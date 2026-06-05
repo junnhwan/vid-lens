@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -73,8 +75,8 @@ func main() {
 	asynqServer := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: cfg.Redis.Addr()},
 		asynq.Config{
-			Concurrency:     4,
-			RetryDelayFunc:  asynq.DefaultRetryDelayFunc,
+			Concurrency:    4,
+			RetryDelayFunc: asynq.DefaultRetryDelayFunc,
 			Queues: map[string]int{
 				"critical": 6,
 				"default":  3,
@@ -113,13 +115,12 @@ func main() {
 	r := gin.Default()
 	r.Use(middleware.CORS())
 
+	// API 路由
 	api := r.Group("/api/v1")
 	{
-		// 公开接口
 		api.POST("/user/register", userHandler.Register)
 		api.POST("/user/login", userHandler.Login)
 
-		// 需要认证的接口
 		auth := api.Group("")
 		auth.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
@@ -127,23 +128,16 @@ func main() {
 
 			media := auth.Group("/media")
 			{
-				// 上传
 				media.POST("/upload", mediaHandler.UploadFile)
 				media.POST("/upload-url", mediaHandler.UploadByURL)
 				media.POST("/upload-chunk", mediaHandler.UploadChunk)
 				media.GET("/check-upload", mediaHandler.CheckUpload)
 				media.POST("/merge-chunks", mediaHandler.MergeChunks)
-
-				// 查询
 				media.GET("/list", mediaHandler.ListTasks)
 				media.GET("/task/:id", mediaHandler.GetTaskDetail)
 				media.DELETE("/task/:id", mediaHandler.DeleteTask)
-
-				// AI 分析（限流保护）
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestAnalysis)
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestTranscribe)
-
-				// 下载
 				media.GET("/download-audio/:id", mediaHandler.DownloadAudio)
 			}
 		}
@@ -152,6 +146,19 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "VidLens"})
 	})
+
+	// 前端静态文件（生产模式）
+	// 面试亮点：编译为单个二进制 + 前端静态资源，部署极其简单
+	staticDir := filepath.Join(".", "web", "dist")
+	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
+		r.Static("/assets", filepath.Join(staticDir, "assets"))
+		r.StaticFile("/vite.svg", filepath.Join(staticDir, "vite.svg"))
+		r.NoRoute(func(c *gin.Context) {
+			// SPA 兜底：所有未匹配路由返回 index.html
+			c.File(filepath.Join(staticDir, "index.html"))
+		})
+		log.Println("✅ 前端静态资源已加载")
+	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("🚀 VidLens 服务启动在 http://localhost%s", addr)
