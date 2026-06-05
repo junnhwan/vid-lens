@@ -1,0 +1,36 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vid-lens
+/server
+
+# Test
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+config.local.yaml
+
+# Docker data
+data/
+
+# Dependencies (go.sum is tracked)
+vendor/
+
+# Temp files
+tmp/
+*.tmp
+*.log

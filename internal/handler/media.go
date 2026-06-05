@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"io"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,28 @@ func (h *MediaHandler) UploadFile(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// UploadByURL 通过 URL 下载并上传
+// POST /api/v1/media/upload-url
+func (h *MediaHandler) UploadByURL(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请提供视频链接")
+		return
+	}
+
+	result, err := h.svc.UploadByURL(c.Request.Context(), userID, req.URL)
+	if err != nil {
+		response.InternalError(c, "下载失败: "+err.Error())
+		return
+	}
+
+	response.OKWithMsg(c, "链接资源已入库", result)
+}
+
 // UploadChunk 分片上传
 // POST /api/v1/media/upload-chunk
 func (h *MediaHandler) UploadChunk(c *gin.Context) {
@@ -55,18 +78,7 @@ func (h *MediaHandler) UploadChunk(c *gin.Context) {
 	}
 	defer chunkFile.Close()
 
-	// 读取分片数据
-	chunkData := make([]byte, 0)
-	buf := make([]byte, 4096)
-	for {
-		n, err := chunkFile.Read(buf)
-		if n > 0 {
-			chunkData = append(chunkData, buf[:n]...)
-		}
-		if err != nil {
-			break
-		}
-	}
+	chunkData, _ := io.ReadAll(chunkFile)
 
 	if err := h.svc.UploadChunk(c.Request.Context(), fileMD5, chunkNumber, chunkData, int64(len(chunkData))); err != nil {
 		response.InternalError(c, "分片上传失败: "+err.Error())
@@ -76,7 +88,7 @@ func (h *MediaHandler) UploadChunk(c *gin.Context) {
 	response.OK(c, gin.H{"chunk_number": chunkNumber})
 }
 
-// CheckUpload 检查上传进度（断点续传核心）
+// CheckUpload 检查上传进度（断点续传）
 // GET /api/v1/media/check-upload?file_md5=xxx
 func (h *MediaHandler) CheckUpload(c *gin.Context) {
 	fileMD5 := c.Query("file_md5")
@@ -118,15 +130,11 @@ func (h *MediaHandler) MergeChunks(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// RequestAnalysis 提交 AI 分析请求
+// RequestAnalysis 提交 AI 分析
 // POST /api/v1/media/analyze/:id
 func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的任务 ID")
-		return
-	}
+	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
 	if err := h.svc.RequestAnalysis(c.Request.Context(), userID, taskID); err != nil {
 		response.Fail(c, 400, err.Error())
@@ -136,15 +144,11 @@ func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 	response.OKWithMsg(c, "任务已投递至消息队列", gin.H{"task_id": taskID})
 }
 
-// RequestTranscribe 提交文字提取请求
+// RequestTranscribe 提交文字提取
 // POST /api/v1/media/transcribe/:id
 func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的任务 ID")
-		return
-	}
+	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
 	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID); err != nil {
 		response.Fail(c, 400, err.Error())
@@ -154,15 +158,11 @@ func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
 	response.OKWithMsg(c, "文字提取任务已提交", gin.H{"task_id": taskID})
 }
 
-// GetTaskDetail 查询任务详情（前端轮询用）
+// GetTaskDetail 查询任务详情（轮询用）
 // GET /api/v1/media/task/:id
 func (h *MediaHandler) GetTaskDetail(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的任务 ID")
-		return
-	}
+	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
 	task, err := h.svc.GetTaskDetail(c.Request.Context(), userID, taskID)
 	if err != nil {
@@ -173,7 +173,7 @@ func (h *MediaHandler) GetTaskDetail(c *gin.Context) {
 	response.OK(c, task)
 }
 
-// ListTasks 分页查询任务列表
+// ListTasks 任务列表
 // GET /api/v1/media/list?page=1&page_size=20
 func (h *MediaHandler) ListTasks(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -193,23 +193,14 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, gin.H{
-		"list":      tasks,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
-	})
+	response.OK(c, gin.H{"list": tasks, "total": total, "page": page, "page_size": pageSize})
 }
 
 // DeleteTask 删除任务
 // DELETE /api/v1/media/task/:id
 func (h *MediaHandler) DeleteTask(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的任务 ID")
-		return
-	}
+	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
 	if err := h.svc.DeleteTask(c.Request.Context(), userID, taskID); err != nil {
 		response.Fail(c, 400, err.Error())
@@ -219,33 +210,23 @@ func (h *MediaHandler) DeleteTask(c *gin.Context) {
 	response.OKWithMsg(c, "删除成功", nil)
 }
 
-// DownloadAudio 下载音频（通过 Pre-signed URL）
+// DownloadAudio 获取音频下载链接
 // GET /api/v1/media/download-audio/:id
 func (h *MediaHandler) DownloadAudio(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "无效的任务 ID")
-		return
-	}
+	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
-	// 验证权限
 	task, err := h.svc.GetTaskDetail(c.Request.Context(), userID, taskID)
 	if err != nil {
 		response.Fail(c, 404, "任务不存在")
 		return
 	}
 
-	// 获取 Pre-signed URL
 	url, err := h.svc.GetPresignedURL(c.Request.Context(), taskID)
 	if err != nil {
 		response.InternalError(c, "获取下载链接失败")
 		return
 	}
 
-	// 返回预签名 URL，前端直接跳转下载
-	response.OK(c, gin.H{
-		"download_url": url,
-		"filename":     task.Filename,
-	})
+	response.OK(c, gin.H{"download_url": url, "filename": task.Filename})
 }
