@@ -19,7 +19,7 @@ services:
       - vidlens-net
 
   # =========================================
-  # 2. Redis (缓存 + 分布式锁 + 任务队列)
+  # 2. Redis (缓存 + 分布式锁)
   # =========================================
   redis:
     image: redis:latest
@@ -47,6 +47,54 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - ./data/minio:/data
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 4. Zookeeper (Kafka 依赖)
+  # =========================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: vidlens-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 5. Kafka (消息队列)
+  # =========================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: vidlens-kafka
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 6. Kafka UI (可视化管理)
+  # =========================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: vidlens-kafka-ui
+    ports:
+      - "8180:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: vidlens
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - kafka
     networks:
       - vidlens-net
 

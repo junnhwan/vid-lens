@@ -25,6 +25,13 @@ minio:
   bucket: vidlens
   use_ssl: false
 
+kafka:
+  brokers:
+    - localhost:9092
+  analyze_topic: "video-analyze"
+  transcribe_topic: "video-transcribe"
+  consumer_group: "vidlens-worker"
+
 ai:
   siliconflow_api_key: "sk-your-key-here"
   siliconflow_base_url: "https://api.siliconflow.cn/v1"

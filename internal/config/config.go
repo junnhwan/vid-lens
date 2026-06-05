@@ -9,14 +9,15 @@ import (
 
 // Config 全局配置结构体
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	MinIO    MinIOConfig    `yaml:"minio"`
-	AI       AIConfig       `yaml:"ai"`
-	Tools    ToolsConfig    `yaml:"tools"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	Upload   UploadConfig   `yaml:"upload"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Redis     RedisConfig     `yaml:"redis"`
+	MinIO     MinIOConfig     `yaml:"minio"`
+	Kafka     KafkaConfig     `yaml:"kafka"`
+	AI        AIConfig        `yaml:"ai"`
+	Tools     ToolsConfig     `yaml:"tools"`
+	JWT       JWTConfig       `yaml:"jwt"`
+	Upload    UploadConfig    `yaml:"upload"`
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
 }
 
@@ -34,7 +35,6 @@ type DatabaseConfig struct {
 	Charset  string `yaml:"charset"`
 }
 
-// DSN 返回 MySQL 连接字符串
 func (d *DatabaseConfig) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
 		d.Username, d.Password, d.Host, d.Port, d.DBName, d.Charset)
@@ -47,7 +47,6 @@ type RedisConfig struct {
 	DB       int    `yaml:"db"`
 }
 
-// Addr 返回 Redis 地址
 func (r *RedisConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", r.Host, r.Port)
 }
@@ -58,6 +57,13 @@ type MinIOConfig struct {
 	SecretKey string `yaml:"secret_key"`
 	Bucket    string `yaml:"bucket"`
 	UseSSL    bool   `yaml:"use_ssl"`
+}
+
+type KafkaConfig struct {
+	Brokers          []string `yaml:"brokers"`
+	AnalyzeTopic     string   `yaml:"analyze_topic"`
+	TranscribeTopic  string   `yaml:"transcribe_topic"`
+	ConsumerGroup    string   `yaml:"consumer_group"`
 }
 
 type AIConfig struct {
@@ -83,11 +89,10 @@ type UploadConfig struct {
 }
 
 type RateLimitConfig struct {
-	Capacity int `yaml:"capacity"` // 桶容量
-	Rate     int `yaml:"rate"`     // 每秒生成令牌数
+	Capacity int `yaml:"capacity"`
+	Rate     int `yaml:"rate"`
 }
 
-// Load 从 YAML 文件加载配置
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

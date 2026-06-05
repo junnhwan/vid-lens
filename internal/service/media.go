@@ -185,7 +185,7 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if err := s.repo.Task.UpdateStatus(taskID, model.TaskStatusQueued, ""); err != nil {
 		return err
 	}
-	if err := s.mq.EnqueueAnalyze(taskID, task.FileMD5); err != nil {
+	if err := s.mq.EnqueueAnalyze(ctx, taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatus(taskID, model.TaskStatusPending, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
@@ -206,7 +206,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	}
 
 	s.repo.Task.UpdateStatus(taskID, model.TaskStatusQueued, "")
-	if err := s.mq.EnqueueTranscribe(taskID, task.FileMD5); err != nil {
+	if err := s.mq.EnqueueTranscribe(ctx, taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatus(taskID, model.TaskStatusPending, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
