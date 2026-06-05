@@ -1,0 +1,55 @@
+version: '3'
+services:
+  # =========================================
+  # 1. MySQL (数据库)
+  # =========================================
+  mysql:
+    image: mysql:8.0
+    container_name: vidlens-mysql
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=vidlens
+      - TZ=Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 2. Redis (缓存 + 分布式锁 + 任务队列)
+  # =========================================
+  redis:
+    image: redis:latest
+    container_name: vidlens-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 3. MinIO (对象存储)
+  # =========================================
+  minio:
+    image: minio/minio
+    container_name: vidlens-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - vidlens-net
+
+networks:
+  vidlens-net:
+    driver: bridge

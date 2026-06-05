@@ -1,0 +1,48 @@
+# VidLens 配置文件
+
+server:
+  port: 8080
+  mode: debug  # debug / release
+
+database:
+  host: 127.0.0.1
+  port: 3307
+  username: root
+  password: root
+  dbname: vidlens
+  charset: utf8mb4
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+
+minio:
+  endpoint: localhost:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  bucket: vidlens
+  use_ssl: false
+
+ai:
+  siliconflow_api_key: "sk-your-key-here"
+  siliconflow_base_url: "https://api.siliconflow.cn/v1"
+  asr_model: "TeleAI/TeleSpeechASR"
+  llm_model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+
+tools:
+  ffmpeg_path: "ffmpeg"
+  ytdlp_path: "yt-dlp"
+
+jwt:
+  secret: "vidlens-jwt-secret-change-in-production"
+  expire_hours: 72
+
+upload:
+  max_file_size: 2147483648  # 2GB
+  chunk_size: 5242880        # 5MB
+
+ratelimit:
+  capacity: 10    # 桶容量
+  rate: 10        # 每秒生成令牌数
