@@ -1,10 +1,11 @@
 <div align="center">
+
 # 镜知 · VidLens
 
 **以镜观视，以知见意** — AI 驱动的视频内容理解平台
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev)
-[![Kafka](https://img.shields.io/badge/Kafka-7.5-231F20?style=flat&logo=apache-kafka)](https://kafka.apache.org)
+[![Vue](https://img.shields.io/badge/Vue-3-4FC08D?style=flat&logo=vue.js)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>

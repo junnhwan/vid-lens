@@ -35,3 +35,6 @@ tmp/
 *.tmp
 *.log
 .logs/
+
+# Local frontend backup
+web/src/App-old.vue
