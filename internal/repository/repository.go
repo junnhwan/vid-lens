@@ -11,6 +11,7 @@ type Repositories struct {
 	Summary       *SummaryRepository
 	AIProfile     *AIProfileRepository
 	VideoChunk    *VideoChunkRepository
+	RAGIndex      *RAGIndexRepository
 	Chat          *ChatRepository
 }
 
@@ -24,6 +25,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Summary:       NewSummaryRepository(db),
 		AIProfile:     NewAIProfileRepository(db),
 		VideoChunk:    NewVideoChunkRepository(db),
+		RAGIndex:      NewRAGIndexRepository(db),
 		Chat:          NewChatRepository(db),
 	}
 }

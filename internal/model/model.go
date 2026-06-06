@@ -12,6 +12,7 @@ func AllModels() []interface{} {
 		&AISummary{},
 		&UserAIProfile{},
 		&VideoChunk{},
+		&VideoRAGIndex{},
 		&ChatSession{},
 		&ChatMessage{},
 	}

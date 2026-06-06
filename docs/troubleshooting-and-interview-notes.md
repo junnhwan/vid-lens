@@ -1691,6 +1691,191 @@ A：因为总结需要转写文本。如果当前任务还没有 ASR 结果，an
 - 阶段五增加 ASR chunk 表，支持分片级进度和失败恢复。
 - 后续可以把 stage 流转抽成显式状态机，集中校验非法流转。
 
+## 记录 011：RAG 索引增加独立状态表
+
+### 背景
+
+路线图阶段四要求修复“RAG 是否已索引”只依赖 `video_chunks` 的粗糙判断。旧逻辑是：
+
+```text
+有 chunks -> indexed=true
+没有 chunks -> indexed=false
+```
+
+这能回答“有没有 chunk”，但不能回答“是否正在构建、是否构建失败、失败原因是什么、使用的是哪个 embedding dim”。
+
+### 现象
+
+旧状态接口只能从 chunk 数量推断：
+
+```json
+{
+  "indexed": true,
+  "chunks": 8,
+  "embedding_model": "text-embedding-3-small"
+}
+```
+
+如果 Milvus 写入失败、Embedding 超时或维度不匹配，前端和排障文档只能看到 chunks 或错误响应，缺少持久化的索引状态。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/model/rag_index.go
+internal/repository/rag_index.go
+internal/service/rag_index.go
+internal/service/rag_index_test.go
+internal/model/model.go
+internal/repository/repository.go
+```
+
+阶段四前，`GetTaskIndexStatus` 只调用：
+
+```text
+repos.VideoChunk.ListByTaskID(userID, taskID, embeddingModel)
+```
+
+没有索引状态表。
+
+### 根因
+
+`video_chunks` 是索引内容表，不是索引任务状态表。用内容表是否为空推断状态，会丢失构建中、失败原因、embedding 维度和重建版本等信息。
+
+### 修复方案
+
+新增表：
+
+```text
+video_rag_indexes
+
+id
+user_id
+task_id
+embedding_model
+embedding_dim
+status           # not_indexed / indexing / indexed / failed
+chunk_count
+last_error
+build_version
+started_at
+finished_at
+created_at
+updated_at
+```
+
+唯一索引：
+
+```text
+unique(user_id, task_id, embedding_model)
+```
+
+构建流程变为：
+
+```text
+BuildTaskIndex
+  -> upsert status=indexing
+  -> split transcription
+  -> embedding chunks
+  -> replace MySQL chunks
+  -> upsert Milvus vectors
+  -> upsert status=indexed, chunk_count=N
+```
+
+失败流程：
+
+```text
+构建中任一步失败
+  -> upsert status=failed
+  -> last_error=...
+  -> chunk_count=0
+```
+
+状态接口优先读取 `video_rag_indexes`。只有没有状态行时，才 fallback 到旧的 `video_chunks` 判断，兼容历史数据。
+
+响应现在包含：
+
+```json
+{
+  "task_id": 2,
+  "status": "indexed",
+  "indexed": true,
+  "chunks": 8,
+  "embedding_model": "text-embedding-3-small",
+  "last_error": ""
+}
+```
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/service/rag_index_test.go
+```
+
+关键测试点：
+
+```text
+BuildTaskIndex 成功后创建 indexed 状态行
+状态行记录 chunk_count 和 embedding_dim
+Milvus/vector store 写入失败时记录 failed 和 last_error
+GetTaskIndexStatus 优先读取 video_rag_indexes
+即使存在旧 chunks，failed 状态也不会被误判为 indexed
+用户 A 的索引状态不会泄露给用户 B
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service -run RAGIndex
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/service -run RAGIndex 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我第一版 RAG 状态是通过 `video_chunks` 是否存在来判断 indexed，这只能说明 MySQL 里有没有 chunk，不能说明 Milvus 向量是否写入成功，也不能表达 indexing、failed 和失败原因。
+>
+> 所以后来我加了 `video_rag_indexes` 状态表，按 `user_id + task_id + embedding_model` 唯一记录一次索引状态。构建开始写 `indexing`，成功写 `indexed/chunk_count`，任何一步失败都写 `failed/last_error`。状态接口优先查这个表，没有状态行时才兼容旧 chunks 判断。
+>
+> 这样刷新页面或换浏览器后，前端不需要自己记“是否构建过索引”，而是从服务端拿真实状态；排障时也能知道索引失败是 embedding、MySQL chunk、Milvus 写入还是维度配置问题。
+
+### 面试官可能追问
+
+**Q：为什么唯一索引要带 embedding_model？**
+
+A：同一个视频可能用不同 embedding 模型重建索引，不同模型的向量空间不能混用。状态也要按当前用户默认 embedding model 区分。
+
+**Q：为什么状态表不直接替代 chunks 表？**
+
+A：两者职责不同。`video_rag_indexes` 记录索引构建状态和元信息；`video_chunks` 保存具体文本片段、vector_id 和内容 hash。状态表不能替代内容表。
+
+**Q：为什么失败时 chunk_count 设为 0？**
+
+A：失败状态表示本次索引不可用。即使数据库里有旧 chunks，也不能把本次失败误判为可用索引。状态接口优先读状态表，就是为了避免这种误判。
+
+### 这次不要夸大的点
+
+- 当前状态表记录的是构建状态，没有校验 Milvus 中旧向量是否仍然存在。
+- 当前重建版本固定为第一版字段，还没有实现版本递增策略。
+- 当前 RAG 索引仍是同步构建，不是独立 Kafka job。
+
+### 后续演进
+
+- 重建索引时递增 `build_version`，并清理旧 Milvus 向量。
+- 状态接口增加 Milvus readiness 或向量存在性校验。
+- 后续可把 RAG index 构建也作为独立 Kafka job，避免手动构建接口长时间等待。
+
 ## 后续问题记录模板
 
 复制下面模板追加：

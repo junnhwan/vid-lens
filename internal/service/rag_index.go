@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -42,9 +43,11 @@ type RAGIndexService struct {
 
 type RAGIndexResult struct {
 	TaskID         int64  `json:"task_id"`
+	Status         string `json:"status"`
 	Indexed        bool   `json:"indexed"`
 	Chunks         int    `json:"chunks"`
 	EmbeddingModel string `json:"embedding_model"`
+	LastError      string `json:"last_error"`
 }
 
 func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cfg RAGIndexConfig) *RAGIndexService {
@@ -87,8 +90,43 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	if expectedDim <= 0 {
 		expectedDim = s.cfg.EmbeddingDim
 	}
+	startedAt := time.Now()
+	if err := s.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
+		UserID:         userID,
+		TaskID:         taskID,
+		EmbeddingModel: modelName,
+		EmbeddingDim:   expectedDim,
+		Status:         model.RAGIndexStatusIndexing,
+		ChunkCount:     0,
+		LastError:      "",
+		BuildVersion:   1,
+		StartedAt:      &startedAt,
+		FinishedAt:     nil,
+	}); err != nil {
+		return nil, err
+	}
+	markFailed := func(err error) (*RAGIndexResult, error) {
+		finishedAt := time.Now()
+		errMsg := err.Error()
+		if len(errMsg) > 500 {
+			errMsg = errMsg[:500]
+		}
+		_ = s.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
+			UserID:         userID,
+			TaskID:         taskID,
+			EmbeddingModel: modelName,
+			EmbeddingDim:   expectedDim,
+			Status:         model.RAGIndexStatusFailed,
+			ChunkCount:     0,
+			LastError:      errMsg,
+			BuildVersion:   1,
+			StartedAt:      &startedAt,
+			FinishedAt:     &finishedAt,
+		})
+		return nil, err
+	}
 	if expectedDim != s.cfg.EmbeddingDim {
-		return nil, fmt.Errorf("Embedding 维度必须等于系统配置 %d，当前配置 %d", s.cfg.EmbeddingDim, expectedDim)
+		return markFailed(fmt.Errorf("Embedding 维度必须等于系统配置 %d，当前配置 %d", s.cfg.EmbeddingDim, expectedDim))
 	}
 
 	dbChunks := make([]model.VideoChunk, 0, len(chunks))
@@ -96,10 +134,10 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	for _, chunk := range chunks {
 		vector, err := embedding.Embed(ctx, chunk.Content)
 		if err != nil {
-			return nil, err
+			return markFailed(err)
 		}
 		if len(vector) != expectedDim {
-			return nil, fmt.Errorf("Embedding 维度不匹配: 返回 %d，配置 %d", len(vector), expectedDim)
+			return markFailed(fmt.Errorf("Embedding 维度不匹配: 返回 %d，配置 %d", len(vector), expectedDim))
 		}
 
 		hash := md5Hex(chunk.Content)
@@ -128,12 +166,12 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	}
 
 	if err := s.repos.VideoChunk.ReplaceTaskChunks(taskID, modelName, dbChunks); err != nil {
-		return nil, err
+		return markFailed(err)
 	}
 
 	stored, err := s.repos.VideoChunk.ListByTaskID(userID, taskID, modelName)
 	if err != nil {
-		return nil, err
+		return markFailed(err)
 	}
 	chunkIDsByVectorID := make(map[string]int64, len(stored))
 	for _, chunk := range stored {
@@ -145,12 +183,29 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 
 	if s.store != nil {
 		if err := s.store.UpsertChunks(ctx, vectors); err != nil {
-			return nil, err
+			return markFailed(err)
 		}
+	}
+
+	finishedAt := time.Now()
+	if err := s.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
+		UserID:         userID,
+		TaskID:         taskID,
+		EmbeddingModel: modelName,
+		EmbeddingDim:   expectedDim,
+		Status:         model.RAGIndexStatusIndexed,
+		ChunkCount:     len(chunks),
+		LastError:      "",
+		BuildVersion:   1,
+		StartedAt:      &startedAt,
+		FinishedAt:     &finishedAt,
+	}); err != nil {
+		return nil, err
 	}
 
 	return &RAGIndexResult{
 		TaskID:         taskID,
+		Status:         model.RAGIndexStatusIndexed,
 		Indexed:        true,
 		Chunks:         len(chunks),
 		EmbeddingModel: modelName,
@@ -162,7 +217,22 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 
 	modelName := profile.EmbeddingModel
 	if modelName == "" {
-		return &RAGIndexResult{TaskID: taskID, Indexed: false, Chunks: 0}, nil
+		return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNotIndexed, Indexed: false, Chunks: 0}, nil
+	}
+
+	index, err := s.repos.RAGIndex.FindByTaskAndModel(userID, taskID, modelName)
+	if err != nil {
+		return nil, err
+	}
+	if index != nil {
+		return &RAGIndexResult{
+			TaskID:         taskID,
+			Status:         index.Status,
+			Indexed:        index.Status == model.RAGIndexStatusIndexed,
+			Chunks:         index.ChunkCount,
+			EmbeddingModel: index.EmbeddingModel,
+			LastError:      index.LastError,
+		}, nil
 	}
 
 	chunks, err := s.repos.VideoChunk.ListByTaskID(userID, taskID, modelName)
@@ -171,10 +241,18 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 	}
 	return &RAGIndexResult{
 		TaskID:         taskID,
+		Status:         statusFromChunks(len(chunks)),
 		Indexed:        len(chunks) > 0,
 		Chunks:         len(chunks),
 		EmbeddingModel: modelName,
 	}, nil
+}
+
+func statusFromChunks(chunks int) string {
+	if chunks > 0 {
+		return model.RAGIndexStatusIndexed
+	}
+	return model.RAGIndexStatusNotIndexed
 }
 
 func md5Hex(s string) string {
