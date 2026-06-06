@@ -178,6 +178,55 @@ func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
 	}
 }
 
+func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "abababababababababababababababab", Filename: "video.mp4", FileURL: "videos/stream.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "流式问答片段"},
+	}}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	var events []ChatStreamEvent
+	result, err := svc.AskStream(context.Background(), 7, session.ID, "如何流式？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	}, func(event ChatStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("AskStream() error = %v", err)
+	}
+	if result.Answer == "" {
+		t.Fatal("expected answer")
+	}
+	if len(events) < 3 {
+		t.Fatalf("events = %#v, want citations, answer and done", events)
+	}
+	if events[0].Type != "citations" {
+		t.Fatalf("first event = %#v, want citations", events[0])
+	}
+	if events[len(events)-1].Type != "done" {
+		t.Fatalf("last event = %#v, want done", events[len(events)-1])
+	}
+	foundAnswer := false
+	for _, event := range events {
+		if event.Type == "answer" {
+			foundAnswer = true
+		}
+	}
+	if !foundAnswer {
+		t.Fatalf("events = %#v, want answer event", events)
+	}
+}
+
 func newChatServiceTestRepositories(t *testing.T) *repository.Repositories {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

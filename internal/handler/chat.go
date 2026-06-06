@@ -105,3 +105,51 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	}
 	response.OK(c, result)
 }
+
+func (h *ChatHandler) AskStream(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
+	if err != nil || sessionID <= 0 {
+		response.BadRequest(c, "会话 ID 错误")
+		return
+	}
+
+	var req struct {
+		Question string `json:"question" binding:"required"`
+		TopK     int    `json:"top_k"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	chatClient, err := h.aiFactory.NewChatClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+
+	_, err = h.chatSvc.AskStream(c.Request.Context(), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile, func(event service.ChatStreamEvent) error {
+		c.SSEvent(event.Type, event.Data)
+		c.Writer.Flush()
+		return nil
+	})
+	if err != nil {
+		c.SSEvent("error", gin.H{"message": err.Error()})
+		c.Writer.Flush()
+	}
+}

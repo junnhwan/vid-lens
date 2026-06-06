@@ -55,6 +55,11 @@ type AskResult struct {
 	Model     string           `json:"model"`
 }
 
+type ChatStreamEvent struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data,omitempty"`
+}
+
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {
 	if cfg.TopK <= 0 {
 		cfg.TopK = 5
@@ -190,6 +195,51 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 		Citations: citations,
 		Model:     profile.LLMModel,
 	}, nil
+}
+
+func (s *ChatService) AskStream(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(ChatStreamEvent) error) (*AskResult, error) {
+	if emit == nil {
+		return nil, fmt.Errorf("stream emit 不能为空")
+	}
+	result, err := s.Ask(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	if err != nil {
+		return nil, err
+	}
+	if err := emit(ChatStreamEvent{Type: "citations", Data: result.Citations}); err != nil {
+		return nil, err
+	}
+	for _, chunk := range splitAnswerForStream(result.Answer, 80) {
+		if err := emit(ChatStreamEvent{Type: "answer", Data: chunk}); err != nil {
+			return nil, err
+		}
+	}
+	if err := emit(ChatStreamEvent{Type: "done", Data: map[string]interface{}{
+		"message_id": result.MessageID,
+		"model":      result.Model,
+	}}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func splitAnswerForStream(answer string, maxRunes int) []string {
+	if maxRunes <= 0 {
+		maxRunes = 80
+	}
+	runes := []rune(answer)
+	if len(runes) == 0 {
+		return []string{""}
+	}
+	parts := make([]string, 0, (len(runes)/maxRunes)+1)
+	for len(runes) > 0 {
+		n := maxRunes
+		if len(runes) < n {
+			n = len(runes)
+		}
+		parts = append(parts, string(runes[:n]))
+		runes = runes[n:]
+	}
+	return parts
 }
 
 func (s *ChatService) loadRecentMessages(ctx context.Context, userID, sessionID int64, limit int) ([]model.ChatMessage, error) {
