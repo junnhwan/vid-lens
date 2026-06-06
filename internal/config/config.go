@@ -60,15 +60,18 @@ type MinIOConfig struct {
 }
 
 type KafkaConfig struct {
-	Brokers          []string `yaml:"brokers"`
-	AnalyzeTopic     string   `yaml:"analyze_topic"`
-	TranscribeTopic  string   `yaml:"transcribe_topic"`
-	ConsumerGroup    string   `yaml:"consumer_group"`
+	Brokers         []string `yaml:"brokers"`
+	AnalyzeTopic    string   `yaml:"analyze_topic"`
+	TranscribeTopic string   `yaml:"transcribe_topic"`
+	ConsumerGroup   string   `yaml:"consumer_group"`
 }
 
 type AIConfig struct {
+	Provider           string `yaml:"provider"`
 	SiliconFlowAPIKey  string `yaml:"siliconflow_api_key"`
 	SiliconFlowBaseURL string `yaml:"siliconflow_base_url"`
+	MimoAPIKey         string `yaml:"mimo_api_key"`
+	MimoBaseURL        string `yaml:"mimo_base_url"`
 	ASRModel           string `yaml:"asr_model"`
 	LLMModel           string `yaml:"llm_model"`
 }
@@ -99,8 +102,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
 	}
 
+	expanded := os.ExpandEnv(string(data))
+
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 

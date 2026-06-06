@@ -33,6 +33,7 @@ func (r *TaskRepository) FindByID(id int64) (*model.VideoTask, error) {
 func (r *TaskRepository) FindByIDWithDetail(id int64) (*model.VideoTask, error) {
 	var task model.VideoTask
 	err := r.db.
+		Preload("Asset").
 		Preload("Transcription").
 		Preload("Summary").
 		First(&task, id).Error
@@ -63,7 +64,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, file_md5, filename, file_url, file_size, status, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -75,10 +76,26 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 // UpdateStatus 更新任务状态
 func (r *TaskRepository) UpdateStatus(id int64, status int8, errMsg string) error {
 	updates := map[string]interface{}{
-		"status":     status,
-		"error_msg":  errMsg,
+		"status":    status,
+		"error_msg": errMsg,
 	}
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// UpdateStatusIf 只在当前状态属于 allowedFrom 时更新状态。
+// 返回 false 表示状态已被其他请求改变，调用方应停止当前操作。
+func (r *TaskRepository) UpdateStatusIf(id int64, allowedFrom []int8, status int8, errMsg string) (bool, error) {
+	updates := map[string]interface{}{
+		"status":    status,
+		"error_msg": errMsg,
+	}
+	tx := r.db.Model(&model.VideoTask{}).
+		Where("id = ? AND status IN ?", id, allowedFrom).
+		Updates(updates)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
 }
 
 // UpdateFileURL 更新文件存储路径

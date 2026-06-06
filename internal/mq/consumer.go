@@ -20,15 +20,16 @@ import (
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
-//   1. 消费者组：同一个 Group 下的多个消费者分摊不同分区的消息，天然负载均衡
-//   2. 基于 MD5 的 Key 路由：同一视频的消息一定进入同一分区，同一分区被同一消费者消费
-//      → 保证了同一个视频不会被两个消费者同时处理（配合分布式锁双重保障）
-//   3. 手动提交 offset：只有业务逻辑执行成功才 commit，防止消息丢失
+//  1. 消费者组：同一个 Group 下的多个消费者分摊不同分区的消息，天然负载均衡
+//  2. 基于 MD5 的 Key 路由：同一视频的消息一定进入同一分区，同一分区被同一消费者消费
+//     → 保证了同一个视频不会被两个消费者同时处理（配合分布式锁双重保障）
+//  3. 手动提交 offset：只有业务逻辑执行成功才 commit，防止消息丢失
 type Consumer struct {
-	repo    *repository.Repositories
-	storage *storage.MinIOStorage
-	ai      ai.Strategy
-	rdb     redis.Cmdable
+	repo       *repository.Repositories
+	storage    *storage.MinIOStorage
+	ai         ai.Strategy
+	rdb        redis.Cmdable
+	ffmpegPath string
 }
 
 // NewConsumer 创建消费者
@@ -37,12 +38,17 @@ func NewConsumer(
 	storage *storage.MinIOStorage,
 	aiStrategy ai.Strategy,
 	rdb redis.Cmdable,
+	ffmpegPath string,
 ) *Consumer {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
 	return &Consumer{
-		repo:    repo,
-		storage: storage,
-		ai:      aiStrategy,
-		rdb:     rdb,
+		repo:       repo,
+		storage:    storage,
+		ai:         aiStrategy,
+		rdb:        rdb,
+		ffmpegPath: ffmpegPath,
 	}
 }
 
@@ -51,14 +57,14 @@ func NewConsumer(
 // Kafka 版本通过 Reader 按 Group 消费，自动管理 offset
 func (c *Consumer) StartAnalyzeConsumer(brokers []string, topic, groupID string) {
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:          brokers,
-		Topic:            topic,
-		GroupID:          groupID,
-		MinBytes:         1e3,   // 1KB
-		MaxBytes:         1e6,   // 1MB
-		CommitInterval:   0,     // 手动提交（不自动提交）
-		ReadBackoffMin:   100 * time.Millisecond,
-		ReadBackoffMax:   1 * time.Second,
+		Brokers:        brokers,
+		Topic:          topic,
+		GroupID:        groupID,
+		MinBytes:       1e3, // 1KB
+		MaxBytes:       1e6, // 1MB
+		CommitInterval: 0,   // 手动提交（不自动提交）
+		ReadBackoffMin: 100 * time.Millisecond,
+		ReadBackoffMax: 1 * time.Second,
 	})
 
 	go func() {
@@ -137,7 +143,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 	}
 	if !acquired {
 		log.Printf("[Kafka] 抢锁失败，跳过: md5=%s", payload.MD5)
-		return nil
+		return fmt.Errorf("同一视频正在处理中")
 	}
 	defer distLock.Unlock(ctx)
 
@@ -147,12 +153,28 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
 	if task.Status == model.TaskStatusCompleted {
-		log.Printf("[Kafka] 任务已完成，跳过: taskID=%d", payload.TaskID)
-		return nil
+		summary, err := c.repo.Summary.FindByTaskID(task.ID)
+		if err != nil {
+			return fmt.Errorf("查询任务总结失败: %w", err)
+		}
+		if summary != nil {
+			log.Printf("[Kafka] 任务已完成，跳过: taskID=%d", payload.TaskID)
+			return nil
+		}
+		log.Printf("[Kafka] 任务已完成但缺少总结，继续分析: taskID=%d", payload.TaskID)
 	}
 
 	// 第 4 步：更新状态为处理中
-	c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusRunning, "")
+	updated, err := c.repo.Task.UpdateStatusIf(payload.TaskID,
+		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
+		model.TaskStatusRunning, "")
+	if err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+	if !updated {
+		log.Printf("[Kafka] 任务状态已变化，跳过: taskID=%d", payload.TaskID)
+		return nil
+	}
 
 	// 第 5 步：核心业务
 	if err := c.processVideo(ctx, task); err != nil {
@@ -160,12 +182,16 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		if len(errMsg) > 500 {
 			errMsg = errMsg[:500]
 		}
-		c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, errMsg)
-		return err
+		if updateErr := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, errMsg); updateErr != nil {
+			return fmt.Errorf("任务失败且状态更新失败: %w", updateErr)
+		}
+		return nil
 	}
 
 	// 第 6 步：更新状态为已完成
-	c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, "")
+	if err := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, ""); err != nil {
+		return fmt.Errorf("更新完成状态失败: %w", err)
+	}
 	log.Printf("[Kafka] 任务完成: taskID=%d", payload.TaskID)
 	return nil
 }
@@ -182,31 +208,61 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 		return err
 	}
 
-	audioPath, err := ffmpeg.ExtractAudio(ctx, "ffmpeg", task.FileURL)
+	updated, err := c.repo.Task.UpdateStatusIf(payload.TaskID,
+		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
+		model.TaskStatusRunning, "")
 	if err != nil {
 		return err
+	}
+	if !updated {
+		return nil
+	}
+
+	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
+	if err != nil {
+		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		return nil
+	}
+	defer os.Remove(videoPath)
+
+	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
+	if err != nil {
+		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		return nil
 	}
 	defer os.Remove(audioPath)
 
 	transcript, err := c.ai.Transcribe(ctx, audioPath)
 	if err != nil {
-		return err
+		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		return nil
 	}
 
-	c.repo.Transcription.Upsert(&model.VideoTranscription{
+	if err := c.repo.Transcription.Upsert(&model.VideoTranscription{
 		TaskID:  task.ID,
 		Content: transcript,
 		Words:   len([]rune(transcript)),
-	})
+	}); err != nil {
+		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		return nil
+	}
 
-	c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, "")
+	if err := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, ""); err != nil {
+		return err
+	}
 	return nil
 }
 
 // processVideo 核心业务：FFmpeg → ASR → LLM
 func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) error {
 	log.Printf("[Kafka] 提取音频: taskID=%d", task.ID)
-	audioPath, err := ffmpeg.ExtractAudio(ctx, "ffmpeg", task.FileURL)
+	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
+	if err != nil {
+		return fmt.Errorf("下载视频失败: %w", err)
+	}
+	defer os.Remove(videoPath)
+
+	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
 	if err != nil {
 		return fmt.Errorf("提取音频失败: %w", err)
 	}
@@ -218,11 +274,13 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
 
-	c.repo.Transcription.Upsert(&model.VideoTranscription{
+	if err := c.repo.Transcription.Upsert(&model.VideoTranscription{
 		TaskID:  task.ID,
 		Content: transcript,
 		Words:   len([]rune(transcript)),
-	})
+	}); err != nil {
+		return fmt.Errorf("保存转录失败: %w", err)
+	}
 
 	log.Printf("[Kafka] AI 总结: taskID=%d", task.ID)
 	summary, err := c.ai.Summarize(ctx, transcript)
@@ -230,11 +288,21 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("AI 总结失败: %w", err)
 	}
 
-	c.repo.Summary.Upsert(&model.AISummary{
+	if err := c.repo.Summary.Upsert(&model.AISummary{
 		TaskID:    task.ID,
 		Content:   summary,
 		ModelName: "DeepSeek-R1-Distill-Qwen-32B",
-	})
+	}); err != nil {
+		return fmt.Errorf("保存总结失败: %w", err)
+	}
 
 	return nil
+}
+
+func truncateError(err error) string {
+	errMsg := err.Error()
+	if len(errMsg) > 500 {
+		return errMsg[:500]
+	}
+	return errMsg
 }

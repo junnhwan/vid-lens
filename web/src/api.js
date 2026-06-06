@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { shouldResetSessionOnUnauthorized } from './authErrorPolicy.js'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -7,7 +8,7 @@ const api = axios.create({
 
 // 请求拦截器：自动带 Token
 api.interceptors.request.use(config => {
-  const user = JSON.parse(localStorage.getItem('vidlens_user') || '{}')
+  const user = JSON.parse(localStorage.getItem('user') || '{}')
   if (user.token) {
     config.headers.Authorization = `Bearer ${user.token}`
   }
@@ -18,8 +19,8 @@ api.interceptors.request.use(config => {
 api.interceptors.response.use(
   res => res.data,
   err => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('vidlens_user')
+    if (err.response?.status === 401 && shouldResetSessionOnUnauthorized(err.config?.url)) {
+      localStorage.removeItem('user')
       window.location.reload()
     }
     return Promise.reject(err.response?.data || err)
@@ -45,7 +46,7 @@ export default {
   },
   uploadByURL: (url) => api.post('/media/upload-url', { url }),
   listTasks: (page = 1, pageSize = 20) =>
-    api.get('/media/list', { params: { page, pageSize } }),
+    api.get('/media/list', { params: { page, page_size: pageSize } }),
   getTask: (id) => api.get(`/media/task/${id}`),
   deleteTask: (id) => api.delete(`/media/task/${id}`),
   analyze: (id) => api.post(`/media/analyze/${id}`),

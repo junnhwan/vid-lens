@@ -84,7 +84,7 @@
 | 缓存 | Redis (go-redis) | 分布式锁、令牌桶、分片状态追踪 |
 | 对象存储 | MinIO | 私有桶 + Pre-signed URL |
 | 数据库 | MySQL 8.0 | 4 表垂直分拆 |
-| AI 服务 | 硅基流动 | ASR (TeleSpeech) + LLM (DeepSeek-R1) |
+| AI 服务 | 小米 MiMo / 硅基流动 | 策略模式切换供应商，支持 ASR + LLM 总结 |
 | 音视频 | FFmpeg + yt-dlp | 音频提取、视频下载 |
 | 前端 | Vue 3 + Axios | 登录、上传、任务管理、Markdown 渲染 |
 
@@ -100,12 +100,13 @@ docker-compose up -d
 
 ### 2. 配置
 
-编辑 `config.yaml`，填入 AI API Key：
+编辑 `config.yaml`，选择 AI 供应商并配置 API Key。默认使用小米 MiMo Token Plan：
 
-```yaml
-ai:
-  siliconflow_api_key: "sk-your-key-here"
+```powershell
+$env:MIMO_API_KEY="tp-your-key-here"
 ```
+
+如需改回硅基流动，将 `ai.provider` 改为 `siliconflow`，并设置 `SILICONFLOW_API_KEY`。
 
 ### 3. 启动后端
 
@@ -137,7 +138,8 @@ vid-lens/
 ├── internal/
 │   ├── ai/                    # AI 策略模式 (Strategy Interface)
 │   │   ├── strategy.go            # 策略接口定义
-│   │   └── siliconflow.go         # 硅基流动实现 + 指数退避重试
+│   │   ├── siliconflow.go         # 硅基流动实现 + 指数退避重试
+│   │   └── mimo.go                # 小米 MiMo 实现 + Token Plan 适配
 │   ├── config/                # YAML 配置加载
 │   ├── handler/               # HTTP 处理层 (Gin Handlers)
 │   ├── middleware/             # 中间件

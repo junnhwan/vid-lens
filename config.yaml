@@ -27,20 +27,26 @@ minio:
 
 kafka:
   brokers:
-    - localhost:9092
+    - localhost:19092
   analyze_topic: "video-analyze"
   transcribe_topic: "video-transcribe"
   consumer_group: "vidlens-worker"
 
 ai:
-  siliconflow_api_key: "sk-your-key-here"
-  siliconflow_base_url: "https://api.siliconflow.cn/v1"
-  asr_model: "TeleAI/TeleSpeechASR"
-  llm_model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+  provider: "mimo"  # mimo / siliconflow
+  # MiMo Token Plan：PowerShell 中设置 $env:MIMO_API_KEY="tp-..."
+  mimo_api_key: "${MIMO_API_KEY}"
+  # 如果控制台给你的 Token Plan endpoint 不同，改这里即可。
+  mimo_base_url: "https://token-plan-cn.xiaomimimo.com/v1"
+
+  siliconflow_api_key: "${SILICONFLOW_API_KEY}"
+  siliconflow_base_url: "https://api.siliconflow.com/v1"
+  asr_model: "mimo-v2.5-asr"
+  llm_model: "mimo-v2.5"
 
 tools:
-  ffmpeg_path: "ffmpeg"
-  ytdlp_path: "yt-dlp"
+  ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
+  ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
 
 jwt:
   secret: "vidlens-jwt-secret-change-in-production"

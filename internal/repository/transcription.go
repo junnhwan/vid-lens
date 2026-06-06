@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
@@ -23,6 +25,9 @@ func (r *TranscriptionRepository) Create(t *model.VideoTranscription) error {
 func (r *TranscriptionRepository) FindByTaskID(taskID int64) (*model.VideoTranscription, error) {
 	var t model.VideoTranscription
 	err := r.db.Where("task_id = ?", taskID).First(&t).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

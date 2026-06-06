@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
@@ -23,6 +25,9 @@ func (r *SummaryRepository) Create(s *model.AISummary) error {
 func (r *SummaryRepository) FindByTaskID(taskID int64) (*model.AISummary, error) {
 	var s model.AISummary
 	err := r.db.Where("task_id = ?", taskID).First(&s).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

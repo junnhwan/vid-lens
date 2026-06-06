@@ -35,9 +35,15 @@ func GenerateToken(userID int64, username, role, secret string, expireHours int)
 
 // ParseToken 解析 JWT Token
 func ParseToken(tokenString, secret string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return []byte(secret), nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&Claims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return []byte(secret), nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer("vidlens"),
+	)
 	if err != nil {
 		return nil, err
 	}

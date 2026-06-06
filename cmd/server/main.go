@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -33,7 +34,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
-	db.AutoMigrate(model.AllModels()...)
+	if err := model.Migrate(db); err != nil {
+		log.Fatalf("迁移数据库失败: %v", err)
+	}
 	log.Println("✅ 数据库连接成功")
 
 	// Redis
@@ -55,10 +58,21 @@ func main() {
 	log.Println("✅ MinIO 连接成功")
 
 	// AI
-	aiStrategy := ai.NewSiliconFlowStrategy(
-		cfg.AI.SiliconFlowAPIKey, cfg.AI.SiliconFlowBaseURL,
-		cfg.AI.ASRModel, cfg.AI.LLMModel,
-	)
+	var aiStrategy ai.Strategy
+	switch strings.ToLower(cfg.AI.Provider) {
+	case "", "siliconflow":
+		aiStrategy = ai.NewSiliconFlowStrategy(
+			cfg.AI.SiliconFlowAPIKey, cfg.AI.SiliconFlowBaseURL,
+			cfg.AI.ASRModel, cfg.AI.LLMModel,
+		)
+	case "mimo":
+		aiStrategy = ai.NewMimoStrategy(
+			cfg.AI.MimoAPIKey, cfg.AI.MimoBaseURL,
+			cfg.AI.ASRModel, cfg.AI.LLMModel,
+		)
+	default:
+		log.Fatalf("不支持的 AI provider: %s", cfg.AI.Provider)
+	}
 
 	// Kafka
 	mq.CreateTopics(cfg.Kafka.Brokers, []string{
@@ -69,7 +83,7 @@ func main() {
 	log.Println("✅ Kafka 生产者就绪")
 
 	repos := repository.NewRepositories(db)
-	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb)
+	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
 	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
 

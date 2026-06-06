@@ -78,7 +78,15 @@ func (h *MediaHandler) UploadChunk(c *gin.Context) {
 	}
 	defer chunkFile.Close()
 
-	chunkData, _ := io.ReadAll(chunkFile)
+	chunkReader := io.Reader(chunkFile)
+	if maxChunkSize := h.svc.MaxChunkSize(); maxChunkSize > 0 {
+		chunkReader = io.LimitReader(chunkFile, maxChunkSize+1)
+	}
+	chunkData, err := io.ReadAll(chunkReader)
+	if err != nil {
+		response.InternalError(c, "读取分片失败")
+		return
+	}
 
 	if err := h.svc.UploadChunk(c.Request.Context(), fileMD5, chunkNumber, chunkData, int64(len(chunkData))); err != nil {
 		response.InternalError(c, "分片上传失败: "+err.Error())

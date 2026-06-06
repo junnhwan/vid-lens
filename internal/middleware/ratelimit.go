@@ -79,6 +79,11 @@ func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
 		if key == "" {
 			key = c.Request.URL.Path
 		}
+		if userID, ok := c.Get("userID"); ok {
+			key = fmt.Sprintf("%s:user:%v", key, userID)
+		} else {
+			key = fmt.Sprintf("%s:ip:%s", key, c.ClientIP())
+		}
 
 		if !limiter.Allow(c.Request.Context(), key) {
 			response.TooManyRequests(c, "当前请求过多，请稍后再试")

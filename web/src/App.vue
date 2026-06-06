@@ -123,8 +123,8 @@
 
     <!-- 登录/注册弹窗 -->
     <transition name="modal">
-      <div v-if="showAuth" class="modal-backdrop" @click="closeAuth">
-        <div class="modal-panel" @click.stop>
+      <div v-if="showAuth" class="modal-backdrop" @click.self="closeAuth">
+        <div class="modal-panel">
           <button class="modal-close" @click="closeAuth">×</button>
           <h2>{{ authMode === 'login' ? '登录' : '注册' }}</h2>
           <div class="auth-form">
@@ -247,13 +247,11 @@ const uploadFile = async (file) => {
   uploading.value = true
   uploadMsg.value = '正在上传...'
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    await api.uploadFile(formData)
+    await api.uploadFile(file)
     showToast('上传成功')
     await fetchTasks()
   } catch (err) {
-    showToast(err.response?.data?.message || '上传失败', true)
+    showToast(err.message || '上传失败', true)
   } finally {
     uploading.value = false
   }
@@ -272,14 +270,12 @@ const handleUrlUpload = async () => {
   uploading.value = true
   uploadMsg.value = '正在下载并解析...'
   try {
-    const formData = new FormData()
-    formData.append('url', videoUrl.value)
-    await api.uploadByUrl(formData)
+    await api.uploadByURL(videoUrl.value)
     showToast('下载成功')
     videoUrl.value = ''
     await fetchTasks()
   } catch (err) {
-    showToast(err.response?.data?.message || '下载失败', true)
+    showToast(err.message || '下载失败', true)
   } finally {
     uploading.value = false
   }
@@ -292,7 +288,7 @@ const fetchTasks = async () => {
   }
   try {
     const res = await api.listTasks()
-    tasks.value = res.data || []
+    tasks.value = res || []
   } catch (err) {
     console.error(err)
   }
@@ -322,10 +318,10 @@ const doTranscribe = async (task) => {
   loading.value[task.id] = true
   expanded.value[task.id] = true
   try {
-    await api.requestTranscribe(task.id)
+    await api.transcribe(task.id)
     startPolling(task.id, 'transcription')
   } catch (err) {
-    showToast('请求失败', true)
+    showToast(err.message || '请求失败', true)
     loading.value[task.id] = false
   }
 }
@@ -339,10 +335,10 @@ const doAnalyze = async (task) => {
   loading.value[task.id] = true
   expanded.value[task.id] = true
   try {
-    await api.requestAnalysis(task.id)
+    await api.analyze(task.id)
     startPolling(task.id, 'summary')
   } catch (err) {
-    showToast(err.response?.data?.message || '请求失败', true)
+    showToast(err.message || '请求失败', true)
     loading.value[task.id] = false
   }
 }
@@ -392,15 +388,16 @@ const handleAuth = async () => {
   authLoading.value = true
   authMsg.value = ''
   try {
+    const { username, password, nickname } = authForm.value
     const res = authMode.value === 'login'
-      ? await api.login(authForm.value)
-      : await api.register(authForm.value)
+      ? await api.login(username, password)
+      : await api.register(username, password, nickname)
     if (authMode.value === 'login') {
-      user.value = res.data
-      localStorage.setItem('token', res.data.token)
-      localStorage.setItem('user', JSON.stringify(res.data))
+      user.value = res.user
+      localStorage.setItem('user', JSON.stringify(res.user))
+      localStorage.setItem('token', res.token)
       closeAuth()
-      showToast(`欢迎回来，${res.data.nickname || res.data.username}`)
+      showToast(`欢迎回来，${res.user.nickname || res.user.username}`)
       await fetchTasks()
     } else {
       authMsg.value = '注册成功，请登录'
@@ -408,7 +405,7 @@ const handleAuth = async () => {
       setTimeout(() => switchAuthMode(), 1500)
     }
   } catch (err) {
-    authMsg.value = err.response?.data?.message || '操作失败'
+    authMsg.value = err.message || '操作失败'
     authError.value = true
   } finally {
     authLoading.value = false
@@ -433,6 +430,17 @@ onMounted(() => {
   }
 })
 </script>
+
+<style>
+/* 全局样式（无 scoped，影响整个页面） */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+</style>
 
 <style scoped>
 * { box-sizing: border-box; }
