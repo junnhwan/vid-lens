@@ -52,6 +52,10 @@ jwt:
   secret: "vidlens-jwt-secret-change-in-production"
   expire_hours: 72
 
+security:
+  # 16/24/32 字节 AES-GCM 密钥，用于加密用户自己提交的模型 API Key。
+  api_key_secret: "${VIDLENS_API_KEY_SECRET}"
+
 upload:
   max_file_size: 2147483648  # 2GB
   chunk_size: 5242880        # 5MB
@@ -59,3 +63,20 @@ upload:
 ratelimit:
   capacity: 10    # 桶容量
   rate: 10        # 每秒生成令牌数
+
+rag:
+  enabled: true
+  chunk_size: 800
+  chunk_overlap: 120
+  top_k: 5
+  min_score: 0.35
+  recent_turns: 8
+  embedding_dim: 1536
+  collection: "vidlens_video_chunks"
+
+milvus:
+  address: "127.0.0.1:19530"
+  username: ""
+  password: ""
+  token: ""
+  database: "default"

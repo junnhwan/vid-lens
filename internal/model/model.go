@@ -10,6 +10,10 @@ func AllModels() []interface{} {
 		&VideoTask{},
 		&VideoTranscription{},
 		&AISummary{},
+		&UserAIProfile{},
+		&VideoChunk{},
+		&ChatSession{},
+		&ChatMessage{},
 	}
 }
 

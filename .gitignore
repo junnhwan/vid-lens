@@ -39,5 +39,7 @@ tmp/
 # Local frontend backup
 web/src/App-old.vue
 
+# Local design notes
+docs/DESIGN_UPDATES.md
 
 other-grill.md

@@ -9,6 +9,9 @@ type Repositories struct {
 	Task          *TaskRepository
 	Transcription *TranscriptionRepository
 	Summary       *SummaryRepository
+	AIProfile     *AIProfileRepository
+	VideoChunk    *VideoChunkRepository
+	Chat          *ChatRepository
 }
 
 // NewRepositories 创建所有 Repository 实例
@@ -19,5 +22,8 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Task:          NewTaskRepository(db),
 		Transcription: NewTranscriptionRepository(db),
 		Summary:       NewSummaryRepository(db),
+		AIProfile:     NewAIProfileRepository(db),
+		VideoChunk:    NewVideoChunkRepository(db),
+		Chat:          NewChatRepository(db),
 	}
 }

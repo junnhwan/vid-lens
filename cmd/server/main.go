@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -15,13 +17,37 @@ import (
 	"vid-lens/internal/middleware"
 	"vid-lens/internal/model"
 	"vid-lens/internal/mq"
+	"vid-lens/internal/pkg/secret"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/storage"
+	"vid-lens/internal/vector"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+type aiProfileTesterAdapter struct {
+	tester *ai.ProfileTester
+}
+
+func (a *aiProfileTesterAdapter) TestProfile(ctx context.Context, profile *service.DecryptedAIProfile) error {
+	return a.tester.TestProfile(ctx, ai.Profile{
+		LLMProvider:       profile.LLMProvider,
+		LLMBaseURL:        profile.LLMBaseURL,
+		LLMAPIKey:         profile.LLMAPIKey,
+		LLMModel:          profile.LLMModel,
+		ASRProvider:       profile.ASRProvider,
+		ASRBaseURL:        profile.ASRBaseURL,
+		ASRAPIKey:         profile.ASRAPIKey,
+		ASRModel:          profile.ASRModel,
+		EmbeddingProvider: profile.EmbeddingProvider,
+		EmbeddingEndpoint: profile.EmbeddingEndpoint,
+		EmbeddingAPIKey:   profile.EmbeddingAPIKey,
+		EmbeddingModel:    profile.EmbeddingModel,
+		EmbeddingDim:      profile.EmbeddingDim,
+	})
+}
 
 func main() {
 	cfg, err := config.Load("config.yaml")
@@ -83,16 +109,87 @@ func main() {
 	log.Println("✅ Kafka 生产者就绪")
 
 	repos := repository.NewRepositories(db)
-	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
-	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
-	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
 
 	// Service & Handler
+	apiKeySecret := cfg.Security.APIKeySecret
+	if apiKeySecret == "" {
+		apiKeySecret = cfg.JWT.Secret
+		log.Println("⚠️ security.api_key_secret 未配置，临时复用 jwt.secret；公开部署请设置 VIDLENS_API_KEY_SECRET")
+	}
+	secretCodec, err := secret.NewCodecFromPassphrase(apiKeySecret)
+	if err != nil {
+		log.Fatalf("初始化 API Key 加密器失败: %v", err)
+	}
+	aiFactory := ai.NewFactory()
 	userSvc := service.NewUserService(repos.User, cfg.JWT)
+	aiProfileSvc := service.NewAIProfileService(repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
+	var ragStore service.RAGVectorStore
+	var ragRetriever service.RAGRetriever
+	if cfg.RAG.Enabled {
+		milvusCtx, cancelMilvus := context.WithTimeout(context.Background(), 5*time.Second)
+		milvusStore, err := vector.NewMilvusStore(milvusCtx, vector.MilvusConfig{
+			Address:    cfg.Milvus.Address,
+			Username:   cfg.Milvus.Username,
+			Password:   cfg.Milvus.Password,
+			Token:      cfg.Milvus.Token,
+			Database:   cfg.Milvus.Database,
+			Collection: cfg.RAG.Collection,
+			Dim:        cfg.RAG.EmbeddingDim,
+		})
+		cancelMilvus()
+		if err != nil {
+			log.Printf("⚠️ Milvus 连接失败，RAG 索引和视频问答暂不可用: %v", err)
+		} else {
+			defer func() {
+				if err := milvusStore.Close(); err != nil {
+					log.Printf("关闭 Milvus 连接失败: %v", err)
+				}
+			}()
+			ragStore = milvusStore
+			ragRetriever = milvusStore
+			log.Println("✅ Milvus 向量库连接成功")
+		}
+	} else {
+		log.Println("ℹ️ RAG 未启用，视频问答功能不可用")
+	}
+	ragIndexSvc := service.NewRAGIndexService(repos, ragStore, service.RAGIndexConfig{
+		ChunkSize:      cfg.RAG.ChunkSize,
+		ChunkOverlap:   cfg.RAG.ChunkOverlap,
+		EmbeddingDim:   cfg.RAG.EmbeddingDim,
+		CollectionName: cfg.RAG.Collection,
+	})
+	chatSvc := service.NewChatService(repos, ragRetriever, service.ChatConfig{
+		TopK:        cfg.RAG.TopK,
+		MinScore:    cfg.RAG.MinScore,
+		RecentTurns: cfg.RAG.RecentTurns,
+	})
+	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(rdb))
 	mediaSvc := service.NewMediaService(repos, minioStorage, producer, rdb, cfg.Upload, cfg.Tools)
 	userHandler := handler.NewUserHandler(userSvc)
+	aiProfileHandler := handler.NewAIProfileHandler(aiProfileSvc)
+	ragHandler := handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory)
+	chatHandler := handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory)
 	mediaHandler := handler.NewMediaHandler(mediaSvc)
 	rateLimiter := middleware.NewRateLimiter(rdb, cfg.RateLimit.Capacity, cfg.RateLimit.Rate)
+
+	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
+	consumer.SetAIResolver(aiFactory, aiProfileSvc)
+	if ragStore != nil {
+		consumer.SetRAGIndexer(func(ctx context.Context, task *model.VideoTask) error {
+			profile, err := aiProfileSvc.GetDefaultAIProfile(task.UserID)
+			if err != nil {
+				return err
+			}
+			embeddingClient, err := aiFactory.NewEmbeddingClient(*profile)
+			if err != nil {
+				return err
+			}
+			_, err = ragIndexSvc.BuildTaskIndex(ctx, task.UserID, task.ID, embeddingClient, *profile)
+			return err
+		})
+	}
+	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
+	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
 
 	// HTTP
 	if cfg.Server.Mode == "release" {
@@ -110,6 +207,21 @@ func main() {
 		auth.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
 			auth.GET("/user/profile", userHandler.GetProfile)
+			aiProfiles := auth.Group("/ai/profiles")
+			{
+				aiProfiles.GET("", aiProfileHandler.List)
+				aiProfiles.POST("", aiProfileHandler.Create)
+				aiProfiles.PUT("/:id", aiProfileHandler.Update)
+				aiProfiles.DELETE("/:id", aiProfileHandler.Delete)
+				aiProfiles.POST("/test", aiProfileHandler.Test)
+			}
+			chat := auth.Group("/chat")
+			{
+				chat.POST("/sessions", chatHandler.CreateSession)
+				chat.GET("/sessions", chatHandler.ListSessions)
+				chat.GET("/sessions/:session_id/messages", chatHandler.ListMessages)
+				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), chatHandler.Ask)
+			}
 			media := auth.Group("/media")
 			{
 				media.POST("/upload", mediaHandler.UploadFile)
@@ -122,6 +234,8 @@ func main() {
 				media.DELETE("/task/:id", mediaHandler.DeleteTask)
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestAnalysis)
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestTranscribe)
+				media.GET("/task/:id/rag-index", ragHandler.GetTaskIndexStatus)
+				media.POST("/task/:id/rag-index", middleware.RateLimit(rateLimiter), ragHandler.BuildTaskIndex)
 				media.GET("/download-audio/:id", mediaHandler.DownloadAudio)
 			}
 		}

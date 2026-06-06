@@ -21,6 +21,7 @@ import (
 )
 
 type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
+type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
@@ -32,9 +33,16 @@ type Consumer struct {
 	repo       *repository.Repositories
 	storage    *storage.MinIOStorage
 	ai         ai.Strategy
+	aiFactory  *ai.Factory
+	profiles   profileResolver
 	rdb        redis.Cmdable
 	ffmpegPath string
 	splitAudio splitAudioFunc
+	ragIndex   ragIndexFunc
+}
+
+type profileResolver interface {
+	GetDefaultAIProfile(userID int64) (*ai.Profile, error)
 }
 
 // NewConsumer 创建消费者
@@ -56,6 +64,15 @@ func NewConsumer(
 		ffmpegPath: ffmpegPath,
 		splitAudio: ffmpeg.SplitAudio,
 	}
+}
+
+func (c *Consumer) SetAIResolver(factory *ai.Factory, profiles profileResolver) {
+	c.aiFactory = factory
+	c.profiles = profiles
+}
+
+func (c *Consumer) SetRAGIndexer(indexer ragIndexFunc) {
+	c.ragIndex = indexer
 }
 
 // StartAnalyzeConsumer 启动 AI 分析消费者
@@ -238,7 +255,13 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	}
 	defer os.Remove(audioPath)
 
-	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath)
+	taskAI, err := c.strategyForTask(task)
+	if err != nil {
+		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		return nil
+	}
+
+	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
 		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
 		return nil
@@ -252,6 +275,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
 		return nil
 	}
+	c.indexAfterTranscription(ctx, task)
 
 	if err := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, ""); err != nil {
 		return err
@@ -284,7 +308,12 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	defer os.Remove(audioPath)
 
 	log.Printf("[Kafka] ASR 转录: taskID=%d", task.ID)
-	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath)
+	taskAI, err := c.strategyForTask(task)
+	if err != nil {
+		return err
+	}
+
+	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
@@ -296,11 +325,12 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}); err != nil {
 		return fmt.Errorf("保存转录失败: %w", err)
 	}
+	c.indexAfterTranscription(ctx, task)
 
 	return c.summarizeTask(ctx, task)
 }
 
-func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string) (string, error) {
+func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
 	splitAudio := c.splitAudio
 	if splitAudio == nil {
 		splitAudio = ffmpeg.SplitAudio
@@ -319,7 +349,7 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 
 	parts := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
-		text, err := c.ai.Transcribe(ctx, chunk)
+		text, err := strategy.Transcribe(ctx, chunk)
 		if err != nil {
 			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
 		}
@@ -339,6 +369,24 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 	return transcript, nil
 }
 
+func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
+	if c.profiles == nil || c.aiFactory == nil {
+		if c.ai == nil {
+			return nil, fmt.Errorf("请先配置 AI 服务")
+		}
+		return c.ai, nil
+	}
+
+	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		return nil, fmt.Errorf("请先配置 AI 服务")
+	}
+	return c.aiFactory.NewAnalysisStrategy(*profile)
+}
+
 func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
 	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
 	if err != nil {
@@ -349,7 +397,11 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	}
 
 	log.Printf("[Kafka] AI 总结: taskID=%d", task.ID)
-	summary, err := c.ai.Summarize(ctx, transcription.Content)
+	taskAI, err := c.strategyForTask(task)
+	if err != nil {
+		return err
+	}
+	summary, err := taskAI.Summarize(ctx, transcription.Content)
 	if err != nil {
 		return fmt.Errorf("AI 总结失败: %w", err)
 	}
@@ -363,6 +415,17 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	}
 
 	return nil
+}
+
+func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) {
+	if c.ragIndex == nil {
+		return
+	}
+	if err := c.ragIndex(ctx, task); err != nil {
+		log.Printf("[Kafka] RAG 索引构建失败，可稍后手动重试: taskID=%d, err=%v", task.ID, err)
+		return
+	}
+	log.Printf("[Kafka] RAG 索引构建完成: taskID=%d", task.ID)
 }
 
 func truncateError(err error) string {

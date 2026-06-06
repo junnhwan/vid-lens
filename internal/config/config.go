@@ -17,8 +17,11 @@ type Config struct {
 	AI        AIConfig        `yaml:"ai"`
 	Tools     ToolsConfig     `yaml:"tools"`
 	JWT       JWTConfig       `yaml:"jwt"`
+	Security  SecurityConfig  `yaml:"security"`
 	Upload    UploadConfig    `yaml:"upload"`
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
+	RAG       RAGConfig       `yaml:"rag"`
+	Milvus    MilvusConfig    `yaml:"milvus"`
 }
 
 type ServerConfig struct {
@@ -86,6 +89,10 @@ type JWTConfig struct {
 	ExpireHours int    `yaml:"expire_hours"`
 }
 
+type SecurityConfig struct {
+	APIKeySecret string `yaml:"api_key_secret"`
+}
+
 type UploadConfig struct {
 	MaxFileSize int64 `yaml:"max_file_size"`
 	ChunkSize   int64 `yaml:"chunk_size"`
@@ -94,6 +101,25 @@ type UploadConfig struct {
 type RateLimitConfig struct {
 	Capacity int `yaml:"capacity"`
 	Rate     int `yaml:"rate"`
+}
+
+type RAGConfig struct {
+	Enabled      bool    `yaml:"enabled"`
+	ChunkSize    int     `yaml:"chunk_size"`
+	ChunkOverlap int     `yaml:"chunk_overlap"`
+	TopK         int     `yaml:"top_k"`
+	MinScore     float32 `yaml:"min_score"`
+	RecentTurns  int     `yaml:"recent_turns"`
+	EmbeddingDim int     `yaml:"embedding_dim"`
+	Collection   string  `yaml:"collection"`
+}
+
+type MilvusConfig struct {
+	Address  string `yaml:"address"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	Token    string `yaml:"token"`
+	Database string `yaml:"database"`
 }
 
 func Load(path string) (*Config, error) {

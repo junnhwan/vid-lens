@@ -88,6 +88,7 @@
 <script setup>
 import { ref } from 'vue'
 import api from '../api'
+import { normalizeListResponse } from '../apiEnvelope.js'
 
 defineProps({ show: Boolean })
 const emit = defineEmits(['close', 'updated'])
@@ -107,7 +108,7 @@ const formData = ref({
 const loadProfiles = async () => {
   try {
     const res = await api.getAIProfiles()
-    profiles.value = res?.list || []
+    profiles.value = normalizeListResponse(res)
   } catch (err) {
     console.error('加载配置失败:', err)
   }

@@ -12,16 +12,23 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
 
 type recordingAI struct {
-	summarizeInput string
-	chunksInput    []string
+	summarizeInput  string
+	chunksInput     []string
 	transcribeInput []string
-	transcribeUsed bool
-	transcripts    map[string]string
+	transcribeUsed  bool
+	transcripts     map[string]string
+}
+
+type emptyProfileResolver struct{}
+
+func (emptyProfileResolver) GetDefaultAIProfile(int64) (*ai.Profile, error) {
+	return nil, nil
 }
 
 func (a *recordingAI) Transcribe(_ context.Context, audioPath string) (string, error) {
@@ -112,6 +119,26 @@ func TestProcessVideoReusesExistingTranscriptionBeforeDownloadingVideo(t *testin
 	}
 }
 
+func TestStrategyForTaskDoesNotFallbackWhenProfileResolverIsConfigured(t *testing.T) {
+	globalAI := &recordingAI{}
+	consumer := &Consumer{
+		ai:        globalAI,
+		aiFactory: ai.NewFactory(),
+		profiles:  emptyProfileResolver{},
+	}
+
+	_, err := consumer.strategyForTask(&model.VideoTask{UserID: 99})
+	if err == nil {
+		t.Fatal("strategyForTask() succeeded without user profile, want error")
+	}
+	if !strings.Contains(err.Error(), "请先配置 AI 服务") {
+		t.Fatalf("strategyForTask() error = %v", err)
+	}
+	if globalAI.transcribeUsed || globalAI.summarizeInput != "" {
+		t.Fatal("global AI fallback was used")
+	}
+}
+
 func TestTranscribeAudioAlwaysSplitsAudioBeforeASR(t *testing.T) {
 	tmpDir := t.TempDir()
 	audioPath := filepath.Join(tmpDir, "audio.mp3")
@@ -128,7 +155,7 @@ func TestTranscribeAudioAlwaysSplitsAudioBeforeASR(t *testing.T) {
 		},
 	}
 
-	transcript, err := consumer.transcribeAudio(context.Background(), 0, audioPath)
+	transcript, err := consumer.transcribeAudio(context.Background(), 0, audioPath, ai)
 	if err != nil {
 		t.Fatalf("transcribe audio: %v", err)
 	}
@@ -184,7 +211,7 @@ func TestTranscribeAudioLogsChunkMetrics(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(originalOutput)
 
-	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath)
+	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
 	if err != nil {
 		t.Fatalf("transcribe audio: %v", err)
 	}
@@ -217,20 +244,40 @@ func TestTranscribeAudioReturnsErrorWhenSplitCreatesNoChunks(t *testing.T) {
 		t.Fatalf("write audio: %v", err)
 	}
 
+	ai := &recordingAI{}
 	consumer := &Consumer{
-		ai:         &recordingAI{},
+		ai:         ai,
 		ffmpegPath: "ffmpeg",
 		splitAudio: func(context.Context, string, string, int) ([]string, error) {
 			return nil, nil
 		},
 	}
 
-	_, err := consumer.transcribeAudio(context.Background(), 42, audioPath)
+	_, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
 	if err == nil {
 		t.Fatalf("expected error when split creates no chunks")
 	}
 	if !strings.Contains(err.Error(), "没有可转写的音频片段") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIndexAfterTranscriptionInvokesRAGIndexerAndSwallowsError(t *testing.T) {
+	calls := 0
+	task := &model.VideoTask{ID: 12, UserID: 7}
+	consumer := &Consumer{}
+	consumer.SetRAGIndexer(func(_ context.Context, got *model.VideoTask) error {
+		calls++
+		if got.ID != task.ID || got.UserID != task.UserID {
+			t.Fatalf("indexed task = %+v, want %+v", got, task)
+		}
+		return fmt.Errorf("milvus unavailable")
+	})
+
+	consumer.indexAfterTranscription(context.Background(), task)
+
+	if calls != 1 {
+		t.Fatalf("rag index calls = %d, want 1", calls)
 	}
 }
 
