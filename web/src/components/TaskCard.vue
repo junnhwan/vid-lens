@@ -1,6 +1,6 @@
 <template>
   <div class="task-card" @click="$emit('click')">
-    <button class="task-delete" @click.stop="$emit('delete')" title="删除">×</button>
+    <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">×</button>
 
     <div class="task-header">
       <div class="task-icon">🎬</div>
@@ -28,6 +28,7 @@
 <script setup>
 import { computed } from 'vue'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
+import { formatTime, statusClass, statusText } from '../utils/format.js'
 
 const props = defineProps({
   task: Object,
@@ -35,15 +36,6 @@ const props = defineProps({
 })
 
 defineEmits(['click', 'delete', 'transcribe', 'analyze'])
-
-const formatTime = (str) => {
-  if (!str) return '--'
-  const d = new Date(str)
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-const statusClass = (s) => ['pending', 'queued', 'running', 'completed', 'failed'][s] || 'pending'
-const statusText = (s) => ['待处理', '排队中', '处理中', '已完成', '失败'][s] || '未知'
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
 </script>
@@ -171,6 +163,7 @@ const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.l
   backdrop-filter: blur(8px);
   border: 1px solid;
 }
+
 .meta-status.pending {
   background: rgba(139, 149, 168, 0.15);
   color: #8b95a8;
@@ -187,11 +180,7 @@ const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.l
   color: #f4e4a6;
   border-color: rgba(212, 175, 55, 0.3);
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.2);
-  animation: statusPulse 2s ease-in-out infinite;
-}
-@keyframes statusPulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(212, 175, 55, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(212, 175, 55, 0.4); }
+  animation: vl-status-pulse 2s ease-in-out infinite;
 }
 .meta-status.completed {
   background: rgba(34, 197, 94, 0.15);

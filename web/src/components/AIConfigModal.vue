@@ -1,8 +1,8 @@
 <template>
   <transition name="modal">
-    <div v-if="show" class="modal-backdrop" @mousedown.self="handleBackdropMouseDown">
+    <div v-if="show" class="modal-backdrop" @mousedown.self="handleBackdropMouseDown" role="dialog" aria-modal="true" aria-label="模型配置">
       <div class="modal-panel">
-        <button class="modal-close" @click="$emit('close')">×</button>
+        <button class="modal-close" @click="$emit('close')" aria-label="关闭">×</button>
         <h2>🤖 模型配置</h2>
 
         <div v-if="!isEditing" class="config-list">
@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { normalizeListResponse } from '../apiEnvelope.js'
 
@@ -137,7 +137,10 @@ const startEdit = (profile) => {
 const cancelEdit = () => { isEditing.value = false; editingProfile.value = null }
 
 const handleSubmit = async () => {
-  if (!formData.value.name) { alert('请输入配置名称'); return }
+  if (!formData.value.name) {
+    emit('showConfirm', { title: '提示', message: '请输入配置名称', confirmText: '知道了', showCancel: false, type: 'warning', icon: '📝' })
+    return
+  }
   loading.value = true
   try {
     const payload = { ...formData.value }
@@ -152,7 +155,7 @@ const handleSubmit = async () => {
     cancelEdit()
     emit('updated')
   } catch (err) {
-    alert(err.message || '保存失败')
+    emit('showConfirm', { title: '保存失败', message: err.message || '保存失败', confirmText: '知道了', showCancel: false, type: 'danger', icon: '❌' })
   } finally {
     loading.value = false
   }
@@ -172,14 +175,23 @@ const handleTest = async (profile) => {
 }
 
 const handleDelete = async (id) => {
-  if (!confirm('确认删除此配置？')) return
-  try {
-    await api.deleteAIProfile(id)
-    await loadProfiles()
-    emit('updated')
-  } catch (err) {
-    alert(err.message || '删除失败')
-  }
+  emit('showConfirm', {
+    title: '确认删除',
+    message: '此操作不可恢复，确定要删除这条模型配置吗？',
+    confirmText: '删除',
+    showCancel: true,
+    type: 'danger',
+    icon: '🗑️',
+    onConfirm: async () => {
+      try {
+        await api.deleteAIProfile(id)
+        await loadProfiles()
+        emit('updated')
+      } catch (err) {
+        emit('showConfirm', { title: '删除失败', message: err.message || '删除失败', confirmText: '知道了', showCancel: false, type: 'danger', icon: '❌' })
+      }
+    }
+  })
 }
 
 const handleBackdropMouseDown = (e) => {
@@ -192,6 +204,15 @@ const handleBackdropMouseDown = (e) => {
   }
   document.addEventListener('mouseup', handleMouseUp)
 }
+
+// ESC 关闭
+const onKeyDown = (e) => {
+  if (e.key === 'Escape') {
+    emit('close')
+  }
+}
+onMounted(() => document.addEventListener('keydown', onKeyDown))
+onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 defineExpose({ loadProfiles })
 </script>
@@ -318,6 +339,7 @@ defineExpose({ loadProfiles })
 
 .form-input {
   width: 100%;
+  box-sizing: border-box;
   background: rgba(10, 14, 26, 0.6);
   border: 1px solid rgba(139, 149, 168, 0.2);
   padding: 0.75rem 1rem;
@@ -370,5 +392,15 @@ defineExpose({ loadProfiles })
 .modal-enter-active, .modal-leave-active { transition: all 0.3s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 .modal-enter-from .modal-panel, .modal-leave-to .modal-panel { transform: scale(0.9); }
-</style>
 
+/* 响应式 */
+@media (max-width: 600px) {
+  .modal-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 1.5rem;
+  }
+}
+</style>

@@ -1,26 +1,32 @@
 <template>
   <div id="app">
-    <Navbar :user="user" @logout="logout" @openAuth="openAuth" @openConfig="openConfig" />
+    <Navbar :user="user" @logout="logout" @openAuth="openAuth" @openConfig="openConfig" @toggleSidebar="sidebarOpen = !sidebarOpen" />
 
     <div class="app-layout">
       <Sidebar
         :user="user"
         :uploading="uploading"
         :uploadMsg="uploadMsg"
+        :uploadProgress="uploadProgress"
         :stats="taskStats"
+        :mobileOpen="sidebarOpen"
         @uploadFile="handleFileUpload"
         @uploadUrl="handleUrlUpload"
         @openAuth="openAuth"
+        @closeSidebar="sidebarOpen = false"
       />
 
       <main class="content-area">
         <TaskList
           :tasks="tasks"
           :loading="loading"
+          :hasMore="hasMore"
+          :loadingMore="loadingMore"
           @taskClick="openTaskDrawer"
           @deleteTask="deleteTask"
           @transcribe="doTranscribe"
           @analyze="doAnalyze"
+          @loadMore="loadMoreTasks"
         />
       </main>
     </div>
@@ -31,6 +37,7 @@
       @close="closeDrawer"
       @transcribe="doTranscribe(selectedTask)"
       @analyze="doAnalyze(selectedTask)"
+      @chatError="(msg) => showToast(msg, true)"
     />
 
     <AuthModal
@@ -49,7 +56,25 @@
       :show="showConfig"
       @close="closeConfig"
       @updated="onConfigUpdated"
+      @showConfirm="openConfirm"
     />
+
+    <ConfirmDialog
+      :show="confirmState.show"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :confirmText="confirmState.confirmText"
+      :showCancel="confirmState.showCancel"
+      :type="confirmState.type"
+      :icon="confirmState.icon"
+      @confirm="handleConfirm"
+      @cancel="closeConfirm"
+    />
+
+    <!-- 离线提示 -->
+    <transition name="toast">
+      <div v-if="offlineToast" class="toast offline">📡 网络已断开，部分功能不可用</div>
+    </transition>
 
     <transition name="toast">
       <div v-if="toast" class="toast" :class="{ error: toastIsError }">{{ toast }}</div>
@@ -58,13 +83,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import Navbar from './components/Navbar.vue'
 import Sidebar from './components/Sidebar.vue'
 import TaskList from './components/TaskList.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import AuthModal from './components/AuthModal.vue'
-import AIConfigModal from './components/AIConfigModal.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
+
+// 懒加载低频组件
+const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigModal.vue'))
+
 import api from './api'
 import { buildStoredUser } from './authSession.js'
 import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
@@ -75,6 +104,7 @@ const user = ref(null)
 const tasks = ref([])
 const uploading = ref(false)
 const uploadMsg = ref('')
+const uploadProgress = ref(-1)
 const toast = ref('')
 const toastIsError = ref(false)
 const selectedTask = ref(null)
@@ -87,6 +117,40 @@ const authError = ref(false)
 const pollingTimers = ref({})
 const showConfig = ref(false)
 const aiConfigModal = ref(null)
+const sidebarOpen = ref(false)
+const offlineToast = ref(false)
+
+// 分页
+const currentPage = ref(1)
+const pageSize = 20
+const hasMore = ref(false)
+const loadingMore = ref(false)
+
+// ConfirmDialog 状态
+const confirmState = ref({
+  show: false,
+  title: '提示',
+  message: '',
+  confirmText: '确认',
+  showCancel: true,
+  type: 'danger',
+  icon: '⚠️',
+  onConfirm: null
+})
+
+const openConfirm = (opts) => {
+  confirmState.value = { ...confirmState.value, show: true, ...opts }
+}
+
+const handleConfirm = () => {
+  const cb = confirmState.value.onConfirm
+  confirmState.value.show = false
+  if (cb) cb()
+}
+
+const closeConfirm = () => {
+  confirmState.value.show = false
+}
 
 // 计算属性
 const taskStats = computed(() => ({
@@ -111,20 +175,28 @@ const handleFileUpload = async (file) => {
   }
   uploading.value = true
   uploadMsg.value = '正在上传...'
+  uploadProgress.value = 0
   try {
-    await api.uploadFile(file)
+    await api.uploadFile(file, (evt) => {
+      if (evt.total) {
+        uploadProgress.value = Math.round((evt.loaded / evt.total) * 100)
+      }
+    })
     showToast('上传成功')
+    uploadProgress.value = 100
     await fetchTasks()
   } catch (err) {
     showToast(err.message || '上传失败', true)
   } finally {
     uploading.value = false
+    setTimeout(() => { uploadProgress.value = -1 }, 800)
   }
 }
 
 const handleUrlUpload = async (url) => {
   uploading.value = true
   uploadMsg.value = '正在下载并解析...'
+  uploadProgress.value = -1
   try {
     await api.uploadByURL(url)
     showToast('下载成功')
@@ -136,35 +208,62 @@ const handleUrlUpload = async (url) => {
   }
 }
 
-const fetchTasks = async () => {
+const fetchTasks = async (page = 1, append = false) => {
   if (!user.value) {
     tasks.value = []
     return
   }
   try {
-    const res = await api.listTasks()
-    tasks.value = res?.list || []
+    const res = await api.listTasks(page, pageSize)
+    const list = res?.list || []
+    if (append) {
+      tasks.value = [...tasks.value, ...list]
+    } else {
+      tasks.value = list
+    }
+    currentPage.value = page
+    hasMore.value = list.length >= pageSize
   } catch (err) {
     console.error(err)
   }
 }
 
-const deleteTask = async (task) => {
-  if (!confirm(`确认删除「${task.filename}」？`)) return
+const loadMoreTasks = async () => {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
   try {
-    await api.deleteTask(task.id)
-    showToast('删除成功')
-    tasks.value = tasks.value.filter(t => t.id !== task.id)
-    if (selectedTask.value?.id === task.id) {
-      selectedTask.value = null
-    }
-  } catch (err) {
-    showToast('删除失败', true)
+    await fetchTasks(currentPage.value + 1, true)
+  } finally {
+    loadingMore.value = false
   }
+}
+
+const deleteTask = async (task) => {
+  openConfirm({
+    title: '确认删除',
+    message: `确定要删除「${task.filename}」吗？此操作不可恢复。`,
+    confirmText: '删除',
+    showCancel: true,
+    type: 'danger',
+    icon: '🗑️',
+    onConfirm: async () => {
+      try {
+        await api.deleteTask(task.id)
+        showToast('删除成功')
+        tasks.value = tasks.value.filter(t => t.id !== task.id)
+        if (selectedTask.value?.id === task.id) {
+          selectedTask.value = null
+        }
+      } catch (err) {
+        showToast('删除失败', true)
+      }
+    }
+  })
 }
 
 const openTaskDrawer = async (task) => {
   selectedTask.value = task
+  sidebarOpen.value = false
   if (needsTaskDetail(task)) {
     await refreshTaskDetail(task.id)
   }
@@ -320,6 +419,15 @@ const onConfigUpdated = () => {
   showToast('配置已更新')
 }
 
+// 网络状态检测
+const handleOnline = () => {
+  offlineToast.value = false
+  showToast('网络已恢复')
+}
+const handleOffline = () => {
+  offlineToast.value = true
+}
+
 onMounted(() => {
   const saved = localStorage.getItem('user')
   if (saved) {
@@ -328,6 +436,13 @@ onMounted(() => {
       fetchTasks()
     } catch (e) {}
   }
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
 })
 </script>
 
@@ -442,11 +557,24 @@ html, body {
 .toast.error {
   background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95));
 }
+.toast.offline {
+  background: linear-gradient(135deg, rgba(139, 149, 168, 0.95), rgba(100, 116, 139, 0.95));
+  top: auto;
+  bottom: 2.5rem;
+  right: 2.5rem;
+}
 .toast-enter-active, .toast-leave-active {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
   transform: translateX(100%) scale(0.8);
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+  .content-area {
+    padding: 1.5rem 1rem;
+  }
 }
 </style>

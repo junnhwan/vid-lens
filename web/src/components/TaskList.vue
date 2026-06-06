@@ -9,10 +9,10 @@
           {{ tab.label }} <span class="tab-count">{{ tab.count }}</span>
         </button>
       </div>
-      <input v-model="searchQuery" class="search-box" placeholder="🔍 搜索文件名..." />
+      <input v-model="searchQuery" class="search-box" placeholder="🔍 搜索文件名..." aria-label="搜索任务" />
     </div>
 
-    <div class="tasks-list">
+    <TransitionGroup name="task-list" tag="div" class="tasks-list">
       <TaskCard
         v-for="t in filteredTasks"
         :key="t.id"
@@ -23,6 +23,19 @@
         @transcribe="$emit('transcribe', t)"
         @analyze="$emit('analyze', t)"
       />
+    </TransitionGroup>
+
+    <!-- 搜索无结果 -->
+    <div v-if="tasks.length && !filteredTasks.length" class="empty-search">
+      <div class="empty-search-icon">🔍</div>
+      <p>没有找到匹配「{{ searchQuery }}」的任务</p>
+    </div>
+
+    <!-- 加载更多 -->
+    <div v-if="hasMore" class="load-more">
+      <button class="load-more-btn" @click="$emit('loadMore')" :disabled="loadingMore">
+        {{ loadingMore ? '加载中...' : '加载更多' }}
+      </button>
     </div>
   </section>
 
@@ -39,10 +52,12 @@ import TaskCard from './TaskCard.vue'
 
 const props = defineProps({
   tasks: Array,
-  loading: Object
+  loading: Object,
+  hasMore: { type: Boolean, default: false },
+  loadingMore: { type: Boolean, default: false }
 })
 
-defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze'])
+defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore'])
 
 const activeTab = ref('all')
 const searchQuery = ref('')
@@ -68,12 +83,9 @@ const filteredTasks = computed(() => {
 <style scoped>
 /* 任务区 */
 .tasks-section {
-  animation: fadeInUp 0.6s ease-out;
+  animation: vl-fade-in-up 0.6s ease-out;
 }
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -167,11 +179,78 @@ const filteredTasks = computed(() => {
   color: #5a6477;
 }
 
-/* 任务列表 */
+/* 任务列表 + TransitionGroup */
 .tasks-list {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.task-list-enter-active {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.task-list-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+.task-list-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
+}
+.task-list-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
+}
+.task-list-move {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 搜索无结果 */
+.empty-search {
+  text-align: center;
+  padding: 3rem 1rem;
+  opacity: 0.6;
+}
+
+.empty-search-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.empty-search p {
+  color: #8b95a8;
+  font-size: 0.95rem;
+}
+
+/* 加载更多 */
+.load-more {
+  text-align: center;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(139, 149, 168, 0.1);
+}
+
+.load-more-btn {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.25);
+  padding: 0.75rem 2rem;
+  border-radius: 0.75rem;
+  color: #8b95a8;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+  transform: translateY(-2px);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 空状态 */
@@ -203,5 +282,23 @@ const filteredTasks = computed(() => {
 .empty-state p {
   color: #8b95a8;
   font-size: 0.95rem;
+}
+
+/* 响应式 */
+@media (max-width: 600px) {
+  .section-header {
+    gap: 1rem;
+  }
+  .search-box {
+    min-width: unset;
+    width: 100%;
+    order: 10;
+  }
+  .filter-tabs {
+    order: 5;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 </style>

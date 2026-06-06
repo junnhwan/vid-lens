@@ -1,10 +1,10 @@
 <template>
   <transition name="drawer">
-    <div v-if="task" class="drawer-backdrop" @click="$emit('close')">
-      <div class="task-drawer" @click.stop>
+    <div v-if="task" class="drawer-backdrop" @click="$emit('close')" role="dialog" aria-modal="true" :aria-label="task.filename">
+      <div class="task-drawer" ref="drawerPanel" @click.stop>
         <div class="drawer-header">
           <h3>{{ task.filename }}</h3>
-          <button class="drawer-close" @click="$emit('close')">×</button>
+          <button class="drawer-close" @click="$emit('close')" aria-label="关闭">×</button>
         </div>
 
         <div class="drawer-content">
@@ -85,10 +85,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
 import { taskFailureMessage } from '../taskDetailPolicy.js'
+import { formatTime, formatFileSize, statusClass, statusText } from '../utils/format.js'
 import VideoRAGChat from './VideoRAGChat.vue'
 
 const props = defineProps({
@@ -96,42 +98,66 @@ const props = defineProps({
   loading: Boolean
 })
 
-const emit = defineEmits(['close', 'transcribe', 'analyze'])
+const emit = defineEmits(['close', 'transcribe', 'analyze', 'chatError'])
 
 const activeTab = ref('detail')
+const drawerPanel = ref(null)
+let previouslyFocused = null
 
 const canUseRAG = computed(() => {
   return props.task?.transcription?.content || props.task?.status === 3
 })
 
 const handleChatError = (msg) => {
-  alert(msg)
+  emit('chatError', msg)
 }
 
-const formatTime = (str) => {
-  if (!str) return '--'
-  const d = new Date(str)
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-const formatFileSize = (bytes) => {
-  if (!bytes) return '--'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let size = bytes
-  let unitIndex = 0
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex++
-  }
-  return `${size.toFixed(2)} ${units[unitIndex]}`
-}
-
-const statusClass = (s) => ['pending', 'queued', 'running', 'completed', 'failed'][s] || 'pending'
-const statusText = (s) => ['待处理', '排队中', '处理中', '已完成', '失败'][s] || '未知'
-const renderMarkdown = (content) => marked.parse(content || '')
+const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
 const failureMessage = computed(() => taskFailureMessage(props.task))
+
+// ESC 关闭 + Focus trap
+const onKeyDown = (e) => {
+  if (!props.task) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+    return
+  }
+  // 基本焦点捕获
+  if (e.key === 'Tab' && drawerPanel.value) {
+    const focusable = drawerPanel.value.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+}
+
+watch(() => props.task, (val) => {
+  if (val) {
+    previouslyFocused = document.activeElement
+    nextTick(() => {
+      const firstBtn = drawerPanel.value?.querySelector('button')
+      firstBtn?.focus()
+    })
+  } else if (previouslyFocused) {
+    previouslyFocused.focus()
+    previouslyFocused = null
+  }
+})
+
+onMounted(() => document.addEventListener('keydown', onKeyDown))
+onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 </script>
 
 <style scoped>
@@ -337,12 +363,7 @@ const failureMessage = computed(() => taskFailureMessage(props.task))
   color: #f4e4a6;
   border-color: rgba(212, 175, 55, 0.3);
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.2);
-  animation: statusPulse 2s ease-in-out infinite;
-}
-
-@keyframes statusPulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(212, 175, 55, 0.2); }
-  50% { box-shadow: 0 0 20px rgba(212, 175, 55, 0.4); }
+  animation: vl-status-pulse 2s ease-in-out infinite;
 }
 
 .meta-status.completed {
@@ -426,22 +447,13 @@ const failureMessage = computed(() => taskFailureMessage(props.task))
   border: 3px solid rgba(212, 175, 55, 0.15);
   border-top-color: #d4af37;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: vl-spin 0.8s linear infinite;
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.3);
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .drawer-result-block {
   margin-bottom: 2rem;
-  animation: resultFadeIn 0.5s ease-out;
-}
-
-@keyframes resultFadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: vl-fade-in-up 0.5s ease-out;
 }
 
 .drawer-result-block:last-child {
@@ -613,5 +625,19 @@ const failureMessage = computed(() => taskFailureMessage(props.task))
 
 .drawer-leave-to .task-drawer {
   transform: translateX(100%);
+}
+
+/* 响应式 */
+@media (max-width: 600px) {
+  .task-drawer {
+    width: 100%;
+    max-width: 100vw;
+  }
+  .drawer-content {
+    padding: 1.25rem;
+  }
+  .drawer-header {
+    padding: 1.25rem;
+  }
 }
 </style>

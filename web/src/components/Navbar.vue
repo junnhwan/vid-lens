@@ -1,13 +1,14 @@
 <template>
-  <nav class="navbar">
+  <nav class="navbar" role="navigation" aria-label="主导航">
     <div class="nav-container">
       <div class="brand">
         <span class="mirror-icon">◇</span>
         <span class="brand-text">镜知 <span class="en">VidLens</span></span>
       </div>
+      <button class="mobile-menu-btn" @click="$emit('toggleSidebar')" aria-label="切换侧边栏">☰</button>
       <div class="nav-right">
         <template v-if="user">
-          <button class="btn-icon-text" @click="$emit('openConfig')" title="模型配置">
+          <button class="btn-icon-text" @click="$emit('openConfig')" title="模型配置" aria-label="模型配置">
             <span class="icon">🤖</span>
           </button>
           <div class="user-badge">
@@ -27,7 +28,7 @@ defineProps({
   user: Object
 })
 
-defineEmits(['logout', 'openAuth', 'openConfig'])
+defineEmits(['logout', 'openAuth', 'openConfig', 'toggleSidebar'])
 </script>
 
 <style scoped>
@@ -41,7 +42,6 @@ defineEmits(['logout', 'openAuth', 'openConfig'])
   position: sticky;
   top: 0;
   z-index: 100;
-  position: relative;
 }
 
 .navbar::after {
@@ -111,6 +111,19 @@ defineEmits(['logout', 'openAuth', 'openConfig'])
   font-family: 'JetBrains Mono', monospace;
   letter-spacing: 1px;
   font-weight: 400;
+}
+
+/* 移动端菜单按钮 —— 默认隐藏 */
+.mobile-menu-btn {
+  display: none;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  font-size: 1.5rem;
+  color: #d4af37;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.65rem;
+  cursor: pointer;
+  transition: all 0.3s;
 }
 
 .nav-right { display: flex; align-items: center; gap: 1.25rem; }
@@ -218,5 +231,30 @@ defineEmits(['logout', 'openAuth', 'openConfig'])
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(212, 175, 55, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
   background-position: 200% center;
+}
+
+/* 响应式：平板及以下 */
+@media (max-width: 900px) {
+  .nav-container {
+    padding: 0 1.5rem;
+  }
+  .mobile-menu-btn {
+    display: block;
+  }
+  .user-name {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .brand {
+    font-size: 1.35rem;
+  }
+  .mirror-icon {
+    font-size: 1.8rem;
+  }
+  .nav-container {
+    padding: 0 1rem;
+  }
 }
 </style>

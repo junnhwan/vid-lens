@@ -15,7 +15,8 @@
       <div class="chat-messages" ref="messagesContainer">
         <div v-for="msg in messages" :key="msg.id" class="message" :class="msg.role">
           <div class="message-content">
-            <div class="message-text">{{ msg.content }}</div>
+            <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.citations && msg.citations.length" class="citations">
               <div class="citations-header">📚 参考片段</div>
               <div v-for="(cite, idx) in msg.citations" :key="idx" class="citation-item">
@@ -38,6 +39,7 @@
           placeholder="问问这个视频..."
           :disabled="loading"
           class="input-field"
+          aria-label="输入问题"
         />
         <button @click="sendQuestion" :disabled="loading || !question" class="btn-send">
           发送
@@ -49,6 +51,8 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import api from '../api'
 
 const props = defineProps({
@@ -64,6 +68,8 @@ const question = ref('')
 const loading = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
+
+const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
 
 const buildIndex = async () => {
   building.value = true
@@ -181,12 +187,7 @@ onMounted(() => {
 
 .message {
   display: flex;
-  animation: messageIn 0.3s ease-out;
-}
-
-@keyframes messageIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: vl-message-in 0.3s ease-out;
 }
 
 .message.user {
@@ -225,6 +226,38 @@ onMounted(() => {
   line-height: 1.7;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* RAG Chat 内的 Markdown 渲染 */
+.message-text.markdown-body :deep(p) {
+  margin-bottom: 0.5rem;
+}
+
+.message-text.markdown-body :deep(strong) {
+  color: #f4e4a6;
+}
+
+.message-text.markdown-body :deep(ul),
+.message-text.markdown-body :deep(ol) {
+  padding-left: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.message-text.markdown-body :deep(li) {
+  margin-bottom: 0.3rem;
+}
+
+.message-text.markdown-body :deep(li::marker) {
+  color: #d4af37;
+}
+
+.message-text.markdown-body :deep(code) {
+  background: rgba(212, 175, 55, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #f4e4a6;
 }
 
 .citations {
@@ -336,10 +369,6 @@ onMounted(() => {
   border: 2.5px solid rgba(212, 175, 55, 0.15);
   border-top-color: #d4af37;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+  animation: vl-spin 0.8s linear infinite;
 }
 </style>

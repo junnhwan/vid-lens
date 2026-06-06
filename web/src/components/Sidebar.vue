@@ -1,5 +1,5 @@
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ open: mobileOpen }">
     <!-- 上传区 -->
     <section class="sidebar-section">
       <h3 class="section-title">📤 上传视频</h3>
@@ -26,8 +26,19 @@
         </div>
       </div>
 
-      <!-- 上传状态 -->
-      <div v-if="uploading" class="upload-status">
+      <!-- 上传进度 -->
+      <div v-if="uploading && uploadProgress >= 0" class="upload-progress">
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: uploadProgress + '%' }"></div>
+        </div>
+        <div class="progress-info">
+          <div class="spinner small"></div>
+          <span>{{ uploadMsg }} · {{ uploadProgress }}%</span>
+        </div>
+      </div>
+
+      <!-- 上传状态（无进度时） -->
+      <div v-else-if="uploading" class="upload-status">
         <div class="spinner small"></div>
         <span>{{ uploadMsg }}</span>
       </div>
@@ -56,6 +67,11 @@
       </div>
     </section>
   </aside>
+
+  <!-- 移动端遮罩 -->
+  <transition name="fade">
+    <div v-if="mobileOpen" class="sidebar-overlay" @click="$emit('closeSidebar')"></div>
+  </transition>
 </template>
 
 <script setup>
@@ -65,10 +81,12 @@ const props = defineProps({
   user: Object,
   uploading: Boolean,
   uploadMsg: String,
-  stats: Object
+  uploadProgress: { type: Number, default: -1 },
+  stats: Object,
+  mobileOpen: Boolean
 })
 
-const emit = defineEmits(['uploadFile', 'uploadUrl', 'openAuth'])
+const emit = defineEmits(['uploadFile', 'uploadUrl', 'openAuth', 'closeSidebar'])
 
 const videoUrl = ref('')
 const dragging = ref(false)
@@ -311,7 +329,43 @@ const handleUrlUpload = () => {
   color: #5a6477;
 }
 
-/* 上传状态 */
+/* 上传进度条 */
+.upload-progress {
+  margin-top: 1rem;
+  backdrop-filter: blur(20px) saturate(180%);
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.7), rgba(20, 30, 50, 0.5));
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.progress-bar {
+  height: 6px;
+  background: rgba(139, 149, 168, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d4af37, #f4e4a6);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(212, 175, 55, 0.4);
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #d4af37;
+}
+
+/* 上传状态（无进度） */
 .upload-status {
   display: flex;
   align-items: center;
@@ -335,7 +389,7 @@ const handleUrlUpload = () => {
   border: 2.5px solid rgba(212, 175, 55, 0.15);
   border-top-color: #d4af37;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: vl-spin 0.8s linear infinite;
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.3);
 }
 
@@ -343,10 +397,6 @@ const handleUrlUpload = () => {
   width: 1.25rem;
   height: 1.25rem;
   border-width: 2.5px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 /* 统计网格 */
@@ -389,4 +439,40 @@ const handleUrlUpload = () => {
   color: #8b95a8;
   font-weight: 500;
 }
+
+/* 移动端遮罩 */
+.sidebar-overlay {
+  display: none;
+}
+
+/* 响应式 */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 150;
+    transform: translateX(-100%);
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+    border-right: 1px solid rgba(212, 175, 55, 0.3);
+    background: linear-gradient(135deg, rgba(10, 14, 26, 0.97), rgba(15, 25, 45, 0.97));
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 149;
+  }
+}
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
