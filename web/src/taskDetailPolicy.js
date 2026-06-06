@@ -9,3 +9,8 @@ export function needsResultDetail(task, type) {
   if (type === 'summary') return !!task.summary?.content
   return needsTaskDetail(task)
 }
+
+export function taskFailureMessage(task) {
+  if (!task || task.status !== 4) return ''
+  return task.error_msg || ''
+}

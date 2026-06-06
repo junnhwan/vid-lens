@@ -9,6 +9,9 @@ type Strategy interface {
 	// Transcribe 语音转文字（ASR）
 	Transcribe(ctx context.Context, audioPath string) (string, error)
 
+	// TranscribeChunks 分片语音转文字，规避单次 ASR 请求体限制。
+	TranscribeChunks(ctx context.Context, audioPaths []string) (string, error)
+
 	// Summarize 大模型总结
 	Summarize(ctx context.Context, text string) (string, error)
 }

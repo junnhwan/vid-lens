@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { needsResultDetail, needsTaskDetail } from '../src/taskDetailPolicy.js'
+import { needsResultDetail, needsTaskDetail, taskFailureMessage } from '../src/taskDetailPolicy.js'
 
 assert.equal(
   needsTaskDetail({ status: 3 }),
@@ -36,4 +36,16 @@ assert.equal(
   needsTaskDetail({ status: 2 }),
   false,
   'running list items should not fetch detail yet',
+)
+
+assert.equal(
+  taskFailureMessage({ status: 4, error_msg: '音频过大' }),
+  '音频过大',
+  'failed tasks should expose backend error messages for display',
+)
+
+assert.equal(
+  taskFailureMessage({ status: 3, error_msg: 'old error' }),
+  '',
+  'completed tasks should not expose stale error messages',
 )

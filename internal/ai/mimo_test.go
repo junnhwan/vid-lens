@@ -74,6 +74,38 @@ func TestMimoSummarizeSendsTextChatCompletion(t *testing.T) {
 	}
 }
 
+func TestMimoTranscribeChunksCallsASRForEachChunkAndMergesText(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"片段` + string(rune('0'+requests)) + `"}}]}`))
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	chunkA := filepath.Join(tmpDir, "chunk-a.mp3")
+	chunkB := filepath.Join(tmpDir, "chunk-b.mp3")
+	if err := os.WriteFile(chunkA, []byte("chunk a"), 0644); err != nil {
+		t.Fatalf("write chunk a: %v", err)
+	}
+	if err := os.WriteFile(chunkB, []byte("chunk b"), 0644); err != nil {
+		t.Fatalf("write chunk b: %v", err)
+	}
+
+	strategy := NewMimoStrategy("tp-test-key", server.URL, "mimo-v2.5-asr", "mimo-v2.5")
+	text, err := strategy.TranscribeChunks(context.Background(), []string{chunkA, chunkB})
+	if err != nil {
+		t.Fatalf("transcribe chunks: %v", err)
+	}
+	if text != "片段1\n\n片段2" {
+		t.Fatalf("unexpected merged transcript: %q", text)
+	}
+	if requests != 2 {
+		t.Fatalf("expected 2 ASR requests, got %d", requests)
+	}
+}
+
 func mustFindInputAudioData(t *testing.T, request map[string]interface{}) string {
 	t.Helper()
 

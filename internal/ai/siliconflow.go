@@ -66,6 +66,28 @@ func (s *SiliconFlowStrategy) Transcribe(ctx context.Context, audioPath string) 
 	return "", fmt.Errorf("ASR 重试 3 次后仍失败: %w", lastErr)
 }
 
+func (s *SiliconFlowStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
+	if len(audioPaths) == 0 {
+		return "", fmt.Errorf("没有可转写的音频片段")
+	}
+
+	parts := make([]string, 0, len(audioPaths))
+	for i, audioPath := range audioPaths {
+		text, err := s.Transcribe(ctx, audioPath)
+		if err != nil {
+			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
+		}
+		text = strings.TrimSpace(text)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("ASR 返回空结果")
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
 // doTranscribe 执行一次 ASR 请求
 func (s *SiliconFlowStrategy) doTranscribe(ctx context.Context, audioPath string) (string, error) {
 	// 读取音频文件

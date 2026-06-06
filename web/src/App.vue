@@ -106,6 +106,10 @@
                   <div class="spinner small"></div> 处理中...
                 </div>
                 <template v-else>
+                  <div v-if="failureMessage(t)" class="result-block error-block">
+                    <h4>处理失败</h4>
+                    <p class="error-text">{{ failureMessage(t) }}</p>
+                  </div>
                   <div v-if="t.transcription?.content" class="result-block">
                     <h4>📝 文字提取</h4>
                     <pre class="result-text">{{ t.transcription.content }}</pre>
@@ -155,7 +159,7 @@ import { marked } from 'marked'
 import api from './api'
 import { buildStoredUser } from './authSession.js'
 import { isTaskActionDisabled } from './taskActionPolicy.js'
-import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
+import { needsResultDetail, needsTaskDetail, taskFailureMessage } from './taskDetailPolicy.js'
 import { shouldStopPolling } from './taskPollingPolicy.js'
 
 // 状态
@@ -214,6 +218,7 @@ const formatTime = (str) => {
 const statusClass = (s) => ['pending', 'queued', 'running', 'completed', 'failed'][s] || 'pending'
 const statusText = (s) => ['待处理', '排队中', '处理中', '已完成', '失败'][s] || '未知'
 const isActionDisabled = (t) => isTaskActionDisabled(t, loading.value[t.id])
+const failureMessage = (t) => taskFailureMessage(t)
 const renderMarkdown = (content) => marked.parse(content || '')
 
 // 业务逻辑
@@ -624,6 +629,8 @@ html, body {
 .result-block { margin-bottom: 1.5rem; }
 .result-block:last-child { margin-bottom: 0; }
 .result-block h4 { font-size: 1rem; margin-bottom: 0.75rem; color: #f59e0b; }
+.result-block.error-block h4 { color: #f87171; }
+.error-text { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); color: #fecaca; padding: 1rem; border-radius: 0.5rem; line-height: 1.6; white-space: pre-wrap; }
 .result-text { background: rgba(15, 23, 42, 0.5); padding: 1rem; border-radius: 0.5rem; font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap; color: #cbd5e1; max-height: 300px; overflow-y: auto; }
 .result-markdown { background: rgba(15, 23, 42, 0.5); padding: 1rem; border-radius: 0.5rem; line-height: 1.8; max-height: 400px; overflow-y: auto; }
 .result-markdown :deep(h2), .result-markdown :deep(h3) { color: #f59e0b; margin-top: 1rem; margin-bottom: 0.5rem; }

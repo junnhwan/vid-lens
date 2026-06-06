@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -17,6 +19,8 @@ import (
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 )
+
+const maxDirectASRAudioBytes = 7 * 1024 * 1024
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
@@ -232,7 +236,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	}
 	defer os.Remove(audioPath)
 
-	transcript, err := c.ai.Transcribe(ctx, audioPath)
+	transcript, err := c.transcribeAudio(ctx, audioPath)
 	if err != nil {
 		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
 		return nil
@@ -255,6 +259,15 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 
 // processVideo 核心业务：FFmpeg → ASR → LLM
 func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) error {
+	existingTranscription, err := c.repo.Transcription.FindByTaskID(task.ID)
+	if err != nil {
+		return fmt.Errorf("查询转录失败: %w", err)
+	}
+	if existingTranscription != nil && strings.TrimSpace(existingTranscription.Content) != "" {
+		log.Printf("[Kafka] 复用已有转录生成总结: taskID=%d", task.ID)
+		return c.summarizeTask(ctx, task)
+	}
+
 	log.Printf("[Kafka] 提取音频: taskID=%d", task.ID)
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
@@ -269,7 +282,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	defer os.Remove(audioPath)
 
 	log.Printf("[Kafka] ASR 转录: taskID=%d", task.ID)
-	transcript, err := c.ai.Transcribe(ctx, audioPath)
+	transcript, err := c.transcribeAudio(ctx, audioPath)
 	if err != nil {
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
@@ -282,8 +295,39 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("保存转录失败: %w", err)
 	}
 
+	return c.summarizeTask(ctx, task)
+}
+
+func (c *Consumer) transcribeAudio(ctx context.Context, audioPath string) (string, error) {
+	size, err := fileSize(audioPath)
+	if err != nil {
+		return "", err
+	}
+	if size <= maxDirectASRAudioBytes {
+		return c.ai.Transcribe(ctx, audioPath)
+	}
+
+	log.Printf("[Kafka] 音频过大，切片转写: path=%s, size=%d", audioPath, size)
+	chunks, err := ffmpeg.SplitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(filepath.Dir(chunks[0]))
+
+	return c.ai.TranscribeChunks(ctx, chunks)
+}
+
+func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
+	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
+	if err != nil {
+		return fmt.Errorf("查询转录失败: %w", err)
+	}
+	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
+		return fmt.Errorf("缺少转录文本，无法生成 AI 总结")
+	}
+
 	log.Printf("[Kafka] AI 总结: taskID=%d", task.ID)
-	summary, err := c.ai.Summarize(ctx, transcript)
+	summary, err := c.ai.Summarize(ctx, transcription.Content)
 	if err != nil {
 		return fmt.Errorf("AI 总结失败: %w", err)
 	}
@@ -291,12 +335,20 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	if err := c.repo.Summary.Upsert(&model.AISummary{
 		TaskID:    task.ID,
 		Content:   summary,
-		ModelName: "DeepSeek-R1-Distill-Qwen-32B",
+		ModelName: "mimo-v2.5",
 	}); err != nil {
 		return fmt.Errorf("保存总结失败: %w", err)
 	}
 
 	return nil
+}
+
+func fileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("读取音频文件信息失败: %w", err)
+	}
+	return info.Size(), nil
 }
 
 func truncateError(err error) string {
