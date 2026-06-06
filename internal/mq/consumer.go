@@ -20,7 +20,7 @@ import (
 	"vid-lens/internal/storage"
 )
 
-const maxDirectASRAudioBytes = 7 * 1024 * 1024
+type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
@@ -34,6 +34,7 @@ type Consumer struct {
 	ai         ai.Strategy
 	rdb        redis.Cmdable
 	ffmpegPath string
+	splitAudio splitAudioFunc
 }
 
 // NewConsumer 创建消费者
@@ -53,6 +54,7 @@ func NewConsumer(
 		ai:         aiStrategy,
 		rdb:        rdb,
 		ffmpegPath: ffmpegPath,
+		splitAudio: ffmpeg.SplitAudio,
 	}
 }
 
@@ -299,16 +301,13 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 }
 
 func (c *Consumer) transcribeAudio(ctx context.Context, audioPath string) (string, error) {
-	size, err := fileSize(audioPath)
-	if err != nil {
-		return "", err
-	}
-	if size <= maxDirectASRAudioBytes {
-		return c.ai.Transcribe(ctx, audioPath)
+	splitAudio := c.splitAudio
+	if splitAudio == nil {
+		splitAudio = ffmpeg.SplitAudio
 	}
 
-	log.Printf("[Kafka] 音频过大，切片转写: path=%s, size=%d", audioPath, size)
-	chunks, err := ffmpeg.SplitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	log.Printf("[Kafka] 音频切片转写: path=%s, segmentSeconds=%d", audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	chunks, err := splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
 	if err != nil {
 		return "", err
 	}
@@ -341,14 +340,6 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	}
 
 	return nil
-}
-
-func fileSize(path string) (int64, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, fmt.Errorf("读取音频文件信息失败: %w", err)
-	}
-	return info.Size(), nil
 }
 
 func truncateError(err error) string {

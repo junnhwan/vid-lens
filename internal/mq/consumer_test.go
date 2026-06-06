@@ -2,6 +2,8 @@ package mq
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -12,14 +14,18 @@ import (
 
 type recordingAI struct {
 	summarizeInput string
+	chunksInput    []string
+	transcribeUsed bool
 }
 
 func (a *recordingAI) Transcribe(context.Context, string) (string, error) {
+	a.transcribeUsed = true
 	return "", nil
 }
 
-func (a *recordingAI) TranscribeChunks(context.Context, []string) (string, error) {
-	return "", nil
+func (a *recordingAI) TranscribeChunks(_ context.Context, audioPaths []string) (string, error) {
+	a.chunksInput = append([]string(nil), audioPaths...)
+	return "分片转写结果", nil
 }
 
 func (a *recordingAI) Summarize(_ context.Context, text string) (string, error) {
@@ -93,6 +99,37 @@ func TestProcessVideoReusesExistingTranscriptionBeforeDownloadingVideo(t *testin
 
 	if ai.summarizeInput != "已存在转写，不应重新下载视频" {
 		t.Fatalf("expected existing transcription to be summarized, got %q", ai.summarizeInput)
+	}
+}
+
+func TestTranscribeAudioAlwaysUsesChunkedASR(t *testing.T) {
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("small audio"), 0644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+
+	ai := &recordingAI{}
+	consumer := &Consumer{
+		ai:         ai,
+		ffmpegPath: "ffmpeg",
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return []string{"chunk-001.mp3", "chunk-002.mp3"}, nil
+		},
+	}
+
+	transcript, err := consumer.transcribeAudio(context.Background(), audioPath)
+	if err != nil {
+		t.Fatalf("transcribe audio: %v", err)
+	}
+	if transcript != "分片转写结果" {
+		t.Fatalf("unexpected transcript: %q", transcript)
+	}
+	if ai.transcribeUsed {
+		t.Fatalf("expected chunked ASR path, but direct ASR was used")
+	}
+	if len(ai.chunksInput) != 2 {
+		t.Fatalf("expected 2 chunks, got %#v", ai.chunksInput)
 	}
 }
 
