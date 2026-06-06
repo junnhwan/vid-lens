@@ -177,6 +177,10 @@ func main() {
 
 	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
 	consumer.SetDownloadTools(cfg.Tools.YtDlpPath, cfg.Tools.FFmpegPath, cfg.Tools.CookiesPath, cfg.Tools.ProxyURL)
+	consumer.SetRetryPolicy(mq.TaskRetryPolicy{
+		MaxRetries:     cfg.TaskRetry.MaxRetries,
+		BackoffSeconds: cfg.TaskRetry.BackoffSeconds,
+	})
 	consumer.SetAIResolver(aiFactory, aiProfileSvc)
 	if ragStore != nil {
 		consumer.SetRAGIndexer(func(ctx context.Context, task *model.VideoTask) error {
@@ -195,6 +199,11 @@ func main() {
 	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartDownloadConsumer(cfg.Kafka.Brokers, cfg.Kafka.DownloadTopic, cfg.Kafka.ConsumerGroup)
+	retryScheduler := mq.NewRetryScheduler(repos, producer, mq.RetrySchedulerConfig{
+		BatchSize: cfg.TaskRetry.BatchSize,
+		Interval:  time.Duration(cfg.TaskRetry.ScanIntervalSeconds) * time.Second,
+	})
+	retryScheduler.Start(context.Background())
 
 	// HTTP
 	if cfg.Server.Mode == "release" {

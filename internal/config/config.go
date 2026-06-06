@@ -19,6 +19,7 @@ type Config struct {
 	JWT       JWTConfig       `yaml:"jwt"`
 	Security  SecurityConfig  `yaml:"security"`
 	Upload    UploadConfig    `yaml:"upload"`
+	TaskRetry TaskRetryConfig `yaml:"task_retry"`
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
 	RAG       RAGConfig       `yaml:"rag"`
 	Milvus    MilvusConfig    `yaml:"milvus"`
@@ -99,6 +100,13 @@ type SecurityConfig struct {
 type UploadConfig struct {
 	MaxFileSize int64 `yaml:"max_file_size"`
 	ChunkSize   int64 `yaml:"chunk_size"`
+}
+
+type TaskRetryConfig struct {
+	MaxRetries          int   `yaml:"max_retries"`
+	BackoffSeconds      []int `yaml:"backoff_seconds"`
+	ScanIntervalSeconds int   `yaml:"scan_interval_seconds"`
+	BatchSize           int   `yaml:"batch_size"`
 }
 
 type RateLimitConfig struct {

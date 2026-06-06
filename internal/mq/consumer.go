@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -50,6 +51,7 @@ type Consumer struct {
 	proxyURL    string
 	splitAudio  splitAudioFunc
 	ragIndex    ragIndexFunc
+	retryPolicy TaskRetryPolicy
 
 	downloadVideo   downloadVideoFunc
 	uploadLocalFile uploadLocalFileFunc
@@ -221,7 +223,7 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 		return nil
 	}
 	if strings.TrimSpace(task.SourceURL) == "" {
-		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, "URL 下载任务缺少 source_url")
+		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("URL 下载任务缺少 source_url"))
 		return nil
 	}
 
@@ -230,26 +232,26 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 	if err != nil {
 		errMsg := truncateError(err)
 		log.Printf("[Kafka] URL 下载失败: taskID=%d userID=%d url=%s err=%v", task.ID, task.UserID, sanitizeURLForLog(task.SourceURL), err)
-		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, errMsg)
+		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, errors.New(errMsg))
 		return nil
 	}
 	defer os.Remove(localPath)
 
 	fileMD5, size, err := hashLocalFile(localPath)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
 		return nil
 	}
 
 	asset, err := c.repo.Asset.FindByMD5(fileMD5)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
 		return nil
 	}
 	if asset == nil {
 		objectName := fmt.Sprintf("videos/%s%s", uuid.New().String(), extensionForDownloadedFile(localPath))
 		if err := c.callUploadLocalFile(ctx, localPath, objectName, "video/mp4"); err != nil {
-			_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(fmt.Errorf("上传到 MinIO 失败: %w", err)))
+			_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("上传到 MinIO 失败: %w", err))
 			return nil
 		}
 		asset = &model.VideoAsset{
@@ -263,7 +265,7 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 			if findErr == nil && existing != nil {
 				asset = existing
 			} else {
-				_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+				_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
 				return nil
 			}
 		}
@@ -350,11 +352,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 
 	// 第 5 步：核心业务
 	if err := c.processVideo(ctx, task); err != nil {
-		errMsg := err.Error()
-		if len(errMsg) > 500 {
-			errMsg = errMsg[:500]
-		}
-		if updateErr := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, errMsg); updateErr != nil {
+		if updateErr := c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, model.TaskStageSummarizing, err); updateErr != nil {
 			return fmt.Errorf("任务失败且状态更新失败: %w", updateErr)
 		}
 		return nil
@@ -392,27 +390,27 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
 	defer os.Remove(videoPath)
 
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
 	defer os.Remove(audioPath)
 
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
 
 	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
-		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
 
@@ -421,7 +419,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 		Content: transcript,
 		Words:   len([]rune(transcript)),
 	}); err != nil {
-		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
+		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
 	c.indexAfterTranscription(ctx, task)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/segmentio/kafka-go"
@@ -464,6 +465,211 @@ func TestHandleDownloadFailureMarksTaskFailedWithoutLeakingQueryInLog(t *testing
 	if strings.Contains(logText, "token=secret") || strings.Contains(logText, "#frag") {
 		t.Fatalf("log leaked query or fragment: %s", logText)
 	}
+}
+
+func TestRecordTaskFailureSchedulesRetryForRetryableError(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "44444444444444444444444444444444",
+		Filename:   "video.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageTranscribing,
+		RetryCount: 1,
+		MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	consumer := &Consumer{
+		repo: repos,
+		retryPolicy: TaskRetryPolicy{
+			MaxRetries:     3,
+			BackoffSeconds: []int{60, 300, 900},
+			Now:            func() time.Time { return now },
+		},
+	}
+
+	if err := consumer.recordTaskFailure(task.ID, TaskJobTranscribe, model.TaskStageTranscribing, fmt.Errorf("network timeout")); err != nil {
+		t.Fatalf("recordTaskFailure: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %d, want failed", current.Status)
+	}
+	if current.RetryCount != 2 {
+		t.Fatalf("retry_count = %d, want 2", current.RetryCount)
+	}
+	if current.NextRetryAt == nil || !current.NextRetryAt.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("next_retry_at = %v, want %v", current.NextRetryAt, now.Add(5*time.Minute))
+	}
+	if current.LastJobType != TaskJobTranscribe {
+		t.Fatalf("last_job_type = %q, want transcribe", current.LastJobType)
+	}
+}
+
+func TestRecordTaskFailureMarksNonRetryableErrorFailedWithoutRetry(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "55555555555555555555555555555555",
+		Filename:   "video.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageSummarizing,
+		RetryCount: 0,
+		MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	consumer := &Consumer{repo: repos}
+	if err := consumer.recordTaskFailure(task.ID, TaskJobAnalyze, model.TaskStageSummarizing, fmt.Errorf("请先配置 AI 服务")); err != nil {
+		t.Fatalf("recordTaskFailure: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %d, want failed", current.Status)
+	}
+	if current.RetryCount != 0 {
+		t.Fatalf("retry_count = %d, want 0", current.RetryCount)
+	}
+	if current.NextRetryAt != nil {
+		t.Fatalf("next_retry_at = %v, want nil", current.NextRetryAt)
+	}
+}
+
+func TestRecordTaskFailureMarksDeadWhenRetryLimitExceeded(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "66666666666666666666666666666666",
+		Filename:   "video.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageDownloading,
+		RetryCount: 3,
+		MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	consumer := &Consumer{repo: repos}
+	if err := consumer.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("network timeout")); err != nil {
+		t.Fatalf("recordTaskFailure: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusDead {
+		t.Fatalf("status = %d, want dead", current.Status)
+	}
+	if current.RetryCount != 4 {
+		t.Fatalf("retry_count = %d, want 4", current.RetryCount)
+	}
+	if current.NextRetryAt != nil {
+		t.Fatalf("next_retry_at = %v, want nil", current.NextRetryAt)
+	}
+}
+
+func TestRetrySchedulerRequeuesOnlyDueFailedTasks(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-time.Second)
+	futureAt := now.Add(time.Hour)
+	dueTask := &model.VideoTask{
+		UserID:      7,
+		FileMD5:     "77777777777777777777777777777777",
+		Filename:    "due.mp4",
+		Status:      model.TaskStatusFailed,
+		Stage:       model.TaskStageTranscribing,
+		RetryCount:  1,
+		MaxRetries:  3,
+		NextRetryAt: &dueAt,
+		LastJobType: TaskJobTranscribe,
+	}
+	futureTask := &model.VideoTask{
+		UserID:      7,
+		FileMD5:     "88888888888888888888888888888888",
+		Filename:    "future.mp4",
+		Status:      model.TaskStatusFailed,
+		Stage:       model.TaskStageDownloading,
+		RetryCount:  1,
+		MaxRetries:  3,
+		NextRetryAt: &futureAt,
+		LastJobType: TaskJobDownload,
+	}
+	if err := repos.Task.Create(dueTask); err != nil {
+		t.Fatalf("create due task: %v", err)
+	}
+	if err := repos.Task.Create(futureTask); err != nil {
+		t.Fatalf("create future task: %v", err)
+	}
+
+	producer := &recordingRetryProducer{}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		BatchSize: 10,
+		Now:       func() time.Time { return now },
+	})
+	if err := scheduler.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if len(producer.transcribes) != 1 || producer.transcribes[0] != dueTask.ID {
+		t.Fatalf("transcribe requeues = %#v, want due task", producer.transcribes)
+	}
+	if len(producer.downloads) != 0 || len(producer.analyzes) != 0 {
+		t.Fatalf("unexpected requeues: downloads=%#v analyzes=%#v", producer.downloads, producer.analyzes)
+	}
+
+	requeued, err := repos.Task.FindByID(dueTask.ID)
+	if err != nil {
+		t.Fatalf("find requeued task: %v", err)
+	}
+	if requeued.Status != model.TaskStatusQueued || requeued.NextRetryAt != nil {
+		t.Fatalf("requeued task status/next = %d/%v, want queued/nil", requeued.Status, requeued.NextRetryAt)
+	}
+
+	unchanged, err := repos.Task.FindByID(futureTask.ID)
+	if err != nil {
+		t.Fatalf("find future task: %v", err)
+	}
+	if unchanged.Status != model.TaskStatusFailed || unchanged.NextRetryAt == nil {
+		t.Fatalf("future task changed unexpectedly: %+v", unchanged)
+	}
+}
+
+type recordingRetryProducer struct {
+	analyzes    []int64
+	transcribes []int64
+	downloads   []int64
+}
+
+func (p *recordingRetryProducer) EnqueueAnalyze(_ context.Context, taskID int64, _ string) error {
+	p.analyzes = append(p.analyzes, taskID)
+	return nil
+}
+
+func (p *recordingRetryProducer) EnqueueTranscribe(_ context.Context, taskID int64, _ string) error {
+	p.transcribes = append(p.transcribes, taskID)
+	return nil
+}
+
+func (p *recordingRetryProducer) EnqueueDownload(_ context.Context, taskID int64, _ string) error {
+	p.downloads = append(p.downloads, taskID)
+	return nil
 }
 
 func downloadMessage(taskID int64, key string) kafka.Message {

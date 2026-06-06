@@ -63,6 +63,12 @@ upload:
   max_file_size: 2147483648  # 2GB
   chunk_size: 5242880        # 5MB
 
+task_retry:
+  max_retries: 3
+  backoff_seconds: [60, 300, 900]
+  scan_interval_seconds: 30
+  batch_size: 20
+
 ratelimit:
   capacity: 10    # 桶容量
   rate: 10        # 每秒生成令牌数

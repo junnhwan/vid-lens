@@ -54,6 +54,7 @@ type VideoTask struct {
 	NextRetryAt   *time.Time     `json:"next_retry_at,omitempty"`
 	LastErrorCode string         `gorm:"type:varchar(100)" json:"last_error_code"`
 	LastErrorMsg  string         `gorm:"type:varchar(500)" json:"last_error_msg"`
+	LastJobType   string         `gorm:"type:varchar(30);index" json:"last_job_type"`
 	StartedAt     *time.Time     `json:"started_at,omitempty"`
 	FinishedAt    *time.Time     `json:"finished_at,omitempty"`
 	ErrorMsg      string         `gorm:"type:varchar(500)" json:"error_msg"` // 失败原因

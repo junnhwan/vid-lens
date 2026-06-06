@@ -66,7 +66,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, started_at, finished_at, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -135,11 +135,74 @@ func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, 
 		"error_msg":       "",
 		"last_error_code": "",
 		"last_error_msg":  "",
+		"last_job_type":   "",
 		"finished_at":     finishedAt,
 	}
 	return r.db.Model(&model.VideoTask{}).
 		Where("id = ? AND status = ? AND stage = ?", id, model.TaskStatusRunning, model.TaskStageDownloading).
 		Updates(updates).Error
+}
+
+func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time) error {
+	updates := map[string]interface{}{
+		"status":          model.TaskStatusFailed,
+		"stage":           stage,
+		"error_msg":       errMsg,
+		"last_error_code": "retryable_error",
+		"last_error_msg":  errMsg,
+		"last_job_type":   jobType,
+		"retry_count":     retryCount,
+		"max_retries":     maxRetries,
+		"next_retry_at":   nextRetryAt,
+	}
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *TaskRepository) RecordTerminalFailure(id int64, jobType, stage, errCode, errMsg string, retryCount, maxRetries int, status int8) error {
+	updates := map[string]interface{}{
+		"status":          status,
+		"stage":           stage,
+		"error_msg":       errMsg,
+		"last_error_code": errCode,
+		"last_error_msg":  errMsg,
+		"last_job_type":   jobType,
+		"retry_count":     retryCount,
+		"max_retries":     maxRetries,
+		"next_retry_at":   nil,
+		"finished_at":     time.Now(),
+	}
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.VideoTask, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	var tasks []model.VideoTask
+	err := r.db.
+		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ? AND retry_count <= max_retries AND last_job_type <> ?",
+			model.TaskStatusFailed, now, "").
+		Order("next_retry_at ASC").
+		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
+}
+
+func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
+	updates := map[string]interface{}{
+		"status":        status,
+		"stage":         stage,
+		"error_msg":     "",
+		"next_retry_at": nil,
+	}
+	tx := r.db.Model(&model.VideoTask{}).
+		Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", id, model.TaskStatusFailed, now).
+		Updates(updates)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
 }
 
 // Delete 删除任务（逻辑删除）

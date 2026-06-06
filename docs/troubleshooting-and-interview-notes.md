@@ -1305,6 +1305,213 @@ A：worker 需要原始 URL 才能下载，所以第一版保存完整 URL。但
 - 阶段三把转写、总结、索引阶段统一写入 `stage`，让前端能展示更细处理阶段。
 - 后续可增加 URL 下载进度日志或进度字段，但不作为第一阶段阻塞项。
 
+## 记录 009：Kafka 消费失败补业务级重试和 dead 状态
+
+### 背景
+
+路线图阶段二要求在保留 Kafka 的前提下补齐业务级失败治理。Kafka 能提供 at-least-once 消费语义，但它不像 RocketMQ 那样直接开箱提供业务任务的延迟重试、最大次数和死信状态。
+
+### 现象
+
+旧消费逻辑主要有两类问题：
+
+```text
+业务失败 -> 更新 task failed -> commit offset
+```
+
+或早期文档中提到的：
+
+```text
+业务失败 -> 不 commit offset -> 等待 Kafka 下次重放
+```
+
+第一种不会自动重试，第二种如果长期失败会卡住同一分区后续消息。两者都不能回答：
+
+```text
+这个错误能不能重试？
+已经重试了几次？
+下一次什么时候重试？
+超过上限后任务处于什么状态？
+应该重投递到 analyze、transcribe 还是 download topic？
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/mq/consumer.go
+internal/mq/retry.go
+internal/repository/task.go
+internal/model/task.go
+cmd/server/main.go
+config.yaml
+```
+
+阶段一已经给 `video_tasks` 增加了 `retry_count/max_retries/next_retry_at` 等字段；阶段二继续补了 `last_job_type`，用于调度器知道失败任务应该重新投递到哪个 Kafka topic。
+
+### 根因
+
+根因是把 Kafka offset 重放和业务任务重试混在了一起。Kafka 的 offset 控制的是消息消费进度，不应该承担全部业务失败治理。外部 AI、Milvus、MinIO、yt-dlp 的错误有些可重试，有些不可重试，需要在业务层分类并持久化。
+
+### 修复方案
+
+新增统一任务类型：
+
+```text
+analyze
+transcribe
+download
+```
+
+新增重试配置：
+
+```yaml
+task_retry:
+  max_retries: 3
+  backoff_seconds: [60, 300, 900]
+  scan_interval_seconds: 30
+  batch_size: 20
+```
+
+consumer 处理失败后不再简单写 failed，而是走统一失败记录：
+
+```text
+不可重试错误
+  -> status=failed
+  -> next_retry_at=NULL
+  -> last_error_code=non_retryable_error
+  -> commit offset
+
+可重试错误且未超过上限
+  -> retry_count + 1
+  -> next_retry_at = now + backoff
+  -> status=failed
+  -> last_job_type=download/transcribe/analyze
+  -> commit offset
+
+可重试错误但超过上限
+  -> status=dead
+  -> last_error_code=retry_exhausted
+  -> next_retry_at=NULL
+  -> commit offset
+```
+
+新增数据库调度器：
+
+```text
+每 30 秒扫描：
+  status=failed
+  next_retry_at <= now
+  retry_count <= max_retries
+  last_job_type 不为空
+
+claim 成功后按 last_job_type 重新投递：
+  download    -> video-download
+  transcribe  -> video-transcribe
+  analyze     -> video-analyze
+```
+
+重试调度器会先用条件更新 claim 任务，降低多实例重复扫描风险。download 任务重新进入 `running/downloading`，transcribe/analyze 任务重新进入 `queued`，后续由原 consumer 继续处理。
+
+错误分类第一版采用字符串规则：
+
+```text
+不可重试：
+  请先配置 AI 服务
+  API Key 解密失败
+  无权
+  文件不存在
+  Embedding 维度
+  ASR 返回空结果
+  video unavailable
+  B 站 HTTP 412
+
+可重试：
+  timeout
+  context deadline exceeded
+  network
+  connection refused/reset
+  service unavailable
+  HTTP 429/500/502/503/504
+  MinIO/Milvus 临时错误
+```
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/mq/consumer_test.go
+```
+
+关键测试点：
+
+```text
+可重试错误会递增 retry_count，并写入 next_retry_at
+不可重试错误直接 failed，不写 next_retry_at
+超过 max_retries 后进入 dead
+retry scheduler 只重投递到期 failed 任务
+未到期任务不会被调度器改动
+到期 transcribe 任务会重新投递到 transcribe topic，并清空 next_retry_at
+```
+
+验证命令：
+
+```powershell
+go test ./internal/mq
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/mq 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> Kafka 给我的是 at-least-once 消费能力，但业务任务不能只靠“不提交 offset”来重试。因为如果一个任务因为用户没配置 API Key 或 B 站 412 这种不可重试问题一直失败，不提交 offset 会卡住同一分区后面的消息。
+>
+> 所以我在业务层补了重试状态：consumer 失败后先分类错误。网络 timeout、AI 5xx、MinIO 或 Milvus 临时不可用这类错误会递增 `retry_count`，按 `[1分钟、5分钟、15分钟]` 写 `next_retry_at`；用户未配置 AI 服务、权限问题、Embedding 维度不匹配、B 站 412 这类问题直接 failed。超过最大重试次数后进入 `dead`，表示需要人工或用户重新触发。
+>
+> 重试不是让 Kafka consumer sleep，而是由数据库调度器扫描到期任务，再按 `last_job_type` 重新投递到对应 Kafka topic。这样失败消息会被 commit，不会无限卡住 Kafka 分区，同时前端也能从任务详情看到重试次数、下次重试时间和最终 dead 状态。
+
+### 面试官可能追问
+
+**Q：为什么不直接用 Kafka retry topic？**
+
+A：可以做，但第一版用数据库调度器更容易和任务状态表结合，前端能直接查到 `retry_count/next_retry_at/dead`。Kafka consumer 长时间 sleep 等延迟重投递不合适，会占住分区；retry topic 方案后续可以演进，但不是当前最小可靠方案。
+
+**Q：为什么失败后还 commit offset？**
+
+A：因为失败状态已经落库，业务重试由数据库调度器接管。继续不提交 offset 会让同一条消息反复阻塞消费进度，尤其不可重试错误会拖住同分区后续任务。
+
+**Q：怎么避免多实例重复扫描？**
+
+A：调度器先查到期任务，再用条件更新 claim：只有仍然是 `failed` 且 `next_retry_at <= now` 的任务才能被改成 queued/running。多个实例同时扫描时，只有一个实例能成功 claim。当前第一版没有再叠 Redis 扫描锁，后续可以补全局锁减少无效扫描。
+
+**Q：错误分类为什么先用字符串？**
+
+A：因为现有 provider、yt-dlp、MinIO、Milvus 返回的错误类型并不统一。第一版先用字符串规则覆盖明确场景，并通过测试固定行为。后续可以把 AI client 和工具层错误包装成带 `Retryable()` 和 `ErrorCode()` 的结构化错误。
+
+### 这次不要夸大的点
+
+- 当前是业务层 retry/dead 状态，不是 Kafka 原生死信队列。
+- 当前没有新增 dead topic。
+- 当前错误分类是第一版规则，不是完整错误类型体系。
+- 当前调度器用数据库条件 claim 降低重复重投递风险，还没有加 Redis 全局扫描锁。
+
+### 后续演进
+
+- 把错误分类升级成结构化 `RetryableError`。
+- 给 retry scheduler 增加 Redis 分布式锁，减少多实例重复扫描。
+- 在前端展示 `retry_count/next_retry_at/dead`，提示用户等待自动重试或手动重新触发。
+- 结合阶段三，把失败时的 `stage` 写得更精确。
+
 ## 后续问题记录模板
 
 复制下面模板追加：
