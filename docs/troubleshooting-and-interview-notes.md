@@ -738,6 +738,125 @@ A：JSON 列要求值是合法 JSON 文档。空字符串不是合法 JSON；NUL
 - 状态接口同时校验 Milvus collection 是否可用，必要时提示重新构建。
 - 将同步构建索引改为 Kafka 异步任务，避免前端长时间等待。
 
+## 记录 005：服务器部署后 Milvus 端口已监听但 RAG 初始化失败
+
+### 背景
+
+新版后端接入了 Milvus，用于视频转写文本的 RAG 索引和问答。服务器部署时，MySQL、Redis、MinIO、Redpanda、后端服务都已启动，`/health` 也返回正常，但后端启动日志提示 Milvus 连接失败，RAG 暂不可用。
+
+### 现象
+
+服务器上能看到 Milvus 容器在运行，`127.0.0.1:19530` 端口也已经监听。但后端启动时先后出现：
+
+```text
+Milvus 连接失败，RAG 索引和视频问答暂不可用: context deadline exceeded
+Milvus 连接失败，RAG 索引和视频问答暂不可用: service unavailable: internal: Milvus Proxy is not ready yet
+```
+
+这说明“端口通”不等于“Milvus 内部组件已经可用”。
+
+### 排查证据
+
+继续查看 Milvus 容器日志，发现反复出现 MinIO 认证失败：
+
+```text
+failed to check blob bucket exist
+The Access Key Id you provided does not exist in our records.
+```
+
+再进入 Milvus 容器检查配置文件，发现 Milvus 2.4.15 的 `milvus.yaml` 中写明读取的环境变量是：
+
+```text
+MINIO_ACCESS_KEY_ID
+MINIO_SECRET_ACCESS_KEY
+```
+
+而 compose 中原来写的是：
+
+```text
+MINIO_ACCESS_KEY
+MINIO_SECRET_KEY
+```
+
+因此 Milvus 没有读到我们给它配置的 MinIO 凭证，而是继续使用默认的 `minioadmin/minioadmin` 去访问服务器已有 MinIO，导致对象存储认证失败。Milvus Standalone 虽然开了 19530 端口，但内部 DataCoord、QueryCoord、Proxy 等组件无法完整就绪。
+
+### 根因
+
+Milvus 2.4.15 的 MinIO 环境变量名称和当前 compose 中使用的变量名称不一致。错误变量名不会报配置解析错误，而是被忽略，最终表现为 Milvus 运行中访问 MinIO 失败。
+
+### 修复方案
+
+将 Milvus 服务的 MinIO 环境变量改为 Milvus 实际读取的名称：
+
+```yaml
+environment:
+  ETCD_ENDPOINTS: milvus-etcd:2379
+  MINIO_ADDRESS: minio:9000
+  MINIO_ACCESS_KEY_ID: minioadmin
+  MINIO_SECRET_ACCESS_KEY: minioadmin
+```
+
+服务器部署版本也同步修正为同样的变量名，然后只重建 Milvus 容器：
+
+```bash
+docker compose up -d --no-deps --force-recreate milvus
+```
+
+等待 Milvus 日志稳定后，再重启后端，让后端重新初始化 Milvus 客户端。
+
+### 测试与验证
+
+修复后验证了以下几项：
+
+```text
+Milvus 容器 restart=0 status=running
+127.0.0.1:19530 正常监听
+Milvus 日志不再出现 Access Key 认证错误
+后端 /health 返回 {"service":"VidLens","status":"ok"}
+后端启动日志出现：Milvus 向量库连接成功
+```
+
+公开访问也验证了：
+
+```text
+http://vidlens.wanjune.qzz.io/       -> 200 text/html
+http://vidlens.wanjune.qzz.io/health -> 200 application/json
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我在服务器部署 RAG 功能时遇到过一个典型的中间件“假启动”问题：Milvus 容器是 running，19530 端口也监听了，但后端仍然提示 Milvus 不可用。  
+> 我没有只看容器状态，而是继续看 Milvus 内部日志，发现它访问 MinIO 时认证失败。再进容器看 Milvus 2.4.15 的配置文件，确认它读取的是 `MINIO_ACCESS_KEY_ID` 和 `MINIO_SECRET_ACCESS_KEY`，而我的 compose 写成了另一组变量名，导致配置被忽略。  
+> 修复后我只重建 Milvus 容器，没有动 MySQL、Redis、MinIO、Redpanda 的数据容器。等 Milvus 日志稳定后重启后端，最终启动日志明确显示 Milvus 连接成功。这次排查让我意识到部署验证不能只看容器 running 和端口监听，还要验证依赖组件是否真正 ready。
+
+### 面试官可能追问
+
+**Q：为什么端口监听了，服务还可能不可用？**
+
+A：端口监听只能说明进程对外提供了 socket，不代表内部依赖和组件状态都 ready。Milvus Standalone 内部还包含 Proxy、DataCoord、QueryCoord、IndexNode 等组件，并依赖 etcd 和对象存储。任何一个关键依赖异常，都可能让客户端请求失败。
+
+**Q：为什么没有直接清空 Milvus 数据目录重来？**
+
+A：清数据是最后手段。这里日志已经明确指向 MinIO 认证失败，根因是配置变量名错误。直接清数据会掩盖问题，而且可能误删已有索引数据。正确做法是先修配置，再重建受影响容器。
+
+**Q：为什么只重建 Milvus，不重建全部中间件？**
+
+A：故障边界已经定位在 Milvus 读取 MinIO 凭证这层。MySQL、Redis、MinIO、Redpanda 都是正常运行的，重建全部容器会扩大风险，也可能影响已有数据。
+
+### 这次不要夸大的点
+
+- 这次只是单机 Milvus Standalone 部署，不是生产级 Milvus 集群运维。
+- 当前没有给 Milvus 增加独立 healthcheck，只是通过容器状态、日志和后端连接结果验证。
+- 当前公开部署仍是演示性质，服务器磁盘空间有限，不适合大量用户上传大视频。
+
+### 后续演进
+
+- 给 Milvus 加 `healthcheck`，后端启动或部署脚本等待 healthcheck ready 后再重启应用。
+- 部署脚本中增加中间件 readiness 检查，避免只检查端口。
+- 给服务器补充磁盘监控和日志轮转，防止视频文件、Docker 镜像、Milvus 数据持续增长。
+
 ## 后续问题记录模板
 
 复制下面模板追加：
