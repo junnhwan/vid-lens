@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -9,6 +10,18 @@ import (
 	"vid-lens/internal/pkg/secret"
 	"vid-lens/internal/repository"
 )
+
+type recordingAIProfileTester struct {
+	profile *DecryptedAIProfile
+	calls   int
+}
+
+func (t *recordingAIProfileTester) TestProfile(ctx context.Context, profile *DecryptedAIProfile) error {
+	t.calls++
+	copied := *profile
+	t.profile = &copied
+	return nil
+}
 
 func TestAIProfileServiceCreateEncryptsKeysAndReturnsMaskedProfile(t *testing.T) {
 	svc, repos, codec := newAIProfileServiceForTest(t)
@@ -110,6 +123,51 @@ func TestAIProfileServiceDefaultDecryptedProfile(t *testing.T) {
 	}
 	if profile.EmbeddingAPIKey != "sk-embedding-secret" {
 		t.Fatalf("EmbeddingAPIKey = %q", profile.EmbeddingAPIKey)
+	}
+}
+
+func TestAIProfileServiceTestSavedProfileByIDDecryptsAndCallsTester(t *testing.T) {
+	tester := &recordingAIProfileTester{}
+	svc, _, _ := newAIProfileServiceForTest(t)
+	svc.tester = tester
+	created, err := svc.Create(7, validAIProfileRequest())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if err := svc.TestSavedProfile(context.Background(), 7, created.ID); err != nil {
+		t.Fatalf("TestSavedProfile() error = %v", err)
+	}
+	if tester.calls != 1 {
+		t.Fatalf("tester calls = %d, want 1", tester.calls)
+	}
+	if tester.profile == nil {
+		t.Fatal("tester profile was nil")
+	}
+	if tester.profile.UserID != 7 || tester.profile.ID != created.ID {
+		t.Fatalf("tester profile identity = user %d id %d, want user 7 id %d", tester.profile.UserID, tester.profile.ID, created.ID)
+	}
+	if tester.profile.LLMAPIKey != "sk-llm-secret" || tester.profile.ASRAPIKey != "tp-asr-secret" || tester.profile.EmbeddingAPIKey != "sk-embedding-secret" {
+		t.Fatalf("tester received undecrypted or wrong keys: %+v", tester.profile)
+	}
+}
+
+func TestAIProfileServiceFirstProfileBecomesDefaultWhenUnset(t *testing.T) {
+	svc, repos, _ := newAIProfileServiceForTest(t)
+	req := validAIProfileRequest()
+	req.IsDefault = false
+
+	created, err := svc.Create(7, req)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	stored, err := repos.AIProfile.FindByIDForUser(7, created.ID)
+	if err != nil {
+		t.Fatalf("FindByIDForUser() error = %v", err)
+	}
+	if !stored.IsDefault {
+		t.Fatal("first profile was not marked default")
 	}
 }
 

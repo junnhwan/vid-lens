@@ -59,6 +59,12 @@ func (r *AIProfileRepository) FindDefaultByUserID(userID int64) (*model.UserAIPr
 	return &profile, nil
 }
 
+func (r *AIProfileRepository) CountByUserID(userID int64) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.UserAIProfile{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
+}
+
 func (r *AIProfileRepository) UpdateForUser(userID int64, profile *model.UserAIProfile) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var existing model.UserAIProfile

@@ -15,19 +15,11 @@ import (
 // DownloadVideo 通过 yt-dlp 下载视频
 // 面试亮点：yt-dlp 支持 B站/YouTube/抖音等主流平台，降低用户使用门槛
 // 用户无需手动下载视频再上传，直接粘贴链接即可
-func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, videoURL string) (string, error) {
+func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, cookiesPath, videoURL string) (string, error) {
 	outputPath := filepath.Join(os.TempDir(), uuid.New().String()+".mp4")
 
-	args := []string{
-		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		"--referer", "https://www.bilibili.com/",
-		"--recode-video", "mp4",
-		"--ffmpeg-location", ffmpegPath,
-		"-o", outputPath,
-		"--no-check-certificate",
-		"--no-playlist",
-		videoURL,
-	}
+	args := buildArgs(ffmpegPath, cookiesPath, videoURL)
+	args = append(args, "-o", outputPath)
 
 	cmd := exec.CommandContext(ctx, ytDlpPath, args...)
 	var stderr strings.Builder
@@ -37,7 +29,7 @@ func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, videoURL string) 
 	if err := cmd.Run(); err != nil {
 		// 清理残留文件
 		os.Remove(outputPath)
-		return "", fmt.Errorf("yt-dlp 下载失败: %w\n%s", err, stderr.String())
+		return "", formatDownloadError(err, stderr.String())
 	}
 
 	// 验证文件存在
@@ -50,9 +42,31 @@ func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, videoURL string) 
 	return outputPath, nil
 }
 
+func buildArgs(ffmpegPath, cookiesPath, videoURL string) []string {
+	args := []string{
+		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		"--referer", "https://www.bilibili.com/",
+		"--recode-video", "mp4",
+		"--ffmpeg-location", ffmpegPath,
+		"--no-check-certificate",
+		"--no-playlist",
+	}
+	if strings.TrimSpace(cookiesPath) != "" {
+		args = append(args, "--cookies", strings.TrimSpace(cookiesPath))
+	}
+	return append(args, videoURL)
+}
+
+func formatDownloadError(err error, stderr string) error {
+	if strings.Contains(stderr, "HTTP Error 412") && strings.Contains(stderr, "[BiliBili]") {
+		return fmt.Errorf("yt-dlp 下载失败: B 站返回 412，服务器请求被 B 站风控拦截。请改用本地视频上传，或在服务器配置 B 站 cookies 后重试: %w\n%s", err, stderr)
+	}
+	return fmt.Errorf("yt-dlp 下载失败: %w\n%s", err, stderr)
+}
+
 // DownloadVideoWithTimeout 带超时的下载（默认 10 分钟）
 func DownloadVideoWithTimeout(ytDlpPath, ffmpegPath, videoURL string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	return DownloadVideo(ctx, ytDlpPath, ffmpegPath, videoURL)
+	return DownloadVideo(ctx, ytDlpPath, ffmpegPath, "", videoURL)
 }

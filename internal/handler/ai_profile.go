@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -85,8 +88,34 @@ func (h *AIProfileHandler) Delete(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) Test(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	var idReq struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &idReq); err == nil && idReq.ID > 0 {
+		userID := middleware.GetUserID(c)
+		if err := h.svc.TestSavedProfile(c.Request.Context(), userID, idReq.ID); err != nil {
+			if errors.Is(err, service.ErrAIProfileNotFound) {
+				response.Fail(c, 404, err.Error())
+				return
+			}
+			response.BadRequest(c, "模型配置测试失败: "+err.Error())
+			return
+		}
+		response.OK(c, gin.H{"ok": true})
+		return
+	}
+
 	var req service.AIProfileRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if err := validateAIProfileRequestBinding(req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
@@ -96,4 +125,20 @@ func (h *AIProfileHandler) Test(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"ok": true})
+}
+
+func validateAIProfileRequestBinding(req service.AIProfileRequest) error {
+	if req.Name == "" {
+		return errors.New("配置名称不能为空")
+	}
+	if req.LLMProvider == "" || req.LLMBaseURL == "" || req.LLMModel == "" {
+		return errors.New("LLM 配置不完整")
+	}
+	if req.ASRProvider == "" || req.ASRBaseURL == "" || req.ASRModel == "" {
+		return errors.New("ASR 配置不完整")
+	}
+	if req.EmbeddingProvider == "" || req.EmbeddingEndpoint == "" || req.EmbeddingModel == "" || req.EmbeddingDim <= 0 {
+		return errors.New("Embedding 配置不完整")
+	}
+	return nil
 }

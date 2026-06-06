@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	neturl "net/url"
 	"os"
@@ -124,8 +125,9 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 		return nil, err
 	}
 
-	localPath, err := ytdlp.DownloadVideo(ctx, s.tools.YtDlpPath, s.tools.FFmpegPath, videoURL)
+	localPath, err := ytdlp.DownloadVideo(ctx, s.tools.YtDlpPath, s.tools.FFmpegPath, s.tools.CookiesPath, videoURL)
 	if err != nil {
+		log.Printf("[Media] URL upload download failed: userID=%d url=%s err=%v", userID, sanitizeURLForLog(videoURL), err)
 		return nil, fmt.Errorf("视频下载失败: %w", err)
 	}
 	defer os.Remove(localPath)
@@ -176,6 +178,16 @@ func validateRemoteVideoURL(rawURL string) error {
 	}
 
 	return nil
+}
+
+func sanitizeURLForLog(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func (s *MediaService) validateUploadSize(fileSize int64) error {

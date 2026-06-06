@@ -91,6 +91,15 @@ func (s *AIProfileService) Create(userID int64, req AIProfileRequest) (*AIProfil
 	if err := validateAIProfileRequest(req, true); err != nil {
 		return nil, err
 	}
+	if !req.IsDefault {
+		count, err := s.repo.CountByUserID(userID)
+		if err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			req.IsDefault = true
+		}
+	}
 	profile, err := s.profileFromRequest(userID, req, nil)
 	if err != nil {
 		return nil, err
@@ -164,6 +173,24 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 		EmbeddingDim:      req.EmbeddingDim,
 	}
 	return s.tester.TestProfile(ctx, profile)
+}
+
+func (s *AIProfileService) TestSavedProfile(ctx context.Context, userID, id int64) error {
+	if s.tester == nil {
+		return nil
+	}
+	profile, err := s.repo.FindByIDForUser(userID, id)
+	if err != nil {
+		return err
+	}
+	if profile == nil {
+		return ErrAIProfileNotFound
+	}
+	decrypted, err := s.decryptProfile(profile)
+	if err != nil {
+		return err
+	}
+	return s.tester.TestProfile(ctx, decrypted)
 }
 
 func (s *AIProfileService) GetDefaultDecrypted(userID int64) (*DecryptedAIProfile, error) {

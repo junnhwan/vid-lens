@@ -857,6 +857,155 @@ A：故障边界已经定位在 Milvus 读取 MinIO 凭证这层。MySQL、Redis
 - 部署脚本中增加中间件 readiness 检查，避免只检查端口。
 - 给服务器补充磁盘监控和日志轮转，防止视频文件、Docker 镜像、Milvus 数据持续增长。
 
+## 记录 006：服务器上传 B 站链接失败，yt-dlp 返回 412
+
+### 背景
+
+新版部署后，公开站点支持用户粘贴视频 URL，由后端调用 `yt-dlp` 下载到临时文件，再上传到 MinIO 并创建任务。用户 `jhwan` 在服务器环境测试 B 站链接上传时，前端提示下载失败。
+
+### 现象
+
+前端错误信息包含两段关键内容：
+
+```text
+WARNING: ffmpeg-location ffmpeg does not exist! Continuing without ffmpeg
+ERROR: [BiliBili] ... Unable to download webpage: HTTP Error 412: Precondition Failed
+```
+
+后端访问日志只显示：
+
+```text
+POST /api/v1/media/upload-url -> 500
+```
+
+最初日志里没有 `yt-dlp` stderr，无法直接判断是工具路径、B 站风控、链接格式还是下载格式问题。
+
+### 排查证据
+
+1. 服务器实际存在工具：
+
+```text
+/usr/bin/ffmpeg
+/usr/local/bin/yt-dlp
+```
+
+2. 服务器 `config.yaml` 原来写的是：
+
+```yaml
+tools:
+  ffmpeg_path: "ffmpeg"
+  ytdlp_path: "yt-dlp"
+```
+
+在 systemd 服务环境里，进程 `PATH` 不一定包含这些路径，所以 `yt-dlp` 收到 `--ffmpeg-location ffmpeg` 后提示找不到 ffmpeg。
+
+3. 改成绝对路径并重启后，重新直接在服务器执行：
+
+```bash
+/usr/local/bin/yt-dlp --simulate \
+  --ffmpeg-location /usr/bin/ffmpeg \
+  --referer https://www.bilibili.com/ \
+  https://www.bilibili.com/video/...
+```
+
+ffmpeg 警告消失，但 B 站仍返回：
+
+```text
+HTTP Error 412: Precondition Failed
+```
+
+4. 尝试补充 UA、Referer、Accept-Language、IPv4 后，服务器请求仍然被 B 站 412 拦截。`--impersonate chrome` 在当前服务器的 yt-dlp 环境不可用。
+
+### 根因
+
+这是两个问题叠在一起：
+
+1. **服务器工具路径配置不稳**：systemd 环境下使用 `ffmpeg` / `yt-dlp` 相对命令不可靠，应使用绝对路径。
+2. **B 站反爬 / 风控**：服务器公网 IP 直接请求 B 站网页时，被 B 站返回 412。这个不是 AI 配置问题，也不是 MinIO 或 Kafka 问题。
+
+### 修复方案
+
+1. 服务器部署配置改为绝对路径：
+
+```yaml
+tools:
+  ffmpeg_path: "/usr/bin/ffmpeg"
+  ytdlp_path: "/usr/local/bin/yt-dlp"
+```
+
+2. 后端 URL 上传失败时记录可排查日志：
+
+```text
+[Media] URL upload download failed: userID=... url=... err=...
+```
+
+日志里的 URL 会去掉 query 和 fragment，避免把分享链接里的敏感参数完整写入日志。
+
+3. 新增 `tools.cookies_path` 可选配置：
+
+```yaml
+tools:
+  cookies_path: "/opt/vidlens/secrets/bilibili-cookies.txt"
+```
+
+如果配置了 cookies 文件，后端会把 `--cookies <path>` 传给 `yt-dlp`。未配置时行为保持不变。
+
+4. 对 B 站 412 做友好错误包装，明确提示：
+
+```text
+B 站返回 412，服务器请求被 B 站风控拦截。请改用本地视频上传，或在服务器配置 B 站 cookies 后重试
+```
+
+### 测试与验证
+
+本地新增并通过了测试：
+
+```text
+internal/pkg/ytdlp: cookies_path 配置存在时会追加 --cookies 参数
+internal/pkg/ytdlp: BiliBili HTTP 412 会包装成可理解错误
+internal/service: URL 下载失败会记录 userID、脱敏 URL 和 yt-dlp 错误
+```
+
+服务器验证：
+
+```text
+ffmpeg 警告已消失
+B 站 412 仍可复现，证明剩余问题是 B 站访问风控
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我在公开部署后测试 B 站链接上传，发现前端只提示下载失败。第一步我先把 `yt-dlp` 的 stderr 打进后端日志，补齐可观测性。日志显示两个问题叠在一起：一是 systemd 进程里 `ffmpeg` 相对路径不稳定，`yt-dlp` 找不到 ffmpeg；二是修正为 `/usr/bin/ffmpeg` 后，B 站仍返回 412。
+> 我没有把 412 误判成后端上传失败，而是直接在服务器用同样参数执行 `yt-dlp --simulate` 复现，确认这是服务器 IP 访问 B 站网页被风控。最后我做了三件事：部署配置改绝对路径；下载失败日志脱敏记录；后端支持可选 cookies 文件，并对 B 站 412 返回更明确的用户提示。
+
+### 面试官可能追问
+
+**Q：为什么不用相对命令 `ffmpeg`？**
+
+A：在交互式 shell 里能找到命令，不代表 systemd 服务进程的 PATH 也一样。部署服务应该尽量使用绝对路径，减少环境差异。
+
+**Q：为什么 B 站需要 cookies？**
+
+A：B 站对服务端 IP、请求头、访问频率、登录状态等都有风控。某些视频网页未登录或从服务器 IP 直接访问会返回 412。cookies 可以让 yt-dlp 带上登录态，但也引入账号安全风险，所以应该作为用户/部署者显式配置，而不是项目内置。
+
+**Q：为什么不把 cookies 写进数据库或配置到公开站点默认使用？**
+
+A：公开部署不能默认使用服务拥有者的个人 B 站 cookies，否则陌生用户会消耗或滥用账号能力，也有隐私风险。更合理的是 BYOC，用户自己提供，或者提示改用本地视频上传。
+
+### 这次不要夸大的点
+
+- 加 cookies path 只是提供能力，不保证所有 B 站视频都能下载。
+- 当前没有实现用户级 B 站 cookies 管理，只是部署级可选配置。
+- 当前没有解决所有平台反爬，只是对 B 站 412 做了明确识别和提示。
+
+### 后续演进
+
+- 前端对 B 站 412 展示更友好的提示，建议用户改用本地上传。
+- 后续如果要做公开视频下载能力，可以设计用户级 cookies 配置，但必须考虑加密存储、脱敏展示、删除能力和风险提示。
+- 给 URL 下载增加任务化处理，避免 HTTP 请求长时间阻塞。
+
 ## 后续问题记录模板
 
 复制下面模板追加：

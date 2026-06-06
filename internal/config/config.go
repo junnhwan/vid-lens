@@ -80,8 +80,9 @@ type AIConfig struct {
 }
 
 type ToolsConfig struct {
-	FFmpegPath string `yaml:"ffmpeg_path"`
-	YtDlpPath  string `yaml:"ytdlp_path"`
+	FFmpegPath  string `yaml:"ffmpeg_path"`
+	YtDlpPath   string `yaml:"ytdlp_path"`
+	CookiesPath string `yaml:"cookies_path"`
 }
 
 type JWTConfig struct {
