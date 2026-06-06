@@ -34,3 +34,4 @@ vendor/
 tmp/
 *.tmp
 *.log
+.logs/
