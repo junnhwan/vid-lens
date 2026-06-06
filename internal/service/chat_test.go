@@ -157,6 +157,51 @@ func TestChatServiceAskUsesRequestedTopKAndRedisRecentMemory(t *testing.T) {
 	}
 }
 
+func TestChatServiceAskMergesKeywordChunksWithVectorResults(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "fefefefefefefefefefefefefefefefe", Filename: "video.mp4", FileURL: "videos/hybrid.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "text-embedding-3-small", []model.VideoChunk{
+		{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "关键词命中的分布式锁片段", ContentHash: "hash0", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "kw-vector"},
+	}); err != nil {
+		t.Fatalf("replace chunks: %v", err)
+	}
+
+	chatClient := &recordingChatClient{}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 99, ChunkIndex: 9, Score: 0.82, Content: "纯向量召回片段"},
+	}}
+	svc := NewChatService(repos, retriever, ChatConfig{TopK: 2, CandidateK: 6, MinScore: 0.3})
+
+	result, err := svc.Ask(context.Background(), 7, session.ID, "分布式锁", 2, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if len(result.Citations) != 2 {
+		t.Fatalf("citations = %+v, want vector and keyword chunks", result.Citations)
+	}
+
+	joinedPrompt := ""
+	for _, msg := range chatClient.messages {
+		joinedPrompt += msg.Content + "\n"
+	}
+	if !strings.Contains(joinedPrompt, "关键词命中的分布式锁片段") {
+		t.Fatalf("prompt did not include keyword chunk: %s", joinedPrompt)
+	}
+	if retriever.lastReq.TopK != 6 {
+		t.Fatalf("vector candidate TopK = %d, want 6", retriever.lastReq.TopK)
+	}
+}
+
 func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "video.mp4", FileURL: "videos/d.mp4"}

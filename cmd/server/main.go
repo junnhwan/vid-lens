@@ -163,6 +163,7 @@ func main() {
 	})
 	chatSvc := service.NewChatService(repos, ragRetriever, service.ChatConfig{
 		TopK:        cfg.RAG.TopK,
+		CandidateK:  cfg.RAG.CandidateK,
 		MinScore:    cfg.RAG.MinScore,
 		RecentTurns: cfg.RAG.RecentTurns,
 	})

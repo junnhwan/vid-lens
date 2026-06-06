@@ -119,6 +119,7 @@ type RAGConfig struct {
 	ChunkSize    int     `yaml:"chunk_size"`
 	ChunkOverlap int     `yaml:"chunk_overlap"`
 	TopK         int     `yaml:"top_k"`
+	CandidateK   int     `yaml:"candidate_k"`
 	MinScore     float32 `yaml:"min_score"`
 	RecentTurns  int     `yaml:"recent_turns"`
 	EmbeddingDim int     `yaml:"embedding_dim"`

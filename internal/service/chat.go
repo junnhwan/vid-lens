@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"vid-lens/internal/ai"
@@ -13,6 +14,7 @@ import (
 
 type ChatConfig struct {
 	TopK        int
+	CandidateK  int
 	MinScore    float32
 	RecentTurns int
 }
@@ -137,13 +139,18 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 	if topK > 10 {
 		topK = 10
 	}
+	candidateK := s.candidateK(topK)
 	citations, err := s.retriever.Search(ctx, queryVector, RetrievalRequest{
 		UserID:         userID,
 		TaskID:         session.TaskID,
 		EmbeddingModel: profile.EmbeddingModel,
-		TopK:           topK,
+		TopK:           candidateK,
 		MinScore:       s.cfg.MinScore,
 	})
+	if err != nil {
+		return nil, err
+	}
+	citations, err = s.mergeKeywordChunks(session.TaskID, userID, profile.EmbeddingModel, question, citations, candidateK, topK)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +202,67 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 		Citations: citations,
 		Model:     profile.LLMModel,
 	}, nil
+}
+
+func (s *ChatService) candidateK(topK int) int {
+	candidateK := s.cfg.CandidateK
+	if candidateK <= 0 {
+		return topK
+	}
+	if candidateK < topK {
+		return topK
+	}
+	if candidateK > 50 {
+		return 50
+	}
+	return candidateK
+}
+
+func (s *ChatService) mergeKeywordChunks(taskID, userID int64, embeddingModel, question string, vectorChunks []RetrievedChunk, candidateK, topK int) ([]RetrievedChunk, error) {
+	merged := make([]RetrievedChunk, 0, len(vectorChunks))
+	seen := make(map[string]bool, len(vectorChunks))
+	for _, chunk := range vectorChunks {
+		key := retrievalChunkKey(chunk)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, chunk)
+	}
+
+	keywordChunks, err := s.repos.VideoChunk.SearchByKeyword(userID, taskID, embeddingModel, question, candidateK)
+	if err != nil {
+		return nil, err
+	}
+	for _, chunk := range keywordChunks {
+		candidate := RetrievedChunk{
+			ChunkID:    chunk.ID,
+			ChunkIndex: chunk.ChunkIndex,
+			Score:      0.05,
+			Content:    chunk.Content,
+		}
+		key := retrievalChunkKey(candidate)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, candidate)
+	}
+
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Score > merged[j].Score
+	})
+	if len(merged) > topK {
+		merged = merged[:topK]
+	}
+	return merged, nil
+}
+
+func retrievalChunkKey(chunk RetrievedChunk) string {
+	if chunk.ChunkID > 0 {
+		return fmt.Sprintf("id:%d", chunk.ChunkID)
+	}
+	return fmt.Sprintf("idx:%d:%s", chunk.ChunkIndex, chunk.Content)
 }
 
 func (s *ChatService) AskStream(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(ChatStreamEvent) error) (*AskResult, error) {

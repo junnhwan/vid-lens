@@ -2347,6 +2347,129 @@ A：它能先验证后端路由、鉴权、SSE content-type、事件格式和消
 - 流式过程中支持中途取消和半截输出处理。
 - 前端用 fetch ReadableStream 消费 POST SSE/stream 响应。
 
+## 记录 015：RAG 问答增加候选扩展和关键词融合
+
+### 背景
+
+路线图阶段八提到当前 RAG 是：
+
+```text
+query embedding -> Milvus Top-K -> prompt -> LLM
+```
+
+这适合作为第一版，但如果用户问题里有非常明确的关键词，而向量召回没有命中对应 chunk，答案质量会受影响。
+
+### 现象
+
+旧流程只取最终 `top_k` 个向量结果。比如前端请求 topK=5，Milvus 只返回 5 个候选，后端没有机会从更多候选里融合关键词命中的片段。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/service/chat.go
+internal/service/chat_test.go
+internal/repository/video_chunk.go
+internal/config/config.go
+cmd/server/main.go
+config.yaml
+```
+
+阶段八前，`ChatService.Ask` 直接把用户 topK 传给 retriever。
+
+### 根因
+
+单一路径向量召回对语义相似问题很有用，但对精确术语、代码名、专有名词或短关键词不一定稳定。关键词召回可以作为低成本补充。
+
+### 修复方案
+
+新增配置：
+
+```yaml
+rag:
+  top_k: 5
+  candidate_k: 30
+```
+
+新的检索流程：
+
+```text
+1. 向量召回 candidate_k 个候选
+2. MySQL video_chunks 按 content LIKE question 做关键词召回
+3. 按 chunk_id / chunk_index 去重
+4. 保留向量分数，关键词-only chunk 给较低补充分数
+5. 按分数排序后截取最终 top_k
+6. 进入 prompt
+```
+
+这不是完整 BM25 或 rerank 模型，但已经具备混合检索的基础能力：向量召回负责语义，关键词召回补精确命中。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/service/chat_test.go
+```
+
+关键测试点：
+
+```text
+ChatService 会向 retriever 请求 candidate_k 个向量候选
+当 MySQL chunk 命中问题关键词时，会融合进 citations
+prompt 中包含关键词-only chunk
+最终 citations 截取到用户请求 topK
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service -run ChatServiceAsk
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/service -run ChatServiceAsk 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> RAG 第一版只做向量 Top-K，这对语义问题够用，但对明确关键词、专有名词或代码名不一定稳定。所以我加了一个轻量混合检索版本：向量侧先召回 `candidate_k` 个候选，同时从 MySQL 的 `video_chunks` 做关键词 LIKE 召回，然后去重、融合并截取最终 topK 给 LLM。
+>
+> 这不是完整 BM25，也没有引入额外 rerank 模型，但它能在不增加外部依赖的情况下补齐“关键词明确但向量没命中”的场景。后续如果要继续提升质量，可以把 MySQL LIKE 换成 fulltext/BM25，再对候选做 RRF 或 rerank model。
+
+### 面试官可能追问
+
+**Q：LIKE 算不算真正混合检索？**
+
+A：它是混合检索的基础版，不是最终形态。核心思想是把语义召回和关键词召回合并。当前用 LIKE 是为了低成本验证链路，后续可以替换为 MySQL fulltext、BM25 或专门检索引擎。
+
+**Q：为什么关键词 chunk 分数较低？**
+
+A：为了让向量召回仍作为主排序来源，关键词召回作为补充进入上下文。后续做 RRF 时可以用 rank 而不是手工分数。
+
+**Q：candidate_k 为什么默认 30？**
+
+A：最终 topK 通常是 5，扩大到 30 个候选可以给融合和后续 rerank 留空间，同时不会让 prompt 直接变长，因为最后仍截取 topK。
+
+### 这次不要夸大的点
+
+- 当前不是 BM25。
+- 当前没有引入 rerank 模型。
+- 当前融合策略是基础去重 + 分数排序，不是完整 RRF。
+
+### 后续演进
+
+- 用 MySQL fulltext/BM25 替换 LIKE。
+- 引入 RRF 融合 vector_rank 和 keyword_rank。
+- 对 candidate_k 候选接 rerank 模型后再截取 topK。
+
 ## 后续问题记录模板
 
 复制下面模板追加：
