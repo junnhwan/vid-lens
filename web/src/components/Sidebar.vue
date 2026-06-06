@@ -290,6 +290,7 @@ const handleUrlUpload = () => {
 
 .url-input-group input {
   width: 100%;
+  box-sizing: border-box;
   background: rgba(10, 14, 26, 0.6);
   border: 1px solid rgba(139, 149, 168, 0.2);
   border-radius: 0.65rem;
