@@ -1,11 +1,9 @@
 <div align="center">
-
 # 镜知 · VidLens
 
-**以镜观视，以知见意** — AI 驱动的智能视频内容理解平台
+**以镜观视，以知见意** — AI 驱动的视频内容理解平台
 
-[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
-[![Vue](https://img.shields.io/badge/Vue-3-4FC08D?style=flat&logo=vue.js)](https://vuejs.org)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev)
 [![Kafka](https://img.shields.io/badge/Kafka-7.5-231F20?style=flat&logo=apache-kafka)](https://kafka.apache.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -15,64 +13,40 @@
 
 ## 📖 项目简介
 
-镜知是一个完整的**视频 AI 分析平台**：上传视频 → 自动提取音频 → ASR 语音转录 → LLM 智能摘要，全链路异步处理，开箱即用。
+镜知是一个面向视频内容理解场景的 Go 后端项目：上传视频或提交视频链接后，系统会异步完成视频下载、音频提取、ASR 语音转录和 LLM 智能摘要，并提供一个简单 Web 界面用于触发任务和查看结果。
 
-针对视频处理场景中**「长耗时阻塞」**、**「高并发资源冲突」**、**「大文件传输不稳定」**三大痛点，项目基于 **Kafka + Redis 分布式锁 + Lua 令牌桶 + 分片上传** 构建了一套生产级的异步处理架构。
+项目围绕视频处理中的**长耗时任务**、**重复处理**、**大文件传输**和**外部 AI 服务限制**等问题，使用 **Kafka + Redis 分布式锁 + Lua 令牌桶 + MinIO + FFmpeg** 实现了一套可运行、可排查、适合学习后端工程思想的处理链路。
+
+## 🖼️ 项目截图
+
+### 工作台总览
+
+![工作台总览](docs/images/readme-01-dashboard.png)
+
+### ASR 文字提取
+
+![ASR 文字提取](docs/images/readme-02-transcription.png)
+
+### AI 摘要分析
+
+![AI 摘要分析](docs/images/readme-03-summary.png)
 
 ## ✨ 功能特性
 
 - 🔐 **用户体系** — bcrypt 密码哈希 + JWT 鉴权
 - 📤 **视频上传** — 普通上传 / 分片断点续传 / URL 远程下载（B站 / YouTube）
-- 🎯 **内容去重** — MD5 秒传 + 唯一索引物理兜底
-- 🤖 **AI 分析** — 语音转录（ASR）+ 智能摘要（LLM），策略模式可切换供应商
-- 🛡️ **接口限流** — Redis Hash + Lua 令牌桶，惰性计算原子扣减
-- 🔒 **并发安全** — 自研 Redis 分布式锁，Lua 脚本 + WatchDog 自动续期
+- 🎯 **内容去重** — MD5 秒传 + 唯一索引兜底，避免同一视频重复入库
+- 🤖 **AI 分析** — ASR 语音转录 + LLM 智能摘要，支持小米 MiMo / 硅基流动策略切换
+- 🎧 **长视频处理** — FFmpeg 压缩音频 + 300 秒切片 ASR，降低单次请求体积和长音频漏识别风险
+- 🛡️ **接口限流** — Redis Hash + Lua 令牌桶，惰性计算、原子扣减
+- 🔒 **并发安全** — Redis 分布式锁，Lua 脚本校验 owner，WatchDog 自动续期
 - 💾 **私有存储** — MinIO 私有桶 + 5 分钟预签名 URL
-- 📊 **垂直分表** — 任务 / 转录 / 摘要独立建表，保护主表查询性能
+- 📊 **垂直分表** — 任务 / 转录 / 摘要独立建表，避免大文本污染任务主表
+- 🧭 **任务可观测** — 消费者日志记录 taskID、切片数量、单片转写长度和最终转写长度
 
 ## 🏗️ 技术架构
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         客户端 (Vue3)                        │
-└──────┬──────────┬──────────────┬──────────────┬──────────────┘
-       │          │              │              │
-   文件上传    分片上传      AI分析请求     轮询任务状态
-       │          │              │              │
-┌──────▼──────────▼──────────────▼──────────────▼──────────────┐
-│                      Gin HTTP Server                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ JWT Auth │  │   CORS   │  │RateLimit │  │ Handlers │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ 投递消息 (同步发送, RequiredAcks=All)
-                       ▼
-              ┌─────────────────┐
-              │  Kafka Cluster  │  ◄── MD5 做 Key, 同视频同分区
-              │  ┌────────────┐ │
-              │  │ 4 Partitions│ │
-              │  └────────────┘ │
-              └────────┬────────┘
-                       │ 消费者组拉取 (手动 commit offset)
-                       ▼
-         ┌─────────────────────────────┐
-         │     Kafka Consumer Worker    │
-         │  ① 解析消息                  │
-         │  ② 分布式锁 (Redis + Lua)    │
-         │  ③ 幂等校验 (状态机检查)      │
-         │  ④ 更新状态 → Running        │
-         │  ⑤ FFmpeg → ASR → LLM       │
-         │  ⑥ 更新状态 → Completed      │
-         │  ⑦ 手动提交 offset           │
-         └─────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-   ┌─────────┐   ┌─────────┐   ┌─────────┐
-   │  MySQL  │   │  Redis  │   │  MinIO  │
-   │ (持久化) │   │ (缓存锁) │   │ (视频文件)│
-   └─────────┘   └─────────┘   └─────────┘
-```
+![VidLens 后端架构图](docs/images/vidlens-architecture.png)
 
 ## 🛠️ 技术栈
 
@@ -81,12 +55,12 @@
 | HTTP 框架 | Gin | 路由分组、中间件链 |
 | ORM | GORM | 模型定义、AutoMigrate |
 | 消息队列 | Kafka (segmentio/kafka-go) | 异步任务、削峰填谷、消费组负载均衡 |
-| 缓存 | Redis (go-redis) | 分布式锁、令牌桶、分片状态追踪 |
+| 缓存 | Redis (go-redis) | 分布式锁、令牌桶、分片上传状态 |
 | 对象存储 | MinIO | 私有桶 + Pre-signed URL |
-| 数据库 | MySQL 8.0 | 4 表垂直分拆 |
+| 数据库 | MySQL 8.0 | 用户、任务、转录、摘要独立建表 |
 | AI 服务 | 小米 MiMo / 硅基流动 | 策略模式切换供应商，支持 ASR + LLM 总结 |
-| 音视频 | FFmpeg + yt-dlp | 音频提取、视频下载 |
-| 前端 | Vue 3 + Axios | 登录、上传、任务管理、Markdown 渲染 |
+| 音视频 | FFmpeg + yt-dlp | 音频提取、音频切片、视频链接下载 |
+| 展示界面 | Vue 3 + Vite | 用于触发上传、查看任务状态和展示转写 / 总结结果 |
 
 ## 🚀 快速开始
 
@@ -98,23 +72,57 @@ docker-compose up -d
 
 包含：MySQL 8.0、Redis、MinIO、Zookeeper、Kafka、Kafka UI。
 
-### 2. 配置
+本项目会把 MySQL、Redis、MinIO 的本地数据挂载到 `data/` 目录，属于运行数据，不需要提交到 Git。
 
-编辑 `config.yaml`，选择 AI 供应商并配置 API Key。默认使用小米 MiMo Token Plan：
+### 2. 配置 AI Key
+
+编辑 `config.yaml`，选择 AI 供应商并配置 API Key。当前默认使用小米 MiMo Token Plan：
+
+```yaml
+ai:
+  provider: "mimo"
+  mimo_base_url: "https://token-plan-cn.xiaomimimo.com/v1"
+  asr_model: "mimo-v2.5-asr"
+  llm_model: "mimo-v2.5"
+```
+
+PowerShell 中设置环境变量：
 
 ```powershell
 $env:MIMO_API_KEY="tp-your-key-here"
 ```
 
-如需改回硅基流动，将 `ai.provider` 改为 `siliconflow`，并设置 `SILICONFLOW_API_KEY`。
+如需改回硅基流动，将 `ai.provider` 改为 `siliconflow`，并设置：
 
-### 3. 启动后端
-
-```bash
-go run cmd/server/main.go
+```powershell
+$env:SILICONFLOW_API_KEY="your-key-here"
 ```
 
-### 4. 启动前端（可选）
+### 3. 配置 FFmpeg 和 yt-dlp
+
+项目依赖本地 FFmpeg 和 yt-dlp：
+
+```yaml
+tools:
+  ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
+  ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
+```
+
+FFmpeg 用于提取和切分音频，yt-dlp 用于从 B 站 / YouTube 等链接下载视频。如果你的安装路径不同，需要同步修改 `config.yaml`。
+
+### 4. 启动后端
+
+```bash
+go run ./cmd/server
+```
+
+健康检查：
+
+```text
+http://localhost:8080/health
+```
+
+### 5. 启动展示界面（可选）
 
 ```bash
 cd web
@@ -122,49 +130,47 @@ npm install
 npm run dev
 ```
 
-或直接构建前端静态文件，后端自动托管：
+开发模式访问：
 
-```bash
-cd web && npm run build
+```text
+http://127.0.0.1:5173
 ```
 
-访问 `http://localhost:8080` 即可使用。
+如果要让 Go 后端托管静态资源：
+
+```bash
+cd web
+npm run build
+```
+
+然后访问：
+
+```text
+http://localhost:8080
+```
 
 ## 📁 项目结构
 
 ```
 vid-lens/
-├── cmd/server/main.go         # 程序入口，初始化所有组件
+├── cmd/server/main.go         # 程序入口，初始化数据库、Redis、MinIO、Kafka、AI 策略
 ├── internal/
-│   ├── ai/                    # AI 策略模式 (Strategy Interface)
+│   ├── ai/                    # AI 策略模式
 │   │   ├── strategy.go            # 策略接口定义
-│   │   ├── siliconflow.go         # 硅基流动实现 + 指数退避重试
+│   │   ├── siliconflow.go         # 硅基流动实现
 │   │   └── mimo.go                # 小米 MiMo 实现 + Token Plan 适配
 │   ├── config/                # YAML 配置加载
 │   ├── handler/               # HTTP 处理层 (Gin Handlers)
-│   ├── middleware/             # 中间件
-│   │   ├── auth.go                # JWT 认证
-│   │   ├── cors.go                # 跨域
-│   │   └── ratelimit.go           # Lua 令牌桶限流
-│   ├── model/                 # 数据模型 (4 表垂直分拆)
-│   │   ├── user.go                # 用户表 (bcrypt 密码)
-│   │   ├── task.go                # 视频任务表 (5 状态机)
-│   │   ├── transcription.go       # 转录文本表 (独立存储)
-│   │   └── summary.go             # AI 摘要表 (独立存储)
-│   ├── mq/                    # Kafka 消息队列
-│   │   ├── producer.go            # 生产者 (同步发送, Key 路由)
-│   │   └── consumer.go            # 消费者 (六步规范, 手动 commit)
-│   ├── pkg/                   # 内部工具包
-│   │   ├── ffmpeg/                # FFmpeg 音频提取
-│   │   ├── jwt/                   # JWT 生成与解析
-│   │   ├── lock/                  # Redis 分布式锁 (Lua + WatchDog)
-│   │   ├── response/              # 统一响应封装
-│   │   └── ytdlp/                 # yt-dlp 视频下载
+│   ├── middleware/            # JWT、CORS、Lua 令牌桶限流
+│   ├── model/                 # 用户、任务、转录、摘要模型
+│   ├── mq/                    # Kafka 生产者 / 消费者
+│   ├── pkg/                   # FFmpeg、yt-dlp、JWT、Redis Lock、响应封装
 │   ├── repository/            # 数据访问层
 │   ├── service/               # 业务逻辑层
 │   └── storage/               # MinIO 存储操作
-├── web/                       # Vue3 前端
-├── config.yaml                # 配置文件
+├── web/                       # 简单展示界面，用于调用后端接口和查看任务结果
+├── docs/images/               # README 项目截图
+├── config.yaml                # 本地配置文件
 ├── docker-compose.yml         # 容器编排
 └── README.md
 ```
@@ -173,13 +179,28 @@ vid-lens/
 
 ### Kafka 异步架构
 
-- **生产端**：同步发送 + `RequiredAcks=All`，确保消息不丢失；MD5 作为 Key 保证同一视频进入同一分区
-- **消费端**：消费者组分摊分区，天然负载均衡；手动 commit offset，只有业务成功才提交
-- **六步消费规范**：解析 → 分布式锁 → 幂等校验 → 状态流转 → 业务处理 → 结果落盘
+- **生产端**：同步发送 + `RequiredAcks=All`，降低消息丢失风险；MD5 作为 Key 保证同一视频进入同一分区
+- **消费端**：消费者组分摊分区；业务处理成功后手动 commit offset
+- **消费流程**：解析消息 → 分布式锁 → 幂等校验 → 状态流转 → 业务处理 → 结果落盘
 
-### 自研 Redis 分布式锁
+### 长视频 ASR 分片处理
 
-基于 Lua 脚本实现原子操作，WatchDog 协程以 `TTL/3` 间隔自动续期，适配视频处理等长耗时场景，锁释放时校验 Owner 防止误删。
+- FFmpeg 将视频音频转为更适合语音识别的低码率音频：
+
+```text
+-ac 1 -ar 16000 -acodec libmp3lame -b:a 32k
+```
+
+- 后端按 300 秒切片，逐段调用 ASR，再合并文本。
+- 消费者日志记录 `taskID`、切片数量、每段转写字符数和最终转写长度，便于排查长视频识别不完整的问题。
+
+### AI 总结复用转写
+
+如果任务已经存在 `video_transcriptions.content`，AI 总结会直接复用已有转写文本，不再重复下载视频、提取音频和调用 ASR。这样能减少外部模型调用次数，也降低长视频重复处理失败的概率。
+
+### Redis 分布式锁
+
+基于 Lua 脚本实现原子加锁和释放，释放锁时校验 owner，避免误删其他任务持有的锁。WatchDog 协程以 `TTL/3` 间隔自动续期，适配视频处理这类长耗时任务。
 
 ### Lua 令牌桶限流
 
@@ -199,7 +220,7 @@ Pending(0) → Queued(1) → Running(2) → Completed(3)
                                     → Failed(4)
 ```
 
-每次状态流转都有校验，防止非法跳转（如 Running → Queued），配合唯一索引保证幂等。
+任务状态流转通过 `UpdateStatusIf` 做条件更新，避免已处理任务被旧请求覆盖回队列态或运行态。
 
 ## 📄 License
 

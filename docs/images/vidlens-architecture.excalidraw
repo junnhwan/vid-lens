@@ -1,0 +1,646 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "mcp-excalidraw-server",
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "x": 70,
+      "y": 35,
+      "width": 700,
+      "height": 38,
+      "strokeColor": "#1e1e1e",
+      "text": "VidLens 后端架构图：视频上传、异步转写与 AI 总结",
+      "fontSize": 28,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.967Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "x": 72,
+      "y": 78,
+      "width": 900,
+      "height": 24,
+      "strokeColor": "#868e96",
+      "text": "主流程只展示任务链路；资源卡片说明各中间件职责，避免交叉线干扰阅读",
+      "fontSize": 16,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "zone_flow",
+      "type": "rectangle",
+      "x": 50,
+      "y": 125,
+      "width": 1450,
+      "height": 260,
+      "backgroundColor": "#f8f9fa",
+      "strokeColor": "#868e96",
+      "roughness": 1,
+      "opacity": 100,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "label_flow",
+      "type": "text",
+      "x": 75,
+      "y": 145,
+      "width": 140,
+      "height": 24,
+      "strokeColor": "#868e96",
+      "text": "主任务链路",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "client",
+      "type": "rectangle",
+      "x": 80,
+      "y": 230,
+      "width": 140,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#1971c2",
+      "roughness": 1,
+      "label": {
+        "text": "1. Web / API\n上传 / URL\n提取 / 总结"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "gin",
+      "type": "rectangle",
+      "x": 255,
+      "y": 230,
+      "width": 140,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#9c36b5",
+      "roughness": 1,
+      "label": {
+        "text": "2. Gin Server\nJWT Auth\nLua 限流"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "service",
+      "type": "rectangle",
+      "x": 430,
+      "y": 230,
+      "width": 150,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#9c36b5",
+      "roughness": 1,
+      "label": {
+        "text": "3. MediaService\n建任务\n查状态"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "producer",
+      "type": "rectangle",
+      "x": 615,
+      "y": 230,
+      "width": 145,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#e8590c",
+      "roughness": 1,
+      "label": {
+        "text": "4. Producer\n同步发送\nkey=file_md5"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "topic",
+      "type": "rectangle",
+      "x": 785,
+      "y": 230,
+      "width": 165,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#e8590c",
+      "roughness": 1,
+      "label": {
+        "text": "5. Kafka Topics\nvideo-transcribe\nvideo-analyze"
+      },
+      "fontSize": 14,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:21:17.498Z",
+      "version": 2
+    },
+    {
+      "id": "consumer",
+      "type": "rectangle",
+      "x": 975,
+      "y": 230,
+      "width": 145,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#2f9e44",
+      "roughness": 1,
+      "label": {
+        "text": "6. Consumer\nRedis Lock\n状态校验"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "pipeline",
+      "type": "rectangle",
+      "x": 1155,
+      "y": 220,
+      "width": 180,
+      "height": 102,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#2f9e44",
+      "roughness": 1,
+      "label": {
+        "text": "7. 处理流水线\nFFmpeg 切片\nASR 转写\nLLM 总结"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "done",
+      "type": "rectangle",
+      "x": 1370,
+      "y": 230,
+      "width": 125,
+      "height": 82,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#2f9e44",
+      "roughness": 1,
+      "label": {
+        "text": "8. 结果落库\n完成任务\ncommit offset"
+      },
+      "fontSize": 14,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "note",
+      "type": "rectangle",
+      "x": 620,
+      "y": 335,
+      "width": 610,
+      "height": 46,
+      "backgroundColor": "#fff9db",
+      "strokeColor": "#e8590c",
+      "roughness": 1,
+      "label": {
+        "text": "长视频保护：音频按 300 秒切片；日志记录 taskID、chunks、每段 chars、最终 transcriptChars"
+      },
+      "fontSize": 14,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "zone_resources",
+      "type": "rectangle",
+      "x": 50,
+      "y": 450,
+      "width": 1450,
+      "height": 205,
+      "backgroundColor": "#e7f5ff",
+      "strokeColor": "#0c8599",
+      "roughness": 1,
+      "opacity": 100,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "label_res",
+      "type": "text",
+      "x": 75,
+      "y": 470,
+      "width": 150,
+      "height": 24,
+      "strokeColor": "#0c8599",
+      "text": "资源与状态职责",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "mysql",
+      "type": "rectangle",
+      "x": 110,
+      "y": 525,
+      "width": 300,
+      "height": 88,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#0c8599",
+      "roughness": 1,
+      "label": {
+        "text": "MySQL\n关联步骤：3、6、8\n任务、视频元数据、转写文本、AI 摘要"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "redis",
+      "type": "rectangle",
+      "x": 470,
+      "y": 525,
+      "width": 300,
+      "height": 88,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#0c8599",
+      "roughness": 1,
+      "label": {
+        "text": "Redis\n关联步骤：2、6\n令牌桶、分布式锁、分片上传状态"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "minio",
+      "type": "rectangle",
+      "x": 830,
+      "y": 525,
+      "width": 300,
+      "height": 88,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#0c8599",
+      "roughness": 1,
+      "label": {
+        "text": "MinIO\n关联步骤：3、7\n视频对象、上传分片、预签名 URL"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "external",
+      "type": "rectangle",
+      "x": 1190,
+      "y": 525,
+      "width": 300,
+      "height": 88,
+      "backgroundColor": "#ffffff",
+      "strokeColor": "#2f9e44",
+      "roughness": 1,
+      "label": {
+        "text": "外部工具 / 模型\n关联步骤：3、7\nyt-dlp、FFmpeg、MiMo / SiliconFlow"
+      },
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_sync",
+      "type": "line",
+      "x": 1090,
+      "y": 68,
+      "width": 60,
+      "height": 0,
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_sync_text",
+      "type": "text",
+      "x": 1160,
+      "y": 58,
+      "width": 120,
+      "height": 22,
+      "strokeColor": "#1e1e1e",
+      "text": "同步调用",
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_async",
+      "type": "line",
+      "x": 1090,
+      "y": 98,
+      "width": 60,
+      "height": 0,
+      "strokeColor": "#e8590c",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_async_text",
+      "type": "text",
+      "x": 1160,
+      "y": 88,
+      "width": 120,
+      "height": 22,
+      "strokeColor": "#e8590c",
+      "text": "异步消息",
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_process",
+      "type": "line",
+      "x": 1290,
+      "y": 68,
+      "width": 60,
+      "height": 0,
+      "strokeColor": "#2f9e44",
+      "strokeWidth": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "legend_process_text",
+      "type": "text",
+      "x": 1360,
+      "y": 58,
+      "width": 120,
+      "height": 22,
+      "strokeColor": "#2f9e44",
+      "text": "消费处理",
+      "fontSize": 15,
+      "fontFamily": 2,
+      "createdAt": "2026-06-06T07:19:43.968Z",
+      "updatedAt": "2026-06-06T07:19:43.968Z",
+      "version": 1
+    },
+    {
+      "id": "a1",
+      "type": "arrow",
+      "x": 228,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "client"
+      },
+      "end": {
+        "id": "gin"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a2",
+      "type": "arrow",
+      "x": 403,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 2,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "gin"
+      },
+      "end": {
+        "id": "service"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a3",
+      "type": "arrow",
+      "x": 588,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#e8590c",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "service"
+      },
+      "end": {
+        "id": "producer"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a4",
+      "type": "arrow",
+      "x": 768,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#e8590c",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "producer"
+      },
+      "end": {
+        "id": "topic"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a5",
+      "type": "arrow",
+      "x": 948,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#e8590c",
+      "strokeWidth": 2,
+      "strokeStyle": "dashed",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "topic"
+      },
+      "end": {
+        "id": "consumer"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a6",
+      "type": "arrow",
+      "x": 1128,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#2f9e44",
+      "strokeWidth": 2,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "consumer"
+      },
+      "end": {
+        "id": "pipeline"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    },
+    {
+      "id": "a7",
+      "type": "arrow",
+      "x": 1343,
+      "y": 271,
+      "width": 35,
+      "height": 0,
+      "strokeColor": "#2f9e44",
+      "strokeWidth": 2,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          19,
+          0
+        ]
+      ],
+      "start": {
+        "id": "pipeline"
+      },
+      "end": {
+        "id": "done"
+      },
+      "endArrowhead": "arrow",
+      "createdAt": "2026-06-06T07:20:08.097Z",
+      "updatedAt": "2026-06-06T07:20:08.097Z",
+      "version": 1
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": null
+  }
+}
