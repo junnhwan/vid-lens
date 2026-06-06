@@ -66,7 +66,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, started_at, finished_at, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, trace_id, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -88,10 +88,15 @@ func (r *TaskRepository) UpdateStatus(id int64, status int8, errMsg string) erro
 }
 
 func (r *TaskRepository) UpdateStatusAndStage(id int64, status int8, stage, errMsg string) error {
+	now := time.Now()
 	updates := map[string]interface{}{
-		"status":    status,
-		"stage":     stage,
-		"error_msg": errMsg,
+		"status":           status,
+		"stage":            stage,
+		"stage_started_at": &now,
+		"error_msg":        errMsg,
+	}
+	if stage == model.TaskStageNone || status == model.TaskStatusCompleted || status == model.TaskStatusFailed || status == model.TaskStatusDead {
+		updates["stage_finished_at"] = &now
 	}
 	if errMsg != "" {
 		updates["last_error_msg"] = errMsg
@@ -119,10 +124,15 @@ func (r *TaskRepository) UpdateStatusIf(id int64, allowedFrom []int8, status int
 }
 
 func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, status int8, stage, errMsg string) (bool, error) {
+	now := time.Now()
 	updates := map[string]interface{}{
-		"status":    status,
-		"stage":     stage,
-		"error_msg": errMsg,
+		"status":           status,
+		"stage":            stage,
+		"stage_started_at": &now,
+		"error_msg":        errMsg,
+	}
+	if stage == model.TaskStageNone || status == model.TaskStatusCompleted || status == model.TaskStatusFailed || status == model.TaskStatusDead {
+		updates["stage_finished_at"] = &now
 	}
 	if errMsg != "" {
 		updates["last_error_msg"] = errMsg
@@ -143,18 +153,19 @@ func (r *TaskRepository) UpdateFileURL(id int64, fileURL string) error {
 
 func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, filename string, finishedAt time.Time) error {
 	updates := map[string]interface{}{
-		"asset_id":        asset.ID,
-		"file_md5":        asset.FileMD5,
-		"filename":        filename,
-		"file_url":        asset.ObjectName,
-		"file_size":       asset.FileSize,
-		"status":          model.TaskStatusPending,
-		"stage":           model.TaskStageUploaded,
-		"error_msg":       "",
-		"last_error_code": "",
-		"last_error_msg":  "",
-		"last_job_type":   "",
-		"finished_at":     finishedAt,
+		"asset_id":          asset.ID,
+		"file_md5":          asset.FileMD5,
+		"filename":          filename,
+		"file_url":          asset.ObjectName,
+		"file_size":         asset.FileSize,
+		"status":            model.TaskStatusPending,
+		"stage":             model.TaskStageUploaded,
+		"error_msg":         "",
+		"last_error_code":   "",
+		"last_error_msg":    "",
+		"last_job_type":     "",
+		"stage_finished_at": finishedAt,
+		"finished_at":       finishedAt,
 	}
 	return r.db.Model(&model.VideoTask{}).
 		Where("id = ? AND status = ? AND stage = ?", id, model.TaskStatusRunning, model.TaskStageDownloading).
@@ -162,32 +173,36 @@ func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, 
 }
 
 func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time) error {
+	now := time.Now()
 	updates := map[string]interface{}{
-		"status":          model.TaskStatusFailed,
-		"stage":           stage,
-		"error_msg":       errMsg,
-		"last_error_code": "retryable_error",
-		"last_error_msg":  errMsg,
-		"last_job_type":   jobType,
-		"retry_count":     retryCount,
-		"max_retries":     maxRetries,
-		"next_retry_at":   nextRetryAt,
+		"status":            model.TaskStatusFailed,
+		"stage":             stage,
+		"error_msg":         errMsg,
+		"last_error_code":   "retryable_error",
+		"last_error_msg":    errMsg,
+		"last_job_type":     jobType,
+		"retry_count":       retryCount,
+		"max_retries":       maxRetries,
+		"next_retry_at":     nextRetryAt,
+		"stage_finished_at": &now,
 	}
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func (r *TaskRepository) RecordTerminalFailure(id int64, jobType, stage, errCode, errMsg string, retryCount, maxRetries int, status int8) error {
+	now := time.Now()
 	updates := map[string]interface{}{
-		"status":          status,
-		"stage":           stage,
-		"error_msg":       errMsg,
-		"last_error_code": errCode,
-		"last_error_msg":  errMsg,
-		"last_job_type":   jobType,
-		"retry_count":     retryCount,
-		"max_retries":     maxRetries,
-		"next_retry_at":   nil,
-		"finished_at":     time.Now(),
+		"status":            status,
+		"stage":             stage,
+		"error_msg":         errMsg,
+		"last_error_code":   errCode,
+		"last_error_msg":    errMsg,
+		"last_job_type":     jobType,
+		"retry_count":       retryCount,
+		"max_retries":       maxRetries,
+		"next_retry_at":     nil,
+		"stage_finished_at": &now,
+		"finished_at":       now,
 	}
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
 }
@@ -209,10 +224,11 @@ func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.Vi
 
 func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
 	updates := map[string]interface{}{
-		"status":        status,
-		"stage":         stage,
-		"error_msg":     "",
-		"next_retry_at": nil,
+		"status":           status,
+		"stage":            stage,
+		"stage_started_at": &now,
+		"error_msg":        "",
+		"next_retry_at":    nil,
 	}
 	tx := r.db.Model(&model.VideoTask{}).
 		Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", id, model.TaskStatusFailed, now).

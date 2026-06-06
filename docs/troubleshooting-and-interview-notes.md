@@ -2033,6 +2033,178 @@ A：任务 retry_count 表示 Kafka 业务任务整体重试次数；chunk retry
 - 将音频 chunk 上传 MinIO，支持跨进程/跨实例重试。
 - 记录 ASR provider/model，避免切换模型后复用旧 chunk。
 
+## 记录 013：任务链路增加 trace_id 和阶段时间字段
+
+### 背景
+
+路线图阶段六要求增强可观测性，让系统能回答：
+
+```text
+哪个 task 出错？
+当前在哪个 stage？
+每个 stage 大概什么时候开始/结束？
+HTTP 创建、Kafka 消费和任务详情能不能串起来？
+```
+
+### 现象
+
+阶段三已经有 `stage`，但缺少统一 trace id。日志里能看到 taskID，但 HTTP 创建、Kafka payload、consumer 日志和数据库任务之间没有统一链路 ID。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/model/task.go
+internal/repository/task.go
+internal/mq/trace.go
+internal/mq/producer.go
+internal/mq/consumer.go
+internal/service/media.go
+internal/service/media_test.go
+```
+
+阶段六前，Kafka payload 只有：
+
+```json
+{
+  "task_id": 1,
+  "md5": "..."
+}
+```
+
+没有 `trace_id`。
+
+### 根因
+
+异步链路跨越 HTTP 请求、数据库任务、Kafka 消息和 consumer 执行。只靠 taskID 可以定位单个任务，但不利于把创建、投递、消费、重试日志统一串起来，也不利于后续接入结构化日志或指标。
+
+### 修复方案
+
+新增任务字段：
+
+```text
+trace_id
+stage_started_at
+stage_finished_at
+```
+
+任务创建时生成 `trace_id`：
+
+```text
+本地上传 / 分片合并 / URL 上传任务创建 -> trace_id = uuid
+```
+
+Kafka producer 保持原方法签名不变，通过 context 读取 trace id：
+
+```go
+mq.ContextWithTraceID(ctx, task.TraceID)
+mq.TraceIDFromContext(ctx)
+```
+
+Kafka payload 增加：
+
+```json
+{
+  "task_id": 1,
+  "md5": "...",
+  "trace_id": "..."
+}
+```
+
+download payload 同样增加：
+
+```json
+{
+  "task_id": 1,
+  "key": "...",
+  "trace_id": "..."
+}
+```
+
+consumer 日志优先使用 payload trace id，缺失时回退数据库 task trace id：
+
+```text
+[Kafka] URL 下载开始: traceID=... taskID=... url=...
+[Kafka] URL 下载失败: traceID=... taskID=... userID=... url=... err=...
+[Kafka] URL 下载完成: traceID=... taskID=... assetID=... md5=... size=...
+```
+
+repository 在 `UpdateStatusAndStage` / `UpdateStatusAndStageIf` / retry claim / failure 记录中写入阶段时间：
+
+```text
+stage_started_at
+stage_finished_at
+```
+
+这不是完整 tracing 系统，但已经让任务详情和日志具备可串联的核心字段。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/service/media_test.go
+```
+
+关键测试点：
+
+```text
+UploadByURL 创建任务时生成 trace_id
+UploadByURL 响应返回 trace_id
+下载消息投递 context 中包含同一个 trace_id
+RequestTranscribe 投递消息时沿用 task.trace_id
+RequestAnalysis 投递消息时沿用 task.trace_id
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service ./internal/mq ./internal/repository
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/service ./internal/mq ./internal/repository 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 视频处理是异步链路，请求创建任务后，后续下载、转写、总结和索引都在 Kafka consumer 里执行。只看 HTTP 日志或只看 consumer 日志都不完整，所以我给任务加了 `trace_id`，创建任务时生成并保存到数据库，投递 Kafka 时也写入 payload。
+>
+> 这样排查时可以用同一个 trace id 串起：用户什么时候提交 URL、任务 ID 是多少、投递到了哪个 topic、consumer 下载或转写是否失败、最终任务状态是什么。与此同时，`stage_started_at/stage_finished_at` 能记录阶段时间，为后续统计每个阶段耗时打基础。
+
+### 面试官可能追问
+
+**Q：这是不是完整链路追踪？**
+
+A：不是。当前是应用层 trace id 和阶段时间字段，不是 OpenTelemetry 那种 span 体系。它解决的是 demo 项目最直接的排障问题：跨 HTTP、Kafka、DB、consumer 串日志。后续如果上 OTel，可以把这个 trace id 接入真正的 trace/span。
+
+**Q：为什么 producer 方法签名不加 traceID 参数？**
+
+A：为了不让所有业务调用都扩散参数，我用 context 携带 trace id。service 层在投递前 `ContextWithTraceID`，producer 只负责读取并写入 payload。这样保留了原有方法签名，也方便后续从 HTTP middleware 自动注入 trace id。
+
+**Q：stage 时间准不准？**
+
+A：当前是阶段状态更新时记录的应用时间，适合排查和粗粒度耗时估算，不是高精度指标。后续要做指标可以用 Prometheus histogram 或 OpenTelemetry span。
+
+### 这次不要夸大的点
+
+- 当前没有引入 Prometheus 或 OpenTelemetry。
+- 当前阶段耗时是 DB 字段，不是完整指标系统。
+- 当前只有关键 Kafka 日志带 trace id，后续还可以把 ASR、LLM、Milvus 日志统一结构化。
+
+### 后续演进
+
+- 增加 HTTP middleware 自动注入 trace id，并写响应头。
+- 将 stage 耗时导出为 Prometheus 指标。
+- 用 OpenTelemetry span 表达 download/transcribe/summarize/index 子阶段。
+
 ## 后续问题记录模板
 
 复制下面模板追加：

@@ -70,6 +70,7 @@ type UploadResult struct {
 	FileSize int64  `json:"file_size"`
 	Status   int8   `json:"status"`
 	Stage    string `json:"stage"`
+	TraceID  string `json:"trace_id"`
 }
 
 // UploadFile 普通文件上传
@@ -112,6 +113,7 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 		FileSize: asset.FileSize,
 		Status:   status,
 		Stage:    model.TaskStageUploaded,
+		TraceID:  uuid.New().String(),
 	}
 	if err := s.repo.Task.Create(task); err != nil {
 		return nil, err
@@ -125,6 +127,7 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 		FileSize: asset.FileSize,
 		Status:   status,
 		Stage:    task.Stage,
+		TraceID:  task.TraceID,
 	}, nil
 }
 
@@ -142,6 +145,7 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 		Filename:   filenameForURLTask(videoURL),
 		Status:     model.TaskStatusRunning,
 		Stage:      model.TaskStageDownloading,
+		TraceID:    uuid.New().String(),
 		SourceType: model.TaskSourceTypeURL,
 		SourceURL:  videoURL,
 		MaxRetries: 3,
@@ -151,7 +155,7 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 		return nil, err
 	}
 
-	if err := s.mq.EnqueueDownload(ctx, task.ID, key); err != nil {
+	if err := s.mq.EnqueueDownload(mq.ContextWithTraceID(ctx, task.TraceID), task.ID, key); err != nil {
 		errMsg := "下载任务投递失败"
 		_ = s.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, errMsg)
 		return nil, fmt.Errorf("%s: %w", errMsg, err)
@@ -165,6 +169,7 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 		FileSize: task.FileSize,
 		Status:   task.Status,
 		Stage:    task.Stage,
+		TraceID:  task.TraceID,
 	}, nil
 }
 
@@ -366,7 +371,7 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if !updated {
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
-	if err := s.mq.EnqueueAnalyze(ctx, taskID, task.FileMD5); err != nil {
+	if err := s.mq.EnqueueAnalyze(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
@@ -404,7 +409,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	if !updated {
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
-	if err := s.mq.EnqueueTranscribe(ctx, taskID, task.FileMD5); err != nil {
+	if err := s.mq.EnqueueTranscribe(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}

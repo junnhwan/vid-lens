@@ -9,13 +9,15 @@ import (
 
 // AnalyzePayload 任务消息载荷
 type AnalyzePayload struct {
-	TaskID int64  `json:"task_id"`
-	MD5    string `json:"md5"`
+	TaskID  int64  `json:"task_id"`
+	MD5     string `json:"md5"`
+	TraceID string `json:"trace_id"`
 }
 
 type DownloadPayload struct {
-	TaskID int64  `json:"task_id"`
-	Key    string `json:"key"`
+	TaskID  int64  `json:"task_id"`
+	Key     string `json:"key"`
+	TraceID string `json:"trace_id"`
 }
 
 // Producer Kafka 生产者
@@ -59,8 +61,9 @@ func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic 
 // 使用 MD5 作为消息 Key → 同一视频的任务会被路由到同一分区，保证消费顺序
 func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
-		TaskID: taskID,
-		MD5:    md5,
+		TaskID:  taskID,
+		MD5:     md5,
+		TraceID: TraceIDFromContext(ctx),
 	})
 
 	return p.analyzeWriter.WriteMessages(ctx, kafka.Message{
@@ -72,8 +75,9 @@ func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string)
 // EnqueueTranscribe 投递文字提取任务
 func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
-		TaskID: taskID,
-		MD5:    md5,
+		TaskID:  taskID,
+		MD5:     md5,
+		TraceID: TraceIDFromContext(ctx),
 	})
 
 	return p.transcribeWriter.WriteMessages(ctx, kafka.Message{
@@ -84,8 +88,9 @@ func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 stri
 
 func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string) error {
 	payload, _ := json.Marshal(DownloadPayload{
-		TaskID: taskID,
-		Key:    key,
+		TaskID:  taskID,
+		Key:     key,
+		TraceID: TraceIDFromContext(ctx),
 	})
 
 	return p.downloadWriter.WriteMessages(ctx, kafka.Message{

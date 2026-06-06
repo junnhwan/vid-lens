@@ -218,8 +218,9 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 	if err != nil {
 		return fmt.Errorf("查询下载任务失败: %w", err)
 	}
+	traceID := traceIDForTask(payload.TraceID, task)
 	if task.Status != model.TaskStatusRunning || task.Stage != model.TaskStageDownloading {
-		log.Printf("[Kafka] 下载任务状态已变化，跳过: taskID=%d status=%d stage=%s", task.ID, task.Status, task.Stage)
+		log.Printf("[Kafka] 下载任务状态已变化，跳过: traceID=%s taskID=%d status=%d stage=%s", traceID, task.ID, task.Status, task.Stage)
 		return nil
 	}
 	if strings.TrimSpace(task.SourceURL) == "" {
@@ -227,11 +228,11 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 		return nil
 	}
 
-	log.Printf("[Kafka] URL 下载开始: taskID=%d url=%s", task.ID, sanitizeURLForLog(task.SourceURL))
+	log.Printf("[Kafka] URL 下载开始: traceID=%s taskID=%d url=%s", traceID, task.ID, sanitizeURLForLog(task.SourceURL))
 	localPath, err := c.callDownloadVideo(ctx, task.SourceURL)
 	if err != nil {
 		errMsg := truncateError(err)
-		log.Printf("[Kafka] URL 下载失败: taskID=%d userID=%d url=%s err=%v", task.ID, task.UserID, sanitizeURLForLog(task.SourceURL), err)
+		log.Printf("[Kafka] URL 下载失败: traceID=%s taskID=%d userID=%d url=%s err=%v", traceID, task.ID, task.UserID, sanitizeURLForLog(task.SourceURL), err)
 		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, errors.New(errMsg))
 		return nil
 	}
@@ -278,7 +279,7 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 	if err := c.repo.Task.CompleteURLDownload(task.ID, asset, filename, time.Now()); err != nil {
 		return fmt.Errorf("回写下载任务失败: %w", err)
 	}
-	log.Printf("[Kafka] URL 下载完成: taskID=%d assetID=%d md5=%s size=%d", task.ID, asset.ID, asset.FileMD5, asset.FileSize)
+	log.Printf("[Kafka] URL 下载完成: traceID=%s taskID=%d assetID=%d md5=%s size=%d", traceID, task.ID, asset.ID, asset.FileMD5, asset.FileSize)
 	return nil
 }
 
@@ -305,7 +306,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		return fmt.Errorf("解析消息失败: %w", err)
 	}
 
-	log.Printf("[Kafka] 收到分析任务: taskID=%d, md5=%s", payload.TaskID, payload.MD5)
+	log.Printf("[Kafka] 收到分析任务: traceID=%s taskID=%d, md5=%s", payload.TraceID, payload.TaskID, payload.MD5)
 
 	// 第 2 步：基于 MD5 获取分布式锁
 	lockKey := fmt.Sprintf("vidlens:lock:%s", payload.MD5)
@@ -672,4 +673,14 @@ func extensionForDownloadedFile(path string) string {
 	default:
 		return ".mp4"
 	}
+}
+
+func traceIDForTask(payloadTraceID string, task *model.VideoTask) string {
+	if payloadTraceID != "" {
+		return payloadTraceID
+	}
+	if task != nil {
+		return task.TraceID
+	}
+	return ""
 }
