@@ -1,9 +1,13 @@
 package mq
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -15,12 +19,18 @@ import (
 type recordingAI struct {
 	summarizeInput string
 	chunksInput    []string
+	transcribeInput []string
 	transcribeUsed bool
+	transcripts    map[string]string
 }
 
-func (a *recordingAI) Transcribe(context.Context, string) (string, error) {
+func (a *recordingAI) Transcribe(_ context.Context, audioPath string) (string, error) {
 	a.transcribeUsed = true
-	return "", nil
+	a.transcribeInput = append(a.transcribeInput, audioPath)
+	if a.transcripts != nil {
+		return a.transcripts[audioPath], nil
+	}
+	return "分片转写结果", nil
 }
 
 func (a *recordingAI) TranscribeChunks(_ context.Context, audioPaths []string) (string, error) {
@@ -102,7 +112,7 @@ func TestProcessVideoReusesExistingTranscriptionBeforeDownloadingVideo(t *testin
 	}
 }
 
-func TestTranscribeAudioAlwaysUsesChunkedASR(t *testing.T) {
+func TestTranscribeAudioAlwaysSplitsAudioBeforeASR(t *testing.T) {
 	tmpDir := t.TempDir()
 	audioPath := filepath.Join(tmpDir, "audio.mp3")
 	if err := os.WriteFile(audioPath, []byte("small audio"), 0644); err != nil {
@@ -118,18 +128,109 @@ func TestTranscribeAudioAlwaysUsesChunkedASR(t *testing.T) {
 		},
 	}
 
-	transcript, err := consumer.transcribeAudio(context.Background(), audioPath)
+	transcript, err := consumer.transcribeAudio(context.Background(), 0, audioPath)
 	if err != nil {
 		t.Fatalf("transcribe audio: %v", err)
 	}
-	if transcript != "分片转写结果" {
+	if transcript != "分片转写结果\n\n分片转写结果" {
 		t.Fatalf("unexpected transcript: %q", transcript)
 	}
-	if ai.transcribeUsed {
-		t.Fatalf("expected chunked ASR path, but direct ASR was used")
+	if !ai.transcribeUsed {
+		t.Fatalf("expected ASR to be called for generated chunks")
 	}
-	if len(ai.chunksInput) != 2 {
-		t.Fatalf("expected 2 chunks, got %#v", ai.chunksInput)
+	if len(ai.transcribeInput) != 2 {
+		t.Fatalf("expected 2 ASR chunk calls, got %#v", ai.transcribeInput)
+	}
+	if ai.transcribeInput[0] != "chunk-001.mp3" || ai.transcribeInput[1] != "chunk-002.mp3" {
+		t.Fatalf("unexpected ASR inputs: %#v", ai.transcribeInput)
+	}
+}
+
+func TestTranscribeAudioLogsChunkMetrics(t *testing.T) {
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("small audio"), 0644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+
+	chunkA := filepath.Join(tmpDir, "chunks", "chunk-001.mp3")
+	chunkB := filepath.Join(tmpDir, "chunks", "chunk-002.mp3")
+	if err := os.MkdirAll(filepath.Dir(chunkA), 0755); err != nil {
+		t.Fatalf("create chunk dir: %v", err)
+	}
+	if err := os.WriteFile(chunkA, []byte("chunk a"), 0644); err != nil {
+		t.Fatalf("write chunk a: %v", err)
+	}
+	if err := os.WriteFile(chunkB, []byte("chunk b"), 0644); err != nil {
+		t.Fatalf("write chunk b: %v", err)
+	}
+
+	ai := &recordingAI{
+		transcripts: map[string]string{
+			chunkA: "第一段文本",
+			chunkB: "第二段更长文本",
+		},
+	}
+	consumer := &Consumer{
+		ai:         ai,
+		ffmpegPath: "ffmpeg",
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return []string{chunkA, chunkB}, nil
+		},
+	}
+
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(originalOutput)
+
+	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath)
+	if err != nil {
+		t.Fatalf("transcribe audio: %v", err)
+	}
+	if transcript != "第一段文本\n\n第二段更长文本" {
+		t.Fatalf("unexpected transcript: %q", transcript)
+	}
+
+	logText := logs.String()
+	for _, want := range []string{
+		"taskID=42",
+		"chunks=2",
+		"chunk=1/2",
+		fmt.Sprintf("path=%s", chunkA),
+		"chars=5",
+		"chunk=2/2",
+		fmt.Sprintf("path=%s", chunkB),
+		"chars=7",
+		"transcriptChars=14",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("expected log to contain %q, got:\n%s", want, logText)
+		}
+	}
+}
+
+func TestTranscribeAudioReturnsErrorWhenSplitCreatesNoChunks(t *testing.T) {
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+	if err := os.WriteFile(audioPath, []byte("small audio"), 0644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+
+	consumer := &Consumer{
+		ai:         &recordingAI{},
+		ffmpegPath: "ffmpeg",
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return nil, nil
+		},
+	}
+
+	_, err := consumer.transcribeAudio(context.Background(), 42, audioPath)
+	if err == nil {
+		t.Fatalf("expected error when split creates no chunks")
+	}
+	if !strings.Contains(err.Error(), "没有可转写的音频片段") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

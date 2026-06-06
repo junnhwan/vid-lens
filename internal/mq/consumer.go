@@ -238,7 +238,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	}
 	defer os.Remove(audioPath)
 
-	transcript, err := c.transcribeAudio(ctx, audioPath)
+	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath)
 	if err != nil {
 		_ = c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusFailed, truncateError(err))
 		return nil
@@ -284,7 +284,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	defer os.Remove(audioPath)
 
 	log.Printf("[Kafka] ASR 转录: taskID=%d", task.ID)
-	transcript, err := c.transcribeAudio(ctx, audioPath)
+	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath)
 	if err != nil {
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
@@ -300,20 +300,43 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	return c.summarizeTask(ctx, task)
 }
 
-func (c *Consumer) transcribeAudio(ctx context.Context, audioPath string) (string, error) {
+func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string) (string, error) {
 	splitAudio := c.splitAudio
 	if splitAudio == nil {
 		splitAudio = ffmpeg.SplitAudio
 	}
 
-	log.Printf("[Kafka] 音频切片转写: path=%s, segmentSeconds=%d", audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	log.Printf("[Kafka] 音频切片转写开始: taskID=%d, path=%s, segmentSeconds=%d", taskID, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
 	chunks, err := splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
 	if err != nil {
 		return "", err
 	}
+	if len(chunks) == 0 {
+		return "", fmt.Errorf("没有可转写的音频片段")
+	}
 	defer os.RemoveAll(filepath.Dir(chunks[0]))
+	log.Printf("[Kafka] 音频切片转写已切片: taskID=%d, chunks=%d", taskID, len(chunks))
 
-	return c.ai.TranscribeChunks(ctx, chunks)
+	parts := make([]string, 0, len(chunks))
+	for i, chunk := range chunks {
+		text, err := c.ai.Transcribe(ctx, chunk)
+		if err != nil {
+			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
+		}
+		text = strings.TrimSpace(text)
+		chars := len([]rune(text))
+		log.Printf("[Kafka] 音频切片转写片段完成: taskID=%d, chunk=%d/%d, path=%s, chars=%d", taskID, i+1, len(chunks), chunk, chars)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("ASR 返回空结果")
+	}
+
+	transcript := strings.Join(parts, "\n\n")
+	log.Printf("[Kafka] 音频切片转写完成: taskID=%d, chunks=%d, transcriptChars=%d", taskID, len(chunks), len([]rune(transcript)))
+	return transcript, nil
 }
 
 func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
