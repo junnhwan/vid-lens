@@ -357,9 +357,9 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 		}
 	}
 
-	updated, err := s.repo.Task.UpdateStatusIf(taskID,
+	updated, err := s.repo.Task.UpdateStatusAndStageIf(taskID,
 		[]int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusQueued, "")
+		model.TaskStatusQueued, model.TaskStageSummarizing, "")
 	if err != nil {
 		return err
 	}
@@ -367,7 +367,7 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
 	if err := s.mq.EnqueueAnalyze(ctx, taskID, task.FileMD5); err != nil {
-		s.repo.Task.UpdateStatusIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, "消息投递失败")
+		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
 	return nil
@@ -395,9 +395,9 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 		}
 	}
 
-	updated, err := s.repo.Task.UpdateStatusIf(taskID,
+	updated, err := s.repo.Task.UpdateStatusAndStageIf(taskID,
 		[]int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusQueued, "")
+		model.TaskStatusQueued, model.TaskStageTranscribing, "")
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
 	if err := s.mq.EnqueueTranscribe(ctx, taskID, task.FileMD5); err != nil {
-		s.repo.Task.UpdateStatusIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, "消息投递失败")
+		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
 	return nil

@@ -96,6 +96,70 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	}
 }
 
+func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	producer := &recordingMediaProducer{}
+	task := &model.VideoTask{
+		UserID:   7,
+		FileMD5:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Filename: "video.mp4",
+		FileURL:  "videos/video.mp4",
+		Status:   model.TaskStatusPending,
+		Stage:    model.TaskStageUploaded,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := &MediaService{repo: repos, mq: producer}
+	if err := svc.RequestTranscribe(context.Background(), 7, task.ID); err != nil {
+		t.Fatalf("RequestTranscribe: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageTranscribing {
+		t.Fatalf("status/stage = %d/%q, want queued/transcribing", current.Status, current.Stage)
+	}
+	if len(producer.transcribes) != 1 || producer.transcribes[0] != task.ID {
+		t.Fatalf("transcribe enqueue calls = %#v, want task id", producer.transcribes)
+	}
+}
+
+func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	producer := &recordingMediaProducer{}
+	task := &model.VideoTask{
+		UserID:   7,
+		FileMD5:  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Filename: "video.mp4",
+		FileURL:  "videos/video.mp4",
+		Status:   model.TaskStatusPending,
+		Stage:    model.TaskStageUploaded,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := &MediaService{repo: repos, mq: producer}
+	if err := svc.RequestAnalysis(context.Background(), 7, task.ID); err != nil {
+		t.Fatalf("RequestAnalysis: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageSummarizing {
+		t.Fatalf("status/stage = %d/%q, want queued/summarizing", current.Status, current.Stage)
+	}
+	if len(producer.analyzes) != 1 || producer.analyzes[0] != task.ID {
+		t.Fatalf("analyze enqueue calls = %#v, want task id", producer.analyzes)
+	}
+}
+
 func filepathThatDoesNotExist() string {
 	return os.DevNull + "-vidlens-missing-ytdlp"
 }
@@ -105,13 +169,17 @@ type recordingMediaProducer struct {
 		taskID int64
 		key    string
 	}
+	analyzes    []int64
+	transcribes []int64
 }
 
-func (p *recordingMediaProducer) EnqueueAnalyze(context.Context, int64, string) error {
+func (p *recordingMediaProducer) EnqueueAnalyze(_ context.Context, taskID int64, _ string) error {
+	p.analyzes = append(p.analyzes, taskID)
 	return nil
 }
 
-func (p *recordingMediaProducer) EnqueueTranscribe(context.Context, int64, string) error {
+func (p *recordingMediaProducer) EnqueueTranscribe(_ context.Context, taskID int64, _ string) error {
+	p.transcribes = append(p.transcribes, taskID)
 	return nil
 }
 

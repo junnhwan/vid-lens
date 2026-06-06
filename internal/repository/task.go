@@ -118,6 +118,24 @@ func (r *TaskRepository) UpdateStatusIf(id int64, allowedFrom []int8, status int
 	return tx.RowsAffected > 0, nil
 }
 
+func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, status int8, stage, errMsg string) (bool, error) {
+	updates := map[string]interface{}{
+		"status":    status,
+		"stage":     stage,
+		"error_msg": errMsg,
+	}
+	if errMsg != "" {
+		updates["last_error_msg"] = errMsg
+	}
+	tx := r.db.Model(&model.VideoTask{}).
+		Where("id = ? AND status IN ?", id, allowedFrom).
+		Updates(updates)
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
 // UpdateFileURL 更新文件存储路径
 func (r *TaskRepository) UpdateFileURL(id int64, fileURL string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("file_url", fileURL).Error

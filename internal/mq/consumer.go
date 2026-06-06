@@ -339,9 +339,9 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 	}
 
 	// 第 4 步：更新状态为处理中
-	updated, err := c.repo.Task.UpdateStatusIf(payload.TaskID,
+	updated, err := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
 		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusRunning, "")
+		model.TaskStatusRunning, model.TaskStageSummarizing, "")
 	if err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
@@ -352,14 +352,14 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 
 	// 第 5 步：核心业务
 	if err := c.processVideo(ctx, task); err != nil {
-		if updateErr := c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, model.TaskStageSummarizing, err); updateErr != nil {
+		if updateErr := c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, "", err); updateErr != nil {
 			return fmt.Errorf("任务失败且状态更新失败: %w", updateErr)
 		}
 		return nil
 	}
 
 	// 第 6 步：更新状态为已完成
-	if err := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, ""); err != nil {
+	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
 		return fmt.Errorf("更新完成状态失败: %w", err)
 	}
 	log.Printf("[Kafka] 任务完成: taskID=%d", payload.TaskID)
@@ -378,9 +378,9 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 		return err
 	}
 
-	updated, err := c.repo.Task.UpdateStatusIf(payload.TaskID,
+	updated, err := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
 		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusRunning, "")
+		model.TaskStatusRunning, model.TaskStageTranscribing, "")
 	if err != nil {
 		return err
 	}
@@ -422,9 +422,10 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
 		return nil
 	}
+	_ = c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusRunning, model.TaskStageIndexing, "")
 	c.indexAfterTranscription(ctx, task)
 
-	if err := c.repo.Task.UpdateStatus(payload.TaskID, model.TaskStatusCompleted, ""); err != nil {
+	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
 		return err
 	}
 	return nil
@@ -441,6 +442,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return c.summarizeTask(ctx, task)
 	}
 
+	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageTranscribing, "")
 	log.Printf("[Kafka] 提取音频: taskID=%d", task.ID)
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
@@ -472,6 +474,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}); err != nil {
 		return fmt.Errorf("保存转录失败: %w", err)
 	}
+	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageIndexing, "")
 	c.indexAfterTranscription(ctx, task)
 
 	return c.summarizeTask(ctx, task)
@@ -535,6 +538,7 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 }
 
 func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
+	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageSummarizing, "")
 	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
 	if err != nil {
 		return fmt.Errorf("查询转录失败: %w", err)

@@ -104,6 +104,9 @@ func (c *Consumer) recordTaskFailure(taskID int64, jobType, stage string, err er
 	if findErr != nil {
 		return findErr
 	}
+	if strings.TrimSpace(stage) == "" {
+		stage = task.Stage
+	}
 	policy := c.retryPolicy.normalized()
 	maxRetries := task.MaxRetries
 	if maxRetries <= 0 {
