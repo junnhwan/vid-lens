@@ -138,11 +138,14 @@ tools:
   ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
   ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
   cookies_path: ""
+  proxy_url: ""
 ```
 
 FFmpeg 用于提取和切分音频，yt-dlp 用于从 B 站 / YouTube 等链接下载视频。如果你的安装路径不同，需要同步修改 `config.yaml`。
 
 B 站链接在服务器公网 IP 上可能触发 `HTTP Error 412: Precondition Failed`，这通常是 B 站风控拦截，不是后端上传或 AI 配置问题。此时可以改用本地视频上传；如果确实要支持服务器下载 B 站链接，可以把 Netscape 格式的 B 站 cookies 文件路径配置到 `tools.cookies_path`，后端会把它传给 yt-dlp。
+
+如果部署环境访问 YouTube 需要代理，可以配置 `tools.proxy_url`，例如 `http://127.0.0.1:7890`。后端只会把该代理传给 `yt-dlp`，不会影响数据库、Redis、MinIO、Milvus 或 AI API 请求。URL 下载会限制到最高 720p，避免公开视频下载时拉取 4K 源视频导致上传接口长时间阻塞。
 
 ### 4. 启动后端
 

@@ -48,6 +48,7 @@ tools:
   ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
   ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
   cookies_path: ""
+  proxy_url: ""
 
 jwt:
   secret: "vidlens-jwt-secret-change-in-production"

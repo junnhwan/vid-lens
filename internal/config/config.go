@@ -83,6 +83,7 @@ type ToolsConfig struct {
 	FFmpegPath  string `yaml:"ffmpeg_path"`
 	YtDlpPath   string `yaml:"ytdlp_path"`
 	CookiesPath string `yaml:"cookies_path"`
+	ProxyURL    string `yaml:"proxy_url"`
 }
 
 type JWTConfig struct {

@@ -125,7 +125,7 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 		return nil, err
 	}
 
-	localPath, err := ytdlp.DownloadVideo(ctx, s.tools.YtDlpPath, s.tools.FFmpegPath, s.tools.CookiesPath, videoURL)
+	localPath, err := ytdlp.DownloadVideo(ctx, s.tools.YtDlpPath, s.tools.FFmpegPath, s.tools.CookiesPath, s.tools.ProxyURL, videoURL)
 	if err != nil {
 		log.Printf("[Media] URL upload download failed: userID=%d url=%s err=%v", userID, sanitizeURLForLog(videoURL), err)
 		return nil, fmt.Errorf("视频下载失败: %w", err)
