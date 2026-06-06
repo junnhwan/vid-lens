@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang='zh-CN'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>VidLens RAG 功能演示</title>
+  <link href='https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap' rel='stylesheet'>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Noto Sans SC', sans-serif;
+      background: #0a0e1a;
+      color: #e8eef7;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 3rem; }
+    .header h1 {
+      font-size: 2.5rem;
+      background: linear-gradient(135deg, #d4af37, #f4e4a6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 1rem;
+    }
+    .section {
+      backdrop-filter: blur(20px);
+      background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      border-radius: 1.5rem;
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+    .section-title {
+      font-size: 1.5rem;
+      color: #d4af37;
+      margin-bottom: 1.5rem;
+    }
+    .nav-demo {
+      display: flex;
+      justify-content: space-between;
+      padding: 1.5rem 2rem;
+      background: rgba(10, 14, 26, 0.85);
+      border: 1px solid rgba(212, 175, 55, 0.15);
+      border-radius: 1rem;
+      margin-bottom: 1rem;
+    }
+    .brand { display: flex; gap: 1rem; align-items: center; }
+    .brand-text {
+      font-size: 1.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #d4af37, #f4e4a6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .btn-config {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      padding: 0.65rem 1rem;
+      border-radius: 0.75rem;
+      color: #d4af37;
+      cursor: pointer;
+      font-size: 1.2rem;
+    }
+    .profile-card {
+      background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+      border: 1px solid rgba(139, 149, 168, 0.2);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .profile-header { display: flex; justify-content: space-between; margin-bottom: 1rem; }
+    .default-badge {
+      background: rgba(212, 175, 55, 0.2);
+      border: 1px solid rgba(212, 175, 55, 0.4);
+      color: #d4af37;
+      padding: 0.25rem 0.75rem;
+      border-radius: 0.5rem;
+      font-size: 0.8rem;
+    }
+    .detail-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .detail-row .label { color: #8b95a8; min-width: 90px; }
+    .detail-row .value { color: #b8c5db; font-family: monospace; }
+    .message {
+      display: flex;
+      margin-bottom: 1.5rem;
+    }
+    .message.user { justify-content: flex-end; }
+    .message.user .content {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.15), rgba(41, 98, 255, 0.12));
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      padding: 1rem 1.25rem;
+      border-radius: 1rem 1rem 0.25rem 1rem;
+      max-width: 70%;
+    }
+    .message.assistant { justify-content: flex-start; }
+    .message.assistant .content {
+      background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+      border: 1px solid rgba(139, 149, 168, 0.2);
+      padding: 1rem 1.25rem;
+      border-radius: 1rem 1rem 1rem 0.25rem;
+      max-width: 80%;
+    }
+    .citation {
+      background: rgba(10, 14, 26, 0.5);
+      padding: 0.75rem;
+      border-radius: 0.65rem;
+      margin-top: 0.5rem;
+      border: 1px solid rgba(139, 149, 168, 0.1);
+    }
+    .citation-score {
+      color: #5b8fff;
+      font-size: 0.8rem;
+      margin-bottom: 0.5rem;
+    }
+    .citation-content {
+      color: #8b95a8;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .btn-amber {
+      background: linear-gradient(135deg, #d4af37, #f4e4a6);
+      color: #0a0e1a;
+      border: none;
+      padding: 0.75rem 1.75rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .note { color: #8b95a8; font-size: 0.9rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <div class='header'>
+      <h1>🎨 VidLens RAG 功能演示</h1>
+      <p style='color: #8b95a8;'>新中式科技美学 · AI 配置与视频对话</p>
+    </div>
+
+    <div class='section'>
+      <div class='section-title'>🧭 功能 1: 导航栏新增模型配置入口</div>
+      <div class='nav-demo'>
+        <div class='brand'>
+          <span style='font-size: 2rem;'>◇</span>
+          <span class='brand-text'>镜知 VidLens</span>
+        </div>
+        <button class='btn-config'>🤖</button>
+      </div>
+      <p class='note'>💡 点击 🤖 图标可打开 AI 配置模态框</p>
+    </div>
+
+    <div class='section'>
+      <div class='section-title'>⚙️ 功能 2: AI 配置管理</div>
+      <div class='profile-card'>
+        <div class='profile-header'>
+          <h4>我的模型配置</h4>
+          <span class='default-badge'>默认</span>
+        </div>
+        <div class='detail-row'><span class='label'>LLM:</span><span class='value'>openai_compatible / deepseek-chat</span></div>
+        <div class='detail-row'><span class='label'>ASR:</span><span class='value'>mimo / mimo-v2.5-asr</span></div>
+        <div class='detail-row'><span class='label'>Embedding:</span><span class='value'>openai_compatible / text-embedding-3-small</span></div>
+      </div>
+      <button class='btn-amber'>+ 新建配置</button>
+      <p class='note'>💡 支持配置 ASR（语音转写）、LLM（大模型）、Embedding（向量化）</p>
+    </div>
+
+    <div class='section'>
+      <div class='section-title'>💬 功能 3: 视频 RAG 对话</div>
+      <div class='message user'>
+        <div class='content'>这个视频里讲的分布式锁为什么要校验 owner？</div>
+      </div>
+      <div class='message assistant'>
+        <div class='content'>
+          <p>视频中提到，释放锁时校验 owner 是为了避免误删其他请求持有的锁。如果请求 A 获取了锁但执行时间过长导致锁过期，这时请求 B 获取到了同一把锁，如果请求 A 此时释放锁却不校验 owner，就会把请求 B 的锁误删掉。</p>
+          <div style='margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(139, 149, 168, 0.15);'>
+            <div style='color: #d4af37; font-size: 0.85rem; margin-bottom: 0.75rem;'>📚 参考片段</div>
+            <div class='citation'>
+              <div class='citation-score'>相关度: 92%</div>
+              <div class='citation-content'>分布式锁释放时要校验 owner，否则可能会误删其他请求持有的锁...</div>
+            </div>
+            <div class='citation'>
+              <div class='citation-score'>相关度: 85%</div>
+              <div class='citation-content'>为了保证并发安全，Redis 分布式锁必须使用 SET NX EX 命令...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class='note'>💡 AI 回答会附带引用片段（citations），显示相关度和原文内容</p>
+    </div>
+
+    <div class='section'>
+      <div class='section-title'>🎨 设计风格说明</div>
+      <ul style='color: #8b95a8; line-height: 2; list-style: none;'>
+        <li>✅ 新中式科技美学 - 深色墨底 + 金色渐变</li>
+        <li>✅ 毛玻璃效果 - backdrop-filter blur</li>
+        <li>✅ 流畅动画 - 0.3s cubic-bezier 过渡</li>
+        <li>✅ API Key 安全 - 只显示脱敏后的 Key</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

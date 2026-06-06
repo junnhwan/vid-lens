@@ -1,6 +1,6 @@
 <template>
   <div id="app">
-    <Navbar :user="user" @logout="logout" @openAuth="openAuth" />
+    <Navbar :user="user" @logout="logout" @openAuth="openAuth" @openConfig="openConfig" />
 
     <div class="app-layout">
       <Sidebar
@@ -44,6 +44,13 @@
       @submit="handleAuth"
     />
 
+    <AIConfigModal
+      ref="aiConfigModal"
+      :show="showConfig"
+      @close="closeConfig"
+      @updated="onConfigUpdated"
+    />
+
     <transition name="toast">
       <div v-if="toast" class="toast" :class="{ error: toastIsError }">{{ toast }}</div>
     </transition>
@@ -57,6 +64,7 @@ import Sidebar from './components/Sidebar.vue'
 import TaskList from './components/TaskList.vue'
 import TaskDrawer from './components/TaskDrawer.vue'
 import AuthModal from './components/AuthModal.vue'
+import AIConfigModal from './components/AIConfigModal.vue'
 import api from './api'
 import { buildStoredUser } from './authSession.js'
 import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
@@ -77,6 +85,8 @@ const authLoading = ref(false)
 const authMsg = ref('')
 const authError = ref(false)
 const pollingTimers = ref({})
+const showConfig = ref(false)
+const aiConfigModal = ref(null)
 
 // 计算属性
 const taskStats = computed(() => ({
@@ -294,6 +304,20 @@ const logout = () => {
   localStorage.removeItem('user')
   tasks.value = []
   showToast('已退出')
+}
+
+// AI 配置相关
+const openConfig = () => {
+  showConfig.value = true
+  aiConfigModal.value?.loadProfiles()
+}
+
+const closeConfig = () => {
+  showConfig.value = false
+}
+
+const onConfigUpdated = () => {
+  showToast('配置已更新')
 }
 
 onMounted(() => {

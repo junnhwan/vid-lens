@@ -7,6 +7,9 @@
       </div>
       <div class="nav-right">
         <template v-if="user">
+          <button class="btn-icon-text" @click="$emit('openConfig')" title="模型配置">
+            <span class="icon">🤖</span>
+          </button>
           <div class="user-badge">
             <span class="user-avatar">{{ user.nickname?.[0] || 'U' }}</span>
             <span class="user-name">{{ user.nickname || user.username }}</span>
@@ -24,7 +27,7 @@ defineProps({
   user: Object
 })
 
-defineEmits(['logout', 'openAuth'])
+defineEmits(['logout', 'openAuth', 'openConfig'])
 </script>
 
 <style scoped>
@@ -111,6 +114,33 @@ defineEmits(['logout', 'openAuth'])
 }
 
 .nav-right { display: flex; align-items: center; gap: 1.25rem; }
+
+.btn-icon-text {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  padding: 0.65rem 1rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #d4af37;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.btn-icon-text:hover {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
+  border-color: rgba(212, 175, 55, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
+}
+
+.btn-icon-text .icon {
+  font-size: 1.2rem;
+}
+
 .user-badge {
   display: flex;
   align-items: center;
