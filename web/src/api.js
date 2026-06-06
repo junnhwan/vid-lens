@@ -1,5 +1,7 @@
 import axios from 'axios'
+import { unwrapApiResponse } from './apiEnvelope.js'
 import { shouldResetSessionOnUnauthorized } from './authErrorPolicy.js'
+import { getStoredAuthToken } from './authSession.js'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -8,16 +10,16 @@ const api = axios.create({
 
 // 请求拦截器：自动带 Token
 api.interceptors.request.use(config => {
-  const user = JSON.parse(localStorage.getItem('user') || '{}')
-  if (user.token) {
-    config.headers.Authorization = `Bearer ${user.token}`
+  const token = getStoredAuthToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
 
 // 响应拦截器：统一处理错误
 api.interceptors.response.use(
-  res => res.data,
+  res => unwrapApiResponse(res),
   err => {
     if (err.response?.status === 401 && shouldResetSessionOnUnauthorized(err.config?.url)) {
       localStorage.removeItem('user')

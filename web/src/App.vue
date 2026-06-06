@@ -25,6 +25,7 @@
       <!-- 上传磁贴 -->
       <section class="upload-tiles">
         <div class="tile" :class="{ disabled: !user, uploading }"
+             @click="guardLocalUploadClick"
              @dragover.prevent="dragging = true"
              @dragleave.prevent="dragging = false"
              @drop.prevent="handleDrop">
@@ -37,7 +38,7 @@
           </button>
         </div>
 
-        <div class="tile" :class="{ disabled: !user, uploading }">
+        <div class="tile" :class="{ disabled: !user, uploading }" @click="guardUnauthedClick">
           <div class="tile-icon">🌐</div>
           <h3>链接下载</h3>
           <p>B站 / YouTube 视频链接</p>
@@ -152,6 +153,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import api from './api'
+import { buildStoredUser } from './authSession.js'
+import { isTaskActionDisabled } from './taskActionPolicy.js'
+import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
+import { shouldStopPolling } from './taskPollingPolicy.js'
 
 // 状态
 const user = ref(null)
@@ -208,10 +213,21 @@ const formatTime = (str) => {
 
 const statusClass = (s) => ['pending', 'queued', 'running', 'completed', 'failed'][s] || 'pending'
 const statusText = (s) => ['待处理', '排队中', '处理中', '已完成', '失败'][s] || '未知'
-const isActionDisabled = (t) => t.status !== 3
+const isActionDisabled = (t) => isTaskActionDisabled(t, loading.value[t.id])
 const renderMarkdown = (content) => marked.parse(content || '')
 
 // 业务逻辑
+const guardUnauthedClick = () => {
+  if (!user.value) openAuth()
+}
+
+const guardLocalUploadClick = (e) => {
+  if (user.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  openAuth()
+}
+
 const triggerFileInput = () => {
   if (!user.value) {
     showToast('请先登录', true)
@@ -288,7 +304,7 @@ const fetchTasks = async () => {
   }
   try {
     const res = await api.listTasks()
-    tasks.value = res || []
+    tasks.value = res?.list || []
   } catch (err) {
     console.error(err)
   }
@@ -305,13 +321,20 @@ const deleteTask = async (task) => {
   }
 }
 
-const toggleExpand = (id) => {
+const toggleExpand = async (id) => {
   expanded.value[id] = !expanded.value[id]
+  if (!expanded.value[id]) return
+
+  const task = tasks.value.find(t => t.id === id)
+  if (needsTaskDetail(task)) {
+    await refreshTaskDetail(id)
+  }
 }
 
 const doTranscribe = async (task) => {
-  if (task.transcription?.content) {
+  if (task.transcription?.content || needsResultDetail(task, 'transcription')) {
     expanded.value[task.id] = true
+    await refreshTaskDetail(task.id)
     return
   }
   if (loading.value[task.id]) return
@@ -327,8 +350,9 @@ const doTranscribe = async (task) => {
 }
 
 const doAnalyze = async (task) => {
-  if (task.summary?.content) {
+  if (task.summary?.content || needsResultDetail(task, 'summary')) {
     expanded.value[task.id] = true
+    await refreshTaskDetail(task.id)
     return
   }
   if (loading.value[task.id]) return
@@ -349,12 +373,16 @@ const startPolling = (taskId, type) => {
     await fetchTasks()
     const task = tasks.value.find(t => t.id === taskId)
     if (!task) return
-    const hasResult = type === 'transcription' ? task.transcription?.content : task.summary?.content
-    if (hasResult) {
+    if (shouldStopPolling(task, type)) {
       clearInterval(timer)
       delete pollingTimers.value[taskId]
       loading.value[taskId] = false
-      showToast('处理完成')
+      if (task.status === 3) {
+        await refreshTaskDetail(taskId)
+        showToast('处理完成')
+      } else {
+        showToast(task.error_msg || '处理失败', true)
+      }
     }
   }, 3000)
   pollingTimers.value[taskId] = timer
@@ -365,6 +393,18 @@ const startPolling = (taskId, type) => {
       loading.value[taskId] = false
     }
   }, 300000)
+}
+
+const refreshTaskDetail = async (taskId) => {
+  try {
+    const detail = await api.getTask(taskId)
+    const index = tasks.value.findIndex(t => t.id === taskId)
+    if (index >= 0) {
+      tasks.value[index] = { ...tasks.value[index], ...detail }
+    }
+  } catch (err) {
+    console.error(err)
+  }
 }
 
 // 认证相关
@@ -393,11 +433,12 @@ const handleAuth = async () => {
       ? await api.login(username, password)
       : await api.register(username, password, nickname)
     if (authMode.value === 'login') {
-      user.value = res.user
-      localStorage.setItem('user', JSON.stringify(res.user))
+      const sessionUser = buildStoredUser(res.user, res.token)
+      user.value = sessionUser
+      localStorage.setItem('user', JSON.stringify(sessionUser))
       localStorage.setItem('token', res.token)
       closeAuth()
-      showToast(`欢迎回来，${res.user.nickname || res.user.username}`)
+      showToast(`欢迎回来，${sessionUser.nickname || sessionUser.username}`)
       await fetchTasks()
     } else {
       authMsg.value = '注册成功，请登录'
