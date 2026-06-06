@@ -40,6 +40,7 @@ tmp/
 web/src/App-old.vue
 
 # Local design notes
+DESIGN_UPDATES.md
 docs/DESIGN_UPDATES.md
 
 other-grill.md
