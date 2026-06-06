@@ -8,6 +8,24 @@
         </div>
 
         <div class="drawer-content">
+          <div class="drawer-tabs">
+            <button
+              :class="['tab-btn', { active: activeTab === 'detail' }]"
+              @click="activeTab = 'detail'"
+            >
+              📋 详情
+            </button>
+            <button
+              :class="['tab-btn', { active: activeTab === 'chat' }]"
+              @click="activeTab = 'chat'"
+              :disabled="!canUseRAG"
+              :title="canUseRAG ? '问问这个视频' : '需要先完成文字提取'"
+            >
+              💬 问问视频
+            </button>
+          </div>
+
+          <div v-if="activeTab === 'detail'">
           <div class="drawer-meta">
             <div class="meta-item">
               <span class="meta-label">创建时间</span>
@@ -55,6 +73,11 @@
               <div class="result-markdown" v-html="renderMarkdown(task.summary.content)"></div>
             </div>
           </template>
+          </div>
+
+          <div v-if="activeTab === 'chat'" class="chat-tab">
+            <VideoRAGChat :task="task" @error="handleChatError" />
+          </div>
         </div>
       </div>
     </div>
@@ -62,17 +85,28 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { marked } from 'marked'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
 import { taskFailureMessage } from '../taskDetailPolicy.js'
+import VideoRAGChat from './VideoRAGChat.vue'
 
 const props = defineProps({
   task: Object,
   loading: Boolean
 })
 
-defineEmits(['close', 'transcribe', 'analyze'])
+const emit = defineEmits(['close', 'transcribe', 'analyze'])
+
+const activeTab = ref('detail')
+
+const canUseRAG = computed(() => {
+  return props.task?.transcription?.content || props.task?.status === 3
+})
+
+const handleChatError = (msg) => {
+  alert(msg)
+}
 
 const formatTime = (str) => {
   if (!str) return '--'
@@ -177,6 +211,52 @@ const failureMessage = computed(() => taskFailureMessage(props.task))
   padding: 2rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-tabs {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(139, 149, 168, 0.15);
+  padding-bottom: 1rem;
+}
+
+.tab-btn {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.75rem 0.75rem 0 0;
+  color: #8b95a8;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tab-btn:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.3);
+  color: #d4af37;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.15), rgba(41, 98, 255, 0.1));
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.2);
+}
+
+.tab-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.chat-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .drawer-content::-webkit-scrollbar {

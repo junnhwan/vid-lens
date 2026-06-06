@@ -68,4 +68,29 @@ export default {
   },
   mergeChunks: (fileMD5, filename, totalChunks) =>
     api.post('/media/merge-chunks', { file_md5: fileMD5, filename, total_chunks: totalChunks }),
+
+  // AI 配置
+  getAIProfiles: () => api.get('/ai/profiles'),
+  createAIProfile: (profile) => api.post('/ai/profiles', profile),
+  updateAIProfile: (id, profile) => api.put(`/ai/profiles/${id}`, profile),
+  deleteAIProfile: (id) => api.delete(`/ai/profiles/${id}`),
+  testAIProfile: (profile) => api.post('/ai/profiles/test', profile),
+
+  // RAG 索引
+  buildRAGIndex: (taskId, rebuild = false) =>
+    api.post(`/media/task/${taskId}/rag-index`, { rebuild }),
+  getRAGIndexStatus: (taskId) =>
+    api.get(`/media/task/${taskId}/rag-index`),
+
+  // 聊天会话
+  createChatSession: (taskId, title) =>
+    api.post('/chat/sessions', { task_id: taskId, title }),
+  getChatSessions: (taskId) =>
+    api.get('/chat/sessions', { params: { task_id: taskId } }),
+  getChatMessages: (sessionId) =>
+    api.get(`/chat/sessions/${sessionId}/messages`),
+  sendChatMessage: (sessionId, question, topK = 5) =>
+    api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK }),
+  deleteChatSession: (sessionId) =>
+    api.delete(`/chat/sessions/${sessionId}`),
 }
