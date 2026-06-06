@@ -98,7 +98,7 @@
         </div>
 
         <div class="tasks-list">
-          <div v-for="t in filteredTasks" :key="t.id" class="task-card" @click="toggleExpand(t.id)">
+          <div v-for="t in filteredTasks" :key="t.id" class="task-card" @click="openTaskDrawer(t)">
             <button class="task-delete" @click.stop="deleteTask(t)" title="删除">×</button>
 
             <div class="task-header">
@@ -121,29 +121,6 @@
                 <span class="btn-icon">🤖</span> AI 总结
               </button>
             </div>
-
-            <!-- 展开内容 -->
-            <transition name="expand">
-              <div v-if="expanded[t.id]" class="task-result" @click.stop>
-                <div v-if="loading[t.id]" class="result-loading">
-                  <div class="spinner small"></div> 处理中...
-                </div>
-                <template v-else>
-                  <div v-if="failureMessage(t)" class="result-block error-block">
-                    <h4>处理失败</h4>
-                    <p class="error-text">{{ failureMessage(t) }}</p>
-                  </div>
-                  <div v-if="t.transcription?.content" class="result-block">
-                    <h4>📝 文字提取</h4>
-                    <pre class="result-text">{{ t.transcription.content }}</pre>
-                  </div>
-                  <div v-if="t.summary?.content" class="result-block">
-                    <h4>🤖 AI 总结</h4>
-                    <div class="result-markdown" v-html="renderMarkdown(t.summary.content)"></div>
-                  </div>
-                </template>
-              </div>
-            </transition>
           </div>
         </div>
       </section>
@@ -156,6 +133,68 @@
       </div>
     </main>
   </div>
+
+    <!-- 任务详情抽屉 -->
+    <transition name="drawer">
+      <div v-if="selectedTask" class="drawer-backdrop" @click="closeDrawer">
+        <div class="task-drawer" @click.stop>
+          <div class="drawer-header">
+            <h3>{{ selectedTask.filename }}</h3>
+            <button class="drawer-close" @click="closeDrawer">×</button>
+          </div>
+
+          <div class="drawer-content">
+            <div class="drawer-meta">
+              <div class="meta-item">
+                <span class="meta-label">创建时间</span>
+                <span class="meta-value">{{ formatTime(selectedTask.created_at) }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">文件大小</span>
+                <span class="meta-value">{{ formatFileSize(selectedTask.file_size) }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">状态</span>
+                <span class="meta-status" :class="statusClass(selectedTask.status)">
+                  {{ statusText(selectedTask.status) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="drawer-actions">
+              <button class="drawer-action-btn" @click.stop="doTranscribe(selectedTask)" :disabled="isActionDisabled(selectedTask)">
+                <span class="btn-icon">📄</span> 提取文字
+              </button>
+              <button class="drawer-action-btn amber" @click.stop="doAnalyze(selectedTask)" :disabled="isActionDisabled(selectedTask)">
+                <span class="btn-icon">🤖</span> AI 总结
+              </button>
+            </div>
+
+            <div v-if="loading[selectedTask.id]" class="drawer-loading">
+              <div class="spinner"></div>
+              <span>处理中...</span>
+            </div>
+
+            <template v-else>
+              <div v-if="failureMessage(selectedTask)" class="drawer-result-block error-block">
+                <h4>❌ 处理失败</h4>
+                <p class="error-text">{{ failureMessage(selectedTask) }}</p>
+              </div>
+
+              <div v-if="selectedTask.transcription?.content" class="drawer-result-block">
+                <h4>📝 文字提取</h4>
+                <pre class="result-text">{{ selectedTask.transcription.content }}</pre>
+              </div>
+
+              <div v-if="selectedTask.summary?.content" class="drawer-result-block">
+                <h4>🤖 AI 总结</h4>
+                <div class="result-markdown" v-html="renderMarkdown(selectedTask.summary.content)"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <!-- Toast 消息 -->
     <transition name="toast">
@@ -207,7 +246,7 @@ const uploadMsg = ref('')
 const dragging = ref(false)
 const toast = ref('')
 const toastIsError = ref(false)
-const expanded = ref({})
+const selectedTask = ref(null)
 const loading = ref({})
 const activeTab = ref('all')
 const searchQuery = ref('')
@@ -249,6 +288,18 @@ const formatTime = (str) => {
   if (!str) return '--'
   const d = new Date(str)
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return '--'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = bytes
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex++
+  }
+  return `${size.toFixed(2)} ${units[unitIndex]}`
 }
 
 const statusClass = (s) => ['pending', 'queued', 'running', 'completed', 'failed'][s] || 'pending'
@@ -357,30 +408,34 @@ const deleteTask = async (task) => {
     await api.deleteTask(task.id)
     showToast('删除成功')
     tasks.value = tasks.value.filter(t => t.id !== task.id)
+    if (selectedTask.value?.id === task.id) {
+      selectedTask.value = null
+    }
   } catch (err) {
     showToast('删除失败', true)
   }
 }
 
-const toggleExpand = async (id) => {
-  expanded.value[id] = !expanded.value[id]
-  if (!expanded.value[id]) return
-
-  const task = tasks.value.find(t => t.id === id)
+const openTaskDrawer = async (task) => {
+  selectedTask.value = task
   if (needsTaskDetail(task)) {
-    await refreshTaskDetail(id)
+    await refreshTaskDetail(task.id)
   }
+}
+
+const closeDrawer = () => {
+  selectedTask.value = null
 }
 
 const doTranscribe = async (task) => {
   if (task.transcription?.content || needsResultDetail(task, 'transcription')) {
-    expanded.value[task.id] = true
+    selectedTask.value = task
     await refreshTaskDetail(task.id)
     return
   }
   if (loading.value[task.id]) return
   loading.value[task.id] = true
-  expanded.value[task.id] = true
+  selectedTask.value = task
   try {
     await api.transcribe(task.id)
     startPolling(task.id, 'transcription')
@@ -392,13 +447,13 @@ const doTranscribe = async (task) => {
 
 const doAnalyze = async (task) => {
   if (task.summary?.content || needsResultDetail(task, 'summary')) {
-    expanded.value[task.id] = true
+    selectedTask.value = task
     await refreshTaskDetail(task.id)
     return
   }
   if (loading.value[task.id]) return
   loading.value[task.id] = true
-  expanded.value[task.id] = true
+  selectedTask.value = task
   try {
     await api.analyze(task.id)
     startPolling(task.id, 'summary')
@@ -442,6 +497,9 @@ const refreshTaskDetail = async (taskId) => {
     const index = tasks.value.findIndex(t => t.id === taskId)
     if (index >= 0) {
       tasks.value[index] = { ...tasks.value[index], ...detail }
+    }
+    if (selectedTask.value?.id === taskId) {
+      selectedTask.value = { ...selectedTask.value, ...detail }
     }
   } catch (err) {
     console.error(err)
@@ -1353,6 +1411,7 @@ html, body {
   display: flex;
   gap: 1rem;
 }
+
 .action-btn {
   flex: 1;
   background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
@@ -1371,25 +1430,8 @@ html, body {
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   letter-spacing: 0.3px;
-  position: relative;
-  overflow: hidden;
 }
-.action-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(212, 175, 55, 0.15);
-  transform: translate(-50%, -50%);
-  transition: width 0.4s, height 0.4s;
-}
-.action-btn:hover:not(:disabled)::before {
-  width: 300px;
-  height: 300px;
-}
+
 .action-btn:hover:not(:disabled) {
   border-color: rgba(212, 175, 55, 0.5);
   color: #d4af37;
@@ -1397,86 +1439,33 @@ html, body {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
+
 .action-btn.amber {
   border-color: rgba(212, 175, 55, 0.35);
   color: #d4af37;
   background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
   box-shadow: 0 2px 12px rgba(212, 175, 55, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
+
 .action-btn.amber:hover:not(:disabled) {
   border-color: rgba(212, 175, 55, 0.6);
   background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
   box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
+
 .action-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
   filter: grayscale(0.5);
 }
+
 .btn-icon {
   font-size: 1.35rem;
   position: relative;
   z-index: 1;
 }
 
-/* 任务结果展开 */
-.task-result {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid rgba(139, 149, 168, 0.15);
-  position: relative;
-}
-.task-result::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent);
-}
-.result-loading {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1.5rem;
-  color: #8b95a8;
-  font-weight: 500;
-  background: rgba(10, 14, 26, 0.3);
-  border-radius: 0.875rem;
-  border: 1px solid rgba(139, 149, 168, 0.1);
-}
-.result-block {
-  margin-bottom: 2rem;
-  animation: resultFadeIn 0.5s ease-out;
-}
-@keyframes resultFadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.result-block:last-child {
-  margin-bottom: 0;
-}
-.result-block h4 {
-  font-size: 1.1rem;
-  margin-bottom: 1rem;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.result-block.error-block h4 {
-  background: linear-gradient(135deg, #f87171, #fca5a5);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
+/* 结果文本样式 */
 .error-text {
   background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
   border: 1px solid rgba(239, 68, 68, 0.3);
@@ -1489,6 +1478,7 @@ html, body {
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(239, 68, 68, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
+
 .result-text {
   background: rgba(10, 14, 26, 0.6);
   padding: 1.5rem;
@@ -1497,7 +1487,7 @@ html, body {
   line-height: 1.8;
   white-space: pre-wrap;
   color: #b8c5db;
-  max-height: 350px;
+  max-height: 400px;
   overflow-y: auto;
   border: 1px solid rgba(139, 149, 168, 0.15);
   backdrop-filter: blur(8px);
@@ -1506,26 +1496,31 @@ html, body {
   scrollbar-width: thin;
   scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
 }
+
 .result-text::-webkit-scrollbar {
   width: 8px;
 }
+
 .result-text::-webkit-scrollbar-track {
   background: rgba(10, 14, 26, 0.5);
   border-radius: 4px;
 }
+
 .result-text::-webkit-scrollbar-thumb {
   background: rgba(212, 175, 55, 0.3);
   border-radius: 4px;
 }
+
 .result-text::-webkit-scrollbar-thumb:hover {
   background: rgba(212, 175, 55, 0.5);
 }
+
 .result-markdown {
   background: rgba(10, 14, 26, 0.6);
   padding: 1.5rem;
   border-radius: 0.875rem;
   line-height: 1.9;
-  max-height: 450px;
+  max-height: 500px;
   overflow-y: auto;
   border: 1px solid rgba(139, 149, 168, 0.15);
   backdrop-filter: blur(8px);
@@ -1533,20 +1528,25 @@ html, body {
   scrollbar-width: thin;
   scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
 }
+
 .result-markdown::-webkit-scrollbar {
   width: 8px;
 }
+
 .result-markdown::-webkit-scrollbar-track {
   background: rgba(10, 14, 26, 0.5);
   border-radius: 4px;
 }
+
 .result-markdown::-webkit-scrollbar-thumb {
   background: rgba(212, 175, 55, 0.3);
   border-radius: 4px;
 }
+
 .result-markdown::-webkit-scrollbar-thumb:hover {
   background: rgba(212, 175, 55, 0.5);
 }
+
 .result-markdown :deep(h2), .result-markdown :deep(h3) {
   background: linear-gradient(135deg, #d4af37, #f4e4a6);
   -webkit-background-clip: text;
@@ -1557,27 +1557,33 @@ html, body {
   font-weight: 700;
   letter-spacing: 0.3px;
 }
+
 .result-markdown :deep(p) {
   margin-bottom: 1rem;
   color: #b8c5db;
   font-size: 0.95rem;
 }
+
 .result-markdown :deep(strong) {
   color: #f4e4a6;
   font-weight: 600;
 }
+
 .result-markdown :deep(ul) {
   padding-left: 2rem;
   margin-bottom: 1rem;
 }
+
 .result-markdown :deep(li) {
   margin-bottom: 0.65rem;
   color: #b8c5db;
   position: relative;
 }
+
 .result-markdown :deep(li::marker) {
   color: #d4af37;
 }
+
 .result-markdown :deep(code) {
   background: rgba(212, 175, 55, 0.1);
   padding: 0.2rem 0.5rem;
@@ -1586,15 +1592,6 @@ html, body {
   font-size: 0.875rem;
   color: #f4e4a6;
   border: 1px solid rgba(212, 175, 55, 0.2);
-}
-.expand-enter-active, .expand-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.expand-enter-from, .expand-leave-to {
-  opacity: 0;
-  max-height: 0;
-  overflow: hidden;
-  transform: translateY(-10px);
 }
 
 /* Spinner */
@@ -1614,6 +1611,236 @@ html, body {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* 任务详情抽屉 */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  z-index: 1001;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-drawer {
+  width: 600px;
+  max-width: 90vw;
+  height: 100vh;
+  background: linear-gradient(135deg, rgba(10, 14, 26, 0.98), rgba(15, 25, 45, 0.98));
+  backdrop-filter: blur(32px) saturate(180%);
+  border-left: 1px solid rgba(212, 175, 55, 0.3);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2rem;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+}
+
+.drawer-header h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #d4af37, #f4e4a6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  flex: 1;
+  padding-right: 2rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-close {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  color: #ef4444;
+  font-size: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.drawer-close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  transform: rotate(90deg);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+}
+
+.drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
+}
+
+.drawer-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.drawer-content::-webkit-scrollbar-track {
+  background: rgba(10, 14, 26, 0.5);
+}
+
+.drawer-content::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+  border-radius: 4px;
+}
+
+.drawer-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.5);
+}
+
+.drawer-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  border-radius: 1rem;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.meta-label {
+  font-size: 0.8rem;
+  color: #8b95a8;
+  font-weight: 500;
+}
+
+.meta-value {
+  font-size: 0.95rem;
+  color: #e8eef7;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.drawer-actions {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.drawer-action-btn {
+  flex: 1;
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.25);
+  padding: 1rem 1.5rem;
+  border-radius: 0.875rem;
+  color: #8b95a8;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.drawer-action-btn:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.5);
+  color: #d4af37;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.2);
+}
+
+.drawer-action-btn.amber {
+  border-color: rgba(212, 175, 55, 0.35);
+  color: #d4af37;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
+}
+
+.drawer-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.drawer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 1rem;
+  color: #d4af37;
+  font-weight: 500;
+}
+
+.drawer-result-block {
+  margin-bottom: 2rem;
+  animation: resultFadeIn 0.5s ease-out;
+}
+
+.drawer-result-block:last-child {
+  margin-bottom: 0;
+}
+
+.drawer-result-block h4 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, #d4af37, #f4e4a6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.drawer-result-block.error-block h4 {
+  background: linear-gradient(135deg, #f87171, #fca5a5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.drawer-enter-active, .drawer-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.drawer-enter-active .task-drawer,
+.drawer-leave-active .task-drawer {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.drawer-enter-from, .drawer-leave-to {
+  opacity: 0;
+}
+
+.drawer-enter-from .task-drawer {
+  transform: translateX(100%);
+}
+
+.drawer-leave-to .task-drawer {
+  transform: translateX(100%);
 }
 
 /* 登录弹窗 */
