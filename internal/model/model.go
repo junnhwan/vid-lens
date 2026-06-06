@@ -9,6 +9,7 @@ func AllModels() []interface{} {
 		&VideoAsset{},
 		&VideoTask{},
 		&VideoTranscription{},
+		&VideoTranscriptionChunk{},
 		&AISummary{},
 		&UserAIProfile{},
 		&VideoChunk{},

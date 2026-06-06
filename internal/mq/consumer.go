@@ -499,14 +499,22 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 
 	parts := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
+		if completed := c.completedTranscriptionChunk(taskID, i); completed != "" {
+			log.Printf("[Kafka] 音频切片转写片段复用: taskID=%d, chunk=%d/%d, path=%s, chars=%d", taskID, i+1, len(chunks), chunk, len([]rune(completed)))
+			parts = append(parts, completed)
+			continue
+		}
+		c.markTranscriptionChunkRunning(taskID, i, chunk)
 		text, err := strategy.Transcribe(ctx, chunk)
 		if err != nil {
+			c.markTranscriptionChunkFailed(taskID, i, chunk, err)
 			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
 		}
 		text = strings.TrimSpace(text)
 		chars := len([]rune(text))
 		log.Printf("[Kafka] 音频切片转写片段完成: taskID=%d, chunk=%d/%d, path=%s, chars=%d", taskID, i+1, len(chunks), chunk, chars)
 		if text != "" {
+			c.markTranscriptionChunkCompleted(taskID, i, chunk, text)
 			parts = append(parts, text)
 		}
 	}
@@ -517,6 +525,47 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 	transcript := strings.Join(parts, "\n\n")
 	log.Printf("[Kafka] 音频切片转写完成: taskID=%d, chunks=%d, transcriptChars=%d", taskID, len(chunks), len([]rune(transcript)))
 	return transcript, nil
+}
+
+func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int) string {
+	if c.repo == nil || c.repo.TranscriptionChunk == nil {
+		return ""
+	}
+	chunk, err := c.repo.TranscriptionChunk.FindByTaskAndIndex(taskID, chunkIndex)
+	if err != nil || chunk == nil {
+		return ""
+	}
+	if chunk.Status == model.TranscriptionChunkStatusCompleted && strings.TrimSpace(chunk.Content) != "" {
+		return strings.TrimSpace(chunk.Content)
+	}
+	return ""
+}
+
+func (c *Consumer) markTranscriptionChunkRunning(taskID int64, chunkIndex int, audioObject string) {
+	if c.repo == nil || c.repo.TranscriptionChunk == nil {
+		return
+	}
+	if err := c.repo.TranscriptionChunk.UpsertRunning(taskID, chunkIndex, audioObject); err != nil {
+		log.Printf("[Kafka] 转写分片状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, err)
+	}
+}
+
+func (c *Consumer) markTranscriptionChunkCompleted(taskID int64, chunkIndex int, audioObject, content string) {
+	if c.repo == nil || c.repo.TranscriptionChunk == nil {
+		return
+	}
+	if err := c.repo.TranscriptionChunk.UpsertCompleted(taskID, chunkIndex, audioObject, content); err != nil {
+		log.Printf("[Kafka] 转写分片完成状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, err)
+	}
+}
+
+func (c *Consumer) markTranscriptionChunkFailed(taskID int64, chunkIndex int, audioObject string, err error) {
+	if c.repo == nil || c.repo.TranscriptionChunk == nil {
+		return
+	}
+	if writeErr := c.repo.TranscriptionChunk.UpsertFailed(taskID, chunkIndex, audioObject, err.Error()); writeErr != nil {
+		log.Printf("[Kafka] 转写分片失败状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, writeErr)
+	}
 }
 
 func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {

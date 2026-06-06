@@ -23,11 +23,12 @@ import (
 )
 
 type recordingAI struct {
-	summarizeInput  string
-	chunksInput     []string
-	transcribeInput []string
-	transcribeUsed  bool
-	transcripts     map[string]string
+	summarizeInput   string
+	chunksInput      []string
+	transcribeInput  []string
+	transcribeUsed   bool
+	transcripts      map[string]string
+	transcribeErrors map[string]error
 }
 
 type emptyProfileResolver struct{}
@@ -39,6 +40,9 @@ func (emptyProfileResolver) GetDefaultAIProfile(int64) (*ai.Profile, error) {
 func (a *recordingAI) Transcribe(_ context.Context, audioPath string) (string, error) {
 	a.transcribeUsed = true
 	a.transcribeInput = append(a.transcribeInput, audioPath)
+	if a.transcribeErrors != nil && a.transcribeErrors[audioPath] != nil {
+		return "", a.transcribeErrors[audioPath]
+	}
 	if a.transcripts != nil {
 		return a.transcripts[audioPath], nil
 	}
@@ -264,6 +268,101 @@ func TestTranscribeAudioReturnsErrorWhenSplitCreatesNoChunks(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "没有可转写的音频片段") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTranscribeAudioPersistsChunksAndSkipsCompletedOnRetry(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+	chunkA := filepath.Join(tmpDir, "chunks", "chunk-001.mp3")
+	chunkB := filepath.Join(tmpDir, "chunks", "chunk-002.mp3")
+	if err := os.MkdirAll(filepath.Dir(chunkA), 0755); err != nil {
+		t.Fatalf("create chunk dir: %v", err)
+	}
+	for _, path := range []string{audioPath, chunkA, chunkB} {
+		if err := os.WriteFile(path, []byte("audio"), 0644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if err := repos.TranscriptionChunk.UpsertCompleted(42, 0, chunkA, "已完成第一段"); err != nil {
+		t.Fatalf("seed completed chunk: %v", err)
+	}
+
+	ai := &recordingAI{transcripts: map[string]string{chunkB: "第二段新文本"}}
+	consumer := &Consumer{
+		repo:       repos,
+		ai:         ai,
+		ffmpegPath: "ffmpeg",
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return []string{chunkA, chunkB}, nil
+		},
+	}
+
+	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
+	if err != nil {
+		t.Fatalf("transcribeAudio: %v", err)
+	}
+	if transcript != "已完成第一段\n\n第二段新文本" {
+		t.Fatalf("transcript = %q", transcript)
+	}
+	if len(ai.transcribeInput) != 1 || ai.transcribeInput[0] != chunkB {
+		t.Fatalf("ASR inputs = %#v, want only second chunk", ai.transcribeInput)
+	}
+
+	chunks, err := repos.TranscriptionChunk.ListByTaskID(42)
+	if err != nil {
+		t.Fatalf("list chunks: %v", err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("stored chunks = %d, want 2", len(chunks))
+	}
+	if chunks[0].Status != model.TranscriptionChunkStatusCompleted || chunks[0].Content != "已完成第一段" {
+		t.Fatalf("chunk 0 = %+v", chunks[0])
+	}
+	if chunks[1].Status != model.TranscriptionChunkStatusCompleted || chunks[1].Content != "第二段新文本" || chunks[1].Chars != 6 {
+		t.Fatalf("chunk 1 = %+v", chunks[1])
+	}
+}
+
+func TestTranscribeAudioPersistsFailedChunk(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	tmpDir := t.TempDir()
+	audioPath := filepath.Join(tmpDir, "audio.mp3")
+	chunkA := filepath.Join(tmpDir, "chunks", "chunk-001.mp3")
+	if err := os.MkdirAll(filepath.Dir(chunkA), 0755); err != nil {
+		t.Fatalf("create chunk dir: %v", err)
+	}
+	for _, path := range []string{audioPath, chunkA} {
+		if err := os.WriteFile(path, []byte("audio"), 0644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	ai := &recordingAI{transcribeErrors: map[string]error{chunkA: fmt.Errorf("asr timeout")}}
+	consumer := &Consumer{
+		repo:       repos,
+		ai:         ai,
+		ffmpegPath: "ffmpeg",
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return []string{chunkA}, nil
+		},
+	}
+
+	_, err := consumer.transcribeAudio(context.Background(), 43, audioPath, ai)
+	if err == nil {
+		t.Fatal("transcribeAudio succeeded, want ASR error")
+	}
+
+	chunk, findErr := repos.TranscriptionChunk.FindByTaskAndIndex(43, 0)
+	if findErr != nil {
+		t.Fatalf("find chunk: %v", findErr)
+	}
+	if chunk == nil {
+		t.Fatal("expected failed chunk row")
+	}
+	if chunk.Status != model.TranscriptionChunkStatusFailed || chunk.ErrorMsg == "" || chunk.RetryCount != 1 {
+		t.Fatalf("failed chunk = %+v", chunk)
 	}
 }
 

@@ -1876,6 +1876,163 @@ A：失败状态表示本次索引不可用。即使数据库里有旧 chunks，
 - 状态接口增加 Milvus readiness 或向量存在性校验。
 - 后续可把 RAG index 构建也作为独立 Kafka job，避免手动构建接口长时间等待。
 
+## 记录 012：ASR 分片结果持久化，支持失败片段复用
+
+### 背景
+
+路线图阶段五要求把 ASR chunk 结果落库。此前长视频已经按 300 秒切片转写，但每段结果只在内存中合并，数据库只保存最终全文。
+
+### 现象
+
+旧流程：
+
+```text
+split audio -> for each chunk call ASR -> memory merge -> save full transcription
+```
+
+问题是：
+
+```text
+第 3 段失败时，第 1/2 段已成功结果无法复用
+重试只能任务级重跑
+无法从数据库看到哪一段失败
+无法展示 2/3 这类转写进度
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/model/transcription_chunk.go
+internal/repository/transcription_chunk.go
+internal/mq/consumer.go
+internal/mq/consumer_test.go
+internal/model/model.go
+internal/repository/repository.go
+```
+
+阶段五前，`transcribeAudio` 只把每段文本 append 到内存数组，最后合并成 `video_transcriptions.content`。
+
+### 根因
+
+ASR 分片是处理过程事实，但没有持久化。任务失败后，系统只知道整体失败，不知道哪些片段已经成功，也不能跳过已完成片段。
+
+### 修复方案
+
+新增表：
+
+```text
+video_transcription_chunks
+
+id
+task_id
+chunk_index
+audio_object
+start_second
+end_second
+status       # pending / running / completed / failed
+content
+chars
+error_msg
+retry_count
+created_at
+updated_at
+```
+
+唯一索引：
+
+```text
+unique(task_id, chunk_index)
+```
+
+新的分片转写流程：
+
+```text
+split audio
+for each chunk:
+  如果 video_transcription_chunks 中该 chunk 已 completed：
+    复用 content，跳过 ASR
+  否则：
+    upsert status=running
+    call ASR
+    success -> upsert status=completed, content, chars
+    fail    -> upsert status=failed, error_msg, retry_count+1
+
+全部成功：
+  merge completed/current chunk content
+  save video_transcriptions.content
+```
+
+这次第一版不把音频 chunk 上传 MinIO，只记录本次处理的本地 chunk path 到 `audio_object`，后续如果要跨进程长期复用音频片段，可以再把 chunk 对象化。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/mq/consumer_test.go
+```
+
+关键测试点：
+
+```text
+已 completed 的 chunk 会被复用，不再调用 ASR
+新成功 chunk 会写 status=completed/content/chars
+ASR 失败 chunk 会写 status=failed/error_msg/retry_count
+最终合并文本包含复用 chunk 和新转写 chunk
+```
+
+验证命令：
+
+```powershell
+go test ./internal/mq
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/mq 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 长视频 ASR 第一版虽然做了 300 秒切片，但每段结果只在内存里合并，数据库只保存最终全文。这样如果第 3 段失败，前 2 段的成功结果也无法复用，用户重试时只能整个视频重新转写。
+>
+> 后来我加了 `video_transcription_chunks` 表，按 `task_id + chunk_index` 记录每段状态、文本、字符数和错误原因。consumer 转写前会先查该 chunk 是否已经 completed，如果已经完成就直接复用内容；否则才调用 ASR。某段失败时写 `failed/error_msg/retry_count`，下次重试可以跳过已完成片段，只重跑失败或未完成片段。
+>
+> 这个改动让长视频处理从“任务级重试”开始演进到“分片级恢复”，也为前端展示 `2/3` 这类进度打基础。
+
+### 面试官可能追问
+
+**Q：为什么不直接把音频 chunk 上传到 MinIO？**
+
+A：这是后续更完整的方案。第一版先持久化转写结果和状态，解决“成功文本不能复用”和“失败段不可见”的问题。音频 chunk 对象化会增加存储清理和生命周期管理，适合下一步做。
+
+**Q：复用 completed chunk 会不会复用旧模型结果？**
+
+A：当前表还没有记录 ASR model/version，所以复用粒度是 task + chunk。后续如果用户切换 ASR 模型，应该把 ASR provider/model 也纳入 chunk 记录或触发重建。
+
+**Q：失败 chunk 的 retry_count 和任务 retry_count 有什么区别？**
+
+A：任务 retry_count 表示 Kafka 业务任务整体重试次数；chunk retry_count 表示某个 ASR 片段失败次数。两者粒度不同，后续可以结合起来做更细的进度和告警。
+
+### 这次不要夸大的点
+
+- 当前没有前端进度条，只是后端数据已经可支撑。
+- 当前没有把音频 chunk 上传 MinIO，`audio_object` 第一版记录本地处理路径。
+- 当前没有按 ASR model 维度隔离 chunk 结果。
+
+### 后续演进
+
+- 保存 chunk 的 start/end 秒数，前端展示分片进度和定位。
+- 将音频 chunk 上传 MinIO，支持跨进程/跨实例重试。
+- 记录 ASR provider/model，避免切换模型后复用旧 chunk。
+
 ## 后续问题记录模板
 
 复制下面模板追加：
