@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	neturl "net/url"
 	"os"
@@ -22,15 +21,20 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/mq"
 	"vid-lens/internal/pkg/lock"
-	"vid-lens/internal/pkg/ytdlp"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 )
 
+type mediaProducer interface {
+	EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error
+	EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error
+	EnqueueDownload(ctx context.Context, taskID int64, key string) error
+}
+
 type MediaService struct {
 	repo    *repository.Repositories
 	storage *storage.MinIOStorage
-	mq      *mq.Producer
+	mq      mediaProducer
 	rdb     redis.Cmdable
 	cfg     config.UploadConfig
 	tools   config.ToolsConfig
@@ -64,6 +68,8 @@ type UploadResult struct {
 	Filename string `json:"filename"`
 	FileURL  string `json:"file_url"`
 	FileSize int64  `json:"file_size"`
+	Status   int8   `json:"status"`
+	Stage    string `json:"stage"`
 }
 
 // UploadFile 普通文件上传
@@ -105,6 +111,7 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 		FileURL:  asset.ObjectName,
 		FileSize: asset.FileSize,
 		Status:   status,
+		Stage:    model.TaskStageUploaded,
 	}
 	if err := s.repo.Task.Create(task); err != nil {
 		return nil, err
@@ -116,40 +123,63 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 		Filename: filename,
 		FileURL:  asset.ObjectName,
 		FileSize: asset.FileSize,
+		Status:   status,
+		Stage:    task.Stage,
 	}, nil
 }
 
-// UploadByURL 通过 URL 下载视频并上传
+// UploadByURL 创建 URL 下载任务并立即返回，真正下载由 Kafka consumer 执行。
 func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL string) (*UploadResult, error) {
 	if err := validateRemoteVideoURL(videoURL); err != nil {
 		return nil, err
 	}
 
-	localPath, err := ytdlp.DownloadVideo(ctx, s.tools.YtDlpPath, s.tools.FFmpegPath, s.tools.CookiesPath, s.tools.ProxyURL, videoURL)
-	if err != nil {
-		log.Printf("[Media] URL upload download failed: userID=%d url=%s err=%v", userID, sanitizeURLForLog(videoURL), err)
-		return nil, fmt.Errorf("视频下载失败: %w", err)
+	key := md5HexString(videoURL)
+	now := time.Now()
+	task := &model.VideoTask{
+		UserID:     userID,
+		FileMD5:    key,
+		Filename:   filenameForURLTask(videoURL),
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageDownloading,
+		SourceType: model.TaskSourceTypeURL,
+		SourceURL:  videoURL,
+		MaxRetries: 3,
+		StartedAt:  &now,
 	}
-	defer os.Remove(localPath)
-
-	fileMD5, size, err := hashLocalFile(localPath, s.cfg.MaxFileSize)
-	if err != nil {
-		return nil, fmt.Errorf("计算下载文件 MD5 失败: %w", err)
-	}
-
-	asset, err := s.repo.Asset.FindByMD5(fileMD5)
-	if err != nil {
+	if err := s.repo.Task.Create(task); err != nil {
 		return nil, err
 	}
-	objectName := fmt.Sprintf("videos/%s.mp4", uuid.New().String())
-	if asset == nil {
-		asset, err = s.createAssetFromLocalFile(ctx, fileMD5, localPath, objectName, "video/mp4", size)
-		if err != nil {
-			return nil, err
-		}
+
+	if err := s.mq.EnqueueDownload(ctx, task.ID, key); err != nil {
+		errMsg := "下载任务投递失败"
+		_ = s.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, errMsg)
+		return nil, fmt.Errorf("%s: %w", errMsg, err)
 	}
 
-	return s.createTaskFromAsset(userID, "WEB_"+filepath.Base(localPath), asset, model.TaskStatusPending)
+	return &UploadResult{
+		TaskID:   task.ID,
+		FileMD5:  task.FileMD5,
+		Filename: task.Filename,
+		FileURL:  task.FileURL,
+		FileSize: task.FileSize,
+		Status:   task.Status,
+		Stage:    task.Stage,
+	}, nil
+}
+
+func md5HexString(value string) string {
+	sum := md5.Sum([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func filenameForURLTask(videoURL string) string {
+	parsed, err := neturl.Parse(videoURL)
+	if err != nil || parsed.Hostname() == "" {
+		return "WEB_remote_video.mp4"
+	}
+	host := strings.ReplaceAll(parsed.Hostname(), ":", "_")
+	return "WEB_" + host + ".mp4"
 }
 
 func validateRemoteVideoURL(rawURL string) error {

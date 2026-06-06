@@ -3,6 +3,9 @@ package mq
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/segmentio/kafka-go"
 	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -279,6 +283,197 @@ func TestIndexAfterTranscriptionInvokesRAGIndexerAndSwallowsError(t *testing.T) 
 	if calls != 1 {
 		t.Fatalf("rag index calls = %d, want 1", calls)
 	}
+}
+
+func TestHandleDownloadCreatesAssetAndMarksTaskUploaded(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "11111111111111111111111111111111",
+		Filename:   "WEB_pending.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageDownloading,
+		SourceType: model.TaskSourceTypeURL,
+		SourceURL:  "https://www.youtube.com/watch?v=test",
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	videoPath := filepath.Join(tmpDir, "downloaded.mp4")
+	videoBytes := []byte("downloaded video content")
+	if err := os.WriteFile(videoPath, videoBytes, 0644); err != nil {
+		t.Fatalf("write video: %v", err)
+	}
+	expectedMD5 := md5Hex(videoBytes)
+
+	uploaded := false
+	consumer := &Consumer{
+		repo: repos,
+		downloadVideo: func(context.Context, string) (string, error) {
+			return videoPath, nil
+		},
+		uploadLocalFile: func(_ context.Context, localPath, objectName, contentType string) error {
+			uploaded = true
+			if localPath != videoPath {
+				t.Fatalf("uploaded path = %q, want %q", localPath, videoPath)
+			}
+			if !strings.HasPrefix(objectName, "videos/") || !strings.HasSuffix(objectName, ".mp4") {
+				t.Fatalf("unexpected object name: %q", objectName)
+			}
+			if contentType != "video/mp4" {
+				t.Fatalf("content type = %q, want video/mp4", contentType)
+			}
+			return nil
+		},
+	}
+
+	if err := consumer.handleDownload(context.Background(), downloadMessage(task.ID, task.FileMD5)); err != nil {
+		t.Fatalf("handleDownload: %v", err)
+	}
+	if !uploaded {
+		t.Fatal("expected downloaded file to be uploaded when asset does not exist")
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusPending || current.Stage != model.TaskStageUploaded {
+		t.Fatalf("task status/stage = %d/%q, want pending/uploaded", current.Status, current.Stage)
+	}
+	if current.FileMD5 != expectedMD5 {
+		t.Fatalf("task file md5 = %q, want %q", current.FileMD5, expectedMD5)
+	}
+	if current.AssetID == 0 || current.FileURL == "" || current.FileSize != int64(len(videoBytes)) {
+		t.Fatalf("task asset fields not populated: %+v", current)
+	}
+
+	asset, err := repos.Asset.FindByMD5(expectedMD5)
+	if err != nil {
+		t.Fatalf("find asset: %v", err)
+	}
+	if asset == nil {
+		t.Fatal("expected asset to be created")
+	}
+}
+
+func TestHandleDownloadReusesExistingAssetForSameMD5(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	videoBytes := []byte("same video content")
+	fileMD5 := md5Hex(videoBytes)
+	asset := &model.VideoAsset{
+		FileMD5:     fileMD5,
+		ObjectName:  "videos/existing.mp4",
+		FileSize:    int64(len(videoBytes)),
+		ContentType: "video/mp4",
+	}
+	if err := repos.Asset.Create(asset); err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "22222222222222222222222222222222",
+		Filename:   "WEB_pending.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageDownloading,
+		SourceType: model.TaskSourceTypeURL,
+		SourceURL:  "https://www.youtube.com/watch?v=test",
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	videoPath := filepath.Join(tmpDir, "downloaded.mp4")
+	if err := os.WriteFile(videoPath, videoBytes, 0644); err != nil {
+		t.Fatalf("write video: %v", err)
+	}
+
+	consumer := &Consumer{
+		repo: repos,
+		downloadVideo: func(context.Context, string) (string, error) {
+			return videoPath, nil
+		},
+		uploadLocalFile: func(context.Context, string, string, string) error {
+			t.Fatal("did not expect upload when matching asset already exists")
+			return nil
+		},
+	}
+
+	if err := consumer.handleDownload(context.Background(), downloadMessage(task.ID, task.FileMD5)); err != nil {
+		t.Fatalf("handleDownload: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.AssetID != asset.ID || current.FileURL != asset.ObjectName || current.FileMD5 != fileMD5 {
+		t.Fatalf("task did not reuse existing asset: %+v asset=%+v", current, asset)
+	}
+}
+
+func TestHandleDownloadFailureMarksTaskFailedWithoutLeakingQueryInLog(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "33333333333333333333333333333333",
+		Filename:   "WEB_pending.mp4",
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageDownloading,
+		SourceType: model.TaskSourceTypeURL,
+		SourceURL:  "https://www.bilibili.com/video/BV1xx?p=1&token=secret#frag",
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(originalOutput)
+
+	consumer := &Consumer{
+		repo: repos,
+		downloadVideo: func(context.Context, string) (string, error) {
+			return "", fmt.Errorf("yt-dlp 下载失败: HTTP Error 412")
+		},
+	}
+
+	if err := consumer.handleDownload(context.Background(), downloadMessage(task.ID, task.FileMD5)); err != nil {
+		t.Fatalf("handleDownload: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusFailed || current.Stage != model.TaskStageDownloading {
+		t.Fatalf("task status/stage = %d/%q, want failed/downloading", current.Status, current.Stage)
+	}
+	if !strings.Contains(current.ErrorMsg, "yt-dlp 下载失败") {
+		t.Fatalf("task error_msg = %q", current.ErrorMsg)
+	}
+
+	logText := logs.String()
+	if !strings.Contains(logText, "url=https://www.bilibili.com/video/BV1xx") {
+		t.Fatalf("expected sanitized URL in log, got: %s", logText)
+	}
+	if strings.Contains(logText, "token=secret") || strings.Contains(logText, "#frag") {
+		t.Fatalf("log leaked query or fragment: %s", logText)
+	}
+}
+
+func downloadMessage(taskID int64, key string) kafka.Message {
+	payload, _ := json.Marshal(DownloadPayload{TaskID: taskID, Key: key})
+	return kafka.Message{Key: []byte(key), Value: payload}
+}
+
+func md5Hex(data []byte) string {
+	sum := md5.Sum(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func newConsumerTestRepositories(t *testing.T) *repository.Repositories {

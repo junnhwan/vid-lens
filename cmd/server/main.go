@@ -101,10 +101,13 @@ func main() {
 	}
 
 	// Kafka
+	if cfg.Kafka.DownloadTopic == "" {
+		cfg.Kafka.DownloadTopic = "video-download"
+	}
 	mq.CreateTopics(cfg.Kafka.Brokers, []string{
-		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic,
+		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic,
 	})
-	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic)
+	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic)
 	defer producer.Close()
 	log.Println("✅ Kafka 生产者就绪")
 
@@ -173,6 +176,7 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(rdb, cfg.RateLimit.Capacity, cfg.RateLimit.Rate)
 
 	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
+	consumer.SetDownloadTools(cfg.Tools.YtDlpPath, cfg.Tools.FFmpegPath, cfg.Tools.CookiesPath, cfg.Tools.ProxyURL)
 	consumer.SetAIResolver(aiFactory, aiProfileSvc)
 	if ragStore != nil {
 		consumer.SetRAGIndexer(func(ctx context.Context, task *model.VideoTask) error {
@@ -190,6 +194,7 @@ func main() {
 	}
 	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
+	consumer.StartDownloadConsumer(cfg.Kafka.Brokers, cfg.Kafka.DownloadTopic, cfg.Kafka.ConsumerGroup)
 
 	// HTTP
 	if cfg.Server.Mode == "release" {

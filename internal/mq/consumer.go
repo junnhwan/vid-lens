@@ -2,26 +2,34 @@ package mq
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/pkg/lock"
+	"vid-lens/internal/pkg/ytdlp"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 )
 
 type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
 type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
+type downloadVideoFunc func(ctx context.Context, sourceURL string) (string, error)
+type uploadLocalFileFunc func(ctx context.Context, localPath, objectName, contentType string) error
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
@@ -30,15 +38,21 @@ type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
 //     → 保证了同一个视频不会被两个消费者同时处理（配合分布式锁双重保障）
 //  3. 手动提交 offset：只有业务逻辑执行成功才 commit，防止消息丢失
 type Consumer struct {
-	repo       *repository.Repositories
-	storage    *storage.MinIOStorage
-	ai         ai.Strategy
-	aiFactory  *ai.Factory
-	profiles   profileResolver
-	rdb        redis.Cmdable
-	ffmpegPath string
-	splitAudio splitAudioFunc
-	ragIndex   ragIndexFunc
+	repo        *repository.Repositories
+	storage     *storage.MinIOStorage
+	ai          ai.Strategy
+	aiFactory   *ai.Factory
+	profiles    profileResolver
+	rdb         redis.Cmdable
+	ffmpegPath  string
+	ytdlpPath   string
+	cookiesPath string
+	proxyURL    string
+	splitAudio  splitAudioFunc
+	ragIndex    ragIndexFunc
+
+	downloadVideo   downloadVideoFunc
+	uploadLocalFile uploadLocalFileFunc
 }
 
 type profileResolver interface {
@@ -56,13 +70,30 @@ func NewConsumer(
 	if ffmpegPath == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	return &Consumer{
+	consumer := &Consumer{
 		repo:       repo,
 		storage:    storage,
 		ai:         aiStrategy,
 		rdb:        rdb,
 		ffmpegPath: ffmpegPath,
 		splitAudio: ffmpeg.SplitAudio,
+	}
+	consumer.uploadLocalFile = func(ctx context.Context, localPath, objectName, contentType string) error {
+		if consumer.storage == nil {
+			return fmt.Errorf("对象存储未初始化")
+		}
+		_, err := consumer.storage.UploadFromPath(ctx, localPath, objectName, contentType)
+		return err
+	}
+	return consumer
+}
+
+func (c *Consumer) SetDownloadTools(ytdlpPath, ffmpegPath, cookiesPath, proxyURL string) {
+	c.ytdlpPath = ytdlpPath
+	c.cookiesPath = cookiesPath
+	c.proxyURL = proxyURL
+	if ffmpegPath != "" {
+		c.ffmpegPath = ffmpegPath
 	}
 }
 
@@ -143,6 +174,124 @@ func (c *Consumer) StartTranscribeConsumer(brokers []string, topic, groupID stri
 			}
 		}
 	}()
+}
+
+func (c *Consumer) StartDownloadConsumer(brokers []string, topic, groupID string) {
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,
+		Topic:          topic,
+		GroupID:        groupID,
+		CommitInterval: 0,
+		MinBytes:       1e3,
+		MaxBytes:       1e6,
+	})
+
+	go func() {
+		log.Println("✅ Kafka 消费者已启动 [download]")
+		for {
+			msg, err := r.ReadMessage(context.Background())
+			if err != nil {
+				log.Printf("[Kafka] 读取下载消息失败: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			if err := c.handleDownload(context.Background(), msg); err != nil {
+				log.Printf("[Kafka] 下载任务消息异常: %v", err)
+			}
+			if err := r.CommitMessages(context.Background(), msg); err != nil {
+				log.Printf("[Kafka] download commit offset 失败: %v", err)
+			}
+		}
+	}()
+}
+
+func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error {
+	var payload DownloadPayload
+	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+		return fmt.Errorf("解析下载消息失败: %w", err)
+	}
+
+	task, err := c.repo.Task.FindByID(payload.TaskID)
+	if err != nil {
+		return fmt.Errorf("查询下载任务失败: %w", err)
+	}
+	if task.Status != model.TaskStatusRunning || task.Stage != model.TaskStageDownloading {
+		log.Printf("[Kafka] 下载任务状态已变化，跳过: taskID=%d status=%d stage=%s", task.ID, task.Status, task.Stage)
+		return nil
+	}
+	if strings.TrimSpace(task.SourceURL) == "" {
+		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, "URL 下载任务缺少 source_url")
+		return nil
+	}
+
+	log.Printf("[Kafka] URL 下载开始: taskID=%d url=%s", task.ID, sanitizeURLForLog(task.SourceURL))
+	localPath, err := c.callDownloadVideo(ctx, task.SourceURL)
+	if err != nil {
+		errMsg := truncateError(err)
+		log.Printf("[Kafka] URL 下载失败: taskID=%d userID=%d url=%s err=%v", task.ID, task.UserID, sanitizeURLForLog(task.SourceURL), err)
+		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, errMsg)
+		return nil
+	}
+	defer os.Remove(localPath)
+
+	fileMD5, size, err := hashLocalFile(localPath)
+	if err != nil {
+		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+		return nil
+	}
+
+	asset, err := c.repo.Asset.FindByMD5(fileMD5)
+	if err != nil {
+		_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+		return nil
+	}
+	if asset == nil {
+		objectName := fmt.Sprintf("videos/%s%s", uuid.New().String(), extensionForDownloadedFile(localPath))
+		if err := c.callUploadLocalFile(ctx, localPath, objectName, "video/mp4"); err != nil {
+			_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(fmt.Errorf("上传到 MinIO 失败: %w", err)))
+			return nil
+		}
+		asset = &model.VideoAsset{
+			FileMD5:     fileMD5,
+			ObjectName:  objectName,
+			FileSize:    size,
+			ContentType: "video/mp4",
+		}
+		if err := c.repo.Asset.Create(asset); err != nil {
+			existing, findErr := c.repo.Asset.FindByMD5(fileMD5)
+			if findErr == nil && existing != nil {
+				asset = existing
+			} else {
+				_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, truncateError(err))
+				return nil
+			}
+		}
+	}
+
+	filename := "WEB_" + filepath.Base(localPath)
+	if filename == "WEB_" || filename == "WEB_." {
+		filename = task.Filename
+	}
+	if err := c.repo.Task.CompleteURLDownload(task.ID, asset, filename, time.Now()); err != nil {
+		return fmt.Errorf("回写下载任务失败: %w", err)
+	}
+	log.Printf("[Kafka] URL 下载完成: taskID=%d assetID=%d md5=%s size=%d", task.ID, asset.ID, asset.FileMD5, asset.FileSize)
+	return nil
+}
+
+func (c *Consumer) callDownloadVideo(ctx context.Context, sourceURL string) (string, error) {
+	if c.downloadVideo != nil {
+		return c.downloadVideo(ctx, sourceURL)
+	}
+	return ytdlp.DownloadVideo(ctx, c.ytdlpPath, c.ffmpegPath, c.cookiesPath, c.proxyURL, sourceURL)
+}
+
+func (c *Consumer) callUploadLocalFile(ctx context.Context, localPath, objectName, contentType string) error {
+	if c.uploadLocalFile != nil {
+		return c.uploadLocalFile(ctx, localPath, objectName, contentType)
+	}
+	return fmt.Errorf("对象存储未初始化")
 }
 
 // handleAnalyze 处理视频分析任务
@@ -434,4 +583,42 @@ func truncateError(err error) string {
 		return errMsg[:500]
 	}
 	return errMsg
+}
+
+func hashLocalFile(path string) (string, int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("打开下载文件失败: %w", err)
+	}
+	defer file.Close()
+
+	hasher := md5.New()
+	size, err := io.Copy(hasher, file)
+	if err != nil {
+		return "", 0, fmt.Errorf("计算下载文件 MD5 失败: %w", err)
+	}
+	if size == 0 {
+		return "", 0, fmt.Errorf("下载文件为空")
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), size, nil
+}
+
+func sanitizeURLForLog(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func extensionForDownloadedFile(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".avi", ".mkv", ".mov", ".webm", ".mp4":
+		return ext
+	default:
+		return ".mp4"
+	}
 }

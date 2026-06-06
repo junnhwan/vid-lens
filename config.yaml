@@ -30,6 +30,7 @@ kafka:
     - localhost:19092
   analyze_topic: "video-analyze"
   transcribe_topic: "video-transcribe"
+  download_topic: "video-download"
   consumer_group: "vidlens-worker"
 
 ai:

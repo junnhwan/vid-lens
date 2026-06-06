@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
@@ -64,7 +66,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -79,6 +81,21 @@ func (r *TaskRepository) UpdateStatus(id int64, status int8, errMsg string) erro
 		"status":    status,
 		"error_msg": errMsg,
 	}
+	if errMsg != "" {
+		updates["last_error_msg"] = errMsg
+	}
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *TaskRepository) UpdateStatusAndStage(id int64, status int8, stage, errMsg string) error {
+	updates := map[string]interface{}{
+		"status":    status,
+		"stage":     stage,
+		"error_msg": errMsg,
+	}
+	if errMsg != "" {
+		updates["last_error_msg"] = errMsg
+	}
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
 }
 
@@ -88,6 +105,9 @@ func (r *TaskRepository) UpdateStatusIf(id int64, allowedFrom []int8, status int
 	updates := map[string]interface{}{
 		"status":    status,
 		"error_msg": errMsg,
+	}
+	if errMsg != "" {
+		updates["last_error_msg"] = errMsg
 	}
 	tx := r.db.Model(&model.VideoTask{}).
 		Where("id = ? AND status IN ?", id, allowedFrom).
@@ -101,6 +121,25 @@ func (r *TaskRepository) UpdateStatusIf(id int64, allowedFrom []int8, status int
 // UpdateFileURL 更新文件存储路径
 func (r *TaskRepository) UpdateFileURL(id int64, fileURL string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("file_url", fileURL).Error
+}
+
+func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, filename string, finishedAt time.Time) error {
+	updates := map[string]interface{}{
+		"asset_id":        asset.ID,
+		"file_md5":        asset.FileMD5,
+		"filename":        filename,
+		"file_url":        asset.ObjectName,
+		"file_size":       asset.FileSize,
+		"status":          model.TaskStatusPending,
+		"stage":           model.TaskStageUploaded,
+		"error_msg":       "",
+		"last_error_code": "",
+		"last_error_msg":  "",
+		"finished_at":     finishedAt,
+	}
+	return r.db.Model(&model.VideoTask{}).
+		Where("id = ? AND status = ? AND stage = ?", id, model.TaskStatusRunning, model.TaskStageDownloading).
+		Updates(updates).Error
 }
 
 // Delete 删除任务（逻辑删除）

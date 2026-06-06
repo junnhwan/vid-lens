@@ -1,14 +1,16 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"log"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 	"vid-lens/internal/config"
+	"vid-lens/internal/model"
+	"vid-lens/internal/repository"
 )
 
 func TestValidateRemoteVideoURLRejectsLocalTargets(t *testing.T) {
@@ -39,40 +41,97 @@ func TestValidateRemoteVideoURLAllowsHTTPVideoSites(t *testing.T) {
 	}
 }
 
-func TestUploadByURLLogsDownloadFailureWithSanitizedURL(t *testing.T) {
-	var logs bytes.Buffer
-	originalOutput := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(originalOutput)
+func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	producer := &recordingMediaProducer{}
 
 	svc := &MediaService{
+		repo: repos,
+		mq:   producer,
 		tools: config.ToolsConfig{
 			YtDlpPath:  filepathThatDoesNotExist(),
 			FFmpegPath: "ffmpeg",
 		},
 	}
 
-	_, err := svc.UploadByURL(context.Background(), 7, "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag")
-	if err == nil {
-		t.Fatal("UploadByURL() succeeded, want download failure")
+	result, err := svc.UploadByURL(context.Background(), 7, "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag")
+	if err != nil {
+		t.Fatalf("UploadByURL() error = %v", err)
+	}
+	if result.TaskID == 0 {
+		t.Fatal("expected task id")
+	}
+	if result.Status != model.TaskStatusRunning {
+		t.Fatalf("result status = %d, want running", result.Status)
+	}
+	if result.Stage != model.TaskStageDownloading {
+		t.Fatalf("result stage = %q, want downloading", result.Stage)
+	}
+	if result.FileMD5 == "" {
+		t.Fatal("expected deterministic placeholder md5 before download finishes")
 	}
 
-	got := logs.String()
-	for _, want := range []string{
-		"[Media] URL upload download failed",
-		"userID=7",
-		"url=https://www.bilibili.com/video/BV1xx411c7mD",
-		"yt-dlp 下载失败",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("log missing %q: %s", want, got)
-		}
+	if len(producer.downloads) != 1 {
+		t.Fatalf("download enqueue calls = %d, want 1", len(producer.downloads))
 	}
-	if strings.Contains(got, "token=secret") || strings.Contains(got, "#frag") {
-		t.Fatalf("log leaked query or fragment: %s", got)
+	if producer.downloads[0].taskID != result.TaskID || producer.downloads[0].key != result.FileMD5 {
+		t.Fatalf("unexpected download enqueue: %+v result=%+v", producer.downloads[0], result)
+	}
+
+	task, err := repos.Task.FindByID(result.TaskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if task.UserID != 7 {
+		t.Fatalf("task user = %d, want 7", task.UserID)
+	}
+	if task.Status != model.TaskStatusRunning || task.Stage != model.TaskStageDownloading {
+		t.Fatalf("task status/stage = %d/%q, want running/downloading", task.Status, task.Stage)
+	}
+	if task.SourceType != model.TaskSourceTypeURL {
+		t.Fatalf("task source_type = %q, want url", task.SourceType)
+	}
+	if task.SourceURL == "" || !strings.Contains(task.SourceURL, "token=secret") {
+		t.Fatalf("task source_url was not persisted for worker: %q", task.SourceURL)
 	}
 }
 
 func filepathThatDoesNotExist() string {
 	return os.DevNull + "-vidlens-missing-ytdlp"
+}
+
+type recordingMediaProducer struct {
+	downloads []struct {
+		taskID int64
+		key    string
+	}
+}
+
+func (p *recordingMediaProducer) EnqueueAnalyze(context.Context, int64, string) error {
+	return nil
+}
+
+func (p *recordingMediaProducer) EnqueueTranscribe(context.Context, int64, string) error {
+	return nil
+}
+
+func (p *recordingMediaProducer) EnqueueDownload(_ context.Context, taskID int64, key string) error {
+	p.downloads = append(p.downloads, struct {
+		taskID int64
+		key    string
+	}{taskID: taskID, key: key})
+	return nil
+}
+
+func newMediaTestRepositories(t *testing.T) *repository.Repositories {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	return repository.NewRepositories(db)
 }

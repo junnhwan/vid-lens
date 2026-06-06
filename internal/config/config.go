@@ -66,6 +66,7 @@ type KafkaConfig struct {
 	Brokers         []string `yaml:"brokers"`
 	AnalyzeTopic    string   `yaml:"analyze_topic"`
 	TranscribeTopic string   `yaml:"transcribe_topic"`
+	DownloadTopic   string   `yaml:"download_topic"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
 }
 
