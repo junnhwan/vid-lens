@@ -125,7 +125,21 @@ func unsafeIP(ip net.IP) bool {
 
 func sanitizeRemoteVideoURL(parsed neturl.URL) string {
 	parsed.User = nil
+	query := parsed.Query()
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
+	if isYouTubeWatchURL(parsed) {
+		videoID := strings.TrimSpace(query.Get("v"))
+		if videoID != "" {
+			values := neturl.Values{}
+			values.Set("v", videoID)
+			parsed.RawQuery = values.Encode()
+		}
+	}
 	return parsed.String()
+}
+
+func isYouTubeWatchURL(parsed neturl.URL) bool {
+	host := normalizeHost(parsed.Hostname())
+	return (host == "youtube.com" || strings.HasSuffix(host, ".youtube.com")) && parsed.EscapedPath() == "/watch"
 }

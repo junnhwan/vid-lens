@@ -38,7 +38,7 @@ func TestVideoAssetCanBackMultipleUserTasksWithSameMD5(t *testing.T) {
 
 	first := &model.VideoTask{
 		UserID:   1,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: "first.mp4",
 		FileURL:  asset.ObjectName,
@@ -47,7 +47,7 @@ func TestVideoAssetCanBackMultipleUserTasksWithSameMD5(t *testing.T) {
 	}
 	second := &model.VideoTask{
 		UserID:   2,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: "second.mp4",
 		FileURL:  asset.ObjectName,
@@ -86,7 +86,7 @@ func TestTaskRepositoryCountActiveByAssetIDIgnoresDeletedTasks(t *testing.T) {
 
 	first := &model.VideoTask{
 		UserID:   1,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: "first.mp4",
 		FileURL:  asset.ObjectName,
@@ -95,7 +95,7 @@ func TestTaskRepositoryCountActiveByAssetIDIgnoresDeletedTasks(t *testing.T) {
 	}
 	second := &model.VideoTask{
 		UserID:   2,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: "second.mp4",
 		FileURL:  asset.ObjectName,

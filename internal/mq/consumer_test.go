@@ -653,7 +653,7 @@ func TestHandleDownloadCreatesAssetAndMarksTaskUploaded(t *testing.T) {
 	if current.FileMD5 != expectedMD5 {
 		t.Fatalf("task file md5 = %q, want %q", current.FileMD5, expectedMD5)
 	}
-	if current.AssetID == 0 || current.FileURL == "" || current.FileSize != int64(len(videoBytes)) {
+	if current.AssetID == nil || *current.AssetID == 0 || current.FileURL == "" || current.FileSize != int64(len(videoBytes)) {
 		t.Fatalf("task asset fields not populated: %+v", current)
 	}
 	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeDownload)
@@ -724,7 +724,7 @@ func TestHandleDownloadReusesExistingAssetForSameMD5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if current.AssetID != asset.ID || current.FileURL != asset.ObjectName || current.FileMD5 != fileMD5 {
+	if current.AssetID == nil || *current.AssetID != asset.ID || current.FileURL != asset.ObjectName || current.FileMD5 != fileMD5 {
 		t.Fatalf("task did not reuse existing asset: %+v asset=%+v", current, asset)
 	}
 }

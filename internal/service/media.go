@@ -121,7 +121,7 @@ func (s *MediaService) UploadFile(ctx context.Context, userID int64, filename st
 func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset *model.VideoAsset, status int8) (*UploadResult, error) {
 	task := &model.VideoTask{
 		UserID:   userID,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: filename,
 		FileURL:  asset.ObjectName,
@@ -473,11 +473,13 @@ func (s *MediaService) DeleteTask(ctx context.Context, userID, taskID int64) err
 		if err := txRepos.Task.Delete(taskID); err != nil {
 			return err
 		}
-		activeRefs, err := txRepos.Task.CountActiveByAssetID(assetID)
-		if err != nil {
-			return err
+		if assetID != nil {
+			activeRefs, err := txRepos.Task.CountActiveByAssetID(*assetID)
+			if err != nil {
+				return err
+			}
+			deleteAssetObject = *assetID > 0 && activeRefs == 0
 		}
-		deleteAssetObject = assetID > 0 && activeRefs == 0
 		return nil
 	}); err != nil {
 		return err
@@ -487,7 +489,7 @@ func (s *MediaService) DeleteTask(ctx context.Context, userID, taskID int64) err
 		if err := s.deleteObject(ctx, objectName); err != nil {
 			return fmt.Errorf("删除视频对象失败: %w", err)
 		}
-		if err := s.repo.Asset.Delete(assetID); err != nil {
+		if err := s.repo.Asset.Delete(*assetID); err != nil {
 			return err
 		}
 	}

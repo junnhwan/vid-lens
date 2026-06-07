@@ -40,7 +40,7 @@ const (
 type VideoTask struct {
 	ID              int64          `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID          int64          `gorm:"index;not null" json:"user_id"`
-	AssetID         int64          `gorm:"index" json:"asset_id"`
+	AssetID         *int64         `gorm:"index" json:"asset_id"`
 	FileMD5         string         `gorm:"type:char(32);index;not null" json:"file_md5"`
 	Filename        string         `gorm:"type:varchar(255);not null" json:"filename"`
 	FileURL         string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径

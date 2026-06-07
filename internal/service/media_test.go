@@ -57,6 +57,23 @@ func TestRemoteVideoURLValidatorAllowsWhitelistedPublicHostsAndSanitizes(t *test
 	}
 }
 
+func TestRemoteVideoURLValidatorKeepsYouTubeVideoIDWhileSanitizing(t *testing.T) {
+	validator := remoteVideoURLValidator{
+		allowedHosts: []string{"youtube.com", "youtu.be"},
+		resolver: fakeRemoteURLResolver{
+			"www.youtube.com": {net.ParseIP("203.0.113.10")},
+		},
+	}
+
+	checked, err := validator.validate(context.Background(), "https://www.youtube.com/watch?v=abc123&list=secret#frag")
+	if err != nil {
+		t.Fatalf("expected YouTube URL to be allowed, got %v", err)
+	}
+	if checked.Sanitized != "https://www.youtube.com/watch?v=abc123" {
+		t.Fatalf("sanitized YouTube URL = %q", checked.Sanitized)
+	}
+}
+
 func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	producer := &recordingMediaProducer{}
@@ -134,6 +151,34 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	}
 	if job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageDownloading || job.UserID != 7 || job.TraceID != result.TraceID {
 		t.Fatalf("download task_job = %+v", job)
+	}
+}
+
+func TestUploadByURLCreatesTaskWithoutAssetBeforeDownloadWhenForeignKeysAreEnforced(t *testing.T) {
+	repos := newMediaTestRepositoriesWithForeignKeys(t)
+	producer := &recordingMediaProducer{}
+
+	svc := &MediaService{
+		repo: repos,
+		mq:   producer,
+		tools: config.ToolsConfig{
+			AllowedVideoHosts: []string{"youtube.com"},
+		},
+		remoteURLResolver: fakeRemoteURLResolver{
+			"www.youtube.com": {net.ParseIP("203.0.113.10")},
+		},
+	}
+
+	result, err := svc.UploadByURL(context.Background(), 7, "https://www.youtube.com/watch?v=abc123")
+	if err != nil {
+		t.Fatalf("UploadByURL() error = %v", err)
+	}
+	task, err := repos.Task.FindByID(result.TaskID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if task.AssetID != nil {
+		t.Fatalf("URL task should not reference an asset before download completes, got %v", *task.AssetID)
 	}
 }
 
@@ -403,7 +448,7 @@ func createMediaTestTask(t *testing.T, repos *repository.Repositories, userID in
 	t.Helper()
 	task := &model.VideoTask{
 		UserID:   userID,
-		AssetID:  asset.ID,
+		AssetID:  &asset.ID,
 		FileMD5:  asset.FileMD5,
 		Filename: filename,
 		FileURL:  asset.ObjectName,
@@ -534,6 +579,22 @@ func newMediaTestRepositories(t *testing.T) *repository.Repositories {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
+	}
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	return repository.NewRepositories(db)
+}
+
+func newMediaTestRepositoriesWithForeignKeys(t *testing.T) *repository.Repositories {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
 	}
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		t.Fatalf("migrate test db: %v", err)
