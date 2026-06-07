@@ -38,7 +38,15 @@
             <div v-if="msg.citations && msg.citations.length" class="citations">
               <div class="citations-header">📚 参考片段</div>
               <div v-for="(cite, idx) in msg.citations" :key="idx" class="citation-item">
-                <div class="citation-score">相关度: {{ (cite.score * 100).toFixed(0) }}%</div>
+                <div class="citation-meta">
+                  <span v-if="cite.source" class="citation-source">来源: {{ cite.source }}</span>
+                  <span v-if="cite.chunk_id" class="citation-chunk">Chunk: #{{ cite.chunk_id }}</span>
+                </div>
+                <div class="citation-scores">
+                  <span v-if="cite.rrf_score !== undefined" class="citation-rrf">RRF: {{ cite.rrf_score.toFixed(4) }}</span>
+                  <span v-if="cite.vector_rank" class="citation-rank">向量: #{{ cite.vector_rank }}</span>
+                  <span v-if="cite.keyword_rank" class="citation-rank">关键词: #{{ cite.keyword_rank }}</span>
+                </div>
                 <div class="citation-content">{{ cite.content }}</div>
               </div>
             </div>
@@ -68,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
@@ -86,6 +94,7 @@ const question = ref('')
 const loading = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
+let indexStatusTimer = null
 
 const indexIcon = computed(() => {
   switch (indexStatus.value.status) {
@@ -158,20 +167,36 @@ const sendQuestion = async () => {
   question.value = ''
 
   loading.value = true
+
+  // 预插入一个空的 assistant 消息
+  const assistantMsg = {
+    id: `temp-${Date.now()}`,
+    role: 'assistant',
+    content: '',
+    citations: [],
+    timestamp: new Date()
+  }
+  messages.value.push(assistantMsg)
+
   try {
-    const res = await api.sendChatMessage(sessionId.value, q, 5)
-    messages.value.push({
-      id: res.message_id,
-      role: 'assistant',
-      content: res.answer,
-      citations: res.citations || [],
-      timestamp: new Date()
+    await api.sendChatMessageStream(sessionId.value, q, 5, (event) => {
+      if (event.type === 'answer') {
+        assistantMsg.content += event.delta || ''
+        nextTick(() => {
+          messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
+        })
+      } else if (event.type === 'citations') {
+        assistantMsg.citations = event.citations || []
+      } else if (event.type === 'done') {
+        assistantMsg.id = event.message_id || assistantMsg.id
+        loading.value = false
+      } else if (event.type === 'error') {
+        emit('error', event.message || '回答失败')
+        loading.value = false
+      }
     })
-    await nextTick()
-    messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
   } catch (err) {
     emit('error', err.message || '发送失败')
-  } finally {
     loading.value = false
   }
 }
@@ -182,24 +207,47 @@ const checkIndexStatus = async () => {
     // 后端返回 { indexed: boolean, status: string, chunks: number, last_error: string }
     if (res.indexed) {
       indexStatus.value = { status: 'indexed', chunks: res.chunks || 0, error: '' }
+      stopIndexPolling()
       if (!sessionId.value) {
         await createSession()
       }
     } else if (res.status === 'indexing') {
       indexStatus.value = { status: 'indexing', chunks: 0, error: '' }
+      startIndexPolling()
     } else if (res.status === 'failed') {
       indexStatus.value = { status: 'failed', chunks: 0, error: res.last_error || '构建失败' }
+      stopIndexPolling()
     } else {
       indexStatus.value = { status: 'not_indexed', chunks: 0, error: '' }
+      stopIndexPolling()
     }
   } catch (err) {
     console.error('检查索引状态失败:', err)
     indexStatus.value = { status: 'not_indexed', chunks: 0, error: '' }
+    stopIndexPolling()
+  }
+}
+
+const startIndexPolling = () => {
+  if (indexStatusTimer) return
+  indexStatusTimer = setInterval(() => {
+    checkIndexStatus()
+  }, 2500)
+}
+
+const stopIndexPolling = () => {
+  if (indexStatusTimer) {
+    clearInterval(indexStatusTimer)
+    indexStatusTimer = null
   }
 }
 
 onMounted(() => {
   checkIndexStatus()
+})
+
+onUnmounted(() => {
+  stopIndexPolling()
 })
 </script>
 
@@ -390,11 +438,52 @@ onMounted(() => {
   border: 1px solid rgba(139, 149, 168, 0.1);
 }
 
-.citation-score {
-  font-size: 0.8rem;
-  color: #5b8fff;
+.citation-meta {
+  display: flex;
+  gap: 0.75rem;
   margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.citation-source {
+  font-size: 0.75rem;
+  color: #5b8fff;
   font-family: 'JetBrains Mono', monospace;
+  background: rgba(41, 98, 255, 0.1);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(41, 98, 255, 0.2);
+}
+
+.citation-chunk {
+  font-size: 0.75rem;
+  color: #8b95a8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.citation-scores {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.citation-rrf {
+  color: #d4af37;
+  background: rgba(212, 175, 55, 0.1);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+.citation-rank {
+  color: #8b95a8;
+  background: rgba(139, 149, 168, 0.1);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(139, 149, 168, 0.15);
 }
 
 .citation-content {

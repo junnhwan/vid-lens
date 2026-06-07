@@ -91,6 +91,51 @@ export default {
     api.get(`/chat/sessions/${sessionId}/messages`),
   sendChatMessage: (sessionId, question, topK = 5) =>
     api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK }),
+
+  // 流式聊天（SSE）
+  sendChatMessageStream: async (sessionId, question, topK = 5, onEvent) => {
+    const token = getStoredAuthToken()
+    const response = await fetch(`/api/v1/chat/sessions/${sessionId}/messages/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ question, top_k: topK }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ message: '请求失败' }))
+      throw new Error(err.message || `HTTP ${response.status}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (!data) continue
+
+        try {
+          const event = JSON.parse(data)
+          onEvent(event)
+        } catch (e) {
+          console.warn('解析 SSE 事件失败:', data, e)
+        }
+      }
+    }
+  },
+
   deleteChatSession: (sessionId) =>
     api.delete(`/chat/sessions/${sessionId}`),
 }

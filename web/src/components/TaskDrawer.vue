@@ -60,6 +60,41 @@
             </div>
           </div>
 
+          <!-- 任务处理明细 -->
+          <div v-if="task.jobs && task.jobs.length" class="task-jobs-section">
+            <h4 class="jobs-header">🔧 处理明细</h4>
+            <div class="jobs-list">
+              <div v-for="job in task.jobs" :key="job.id" class="job-item">
+                <div class="job-header">
+                  <span class="job-type">{{ jobTypeLabel(job.job_type) }}</span>
+                  <span class="job-status" :class="jobStatusClass(job.status)">
+                    {{ jobStatusLabel(job.status) }}
+                  </span>
+                </div>
+                <div v-if="job.stage" class="job-stage">
+                  <span class="job-label">阶段:</span>
+                  <span class="job-value">{{ job.stage }}</span>
+                </div>
+                <div v-if="job.retry_count !== undefined" class="job-retry">
+                  <span class="job-label">重试:</span>
+                  <span class="job-value">{{ job.retry_count }} / {{ job.max_retries || 3 }}</span>
+                </div>
+                <div v-if="job.next_retry_at" class="job-next-retry">
+                  <span class="job-label">下次重试:</span>
+                  <span class="job-value">{{ formatRelativeTime(job.next_retry_at) }}</span>
+                </div>
+                <div v-if="job.last_error_msg" class="job-error">
+                  <span class="job-label">错误:</span>
+                  <span class="job-error-text">{{ job.last_error_msg }}</span>
+                </div>
+                <div v-if="job.trace_id" class="job-trace">
+                  <span class="job-label">Trace ID:</span>
+                  <span class="job-trace-id">{{ job.trace_id.slice(0, 16) }}...</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="drawer-actions">
             <button class="drawer-action-btn" @click.stop="$emit('transcribe')" :disabled="isActionDisabled">
               <span class="btn-icon">📄</span> 提取文字
@@ -226,6 +261,39 @@ const downloadMarkdown = (content, filename) => {
   a.download = `${filename}_AI总结.md`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// Job 辅助函数
+const jobTypeLabel = (type) => {
+  const labels = {
+    'download': '下载',
+    'transcribe': '转录',
+    'analyze': '分析',
+    'rag_index': 'RAG 索引'
+  }
+  return labels[type] || type
+}
+
+const jobStatusLabel = (status) => {
+  const labels = {
+    'queued': '排队中',
+    'running': '运行中',
+    'completed': '已完成',
+    'failed': '失败',
+    'retrying': '重试中'
+  }
+  return labels[status] || status
+}
+
+const jobStatusClass = (status) => {
+  const classes = {
+    'queued': 'job-status-queued',
+    'running': 'job-status-running',
+    'completed': 'job-status-completed',
+    'failed': 'job-status-failed',
+    'retrying': 'job-status-retrying'
+  }
+  return classes[status] || ''
 }
 
 // ESC 关闭 + Focus trap
@@ -519,6 +587,133 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   padding: 1.25rem;
   margin-bottom: 2rem;
   backdrop-filter: blur(8px);
+}
+
+/* 任务处理明细 */
+.task-jobs-section {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.jobs-header {
+  font-size: 1.1rem;
+  background: linear-gradient(135deg, #d4af37, #f4e4a6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.job-item {
+  background: rgba(10, 14, 26, 0.5);
+  border: 1px solid rgba(139, 149, 168, 0.15);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.job-type {
+  font-weight: 600;
+  color: #e8eef7;
+  font-size: 0.95rem;
+}
+
+.job-status {
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.job-status-queued {
+  background: rgba(41, 98, 255, 0.15);
+  color: #5b8fff;
+  border: 1px solid rgba(41, 98, 255, 0.3);
+}
+
+.job-status-running {
+  background: rgba(212, 175, 55, 0.15);
+  color: #f4e4a6;
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.job-status-completed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.job-status-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.job-status-retrying {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.job-stage,
+.job-retry,
+.job-next-retry,
+.job-error,
+.job-trace {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.job-stage:last-child,
+.job-retry:last-child,
+.job-next-retry:last-child,
+.job-error:last-child,
+.job-trace:last-child {
+  margin-bottom: 0;
+}
+
+.job-label {
+  color: #8b95a8;
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.job-value {
+  color: #b8c5db;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.job-error-text {
+  color: #fca5a5;
+  font-family: 'JetBrains Mono', monospace;
+  flex: 1;
+  word-break: break-word;
+}
+
+.job-trace-id {
+  color: #8b95a8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
 }
 
 .retry-error,
