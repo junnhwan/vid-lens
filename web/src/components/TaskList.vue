@@ -1,6 +1,6 @@
 <template>
   <!-- 骨架屏加载状态 -->
-  <section v-if="loading && !tasks.length" class="tasks-section">
+  <section v-if="showInitialSkeleton" class="tasks-section">
     <div class="section-header">
       <h2>我的任务</h2>
     </div>
@@ -82,10 +82,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import TaskCard from './TaskCard.vue'
+import { shouldShowInitialTaskSkeleton } from '../taskListLoadingPolicy.js'
 
 const props = defineProps({
   tasks: Array,
   loading: Object,
+  initialLoading: { type: Boolean, default: false },
   hasMore: { type: Boolean, default: false },
   loadingMore: { type: Boolean, default: false }
 })
@@ -96,6 +98,10 @@ const activeTab = ref('all')
 const searchQuery = ref('')
 const showScrollTop = ref(false)
 const viewMode = ref(localStorage.getItem('taskViewMode') || 'grid')
+
+const showInitialSkeleton = computed(() =>
+  shouldShowInitialTaskSkeleton(props.tasks, props.initialLoading),
+)
 
 const toggleView = () => {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'

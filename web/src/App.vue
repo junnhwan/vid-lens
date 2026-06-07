@@ -20,6 +20,7 @@
         <TaskList
           :tasks="tasks"
           :loading="loading"
+          :initialLoading="tasksLoading"
           :hasMore="hasMore"
           :loadingMore="loadingMore"
           @taskClick="openTaskDrawer"
@@ -38,6 +39,7 @@
       @transcribe="doTranscribe(selectedTask)"
       @analyze="doAnalyze(selectedTask)"
       @chatError="(msg) => showToast(msg, true)"
+      @toast="showToast"
     />
 
     <AuthModal
@@ -109,6 +111,7 @@ const toast = ref('')
 const toastIsError = ref(false)
 const selectedTask = ref(null)
 const loading = ref({})
+const tasksLoading = ref(false)
 const showAuth = ref(false)
 const authMode = ref('login')
 const authLoading = ref(false)
@@ -211,7 +214,11 @@ const handleUrlUpload = async (url) => {
 const fetchTasks = async (page = 1, append = false) => {
   if (!user.value) {
     tasks.value = []
+    tasksLoading.value = false
     return
+  }
+  if (!append && tasks.value.length === 0) {
+    tasksLoading.value = true
   }
   try {
     const res = await api.listTasks(page, pageSize)
@@ -225,6 +232,10 @@ const fetchTasks = async (page = 1, append = false) => {
     hasMore.value = list.length >= pageSize
   } catch (err) {
     console.error(err)
+  } finally {
+    if (!append) {
+      tasksLoading.value = false
+    }
   }
 }
 

@@ -42,6 +42,7 @@ web/src/App-old.vue
 # Local design notes
 AGENTS.md
 MEMORY.md
+MEMORY.zh-CN.md
 DESIGN_UPDATES.md
 docs/DESIGN_UPDATES.md
 docs/backend-optimization-roadmap.md

@@ -149,7 +149,7 @@ const props = defineProps({
   loading: Boolean
 })
 
-const emit = defineEmits(['close', 'transcribe', 'analyze', 'chatError'])
+const emit = defineEmits(['close', 'transcribe', 'analyze', 'chatError', 'toast'])
 
 const activeTab = ref('detail')
 const drawerPanel = ref(null)
@@ -202,7 +202,7 @@ const errorMsg = computed(() => getErrorMessage(props.task))
 const copyText = async (text) => {
   try {
     await navigator.clipboard.writeText(text)
-    emit('chatError', '已复制到剪贴板')
+    emit('toast', '已复制到剪贴板')
   } catch (err) {
     emit('chatError', '复制失败')
   }
