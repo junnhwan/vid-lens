@@ -38,6 +38,7 @@
             <div class="meta-item">
               <span class="meta-label">状态</span>
               <span class="meta-status" :class="detailedStatus.class">
+                <span class="status-icon">{{ detailedStatus.icon }}</span>
                 {{ detailedStatus.text }}
               </span>
             </div>
@@ -80,13 +81,47 @@
             </div>
 
             <div v-if="task.transcription?.content" class="drawer-result-block">
-              <h4>📝 文字提取</h4>
-              <pre class="result-text">{{ task.transcription.content }}</pre>
+              <div class="result-header">
+                <h4>📝 文字提取</h4>
+                <div class="result-actions">
+                  <button class="icon-btn" @click="copyText(task.transcription.content)" title="复制">
+                    📋
+                  </button>
+                  <button class="icon-btn" @click="downloadText(task.transcription.content, task.filename)" title="下载为 TXT">
+                    ⬇️
+                  </button>
+                </div>
+              </div>
+              <pre class="result-text">{{ transcriptionPreview }}</pre>
+              <button
+                v-if="showTranscriptionExpand"
+                class="expand-btn"
+                @click="transcriptionExpanded = !transcriptionExpanded"
+              >
+                {{ transcriptionExpanded ? '收起 ▲' : '展开全部 ▼' }}
+              </button>
             </div>
 
             <div v-if="task.summary?.content" class="drawer-result-block">
-              <h4>🤖 AI 总结</h4>
-              <div class="result-markdown" v-html="renderMarkdown(task.summary.content)"></div>
+              <div class="result-header">
+                <h4>🤖 AI 总结</h4>
+                <div class="result-actions">
+                  <button class="icon-btn" @click="copyText(task.summary.content)" title="复制">
+                    📋
+                  </button>
+                  <button class="icon-btn" @click="downloadMarkdown(task.summary.content, task.filename)" title="下载为 MD">
+                    ⬇️
+                  </button>
+                </div>
+              </div>
+              <div class="result-markdown" v-html="renderMarkdown(summaryPreview)"></div>
+              <button
+                v-if="showSummaryExpand"
+                class="expand-btn"
+                @click="summaryExpanded = !summaryExpanded"
+              >
+                {{ summaryExpanded ? '收起 ▲' : '展开全部 ▼' }}
+              </button>
             </div>
           </template>
           </div>
@@ -120,6 +155,34 @@ const activeTab = ref('detail')
 const drawerPanel = ref(null)
 let previouslyFocused = null
 
+// 文本折叠状态
+const transcriptionExpanded = ref(false)
+const summaryExpanded = ref(false)
+
+const transcriptionPreview = computed(() => {
+  const content = props.task?.transcription?.content || ''
+  if (!content || transcriptionExpanded.value) return content
+  const lines = content.split('\n')
+  return lines.length > 10 ? lines.slice(0, 10).join('\n') : content
+})
+
+const summaryPreview = computed(() => {
+  const content = props.task?.summary?.content || ''
+  if (!content || summaryExpanded.value) return content
+  const lines = content.split('\n')
+  return lines.length > 15 ? lines.slice(0, 15).join('\n') : content
+})
+
+const showTranscriptionExpand = computed(() => {
+  const content = props.task?.transcription?.content || ''
+  return content.split('\n').length > 10
+})
+
+const showSummaryExpand = computed(() => {
+  const content = props.task?.summary?.content || ''
+  return content.split('\n').length > 15
+})
+
 const canUseRAG = computed(() => {
   return props.task?.transcription?.content || props.task?.status === 3
 })
@@ -134,6 +197,36 @@ const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.l
 const failureMessage = computed(() => taskFailureMessage(props.task))
 const detailedStatus = computed(() => getDetailedStatus(props.task))
 const errorMsg = computed(() => getErrorMessage(props.task))
+
+// 复制和下载功能
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    emit('chatError', '已复制到剪贴板')
+  } catch (err) {
+    emit('chatError', '复制失败')
+  }
+}
+
+const downloadText = (content, filename) => {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}_文字提取.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const downloadMarkdown = (content, filename) => {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}_AI总结.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 // ESC 关闭 + Focus trap
 const onKeyDown = (e) => {
@@ -359,8 +452,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   text-transform: uppercase;
   backdrop-filter: blur(8px);
   border: 1px solid;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   width: fit-content;
+}
+
+.status-icon {
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .meta-status.pending {
@@ -529,9 +629,62 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   margin-bottom: 0;
 }
 
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.result-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.icon-btn {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.icon-btn:hover {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
+  border-color: rgba(212, 175, 55, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
+}
+
+.expand-btn {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.25);
+  padding: 0.65rem 1.25rem;
+  border-radius: 0.65rem;
+  color: #8b95a8;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.expand-btn:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+}
+
 .drawer-result-block h4 {
   font-size: 1.1rem;
-  margin-bottom: 1rem;
   background: linear-gradient(135deg, #d4af37, #f4e4a6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

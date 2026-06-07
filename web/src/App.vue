@@ -419,6 +419,26 @@ const onConfigUpdated = () => {
   showToast('配置已更新')
 }
 
+// 键盘快捷键
+const handleGlobalKeydown = (e) => {
+  // Ctrl/Cmd + K 打开搜索
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault()
+    const searchBox = document.querySelector('.search-box')
+    if (searchBox) {
+      searchBox.focus()
+    }
+  }
+  // N 键快速上传（非输入框时）
+  if (e.key === 'n' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+    e.preventDefault()
+    const uploadBtn = document.querySelector('.upload-btn')
+    if (uploadBtn) {
+      uploadBtn.click()
+    }
+  }
+}
+
 // 网络状态检测
 const handleOnline = () => {
   offlineToast.value = false
@@ -438,11 +458,13 @@ onMounted(() => {
   }
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
+  window.addEventListener('keydown', handleGlobalKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 </script>
 

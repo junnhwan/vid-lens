@@ -34,6 +34,7 @@
           <div class="message-content">
             <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
+            <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
             <div v-if="msg.citations && msg.citations.length" class="citations">
               <div class="citations-header">📚 参考片段</div>
               <div v-for="(cite, idx) in msg.citations" :key="idx" class="citation-item">
@@ -108,6 +109,20 @@ const indexButtonText = computed(() => {
   return indexStatus.value.status === 'failed' ? '重新构建索引' : '构建视频索引'
 })
 
+const formatMessageTime = (timestamp) => {
+  if (!timestamp) return ''
+  const now = new Date()
+  const diff = now - new Date(timestamp)
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 60) return '刚刚'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时前`
+  const days = Math.floor(hours / 24)
+  return `${days}天前`
+}
+
 const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
 
 const buildIndex = async () => {
@@ -137,7 +152,7 @@ const createSession = async () => {
 const sendQuestion = async () => {
   if (!question.value || loading.value) return
 
-  const userMessage = { id: Date.now(), role: 'user', content: question.value }
+  const userMessage = { id: Date.now(), role: 'user', content: question.value, timestamp: new Date() }
   messages.value.push(userMessage)
   const q = question.value
   question.value = ''
@@ -149,7 +164,8 @@ const sendQuestion = async () => {
       id: res.message_id,
       role: 'assistant',
       content: res.answer,
-      citations: res.citations || []
+      citations: res.citations || [],
+      timestamp: new Date()
     })
     await nextTick()
     messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
@@ -311,6 +327,14 @@ onMounted(() => {
   line-height: 1.7;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.message-time {
+  font-size: 0.75rem;
+  color: #8b95a8;
+  margin-top: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0.7;
 }
 
 /* RAG Chat 内的 Markdown 渲染 */

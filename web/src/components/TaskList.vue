@@ -1,5 +1,27 @@
 <template>
-  <section v-if="tasks.length" class="tasks-section">
+  <!-- 骨架屏加载状态 -->
+  <section v-if="loading && !tasks.length" class="tasks-section">
+    <div class="section-header">
+      <h2>我的任务</h2>
+    </div>
+    <div class="tasks-list">
+      <div v-for="i in 3" :key="i" class="skeleton-card">
+        <div class="skeleton-header">
+          <div class="skeleton-icon"></div>
+          <div class="skeleton-info">
+            <div class="skeleton-title"></div>
+            <div class="skeleton-meta"></div>
+          </div>
+        </div>
+        <div class="skeleton-actions">
+          <div class="skeleton-btn"></div>
+          <div class="skeleton-btn"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section v-else-if="tasks.length" class="tasks-section">
     <div class="section-header">
       <h2>我的任务</h2>
       <div class="filter-tabs">
@@ -10,14 +32,18 @@
         </button>
       </div>
       <input v-model="searchQuery" class="search-box" placeholder="🔍 搜索文件名..." aria-label="搜索任务" />
+      <button class="view-toggle" @click="toggleView" :title="viewMode === 'grid' ? '切换到列表视图' : '切换到网格视图'">
+        {{ viewMode === 'grid' ? '☰' : '⊞' }}
+      </button>
     </div>
 
-    <TransitionGroup name="task-list" tag="div" class="tasks-list">
+    <TransitionGroup name="task-list" tag="div" class="tasks-list" :class="viewMode">
       <TaskCard
         v-for="t in filteredTasks"
         :key="t.id"
         :task="t"
         :loading="loading[t.id]"
+        :compact="viewMode === 'list'"
         @click="$emit('taskClick', t)"
         @delete="$emit('deleteTask', t)"
         @transcribe="$emit('transcribe', t)"
@@ -44,10 +70,17 @@
     <h3>还没有任务</h3>
     <p>从左侧上传你的第一个视频开始分析吧</p>
   </div>
+
+  <!-- 回到顶部按钮 -->
+  <transition name="scroll-top">
+    <button v-if="showScrollTop" class="scroll-top-btn" @click="scrollToTop" aria-label="回到顶部">
+      ⬆️
+    </button>
+  </transition>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import TaskCard from './TaskCard.vue'
 
 const props = defineProps({
@@ -61,22 +94,59 @@ defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore'])
 
 const activeTab = ref('all')
 const searchQuery = ref('')
+const showScrollTop = ref(false)
+const viewMode = ref(localStorage.getItem('taskViewMode') || 'grid')
+
+const toggleView = () => {
+  viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
+  localStorage.setItem('taskViewMode', viewMode.value)
+}
 
 const tabs = computed(() => [
   { key: 'all', label: '全部', count: props.tasks.length },
   { key: 'processing', label: '处理中', count: props.tasks.filter(t => t.status < 3).length },
-  { key: 'completed', label: '已完成', count: props.tasks.filter(t => t.status === 3).length }
+  { key: 'completed', label: '已完成', count: props.tasks.filter(t => t.status === 3).length },
+  { key: 'failed', label: '失败', count: props.tasks.filter(t => t.status === 4 || t.status === 5).length }
 ])
 
 const filteredTasks = computed(() => {
   let result = props.tasks
   if (activeTab.value === 'processing') result = result.filter(t => t.status < 3)
   if (activeTab.value === 'completed') result = result.filter(t => t.status === 3)
+  if (activeTab.value === 'failed') result = result.filter(t => t.status === 4 || t.status === 5)
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     result = result.filter(t => t.filename?.toLowerCase().includes(q))
   }
   return result
+})
+
+const handleScroll = () => {
+  const contentArea = document.querySelector('.content-area')
+  if (contentArea) {
+    showScrollTop.value = contentArea.scrollTop > 400
+  }
+}
+
+const scrollToTop = () => {
+  const contentArea = document.querySelector('.content-area')
+  if (contentArea) {
+    contentArea.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+onMounted(() => {
+  const contentArea = document.querySelector('.content-area')
+  if (contentArea) {
+    contentArea.addEventListener('scroll', handleScroll)
+  }
+})
+
+onUnmounted(() => {
+  const contentArea = document.querySelector('.content-area')
+  if (contentArea) {
+    contentArea.removeEventListener('scroll', handleScroll)
+  }
 })
 </script>
 
@@ -179,10 +249,41 @@ const filteredTasks = computed(() => {
   color: #5a6477;
 }
 
+.view-toggle {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.4), rgba(20, 30, 50, 0.3));
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.65rem;
+  color: #8b95a8;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+
+.view-toggle:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  transform: translateY(-2px);
+}
+
 /* 任务列表 + TransitionGroup */
 .tasks-list {
   display: flex;
   flex-direction: column;
+  gap: 1.5rem;
+}
+
+.tasks-list.list {
+  gap: 1rem;
+}
+
+.tasks-list.grid {
   gap: 1.5rem;
 }
 
@@ -282,6 +383,107 @@ const filteredTasks = computed(() => {
 .empty-state p {
   color: #8b95a8;
   font-size: 0.95rem;
+}
+
+/* 骨架屏 */
+.skeleton-card {
+  background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  border-radius: 1.5rem;
+  padding: 2rem;
+  animation: vl-skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes vl-skeleton-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.skeleton-header {
+  display: flex;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.skeleton-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  background: rgba(139, 149, 168, 0.2);
+  border-radius: 1rem;
+  flex-shrink: 0;
+}
+
+.skeleton-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.skeleton-title {
+  height: 1.25rem;
+  background: rgba(139, 149, 168, 0.2);
+  border-radius: 0.5rem;
+  width: 60%;
+}
+
+.skeleton-meta {
+  height: 0.875rem;
+  background: rgba(139, 149, 168, 0.15);
+  border-radius: 0.5rem;
+  width: 40%;
+}
+
+.skeleton-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.skeleton-btn {
+  flex: 1;
+  height: 2.75rem;
+  background: rgba(139, 149, 168, 0.15);
+  border-radius: 0.875rem;
+}
+
+/* 回到顶部按钮 */
+.scroll-top-btn {
+  position: fixed;
+  bottom: 2.5rem;
+  right: 2.5rem;
+  width: 3rem;
+  height: 3rem;
+  background: linear-gradient(135deg, #d4af37, #f4e4a6);
+  border: none;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.4);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scroll-top-btn:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.6);
+}
+
+.scroll-top-enter-active,
+.scroll-top-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scroll-top-enter-from,
+.scroll-top-leave-to {
+  opacity: 0;
+  transform: translateY(20px) scale(0.8);
 }
 
 /* 响应式 */

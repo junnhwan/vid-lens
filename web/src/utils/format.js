@@ -31,38 +31,38 @@ export const statusText  = (s) => STATUS_TEXTS[s] || '未知'
  * 根据 task 的 status + stage + retry 状态，返回更精确的展示文本和样式类
  */
 export const getDetailedStatus = (task) => {
-  if (!task) return { text: '未知', class: 'pending' }
+  if (!task) return { text: '未知', class: 'pending', icon: '❓' }
 
   const { status, stage, next_retry_at } = task
 
   // status=5 或 'dead' 字符串
   if (status === 5 || status === 'dead') {
-    return { text: '已终止', class: 'dead' }
+    return { text: '已终止', class: 'dead', icon: '⛔' }
   }
 
   // status=4 (failed) 且有 next_retry_at，说明等待重试
   if (status === 4 && next_retry_at) {
-    return { text: '等待重试', class: 'retrying' }
+    return { text: '等待重试', class: 'retrying', icon: '🔄' }
   }
 
   // status=4 (failed) 且无 next_retry_at，说明已彻底失败
   if (status === 4) {
-    return { text: '失败', class: 'failed' }
+    return { text: '失败', class: 'failed', icon: '❌' }
   }
 
   // status=3 (completed)
   if (status === 3) {
-    return { text: '已完成', class: 'completed' }
+    return { text: '已完成', class: 'completed', icon: '✅' }
   }
 
   // status < 3 且有 stage，展示具体阶段
   if (status < 3 && stage) {
     const stageMap = {
-      downloading: { text: '下载中', class: 'running' },
-      uploaded: { text: '已上传', class: 'queued' },
-      transcribing: { text: '文字提取中', class: 'running' },
-      summarizing: { text: 'AI 总结中', class: 'running' },
-      indexing: { text: '构建索引中', class: 'running' }
+      downloading: { text: '下载中', class: 'running', icon: '⬇️' },
+      uploaded: { text: '已上传', class: 'queued', icon: '📤' },
+      transcribing: { text: '文字提取中', class: 'running', icon: '📝' },
+      summarizing: { text: 'AI 总结中', class: 'running', icon: '🤖' },
+      indexing: { text: '构建索引中', class: 'running', icon: '🔍' }
     }
     if (stageMap[stage]) {
       return stageMap[stage]
@@ -70,7 +70,17 @@ export const getDetailedStatus = (task) => {
   }
 
   // 无 stage 时回退到基础 status 映射
-  return { text: statusText(status), class: statusClass(status) }
+  const baseStatus = { text: statusText(status), class: statusClass(status) }
+  const iconMap = {
+    pending: '⏸️',
+    queued: '⏳',
+    running: '⏳',
+    completed: '✅',
+    failed: '❌',
+    dead: '⛔'
+  }
+  baseStatus.icon = iconMap[baseStatus.class] || '❓'
+  return baseStatus
 }
 
 /**

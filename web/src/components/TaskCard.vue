@@ -1,5 +1,5 @@
 <template>
-  <div class="task-card" @click="$emit('click')">
+  <div class="task-card" :class="{ 'task-failed': task.status === 4, 'compact': compact }" @click="$emit('click')">
     <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">×</button>
 
     <div class="task-header">
@@ -9,12 +9,17 @@
         <div class="task-meta">
           <span class="meta-time">{{ formatTime(task.created_at) }}</span>
           <span class="meta-dot">·</span>
-          <span class="meta-status" :class="detailedStatus.class">{{ detailedStatus.text }}</span>
+          <span class="meta-size">{{ formatFileSize(task.file_size) }}</span>
+          <span class="meta-dot">·</span>
+          <span class="meta-status" :class="detailedStatus.class">
+            <span class="status-icon">{{ detailedStatus.icon }}</span>
+            {{ detailedStatus.text }}
+          </span>
         </div>
       </div>
     </div>
 
-    <div class="task-actions">
+    <div v-if="!compact" class="task-actions">
       <button class="action-btn" @click.stop="$emit('transcribe')" :disabled="isActionDisabled">
         <span class="btn-icon">📄</span> 提取文字
       </button>
@@ -28,11 +33,12 @@
 <script setup>
 import { computed } from 'vue'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
-import { formatTime, getDetailedStatus } from '../utils/format.js'
+import { formatTime, formatFileSize, getDetailedStatus } from '../utils/format.js'
 
 const props = defineProps({
   task: Object,
-  loading: Boolean
+  loading: Boolean,
+  compact: { type: Boolean, default: false }
 })
 
 defineEmits(['click', 'delete', 'transcribe', 'analyze'])
@@ -65,6 +71,24 @@ const detailedStatus = computed(() => getDetailedStatus(props.task))
   opacity: 0;
   transition: opacity 0.3s;
 }
+
+.task-card.task-failed::before {
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+  opacity: 1;
+  animation: vl-pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes vl-pulse-border {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: -2px 0 8px rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: -2px 0 16px rgba(239, 68, 68, 0.6);
+  }
+}
+
 .task-card:hover::before {
   opacity: 1;
 }
@@ -73,6 +97,26 @@ const detailedStatus = computed(() => getDetailedStatus(props.task))
   box-shadow: 0 8px 32px rgba(212, 175, 55, 0.15), 0 0 0 1px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   transform: translateY(-4px);
 }
+
+.task-card.compact {
+  padding: 1.25rem 1.5rem;
+}
+
+.task-card.compact .task-header {
+  margin-bottom: 0;
+}
+
+.task-card.compact .task-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 1.25rem;
+}
+
+.task-card.compact .task-name {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
 .task-delete {
   position: absolute;
   top: 1.25rem;
@@ -150,7 +194,7 @@ const detailedStatus = computed(() => getDetailedStatus(props.task))
   opacity: 0.4;
   font-size: 0.6rem;
 }
-.meta-time {
+.meta-time, .meta-size {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85rem;
 }
@@ -163,6 +207,14 @@ const detailedStatus = computed(() => getDetailedStatus(props.task))
   text-transform: uppercase;
   backdrop-filter: blur(8px);
   border: 1px solid;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.status-icon {
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .meta-status.pending {
