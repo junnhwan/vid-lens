@@ -99,7 +99,7 @@ const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigMo
 import api from './api'
 import { buildStoredUser } from './authSession.js'
 import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
-import { shouldStopPolling } from './taskPollingPolicy.js'
+import { isPollingSuccessful, shouldStopPolling } from './taskPollingPolicy.js'
 
 // 状态
 const user = ref(null)
@@ -201,9 +201,13 @@ const handleUrlUpload = async (url) => {
   uploadMsg.value = '正在创建下载任务...'
   uploadProgress.value = -1
   try {
-    await api.uploadByURL(url)
+    const result = await api.uploadByURL(url)
     showToast('已创建下载任务，正在后台下载视频')
     await fetchTasks()
+    if (result?.task_id) {
+      loading.value[result.task_id] = true
+      startPolling(result.task_id, 'download')
+    }
   } catch (err) {
     showToast(err.message || '创建任务失败', true)
   } finally {
@@ -326,15 +330,18 @@ const startPolling = (taskId, type) => {
     await fetchTasks()
     const task = tasks.value.find(t => t.id === taskId)
     if (!task) return
+    if (selectedTask.value?.id === taskId) {
+      selectedTask.value = { ...selectedTask.value, ...task }
+    }
     if (shouldStopPolling(task, type)) {
       clearInterval(timer)
       delete pollingTimers.value[taskId]
       loading.value[taskId] = false
-      if (task.status === 3) {
+      if (isPollingSuccessful(task, type)) {
         await refreshTaskDetail(taskId)
-        showToast('处理完成')
+        showToast(type === 'download' ? '下载完成' : '处理完成')
       } else {
-        showToast(task.error_msg || '处理失败', true)
+        showToast(task.error_msg || task.last_error_msg || '处理失败', true)
       }
     }
   }, 3000)
