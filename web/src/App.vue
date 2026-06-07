@@ -195,14 +195,14 @@ const handleFileUpload = async (file) => {
 
 const handleUrlUpload = async (url) => {
   uploading.value = true
-  uploadMsg.value = '正在下载并解析...'
+  uploadMsg.value = '正在创建下载任务...'
   uploadProgress.value = -1
   try {
     await api.uploadByURL(url)
-    showToast('下载成功')
+    showToast('已创建下载任务，正在后台下载视频')
     await fetchTasks()
   } catch (err) {
-    showToast(err.message || '下载失败', true)
+    showToast(err.message || '创建任务失败', true)
   } finally {
     uploading.value = false
   }

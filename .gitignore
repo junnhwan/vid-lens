@@ -42,5 +42,10 @@ web/src/App-old.vue
 # Local design notes
 DESIGN_UPDATES.md
 docs/DESIGN_UPDATES.md
+docs/backend-optimization-roadmap.md
+docs/superpowers/
+
+# Local resume drafts
+resume.md
 
 other-grill.md

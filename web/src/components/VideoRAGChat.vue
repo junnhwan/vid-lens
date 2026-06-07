@@ -1,13 +1,30 @@
 <template>
   <div class="rag-chat">
-    <div v-if="!indexStatus.indexed" class="index-prompt">
-      <div class="prompt-icon">🔍</div>
-      <p>需要先构建视频索引才能提问</p>
-      <button class="btn-amber" @click="buildIndex" :disabled="building">
-        {{ building ? '构建中...' : '构建视频索引' }}
+    <!-- 索引状态提示 -->
+    <div v-if="indexStatus.status !== 'indexed'" class="index-prompt">
+      <div class="prompt-icon">{{ indexIcon }}</div>
+      <p>{{ indexPromptText }}</p>
+
+      <!-- 索引构建按钮 -->
+      <button
+        v-if="indexStatus.status !== 'indexing'"
+        class="btn-amber"
+        @click="buildIndex"
+        :disabled="building"
+      >
+        {{ building ? '构建中...' : indexButtonText }}
       </button>
-      <div v-if="indexStatus.indexed" class="index-info">
-        ✅ 已构建 {{ indexStatus.chunks }} 个片段
+
+      <!-- 构建中提示 -->
+      <div v-if="indexStatus.status === 'indexing'" class="indexing-spinner">
+        <div class="spinner"></div>
+        <span>索引构建中，请稍候...</span>
+      </div>
+
+      <!-- 失败时显示错误 -->
+      <div v-if="indexStatus.status === 'failed' && indexStatus.error" class="index-error">
+        <span class="error-label">失败原因:</span>
+        <span class="error-text">{{ indexStatus.error }}</span>
       </div>
     </div>
 
@@ -61,7 +78,7 @@ const props = defineProps({
 
 const emit = defineEmits(['error'])
 
-const indexStatus = ref({ indexed: false, chunks: 0 })
+const indexStatus = ref({ status: 'not_indexed', chunks: 0, error: '' })
 const building = ref(false)
 const messages = ref([])
 const question = ref('')
@@ -69,15 +86,39 @@ const loading = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 
+const indexIcon = computed(() => {
+  switch (indexStatus.value.status) {
+    case 'indexing': return '⏳'
+    case 'failed': return '❌'
+    case 'indexed': return '✅'
+    default: return '🔍'
+  }
+})
+
+const indexPromptText = computed(() => {
+  switch (indexStatus.value.status) {
+    case 'indexing': return '正在构建视频索引...'
+    case 'failed': return '索引构建失败，可以重新尝试'
+    case 'not_indexed': return '需要先构建视频索引才能提问'
+    default: return '需要先构建视频索引才能提问'
+  }
+})
+
+const indexButtonText = computed(() => {
+  return indexStatus.value.status === 'failed' ? '重新构建索引' : '构建视频索引'
+})
+
 const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
 
 const buildIndex = async () => {
   building.value = true
+  indexStatus.value.status = 'indexing'
   try {
     const res = await api.buildRAGIndex(props.task.id)
-    indexStatus.value = { indexed: true, chunks: res.chunks || 0 }
+    indexStatus.value = { status: 'indexed', chunks: res.chunks || 0, error: '' }
     await createSession()
   } catch (err) {
+    indexStatus.value = { status: 'failed', chunks: 0, error: err.message || '构建索引失败' }
     emit('error', err.message || '构建索引失败')
   } finally {
     building.value = false
@@ -122,12 +163,22 @@ const sendQuestion = async () => {
 const checkIndexStatus = async () => {
   try {
     const res = await api.getRAGIndexStatus(props.task.id)
-    indexStatus.value = { indexed: res.indexed, chunks: res.chunks || 0 }
-    if (res.indexed && !sessionId.value) {
-      await createSession()
+    // 后端返回 { indexed: boolean, status: string, chunks: number, last_error: string }
+    if (res.indexed) {
+      indexStatus.value = { status: 'indexed', chunks: res.chunks || 0, error: '' }
+      if (!sessionId.value) {
+        await createSession()
+      }
+    } else if (res.status === 'indexing') {
+      indexStatus.value = { status: 'indexing', chunks: 0, error: '' }
+    } else if (res.status === 'failed') {
+      indexStatus.value = { status: 'failed', chunks: 0, error: res.last_error || '构建失败' }
+    } else {
+      indexStatus.value = { status: 'not_indexed', chunks: 0, error: '' }
     }
   } catch (err) {
     console.error('检查索引状态失败:', err)
+    indexStatus.value = { status: 'not_indexed', chunks: 0, error: '' }
   }
 }
 
@@ -157,6 +208,40 @@ onMounted(() => {
   color: #8b95a8;
   margin-bottom: 2rem;
   font-size: 1rem;
+}
+
+.indexing-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: #d4af37;
+  font-size: 0.95rem;
+  margin-top: 1.5rem;
+}
+
+.index-error {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(220, 38, 38, 0.08));
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.error-label {
+  color: #f87171;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.error-text {
+  color: #fecaca;
+  font-size: 0.9rem;
+  font-family: 'JetBrains Mono', monospace;
+  word-break: break-word;
 }
 
 .index-info {

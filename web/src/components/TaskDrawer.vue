@@ -37,9 +37,25 @@
             </div>
             <div class="meta-item">
               <span class="meta-label">状态</span>
-              <span class="meta-status" :class="statusClass(task.status)">
-                {{ statusText(task.status) }}
+              <span class="meta-status" :class="detailedStatus.class">
+                {{ detailedStatus.text }}
               </span>
+            </div>
+          </div>
+
+          <!-- 失败 / 重试信息 -->
+          <div v-if="errorMsg || task.next_retry_at" class="retry-info">
+            <div v-if="errorMsg" class="retry-error">
+              <span class="retry-label">错误:</span>
+              <span class="retry-text">{{ errorMsg }}</span>
+            </div>
+            <div v-if="task.retry_count !== undefined" class="retry-count">
+              <span class="retry-label">重试次数:</span>
+              <span class="retry-text">{{ task.retry_count }} / {{ task.max_retries || 3 }}</span>
+            </div>
+            <div v-if="task.next_retry_at" class="retry-next">
+              <span class="retry-label">下次重试:</span>
+              <span class="retry-text">{{ formatRelativeTime(task.next_retry_at) }}</span>
             </div>
           </div>
 
@@ -90,7 +106,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
 import { taskFailureMessage } from '../taskDetailPolicy.js'
-import { formatTime, formatFileSize, statusClass, statusText } from '../utils/format.js'
+import { formatTime, formatFileSize, getDetailedStatus, getErrorMessage, formatRelativeTime } from '../utils/format.js'
 import VideoRAGChat from './VideoRAGChat.vue'
 
 const props = defineProps({
@@ -116,6 +132,8 @@ const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || '
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
 const failureMessage = computed(() => taskFailureMessage(props.task))
+const detailedStatus = computed(() => getDetailedStatus(props.task))
+const errorMsg = computed(() => getErrorMessage(props.task))
 
 // ESC 关闭 + Focus trap
 const onKeyDown = (e) => {
@@ -378,6 +396,57 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.3);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
+.meta-status.retrying {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+}
+
+.meta-status.dead {
+  background: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
+  border-color: rgba(100, 116, 139, 0.3);
+}
+
+/* 重试信息 */
+.retry-info {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(239, 68, 68, 0.05));
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 0.875rem;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+  backdrop-filter: blur(8px);
+}
+
+.retry-error,
+.retry-count,
+.retry-next {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.9rem;
+}
+
+.retry-error:last-child,
+.retry-count:last-child,
+.retry-next:last-child {
+  margin-bottom: 0;
+}
+
+.retry-label {
+  color: #fbbf24;
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.retry-text {
+  color: #e8eef7;
+  font-family: 'JetBrains Mono', monospace;
+  flex: 1;
+  word-break: break-word;
 }
 
 .drawer-actions {

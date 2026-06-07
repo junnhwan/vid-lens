@@ -9,7 +9,7 @@
         <div class="task-meta">
           <span class="meta-time">{{ formatTime(task.created_at) }}</span>
           <span class="meta-dot">·</span>
-          <span class="meta-status" :class="statusClass(task.status)">{{ statusText(task.status) }}</span>
+          <span class="meta-status" :class="detailedStatus.class">{{ detailedStatus.text }}</span>
         </div>
       </div>
     </div>
@@ -28,7 +28,7 @@
 <script setup>
 import { computed } from 'vue'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
-import { formatTime, statusClass, statusText } from '../utils/format.js'
+import { formatTime, getDetailedStatus } from '../utils/format.js'
 
 const props = defineProps({
   task: Object,
@@ -38,6 +38,7 @@ const props = defineProps({
 defineEmits(['click', 'delete', 'transcribe', 'analyze'])
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
+const detailedStatus = computed(() => getDetailedStatus(props.task))
 </script>
 
 <style scoped>
@@ -193,6 +194,17 @@ const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.l
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.3);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+.meta-status.retrying {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+}
+.meta-status.dead {
+  background: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
+  border-color: rgba(100, 116, 139, 0.3);
 }
 
 /* 任务操作按钮 */
