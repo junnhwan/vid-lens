@@ -31,3 +31,7 @@ func (r *AssetRepository) FindByMD5(md5 string) (*model.VideoAsset, error) {
 	}
 	return &asset, nil
 }
+
+func (r *AssetRepository) Delete(id int64) error {
+	return r.db.Delete(&model.VideoAsset{}, id).Error
+}

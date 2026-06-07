@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	TaskJobAnalyze    = "analyze"
-	TaskJobTranscribe = "transcribe"
-	TaskJobDownload   = "download"
+	TaskJobAnalyze    = model.TaskJobTypeAnalyze
+	TaskJobTranscribe = model.TaskJobTypeTranscribe
+	TaskJobDownload   = model.TaskJobTypeDownload
+	TaskJobRAGIndex   = model.TaskJobTypeRAGIndex
 )
 
 type TaskRetryPolicy struct {
@@ -115,28 +116,39 @@ func (c *Consumer) recordTaskFailure(taskID int64, jobType, stage string, err er
 
 	errMsg := truncateError(err)
 	if !isRetryableError(err) {
-		return c.repo.Task.RecordTerminalFailure(taskID, jobType, stage, "non_retryable_error", errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed)
+		if err := c.repo.Task.RecordTerminalFailure(taskID, jobType, stage, "non_retryable_error", errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed); err != nil {
+			return err
+		}
+		return c.repo.TaskJob.RecordTerminalFailure(taskID, jobType, stage, "non_retryable_error", errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed)
 	}
 
 	nextRetryCount := task.RetryCount + 1
 	if nextRetryCount > maxRetries {
-		return c.repo.Task.RecordTerminalFailure(taskID, jobType, stage, "retry_exhausted", errMsg, nextRetryCount, maxRetries, model.TaskStatusDead)
+		if err := c.repo.Task.RecordTerminalFailure(taskID, jobType, stage, "retry_exhausted", errMsg, nextRetryCount, maxRetries, model.TaskStatusDead); err != nil {
+			return err
+		}
+		return c.repo.TaskJob.RecordTerminalFailure(taskID, jobType, stage, "retry_exhausted", errMsg, nextRetryCount, maxRetries, model.TaskStatusDead)
 	}
 
 	nextRetryAt := policy.Now().Add(policy.backoffForRetry(nextRetryCount))
-	return c.repo.Task.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt)
+	if err := c.repo.Task.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt); err != nil {
+		return err
+	}
+	return c.repo.TaskJob.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt)
 }
 
 type retryProducer interface {
 	EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error
 	EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error
 	EnqueueDownload(ctx context.Context, taskID int64, key string) error
+	EnqueueRAGIndex(ctx context.Context, taskID int64) error
 }
 
 type RetrySchedulerConfig struct {
-	BatchSize int
-	Interval  time.Duration
-	Now       func() time.Time
+	BatchSize              int
+	Interval               time.Duration
+	DispatchFailureBackoff time.Duration
+	Now                    func() time.Time
 }
 
 type RetryScheduler struct {
@@ -151,6 +163,9 @@ func NewRetryScheduler(repos *repository.Repositories, producer retryProducer, c
 	}
 	if config.Interval <= 0 {
 		config.Interval = 30 * time.Second
+	}
+	if config.DispatchFailureBackoff <= 0 {
+		config.DispatchFailureBackoff = time.Minute
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -191,8 +206,11 @@ func (s *RetryScheduler) RunOnce(ctx context.Context) error {
 		if !claimed {
 			continue
 		}
+		_ = s.repos.TaskJob.UpsertDispatching(&task, task.LastJobType, status, stage)
 		if err := s.enqueueRetry(ctx, task); err != nil {
-			_ = s.repos.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, stage, truncateError(err))
+			nextRetryAt := now.Add(s.config.DispatchFailureBackoff)
+			_ = s.repos.Task.RestoreRetryAfterDispatchFailure(task.ID, stage, truncateError(err), nextRetryAt)
+			_ = s.repos.TaskJob.RestoreAfterDispatchFailure(task.ID, task.LastJobType, stage, truncateError(err), nextRetryAt)
 			return err
 		}
 	}
@@ -210,6 +228,8 @@ func retryDispatchState(jobType, currentStage string) (int8, string) {
 			currentStage = model.TaskStageSummarizing
 		}
 		return model.TaskStatusQueued, currentStage
+	case TaskJobRAGIndex:
+		return model.TaskStatusQueued, model.TaskStageIndexing
 	default:
 		return model.TaskStatusQueued, currentStage
 	}
@@ -223,6 +243,8 @@ func (s *RetryScheduler) enqueueRetry(ctx context.Context, task model.VideoTask)
 		return s.producer.EnqueueTranscribe(ctx, task.ID, task.FileMD5)
 	case TaskJobAnalyze:
 		return s.producer.EnqueueAnalyze(ctx, task.ID, task.FileMD5)
+	case TaskJobRAGIndex:
+		return s.producer.EnqueueRAGIndex(ctx, task.ID)
 	default:
 		return fmt.Errorf("未知重试任务类型: %s", task.LastJobType)
 	}

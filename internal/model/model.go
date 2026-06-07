@@ -8,6 +8,7 @@ func AllModels() []interface{} {
 		&User{},
 		&VideoAsset{},
 		&VideoTask{},
+		&TaskJob{},
 		&VideoTranscription{},
 		&VideoTranscriptionChunk{},
 		&AISummary{},
@@ -16,6 +17,8 @@ func AllModels() []interface{} {
 		&VideoRAGIndex{},
 		&ChatSession{},
 		&ChatMessage{},
+		&AICallLog{},
+		&UserUsageDaily{},
 	}
 }
 

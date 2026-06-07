@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -20,6 +21,11 @@ type DownloadPayload struct {
 	TraceID string `json:"trace_id"`
 }
 
+type RAGIndexPayload struct {
+	TaskID  int64  `json:"task_id"`
+	TraceID string `json:"trace_id"`
+}
+
 // Producer Kafka 生产者
 // 面试亮点（选型理由）：
 //
@@ -34,11 +40,15 @@ type Producer struct {
 	analyzeWriter    *kafka.Writer
 	transcribeWriter *kafka.Writer
 	downloadWriter   *kafka.Writer
+	ragIndexWriter   *kafka.Writer
 }
 
 // NewProducer 创建 Kafka 生产者
-func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic string) *Producer {
+func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic string, ragIndexTopic ...string) *Producer {
 	newWriter := func(topic string) *kafka.Writer {
+		if topic == "" {
+			return nil
+		}
 		return &kafka.Writer{
 			Addr:         kafka.TCP(brokers...),
 			Topic:        topic,
@@ -49,10 +59,15 @@ func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic 
 		}
 	}
 
+	var ragTopic string
+	if len(ragIndexTopic) > 0 {
+		ragTopic = ragIndexTopic[0]
+	}
 	return &Producer{
 		analyzeWriter:    newWriter(analyzeTopic),
 		transcribeWriter: newWriter(transcribeTopic),
 		downloadWriter:   newWriter(downloadTopic),
+		ragIndexWriter:   newWriter(ragTopic),
 	}
 }
 
@@ -99,18 +114,48 @@ func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string
 	})
 }
 
+func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
+	if p.ragIndexWriter == nil {
+		return fmt.Errorf("RAG 索引 Kafka topic 未配置")
+	}
+	return p.ragIndexWriter.WriteMessages(ctx, newRAGIndexMessage(ctx, taskID))
+}
+
+func newRAGIndexMessage(ctx context.Context, taskID int64) kafka.Message {
+	payload, _ := json.Marshal(RAGIndexPayload{
+		TaskID:  taskID,
+		TraceID: TraceIDFromContext(ctx),
+	})
+	key := fmt.Sprint(taskID)
+	return kafka.Message{
+		Key:   []byte(key),
+		Value: payload,
+	}
+}
+
 // Close 关闭生产者
 func (p *Producer) Close() error {
-	err1 := p.analyzeWriter.Close()
-	err2 := p.transcribeWriter.Close()
-	err3 := p.downloadWriter.Close()
+	err1 := closeWriter(p.analyzeWriter)
+	err2 := closeWriter(p.transcribeWriter)
+	err3 := closeWriter(p.downloadWriter)
+	err4 := closeWriter(p.ragIndexWriter)
 	if err1 != nil {
 		return err1
 	}
 	if err2 != nil {
 		return err2
 	}
-	return err3
+	if err3 != nil {
+		return err3
+	}
+	return err4
+}
+
+func closeWriter(w *kafka.Writer) error {
+	if w == nil {
+		return nil
+	}
+	return w.Close()
 }
 
 // CreateTopics 确保 Topic 存在（首次启动时调用）

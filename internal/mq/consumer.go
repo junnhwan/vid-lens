@@ -31,6 +31,9 @@ type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segm
 type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
 type downloadVideoFunc func(ctx context.Context, sourceURL string) (string, error)
 type uploadLocalFileFunc func(ctx context.Context, localPath, objectName, contentType string) error
+type ragIndexProducer interface {
+	EnqueueRAGIndex(ctx context.Context, taskID int64) error
+}
 
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
@@ -43,6 +46,7 @@ type Consumer struct {
 	storage     *storage.MinIOStorage
 	ai          ai.Strategy
 	aiFactory   *ai.Factory
+	aiRecorder  ai.CallRecorder
 	profiles    profileResolver
 	rdb         redis.Cmdable
 	ffmpegPath  string
@@ -51,6 +55,7 @@ type Consumer struct {
 	proxyURL    string
 	splitAudio  splitAudioFunc
 	ragIndex    ragIndexFunc
+	ragProducer ragIndexProducer
 	retryPolicy TaskRetryPolicy
 
 	downloadVideo   downloadVideoFunc
@@ -104,8 +109,16 @@ func (c *Consumer) SetAIResolver(factory *ai.Factory, profiles profileResolver) 
 	c.profiles = profiles
 }
 
+func (c *Consumer) SetAIRecorder(recorder ai.CallRecorder) {
+	c.aiRecorder = recorder
+}
+
 func (c *Consumer) SetRAGIndexer(indexer ragIndexFunc) {
 	c.ragIndex = indexer
+}
+
+func (c *Consumer) SetRAGIndexProducer(producer ragIndexProducer) {
+	c.ragProducer = producer
 }
 
 // StartAnalyzeConsumer 启动 AI 分析消费者
@@ -208,6 +221,36 @@ func (c *Consumer) StartDownloadConsumer(brokers []string, topic, groupID string
 	}()
 }
 
+func (c *Consumer) StartRAGIndexConsumer(brokers []string, topic, groupID string) {
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,
+		Topic:          topic,
+		GroupID:        groupID,
+		CommitInterval: 0,
+		MinBytes:       1e3,
+		MaxBytes:       1e6,
+	})
+
+	go func() {
+		log.Println("✅ Kafka 消费者已启动 [rag_index]")
+		for {
+			msg, err := r.ReadMessage(context.Background())
+			if err != nil {
+				log.Printf("[Kafka] 读取 RAG 索引消息失败: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			if err := c.handleRAGIndex(context.Background(), msg); err != nil {
+				log.Printf("[Kafka] RAG 索引任务消息异常: %v", err)
+			}
+			if err := r.CommitMessages(context.Background(), msg); err != nil {
+				log.Printf("[Kafka] rag_index commit offset 失败: %v", err)
+			}
+		}
+	}()
+}
+
 func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error {
 	var payload DownloadPayload
 	if err := json.Unmarshal(msg.Value, &payload); err != nil {
@@ -223,6 +266,7 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 		log.Printf("[Kafka] 下载任务状态已变化，跳过: traceID=%s taskID=%d status=%d stage=%s", traceID, task.ID, task.Status, task.Stage)
 		return nil
 	}
+	c.markTaskJobRunning(task, TaskJobDownload, model.TaskStageDownloading)
 	if strings.TrimSpace(task.SourceURL) == "" {
 		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("URL 下载任务缺少 source_url"))
 		return nil
@@ -279,7 +323,47 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 	if err := c.repo.Task.CompleteURLDownload(task.ID, asset, filename, time.Now()); err != nil {
 		return fmt.Errorf("回写下载任务失败: %w", err)
 	}
+	c.markTaskJobCompleted(task.ID, TaskJobDownload, model.TaskStageDownloading)
 	log.Printf("[Kafka] URL 下载完成: traceID=%s taskID=%d assetID=%d md5=%s size=%d", traceID, task.ID, asset.ID, asset.FileMD5, asset.FileSize)
+	return nil
+}
+
+func (c *Consumer) handleRAGIndex(ctx context.Context, msg kafka.Message) error {
+	var payload RAGIndexPayload
+	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+		return fmt.Errorf("解析 RAG 索引消息失败: %w", err)
+	}
+
+	task, err := c.repo.Task.FindByID(payload.TaskID)
+	if err != nil {
+		return fmt.Errorf("查询 RAG 索引任务失败: %w", err)
+	}
+	traceID := traceIDForTask(payload.TraceID, task)
+	ctx = ContextWithTraceID(ctx, traceID)
+	c.markTaskJobRunning(task, TaskJobRAGIndex, model.TaskStageIndexing)
+
+	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
+	if err != nil {
+		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err)
+		return nil
+	}
+	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
+		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("缺少转录文本，无法构建 RAG 索引"))
+		return nil
+	}
+	if c.ragIndex == nil {
+		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("RAG 索引器未初始化"))
+		return nil
+	}
+
+	log.Printf("[Kafka] RAG 索引任务开始: traceID=%s taskID=%d userID=%d", traceID, task.ID, task.UserID)
+	if err := c.ragIndex(ctx, task); err != nil {
+		log.Printf("[Kafka] RAG 索引任务失败: traceID=%s taskID=%d err=%v", traceID, task.ID, err)
+		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err)
+		return nil
+	}
+	c.markTaskJobCompleted(task.ID, TaskJobRAGIndex, model.TaskStageIndexing)
+	log.Printf("[Kafka] RAG 索引任务完成: traceID=%s taskID=%d", traceID, task.ID)
 	return nil
 }
 
@@ -350,6 +434,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		log.Printf("[Kafka] 任务状态已变化，跳过: taskID=%d", payload.TaskID)
 		return nil
 	}
+	c.markTaskJobRunning(task, TaskJobAnalyze, model.TaskStageSummarizing)
 
 	// 第 5 步：核心业务
 	if err := c.processVideo(ctx, task); err != nil {
@@ -363,6 +448,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
 		return fmt.Errorf("更新完成状态失败: %w", err)
 	}
+	c.markTaskJobCompleted(payload.TaskID, TaskJobAnalyze, model.TaskStageSummarizing)
 	log.Printf("[Kafka] 任务完成: taskID=%d", payload.TaskID)
 	return nil
 }
@@ -388,6 +474,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	if !updated {
 		return nil
 	}
+	c.markTaskJobRunning(task, TaskJobTranscribe, model.TaskStageTranscribing)
 
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
@@ -429,6 +516,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
 		return err
 	}
+	c.markTaskJobCompleted(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing)
 	return nil
 }
 
@@ -574,7 +662,10 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 		if c.ai == nil {
 			return nil, fmt.Errorf("请先配置 AI 服务")
 		}
-		return c.ai, nil
+		return ai.NewObservedStrategy(c.ai, c.aiRecorder, ai.CallContext{
+			UserID: task.UserID,
+			TaskID: task.ID,
+		}), nil
 	}
 
 	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
@@ -584,7 +675,18 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 	if profile == nil {
 		return nil, fmt.Errorf("请先配置 AI 服务")
 	}
-	return c.aiFactory.NewAnalysisStrategy(*profile)
+	strategy, err := c.aiFactory.NewAnalysisStrategy(*profile)
+	if err != nil {
+		return nil, err
+	}
+	return ai.NewObservedStrategy(strategy, c.aiRecorder, ai.CallContext{
+		UserID:      task.UserID,
+		TaskID:      task.ID,
+		ASRProvider: profile.ASRProvider,
+		ASRModel:    profile.ASRModel,
+		LLMProvider: profile.LLMProvider,
+		LLMModel:    profile.LLMModel,
+	}), nil
 }
 
 func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
@@ -619,14 +721,48 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 }
 
 func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) {
-	if c.ragIndex == nil {
+	if c.ragProducer == nil {
 		return
 	}
-	if err := c.ragIndex(ctx, task); err != nil {
-		log.Printf("[Kafka] RAG 索引构建失败，可稍后手动重试: taskID=%d, err=%v", task.ID, err)
+	if c.repo != nil && c.repo.TaskJob != nil {
+		if err := c.repo.TaskJob.UpsertQueued(task, TaskJobRAGIndex, model.TaskStageIndexing, task.MaxRetries); err != nil {
+			log.Printf("[Kafka] RAG 索引子任务状态写入失败: taskID=%d err=%v", task.ID, err)
+		}
+	}
+	ctx = ContextWithTraceID(ctx, task.TraceID)
+	if err := c.ragProducer.EnqueueRAGIndex(ctx, task.ID); err != nil {
+		log.Printf("[Kafka] RAG 索引任务投递失败，可稍后手动重试: taskID=%d, err=%v", task.ID, err)
+		if c.repo != nil && c.repo.TaskJob != nil {
+			_ = c.repo.TaskJob.RecordTerminalFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, "enqueue_failed", truncateError(err), task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
+		}
+		c.recordRAGIndexEnqueueFailure(task, err)
 		return
 	}
-	log.Printf("[Kafka] RAG 索引构建完成: taskID=%d", task.ID)
+	log.Printf("[Kafka] RAG 索引任务已投递: taskID=%d", task.ID)
+}
+
+func (c *Consumer) recordRAGIndexEnqueueFailure(task *model.VideoTask, err error) {
+	if c.repo == nil || c.repo.RAGIndex == nil || c.profiles == nil || task == nil {
+		return
+	}
+	profile, profileErr := c.profiles.GetDefaultAIProfile(task.UserID)
+	if profileErr != nil || profile == nil || strings.TrimSpace(profile.EmbeddingModel) == "" {
+		return
+	}
+	now := time.Now()
+	errMsg := truncateError(fmt.Errorf("RAG 索引任务投递失败: %w", err))
+	_ = c.repo.RAGIndex.Upsert(&model.VideoRAGIndex{
+		UserID:         task.UserID,
+		TaskID:         task.ID,
+		EmbeddingModel: profile.EmbeddingModel,
+		EmbeddingDim:   profile.EmbeddingDim,
+		Status:         model.RAGIndexStatusFailed,
+		ChunkCount:     0,
+		LastError:      errMsg,
+		BuildVersion:   1,
+		StartedAt:      &now,
+		FinishedAt:     &now,
+	})
 }
 
 func truncateError(err error) string {
@@ -683,4 +819,26 @@ func traceIDForTask(payloadTraceID string, task *model.VideoTask) string {
 		return task.TraceID
 	}
 	return ""
+}
+
+func (c *Consumer) markTaskJobRunning(task *model.VideoTask, jobType, stage string) {
+	if c == nil || c.repo == nil || c.repo.TaskJob == nil || task == nil {
+		return
+	}
+	if err := c.repo.TaskJob.UpsertDispatching(task, jobType, model.TaskStatusRunning, stage); err != nil {
+		log.Printf("[Kafka] 子任务状态写入失败: taskID=%d jobType=%s err=%v", task.ID, jobType, err)
+		return
+	}
+	if err := c.repo.TaskJob.MarkRunning(task.ID, jobType, stage); err != nil {
+		log.Printf("[Kafka] 子任务运行状态写入失败: taskID=%d jobType=%s err=%v", task.ID, jobType, err)
+	}
+}
+
+func (c *Consumer) markTaskJobCompleted(taskID int64, jobType, stage string) {
+	if c == nil || c.repo == nil || c.repo.TaskJob == nil {
+		return
+	}
+	if err := c.repo.TaskJob.MarkCompleted(taskID, jobType, stage); err != nil {
+		log.Printf("[Kafka] 子任务完成状态写入失败: taskID=%d jobType=%s err=%v", taskID, jobType, err)
+	}
 }

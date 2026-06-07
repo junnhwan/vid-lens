@@ -146,6 +146,18 @@ func (s *MilvusStore) UpsertChunks(ctx context.Context, vectors []service.RAGVec
 	return s.client.Flush(ctx, s.collection, false)
 }
 
+func (s *MilvusStore) DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error {
+	filter := fmt.Sprintf("%s == %d and %s == %d and %s == %q",
+		fieldUserID, userID,
+		fieldTaskID, taskID,
+		fieldEmbeddingModel, embeddingModel,
+	)
+	if err := s.client.Delete(ctx, s.collection, "", filter); err != nil {
+		return err
+	}
+	return s.client.Flush(ctx, s.collection, false)
+}
+
 func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.RetrievalRequest) ([]service.RetrievedChunk, error) {
 	if len(query) != s.dim {
 		return nil, fmt.Errorf("query embedding dim = %d, want %d", len(query), s.dim)

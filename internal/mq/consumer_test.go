@@ -37,6 +37,15 @@ func (emptyProfileResolver) GetDefaultAIProfile(int64) (*ai.Profile, error) {
 	return nil, nil
 }
 
+type staticProfileResolver struct {
+	profile *ai.Profile
+	err     error
+}
+
+func (r staticProfileResolver) GetDefaultAIProfile(int64) (*ai.Profile, error) {
+	return r.profile, r.err
+}
+
 func (a *recordingAI) Transcribe(_ context.Context, audioPath string) (string, error) {
 	a.transcribeUsed = true
 	a.transcribeInput = append(a.transcribeInput, audioPath)
@@ -366,22 +375,220 @@ func TestTranscribeAudioPersistsFailedChunk(t *testing.T) {
 	}
 }
 
-func TestIndexAfterTranscriptionInvokesRAGIndexerAndSwallowsError(t *testing.T) {
+func TestIndexAfterTranscriptionEnqueuesRAGIndexAndDoesNotCallIndexer(t *testing.T) {
 	calls := 0
-	task := &model.VideoTask{ID: 12, UserID: 7}
+	task := &model.VideoTask{ID: 12, UserID: 7, TraceID: "trace-task-12"}
+	producer := &recordingRAGIndexProducer{}
 	consumer := &Consumer{}
+	consumer.SetRAGIndexProducer(producer)
+	consumer.SetRAGIndexer(func(_ context.Context, got *model.VideoTask) error {
+		calls++
+		return nil
+	})
+
+	consumer.indexAfterTranscription(context.Background(), task)
+
+	if calls != 0 {
+		t.Fatalf("rag index calls = %d, want async enqueue only", calls)
+	}
+	if len(producer.taskIDs) != 1 || producer.taskIDs[0] != task.ID {
+		t.Fatalf("rag index enqueues = %#v, want task %d", producer.taskIDs, task.ID)
+	}
+	if len(producer.traceIDs) != 1 || producer.traceIDs[0] != task.TraceID {
+		t.Fatalf("rag index trace IDs = %#v, want %q", producer.traceIDs, task.TraceID)
+	}
+}
+
+func TestIndexAfterTranscriptionCreatesQueuedRAGIndexJob(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:   7,
+		FileMD5:  "adadadadadadadadadadadadadadadad",
+		Filename: "video.mp4",
+		Status:   model.TaskStatusRunning,
+		Stage:    model.TaskStageIndexing,
+		TraceID:  "trace-rag-queued",
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	consumer := &Consumer{repo: repos}
+	consumer.SetRAGIndexProducer(&recordingRAGIndexProducer{})
+
+	consumer.indexAfterTranscription(context.Background(), task)
+
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
+	if err != nil {
+		t.Fatalf("find rag job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageIndexing || job.TraceID != task.TraceID {
+		t.Fatalf("rag task_job = %+v, want queued/indexing", job)
+	}
+}
+
+func TestIndexAfterTranscriptionRecordsRAGIndexFailureWhenEnqueueFails(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:   7,
+		FileMD5:  "abababababababababababababababab",
+		Filename: "video.mp4",
+		Status:   model.TaskStatusRunning,
+		Stage:    model.TaskStageIndexing,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	profile := &ai.Profile{EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536}
+	consumer := &Consumer{
+		repo:     repos,
+		profiles: staticProfileResolver{profile: profile},
+	}
+	consumer.SetRAGIndexProducer(&recordingRAGIndexProducer{err: fmt.Errorf("kafka unavailable")})
+
+	consumer.indexAfterTranscription(context.Background(), task)
+
+	index, err := repos.RAGIndex.FindByTaskAndModel(task.UserID, task.ID, profile.EmbeddingModel)
+	if err != nil {
+		t.Fatalf("find rag index: %v", err)
+	}
+	if index == nil {
+		t.Fatal("expected rag index failure row")
+	}
+	if index.Status != model.RAGIndexStatusFailed {
+		t.Fatalf("rag index status = %q, want failed", index.Status)
+	}
+	if !strings.Contains(index.LastError, "kafka unavailable") {
+		t.Fatalf("rag index last_error = %q, want kafka error", index.LastError)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
+	if err != nil {
+		t.Fatalf("find rag job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusFailed || job.LastErrorCode != "enqueue_failed" {
+		t.Fatalf("rag task_job enqueue failure = %+v", job)
+	}
+}
+
+func TestHandleRAGIndexInvokesIndexer(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:   7,
+		FileMD5:  "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+		Filename: "video.mp4",
+		Status:   model.TaskStatusCompleted,
+		Stage:    model.TaskStageNone,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{
+		TaskID:  task.ID,
+		Content: "已完成转写，RAG consumer 应异步构建索引",
+		Words:   22,
+	}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	calls := 0
+	consumer := &Consumer{repo: repos}
 	consumer.SetRAGIndexer(func(_ context.Context, got *model.VideoTask) error {
 		calls++
 		if got.ID != task.ID || got.UserID != task.UserID {
 			t.Fatalf("indexed task = %+v, want %+v", got, task)
 		}
-		return fmt.Errorf("milvus unavailable")
+		return nil
 	})
 
-	consumer.indexAfterTranscription(context.Background(), task)
+	if err := consumer.handleRAGIndex(context.Background(), ragIndexMessage(task.ID, "trace-rag-ok")); err != nil {
+		t.Fatalf("handleRAGIndex: %v", err)
+	}
 
 	if calls != 1 {
 		t.Fatalf("rag index calls = %d, want 1", calls)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusCompleted || current.Stage != model.TaskStageNone {
+		t.Fatalf("task status/stage = %d/%q, want completed/none", current.Status, current.Stage)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
+	if err != nil {
+		t.Fatalf("find rag job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusCompleted || job.Stage != model.TaskStageIndexing || job.FinishedAt == nil {
+		t.Fatalf("rag task_job = %+v, want completed", job)
+	}
+}
+
+func TestHandleRAGIndexFailureSchedulesRetryButKeepsTranscription(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID:     7,
+		FileMD5:    "efefefefefefefefefefefefefefefef",
+		Filename:   "video.mp4",
+		Status:     model.TaskStatusCompleted,
+		Stage:      model.TaskStageNone,
+		MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{
+		TaskID:  task.ID,
+		Content: "RAG 失败后转写文本仍应保留",
+		Words:   16,
+	}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	consumer := &Consumer{
+		repo: repos,
+		retryPolicy: TaskRetryPolicy{
+			MaxRetries:     3,
+			BackoffSeconds: []int{60, 300, 900},
+			Now:            func() time.Time { return now },
+		},
+	}
+	consumer.SetRAGIndexer(func(context.Context, *model.VideoTask) error {
+		return fmt.Errorf("milvus service unavailable")
+	})
+
+	if err := consumer.handleRAGIndex(context.Background(), ragIndexMessage(task.ID, "trace-rag-fail")); err != nil {
+		t.Fatalf("handleRAGIndex: %v", err)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusFailed || current.Stage != model.TaskStageIndexing {
+		t.Fatalf("task status/stage = %d/%q, want failed/indexing", current.Status, current.Stage)
+	}
+	if current.LastJobType != TaskJobRAGIndex {
+		t.Fatalf("last_job_type = %q, want rag_index", current.LastJobType)
+	}
+	if current.NextRetryAt == nil || !current.NextRetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("next_retry_at = %v, want %v", current.NextRetryAt, now.Add(time.Minute))
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
+	if err != nil {
+		t.Fatalf("find rag job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusFailed || job.NextRetryAt == nil || !job.NextRetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("rag task_job retry metadata = %+v", job)
+	}
+
+	transcription, err := repos.Transcription.FindByTaskID(task.ID)
+	if err != nil {
+		t.Fatalf("find transcription: %v", err)
+	}
+	if transcription == nil || transcription.Content == "" {
+		t.Fatalf("transcription should remain readable after rag failure: %+v", transcription)
 	}
 }
 
@@ -448,6 +655,13 @@ func TestHandleDownloadCreatesAssetAndMarksTaskUploaded(t *testing.T) {
 	}
 	if current.AssetID == 0 || current.FileURL == "" || current.FileSize != int64(len(videoBytes)) {
 		t.Fatalf("task asset fields not populated: %+v", current)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeDownload)
+	if err != nil {
+		t.Fatalf("find download job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusCompleted || job.Stage != model.TaskStageDownloading || job.FinishedAt == nil {
+		t.Fatalf("download task_job = %+v, want completed", job)
 	}
 
 	asset, err := repos.Asset.FindByMD5(expectedMD5)
@@ -611,6 +825,13 @@ func TestRecordTaskFailureSchedulesRetryForRetryableError(t *testing.T) {
 	if current.LastJobType != TaskJobTranscribe {
 		t.Fatalf("last_job_type = %q, want transcribe", current.LastJobType)
 	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if err != nil {
+		t.Fatalf("find transcribe job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusFailed || job.RetryCount != 2 || job.NextRetryAt == nil || !job.NextRetryAt.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("transcribe task_job retry metadata = %+v", job)
+	}
 }
 
 func TestRecordTaskFailureMarksNonRetryableErrorFailedWithoutRetry(t *testing.T) {
@@ -750,30 +971,154 @@ func TestRetrySchedulerRequeuesOnlyDueFailedTasks(t *testing.T) {
 	}
 }
 
+func TestRetrySchedulerRestoresNextRetryWhenEnqueueFailsAfterClaim(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-time.Second)
+	task := &model.VideoTask{
+		UserID:       7,
+		FileMD5:      "99999999999999999999999999999999",
+		Filename:     "retry-dispatch-fail.mp4",
+		Status:       model.TaskStatusFailed,
+		Stage:        model.TaskStageTranscribing,
+		RetryCount:   2,
+		MaxRetries:   3,
+		NextRetryAt:  &dueAt,
+		LastJobType:  TaskJobTranscribe,
+		LastErrorMsg: "previous network timeout",
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	producer := &recordingRetryProducer{err: fmt.Errorf("kafka unavailable")}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		BatchSize: 10,
+		Now:       func() time.Time { return now },
+	})
+	if err := scheduler.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce() expected enqueue error")
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusFailed {
+		t.Fatalf("status = %d, want failed", current.Status)
+	}
+	if current.Stage != model.TaskStageTranscribing {
+		t.Fatalf("stage = %q, want transcribing", current.Stage)
+	}
+	if current.NextRetryAt == nil || !current.NextRetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("next_retry_at = %v, want %v", current.NextRetryAt, now.Add(time.Minute))
+	}
+	if current.RetryCount != 2 {
+		t.Fatalf("retry_count = %d, want unchanged 2", current.RetryCount)
+	}
+	if current.LastErrorCode != "retry_enqueue_failed" {
+		t.Fatalf("last_error_code = %q, want retry_enqueue_failed", current.LastErrorCode)
+	}
+	if !strings.Contains(current.LastErrorMsg, "kafka unavailable") {
+		t.Fatalf("last_error_msg = %q, want kafka error", current.LastErrorMsg)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if err != nil {
+		t.Fatalf("find transcribe job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusFailed || job.NextRetryAt == nil || !job.NextRetryAt.Equal(now.Add(time.Minute)) || job.LastErrorCode != "retry_enqueue_failed" {
+		t.Fatalf("transcribe task_job dispatch failure = %+v", job)
+	}
+}
+
+func TestRetrySchedulerRequeuesRAGIndexJob(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-time.Second)
+	task := &model.VideoTask{
+		UserID:      7,
+		FileMD5:     "12121212121212121212121212121212",
+		Filename:    "rag-retry.mp4",
+		Status:      model.TaskStatusFailed,
+		Stage:       model.TaskStageIndexing,
+		RetryCount:  1,
+		MaxRetries:  3,
+		NextRetryAt: &dueAt,
+		LastJobType: TaskJobRAGIndex,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	producer := &recordingRetryProducer{}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		BatchSize: 10,
+		Now:       func() time.Time { return now },
+	})
+	if err := scheduler.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if len(producer.ragIndexes) != 1 || producer.ragIndexes[0] != task.ID {
+		t.Fatalf("rag index requeues = %#v, want task %d", producer.ragIndexes, task.ID)
+	}
+	requeued, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find requeued task: %v", err)
+	}
+	if requeued.Status != model.TaskStatusQueued || requeued.Stage != model.TaskStageIndexing || requeued.NextRetryAt != nil {
+		t.Fatalf("requeued task = %+v, want queued/indexing with nil next_retry_at", requeued)
+	}
+}
+
 type recordingRetryProducer struct {
 	analyzes    []int64
 	transcribes []int64
 	downloads   []int64
+	ragIndexes  []int64
+	err         error
 }
 
 func (p *recordingRetryProducer) EnqueueAnalyze(_ context.Context, taskID int64, _ string) error {
 	p.analyzes = append(p.analyzes, taskID)
-	return nil
+	return p.err
 }
 
 func (p *recordingRetryProducer) EnqueueTranscribe(_ context.Context, taskID int64, _ string) error {
 	p.transcribes = append(p.transcribes, taskID)
-	return nil
+	return p.err
 }
 
 func (p *recordingRetryProducer) EnqueueDownload(_ context.Context, taskID int64, _ string) error {
 	p.downloads = append(p.downloads, taskID)
-	return nil
+	return p.err
+}
+
+func (p *recordingRetryProducer) EnqueueRAGIndex(_ context.Context, taskID int64) error {
+	p.ragIndexes = append(p.ragIndexes, taskID)
+	return p.err
+}
+
+type recordingRAGIndexProducer struct {
+	taskIDs  []int64
+	traceIDs []string
+	err      error
+}
+
+func (p *recordingRAGIndexProducer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
+	p.taskIDs = append(p.taskIDs, taskID)
+	p.traceIDs = append(p.traceIDs, TraceIDFromContext(ctx))
+	return p.err
 }
 
 func downloadMessage(taskID int64, key string) kafka.Message {
 	payload, _ := json.Marshal(DownloadPayload{TaskID: taskID, Key: key})
 	return kafka.Message{Key: []byte(key), Value: payload}
+}
+
+func ragIndexMessage(taskID int64, traceID string) kafka.Message {
+	payload, _ := json.Marshal(RAGIndexPayload{TaskID: taskID, TraceID: traceID})
+	return kafka.Message{Key: []byte(fmt.Sprint(taskID)), Value: payload}
 }
 
 func md5Hex(data []byte) string {

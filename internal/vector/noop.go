@@ -15,3 +15,7 @@ func NewNoopStore() *NoopStore {
 func (s *NoopStore) UpsertChunks(context.Context, []service.RAGVector) error {
 	return nil
 }
+
+func (s *NoopStore) DeleteTaskChunks(context.Context, int64, int64, string) error {
+	return nil
+}

@@ -27,11 +27,29 @@ func (c *fakeEmbeddingClient) Embed(_ context.Context, input string) ([]float32,
 }
 
 type fakeVectorStore struct {
-	upserts []RAGVector
-	err     error
+	upserts     []RAGVector
+	deleteCalls []struct {
+		userID int64
+		taskID int64
+		model  string
+	}
+	events    []string
+	err       error
+	deleteErr error
+}
+
+func (s *fakeVectorStore) DeleteTaskChunks(_ context.Context, userID, taskID int64, embeddingModel string) error {
+	s.events = append(s.events, "delete")
+	s.deleteCalls = append(s.deleteCalls, struct {
+		userID int64
+		taskID int64
+		model  string
+	}{userID: userID, taskID: taskID, model: embeddingModel})
+	return s.deleteErr
 }
 
 func (s *fakeVectorStore) UpsertChunks(_ context.Context, vectors []RAGVector) error {
+	s.events = append(s.events, "upsert")
 	if s.err != nil {
 		return s.err
 	}
@@ -102,6 +120,126 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	}
 	if index.Status != model.RAGIndexStatusIndexed || index.ChunkCount != 4 || index.EmbeddingDim != 3 {
 		t.Fatalf("rag index = %+v, want indexed with 4 chunks and dim 3", index)
+	}
+}
+
+func TestRAGIndexServiceRecordsEmbeddingCalls(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "58585858585858585858585858585858", Filename: "video.mp4", FileURL: "videos/rag-audit.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{
+		TaskID:  task.ID,
+		Content: "abcdefghijklmnopqrst",
+		Words:   20,
+	}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+
+	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{ChunkSize: 10, EmbeddingDim: 3})
+	svc.SetAIRecorder(NewAIObserver(repos))
+	if _, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
+		EmbeddingProvider: "openai_compatible",
+		EmbeddingModel:    "text-embedding-3-small",
+		EmbeddingDim:      3,
+	}); err != nil {
+		t.Fatalf("BuildTaskIndex() error = %v", err)
+	}
+
+	logs, err := repos.AICallLog.ListByUserID(7, 10)
+	if err != nil {
+		t.Fatalf("list ai call logs: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected embedding call logs")
+	}
+	for _, log := range logs {
+		if log.Kind != model.AICallKindEmbedding || log.TaskID != task.ID || log.ModelName != "text-embedding-3-small" {
+			t.Fatalf("log = %+v, want scoped embedding log", log)
+		}
+	}
+}
+
+func TestRAGIndexServiceDeletesOldVectorsBeforeReplacingChunks(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "56565656565656565656565656565656", Filename: "video.mp4", FileURL: "videos/rebuild.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "new transcript content for rebuild", Words: 5}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "text-embedding-3-small", []model.VideoChunk{
+		{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "old stale chunk", ContentHash: "old", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 3, VectorID: "old-vector"},
+	}); err != nil {
+		t.Fatalf("seed old chunks: %v", err)
+	}
+
+	store := &fakeVectorStore{}
+	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 12, EmbeddingDim: 3})
+	if _, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		EmbeddingDim:   3,
+	}); err != nil {
+		t.Fatalf("BuildTaskIndex() error = %v", err)
+	}
+
+	if len(store.events) < 2 || store.events[0] != "delete" || store.events[1] != "upsert" {
+		t.Fatalf("vector store events = %#v, want delete before upsert", store.events)
+	}
+	if len(store.deleteCalls) != 1 || store.deleteCalls[0].userID != 7 || store.deleteCalls[0].taskID != task.ID || store.deleteCalls[0].model != "text-embedding-3-small" {
+		t.Fatalf("delete calls = %+v", store.deleteCalls)
+	}
+	chunks, err := repos.VideoChunk.ListByTaskID(7, task.ID, "text-embedding-3-small")
+	if err != nil {
+		t.Fatalf("list chunks: %v", err)
+	}
+	if len(chunks) == 0 || chunks[0].Content == "old stale chunk" {
+		t.Fatalf("chunks were not replaced after delete succeeded: %+v", chunks)
+	}
+}
+
+func TestRAGIndexServiceStopsBeforeReplacingChunksWhenOldVectorDeleteFails(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "57575757575757575757575757575757", Filename: "video.mp4", FileURL: "videos/rebuild-fail.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "new transcript should not replace old chunk", Words: 7}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "text-embedding-3-small", []model.VideoChunk{
+		{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "old stale chunk", ContentHash: "old", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 3, VectorID: "old-vector"},
+	}); err != nil {
+		t.Fatalf("seed old chunks: %v", err)
+	}
+
+	store := &fakeVectorStore{deleteErr: fmt.Errorf("milvus delete failed")}
+	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 12, EmbeddingDim: 3})
+	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		EmbeddingDim:   3,
+	})
+	if err == nil {
+		t.Fatal("BuildTaskIndex() succeeded, want delete failure")
+	}
+	if len(store.events) != 1 || store.events[0] != "delete" {
+		t.Fatalf("events = %#v, want only delete", store.events)
+	}
+	chunks, listErr := repos.VideoChunk.ListByTaskID(7, task.ID, "text-embedding-3-small")
+	if listErr != nil {
+		t.Fatalf("list chunks: %v", listErr)
+	}
+	if len(chunks) != 1 || chunks[0].Content != "old stale chunk" {
+		t.Fatalf("old chunks should remain when vector delete fails: %+v", chunks)
+	}
+	index, findErr := repos.RAGIndex.FindByTaskAndModel(7, task.ID, "text-embedding-3-small")
+	if findErr != nil {
+		t.Fatalf("find rag index: %v", findErr)
+	}
+	if index == nil || index.Status != model.RAGIndexStatusFailed || index.LastError == "" {
+		t.Fatalf("rag index should record delete failure: %+v", index)
 	}
 }
 

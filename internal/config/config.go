@@ -68,6 +68,7 @@ type KafkaConfig struct {
 	AnalyzeTopic    string   `yaml:"analyze_topic"`
 	TranscribeTopic string   `yaml:"transcribe_topic"`
 	DownloadTopic   string   `yaml:"download_topic"`
+	RAGIndexTopic   string   `yaml:"rag_index_topic"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
 }
 
@@ -82,10 +83,11 @@ type AIConfig struct {
 }
 
 type ToolsConfig struct {
-	FFmpegPath  string `yaml:"ffmpeg_path"`
-	YtDlpPath   string `yaml:"ytdlp_path"`
-	CookiesPath string `yaml:"cookies_path"`
-	ProxyURL    string `yaml:"proxy_url"`
+	FFmpegPath        string   `yaml:"ffmpeg_path"`
+	YtDlpPath         string   `yaml:"ytdlp_path"`
+	CookiesPath       string   `yaml:"cookies_path"`
+	ProxyURL          string   `yaml:"proxy_url"`
+	AllowedVideoHosts []string `yaml:"allowed_video_hosts"`
 }
 
 type JWTConfig struct {

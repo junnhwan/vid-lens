@@ -49,3 +49,7 @@ func (r *SummaryRepository) Upsert(s *model.AISummary) error {
 		"model_name": s.ModelName,
 	}).Error
 }
+
+func (r *SummaryRepository) DeleteByTaskID(taskID int64) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&model.AISummary{}).Error
+}

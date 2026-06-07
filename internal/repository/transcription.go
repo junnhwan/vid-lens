@@ -49,3 +49,7 @@ func (r *TranscriptionRepository) Upsert(t *model.VideoTranscription) error {
 		"words":   t.Words,
 	}).Error
 }
+
+func (r *TranscriptionRepository) DeleteByTaskID(taskID int64) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&model.VideoTranscription{}).Error
+}

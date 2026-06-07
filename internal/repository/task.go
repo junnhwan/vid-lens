@@ -38,6 +38,7 @@ func (r *TaskRepository) FindByIDWithDetail(id int64) (*model.VideoTask, error) 
 		Preload("Asset").
 		Preload("Transcription").
 		Preload("Summary").
+		Preload("Jobs").
 		First(&task, id).Error
 	if err != nil {
 		return nil, err
@@ -237,6 +238,29 @@ func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, st
 		return false, tx.Error
 	}
 	return tx.RowsAffected > 0, nil
+}
+
+func (r *TaskRepository) RestoreRetryAfterDispatchFailure(id int64, stage, errMsg string, nextRetryAt time.Time) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":            model.TaskStatusFailed,
+		"stage":             stage,
+		"error_msg":         errMsg,
+		"last_error_code":   "retry_enqueue_failed",
+		"last_error_msg":    errMsg,
+		"next_retry_at":     nextRetryAt,
+		"stage_finished_at": &now,
+	}
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *TaskRepository) CountActiveByAssetID(assetID int64) (int64, error) {
+	if assetID <= 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.db.Model(&model.VideoTask{}).Where("asset_id = ?", assetID).Count(&count).Error
+	return count, err
 }
 
 // Delete 删除任务（逻辑删除）

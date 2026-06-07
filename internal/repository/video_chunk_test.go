@@ -38,6 +38,35 @@ func TestVideoChunkRepositoryReplaceTaskChunks(t *testing.T) {
 	}
 }
 
+func TestVideoChunkRepositorySearchByBM25RanksKeywordMatches(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunks := []model.VideoChunk{
+		{UserID: 7, TaskID: 1, ChunkIndex: 0, Content: "Redis 分布式锁释放时必须校验 owner，避免删掉别人的锁", ContentHash: "hash0", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v0"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "WatchDog 会在长任务运行时自动续期分布式锁", ContentHash: "hash1", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v1"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 2, Content: "AI 总结会复用已有转写文本", ContentHash: "hash2", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v2"},
+	}
+	if err := repo.ReplaceTaskChunks(1, "text-embedding-3-small", chunks); err != nil {
+		t.Fatalf("ReplaceTaskChunks() error = %v", err)
+	}
+
+	results, err := repo.SearchByBM25(7, 1, "text-embedding-3-small", []string{"分布式锁", "owner", "校验"}, 5)
+	if err != nil {
+		t.Fatalf("SearchByBM25() error = %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("results = %+v, want at least two keyword matches", results)
+	}
+	if results[0].Chunk.ChunkIndex != 0 {
+		t.Fatalf("top chunk index = %d, want owner chunk first: %+v", results[0].Chunk.ChunkIndex, results)
+	}
+	if results[0].Score <= results[1].Score {
+		t.Fatalf("top BM25 score should be greater than second: %+v", results)
+	}
+	if results[0].Rank != 1 || results[1].Rank != 2 {
+		t.Fatalf("ranks = %+v, want 1-based ranks", results)
+	}
+}
+
 func newVideoChunkTestRepo(t *testing.T) *VideoChunkRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

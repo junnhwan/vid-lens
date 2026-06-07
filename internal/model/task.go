@@ -69,6 +69,7 @@ type VideoTask struct {
 	Asset         *VideoAsset         `gorm:"foreignKey:AssetID;references:ID" json:"asset,omitempty"`
 	Transcription *VideoTranscription `gorm:"foreignKey:TaskID;references:ID" json:"transcription,omitempty"`
 	Summary       *AISummary          `gorm:"foreignKey:TaskID;references:ID" json:"summary,omitempty"`
+	Jobs          []TaskJob           `gorm:"foreignKey:TaskID;references:ID" json:"jobs,omitempty"`
 }
 
 func (VideoTask) TableName() string {

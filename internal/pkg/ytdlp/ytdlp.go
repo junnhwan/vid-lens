@@ -49,7 +49,6 @@ func buildArgs(ffmpegPath, cookiesPath, proxyURL, videoURL string) []string {
 		"--format", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/bv*[height<=720]+ba/best[height<=720]/best",
 		"--recode-video", "mp4",
 		"--ffmpeg-location", ffmpegPath,
-		"--no-check-certificate",
 		"--no-playlist",
 	}
 	if strings.TrimSpace(cookiesPath) != "" {

@@ -70,3 +70,20 @@ func (r *ChatRepository) ListRecentMessages(userID, sessionID int64, limit int) 
 	}
 	return messages, nil
 }
+
+func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var sessionIDs []int64
+		if err := tx.Model(&model.ChatSession{}).
+			Where("task_id = ?", taskID).
+			Pluck("id", &sessionIDs).Error; err != nil {
+			return err
+		}
+		if len(sessionIDs) > 0 {
+			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessage{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("task_id = ?", taskID).Delete(&model.ChatSession{}).Error
+	})
+}

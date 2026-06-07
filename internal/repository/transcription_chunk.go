@@ -104,3 +104,7 @@ func (r *TranscriptionChunkRepository) UpsertFailed(taskID int64, chunkIndex int
 		"retry_count":  existing.RetryCount + 1,
 	}).Error
 }
+
+func (r *TranscriptionChunkRepository) DeleteByTaskID(taskID int64) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&model.VideoTranscriptionChunk{}).Error
+}

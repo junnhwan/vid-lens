@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -31,13 +30,24 @@ type mediaProducer interface {
 	EnqueueDownload(ctx context.Context, taskID int64, key string) error
 }
 
+type objectDeleter interface {
+	DeleteObject(ctx context.Context, objectName string) error
+}
+
+type TaskVectorCleaner interface {
+	DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
+}
+
 type MediaService struct {
-	repo    *repository.Repositories
-	storage *storage.MinIOStorage
-	mq      mediaProducer
-	rdb     redis.Cmdable
-	cfg     config.UploadConfig
-	tools   config.ToolsConfig
+	repo              *repository.Repositories
+	storage           *storage.MinIOStorage
+	objectDeleter     objectDeleter
+	taskVectorCleaner TaskVectorCleaner
+	remoteURLResolver remoteURLResolver
+	mq                mediaProducer
+	rdb               redis.Cmdable
+	cfg               config.UploadConfig
+	tools             config.ToolsConfig
 }
 
 func NewMediaService(
@@ -49,13 +59,18 @@ func NewMediaService(
 	tools config.ToolsConfig,
 ) *MediaService {
 	return &MediaService{
-		repo:    repo,
-		storage: storage,
-		mq:      mqProducer,
-		rdb:     rdb,
-		cfg:     cfg,
-		tools:   tools,
+		repo:          repo,
+		storage:       storage,
+		objectDeleter: storage,
+		mq:            mqProducer,
+		rdb:           rdb,
+		cfg:           cfg,
+		tools:         tools,
 	}
+}
+
+func (s *MediaService) SetTaskVectorCleaner(cleaner TaskVectorCleaner) {
+	s.taskVectorCleaner = cleaner
 }
 
 func (s *MediaService) MaxChunkSize() int64 {
@@ -133,31 +148,36 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 
 // UploadByURL 创建 URL 下载任务并立即返回，真正下载由 Kafka consumer 执行。
 func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL string) (*UploadResult, error) {
-	if err := validateRemoteVideoURL(videoURL); err != nil {
+	checkedURL, err := newRemoteVideoURLValidator(s.tools, s.remoteURLResolver).validate(ctx, videoURL)
+	if err != nil {
 		return nil, err
 	}
 
-	key := md5HexString(videoURL)
+	key := md5HexString(checkedURL.Sanitized)
 	now := time.Now()
 	task := &model.VideoTask{
 		UserID:     userID,
 		FileMD5:    key,
-		Filename:   filenameForURLTask(videoURL),
+		Filename:   filenameForURLTask(checkedURL.Sanitized),
 		Status:     model.TaskStatusRunning,
 		Stage:      model.TaskStageDownloading,
 		TraceID:    uuid.New().String(),
 		SourceType: model.TaskSourceTypeURL,
-		SourceURL:  videoURL,
+		SourceURL:  checkedURL.Sanitized,
 		MaxRetries: 3,
 		StartedAt:  &now,
 	}
 	if err := s.repo.Task.Create(task); err != nil {
 		return nil, err
 	}
+	if err := s.repo.TaskJob.UpsertQueued(task, model.TaskJobTypeDownload, model.TaskStageDownloading, task.MaxRetries); err != nil {
+		return nil, err
+	}
 
 	if err := s.mq.EnqueueDownload(mq.ContextWithTraceID(ctx, task.TraceID), task.ID, key); err != nil {
 		errMsg := "下载任务投递失败"
 		_ = s.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusFailed, model.TaskStageDownloading, errMsg)
+		_ = s.repo.TaskJob.RecordTerminalFailure(task.ID, model.TaskJobTypeDownload, model.TaskStageDownloading, "enqueue_failed", errMsg, task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
 		return nil, fmt.Errorf("%s: %w", errMsg, err)
 	}
 
@@ -185,44 +205,6 @@ func filenameForURLTask(videoURL string) string {
 	}
 	host := strings.ReplaceAll(parsed.Hostname(), ":", "_")
 	return "WEB_" + host + ".mp4"
-}
-
-func validateRemoteVideoURL(rawURL string) error {
-	parsed, err := neturl.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("视频链接格式错误")
-	}
-
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("仅支持 http/https 视频链接")
-	}
-
-	host := strings.ToLower(parsed.Hostname())
-	if host == "" {
-		return fmt.Errorf("视频链接缺少 host")
-	}
-	if host == "localhost" {
-		return fmt.Errorf("不允许访问本地地址")
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return fmt.Errorf("不允许访问内网或本地地址")
-		}
-	}
-
-	return nil
-}
-
-func sanitizeURLForLog(rawURL string) string {
-	parsed, err := neturl.Parse(rawURL)
-	if err != nil {
-		return "<invalid-url>"
-	}
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String()
 }
 
 func (s *MediaService) validateUploadSize(fileSize int64) error {
@@ -371,8 +353,12 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if !updated {
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
+	if err := s.repo.TaskJob.UpsertQueued(task, model.TaskJobTypeAnalyze, model.TaskStageSummarizing, task.MaxRetries); err != nil {
+		return err
+	}
 	if err := s.mq.EnqueueAnalyze(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
+		_ = s.repo.TaskJob.RecordTerminalFailure(taskID, model.TaskJobTypeAnalyze, model.TaskStageSummarizing, "enqueue_failed", "消息投递失败", task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
 	return nil
@@ -409,8 +395,12 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	if !updated {
 		return fmt.Errorf("任务状态已变化，请刷新后重试")
 	}
+	if err := s.repo.TaskJob.UpsertQueued(task, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, task.MaxRetries); err != nil {
+		return err
+	}
 	if err := s.mq.EnqueueTranscribe(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
+		_ = s.repo.TaskJob.RecordTerminalFailure(taskID, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, "enqueue_failed", "消息投递失败", task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
 		return fmt.Errorf("系统繁忙，请稍后重试")
 	}
 	return nil
@@ -442,10 +432,105 @@ func (s *MediaService) DeleteTask(ctx context.Context, userID, taskID int64) err
 	if task.UserID != userID {
 		return fmt.Errorf("无权删除此任务")
 	}
-	if task.FileURL != "" {
-		s.storage.DeleteObject(ctx, task.FileURL)
+
+	embeddingModels, err := s.collectTaskEmbeddingModels(userID, taskID)
+	if err != nil {
+		return err
 	}
-	return s.repo.Task.Delete(taskID)
+	if s.taskVectorCleaner != nil {
+		for _, modelName := range embeddingModels {
+			if err := s.taskVectorCleaner.DeleteTaskChunks(ctx, userID, taskID, modelName); err != nil {
+				return fmt.Errorf("清理向量数据失败: %w", err)
+			}
+		}
+	}
+
+	assetID := task.AssetID
+	objectName := task.FileURL
+	deleteAssetObject := false
+	if err := s.repo.Transaction(func(txRepos *repository.Repositories) error {
+		if err := txRepos.Transcription.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.TranscriptionChunk.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.Summary.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.VideoChunk.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.RAGIndex.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.Chat.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.TaskJob.DeleteByTaskID(taskID); err != nil {
+			return err
+		}
+		if err := txRepos.Task.Delete(taskID); err != nil {
+			return err
+		}
+		activeRefs, err := txRepos.Task.CountActiveByAssetID(assetID)
+		if err != nil {
+			return err
+		}
+		deleteAssetObject = assetID > 0 && activeRefs == 0
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if deleteAssetObject && objectName != "" {
+		if err := s.deleteObject(ctx, objectName); err != nil {
+			return fmt.Errorf("删除视频对象失败: %w", err)
+		}
+		if err := s.repo.Asset.Delete(assetID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *MediaService) collectTaskEmbeddingModels(userID, taskID int64) ([]string, error) {
+	seen := make(map[string]bool)
+	addModels := func(models []string) {
+		for _, modelName := range models {
+			modelName = strings.TrimSpace(modelName)
+			if modelName != "" {
+				seen[modelName] = true
+			}
+		}
+	}
+
+	chunkModels, err := s.repo.VideoChunk.ListEmbeddingModelsByTask(userID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	addModels(chunkModels)
+	indexModels, err := s.repo.RAGIndex.ListEmbeddingModelsByTask(userID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	addModels(indexModels)
+
+	models := make([]string, 0, len(seen))
+	for modelName := range seen {
+		models = append(models, modelName)
+	}
+	return models, nil
+}
+
+func (s *MediaService) deleteObject(ctx context.Context, objectName string) error {
+	if s.objectDeleter != nil {
+		return s.objectDeleter.DeleteObject(ctx, objectName)
+	}
+	if s.storage == nil {
+		return fmt.Errorf("对象存储未启用")
+	}
+	return s.storage.DeleteObject(ctx, objectName)
 }
 
 // GetPresignedURL 获取预签名链接

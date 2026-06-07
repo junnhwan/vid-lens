@@ -33,12 +33,14 @@ type RAGVector struct {
 
 type RAGVectorStore interface {
 	UpsertChunks(ctx context.Context, vectors []RAGVector) error
+	DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
 }
 
 type RAGIndexService struct {
-	repos *repository.Repositories
-	store RAGVectorStore
-	cfg   RAGIndexConfig
+	repos    *repository.Repositories
+	store    RAGVectorStore
+	recorder ai.CallRecorder
+	cfg      RAGIndexConfig
 }
 
 type RAGIndexResult struct {
@@ -58,6 +60,10 @@ func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cf
 		cfg.EmbeddingDim = 1536
 	}
 	return &RAGIndexService{repos: repos, store: store, cfg: cfg}
+}
+
+func (s *RAGIndexService) SetAIRecorder(recorder ai.CallRecorder) {
+	s.recorder = recorder
 }
 
 func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int64, embedding ai.EmbeddingClient, profile ai.Profile) (*RAGIndexResult, error) {
@@ -128,6 +134,15 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	if expectedDim != s.cfg.EmbeddingDim {
 		return markFailed(fmt.Errorf("Embedding 维度必须等于系统配置 %d，当前配置 %d", s.cfg.EmbeddingDim, expectedDim))
 	}
+	if err := s.store.DeleteTaskChunks(ctx, userID, taskID, modelName); err != nil {
+		return markFailed(err)
+	}
+	embedding = ai.NewObservedEmbeddingClient(embedding, s.recorder, ai.CallContext{
+		UserID:   userID,
+		TaskID:   taskID,
+		Provider: profile.EmbeddingProvider,
+		Model:    modelName,
+	})
 
 	dbChunks := make([]model.VideoChunk, 0, len(chunks))
 	vectors := make([]RAGVector, 0, len(chunks))

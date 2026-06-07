@@ -104,10 +104,13 @@ func main() {
 	if cfg.Kafka.DownloadTopic == "" {
 		cfg.Kafka.DownloadTopic = "video-download"
 	}
+	if cfg.Kafka.RAGIndexTopic == "" {
+		cfg.Kafka.RAGIndexTopic = "video-rag-index"
+	}
 	mq.CreateTopics(cfg.Kafka.Brokers, []string{
-		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic,
+		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic,
 	})
-	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic)
+	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic)
 	defer producer.Close()
 	log.Println("✅ Kafka 生产者就绪")
 
@@ -161,14 +164,22 @@ func main() {
 		EmbeddingDim:   cfg.RAG.EmbeddingDim,
 		CollectionName: cfg.RAG.Collection,
 	})
+	aiObserver := service.NewAIObserver(repos)
+	ragIndexSvc.SetAIRecorder(aiObserver)
 	chatSvc := service.NewChatService(repos, ragRetriever, service.ChatConfig{
 		TopK:        cfg.RAG.TopK,
 		CandidateK:  cfg.RAG.CandidateK,
 		MinScore:    cfg.RAG.MinScore,
 		RecentTurns: cfg.RAG.RecentTurns,
 	})
+	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(rdb))
 	mediaSvc := service.NewMediaService(repos, minioStorage, producer, rdb, cfg.Upload, cfg.Tools)
+	if cleaner, ok := ragStore.(interface {
+		DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
+	}); ok {
+		mediaSvc.SetTaskVectorCleaner(cleaner)
+	}
 	userHandler := handler.NewUserHandler(userSvc)
 	aiProfileHandler := handler.NewAIProfileHandler(aiProfileSvc)
 	ragHandler := handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory)
@@ -183,6 +194,8 @@ func main() {
 		BackoffSeconds: cfg.TaskRetry.BackoffSeconds,
 	})
 	consumer.SetAIResolver(aiFactory, aiProfileSvc)
+	consumer.SetAIRecorder(aiObserver)
+	consumer.SetRAGIndexProducer(producer)
 	if ragStore != nil {
 		consumer.SetRAGIndexer(func(ctx context.Context, task *model.VideoTask) error {
 			profile, err := aiProfileSvc.GetDefaultAIProfile(task.UserID)
@@ -200,6 +213,7 @@ func main() {
 	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
 	consumer.StartDownloadConsumer(cfg.Kafka.Brokers, cfg.Kafka.DownloadTopic, cfg.Kafka.ConsumerGroup)
+	consumer.StartRAGIndexConsumer(cfg.Kafka.Brokers, cfg.Kafka.RAGIndexTopic, cfg.Kafka.ConsumerGroup)
 	retryScheduler := mq.NewRetryScheduler(repos, producer, mq.RetrySchedulerConfig{
 		BatchSize: cfg.TaskRetry.BatchSize,
 		Interval:  time.Duration(cfg.TaskRetry.ScanIntervalSeconds) * time.Second,

@@ -36,6 +36,15 @@ func TestBuildArgsLimitsDownloadedVideoFormat(t *testing.T) {
 	}
 }
 
+func TestBuildArgsDoesNotDisableCertificateChecks(t *testing.T) {
+	args := buildArgs("ffmpeg", "", "", "https://www.youtube.com/watch?v=test")
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, "--no-check-certificate") {
+		t.Fatalf("args should not disable certificate checks: %v", args)
+	}
+}
+
 func TestDownloadErrorExplainsBilibili412(t *testing.T) {
 	err := formatDownloadError(errors.New("exit status 1"), "ERROR: [BiliBili] Unable to download webpage: HTTP Error 412: Precondition Failed")
 

@@ -56,3 +56,17 @@ func (r *RAGIndexRepository) FindByTaskAndModel(userID, taskID int64, embeddingM
 	}
 	return &index, nil
 }
+
+func (r *RAGIndexRepository) ListEmbeddingModelsByTask(userID, taskID int64) ([]string, error) {
+	var models []string
+	err := r.db.Model(&model.VideoRAGIndex{}).
+		Where("user_id = ? AND task_id = ?", userID, taskID).
+		Distinct("embedding_model").
+		Order("embedding_model asc").
+		Pluck("embedding_model", &models).Error
+	return models, err
+}
+
+func (r *RAGIndexRepository) DeleteByTaskID(taskID int64) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&model.VideoRAGIndex{}).Error
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,43 @@ func TestOpenAIChatClientPostsChatCompletions(t *testing.T) {
 	}
 	if gotModel != "chat-model" {
 		t.Fatalf("model = %q", gotModel)
+	}
+}
+
+func TestOpenAIChatClientStreamsChatCompletionDeltas(t *testing.T) {
+	var gotStream bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotStream = body.Stream
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"第一段"}}]}`,
+			`data: {"choices":[{"delta":{"content":"第二段"}}]}`,
+			`data: [DONE]`,
+			"",
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIChatClient(server.URL+"/v1", "sk-chat", "chat-model")
+	var deltas []string
+	err := client.StreamChat(context.Background(), []ChatMessage{{Role: "user", Content: "hello"}}, func(delta string) error {
+		deltas = append(deltas, delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamChat() error = %v", err)
+	}
+	if !gotStream {
+		t.Fatal("request stream flag = false, want true")
+	}
+	if strings.Join(deltas, "") != "第一段第二段" {
+		t.Fatalf("deltas = %#v", deltas)
 	}
 }
 

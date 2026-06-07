@@ -4,9 +4,11 @@ import "gorm.io/gorm"
 
 // Repositories 所有 Repository 的聚合
 type Repositories struct {
+	db                 *gorm.DB
 	User               *UserRepository
 	Asset              *AssetRepository
 	Task               *TaskRepository
+	TaskJob            *TaskJobRepository
 	Transcription      *TranscriptionRepository
 	TranscriptionChunk *TranscriptionChunkRepository
 	Summary            *SummaryRepository
@@ -14,14 +16,17 @@ type Repositories struct {
 	VideoChunk         *VideoChunkRepository
 	RAGIndex           *RAGIndexRepository
 	Chat               *ChatRepository
+	AICallLog          *AICallLogRepository
 }
 
 // NewRepositories 创建所有 Repository 实例
 func NewRepositories(db *gorm.DB) *Repositories {
 	return &Repositories{
+		db:                 db,
 		User:               NewUserRepository(db),
 		Asset:              NewAssetRepository(db),
 		Task:               NewTaskRepository(db),
+		TaskJob:            NewTaskJobRepository(db),
 		Transcription:      NewTranscriptionRepository(db),
 		TranscriptionChunk: NewTranscriptionChunkRepository(db),
 		Summary:            NewSummaryRepository(db),
@@ -29,5 +34,12 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		VideoChunk:         NewVideoChunkRepository(db),
 		RAGIndex:           NewRAGIndexRepository(db),
 		Chat:               NewChatRepository(db),
+		AICallLog:          NewAICallLogRepository(db),
 	}
+}
+
+func (r *Repositories) Transaction(fn func(*Repositories) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(NewRepositories(tx))
+	})
 }

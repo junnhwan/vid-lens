@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -14,31 +16,44 @@ import (
 	"vid-lens/internal/repository"
 )
 
-func TestValidateRemoteVideoURLRejectsLocalTargets(t *testing.T) {
+func TestRemoteVideoURLValidatorRejectsUnsafeTargets(t *testing.T) {
+	validator := remoteVideoURLValidator{
+		allowedHosts: []string{"bilibili.com", "youtube.com", "youtu.be"},
+		resolver: fakeRemoteURLResolver{
+			"internal.bilibili.com": {net.ParseIP("10.0.0.8")},
+			"www.bilibili.com":      {net.ParseIP("203.0.113.10")},
+		},
+	}
 	cases := []string{
 		"http://localhost/video.mp4",
 		"http://127.0.0.1/video.mp4",
 		"http://[::1]/video.mp4",
 		"file:///tmp/video.mp4",
+		"https://evilbilibili.com/video/BV1xx411c7mD",
+		"https://internal.bilibili.com/video/BV1xx411c7mD",
 	}
 
 	for _, rawURL := range cases {
-		if err := validateRemoteVideoURL(rawURL); err == nil {
+		if _, err := validator.validate(context.Background(), rawURL); err == nil {
 			t.Fatalf("expected %q to be rejected", rawURL)
 		}
 	}
 }
 
-func TestValidateRemoteVideoURLAllowsHTTPVideoSites(t *testing.T) {
-	cases := []string{
-		"https://www.bilibili.com/video/BV1xx411c7mD",
-		"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+func TestRemoteVideoURLValidatorAllowsWhitelistedPublicHostsAndSanitizes(t *testing.T) {
+	validator := remoteVideoURLValidator{
+		allowedHosts: []string{"bilibili.com", "youtube.com", "youtu.be"},
+		resolver: fakeRemoteURLResolver{
+			"www.bilibili.com": {net.ParseIP("203.0.113.10")},
+		},
 	}
 
-	for _, rawURL := range cases {
-		if err := validateRemoteVideoURL(rawURL); err != nil {
-			t.Fatalf("expected %q to be allowed, got %v", rawURL, err)
-		}
+	checked, err := validator.validate(context.Background(), "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag")
+	if err != nil {
+		t.Fatalf("expected URL to be allowed, got %v", err)
+	}
+	if checked.Sanitized != "https://www.bilibili.com/video/BV1xx411c7mD" {
+		t.Fatalf("sanitized URL = %q", checked.Sanitized)
 	}
 }
 
@@ -50,12 +65,18 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 		repo: repos,
 		mq:   producer,
 		tools: config.ToolsConfig{
-			YtDlpPath:  filepathThatDoesNotExist(),
-			FFmpegPath: "ffmpeg",
+			YtDlpPath:         filepathThatDoesNotExist(),
+			FFmpegPath:        "ffmpeg",
+			AllowedVideoHosts: []string{"bilibili.com"},
+		},
+		remoteURLResolver: fakeRemoteURLResolver{
+			"www.bilibili.com": {net.ParseIP("203.0.113.10")},
 		},
 	}
 
-	result, err := svc.UploadByURL(context.Background(), 7, "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag")
+	rawURL := "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag"
+	sanitizedURL := "https://www.bilibili.com/video/BV1xx411c7mD"
+	result, err := svc.UploadByURL(context.Background(), 7, rawURL)
 	if err != nil {
 		t.Fatalf("UploadByURL() error = %v", err)
 	}
@@ -68,8 +89,8 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	if result.Stage != model.TaskStageDownloading {
 		t.Fatalf("result stage = %q, want downloading", result.Stage)
 	}
-	if result.FileMD5 == "" {
-		t.Fatal("expected deterministic placeholder md5 before download finishes")
+	if result.FileMD5 != md5HexString(sanitizedURL) {
+		t.Fatalf("file md5 = %q, want sanitized URL md5", result.FileMD5)
 	}
 	if result.TraceID == "" {
 		t.Fatal("expected trace id")
@@ -101,8 +122,18 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	if task.SourceType != model.TaskSourceTypeURL {
 		t.Fatalf("task source_type = %q, want url", task.SourceType)
 	}
-	if task.SourceURL == "" || !strings.Contains(task.SourceURL, "token=secret") {
-		t.Fatalf("task source_url was not persisted for worker: %q", task.SourceURL)
+	if task.SourceURL != sanitizedURL {
+		t.Fatalf("task source_url = %q, want sanitized URL %q", task.SourceURL, sanitizedURL)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(result.TaskID, model.TaskJobTypeDownload)
+	if err != nil {
+		t.Fatalf("find download job: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected download task_job")
+	}
+	if job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageDownloading || job.UserID != 7 || job.TraceID != result.TraceID {
+		t.Fatalf("download task_job = %+v", job)
 	}
 }
 
@@ -140,6 +171,13 @@ func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
 	if len(producer.transcribeTraceIDs) != 1 || producer.transcribeTraceIDs[0] != "trace-transcribe" {
 		t.Fatalf("transcribe trace ids = %#v, want trace-transcribe", producer.transcribeTraceIDs)
 	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if err != nil {
+		t.Fatalf("find transcribe job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageTranscribing || job.TraceID != "trace-transcribe" {
+		t.Fatalf("transcribe task_job = %+v", job)
+	}
 }
 
 func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
@@ -176,6 +214,121 @@ func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
 	if len(producer.analyzeTraceIDs) != 1 || producer.analyzeTraceIDs[0] != "trace-analyze" {
 		t.Fatalf("analyze trace ids = %#v, want trace-analyze", producer.analyzeTraceIDs)
 	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeAnalyze)
+	if err != nil {
+		t.Fatalf("find analyze job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageSummarizing || job.TraceID != "trace-analyze" {
+		t.Fatalf("analyze task_job = %+v", job)
+	}
+}
+
+func TestDeleteTaskKeepsSharedAssetObjectAndCleansTaskData(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	storage := &recordingObjectStorage{}
+	cleaner := &recordingTaskVectorCleaner{}
+
+	asset := createMediaTestAsset(t, repos, "cccccccccccccccccccccccccccccccc", "videos/shared-delete.mp4")
+	taskA := createMediaTestTask(t, repos, 7, asset, "a.mp4")
+	taskB := createMediaTestTask(t, repos, 8, asset, "b.mp4")
+	createTaskOwnedData(t, repos, taskA.ID, taskA.UserID, "text-embedding-3-small")
+	if err := repos.TaskJob.UpsertQueued(taskA, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, 3); err != nil {
+		t.Fatalf("create task job: %v", err)
+	}
+
+	svc := &MediaService{
+		repo:              repos,
+		objectDeleter:     storage,
+		taskVectorCleaner: cleaner,
+	}
+	if err := svc.DeleteTask(context.Background(), taskA.UserID, taskA.ID); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	if _, err := repos.Task.FindByID(taskA.ID); err == nil {
+		t.Fatal("deleted task should not be visible")
+	}
+	if _, err := repos.Task.FindByID(taskB.ID); err != nil {
+		t.Fatalf("shared task should remain visible: %v", err)
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("shared object should not be deleted, got %v", storage.deleted)
+	}
+	foundAsset, err := repos.Asset.FindByMD5(asset.FileMD5)
+	if err != nil {
+		t.Fatalf("find asset: %v", err)
+	}
+	if foundAsset == nil {
+		t.Fatal("shared asset should remain")
+	}
+	assertTaskOwnedDataDeleted(t, repos, taskA.ID, taskA.UserID, "text-embedding-3-small")
+	jobs, err := repos.TaskJob.ListByTaskID(taskA.UserID, taskA.ID)
+	if err != nil {
+		t.Fatalf("list task jobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("task jobs should be deleted, got %+v", jobs)
+	}
+	if len(cleaner.calls) != 1 || cleaner.calls[0].userID != taskA.UserID || cleaner.calls[0].taskID != taskA.ID || cleaner.calls[0].model != "text-embedding-3-small" {
+		t.Fatalf("unexpected vector cleanup calls: %+v", cleaner.calls)
+	}
+}
+
+func TestDeleteTaskDeletesLastAssetReferenceAndObject(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	storage := &recordingObjectStorage{}
+	cleaner := &recordingTaskVectorCleaner{}
+
+	asset := createMediaTestAsset(t, repos, "dddddddddddddddddddddddddddddddd", "videos/only-delete.mp4")
+	task := createMediaTestTask(t, repos, 7, asset, "only.mp4")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+
+	svc := &MediaService{
+		repo:              repos,
+		objectDeleter:     storage,
+		taskVectorCleaner: cleaner,
+	}
+	if err := svc.DeleteTask(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	if len(storage.deleted) != 1 || storage.deleted[0] != asset.ObjectName {
+		t.Fatalf("deleted objects = %v, want [%s]", storage.deleted, asset.ObjectName)
+	}
+	foundAsset, err := repos.Asset.FindByMD5(asset.FileMD5)
+	if err != nil {
+		t.Fatalf("find asset: %v", err)
+	}
+	if foundAsset != nil {
+		t.Fatalf("asset should be deleted after last reference, got %+v", foundAsset)
+	}
+	assertTaskOwnedDataDeleted(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+}
+
+func TestDeleteTaskStopsWhenVectorCleanupFails(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	storage := &recordingObjectStorage{}
+	cleaner := &recordingTaskVectorCleaner{err: errors.New("milvus delete failed")}
+
+	asset := createMediaTestAsset(t, repos, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "videos/vector-fail.mp4")
+	task := createMediaTestTask(t, repos, 7, asset, "vector-fail.mp4")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+
+	svc := &MediaService{
+		repo:              repos,
+		objectDeleter:     storage,
+		taskVectorCleaner: cleaner,
+	}
+	if err := svc.DeleteTask(context.Background(), task.UserID, task.ID); err == nil {
+		t.Fatal("DeleteTask() expected vector cleanup error")
+	}
+
+	if _, err := repos.Task.FindByID(task.ID); err != nil {
+		t.Fatalf("task should remain when vector cleanup fails: %v", err)
+	}
+	if len(storage.deleted) != 0 {
+		t.Fatalf("object should not be deleted when vector cleanup fails, got %v", storage.deleted)
+	}
 }
 
 func filepathThatDoesNotExist() string {
@@ -192,6 +345,166 @@ type recordingMediaProducer struct {
 	analyzeTraceIDs    []string
 	transcribes        []int64
 	transcribeTraceIDs []string
+}
+
+type recordingObjectStorage struct {
+	deleted []string
+}
+
+func (s *recordingObjectStorage) DeleteObject(_ context.Context, objectName string) error {
+	s.deleted = append(s.deleted, objectName)
+	return nil
+}
+
+type recordingTaskVectorCleaner struct {
+	calls []struct {
+		userID int64
+		taskID int64
+		model  string
+	}
+	err error
+}
+
+type fakeRemoteURLResolver map[string][]net.IP
+
+func (r fakeRemoteURLResolver) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
+	_ = ctx
+	ips := r[strings.ToLower(host)]
+	if ips == nil {
+		return []net.IP{net.ParseIP("203.0.113.20")}, nil
+	}
+	return ips, nil
+}
+
+func (c *recordingTaskVectorCleaner) DeleteTaskChunks(_ context.Context, userID, taskID int64, embeddingModel string) error {
+	c.calls = append(c.calls, struct {
+		userID int64
+		taskID int64
+		model  string
+	}{userID: userID, taskID: taskID, model: embeddingModel})
+	return c.err
+}
+
+func createMediaTestAsset(t *testing.T, repos *repository.Repositories, md5, objectName string) *model.VideoAsset {
+	t.Helper()
+	asset := &model.VideoAsset{
+		FileMD5:     md5,
+		ObjectName:  objectName,
+		FileSize:    1024,
+		ContentType: "video/mp4",
+	}
+	if err := repos.Asset.Create(asset); err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	return asset
+}
+
+func createMediaTestTask(t *testing.T, repos *repository.Repositories, userID int64, asset *model.VideoAsset, filename string) *model.VideoTask {
+	t.Helper()
+	task := &model.VideoTask{
+		UserID:   userID,
+		AssetID:  asset.ID,
+		FileMD5:  asset.FileMD5,
+		Filename: filename,
+		FileURL:  asset.ObjectName,
+		FileSize: asset.FileSize,
+		Status:   model.TaskStatusPending,
+		Stage:    model.TaskStageUploaded,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	return task
+}
+
+func createTaskOwnedData(t *testing.T, repos *repository.Repositories, taskID, userID int64, embeddingModel string) {
+	t.Helper()
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: taskID, Content: "transcript", Words: 1}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompleted(taskID, 0, "audio/chunk-0.mp3", "chunk transcript"); err != nil {
+		t.Fatalf("create transcription chunk: %v", err)
+	}
+	if err := repos.Summary.Create(&model.AISummary{TaskID: taskID, Content: "summary", ModelName: "llm"}); err != nil {
+		t.Fatalf("create summary: %v", err)
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(taskID, embeddingModel, []model.VideoChunk{
+		{
+			UserID:         userID,
+			TaskID:         taskID,
+			ChunkIndex:     0,
+			Content:        "rag chunk",
+			ContentHash:    "hash",
+			EmbeddingModel: embeddingModel,
+			EmbeddingDim:   1536,
+			VectorID:       "vector-id",
+		},
+	}); err != nil {
+		t.Fatalf("create video chunk: %v", err)
+	}
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{
+		UserID:         userID,
+		TaskID:         taskID,
+		EmbeddingModel: embeddingModel,
+		EmbeddingDim:   1536,
+		Status:         model.RAGIndexStatusIndexed,
+		ChunkCount:     1,
+	}); err != nil {
+		t.Fatalf("create rag index: %v", err)
+	}
+	session := &model.ChatSession{UserID: userID, TaskID: taskID, Title: "chat"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create chat session: %v", err)
+	}
+	if err := repos.Chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, UserID: userID, Role: "user", Content: "question"}); err != nil {
+		t.Fatalf("create chat message: %v", err)
+	}
+}
+
+func assertTaskOwnedDataDeleted(t *testing.T, repos *repository.Repositories, taskID, userID int64, embeddingModel string) {
+	t.Helper()
+	transcription, err := repos.Transcription.FindByTaskID(taskID)
+	if err != nil {
+		t.Fatalf("find transcription: %v", err)
+	}
+	if transcription != nil {
+		t.Fatalf("transcription should be deleted, got %+v", transcription)
+	}
+	transcriptionChunks, err := repos.TranscriptionChunk.ListByTaskID(taskID)
+	if err != nil {
+		t.Fatalf("list transcription chunks: %v", err)
+	}
+	if len(transcriptionChunks) != 0 {
+		t.Fatalf("transcription chunks should be deleted, got %+v", transcriptionChunks)
+	}
+	summary, err := repos.Summary.FindByTaskID(taskID)
+	if err != nil {
+		t.Fatalf("find summary: %v", err)
+	}
+	if summary != nil {
+		t.Fatalf("summary should be deleted, got %+v", summary)
+	}
+	videoChunks, err := repos.VideoChunk.ListByTaskID(userID, taskID, embeddingModel)
+	if err != nil {
+		t.Fatalf("list video chunks: %v", err)
+	}
+	if len(videoChunks) != 0 {
+		t.Fatalf("video chunks should be deleted, got %+v", videoChunks)
+	}
+	ragIndex, err := repos.RAGIndex.FindByTaskAndModel(userID, taskID, embeddingModel)
+	if err != nil {
+		t.Fatalf("find rag index: %v", err)
+	}
+	if ragIndex != nil {
+		t.Fatalf("rag index should be deleted, got %+v", ragIndex)
+	}
+	sessions, err := repos.Chat.ListSessions(userID, taskID)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("chat sessions should be deleted, got %+v", sessions)
+	}
 }
 
 func (p *recordingMediaProducer) EnqueueAnalyze(ctx context.Context, taskID int64, _ string) error {

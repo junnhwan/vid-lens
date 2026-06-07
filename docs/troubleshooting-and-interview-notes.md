@@ -550,18 +550,18 @@ A：这是数据隔离。公开部署后不同用户的视频 chunk 都在同一
 ### 这次不要夸大的点
 
 - 当前是单视频 RAG，不是跨视频知识库。
-- 当前是向量召回，没有 BM25 混合检索，也没有 rerank。
-- 当前没有 SSE 流式输出。
-- 当前自动索引失败不会阻断 ASR 主流程，用户仍可通过手动索引接口重试。
+- 当前已有 Go 侧 BM25 风格关键词召回 + RRF 融合，但没有 rerank。
+- 当前已有 provider 级 token streaming；早期记录里提到的“只做 SSE 分块”已被记录 023 覆盖。
+- 当前自动索引已改为独立 RAG Kafka job；索引失败不删除 ASR 转写文本。
 - 当前 Milvus 已写入 compose，并已在本地通过 `milvusdb/milvus:v2.4.15` 和 `quay.io/coreos/etcd:v3.5.18` 启动验证。
 
 ### 后续演进
 
-- 将 RAG 索引构建改成独立 Kafka topic，避免长文本同步索引阻塞请求。
-- 保存索引状态，例如 `not_indexed/indexing/indexed/failed`。
+- 继续完善 RAG 独立 job 的可视化状态和重试观测。
+- 继续维护索引状态，例如 `indexing/indexed/failed`。
 - 支持多 embedding 维度时按维度拆 collection。
-- 增加 AI 调用日志，记录用户维度的请求次数和失败原因，但不记录明文 Key。
-- 增加流式问答和引用片段前端交互。
+- AI 调用日志和用户每日用量已在记录 024 补齐第一版，后续可增加 token 级统计。
+- 流式问答后端已在记录 023 补齐 provider 级 streaming，后续可完善前端交互。
 
 ## 记录 004：RAG 问答重复要求构建索引，且提问时报 MySQL JSON 错误
 
@@ -1667,9 +1667,9 @@ go test ./... 通过
 
 ### 面试官可能追问
 
-**Q：为什么不直接拆成 job 表？**
+**Q：为什么当时不直接拆成 job 表？**
 
-A：长期更合理的是 `video_tasks` 表示视频资产任务，`task_jobs` 表示一次 download/transcribe/summarize/index 动作。但这会引入较大改动。当前阶段先用 `stage` 补齐可解释性，保持接口和前端兼容。
+A：长期更合理的是 `video_tasks` 表示视频资产任务，`task_jobs` 表示一次 download/transcribe/summarize/index 动作。但当时这会引入较大改动，所以先用 `stage` 补齐可解释性，保持接口和前端兼容。后续已在记录 025 中补了第一版 `task_jobs`。
 
 **Q：completed 后为什么 stage=none？**
 
@@ -1681,7 +1681,7 @@ A：因为总结需要转写文本。如果当前任务还没有 ASR 结果，an
 
 ### 这次不要夸大的点
 
-- 当前还没有独立 `task_jobs` 表。
+- 当时还没有独立 `task_jobs` 表；后续记录 025 已补第一版子任务表。
 - 当前没有记录每个 stage 的耗时历史，只记录当前阶段。
 - 当前 RAG 索引失败仍不阻塞转写/总结主任务，只会记录日志；阶段四会补独立索引状态表。
 
@@ -2321,15 +2321,15 @@ go test ./... 通过
 
 可以这样讲：
 
-> 当前 RAG 问答第一版是普通 JSON，因为我优先保证检索、引用和消息持久化正确。后续为了支持更好的用户体验，我先在后端加了 SSE stream 接口，事件包括 citations、answer 和 done。
+> 当时 RAG 问答第一版是普通 JSON，因为我优先保证检索、引用和消息持久化正确。后续为了支持更好的用户体验，我先在后端加了 SSE stream 接口，事件包括 citations、answer 和 done。
 >
-> 这一版还不是 provider 级 token streaming，因为现有 AI client 抽象是一次性返回完整字符串，不同 provider 的 streaming 协议也不同。所以我先保持 provider 不变，复用现有 Ask 流程得到完整答案后，通过 SSE 分块输出，先稳定接口契约。下一步再把 ChatClient 抽象升级为可选 StreamChat。
+> 这一版当时还不是 provider 级 token streaming，因为现有 AI client 抽象是一次性返回完整字符串，不同 provider 的 streaming 协议也不同。所以我先保持 provider 不变，复用现有 Ask 流程得到完整答案后，通过 SSE 分块输出，先稳定接口契约。后续记录 023 已把 ChatClient 抽象升级为可选 StreamChat。
 
 ### 面试官可能追问
 
 **Q：这算真正流式输出吗？**
 
-A：严格说还不是 token 级流式。它是 SSE 接口契约的第一版，答案是在 LLM 完整返回后分块发给客户端。真正 token streaming 需要改 provider 层，让 OpenAI-compatible 响应边到边转发。
+A：这条记录描述的是当时的 SSE 接口契约第一版，严格说当时还不是 token 级流式。后续记录 023 已在 provider 层增加 `StreamChat`，让 OpenAI-compatible 响应边到边转发。
 
 **Q：为什么还要做这个中间版本？**
 
@@ -2337,15 +2337,15 @@ A：它能先验证后端路由、鉴权、SSE content-type、事件格式和消
 
 ### 这次不要夸大的点
 
-- 当前不是 token-by-token streaming。
+- 当时不是 token-by-token streaming；后续记录 023 已补 provider 级 token streaming。
 - 当前没有改前端 UI。
 - 当前没有处理半截输出落库，消息仍在完整 Ask 成功后保存。
 
 ### 后续演进
 
-- 给 `ai.ChatClient` 增加可选 `StreamChat` 能力。
-- 流式过程中支持中途取消和半截输出处理。
-- 前端用 fetch ReadableStream 消费 POST SSE/stream 响应。
+- 后续已给 `ai.ChatClient` 增加可选 `StreamChat` 能力。
+- 继续完善流式过程中断和半截输出处理。
+- 前端可继续用 fetch ReadableStream 消费 POST SSE/stream 响应。
 
 ## 记录 015：RAG 问答增加候选扩展和关键词融合
 
@@ -2403,7 +2403,7 @@ rag:
 6. 进入 prompt
 ```
 
-这不是完整 BM25 或 rerank 模型，但已经具备混合检索的基础能力：向量召回负责语义，关键词召回补精确命中。
+这在当时还不是完整 BM25 或 rerank 模型，但已经具备混合检索的基础能力：向量召回负责语义，关键词召回补精确命中。后续记录 019 已升级为 Go 侧 BM25 风格召回 + RRF。
 
 ### 测试与验证
 
@@ -2442,17 +2442,17 @@ go test ./... 通过
 
 > RAG 第一版只做向量 Top-K，这对语义问题够用，但对明确关键词、专有名词或代码名不一定稳定。所以我加了一个轻量混合检索版本：向量侧先召回 `candidate_k` 个候选，同时从 MySQL 的 `video_chunks` 做关键词 LIKE 召回，然后去重、融合并截取最终 topK 给 LLM。
 >
-> 这不是完整 BM25，也没有引入额外 rerank 模型，但它能在不增加外部依赖的情况下补齐“关键词明确但向量没命中”的场景。后续如果要继续提升质量，可以把 MySQL LIKE 换成 fulltext/BM25，再对候选做 RRF 或 rerank model。
+> 这在当时不是完整 BM25，也没有引入额外 rerank 模型，但它能在不增加外部依赖的情况下补齐“关键词明确但向量没命中”的场景。后续记录 019 已把 LIKE fallback 升级为 Go 侧 BM25 风格召回，并用 RRF 做排名融合。
 
 ### 面试官可能追问
 
 **Q：LIKE 算不算真正混合检索？**
 
-A：它是混合检索的基础版，不是最终形态。核心思想是把语义召回和关键词召回合并。当前用 LIKE 是为了低成本验证链路，后续可以替换为 MySQL fulltext、BM25 或专门检索引擎。
+A：它是混合检索的基础版，不是最终形态。核心思想是把语义召回和关键词召回合并。当时用 LIKE 是为了低成本验证链路，后续记录 019 已替换为 Go 侧 BM25 风格召回。
 
 **Q：为什么关键词 chunk 分数较低？**
 
-A：为了让向量召回仍作为主排序来源，关键词召回作为补充进入上下文。后续做 RRF 时可以用 rank 而不是手工分数。
+A：为了让向量召回仍作为主排序来源，关键词召回作为补充进入上下文。后续记录 019 已改为用 RRF rank 融合，而不是手工分数直接混排。
 
 **Q：candidate_k 为什么默认 30？**
 
@@ -2460,15 +2460,1471 @@ A：最终 topK 通常是 5，扩大到 30 个候选可以给融合和后续 rer
 
 ### 这次不要夸大的点
 
-- 当前不是 BM25。
+- 当时不是 BM25；后续记录 019 已补 Go 侧 BM25 风格召回。
 - 当前没有引入 rerank 模型。
-- 当前融合策略是基础去重 + 分数排序，不是完整 RRF。
+- 当时融合策略是基础去重 + 分数排序；后续记录 019 已补 RRF。
 
 ### 后续演进
 
-- 用 MySQL fulltext/BM25 替换 LIKE。
-- 引入 RRF 融合 vector_rank 和 keyword_rank。
+- 继续评估是否用 MySQL fulltext/ngram 或专门检索引擎替换 Go 侧 BM25 风格实现。
+- 继续基于 RRF 指标做检索评估。
 - 对 candidate_k 候选接 rerank 模型后再截取 topK。
+
+## 记录 016：删除任务时不能误删共享视频资产
+
+### 背景
+
+VidLens 已经做了 MD5 内容级去重，同一个 `video_assets` 资产可以被多个 `video_tasks` 复用。路线图 P0-1 要求补齐任务删除和资源生命周期，否则删除单个任务可能破坏其他任务。
+
+### 现象
+
+旧版 `MediaService.DeleteTask` 的逻辑很直接：
+
+```text
+校验任务归属
+如果 task.FileURL 非空，直接删除 MinIO object
+逻辑删除 video_tasks
+```
+
+问题是任务 A 和任务 B 如果复用同一个 `asset_id/object_name`，删除任务 A 时会直接删除 MinIO 对象，任务 B 的数据库记录还在，但视频文件已经没了。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/service/media.go
+internal/model/asset.go
+internal/repository/task.go
+internal/repository/video_chunk.go
+internal/vector/milvus.go
+cmd/server/main.go
+```
+
+`video_assets` 注释已经说明“同一个资产可以被多个用户任务复用”，但旧删除流程没有检查引用计数，也没有清理：
+
+```text
+video_transcriptions
+video_transcription_chunks
+ai_summaries
+video_chunks
+video_rag_indexes
+chat_sessions
+chat_messages
+Milvus vectors
+```
+
+### 根因
+
+任务删除和对象删除被混在一起，没有区分“用户任务”与“底层视频资产”的生命周期。内容级去重之后，MinIO object 的所有者不再是某一个 task，而是 asset；只有最后一个 task 引用消失时，才能删除 asset 对应的对象。
+
+### 修复方案
+
+本次把删除流程改成资源生命周期清理：
+
+```text
+1. 校验 task 归属
+2. 收集该 task 的 embedding_model
+3. 先按 user_id/task_id/embedding_model 清理 Milvus vectors
+4. DB transaction 内删除 task 从属数据：
+   - transcription
+   - transcription chunks
+   - summary
+   - video chunks
+   - rag index
+   - chat messages/sessions
+   - video task
+5. transaction 内统计 asset_id 仍有多少 active task 引用
+6. 如果仍有引用，保留 MinIO object 和 video_assets
+7. 如果没有引用，删除 MinIO object，再软删除 video_assets
+```
+
+同时给 `MilvusStore` 和 `NoopStore` 增加 `DeleteTaskChunks`，并在 `cmd/server/main.go` 中把 RAG store 注入到 `MediaService` 的清理链路。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/repository/task_test.go
+internal/service/media_test.go
+```
+
+关键测试点：
+
+```text
+两个 task 共享同一个 asset 时，删除其中一个不会删除 MinIO object
+删除最后一个 asset 引用时，会删除 MinIO object 和 video_assets
+删除 task 会清理转写、ASR chunk、总结、RAG chunk、RAG index、聊天会话/消息
+Milvus vector 清理失败时，不继续删除 MySQL task 和 MinIO object
+CountActiveByAssetID 会忽略已软删除任务
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service ./internal/repository ./internal/vector
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/service ./internal/repository ./internal/vector 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我最开始做了 MD5 级内容去重，同一个视频文件会落成一个 `video_assets`，多个用户任务可以复用这个资产。后面我发现删除任务不能直接删 MinIO object，因为这会把其他复用同一 asset 的任务破坏掉。
+>
+> 所以我把删除任务改成了资源生命周期处理：先清理这个 task 自己的转写、总结、RAG chunks、RAG index、聊天记录和 Milvus vectors，再逻辑删除 task。删除后统计这个 asset 是否还有其他 active task 引用，只有最后一个引用消失时才删除 MinIO object 和 asset 记录。这个改动解决的是对象存储和数据库引用关系的一致性问题。
+
+### 面试官可能追问
+
+**Q：为什么 Milvus 删除失败时不继续删 MySQL？**
+
+A：因为 RAG 检索真正读的是 Milvus。如果 MySQL task 删了但向量还留在 Milvus，后续排障会更困难，也可能出现不一致的旧检索数据。所以当前策略是向量清理失败直接返回错误，不让用户误以为任务已完整删除。
+
+**Q：删除 MinIO object 失败怎么办？**
+
+A：当前会返回错误，不静默吞掉。严格生产系统还可以引入待清理表或后台补偿任务，专门处理对象存储删除失败后的重试。
+
+### 这次不要夸大的点
+
+- 当前不是完整对象生命周期系统，没有自动归档、冷热分层或后台补偿清理。
+- 当前没有清理历史上传临时 chunks 的完整生命周期。
+- 当前 task 删除和 asset 删除之间仍不是分布式事务。
+
+### 后续演进
+
+- 增加 resource_cleanup_jobs，用后台任务补偿 MinIO/Milvus 删除失败。
+- 给分片上传临时对象增加定期清理或 MinIO lifecycle。
+- 删除前增加更严格的状态检查，避免正在运行的 task 被删除。
+
+## 记录 017：RetryScheduler 投递失败后恢复 next_retry_at
+
+### 背景
+
+VidLens 使用 DB retry scheduler 弥补 Kafka 没有 RocketMQ 那种业务级延迟重试语义的问题。路线图 P0-2 要求修复一个细节：scheduler claim 到任务后，如果重新投递 Kafka 失败，不能让任务失去下一次调度机会。
+
+### 现象
+
+旧流程是：
+
+```text
+FindDueRetryTasks
+ClaimRetryTask -> status 改成 queued/running，next_retry_at 清空
+enqueueRetry
+```
+
+如果 `enqueueRetry` 失败，旧代码只是把任务写回 failed：
+
+```text
+UpdateStatusAndStage(task.ID, failed, stage, err)
+```
+
+此时 `next_retry_at` 已经被 claim 阶段清空，后续 scheduler 查询条件要求 `next_retry_at IS NOT NULL`，这个任务就可能一直卡在 failed。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/mq/retry.go
+internal/repository/task.go
+internal/mq/consumer_test.go
+```
+
+`FindDueRetryTasks` 的查询条件包含：
+
+```text
+status = failed
+next_retry_at IS NOT NULL
+next_retry_at <= now
+last_job_type <> ''
+```
+
+所以 claim 后投递失败必须恢复 `next_retry_at`。
+
+### 根因
+
+重试链路只考虑了“业务处理失败后的下一次重试”，没有覆盖“重试调度自身投递失败”的恢复。Kafka 写入失败发生在业务处理之前，不应该额外消耗一次业务 retry_count，但必须重新设置短退避时间。
+
+### 修复方案
+
+新增 repository 方法：
+
+```go
+RestoreRetryAfterDispatchFailure(id, stage, errMsg, nextRetryAt)
+```
+
+更新字段：
+
+```text
+status = failed
+stage = 原重试目标 stage
+last_error_code = retry_enqueue_failed
+last_error_msg = Kafka 投递错误
+next_retry_at = now + 1 minute
+retry_count 保持不变
+```
+
+`RetryScheduler.RunOnce` 在 `enqueueRetry` 失败时调用这个恢复方法，然后仍返回错误给日志层。
+
+### 测试与验证
+
+新增测试：
+
+```text
+TestRetrySchedulerRestoresNextRetryWhenEnqueueFailsAfterClaim
+```
+
+关键断言：
+
+```text
+enqueue 失败后任务仍为 failed
+next_retry_at 被恢复为 now + 1 minute
+retry_count 不增加
+last_error_code = retry_enqueue_failed
+last_error_msg 包含 Kafka 错误
+```
+
+验证命令：
+
+```powershell
+go test ./internal/mq -run RetryScheduler
+go test ./internal/repository -run Task
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/mq -run RetryScheduler 通过
+go test ./internal/repository -run Task 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我没有把 Kafka 消费失败简单地无限不提交 offset，因为那会卡住分区，所以我在业务层做了 DB retry scheduler。后面我补了一个容易被忽略的失败点：scheduler 把任务 claim 出来后，会先清空 `next_retry_at`，再重新投递 Kafka。如果这一步 Kafka 投递失败，任务就会卡在 failed，而且后续 scheduler 再也捞不到。
+>
+> 我的修复是把这个场景单独标记成 `retry_enqueue_failed`，恢复 failed 状态和下一次短退避调度时间，但不增加业务 retry_count，因为业务逻辑还没有真正重跑。这样重试链路本身也具备失败恢复能力。
+
+### 面试官可能追问
+
+**Q：为什么投递失败不增加 retry_count？**
+
+A：因为 retry_count 记录的是业务处理尝试次数。Kafka 重投递失败发生在业务处理之前，如果也增加 retry_count，会让任务因为 MQ 短暂不可用而更快进入 dead，不符合语义。
+
+**Q：为什么恢复为 1 分钟？**
+
+A：这是当前第一版短退避，避免 scheduler 立刻忙等重投。后续可以把 dispatch failure backoff 配到 `task_retry` 里。
+
+### 这次不要夸大的点
+
+- 当前仍不是 Kafka 原生死信队列。
+- 当前没有单独统计 retry dispatch failure 次数。
+- 当前调度器是 DB 轮询，不是分布式调度器。
+
+### 后续演进
+
+- 给 retry dispatch failure 单独加计数字段或审计日志。
+- 多实例部署时给 scheduler 增加分布式锁或基于 DB 的更严格 claim 条件。
+- 将 dispatch failure backoff 配置化。
+
+## 记录 018：URL 下载增加白名单、DNS 安全校验和脱敏
+
+### 背景
+
+VidLens 支持用户提交 B 站或 YouTube 链接，由后端调用 yt-dlp 下载视频。公开部署后，后端会代表用户访问外部网络，因此 URL 下载不能只做简单格式校验。
+
+### 现象
+
+旧校验已经拒绝了：
+
+```text
+非 http/https
+host 为空
+localhost
+直接 IP 且为 loopback/private/link-local
+```
+
+但仍有风险：
+
+```text
+域名 DNS 解析后可能指向内网地址
+evilbilibili.com 这类相似域名可能被误认为平台链接
+source_url 会保存完整 query token 和 fragment
+yt-dlp 参数默认带 --no-check-certificate
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/service/remote_video_url.go
+internal/service/media.go
+internal/config/config.go
+config.yaml
+internal/pkg/ytdlp/ytdlp.go
+internal/service/media_test.go
+internal/pkg/ytdlp/ytdlp_test.go
+```
+
+### 根因
+
+URL 下载是服务端代访问外部资源，本质上有 SSRF 风险。只检查 URL 字符串不够，因为域名最终访问的 IP 由 DNS 决定；同时 query/fragment 里可能带用户 token，不应该直接入库或出现在日志里。
+
+### 修复方案
+
+新增配置：
+
+```yaml
+tools:
+  allowed_video_hosts:
+    - bilibili.com
+    - b23.tv
+    - youtube.com
+    - youtu.be
+```
+
+新增 `remoteVideoURLValidator`，校验顺序：
+
+```text
+1. trim 和 URL parse
+2. scheme 必须为 http/https
+3. host 不能为空，localhost 拒绝
+4. domain whitelist，支持 www.bilibili.com 这类子域名，但拒绝 evilbilibili.com
+5. DNS resolver 解析 host
+6. 任意解析结果为 private/loopback/link-local/unspecified/multicast 就拒绝
+7. 入库前清除 userinfo、query 和 fragment
+```
+
+`UploadByURL` 现在使用脱敏 URL 生成下载 key、filename 和 `SourceURL`。yt-dlp 参数移除了 `--no-check-certificate`。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/config/config_test.go
+internal/service/media_test.go
+internal/pkg/ytdlp/ytdlp_test.go
+```
+
+关键测试点：
+
+```text
+allowed_video_hosts 可从 YAML 解析
+localhost、127.0.0.1、::1、file scheme 被拒绝
+evilbilibili.com 被拒绝
+白名单域名解析到 10.0.0.8 时被拒绝
+www.bilibili.com 公网解析可通过
+SourceURL 不再保存 token/query/fragment
+yt-dlp 参数不再包含 --no-check-certificate
+```
+
+验证命令：
+
+```powershell
+go test ./internal/config -run AllowedVideoHosts
+go test ./internal/service -run "RemoteVideoURL|UploadByURL"
+go test ./internal/pkg/ytdlp -run Certificate
+go test ./...
+docker compose config
+```
+
+本阶段验证结果：
+
+```text
+上述定向测试通过
+go test ./... 通过
+docker compose config 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> URL 下载不是把用户传来的链接直接交给 yt-dlp。公开部署后，服务端会代表用户访问网络，如果不限制，就可能出现 SSRF 风险。所以我把校验拆成了几层：只允许 http/https，只允许明确支持的平台域名，对域名做白名单后缀匹配，再解析 DNS，拒绝解析到内网、loopback、link-local、multicast 这类地址。
+>
+> 同时我把入库的 `source_url` 改成脱敏 URL，不保存 query token 和 fragment，日志里也不会出现这类参数。yt-dlp 侧也去掉了默认跳过证书校验的参数。这个方案不能说是完全生产级 SSRF 防护，但已经比单纯字符串校验更可防守。
+
+### 面试官可能追问
+
+**Q：为什么不能说生产级 SSRF 防护？**
+
+A：因为 yt-dlp 自己可能跟随平台内部重定向，Go 层的 DNS 校验不一定覆盖它实际访问的每一次请求。更严格的生产方案应该把下载放进网络受限的沙箱或独立下载服务，并限制 egress 网络。
+
+**Q：去掉 query 会不会影响某些平台链接？**
+
+A：可能会。所以当前白名单平台主要面向 B 站和 YouTube 常规公开链接。需要 query 才能访问的私有链接不适合直接作为公开部署的下载入口，除非后续专门做加密保存和更严格的访问策略。
+
+### 这次不要夸大的点
+
+- 当前不是完整生产级 SSRF 沙箱。
+- 当前没有控制 yt-dlp 跟随重定向后的每一次网络访问。
+- 当前没有保存 raw_url_hash 或加密 raw_url。
+
+### 后续演进
+
+- 将 yt-dlp 放到 egress 受限的容器或独立下载服务。
+- 如确实需要 query 参数，新增加密 raw URL 字段，只在下载 worker 内部解密使用。
+- 记录 raw URL hash，便于排障和去重，但不暴露敏感 query。
+
+## 记录 019：RAG 检索从 LIKE fallback 升级为 Go 侧 BM25 风格召回 + RRF 融合
+
+### 背景
+
+VidLens 的视频问答使用 ASR 转写文本作为 RAG 知识源。旧版本的检索流程是：
+
+```text
+query embedding -> Milvus vector candidates -> MySQL LIKE fallback -> 简单按 score 排序
+```
+
+这能覆盖一部分语义召回和完整字符串命中，但不能防守成“BM25/RRF 混合检索”。
+
+### 现象
+
+旧 LIKE fallback 的问题：
+
+```text
+LIKE "%完整问题%" 很难命中 chunk
+关键词召回没有真实排名
+vector score 和 keyword score 不是同一尺度
+citation 看不出来自 vector、keyword 还是两者同时命中
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/service/chat.go
+internal/service/retrieval_fusion.go
+internal/repository/video_chunk.go
+internal/service/retrieval_fusion_test.go
+internal/repository/video_chunk_test.go
+```
+
+### 根因
+
+RAG 检索不能把语义向量分数和关键词命中分数直接相加。向量检索更适合语义相似问题，关键词检索更适合精确术语、英文缩写、数字和专有名词；两路结果的分数尺度不同，直接混排不稳定。
+
+### 修复方案
+
+本阶段做了两层改动：
+
+```text
+1. query terms 提取：
+   - 保留英文、数字和中文 n-gram
+   - 避免只拿完整问题做 LIKE
+
+2. retrieval fusion：
+   - vector results 带 vector_rank
+   - keyword results 带 keyword_rank
+   - 用 RRF 做排名融合
+   - citation 增加 source/vector_rank/keyword_rank/rrf_score
+```
+
+Repository 层新增 `SearchByBM25`。当前实现是从单个 task 的 `video_chunks` 中加载候选 chunk，在 Go 侧计算 BM25 风格分数，主要考虑本项目“单视频 chunk 数量有限、测试可移植”的约束。这里没有引入 Elasticsearch，也没有依赖 MySQL FULLTEXT/ngram parser。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/service/retrieval_fusion_test.go
+internal/repository/video_chunk_test.go
+```
+
+关键测试点：
+
+```text
+vector 命中 1/2，keyword 命中 2/3 时，chunk 2 通过 RRF 排到前面
+缺失一路 rank 时仍可融合
+source 正确标记为 vector / keyword / hybrid
+中文、英文、数字 query terms 可提取
+SearchByBM25 能对相关 chunk 排名
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service -run Retrieval
+go test ./internal/repository -run VideoChunk
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+P1-1 实现后 go test ./... 通过
+当前最新 go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> RAG 第一版只做向量检索，后来我加过 LIKE fallback，但完整问题字符串很难直接命中 chunk，所以这只能算轻量补充。后面我把检索升级成了向量召回加关键词召回，再用 RRF 做排名融合。
+>
+> 这里我没有直接把向量分数和关键词分数相加，因为两种分数不是同一个尺度。RRF 用的是排名，不依赖分数绝对值，所以对第一版混合检索更稳。当前关键词侧是针对单视频 chunk 的 Go 侧 BM25 风格实现，适合先验证链路；如果后续数据量变大，再替换成 MySQL FULLTEXT/ngram 或专门检索引擎。
+
+### 面试官可能追问
+
+**Q：能不能说已经用了 Elasticsearch？**
+
+A：不能。当前没有引入 Elasticsearch。关键词召回是在 MySQL chunk 数据基础上做 Go 侧 BM25 风格打分。
+
+**Q：能不能说已经做了 rerank？**
+
+A：不能。当前做的是召回和 RRF 融合，还没有接 rerank 模型。rerank 应该放在混合召回稳定、有评估集之后。
+
+### 这次不要夸大的点
+
+- 当前不是 Elasticsearch/OpenSearch。
+- 当前不是 MySQL FULLTEXT/ngram parser 实现。
+- 当前没有 rerank。
+- 当前没有 query rewrite 模型。
+
+### 后续演进
+
+- 增加 RAG 评估集，用 Recall@K 和 MRR 对比纯 vector、keyword、hybrid。
+- 数据量增加后，把 Go 侧 BM25 替换为 MySQL FULLTEXT/ngram 或专用检索引擎。
+- 在稳定召回基础上增加 rerank。
+
+## 记录 020：RAG 重建索引前清理 Milvus 旧向量
+
+### 背景
+
+RAG 索引重建会替换 MySQL 里的 `video_chunks`，并向 Milvus upsert 新向量。旧版本没有在重建前删除同一 task/model 下的旧向量。
+
+### 现象
+
+如果同一个 task 的转写内容变化，新的 vector_id 会因为内容 hash 变化而改变。此时：
+
+```text
+MySQL video_chunks 已是新内容
+Milvus 里仍可能保留旧 vector
+检索 filter 只按 user_id/task_id/embedding_model
+用户问答可能召回旧片段
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/service/rag_index.go
+internal/vector/milvus.go
+internal/vector/noop.go
+internal/service/rag_index_test.go
+```
+
+### 根因
+
+MySQL chunk 表和 Milvus 向量库是两套存储。只替换 MySQL chunk 不会自动删除 Milvus 中已经写入的旧 vector。因为当前 Milvus filter 没有 build_version 隔离，旧 vector 仍满足 `user_id/task_id/embedding_model` 条件。
+
+### 修复方案
+
+扩展 `RAGVectorStore`：
+
+```go
+UpsertChunks(ctx context.Context, vectors []RAGVector) error
+DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
+```
+
+`BuildTaskIndex` 现在的顺序是：
+
+```text
+1. 写 video_rag_indexes = indexing
+2. DeleteTaskChunks(user_id, task_id, embedding_model)
+3. 生成 embedding
+4. ReplaceTaskChunks 写 MySQL 新 chunks
+5. UpsertChunks 写 Milvus 新 vectors
+6. 写 video_rag_indexes = indexed
+```
+
+如果删除旧 Milvus vectors 失败，流程会写 `video_rag_indexes = failed`，并且不会继续替换 MySQL chunks，避免 MySQL 和向量库进一步分叉。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/service/rag_index_test.go
+```
+
+关键测试点：
+
+```text
+BuildTaskIndex 会先 DeleteTaskChunks 再 UpsertChunks
+DeleteTaskChunks 失败时不会 ReplaceTaskChunks
+DeleteTaskChunks 失败会记录 RAG index failed 和 last_error
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service -run "RAGIndexServiceDeletesOldVectors|RAGIndexServiceStopsBefore"
+go test ./internal/service
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+P1-2 定向 RAG 测试通过
+P1-2 后 go test ./internal/service 通过
+P1-2 后 go test ./... 通过
+当前最新 go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> RAG 索引重建不是只替换 MySQL chunks 就够了，因为真正参与向量召回的是 Milvus。旧向量如果不删，即使 MySQL 里已经是新 chunk，Milvus filter 仍然可能召回旧内容。
+>
+> 所以我把向量存储接口扩展了删除能力，重建前先按 `user_id/task_id/embedding_model` 删除旧向量。如果删除失败，就把 RAG index 状态写成 failed，不继续替换 MySQL chunks。这个问题本质上是关系型元数据和向量库数据的一致性问题。
+
+### 面试官可能追问
+
+**Q：删除旧向量后 upsert 新向量失败怎么办？**
+
+A：当前会把 RAG index 状态标记为 failed，用户可以重试构建索引。第一版选择简单一致性，没有做在线双版本切换。
+
+**Q：为什么没有直接做 build_version？**
+
+A：build_version 更适合在线重建和无缝切换，但要改 Milvus schema 和检索 filter。当前项目先按 task/model 删除旧向量，覆盖重建污染问题；后续如果要在线重建，再引入 build_version。
+
+### 这次不要夸大的点
+
+- 当前不是无缝在线索引切换。
+- 当前没有 build_version filter 生效。
+- 当前没有后台异步清理旧版本。
+
+### 后续演进
+
+- 增加 build_version 字段并让检索 filter 只查当前 indexed 版本。
+- 删除旧版本向量改为后台清理，减少重建窗口。
+- 记录每次构建版本、耗时和失败原因。
+
+## 记录 021：RAG 索引从 ASR 完成路径拆成独立 Kafka job
+
+### 背景
+
+旧版本在 ASR 转写保存后，直接同步调用 RAG indexer：
+
+```text
+transcribe consumer -> save transcription -> BuildTaskIndex -> completed
+```
+
+这会让 embedding 和 Milvus 写入占用转写 consumer 的处理时间。
+
+### 现象
+
+RAG 索引和 ASR 的失败边界不同：
+
+```text
+ASR 成功后，用户应该能查看转写文本
+Embedding 或 Milvus 失败，只应该影响问答索引
+旧同步调用会让转写 consumer 被 RAG 索引耗时拖住
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/mq/producer.go
+internal/mq/consumer.go
+internal/mq/retry.go
+internal/config/config.go
+config.yaml
+cmd/server/main.go
+internal/mq/consumer_test.go
+internal/mq/producer_test.go
+internal/config/config_test.go
+```
+
+### 根因
+
+ASR、总结、RAG 索引属于不同处理动作。旧流程把 RAG 索引塞在 ASR 完成后的同步路径里，导致索引慢或向量库失败时，会影响文字提取 worker 的吞吐和语义边界。
+
+### 修复方案
+
+新增 Kafka topic 配置：
+
+```yaml
+kafka:
+  rag_index_topic: "video-rag-index"
+```
+
+新增 payload：
+
+```go
+type RAGIndexPayload struct {
+    TaskID  int64  `json:"task_id"`
+    TraceID string `json:"trace_id"`
+}
+```
+
+Producer 新增：
+
+```text
+EnqueueRAGIndex(ctx, taskID)
+```
+
+Consumer 新增：
+
+```text
+SetRAGIndexProducer
+StartRAGIndexConsumer
+handleRAGIndex
+```
+
+现在 ASR 完成后：
+
+```text
+save transcription
+enqueue rag_index job
+transcribe task completed
+```
+
+RAG consumer 独立执行：
+
+```text
+load task
+确认 transcription 存在
+调用 BuildTaskIndex
+成功提交 offset
+失败 recordTaskFailure(task, rag_index, indexing, err)
+```
+
+RetryScheduler 新增 `TaskJobRAGIndex = "rag_index"`，失败后可以按现有 DB retry scheduler 重新投递到 `video-rag-index` topic。
+
+如果 ASR 后投递 RAG job 失败，ASR 结果仍保留；如果能解析到默认 AI profile，则写 `video_rag_indexes = failed` 记录投递失败原因，方便用户或后续接口看到索引没有构建成功。
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/config/config_test.go
+internal/mq/producer_test.go
+internal/mq/consumer_test.go
+```
+
+关键测试点：
+
+```text
+rag_index_topic 可从 YAML 解析
+RAGIndexPayload 包含 task_id 和 trace_id
+indexAfterTranscription 只 enqueue，不同步调用 indexer
+enqueue 失败时写 video_rag_indexes failed
+handleRAGIndex 会调用 indexer
+RAG indexer 失败会调度 rag_index retry，且转写文本仍保留
+RetryScheduler 能重投 rag_index job
+```
+
+验证命令：
+
+```powershell
+go test ./internal/mq ./internal/config
+go test ./...
+docker compose config
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/mq ./internal/config 通过
+go test ./... 通过
+docker compose config 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我把 ASR 和 RAG 索引拆成两个异步 job，是因为它们的失败边界不同。ASR 成功后，用户应该能看到转写文本；Embedding 或 Milvus 失败只影响问答索引，不应该让文字提取这个动作也被认为失败。
+>
+> 现在转写 consumer 在保存 transcription 后只投递 `rag_index` Kafka 消息，然后完成转写任务。RAG consumer 独立读取 `video-rag-index` topic，调用 `BuildTaskIndex` 写 chunks 和 Milvus vectors。失败时通过 `last_job_type=rag_index` 进入现有 DB retry scheduler，同时 `video_rag_indexes` 会记录索引失败状态。
+
+### 面试官可能追问
+
+**Q：RAG 失败后为什么还把主任务标成 failed？**
+
+A：这是当时 `video_tasks.status` 仍混合多个动作语义的历史限制。为了复用现有 retry scheduler，RAG job 失败会写 `last_job_type=rag_index` 和 `stage=indexing`。但 transcription 数据不会删除，用户仍可查看转写文本。后续记录 025 已补第一版 `task_jobs`，用于把转写、总结、RAG 索引的子任务状态拆开记录。
+
+**Q：Kafka 消息失败会不会无限不提交 offset？**
+
+A：业务失败会记录到 DB retry 状态后返回 nil，让 offset 提交，避免卡住分区。真正的重试由 DB retry scheduler 按 `next_retry_at` 重新投递。
+
+### 这次不要夸大的点
+
+- 当时还没有 `task_jobs` 子任务表；后续记录 025 已补第一版子任务状态表。
+- 当前没有独立 RAG 微服务，仍是 Go 单体内的独立 Kafka consumer。
+- 当前没有改变 RocketMQ，也没有拆微服务。
+
+### 后续演进
+
+- 继续完善 `task_jobs` 的前端展示和更细粒度耗时统计。
+- RAG consumer 增加更细的 AI 调用审计和耗时记录。
+- 根据实际吞吐给 `video-rag-index` topic 单独配置 consumer 并发。
+
+## 记录 022：增加 RAG 离线评估指标，避免只凭主观感觉判断检索质量
+
+### 背景
+
+RAG 检索从向量 + LIKE fallback 升级到 Go 侧 BM25 风格召回 + RRF 后，需要一个小规模评估办法证明改动是否真的改善召回，而不是只看单次人工问答效果。
+
+### 现象
+
+没有评估体系时，RAG 优化容易变成：
+
+```text
+挑几个问题肉眼试一下
+只看最终回答是否顺眼
+不知道 topK 有没有命中期望片段
+不知道无结果率、MRR、source 分布是否变化
+```
+
+### 排查证据
+
+相关代码和样例：
+
+```text
+internal/service/rag_eval.go
+internal/service/rag_eval_test.go
+docs/eval/rag-cases.example.md
+```
+
+### 根因
+
+RAG 的关键不是只生成答案，而是先检索到正确上下文。没有检索评估时，模型可能靠泛化知识或编造回答掩盖检索失败，后端也无法量化 BM25/RRF 是否真的提升了召回。
+
+### 修复方案
+
+新增离线评估核心：
+
+```text
+RAGEvalCase:
+  task_hint
+  question
+  expected_chunk_keywords
+  expected_answer_points
+
+RunRAGEval:
+  对每个 case 调用传入的检索函数
+  记录 citations 和耗时
+
+EvaluateRAGRetrieval:
+  计算 Recall@K
+  计算 MRR
+  计算无结果率
+  计算平均检索耗时
+  统计 vector / keyword / hybrid source 分布
+```
+
+当前实现是纯 service 层指标计算和 runner，不依赖真实 Milvus、LLM 或具体视频数据。`docs/eval/rag-cases.example.md` 只放格式样例，不放真实用户视频内容。
+
+### 测试与验证
+
+新增测试：
+
+```text
+internal/service/rag_eval_test.go
+```
+
+关键测试点：
+
+```text
+命中 rank=2 时 Recall@K 和 MRR 计算正确
+无结果 case 会计入 no_result_rate
+source_counts 会统计 vector / keyword / hybrid
+没有 expected_chunk_keywords 的 case 会被跳过，不污染 Recall/MRR
+RunRAGEval 会调用传入 retriever，并保留无结果 case
+```
+
+验证命令：
+
+```powershell
+go test ./internal/service -run RAGEval -v
+go test ./internal/service
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/service -run RAGEval -v 通过，3 个 RAGEval 测试执行
+go test ./internal/service 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> RAG 优化不能只靠肉眼感觉，所以我补了一个离线评估核心。每个 case 有问题和期望命中的 chunk 关键词，评估时看 topK citation 里是否命中这些关键词，并计算 Recall@K、MRR、无结果率、检索耗时和 vector/keyword/hybrid 来源占比。
+>
+> 这个设计先不依赖真实 LLM，也不让模型回答质量干扰检索评估。它评估的是“有没有把正确上下文捞出来”。后续接真实视频任务时，只需要把检索函数接到现有 ChatService 的 retrieval 流程上，就能比较纯向量、关键词和 RRF 混合检索。
+
+### 面试官可能追问
+
+**Q：为什么用 expected_chunk_keywords，而不是人工标 chunk_id？**
+
+A：第一版更轻量，适合本地样例和隐私脱敏。真实评估集更严谨的做法是标注期望 chunk_id 或时间段，再计算更精确的 Recall@K。
+
+**Q：现在能证明回答质量提升了吗？**
+
+A：不能直接证明回答质量。当前评估的是检索质量。回答质量还需要结合 expected_answer_points、人工评审或 LLM-as-judge，但那应该建立在检索评估之后。
+
+### 这次不要夸大的点
+
+- 当前没有接真实生产数据集。
+- 当前没有 LLM-as-judge。
+- 当前没有自动对比多套检索配置的 CLI。
+
+### 后续演进
+
+- 增加真实脱敏评估集，标注期望 chunk_id 或时间段。
+- 增加纯 vector、keyword、hybrid 的对比 runner。
+- 加入 expected_answer_points 的答案覆盖率评估。
+
+## 记录 023：SSE 问答从完整回答切块升级为 provider 级 token streaming
+
+### 背景
+
+旧版 `/chat/.../messages/stream` 接口虽然使用 SSE 返回，但后端流程是：
+
+```text
+ChatService.Ask -> 等 LLM 完整回答 -> 按 80 rune 切块 -> SSE answer 事件
+```
+
+这只能算接口契约上的流式输出，不是模型 provider 级 token streaming。
+
+### 现象
+
+旧实现的问题：
+
+```text
+用户要等 LLM 完整回答返回后才开始看到 answer 事件
+上游模型中途输出的 delta 没有被实时转发
+请求取消时无法尽早停止上游流式读取
+面试中不能说“真正 token streaming”
+```
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/ai/chat.go
+internal/service/chat.go
+internal/service/chat_test.go
+internal/ai/chat_embedding_test.go
+internal/handler/chat.go
+```
+
+### 根因
+
+`ChatClient` 旧接口只有 `Chat(ctx, messages) (string, error)`，它天然只能等完整响应。`AskStream` 复用 `Ask`，导致检索、LLM 调用、落库全部完成后才开始 SSE 输出 answer chunk。
+
+### 修复方案
+
+AI 层新增可选接口：
+
+```go
+type StreamingChatClient interface {
+    StreamChat(ctx context.Context, messages []ChatMessage, emit func(delta string) error) error
+}
+```
+
+`OpenAIChatClient` 实现 `StreamChat`：
+
+```text
+POST /chat/completions
+stream=true
+读取 text/event-stream
+解析 data: {...choices[].delta.content...}
+遇到 data: [DONE] 结束
+每个 delta 立即回调 emit
+```
+
+Service 层拆出共用流程：
+
+```text
+prepareRAGChat:
+  校验 question/session
+  embedding
+  vector + BM25/RRF 检索
+  加载 recent memory
+  构造 RAG messages
+
+saveChatExchange:
+  保存 user message
+  保存 assistant message
+  保存 retrieval snapshot
+  刷新 Redis recent memory
+```
+
+`AskStream` 现在流程：
+
+```text
+prepareRAGChat
+emit citations
+如果 chat 支持 StreamingChatClient:
+  StreamChat 每个 delta -> emit answer
+  累积完整 answer
+否则:
+  fallback 到 Chat 完整回答后切块
+saveChatExchange
+emit done
+```
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/ai/chat_embedding_test.go
+internal/service/chat_test.go
+```
+
+关键测试点：
+
+```text
+OpenAIChatClient.StreamChat 会发送 stream=true
+能解析 OpenAI-compatible SSE delta
+AskStream 在 streaming client 下不调用普通 Chat()
+AskStream 会按 delta emit answer 事件
+assistant message 保存的是累积后的完整答案
+不支持 streaming 的 client 仍 fallback 到原切块逻辑
+```
+
+验证命令：
+
+```powershell
+go test ./internal/ai -run Stream -v
+go test ./internal/service -run AskStream -v
+go test ./internal/ai
+go test ./internal/service
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+go test ./internal/ai -run Stream -v 通过
+go test ./internal/service -run AskStream -v 通过
+go test ./internal/ai 通过
+go test ./internal/service 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我第一版 SSE 只是把完整回答切块返回，不能算真正 token streaming。后面我在 AI client 层增加了可选的 `StreamChat` 接口，对 OpenAI-compatible `/chat/completions` 使用 `stream=true`，逐行解析 SSE 里的 `delta.content`，后端拿到一个 delta 就通过 SSE 发给前端。
+>
+> Service 层没有直接丢掉原来的兼容性：如果 provider client 支持 streaming，就走真实流式；如果不支持，就 fallback 到完整回答后切块。无论哪种方式，后端都会累积完整回答，最后保存 user message、assistant message 和 retrieval snapshot。
+
+### 面试官可能追问
+
+**Q：中途失败时会不会保存半截回答？**
+
+A：当前实现是 StreamChat 成功结束后才落库。如果上游中途失败，接口返回错误事件，不保存半截 assistant message。后续如果要保存半截，需要单独定义 partial 状态。
+
+**Q：为什么还保留 fallback？**
+
+A：因为不是所有 provider 或 profile 都保证支持 streaming。保留 fallback 可以不破坏旧 provider，但我会明确标注它是 fallback，不把它说成真正 token streaming。
+
+### 这次不要夸大的点
+
+- 当前没有为 SSE event 增加 `stream_mode` 字段。
+- 当前没有保存 partial assistant message。
+- 当前没有对每个 token 做审计计费，只记录完整 answer 落库。
+
+### 后续演进
+
+- 给 stream event 增加 `stream_mode=provider/fallback`。
+- 支持中途失败的 partial message 状态。
+- 将 LLM streaming 调用纳入 AI 调用审计和用户额度。
+
+## 记录 024：增加 AI 调用审计和用户每日用量聚合
+
+### 背景
+
+VidLens 支持用户级 BYOK profile，这能避免公开部署时默认消耗服务端 Key，但还不能回答：
+
+```text
+某次问答失败到底是 embedding、LLM、ASR 还是配置问题
+某个用户今天发起了多少次 LLM/Embedding/ASR 调用
+调用耗时和失败状态如何
+```
+
+### 现象
+
+旧版本 AI 调用只在业务流程中返回错误或写任务失败状态，没有统一审计表。排障时需要从不同日志和任务状态里拼线索。
+
+### 排查证据
+
+相关代码入口：
+
+```text
+internal/model/ai_call_log.go
+internal/repository/ai_call_log.go
+internal/service/ai_observer.go
+internal/ai/observed.go
+internal/service/chat.go
+internal/service/rag_index.go
+internal/mq/consumer.go
+cmd/server/main.go
+internal/repository/ai_call_log_test.go
+internal/service/ai_observer_test.go
+internal/ai/observed_test.go
+```
+
+### 根因
+
+BYOK 解决的是 Key 来源和成本归属，但没有统一记录 AI 调用元数据。Embedding、LLM、ASR 分散在 ChatService、RAGIndexService 和 Kafka consumer 中，如果不做统一 observer，后续排障和额度控制都会缺证据。
+
+### 修复方案
+
+新增模型：
+
+```text
+ai_call_logs:
+  user_id/task_id/session_id
+  kind: asr / llm / embedding
+  provider/model
+  status: success / failed
+  duration_ms
+  input_chars/output_chars
+  error_code/error_msg
+  created_at
+
+user_usage_daily:
+  user_id/date
+  asr_seconds/asr_requests
+  llm_requests
+  embedding_requests
+  failed_requests
+  input_chars/output_chars
+```
+
+新增 `AIObserver`：
+
+```text
+RecordAICall -> 写 ai_call_logs -> upsert user_usage_daily
+```
+
+新增 AI wrapper：
+
+```text
+ObservedChatClient
+ObservedEmbeddingClient
+ObservedStrategy
+```
+
+接入点：
+
+```text
+ChatService:
+  question embedding
+  LLM Chat / StreamChat
+
+RAGIndexService:
+  每个 chunk embedding
+
+MQ Consumer:
+  ASR Transcribe
+  LLM Summarize
+```
+
+安全边界：
+
+```text
+不保存明文 API Key
+不保存 Authorization header
+不保存完整 prompt
+不保存完整模型响应
+只保存字符数、状态、耗时、provider/model 和错误摘要
+```
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/repository/ai_call_log_test.go
+internal/service/ai_observer_test.go
+internal/ai/observed_test.go
+internal/service/chat_test.go
+internal/service/rag_index_test.go
+```
+
+关键测试点：
+
+```text
+AI call log 可落库
+user_usage_daily 可按日聚合 LLM/Embedding/失败次数和字符数
+observer 不保存完整 prompt/response
+ObservedChatClient 失败时记录 failed llm log
+非 streaming base client 不会被 wrapper 伪装成 streaming client
+ObservedStrategy 区分 ASR provider/model 和 LLM provider/model
+ChatService Ask 记录 embedding + llm
+RAGIndexService BuildTaskIndex 记录 embedding
+```
+
+验证命令：
+
+```powershell
+go test ./internal/repository -run AICall -v
+go test ./internal/service -run AIObserver -v
+go test ./internal/ai -run Observed -v
+go test ./internal/service -run "RecordsEmbeddingAndLLM|RecordsEmbeddingCalls" -v
+go test ./internal/repository ./internal/service ./internal/ai ./internal/mq
+go test ./...
+```
+
+本阶段验证结果：
+
+```text
+上述定向测试通过
+go test ./internal/repository ./internal/service ./internal/ai ./internal/mq 通过
+go test ./... 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> BYOK 只能说明不默认消耗服务端 Key，但排障和成本可观测还需要审计。所以我加了 `ai_call_logs` 和 `user_usage_daily`。每次 ASR、Embedding、LLM 调用都会记录 provider、model、状态、耗时、输入输出字符数和错误摘要，并按用户日期聚合调用次数。
+>
+> 这里我刻意不保存明文 API Key、Authorization header、完整 prompt 和完整模型响应。因为这些内容可能包含用户隐私或密钥。当前记录的是排障和额度控制需要的元数据，而不是把模型上下文全文落库。
+
+### 面试官可能追问
+
+**Q：这算完整计费系统吗？**
+
+A：不能算完整计费系统。当前是审计和每日用量聚合，主要用于排障和基础额度控制。真正计费还需要 token 级统计、套餐规则、扣减事务和账单状态。
+
+**Q：为什么只记录字符数，不记录 token？**
+
+A：不同 provider 的 token 计算规则不完全一致，第一版先用字符数做近似可观测指标。后续可以根据 provider 返回的 usage 字段补 token 统计。
+
+### 这次不要夸大的点
+
+- 当前没有真实扣费。
+- 当前没有 token 级精确计量。
+- 当前没有套餐/账单系统。
+- 当前没有记录完整 prompt/response。
+
+### 后续演进
+
+- 读取 provider usage 字段，补 prompt_tokens/completion_tokens。
+- 增加用户每日额度限制和超额拒绝。
+- 在管理端展示 AI 调用审计和失败分布。
+
+## 记录 025：新增 task_jobs 子任务状态表，拆开长任务动作语义
+
+### 背景
+
+`video_tasks.status` 早期同时承载了多个动作的状态：
+
+```text
+URL 下载
+ASR 转写
+AI 总结
+RAG 索引
+```
+
+虽然前面已经通过 `stage`、`last_job_type`、`retry_count`、`next_retry_at` 缓解了排障问题，但单表状态仍然容易让“视频任务状态”和“某个处理动作状态”混在一起。
+
+### 现象
+
+典型问题是：
+
+```text
+RAG 索引失败会把 video_tasks 写成 failed/indexing
+但转写文本其实已经存在，用户仍能查看 transcription
+download/transcribe/analyze/rag_index 的失败、重试和完成状态缺少独立行
+任务详情无法直接展示每个处理动作的状态
+```
+
+### 排查证据
+
+相关实现路径：
+
+```text
+internal/model/task_job.go
+internal/model/task.go
+internal/model/model.go
+internal/repository/task_job.go
+internal/repository/repository.go
+internal/service/media.go
+internal/mq/consumer.go
+internal/mq/retry.go
+internal/repository/task_job_test.go
+internal/service/media_test.go
+internal/mq/consumer_test.go
+```
+
+### 根因
+
+`video_tasks` 本质上更适合表示用户的视频入口和资产引用，但实际处理流程里存在多个动作，每个动作都有自己的 `queued/running/completed/failed/dead`、阶段、重试次数、下次重试时间和错误原因。只靠主任务表会让这些动作互相覆盖状态。
+
+### 修复方案
+
+新增 `task_jobs` 表：
+
+```text
+task_id
+user_id
+job_type: download / transcribe / analyze / rag_index
+status
+stage
+trace_id
+retry_count
+max_retries
+next_retry_at
+last_error_code
+last_error_msg
+started_at
+finished_at
+```
+
+第一版使用 `(task_id, job_type)` 唯一索引，表示同一个视频任务下每类动作保留当前状态行，不做完整历史事件表。
+
+接入点：
+
+```text
+UploadByURL:
+  创建 download queued job
+  投递失败时写 download failed job
+
+RequestTranscribe:
+  创建 transcribe queued job
+  投递失败时写 transcribe failed job
+
+RequestAnalysis:
+  创建 analyze queued job
+  投递失败时写 analyze failed job
+
+Consumer:
+  handleDownload/handleTranscribe/handleAnalyze/handleRAGIndex 开始时写 running
+  成功时写 completed
+  recordTaskFailure 同步写 failed/dead 和 retry 元数据
+
+RetryScheduler:
+  claim 后写 dispatching 状态
+  Kafka 重新投递失败时同步恢复 failed + next_retry_at
+
+DeleteTask:
+  删除任务时清理 task_jobs
+
+GetTaskDetail:
+  预加载 Jobs，后端详情响应可带出子任务状态
+```
+
+兼容策略：
+
+```text
+保留 video_tasks.status/stage/last_job_type 作为旧接口和 retry scheduler 的兼容状态源
+task_jobs 作为第一版子任务状态镜像和更清晰的后端排障数据
+不改前端样式，不拆微服务，不迁移 MQ
+```
+
+### 测试与验证
+
+新增/更新测试：
+
+```text
+internal/repository/task_job_test.go
+internal/service/media_test.go
+internal/mq/consumer_test.go
+```
+
+关键测试点：
+
+```text
+task_jobs 可记录 queued -> running -> failed/retry -> queued -> completed
+queued 子任务新建时不会继承旧 retry_count
+UploadByURL 创建 download queued job
+RequestTranscribe 创建 transcribe queued job
+RequestAnalysis 创建 analyze queued job
+DeleteTask 清理 task_jobs
+RAG enqueue 成功创建 rag_index queued job
+RAG enqueue 失败创建 rag_index failed job
+RAG consumer 成功写 rag_index completed job
+RAG consumer 失败写 rag_index failed + next_retry_at
+download consumer 成功写 download completed job
+recordTaskFailure 同步写 task_jobs retry 元数据
+RetryScheduler 投递失败恢复 task_jobs next_retry_at
+```
+
+验证命令：
+
+```powershell
+go test ./internal/repository -run "TaskJob|UpsertQueued" -v
+go test ./internal/mq -run "IndexAfterTranscription" -v
+go test ./internal/repository ./internal/service ./internal/mq
+```
+
+本阶段验证结果：
+
+```text
+上述定向测试通过
+go test ./internal/repository ./internal/service ./internal/mq 通过
+```
+
+### 面试可讲版本
+
+可以这样讲：
+
+> 我最后补了一版 `task_jobs`，解决的是 `video_tasks.status` 混合多个动作语义的问题。比如一个视频任务可能已经完成 ASR，但 RAG 索引失败了。旧设计只能把主任务写成 failed/indexing，用户容易误解成整个视频处理都失败。
+>
+> 第一版没有推翻现有接口，而是保留 `video_tasks` 作为兼容状态源，在旁边增加 `task_jobs`：download、transcribe、analyze、rag_index 每类动作都有独立的 status、stage、retry_count、next_retry_at 和错误摘要。这样失败重试仍然复用现有 scheduler，但后端排障和任务详情可以看到每个动作自己的状态。
+
+### 面试官可能追问
+
+**Q：这是不是完整工作流引擎？**
+
+A：不是。当前只是把视频任务下的几个处理动作拆成子任务状态表，没有做 DAG 编排、历史事件流、补偿事务或可视化工作流。它解决的是当前项目里最直接的状态语义混杂问题。
+
+**Q：为什么 `(task_id, job_type)` 唯一，而不是每次重试都插一行？**
+
+A：第一版更关注当前可查询状态和兼容现有接口。重试历史如果全部保留，会更接近事件表或 job_attempts 表，改动更大。现在保留当前 job 状态，后续如果要做审计，可以再加 `task_job_attempts`。
+
+**Q：为什么还保留 `video_tasks.status`？**
+
+A：因为现有前端、API 和 retry scheduler 已经依赖它。直接替换会扩大改动面。当前做法是兼容保留主任务状态，同时用 `task_jobs` 提供更细的后端状态边界。
+
+### 这次不要夸大的点
+
+- 当前没有完整工作流引擎。
+- 当前没有记录每一次 retry attempt 的历史行。
+- 当前没有前端样式重构，只是后端详情可预加载 Jobs。
+- 当前 `video_tasks.status` 仍保留兼容语义，没有完全退役。
+
+### 后续演进
+
+- 增加 `task_job_attempts` 或事件表，记录每次尝试的耗时和错误。
+- 让前端任务详情明确展示每个子任务状态。
+- 将 retry scheduler 逐步从 `video_tasks.last_job_type` 迁移到 `task_jobs` 驱动。
 
 ## 后续问题记录模板
 
