@@ -145,12 +145,17 @@ export default {
       eventType = 'message'
       if (!data) return
 
+      let payload
       try {
-        const payload = JSON.parse(data)
-        onEvent(normalizeChatStreamEvent(currentType, payload))
+        payload = JSON.parse(data)
       } catch (e) {
-        console.warn('解析 SSE 事件失败:', data, e)
+        if (currentType !== 'answer' && currentType !== 'error') {
+          console.warn('解析 SSE 事件失败:', data, e)
+          return
+        }
+        payload = data
       }
+      onEvent(normalizeChatStreamEvent(currentType, payload))
     }
 
     while (true) {
