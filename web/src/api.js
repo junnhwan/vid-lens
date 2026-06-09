@@ -8,6 +8,25 @@ const api = axios.create({
   timeout: 300000, // 5 分钟（大文件上传）
 })
 
+function normalizeChatStreamEvent(eventType, payload) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.type) {
+    return payload
+  }
+  if (eventType === 'citations') {
+    return { type: 'citations', citations: Array.isArray(payload) ? payload : payload?.citations || [] }
+  }
+  if (eventType === 'answer') {
+    return { type: 'answer', delta: typeof payload === 'string' ? payload : payload?.delta || '' }
+  }
+  if (eventType === 'done') {
+    return { type: 'done', ...(payload && typeof payload === 'object' ? payload : {}) }
+  }
+  if (eventType === 'error') {
+    return { type: 'error', message: typeof payload === 'string' ? payload : payload?.message || '回答失败' }
+  }
+  return payload
+}
+
 // 请求拦截器：自动带 Token
 api.interceptors.request.use(config => {
   const token = getStoredAuthToken()
@@ -112,25 +131,51 @@ export default {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let eventType = 'message'
+    let eventData = []
+
+    const flushEvent = () => {
+      if (!eventData.length) {
+        eventType = 'message'
+        return
+      }
+      const data = eventData.join('\n').trim()
+      eventData = []
+      const currentType = eventType
+      eventType = 'message'
+      if (!data) return
+
+      try {
+        const payload = JSON.parse(data)
+        onEvent(normalizeChatStreamEvent(currentType, payload))
+      } catch (e) {
+        console.warn('解析 SSE 事件失败:', data, e)
+      }
+    }
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        flushEvent()
+        break
+      }
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''
 
       for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data: ')) continue
-        const data = line.slice(6).trim()
-        if (!data) continue
-
-        try {
-          const event = JSON.parse(data)
-          onEvent(event)
-        } catch (e) {
-          console.warn('解析 SSE 事件失败:', data, e)
+        const text = line.replace(/\r$/, '')
+        if (!text.trim()) {
+          flushEvent()
+          continue
+        }
+        if (text.startsWith('event:')) {
+          eventType = text.slice(6).trim() || 'message'
+          continue
+        }
+        if (text.startsWith('data:')) {
+          eventData.push(text.slice(5).trimStart())
         }
       }
     }
