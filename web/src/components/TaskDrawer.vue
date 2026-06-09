@@ -176,6 +176,12 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { isTaskActionDisabled } from '../taskActionPolicy.js'
 import { taskFailureMessage } from '../taskDetailPolicy.js'
+import {
+  DEFAULT_SUMMARY_PREVIEW_OPTIONS,
+  DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS,
+  taskResultNeedsExpansion,
+  taskResultTextForDisplay,
+} from '../taskResultDisplayPolicy.js'
 import { formatTime, formatFileSize, getDetailedStatus, getErrorMessage, formatRelativeTime } from '../utils/format.js'
 import VideoRAGChat from './VideoRAGChat.vue'
 
@@ -196,26 +202,22 @@ const summaryExpanded = ref(false)
 
 const transcriptionPreview = computed(() => {
   const content = props.task?.transcription?.content || ''
-  if (!content || transcriptionExpanded.value) return content
-  const lines = content.split('\n')
-  return lines.length > 10 ? lines.slice(0, 10).join('\n') : content
+  return taskResultTextForDisplay(content, transcriptionExpanded.value, DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS)
 })
 
 const summaryPreview = computed(() => {
   const content = props.task?.summary?.content || ''
-  if (!content || summaryExpanded.value) return content
-  const lines = content.split('\n')
-  return lines.length > 15 ? lines.slice(0, 15).join('\n') : content
+  return taskResultTextForDisplay(content, summaryExpanded.value, DEFAULT_SUMMARY_PREVIEW_OPTIONS)
 })
 
 const showTranscriptionExpand = computed(() => {
   const content = props.task?.transcription?.content || ''
-  return content.split('\n').length > 10
+  return taskResultNeedsExpansion(content, DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS)
 })
 
 const showSummaryExpand = computed(() => {
   const content = props.task?.summary?.content || ''
-  return content.split('\n').length > 15
+  return taskResultNeedsExpansion(content, DEFAULT_SUMMARY_PREVIEW_OPTIONS)
 })
 
 const canUseRAG = computed(() => {
@@ -333,6 +335,11 @@ watch(() => props.task, (val) => {
     previouslyFocused.focus()
     previouslyFocused = null
   }
+})
+
+watch(() => props.task?.id, () => {
+  transcriptionExpanded.value = false
+  summaryExpanded.value = false
 })
 
 onMounted(() => document.addEventListener('keydown', onKeyDown))

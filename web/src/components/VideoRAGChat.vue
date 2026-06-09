@@ -30,13 +30,23 @@
 
     <div v-else class="chat-container">
       <div class="chat-messages" ref="messagesContainer">
-        <div v-for="msg in messages" :key="msg.id" class="message" :class="msg.role">
+        <div v-for="(msg, msgIdx) in messages" :key="msg.id || msgIdx" class="message" :class="msg.role">
           <div class="message-content">
             <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
             <div v-if="msg.citations && msg.citations.length" class="citations">
-              <div class="citations-header">📚 参考片段</div>
+              <div class="citations-header">
+                <span class="citations-title">参考片段</span>
+                <button
+                  v-if="messageHasExpandableCitations(msg.citations)"
+                  type="button"
+                  class="citations-toggle"
+                  @click="toggleMessageCitations(msg, msgIdx)"
+                >
+                  {{ messageCitationsAllExpanded(msg, msgIdx) ? '收起全部' : '展开全部' }}
+                </button>
+              </div>
               <div v-for="(cite, idx) in msg.citations" :key="idx" class="citation-item">
                 <div class="citation-meta">
                   <span v-if="cite.source" class="citation-source">来源: {{ cite.source }}</span>
@@ -47,7 +57,22 @@
                   <span v-if="cite.vector_rank" class="citation-rank">向量: #{{ cite.vector_rank }}</span>
                   <span v-if="cite.keyword_rank" class="citation-rank">关键词: #{{ cite.keyword_rank }}</span>
                 </div>
-                <div class="citation-content">{{ cite.content }}</div>
+                <div
+                  class="citation-content"
+                  :class="{ collapsed: citationHasExpansion(cite) && !citationIsExpanded(msg, msgIdx, idx) }"
+                >
+                  {{ citationDisplayContent(cite, msg, msgIdx, idx) }}
+                </div>
+                <div v-if="citationHasExpansion(cite)" class="citation-actions">
+                  <button
+                    type="button"
+                    class="citation-toggle"
+                    :aria-expanded="citationIsExpanded(msg, msgIdx, idx)"
+                    @click="toggleCitationExpansion(msg, msgIdx, idx)"
+                  >
+                    {{ citationIsExpanded(msg, msgIdx, idx) ? '收起' : '展开' }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -81,6 +106,14 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
 import { normalizeChatMessages, resolveReusableChatSession } from '../chatHistoryPolicy.js'
+import {
+  DEFAULT_CITATION_PREVIEW_OPTIONS,
+  areAllExpandableCitationsExpanded,
+  citationExpansionKey,
+  citationNeedsExpansion,
+  citationTextForDisplay,
+  setMessageCitationsExpanded,
+} from '../citationDisplayPolicy.js'
 
 const props = defineProps({
   task: Object
@@ -96,7 +129,10 @@ const loading = ref(false)
 const sessionLoading = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
+const expandedCitationKeys = ref(new Set())
 let indexStatusTimer = null
+
+const citationPreviewOptions = DEFAULT_CITATION_PREVIEW_OPTIONS
 
 const indexIcon = computed(() => {
   switch (indexStatus.value.status) {
@@ -135,6 +171,64 @@ const formatMessageTime = (timestamp) => {
 }
 
 const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
+
+const messageExpansionId = (message, messageIndex) => message?.id ?? `message-${messageIndex}`
+
+const citationHasExpansion = (citation) => citationNeedsExpansion(citation?.content, citationPreviewOptions)
+
+const citationIsExpanded = (message, messageIndex, citationIndex) => {
+  const key = citationExpansionKey(messageExpansionId(message, messageIndex), citationIndex)
+  return expandedCitationKeys.value.has(key)
+}
+
+const citationDisplayContent = (citation, message, messageIndex, citationIndex) => {
+  return citationTextForDisplay(
+    citation?.content,
+    citationIsExpanded(message, messageIndex, citationIndex),
+    citationPreviewOptions,
+  )
+}
+
+const messageHasExpandableCitations = (citations) => {
+  return Array.isArray(citations) && citations.some((citation) => citationHasExpansion(citation))
+}
+
+const messageCitationsAllExpanded = (message, messageIndex) => {
+  return areAllExpandableCitationsExpanded(
+    expandedCitationKeys.value,
+    messageExpansionId(message, messageIndex),
+    message?.citations,
+    citationPreviewOptions,
+  )
+}
+
+const toggleCitationExpansion = (message, messageIndex, citationIndex) => {
+  const key = citationExpansionKey(messageExpansionId(message, messageIndex), citationIndex)
+  const nextKeys = new Set(expandedCitationKeys.value)
+  if (nextKeys.has(key)) {
+    nextKeys.delete(key)
+  } else {
+    nextKeys.add(key)
+  }
+  expandedCitationKeys.value = nextKeys
+}
+
+const toggleMessageCitations = (message, messageIndex) => {
+  const messageId = messageExpansionId(message, messageIndex)
+  const expand = !areAllExpandableCitationsExpanded(
+    expandedCitationKeys.value,
+    messageId,
+    message?.citations,
+    citationPreviewOptions,
+  )
+  expandedCitationKeys.value = setMessageCitationsExpanded(
+    expandedCitationKeys.value,
+    messageId,
+    message?.citations,
+    expand,
+    citationPreviewOptions,
+  )
+}
 
 const buildIndex = async () => {
   building.value = true
@@ -462,16 +556,42 @@ onUnmounted(() => {
 }
 
 .citations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   font-size: 0.85rem;
-  color: #d4af37;
   margin-bottom: 0.75rem;
   font-weight: 600;
 }
 
+.citations-title {
+  color: #a8b3c7;
+}
+
+.citations-toggle,
+.citation-toggle {
+  background: transparent;
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  color: #d4af37;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.35rem;
+  transition: all 0.2s;
+}
+
+.citations-toggle:hover,
+.citation-toggle:hover {
+  background: rgba(212, 175, 55, 0.08);
+  border-color: rgba(212, 175, 55, 0.3);
+}
+
 .citation-item {
-  background: rgba(10, 14, 26, 0.5);
-  padding: 0.75rem;
-  border-radius: 0.65rem;
+  background: rgba(10, 14, 26, 0.35);
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.5rem;
   margin-bottom: 0.5rem;
   border: 1px solid rgba(139, 149, 168, 0.1);
 }
@@ -506,6 +626,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   font-size: 0.75rem;
   font-family: 'JetBrains Mono', monospace;
+  opacity: 0.75;
 }
 
 .citation-rrf {
@@ -528,6 +649,18 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: #8b95a8;
   line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.citation-content.collapsed {
+  color: #9aa6ba;
+}
+
+.citation-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
 }
 
 .chat-input {
