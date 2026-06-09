@@ -63,11 +63,11 @@
           v-model="question"
           @keyup.enter="sendQuestion"
           placeholder="问问这个视频..."
-          :disabled="loading"
+          :disabled="loading || sessionLoading"
           class="input-field"
           aria-label="输入问题"
         />
-        <button @click="sendQuestion" :disabled="loading || !question" class="btn-send">
+        <button @click="sendQuestion" :disabled="loading || sessionLoading || !question" class="btn-send">
           发送
         </button>
       </div>
@@ -80,6 +80,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
+import { normalizeChatMessages, resolveReusableChatSession } from '../chatHistoryPolicy.js'
 
 const props = defineProps({
   task: Object
@@ -92,6 +93,7 @@ const building = ref(false)
 const messages = ref([])
 const question = ref('')
 const loading = ref(false)
+const sessionLoading = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 let indexStatusTimer = null
@@ -140,7 +142,7 @@ const buildIndex = async () => {
   try {
     const res = await api.buildRAGIndex(props.task.id)
     indexStatus.value = { status: 'indexed', chunks: res.chunks || 0, error: '' }
-    await createSession()
+    await ensureChatSession()
   } catch (err) {
     indexStatus.value = { status: 'failed', chunks: 0, error: err.message || '构建索引失败' }
     emit('error', err.message || '构建索引失败')
@@ -153,13 +155,51 @@ const createSession = async () => {
   try {
     const res = await api.createChatSession(props.task.id, '会话')
     sessionId.value = res.id
+    return res
   } catch (err) {
     console.error('创建会话失败:', err)
+    return null
+  }
+}
+
+const scrollMessagesToBottom = () => {
+  nextTick(() => {
+    messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
+  })
+}
+
+const ensureChatSession = async () => {
+  if (sessionId.value || sessionLoading.value) return
+  sessionLoading.value = true
+  try {
+    const sessions = await api.getChatSessions(props.task.id)
+    const reusable = await resolveReusableChatSession(sessions, (id) => api.getChatMessages(id))
+    if (reusable.session) {
+      sessionId.value = reusable.session.id
+      messages.value = normalizeChatMessages(reusable.messages)
+      scrollMessagesToBottom()
+      return
+    }
+    await createSession()
+  } catch (err) {
+    console.error('加载会话失败:', err)
+    if (!sessionId.value) {
+      await createSession()
+    }
+  } finally {
+    sessionLoading.value = false
   }
 }
 
 const sendQuestion = async () => {
-  if (!question.value || loading.value) return
+  if (!question.value || loading.value || sessionLoading.value) return
+  if (!sessionId.value) {
+    await ensureChatSession()
+  }
+  if (!sessionId.value) {
+    emit('error', '会话初始化失败')
+    return
+  }
 
   const userMessage = { id: Date.now(), role: 'user', content: question.value, timestamp: new Date() }
   messages.value.push(userMessage)
@@ -182,9 +222,7 @@ const sendQuestion = async () => {
     await api.sendChatMessageStream(sessionId.value, q, 5, (event) => {
       if (event.type === 'answer') {
         assistantMsg.content += event.delta || ''
-        nextTick(() => {
-          messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
-        })
+        scrollMessagesToBottom()
       } else if (event.type === 'citations') {
         assistantMsg.citations = event.citations || []
       } else if (event.type === 'done') {
@@ -209,7 +247,7 @@ const checkIndexStatus = async () => {
       indexStatus.value = { status: 'indexed', chunks: res.chunks || 0, error: '' }
       stopIndexPolling()
       if (!sessionId.value) {
-        await createSession()
+        await ensureChatSession()
       }
     } else if (res.status === 'indexing') {
       indexStatus.value = { status: 'indexing', chunks: 0, error: '' }
