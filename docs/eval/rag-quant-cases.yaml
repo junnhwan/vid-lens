@@ -1,0 +1,179 @@
+# VidLens resume quantification RAG eval cases.
+# Do not include secrets, API keys, cookies, full private transcripts, or private URLs.
+# Metrics target: compare vector-only vs vector+BM25+RRF retrieval.
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which show talks about an Avatar keeping peace between four nations?"
+  expected_chunk_keywords:
+    - "Avatar"
+    - "four nations"
+  expected_answer_points:
+    - "The transcript is discussing Avatar as a recommended show."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Who starts the war in the Avatar story?"
+  expected_chunk_keywords:
+    - "Fire Nation"
+    - "war"
+  expected_answer_points:
+    - "The Fire Nation starts the war."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "How long had the current Avatar been missing?"
+  expected_chunk_keywords:
+    - "Avatar"
+    - "hundred years"
+  expected_answer_points:
+    - "The Avatar had been missing for more than a hundred years."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which recommended show is described as technically a kids show?"
+  expected_chunk_keywords:
+    - "kids show"
+    - "best TV shows"
+  expected_answer_points:
+    - "The speaker says the show is technically a kids show but still highly regarded."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "What kind of show is said to be lighthearted and fun to watch?"
+  expected_chunk_keywords:
+    - "cartoons"
+    - "lighthearted"
+  expected_answer_points:
+    - "Cartoons are described as lighthearted and fun to watch."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which sitcom is about a girl moving into an apartment with three guys?"
+  expected_chunk_keywords:
+    - "New Girl"
+    - "apartment"
+    - "three other guys"
+  expected_answer_points:
+    - "The show is New Girl."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which show made the speaker laugh out loud?"
+  expected_chunk_keywords:
+    - "New Girl"
+    - "laugh out loud"
+  expected_answer_points:
+    - "The speaker says New Girl made them laugh out loud."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which show is usually shortened to Parks and Rec?"
+  expected_chunk_keywords:
+    - "Parks and Recreation"
+    - "Parks and Rec"
+  expected_answer_points:
+    - "Parks and Recreation is shortened to Parks and Rec."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which mature show follows a huge ad agency in New York City?"
+  expected_chunk_keywords:
+    - "Mad Men"
+    - "ad agency"
+    - "New York City"
+  expected_answer_points:
+    - "The show is Mad Men."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "What decade is Mad Men set in?"
+  expected_chunk_keywords:
+    - "Mad Men"
+    - "1960s"
+  expected_answer_points:
+    - "Mad Men is set in the 1960s."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "What details make the historical setting feel realistic?"
+  expected_chunk_keywords:
+    - "costumes"
+    - "realistic"
+  expected_answer_points:
+    - "The transcript mentions realistic production details such as costumes."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Why does the speaker say language learning is more than memorizing words?"
+  expected_chunk_keywords:
+    - "memorizing"
+    - "fluency"
+  expected_answer_points:
+    - "Developing fluency takes more than memorizing words and expressions."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "What did Chinese professors include besides regular class content?"
+  expected_chunk_keywords:
+    - "Chinese professors"
+    - "Chinese history"
+    - "holidays"
+  expected_answer_points:
+    - "They made time for Chinese history and holidays."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  question: "Which cultural topics helped the speaker while learning Chinese?"
+  expected_chunk_keywords:
+    - "Chinese history"
+    - "special events"
+  expected_answer_points:
+    - "Chinese history and special events helped the speaker."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  question: "In the Claude Code transcript, which image or UI format is mentioned?"
+  expected_chunk_keywords:
+    - "Claude Code"
+    - "SVG"
+  expected_answer_points:
+    - "The transcript includes Claude Code and SVG."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  question: "Which presentation format is mentioned together with SVG and UI?"
+  expected_chunk_keywords:
+    - "PPT"
+    - "SVG"
+    - "UI"
+  expected_answer_points:
+    - "The transcript mentions PPT, SVG, and UI."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  question: "What Agent-related concept appears in the Claude Code transcript?"
+  expected_chunk_keywords:
+    - "Agent Skills"
+    - "skill"
+    - "Claude Code"
+  expected_answer_points:
+    - "The transcript mentions Agent Skills and skill."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  question: "Which Markdown-related evaluation terms appear in the transcript?"
+  expected_chunk_keywords:
+    - "Markdown"
+    - "token"
+  expected_answer_points:
+    - "The transcript contains Markdown and token."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  question: "Which scale and metadata terms appear near the end of the transcript?"
+  expected_chunk_keywords:
+    - "Scale"
+    - "Meta Data"
+  expected_answer_points:
+    - "The transcript includes Scale and Meta Data."
