@@ -12,6 +12,11 @@
 6. 最后读 `05-rag-hybrid-retrieval.md`，它是 AI 应用差异化亮点。
 7. 追问补充读 `08-large-video-handling.md`，它回答"视频特别大怎么办"。
 8. 资源排查补充读 `07-cpu-memory-io.md`，它回答"CPU / 内存 / IO 满了怎么办"。
+9. 再补 `09-data-model-lifecycle.md`，它回答"表为什么这么拆"。
+10. 再补 `10-delete-task-cleanup-consistency.md`，它回答"删除任务时怎么清理 MySQL / MinIO / Milvus"。
+11. 再补 `11-task-observability-debugging.md`，它回答"任务失败怎么定位"。
+12. 再补 `12-auth-user-isolation.md`，它回答"用户数据和 RAG 片段怎么隔离"。
+13. 再补 `13-testing-strategy.md`，它回答"怎么证明不是只跑通 demo"。
 
 ## 最终简历 6 条
 
@@ -54,6 +59,11 @@
 5. RAG 为什么不用摘要，BM25 和 RRF 怎么讲。
 6. 哪些错误可重试，哪些错误快速失败。
 7. 视频特别大时，上传、外链下载、存储合并和 ASR 切片怎么处理。
+8. 表结构怎么按文件、任务、子任务、RAG、聊天和 AI 配置拆分。
+9. 删除任务时怎么清理转写、摘要、RAG chunk、Milvus 向量和共享视频资产。
+10. 任务失败时从 task、job、traceID、chunk 和 AI 调用日志怎么排查。
+11. 用户鉴权、AI profile、chat session 和 RAG 检索怎么做数据隔离。
+12. 后端和前端分别测了哪些高风险逻辑，哪些还缺 E2E。
 
 ## 统一回答公式
 
