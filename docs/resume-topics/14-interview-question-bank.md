@@ -69,8 +69,8 @@
 
 ### 边界兜底
 - **锁持有者宕机怎么办？** → watchdog 也死，锁 30s TTL 自动释放，不死锁。
-- **owner 用什么生成？** ⚠️ → `time.Now().UnixNano()`，不是注释说的 UUID（redis_lock.go:39）；同纳秒冲突理论会破坏互斥，概率极低。
-- **renew 续期失败会怎样？** ⚠️ → `renew()` 忽略 Eval 返回/错误（redis_lock.go:101），续期静默失败可能导致锁过期。已知风险点。
+- **owner 怎么生成？为什么用 UUID 不用时间戳？** → 用 `uuid.New().String()`（redis_lock.go:45）。**原先用 `UnixNano()`，高并发同纳秒撞同一 owner 会让释放脚本误删别人的锁——已修复成 UUID**。面试可讲发现过程。
+- **renew 续期失败怎么处理？** → `renew()` 检查 Eval 返回 + 记日志（redis_lock.go:108）。**原先忽略返回值，续期静默失败可能导致锁过期——已修复**。续期失败不退 watchdog（瞬时故障下次续上），并发安全由业务幂等兜底。
 - **这个锁可重入吗？能跨 goroutine 共享吗？** ⚠️ → 不能。value/stopChan 在 struct 上是有状态的，每次获取必须 `NewRedisLock` 新建实例。
 - **两个用户同时传同内容建 asset？** → FileMD5 唯一索引兜底，一个赢一个撞键→重查复用→删自己对象。
 
@@ -107,7 +107,7 @@
 - **分片传到 99% 断了？** → check-upload 拿已传片，只补缺失。
 - **合并请求被重复/重试发起？** → 非阻塞锁+双检；DB 唯一索引兜底。⚠️ 不是"用户点按钮"，是 HTTP 重试/重发。
 - **客户端伪造 MD5？** ⚠️ → 能骗秒传拿别人内容的 task；当前无校验，要单片 MD5 或 SHA-256。
-- **临时分片不清理？** ⚠️ → MinIO 存储泄漏，要定时清理任务。
+- **合并后临时分片怎么处理？** → `cleanupMergedChunks` 合并成功后 best-effort 删 `chunks/<md5>/*` + Redis key，保留 `:status=COMPLETED`（media.go:670）。**原先不清理是存储泄漏——已修复**。注意：崩溃在 ComposeObject 与 Asset.Create 之间的孤儿合并对象不在清理范围（仍需回收，见 L7）。
 - **合并中途崩溃？** → 留孤儿对象；重试时锁过期→重新合并→建成功；靠清理回收。
 
 ### 系统设计
