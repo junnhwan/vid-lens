@@ -41,6 +41,23 @@
 - **要保证消息顺序怎么做的？** → 用 MD5 做 key，同视频同分区顺序消费。
 - **怎么保证"投递了但消费者没跑"不丢？** → task 落库 + 投递失败会回滚状态/记失败；RetryScheduler 扫描 due 任务补投。
 
+### 生产者侧（producer.go）
+- **生产者怎么配置的？** → 每个 topic 一个 kafka.Writer，RequiredAcks=RequireAll（等所有 ISR 副本确认，不丢），MaxAttempts=3，Async=false（同步发送等 ack）。producer.go:52。
+- **同步发送（Async:false）为什么还说"投递即返回"？** → 同步指等 broker ack，不是等业务处理完；接口 RT=落库+一次 produce ack（毫秒级），分钟级处理在消费者。⚠️ 别说"fire-and-forget 异步投递"，是同步投递。
+- **acks=All 代价？** → 最强持久化但延迟最高（等所有副本）；要吞吐可降为 leader-only。
+- **⚠️ Key=MD5 真能保证同视频进同分区、顺序消费吗？** → **不能！** Balancer 是 `&kafka.LeastBytes{}`（按最少负载选分区，**忽略 Key**）（producer.go:55）。注释"MD5 路由保证同分区顺序消费"是错的。要真按 key 路由得用 `&kafka.Hash{}`。**所以"同视频不被并发处理"实际靠 handleAnalyze 的 Redis MD5 锁保证，不靠 Kafka 分区**——别在面试说是靠分区路由。
+- **投递失败怎么处理？** → WriteMessages 返回 err → 接口层回滚任务状态/记 task_job 失败（media.go RequestAnalysis），用户可重试；RetryScheduler 补投。
+
+### Kafka broker 八股
+- **分区数怎么定？** → 代码建 topic 用 4 分区（producer.go:173）；分区数 ≥ 消费者数才能并行，吞吐不够加分区。
+- **副本因子 1 意味着什么？** → 单机单副本，broker 挂消息丢；生产要 RF≥2 + min.insync.replicas。
+- **消费组重平衡（rebalance）会怎样？** → 消费者加入/退出时分区重分配，期间消费暂停（stop-the-world）。
+- **offset 存哪？** → Kafka 内部 topic `__consumer_offsets`。
+
+### 边界兜底（补充）
+- **Kafka 挂了接口还能投递吗？** → 投递失败→回滚状态/记失败；已落库 task 由 RetryScheduler 补投（连第 6 点）。
+- **traceID 怎么跨进程传？** → context 注入（ContextWithTraceID），produce 时写入 payload，消费时取回，贯穿日志（trace.go）。
+
 ---
 
 ## 第 2 点：Redis 锁 + WatchDog + MD5 复用
@@ -184,6 +201,31 @@
 - **chunk 数量很大 BM25 慢怎么办？** → 换 ES/MySQL FULLTEXT 做倒排；或离线预算索引；当前在内存只适合单 task 规模。
 - **怎么提升召回质量？** → query 改写/扩展、HyDE、调 chunkSize/overlap、多路召回扩 candidate_k。
 - **多模型 embedding 共存？** → 按 embedding_model 隔离（chunk 表有该字段），但维度要匹配配置。
+
+### Milvus 向量库
+- **collection schema 有哪些字段？** → vector_id(PK,VarChar100)、user_id/task_id/chunk_id/chunk_index(Int64)、content_hash、embedding_model(VarChar)、content(VarChar 8192)、embedding(FloatVector dim1536)。milvus.go:76。
+- **用什么索引？** → AUTOINDEX + COSINE 度量（milvus.go:92）。AUTOINDEX 让 Milvus 自动选索引类型，没手调 HNSW/IVF 参数。被问"HNSW 还是 IVF"诚实答：用 AUTOINDEX 自动决定。
+- **为什么用 COSINE？** → 文本嵌入常用 cosine 相似度，对向量长度不敏感；嵌入一般归一化，cosine≈点积。
+- **怎么保证查不到别人的视频？** → Search 的 filter 带 `user_id==? AND task_id==? AND embedding_model==?`（milvus.go:169），租户级隔离。⚠️ 注意这和第 2/3 点 asset 按 MD5 全局共享正好相反——RAG 这边严格按 user+task 隔离。
+- **Upsert/Delete 后为什么调 Flush？** → 强制 Milvus 落盘（milvus.go:146/158），保证立即可查；Flush 同步阻塞，索引阶段每 task 一次可接受，高频写要注意性能。
+- **content 字段为什么限 8192？** → Milvus VarChar 上限；chunk 是 800 rune 远小于它，truncateForMilvus 只是安全网。
+
+### 引用 citation 机制（简历原文"返回引用片段提升答案可解释性"，必考）
+- **引用是怎么生成的？** → citation 就是 RRF 融合后的 topK 个 RetrievedChunk（chunk_id/index/content/score/source）。chat.go:174。
+- **引用怎么返回前端？** → AskResult.Citations 直接返回；流式下 SSE **先发 `{type:"citations"}` 事件，再发 answer delta，最后 done**（chat.go:294）。前端先看到引用再看流式答案。
+- **引用怎么提升可解释性？** → ①前端把命中原文片段和答案一起展示供核对；②system prompt 要求 LLM"回答应尽量引用具体片段""没有就说不编造"（chat.go:420），约束幻觉。
+- **引用能追溯吗？** → 能。saveChatExchange 把 citations 序列化成 RetrievalSnapshot 存进 assistant 消息（chat.go:218），事后能查每条答案当时引用了哪些片段——这就是"可追溯"。
+- **引用里 source 字段什么意思？** → hybrid/vector/keyword，标明该片段是向量召回、关键词召回还是两者都命中（retrieval_fusion.go:103）。
+
+### 检索编排（端到端）
+- **一次问答完整流程？** → 校验问题→embed question→Milvus 向量召回 candidateK(~30)→BM25 关键词召回 candidateK→RRF 融合到 topK(~5)→注入 system prompt+近期会话→LLM 生成→存问答+引用快照。chat.go:144。
+- **为什么先取 candidateK 再融合到 topK（两段式）？** → 单路召回都不够稳，先 over-fetch 多候选，RRF 融合排序后再截 topK，提高最终质量。candidateK 默认 30。
+- **多轮对话怎么带上下文？** → 取最近 RecentTurns*2 条消息注入 prompt；ChatMemoryStore 走 Redis 缓存，miss 回 DB（chat.go:379）。
+- **没建索引就问答？** → retriever==nil 报"尚未构建 RAG 索引"；检索为空报"未检索到足够相关的视频片段"。
+
+### 边界兜底（补充）
+- **向量检索维度不对？** → Search 里 `len(query)!=dim` 直接报错（milvus.go:162）；索引时也强校验，模型维度锁死。
+- **要不要加 reranker？** → 当前只有 RRF 融合，没 cross-encoder 重排；要提升精度可加 rerank（如 bge-reranker）做第二阶段精排。
 
 ---
 
