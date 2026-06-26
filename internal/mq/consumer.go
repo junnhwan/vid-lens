@@ -211,11 +211,16 @@ func (c *Consumer) StartDownloadConsumer(brokers []string, topic, groupID string
 				continue
 			}
 
+			// 与 analyze/transcribe 一致：只有业务成功才 commit offset。
+			// 业务级失败（下载失败、上传失败等）已由 handleDownload 记入 task_job 表，
+			// 由 RetryScheduler 兜底，此时返回 nil 走 commit；
+			// 基础设施级失败（消息解析、DB 查询、回写）返回 err，不 commit，由 Kafka at-least-once 重投。
 			if err := c.handleDownload(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] 下载任务消息异常: %v", err)
-			}
-			if err := r.CommitMessages(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] download commit offset 失败: %v", err)
+				log.Printf("[Kafka] 下载任务消息异常（不提交 offset，等待重投）: %v", err)
+			} else {
+				if err := r.CommitMessages(context.Background(), msg); err != nil {
+					log.Printf("[Kafka] download commit offset 失败: %v", err)
+				}
 			}
 		}
 	}()
@@ -241,11 +246,13 @@ func (c *Consumer) StartRAGIndexConsumer(brokers []string, topic, groupID string
 				continue
 			}
 
+			// 同 download：业务成功才 commit；基础设施级失败返回 err 不 commit，等待 Kafka 重投。
 			if err := c.handleRAGIndex(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] RAG 索引任务消息异常: %v", err)
-			}
-			if err := r.CommitMessages(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] rag_index commit offset 失败: %v", err)
+				log.Printf("[Kafka] RAG 索引任务消息异常（不提交 offset，等待重投）: %v", err)
+			} else {
+				if err := r.CommitMessages(context.Background(), msg); err != nil {
+					log.Printf("[Kafka] rag_index commit offset 失败: %v", err)
+				}
 			}
 		}
 	}()
