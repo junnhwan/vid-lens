@@ -52,3 +52,9 @@ docs/superpowers/
 resume.md
 
 other-grill.md
+
+# Local work artifacts (not tracked)
+docs/site/
+docs/vidlensdocs.zip
+.playwright-mcp/
+/*.png
