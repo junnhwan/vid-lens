@@ -166,6 +166,11 @@
 - **怎么限"高成本 AI 接口"更严？** → 给 AI 路由 SetRouteLimit 更小容量/速率。
 - **海量用户下 Redis 压力？** → key 多（每用户每路由一个），用 EXPIRE 清理空闲桶；可抽样/分级限流。
 
+### 实际接线（main.go / config.go，对照简历"限制高成本 AI 请求"）
+- **哪些接口被限流？** → 只挂在 AI 成本接口：`analyze/:id`、`transcribe/:id`、`task/:id/rag-index`、chat 的 `messages` 和 `messages/stream`（main.go:256-272）。上传/合并/列表/登录等**不限**。这正好对应简历"限制高成本 AI 请求"——只挡会触发外部 AI 调用的接口。
+- **按接口维度怎么落地的？** → ①每路由每用户独立桶（key=`route:user:uid`）；②`RateLimitConfig.Routes` 支持按路由配不同容量/速率，main.go 启动时循环 `SetRouteLimit` 注册（main.go:190）。
+- **⚠️ 但 shipped config.yaml 没写 routes** → 当前配置只有全局 `capacity:10 / rate:10`，没有 routes 覆盖，所以实际所有 AI 接口共用 10/10。要差异化得在 yaml 加 `routes:`。诚实说法："按接口维度在 key/计数层面是真的；按接口配不同配额是代码支持、配置未启用。"
+
 ---
 
 ## 第 5 点：RAG 混合检索（BM25 + 向量 + RRF）
