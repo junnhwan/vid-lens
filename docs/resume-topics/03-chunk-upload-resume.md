@@ -341,3 +341,67 @@ MinIO 存的是对象，不是关系数据。对象存储适合大文件，MySQL
 ### 要不要做
 
 面试角度：现在"MD5 内容指纹 + 复用"只在服务端成立，做了秒传才端到端坐实（强化第 2 条）。有时间建议做；没时间至少能讲清这套规划。
+
+---
+
+## 19. 端到端链路速查（从浏览器开始）
+
+> 前提：当前前端实际走整文件 `uploadFile`；下面是**分片上传这条链路的完整设计流程**（后端已实现、前端契约已定义但 web 未接）。面试讲这套设计，但要清楚哪步真写了、哪步是设计——见末尾对照表。
+
+### 数据流总览
+
+```
+浏览器
+  ① 选文件 +（设计）算整文件 MD5
+  ②（设计）秒传预检 ──命中──→ 0 字节直接建 task
+  ③ 切 5MB 分片
+  ▼ 每片 POST /upload-chunk  {file_md5, chunk_number, chunk}
+Gin handler (media.go:66)
+  │ LimitReader(5MB+1)：防超限 + 防 OOM（+1 是哨兵，区分"正好 5MB"和"超限截断"）
+  ▼
+service UploadChunk (media.go:582)
+  │ 先落盘：PutObject → MinIO  chunks/<md5>/<n>
+  │ 后记账：SAdd upload:chunks:<md5> + Expire 24h   (Redis Set，天然去重)
+  ▼ 返回 chunk_number
+（中断？）→ GET /check-upload → SMembers 拿已传片 → 只补缺失 ← 断点续传
+  ▼ 全部到齐
+POST /merge-chunks  {file_md5, filename, total_chunks}
+service MergeChunks (media.go:601)
+  │ FindByMD5 命中？ → 秒传：直接建 task，跳过合并
+  │ 非阻塞锁 vidlens:merge:<md5> + 拿不到锁双检 MD5
+  │ 完整性校验：SIsMember 查 0..n-1 片是否齐
+  │ ComposeObject → MinIO 服务端合并成 videos/<uuid>.<ext>
+  │ Asset.Create（FileMD5 唯一索引兜底）→ MySQL
+  ▼ 返回 task_id
+浏览器轮询 GET /media/task/:id → 用户触发 AI 分析（Kafka 异步，第 1 点）
+```
+
+### Happy path 逐层
+
+1. **选文件 + 算 MD5**（浏览器）：`File` 对象 → 算整文件 MD5 当会话唯一 key。
+2. **切 5MB 分片**（浏览器）：`file.slice`，5MB 是 S3 `ComposeObject` 硬下限。
+3. **逐片上传 `POST /upload-chunk`**：handler `LimitReader(5MB+1)` 封顶 → service 先 `PutObject` 落 MinIO `chunks/<md5>/<n>`，后 `SAdd` 记 Redis Set（**先落盘后记账**）。
+4. **合并 `POST /merge-chunks`**：`FindByMD5` 秒传短路 → 非阻塞锁+双检 → 完整性校验 → `ComposeObject` 服务端合并 → `Asset.Create` → 建 task。
+5. **轮询任务**：`GET /media/task/:id` → 触发 AI 分析（进第 1 点 Kafka 链路）。
+
+### 两个关键分支
+
+- **断点续传**：断了重进 → `GET /check-upload`（`SMembers` 返回已传片）→ 本地 diff 出缺失片 → 只补缺失 → 回到逐片上传。前面 99% 不重传。
+- **秒传**：合并时 `FindByMD5` 命中已有 asset → 不合并、不重建 asset，直接给当前用户新建 task 指向同一 asset（存储级去重，非带宽秒传，见第 18 节）。
+
+### 实现现状对照表（防拷打核心）
+
+| 步骤 | 后端 | 当前 web 前端 |
+|---|---|---|
+| 选文件 | — | ✅ |
+| 算整文件 MD5 | — | ❌ |
+| 秒传预检接口 | ❌（`check-upload` 只查分片状态，不查 asset） | ❌ |
+| 切 5MB 分片 | — | ❌ |
+| 分片上传 `upload-chunk` | ✅ | ❌（用整文件 `uploadFile`） |
+| 断点续传 `check-upload` | ✅ | ❌ |
+| 合并 `merge-chunks` | ✅ | ❌ |
+| 轮询任务 `task/:id` | ✅ | ✅ |
+
+### 被追问"你前端做了吗"怎么答
+
+> 后端这条链路我完整实现了——4 个接口、Redis Set 状态、MinIO 服务端合并、非阻塞锁 + 双检、完整性校验、合并时秒传短路。前端当前主走了整文件上传通道，分片通道的接口和契约已就绪，编排待接。我没把没接线的说成线上在跑。
