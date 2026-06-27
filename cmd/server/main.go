@@ -186,6 +186,10 @@ func main() {
 	chatHandler := handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory)
 	mediaHandler := handler.NewMediaHandler(mediaSvc)
 	rateLimiter := middleware.NewRateLimiter(rdb, cfg.RateLimit.Capacity, cfg.RateLimit.Rate)
+	// 高成本 AI 接口按路由单独配更严格的限额（覆盖全局默认）
+	for path, route := range cfg.RateLimit.Routes {
+		rateLimiter.SetRouteLimit(path, route.Capacity, route.Rate)
+	}
 
 	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
 	consumer.SetDownloadTools(cfg.Tools.YtDlpPath, cfg.Tools.FFmpegPath, cfg.Tools.CookiesPath, cfg.Tools.ProxyURL)

@@ -112,6 +112,16 @@ type TaskRetryConfig struct {
 }
 
 type RateLimitConfig struct {
+	Capacity int                       `yaml:"capacity"`
+	Rate     int                       `yaml:"rate"`
+	// Routes 为指定路由单独配置令牌桶配额，覆盖全局 Capacity/Rate。
+	// key 为 Gin 路由模板（c.FullPath() 形式，如 /api/v1/chat/sessions/:session_id/messages），
+	// 用于对高成本 AI 接口施加更严格的限额。
+	Routes map[string]RouteRateLimit `yaml:"routes"`
+}
+
+// RouteRateLimit 单个路由的专属限流配额
+type RouteRateLimit struct {
 	Capacity int `yaml:"capacity"`
 	Rate     int `yaml:"rate"`
 }

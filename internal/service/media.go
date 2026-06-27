@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -553,7 +554,7 @@ func (s *MediaService) InitChunkedUpload(ctx context.Context, fileMD5 string, to
 	return nil
 }
 
-func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string) (map[string]interface{}, error) {
+func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string) (map[string]any, error) {
 	if err := validateFileMD5(fileMD5); err != nil {
 		return nil, err
 	}
@@ -562,12 +563,12 @@ func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string) 
 
 	status, _ := s.rdb.Get(ctx, key+":status").Result()
 	if status == "COMPLETED" {
-		return map[string]interface{}{"status": "completed", "uploaded": []int{}}, nil
+		return map[string]any{"status": "completed", "uploaded": []int{}}, nil
 	}
 
 	uploaded, err := s.rdb.SMembers(ctx, key).Result()
 	if err != nil {
-		return map[string]interface{}{"status": "new", "uploaded": []int{}}, nil
+		return map[string]any{"status": "new", "uploaded": []int{}}, nil
 	}
 
 	nums := make([]int, 0, len(uploaded))
@@ -575,7 +576,7 @@ func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string) 
 		n, _ := strconv.Atoi(v)
 		nums = append(nums, n)
 	}
-	return map[string]interface{}{"status": "uploading", "uploaded": nums}, nil
+	return map[string]any{"status": "uploading", "uploaded": nums}, nil
 }
 
 // UploadChunk 先落盘后记账
@@ -626,7 +627,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 	defer mergeLock.Unlock(ctx)
 
 	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
-	for i := 0; i < totalChunks; i++ {
+	for i := range totalChunks {
 		exists, err := s.rdb.SIsMember(ctx, key, i).Result()
 		if err != nil {
 			return nil, fmt.Errorf("检查分片状态失败: %w", err)
@@ -640,7 +641,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 	dst := fmt.Sprintf("videos/%s%s", uuid.New().String(), ext)
 
 	srcs := make([]minio.CopySrcOptions, 0, totalChunks)
-	for i := 0; i < totalChunks; i++ {
+	for i := range totalChunks {
 		srcs = append(srcs, minio.CopySrcOptions{
 			Bucket: s.storage.BucketName(),
 			Object: fmt.Sprintf("chunks/%s/%d", fileMD5, i),
@@ -664,7 +665,23 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 	}
 
 	s.rdb.Set(ctx, key+":status", "COMPLETED", 24*time.Hour)
+	// 合并产物已落库，清理分片对象与 Redis 分片状态（best-effort，失败不影响合并结果）。
+	// status=COMPLETED 保留，供 check-upload 识别已完成上传。
+	s.cleanupMergedChunks(ctx, fileMD5, totalChunks)
 	return s.createTaskFromAsset(userID, filename, asset, model.TaskStatusPending)
+}
+
+// cleanupMergedChunks 合并成功后清理 MinIO 分片对象与 Redis 分片状态。
+// best-effort：单个清理失败仅记录日志，不阻塞已成功的合并（分片残留只浪费少量存储，不影响业务正确性）。
+func (s *MediaService) cleanupMergedChunks(ctx context.Context, fileMD5 string, totalChunks int) {
+	for i := range totalChunks {
+		objName := fmt.Sprintf("chunks/%s/%d", fileMD5, i)
+		if err := s.deleteObject(ctx, objName); err != nil {
+			log.Printf("[media] 清理分片对象失败（可忽略）: %s err=%v", objName, err)
+		}
+	}
+	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
+	s.rdb.Del(ctx, key, key+":total")
 }
 
 // readerWrapper []byte → io.Reader
