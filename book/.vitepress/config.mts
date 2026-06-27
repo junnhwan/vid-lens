@@ -11,6 +11,7 @@ export default defineConfig({
       { text: '首页', link: '/' },
       { text: '面试题', link: '/interview/' },
       { text: '源码走读', link: '/source/' },
+      { text: '动画实验', link: '/animations/' },
       { text: '八股速查', link: '/reference/' },
     ],
     sidebar: {
@@ -19,6 +20,7 @@ export default defineConfig({
           text: '🎯 面试题',
           items: [
             { text: '总览', link: '/interview/' },
+            { text: '面试作战手册', link: '/interview/playbook/' },
             { text: '1. 架构与启动流程', link: '/interview/architecture/' },
             { text: '2. AI 策略层', link: '/interview/ai-strategy/' },
             { text: '3. Kafka 异步处理', link: '/interview/kafka-async/' },
@@ -47,6 +49,14 @@ export default defineConfig({
             { text: '8. 数据模型设计', link: '/source/data-model/' },
             { text: '9. Repository 层', link: '/source/repository/' },
             { text: '10. 安全体系', link: '/source/security/' },
+          ]
+        }
+      ],
+      '/animations/': [
+        {
+          text: '🎬 动画实验',
+          items: [
+            { text: '总览', link: '/animations/' },
           ]
         }
       ],

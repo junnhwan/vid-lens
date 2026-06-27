@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VidLens Task Flow</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #020617;
+      --panel: #0f172a;
+      --line: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --cyan: #06b6d4;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
+    }
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+    .grid {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background-image:
+        linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle at center, black 0%, transparent 75%);
+    }
+    main {
+      position: relative;
+      z-index: 1;
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 34px 0;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 52px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+    .sub {
+      margin-top: 12px;
+      color: var(--muted);
+      max-width: 680px;
+      line-height: 1.7;
+    }
+    .keys {
+      color: var(--muted);
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 12px;
+      text-align: right;
+      line-height: 1.8;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: 1.45fr 0.9fr;
+      gap: 18px;
+    }
+    .map, .side {
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(14px);
+      border-radius: 8px;
+      box-shadow: 0 24px 70px rgba(0,0,0,0.34);
+    }
+    .map {
+      min-height: 610px;
+      position: relative;
+      padding: 28px;
+      overflow: hidden;
+    }
+    .lane {
+      position: absolute;
+      left: 28px;
+      right: 28px;
+      border-top: 1px dashed rgba(148, 163, 184, 0.18);
+    }
+    .lane span {
+      position: absolute;
+      top: -10px;
+      left: 0;
+      color: rgba(148, 163, 184, 0.5);
+      font-size: 11px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      background: var(--panel);
+      padding-right: 10px;
+    }
+    .node {
+      position: absolute;
+      width: 154px;
+      min-height: 82px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-left: 4px solid var(--blue);
+      background: rgba(2, 6, 23, 0.72);
+      border-radius: 8px;
+      padding: 12px;
+      transform: translateY(18px);
+      opacity: 0.36;
+      transition: opacity .35s ease, transform .35s ease, border-color .35s ease, box-shadow .35s ease;
+    }
+    .node.active, .node.done {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .node.active {
+      border-color: currentColor;
+      box-shadow: 0 0 0 1px currentColor, 0 0 28px color-mix(in srgb, currentColor 34%, transparent);
+    }
+    .node strong { display: block; font-size: 15px; margin-bottom: 8px; }
+    .node small { display: block; color: var(--muted); line-height: 1.45; font-size: 12px; }
+    .node[data-color="blue"] { color: var(--blue); border-left-color: var(--blue); }
+    .node[data-color="green"] { color: var(--green); border-left-color: var(--green); }
+    .node[data-color="amber"] { color: var(--amber); border-left-color: var(--amber); }
+    .node[data-color="cyan"] { color: var(--cyan); border-left-color: var(--cyan); }
+    .node[data-color="red"] { color: var(--red); border-left-color: var(--red); }
+    .arrow {
+      position: absolute;
+      height: 2px;
+      background: repeating-linear-gradient(90deg, rgba(59,130,246,.8) 0 8px, transparent 8px 14px);
+      background-size: 28px 2px;
+      animation: dash 0.8s linear infinite;
+      opacity: 0.22;
+      transition: opacity .35s ease;
+    }
+    .arrow.active, .arrow.done { opacity: 1; }
+    .arrow::after {
+      content: "";
+      position: absolute;
+      right: -2px;
+      top: -4px;
+      border-left: 9px solid #60a5fa;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+    @keyframes dash { to { background-position: 28px 0; } }
+    .side { padding: 24px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid rgba(148, 163, 184, .28);
+      border-radius: 999px;
+      color: var(--muted);
+      font: 12px "JetBrains Mono", Consolas, monospace;
+    }
+    .side h2 { margin: 18px 0 10px; font-size: 24px; letter-spacing: 0; }
+    .side p { color: var(--muted); line-height: 1.8; margin: 0 0 16px; }
+    pre {
+      margin: 18px 0 0;
+      white-space: pre-wrap;
+      color: #cbd5e1;
+      background: rgba(2, 6, 23, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid rgba(148, 163, 184, .3);
+      background: #111827;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    button:hover { border-color: var(--blue); }
+    @media (max-width: 860px) {
+      header, .stage { display: block; }
+      .keys { text-align: left; margin-top: 14px; }
+      .map { min-height: 720px; margin-bottom: 18px; }
+      .node { width: calc(100% - 56px); left: 28px !important; }
+      .arrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="particles"></canvas>
+  <div class="grid"></div>
+  <main>
+    <header>
+      <div>
+        <h1>VidLens 异步任务链路</h1>
+        <div class="sub">从 URL 提交到 RAG 建索引，每一步都映射到真实后端模块。面试时重点讲状态落库、Kafka 解耦、失败重试和用户可见状态。</div>
+      </div>
+      <div class="keys">Space/→ 下一步<br>← 上一步 · A 自动 · R 重置</div>
+    </header>
+    <section class="stage">
+      <div class="map" id="map">
+        <div class="lane" style="top:88px"><span>HTTP 接入层</span></div>
+        <div class="lane" style="top:244px"><span>Kafka 后台任务</span></div>
+        <div class="lane" style="top:400px"><span>AI / RAG 数据层</span></div>
+        <div class="node" data-step="0" data-color="blue" style="left:38px;top:110px"><strong>创建任务</strong><small>UploadByURL 校验 URL，写入 running/downloading。</small></div>
+        <div class="node" data-step="1" data-color="blue" style="left:236px;top:110px"><strong>投递 Kafka</strong><small>TaskJob queued，DownloadPayload 进入 download topic。</small></div>
+        <div class="node" data-step="2" data-color="amber" style="left:432px;top:110px"><strong>下载视频</strong><small>yt-dlp 下载，失败进入 retry state。</small></div>
+        <div class="node" data-step="3" data-color="green" style="left:236px;top:272px"><strong>ASR 转写</strong><small>FFmpeg 提取音频，长视频按 300 秒切片。</small></div>
+        <div class="node" data-step="4" data-color="cyan" style="left:432px;top:272px"><strong>LLM 摘要</strong><small>优先复用已有转写，降低重复 ASR 成本。</small></div>
+        <div class="node" data-step="5" data-color="green" style="left:236px;top:438px"><strong>RAG 建索引</strong><small>转写文本切 chunk，embedding 后写 Milvus。</small></div>
+        <div class="node" data-step="6" data-color="cyan" style="left:432px;top:438px"><strong>视频问答</strong><small>向量 + BM25 + RRF 后拼接 prompt。</small></div>
+        <div class="node" data-step="7" data-color="red" style="left:628px;top:272px"><strong>失败恢复</strong><small>RetryScheduler claim，到期重新投递 Kafka。</small></div>
+        <div class="arrow" data-arrow="0" style="left:190px;top:151px;width:42px"></div>
+        <div class="arrow" data-arrow="1" style="left:388px;top:151px;width:42px"></div>
+        <div class="arrow" data-arrow="2" style="left:315px;top:234px;width:2px;transform:rotate(90deg);transform-origin:left"></div>
+        <div class="arrow" data-arrow="3" style="left:388px;top:313px;width:42px"></div>
+        <div class="arrow" data-arrow="4" style="left:315px;top:398px;width:2px;transform:rotate(90deg);transform-origin:left"></div>
+        <div class="arrow" data-arrow="5" style="left:388px;top:479px;width:42px"></div>
+        <div class="arrow" data-arrow="6" style="left:588px;top:313px;width:42px;background-image:repeating-linear-gradient(90deg,rgba(239,68,68,.8) 0 8px,transparent 8px 14px)"></div>
+      </div>
+      <aside class="side">
+        <span class="badge" id="badge">step 1 / 8</span>
+        <h2 id="title"></h2>
+        <p id="desc"></p>
+        <pre id="code"></pre>
+        <div class="controls">
+          <button onclick="prev()">上一步</button>
+          <button onclick="next()">下一步</button>
+          <button onclick="toggleAuto()">自动播放</button>
+          <button onclick="reset()">重置</button>
+        </div>
+      </aside>
+    </section>
+  </main>
+  <script>
+    const steps = [
+      ['创建任务', 'HTTP 层只做轻量工作：校验 URL、创建 VideoTask 和 TaskJob，立即返回 taskID。', 'internal/service/media.go:150\ncheckedURL := validate(...)\ntask.Status = Running\ntask.Stage = Downloading'],
+      ['投递 Kafka', '写入 TaskJob queued 后投递 download topic。投递失败会把任务标失败，前端不会一直等。', 'internal/service/media.go:174\ninternal/mq/producer.go:104\nEnqueueDownload(ctx, task.ID, key)'],
+      ['下载视频', 'Download consumer 调 yt-dlp 下载，日志只记录清洗后的 URL，下载完成后落 MinIO 和 VideoAsset。', 'internal/mq/consumer.go:261\ninternal/pkg/ytdlp/ytdlp.go:45\nformat <= 720p'],
+      ['ASR 转写', '长视频先抽音频并切片，每段 ASR 后合并，解决单次音频过大和长视频漏识别问题。', 'internal/mq/consumer.go:464\nREADME.md:226\n300 秒切片 ASR'],
+      ['LLM 摘要', '摘要阶段复用已有转写，不重复下载视频和调用 ASR，降低成本和失败面。', 'internal/mq/consumer.go:393\nREADME.md:239\nreuse transcription'],
+      ['RAG 建索引', 'RAG 使用 ASR 转写文本作为知识源，切 chunk、embedding 后写入 Milvus，并记录 video_rag_indexes 状态。', 'internal/service/rag_index.go:118\ninternal/vector/milvus.go:102\nVideoRAGIndex status'],
+      ['视频问答', '问答时做 query embedding，召回向量结果，再合并 BM25 关键词结果，用 RRF 融合。', 'internal/service/chat.go:160\ninternal/service/chat.go:258\nretrieval_fusion.go:14'],
+      ['失败恢复', '失败任务不是原地 sleep。RetryScheduler 到期 claim，重新投递；投递失败会恢复 next_retry_at。', 'internal/mq/retry.go:193\ninternal/mq/retry.go:210\nRestoreAfterDispatchFailure']
+    ];
+    let step = 0;
+    let timer = null;
+    function render() {
+      document.querySelectorAll('.node').forEach(n => {
+        const i = Number(n.dataset.step);
+        n.classList.toggle('active', i === step);
+        n.classList.toggle('done', i < step);
+      });
+      document.querySelectorAll('.arrow').forEach(a => {
+        const i = Number(a.dataset.arrow);
+        a.classList.toggle('active', i === Math.max(0, step - 1));
+        a.classList.toggle('done', i < step - 1);
+      });
+      document.getElementById('badge').textContent = `step ${step + 1} / ${steps.length}`;
+      document.getElementById('title').textContent = steps[step][0];
+      document.getElementById('desc').textContent = steps[step][1];
+      document.getElementById('code').textContent = steps[step][2];
+    }
+    function next() { step = Math.min(steps.length - 1, step + 1); render(); }
+    function prev() { step = Math.max(0, step - 1); render(); }
+    function reset() { step = 0; render(); }
+    function toggleAuto() {
+      if (timer) { clearInterval(timer); timer = null; return; }
+      timer = setInterval(() => { step = (step + 1) % steps.length; render(); }, 1700);
+    }
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === ' ') next();
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key.toLowerCase() === 'a') toggleAuto();
+      if (e.key.toLowerCase() === 'r') reset();
+    });
+    const canvas = document.getElementById('particles');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    function size() {
+      canvas.width = innerWidth * devicePixelRatio;
+      canvas.height = innerHeight * devicePixelRatio;
+      particles = Array.from({ length: 78 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - .5) * .22 * devicePixelRatio,
+        vy: (Math.random() - .5) * .22 * devicePixelRatio,
+        r: (Math.random() * 1.8 + .5) * devicePixelRatio
+      }));
+    }
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = 'rgba(59,130,246,.35)';
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      }
+      requestAnimationFrame(draw);
+    }
+    addEventListener('resize', size);
+    size(); draw(); render();
+  </script>
+</body>
+</html>

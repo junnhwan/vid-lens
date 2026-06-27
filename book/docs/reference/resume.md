@@ -21,7 +21,7 @@
 > - Redis 分布式锁 + WatchDog 自动续期，保证长耗时任务的幂等性
 > - 纯 Go 实现的 BM25 检索 + RRF 融合，零外部搜索引擎依赖
 > - AES-256-GCM 加密存储用户 API Key，JWT 认证 + Redis 令牌桶限流
-> - MinIO Server-Side 分片合并，内容级 MD5 去重实现秒传
+> - MinIO 私有桶 + 预签名 URL，结合内容级 MD5 做视频资产复用
 
 ## 三、STAR 法则描述（选 2-3 个讲）
 
@@ -32,7 +32,7 @@
 | **S (Situation)** | 视频处理涉及下载、转码、ASR、摘要多个步骤，单步可能耗时数分钟，同步处理会阻塞 HTTP 连接 |
 | **T (Task)** | 需要设计一个可靠的异步任务处理系统，支持失败重试、状态追踪、幂等消费 |
 | **A (Action)** | 采用 Kafka 4 topic 分阶段架构，每个 consumer 独立消费；实现分布式锁保证幂等，UpdateStatusIf 乐观锁防并发冲突；设计 TaskJob 双表实现细粒度可观测性；实现指数退避重试（60s/300s/900s）+ 死信机制 |
-| **R (Result)** | 系统支持大文件异步处理，单任务处理链路可靠，失败自动重试 3 次，Dead 状态人工介入 |
+| **R (Result)** | 系统支持大文件异步处理，任务失败会落到可见状态并按 retry state 调度，Dead 状态需要人工或用户重新触发 |
 
 ### STAR 2：RAG 检索质量优化
 
@@ -41,7 +41,7 @@
 | **S (Situation)** | 纯向量检索对精确术语（如 "owner 校验"）召回率低，纯关键词检索无法理解语义 |
 | **T (Task)** | 需要提升 RAG 问答的检索质量，同时保持系统轻量（无外部搜索引擎依赖） |
 | **A (Action)** | 实现双路检索：Milvus 向量检索 + 纯 Go BM25 关键词检索；用 RRF（Reciprocal Rank Fusion）融合两路结果；CJK n-gram 分词避免引入 jieba 等重依赖；实现 RAG 评估工具（Recall@K、MRR）量化效果 |
-| **R (Result)** | 混合检索相比纯向量检索 Recall@5 提升约 20%，系统零外部搜索引擎依赖 |
+| **R (Result)** | 当前形成了可解释的混合检索 baseline，后续可以用 Recall@K、MRR、Context Precision 做系统评估 |
 
 ### STAR 3：分布式锁与幂等性
 
@@ -50,7 +50,7 @@
 | **S (Situation)** | Kafka consumer 可能多实例部署，同一任务可能被重复消费；视频处理耗时长，锁可能过期 |
 | **T (Task)** | 需要保证任务处理的幂等性和锁的可靠性 |
 | **A (Action)** | 设计 Redis 分布式锁：UUID owner 防误删，Lua 脚本原子校验，WatchDog goroutine 每 10 秒自动续期；消费前 UpdateStatusIf 乐观锁检查，RowsAffected=0 则跳过；TaskJob Upsert 实现幂等投递 |
-| **R (Result)** | 多实例部署下零重复处理，长耗时任务（30+ 分钟）锁不丢失 |
+| **R (Result)** | 通过 Redis owner 校验、WatchDog 续期、状态条件更新和 TaskJob upsert 降低重复处理风险；仍需结合部署和压测验证多实例极端场景 |
 
 ### STAR 4：安全体系设计
 
@@ -59,14 +59,14 @@
 | **S (Situation)** | 平台允许用户提交外部 URL 下载视频，存在 SSRF 攻击风险；用户 API Key 需要安全存储 |
 | **T (Task)** | 构建多层安全防护体系 |
 | **A (Action)** | URL 提交：域名白名单 + DNS 解析后 IP 安全检查（拒绝 loopback/private/link-local）+ URL 清洗；API Key：AES-256-GCM 加密存储，`json:"-"` 防序列化泄露；认证：JWT Bearer Token + Redis 令牌桶限流，Fail-Open 策略 |
-| **R (Result)** | 系统通过 SSRF 安全测试，API Key 零泄露风险，限流不影响核心可用性 |
+| **R (Result)** | 当前已有 URL 下载第一层 SSRF 防护和 API Key 加密/脱敏；重定向链校验、DNS rebinding 防护和硬下载限制仍是后续安全优化 |
 
 ## 四、高频追问应对
 
 ### "为什么选 Kafka 而不是 RabbitMQ？"
 
 > 1. **吞吐量**：视频处理场景消息量不大但消息体可能较大，Kafka 的顺序写入和零拷贝更适合
-> 2. **持久化**：Kafka 天然持久化消息，consumer 崩溃后可从 offset 恢复，不需要额外的死信队列
+> 2. **持久化**：Kafka 可以持久化消息，consumer 崩溃后可从 offset 恢复；业务死信/重试状态在 VidLens 里主要由 MySQL 状态表维护
 > 3. **生态**：Kafka UI 便于监控，Kafka Connect 可扩展到数据仓库
 > 4. **本项目实际**：4 个 topic 解耦处理阶段，每个阶段可独立重试，比 RabbitMQ 的 exchange-binding 模型更直观
 
@@ -96,11 +96,11 @@
 项目名称：VidLens - AI 视频内容理解平台
 技术栈：Go, Gin, GORM, Kafka, Redis, MinIO, Milvus, Vue 3
 项目描述：
-- 设计并实现基于 Kafka 的异步视频处理流水线，支持下载/转码/ASR/摘要/RAG 索引 5 阶段处理
+- 设计并实现基于 Kafka 的异步视频处理流水线，支持下载、音频处理、ASR、摘要、RAG 索引等后台任务
 - 实现向量+BM25 双路检索 + RRF 融合的 RAG 问答系统，支持 SSE 流式输出
 - 设计 Redis 分布式锁（WatchDog 自动续期）+ 乐观锁状态机保证任务幂等性
 - 实现纯 Go BM25 检索引擎、AES-GCM API Key 加密、SSRF 防护等核心模块
-- 支持分片上传、MD5 秒传、MinIO Server-Side 合并、指数退避重试等企业级特性
+- 支持分片上传、MD5 资产复用、MinIO 私有存储、DB 侧 retry state 等后端工程能力
 ```
 
 ## 六、面试自我介绍模板

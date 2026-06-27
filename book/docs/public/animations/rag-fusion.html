@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VidLens RAG Fusion</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #020617;
+      --panel: rgba(15,23,42,.86);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 18% 20%, rgba(34,197,94,.16), transparent 30%), var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    canvas { position: fixed; inset: 0; z-index: 0; }
+    main { position: relative; z-index: 1; width: min(1160px, calc(100vw - 32px)); margin: 0 auto; padding: 34px 0; }
+    header { display: flex; justify-content: space-between; gap: 18px; align-items: end; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 50px); line-height: 1; letter-spacing: 0; }
+    .sub { color: var(--muted); line-height: 1.7; max-width: 690px; margin-top: 12px; }
+    .keys { color: var(--muted); font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px; line-height: 1.8; text-align: right; }
+    .board { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .panel {
+      min-height: 540px;
+      border: 1px solid rgba(148,163,184,.22);
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.3);
+    }
+    .panel h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: 0; }
+    .panel p { margin: 0 0 16px; color: var(--muted); line-height: 1.6; font-size: 13px; }
+    .item {
+      border: 1px solid rgba(148,163,184,.18);
+      background: rgba(2,6,23,.64);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      opacity: .28;
+      transform: translateY(14px);
+      transition: opacity .35s ease, transform .35s ease, border-color .35s ease, box-shadow .35s ease;
+    }
+    .item.visible { opacity: 1; transform: translateY(0); }
+    .item.active { border-color: currentColor; box-shadow: 0 0 24px color-mix(in srgb, currentColor 28%, transparent); }
+    .item strong { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+    .item small { display: block; margin-top: 8px; color: var(--muted); line-height: 1.5; }
+    .blue { color: var(--blue); }
+    .green { color: var(--green); }
+    .amber { color: var(--amber); }
+    .red { color: var(--red); }
+    .formula {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid rgba(245,158,11,.28);
+      background: rgba(245,158,11,.08);
+      border-radius: 8px;
+      color: #fde68a;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .explain {
+      margin-top: 18px;
+      border: 1px solid rgba(148,163,184,.22);
+      background: rgba(2,6,23,.74);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .explain h3 { margin: 0 0 8px; font-size: 20px; }
+    .explain p { margin: 0; color: var(--muted); line-height: 1.8; }
+    .controls { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    button {
+      border: 1px solid rgba(148,163,184,.3);
+      background: #111827;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    button:hover { border-color: var(--green); }
+    @media (max-width: 900px) {
+      header, .board { display: block; }
+      .keys { text-align: left; margin-top: 14px; }
+      .panel { min-height: 0; margin-bottom: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="particles"></canvas>
+  <main>
+    <header>
+      <div>
+        <h1>RAG 双路检索融合</h1>
+        <div class="sub">VidLens 当前不是“纯向量检索”。它先用问题 embedding 查 Milvus，再用关键词查本地 chunks，最后用 RRF 按排名融合，避免向量检索漏掉精确术语。</div>
+      </div>
+      <div class="keys">Space/→ 下一步<br>← 上一步 · A 自动 · R 重置</div>
+    </header>
+    <section class="board">
+      <div class="panel">
+        <h2>Vector Recall</h2>
+        <p>语义相似，适合问法变化。</p>
+        <div class="item blue" data-step="0"><strong>问题向量化 <span>chat.go:160</span></strong><small>embedding.Embed(ctx, question)</small></div>
+        <div class="item blue" data-step="1"><strong>Milvus TopK <span>milvus.go:161</span></strong><small>按 user_id + task_id + embedding_model 过滤。</small></div>
+        <div class="item blue" data-step="2"><strong>向量候选 <span>score</span></strong><small>适合“换一种说法”的语义召回。</small></div>
+      </div>
+      <div class="panel">
+        <h2>Keyword Recall</h2>
+        <p>精确命中，适合 owner、TraceID、状态码这类词。</p>
+        <div class="item green" data-step="3"><strong>提取 terms <span>chat.go:258</span></strong><small>从问题中抽取关键词和 CJK n-gram。</small></div>
+        <div class="item green" data-step="4"><strong>BM25 排序 <span>video_chunk.go:47</span></strong><small>在当前视频 chunks 内计算关键词相关性。</small></div>
+        <div class="item green" data-step="5"><strong>关键词候选 <span>rank</span></strong><small>避免专有名词被纯向量检索漏掉。</small></div>
+      </div>
+      <div class="panel">
+        <h2>RRF Fusion</h2>
+        <p>不用直接比较两路分数，而是融合排名。</p>
+        <div class="item amber" data-step="6"><strong>rank → score <span>k=60</span></strong><small>score += 1 / (k + rank)</small></div>
+        <div class="item amber" data-step="7"><strong>去重合并 <span>chunk key</span></strong><small>同一 chunk 在两路出现会叠加贡献。</small></div>
+        <div class="item red" data-step="8"><strong>最终上下文 <span>prompt</span></strong><small>TopK chunks + 最近聊天历史一起交给 LLM。</small></div>
+        <div class="formula">RRF(chunk) = Σ 1 / (60 + rank_i)<br>source = vector | keyword | hybrid</div>
+      </div>
+    </section>
+    <section class="explain">
+      <h3 id="title"></h3>
+      <p id="desc"></p>
+      <div class="controls">
+        <button onclick="prev()">上一步</button>
+        <button onclick="next()">下一步</button>
+        <button onclick="toggleAuto()">自动播放</button>
+        <button onclick="reset()">重置</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const copy = [
+      ['问题向量化', 'ChatService 先把用户问题送到用户配置的 embedding client。这里也说明 BYOK 不只服务摘要，RAG 的 embedding 同样按用户 profile 走。'],
+      ['Milvus TopK', 'Milvus 检索不是全局乱搜，而是用 user_id、task_id、embedding_model 做隔离，保证不同用户和不同模型的向量空间不混在一起。'],
+      ['向量候选', '向量召回适合语义近似，但对 owner、HTTP 412、TaskJob 这种精确术语可能不稳定。'],
+      ['提取关键词', '所以代码又做了一路关键词检索，把问题拆成 terms 后在本地 video_chunks 中查。'],
+      ['BM25 排序', '当前 BM25 是 Go 侧轻量实现，不是 Elasticsearch/OpenSearch。面试时要说清楚边界。'],
+      ['关键词候选', '关键词召回弥补精确词漏召回，尤其适合后端项目里大量字段名、错误码、组件名。'],
+      ['RRF 计分', '两路分数量纲不同，不能直接相加。RRF 用排名融合，简单、稳健、适合先做 baseline。'],
+      ['去重合并', '同一 chunk 如果被两路都命中，会得到 hybrid 来源和更高 RRF 分。'],
+      ['最终上下文', '融合后的 chunks 进入 prompt，并保存 retrieval snapshot，用户可以回看回答依据。']
+    ];
+    let step = 0, timer = null;
+    function render() {
+      document.querySelectorAll('.item').forEach(el => {
+        const i = Number(el.dataset.step);
+        el.classList.toggle('visible', i <= step);
+        el.classList.toggle('active', i === step);
+      });
+      document.getElementById('title').textContent = `${step + 1}. ${copy[step][0]}`;
+      document.getElementById('desc').textContent = copy[step][1];
+    }
+    function next() { step = Math.min(copy.length - 1, step + 1); render(); }
+    function prev() { step = Math.max(0, step - 1); render(); }
+    function reset() { step = 0; render(); }
+    function toggleAuto() {
+      if (timer) { clearInterval(timer); timer = null; return; }
+      timer = setInterval(() => { step = (step + 1) % copy.length; render(); }, 1700);
+    }
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === ' ') next();
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key.toLowerCase() === 'a') toggleAuto();
+      if (e.key.toLowerCase() === 'r') reset();
+    });
+    const canvas = document.getElementById('particles'), ctx = canvas.getContext('2d');
+    let particles = [];
+    function size() {
+      canvas.width = innerWidth * devicePixelRatio;
+      canvas.height = innerHeight * devicePixelRatio;
+      particles = Array.from({ length: 70 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - .5) * .18 * devicePixelRatio,
+        vy: (Math.random() - .5) * .18 * devicePixelRatio,
+        r: (Math.random() * 1.6 + .4) * devicePixelRatio
+      }));
+    }
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = 'rgba(34,197,94,.32)';
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      }
+      requestAnimationFrame(draw);
+    }
+    addEventListener('resize', size);
+    size(); draw(); render();
+  </script>
+</body>
+</html>
