@@ -204,3 +204,26 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Resume Grill Details ── */
+.vp-doc details {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--vp-c-bg-soft);
+}
+
+.vp-doc details + ul,
+.vp-doc details + p {
+  margin-top: 14px;
+}
+
+.vp-doc summary {
+  cursor: pointer;
+  color: var(--vp-c-brand-1);
+  font-weight: 700;
+}
+
+.vp-doc details[open] summary {
+  margin-bottom: 10px;
+}
