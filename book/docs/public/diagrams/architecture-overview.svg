@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 780" font-family="system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+    </marker>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#86efac"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fcd34d"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fca5a5"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Header -->
+  <rect width="900" height="50" rx="0" fill="url(#headerGrad)"/>
+  <text x="450" y="32" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">VidLens — System Architecture</text>
+
+  <!-- ==================== Sync Flow (Top) ==================== -->
+  <text x="450" y="85" text-anchor="middle" fill="#374151" font-size="15" font-weight="600">Synchronous Request Flow</text>
+
+  <!-- HTTP Client -->
+  <rect x="30" y="100" width="100" height="44" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="127" text-anchor="middle" fill="#334155" font-size="13" font-weight="600">HTTP Client</text>
+
+  <!-- Arrow -->
+  <line x1="130" y1="122" x2="175" y2="122" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Gin Router -->
+  <rect x="180" y="100" width="110" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="235" y="127" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Gin Router</text>
+
+  <!-- Arrow -->
+  <line x1="290" y1="122" x2="335" y2="122" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Middleware Stack -->
+  <rect x="340" y="92" width="130" height="60" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="405" y="113" text-anchor="middle" fill="#374151" font-size="12" font-weight="600">Middleware Stack</text>
+  <line x1="350" y1="120" x2="460" y2="120" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="405" y="140" text-anchor="middle" fill="#64748b" font-size="11">JWT / RateLimit / CORS</text>
+
+  <!-- Arrow -->
+  <line x1="470" y1="122" x2="515" y2="122" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Handler -->
+  <rect x="520" y="100" width="100" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="570" y="127" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Handler</text>
+
+  <!-- Arrow -->
+  <line x1="620" y1="122" x2="665" y2="122" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Service -->
+  <rect x="670" y="100" width="100" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="720" y="127" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Service</text>
+
+  <!-- Arrow down from Service -->
+  <line x1="720" y1="144" x2="720" y2="180" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Repository -->
+  <rect x="670" y="185" width="100" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="720" y="212" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Repository</text>
+
+  <!-- Arrow down -->
+  <line x1="720" y1="229" x2="720" y2="262" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Model -->
+  <rect x="670" y="267" width="100" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="720" y="294" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Model</text>
+
+  <!-- ==================== External Services Row ==================== -->
+  <text x="450" y="360" text-anchor="middle" fill="#374151" font-size="15" font-weight="600">External Services &amp; Storage</text>
+
+  <!-- Redis -->
+  <rect x="60" y="375" width="130" height="56" rx="8" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="125" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Redis</text>
+  <text x="125" y="418" text-anchor="middle" fill="#fff" font-size="10">Cache / Distributed Lock</text>
+
+  <!-- MinIO -->
+  <rect x="230" y="375" width="130" height="56" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="295" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">MinIO</text>
+  <text x="295" y="418" text-anchor="middle" fill="#fff" font-size="10">Object Storage (S3)</text>
+
+  <!-- PostgreSQL -->
+  <rect x="400" y="375" width="130" height="56" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="465" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">PostgreSQL</text>
+  <text x="465" y="418" text-anchor="middle" fill="#fff" font-size="10">Relational DB</text>
+
+  <!-- Milvus -->
+  <rect x="570" y="375" width="130" height="56" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="635" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Milvus</text>
+  <text x="635" y="418" text-anchor="middle" fill="#fff" font-size="10">Vector Database</text>
+
+  <!-- LLM -->
+  <rect x="740" y="375" width="130" height="56" rx="8" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="805" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">LLM API</text>
+  <text x="805" y="418" text-anchor="middle" fill="#fff" font-size="10">GPT / Local Model</text>
+
+  <!-- Connections from Service/Repository to storage -->
+  <line x1="695" y1="267" x2="125" y2="431" stroke="#374151" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <line x1="700" y1="267" x2="295" y2="431" stroke="#374151" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <line x1="720" y1="311" x2="465" y2="375" stroke="#374151" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <line x1="745" y1="267" x2="635" y2="375" stroke="#374151" stroke-width="1" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+
+  <!-- ==================== Async Flow (Bottom) ==================== -->
+  <rect x="20" y="470" width="860" height="210" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="450" y="495" text-anchor="middle" fill="#ef4444" font-size="15" font-weight="700">Asynchronous Flow (Kafka)</text>
+
+  <!-- Service (async trigger) -->
+  <rect x="40" y="515" width="100" height="44" rx="8" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="90" y="542" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">Service</text>
+
+  <!-- Arrow to Kafka Producer -->
+  <line x1="140" y1="537" x2="195" y2="537" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <text x="167" y="530" text-anchor="middle" fill="#ef4444" font-size="10">publish</text>
+
+  <!-- Kafka Producer -->
+  <rect x="200" y="515" width="120" height="44" rx="8" fill="url(#redGrad)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="260" y="537" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Kafka Producer</text>
+  <text x="260" y="550" text-anchor="middle" fill="#fff" font-size="10">Async Publish</text>
+
+  <!-- Arrow to Kafka Broker -->
+  <line x1="320" y1="537" x2="375" y2="537" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+
+  <!-- Kafka Broker (Topics) -->
+  <rect x="380" y="505" width="140" height="64" rx="8" fill="url(#redGrad)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="450" y="525" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Kafka Broker</text>
+  <text x="450" y="543" text-anchor="middle" fill="#fff" font-size="9">4 Topics (chained)</text>
+  <text x="450" y="558" text-anchor="middle" fill="#fff" font-size="9">download &gt; transcribe &gt; analyze &gt; rag</text>
+
+  <!-- Arrow to Consumer -->
+  <line x1="520" y1="537" x2="575" y2="537" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+
+  <!-- Kafka Consumer -->
+  <rect x="580" y="515" width="120" height="44" rx="8" fill="url(#redGrad)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="640" y="537" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">Kafka Consumer</text>
+  <text x="640" y="550" text-anchor="middle" fill="#fff" font-size="10">Worker Pool</text>
+
+  <!-- Arrow to processing -->
+  <line x1="700" y1="537" x2="740" y2="537" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+
+  <!-- Processing Tools -->
+  <rect x="745" y="505" width="120" height="64" rx="8" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="805" y="525" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Processing</text>
+  <text x="805" y="542" text-anchor="middle" fill="#fff" font-size="10">FFmpeg (video)</text>
+  <text x="805" y="555" text-anchor="middle" fill="#fff" font-size="10">ASR / LLM / Embed</text>
+
+  <!-- Status update arrow back -->
+  <line x1="805" y1="569" x2="805" y2="620" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="830" y="600" fill="#374151" font-size="10" font-style="italic">status update</text>
+
+  <!-- Status DB -->
+  <rect x="745" y="625" width="120" height="38" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="805" y="649" text-anchor="middle" fill="#fff" font-size="12" font-weight="600">DB Status Update</text>
+
+  <!-- ==================== Legend ==================== -->
+  <rect x="0" y="700" width="900" height="80" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="450" y="722" text-anchor="middle" fill="#374151" font-size="13" font-weight="700">Legend</text>
+
+  <rect x="60" y="735" width="24" height="16" rx="4" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1"/>
+  <text x="90" y="748" fill="#374151" font-size="11">Core Layer</text>
+
+  <rect x="180" y="735" width="24" height="16" rx="4" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="1"/>
+  <text x="210" y="748" fill="#374151" font-size="11">Tools / External</text>
+
+  <rect x="330" y="735" width="24" height="16" rx="4" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1"/>
+  <text x="360" y="748" fill="#374151" font-size="11">Storage / Database</text>
+
+  <rect x="500" y="735" width="24" height="16" rx="4" fill="url(#amberGrad)" stroke="#d97706" stroke-width="1"/>
+  <text x="530" y="748" fill="#374151" font-size="11">Decision</text>
+
+  <rect x="620" y="735" width="24" height="16" rx="4" fill="url(#redGrad)" stroke="#dc2626" stroke-width="1"/>
+  <text x="650" y="748" fill="#374151" font-size="11">Async / Kafka</text>
+
+  <line x1="740" y1="743" x2="780" y2="743" stroke="#374151" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="790" y="748" fill="#374151" font-size="11">Dependency</text>
+</svg>

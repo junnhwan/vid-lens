@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 720" font-family="system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22c55e"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#86efac"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fcd34d"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fca5a5"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Header -->
+  <rect width="900" height="50" rx="0" fill="url(#headerGrad)"/>
+  <text x="450" y="32" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">VidLens — Distributed Lock (Redis)</text>
+
+  <!-- ==================== Step 1: TryLock ==================== -->
+  <rect x="330" y="75" width="240" height="65" rx="12" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="2"/>
+  <text x="450" y="100" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">TryLock</text>
+  <text x="450" y="118" text-anchor="middle" fill="#bfdbfe" font-size="11">SET key value NX EX 30</text>
+  <text x="450" y="132" text-anchor="middle" fill="#bfdbfe" font-size="9">(SetNX with TTL=30s)</text>
+
+  <!-- Arrow down to decision -->
+  <line x1="450" y1="140" x2="450" y2="170" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ==================== Decision: Success? ==================== -->
+  <!-- Diamond shape -->
+  <polygon points="450,175 530,225 450,275 370,225" fill="url(#amberGrad)" stroke="#d97706" stroke-width="2"/>
+  <text x="450" y="222" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Lock</text>
+  <text x="450" y="238" text-anchor="middle" fill="#fff" font-size="13" font-weight="700">Acquired?</text>
+
+  <!-- ==================== YES Path (Left) ==================== -->
+  <line x1="370" y1="225" x2="200" y2="225" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <rect x="160" y="210" width="36" height="20" rx="4" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="178" y="224" text-anchor="middle" fill="#16a34a" font-size="10" font-weight="700">YES</text>
+
+  <!-- ==================== NO Path (Right) ==================== -->
+  <line x1="530" y1="225" x2="700" y2="225" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <rect x="690" y="210" width="30" height="20" rx="4" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="705" y="224" text-anchor="middle" fill="#ef4444" font-size="10" font-weight="700">NO</text>
+
+  <!-- ==================== YES Branch: WatchDog ==================== -->
+  <rect x="60" y="270" width="280" height="70" rx="12" fill="url(#greenGrad)" stroke="#16a34a" stroke-width="2"/>
+  <text x="200" y="296" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">WatchDog Started</text>
+  <text x="200" y="316" text-anchor="middle" fill="#dcfce7" font-size="11">Goroutine: renew TTL every 10s</text>
+  <text x="200" y="332" text-anchor="middle" fill="#dcfce7" font-size="9">EXPIRE key 30 (if still held)</text>
+
+  <!-- Arrow from YES to WatchDog -->
+  <line x1="200" y1="225" x2="200" y2="270" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+  <!-- Arrow: WatchDog → Execute Business -->
+  <line x1="200" y1="340" x2="200" y2="370" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ==================== Business Execution ==================== -->
+  <rect x="60" y="375" width="280" height="65" rx="12" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="2"/>
+  <text x="200" y="402" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">Execute Business Logic</text>
+  <text x="200" y="422" text-anchor="middle" fill="#bfdbfe" font-size="11">Protected critical section</text>
+  <text x="200" y="436" text-anchor="middle" fill="#bfdbfe" font-size="9">e.g. video processing task</text>
+
+  <!-- Arrow: Business → Unlock -->
+  <line x1="200" y1="440" x2="200" y2="470" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ==================== Unlock ==================== -->
+  <rect x="60" y="475" width="280" height="75" rx="12" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="2"/>
+  <text x="200" y="500" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">Unlock (Lua Script)</text>
+  <text x="200" y="520" text-anchor="middle" fill="#ddd6fe" font-size="10">if redis.call('get',KEY) == VAL</text>
+  <text x="200" y="535" text-anchor="middle" fill="#ddd6fe" font-size="10">then redis.call('del',KEY) end</text>
+  <text x="200" y="548" text-anchor="middle" fill="#ddd6fe" font-size="9">Atomic: verify owner before delete</text>
+
+  <!-- Arrow: Unlock → Done -->
+  <line x1="200" y1="550" x2="200" y2="575" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Done -->
+  <rect x="120" y="580" width="160" height="40" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="200" y="605" text-anchor="middle" fill="#16a34a" font-size="14" font-weight="700">Lock Released</text>
+
+  <!-- ==================== NO Branch: Retry Logic ==================== -->
+  <rect x="600" y="270" width="260" height="70" rx="12" fill="url(#redGrad)" stroke="#dc2626" stroke-width="2"/>
+  <text x="730" y="296" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">Lock Failed</text>
+  <text x="730" y="316" text-anchor="middle" fill="#fecaca" font-size="11">Another instance holds the lock</text>
+  <text x="730" y="332" text-anchor="middle" fill="#fecaca" font-size="9">Wait and retry...</text>
+
+  <!-- Arrow from NO to Lock Failed -->
+  <line x1="730" y1="225" x2="730" y2="270" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+
+  <!-- Arrow: Lock Failed → Retry Decision -->
+  <line x1="730" y1="340" x2="730" y2="370" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Retry Decision Diamond -->
+  <polygon points="730,375 800,415 730,455 660,415" fill="url(#amberGrad)" stroke="#d97706" stroke-width="2"/>
+  <text x="730" y="412" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">Max</text>
+  <text x="730" y="426" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">Retries?</text>
+
+  <!-- NO (still can retry) - goes up to retry -->
+  <line x1="660" y1="415" x2="600" y2="415" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <rect x="568" y="400" width="28" height="20" rx="4" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+  <text x="582" y="414" text-anchor="middle" fill="#16a34a" font-size="9" font-weight="700">NO</text>
+
+  <!-- Retry action box -->
+  <rect x="400" y="385" width="160" height="55" rx="10" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.5"/>
+  <text x="480" y="407" text-anchor="middle" fill="#92400e" font-size="12" font-weight="600">Backoff &amp; Retry</text>
+  <text x="480" y="425" text-anchor="middle" fill="#b45309" font-size="10">sleep(random 50~200ms)</text>
+  <text x="480" y="438" text-anchor="middle" fill="#b45309" font-size="9">attempt++</text>
+
+  <!-- Arrow from retry back to TryLock -->
+  <line x1="480" y1="385" x2="480" y2="320" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="480" y1="320" x2="450" y2="140" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-amber)"/>
+  <text x="485" y="240" fill="#b45309" font-size="10" font-weight="600" transform="rotate(-75,485,240)">retry</text>
+
+  <!-- YES (exhausted) - goes down to give up -->
+  <line x1="730" y1="455" x2="730" y2="500" stroke="#ef4444" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <rect x="718" y="462" width="28" height="20" rx="4" fill="#fef2f2" stroke="#fca5a5" stroke-width="1"/>
+  <text x="732" y="476" text-anchor="middle" fill="#ef4444" font-size="9" font-weight="700">YES</text>
+
+  <!-- Give up box -->
+  <rect x="650" y="505" width="160" height="50" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <text x="730" y="528" text-anchor="middle" fill="#ef4444" font-size="13" font-weight="700">Give Up</text>
+  <text x="730" y="545" text-anchor="middle" fill="#b91c1c" font-size="10">Return error to caller</text>
+
+  <!-- ==================== WatchDog Renew Detail ==================== -->
+  <rect x="60" y="630" width="840" height="80" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <text x="450" y="655" text-anchor="middle" fill="#16a34a" font-size="13" font-weight="700">WatchDog Renewal Mechanism</text>
+  <text x="120" y="680" fill="#374151" font-size="11">1. WatchDog goroutine starts when lock is acquired</text>
+  <text x="120" y="698" fill="#374151" font-size="11">2. Ticker fires every TTL/3 (10s for 30s TTL)</text>
+  <text x="500" y="680" fill="#374151" font-size="11">3. Each tick: EXPIRE key 30 (only if still owned)</text>
+  <text x="500" y="698" fill="#374151" font-size="11">4. Stops when unlock is called or context is canceled</text>
+
+  <!-- ==================== Legend ==================== -->
+  <rect x="200" y="630" width="0" height="0" fill="none"/>
+  <!-- Legend integrated into footer above -->
+
+  <!-- Small legend at bottom-right -->
+  <rect x="640" y="580" width="240" height="45" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="650" y="596" fill="#374151" font-size="10" font-weight="700">Colors:</text>
+
+  <rect x="650" y="603" width="14" height="10" rx="3" fill="url(#greenGrad)"/>
+  <text x="668" y="612" fill="#374151" font-size="9">Success / WatchDog</text>
+
+  <rect x="760" y="603" width="14" height="10" rx="3" fill="url(#redGrad)"/>
+  <text x="778" y="612" fill="#374151" font-size="9">Failure</text>
+</svg>

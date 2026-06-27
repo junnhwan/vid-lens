@@ -3,6 +3,12 @@
 > 模块路径: `internal/pkg/lock/`
 > 源文件: `redis_lock.go`、`redis_lock_test.go`
 
+<div class="diagram-container">
+
+![分布式锁流程](/diagrams/distributed-lock.svg)
+
+</div>
+
 ---
 
 ## 文件清单

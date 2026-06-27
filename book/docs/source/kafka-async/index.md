@@ -2,6 +2,12 @@
 
 > 基于 VidLens 项目 `internal/mq/` 包的真实源码，覆盖 Producer、Consumer、重试系统、TraceID 传播四个核心模块。
 
+<div class="diagram-container">
+
+![Kafka 异步处理流程](/diagrams/kafka-async.svg)
+
+</div>
+
 ---
 
 ## 文件总览

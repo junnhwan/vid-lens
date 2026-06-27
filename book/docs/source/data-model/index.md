@@ -2,6 +2,16 @@
 
 ## 基于 VidLens 项目的模型层分析
 
+<div class="diagram-container">
+
+![任务状态机](/diagrams/task-state-machine.svg)
+
+</div>
+
+## 交互式状态机
+
+<TaskStateMachine />
+
 ---
 
 ## 文件结构

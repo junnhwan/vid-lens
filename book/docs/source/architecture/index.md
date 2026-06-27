@@ -4,6 +4,12 @@
 
 ## 架构概览
 
+<div class="diagram-container">
+
+![VidLens 架构总览](/diagrams/architecture-overview.svg)
+
+</div>
+
 ### 项目概况
 
 VidLens 是一个 AI 驱动的视频内容理解平台，支持视频上传、音频提取、语音转文字（ASR）、AI 总结、RAG 索引和智能问答。技术栈：Go 1.24.0 + Gin + GORM + Kafka + Redis + MinIO + Milvus。

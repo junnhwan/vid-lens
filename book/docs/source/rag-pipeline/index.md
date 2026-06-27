@@ -2,6 +2,12 @@
 
 本文档详细分析 VidLens RAG Pipeline 的源码实现，包括核心结构体、关键函数、调用链和设计决策。
 
+<div class="diagram-container">
+
+![RAG 检索管道](/diagrams/rag-pipeline.svg)
+
+</div>
+
 ---
 
 ## 1. 文件表
