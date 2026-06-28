@@ -27,14 +27,19 @@ type RetrievalRequest struct {
 }
 
 type RetrievedChunk struct {
-	ChunkID     int64   `json:"chunk_id"`
-	ChunkIndex  int     `json:"chunk_index"`
-	Score       float32 `json:"score"`
-	Content     string  `json:"content"`
-	Source      string  `json:"source,omitempty"`
-	VectorRank  int     `json:"vector_rank,omitempty"`
-	KeywordRank int     `json:"keyword_rank,omitempty"`
-	RRFScore    float64 `json:"rrf_score,omitempty"`
+	ChunkID                int64    `json:"chunk_id"`
+	ChunkIndex             int      `json:"chunk_index"`
+	Score                  float32  `json:"score"`
+	Content                string   `json:"content"`
+	Source                 string   `json:"source,omitempty"`
+	VectorRank             int      `json:"vector_rank,omitempty"`
+	KeywordRank            int      `json:"keyword_rank,omitempty"`
+	RRFScore               float64  `json:"rrf_score,omitempty"`
+	ExpandedFromChunkIndex int      `json:"expanded_from_chunk_index,omitempty"`
+	ExpandedWindowStart    int      `json:"expanded_window_start,omitempty"`
+	ExpandedWindowEnd      int      `json:"expanded_window_end,omitempty"`
+	WindowTruncated        bool     `json:"window_truncated,omitempty"`
+	Fallbacks              []string `json:"fallbacks,omitempty"`
 }
 
 type RAGRetriever interface {
