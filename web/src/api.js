@@ -111,6 +111,10 @@ export default {
   sendChatMessage: (sessionId, question, topK = 5) =>
     api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK }),
 
+  // Agentic Video QA（非流式）：返回 { message_id, answer, template, citations, trace, model }
+  sendAgentMessage: (sessionId, question, topK = 5) =>
+    api.post(`/chat/sessions/${sessionId}/messages/agent`, { question, top_k: topK }),
+
   // 流式聊天（SSE）
   sendChatMessageStream: async (sessionId, question, topK = 5, onEvent) => {
     const token = getStoredAuthToken()

@@ -35,6 +35,13 @@
             <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
+            <div
+              v-if="msg.role === 'assistant' && (msg.template || msg.model)"
+              class="agent-meta"
+            >
+              <span v-if="msg.template" class="agent-tag agent-template">模板: {{ msg.template }}</span>
+              <span v-if="msg.model" class="agent-tag agent-model">模型: {{ msg.model }}</span>
+            </div>
             <div v-if="msg.citations && msg.citations.length" class="citations">
               <div class="citations-header">
                 <span class="citations-title">参考片段</span>
@@ -75,6 +82,20 @@
                 </div>
               </div>
             </div>
+            <div v-if="msg.trace && msg.trace.length" class="agent-trace">
+              <div class="citations-header">
+                <span class="citations-title">工具调用</span>
+              </div>
+              <div v-for="(step, idx) in msg.trace" :key="idx" class="trace-item">
+                <div class="trace-meta">
+                  <span class="trace-tool">{{ step.tool }}</span>
+                  <span v-if="step.name" class="trace-name">{{ step.name }}</span>
+                  <span v-if="step.output_ref" class="trace-output">→ {{ step.output_ref }}</span>
+                </div>
+                <div v-if="step.input" class="trace-input">{{ formatTraceValue(step.input) }}</div>
+                <div v-if="step.error" class="trace-error">{{ step.error }}</div>
+              </div>
+            </div>
           </div>
         </div>
         <div v-if="loading" class="message assistant loading">
@@ -84,17 +105,31 @@
       </div>
 
       <div class="chat-input">
-        <input
-          v-model="question"
-          @keyup.enter="sendQuestion"
-          placeholder="问问这个视频..."
-          :disabled="loading || sessionLoading"
-          class="input-field"
-          aria-label="输入问题"
-        />
-        <button @click="sendQuestion" :disabled="loading || sessionLoading || !question" class="btn-send">
-          发送
-        </button>
+        <div class="chat-input-toolbar">
+          <button
+            type="button"
+            class="mode-toggle"
+            :class="{ active: agentMode }"
+            :disabled="loading || sessionLoading"
+            :title="agentMode ? 'Agentic QA：工具调用链 + 引用 + 模板（非流式）' : '普通 RAG 流式问答'"
+            @click="agentMode = !agentMode"
+          >
+            {{ agentMode ? 'Agentic QA' : '普通问答' }}
+          </button>
+        </div>
+        <div class="chat-input-row">
+          <input
+            v-model="question"
+            @keyup.enter="sendQuestion"
+            placeholder="问问这个视频..."
+            :disabled="loading || sessionLoading"
+            class="input-field"
+            aria-label="输入问题"
+          />
+          <button @click="sendQuestion" :disabled="loading || sessionLoading || !question" class="btn-send">
+            发送
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -127,6 +162,7 @@ const messages = ref([])
 const question = ref('')
 const loading = ref(false)
 const sessionLoading = ref(false)
+const agentMode = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 const expandedCitationKeys = ref(new Set())
@@ -285,6 +321,16 @@ const ensureChatSession = async () => {
   }
 }
 
+const formatTraceValue = (value) => {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 const sendQuestion = async () => {
   if (!question.value || loading.value || sessionLoading.value) return
   if (!sessionId.value) {
@@ -302,13 +348,26 @@ const sendQuestion = async () => {
 
   loading.value = true
 
+  if (agentMode.value) {
+    await sendAgentQuestion(q)
+  } else {
+    await sendStreamQuestion(q)
+  }
+}
+
+// 普通 RAG：SSE 流式，边收边渲染
+const sendStreamQuestion = async (q) => {
   // 预插入一个空的 assistant 消息
   const assistantMsg = {
     id: `temp-${Date.now()}`,
     role: 'assistant',
     content: '',
     citations: [],
-    timestamp: new Date()
+    timestamp: new Date(),
+    template: null,
+    trace: [],
+    model: null,
+    mode: 'rag',
   }
   messages.value.push(assistantMsg)
 
@@ -329,6 +388,29 @@ const sendQuestion = async () => {
     })
   } catch (err) {
     emit('error', err.message || '发送失败')
+    loading.value = false
+  }
+}
+
+// Agentic QA：非流式，等待接口返回后一次性插入 assistant 消息
+const sendAgentQuestion = async (q) => {
+  try {
+    const res = await api.sendAgentMessage(sessionId.value, q, 5)
+    messages.value.push({
+      id: res.message_id || `temp-${Date.now()}`,
+      role: 'assistant',
+      content: res.answer || '',
+      citations: Array.isArray(res.citations) ? res.citations : [],
+      timestamp: new Date(),
+      template: res.template || null,
+      trace: Array.isArray(res.trace) ? res.trace : [],
+      model: res.model || null,
+      mode: 'agent',
+    })
+    scrollMessagesToBottom()
+  } catch (err) {
+    emit('error', err.message || 'Agentic 问答失败')
+  } finally {
     loading.value = false
   }
 }
@@ -667,6 +749,7 @@ onUnmounted(() => {
   padding: 1.5rem;
   border-top: 1px solid rgba(212, 175, 55, 0.15);
   display: flex;
+  flex-direction: column;
   gap: 1rem;
   background: linear-gradient(135deg, rgba(10, 14, 26, 0.5), rgba(15, 25, 45, 0.4));
 }
@@ -739,5 +822,127 @@ onUnmounted(() => {
   border-top-color: #d4af37;
   border-radius: 50%;
   animation: vl-spin 0.8s linear infinite;
+}
+
+.chat-input-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.mode-toggle {
+  background: transparent;
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  color: #8b95a8;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.mode-toggle:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.3);
+  color: #d4af37;
+}
+
+.mode-toggle.active {
+  background: rgba(212, 175, 55, 0.12);
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+}
+
+.mode-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.agent-tag {
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  background: rgba(139, 149, 168, 0.08);
+  color: #a8b3c7;
+}
+
+.agent-template {
+  color: #d4af37;
+  border-color: rgba(212, 175, 55, 0.3);
+  background: rgba(212, 175, 55, 0.1);
+}
+
+.agent-model {
+  color: #8b95a8;
+}
+
+.agent-trace {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(139, 149, 168, 0.15);
+}
+
+.trace-item {
+  background: rgba(10, 14, 26, 0.35);
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(139, 149, 168, 0.1);
+}
+
+.trace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.trace-tool {
+  color: #5b8fff;
+  background: rgba(41, 98, 255, 0.1);
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(41, 98, 255, 0.2);
+}
+
+.trace-name {
+  color: #a8b3c7;
+}
+
+.trace-output {
+  color: #d4af37;
+  opacity: 0.85;
+}
+
+.trace-input {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: #8b95a8;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.8;
+}
+
+.trace-error {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: #f87171;
+  font-family: 'JetBrains Mono', monospace;
 }
 </style>

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   normalizeChatMessages,
   parseRetrievalSnapshot,
+  parseRetrievalSnapshotDetail,
   resolveReusableChatSession,
 } from '../src/chatHistoryPolicy.js'
 
@@ -16,6 +17,41 @@ assert.deepEqual(
   parseRetrievalSnapshot('not valid json'),
   [],
   'invalid retrieval_snapshot should not break chat history rendering',
+)
+
+assert.deepEqual(
+  parseRetrievalSnapshot(
+    JSON.stringify({
+      template: 'direct_qa',
+      citations: [{ chunk_id: 1, content: '命中片段' }],
+      trace: [{ tool: 'search_transcript', name: 'search topic' }],
+    }),
+  ),
+  [{ chunk_id: 1, content: '命中片段' }],
+  'agentic retrieval_snapshot object should still expose its citations array',
+)
+
+assert.deepEqual(
+  parseRetrievalSnapshotDetail(
+    JSON.stringify({
+      template: 'compare_topics',
+      citations: [{ chunk_id: 5, content: '片段A' }],
+      trace: [{ tool: 'compare_segments', name: 'compare' }],
+    }),
+  ),
+  {
+    template: 'compare_topics',
+    citations: [{ chunk_id: 5, content: '片段A' }],
+    trace: [{ tool: 'compare_segments', name: 'compare' }],
+    mode: 'agent',
+  },
+  'agentic retrieval_snapshot should keep template / trace alongside citations',
+)
+
+assert.deepEqual(
+  parseRetrievalSnapshotDetail('[{"chunk_id":8,"content":"参考片段"}]'),
+  { template: null, citations: [{ chunk_id: 8, content: '参考片段' }], trace: [], mode: 'rag' },
+  'plain RAG retrieval_snapshot should normalize into rag mode with empty trace',
 )
 
 assert.deepEqual(
@@ -36,6 +72,10 @@ assert.deepEqual(
       content: '刚刚问的问题',
       citations: [],
       timestamp: '2026-06-09T11:40:25Z',
+      template: null,
+      trace: [],
+      model: null,
+      mode: 'rag',
     },
     {
       id: 2,
@@ -43,9 +83,60 @@ assert.deepEqual(
       content: '历史回答',
       citations: [{ chunk_id: 8, content: '参考片段' }],
       timestamp: '2026-06-09T11:40:26Z',
+      template: null,
+      trace: [],
+      model: null,
+      mode: 'rag',
     },
   ],
   'backend chat messages should be normalized into the UI message shape',
+)
+
+assert.deepEqual(
+  normalizeChatMessages([
+    {
+      id: 3,
+      role: 'assistant',
+      content: 'Agentic 回答',
+      model: 'gpt-4o-mini',
+      created_at: '2026-06-28T10:00:00Z',
+      retrieval_snapshot: {
+        template: 'compare_topics',
+        citations: [{ chunk_id: 5, content: '片段A', source: 'hybrid' }],
+        trace: [
+          {
+            name: 'search topic',
+            tool: 'search_transcript',
+            input: { question: '比较两者', top_k: 5 },
+            output_ref: 'citations:5',
+            error: '',
+          },
+        ],
+      },
+    },
+  ]),
+  [
+    {
+      id: 3,
+      role: 'assistant',
+      content: 'Agentic 回答',
+      citations: [{ chunk_id: 5, content: '片段A', source: 'hybrid' }],
+      timestamp: '2026-06-28T10:00:00Z',
+      template: 'compare_topics',
+      trace: [
+        {
+          name: 'search topic',
+          tool: 'search_transcript',
+          input: { question: '比较两者', top_k: 5 },
+          output_ref: 'citations:5',
+          error: '',
+        },
+      ],
+      model: 'gpt-4o-mini',
+      mode: 'agent',
+    },
+  ],
+  'agentic chat history should preserve template / trace / model and resolve agent mode',
 )
 
 const loadedSessionIDs = []
