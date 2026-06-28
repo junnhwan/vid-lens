@@ -56,5 +56,6 @@ other-grill.md
 # Local work artifacts (not tracked)
 docs/site/
 docs/vidlensdocs.zip
+docs/vidlens-source-notes.html
 .playwright-mcp/
 /*.png
