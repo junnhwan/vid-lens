@@ -1,6 +1,14 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
+	"vid-lens/internal/repository"
+)
 
 func TestVideoAgentClassifiesIntentTemplates(t *testing.T) {
 	tests := []struct {
@@ -36,8 +44,117 @@ func TestVideoAgentClassifiesUnknownQuestionAsDirectQA(t *testing.T) {
 
 func TestVideoAgentAskRejectsBlankQuestion(t *testing.T) {
 	svc := &VideoAgentService{}
-	_, err := svc.Ask(nil, VideoAgentRequest{Question: "   "})
+	_, err := svc.Ask(context.Background(), VideoAgentRequest{Question: "   "}, nil, nil, ai.Profile{})
 	if err == nil {
 		t.Fatal("Ask() succeeded for blank question")
 	}
+}
+
+func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"直接回答",
+	}}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 2, Content: "owner 校验引用片段"},
+	}}
+	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	agent := NewVideoAgentService(chatSvc)
+
+	result, err := agent.Ask(context.Background(), VideoAgentRequest{
+		UserID:    7,
+		SessionID: session.ID,
+		Question:  "为什么要校验 owner？",
+		TopK:      3,
+	}, embedding, chatClient, ai.Profile{EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "直接回答" || result.Template != string(VideoAgentDirectQA) || result.Model != "chat-model" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(result.Citations) != 1 || result.Citations[0].Content != "owner 校验引用片段" {
+		t.Fatalf("citations = %+v", result.Citations)
+	}
+	if traceTools(result.Trace) != "search_transcript|build_cited_answer" {
+		t.Fatalf("trace = %+v", result.Trace)
+	}
+	if retriever.lastReq.TaskID != task.ID {
+		t.Fatalf("retriever task id = %d, want %d", retriever.lastReq.TaskID, task.ID)
+	}
+
+	messages, err := repos.Chat.ListMessages(7, session.ID)
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
+		t.Fatalf("messages = %+v", messages)
+	}
+	if !strings.Contains(*messages[1].RetrievalSnapshot, "build_cited_answer") {
+		t.Fatalf("snapshot = %s, want trace", *messages[1].RetrievalSnapshot)
+	}
+}
+
+func TestVideoAgentAskSummarizeExecutesWindowSummarizeAndBuildAnswer(t *testing.T) {
+	repos, _, session := newVideoAgentTestSession(t)
+	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+		"chunk-0 背景", "chunk-1 Redis owner", "chunk-2 风险",
+	})
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"总结中间结果",
+		"最终总结回答",
+	}}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 2, ChunkIndex: 1, Content: "chunk-1 Redis owner"},
+	}}
+	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	agent := NewVideoAgentService(chatSvc)
+
+	result, err := agent.Ask(context.Background(), VideoAgentRequest{
+		UserID:    7,
+		SessionID: session.ID,
+		Question:  "总结一下 Redis owner 风险",
+		TopK:      1,
+	}, embedding, chatClient, ai.Profile{EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "最终总结回答" || result.Template != string(VideoAgentSummarizeTopic) {
+		t.Fatalf("result = %+v", result)
+	}
+	if traceTools(result.Trace) != "search_transcript|get_transcript_window|summarize_segments|build_cited_answer" {
+		t.Fatalf("trace = %+v", result.Trace)
+	}
+	if len(chatClient.messages) != 3 {
+		t.Fatalf("chat calls = %d, want rewrite, summarize and final answer", len(chatClient.messages))
+	}
+	if !messagesContain(chatClient.messages[1], "chunk-0 背景") || !messagesContain(chatClient.messages[1], "chunk-2 风险") {
+		t.Fatalf("summarize prompt = %+v, want expanded window", chatClient.messages[1])
+	}
+}
+
+func newVideoAgentTestSession(t *testing.T) (*repository.Repositories, *model.VideoTask, *model.ChatSession) {
+	t.Helper()
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "33333333333333333333333333333333", Filename: "agent.mp4", FileURL: "videos/agent.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "agent"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	return repos, task, session
+}
+
+func traceTools(trace []VideoAgentStep) string {
+	tools := make([]string, 0, len(trace))
+	for _, step := range trace {
+		tools = append(tools, step.Tool)
+	}
+	return strings.Join(tools, "|")
 }
