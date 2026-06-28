@@ -1,9 +1,10 @@
 # VidLens resume quantification RAG eval cases.
 # Do not include secrets, API keys, cookies, full private transcripts, or private URLs.
-# Metrics target: compare vector-only vs vector+BM25+RRF retrieval.
+# Cases are based on local MySQL video_chunks for task_id 2, 5, and 6.
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "Which show talks about an Avatar keeping peace between four nations?"
   expected_chunk_keywords:
     - "Avatar"
@@ -13,6 +14,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "Who starts the war in the Avatar story?"
   expected_chunk_keywords:
     - "Fire Nation"
@@ -22,6 +24,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "How long had the current Avatar been missing?"
   expected_chunk_keywords:
     - "Avatar"
@@ -31,6 +34,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: keyword_exact
   question: "Which recommended show is described as technically a kids show?"
   expected_chunk_keywords:
     - "kids show"
@@ -40,15 +44,17 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "What kind of show is said to be lighthearted and fun to watch?"
   expected_chunk_keywords:
-    - "cartoons"
+    - "kids show"
     - "lighthearted"
   expected_answer_points:
-    - "Cartoons are described as lighthearted and fun to watch."
+    - "Avatar is described as lighthearted and fun to watch despite heavy topics."
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "Which sitcom is about a girl moving into an apartment with three guys?"
   expected_chunk_keywords:
     - "New Girl"
@@ -59,6 +65,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "Which show made the speaker laugh out loud?"
   expected_chunk_keywords:
     - "New Girl"
@@ -68,6 +75,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: keyword_exact
   question: "Which show is usually shortened to Parks and Rec?"
   expected_chunk_keywords:
     - "Parks and Recreation"
@@ -77,6 +85,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "Which mature show follows a huge ad agency in New York City?"
   expected_chunk_keywords:
     - "Mad Men"
@@ -87,6 +96,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "What decade is Mad Men set in?"
   expected_chunk_keywords:
     - "Mad Men"
@@ -96,6 +106,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: keyword_exact
   question: "What details make the historical setting feel realistic?"
   expected_chunk_keywords:
     - "costumes"
@@ -105,7 +116,8 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
-  question: "Why does the speaker say language learning is more than memorizing words?"
+  category: rewrite_needed
+  question: "Why is building fluency more than memorizing vocabulary?"
   expected_chunk_keywords:
     - "memorizing"
     - "fluency"
@@ -114,6 +126,7 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
   question: "What did Chinese professors include besides regular class content?"
   expected_chunk_keywords:
     - "Chinese professors"
@@ -124,7 +137,8 @@
 
 - task_id: 5
   task_hint: "English learning TV show recommendation transcript"
-  question: "Which cultural topics helped the speaker while learning Chinese?"
+  category: rewrite_needed
+  question: "What cultural lessons helped the speaker when studying Mandarin?"
   expected_chunk_keywords:
     - "Chinese history"
     - "special events"
@@ -133,6 +147,7 @@
 
 - task_id: 6
   task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
   question: "In the Claude Code transcript, which image or UI format is mentioned?"
   expected_chunk_keywords:
     - "Claude Code"
@@ -142,6 +157,7 @@
 
 - task_id: 6
   task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
   question: "Which presentation format is mentioned together with SVG and UI?"
   expected_chunk_keywords:
     - "PPT"
@@ -152,6 +168,7 @@
 
 - task_id: 6
   task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
   question: "What Agent-related concept appears in the Claude Code transcript?"
   expected_chunk_keywords:
     - "Agent Skills"
@@ -162,6 +179,7 @@
 
 - task_id: 6
   task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
   question: "Which Markdown-related evaluation terms appear in the transcript?"
   expected_chunk_keywords:
     - "Markdown"
@@ -171,9 +189,343 @@
 
 - task_id: 6
   task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
   question: "Which scale and metadata terms appear near the end of the transcript?"
   expected_chunk_keywords:
     - "Scale"
     - "Meta Data"
   expected_answer_points:
     - "The transcript includes Scale and Meta Data."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: keyword_exact
+  question: "Which four elements define the nations in Avatar?"
+  expected_chunk_keywords:
+    - "water"
+    - "fire"
+    - "earth"
+    - "air"
+  expected_answer_points:
+    - "The nations are based on water, fire, earth, and air."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "What can some people in the water nation do?"
+  expected_chunk_keywords:
+    - "water bend"
+    - "control the water"
+  expected_answer_points:
+    - "Some people in the water nation can water bend and control water with their hands."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "What does the Avatar need to do after returning?"
+  expected_chunk_keywords:
+    - "master all four elements"
+    - "restore peace"
+    - "stop the war"
+  expected_answer_points:
+    - "The Avatar has to master all four elements, restore peace, and stop the war."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "What does the speaker praise about Avatar's characters and visuals?"
+  expected_chunk_keywords:
+    - "character development"
+    - "animation is great"
+  expected_answer_points:
+    - "The speaker praises the character development and animation."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rewrite_needed
+  question: "Why might cartoons be easier for English practice?"
+  expected_chunk_keywords:
+    - "speak pretty clearly"
+    - "easy to understand"
+  expected_answer_points:
+    - "Cartoons usually speak clearly and are easy to understand."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "How long is each Avatar episode according to the speaker?"
+  expected_chunk_keywords:
+    - "twenty minutes"
+    - "schedule"
+  expected_answer_points:
+    - "Each episode is about twenty minutes long."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rewrite_needed
+  question: "Which recommendation helps you hear everyday American speech?"
+  expected_chunk_keywords:
+    - "real life conversations"
+    - "day to day life"
+  expected_answer_points:
+    - "New Girl includes real-life conversations and day-to-day language."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: keyword_exact
+  question: "What sitcom feature does the speaker say they hate?"
+  expected_chunk_keywords:
+    - "laugh tracks"
+    - "hate"
+  expected_answer_points:
+    - "The speaker says they hate laugh tracks."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "Why does the speaker suggest starting Parks and Rec at season two?"
+  expected_chunk_keywords:
+    - "first season"
+    - "pretty rough"
+    - "second season"
+  expected_answer_points:
+    - "The first season is rough, so viewers can skip to the second season."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "Which department do Mad Men characters work in?"
+  expected_chunk_keywords:
+    - "creative department"
+    - "ads"
+  expected_answer_points:
+    - "The main characters work in the creative department making ads."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rewrite_needed
+  question: "What kinds of rapid changes does Mad Men show in America?"
+  expected_chunk_keywords:
+    - "socially"
+    - "economically"
+  expected_answer_points:
+    - "It shows a time when America was changing socially and economically."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rewrite_needed
+  question: "Why should learners understand culture instead of only words?"
+  expected_chunk_keywords:
+    - "Language and culture"
+    - "closely intertwined"
+  expected_answer_points:
+    - "Language and culture are closely intertwined."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: direct_fact
+  question: "What kind of environment can the recommended shows create at home?"
+  expected_chunk_keywords:
+    - "English environment"
+    - "at home"
+  expected_answer_points:
+    - "The shows can help create an English environment at home."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which repeated file extension appears with Markdown?"
+  expected_chunk_keywords:
+    - ".md"
+    - "Markdown"
+  expected_answer_points:
+    - "The transcript repeatedly mentions .md and Markdown."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which tool protocol acronym appears in the Claude Code transcript?"
+  expected_chunk_keywords:
+    - "MCP"
+    - "Claude Code"
+  expected_answer_points:
+    - "The transcript mentions MCP in the Claude Code discussion."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: context_window_needed
+  question: "Which UI formats are mentioned before the transcript moves into Agent Skills?"
+  evidence_anchor_chunk: 0
+  evidence_window_chunks: [0, 1]
+  expected_chunk_keywords:
+    - "UI"
+    - "SVG"
+    - "PPT"
+    - "Agent Skills"
+  expected_answer_points:
+    - "The window around chunks 0 and 1 mentions UI, SVG, PPT, and then Agent Skills."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: context_window_needed
+  question: "What happens after the transcript explains that the Avatar controls all four elements?"
+  evidence_anchor_chunk: 1
+  evidence_window_chunks: [1, 2]
+  expected_chunk_keywords:
+    - "current Avatar goes missing"
+    - "hundred years"
+  expected_answer_points:
+    - "The current Avatar goes missing and has been missing for more than a hundred years."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: context_window_needed
+  question: "What does the speaker say after mentioning costumes and realistic details?"
+  evidence_anchor_chunk: 6
+  evidence_window_chunks: [6, 7]
+  expected_chunk_keywords:
+    - "costumes"
+    - "drama and history"
+    - "historical events"
+  expected_answer_points:
+    - "The nearby window says the show suits people who like drama and history and shows historical events."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: context_window_needed
+  question: "What classroom examples follow the point that language and culture are intertwined?"
+  evidence_anchor_chunk: 8
+  evidence_window_chunks: [8, 9]
+  expected_chunk_keywords:
+    - "Chinese professors"
+    - "Chinese history"
+    - "special events"
+  expected_answer_points:
+    - "The following classroom examples are Chinese history, holidays, and special events."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which video platform name appears in the AI coding discussion?"
+  expected_chunk_keywords:
+    - "Bilibili"
+    - "AI"
+  expected_answer_points:
+    - "The transcript mentions Bilibili in an AI coding discussion."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which editor name appears near Bilibili?"
+  expected_chunk_keywords:
+    - "VS Code"
+    - "Bilibili"
+  expected_answer_points:
+    - "VS Code appears near Bilibili."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which abstraction phrase appears in the noisy AI transcript?"
+  expected_chunk_keywords:
+    - "leak"
+    - "leak abstraction"
+  expected_answer_points:
+    - "The transcript includes leak abstraction."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which review practice appears with spec?"
+  expected_chunk_keywords:
+    - "code review"
+    - "spec"
+  expected_answer_points:
+    - "The transcript mentions code review and spec."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: context_window_needed
+  question: "Which three quality questions appear around the bug discussion?"
+  evidence_anchor_chunk: 3
+  evidence_window_chunks: [3, 4]
+  expected_chunk_keywords:
+    - "safe from bug"
+    - "ready for change"
+    - "easy to understand"
+  expected_answer_points:
+    - "The window includes safe from bug, ready for change, and easy to understand."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which development method abbreviations appear near Web coding?"
+  expected_chunk_keywords:
+    - "Web coding"
+    - "TDD"
+    - "SDD"
+  expected_answer_points:
+    - "The transcript mentions Web coding, TDD, and SDD."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which cost or context unit is mentioned in the AI discussion?"
+  expected_chunk_keywords:
+    - "token"
+    - "AI"
+  expected_answer_points:
+    - "The transcript mentions token in the AI discussion."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rerank_needed
+  question: "Which recommendation is the apartment sitcom rather than the workplace comedy?"
+  expected_chunk_keywords:
+    - "New Girl"
+    - "apartment"
+    - "three other guys"
+  expected_answer_points:
+    - "The apartment sitcom is New Girl."
+
+- task_id: 5
+  task_hint: "English learning TV show recommendation transcript"
+  category: rerank_needed
+  question: "Which recommendation is the mature drama about advertising, not the sitcom?"
+  expected_chunk_keywords:
+    - "Mad Men"
+    - "ad agency"
+    - "1960s"
+  expected_answer_points:
+    - "Mad Men is the mature drama about an ad agency in the 1960s."
+
+- task_id: 6
+  task_hint: "Claude Code talk transcript sample with noisy ASR; English identifiers retained"
+  category: rerank_needed
+  question: "Which Claude-related concept is specifically about reusable skills?"
+  expected_chunk_keywords:
+    - "Agent Skills"
+    - "skill.md"
+    - "Claude Code"
+  expected_answer_points:
+    - "The transcript refers to Agent Skills and skill.md."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: rerank_needed
+  question: "Which phrase is about abstraction leakage rather than construction?"
+  expected_chunk_keywords:
+    - "leak abstraction"
+    - "construction"
+  expected_answer_points:
+    - "The relevant chunk contrasts leak abstraction with construction."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: rerank_needed
+  question: "Which phrase asks whether the code is easy to change?"
+  expected_chunk_keywords:
+    - "ready for change"
+    - "easy to understand"
+  expected_answer_points:
+    - "The relevant window includes ready for change and easy to understand."
