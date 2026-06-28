@@ -11,6 +11,38 @@ import (
 	"vid-lens/internal/service"
 )
 
+func TestEvalProgressLogsStageAndCaseWhenEnabled(t *testing.T) {
+	var b strings.Builder
+	progress := newEvalProgress(true, &b)
+
+	progress.stage("loaded %d cases", 50)
+	progress.caseStep("embedding", 2, 50, evalCase{TaskID: 5, Question: "Which show mentions Avatar?"})
+
+	output := b.String()
+	for _, want := range []string{
+		"[rag-eval]",
+		"loaded 50 cases",
+		"embedding case 2/50 task=5",
+		"Which show mentions Avatar?",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("progress output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestEvalProgressIsSilentWhenDisabled(t *testing.T) {
+	var b strings.Builder
+	progress := newEvalProgress(false, &b)
+
+	progress.stage("loaded %d cases", 50)
+	progress.caseStep("embedding", 2, 50, evalCase{TaskID: 5, Question: "Which show mentions Avatar?"})
+
+	if b.String() != "" {
+		t.Fatalf("progress output = %q, want empty", b.String())
+	}
+}
+
 func TestLoadCasesReadsTaskIDAndExpectedKeywords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cases.yaml")

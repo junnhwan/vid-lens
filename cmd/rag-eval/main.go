@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -39,6 +40,7 @@ type evalOptions struct {
 	topK        int
 	candidateK  int
 	timeout     time.Duration
+	progress    bool
 }
 
 type profileBundle struct {
@@ -84,16 +86,19 @@ func parseFlags() evalOptions {
 	flag.StringVar(&opts.commit, "commit", "unknown", "code commit label")
 	flag.IntVar(&opts.topK, "top-k", 0, "retrieval topK; default uses config or 5")
 	flag.IntVar(&opts.candidateK, "candidate-k", 0, "hybrid candidateK; default uses config or topK")
+	flag.BoolVar(&opts.progress, "progress", false, "write evaluation progress to stderr")
 	flag.Parse()
 	opts.timeout = *timeout
 	return opts
 }
 
 func run(parent context.Context, opts evalOptions) error {
+	progress := newEvalProgress(opts.progress, os.Stderr)
 	cases, err := loadCases(opts.casesPath)
 	if err != nil {
 		return err
 	}
+	progress.stage("loaded %d cases from %s", len(cases), opts.casesPath)
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
 		return err
@@ -120,6 +125,7 @@ func run(parent context.Context, opts evalOptions) error {
 	ctx, cancel := context.WithTimeout(parent, opts.timeout)
 	defer cancel()
 
+	progress.stage("connecting mysql and milvus")
 	db, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
 	if err != nil {
 		return fmt.Errorf("connect mysql: %w", err)
@@ -156,28 +162,33 @@ func run(parent context.Context, opts evalOptions) error {
 	}
 	defer store.Close()
 
-	caseContexts, embeddingModel, taskIDs, err := prepareCases(ctx, cases, repos, profiles, factory, cfg.RAG.RerankEndpoint, cfg.RAG.RerankModel)
+	caseContexts, embeddingModel, taskIDs, err := prepareCases(ctx, cases, repos, profiles, factory, cfg.RAG.RerankEndpoint, cfg.RAG.RerankModel, progress)
 	if err != nil {
 		return err
 	}
 
-	vectorReport, err := evaluateVectorOnly(ctx, caseContexts, store, topK)
+	progress.stage("evaluating retrieval mode: Vector only")
+	vectorReport, err := evaluateVectorOnly(ctx, caseContexts, store, topK, progress)
 	if err != nil {
 		return err
 	}
-	hybridReport, err := evaluateHybrid(ctx, caseContexts, store, repos, topK, candidateK)
+	progress.stage("evaluating retrieval mode: Vector + BM25 + RRF")
+	hybridReport, err := evaluateHybrid(ctx, caseContexts, store, repos, topK, candidateK, progress)
 	if err != nil {
 		return err
 	}
-	rewriteReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, false)
+	progress.stage("evaluating retrieval mode: Rewrite + MultiQuery + RRF")
+	rewriteReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, false, progress)
 	if err != nil {
 		return err
 	}
-	fullReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, true)
+	progress.stage("evaluating retrieval mode: Rewrite + MultiQuery + RRF + Window + Rerank")
+	fullReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, true, progress)
 	if err != nil {
 		return err
 	}
-	modelRerankReport, err := evaluateModelRerankPipeline(ctx, caseContexts, store, repos, factory, topK, candidateK)
+	progress.stage("evaluating retrieval mode: Rewrite + MultiQuery + RRF + Window + Model Rerank")
+	modelRerankReport, err := evaluateModelRerankPipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, progress)
 	if err != nil {
 		return err
 	}
@@ -189,7 +200,8 @@ func run(parent context.Context, opts evalOptions) error {
 		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: fullReport},
 		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: modelRerankReport},
 	}
-	answerResults := evaluateAnswerModes(ctx, caseContexts, store, repos, factory, topK, candidateK)
+	progress.stage("evaluating answer modes: ordinary RAG vs agentic")
+	answerResults := evaluateAnswerModes(ctx, caseContexts, store, repos, factory, topK, candidateK, progress)
 	markdown := renderMarkdownWithAgentAnswerEval(opts, taskIDs, len(cases), embeddingModel, topK, candidateK, retrievalResults, answerResults)
 	if err := os.MkdirAll(parentDir(opts.outputPath), 0o755); err != nil {
 		return err
@@ -199,6 +211,41 @@ func run(parent context.Context, opts evalOptions) error {
 	}
 	fmt.Printf("wrote %s\n", opts.outputPath)
 	return nil
+}
+
+type evalProgress struct {
+	enabled bool
+	out     io.Writer
+}
+
+func newEvalProgress(enabled bool, out io.Writer) evalProgress {
+	if out == nil {
+		out = io.Discard
+	}
+	return evalProgress{enabled: enabled, out: out}
+}
+
+func (p evalProgress) stage(format string, args ...any) {
+	if !p.enabled {
+		return
+	}
+	fmt.Fprintf(p.out, "[rag-eval] %s\n", fmt.Sprintf(format, args...))
+}
+
+func (p evalProgress) caseStep(stage string, idx, total int, c evalCase) {
+	if !p.enabled {
+		return
+	}
+	fmt.Fprintf(p.out, "[rag-eval] %s case %d/%d task=%d question=%q\n", stage, idx, total, c.TaskID, truncateProgressQuestion(c.Question))
+}
+
+func truncateProgressQuestion(question string) string {
+	question = strings.TrimSpace(question)
+	runes := []rune(question)
+	if len(runes) <= 80 {
+		return question
+	}
+	return string(runes[:80]) + "..."
 }
 
 func loadCases(path string) ([]evalCase, error) {
@@ -224,14 +271,15 @@ func loadCases(path string) ([]evalCase, error) {
 	return cases, nil
 }
 
-func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repositories, profiles *service.AIProfileService, factory *ai.Factory, rerankEndpoint, rerankModel string) ([]caseEvalContext, string, []int64, error) {
+func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repositories, profiles *service.AIProfileService, factory *ai.Factory, rerankEndpoint, rerankModel string, progress evalProgress) ([]caseEvalContext, string, []int64, error) {
 	profileCache := make(map[int64]profileBundle)
 	taskIDSet := make(map[int64]bool)
 	taskIDs := make([]int64, 0)
 	var embeddingModel string
 	prepared := make([]caseEvalContext, 0, len(cases))
 
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("prepare", i+1, len(cases), c)
 		task, err := repos.Task.FindByID(c.TaskID)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("find task %d: %w", c.TaskID, err)
@@ -251,10 +299,12 @@ func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repos
 			bundle = profileBundle{profile: profile, embedding: embedding}
 			profileCache[task.UserID] = bundle
 		}
+		progress.caseStep("embedding", i+1, len(cases), c)
 		vector, err := bundle.embedding.Embed(ctx, c.Question)
 		if err != nil {
 			return nil, "", nil, fmt.Errorf("embed question for task %d: %w", c.TaskID, err)
 		}
+		progress.caseStep("rewrite", i+1, len(cases), c)
 		rewrite, rewriteErr := newEvalRewriter(factory, *bundle.profile).Rewrite(ctx, service.RewriteInput{
 			Question:   c.Question,
 			NumQueries: 3,
@@ -283,9 +333,10 @@ func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repos
 	return prepared, embeddingModel, taskIDs, nil
 }
 
-func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, topK int) (service.RAGEvalReport, error) {
+func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, topK int, progress evalProgress) (service.RAGEvalReport, error) {
 	results := make([]service.RAGEvalCaseResult, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("vector search", i+1, len(cases), c.evalCase)
 		startedAt := time.Now()
 		chunks, err := store.Search(ctx, c.vector, service.RetrievalRequest{
 			UserID:         c.userID,
@@ -310,9 +361,10 @@ func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store serv
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, topK, candidateK int) (service.RAGEvalReport, error) {
+func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, topK, candidateK int, progress evalProgress) (service.RAGEvalReport, error) {
 	results := make([]service.RAGEvalCaseResult, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("hybrid retrieval", i+1, len(cases), c.evalCase)
 		startedAt := time.Now()
 		vectorChunks, err := store.Search(ctx, c.vector, service.RetrievalRequest{
 			UserID:         c.userID,
@@ -350,9 +402,10 @@ func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, full bool) (service.RAGEvalReport, error) {
+func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, full bool, progress evalProgress) (service.RAGEvalReport, error) {
 	results := make([]service.RAGEvalCaseResult, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("rewrite pipeline retrieval", i+1, len(cases), c.evalCase)
 		var expander *service.ContextExpander
 		var reranker service.Reranker
 		if full {
@@ -393,9 +446,10 @@ func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (service.RAGEvalReport, error) {
+func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, progress evalProgress) (service.RAGEvalReport, error) {
 	results := make([]service.RAGEvalCaseResult, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("model rerank retrieval", i+1, len(cases), c.evalCase)
 		expander := service.NewContextExpander(repos, 1, 4000)
 		rerankClient, err := factory.NewRerankClient(*c.profile)
 		var reranker service.Reranker
@@ -438,11 +492,13 @@ func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, s
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateAnswerModes(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) []answerModeResult {
+func evaluateAnswerModes(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, progress evalProgress) []answerModeResult {
 	ordinaryResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
 	agentResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
+		progress.caseStep("ordinary answer", i+1, len(cases), c.evalCase)
 		ordinaryResults = append(ordinaryResults, evaluateOrdinaryAnswer(ctx, c, store, repos, factory, topK, candidateK))
+		progress.caseStep("agentic answer", i+1, len(cases), c.evalCase)
 		agentResults = append(agentResults, evaluateAgenticAnswer(ctx, c, store, repos, factory, topK, candidateK))
 	}
 	return []answerModeResult{
