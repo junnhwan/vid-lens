@@ -105,8 +105,8 @@
 
   <!-- PostgreSQL -->
   <rect x="400" y="375" width="130" height="56" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="465" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">PostgreSQL</text>
-  <text x="465" y="418" text-anchor="middle" fill="#fff" font-size="10">Relational DB</text>
+  <text x="465" y="397" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">MySQL</text>
+  <text x="465" y="418" text-anchor="middle" fill="#fff" font-size="10">Relational DB (GORM)</text>
 
   <!-- Milvus -->
   <rect x="570" y="375" width="130" height="56" rx="8" fill="url(#purpleGrad)" stroke="#7c3aed" stroke-width="1.5"/>

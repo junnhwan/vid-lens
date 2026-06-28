@@ -47,8 +47,8 @@
 
   <!-- ==================== Step 1: Question Input ==================== -->
   <rect x="330" y="70" width="240" height="50" rx="10" fill="url(#blueGrad)" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="450" y="100" text-anchor="middle" fill="#fff" font-size="14" font-weight="600">User Question</text>
-  <text x="450" y="90" text-anchor="middle" fill="#fff" font-size="10">(e.g. "这段视频讲了什么?")</text>
+  <text x="450" y="90" text-anchor="middle" fill="#fff" font-size="14" font-weight="600">User Question</text>
+  <text x="450" y="108" text-anchor="middle" fill="#bfdbfe" font-size="10">e.g. "这段视频讲了什么?"</text>
 
   <!-- Arrow -->
   <line x1="450" y1="120" x2="450" y2="148" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>

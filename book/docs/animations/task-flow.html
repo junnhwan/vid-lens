@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VidLens 视频任务异步状态机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Space Grotesk', system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; min-height: 100vh; display: flex; flex-direction: column; }
+
+  .header { background: linear-gradient(135deg, #1e293b, #334155); padding: 20px 32px; border-bottom: 1px solid #374151; }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .header p { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+
+  .main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 32px 16px; }
+
+  .step-display { width: 100%; max-width: 720px; margin-bottom: 24px; }
+  .step-card { background: #141414; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; opacity: 0; transform: translateY(20px); transition: all 0.4s ease; }
+  .step-card.active { opacity: 1; transform: translateY(0); }
+  .step-number { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #3b82f6; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+  .step-title { font-size: 20px; font-weight: 700; margin: 8px 0; color: #fff; }
+  .step-desc { font-size: 14px; color: #a3a3a3; line-height: 1.7; }
+  .step-code { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 14px; margin-top: 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #a3e635; overflow-x: auto; white-space: pre; }
+  .step-tag { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; margin-top: 10px; }
+  .tag-sync { background: #172554; color: #60a5fa; }
+  .tag-async { background: #450a0a; color: #f87171; }
+  .tag-db { background: #1e1b4b; color: #a78bfa; }
+  .tag-external { background: #052e16; color: #4ade80; }
+
+  .timeline { width: 100%; max-width: 720px; display: flex; align-items: center; gap: 0; margin-bottom: 20px; }
+  .timeline-dot { width: 12px; height: 12px; border-radius: 50%; background: #2a2a2a; border: 2px solid #404040; flex-shrink: 0; transition: all 0.3s ease; z-index: 1; }
+  .timeline-dot.active { background: #3b82f6; border-color: #60a5fa; box-shadow: 0 0 12px rgba(59,130,246,0.5); }
+  .timeline-dot.done { background: #22c55e; border-color: #4ade80; }
+  .timeline-line { flex: 1; height: 2px; background: #2a2a2a; transition: background 0.3s ease; }
+  .timeline-line.done { background: #22c55e; }
+
+  .controls { display: flex; gap: 10px; margin-top: 8px; }
+  .btn { padding: 10px 20px; border: 1px solid #374151; border-radius: 8px; background: #1a1a1a; color: #e5e5e5; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; font-family: inherit; }
+  .btn:hover { background: #262626; border-color: #525252; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+
+  .key-hint { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #525252; padding: 2px 6px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 3px; margin-left: 6px; }
+
+  .legend { display: flex; gap: 16px; margin-top: 24px; flex-wrap: wrap; justify-content: center; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #737373; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎬 VidLens — 视频任务异步状态机</h1>
+  <p>URL 上传 → Kafka 投递 → 下载 → 转写 → 摘要 → RAG 建索引的端到端链路</p>
+</div>
+
+<div class="main">
+  <div class="timeline" id="timeline"></div>
+
+  <div class="step-display">
+    <div class="step-card" id="step-card"></div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btn-prev" onclick="prev()">← 上一步</button>
+    <button class="btn btn-primary" id="btn-next" onclick="next()">下一步 →</button>
+    <button class="btn" onclick="reset()">R 重置</button>
+    <button class="btn" id="btn-auto" onclick="toggleAuto()">A 自动播放</button>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>同步请求</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>异步 Kafka</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>数据库</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>外部服务</div>
+  </div>
+</div>
+
+<script>
+const steps = [
+  {
+    num: 'STEP 1',
+    title: '用户上传视频 / 提交 URL',
+    desc: '用户通过 HTTP POST 上传视频文件或提交视频 URL。Handler 层接收请求，调用 MediaService。',
+    code: `// internal/handler/media.go
+func (h *MediaHandler) UploadByURL(c *gin.Context) {
+    userID := middleware.GetUserID(c)
+    var req struct { VideoURL string \`json:"video_url"\` }
+    c.ShouldBindJSON(&req)
+    result, err := h.svc.UploadByURL(c, userID, req.VideoURL)
+    // ...
+}`,
+    tag: '同步请求', tagClass: 'tag-sync',
+  },
+  {
+    num: 'STEP 2',
+    title: '创建任务 + 投递 Kafka',
+    desc: 'MediaService 创建 VideoTask（状态=RUNNING, 阶段=DOWNLOADING），然后投递消息到 Kafka download topic。',
+    code: `// internal/service/media.go:159-183
+task := &model.VideoTask{
+    Status:     model.TaskStatusRunning,
+    Stage:      model.TaskStageDownloading,
+    SourceType: model.TaskSourceTypeURL,
+    MaxRetries: 3,
+}
+repo.Task.Create(task)
+repo.TaskJob.UpsertQueued(task, ...)
+mq.EnqueueDownload(ctx, task.ID, key)  // → Kafka`,
+    tag: '异步 Kafka', tagClass: 'tag-async',
+  },
+  {
+    num: 'STEP 3',
+    title: 'Kafka Consumer: 视频下载',
+    desc: 'Download Consumer 消费消息，使用 yt-dlp 下载视频，上传到 MinIO，更新任务状态。',
+    code: `// internal/mq/consumer.go:261-336
+func (c *Consumer) handleDownload(ctx, msg) {
+    task := repo.Task.FindByID(payload.TaskID)
+    localPath := ytdlp.DownloadVideo(ctx, url)
+    asset := repo.Asset.FindByMD5(fileMD5)
+    if asset == nil {
+        storage.UploadFromPath(ctx, localPath, ...)
+        repo.Asset.Create(asset)
+    }
+    repo.Task.CompleteURLDownload(task.ID, asset, ...)
+}`,
+    tag: '外部服务', tagClass: 'tag-external',
+  },
+  {
+    num: 'STEP 4',
+    title: '投递转写任务 → ASR 转录',
+    desc: '下载完成后，投递消息到 transcribe topic。Consumer 提取音频（FFmpeg），分片后调用 ASR 引擎转写。',
+    code: `// internal/mq/consumer.go:579-624
+func (c *Consumer) transcribeAudio(ctx, taskID, audioPath, strategy) {
+    chunks := splitAudio(ctx, ffmpegPath, audioPath, 300)
+    for i, chunk := range chunks {
+        text := strategy.Transcribe(ctx, chunk)
+        markTranscriptionChunkCompleted(taskID, i, chunk, text)
+    }
+    return strings.Join(parts, "\\n\\n")
+}`,
+    tag: '外部服务', tagClass: 'tag-external',
+  },
+  {
+    num: 'STEP 5',
+    title: 'LLM 摘要生成',
+    desc: '转写完成后，调用 LLM 生成视频摘要。使用用户配置的 AI Profile 动态创建客户端。',
+    code: `// internal/mq/consumer.go:699-728
+func (c *Consumer) summarizeTask(ctx, task) {
+    transcription := repo.Transcription.FindByTaskID(task.ID)
+    taskAI := strategyForTask(task)  // 从 AI Profile 创建
+    summary := taskAI.Summarize(ctx, transcription.Content)
+    repo.Summary.Upsert(&model.AISummary{
+        TaskID:  task.ID,
+        Content: summary,
+    })
+}`,
+    tag: '外部服务', tagClass: 'tag-external',
+  },
+  {
+    num: 'STEP 6',
+    title: 'RAG 索引构建',
+    desc: '摘要完成后，投递消息到 rag-index topic。Consumer 将转写文本分块，生成 Embedding 向量，写入 Milvus。',
+    code: `// internal/service/rag_index.go
+func (s *RAGIndexService) BuildTaskIndex(ctx, task) {
+    chunks := splitText(transcription.Content)
+    for _, chunk := range chunks {
+        vector := embedding.Embed(ctx, chunk.Content)
+        chunk.Embedding = vector
+    }
+    repo.VideoChunk.ReplaceTaskChunks(task.ID, chunks)
+    milvus.Insert(collection, chunks)
+}`,
+    tag: '数据库', tagClass: 'tag-db',
+  },
+  {
+    num: 'STEP 7',
+    title: '任务完成 ✅',
+    desc: '所有阶段完成后，更新任务状态为 Completed。用户可以在聊天界面基于视频内容提问。',
+    code: `// 任务状态流转
+Pending(0) → Queued(1) → Running(2) → Completed(3)
+                          ↓
+                       Failed(4) → [retry] → Queued(1)
+                          ↓
+                       Dead(5)  // 重试耗尽
+
+// 最终数据
+VideoTranscription  // ASR 转写文本
+AISummary           // LLM 摘要
+VideoChunk + Milvus // RAG 向量索引`,
+    tag: '数据库', tagClass: 'tag-db',
+  },
+];
+
+let current = 0;
+let autoTimer = null;
+
+function init() {
+  const timeline = document.getElementById('timeline');
+  timeline.innerHTML = '';
+  steps.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'timeline-dot' + (i === 0 ? ' active' : '');
+    dot.id = 'dot-' + i;
+    timeline.appendChild(dot);
+    if (i < steps.length - 1) {
+      const line = document.createElement('div');
+      line.className = 'timeline-line';
+      line.id = 'line-' + i;
+      timeline.appendChild(line);
+    }
+  });
+  render();
+}
+
+function render() {
+  const s = steps[current];
+  const card = document.getElementById('step-card');
+  card.className = 'step-card';
+  card.innerHTML = `
+    <div class="step-number">${s.num}</div>
+    <div class="step-title">${s.title}</div>
+    <div class="step-desc">${s.desc}</div>
+    <div class="step-code">${s.code}</div>
+    <span class="step-tag ${s.tagClass}">${s.tag}</span>
+  `;
+  requestAnimationFrame(() => card.classList.add('active'));
+
+  steps.forEach((_, i) => {
+    const dot = document.getElementById('dot-' + i);
+    dot.className = 'timeline-dot' + (i < current ? ' done' : i === current ? ' active' : '');
+    if (i < steps.length - 1) {
+      document.getElementById('line-' + i).className = 'timeline-line' + (i < current ? ' done' : '');
+    }
+  });
+
+  document.getElementById('btn-prev').disabled = current === 0;
+  document.getElementById('btn-next').disabled = current === steps.length - 1;
+}
+
+function next() { if (current < steps.length - 1) { current++; render(); } }
+function prev() { if (current > 0) { current--; render(); } }
+function reset() { current = 0; stopAuto(); render(); }
+
+function toggleAuto() {
+  if (autoTimer) { stopAuto(); }
+  else {
+    document.getElementById('btn-auto').textContent = '⏸ 暂停';
+    autoTimer = setInterval(() => {
+      if (current >= steps.length - 1) { stopAuto(); return; }
+      next();
+    }, 3000);
+  }
+}
+function stopAuto() {
+  clearInterval(autoTimer);
+  autoTimer = null;
+  document.getElementById('btn-auto').textContent = 'A 自动播放';
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  else if (e.key === 'a' || e.key === 'A') { toggleAuto(); }
+  else if (e.key === 'r' || e.key === 'R') { reset(); }
+});
+
+init();
+</script>
+</body>
+</html>
