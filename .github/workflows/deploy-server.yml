@@ -1,0 +1,145 @@
+name: Deploy Server
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "book/**"
+      - "docs/**"
+      - "**/*.md"
+      - ".github/workflows/deploy-server.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vidlens-server
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATH: /opt/vidlens
+  HEALTH_URL: http://vidlens.wanjune.qzz.io/health
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test backend
+        run: go test ./...
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Test frontend
+        run: npm test
+        working-directory: web
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+
+      - name: Build backend
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o build/server ./cmd/server
+          tar -czf build/web-dist.tar.gz -C web dist
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.VIDLENS_DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.VIDLENS_DEPLOY_SSH_KEY }}
+          DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::Missing one of VIDLENS_DEPLOY_HOST, VIDLENS_DEPLOY_USER, VIDLENS_DEPLOY_SSH_KEY"
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/vidlens_deploy_key
+          chmod 600 ~/.ssh/vidlens_deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload artifacts
+        env:
+          DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.VIDLENS_DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote_tmp'"
+          scp -i ~/.ssh/vidlens_deploy_key -P "$DEPLOY_PORT" build/server build/web-dist.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:$remote_tmp/"
+
+      - name: Deploy and restart service
+        env:
+          DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.VIDLENS_DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          deploy_dir="$DEPLOY_PATH"
+          sha="${GITHUB_SHA:0:12}"
+          tmp_dir="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          stamp="$(date +%Y%m%d-%H%M%S)-$sha"
+          backup_dir="$deploy_dir/.logs/deploy-backups/$stamp"
+          new_dist="$deploy_dir/web/dist.new"
+          old_dist=""
+
+          test -f "$tmp_dir/server"
+          test -f "$tmp_dir/web-dist.tar.gz"
+          mkdir -p "$backup_dir" "$deploy_dir/web"
+
+          if [ -f "$deploy_dir/server" ]; then
+            cp "$deploy_dir/server" "$backup_dir/server"
+          fi
+          if [ -d "$deploy_dir/web/dist" ]; then
+            tar -czf "$backup_dir/web-dist.tar.gz" -C "$deploy_dir/web" dist
+          fi
+
+          install -m 0755 "$tmp_dir/server" "$deploy_dir/server.new"
+          mv "$deploy_dir/server.new" "$deploy_dir/server"
+
+          rm -rf "$new_dist"
+          mkdir -p "$new_dist"
+          tar -xzf "$tmp_dir/web-dist.tar.gz" -C "$new_dist" --strip-components=1
+          if [ -d "$deploy_dir/web/dist" ]; then
+            old_dist="$deploy_dir/web/dist.old-$stamp"
+            mv "$deploy_dir/web/dist" "$old_dist"
+          fi
+          mv "$new_dist" "$deploy_dir/web/dist"
+
+          systemctl restart vidlens.service
+          systemctl is-active --quiet vidlens.service
+          curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:18083/health
+
+          rm -rf "$tmp_dir"
+          if [ -n "$old_dist" ] && [ -d "$old_dist" ]; then
+            rm -rf "$old_dist"
+          fi
+          echo "Deployed $sha, backup saved to $backup_dir"
+          REMOTE
+
+      - name: Verify public health
+        run: curl -fsS --retry 5 --retry-delay 2 "$HEALTH_URL"
