@@ -519,6 +519,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	}
 	_ = c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusRunning, model.TaskStageIndexing, "")
 	c.indexAfterTranscription(ctx, task)
+	c.generateTitle(ctx, task, transcript)
 
 	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
 		return err
@@ -706,6 +707,8 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 		return fmt.Errorf("缺少转录文本，无法生成 AI 总结")
 	}
 
+	c.generateTitle(ctx, task, transcription.Content)
+
 	log.Printf("[Kafka] AI 总结: taskID=%d", task.ID)
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
@@ -726,6 +729,86 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 
 	return nil
 }
+
+// generateTitle 在转写文本就绪后调用 LLM 生成简洁视频标题并写回。
+// 失败仅记录日志，不阻塞转写/索引/总结主流程。
+func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, transcript string) {
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" || strings.TrimSpace(task.Title) != "" {
+		return
+	}
+	if c.aiFactory == nil || c.profiles == nil {
+		return
+	}
+	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
+	if err != nil || profile == nil {
+		log.Printf("[Kafka] 生成标题跳过：未找到 AI profile: taskID=%d err=%v", task.ID, err)
+		return
+	}
+	chatClient, err := c.aiFactory.NewChatClient(*profile)
+	if err != nil {
+		log.Printf("[Kafka] 生成标题跳过：创建 chat client 失败: taskID=%d err=%v", task.ID, err)
+		return
+	}
+	chatClient = ai.NewObservedChatClient(chatClient, c.aiRecorder, ai.CallContext{
+		UserID:      task.UserID,
+		TaskID:      task.ID,
+		LLMProvider: profile.LLMProvider,
+		LLMModel:    profile.LLMModel,
+		Kind:        model.AICallKindLLM,
+	})
+
+	title, err := chatClient.Chat(ctx, []ai.ChatMessage{
+		{Role: "system", Content: titleSystemPrompt},
+		{Role: "user", Content: truncateRunes(transcript, 1000)},
+	})
+	if err != nil {
+		log.Printf("[Kafka] 生成标题失败: taskID=%d err=%v", task.ID, err)
+		return
+	}
+	title = sanitizeVideoTitle(title)
+	if title == "" {
+		return
+	}
+	if err := c.repo.Task.UpdateTitle(task.ID, title); err != nil {
+		log.Printf("[Kafka] 写回标题失败: taskID=%d err=%v", task.ID, err)
+		return
+	}
+	task.Title = title
+	log.Printf("[Kafka] 已生成视频标题: taskID=%d title=%q", task.ID, title)
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// sanitizeVideoTitle 规整 LLM 返回的标题：去首尾空白与引号、合并换行、限长。
+func sanitizeVideoTitle(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "\"'")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > 60 {
+		s = string(r[:60])
+	}
+	return strings.TrimSpace(s)
+}
+
+const titleSystemPrompt = `根据用户提供的视频语音转写文本，生成一个简洁准确的视频标题。
+
+要求：
+1. 使用中文，不超过 30 个字。
+2. 概括视频核心主题，客观中性，不要标题党或夸张表述。
+3. 只输出标题文本本身，不要引号、序号、前缀（如"标题："）、换行或任何解释。
+4. 若文本过短或无实质内容，输出"未命名视频"。`
 
 func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) {
 	if c.ragProducer == nil {

@@ -24,7 +24,7 @@
         >
           <div class="video-item-icon">🎬</div>
           <div class="video-item-info">
-            <div class="video-item-name">{{ t.filename }}</div>
+            <div class="video-item-name">{{ t.title || t.filename }}</div>
             <div class="video-item-meta">{{ formatTime(t.created_at) }}</div>
           </div>
           <span v-if="isCurrent(t)" class="video-item-active-dot"></span>

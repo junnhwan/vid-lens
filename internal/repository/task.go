@@ -67,7 +67,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, file_url, file_size, status, stage, trace_id, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -150,6 +150,11 @@ func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, st
 // UpdateFileURL 更新文件存储路径
 func (r *TaskRepository) UpdateFileURL(id int64, fileURL string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("file_url", fileURL).Error
+}
+
+// UpdateTitle 写回 AI 生成的视频标题
+func (r *TaskRepository) UpdateTitle(id int64, title string) error {
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("title", title).Error
 }
 
 func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, filename string, finishedAt time.Time) error {

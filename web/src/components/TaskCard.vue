@@ -5,7 +5,7 @@
     <div class="task-header">
       <div class="task-icon">🎬</div>
       <div class="task-info">
-        <div class="task-name">{{ task.filename }}</div>
+        <div class="task-name">{{ task.title || task.filename }}</div>
         <div class="task-meta">
           <span class="meta-time">{{ formatTime(task.created_at) }}</span>
           <span class="meta-dot">·</span>

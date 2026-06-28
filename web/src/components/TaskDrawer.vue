@@ -3,7 +3,7 @@
     <div v-if="task" class="drawer-backdrop" @click="$emit('close')" role="dialog" aria-modal="true" :aria-label="task.filename">
       <div class="task-drawer" ref="drawerPanel" @click.stop>
         <div class="drawer-header">
-          <h3>{{ task.filename }}</h3>
+          <h3>{{ task.title || task.filename }}</h3>
           <button class="drawer-close" @click="$emit('close')" aria-label="关闭">×</button>
         </div>
 

@@ -43,6 +43,7 @@ type VideoTask struct {
 	AssetID         *int64         `gorm:"index" json:"asset_id"`
 	FileMD5         string         `gorm:"type:char(32);index;not null" json:"file_md5"`
 	Filename        string         `gorm:"type:varchar(255);not null" json:"filename"`
+	Title           string         `gorm:"type:varchar(120);default:''" json:"title,omitempty"`
 	FileURL         string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径
 	FileSize        int64          `gorm:"default:0" json:"file_size"`        // 文件大小（字节）
 	Status          int8           `gorm:"type:tinyint;default:0;index:idx_status_time" json:"status"`
