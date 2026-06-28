@@ -137,7 +137,7 @@ func (s *ChatService) ListMessages(userID, sessionID int64) ([]model.ChatMessage
 
 func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, profile)
+	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 	return s.saveChatExchange(ctx, userID, sessionID, prepared.Question, answer, prepared.Citations, prepared.RecentLimit, profile.LLMModel)
 }
 
-func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, profile ai.Profile) (*preparedRAGChat, error) {
+func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -181,7 +181,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if err != nil {
 		return nil, err
 	}
-	retrieval, err := s.newRetrievalPipeline(topK).Retrieve(ctx, RetrievalPipelineRequest{
+	retrieval, err := s.newRetrievalPipeline(topK, chat).Retrieve(ctx, RetrievalPipelineRequest{
 		UserID:         userID,
 		TaskID:         session.TaskID,
 		Question:       question,
@@ -208,10 +208,11 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	}, nil
 }
 
-func (s *ChatService) newRetrievalPipeline(topK int) *RetrievalPipeline {
+func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *RetrievalPipeline {
 	return &RetrievalPipeline{
 		repos:     s.repos,
 		retriever: s.retriever,
+		rewriter:  NewLLMQueryRewriter(chat),
 		expander: &ContextExpander{
 			repos:               s.repos,
 			Radius:              1,
@@ -305,7 +306,7 @@ func (s *ChatService) AskStream(ctx context.Context, userID, sessionID int64, qu
 		return nil, fmt.Errorf("stream emit 不能为空")
 	}
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, profile)
+	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
