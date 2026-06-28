@@ -615,15 +615,15 @@ func renderCategoryMetrics(b *strings.Builder, topK int, results []modeResult) {
 	}
 	sort.Strings(categories)
 	fmt.Fprintf(b, "### Per-Category Metrics\n\n")
-	fmt.Fprintf(b, "| Mode | Category | Cases | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Citation Context Hit Rate | Expanded Context Hit Rate | Rerank Changed Rank Count |\n", topK)
-	fmt.Fprintf(b, "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+	fmt.Fprintf(b, "| Mode | Category | Cases | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Avg Expanded Context | Citation Context Hit Rate | Expanded Context Hit Rate | Rerank Changed Rank Count |\n", topK)
+	fmt.Fprintf(b, "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, result := range results {
 		for _, category := range categories {
 			categoryReport, ok := result.report.Categories[category]
 			if !ok {
 				continue
 			}
-			fmt.Fprintf(b, "| %s | %s | %d | %s | %.3f | %s | %.2f ms | %s | %s | %s | %d |\n",
+			fmt.Fprintf(b, "| %s | %s | %d | %s | %.3f | %s | %.2f ms | %s | %.1f chars | %s | %s | %d |\n",
 				result.mode,
 				category,
 				categoryReport.TotalCases,
@@ -632,6 +632,7 @@ func renderCategoryMetrics(b *strings.Builder, topK int, results []modeResult) {
 				formatPercent(categoryReport.NoResultRate),
 				categoryReport.AvgLatencyMs,
 				formatPercent(categoryReport.RewriteFallbackRate),
+				categoryReport.AvgExpandedContextChars,
 				formatPercent(categoryReport.CitationContextHitRate),
 				formatPercent(categoryReport.ExpandedContextHitRate),
 				categoryReport.RerankChangedRankCount,

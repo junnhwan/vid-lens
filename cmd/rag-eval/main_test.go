@@ -156,7 +156,7 @@ func TestRenderMarkdownIncludesPerCategoryMetrics(t *testing.T) {
 
 	for _, want := range []string{
 		"### Per-Category Metrics",
-		"| Mode | Category | Cases | Recall@5 | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate |",
+		"| Mode | Category | Cases | Recall@5 | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Avg Expanded Context |",
 		"| Vector only | keyword_exact | 2 | 50.0% | 0.500 | 50.0% | 12.50 ms |",
 		"| Rewrite + MultiQuery + RRF + Window + Model Rerank | keyword_exact | 2 | 100.0% | 1.000 | 0.0% | 30.00 ms |",
 	} {
