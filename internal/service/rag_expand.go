@@ -59,6 +59,9 @@ func (e *ContextExpander) Expand(ctx context.Context, userID, taskID int64, embe
 		}
 
 		next := citation
+		if next.AnchorContent == "" {
+			next.AnchorContent = citation.Content
+		}
 		next.Content = joinChunkWindow(window)
 		next.ExpandedFromChunkIndex = citation.ChunkIndex
 		next.ExpandedWindowStart = window[0].ChunkIndex

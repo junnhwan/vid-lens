@@ -153,3 +153,32 @@ func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
 		t.Fatalf("rerank changed count = %d, want 1", report.RerankChangedRankCount)
 	}
 }
+
+func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
+	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
+		{
+			Case: RAGEvalCase{
+				Question:              "哪里提到 owner 校验？",
+				ExpectedChunkKeywords: []string{"owner 校验"},
+			},
+			Citations: []RetrievedChunk{
+				{
+					ChunkID:       1,
+					ChunkIndex:    5,
+					AnchorContent: "这里只是相邻片段的锚点，没有关键词",
+					Content:       "这里只是相邻片段的锚点，没有关键词\n真正命中的邻居窗口提到了 owner 校验",
+				},
+			},
+		},
+	}, 1)
+
+	if report.RecallAtK != 0 || report.MRR != 0 || report.HitCases != 0 {
+		t.Fatalf("report = %+v, want anchor-based Recall/MRR to stay zero", report)
+	}
+	if !report.Cases[0].CitationContextHit || !report.Cases[0].ExpandedContextHit {
+		t.Fatalf("case context hit flags = %+v, want expanded context hit recorded", report.Cases[0])
+	}
+	if report.CitationContextHitCases != 1 || report.ExpandedContextHitCases != 1 {
+		t.Fatalf("context hit counts = citation:%d expanded:%d, want 1/1", report.CitationContextHitCases, report.ExpandedContextHitCases)
+	}
+}

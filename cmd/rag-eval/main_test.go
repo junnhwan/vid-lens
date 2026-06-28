@@ -94,6 +94,8 @@ func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 		"Rewrite Fallback Rate",
 		"Avg Expanded Context",
 		"Rerank Changed Rank Count",
+		"Citation Context Hit Rate",
+		"Expanded Context Hit Rate",
 		"设计并实现 VidLens 视频 RAG 检索评测框架",
 	} {
 		if !strings.Contains(markdown, want) {

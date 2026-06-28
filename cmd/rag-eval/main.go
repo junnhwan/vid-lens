@@ -441,10 +441,10 @@ func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingM
 	fmt.Fprintf(&b, "- TopK: %d\n", topK)
 	fmt.Fprintf(&b, "- CandidateK: %d\n", candidateK)
 	fmt.Fprintf(&b, "- Latency note: retrieval latency excludes the shared query embedding API call.\n\n")
-	fmt.Fprintf(&b, "| Mode | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Avg Expanded Context | Rerank Changed Rank Count |\n", topK)
-	fmt.Fprintf(&b, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+	fmt.Fprintf(&b, "| Mode | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Avg Expanded Context | Rerank Changed Rank Count | Citation Context Hit Rate | Expanded Context Hit Rate |\n", topK)
+	fmt.Fprintf(&b, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, result := range results {
-		fmt.Fprintf(&b, "| %s | %s | %.3f | %s | %.2f ms | %s | %.1f chars | %d |\n",
+		fmt.Fprintf(&b, "| %s | %s | %.3f | %s | %.2f ms | %s | %.1f chars | %d | %s | %s |\n",
 			result.mode,
 			formatPercent(result.report.RecallAtK),
 			result.report.MRR,
@@ -453,6 +453,8 @@ func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingM
 			formatPercent(result.report.RewriteFallbackRate),
 			result.report.AvgExpandedContextChars,
 			result.report.RerankChangedRankCount,
+			formatPercent(result.report.CitationContextHitRate),
+			formatPercent(result.report.ExpandedContextHitRate),
 		)
 	}
 	fmt.Fprintf(&b, "\n")

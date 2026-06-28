@@ -31,6 +31,7 @@ type RetrievedChunk struct {
 	ChunkIndex             int      `json:"chunk_index"`
 	Score                  float32  `json:"score"`
 	Content                string   `json:"content"`
+	AnchorContent          string   `json:"anchor_content,omitempty"`
 	Source                 string   `json:"source,omitempty"`
 	VectorRank             int      `json:"vector_rank,omitempty"`
 	KeywordRank            int      `json:"keyword_rank,omitempty"`

@@ -25,13 +25,15 @@ type RAGEvalCaseResult struct {
 type RAGEvalRetriever func(ctx context.Context, evalCase RAGEvalCase, topK int) ([]RetrievedChunk, error)
 
 type RAGEvalCaseReport struct {
-	Question     string   `json:"question"`
-	Hit          bool     `json:"hit"`
-	Skipped      bool     `json:"skipped"`
-	FirstHitRank int      `json:"first_hit_rank"`
-	Keywords     []string `json:"keywords"`
-	LatencyMs    float64  `json:"latency_ms"`
-	ResultCount  int      `json:"result_count"`
+	Question           string   `json:"question"`
+	Hit                bool     `json:"hit"`
+	Skipped            bool     `json:"skipped"`
+	FirstHitRank       int      `json:"first_hit_rank"`
+	Keywords           []string `json:"keywords"`
+	LatencyMs          float64  `json:"latency_ms"`
+	ResultCount        int      `json:"result_count"`
+	CitationContextHit bool     `json:"citation_context_hit"`
+	ExpandedContextHit bool     `json:"expanded_context_hit"`
 }
 
 type RAGEvalReport struct {
@@ -49,6 +51,10 @@ type RAGEvalReport struct {
 	RewriteFallbackRate     float64 `json:"rewrite_fallback_rate"`
 	AvgExpandedContextChars float64 `json:"avg_expanded_context_chars"`
 	RerankChangedRankCount  int     `json:"rerank_changed_rank_count"`
+	CitationContextHitCases int     `json:"citation_context_hit_cases"`
+	CitationContextHitRate  float64 `json:"citation_context_hit_rate"`
+	ExpandedContextHitCases int     `json:"expanded_context_hit_cases"`
+	ExpandedContextHitRate  float64 `json:"expanded_context_hit_rate"`
 }
 
 func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
@@ -111,7 +117,15 @@ func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
 			limit = len(citations)
 		}
 		for i := 0; i < limit; i++ {
-			if chunkMatchesExpectedKeywords(citations[i].Content, caseReport.Keywords) {
+			anchorHit := chunkMatchesExpectedKeywords(anchorContentForEval(citations[i]), caseReport.Keywords)
+			contextHit := chunkMatchesExpectedKeywords(citations[i].Content, caseReport.Keywords)
+			if contextHit {
+				caseReport.CitationContextHit = true
+			}
+			if contextHit && !anchorHit && citations[i].AnchorContent != "" {
+				caseReport.ExpandedContextHit = true
+			}
+			if anchorHit {
 				caseReport.Hit = true
 				caseReport.FirstHitRank = i + 1
 				break
@@ -121,12 +135,20 @@ func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
 			report.HitCases++
 			reciprocalRankSum += 1.0 / float64(caseReport.FirstHitRank)
 		}
+		if caseReport.CitationContextHit {
+			report.CitationContextHitCases++
+		}
+		if caseReport.ExpandedContextHit {
+			report.ExpandedContextHitCases++
+		}
 		report.Cases = append(report.Cases, caseReport)
 	}
 
 	if report.EvaluableCases > 0 {
 		report.RecallAtK = float64(report.HitCases) / float64(report.EvaluableCases)
 		report.MRR = reciprocalRankSum / float64(report.EvaluableCases)
+		report.CitationContextHitRate = float64(report.CitationContextHitCases) / float64(report.EvaluableCases)
+		report.ExpandedContextHitRate = float64(report.ExpandedContextHitCases) / float64(report.EvaluableCases)
 	}
 	report.NoResultRate = float64(noResultCases) / float64(len(results))
 	report.AvgLatencyMs = durationMillis(latencySum) / float64(len(results))
@@ -178,6 +200,13 @@ func chunkMatchesExpectedKeywords(content string, keywords []string) bool {
 		}
 	}
 	return true
+}
+
+func anchorContentForEval(chunk RetrievedChunk) string {
+	if strings.TrimSpace(chunk.AnchorContent) != "" {
+		return chunk.AnchorContent
+	}
+	return chunk.Content
 }
 
 func durationMillis(duration time.Duration) float64 {
