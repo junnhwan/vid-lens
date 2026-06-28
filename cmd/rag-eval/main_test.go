@@ -75,3 +75,32 @@ func TestRenderMarkdownDoesNotClaimRecallImprovedWhenOnlyMRRImproves(t *testing.
 		t.Fatalf("renderMarkdown() missing equal Recall@5 wording:\n%s", markdown)
 	}
 }
+
+func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
+	results := []modeResult{
+		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 1}},
+		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 2}},
+		{mode: "Rewrite + MultiQuery + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 3, RewriteFallbackCount: 2, RewriteFallbackRate: 0.5}},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 4, AvgExpandedContextChars: 128, RerankChangedRankCount: 1}},
+	}
+
+	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{5}, 4, "text-embedding-3-small", 5, 30, results)
+
+	for _, want := range []string{
+		"Vector only",
+		"Vector + BM25 + RRF",
+		"Rewrite + MultiQuery + RRF",
+		"Rewrite + MultiQuery + RRF + Window + Rerank",
+		"Rewrite Fallback Rate",
+		"Avg Expanded Context",
+		"Rerank Changed Rank Count",
+		"设计并实现 VidLens 视频 RAG 检索评测框架",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("renderMarkdown() missing %q:\n%s", want, markdown)
+		}
+	}
+	if strings.Contains(markdown, "提升") {
+		t.Fatalf("renderMarkdown() should not claim improvement when metrics are equal:\n%s", markdown)
+	}
+}

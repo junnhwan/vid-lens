@@ -114,3 +114,42 @@ func TestRAGEvalRunUsesRetrieverAndPreservesNoResultCases(t *testing.T) {
 		t.Fatalf("latency should be recorded: %+v", report.Cases)
 	}
 }
+
+func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
+	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
+		{
+			Case: RAGEvalCase{
+				Question:              "Redis 分布式锁风险？",
+				ExpectedChunkKeywords: []string{"Redis"},
+			},
+			Citations: []RetrievedChunk{
+				{ChunkID: 1, Content: "Redis 分布式锁风险", Source: RetrievalSourceHybrid},
+			},
+			Duration:             10 * time.Millisecond,
+			RewriteFallback:      true,
+			ExpandedContextChars: 120,
+			RerankChangedRank:    true,
+		},
+		{
+			Case: RAGEvalCase{
+				Question:              "RAG 为什么要切片？",
+				ExpectedChunkKeywords: []string{"RAG"},
+			},
+			Citations: []RetrievedChunk{
+				{ChunkID: 2, Content: "RAG 切片", Source: RetrievalSourceVector},
+			},
+			Duration:             20 * time.Millisecond,
+			ExpandedContextChars: 80,
+		},
+	}, 3)
+
+	if report.RewriteFallbackCount != 1 || report.RewriteFallbackRate != 0.5 {
+		t.Fatalf("rewrite fallback metrics = %d %.3f, want 1 and 0.5", report.RewriteFallbackCount, report.RewriteFallbackRate)
+	}
+	if report.AvgExpandedContextChars != 100 {
+		t.Fatalf("avg expanded context chars = %.1f, want 100", report.AvgExpandedContextChars)
+	}
+	if report.RerankChangedRankCount != 1 {
+		t.Fatalf("rerank changed count = %d, want 1", report.RerankChangedRankCount)
+	}
+}

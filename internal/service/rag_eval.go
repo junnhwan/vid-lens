@@ -14,9 +14,12 @@ type RAGEvalCase struct {
 }
 
 type RAGEvalCaseResult struct {
-	Case      RAGEvalCase
-	Citations []RetrievedChunk
-	Duration  time.Duration
+	Case                 RAGEvalCase
+	Citations            []RetrievedChunk
+	Duration             time.Duration
+	RewriteFallback      bool
+	ExpandedContextChars int
+	RerankChangedRank    bool
 }
 
 type RAGEvalRetriever func(ctx context.Context, evalCase RAGEvalCase, topK int) ([]RetrievedChunk, error)
@@ -41,6 +44,11 @@ type RAGEvalReport struct {
 	AvgLatencyMs   float64             `json:"avg_latency_ms"`
 	SourceCounts   map[string]int      `json:"source_counts"`
 	Cases          []RAGEvalCaseReport `json:"cases"`
+
+	RewriteFallbackCount    int     `json:"rewrite_fallback_count"`
+	RewriteFallbackRate     float64 `json:"rewrite_fallback_rate"`
+	AvgExpandedContextChars float64 `json:"avg_expanded_context_chars"`
+	RerankChangedRankCount  int     `json:"rerank_changed_rank_count"`
 }
 
 func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
@@ -59,6 +67,7 @@ func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
 	var reciprocalRankSum float64
 	var noResultCases int
 	var latencySum time.Duration
+	var expandedContextChars int
 
 	for _, result := range results {
 		citations := result.Citations
@@ -66,6 +75,13 @@ func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
 			noResultCases++
 		}
 		latencySum += result.Duration
+		if result.RewriteFallback {
+			report.RewriteFallbackCount++
+		}
+		expandedContextChars += result.ExpandedContextChars
+		if result.RerankChangedRank {
+			report.RerankChangedRankCount++
+		}
 		for _, citation := range citations {
 			source := citation.Source
 			if source == "" {
@@ -114,6 +130,8 @@ func EvaluateRAGRetrieval(results []RAGEvalCaseResult, topK int) RAGEvalReport {
 	}
 	report.NoResultRate = float64(noResultCases) / float64(len(results))
 	report.AvgLatencyMs = durationMillis(latencySum) / float64(len(results))
+	report.RewriteFallbackRate = float64(report.RewriteFallbackCount) / float64(len(results))
+	report.AvgExpandedContextChars = float64(expandedContextChars) / float64(len(results))
 	return report
 }
 

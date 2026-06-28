@@ -14,6 +14,14 @@ type ContextExpander struct {
 	MaxCharsPerCitation int
 }
 
+func NewContextExpander(repos *repository.Repositories, radius, maxCharsPerCitation int) *ContextExpander {
+	return &ContextExpander{
+		repos:               repos,
+		Radius:              radius,
+		MaxCharsPerCitation: maxCharsPerCitation,
+	}
+}
+
 func (e *ContextExpander) Expand(ctx context.Context, userID, taskID int64, embeddingModel string, citations []RetrievedChunk) ([]RetrievedChunk, error) {
 	if len(citations) == 0 {
 		return nil, nil

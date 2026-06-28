@@ -46,10 +46,11 @@ type profileBundle struct {
 }
 
 type caseEvalContext struct {
-	evalCase evalCase
-	userID   int64
-	profile  *ai.Profile
-	vector   []float32
+	evalCase  evalCase
+	userID    int64
+	profile   *ai.Profile
+	embedding ai.EmbeddingClient
+	vector    []float32
 }
 
 type modeResult struct {
@@ -160,10 +161,20 @@ func run(parent context.Context, opts evalOptions) error {
 	if err != nil {
 		return err
 	}
+	rewriteReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, false)
+	if err != nil {
+		return err
+	}
+	fullReport, err := evaluateRewritePipeline(ctx, caseContexts, store, repos, factory, topK, candidateK, true)
+	if err != nil {
+		return err
+	}
 
 	markdown := renderMarkdown(opts, taskIDs, len(cases), embeddingModel, topK, candidateK, []modeResult{
 		{mode: "Vector only", report: vectorReport},
 		{mode: "Vector + BM25 + RRF", report: hybridReport},
+		{mode: "Rewrite + MultiQuery + RRF", report: rewriteReport},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: fullReport},
 	})
 	if err := os.MkdirAll(parentDir(opts.outputPath), 0o755); err != nil {
 		return err
@@ -237,10 +248,11 @@ func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repos
 			taskIDs = append(taskIDs, c.TaskID)
 		}
 		prepared = append(prepared, caseEvalContext{
-			evalCase: c,
-			userID:   task.UserID,
-			profile:  bundle.profile,
-			vector:   vector,
+			evalCase:  c,
+			userID:    task.UserID,
+			profile:   bundle.profile,
+			embedding: bundle.embedding,
+			vector:    vector,
 		})
 	}
 	sort.Slice(taskIDs, func(i, j int) bool { return taskIDs[i] < taskIDs[j] })
@@ -314,6 +326,99 @@ func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
+func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, full bool) (service.RAGEvalReport, error) {
+	results := make([]service.RAGEvalCaseResult, 0, len(cases))
+	for _, c := range cases {
+		var expander *service.ContextExpander
+		var reranker service.Reranker
+		if full {
+			expander = service.NewContextExpander(repos, 1, 4000)
+			reranker = service.DeterministicReranker{}
+		}
+		pipeline := service.NewRetrievalPipeline(
+			repos,
+			store,
+			newEvalRewriter(factory, *c.profile),
+			expander,
+			reranker,
+			candidateK,
+			0,
+		)
+		startedAt := time.Now()
+		result, err := pipeline.Retrieve(ctx, service.RetrievalPipelineRequest{
+			UserID:         c.userID,
+			TaskID:         c.evalCase.TaskID,
+			Question:       c.evalCase.Question,
+			TopK:           topK,
+			EmbeddingModel: c.profile.EmbeddingModel,
+			Embedding:      c.embedding,
+		})
+		duration := time.Since(startedAt)
+		if err != nil {
+			return service.RAGEvalReport{}, fmt.Errorf("pipeline eval task %d: %w", c.evalCase.TaskID, err)
+		}
+		results = append(results, service.RAGEvalCaseResult{
+			Case:                 c.evalCase.serviceCase(),
+			Citations:            result.Citations,
+			Duration:             duration,
+			RewriteFallback:      result.Rewrite.Fallback,
+			ExpandedContextChars: citationContentChars(result.Citations),
+			RerankChangedRank:    rerankChangedRank(result.Citations),
+		})
+	}
+	return service.EvaluateRAGRetrieval(results, topK), nil
+}
+
+func newEvalRewriter(factory *ai.Factory, profile ai.Profile) service.QueryRewriter {
+	if strings.TrimSpace(profile.LLMProvider) == "" ||
+		strings.TrimSpace(profile.LLMBaseURL) == "" ||
+		strings.TrimSpace(profile.LLMAPIKey) == "" ||
+		strings.TrimSpace(profile.LLMModel) == "" {
+		return evalFallbackRewriter{reason: "LLM rewrite profile is incomplete"}
+	}
+	chat, err := factory.NewChatClient(profile)
+	if err != nil {
+		return evalFallbackRewriter{reason: err.Error()}
+	}
+	return service.NewLLMQueryRewriter(chat)
+}
+
+type evalFallbackRewriter struct {
+	reason string
+}
+
+func (r evalFallbackRewriter) Rewrite(_ context.Context, input service.RewriteInput) (service.RewriteResult, error) {
+	original := strings.TrimSpace(input.Question)
+	if original == "" {
+		return service.RewriteResult{}, fmt.Errorf("问题不能为空")
+	}
+	if r.reason == "" {
+		r.reason = "rewrite unavailable"
+	}
+	return service.RewriteResult{
+		Original: original,
+		Queries:  []string{original},
+		Fallback: true,
+	}, fmt.Errorf("%s", r.reason)
+}
+
+func citationContentChars(citations []service.RetrievedChunk) int {
+	var total int
+	for _, citation := range citations {
+		total += len([]rune(citation.Content))
+	}
+	return total
+}
+
+func rerankChangedRank(citations []service.RetrievedChunk) bool {
+	for _, citation := range citations {
+		if citation.FinalRank > 0 && citation.CrossQueryRank > 0 && citation.FinalRank != citation.CrossQueryRank {
+			return true
+		}
+	}
+	return false
+}
+
 func (c evalCase) serviceCase() service.RAGEvalCase {
 	return service.RAGEvalCase{
 		TaskHint:              c.TaskHint,
@@ -336,37 +441,41 @@ func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingM
 	fmt.Fprintf(&b, "- TopK: %d\n", topK)
 	fmt.Fprintf(&b, "- CandidateK: %d\n", candidateK)
 	fmt.Fprintf(&b, "- Latency note: retrieval latency excludes the shared query embedding API call.\n\n")
-	fmt.Fprintf(&b, "| Mode | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency |\n", topK)
-	fmt.Fprintf(&b, "| --- | ---: | ---: | ---: | ---: |\n")
+	fmt.Fprintf(&b, "| Mode | Recall@%d | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate | Avg Expanded Context | Rerank Changed Rank Count |\n", topK)
+	fmt.Fprintf(&b, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, result := range results {
-		fmt.Fprintf(&b, "| %s | %s | %.3f | %s | %.2f ms |\n",
+		fmt.Fprintf(&b, "| %s | %s | %.3f | %s | %.2f ms | %s | %.1f chars | %d |\n",
 			result.mode,
 			formatPercent(result.report.RecallAtK),
 			result.report.MRR,
 			formatPercent(result.report.NoResultRate),
 			result.report.AvgLatencyMs,
+			formatPercent(result.report.RewriteFallbackRate),
+			result.report.AvgExpandedContextChars,
+			result.report.RerankChangedRankCount,
 		)
 	}
 	fmt.Fprintf(&b, "\n")
 	if len(results) >= 2 {
 		base := results[0].report
-		opt := results[1].report
+		opt := results[len(results)-1].report
 		recallImproved := opt.RecallAtK > base.RecallAtK
 		mrrImproved := opt.MRR > base.MRR
+		noResultRegressed := opt.NoResultRate > base.NoResultRate
 		fmt.Fprintf(&b, "Conclusion:\n")
-		if recallImproved || mrrImproved {
-			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, hybrid retrieval %s and %s. This supports a cautious resume claim about retrieval ranking for exact keywords and project-specific terms, not a broad claim about answer accuracy or production RAG quality.\n\n",
+		if (recallImproved || mrrImproved) && !noResultRegressed {
+			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, the strongest RAG 2.0 mode %s and %s. This supports a cautious resume claim about retrieval ranking for exact keywords and project-specific terms, not a broad claim about answer accuracy or production RAG quality.\n\n",
 				recallComparisonText(topK, base.RecallAtK, opt.RecallAtK),
 				mrrComparisonText(base.MRR, opt.MRR))
 			fmt.Fprintf(&b, "Resume sentence:\n")
-			fmt.Fprintf(&b, "基于 RAG 实现视频智能问答，针对专有名词和精确关键词问题引入 Go 侧 BM25 风格召回，并通过 RRF 融合向量检索结果；在自建 %d 条视频问答评估集上%s，%s，返回引用片段提升答案可解释性。\n\n",
+			fmt.Fprintf(&b, "基于 VidLens 视频转写全文构建 RAG 2.0 问答链路，引入 query rewrite、多查询向量/BM25 混合召回、RRF 融合、相邻片段回填和轻量 rerank；在自建 %d 条视频问答评估集上%s，%s，返回引用片段辅助解释检索依据。\n\n",
 				caseCount,
 				recallResumeText(topK, base.RecallAtK, opt.RecallAtK),
 				mrrResumeText(base.MRR, opt.MRR))
 		} else {
-			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, hybrid retrieval did not produce a higher aggregate Recall@%d or MRR than vector-only retrieval. Do not write a resume claim about retrieval improvement from this run.\n\n", topK)
+			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, the RAG 2.0 modes did not produce a safer aggregate improvement over vector-only retrieval. Do not write a resume claim about retrieval improvement from this run.\n\n")
 			fmt.Fprintf(&b, "Resume sentence:\n")
-			fmt.Fprintf(&b, "本次小样本 RAG A/B 评估未观察到可用于简历的 Recall@%d 或 MRR 提升，不建议写检索提升比例。\n\n", topK)
+			fmt.Fprintf(&b, "设计并实现 VidLens 视频 RAG 检索评测框架，支持 vector-only、BM25+RRF、query rewrite、多查询召回、相邻片段回填和 rerank 多模式对比；通过自建 %d 条视频 QA case 记录 Recall@%d、MRR、无结果率和检索延迟，为后续优化提供可量化依据。\n\n", caseCount, topK)
 		}
 	}
 	for _, result := range results {

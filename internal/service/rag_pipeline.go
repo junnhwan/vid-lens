@@ -22,6 +22,18 @@ type RetrievalPipeline struct {
 	RRFK       float64
 }
 
+func NewRetrievalPipeline(repos *repository.Repositories, retriever RAGRetriever, rewriter QueryRewriter, expander *ContextExpander, reranker Reranker, candidateK int, minScore float32) *RetrievalPipeline {
+	return &RetrievalPipeline{
+		repos:      repos,
+		retriever:  retriever,
+		rewriter:   rewriter,
+		expander:   expander,
+		reranker:   reranker,
+		CandidateK: candidateK,
+		MinScore:   minScore,
+	}
+}
+
 type RetrievalPipelineRequest struct {
 	UserID         int64
 	TaskID         int64
