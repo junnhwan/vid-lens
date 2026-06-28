@@ -61,6 +61,11 @@ type modeResult struct {
 	report service.RAGEvalReport
 }
 
+type answerModeResult struct {
+	mode   string
+	report service.VideoAgentAnswerEvalReport
+}
+
 func main() {
 	opts := parseFlags()
 	if err := run(context.Background(), opts); err != nil {
@@ -177,13 +182,15 @@ func run(parent context.Context, opts evalOptions) error {
 		return err
 	}
 
-	markdown := renderMarkdown(opts, taskIDs, len(cases), embeddingModel, topK, candidateK, []modeResult{
+	retrievalResults := []modeResult{
 		{mode: "Vector only", report: vectorReport},
 		{mode: "Vector + BM25 + RRF", report: hybridReport},
 		{mode: "Rewrite + MultiQuery + RRF", report: rewriteReport},
 		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: fullReport},
 		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: modelRerankReport},
-	})
+	}
+	answerResults := evaluateAnswerModes(ctx, caseContexts, store, repos, factory, topK, candidateK)
+	markdown := renderMarkdownWithAgentAnswerEval(opts, taskIDs, len(cases), embeddingModel, topK, candidateK, retrievalResults, answerResults)
 	if err := os.MkdirAll(parentDir(opts.outputPath), 0o755); err != nil {
 		return err
 	}
@@ -431,6 +438,134 @@ func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, s
 	return service.EvaluateRAGRetrieval(results, topK), nil
 }
 
+func evaluateAnswerModes(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) []answerModeResult {
+	ordinaryResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
+	agentResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
+	for _, c := range cases {
+		ordinaryResults = append(ordinaryResults, evaluateOrdinaryAnswer(ctx, c, store, repos, factory, topK, candidateK))
+		agentResults = append(agentResults, evaluateAgenticAnswer(ctx, c, store, repos, factory, topK, candidateK))
+	}
+	return []answerModeResult{
+		{mode: "Ordinary RAG answer", report: service.EvaluateVideoAgentAnswers(ordinaryResults)},
+		{mode: "Agentic answer", report: service.EvaluateVideoAgentAnswers(agentResults)},
+	}
+}
+
+func evaluateOrdinaryAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result service.VideoAgentAnswerEvalCaseResult) {
+	result = service.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
+	startedAt := time.Now()
+	defer func() {
+		result.Duration = time.Since(startedAt)
+	}()
+	chat, err := newAnswerEvalChatClient(factory, *c.profile)
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	pipeline := newAnswerEvalPipeline(c, store, repos, candidateK)
+	retrieval, err := pipeline.Retrieve(ctx, service.RetrievalPipelineRequest{
+		UserID:         c.userID,
+		TaskID:         c.evalCase.TaskID,
+		Question:       c.evalCase.Question,
+		TopK:           topK,
+		EmbeddingModel: c.profile.EmbeddingModel,
+		Embedding:      c.embedding,
+	})
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	result.Citations = retrieval.Citations
+	if len(retrieval.Citations) == 0 {
+		result = answerEvalErrorResult(result, fmt.Errorf("no retrieved citations"))
+		return
+	}
+	answer, err := chat.Chat(ctx, service.BuildRAGAnswerMessages(retrieval.Citations, c.evalCase.Question))
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	result.Answer = answer
+	return
+}
+
+func evaluateAgenticAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result service.VideoAgentAnswerEvalCaseResult) {
+	result = service.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
+	startedAt := time.Now()
+	defer func() {
+		result.Duration = time.Since(startedAt)
+	}()
+	chat, err := newAnswerEvalChatClient(factory, *c.profile)
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	pipeline := newAnswerEvalPipeline(c, store, repos, candidateK)
+	tools := service.NewVideoAgentTools(repos, pipeline, chat)
+	search, step, err := tools.SearchTranscript(ctx, service.SearchTranscriptInput{
+		UserID:         c.userID,
+		TaskID:         c.evalCase.TaskID,
+		Question:       c.evalCase.Question,
+		TopK:           topK,
+		EmbeddingModel: c.profile.EmbeddingModel,
+		Embedding:      c.embedding,
+	})
+	result.Trace = append(result.Trace, step)
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	if len(search.Citations) == 0 {
+		result = answerEvalErrorResult(result, fmt.Errorf("no retrieved citations"))
+		return
+	}
+	template := service.ClassifyVideoAgentTemplate(c.evalCase.Question)
+	answer, citations, trace, err := service.ExecuteVideoAgentTemplate(ctx, tools, template, service.VideoAgentTemplateRequest{
+		UserID:         c.userID,
+		TaskID:         c.evalCase.TaskID,
+		Question:       c.evalCase.Question,
+		EmbeddingModel: c.profile.EmbeddingModel,
+	}, search.Citations, result.Trace)
+	result.Trace = trace
+	result.Citations = citations
+	if err != nil {
+		result = answerEvalErrorResult(result, err)
+		return
+	}
+	result.Answer = answer
+	return
+}
+
+func newAnswerEvalPipeline(c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, candidateK int) *service.RetrievalPipeline {
+	return service.NewRetrievalPipeline(
+		repos,
+		store,
+		cachedEvalRewriter{result: c.rewrite, err: c.rewriteErr},
+		service.NewContextExpander(repos, 1, 4000),
+		service.DeterministicReranker{},
+		candidateK,
+		0,
+	)
+}
+
+func newAnswerEvalChatClient(factory *ai.Factory, profile ai.Profile) (ai.ChatClient, error) {
+	if strings.TrimSpace(profile.LLMProvider) == "" ||
+		strings.TrimSpace(profile.LLMBaseURL) == "" ||
+		strings.TrimSpace(profile.LLMAPIKey) == "" ||
+		strings.TrimSpace(profile.LLMModel) == "" {
+		return nil, fmt.Errorf("LLM answer profile is incomplete")
+	}
+	return factory.NewChatClient(profile)
+}
+
+func answerEvalErrorResult(result service.VideoAgentAnswerEvalCaseResult, err error) service.VideoAgentAnswerEvalCaseResult {
+	result.FallbackOrError = true
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result
+}
+
 func newEvalRewriter(factory *ai.Factory, profile ai.Profile) service.QueryRewriter {
 	if strings.TrimSpace(profile.LLMProvider) == "" ||
 		strings.TrimSpace(profile.LLMBaseURL) == "" ||
@@ -514,6 +649,10 @@ func (c evalCase) serviceCase() service.RAGEvalCase {
 }
 
 func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingModel string, topK, candidateK int, results []modeResult) string {
+	return renderMarkdownWithAgentAnswerEval(opts, taskIDs, caseCount, embeddingModel, topK, candidateK, results, nil)
+}
+
+func renderMarkdownWithAgentAnswerEval(opts evalOptions, taskIDs []int64, caseCount int, embeddingModel string, topK, candidateK int, results []modeResult, answerResults []answerModeResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# VidLens Resume Quantification Results\n\n")
 	fmt.Fprintf(&b, "## RAG Retrieval A/B Evaluation\n\n")
@@ -545,6 +684,7 @@ func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingM
 	fmt.Fprintf(&b, "\n")
 	renderCategoryMetrics(&b, topK, results)
 	fmt.Fprintf(&b, "\n")
+	renderAgentAnswerEvaluation(&b, answerResults)
 	if len(results) >= 2 {
 		base := results[0].report
 		hybrid, hasHybrid := findModeResult(results, "Vector + BM25 + RRF")
@@ -639,6 +779,48 @@ func renderCategoryMetrics(b *strings.Builder, topK int, results []modeResult) {
 			)
 		}
 	}
+}
+
+func renderAgentAnswerEvaluation(b *strings.Builder, answerResults []answerModeResult) {
+	if len(answerResults) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "## Agent Answer Evaluation\n\n")
+	fmt.Fprintf(b, "| Mode | Answer Point Coverage | Citation Hit Rate | No Answer Rate | Avg Tool Steps | Fallback/Error Rate | Avg Latency |\n")
+	fmt.Fprintf(b, "| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+	for _, result := range answerResults {
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %.1f | %s | %.2f ms |\n",
+			result.mode,
+			formatPercent(result.report.AnswerPointCoverage),
+			formatPercent(result.report.CitationHitRate),
+			formatPercent(result.report.NoAnswerRate),
+			result.report.AvgToolSteps,
+			formatPercent(result.report.FallbackErrorRate),
+			result.report.AvgLatencyMs,
+		)
+	}
+	fmt.Fprintf(b, "\n")
+	ordinary, hasOrdinary := findAnswerModeResult(answerResults, "Ordinary RAG answer")
+	agentic, hasAgentic := findAnswerModeResult(answerResults, "Agentic answer")
+	if hasOrdinary && hasAgentic {
+		if agentic.report.AnswerPointCoverage > ordinary.report.AnswerPointCoverage &&
+			agentic.report.FallbackErrorRate <= ordinary.report.FallbackErrorRate {
+			fmt.Fprintf(b, "Agentic answer improved deterministic answer-point coverage from %s to %s. Treat this as local eval evidence, not a production benchmark or broad answer-accuracy claim.\n\n",
+				formatPercent(ordinary.report.AnswerPointCoverage),
+				formatPercent(agentic.report.AnswerPointCoverage))
+		} else {
+			fmt.Fprintf(b, "Agentic answer eval did not prove a safer answer-point coverage improvement over ordinary RAG in this run. Do not claim answer accuracy improvement from Agentic QA without stronger eval evidence.\n\n")
+		}
+	}
+}
+
+func findAnswerModeResult(results []answerModeResult, mode string) (answerModeResult, bool) {
+	for _, result := range results {
+		if result.mode == mode {
+			return result, true
+		}
+	}
+	return answerModeResult{}, false
 }
 
 func recallComparisonText(topK int, base, opt float64) string {

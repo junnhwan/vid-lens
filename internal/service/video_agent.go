@@ -43,6 +43,13 @@ type VideoAgentStep struct {
 	Error     string         `json:"error,omitempty"`
 }
 
+type VideoAgentTemplateRequest struct {
+	UserID         int64
+	TaskID         int64
+	Question       string
+	EmbeddingModel string
+}
+
 type VideoAgentService struct {
 	chatSvc *ChatService
 }
@@ -144,9 +151,18 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 }
 
 func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentRequest, embeddingModel string, taskID int64, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
+	return ExecuteVideoAgentTemplate(ctx, tools, template, VideoAgentTemplateRequest{
+		UserID:         req.UserID,
+		TaskID:         taskID,
+		Question:       req.Question,
+		EmbeddingModel: embeddingModel,
+	}, citations, trace)
+}
+
+func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentTemplateRequest, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
 	switch template {
 	case VideoAgentSummarizeTopic:
-		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, taskID, embeddingModel, citations, len(citations))
+		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, len(citations))
 		trace = append(trace, windowTrace...)
 		if err != nil {
 			return "", nil, trace, err
@@ -163,7 +179,7 @@ func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAge
 		}
 		return final.Answer, final.Citations, trace, nil
 	case VideoAgentCompareTopics:
-		groups, windowTrace, err := loadAgentWindowGroups(ctx, tools, req.UserID, taskID, embeddingModel, citations, 2)
+		groups, windowTrace, err := loadAgentWindowGroups(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, 2)
 		trace = append(trace, windowTrace...)
 		if err != nil {
 			return "", nil, trace, err
@@ -180,7 +196,7 @@ func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAge
 		}
 		return final.Answer, final.Citations, trace, nil
 	case VideoAgentCritiqueTopic:
-		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, taskID, embeddingModel, citations, len(citations))
+		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, len(citations))
 		trace = append(trace, windowTrace...)
 		if err != nil {
 			return "", nil, trace, err

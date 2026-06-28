@@ -98,8 +98,8 @@ func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
 }
 
 func TestVideoAgentAskSummarizeExecutesWindowSummarizeAndBuildAnswer(t *testing.T) {
-	repos, _, session := newVideoAgentTestSession(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+	repos, task, session := newVideoAgentTestSession(t)
+	seedVideoChunks(t, repos, 7, task.ID, "text-embedding-3-small", []string{
 		"chunk-0 背景", "chunk-1 Redis owner", "chunk-2 风险",
 	})
 	embedding := &fakeEmbeddingClient{dim: 3}
@@ -134,6 +134,87 @@ func TestVideoAgentAskSummarizeExecutesWindowSummarizeAndBuildAnswer(t *testing.
 	}
 	if !messagesContain(chatClient.messages[1], "chunk-0 背景") || !messagesContain(chatClient.messages[1], "chunk-2 风险") {
 		t.Fatalf("summarize prompt = %+v, want expanded window", chatClient.messages[1])
+	}
+}
+
+func TestVideoAgentAskCompareExecutesWindowCompareAndBuildAnswer(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	seedVideoChunks(t, repos, 7, task.ID, "text-embedding-3-small", []string{
+		"chunk-0 前半段观点", "chunk-1 过渡", "chunk-2 后半段变化",
+	})
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"对比中间结果",
+		"最终对比回答",
+	}}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 0, Content: "chunk-0 前半段观点"},
+		{ChunkID: 3, ChunkIndex: 2, Content: "chunk-2 后半段变化"},
+	}}
+	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	agent := NewVideoAgentService(chatSvc)
+
+	result, err := agent.Ask(context.Background(), VideoAgentRequest{
+		UserID:    7,
+		SessionID: session.ID,
+		Question:  "对比前后两段观点有什么变化",
+		TopK:      2,
+	}, embedding, chatClient, ai.Profile{EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "最终对比回答" || result.Template != string(VideoAgentCompareTopics) {
+		t.Fatalf("result = %+v", result)
+	}
+	if traceTools(result.Trace) != "search_transcript|get_transcript_window|get_transcript_window|compare_segments|build_cited_answer" {
+		t.Fatalf("trace = %+v", result.Trace)
+	}
+	if len(chatClient.messages) != 3 {
+		t.Fatalf("chat calls = %d, want rewrite, compare and final answer", len(chatClient.messages))
+	}
+	if !messagesContain(chatClient.messages[1], "前半段观点") || !messagesContain(chatClient.messages[1], "后半段变化") {
+		t.Fatalf("compare prompt = %+v, want both windows", chatClient.messages[1])
+	}
+}
+
+func TestVideoAgentAskCritiqueExecutesWindowSummarizeAndBuildAnswer(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	seedVideoChunks(t, repos, 7, task.ID, "text-embedding-3-small", []string{
+		"chunk-0 背景", "chunk-1 释放锁没有 owner 校验会有风险", "chunk-2 后续说明",
+	})
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"风险中间结果",
+		"最终风险回答",
+	}}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 2, ChunkIndex: 1, Content: "chunk-1 释放锁没有 owner 校验会有风险"},
+	}}
+	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	agent := NewVideoAgentService(chatSvc)
+
+	result, err := agent.Ask(context.Background(), VideoAgentRequest{
+		UserID:    7,
+		SessionID: session.ID,
+		Question:  "这个分布式锁方案有什么风险和不足？",
+		TopK:      1,
+	}, embedding, chatClient, ai.Profile{EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "最终风险回答" || result.Template != string(VideoAgentCritiqueTopic) {
+		t.Fatalf("result = %+v", result)
+	}
+	if traceTools(result.Trace) != "search_transcript|get_transcript_window|summarize_segments|build_cited_answer" {
+		t.Fatalf("trace = %+v", result.Trace)
+	}
+	if len(chatClient.messages) != 3 {
+		t.Fatalf("chat calls = %d, want rewrite, critique summarize and final answer", len(chatClient.messages))
+	}
+	if !messagesContain(chatClient.messages[1], "问题、风险、不足或不严谨") {
+		t.Fatalf("critique prompt = %+v, want risk framing", chatClient.messages[1])
 	}
 }
 

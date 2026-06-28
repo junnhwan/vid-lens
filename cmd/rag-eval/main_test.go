@@ -186,3 +186,44 @@ func TestRenderMarkdownRecordsHybridImprovementEvenWhenModelRerankRegresses(t *t
 		}
 	}
 }
+
+func TestRenderMarkdownIncludesAgentAnswerEvaluation(t *testing.T) {
+	retrievalResults := []modeResult{
+		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
+		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
+	}
+	answerResults := []answerModeResult{
+		{mode: "Ordinary RAG answer", report: service.VideoAgentAnswerEvalReport{
+			TotalCases:          2,
+			AnswerPointCoverage: 0.50,
+			CitationHitRate:     0.50,
+			NoAnswerRate:        0.50,
+			AvgToolSteps:        0,
+			FallbackErrorRate:   0,
+			AvgLatencyMs:        120,
+		}},
+		{mode: "Agentic answer", report: service.VideoAgentAnswerEvalReport{
+			TotalCases:          2,
+			AnswerPointCoverage: 0.75,
+			CitationHitRate:     1.00,
+			NoAnswerRate:        0,
+			AvgToolSteps:        3.5,
+			FallbackErrorRate:   0,
+			AvgLatencyMs:        240,
+		}},
+	}
+
+	markdown := renderMarkdownWithAgentAnswerEval(evalOptions{environment: "test", commit: "abc123"}, []int64{2, 5}, 2, "text-embedding-3-small", 5, 30, retrievalResults, answerResults)
+
+	for _, want := range []string{
+		"## Agent Answer Evaluation",
+		"| Mode | Answer Point Coverage | Citation Hit Rate | No Answer Rate | Avg Tool Steps | Fallback/Error Rate | Avg Latency |",
+		"| Ordinary RAG answer | 50.0% | 50.0% | 50.0% | 0.0 | 0.0% | 120.00 ms |",
+		"| Agentic answer | 75.0% | 100.0% | 0.0% | 3.5 | 0.0% | 240.00 ms |",
+		"Agentic answer improved deterministic answer-point coverage from 50.0% to 75.0%",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("renderMarkdownWithAgentAnswerEval() missing %q:\n%s", want, markdown)
+		}
+	}
+}
