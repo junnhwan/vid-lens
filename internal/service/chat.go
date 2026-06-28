@@ -3,12 +3,27 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
+)
+
+type ChatMode string
+
+const (
+	ChatModeVideoAssistant ChatMode = "video_assistant"
+	ChatModeStrictRAG      ChatMode = "strict_rag"
+)
+
+const maxVideoContextRunes = 8000
+
+var (
+	errRAGIndexUnavailable = errors.New("当前视频尚未构建 RAG 索引")
+	errNoRetrievedContext  = errors.New("未检索到足够相关的视频片段")
 )
 
 type ChatConfig struct {
@@ -137,8 +152,12 @@ func (s *ChatService) ListMessages(userID, sessionID int64) ([]model.ChatMessage
 }
 
 func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
+	return s.AskWithMode(ctx, ChatModeStrictRAG, userID, sessionID, question, topK, embedding, chat, profile)
+}
+
+func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	prepared, err := s.prepareChatByMode(ctx, normalizeChatMode(mode), userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +168,24 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 	}
 
 	return s.saveChatExchange(ctx, userID, sessionID, prepared.Question, answer, prepared.Citations, prepared.RecentLimit, profile.LLMModel)
+}
+
+func normalizeChatMode(mode ChatMode) ChatMode {
+	switch ChatMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
+	case ChatModeStrictRAG:
+		return ChatModeStrictRAG
+	case ChatModeVideoAssistant:
+		return ChatModeVideoAssistant
+	default:
+		return ChatModeVideoAssistant
+	}
+}
+
+func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
+	if mode == ChatModeStrictRAG {
+		return s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	}
+	return s.prepareVideoAssistantChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
 }
 
 func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
@@ -168,7 +205,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 		return nil, fmt.Errorf("无权访问此会话")
 	}
 	if s.retriever == nil {
-		return nil, fmt.Errorf("当前视频尚未构建 RAG 索引")
+		return nil, errRAGIndexUnavailable
 	}
 	if topK <= 0 {
 		topK = s.cfg.TopK
@@ -196,7 +233,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	}
 	citations := retrieval.Citations
 	if len(citations) == 0 {
-		return nil, fmt.Errorf("未检索到足够相关的视频片段")
+		return nil, errNoRetrievedContext
 	}
 	messages := buildRAGMessages(citations, recent, question)
 	return &preparedRAGChat{
@@ -207,6 +244,83 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 		Citations:   citations,
 		Messages:    messages,
 	}, nil
+}
+
+func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return nil, fmt.Errorf("问题不能为空")
+	}
+	if len([]rune(question)) > 1000 {
+		return nil, fmt.Errorf("问题过长")
+	}
+
+	session, err := s.repos.Chat.FindSessionForUser(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("无权访问此会话")
+	}
+
+	recentLimit := s.cfg.RecentTurns * 2
+	recent, err := s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
+	if err != nil {
+		return nil, err
+	}
+	if isVideoOverviewQuestion(question) {
+		return s.prepareVideoContextChat(session, question, recent, recentLimit)
+	}
+
+	prepared, ragErr := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	if ragErr == nil {
+		return prepared, nil
+	}
+	if errors.Is(ragErr, errNoRetrievedContext) || errors.Is(ragErr, errRAGIndexUnavailable) {
+		return s.prepareVideoContextChat(session, question, recent, recentLimit)
+	}
+	return nil, ragErr
+}
+
+func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, question string, recent []model.ChatMessage, recentLimit int) (*preparedRAGChat, error) {
+	contextText, err := s.videoContextText(session.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	messages := buildVideoAssistantMessages(contextText, recent, question)
+	return &preparedRAGChat{
+		Session:     session,
+		Question:    question,
+		RecentLimit: recentLimit,
+		Citations:   []RetrievedChunk{},
+		Messages:    messages,
+	}, nil
+}
+
+func (s *ChatService) videoContextText(taskID int64) (string, error) {
+	sections := make([]string, 0, 2)
+	if s.repos.Summary != nil {
+		summary, err := s.repos.Summary.FindByTaskID(taskID)
+		if err != nil {
+			return "", err
+		}
+		if summary != nil && strings.TrimSpace(summary.Content) != "" {
+			sections = append(sections, "视频摘要：\n"+trimRunes(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
+		}
+	}
+	if s.repos.Transcription != nil {
+		transcription, err := s.repos.Transcription.FindByTaskID(taskID)
+		if err != nil {
+			return "", err
+		}
+		if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
+			sections = append(sections, "视频转写：\n"+trimRunes(strings.TrimSpace(transcription.Content), maxVideoContextRunes))
+		}
+	}
+	if len(sections) == 0 {
+		return "", fmt.Errorf("当前视频没有可用的摘要或转写上下文")
+	}
+	return strings.Join(sections, "\n\n"), nil
 }
 
 func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *RetrievalPipeline {
@@ -303,11 +417,15 @@ func retrievalChunkKey(chunk RetrievedChunk) string {
 }
 
 func (s *ChatService) AskStream(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(ChatStreamEvent) error) (*AskResult, error) {
+	return s.AskStreamWithMode(ctx, ChatModeStrictRAG, userID, sessionID, question, topK, embedding, chat, profile, emit)
+}
+
+func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(ChatStreamEvent) error) (*AskResult, error) {
 	if emit == nil {
 		return nil, fmt.Errorf("stream emit 不能为空")
 	}
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	prepared, err := s.prepareChatByMode(ctx, normalizeChatMode(mode), userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -451,4 +569,67 @@ func buildRAGMessages(citations []RetrievedChunk, recent []model.ChatMessage, qu
 	}
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: question})
 	return messages
+}
+
+func buildVideoAssistantMessages(videoContext string, recent []model.ChatMessage, question string) []ai.ChatMessage {
+	messages := []ai.ChatMessage{
+		{
+			Role:    "system",
+			Content: "你是 VidLens 的视频助手。优先基于提供的视频摘要和转写回答。可以做整体概括、解释和延伸，但不能把未提供的信息说成来自视频。如果用户问题明显和视频无关，可以正常回答，并明确说明这部分不基于当前视频内容。",
+		},
+		{
+			Role:    "system",
+			Content: "可用的视频上下文：\n" + videoContext,
+		},
+	}
+	for _, msg := range recent {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content})
+		}
+	}
+	messages = append(messages, ai.ChatMessage{Role: "user", Content: question})
+	return messages
+}
+
+func isVideoOverviewQuestion(question string) bool {
+	q := strings.TrimSpace(strings.ToLower(question))
+	if q == "" {
+		return false
+	}
+	overviewHints := []string{
+		"讲了什么",
+		"说了什么",
+		"主要内容",
+		"核心内容",
+		"核心观点",
+		"主要观点",
+		"视频概括",
+		"视频概览",
+		"总结一下",
+		"简单总结",
+		"简要总结",
+		"简要讲",
+		"概括一下",
+		"归纳一下",
+		"overview",
+		"summary",
+		"summarize",
+	}
+	for _, hint := range overviewHints {
+		if strings.Contains(q, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimRunes(text string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes]) + "\n\n[已截断，仅提供前半部分上下文]"
 }

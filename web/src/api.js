@@ -108,15 +108,17 @@ export default {
     api.get('/chat/sessions', { params: { task_id: taskId } }),
   getChatMessages: (sessionId) =>
     api.get(`/chat/sessions/${sessionId}/messages`),
-  sendChatMessage: (sessionId, question, topK = 5) =>
-    api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK }),
+  sendChatMessage: (sessionId, question, topK = 5, mode = 'video_assistant') =>
+    api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK, mode }),
 
   // Agentic Video QA（非流式）：返回 { message_id, answer, template, citations, trace, model }
   sendAgentMessage: (sessionId, question, topK = 5) =>
     api.post(`/chat/sessions/${sessionId}/messages/agent`, { question, top_k: topK }),
 
   // 流式聊天（SSE）
-  sendChatMessageStream: async (sessionId, question, topK = 5, onEvent) => {
+  sendChatMessageStream: async (sessionId, question, topK = 5, modeOrOnEvent = 'video_assistant', maybeOnEvent) => {
+    const mode = typeof modeOrOnEvent === 'string' ? modeOrOnEvent : 'video_assistant'
+    const onEvent = typeof modeOrOnEvent === 'function' ? modeOrOnEvent : maybeOnEvent
     const token = getStoredAuthToken()
     const response = await fetch(`/api/v1/chat/sessions/${sessionId}/messages/stream`, {
       method: 'POST',
@@ -124,7 +126,7 @@ export default {
         'Content-Type': 'application/json',
         'Authorization': token ? `Bearer ${token}` : '',
       },
-      body: JSON.stringify({ question, top_k: topK }),
+      body: JSON.stringify({ question, top_k: topK, mode }),
     })
 
     if (!response.ok) {

@@ -384,6 +384,125 @@ func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
 	}
 }
 
+func TestChatServiceAskWithModeVideoAssistantUsesSummaryForOverview(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", Filename: "overview.mp4", FileURL: "videos/overview.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.Summary.Create(&model.AISummary{TaskID: task.ID, Content: "这个视频主要讲 Redis 分布式锁的 owner 校验和 WatchDog 续期。", ModelName: "chat-model"}); err != nil {
+		t.Fatalf("create summary: %v", err)
+	}
+
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{"这是视频概览回答"}}
+	svc := NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "简要讲这个视频说了什么", 0, embedding, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("AskWithMode() error = %v", err)
+	}
+	if result.Answer != "这是视频概览回答" {
+		t.Fatalf("answer = %q", result.Answer)
+	}
+	if len(result.Citations) != 0 {
+		t.Fatalf("citations = %+v, want no strict RAG citations for summary context", result.Citations)
+	}
+	if len(embedding.inputs) != 0 {
+		t.Fatalf("embedding inputs = %+v, want overview path to skip retrieval", embedding.inputs)
+	}
+	joinedPrompt := ""
+	for _, msg := range chatClient.messages[0] {
+		joinedPrompt += msg.Content + "\n"
+	}
+	if !strings.Contains(joinedPrompt, "视频摘要") || !strings.Contains(joinedPrompt, "owner 校验") {
+		t.Fatalf("prompt did not include video summary context: %s", joinedPrompt)
+	}
+}
+
+func TestChatServiceAskWithModeVideoAssistantFallsBackToTranscriptionWhenRetrievalMisses(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2", Filename: "fallback.mp4", FileURL: "videos/fallback.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: task.ID, Content: "转写里提到 URL 下载要校验域名白名单和私有 IP，避免 SSRF 风险。", Words: 35}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"这是基于转写兜底的回答",
+	}}
+	svc := NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "URL 下载有什么风险？", 0, embedding, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("AskWithMode() error = %v", err)
+	}
+	if result.Answer != "这是基于转写兜底的回答" {
+		t.Fatalf("answer = %q", result.Answer)
+	}
+	if len(result.Citations) != 0 {
+		t.Fatalf("citations = %+v, want no citations for transcription fallback", result.Citations)
+	}
+	if len(embedding.inputs) != 1 || embedding.inputs[0] != "URL 下载有什么风险？" {
+		t.Fatalf("embedding inputs = %+v, want one retrieval attempt before fallback", embedding.inputs)
+	}
+	if len(chatClient.messages) != 2 {
+		t.Fatalf("chat calls = %d, want rewrite and fallback answer", len(chatClient.messages))
+	}
+	joinedPrompt := ""
+	for _, msg := range chatClient.messages[1] {
+		joinedPrompt += msg.Content + "\n"
+	}
+	if !strings.Contains(joinedPrompt, "视频转写") || !strings.Contains(joinedPrompt, "SSRF 风险") {
+		t.Fatalf("prompt did not include transcription context: %s", joinedPrompt)
+	}
+}
+
+func TestChatServiceAskWithModeStrictRAGStillRejectsNoRetrievedContext(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", Filename: "strict.mp4", FileURL: "videos/strict.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.Summary.Create(&model.AISummary{TaskID: task.ID, Content: "即使有摘要，严格模式也必须要求检索引用。", ModelName: "chat-model"}); err != nil {
+		t.Fatalf("create summary: %v", err)
+	}
+
+	svc := NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5, MinScore: 0.3})
+	_, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "没有相关内容？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err == nil {
+		t.Fatal("AskWithMode() strict_rag succeeded without retrieved context")
+	}
+	if !strings.Contains(err.Error(), "未检索到足够相关的视频片段") {
+		t.Fatalf("err = %v, want no retrieved context error", err)
+	}
+}
+
 func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "abababababababababababababababab", Filename: "video.mp4", FileURL: "videos/stream.mp4"}

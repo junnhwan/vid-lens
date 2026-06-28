@@ -8,11 +8,16 @@ const { default: api } = await import('../src/api.js')
 
 const encoder = new TextEncoder()
 
-async function collectStreamEvents(body) {
+async function collectStreamEvents(body, expectedMode = 'video_assistant', modeArg = undefined) {
   global.fetch = async (url, options) => {
     assert.equal(url, '/api/v1/chat/sessions/12/messages/stream')
     assert.equal(options.method, 'POST')
     assert.equal(options.headers.Authorization, 'Bearer test-token')
+    assert.deepEqual(JSON.parse(options.body), {
+      question: '问问视频内容',
+      top_k: 5,
+      mode: expectedMode,
+    })
 
     return {
       ok: true,
@@ -26,7 +31,11 @@ async function collectStreamEvents(body) {
   }
 
   const events = []
-  await api.sendChatMessageStream(12, '问问视频内容', 5, (event) => events.push(event))
+  if (modeArg) {
+    await api.sendChatMessageStream(12, '问问视频内容', 5, modeArg, (event) => events.push(event))
+  } else {
+    await api.sendChatMessageStream(12, '问问视频内容', 5, (event) => events.push(event))
+  }
   return events
 }
 
@@ -80,4 +89,18 @@ assert.deepEqual(
     { type: 'done', message_id: 42, model: 'chat-model' },
   ],
   'chat stream parser should handle raw string answer payloads emitted by gin-contrib/sse',
+)
+
+const strictModeEvents = await collectStreamEvents([
+  'event: done',
+  'data: {"message_id":43,"model":"chat-model"}',
+  '',
+].join('\n'), 'strict_rag', 'strict_rag')
+
+assert.deepEqual(
+  strictModeEvents,
+  [
+    { type: 'done', message_id: 43, model: 'chat-model' },
+  ],
+  'chat stream request should accept an explicit strict RAG mode',
 )

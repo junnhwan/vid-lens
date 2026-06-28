@@ -86,6 +86,7 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	var req struct {
 		Question string `json:"question" binding:"required"`
 		TopK     int    `json:"top_k"`
+		Mode     string `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -108,7 +109,7 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 		return
 	}
 
-	result, err := h.chatSvc.Ask(c.Request.Context(), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile)
+	result, err := h.chatSvc.AskWithMode(c.Request.Context(), service.ChatMode(req.Mode), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -177,6 +178,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	var req struct {
 		Question string `json:"question" binding:"required"`
 		TopK     int    `json:"top_k"`
+		Mode     string `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -203,7 +205,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	_, err = h.chatSvc.AskStream(c.Request.Context(), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile, func(event service.ChatStreamEvent) error {
+	_, err = h.chatSvc.AskStreamWithMode(c.Request.Context(), service.ChatMode(req.Mode), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile, func(event service.ChatStreamEvent) error {
 		c.SSEvent(event.Type, event.Data)
 		c.Writer.Flush()
 		return nil

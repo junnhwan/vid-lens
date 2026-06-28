@@ -28,7 +28,7 @@
       </div>
     </div>
 
-    <div v-else class="chat-container">
+    <div class="chat-container">
       <div class="chat-messages" ref="messagesContainer">
         <div v-for="(msg, msgIdx) in messages" :key="msg.id || msgIdx" class="message" :class="msg.role">
           <div class="message-content">
@@ -109,24 +109,47 @@
           <button
             type="button"
             class="mode-toggle"
-            :class="{ active: agentMode }"
+            :class="{ active: chatMode === 'video_assistant' }"
             :disabled="loading || sessionLoading"
-            :title="agentMode ? 'Agentic QA：工具调用链 + 引用 + 模板（非流式）' : '普通 RAG 流式问答'"
-            @click="agentMode = !agentMode"
+            title="结合摘要、转写和必要检索回答"
+            @click="chatMode = 'video_assistant'"
           >
-            {{ agentMode ? 'Agentic QA' : '普通问答' }}
+            视频助手
           </button>
+          <button
+            type="button"
+            class="mode-toggle"
+            :class="{ active: chatMode === 'strict_rag' }"
+            :disabled="loading || sessionLoading"
+            title="只基于检索到的视频片段回答"
+            @click="chatMode = 'strict_rag'"
+          >
+            严格引用
+          </button>
+          <button
+            type="button"
+            class="mode-toggle"
+            :class="{ active: chatMode === 'agent' }"
+            :disabled="loading || sessionLoading"
+            title="Agentic QA：工具调用链 + 引用 + 模板（非流式）"
+            @click="chatMode = 'agent'"
+          >
+            Agentic QA
+          </button>
+        </div>
+        <div v-if="strictModeBlocked" class="chat-mode-warning">
+          {{ strictModeBlockedText }}
         </div>
         <div class="chat-input-row">
           <input
             v-model="question"
             @keyup.enter="sendQuestion"
-            placeholder="问问这个视频..."
-            :disabled="loading || sessionLoading"
+            :placeholder="chatInputPlaceholder"
+            :disabled="loading || sessionLoading || strictModeBlocked"
             class="input-field"
             aria-label="输入问题"
           />
-          <button @click="sendQuestion" :disabled="loading || sessionLoading || !question" class="btn-send">
+          <button @click="sendQuestion" :disabled="sendDisabled" class="btn-send">
             发送
           </button>
         </div>
@@ -162,7 +185,7 @@ const messages = ref([])
 const question = ref('')
 const loading = ref(false)
 const sessionLoading = ref(false)
-const agentMode = ref(false)
+const chatMode = ref('video_assistant')
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 const expandedCitationKeys = ref(new Set())
@@ -181,16 +204,34 @@ const indexIcon = computed(() => {
 
 const indexPromptText = computed(() => {
   switch (indexStatus.value.status) {
-    case 'indexing': return '正在构建视频索引...'
-    case 'failed': return '索引构建失败，可以重新尝试'
-    case 'not_indexed': return '需要先构建视频索引才能提问'
-    default: return '需要先构建视频索引才能提问'
+    case 'indexing': return '正在构建视频索引；视频助手仍可先基于摘要和转写回答'
+    case 'failed': return '索引构建失败；严格引用不可用，视频助手仍可基于摘要和转写回答'
+    case 'not_indexed': return '严格引用需要先构建视频索引；视频助手可先基于摘要和转写回答'
+    default: return '严格引用需要先构建视频索引；视频助手可先基于摘要和转写回答'
   }
 })
 
 const indexButtonText = computed(() => {
   return indexStatus.value.status === 'failed' ? '重新构建索引' : '构建视频索引'
 })
+
+const strictModeBlocked = computed(() => {
+  return (chatMode.value === 'strict_rag' || chatMode.value === 'agent') && indexStatus.value.status !== 'indexed'
+})
+
+const strictModeBlockedText = computed(() => {
+  return chatMode.value === 'agent'
+    ? 'Agentic QA 依赖视频索引，请先构建索引。'
+    : '严格引用模式依赖视频索引，请先构建索引。'
+})
+
+const chatInputPlaceholder = computed(() => {
+  if (chatMode.value === 'strict_rag') return '基于引用片段提问...'
+  if (chatMode.value === 'agent') return '让 Agentic QA 分析这个视频...'
+  return '问问这个视频...'
+})
+
+const sendDisabled = computed(() => loading.value || sessionLoading.value || !question.value || strictModeBlocked.value)
 
 const formatMessageTime = (timestamp) => {
   if (!timestamp) return ''
@@ -348,15 +389,15 @@ const sendQuestion = async () => {
 
   loading.value = true
 
-  if (agentMode.value) {
+  if (chatMode.value === 'agent') {
     await sendAgentQuestion(q)
   } else {
-    await sendStreamQuestion(q)
+    await sendStreamQuestion(q, chatMode.value)
   }
 }
 
-// 普通 RAG：SSE 流式，边收边渲染
-const sendStreamQuestion = async (q) => {
+// 视频助手 / 严格引用：SSE 流式，边收边渲染
+const sendStreamQuestion = async (q, mode) => {
   // 预插入一个空的 assistant 消息
   const assistantMsg = {
     id: `temp-${Date.now()}`,
@@ -372,7 +413,7 @@ const sendStreamQuestion = async (q) => {
   messages.value.push(assistantMsg)
 
   try {
-    await api.sendChatMessageStream(sessionId.value, q, 5, (event) => {
+    await api.sendChatMessageStream(sessionId.value, q, 5, mode, (event) => {
       if (event.type === 'answer') {
         assistantMsg.content += event.delta || ''
         scrollMessagesToBottom()
@@ -458,6 +499,7 @@ const stopIndexPolling = () => {
 
 onMounted(() => {
   checkIndexStatus()
+  ensureChatSession()
 })
 
 onUnmounted(() => {
@@ -473,19 +515,27 @@ onUnmounted(() => {
 }
 
 .index-prompt {
-  text-align: center;
-  padding: 3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  text-align: left;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid rgba(139, 149, 168, 0.14);
+  background: rgba(10, 14, 26, 0.42);
 }
 
 .prompt-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
+  font-size: 1.35rem;
+  line-height: 1;
 }
 
 .index-prompt p {
   color: #8b95a8;
-  margin-bottom: 2rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 220px;
 }
 
 .indexing-spinner {
@@ -495,7 +545,7 @@ onUnmounted(() => {
   gap: 0.75rem;
   color: #d4af37;
   font-size: 0.95rem;
-  margin-top: 1.5rem;
+  margin: 0;
 }
 
 .index-error {
@@ -827,6 +877,14 @@ onUnmounted(() => {
 .chat-input-toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chat-mode-warning {
+  color: #f4c46b;
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .chat-input-row {
