@@ -175,12 +175,12 @@ func (s *ChatService) AskStream(ctx context.Context, ..., emit func(ChatStreamEv
 
 ### 源码参考
 
-**文件**: `internal/service/chat_memory.go`
+**文件**: `internal/service/chat.go:44-47`
 
 ```go
 type ChatMemoryStore interface {
-    Append(ctx context.Context, userID, sessionID int64, msg ChatMessage) error
-    Recent(ctx context.Context, userID, sessionID int64, limit int) ([]ChatMessage, error)
+    GetRecentMessages(ctx context.Context, sessionID int64, limit int) ([]model.ChatMessage, error)
+    SaveRecentMessages(ctx context.Context, sessionID int64, messages []model.ChatMessage, limit int) error
 }
 
 // 实现特点:

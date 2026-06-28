@@ -56,7 +56,7 @@ VidLens 使用视频文件的 MD5 作为 Kafka 消息 Key。Kafka 的 `LeastByte
 - Q: 为什么不直接用 taskID 作为 Key？
   - A: taskID 在投递时可能还未生成（虽然 VidLens 是先建 Task 再投递），更关键的是：同一视频可能被不同用户上传生成不同 taskID，用 MD5 能将这些任务聚合到同一分区，配合分布式锁实现"同一视频全局只处理一次"。
 - Q: 如果两个用户上传了同一个视频会怎样？
-  - A: 两个 task 的消息 Key 相同（MD5 相同），会进入同一分区、被同一 Consumer 消费。Consumer 在 `handleAnalyze` 中通过分布式锁（`vidlens:lock:{md5}`）保证同一时间只有一个任务在处理。第二个任务抢锁失败后直接跳过（`producer.go:411`），实现了内容级去重。
+  - A: 两个 task 的消息 Key 相同（MD5 相同），会进入同一分区、被同一 Consumer 消费。Consumer 在 `handleAnalyze` 中通过分布式锁（`vidlens:lock:{md5}`）保证同一时间只有一个任务在处理。第二个任务抢锁失败后直接跳过（`consumer.go:411`），实现了内容级去重。
 - Q: 分区数设为 4 是怎么考虑的？
   - A: `CreateTopics` 中 `NumPartitions: 4`（`producer.go:173`），配合单机部署 `ReplicationFactor: 1`。4 个分区支持未来扩展到 4 个 Consumer 实例并行消费，当前单实例则所有分区由一个 Reader 轮询。
 
@@ -70,7 +70,7 @@ VidLens 使用视频文件的 MD5 作为 Kafka 消息 Key。Kafka 的 `LeastByte
 // consumer.go:134
 CommitInterval: 0,   // 手动提交（不自动提交）
 
-// consumer.go:151-158
+// consumer.go:149-159
 if err := c.handleAnalyze(context.Background(), msg); err != nil {
     log.Printf("[Kafka] 分析任务失败: %v", err)
     // 消费失败不 commit offset，下次会重新消费
@@ -106,32 +106,59 @@ if err := c.handleAnalyze(context.Background(), msg); err != nil {
 func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
     // 第 1 步：解析消息
     var payload AnalyzePayload
-    json.Unmarshal(msg.Value, &payload)
+    if err := json.Unmarshal(msg.Value, &payload); err != nil {
+        return fmt.Errorf("解析消息失败: %w", err)
+    }
 
     // 第 2 步：基于 MD5 获取分布式锁
     lockKey := fmt.Sprintf("vidlens:lock:%s", payload.MD5)
     distLock := lock.NewRedisLock(c.rdb, lockKey)
-    acquired, _ := distLock.TryLock(ctx, 5*time.Second)
-    if !acquired { return fmt.Errorf("同一视频正在处理中") }
+    acquired, err := distLock.TryLock(ctx, 5*time.Second)
+    if err != nil {
+        return fmt.Errorf("获取分布式锁失败: %w", err)
+    }
+    if !acquired {
+        return fmt.Errorf("同一视频正在处理中")
+    }
     defer distLock.Unlock(ctx)
 
     // 第 3 步：幂等校验
-    task, _ := c.repo.Task.FindByID(payload.TaskID)
-    if task.Status == model.TaskStatusCompleted { return nil }
+    task, err := c.repo.Task.FindByID(payload.TaskID)
+    if err != nil {
+        return fmt.Errorf("查询任务失败: %w", err)
+    }
+    if task.Status == model.TaskStatusCompleted {
+        summary, _ := c.repo.Summary.FindByTaskID(task.ID)
+        if summary != nil {
+            return nil  // 已完成且有总结，跳过
+        }
+        // 已完成但缺少总结，继续分析
+    }
 
     // 第 4 步：更新状态为处理中
-    updated, _ := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
+    updated, err := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
         []int8{model.TaskStatusPending, model.TaskStatusQueued,
                model.TaskStatusFailed, model.TaskStatusCompleted},
         model.TaskStatusRunning, model.TaskStageSummarizing, "")
+    if err != nil {
+        return fmt.Errorf("更新任务状态失败: %w", err)
+    }
     if !updated { return nil }
+    c.markTaskJobRunning(task, TaskJobAnalyze, model.TaskStageSummarizing)
 
     // 第 5 步：核心业务
-    c.processVideo(ctx, task)
+    if err := c.processVideo(ctx, task); err != nil {
+        c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, "", err)
+        return nil
+    }
 
     // 第 6 步：更新状态为已完成
-    c.repo.Task.UpdateStatusAndStage(payload.TaskID,
-        model.TaskStatusCompleted, model.TaskStageNone, "")
+    if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID,
+        model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
+        return fmt.Errorf("更新完成状态失败: %w", err)
+    }
+    c.markTaskJobCompleted(payload.TaskID, TaskJobAnalyze, model.TaskStageSummarizing)
+    return nil
 }
 ```
 
@@ -194,7 +221,7 @@ VidLens 的重试系统由三部分组成：
 **追问链**:
 
 - Q: `isRetryableError` 怎么判断错误是否可重试？
-  - A: 先检查黑名单（`nonRetryable`，如"请先配置 AI 服务"、"video unavailable"），命中则不可重试。再检查白名单（`retryable`，如"timeout"、"connection refused"、"HTTP 503"），命中则可重试。都不命中默认不可重试。
+  - A: 先检查黑名单（`nonRetryable`，如"请先配置 ai 服务"、"video unavailable"），命中则不可重试。再检查白名单（`retryable`，如"timeout"、"connection refused"、"HTTP 503"），命中则可重试。都不命中默认不可重试。
 - Q: 为什么用阶梯式退避而不是指数退避？
   - A: 阶梯式退避更可控：运维可以精确配置每级间隔。对于 Kafka 消费场景，60s/300s/900s 的阶梯已经足够覆盖大部分临时故障（如 AI 服务过载、网络抖动），同时不会让任务等太久。
 - Q: `RetryScheduler` 的 `ClaimRetryTask` 是做什么的？
@@ -210,8 +237,11 @@ VidLens 的重试系统由三部分组成：
 // consumer.go:579-624
 func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64,
     audioPath string, strategy ai.Strategy) (string, error) {
-    // 1. 音频分片：按 300 秒切片
-    chunks, _ := splitAudio(ctx, c.ffmpegPath, audioPath, 300)
+    // 1. 音频分片：按 ffmpeg.DefaultAudioSegmentSeconds (300s) 切片
+    chunks, err := splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+    if err != nil {
+        return "", err
+    }
 
     // 2. 逐片转写
     parts := make([]string, 0, len(chunks))
@@ -224,10 +254,17 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64,
         // 2b. 标记该片为处理中
         c.markTranscriptionChunkRunning(taskID, i, chunk)
         // 2c. 调用 ASR
-        text, _ := strategy.Transcribe(ctx, chunk)
+        text, err := strategy.Transcribe(ctx, chunk)
+        if err != nil {
+            c.markTranscriptionChunkFailed(taskID, i, chunk, err)
+            return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
+        }
         // 2d. 保存该片结果
-        c.markTranscriptionChunkCompleted(taskID, i, chunk, text)
-        parts = append(parts, text)
+        text = strings.TrimSpace(text)
+        if text != "" {
+            c.markTranscriptionChunkCompleted(taskID, i, chunk, text)
+            parts = append(parts, text)
+        }
     }
 
     // 3. 合并所有片
@@ -266,7 +303,10 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64,
 ```go
 // consumer.go:531-539
 func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) error {
-    existingTranscription, _ := c.repo.Transcription.FindByTaskID(task.ID)
+    existingTranscription, err := c.repo.Transcription.FindByTaskID(task.ID)
+    if err != nil {
+        return fmt.Errorf("查询转录失败: %w", err)
+    }
     if existingTranscription != nil &&
        strings.TrimSpace(existingTranscription.Content) != "" {
         log.Printf("[Kafka] 复用已有转录生成总结: taskID=%d", task.ID)
@@ -356,7 +396,9 @@ VidLens 的 TraceID 传播分三层：
 if err := c.handleDownload(context.Background(), msg); err != nil {
     log.Printf("[Kafka] 下载任务消息异常（不提交 offset，等待重投）: %v", err)
 } else {
-    r.CommitMessages(context.Background(), msg)
+    if err := r.CommitMessages(context.Background(), msg); err != nil {
+        log.Printf("[Kafka] download commit offset 失败: %v", err)
+    }
 }
 ```
 
@@ -365,10 +407,14 @@ if err := c.handleDownload(context.Background(), msg); err != nil {
 ```go
 // retry.go:118-123
 if !isRetryableError(err) {
-    c.repo.Task.RecordTerminalFailure(taskID, jobType, stage,
+    if err := c.repo.Task.RecordTerminalFailure(taskID, jobType, stage,
+        "non_retryable_error", errMsg, task.RetryCount, maxRetries,
+        model.TaskStatusFailed); err != nil {
+        return err
+    }
+    return c.repo.TaskJob.RecordTerminalFailure(taskID, jobType, stage,
         "non_retryable_error", errMsg, task.RetryCount, maxRetries,
         model.TaskStatusFailed)
-    return c.repo.TaskJob.RecordTerminalFailure(...)
 }
 ```
 
