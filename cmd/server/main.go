@@ -254,6 +254,7 @@ func main() {
 				chat.GET("/sessions", chatHandler.ListSessions)
 				chat.GET("/sessions/:session_id/messages", chatHandler.ListMessages)
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), chatHandler.Ask)
+				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), chatHandler.AskAgent)
 				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), chatHandler.AskStream)
 			}
 			media := auth.Group("/media")

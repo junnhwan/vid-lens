@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -12,12 +13,21 @@ import (
 
 type ChatHandler struct {
 	chatSvc    *service.ChatService
+	agentSvc   videoAgentAsker
 	profileSvc *service.AIProfileService
 	aiFactory  *ai.Factory
 }
 
+type videoAgentAsker interface {
+	Ask(ctx context.Context, req service.VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
+}
+
 func NewChatHandler(chatSvc *service.ChatService, profileSvc *service.AIProfileService, aiFactory *ai.Factory) *ChatHandler {
-	return &ChatHandler{chatSvc: chatSvc, profileSvc: profileSvc, aiFactory: aiFactory}
+	var agentSvc videoAgentAsker
+	if chatSvc != nil {
+		agentSvc = service.NewVideoAgentService(chatSvc)
+	}
+	return &ChatHandler{chatSvc: chatSvc, agentSvc: agentSvc, profileSvc: profileSvc, aiFactory: aiFactory}
 }
 
 func (h *ChatHandler) CreateSession(c *gin.Context) {
@@ -99,6 +109,56 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	}
 
 	result, err := h.chatSvc.Ask(c.Request.Context(), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *ChatHandler) AskAgent(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
+	if err != nil || sessionID <= 0 {
+		response.BadRequest(c, "会话 ID 错误")
+		return
+	}
+
+	var req struct {
+		Question string `json:"question" binding:"required"`
+		TopK     int    `json:"top_k"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if h.agentSvc == nil {
+		response.BadRequest(c, "agent 服务不可用")
+		return
+	}
+
+	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	chatClient, err := h.aiFactory.NewChatClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.agentSvc.Ask(c.Request.Context(), service.VideoAgentRequest{
+		UserID:    userID,
+		SessionID: sessionID,
+		Question:  req.Question,
+		TopK:      req.TopK,
+	}, embeddingClient, chatClient, *profile)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
