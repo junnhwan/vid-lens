@@ -41,6 +41,8 @@ type RetrievedChunk struct {
 	WindowTruncated        bool     `json:"window_truncated,omitempty"`
 	RerankScore            float64  `json:"rerank_score,omitempty"`
 	FinalRank              int      `json:"final_rank,omitempty"`
+	MatchedQuery           string   `json:"matched_query,omitempty"`
+	CrossQueryRank         int      `json:"cross_query_rank,omitempty"`
 	Fallbacks              []string `json:"fallbacks,omitempty"`
 }
 
@@ -164,10 +166,6 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
-	queryVector, err := embedding.Embed(ctx, question)
-	if err != nil {
-		return nil, err
-	}
 	if s.retriever == nil {
 		return nil, fmt.Errorf("当前视频尚未构建 RAG 索引")
 	}
@@ -177,29 +175,27 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if topK > 10 {
 		topK = 10
 	}
-	candidateK := s.candidateK(topK)
-	citations, err := s.retriever.Search(ctx, queryVector, RetrievalRequest{
-		UserID:         userID,
-		TaskID:         session.TaskID,
-		EmbeddingModel: profile.EmbeddingModel,
-		TopK:           candidateK,
-		MinScore:       s.cfg.MinScore,
-	})
-	if err != nil {
-		return nil, err
-	}
-	citations, err = s.mergeKeywordChunks(session.TaskID, userID, profile.EmbeddingModel, question, citations, candidateK, topK)
-	if err != nil {
-		return nil, err
-	}
-	if len(citations) == 0 {
-		return nil, fmt.Errorf("未检索到足够相关的视频片段")
-	}
 
 	recentLimit := s.cfg.RecentTurns * 2
 	recent, err := s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
 	if err != nil {
 		return nil, err
+	}
+	retrieval, err := s.newRetrievalPipeline(topK).Retrieve(ctx, RetrievalPipelineRequest{
+		UserID:         userID,
+		TaskID:         session.TaskID,
+		Question:       question,
+		Recent:         recent,
+		TopK:           topK,
+		EmbeddingModel: profile.EmbeddingModel,
+		Embedding:      embedding,
+	})
+	if err != nil {
+		return nil, err
+	}
+	citations := retrieval.Citations
+	if len(citations) == 0 {
+		return nil, fmt.Errorf("未检索到足够相关的视频片段")
 	}
 	messages := buildRAGMessages(citations, recent, question)
 	return &preparedRAGChat{
@@ -210,6 +206,21 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 		Citations:   citations,
 		Messages:    messages,
 	}, nil
+}
+
+func (s *ChatService) newRetrievalPipeline(topK int) *RetrievalPipeline {
+	return &RetrievalPipeline{
+		repos:     s.repos,
+		retriever: s.retriever,
+		expander: &ContextExpander{
+			repos:               s.repos,
+			Radius:              1,
+			MaxCharsPerCitation: 4000,
+		},
+		reranker:   DeterministicReranker{},
+		CandidateK: s.candidateK(topK),
+		MinScore:   s.cfg.MinScore,
+	}
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []RetrievedChunk, recentLimit int, modelName string) (*AskResult, error) {
