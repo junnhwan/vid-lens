@@ -111,7 +111,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		perQuery = append(perQuery, fused)
 	}
 
-	citations := fuseCrossQueryChunks(perQuery, topK, p.RRFK)
+	citations := fuseCrossQueryChunks(perQuery, candidateK, p.RRFK)
 	var err error
 	if p.expander != nil {
 		citations, err = p.expander.Expand(ctx, req.UserID, req.TaskID, req.EmbeddingModel, citations)
@@ -121,6 +121,8 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	}
 	if p.reranker != nil {
 		citations = p.reranker.Rerank(ctx, req.Question, citations, topK)
+	} else {
+		citations = capRetrievedChunks(citations, topK)
 	}
 	return RetrievalPipelineResult{
 		Citations: citations,
@@ -221,4 +223,11 @@ func fuseCrossQueryChunks(rankLists [][]RetrievedChunk, topK int, k float64) []R
 		result = append(result, chunk)
 	}
 	return result
+}
+
+func capRetrievedChunks(chunks []RetrievedChunk, topK int) []RetrievedChunk {
+	if topK <= 0 || len(chunks) <= topK {
+		return chunks
+	}
+	return chunks[:topK]
 }

@@ -206,6 +206,40 @@ func TestRetrievalPipelineInvokesExpanderAndRerankerWhenConfigured(t *testing.T)
 	}
 }
 
+func TestRetrievalPipelineReranksCandidatePoolBeforeFinalTopK(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	embedding := &fakeEmbeddingClient{dim: 3}
+	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{
+		{ChunkID: 1, ChunkIndex: 1, Content: "unrelated upload background"},
+		{ChunkID: 2, ChunkIndex: 2, Content: "another weak candidate"},
+		{ChunkID: 3, ChunkIndex: 3, Content: "Redis owner 风险 candidate"},
+	}}}
+	pipeline := &RetrievalPipeline{
+		repos:      repos,
+		retriever:  retriever,
+		reranker:   DeterministicReranker{},
+		CandidateK: 3,
+	}
+
+	result, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{
+		UserID:         7,
+		TaskID:         1,
+		Question:       "Redis owner 风险",
+		TopK:           1,
+		EmbeddingModel: "text-embedding-3-small",
+		Embedding:      embedding,
+	})
+	if err != nil {
+		t.Fatalf("Retrieve() error = %v", err)
+	}
+	if len(result.Citations) != 1 {
+		t.Fatalf("citations = %+v, want final topK=1", result.Citations)
+	}
+	if result.Citations[0].ChunkID != 3 {
+		t.Fatalf("top citation = %+v, want reranker to promote candidate outside pre-rerank topK", result.Citations[0])
+	}
+}
+
 func containsContent(chunks []RetrievedChunk, content string) bool {
 	for _, chunk := range chunks {
 		if strings.Contains(chunk.Content, content) {
