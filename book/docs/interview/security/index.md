@@ -2,33 +2,41 @@
 
 ## 题目 1: JWT 中间件的 Bearer 提取逻辑
 
-**源码位置:** `internal/middleware/auth.go:12-50`
+**源码位置:** `internal/middleware/auth.go:12-40`
 
 ```go
  12 func JWTAuth(secret string) gin.HandlerFunc {
  13     return func(c *gin.Context) {
  14         authHeader := c.GetHeader("Authorization")
- 15         if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
- 16             response.Unauthorized(c, "未登录")
+ 15         if authHeader == "" {
+ 16             response.Unauthorized(c, "请先登录")
  17             c.Abort()
  18             return
  19         }
- 20         tokenString := strings.TrimPrefix(authHeader, "Bearer ")
- 21         claims, err := jwt.ParseToken(tokenString, secret)
- 22         if err != nil {
- 23             response.Unauthorized(c, "登录已过期")
+ 20
+ 21         parts := strings.SplitN(authHeader, " ", 2)
+ 22         if len(parts) != 2 || parts[0] != "Bearer" {
+ 23             response.Unauthorized(c, "Token 格式错误")
  24             c.Abort()
  25             return
  26         }
- 27         c.Set("userID", claims.UserID)
- 28         c.Set("username", claims.Username)
- 29         c.Set("role", claims.Role)
- 30         c.Next()
- 31     }
- 32 }
+ 27
+ 28         claims, err := jwt.ParseToken(parts[1], secret)
+ 29         if err != nil {
+ 30             response.Unauthorized(c, "Token 无效或已过期")
+ 31             c.Abort()
+ 32             return
+ 33         }
+ 34
+ 35         c.Set("userID", claims.UserID)
+ 36         c.Set("username", claims.Username)
+ 37         c.Set("role", claims.Role)
+ 38         c.Next()
+ 39     }
+ 40 }
 ```
 
-**问题:** 第 15 行同时检查了空值和前缀, 第 20 行再做 TrimPrefix。这两步之间是否存在竞态或注入风险?
+**问题:** 代码使用 `strings.SplitN(authHeader, " ", 2)` 将 `Bearer <token>` 拆为两部分。为什么选择 SplitN 而不是 HasPrefix + TrimPrefix?
 
 **追问链:**
 1. 如果攻击者发送 `Authorization: BearerXXX`(无空格), 这段代码会怎么处理? 这是否符合预期?
@@ -40,22 +48,23 @@
 
 ## 题目 2: Claims 从 Context 到 Handler 的传递方式
 
-**源码位置:** `internal/middleware/auth.go:27-30` 及 `auth.go:34-40`
+**源码位置:** `internal/middleware/auth.go:35-38` 及 `auth.go:42-49`
 
 ```go
- 27         c.Set("userID", claims.UserID)
- 28         c.Set("username", claims.Username)
- 29         c.Set("role", claims.Role)
- 30         c.Next()
- 31     }
- 32 }
- 33
- 34 func GetUserID(c *gin.Context) int64 {
- 35     if v, ok := c.Get("userID"); ok {
- 36         return v.(int64)
- 37     }
- 38     return 0
- 39 }
+ 35         c.Set("userID", claims.UserID)
+ 36         c.Set("username", claims.Username)
+ 37         c.Set("role", claims.Role)
+ 38         c.Next()
+ 39     }
+ 40 }
+ 41
+ 42 func GetUserID(c *gin.Context) int64 {
+ 43     id, exists := c.Get("userID")
+ 44     if !exists {
+ 45         return 0
+ 46     }
+ 47     return id.(int64)
+ 48 }
 ```
 
 **问题:** `GetUserID` 在 key 不存在时返回 `0`。这在业务层会产生什么后果?
@@ -70,22 +79,25 @@
 
 ## 题目 3: HS256 签名与密钥管理
 
-**源码位置:** `pkg/jwt/jwt.go:19-35`
+**源码位置:** `internal/pkg/jwt/jwt.go:19-34`
 
 ```go
  19 func GenerateToken(userID int64, username, role, secret string, expireHours int) (string, error) {
- 20     claims := Claims{
- 21         UserID:   userID,
- 22         Username: username,
- 23         Role:     role,
- 24         RegisteredClaims: jwt.RegisteredClaims{
- 25             ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expireHours) * time.Hour)),
- 26             IssuedAt:  jwt.NewNumericDate(time.Now()),
- 27         },
- 28     }
- 29     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
- 30     return token.SignedString([]byte(secret))
- 31 }
+ 20     now := time.Now()
+ 21     claims := Claims{
+ 22         UserID:   userID,
+ 23         Username: username,
+ 24         Role:     role,
+ 25         RegisteredClaims: jwt.RegisteredClaims{
+ 26             ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(expireHours) * time.Hour)),
+ 27             IssuedAt:  jwt.NewNumericDate(now),
+ 28             Issuer:    "vidlens",
+ 29         },
+ 30     }
+ 31
+ 32     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+ 33     return token.SignedString([]byte(secret))
+ 34 }
 ```
 
 **问题:** 代码使用 HS256(对称签名)。从安全工程角度, 这带来了哪些局限?
@@ -100,20 +112,19 @@
 
 ## 题目 4: AES-GCM 密钥派生
 
-**源码位置:** `pkg/secret/crypto.go:7-13`
+**源码位置:** `internal/pkg/secret/crypto.go:17-23`
 
 ```go
-  7 func NewCodec(secret string) (*Codec, error) {
-  8     key := sha256.Sum256([]byte(secret))
-  9     block, err := aes.NewCipher(key[:])
- 10     if err != nil { return nil, err }
- 11     aead, err := cipher.NewGCM(block)
- 12     if err != nil { return nil, err }
- 13     return &Codec{aead: aead}, nil
- 14 }
+ 17 func NewCodecFromPassphrase(passphrase string) (*Codec, error) {
+ 18     if passphrase == "" {
+ 19         return nil, fmt.Errorf("api key secret is required")
+ 20     }
+ 21     sum := sha256.Sum256([]byte(passphrase))
+ 22     return newCodecFromKey(sum[:])
+ 23 }
 ```
 
-**问题:** 第 8 行用 `sha256.Sum256` 将字符串转为 32 字节密钥。这与专业的密钥派生函数(如 PBKDF2、Argon2)相比, 缺少了什么?
+**问题:** 第 21 行用 `sha256.Sum256` 将字符串转为 32 字节密钥。这与专业的密钥派生函数(如 PBKDF2、Argon2)相比, 缺少了什么?
 
 **追问链:**
 1. `sha256.Sum256` 是确定性的、无盐的。如果两个用户碰巧使用了相同的 `secret` 字符串, 他们的密钥就完全相同。这在什么场景下是可接受的, 什么场景下不可接受?
@@ -125,20 +136,21 @@
 
 ## 题目 5: AES-GCM Nonce 生成与密文格式
 
-**源码位置:** `pkg/secret/crypto.go:16-26`
+**源码位置:** `internal/pkg/secret/crypto.go:47-58`
 
 ```go
- 16 func (c *Codec) Encrypt(plaintext string) (string, error) {
- 17     nonce := make([]byte, c.aead.NonceSize())
- 18     if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
- 19         return "", err
- 20     }
- 21     sealed := c.aead.Seal(nil, nonce, []byte(plaintext), nil)
- 22     payload := make([]byte, 0, len(nonce)+len(sealed))
- 23     payload = append(payload, nonce...)
- 24     payload = append(payload, sealed...)
- 25     return base64.StdEncoding.EncodeToString(payload), nil
- 26 }
+ 47 func (c *Codec) Encrypt(plaintext string) (string, error) {
+ 48     nonce := make([]byte, c.aead.NonceSize())
+ 49     if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+ 50         return "", err
+ 51     }
+ 52
+ 53     sealed := c.aead.Seal(nil, nonce, []byte(plaintext), nil)
+ 54     payload := make([]byte, 0, len(nonce)+len(sealed))
+ 55     payload = append(payload, nonce...)
+ 56     payload = append(payload, sealed...)
+ 57     return base64.StdEncoding.EncodeToString(payload), nil
+ 58 }
 ```
 
 **问题:** 第 17 行使用 `rand.Reader` 生成 nonce。GCM 的 nonce 大小通常是 12 字节。如果用生日攻击估算, 在同一个密钥下大约加密多少次就有 50% 的概率发生 nonce 碰撞?
@@ -153,19 +165,27 @@
 
 ## 题目 6: AES-GCM 解密的长度校验
 
-**源码位置:** `pkg/secret/crypto.go:28-36`
+**源码位置:** `internal/pkg/secret/crypto.go:60-77`
 
 ```go
- 28 func (c *Codec) Decrypt(ciphertext string) (string, error) {
- 29     data, err := base64.StdEncoding.DecodeString(ciphertext)
- 30     if err != nil { return "", err }
- 31     nonceSize := c.aead.NonceSize()
- 32     if len(data) < nonceSize { return "", fmt.Errorf("密文过短") }
- 33     nonce, sealed := data[:nonceSize], data[nonceSize:]
- 34     plaintext, err := c.aead.Open(nil, nonce, sealed, nil)
- 35     if err != nil { return "", err }
- 36     return string(plaintext), nil
- 37 }
+ 60 func (c *Codec) Decrypt(ciphertext string) (string, error) {
+ 61     payload, err := base64.StdEncoding.DecodeString(ciphertext)
+ 62     if err != nil {
+ 63         return "", err
+ 64     }
+ 65     nonceSize := c.aead.NonceSize()
+ 66     if len(payload) <= nonceSize {
+ 67         return "", fmt.Errorf("ciphertext is too short")
+ 68     }
+ 69
+ 70     nonce := payload[:nonceSize]
+ 71     sealed := payload[nonceSize:]
+ 72     plaintext, err := c.aead.Open(nil, nonce, sealed, nil)
+ 73     if err != nil {
+ 74         return "", err
+ 75     }
+ 76     return string(plaintext), nil
+ 77 }
 ```
 
 **问题:** 第 32 行检查 `len(data) < nonceSize`, 但没有检查 `sealed` 部分的最小长度。GCM 密文的最短合法长度是多少?
@@ -180,13 +200,18 @@
 
 ## 题目 7: API Key 脱敏函数
 
-**源码位置:** `pkg/secret/crypto.go:38-42`
+**源码位置:** `internal/pkg/secret/crypto.go:79-87`
 
 ```go
- 38 func MaskAPIKey(key string) string {
- 39     if len(key) <= 8 { return "****" }
- 40     return key[:4] + "****" + key[len(key)-4:]
- 41 }
+ 79 func MaskAPIKey(key string) string {
+ 80     if key == "" {
+ 81         return ""
+ 82     }
+ 83     if len(key) <= 8 {
+ 84         return "****"
+ 85     }
+ 86     return key[:3] + "****" + key[len(key)-4:]
+ 87 }
 ```
 
 **问题:** 这个函数对短密钥(<=8 字符)的处理方式是返回固定字符串 `"****"`。但对于刚好 9 字符的密钥, 泄露了首尾各 4 个字符, 仅隐藏 1 个字符。这在安全上是否可接受?
@@ -201,32 +226,54 @@
 
 ## 题目 8: SSRF 防护 -- 域名白名单与 IP 检查
 
-**源码位置:** `service/remote_video_url.go:52-96`
+**源码位置:** `internal/service/remote_video_url.go:52-96`
 
 ```go
  52 func (v remoteVideoURLValidator) validate(ctx context.Context, rawURL string) (checkedRemoteVideoURL, error) {
- 53     parsed, err := url.Parse(rawURL)
- 54     if parsed.Scheme != "http" && parsed.Scheme != "https" {
- 55         return ..., fmt.Errorf("仅支持 http/https 链接")
- 56     }
- 57     host := parsed.Hostname()
- 58     if !v.hostAllowed(host) {
- 59         return ..., fmt.Errorf("不支持的视频链接域名")
- 60     }
- 61     if net.ParseIP(host) != nil {
- 62         if unsafeIP(net.ParseIP(host)) {
- 63             return ..., fmt.Errorf("视频链接域名解析到内网或本地地址")
- 64         }
- 65     } else {
- 66         ips, err := v.resolver.LookupIP(ctx, host)
- 67         for _, ip := range ips {
- 68             if unsafeIP(ip) {
- 69                 return ..., fmt.Errorf("视频链接域名解析到内网或本地地址")
- 70             }
- 71         }
- 72     }
- 73     sanitized := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
- 74     ...
+ 53     rawURL = strings.TrimSpace(rawURL)
+ 54     parsed, err := neturl.Parse(rawURL)
+ 55     if err != nil {
+ 56         return checkedRemoteVideoURL{}, fmt.Errorf("视频链接格式错误")
+ 57     }
+ 58
+ 59     scheme := strings.ToLower(parsed.Scheme)
+ 60     if scheme != "http" && scheme != "https" {
+ 61         return checkedRemoteVideoURL{}, fmt.Errorf("仅支持 http/https 视频链接")
+ 62     }
+ 63
+ 64     host := normalizeHost(parsed.Hostname())
+ 65     if host == "" {
+ 66         return checkedRemoteVideoURL{}, fmt.Errorf("视频链接缺少 host")
+ 67     }
+ 68     if host == "localhost" {
+ 69         return checkedRemoteVideoURL{}, fmt.Errorf("不允许访问本地地址")
+ 70     }
+ 71     if !hostAllowed(host, v.allowedHosts) {
+ 72         return checkedRemoteVideoURL{}, fmt.Errorf("不支持的视频平台域名: %s", host)
+ 73     }
+ 74
+ 75     if ip := net.ParseIP(host); ip != nil {
+ 76         if unsafeIP(ip) {
+ 77             return checkedRemoteVideoURL{}, fmt.Errorf("不允许访问内网或本地地址")
+ 78         }
+ 79     } else {
+ 80         ips, err := v.resolver.LookupIP(ctx, host)
+ 81         if err != nil {
+ 82             return checkedRemoteVideoURL{}, fmt.Errorf("解析视频链接域名失败: %w", err)
+ 83         }
+ 84         if len(ips) == 0 {
+ 85             return checkedRemoteVideoURL{}, fmt.Errorf("视频链接域名没有可用解析结果")
+ 86         }
+ 87         for _, ip := range ips {
+ 88             if unsafeIP(ip) {
+ 89                 return checkedRemoteVideoURL{}, fmt.Errorf("视频链接域名解析到内网或本地地址")
+ 90             }
+ 91         }
+ 92     }
+ 93
+ 94     sanitized := sanitizeRemoteVideoURL(*parsed)
+ 95     return checkedRemoteVideoURL{Raw: rawURL, Sanitized: sanitized, Host: host}, nil
+ 96 }
 ```
 
 **问题:** 第 61 行对裸 IP 和域名分别处理。但如果攻击者使用 `0x7f000001`(十六进制 IP) 或 `2130706433`(十进制 IP) 来表示 `127.0.0.1`, `net.ParseIP` 能否正确解析?
@@ -241,15 +288,24 @@
 
 ## 题目 9: SSRF 防护 -- URL 清洗与特殊处理
 
-**源码位置:** `service/remote_video_url.go:73-85`
+**源码位置:** `internal/service/remote_video_url.go:126-140`
 
 ```go
- 73     sanitized := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}
- 74     // 特殊处理 YouTube: 保留 v= 参数
- 75     if strings.Contains(host, "youtube.com") {
- 76         sanitized.RawQuery = "v=" + parsed.Query().Get("v")
- 77     }
- 78     return checkedRemoteVideoURL{Raw: rawURL, Sanitized: sanitized.String(), Host: host}, nil
+126 func sanitizeRemoteVideoURL(parsed neturl.URL) string {
+127     parsed.User = nil
+128     query := parsed.Query()
+129     parsed.RawQuery = ""
+130     parsed.Fragment = ""
+131     if isYouTubeWatchURL(parsed) {
+132         videoID := strings.TrimSpace(query.Get("v"))
+133         if videoID != "" {
+134             values := neturl.Values{}
+135             values.Set("v", videoID)
+136             parsed.RawQuery = values.Encode()
+137         }
+138     }
+139     return parsed.String()
+140 }
 ```
 
 **问题:** 第 76 行只保留了 `v=` 参数, 但 `parsed.Query().Get("v")` 的值未经任何校验。如果攻击者传入 `v=<script>alert(1)</script>`, 这段代码的行为是什么?
@@ -264,15 +320,17 @@
 
 ## 题目 10: CORS 配置与测试中间件绕过
 
-**源码位置:** `middleware/cors.go` 及 `ai_profile_test.go:43-46`
+**源码位置:** `internal/middleware/cors.go:11-19`
 
 ```go
 // middleware/cors.go
 func CORS() gin.HandlerFunc {
     return cors.New(cors.Config{
-        AllowAllOrigins:  true,
-        AllowCredentials: true,
-        ...
+        AllowAllOrigins: true,
+        AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+        AllowHeaders:    []string{"Origin", "Content-Type", "Authorization"},
+        ExposeHeaders:   []string{"Content-Length"},
+        MaxAge:          12 * time.Hour,
     })
 }
 
@@ -283,10 +341,10 @@ router.POST("/ai/profiles/test", func(c *gin.Context) {
 })
 ```
 
-**问题:** CORS 配置中 `AllowAllOrigins: true` 与 `AllowCredentials: true` 同时存在。根据 W3C CORS 规范, 这是否合法? 浏览器会如何处理?
+**问题:** CORS 配置中 `AllowAllOrigins: true` 但未设置 `AllowCredentials`。这种配置在生产环境中有什么安全风险?
 
 **追问链:**
-1. 当 `AllowAllOrigins` 为 `true` 且 `AllowCredentials` 为 `true` 时, `go-chi/cors` 库的实际行为是什么? 它是否会将 `Access-Control-Allow-Origin` 设为请求的 `Origin` 值(而非 `*`)? 这是否存在安全风险?
-2. 如果一个恶意网站 `https://evil.com` 发起跨域请求到 VidLens API, 且用户已登录(携带 Cookie), 这种配置会导致什么后果?
-3. 测试代码(第 2 行 `c.Set("userID", int64(7))`)直接在路由中注入用户身份, 绕过了 JWT 中间件。这种测试模式有什么风险? 如果测试代码意外泄漏到生产环境会怎样?
+1. `AllowAllOrigins: true` 意味着任何域名都可以向 VidLens API 发起跨域请求。如果用户已登录（携带 Cookie），恶意网站可以读取用户的敏感数据。正确的做法是什么?
+2. 对比 `AllowAllOrigins` 和具体的域名白名单（如 `AllowOrigins: []string{"https://vidlens.example.com"}`），各自适用什么场景?
+3. 测试代码（`c.Set("userID", int64(7))`）直接在路由中注入用户身份，绕过了 JWT 中间件。这种测试模式有什么风险? 如果测试代码意外泄漏到生产环境会怎样?
 4. 正确的测试方式应该如何处理认证? (提示: mock middleware、test token、httptest)

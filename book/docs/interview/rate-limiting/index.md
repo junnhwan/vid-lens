@@ -86,7 +86,11 @@ redis.call("EXPIRE", key, 60)
 **代码参考** (ratelimit.go, 行 95-106):
 ```go
 func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int) bool {
-    result, err := tokenBucketScript.Run(ctx, r.client, []string{key}, rate, capacity, time.Now().UnixMilli()).Int()
+    now := time.Now().UnixMilli()
+    result, err := tokenBucketScript.Run(ctx, r.client,
+        []string{fmt.Sprintf("rate_limiter:%s", key)},
+        rate, capacity, now,
+    ).Int()
     if err != nil {
         log.Printf("[ratelimit] Redis 异常，fail-open 放行 key=%s err=%v", key, err)
         return true  // Fail-Open
@@ -111,15 +115,25 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int)
 
 **问题**: 为什么限流 Key 要包含路由路径和用户标识？
 
-**代码参考** (ratelimit.go, 行 110-130):
+**代码参考** (ratelimit.go, 行 108-132):
 ```go
 func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
     return func(c *gin.Context) {
-        // key = 路由路径 + ":" + 用户ID/IP
-        key := c.FullPath() + ":" + identity
-        cap, rate := limiter.getRouteLimit(c.FullPath())
-        if !limiter.Allow(c.Request.Context(), key, cap, rate) {
-            response.TooManyRequests(c, "请求过于频繁，请稍后再试")
+        path := c.FullPath()
+        if path == "" {
+            path = c.Request.URL.Path
+        }
+
+        var key string
+        if userID, ok := c.Get("userID"); ok {
+            key = fmt.Sprintf("%s:user:%v", path, userID)
+        } else {
+            key = fmt.Sprintf("%s:ip:%s", path, c.ClientIP())
+        }
+
+        capacity, rate := limiter.configFor(path)
+        if !limiter.Allow(c.Request.Context(), key, capacity, rate) {
+            response.TooManyRequests(c, "当前请求过多，请稍后再试")
             c.Abort()
             return
         }
@@ -144,13 +158,14 @@ func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
 
 **问题**: 如何实现不同接口使用不同的限流配置？
 
-**代码参考** (ratelimit.go, 行 19-29, 43-45):
+**代码参考** (ratelimit.go, 行 19-30, 43-47):
 ```go
 type RateLimiter struct {
-    client      redis.Cmdable
-    capacity    int                    // 全局默认桶容量
-    rate        int                    // 全局默认速率 (tokens/sec)
-    routeLimits map[string]routeLimit  // 按路由覆盖
+    client    redis.Cmdable
+    capacity  int // 全局默认桶容量
+    rate      int // 全局默认每秒令牌数
+    overrides map[string]routeLimit
+    mu        sync.RWMutex
 }
 type routeLimit struct {
     capacity int
@@ -158,7 +173,9 @@ type routeLimit struct {
 }
 
 func (r *RateLimiter) SetRouteLimit(path string, capacity, rate int) {
-    r.routeLimits[path] = routeLimit{capacity: capacity, rate: rate}
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.overrides[path] = routeLimit{capacity: capacity, rate: rate}
 }
 ```
 
@@ -201,9 +218,13 @@ local last_time = tonumber(bucket[2])
 
 **问题**: 为什么使用 `time.Now().UnixMilli()` 而不是秒级时间戳？
 
-**代码参考** (ratelimit.go, 行 97):
+**代码参考** (ratelimit.go, 行 96-100):
 ```go
-result, err := tokenBucketScript.Run(ctx, r.client, []string{key}, rate, capacity, time.Now().UnixMilli()).Int()
+now := time.Now().UnixMilli()
+result, err := tokenBucketScript.Run(ctx, r.client,
+    []string{fmt.Sprintf("rate_limiter:%s", key)},
+    rate, capacity, now,
+).Int()
 ```
 
 **追问链**:
@@ -243,14 +264,25 @@ redis.call("EXPIRE", key, 60)
 
 **问题**: 为什么使用中间件模式实现限流？有什么好处？
 
-**代码参考** (ratelimit.go, 行 110-130):
+**代码参考** (ratelimit.go, 行 108-132):
 ```go
 func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
     return func(c *gin.Context) {
-        key := c.FullPath() + ":" + identity
-        cap, rate := limiter.getRouteLimit(c.FullPath())
-        if !limiter.Allow(c.Request.Context(), key, cap, rate) {
-            response.TooManyRequests(c, "请求过于频繁，请稍后再试")
+        path := c.FullPath()
+        if path == "" {
+            path = c.Request.URL.Path
+        }
+
+        var key string
+        if userID, ok := c.Get("userID"); ok {
+            key = fmt.Sprintf("%s:user:%v", path, userID)
+        } else {
+            key = fmt.Sprintf("%s:ip:%s", path, c.ClientIP())
+        }
+
+        capacity, rate := limiter.configFor(path)
+        if !limiter.Allow(c.Request.Context(), key, capacity, rate) {
+            response.TooManyRequests(c, "当前请求过多，请稍后再试")
             c.Abort()
             return
         }

@@ -15,14 +15,15 @@
 
 ## 核心结构体
 
-### RateLimiter (行 19-29)
+### RateLimiter (行 19-30)
 
 ```go
 type RateLimiter struct {
-    client      redis.Cmdable
-    capacity    int                    // 全局默认桶容量
-    rate        int                    // 全局默认速率 (tokens/sec)
-    routeLimits map[string]routeLimit  // 按路由覆盖
+    client    redis.Cmdable
+    capacity  int // 全局默认桶容量
+    rate      int // 全局默认每秒令牌数
+    overrides map[string]routeLimit
+    mu        sync.RWMutex
 }
 type routeLimit struct {
     capacity int
@@ -34,7 +35,8 @@ type routeLimit struct {
 - `redis.Cmdable`: 接口类型，支持 Redis 客户端和集群客户端
 - `capacity`: 桶容量，决定突发流量上限
 - `rate`: 令牌生成速率，决定平均 QPS
-- `routeLimits`: 路由级别的配置覆盖，支持精细化限流
+- `overrides`: 路由级别的配置覆盖，支持精细化限流
+- `mu`: 读写锁，保证 `overrides` 并发安全
 
 ### routeLimit (行 24-27)
 
@@ -58,10 +60,10 @@ type routeLimit struct {
 ```go
 func NewRateLimiter(client redis.Cmdable, capacity, rate int) *RateLimiter {
     return &RateLimiter{
-        client:      client,
-        capacity:    capacity,
-        rate:        rate,
-        routeLimits: make(map[string]routeLimit),
+        client:    client,
+        capacity:  capacity,
+        rate:      rate,
+        overrides: make(map[string]routeLimit),
     }
 }
 ```
@@ -70,26 +72,31 @@ func NewRateLimiter(client redis.Cmdable, capacity, rate int) *RateLimiter {
 - 使用构造函数模式，确保 map 已初始化
 - 接收 `redis.Cmdable` 接口，便于测试时注入 miniredis
 
-### 2. SetRouteLimit (行 43-45)
+### 2. SetRouteLimit (行 43-47)
 
 ```go
 func (r *RateLimiter) SetRouteLimit(path string, capacity, rate int) {
-    r.routeLimits[path] = routeLimit{capacity: capacity, rate: rate}
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.overrides[path] = routeLimit{capacity: capacity, rate: rate}
 }
 ```
 
 **设计决策**:
 - 运行时动态配置，无需重启服务
+- 使用 `sync.RWMutex` 保证并发安全
 - 支持热更新，适合配置中心场景
 
-### 3. getRouteLimit (行 48-55)
+### 3. configFor (行 50-57)
 
 ```go
-func (r *RateLimiter) getRouteLimit(path string) (int, int) {
-    if limit, ok := r.routeLimits[path]; ok {
-        return limit.capacity, limit.rate
-    }
-    return r.capacity, r.rate
+func (r *RateLimiter) configFor(path string) (int, int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if cfg, ok := r.overrides[path]; ok {
+		return cfg.capacity, cfg.rate
+	}
+	return r.capacity, r.rate
 }
 ```
 
@@ -101,7 +108,11 @@ func (r *RateLimiter) getRouteLimit(path string) (int, int) {
 
 ```go
 func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int) bool {
-    result, err := tokenBucketScript.Run(ctx, r.client, []string{key}, rate, capacity, time.Now().UnixMilli()).Int()
+    now := time.Now().UnixMilli()
+    result, err := tokenBucketScript.Run(ctx, r.client,
+        []string{fmt.Sprintf("rate_limiter:%s", key)},
+        rate, capacity, now,
+    ).Int()
     if err != nil {
         log.Printf("[ratelimit] Redis 异常，fail-open 放行 key=%s err=%v", key, err)
         return true  // Fail-Open
@@ -115,16 +126,26 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int)
 - **日志记录**: 记录错误信息，便于监控告警
 - **返回值**: `true` 表示放行，`false` 表示限流
 
-### 5. RateLimit 中间件 (行 110-130)
+### 5. RateLimit 中间件 (行 108-132)
 
 ```go
 func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
     return func(c *gin.Context) {
-        // key = 路由路径 + ":" + 用户ID/IP
-        key := c.FullPath() + ":" + identity
-        cap, rate := limiter.getRouteLimit(c.FullPath())
-        if !limiter.Allow(c.Request.Context(), key, cap, rate) {
-            response.TooManyRequests(c, "请求过于频繁，请稍后再试")
+        path := c.FullPath()
+        if path == "" {
+            path = c.Request.URL.Path
+        }
+
+        var key string
+        if userID, ok := c.Get("userID"); ok {
+            key = fmt.Sprintf("%s:user:%v", path, userID)
+        } else {
+            key = fmt.Sprintf("%s:ip:%s", path, c.ClientIP())
+        }
+
+        capacity, rate := limiter.configFor(path)
+        if !limiter.Allow(c.Request.Context(), key, capacity, rate) {
+            response.TooManyRequests(c, "当前请求过多，请稍后再试")
             c.Abort()
             return
         }
