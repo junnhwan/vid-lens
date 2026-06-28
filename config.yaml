@@ -89,6 +89,9 @@ rag:
   recent_turns: 8
   embedding_dim: 1536
   collection: "vidlens_video_chunks"
+  # Optional. If empty, OpenAI-compatible rerank derives /rerank from an embedding endpoint ending in /embeddings.
+  rerank_endpoint: ""
+  rerank_model: "Qwen/Qwen3-Reranker-4B"
 
 milvus:
   address: "127.0.0.1:19530"

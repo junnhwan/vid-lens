@@ -20,6 +20,8 @@ type Profile struct {
 	EmbeddingAPIKey   string
 	EmbeddingModel    string
 	EmbeddingDim      int
+	RerankEndpoint    string
+	RerankModel       string
 }
 
 type Factory struct{}
@@ -58,6 +60,23 @@ func (f *Factory) NewEmbeddingClient(profile Profile) (EmbeddingClient, error) {
 		return NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 Embedding provider: %s", profile.EmbeddingProvider)
+	}
+}
+
+func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
+	switch normalizeProvider(profile.EmbeddingProvider) {
+	case "openai_compatible", "siliconflow":
+		endpoint := strings.TrimSpace(profile.RerankEndpoint)
+		if endpoint == "" {
+			derived, ok := deriveRerankEndpointFromEmbedding(profile.EmbeddingEndpoint)
+			if !ok {
+				return nil, fmt.Errorf("无法从 Embedding endpoint 推导 Rerank endpoint，请显式配置 rerank endpoint")
+			}
+			endpoint = derived
+		}
+		return NewOpenAIRerankClient(endpoint, profile.EmbeddingAPIKey, profile.RerankModel), nil
+	default:
+		return nil, fmt.Errorf("不支持的 Rerank provider: %s", profile.EmbeddingProvider)
 	}
 }
 

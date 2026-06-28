@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"vid-lens/internal/ai"
 )
 
 func TestDeterministicRerankerKeywordHitOutranksWeakVectorOnlyHit(t *testing.T) {
@@ -71,5 +74,56 @@ func TestDeterministicRerankerCapsTopK(t *testing.T) {
 	}
 	if reranked[0].FinalRank != 1 || reranked[0].RerankScore == 0 {
 		t.Fatalf("rerank trace not populated: %+v", reranked[0])
+	}
+}
+
+type fakeRerankClient struct {
+	results []ai.RerankResult
+	err     error
+}
+
+func (c *fakeRerankClient) Rerank(_ context.Context, _ string, _ []string, _ int) ([]ai.RerankResult, error) {
+	return c.results, c.err
+}
+
+func TestModelRerankerSortsByModelScores(t *testing.T) {
+	reranker := NewModelReranker(&fakeRerankClient{results: []ai.RerankResult{
+		{Index: 2, Score: 0.95},
+		{Index: 0, Score: 0.40},
+		{Index: 1, Score: 0.10},
+	}})
+	chunks := []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 1, Content: "weak"},
+		{ChunkID: 2, ChunkIndex: 2, Content: "least relevant"},
+		{ChunkID: 3, ChunkIndex: 3, Content: "best"},
+	}
+
+	reranked := reranker.Rerank(context.Background(), "question", chunks, 2)
+
+	if len(reranked) != 2 {
+		t.Fatalf("len(reranked) = %d, want 2", len(reranked))
+	}
+	if reranked[0].ChunkID != 3 || reranked[0].RerankScore != 0.95 || reranked[0].FinalRank != 1 {
+		t.Fatalf("top reranked chunk = %+v, want chunk 3 score 0.95 rank 1", reranked[0])
+	}
+	if reranked[1].ChunkID != 1 || reranked[1].RerankScore != 0.40 || reranked[1].FinalRank != 2 {
+		t.Fatalf("second reranked chunk = %+v, want chunk 1 score 0.40 rank 2", reranked[1])
+	}
+}
+
+func TestModelRerankerFallsBackToOriginalOrderOnClientError(t *testing.T) {
+	reranker := NewModelReranker(&fakeRerankClient{err: errors.New("rerank unavailable")})
+	chunks := []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 1, Content: "first", CrossQueryRank: 1},
+		{ChunkID: 2, ChunkIndex: 2, Content: "second", CrossQueryRank: 2},
+	}
+
+	reranked := reranker.Rerank(context.Background(), "question", chunks, 2)
+
+	if len(reranked) != 2 || reranked[0].ChunkID != 1 || reranked[1].ChunkID != 2 {
+		t.Fatalf("reranked = %+v, want original order preserved", reranked)
+	}
+	if len(reranked[0].Fallbacks) == 0 || reranked[0].Fallbacks[0] != "model_rerank_failed" {
+		t.Fatalf("fallbacks = %+v, want model_rerank_failed", reranked[0].Fallbacks)
 	}
 }

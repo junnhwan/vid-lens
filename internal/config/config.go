@@ -112,8 +112,8 @@ type TaskRetryConfig struct {
 }
 
 type RateLimitConfig struct {
-	Capacity int                       `yaml:"capacity"`
-	Rate     int                       `yaml:"rate"`
+	Capacity int `yaml:"capacity"`
+	Rate     int `yaml:"rate"`
 	// Routes 为指定路由单独配置令牌桶配额，覆盖全局 Capacity/Rate。
 	// key 为 Gin 路由模板（c.FullPath() 形式，如 /api/v1/chat/sessions/:session_id/messages），
 	// 用于对高成本 AI 接口施加更严格的限额。
@@ -127,15 +127,17 @@ type RouteRateLimit struct {
 }
 
 type RAGConfig struct {
-	Enabled      bool    `yaml:"enabled"`
-	ChunkSize    int     `yaml:"chunk_size"`
-	ChunkOverlap int     `yaml:"chunk_overlap"`
-	TopK         int     `yaml:"top_k"`
-	CandidateK   int     `yaml:"candidate_k"`
-	MinScore     float32 `yaml:"min_score"`
-	RecentTurns  int     `yaml:"recent_turns"`
-	EmbeddingDim int     `yaml:"embedding_dim"`
-	Collection   string  `yaml:"collection"`
+	Enabled        bool    `yaml:"enabled"`
+	ChunkSize      int     `yaml:"chunk_size"`
+	ChunkOverlap   int     `yaml:"chunk_overlap"`
+	TopK           int     `yaml:"top_k"`
+	CandidateK     int     `yaml:"candidate_k"`
+	MinScore       float32 `yaml:"min_score"`
+	RecentTurns    int     `yaml:"recent_turns"`
+	EmbeddingDim   int     `yaml:"embedding_dim"`
+	Collection     string  `yaml:"collection"`
+	RerankEndpoint string  `yaml:"rerank_endpoint"`
+	RerankModel    string  `yaml:"rerank_model"`
 }
 
 type MilvusConfig struct {
