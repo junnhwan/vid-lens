@@ -1,46 +1,14 @@
 <template>
   <div id="app">
-    <Navbar :user="user" @logout="logout" @openAuth="openAuth" @openConfig="openConfig" @toggleSidebar="sidebarOpen = !sidebarOpen" />
-
-    <div class="app-layout">
-      <Sidebar
-        :user="user"
-        :uploading="uploading"
-        :uploadMsg="uploadMsg"
-        :uploadProgress="uploadProgress"
-        :stats="taskStats"
-        :mobileOpen="sidebarOpen"
-        @uploadFile="handleFileUpload"
-        @uploadUrl="handleUrlUpload"
-        @openAuth="openAuth"
-        @closeSidebar="sidebarOpen = false"
-      />
-
-      <main class="content-area">
-        <TaskList
-          :tasks="tasks"
-          :loading="loading"
-          :initialLoading="tasksLoading"
-          :hasMore="hasMore"
-          :loadingMore="loadingMore"
-          @taskClick="openTaskDrawer"
-          @deleteTask="deleteTask"
-          @transcribe="doTranscribe"
-          @analyze="doAnalyze"
-          @loadMore="loadMoreTasks"
-        />
-      </main>
-    </div>
-
-    <TaskDrawer
-      :task="selectedTask"
-      :loading="loading[selectedTask?.id]"
-      @close="closeDrawer"
-      @transcribe="doTranscribe(selectedTask)"
-      @analyze="doAnalyze(selectedTask)"
-      @chatError="(msg) => showToast(msg, true)"
-      @toast="showToast"
+    <Navbar
+      :user="user"
+      @logout="logout"
+      @openAuth="openAuth"
+      @openConfig="openConfig"
+      @toggleSidebar="toggleSidebar"
     />
+
+    <router-view />
 
     <AuthModal
       :show="showAuth"
@@ -85,11 +53,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, reactive, provide, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import Navbar from './components/Navbar.vue'
-import Sidebar from './components/Sidebar.vue'
-import TaskList from './components/TaskList.vue'
-import TaskDrawer from './components/TaskDrawer.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
@@ -437,6 +402,40 @@ const onConfigUpdated = () => {
   showToast('配置已更新')
 }
 
+// 侧边栏（移动端）
+const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value }
+const closeSidebar = () => { sidebarOpen.value = false }
+
+// 把共享状态/方法提供给路由视图组件。
+// reactive 会自动 unwrap 顶层的 ref/computed，视图里可直接 app.tasks 这样用。
+const appCtx = reactive({
+  user,
+  tasks,
+  uploading,
+  uploadMsg,
+  uploadProgress,
+  taskStats,
+  selectedTask,
+  loading,
+  tasksLoading,
+  loadingMore,
+  hasMore,
+  sidebarOpen,
+  handleFileUpload,
+  handleUrlUpload,
+  openTaskDrawer,
+  closeDrawer,
+  deleteTask,
+  doTranscribe,
+  doAnalyze,
+  loadMoreTasks,
+  showToast,
+  openAuth,
+  toggleSidebar,
+  closeSidebar,
+})
+provide('appCtx', appCtx)
+
 // 键盘快捷键
 const handleGlobalKeydown = (e) => {
   // Ctrl/Cmd + K 打开搜索
@@ -542,41 +541,6 @@ html, body {
   to { transform: translate(10%, 10%) rotate(5deg); }
 }
 
-.app-layout {
-  display: flex;
-  min-height: calc(100vh - 80px);
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 0;
-  position: relative;
-  z-index: 2;
-}
-
-.content-area {
-  flex: 1;
-  padding: 2rem 3rem;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) transparent;
-}
-
-.content-area::-webkit-scrollbar {
-  width: 8px;
-}
-
-.content-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.content-area::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
-  border-radius: 4px;
-}
-
-.content-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.5);
-}
-
 /* Toast */
 .toast {
   position: fixed;
@@ -609,12 +573,5 @@ html, body {
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
   transform: translateX(100%) scale(0.8);
-}
-
-/* 响应式 */
-@media (max-width: 900px) {
-  .content-area {
-    padding: 1.5rem 1rem;
-  }
 }
 </style>

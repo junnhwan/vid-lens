@@ -48,6 +48,7 @@
         @delete="$emit('deleteTask', t)"
         @transcribe="$emit('transcribe', t)"
         @analyze="$emit('analyze', t)"
+        @chat="$emit('chat', t)"
       />
     </TransitionGroup>
 
@@ -92,7 +93,7 @@ const props = defineProps({
   loadingMore: { type: Boolean, default: false }
 })
 
-defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore'])
+defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat'])
 
 const activeTab = ref('all')
 const searchQuery = ref('')

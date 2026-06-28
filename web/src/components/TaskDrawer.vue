@@ -8,24 +8,7 @@
         </div>
 
         <div class="drawer-content">
-          <div class="drawer-tabs">
-            <button
-              :class="['tab-btn', { active: activeTab === 'detail' }]"
-              @click="activeTab = 'detail'"
-            >
-              📋 详情
-            </button>
-            <button
-              :class="['tab-btn', { active: activeTab === 'chat' }]"
-              @click="activeTab = 'chat'"
-              :disabled="!canUseRAG"
-              :title="canUseRAG ? '问问这个视频' : '需要先完成文字提取'"
-            >
-              💬 问问视频
-            </button>
-          </div>
-
-          <div v-if="activeTab === 'detail'">
+          <div>
           <div class="drawer-meta">
             <div class="meta-item">
               <span class="meta-label">创建时间</span>
@@ -104,6 +87,10 @@
             </button>
           </div>
 
+          <button v-if="canUseRAG" class="drawer-action-btn chat-entry" @click.stop="goChat">
+            <span class="btn-icon">💬</span> 去对话
+          </button>
+
           <div v-if="loading" class="drawer-loading">
             <div class="spinner"></div>
             <span>处理中...</span>
@@ -160,10 +147,6 @@
             </div>
           </template>
           </div>
-
-          <div v-if="activeTab === 'chat'" class="chat-tab">
-            <VideoRAGChat :task="task" @error="handleChatError" />
-          </div>
         </div>
       </div>
     </div>
@@ -183,16 +166,16 @@ import {
   taskResultTextForDisplay,
 } from '../taskResultDisplayPolicy.js'
 import { formatTime, formatFileSize, getDetailedStatus, getErrorMessage, formatRelativeTime } from '../utils/format.js'
-import VideoRAGChat from './VideoRAGChat.vue'
+import { useRouter } from 'vue-router'
 
 const props = defineProps({
   task: Object,
   loading: Boolean
 })
 
-const emit = defineEmits(['close', 'transcribe', 'analyze', 'chatError', 'toast'])
+const emit = defineEmits(['close', 'transcribe', 'analyze', 'toast'])
 
-const activeTab = ref('detail')
+const router = useRouter()
 const drawerPanel = ref(null)
 let previouslyFocused = null
 
@@ -224,8 +207,11 @@ const canUseRAG = computed(() => {
   return props.task?.transcription?.content || props.task?.status === 3
 })
 
-const handleChatError = (msg) => {
-  emit('chatError', msg)
+const goChat = () => {
+  if (props.task?.id != null) {
+    emit('close')
+    router.push({ name: 'chat-task', params: { taskId: props.task.id } })
+  }
 }
 
 const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
@@ -797,6 +783,19 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .btn-icon {
   font-size: 1.35rem;
+}
+
+.chat-entry {
+  width: 100%;
+  border-color: rgba(212, 175, 55, 0.4);
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.15), rgba(41, 98, 255, 0.1));
+  color: #d4af37;
+  margin-bottom: 2rem;
+}
+
+.chat-entry:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.6);
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.25);
 }
 
 .drawer-loading {

@@ -26,6 +26,9 @@
       <button class="action-btn amber" @click.stop="$emit('analyze')" :disabled="isActionDisabled">
         <span class="btn-icon">🤖</span> AI 总结
       </button>
+      <button v-if="canChat" class="action-btn chat" @click.stop="$emit('chat')">
+        <span class="btn-icon">💬</span> 去对话
+      </button>
     </div>
   </div>
 </template>
@@ -41,10 +44,11 @@ const props = defineProps({
   compact: { type: Boolean, default: false }
 })
 
-defineEmits(['click', 'delete', 'transcribe', 'analyze'])
+defineEmits(['click', 'delete', 'transcribe', 'analyze', 'chat'])
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
 const detailedStatus = computed(() => getDetailedStatus(props.task))
+const canChat = computed(() => props.task?.transcription?.content || props.task?.status === 3)
 </script>
 
 <style scoped>
@@ -304,6 +308,18 @@ const detailedStatus = computed(() => getDetailedStatus(props.task))
   border-color: rgba(212, 175, 55, 0.6);
   background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
   box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.action-btn.chat {
+  border-color: rgba(41, 98, 255, 0.35);
+  color: #5b8fff;
+  background: linear-gradient(135deg, rgba(41, 98, 255, 0.12), rgba(212, 175, 55, 0.06));
+}
+
+.action-btn.chat:hover:not(:disabled) {
+  border-color: rgba(41, 98, 255, 0.6);
+  background: linear-gradient(135deg, rgba(41, 98, 255, 0.2), rgba(212, 175, 55, 0.1));
+  box-shadow: 0 4px 16px rgba(41, 98, 255, 0.2);
 }
 
 .action-btn:disabled {

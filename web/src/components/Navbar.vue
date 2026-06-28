@@ -5,6 +5,10 @@
         <span class="mirror-icon">◇</span>
         <span class="brand-text">镜知 <span class="en">VidLens</span></span>
       </div>
+      <nav v-if="user" class="nav-links">
+        <router-link :to="{ name: 'library' }" class="nav-link">🎬 视频</router-link>
+        <router-link :to="{ name: 'chat' }" class="nav-link">💬 对话</router-link>
+      </nav>
       <button class="mobile-menu-btn" @click="$emit('toggleSidebar')" aria-label="切换侧边栏">☰</button>
       <div class="nav-right">
         <template v-if="user">
@@ -124,6 +128,34 @@ defineEmits(['logout', 'openAuth', 'openConfig', 'toggleSidebar'])
   border-radius: 0.65rem;
   cursor: pointer;
   transition: all 0.3s;
+}
+
+.nav-links {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1.5rem;
+}
+
+.nav-link {
+  padding: 0.5rem 1rem;
+  border-radius: 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #8b95a8;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: all 0.25s;
+}
+
+.nav-link:hover {
+  color: #d4af37;
+  background: rgba(212, 175, 55, 0.08);
+}
+
+.nav-link.router-link-active {
+  color: #d4af37;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
+  border-color: rgba(212, 175, 55, 0.3);
 }
 
 .nav-right { display: flex; align-items: center; gap: 1.25rem; }
