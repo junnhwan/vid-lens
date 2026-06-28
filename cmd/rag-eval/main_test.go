@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ func TestLoadCasesReadsTaskIDAndExpectedKeywords(t *testing.T) {
 	data := []byte(`
 - task_id: 5
   task_hint: "sample"
+  category: "keyword_exact"
   question: "Which show mentions Avatar?"
   expected_chunk_keywords:
     - "Avatar"
@@ -40,8 +43,30 @@ func TestLoadCasesReadsTaskIDAndExpectedKeywords(t *testing.T) {
 	if got.Question != "Which show mentions Avatar?" {
 		t.Fatalf("Question = %q", got.Question)
 	}
+	if got.Category != "keyword_exact" {
+		t.Fatalf("Category = %q, want keyword_exact", got.Category)
+	}
 	if len(got.ExpectedChunkKeywords) != 2 || got.ExpectedChunkKeywords[0] != "Avatar" || got.ExpectedChunkKeywords[1] != "four nations" {
 		t.Fatalf("ExpectedChunkKeywords = %#v", got.ExpectedChunkKeywords)
+	}
+}
+
+func TestCachedEvalRewriterReturnsCachedResultAndError(t *testing.T) {
+	want := service.RewriteResult{
+		Original: "question",
+		Queries:  []string{"query one", "query two"},
+		UsedLLM:  true,
+	}
+	wantErr := errors.New("observability error")
+	rewriter := cachedEvalRewriter{result: want, err: wantErr}
+
+	got, err := rewriter.Rewrite(context.Background(), service.RewriteInput{Question: "ignored"})
+
+	if err != wantErr {
+		t.Fatalf("err = %v, want cached error", err)
+	}
+	if strings.Join(got.Queries, "|") != "query one|query two" || !got.UsedLLM {
+		t.Fatalf("result = %+v, want cached rewrite", got)
 	}
 }
 
@@ -78,7 +103,7 @@ func TestRenderMarkdownDoesNotClaimRecallImprovedWhenOnlyMRRImproves(t *testing.
 
 func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 	results := []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 1}},
+		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 1, Categories: map[string]service.RAGEvalCategoryReport{"keyword_exact": {TotalCases: 1, EvaluableCases: 1, HitCases: 1, RecallAtK: 1.0, MRR: 1.0}}}},
 		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 2}},
 		{mode: "Rewrite + MultiQuery + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 3, RewriteFallbackCount: 2, RewriteFallbackRate: 0.5}},
 		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 4, AvgExpandedContextChars: 128, RerankChangedRankCount: 1}},
@@ -96,6 +121,8 @@ func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 		"Rerank Changed Rank Count",
 		"Citation Context Hit Rate",
 		"Expanded Context Hit Rate",
+		"Per-Category Metrics",
+		"keyword_exact",
 		"设计并实现 VidLens 视频 RAG 检索评测框架",
 	} {
 		if !strings.Contains(markdown, want) {
@@ -104,5 +131,58 @@ func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 	}
 	if strings.Contains(markdown, "提升") {
 		t.Fatalf("renderMarkdown() should not claim improvement when metrics are equal:\n%s", markdown)
+	}
+}
+
+func TestRenderMarkdownIncludesPerCategoryMetrics(t *testing.T) {
+	results := []modeResult{
+		{mode: "Vector only", report: service.RAGEvalReport{
+			RecallAtK: 1.0,
+			MRR:       1.0,
+			Categories: map[string]service.RAGEvalCategoryReport{
+				"keyword_exact": {TotalCases: 2, EvaluableCases: 2, HitCases: 1, RecallAtK: 0.5, MRR: 0.5, NoResultRate: 0.5, AvgLatencyMs: 12.5},
+			},
+		}},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: service.RAGEvalReport{
+			RecallAtK: 1.0,
+			MRR:       1.0,
+			Categories: map[string]service.RAGEvalCategoryReport{
+				"keyword_exact": {TotalCases: 2, EvaluableCases: 2, HitCases: 2, RecallAtK: 1.0, MRR: 1.0, NoResultRate: 0.0, AvgLatencyMs: 30.0, RerankChangedRankCount: 1},
+			},
+		}},
+	}
+
+	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{5}, 2, "text-embedding-3-small", 5, 30, results)
+
+	for _, want := range []string{
+		"### Per-Category Metrics",
+		"| Mode | Category | Cases | Recall@5 | MRR | No Result Rate | Avg Retrieval Latency | Rewrite Fallback Rate |",
+		"| Vector only | keyword_exact | 2 | 50.0% | 0.500 | 50.0% | 12.50 ms |",
+		"| Rewrite + MultiQuery + RRF + Window + Model Rerank | keyword_exact | 2 | 100.0% | 1.000 | 0.0% | 30.00 ms |",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("renderMarkdown() missing %q:\n%s", want, markdown)
+		}
+	}
+}
+
+func TestRenderMarkdownRecordsHybridImprovementEvenWhenModelRerankRegresses(t *testing.T) {
+	results := []modeResult{
+		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
+		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
+		{mode: "Rewrite + MultiQuery + RRF", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.896}},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.648}},
+	}
+
+	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{2, 5, 6}, 50, "text-embedding-3-small", 5, 30, results)
+
+	for _, want := range []string{
+		"BM25+RRF improved Recall@5 from 96.0% to 98.0% and improved MRR from 0.837 to 0.878",
+		"Model Rerank did not improve ranking in this run",
+		"不要写 model rerank 提升检索排名的简历 claim",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("renderMarkdown() missing %q:\n%s", want, markdown)
+		}
 	}
 }

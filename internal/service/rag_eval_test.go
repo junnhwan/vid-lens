@@ -154,6 +154,56 @@ func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
 	}
 }
 
+func TestRAGEvalAggregatesMetricsByCategory(t *testing.T) {
+	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
+		{
+			Case: RAGEvalCase{
+				Category:              "keyword_exact",
+				Question:              "Where is SVG mentioned?",
+				ExpectedChunkKeywords: []string{"SVG"},
+			},
+			Citations: []RetrievedChunk{{ChunkID: 1, Content: "SVG UI", Source: RetrievalSourceKeyword}},
+			Duration:  10 * time.Millisecond,
+		},
+		{
+			Case: RAGEvalCase{
+				Category:              "keyword_exact",
+				Question:              "Where is PPT mentioned?",
+				ExpectedChunkKeywords: []string{"PPT"},
+			},
+			Citations: nil,
+			Duration:  20 * time.Millisecond,
+		},
+		{
+			Case: RAGEvalCase{
+				Category:              "rewrite_needed",
+				Question:              "Which animation keeps the world balanced?",
+				ExpectedChunkKeywords: []string{"Avatar"},
+			},
+			Citations: []RetrievedChunk{{ChunkID: 2, Content: "Avatar keeps peace", Source: RetrievalSourceVector}},
+			Duration:  30 * time.Millisecond,
+		},
+	}, 5)
+
+	if len(report.Categories) != 2 {
+		t.Fatalf("categories = %#v, want 2 category reports", report.Categories)
+	}
+	keyword := report.Categories["keyword_exact"]
+	if keyword.TotalCases != 2 || keyword.HitCases != 1 || keyword.RecallAtK != 0.5 || keyword.NoResultRate != 0.5 {
+		t.Fatalf("keyword category = %+v, want 2 total, 1 hit, recall/no-result 0.5", keyword)
+	}
+	if keyword.MRR != 0.5 {
+		t.Fatalf("keyword MRR = %.3f, want 0.5", keyword.MRR)
+	}
+	rewrite := report.Categories["rewrite_needed"]
+	if rewrite.TotalCases != 1 || rewrite.HitCases != 1 || rewrite.RecallAtK != 1.0 || rewrite.AvgLatencyMs != 30 {
+		t.Fatalf("rewrite category = %+v, want one hit with 30ms latency", rewrite)
+	}
+	if report.Cases[0].Category != "keyword_exact" {
+		t.Fatalf("case category = %q, want keyword_exact", report.Cases[0].Category)
+	}
+}
+
 func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
 	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
 		{
