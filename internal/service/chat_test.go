@@ -33,6 +33,22 @@ func (c *recordingChatClient) Chat(_ context.Context, messages []ai.ChatMessage)
 	return "这是基于视频片段的回答", nil
 }
 
+type scriptedChatClient struct {
+	responses []string
+	messages  [][]ai.ChatMessage
+}
+
+func (c *scriptedChatClient) Chat(_ context.Context, messages []ai.ChatMessage) (string, error) {
+	copied := append([]ai.ChatMessage(nil), messages...)
+	c.messages = append(c.messages, copied)
+	if len(c.responses) == 0 {
+		return "这是基于视频片段的回答", nil
+	}
+	response := c.responses[0]
+	c.responses = c.responses[1:]
+	return response, nil
+}
+
 type streamingRecordingChatClient struct {
 	recordingChatClient
 	streamed    []string
@@ -170,8 +186,8 @@ func TestChatServiceAskRecordsEmbeddingAndLLMCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find daily usage: %v", err)
 	}
-	if usage == nil || usage.EmbeddingRequests != 1 || usage.LLMRequests != 1 {
-		t.Fatalf("usage = %+v, want embedding=1 llm=1", usage)
+	if usage == nil || usage.EmbeddingRequests != 1 || usage.LLMRequests != 2 {
+		t.Fatalf("usage = %+v, want embedding=1 llm=2 for rewrite and answer", usage)
 	}
 }
 
@@ -274,6 +290,79 @@ func TestChatServiceAskMergesKeywordChunksWithVectorResults(t *testing.T) {
 	}
 }
 
+func TestChatServiceAskUsesQueryRewriteInRetrievalPath(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "91919191919191919191919191919191", Filename: "video.mp4", FileURL: "videos/rewrite.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		`{"queries":["Redis 分布式锁 owner 风险"]}`,
+		"这是基于改写检索的回答",
+	}}
+	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 1, Content: "Redis 分布式锁 owner 风险片段"},
+	}}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	result, err := svc.Ask(context.Background(), 7, session.ID, "那这个风险点呢？", 0, embedding, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "这是基于改写检索的回答" {
+		t.Fatalf("answer = %q", result.Answer)
+	}
+	if len(chatClient.messages) != 2 {
+		t.Fatalf("chat calls = %d, want rewrite call and final answer call", len(chatClient.messages))
+	}
+	if len(embedding.inputs) != 2 || embedding.inputs[0] != "Redis 分布式锁 owner 风险" || embedding.inputs[1] != "那这个风险点呢？" {
+		t.Fatalf("embedding inputs = %+v, want rewritten query then original question", embedding.inputs)
+	}
+}
+
+func TestChatServiceAskFallsBackWhenQueryRewriteFails(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "92929292929292929292929292929292", Filename: "video.mp4", FileURL: "videos/rewrite-fallback.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	embedding := &fakeEmbeddingClient{dim: 3}
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"这是 fallback 后的回答",
+	}}
+	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+		{ChunkID: 1, ChunkIndex: 1, Content: "原问题 fallback 片段"},
+	}}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	result, err := svc.Ask(context.Background(), 7, session.ID, "原问题", 0, embedding, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if result.Answer != "这是 fallback 后的回答" {
+		t.Fatalf("answer = %q", result.Answer)
+	}
+	if len(embedding.inputs) != 1 || embedding.inputs[0] != "原问题" {
+		t.Fatalf("embedding inputs = %+v, want original question fallback only", embedding.inputs)
+	}
+}
+
 func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "video.mp4", FileURL: "videos/d.mp4"}
@@ -371,8 +460,8 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 	if err != nil {
 		t.Fatalf("AskStream() error = %v", err)
 	}
-	if chatClient.chatCalls != 0 {
-		t.Fatalf("Chat() calls = %d, want provider streaming path", chatClient.chatCalls)
+	if chatClient.chatCalls != 1 {
+		t.Fatalf("Chat() calls = %d, want one rewrite call before provider streaming answer path", chatClient.chatCalls)
 	}
 	if chatClient.streamCalls != 1 {
 		t.Fatalf("StreamChat() calls = %d, want 1", chatClient.streamCalls)

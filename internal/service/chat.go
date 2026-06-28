@@ -27,14 +27,24 @@ type RetrievalRequest struct {
 }
 
 type RetrievedChunk struct {
-	ChunkID     int64   `json:"chunk_id"`
-	ChunkIndex  int     `json:"chunk_index"`
-	Score       float32 `json:"score"`
-	Content     string  `json:"content"`
-	Source      string  `json:"source,omitempty"`
-	VectorRank  int     `json:"vector_rank,omitempty"`
-	KeywordRank int     `json:"keyword_rank,omitempty"`
-	RRFScore    float64 `json:"rrf_score,omitempty"`
+	ChunkID                int64    `json:"chunk_id"`
+	ChunkIndex             int      `json:"chunk_index"`
+	Score                  float32  `json:"score"`
+	Content                string   `json:"content"`
+	AnchorContent          string   `json:"anchor_content,omitempty"`
+	Source                 string   `json:"source,omitempty"`
+	VectorRank             int      `json:"vector_rank,omitempty"`
+	KeywordRank            int      `json:"keyword_rank,omitempty"`
+	RRFScore               float64  `json:"rrf_score,omitempty"`
+	ExpandedFromChunkIndex int      `json:"expanded_from_chunk_index,omitempty"`
+	ExpandedWindowStart    int      `json:"expanded_window_start,omitempty"`
+	ExpandedWindowEnd      int      `json:"expanded_window_end,omitempty"`
+	WindowTruncated        bool     `json:"window_truncated,omitempty"`
+	RerankScore            float64  `json:"rerank_score,omitempty"`
+	FinalRank              int      `json:"final_rank,omitempty"`
+	MatchedQuery           string   `json:"matched_query,omitempty"`
+	CrossQueryRank         int      `json:"cross_query_rank,omitempty"`
+	Fallbacks              []string `json:"fallbacks,omitempty"`
 }
 
 type RAGRetriever interface {
@@ -128,7 +138,7 @@ func (s *ChatService) ListMessages(userID, sessionID int64) ([]model.ChatMessage
 
 func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, profile)
+	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +151,7 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 	return s.saveChatExchange(ctx, userID, sessionID, prepared.Question, answer, prepared.Citations, prepared.RecentLimit, profile.LLMModel)
 }
 
-func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, profile ai.Profile) (*preparedRAGChat, error) {
+func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -157,10 +167,6 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
-	queryVector, err := embedding.Embed(ctx, question)
-	if err != nil {
-		return nil, err
-	}
 	if s.retriever == nil {
 		return nil, fmt.Errorf("当前视频尚未构建 RAG 索引")
 	}
@@ -170,29 +176,27 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if topK > 10 {
 		topK = 10
 	}
-	candidateK := s.candidateK(topK)
-	citations, err := s.retriever.Search(ctx, queryVector, RetrievalRequest{
-		UserID:         userID,
-		TaskID:         session.TaskID,
-		EmbeddingModel: profile.EmbeddingModel,
-		TopK:           candidateK,
-		MinScore:       s.cfg.MinScore,
-	})
-	if err != nil {
-		return nil, err
-	}
-	citations, err = s.mergeKeywordChunks(session.TaskID, userID, profile.EmbeddingModel, question, citations, candidateK, topK)
-	if err != nil {
-		return nil, err
-	}
-	if len(citations) == 0 {
-		return nil, fmt.Errorf("未检索到足够相关的视频片段")
-	}
 
 	recentLimit := s.cfg.RecentTurns * 2
 	recent, err := s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
 	if err != nil {
 		return nil, err
+	}
+	retrieval, err := s.newRetrievalPipeline(topK, chat).Retrieve(ctx, RetrievalPipelineRequest{
+		UserID:         userID,
+		TaskID:         session.TaskID,
+		Question:       question,
+		Recent:         recent,
+		TopK:           topK,
+		EmbeddingModel: profile.EmbeddingModel,
+		Embedding:      embedding,
+	})
+	if err != nil {
+		return nil, err
+	}
+	citations := retrieval.Citations
+	if len(citations) == 0 {
+		return nil, fmt.Errorf("未检索到足够相关的视频片段")
 	}
 	messages := buildRAGMessages(citations, recent, question)
 	return &preparedRAGChat{
@@ -203,6 +207,22 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 		Citations:   citations,
 		Messages:    messages,
 	}, nil
+}
+
+func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *RetrievalPipeline {
+	return &RetrievalPipeline{
+		repos:     s.repos,
+		retriever: s.retriever,
+		rewriter:  NewLLMQueryRewriter(chat),
+		expander: &ContextExpander{
+			repos:               s.repos,
+			Radius:              1,
+			MaxCharsPerCitation: 4000,
+		},
+		reranker:   DeterministicReranker{},
+		CandidateK: s.candidateK(topK),
+		MinScore:   s.cfg.MinScore,
+	}
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []RetrievedChunk, recentLimit int, modelName string) (*AskResult, error) {
@@ -287,7 +307,7 @@ func (s *ChatService) AskStream(ctx context.Context, userID, sessionID int64, qu
 		return nil, fmt.Errorf("stream emit 不能为空")
 	}
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
-	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, profile)
+	prepared, err := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}

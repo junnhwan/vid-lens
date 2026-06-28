@@ -44,6 +44,17 @@ func (r *VideoChunkRepository) ListByTaskID(userID, taskID int64, embeddingModel
 	return chunks, err
 }
 
+func (r *VideoChunkRepository) ListByIndexRange(userID, taskID int64, embeddingModel string, start, end int) ([]model.VideoChunk, error) {
+	var chunks []model.VideoChunk
+	err := r.db.Where(
+		"user_id = ? AND task_id = ? AND embedding_model = ? AND chunk_index >= ? AND chunk_index <= ?",
+		userID, taskID, embeddingModel, start, end,
+	).
+		Order("chunk_index asc").
+		Find(&chunks).Error
+	return chunks, err
+}
+
 func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel string, terms []string, limit int) ([]VideoChunkSearchResult, error) {
 	terms = normalizeSearchTerms(terms)
 	if len(terms) == 0 {

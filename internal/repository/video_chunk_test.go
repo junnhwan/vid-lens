@@ -67,6 +67,47 @@ func TestVideoChunkRepositorySearchByBM25RanksKeywordMatches(t *testing.T) {
 	}
 }
 
+func TestVideoChunkRepositoryListByIndexRangeWindowPreservesOrderAndScope(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunks := []model.VideoChunk{
+		{UserID: 7, TaskID: 1, ChunkIndex: 0, Content: "target-0", ContentHash: "hash0", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v0"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "target-1", ContentHash: "hash1", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v1"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 2, Content: "target-2", ContentHash: "hash2", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v2"},
+		{UserID: 8, TaskID: 3, ChunkIndex: 1, Content: "wrong-user", ContentHash: "hash3", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v3"},
+		{UserID: 7, TaskID: 2, ChunkIndex: 1, Content: "wrong-task", ContentHash: "hash4", EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536, VectorID: "v4"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "wrong-model", ContentHash: "hash5", EmbeddingModel: "other-model", EmbeddingDim: 1536, VectorID: "v5"},
+	}
+	for _, chunk := range chunks {
+		if err := repo.db.Create(&chunk).Error; err != nil {
+			t.Fatalf("create chunk %+v: %v", chunk, err)
+		}
+	}
+
+	window, err := repo.ListByIndexRange(7, 1, "text-embedding-3-small", 0, 2)
+	if err != nil {
+		t.Fatalf("ListByIndexRange() error = %v", err)
+	}
+	if len(window) != 3 {
+		t.Fatalf("len(window) = %d, want 3: %+v", len(window), window)
+	}
+	for i, chunk := range window {
+		if chunk.ChunkIndex != i {
+			t.Fatalf("window[%d].ChunkIndex = %d, want %d: %+v", i, chunk.ChunkIndex, i, window)
+		}
+		if chunk.UserID != 7 || chunk.TaskID != 1 || chunk.EmbeddingModel != "text-embedding-3-small" {
+			t.Fatalf("window[%d] escaped scope: %+v", i, chunk)
+		}
+	}
+
+	wrongUserWindow, err := repo.ListByIndexRange(7, 3, "text-embedding-3-small", 1, 1)
+	if err != nil {
+		t.Fatalf("ListByIndexRange(wrong user scope) error = %v", err)
+	}
+	if len(wrongUserWindow) != 0 {
+		t.Fatalf("wrong user window = %+v, want empty", wrongUserWindow)
+	}
+}
+
 func newVideoChunkTestRepo(t *testing.T) *VideoChunkRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

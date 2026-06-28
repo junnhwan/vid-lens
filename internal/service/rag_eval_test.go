@@ -114,3 +114,71 @@ func TestRAGEvalRunUsesRetrieverAndPreservesNoResultCases(t *testing.T) {
 		t.Fatalf("latency should be recorded: %+v", report.Cases)
 	}
 }
+
+func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
+	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
+		{
+			Case: RAGEvalCase{
+				Question:              "Redis 分布式锁风险？",
+				ExpectedChunkKeywords: []string{"Redis"},
+			},
+			Citations: []RetrievedChunk{
+				{ChunkID: 1, Content: "Redis 分布式锁风险", Source: RetrievalSourceHybrid},
+			},
+			Duration:             10 * time.Millisecond,
+			RewriteFallback:      true,
+			ExpandedContextChars: 120,
+			RerankChangedRank:    true,
+		},
+		{
+			Case: RAGEvalCase{
+				Question:              "RAG 为什么要切片？",
+				ExpectedChunkKeywords: []string{"RAG"},
+			},
+			Citations: []RetrievedChunk{
+				{ChunkID: 2, Content: "RAG 切片", Source: RetrievalSourceVector},
+			},
+			Duration:             20 * time.Millisecond,
+			ExpandedContextChars: 80,
+		},
+	}, 3)
+
+	if report.RewriteFallbackCount != 1 || report.RewriteFallbackRate != 0.5 {
+		t.Fatalf("rewrite fallback metrics = %d %.3f, want 1 and 0.5", report.RewriteFallbackCount, report.RewriteFallbackRate)
+	}
+	if report.AvgExpandedContextChars != 100 {
+		t.Fatalf("avg expanded context chars = %.1f, want 100", report.AvgExpandedContextChars)
+	}
+	if report.RerankChangedRankCount != 1 {
+		t.Fatalf("rerank changed count = %d, want 1", report.RerankChangedRankCount)
+	}
+}
+
+func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
+	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
+		{
+			Case: RAGEvalCase{
+				Question:              "哪里提到 owner 校验？",
+				ExpectedChunkKeywords: []string{"owner 校验"},
+			},
+			Citations: []RetrievedChunk{
+				{
+					ChunkID:       1,
+					ChunkIndex:    5,
+					AnchorContent: "这里只是相邻片段的锚点，没有关键词",
+					Content:       "这里只是相邻片段的锚点，没有关键词\n真正命中的邻居窗口提到了 owner 校验",
+				},
+			},
+		},
+	}, 1)
+
+	if report.RecallAtK != 0 || report.MRR != 0 || report.HitCases != 0 {
+		t.Fatalf("report = %+v, want anchor-based Recall/MRR to stay zero", report)
+	}
+	if !report.Cases[0].CitationContextHit || !report.Cases[0].ExpandedContextHit {
+		t.Fatalf("case context hit flags = %+v, want expanded context hit recorded", report.Cases[0])
+	}
+	if report.CitationContextHitCases != 1 || report.ExpandedContextHitCases != 1 {
+		t.Fatalf("context hit counts = citation:%d expanded:%d, want 1/1", report.CitationContextHitCases, report.ExpandedContextHitCases)
+	}
+}
