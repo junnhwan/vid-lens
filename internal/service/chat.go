@@ -39,6 +39,8 @@ type RetrievedChunk struct {
 	ExpandedWindowStart    int      `json:"expanded_window_start,omitempty"`
 	ExpandedWindowEnd      int      `json:"expanded_window_end,omitempty"`
 	WindowTruncated        bool     `json:"window_truncated,omitempty"`
+	RerankScore            float64  `json:"rerank_score,omitempty"`
+	FinalRank              int      `json:"final_rank,omitempty"`
 	Fallbacks              []string `json:"fallbacks,omitempty"`
 }
 
