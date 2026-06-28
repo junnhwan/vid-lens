@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"vid-lens/internal/model"
@@ -56,13 +57,17 @@ func (r *TaskRepository) FindByMD5(md5 string) (*model.VideoTask, error) {
 	return &task, nil
 }
 
-// ListByUserID 分页查询用户的视频任务列表
+// ListByUserID 分页查询用户的视频任务列表，keyword 非空时按文件名/标题模糊搜索
 // 面试亮点：(user_id, created_at) 联合索引，天然按时间排序
-func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int) ([]model.VideoTask, int64, error) {
+func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {
 	var tasks []model.VideoTask
 	var total int64
 
 	query := r.db.Where("user_id = ?", userID)
+	if kw := strings.TrimSpace(keyword); kw != "" {
+		like := "%" + kw + "%"
+		query = query.Where("filename LIKE ? OR title LIKE ?", like, like)
+	}
 	query.Model(&model.VideoTask{}).Count(&total)
 
 	offset := (page - 1) * pageSize

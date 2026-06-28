@@ -29,9 +29,26 @@
     </div>
 
     <div class="chat-container">
-      <div class="chat-messages" ref="messagesContainer">
+      <div v-if="sessions.length" class="chat-sessions-bar">
+        <select class="session-select" :value="sessionId" @change="onSessionSelectChange" aria-label="切换对话">
+          <option v-for="s in sessions" :key="s.id" :value="s.id">{{ sessionLabel(s) }}</option>
+        </select>
+        <button type="button" class="session-btn" :disabled="sessionLoading" @click="newSession" title="新建对话">＋ 新对话</button>
+        <button type="button" class="session-btn danger" :disabled="!sessionId" @click="deleteCurrentSession" title="删除当前对话">🗑</button>
+      </div>
+      <div class="chat-messages" ref="messagesContainer" @scroll="onMessagesScroll">
         <div v-for="(msg, msgIdx) in messages" :key="msg.id || msgIdx" class="message" :class="msg.role">
           <div class="message-content">
+            <button
+              v-if="msg.role === 'assistant' && msg.content"
+              type="button"
+              class="message-copy"
+              :class="{ copied: copiedMessageId === msg.id }"
+              :title="copiedMessageId === msg.id ? '已复制' : '复制回答'"
+              @click="copyMessage(msg)"
+            >
+              {{ copiedMessageId === msg.id ? '✓' : '⧉' }}
+            </button>
             <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
@@ -141,15 +158,21 @@
           {{ strictModeBlockedText }}
         </div>
         <div class="chat-input-row">
-          <input
+          <textarea
+            ref="questionInput"
             v-model="question"
-            @keyup.enter="sendQuestion"
+            @keydown.enter.exact.prevent="sendQuestion"
+            @input="autoResizeTextarea"
             :placeholder="chatInputPlaceholder"
             :disabled="loading || sessionLoading || strictModeBlocked"
             class="input-field"
+            rows="1"
             aria-label="输入问题"
-          />
-          <button @click="sendQuestion" :disabled="sendDisabled" class="btn-send">
+          ></textarea>
+          <button v-if="streaming" @click="stopStreaming" class="btn-send stop">
+            停止
+          </button>
+          <button v-else @click="sendQuestion" :disabled="sendDisabled" class="btn-send">
             发送
           </button>
         </div>
@@ -163,7 +186,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
-import { normalizeChatMessages, resolveReusableChatSession } from '../chatHistoryPolicy.js'
+import { normalizeChatMessages } from '../chatHistoryPolicy.js'
 import {
   DEFAULT_CITATION_PREVIEW_OPTIONS,
   areAllExpandableCitationsExpanded,
@@ -182,13 +205,19 @@ const emit = defineEmits(['error'])
 const indexStatus = ref({ status: 'not_indexed', chunks: 0, error: '' })
 const building = ref(false)
 const messages = ref([])
+const sessions = ref([])
 const question = ref('')
 const loading = ref(false)
 const sessionLoading = ref(false)
 const chatMode = ref('video_assistant')
 const sessionId = ref(null)
 const messagesContainer = ref(null)
+const questionInput = ref(null)
 const expandedCitationKeys = ref(new Set())
+const streaming = ref(false)
+const userAtBottom = ref(true)
+const copiedMessageId = ref(null)
+let abortController = null
 let indexStatusTimer = null
 
 const citationPreviewOptions = DEFAULT_CITATION_PREVIEW_OPTIONS
@@ -324,8 +353,10 @@ const buildIndex = async () => {
 
 const createSession = async () => {
   try {
-    const res = await api.createChatSession(props.task.id, '会话')
+    const res = await api.createChatSession(props.task.id, '')
+    sessions.value = [res, ...sessions.value]
     sessionId.value = res.id
+    messages.value = []
     return res
   } catch (err) {
     console.error('创建会话失败:', err)
@@ -333,22 +364,110 @@ const createSession = async () => {
   }
 }
 
-const scrollMessagesToBottom = () => {
+const loadMessages = async (id) => {
+  try {
+    messages.value = normalizeChatMessages(await api.getChatMessages(id))
+  } catch (err) {
+    console.error('加载会话消息失败:', err)
+    messages.value = []
+  }
+  scrollMessagesToBottom(true)
+}
+
+const refreshSessions = async () => {
+  try {
+    sessions.value = (await api.getChatSessions(props.task.id)) || []
+  } catch (err) {
+    sessions.value = []
+  }
+}
+
+const sessionLabel = (s) => s.title || `会话 #${s.id}`
+
+const selectSession = async (id) => {
+  if (!id) return
+  if (sessionId.value === id) return
+  sessionId.value = id
+  await loadMessages(id)
+}
+
+const onSessionSelectChange = (e) => selectSession(Number(e.target.value))
+
+const newSession = async () => {
+  if (sessionLoading.value) return
+  sessionLoading.value = true
+  try {
+    await createSession()
+  } finally {
+    sessionLoading.value = false
+  }
+}
+
+const deleteCurrentSession = async () => {
+  if (!sessionId.value || sessionLoading.value) return
+  if (!window.confirm('确定删除当前对话？此操作不可恢复。')) return
+  sessionLoading.value = true
+  try {
+    await api.deleteChatSession(sessionId.value)
+    sessions.value = sessions.value.filter((s) => s.id !== sessionId.value)
+    sessionId.value = null
+    if (sessions.value.length > 0) {
+      await selectSession(sessions.value[0].id)
+    } else {
+      await createSession()
+    }
+  } catch (err) {
+    emit('error', err.message || '删除会话失败')
+  } finally {
+    sessionLoading.value = false
+  }
+}
+
+const scrollMessagesToBottom = (force = false) => {
+  // 用户滚到上方查看历史时，不要把视口拽回底部打断阅读
+  if (!force && !userAtBottom.value) return
   nextTick(() => {
     messagesContainer.value?.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
   })
+}
+
+const onMessagesScroll = () => {
+  const el = messagesContainer.value
+  if (!el) return
+  const threshold = 80
+  userAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold
+}
+
+const stopStreaming = () => {
+  abortController?.abort()
+}
+
+const copyMessage = async (message) => {
+  try {
+    await navigator.clipboard.writeText(message.content || '')
+    copiedMessageId.value = message.id
+    setTimeout(() => {
+      if (copiedMessageId.value === message.id) copiedMessageId.value = null
+    }, 1500)
+  } catch (err) {
+    emit('error', '复制失败')
+  }
+}
+
+const autoResizeTextarea = () => {
+  const el = questionInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
 const ensureChatSession = async () => {
   if (sessionId.value || sessionLoading.value) return
   sessionLoading.value = true
   try {
-    const sessions = await api.getChatSessions(props.task.id)
-    const reusable = await resolveReusableChatSession(sessions, (id) => api.getChatMessages(id))
-    if (reusable.session) {
-      sessionId.value = reusable.session.id
-      messages.value = normalizeChatMessages(reusable.messages)
-      scrollMessagesToBottom()
+    await refreshSessions()
+    if (sessions.value.length > 0) {
+      await selectSession(sessions.value[0].id)
       return
     }
     await createSession()
@@ -411,6 +530,23 @@ const sendStreamQuestion = async (q, mode) => {
     mode: 'rag',
   }
   messages.value.push(assistantMsg)
+  userAtBottom.value = true
+  streaming.value = true
+  abortController = new AbortController()
+
+  const finish = () => {
+    streaming.value = false
+    loading.value = false
+    abortController = null
+  }
+  const failStream = (reason) => {
+    // 流式失败时若气泡还空着，回填错误说明，避免留一条空气泡
+    if (!assistantMsg.content) {
+      assistantMsg.content = `⚠️ ${reason}`
+    }
+    emit('error', reason)
+    finish()
+  }
 
   try {
     await api.sendChatMessageStream(sessionId.value, q, 5, mode, (event) => {
@@ -421,15 +557,18 @@ const sendStreamQuestion = async (q, mode) => {
         assistantMsg.citations = event.citations || []
       } else if (event.type === 'done') {
         assistantMsg.id = event.message_id || assistantMsg.id
-        loading.value = false
+        finish()
       } else if (event.type === 'error') {
-        emit('error', event.message || '回答失败')
-        loading.value = false
+        failStream(event.message || '回答失败')
       }
-    })
+    }, abortController.signal)
   } catch (err) {
-    emit('error', err.message || '发送失败')
-    loading.value = false
+    if (err?.name === 'AbortError') {
+      // 用户主动停止：保留已生成内容，不报错
+      finish()
+    } else {
+      failStream(err.message || '发送失败')
+    }
   }
 }
 
@@ -584,6 +723,60 @@ onUnmounted(() => {
   height: 100%;
 }
 
+.chat-sessions-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid rgba(139, 149, 168, 0.14);
+  background: rgba(10, 14, 26, 0.42);
+}
+
+.session-select {
+  flex: 1;
+  min-width: 0;
+  background: rgba(10, 14, 26, 0.6);
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  color: #e8eef7;
+  font-size: 0.82rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.session-select:focus {
+  border-color: #d4af37;
+}
+
+.session-btn {
+  background: transparent;
+  border: 1px solid rgba(139, 149, 168, 0.2);
+  color: #8b95a8;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.session-btn:hover:not(:disabled) {
+  border-color: rgba(212, 175, 55, 0.4);
+  color: #d4af37;
+}
+
+.session-btn.danger:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
+.session-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -621,12 +814,47 @@ onUnmounted(() => {
 }
 
 .message.assistant .message-content {
+  position: relative;
   background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.2);
   color: #b8c5db;
   max-width: 80%;
   padding: 1rem 1.25rem;
   border-radius: 1rem 1rem 1rem 0.25rem;
+}
+
+.message-copy {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  opacity: 0;
+  background: rgba(10, 14, 26, 0.75);
+  border: 1px solid rgba(139, 149, 168, 0.25);
+  color: #8b95a8;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.message-content:hover .message-copy {
+  opacity: 1;
+}
+
+.message-copy:hover {
+  color: #d4af37;
+  border-color: rgba(212, 175, 55, 0.4);
+}
+
+.message-copy.copied {
+  color: #4ade80;
+  opacity: 1;
+  border-color: rgba(74, 222, 128, 0.4);
 }
 
 .message.loading {
@@ -814,6 +1042,12 @@ onUnmounted(() => {
   outline: none;
   transition: all 0.3s;
   font-size: 0.95rem;
+  resize: none;
+  overflow-y: auto;
+  min-height: 3rem;
+  max-height: 160px;
+  line-height: 1.5;
+  font-family: inherit;
 }
 
 .input-field:focus {
@@ -841,6 +1075,15 @@ onUnmounted(() => {
 .btn-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.btn-send.stop {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.92), rgba(220, 38, 38, 0.92));
+  color: #fff;
+}
+
+.btn-send.stop:hover {
+  box-shadow: 0 6px 24px rgba(239, 68, 68, 0.4);
 }
 
 .btn-amber {

@@ -93,6 +93,9 @@ const currentPage = ref(1)
 const pageSize = 20
 const hasMore = ref(false)
 const loadingMore = ref(false)
+const tasksTotal = ref(0) // 后端返回的全量任务数；已加载任务可能少于它（分页未加载完）
+const tasksLoadError = ref('') // 列表加载失败原因（非空时前端展示重试入口）
+const searchKeyword = ref('') // 任务搜索关键字（走后端全量搜索，不再只过滤已加载页）
 
 // ConfirmDialog 状态
 const confirmState = ref({
@@ -121,8 +124,11 @@ const closeConfirm = () => {
 }
 
 // 计算属性
+// total 是后端全量值；completed/processing/failed 仅基于当前已加载任务，
+// 超过一页时分项可能不全，由 Sidebar 在 loaded < total 时提示。
 const taskStats = computed(() => ({
-  total: tasks.value.length,
+  total: tasksTotal.value || tasks.value.length,
+  loaded: tasks.value.length,
   completed: tasks.value.filter(t => t.status === 3).length,
   processing: tasks.value.filter(t => t.status < 3).length,
   failed: tasks.value.filter(t => t.status === 4).length
@@ -180,7 +186,7 @@ const handleUrlUpload = async (url) => {
   }
 }
 
-const fetchTasks = async (page = 1, append = false) => {
+const fetchTasks = async (page = 1, append = false, keyword = searchKeyword.value) => {
   if (!user.value) {
     tasks.value = []
     tasksLoading.value = false
@@ -190,7 +196,7 @@ const fetchTasks = async (page = 1, append = false) => {
     tasksLoading.value = true
   }
   try {
-    const res = await api.listTasks(page, pageSize)
+    const res = await api.listTasks(page, pageSize, keyword)
     const list = res?.list || []
     if (append) {
       tasks.value = [...tasks.value, ...list]
@@ -198,9 +204,18 @@ const fetchTasks = async (page = 1, append = false) => {
       tasks.value = list
     }
     currentPage.value = page
-    hasMore.value = list.length >= pageSize
+    tasksTotal.value = typeof res?.total === 'number' ? res.total : tasks.value.length
+    hasMore.value = tasks.value.length < tasksTotal.value
+    tasksLoadError.value = ''
   } catch (err) {
     console.error(err)
+    // 首次加载（当前无数据）才弹 toast，避免轮询刷屏；同时记录错误供列表展示重试
+    if (!append) {
+      tasksLoadError.value = err.message || '加载任务列表失败'
+      if (tasks.value.length === 0) {
+        showToast(tasksLoadError.value, true)
+      }
+    }
   } finally {
     if (!append) {
       tasksLoading.value = false
@@ -216,6 +231,13 @@ const loadMoreTasks = async () => {
   } finally {
     loadingMore.value = false
   }
+}
+
+const retryLoadTasks = () => fetchTasks(1)
+
+const onSearchTasks = (kw) => {
+  searchKeyword.value = kw
+  fetchTasks(1, false, kw)
 }
 
 const deleteTask = async (task) => {
@@ -316,6 +338,7 @@ const startPolling = (taskId, type) => {
       clearInterval(pollingTimers.value[taskId])
       delete pollingTimers.value[taskId]
       loading.value[taskId] = false
+      showToast('任务仍在后台处理，请稍后刷新查看进度', true)
     }
   }, 300000)
 }
@@ -420,6 +443,11 @@ const appCtx = reactive({
   tasksLoading,
   loadingMore,
   hasMore,
+  tasksTotal,
+  tasksLoadError,
+  retryLoadTasks,
+  searchKeyword,
+  onSearchTasks,
   sidebarOpen,
   handleFileUpload,
   handleUrlUpload,

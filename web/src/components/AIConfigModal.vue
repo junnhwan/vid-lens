@@ -91,7 +91,7 @@ import api from '../api'
 import { normalizeListResponse } from '../apiEnvelope.js'
 
 defineProps({ show: Boolean })
-const emit = defineEmits(['close', 'updated'])
+const emit = defineEmits(['close', 'updated', 'showConfirm'])
 
 const profiles = ref([])
 const isEditing = ref(false)

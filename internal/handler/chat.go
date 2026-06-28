@@ -75,6 +75,20 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 	response.OK(c, messages)
 }
 
+func (h *ChatHandler) DeleteSession(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
+	if err != nil || sessionID <= 0 {
+		response.BadRequest(c, "会话 ID 错误")
+		return
+	}
+	if err := h.chatSvc.DeleteSession(userID, sessionID); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"deleted": true})
+}
+
 func (h *ChatHandler) Ask(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)

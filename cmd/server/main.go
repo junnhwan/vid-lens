@@ -252,6 +252,7 @@ func main() {
 			{
 				chat.POST("/sessions", chatHandler.CreateSession)
 				chat.GET("/sessions", chatHandler.ListSessions)
+				chat.DELETE("/sessions/:session_id", chatHandler.DeleteSession)
 				chat.GET("/sessions/:session_id/messages", chatHandler.ListMessages)
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), chatHandler.Ask)
 				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), chatHandler.AskAgent)

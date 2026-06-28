@@ -8,7 +8,7 @@
            @click="handleLocalUploadClick"
            @dragover.prevent="dragging = true"
            @dragleave.prevent="dragging = false"
-           @drop.prevent="handleDrop">
+           @drop.prevent.stop="handleDrop">
         <div class="upload-icon">📁</div>
         <p class="upload-label">本地上传</p>
         <input type="file" accept="video/*" :disabled="!user" @change="handleFileSelect" hidden ref="fileInput" />
@@ -47,6 +47,9 @@
     <!-- 统计卡片 -->
     <section v-if="user" class="sidebar-section">
       <h3 class="section-title">📊 数据概览</h3>
+      <div v-if="stats.loaded != null && stats.loaded < stats.total" class="stats-partial-hint">
+        仅统计已加载 {{ stats.loaded }} / {{ stats.total }} 条
+      </div>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-value">{{ stats.total }}</div>
@@ -86,7 +89,7 @@ const props = defineProps({
   mobileOpen: Boolean
 })
 
-const emit = defineEmits(['uploadFile', 'uploadUrl', 'openAuth', 'closeSidebar'])
+const emit = defineEmits(['uploadFile', 'uploadUrl', 'openAuth', 'closeSidebar', 'toast'])
 
 const videoUrl = ref('')
 const dragging = ref(false)
@@ -126,7 +129,11 @@ const handleDrop = async (e) => {
     return
   }
   const file = e.dataTransfer.files?.[0]
-  if (!file || !file.type.startsWith('video/')) {
+  if (!file) {
+    return
+  }
+  if (!file.type.startsWith('video/')) {
+    emit('toast', '仅支持视频文件')
     return
   }
   emit('uploadFile', file)
@@ -137,7 +144,11 @@ const handleUrlUpload = () => {
     emit('openAuth')
     return
   }
-  if (!videoUrl.value || !videoUrl.value.startsWith('http')) {
+  if (!videoUrl.value) {
+    return
+  }
+  if (!/^https?:\/\//i.test(videoUrl.value)) {
+    emit('toast', '请输入 http(s) 开头的链接')
     return
   }
   emit('uploadUrl', videoUrl.value)
@@ -193,6 +204,14 @@ const handleUrlUpload = () => {
   background-clip: text;
   margin-bottom: 1.25rem;
   letter-spacing: 0.5px;
+}
+
+.stats-partial-hint {
+  font-size: 0.72rem;
+  color: #8b95a8;
+  margin-top: -0.5rem;
+  margin-bottom: 1rem;
+  opacity: 0.8;
 }
 
 /* 上传卡片 */

@@ -1,5 +1,5 @@
 <template>
-  <div class="app-layout">
+  <div class="app-layout" @dragover.prevent @drop.prevent="onGlobalDrop">
     <Sidebar
       :user="app.user"
       :uploading="app.uploading"
@@ -11,6 +11,7 @@
       @uploadUrl="app.handleUrlUpload"
       @openAuth="app.openAuth"
       @closeSidebar="app.closeSidebar"
+      @toast="(msg) => app.showToast(msg, true)"
     />
 
     <main class="content-area">
@@ -20,12 +21,15 @@
         :initialLoading="app.tasksLoading"
         :hasMore="app.hasMore"
         :loadingMore="app.loadingMore"
+        :loadError="app.tasksLoadError"
         @taskClick="app.openTaskDrawer"
         @deleteTask="app.deleteTask"
         @transcribe="app.doTranscribe"
         @analyze="app.doAnalyze"
         @loadMore="app.loadMoreTasks"
         @chat="goChat"
+        @retry="app.retryLoadTasks"
+        @search="app.onSearchTasks"
       />
     </main>
   </div>
@@ -52,6 +56,13 @@ const router = useRouter()
 
 const goChat = (task) => {
   router.push({ name: 'chat-task', params: { taskId: task.id } })
+}
+
+// 支持把视频拖到页面任意位置上传（Sidebar 上传卡用 .stop 自行处理，不会重复触发）
+const onGlobalDrop = (e) => {
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  app.handleFileUpload(file)
 }
 </script>
 

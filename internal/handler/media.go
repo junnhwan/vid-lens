@@ -187,6 +187,7 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	keyword := c.Query("keyword")
 
 	if page < 1 {
 		page = 1
@@ -195,7 +196,7 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 		pageSize = 20
 	}
 
-	tasks, total, err := h.svc.ListTasks(userID, page, pageSize)
+	tasks, total, err := h.svc.ListTasks(userID, page, pageSize, keyword)
 	if err != nil {
 		response.InternalError(c, "查询失败")
 		return

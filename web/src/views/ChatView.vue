@@ -45,6 +45,11 @@
         :task="currentTask"
         @error="onChatError"
       />
+      <div v-else-if="taskNotFound" class="chat-placeholder">
+        <div class="placeholder-icon">🚫</div>
+        <p>视频不存在或无权限访问</p>
+        <button class="btn-amber small" @click="goLibrary">返回视频处理</button>
+      </div>
       <div v-else class="chat-placeholder">
         <div class="placeholder-icon">💬</div>
         <p>从左侧选择一个视频开始对话</p>
@@ -54,8 +59,9 @@
 </template>
 
 <script setup>
-import { computed, inject } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import api from '../api'
 import VideoRAGChat from '../components/VideoRAGChat.vue'
 import { formatTime } from '../utils/format.js'
 
@@ -68,15 +74,43 @@ const chattableTasks = computed(() =>
   (app.tasks || []).filter((t) => t.transcription?.content || t.status === 3),
 )
 
-const currentTask = computed(() => {
+const currentTask = ref(null)
+const taskNotFound = ref(false)
+
+// 直达 /chat/:taskId 时：优先用已加载列表；分页没加载到就单独 getTask 拉详情；
+// 拉不到（不存在 / 无权限）就显示提示，绝不回退到别的视频。
+const resolveTask = async () => {
   const idParam = route.params.taskId
-  if (idParam != null) {
-    const id = Number(idParam)
-    const found = (app.tasks || []).find((t) => t.id === id)
-    if (found) return found
+  if (idParam == null || idParam === '') {
+    taskNotFound.value = false
+    currentTask.value = chattableTasks.value[0] || null
+    return
   }
-  return chattableTasks.value[0] || null
-})
+  const id = Number(idParam)
+  const found = (app.tasks || []).find((t) => t.id === id)
+  if (found) {
+    taskNotFound.value = false
+    currentTask.value = found
+    return
+  }
+  try {
+    const detail = await api.getTask(id)
+    taskNotFound.value = false
+    currentTask.value = detail || null
+    // 让该视频也出现在左侧列表（若尚未加载）
+    if (detail && Array.isArray(app.tasks) && !app.tasks.some((t) => t.id === detail.id)) {
+      app.tasks.push(detail)
+    }
+  } catch (err) {
+    taskNotFound.value = true
+    currentTask.value = null
+    app.showToast(err.message || '视频不存在或无权限', true)
+  }
+}
+
+watch(() => route.params.taskId, resolveTask, { immediate: true })
+// 首次进入时任务列表可能还没加载完，加载后重新解析一次
+watch(() => (app.tasks || []).length, resolveTask)
 
 const isCurrent = (task) => currentTask.value?.id === task.id
 

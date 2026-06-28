@@ -66,8 +66,8 @@ export default {
     })
   },
   uploadByURL: (url) => api.post('/media/upload-url', { url }),
-  listTasks: (page = 1, pageSize = 20) =>
-    api.get('/media/list', { params: { page, page_size: pageSize } }),
+  listTasks: (page = 1, pageSize = 20, keyword = '') =>
+    api.get('/media/list', { params: { page, page_size: pageSize, keyword } }),
   getTask: (id) => api.get(`/media/task/${id}`),
   deleteTask: (id) => api.delete(`/media/task/${id}`),
   analyze: (id) => api.post(`/media/analyze/${id}`),
@@ -116,7 +116,7 @@ export default {
     api.post(`/chat/sessions/${sessionId}/messages/agent`, { question, top_k: topK }),
 
   // 流式聊天（SSE）
-  sendChatMessageStream: async (sessionId, question, topK = 5, modeOrOnEvent = 'video_assistant', maybeOnEvent) => {
+  sendChatMessageStream: async (sessionId, question, topK = 5, modeOrOnEvent = 'video_assistant', maybeOnEvent, signal) => {
     const mode = typeof modeOrOnEvent === 'string' ? modeOrOnEvent : 'video_assistant'
     const onEvent = typeof modeOrOnEvent === 'function' ? modeOrOnEvent : maybeOnEvent
     const token = getStoredAuthToken()
@@ -127,6 +127,7 @@ export default {
         'Authorization': token ? `Bearer ${token}` : '',
       },
       body: JSON.stringify({ question, top_k: topK, mode }),
+      signal,
     })
 
     if (!response.ok) {

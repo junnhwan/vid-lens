@@ -87,3 +87,13 @@ func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
 		return tx.Where("task_id = ?", taskID).Delete(&model.ChatSession{}).Error
 	})
 }
+
+// DeleteSession 删除单个会话及其消息（调用方应已校验归属于该用户）
+func (r *ChatRepository) DeleteSession(sessionID int64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", sessionID).Delete(&model.ChatSession{}).Error
+	})
+}

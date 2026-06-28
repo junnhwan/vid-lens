@@ -151,6 +151,17 @@ func (s *ChatService) ListMessages(userID, sessionID int64) ([]model.ChatMessage
 	return s.repos.Chat.ListMessages(userID, sessionID)
 }
 
+func (s *ChatService) DeleteSession(userID, sessionID int64) error {
+	session, err := s.repos.Chat.FindSessionForUser(userID, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return fmt.Errorf("会话不存在或无权限")
+	}
+	return s.repos.Chat.DeleteSession(sessionID)
+}
+
 func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
 	return s.AskWithMode(ctx, ChatModeStrictRAG, userID, sessionID, question, topK, embedding, chat, profile)
 }

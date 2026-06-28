@@ -21,6 +21,13 @@
     </div>
   </section>
 
+  <section v-else-if="loadError" class="empty-state">
+    <div class="empty-icon">⚠️</div>
+    <h3>任务列表加载失败</h3>
+    <p>{{ loadError }}</p>
+    <button class="load-more-btn" @click="$emit('retry')">重新加载</button>
+  </section>
+
   <section v-else-if="tasks.length" class="tasks-section">
     <div class="section-header">
       <h2>我的任务</h2>
@@ -81,7 +88,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import TaskCard from './TaskCard.vue'
 import { shouldShowInitialTaskSkeleton } from '../taskListLoadingPolicy.js'
 
@@ -90,10 +97,11 @@ const props = defineProps({
   loading: Object,
   initialLoading: { type: Boolean, default: false },
   hasMore: { type: Boolean, default: false },
-  loadingMore: { type: Boolean, default: false }
+  loadingMore: { type: Boolean, default: false },
+  loadError: { type: String, default: '' }
 })
 
-defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat'])
+const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search'])
 
 const activeTab = ref('all')
 const searchQuery = ref('')
@@ -117,15 +125,18 @@ const tabs = computed(() => [
 ])
 
 const filteredTasks = computed(() => {
+  // 关键字搜索交给后端（emit search），这里只做状态 tab 的客户端过滤
   let result = props.tasks
   if (activeTab.value === 'processing') result = result.filter(t => t.status < 3)
   if (activeTab.value === 'completed') result = result.filter(t => t.status === 3)
   if (activeTab.value === 'failed') result = result.filter(t => t.status === 4 || t.status === 5)
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase()
-    result = result.filter(t => t.filename?.toLowerCase().includes(q))
-  }
   return result
+})
+
+let searchTimer = null
+watch(searchQuery, (val) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => emit('search', val), 300)
 })
 
 const handleScroll = () => {

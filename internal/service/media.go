@@ -419,9 +419,9 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 	return task, nil
 }
 
-// ListTasks 分页查询
-func (s *MediaService) ListTasks(userID int64, page, pageSize int) ([]model.VideoTask, int64, error) {
-	return s.repo.Task.ListByUserID(userID, page, pageSize)
+// ListTasks 分页查询，keyword 非空时按文件名/标题搜索
+func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {
+	return s.repo.Task.ListByUserID(userID, page, pageSize, keyword)
 }
 
 // DeleteTask 删除
