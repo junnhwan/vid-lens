@@ -62,73 +62,76 @@ const handleBackdropMouseDown = (e) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  padding: 1.25rem;
+  z-index: 1200;
+  overflow-y: auto;
 }
 
 .confirm-panel {
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.97), rgba(20, 30, 50, 0.95));
-  backdrop-filter: blur(32px) saturate(180%);
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  border-radius: 1.5rem;
-  padding: 2.5rem;
-  max-width: 420px;
-  width: 90%;
+  background: var(--vl-panel);
+  border: 1px solid var(--vl-border-strong);
+  border-radius: var(--vl-radius-xl);
+  padding: 1.75rem 1.5rem 1.5rem;
+  max-width: 400px;
+  width: min(400px, 100%);
+  margin: auto;
   text-align: center;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--vl-shadow);
 }
 
 .confirm-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  filter: drop-shadow(0 2px 8px rgba(212, 175, 55, 0.3));
+  font-size: 1.75rem;
+  margin-bottom: 0.65rem;
 }
 
 .confirm-title {
-  font-size: 1.25rem;
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  color: #e8eef7;
-  margin-bottom: 0.75rem;
+  font-family: var(--vl-font-display);
+  color: var(--vl-text);
 }
 
 .confirm-message {
-  color: #8b95a8;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  margin-bottom: 2rem;
+  margin: 0 0 1.35rem;
+  color: var(--vl-text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .confirm-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.65rem;
   justify-content: center;
 }
 
 .btn-cancel {
-  background: rgba(139, 149, 168, 0.1);
-  border: 1px solid rgba(139, 149, 168, 0.3);
-  color: #8b95a8;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
+  background: transparent;
+  border: 1px solid var(--vl-border);
+  color: var(--vl-text-secondary);
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--vl-radius-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
-  font-size: 0.95rem;
+  transition: all 0.2s;
+  font-size: 0.88rem;
 }
 
 .btn-cancel:hover {
-  border-color: rgba(139, 149, 168, 0.5);
-  color: #e8eef7;
+  border-color: var(--vl-border-strong);
+  color: var(--vl-text);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .btn-confirm {
   border: none;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--vl-radius-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
-  font-size: 0.95rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+  font-size: 0.88rem;
 }
 
 .btn-confirm.danger {
@@ -137,34 +140,33 @@ const handleBackdropMouseDown = (e) => {
 }
 
 .btn-confirm.danger:hover {
-  box-shadow: 0 6px 24px rgba(239, 68, 68, 0.4);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
 }
 
 .btn-confirm.warning {
   background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #0a0e1a;
+  color: var(--vl-text-inverse);
 }
 
 .btn-confirm.warning:hover {
-  box-shadow: 0 6px 24px rgba(245, 158, 11, 0.4);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.35);
+  transform: translateY(-1px);
 }
 
 .btn-confirm.primary {
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  color: #0a0e1a;
+  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  color: var(--vl-text-inverse);
 }
 
 .btn-confirm.primary:hover {
-  box-shadow: 0 6px 24px rgba(212, 175, 55, 0.4);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 18px var(--vl-primary-glow);
+  transform: translateY(-1px);
 }
 
-/* transition */
-.confirm-enter-active, .confirm-leave-active { transition: opacity 0.25s ease; }
-.confirm-enter-active .confirm-panel, .confirm-leave-active .confirm-panel { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.confirm-enter-active, .confirm-leave-active { transition: opacity 0.2s ease; }
+.confirm-enter-active .confirm-panel, .confirm-leave-active .confirm-panel { transition: transform 0.2s var(--vl-ease); }
 .confirm-enter-from, .confirm-leave-to { opacity: 0; }
-.confirm-enter-from .confirm-panel { transform: scale(0.9); }
-.confirm-leave-to .confirm-panel { transform: scale(0.9); }
+.confirm-enter-from .confirm-panel { transform: scale(0.96); }
+.confirm-leave-to .confirm-panel { transform: scale(0.96); }
 </style>

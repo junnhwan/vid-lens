@@ -3,7 +3,9 @@
     <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">×</button>
 
     <div class="task-header">
-      <div class="task-icon">🎬</div>
+      <div class="task-icon" aria-hidden="true">
+        <span class="film-mark"></span>
+      </div>
       <div class="task-info">
         <div class="task-name">{{ task.title || task.filename }}</div>
         <div class="task-meta">
@@ -12,7 +14,7 @@
           <span class="meta-size">{{ formatFileSize(task.file_size) }}</span>
           <span class="meta-dot">·</span>
           <span class="meta-status" :class="detailedStatus.class">
-            <span class="status-icon">{{ detailedStatus.icon }}</span>
+            <span class="status-dot" aria-hidden="true"></span>
             {{ detailedStatus.text }}
           </span>
         </div>
@@ -21,13 +23,13 @@
 
     <div v-if="!compact" class="task-actions">
       <button class="action-btn" @click.stop="$emit('transcribe')" :disabled="isActionDisabled">
-        <span class="btn-icon">📄</span> 提取文字
+        提取文字
       </button>
-      <button class="action-btn amber" @click.stop="$emit('analyze')" :disabled="isActionDisabled">
-        <span class="btn-icon">🤖</span> AI 总结
+      <button class="action-btn accent" @click.stop="$emit('analyze')" :disabled="isActionDisabled">
+        AI 总结
       </button>
       <button v-if="canChat" class="action-btn chat" @click.stop="$emit('chat')">
-        <span class="btn-icon">💬</span> 去对话
+        去对话
       </button>
     </div>
   </div>
@@ -53,57 +55,46 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 
 <style scoped>
 .task-card {
-  backdrop-filter: blur(20px) saturate(180%);
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
-  border: 1px solid rgba(139, 149, 168, 0.2);
-  border-radius: 1.5rem;
-  padding: 2rem;
+  background: var(--vl-surface);
+  border: 1px solid var(--vl-border);
+  border-radius: var(--vl-radius-lg);
+  padding: 1.15rem 1.25rem;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, background 0.2s;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
+
 .task-card::before {
   content: '';
   position: absolute;
-  top: 0;
   left: 0;
-  width: 4px;
-  height: 100%;
-  background: linear-gradient(180deg, #d4af37, #2962ff);
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--vl-primary), transparent 85%);
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity 0.2s;
 }
 
 .task-card.task-failed::before {
-  background: linear-gradient(180deg, #ef4444, #dc2626);
+  background: linear-gradient(180deg, var(--vl-danger), transparent 85%);
   opacity: 1;
-  animation: vl-pulse-border 2s ease-in-out infinite;
 }
 
-@keyframes vl-pulse-border {
-  0%, 100% {
-    opacity: 1;
-    box-shadow: -2px 0 8px rgba(239, 68, 68, 0.4);
-  }
-  50% {
-    opacity: 0.6;
-    box-shadow: -2px 0 16px rgba(239, 68, 68, 0.6);
-  }
+.task-card:hover {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: var(--vl-surface-hover);
+  box-shadow: var(--vl-shadow-sm);
+  transform: translateY(-2px);
 }
 
 .task-card:hover::before {
   opacity: 1;
 }
-.task-card:hover {
-  border-color: rgba(212, 175, 55, 0.4);
-  box-shadow: 0 8px 32px rgba(212, 175, 55, 0.15), 0 0 0 1px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transform: translateY(-4px);
-}
 
 .task-card.compact {
-  padding: 1.25rem 1.5rem;
+  padding: 0.9rem 1rem;
 }
 
 .task-card.compact .task-header {
@@ -111,151 +102,166 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 }
 
 .task-card.compact .task-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-  font-size: 1.25rem;
+  width: 2.2rem;
+  height: 2.2rem;
 }
 
 .task-card.compact .task-name {
-  font-size: 1rem;
-  margin-bottom: 0.25rem;
+  font-size: 0.95rem;
+  margin-bottom: 0.15rem;
 }
 
 .task-delete {
   position: absolute;
-  top: 1.25rem;
-  right: 1.25rem;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  width: 2.25rem;
-  height: 2.25rem;
+  top: 0.85rem;
+  right: 0.85rem;
+  width: 1.85rem;
+  height: 1.85rem;
   border-radius: 50%;
-  color: #ef4444;
-  font-size: 1.25rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 1.15rem;
+  line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(8px);
+  transition: opacity 0.2s, color 0.2s, background 0.2s, border-color 0.2s;
+  display: grid;
+  place-items: center;
 }
-.task-card:hover .task-delete {
+
+.task-card:hover .task-delete,
+.task-delete:focus-visible {
   opacity: 1;
 }
+
 .task-delete:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  transform: rotate(90deg) scale(1.1);
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+  color: var(--vl-danger);
+  background: var(--vl-danger-dim);
+  border-color: rgba(248, 113, 113, 0.35);
 }
+
 .task-header {
   display: flex;
-  gap: 1.25rem;
-  margin-bottom: 1.5rem;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+  padding-right: 1.75rem;
 }
+
 .task-icon {
-  width: 3.5rem;
-  height: 3.5rem;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  border-radius: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.7rem;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: all 0.3s;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, rgba(45, 212, 191, 0.14), rgba(96, 165, 250, 0.08));
+  border: 1px solid rgba(45, 212, 191, 0.22);
 }
-.task-card:hover .task-icon {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(212, 175, 55, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+
+.film-mark {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.2rem;
+  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
+  box-shadow: 0 0 10px var(--vl-primary-glow);
+  position: relative;
 }
+
+.film-mark::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 1px solid rgba(7, 9, 15, 0.45);
+  border-radius: 0.1rem;
+}
+
 .task-info {
   flex: 1;
   min-width: 0;
 }
+
 .task-name {
-  font-size: 1.15rem;
+  font-size: 1.02rem;
   font-weight: 600;
+  color: var(--vl-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #e8eef7;
-  letter-spacing: 0.3px;
-  margin-bottom: 0.5rem;
-}
-.task-meta {
-  display: flex;
-  gap: 0.75rem;
-  font-size: 0.875rem;
-  color: #8b95a8;
-  margin-top: 0.5rem;
-  align-items: center;
-}
-.meta-dot {
-  opacity: 0.4;
-  font-size: 0.6rem;
-}
-.meta-time, .meta-size {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-}
-.meta-status {
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.5rem;
-  font-weight: 600;
-  font-size: 0.8rem;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  backdrop-filter: blur(8px);
-  border: 1px solid;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+  letter-spacing: 0.01em;
 }
 
-.status-icon {
-  font-size: 0.9rem;
-  line-height: 1;
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--vl-text-muted);
+}
+
+.meta-dot {
+  opacity: 0.5;
+}
+
+.meta-time,
+.meta-size {
+  font-family: var(--vl-font-mono);
+  font-size: 0.75rem;
+}
+
+.meta-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.status-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .meta-status.pending {
-  background: rgba(139, 149, 168, 0.15);
-  color: #8b95a8;
-  border-color: rgba(139, 149, 168, 0.3);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--vl-text-secondary);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 .meta-status.queued {
-  background: rgba(41, 98, 255, 0.15);
-  color: #5b8fff;
-  border-color: rgba(41, 98, 255, 0.3);
-  box-shadow: 0 0 12px rgba(41, 98, 255, 0.2);
+  background: var(--vl-info-dim);
+  color: var(--vl-info);
+  border-color: rgba(96, 165, 250, 0.3);
 }
 .meta-status.running {
-  background: rgba(212, 175, 55, 0.15);
-  color: #f4e4a6;
-  border-color: rgba(212, 175, 55, 0.3);
-  box-shadow: 0 0 12px rgba(212, 175, 55, 0.2);
-  animation: vl-status-pulse 2s ease-in-out infinite;
+  background: var(--vl-accent-dim);
+  color: var(--vl-accent);
+  border-color: rgba(240, 180, 41, 0.3);
+}
+.meta-status.running .status-dot {
+  animation: vl-status-pulse 1.6s ease-in-out infinite;
 }
 .meta-status.completed {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.3);
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
+  background: var(--vl-success-dim);
+  color: var(--vl-success);
+  border-color: rgba(52, 211, 153, 0.3);
 }
 .meta-status.failed {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  border-color: rgba(239, 68, 68, 0.3);
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+  background: var(--vl-danger-dim);
+  color: var(--vl-danger);
+  border-color: rgba(248, 113, 113, 0.3);
 }
 .meta-status.retrying {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border-color: rgba(245, 158, 11, 0.3);
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+  background: var(--vl-warning-dim);
+  color: var(--vl-warning);
+  border-color: rgba(251, 191, 36, 0.3);
 }
 .meta-status.dead {
   background: rgba(100, 116, 139, 0.15);
@@ -263,74 +269,58 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   border-color: rgba(100, 116, 139, 0.3);
 }
 
-/* 任务操作按钮 */
 .task-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.55rem;
 }
 
 .action-btn {
   flex: 1;
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
-  border: 1px solid rgba(139, 149, 168, 0.25);
-  padding: 0.9rem 1.5rem;
-  border-radius: 0.875rem;
-  color: #8b95a8;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--vl-radius-sm);
+  border: 1px solid var(--vl-border);
+  background: rgba(7, 9, 15, 0.35);
+  color: var(--vl-text-secondary);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.65rem;
   font-weight: 600;
-  font-size: 0.95rem;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  letter-spacing: 0.3px;
+  font-size: 0.82rem;
+  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
 }
 
 .action-btn:hover:not(:disabled) {
-  border-color: rgba(212, 175, 55, 0.5);
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
+  transform: translateY(-1px);
 }
 
-.action-btn.amber {
-  border-color: rgba(212, 175, 55, 0.35);
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
-  box-shadow: 0 2px 12px rgba(212, 175, 55, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+.action-btn.accent {
+  border-color: rgba(240, 180, 41, 0.35);
+  color: var(--vl-accent);
+  background: var(--vl-accent-dim);
 }
 
-.action-btn.amber:hover:not(:disabled) {
-  border-color: rgba(212, 175, 55, 0.6);
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
-  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+.action-btn.accent:hover:not(:disabled) {
+  border-color: rgba(240, 180, 41, 0.55);
+  color: #fcd34d;
+  background: rgba(240, 180, 41, 0.2);
 }
 
 .action-btn.chat {
-  border-color: rgba(41, 98, 255, 0.35);
-  color: #5b8fff;
-  background: linear-gradient(135deg, rgba(41, 98, 255, 0.12), rgba(212, 175, 55, 0.06));
+  border-color: rgba(96, 165, 250, 0.35);
+  color: var(--vl-info);
+  background: var(--vl-info-dim);
 }
 
 .action-btn.chat:hover:not(:disabled) {
-  border-color: rgba(41, 98, 255, 0.6);
-  background: linear-gradient(135deg, rgba(41, 98, 255, 0.2), rgba(212, 175, 55, 0.1));
-  box-shadow: 0 4px 16px rgba(41, 98, 255, 0.2);
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(96, 165, 250, 0.2);
 }
 
 .action-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-  filter: grayscale(0.5);
-}
-
-.btn-icon {
-  font-size: 1.35rem;
-  position: relative;
-  z-index: 1;
+  transform: none;
 }
 </style>

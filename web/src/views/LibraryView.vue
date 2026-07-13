@@ -69,42 +69,21 @@ const onGlobalDrop = (e) => {
 <style scoped>
 .app-layout {
   display: flex;
-  min-height: calc(100vh - 80px);
-  max-width: 1600px;
+  min-height: calc(100vh - var(--vl-nav-h));
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0;
-  position: relative;
-  z-index: 2;
 }
 
 .content-area {
   flex: 1;
-  padding: 2rem 3rem;
+  min-width: 0;
+  padding: 1.35rem 1.75rem 2rem;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) transparent;
-}
-
-.content-area::-webkit-scrollbar {
-  width: 8px;
-}
-
-.content-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.content-area::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
-  border-radius: 4px;
-}
-
-.content-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.5);
 }
 
 @media (max-width: 900px) {
   .content-area {
-    padding: 1.5rem 1rem;
+    padding: 1.1rem 1rem 1.5rem;
   }
 }
 </style>

@@ -3,11 +3,11 @@
     <div v-if="show" class="modal-backdrop" @mousedown.self="handleBackdropMouseDown" role="dialog" aria-modal="true" aria-label="模型配置">
       <div class="modal-panel">
         <button class="modal-close" @click="$emit('close')" aria-label="关闭">×</button>
-        <h2>🤖 模型配置</h2>
+        <h2>模型配置</h2>
 
         <div v-if="!isEditing" class="config-list">
           <div v-if="profiles.length === 0" class="empty-state">
-            <div class="empty-icon">📦</div>
+            <div class="empty-icon" aria-hidden="true">◇</div>
             <p>还没有配置模型服务</p>
             <button class="btn-amber" @click="startCreate">新建配置</button>
           </div>
@@ -221,32 +221,34 @@ defineExpose({ loadProfiles })
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  padding: 1.25rem;
+  z-index: 1100;
+  overflow-y: auto;
 }
 
 .modal-panel {
-  width: 90%;
-  max-width: 900px;
-  max-height: 90vh;
-  backdrop-filter: blur(32px) saturate(180%);
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.95), rgba(20, 30, 50, 0.9));
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  border-radius: 1.75rem;
-  padding: 2.75rem;
+  width: min(900px, 100%);
+  max-height: min(90vh, 100%);
+  margin: auto;
+  backdrop-filter: blur(20px) saturate(160%);
+  background: var(--vl-panel, rgba(12, 16, 24, 0.96));
+  border: 1px solid var(--vl-border-strong, rgba(148, 163, 184, 0.22));
+  border-radius: var(--vl-radius-xl, 1.25rem);
+  padding: 1.75rem 1.75rem 1.5rem;
   position: relative;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--vl-shadow, 0 24px 64px rgba(0, 0, 0, 0.55));
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) transparent;
+  scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
 }
 
 .modal-panel::-webkit-scrollbar { width: 8px; }
-.modal-panel::-webkit-scrollbar-thumb { background: rgba(212, 175, 55, 0.3); border-radius: 4px; }
+.modal-panel::-webkit-scrollbar-thumb { background: rgba(45, 212, 191, 0.3); border-radius: 4px; }
 
 .modal-close {
   position: absolute;
@@ -257,7 +259,7 @@ defineExpose({ loadProfiles })
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 50%;
-  color: #ef4444;
+  color: var(--vl-danger);
   font-size: 1.5rem;
   cursor: pointer;
   transition: all 0.3s;
@@ -269,37 +271,38 @@ defineExpose({ loadProfiles })
 }
 
 .modal-panel h2 {
-  font-size: 1.75rem;
-  margin-bottom: 2rem;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  margin: 0 0 1.25rem;
+  padding-right: 2.5rem;
+  font-family: var(--vl-font-display, inherit);
+  font-size: 1.25rem;
   font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--vl-text, #e8eef6);
 }
 
 .empty-state { text-align: center; padding: 3rem; }
 .empty-icon { font-size: 4rem; margin-bottom: 1rem; }
-.empty-state p { color: #8b95a8; margin-bottom: 2rem; }
+.empty-state p { color: var(--vl-text-secondary); margin-bottom: 2rem; }
 .config-actions { margin-bottom: 1.5rem; }
 .profile-grid { display: grid; gap: 1.25rem; }
 
 .profile-card {
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.6), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.2);
   border-radius: 1rem;
   padding: 1.5rem;
   transition: all 0.3s;
 }
 
-.profile-card.default { border-color: rgba(212, 175, 55, 0.4); }
-.profile-card:hover { border-color: rgba(212, 175, 55, 0.3); box-shadow: 0 4px 16px rgba(212, 175, 55, 0.15); }
+.profile-card.default { border-color: rgba(45, 212, 191, 0.4); }
+.profile-card:hover { border-color: rgba(45, 212, 191, 0.3); box-shadow: 0 4px 16px rgba(45, 212, 191, 0.15); }
 .profile-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-.profile-header h4 { font-size: 1.15rem; font-weight: 600; color: #e8eef7; }
+.profile-header h4 { font-size: 1.15rem; font-weight: 600; color: var(--vl-text); }
 
 .default-badge {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.15));
-  border: 1px solid rgba(212, 175, 55, 0.4);
-  color: #d4af37;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.2), rgba(96, 165, 250, 0.15));
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
   padding: 0.25rem 0.75rem;
   border-radius: 0.5rem;
   font-size: 0.8rem;
@@ -308,55 +311,55 @@ defineExpose({ loadProfiles })
 
 .profile-details { margin-bottom: 1rem; }
 .detail-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.9rem; }
-.detail-row .label { color: #8b95a8; min-width: 90px; }
-.detail-row .value { color: #b8c5db; font-family: 'JetBrains Mono', monospace; }
+.detail-row .label { color: var(--vl-text-secondary); min-width: 90px; }
+.detail-row .value { color: #b8c5db; font-family: var(--vl-font-mono); }
 .profile-actions { display: flex; gap: 0.75rem; }
 
 .action-btn {
   flex: 1;
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.25);
   padding: 0.65rem 1rem;
   border-radius: 0.65rem;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   cursor: pointer;
   transition: all 0.3s;
   font-size: 0.9rem;
   font-weight: 500;
 }
 
-.action-btn:hover { border-color: rgba(212, 175, 55, 0.5); color: #d4af37; }
-.action-btn.test { color: #5b8fff; border-color: rgba(41, 98, 255, 0.3); }
-.action-btn.test:hover { border-color: rgba(41, 98, 255, 0.6); }
-.action-btn.danger { color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+.action-btn:hover { border-color: rgba(45, 212, 191, 0.5); color: var(--vl-primary); }
+.action-btn.test { color: var(--vl-info); border-color: rgba(96, 165, 250, 0.3); }
+.action-btn.test:hover { border-color: rgba(96, 165, 250, 0.6); }
+.action-btn.danger { color: var(--vl-danger); border-color: rgba(239, 68, 68, 0.3); }
 .action-btn.danger:hover { border-color: rgba(239, 68, 68, 0.6); }
 
 .config-form { display: flex; flex-direction: column; gap: 1.5rem; }
-.form-section h3 { font-size: 1.1rem; font-weight: 600; color: #d4af37; margin-bottom: 1rem; }
+.form-section h3 { font-size: 1.1rem; font-weight: 600; color: var(--vl-primary); margin-bottom: 1rem; }
 .form-group { margin-bottom: 1rem; }
-.form-group label { display: block; color: #8b95a8; font-size: 0.9rem; margin-bottom: 0.5rem; font-weight: 500; }
+.form-group label { display: block; color: var(--vl-text-secondary); font-size: 0.9rem; margin-bottom: 0.5rem; font-weight: 500; }
 .form-group.checkbox-group label { display: inline; }
 
 .form-input {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(10, 14, 26, 0.6);
+  background: rgba(7, 9, 15, 0.6);
   border: 1px solid rgba(139, 149, 168, 0.2);
   padding: 0.75rem 1rem;
   border-radius: 0.75rem;
-  color: #e8eef7;
+  color: var(--vl-text);
   outline: none;
   transition: all 0.3s;
   font-size: 0.9rem;
 }
 
-.form-input:focus { border-color: #d4af37; box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15); }
-.masked-key { margin-top: 0.5rem; font-size: 0.85rem; color: #5a6477; font-family: 'JetBrains Mono', monospace; }
+.form-input:focus { border-color: var(--vl-primary); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15); }
+.masked-key { margin-top: 0.5rem; font-size: 0.85rem; color: var(--vl-text-muted); font-family: var(--vl-font-mono); }
 .form-actions { display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem; }
 
 .btn-amber {
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  color: #0a0e1a;
+  background: var(--vl-primary);
+  color: var(--vl-text-inverse);
   border: none;
   padding: 0.75rem 1.75rem;
   border-radius: 0.75rem;
@@ -366,13 +369,13 @@ defineExpose({ loadProfiles })
   font-size: 0.95rem;
 }
 
-.btn-amber:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(212, 175, 55, 0.4); }
+.btn-amber:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(45, 212, 191, 0.4); }
 .btn-amber:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-secondary {
   background: rgba(139, 149, 168, 0.1);
   border: 1px solid rgba(139, 149, 168, 0.3);
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   padding: 0.75rem 1.75rem;
   border-radius: 0.75rem;
   font-weight: 600;
@@ -384,8 +387,8 @@ defineExpose({ loadProfiles })
 .btn-secondary:hover { border-color: rgba(139, 149, 168, 0.5); }
 
 .test-result { margin-top: 1.5rem; padding: 1.25rem; border-radius: 0.875rem; backdrop-filter: blur(8px); }
-.test-result.success { background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(22, 163, 74, 0.1)); border: 1px solid rgba(34, 197, 94, 0.3); color: #4ade80; }
-.test-result.error { background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1)); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; }
+.test-result.success { background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(22, 163, 74, 0.1)); border: 1px solid rgba(34, 197, 94, 0.3); color: var(--vl-success); }
+.test-result.error { background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1)); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--vl-danger); }
 .test-result h4 { margin-bottom: 0.5rem; font-size: 1rem; }
 .test-result p { font-size: 0.9rem; line-height: 1.6; }
 

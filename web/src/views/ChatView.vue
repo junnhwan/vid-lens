@@ -1,14 +1,15 @@
 <template>
   <div v-if="!app.user" class="chat-gate">
-    <div class="gate-icon">💬</div>
+    <div class="gate-mark" aria-hidden="true"></div>
     <h3>登录后即可与视频对话</h3>
+    <p class="gate-sub">基于转写文本的 RAG 问答，带引用片段</p>
     <button class="btn-amber" @click="app.openAuth">登录 / 注册</button>
   </div>
 
   <div v-else class="chat-layout">
     <aside class="chat-sidebar">
       <div class="chat-sidebar-header">
-        <h3>💬 对话视频</h3>
+        <h3>对话视频</h3>
         <button class="back-link" @click="goLibrary" title="返回视频处理">
           ← 处理
         </button>
@@ -22,7 +23,7 @@
           :class="{ active: isCurrent(t) }"
           @click="selectTask(t)"
         >
-          <div class="video-item-icon">🎬</div>
+          <div class="video-item-icon" aria-hidden="true"></div>
           <div class="video-item-info">
             <div class="video-item-name">{{ t.title || t.filename }}</div>
             <div class="video-item-meta">{{ formatTime(t.created_at) }}</div>
@@ -32,7 +33,6 @@
       </div>
 
       <div v-else class="video-list-empty">
-        <div class="empty-icon">📭</div>
         <p>还没有可对话的视频</p>
         <button class="btn-amber small" @click="goLibrary">去提取文字</button>
       </div>
@@ -46,12 +46,10 @@
         @error="onChatError"
       />
       <div v-else-if="taskNotFound" class="chat-placeholder">
-        <div class="placeholder-icon">🚫</div>
         <p>视频不存在或无权限访问</p>
         <button class="btn-amber small" @click="goLibrary">返回视频处理</button>
       </div>
       <div v-else class="chat-placeholder">
-        <div class="placeholder-icon">💬</div>
         <p>从左侧选择一个视频开始对话</p>
       </div>
     </main>
@@ -126,22 +124,18 @@ const onChatError = (msg) => app.showToast(msg, true)
 <style scoped>
 .chat-layout {
   display: flex;
-  height: calc(100vh - 80px);
-  max-width: 1600px;
+  height: calc(100vh - var(--vl-nav-h));
+  max-width: 1440px;
   margin: 0 auto;
-  position: relative;
-  z-index: 2;
 }
 
-/* 左栏：视频选择 */
 .chat-sidebar {
-  width: 300px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(212, 175, 55, 0.15);
-  background: linear-gradient(135deg, rgba(10, 14, 26, 0.4), rgba(15, 25, 45, 0.3));
-  backdrop-filter: blur(20px) saturate(180%);
+  border-right: 1px solid var(--vl-border);
+  background: rgba(8, 11, 18, 0.55);
   overflow: hidden;
 }
 
@@ -149,78 +143,82 @@ const onChatError = (msg) => app.showToast(msg, true)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem 1.5rem 1rem;
-  border-bottom: 1px solid rgba(139, 149, 168, 0.15);
+  padding: 1.1rem 1.1rem 0.9rem;
+  border-bottom: 1px solid var(--vl-border);
 }
 
 .chat-sidebar-header h3 {
-  font-size: 1.05rem;
+  margin: 0;
+  font-family: var(--vl-font-display);
+  font-size: 0.95rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: 0.5px;
+  color: var(--vl-text);
+  letter-spacing: 0.03em;
 }
 
 .back-link {
   background: transparent;
-  border: 1px solid rgba(139, 149, 168, 0.2);
-  color: #8b95a8;
+  border: 1px solid var(--vl-border);
+  color: var(--vl-text-muted);
   cursor: pointer;
-  font-size: 0.78rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--vl-radius-sm);
   transition: all 0.2s;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
 }
 
 .back-link:hover {
-  border-color: rgba(212, 175, 55, 0.4);
-  color: #d4af37;
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
 }
 
 .video-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) transparent;
+  gap: 0.4rem;
 }
 
 .video-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 0.85rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(139, 149, 168, 0.15);
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.3));
+  gap: 0.65rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: var(--vl-radius);
+  border: 1px solid transparent;
+  background: transparent;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s var(--vl-ease);
   text-align: left;
   color: inherit;
-  position: relative;
+  width: 100%;
 }
 
 .video-item:hover {
-  border-color: rgba(212, 175, 55, 0.4);
-  transform: translateX(2px);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--vl-border);
 }
 
 .video-item.active {
-  border-color: rgba(212, 175, 55, 0.55);
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.14), rgba(41, 98, 255, 0.08));
-  box-shadow: 0 2px 12px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-color: rgba(45, 212, 191, 0.4);
+  background: var(--vl-primary-dim);
 }
 
 .video-item-icon {
-  font-size: 1.25rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
   flex-shrink: 0;
+  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
+  opacity: 0.7;
+}
+
+.video-item.active .video-item-icon {
+  opacity: 1;
+  box-shadow: 0 0 8px var(--vl-primary-glow);
 }
 
 .video-item-info {
@@ -229,27 +227,27 @@ const onChatError = (msg) => app.showToast(msg, true)
 }
 
 .video-item-name {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  color: #e8eef7;
+  color: var(--vl-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.15rem;
 }
 
 .video-item-meta {
-  font-size: 0.72rem;
-  color: #8b95a8;
-  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--vl-text-muted);
+  font-family: var(--vl-font-mono);
 }
 
 .video-item-active-dot {
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 0.4rem;
+  height: 0.4rem;
   border-radius: 50%;
-  background: #d4af37;
-  box-shadow: 0 0 8px rgba(212, 175, 55, 0.7);
+  background: var(--vl-primary);
+  box-shadow: 0 0 8px var(--vl-primary-glow);
   flex-shrink: 0;
 }
 
@@ -259,23 +257,17 @@ const onChatError = (msg) => app.showToast(msg, true)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-  padding: 2rem 1.5rem;
+  gap: 0.85rem;
+  padding: 1.5rem;
   text-align: center;
 }
 
-.video-list-empty .empty-icon {
-  font-size: 2.5rem;
-  opacity: 0.6;
-}
-
 .video-list-empty p {
-  color: #8b95a8;
-  font-size: 0.88rem;
+  color: var(--vl-text-muted);
+  font-size: 0.86rem;
   margin: 0;
 }
 
-/* 右栏：对话区 */
 .chat-main {
   flex: 1;
   min-width: 0;
@@ -290,63 +282,49 @@ const onChatError = (msg) => app.showToast(msg, true)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  color: #8b95a8;
+  gap: 0.9rem;
+  color: var(--vl-text-muted);
+  font-size: 0.92rem;
 }
 
-.placeholder-icon {
-  font-size: 3.5rem;
-  opacity: 0.5;
-}
-
-/* 未登录引导 */
 .chat-gate {
-  min-height: calc(100vh - 80px);
+  min-height: calc(100vh - var(--vl-nav-h));
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.25rem;
-  position: relative;
-  z-index: 2;
+  gap: 0.75rem;
+  padding: 2rem;
+  text-align: center;
 }
 
-.chat-gate .gate-icon {
-  font-size: 4rem;
+.gate-mark {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgba(45, 212, 191, 0.25), rgba(96, 165, 250, 0.12));
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  box-shadow: 0 0 28px rgba(45, 212, 191, 0.2);
+  margin-bottom: 0.5rem;
 }
 
 .chat-gate h3 {
-  color: #e8eef7;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  margin: 0;
+  color: var(--vl-text);
+  font-family: var(--vl-font-display);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
-.btn-amber {
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  color: #0a0e1a;
-  border: none;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s;
-  font-size: 0.95rem;
+.gate-sub {
+  margin: 0 0 0.5rem;
+  color: var(--vl-text-muted);
+  font-size: 0.88rem;
 }
 
-.btn-amber:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(212, 175, 55, 0.4);
-}
-
-.btn-amber.small {
-  padding: 0.5rem 1.1rem;
-  font-size: 0.82rem;
-}
-
-/* 响应式 */
 @media (max-width: 900px) {
   .chat-sidebar {
-    width: 240px;
+    width: 220px;
   }
 }
 
@@ -356,12 +334,12 @@ const onChatError = (msg) => app.showToast(msg, true)
   }
   .chat-sidebar {
     width: 100%;
-    height: 38vh;
+    height: 36vh;
     border-right: none;
-    border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+    border-bottom: 1px solid var(--vl-border);
   }
   .chat-main {
-    height: 62vh;
+    height: 64vh;
   }
 }
 </style>

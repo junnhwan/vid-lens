@@ -65,180 +65,143 @@ const handleBackdropMouseDown = (e) => {
 </script>
 
 <style scoped>
-/* 登录弹窗 */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  padding: 1.25rem;
+  z-index: 1100;
+  overflow-y: auto;
 }
+
 .modal-panel {
-  width: 90%;
-  max-width: 450px;
-  backdrop-filter: blur(32px) saturate(180%);
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.95), rgba(20, 30, 50, 0.9));
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  border-radius: 1.75rem;
-  padding: 2.75rem;
+  width: min(420px, 100%);
+  margin: auto;
+  background: var(--vl-panel);
+  border: 1px solid var(--vl-border-strong);
+  border-radius: var(--vl-radius-xl);
+  padding: 2rem 1.75rem 1.75rem;
   position: relative;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: var(--vl-shadow);
 }
-.modal-panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 1.75rem;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.5), rgba(41, 98, 255, 0.3));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.6;
-}
+
 .modal-close {
   position: absolute;
-  top: 1.25rem;
-  right: 1.25rem;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  width: 2.5rem;
-  height: 2.5rem;
+  top: 0.9rem;
+  right: 0.9rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 50%;
-  color: #ef4444;
-  font-size: 1.5rem;
+  border: 1px solid var(--vl-border);
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 1.25rem;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
+
 .modal-close:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  transform: rotate(90deg) scale(1.1);
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+  color: var(--vl-danger);
+  border-color: rgba(248, 113, 113, 0.4);
+  background: var(--vl-danger-dim);
 }
+
 .modal-panel h2 {
-  font-size: 1.75rem;
-  margin-bottom: 2rem;
+  margin: 0 0 1.35rem;
   text-align: center;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: var(--vl-font-display);
+  font-size: 1.35rem;
   font-weight: 700;
-  letter-spacing: 1px;
+  color: var(--vl-text);
+  letter-spacing: 0.03em;
 }
+
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.85rem;
 }
+
 .form-input {
-  background: rgba(10, 14, 26, 0.6);
-  border: 1px solid rgba(139, 149, 168, 0.2);
-  padding: 0.95rem 1.25rem;
-  border-radius: 0.875rem;
-  color: #e8eef7;
+  width: 100%;
+  background: rgba(7, 9, 15, 0.55);
+  border: 1px solid var(--vl-border);
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--vl-radius-sm);
+  color: var(--vl-text);
   outline: none;
-  transition: all 0.3s;
-  backdrop-filter: blur(8px);
-  font-size: 0.95rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-size: 0.92rem;
 }
+
 .form-input:focus {
-  border-color: #d4af37;
-  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15), 0 2px 8px rgba(212, 175, 55, 0.2);
-  background: rgba(10, 14, 26, 0.8);
+  border-color: var(--vl-border-focus);
+  box-shadow: 0 0 0 3px var(--vl-primary-dim);
 }
+
 .form-input::placeholder {
-  color: #5a6477;
+  color: var(--vl-text-muted);
 }
+
 .auth-switch {
   text-align: center;
-  font-size: 0.95rem;
-  color: #8b95a8;
-  margin-top: 0.5rem;
+  font-size: 0.86rem;
+  color: var(--vl-text-muted);
+  margin: 0.25rem 0 0;
 }
+
 .link-btn {
   background: none;
   border: none;
-  color: #d4af37;
+  color: var(--vl-primary);
   cursor: pointer;
-  text-decoration: none;
   font-weight: 600;
-  transition: all 0.3s;
-  padding: 0 0.25rem;
-  border-radius: 0.25rem;
-}
-.link-btn:hover {
-  color: #f4e4a6;
-  background: rgba(212, 175, 55, 0.1);
-}
-.auth-msg {
-  text-align: center;
-  font-size: 0.9rem;
-  padding: 0.85rem;
-  border-radius: 0.75rem;
-  margin-top: 0.75rem;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(22, 163, 74, 0.1));
-  color: #4ade80;
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  backdrop-filter: blur(8px);
-  font-weight: 500;
-}
-.auth-msg.error {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
-  color: #f87171;
-  border-color: rgba(239, 68, 68, 0.3);
-}
-.modal-enter-active, .modal-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.modal-enter-from, .modal-leave-to {
-  opacity: 0;
-}
-.modal-enter-from .modal-panel, .modal-leave-to .modal-panel {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0;
+  padding: 0 0.2rem;
 }
 
-.btn-amber {
-  background: linear-gradient(135deg, #d4af37 0%, #f4e4a6 50%, #d4af37 100%);
-  background-size: 200% auto;
-  color: #0a0e1a;
-  border: none;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  font-size: 0.95rem;
-  letter-spacing: 0.5px;
-  position: relative;
-  overflow: hidden;
+.link-btn:hover {
+  text-decoration: underline;
 }
-.btn-amber::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transform: translateX(-100%);
-  transition: transform 0.6s;
+
+.auth-msg {
+  text-align: center;
+  font-size: 0.84rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--vl-radius-sm);
+  margin: 0.15rem 0 0;
+  background: var(--vl-success-dim);
+  color: var(--vl-success);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  font-weight: 500;
 }
-.btn-amber:hover::before {
-  transform: translateX(100%);
+
+.auth-msg.error {
+  background: var(--vl-danger-dim);
+  color: var(--vl-danger);
+  border-color: rgba(248, 113, 113, 0.3);
 }
-.btn-amber:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(212, 175, 55, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  background-position: 200% center;
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.25s var(--vl-ease);
 }
-.btn-amber.full { width: 100%; }
+.modal-enter-active .modal-panel,
+.modal-leave-active .modal-panel {
+  transition: transform 0.25s var(--vl-ease), opacity 0.25s;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-panel,
+.modal-leave-to .modal-panel {
+  transform: scale(0.96) translateY(8px);
+  opacity: 0;
+}
 </style>

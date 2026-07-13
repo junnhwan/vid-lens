@@ -1,32 +1,140 @@
 /*
- * 共享动画 & 工具类 —— 全局使用，避免每个组件重复定义 @keyframes。
- * 在 main.js 中 import 即可。
+ * VidLens design system — dark optical lab aesthetic.
+ * Import once from main.js. Prefer CSS variables over hardcoded gold/blue.
  */
 
-/* 旋转加载 */
+:root {
+  /* Surfaces */
+  --vl-bg: #07090f;
+  --vl-bg-elevated: #0c1018;
+  --vl-surface: rgba(16, 22, 34, 0.72);
+  --vl-surface-solid: #111827;
+  --vl-surface-hover: rgba(24, 32, 48, 0.88);
+  --vl-panel: rgba(12, 16, 24, 0.92);
+
+  /* Borders */
+  --vl-border: rgba(148, 163, 184, 0.12);
+  --vl-border-strong: rgba(148, 163, 184, 0.22);
+  --vl-border-focus: rgba(45, 212, 191, 0.45);
+
+  /* Text */
+  --vl-text: #e8eef6;
+  --vl-text-secondary: #94a3b8;
+  --vl-text-muted: #64748b;
+  --vl-text-inverse: #07090f;
+
+  /* Brand: teal (primary) + warm amber (accent) */
+  --vl-primary: #2dd4bf;
+  --vl-primary-dim: rgba(45, 212, 191, 0.14);
+  --vl-primary-glow: rgba(45, 212, 191, 0.28);
+  --vl-accent: #f0b429;
+  --vl-accent-dim: rgba(240, 180, 41, 0.14);
+  --vl-accent-glow: rgba(240, 180, 41, 0.25);
+  --vl-info: #60a5fa;
+  --vl-info-dim: rgba(96, 165, 250, 0.14);
+  --vl-success: #34d399;
+  --vl-success-dim: rgba(52, 211, 153, 0.14);
+  --vl-danger: #f87171;
+  --vl-danger-dim: rgba(248, 113, 113, 0.14);
+  --vl-warning: #fbbf24;
+  --vl-warning-dim: rgba(251, 191, 36, 0.14);
+
+  /* Radius / shadow / motion */
+  --vl-radius-sm: 0.5rem;
+  --vl-radius: 0.75rem;
+  --vl-radius-lg: 1rem;
+  --vl-radius-xl: 1.25rem;
+  --vl-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --vl-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
+  --vl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --vl-font: 'DM Sans', 'Noto Sans SC', system-ui, sans-serif;
+  --vl-font-display: 'Syne', 'Noto Sans SC', system-ui, sans-serif;
+  --vl-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --vl-nav-h: 64px;
+}
+
+/* Shared keyframes */
 @keyframes vl-spin {
   to { transform: rotate(360deg); }
 }
 
-/* 状态脉冲 */
 @keyframes vl-status-pulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(212, 175, 55, 0.2); }
-  50%      { box-shadow: 0 0 20px rgba(212, 175, 55, 0.4); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--vl-primary-glow); }
+  50% { box-shadow: 0 0 0 6px transparent; }
 }
 
-/* 消息弹入 */
 @keyframes vl-message-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* 渐入上浮 */
 @keyframes vl-fade-in-up {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* 无障碍：减少动效偏好 */
+@keyframes vl-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@keyframes vl-shimmer {
+  to { background-position: 200% center; }
+}
+
+/* Utility: primary button */
+.btn-primary,
+.btn-amber {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--vl-font);
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  color: var(--vl-text-inverse);
+  background: linear-gradient(135deg, var(--vl-primary) 0%, #14b8a6 100%);
+  padding: 0.7rem 1.4rem;
+  border-radius: var(--vl-radius);
+  box-shadow: 0 4px 16px var(--vl-primary-glow);
+  transition: transform 0.2s var(--vl-ease), box-shadow 0.2s var(--vl-ease), filter 0.2s;
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-amber:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px var(--vl-primary-glow);
+  filter: brightness(1.05);
+}
+
+.btn-primary:disabled,
+.btn-amber:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary.full,
+.btn-amber.full {
+  width: 100%;
+}
+
+.btn-primary.small,
+.btn-amber.small {
+  padding: 0.45rem 0.95rem;
+  font-size: 0.82rem;
+}
+
+/* Soft surface card */
+.vl-card {
+  background: var(--vl-surface);
+  border: 1px solid var(--vl-border);
+  border-radius: var(--vl-radius-lg);
+  box-shadow: var(--vl-shadow-sm);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

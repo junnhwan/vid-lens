@@ -348,9 +348,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   width: 600px;
   max-width: 90vw;
   height: 100vh;
-  background: linear-gradient(135deg, rgba(10, 14, 26, 0.98), rgba(15, 25, 45, 0.98));
+  background: linear-gradient(135deg, rgba(7, 9, 15, 0.98), rgba(16, 22, 34, 0.98));
   backdrop-filter: blur(32px) saturate(180%);
-  border-left: 1px solid rgba(212, 175, 55, 0.3);
+  border-left: 1px solid rgba(45, 212, 191, 0.3);
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
@@ -361,20 +361,18 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2rem;
-  border-bottom: 1px solid rgba(212, 175, 55, 0.15);
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.6), rgba(20, 30, 50, 0.4));
+  padding: 1.25rem 1.35rem;
+  border-bottom: 1px solid var(--vl-border);
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.6), rgba(17, 24, 39, 0.4));
 }
 
 .drawer-header h3 {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-family: var(--vl-font-display);
+  color: var(--vl-text);
   flex: 1;
-  padding-right: 2rem;
+  padding-right: 1.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -386,7 +384,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 50%;
-  color: #ef4444;
+  color: var(--vl-danger);
   font-size: 1.5rem;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -398,7 +396,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .drawer-close:hover {
   background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
+  border-color: var(--vl-danger);
   transform: rotate(90deg);
   box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
 }
@@ -406,9 +404,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 .drawer-content {
   flex: 1;
   overflow-y: auto;
-  padding: 2rem;
+  padding: 1.25rem 1.35rem;
   scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
+  scrollbar-color: rgba(45, 212, 191, 0.3) rgba(7, 9, 15, 0.5);
   display: flex;
   flex-direction: column;
 }
@@ -422,11 +420,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .tab-btn {
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.2);
   padding: 0.75rem 1.5rem;
   border-radius: 0.75rem 0.75rem 0 0;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   cursor: pointer;
   transition: all 0.3s;
   font-size: 0.95rem;
@@ -434,15 +432,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .tab-btn:hover:not(:disabled) {
-  border-color: rgba(212, 175, 55, 0.3);
-  color: #d4af37;
+  border-color: rgba(45, 212, 191, 0.3);
+  color: var(--vl-primary);
 }
 
 .tab-btn.active {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.15), rgba(41, 98, 255, 0.1));
-  border-color: rgba(212, 175, 55, 0.4);
-  color: #d4af37;
-  box-shadow: 0 2px 8px rgba(212, 175, 55, 0.2);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.15), rgba(96, 165, 250, 0.1));
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
+  box-shadow: 0 2px 8px rgba(45, 212, 191, 0.2);
 }
 
 .tab-btn:disabled {
@@ -462,16 +460,16 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .drawer-content::-webkit-scrollbar-track {
-  background: rgba(10, 14, 26, 0.5);
+  background: rgba(7, 9, 15, 0.5);
 }
 
 .drawer-content::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
+  background: rgba(45, 212, 191, 0.3);
   border-radius: 4px;
 }
 
 .drawer-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.5);
+  background: rgba(45, 212, 191, 0.5);
 }
 
 .drawer-meta {
@@ -480,7 +478,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   gap: 1rem;
   margin-bottom: 2rem;
   padding: 1.5rem;
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.2);
   border-radius: 1rem;
 }
@@ -493,15 +491,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .meta-label {
   font-size: 0.8rem;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   font-weight: 500;
 }
 
 .meta-value {
   font-size: 0.95rem;
-  color: #e8eef7;
+  color: var(--vl-text);
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
 }
 
 .meta-status {
@@ -526,49 +524,49 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .meta-status.pending {
   background: rgba(139, 149, 168, 0.15);
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   border-color: rgba(139, 149, 168, 0.3);
 }
 
 .meta-status.queued {
-  background: rgba(41, 98, 255, 0.15);
-  color: #5b8fff;
-  border-color: rgba(41, 98, 255, 0.3);
-  box-shadow: 0 0 12px rgba(41, 98, 255, 0.2);
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--vl-info);
+  border-color: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.2);
 }
 
 .meta-status.running {
-  background: rgba(212, 175, 55, 0.15);
-  color: #f4e4a6;
-  border-color: rgba(212, 175, 55, 0.3);
-  box-shadow: 0 0 12px rgba(212, 175, 55, 0.2);
+  background: rgba(45, 212, 191, 0.15);
+  color: var(--vl-primary);
+  border-color: rgba(45, 212, 191, 0.3);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.2);
   animation: vl-status-pulse 2s ease-in-out infinite;
 }
 
 .meta-status.completed {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: var(--vl-success);
   border-color: rgba(34, 197, 94, 0.3);
   box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
 }
 
 .meta-status.failed {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: var(--vl-danger);
   border-color: rgba(239, 68, 68, 0.3);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
 }
 
 .meta-status.retrying {
   background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  color: var(--vl-warning);
   border-color: rgba(245, 158, 11, 0.3);
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
 }
 
 .meta-status.dead {
   background: rgba(100, 116, 139, 0.15);
-  color: #94a3b8;
+  color: var(--vl-text-secondary);
   border-color: rgba(100, 116, 139, 0.3);
 }
 
@@ -584,7 +582,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 /* 任务处理明细 */
 .task-jobs-section {
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.2);
   border-radius: 1rem;
   padding: 1.5rem;
@@ -592,13 +590,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .jobs-header {
-  font-size: 1.1rem;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 0.95rem;
+  color: var(--vl-text);
+  font-family: var(--vl-font-display);
   font-weight: 700;
-  margin-bottom: 1rem;
+  margin-bottom: 0.85rem;
 }
 
 .jobs-list {
@@ -608,7 +604,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .job-item {
-  background: rgba(10, 14, 26, 0.5);
+  background: rgba(7, 9, 15, 0.5);
   border: 1px solid rgba(139, 149, 168, 0.15);
   border-radius: 0.75rem;
   padding: 1rem;
@@ -623,7 +619,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .job-type {
   font-weight: 600;
-  color: #e8eef7;
+  color: var(--vl-text);
   font-size: 0.95rem;
 }
 
@@ -637,32 +633,32 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .job-status-queued {
-  background: rgba(41, 98, 255, 0.15);
-  color: #5b8fff;
-  border: 1px solid rgba(41, 98, 255, 0.3);
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--vl-info);
+  border: 1px solid rgba(96, 165, 250, 0.3);
 }
 
 .job-status-running {
-  background: rgba(212, 175, 55, 0.15);
-  color: #f4e4a6;
-  border: 1px solid rgba(212, 175, 55, 0.3);
+  background: rgba(45, 212, 191, 0.15);
+  color: var(--vl-primary);
+  border: 1px solid rgba(45, 212, 191, 0.3);
 }
 
 .job-status-completed {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: var(--vl-success);
   border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 .job-status-failed {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: var(--vl-danger);
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .job-status-retrying {
   background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  color: var(--vl-warning);
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
@@ -686,26 +682,26 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .job-label {
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   font-weight: 600;
   min-width: 70px;
 }
 
 .job-value {
   color: #b8c5db;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
 }
 
 .job-error-text {
   color: #fca5a5;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
   flex: 1;
   word-break: break-word;
 }
 
 .job-trace-id {
-  color: #8b95a8;
-  font-family: 'JetBrains Mono', monospace;
+  color: var(--vl-text-secondary);
+  font-family: var(--vl-font-mono);
   font-size: 0.75rem;
 }
 
@@ -725,14 +721,14 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .retry-label {
-  color: #fbbf24;
+  color: var(--vl-warning);
   font-weight: 600;
   min-width: 70px;
 }
 
 .retry-text {
-  color: #e8eef7;
-  font-family: 'JetBrains Mono', monospace;
+  color: var(--vl-text);
+  font-family: var(--vl-font-mono);
   flex: 1;
   word-break: break-word;
 }
@@ -745,11 +741,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .drawer-action-btn {
   flex: 1;
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.25);
   padding: 1rem 1.5rem;
   border-radius: 0.875rem;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
@@ -763,17 +759,17 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .drawer-action-btn:hover:not(:disabled) {
-  border-color: rgba(212, 175, 55, 0.5);
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  border-color: rgba(45, 212, 191, 0.5);
+  color: var(--vl-primary);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.1), rgba(96, 165, 250, 0.08));
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.2);
+  box-shadow: 0 4px 16px rgba(45, 212, 191, 0.2);
 }
 
 .drawer-action-btn.amber {
-  border-color: rgba(212, 175, 55, 0.35);
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--vl-primary);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(96, 165, 250, 0.08));
 }
 
 .drawer-action-btn:disabled {
@@ -787,15 +783,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
 .chat-entry {
   width: 100%;
-  border-color: rgba(212, 175, 55, 0.4);
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.15), rgba(41, 98, 255, 0.1));
-  color: #d4af37;
+  border-color: rgba(45, 212, 191, 0.4);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.15), rgba(96, 165, 250, 0.1));
+  color: var(--vl-primary);
   margin-bottom: 2rem;
 }
 
 .chat-entry:hover:not(:disabled) {
-  border-color: rgba(212, 175, 55, 0.6);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.25);
+  border-color: rgba(45, 212, 191, 0.6);
+  box-shadow: 0 4px 16px rgba(45, 212, 191, 0.25);
 }
 
 .drawer-loading {
@@ -804,21 +800,21 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   justify-content: center;
   gap: 1rem;
   padding: 2rem;
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
-  border: 1px solid rgba(212, 175, 55, 0.2);
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
+  border: 1px solid rgba(45, 212, 191, 0.2);
   border-radius: 1rem;
-  color: #d4af37;
+  color: var(--vl-primary);
   font-weight: 500;
 }
 
 .spinner {
   width: 1.75rem;
   height: 1.75rem;
-  border: 3px solid rgba(212, 175, 55, 0.15);
-  border-top-color: #d4af37;
+  border: 3px solid rgba(45, 212, 191, 0.15);
+  border-top-color: var(--vl-primary);
   border-radius: 50%;
   animation: vl-spin 0.8s linear infinite;
-  box-shadow: 0 0 12px rgba(212, 175, 55, 0.3);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.3);
 }
 
 .drawer-result-block {
@@ -843,8 +839,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .icon-btn {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
-  border: 1px solid rgba(212, 175, 55, 0.3);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.1), rgba(96, 165, 250, 0.08));
+  border: 1px solid rgba(45, 212, 191, 0.3);
   width: 2rem;
   height: 2rem;
   border-radius: 0.5rem;
@@ -858,18 +854,18 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .icon-btn:hover {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
-  border-color: rgba(212, 175, 55, 0.5);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.2), rgba(96, 165, 250, 0.12));
+  border-color: rgba(45, 212, 191, 0.5);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
+  box-shadow: 0 4px 12px rgba(45, 212, 191, 0.2);
 }
 
 .expand-btn {
-  background: linear-gradient(135deg, rgba(15, 25, 45, 0.5), rgba(20, 30, 50, 0.4));
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.5), rgba(17, 24, 39, 0.4));
   border: 1px solid rgba(139, 149, 168, 0.25);
   padding: 0.65rem 1.25rem;
   border-radius: 0.65rem;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   cursor: pointer;
   transition: all 0.3s;
   font-size: 0.875rem;
@@ -879,23 +875,20 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .expand-btn:hover {
-  border-color: rgba(212, 175, 55, 0.4);
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.1), rgba(96, 165, 250, 0.08));
 }
 
 .drawer-result-block h4 {
   font-size: 1.1rem;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--vl-text);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
 
 .drawer-result-block.error-block h4 {
-  background: linear-gradient(135deg, #f87171, #fca5a5);
+  background: linear-gradient(135deg, var(--vl-danger), #fca5a5);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -915,7 +908,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .result-text {
-  background: rgba(10, 14, 26, 0.6);
+  background: rgba(7, 9, 15, 0.6);
   padding: 1.5rem;
   border-radius: 0.875rem;
   font-size: 0.95rem;
@@ -927,9 +920,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   border: 1px solid rgba(139, 149, 168, 0.15);
   backdrop-filter: blur(8px);
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
   scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
+  scrollbar-color: rgba(45, 212, 191, 0.3) rgba(7, 9, 15, 0.5);
 }
 
 .result-text::-webkit-scrollbar {
@@ -937,21 +930,21 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .result-text::-webkit-scrollbar-track {
-  background: rgba(10, 14, 26, 0.5);
+  background: rgba(7, 9, 15, 0.5);
   border-radius: 4px;
 }
 
 .result-text::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
+  background: rgba(45, 212, 191, 0.3);
   border-radius: 4px;
 }
 
 .result-text::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.5);
+  background: rgba(45, 212, 191, 0.5);
 }
 
 .result-markdown {
-  background: rgba(10, 14, 26, 0.6);
+  background: rgba(7, 9, 15, 0.6);
   padding: 1.5rem;
   border-radius: 0.875rem;
   line-height: 1.9;
@@ -961,7 +954,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
   backdrop-filter: blur(8px);
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
   scrollbar-width: thin;
-  scrollbar-color: rgba(212, 175, 55, 0.3) rgba(10, 14, 26, 0.5);
+  scrollbar-color: rgba(45, 212, 191, 0.3) rgba(7, 9, 15, 0.5);
 }
 
 .result-markdown::-webkit-scrollbar {
@@ -969,24 +962,21 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .result-markdown::-webkit-scrollbar-track {
-  background: rgba(10, 14, 26, 0.5);
+  background: rgba(7, 9, 15, 0.5);
   border-radius: 4px;
 }
 
 .result-markdown::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.3);
+  background: rgba(45, 212, 191, 0.3);
   border-radius: 4px;
 }
 
 .result-markdown::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.5);
+  background: rgba(45, 212, 191, 0.5);
 }
 
 .result-markdown :deep(h2), .result-markdown :deep(h3) {
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--vl-text);
   margin-top: 1.5rem;
   margin-bottom: 0.75rem;
   font-weight: 700;
@@ -1000,7 +990,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .result-markdown :deep(strong) {
-  color: #f4e4a6;
+  color: var(--vl-primary);
   font-weight: 600;
 }
 
@@ -1016,17 +1006,17 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 }
 
 .result-markdown :deep(li::marker) {
-  color: #d4af37;
+  color: var(--vl-primary);
 }
 
 .result-markdown :deep(code) {
-  background: rgba(212, 175, 55, 0.1);
+  background: rgba(45, 212, 191, 0.1);
   padding: 0.2rem 0.5rem;
   border-radius: 0.375rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--vl-font-mono);
   font-size: 0.875rem;
-  color: #f4e4a6;
-  border: 1px solid rgba(212, 175, 55, 0.2);
+  color: var(--vl-primary);
+  border: 1px solid rgba(45, 212, 191, 0.2);
 }
 
 .drawer-enter-active, .drawer-leave-active {

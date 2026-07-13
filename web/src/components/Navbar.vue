@@ -1,22 +1,39 @@
 <template>
   <nav class="navbar" role="navigation" aria-label="主导航">
     <div class="nav-container">
-      <div class="brand">
-        <span class="mirror-icon">◇</span>
-        <span class="brand-text">镜知 <span class="en">VidLens</span></span>
-      </div>
+      <router-link :to="{ name: 'library' }" class="brand">
+        <span class="mirror-mark" aria-hidden="true">
+          <span class="mirror-core"></span>
+        </span>
+        <span class="brand-text">
+          镜知
+          <span class="en">VidLens</span>
+        </span>
+      </router-link>
+
       <nav v-if="user" class="nav-links">
-        <router-link :to="{ name: 'library' }" class="nav-link">🎬 视频</router-link>
-        <router-link :to="{ name: 'chat' }" class="nav-link">💬 对话</router-link>
+        <router-link :to="{ name: 'library' }" class="nav-link">视频库</router-link>
+        <router-link :to="{ name: 'chat' }" class="nav-link">对话</router-link>
       </nav>
-      <button class="mobile-menu-btn" @click="$emit('toggleSidebar')" aria-label="切换侧边栏">☰</button>
+
+      <!-- only useful on library (upload sidebar); chat has its own layout -->
+      <button
+        v-if="user && showUploadMenu"
+        class="mobile-menu-btn"
+        @click="$emit('toggleSidebar')"
+        aria-label="切换上传侧栏"
+      >
+        <span class="menu-bars" aria-hidden="true"></span>
+      </button>
+
       <div class="nav-right">
         <template v-if="user">
-          <button class="btn-icon-text" @click="$emit('openConfig')" title="模型配置" aria-label="模型配置">
-            <span class="icon">🤖</span>
+          <button class="btn-ghost" @click="$emit('openConfig')" title="模型配置" aria-label="模型配置">
+            <span class="gear" aria-hidden="true">⚙</span>
+            <span class="btn-label">模型</span>
           </button>
           <div class="user-badge">
-            <span class="user-avatar">{{ user.nickname?.[0] || 'U' }}</span>
+            <span class="user-avatar">{{ user.nickname?.[0] || user.username?.[0] || 'U' }}</span>
             <span class="user-name">{{ user.nickname || user.username }}</span>
           </div>
           <button class="btn-text" @click="$emit('logout')">退出</button>
@@ -28,265 +45,259 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+
 defineProps({
   user: Object
 })
 
 defineEmits(['logout', 'openAuth', 'openConfig', 'toggleSidebar'])
+
+const route = useRoute()
+const showUploadMenu = computed(() => route.name === 'library')
 </script>
 
 <style scoped>
-/* 导航栏 */
 .navbar {
-  backdrop-filter: blur(24px) saturate(180%);
-  background: rgba(10, 14, 26, 0.85);
-  border-bottom: 1px solid rgba(212, 175, 55, 0.15);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  padding: 1.25rem 0;
+  height: var(--vl-nav-h);
+  backdrop-filter: blur(18px) saturate(160%);
+  background: rgba(7, 9, 15, 0.78);
+  border-bottom: 1px solid var(--vl-border);
   position: sticky;
   top: 0;
   z-index: 100;
 }
 
-.navbar::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.5), transparent);
-}
-
 .nav-container {
-  max-width: 1600px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0 3rem;
+  padding: 0 1.5rem;
+  height: 100%;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  position: relative;
-  z-index: 2;
+  gap: 1rem;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  position: relative;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: inherit;
+  flex-shrink: 0;
 }
 
-.mirror-icon {
-  font-size: 2.5rem;
-  color: #d4af37;
-  filter: drop-shadow(0 0 12px rgba(212, 175, 55, 0.7)) drop-shadow(0 0 4px rgba(41, 98, 255, 0.3));
-  animation: iconPulse 3s ease-in-out infinite;
-  transform-origin: center;
+.mirror-mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.55rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, rgba(45, 212, 191, 0.2), rgba(96, 165, 250, 0.12));
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.15);
 }
 
-@keyframes iconPulse {
-  0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 12px rgba(212, 175, 55, 0.7)) drop-shadow(0 0 4px rgba(41, 98, 255, 0.3)); }
-  50% { transform: scale(1.05) rotate(5deg); filter: drop-shadow(0 0 18px rgba(212, 175, 55, 0.9)) drop-shadow(0 0 8px rgba(41, 98, 255, 0.5)); }
+.mirror-core {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #5eead4, #0d9488 70%, #134e4a);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
 }
 
 .brand-text {
-  background: linear-gradient(135deg, #d4af37 0%, #f4e4a6 50%, #d4af37 100%);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: shimmer 4s linear infinite;
-  position: relative;
-  text-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
-}
-
-@keyframes shimmer {
-  to { background-position: 200% center; }
+  font-family: var(--vl-font-display);
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: 0.04em;
+  color: var(--vl-text);
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
 }
 
 .brand-text .en {
-  font-size: 0.65rem;
-  opacity: 0.8;
-  margin-left: 0.5rem;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: 1px;
-  font-weight: 400;
-}
-
-/* 移动端菜单按钮 —— 默认隐藏 */
-.mobile-menu-btn {
-  display: none;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  font-size: 1.5rem;
-  color: #d4af37;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.65rem;
-  cursor: pointer;
-  transition: all 0.3s;
+  font-family: var(--vl-font-mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--vl-primary);
+  opacity: 0.9;
 }
 
 .nav-links {
   display: flex;
-  gap: 0.5rem;
-  margin-left: 1.5rem;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  padding: 0.2rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--vl-border);
+  border-radius: 999px;
 }
 
 .nav-link {
-  padding: 0.5rem 1rem;
-  border-radius: 0.65rem;
-  font-size: 0.9rem;
+  padding: 0.4rem 0.95rem;
+  border-radius: 999px;
+  font-size: 0.86rem;
   font-weight: 500;
-  color: #8b95a8;
+  color: var(--vl-text-secondary);
   text-decoration: none;
-  border: 1px solid transparent;
-  transition: all 0.25s;
+  transition: color 0.2s, background 0.2s;
 }
 
 .nav-link:hover {
-  color: #d4af37;
-  background: rgba(212, 175, 55, 0.08);
+  color: var(--vl-text);
 }
 
 .nav-link.router-link-active {
-  color: #d4af37;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.12), rgba(41, 98, 255, 0.08));
-  border-color: rgba(212, 175, 55, 0.3);
+  color: var(--vl-text-inverse);
+  background: var(--vl-primary);
+  font-weight: 600;
 }
 
-.nav-right { display: flex; align-items: center; gap: 1.25rem; }
-
-.btn-icon-text {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(41, 98, 255, 0.08));
-  border: 1px solid rgba(212, 175, 55, 0.3);
-  padding: 0.65rem 1rem;
-  border-radius: 0.75rem;
+.mobile-menu-btn {
+  display: none;
+  margin-left: auto;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: var(--vl-radius-sm);
+  border: 1px solid var(--vl-border);
+  background: var(--vl-surface);
   cursor: pointer;
-  transition: all 0.3s;
+  place-items: center;
+}
+
+.menu-bars {
+  width: 1rem;
+  height: 0.7rem;
+  display: block;
+  background:
+    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 0 / 100% 2px no-repeat,
+    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 50% / 100% 2px no-repeat,
+    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 100% / 70% 2px no-repeat;
+}
+
+.nav-right {
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  color: #d4af37;
+  gap: 0.65rem;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--vl-radius-sm);
+  border: 1px solid var(--vl-border);
+  background: transparent;
+  color: var(--vl-text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
   font-weight: 500;
-  font-size: 0.9rem;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 }
 
-.btn-icon-text:hover {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.2), rgba(41, 98, 255, 0.12));
-  border-color: rgba(212, 175, 55, 0.5);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
+.btn-ghost:hover {
+  border-color: var(--vl-border-focus);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
 }
 
-.btn-icon-text .icon {
-  font-size: 1.2rem;
+.gear {
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .user-badge {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 1.25rem;
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.08), rgba(41, 98, 255, 0.08));
-  backdrop-filter: blur(12px);
-  border-radius: 2rem;
-  border: 1px solid rgba(212, 175, 55, 0.25);
-  box-shadow: 0 2px 12px rgba(212, 175, 55, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  gap: 0.55rem;
+  padding: 0.25rem 0.7rem 0.25rem 0.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--vl-border);
+  background: rgba(255, 255, 255, 0.03);
 }
-.user-badge:hover {
-  border-color: rgba(212, 175, 55, 0.45);
-  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  transform: translateY(-1px);
-}
+
 .user-avatar {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 1.85rem;
+  height: 1.85rem;
   border-radius: 50%;
-  background: linear-gradient(135deg, #d4af37, #f4e4a6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-weight: 700;
-  color: #0a0e1a;
-  box-shadow: 0 0 12px rgba(212, 175, 55, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3);
-  font-size: 0.95rem;
+  font-size: 0.8rem;
+  color: var(--vl-text-inverse);
+  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
 }
-.user-name { font-size: 0.95rem; font-weight: 500; color: #e8eef7; }
+
+.user-name {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--vl-text);
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .btn-text {
   background: none;
   border: none;
-  color: #8b95a8;
+  color: var(--vl-text-muted);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
-  transition: all 0.3s;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-}
-.btn-text:hover {
-  color: #d4af37;
-  background: rgba(212, 175, 55, 0.08);
-}
-.btn-amber {
-  background: linear-gradient(135deg, #d4af37 0%, #f4e4a6 50%, #d4af37 100%);
-  background-size: 200% auto;
-  color: #0a0e1a;
-  border: none;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  font-size: 0.95rem;
-  letter-spacing: 0.5px;
-  position: relative;
-  overflow: hidden;
-}
-.btn-amber::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transform: translateX(-100%);
-  transition: transform 0.6s;
-}
-.btn-amber:hover::before {
-  transform: translateX(100%);
-}
-.btn-amber:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(212, 175, 55, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  background-position: 200% center;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--vl-radius-sm);
+  transition: color 0.2s, background 0.2s;
 }
 
-/* 响应式：平板及以下 */
+.btn-text:hover {
+  color: var(--vl-danger);
+  background: var(--vl-danger-dim);
+}
+
 @media (max-width: 900px) {
-  .nav-container {
-    padding: 0 1.5rem;
-  }
   .mobile-menu-btn {
-    display: block;
+    display: grid;
+    margin-left: 0.35rem;
   }
-  .user-name {
+  /* keep nav reachable on small screens — previously hidden, chat became unreachable */
+  .nav-links {
+    display: flex;
+    margin-left: 0.25rem;
+    padding: 0.15rem;
+    gap: 0.15rem;
+  }
+  .nav-link {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+  }
+  .user-name,
+  .btn-label {
     display: none;
+  }
+  .nav-container {
+    padding: 0 1rem;
+    gap: 0.5rem;
+  }
+  .nav-right {
+    gap: 0.4rem;
   }
 }
 
 @media (max-width: 600px) {
-  .brand {
-    font-size: 1.35rem;
+  .brand-text {
+    font-size: 1.05rem;
   }
-  .mirror-icon {
-    font-size: 1.8rem;
-  }
-  .nav-container {
-    padding: 0 1rem;
+  .brand-text .en {
+    display: none;
   }
 }
 </style>

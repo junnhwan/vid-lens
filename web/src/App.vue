@@ -53,7 +53,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, provide, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
+import { ref, computed, reactive, provide, onMounted, onUnmounted, defineAsyncComponent, watch } from 'vue'
 import Navbar from './components/Navbar.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -493,6 +493,15 @@ const handleOffline = () => {
   offlineToast.value = true
 }
 
+
+// 弹层打开时锁住背景滚动，避免 fixed 层与页面滚动打架
+watch(
+  () => showAuth.value || showConfig.value || confirmState.show,
+  (open) => {
+    document.body.style.overflow = open ? 'hidden' : ''
+  },
+)
+
 onMounted(() => {
   const saved = localStorage.getItem('user')
   if (saved) {
@@ -510,96 +519,113 @@ onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  document.body.style.overflow = ''
 })
 </script>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap');
 
-/* 全局样式 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html, body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
   overflow-x: hidden;
+  background: var(--vl-bg);
 }
 
 #app {
   min-height: 100vh;
-  background: #0a0e1a;
-  background-image:
-    radial-gradient(circle at 20% 30%, rgba(41, 98, 255, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(212, 175, 55, 0.06) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.4) 0%, transparent 100%);
   position: relative;
-  color: #e8eef7;
-  font-family: 'Noto Sans SC', -apple-system, sans-serif;
+  color: var(--vl-text);
+  font-family: var(--vl-font);
+  font-feature-settings: 'ss01' on, 'kern' on;
+  letter-spacing: 0.01em;
   overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(45, 212, 191, 0.12), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 95% 10%, rgba(96, 165, 250, 0.08), transparent 50%),
+    radial-gradient(ellipse 50% 50% at 70% 100%, rgba(240, 180, 41, 0.05), transparent 55%),
+    var(--vl-bg);
 }
 
+/* subtle film grain — keep pointer-events off; do NOT force position on children
+   (that would override modal position:fixed via #app > * specificity) */
 #app::before {
   content: '';
   position: fixed;
   inset: 0;
-  background:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.01) 0px, transparent 1px, transparent 2px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.01) 0px, transparent 1px, transparent 2px);
-  background-size: 80px 80px;
   pointer-events: none;
-  z-index: 1;
+  z-index: 0;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  mix-blend-mode: soft-light;
 }
 
-#app::after {
-  content: '';
-  position: fixed;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(212, 175, 55, 0.02) 1px, transparent 1px);
-  background-size: 40px 40px;
-  animation: subtleFloat 60s linear infinite;
-  pointer-events: none;
-  z-index: 1;
+button, input, textarea, select {
+  font-family: inherit;
 }
 
-@keyframes subtleFloat {
-  from { transform: translate(0, 0) rotate(0deg); }
-  to { transform: translate(10%, 10%) rotate(5deg); }
+a {
+  color: var(--vl-primary);
 }
 
 /* Toast */
 .toast {
   position: fixed;
-  top: 2.5rem;
-  right: 2.5rem;
-  padding: 1.25rem 2rem;
-  backdrop-filter: blur(24px) saturate(180%);
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(22, 163, 74, 0.95));
-  border-radius: 1rem;
+  top: calc(var(--vl-nav-h) + 1rem);
+  right: 1.5rem;
+  padding: 0.85rem 1.25rem;
+  backdrop-filter: blur(16px) saturate(160%);
+  background: rgba(16, 185, 129, 0.92);
+  border-radius: var(--vl-radius);
   font-weight: 600;
-  z-index: 1000;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  font-size: 0.95rem;
-  letter-spacing: 0.3px;
+  z-index: 1300;
+  box-shadow: var(--vl-shadow);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.88rem;
+  letter-spacing: 0.02em;
   color: #fff;
+  max-width: min(360px, calc(100vw - 2rem));
 }
 .toast.error {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95));
+  background: rgba(239, 68, 68, 0.94);
 }
 .toast.offline {
-  background: linear-gradient(135deg, rgba(139, 149, 168, 0.95), rgba(100, 116, 139, 0.95));
+  background: rgba(71, 85, 105, 0.95);
   top: auto;
-  bottom: 2.5rem;
-  right: 2.5rem;
+  bottom: 1.5rem;
 }
 .toast-enter-active, .toast-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s var(--vl-ease);
 }
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
-  transform: translateX(100%) scale(0.8);
+  transform: translateX(16px) scale(0.96);
+}
+
+/* Thin scrollbar default */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 212, 191, 0.28) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(45, 212, 191, 0.28);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(45, 212, 191, 0.45);
 }
 </style>
