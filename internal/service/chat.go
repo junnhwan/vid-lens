@@ -287,10 +287,12 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, userID, ses
 	if ragErr == nil {
 		return prepared, nil
 	}
-	if errors.Is(ragErr, errNoRetrievedContext) || errors.Is(ragErr, errRAGIndexUnavailable) {
-		return s.prepareVideoContextChat(session, question, recent, recentLimit)
+	// 视频助手应在检索链路不可用时继续使用已校验会话的摘要/转写，
+	// 但客户端取消或请求超时后不能再发起兜底模型调用。
+	if errors.Is(ragErr, context.Canceled) || errors.Is(ragErr, context.DeadlineExceeded) {
+		return nil, ragErr
 	}
-	return nil, ragErr
+	return s.prepareVideoContextChat(session, question, recent, recentLimit)
 }
 
 func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, question string, recent []model.ChatMessage, recentLimit int) (*preparedRAGChat, error) {

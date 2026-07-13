@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -225,6 +226,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		log.Printf("chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
 		c.SSEvent("error", gin.H{"message": err.Error()})
 		c.Writer.Flush()
 	}

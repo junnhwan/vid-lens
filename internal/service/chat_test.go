@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -20,6 +21,14 @@ type fakeRetriever struct {
 func (r *fakeRetriever) Search(ctx context.Context, query []float32, req RetrievalRequest) ([]RetrievedChunk, error) {
 	r.lastReq = req
 	return r.results, nil
+}
+
+type failingRetriever struct {
+	err error
+}
+
+func (r *failingRetriever) Search(context.Context, []float32, RetrievalRequest) ([]RetrievedChunk, error) {
+	return nil, r.err
 }
 
 type recordingChatClient struct {
@@ -473,6 +482,102 @@ func TestChatServiceAskWithModeVideoAssistantFallsBackToTranscriptionWhenRetriev
 	}
 	if !strings.Contains(joinedPrompt, "视频转写") || !strings.Contains(joinedPrompt, "SSRF 风险") {
 		t.Fatalf("prompt did not include transcription context: %s", joinedPrompt)
+	}
+}
+
+func TestChatServiceAskWithModeVideoAssistantFallsBackToTranscriptionWhenRetrieverFails(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4", Filename: "retrieval-error.mp4", FileURL: "videos/retrieval-error.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: task.ID, Content: "转写里说明视频助手应在向量检索不可用时继续回答。", Words: 24}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"这是检索故障后的转写兜底回答",
+	}}
+	svc := NewChatService(repos, &failingRetriever{err: errors.New("milvus search unavailable")}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "检索坏了还能回答吗？", 0, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("AskWithMode() error = %v, want transcription fallback", err)
+	}
+	if result.Answer != "这是检索故障后的转写兜底回答" {
+		t.Fatalf("answer = %q", result.Answer)
+	}
+	if len(result.Citations) != 0 {
+		t.Fatalf("citations = %+v, want no citations for retrieval error fallback", result.Citations)
+	}
+	if len(chatClient.messages) != 2 {
+		t.Fatalf("chat calls = %d, want rewrite and fallback answer", len(chatClient.messages))
+	}
+	joinedPrompt := ""
+	for _, msg := range chatClient.messages[1] {
+		joinedPrompt += msg.Content + "\n"
+	}
+	if !strings.Contains(joinedPrompt, "视频转写") || !strings.Contains(joinedPrompt, "向量检索不可用") {
+		t.Fatalf("prompt did not include transcription context: %s", joinedPrompt)
+	}
+}
+
+func TestChatServiceAskWithModeVideoAssistantDoesNotFallbackWhenRequestIsCanceled(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5", Filename: "canceled.mp4", FileURL: "videos/canceled.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: task.ID, Content: "请求取消后不应继续调用模型。", Words: 14}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	chatClient := &scriptedChatClient{responses: []string{"not-json", "不应生成这条回答"}}
+	svc := NewChatService(repos, &failingRetriever{err: context.Canceled}, ChatConfig{TopK: 5, MinScore: 0.3})
+
+	_, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "请求已取消", 0, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(chatClient.messages) != 1 {
+		t.Fatalf("chat calls = %d, want rewrite only and no fallback answer", len(chatClient.messages))
+	}
+}
+
+func TestChatServiceAskWithModeStrictRAGPropagatesRetrieverFailure(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6", Filename: "strict-error.mp4", FileURL: "videos/strict-error.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	retrievalErr := errors.New("milvus search unavailable")
+	svc := NewChatService(repos, &failingRetriever{err: retrievalErr}, ChatConfig{TopK: 5, MinScore: 0.3})
+	_, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "严格检索", 0, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json"}}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		LLMModel:       "chat-model",
+	})
+	if !errors.Is(err, retrievalErr) {
+		t.Fatalf("err = %v, want retriever failure", err)
 	}
 }
 
