@@ -263,7 +263,12 @@ const deleteTask = async (task) => {
   })
 }
 
+// 视频库 master-detail：再点同一条可取消选中
 const openTaskDrawer = async (task) => {
+  if (selectedTask.value?.id === task?.id) {
+    selectedTask.value = null
+    return
+  }
   selectedTask.value = task
   sidebarOpen.value = false
   if (needsTaskDetail(task)) {
@@ -466,6 +471,18 @@ provide('appCtx', appCtx)
 
 // 键盘快捷键
 const handleGlobalKeydown = (e) => {
+  // ESC 关闭视频库详情分栏（弹层打开时不抢）
+  if (
+    e.key === 'Escape' &&
+    selectedTask.value &&
+    !showAuth.value &&
+    !showConfig.value &&
+    !confirmState.value.show
+  ) {
+    e.preventDefault()
+    closeDrawer()
+    return
+  }
   // Ctrl/Cmd + K 打开搜索
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault()

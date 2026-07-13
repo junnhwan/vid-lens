@@ -1,5 +1,14 @@
 <template>
-  <div class="task-card" :class="{ 'task-failed': task.status === 4, 'compact': compact }" @click="$emit('click')">
+  <div
+    class="task-card"
+    :class="{
+      'task-failed': task.status === 4,
+      compact,
+      selected,
+    }"
+    :aria-selected="selected"
+    @click="$emit('click')"
+  >
     <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">×</button>
 
     <div class="task-header">
@@ -43,7 +52,8 @@ import { formatTime, formatFileSize, getDetailedStatus } from '../utils/format.j
 const props = defineProps({
   task: Object,
   loading: Boolean,
-  compact: { type: Boolean, default: false }
+  compact: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false },
 })
 
 defineEmits(['click', 'delete', 'transcribe', 'analyze', 'chat'])
@@ -89,8 +99,16 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   transform: translateY(-2px);
 }
 
-.task-card:hover::before {
+.task-card:hover::before,
+.task-card.selected::before {
   opacity: 1;
+}
+
+.task-card.selected {
+  border-color: rgba(45, 212, 191, 0.5);
+  background: rgba(45, 212, 191, 0.08);
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.15), var(--vl-shadow-sm);
+  transform: none;
 }
 
 .task-card.compact {

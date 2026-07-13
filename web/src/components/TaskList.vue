@@ -28,7 +28,7 @@
     <button class="load-more-btn" @click="$emit('retry')">重新加载</button>
   </section>
 
-  <section v-else-if="tasks.length" class="tasks-section">
+  <section v-else-if="tasks.length" class="tasks-section" :class="{ 'split-mode': compactList }">
     <div class="section-header">
       <h2>我的任务</h2>
       <div class="filter-tabs">
@@ -39,18 +39,24 @@
         </button>
       </div>
       <input v-model="searchQuery" class="search-box" placeholder="搜索文件名…  Ctrl+K" aria-label="搜索任务" />
-      <button class="view-toggle" @click="toggleView" :title="viewMode === 'grid' ? '切换到列表视图' : '切换到网格视图'">
+      <button
+        v-if="!compactList"
+        class="view-toggle"
+        @click="toggleView"
+        :title="viewMode === 'grid' ? '切换到列表视图' : '切换到网格视图'"
+      >
         {{ viewMode === 'grid' ? '≡' : '▦' }}
       </button>
     </div>
 
-    <TransitionGroup name="task-list" tag="div" class="tasks-list" :class="viewMode">
+    <TransitionGroup name="task-list" tag="div" class="tasks-list" :class="effectiveViewMode">
       <TaskCard
         v-for="t in filteredTasks"
         :key="t.id"
         :task="t"
         :loading="loading[t.id]"
-        :compact="viewMode === 'list'"
+        :compact="effectiveViewMode === 'list'"
+        :selected="selectedId === t.id"
         @click="$emit('taskClick', t)"
         @delete="$emit('deleteTask', t)"
         @transcribe="$emit('transcribe', t)"
@@ -98,7 +104,11 @@ const props = defineProps({
   initialLoading: { type: Boolean, default: false },
   hasMore: { type: Boolean, default: false },
   loadingMore: { type: Boolean, default: false },
-  loadError: { type: String, default: '' }
+  loadError: { type: String, default: '' },
+  /** 当前选中的任务 id（分栏高亮） */
+  selectedId: { type: [Number, String], default: null },
+  /** 分栏时强制紧凑列表，隐藏网格切换 */
+  compactList: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search'])
@@ -111,6 +121,9 @@ const viewMode = ref(localStorage.getItem('taskViewMode') || 'grid')
 const showInitialSkeleton = computed(() =>
   shouldShowInitialTaskSkeleton(props.tasks, props.initialLoading),
 )
+
+// 分栏模式固定 list，更窄更易扫
+const effectiveViewMode = computed(() => (props.compactList ? 'list' : viewMode.value))
 
 const toggleView = () => {
   viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
@@ -139,31 +152,33 @@ watch(searchQuery, (val) => {
   searchTimer = setTimeout(() => emit('search', val), 300)
 })
 
+const getListScrollEl = () => document.querySelector('.list-pane')
+
 const handleScroll = () => {
-  const contentArea = document.querySelector('.content-area')
-  if (contentArea) {
-    showScrollTop.value = contentArea.scrollTop > 400
+  const el = getListScrollEl()
+  if (el) {
+    showScrollTop.value = el.scrollTop > 400
   }
 }
 
 const scrollToTop = () => {
-  const contentArea = document.querySelector('.content-area')
-  if (contentArea) {
-    contentArea.scrollTo({ top: 0, behavior: 'smooth' })
+  const el = getListScrollEl()
+  if (el) {
+    el.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
 
 onMounted(() => {
-  const contentArea = document.querySelector('.content-area')
-  if (contentArea) {
-    contentArea.addEventListener('scroll', handleScroll)
+  const el = getListScrollEl()
+  if (el) {
+    el.addEventListener('scroll', handleScroll)
   }
 })
 
 onUnmounted(() => {
-  const contentArea = document.querySelector('.content-area')
-  if (contentArea) {
-    contentArea.removeEventListener('scroll', handleScroll)
+  const el = getListScrollEl()
+  if (el) {
+    el.removeEventListener('scroll', handleScroll)
   }
 })
 </script>
@@ -482,6 +497,20 @@ onUnmounted(() => {
 .scroll-top-leave-to {
   opacity: 0;
   transform: translateY(12px) scale(0.9);
+}
+
+.tasks-section.split-mode .section-header h2 {
+  font-size: 1.15rem;
+}
+
+.tasks-section.split-mode .search-box {
+  min-width: 0;
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.tasks-section.split-mode .filter-tabs {
+  flex: 1 1 100%;
 }
 
 @media (max-width: 600px) {
