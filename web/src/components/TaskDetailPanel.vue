@@ -95,13 +95,14 @@
     </nav>
 
     <div class="detail-body">
-      <div v-if="loading" class="panel-loading">
+      <!-- 处理中横幅：不遮挡已有转写/总结，避免读结果时被整页 spinner 顶掉 -->
+      <div v-if="loading" class="panel-loading-banner" role="status">
         <div class="spinner" aria-hidden="true"></div>
         <span>处理中…</span>
       </div>
 
       <!-- 概览 -->
-      <div v-else-if="activeTab === 'overview'" class="tab-pane" role="tabpanel">
+      <div v-if="activeTab === 'overview'" class="tab-pane" role="tabpanel">
         <div v-if="failureMessage" class="error-block">
           <h4>处理失败</h4>
           <p class="error-text">{{ failureMessage }}</p>
@@ -410,6 +411,16 @@ watch(
     else activeTab.value = 'overview'
   },
 )
+
+// 轮询完成后内容首次出现：若仍在概览，自动切到对应结果 Tab
+watch(
+  () => [!!props.task?.transcription?.content, !!props.task?.summary?.content],
+  ([hasTx, hasSum], [prevTx, prevSum] = [false, false]) => {
+    if (activeTab.value !== 'overview') return
+    if (hasSum && !prevSum) activeTab.value = 'summary'
+    else if (hasTx && !prevTx) activeTab.value = 'transcription'
+  },
+)
 </script>
 
 <style scoped>
@@ -665,15 +676,18 @@ watch(
   animation: vl-fade-in-up 0.28s var(--vl-ease);
 }
 
-.panel-loading {
+.panel-loading-banner {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 2.5rem 1rem;
+  gap: 0.65rem;
+  margin: -0.25rem 0 0.9rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--vl-radius-sm);
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  background: rgba(45, 212, 191, 0.08);
   color: var(--vl-primary);
-  font-weight: 500;
-  font-size: 0.9rem;
+  font-weight: 600;
+  font-size: 0.84rem;
 }
 
 .spinner {

@@ -85,7 +85,12 @@ const resolveTask = async () => {
     return
   }
   const id = Number(idParam)
-  const found = (app.tasks || []).find((t) => t.id === id)
+  if (!Number.isFinite(id)) {
+    taskNotFound.value = true
+    currentTask.value = null
+    return
+  }
+  const found = (app.tasks || []).find((t) => Number(t.id) === id)
   if (found) {
     taskNotFound.value = false
     currentTask.value = found
@@ -96,7 +101,7 @@ const resolveTask = async () => {
     taskNotFound.value = false
     currentTask.value = detail || null
     // 让该视频也出现在左侧列表（若尚未加载）
-    if (detail && Array.isArray(app.tasks) && !app.tasks.some((t) => t.id === detail.id)) {
+    if (detail && Array.isArray(app.tasks) && !app.tasks.some((t) => Number(t.id) === Number(detail.id))) {
       app.tasks.push(detail)
     }
   } catch (err) {

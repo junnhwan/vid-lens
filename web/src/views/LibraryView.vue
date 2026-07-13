@@ -29,6 +29,7 @@
           :loadError="app.tasksLoadError"
           :selectedId="app.selectedTask?.id"
           :compactList="!!app.selectedTask && !isMobile"
+          :searchKeyword="app.searchKeyword"
           @taskClick="app.openTaskDrawer"
           @deleteTask="app.deleteTask"
           @transcribe="app.doTranscribe"

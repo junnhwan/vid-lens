@@ -2,7 +2,7 @@
   <div
     class="task-card"
     :class="{
-      'task-failed': task.status === 4,
+      'task-failed': task.status === 4 || task.status === 5,
       compact,
       selected,
     }"

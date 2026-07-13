@@ -253,9 +253,16 @@ const deleteTask = async (task) => {
         await api.deleteTask(task.id)
         showToast('删除成功')
         tasks.value = tasks.value.filter(t => t.id !== task.id)
+        tasksTotal.value = Math.max(0, tasksTotal.value - 1)
+        hasMore.value = tasks.value.length < tasksTotal.value
         if (selectedTask.value?.id === task.id) {
           selectedTask.value = null
         }
+        if (pollingTimers.value[task.id]) {
+          clearInterval(pollingTimers.value[task.id])
+          delete pollingTimers.value[task.id]
+        }
+        delete loading.value[task.id]
       } catch (err) {
         showToast('删除失败', true)
       }
@@ -316,20 +323,48 @@ const doAnalyze = async (task) => {
   }
 }
 
+const mergeTaskIntoList = (detail) => {
+  if (!detail?.id) return null
+  const index = tasks.value.findIndex((t) => t.id === detail.id)
+  if (index >= 0) {
+    const merged = { ...tasks.value[index], ...detail }
+    tasks.value[index] = merged
+    return merged
+  }
+  // 新下载任务可能还不在当前页：插到列表顶部，避免进度无处展示
+  tasks.value = [detail, ...tasks.value]
+  tasksTotal.value = Math.max(tasksTotal.value + 1, tasks.value.length)
+  return detail
+}
+
+const refreshTaskDetail = async (taskId) => {
+  try {
+    const detail = await api.getTask(taskId)
+    const merged = mergeTaskIntoList(detail)
+    if (selectedTask.value?.id === taskId && merged) {
+      selectedTask.value = { ...selectedTask.value, ...merged }
+    }
+    return merged
+  } catch (err) {
+    console.error(err)
+    return null
+  }
+}
+
+// 轮询单任务详情，避免 fetchTasks(page=1) 冲掉已加载分页 / 搜索结果
 const startPolling = (taskId, type) => {
   if (pollingTimers.value[taskId]) clearInterval(pollingTimers.value[taskId])
   const timer = setInterval(async () => {
-    await fetchTasks()
-    const task = tasks.value.find(t => t.id === taskId)
+    // 若 timer 已被清理，跳过（防止竞态）
+    if (!pollingTimers.value[taskId]) return
+    const task = await refreshTaskDetail(taskId)
     if (!task) return
-    if (selectedTask.value?.id === taskId) {
-      selectedTask.value = { ...selectedTask.value, ...task }
-    }
     if (shouldStopPolling(task, type)) {
       clearInterval(timer)
       delete pollingTimers.value[taskId]
       loading.value[taskId] = false
       if (isPollingSuccessful(task, type)) {
+        // 完成时再拉一次，拿全量 transcription/summary
         await refreshTaskDetail(taskId)
         showToast(type === 'download' ? '下载完成' : '处理完成')
       } else {
@@ -339,7 +374,7 @@ const startPolling = (taskId, type) => {
   }, 3000)
   pollingTimers.value[taskId] = timer
   setTimeout(() => {
-    if (pollingTimers.value[taskId]) {
+    if (pollingTimers.value[taskId] === timer) {
       clearInterval(pollingTimers.value[taskId])
       delete pollingTimers.value[taskId]
       loading.value[taskId] = false
@@ -348,19 +383,10 @@ const startPolling = (taskId, type) => {
   }, 300000)
 }
 
-const refreshTaskDetail = async (taskId) => {
-  try {
-    const detail = await api.getTask(taskId)
-    const index = tasks.value.findIndex(t => t.id === taskId)
-    if (index >= 0) {
-      tasks.value[index] = { ...tasks.value[index], ...detail }
-    }
-    if (selectedTask.value?.id === taskId) {
-      selectedTask.value = { ...selectedTask.value, ...detail }
-    }
-  } catch (err) {
-    console.error(err)
-  }
+const clearAllPolling = () => {
+  Object.values(pollingTimers.value).forEach((timer) => clearInterval(timer))
+  pollingTimers.value = {}
+  loading.value = {}
 }
 
 // 认证相关
@@ -409,10 +435,16 @@ const handleAuth = async (formData) => {
 }
 
 const logout = () => {
+  clearAllPolling()
   user.value = null
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   tasks.value = []
+  tasksTotal.value = 0
+  hasMore.value = false
+  selectedTask.value = null
+  searchKeyword.value = ''
+  tasksLoadError.value = ''
   showToast('已退出')
 }
 
@@ -491,11 +523,18 @@ const handleGlobalKeydown = (e) => {
       searchBox.focus()
     }
   }
-  // N 键快速上传（非输入框时）
-  if (e.key === 'n' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+  // N 键快速上传（非输入/可编辑区域时）
+  if (
+    e.key === 'n' &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.altKey &&
+    !['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) &&
+    !e.target.isContentEditable
+  ) {
     e.preventDefault()
     const uploadBtn = document.querySelector('.upload-btn')
-    if (uploadBtn) {
+    if (uploadBtn && !uploadBtn.disabled) {
       uploadBtn.click()
     }
   }
@@ -513,7 +552,7 @@ const handleOffline = () => {
 
 // 弹层打开时锁住背景滚动，避免 fixed 层与页面滚动打架
 watch(
-  () => showAuth.value || showConfig.value || confirmState.show,
+  () => showAuth.value || showConfig.value || confirmState.value.show,
   (open) => {
     document.body.style.overflow = open ? 'hidden' : ''
   },
@@ -536,6 +575,7 @@ onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  clearAllPolling()
   document.body.style.overflow = ''
 })
 </script>

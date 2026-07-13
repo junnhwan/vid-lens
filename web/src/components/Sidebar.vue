@@ -140,6 +140,7 @@ const handleFileSelect = async (e) => {
   if (!file) return
   emit('uploadFile', file)
   e.target.value = ''
+  emit('closeSidebar')
 }
 
 const handleDrop = async (e) => {
@@ -155,6 +156,7 @@ const handleDrop = async (e) => {
     return
   }
   emit('uploadFile', file)
+  emit('closeSidebar')
 }
 
 const handleUrlUpload = () => {
@@ -163,12 +165,13 @@ const handleUrlUpload = () => {
     return
   }
   if (!videoUrl.value) return
-  if (!/^https?:\/\//i.test(videoUrl.value)) {
+  if (!/^https?:\/\//i.test(videoUrl.value.trim())) {
     emit('toast', '请输入 http(s) 开头的链接')
     return
   }
-  emit('uploadUrl', videoUrl.value)
+  emit('uploadUrl', videoUrl.value.trim())
   videoUrl.value = ''
+  emit('closeSidebar')
 }
 </script>
 

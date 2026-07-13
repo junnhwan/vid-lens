@@ -505,6 +505,11 @@ const sendQuestion = async () => {
   messages.value.push(userMessage)
   const q = question.value
   question.value = ''
+  nextTick(() => {
+    if (questionInput.value) {
+      questionInput.value.style.height = 'auto'
+    }
+  })
 
   loading.value = true
 
@@ -643,6 +648,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopIndexPolling()
+  // 离开对话页时中止进行中的流，避免回调写已卸载组件
+  abortController?.abort()
+  abortController = null
+  streaming.value = false
+  loading.value = false
 })
 </script>
 
@@ -689,14 +699,15 @@ onUnmounted(() => {
 }
 
 .index-error {
-  margin-top: 1.5rem;
-  padding: 1rem;
+  margin: 0;
+  flex: 1 1 100%;
+  padding: 0.65rem 0.85rem;
   background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(220, 38, 38, 0.08));
   border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 0.75rem;
+  border-radius: 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .error-label {

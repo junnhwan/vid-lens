@@ -28,7 +28,12 @@
     <button class="load-more-btn" @click="$emit('retry')">重新加载</button>
   </section>
 
-  <section v-else-if="tasks.length" class="tasks-section" :class="{ 'split-mode': compactList }">
+  <!-- 有任务，或正在搜索（展示工具栏 + 空结果），避免后端搜空时误显示「还没有任务」 -->
+  <section
+    v-else-if="tasks.length || hasActiveSearch"
+    class="tasks-section"
+    :class="{ 'split-mode': compactList }"
+  >
     <div class="section-header">
       <h2>我的任务</h2>
       <div class="filter-tabs">
@@ -49,7 +54,13 @@
       </button>
     </div>
 
-    <TransitionGroup name="task-list" tag="div" class="tasks-list" :class="effectiveViewMode">
+    <TransitionGroup
+      v-if="filteredTasks.length"
+      name="task-list"
+      tag="div"
+      class="tasks-list"
+      :class="effectiveViewMode"
+    >
       <TaskCard
         v-for="t in filteredTasks"
         :key="t.id"
@@ -65,14 +76,24 @@
       />
     </TransitionGroup>
 
-    <!-- 搜索无结果 -->
-    <div v-if="tasks.length && !filteredTasks.length" class="empty-search">
+    <!-- 搜索 / Tab 过滤无结果 -->
+    <div v-else class="empty-search">
       <div class="empty-search-icon">⌀</div>
-      <p>没有找到匹配「{{ searchQuery }}」的任务</p>
+      <p v-if="hasActiveSearch">没有找到匹配「{{ searchQuery.trim() || searchKeyword }}」的任务</p>
+      <p v-else-if="activeTab !== 'all'">当前筛选下没有任务，试试切换到「全部」</p>
+      <p v-else>没有可展示的任务</p>
+      <button
+        v-if="hasActiveSearch"
+        type="button"
+        class="clear-search-btn"
+        @click="clearSearch"
+      >
+        清除搜索
+      </button>
     </div>
 
     <!-- 加载更多 -->
-    <div v-if="hasMore" class="load-more">
+    <div v-if="hasMore && filteredTasks.length" class="load-more">
       <button class="load-more-btn" @click="$emit('loadMore')" :disabled="loadingMore">
         {{ loadingMore ? '加载中...' : '加载更多' }}
       </button>
@@ -109,18 +130,22 @@ const props = defineProps({
   selectedId: { type: [Number, String], default: null },
   /** 分栏时强制紧凑列表，隐藏网格切换 */
   compactList: { type: Boolean, default: false },
+  /** 父级当前生效的后端搜索关键字（用于空态判断，避免本地输入防抖与列表不同步） */
+  searchKeyword: { type: String, default: '' },
 })
 
 const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search'])
 
 const activeTab = ref('all')
-const searchQuery = ref('')
+const searchQuery = ref(props.searchKeyword || '')
 const showScrollTop = ref(false)
 const viewMode = ref(localStorage.getItem('taskViewMode') || 'grid')
 
 const showInitialSkeleton = computed(() =>
   shouldShowInitialTaskSkeleton(props.tasks, props.initialLoading),
 )
+
+const hasActiveSearch = computed(() => !!(props.searchKeyword || '').trim() || !!(searchQuery.value || '').trim())
 
 // 分栏模式固定 list，更窄更易扫
 const effectiveViewMode = computed(() => (props.compactList ? 'list' : viewMode.value))
@@ -139,7 +164,7 @@ const tabs = computed(() => [
 
 const filteredTasks = computed(() => {
   // 关键字搜索交给后端（emit search），这里只做状态 tab 的客户端过滤
-  let result = props.tasks
+  let result = props.tasks || []
   if (activeTab.value === 'processing') result = result.filter(t => t.status < 3)
   if (activeTab.value === 'completed') result = result.filter(t => t.status === 3)
   if (activeTab.value === 'failed') result = result.filter(t => t.status === 4 || t.status === 5)
@@ -149,8 +174,24 @@ const filteredTasks = computed(() => {
 let searchTimer = null
 watch(searchQuery, (val) => {
   clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => emit('search', val), 300)
+  searchTimer = setTimeout(() => emit('search', val.trim()), 300)
 })
+
+// 父级清空关键字（如退出登录）时同步输入框
+watch(
+  () => props.searchKeyword,
+  (kw) => {
+    if ((kw || '') !== searchQuery.value && !(kw || '').trim() && searchQuery.value) {
+      searchQuery.value = kw || ''
+    }
+  },
+)
+
+const clearSearch = () => {
+  clearTimeout(searchTimer)
+  searchQuery.value = ''
+  emit('search', '')
+}
 
 const getListScrollEl = () => document.querySelector('.list-pane')
 
@@ -176,6 +217,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearTimeout(searchTimer)
   const el = getListScrollEl()
   if (el) {
     el.removeEventListener('scroll', handleScroll)
@@ -339,6 +381,25 @@ onUnmounted(() => {
   color: var(--vl-text-muted);
   font-size: 0.9rem;
   margin: 0;
+}
+
+.clear-search-btn {
+  margin-top: 1rem;
+  background: transparent;
+  border: 1px solid var(--vl-border);
+  padding: 0.5rem 1.1rem;
+  border-radius: var(--vl-radius-sm);
+  color: var(--vl-text-secondary);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.84rem;
+  transition: all 0.2s;
+}
+
+.clear-search-btn:hover {
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
 }
 
 .load-more {
