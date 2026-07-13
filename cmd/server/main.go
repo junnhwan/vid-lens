@@ -299,6 +299,8 @@ func main() {
 			if reqPath != "/" && !strings.Contains(reqPath[1:], "/") {
 				candidate := filepath.Join(staticDir, filepath.Base(reqPath))
 				if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+					// 根级静态资源勿被 CDN 长时间缓存错误响应
+					c.Header("Cache-Control", "public, max-age=3600")
 					c.File(candidate)
 					return
 				}
