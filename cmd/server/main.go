@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -281,11 +283,28 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok", "service": "VidLens"})
 	})
 
-	// 前端静态文件
+	// 前端静态文件：/assets 整目录 + dist 根下的真实文件（如 favicon.svg）；
+	// 其余未知路径回退 index.html，供 hash 路由 SPA 使用。
 	staticDir := filepath.Join(".", "web", "dist")
 	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
 		r.Static("/assets", filepath.Join(staticDir, "assets"))
-		r.NoRoute(func(c *gin.Context) { c.File(filepath.Join(staticDir, "index.html")) })
+		r.NoRoute(func(c *gin.Context) {
+			// 只处理 GET/HEAD，避免误把 API 404 当页面返回
+			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			reqPath := path.Clean("/" + c.Request.URL.Path)
+			// 禁止路径穿越；仅允许 dist 根下的单层静态文件（favicon 等）
+			if reqPath != "/" && !strings.Contains(reqPath[1:], "/") {
+				candidate := filepath.Join(staticDir, filepath.Base(reqPath))
+				if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+					c.File(candidate)
+					return
+				}
+			}
+			c.File(filepath.Join(staticDir, "index.html"))
+		})
 		log.Println("✅ 前端静态资源已加载")
 	}
 
