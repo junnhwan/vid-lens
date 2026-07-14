@@ -1,6 +1,6 @@
 import SparkMD5 from 'spark-md5'
 
-export const CHUNK_SIZE = 5 * 1024 * 1024
+export const CHUNK_SIZE = 1024 * 1024
 
 function emitProgress(onProgress, stage, percent, extra = {}) {
   onProgress?.({ stage, percent: Math.max(0, Math.min(100, Math.round(percent))), ...extra })
@@ -81,6 +81,7 @@ export async function uploadFileInChunks({
   calculateMD5 = calculateFileMD5,
   chunkSize = CHUNK_SIZE,
   maxChunkRetries = 2,
+  maxConcurrency = 3,
   retryDelay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => Date.now(),
 }) {
@@ -88,6 +89,7 @@ export async function uploadFileInChunks({
   if (!api) throw new Error('上传 API 不可用')
   if (typeof calculateMD5 !== 'function') throw new Error('文件指纹计算器不可用')
   if (!Number.isInteger(chunkSize) || chunkSize <= 0) throw new Error('分片大小必须大于 0')
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency <= 0) throw new Error('上传并发数必须大于 0')
 
   emitProgress(onProgress, 'hashing', 0)
   const fileMD5 = await calculateMD5(file, {
@@ -106,62 +108,90 @@ export async function uploadFileInChunks({
     (total, index) => total + chunkByteLength(file.size, chunkSize, index),
     0,
   )
+  const initialCompletedBytes = completedBytes
+  const uploadStartedAt = now()
+  const inflightLoaded = new Map()
+  const pendingIndexes = []
+  for (let index = 0; index < totalChunks; index += 1) {
+    if (!uploaded.has(index)) pendingIndexes.push(index)
+  }
+
+  const emitUploadProgress = (index, chunkSizeForIndex, retryAttempt = 0) => {
+    const inflightBytes = [...inflightLoaded.values()].reduce((total, loaded) => total + loaded, 0)
+    const transferredBytes = Math.min(completedBytes + inflightBytes, file.size)
+    const elapsedSeconds = Math.max((now() - uploadStartedAt) / 1000, 0.001)
+    const bytesPerSecond = Math.max(transferredBytes - initialCompletedBytes, 0) / elapsedSeconds
+    const loaded = inflightLoaded.get(index) || 0
+    emitProgress(onProgress, 'uploading', 10 + (transferredBytes / file.size) * 85, {
+      chunkNumber: index,
+      chunkPercent: chunkSizeForIndex > 0 ? Math.round((loaded / chunkSizeForIndex) * 100) : 0,
+      uploadedChunks: uploaded.size,
+      totalChunks,
+      bytesPerSecond,
+      etaSeconds: bytesPerSecond > 0 ? Math.max(file.size - transferredBytes, 0) / bytesPerSecond : null,
+      retryAttempt,
+      maxConcurrency,
+    })
+  }
+
   emitProgress(onProgress, 'uploading', 10 + (completedBytes / file.size) * 85, {
     uploadedChunks: uploaded.size,
     totalChunks,
+    maxConcurrency,
   })
 
-  if (uploadState?.status !== 'completed') {
-    for (let index = 0; index < totalChunks; index += 1) {
-      if (uploaded.has(index)) continue
+  if (uploadState?.status !== 'completed' && pendingIndexes.length > 0) {
+    let cursor = 0
+    let fatalError = null
 
-      const start = index * chunkSize
-      const chunk = file.slice(start, Math.min(start + chunkSize, file.size))
-      let lastError
-      let succeeded = false
-      for (let attempt = 0; attempt <= maxChunkRetries; attempt += 1) {
-        const attemptStartedAt = now()
-        if (attempt > 0) {
-          emitProgress(onProgress, 'uploading', 10 + (completedBytes / file.size) * 85, {
-            chunkNumber: index, chunkPercent: 0, uploadedChunks: uploaded.size, totalChunks,
-            retryAttempt: attempt,
-          })
-          await retryDelay(Math.min(1000 * (2 ** (attempt - 1)), 4000))
-        }
-        try {
-          await api.uploadChunk(fileMD5, index, chunk, (event) => {
-            const loaded = Math.min(Number(event?.loaded) || 0, chunk.size)
-            const elapsedSeconds = Math.max((now() - attemptStartedAt) / 1000, 0.001)
-            const bytesPerSecond = loaded / elapsedSeconds
-            const remainingBytes = Math.max(file.size - completedBytes - loaded, 0)
-            emitProgress(onProgress, 'uploading', 10 + ((completedBytes + loaded) / file.size) * 85, {
-              chunkNumber: index,
-              chunkPercent: chunk.size > 0 ? Math.round((loaded / chunk.size) * 100) : 0,
-              uploadedChunks: uploaded.size,
-              totalChunks,
-              bytesPerSecond,
-              etaSeconds: bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : null,
-              retryAttempt: attempt,
+    const worker = async () => {
+      while (!fatalError) {
+        const position = cursor
+        cursor += 1
+        if (position >= pendingIndexes.length) return
+
+        const index = pendingIndexes[position]
+        const start = index * chunkSize
+        const chunk = file.slice(start, Math.min(start + chunkSize, file.size))
+        let lastError
+        let succeeded = false
+
+        for (let attempt = 0; attempt <= maxChunkRetries; attempt += 1) {
+          inflightLoaded.set(index, 0)
+          if (attempt > 0) {
+            emitUploadProgress(index, chunk.size, attempt)
+            await retryDelay(Math.min(1000 * (2 ** (attempt - 1)), 4000))
+          }
+          try {
+            await api.uploadChunk(fileMD5, index, chunk, (event) => {
+              inflightLoaded.set(index, Math.min(Number(event?.loaded) || 0, chunk.size))
+              emitUploadProgress(index, chunk.size, attempt)
             })
-          })
-          succeeded = true
-          break
-        } catch (error) {
-          lastError = error
+            succeeded = true
+            break
+          } catch (error) {
+            lastError = error
+            inflightLoaded.set(index, 0)
+          }
         }
-      }
-      if (!succeeded) {
-        throw new Error(`第 ${index + 1}/${totalChunks} 片上传失败：${formatUploadError(lastError)}；重新选择同一文件可断点续传`, { cause: lastError })
-      }
 
-      completedBytes += chunk.size
-      uploaded.add(index)
-      emitProgress(onProgress, 'uploading', 10 + (completedBytes / file.size) * 85, {
-        chunkNumber: index,
-        uploadedChunks: uploaded.size,
-        totalChunks,
-      })
+        inflightLoaded.delete(index)
+        if (!succeeded) {
+          fatalError = new Error(`第 ${index + 1}/${totalChunks} 片上传失败：${formatUploadError(lastError)}；重新选择同一文件可断点续传`, { cause: lastError })
+          return
+        }
+
+        completedBytes += chunk.size
+        uploaded.add(index)
+        emitUploadProgress(index, chunk.size)
+      }
     }
+
+    await Promise.all(Array.from(
+      { length: Math.min(maxConcurrency, pendingIndexes.length) },
+      () => worker(),
+    ))
+    if (fatalError) throw fatalError
   }
 
   emitProgress(onProgress, 'merging', 95, { totalChunks })
@@ -169,5 +199,3 @@ export async function uploadFileInChunks({
   emitProgress(onProgress, 'completed', 100, { totalChunks })
   return result
 }
-
-

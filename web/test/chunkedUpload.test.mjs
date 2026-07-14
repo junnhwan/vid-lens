@@ -175,3 +175,34 @@ function makeFile(size, name = 'demo.mp4') {
     /正在重试第 4\/24 片（第 1 次）/,
   )
 }
+
+{
+  const { CHUNK_SIZE } = await import('../src/chunkedUpload.js')
+  assert.equal(CHUNK_SIZE, 1024 * 1024, 'Cloudflare uploads should use 1 MiB chunks to stay below request deadlines')
+}
+
+{
+  let active = 0
+  let maxActive = 0
+  const indexes = []
+  const api = {
+    checkUpload: async () => ({ status: 'new', uploaded: [] }),
+    uploadChunk: async (_md5, index, chunk, onProgress) => {
+      indexes.push(index)
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      onProgress?.({ loaded: chunk.size, total: chunk.size })
+      active -= 1
+    },
+    mergeChunks: async () => ({ task_id: 13 }),
+  }
+
+  await uploadFileInChunks({
+    file: makeFile(10), api, chunkSize: 2, maxConcurrency: 3,
+    calculateMD5: async () => '22222222222222222222222222222222',
+  })
+
+  assert.equal(maxActive, 3, 'uploads should use the configured bounded concurrency')
+  assert.deepEqual(indexes.sort((a, b) => a - b), [0, 1, 2, 3, 4])
+}
