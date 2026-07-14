@@ -305,3 +305,10 @@ func TestStrictExperimentConfigRequiresExplicitChunkerAndReranker(t *testing.T) 
 		t.Fatal("strict experiment accepted hidden reranker mode")
 	}
 }
+
+func TestDefaultRAGRetrievalConfigMatchesCurrentChunkerProvenance(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	if cfg.ChunkerStrategy != ChunkerStrategyRecursiveSentence || cfg.ChunkerVersion != RecursiveSentenceChunkerVersion {
+		t.Fatalf("default chunker provenance = %q/%q, want %q/%q", cfg.ChunkerStrategy, cfg.ChunkerVersion, ChunkerStrategyRecursiveSentence, RecursiveSentenceChunkerVersion)
+	}
+}

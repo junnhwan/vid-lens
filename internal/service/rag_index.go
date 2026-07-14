@@ -18,8 +18,12 @@ import (
 )
 
 const (
+	// Fixed-window provenance is retained for historical evaluation artifacts.
 	ChunkerStrategyFixedWindow = "fixed_window"
 	FixedWindowChunkerVersion  = "split-text-v1"
+
+	ChunkerStrategyRecursiveSentence = "recursive_sentence"
+	RecursiveSentenceChunkerVersion  = "recursive-sentence-v1"
 )
 
 type RAGIndexConfig struct {
@@ -66,10 +70,10 @@ type RAGIndexResult struct {
 
 func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cfg RAGIndexConfig) *RAGIndexService {
 	if strings.TrimSpace(cfg.ChunkerStrategy) == "" {
-		cfg.ChunkerStrategy = ChunkerStrategyFixedWindow
+		cfg.ChunkerStrategy = ChunkerStrategyRecursiveSentence
 	}
 	if strings.TrimSpace(cfg.ChunkerVersion) == "" {
-		cfg.ChunkerVersion = FixedWindowChunkerVersion
+		cfg.ChunkerVersion = RecursiveSentenceChunkerVersion
 	}
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = 800

@@ -87,22 +87,22 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildTaskIndex() error = %v", err)
 	}
-	if result.Chunks != 4 {
-		t.Fatalf("result.Chunks = %d, want 4", result.Chunks)
+	if result.Chunks != 3 {
+		t.Fatalf("result.Chunks = %d, want 3", result.Chunks)
 	}
-	if len(embedding.inputs) != 4 {
-		t.Fatalf("embedding calls = %d, want 4", len(embedding.inputs))
+	if len(embedding.inputs) != 3 {
+		t.Fatalf("embedding calls = %d, want 3", len(embedding.inputs))
 	}
-	if len(store.upserts) != 4 {
-		t.Fatalf("vector upserts = %d, want 4", len(store.upserts))
+	if len(store.upserts) != 3 {
+		t.Fatalf("vector upserts = %d, want 3", len(store.upserts))
 	}
 
 	chunks, err := repos.VideoChunk.ListByTaskID(7, task.ID, "text-embedding-3-small")
 	if err != nil {
 		t.Fatalf("ListByTaskID() error = %v", err)
 	}
-	if len(chunks) != 4 {
-		t.Fatalf("stored chunks = %d, want 4", len(chunks))
+	if len(chunks) != 3 {
+		t.Fatalf("stored chunks = %d, want 3", len(chunks))
 	}
 	if chunks[0].VectorID == "" || store.upserts[0].VectorID != chunks[0].VectorID {
 		t.Fatalf("vector id mismatch: chunk=%q vector=%q", chunks[0].VectorID, store.upserts[0].VectorID)
@@ -118,10 +118,10 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	if index == nil {
 		t.Fatal("expected rag index status row")
 	}
-	if index.Status != model.RAGIndexStatusIndexed || index.ChunkCount != 4 || index.EmbeddingDim != 3 {
-		t.Fatalf("rag index = %+v, want indexed with 4 chunks and dim 3", index)
+	if index.Status != model.RAGIndexStatusIndexed || index.ChunkCount != 3 || index.EmbeddingDim != 3 {
+		t.Fatalf("rag index = %+v, want indexed with 3 chunks and dim 3", index)
 	}
-	if index.ChunkerStrategy != ChunkerStrategyFixedWindow || index.ChunkerVersion != FixedWindowChunkerVersion || index.ChunkSize != 10 || index.ChunkOverlap != 2 {
+	if index.ChunkerStrategy != ChunkerStrategyRecursiveSentence || index.ChunkerVersion != RecursiveSentenceChunkerVersion || index.ChunkSize != 10 || index.ChunkOverlap != 2 {
 		t.Fatalf("rag index chunker provenance = %+v", index)
 	}
 	wantManifest, err := ComputeChunkManifestSHA256(chunks)

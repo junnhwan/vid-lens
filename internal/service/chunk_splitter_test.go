@@ -14,11 +14,11 @@ func TestSplitTextIntoChunksReturnsSingleChunkForShortText(t *testing.T) {
 
 func TestSplitTextIntoChunksUsesOverlap(t *testing.T) {
 	chunks := SplitTextIntoChunks("abcdefghijklmnopqrstuvwxyz", 10, 2)
-	if len(chunks) != 4 {
-		t.Fatalf("len(chunks) = %d, want 4: %+v", len(chunks), chunks)
+	if len(chunks) != 3 {
+		t.Fatalf("len(chunks) = %d, want 3 without a duplicate overlap-only tail: %+v", len(chunks), chunks)
 	}
 
-	want := []string{"abcdefghij", "ijklmnopqr", "qrstuvwxyz", "yz"}
+	want := []string{"abcdefghij", "ijklmnopqr", "qrstuvwxyz"}
 	for i, chunk := range chunks {
 		if chunk.Index != i {
 			t.Fatalf("chunk[%d].Index = %d", i, chunk.Index)
@@ -64,5 +64,38 @@ func TestSplitTextIntoChunksPrefersSemanticBoundary(t *testing.T) {
 	}
 	if joined != text {
 		t.Fatalf("joined chunks = %q, want %q", joined, text)
+	}
+}
+
+func TestSplitTextIntoChunksOverlapsWholeSentencesWithoutFragmentedStarts(t *testing.T) {
+	chunks := SplitTextIntoChunks("甲甲甲。乙乙乙。丙丙丙。丁丁丁。", 8, 4)
+	want := []string{
+		"甲甲甲。乙乙乙。",
+		"乙乙乙。丙丙丙。",
+		"丙丙丙。丁丁丁。",
+	}
+	if len(chunks) != len(want) {
+		t.Fatalf("len(chunks) = %d, want %d: %+v", len(chunks), len(want), chunks)
+	}
+	for i, chunk := range chunks {
+		if chunk.Index != i {
+			t.Fatalf("chunk[%d].Index = %d, want %d", i, chunk.Index, i)
+		}
+		if chunk.Content != want[i] {
+			t.Fatalf("chunk[%d].Content = %q, want %q", i, chunk.Content, want[i])
+		}
+	}
+}
+
+func TestSplitTextIntoChunksRecursivelySplitsOversizedSentenceAtClauseBoundaries(t *testing.T) {
+	chunks := SplitTextIntoChunks("甲甲甲甲，乙乙乙乙，丙丙丙丙。", 6, 0)
+	want := []string{"甲甲甲甲，", "乙乙乙乙，", "丙丙丙丙。"}
+	if len(chunks) != len(want) {
+		t.Fatalf("len(chunks) = %d, want %d: %+v", len(chunks), len(want), chunks)
+	}
+	for i, chunk := range chunks {
+		if chunk.Content != want[i] {
+			t.Fatalf("chunk[%d].Content = %q, want %q", i, chunk.Content, want[i])
+		}
 	}
 }

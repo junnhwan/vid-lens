@@ -53,7 +53,7 @@ func DefaultRAGRetrievalConfig() RAGRetrievalConfig {
 		QueryMode: QueryModeRewrite, RewriteQueries: 3,
 		TopK: 5, CandidateK: 20, RRFK: defaultRRFK,
 		NeighborRadius: 1, MaxContextChars: 4000,
-		ChunkerStrategy: ChunkerStrategySemanticBoundary, ChunkerVersion: "semantic-v1",
+		ChunkerStrategy: ChunkerStrategyRecursiveSentence, ChunkerVersion: RecursiveSentenceChunkerVersion,
 		ChunkSize: 800, ChunkOverlap: 100,
 		RerankerMode: RerankerModeDeterministic, RerankerVersion: "deterministic-v1",
 	}
