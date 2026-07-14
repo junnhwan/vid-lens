@@ -62,6 +62,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigModal.vue'))
 
 import api from './api'
+import { formatUploadError, uploadFileInChunks } from './chunkedUpload.js'
 import { buildStoredUser } from './authSession.js'
 import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
 import { isPollingSuccessful, shouldStopPolling } from './taskPollingPolicy.js'
@@ -148,19 +149,29 @@ const handleFileUpload = async (file) => {
     return
   }
   uploading.value = true
-  uploadMsg.value = '正在上传...'
+  uploadMsg.value = '正在计算文件指纹...'
   uploadProgress.value = 0
   try {
-    await api.uploadFile(file, (evt) => {
-      if (evt.total) {
-        uploadProgress.value = Math.round((evt.loaded / evt.total) * 100)
-      }
+    await uploadFileInChunks({
+      file,
+      api,
+      onProgress: ({ stage, percent, uploadedChunks = 0, totalChunks = 0 }) => {
+        uploadProgress.value = percent
+        if (stage === 'hashing') uploadMsg.value = '正在计算文件指纹...'
+        if (stage === 'uploading') {
+          uploadMsg.value = totalChunks > 0
+            ? `正在上传分片（已完成 ${uploadedChunks}/${totalChunks}）...`
+            : '正在上传分片...'
+        }
+        if (stage === 'merging') uploadMsg.value = '正在合并视频分片...'
+        if (stage === 'completed') uploadMsg.value = '上传完成'
+      },
     })
     showToast('上传成功')
     uploadProgress.value = 100
     await fetchTasks()
   } catch (err) {
-    showToast(err.message || '上传失败', true)
+    showToast(formatUploadError(err), true)
   } finally {
     uploading.value = false
     setTimeout(() => { uploadProgress.value = -1 }, 800)

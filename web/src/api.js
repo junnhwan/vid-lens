@@ -76,13 +76,14 @@ export default {
 
   // 分片上传
   checkUpload: (fileMD5) => api.get('/media/check-upload', { params: { file_md5: fileMD5 } }),
-  uploadChunk: (fileMD5, chunkNumber, chunkData) => {
+  uploadChunk: (fileMD5, chunkNumber, chunkData, onProgress) => {
     const form = new FormData()
     form.append('file_md5', fileMD5)
     form.append('chunk_number', chunkNumber)
     form.append('chunk', chunkData)
     return api.post('/media/upload-chunk', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress,
     })
   },
   mergeChunks: (fileMD5, filename, totalChunks) =>
