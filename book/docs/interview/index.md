@@ -1,33 +1,23 @@
-# 🎯 面试题总览
+# 面试准备总览
 
-VidLens 是一个 **AI 驱动的视频内容理解平台**：上传视频或提交 URL → 异步下载 → FFmpeg 提取音频 → ASR 转写 → LLM 摘要 → RAG 问答。
+> 不要从侧边栏第一项一路背到最后。按“先会讲项目，再守住四条简历，最后补专项和八股”的顺序准备。
 
-本章基于项目真实源码，覆盖 **10 大核心模块**，每模块 **10 道面试题**，共 **100+ 道**。
+## 四阶段复习路线
 
-如果时间有限，先看 [面试作战手册](/interview/playbook/)：那里把 Kafka、RAG、BYOK、URL 下载安全、重试恢复和 AI 编程方法写成可以直接说出口的回答稿。
+| 阶段 | 目标 | 页面 |
+|---|---|---|
+| 1. 会讲 | 形成 2 分钟项目介绍，明确项目边界 | [面试作战手册](/interview/playbook/)、[项目定位](/interview/resume-grill/overview/) |
+| 2. 守简历 | 每条简历能连续回答实现、故障和取舍 | [四条主线速背](/interview/resume-grill/core-capabilities/) |
+| 3. 抗追问 | 补可靠性、Debug、系统设计和中间件细节 | [简历拷打总览](/interview/resume-grill/) |
+| 4. 查缺口 | 按模块补 Go、Kafka、Redis、MySQL、RAG 基础 | 使用侧边栏“后端模块面试题”文件夹 |
 
-如果你要准备“面试官盯着简历逐句追问”的压力面，直接看 [简历拷打](/interview/resume-grill/)：它按当前简历项目能力拆成项目定位、Kafka、Redis、上传存储、RAG、可靠性设计、MySQL/GORM、URL 安全部署、Debug 复盘、系统设计 10 个方向，每题都有简答、折叠深答、追问、证据路径和不能夸大的边界。
+## 简历四条主线
 
-## 模块列表
+1. [Kafka 异步调度、任务状态与失败重试](/interview/resume-grill/resume-core/kafka-retry/)
+2. [长视频分段 ASR 与片段复用](/interview/resume-grill/resume-core/asr-chunks/)
+3. [分片上传、断点续传与 MinIO](/interview/resume-grill/resume-core/chunk-upload/)
+4. [Milvus + BM25 + RRF 混合检索](/interview/resume-grill/resume-core/hybrid-rag/)
 
-| # | 模块 | 核心考点 |
-|---|------|----------|
-| 0 | [面试作战手册](/interview/playbook/) | 口语化项目回答、限制边界、真实 bug 复盘 |
-| 0.5 | [简历拷打](/interview/resume-grill/) | 简历逐句追问、短答/深答、技术对比、系统设计压力面 |
-| 1 | [架构与启动流程](/interview/architecture/) | 分层架构、依赖注入、中间件链、Gin 路由 |
-| 2 | [AI 策略层](/interview/ai-strategy/) | 策略模式、工厂模式、装饰器模式、接口隔离 |
-| 3 | [Kafka 异步处理](/interview/kafka-async/) | 生产者/消费者、幂等性、分布式锁、重试退避 |
-| 4 | [分布式锁](/interview/distributed-lock/) | Redis SetNX、UUID owner、WatchDog、Lua 脚本 |
-| 5 | [令牌桶限流](/interview/rate-limiting/) | Redis Lua 令牌桶、Fail-Open、按路由差异化 |
-| 6 | [RAG 检索管道](/interview/rag-pipeline/) | 向量检索、BM25、RRF 融合、SSE 流式输出 |
-| 7 | [媒体上传与存储](/interview/media-upload/) | 分片上传、MD5 去重、MinIO Compose、级联删除 |
-| 8 | [数据模型设计](/interview/data-model/) | 状态机、垂直拆分、任务-作业双表、软删除 |
-| 9 | [Repository 层](/interview/repository/) | 事务管理、条件更新、BM25 纯 Go 实现 |
-| 10 | [安全体系](/interview/security/) | JWT 认证、AES-GCM 加密、SSRF 防护、URL 校验 |
+## 使用方法
 
-## 使用建议
-
-1. **先读源码走读** → 建立全局认知
-2. **再刷面试题** → 每题先自己回答，再看参考答案
-3. **用追问链深挖** → 面试官最爱问的"为什么"和"如果...怎么办"
-4. **最后背八股速查** → 临场快速回忆
+每次只练一条主线：先遮住答案口述 30 秒，再展开深答；最后只看“当前边界”，检查有没有把未来规划说成已实现。源码证据不是让你背行号，而是保证回答能落回真实实现。
