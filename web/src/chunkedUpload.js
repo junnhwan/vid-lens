@@ -29,6 +29,10 @@ export function formatUploadError(error) {
   if (error?.response?.status === 413 || error?.status === 413) {
     return '上传请求过大，请使用分片上传后重试'
   }
+  const serverMessage = error?.response?.data?.message || error?.response?.data?.msg
+  if (typeof serverMessage === 'string' && serverMessage.trim()) {
+    return serverMessage
+  }
   if (error?.code === 'ECONNABORTED') {
     return '上传超时，请重新选择同一文件继续上传'
   }
@@ -41,12 +45,44 @@ export function formatUploadError(error) {
   return '上传失败，请稍后重试'
 }
 
+export function formatUploadProgressMessage({
+  chunkNumber,
+  chunkPercent = 0,
+  uploadedChunks = 0,
+  totalChunks = 0,
+  bytesPerSecond = 0,
+  etaSeconds,
+  retryAttempt = 0,
+} = {}) {
+  if (!totalChunks) return '正在上传分片...'
+  if (!Number.isInteger(chunkNumber)) return `正在上传分片（已完成 ${uploadedChunks}/${totalChunks}）...`
+
+  const prefix = retryAttempt > 0
+    ? `正在重试第 ${chunkNumber + 1}/${totalChunks} 片（第 ${retryAttempt} 次）`
+    : `正在上传第 ${chunkNumber + 1}/${totalChunks} 片（当前片 ${chunkPercent}%）`
+  const details = [`已完成 ${uploadedChunks}/${totalChunks}`]
+  if (bytesPerSecond > 0) {
+    details.push(bytesPerSecond >= 1024 * 1024
+      ? `${(bytesPerSecond / 1024 / 1024).toFixed(1)} MiB/s`
+      : `${Math.round(bytesPerSecond / 1024)} KiB/s`)
+  }
+  if (Number.isFinite(etaSeconds) && etaSeconds >= 0) {
+    details.push(etaSeconds < 60
+      ? `预计剩余 ${Math.max(1, Math.ceil(etaSeconds))} 秒`
+      : `预计剩余 ${Math.ceil(etaSeconds / 60)} 分钟`)
+  }
+  return `${prefix} · ${details.join(' · ')}`
+}
+
 export async function uploadFileInChunks({
   file,
   api,
   onProgress,
   calculateMD5 = calculateFileMD5,
   chunkSize = CHUNK_SIZE,
+  maxChunkRetries = 2,
+  retryDelay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = () => Date.now(),
 }) {
   if (!file || file.size <= 0) throw new Error('文件不能为空')
   if (!api) throw new Error('上传 API 不可用')
@@ -81,17 +117,41 @@ export async function uploadFileInChunks({
 
       const start = index * chunkSize
       const chunk = file.slice(start, Math.min(start + chunkSize, file.size))
-      try {
-        await api.uploadChunk(fileMD5, index, chunk, (event) => {
-          const loaded = Math.min(Number(event?.loaded) || 0, chunk.size)
-          emitProgress(onProgress, 'uploading', 10 + ((completedBytes + loaded) / file.size) * 85, {
-            chunkNumber: index,
-            uploadedChunks: uploaded.size,
-            totalChunks,
+      let lastError
+      let succeeded = false
+      for (let attempt = 0; attempt <= maxChunkRetries; attempt += 1) {
+        const attemptStartedAt = now()
+        if (attempt > 0) {
+          emitProgress(onProgress, 'uploading', 10 + (completedBytes / file.size) * 85, {
+            chunkNumber: index, chunkPercent: 0, uploadedChunks: uploaded.size, totalChunks,
+            retryAttempt: attempt,
           })
-        })
-      } catch (error) {
-        throw new Error(`第 ${index + 1}/${totalChunks} 片上传失败：${formatUploadError(error)}`, { cause: error })
+          await retryDelay(Math.min(1000 * (2 ** (attempt - 1)), 4000))
+        }
+        try {
+          await api.uploadChunk(fileMD5, index, chunk, (event) => {
+            const loaded = Math.min(Number(event?.loaded) || 0, chunk.size)
+            const elapsedSeconds = Math.max((now() - attemptStartedAt) / 1000, 0.001)
+            const bytesPerSecond = loaded / elapsedSeconds
+            const remainingBytes = Math.max(file.size - completedBytes - loaded, 0)
+            emitProgress(onProgress, 'uploading', 10 + ((completedBytes + loaded) / file.size) * 85, {
+              chunkNumber: index,
+              chunkPercent: chunk.size > 0 ? Math.round((loaded / chunk.size) * 100) : 0,
+              uploadedChunks: uploaded.size,
+              totalChunks,
+              bytesPerSecond,
+              etaSeconds: bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : null,
+              retryAttempt: attempt,
+            })
+          })
+          succeeded = true
+          break
+        } catch (error) {
+          lastError = error
+        }
+      }
+      if (!succeeded) {
+        throw new Error(`第 ${index + 1}/${totalChunks} 片上传失败：${formatUploadError(lastError)}；重新选择同一文件可断点续传`, { cause: lastError })
       }
 
       completedBytes += chunk.size
