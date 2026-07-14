@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"gopkg.in/yaml.v3"
+
+	rageval "vid-lens/internal/eval"
 	"vid-lens/internal/service"
 )
 
@@ -257,5 +263,303 @@ func TestRenderMarkdownIncludesAgentAnswerEvaluation(t *testing.T) {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("renderMarkdownWithAgentAnswerEval() missing %q:\n%s", want, markdown)
 		}
+	}
+}
+
+func TestParseEvalFlagsIncludesStrictArtifactAndRegistryOptions(t *testing.T) {
+	opts, err := parseEvalFlags([]string{
+		"--strict", "--dataset-version", "rag-v1", "--split", "dev",
+		"--manifest", "manifest.yaml", "--cases", "dev.yaml",
+		"--sealed-test-token", "secret", "--output-dir", "artifacts",
+		"--experiment-registry", "registry.yaml", "--experiment-id", "exp-1", "--variant-id", "hybrid",
+		"--corpus-hash", strings.Repeat("a", 64), "--chunk-manifest-hash", strings.Repeat("b", 64),
+		"--vector-artifact-hash", strings.Repeat("c", 64), "--config-hash", strings.Repeat("d", 64),
+	})
+	if err != nil {
+		t.Fatalf("parseEvalFlags() error = %v", err)
+	}
+	if !opts.strict || opts.datasetVersion != "rag-v1" || opts.split != rageval.SplitDev || opts.outputDir != "artifacts" || opts.experimentID != "exp-1" || opts.variantID != "hybrid" {
+		t.Fatalf("opts = %+v", opts)
+	}
+	if opts.manifestPath != "manifest.yaml" || opts.casesPath != "dev.yaml" {
+		t.Fatalf("physical split paths = manifest %q cases %q", opts.manifestPath, opts.casesPath)
+	}
+}
+
+func TestParseEvalFlagsAllowsSnapshotOnlyWithoutPreregisteredHashes(t *testing.T) {
+	opts, err := parseEvalFlags([]string{
+		"--strict", "--snapshot-only", "--dataset-version", "rag-v1", "--split", "dev",
+		"--retrieval-config", "candidate.yaml", "--output-dir", "artifacts",
+	})
+	if err != nil {
+		t.Fatalf("parseEvalFlags() error = %v", err)
+	}
+	if !opts.snapshotOnly || opts.experimentID != "" || opts.corpusSHA256 != "" {
+		t.Fatalf("snapshot opts = %+v", opts)
+	}
+}
+
+func TestParseEvalFlagsRequiresDatasetVersionInStrictMode(t *testing.T) {
+	_, err := parseEvalFlags([]string{"--strict"})
+	if err == nil || !strings.Contains(err.Error(), "dataset-version") {
+		t.Fatalf("parseEvalFlags() error = %v, want explicit dataset-version error", err)
+	}
+}
+
+func TestLoadSnapshotRetrievalConfigRequiresExplicitStrictProvenance(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "snapshot.yaml")
+	cfg := service.DefaultRAGRetrievalConfig()
+	cfg.ChunkerStrategy = service.ChunkerStrategyFixedWindow
+	cfg.ChunkerVersion = service.FixedWindowChunkerVersion
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadSnapshotRetrievalConfig(path)
+	if err != nil {
+		t.Fatalf("loadSnapshotRetrievalConfig() error = %v", err)
+	}
+	if got.ChunkerStrategy != service.ChunkerStrategyFixedWindow || got.ChunkSize != cfg.ChunkSize {
+		t.Fatalf("config = %+v", got)
+	}
+
+	cfg.ChunkerVersion = ""
+	raw, _ = yaml.Marshal(cfg)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSnapshotRetrievalConfig(path); err == nil || !strings.Contains(err.Error(), "chunker") {
+		t.Fatalf("error = %v, want strict chunker provenance error", err)
+	}
+}
+
+func TestLoadCasesKeepsLegacyBaselineCompatibility(t *testing.T) {
+	cases, err := loadCases("../../docs/eval/rag-quant-cases.yaml")
+	if err != nil {
+		t.Fatalf("loadCases() legacy error = %v", err)
+	}
+	if len(cases) == 0 || cases[0].TaskID == 0 || len(cases[0].ExpectedChunkKeywords) == 0 {
+		t.Fatalf("legacy cases not preserved: first=%+v count=%d", cases[0], len(cases))
+	}
+}
+
+func TestRunStrictValidateOnlyChecksDatasetAndRegistryWithoutRuntimeServices(t *testing.T) {
+	datasetPath, registryPath := writeStrictCLIInputs(t)
+	opts := strictCLIOptions(datasetPath, registryPath)
+	opts.validateOnly = true
+	opts.configPath = filepath.Join(t.TempDir(), "missing-config.yaml")
+
+	if err := run(t.Context(), opts); err != nil {
+		t.Fatalf("run() strict validate-only error = %v", err)
+	}
+}
+
+func TestRunStrictValidateOnlyLoadsPhysicalDevSplit(t *testing.T) {
+	combinedPath, registryPath := writeStrictCLIInputs(t)
+	combinedRaw, err := os.ReadFile(combinedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataset, err := rageval.LoadDataset(combinedRaw, rageval.LoadOptions{Mode: rageval.LoadModeStrict, DatasetVersion: "rag-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentHash, err := rageval.ComputeSplitContentSHA256(dataset, rageval.SplitDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := dataset.Manifest.Splits[rageval.SplitDev]
+	definition.ContentSHA256 = contentHash
+	dataset.Manifest.Splits[rageval.SplitDev] = definition
+	manifestHash, err := rageval.ComputeManifestSHA256(dataset.DatasetVersion, dataset.Manifest.Splits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataset.Manifest.SHA256 = manifestHash
+	manifestRaw, err := rageval.MarshalDatasetManifestYAML(dataset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devRaw, err := rageval.MarshalSplitDatasetYAML(dataset, rageval.SplitDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "manifest.yaml")
+	devPath := filepath.Join(dir, "dev.yaml")
+	if err := os.WriteFile(manifestPath, manifestRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devPath, devRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := strictCLIOptions(devPath, registryPath)
+	opts.manifestPath = manifestPath
+	opts.validateOnly = true
+	opts.configPath = filepath.Join(t.TempDir(), "missing-config.yaml")
+	if err := run(t.Context(), opts); err != nil {
+		t.Fatalf("run() physical strict dev validate-only error = %v", err)
+	}
+}
+
+func TestRunStrictDevIsBlockedAfterSameDatasetTestWasAccessed(t *testing.T) {
+	datasetPath, registryPath := writeStrictCLIInputs(t)
+	opts := strictCLIOptions(datasetPath, registryPath)
+	opts.validateOnly = true
+	opts.sealedAccessRegistry = filepath.Join(t.TempDir(), "sealed-access.jsonl")
+	if err := rageval.AppendSealedAccess(opts.sealedAccessRegistry, rageval.SealedAccessEvent{
+		OccurredAt: time.Now(), DatasetVersion: "rag-v1", RunID: "test-run", ExperimentID: "exp-final", Commit: "abc123",
+		DatasetSHA256: strings.Repeat("e", 64), TestContentSHA256: strings.Repeat("f", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := run(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "new dataset version") {
+		t.Fatalf("run() error = %v, want sealed tuning guard", err)
+	}
+}
+
+func TestRunStrictExecutionRequiresProductionRetrievalConfigs(t *testing.T) {
+	datasetPath, registryPath := writeStrictCLIInputs(t)
+	opts := strictCLIOptions(datasetPath, registryPath)
+
+	err := run(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "--retrieval-config") {
+		t.Fatalf("run() error = %v, want production retrieval config error", err)
+	}
+}
+
+func strictCLIOptions(datasetPath, registryPath string) evalOptions {
+	return evalOptions{
+		strict: true, datasetVersion: "rag-v1", split: rageval.SplitDev,
+		casesPath: datasetPath, experimentRegistry: registryPath,
+		experimentID: "exp-1", variantID: "hybrid", commit: "abc123",
+		configSHA256: strings.Repeat("a", 64), corpusSHA256: strings.Repeat("b", 64),
+		chunkManifestSHA256: strings.Repeat("c", 64), vectorArtifactSHA256: strings.Repeat("d", 64),
+		sealedAccessRegistry: filepath.Join(filepath.Dir(datasetPath), "sealed-access.jsonl"),
+		outputDir:            filepath.Join(filepath.Dir(datasetPath), "artifacts"),
+	}
+}
+
+func writeStrictCLIInputs(t *testing.T) (string, string) {
+	t.Helper()
+	dataset := rageval.Dataset{
+		SchemaVersion: "1", DatasetVersion: "rag-v1",
+		Manifest: rageval.SplitManifest{Splits: map[rageval.Split]rageval.SplitDefinition{
+			rageval.SplitTrain: {}, rageval.SplitDev: {}, rageval.SplitTest: {},
+		}},
+	}
+	if err := rageval.SealSplit(&dataset, rageval.SplitTest, "test-token"); err != nil {
+		t.Fatal(err)
+	}
+	manifestHash, err := rageval.ComputeManifestSHA256(dataset.DatasetVersion, dataset.Manifest.Splits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataset.Manifest.SHA256 = manifestHash
+	raw, err := rageval.MarshalDatasetYAML(dataset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	datasetPath := filepath.Join(dir, "dataset.yaml")
+	if err := os.WriteFile(datasetPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(dir, "registry.yaml")
+	registry := `registry_version: "1"
+experiments:
+  - experiment_id: exp-1
+    dataset_version: rag-v1
+    status: preregistered
+    baseline_variant: vector-only
+    baseline_config_sha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    frozen_evidence:
+      corpus_sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      chunk_manifest_sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      vector_artifact_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    primary_metric: ndcg_at_k
+    direction: higher
+    minimum_effect: 0.01
+    bootstrap: {iterations: 1000, confidence_level: 0.95, seed: 7}
+    guardrails:
+      - {metric: answerability_f1, direction: higher, max_regression: 0.01}
+    candidates:
+      - variant_id: hybrid
+        commit: abc123
+        config_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`
+	if err := os.WriteFile(registryPath, []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return datasetPath, registryPath
+}
+
+func TestLoadRetrievalConfigsEnforcesHashAndSingleVariable(t *testing.T) {
+	base := service.DefaultRAGRetrievalConfig()
+	base.Name = "base"
+	base.QueryMode = service.QueryModeOriginal
+	base.RewriteQueries = 1
+	base.NeighborRadius = 0
+	candidate := base
+	candidate.Name = "candidate"
+	candidate.EnableBM25 = false
+	dir := t.TempDir()
+	basePath := filepath.Join(dir, "base.yaml")
+	candidatePath := filepath.Join(dir, "candidate.yaml")
+	baseRaw, _ := yaml.Marshal(base)
+	candidateRaw, _ := yaml.Marshal(candidate)
+	if err := os.WriteFile(basePath, baseRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(candidatePath, candidateRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	baseSum := sha256.Sum256(baseRaw)
+	candidateSum := sha256.Sum256(candidateRaw)
+	gotBase, gotCandidate, factor, err := loadRetrievalConfigs(basePath, candidatePath, hex.EncodeToString(baseSum[:]), hex.EncodeToString(candidateSum[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if factor != "enable_bm25" || gotCandidate.EnableBM25 || gotBase.EnableBM25 == gotCandidate.EnableBM25 {
+		t.Fatalf("factor=%q base=%+v candidate=%+v", factor, gotBase, gotCandidate)
+	}
+	if _, _, _, err := loadRetrievalConfigs(basePath, candidatePath, strings.Repeat("f", 64), hex.EncodeToString(candidateSum[:])); err == nil || !strings.Contains(err.Error(), "baseline retrieval config hash mismatch") {
+		t.Fatalf("baseline mismatch error = %v", err)
+	}
+}
+
+func TestConfiguredRerankerAndEvidenceUseStrictConfigAndFullContext(t *testing.T) {
+	none, err := configuredReranker(service.RerankerModeNone)
+	if err != nil || none != nil {
+		t.Fatalf("none reranker = %#v, err=%v", none, err)
+	}
+	deterministic, err := configuredReranker(service.RerankerModeDeterministic)
+	if err != nil || deterministic == nil {
+		t.Fatalf("deterministic reranker = %#v, err=%v", deterministic, err)
+	}
+	if _, err := configuredReranker("unknown"); err == nil {
+		t.Fatal("unsupported reranker error = nil")
+	}
+	chunk := service.RetrievedChunk{EvidenceID: "e1", AnchorContent: "anchor", Content: "expanded full context"}
+	evidence := chunkEvidenceFromCitation(chunk, "video-a")
+	if evidence.Text != "expanded full context" || evidence.ContextID != "e1" {
+		t.Fatalf("evidence = %+v", evidence)
+	}
+}
+
+func TestStrictRetrievalMetricConfigIsValid(t *testing.T) {
+	cfg := strictRetrievalMetricConfig(5)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("strict retrieval metric config must be runnable: %v", err)
+	}
+	if cfg.K != 5 {
+		t.Fatalf("K = %d, want 5", cfg.K)
 	}
 }

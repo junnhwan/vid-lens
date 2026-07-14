@@ -9,20 +9,21 @@ import (
 
 // Config 全局配置结构体
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Redis     RedisConfig     `yaml:"redis"`
-	MinIO     MinIOConfig     `yaml:"minio"`
-	Kafka     KafkaConfig     `yaml:"kafka"`
-	AI        AIConfig        `yaml:"ai"`
-	Tools     ToolsConfig     `yaml:"tools"`
-	JWT       JWTConfig       `yaml:"jwt"`
-	Security  SecurityConfig  `yaml:"security"`
-	Upload    UploadConfig    `yaml:"upload"`
-	TaskRetry TaskRetryConfig `yaml:"task_retry"`
-	RateLimit RateLimitConfig `yaml:"ratelimit"`
-	RAG       RAGConfig       `yaml:"rag"`
-	Milvus    MilvusConfig    `yaml:"milvus"`
+	Server       ServerConfig       `yaml:"server"`
+	Database     DatabaseConfig     `yaml:"database"`
+	Redis        RedisConfig        `yaml:"redis"`
+	MinIO        MinIOConfig        `yaml:"minio"`
+	Kafka        KafkaConfig        `yaml:"kafka"`
+	AI           AIConfig           `yaml:"ai"`
+	Tools        ToolsConfig        `yaml:"tools"`
+	JWT          JWTConfig          `yaml:"jwt"`
+	Security     SecurityConfig     `yaml:"security"`
+	Upload       UploadConfig       `yaml:"upload"`
+	TaskRetry    TaskRetryConfig    `yaml:"task_retry"`
+	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
+	RAG          RAGConfig          `yaml:"rag"`
+	Milvus       MilvusConfig       `yaml:"milvus"`
+	AIGovernance AIGovernanceConfig `yaml:"-"`
 }
 
 type ServerConfig struct {
@@ -156,9 +157,13 @@ func Load(path string) (*Config, error) {
 
 	expanded := os.ExpandEnv(string(data))
 
-	var cfg Config
+	cfg := Config{AIGovernance: defaultAIGovernanceConfig()}
 	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+
+	if err := applyAIGovernanceEnv(&cfg.AIGovernance); err != nil {
+		return nil, fmt.Errorf("AI 治理配置无效: %w", err)
 	}
 
 	return &cfg, nil

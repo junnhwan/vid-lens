@@ -357,7 +357,12 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if err := s.repo.TaskJob.UpsertQueued(task, model.TaskJobTypeAnalyze, model.TaskStageSummarizing, task.MaxRetries); err != nil {
 		return err
 	}
-	if err := s.mq.EnqueueAnalyze(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
+	budgetID, err := s.repo.EnsureTaskJobRetryBudget(task.ID, model.TaskJobTypeAnalyze, time.Now())
+	if err != nil {
+		return fmt.Errorf("初始化分析重试预算失败: %w", err)
+	}
+	enqueueCtx := mq.ContextWithRetryBudgetID(mq.ContextWithTraceID(ctx, task.TraceID), budgetID)
+	if err := s.mq.EnqueueAnalyze(enqueueCtx, taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		_ = s.repo.TaskJob.RecordTerminalFailure(taskID, model.TaskJobTypeAnalyze, model.TaskStageSummarizing, "enqueue_failed", "消息投递失败", task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
 		return fmt.Errorf("系统繁忙，请稍后重试")
@@ -399,7 +404,12 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	if err := s.repo.TaskJob.UpsertQueued(task, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, task.MaxRetries); err != nil {
 		return err
 	}
-	if err := s.mq.EnqueueTranscribe(mq.ContextWithTraceID(ctx, task.TraceID), taskID, task.FileMD5); err != nil {
+	budgetID, err := s.repo.EnsureTaskJobRetryBudget(task.ID, model.TaskJobTypeTranscribe, time.Now())
+	if err != nil {
+		return fmt.Errorf("初始化转写重试预算失败: %w", err)
+	}
+	enqueueCtx := mq.ContextWithRetryBudgetID(mq.ContextWithTraceID(ctx, task.TraceID), budgetID)
+	if err := s.mq.EnqueueTranscribe(enqueueCtx, taskID, task.FileMD5); err != nil {
 		s.repo.Task.UpdateStatusAndStageIf(taskID, []int8{model.TaskStatusQueued}, model.TaskStatusPending, task.Stage, "消息投递失败")
 		_ = s.repo.TaskJob.RecordTerminalFailure(taskID, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, "enqueue_failed", "消息投递失败", task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
 		return fmt.Errorf("系统繁忙，请稍后重试")

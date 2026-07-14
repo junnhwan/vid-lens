@@ -3,13 +3,16 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"vid-lens/internal/pkg/response"
+	"vid-lens/internal/observability"
 )
 
 // RateLimiter 基于 Redis + Lua 的令牌桶限流器
@@ -98,11 +101,35 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int)
 		[]string{fmt.Sprintf("rate_limiter:%s", key)},
 		rate, capacity, now,
 	).Int()
+	scope := rateLimitScope(key)
 	if err != nil {
-		log.Printf("[ratelimit] Redis 异常，fail-open 放行 key=%s err=%v", key, err)
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.IncRateLimit(scope, "fail_open")
+		}
+		observability.Log(ctx, slog.Default(), slog.LevelError, "rate limiter redis failed open",
+			slog.String("scope", scope), slog.String("error", observability.SafeError(err)))
 		return true
 	}
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		if result == 1 {
+			metrics.IncRateLimit(scope, "allowed")
+		} else {
+			metrics.IncRateLimit(scope, "rejected")
+		}
+	}
 	return result == 1
+}
+
+func rateLimitScope(key string) string {
+	lower := strings.ToLower(key)
+	switch {
+	case strings.Contains(lower, "/chat"), strings.Contains(lower, "/analyze"), strings.Contains(lower, "/transcribe"), strings.Contains(lower, "rag-index"):
+		return "ai"
+	case strings.Contains(lower, "upload"):
+		return "upload"
+	default:
+		return "default"
+	}
 }
 
 // RateLimit Gin 中间件
@@ -123,7 +150,8 @@ func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
 
 		capacity, rate := limiter.configFor(path)
 		if !limiter.Allow(c.Request.Context(), key, capacity, rate) {
-			response.TooManyRequests(c, "当前请求过多，请稍后再试")
+			c.Header("Retry-After", strconv.Itoa(1))
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "RATE_LIMITED", "message": "当前请求过多，请稍后再试", "scope": rateLimitScope(key), "retry_after": 1})
 			c.Abort()
 			return
 		}

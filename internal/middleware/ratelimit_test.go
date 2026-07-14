@@ -2,6 +2,10 @@ package middleware
 
 import (
 	"context"
+	"github.com/gin-gonic/gin"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,4 +126,18 @@ func TestRateLimiterTokenRefill(t *testing.T) {
 	if !limiter.Allow(ctx, "refill:user:1", 1, 100) {
 		t.Fatalf("补充后应重新放行")
 	}
+}
+func TestRateLimitReturnsStructured429AndRetryAfter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, c := newRateLimitTestRedis(t)
+	l := NewRateLimiter(c, 1, 0)
+	r := gin.New()
+	r.GET("/costly", RateLimit(l), func(x *gin.Context) { x.Status(204) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/costly", nil))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/costly", nil))
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" || !strings.Contains(w.Body.String(), "RATE_LIMITED") {
+		t.Fatalf("code=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
+	}
+	_ = http.StatusOK
 }

@@ -52,13 +52,13 @@ func (c *OpenAIEmbeddingClient) Embed(ctx context.Context, input string) ([]floa
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Embedding 请求失败: %w", err)
+		return nil, ProviderTransportError("openai_compatible", "embedding", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Embedding 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, ProviderHTTPError("openai_compatible", "embedding", resp.StatusCode, resp.Header, body)
 	}
 
 	var result struct {

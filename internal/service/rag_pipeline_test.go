@@ -250,3 +250,78 @@ func containsContent(chunks []RetrievedChunk, content string) bool {
 }
 
 var _ ai.EmbeddingClient = (*fakeEmbeddingClient)(nil)
+
+func TestRetrievalPipelineConfigVectorOnlySkipsBM25(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	seedVideoChunks(t, repos, 7, 1, "m", []string{"keyword q"})
+	embedding := &fakeEmbeddingClient{dim: 3}
+	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{{EvidenceID: "v1", ChunkID: 9, Content: "vector"}}}}
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableBM25 = false
+	cfg.QueryMode = QueryModeOriginal
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	pipeline := &RetrievalPipeline{repos: repos, retriever: retriever, Config: &cfg}
+	result, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskID: 1, Question: "keyword q", EmbeddingModel: "m", Embedding: embedding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Citations) != 1 || result.Citations[0].Source != RetrievalSourceVector {
+		t.Fatalf("citations=%+v", result.Citations)
+	}
+}
+
+func TestRetrievalPipelineConfigBM25OnlySkipsEmbeddingAndVector(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	seedVideoChunks(t, repos, 7, 1, "m", []string{"redis owner"})
+	retriever := &pipelineTestRetriever{}
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableVector = false
+	cfg.QueryMode = QueryModeOriginal
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	pipeline := &RetrievalPipeline{repos: repos, retriever: retriever, Config: &cfg}
+	result, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskID: 1, Question: "redis owner", EmbeddingModel: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retriever.requests) != 0 || len(result.Citations) == 0 || result.Citations[0].EvidenceID == "" {
+		t.Fatalf("requests=%+v citations=%+v", retriever.requests, result.Citations)
+	}
+}
+
+func TestRetrievalPipelineConfigControlsRewriteCount(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	embedding := &fakeEmbeddingClient{dim: 3}
+	rewriter := &pipelineTestRewriter{result: RewriteResult{Original: "q", Queries: []string{"q1", "q2"}}}
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableBM25 = false
+	cfg.RewriteQueries = 2
+	cfg.NeighborRadius = 0
+	pipeline := &RetrievalPipeline{repos: repos, retriever: &pipelineTestRetriever{results: [][]RetrievedChunk{{}, {}}}, rewriter: rewriter, Config: &cfg}
+	_, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskID: 1, Question: "q", EmbeddingModel: "m", Embedding: embedding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rewriter.input.NumQueries != 2 {
+		t.Fatalf("NumQueries=%d", rewriter.input.NumQueries)
+	}
+}
+
+func TestNewConfiguredRetrievalPipelineBuildsBM25OnlyWithoutLLM(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableVector = false
+	cfg.QueryMode = QueryModeOriginal
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	p, err := NewConfiguredRetrievalPipeline(newChatServiceTestRepositories(t), nil, nil, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Config == nil || p.expander != nil {
+		t.Fatalf("pipeline=%+v", p)
+	}
+	if _, ok := p.rewriter.(NoopQueryRewriter); !ok {
+		t.Fatalf("rewriter=%T", p.rewriter)
+	}
+}

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,10 +18,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/kafka-go"
+	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/pkg/lock"
+	"vid-lens/internal/pkg/processingguard"
 	"vid-lens/internal/pkg/ytdlp"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
@@ -35,28 +38,44 @@ type ragIndexProducer interface {
 	EnqueueRAGIndex(ctx context.Context, taskID int64) error
 }
 
+type kafkaMessageReader interface {
+	FetchMessage(ctx context.Context) (kafka.Message, error)
+	CommitMessages(ctx context.Context, messages ...kafka.Message) error
+	Close() error
+}
+
+type kafkaReaderFactory func(config kafka.ReaderConfig) kafkaMessageReader
+type kafkaMessageHandler func(ctx context.Context, message kafka.Message) error
+
 // Consumer Kafka 消费者
 // 面试亮点（消费端设计）：
 //  1. 消费者组：同一个 Group 下的多个消费者分摊不同分区的消息，天然负载均衡
 //  2. 基于 MD5 的 Key 路由：同一视频的消息一定进入同一分区，同一分区被同一消费者消费
 //     → 保证了同一个视频不会被两个消费者同时处理（配合分布式锁双重保障）
-//  3. 手动提交 offset：只有业务逻辑执行成功才 commit，防止消息丢失
+//  3. 手动提交 offset：业务成功、失败已可靠移交 RetryScheduler，或毒消息已持久化隔离后才 commit
 type Consumer struct {
-	repo        *repository.Repositories
-	storage     *storage.MinIOStorage
-	ai          ai.Strategy
-	aiFactory   *ai.Factory
-	aiRecorder  ai.CallRecorder
-	profiles    profileResolver
-	rdb         redis.Cmdable
-	ffmpegPath  string
-	ytdlpPath   string
-	cookiesPath string
-	proxyURL    string
-	splitAudio  splitAudioFunc
-	ragIndex    ragIndexFunc
-	ragProducer ragIndexProducer
-	retryPolicy TaskRetryPolicy
+	repo                   *repository.Repositories
+	storage                *storage.MinIOStorage
+	ai                     ai.Strategy
+	aiFactory              *ai.Factory
+	aiRecorder             ai.CallRecorder
+	profiles               profileResolver
+	rdb                    redis.Cmdable
+	ffmpegPath             string
+	ytdlpPath              string
+	cookiesPath            string
+	proxyURL               string
+	splitAudio             splitAudioFunc
+	ragIndex               ragIndexFunc
+	ragProducer            ragIndexProducer
+	retryPolicy            TaskRetryPolicy
+	processingLease        time.Duration
+	leaseHeartbeatInterval time.Duration
+	now                    func() time.Time
+	newToken               func() string
+
+	newKafkaReader       kafkaReaderFactory
+	readerRestartBackoff time.Duration
 
 	downloadVideo   downloadVideoFunc
 	uploadLocalFile uploadLocalFileFunc
@@ -78,12 +97,15 @@ func NewConsumer(
 		ffmpegPath = "ffmpeg"
 	}
 	consumer := &Consumer{
-		repo:       repo,
-		storage:    storage,
-		ai:         aiStrategy,
-		rdb:        rdb,
-		ffmpegPath: ffmpegPath,
-		splitAudio: ffmpeg.SplitAudio,
+		repo:            repo,
+		storage:         storage,
+		ai:              aiStrategy,
+		rdb:             rdb,
+		ffmpegPath:      ffmpegPath,
+		splitAudio:      ffmpeg.SplitAudio,
+		processingLease: 30 * time.Minute,
+		now:             time.Now,
+		newToken:        uuid.NewString,
 	}
 	consumer.uploadLocalFile = func(ctx context.Context, localPath, objectName, contentType string) error {
 		if consumer.storage == nil {
@@ -121,141 +143,175 @@ func (c *Consumer) SetRAGIndexProducer(producer ragIndexProducer) {
 	c.ragProducer = producer
 }
 
-// StartAnalyzeConsumer 启动 AI 分析消费者
-// 面试亮点：对应面试文档中 RocketMQ 的消费者监听模式
-// Kafka 版本通过 Reader 按 Group 消费，自动管理 offset
-func (c *Consumer) StartAnalyzeConsumer(brokers []string, topic, groupID string) {
-	r := kafka.NewReader(kafka.ReaderConfig{
+func groupReaderConfig(brokers []string, topic, groupID string) kafka.ReaderConfig {
+	return kafka.ReaderConfig{
 		Brokers:        brokers,
 		Topic:          topic,
 		GroupID:        groupID,
-		MinBytes:       1e3, // 1KB
-		MaxBytes:       1e6, // 1MB
-		CommitInterval: 0,   // 手动提交（不自动提交）
-		ReadBackoffMin: 100 * time.Millisecond,
-		ReadBackoffMax: 1 * time.Second,
-	})
-
-	go func() {
-		log.Println("✅ Kafka 消费者已启动 [analyze]")
-		for {
-			msg, err := r.ReadMessage(context.Background())
-			if err != nil {
-				log.Printf("[Kafka] 读取消息失败: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
-
-			if err := c.handleAnalyze(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] 分析任务失败: %v", err)
-				// 面试亮点：消费失败不 commit offset，下次会重新消费
-				// 这就是 Kafka 的 at-least-once 语义
-				// 配合业务层的幂等校验（分布式锁 + 状态检查），不会重复执行
-			} else {
-				// 手动 commit：只有业务成功才提交 offset
-				if err := r.CommitMessages(context.Background(), msg); err != nil {
-					log.Printf("[Kafka] commit offset 失败: %v", err)
-				}
-			}
-		}
-	}()
-}
-
-// StartTranscribeConsumer 启动文字提取消费者
-func (c *Consumer) StartTranscribeConsumer(brokers []string, topic, groupID string) {
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        brokers,
-		Topic:          topic,
-		GroupID:        groupID,
-		CommitInterval: 0,
 		MinBytes:       1e3,
 		MaxBytes:       1e6,
-	})
+		CommitInterval: 0,
+		ReadBackoffMin: 100 * time.Millisecond,
+		ReadBackoffMax: time.Second,
+	}
+}
 
-	go func() {
-		log.Println("✅ Kafka 消费者已启动 [transcribe]")
-		for {
-			msg, err := r.ReadMessage(context.Background())
-			if err != nil {
-				log.Printf("[Kafka] 读取消息失败: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
+func (c *Consumer) readerFactory() kafkaReaderFactory {
+	if c.newKafkaReader != nil {
+		return c.newKafkaReader
+	}
+	return func(config kafka.ReaderConfig) kafkaMessageReader {
+		return kafka.NewReader(config)
+	}
+}
 
-			if err := c.handleTranscribe(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] 转录任务失败: %v", err)
-			} else {
-				r.CommitMessages(context.Background(), msg)
-			}
+func (c *Consumer) restartBackoff() time.Duration {
+	if c.readerRestartBackoff > 0 {
+		return c.readerRestartBackoff
+	}
+	return time.Second
+}
+
+func consumeReader(ctx context.Context, reader kafkaMessageReader, handler kafkaMessageHandler) (err error) {
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("关闭 Kafka reader 失败: %w", closeErr))
 		}
 	}()
+
+	for {
+		message, fetchErr := reader.FetchMessage(ctx)
+		if fetchErr != nil {
+			return fmt.Errorf("获取 Kafka 消息失败: %w", fetchErr)
+		}
+		if handleErr := handler(ctx, message); handleErr != nil {
+			return fmt.Errorf("处理 Kafka 消息失败: %w", handleErr)
+		}
+		if commitErr := reader.CommitMessages(ctx, message); commitErr != nil {
+			return fmt.Errorf("提交 Kafka offset 失败: %w", commitErr)
+		}
+	}
+}
+
+func (c *Consumer) runGroupConsumer(ctx context.Context, name string, config kafka.ReaderConfig, handler kafkaMessageHandler) {
+	for ctx.Err() == nil {
+		reader := c.readerFactory()(config)
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "kafka consumer started", slog.String("consumer", name), slog.String("topic", config.Topic), slog.String("group", config.GroupID))
+		err := consumeReader(ctx, reader, handler)
+		if ctx.Err() != nil {
+			return
+		}
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "kafka consumer rebuilding reader", slog.String("consumer", name), slog.String("error", observability.SafeError(err)))
+
+		timer := time.NewTimer(c.restartBackoff())
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+// Group consumers use FetchMessage and explicitly commit only after the handler
+// either completes the business operation or durably records its failure for RetryScheduler.
+// Any fetch, handler, or commit error closes this reader; the outer loop rebuilds it after backoff.
+func (c *Consumer) poisonAwareHandler(name, groupID string, handler kafkaMessageHandler) kafkaMessageHandler {
+	return func(ctx context.Context, message kafka.Message) error {
+		err := handler(ctx, message)
+		if err == nil || !isPoisonMessageError(err) {
+			return err
+		}
+		if c == nil || c.repo == nil || c.repo.TaskMessageFailure == nil {
+			return fmt.Errorf("poison 消息隔离仓储未初始化: %w", err)
+		}
+		failure := &model.KafkaMessageFailure{
+			ConsumerGroup: groupID, ConsumerName: name, Topic: message.Topic,
+			Partition: message.Partition, MessageOffset: message.Offset,
+			MessageKey: append([]byte(nil), message.Key...), Payload: append([]byte(nil), message.Value...),
+			ErrorMessage: truncateError(err),
+		}
+		if persistErr := c.repo.TaskMessageFailure.Record(failure); persistErr != nil {
+			return fmt.Errorf("持久化 poison 消息失败: %w", persistErr)
+		}
+		return nil
+	}
+}
+
+func isPoisonMessageError(err error) bool {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return true
+	}
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &typeErr)
+}
+
+func (c *Consumer) startGroupConsumer(name string, brokers []string, topic, groupID string, handler kafkaMessageHandler) {
+	durableHandler := c.poisonAwareHandler(name, groupID, handler)
+	observedHandler := func(ctx context.Context, message kafka.Message) error {
+		startedAt := time.Now()
+		err := durableHandler(ctx, message)
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.ObserveKafkaJob(name, time.Since(startedAt))
+		}
+		return err
+	}
+	go c.runGroupConsumer(context.Background(), name, groupReaderConfig(brokers, topic, groupID), observedHandler)
+}
+
+func (c *Consumer) StartAnalyzeConsumer(brokers []string, topic, groupID string) {
+	c.startGroupConsumer("analyze", brokers, topic, groupID, c.handleAnalyze)
+}
+
+func (c *Consumer) StartTranscribeConsumer(brokers []string, topic, groupID string) {
+	c.startGroupConsumer("transcribe", brokers, topic, groupID, c.handleTranscribe)
 }
 
 func (c *Consumer) StartDownloadConsumer(brokers []string, topic, groupID string) {
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        brokers,
-		Topic:          topic,
-		GroupID:        groupID,
-		CommitInterval: 0,
-		MinBytes:       1e3,
-		MaxBytes:       1e6,
-	})
-
-	go func() {
-		log.Println("✅ Kafka 消费者已启动 [download]")
-		for {
-			msg, err := r.ReadMessage(context.Background())
-			if err != nil {
-				log.Printf("[Kafka] 读取下载消息失败: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
-
-			// 与 analyze/transcribe 一致：只有业务成功才 commit offset。
-			// 业务级失败（下载失败、上传失败等）已由 handleDownload 记入 task_job 表，
-			// 由 RetryScheduler 兜底，此时返回 nil 走 commit；
-			// 基础设施级失败（消息解析、DB 查询、回写）返回 err，不 commit，由 Kafka at-least-once 重投。
-			if err := c.handleDownload(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] 下载任务消息异常（不提交 offset，等待重投）: %v", err)
-			} else {
-				if err := r.CommitMessages(context.Background(), msg); err != nil {
-					log.Printf("[Kafka] download commit offset 失败: %v", err)
-				}
-			}
-		}
-	}()
+	c.startGroupConsumer("download", brokers, topic, groupID, c.handleDownload)
 }
 
 func (c *Consumer) StartRAGIndexConsumer(brokers []string, topic, groupID string) {
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        brokers,
-		Topic:          topic,
-		GroupID:        groupID,
-		CommitInterval: 0,
-		MinBytes:       1e3,
-		MaxBytes:       1e6,
+	c.startGroupConsumer("rag_index", brokers, topic, groupID, c.handleRAGIndex)
+}
+
+func (c *Consumer) currentTime() time.Time {
+	if c != nil && c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *Consumer) claimTaskForMessage(taskID int64, jobType, stage, messageToken string) (repository.TaskLeaseClaim, error) {
+	if c == nil || c.repo == nil {
+		return repository.TaskLeaseClaim{}, fmt.Errorf("任务仓储未初始化")
+	}
+	now := time.Now()
+	if c.now != nil {
+		now = c.now()
+	}
+	lease := c.processingLease
+	if lease <= 0 {
+		lease = 30 * time.Minute
+	}
+	newToken := uuid.NewString()
+	if c.newToken != nil {
+		newToken = c.newToken()
+	}
+	return c.repo.ClaimTaskProcessing(repository.TaskProcessingClaimRequest{
+		TaskID: taskID, JobType: jobType, Stage: stage, MessageToken: messageToken,
+		Now: now, LeaseUntil: now.Add(lease), NewToken: newToken,
 	})
+}
 
-	go func() {
-		log.Println("✅ Kafka 消费者已启动 [rag_index]")
-		for {
-			msg, err := r.ReadMessage(context.Background())
-			if err != nil {
-				log.Printf("[Kafka] 读取 RAG 索引消息失败: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
-
-			// 同 download：业务成功才 commit；基础设施级失败返回 err 不 commit，等待 Kafka 重投。
-			if err := c.handleRAGIndex(context.Background(), msg); err != nil {
-				log.Printf("[Kafka] RAG 索引任务消息异常（不提交 offset，等待重投）: %v", err)
-			} else {
-				if err := r.CommitMessages(context.Background(), msg); err != nil {
-					log.Printf("[Kafka] rag_index commit offset 失败: %v", err)
-				}
-			}
-		}
-	}()
+func retrySchedulerOwns(task *model.VideoTask) bool {
+	return task != nil && task.Status == model.TaskStatusFailed && task.NextRetryAt != nil
 }
 
 func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error {
@@ -269,42 +325,52 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 		return fmt.Errorf("查询下载任务失败: %w", err)
 	}
 	traceID := traceIDForTask(payload.TraceID, task)
-	if task.Status != model.TaskStatusRunning || task.Stage != model.TaskStageDownloading {
-		log.Printf("[Kafka] 下载任务状态已变化，跳过: traceID=%s taskID=%d status=%d stage=%s", traceID, task.ID, task.Status, task.Stage)
-		return nil
+	claim, err := c.claimTaskForMessage(task.ID, TaskJobDownload, model.TaskStageDownloading, payload.ClaimToken)
+	if err != nil {
+		return fmt.Errorf("获取下载 processing lease 失败: %w", err)
 	}
-	c.markTaskJobRunning(task, TaskJobDownload, model.TaskStageDownloading)
-	if strings.TrimSpace(task.SourceURL) == "" {
-		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("URL 下载任务缺少 source_url"))
+	switch claim.Outcome {
+	case repository.TaskLeaseBusy:
+		return fmt.Errorf("下载 processing lease 正由其他消费者持有")
+	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
 		return nil
+	case repository.TaskLeaseAcquired:
+	default:
+		return fmt.Errorf("未知下载 processing lease 状态: %s", claim.Outcome)
+	}
+	ctx, stopLease := c.startProcessingLeaseHeartbeat(ctx, task.ID, TaskJobDownload, claim.Token)
+	defer stopLease()
+	task.TraceID = traceID
+	ctx = c.contextForTaskJob(ctx, task, TaskJobDownload, payload.BudgetID)
+	if strings.TrimSpace(task.SourceURL) == "" {
+		return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("URL 下载任务缺少 source_url"), claim.Token)
 	}
 
-	log.Printf("[Kafka] URL 下载开始: traceID=%s taskID=%d url=%s", traceID, task.ID, sanitizeURLForLog(task.SourceURL))
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "video download started")
 	localPath, err := c.callDownloadVideo(ctx, task.SourceURL)
 	if err != nil {
 		errMsg := truncateError(err)
-		log.Printf("[Kafka] URL 下载失败: traceID=%s taskID=%d userID=%d url=%s err=%v", traceID, task.ID, task.UserID, sanitizeURLForLog(task.SourceURL), err)
-		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, errors.New(errMsg))
-		return nil
+		observability.Log(ctx, slog.Default(), slog.LevelError, "video download failed", slog.String("error", observability.SafeError(err)))
+		return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, errors.New(errMsg), claim.Token)
 	}
 	defer os.Remove(localPath)
 
 	fileMD5, size, err := hashLocalFile(localPath)
 	if err != nil {
-		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
-		return nil
+		return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err, claim.Token)
 	}
 
 	asset, err := c.repo.Asset.FindByMD5(fileMD5)
 	if err != nil {
-		_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
-		return nil
+		return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err, claim.Token)
 	}
 	if asset == nil {
 		objectName := fmt.Sprintf("videos/%s%s", uuid.New().String(), extensionForDownloadedFile(localPath))
 		if err := c.callUploadLocalFile(ctx, localPath, objectName, "video/mp4"); err != nil {
-			_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("上传到 MinIO 失败: %w", err))
-			return nil
+			return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, fmt.Errorf("上传到 MinIO 失败: %w", err), claim.Token)
 		}
 		asset = &model.VideoAsset{
 			FileMD5:     fileMD5,
@@ -317,8 +383,7 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 			if findErr == nil && existing != nil {
 				asset = existing
 			} else {
-				_ = c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err)
-				return nil
+				return c.recordTaskFailure(task.ID, TaskJobDownload, model.TaskStageDownloading, err, claim.Token)
 			}
 		}
 	}
@@ -327,11 +392,18 @@ func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error 
 	if filename == "WEB_" || filename == "WEB_." {
 		filename = task.Filename
 	}
-	if err := c.repo.Task.CompleteURLDownload(task.ID, asset, filename, time.Now()); err != nil {
+	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{
+		TaskID: task.ID, JobType: TaskJobDownload, JobStage: model.TaskStageDownloading, Token: claim.Token,
+		TaskStatus: model.TaskStatusPending, TaskStage: model.TaskStageUploaded, Now: c.currentTime(),
+		TaskFields: map[string]interface{}{"asset_id": asset.ID, "file_md5": asset.FileMD5, "filename": filename, "file_url": asset.ObjectName, "file_size": asset.FileSize, "last_job_type": ""},
+	})
+	if err != nil {
 		return fmt.Errorf("回写下载任务失败: %w", err)
 	}
-	c.markTaskJobCompleted(task.ID, TaskJobDownload, model.TaskStageDownloading)
-	log.Printf("[Kafka] URL 下载完成: traceID=%s taskID=%d assetID=%d md5=%s size=%d", traceID, task.ID, asset.ID, asset.FileMD5, asset.FileSize)
+	if !completed {
+		return nil
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "video download completed", slog.Int64("asset_id", asset.ID), slog.Int64("file_size", asset.FileSize))
 	return nil
 }
 
@@ -347,30 +419,59 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, msg kafka.Message) error 
 	}
 	traceID := traceIDForTask(payload.TraceID, task)
 	ctx = ContextWithTraceID(ctx, traceID)
-	c.markTaskJobRunning(task, TaskJobRAGIndex, model.TaskStageIndexing)
+	claim, err := c.claimTaskForMessage(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, payload.ClaimToken)
+	if err != nil {
+		return fmt.Errorf("获取 RAG processing lease 失败: %w", err)
+	}
+	switch claim.Outcome {
+	case repository.TaskLeaseBusy:
+		return fmt.Errorf("RAG processing lease 正由其他消费者持有")
+	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
+		return nil
+	case repository.TaskLeaseAcquired:
+	default:
+		return fmt.Errorf("未知 RAG processing lease 状态: %s", claim.Outcome)
+	}
+	ctx, stopLease := c.startProcessingLeaseHeartbeat(ctx, task.ID, TaskJobRAGIndex, claim.Token)
+	defer stopLease()
+	task.TraceID = traceID
+	ctx = c.contextForTaskJob(ctx, task, TaskJobRAGIndex, payload.BudgetID)
 
 	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
 	if err != nil {
-		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err)
-		return nil
+		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err, claim.Token)
 	}
 	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
-		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("缺少转录文本，无法构建 RAG 索引"))
-		return nil
+		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("缺少转录文本，无法构建 RAG 索引"), claim.Token)
 	}
 	if c.ragIndex == nil {
-		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("RAG 索引器未初始化"))
-		return nil
+		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("RAG 索引器未初始化"), claim.Token)
 	}
 
-	log.Printf("[Kafka] RAG 索引任务开始: traceID=%s taskID=%d userID=%d", traceID, task.ID, task.UserID)
-	if err := c.ragIndex(ctx, task); err != nil {
-		log.Printf("[Kafka] RAG 索引任务失败: traceID=%s taskID=%d err=%v", traceID, task.ID, err)
-		_ = c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "rag index started")
+	ctx = processingguard.With(ctx, requireProcessingLease)
+	ragErr := c.ragIndex(ctx, task)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if ragErr != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelError, "rag index failed", slog.String("error", observability.SafeError(ragErr)))
+		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, ragErr, claim.Token)
+	}
+	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{
+		TaskID: task.ID, JobType: TaskJobRAGIndex, JobStage: model.TaskStageIndexing, Token: claim.Token,
+		TaskStatus: model.TaskStatusCompleted, TaskStage: model.TaskStageNone, Now: c.currentTime(),
+	})
+	if err != nil {
+		return fmt.Errorf("完成 RAG processing lease 失败: %w", err)
+	}
+	if !completed {
 		return nil
 	}
-	c.markTaskJobCompleted(task.ID, TaskJobRAGIndex, model.TaskStageIndexing)
-	log.Printf("[Kafka] RAG 索引任务完成: traceID=%s taskID=%d", traceID, task.ID)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "rag index completed")
 	return nil
 }
 
@@ -397,7 +498,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		return fmt.Errorf("解析消息失败: %w", err)
 	}
 
-	log.Printf("[Kafka] 收到分析任务: traceID=%s taskID=%d, md5=%s", payload.TraceID, payload.TaskID, payload.MD5)
+	observability.Log(ContextWithTraceID(ctx, payload.TraceID), slog.Default(), slog.LevelInfo, "analyze message received", slog.Int64("task_id", payload.TaskID))
 
 	// 第 2 步：基于 MD5 获取分布式锁
 	lockKey := fmt.Sprintf("vidlens:lock:%s", payload.MD5)
@@ -408,7 +509,7 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 		return fmt.Errorf("获取分布式锁失败: %w", err)
 	}
 	if !acquired {
-		log.Printf("[Kafka] 抢锁失败，跳过: md5=%s", payload.MD5)
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video processing lock busy")
 		return fmt.Errorf("同一视频正在处理中")
 	}
 	defer distLock.Unlock(ctx)
@@ -418,45 +519,42 @@ func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
 	if err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
-	if task.Status == model.TaskStatusCompleted {
-		summary, err := c.repo.Summary.FindByTaskID(task.ID)
-		if err != nil {
-			return fmt.Errorf("查询任务总结失败: %w", err)
-		}
-		if summary != nil {
-			log.Printf("[Kafka] 任务已完成，跳过: taskID=%d", payload.TaskID)
-			return nil
-		}
-		log.Printf("[Kafka] 任务已完成但缺少总结，继续分析: taskID=%d", payload.TaskID)
-	}
-
-	// 第 4 步：更新状态为处理中
-	updated, err := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
-		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusRunning, model.TaskStageSummarizing, "")
+	initialStage := c.analyzeInitialStage(task)
+	claim, err := c.claimTaskForMessage(task.ID, TaskJobAnalyze, initialStage, payload.ClaimToken)
 	if err != nil {
-		return fmt.Errorf("更新任务状态失败: %w", err)
+		return fmt.Errorf("获取分析 processing lease 失败: %w", err)
 	}
-	if !updated {
-		log.Printf("[Kafka] 任务状态已变化，跳过: taskID=%d", payload.TaskID)
+	switch claim.Outcome {
+	case repository.TaskLeaseBusy:
+		return fmt.Errorf("分析 processing lease 正由其他消费者持有")
+	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
 		return nil
+	case repository.TaskLeaseAcquired:
+	default:
+		return fmt.Errorf("未知分析 processing lease 状态: %s", claim.Outcome)
 	}
-	c.markTaskJobRunning(task, TaskJobAnalyze, model.TaskStageSummarizing)
+	ctx, stopLease := c.startProcessingLeaseHeartbeat(ctx, task.ID, TaskJobAnalyze, claim.Token)
+	defer stopLease()
+	task.TraceID = traceIDForTask(payload.TraceID, task)
+	ctx = c.contextForTaskJob(ctx, task, TaskJobAnalyze, payload.BudgetID)
 
 	// 第 5 步：核心业务
 	if err := c.processVideo(ctx, task); err != nil {
-		if updateErr := c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, "", err); updateErr != nil {
+		if updateErr := c.recordTaskFailure(payload.TaskID, TaskJobAnalyze, "", err, claim.Token); updateErr != nil {
 			return fmt.Errorf("任务失败且状态更新失败: %w", updateErr)
 		}
 		return nil
 	}
 
 	// 第 6 步：更新状态为已完成
-	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
+	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{TaskID: task.ID, JobType: TaskJobAnalyze, JobStage: model.TaskStageSummarizing, Token: claim.Token, TaskStatus: model.TaskStatusCompleted, TaskStage: model.TaskStageNone, Now: c.currentTime()})
+	if err != nil {
 		return fmt.Errorf("更新完成状态失败: %w", err)
 	}
-	c.markTaskJobCompleted(payload.TaskID, TaskJobAnalyze, model.TaskStageSummarizing)
-	log.Printf("[Kafka] 任务完成: taskID=%d", payload.TaskID)
+	if !completed {
+		return nil
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "analyze task completed")
 	return nil
 }
 
@@ -471,60 +569,76 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	if err != nil {
 		return err
 	}
-
-	updated, err := c.repo.Task.UpdateStatusAndStageIf(payload.TaskID,
-		[]int8{model.TaskStatusPending, model.TaskStatusQueued, model.TaskStatusFailed, model.TaskStatusCompleted},
-		model.TaskStatusRunning, model.TaskStageTranscribing, "")
+	claim, err := c.claimTaskForMessage(task.ID, TaskJobTranscribe, model.TaskStageTranscribing, payload.ClaimToken)
 	if err != nil {
-		return err
+		return fmt.Errorf("获取转录 processing lease 失败: %w", err)
 	}
-	if !updated {
+	switch claim.Outcome {
+	case repository.TaskLeaseBusy:
+		return fmt.Errorf("转录 processing lease 正由其他消费者持有")
+	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
 		return nil
+	case repository.TaskLeaseAcquired:
+	default:
+		return fmt.Errorf("未知转录 processing lease 状态: %s", claim.Outcome)
 	}
-	c.markTaskJobRunning(task, TaskJobTranscribe, model.TaskStageTranscribing)
+	ctx, stopLease := c.startProcessingLeaseHeartbeat(ctx, task.ID, TaskJobTranscribe, claim.Token)
+	defer stopLease()
+	task.TraceID = traceIDForTask(payload.TraceID, task)
+	ctx = c.contextForTaskJob(ctx, task, TaskJobTranscribe, payload.BudgetID)
 
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
-		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
-		return nil
+		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 	defer os.Remove(videoPath)
 
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
 	if err != nil {
-		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
-		return nil
+		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 	defer os.Remove(audioPath)
 
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
-		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
-		return nil
+		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 
 	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
-		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
-		return nil
+		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 
-	if err := c.repo.Transcription.Upsert(&model.VideoTranscription{
-		TaskID:  task.ID,
-		Content: transcript,
-		Words:   len([]rune(transcript)),
-	}); err != nil {
-		_ = c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err)
-		return nil
-	}
-	_ = c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusRunning, model.TaskStageIndexing, "")
-	c.indexAfterTranscription(ctx, task)
-	c.generateTitle(ctx, task, transcript)
-
-	if err := c.repo.Task.UpdateStatusAndStage(payload.TaskID, model.TaskStatusCompleted, model.TaskStageNone, ""); err != nil {
+	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	c.markTaskJobCompleted(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing)
+	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.Transcription.Upsert(&model.VideoTranscription{
+			TaskID: task.ID, Content: transcript, Words: len([]rune(transcript)),
+		})
+	}); err != nil {
+		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if err := c.indexAfterTranscription(ctx, task); err != nil {
+		return err
+	}
+	if err := c.generateTitle(ctx, task, transcript); err != nil {
+		return err
+	}
+	parentStatus, parentStage := int8(model.TaskStatusCompleted), model.TaskStageNone
+	if c.ragProducer != nil {
+		parentStatus, parentStage = model.TaskStatusRunning, model.TaskStageIndexing
+	}
+	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{TaskID: task.ID, JobType: TaskJobTranscribe, JobStage: model.TaskStageTranscribing, Token: claim.Token, TaskStatus: parentStatus, TaskStage: parentStage, Now: c.currentTime()})
+	if err != nil {
+		return err
+	}
+	if !completed {
+		return nil
+	}
 	return nil
 }
 
@@ -535,12 +649,20 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("查询转录失败: %w", err)
 	}
 	if existingTranscription != nil && strings.TrimSpace(existingTranscription.Content) != "" {
-		log.Printf("[Kafka] 复用已有转录生成总结: taskID=%d", task.ID)
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "reuse transcription for summary")
 		return c.summarizeTask(ctx, task)
 	}
 
-	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageTranscribing, "")
-	log.Printf("[Kafka] 提取音频: taskID=%d", task.ID)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if err := c.transitionTaskStage(ctx, task.ID, model.TaskStageTranscribing); err != nil {
+		return fmt.Errorf("更新转录阶段失败: %w", err)
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "audio extraction started")
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
 		return fmt.Errorf("下载视频失败: %w", err)
@@ -553,7 +675,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}
 	defer os.Remove(audioPath)
 
-	log.Printf("[Kafka] ASR 转录: taskID=%d", task.ID)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr transcription started")
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
 		return err
@@ -564,63 +686,109 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
 
-	if err := c.repo.Transcription.Upsert(&model.VideoTranscription{
-		TaskID:  task.ID,
-		Content: transcript,
-		Words:   len([]rune(transcript)),
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.Transcription.Upsert(&model.VideoTranscription{
+			TaskID: task.ID, Content: transcript, Words: len([]rune(transcript)),
+		})
 	}); err != nil {
 		return fmt.Errorf("保存转录失败: %w", err)
 	}
-	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageIndexing, "")
-	c.indexAfterTranscription(ctx, task)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if err := c.indexAfterTranscription(ctx, task); err != nil {
+		return err
+	}
 
 	return c.summarizeTask(ctx, task)
 }
 
 func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
+	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageTranscribing})
 	splitAudio := c.splitAudio
 	if splitAudio == nil {
 		splitAudio = ffmpeg.SplitAudio
 	}
 
-	log.Printf("[Kafka] 音频切片转写开始: taskID=%d, path=%s, segmentSeconds=%d", taskID, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunking started", slog.Int64("task_id", taskID), slog.Int("segment_seconds", ffmpeg.DefaultAudioSegmentSeconds))
 	chunks, err := splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
 	if err != nil {
+		return "", err
+	}
+	if err := requireProcessingLease(ctx); err != nil {
 		return "", err
 	}
 	if len(chunks) == 0 {
 		return "", fmt.Errorf("没有可转写的音频片段")
 	}
 	defer os.RemoveAll(filepath.Dir(chunks[0]))
-	log.Printf("[Kafka] 音频切片转写已切片: taskID=%d, chunks=%d", taskID, len(chunks))
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunks prepared", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(chunks)))
 
 	parts := make([]string, 0, len(chunks))
 	for i, chunk := range chunks {
+		if err := requireProcessingLease(ctx); err != nil {
+			return "", err
+		}
 		if completed := c.completedTranscriptionChunk(taskID, i); completed != "" {
-			log.Printf("[Kafka] 音频切片转写片段复用: taskID=%d, chunk=%d/%d, path=%s, chars=%d", taskID, i+1, len(chunks), chunk, len([]rune(completed)))
+			if metrics := observability.DefaultMetrics(); metrics != nil {
+				metrics.IncASRChunkReuse()
+			}
+			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk reused", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", len([]rune(completed))))
 			parts = append(parts, completed)
 			continue
 		}
-		c.markTranscriptionChunkRunning(taskID, i, chunk)
-		text, err := strategy.Transcribe(ctx, chunk)
-		if err != nil {
-			c.markTranscriptionChunkFailed(taskID, i, chunk, err)
-			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, err)
+
+		if err := c.markTranscriptionChunkRunning(ctx, taskID, i, chunk); err != nil {
+			return "", err
+		}
+		if err := requireProcessingLease(ctx); err != nil {
+			return "", err
+		}
+		chunkStartedAt := time.Now()
+		text, transcribeErr := strategy.Transcribe(ctx, chunk)
+		if err := requireProcessingLease(ctx); err != nil {
+			return "", err
+		}
+		if transcribeErr != nil {
+			if metrics := observability.DefaultMetrics(); metrics != nil {
+				metrics.ObserveASRChunk("failed", time.Since(chunkStartedAt))
+			}
+			if err := c.markTranscriptionChunkFailed(ctx, taskID, i, chunk, transcribeErr); err != nil {
+				return "", err
+			}
+			if err := requireProcessingLease(ctx); err != nil {
+				return "", err
+			}
+			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, transcribeErr)
+		}
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.ObserveASRChunk("success", time.Since(chunkStartedAt))
 		}
 		text = strings.TrimSpace(text)
 		chars := len([]rune(text))
-		log.Printf("[Kafka] 音频切片转写片段完成: taskID=%d, chunk=%d/%d, path=%s, chars=%d", taskID, i+1, len(chunks), chunk, chars)
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", chars))
 		if text != "" {
-			c.markTranscriptionChunkCompleted(taskID, i, chunk, text)
+			if err := c.markTranscriptionChunkCompleted(ctx, taskID, i, chunk, text); err != nil {
+				return "", err
+			}
+			if err := requireProcessingLease(ctx); err != nil {
+				return "", err
+			}
 			parts = append(parts, text)
 		}
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return "", err
 	}
 	if len(parts) == 0 {
 		return "", fmt.Errorf("ASR 返回空结果")
 	}
 
 	transcript := strings.Join(parts, "\n\n")
-	log.Printf("[Kafka] 音频切片转写完成: taskID=%d, chunks=%d, transcriptChars=%d", taskID, len(chunks), len([]rune(transcript)))
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr transcription completed", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", len([]rune(transcript))))
 	return transcript, nil
 }
 
@@ -638,31 +806,31 @@ func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int) str
 	return ""
 }
 
-func (c *Consumer) markTranscriptionChunkRunning(taskID int64, chunkIndex int, audioObject string) {
+func (c *Consumer) markTranscriptionChunkRunning(ctx context.Context, taskID int64, chunkIndex int, audioObject string) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
-		return
+		return nil
 	}
-	if err := c.repo.TranscriptionChunk.UpsertRunning(taskID, chunkIndex, audioObject); err != nil {
-		log.Printf("[Kafka] 转写分片状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, err)
-	}
+	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.TranscriptionChunk.UpsertRunning(taskID, chunkIndex, audioObject)
+	})
 }
 
-func (c *Consumer) markTranscriptionChunkCompleted(taskID int64, chunkIndex int, audioObject, content string) {
+func (c *Consumer) markTranscriptionChunkCompleted(ctx context.Context, taskID int64, chunkIndex int, audioObject, content string) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
-		return
+		return nil
 	}
-	if err := c.repo.TranscriptionChunk.UpsertCompleted(taskID, chunkIndex, audioObject, content); err != nil {
-		log.Printf("[Kafka] 转写分片完成状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, err)
-	}
+	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.TranscriptionChunk.UpsertCompleted(taskID, chunkIndex, audioObject, content)
+	})
 }
 
-func (c *Consumer) markTranscriptionChunkFailed(taskID int64, chunkIndex int, audioObject string, err error) {
+func (c *Consumer) markTranscriptionChunkFailed(ctx context.Context, taskID int64, chunkIndex int, audioObject string, cause error) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
-		return
+		return nil
 	}
-	if writeErr := c.repo.TranscriptionChunk.UpsertFailed(taskID, chunkIndex, audioObject, err.Error()); writeErr != nil {
-		log.Printf("[Kafka] 转写分片失败状态写入失败: taskID=%d chunk=%d err=%v", taskID, chunkIndex+1, writeErr)
-	}
+	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.TranscriptionChunk.UpsertFailed(taskID, chunkIndex, audioObject, cause.Error())
+	})
 }
 
 func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
@@ -698,7 +866,16 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 }
 
 func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) error {
-	_ = c.repo.Task.UpdateStatusAndStage(task.ID, model.TaskStatusRunning, model.TaskStageSummarizing, "")
+	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageSummarizing})
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if err := c.transitionTaskStage(ctx, task.ID, model.TaskStageSummarizing); err != nil {
+		return fmt.Errorf("更新总结阶段失败: %w", err)
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
 	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
 	if err != nil {
 		return fmt.Errorf("查询转录失败: %w", err)
@@ -707,24 +884,35 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 		return fmt.Errorf("缺少转录文本，无法生成 AI 总结")
 	}
 
-	c.generateTitle(ctx, task, transcription.Content)
+	if err := c.generateTitle(ctx, task, transcription.Content); err != nil {
+		return err
+	}
 
-	log.Printf("[Kafka] AI 总结: taskID=%d", task.ID)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "ai summary started")
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
 		return err
 	}
-	summary, err := taskAI.Summarize(ctx, transcription.Content)
-	if err != nil {
-		return fmt.Errorf("AI 总结失败: %w", err)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	summary, summarizeErr := taskAI.Summarize(ctx, transcription.Content)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if summarizeErr != nil {
+		return fmt.Errorf("AI 总结失败: %w", summarizeErr)
 	}
 
-	if err := c.repo.Summary.Upsert(&model.AISummary{
-		TaskID:    task.ID,
-		Content:   summary,
-		ModelName: "mimo-v2.5",
+	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.Summary.Upsert(&model.AISummary{
+			TaskID: task.ID, Content: summary, ModelName: "mimo-v2.5",
+		})
 	}); err != nil {
 		return fmt.Errorf("保存总结失败: %w", err)
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
 	}
 
 	return nil
@@ -732,23 +920,27 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 
 // generateTitle 在转写文本就绪后调用 LLM 生成简洁视频标题并写回。
 // 失败仅记录日志，不阻塞转写/索引/总结主流程。
-func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, transcript string) {
+func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, transcript string) error {
+	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: "title_generation"})
 	transcript = strings.TrimSpace(transcript)
 	if transcript == "" || strings.TrimSpace(task.Title) != "" {
-		return
+		return nil
 	}
 	if c.aiFactory == nil || c.profiles == nil {
-		return
+		return nil
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
 	}
 	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
 	if err != nil || profile == nil {
-		log.Printf("[Kafka] 生成标题跳过：未找到 AI profile: taskID=%d err=%v", task.ID, err)
-		return
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title skipped: ai profile unavailable", slog.String("error", observability.SafeError(err)))
+		return nil
 	}
 	chatClient, err := c.aiFactory.NewChatClient(*profile)
 	if err != nil {
-		log.Printf("[Kafka] 生成标题跳过：创建 chat client 失败: taskID=%d err=%v", task.ID, err)
-		return
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title skipped: chat client unavailable", slog.String("error", observability.SafeError(err)))
+		return nil
 	}
 	chatClient = ai.NewObservedChatClient(chatClient, c.aiRecorder, ai.CallContext{
 		UserID:      task.UserID,
@@ -758,24 +950,39 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 		Kind:        model.AICallKindLLM,
 	})
 
-	title, err := chatClient.Chat(ctx, []ai.ChatMessage{
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	title, chatErr := chatClient.Chat(ctx, []ai.ChatMessage{
 		{Role: "system", Content: titleSystemPrompt},
 		{Role: "user", Content: truncateRunes(transcript, 1000)},
 	})
-	if err != nil {
-		log.Printf("[Kafka] 生成标题失败: taskID=%d err=%v", task.ID, err)
-		return
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if chatErr != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title generation failed", slog.String("error", observability.SafeError(chatErr)))
+		return nil
 	}
 	title = sanitizeVideoTitle(title)
 	if title == "" {
-		return
+		return nil
 	}
-	if err := c.repo.Task.UpdateTitle(task.ID, title); err != nil {
-		log.Printf("[Kafka] 写回标题失败: taskID=%d err=%v", task.ID, err)
-		return
+	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.Task.UpdateTitle(task.ID, title)
+	}); err != nil {
+		if errors.Is(err, ErrProcessingLeaseLost) {
+			return err
+		}
+		observability.Log(ctx, slog.Default(), slog.LevelError, "persist video title failed", slog.String("error", observability.SafeError(err)))
+		return nil
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
 	}
 	task.Title = title
-	log.Printf("[Kafka] 已生成视频标题: taskID=%d title=%q", task.ID, title)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "video title generated")
+	return nil
 }
 
 func truncateRunes(s string, n int) string {
@@ -810,25 +1017,74 @@ const titleSystemPrompt = `根据用户提供的视频语音转写文本，生�
 3. 只输出标题文本本身，不要引号、序号、前缀（如"标题："）、换行或任何解释。
 4. 若文本过短或无实质内容，输出"未命名视频"。`
 
-func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) {
+func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) error {
 	if c.ragProducer == nil {
-		return
+		return nil
 	}
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	var budgetID string
 	if c.repo != nil && c.repo.TaskJob != nil {
 		if err := c.repo.TaskJob.UpsertQueued(task, TaskJobRAGIndex, model.TaskStageIndexing, task.MaxRetries); err != nil {
-			log.Printf("[Kafka] RAG 索引子任务状态写入失败: taskID=%d err=%v", task.ID, err)
+			observability.Log(ctx, slog.Default(), slog.LevelError, "persist rag index job state failed", slog.String("error", observability.SafeError(err)))
+			return fmt.Errorf("persist rag index job state: %w", err)
+		}
+		if err := requireProcessingLease(ctx); err != nil {
+			return err
+		}
+		var err error
+		budgetID, err = c.repo.EnsureTaskJobRetryBudget(task.ID, TaskJobRAGIndex, c.currentTime())
+		if err != nil {
+			return fmt.Errorf("persist rag index retry budget: %w", err)
 		}
 	}
-	ctx = ContextWithTraceID(ctx, task.TraceID)
-	if err := c.ragProducer.EnqueueRAGIndex(ctx, task.ID); err != nil {
-		log.Printf("[Kafka] RAG 索引任务投递失败，可稍后手动重试: taskID=%d, err=%v", task.ID, err)
-		if c.repo != nil && c.repo.TaskJob != nil {
-			_ = c.repo.TaskJob.RecordTerminalFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, "enqueue_failed", truncateError(err), task.RetryCount, task.MaxRetries, model.TaskStatusFailed)
-		}
-		c.recordRAGIndexEnqueueFailure(task, err)
-		return
+	ctx = ContextWithRetryBudgetID(ContextWithTraceID(ctx, task.TraceID), budgetID)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
 	}
-	log.Printf("[Kafka] RAG 索引任务已投递: taskID=%d", task.ID)
+	enqueueErr := c.ragProducer.EnqueueRAGIndex(ctx, task.ID)
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if enqueueErr != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelError, "enqueue rag index failed", slog.String("error", observability.SafeError(enqueueErr)))
+		c.recordRAGIndexEnqueueFailure(task, enqueueErr)
+
+		owner := processingLeaseOwnerFromContext(ctx)
+		if owner != nil && c.repo != nil {
+			now := c.currentTime()
+			policy := c.retryPolicy.normalized()
+			nextRetryAt := now.Add(policy.backoffForRetry(1))
+			currentStage := task.Stage
+			if job, findErr := c.repo.TaskJob.FindByTaskAndType(task.ID, owner.jobType); findErr == nil && job != nil && job.Stage != "" {
+				currentStage = job.Stage
+			}
+			updated, handoffErr := c.repo.FailTaskProcessingHandoff(repository.TaskProcessingHandoffFailureRequest{
+				TaskID: task.ID, CurrentJobType: owner.jobType, CurrentStage: currentStage,
+				NextJobType: TaskJobRAGIndex, NextStage: model.TaskStageIndexing, Token: owner.token,
+				Status: model.TaskStatusFailed, ErrorCode: "enqueue_failed", ErrorMessage: truncateError(enqueueErr),
+				RetryCount: 1, MaxRetries: policy.MaxRetries, NextRetryAt: &nextRetryAt, Now: now,
+			})
+			if handoffErr != nil {
+				return fmt.Errorf("persist rag enqueue failure handoff: %w", handoffErr)
+			}
+			if !updated {
+				return ErrProcessingLeaseLost
+			}
+		} else if c.repo != nil && c.repo.TaskJob != nil {
+			// Compatibility for direct/non-consumer invocations: persist the child
+			// failure, but only a processing owner may mutate the parent workflow.
+			_ = c.repo.TaskJob.RecordTerminalFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, "enqueue_failed", truncateError(enqueueErr), 1, policyMaxRetries(c.retryPolicy), model.TaskStatusFailed)
+		}
+		return fmt.Errorf("enqueue rag index: %w", enqueueErr)
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "rag index enqueued")
+	return nil
+}
+
+func policyMaxRetries(policy TaskRetryPolicy) int {
+	return policy.normalized().MaxRetries
 }
 
 func (c *Consumer) recordRAGIndexEnqueueFailure(task *model.VideoTask, err error) {
@@ -911,16 +1167,121 @@ func traceIDForTask(payloadTraceID string, task *model.VideoTask) string {
 	return ""
 }
 
+func (c *Consumer) contextForTaskJob(ctx context.Context, task *model.VideoTask, jobType string, payloadBudgetID ...string) context.Context {
+	if c == nil || c.repo == nil || c.repo.TaskJob == nil || task == nil {
+		return contextForTaskJob(ctx, task, nil)
+	}
+	job, err := c.repo.TaskJob.FindByTaskAndType(task.ID, jobType)
+	if err != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelError, "load task job correlation failed",
+			slog.String("job_type", jobType), slog.String("error", observability.SafeError(err)))
+		return contextForTaskJob(ctx, task, nil)
+	}
+	ctx = contextForTaskJob(ctx, task, job)
+	budgetID := ""
+	if job != nil {
+		budgetID = strings.TrimSpace(job.RetryBudgetID)
+	}
+	payloadID := ""
+	if len(payloadBudgetID) > 0 {
+		payloadID = strings.TrimSpace(payloadBudgetID[0])
+	}
+	if budgetID == "" {
+		budgetID = payloadID
+	} else if payloadID != "" && payloadID != budgetID {
+		// The database binding is authoritative. A stale Kafka delivery must not
+		// replace the retry cycle currently owned by the task job.
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "stale retry budget in Kafka payload ignored",
+			slog.String("job_type", jobType))
+	}
+	return ai.WithGovernanceContext(ctx, ai.GovernanceContext{
+		RetryBudgetID: budgetID,
+		Subject:       fmt.Sprintf("user:%d", task.UserID),
+	})
+}
+
+func (c *Consumer) analyzeInitialStage(task *model.VideoTask) string {
+	if task == nil {
+		return model.TaskStageTranscribing
+	}
+	if task.Stage == model.TaskStageTranscribing || task.Stage == model.TaskStageSummarizing {
+		return task.Stage
+	}
+	if c != nil && c.repo != nil && c.repo.Transcription != nil {
+		if transcription, err := c.repo.Transcription.FindByTaskID(task.ID); err == nil && transcription != nil && strings.TrimSpace(transcription.Content) != "" {
+			return model.TaskStageSummarizing
+		}
+	}
+	return model.TaskStageTranscribing
+}
+
+func (c *Consumer) transitionTaskStage(ctx context.Context, taskID int64, nextStage string) error {
+	if c == nil || c.repo == nil || c.repo.Task == nil {
+		return fmt.Errorf("任务仓储未初始化")
+	}
+	task, err := c.repo.Task.FindByID(taskID)
+	if err != nil {
+		return err
+	}
+	if task.Stage == nextStage {
+		return nil
+	}
+	finishedAt := c.currentTime()
+	startedAt := finishedAt
+	if task.StageStartedAt != nil {
+		startedAt = *task.StageStartedAt
+	}
+	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.Task.UpdateStatusAndStage(taskID, model.TaskStatusRunning, nextStage, "")
+	}); err != nil {
+		return err
+	}
+	if task.Stage != "" && task.Stage != model.TaskStageNone && task.Stage != model.TaskStageUploaded {
+		if startedAt.After(finishedAt) {
+			startedAt = finishedAt
+		}
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.ObserveTaskStage(task.Stage, "success", finishedAt.Sub(startedAt))
+		}
+	}
+	return nil
+}
+
+func (c *Consumer) completeTaskProcessing(req repository.TaskProcessingCompleteRequest) (bool, error) {
+	if c == nil || c.repo == nil {
+		return false, fmt.Errorf("任务仓储未初始化")
+	}
+	startedAt := req.Now
+	if task, err := c.repo.Task.FindByID(req.TaskID); err == nil && task != nil && task.StageStartedAt != nil {
+		startedAt = *task.StageStartedAt
+	}
+	completed, err := c.repo.CompleteTaskProcessing(req)
+	if err != nil || !completed {
+		return completed, err
+	}
+	finishedAt := req.Now
+	if finishedAt.IsZero() {
+		finishedAt = c.currentTime()
+	}
+	if startedAt.IsZero() || startedAt.After(finishedAt) {
+		startedAt = finishedAt
+	}
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		metrics.ObserveTaskStage(req.JobStage, "success", finishedAt.Sub(startedAt))
+	}
+	return true, nil
+}
+
 func (c *Consumer) markTaskJobRunning(task *model.VideoTask, jobType, stage string) {
 	if c == nil || c.repo == nil || c.repo.TaskJob == nil || task == nil {
 		return
 	}
 	if err := c.repo.TaskJob.UpsertDispatching(task, jobType, model.TaskStatusRunning, stage); err != nil {
-		log.Printf("[Kafka] 子任务状态写入失败: taskID=%d jobType=%s err=%v", task.ID, jobType, err)
+		observability.Log(contextForTaskJob(context.Background(), task, nil), slog.Default(), slog.LevelError, "persist task job state failed", slog.String("job_type", jobType), slog.String("error", observability.SafeError(err)))
 		return
 	}
 	if err := c.repo.TaskJob.MarkRunning(task.ID, jobType, stage); err != nil {
-		log.Printf("[Kafka] 子任务运行状态写入失败: taskID=%d jobType=%s err=%v", task.ID, jobType, err)
+		observability.Log(contextForTaskJob(context.Background(), task, nil), slog.Default(), slog.LevelError, "persist task job running state failed", slog.String("job_type", jobType), slog.String("error", observability.SafeError(err)))
 	}
 }
 
@@ -928,7 +1289,15 @@ func (c *Consumer) markTaskJobCompleted(taskID int64, jobType, stage string) {
 	if c == nil || c.repo == nil || c.repo.TaskJob == nil {
 		return
 	}
+	startedAt := time.Now()
+	if job, err := c.repo.TaskJob.FindByTaskAndType(taskID, jobType); err == nil && job != nil && job.StartedAt != nil {
+		startedAt = *job.StartedAt
+	}
 	if err := c.repo.TaskJob.MarkCompleted(taskID, jobType, stage); err != nil {
-		log.Printf("[Kafka] 子任务完成状态写入失败: taskID=%d jobType=%s err=%v", taskID, jobType, err)
+		observability.Log(context.Background(), slog.Default(), slog.LevelError, "persist task job completed state failed", slog.Int64("task_id", taskID), slog.String("job_type", jobType), slog.String("error", observability.SafeError(err)))
+		return
+	}
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		metrics.ObserveTaskStage(stage, "success", time.Since(startedAt))
 	}
 }

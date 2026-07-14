@@ -4,14 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/config"
@@ -19,6 +23,7 @@ import (
 	"vid-lens/internal/middleware"
 	"vid-lens/internal/model"
 	"vid-lens/internal/mq"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/secret"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
@@ -52,6 +57,18 @@ func (a *aiProfileTesterAdapter) TestProfile(ctx context.Context, profile *servi
 }
 
 func main() {
+	runtimeCtx, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopRuntime()
+
+	slog.SetDefault(observability.NewJSONLogger(os.Stdout, slog.LevelInfo))
+	registry := prometheus.NewRegistry()
+	metrics, err := observability.NewMetrics(registry)
+	if err != nil {
+		log.Fatalf("初始化 Prometheus 指标失败: %v", err)
+	}
+	observability.SetDefaultMetrics(metrics)
+	go serveMetrics(metrics.Handler())
+
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
@@ -66,6 +83,7 @@ func main() {
 		log.Fatalf("迁移数据库失败: %v", err)
 	}
 	log.Println("✅ 数据库连接成功")
+	repos := repository.NewRepositories(db)
 
 	// Redis
 	rdb := redis.NewClient(&redis.Options{
@@ -74,6 +92,12 @@ func main() {
 		DB:       cfg.Redis.DB,
 	})
 	log.Println("✅ Redis 连接成功")
+	governance, err := newAIGovernanceRuntime(cfg.AIGovernance, rdb, repos)
+	if err != nil {
+		log.Fatalf("初始化 AI 调用治理失败: %v", err)
+	}
+	providerAdmission := governance.Admission
+	startQuotaReconciler(runtimeCtx, governance.Reconciler, quotaReconcileInterval)
 
 	// MinIO
 	minioStorage, err := storage.NewMinIOStorage(
@@ -101,6 +125,7 @@ func main() {
 	default:
 		log.Fatalf("不支持的 AI provider: %s", cfg.AI.Provider)
 	}
+	aiStrategy = ai.AdmitStrategy(aiStrategy, providerAdmission, strings.ToLower(cfg.AI.Provider), cfg.AI.ASRModel, cfg.AI.LLMModel)
 
 	// Kafka
 	if cfg.Kafka.DownloadTopic == "" {
@@ -116,8 +141,6 @@ func main() {
 	defer producer.Close()
 	log.Println("✅ Kafka 生产者就绪")
 
-	repos := repository.NewRepositories(db)
-
 	// Service & Handler
 	apiKeySecret := cfg.Security.APIKeySecret
 	if apiKeySecret == "" {
@@ -128,7 +151,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化 API Key 加密器失败: %v", err)
 	}
-	aiFactory := ai.NewFactory()
+	aiFactory := ai.NewFactoryWithAdmission(providerAdmission)
 	userSvc := service.NewUserService(repos.User, cfg.JWT)
 	aiProfileSvc := service.NewAIProfileService(repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
 	var ragStore service.RAGVectorStore
@@ -224,7 +247,7 @@ func main() {
 		BatchSize: cfg.TaskRetry.BatchSize,
 		Interval:  time.Duration(cfg.TaskRetry.ScanIntervalSeconds) * time.Second,
 	})
-	retryScheduler.Start(context.Background())
+	retryScheduler.Start(runtimeCtx)
 
 	// HTTP
 	if cfg.Server.Mode == "release" {

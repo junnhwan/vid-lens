@@ -34,13 +34,18 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 		index.BuildVersion = existing.BuildVersion
 	}
 	return r.db.Model(&existing).Updates(map[string]interface{}{
-		"embedding_dim": index.EmbeddingDim,
-		"status":        index.Status,
-		"chunk_count":   index.ChunkCount,
-		"last_error":    index.LastError,
-		"build_version": index.BuildVersion,
-		"started_at":    index.StartedAt,
-		"finished_at":   index.FinishedAt,
+		"embedding_dim":         index.EmbeddingDim,
+		"status":                index.Status,
+		"chunk_count":           index.ChunkCount,
+		"chunker_strategy":      index.ChunkerStrategy,
+		"chunker_version":       index.ChunkerVersion,
+		"chunk_size":            index.ChunkSize,
+		"chunk_overlap":         index.ChunkOverlap,
+		"chunk_manifest_sha256": index.ChunkManifestSHA256,
+		"last_error":            index.LastError,
+		"build_version":         index.BuildVersion,
+		"started_at":            index.StartedAt,
+		"finished_at":           index.FinishedAt,
 	}).Error
 }
 

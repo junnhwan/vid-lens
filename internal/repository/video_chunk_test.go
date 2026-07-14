@@ -119,3 +119,51 @@ func newVideoChunkTestRepo(t *testing.T) *VideoChunkRepository {
 	}
 	return NewVideoChunkRepository(db)
 }
+
+func TestVideoChunkRepositoryBM25UsesTokenStatisticsNotSubstringCounts(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunks := []model.VideoChunk{
+		{UserID: 7, TaskID: 1, ChunkIndex: 0, Content: "redis provides caching", ContentHash: "hash0", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "e0"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "red red queue", ContentHash: "hash1", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "e1"},
+	}
+	if err := repo.ReplaceTaskChunks(1, "m", chunks); err != nil {
+		t.Fatal(err)
+	}
+	results, err := repo.SearchByBM25(7, 1, "m", []string{"red"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Chunk.VectorID != "e1" {
+		t.Fatalf("results = %+v, want only exact token e1", results)
+	}
+}
+
+func TestVideoChunkRepositoryBM25ReturnsStableEvidenceIdentity(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunk := model.VideoChunk{UserID: 7, TaskID: 1, ChunkIndex: 3, Content: "令牌桶限制昂贵调用", ContentHash: "hash", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "task_1_hash_3"}
+	if err := repo.ReplaceTaskChunks(1, "m", []model.VideoChunk{chunk}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := repo.SearchByBM25(7, 1, "m", []string{"令牌桶"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Chunk.VectorID != "task_1_hash_3" {
+		t.Fatalf("results = %+v, want persisted stable VectorID", results)
+	}
+}
+
+func TestVideoChunkRepositoryListsStableEvidenceManifest(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunks := []model.VideoChunk{{UserID: 7, TaskID: 9, ChunkIndex: 1, VectorID: "task_9_hash_1", ContentHash: "hash", Content: "evidence text", EmbeddingModel: "m"}}
+	if err := repo.ReplaceTaskChunks(9, "m", chunks); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := repo.ListEvidenceManifest(7, 9, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest) != 1 || manifest[0].EvidenceID != "task_9_hash_1" || manifest[0].ChunkIndex != 1 {
+		t.Fatalf("manifest=%+v", manifest)
+	}
+}

@@ -45,3 +45,24 @@ func TestSplitTextIntoChunksRejectsInvalidOverlap(t *testing.T) {
 		t.Fatalf("unexpected chunks: %+v", chunks)
 	}
 }
+
+func TestSplitTextIntoChunksPrefersSemanticBoundary(t *testing.T) {
+	text := "第一句很短。第二句也不长。第三句结束。"
+	chunks := SplitTextIntoChunks(text, 12, 0)
+	if len(chunks) < 3 {
+		t.Fatalf("len(chunks) = %d, want sentence-aligned chunks: %+v", len(chunks), chunks)
+	}
+	for i := 0; i < len(chunks)-1; i++ {
+		last := []rune(chunks[i].Content)
+		if len(last) == 0 || last[len(last)-1] != '。' {
+			t.Fatalf("chunk[%d] = %q, want semantic sentence boundary", i, chunks[i].Content)
+		}
+	}
+	joined := ""
+	for _, chunk := range chunks {
+		joined += chunk.Content
+	}
+	if joined != text {
+		t.Fatalf("joined chunks = %q, want %q", joined, text)
+	}
+}

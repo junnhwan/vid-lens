@@ -24,20 +24,19 @@ type Profile struct {
 	RerankModel       string
 }
 
-type Factory struct{}
+type Factory struct{ admission Admission }
 
-func NewFactory() *Factory {
-	return &Factory{}
-}
+func NewFactory() *Factory                                 { return &Factory{} }
+func NewFactoryWithAdmission(admission Admission) *Factory { return &Factory{admission: admission} }
 
 func (f *Factory) NewASRStrategy(profile Profile) (Strategy, error) {
 	switch normalizeProvider(profile.ASRProvider) {
 	case "mimo":
-		return NewMimoStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), nil
+		return AdmitStrategy(NewMimoStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, "mimo", profile.ASRModel, profile.ASRModel), nil
 	case "siliconflow":
-		return NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), nil
+		return AdmitStrategy(NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, normalizeProvider(profile.ASRProvider), profile.ASRModel, profile.ASRModel), nil
 	case "openai_compatible":
-		return NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), nil
+		return AdmitStrategy(NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, normalizeProvider(profile.ASRProvider), profile.ASRModel, profile.ASRModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 ASR provider: %s", profile.ASRProvider)
 	}
@@ -46,9 +45,9 @@ func (f *Factory) NewASRStrategy(profile Profile) (Strategy, error) {
 func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
 	switch normalizeProvider(profile.LLMProvider) {
 	case "openai_compatible", "siliconflow":
-		return NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), nil
+		return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, normalizeProvider(profile.LLMProvider), profile.LLMModel), nil
 	case "mimo":
-		return NewMimoChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), nil
+		return AdmitChat(NewMimoChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, "mimo", profile.LLMModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 LLM provider: %s", profile.LLMProvider)
 	}
@@ -57,7 +56,7 @@ func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
 func (f *Factory) NewEmbeddingClient(profile Profile) (EmbeddingClient, error) {
 	switch normalizeProvider(profile.EmbeddingProvider) {
 	case "openai_compatible", "siliconflow":
-		return NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), nil
+		return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, normalizeProvider(profile.EmbeddingProvider), profile.EmbeddingModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 Embedding provider: %s", profile.EmbeddingProvider)
 	}

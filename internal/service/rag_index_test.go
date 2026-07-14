@@ -121,6 +121,16 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	if index.Status != model.RAGIndexStatusIndexed || index.ChunkCount != 4 || index.EmbeddingDim != 3 {
 		t.Fatalf("rag index = %+v, want indexed with 4 chunks and dim 3", index)
 	}
+	if index.ChunkerStrategy != ChunkerStrategyFixedWindow || index.ChunkerVersion != FixedWindowChunkerVersion || index.ChunkSize != 10 || index.ChunkOverlap != 2 {
+		t.Fatalf("rag index chunker provenance = %+v", index)
+	}
+	wantManifest, err := ComputeChunkManifestSHA256(chunks)
+	if err != nil {
+		t.Fatalf("ComputeChunkManifestSHA256() error = %v", err)
+	}
+	if index.ChunkManifestSHA256 != wantManifest {
+		t.Fatalf("chunk manifest hash = %q, want %q", index.ChunkManifestSHA256, wantManifest)
+	}
 }
 
 func TestRAGIndexServiceRecordsEmbeddingCalls(t *testing.T) {
@@ -432,4 +442,13 @@ func newRAGIndexTestRepositories(t *testing.T) *repository.Repositories {
 		t.Fatalf("AutoMigrate() error = %v", err)
 	}
 	return repository.NewRepositories(db)
+}
+
+func TestChunkEvidenceIDIsStableAndContentBound(t *testing.T) {
+	first := ChunkEvidenceID(9, 3, md5Hex("same content"))
+	second := ChunkEvidenceID(9, 3, md5Hex("same content"))
+	changed := ChunkEvidenceID(9, 3, md5Hex("changed content"))
+	if first == "" || first != second || first == changed {
+		t.Fatalf("ids first=%q second=%q changed=%q", first, second, changed)
+	}
 }

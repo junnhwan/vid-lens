@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
@@ -158,6 +159,84 @@ func (s *MilvusStore) DeleteTaskChunks(ctx context.Context, userID, taskID int64
 	return s.client.Flush(ctx, s.collection, false)
 }
 
+func (s *MilvusStore) ListTaskVectorManifest(ctx context.Context, userID, taskID int64, embeddingModel string) ([]service.RAGVectorManifestEntry, error) {
+	filter := fmt.Sprintf("%s == %d and %s == %d and %s == %q",
+		fieldUserID, userID, fieldTaskID, taskID, fieldEmbeddingModel, embeddingModel)
+	iterator, err := s.client.QueryIterator(ctx, client.NewQueryIteratorOption(s.collection).
+		WithExpr(filter).
+		WithOutputFields(fieldVectorID, fieldUserID, fieldTaskID, fieldChunkID, fieldChunkIndex, fieldContentHash, fieldEmbeddingModel).
+		WithBatchSize(1000))
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]service.RAGVectorManifestEntry, 0)
+	for {
+		result, nextErr := iterator.Next(ctx)
+		if nextErr == io.EOF {
+			break
+		}
+		if nextErr != nil {
+			return nil, nextErr
+		}
+		batch, parseErr := parseVectorManifestResultSet(result)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		entries = append(entries, batch...)
+	}
+	return entries, nil
+}
+
+func parseVectorManifestResultSet(result client.ResultSet) ([]service.RAGVectorManifestEntry, error) {
+	columns := map[string]entity.Column{
+		fieldVectorID: result.GetColumn(fieldVectorID), fieldUserID: result.GetColumn(fieldUserID),
+		fieldTaskID: result.GetColumn(fieldTaskID), fieldChunkID: result.GetColumn(fieldChunkID),
+		fieldChunkIndex: result.GetColumn(fieldChunkIndex), fieldContentHash: result.GetColumn(fieldContentHash),
+		fieldEmbeddingModel: result.GetColumn(fieldEmbeddingModel),
+	}
+	for name, column := range columns {
+		if column == nil {
+			return nil, fmt.Errorf("milvus vector manifest missing output field %s", name)
+		}
+	}
+	entries := make([]service.RAGVectorManifestEntry, 0, result.Len())
+	for i := 0; i < result.Len(); i++ {
+		evidenceID, err := columns[fieldVectorID].GetAsString(i)
+		if err != nil {
+			return nil, err
+		}
+		userID, err := columns[fieldUserID].GetAsInt64(i)
+		if err != nil {
+			return nil, err
+		}
+		taskID, err := columns[fieldTaskID].GetAsInt64(i)
+		if err != nil {
+			return nil, err
+		}
+		chunkID, err := columns[fieldChunkID].GetAsInt64(i)
+		if err != nil {
+			return nil, err
+		}
+		chunkIndex, err := columns[fieldChunkIndex].GetAsInt64(i)
+		if err != nil {
+			return nil, err
+		}
+		contentHash, err := columns[fieldContentHash].GetAsString(i)
+		if err != nil {
+			return nil, err
+		}
+		embeddingModel, err := columns[fieldEmbeddingModel].GetAsString(i)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, service.RAGVectorManifestEntry{
+			EvidenceID: evidenceID, UserID: userID, TaskID: taskID, ChunkID: chunkID,
+			ChunkIndex: int(chunkIndex), ContentHash: contentHash, EmbeddingModel: embeddingModel,
+		})
+	}
+	return entries, nil
+}
+
 func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.RetrievalRequest) ([]service.RetrievedChunk, error) {
 	if len(query) != s.dim {
 		return nil, fmt.Errorf("query embedding dim = %d, want %d", len(query), s.dim)
@@ -180,7 +259,7 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 		s.collection,
 		nil,
 		filter,
-		[]string{fieldChunkID, fieldChunkIndex, fieldContent},
+		[]string{fieldVectorID, fieldChunkID, fieldChunkIndex, fieldContent},
 		[]entity.Vector{entity.FloatVector(query)},
 		fieldEmbedding,
 		entity.COSINE,
@@ -198,10 +277,11 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 	if rs.Err != nil {
 		return nil, rs.Err
 	}
+	vectorIDCol := rs.Fields.GetColumn(fieldVectorID)
 	chunkIDCol := rs.Fields.GetColumn(fieldChunkID)
 	chunkIndexCol := rs.Fields.GetColumn(fieldChunkIndex)
 	contentCol := rs.Fields.GetColumn(fieldContent)
-	if chunkIDCol == nil || chunkIndexCol == nil || contentCol == nil {
+	if vectorIDCol == nil || chunkIDCol == nil || chunkIndexCol == nil || contentCol == nil {
 		return nil, fmt.Errorf("milvus search missing output fields")
 	}
 
@@ -210,6 +290,10 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 		score := rs.Scores[i]
 		if req.MinScore > 0 && score < req.MinScore {
 			continue
+		}
+		vectorID, err := vectorIDCol.GetAsString(i)
+		if err != nil {
+			return nil, err
 		}
 		chunkID, err := chunkIDCol.GetAsInt64(i)
 		if err != nil {
@@ -224,6 +308,7 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 			return nil, err
 		}
 		results = append(results, service.RetrievedChunk{
+			EvidenceID: vectorID,
 			ChunkID:    chunkID,
 			ChunkIndex: int(chunkIndex),
 			Score:      score,

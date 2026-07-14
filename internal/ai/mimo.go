@@ -134,13 +134,13 @@ func (s *MimoStrategy) chatCompletion(ctx context.Context, reqBody map[string]in
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%s 请求失败: %w", label, err)
+		return "", ProviderTransportError("mimo", label, err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s 返回错误 (HTTP %d): %s", label, resp.StatusCode, string(body))
+		return "", ProviderHTTPError("mimo", label, resp.StatusCode, resp.Header, body)
 	}
 
 	var result struct {

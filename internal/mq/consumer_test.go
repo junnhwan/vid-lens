@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/repository"
 )
 
@@ -239,15 +240,13 @@ func TestTranscribeAudioLogsChunkMetrics(t *testing.T) {
 
 	logText := logs.String()
 	for _, want := range []string{
-		"taskID=42",
-		"chunks=2",
-		"chunk=1/2",
-		fmt.Sprintf("path=%s", chunkA),
-		"chars=5",
-		"chunk=2/2",
-		fmt.Sprintf("path=%s", chunkB),
-		"chars=7",
-		"transcriptChars=14",
+		"task_id=42",
+		"chunk_count=2",
+		"chunk_index=1",
+		"output_chars=5",
+		"chunk_index=2",
+		"output_chars=7",
+		"output_chars=14",
 	} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("expected log to contain %q, got:\n%s", want, logText)
@@ -413,10 +412,13 @@ func TestIndexAfterTranscriptionCreatesQueuedRAGIndexJob(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
+	producer := &recordingRAGIndexProducer{}
 	consumer := &Consumer{repo: repos}
-	consumer.SetRAGIndexProducer(&recordingRAGIndexProducer{})
+	consumer.SetRAGIndexProducer(producer)
 
-	consumer.indexAfterTranscription(context.Background(), task)
+	if err := consumer.indexAfterTranscription(context.Background(), task); err != nil {
+		t.Fatalf("index after transcription: %v", err)
+	}
 
 	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
 	if err != nil {
@@ -424,6 +426,15 @@ func TestIndexAfterTranscriptionCreatesQueuedRAGIndexJob(t *testing.T) {
 	}
 	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageIndexing || job.TraceID != task.TraceID {
 		t.Fatalf("rag task_job = %+v, want queued/indexing", job)
+	}
+	if job.RetryBudgetID == "" {
+		t.Fatal("rag task_job retry budget ID is empty")
+	}
+	if len(producer.budgetIDs) != 1 || producer.budgetIDs[0] != job.RetryBudgetID {
+		t.Fatalf("rag enqueue budget IDs = %#v, want %q", producer.budgetIDs, job.RetryBudgetID)
+	}
+	if _, err := repos.RetryBudget.Get(job.RetryBudgetID); err != nil {
+		t.Fatalf("find rag retry budget: %v", err)
 	}
 }
 
@@ -477,8 +488,8 @@ func TestHandleRAGIndexInvokesIndexer(t *testing.T) {
 		UserID:   7,
 		FileMD5:  "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
 		Filename: "video.mp4",
-		Status:   model.TaskStatusCompleted,
-		Stage:    model.TaskStageNone,
+		Status:   model.TaskStatusRunning,
+		Stage:    model.TaskStageIndexing,
 	}
 	if err := repos.Task.Create(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -524,14 +535,64 @@ func TestHandleRAGIndexInvokesIndexer(t *testing.T) {
 	}
 }
 
+func TestHandleRAGIndexCarriesKafkaRetryBudgetIntoAIContext(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "dededededededededededededededede",
+		Filename: "budget.mp4", Status: model.TaskStatusRunning, Stage: model.TaskStageIndexing,
+		MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.TaskJob.UpsertQueued(task, model.TaskJobTypeRAGIndex, model.TaskStageIndexing, 3); err != nil {
+		t.Fatalf("create task job: %v", err)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeRAGIndex)
+	if err != nil || job == nil {
+		t.Fatalf("find task job: %+v %v", job, err)
+	}
+	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
+	if _, err := repos.RetryBudget.Ensure(repository.RetryBudgetSpec{
+		BudgetID: "rag-budget-1", TaskID: task.ID, JobID: job.ID,
+		Operation: model.TaskJobTypeRAGIndex, MaxAttempts: 3,
+		Deadline: now.Add(time.Hour), Now: now,
+	}); err != nil {
+		t.Fatalf("create retry budget: %v", err)
+	}
+	if _, err := repos.TaskJob.BindRetryBudget(task.ID, model.TaskJobTypeRAGIndex, "rag-budget-1"); err != nil {
+		t.Fatalf("bind retry budget: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "用于验证预算透传的转写", Words: 12}); err != nil {
+		t.Fatalf("create transcription: %v", err)
+	}
+
+	var got ai.GovernanceContext
+	consumer := &Consumer{repo: repos}
+	consumer.SetRAGIndexer(func(ctx context.Context, _ *model.VideoTask) error {
+		got = ai.GovernanceContextFromContext(ctx)
+		return nil
+	})
+	payload, _ := json.Marshal(RAGIndexPayload{TaskID: task.ID, TraceID: "trace-rag-budget", BudgetID: "rag-budget-1"})
+	if err := consumer.handleRAGIndex(context.Background(), kafka.Message{Value: payload}); err != nil {
+		t.Fatalf("handleRAGIndex: %v", err)
+	}
+	if got.RetryBudgetID != "rag-budget-1" {
+		t.Fatalf("governance retry budget = %q, want rag-budget-1", got.RetryBudgetID)
+	}
+	if got.Subject != "user:7" {
+		t.Fatalf("governance subject = %q, want user:7", got.Subject)
+	}
+}
+
 func TestHandleRAGIndexFailureSchedulesRetryButKeepsTranscription(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	task := &model.VideoTask{
 		UserID:     7,
 		FileMD5:    "efefefefefefefefefefefefefefefef",
 		Filename:   "video.mp4",
-		Status:     model.TaskStatusCompleted,
-		Stage:      model.TaskStageNone,
+		Status:     model.TaskStatusRunning,
+		Stage:      model.TaskStageIndexing,
 		MaxRetries: 3,
 	}
 	if err := repos.Task.Create(task); err != nil {
@@ -772,11 +833,11 @@ func TestHandleDownloadFailureMarksTaskFailedWithoutLeakingQueryInLog(t *testing
 	}
 
 	logText := logs.String()
-	if !strings.Contains(logText, "url=https://www.bilibili.com/video/BV1xx") {
-		t.Fatalf("expected sanitized URL in log, got: %s", logText)
+	if !strings.Contains(logText, "video download failed") {
+		t.Fatalf("expected structured failure event, got: %s", logText)
 	}
-	if strings.Contains(logText, "token=secret") || strings.Contains(logText, "#frag") {
-		t.Fatalf("log leaked query or fragment: %s", logText)
+	if strings.Contains(logText, "www.bilibili.com") || strings.Contains(logText, "token=secret") || strings.Contains(logText, "#frag") {
+		t.Fatalf("log leaked source URL, query, or fragment: %s", logText)
 	}
 }
 
@@ -1031,6 +1092,57 @@ func TestRetrySchedulerRestoresNextRetryWhenEnqueueFailsAfterClaim(t *testing.T)
 	}
 }
 
+func TestRetrySchedulerConsumesAndForwardsBoundRetryBudget(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Date(2026, 7, 14, 15, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-time.Second)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "abababababababababababababababab", Filename: "retry-budget.mp4",
+		Status: model.TaskStatusFailed, Stage: model.TaskStageTranscribing,
+		RetryCount: 1, MaxRetries: 3, NextRetryAt: &dueAt, LastJobType: TaskJobTranscribe,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.TaskJob.UpsertQueued(task, TaskJobTranscribe, model.TaskStageTranscribing, 3); err != nil {
+		t.Fatalf("create task job: %v", err)
+	}
+	if err := repos.TaskJob.RecordRetryableFailure(task.ID, TaskJobTranscribe, model.TaskStageTranscribing, "provider 503", 1, 3, dueAt); err != nil {
+		t.Fatalf("mark task job retryable: %v", err)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, TaskJobTranscribe)
+	if err != nil || job == nil {
+		t.Fatalf("find task job: %+v %v", job, err)
+	}
+	if _, err := repos.RetryBudget.Ensure(repository.RetryBudgetSpec{
+		BudgetID: "task-retry-budget-1", TaskID: task.ID, JobID: job.ID,
+		Operation: TaskJobTranscribe, MaxAttempts: 3, Deadline: now.Add(time.Hour), Now: now,
+	}); err != nil {
+		t.Fatalf("create retry budget: %v", err)
+	}
+	if _, err := repos.TaskJob.BindRetryBudget(task.ID, TaskJobTranscribe, "task-retry-budget-1"); err != nil {
+		t.Fatalf("bind retry budget: %v", err)
+	}
+
+	producer := &recordingRetryProducer{}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		BatchSize: 10, Now: func() time.Time { return now }, NewToken: func() string { return "dispatch-token-1" },
+	})
+	if err := scheduler.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if len(producer.transcribeBudgetIDs) != 1 || producer.transcribeBudgetIDs[0] != "task-retry-budget-1" {
+		t.Fatalf("forwarded budgets = %#v, want task-retry-budget-1", producer.transcribeBudgetIDs)
+	}
+	budget, err := repos.RetryBudget.Get("task-retry-budget-1")
+	if err != nil {
+		t.Fatalf("get retry budget: %v", err)
+	}
+	if budget.AttemptCount != 1 {
+		t.Fatalf("scheduler consumed attempts = %d, want 1", budget.AttemptCount)
+	}
+}
+
 func TestRetrySchedulerRequeuesRAGIndexJob(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
@@ -1072,11 +1184,12 @@ func TestRetrySchedulerRequeuesRAGIndexJob(t *testing.T) {
 }
 
 type recordingRetryProducer struct {
-	analyzes    []int64
-	transcribes []int64
-	downloads   []int64
-	ragIndexes  []int64
-	err         error
+	analyzes            []int64
+	transcribes         []int64
+	downloads           []int64
+	ragIndexes          []int64
+	transcribeBudgetIDs []string
+	err                 error
 }
 
 func (p *recordingRetryProducer) EnqueueAnalyze(_ context.Context, taskID int64, _ string) error {
@@ -1084,8 +1197,9 @@ func (p *recordingRetryProducer) EnqueueAnalyze(_ context.Context, taskID int64,
 	return p.err
 }
 
-func (p *recordingRetryProducer) EnqueueTranscribe(_ context.Context, taskID int64, _ string) error {
+func (p *recordingRetryProducer) EnqueueTranscribe(ctx context.Context, taskID int64, _ string) error {
 	p.transcribes = append(p.transcribes, taskID)
+	p.transcribeBudgetIDs = append(p.transcribeBudgetIDs, retryBudgetIDFromContext(ctx))
 	return p.err
 }
 
@@ -1100,14 +1214,16 @@ func (p *recordingRetryProducer) EnqueueRAGIndex(_ context.Context, taskID int64
 }
 
 type recordingRAGIndexProducer struct {
-	taskIDs  []int64
-	traceIDs []string
-	err      error
+	taskIDs   []int64
+	traceIDs  []string
+	budgetIDs []string
+	err       error
 }
 
 func (p *recordingRAGIndexProducer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
 	p.taskIDs = append(p.taskIDs, taskID)
 	p.traceIDs = append(p.traceIDs, TraceIDFromContext(ctx))
+	p.budgetIDs = append(p.budgetIDs, RetryBudgetIDFromContext(ctx))
 	return p.err
 }
 
@@ -1133,9 +1249,61 @@ func newConsumerTestRepositories(t *testing.T) *repository.Repositories {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get test sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}
 
 	return repository.NewRepositories(db)
+}
+
+func TestTranscribeAudioOverridesAnalyzeContextWithActualStage(t *testing.T) {
+	strategy := &stageCapturingStrategy{}
+	consumer := &Consumer{ffmpegPath: "ffmpeg", splitAudio: func(context.Context, string, string, int) ([]string, error) { return []string{"chunk-1.mp3"}, nil }}
+	ctx := observability.WithCorrelation(context.Background(), observability.Correlation{Stage: model.TaskStageSummarizing, Attempt: 2})
+	if _, err := consumer.transcribeAudio(ctx, 42, "audio.mp3", strategy); err != nil {
+		t.Fatal(err)
+	}
+	if strategy.transcribe.Stage != model.TaskStageTranscribing || strategy.transcribe.Attempt != 2 {
+		t.Fatalf("correlation=%+v", strategy.transcribe)
+	}
+}
+
+func TestSummarizeTaskOverridesContextWithActualStage(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "92929292929292929292929292929292", Filename: "summary.mp4", Status: model.TaskStatusRunning, Stage: model.TaskStageTranscribing}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "transcript"}); err != nil {
+		t.Fatal(err)
+	}
+	strategy := &stageCapturingStrategy{}
+	consumer := &Consumer{repo: repos, ai: strategy}
+	ctx := observability.WithCorrelation(context.Background(), observability.Correlation{Stage: model.TaskStageTranscribing, Attempt: 3})
+	if err := consumer.summarizeTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if strategy.summarize.Stage != model.TaskStageSummarizing || strategy.summarize.Attempt != 3 {
+		t.Fatalf("correlation=%+v", strategy.summarize)
+	}
+}
+
+type stageCapturingStrategy struct{ transcribe, summarize observability.Correlation }
+
+func (s *stageCapturingStrategy) Transcribe(ctx context.Context, _ string) (string, error) {
+	s.transcribe = observability.CorrelationFromContext(ctx)
+	return "text", nil
+}
+func (s *stageCapturingStrategy) TranscribeChunks(ctx context.Context, _ []string) (string, error) {
+	s.transcribe = observability.CorrelationFromContext(ctx)
+	return "text", nil
+}
+func (s *stageCapturingStrategy) Summarize(ctx context.Context, _ string) (string, error) {
+	s.summarize = observability.CorrelationFromContext(ctx)
+	return "summary", nil
 }

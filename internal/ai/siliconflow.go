@@ -39,31 +39,9 @@ func NewSiliconFlowStrategy(apiKey, baseURL, asrModel, llmModel string) *Silicon
 // Transcribe 调用 ASR 接口：音频 → 文字
 // 面试亮点：指数退避重试（1s → 2s → 4s），客户端错误不重试
 func (s *SiliconFlowStrategy) Transcribe(ctx context.Context, audioPath string) (string, error) {
-	var lastErr error
-
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			waitTime := time.Second * time.Duration(1<<(attempt-1)) // 1s, 2s, 4s
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(waitTime):
-			}
-		}
-
-		text, err := s.doTranscribe(ctx, audioPath)
-		if err == nil {
-			return text, nil
-		}
-		lastErr = err
-
-		// 客户端错误（如 401/400）不重试
-		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "400") {
-			break
-		}
-	}
-
-	return "", fmt.Errorf("ASR 重试 3 次后仍失败: %w", lastErr)
+	// Provider 内部不再自行重试，避免绕过统一准入并造成多层重试放大。
+	// 长退避由任务调度层负责；持久化共享预算将在后续阶段接入。
+	return s.doTranscribe(ctx, audioPath)
 }
 
 func (s *SiliconFlowStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
@@ -122,13 +100,13 @@ func (s *SiliconFlowStrategy) doTranscribe(ctx context.Context, audioPath string
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ASR 请求失败: %w", err)
+		return "", ProviderTransportError("siliconflow", "asr", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ASR 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", ProviderHTTPError("siliconflow", "asr", resp.StatusCode, resp.Header, body)
 	}
 
 	var result struct {
@@ -204,13 +182,13 @@ func (s *SiliconFlowStrategy) Summarize(ctx context.Context, text string) (strin
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("LLM 请求失败: %w", err)
+		return "", ProviderTransportError("siliconflow", "chat", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("LLM 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", ProviderHTTPError("siliconflow", "chat", resp.StatusCode, resp.Header, body)
 	}
 
 	var result struct {

@@ -36,32 +36,45 @@ func (r *TaskJobRepository) upsertDispatchState(task *model.VideoTask, jobType s
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	retryCount := task.RetryCount
-	if resetRetry {
-		retryCount = 0
-	}
+	// A TaskJob owns its stage retry budget. A newly created stage always
+	// starts at zero and never inherits the compatibility mirror on VideoTask.
+	retryCount := 0
 	job := &model.TaskJob{
-		TaskID:     task.ID,
-		UserID:     task.UserID,
-		JobType:    jobType,
-		Status:     status,
-		Stage:      stage,
-		TraceID:    task.TraceID,
-		RetryCount: retryCount,
-		MaxRetries: maxRetries,
+		TaskID:          task.ID,
+		UserID:          task.UserID,
+		JobType:         jobType,
+		Status:          status,
+		Stage:           stage,
+		TraceID:         task.TraceID,
+		RetryCount:      retryCount,
+		MaxRetries:      maxRetries,
+		ProcessingToken: task.ProcessingToken,
+		LeaseKind:       task.LeaseKind,
+		LeaseExpiresAt:  task.LeaseExpiresAt,
+		LeaseVersion:    task.LeaseVersion,
 	}
 	updates := map[string]interface{}{
-		"user_id":         task.UserID,
-		"status":          status,
-		"stage":           stage,
-		"trace_id":        task.TraceID,
-		"retry_count":     retryCount,
-		"max_retries":     maxRetries,
-		"next_retry_at":   nil,
-		"last_error_code": "",
-		"last_error_msg":  "",
-		"started_at":      nil,
-		"finished_at":     nil,
+		"user_id":          task.UserID,
+		"status":           status,
+		"stage":            stage,
+		"trace_id":         task.TraceID,
+		"max_retries":      maxRetries,
+		"next_retry_at":    nil,
+		"last_error_code":  "",
+		"last_error_msg":   "",
+		"processing_token": task.ProcessingToken,
+		"lease_kind":       task.LeaseKind,
+		"lease_expires_at": task.LeaseExpiresAt,
+		"lease_version":    task.LeaseVersion,
+		"started_at":       nil,
+		"finished_at":      nil,
+	}
+	if resetRetry {
+		updates["retry_count"] = 0
+		// An explicit user submission starts a new retry cycle. Scheduler
+		// redispatches never call UpsertQueued, so they keep the same budget.
+		updates["retry_budget_id"] = ""
+		updates["retry_budget_generation"] = gorm.Expr("retry_budget_generation + 1")
 	}
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "task_id"}, {Name: "job_type"}},
@@ -204,7 +217,32 @@ func (r *TaskJobRepository) ensureJob(taskID int64, jobType, stage string, maxRe
 		Status:     task.Status,
 		Stage:      stage,
 		TraceID:    task.TraceID,
-		RetryCount: task.RetryCount,
+		RetryCount: 0,
 		MaxRetries: maxRetries,
 	}).Error
+}
+
+// BindRetryBudget assigns a durable budget once. Replays may bind the same ID,
+// but cannot replace an existing budget with a different one.
+func (r *TaskJobRepository) BindRetryBudget(taskID int64, jobType, budgetID string) (bool, error) {
+	if taskID <= 0 || jobType == "" || budgetID == "" {
+		return false, errors.New("invalid task retry budget binding")
+	}
+	result := r.db.Model(&model.TaskJob{}).
+		Where("task_id = ? AND job_type = ? AND (retry_budget_id = '' OR retry_budget_id IS NULL)", taskID, jobType).
+		Update("retry_budget_id", budgetID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+	var job model.TaskJob
+	if err := r.db.Where("task_id = ? AND job_type = ?", taskID, jobType).First(&job).Error; err != nil {
+		return false, err
+	}
+	if job.RetryBudgetID != budgetID {
+		return false, errors.New("task job already uses a different retry budget")
+	}
+	return false, nil
 }

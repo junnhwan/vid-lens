@@ -59,18 +59,21 @@ func (e *ContextExpander) Expand(ctx context.Context, userID, taskID int64, embe
 		}
 
 		next := citation
-		if next.AnchorContent == "" {
-			next.AnchorContent = citation.Content
+		content, anchor, selectedStart, selectedEnd, truncated, ok := joinChunkWindowPreservingAnchor(window, citation.ChunkIndex, e.MaxCharsPerCitation)
+		if !ok {
+			fallback := citation
+			fallback.Fallbacks = appendFallback(fallback.Fallbacks, "window_anchor_missing")
+			expanded = append(expanded, fallback)
+			continue
 		}
-		next.Content = joinChunkWindow(window)
+		next.AnchorContent = anchor
+		next.Content = content
 		next.ExpandedFromChunkIndex = citation.ChunkIndex
-		next.ExpandedWindowStart = window[0].ChunkIndex
-		next.ExpandedWindowEnd = window[len(window)-1].ChunkIndex
-		if e.MaxCharsPerCitation > 0 {
-			next.Content, next.WindowTruncated = truncateRunes(next.Content, e.MaxCharsPerCitation)
-			if next.WindowTruncated {
-				next.Fallbacks = appendFallback(next.Fallbacks, "window_truncated")
-			}
+		next.ExpandedWindowStart = selectedStart
+		next.ExpandedWindowEnd = selectedEnd
+		next.WindowTruncated = truncated
+		if next.WindowTruncated {
+			next.Fallbacks = appendFallback(next.Fallbacks, "window_truncated")
 		}
 		expanded = append(expanded, next)
 	}
@@ -95,6 +98,71 @@ func joinChunkWindow(chunks []model.VideoChunk) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func joinChunkWindowPreservingAnchor(chunks []model.VideoChunk, anchorIndex, maxRunes int) (content, anchor string, start, end int, truncated, ok bool) {
+	anchorPos := -1
+	for i := range chunks {
+		if chunks[i].ChunkIndex == anchorIndex {
+			anchorPos = i
+			break
+		}
+	}
+	if anchorPos < 0 {
+		return "", "", 0, 0, false, false
+	}
+	anchor = strings.TrimSpace(chunks[anchorPos].Content)
+	if anchor == "" {
+		return "", "", 0, 0, false, false
+	}
+	joined := joinChunkWindow(chunks)
+	if maxRunes <= 0 || len([]rune(joined)) <= maxRunes {
+		return joined, anchor, chunks[0].ChunkIndex, chunks[len(chunks)-1].ChunkIndex, false, true
+	}
+
+	// The citation identity points at the anchor chunk, so the anchor is a hard
+	// constraint while the configured character budget is soft. If the anchor
+	// itself exceeds the budget, keep it intact and omit all neighbors.
+	selected := map[int]bool{anchorPos: true}
+	used := len([]rune(anchor))
+	for distance := 1; anchorPos-distance >= 0 || anchorPos+distance < len(chunks); distance++ {
+		for _, pos := range []int{anchorPos - distance, anchorPos + distance} {
+			if pos < 0 || pos >= len(chunks) {
+				continue
+			}
+			part := strings.TrimSpace(chunks[pos].Content)
+			if part == "" {
+				continue
+			}
+			cost := len([]rune(part))
+			if used > 0 {
+				cost++ // newline separator
+			}
+			if used+cost <= maxRunes {
+				selected[pos] = true
+				used += cost
+			}
+		}
+	}
+	parts := make([]string, 0, len(selected))
+	start, end = anchorIndex, anchorIndex
+	for i, chunk := range chunks {
+		if !selected[i] {
+			continue
+		}
+		part := strings.TrimSpace(chunk.Content)
+		if part == "" {
+			continue
+		}
+		parts = append(parts, part)
+		if chunk.ChunkIndex < start {
+			start = chunk.ChunkIndex
+		}
+		if chunk.ChunkIndex > end {
+			end = chunk.ChunkIndex
+		}
+	}
+	return strings.Join(parts, "\n"), anchor, start, end, true, true
 }
 
 func truncateRunes(text string, maxRunes int) (string, bool) {

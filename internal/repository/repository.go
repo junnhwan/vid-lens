@@ -9,6 +9,7 @@ type Repositories struct {
 	Asset              *AssetRepository
 	Task               *TaskRepository
 	TaskJob            *TaskJobRepository
+	TaskMessageFailure *TaskMessageFailureRepository
 	Transcription      *TranscriptionRepository
 	TranscriptionChunk *TranscriptionChunkRepository
 	Summary            *SummaryRepository
@@ -17,6 +18,9 @@ type Repositories struct {
 	RAGIndex           *RAGIndexRepository
 	Chat               *ChatRepository
 	AICallLog          *AICallLogRepository
+	RetryBudget        *RetryBudgetRepository
+	UsageLedger        *UsageLedgerRepository
+	QuotaCompensation  *QuotaCompensationRepository
 }
 
 // NewRepositories 创建所有 Repository 实例
@@ -27,6 +31,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Asset:              NewAssetRepository(db),
 		Task:               NewTaskRepository(db),
 		TaskJob:            NewTaskJobRepository(db),
+		TaskMessageFailure: NewTaskMessageFailureRepository(db),
 		Transcription:      NewTranscriptionRepository(db),
 		TranscriptionChunk: NewTranscriptionChunkRepository(db),
 		Summary:            NewSummaryRepository(db),
@@ -35,6 +40,9 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		RAGIndex:           NewRAGIndexRepository(db),
 		Chat:               NewChatRepository(db),
 		AICallLog:          NewAICallLogRepository(db),
+		RetryBudget:        NewRetryBudgetRepository(db),
+		UsageLedger:        NewUsageLedgerRepository(db),
+		QuotaCompensation:  NewQuotaCompensationRepository(db),
 	}
 }
 

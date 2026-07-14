@@ -75,13 +75,13 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (st
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("LLM 请求失败: %w", err)
+		return "", ProviderTransportError("openai_compatible", "chat", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("LLM 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", ProviderHTTPError("openai_compatible", "chat", resp.StatusCode, resp.Header, body)
 	}
 
 	var result struct {
@@ -124,13 +124,13 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("LLM 流式请求失败: %w", err)
+		return ProviderTransportError("openai_compatible", "chat_stream", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("LLM 流式返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return ProviderHTTPError("openai_compatible", "chat_stream", resp.StatusCode, resp.Header, body)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

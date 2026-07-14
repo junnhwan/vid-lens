@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gorm.io/gorm"
 	"vid-lens/internal/model"
@@ -34,6 +35,14 @@ func (r *VideoChunkRepository) ReplaceTaskChunks(taskID int64, embeddingModel st
 		}
 		return tx.Create(&chunks).Error
 	})
+}
+
+func (r *VideoChunkRepository) ListAllByTaskID(taskID int64) ([]model.VideoChunk, error) {
+	var chunks []model.VideoChunk
+	err := r.db.Where("task_id = ?", taskID).
+		Order("user_id asc, embedding_model asc, chunk_index asc").
+		Find(&chunks).Error
+	return chunks, err
 }
 
 func (r *VideoChunkRepository) ListByTaskID(userID, taskID int64, embeddingModel string) ([]model.VideoChunk, error) {
@@ -80,16 +89,20 @@ func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel
 	docFreq := make(map[string]int, len(terms))
 	totalLength := 0.0
 	for i, chunk := range chunks {
-		content := strings.ToLower(chunk.Content)
-		length := float64(len([]rune(content)))
+		tokens := tokenizeBM25Text(chunk.Content)
+		length := float64(len(tokens))
 		if length <= 0 {
 			length = 1
 		}
 		docLengths[i] = length
 		totalLength += length
+		allFreqs := make(map[string]int, len(tokens))
+		for _, token := range tokens {
+			allFreqs[token]++
+		}
 		freqs := make(map[string]int, len(terms))
 		for _, term := range terms {
-			count := strings.Count(content, term)
+			count := allFreqs[term]
 			if count > 0 {
 				freqs[term] = count
 				docFreq[term]++
@@ -164,4 +177,79 @@ func normalizeSearchTerms(terms []string) []string {
 		out = append(out, term)
 	}
 	return out
+}
+
+// tokenizeBM25Text creates deterministic word tokens for Latin text and 2-4
+// character n-grams for contiguous Han text. Unlike substring counting this
+// prevents an ASCII query such as "red" from matching "redis", while still
+// providing reproducible lexical statistics without depending on a MySQL
+// deployment-specific Chinese full-text parser.
+func tokenizeBM25Text(text string) []string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return nil
+	}
+	var tokens []string
+	var latin, han []rune
+	flushLatin := func() {
+		if len(latin) > 0 {
+			tokens = append(tokens, string(latin))
+		}
+		latin = latin[:0]
+	}
+	flushHan := func() {
+		if len(han) == 0 {
+			return
+		}
+		if len(han) == 1 {
+			tokens = append(tokens, string(han))
+			han = han[:0]
+			return
+		}
+		for n := 2; n <= 4; n++ {
+			if len(han) < n {
+				continue
+			}
+			for i := 0; i+n <= len(han); i++ {
+				tokens = append(tokens, string(han[i:i+n]))
+			}
+		}
+		han = han[:0]
+	}
+	for _, r := range text {
+		switch {
+		case unicode.Is(unicode.Han, r):
+			flushLatin()
+			han = append(han, r)
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			flushHan()
+			latin = append(latin, r)
+		default:
+			flushLatin()
+			flushHan()
+		}
+	}
+	flushLatin()
+	flushHan()
+	return tokens
+}
+
+type ChunkEvidenceManifestEntry struct {
+	TaskID      int64  `json:"task_id" yaml:"task_id"`
+	ChunkIndex  int    `json:"chunk_index" yaml:"chunk_index"`
+	EvidenceID  string `json:"evidence_id" yaml:"evidence_id"`
+	ContentHash string `json:"content_hash" yaml:"content_hash"`
+	Content     string `json:"content" yaml:"content"`
+}
+
+func (r *VideoChunkRepository) ListEvidenceManifest(userID, taskID int64, embeddingModel string) ([]ChunkEvidenceManifestEntry, error) {
+	var chunks []model.VideoChunk
+	if err := r.db.Where("user_id = ? AND task_id = ? AND embedding_model = ?", userID, taskID, embeddingModel).Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ChunkEvidenceManifestEntry, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, ChunkEvidenceManifestEntry{TaskID: chunk.TaskID, ChunkIndex: chunk.ChunkIndex, EvidenceID: chunk.VectorID, ContentHash: chunk.ContentHash, Content: chunk.Content})
+	}
+	return out, nil
 }

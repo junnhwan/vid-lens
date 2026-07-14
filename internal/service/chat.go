@@ -31,6 +31,7 @@ type ChatConfig struct {
 	CandidateK  int
 	MinScore    float32
 	RecentTurns int
+	Retrieval   *RAGRetrievalConfig
 }
 
 type RetrievalRequest struct {
@@ -42,6 +43,7 @@ type RetrievalRequest struct {
 }
 
 type RetrievedChunk struct {
+	EvidenceID             string   `json:"evidence_id"`
 	ChunkID                int64    `json:"chunk_id"`
 	ChunkIndex             int      `json:"chunk_index"`
 	Score                  float32  `json:"score"`
@@ -337,19 +339,26 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 }
 
 func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *RetrievalPipeline {
-	return &RetrievalPipeline{
-		repos:     s.repos,
-		retriever: s.retriever,
-		rewriter:  NewLLMQueryRewriter(chat),
-		expander: &ContextExpander{
-			repos:               s.repos,
-			Radius:              1,
-			MaxCharsPerCitation: 4000,
-		},
-		reranker:   DeterministicReranker{},
-		CandidateK: s.candidateK(topK),
-		MinScore:   s.cfg.MinScore,
+	cfg := s.cfg.Retrieval
+	var rewriter QueryRewriter = NewLLMQueryRewriter(chat)
+	var expander *ContextExpander
+	if cfg == nil {
+		expander = &ContextExpander{repos: s.repos, Radius: 1, MaxCharsPerCitation: 4000}
+	} else {
+		switch cfg.QueryMode {
+		case QueryModeOriginal:
+			rewriter = NoopQueryRewriter{}
+		case QueryModePreprocess:
+			rewriter = PreprocessQueryRewriter{}
+		case QueryModeRewrite:
+			rewriter = NewLLMQueryRewriter(chat)
+		}
+		if cfg.NeighborRadius > 0 {
+			expander = &ContextExpander{repos: s.repos, Radius: cfg.NeighborRadius, MaxCharsPerCitation: cfg.MaxContextChars}
+		}
 	}
+	return &RetrievalPipeline{repos: s.repos, retriever: s.retriever, rewriter: rewriter, expander: expander,
+		reranker: DeterministicReranker{}, CandidateK: s.candidateK(topK), MinScore: s.cfg.MinScore, Config: cfg}
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []RetrievedChunk, recentLimit int, modelName string) (*AskResult, error) {
@@ -411,6 +420,7 @@ func (s *ChatService) mergeKeywordChunks(taskID, userID int64, embeddingModel, q
 	keywordChunks := make([]RetrievedChunk, 0, len(keywordResults))
 	for _, result := range keywordResults {
 		keywordChunks = append(keywordChunks, RetrievedChunk{
+			EvidenceID:  result.Chunk.VectorID,
 			ChunkID:     result.Chunk.ID,
 			ChunkIndex:  result.Chunk.ChunkIndex,
 			Score:       float32(result.Score),
@@ -423,6 +433,9 @@ func (s *ChatService) mergeKeywordChunks(taskID, userID int64, embeddingModel, q
 }
 
 func retrievalChunkKey(chunk RetrievedChunk) string {
+	if evidenceID := strings.TrimSpace(chunk.EvidenceID); evidenceID != "" {
+		return "evidence:" + evidenceID
+	}
 	if chunk.ChunkID > 0 {
 		return fmt.Sprintf("id:%d", chunk.ChunkID)
 	}

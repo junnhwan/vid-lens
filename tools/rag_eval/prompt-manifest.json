@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "ragas_version": "0.4.3",
+  "metrics": {
+    "context_precision": "LLMContextPrecisionWithReference/default",
+    "context_recall": "LLMContextRecall/default",
+    "faithfulness": "Faithfulness/default",
+    "response_relevancy": "ResponseRelevancy/default",
+    "factual_correctness": "FactualCorrectness/default",
+    "noise_sensitivity": "NoiseSensitivity/default"
+  },
+  "note": "Ragas is version-pinned; this manifest is hashed into every run. Provider-side system prompts and raw responses are captured best-effort through callbacks."
+}

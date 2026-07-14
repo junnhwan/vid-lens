@@ -9,6 +9,7 @@ func AllModels() []interface{} {
 		&VideoAsset{},
 		&VideoTask{},
 		&TaskJob{},
+		&KafkaMessageFailure{},
 		&VideoTranscription{},
 		&VideoTranscriptionChunk{},
 		&AISummary{},
@@ -18,6 +19,10 @@ func AllModels() []interface{} {
 		&ChatSession{},
 		&ChatMessage{},
 		&AICallLog{},
+		&AIRetryBudget{},
+		&AIRetryAttempt{},
+		&AIUsageLedger{},
+		&QuotaCompensation{},
 		&UserUsageDaily{},
 	}
 }

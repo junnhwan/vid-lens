@@ -121,3 +121,33 @@ func containsFallback(fallbacks []string, want string) bool {
 	}
 	return false
 }
+
+func TestContextExpanderTruncationAlwaysKeepsFullAnchor(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+		"left-neighbor-is-long", "ANCHOR-EVIDENCE", "right-neighbor-is-long",
+	})
+	expander := &ContextExpander{repos: repos, Radius: 1, MaxCharsPerCitation: 12}
+
+	expanded, err := expander.Expand(context.Background(), 7, 1, "text-embedding-3-small", []RetrievedChunk{
+		{EvidenceID: "stable-anchor", ChunkID: 2, ChunkIndex: 1, Content: "ANCHOR-EVIDENCE"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded) != 1 {
+		t.Fatalf("len(expanded) = %d, want 1", len(expanded))
+	}
+	if !strings.Contains(expanded[0].Content, "ANCHOR-EVIDENCE") {
+		t.Fatalf("expanded content %q dropped or truncated its referenced anchor", expanded[0].Content)
+	}
+	if expanded[0].AnchorContent != "ANCHOR-EVIDENCE" {
+		t.Fatalf("AnchorContent = %q, want full persisted anchor", expanded[0].AnchorContent)
+	}
+	if expanded[0].EvidenceID != "stable-anchor" {
+		t.Fatalf("EvidenceID changed to %q", expanded[0].EvidenceID)
+	}
+	if !expanded[0].WindowTruncated {
+		t.Fatal("WindowTruncated = false, want true when neighbors are omitted")
+	}
+}

@@ -24,6 +24,11 @@ const (
 )
 
 const (
+	TaskLeaseKindProcessing = "processing"
+	TaskLeaseKindDispatch   = "dispatch"
+)
+
+const (
 	TaskStageNone         = "none"
 	TaskStageDownloading  = "downloading"
 	TaskStageUploaded     = "uploaded"
@@ -57,6 +62,10 @@ type VideoTask struct {
 	LastErrorCode   string         `gorm:"type:varchar(100)" json:"last_error_code"`
 	LastErrorMsg    string         `gorm:"type:varchar(500)" json:"last_error_msg"`
 	LastJobType     string         `gorm:"type:varchar(30);index" json:"last_job_type"`
+	ProcessingToken string         `gorm:"type:varchar(64);index" json:"-"`
+	LeaseKind       string         `gorm:"type:varchar(20);index" json:"-"`
+	LeaseExpiresAt  *time.Time     `gorm:"index" json:"-"`
+	LeaseVersion    int64          `gorm:"default:0" json:"-"`
 	StageStartedAt  *time.Time     `json:"stage_started_at,omitempty"`
 	StageFinishedAt *time.Time     `json:"stage_finished_at,omitempty"`
 	StartedAt       *time.Time     `json:"started_at,omitempty"`

@@ -46,3 +46,16 @@ func TestExtractQueryTermsPreservesEnglishNumbersAndChineseNgrams(t *testing.T) 
 		}
 	}
 }
+
+func TestFuseRetrievedChunksDeduplicatesByStableEvidenceID(t *testing.T) {
+	vectorChunks := []RetrievedChunk{{EvidenceID: "task_9_semantic-v1_deadbeef_3", ChunkID: 10, ChunkIndex: 3, Content: "vector copy"}}
+	keywordChunks := []RetrievedChunk{{EvidenceID: "task_9_semantic-v1_deadbeef_3", ChunkID: 99, ChunkIndex: 3, Content: "mysql copy"}}
+
+	fused := FuseRetrievedChunks(vectorChunks, keywordChunks, 5, 60)
+	if len(fused) != 1 {
+		t.Fatalf("len(fused) = %d, want stable evidence merged once: %+v", len(fused), fused)
+	}
+	if fused[0].Source != RetrievalSourceHybrid || fused[0].VectorRank != 1 || fused[0].KeywordRank != 1 {
+		t.Fatalf("fused evidence = %+v, want both retrieval ranks", fused[0])
+	}
+}

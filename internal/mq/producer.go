@@ -10,20 +10,71 @@ import (
 
 // AnalyzePayload 任务消息载荷
 type AnalyzePayload struct {
-	TaskID  int64  `json:"task_id"`
-	MD5     string `json:"md5"`
-	TraceID string `json:"trace_id"`
+	TaskID     int64  `json:"task_id"`
+	MD5        string `json:"md5"`
+	TraceID    string `json:"trace_id"`
+	ClaimToken string `json:"claim_token,omitempty"`
+	BudgetID   string `json:"budget_id,omitempty"`
 }
 
 type DownloadPayload struct {
-	TaskID  int64  `json:"task_id"`
-	Key     string `json:"key"`
-	TraceID string `json:"trace_id"`
+	TaskID     int64  `json:"task_id"`
+	Key        string `json:"key"`
+	TraceID    string `json:"trace_id"`
+	ClaimToken string `json:"claim_token,omitempty"`
+	BudgetID   string `json:"budget_id,omitempty"`
 }
 
 type RAGIndexPayload struct {
-	TaskID  int64  `json:"task_id"`
-	TraceID string `json:"trace_id"`
+	TaskID     int64  `json:"task_id"`
+	TraceID    string `json:"trace_id"`
+	ClaimToken string `json:"claim_token,omitempty"`
+	BudgetID   string `json:"budget_id,omitempty"`
+}
+
+type retryBudgetContextKey struct{}
+
+// ContextWithRetryBudgetID carries the durable retry-cycle identity into a
+// Kafka payload. It is exported so request services and internal handoffs use
+// exactly the same context contract as the RetryScheduler.
+func ContextWithRetryBudgetID(ctx context.Context, budgetID string) context.Context {
+	if budgetID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, retryBudgetContextKey{}, budgetID)
+}
+
+func RetryBudgetIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(retryBudgetContextKey{}).(string)
+	return value
+}
+
+func contextWithRetryBudgetID(ctx context.Context, budgetID string) context.Context {
+	return ContextWithRetryBudgetID(ctx, budgetID)
+}
+
+func retryBudgetIDFromContext(ctx context.Context) string {
+	return RetryBudgetIDFromContext(ctx)
+}
+
+type claimTokenContextKey struct{}
+
+func contextWithClaimToken(ctx context.Context, token string) context.Context {
+	if token == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, claimTokenContextKey{}, token)
+}
+
+func claimTokenFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	token, _ := ctx.Value(claimTokenContextKey{}).(string)
+	return token
 }
 
 // Producer Kafka 生产者
@@ -76,9 +127,11 @@ func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic 
 // 使用 MD5 作为消息 Key → 同一视频的任务会被路由到同一分区，保证消费顺序
 func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
-		TaskID:  taskID,
-		MD5:     md5,
-		TraceID: TraceIDFromContext(ctx),
+		TaskID:     taskID,
+		MD5:        md5,
+		TraceID:    TraceIDFromContext(ctx),
+		ClaimToken: claimTokenFromContext(ctx),
+		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 
 	return p.analyzeWriter.WriteMessages(ctx, kafka.Message{
@@ -90,9 +143,11 @@ func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string)
 // EnqueueTranscribe 投递文字提取任务
 func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
-		TaskID:  taskID,
-		MD5:     md5,
-		TraceID: TraceIDFromContext(ctx),
+		TaskID:     taskID,
+		MD5:        md5,
+		TraceID:    TraceIDFromContext(ctx),
+		ClaimToken: claimTokenFromContext(ctx),
+		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 
 	return p.transcribeWriter.WriteMessages(ctx, kafka.Message{
@@ -103,9 +158,11 @@ func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 stri
 
 func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string) error {
 	payload, _ := json.Marshal(DownloadPayload{
-		TaskID:  taskID,
-		Key:     key,
-		TraceID: TraceIDFromContext(ctx),
+		TaskID:     taskID,
+		Key:        key,
+		TraceID:    TraceIDFromContext(ctx),
+		ClaimToken: claimTokenFromContext(ctx),
+		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 
 	return p.downloadWriter.WriteMessages(ctx, kafka.Message{
@@ -123,8 +180,10 @@ func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
 
 func newRAGIndexMessage(ctx context.Context, taskID int64) kafka.Message {
 	payload, _ := json.Marshal(RAGIndexPayload{
-		TaskID:  taskID,
-		TraceID: TraceIDFromContext(ctx),
+		TaskID:     taskID,
+		TraceID:    TraceIDFromContext(ctx),
+		ClaimToken: claimTokenFromContext(ctx),
+		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 	key := fmt.Sprint(taskID)
 	return kafka.Message{

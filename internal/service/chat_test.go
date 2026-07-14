@@ -726,3 +726,21 @@ func newChatServiceTestRepositories(t *testing.T) *repository.Repositories {
 	}
 	return repository.NewRepositories(db)
 }
+
+func TestChatServiceBuildsRetrievalPipelineFromExplicitConfig(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.QueryMode = QueryModePreprocess
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	svc := NewChatService(nil, &fakeRetriever{}, ChatConfig{Retrieval: &cfg})
+	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{})
+	if pipeline.Config != &cfg {
+		t.Fatalf("pipeline config=%p want=%p", pipeline.Config, &cfg)
+	}
+	if _, ok := pipeline.rewriter.(PreprocessQueryRewriter); !ok {
+		t.Fatalf("rewriter=%T", pipeline.rewriter)
+	}
+	if pipeline.expander != nil {
+		t.Fatalf("expander=%+v want nil", pipeline.expander)
+	}
+}

@@ -223,6 +223,12 @@ func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
 	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageTranscribing || job.TraceID != "trace-transcribe" {
 		t.Fatalf("transcribe task_job = %+v", job)
 	}
+	if job.RetryBudgetID == "" || len(producer.transcribeBudgetIDs) != 1 || producer.transcribeBudgetIDs[0] != job.RetryBudgetID {
+		t.Fatalf("transcribe retry budget job/context = %q/%#v", job.RetryBudgetID, producer.transcribeBudgetIDs)
+	}
+	if _, err := repos.RetryBudget.Get(job.RetryBudgetID); err != nil {
+		t.Fatalf("load transcribe retry budget: %v", err)
+	}
 }
 
 func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
@@ -265,6 +271,12 @@ func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
 	}
 	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageSummarizing || job.TraceID != "trace-analyze" {
 		t.Fatalf("analyze task_job = %+v", job)
+	}
+	if job.RetryBudgetID == "" || len(producer.analyzeBudgetIDs) != 1 || producer.analyzeBudgetIDs[0] != job.RetryBudgetID {
+		t.Fatalf("analyze retry budget job/context = %q/%#v", job.RetryBudgetID, producer.analyzeBudgetIDs)
+	}
+	if _, err := repos.RetryBudget.Get(job.RetryBudgetID); err != nil {
+		t.Fatalf("load analyze retry budget: %v", err)
 	}
 }
 
@@ -386,10 +398,12 @@ type recordingMediaProducer struct {
 		key     string
 		traceID string
 	}
-	analyzes           []int64
-	analyzeTraceIDs    []string
-	transcribes        []int64
-	transcribeTraceIDs []string
+	analyzes            []int64
+	analyzeTraceIDs     []string
+	analyzeBudgetIDs    []string
+	transcribes         []int64
+	transcribeTraceIDs  []string
+	transcribeBudgetIDs []string
 }
 
 type recordingObjectStorage struct {
@@ -555,12 +569,14 @@ func assertTaskOwnedDataDeleted(t *testing.T, repos *repository.Repositories, ta
 func (p *recordingMediaProducer) EnqueueAnalyze(ctx context.Context, taskID int64, _ string) error {
 	p.analyzes = append(p.analyzes, taskID)
 	p.analyzeTraceIDs = append(p.analyzeTraceIDs, mq.TraceIDFromContext(ctx))
+	p.analyzeBudgetIDs = append(p.analyzeBudgetIDs, mq.RetryBudgetIDFromContext(ctx))
 	return nil
 }
 
 func (p *recordingMediaProducer) EnqueueTranscribe(ctx context.Context, taskID int64, _ string) error {
 	p.transcribes = append(p.transcribes, taskID)
 	p.transcribeTraceIDs = append(p.transcribeTraceIDs, mq.TraceIDFromContext(ctx))
+	p.transcribeBudgetIDs = append(p.transcribeBudgetIDs, mq.RetryBudgetIDFromContext(ctx))
 	return nil
 }
 

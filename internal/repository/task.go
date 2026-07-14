@@ -224,10 +224,13 @@ func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.Vi
 	}
 
 	var tasks []model.VideoTask
-	err := r.db.
-		Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ? AND retry_count <= max_retries AND last_job_type <> ?",
-			model.TaskStatusFailed, now, "").
-		Order("next_retry_at ASC").
+	err := r.db.Model(&model.VideoTask{}).
+		Select("video_tasks.*").
+		Joins("LEFT JOIN task_jobs AS retry_job ON retry_job.task_id = video_tasks.id AND retry_job.job_type = video_tasks.last_job_type").
+		Where("video_tasks.last_job_type <> ? AND (retry_job.id IS NULL OR retry_job.retry_count <= retry_job.max_retries)", "").
+		Where("((video_tasks.status = ? AND video_tasks.next_retry_at IS NOT NULL AND video_tasks.next_retry_at <= ?) OR (retry_job.status = ? AND retry_job.next_retry_at IS NOT NULL AND retry_job.next_retry_at <= ?) OR (retry_job.status IN ? AND retry_job.processing_token <> ? AND retry_job.lease_expires_at IS NOT NULL AND retry_job.lease_expires_at <= ?) OR (retry_job.id IS NULL AND video_tasks.status IN ? AND video_tasks.processing_token <> ? AND video_tasks.lease_expires_at IS NOT NULL AND video_tasks.lease_expires_at <= ?))",
+			model.TaskStatusFailed, now, model.TaskStatusFailed, now, []int8{model.TaskStatusQueued, model.TaskStatusRunning}, "", now, []int8{model.TaskStatusQueued, model.TaskStatusRunning}, "", now).
+		Order("COALESCE(retry_job.next_retry_at, retry_job.lease_expires_at, video_tasks.next_retry_at) ASC").
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err

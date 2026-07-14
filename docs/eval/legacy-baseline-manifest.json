@@ -1,0 +1,61 @@
+{
+  "baseline_id": "legacy-rag-2026-06-28",
+  "classification": {
+    "limitations": [
+      "50 self-built keyword-labeled cases cover only task IDs 2, 5, and 6.",
+      "Cases have no video_id, source_group, frozen split, stable evidence identity, or graded relevance.",
+      "There is no sealed test, clustered confidence interval, independent review, or human calibration.",
+      "Metrics are retained only as historical engineering context and must not be presented as strict resume evidence."
+    ],
+    "mode": "legacy/non-strict",
+    "resume_evidence_eligible": false,
+    "strict": false
+  },
+  "historical_metrics": {
+    "vector_bm25_rrf": {
+      "mrr": 0.878,
+      "recall_at_5": 0.98
+    },
+    "vector_only": {
+      "mrr": 0.837,
+      "recall_at_5": 0.96
+    }
+  },
+  "provenance": {
+    "case_count": 50,
+    "dataset_path": "docs/eval/rag-quant-cases.yaml",
+    "dataset_sha256": "5f08781f52a86fb4038c0d154a99f171eed0c3fe7801f7c3f47ae05bc2b82fa6",
+    "environment": "local",
+    "evaluated_at": "2026-06-28",
+    "evaluated_commit": "e962ebd0f491051056bf7ebfac7dd782c32a8124",
+    "report_commit": "e569a10402f725bf9e21cdaf271bfa4a43925f67",
+    "report_path": "docs/eval/resume-quant-results.md",
+    "report_sha256": "271aa4ca70afd0d9427abb2037e8115a87e6186fd78ee615c1b3f3c8c1e44c22",
+    "task_ids": [
+      2,
+      5,
+      6
+    ]
+  },
+  "retrieval_config": {
+    "candidate_k": 30,
+    "chunk_overlap": 120,
+    "chunk_size": 800,
+    "collection": "vidlens_video_chunks",
+    "embedding_model": "text-embedding-3-small",
+    "latency_scope": "retrieval only; shared query embedding API call excluded",
+    "min_score": 0.35,
+    "retrieval_modes": [
+      "vector-only",
+      "vector-bm25-rrf",
+      "rewrite-multiquery-rrf",
+      "rewrite-multiquery-rrf-window-deterministic-rerank",
+      "rewrite-multiquery-rrf-window-model-rerank"
+    ],
+    "source": "config.yaml@e962ebd0f491051056bf7ebfac7dd782c32a8124",
+    "top_k": 5
+  },
+  "retrieval_config_sha256": "ee80b067cf09f1a483e8a5c7e10cc002fdbb6c8c6a1f826a565ce7ab28762e54",
+  "schema_version": "1",
+  "usage_policy": "legacy/non-strict/not-for-resume"
+}

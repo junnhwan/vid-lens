@@ -232,3 +232,76 @@ func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
 		t.Fatalf("context hit counts = citation:%d expanded:%d, want 1/1", report.CitationContextHitCases, report.ExpandedContextHitCases)
 	}
 }
+
+func TestRAGRetrievalConfigRequiresSingleVariableAblation(t *testing.T) {
+	base := DefaultRAGRetrievalConfig()
+	candidate := base
+	candidate.RRFK = 30
+	if diff, err := ValidateSingleVariableAblation(base, candidate); err != nil || diff != "rrf_k" {
+		t.Fatalf("single variable diff = %q, err=%v", diff, err)
+	}
+	candidate.NeighborRadius = 0
+	if _, err := ValidateSingleVariableAblation(base, candidate); err == nil {
+		t.Fatal("two changed variables must be rejected")
+	}
+}
+
+func TestRAGRetrievalConfigSupportsVectorHybridNeighborAndQueryModes(t *testing.T) {
+	for _, cfg := range []RAGRetrievalConfig{
+		{Name: "vector", EnableVector: true, EnableBM25: false, QueryMode: QueryModeOriginal, TopK: 5, CandidateK: 20, RRFK: 60},
+		{Name: "hybrid", EnableVector: true, EnableBM25: true, QueryMode: QueryModePreprocess, TopK: 5, CandidateK: 20, RRFK: 30, NeighborRadius: 1, MaxContextChars: 4000},
+		{Name: "rewrite", EnableVector: true, EnableBM25: true, QueryMode: QueryModeRewrite, RewriteQueries: 3, TopK: 5, CandidateK: 20, RRFK: 60},
+	} {
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("config %+v error = %v", cfg, err)
+		}
+	}
+}
+
+func TestNormalizeRetrievalQueryIsDeterministicAndConservative(t *testing.T) {
+	got := NormalizeRetrievalQuery("  Redis\n  WatchDog 是什么？  ")
+	if got != "Redis WatchDog 是什么?" {
+		t.Fatalf("NormalizeRetrievalQuery() = %q", got)
+	}
+}
+
+func TestRAGRetrievalConfigRejectsTwoRetrieverMechanismChanges(t *testing.T) {
+	base := DefaultRAGRetrievalConfig()
+	base.EnableBM25 = false
+	candidate := base
+	candidate.EnableVector = false
+	candidate.EnableBM25 = true
+	if _, err := ValidateSingleVariableAblation(base, candidate); err == nil {
+		t.Fatal("vector-only to BM25-only changes two mechanisms and must be rejected")
+	}
+}
+
+func TestRAGRetrievalConfigIncludesChunkerAndRerankerInAblation(t *testing.T) {
+	base := DefaultRAGRetrievalConfig()
+	candidate := base
+	candidate.RerankerMode = RerankerModeNone
+	factor, err := ValidateSingleVariableAblation(base, candidate)
+	if err != nil || factor != "reranker_mode" {
+		t.Fatalf("reranker factor = %q, err=%v", factor, err)
+	}
+
+	candidate = base
+	candidate.ChunkerVersion = "semantic-v2"
+	factor, err = ValidateSingleVariableAblation(base, candidate)
+	if err != nil || factor != "chunker_version" {
+		t.Fatalf("chunker factor = %q, err=%v", factor, err)
+	}
+}
+
+func TestStrictExperimentConfigRequiresExplicitChunkerAndReranker(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.ChunkerVersion = ""
+	if err := cfg.ValidateStrictExperiment(); err == nil {
+		t.Fatal("strict experiment accepted hidden chunker version")
+	}
+	cfg = DefaultRAGRetrievalConfig()
+	cfg.RerankerMode = ""
+	if err := cfg.ValidateStrictExperiment(); err == nil {
+		t.Fatal("strict experiment accepted hidden reranker mode")
+	}
+}
