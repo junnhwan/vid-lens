@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/pkg/quota"
 	"vid-lens/internal/repository"
 )
 
@@ -24,6 +26,23 @@ func (c *fakeEmbeddingClient) Embed(_ context.Context, input string) ([]float32,
 		vector[i] = float32(i)
 	}
 	return vector, nil
+}
+
+type admissionThenEmbeddingClient struct {
+	dim      int
+	attempts int
+}
+
+func (c *admissionThenEmbeddingClient) Embed(_ context.Context, _ string) ([]float32, error) {
+	c.attempts++
+	if c.attempts == 1 {
+		return nil, &ai.AdmissionError{Decision: quota.Decision{
+			Allowed:    false,
+			Scope:      "model",
+			RetryAfter: time.Millisecond,
+		}}
+	}
+	return make([]float32, c.dim), nil
 }
 
 type fakeVectorStore struct {
@@ -130,6 +149,37 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	}
 	if index.ChunkManifestSHA256 != wantManifest {
 		t.Fatalf("chunk manifest hash = %q, want %q", index.ChunkManifestSHA256, wantManifest)
+	}
+}
+
+func TestRAGIndexServiceWaitsAndRetriesAdmissionRejection(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "59595959595959595959595959595959", Filename: "video.mp4", FileURL: "videos/admission-retry.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{
+		TaskID:  task.ID,
+		Content: "one complete sentence.",
+		Words:   3,
+	}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+
+	embedding := &admissionThenEmbeddingClient{dim: 3}
+	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{ChunkSize: 100, EmbeddingDim: 3})
+	result, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, embedding, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		EmbeddingDim:   3,
+	})
+	if err != nil {
+		t.Fatalf("BuildTaskIndex() error = %v", err)
+	}
+	if embedding.attempts != 2 {
+		t.Fatalf("embedding attempts = %d, want 2", embedding.attempts)
+	}
+	if result.Status != model.RAGIndexStatusIndexed || result.Chunks != 1 {
+		t.Fatalf("result = %+v, want indexed with 1 chunk", result)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -82,6 +83,26 @@ func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cf
 		cfg.EmbeddingDim = 1536
 	}
 	return &RAGIndexService{repos: repos, store: store, cfg: cfg}
+}
+
+func embedWithAdmissionWait(ctx context.Context, embedding ai.EmbeddingClient, input string) ([]float32, error) {
+	for {
+		vector, err := embedding.Embed(ctx, input)
+		if err == nil {
+			return vector, nil
+		}
+		var admissionErr *ai.AdmissionError
+		if !errors.As(err, &admissionErr) || admissionErr.Decision.RetryAfter <= 0 {
+			return nil, err
+		}
+		timer := time.NewTimer(admissionErr.Decision.RetryAfter)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *RAGIndexService) SetAIRecorder(recorder ai.CallRecorder) {
@@ -195,7 +216,7 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 		if err := checkRAGBuildContext(ctx); err != nil {
 			return nil, err
 		}
-		vector, err := embedding.Embed(ctx, chunk.Content)
+		vector, err := embedWithAdmissionWait(ctx, embedding, chunk.Content)
 		if err != nil {
 			return markFailed(err)
 		}
