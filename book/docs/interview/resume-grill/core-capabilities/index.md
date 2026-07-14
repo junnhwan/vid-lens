@@ -2,6 +2,17 @@
 
 > 这页专门对应简历中的四条项目经历。建议先背每节的“30 秒回答”，再用“深答”应对追问。所有结论都以当前 VidLens 代码为准；如果代码只做到项目级验证，就主动说清边界。
 
+## 四个深入专题
+
+| 简历原句 | 深入准备 | 题量 |
+|---|---|---:|
+| Kafka 异步调度与失败重试 | [Kafka 异步与重试](/interview/resume-grill/resume-core/kafka-retry/) | 11 |
+| 长视频分段 ASR 与结果复用 | [分段 ASR](/interview/resume-grill/resume-core/asr-chunks/) | 11 |
+| 分片上传、Redis 状态与 MinIO 合并 | [分片上传](/interview/resume-grill/resume-core/chunk-upload/) | 10 |
+| Milvus + BM25 + RRF 与引用 | [混合检索](/interview/resume-grill/resume-core/hybrid-rag/) | 12 |
+
+本页用于面试前速背；四个专题页用于逐题训练。
+
 ## 先记住项目主线
 
 ### 两分钟项目介绍
