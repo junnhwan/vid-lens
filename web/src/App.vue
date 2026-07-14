@@ -8,7 +8,11 @@
       @toggleSidebar="toggleSidebar"
     />
 
-    <router-view />
+    <router-view v-slot="{ Component, route }">
+      <transition name="page" mode="out-in">
+        <component :is="Component" :key="route.meta.pageKey || route.name" />
+      </transition>
+    </router-view>
 
     <AuthModal
       :show="showAuth"
@@ -64,6 +68,7 @@ const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigMo
 import api from './api'
 import { formatUploadError, formatUploadProgressMessage, uploadFileInChunks } from './chunkedUpload.js'
 import { buildStoredUser } from './authSession.js'
+import { writeLastChatTaskId } from './chatSelectionPolicy.js'
 import { needsResultDetail, needsTaskDetail } from './taskDetailPolicy.js'
 import { isPollingSuccessful, shouldStopPolling } from './taskPollingPolicy.js'
 
@@ -449,6 +454,7 @@ const logout = () => {
   user.value = null
   localStorage.removeItem('token')
   localStorage.removeItem('user')
+  writeLastChatTaskId(null) // 避免下一账号误开上一人的对话视频
   tasks.value = []
   tasksTotal.value = 0
   hasMore.value = false
@@ -694,5 +700,25 @@ a {
 }
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(45, 212, 191, 0.45);
+}
+
+/* Library ↔ Chat page cross-fade (keyed by route.meta.pageKey so /chat/:id 不闪) */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.22s var(--vl-ease), transform 0.22s var(--vl-ease);
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: none;
+  }
 }
 </style>

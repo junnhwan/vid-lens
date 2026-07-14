@@ -7,9 +7,25 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', redirect: '/library' },
-    { path: '/library', name: 'library', component: LibraryView },
-    { path: '/chat', name: 'chat', component: ChatView },
-    { path: '/chat/:taskId', name: 'chat-task', component: ChatView },
+    {
+      path: '/library',
+      name: 'library',
+      component: LibraryView,
+      meta: { pageKey: 'library' },
+    },
+    {
+      path: '/chat',
+      name: 'chat',
+      component: ChatView,
+      meta: { pageKey: 'chat' },
+    },
+    {
+      path: '/chat/:taskId',
+      name: 'chat-task',
+      component: ChatView,
+      // 同一 pageKey：切换视频不触发整页 transition，避免闪一下
+      meta: { pageKey: 'chat' },
+    },
   ],
 })
 

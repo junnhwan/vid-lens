@@ -11,9 +11,9 @@
         </span>
       </router-link>
 
-      <nav v-if="user" class="nav-links">
+      <nav v-if="user" class="nav-links" aria-label="页面切换">
         <router-link :to="{ name: 'library' }" class="nav-link">视频库</router-link>
-        <router-link :to="{ name: 'chat' }" class="nav-link">对话</router-link>
+        <router-link :to="chatLink" class="nav-link" :class="{ 'is-chat-active': isChatRoute }">对话</router-link>
       </nav>
 
       <!-- only useful on library (upload sidebar); chat has its own layout -->
@@ -47,6 +47,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { readLastChatTaskId } from '../chatSelectionPolicy.js'
 
 defineProps({
   user: Object
@@ -56,6 +57,20 @@ defineEmits(['logout', 'openAuth', 'openConfig', 'toggleSidebar'])
 
 const route = useRoute()
 const showUploadMenu = computed(() => route.name === 'library')
+const isChatRoute = computed(() => route.name === 'chat' || route.name === 'chat-task')
+
+// 顶栏「对话」优先回到上次视频，避免总是落到 bare /chat → 第一个视频
+const chatLink = computed(() => {
+  // 已在某个对话里时，点「对话」保持当前任务（别跳回 bare）
+  if (route.name === 'chat-task' && route.params.taskId != null && route.params.taskId !== '') {
+    return { name: 'chat-task', params: { taskId: route.params.taskId } }
+  }
+  const lastId = readLastChatTaskId()
+  if (lastId != null) {
+    return { name: 'chat-task', params: { taskId: lastId } }
+  }
+  return { name: 'chat' }
+})
 </script>
 
 <style scoped>
@@ -153,7 +168,8 @@ const showUploadMenu = computed(() => route.name === 'library')
   color: var(--vl-text);
 }
 
-.nav-link.router-link-active {
+.nav-link.router-link-active,
+.nav-link.is-chat-active {
   color: var(--vl-text-inverse);
   background: var(--vl-primary);
   font-weight: 600;
