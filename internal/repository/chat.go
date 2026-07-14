@@ -19,6 +19,13 @@ func (r *ChatRepository) CreateSession(session *model.ChatSession) error {
 	return r.db.Create(session).Error
 }
 
+// UpdateSessionTitle 仅更新标题与 updated_at（GORM 会自动维护 UpdatedAt）。
+func (r *ChatRepository) UpdateSessionTitle(sessionID int64, title string) error {
+	return r.db.Model(&model.ChatSession{}).
+		Where("id = ?", sessionID).
+		Update("title", title).Error
+}
+
 func (r *ChatRepository) ListSessions(userID int64, taskID int64) ([]model.ChatSession, error) {
 	var sessions []model.ChatSession
 	query := r.db.Where("user_id = ?", userID)

@@ -29,12 +29,39 @@
     </div>
 
     <div class="chat-container">
-      <div v-if="sessions.length" class="chat-sessions-bar">
-        <select class="session-select" :value="sessionId" @change="onSessionSelectChange" aria-label="切换对话">
-          <option v-for="s in sessions" :key="s.id" :value="s.id">{{ sessionLabel(s) }}</option>
-        </select>
-        <button type="button" class="session-btn" :disabled="sessionLoading" @click="newSession" title="新建对话">＋ 新对话</button>
-        <button type="button" class="session-btn danger" :disabled="!sessionId" @click="deleteCurrentSession" title="删除当前对话">🗑</button>
+      <div class="chat-sessions-bar">
+        <div class="session-chips" role="listbox" aria-label="切换对话">
+          <button
+            v-for="(s, idx) in sessions"
+            :key="s.id"
+            type="button"
+            role="option"
+            class="session-chip"
+            :class="{ active: Number(sessionId) === Number(s.id) }"
+            :aria-selected="Number(sessionId) === Number(s.id)"
+            :title="sessionChipTitle(s)"
+            :disabled="sessionLoading"
+            @click="selectSession(s.id)"
+          >
+            <span class="session-chip-title">{{ sessionLabel(s, idx) }}</span>
+            <span v-if="sessionMeta(s)" class="session-chip-meta">{{ sessionMeta(s) }}</span>
+          </button>
+          <div v-if="!sessions.length && !sessionLoading" class="session-empty-hint">还没有对话，发一条消息开始</div>
+        </div>
+        <div class="session-actions">
+          <button type="button" class="session-btn" :disabled="sessionLoading" @click="newSession" title="新建对话">
+            ＋ 新对话
+          </button>
+          <button
+            type="button"
+            class="session-btn danger"
+            :disabled="!sessionId || sessionLoading"
+            @click="deleteCurrentSession"
+            title="删除当前对话"
+          >
+            删除
+          </button>
+        </div>
       </div>
       <div class="chat-messages" ref="messagesContainer" @scroll="onMessagesScroll">
         <div v-for="(msg, msgIdx) in messages" :key="msg.id || msgIdx" class="message" :class="msg.role">
@@ -187,6 +214,10 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
 import { normalizeChatMessages } from '../chatHistoryPolicy.js'
+import {
+  formatSessionLabel,
+  formatSessionRelativeTime,
+} from '../chatSessionDisplayPolicy.js'
 import {
   DEFAULT_CITATION_PREVIEW_OPTIONS,
   areAllExpandableCitationsExpanded,
@@ -382,16 +413,37 @@ const refreshSessions = async () => {
   }
 }
 
-const sessionLabel = (s) => s.title || `会话 #${s.id}`
+const sessionLabel = (s, idx = 0) => formatSessionLabel(s, { index: idx })
+
+const sessionMeta = (s) => formatSessionRelativeTime(s?.updated_at || s?.created_at)
+
+const sessionChipTitle = (s) => {
+  const title = sessionLabel(s)
+  const meta = sessionMeta(s)
+  return meta ? `${title} · ${meta}` : title
+}
+
+/** 首轮问答后端可能改写标题：刷新列表，尽量保持当前选中 */
+const refreshSessionTitles = async () => {
+  const current = sessionId.value
+  try {
+    const list = (await api.getChatSessions(props.task.id)) || []
+    sessions.value = list
+    if (current && !list.some((s) => Number(s.id) === Number(current))) {
+      // 当前会话被删了才换
+      if (list.length) sessionId.value = list[0].id
+    }
+  } catch {
+    // ignore background refresh
+  }
+}
 
 const selectSession = async (id) => {
   if (!id) return
-  if (sessionId.value === id) return
+  if (Number(sessionId.value) === Number(id)) return
   sessionId.value = id
   await loadMessages(id)
 }
-
-const onSessionSelectChange = (e) => selectSession(Number(e.target.value))
 
 const newSession = async () => {
   if (sessionLoading.value) return
@@ -409,7 +461,7 @@ const deleteCurrentSession = async () => {
   sessionLoading.value = true
   try {
     await api.deleteChatSession(sessionId.value)
-    sessions.value = sessions.value.filter((s) => s.id !== sessionId.value)
+    sessions.value = sessions.value.filter((s) => Number(s.id) !== Number(sessionId.value))
     sessionId.value = null
     if (sessions.value.length > 0) {
       await selectSession(sessions.value[0].id)
@@ -563,6 +615,7 @@ const sendStreamQuestion = async (q, mode) => {
       } else if (event.type === 'done') {
         assistantMsg.id = event.message_id || assistantMsg.id
         finish()
+        refreshSessionTitles()
       } else if (event.type === 'error') {
         failStream(event.message || '回答失败')
       }
@@ -571,6 +624,7 @@ const sendStreamQuestion = async (q, mode) => {
     if (err?.name === 'AbortError') {
       // 用户主动停止：保留已生成内容，不报错
       finish()
+      refreshSessionTitles()
     } else {
       failStream(err.message || '发送失败')
     }
@@ -593,6 +647,7 @@ const sendAgentQuestion = async (q) => {
       mode: 'agent',
     })
     scrollMessagesToBottom()
+    refreshSessionTitles()
   } catch (err) {
     emit('error', err.message || 'Agentic 问答失败')
   } finally {
@@ -750,29 +805,103 @@ onUnmounted(() => {
 .chat-sessions-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.65rem 1.25rem;
+  gap: 0.65rem;
+  padding: 0.6rem 1rem 0.6rem 1.1rem;
   border-bottom: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.48);
+  background:
+    linear-gradient(90deg, rgba(45, 212, 191, 0.04), transparent 40%),
+    rgba(7, 9, 15, 0.52);
+  min-height: 3.1rem;
 }
 
-.session-select {
+.session-chips {
   flex: 1;
   min-width: 0;
-  background: rgba(7, 9, 15, 0.65);
-  border: 1px solid var(--vl-border);
-  border-radius: var(--vl-radius-sm);
-  padding: 0.45rem 0.7rem;
-  color: var(--vl-text);
-  font-size: 0.82rem;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.1rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 212, 191, 0.25) transparent;
 }
 
-.session-select:focus {
-  border-color: var(--vl-border-focus);
-  box-shadow: 0 0 0 3px var(--vl-primary-dim);
+.session-chips::-webkit-scrollbar {
+  height: 4px;
+}
+
+.session-empty-hint {
+  font-size: 0.78rem;
+  color: var(--vl-text-muted);
+  padding: 0.25rem 0.15rem;
+  white-space: nowrap;
+}
+
+.session-chip {
+  flex: 0 0 auto;
+  max-width: 11.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--vl-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--vl-text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.session-chip:hover:not(:disabled) {
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--vl-text);
+  background: rgba(45, 212, 191, 0.06);
+}
+
+.session-chip.active {
+  border-color: rgba(45, 212, 191, 0.5);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.16), rgba(96, 165, 250, 0.08));
+  color: var(--vl-text);
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.12);
+}
+
+.session-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.session-chip-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 10.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-chip.active .session-chip-title {
+  color: var(--vl-primary);
+}
+
+.session-chip-meta {
+  font-size: 0.65rem;
+  font-family: var(--vl-font-mono);
+  color: var(--vl-text-muted);
+  line-height: 1.2;
+  max-width: 10.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
 .session-btn {
@@ -780,9 +909,9 @@ onUnmounted(() => {
   border: 1px solid var(--vl-border);
   color: var(--vl-text-secondary);
   padding: 0.4rem 0.7rem;
-  border-radius: var(--vl-radius-sm);
+  border-radius: 999px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   font-family: var(--vl-font-mono);
   transition: border-color 0.2s, color 0.2s, background 0.2s;
   white-space: nowrap;
@@ -803,6 +932,24 @@ onUnmounted(() => {
 .session-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .chat-sessions-bar {
+    flex-wrap: wrap;
+    padding: 0.55rem 0.75rem;
+  }
+  .session-chips {
+    order: 2;
+    width: 100%;
+  }
+  .session-actions {
+    order: 1;
+    margin-left: auto;
+  }
+  .session-chip {
+    max-width: 9.5rem;
+  }
 }
 
 .chat-messages {

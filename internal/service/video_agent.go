@@ -277,6 +277,9 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	}); err != nil {
 		return err
 	}
+	if session, err := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); err == nil && session != nil {
+		s.chatSvc.maybeAutoTitleSession(session, question)
+	}
 	snapshot, err := json.Marshal(struct {
 		Template  string           `json:"template"`
 		Citations []RetrievedChunk `json:"citations"`
