@@ -8,21 +8,23 @@
 
 | 顺序 | 页面 | 适合解决的问题 |
 |---|---|---|
-| 1 | [项目定位与总览](/interview/resume-grill/overview/) | 2 分钟项目介绍、是不是 AI 套壳、技术栈选择 |
-| 2 | [Kafka 异步任务](/interview/resume-grill/kafka-async/) | 为什么异步、消息丢失/重复、重试、任务状态 |
-| 3 | [Redis 锁与限流](/interview/resume-grill/redis-lock-rate-limit/) | WatchDog、owner 校验、Lua 令牌桶、成本控制 |
-| 4 | [上传、断点续传与 MinIO](/interview/resume-grill/upload-minio/) | 分片上传、MD5 复用、ComposeObject、预签名 URL |
-| 5 | [RAG 与 Milvus](/interview/resume-grill/rag-milvus/) | ASR 文本做知识源、chunk、向量检索、BM25 风格召回、RRF |
-| 6 | [可靠性与系统设计](/interview/resume-grill/reliability-system-design/) | 外部 AI 失败、URL 下载安全、BYOK、审计、扩展方案 |
-| 7 | [MySQL/GORM 数据模型](/interview/resume-grill/mysql-gorm-data-model/) | 任务表、Job 表、软删除、JSON 字段、事务边界 |
-| 8 | [URL 安全与部署](/interview/resume-grill/url-security-deploy/) | SSRF 第一层防护、yt-dlp、代理、720p、Milvus readiness |
-| 9 | [Debug 复盘](/interview/resume-grill/debugging-war-stories/) | 长视频 ASR、RAG 状态、MySQL JSON、Retry 半成功、AI 辅助项目答法 |
-| 10 | [系统设计压力面](/interview/resume-grill/hard-system-design/) | 1000 用户、10GB 视频、Kafka 扩容、Redis/MySQL 故障、微服务拆分 |
+| 1 | [四条简历核心能力](/interview/resume-grill/core-capabilities/) | 按当前四条简历逐句准备：短答、深答、追问、防守、证据与边界 |
+| 2 | [项目定位与总览](/interview/resume-grill/overview/) | 2 分钟项目介绍、是不是 AI 套壳、技术栈选择 |
+| 3 | [Kafka 异步任务](/interview/resume-grill/kafka-async/) | 为什么异步、消息丢失/重复、重试、任务状态 |
+| 4 | [Redis 锁与限流](/interview/resume-grill/redis-lock-rate-limit/) | WatchDog、owner 校验、Lua 令牌桶、成本控制 |
+| 5 | [上传、断点续传与 MinIO](/interview/resume-grill/upload-minio/) | 分片上传、MD5 复用、ComposeObject、预签名 URL |
+| 6 | [RAG 与 Milvus](/interview/resume-grill/rag-milvus/) | ASR 文本做知识源、chunk、向量检索、BM25 风格召回、RRF |
+| 7 | [可靠性与系统设计](/interview/resume-grill/reliability-system-design/) | 外部 AI 失败、URL 下载安全、BYOK、审计、扩展方案 |
+| 8 | [MySQL/GORM 数据模型](/interview/resume-grill/mysql-gorm-data-model/) | 任务表、Job 表、软删除、JSON 字段、事务边界 |
+| 9 | [URL 安全与部署](/interview/resume-grill/url-security-deploy/) | SSRF 第一层防护、yt-dlp、代理、720p、Milvus readiness |
+| 10 | [Debug 复盘](/interview/resume-grill/debugging-war-stories/) | 长视频 ASR、RAG 状态、MySQL JSON、Retry 半成功、AI 辅助项目答法 |
+| 11 | [系统设计压力面](/interview/resume-grill/hard-system-design/) | 1000 用户、10GB 视频、Kafka 扩容、Redis/MySQL 故障、微服务拆分 |
 
 ## 简历话术到追问映射
 
 | 简历关键词 | 面试官会追问 | 先看 |
 |---|---|---|
+| 当前四条简历 | 四条怎么串成一条业务闭环？每条有哪些边界？ | [四条简历核心能力](/interview/resume-grill/core-capabilities/) |
 | AI 视频理解后端 | 你到底解决什么问题？为什么不是调 API？ | [项目定位与总览](/interview/resume-grill/overview/) |
 | Kafka 异步处理 | 为什么不用同步 HTTP 或本地 goroutine？失败怎么恢复？ | [Kafka 异步任务](/interview/resume-grill/kafka-async/) |
 | Redis 分布式锁 | SETNX 有什么坑？WatchDog 怎么防误删？ | [Redis 锁与限流](/interview/resume-grill/redis-lock-rate-limit/) |
@@ -66,3 +68,4 @@
 - URL 下载安全复盘：`docs/troubleshooting-and-interview-notes.md:2783`, `docs/troubleshooting-and-interview-notes.md:2856`
 - RAG 混合检索复盘：`docs/troubleshooting-and-interview-notes.md:2882`, `docs/troubleshooting-and-interview-notes.md:2977`
 - TaskJob 状态拆分复盘：`docs/troubleshooting-and-interview-notes.md:3749`, `docs/troubleshooting-and-interview-notes.md:3898`
+

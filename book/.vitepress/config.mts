@@ -22,6 +22,7 @@ export default defineConfig({
             { text: '总览', link: '/interview/' },
             { text: '面试作战手册', link: '/interview/playbook/' },
             { text: '简历拷打', link: '/interview/resume-grill/' },
+            { text: '简历拷打：四条核心能力', link: '/interview/resume-grill/core-capabilities/' },
             { text: '简历拷打：项目定位', link: '/interview/resume-grill/overview/' },
             { text: '简历拷打：Kafka 异步', link: '/interview/resume-grill/kafka-async/' },
             { text: '简历拷打：Redis 锁与限流', link: '/interview/resume-grill/redis-lock-rate-limit/' },
@@ -93,3 +94,4 @@ export default defineConfig({
     }
   }
 })
+
