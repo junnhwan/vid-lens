@@ -6,8 +6,7 @@
           <span class="mirror-core"></span>
         </span>
         <span class="brand-text">
-          镜知
-          <span class="en">VidLens</span>
+          映知
         </span>
       </router-link>
 
