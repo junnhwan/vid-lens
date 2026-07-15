@@ -13,6 +13,11 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+const minComposePartSize int64 = 5 * 1024 * 1024
+
+// objectPartOpener 按需打开一个待合并的源对象。
+type objectPartOpener func(context.Context, minio.CopySrcOptions) (io.ReadCloser, error)
+
 // MinIOStorage MinIO 对象存储操作封装
 type MinIOStorage struct {
 	client   *minio.Client
@@ -102,12 +107,114 @@ func (s *MinIOStorage) DeleteObject(ctx context.Context, objectName string) erro
 	return s.client.RemoveObject(ctx, s.bucket, objectName, minio.RemoveObjectOptions{})
 }
 
-// ComposeObject 合并分片并返回合并后对象大小
+// requiresStreamingMerge 判断源对象是否违反 MinIO ComposeObject 的限制：
+// 除最后一个 source 外，每个 source 都必须至少为 5 MiB。
+func requiresStreamingMerge(sizes []int64) bool {
+	for i := 0; i < len(sizes)-1; i++ {
+		if sizes[i] < minComposePartSize {
+			return true
+		}
+	}
+	return false
+}
+
+// copyObjectParts 按 sources 的顺序逐个读取并写入目标流，避免同时打开全部分片。
+func copyObjectParts(ctx context.Context, dst io.Writer, sources []minio.CopySrcOptions, open objectPartOpener) error {
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		reader, err := open(ctx, source)
+		if err != nil {
+			return fmt.Errorf("打开分片对象 %s/%s 失败: %w", source.Bucket, source.Object, err)
+		}
+
+		_, copyErr := io.Copy(dst, reader)
+		closeErr := reader.Close()
+		if copyErr != nil {
+			return fmt.Errorf("读取分片对象 %s/%s 失败: %w", source.Bucket, source.Object, copyErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("关闭分片对象 %s/%s 失败: %w", source.Bucket, source.Object, closeErr)
+		}
+	}
+	return nil
+}
+
+// ComposeObject 合并分片并返回合并后对象大小。
+// 大分片继续使用 MinIO 服务端 ComposeObject；若非末尾分片小于 5 MiB，
+// 则顺序读取各分片并流式 PutObject，避免把完整文件加载到内存。
 func (s *MinIOStorage) ComposeObject(ctx context.Context, dst string, sources []minio.CopySrcOptions) (int64, error) {
-	dstOpts := minio.CopyDestOptions{Bucket: s.bucket, Object: dst}
-	info, err := s.client.ComposeObject(ctx, dstOpts, sources...)
-	if err != nil {
-		return 0, err
+	if len(sources) == 0 {
+		return 0, fmt.Errorf("合并分片失败: 源对象不能为空")
+	}
+
+	sizes := make([]int64, len(sources))
+	var totalSize int64
+	for i, source := range sources {
+		statOpts := minio.StatObjectOptions{
+			ServerSideEncryption: source.Encryption,
+			VersionID:            source.VersionID,
+		}
+		info, err := s.client.StatObject(ctx, source.Bucket, source.Object, statOpts)
+		if err != nil {
+			return 0, fmt.Errorf("检查分片对象 %s/%s 失败: %w", source.Bucket, source.Object, err)
+		}
+
+		size := info.Size
+		if source.MatchRange {
+			if source.Start < 0 || source.End < source.Start || source.End >= info.Size {
+				return 0, fmt.Errorf(
+					"分片对象 %s/%s 的读取范围 [%d, %d] 无效（对象大小为 %d）",
+					source.Bucket, source.Object, source.Start, source.End, info.Size,
+				)
+			}
+			size = source.End - source.Start + 1
+		}
+		sizes[i] = size
+		totalSize += size
+	}
+
+	if !requiresStreamingMerge(sizes) {
+		dstOpts := minio.CopyDestOptions{Bucket: s.bucket, Object: dst}
+		info, err := s.client.ComposeObject(ctx, dstOpts, sources...)
+		if err != nil {
+			return 0, err
+		}
+		return info.Size, nil
+	}
+
+	pipeReader, pipeWriter := io.Pipe()
+	copyResult := make(chan error, 1)
+	go func() {
+		err := copyObjectParts(ctx, pipeWriter, sources, func(ctx context.Context, source minio.CopySrcOptions) (io.ReadCloser, error) {
+			getOpts := minio.GetObjectOptions{
+				ServerSideEncryption: source.Encryption,
+				VersionID:            source.VersionID,
+			}
+			if source.MatchRange {
+				if err := getOpts.SetRange(source.Start, source.End); err != nil {
+					return nil, err
+				}
+			}
+			return s.client.GetObject(ctx, source.Bucket, source.Object, getOpts)
+		})
+		_ = pipeWriter.CloseWithError(err)
+		copyResult <- err
+	}()
+
+	info, putErr := s.client.PutObject(ctx, s.bucket, dst, pipeReader, totalSize, minio.PutObjectOptions{
+		ContentType: "application/octet-stream",
+	})
+	// PutObject 可能在读取完 pipe 前失败；主动关闭 reader 以解除复制 goroutine 的阻塞。
+	_ = pipeReader.CloseWithError(putErr)
+	copyErr := <-copyResult
+	if putErr != nil {
+		return 0, putErr
+	}
+	if copyErr != nil {
+		return 0, copyErr
 	}
 	return info.Size, nil
 }

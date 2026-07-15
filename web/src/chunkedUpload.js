@@ -1,6 +1,6 @@
 import SparkMD5 from 'spark-md5'
 
-export const CHUNK_SIZE = 1024 * 1024
+export const CHUNK_SIZE = 5 * 1024 * 1024
 
 function emitProgress(onProgress, stage, percent, extra = {}) {
   onProgress?.({ stage, percent: Math.max(0, Math.min(100, Math.round(percent))), ...extra })

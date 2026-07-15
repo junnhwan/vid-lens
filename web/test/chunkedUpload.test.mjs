@@ -178,7 +178,7 @@ function makeFile(size, name = 'demo.mp4') {
 
 {
   const { CHUNK_SIZE } = await import('../src/chunkedUpload.js')
-  assert.equal(CHUNK_SIZE, 1024 * 1024, 'Cloudflare uploads should use 1 MiB chunks to stay below request deadlines')
+  assert.equal(CHUNK_SIZE, 5 * 1024 * 1024, 'MinIO compose requires every non-final source chunk to be at least 5 MiB')
 }
 
 {
