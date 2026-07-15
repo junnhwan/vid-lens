@@ -179,10 +179,14 @@ const handleUrlUpload = () => {
 .sidebar {
   width: 300px;
   flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
   padding: 1.35rem 1.15rem;
   background: rgba(8, 11, 18, 0.55);
   border-right: 1px solid var(--vl-border);
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sidebar-section {
@@ -447,12 +451,20 @@ const handleUrlUpload = () => {
     top: 0;
     left: 0;
     height: 100vh;
+    max-height: 100vh;
     z-index: 150;
     transform: translateX(-100%);
     transition: transform 0.3s var(--vl-ease);
     box-shadow: var(--vl-shadow);
     border-right: 1px solid var(--vl-border-strong);
     background: rgba(7, 9, 15, 0.98);
+  }
+
+  @supports (height: 100dvh) {
+    .sidebar {
+      height: 100dvh;
+      max-height: 100dvh;
+    }
   }
 
   .sidebar.open {

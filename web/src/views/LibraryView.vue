@@ -111,26 +111,38 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/*
+ * 视频库固定视口高度：侧栏 / 列表 / 详情各自滚动，
+ * 避免列表变长时整页下滑、两侧栏留空白。
+ */
 .app-layout {
   display: flex;
-  min-height: calc(100vh - var(--vl-nav-h));
+  height: calc(100vh - var(--vl-nav-h));
+  max-height: calc(100vh - var(--vl-nav-h));
   max-width: 1440px;
   margin: 0 auto;
   position: relative;
+  overflow: hidden;
 }
 
 .library-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
-  min-height: calc(100vh - var(--vl-nav-h));
+  height: 100%;
+  overflow: hidden;
 }
 
 .list-pane {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   padding: 1.35rem 1.5rem 2rem 1.75rem;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   transition: flex 0.25s var(--vl-ease), max-width 0.25s var(--vl-ease), padding 0.25s var(--vl-ease);
 }
 
@@ -144,14 +156,12 @@ onUnmounted(() => {
 .detail-pane {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   padding: 1.35rem 1.5rem 1.75rem 0.35rem;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  height: calc(100vh - var(--vl-nav-h));
-  position: sticky;
-  top: var(--vl-nav-h);
-  align-self: flex-start;
+  overflow: hidden;
   animation: vl-fade-in-up 0.28s var(--vl-ease);
 }
 
@@ -193,6 +203,14 @@ onUnmounted(() => {
 
   .list-pane.mobile-hidden {
     display: none;
+  }
+}
+
+/* 动态工具栏高度 / 移动浏览器地址栏：用 dvh 更贴合可见视口 */
+@supports (height: 100dvh) {
+  .app-layout {
+    height: calc(100dvh - var(--vl-nav-h));
+    max-height: calc(100dvh - var(--vl-nav-h));
   }
 }
 </style>
