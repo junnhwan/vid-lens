@@ -49,25 +49,179 @@
           </div>
           <div class="form-section">
             <h3>🗣️ ASR 配置</h3>
-            <div class="form-group"><label>Provider *</label><input v-model="formData.asr_provider" placeholder="mimo" class="form-input" /></div>
-            <div class="form-group"><label>Base URL *</label><input v-model="formData.asr_base_url" placeholder="https://..." class="form-input" /></div>
-            <div class="form-group"><label>API Key {{ isEditMode ? '(留空不改)' : '*' }}</label><input v-model="formData.asr_api_key" type="password" :placeholder="isEditMode ? '保持原有' : 'tp-xxx'" class="form-input" /><div v-if="isEditMode && editingProfile?.asr_api_key_masked" class="masked-key">当前: {{ editingProfile.asr_api_key_masked }}</div></div>
-            <div class="form-group"><label>Model *</label><input v-model="formData.asr_model" placeholder="mimo-v2.5-asr" class="form-input" /></div>
+            <div class="form-group">
+              <label for="asr-provider">Provider *</label>
+              <select
+                id="asr-provider"
+                class="form-input form-select"
+                :value="formData.asr_provider"
+                @change="onAsrProviderChange($event.target.value)"
+              >
+                <option v-for="p in ASR_PROVIDERS" :key="p.id" :value="p.id">
+                  {{ p.label }} — {{ p.description }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="asr-base-url">Base URL *</label>
+              <input
+                id="asr-base-url"
+                v-model="formData.asr_base_url"
+                :placeholder="isCustomCompatibleProvider(formData.asr_provider) ? 'https://your-host/v1' : 'https://...'"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="asr-api-key">API Key {{ isEditMode ? '(留空不改)' : '*' }}</label>
+              <input
+                id="asr-api-key"
+                v-model="formData.asr_api_key"
+                type="password"
+                :placeholder="isEditMode ? '保持原有' : keyPlaceholder('asr', formData.asr_provider)"
+                class="form-input"
+              />
+              <div v-if="isEditMode && editingProfile?.asr_api_key_masked" class="masked-key">
+                当前: {{ editingProfile.asr_api_key_masked }}
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="asr-model">Model *</label>
+              <input
+                id="asr-model"
+                v-model="formData.asr_model"
+                list="asr-model-suggestions"
+                :placeholder="suggestedModels('asr', formData.asr_provider)[0] || 'model-id'"
+                class="form-input"
+              />
+              <datalist id="asr-model-suggestions">
+                <option
+                  v-for="m in suggestedModels('asr', formData.asr_provider)"
+                  :key="m"
+                  :value="m"
+                />
+              </datalist>
+            </div>
           </div>
           <div class="form-section">
             <h3>💬 LLM 配置</h3>
-            <div class="form-group"><label>Provider *</label><input v-model="formData.llm_provider" placeholder="openai_compatible" class="form-input" /></div>
-            <div class="form-group"><label>Base URL *</label><input v-model="formData.llm_base_url" placeholder="https://..." class="form-input" /></div>
-            <div class="form-group"><label>API Key {{ isEditMode ? '(留空不改)' : '*' }}</label><input v-model="formData.llm_api_key" type="password" :placeholder="isEditMode ? '保持原有' : 'sk-xxx'" class="form-input" /><div v-if="isEditMode && editingProfile?.llm_api_key_masked" class="masked-key">当前: {{ editingProfile.llm_api_key_masked }}</div></div>
-            <div class="form-group"><label>Model *</label><input v-model="formData.llm_model" placeholder="deepseek-chat" class="form-input" /></div>
+            <div class="form-group">
+              <label for="llm-provider">Provider *</label>
+              <select
+                id="llm-provider"
+                class="form-input form-select"
+                :value="formData.llm_provider"
+                @change="onLlmProviderChange($event.target.value)"
+              >
+                <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">
+                  {{ p.label }} — {{ p.description }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="llm-base-url">Base URL *</label>
+              <input
+                id="llm-base-url"
+                v-model="formData.llm_base_url"
+                :placeholder="isCustomCompatibleProvider(formData.llm_provider) ? 'https://api.deepseek.com/v1' : 'https://...'"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="llm-api-key">API Key {{ isEditMode ? '(留空不改)' : '*' }}</label>
+              <input
+                id="llm-api-key"
+                v-model="formData.llm_api_key"
+                type="password"
+                :placeholder="isEditMode ? '保持原有' : keyPlaceholder('llm', formData.llm_provider)"
+                class="form-input"
+              />
+              <div v-if="isEditMode && editingProfile?.llm_api_key_masked" class="masked-key">
+                当前: {{ editingProfile.llm_api_key_masked }}
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="llm-model">Model *</label>
+              <input
+                id="llm-model"
+                v-model="formData.llm_model"
+                list="llm-model-suggestions"
+                :placeholder="suggestedModels('llm', formData.llm_provider)[0] || 'model-id'"
+                class="form-input"
+              />
+              <datalist id="llm-model-suggestions">
+                <option
+                  v-for="m in suggestedModels('llm', formData.llm_provider)"
+                  :key="m"
+                  :value="m"
+                />
+              </datalist>
+            </div>
           </div>
           <div class="form-section">
             <h3>🔍 Embedding 配置</h3>
-            <div class="form-group"><label>Provider *</label><input v-model="formData.embedding_provider" placeholder="openai_compatible" class="form-input" /></div>
-            <div class="form-group"><label>Endpoint *</label><input v-model="formData.embedding_endpoint" placeholder="https://.../embeddings" class="form-input" /></div>
-            <div class="form-group"><label>API Key {{ isEditMode ? '(留空不改)' : '*' }}</label><input v-model="formData.embedding_api_key" type="password" :placeholder="isEditMode ? '保持原有' : 'sk-xxx'" class="form-input" /><div v-if="isEditMode && editingProfile?.embedding_api_key_masked" class="masked-key">当前: {{ editingProfile.embedding_api_key_masked }}</div></div>
-            <div class="form-group"><label>Model *</label><input v-model="formData.embedding_model" placeholder="text-embedding-3-small" class="form-input" /></div>
-            <div class="form-group"><label>Dimension *</label><input v-model.number="formData.embedding_dim" type="number" placeholder="1536" class="form-input" /></div>
+            <div class="form-group">
+              <label for="embedding-provider">Provider *</label>
+              <select
+                id="embedding-provider"
+                class="form-input form-select"
+                :value="formData.embedding_provider"
+                @change="onEmbeddingProviderChange($event.target.value)"
+              >
+                <option v-for="p in EMBEDDING_PROVIDERS" :key="p.id" :value="p.id">
+                  {{ p.label }} — {{ p.description }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="embedding-endpoint">Endpoint *</label>
+              <input
+                id="embedding-endpoint"
+                v-model="formData.embedding_endpoint"
+                :placeholder="isCustomCompatibleProvider(formData.embedding_provider) ? 'https://.../v1/embeddings' : 'https://.../embeddings'"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="embedding-api-key">API Key {{ isEditMode ? '(留空不改)' : '*' }}</label>
+              <input
+                id="embedding-api-key"
+                v-model="formData.embedding_api_key"
+                type="password"
+                :placeholder="isEditMode ? '保持原有' : keyPlaceholder('embedding', formData.embedding_provider)"
+                class="form-input"
+              />
+              <div v-if="isEditMode && editingProfile?.embedding_api_key_masked" class="masked-key">
+                当前: {{ editingProfile.embedding_api_key_masked }}
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="embedding-model">Model *</label>
+              <input
+                id="embedding-model"
+                v-model="formData.embedding_model"
+                list="embedding-model-suggestions"
+                :placeholder="suggestedModels('embedding', formData.embedding_provider)[0] || 'model-id'"
+                class="form-input"
+              />
+              <datalist id="embedding-model-suggestions">
+                <option
+                  v-for="m in suggestedModels('embedding', formData.embedding_provider)"
+                  :key="m"
+                  :value="m"
+                />
+              </datalist>
+            </div>
+            <div class="form-group">
+              <label for="embedding-dim">Dimension *</label>
+              <input
+                id="embedding-dim"
+                v-model.number="formData.embedding_dim"
+                type="number"
+                min="1"
+                placeholder="1024"
+                class="form-input"
+              />
+            </div>
           </div>
           <div class="form-actions">
             <button class="btn-secondary" @click="cancelEdit" :disabled="loading">取消</button>
@@ -89,6 +243,19 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { normalizeListResponse } from '../apiEnvelope.js'
+import {
+  ASR_PROVIDERS,
+  EMBEDDING_PROVIDERS,
+  LLM_PROVIDERS,
+  applyAsrProviderChange,
+  applyEmbeddingProviderChange,
+  applyLlmProviderChange,
+  createDefaultAIProfileForm,
+  isCustomCompatibleProvider,
+  keyPlaceholder,
+  profileToFormData,
+  suggestedModels,
+} from '../aiProviderPresets.js'
 
 defineProps({ show: Boolean })
 const emit = defineEmits(['close', 'updated', 'showConfirm'])
@@ -99,11 +266,7 @@ const isEditMode = ref(false)
 const editingProfile = ref(null)
 const loading = ref(false)
 const testResult = ref(null)
-const formData = ref({
-  name: '', asr_provider: '', asr_base_url: '', asr_api_key: '', asr_model: '',
-  llm_provider: '', llm_base_url: '', llm_api_key: '', llm_model: '',
-  embedding_provider: '', embedding_endpoint: '', embedding_api_key: '', embedding_model: '', embedding_dim: null, is_default: false,
-})
+const formData = ref(createDefaultAIProfileForm())
 
 const loadProfiles = async () => {
   try {
@@ -118,7 +281,7 @@ const startCreate = () => {
   isEditing.value = true
   isEditMode.value = false
   editingProfile.value = null
-  formData.value = { name: '', asr_provider: '', asr_base_url: '', asr_api_key: '', asr_model: '', llm_provider: '', llm_base_url: '', llm_api_key: '', llm_model: '', embedding_provider: '', embedding_endpoint: '', embedding_api_key: '', embedding_model: '', embedding_dim: null, is_default: false }
+  formData.value = createDefaultAIProfileForm()
   testResult.value = null
 }
 
@@ -126,12 +289,20 @@ const startEdit = (profile) => {
   isEditing.value = true
   isEditMode.value = true
   editingProfile.value = profile
-  formData.value = {
-    name: profile.name, asr_provider: profile.asr_provider, asr_base_url: profile.asr_base_url, asr_api_key: '', asr_model: profile.asr_model,
-    llm_provider: profile.llm_provider, llm_base_url: profile.llm_base_url, llm_api_key: '', llm_model: profile.llm_model,
-    embedding_provider: profile.embedding_provider, embedding_endpoint: profile.embedding_endpoint, embedding_api_key: '', embedding_model: profile.embedding_model, embedding_dim: profile.embedding_dim, is_default: profile.is_default,
-  }
+  formData.value = profileToFormData(profile)
   testResult.value = null
+}
+
+const onAsrProviderChange = (next) => {
+  Object.assign(formData.value, applyAsrProviderChange(formData.value, next))
+}
+
+const onLlmProviderChange = (next) => {
+  Object.assign(formData.value, applyLlmProviderChange(formData.value, next))
+}
+
+const onEmbeddingProviderChange = (next) => {
+  Object.assign(formData.value, applyEmbeddingProviderChange(formData.value, next))
 }
 
 const cancelEdit = () => { isEditing.value = false; editingProfile.value = null }
@@ -351,6 +522,26 @@ defineExpose({ loadProfiles })
   outline: none;
   transition: all 0.3s;
   font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.form-select {
+  appearance: none;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--vl-text-muted) 50%),
+    linear-gradient(135deg, var(--vl-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.15rem) calc(50% - 0.15rem),
+    calc(100% - 0.85rem) calc(50% - 0.15rem);
+  background-size: 0.35rem 0.35rem, 0.35rem 0.35rem;
+  background-repeat: no-repeat;
+  padding-right: 2.25rem;
+}
+
+.form-select option {
+  background: #111827;
+  color: var(--vl-text);
 }
 
 .form-input:focus { border-color: var(--vl-primary); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15); }
