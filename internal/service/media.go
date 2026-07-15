@@ -503,6 +503,7 @@ func (s *MediaService) DeleteTask(ctx context.Context, userID, taskID int64) err
 		if err := s.repo.Asset.Delete(*assetID); err != nil {
 			return err
 		}
+		s.clearChunkUploadState(ctx, task.FileMD5)
 	}
 	return nil
 }
@@ -575,6 +576,16 @@ func uploadSpecMatches(values []interface{}, fileSize, chunkSize int64, totalChu
 		storedFileSize == fileSize && storedChunkSize == chunkSize && storedTotalChunks == totalChunks
 }
 
+func (s *MediaService) clearChunkUploadState(ctx context.Context, fileMD5 string) {
+	if s.rdb == nil || fileMD5 == "" {
+		return
+	}
+	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
+	if err := s.rdb.Del(ctx, key, key+":status", key+":total", key+":file_size", key+":chunk_size").Err(); err != nil {
+		log.Printf("[media] 清理上传状态失败（可忽略）: md5=%s err=%v", fileMD5, err)
+	}
+}
+
 func (s *MediaService) resetChunkUpload(ctx context.Context, key, fileMD5 string, uploaded []string) {
 	for _, raw := range uploaded {
 		index, err := strconv.Atoi(raw)
@@ -616,7 +627,16 @@ func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string, 
 		status = ""
 	}
 	if status == "COMPLETED" {
-		return map[string]any{"status": "completed", "uploaded": []int{}}, nil
+		asset, err := s.repo.Asset.FindByMD5(fileMD5)
+		if err != nil {
+			return nil, fmt.Errorf("校验已上传文件失败: %w", err)
+		}
+		if asset != nil && asset.FileSize == fileSize {
+			return map[string]any{"status": "completed", "uploaded": []int{}}, nil
+		}
+		s.clearChunkUploadState(ctx, fileMD5)
+		uploaded = nil
+		status = ""
 	}
 
 	pipe := s.rdb.TxPipeline()

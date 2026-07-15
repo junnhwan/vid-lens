@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"vid-lens/internal/config"
 	"vid-lens/internal/model"
@@ -360,6 +362,58 @@ func TestDeleteTaskDeletesLastAssetReferenceAndObject(t *testing.T) {
 		t.Fatalf("asset should be deleted after last reference, got %+v", foundAsset)
 	}
 	assertTaskOwnedDataDeleted(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+}
+
+func TestDeleteTaskClearsCompletedUploadStateForLastAssetReference(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	storage := &recordingObjectStorage{}
+	redisServer := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	asset := createMediaTestAsset(t, repos, "abababababababababababababababab", "videos/delete-upload-state.mp4")
+	task := createMediaTestTask(t, repos, 7, asset, "delete-upload-state.mp4")
+	key := "upload:chunks:" + asset.FileMD5
+	ctx := context.Background()
+	for _, suffix := range []string{"", ":status", ":total", ":file_size", ":chunk_size"} {
+		if err := rdb.Set(ctx, key+suffix, "stale", 0).Err(); err != nil {
+			t.Fatalf("seed redis key %s: %v", suffix, err)
+		}
+	}
+
+	svc := &MediaService{repo: repos, objectDeleter: storage, rdb: rdb}
+	if err := svc.DeleteTask(ctx, task.UserID, task.ID); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	for _, suffix := range []string{"", ":status", ":total", ":file_size", ":chunk_size"} {
+		if rdb.Exists(ctx, key+suffix).Val() != 0 {
+			t.Errorf("stale upload state remains: %s", key+suffix)
+		}
+	}
+}
+
+func TestCheckUploadProgressRejectsStaleCompletedStateWithoutActiveAsset(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	redisServer := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	md5 := "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+	key := "upload:chunks:" + md5
+	rdb.Set(ctx, key+":status", "COMPLETED", 0)
+	rdb.Set(ctx, key+":file_size", 11, 0)
+	rdb.Set(ctx, key+":chunk_size", 5, 0)
+	rdb.Set(ctx, key+":total", 3, 0)
+
+	svc := &MediaService{repo: repos, rdb: rdb, cfg: config.UploadConfig{ChunkSize: 5}}
+	result, err := svc.CheckUploadProgress(ctx, md5, 11, 5, 3)
+	if err != nil {
+		t.Fatalf("CheckUploadProgress() error = %v", err)
+	}
+	if result["status"] == "completed" {
+		t.Fatalf("stale completed state must not skip upload: %#v", result)
+	}
 }
 
 func TestDeleteTaskStopsWhenVectorCleanupFails(t *testing.T) {
