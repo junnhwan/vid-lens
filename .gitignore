@@ -6,6 +6,7 @@
 *.dylib
 vid-lens
 /server
+build/
 
 # Test
 *.test
@@ -40,6 +41,7 @@ tmp/
 web/src/App-old.vue
 
 # Local design notes
+/CLAUDE.md
 AGENTS.md
 MEMORY.md
 MEMORY.zh-CN.md
