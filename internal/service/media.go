@@ -564,27 +564,76 @@ func (s *MediaService) InitChunkedUpload(ctx context.Context, fileMD5 string, to
 	return nil
 }
 
-func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string) (map[string]any, error) {
+func uploadSpecMatches(values []interface{}, fileSize, chunkSize int64, totalChunks int) bool {
+	if len(values) != 3 || values[0] == nil || values[1] == nil || values[2] == nil {
+		return false
+	}
+	storedFileSize, err1 := strconv.ParseInt(fmt.Sprint(values[0]), 10, 64)
+	storedChunkSize, err2 := strconv.ParseInt(fmt.Sprint(values[1]), 10, 64)
+	storedTotalChunks, err3 := strconv.Atoi(fmt.Sprint(values[2]))
+	return err1 == nil && err2 == nil && err3 == nil &&
+		storedFileSize == fileSize && storedChunkSize == chunkSize && storedTotalChunks == totalChunks
+}
+
+func (s *MediaService) resetChunkUpload(ctx context.Context, key, fileMD5 string, uploaded []string) {
+	for _, raw := range uploaded {
+		index, err := strconv.Atoi(raw)
+		if err != nil || index < 0 {
+			continue
+		}
+		if err := s.deleteObject(ctx, fmt.Sprintf("chunks/%s/%d", fileMD5, index)); err != nil {
+			log.Printf("[media] 清理不兼容上传分片失败（可忽略）: md5=%s chunk=%d err=%v", fileMD5, index, err)
+		}
+	}
+	s.rdb.Del(ctx, key, key+":status", key+":total", key+":file_size", key+":chunk_size")
+}
+
+func (s *MediaService) CheckUploadProgress(ctx context.Context, fileMD5 string, fileSize, chunkSize int64, totalChunks int) (map[string]any, error) {
 	if err := validateFileMD5(fileMD5); err != nil {
 		return nil, err
 	}
+	if fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0 || int64(totalChunks) != (fileSize+chunkSize-1)/chunkSize {
+		return nil, fmt.Errorf("上传规格无效")
+	}
+	if s.cfg.ChunkSize > 0 && chunkSize > s.cfg.ChunkSize {
+		return nil, fmt.Errorf("分片大小超过限制: 最大 %d 字节", s.cfg.ChunkSize)
+	}
 
 	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
-
+	uploaded, err := s.rdb.SMembers(ctx, key).Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("读取上传进度失败: %w", err)
+	}
+	values, err := s.rdb.MGet(ctx, key+":file_size", key+":chunk_size", key+":total").Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("读取上传规格失败: %w", err)
+	}
 	status, _ := s.rdb.Get(ctx, key+":status").Result()
+
+	if (len(uploaded) > 0 || status != "") && !uploadSpecMatches(values, fileSize, chunkSize, totalChunks) {
+		s.resetChunkUpload(ctx, key, fileMD5, uploaded)
+		uploaded = nil
+		status = ""
+	}
 	if status == "COMPLETED" {
 		return map[string]any{"status": "completed", "uploaded": []int{}}, nil
 	}
 
-	uploaded, err := s.rdb.SMembers(ctx, key).Result()
-	if err != nil {
-		return map[string]any{"status": "new", "uploaded": []int{}}, nil
+	pipe := s.rdb.TxPipeline()
+	pipe.Set(ctx, key+":file_size", fileSize, 24*time.Hour)
+	pipe.Set(ctx, key+":chunk_size", chunkSize, 24*time.Hour)
+	pipe.Set(ctx, key+":total", totalChunks, 24*time.Hour)
+	pipe.Set(ctx, key+":status", "INIT", 24*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("保存上传规格失败: %w", err)
 	}
 
 	nums := make([]int, 0, len(uploaded))
 	for _, v := range uploaded {
-		n, _ := strconv.Atoi(v)
-		nums = append(nums, n)
+		n, err := strconv.Atoi(v)
+		if err == nil && n >= 0 && n < totalChunks {
+			nums = append(nums, n)
+		}
 	}
 	return map[string]any{"status": "uploading", "uploaded": nums}, nil
 }
@@ -609,12 +658,12 @@ func (s *MediaService) UploadChunk(ctx context.Context, fileMD5 string, chunkNum
 }
 
 // MergeChunks 合并分片
-func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, filename string, totalChunks int) (*UploadResult, error) {
+func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, filename string, totalChunks int, expectedFileSize, chunkSize int64) (*UploadResult, error) {
 	if err := validateFileMD5(fileMD5); err != nil {
 		return nil, err
 	}
-	if totalChunks <= 0 {
-		return nil, fmt.Errorf("total_chunks 必须大于 0")
+	if totalChunks <= 0 || expectedFileSize <= 0 || chunkSize <= 0 || int64(totalChunks) != (expectedFileSize+chunkSize-1)/chunkSize {
+		return nil, fmt.Errorf("上传规格无效")
 	}
 
 	existingAsset, err := s.repo.Asset.FindByMD5(fileMD5)
@@ -622,6 +671,9 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 		return nil, err
 	}
 	if existingAsset != nil {
+		if existingAsset.FileSize != expectedFileSize {
+			return nil, fmt.Errorf("同一文件指纹的已存资产大小异常: 实际 %d 字节，期望 %d 字节，请删除异常资产后重试", existingAsset.FileSize, expectedFileSize)
+		}
 		return s.createTaskFromAsset(userID, filename, existingAsset, model.TaskStatusPending)
 	}
 
@@ -637,6 +689,10 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 	defer mergeLock.Unlock(ctx)
 
 	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
+	values, err := s.rdb.MGet(ctx, key+":file_size", key+":chunk_size", key+":total").Result()
+	if err != nil || !uploadSpecMatches(values, expectedFileSize, chunkSize, totalChunks) {
+		return nil, fmt.Errorf("上传会话规格不一致，请重新选择原文件上传")
+	}
 	for i := range totalChunks {
 		exists, err := s.rdb.SIsMember(ctx, key, i).Result()
 		if err != nil {
@@ -661,6 +717,10 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 	size, err := s.storage.ComposeObject(ctx, dst, srcs)
 	if err != nil {
 		return nil, fmt.Errorf("合并分片失败: %w", err)
+	}
+	if size != expectedFileSize {
+		_ = s.storage.DeleteObject(ctx, dst)
+		return nil, fmt.Errorf("合并后文件大小不一致: 实际 %d 字节，期望 %d 字节，请重新上传", size, expectedFileSize)
 	}
 
 	asset := &model.VideoAsset{
@@ -691,7 +751,8 @@ func (s *MediaService) cleanupMergedChunks(ctx context.Context, fileMD5 string, 
 		}
 	}
 	key := fmt.Sprintf("upload:chunks:%s", fileMD5)
-	s.rdb.Del(ctx, key, key+":total")
+	// 保留带 TTL 的上传规格和 COMPLETED 状态，避免相同文件立即重复上传。
+	s.rdb.Del(ctx, key)
 }
 
 // readerWrapper []byte → io.Reader

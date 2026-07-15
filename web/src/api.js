@@ -75,7 +75,9 @@ export default {
   downloadAudio: (id) => api.get(`/media/download-audio/${id}`),
 
   // 分片上传
-  checkUpload: (fileMD5) => api.get('/media/check-upload', { params: { file_md5: fileMD5 } }),
+  checkUpload: (fileMD5, fileSize, chunkSize, totalChunks) => api.get('/media/check-upload', {
+    params: { file_md5: fileMD5, file_size: fileSize, chunk_size: chunkSize, total_chunks: totalChunks },
+  }),
   uploadChunk: (fileMD5, chunkNumber, chunkData, onProgress) => {
     const form = new FormData()
     form.append('file_md5', fileMD5)
@@ -86,8 +88,10 @@ export default {
       onUploadProgress: onProgress,
     })
   },
-  mergeChunks: (fileMD5, filename, totalChunks) =>
-    api.post('/media/merge-chunks', { file_md5: fileMD5, filename, total_chunks: totalChunks }),
+  mergeChunks: (fileMD5, filename, totalChunks, fileSize, chunkSize) =>
+    api.post('/media/merge-chunks', {
+      file_md5: fileMD5, filename, total_chunks: totalChunks, file_size: fileSize, chunk_size: chunkSize,
+    }),
 
   // AI 配置
   getAIProfiles: () => api.get('/ai/profiles'),

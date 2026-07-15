@@ -97,7 +97,7 @@ export async function uploadFileInChunks({
     onProgress: (percent) => emitProgress(onProgress, 'hashing', percent * 0.1),
   })
   const totalChunks = Math.ceil(file.size / chunkSize)
-  const uploadState = await api.checkUpload(fileMD5)
+  const uploadState = await api.checkUpload(fileMD5, file.size, chunkSize, totalChunks)
   const uploaded = new Set(
     Array.isArray(uploadState?.uploaded)
       ? uploadState.uploaded.map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < totalChunks)
@@ -195,7 +195,7 @@ export async function uploadFileInChunks({
   }
 
   emitProgress(onProgress, 'merging', 95, { totalChunks })
-  const result = await api.mergeChunks(fileMD5, file.name, totalChunks)
+  const result = await api.mergeChunks(fileMD5, file.name, totalChunks, file.size, chunkSize)
   emitProgress(onProgress, 'completed', 100, { totalChunks })
   return result
 }

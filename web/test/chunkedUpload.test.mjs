@@ -44,7 +44,7 @@ function makeFile(size, name = 'demo.mp4') {
   )
   assert.deepEqual(
     calls.at(-1),
-    ['merge', '0123456789abcdef0123456789abcdef', 'demo.mp4', 3],
+    ['merge', '0123456789abcdef0123456789abcdef', 'demo.mp4', 3, 11, 5],
     'all chunks should be merged with the file identity and total chunk count',
   )
   assert.deepEqual(result, { task_id: 9 })
@@ -72,7 +72,7 @@ function makeFile(size, name = 'demo.mp4') {
     calculateMD5: async () => 'abcdef0123456789abcdef0123456789',
   })
 
-  assert.deepEqual(calls, [['merge', 'abcdef0123456789abcdef0123456789', 'existing.mp4', 1]])
+  assert.deepEqual(calls, [['merge', 'abcdef0123456789abcdef0123456789', 'existing.mp4', 1, 3, 5]])
 }
 
 {
@@ -205,4 +205,21 @@ function makeFile(size, name = 'demo.mp4') {
 
   assert.equal(maxActive, 3, 'uploads should use the configured bounded concurrency')
   assert.deepEqual(indexes.sort((a, b) => a - b), [0, 1, 2, 3, 4])
+}
+
+{
+  let checkedArgs
+  let mergeArgs
+  const api = {
+    checkUpload: async (...args) => { checkedArgs = args; return { status: 'new', uploaded: [] } },
+    uploadChunk: async () => {},
+    mergeChunks: async (...args) => { mergeArgs = args; return { task_id: 14 } },
+  }
+  const file = makeFile(11)
+  await uploadFileInChunks({
+    file, api, chunkSize: 5,
+    calculateMD5: async () => '33333333333333333333333333333333',
+  })
+  assert.deepEqual(checkedArgs, ['33333333333333333333333333333333', 11, 5, 3], 'resume lookup must include the upload specification')
+  assert.deepEqual(mergeArgs, ['33333333333333333333333333333333', file.name, 3, 11, 5], 'merge must include expected size and chunk size')
 }

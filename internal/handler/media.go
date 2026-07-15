@@ -105,7 +105,15 @@ func (h *MediaHandler) CheckUpload(c *gin.Context) {
 		return
 	}
 
-	progress, err := h.svc.CheckUploadProgress(c.Request.Context(), fileMD5)
+	fileSize, err1 := strconv.ParseInt(c.Query("file_size"), 10, 64)
+	chunkSize, err2 := strconv.ParseInt(c.Query("chunk_size"), 10, 64)
+	totalChunks, err3 := strconv.Atoi(c.Query("total_chunks"))
+	if err1 != nil || err2 != nil || err3 != nil || fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0 {
+		response.BadRequest(c, "缺少或无效的 file_size、chunk_size、total_chunks 参数")
+		return
+	}
+
+	progress, err := h.svc.CheckUploadProgress(c.Request.Context(), fileMD5, fileSize, chunkSize, totalChunks)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -123,13 +131,15 @@ func (h *MediaHandler) MergeChunks(c *gin.Context) {
 		FileMD5     string `json:"file_md5" binding:"required"`
 		Filename    string `json:"filename" binding:"required"`
 		TotalChunks int    `json:"total_chunks" binding:"required"`
+		FileSize    int64  `json:"file_size" binding:"required"`
+		ChunkSize   int64  `json:"chunk_size" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 
-	result, err := h.svc.MergeChunks(c.Request.Context(), userID, req.FileMD5, req.Filename, req.TotalChunks)
+	result, err := h.svc.MergeChunks(c.Request.Context(), userID, req.FileMD5, req.Filename, req.TotalChunks, req.FileSize, req.ChunkSize)
 	if err != nil {
 		response.InternalError(c, "合并失败: "+err.Error())
 		return

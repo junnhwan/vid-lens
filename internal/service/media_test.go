@@ -617,3 +617,15 @@ func newMediaTestRepositoriesWithForeignKeys(t *testing.T) *repository.Repositor
 	}
 	return repository.NewRepositories(db)
 }
+
+func TestUploadSpecMatchesRejectsLegacyOrChangedChunkLayout(t *testing.T) {
+	if uploadSpecMatches([]interface{}{nil, nil, nil}, 117, 5, 24) {
+		t.Fatal("legacy upload state without metadata must not be resumed")
+	}
+	if uploadSpecMatches([]interface{}{"117", "1", "117"}, 117, 5, 24) {
+		t.Fatal("a 1 MiB layout must not be resumed as a 5 MiB layout")
+	}
+	if !uploadSpecMatches([]interface{}{"117", "5", "24"}, 117, 5, 24) {
+		t.Fatal("matching upload specification should be resumable")
+	}
+}
