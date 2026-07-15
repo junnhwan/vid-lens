@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -334,8 +335,14 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	log.Printf("🚀 VidLens 服务启动在 http://localhost%s", addr)
-	if err := r.Run(addr); err != nil {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}
+	server := &http.Server{Addr: addr, Handler: r}
+	log.Printf("🚀 VidLens 服务启动在 http://localhost%s", addr)
+	if err := serveHTTP(runtimeCtx, server, listener, httpShutdownTimeout); err != nil {
+		log.Fatalf("服务运行失败: %v", err)
+	}
+	log.Println("✅ VidLens 服务已优雅停止")
 }
