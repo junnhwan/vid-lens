@@ -44,13 +44,23 @@ func (r *RetryBudgetRepository) Ensure(spec RetryBudgetSpec) (*model.AIRetryBudg
 	if err := r.db.First(&stored, "budget_id = ?", spec.BudgetID).Error; err != nil {
 		return nil, err
 	}
-	if stored.Operation != spec.Operation || stored.MaxAttempts != spec.MaxAttempts || !stored.Deadline.Equal(spec.Deadline) || (stored.TaskID != 0 && spec.TaskID != 0 && stored.TaskID != spec.TaskID) || (stored.JobID != 0 && spec.JobID != 0 && stored.JobID != spec.JobID) {
+	if stored.Operation != spec.Operation || stored.MaxAttempts != spec.MaxAttempts || !retryBudgetDeadlineEqual(stored.Deadline, spec.Deadline) || (stored.TaskID != 0 && spec.TaskID != 0 && stored.TaskID != spec.TaskID) || (stored.JobID != 0 && spec.JobID != 0 && stored.JobID != spec.JobID) {
 		return nil, fmt.Errorf("retry budget %s already exists with a different immutable specification", spec.BudgetID)
 	}
 	return &stored, nil
 }
 
 const taskJobRetryBudgetTTL = 24 * time.Hour
+
+// MySQL stores retry budget deadlines as datetime(3), so values round-trip at
+// millisecond precision even when the originating Go time contains nanoseconds.
+func retryBudgetDeadlineEqual(left, right time.Time) bool {
+	delta := left.Sub(right)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta < time.Millisecond
+}
 
 // EnsureTaskJobRetryBudget creates one durable budget for the current explicit
 // task-job cycle. The budget counts only additional provider/scheduler retry
