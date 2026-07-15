@@ -226,7 +226,7 @@ func (s *MediaService) createAssetFromLocalFile(ctx context.Context, fileMD5, lo
 		FileSize:    size,
 		ContentType: contentType,
 	}
-	if err := s.repo.Asset.Create(asset); err != nil {
+	if err := s.repo.Asset.CreateOrRestore(asset); err != nil {
 		// 并发上传同一内容时，可能另一个请求已经创建了资产。
 		// 复用已存在资产，并删除当前请求刚上传但不再需要的对象。
 		existing, findErr := s.repo.Asset.FindByMD5(fileMD5)
@@ -729,7 +729,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 		FileSize:    size,
 		ContentType: contentTypeForFilename(filename),
 	}
-	if err := s.repo.Asset.Create(asset); err != nil {
+	if err := s.repo.Asset.CreateOrRestore(asset); err != nil {
 		_ = s.storage.DeleteObject(ctx, dst)
 		return nil, err
 	}
