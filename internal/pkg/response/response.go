@@ -57,16 +57,6 @@ func Unauthorized(c *gin.Context, msg string) {
 	Fail(c, http.StatusUnauthorized, msg)
 }
 
-// Forbidden 403 无权限
-func Forbidden(c *gin.Context, msg string) {
-	Fail(c, http.StatusForbidden, msg)
-}
-
-// TooManyRequests 429 限流
-func TooManyRequests(c *gin.Context, msg string) {
-	Fail(c, http.StatusTooManyRequests, msg)
-}
-
 // InternalError 500 内部错误
 func InternalError(c *gin.Context, msg string) {
 	Fail(c, http.StatusInternalServerError, msg)

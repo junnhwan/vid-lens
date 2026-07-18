@@ -1,10 +1,12 @@
 services:
   # =========================================
-  # 1. MySQL (数据库)
+  # Legacy MySQL rollback source only
+  # Start only when needed: docker compose --profile legacy-mysql up -d mysql
   # =========================================
   mysql:
     image: mysql:8.0
     container_name: vidlens-mysql
+    profiles: ["legacy-mysql"]
     ports:
       - "3307:3306"
     environment:
@@ -50,6 +52,31 @@ services:
       - vidlens-net
 
   # =========================================
+  # PostgreSQL + pgvector (primary application database)
+  # Stores relational business data and RAG vectors; starts by default.
+  # =========================================
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: vidlens-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: vidlens
+      POSTGRES_PASSWORD: vidlens
+      POSTGRES_DB: vidlens
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - vidlens-net
+
+  # =========================================
   # 4. Zookeeper (Kafka 依赖)
   # =========================================
   zookeeper:
@@ -85,10 +112,11 @@ services:
       - vidlens-net
 
   # =========================================
-  # 6. Milvus Etcd (向量数据库依赖)
+  # 6. Milvus Etcd (rollback profile only)
   # =========================================
   milvus-etcd:
     image: quay.io/coreos/etcd:v3.5.18
+    profiles: ["milvus"]
     container_name: vidlens-milvus-etcd
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -102,10 +130,12 @@ services:
       - vidlens-net
 
   # =========================================
-  # 7. Milvus Standalone (RAG 向量库)
+  # 7. Milvus Standalone (rollback profile only)
+  # Start with: docker compose --profile milvus up -d
   # =========================================
   milvus:
     image: milvusdb/milvus:v2.4.15
+    profiles: ["milvus"]
     container_name: vidlens-milvus
     command: ["milvus", "run", "standalone"]
     security_opt:

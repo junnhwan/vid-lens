@@ -109,25 +109,13 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		step, err := failVideoAgentStep(step, "当前视频尚未构建 RAG 索引")
 		return SearchTranscriptResult{}, step, err
 	}
-	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
-		UserID:         input.UserID,
-		TaskID:         input.TaskID,
-		Question:       input.Question,
-		Recent:         input.Recent,
-		TopK:           input.TopK,
-		EmbeddingModel: input.EmbeddingModel,
-		Embedding:      input.Embedding,
-	})
+	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest(input))
 	if err != nil {
 		step, err := failVideoAgentStep(step, err.Error())
 		return SearchTranscriptResult{}, step, err
 	}
 	step.OutputRef = fmt.Sprintf("citations:%d", len(result.Citations))
-	return SearchTranscriptResult{
-		Citations: result.Citations,
-		Rewrite:   result.Rewrite,
-		Trace:     result.Trace,
-	}, step, nil
+	return SearchTranscriptResult(result), step, nil
 }
 
 func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input TranscriptWindowInput) (TranscriptWindowResult, VideoAgentStep, error) {
@@ -217,7 +205,7 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		return BuildCitedAnswerResult{}, step, err
 	}
 	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。回答中要保留对片段的指代。"},
+		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"},
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))},
 	})
 	if err != nil {
@@ -281,8 +269,8 @@ func formatSegmentGroups(groups []TranscriptSegmentGroup) string {
 
 func formatRetrievedChunks(chunks []RetrievedChunk) string {
 	lines := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		lines = append(lines, fmt.Sprintf("[chunk %d] %s", chunk.ChunkIndex, strings.TrimSpace(chunk.Content)))
+	for index, chunk := range chunks {
+		lines = append(lines, fmt.Sprintf("[C%d] (chunk %d) %s", index+1, chunk.ChunkIndex, strings.TrimSpace(chunk.Content)))
 	}
 	return strings.Join(lines, "\n")
 }

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -165,5 +166,47 @@ func TestVideoChunkRepositoryListsStableEvidenceManifest(t *testing.T) {
 	}
 	if len(manifest) != 1 || manifest[0].EvidenceID != "task_9_hash_1" || manifest[0].ChunkIndex != 1 {
 		t.Fatalf("manifest=%+v", manifest)
+	}
+}
+
+func TestVideoChunkRepositoryListForReindexUsesStableCursorAndFilters(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	if err := repo.ReplaceTaskChunks(1, "m", []model.VideoChunk{
+		{UserID: 7, TaskID: 1, ChunkIndex: 0, Content: "a", ContentHash: "h1", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "v1"},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "b", ContentHash: "h2", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "v2"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ReplaceTaskChunks(2, "other", []model.VideoChunk{
+		{UserID: 8, TaskID: 2, ChunkIndex: 0, Content: "c", ContentHash: "h3", EmbeddingModel: "other", EmbeddingDim: 3, VectorID: "v3"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.ListForReindex(context.Background(), 0, 1, 7, 1, "m")
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first page=%+v err=%v", first, err)
+	}
+	second, err := repo.ListForReindex(context.Background(), first[0].ID, 10, 7, 1, "m")
+	if err != nil || len(second) != 1 || second[0].ID <= first[0].ID || second[0].VectorID != "v2" {
+		t.Fatalf("second page=%+v err=%v", second, err)
+	}
+}
+
+func TestVideoChunkRepositoryListsAllEvidenceManifestInStableScopeOrder(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	for _, chunk := range []model.VideoChunk{
+		{UserID: 2, TaskID: 20, ChunkIndex: 1, VectorID: "u2", ContentHash: "h2", Content: "two", EmbeddingModel: "m2"},
+		{UserID: 1, TaskID: 10, ChunkIndex: 0, VectorID: "u1", ContentHash: "h1", Content: "one", EmbeddingModel: "m1"},
+	} {
+		if err := repo.db.Create(&chunk).Error; err != nil {
+			t.Fatalf("create chunk: %v", err)
+		}
+	}
+	manifest, err := repo.ListAllEvidenceManifest(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllEvidenceManifest() error = %v", err)
+	}
+	if len(manifest) != 2 || manifest[0].UserID != 1 || manifest[1].UserID != 2 {
+		t.Fatalf("manifest = %+v, want stable all-scope ordering", manifest)
 	}
 }

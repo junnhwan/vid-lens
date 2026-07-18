@@ -52,14 +52,14 @@ func (r *RetryBudgetRepository) Ensure(spec RetryBudgetSpec) (*model.AIRetryBudg
 
 const taskJobRetryBudgetTTL = 24 * time.Hour
 
-// MySQL stores retry budget deadlines as datetime(3), so values round-trip at
-// millisecond precision even when the originating Go time contains nanoseconds.
+// PostgreSQL timestamps round-trip at microsecond precision even when the
+// originating Go time contains nanoseconds.
 func retryBudgetDeadlineEqual(left, right time.Time) bool {
 	delta := left.Sub(right)
 	if delta < 0 {
 		delta = -delta
 	}
-	return delta < time.Millisecond
+	return delta < time.Microsecond
 }
 
 // EnsureTaskJobRetryBudget creates one durable budget for the current explicit
@@ -73,41 +73,48 @@ func (r *Repositories) EnsureTaskJobRetryBudget(taskID int64, jobType string, no
 		now = time.Now()
 	}
 	var budgetID string
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		var job model.TaskJob
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("task_id = ? AND job_type = ?", taskID, jobType).First(&job).Error; err != nil {
-			return err
-		}
-		if existing := strings.TrimSpace(job.RetryBudgetID); existing != "" {
-			budgetID = existing
-			return nil
-		}
-		maxAttempts := job.MaxRetries
-		if maxAttempts <= 0 {
-			maxAttempts = 3
-		}
-		budgetID = fmt.Sprintf("task-%d-job-%d-cycle-%d", taskID, job.ID, job.RetryBudgetGeneration)
-		budgetRepo := NewRetryBudgetRepository(tx)
-		if _, err := budgetRepo.Ensure(RetryBudgetSpec{
-			BudgetID: budgetID, TaskID: taskID, JobID: job.ID,
-			Operation: jobType, MaxAttempts: maxAttempts,
-			Deadline: now.Add(taskJobRetryBudgetTTL), Now: now,
-		}); err != nil {
-			return err
-		}
-		result := tx.Model(&model.TaskJob{}).
-			Where("id = ? AND (retry_budget_id = '' OR retry_budget_id IS NULL)", job.ID).
-			Update("retry_budget_id", budgetID)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return fmt.Errorf("task job retry budget changed concurrently")
-		}
-		return nil
+	err := r.Transaction(func(repos *Repositories) error {
+		var err error
+		budgetID, err = repos.ensureTaskJobRetryBudget(taskID, jobType, now)
+		return err
 	})
 	return budgetID, err
+}
+
+// ensureTaskJobRetryBudget uses the receiver's current transaction. Repository
+// workflows that already own a transaction must call this helper instead of
+// opening a nested transaction/savepoint.
+func (r *Repositories) ensureTaskJobRetryBudget(taskID int64, jobType string, now time.Time) (string, error) {
+	var job model.TaskJob
+	if err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("task_id = ? AND job_type = ?", taskID, jobType).First(&job).Error; err != nil {
+		return "", err
+	}
+	if existing := strings.TrimSpace(job.RetryBudgetID); existing != "" {
+		return existing, nil
+	}
+	maxAttempts := job.MaxRetries
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	budgetID := fmt.Sprintf("task-%d-job-%d-cycle-%d", taskID, job.ID, job.RetryBudgetGeneration)
+	if _, err := r.RetryBudget.Ensure(RetryBudgetSpec{
+		BudgetID: budgetID, TaskID: taskID, JobID: job.ID,
+		Operation: jobType, MaxAttempts: maxAttempts,
+		Deadline: now.Add(taskJobRetryBudgetTTL), Now: now,
+	}); err != nil {
+		return "", err
+	}
+	result := r.db.Model(&model.TaskJob{}).
+		Where("id = ? AND (retry_budget_id = '' OR retry_budget_id IS NULL)", job.ID).
+		Update("retry_budget_id", budgetID)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected != 1 {
+		return "", fmt.Errorf("task job retry budget changed concurrently")
+	}
+	return budgetID, nil
 }
 
 func (r *RetryBudgetRepository) Get(budgetID string) (*model.AIRetryBudget, error) {

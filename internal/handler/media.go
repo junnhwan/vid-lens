@@ -1,7 +1,8 @@
 package handler
 
 import (
-	"io"
+	"errors"
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -59,93 +60,6 @@ func (h *MediaHandler) UploadByURL(c *gin.Context) {
 	}
 
 	response.OKWithMsg(c, "链接资源已入库", result)
-}
-
-// UploadChunk 分片上传
-// POST /api/v1/media/upload-chunk
-func (h *MediaHandler) UploadChunk(c *gin.Context) {
-	fileMD5 := c.PostForm("file_md5")
-	chunkNumber, _ := strconv.Atoi(c.PostForm("chunk_number"))
-	if fileMD5 == "" || chunkNumber < 0 {
-		response.BadRequest(c, "缺少 file_md5 或 chunk_number")
-		return
-	}
-
-	chunkFile, _, err := c.Request.FormFile("chunk")
-	if err != nil {
-		response.BadRequest(c, "请选择分片文件")
-		return
-	}
-	defer chunkFile.Close()
-
-	chunkReader := io.Reader(chunkFile)
-	if maxChunkSize := h.svc.MaxChunkSize(); maxChunkSize > 0 {
-		chunkReader = io.LimitReader(chunkFile, maxChunkSize+1)
-	}
-	chunkData, err := io.ReadAll(chunkReader)
-	if err != nil {
-		response.InternalError(c, "读取分片失败")
-		return
-	}
-
-	if err := h.svc.UploadChunk(c.Request.Context(), fileMD5, chunkNumber, chunkData, int64(len(chunkData))); err != nil {
-		response.InternalError(c, "分片上传失败: "+err.Error())
-		return
-	}
-
-	response.OK(c, gin.H{"chunk_number": chunkNumber})
-}
-
-// CheckUpload 检查上传进度（断点续传）
-// GET /api/v1/media/check-upload?file_md5=xxx
-func (h *MediaHandler) CheckUpload(c *gin.Context) {
-	fileMD5 := c.Query("file_md5")
-	if fileMD5 == "" {
-		response.BadRequest(c, "缺少 file_md5 参数")
-		return
-	}
-
-	fileSize, err1 := strconv.ParseInt(c.Query("file_size"), 10, 64)
-	chunkSize, err2 := strconv.ParseInt(c.Query("chunk_size"), 10, 64)
-	totalChunks, err3 := strconv.Atoi(c.Query("total_chunks"))
-	if err1 != nil || err2 != nil || err3 != nil || fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0 {
-		response.BadRequest(c, "缺少或无效的 file_size、chunk_size、total_chunks 参数")
-		return
-	}
-
-	progress, err := h.svc.CheckUploadProgress(c.Request.Context(), fileMD5, fileSize, chunkSize, totalChunks)
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-
-	response.OK(c, progress)
-}
-
-// MergeChunks 合并分片
-// POST /api/v1/media/merge-chunks
-func (h *MediaHandler) MergeChunks(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-
-	var req struct {
-		FileMD5     string `json:"file_md5" binding:"required"`
-		Filename    string `json:"filename" binding:"required"`
-		TotalChunks int    `json:"total_chunks" binding:"required"`
-		FileSize    int64  `json:"file_size" binding:"required"`
-		ChunkSize   int64  `json:"chunk_size" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
-		return
-	}
-
-	result, err := h.svc.MergeChunks(c.Request.Context(), userID, req.FileMD5, req.Filename, req.TotalChunks, req.FileSize, req.ChunkSize)
-	if err != nil {
-		response.InternalError(c, "合并失败: "+err.Error())
-		return
-	}
-
-	response.OK(c, result)
 }
 
 // RequestAnalysis 提交 AI 分析
@@ -222,11 +136,29 @@ func (h *MediaHandler) DeleteTask(c *gin.Context) {
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
 	if err := h.svc.DeleteTask(c.Request.Context(), userID, taskID); err != nil {
-		response.Fail(c, 400, err.Error())
+		status := deleteTaskHTTPStatus(err)
+		message := err.Error()
+		if status == http.StatusInternalServerError {
+			message = "删除任务失败"
+		}
+		response.Fail(c, status, message)
 		return
 	}
 
 	response.OKWithMsg(c, "删除成功", nil)
+}
+
+func deleteTaskHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrTaskNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrTaskForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, service.ErrTaskActive):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 // DownloadAudio 获取音频下载链接

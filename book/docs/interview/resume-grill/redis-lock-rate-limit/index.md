@@ -2,35 +2,30 @@
 
 > 目标：把 Redis 讲成 VidLens 里的并发和成本控制工具。不要只背 SETNX 或令牌桶公式。
 
-### 1. 为什么 VidLens 需要分布式锁？
+### 1. 为什么 VidLens 仍需要分布式锁？
 
 - 题目：锁的业务必要性。
-- 面试官想听什么：具体竞态在哪里。
-- 简答：主要是防止同一视频 MD5 的分片合并、资产创建或分析消费出现并发竞态。VidLens 支持分片上传和 MD5 资产复用，如果两个请求同时合并同一个文件，就可能重复 ComposeObject 或重复创建 asset；分析 consumer 也会按 MD5 抢锁，避免同一视频被两个消费者同时分析。
+- 简答：Redis lock 主要用于跨实例保护昂贵、可重复触发的业务临界区，例如普通上传按完整 MD5 创建资产以及分析 Consumer 的并发处理。新的 durable upload session complete 不再依赖旧 merge lock，而使用 PostgreSQL token + expiry lease。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  分布式锁不是为了“显得高级”，而是因为这个项目有共享资源：同一个 `fileMD5` 对应的分片目录、合并后的 MinIO object 和 `video_assets` 记录。如果两个 merge 请求同时进来，即使都认为分片齐了，也可能同时执行 ComposeObject，产生两个对象或数据库唯一冲突。
+  本地 mutex 只能保护单进程，多实例下无法阻止两个请求同时做昂贵对象操作或两个 Consumer 同时处理同一视频。VidLens 的 Redis lock 使用随机 owner、TTL、WatchDog 和 owner-aware Lua unlock，降低重复计算和外部调用。
 
-  当前有两个能直接从源码证明的使用点。`MergeChunks` 会先查 `VideoAsset` 是否已存在，存在则直接创建 task 复用。不存在时才拿 `vidlens:merge:{md5}` 这把 Redis lock。拿不到锁时再查一次 asset，如果已经被别的请求合并完成，就复用；否则告诉用户合并进行中。
-
-  另一个点是分析 consumer。`handleAnalyze` 解析 Kafka 消息后，会基于视频 MD5 创建 `vidlens:lock:{md5}`，抢到锁才继续做幂等校验、状态流转和摘要分析。这里我会保守表述为“保护分析任务消费的临界区”，而不是说所有 consumer 都用了同一把锁。
+  但锁不是正确性的唯一来源：`video_assets` 的唯一约束、task processing lease 和幂等状态转换才是物理兜底。上传 session 的 owner、manifest、chunk ledger 和 completion ownership 已归 PostgreSQL，不应为了“统一用 Redis”重新引入全局 merge lock。
   </details>
 
 - 延伸追问：
-  - 只靠 MySQL unique index 行不行？
+  - 只靠 PostgreSQL unique index 行不行？
   - 本地 mutex 为什么不够？
-  - 拿不到锁时为什么再查一次 asset？
+  - Redis 锁过期但业务仍在执行怎么办？
 - 项目证据：
-  - `internal/service/media.go:610` merge 前查 MD5 asset。
-  - `internal/service/media.go:618` 创建 `vidlens:merge:{md5}` Redis lock。
-  - `internal/service/media.go:621` 拿不到锁后再次查 asset。
-  - `internal/service/media.go:651` 锁内执行 MinIO ComposeObject。
-  - `internal/mq/consumer.go:402` 分析 consumer 基于 MD5 获取分布式锁。
-  - `internal/mq/consumer.go:406` 分析 consumer 调用 `TryLock`。
-- 当前边界：MySQL 唯一约束仍是最后物理兜底，锁是降低竞态和重复工作。
+  - `internal/pkg/lock/redis_lock.go`
+  - `internal/mq/consumer_analyze.go`
+  - `internal/service/media_file_upload.go`
+  - `internal/repository/task_lease*.go`
+- 当前边界：锁减少竞争和昂贵重复工作，不提供跨 Redis/PostgreSQL/MinIO 的强一致事务。
 
 ### 2. SETNX + 固定 TTL 有什么问题？
 
@@ -189,26 +184,12 @@
 
 ### 8. Redis 在分片上传里负责什么？
 
-- 题目：Redis 不只用于锁和限流。
-- 面试官想听什么：临时状态适合 Redis，最终资产仍在 MinIO/MySQL。
-- 简答：Redis 用 Set 记录某个 MD5 已上传的 chunk number，用 `total/status` 记录上传进度。每个 chunk 先落 MinIO，再 `SAdd` 记账；merge 时检查 Set 是否包含所有分片，成功后清理临时 chunk 和 Redis 状态。
-- 深答：
-
-  <details>
-  <summary>展开深答</summary>
-
-  分片上传状态是典型临时状态。用户上传第 0、1、2 片，后端需要知道哪些分片已经到达，断线后前端可以查询进度，只补缺失分片。Redis Set 很适合这个场景，因为同一个 chunk number 重复上传时 `SAdd` 天然幂等，查询是否存在也快。
-
-  但我不会把 Redis 当最终存储。真正的数据先写 MinIO chunk object，成功后才写 Redis Set，这样 Redis 里记录的都是已经落盘的分片。合并成功后，MinIO ComposeObject 生成最终视频对象，MySQL 创建 `video_assets`，Redis 分片状态只是辅助信息。
-  </details>
-
-- 延伸追问：
-  - 为什么不是 Redis bitmap？
-  - Redis 状态丢了怎么办？
-  - 为什么先落 MinIO 再记 Redis？
+- 简答：当前不负责。durable upload session 的 manifest、进度、chunk hash、完成 lease 和 task identity 都在 PostgreSQL；MinIO 只保存字节。Redis 停止不能让已经接受的 chunk 从业务台账消失。
+- 为什么改：旧 Redis 片号协议没有 user ownership、不可变 manifest、同片冲突和稳定完成回执，TTL 也会让业务事实消失。
+- Redis 当前职责：分布式锁、Lua 令牌桶和最近聊天记忆。
 - 项目证据：
-  - `internal/service/media.go:550` 初始化分片上传状态。
-  - `internal/service/media.go:569` 查询 Redis Set 已上传分片。
-  - `internal/service/media.go:592` chunk 先上传 MinIO。
-  - `internal/service/media.go:596` MinIO 成功后 `SAdd` 记账。
-- 当前边界：当前没有完整清理历史 abandoned chunks 的后台生命周期任务。
+  - `internal/service/upload_session*.go`
+  - `internal/repository/upload_session.go`
+  - `internal/model/upload_session*.go`
+  - [上传专项](/interview/resume-grill/resume-core/chunk-upload/)
+- 当前边界：abandoned session 和孤儿对象回收仍需后台任务，但不能用本地内存或 Redis fallback 替代 PostgreSQL 事实。

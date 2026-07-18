@@ -19,7 +19,9 @@ concurrency:
 
 env:
   DEPLOY_PATH: /opt/vidlens
-  HEALTH_URL: http://vidlens.wanjune.qzz.io/health
+  RUNTIME_GENERATION: postgres-pgvector-v1
+  INTERNAL_READY_URL: http://127.0.0.1:18083/readyz
+  PUBLIC_HEALTH_URL: http://vidlens.wanjune.qzz.io/health
 
 jobs:
   deploy:
@@ -28,6 +30,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test deployment safety
+        run: bash deploy/server-deploy_test.sh
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -35,7 +40,7 @@ jobs:
           cache: true
 
       - name: Test backend
-        run: go test ./...
+        run: go test -count=1 ./...
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -97,49 +102,10 @@ jobs:
           DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_PATH='$DEPLOY_PATH' GITHUB_SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
-          set -euo pipefail
-          deploy_dir="$DEPLOY_PATH"
-          sha="${GITHUB_SHA:0:12}"
-          tmp_dir="/tmp/vidlens-deploy-${GITHUB_SHA}"
-          stamp="$(date +%Y%m%d-%H%M%S)-$sha"
-          backup_dir="$deploy_dir/.logs/deploy-backups/$stamp"
-          new_dist="$deploy_dir/web/dist.new"
-          old_dist=""
-
-          test -f "$tmp_dir/server"
-          test -f "$tmp_dir/web-dist.tar.gz"
-          mkdir -p "$backup_dir" "$deploy_dir/web"
-
-          if [ -f "$deploy_dir/server" ]; then
-            cp "$deploy_dir/server" "$backup_dir/server"
-          fi
-          if [ -d "$deploy_dir/web/dist" ]; then
-            tar -czf "$backup_dir/web-dist.tar.gz" -C "$deploy_dir/web" dist
-          fi
-
-          install -m 0755 "$tmp_dir/server" "$deploy_dir/server.new"
-          mv "$deploy_dir/server.new" "$deploy_dir/server"
-
-          rm -rf "$new_dist"
-          mkdir -p "$new_dist"
-          tar -xzf "$tmp_dir/web-dist.tar.gz" -C "$new_dist" --strip-components=1
-          if [ -d "$deploy_dir/web/dist" ]; then
-            old_dist="$deploy_dir/web/dist.old-$stamp"
-            mv "$deploy_dir/web/dist" "$old_dist"
-          fi
-          mv "$new_dist" "$deploy_dir/web/dist"
-
-          systemctl restart vidlens.service
-          systemctl is-active --quiet vidlens.service
-          curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:18083/health
-
-          rm -rf "$tmp_dir"
-          if [ -n "$old_dist" ] && [ -d "$old_dist" ]; then
-            rm -rf "$old_dist"
-          fi
-          echo "Deployed $sha, backup saved to $backup_dir"
-          REMOTE
+          remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_TMP_DIR='$remote_tmp' GITHUB_SHA='$GITHUB_SHA' EXPECTED_RUNTIME_GENERATION='$RUNTIME_GENERATION' HEALTH_URL='$INTERNAL_READY_URL' bash -s" \
+            < deploy/server-deploy.sh
 
       - name: Verify public health
-        run: curl -fsS --retry 5 --retry-delay 2 "$HEALTH_URL"
+        run: curl -fsS --retry 5 --retry-delay 2 "$PUBLIC_HEALTH_URL"

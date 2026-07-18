@@ -1,213 +1,89 @@
 # 项目定位与总览拷打
 
-> 目标：把项目讲成“AI 视频理解后端”，而不是“Kafka、Redis、MinIO 技术堆叠”。回答时先说业务链路，再说工程手段。
+> 本页回答“项目是什么、为什么不是 AI 套壳、技术选型是否合理”。详细实现进入各专题页，不在这里复制源码和易漂移行号。
 
-### 1. 你这个项目到底解决什么问题？
+## 1. 这个项目解决什么问题？
 
-- 题目：面试官想确认你是不是只做了一个上传页面加 AI 接口。
-- 面试官想听什么：视频处理为什么长、贵、容易失败，以及后端怎么把这些问题拆开。
-- 简答：VidLens 解决的是上传或提交视频 URL 后，异步完成下载、音频提取、ASR、摘要和基于转写文本的 RAG 问答。重点不是“调 AI”，而是把长耗时、高成本、外部服务不稳定的处理链路做成可排队、可重试、可观察的后端流程。
-- 深答：
+**直接回答：**
 
-  <details>
-  <summary>展开深答</summary>
+VidLens 面向长视频理解。用户真正需要的不是一次模型调用，而是把视频可靠地变成可查看、可检索、可追溯的内容：上传文件、后台处理、ASR 转写、摘要、RAG 建索引和带引用问答。
 
-  我会先把它定义成一个 AI 视频理解后端。用户上传视频或提交 URL 后，系统先把视频文件落到 MinIO，再通过 Kafka 进入后台处理。后续会用 FFmpeg 提取和压缩音频，ASR 生成转写文本，LLM 生成摘要，同时用转写文本构建 RAG 索引，让用户可以围绕视频内容提问。
+难点来自链路长且外部依赖多。大文件可能传输中断，FFmpeg 和 ASR 可能耗时几分钟，模型接口可能限流或鉴权失败，索引 source 与 projection 可能分阶段失败。项目围绕这些具体失败模式设计状态、重试、幂等和恢复能力。
 
-  这个项目里真正麻烦的地方不是 API 调用本身，而是视频链路的工程约束。比如长视频 ASR 可能因为单次请求体积、识别时长或 provider 不稳定而失败；URL 下载可能卡住 HTTP 请求；用户重复上传同一个视频会浪费存储和模型调用；RAG 如果直接用摘要做知识源会丢细节。所以后端需要 Kafka、任务状态、Redis 锁、对象存储、BYOK 和 RAG 状态，而不是简单同步调用。
-  </details>
+**项目证据：** `internal/service/media_*.go`、`internal/mq/consumer_*.go`、`internal/service/rag_*.go`。
 
-- 延伸追问：
-  - 为什么说后端是主项目，前端只是验证面？
-  - 如果只做短视频，还需要 Kafka 吗？
-  - 为什么 RAG 的知识源不是摘要？
-- 项目证据：
-  - `README.md:17` 描述上传/URL 到 ASR、摘要、RAG 问答链路。
-  - `README.md:46` 列出普通上传、分片续传、URL 下载、BYOK、RAG。
-  - `README.md:247` 明确 RAG 知识源是 ASR 转写全文。
-- 当前边界：它是简历项目和公开部署验证项目，不能包装成已有大规模生产流量。
+## 2. 两分钟项目介绍怎么说？
 
-### 2. 两分钟项目介绍怎么说？
+VidLens 是一个 Go 后端为主的 AI 视频理解项目。用户上传视频后，后端将对象保存到 MinIO，在 PostgreSQL 创建 task/job，并通过 Kafka 异步执行音频提取、分段 ASR、摘要和 RAG 索引。ASR 片段结果单独保存，失败重试时复用已完成片段；RAG 使用完整转写作为知识源，将 `video_chunks` 文本事实和 pgvector 向量投影保存到 PostgreSQL，查询时融合向量召回与 Go 侧 BM25，并返回 citations。
 
-- 题目：面试开场最常见，让你自然带出核心技术。
-- 面试官想听什么：业务、链路、技术、难点、结果，顺序清楚。
-- 简答：VidLens 是一个 Go 写的 AI 视频理解后端，支持视频上传和 URL 下载。后端用 MinIO 存视频，用 Kafka 处理下载、转写、摘要和 RAG 索引，用 Redis 做锁、限流和分片上传状态，用 Milvus 存转写 chunk 向量，最后让用户基于视频内容问答。
-- 深答：
+Redis 不保存核心业务事实，主要用于分布式锁、token bucket、上传临时状态和最近聊天缓存。用户可以通过 BYOK 配置自己的 ASR、LLM 和 Embedding 服务，Key 加密保存。前端只是触发和展示这些后端能力。
 
-  <details>
-  <summary>展开深答</summary>
+我会主动说明：本地 PostgreSQL + pgvector 迁移已经验证，远端尚不能声称完成切换；首次 Kafka 投递 outbox 和 durable upload session 仍是后续工作；URL 下载只是低优先级便利功能。
 
-  我会这样说：VidLens 是一个面向视频学习和内容理解的 Go 后端项目。用户可以上传本地视频，也可以提交 B 站或 YouTube 这类公开视频链接。HTTP 接口不会同步等完整个视频处理，而是创建 task，投递到 Kafka，由后台 consumer 下载视频、提取音频、分片 ASR、生成摘要和构建 RAG 索引。
+## 3. 为什么不是 AI 接口套壳？
 
-  存储上，大文件不进 MySQL，而是放到 MinIO 私有桶，业务表保存 object name 和状态。Redis 用在三个地方：分布式锁防止同一视频并发合并或重复处理，Lua 令牌桶保护高成本接口，分片上传用 Set 记录已上传 chunk。RAG 部分把 ASR 转写切成 chunk，生成 embedding 后写入 Milvus，提问时按 `user_id + task_id + embedding_model` 过滤检索，再把引用片段拼进 prompt。
+如果只是套壳，请求进来后直接调用模型并返回即可；VidLens 的主要代码和故障都发生在模型调用前后：
 
-  我会补一句限制：这个项目有混合检索和审计基础，但不是完整商业计费系统，也不是跨视频知识库。
-  </details>
+- 大文件如何分片、合并、复用 asset；
+- HTTP 如何快速返回，后台任务如何保存阶段；
+- 重复消息和超时任务如何通过 lease 恢复；
+- 长视频如何切片，并复用已完成的 ASR 结果；
+- RAG source 与 projection 如何审计和重建；
+- BYOK 如何加密、脱敏和按用户装配 provider；
+- 删除 task 后如何最终清理向量、对象和 Redis 状态。
 
-- 延伸追问：
-  - 你负责最核心的模块是哪几个？
-  - 你遇到过最真实的 bug 是什么？
-  - 如果只能保留一个亮点，你讲哪个？
-- 项目证据：
-  - `README.md:70` 技术栈中列出 Kafka、Redis、MinIO、Milvus。
-  - `README.md:220` 单独说明 Kafka 异步架构。
-  - `README.md:249` 单独说明 Redis 分布式锁。
-- 危险回答：不要上来背“提升性能、保证稳定性”，要先讲视频处理链路为什么会失败。
+AI provider 是不稳定外部依赖，项目价值是围绕它构造可解释的业务状态和失败恢复，而不是中间件数量。
 
-### 3. 为什么不是 AI 接口套壳？
+## 4. 为什么选 Go、Gin、GORM、PostgreSQL + pgvector？
 
-- 题目：面试官怀疑项目只是调用模型。
-- 面试官想听什么：你能说出模型之外的后端状态、一致性、失败处理。
-- 简答：如果只是 AI 套壳，HTTP 同步调用就结束了。VidLens 需要处理大文件存储、长视频分片 ASR、任务状态、重试、URL 下载安全、BYOK、RAG 索引一致性和引用返回，这些都是模型调用外面的后端工程问题。
-- 深答：
+**Go + Gin：** 适合当前单体 API、后台 goroutine 生命周期和 Kafka consumer；项目重点在后端，不需要为展示面引入更重框架。
 
-  <details>
-  <summary>展开深答</summary>
+**GORM：** 当前模型、事务和条件更新规模下可以提高开发效率，但关键 claim/lease 和 PostgreSQL 特性仍使用明确 SQL 或严格条件更新，不能只依赖 ORM 魔法。
 
-  我不会否认项目依赖外部 AI 服务，但模型只是链路的一部分。以长视频为例，最开始短视频能转写，长视频会失败或只得到几百字。后来定位到两个问题：音频 base64 后超出 MiMo 单次请求限制，以及长音频单次 ASR 可能返回不完整。所以修复不是换提示词，而是用 FFmpeg 压缩音频、按 300 秒切片、逐段 ASR 后合并，并且补 chunk 级日志。
+**PostgreSQL + pgvector：** 第一版 MySQL + Milvus 要维护两套持久化系统。当前数据量没有证明需要专用向量集群，因此迁移到 PostgreSQL 单库，让业务表、RAG source 和向量 projection 共享一套部署、备份和审计边界。pgvector 是扩展，不是第二套数据库。
 
-  RAG 也是类似。不能直接把摘要当知识库，因为摘要已经压缩过，可能漏掉细节。代码里是读取 `video_transcriptions.content`，切成 chunk，保存 MySQL chunk 和 Milvus vector；聊天时还会保存 retrieval snapshot。这里涉及数据源选择、向量库隔离、检索融合、状态记录和失败边界。
-  </details>
+**Kafka：** 长任务需要持久异步传递和 consumer group；业务重试状态由 PostgreSQL 管理。它不是为了复制 Java 项目的 RocketMQ。
 
-- 延伸追问：
-  - 长视频 ASR 具体怎么修？
-  - RAG 索引失败会不会影响转写？
-  - 哪些地方跟 AI 无关但很重要？
-- 项目证据：
-  - `docs/troubleshooting-and-interview-notes.md:47` 记录 MiMo ASR 超 10MB 错误。
-  - `docs/troubleshooting-and-interview-notes.md:134` 记录 300 秒切片方案。
-  - `internal/service/rag_index.go:78` RAG 构建读取 transcription。
-  - `internal/model/chat.go:24` 聊天记录保存 retrieval snapshot。
-- 当前边界：不要说模型能力是自己训练的；项目是工程化调用和编排外部 AI 服务。
+**Redis 与 MinIO：** Redis 负责短期协调，MinIO 负责大对象，各自解决关系数据库不适合承担的问题。
 
-### 4. 技术栈为什么选 Go、Gin、GORM、MySQL？
+**项目证据：** `cmd/server/database.go`、`internal/database/postgres.go`、`internal/vector/factory.go`、`internal/vector/pgvector.go`。
 
-- 题目：面试官看你是否理解栈选择，而不是只会罗列。
-- 面试官想听什么：语言和业务链路的匹配度，以及没有过度设计。
-- 简答：Go 适合写并发后端和长任务 worker，Gin/GORM/MySQL 是简历项目里足够清晰的 Web 与持久化组合。项目重点不在炫框架，而在任务状态、Kafka consumer、Redis/Milvus/MinIO 集成和失败恢复。
-- 深答：
+## 5. 项目最值得讲的难点是什么？
 
-  <details>
-  <summary>展开深答</summary>
+1. **任务可靠性：** task/job 状态、processing lease、typed provider error、retry budget，以及 RetryScheduler enqueue 失败后的事务恢复。
+2. **长视频 ASR：** 固定时长切片、片段状态、结果复用、最终拼接和日志定位。
+3. **RAG 生命周期：** ASR 作为知识源、stable evidence ID、source/projection 分阶段发布、BM25 + RRF、citation snapshot、audit/reindex。
+4. **资源生命周期：** task soft delete 先提交 durable cleanup intent，再由 scheduler 幂等清理外部资源。
+5. **数据库迁移：** MySQL + Milvus 到 PostgreSQL + pgvector 的复制、独立审计、sequence 校准和停止 MySQL smoke。
 
-  我选 Go 是因为这个项目有比较多的后台处理和外部组件集成：Kafka consumer、FFmpeg/yt-dlp 命令调用、MinIO 文件流、Milvus 检索、Redis 锁和限流。Go 的 goroutine 和标准库 context 适合组织这些 I/O 密集型链路。
+这些内容都有源码、测试或故障记录，不需要用虚构并发量包装。
 
-  Gin 负责 HTTP API，GORM 负责常规业务表。MySQL 存任务、转写、摘要、RAG index、chat message、AI profile 和调用审计。大文件不放 MySQL，而是用 MinIO；向量不放 MySQL，而是用 Milvus。也就是说 MySQL 负责状态和元数据，专门存储负责二进制对象和向量。
-  </details>
+## 6. 如果面试官说“这只是拼组件”，怎么回应？
 
-- 延伸追问：
-  - 为什么不用 Java/SpringBoot？
-  - GORM 有什么风险？
-  - 哪些数据不应该放 MySQL？
-- 项目证据：
-  - `README.md:195` 项目结构说明 `cmd/server/main.go` 初始化 DB、Redis、MinIO、Kafka、Milvus。
-  - `README.md:204` 说明 model 层包含任务、转录、摘要、AI 配置、RAG chunk、聊天模型。
-  - `README.md:72` 对象存储使用 MinIO。
-- 当前边界：不要把技术栈选择说成绝对最优，只说适合当前 Go 后端项目。
+我会先承认组件都可替换，然后解释没有它时具体会坏在哪里：
 
-### 5. 这个项目的核心难点有哪些？
+- 没有持久异步队列，长任务会占住 HTTP，进程退出还会丢本地 goroutine；
+- 没有关系状态和 lease，消息重复或 worker 崩溃后无法判断任务所有权；
+- 没有对象存储，大视频会挤压业务数据库和单机磁盘；
+- 没有 Redis 协调，并发合并和高成本接口保护会退化；
+- 没有向量检索，只靠关键词很难覆盖语义表达；没有 BM25，又容易漏掉术语和数字；
+- 没有 stable citation，回答无法回到原始转写证据。
 
-- 题目：面试官要判断你是否真的踩过坑。
-- 面试官想听什么：具体失败模式，而不是空泛“高并发、高可用”。
-- 简答：核心难点是长视频 ASR 的完整性、异步任务状态与重试、RAG 索引和转写的失败边界、用户自带 AI key 的安全、URL 下载安全，以及大文件上传/复用/删除时的数据一致性。
-- 深答：
+组件不是卖点，组件对应的失败边界和取舍才是卖点。
 
-  <details>
-  <summary>展开深答</summary>
+## 7. 哪些内容不能强说？
 
-  我会按真实故障讲。第一类是长视频 ASR：短视频正常，15 分钟视频失败或转写过短，所以改成音频压缩加 300 秒分片，并补日志。第二类是异步任务：下载、转写、总结、RAG 索引耗时长，不能绑在 HTTP 请求里，所以用 Kafka 和 DB 状态记录。第三类是 RAG 边界：ASR 成功后用户应该能看到转写，Embedding 或 Milvus 失败只应该影响问答索引，所以后来把 RAG 索引拆成独立 Kafka job。
+- 不能说 Kafka exactly-once 或已经有 transactional outbox；
+- 不能说 Redis lock 是 Redisson；
+- 不能说所有 provider 都是真 token streaming；
+- 不能说有 Cross-Encoder rerank、完整 quota/计费或大规模生产收益；
+- 不能说 URL 下载已经生产级；
+- 不能把第一版 MySQL + Milvus 说成当前默认架构；
+- 不能从本地迁移结果推断远端已经切换 PostgreSQL；
+- 不能把同一 PostgreSQL 实例中的 source/projection 说成一个 transaction。
 
-  还有安全和成本问题。公开部署不能用服务端 Key 替所有用户买单，所以实现 BYOK，并把 API Key 加密入库。URL 下载是服务端代用户访问网络，所以做了平台白名单、DNS 私网 IP 拒绝和脱敏 URL，但我不会说这是完整生产级 SSRF 防护。
-  </details>
+事实边界见 `MEMORY.md` 和 `docs/backend-maintenance-map.md`。
 
-- 延伸追问：
-  - 这些难点里哪个最能体现后端能力？
-  - 你怎么验证长视频修复有效？
-  - RAG 失败为什么不删除 ASR 结果？
-- 项目证据：
-  - `docs/troubleshooting-and-interview-notes.md:225` 长视频 ASR 的口语化复盘。
-  - `docs/troubleshooting-and-interview-notes.md:3121` RAG 索引拆成独立 Kafka job。
-  - `docs/troubleshooting-and-interview-notes.md:3570` AI 调用审计的背景。
-  - `docs/troubleshooting-and-interview-notes.md:2783` URL 下载 SSRF 风险背景。
-- 当前边界：不要把这些难点包装成“高并发生产级系统”，重点是链路完整、问题真实、边界清楚。
+## 8. Vue 前端是什么定位？
 
-### 6. 如果面试官说“你这个像拼组件”，怎么回应？
-
-- 题目：压力测试你的项目价值。
-- 面试官想听什么：组件之间为什么必须配合，以及你如何处理边界。
-- 简答：我会承认用了成熟组件，但项目价值在于把组件放到视频 AI 链路里解决具体问题：Kafka 承接长任务，Redis 处理锁和限流，MinIO 存大文件，Milvus 存向量，MySQL 存状态和审计。关键不是组件名，而是每个组件负责什么、失败后怎么恢复。
-- 深答：
-
-  <details>
-  <summary>展开深答</summary>
-
-  后端项目一定会使用基础设施组件，不能因为用了 Kafka、Redis、MinIO 就说是拼装。真正要问的是：没有它会坏在哪里？在 VidLens 里，如果没有 Kafka，下载和 ASR 这种长任务会占住 HTTP 请求；没有 Redis 锁，同一个 MD5 视频合并或重复处理会出现竞态；没有 MinIO，大文件会压垮业务服务和数据库；没有 Milvus，RAG 只能做关键词匹配；没有 MySQL 状态表，用户只能看到一个模糊的“处理中”。
-
-  我更愿意把这个项目讲成视频 AI 链路的状态机和数据流。组件只是工具，核心是用它们表达任务边界、数据边界和失败边界。
-  </details>
-
-- 延伸追问：
-  - 哪个组件可以替换？
-  - Kafka 换成本地队列会怎样？
-  - Milvus 换 MySQL 全文检索行不行？
-- 项目证据：
-  - `cmd/server/main.go:110` 启动时创建 Kafka topics。
-  - `internal/pkg/lock/redis_lock.go:31` 自定义 Redis lock。
-  - `internal/storage/minio.go:61` MinIO 上传文件。
-  - `internal/vector/milvus.go:67` Milvus collection 初始化。
-- 危险回答：不要说“用了很多中间件所以架构高级”，要说“某个业务失败模式需要某个组件”。
-
-### 7. 哪些点不能写进简历或不能强说？
-
-- 题目：面试官看你是否会夸大。
-- 面试官想听什么：你能主动说明边界。
-- 简答：不能说使用 RocketMQ、Redisson、Function Calling、rerank、完整计费、生产级 URL 安全、跨视频知识库或大规模生产流量。当前真实实现是 Kafka、自定义 Redis 锁、单视频 RAG、Go 侧 BM25 风格召回加 RRF、AI 调用审计和 URL 下载第一层安全校验。
-- 深答：
-
-  <details>
-  <summary>展开深答</summary>
-
-  我会主动区分已实现和未来计划。比如参考 Java 项目可能会提 RocketMQ 和 Redisson，但 VidLens 的 Go 版本用的是 Kafka 和自定义 Redis lock，不能照抄。RAG 现在有 Milvus 向量召回、Go 侧关键词 BM25 风格召回和 RRF，但没有接 Cross-Encoder rerank，也不是 Elasticsearch/OpenSearch。AI 调用有审计和每日聚合，但没有套餐、价格、扣费事务，所以不能叫完整计费。
-
-  URL 下载也一样。当前已经做了 http/https、平台白名单、DNS 解析拒绝私网 IP、脱敏 URL 和 720p 限制，但 redirect-chain、DNS rebinding、硬下载大小/时间限制还不完整，所以只能说第一层安全校验。
-  </details>
-
-- 延伸追问：
-  - 为什么不直接复制 Java 项目里的 RocketMQ？
-  - 你怎么描述未来优化？
-  - 当前 RAG 为什么还不能叫完整搜索系统？
-- 项目证据：
-  - `MEMORY.md:262` 开始列出不要过度声称的内容。
-  - `MEMORY.md:266` 明确不要声称 VidLens 使用 RocketMQ。
-  - `MEMORY.md:267` 明确不要声称 VidLens 使用 Redisson。
-  - `docs/troubleshooting-and-interview-notes.md:2858` 明确 URL 下载不能说完全生产级。
-  - `docs/troubleshooting-and-interview-notes.md:2985` 明确当前不是 Elasticsearch/OpenSearch。
-  - `docs/troubleshooting-and-interview-notes.md:3723` 明确不是完整计费系统。
-- 当前边界：保守不是减分，能把边界说清楚通常比硬吹更可信。
-
-### 8. Vue3 前端在项目中是什么定位？
-
-- 题目：面试官可能看到 Vue，但你投的是后端。
-- 面试官想听什么：前端是验证和展示，不抢后端主线。
-- 简答：Vue3 + Vite 前端主要是验证面，用来触发上传、查看任务状态、展示 ASR 文本、摘要和 RAG 问答效果。项目核心还是后端链路：任务状态、Kafka consumer、MinIO、Redis、Milvus、BYOK 和故障处理。
-- 深答：
-
-  <details>
-  <summary>展开深答</summary>
-
-  我不会把这个项目包装成前端产品。Vue3 前端的作用是让后端能力可见：上传视频后能看到 task 状态，转写后能看到文本，摘要和问答能验证 AI 链路是否跑通。真正值得讲的是状态从 HTTP API 到 Kafka topic，再到 consumer 落库和前端轮询展示的闭环。
-
-  面试时如果被问前端，我会简单说明它是验证/display surface，然后马上回到后端，比如任务状态为什么要有 `status` 和 `stage`，RAG 为什么要有 `video_rag_indexes`，聊天为什么要保存 retrieval snapshot。
-  </details>
-
-- 延伸追问：
-  - 前端轮询有什么风险？
-  - 未来会不会用 WebSocket 或 SSE？
-  - 用户怎么看到失败原因？
-- 项目证据：
-  - `internal/model/task.go:12` 定义任务状态。
-  - `internal/model/task.go:27` 定义任务阶段。
-  - `internal/model/rag_index.go:6` 定义 RAG 索引状态。
-  - `internal/model/chat.go:24` 保存 retrieval snapshot。
-  - `README.md:77` 说明展示界面是 Vue 3 + Vite，用于触发上传和查看结果。
-- 当前边界：不要让前端设计盖过后端项目定位。
+Vue 前端是验证和展示面：触发上传、查看任务阶段、展示转写与摘要、发起问答和显示 citations。它不是项目主线。面试被问到前端时，简要说明交互后应回到后端状态流、失败恢复和数据边界。

@@ -145,7 +145,8 @@ func RateLimit(limiter *RateLimiter) gin.HandlerFunc {
 
         capacity, rate := limiter.configFor(path)
         if !limiter.Allow(c.Request.Context(), key, capacity, rate) {
-            response.TooManyRequests(c, "当前请求过多，请稍后再试")
+            c.Header("Retry-After", "1")
+            c.JSON(http.StatusTooManyRequests, gin.H{"code": "RATE_LIMITED", "message": "当前请求过多，请稍后再试", "retry_after": 1})
             c.Abort()
             return
         }

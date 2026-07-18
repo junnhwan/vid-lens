@@ -17,7 +17,7 @@ type VideoTranscriptionChunk struct {
 	StartSecond int       `gorm:"default:0" json:"start_second"`
 	EndSecond   int       `gorm:"default:0" json:"end_second"`
 	Status      string    `gorm:"type:varchar(30);index;not null" json:"status"`
-	Content     string    `gorm:"type:longtext" json:"content"`
+	Content     string    `gorm:"type:text" json:"content"`
 	Chars       int       `gorm:"default:0" json:"chars"`
 	ErrorMsg    string    `gorm:"type:varchar(500)" json:"error_msg"`
 	RetryCount  int       `gorm:"default:0" json:"retry_count"`

@@ -117,45 +117,44 @@
 
   这个问题容易被忽略，因为“扫描到期任务”和“投递消息”不是一个原子操作。数据库条件更新成功后，调度器以为自己拿到了任务；但 Kafka producer 可能因为 broker 不可用、网络错误或 topic 问题投递失败。如果此时不恢复任务的 retry metadata，后续 scheduler 就不会再捞到它。
 
-  VidLens 已经有 `RestoreRetryAfterDispatchFailure` 这类恢复路径，AGENTS 里仍把它列为高优先级生产风险，是因为这种边界需要专门测试 producer 失败和多实例调度场景。面试里可以讲成“我知道当前最危险的不是普通失败，而是跨 DB 和 Kafka 的半成功状态”。
+  VidLens 当前通过 `ClaimRetryDispatch` / `RestoreRetryDispatch` 闭环这个窗口：task 与 task_job 使用相同的 token/version lease 事务性认领，producer 失败时按 token CAS 恢复；进程崩溃则由过期 lease 接管。面试里可以讲“我没有假装 DB 和 Kafka 有原子事务，而是让半成功状态可检测、可恢复”。
   </details>
 
 - 延伸追问：
-  - 为什么不把 Kafka 投递放进 MySQL 事务？
+  - 为什么不把 Kafka 投递放进 PostgreSQL 事务？
   - outbox 模式能不能解决？
   - 多实例 scheduler 会不会重复 claim？
 - 项目证据：
-  - `internal/repository/task.go:226` `ClaimRetryTask` 条件更新。
-  - `internal/repository/task.go:243` `RestoreRetryAfterDispatchFailure`。
-  - `internal/mq/retry.go:212` Kafka retry 投递失败后恢复。
-  - `AGENTS.md:124` RetryScheduler recovery 是高优先级 future work。
-- 当前边界：当前不是完整 outbox/event sourcing 架构，多实例和 producer 失败仍需要更强测试。
+  - `internal/repository/task_lease_dispatch.go` dispatch claim/restore 事务与 token CAS。
+  - `internal/mq/retry.go` producer 失败主动恢复。
+  - `internal/mq/reliability_review_test.go` 多实例、回滚、过期 lease 与 producer 失败测试。
+- 当前边界：重试补投窗口已可恢复，但这不是完整 outbox；首次创建任务后的投递窗口仍需单独做故障矩阵。
 
 ### 6. RAG 旧向量不删会怎样？
 
 - 题目：数据一致性。
 - 面试官想听什么：重建索引时旧数据污染检索。
-- 简答：如果重建 RAG 时只追加新向量，不删除旧向量，Milvus 里会同时存在旧 chunk 和新 chunk。用户提问可能召回过期内容，citation 对不上当前转写，甚至重复片段影响 RRF 排序。
+- 简答：如果重建 RAG 时只追加新向量，不替换旧 projection，pgvector 表里会同时存在旧 chunk 和新 chunk。用户提问可能召回过期内容，citation 对不上当前转写，甚至重复片段影响 RRF 排序。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  RAG 索引不是只建一次。用户换 embedding model、修复转写、重建索引时，都可能生成新的 chunks。如果旧 Milvus vectors 不清理，搜索 filter 仍然可能命中旧 embedding model 或旧 task chunk，导致答案看起来像“模型胡说”，实际是检索数据污染。
+  RAG 索引不是只建一次。用户换 embedding model、修复转写、重建索引时，都可能生成新的 chunks。如果旧 pgvector projection 不替换，检索 scope 仍然可能命中旧 embedding model 或旧 task chunk，导致答案看起来像“模型胡说”，实际是检索数据污染。
 
-  VidLens 的重建流程会先清理旧向量和旧 MySQL chunks，再写新 chunks 和 vectors。这里的复盘价值是：RAG 质量问题不一定是 prompt，很多时候是索引生命周期没管好。
+  VidLens 当前先在一个 PostgreSQL transaction 中替换 `video_chunks` source，再在另一个 transaction 中原子替换 pgvector projection。这里的复盘价值是：RAG 质量问题不一定是 prompt，很多时候是索引生命周期没管好。两步不是同一个 transaction，projection 失败时会记录 failed，并通过 `rag-audit`、`rag-reindex` 恢复。
   </details>
 
 - 延伸追问：
-  - 删除 Milvus 成功、MySQL 失败怎么办？
+  - `video_chunks` source 成功、pgvector projection 失败怎么办？
   - build_version 有什么用？
   - 怎么检测向量残留？
 - 项目证据：
-  - `internal/service/rag_index.go:137` 重建索引前清理旧 Milvus vectors。
-  - `internal/repository/video_chunk.go:26` 替换 MySQL chunks。
+  - `internal/service/rag_index_build.go` 编排 source 持久化与 projection 替换。
+  - `internal/repository/video_chunk.go` 事务性替换 PostgreSQL `video_chunks` source。
   - `docs/troubleshooting-and-interview-notes.md:3004` RAG 旧向量问题记录。
   - `docs/troubleshooting-and-interview-notes.md:3097` 旧向量污染口语化回答。
-- 当前边界：当前没有独立后台巡检 Milvus 与 MySQL chunk 是否完全一致。
+- 当前边界：当前已有 `rag-audit` 检查 source/projection 漂移，`rag-reindex` 可重建；但 source 与 projection 仍是两个 transaction，不是整体强一致。
 
 ### 7. RAG 索引为什么要拆成独立 job？
 
@@ -167,7 +166,7 @@
   <details>
   <summary>展开深答</summary>
 
-  第一版容易把“视频处理完成”和“RAG 可问答”混在一起。实际上 ASR 成功后，转写结果已经有价值；RAG 索引还要经过 chunk、embedding、MySQL chunk、Milvus upsert，任何一步失败都不应该抹掉 ASR 成果。
+  第一版容易把“视频处理完成”和“RAG 可问答”混在一起。实际上 ASR 成功后，转写结果已经有价值；RAG 索引还要经过 chunk、embedding、PostgreSQL `video_chunks` source、pgvector projection publish，任何一步失败都不应该抹掉 ASR 成果。
 
   拆成独立 job 后，`video_rag_indexes` 能记录 indexing/indexed/failed、chunk count、embedding model 和 last_error，`task_jobs` 能记录 rag_index 的重试状态。面试里可以把它讲成对用户可见状态和排障粒度的改进。
   </details>

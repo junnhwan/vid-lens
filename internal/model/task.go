@@ -51,7 +51,7 @@ type VideoTask struct {
 	Title           string         `gorm:"type:varchar(120);default:''" json:"title,omitempty"`
 	FileURL         string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径
 	FileSize        int64          `gorm:"default:0" json:"file_size"`        // 文件大小（字节）
-	Status          int8           `gorm:"type:tinyint;default:0;index:idx_status_time" json:"status"`
+	Status          int8           `gorm:"type:smallint;default:0;index:idx_status_time" json:"status"`
 	Stage           string         `gorm:"type:varchar(50);default:'none';index" json:"stage"`
 	TraceID         string         `gorm:"type:varchar(64);index" json:"trace_id"`
 	SourceType      string         `gorm:"type:varchar(20);index" json:"source_type"`

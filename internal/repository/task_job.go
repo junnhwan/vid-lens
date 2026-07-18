@@ -74,7 +74,7 @@ func (r *TaskJobRepository) upsertDispatchState(task *model.VideoTask, jobType s
 		// An explicit user submission starts a new retry cycle. Scheduler
 		// redispatches never call UpsertQueued, so they keep the same budget.
 		updates["retry_budget_id"] = ""
-		updates["retry_budget_generation"] = gorm.Expr("retry_budget_generation + 1")
+		updates["retry_budget_generation"] = gorm.Expr("task_jobs.retry_budget_generation + 1")
 	}
 	return r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "task_id"}, {Name: "job_type"}},
@@ -164,23 +164,6 @@ func (r *TaskJobRepository) RecordTerminalFailure(taskID int64, jobType, stage, 
 			"max_retries":     maxRetries,
 			"next_retry_at":   nil,
 			"last_error_code": errCode,
-			"last_error_msg":  errMsg,
-			"finished_at":     &now,
-		}).Error
-}
-
-func (r *TaskJobRepository) RestoreAfterDispatchFailure(taskID int64, jobType, stage, errMsg string, nextRetryAt time.Time) error {
-	if err := r.ensureJob(taskID, jobType, stage, 0); err != nil {
-		return err
-	}
-	now := time.Now()
-	return r.db.Model(&model.TaskJob{}).
-		Where("task_id = ? AND job_type = ?", taskID, jobType).
-		Updates(map[string]interface{}{
-			"status":          model.TaskStatusFailed,
-			"stage":           stage,
-			"next_retry_at":   nextRetryAt,
-			"last_error_code": "retry_enqueue_failed",
 			"last_error_msg":  errMsg,
 			"finished_at":     &now,
 		}).Error

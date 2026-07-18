@@ -66,7 +66,7 @@ func TestFreezeEvidenceArtifactsRejectsTaskVideoAndVectorDrift(t *testing.T) {
 			t.Fatalf("error = %v, want task/video mismatch", err)
 		}
 	})
-	t.Run("milvus missing mysql evidence", func(t *testing.T) {
+	t.Run("vector projection missing relational evidence", func(t *testing.T) {
 		dataset, snapshot := validEvidenceSnapshot(t)
 		snapshot.Vectors = nil
 		_, err := FreezeEvidenceArtifacts(dataset, snapshot)

@@ -1,6 +1,7 @@
 package mq
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -127,5 +128,24 @@ func TestRecordLeasedTaskFailureUsesProviderRetryAfterAsLowerBound(t *testing.T)
 	}
 	if job == nil || job.NextRetryAt == nil || !job.NextRetryAt.Equal(want) {
 		t.Fatalf("job next_retry_at = %v, want %v", job, want)
+	}
+}
+
+func TestRetrySchedulerWaitsForStoppedWorker(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	scheduler := NewRetryScheduler(nil, nil, RetrySchedulerConfig{})
+	scheduler.Start(ctx)
+	done := make(chan struct{})
+	go func() {
+		scheduler.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("retry scheduler did not stop after context cancellation")
 	}
 }

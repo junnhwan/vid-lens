@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
 	embedding := &fakeEmbeddingClient{dim: 3}
 	chatClient := &scriptedChatClient{responses: []string{
 		"not-json",
-		"直接回答",
+		"直接回答 [C1]",
 	}}
 	retriever := &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Content: "owner 校验引用片段"},
@@ -92,8 +93,91 @@ func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
+	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
+	}
 	if !strings.Contains(*messages[1].RetrievalSnapshot, "build_cited_answer") {
 		t.Fatalf("snapshot = %s, want trace", *messages[1].RetrievalSnapshot)
+	}
+}
+
+func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *testing.T) {
+	repos, _, session := newVideoAgentTestSession(t)
+	anchor := strings.Repeat("背景内容。", 40) + "工具调用结果会作为新消息反馈给模型。" + strings.Repeat("其他内容。", 40)
+	expanded := "前邻居上下文只给模型。\n" + anchor + "\n后邻居上下文也只给模型。"
+	chatClient := &scriptedChatClient{responses: []string{
+		"not-json",
+		"工具结果会反馈给模型，另一条说明最终文件列表 [C2, C1]",
+	}}
+	retriever := &fakeRetriever{results: []RetrievedChunk{
+		{
+			EvidenceID: "ev-agent-1", ChunkID: 9, ChunkIndex: 3,
+			Content: expanded, AnchorContent: anchor, MatchedQuery: "工具调用结果反馈模型",
+		},
+		{
+			EvidenceID: "ev-agent-2", ChunkID: 10, ChunkIndex: 4,
+			Content:       "完全无关的第二条唯一文本，只讨论最终文件列表。",
+			AnchorContent: "完全无关的第二条唯一文本，只讨论最终文件列表。",
+		},
+	}}
+	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	agent := NewVideoAgentService(chatSvc)
+
+	result, err := agent.Ask(context.Background(), VideoAgentRequest{
+		UserID: 7, SessionID: session.ID, Question: "工具调用结果如何反馈给模型？", TopK: 2,
+	}, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("Ask() error = %v", err)
+	}
+	if len(chatClient.messages) != 2 || !messagesContain(chatClient.messages[1], "前邻居上下文只给模型") || !messagesContain(chatClient.messages[1], "后邻居上下文也只给模型") {
+		t.Fatalf("final answer prompt lost expanded context: %+v", chatClient.messages)
+	}
+	if !messagesContain(chatClient.messages[1], "[C1]") || !messagesContain(chatClient.messages[1], "[C2]") || !messagesContain(chatClient.messages[1], "完全无关的第二条唯一文本") {
+		t.Fatalf("final answer prompt lost candidate citations: %+v", chatClient.messages[1])
+	}
+	if result.Answer != "工具结果会反馈给模型，另一条说明最终文件列表" || strings.Contains(result.Answer, "[C") {
+		t.Fatalf("result answer = %q, want clean answer", result.Answer)
+	}
+	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C1" || result.Citations[1].CitationID != "C2" {
+		t.Fatalf("citations = %+v, want stable candidate order C1, C2", result.Citations)
+	}
+	firstCitation := result.Citations[0]
+	if strings.Contains(firstCitation.Content, "邻居上下文") || !strings.Contains(firstCitation.Content, "工具调用结果会作为新消息反馈给模型") {
+		t.Fatalf("first public citation = %+v", firstCitation)
+	}
+	if !strings.Contains(anchor, firstCitation.Content) {
+		t.Fatalf("first public citation must be verbatim anchor evidence: %q", firstCitation.Content)
+	}
+	if !strings.Contains(result.Citations[1].Content, "完全无关的第二条唯一文本") {
+		t.Fatalf("second public citation = %+v", result.Citations[1])
+	}
+
+	messages, err := repos.Chat.ListMessages(7, session.ID)
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
+		t.Fatalf("messages = %+v", messages)
+	}
+	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
+	}
+	var snapshot struct {
+		Citations []Citation `json:"citations"`
+	}
+	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	if len(snapshot.Citations) != 2 || snapshot.Citations[0].CitationID != "C1" || snapshot.Citations[1].CitationID != "C2" {
+		t.Fatalf("snapshot citations = %+v, want stable candidate order C1, C2", snapshot.Citations)
+	}
+	if snapshot.Citations[0].Content != result.Citations[0].Content || snapshot.Citations[1].Content != result.Citations[1].Content {
+		t.Fatalf("snapshot citations = %+v, result citations = %+v", snapshot.Citations, result.Citations)
+	}
+	if strings.Contains(*messages[1].RetrievalSnapshot, "邻居上下文") || strings.Contains(*messages[1].RetrievalSnapshot, "anchor_content") {
+		t.Fatalf("snapshot leaked internal context: %s", *messages[1].RetrievalSnapshot)
 	}
 }
 

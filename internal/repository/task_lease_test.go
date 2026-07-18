@@ -7,6 +7,211 @@ import (
 	"vid-lens/internal/model"
 )
 
+func TestPrepareInitialTaskDispatchPersistsRecoverableLeaseAndBudgetAtomically(t *testing.T) {
+	repos := newTestRepositories(t)
+	now := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "01010101010101010101010101010101", Filename: "initial.mp4",
+		Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-initial", MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	prepared, err := repos.PrepareInitialTaskDispatch(InitialTaskDispatchRequest{
+		Task: task, AllowedStatuses: []int8{model.TaskStatusPending},
+		JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		Now: now, LeaseUntil: now.Add(2 * time.Minute), Token: "initial-dispatch-token",
+	})
+	if err != nil {
+		t.Fatalf("prepare initial dispatch: %v", err)
+	}
+	if prepared.RetryBudgetID == "" || prepared.Token != "initial-dispatch-token" {
+		t.Fatalf("prepared dispatch = %+v", prepared)
+	}
+
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if err != nil {
+		t.Fatalf("find task job: %v", err)
+	}
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageTranscribing || current.LastJobType != model.TaskJobTypeTranscribe || current.ProcessingToken != prepared.Token || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil || current.LeaseVersion != 1 {
+		t.Fatalf("prepared task = %+v", current)
+	}
+	if job == nil || job.Status != model.TaskStatusQueued || job.ProcessingToken != prepared.Token || job.LeaseKind != model.TaskLeaseKindDispatch || job.LeaseExpiresAt == nil || job.LeaseVersion != current.LeaseVersion || job.RetryBudgetID != prepared.RetryBudgetID {
+		t.Fatalf("prepared task job = %+v", job)
+	}
+	if _, err := repos.RetryBudget.Get(prepared.RetryBudgetID); err != nil {
+		t.Fatalf("load retry budget: %v", err)
+	}
+
+	due, err := repos.Task.FindDueRetryTasks(now.Add(2*time.Minute+time.Millisecond), 10)
+	if err != nil {
+		t.Fatalf("find expired initial dispatch: %v", err)
+	}
+	if len(due) != 1 || due[0].ID != task.ID {
+		t.Fatalf("expired initial dispatches = %+v, want task %d", due, task.ID)
+	}
+}
+
+func TestPreparedInitialDispatchHandsOffOnlyMatchingToken(t *testing.T) {
+	repos := newTestRepositories(t)
+	now := time.Date(2026, 7, 17, 9, 15, 0, 0, time.UTC)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "03030303030303030303030303030303", Filename: "handoff.mp4",
+		Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-handoff", MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	prepared, err := repos.PrepareInitialTaskDispatch(InitialTaskDispatchRequest{
+		Task: task, AllowedStatuses: []int8{model.TaskStatusPending},
+		JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		Now: now, LeaseUntil: now.Add(2 * time.Minute), Token: "handoff-dispatch-token",
+	})
+	if err != nil {
+		t.Fatalf("prepare initial dispatch: %v", err)
+	}
+
+	stale, err := repos.ClaimTaskProcessing(TaskProcessingClaimRequest{
+		TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		MessageToken: "wrong-token", Now: now.Add(time.Second), LeaseUntil: now.Add(time.Hour), NewToken: "worker-stale",
+	})
+	if err != nil || stale.Outcome != TaskLeaseStale {
+		t.Fatalf("stale handoff = %+v/%v", stale, err)
+	}
+	claim, err := repos.ClaimTaskProcessing(TaskProcessingClaimRequest{
+		TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		MessageToken: prepared.Token, Now: now.Add(time.Second), LeaseUntil: now.Add(time.Hour), NewToken: "worker-current",
+	})
+	if err != nil || claim.Outcome != TaskLeaseAcquired {
+		t.Fatalf("current handoff = %+v/%v", claim, err)
+	}
+	current, _ := repos.Task.FindByID(task.ID)
+	job, _ := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if current.ProcessingToken != "worker-current" || current.LeaseKind != model.TaskLeaseKindProcessing || current.LeaseVersion != 2 {
+		t.Fatalf("processing task = %+v", current)
+	}
+	if job == nil || job.ProcessingToken != "worker-current" || job.LeaseKind != model.TaskLeaseKindProcessing || job.LeaseVersion != current.LeaseVersion {
+		t.Fatalf("processing job = %+v", job)
+	}
+}
+
+func TestPrepareInitialTaskDispatchRollsBackWhenBudgetPersistenceFails(t *testing.T) {
+	repos := newTestRepositories(t)
+	now := time.Date(2026, 7, 17, 9, 30, 0, 0, time.UTC)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "02020202020202020202020202020202", Filename: "rollback.mp4",
+		Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-rollback", MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.db.Migrator().DropTable(&model.AIRetryBudget{}); err != nil {
+		t.Fatalf("drop retry budget table: %v", err)
+	}
+
+	_, err := repos.PrepareInitialTaskDispatch(InitialTaskDispatchRequest{
+		Task: task, AllowedStatuses: []int8{model.TaskStatusPending},
+		JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		Now: now, LeaseUntil: now.Add(2 * time.Minute), Token: "rollback-token",
+	})
+	if err == nil {
+		t.Fatal("prepare initial dispatch error = nil, want budget persistence failure")
+	}
+
+	current, findErr := repos.Task.FindByID(task.ID)
+	if findErr != nil {
+		t.Fatalf("find task after rollback: %v", findErr)
+	}
+	if current.Status != model.TaskStatusPending || current.Stage != model.TaskStageUploaded || current.ProcessingToken != "" || current.LastJobType != "" || current.LeaseVersion != 0 {
+		t.Fatalf("task changed despite rollback: %+v", current)
+	}
+	job, findErr := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if findErr != nil {
+		t.Fatalf("find task job after rollback: %v", findErr)
+	}
+	if job != nil {
+		t.Fatalf("task job survived rollback: %+v", job)
+	}
+}
+
+func TestPrepareInitialTaskDispatchRollsBackNewTaskWhenBudgetPersistenceFails(t *testing.T) {
+	repos := newTestRepositories(t)
+	now := time.Date(2026, 7, 17, 9, 45, 0, 0, time.UTC)
+	if err := repos.db.Migrator().DropTable(&model.AIRetryBudget{}); err != nil {
+		t.Fatalf("drop retry budget table: %v", err)
+	}
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "04040404040404040404040404040404", Filename: "new-rollback.mp4",
+		Status: model.TaskStatusRunning, Stage: model.TaskStageDownloading, TraceID: "trace-new-rollback", MaxRetries: 3,
+	}
+
+	_, err := repos.PrepareInitialTaskDispatch(InitialTaskDispatchRequest{
+		Task: task, CreateTask: true,
+		JobType: model.TaskJobTypeDownload, Stage: model.TaskStageDownloading,
+		Now: now, LeaseUntil: now.Add(2 * time.Minute), Token: "new-rollback-token",
+	})
+	if err == nil {
+		t.Fatal("prepare new initial dispatch error = nil, want budget persistence failure")
+	}
+	if task.ID != 0 {
+		t.Fatalf("caller task id = %d after rolled-back create, want 0", task.ID)
+	}
+	var taskCount, jobCount int64
+	if err := repos.db.Model(&model.VideoTask{}).Count(&taskCount).Error; err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if err := repos.db.Model(&model.TaskJob{}).Count(&jobCount).Error; err != nil {
+		t.Fatalf("count task jobs: %v", err)
+	}
+	if taskCount != 0 || jobCount != 0 {
+		t.Fatalf("rolled-back rows = tasks:%d jobs:%d", taskCount, jobCount)
+	}
+}
+
+func TestClaimTaskProcessingSetsTaskStartedAtOnWorkerHandoff(t *testing.T) {
+	repos := newTestRepositories(t)
+	queuedAt := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
+	processingAt := queuedAt.Add(time.Second)
+	task := &model.VideoTask{
+		UserID: 8, FileMD5: "05050505050505050505050505050505", Filename: "start-time.mp4",
+		Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-start-time", MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	prepared, err := repos.PrepareInitialTaskDispatch(InitialTaskDispatchRequest{
+		Task: task, AllowedStatuses: []int8{model.TaskStatusPending},
+		JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		Now: queuedAt, LeaseUntil: queuedAt.Add(2 * time.Minute), Token: "start-time-dispatch",
+	})
+	if err != nil {
+		t.Fatalf("prepare initial dispatch: %v", err)
+	}
+	if task.StartedAt != nil {
+		t.Fatalf("queued task started_at = %v, want nil before worker handoff", task.StartedAt)
+	}
+
+	claim, err := repos.ClaimTaskProcessing(TaskProcessingClaimRequest{
+		TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		MessageToken: prepared.Token, Now: processingAt, LeaseUntil: processingAt.Add(time.Hour), NewToken: "start-time-worker",
+	})
+	if err != nil || claim.Outcome != TaskLeaseAcquired {
+		t.Fatalf("claim processing = %+v/%v", claim, err)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find processing task: %v", err)
+	}
+	if current.StartedAt == nil || !current.StartedAt.Equal(processingAt) {
+		t.Fatalf("processing task started_at = %v, want %v", current.StartedAt, processingAt)
+	}
+}
+
 func TestClaimTaskProcessingReclaimsExpiredRunningLeaseAtomically(t *testing.T) {
 	repos := newTestRepositories(t)
 	now := time.Date(2026, 7, 14, 1, 0, 0, 0, time.UTC)

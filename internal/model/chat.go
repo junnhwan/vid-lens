@@ -20,7 +20,7 @@ type ChatMessage struct {
 	SessionID         int64     `gorm:"index;not null" json:"session_id"`
 	UserID            int64     `gorm:"index;not null" json:"user_id"`
 	Role              string    `gorm:"type:varchar(20);not null" json:"role"`
-	Content           string    `gorm:"type:longtext;not null" json:"content"`
+	Content           string    `gorm:"type:text;not null" json:"content"`
 	RetrievalSnapshot *string   `gorm:"type:json" json:"retrieval_snapshot,omitempty"`
 	ModelName         string    `gorm:"type:varchar(100)" json:"model_name,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`

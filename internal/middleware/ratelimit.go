@@ -25,6 +25,7 @@ type RateLimiter struct {
 	rate      int // 全局默认每秒令牌数
 	overrides map[string]routeLimit
 	mu        sync.RWMutex
+	now       func() time.Time
 }
 
 type routeLimit struct {
@@ -39,6 +40,7 @@ func NewRateLimiter(client redis.Cmdable, capacity, rate int) *RateLimiter {
 		capacity:  capacity,
 		rate:      rate,
 		overrides: make(map[string]routeLimit),
+		now:       time.Now,
 	}
 }
 
@@ -96,7 +98,7 @@ end
 // capacity/rate 作为参数传入，由调用方按路由取配额后注入。
 // Redis 异常时 fail-open（放行）：限流是保护手段而非关键路径，不应成为单点故障。
 func (r *RateLimiter) Allow(ctx context.Context, key string, capacity, rate int) bool {
-	now := time.Now().UnixMilli()
+	now := r.now().UnixMilli()
 	result, err := tokenBucketScript.Run(ctx, r.client,
 		[]string{fmt.Sprintf("rate_limiter:%s", key)},
 		rate, capacity, now,

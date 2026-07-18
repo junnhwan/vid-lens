@@ -49,7 +49,7 @@ func TestExtractQueryTermsPreservesEnglishNumbersAndChineseNgrams(t *testing.T) 
 
 func TestFuseRetrievedChunksDeduplicatesByStableEvidenceID(t *testing.T) {
 	vectorChunks := []RetrievedChunk{{EvidenceID: "task_9_semantic-v1_deadbeef_3", ChunkID: 10, ChunkIndex: 3, Content: "vector copy"}}
-	keywordChunks := []RetrievedChunk{{EvidenceID: "task_9_semantic-v1_deadbeef_3", ChunkID: 99, ChunkIndex: 3, Content: "mysql copy"}}
+	keywordChunks := []RetrievedChunk{{EvidenceID: "task_9_semantic-v1_deadbeef_3", ChunkID: 99, ChunkIndex: 3, Content: "keyword copy"}}
 
 	fused := FuseRetrievedChunks(vectorChunks, keywordChunks, 5, 60)
 	if len(fused) != 1 {

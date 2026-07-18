@@ -30,7 +30,7 @@ type VideoAgentResult struct {
 	MessageID int64            `json:"message_id"`
 	Answer    string           `json:"answer"`
 	Template  string           `json:"template"`
-	Citations []RetrievedChunk `json:"citations"`
+	Citations []Citation       `json:"citations"`
 	Trace     []VideoAgentStep `json:"trace"`
 	Model     string           `json:"model"`
 }
@@ -137,10 +137,12 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
+	candidateCitations := buildCitations(req.Question, citations)
+	finalized := finalizeAnswerCitations(answer, candidateCitations)
 	result := &VideoAgentResult{
-		Answer:    answer,
+		Answer:    finalized.Answer,
 		Template:  string(template),
-		Citations: citations,
+		Citations: finalized.Citations,
 		Trace:     trace,
 		Model:     profile.LLMModel,
 	}
@@ -282,7 +284,7 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	}
 	snapshot, err := json.Marshal(struct {
 		Template  string           `json:"template"`
-		Citations []RetrievedChunk `json:"citations"`
+		Citations []Citation       `json:"citations"`
 		Trace     []VideoAgentStep `json:"trace"`
 	}{
 		Template:  result.Template,

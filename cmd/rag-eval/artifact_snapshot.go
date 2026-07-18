@@ -96,7 +96,7 @@ func buildLiveEvidenceSnapshot(ctx context.Context, dataset rageval.Dataset, spl
 			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("load chunks for task %d: %w", c.TaskID, err)
 		}
 		if len(chunks) == 0 {
-			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("task %d has empty MySQL chunk manifest", c.TaskID)
+			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("task %d has empty relational chunk manifest", c.TaskID)
 		}
 		for _, chunk := range chunks {
 			if chunk.TaskID != c.TaskID || chunk.UserID != task.UserID {
@@ -123,7 +123,7 @@ func buildLiveEvidenceSnapshot(ctx context.Context, dataset rageval.Dataset, spl
 			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("task %d model %q is missing indexed chunker provenance; rebuild the index", group.taskID, group.embeddingModel)
 		}
 		if index.ChunkCount != len(group.chunks) {
-			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("task %d model %q chunk count drift: index=%d mysql=%d", group.taskID, group.embeddingModel, index.ChunkCount, len(group.chunks))
+			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("task %d model %q chunk count drift: index=%d source=%d", group.taskID, group.embeddingModel, index.ChunkCount, len(group.chunks))
 		}
 		manifest, err := service.ComputeChunkManifestSHA256(group.chunks)
 		if err != nil {

@@ -1,241 +1,79 @@
-# 专题 1：Kafka 异步化
+# 专题 1：Kafka 异步任务与状态恢复
 
-## 1. 简历原句
+> 当前事实以 `internal/mq/`、`internal/repository/task_lease*.go` 和 `docs/backend-maintenance-map.md` 为准。
 
-引入 Kafka 将视频下载、ASR 转写、摘要生成和 RAG 索引构建等长耗时任务异步化，HTTP 接口仅负责任务落库和消息投递，避免分钟级视频处理阻塞请求链路
+## 1. 推荐简历表述
 
-## 2. 这个点想证明什么
+使用 Kafka 将视频下载、分段 ASR、摘要和 RAG 索引移出 HTTP 长请求，并以 PostgreSQL task/job 状态、processing lease、错误分类和重试调度管理分钟级任务的重复消费与失败恢复。
 
-这条证明你不是只写了一个同步调 AI API 的 demo，而是把视频处理做成了异步任务链路。它能体现后端工程里的任务拆分、削峰、状态可观测、失败恢复、幂等和最终一致性。
+## 2. 面试口语答案
 
-面试官看到这条，最可能顺着问 Kafka、MySQL 状态表、重复消费、失败重试、topic 拆分、消息可靠性。
+> 视频处理会经历下载、FFmpeg、外部 ASR、LLM 和 Embedding，任一步都可能持续几十秒或失败。如果直接放在 HTTP 请求中，客户端超时后很难判断任务是否还在执行，进程重启也会丢掉内存任务。因此 VidLens 让 HTTP 接口只负责短事务和任务请求，真正处理由 Kafka consumer 完成。
+>
+> Kafka 只负责持久化消息和 consumer group 分发，用户可见的业务状态在 PostgreSQL。`video_tasks` 保留聚合状态，`task_jobs` 区分 download、transcribe、analyze、rag_index；consumer 开始前获取带 token、版本和过期时间的 processing lease，重复消息拿不到所有权就不会重复推进。失败时按是否可恢复写入错误码、重试次数和 `next_retry_at`，RetryScheduler 到期后先获取 dispatch lease，再投递 Kafka；投递失败会通过 token/CAS 恢复为可再次扫描的失败状态。
+>
+> 我不会把它说成 exactly-once。Kafka 仍按 at-least-once 理解，可靠性来自“消息可能重复，但状态转换有 owner 和幂等边界”。目前重试补投失败已经闭环，但首次 task/job 入库与第一次 enqueue 之间还没有 transactional outbox，这是下一阶段需要补的明确一致性缺口。
 
-## 3. 背景痛点
+## 3. 当前主流程
 
-视频处理不是普通 CRUD。一个视频从提交到可问答，可能要经历远程下载、FFmpeg 音频提取、ASR 转写、摘要生成、Embedding 和 Milvus 写入。任何一步都可能耗时几十秒到几分钟。
+```text
+HTTP 请求
+  -> PostgreSQL 创建/更新 task 与 task_job
+  -> Producer 同步写 Kafka（RequireAll，MaxAttempts=3）
+  -> Consumer group 拉取消息
+  -> ClaimTaskProcessing：token + lease + version
+  -> 下载 / ASR / 摘要 / RAG
+  -> CompleteTaskProcessing 或 FailTaskProcessing
+  -> 业务结果或失败移交可靠后再提交 offset
 
-如果这些逻辑放在 HTTP 请求里同步执行，会有几个问题：
+RetryScheduler
+  -> 扫描 next_retry_at 到期任务或过期 lease
+  -> ClaimRetryDispatch
+  -> enqueue
+  -> 成功：等待 consumer 接管
+  -> 失败：RestoreRetryDispatch，退避后可再次扫描
+```
 
-- 请求链路被长时间占用，前端一直等待。
-- HTTP 超时后，后端任务状态不清晰。
-- 处理中间失败时，不容易知道卡在哪一步。
-- 无法做任务堆积、削峰和多实例消费。
-- 外部 AI 服务抖动时，请求会直接失败。
+Topic 按阶段拆为 `video-download`、`video-transcribe`、`video-analyze`、`video-rag-index`。拆分是为了隔离不同耗时和依赖，不代表实现了通用工作流引擎。
 
-所以核心改造是：HTTP 接口只创建任务，真正耗时处理交给 Kafka consumer。
+## 4. 高频追问
 
-## 4. 主流程怎么讲
+### 为什么不用 goroutine？
 
-用户上传视频或提交公开视频 URL 后，后端先完成鉴权、参数校验、任务创建和文件信息落库。接口返回任务 ID，不等待后续视频处理完成。
+> goroutine 只能提供进程内异步。进程退出后任务不可恢复，多实例之间也没有共享积压和消费所有权；视频任务不能把可靠性寄托在内存队列上。
 
-后续流程按任务阶段推进：
+### Kafka 和 PostgreSQL 谁是真相源？
 
-1. 本地视频上传完成后创建 `video_tasks` 和 `task_jobs`。
-2. 远程 URL 会先进入下载任务。
-3. Producer 投递 Kafka 消息，消息里带 `task_id`、`md5`、`trace_id` 等信息。
-4. Consumer 按 topic 消费下载、转写、分析、RAG 索引构建任务。
-5. 每个阶段成功后更新 MySQL 任务状态，并投递下一阶段消息。
-6. 失败后写入任务失败原因、重试次数和下次重试时间。
-7. Retry scheduler 扫描到期 job，再重新投递 Kafka。
-8. 前端通过任务状态接口轮询进度。
+> Kafka 是待处理工作载体，PostgreSQL 是业务状态真相源。只看 offset 无法回答用户任务处于哪个阶段、为什么失败、何时重试。
 
-一句话总结：Kafka 管异步流转，MySQL 管业务状态。
+### 重复消息怎么办？
 
-## 5. 具体实现怎么讲
+> consumer 用 task/job 当前状态、processing token、lease version 和条件更新判断是否拥有执行权。Kafka key 影响分区，但不能代替数据库幂等。
 
-当前项目使用 `segmentio/kafka-go`。Producer 同步写入 Kafka，并配置 `RequiredAcks=All` 和 `MaxAttempts=3`，尽量降低生产端丢消息风险。
+### 为什么业务失败后可以提交 offset？
 
-核心 topic 包括：
+> 只有失败状态和重试时间已经可靠写入 PostgreSQL，或失败已进入不可恢复终态，当前消息的责任才完成。若失败状态本身无法落库，不应该把它描述成已经可靠移交。
 
-- `video-download`
-- `video-transcribe`
-- `video-analyze`
-- `video-rag-index`
+### Kafka 写成功、数据库失败怎么办？
 
-Consumer 不是简单消费完就结束，而是结合 MySQL 状态做业务推进。比如转写成功后写入转写结果，再推进摘要或 RAG 索引构建。业务失败时不会只依赖 Kafka offset 重放，而是把失败状态写到 `task_jobs`，由 retry scheduler 延迟重投递。
+> consumer 收到消息后仍要按数据库状态/lease 判定；无合法任务或无法 claim 时不会盲目执行。反方向“数据库成功、首次 Kafka 写失败”目前尚未完全闭环，不能用 RetryScheduler 的补投闭环冒充首次投递 outbox。
 
-这套设计的重点是：Kafka 解决消息流转和削峰，MySQL 解决用户可见的任务状态、失败原因和恢复入口。
+### 为什么选 Kafka 而不是 RocketMQ？
 
-## 6. 代码证据路径
+> RocketMQ 在 Java 业务消息、延迟消息和事务消息场景很强；本项目是 Go 栈，Kafka 客户端、consumer group 和持久化日志足以支撑当前任务队列。延迟重试语义由 PostgreSQL 状态机补充。选择是生态和已有实现的折中，不是说 Kafka 全面优于 RocketMQ。
 
-- `cmd/server/main.go`：Kafka topics、producer、consumer、retry scheduler 初始化。
-- `internal/mq/producer.go`：Kafka producer、消息 payload、acks 和重试配置。
-- `internal/mq/consumer.go`：下载、转写、分析、RAG 索引构建消费逻辑。
-- `internal/mq/retry.go`：失败分类和 retry scheduler。
-- `internal/model/task.go`：`video_tasks` 任务模型。
-- `internal/model/task_job.go`：`task_jobs` 子任务模型。
+## 5. 代码证据
 
-## 7. 选型理由
+- `internal/mq/producer.go`：同步 producer、payload、key 和 acks。
+- `internal/mq/consumer_lifecycle.go`：reader 生命周期、手动 commit、poison message 处理。
+- `internal/mq/consumer_*.go`：各阶段执行逻辑。
+- `internal/mq/retry.go`：错误分类、退避和 RetryScheduler。
+- `internal/repository/task_lease*.go`：processing/dispatch lease 与 CAS。
+- `internal/model/task.go`、`internal/model/task_job.go`：任务状态模型。
 
-### Q：为什么用 Kafka？
+## 6. 当前限制
 
-答：
-
-我这里的任务特点是长耗时、可堆积、需要多实例消费和异步削峰。Kafka 的 consumer group、持久化日志和吞吐能力比较适合这种任务流转。项目是 Go 后端，`kafka-go` 接入也比较直接。
-
-### Q：为什么不用 goroutine？
-
-答：
-
-goroutine 只能解决当前进程内异步，解决不了可靠任务队列问题。进程重启后内存任务会丢，也不好做堆积、重试和多实例消费。视频处理是分钟级任务，不能依赖内存里的 goroutine 扛可靠性。
-
-### Q：为什么不用线程池或本地队列？
-
-答：
-
-本地队列的问题和 goroutine 类似，进程级别隔离太强。多实例部署时，本地队列无法自然共享任务，也不好统一监控堆积。Kafka 把任务放到 broker，consumer 可以横向扩展。
-
-### Q：为什么不用 RocketMQ？
-
-答：
-
-RocketMQ 的延迟消息、事务消息能力确实更强，Java 生态也常用。但我这个项目是 Go 技术栈，当前重点是异步削峰和任务拆分，Kafka 已经能满足主要需求。不能为了参考文档就把技术栈写成 RocketMQ。
-
-## 8. 高频问题与回答话术
-
-### Q1：异步化后接口做什么？
-
-答：
-
-HTTP 接口只做短操作：鉴权、参数校验、任务创建、必要的文件信息落库和 Kafka 消息投递。它不等待视频下载、ASR、摘要和 RAG 索引构建完成。这样接口能快速返回任务 ID，后续进度由任务状态接口展示。
-
-### Q2：Kafka topic 为什么要拆？
-
-答：
-
-不同任务的耗时和外部依赖不一样。下载依赖公网和目标站点，ASR 依赖音频和外部识别服务，RAG 索引构建依赖 Embedding 和 Milvus。如果都放一个 topic，慢任务可能影响快任务排队。拆 topic 后可以独立扩容、独立排查，也方便后续给不同任务设置不同消费能力。
-
-### Q3：怎么保证消息不丢？
-
-答：
-
-生产端配置 `RequiredAcks=All` 和 `MaxAttempts=3`，消息写入失败会返回错误。业务上任务状态落在 MySQL，如果任务已经落库但消息投递失败，可以通过任务状态和 retry scheduler 做补偿。这里我不会说绝对不丢，更多是生产端确认、DB 状态和补偿机制一起降低风险。
-
-### Q4：重复消费怎么办？
-
-答：
-
-Kafka 默认要按至少一次语义考虑，所以业务层必须幂等。项目里通过任务状态、job 状态、唯一约束和锁降低重复执行影响。例如 RAG 索引重建前会按 task 和 embedding model 清理旧向量和 chunk，再写入新的索引；上传侧用 MD5 复用资产；分析任务消费侧用 MD5 锁降低重复处理。
-
-### Q5：为什么失败后可以 commit offset？
-
-答：
-
-因为失败不是简单丢弃，而是已经写入 MySQL 的失败状态和下次重试时间。Kafka offset 只表示这条消息已经被当前 consumer 接管并转入业务状态机，后续恢复由 DB retry scheduler 负责。如果不 commit，让 Kafka 立即重放，容易造成同一个错误快速重复执行，尤其是 429、5xx、网络抖动时可能形成重试风暴。
-
-### Q6：Kafka 和 MySQL 状态会不会不一致？
-
-答：
-
-会有短暂不一致风险，所以不能只靠 Kafka 或只靠 MySQL。我的处理思路是让 MySQL 作为业务事实来源，Kafka 作为任务推进通道。用户看到的是 MySQL 状态；Kafka 消息失败或 consumer 失败时，通过 job 状态和 retry scheduler 做恢复。
-
-### Q7：任务顺序怎么保证？
-
-答：
-
-系统不需要全局顺序，只需要单个任务内部阶段顺序。比如先有视频文件，再转写，再摘要和 RAG 索引构建。这个顺序通过业务状态和成功后投递下一阶段消息来保证，不依赖 Kafka 全局有序。
-
-### Q8：Kafka 积压怎么排查？
-
-答：
-
-先看是哪一个 topic 积压，再判断是 consumer 数量不足、外部服务慢、单任务耗时过长，还是错误重试导致堆积。对应处理包括扩 consumer、限流入口、拆分耗时阶段、优化外部调用超时和失败分类。
-
-### Q9：是不是过度设计？
-
-答：
-
-如果只是低并发 demo，同步处理确实更简单。但这里核心不是 QPS 高，而是单个任务耗时长、外部依赖多、失败恢复复杂。即使只有一个用户上传 15 分钟视频，也不适合阻塞请求链路。Kafka 解决的是长任务生命周期，不只是高并发。
-
-### Q10：为什么不用工作流引擎？
-
-答：
-
-当前链路阶段固定，主要是下载、转写、分析和 RAG 索引构建，用 Kafka topic 加 MySQL job 表已经能表达。如果后续出现动态 DAG、人工审批、复杂补偿，再考虑 Temporal 这类工作流引擎会更合理。
-
-## 9. 结合八股怎么答
-
-### Kafka 至少一次语义
-
-项目里按至少一次设计，所以必须做业务幂等。回答时不要说 Kafka 保证业务 exactly-once。
-
-### offset commit
-
-offset commit 只能表示 Kafka 消费进度，不代表业务一定成功。项目里业务失败会落 DB，再由 retry scheduler 恢复。
-
-### 消息可靠性
-
-生产端 acks、重试、业务落库、失败补偿一起构成可靠性。不要把可靠性完全推给 Kafka。
-
-### 削峰
-
-Kafka 把瞬时请求转换成后台消费能力范围内的任务处理。限流是在入口挡请求，Kafka 是进系统后的削峰，两者不是一回事。
-
-## 10. tradeoff
-
-引入 Kafka 后，系统复杂度会上升：
-
-- 需要维护 broker、topic、consumer。
-- 需要处理消息重复和幂等。
-- 任务状态会变成异步最终一致。
-- 前端不能立即拿到处理结果，需要轮询任务状态。
-
-但换来的收益是请求链路不再被长任务阻塞，任务失败可观测、可恢复，也便于后续横向扩展消费者。
-
-## 11. 兜底保障
-
-- Producer 失败：接口可以返回失败或依赖任务状态补偿。
-- Consumer 失败：失败信息落 `task_jobs`，由 retry scheduler 重投递。
-- 外部服务 429 / 5xx：进入错误分类和阶梯退避。
-- 重复消息：靠任务状态、唯一约束、锁和幂等处理。
-- Kafka 短暂不可用：任务已落库时可以后续补偿投递。
-
-## 12. 压力追问怎么顶
-
-### 面试官：你这不就是 MQ 套壳？
-
-答：
-
-不是简单把同步代码丢进 MQ。关键是我把视频处理拆成了多个业务阶段，每个阶段都有自己的状态、错误和恢复策略。Kafka 只是异步通道，真正让任务可观测和可恢复的是 MySQL 任务状态、错误分类和 retry scheduler。
-
-### 面试官：Kafka 也可能丢消息，你怎么保证？
-
-答：
-
-我不会说绝对保证不丢。生产端用 acks 和重试降低发送失败，业务侧任务先落 MySQL，失败可以通过 job 状态补偿。项目里更重要的是把业务状态从消息里抽出来，不能把 Kafka 当唯一事实来源。
-
-### 面试官：用户量不大为什么用 Kafka？
-
-答：
-
-这里主要不是流量大，而是单任务耗时长。视频下载、ASR 和 RAG 索引构建可能是分钟级，哪怕并发不高，也不应该占住 HTTP 请求链路。Kafka 是为长任务异步化和失败恢复服务的。
-
-## 13. 30 秒话术
-
-视频下载、ASR、摘要和 RAG 索引构建都可能是分钟级任务，所以我没有放在 HTTP 请求里同步执行。接口只负责任务落库和 Kafka 投递，后续由 consumer 按阶段处理。Kafka 负责异步削峰，MySQL 的 `video_tasks` 和 `task_jobs` 负责记录任务状态、失败原因和重试信息，这样用户能看到进度，失败也有恢复入口。
-
-## 14. 2 分钟话术
-
-这个项目的视频处理链路比较长，一个视频从上传到可问答，中间要经历下载、音频提取、ASR、摘要生成和 RAG 索引构建。如果同步放在 HTTP 请求里，接口很容易阻塞甚至超时，所以我把入口接口变成短请求，只做任务创建、状态落库和 Kafka 消息投递。
-
-后端按任务类型拆了下载、转写、分析和 RAG 索引构建几个 topic。Consumer 消费后执行对应阶段，成功后更新 MySQL 状态并推进下一阶段，失败后把错误类型、重试次数和下次重试时间写入 `task_jobs`，再由 retry scheduler 延迟重投递。这样 Kafka 负责异步流转，MySQL 负责业务状态，失败恢复不会只依赖 Kafka offset 重放。
-
-这条的 tradeoff 是系统复杂度提高，需要处理重复消费和最终一致性。但视频处理是长耗时任务，这个复杂度是值得的。
-
-## 15. 5 分钟深讲版本
-
-我会从同步方案的问题讲起。最初如果把下载、ASR、摘要和 RAG 索引构建都放在请求里，用户会一直等待，HTTP 请求链路很容易超时。而且中间任何一步失败，任务状态都不容易展示，后续也不好恢复。
-
-所以我把入口层和处理层拆开。入口层只负责鉴权、参数校验、任务落库和消息投递。处理层由 Kafka consumer 处理，下载、转写、分析和 RAG 索引构建分别对应不同 topic。不同 topic 的好处是外部依赖不同，可以独立排查和扩容。
-
-可靠性上，我没有把 Kafka 当唯一状态来源。用户关心任务现在处于什么阶段、失败原因是什么、还能不能重试，这些都落在 MySQL 的 `video_tasks` 和 `task_jobs`。Kafka 消费失败后，错误会被分类。如果是 timeout、429、5xx 这类可恢复错误，就写入下次重试时间，由 retry scheduler 重投递；如果是配置缺失、文件不存在这类不可恢复错误，就快速失败。
-
-消费语义上，我按至少一次处理，所以业务必须幂等。比如任务状态会判断是否已完成，RAG 重建会替换旧索引，上传侧通过 MD5 复用 asset，分析任务也有 MD5 锁降低重复处理。这样即使 Kafka 重复投递，也尽量不造成重复 AI 调用和重复入库。
-
-## 16. 不要这么说
-
-- 不要说 Kafka 保证严格 exactly-once。
-- 不要说 Kafka 原生支持业务延迟重试。
-- 不要说用了 RocketMQ。
-- 不要说所有失败都靠 Kafka 自动恢复。
-- 不要说接口性能提升了具体百分比，除非有压测数据。
+- 首次 task/job 写入与 Kafka enqueue 尚无 transactional outbox；相关修复完成前不能声称原子提交。
+- 单机 Compose 的 Kafka replication factor 是 1，`RequireAll` 不等于生产级多副本容灾。
+- 不是 exactly-once，也不是 Saga/工作流引擎。
+- URL 下载不是简历核心能力，下载安全边界也未达到生产级 SSRF 隔离。

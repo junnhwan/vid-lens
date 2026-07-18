@@ -283,8 +283,8 @@ func TestChatServiceAskMergesKeywordChunksWithVectorResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if len(result.Citations) != 2 {
-		t.Fatalf("citations = %+v, want vector and keyword chunks", result.Citations)
+	if len(result.Citations) != 1 {
+		t.Fatalf("citations = %+v, want C1-only fallback when model emits no citation", result.Citations)
 	}
 
 	joinedPrompt := ""
@@ -638,22 +638,21 @@ func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
 		t.Fatal("expected answer")
 	}
 	if len(events) < 3 {
-		t.Fatalf("events = %#v, want citations, answer and done", events)
+		t.Fatalf("events = %#v, want answer, final citations and done", events)
 	}
-	if events[0].Type != "citations" {
-		t.Fatalf("first event = %#v, want citations", events[0])
-	}
-	if events[len(events)-1].Type != "done" {
-		t.Fatalf("last event = %#v, want done", events[len(events)-1])
-	}
-	foundAnswer := false
-	for _, event := range events {
-		if event.Type == "answer" {
-			foundAnswer = true
+	lastAnswerIndex, citationIndex, doneIndex := -1, -1, -1
+	for i, event := range events {
+		switch event.Type {
+		case "answer":
+			lastAnswerIndex = i
+		case "citations":
+			citationIndex = i
+		case "done":
+			doneIndex = i
 		}
 	}
-	if !foundAnswer {
-		t.Fatalf("events = %#v, want answer event", events)
+	if lastAnswerIndex < 0 || citationIndex <= lastAnswerIndex || doneIndex <= citationIndex {
+		t.Fatalf("event order = %#v, want answer... -> citations -> done", events)
 	}
 }
 
@@ -694,12 +693,12 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 		t.Fatalf("answer = %q, want accumulated streaming answer", result.Answer)
 	}
 	if len(events) != 4 {
-		t.Fatalf("events = %#v, want citations, two answer deltas and done", events)
+		t.Fatalf("events = %#v, want two answer deltas, final citations and done", events)
 	}
-	if events[0].Type != "citations" || events[1].Type != "answer" || events[2].Type != "answer" || events[3].Type != "done" {
+	if events[0].Type != "answer" || events[1].Type != "answer" || events[2].Type != "citations" || events[3].Type != "done" {
 		t.Fatalf("event order = %#v", events)
 	}
-	if events[1].Data != "第一段" || events[2].Data != "第二段" {
+	if events[0].Data != "第一段" || events[1].Data != "第二段" {
 		t.Fatalf("answer events = %#v", events)
 	}
 
@@ -742,5 +741,22 @@ func TestChatServiceBuildsRetrievalPipelineFromExplicitConfig(t *testing.T) {
 	}
 	if pipeline.expander != nil {
 		t.Fatalf("expander=%+v want nil", pipeline.expander)
+	}
+}
+
+func TestChatServiceExplicitOriginalConfigDisablesRewriteExpansionAndRerank(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.QueryMode = QueryModeOriginal
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	cfg.RerankerMode = RerankerModeNone
+	cfg.RerankerVersion = ""
+	svc := NewChatService(nil, &fakeRetriever{}, ChatConfig{Retrieval: &cfg})
+	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{})
+	if _, ok := pipeline.rewriter.(NoopQueryRewriter); !ok {
+		t.Fatalf("rewriter = %T, want NoopQueryRewriter", pipeline.rewriter)
+	}
+	if pipeline.expander != nil || pipeline.reranker != nil {
+		t.Fatalf("post retrieval stages = expander:%T reranker:%T, want both nil", pipeline.expander, pipeline.reranker)
 	}
 }

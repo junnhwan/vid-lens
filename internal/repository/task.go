@@ -7,6 +7,7 @@ import (
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TaskRepository struct {
@@ -26,6 +27,18 @@ func (r *TaskRepository) Create(task *model.VideoTask) error {
 func (r *TaskRepository) FindByID(id int64) (*model.VideoTask, error) {
 	var task model.VideoTask
 	err := r.db.First(&task, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// FindByIDForUpdate serializes deletion against worker status transitions.
+// SQLite unit tests cannot prove row-lock behavior;
+// TestPostgresForUpdateBlocksConcurrentTransaction verifies it on PostgreSQL.
+func (r *TaskRepository) FindByIDForUpdate(id int64) (*model.VideoTask, error) {
+	var task model.VideoTask
+	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -152,35 +165,9 @@ func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, st
 	return tx.RowsAffected > 0, nil
 }
 
-// UpdateFileURL 更新文件存储路径
-func (r *TaskRepository) UpdateFileURL(id int64, fileURL string) error {
-	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("file_url", fileURL).Error
-}
-
 // UpdateTitle 写回 AI 生成的视频标题
 func (r *TaskRepository) UpdateTitle(id int64, title string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("title", title).Error
-}
-
-func (r *TaskRepository) CompleteURLDownload(id int64, asset *model.VideoAsset, filename string, finishedAt time.Time) error {
-	updates := map[string]interface{}{
-		"asset_id":          asset.ID,
-		"file_md5":          asset.FileMD5,
-		"filename":          filename,
-		"file_url":          asset.ObjectName,
-		"file_size":         asset.FileSize,
-		"status":            model.TaskStatusPending,
-		"stage":             model.TaskStageUploaded,
-		"error_msg":         "",
-		"last_error_code":   "",
-		"last_error_msg":    "",
-		"last_job_type":     "",
-		"stage_finished_at": finishedAt,
-		"finished_at":       finishedAt,
-	}
-	return r.db.Model(&model.VideoTask{}).
-		Where("id = ? AND status = ? AND stage = ?", id, model.TaskStatusRunning, model.TaskStageDownloading).
-		Updates(updates).Error
 }
 
 func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time) error {
@@ -234,37 +221,6 @@ func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.Vi
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err
-}
-
-func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
-	updates := map[string]interface{}{
-		"status":           status,
-		"stage":            stage,
-		"stage_started_at": &now,
-		"error_msg":        "",
-		"next_retry_at":    nil,
-	}
-	tx := r.db.Model(&model.VideoTask{}).
-		Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", id, model.TaskStatusFailed, now).
-		Updates(updates)
-	if tx.Error != nil {
-		return false, tx.Error
-	}
-	return tx.RowsAffected > 0, nil
-}
-
-func (r *TaskRepository) RestoreRetryAfterDispatchFailure(id int64, stage, errMsg string, nextRetryAt time.Time) error {
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":            model.TaskStatusFailed,
-		"stage":             stage,
-		"error_msg":         errMsg,
-		"last_error_code":   "retry_enqueue_failed",
-		"last_error_msg":    errMsg,
-		"next_retry_at":     nextRetryAt,
-		"stage_finished_at": &now,
-	}
-	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func (r *TaskRepository) CountActiveByAssetID(assetID int64) (int64, error) {

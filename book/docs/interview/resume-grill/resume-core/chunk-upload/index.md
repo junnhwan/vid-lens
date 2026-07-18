@@ -1,103 +1,125 @@
-# 简历主线三：分片上传、断点续传与 MinIO
+# 分片上传与断点续传：PostgreSQL Durable Upload Session
 
-> 练法：先只看问题口述 30 秒，再展开答案；每题都要能说出当前边界。
+> 本页是书站内的上传专项权威页。仓库级更完整证据见 [`docs/resume-topics/03-chunk-upload-resume.md`](/interview/resume-grill/resume-core/chunk-upload/) 对应源文档。其他页面不应复制另一套协议细节。
 
-## Q1：为什么大文件要分片上传？
-
-**直接回答：**
-整文件请求中断后只能从头传，而且业务服务要长时间持有连接。分片后每片独立上传，客户端查询已完成编号，只补缺失部分。
-
-**追问与防守：**
-分片降低重传成本，但协议、状态和临时对象清理更复杂。
-
-**项目证据：** `internal/handler/media.go:66-138`；`internal/service/media.go:550-599`。
-
-## Q2：Redis 中具体记录什么？
+## Q1：为什么要做分片上传？
 
 **直接回答：**
-upload:chunks:{md5} Set 保存已落盘的 chunk number，附加 total 和 status key，并设置 24 小时 TTL。查询时用 SMembers 返回已上传编号。
 
-**追问与防守：**
-Redis 是上传会话状态，不是最终文件唯一事实来源。
+大视频在弱网下用单个 HTTP 请求上传，一旦连接中断就要从头重传。VidLens 把文件拆成多个独立 chunk，并把上传进度持久化成用户级 session；客户端恢复时查询 accepted indexes，只补缺失片。
 
-**项目证据：** `internal/service/media.go:550-580`。
+它改善的是失败恢复，不代表支持任意文件大小，也不自动解决并发完成、完整性、过期回收和对象清理。
 
-## Q3：为什么必须先落盘再记账？
+## Q2：当前谁是事实源？
 
-**直接回答：**
-UploadChunk 先写 MinIO，成功后才 SAdd。若先记 Redis、对象写失败，合并会误以为分片已完成。
+```text
+PostgreSQL
+├── upload_sessions
+│   └── owner、immutable manifest、status、completion lease、asset/task identity
+└── upload_session_chunks
+    └── chunk index、exact size、SHA-256、MinIO object name
 
-**追问与防守：**
-当前 SAdd/Expire 错误处理仍可加强，生产实现应检查 Redis 返回值并提供对象反查。
+MinIO
+└── chunk/final bytes
 
-**项目证据：** `internal/service/media.go:582-599`。
+Redis
+└── 不参与上传会话正确性
+```
 
-## Q4：合并前怎么验证完整性？
+过去的全局 MD5 + Redis 片号协议已经退役。当前进度不能从 Redis Set 推导。
 
-**直接回答：**
-拿到合并锁后遍历 0 到 totalChunks-1，用 SIsMember 检查每片；缺任何一片就返回具体编号，不执行 Compose。
+## Q3：HTTP 协议是什么？
 
-**追问与防守：**
-仅信客户端传来的 total 不够，初始化会话还应绑定文件大小、分片大小和用户。
+```text
+POST /api/v1/media/upload-sessions
+GET  /api/v1/media/upload-sessions/:session_id
+PUT  /api/v1/media/upload-sessions/:session_id/chunks/:index
+POST /api/v1/media/upload-sessions/:session_id/complete
+```
 
-**项目证据：** `internal/service/media.go:602-638`。
+创建时固化 filename、file size、chunk size/count 和 expected MD5。chunk 请求直接发送 `application/octet-stream`，不重复提交 multipart 元数据。
 
-## Q5：为什么使用 MinIO ComposeObject？
+## Q4：怎么防止用户越权或篡改 manifest？
 
-**直接回答：**
-Go 服务只构造按编号排序的源对象列表，MinIO 在存储侧合并，避免业务进程把整个视频读回、落临时盘再上传。
+每次 Get、AcceptChunk、Complete 都按 `user_id + session_id` 查询。manifest 创建后不可变，并生成 fingerprint/active key；同一用户相同 manifest 可恢复，其他用户不能因为知道 UUID 或 MD5 访问该 session。
 
-**追问与防守：**
-它降低业务服务 I/O，不等于合并无成本；仍受对象存储 multipart/compose 限制。
+## Q5：单片如何校验和幂等？
 
-**项目证据：** `internal/service/media.go:640-654`；`internal/storage/minio.go:105-112`。
+服务端根据 manifest 计算该 index 的精确大小，Handler 用 `MaxBytesReader` 限制 body，Service 写临时文件时计算 SHA-256。
 
-## Q6：为什么合并需要分布式锁？
+- 同 index、同 size/hash：幂等返回；
+- 同 index、不同内容：返回 409；
+- 唯一约束 `(session_id, chunk_index)` 是并发写的物理兜底；
+- 对象名包含 SHA-256，冲突请求不会覆盖已接受对象。
 
-**直接回答：**
-两个实例可能同时发现 asset 不存在并同时合并。同 MD5 锁把检查、Compose、资产落库串行化，第二个请求可复用已创建 asset。
+## Q6：complete 为什么需要 lease？
 
-**追问与防守：**
-锁不是唯一保障，数据库唯一约束和幂等资产查询仍要兜底。
+只存 `status=completing` 无法判断执行者仍活着还是已经宕机。当前使用 completion token + expiry：
 
-**项目证据：** `internal/service/media.go:610-627`。
+- live lease 拒绝另一个 complete；
+- lease 过期后允许新执行者 reclaim；
+- 只有当前 token owner 能完成或释放；
+- CAS 防止旧 owner 写坏新 owner 的结果。
 
-## Q7：锁提前过期或误删怎么办？
+这比依赖某个进程内 mutex 或无归属 Redis 锁更容易恢复。
 
-**直接回答：**
-自定义锁使用 UUID owner，WatchDog 每 ttl/3 续期；续期和释放用 Lua 先校验 owner，避免旧请求删除新持有者的锁。
+## Q7：怎么合并，为什么不吃满内存？
 
-**追问与防守：**
-WatchDog 失败仍需要业务幂等兜底，不能声称锁解决所有一致性问题。
+Service 按 chunk index 打开 MinIO 对象，通过 `io.Pipe` 顺序复制，同时计算完整 MD5 和总 size，并把流写成 final object。完整视频不会一次载入 Go 内存。
 
-**项目证据：** `internal/pkg/lock/redis_lock.go:13-21`；`internal/pkg/lock/redis_lock.go:76-139`。
+需要主动说明 tradeoff：字节会经过 `MinIO → Go → MinIO`，这不是对象存储侧零拷贝。当前选择是为了服务端重新校验完整内容，也因此不受旧对象合并协议的 5 MiB part 下限约束。
 
-## Q8：断点续传和秒传有什么区别？
+## Q8：数据库一致性做到哪一步？
 
-**直接回答：**
-断点续传复用同一次上传已完成的 chunk；秒传或内容去重复用数据库中同 MD5 的完整 VideoAsset。两者共享 MD5，但解决不同问题。
+完整性通过后，在同一个 PostgreSQL transaction 中：
 
-**追问与防守：**
-MD5 用于内容标识和项目级去重，不应包装成对抗恶意碰撞的安全哈希。
+1. 创建或锁定 `video_assets`；
+2. 创建 `video_tasks`；
+3. 用 completion token CAS 把 session 标成 completed；
+4. 保存稳定的 `asset_id/task_id`。
 
-**项目证据：** `internal/service/media.go:98-119`；`internal/service/media.go:610-616`。
+MinIO final object 是数据库事务外副作用，所以失败时使用补偿删除和 claim 释放，不能说成跨 MinIO/PostgreSQL 的原子事务。
 
-## Q9：合并成功后如何清理？
+## Q9：重复完成请求怎么办？
 
-**直接回答：**
-最终 asset 落库后把 status 设为 COMPLETED，再 best-effort 删除临时 chunk 和 Redis Set；清理失败只浪费存储，不回滚已成功资产。
+completed session 保存 task ID。客户端第一次响应丢失后再次 complete，服务端返回同一个 task，而不是重复创建。
 
-**追问与防守：**
-需要后台垃圾回收任务处理遗留对象，当前 best-effort 日志不是完整生命周期治理。
+当前边界是：关联 task 被删除后，completed session 的长期返回语义仍需明确，因此不能说它是永久不可变回执。
 
-**项目证据：** `internal/service/media.go:656-684`。
+## Q10：哪些还没做？
 
-## Q10：Redis 宕机或状态过期怎么办？
+- expired/abandoned session 后台扫描；
+- 孤儿 chunk/final object 的耐久回收；
+- task 删除后的 completed session 生命周期；
+- 预签名 multipart 直传；
+- GB 级并发容量数据与基于证据的连接池/带宽调优。
 
-**直接回答：**
-当前上传会话依赖 Redis，状态丢失后客户端可能需要重新初始化和补传。最终已合并资产仍由数据库与 MinIO 保存。
+成功后的临时 chunk 仅 best-effort 清理。面试中应把这些说成下一步，而不是已实现能力。
 
-**追问与防守：**
-生产方案可把 upload session 持久化到 MySQL，并用 MinIO StatObject 重建部分状态。
+## 代码证据
 
-**项目证据：** `internal/service/media.go:557-580`；`internal/model/video_asset.go:1-80`。
+```text
+internal/model/upload_session.go
+internal/model/upload_session_chunk.go
+internal/repository/upload_session.go
+internal/service/upload_session.go
+internal/service/upload_session_chunk.go
+internal/service/upload_session_complete.go
+internal/handler/upload_session.go
+cmd/server/router.go
+web/src/chunkedUpload.js
+```
+
+测试证据：
+
+```text
+internal/repository/upload_session_test.go
+internal/service/upload_session_test.go
+internal/handler/upload_session_test.go
+cmd/server/router_test.go
+web/test/chunkedUpload.test.mjs
+```
+
+## 面试口语版
+
+> 我最初的分片协议只用客户端 MD5 作为全局身份，把片号放 Redis，这对 demo 足够，但 owner、manifest、冲突和完成回执都不清楚。后来我改成用户级 durable upload session：PostgreSQL 保存不可变 manifest、分片 size/SHA-256 台账和完成 lease，MinIO 只保存字节，Redis 不再参与正确性。每片相同内容可幂等重试，不同内容返回冲突；complete 会按顺序流式读取分片，重新计算完整 MD5，再在一个 PostgreSQL transaction 中创建 asset、task 并保存稳定 task ID。它没有把整段视频读进内存，但会多占用一次 MinIO 到 Go 再到 MinIO 的网络，这是服务端完整校验的取舍。当前仍缺 abandoned session 和孤儿对象的后台回收，我会明确承认这个边界。

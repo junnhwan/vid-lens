@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"vid-lens/internal/model"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const chatMemoryTTL = 7 * 24 * time.Hour

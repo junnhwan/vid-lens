@@ -70,7 +70,7 @@ func (c *OpenAIEmbeddingClient) Embed(ctx context.Context, input string) ([]floa
 		return nil, fmt.Errorf("解析 Embedding 响应失败: %w", err)
 	}
 	if len(result.Data) == 0 || len(result.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("Embedding 返回空向量")
+		return nil, fmt.Errorf("embedding 返回空向量")
 	}
 	return result.Data[0].Embedding, nil
 }

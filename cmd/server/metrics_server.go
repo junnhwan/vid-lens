@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -43,10 +44,36 @@ func newMetricsServer(metrics http.Handler) *http.Server {
 	}
 }
 
-func serveMetrics(metrics http.Handler) {
+const metricsShutdownTimeout = 5 * time.Second
+
+// serveMetrics keeps the admin listener tied to the process runtime context.
+// It intentionally exposes only /metrics and shuts down before the process exits.
+func serveMetrics(ctx context.Context, metrics http.Handler) error {
 	server := newMetricsServer(metrics)
+	serveErr := make(chan error, 1)
+	go func() {
+		err := server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serveErr <- err
+	}()
 	slog.Info("metrics admin listener started", "address", server.Addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("metrics admin listener stopped", "error", err)
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			slog.Error("metrics admin listener stopped", "error", err)
+		}
+		return err
+	case <-ctx.Done():
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), metricsShutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		_ = server.Close()
+		return err
+	}
+	return <-serveErr
 }

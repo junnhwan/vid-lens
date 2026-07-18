@@ -9,6 +9,7 @@ func AllModels() []interface{} {
 		&VideoAsset{},
 		&VideoTask{},
 		&TaskJob{},
+		&TaskCleanupJob{},
 		&KafkaMessageFailure{},
 		&VideoTranscription{},
 		&VideoTranscriptionChunk{},
@@ -24,6 +25,8 @@ func AllModels() []interface{} {
 		&AIUsageLedger{},
 		&QuotaCompensation{},
 		&UserUsageDaily{},
+		&UploadSession{},
+		&UploadSessionChunk{},
 	}
 }
 

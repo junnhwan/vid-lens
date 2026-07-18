@@ -21,7 +21,7 @@ type VideoRAGIndex struct {
 	ChunkerVersion      string     `gorm:"type:varchar(50)" json:"chunker_version"`
 	ChunkSize           int        `gorm:"default:0" json:"chunk_size"`
 	ChunkOverlap        int        `gorm:"default:0" json:"chunk_overlap"`
-	ChunkManifestSHA256 string     `gorm:"type:char(64)" json:"chunk_manifest_sha256"`
+	ChunkManifestSHA256 string     `gorm:"type:varchar(64)" json:"chunk_manifest_sha256"`
 	LastError           string     `gorm:"type:varchar(500)" json:"last_error"`
 	BuildVersion        int        `gorm:"default:1" json:"build_version"`
 	StartedAt           *time.Time `json:"started_at,omitempty"`

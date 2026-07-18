@@ -26,6 +26,7 @@ func TestCorrelationRoundTripAndMerge(t *testing.T) {
 }
 
 func TestNilContextReturnsEmptyCorrelation(t *testing.T) {
+	//lint:ignore SA1012 this test documents the defensive nil-context behavior.
 	if got := CorrelationFromContext(nil); got != (Correlation{}) {
 		t.Fatalf("correlation = %+v, want empty", got)
 	}

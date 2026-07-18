@@ -59,7 +59,7 @@ type AIUsageLedger struct {
 func (AIUsageLedger) TableName() string { return "ai_usage_ledgers" }
 
 // QuotaCompensation is a durable outbox item used to reconcile the Redis daily
-// cache with the MySQL usage ledger. EventKey is also the Redis idempotency key.
+// cache with the PostgreSQL usage ledger. EventKey is also the Redis idempotency key.
 type QuotaCompensation struct {
 	ID             int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	EventKey       string     `gorm:"type:varchar(160);not null;uniqueIndex" json:"event_key"`

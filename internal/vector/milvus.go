@@ -318,6 +318,21 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 	return results, nil
 }
 
+// HealthCheck verifies the Milvus server is healthy without changing collection state.
+func (s *MilvusStore) HealthCheck(ctx context.Context) error {
+	if s.client == nil {
+		return fmt.Errorf("milvus client is not initialized")
+	}
+	state, err := s.client.CheckHealth(ctx)
+	if err != nil {
+		return err
+	}
+	if state == nil || !state.IsHealthy {
+		return fmt.Errorf("milvus is unhealthy")
+	}
+	return nil
+}
+
 func (s *MilvusStore) Close() error {
 	if s.client == nil {
 		return nil

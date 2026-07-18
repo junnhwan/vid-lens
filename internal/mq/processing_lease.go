@@ -121,7 +121,7 @@ func (c *Consumer) startProcessingLeaseHeartbeat(parent context.Context, taskID 
 	return ctx, stop
 }
 
-// runLeasedSideEffect executes a MySQL side effect in the same transaction as
+// runLeasedSideEffect executes a database side effect in the same transaction as
 // the task/job processing-lease check. Direct helper calls outside a Kafka
 // processing context retain their existing behavior for HTTP paths and tests.
 func (c *Consumer) runLeasedSideEffect(ctx context.Context, fn func(*repository.Repositories) error) error {

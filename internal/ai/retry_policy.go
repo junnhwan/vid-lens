@@ -82,13 +82,6 @@ type ProviderRetryPolicy struct {
 	NewOperationKey func() string
 }
 
-func DefaultProviderRetryPolicy() ProviderRetryPolicy {
-	return ProviderRetryPolicy{
-		MaxRetries: 2,
-		Backoffs:   []time.Duration{time.Second, 2 * time.Second},
-	}
-}
-
 func (p ProviderRetryPolicy) sleep(ctx context.Context, delay time.Duration) error {
 	if p.Sleep != nil {
 		return p.Sleep(ctx, delay)

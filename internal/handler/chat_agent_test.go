@@ -45,7 +45,7 @@ func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 		MessageID: 12,
 		Answer:    "agent answer",
 		Template:  string(service.VideoAgentSummarizeTopic),
-		Citations: []service.RetrievedChunk{{ChunkID: 1, ChunkIndex: 2, Content: "citation"}},
+		Citations: []service.Citation{{CitationID: "C1", ChunkID: 1, ChunkIndex: 2, Content: "citation"}},
 		Trace:     []service.VideoAgentStep{{Name: "search topic", Tool: service.VideoAgentToolSearchTranscript, OutputRef: "citations:1"}},
 		Model:     "chat-model",
 	}}
@@ -72,7 +72,7 @@ func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 			MessageID int64                    `json:"message_id"`
 			Answer    string                   `json:"answer"`
 			Template  string                   `json:"template"`
-			Citations []service.RetrievedChunk `json:"citations"`
+			Citations []service.Citation       `json:"citations"`
 			Trace     []service.VideoAgentStep `json:"trace"`
 			Model     string                   `json:"model"`
 		} `json:"data"`

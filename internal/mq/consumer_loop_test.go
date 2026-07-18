@@ -188,6 +188,45 @@ func TestConsumeReaderClosesOnContextCancellation(t *testing.T) {
 	}
 }
 
+func TestStartGroupConsumerStopsAndWaitsWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := &scriptedMessageReader{}
+	readerStarted := make(chan struct{})
+	consumer := &Consumer{
+		newKafkaReader: func(kafka.ReaderConfig) kafkaMessageReader {
+			close(readerStarted)
+			return reader
+		},
+	}
+
+	consumer.startGroupConsumer(ctx, "test", []string{"broker"}, "topic", "group", func(context.Context, kafka.Message) error {
+		return nil
+	})
+	select {
+	case <-readerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("consumer did not create a reader")
+	}
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		consumer.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("consumer did not stop after context cancellation")
+	}
+
+	_, _, closed := reader.snapshot()
+	if !closed {
+		t.Fatal("reader was not closed after consumer shutdown")
+	}
+}
+
 func TestRunGroupConsumerRebuildsReaderAfterInfrastructureError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

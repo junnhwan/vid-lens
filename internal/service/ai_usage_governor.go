@@ -15,8 +15,8 @@ import (
 	"vid-lens/internal/repository"
 )
 
-// AIUsageGovernor performs the durable reserve-before-call protocol. MySQL is
-// authoritative; Redis is an idempotent daily cache repaired by the outbox.
+// AIUsageGovernor performs the durable reserve-before-call protocol. PostgreSQL
+// is authoritative; Redis is an idempotent daily cache repaired by the outbox.
 type AIUsageGovernor struct {
 	repos    *repository.Repositories
 	cache    quota.UsageCache

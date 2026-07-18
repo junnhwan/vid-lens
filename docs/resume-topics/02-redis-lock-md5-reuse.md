@@ -1,233 +1,111 @@
-# 专题 2：Redis 分布式锁、MD5 内容指纹和视频文件复用
+# 专题 2：Redis owner lock、内容指纹与数据库幂等
 
-## 1. 简历原句
+## 1. 推荐简历表述
 
-设计 Redis 分布式锁 + WatchDog，结合 MD5 内容指纹和视频文件复用，保护分片合并、分析任务消费等临界区，降低并发重复入库和重复处理风险
+> 对分析消费使用带 owner 校验和 WatchDog 续租的 Redis 分布式锁，并结合 PostgreSQL processing lease、资产唯一约束和业务幂等降低同一视频并发重复处理风险；上传完成并发控制由 PostgreSQL token/lease 负责。
 
-## 2. 这个点想证明什么
+不要再说“Redis 锁保护分片合并”。当前 durable upload session 不使用 Redis 锁，也不依赖 Redis 保存进度。
 
-这条证明你考虑了并发场景下的重复处理和 AI 成本浪费，不只是做了“上传文件 -> 调模型”。它能引出 Redis 分布式锁、WatchDog、owner 校验、MD5 指纹、asset/task 拆分、幂等和共享资源删除。
+## 2. 三类机制不能混为一谈
 
-## 3. 背景痛点
+```text
+Redis owner lock
+└── internal/mq/consumer_analyze.go：按视频 MD5 降低并发分析
 
-视频 AI 处理成本高。相同视频如果重复上传，后端可能重复 ASR、重复摘要、重复生成 embedding、重复写向量库。
+PostgreSQL processing lease
+└── task_jobs：决定某个 task/job 当前执行者的所有权
 
-并发场景下还有竞态问题：
+PostgreSQL upload completion lease
+└── upload_sessions：决定某个 session 当前 complete 执行者的所有权
+```
 
-- 两个请求同时上传同一个视频。
-- 两个请求都计算出同一个 MD5。
-- 两个请求同时发现 `video_assets` 里还没有记录。
-- 两个请求都尝试合并分片、创建 asset、投递分析任务。
+Redis lock 是前置互斥，不是业务事实源；两个 PostgreSQL lease 才保存可恢复的执行所有权。后续修改时不能因为它们都叫“锁”而复用同一状态机。
 
-所以仅有 MD5 查询不够，还需要锁保护关键临界区。
+## 3. 当前调用链
 
-## 4. 主流程怎么讲
+### 普通上传与资产复用
 
-普通上传或分片合并时，后端会计算或接收文件 MD5，把它作为内容指纹。
+1. `UploadFile` 流式写临时文件并在服务端计算完整 MD5 和实际大小。
+2. 先按 MD5 查询 active `video_assets`；命中时为当前用户创建新的 task，复用同一对象。
+3. 未命中时上传新 MinIO 对象并调用 `CreateOrRestore`。
+4. PostgreSQL `video_assets.file_md5` 唯一约束处理并发 winner；loser 查询 winner 资产并 best-effort 删除自己多上传的对象。
+5. 创建 task 前使用 `FOR UPDATE` 锁定 active asset，避免与 durable cleanup 的 deleting ownership 冲突。
 
-如果发现已有相同 MD5 的 `video_assets`，说明真实视频文件已经存在，可以直接创建新的 `video_tasks` 引用这个 asset，而不是再次保存文件和重新处理。
+### 分片上传完成
 
-如果没有已有 asset，就进入创建流程。这个时候要用 Redis 分布式锁保护同一 MD5 的临界区，避免多个请求同时创建同一个资产。
+完整流程在 `03-chunk-upload-resume.md`。complete 通过 PostgreSQL CAS 获取 token/lease，完成事务内锁定或创建 asset、创建 task 并写 session 最终身份。这里不使用 Redis lock。
 
-分析任务消费时，也会基于 MD5 加锁，降低同一视频重复进入分析处理的风险。
+### 分析消费
 
-## 5. 具体实现怎么讲
+`consumer_analyze.go` 先按 MD5 尝试获取 Redis lock，再获取 task/job processing lease。Redis lock 降低同一内容并发进入昂贵分析的概率，processing lease 才决定该 task/job 是否有权产生业务副作用。
 
-项目里 Redis 锁是 Go 自实现，不是 Redisson。
+## 4. Redis 锁实现
 
-核心机制：
+`internal/pkg/lock/redis_lock.go` 的关键点：
 
-- 获取锁：`SETNX key value EX ttl`。
-- key：按业务和 MD5 组织，比如合并锁、分析锁。
-- value：保存 owner，标识当前持锁者。
-- TTL：避免进程宕机后锁永久不释放。
-- WatchDog：业务执行时间可能超过 TTL，所以按 `ttl / 3` 周期续期。
-- 解锁：Lua 脚本校验 owner 后再删除，避免误删别人的锁。
-- 续期：Lua 脚本校验 owner 后再延长 TTL。
+- `SET NX PX` 获取带 TTL 的锁；
+- value 保存随机 owner，而不是固定值；
+- 解锁 Lua 只有在 value 等于 owner 时才删除；
+- WatchDog 续租 Lua 同样校验 owner；
+- `Unlock` 或 context 结束时停止续租；
+- Redis 异常和“锁忙”是不同结果，调用方不能混为一次普通未命中。
 
-资产复用方面，`video_assets` 表示真实视频文件，`video_tasks` 表示用户任务。多个 task 可以引用同一个 asset。
+这不是 Redisson。可以说借鉴 WatchDog 的生命周期思想，但实现和测试都在 Go 项目内。
 
-## 6. 代码证据路径
+## 5. 为什么仍需要数据库兜底
 
-- `internal/pkg/lock/redis_lock.go`：Redis 锁、WatchDog、owner 校验、Lua 解锁和续期。
-- `internal/service/media.go`：上传、分片合并、MD5 查询、asset 复用。
-- `internal/mq/consumer.go`：分析任务消费时基于 MD5 获取锁。
-- `internal/model/task.go`：`VideoAsset` 和 `VideoTask` 模型。
+Redis lock 不能提供绝对 exactly-once：进程暂停、网络分区、TTL 边界和 Redis 故障都可能使前置互斥失效。因此当前正确性还依赖：
 
-## 7. 选型理由
+- `video_assets.file_md5` 唯一约束；
+- task/job processing token 与 lease；
+- 带 owner 的阶段副作用；
+- `CreateOrRestore` 的行锁与 lifecycle 检查；
+- consumer 对 terminal、stale、busy 状态的显式处理。
 
-### Q：为什么用 Redis 分布式锁？
+准确表述是“降低重复处理风险”，不是“保证绝不重复”。
 
-答：
+## 6. MD5 的边界
 
-这个临界区可能被多个后端实例同时访问，本地锁只能保护单进程，不能保护多实例。Redis 是项目里已有基础设施，用 `SETNX + TTL` 可以比较轻量地实现跨实例互斥。
+项目使用 MD5 作为视频内容指纹和资产复用键，不把它用于密码或签名安全。服务端普通上传与 session complete 都会对完整字节重新计算 MD5，不能只信客户端声明。
 
-### Q：为什么还需要 MD5？
+MD5 存在理论碰撞，因此它适合当前非对抗性内容复用场景，但不是恶意上传环境下的强安全身份。若业务进入不可信多租户或合规场景，应评估 SHA-256 资产键、抽样/全量二次校验以及迁移兼容方案。
 
-答：
+## 7. 高频追问
 
-锁解决并发互斥，MD5 解决内容识别。没有 MD5，就不知道两个上传是否是同一视频；只有 MD5 没有锁，并发时又可能同时发现 asset 不存在。所以两者解决的是不同问题。
+### Redis 挂了会怎样？
 
-### Q：为什么要把 asset 和 task 拆开？
+分析入口无法安全获取前置锁时应失败或进入恢复流程，不能假装成功继续昂贵副作用。数据库 processing lease 和唯一约束仍是最终状态兜底。上传 session 不以 Redis 为事实源，因此已接受分片和完成状态不会因 Redis 数据丢失而消失。
 
-答：
+### 为什么不只用 Redis lock？
 
-真实视频文件是资产，用户上传行为是任务。同一个视频可能被多个用户或同一用户多次上传，如果 task 和文件绑定在一起，就会重复存储和重复处理。拆成 asset/task 后，一个 asset 可以被多个 task 引用。
+因为锁结束后不保存业务终态，也不能表达 task/job 的 stale、terminal、retry 等状态。可恢复状态必须持久化到 PostgreSQL。
 
-### Q：为什么不用数据库唯一索引兜底就行？
+### 为什么不只用数据库？
 
-答：
+对当前规模，完全可以进一步评估只保留 PostgreSQL lease。现在 Redis lock 的价值是按内容指纹在进入分析前做跨 task 的粗粒度互斥；processing lease 只隔离具体 task/job。是否保留 Redis lock 应由重复分析成本和实际竞争指标决定，而不是为了展示中间件。
 
-数据库唯一索引是最终兜底，但它发生在较晚阶段。AI 处理成本高，如果等到最后数据库报重复，前面可能已经做了重复合并、重复转写或重复分析。Redis 锁是前置并发控制，尽量减少无效工作。
+### 不同用户上传同一视频是否共用任务？
 
-## 8. 高频问题与回答话术
+不共用 task，只可能复用底层 asset/object。用户状态、AI profile、聊天和 RAG scope 仍按各自 task 与 user 隔离。
 
-### Q1：锁 key 怎么设计？
+## 8. 代码证据
 
-答：
+- `internal/pkg/lock/redis_lock.go`
+- `internal/pkg/lock/redis_lock_test.go`
+- `internal/mq/consumer_analyze.go`
+- `internal/repository/task_lease*.go`
+- `internal/service/media_file_upload.go`
+- `internal/repository/asset.go`
+- `internal/service/upload_session_complete.go`
 
-按业务场景和 MD5 组成 key。比如分片合并可以用 `vidlens:merge:<md5>`，分析任务可以用 `vidlens:lock:<md5>`。这样同一个视频互斥，不同视频互不影响。
+## 9. 30 秒话术
 
-### Q2：锁 value 为什么要有 owner？
+> 我把并发控制分成三层：Redis owner lock 按内容指纹降低并发分析，PostgreSQL processing lease 决定具体 task/job 的执行所有权，上传 complete 则使用独立的 PostgreSQL token/lease。普通上传在服务端计算完整 MD5，`video_assets` 唯一约束决定并发创建 winner，loser 复用 winner 并清理多余对象。所以 Redis 锁只是前置优化，最终正确性依赖数据库状态、唯一约束和幂等，不能说它保证 exactly-once。
 
-答：
+## 10. 不要这么说
 
-因为锁可能过期。假设 A 拿锁后执行太久，锁过期了，B 又拿到同一把锁。A 执行完如果直接 `DEL key`，就会删掉 B 的锁。owner 校验能保证只有当前持锁者才能释放。
-
-### Q3：WatchDog 解决什么问题？
-
-答：
-
-固定 TTL 太短会导致业务没执行完锁就过期，其他请求可能进入临界区。WatchDog 会在持锁期间周期续期，让长任务执行时锁不轻易过期。如果进程宕机，WatchDog 也会停止，锁最终靠 TTL 自动释放。
-
-### Q4：WatchDog 会不会导致死锁？
-
-答：
-
-正常不会。WatchDog 只在持锁进程存活且 owner 匹配时续期。如果进程宕机或上下文结束，续期会停止，锁会在 TTL 后过期。它解决的是长任务误过期，不是无限续期。
-
-### Q5：锁能保证绝对不重复处理吗？
-
-答：
-
-不能说绝对。Redis 锁是降低并发重复处理风险，最终还要结合 DB 状态、唯一约束和业务幂等。简历里我也写的是“降低风险”，不是“完全杜绝”。
-
-### Q6：MD5 会不会冲突？
-
-答：
-
-理论上会，但视频内容去重场景下 MD5 作为工程指纹通常够用。如果要更严谨，可以组合文件大小、SHA-256 和对象元数据一起判断。我不会说 MD5 绝对安全。
-
-### Q7：不同用户上传同一个视频会共用文件吗？
-
-答：
-
-可以共用真实 asset，但用户任务是独立的。`video_assets` 存真实文件，`video_tasks` 存用户任务和任务状态。这样既能复用文件，也能保持用户任务隔离。
-
-### Q8：删除时怎么避免误删共享文件？
-
-答：
-
-删除 task 时不能直接删 MinIO 对象。要先看是否还有其他 task 引用同一个 asset，只有没有引用时才可以清理真实对象和相关索引。否则会影响其他用户或任务。
-
-### Q9：Redis 挂了怎么办？
-
-答：
-
-Redis 挂了会影响锁能力，系统不能再依赖锁做前置互斥。这时要靠数据库唯一约束和任务幂等兜底。生产上还应该对合并、分析这类关键路径做降级或拒绝，避免无锁状态下高成本重复处理。
-
-### Q10：为什么不用 Redisson？
-
-答：
-
-项目是 Go 技术栈，没有使用 Redisson。我是参考 WatchDog 的设计思想，在 Go 里自实现 Redis 锁，包括 `SETNX + TTL`、owner 校验释放和自动续期。面试时要主动澄清不是 Redisson。
-
-## 9. 结合八股怎么答
-
-### Redis 分布式锁正确姿势
-
-核心点是 `SETNX + TTL + owner + Lua 解锁`。不能先 `SETNX` 再单独设置过期时间，否则中间宕机可能死锁。
-
-### Lua 原子性
-
-释放锁时要校验 owner 和删除 key 放在一个 Lua 脚本里执行，避免并发下检查和删除之间状态变化。
-
-### 锁过期问题
-
-长任务可能超过 TTL，所以需要 WatchDog 续期。但 WatchDog 不是强一致方案，只是工程上降低锁误过期。
-
-### 分布式锁和幂等
-
-锁是减少并发冲突，幂等是重复发生后的兜底。两者要一起讲。
-
-## 10. tradeoff
-
-引入 Redis 锁后有几个代价：
-
-- 系统依赖 Redis 可用性。
-- 锁 TTL 和续期周期需要合理设置。
-- 锁只能降低重复处理风险，不是强一致事务。
-- 锁粒度过大影响并发，锁粒度过小又保护不住临界区。
-
-当前按 MD5 加锁，粒度比较合适：同一视频互斥，不同视频并行。
-
-## 11. 兜底保障
-
-- 锁获取失败：返回“合并进行中”或跳过重复分析。
-- 锁过期：WatchDog 尽量续期。
-- 误删锁：Lua owner 校验避免。
-- Redis 异常：DB 唯一约束和任务状态兜底。
-- 重复消息：业务状态和幂等逻辑兜底。
-
-## 12. 压力追问怎么顶
-
-### 面试官：你这个锁是不是伪分布式锁？
-
-答：
-
-如果只是 `SETNX` 后直接 `DEL`，确实不完整。我这里做了 TTL 防死锁，value 保存 owner，释放和续期都用 Lua 校验 owner，并且有 WatchDog 续期。它不是强一致锁，但作为当前视频处理临界区的工程互斥是合适的。
-
-### 面试官：为什么说降低风险，不说避免？
-
-答：
-
-因为分布式系统里 Redis 锁不能保证绝对不重复。网络分区、Redis 故障、consumer 重复投递都可能出现边界情况。所以我更准确地说“降低并发重复入库和重复处理风险”，最终还要靠数据库状态和幂等兜底。
-
-### 面试官：MD5 去重是不是不安全？
-
-答：
-
-如果是安全签名场景，MD5 不合适。但这里是视频内容去重，不是防篡改认证，MD5 加文件大小在工程上通常够用。更严谨可以升级 SHA-256。
-
-## 13. 30 秒话术
-
-我用 MD5 做视频内容指纹，把真实文件放在 `video_assets`，用户任务放在 `video_tasks`，相同视频可以复用同一个 asset。并发场景下，为了避免两个请求同时合并分片、创建资产或重复触发分析处理，我用 Redis 分布式锁保护同一 MD5 的临界区。锁里做了 TTL、owner 校验释放和 WatchDog 续期，避免长任务锁过期或误删别人锁。
-
-## 14. 2 分钟话术
-
-视频处理成本主要在后处理，比如 ASR、摘要和 RAG 索引构建。如果相同视频被重复上传，每次都重新处理，会浪费外部 AI 服务调用成本。所以我用 MD5 作为内容指纹，把真实视频资产和用户任务拆开，`video_assets` 存真实文件，`video_tasks` 存用户任务，多个 task 可以引用同一个 asset。
-
-但只有 MD5 查询还不够，因为并发上传时两个请求可能同时发现 asset 不存在，然后都进入合并和入库流程。所以我在分片合并和分析任务消费等临界区加了 Redis 分布式锁。锁用 `SETNX + TTL` 获取，value 保存 owner，释放和续期都用 Lua 校验 owner，并通过 WatchDog 周期续期，降低长任务执行过程中锁过期的风险。
-
-这套设计不能说绝对杜绝重复处理，但能明显降低并发重复入库和重复 AI 处理风险，最终还要结合数据库状态和幂等逻辑兜底。
-
-## 15. 5 分钟深讲版本
-
-我会先讲为什么要做内容复用。视频 AI 处理成本高，同一个视频如果每次上传都重新 ASR、摘要和建向量，会浪费外部 AI 服务调用和向量存储资源。所以我把文件资产和用户任务拆开，一个 `video_assets` 表示真实文件，一个 `video_tasks` 表示用户的一次处理任务。
-
-内容识别上用 MD5 作为视频内容指纹。上传或合并前先查是否已有相同 MD5 的 asset，如果存在就直接创建 task 引用它，而不是重复保存和处理。
-
-并发问题在于，两个相同视频可能同时上传，它们都查不到 asset，然后同时合并、入库。这里就需要 Redis 锁保护临界区。分片合并锁保证同一 MD5 同时只有一个请求做 ComposeObject 和 asset 创建；分析任务消费锁降低同一视频重复分析的风险。
-
-锁实现上，我没有用 Redisson，而是 Go 自实现。获取锁用 `SETNX + TTL`，value 是 owner。释放锁不能直接 `DEL`，而是 Lua 校验 owner 后删除。业务可能超过 TTL，所以 WatchDog 按 `ttl / 3` 续期；如果进程宕机，WatchDog 停止，锁会靠 TTL 自动释放。
-
-最后我会补边界：Redis 锁是并发控制，不是强一致事务。它降低重复处理风险，最终还需要 MySQL 唯一约束、任务状态和幂等逻辑兜底。
-
-## 16. 不要这么说
-
-- 不要说用了 Redisson。
-- 不要说 MD5 绝对不会冲突。
-- 不要说 Redis 锁保证强一致。
-- 不要说锁能完全杜绝重复 AI 调用。
-- 不要只说“做了去重”，要说清 asset/task 拆分和临界区保护。
-
+- 不要说 Redis lock 保护当前分片 merge。
+- 不要说 Redis 保存当前上传 session 或已上传片号。
+- 不要说使用 Redisson。
+- 不要说 MD5 是安全哈希或绝不会冲突。
+- 不要说 Redis lock 单独保证强一致或 exactly-once。

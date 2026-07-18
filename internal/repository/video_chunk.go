@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -42,6 +43,27 @@ func (r *VideoChunkRepository) ListAllByTaskID(taskID int64) ([]model.VideoChunk
 	err := r.db.Where("task_id = ?", taskID).
 		Order("user_id asc, embedding_model asc, chunk_index asc").
 		Find(&chunks).Error
+	return chunks, err
+}
+
+// ListForReindex returns a stable ID-ordered page for resumable vector
+// rebuilding. Zero-valued filters are intentionally ignored.
+func (r *VideoChunkRepository) ListForReindex(ctx context.Context, afterID int64, limit int, userID, taskID int64, embeddingModel string) ([]model.VideoChunk, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query := r.db.WithContext(ctx).Where("id > ?", afterID)
+	if userID > 0 {
+		query = query.Where("user_id = ?", userID)
+	}
+	if taskID > 0 {
+		query = query.Where("task_id = ?", taskID)
+	}
+	if embeddingModel = strings.TrimSpace(embeddingModel); embeddingModel != "" {
+		query = query.Where("embedding_model = ?", embeddingModel)
+	}
+	var chunks []model.VideoChunk
+	err := query.Order("id ASC").Limit(limit).Find(&chunks).Error
 	return chunks, err
 }
 
@@ -182,7 +204,7 @@ func normalizeSearchTerms(terms []string) []string {
 // tokenizeBM25Text creates deterministic word tokens for Latin text and 2-4
 // character n-grams for contiguous Han text. Unlike substring counting this
 // prevents an ASCII query such as "red" from matching "redis", while still
-// providing reproducible lexical statistics without depending on a MySQL
+// providing reproducible lexical statistics without depending on a database-specific
 // deployment-specific Chinese full-text parser.
 func tokenizeBM25Text(text string) []string {
 	text = strings.ToLower(strings.TrimSpace(text))
@@ -235,21 +257,40 @@ func tokenizeBM25Text(text string) []string {
 }
 
 type ChunkEvidenceManifestEntry struct {
-	TaskID      int64  `json:"task_id" yaml:"task_id"`
-	ChunkIndex  int    `json:"chunk_index" yaml:"chunk_index"`
-	EvidenceID  string `json:"evidence_id" yaml:"evidence_id"`
-	ContentHash string `json:"content_hash" yaml:"content_hash"`
-	Content     string `json:"content" yaml:"content"`
+	UserID         int64  `json:"user_id" yaml:"user_id"`
+	TaskID         int64  `json:"task_id" yaml:"task_id"`
+	ChunkID        int64  `json:"chunk_id" yaml:"chunk_id"`
+	ChunkIndex     int    `json:"chunk_index" yaml:"chunk_index"`
+	EvidenceID     string `json:"evidence_id" yaml:"evidence_id"`
+	ContentHash    string `json:"content_hash" yaml:"content_hash"`
+	Content        string `json:"content" yaml:"content"`
+	EmbeddingModel string `json:"embedding_model" yaml:"embedding_model"`
 }
 
 func (r *VideoChunkRepository) ListEvidenceManifest(userID, taskID int64, embeddingModel string) ([]ChunkEvidenceManifestEntry, error) {
 	var chunks []model.VideoChunk
-	if err := r.db.Where("user_id = ? AND task_id = ? AND embedding_model = ?", userID, taskID, embeddingModel).Order("chunk_index ASC").Find(&chunks).Error; err != nil {
+	if err := r.db.Where("user_id = ? AND task_id = ? AND embedding_model = ?", userID, taskID, embeddingModel).Order("chunk_index ASC, id ASC").Find(&chunks).Error; err != nil {
 		return nil, err
 	}
+	return chunkEvidenceManifest(chunks), nil
+}
+
+// ListAllEvidenceManifest returns every relational RAG source row in a stable
+// scope order for the migration-wide projection audit.
+func (r *VideoChunkRepository) ListAllEvidenceManifest(ctx context.Context) ([]ChunkEvidenceManifestEntry, error) {
+	var chunks []model.VideoChunk
+	if err := r.db.WithContext(ctx).
+		Order("user_id ASC, task_id ASC, embedding_model ASC, chunk_index ASC, id ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunkEvidenceManifest(chunks), nil
+}
+
+func chunkEvidenceManifest(chunks []model.VideoChunk) []ChunkEvidenceManifestEntry {
 	out := make([]ChunkEvidenceManifestEntry, 0, len(chunks))
 	for _, chunk := range chunks {
-		out = append(out, ChunkEvidenceManifestEntry{TaskID: chunk.TaskID, ChunkIndex: chunk.ChunkIndex, EvidenceID: chunk.VectorID, ContentHash: chunk.ContentHash, Content: chunk.Content})
+		out = append(out, ChunkEvidenceManifestEntry{UserID: chunk.UserID, TaskID: chunk.TaskID, ChunkID: chunk.ID, ChunkIndex: chunk.ChunkIndex, EvidenceID: chunk.VectorID, ContentHash: chunk.ContentHash, Content: chunk.Content, EmbeddingModel: chunk.EmbeddingModel})
 	}
-	return out, nil
+	return out
 }

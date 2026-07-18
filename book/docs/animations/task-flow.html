@@ -122,7 +122,11 @@ func (c *Consumer) handleDownload(ctx, msg) {
         storage.UploadFromPath(ctx, localPath, ...)
         repo.Asset.Create(asset)
     }
-    repo.Task.CompleteURLDownload(task.ID, asset, ...)
+    c.completeTaskProcessing(TaskProcessingCompleteRequest{
+        TaskID: task.ID, JobType: "download", Token: claim.Token,
+        TaskStatus: Pending, TaskStage: Uploaded,
+        TaskFields: map[string]any{"asset_id": asset.ID, "file_url": asset.ObjectName},
+    })
 }`,
     tag: '外部服务', tagClass: 'tag-external',
   },
@@ -160,7 +164,7 @@ func (c *Consumer) summarizeTask(ctx, task) {
   {
     num: 'STEP 6',
     title: 'RAG 索引构建',
-    desc: '摘要完成后，投递消息到 rag-index topic。Consumer 将转写文本分块，生成 Embedding 向量，写入 Milvus。',
+    desc: '摘要完成后，投递消息到 rag-index topic。Consumer 将转写文本分块，生成 Embedding 向量，写入 pgvector。',
     code: `// internal/service/rag_index.go
 func (s *RAGIndexService) BuildTaskIndex(ctx, task) {
     chunks := splitText(transcription.Content)
@@ -187,7 +191,7 @@ Pending(0) → Queued(1) → Running(2) → Completed(3)
 // 最终数据
 VideoTranscription  // ASR 转写文本
 AISummary           // LLM 摘要
-VideoChunk + Milvus // RAG 向量索引`,
+VideoChunk + pgvector // RAG 向量索引`,
     tag: '数据库', tagClass: 'tag-db',
   },
 ];

@@ -60,12 +60,12 @@ func TestAdmissionLifecycleReportsSettlementAndReleaseFailuresWithoutMaskingProv
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	settleFailure := errors.New("mysql settle unavailable")
+	settleFailure := errors.New("database settle unavailable")
 	success := AdmitChat(resultChat{}, &QuotaAdmission{Usage: failingUsageController{settleErr: settleFailure}}, "p", "m")
 	if _, err := success.Chat(context.Background(), nil); err != nil {
 		t.Fatalf("settlement bookkeeping must not turn a successful provider call into a provider failure: %v", err)
 	}
-	releaseFailure := errors.New("mysql release unavailable")
+	releaseFailure := errors.New("database release unavailable")
 	providerFailure := errors.New("provider failed")
 	failed := AdmitChat(resultChat{err: providerFailure}, &QuotaAdmission{Usage: failingUsageController{releaseErr: releaseFailure}}, "p", "m")
 	if _, err := failed.Chat(context.Background(), nil); !errors.Is(err, providerFailure) {

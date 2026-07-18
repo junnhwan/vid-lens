@@ -25,8 +25,11 @@ type MinIOStorage struct {
 	endpoint string
 }
 
-// NewMinIOStorage 创建 MinIO 存储实例
-func NewMinIOStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*MinIOStorage, error) {
+// NewMinIOStorageWithContext 创建并初始化 MinIO 存储实例。
+func NewMinIOStorageWithContext(ctx context.Context, endpoint, accessKey, secretKey, bucket string, useSSL bool) (*MinIOStorage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
@@ -41,11 +44,27 @@ func NewMinIOStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool)
 		endpoint: endpoint,
 	}
 
-	if err := s.ensureBucket(context.Background()); err != nil {
+	if err := s.ensureBucket(ctx); err != nil {
 		return nil, err
 	}
 
 	return s, nil
+}
+
+// HealthCheck verifies that the configured bucket is reachable and exists.
+// Unlike ensureBucket, readiness checks must not mutate storage state.
+func (s *MinIOStorage) HealthCheck(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("检查 bucket 失败: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("bucket %q 不存在", s.bucket)
+	}
+	return nil
 }
 
 // ensureBucket 确保 bucket 存在（默认私有权限）
@@ -68,6 +87,17 @@ func (s *MinIOStorage) UploadFile(ctx context.Context, objectName string, reader
 		ContentType: contentType,
 	})
 	return err
+}
+
+// PutObject implements the narrow object-store contract used by durable upload sessions.
+func (s *MinIOStorage) PutObject(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error {
+	return s.UploadFile(ctx, objectName, reader, size, contentType)
+}
+
+// OpenObject opens an object as a stream. Read errors can surface lazily from
+// the returned MinIO object, so callers must handle both read and close errors.
+func (s *MinIOStorage) OpenObject(ctx context.Context, objectName string) (io.ReadCloser, error) {
+	return s.client.GetObject(ctx, s.bucket, objectName, minio.GetObjectOptions{})
 }
 
 // UploadFromPath 上传本地文件

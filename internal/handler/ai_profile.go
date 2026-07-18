@@ -138,7 +138,7 @@ func validateAIProfileRequestBinding(req service.AIProfileRequest) error {
 		return errors.New("ASR 配置不完整")
 	}
 	if req.EmbeddingProvider == "" || req.EmbeddingEndpoint == "" || req.EmbeddingModel == "" || req.EmbeddingDim <= 0 {
-		return errors.New("Embedding 配置不完整")
+		return errors.New("embedding 配置不完整")
 	}
 	return nil
 }

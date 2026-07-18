@@ -99,8 +99,8 @@ func TestRAGIndexServiceStopsAfterContextCancellationDuringVectorDelete(t *testi
 	if store.deleteCalls != 1 {
 		t.Fatalf("delete calls = %d, want 1", store.deleteCalls)
 	}
-	if len(embedding.inputs) != 0 {
-		t.Fatalf("embedding calls = %d, want 0 after cancellation", len(embedding.inputs))
+	if len(embedding.inputs) != 1 {
+		t.Fatalf("embedding calls = %d, want 1 before fallback cancellation", len(embedding.inputs))
 	}
 	if store.upsertCalls != 0 {
 		t.Fatalf("upsert calls = %d, want 0", store.upsertCalls)

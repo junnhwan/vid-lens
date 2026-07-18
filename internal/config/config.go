@@ -1,16 +1,12 @@
 package config
 
-import (
-	"fmt"
-	"os"
-
-	"gopkg.in/yaml.v3"
-)
+import "fmt"
 
 // Config 全局配置结构体
 type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	Database     DatabaseConfig     `yaml:"database"`
+	LegacyMySQL  LegacyMySQLConfig  `yaml:"legacy_mysql"`
 	Redis        RedisConfig        `yaml:"redis"`
 	MinIO        MinIOConfig        `yaml:"minio"`
 	Kafka        KafkaConfig        `yaml:"kafka"`
@@ -20,6 +16,7 @@ type Config struct {
 	Security     SecurityConfig     `yaml:"security"`
 	Upload       UploadConfig       `yaml:"upload"`
 	TaskRetry    TaskRetryConfig    `yaml:"task_retry"`
+	Cleanup      CleanupConfig      `yaml:"cleanup"`
 	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
 	RAG          RAGConfig          `yaml:"rag"`
 	Milvus       MilvusConfig       `yaml:"milvus"`
@@ -31,7 +28,20 @@ type ServerConfig struct {
 	Mode string `yaml:"mode"`
 }
 
+// DatabaseConfig is the single application database. PostgreSQL stores both
+// relational business data and pgvector embeddings.
 type DatabaseConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	DBName   string `yaml:"dbname"`
+	SSLMode  string `yaml:"sslmode"`
+}
+
+// LegacyMySQLConfig is retained temporarily for the offline migration and
+// rollback-period audit tool. The API server never reads this configuration.
+type LegacyMySQLConfig struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
 	Username string `yaml:"username"`
@@ -40,7 +50,7 @@ type DatabaseConfig struct {
 	Charset  string `yaml:"charset"`
 }
 
-func (d *DatabaseConfig) DSN() string {
+func (d *LegacyMySQLConfig) DSN() string {
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
 		d.Username, d.Password, d.Host, d.Port, d.DBName, d.Charset)
 }
@@ -64,6 +74,13 @@ type MinIOConfig struct {
 	UseSSL    bool   `yaml:"use_ssl"`
 }
 
+// Defaults shared by the server and maintenance commands when the optional
+// topic fields are omitted from YAML.
+const (
+	DefaultKafkaDownloadTopic = "video-download"
+	DefaultKafkaRAGIndexTopic = "video-rag-index"
+)
+
 type KafkaConfig struct {
 	Brokers         []string `yaml:"brokers"`
 	AnalyzeTopic    string   `yaml:"analyze_topic"`
@@ -71,6 +88,15 @@ type KafkaConfig struct {
 	DownloadTopic   string   `yaml:"download_topic"`
 	RAGIndexTopic   string   `yaml:"rag_index_topic"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
+}
+
+func (k *KafkaConfig) applyDefaults() {
+	if k.DownloadTopic == "" {
+		k.DownloadTopic = DefaultKafkaDownloadTopic
+	}
+	if k.RAGIndexTopic == "" {
+		k.RAGIndexTopic = DefaultKafkaRAGIndexTopic
+	}
 }
 
 type AIConfig struct {
@@ -112,6 +138,16 @@ type TaskRetryConfig struct {
 	BatchSize           int   `yaml:"batch_size"`
 }
 
+// CleanupConfig controls durable task-resource cleanup independently from
+// Kafka business-task retries. Keeping the policies separate avoids coupling
+// media processing retry semantics to MinIO/Redis/vector cleanup recovery.
+type CleanupConfig struct {
+	ScanIntervalSeconds int `yaml:"scan_interval_seconds"`
+	BatchSize           int `yaml:"batch_size"`
+	LeaseSeconds        int `yaml:"lease_seconds"`
+	RetryBackoffSeconds int `yaml:"retry_backoff_seconds"`
+}
+
 type RateLimitConfig struct {
 	Capacity int `yaml:"capacity"`
 	Rate     int `yaml:"rate"`
@@ -127,44 +163,26 @@ type RouteRateLimit struct {
 	Rate     int `yaml:"rate"`
 }
 
+// RAGConfig controls indexing and retrieval. Store defaults to pgvector; use
+// an explicit "milvus" value only during the temporary rollback window.
 type RAGConfig struct {
-	Enabled        bool    `yaml:"enabled"`
-	ChunkSize      int     `yaml:"chunk_size"`
-	ChunkOverlap   int     `yaml:"chunk_overlap"`
-	TopK           int     `yaml:"top_k"`
-	CandidateK     int     `yaml:"candidate_k"`
-	MinScore       float32 `yaml:"min_score"`
-	RecentTurns    int     `yaml:"recent_turns"`
-	EmbeddingDim   int     `yaml:"embedding_dim"`
-	Collection     string  `yaml:"collection"`
-	RerankEndpoint string  `yaml:"rerank_endpoint"`
-	RerankModel    string  `yaml:"rerank_model"`
+	Enabled      bool    `yaml:"enabled"`
+	Store        string  `yaml:"store"`
+	ChunkSize    int     `yaml:"chunk_size"`
+	ChunkOverlap int     `yaml:"chunk_overlap"`
+	TopK         int     `yaml:"top_k"`
+	CandidateK   int     `yaml:"candidate_k"`
+	MinScore     float32 `yaml:"min_score"`
+	RecentTurns  int     `yaml:"recent_turns"`
+	EmbeddingDim int     `yaml:"embedding_dim"`
+	VectorTable  string  `yaml:"vector_table"`
 }
 
 type MilvusConfig struct {
-	Address  string `yaml:"address"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	Token    string `yaml:"token"`
-	Database string `yaml:"database"`
-}
-
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
-	}
-
-	expanded := os.ExpandEnv(string(data))
-
-	cfg := Config{AIGovernance: defaultAIGovernanceConfig()}
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
-		return nil, fmt.Errorf("解析配置文件失败: %w", err)
-	}
-
-	if err := applyAIGovernanceEnv(&cfg.AIGovernance); err != nil {
-		return nil, fmt.Errorf("AI 治理配置无效: %w", err)
-	}
-
-	return &cfg, nil
+	Address    string `yaml:"address"`
+	Collection string `yaml:"collection"`
+	Username   string `yaml:"username"`
+	Password   string `yaml:"password"`
+	Token      string `yaml:"token"`
+	Database   string `yaml:"database"`
 }

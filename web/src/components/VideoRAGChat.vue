@@ -76,7 +76,7 @@
             >
               {{ copiedMessageId === msg.id ? '✓' : '⧉' }}
             </button>
-            <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(msg.content)"></div>
+            <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(cleanMessageContent(msg))"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
             <div
@@ -87,6 +87,20 @@
               <span v-if="msg.model" class="agent-tag agent-model">模型: {{ msg.model }}</span>
             </div>
             <div v-if="msg.citations && msg.citations.length" class="citations">
+              <nav class="citation-references" aria-label="参考来源">
+                <span class="citation-references-label">参考来源：</span>
+                <button
+                  v-for="(_cite, idx) in msg.citations"
+                  :key="idx"
+                  type="button"
+                  class="citation-reference-link"
+                  :aria-controls="citationCardId(msg, msgIdx, idx)"
+                  :aria-label="`查看参考来源 ${idx + 1}`"
+                  @click="jumpToCitation(msg, msgIdx, idx)"
+                >
+                  {{ citationDisplayLabel(idx) }}
+                </button>
+              </nav>
               <div class="citations-header">
                 <span class="citations-title">参考片段</span>
                 <button
@@ -98,15 +112,20 @@
                   {{ messageCitationsAllExpanded(msg, msgIdx) ? '收起全部' : '展开全部' }}
                 </button>
               </div>
-              <div v-for="(cite, idx) in msg.citations" :key="idx" class="citation-item">
+              <div
+                v-for="(cite, idx) in msg.citations"
+                :id="citationCardId(msg, msgIdx, idx)"
+                :key="idx"
+                class="citation-item"
+                :class="{ highlighted: highlightedCitationId === citationCardId(msg, msgIdx, idx) }"
+                tabindex="-1"
+                role="region"
+                :aria-label="`参考来源 ${idx + 1}`"
+              >
                 <div class="citation-meta">
+                  <span class="citation-id">{{ citationDisplayLabel(idx) }}</span>
                   <span v-if="cite.source" class="citation-source">来源: {{ cite.source }}</span>
                   <span v-if="cite.chunk_id" class="citation-chunk">Chunk: #{{ cite.chunk_id }}</span>
-                </div>
-                <div class="citation-scores">
-                  <span v-if="cite.rrf_score !== undefined" class="citation-rrf">RRF: {{ cite.rrf_score.toFixed(4) }}</span>
-                  <span v-if="cite.vector_rank" class="citation-rank">向量: #{{ cite.vector_rank }}</span>
-                  <span v-if="cite.keyword_rank" class="citation-rank">关键词: #{{ cite.keyword_rank }}</span>
                 </div>
                 <div
                   class="citation-content"
@@ -209,7 +228,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
@@ -221,10 +240,13 @@ import {
 import {
   DEFAULT_CITATION_PREVIEW_OPTIONS,
   areAllExpandableCitationsExpanded,
+  citationDisplayLabel,
+  citationDomId,
   citationExpansionKey,
   citationNeedsExpansion,
   citationTextForDisplay,
   setMessageCitationsExpanded,
+  stripInternalCitationTokens,
 } from '../citationDisplayPolicy.js'
 
 const props = defineProps({
@@ -248,8 +270,10 @@ const expandedCitationKeys = ref(new Set())
 const streaming = ref(false)
 const userAtBottom = ref(true)
 const copiedMessageId = ref(null)
+const highlightedCitationId = ref(null)
 let abortController = null
 let indexStatusTimer = null
+let citationHighlightTimer = null
 
 const citationPreviewOptions = DEFAULT_CITATION_PREVIEW_OPTIONS
 
@@ -309,6 +333,8 @@ const formatMessageTime = (timestamp) => {
 
 const renderMarkdown = (content) => DOMPurify.sanitize(marked.parse(content || ''))
 
+const cleanMessageContent = (message) => stripInternalCitationTokens(message?.content || '')
+
 const messageExpansionId = (message, messageIndex) => message?.id ?? `message-${messageIndex}`
 
 const citationHasExpansion = (citation) => citationNeedsExpansion(citation?.content, citationPreviewOptions)
@@ -324,6 +350,27 @@ const citationDisplayContent = (citation, message, messageIndex, citationIndex) 
     citationIsExpanded(message, messageIndex, citationIndex),
     citationPreviewOptions,
   )
+}
+
+const citationCardId = (message, messageIndex, citationIndex) => {
+  return citationDomId(messageExpansionId(message, messageIndex), citationIndex)
+}
+
+const jumpToCitation = async (message, messageIndex, citationIndex) => {
+  const targetId = citationCardId(message, messageIndex, citationIndex)
+  await nextTick()
+  const target = document.getElementById(targetId)
+  if (!target) return
+
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  target.focus({ preventScroll: true })
+  highlightedCitationId.value = targetId
+
+  if (citationHighlightTimer) clearTimeout(citationHighlightTimer)
+  citationHighlightTimer = setTimeout(() => {
+    if (highlightedCitationId.value === targetId) highlightedCitationId.value = null
+    citationHighlightTimer = null
+  }, 1500)
 }
 
 const messageHasExpandableCitations = (citations) => {
@@ -496,7 +543,7 @@ const stopStreaming = () => {
 
 const copyMessage = async (message) => {
   try {
-    await navigator.clipboard.writeText(message.content || '')
+    await navigator.clipboard.writeText(cleanMessageContent(message))
     copiedMessageId.value = message.id
     setTimeout(() => {
       if (copiedMessageId.value === message.id) copiedMessageId.value = null
@@ -575,9 +622,11 @@ const sendQuestion = async () => {
 // 视频助手 / 严格引用：SSE 流式，边收边渲染
 const sendStreamQuestion = async (q, mode) => {
   // 预插入一个空的 assistant 消息
-  const assistantMsg = {
+  // 持有 reactive proxy，SSE 回调对 delta/citations/done 的修改会立即触发视图更新。
+  const assistantMsg = reactive({
     id: `temp-${Date.now()}`,
     role: 'assistant',
+    rawContent: '',
     content: '',
     citations: [],
     timestamp: new Date(),
@@ -585,7 +634,7 @@ const sendStreamQuestion = async (q, mode) => {
     trace: [],
     model: null,
     mode: 'rag',
-  }
+  })
   messages.value.push(assistantMsg)
   userAtBottom.value = true
   streaming.value = true
@@ -608,11 +657,16 @@ const sendStreamQuestion = async (q, mode) => {
   try {
     await api.sendChatMessageStream(sessionId.value, q, 5, mode, (event) => {
       if (event.type === 'answer') {
-        assistantMsg.content += event.delta || ''
+        assistantMsg.rawContent += event.delta || ''
+        assistantMsg.content = assistantMsg.rawContent
         scrollMessagesToBottom()
       } else if (event.type === 'citations') {
         assistantMsg.citations = event.citations || []
       } else if (event.type === 'done') {
+        if (typeof event.answer === 'string') {
+          assistantMsg.rawContent = event.answer
+          assistantMsg.content = event.answer
+        }
         assistantMsg.id = event.message_id || assistantMsg.id
         finish()
         refreshSessionTitles()
@@ -703,6 +757,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopIndexPolling()
+  if (citationHighlightTimer) {
+    clearTimeout(citationHighlightTimer)
+    citationHighlightTimer = null
+  }
   // 离开对话页时中止进行中的流，避免回调写已卸载组件
   abortController?.abort()
   abortController = null
@@ -1094,6 +1152,41 @@ onUnmounted(() => {
   border-top: 1px solid rgba(139, 149, 168, 0.15);
 }
 
+.citation-references {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+  color: #a8b3c7;
+  font-size: 0.82rem;
+}
+
+.citation-references-label {
+  font-weight: 600;
+}
+
+.citation-reference-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--vl-primary);
+  padding: 0.15rem 0.2rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--vl-font-mono);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.citation-reference-link:hover,
+.citation-reference-link:focus-visible {
+  background: rgba(45, 212, 191, 0.1);
+  outline: 2px solid rgba(45, 212, 191, 0.35);
+  outline-offset: 1px;
+}
+
 .citations-header {
   display: flex;
   align-items: center;
@@ -1133,6 +1226,18 @@ onUnmounted(() => {
   border-radius: 0.5rem;
   margin-bottom: 0.5rem;
   border: 1px solid rgba(139, 149, 168, 0.1);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.citation-item:focus-visible {
+  outline: 2px solid rgba(45, 212, 191, 0.5);
+  outline-offset: 2px;
+}
+
+.citation-item.highlighted {
+  border-color: var(--vl-primary);
+  background: rgba(45, 212, 191, 0.1);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
 }
 
 .citation-meta {
@@ -1140,6 +1245,13 @@ onUnmounted(() => {
   gap: 0.75rem;
   margin-bottom: 0.5rem;
   flex-wrap: wrap;
+}
+
+.citation-id {
+  font-size: 0.75rem;
+  color: var(--vl-primary);
+  font-family: var(--vl-font-mono);
+  font-weight: 700;
 }
 
 .citation-source {
@@ -1156,32 +1268,6 @@ onUnmounted(() => {
   font-size: 0.75rem;
   color: var(--vl-text-secondary);
   font-family: var(--vl-font-mono);
-}
-
-.citation-scores {
-  display: flex;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-  font-size: 0.75rem;
-  font-family: var(--vl-font-mono);
-  opacity: 0.75;
-}
-
-.citation-rrf {
-  color: var(--vl-primary);
-  background: rgba(45, 212, 191, 0.1);
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.35rem;
-  border: 1px solid rgba(45, 212, 191, 0.2);
-}
-
-.citation-rank {
-  color: var(--vl-text-secondary);
-  background: rgba(139, 149, 168, 0.1);
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.35rem;
-  border: 1px solid rgba(139, 149, 168, 0.15);
 }
 
 .citation-content {

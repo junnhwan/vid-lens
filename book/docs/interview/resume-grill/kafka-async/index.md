@@ -6,13 +6,13 @@
 
 - 题目：这是 MQ 第一问。
 - 面试官想听什么：长任务为什么不适合占用请求线程，以及异步后状态如何回写。
-- 简答：视频下载、FFmpeg、ASR、摘要和 RAG 索引都可能持续很久，还依赖外部服务。同步 HTTP 容易超时，也很难给用户展示阶段性失败。Kafka 让接口快速返回 task id，consumer 后台处理并把状态写回 MySQL，前端轮询任务状态。
+- 简答：视频下载、FFmpeg、ASR、摘要和 RAG 索引都可能持续很久，还依赖外部服务。同步 HTTP 容易超时，也很难给用户展示阶段性失败。Kafka 让接口快速返回 task id，consumer 后台处理并把状态写回 PostgreSQL，前端轮询任务状态。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  VidLens 的处理链路不是一个短请求。URL 下载可能受网络和平台风控影响，ASR 会受音频长度和请求体大小限制，RAG 索引还要调用 embedding 并写 Milvus。如果这些都放在 HTTP 请求里，请求会长时间占用连接；一旦客户端断开或服务重启，任务状态也很难恢复。
+  VidLens 的处理链路不是一个短请求。URL 下载可能受网络和平台风控影响，ASR 会受音频长度和请求体大小限制，RAG 索引还要调用 embedding 并发布 pgvector projection。如果这些都放在 HTTP 请求里，请求会长时间占用连接；一旦客户端断开或服务重启，任务状态也很难恢复。
 
   当前实现是先创建 `video_tasks`，再按动作投递 Kafka。比如 URL 上传接口创建 downloading 状态后投递 download topic；转写和摘要也分别进入对应 topic；ASR 完成后再投递独立的 RAG index topic。consumer 处理完成后更新任务状态、保存转写/摘要/RAG 状态。用户拿 task id 查询，而不是等一个长 HTTP 响应。
   </details>
@@ -40,7 +40,7 @@
 
   我会承认 RocketMQ 在 Java 业务消息场景里有优势，尤其是延迟消息、事务消息、重试和 DLQ 这些能力。但 VidLens 不是机械复制 Java 项目，它是 Go 后端项目，当前使用 `segmentio/kafka-go`，启动时创建 topics，producer 投递不同动作，consumer group 处理后台任务。
 
-  本项目没有直接依赖 MQ 自带的业务重试，而是把重试状态落在 MySQL：失败时记录 `retry_count`、`max_retries`、`next_retry_at`、`last_job_type`，RetryScheduler 扫描 due task 后重新投递。这样即使 Kafka 本身不提供 RocketMQ 那种业务延迟重试语义，任务恢复也能通过 DB 状态解释清楚。
+  本项目没有直接依赖 MQ 自带的业务重试，而是把重试状态落在 PostgreSQL：失败时记录 `retry_count`、`max_retries`、`next_retry_at`、`last_job_type`，RetryScheduler 扫描 due task 后重新投递。这样即使 Kafka 本身不提供 RocketMQ 那种业务延迟重试语义，任务恢复也能通过 DB 状态解释清楚。
   </details>
 
 - 延伸追问：
@@ -64,9 +64,9 @@
   <details>
   <summary>展开深答</summary>
 
-  我会分两层讲。Kafka 层面，producer 不是 fire-and-forget，而是配置了 RequireAll ack。业务层面，VidLens 不把“写了一条 Kafka 消息”当成唯一状态来源，任务状态仍在 MySQL。比如 URL 下载创建任务后投递失败，接口会返回错误；RAG 索引投递失败，会记录 rag_index job 失败，并尝试写 `video_rag_indexes` failed。
+  我会分两层讲。Kafka 层面，producer 不是 fire-and-forget，而是配置了 RequireAll ack。业务层面，VidLens 不把“写了一条 Kafka 消息”当成唯一状态来源，任务状态仍在 PostgreSQL。比如 URL 下载创建任务后投递失败，接口会返回错误；RAG 索引投递失败，会记录 rag_index job 失败，并尝试写 `video_rag_indexes` failed。
 
-  对 retry 来说更关键。RetryScheduler 先 claim task，把它从 failed 恢复到 queued/running，然后投递 Kafka。如果投递失败，代码会调用 `RestoreRetryAfterDispatchFailure`，把任务恢复成 failed 并重新设置 `next_retry_at`。这能避免任务已经被 claim 但消息没发出去，导致后续扫描不到。
+  对 retry 来说更关键。RetryScheduler 先 claim task，把它从 failed 恢复到 queued/running，然后投递 Kafka。claim 会通过 `ClaimRetryDispatch` 在同一事务写入 task/job 的 token/version lease。如果投递失败，`RestoreRetryDispatch` 校验 token 后把两张表恢复成 failed 并重新设置 `next_retry_at`；如果进程崩溃，则由过期 lease 扫描接管。
   </details>
 
 - 延伸追问：
@@ -90,7 +90,7 @@
   <details>
   <summary>展开深答</summary>
 
-  我不会说 Kafka 帮我保证业务 exactly-once。VidLens 的 consumer 处理动作需要自己做幂等。上传链路按 MD5 查找 `video_assets`，已有资产时直接创建 task 复用；分片 merge 前先查 asset，再拿 Redis lock，拿不到说明其他请求在合并；RAG 重建时先删除同一 `user_id/task_id/embedding_model` 下旧向量，再替换 MySQL chunks 和 upsert Milvus vectors。
+  我不会说 Kafka 帮我保证业务 exactly-once。VidLens 的 consumer 处理动作需要自己做幂等。上传链路按 MD5 查找 `video_assets`，已有资产时直接创建 task 复用；分片 merge 前先查 asset，再拿 Redis lock，拿不到说明其他请求在合并；RAG 重建时先事务性替换 PostgreSQL `video_chunks` source，再在独立事务中原子替换同一 `user_id/task_id/embedding_model` 下的 pgvector projection；两阶段之间不假装强一致，失败由 RAG 状态、审计和重建恢复。
 
   这些做法的共同点是：消息重复了也尽量不重复生成底层资源，或者用覆盖式/可重建的方式保证最终状态可解释。真正高等级的 exactly-once 需要事务 outbox、幂等表或更严格的状态机，当前项目先做到简历项目可防守的业务幂等。
   </details>
@@ -136,13 +136,13 @@
 
 - 题目：可靠性追问。
 - 面试官想听什么：不是所有失败都适合重试。
-- 简答：失败会先分类。网络、timeout、429、5xx、MinIO、Milvus 等临时错误可以重试；缺少 AI 配置、API key 解密失败、无权、文件不存在、embedding 维度错误、视频不可用等属于非重试。重试状态写入 DB，由 RetryScheduler 按 `next_retry_at` 扫描。
+- 简答：失败会先分类。网络、timeout、429、5xx、MinIO、PostgreSQL/pgvector 暂时不可用等临时错误可以重试；缺少 AI 配置、API key 解密失败、无权、文件不存在、embedding 维度错误、视频不可用等属于非重试。重试状态写入 DB，由 RetryScheduler 按 `next_retry_at` 扫描。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  重试不是“失败就无限再来”。VidLens 的 `isRetryableError` 明确区分 retryable 和 non-retryable。比如用户没配 AI 服务，重试不会自动好；embedding 维度跟 Milvus collection 不一致，重试也不会好；视频被平台删除或 412 风控，也可能不是立刻可恢复。相反，网络 timeout、connection reset、429、5xx、MinIO/Milvus 暂时不可用，才适合退避重试。
+  重试不是“失败就无限再来”。VidLens 的 `isRetryableError` 明确区分 retryable 和 non-retryable。比如用户没配 AI 服务，重试不会自动好；embedding 维度跟 pgvector schema 不一致，重试也不会好；视频被平台删除或 412 风控，也可能不是立刻可恢复。相反，网络 timeout、connection reset、429、5xx、MinIO/PostgreSQL 暂时不可用，才适合退避重试。
 
   失败时会更新 `retry_count`、`max_retries`、`next_retry_at` 和 `last_job_type`。RetryScheduler 扫描 due tasks，claim 后按 job type 重新投递对应 topic。超过最大重试后写 dead，避免任务一直占用调度。
   </details>
@@ -162,13 +162,13 @@
 
 - 题目：面试官看你是否理解失败边界。
 - 面试官想听什么：ASR 和 RAG 的成功条件不同。
-- 简答：ASR 成功后用户应该能看到转写文本；Embedding 或 Milvus 失败只影响问答索引，不应该把转写任务也拖失败。拆成独立 RAG job 后，transcribe consumer 保存转写并投递 `video-rag-index`，RAG consumer 独立构建索引并支持重试。
+- 简答：ASR 成功后用户应该能看到转写文本；Embedding 或 pgvector projection 发布失败只影响问答索引，不应该把转写任务也拖失败。拆成独立 RAG job 后，transcribe consumer 保存转写并投递 `video-rag-index`，RAG consumer 独立构建索引并支持重试。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  旧流程把 RAG indexer 放在 transcribe consumer 后面同步执行。这样看起来链路简单，但实际会让 embedding 和 Milvus 写入占用转写 worker。如果 Milvus 短暂不可用，转写文本明明已经保存，用户却可能看到整个转写任务失败。
+  旧流程把 RAG indexer 放在 transcribe consumer 后面同步执行。这样看起来链路简单，但实际会让 embedding 和第一版 Milvus 写入占用转写 worker；迁移到 pgvector 后，projection 发布仍然是独立的失败边界。如果向量后端短暂不可用，转写文本明明已经保存，用户不应该看到整个转写任务失败。
 
   现在的边界更清楚：`handleTranscribe` 完成 ASR 和转写保存后调用 `indexAfterTranscription`，先写 rag_index queued job，再投递 RAGIndexPayload。`handleRAGIndex` 独立检查 task、transcription 和 indexer，然后调用 `BuildTaskIndex`。失败后按 rag_index job 进入现有 DB retry scheduler。
   </details>
@@ -189,13 +189,13 @@
 
 - 题目：系统运行题。
 - 面试官想听什么：先定位瓶颈，不是直接加机器。
-- 简答：先看积压来自生产突增、consumer bug、外部 AI 慢、FFmpeg/yt-dlp 慢、Milvus 慢还是 DB 写入慢。VidLens 的日志和状态里有 task id、trace id、stage、chunk 数、错误信息，可以按 topic 和 job type 定位。
+- 简答：先看积压来自生产突增、consumer bug、外部 AI 慢、FFmpeg/yt-dlp 慢、embedding/pgvector 慢还是 DB 写入慢。VidLens 的日志和状态里有 task id、trace id、stage、chunk 数、错误信息，可以按 topic 和 job type 定位。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  我不会一上来就说“扩容 consumer”。先要看哪个 topic 积压：download、transcribe、analyze 还是 rag_index。download 慢可能是平台网络、代理、yt-dlp 或 720p 下载；transcribe 慢可能是 FFmpeg 和 ASR provider；rag_index 慢可能是 embedding 或 Milvus；analyze 慢可能是 LLM。
+  我不会一上来就说“扩容 consumer”。先要看哪个 topic 积压：download、transcribe、analyze 还是 rag_index。download 慢可能是平台网络、代理、yt-dlp 或 720p 下载；transcribe 慢可能是 FFmpeg 和 ASR provider；rag_index 慢可能是 embedding provider 或 pgvector projection 写入；analyze 慢可能是 LLM。
 
   然后看 DB 里的 `status/stage/last_job_type/last_error_msg` 和日志里的 trace id。长视频 ASR 复盘里已经补过 chunk 级日志，因为只看最终 completed/failed 不够。确认瓶颈后再决定是加 consumer、增加 partition、降级某些功能、提高 provider timeout，还是先修 bug。
   </details>

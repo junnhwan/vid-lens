@@ -226,7 +226,7 @@
         <div class="node" data-step="2" data-color="amber" style="left:432px;top:110px"><strong>下载视频</strong><small>yt-dlp 下载，失败进入 retry state。</small></div>
         <div class="node" data-step="3" data-color="green" style="left:236px;top:272px"><strong>ASR 转写</strong><small>FFmpeg 提取音频，长视频按 300 秒切片。</small></div>
         <div class="node" data-step="4" data-color="cyan" style="left:432px;top:272px"><strong>LLM 摘要</strong><small>优先复用已有转写，降低重复 ASR 成本。</small></div>
-        <div class="node" data-step="5" data-color="green" style="left:236px;top:438px"><strong>RAG 建索引</strong><small>转写文本切 chunk，embedding 后写 Milvus。</small></div>
+        <div class="node" data-step="5" data-color="green" style="left:236px;top:438px"><strong>RAG 建索引</strong><small>转写文本切 chunk，embedding 后写 pgvector。</small></div>
         <div class="node" data-step="6" data-color="cyan" style="left:432px;top:438px"><strong>视频问答</strong><small>向量 + BM25 + RRF 后拼接 prompt。</small></div>
         <div class="node" data-step="7" data-color="red" style="left:628px;top:272px"><strong>失败恢复</strong><small>RetryScheduler claim，到期重新投递 Kafka。</small></div>
         <div class="arrow" data-arrow="0" style="left:190px;top:151px;width:42px"></div>
@@ -258,9 +258,9 @@
       ['下载视频', 'Download consumer 调 yt-dlp 下载，日志只记录清洗后的 URL，下载完成后落 MinIO 和 VideoAsset。', 'internal/mq/consumer.go:261\ninternal/pkg/ytdlp/ytdlp.go:45\nformat <= 720p'],
       ['ASR 转写', '长视频先抽音频并切片，每段 ASR 后合并，解决单次音频过大和长视频漏识别问题。', 'internal/mq/consumer.go:464\nREADME.md:226\n300 秒切片 ASR'],
       ['LLM 摘要', '摘要阶段复用已有转写，不重复下载视频和调用 ASR，降低成本和失败面。', 'internal/mq/consumer.go:393\nREADME.md:239\nreuse transcription'],
-      ['RAG 建索引', 'RAG 使用 ASR 转写文本作为知识源，切 chunk、embedding 后写入 Milvus，并记录 video_rag_indexes 状态。', 'internal/service/rag_index.go:118\ninternal/vector/milvus.go:102\nVideoRAGIndex status'],
+      ['RAG 建索引', 'RAG 使用 ASR 转写文本作为知识源，切 chunk、embedding 后写入 pgvector，并记录 video_rag_indexes 状态。', 'internal/service/rag_index.go:118\ninternal/vector/pgvector.go\nVideoRAGIndex status'],
       ['视频问答', '问答时做 query embedding，召回向量结果，再合并 BM25 关键词结果，用 RRF 融合。', 'internal/service/chat.go:160\ninternal/service/chat.go:258\nretrieval_fusion.go:14'],
-      ['失败恢复', '失败任务不是原地 sleep。RetryScheduler 到期 claim，重新投递；投递失败会恢复 next_retry_at。', 'internal/mq/retry.go:193\ninternal/mq/retry.go:210\nRestoreAfterDispatchFailure']
+      ['失败恢复', '失败任务不是原地 sleep。RetryScheduler 使用 token/version dispatch lease 认领；投递失败事务性恢复 task/job，崩溃则由过期 lease 接管。', 'internal/mq/retry.go\ninternal/repository/task_lease_dispatch.go\nRestoreRetryDispatch']
     ];
     let step = 0;
     let timer = null;

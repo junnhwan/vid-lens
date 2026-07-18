@@ -60,4 +60,8 @@ docs/site/
 docs/vidlensdocs.zip
 docs/vidlens-source-notes.html
 .playwright-mcp/
+.superpowers/
 /*.png
+
+# Local interview/reference drafts
+other-grill-v2.md

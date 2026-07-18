@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -68,11 +67,4 @@ func formatDownloadError(err error, stderr string) error {
 		return fmt.Errorf("yt-dlp 下载失败: 服务器直连 YouTube 失败，请在 tools.proxy_url 配置可用代理后重试: %w\n%s", err, stderr)
 	}
 	return fmt.Errorf("yt-dlp 下载失败: %w\n%s", err, stderr)
-}
-
-// DownloadVideoWithTimeout 带超时的下载（默认 10 分钟）
-func DownloadVideoWithTimeout(ytDlpPath, ffmpegPath, videoURL string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	return DownloadVideo(ctx, ytDlpPath, ffmpegPath, "", "", videoURL)
 }

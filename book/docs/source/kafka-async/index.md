@@ -261,14 +261,15 @@ RunOnce(ctx)
   ├─ repos.Task.FindDueRetryTasks(now, batchSize=20)
   │    └─ SELECT * FROM video_tasks WHERE next_retry_at <= now AND status IN (4,5)
   ├─ for _, task := range tasks {
-  │    ├─ repos.Task.ClaimRetryTask(task.ID, now, status, stage)  // CAS 认领
-  │    ├─ repos.TaskJob.UpsertDispatching(task, jobType, status, stage)
-  │    └─ enqueueRetry(ctx, task)
+  │    ├─ repos.ClaimRetryDispatch(task/job, expectedVersion, token, leaseUntil)
+  │    │    └─ 一个 PostgreSQL transaction 同步写 task + task_job dispatch lease
+  │    └─ enqueueRetry(contextWithClaimToken(ctx, token), task)
   │         ├─ TaskJobDownload   → producer.EnqueueDownload()
   │         ├─ TaskJobTranscribe → producer.EnqueueTranscribe()
   │         ├─ TaskJobAnalyze    → producer.EnqueueAnalyze()
   │         └─ TaskJobRAGIndex   → producer.EnqueueRAGIndex()
-  └─ 失败时: repos.Task.RestoreRetryAfterDispatchFailure()
+  └─ producer 失败: repos.RestoreRetryDispatch(token, nextRetryAt)
+       └─ token CAS 后事务性恢复 task + task_job；进程崩溃则由过期 lease 扫描恢复
 ```
 
 ### 6. Consumer.recordTaskFailure -- 失败记录与重试决策
@@ -335,7 +336,7 @@ retryCount>3 → 超过最大次数，标记为 Dead
        ├─ 分布式锁       ├─ 更新状态        ├─ yt-dlp 下载    ├─ 查询转录
        ├─ 幂等校验       ├─ FFmpeg 音频     ├─ MD5 去重       ├─ 文本分块
        ├─ 更新状态       ├─ ASR 转写        ├─ MinIO 上传     ├─ Embedding
-       ├─ processVideo  ├─ 保存转录        ├─ 更新 Asset     ├─ Milvus 写入
+       ├─ processVideo  ├─ 保存转录        ├─ 更新 Asset     ├─ pgvector projection
        │  ├─ 复用转录    ├─ 投递 rag-index  └─ 完成           └─ 完成
        │  ├─ FFmpeg     └─ 完成
        │  ├─ ASR

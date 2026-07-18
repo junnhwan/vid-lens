@@ -352,10 +352,10 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 		return fmt.Errorf("ASR 配置不完整")
 	}
 	if strings.TrimSpace(req.EmbeddingProvider) == "" || strings.TrimSpace(req.EmbeddingEndpoint) == "" || strings.TrimSpace(req.EmbeddingModel) == "" {
-		return fmt.Errorf("Embedding 配置不完整")
+		return fmt.Errorf("embedding 配置不完整")
 	}
 	if req.EmbeddingDim <= 0 {
-		return fmt.Errorf("Embedding 维度必须大于 0")
+		return fmt.Errorf("embedding 维度必须大于 0")
 	}
 	if requireKeys && (strings.TrimSpace(req.LLMAPIKey) == "" || strings.TrimSpace(req.ASRAPIKey) == "" || strings.TrimSpace(req.EmbeddingAPIKey) == "") {
 		return fmt.Errorf("API Key 不能为空")

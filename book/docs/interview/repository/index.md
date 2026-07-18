@@ -207,28 +207,22 @@ func (r *TaskRepository) RecordTerminalFailure(id int64, jobType, stage, errCode
 
 ---
 
-## 9. `ClaimRetryTask` 如何防止多个调度实例重复认领？
+## 9. `ClaimRetryDispatch` 如何防止多个调度实例重复认领？
 
 ```go
-// internal/repository/task.go:226-241
-func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
-    updates := map[string]interface{}{
-        "status":           status,
-        "stage":            stage,
-        "stage_started_at": &now,
-        "error_msg":        "",
-        "next_retry_at":    nil,
-    }
-    tx := r.db.Model(&model.VideoTask{}).
-        Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?",
-            id, model.TaskStatusFailed, now).
-        Updates(updates)
-    // ...
-    return tx.RowsAffected > 0, nil
-}
+claimed, err := repos.ClaimRetryDispatch(repository.TaskDispatchClaimRequest{
+    TaskID: task.ID,
+    JobType: task.LastJobType,
+    ExpectedVersion: task.LeaseVersion,
+    Now: now,
+    LeaseUntil: now.Add(dispatchLease),
+    Token: claimToken,
+})
 ```
 
-与 `UpdateStatusIf` 类似的 CAS 模式：WHERE 子句包含 `status = Failed AND next_retry_at <= now`，只有满足条件时才更新。多个调度实例并发执行时，只有一个能成功将 `RowsAffected` 变为 1，其余返回 false 后跳过。
+候选任务来自一次普通扫描，真正的所有权由事务性 claim 决定。Repository 会检查 `lease_version`、终态、job retry 上限和现有 lease，再把同一个 token/version 写入 `video_tasks` 与 `task_jobs`。并发实例使用同一旧 version 时，只有一个能提交有效 claim。
+
+Kafka producer 返回错误后，`RestoreRetryDispatch` 还会校验 task/job 都仍属于该 token；如果 lease 已被新实例接管，它返回 `restored=false`，不会把新 owner 状态回滚。进程直接崩溃时则依靠 `lease_expires_at` 被后续扫描恢复。
 
 ---
 

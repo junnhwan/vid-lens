@@ -12,16 +12,16 @@ function makeFile(size, name = 'demo.mp4') {
   const calls = []
   const progress = []
   const api = {
-    checkUpload: async (md5) => {
-      calls.push(['check', md5])
-      return { status: 'uploading', uploaded: [1] }
+    createUploadSession: async (manifest) => {
+      calls.push(['create', manifest])
+      return { session_id: 'session-1', status: 'active', uploaded: [1], asset_available: false }
     },
-    uploadChunk: async (md5, index, chunk, onProgress) => {
-      calls.push(['chunk', md5, index, chunk.size])
+    uploadSessionChunk: async (sessionID, index, chunk, onProgress) => {
+      calls.push(['chunk', sessionID, index, chunk.size])
       onProgress?.({ loaded: chunk.size, total: chunk.size })
     },
-    mergeChunks: async (...args) => {
-      calls.push(['merge', ...args])
+    completeUploadSession: async (sessionID) => {
+      calls.push(['complete', sessionID])
       return { task_id: 9 }
     },
   }
@@ -34,19 +34,22 @@ function makeFile(size, name = 'demo.mp4') {
     onProgress: (event) => progress.push(event),
   })
 
+  assert.deepEqual(calls[0], ['create', {
+    filename: 'demo.mp4',
+    file_size: 11,
+    chunk_size: 5,
+    total_chunks: 3,
+    expected_md5: '0123456789abcdef0123456789abcdef',
+  }], 'the immutable upload manifest should create or resume the session')
   assert.deepEqual(
     calls.filter(([type]) => type === 'chunk'),
     [
-      ['chunk', '0123456789abcdef0123456789abcdef', 0, 5],
-      ['chunk', '0123456789abcdef0123456789abcdef', 2, 1],
+      ['chunk', 'session-1', 0, 5],
+      ['chunk', 'session-1', 2, 1],
     ],
-    'already uploaded chunks should be skipped while preserving chunk boundaries',
+    'PostgreSQL-recorded chunks should be skipped while preserving chunk boundaries',
   )
-  assert.deepEqual(
-    calls.at(-1),
-    ['merge', '0123456789abcdef0123456789abcdef', 'demo.mp4', 3, 11, 5],
-    'all chunks should be merged with the file identity and total chunk count',
-  )
+  assert.deepEqual(calls.at(-1), ['complete', 'session-1'])
   assert.deepEqual(result, { task_id: 9 })
   assert.equal(progress.at(-1).stage, 'completed')
   assert.equal(progress.at(-1).percent, 100)
@@ -57,10 +60,10 @@ function makeFile(size, name = 'demo.mp4') {
 {
   const calls = []
   const api = {
-    checkUpload: async () => ({ status: 'completed', uploaded: [] }),
-    uploadChunk: async () => calls.push('unexpected chunk'),
-    mergeChunks: async (...args) => {
-      calls.push(['merge', ...args])
+    createUploadSession: async () => ({ session_id: 'session-reuse', status: 'active', uploaded: [], asset_available: true }),
+    uploadSessionChunk: async () => calls.push('unexpected chunk'),
+    completeUploadSession: async (sessionID) => {
+      calls.push(['complete', sessionID])
       return { task_id: 10 }
     },
   }
@@ -72,16 +75,16 @@ function makeFile(size, name = 'demo.mp4') {
     calculateMD5: async () => 'abcdef0123456789abcdef0123456789',
   })
 
-  assert.deepEqual(calls, [['merge', 'abcdef0123456789abcdef0123456789', 'existing.mp4', 1, 3, 5]])
+  assert.deepEqual(calls, [['complete', 'session-reuse']], 'a reusable asset should complete without uploading bytes')
 }
 
 {
   const api = {
-    checkUpload: async () => ({ status: 'new', uploaded: [] }),
-    uploadChunk: async (_md5, index) => {
+    createUploadSession: async () => ({ session_id: 'session-fail', status: 'active', uploaded: [], asset_available: false }),
+    uploadSessionChunk: async (_sessionID, index) => {
       if (index === 1) throw new Error('Network Error')
     },
-    mergeChunks: async () => assert.fail('merge must not run after a failed chunk'),
+    completeUploadSession: async () => assert.fail('completion must not run after a failed chunk'),
   }
 
   await assert.rejects(
@@ -111,34 +114,34 @@ function makeFile(size, name = 'demo.mp4') {
 }
 
 {
-  let checkedMD5 = ''
+  let manifest
   const api = {
-    checkUpload: async (md5) => {
-      checkedMD5 = md5
-      return { status: 'new', uploaded: [] }
+    createUploadSession: async (value) => {
+      manifest = value
+      return { session_id: 'session-md5', status: 'active', uploaded: [], asset_available: false }
     },
-    uploadChunk: async () => {},
-    mergeChunks: async () => ({ task_id: 11 }),
+    uploadSessionChunk: async () => {},
+    completeUploadSession: async () => ({ task_id: 11 }),
   }
   const file = new Blob([new TextEncoder().encode('hello world')], { type: 'video/mp4' })
   Object.defineProperty(file, 'name', { value: 'default-md5.mp4' })
 
   await uploadFileInChunks({ file, api, chunkSize: 4 })
-  assert.equal(checkedMD5, '5eb63bbbe01eeed093cb22bb8f5acdc3', 'the production flow should use incremental MD5 by default')
+  assert.equal(manifest.expected_md5, '5eb63bbbe01eeed093cb22bb8f5acdc3', 'the production flow should use incremental MD5 by default')
 }
 
 {
   const progress = []
   let attempts = 0
   const api = {
-    checkUpload: async () => ({ status: 'uploading', uploaded: [] }),
-    uploadChunk: async (_md5, _index, chunk, onProgress) => {
+    createUploadSession: async () => ({ session_id: 'session-retry', status: 'active', uploaded: [], asset_available: false }),
+    uploadSessionChunk: async (_sessionID, _index, chunk, onProgress) => {
       attempts += 1
-      if (attempts === 1) throw Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { message: '请选择分片文件' } } })
+      if (attempts === 1) throw Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { message: '分片暂时上传失败' } } })
       onProgress?.({ loaded: Math.ceil(chunk.size / 2), total: chunk.size })
       onProgress?.({ loaded: chunk.size, total: chunk.size })
     },
-    mergeChunks: async () => ({ task_id: 12 }),
+    completeUploadSession: async () => ({ task_id: 12 }),
   }
 
   const result = await uploadFileInChunks({
@@ -160,8 +163,8 @@ function makeFile(size, name = 'demo.mp4') {
 
 {
   const { formatUploadError } = await import('../src/chunkedUpload.js')
-  const error = { response: { status: 400, data: { message: '请选择分片文件' } }, message: 'Request failed with status code 400' }
-  assert.match(formatUploadError(error), /请选择分片文件/)
+  const error = { response: { status: 400, data: { message: '分片内容不能为空' } }, message: 'Request failed with status code 400' }
+  assert.match(formatUploadError(error), /分片内容不能为空/)
 }
 
 {
@@ -178,7 +181,7 @@ function makeFile(size, name = 'demo.mp4') {
 
 {
   const { CHUNK_SIZE } = await import('../src/chunkedUpload.js')
-  assert.equal(CHUNK_SIZE, 5 * 1024 * 1024, 'MinIO compose requires every non-final source chunk to be at least 5 MiB')
+  assert.equal(CHUNK_SIZE, 5 * 1024 * 1024, 'the default keeps chunk counts reasonable for large video files')
 }
 
 {
@@ -186,8 +189,8 @@ function makeFile(size, name = 'demo.mp4') {
   let maxActive = 0
   const indexes = []
   const api = {
-    checkUpload: async () => ({ status: 'new', uploaded: [] }),
-    uploadChunk: async (_md5, index, chunk, onProgress) => {
+    createUploadSession: async () => ({ session_id: 'session-concurrency', status: 'active', uploaded: [], asset_available: false }),
+    uploadSessionChunk: async (_sessionID, index, chunk, onProgress) => {
       indexes.push(index)
       active += 1
       maxActive = Math.max(maxActive, active)
@@ -195,7 +198,7 @@ function makeFile(size, name = 'demo.mp4') {
       onProgress?.({ loaded: chunk.size, total: chunk.size })
       active -= 1
     },
-    mergeChunks: async () => ({ task_id: 13 }),
+    completeUploadSession: async () => ({ task_id: 13 }),
   }
 
   await uploadFileInChunks({
@@ -205,21 +208,4 @@ function makeFile(size, name = 'demo.mp4') {
 
   assert.equal(maxActive, 3, 'uploads should use the configured bounded concurrency')
   assert.deepEqual(indexes.sort((a, b) => a - b), [0, 1, 2, 3, 4])
-}
-
-{
-  let checkedArgs
-  let mergeArgs
-  const api = {
-    checkUpload: async (...args) => { checkedArgs = args; return { status: 'new', uploaded: [] } },
-    uploadChunk: async () => {},
-    mergeChunks: async (...args) => { mergeArgs = args; return { task_id: 14 } },
-  }
-  const file = makeFile(11)
-  await uploadFileInChunks({
-    file, api, chunkSize: 5,
-    calculateMD5: async () => '33333333333333333333333333333333',
-  })
-  assert.deepEqual(checkedArgs, ['33333333333333333333333333333333', 11, 5, 3], 'resume lookup must include the upload specification')
-  assert.deepEqual(mergeArgs, ['33333333333333333333333333333333', file.name, 3, 11, 5], 'merge must include expected size and chunk size')
 }

@@ -120,7 +120,10 @@ func TestVideoAgentToolCompareSegmentsCallsChatClientWithGroups(t *testing.T) {
 func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	chatClient := &scriptedChatClient{responses: []string{"最终回答"}}
 	tools := NewVideoAgentTools(nil, nil, chatClient)
-	citations := []RetrievedChunk{{ChunkID: 10, ChunkIndex: 3, Content: "引用片段"}}
+	citations := []RetrievedChunk{
+		{ChunkID: 10, ChunkIndex: 3, Content: "第一条唯一引用片段"},
+		{ChunkID: 20, ChunkIndex: 7, Content: "第二条唯一引用片段"},
+	}
 
 	result, step, err := tools.BuildCitedAnswer(context.Background(), BuildCitedAnswerInput{
 		Question:     "为什么要校验 owner？",
@@ -133,11 +136,24 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	if result.Answer != "最终回答" {
 		t.Fatalf("answer = %q", result.Answer)
 	}
-	if len(result.Citations) != 1 || result.Citations[0].ChunkID != 10 {
+	if len(result.Citations) != 2 || result.Citations[0].ChunkID != 10 || result.Citations[1].ChunkID != 20 {
 		t.Fatalf("citations = %+v", result.Citations)
 	}
-	if len(chatClient.messages) != 1 || !messagesContain(chatClient.messages[0], "引用片段") {
+	if len(chatClient.messages) != 1 || len(chatClient.messages[0]) < 2 {
 		t.Fatalf("chat messages = %+v", chatClient.messages)
+	}
+	for _, want := range []string{"内部标记", "[C1][C2]", "不要写成 [C1, C2]", "展示前隐藏"} {
+		if !strings.Contains(chatClient.messages[0][0].Content, want) {
+			t.Fatalf("agent instruction prompt = %q, missing %q", chatClient.messages[0][0].Content, want)
+		}
+	}
+	for _, wantMapping := range []string{
+		"[C1] (chunk 3) 第一条唯一引用片段",
+		"[C2] (chunk 7) 第二条唯一引用片段",
+	} {
+		if !strings.Contains(chatClient.messages[0][1].Content, wantMapping) {
+			t.Fatalf("agent evidence prompt = %q, missing concrete mapping %q", chatClient.messages[0][1].Content, wantMapping)
+		}
 	}
 	if step.Tool != VideoAgentToolBuildCitedAnswer || step.OutputRef == "" {
 		t.Fatalf("step = %+v", step)

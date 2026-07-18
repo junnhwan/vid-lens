@@ -145,32 +145,6 @@ func (s *leaseCallbackStrategy) Summarize(context.Context, string) (string, erro
 	return s.summarize()
 }
 
-func newPhase0LeasedTask(t *testing.T, userID int64, md5, jobType, stage string) (*model.VideoTask, context.Context, *time.Time) {
-	t.Helper()
-	repos := newConsumerTestRepositories(t)
-	now := time.Now()
-	leaseUntil := now.Add(time.Minute)
-	task := &model.VideoTask{
-		UserID: userID, FileMD5: md5, Filename: "lease-fence.mp4",
-		Status: model.TaskStatusRunning, Stage: stage, LastJobType: jobType,
-		ProcessingToken: "old-worker", LeaseKind: model.TaskLeaseKindProcessing,
-		LeaseExpiresAt: &leaseUntil, LeaseVersion: 1,
-	}
-	if err := repos.Task.Create(task); err != nil {
-		t.Fatal(err)
-	}
-	if err := repos.TaskJob.UpsertDispatching(task, jobType, model.TaskStatusRunning, stage); err != nil {
-		t.Fatal(err)
-	}
-	leaseNow := now
-	ctx := withProcessingLeaseOwner(context.Background(), &processingLeaseOwner{
-		repos: repos, taskID: task.ID, jobType: jobType, token: "old-worker", now: func() time.Time { return leaseNow },
-	})
-	// Return the mutable clock through a pointer so a provider callback can expire
-	// the old worker while its remote call is in flight.
-	return task, ctx, &leaseNow
-}
-
 func TestLostLeaseAfterSuccessfulASRDoesNotOverwriteNewChunkResult(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Now()

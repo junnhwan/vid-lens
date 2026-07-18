@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -62,19 +66,31 @@ func retryBudgetIDFromContext(ctx context.Context) string {
 
 type claimTokenContextKey struct{}
 
-func contextWithClaimToken(ctx context.Context, token string) context.Context {
+// ContextWithClaimToken carries the database-owned dispatch lease into the
+// Kafka payload. HTTP initial dispatches and RetryScheduler redispatches must
+// use the same contract so consumers can atomically hand it off to a processing
+// lease.
+func ContextWithClaimToken(ctx context.Context, token string) context.Context {
 	if token == "" {
 		return ctx
 	}
 	return context.WithValue(ctx, claimTokenContextKey{}, token)
 }
 
-func claimTokenFromContext(ctx context.Context) string {
+func ClaimTokenFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
 	token, _ := ctx.Value(claimTokenContextKey{}).(string)
 	return token
+}
+
+func contextWithClaimToken(ctx context.Context, token string) context.Context {
+	return ContextWithClaimToken(ctx, token)
+}
+
+func claimTokenFromContext(ctx context.Context) string {
+	return ClaimTokenFromContext(ctx)
 }
 
 // Producer Kafka 生产者
@@ -217,27 +233,107 @@ func closeWriter(w *kafka.Writer) error {
 	return w.Close()
 }
 
-// CreateTopics 确保 Topic 存在（首次启动时调用）
+// CreateTopics ensures the configured topics exist. kafka-go treats an existing
+// topic as an idempotent success; connectivity, authorization, and invalid
+// configuration errors are returned to the caller instead of being hidden.
 func CreateTopics(brokers []string, topics []string) error {
-	conn, err := kafka.DialLeader(context.Background(), "tcp", brokers[0], topics[0], 0)
-	if err != nil {
-		// Topic 可能已存在，忽略错误
-		return nil
+	if len(brokers) == 0 {
+		return fmt.Errorf("kafka brokers must not be empty")
 	}
-	conn.Close()
+	broker := strings.TrimSpace(brokers[0])
+	if broker == "" {
+		return fmt.Errorf("kafka broker must not be empty")
+	}
+	if len(topics) == 0 {
+		return fmt.Errorf("kafka topics must not be empty")
+	}
 
-	for _, topic := range topics {
-		topicConfig := kafka.TopicConfig{
+	seen := make(map[string]struct{}, len(topics))
+	configs := make([]kafka.TopicConfig, 0, len(topics))
+	for _, rawTopic := range topics {
+		topic := strings.TrimSpace(rawTopic)
+		if topic == "" {
+			return fmt.Errorf("kafka topic must not be empty")
+		}
+		if _, exists := seen[topic]; exists {
+			continue
+		}
+		seen[topic] = struct{}{}
+		configs = append(configs, kafka.TopicConfig{
 			Topic:             topic,
-			NumPartitions:     4, // 4 个分区，支持并行消费
-			ReplicationFactor: 1, // 单机部署只有 1 个 broker
-		}
-		// 尝试创建，已存在会报错但不影响
-		conn, err := kafka.Dial("tcp", brokers[0])
-		if err == nil {
-			conn.CreateTopics(topicConfig)
-			conn.Close()
-		}
+			NumPartitions:     4,
+			ReplicationFactor: 1,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	bootstrap, err := kafka.DialContext(ctx, "tcp", broker)
+	if err != nil {
+		return fmt.Errorf("connect kafka broker %s: %w", broker, err)
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = bootstrap.SetDeadline(deadline)
+	}
+	controller, err := bootstrap.Controller()
+	closeErr := bootstrap.Close()
+	if err != nil {
+		return fmt.Errorf("discover kafka controller: %w", err)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close kafka bootstrap connection: %w", closeErr)
+	}
+
+	controllerAddress := net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port))
+	conn, err := kafka.DialContext(ctx, "tcp", controllerAddress)
+	if err != nil {
+		return fmt.Errorf("connect kafka controller %s: %w", controllerAddress, err)
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	if err := conn.CreateTopics(configs...); err != nil {
+		return fmt.Errorf("create kafka topics: %w", err)
 	}
 	return nil
+}
+
+// PingBroker checks that at least one configured Kafka broker accepts a TCP
+// connection. It deliberately does not create topics or perform any writes so
+// it is safe to use from a readiness probe.
+func PingBroker(ctx context.Context, brokers []string) error {
+	if len(brokers) == 0 {
+		return fmt.Errorf("kafka brokers must not be empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var lastErr error
+	for _, rawBroker := range brokers {
+		broker := strings.TrimSpace(rawBroker)
+		if broker == "" {
+			lastErr = fmt.Errorf("kafka broker must not be empty")
+			continue
+		}
+
+		conn, err := kafka.DialContext(ctx, "tcp", broker)
+		if err != nil {
+			lastErr = fmt.Errorf("connect kafka broker %s: %w", broker, err)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
+		}
+		if err := conn.Close(); err != nil {
+			lastErr = fmt.Errorf("close kafka broker connection: %w", err)
+			continue
+		}
+		return nil
+	}
+	if lastErr == nil {
+		return fmt.Errorf("kafka brokers must not be empty")
+	}
+	return lastErr
 }

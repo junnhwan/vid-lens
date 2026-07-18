@@ -11,7 +11,7 @@ import (
 )
 
 // EvidenceSnapshot is the live evidence state used by one strict evaluation run.
-// It is built from the transcription corpus, MySQL chunk rows, and Milvus rows.
+// It is built from the transcription corpus, relational chunk rows, and vector projection rows.
 type EvidenceSnapshot struct {
 	SchemaVersion   string                `json:"schema_version"`
 	ChunkerStrategy string                `json:"chunker_strategy"`
@@ -203,7 +203,7 @@ func validateEvidenceSnapshot(dataset Dataset, snapshot EvidenceSnapshot) error 
 	}
 	for evidenceID := range chunksByEvidence {
 		if !seenVectors[evidenceID] {
-			return fmt.Errorf("vector manifest missing MySQL evidence %q", evidenceID)
+			return fmt.Errorf("vector manifest missing relational source evidence %q", evidenceID)
 		}
 	}
 

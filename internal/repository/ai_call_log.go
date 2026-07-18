@@ -45,21 +45,33 @@ func (r *AICallLogRepository) FindDailyUsage(userID int64, date string) (*model.
 
 func (r *AICallLogRepository) IncrementDailyUsage(userID int64, date, kind, status string, inputChars, outputChars, asrSeconds int) error {
 	usage := model.UserUsageDaily{UserID: userID, Date: date, InputChars: inputChars, OutputChars: outputChars}
-	updates := map[string]interface{}{"input_chars": gorm.Expr("input_chars + ?", inputChars), "output_chars": gorm.Expr("output_chars + ?", outputChars)}
+	updates := map[string]interface{}{
+		"input_chars":  qualifiedColumnIncrement("input_chars", inputChars),
+		"output_chars": qualifiedColumnIncrement("output_chars", outputChars),
+	}
 	switch kind {
 	case model.AICallKindASR:
 		usage.ASRRequests, usage.ASRSeconds = 1, asrSeconds
-		updates["asr_requests"], updates["asr_seconds"] = gorm.Expr("asr_requests + ?", 1), gorm.Expr("asr_seconds + ?", asrSeconds)
+		updates["asr_requests"] = qualifiedColumnIncrement("asr_requests", 1)
+		updates["asr_seconds"] = qualifiedColumnIncrement("asr_seconds", asrSeconds)
 	case model.AICallKindLLM:
 		usage.LLMRequests = 1
-		updates["llm_requests"] = gorm.Expr("llm_requests + ?", 1)
+		updates["llm_requests"] = qualifiedColumnIncrement("llm_requests", 1)
 	case model.AICallKindEmbedding:
 		usage.EmbeddingRequests = 1
-		updates["embedding_requests"] = gorm.Expr("embedding_requests + ?", 1)
+		updates["embedding_requests"] = qualifiedColumnIncrement("embedding_requests", 1)
 	}
 	if status == model.AICallStatusFailed {
 		usage.FailedRequests = 1
-		updates["failed_requests"] = gorm.Expr("failed_requests + ?", 1)
+		updates["failed_requests"] = qualifiedColumnIncrement("failed_requests", 1)
 	}
 	return r.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "date"}}, DoUpdates: clause.Assignments(updates)}).Create(&usage).Error
+}
+
+// qualifiedColumnIncrement names the persisted target row explicitly. PostgreSQL
+// exposes both the target row and EXCLUDED row inside ON CONFLICT, so an
+// unqualified column name is ambiguous; GORM renders this form portably for the
+// PostgreSQL runtime and SQLite unit-test dialect.
+func qualifiedColumnIncrement(column string, delta int) clause.Expr {
+	return gorm.Expr("? + ?", clause.Column{Table: clause.CurrentTable, Name: column}, delta)
 }

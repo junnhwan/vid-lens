@@ -1,0 +1,67 @@
+# Active-data migration smoke set.
+#
+# This file is intentionally separate from docs/eval/rag-quant-cases.yaml:
+# the older file contains historical cases whose tasks may have been deleted.
+# Every case here must reference a currently existing task with MySQL chunks.
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which video platform name appears in the AI coding discussion?"
+  expected_chunk_keywords:
+    - "Bilibili"
+    - "AI"
+  expected_answer_points:
+    - "The transcript mentions Bilibili in an AI coding discussion."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which editor name appears near Bilibili?"
+  expected_chunk_keywords:
+    - "VS Code"
+    - "Bilibili"
+  expected_answer_points:
+    - "VS Code appears near Bilibili."
+
+- task_id: 2
+  task_hint: "AI coding talk transcript sample with noisy ASR; English identifiers retained"
+  category: keyword_exact
+  question: "Which abstraction phrase appears in the noisy AI transcript?"
+  expected_chunk_keywords:
+    - "leak"
+    - "leak abstraction"
+  expected_answer_points:
+    - "The transcript includes leak abstraction."
+
+- task_id: 14
+  task_hint: "Active Claude Code talk task; English identifiers retained"
+  category: keyword_exact
+  question: "What tools and workflows came before Claude Code, including ChatGPT copy-paste and GitHub Copilot?"
+  expected_chunk_keywords:
+    - "Claude Code"
+    - "ChatGPT"
+    - "GitHub Copilot"
+  expected_answer_points:
+    - "The discussion mentions ChatGPT copy-paste and GitHub Copilot before Claude Code."
+
+- task_id: 14
+  task_hint: "Active Claude Code talk task; English identifiers retained"
+  category: direct_fact
+  question: "How did Cursor's codebase indexing differ from Claude Code's agentic search approach?"
+  expected_chunk_keywords:
+    - "Cursor"
+    - "indexing"
+    - "agentic search"
+  expected_answer_points:
+    - "Cursor is described as indexing the codebase while Claude Code uses an agentic search approach."
+
+- task_id: 14
+  task_hint: "Active Claude Code talk task; English identifiers retained"
+  category: direct_fact
+  question: "Why did Mario decide to write his own coding agent or harness?"
+  expected_chunk_keywords:
+    - "hate"
+    - "coding agents"
+    - "write one myself"
+  expected_answer_points:
+    - "He disliked existing coding agents or harnesses and decided to write one himself."

@@ -165,14 +165,6 @@ func joinChunkWindowPreservingAnchor(chunks []model.VideoChunk, anchorIndex, max
 	return strings.Join(parts, "\n"), anchor, start, end, true, true
 }
 
-func truncateRunes(text string, maxRunes int) (string, bool) {
-	runes := []rune(text)
-	if maxRunes <= 0 || len(runes) <= maxRunes {
-		return text, false
-	}
-	return string(runes[:maxRunes]), true
-}
-
 func appendFallback(fallbacks []string, fallback string) []string {
 	for _, existing := range fallbacks {
 		if existing == fallback {

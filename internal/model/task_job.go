@@ -17,7 +17,7 @@ type TaskJob struct {
 	TaskID                int64      `gorm:"not null;uniqueIndex:uk_task_jobs_task_type;index" json:"task_id"`
 	UserID                int64      `gorm:"not null;index" json:"user_id"`
 	JobType               string     `gorm:"type:varchar(30);not null;uniqueIndex:uk_task_jobs_task_type;index" json:"job_type"`
-	Status                int8       `gorm:"type:tinyint;default:0;index" json:"status"`
+	Status                int8       `gorm:"type:smallint;default:0;index" json:"status"`
 	Stage                 string     `gorm:"type:varchar(50);default:'none';index" json:"stage"`
 	TraceID               string     `gorm:"type:varchar(64);index" json:"trace_id"`
 	RetryCount            int        `gorm:"default:0" json:"retry_count"`
@@ -50,9 +50,13 @@ type KafkaMessageFailure struct {
 	Topic         string    `gorm:"type:varchar(255);not null;uniqueIndex:uk_kafka_message_failures_offset" json:"topic"`
 	Partition     int       `gorm:"not null;uniqueIndex:uk_kafka_message_failures_offset" json:"partition"`
 	MessageOffset int64     `gorm:"not null;uniqueIndex:uk_kafka_message_failures_offset" json:"message_offset"`
-	MessageKey    []byte    `gorm:"type:blob" json:"message_key"`
-	Payload       []byte    `gorm:"type:blob" json:"payload"`
+	MessageKey    []byte    `json:"message_key"`
+	Payload       []byte    `json:"payload"`
 	ErrorMessage  string    `gorm:"type:varchar(1000);not null" json:"error_message"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (KafkaMessageFailure) TableName() string {
+	return "kafka_message_failures"
 }

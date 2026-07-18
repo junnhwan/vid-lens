@@ -136,7 +136,7 @@
 
 - 题目：部署网络边界。
 - 面试官想听什么：代理应该局部作用，避免污染数据库/中间件/AI 访问。
-- 简答：YouTube 下载可能需要代理，但 MySQL、Redis、MinIO、Milvus 和 AI API 不应该被同一个代理影响。VidLens 把 `tools.proxy_url` 只传给 yt-dlp，降低部署环境变量对其他依赖的副作用。
+- 简答：YouTube 下载可能需要代理，但 PostgreSQL、Redis、MinIO 和 AI API 不应该被同一个代理影响。VidLens 把 `tools.proxy_url` 只传给 yt-dlp，降低部署环境变量对其他依赖的副作用。
 - 深答：
 
   <details>
@@ -144,7 +144,7 @@
 
   服务器上本地 shell 和 systemd 服务不是同一个环境。shell 里可能有代理变量，systemd service 默认没有；即使设置全局代理，也可能让数据库、对象存储或内网服务访问异常。更稳的方式是把代理作为工具配置，只在 yt-dlp 命令参数里生效。
 
-  这也方便排障：如果 YouTube 失败，就检查 yt-dlp + proxy；如果 Milvus 或 MySQL 出问题，就不会被全局 HTTP_PROXY 干扰。面试里可以说这是部署隔离意识，而不是简单“加个代理”。
+  这也方便排障：如果 YouTube 失败，就检查 yt-dlp + proxy；如果 PostgreSQL 或 MinIO 出问题，也不应被全局 HTTP_PROXY 干扰。面试里可以说这是部署隔离意识，而不是简单“加个代理”。
   </details>
 
 - 延伸追问：
@@ -155,7 +155,7 @@
   - `internal/pkg/ytdlp/ytdlp.go:57` yt-dlp 命令支持 proxy。
   - `README.md:148` proxy 只传给 yt-dlp。
   - `docs/troubleshooting-and-interview-notes.md:1096` YouTube 代理排查回答。
-  - `docs/troubleshooting-and-interview-notes.md:1097` 说明不影响 DB/MinIO/Milvus/AI。
+  - `docs/troubleshooting-and-interview-notes.md:1097` 说明代理只应作用于 yt-dlp，不影响 DB/MinIO/AI。
 - 当前边界：当前没有按用户配置代理，也没有代理可用性的自动探测。
 
 ### 7. 为什么限制 720p，不让 yt-dlp 默认拉最高画质？
@@ -184,17 +184,17 @@
   - `docs/troubleshooting-and-interview-notes.md:1108` 720p 对业务足够。
 - 当前边界：当前还没有按视频时长、文件大小和用户等级做动态策略。
 
-### 8. Milvus 端口监听为什么不代表部署 ready？
+### 8. 第一版 Milvus 端口监听为什么不代表部署 ready？
 
-- 题目：中间件 readiness。
+- 题目：第一版向量后端的中间件 readiness 故障复盘。
 - 面试官想听什么：容器 running 和端口 open 不是服务可用。
-- 简答：Milvus Standalone 依赖 Proxy、DataCoord、QueryCoord、IndexNode、etcd 和对象存储。端口监听只说明进程开了 socket，内部组件或 MinIO 凭证错误仍会让客户端连接失败。
+- 简答：第一版使用 Milvus Standalone 时，它依赖 Proxy、DataCoord、QueryCoord、IndexNode、etcd 和对象存储。端口监听只说明进程开了 socket，内部组件或 MinIO 凭证错误仍会让客户端连接失败。
 - 深答：
 
   <details>
   <summary>展开深答</summary>
 
-  部署时遇到过 Milvus 容器 running、19530 端口也监听，但后端初始化仍提示 Proxy not ready。继续看 Milvus 日志，发现它访问 MinIO 的 access key 不对。根因是 compose 环境变量名和 Milvus 2.4.15 实际读取的变量名不一致，配置被忽略。
+  第一版部署时遇到过 Milvus 容器 running、19530 端口也监听，但后端初始化仍提示 Proxy not ready。继续看 Milvus 日志，发现它访问 MinIO 的 access key 不对。根因是 compose 环境变量名和 Milvus 2.4.15 实际读取的变量名不一致，配置被忽略。
 
   修复时没有重建全部中间件，而是只修 Milvus 配置、重建 Milvus 容器、等待日志稳定后重启后端。这段经历适合面试里讲：部署验证不能只看端口，要看依赖日志、readiness 和应用侧初始化结果。
   </details>
@@ -204,9 +204,9 @@
   - 后端连不上 Milvus 是否应该启动失败？
   - readiness 应该怎么做？
 - 项目证据：
-  - `cmd/server/main.go:135` Milvus 初始化使用超时。
-  - `cmd/server/main.go:147` Milvus 失败时降级继续启动。
+  - `internal/vector/milvus.go` 保留第一版 Milvus adapter 和连接逻辑。
+  - `internal/vector/factory.go` 统一 pgvector 与观察期 Milvus rollback adapter 的构造边界。
   - `docs/troubleshooting-and-interview-notes.md:781` Milvus MinIO 凭证变量根因。
   - `docs/troubleshooting-and-interview-notes.md:830` Milvus 部署口语化回答。
-- 当前边界：当前是单机 Milvus Standalone，没有生产级 Milvus 集群运维和独立 healthcheck。
+- 当前边界：当前正式向量后端是 PostgreSQL + pgvector；Milvus 只在迁移观察期作为显式 rollback profile 保留，这段内容只能作为第一版部署故障复盘。
 

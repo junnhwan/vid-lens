@@ -76,6 +76,31 @@ func (s *fakeVectorStore) UpsertChunks(_ context.Context, vectors []RAGVector) e
 	return nil
 }
 
+type fakeReplacingVectorStore struct {
+	*fakeVectorStore
+	replacements []RAGVector
+	replaceCalls []struct {
+		userID int64
+		taskID int64
+		model  string
+	}
+	replaceErr error
+}
+
+func (s *fakeReplacingVectorStore) ReplaceTaskChunks(_ context.Context, userID, taskID int64, embeddingModel string, vectors []RAGVector) error {
+	s.events = append(s.events, "replace")
+	s.replaceCalls = append(s.replaceCalls, struct {
+		userID int64
+		taskID int64
+		model  string
+	}{userID: userID, taskID: taskID, model: embeddingModel})
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+	s.replacements = append([]RAGVector(nil), vectors...)
+	return nil
+}
+
 func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Filename: "video.mp4", FileURL: "videos/a.mp4"}
@@ -93,10 +118,9 @@ func TestRAGIndexServiceBuildTaskIndexCreatesChunksAndVectors(t *testing.T) {
 	embedding := &fakeEmbeddingClient{dim: 3}
 	store := &fakeVectorStore{}
 	svc := NewRAGIndexService(repos, store, RAGIndexConfig{
-		ChunkSize:      10,
-		ChunkOverlap:   2,
-		EmbeddingDim:   3,
-		CollectionName: "vidlens_video_chunks",
+		ChunkSize:    10,
+		ChunkOverlap: 2,
+		EmbeddingDim: 3,
 	})
 
 	result, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, embedding, ai.Profile{
@@ -260,7 +284,7 @@ func TestRAGIndexServiceDeletesOldVectorsBeforeReplacingChunks(t *testing.T) {
 	}
 }
 
-func TestRAGIndexServiceStopsBeforeReplacingChunksWhenOldVectorDeleteFails(t *testing.T) {
+func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFails(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "57575757575757575757575757575757", Filename: "video.mp4", FileURL: "videos/rebuild-fail.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -291,8 +315,8 @@ func TestRAGIndexServiceStopsBeforeReplacingChunksWhenOldVectorDeleteFails(t *te
 	if listErr != nil {
 		t.Fatalf("list chunks: %v", listErr)
 	}
-	if len(chunks) != 1 || chunks[0].Content != "old stale chunk" {
-		t.Fatalf("old chunks should remain when vector delete fails: %+v", chunks)
+	if len(chunks) == 0 || chunks[0].Content == "old stale chunk" {
+		t.Fatalf("relational source should be replaced before the fallback projection failure: %+v", chunks)
 	}
 	index, findErr := repos.RAGIndex.FindByTaskAndModel(7, task.ID, "text-embedding-3-small")
 	if findErr != nil {
@@ -300,6 +324,71 @@ func TestRAGIndexServiceStopsBeforeReplacingChunksWhenOldVectorDeleteFails(t *te
 	}
 	if index == nil || index.Status != model.RAGIndexStatusFailed || index.LastError == "" {
 		t.Fatalf("rag index should record delete failure: %+v", index)
+	}
+}
+
+func TestRAGIndexServiceUsesAtomicVectorReplacerWhenAvailable(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "54545454545454545454545454545454", Filename: "video.mp4", FileURL: "videos/atomic-replace.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "atomic replacement content", Words: 3}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+
+	store := &fakeReplacingVectorStore{fakeVectorStore: &fakeVectorStore{}}
+	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 100, EmbeddingDim: 3})
+	if _, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		EmbeddingDim:   3,
+	}); err != nil {
+		t.Fatalf("BuildTaskIndex() error = %v", err)
+	}
+
+	if len(store.events) != 1 || store.events[0] != "replace" {
+		t.Fatalf("events = %#v, want only atomic replace", store.events)
+	}
+	if len(store.deleteCalls) != 0 || len(store.upserts) != 0 {
+		t.Fatalf("fallback path was called: deletes=%+v upserts=%+v", store.deleteCalls, store.upserts)
+	}
+	if len(store.replaceCalls) != 1 || store.replaceCalls[0].userID != 7 || store.replaceCalls[0].taskID != task.ID || store.replaceCalls[0].model != "text-embedding-3-small" {
+		t.Fatalf("replace calls = %+v", store.replaceCalls)
+	}
+	if len(store.replacements) != 1 || store.replacements[0].ChunkID <= 0 {
+		t.Fatalf("replacement vectors must reference persisted relational chunks: %+v", store.replacements)
+	}
+}
+
+func TestRAGIndexServiceRecordsAtomicReplacementFailure(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "53535353535353535353535353535353", Filename: "video.mp4", FileURL: "videos/atomic-replace-fail.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "atomic replacement failure", Words: 3}); err != nil {
+		t.Fatalf("upsert transcription: %v", err)
+	}
+
+	store := &fakeReplacingVectorStore{fakeVectorStore: &fakeVectorStore{}, replaceErr: fmt.Errorf("pgvector replace failed")}
+	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 100, EmbeddingDim: 3})
+	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
+		EmbeddingModel: "text-embedding-3-small",
+		EmbeddingDim:   3,
+	})
+	if err == nil {
+		t.Fatal("BuildTaskIndex() succeeded, want replacement failure")
+	}
+	if len(store.events) != 1 || store.events[0] != "replace" {
+		t.Fatalf("events = %#v, want only atomic replace", store.events)
+	}
+
+	index, findErr := repos.RAGIndex.FindByTaskAndModel(7, task.ID, "text-embedding-3-small")
+	if findErr != nil {
+		t.Fatalf("find rag index: %v", findErr)
+	}
+	if index == nil || index.Status != model.RAGIndexStatusFailed || index.LastError == "" {
+		t.Fatalf("rag index should record replacement failure: %+v", index)
 	}
 }
 
@@ -410,7 +499,7 @@ func TestRAGIndexServiceGetTaskIndexStatusUsesStoredChunks(t *testing.T) {
 		t.Fatalf("replace chunks: %v", err)
 	}
 
-	svc := NewRAGIndexService(repos, nil, RAGIndexConfig{CollectionName: "vidlens_video_chunks"})
+	svc := NewRAGIndexService(repos, nil, RAGIndexConfig{})
 	status, err := svc.GetTaskIndexStatus(context.Background(), 7, task.ID, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
 		EmbeddingDim:   1536,
@@ -458,7 +547,7 @@ func TestRAGIndexServiceGetTaskIndexStatusUsesRAGIndexState(t *testing.T) {
 		t.Fatalf("replace chunks: %v", err)
 	}
 
-	svc := NewRAGIndexService(repos, nil, RAGIndexConfig{CollectionName: "vidlens_video_chunks"})
+	svc := NewRAGIndexService(repos, nil, RAGIndexConfig{})
 	status, err := svc.GetTaskIndexStatus(context.Background(), 7, task.ID, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
 		EmbeddingDim:   1536,

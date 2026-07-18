@@ -1,650 +1,426 @@
 # VidLens 压测与故障演练指南
 
-> 通过压测验证系统瓶颈，通过故障注入练习排查能力。
-> 每个场景后记录结果，形成面试谈资。
+> 本文只提供**可重复的演练方法和记录模板**，不预填性能结论。没有保存命令、环境和原始结果时，不得把数字写进简历。
+>
+> 当前正式架构是 PostgreSQL + pgvector 单库。MySQL 与 Milvus 只在迁移观察期作为显式回滚 profile 保留，不是默认运行时依赖。
 
----
+## 一、测试原则
 
-## 一、环境准备
+1. 只在本地或隔离测试环境执行，不直接压公网演示实例。
+2. 每次只改变一个变量：并发数、文件大小或故障组件。
+3. 同时记录客户端、Go、PostgreSQL、Redis、Kafka、MinIO 和主机资源。
+4. 先跑小流量 smoke，再逐级增加；出现错误率、磁盘水位或依赖饱和就停止。
+5. 上传测试使用专门测试用户和可删除对象，测试后执行任务清理。
+6. 故障演练前确认 PostgreSQL/MinIO 有备份，不用生产数据做破坏性实验。
 
-### 1.1 安装压测工具
+## 二、环境准备
 
-```bash
-# hey（推荐，Go 单文件，Linux/Windows/macOS 都有）
-# Linux：
-wget https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64 -O hey
-chmod +x hey
-
-# Windows PowerShell（本机压服务器）：
-# 从 https://github.com/rakyll/hey/releases 下载 hey_windows_amd64 放到 PATH 里
-```
-
-### 1.2 准备测试数据
+以下命令使用 Bash、`curl`、`jq`、`hey` 和 Docker Compose。Windows 可以在 Git Bash/WSL 中执行，或者按相同 HTTP 语义改写为 PowerShell。
 
 ```bash
-# 以下变量按你的实际环境修改
 BASE="http://127.0.0.1:8080"
-TOKEN="你的JWT_TOKEN"
+TOKEN="你的测试用户 JWT"
 
-# 准备一个小测试视频（几 MB 就够）
-dd if=/dev/urandom of=/tmp/test-video.mp4 bs=1M count=5
+# 准备 12 MiB 测试文件。随机字节只适合上传链路，不适合 FFmpeg/ASR。
+dd if=/dev/urandom of=/tmp/vidlens-upload.bin bs=1M count=12
 
-# 确认服务健康
-curl -s "$BASE/health" | python3 -m json.tool
+curl -fsS "$BASE/healthz" | jq .
+curl -fsS "$BASE/readyz" | jq .
+docker compose ps
 ```
 
-### 1.3 多终端观察
-
-压测时开 4~5 个终端窗口同步观察，养成习惯：
+### 观察窗口
 
 ```bash
-# 终端 2: Go 服务日志
-docker logs -f <go容器名> --tail 100
+# Go 日志（按实际运行方式选择）
+docker logs -f <vidlens-server-container> --tail 100
 
-# 终端 3: MySQL 状态（每秒刷新）
-watch -n 1 'docker exec vidlens-mysql mysql -uroot -proot -e "
-  SHOW STATUS LIKE \"Threads_connected\";
-  SHOW STATUS LIKE \"Queries\";
-  SHOW PROCESSLIST;
-" 2>/dev/null'
+# PostgreSQL 活跃连接和查询
+docker exec vidlens-postgres psql -U vidlens -d vidlens -c \
+  "select state, count(*) from pg_stat_activity where datname='vidlens' group by state;"
 
-# 终端 4: Redis 状态
-watch -n 1 'docker exec vidlens-redis redis-cli info clients 2>/dev/null | grep connected_clients'
+docker exec vidlens-postgres psql -U vidlens -d vidlens -c \
+  "select pid, state, wait_event_type, wait_event, now()-query_start as age, left(query,120) from pg_stat_activity where datname='vidlens' and state <> 'idle' order by query_start;"
 
-# 终端 5: 容器资源占用
-watch -n 1 'docker stats --no-stream'
+# Redis、Kafka 和容器资源
+docker exec vidlens-redis redis-cli info clients | grep connected_clients
+docker exec vidlens-kafka kafka-consumer-groups \
+  --bootstrap-server localhost:9092 --describe --group vidlens-worker
+docker stats --no-stream
 ```
 
----
-
-## 二、场景 1 — 读接口基线（登录 + 任务列表）
-
-**目标：** 测 Go → MySQL 纯读链路的 QPS 天花板，作为后续所有场景的对比基准。
-
-### 步骤
+如果使用独立 metrics 监听器，再抓取：
 
 ```bash
-# 1. 先登录拿 token
-TOKEN=$(curl -s -X POST "$BASE/api/v1/user/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"testuser","password":"testpass"}' \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+curl -fsS http://127.0.0.1:19090/metrics > /tmp/vidlens-metrics-before.txt
+```
 
-# 2. 低并发热身
+## 三、场景 1：任务列表读基线
+
+**目标：** 测量 Gin → GORM → PostgreSQL 的读链路，并观察深分页差异。
+
+```bash
 ./hey -n 100 -c 10 \
   -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/media/list?page=1&page_size=20"
 
-# 3. 正式压测：200 并发，持续 10 秒
-./hey -n 2000 -c 200 \
+./hey -n 2000 -c 100 \
   -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/media/list?page=1&page_size=20"
 
-# 4. 翻页深水区：page=100 时可能触发慢查询
 ./hey -n 500 -c 50 \
   -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/media/list?page=100&page_size=20"
 ```
 
-### 观察指标
+记录：
 
-| 指标 | 获取方式 | 说明 |
-|------|---------|------|
-| QPS | hey 输出 `Requests/sec` | 纯读链路的天花板 |
-| P50/P99 延迟 | hey 输出 latency 分布 | P99 > 500ms 需关注 |
-| MySQL 连接数 | 终端 3 观察 `Threads_connected` | 接近上限说明连接池要调 |
-| 慢查询 | `docker exec vidlens-mysql mysql -uroot -proot -e "SHOW FULL PROCESSLIST"` | 有 Sending data 超过 1s 的 |
+- QPS、P50、P95、P99 和非 2xx 数；
+- `pg_stat_activity` 连接数和等待事件；
+- 容器 CPU/内存；
+- page=1 与 page=100 的差异。
 
-### 常见瓶颈与修复
+不要看到深分页变慢就直接声称索引失效。先用测试环境的 `EXPLAIN (ANALYZE, BUFFERS)` 验证真实执行计划，再决定联合索引或游标分页。
 
-| 现象 | 可能原因 | 修复方向 |
-|------|---------|---------|
-| QPS 上不去但 CPU 低 | MySQL 连接池太小 | 调大 `SetMaxOpenConns` |
-| page 越大延迟越高 | `OFFSET` 深翻页慢 | 加 `(user_id, created_at)` 联合索引，或改游标翻页 |
-| P99 抖动大 | 连接建立开销 | 开启 `SetMaxIdleConns` 复用连接 |
+## 四、场景 2：普通上传的 asset 复用与任务语义
 
----
-
-## 三、场景 2 — 并发上传同文件（MD5 去重 + 分布式锁）
-
-**目标：** 多个请求同时上传相同 MD5 的文件，验证分布式锁 + 幂等校验是否真的能防止重复入库。
-
-### 步骤
+**目标：** 并发提交同一文件，验证 `video_assets.file_md5` 的物理唯一性和每用户 task 行为。
 
 ```bash
-# 20 个并发上传同一个文件
 for i in $(seq 1 20); do
-  curl -s -o /dev/null -w "%{http_code}\n" \
+  curl -sS -o "/tmp/upload-$i.json" -w "$i %{http_code}\n" \
     -X POST "$BASE/api/v1/media/upload" \
     -H "Authorization: Bearer $TOKEN" \
-    -F "file=@/tmp/test-video.mp4" &
+    -F "file=@/tmp/vidlens-upload.bin" &
 done
 wait
 ```
 
-### 验证
+核验 PostgreSQL：
 
 ```bash
-# 查看 asset 表：同 MD5 应该只有一条记录
-docker exec vidlens-mysql mysql -uroot -proot vidlens \
-  -e "SELECT id, file_md5, file_size, created_at FROM video_assets ORDER BY id DESC LIMIT 25;"
+FILE_MD5=$(md5sum /tmp/vidlens-upload.bin | awk '{print $1}')
 
-# 查看 task 表：同 MD5 应该只有一个 task
-docker exec vidlens-mysql mysql -uroot -proot vidlens \
-  -e "SELECT id, user_id, file_md5, status, created_at FROM video_tasks ORDER BY id DESC LIMIT 25;"
+docker exec vidlens-postgres psql -U vidlens -d vidlens -v md5="$FILE_MD5" -c \
+  "select id,file_md5,file_size,deleted_at from video_assets where file_md5=:'md5';"
+
+docker exec vidlens-postgres psql -U vidlens -d vidlens -v md5="$FILE_MD5" -c \
+  "select id,user_id,asset_id,status,stage,created_at from video_tasks where file_md5=:'md5' order by id;"
 ```
 
-### 判断标准
+判断时分开看两条不变量：
 
-| 结果 | 含义 |
-|------|------|
-| 1 条 asset + 1 条 task，其余返回秒传 | ✅ MD5 去重 + 分布式锁完全生效 |
-| 1 条 asset + 多条 task（状态秒传） | ✅ asset 去重生效，task 幂等可以接受 |
-| 多条 asset 同 MD5 | ❌ 分布式锁有漏洞，查 `redis_lock.go` 日志 |
+- 同一个完整 MD5 的 active asset 应只有一个；
+- task 是否复用取决于当前用户与业务幂等语义，不能把“一个 asset”误写成“全系统只能有一个 task”。
 
-### 进阶：50 并发更暴力
+Redis 锁用于减少昂贵重复工作，PostgreSQL 唯一约束才是 asset 物理兜底。
 
-```bash
-for i in $(seq 1 50); do
-  curl -s -o /dev/null -w "%{http_code} " \
-    -X POST "$BASE/api/v1/media/upload" \
-    -H "Authorization: Bearer $TOKEN" \
-    -F "file=@/tmp/test-video.mp4" &
-done
-wait
-echo ""
-```
+## 五、场景 3：durable upload session 并发与恢复
 
----
+**目标：** 验证 PostgreSQL ledger、MinIO chunk、同片幂等、冲突检测和完成回执。Redis 不应是该场景的事实源。
 
-## 四、场景 3 — 分片上传并发（Redis 记账 + MinIO 存储）
-
-**目标：** 验证 10 个分片并发上传时 Redis Set 的原子性、MinIO 写入的稳定性。
-
-### 步骤
+### 5.1 创建固定 manifest
 
 ```bash
-#!/bin/bash
-# stress-chunk-upload.sh
-FILE_MD5="stress-test-$(date +%s)"
-TOTAL=10
+FILE=/tmp/vidlens-upload.bin
+FILE_SIZE=$(wc -c < "$FILE" | tr -d ' ')
+CHUNK_SIZE=$((5 * 1024 * 1024))
+TOTAL_CHUNKS=$(((FILE_SIZE + CHUNK_SIZE - 1) / CHUNK_SIZE))
+EXPECTED_MD5=$(md5sum "$FILE" | awk '{print $1}')
 
-echo "=== 1. 并发上传 $TOTAL 个分片 ==="
-for i in $(seq 0 $((TOTAL-1))); do
-  dd if=/dev/urandom bs=1M count=5 2>/dev/null | \
-  curl -s -o /dev/null -w "chunk$i: %{http_code}\n" \
-    -X POST "$BASE/api/v1/media/upload-chunk" \
-    -H "Authorization: Bearer $TOKEN" \
-    -F "file_md5=$FILE_MD5" \
-    -F "chunk_number=$i" \
-    -F "chunk=@-;type=application/octet-stream" &
-done
-wait
-
-echo ""
-echo "=== 2. 检查已上传分片 ==="
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/media/check-upload?file_md5=$FILE_MD5" | python3 -m json.tool
-
-echo ""
-echo "=== 3. 合并 ==="
-curl -s -X POST "$BASE/api/v1/media/merge-chunks" \
+CREATE_RESPONSE=$(curl -fsS -X POST "$BASE/api/v1/media/upload-sessions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"file_md5\":\"$FILE_MD5\",\"filename\":\"stress-chunk-test.mp4\",\"total_chunks\":$TOTAL}" \
-  | python3 -m json.tool
+  -d "{\"filename\":\"vidlens-upload.bin\",\"file_size\":$FILE_SIZE,\"chunk_size\":$CHUNK_SIZE,\"total_chunks\":$TOTAL_CHUNKS,\"expected_md5\":\"$EXPECTED_MD5\"}")
 
-echo ""
-echo "=== 4. Redis 分片记录验证 ==="
-docker exec vidlens-redis redis-cli GET "upload:$FILE_MD5:total"
-docker exec vidlens-redis redis-cli SMEMBERS "upload:$FILE_MD5:chunks"
+SESSION_ID=$(printf '%s' "$CREATE_RESPONSE" | jq -r '.data.session_id')
+test -n "$SESSION_ID" && test "$SESSION_ID" != "null"
+printf '%s\n' "$CREATE_RESPONSE" | jq .
+
+rm -f /tmp/vidlens-chunk-*
+split -b "$CHUNK_SIZE" -d -a 4 "$FILE" /tmp/vidlens-chunk-
 ```
 
-### 判断标准
-
-| 结果 | 含义 |
-|------|------|
-| `check-upload` 返回 10 个分片 | ✅ Redis Set 原子写入无丢失 |
-| 返回 < 10 个分片 | ❌ 并发 Redis 写入冲突，排查连接池 |
-| 合并成功，MinIO 有文件 | ✅ 分片上传完整流程正确 |
-| 合并失败 | 查日志，是否某个分片写入 MinIO 超时 |
-
-### 进阶：重复上传同一分片号
+### 5.2 并发 PUT raw chunks
 
 ```bash
-# 两个请求同时传 chunk_number=3，验证幂等性
-for i in 1 2 3 4 5 6; do
-  dd if=/dev/urandom bs=1M count=5 2>/dev/null | \
-  curl -s -o /dev/null -w "%{http_code} " \
-    -X POST "$BASE/api/v1/media/upload-chunk" \
+for chunk in /tmp/vidlens-chunk-*; do
+  raw_index=${chunk##*-}
+  index=$((10#$raw_index))
+  curl -sS -o "/tmp/chunk-$index.json" -w "chunk=$index status=%{http_code}\n" \
+    -X PUT "$BASE/api/v1/media/upload-sessions/$SESSION_ID/chunks/$index" \
     -H "Authorization: Bearer $TOKEN" \
-    -F "file_md5=duplicate-test" \
-    -F "chunk_number=3" \
-    -F "chunk=@-;type=application/octet-stream" &
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@$chunk" &
 done
 wait
-echo ""
 
-# 应该全部返回 200（覆盖写），且 Redis Set 里 chunk 3 只有一条
-docker exec vidlens-redis redis-cli SMEMBERS "upload:duplicate-test:chunks"
+curl -fsS \
+  -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/upload-sessions/$SESSION_ID" | jq .
 ```
 
----
-
-## 五、场景 4 — Kafka 消息堆积与消费能力
-
-**目标：** 快速灌大量消息，测消费者的吞吐量和 Kafka lag 恢复速度。
-
-### 前置：批量造测试任务
+`data.uploaded` 应来自 PostgreSQL `upload_session_chunks`，并与实际片号一致。可直接核验：
 
 ```bash
-# 上传 20 个小文件（或直接数据库批量插入 task 记录）
-for i in $(seq 1 20); do
-  dd if=/dev/urandom of=/tmp/test-$i.mp4 bs=1K count=100 2>/dev/null
-  curl -s -X POST "$BASE/api/v1/media/upload" \
-    -H "Authorization: Bearer $TOKEN" \
-    -F "file=@/tmp/test-$i.mp4" | python3 -c "import sys,json; print(f'task-{i}: {json.load(sys.stdin)}')"
-done
-
-# 记录所有 task ID
+docker exec vidlens-postgres psql -U vidlens -d vidlens -v sid="$SESSION_ID" -c \
+  "select chunk_index,actual_size,content_sha256,object_name from upload_session_chunks where session_id=:'sid' order by chunk_index;"
 ```
 
-### 步骤 1：批量触发分析，瞬间灌入消息
+### 5.3 同 index 幂等与冲突
 
 ```bash
-# 假设 task ID 从 1 到 20
-for task_id in $(seq 1 20); do
-  curl -s -X POST "$BASE/api/v1/media/analyze/$task_id" \
+# 相同字节重传：应返回 200，并返回相同 SHA-256。
+curl -sS -w "\nidempotent=%{http_code}\n" \
+  -X PUT "$BASE/api/v1/media/upload-sessions/$SESSION_ID/chunks/0" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @/tmp/vidlens-chunk-0000
+
+# 制造相同大小、不同内容：应返回 409，不能覆盖 accepted chunk。
+cp /tmp/vidlens-chunk-0000 /tmp/vidlens-conflict
+printf X | dd of=/tmp/vidlens-conflict bs=1 seek=0 conv=notrunc status=none
+curl -sS -w "\nconflict=%{http_code}\n" \
+  -X PUT "$BASE/api/v1/media/upload-sessions/$SESSION_ID/chunks/0" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @/tmp/vidlens-conflict
+```
+
+### 5.4 complete 与稳定返回
+
+```bash
+FIRST_COMPLETE=$(curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/upload-sessions/$SESSION_ID/complete")
+SECOND_COMPLETE=$(curl -fsS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/upload-sessions/$SESSION_ID/complete")
+
+printf '%s\n' "$FIRST_COMPLETE" | jq .
+printf '%s\n' "$SECOND_COMPLETE" | jq .
+
+FIRST_TASK=$(printf '%s' "$FIRST_COMPLETE" | jq -r '.data.task_id')
+SECOND_TASK=$(printf '%s' "$SECOND_COMPLETE" | jq -r '.data.task_id')
+test "$FIRST_TASK" = "$SECOND_TASK"
+```
+
+完成后核验 session、asset 和 task。不要把 MinIO 对象写入描述成 PostgreSQL transaction 的一部分；事务只覆盖关系数据 finalization。
+
+## 六、场景 4：Kafka lag 与消费能力
+
+使用真实可解析的小视频创建一批测试任务，再触发转写或分析。不要直接向数据库插入半成品 task 作为主测试，因为那会绕过服务不变量。
+
+```bash
+for task_id in <测试任务ID列表>; do
+  curl -sS -X POST "$BASE/api/v1/media/analyze/$task_id" \
     -H "Authorization: Bearer $TOKEN" &
 done
 wait
-echo "全部投递完成，开始观察消费速度"
-```
 
-### 步骤 2：实时观察 Kafka Lag
-
-```bash
-# 方法 A：Kafka UI（更直观）
-# 浏览器打开 http://服务器IP:8180 → Topics → video-analyze → Messages
-
-# 方法 B：命令行
-docker exec vidlens-kafka kafka-consumer-groups \
-  --bootstrap-server localhost:9092 \
-  --describe --group vidlens-worker
-
-# 每秒刷一次
 watch -n 1 'docker exec vidlens-kafka kafka-consumer-groups \
-  --bootstrap-server localhost:9092 \
-  --describe --group vidlens-worker 2>/dev/null'
+  --bootstrap-server localhost:9092 --describe --group vidlens-worker 2>/dev/null'
 ```
 
-### 观察指标
+记录：
 
-| 指标 | 说明 |
-|------|------|
-| LAG 列 | 当前积压的消息数，应逐渐下降 |
-| 消费速度 | LAG 从 20 → 0 花了多少秒？算出 msg/s |
-| CURRENT-OFFSET | 已提交的 offset，确认在推进 |
-| 消费者日志 | `docker logs <go容器> \| grep "任务完成"` |
+- 各 topic/partition 的 LAG 和恢复时间；
+- Consumer 日志中的 provider、FFmpeg、DB 等具体等待；
+- 成功、失败、重试 task 数；
+- 外部 AI 限流是否使吞吐受 provider 而非 Kafka 约束。
 
-### 瓶颈分析
+消息 lag 下降不代表业务成功，必须同时检查 PostgreSQL `video_tasks`、`task_jobs` 和失败原因。
 
-| 现象 | 可能原因 | 排查方向 |
-|------|---------|---------|
-| LAG 一直涨不降 | 消费者处理太慢（ASR/LLM 外部 API） | 看 Go 日志卡在哪一步 |
-| LAG 降了但有跳变 | 某些消息消费失败跳过 | 搜索 Go 日志里的 `[Kafka]` ERROR |
-| 消费者完全不消费 | 消费者组 rebalance 卡住 | 重启 Go 服务观察 |
-
----
-
-## 六、场景 5 — 令牌桶限流验证
-
-**目标：** 确认 Redis Lua 令牌桶在高压下正确拒绝超量请求。
-
-### 步骤
+## 七、场景 5：令牌桶
 
 ```bash
-# 找一个有限流的接口，比如 RAG 问答
-# 需要先有一个 session（通过前端创建或手动调接口）
-SESSION_ID=1
-
-# 50 并发打 200 个请求，配置 capacity=10, rate=10
-./hey -n 200 -c 50 \
-  -m POST \
+SESSION_ID=<聊天会话ID>
+./hey -n 200 -c 50 -m POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question":"这个视频讲了什么"}' \
   "$BASE/api/v1/chat/sessions/$SESSION_ID/messages"
 ```
 
-### 判断标准
+记录 200/429 分布和等待后令牌恢复。Redis 异常时当前限流策略可能 fail-open，应把它作为安全/可用性权衡记录，不能误写成所有请求一定拒绝。
 
-```
-hey 输出的 Status code distribution:
-  [200]  XX responses    ← 通过的
-  [429]  XX responses    ← 被限流的
-```
-
-| 结果 | 含义 |
-|------|------|
-| 200 和 429 都有，比例合理 | ✅ 令牌桶生效 |
-| 全是 200 | ❌ 中间件没挂到这个路由，或 key 设计有误 |
-| 全是 429 | ❌ capacity/rate 参数太严或 Redis 连接异常 |
-
-### 进阶：验证令牌恢复
+## 八、场景 6：任务轮询
 
 ```bash
-# 第一轮打满令牌（预期大量 429）
-./hey -n 50 -c 50 -m POST \
+TASK_ID=<当前用户任务ID>
+./hey -n 5000 -c 200 \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"question":"test"}' \
-  "$BASE/api/v1/chat/sessions/$SESSION_ID/messages"
-
-# 等 3 秒让令牌恢复
-sleep 3
-
-# 第二轮应该恢复部分通过
-./hey -n 10 -c 5 -m POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"question":"test"}' \
-  "$BASE/api/v1/chat/sessions/$SESSION_ID/messages"
+  "$BASE/api/v1/media/task/$TASK_ID"
 ```
 
----
+观察 PostgreSQL 连接池、P99、容器 CPU 和日志。轮询场景的优化顺序通常是：确认查询和索引 → 限制前端频率/退避 → 条件请求或事件推送；不要没有证据就先引入 WebSocket。
 
-## 七、场景 6 — 任务轮询压力
+## 九、故障演练
 
-**目标：** 前端轮询任务状态是高频读操作，测 MySQL 在大量轮询下的表现。
-
-### 步骤
+### 9.1 Kafka 宕机：重点验证首次投递窗口
 
 ```bash
-# 模拟 10 个用户同时轮询各自的任务详情
-# 假设有 task ID 1-10，各自对应的用户 token
-
-# 单用户高频轮询（每秒查一次，持续 60 秒）
-for i in $(seq 1 60); do
-  curl -s -H "Authorization: Bearer $TOKEN" \
-    "$BASE/api/v1/media/task/1" -o /dev/null -w "%{http_code} %{time_total}s\n"
-  sleep 1
-done
-
-# 多用户并发轮询
-./hey -n 3000 -c 100 \
-  -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/media/task/1"
-```
-
-### 优化方向
-
-如果 QPS 上不去：
-1. 检查 `task` 表 `id` 是否有主键索引（GORM 默认有）
-2. 考虑给热数据加 Redis 缓存，减少 MySQL 压力
-3. 轮询改 WebSocket 推送（非必须，但面试加分）
-
----
-
-## 八、场景 7 — 故障注入（混沌测试）
-
-> **最有价值的场景。** 每次只杀一个组件，观察系统的反应，练排查能力。
-
-### 8a. Kafka 宕机
-
-```bash
-# 1. 停掉 Kafka
 docker stop vidlens-kafka
 
-# 2. 尝试上传并触发分析
-curl -s -X POST "$BASE/api/v1/media/analyze/1" \
-  -H "Authorization: Bearer $TOKEN"
+curl -sS -w "\nstatus=%{http_code}\n" -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/analyze/<task-id>"
 
-# 3. 观察
-docker logs -f <go容器名> --tail 50
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/task/<task-id>" | jq .
 
-# 4. 恢复 Kafka
 docker start vidlens-kafka
-
-# 5. 再次尝试分析
-curl -s -X POST "$BASE/api/v1/media/analyze/1" \
-  -H "Authorization: Bearer $TOKEN"
 ```
 
-**记录：**
+必须记录：
 
-| 问题 | 你的观察 |
-|------|---------|
-| 用户请求返回什么状态码？ | |
-| 消息丢了还是保留了？ | |
-| Kafka 恢复后消费者自动重连了吗？ | |
-| 重连后积压消息能继续消费吗？ | |
+- 请求返回值；
+- DB 中 task/job/dispatch 状态；
+- Kafka 恢复后是否能自动补投；
+- 多次补投是否仍由 Consumer lease/幂等保护。
 
-**思考：** 如果是生产环境，你会加什么保护？
-- 生产者重试 + 本地缓冲？
-- 降级提示"系统繁忙稍后重试"？
-- 告警通知？
+在首次投递恢复机制完成验证前，不得声称 task 创建与 Kafka enqueue 原子，也不得声称实现了 transactional outbox。
 
----
+### 9.2 Redis 宕机：上传 session 应保持正确性
 
-### 8b. Redis 宕机
+先创建一个未完成 session，再执行：
 
 ```bash
 docker stop vidlens-redis
 
-# 测试不同接口
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/media/list" -w "\nlist: %{http_code}\n"
-curl -s -X POST "$BASE/api/v1/media/upload-chunk" \
+curl -sS -w "\nsession-get=%{http_code}\n" \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file_md5=test" -F "chunk_number=0" -F "chunk=@/tmp/test-video.mp4" \
-  -w "\nchunk: %{http_code}\n"
-curl -s -X POST "$BASE/api/v1/chat/sessions/1/messages" \
+  "$BASE/api/v1/media/upload-sessions/$SESSION_ID"
+
+curl -sS -w "\nchunk-put=%{http_code}\n" \
+  -X PUT "$BASE/api/v1/media/upload-sessions/$SESSION_ID/chunks/0" \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"question":"test"}' -w "\nchat: %{http_code}\n"
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @/tmp/vidlens-chunk-0000
 
 docker start vidlens-redis
 ```
 
-**记录：**
+预期边界：
 
-| 问题 | 你的观察 |
-|------|---------|
-| 任务列表还能查吗？（Redis 没参与） | |
-| 分片上传还能用吗？（依赖 Redis） | |
-| 限流器行为：放行还是拒绝？ | 代码里 `err != nil` 时 `return true`，预期放行 |
-| 聊天上下文缓存丢了，问答还能用吗？ | |
-| Redis 恢复后需要重启 Go 服务吗？ | |
+- upload session 的 manifest 和 ledger 由 PostgreSQL 持有，不应因 Redis 停止而丢失；
+- Redis 锁、限流和最近聊天记忆会受影响；
+- 是否 fail-open/fail-closed 要按具体路径记录，不能用一个结论覆盖所有 Redis 用法。
 
-**思考：**
-- 限流器异常时放行是正确策略吗？什么场景下应该拒绝？
-- 分片上传能不能加本地内存 fallback？
+### 9.3 PostgreSQL 宕机：业务与 pgvector 同时不可用
 
----
+```bash
+docker stop vidlens-postgres
+curl -sS "$BASE/healthz" -w "\nhealthz=%{http_code}\n"
+curl -sS "$BASE/readyz" -w "\nreadyz=%{http_code}\n"
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/media/list" -w "\nlist=%{http_code}\n"
+docker start vidlens-postgres
+```
 
-### 8c. MySQL 宕机
+应验证而不是预设：
+
+- liveness 是否仍返回进程存活；
+- readiness 是否因正式数据库失败而返回非 2xx；
+- PostgreSQL 恢复后连接池是否恢复；
+- Consumer 在 DB 不可用时是否避免提交业务成功；
+- RAG 向量检索也会失败，因为 pgvector 与业务表在同一 PostgreSQL。
+
+### 9.4 MySQL 停止：不应影响 server
+
+MySQL 只在显式 `legacy-mysql` profile 下作为迁移回滚源。默认根本不应启动它。若观察期正在运行：
 
 ```bash
 docker stop vidlens-mysql
-
-# 测试
-curl -s -X POST "$BASE/api/v1/user/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"test"}' -w "\nlogin: %{http_code}\n"
-
-curl -s "$BASE/health" -w "\nhealth: %{http_code}\n"
-
-# 等 30 秒后恢复
-sleep 30
-docker start vidlens-mysql
-
-# MySQL 恢复后测试
-sleep 5
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/media/list" -w "\nlist: %{http_code}\n"
+curl -sS "$BASE/readyz" -w "\nreadyz=%{http_code}\n"
 ```
 
-**记录：**
+server 不读取 `legacy_mysql.*`，因此 MySQL 停止不应改变正式 readiness。该测试证明运行时边界，不证明备份可恢复。
 
-| 问题 | 你的观察 |
-|------|---------|
-| Go 服务直接 panic 了还是返回 500 继续跑？ | |
-| health 接口受影响吗？（不依赖 MySQL） | |
-| MySQL 恢复后 GORM 连接能自动重建吗？需要重启吗？ | |
-| 期间 Kafka 消费者还在跑吗？任务会怎么流转？ | |
+### 9.5 向量投影故障
 
-**思考：**
-- 如果 GORM 连接不能自动重建，是不是需要加健康检查 + 自动重启？
-- 消费者在 MySQL 不可用时，offset 没提交 → 恢复后会重试，幂等够不够？
+pgvector 与业务表共享 PostgreSQL，不能通过停止一个独立 Milvus 容器模拟正式向量后端故障。更有价值的隔离测试是：
 
----
+- 在临时数据库/临时角色中拒绝目标 vector table 权限；
+- 或在独立测试配置中指定不可访问的 pgvector 目标；
+- 验证 RAG build/search 的错误、readiness 和普通业务接口边界；
+- 恢复后运行 `cmd/rag-audit` 对账，再由显式 `cmd/rag-reindex` 修复投影。
 
-### 8d. Milvus 宕机
+不要在正式 `public` schema 上 rename/drop 向量表做演练。Milvus profile 只能验证回滚 adapter，不代表当前正式架构。
 
-```bash
-docker stop vidlens-milvus
+### 9.6 MinIO 宕机
 
-# 测试 RAG 问答
-curl -s -X POST "$BASE/api/v1/chat/sessions/1/messages" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"question":"视频讲了什么"}' -w "\nchat: %{http_code}\n"
+停止 MinIO 后分别测试普通上传、chunk PUT、complete、任务媒体读取和任务列表。预期关系状态仍可读，但字节相关操作失败；恢复后重点检查 session ledger 是否错误记录了未落盘 chunk，以及是否产生孤儿候选对象。
 
-# 测试 RAG 索引构建
-curl -s -X POST "$BASE/api/v1/media/task/1/rag-index" \
-  -H "Authorization: Bearer $TOKEN" -w "\nindex: %{http_code}\n"
-
-# 测试普通功能（不应受影响）
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/media/list" -w "\nlist: %{http_code}\n"
-
-docker start vidlens-milvus
-```
-
-**记录：**
-
-| 问题 | 你的观察 |
-|------|---------|
-| 向量检索失败时 RAG 问答直接报错还是能降级？ | |
-| 普通功能（上传、列表）是否正常？ | |
-| Milvus 恢复后需要重建 collection 吗？ | |
-
-**思考：**
-- 向量检索失败时，能不能只走关键词检索？（你的 `retrieval_fusion.go` 已经支持 hybrid）
-- 这就是面试常问的"熔断降级"——向量化失败时降级为纯关键词召回
-
----
-
-### 8e. 网络分区模拟（进阶）
-
-```bash
-# 模拟 Go 服务和 MySQL 之间网络延迟
-# 需要 tc（Linux 流量控制）
-docker exec <go容器名> sh -c "
-  tc qdisc add dev eth0 root netem delay 500ms 200ms
-"
-
-# 观察接口延迟变化
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/media/list" -w "\n%{time_total}s\n"
-
-# 恢复
-docker exec <go容器名> sh -c "tc qdisc del dev eth0 root"
-```
-
----
-
-## 九、场景 8 — 综合压测（所有组件联动）
-
-**目标：** 同时跑读、写、分析，模拟真实使用场景，找出整体瓶颈。
-
-```bash
-#!/bin/bash
-# stress-full.sh — 综合压测脚本
-
-BASE="http://127.0.0.1:8080"
-TOKEN="你的JWT_TOKEN"
-
-echo "=== 综合压测开始 $(date) ==="
-
-# 1. 后台持续轮询任务列表（模拟用户看板）
-./hey -n 5000 -c 100 \
-  -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/media/list?page=1&page_size=20" &
-PID_LIST=$!
-
-# 2. 后台持续轮询任务详情（模拟前端进度条）
-./hey -n 3000 -c 50 \
-  -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/media/task/1" &
-PID_DETAIL=$!
-
-# 3. 并发上传（模拟用户上传）
-for i in $(seq 1 10); do
-  curl -s -o /dev/null -X POST "$BASE/api/v1/media/upload" \
-    -H "Authorization: Bearer $TOKEN" \
-    -F "file=@/tmp/test-video.mp4" &
-done
-
-# 等读接口压测结束
-wait $PID_LIST
-wait $PID_DETAIL
-
-echo ""
-echo "=== 综合压测结束 $(date) ==="
-echo "查看容器资源："
-docker stats --no-stream
-```
-
----
-
-## 十、记录模板
-
-每个场景跑完后，用下面的模板记录结果，保存为 `stress-test-results.md`。
+## 十、结果记录模板
 
 ```markdown
-## 压测记录：<场景名>
+# VidLens 压测/故障记录：<场景>
 
-- **日期：** 2025-xx-xx
-- **环境：** xC xG 服务器 / Docker 部署
-- **参数：** 并发数 xx，总请求数 xxx
+- 日期：
+- Git commit / 工作树说明：
+- 环境：CPU、内存、磁盘、Docker 版本
+- 配置：PostgreSQL/Redis/Kafka/MinIO 版本与关键非秘密参数
+- 数据：文件大小、任务数、chunk 数
+- 负载：总请求、并发、持续时间
 
-### 结果
+## 原始结果
 
-| 指标 | 数值 |
-|------|------|
-| QPS | |
-| P50 延迟 | |
-| P99 延迟 | |
-| 错误率 | |
+| 指标 | 数值/现象 | 证据路径 |
+|---|---|---|
+| QPS | | |
+| P50/P95/P99 | | |
+| 非 2xx | | |
+| PostgreSQL connections/waits | | |
+| Kafka lag | | |
+| Go CPU/RSS | | |
+| 磁盘/MinIO | | |
 
-### 瓶颈
+## 排查
 
-- 描述你观察到的瓶颈现象
+1. 先观察到什么；
+2. 用什么命令排除什么；
+3. 根因证据是什么；
+4. 修改或配置调整是什么；
+5. 同参数复测结果是什么。
 
-### 排查过程
+## 当前结论
 
-1. 第一步看了什么 → 发现了什么
-2. 第二步做了什么 → 结论是什么
+> 只写本次环境和样本能证明的结论，不外推生产容量。
 
-### 修复
+## 未解决限制
 
-- 修改了什么 / 调了什么参数
-- 修复后 QPS / P99 变成多少
-
-### 面试总结（一句话）
-
-> "我做过 xxx 压测，发现 xxx 是瓶颈，通过 xxx 手段把 QPS 从 xx 提升到 xx / P99 从 xx 降到 xx。"
+-
 ```
 
----
+建议把日志和原始 JSON 放在 `.logs/`，不要提交 token、密码、cookies 或完整 DSN。
 
-## 附：常见问题速查
+## 十一、常用命令
 
-| 问题 | 命令 |
-|------|------|
-| MySQL 慢查询 | `docker exec vidlens-mysql mysql -uroot -proot -e "SELECT * FROM information_schema.PROCESSLIST WHERE TIME > 1;"` |
-| Redis 内存 | `docker exec vidlens-redis redis-cli info memory \| grep used_memory_human` |
-| Redis 连接数 | `docker exec vidlens-redis redis-cli info clients \| grep connected_clients` |
-| Kafka Topic 消息量 | `docker exec vidlens-kafka kafka-run-class kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic video-analyze` |
-| 磁盘空间 | `df -h` |
-| Go 进程内存 | `docker stats --no-stream \| grep vidlens` |
-| 容器日志搜索错误 | `docker logs <容器名> 2>&1 \| grep -i "error\|panic\|fatal" \| tail -20` |
-| 查看 Kafka 消费者组 | `docker exec vidlens-kafka kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group vidlens-worker` |
+| 目的 | 命令 |
+|---|---|
+| PostgreSQL 活跃查询 | `docker exec vidlens-postgres psql -U vidlens -d vidlens -c "select * from pg_stat_activity where state <> 'idle';"` |
+| PostgreSQL 表大小 | `docker exec vidlens-postgres psql -U vidlens -d vidlens -c "select relname,pg_size_pretty(pg_total_relation_size(relid)) from pg_catalog.pg_statio_user_tables order by pg_total_relation_size(relid) desc;"` |
+| Redis 内存 | `docker exec vidlens-redis redis-cli info memory` |
+| Redis 连接 | `docker exec vidlens-redis redis-cli info clients` |
+| Kafka consumer lag | `docker exec vidlens-kafka kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group vidlens-worker` |
+| 容器资源 | `docker stats --no-stream` |
+| 磁盘 | `df -h` |
+| readiness | `curl -fsS http://127.0.0.1:8080/readyz` |
+| RAG 对账 | `go run ./cmd/rag-audit --config config.yaml --user-id <id> --task-id <id> --model <model>` |
+
+## 十二、面试口径
+
+可以说：
+
+> 我把压测拆成读接口、普通上传、durable upload session、Kafka lag、限流和故障注入。测试时同时观察 PostgreSQL 等待、Kafka lag、Go/容器资源和错误率，并保存原始结果。由于 pgvector 与业务表在同一 PostgreSQL，我也会说明单库降低了部署复杂度，但数据库故障会同时影响业务查询和向量检索，需要备份恢复、readiness 和可重建投影来治理。
+
+不能在没有真实记录时说：
+
+- “系统支持万人并发”；
+- “P99 优化了某个百分比”；
+- “Redis 挂了所有功能都能降级”；
+- “Kafka 消息绝不丢失”；
+- “PostgreSQL 与 Kafka 已经 exactly-once”；
+- “pgvector 性能一定优于 Milvus”；
+- “MySQL/Milvus 是当前正式运行依赖”。

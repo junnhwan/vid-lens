@@ -109,22 +109,23 @@ func TestRateLimiterFailsOpenOnRedisError(t *testing.T) {
 	}
 }
 
-// 令牌按速率补充：耗尽后等待，应能重新放行
+// 令牌按速率补充：使用可控时钟验证边界，避免测试负载改变两次请求的真实间隔。
 func TestRateLimiterTokenRefill(t *testing.T) {
 	_, client := newRateLimitTestRedis(t)
-	limiter := NewRateLimiter(client, 1, 100) // 容量1，每秒补100个
+	limiter := NewRateLimiter(client, 1, 100) // 容量1，每10ms补1个
 	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+	limiter.now = func() time.Time { return now }
 
 	if !limiter.Allow(ctx, "refill:user:1", 1, 100) {
 		t.Fatalf("第1次应放行")
 	}
 	if limiter.Allow(ctx, "refill:user:1", 1, 100) {
-		t.Fatalf("第2次应被限流（桶空）")
+		t.Fatalf("同一时刻的第2次应被限流（桶空）")
 	}
-	// 等令牌补充（rate=100/s，30ms 约补 3 个）
-	time.Sleep(50 * time.Millisecond)
+	now = now.Add(10 * time.Millisecond)
 	if !limiter.Allow(ctx, "refill:user:1", 1, 100) {
-		t.Fatalf("补充后应重新放行")
+		t.Fatalf("10ms补充1个令牌后应重新放行")
 	}
 }
 func TestRateLimitReturnsStructured429AndRetryAfter(t *testing.T) {

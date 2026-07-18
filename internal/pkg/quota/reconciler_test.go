@@ -13,7 +13,6 @@ import (
 type memoryCompStore struct {
 	mu     sync.Mutex
 	events map[int64]*model.QuotaCompensation
-	next   int64
 }
 
 func (s *memoryCompStore) ListDueCompensations(time.Time, int) ([]model.QuotaCompensation, error) {

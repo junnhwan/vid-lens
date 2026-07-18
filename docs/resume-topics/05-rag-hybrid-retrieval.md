@@ -1,250 +1,118 @@
-# 专题 5：RAG 检索增强生成、BM25 关键词召回和 RRF 融合
+# 专题 5：PostgreSQL + pgvector 混合检索与引用式 RAG
 
-## 1. 简历原句
+## 1. 推荐简历表述
 
-基于 RAG 检索增强生成实现视频智能问答，将转写文本切分为 chunk 并生成向量写入 Milvus，结合 BM25 关键词召回与 RRF 融合排序，返回引用片段提升答案可解释性
+> 以 ASR 转写原文作为 RAG 数据源，将 PostgreSQL `video_chunks` 作为文本事实表、pgvector 作为可重建向量投影，结合 Go 侧 BM25-style 关键词召回与 RRF 融合，按用户、任务和 embedding model 隔离并返回引用片段。
 
-## 2. 这个点想证明什么
+正式 backend 是 pgvector。Milvus 只在迁移观察期作为回滚 adapter，不写成当前正式技术栈。
 
-这条是 AI 应用差异化亮点。它证明你不是只做了摘要接口，而是围绕视频转写内容构建了可检索、可引用、可问答的 RAG 链路。
+## 2. 为什么使用 ASR 原文
 
-它能引出 chunk 切分、Embedding、Milvus、BM25、RRF、citations、幻觉控制、数据隔离和 RAG 评估。
+摘要已经是模型压缩后的派生结果，可能省略数字、专有名词和局部论据。RAG 的检索源应尽量接近原内容，所以索引从已持久化的 ASR transcription 生成 chunks，而不是从摘要生成。
 
-## 3. 背景痛点
+## 3. 事实源与投影
 
-用户上传的视频内容，大模型本身不知道。如果直接问 LLM，它只能基于预训练知识回答，容易胡说。
+```text
+PostgreSQL video_chunks（事实源）
+├── user_id / task_id / chunk_index
+├── content / content_hash
+├── embedding_model / embedding_dim
+└── stable vector_id / evidence identity
 
-还有几个问题：
+PostgreSQL pgvector table（可重建投影）
+├── scope 与 chunk identity
+├── content metadata
+└── embedding vector
+```
 
-- 长视频转写文本很长，不能完整塞进 prompt。
-- 摘要会压缩细节，不适合作为唯一知识源。
-- 向量召回对语义问题好，但对数字、专有名词、缩写不一定稳定。
-- 只返回答案没有引用，用户不知道依据来自哪里。
+`video_chunks` 用于审计、关键词检索和重建；pgvector 表用于向量相似度检索。Milvus/pgvector 投影失败不能反向删除已提交的 chunk 事实。
 
-所以需要 RAG：先检索视频相关片段，再让模型基于片段回答，并返回引用片段。
+## 4. 索引流程
 
-## 4. 主流程怎么讲
+1. RAG Kafka job 获取 task/job processing lease。
+2. 从完整 ASR transcription 按 `chunk_size + overlap` 构建候选 chunks。
+3. 生成稳定 chunk/vector identity、content hash 和 embedding model scope。
+4. 在 PostgreSQL 中替换 chunk 事实。
+5. 批量生成 embeddings，并按 `user_id + task_id + embedding_model` 原子替换 pgvector 投影。
+6. 更新 `video_rag_indexes` 为 indexed；失败时记录 failed 和 last error，保留事实源供 audit/reindex。
 
-RAG 索引构建流程：
+关系表和 pgvector 位于同一个 PostgreSQL，不代表步骤 4-6 已处于一个事务。准确说法是“单库部署、分阶段提交、投影可重建”。
 
-1. ASR 完成后拿到完整转写文本。
-2. 按 chunk size 和 overlap 切分文本。
-3. 对每个 chunk 调用 Embedding 生成向量。
-4. chunk 元数据写入 MySQL。
-5. 向量和必要字段写入 Milvus。
-6. 记录 RAG index 状态。
+## 5. 查询流程
 
-问答流程：
+1. 校验用户、task 和索引状态。
+2. 对问题生成 embedding。
+3. pgvector 按 `user_id + task_id + embedding_model` 过滤并召回候选。
+4. 从当前 task 的 `video_chunks` 执行 Go 侧 BM25-style 关键词评分。
+5. 使用 RRF 按两路排名融合，避免直接相加不可比的原始分数。
+6. 按现有流水线进行邻居扩展/确定性排序和 token budget 控制。
+7. 把 top chunks 放入 prompt，同时把 evidence identity、chunk index 和文本作为 citations 返回。
 
-1. 用户针对某个视频提问。
-2. 系统将问题向量化。
-3. Milvus 按 `user_id + task_id + embedding_model` 过滤并向量召回。
-4. MySQL chunk 表基于 BM25 做关键词召回。
-5. 使用 RRF 融合两路召回结果。
-6. 将 top chunks、问题和最近对话组装 prompt。
-7. LLM 生成答案。
-8. 返回答案和 citations。
+当前是单视频 scope，不要包装成跨视频企业知识库。
 
-## 5. 具体实现怎么讲
+## 6. 为什么选择 pgvector
 
-知识源是 ASR 转写全文，不是 AI 摘要。摘要适合给用户快速浏览，但会丢细节；RAG 的知识源要尽量贴近原始材料。
+当前项目的数据量没有足够业务价值支撑独立 Milvus 集群的 etcd、部署、备份和升级成本。PostgreSQL 已经保存业务事实，pgvector 可以复用同一数据库完成当前规模的向量过滤与检索，同时保留 `service.RAGVectorStore/RAGRetriever` 接口，后续确有规模证据时仍可替换 backend。
 
-chunk 切分默认有 chunk size 和 overlap。chunk size 控制单个片段长度，overlap 减少边界处语义被切断的问题。
+这不是说 pgvector 永远优于 Milvus。大规模向量、复杂索引治理、独立扩缩容或专门运维团队出现时，独立向量数据库可能更合适。
 
-Milvus 存向量，用于语义召回。MySQL 保存 chunk 元数据，并实现轻量 BM25 关键词召回。RRF 只看排名，不要求向量分数和关键词分数在同一尺度上，适合融合多路召回。
+## 7. BM25-style 与 RRF 的边界
 
-返回 citations 是为了告诉用户答案依据来自哪些片段，降低模型脱离视频内容编造的风险。
+当前关键词检索是 Go 侧针对单 task chunks 的 BM25-style 实现，不是 Elasticsearch/OpenSearch/Bleve，也不应声称具有专业搜索引擎的中文分词、倒排索引和跨库检索能力。
 
-## 6. 代码证据路径
+RRF 的核心形式是 `1 / (k + rank)`。它融合排名而不是直接混合余弦分数和关键词分数，适合当前两路分数尺度不同的情况，但参数和质量仍需要冻结评测集验证。
 
-- `internal/service/rag_index.go`：RAG 索引构建、chunk 写入和向量写入。
-- `internal/service/chunk_splitter.go`：chunk 切分。
-- `internal/vector/milvus.go`：Milvus collection、向量字段、search filter。
-- `internal/repository/video_chunk.go`：BM25 关键词召回。
-- `internal/service/retrieval_fusion.go`：RRF 融合排序。
-- `internal/service/chat.go`：问答、prompt、citations、消息保存。
-- `internal/service/rag_eval.go`：Recall@K、MRR 等评估逻辑。
+## 8. citations 能证明什么
 
-## 7. 选型理由
+citations 让用户看到回答使用了哪些转写片段，便于核对和调试，也能在检索失败时观察上下文来源。但它不能证明 LLM 每句话都受证据支持，更不能保证零幻觉。
 
-### Q：为什么做 RAG？
+## 9. 失败恢复与维护工具
 
-答：
+- `video_rag_indexes` 保存 indexing/indexed/failed、chunk count、model 和 last error。
+- `cmd/rag-audit` 比对事实 manifest 与当前向量投影。
+- `cmd/rag-reindex` 从 PostgreSQL chunk 事实重建 pgvector；它故意固定目标为 pgvector，避免回滚配置下误写 Milvus。
+- `cmd/rag-eval` 使用冻结案例评估 Recall@K、MRR 等，不把少量本地 latency smoke 外推为性能结论。
 
-大模型不知道用户上传的视频内容，直接回答容易幻觉。RAG 先从视频转写文本中检索相关片段，再让模型基于这些片段回答，可以让答案更贴近视频内容。
+## 10. 高频追问
 
-### Q：为什么不用摘要做知识库？
+### 为什么不直接把全文塞给 LLM？
 
-答：
+长转写会增加上下文成本、延迟和噪声，并可能超过模型窗口。检索先缩小到相关片段，再用引用保留证据位置。
 
-摘要是二次生成，会压缩和改写原文，可能丢细节。用户问具体时间点、数字或一句话时，摘要不一定包含。RAG 知识源应该尽量接近原始资料，所以我用 ASR 全文。
+### 为什么需要关键词召回？
 
-### Q：为什么用 Milvus？
+向量召回擅长语义相近，但数字、代码、缩写和专有名词可能不稳定；关键词路径补足精确匹配。是否真的提升必须由评测集证明。
 
-答：
+### pgvector 和业务表同库，为什么还有两套连接池？
 
-Milvus 是向量数据库，适合做 embedding 向量检索。当前视频问答需要按语义召回相关片段，比传统关键词检索更适合处理同义表达和语义问题。
+当前 GORM 业务访问和 pgx 向量访问各自持有连接池，但连接同一个 PostgreSQL。这样保留向量 backend 接口并隔离 SQL 实现，代价是需要分别配置和观测连接池；它不是两个数据库，也没有跨数据库双写。
 
-### Q：为什么还要 BM25 关键词召回？
+### Milvus 是否已经删除？
 
-答：
+没有。正式配置使用 pgvector，Milvus adapter、profile 和迁移期数据暂留作向量回滚。只有观察期结束并明确确认后才删除。
 
-向量召回对语义相似好，但对专有名词、数字、缩写和短关键词不一定稳定。BM25 能补精确匹配。两路召回融合后，既能处理语义问题，也能处理关键词问题。
+### 是否上线模型 rerank？
 
-### Q：为什么用 RRF？
+正式在线聊天没有模型 Cross-Encoder rerank。当前线上是确定性检索/排序基线；模型 rerank 只允许作为显式离线实验，不能写入简历已完成功能。
 
-答：
+## 11. 代码证据
 
-向量分数和 BM25 分数尺度不同，直接加权不稳。RRF 按排名倒数融合，不要求分数可比。一个 chunk 如果在两路召回都靠前，最终排名会更高。
-
-## 8. 高频问题与回答话术
-
-### Q1：chunk size 和 overlap 怎么影响效果？
-
-答：
-
-chunk 太小会丢上下文，模型看到的信息不完整；chunk 太大又会让检索不够精准，也增加 prompt 成本。overlap 是为了缓解句子或语义被切断的问题，但 overlap 太大也会增加重复内容和 embedding 成本。
-
-### Q2：embedding model 为什么要和索引绑定？
-
-答：
-
-不同 embedding model 的向量空间和维度可能不同。查询向量必须和索引向量来自同一个模型，否则相似度没有意义。所以检索过滤里会带 embedding model，索引表也记录模型信息。
-
-### Q3：embedding 维度不匹配怎么办？
-
-答：
-
-维度不匹配属于不可恢复错误，不应该重试。因为重试同样配置还是会失败，需要修正模型配置或重建索引。
-
-### Q4：为什么检索要带 user_id？
-
-答：
-
-用户数据必须隔离。即使 task_id 理论上唯一，也要在向量检索过滤里带 user_id，避免用户之间的数据串读。
-
-### Q5：为什么检索要带 task_id？
-
-答：
-
-当前主线是单视频问答，用户在某个视频详情下提问，只应该检索这个视频的 chunk。task_id 能限制检索范围，避免跨视频混入无关内容。
-
-### Q6：RAG 检索不到怎么办？
-
-答：
-
-可以返回基于当前视频内容没有找到相关依据，而不是让模型硬答。也可以降低阈值、增加 topK 或提示用户换个问法。不能让模型脱离检索片段编造。
-
-### Q7：检索到了但答案错，怎么排查？
-
-答：
-
-先看 citations 和检索快照。如果召回片段不相关，是检索问题；如果片段相关但答案错，是 prompt 或 LLM 生成问题。这样 citations 不只给用户看，也方便排查。
-
-### Q8：为什么不用 Elasticsearch？
-
-答：
-
-当前是单视频 RAG，每个视频 chunk 数量有限，用 MySQL chunk 表实现 BM25 关键词召回已经能验证混合召回链路。Elasticsearch 更适合大规模全文检索，但会增加部署复杂度。后续跨视频知识库规模上来后可以考虑。
-
-### Q9：为什么没有 rerank？
-
-答：
-
-当前先用向量召回、BM25 和 RRF 做轻量融合。rerank 会增加额外模型调用成本和延迟，适合在有评估数据证明召回排序不足后再加。现在可以把 rerank 作为后续优化。
-
-### Q10：RAG 能完全解决幻觉吗？
-
-答：
-
-不能。RAG 可以降低幻觉，因为模型有了外部依据；citations 也能让用户看到来源。但如果召回错了或模型不遵守上下文，仍可能回答错误。所以要结合 prompt 约束、引用片段和评估。
-
-## 9. 结合八股怎么答
-
-### 向量检索
-
-Embedding 把文本映射到向量空间，语义相似的文本向量距离更近。Milvus 做的是相似向量召回。
-
-### BM25
-
-BM25 是基于词频、文档频率和文档长度的关键词相关性排序方法。它对精确词匹配比向量召回更稳定。
-
-### RRF
-
-RRF 公式核心是 `1 / (k + rank)`。它融合排名，不融合原始分数，适合多路检索分数不可比的场景。
-
-### 幻觉
-
-RAG 不是训练模型，而是在生成前提供检索上下文。它降低幻觉，不是消灭幻觉。
-
-## 10. tradeoff
-
-RAG 也有代价：
-
-- 需要额外 embedding 调用成本。
-- 需要维护向量库和索引状态。
-- chunk 参数会影响效果和成本。
-- 检索错误会影响最终答案。
-- citations 增加了实现复杂度，但提升可解释性。
-
-## 11. 兜底保障
-
-- Milvus 不可用：RAG 索引构建或问答失败进入任务失败治理。
-- embedding 维度不匹配：不可重试，快速失败。
-- 检索不到：提示没有依据，不强行回答。
-- 答案错误：通过 citations 和检索快照排查。
-- 用户隔离：检索 filter 带 user_id、task_id、embedding_model。
-
-## 12. 压力追问怎么顶
-
-### 面试官：你这是不是把文本塞给大模型？
-
-答：
-
-不是直接塞全文。长视频转写文本可能很长，直接塞 prompt 成本高也可能超过上下文。我的做法是先切 chunk，写向量库，提问时只检索相关片段，再把 top chunks 交给 LLM。
-
-### 面试官：为什么不用摘要问答？
-
-答：
-
-摘要适合概览，不适合细节问答。摘要会丢信息，用户问具体片段时可能答不上来。所以我用 ASR 全文做 RAG 知识源，摘要只作为展示能力。
-
-### 面试官：没有 rerank，效果靠谱吗？
-
-答：
-
-当前用 Milvus 向量召回、BM25 关键词召回和 RRF 融合，先解决基础召回稳定性。rerank 会带来额外模型调用成本和延迟，我会在有 Recall@K、MRR 等评估数据后再决定是否加入。
-
-## 13. 30 秒话术
-
-我没有用 AI 摘要做 RAG 知识库，而是用 ASR 转写全文。转写文本切成 chunk 后生成 embedding，向量写入 Milvus，chunk 元数据写 MySQL。用户提问时先做 Milvus 向量召回，再基于 MySQL chunk 表做 BM25 关键词召回，最后用 RRF 融合排序，把相关片段交给 LLM，并返回 citations，让答案有依据可追溯。
-
-## 14. 2 分钟话术
-
-视频问答不能直接让大模型回答，因为模型不知道用户上传的视频内容。也不能简单把整段转写塞进 prompt，因为长视频文本太长，成本高，还可能超过上下文窗口。
-
-我的设计是基于 ASR 全文构建 RAG。ASR 完成后，把完整转写按 chunk size 和 overlap 切分，每个 chunk 生成 embedding，向量写 Milvus，元数据写 MySQL。用户提问时，问题先向量化，在 Milvus 中按 user_id、task_id 和 embedding_model 过滤召回相关 chunk。同时，MySQL chunk 表做 BM25 关键词召回，补足数字、专有名词和短词的精确匹配能力。最后用 RRF 融合两路召回结果，把 top chunks 交给 LLM 生成答案，并返回 citations。
-
-这套设计的边界是 RAG 不能完全消除幻觉，检索质量会影响答案质量。后续可以基于 Recall@K 和 MRR 加 rerank 或优化 chunk 参数。
-
-## 15. 5 分钟深讲版本
-
-我会先讲为什么不能直接问大模型。用户上传的视频属于私有新内容，大模型预训练阶段不知道。如果直接让模型回答，它只能猜。其次，长视频 ASR 文本很长，不能完整塞 prompt。
-
-所以我做 RAG。索引构建从 ASR 完整转写开始。摘要不是知识源，因为摘要会丢细节。转写文本按 chunk size 和 overlap 切分，overlap 是为了解决边界语义断裂。每个 chunk 调用 embedding 模型生成向量，写入 Milvus，同时把 chunk 内容、索引、模型等元数据写 MySQL。
-
-问答时，问题先向量化，在 Milvus 里按 user_id、task_id、embedding_model 做过滤检索。user_id 保证用户隔离，task_id 保证单视频问答范围，embedding_model 保证查询向量和索引向量在同一空间。
-
-单靠向量召回对语义问题好，但对数字、专有名词、缩写可能不稳，所以我还做了 BM25 关键词召回。两路召回分数尺度不同，不能直接相加，所以用 RRF 按排名融合。最后把融合后的 top chunks、用户问题和最近对话组装 prompt 给 LLM。
-
-返回时除了答案，还返回 citations。这样用户能看到答案依据来自哪些视频片段；如果答案错了，也能判断是召回错了还是生成错了。
-
-## 16. 不要这么说
-
-- 不要说训练了模型。
-- 不要说 RAG 完全解决幻觉。
-- 不要说已经接入 Elasticsearch。
-- 不要说已经实现 rerank。
-- 不要说跨视频知识库，当前主线是单视频问答。
-- 不要把摘要说成 RAG 知识源。
-
+- `internal/service/rag_index*.go`
+- `internal/service/rag_pipeline.go`
+- `internal/service/retrieval_fusion.go`
+- `internal/repository/video_chunk.go`
+- `internal/vector/factory.go`
+- `internal/vector/pgvector.go`
+- `cmd/rag-audit/`、`cmd/rag-reindex/`、`cmd/rag-eval/`
+
+## 12. 30 秒话术
+
+> 我用 ASR 原文而不是摘要做 RAG。`video_chunks` 是 PostgreSQL 里的文本事实源，pgvector 表是可重建投影。查询时先做按 user、task 和 embedding model 隔离的向量召回，再对当前视频 chunks 做 Go 侧 BM25-style 关键词召回，用 RRF 融合排名，最后把片段同时放进 prompt 和 citations。迁移到 pgvector 是为了减少当前规模下维护 MySQL、PostgreSQL和独立向量库的成本，但索引仍是分阶段提交，不能说全链路强一致。
+
+## 13. 不要这么说
+
+- 不要把 Milvus 写成当前正式 backend。
+- 不要说 pgvector 是独立数据库或项目仍双写 MySQL/PostgreSQL。
+- 不要说同一 PostgreSQL 自动让 RAG 全链路处于一个事务。
+- 不要说当前是专业搜索引擎 BM25、跨视频知识库或模型 rerank。
+- 不要说 citations 消除了幻觉。

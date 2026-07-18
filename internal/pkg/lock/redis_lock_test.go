@@ -2,6 +2,7 @@ package lock
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,13 +52,8 @@ func TestRedisLockUnlockOnlyReleasesOwner(t *testing.T) {
 	}
 	defer owner.Unlock(ctx)
 
-	// 伪造一个持有错误 owner 的实例，尝试释放——Lua 脚本应拒绝。
-	intruder := &RedisLock{
-		client: client,
-		key:    "vidlens:test:owner",
-		value:  "not-the-real-owner",
-		ttl:    30 * time.Second,
-	}
+	// 未持有锁的实例调用 Unlock 必须是幂等空操作，不能删除 owner 的锁。
+	intruder := NewRedisLock(client, "vidlens:test:owner")
 	if err := intruder.Unlock(ctx); err != nil {
 		t.Fatalf("intruder Unlock: %v", err)
 	}
@@ -78,7 +74,7 @@ func TestRedisLockUnlockOnlyReleasesOwner(t *testing.T) {
 	}
 }
 
-// 验证重复 Unlock 不会 panic（stopChan 置 nil 的 double-close 防护）。
+// 验证重复 Unlock 不会 panic，且释放操作保持幂等。
 func TestRedisLockDoubleUnlockNoPanic(t *testing.T) {
 	_, client := newTestRedis(t)
 	ctx := context.Background()
@@ -92,6 +88,39 @@ func TestRedisLockDoubleUnlockNoPanic(t *testing.T) {
 	}
 	if err := l.Unlock(ctx); err != nil { // 不能 panic
 		t.Fatalf("second Unlock: %v", err)
+	}
+}
+
+// 验证多个 goroutine 并发释放同一个锁时，Watchdog 只会停止一次，且不会发生 double-close。
+func TestRedisLockConcurrentUnlockNoRace(t *testing.T) {
+	_, client := newTestRedis(t)
+	ctx := context.Background()
+
+	l := NewRedisLock(client, "vidlens:test:concurrent-unlock")
+	if ok, err := l.TryLock(ctx, 0); err != nil || !ok {
+		t.Fatalf("TryLock: ok=%v err=%v", ok, err)
+	}
+
+	const callers = 16
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- l.Unlock(ctx)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Unlock: %v", err)
+		}
 	}
 }
 

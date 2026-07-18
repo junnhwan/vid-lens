@@ -224,8 +224,8 @@ VidLens 的重试系统由三部分组成：
   - A: 先检查黑名单（`nonRetryable`，如"请先配置 ai 服务"、"video unavailable"），命中则不可重试。再检查白名单（`retryable`，如"timeout"、"connection refused"、"HTTP 503"），命中则可重试。都不命中默认不可重试。
 - Q: 为什么用阶梯式退避而不是指数退避？
   - A: 阶梯式退避更可控：运维可以精确配置每级间隔。对于 Kafka 消费场景，60s/300s/900s 的阶梯已经足够覆盖大部分临时故障（如 AI 服务过载、网络抖动），同时不会让任务等太久。
-- Q: `RetryScheduler` 的 `ClaimRetryTask` 是做什么的？
-  - A: 这是一个 CAS 操作，确保同一个重试任务不会被多个 Scheduler 实例重复投递。类似于乐观锁：只有一个实例能成功"认领"任务。
+- Q: `RetryScheduler` 的 `ClaimRetryDispatch` 是做什么的？
+  - A: 它用 lease version + token 做 CAS，并在一个 PostgreSQL transaction 内同步写 task 和 task_job 的 dispatch lease。只有一个实例能认领；lease 过期后允许接管，旧 token 不能覆盖新状态。
 
 ---
 

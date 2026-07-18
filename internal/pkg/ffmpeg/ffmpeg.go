@@ -95,24 +95,3 @@ func buildSplitAudioArgs(inputPath, outputPattern string, segmentSeconds int) []
 		outputPattern,
 	}
 }
-
-// GetVideoDuration 获取视频时长（秒）
-func GetVideoDuration(ctx context.Context, ffprobePath, inputPath string) (float64, error) {
-	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "error",
-		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1",
-		inputPath,
-	)
-
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	if err := cmd.Run(); err != nil {
-		return 0, fmt.Errorf("获取视频时长失败: %w", err)
-	}
-
-	var duration float64
-	fmt.Sscanf(stdout.String(), "%f", &duration)
-	return duration, nil
-}

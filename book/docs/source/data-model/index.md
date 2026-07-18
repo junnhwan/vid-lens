@@ -415,7 +415,7 @@ VideoTranscription.Content
     compute ContentHash --> check if already vectorized
         |
         v
-    call Embedding API --> generate vector --> write to Milvus --> record VectorID
+    call Embedding API --> generate vector --> write to pgvector projection --> record VectorID
         |
         v
     VideoChunk (Content + ContentHash + VectorID + EmbeddingModel)
@@ -489,7 +489,7 @@ type ChatMessage struct {
 **对话流程**：
 
 ```
-User question --> Embedding query --> Milvus TopK search --> Build Prompt --> LLM generate answer
+User question --> Embedding query --> pgvector TopK + BM25 --> RRF --> Build Prompt --> LLM generate answer
                                                 |
                                                 v
                                        RetrievalSnapshot (JSON)

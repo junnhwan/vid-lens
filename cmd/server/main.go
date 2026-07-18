@@ -9,30 +9,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/config"
-	"vid-lens/internal/handler"
-	"vid-lens/internal/middleware"
-	"vid-lens/internal/model"
 	"vid-lens/internal/mq"
 	"vid-lens/internal/observability"
-	"vid-lens/internal/pkg/secret"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/storage"
 	"vid-lens/internal/vector"
-
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 type aiProfileTesterAdapter struct {
@@ -57,7 +47,23 @@ func (a *aiProfileTesterAdapter) TestProfile(ctx context.Context, profile *servi
 	})
 }
 
+func loadServerConfig(path string) (*config.Config, error) {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateServer(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 func main() {
+	opts, err := parseServerOptions(os.Args[1:])
+	if err != nil {
+		log.Fatalf("解析启动参数失败: %v", err)
+	}
+
 	runtimeCtx, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopRuntime()
 
@@ -68,23 +74,28 @@ func main() {
 		log.Fatalf("初始化 Prometheus 指标失败: %v", err)
 	}
 	observability.SetDefaultMetrics(metrics)
-	go serveMetrics(metrics.Handler())
+	metricsDone := make(chan error, 1)
+	go func() { metricsDone <- serveMetrics(runtimeCtx, metrics.Handler()) }()
 
-	cfg, err := config.Load("config.yaml")
+	cfg, err := loadServerConfig(opts.configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	// 数据库
-	db, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
+	// PostgreSQL 同时承载业务关系数据和 pgvector 向量数据。
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 5*time.Second)
+	dbConnection, err := openServerDatabase(startupCtx, cfg)
+	cancelStartup()
 	if err != nil {
-		log.Fatalf("连接数据库失败: %v", err)
+		log.Fatalf("初始化 PostgreSQL 失败: %v", err)
 	}
-	if err := model.Migrate(db); err != nil {
-		log.Fatalf("迁移数据库失败: %v", err)
-	}
-	log.Println("✅ 数据库连接成功")
-	repos := repository.NewRepositories(db)
+	defer func() {
+		if err := dbConnection.Close(); err != nil {
+			log.Printf("关闭 PostgreSQL 连接池失败: %v", err)
+		}
+	}()
+	log.Println("✅ PostgreSQL 数据库连接成功")
+	repos := repository.NewRepositories(dbConnection.GORM)
 
 	// Redis
 	rdb := redis.NewClient(&redis.Options{
@@ -92,6 +103,17 @@ func main() {
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,
 	})
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			log.Printf("关闭 Redis 连接失败: %v", err)
+		}
+	}()
+	startupCtx, cancelStartup = context.WithTimeout(context.Background(), 5*time.Second)
+	err = rdb.Ping(startupCtx).Err()
+	cancelStartup()
+	if err != nil {
+		log.Fatalf("Redis 健康检查失败: %v", err)
+	}
 	log.Println("✅ Redis 连接成功")
 	governance, err := newAIGovernanceRuntime(cfg.AIGovernance, rdb, repos)
 	if err != nil {
@@ -101,10 +123,12 @@ func main() {
 	startQuotaReconciler(runtimeCtx, governance.Reconciler, quotaReconcileInterval)
 
 	// MinIO
-	minioStorage, err := storage.NewMinIOStorage(
+	startupCtx, cancelStartup = context.WithTimeout(context.Background(), 5*time.Second)
+	minioStorage, err := storage.NewMinIOStorageWithContext(startupCtx,
 		cfg.MinIO.Endpoint, cfg.MinIO.AccessKey, cfg.MinIO.SecretKey,
 		cfg.MinIO.Bucket, cfg.MinIO.UseSSL,
 	)
+	cancelStartup()
 	if err != nil {
 		log.Fatalf("初始化 MinIO 失败: %v", err)
 	}
@@ -129,210 +153,94 @@ func main() {
 	aiStrategy = ai.AdmitStrategy(aiStrategy, providerAdmission, strings.ToLower(cfg.AI.Provider), cfg.AI.ASRModel, cfg.AI.LLMModel)
 
 	// Kafka
-	if cfg.Kafka.DownloadTopic == "" {
-		cfg.Kafka.DownloadTopic = "video-download"
-	}
-	if cfg.Kafka.RAGIndexTopic == "" {
-		cfg.Kafka.RAGIndexTopic = "video-rag-index"
-	}
-	mq.CreateTopics(cfg.Kafka.Brokers, []string{
+	if err := mq.CreateTopics(cfg.Kafka.Brokers, []string{
 		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic,
-	})
+	}); err != nil {
+		log.Fatalf("初始化 Kafka topics 失败: %v", err)
+	}
 	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic)
 	defer producer.Close()
 	log.Println("✅ Kafka 生产者就绪")
 
-	// Service & Handler
-	apiKeySecret := cfg.Security.APIKeySecret
-	if apiKeySecret == "" {
-		apiKeySecret = cfg.JWT.Secret
-		log.Println("⚠️ security.api_key_secret 未配置，临时复用 jwt.secret；公开部署请设置 VIDLENS_API_KEY_SECRET")
-	}
-	secretCodec, err := secret.NewCodecFromPassphrase(apiKeySecret)
-	if err != nil {
-		log.Fatalf("初始化 API Key 加密器失败: %v", err)
-	}
-	aiFactory := ai.NewFactoryWithAdmission(providerAdmission)
-	userSvc := service.NewUserService(repos.User, cfg.JWT)
-	aiProfileSvc := service.NewAIProfileService(repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
 	var ragStore service.RAGVectorStore
 	var ragRetriever service.RAGRetriever
 	if cfg.RAG.Enabled {
-		milvusCtx, cancelMilvus := context.WithTimeout(context.Background(), 5*time.Second)
-		milvusStore, err := vector.NewMilvusStore(milvusCtx, vector.MilvusConfig{
-			Address:    cfg.Milvus.Address,
-			Username:   cfg.Milvus.Username,
-			Password:   cfg.Milvus.Password,
-			Token:      cfg.Milvus.Token,
-			Database:   cfg.Milvus.Database,
-			Collection: cfg.RAG.Collection,
-			Dim:        cfg.RAG.EmbeddingDim,
-		})
-		cancelMilvus()
-		if err != nil {
-			log.Printf("⚠️ Milvus 连接失败，RAG 索引和视频问答暂不可用: %v", err)
+		vectorCtx, cancelVector := context.WithTimeout(context.Background(), 5*time.Second)
+		vectorStore, storeErr := vector.NewStore(vectorCtx, vector.BackendConfigFromApplication(cfg))
+		cancelVector()
+		if storeErr != nil {
+			log.Printf("⚠️ vector backend 连接失败，RAG 索引和视频问答暂不可用: %v", storeErr)
 		} else {
 			defer func() {
-				if err := milvusStore.Close(); err != nil {
-					log.Printf("关闭 Milvus 连接失败: %v", err)
+				if err := vectorStore.Close(); err != nil {
+					log.Printf("关闭 vector backend 连接失败: %v", err)
 				}
 			}()
-			ragStore = milvusStore
-			ragRetriever = milvusStore
-			log.Println("✅ Milvus 向量库连接成功")
+			ragStore = vectorStore
+			ragRetriever = vectorStore
+			log.Printf("✅ vector backend 就绪: %s", vector.NormalizeBackendName(cfg.RAG.Store))
 		}
 	} else {
 		log.Println("ℹ️ RAG 未启用，视频问答功能不可用")
 	}
-	ragIndexSvc := service.NewRAGIndexService(repos, ragStore, service.RAGIndexConfig{
-		ChunkSize:      cfg.RAG.ChunkSize,
-		ChunkOverlap:   cfg.RAG.ChunkOverlap,
-		EmbeddingDim:   cfg.RAG.EmbeddingDim,
-		CollectionName: cfg.RAG.Collection,
-	})
-	aiObserver := service.NewAIObserver(repos)
-	ragIndexSvc.SetAIRecorder(aiObserver)
-	chatSvc := service.NewChatService(repos, ragRetriever, service.ChatConfig{
-		TopK:        cfg.RAG.TopK,
-		CandidateK:  cfg.RAG.CandidateK,
-		MinScore:    cfg.RAG.MinScore,
-		RecentTurns: cfg.RAG.RecentTurns,
-	})
-	chatSvc.SetAIRecorder(aiObserver)
-	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(rdb))
-	mediaSvc := service.NewMediaService(repos, minioStorage, producer, rdb, cfg.Upload, cfg.Tools)
-	if cleaner, ok := ragStore.(interface {
-		DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
-	}); ok {
-		mediaSvc.SetTaskVectorCleaner(cleaner)
+
+	app, err := wireServerApplication(serverDependencies{
+		cfg:               cfg,
+		repos:             repos,
+		rdb:               rdb,
+		minioStorage:      minioStorage,
+		producer:          producer,
+		providerAdmission: providerAdmission,
+		ragStore:          ragStore,
+		ragRetriever:      ragRetriever,
+	}, aiStrategy)
+	if err != nil {
+		log.Fatalf("初始化应用组件失败: %v", err)
 	}
-	userHandler := handler.NewUserHandler(userSvc)
-	aiProfileHandler := handler.NewAIProfileHandler(aiProfileSvc)
-	ragHandler := handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory)
-	chatHandler := handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory)
-	mediaHandler := handler.NewMediaHandler(mediaSvc)
-	rateLimiter := middleware.NewRateLimiter(rdb, cfg.RateLimit.Capacity, cfg.RateLimit.Rate)
-	// 高成本 AI 接口按路由单独配更严格的限额（覆盖全局默认）
-	for path, route := range cfg.RateLimit.Routes {
-		rateLimiter.SetRouteLimit(path, route.Capacity, route.Rate)
+	app.Start(runtimeCtx)
+
+	// HTTP route and static frontend wiring lives in router.go.
+	readinessChecks := []dependencyCheck{
+		{Name: "database", Required: true, Check: func(ctx context.Context) error {
+			return dbConnection.SQL.PingContext(ctx)
+		}},
+		{Name: "redis", Required: true, Check: func(ctx context.Context) error {
+			return rdb.Ping(ctx).Err()
+		}},
+		{Name: "minio", Required: true, Check: minioStorage.HealthCheck},
+		{Name: "kafka", Required: true, Check: func(ctx context.Context) error {
+			return mq.PingBroker(ctx, cfg.Kafka.Brokers)
+		}},
 	}
-
-	consumer := mq.NewConsumer(repos, minioStorage, aiStrategy, rdb, cfg.Tools.FFmpegPath)
-	consumer.SetDownloadTools(cfg.Tools.YtDlpPath, cfg.Tools.FFmpegPath, cfg.Tools.CookiesPath, cfg.Tools.ProxyURL)
-	consumer.SetRetryPolicy(mq.TaskRetryPolicy{
-		MaxRetries:     cfg.TaskRetry.MaxRetries,
-		BackoffSeconds: cfg.TaskRetry.BackoffSeconds,
-	})
-	consumer.SetAIResolver(aiFactory, aiProfileSvc)
-	consumer.SetAIRecorder(aiObserver)
-	consumer.SetRAGIndexProducer(producer)
-	if ragStore != nil {
-		consumer.SetRAGIndexer(func(ctx context.Context, task *model.VideoTask) error {
-			profile, err := aiProfileSvc.GetDefaultAIProfile(task.UserID)
-			if err != nil {
-				return err
-			}
-			embeddingClient, err := aiFactory.NewEmbeddingClient(*profile)
-			if err != nil {
-				return err
-			}
-			_, err = ragIndexSvc.BuildTaskIndex(ctx, task.UserID, task.ID, embeddingClient, *profile)
-			return err
-		})
-	}
-	consumer.StartAnalyzeConsumer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.ConsumerGroup)
-	consumer.StartTranscribeConsumer(cfg.Kafka.Brokers, cfg.Kafka.TranscribeTopic, cfg.Kafka.ConsumerGroup)
-	consumer.StartDownloadConsumer(cfg.Kafka.Brokers, cfg.Kafka.DownloadTopic, cfg.Kafka.ConsumerGroup)
-	consumer.StartRAGIndexConsumer(cfg.Kafka.Brokers, cfg.Kafka.RAGIndexTopic, cfg.Kafka.ConsumerGroup)
-	retryScheduler := mq.NewRetryScheduler(repos, producer, mq.RetrySchedulerConfig{
-		BatchSize: cfg.TaskRetry.BatchSize,
-		Interval:  time.Duration(cfg.TaskRetry.ScanIntervalSeconds) * time.Second,
-	})
-	retryScheduler.Start(runtimeCtx)
-
-	// HTTP
-	if cfg.Server.Mode == "release" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-	r := gin.Default()
-	r.Use(middleware.CORS())
-
-	api := r.Group("/api/v1")
-	{
-		api.POST("/user/register", userHandler.Register)
-		api.POST("/user/login", userHandler.Login)
-
-		auth := api.Group("")
-		auth.Use(middleware.JWTAuth(cfg.JWT.Secret))
-		{
-			auth.GET("/user/profile", userHandler.GetProfile)
-			aiProfiles := auth.Group("/ai/profiles")
-			{
-				aiProfiles.GET("", aiProfileHandler.List)
-				aiProfiles.POST("", aiProfileHandler.Create)
-				aiProfiles.PUT("/:id", aiProfileHandler.Update)
-				aiProfiles.DELETE("/:id", aiProfileHandler.Delete)
-				aiProfiles.POST("/test", aiProfileHandler.Test)
-			}
-			chat := auth.Group("/chat")
-			{
-				chat.POST("/sessions", chatHandler.CreateSession)
-				chat.GET("/sessions", chatHandler.ListSessions)
-				chat.DELETE("/sessions/:session_id", chatHandler.DeleteSession)
-				chat.GET("/sessions/:session_id/messages", chatHandler.ListMessages)
-				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), chatHandler.Ask)
-				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), chatHandler.AskAgent)
-				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), chatHandler.AskStream)
-			}
-			media := auth.Group("/media")
-			{
-				media.POST("/upload", mediaHandler.UploadFile)
-				media.POST("/upload-url", mediaHandler.UploadByURL)
-				media.POST("/upload-chunk", mediaHandler.UploadChunk)
-				media.GET("/check-upload", mediaHandler.CheckUpload)
-				media.POST("/merge-chunks", mediaHandler.MergeChunks)
-				media.GET("/list", mediaHandler.ListTasks)
-				media.GET("/task/:id", mediaHandler.GetTaskDetail)
-				media.DELETE("/task/:id", mediaHandler.DeleteTask)
-				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestAnalysis)
-				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), mediaHandler.RequestTranscribe)
-				media.GET("/task/:id/rag-index", ragHandler.GetTaskIndexStatus)
-				media.POST("/task/:id/rag-index", middleware.RateLimit(rateLimiter), ragHandler.BuildTaskIndex)
-				media.GET("/download-audio/:id", mediaHandler.DownloadAudio)
-			}
-		}
-	}
-
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok", "service": "VidLens"})
-	})
-
-	// 前端静态文件：/assets 整目录 + dist 根下的真实文件（如 favicon.svg）；
-	// 其余未知路径回退 index.html，供 hash 路由 SPA 使用。
-	staticDir := filepath.Join(".", "web", "dist")
-	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
-		r.Static("/assets", filepath.Join(staticDir, "assets"))
-		r.NoRoute(func(c *gin.Context) {
-			// 只处理 GET/HEAD，避免误把 API 404 当页面返回
-			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
-				c.Status(http.StatusNotFound)
-				return
-			}
-			reqPath := path.Clean("/" + c.Request.URL.Path)
-			// 禁止路径穿越；仅允许 dist 根下的单层静态文件（favicon 等）
-			if reqPath != "/" && !strings.Contains(reqPath[1:], "/") {
-				candidate := filepath.Join(staticDir, filepath.Base(reqPath))
-				if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
-					// 根级静态资源勿被 CDN 长时间缓存错误响应
-					c.Header("Cache-Control", "public, max-age=3600")
-					c.File(candidate)
-					return
+	if cfg.RAG.Enabled {
+		readinessChecks = append(readinessChecks, dependencyCheck{
+			Name: "vector",
+			// RAG is an explicitly enabled optional capability during the
+			// current Milvus-to-pgvector migration period.
+			Required: false,
+			Check: func(ctx context.Context) error {
+				if ragStore == nil {
+					return fmt.Errorf("vector store unavailable")
 				}
-			}
-			c.File(filepath.Join(staticDir, "index.html"))
+				healthChecker, ok := ragStore.(interface {
+					HealthCheck(context.Context) error
+				})
+				if !ok {
+					return fmt.Errorf("vector store health check unavailable")
+				}
+				return healthChecker.HealthCheck(ctx)
+			},
 		})
-		log.Println("✅ 前端静态资源已加载")
 	}
+
+	r := newServerRouter(*cfg, serverHandlers{
+		user:           app.handlers.user,
+		profiles:       app.handlers.profiles,
+		rag:            app.handlers.rag,
+		chat:           app.handlers.chat,
+		media:          app.handlers.media,
+		uploadSessions: app.handlers.uploadSessions,
+	}, app.rateLimiter, readinessChecks)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	listener, err := net.Listen("tcp", addr)
@@ -343,6 +251,10 @@ func main() {
 	log.Printf("🚀 VidLens 服务启动在 http://localhost%s", addr)
 	if err := serveHTTP(runtimeCtx, server, listener, httpShutdownTimeout); err != nil {
 		log.Fatalf("服务运行失败: %v", err)
+	}
+	app.Wait()
+	if err := <-metricsDone; err != nil {
+		log.Printf("metrics server shutdown failed: %v", err)
 	}
 	log.Println("✅ VidLens 服务已优雅停止")
 }

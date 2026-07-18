@@ -50,7 +50,7 @@ const jsonEvents = await collectStreamEvents([
     'data: "第二段"',
     '',
     'event: done',
-    'data: {"message_id":42,"model":"chat-model"}',
+    'data: {"message_id":42,"model":"chat-model","answer":"服务端清理后的回答"}',
     '',
   ].join('\n'))
 
@@ -60,7 +60,7 @@ assert.deepEqual(
     { type: 'citations', citations: [{ chunk_id: 7, content: '片段内容' }] },
     { type: 'answer', delta: '第一段' },
     { type: 'answer', delta: '第二段' },
-    { type: 'done', message_id: 42, model: 'chat-model' },
+    { type: 'done', message_id: 42, model: 'chat-model', answer: '服务端清理后的回答' },
   ],
   'chat stream parser should combine Gin SSE event names with JSON data payloads',
 )

@@ -10,7 +10,7 @@ import (
 type AISummary struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	TaskID    int64     `gorm:"uniqueIndex;not null" json:"task_id"`
-	Content   string    `gorm:"type:longtext" json:"content"`   // AI 总结（Markdown 格式）
+	Content   string    `gorm:"type:text" json:"content"`            // AI 总结（Markdown 格式）
 	ModelName string    `gorm:"type:varchar(100)" json:"model_name"` // 使用的模型名称
 	CreatedAt time.Time `json:"created_at"`
 }

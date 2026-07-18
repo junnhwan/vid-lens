@@ -1,74 +1,40 @@
 # 最终简历专题准备索引
 
-这组文档主要围绕最终简历 6 条经历展开，目标不是再介绍项目，而是让每一条都能被连续追问 10 分钟以上。`07-cpu-memory-io.md` 和 `08-large-video-handling.md` 是高频发散追问专题，用来补资源排查和超大视频处理边界。
+> 简历正文只维护在 `../resume-final-draft.md`。本目录负责面试追问，不再复制另一份简历和架构事实。
 
-使用顺序：
+## 建议阅读顺序
 
-1. 先读 `01-kafka-async.md`，这是项目主线。
-2. 再读 `06-task-failure-governance.md`，它和 Kafka 失败恢复强相关。
-3. 再读 `02-redis-lock-md5-reuse.md`，它解决并发和重复处理。
-4. 再读 `03-chunk-upload-resume.md`，它补大文件工程能力。
-5. 再读 `04-redis-lua-rate-limit.md`，它补 AI 成本控制。
-6. 最后读 `05-rag-hybrid-retrieval.md`，它是 AI 应用差异化亮点。
-7. 追问补充读 `08-large-video-handling.md`，它回答"视频特别大怎么办"。
-8. 资源排查补充读 `07-cpu-memory-io.md`，它回答"CPU / 内存 / IO 满了怎么办"。
-9. 再补 `09-data-model-lifecycle.md`，它回答"表为什么这么拆"。
-10. 再补 `10-delete-task-cleanup-consistency.md`，它回答"删除任务时怎么清理 MySQL / MinIO / Milvus"。
-11. 再补 `11-task-observability-debugging.md`，它回答"任务失败怎么定位"。
-12. 再补 `12-auth-user-isolation.md`，它回答"用户数据和 RAG 片段怎么隔离"。
-13. 再补 `13-testing-strategy.md`，它回答"怎么证明不是只跑通 demo"。
+1. `01-kafka-async.md`：异步链路、offset、processing lease 和失败窗口。
+2. `06-task-failure-governance.md`：错误分类、RetryScheduler 和最终状态。
+3. `03-chunk-upload-resume.md`：PostgreSQL durable upload session，是上传唯一权威专题。
+4. `02-redis-lock-md5-reuse.md`：分析消费锁、内容指纹和数据库幂等；不要与 upload completion lease 混淆。
+5. `05-rag-hybrid-retrieval.md`：PostgreSQL + pgvector、BM25-style、RRF 和 citations。
+6. `04-redis-lua-rate-limit.md`：高成本接口限流与 Redis 故障策略。
+7. `08-large-video-handling.md`、`07-cpu-memory-io.md`：大视频边界和资源排查。
+8. `09-data-model-lifecycle.md`、`10-delete-task-cleanup-consistency.md`：数据生命周期和耐久化清理。
+9. `11-task-observability-debugging.md`、`13-testing-strategy.md`：证据、指标和测试边界。
+10. `12-auth-user-isolation.md`：task、profile、session 和 RAG scope 隔离。
 
-## 最终简历 6 条
+## 当前六个核心面试点
 
-- 引入 Kafka 将视频下载、ASR 转写、摘要生成和 RAG 索引构建等长耗时任务异步化，HTTP 接口仅负责任务落库和消息投递，避免分钟级视频处理阻塞请求链路
-- 设计 Redis 分布式锁 + WatchDog，结合 MD5 内容指纹和视频文件复用，保护分片合并、分析任务消费等临界区，降低并发重复入库和重复处理风险
-- 采取分片上传与断点续传机制，通过 Redis Set 记录分片状态，使用 MinIO 存储分片并通过 ComposeObject 合并，提升弱网环境下大文件上传可靠性
-- 基于 Redis Lua 令牌桶限流，按用户和接口维度限制高成本 AI 请求，缓解恶意请求和重复点击带来的外部 AI 服务调用成本
-- 基于 RAG 检索增强生成实现视频智能问答，将转写文本切分为 chunk 并生成向量写入 Milvus，结合 BM25 关键词召回与 RRF 融合排序，返回引用片段提升答案可解释性
-- 设计任务失败治理机制，基于错误分类和阶梯退避重试处理外部依赖异常，对可恢复错误延迟重投递，对不可恢复错误快速失败，避免重试风暴和 AI 成本浪费
+- Kafka + PostgreSQL task/job 状态与 processing lease；
+- PostgreSQL durable upload session + MinIO 字节存储；
+- 分段 ASR、片段结果持久化与失败片段复用；
+- Redis owner lock、WatchDog 与数据库幂等的职责边界；
+- PostgreSQL + pgvector + BM25-style + RRF 混合检索；
+- Redis Lua 限流、AI 调用治理与 Prometheus 可观测性。
 
-## 每份专题怎么用
+## 临面前检查
 
-每份专题都按固定结构写：
-
-- 简历原句：保持和最终简历一致。
-- 这个点想证明什么：回答面试官为什么这条值得写。
-- 背景痛点：先讲业务问题，不先堆技术。
-- 主流程：按请求流转顺序讲。
-- 具体实现：结合当前项目真实代码。
-- 高频问题与回答话术：主材料。
-- 结合八股：把项目和基础知识连接起来。
-- 压力追问：准备被质疑时的回答。
-- 30 秒 / 2 分钟 / 5 分钟版本：按面试节奏背。
-- 不要这么说：避免说成项目没有实现的能力。
-
-## 临面前背诵顺序
-
-第一遍只背每份的 `30 秒话术`。
-
-第二遍背每份的 `主流程` 和 `具体实现`。
-
-第三遍只看 `压力追问` 和 `不要这么说`。
-
-如果只剩 30 分钟，优先看：
-
-1. Kafka 的失败后为什么可以 commit offset。
-2. Redis 锁为什么需要 owner 和 WatchDog。
-3. 分片上传断点续传怎么知道哪些片已经传过。
-4. 限流为什么用 Lua，Redis 挂了怎么办。
-5. RAG 为什么不用摘要，BM25 和 RRF 怎么讲。
-6. 哪些错误可重试，哪些错误快速失败。
-7. 视频特别大时，上传、外链下载、存储合并和 ASR 切片怎么处理。
-8. 表结构怎么按文件、任务、子任务、RAG、聊天和 AI 配置拆分。
-9. 删除任务时怎么清理转写、摘要、RAG chunk、Milvus 向量和共享视频资产。
-10. 任务失败时从 task、job、traceID、chunk 和 AI 调用日志怎么排查。
-11. 用户鉴权、AI profile、chat session 和 RAG 检索怎么做数据隔离。
-12. 后端和前端分别测了哪些高风险逻辑，哪些还缺 E2E。
+- 能解释为什么 RAG 使用 ASR 原文而不是摘要。
+- 能解释 PostgreSQL 是事实源、pgvector 是可重建投影，并承认分阶段提交边界。
+- 能解释上传为什么不再依赖 Redis，以及 complete token/lease 如何防并发完成。
+- 能解释 Kafka offset、processing lease、RetryScheduler 和首次 enqueue 窗口不是同一问题。
+- 能说明 MySQL/Milvus 是观察期回滚资产，而不是当前正式技术栈。
+- 不声称远端迁移、outbox、exactly-once、模型 rerank或生产级 URL 下载安全已经完成。
 
 ## 统一回答公式
 
-回答时尽量按这个顺序：
+具体问题 → 不处理会怎样 → 当前调用链 → 状态 owner / lease / 事务边界 → 故障恢复 → 代码证据 → 当前限制 → 下一步。
 
-背景痛点 -> 主流程 -> 关键实现 -> 选型原因 -> tradeoff -> 兜底保障 -> 代码证据
-
-不要一上来就说“我用了 Kafka / Redis / Milvus”。先说为什么这个场景需要它。
+不要从“我用了 Kafka、Redis、pgvector”开场；先说明 VidLens 的哪个具体问题需要这项机制。

@@ -191,7 +191,7 @@ return r.db.Clauses(clause.OnConflict{
 }).Create(job).Error
 ```
 
-这是 MySQL 的 `INSERT ... ON DUPLICATE KEY UPDATE` 语法。当 `(task_id, job_type)` 已存在时，更新现有记录而不是报错。这实现了"幂等投递"：同一个任务的同一个 Job 类型，无论投递多少次，都只有一条记录。消息队列的 at-least-once 投递语义下，这种 upsert 保证了数据一致性。
+GORM 在当前 PostgreSQL 运行时把它生成成 `INSERT ... ON CONFLICT (...) DO UPDATE`。当 `(task_id, job_type)` 已存在时更新同一行，而不是再插入一条 Job。唯一约束负责数据库最终兜底，但它不等于 Kafka exactly-once；重复消息仍要经过任务状态和 processing lease 校验。
 
 **追问 3.3: ensureJob 方法的作用是什么？什么场景下会触发？**
 
@@ -253,9 +253,9 @@ func (r *TaskRepository) FindByIDWithDetail(id int64) (*model.VideoTask, error) 
 
 `uniqueIndex` 保证一个 VideoTask 只有一条 Transcription 记录（1:1 关系）。如果用普通 index，理论上可能出现重复数据。uniqueIndex 同时也是查询优化器的索引，`WHERE task_id = ?` 的查询效率和普通 index 一样。
 
-**追问 4.2: 如果转录内容特别大（比如 2 小时的视频），longtext 够用吗？**
+**追问 4.2：如果转录内容特别大（比如 2 小时的视频），PostgreSQL text 够用吗？**
 
-MySQL 的 longtext 最大 4GB，对于逐字稿绰绰有余。2 小时的视频，假设每秒 3 个字，总共约 21600 字，UTF-8 编码约 64KB。真正的瓶颈不在存储，而在网络传输——前端请求详情时需要下载整个 Content。如果未来需要优化，可以考虑分段返回或流式传输。
+PostgreSQL `text` 可以保存远大于当前逐字稿规模的内容。两小时视频的逐字稿通常只有几十到几百 KB，当前瓶颈更可能是详情接口一次性传输、前端渲染和后续 prompt 组装，而不是字段容量。数据继续增长时应优先考虑分页读取 transcription chunks 或按需返回，而不是把大字段塞回主任务表。
 
 **追问 4.3: VideoTranscriptionChunk 表的作用是什么？和 VideoTranscription 是什么关系？**
 
@@ -365,7 +365,7 @@ type VideoChunk struct {
 
 **追问 6.1: VectorID 存储的是什么？为什么需要 uniqueIndex？**
 
-VectorID 是向量数据库（Milvus）中对应向量的唯一标识。查询流程是：先从 MySQL 查出 VideoChunk 得到 VectorID，再用 VectorID 去 Milvus 查询相似向量。VectorID 的 uniqueIndex 保证一个 chunk 在 Milvus 中只有一个对应的向量，避免重复索引。
+VectorID 是关系型 chunk 与向量投影共享的稳定 evidence identity。当前 pgvector 行保存同一个 VectorID，检索结果再通过它关联 citation；Milvus 回滚适配也沿用这一标识。数据库 uniqueIndex 防止同一 evidence identity 重复落库，但真正的索引幂等还依赖 scope replace/upsert 逻辑。
 
 **追问 6.2: ContentHash 和 FileMD5 有什么区别？**
 
@@ -373,7 +373,7 @@ FileMD5 是整个视频文件的哈希，用于文件级去重（秒传）。Con
 
 **追问 6.3: 为什么 EmbeddingDim 要单独存储，而不是从 EmbeddingModel 推导？**
 
-不同模型的向量维度不同（如 ada-002 是 1536 维，text-embedding-3-small 可以配置为 512/1536 维）。存储 EmbeddingDim 有两个用途：1) 创建 Milvus Collection 时需要指定维度；2) 检索时验证查询向量和存储向量的维度一致性。
+不同模型的向量维度不同（如 ada-002 是 1536 维，text-embedding-3-small 可以配置为 512/1536 维）。存储 EmbeddingDim 有两个用途：1) 创建 pgvector 表及校验写入时需要固定维度；2) 检索时验证查询向量和存储向量的维度一致性。
 
 ---
 
@@ -391,55 +391,34 @@ NextRetryAt *time.Time `json:"next_retry_at,omitempty"`
 ```
 
 重试流程：
-1. 任务失败时，`RecordRetryableFailure` 更新 `retry_count++`、`next_retry_at = now + backoff`
-2. `FindDueRetryTasks` 查询 `status=Failed AND next_retry_at <= now AND retry_count <= max_retries`
-3. `ClaimRetryTask` 通过乐观锁抢占任务，重新投递到消息队列
+1. 任务失败时，失败状态会同时落到 task/job，并写入 `next_retry_at`；
+2. `FindDueRetryTasks` 查询到期失败任务，也会发现过期的 dispatch/processing lease；
+3. `ClaimRetryDispatch` 使用候选行的 `lease_version` 和新 token，在一个 PostgreSQL transaction 内同步认领 task 与 task_job；
+4. Kafka producer 失败时，`RestoreRetryDispatch` 只允许当前 token owner 事务性恢复两张表；进程崩溃则由 lease 到期后的下一轮扫描接管。
 
 ```go
-// internal/repository/task.go:211-224
-func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.VideoTask, error) {
-    var tasks []model.VideoTask
-    err := r.db.
-        Where("status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ? AND retry_count <= max_retries AND last_job_type <> ?",
-            model.TaskStatusFailed, now, "").
-        Order("next_retry_at ASC").
-        Limit(limit).
-        Find(&tasks).Error
-    return tasks, err
-}
-```
-
-```go
-// internal/repository/task.go:226-241
-func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
-    tx := r.db.Model(&model.VideoTask{}).
-        Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", id, model.TaskStatusFailed, now).
-        Updates(updates)
-    // RowsAffected == 0 表示被其他进程抢占
-    return tx.RowsAffected > 0, nil
-}
+claimed, err := repos.ClaimRetryDispatch(repository.TaskDispatchClaimRequest{
+    TaskID: task.ID, JobType: task.LastJobType,
+    ExpectedVersion: task.LeaseVersion,
+    Now: now, LeaseUntil: now.Add(dispatchLease), Token: claimToken,
+})
 ```
 
 ### 追问链
 
-**追问 7.1: ClaimRetryTask 为什么用 `WHERE status = Failed` 而不是用版本号？**
+**追问 7.1：为什么既要 lease version，又要 token？**
 
-使用状态字段作为乐观锁比版本号更简洁。`ClaimRetryTask` 的 WHERE 条件包含 `status = Failed AND next_retry_at <= now`，如果另一个进程已经抢占了这个任务（把 status 改为 Queued/Running），WHERE 条件不匹配，`RowsAffected` 为 0，当前进程就知道抢占失败了。这避免了引入额外的 version 字段。
+version 防止基于旧快照的 scheduler 抢占已经变化的任务；token 标识本次 dispatch owner。恢复操作必须同时匹配 token、lease kind 和 version，旧 owner 不能覆盖新 owner 的状态。
 
-**追问 7.2: `last_job_type <> ''` 这个条件的作用是什么？**
+**追问 7.2：`last_job_type <> ''` 的作用是什么？**
 
-`FindDueRetryTasks` 中的 `last_job_type <> ''` 排除了没有执行过任何 Job 的任务。如果一个任务从未被处理过（last_job_type 为空），它不应该进入重试队列，而是应该通过正常的调度流程处理。
+它排除没有可恢复 job 类型的任务。Scheduler 必须知道应重新投递 download、transcribe、analyze 还是 rag-index topic，不能猜测。
 
-**追问 7.3: RestoreAfterDispatchFailure 方法的使用场景是什么？**
+**追问 7.3：Kafka 投递失败或进程崩溃怎么恢复？**
 
-```go
-// internal/repository/task.go:243-255
-func (r *TaskRepository) RestoreRetryAfterDispatchFailure(id int64, stage, errMsg string, nextRetryAt time.Time) error {
-    // 将任务状态恢复为 Failed，保持 next_retry_at 不变
-}
-```
+producer 明确返回错误时调用 `RestoreRetryDispatch`，把 task 和 task_job 一起恢复为 Failed，写入 `retry_enqueue_failed` 与短退避时间，而且不增加业务 retry_count。如果进程在 claim 后直接崩溃，没有机会主动 restore，扫描器会在 dispatch lease 过期后重新发现并接管。
 
-当重试调度器成功抢占任务（ClaimRetryTask 返回 true），但在投递消息到 Kafka 时失败了，需要把任务状态恢复为 Failed，让下一轮调度器可以重新捞起。这是一种"先改状态再投递"的事务补偿模式。
+这仍不是 transactional outbox：PostgreSQL commit 和 Kafka write 不在一个原子事务内，只是把半成功窗口变成可检测、可恢复的 lease 状态。
 
 ---
 
@@ -643,6 +622,6 @@ type UserUsageDaily struct {
 
 UserUsageDaily 是按用户按天聚合的用量统计表，`(user_id, date)` 唯一索引保证每天每个用户只有一条记录。用途：1) 限流配额的计算依据；2) 用户用量展示；3) 成本核算。避免每次都从 AICallLog 表聚合查询。
 
-**追问 10.3: 如果要支持视频分片上传的断点续传，数据模型需要怎么扩展？**
+**追问 10.3: 视频分片上传的断点续传如何建模？**
 
-当前 VideoTask 的 `SourceType` 已经支持 `"chunked"` 类型。断点续传需要记录已上传的分片信息，可以在应用层使用 Redis Set 记录已上传的 chunk 序号（`uploaded_chunks:task_id -> {0,1,2,...}`），不需要额外的数据库表。分片合并后，通过 `MergeChunks` 接口更新 VideoTask 的 Status 和 FileURL。
+当前使用两张 PostgreSQL 表，而不是 Redis 临时片号：`upload_sessions` 保存 `user_id`、不可变 manifest、生命周期、completion token/expiry、最终 asset/task identity；`upload_session_chunks` 用 `(session_id, chunk_index)` 唯一约束保存精确 size、SHA-256 和 MinIO object name。这样重启后仍能恢复 owner、进度和完成回执。MinIO 保存字节，Redis 不参与上传正确性。详细见[上传专项](/interview/resume-grill/resume-core/chunk-upload/)。

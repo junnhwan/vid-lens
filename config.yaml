@@ -6,6 +6,14 @@ server:
 
 database:
   host: 127.0.0.1
+  port: 5433
+  username: vidlens
+  password: vidlens
+  dbname: vidlens
+  sslmode: disable
+
+legacy_mysql:
+  host: 127.0.0.1
   port: 3307
   username: root
   password: root
@@ -19,7 +27,7 @@ redis:
   db: 0
 
 minio:
-  endpoint: localhost:9000
+  endpoint: 127.0.0.1:9000
   access_key: minioadmin
   secret_key: minioadmin
   bucket: vidlens
@@ -27,7 +35,7 @@ minio:
 
 kafka:
   brokers:
-    - localhost:19092
+    - 127.0.0.1:19092
   analyze_topic: "video-analyze"
   transcribe_topic: "video-transcribe"
   download_topic: "video-download"
@@ -49,7 +57,7 @@ ai:
 tools:
   ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
   ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
-  cookies_path: ""
+  cookies_path: "D:/Download/www.bilibili.com_cookies.txt"
   proxy_url: ""
   allowed_video_hosts:
     - bilibili.com
@@ -75,11 +83,18 @@ task_retry:
   scan_interval_seconds: 30
   batch_size: 20
 
+cleanup:
+  scan_interval_seconds: 30
+  batch_size: 20
+  lease_seconds: 120
+  retry_backoff_seconds: 60
+
 ratelimit:
   capacity: 10    # 桶容量
   rate: 10        # 每秒生成令牌数
 
 rag:
+  store: pgvector
   enabled: true
   chunk_size: 800
   chunk_overlap: 120
@@ -88,12 +103,10 @@ rag:
   min_score: 0.35
   recent_turns: 8
   embedding_dim: 1536
-  collection: "vidlens_video_chunks"
-  # Optional. If empty, OpenAI-compatible rerank derives /rerank from an embedding endpoint ending in /embeddings.
-  rerank_endpoint: ""
-  rerank_model: "Qwen/Qwen3-Reranker-4B"
+  vector_table: vidlens_rag_vectors
 
 milvus:
+  collection: "vidlens_video_chunks"
   address: "127.0.0.1:19530"
   username: ""
   password: ""

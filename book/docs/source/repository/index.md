@@ -164,16 +164,17 @@ func (r *TaskRepository) FindDueRetryTasks(now time.Time, limit int) ([]model.Vi
 }
 ```
 
-`ClaimRetryTask`（`task.go:226-241`）使用条件更新原语将任务从 Failed 状态原子性地恢复到 Running：
+`ClaimRetryDispatch`（`task_lease_dispatch.go`）在一个 PostgreSQL transaction 内同时认领 task 和对应 task_job。它校验候选行的 `lease_version`，然后写入同一个 dispatch token、lease kind 和过期时间：
 
 ```go
-func (r *TaskRepository) ClaimRetryTask(id int64, now time.Time, status int8, stage string) (bool, error) {
-    tx := r.db.Model(&model.VideoTask{}).
-        Where("id = ? AND status = ? AND next_retry_at IS NOT NULL AND next_retry_at <= ?", id, model.TaskStatusFailed, now).
-        Updates(updates)
-    return tx.RowsAffected > 0, nil
-}
+claimed, err := repos.ClaimRetryDispatch(repository.TaskDispatchClaimRequest{
+    TaskID: task.ID, JobType: task.LastJobType,
+    ExpectedVersion: task.LeaseVersion,
+    Now: now, LeaseUntil: now.Add(dispatchLease), Token: claimToken,
+})
 ```
+
+多个 scheduler 即使扫描到同一候选，也只有版本和状态仍匹配的一方能成功；旧 owner 之后不能凭过期 token 覆盖新状态。
 
 ### 3.4 幂等作业投递 (`task_job.go:29-70`)
 
@@ -369,7 +370,8 @@ Consumer B: UpdateStatusIf(id, [Pending], Running)  --> false (RowsAffected=0, a
 
 Scenario: retry scheduler and normal consumer compete
 
-Scheduler:  ClaimRetryTask(id, now, Running, stage)   --> true  (recover from Failed)
+Scheduler A: ClaimRetryDispatch(version=3, token=A) --> true
+Scheduler B: ClaimRetryDispatch(version=3, token=B) --> false (version/lease changed)
 Consumer:   UpdateStatusIf(id, [Pending], Running)    --> false (status already Running)
 ```
 

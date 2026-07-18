@@ -286,6 +286,50 @@ func TestParseEvalFlagsIncludesStrictArtifactAndRegistryOptions(t *testing.T) {
 	}
 }
 
+func TestParseEvalFlagsIncludesExplicitLegacyModelRerankOptions(t *testing.T) {
+	opts, err := parseEvalFlags([]string{
+		"--rerank-endpoint", "https://api.example.com/v1/rerank",
+		"--rerank-model", "Qwen/Qwen3-Reranker-4B",
+	})
+	if err != nil {
+		t.Fatalf("parseEvalFlags() error = %v", err)
+	}
+	if opts.rerankEndpoint != "https://api.example.com/v1/rerank" || opts.rerankModel != "Qwen/Qwen3-Reranker-4B" {
+		t.Fatalf("legacy model rerank options = endpoint %q model %q", opts.rerankEndpoint, opts.rerankModel)
+	}
+}
+
+func TestLegacyModelRerankIsEnabledOnlyByExplicitModel(t *testing.T) {
+	if (evalOptions{}).legacyModelRerankEnabled() {
+		t.Fatal("legacy model rerank unexpectedly enabled by default")
+	}
+	if !(evalOptions{rerankModel: "Qwen/Qwen3-Reranker-4B"}).legacyModelRerankEnabled() {
+		t.Fatal("legacy model rerank disabled despite explicit model")
+	}
+}
+
+func TestParseEvalFlagsRequiresLegacyRerankModelWhenEndpointIsSet(t *testing.T) {
+	_, err := parseEvalFlags([]string{"--rerank-endpoint", "https://api.example.com/v1/rerank"})
+	if err == nil || !strings.Contains(err.Error(), "rerank-model") {
+		t.Fatalf("parseEvalFlags() error = %v, want rerank-model requirement", err)
+	}
+}
+
+func TestParseEvalFlagsRejectsLegacyModelRerankOptionsInStrictMode(t *testing.T) {
+	for _, args := range [][]string{
+		{"--rerank-model", "Qwen/Qwen3-Reranker-4B"},
+		{"--rerank-endpoint", "https://api.example.com/v1/rerank"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			strictArgs := append([]string{"--strict", "--dataset-version", "rag-v1"}, args...)
+			_, err := parseEvalFlags(strictArgs)
+			if err == nil || !strings.Contains(err.Error(), "legacy-only") || !strings.Contains(err.Error(), "strict") {
+				t.Fatalf("parseEvalFlags() error = %v, want strict-mode boundary error", err)
+			}
+		})
+	}
+}
+
 func TestParseEvalFlagsAllowsSnapshotOnlyWithoutPreregisteredHashes(t *testing.T) {
 	opts, err := parseEvalFlags([]string{
 		"--strict", "--snapshot-only", "--dataset-version", "rag-v1", "--split", "dev",

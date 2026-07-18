@@ -140,7 +140,7 @@ func (t *ProfileTester) TestProfile(ctx context.Context, profile Profile) error 
 		return err
 	}
 	if profile.EmbeddingDim > 0 && len(vector) != profile.EmbeddingDim {
-		return fmt.Errorf("Embedding 维度不匹配: 返回 %d，配置 %d", len(vector), profile.EmbeddingDim)
+		return fmt.Errorf("embedding 维度不匹配: 返回 %d，配置 %d", len(vector), profile.EmbeddingDim)
 	}
 	return nil
 }

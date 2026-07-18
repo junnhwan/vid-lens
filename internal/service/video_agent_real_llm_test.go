@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/config"
+	appdb "vid-lens/internal/database"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/secret"
 	"vid-lens/internal/repository"
@@ -26,10 +26,12 @@ func TestVideoAgentRealLLMSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	db, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
+	connection, err := appdb.OpenPostgres(context.Background(), cfg.Database)
 	if err != nil {
-		t.Fatalf("open mysql: %v", err)
+		t.Fatalf("open PostgreSQL: %v", err)
 	}
+	defer connection.Close()
+	db := connection.GORM
 	repos := repository.NewRepositories(db)
 	secretText := cfg.Security.APIKeySecret
 	if secretText == "" {

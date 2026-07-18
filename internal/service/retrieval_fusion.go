@@ -142,7 +142,7 @@ func ExtractQueryTerms(query string) []string {
 		cjk = cjk[:0]
 	}
 
-	for _, r := range []rune(query) {
+	for _, r := range query {
 		switch {
 		case isCJK(r):
 			flushASCII()

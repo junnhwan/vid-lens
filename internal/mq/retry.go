@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -280,6 +281,7 @@ type RetryScheduler struct {
 	repos    *repository.Repositories
 	producer retryProducer
 	config   RetrySchedulerConfig
+	wg       sync.WaitGroup
 }
 
 func NewRetryScheduler(repos *repository.Repositories, producer retryProducer, config RetrySchedulerConfig) *RetryScheduler {
@@ -305,10 +307,17 @@ func NewRetryScheduler(repos *repository.Repositories, producer retryProducer, c
 }
 
 func (s *RetryScheduler) Start(ctx context.Context) {
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		ticker := time.NewTicker(s.config.Interval)
 		defer ticker.Stop()
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if err := s.RunOnce(ctx); err != nil {
 				observability.Log(ctx, slog.Default(), slog.LevelError, "retry scheduler failed", slog.String("error", observability.SafeError(err)))
 			}
@@ -319,6 +328,11 @@ func (s *RetryScheduler) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// Wait blocks until the scheduler worker has observed context cancellation.
+func (s *RetryScheduler) Wait() {
+	s.wg.Wait()
 }
 
 func (s *RetryScheduler) RunOnce(ctx context.Context) error {

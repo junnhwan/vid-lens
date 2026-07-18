@@ -1,147 +1,157 @@
 # 面试作战手册
 
-> 这部分不是八股清单，而是面试现场可以直接说的项目回答稿。每个回答都只讲 VidLens 已经实现的事实，并明确当前限制和未来优化。
+> 本页是面试现场可直接口述的当前实现稿。事实以源码和 `MEMORY.md` 为准；MySQL + Milvus 只代表第一版架构和迁移历史，远端 PostgreSQL 切换完成前不要外推线上状态。
 
 ## 1. 你这个项目一句话是什么？
 
 ### 直接回答
 
-VidLens 是一个 Go 后端为主的 AI 视频理解项目。用户上传视频或提交视频 URL 后，后端先把视频文件放到 MinIO，再通过 Kafka 异步处理下载、音频提取、ASR 转写、LLM 摘要和 RAG 索引。真正的核心不是“调了一个 AI 接口”，而是把长时间、高成本、容易失败的视频 AI 流程做成可追踪、可重试、可解释的后台任务。
+VidLens 是一个以 Go 后端为主的 AI 视频理解项目。用户上传视频后，后端将文件保存到 MinIO，通过 Kafka 异步执行音频提取、分段 ASR、摘要和 RAG 建索引，最后基于 ASR 转写提供带引用片段的视频问答。
 
-我会把它定位成“AI 视频理解后端”，不是单纯的 MQ/Redis demo。Kafka、Redis、MinIO、Milvus 这些组件都是为这个业务链路服务的：Kafka 解决 HTTP 请求不能等待几分钟的问题，Redis 做分布式锁和限流，MinIO 存视频和音频对象，Milvus 存转写文本的向量索引。
+项目重点不是简单串联模型 API，而是把耗时长、成本高、容易受外部服务影响的处理链路做成可追踪、可重试和可恢复的后台任务。PostgreSQL 保存业务数据、RAG 文本事实和 pgvector 向量投影；Redis 负责锁、限流和临时状态；Kafka 负责任务传递；MinIO 保存大文件。
 
 ### 项目证据
 
-- 启动时创建 Kafka topic、连接 Milvus、装配 ChatService/MediaService/Consumer：`cmd/server/main.go:110`, `cmd/server/main.go:135`, `cmd/server/main.go:169`, `cmd/server/main.go:177`, `cmd/server/main.go:194`
-- 任务状态枚举覆盖 pending/queued/running/completed/failed/dead，stage 覆盖 downloading/transcribing/summarizing/indexing：`internal/model/task.go:12`, `internal/model/task.go:27`
-- RAG 问答检索、最近聊天上下文和回答保存都在 ChatService 中完成：`internal/service/chat.go:129`, `internal/service/chat.go:144`, `internal/service/chat.go:192`, `internal/service/chat.go:208`
+- 启动和依赖装配：`cmd/server/main.go`、`cmd/server/wiring.go`
+- 任务和子作业状态：`internal/model/task.go`、`internal/model/task_job.go`
+- 视频处理 consumer：`internal/mq/consumer_*.go`
+- RAG 建索引和问答：`internal/service/rag_index*.go`、`internal/service/chat_*.go`
 
 ### 当前限制
 
-不要把它说成大规模生产系统。当前更准确的说法是：它已经覆盖了后台任务、RAG、BYOK、安全校验和部署验证这些后端项目核心面，但流量规模、计费配额、完整监控指标和生产级 URL 下载安全还没有完全做完。
+这是经过本地集成、迁移和部署验证的项目级后端，不应描述成大规模生产平台。远端 PostgreSQL 切换、完整计费配额、跨视频知识库和生产级 URL 下载隔离仍不能声称完成。
 
-## 2. 为什么用 Kafka 做异步，而不是 HTTP 同步处理？
-
-### 直接回答
-
-视频下载、FFmpeg 提取音频、ASR、摘要和 RAG 建索引都可能持续几十秒甚至几分钟。如果把这些步骤放在 HTTP 请求里，连接会一直挂着，用户刷新页面后状态也不清楚，服务端线程和上下文也会被长时间占住。
-
-VidLens 的做法是：HTTP 接口只负责创建任务、记录状态并投递 Kafka；后台 consumer 消费消息后按阶段处理，并把状态写回 MySQL。前端拿到 taskID 后轮询任务状态。这样失败可以落到 task/job 状态里，而不是变成一次模糊的 HTTP 超时。
-
-### 项目证据
-
-- Producer 使用 Kafka writer，`RequiredAcks: kafka.RequireAll`，并按 topic 投递 analyze/transcribe/download/rag_index 消息：`internal/mq/producer.go:47`, `internal/mq/producer.go:56`, `internal/mq/producer.go:77`, `internal/mq/producer.go:91`, `internal/mq/producer.go:104`, `internal/mq/producer.go:117`
-- URL 上传创建 downloading 任务后立即投递下载消息，投递失败会把任务和 TaskJob 标为失败：`internal/service/media.go:150`, `internal/service/media.go:174`, `internal/service/media.go:178`, `internal/service/media.go:181`
-- Consumer 分别启动 analyze、transcribe、download、rag_index 消费循环：`internal/mq/consumer.go:124`, `internal/mq/consumer.go:164`, `internal/mq/consumer.go:194`, `internal/mq/consumer.go:230`
-
-### 容易被追问
-
-**追问：Kafka 没有 RocketMQ 那种业务延迟重试，你怎么处理失败？**
-
-我没有把 Kafka 说成 RocketMQ。VidLens 用的是 DB 侧 retry state：失败时记录 `retry_count`、`next_retry_at`、`last_job_type`，RetryScheduler 定期扫描到期任务再重新投递 Kafka。Kafka 负责异步缓冲，重试语义主要在业务表里做。
-
-证据：`internal/mq/retry.go:118`, `internal/mq/retry.go:133`, `internal/mq/retry.go:193`, `internal/repository/task.go:211`
-
-## 3. 你的重试和最终一致性怎么保证？
+## 2. 为什么用 Kafka，而不是在 HTTP 请求里同步处理？
 
 ### 直接回答
 
-VidLens 的重试不是简单 catch 后 sleep。Consumer 处理失败时先判断是不是可重试错误：比如网络抖动、超时这类可以进入 retry；配置缺失、鉴权失败这类非重试错误直接失败，不浪费外部模型调用。
+视频下载、FFmpeg、ASR、摘要和向量索引可能持续几十秒甚至几分钟。放在 HTTP 请求中会长期占用连接；客户端超时或刷新后，也很难判断服务端是否仍在执行。
 
-可重试失败会写入 `next_retry_at`，RetryScheduler 到时间后先 claim 任务，把任务恢复到对应 running stage，再投递 Kafka。如果 claim 后 Kafka 投递失败，代码会把任务恢复回 failed，并重新设置下一次 retry 时间，避免任务被“夹在中间”永远不再调度。
+VidLens 的 HTTP 层只负责校验请求、创建任务和投递消息，consumer 执行具体阶段并把状态写回 PostgreSQL。前端通过任务状态看到 downloading、transcribing、summarizing 或 indexing，而不是只得到一次模糊的 HTTP 超时。
+
+Kafka 在这里负责持久异步传递，不代表 exactly-once，也不负责全部业务重试语义。重复执行和失败恢复仍由 task/job 状态、processing lease、幂等写入和重试调度共同约束。
 
 ### 项目证据
 
-- 非重试错误列表和 retryable 分支：`internal/mq/retry.go:51`, `internal/mq/retry.go:118`
-- 可重试失败记录 `next_retry_at`：`internal/mq/retry.go:133`, `internal/repository/task.go:176`
-- RetryScheduler 扫描、claim、投递；投递失败后恢复 retry 状态：`internal/mq/retry.go:193`, `internal/mq/retry.go:202`, `internal/mq/retry.go:210`, `internal/mq/retry.go:212`
-- 对应回归测试覆盖“claim 后 Kafka enqueue 失败恢复 next_retry_at”：`internal/mq/consumer_test.go:974`
+- Producer：`internal/mq/producer.go`
+- Consumer 生命周期与分阶段处理：`internal/mq/consumer.go`、`internal/mq/consumer_*.go`
+- Task/job 状态：`internal/model/task.go`、`internal/model/task_job.go`
+- Lease 与重试：`internal/repository/task_lease_*.go`、`internal/mq/retry.go`
 
 ### 当前限制
 
-这套设计适合当前单体 Go 后端和 MySQL 状态表。它不是完整的工作流引擎，没有 Temporal 那种跨版本 workflow replay、补偿事务和可视化 DAG。如果将来任务步骤更多，可以把任务编排进一步抽象，或者引入专门的 durable workflow。
+首次创建 task/job 后投递 Kafka 仍存在 DB commit 与 enqueue 之间的一致性窗口。当前不能声称已经实现 transactional outbox；应把它作为下一阶段可靠性改进。
 
-## 4. RAG 用的是什么数据？为什么不是 AI 摘要？
+## 3. 重试和最终一致性怎么处理？
 
 ### 直接回答
 
-VidLens 的 RAG 知识源是 ASR 转写全文，不是 AI 摘要。原因很直接：摘要已经是模型压缩过的二手信息，很多细节、时间点、原话都会丢。如果用户问的是“视频里某个细节怎么说的”，应该从更接近原始内容的转写文本里检索。
+Consumer 失败后先区分错误是否值得重试。网络抖动、超时和部分 provider 临时错误可以按 retry budget 进入重试；鉴权或必需配置错误通常直接失败，避免无意义地重复消耗外部调用。
 
-当前实现是：RAG 索引服务把转写文本切成 chunk，调用用户配置的 Embedding 模型生成向量，写入 Milvus；问答时先把问题向量化，再按 `user_id + task_id + embedding_model` 做隔离检索，同时合并 Go 侧 BM25 关键词结果，用 RRF 排序后拼 prompt。
+可重试失败会在 PostgreSQL 保存 retry count、next retry time 和 job type。RetryScheduler 到期后先通过 dispatch token 和 version lease 认领，再投递 Kafka。如果认领后 enqueue 失败，`RestoreRetryDispatch` 会在事务中把 task 和 job 恢复到可再次调度的失败状态，避免任务永久卡在 running。
+
+外部系统之间不是分布式事务。任务删除使用 durable cleanup intent 和可续租 scheduler；RAG 的 `video_chunks` 与 pgvector projection 分阶段发布，投影失败会记录 RAG failed 状态，并由重试、`rag-reindex` 和 `rag-audit` 恢复或发现不一致。
 
 ### 项目证据
 
-- BuildTaskIndex 读取转写文本、切 chunk、生成 embedding、写向量和本地 chunk：`internal/service/rag_index.go:118`, `internal/service/rag_index.go:150`, `internal/service/rag_index.go:179`, `internal/service/rag_index.go:190`
-- Milvus collection 字段包含 user_id、task_id、chunk_index、embedding_model、embedding：`internal/vector/milvus.go:67`, `internal/vector/milvus.go:83`, `internal/vector/milvus.go:92`
-- 检索时向量召回后合并 BM25，再用 RRF 融合：`internal/service/chat.go:160`, `internal/service/chat.go:174`, `internal/service/chat.go:258`, `internal/service/retrieval_fusion.go:14`
-- Go 侧 BM25 搜索按 user_id、task_id、embedding_model 限定 chunk：`internal/repository/video_chunk.go:47`, `internal/repository/video_chunk.go:59`
+- 重试调度：`internal/mq/retry.go`
+- Dispatch claim/restore：`internal/repository/task_lease_dispatch.go`
+- Durable cleanup：`internal/service/task_cleanup*.go`、`internal/repository/task_cleanup_job.go`
+- RAG 发布与恢复：`internal/service/rag_index_build.go`、`internal/service/rag_reindex.go`、`internal/service/rag_projection_audit.go`
 
 ### 当前限制
 
-不要说已经有专业搜索引擎、rerank 或跨视频知识库。当前是单视频范围内的 Milvus 向量检索 + Go 侧 BM25 风格检索 + RRF 融合。更强的方向是引入评估集、邻近 chunk 扩展、query rewrite、可选 rerank，以及当 chunk 数量变大时考虑 OpenSearch/Bleve/MySQL FULLTEXT。
+这不是通用 workflow engine，也不是跨 PostgreSQL、Kafka、MinIO、Redis 的全局事务。项目采用的是“关系库状态作为协调事实 + 可重试外部副作用”的有限最终一致性设计。
 
-## 5. BYOK 解决了什么？API Key 怎么存？
+## 4. RAG 用什么数据？为什么不是摘要？
 
 ### 直接回答
 
-公开部署时不能默认消耗维护者自己的 AI Key，所以 VidLens 让每个用户配置自己的 ASR、LLM、Embedding provider、baseURL、model 和 key。这样不同用户可以用不同服务商，也能把成本归到自己的账号。
+RAG 的知识源是 ASR 转写，不是 LLM 摘要。摘要本身已经压缩并改写过内容，可能丢掉时间点、术语、原句和局部例子；转写更接近原始视频证据。
 
-API Key 不会明文返回给前端，也不会直接存明文。请求进来后，Service 用 AES-GCM codec 加密成 ciphertext 存到 `user_ai_profiles`；展示列表时只返回 mask 后的 key；真正调用模型前才解密成运行时 profile。
+建索引时先将转写切成带 overlap 的 chunk，保存到 PostgreSQL `video_chunks`，再把带稳定 evidence ID 的向量投影发布到同一 PostgreSQL 实例中的 pgvector 表。查询时按 `user_id + task_id + embedding_model` 隔离，执行 pgvector 语义召回和 Go 侧 BM25 关键词召回，再用 RRF 融合并返回 citations。
 
 ### 项目证据
 
-- UserAIProfile 的三类 API key 字段都 `json:"-"`，避免序列化泄露：`internal/model/ai_profile.go:7`, `internal/model/ai_profile.go:13`, `internal/model/ai_profile.go:17`, `internal/model/ai_profile.go:21`
-- AES-GCM 加密、随机 nonce、base64 payload 和解密逻辑：`internal/pkg/secret/crypto.go:40`, `internal/pkg/secret/crypto.go:47`, `internal/pkg/secret/crypto.go:60`
-- 创建/更新 profile 时加密或保留原密文，返回时 mask，使用时 decrypt：`internal/service/ai_profile.go:229`, `internal/service/ai_profile.go:263`, `internal/service/ai_profile.go:303`, `internal/service/ai_profile.go:311`
-- AI Factory 按 profile 创建 ASR/LLM/Embedding 客户端：`internal/ai/factory.go:34`, `internal/ai/factory.go:47`, `internal/ai/factory.go:58`
+- 建索引：`internal/service/rag_index_build.go`、`internal/service/rag_artifact.go`
+- pgvector：`internal/vector/pgvector.go`
+- BM25：`internal/repository/video_chunk.go`
+- RRF 与查询管线：`internal/service/retrieval_fusion.go`、`internal/service/rag_pipeline.go`
+- 引用与检索快照：`internal/service/chat_prepare.go`、`internal/service/chat_stream.go`、`internal/model/chat.go`
 
 ### 当前限制
 
-这还不是完整的计费系统。项目已经有 AI 调用记录和日聚合，但没有做用户 quota、价格表、余额扣费和账单。面试里可以说“有审计基础”，不要说“已经实现完整计费”。
+`video_chunks` 和 pgvector projection 虽然位于同一个 PostgreSQL 实例，但当前仍由两个 transaction 分阶段更新，不能说成整体强一致。BM25 目前按单视频读取 chunks 后在 Go 内计算，适合项目规模，不等于专业倒排搜索引擎。
 
-## 6. URL 下载有什么安全风险？你做到了哪一层？
-
-### 直接回答
-
-URL 下载最大的风险是 SSRF：用户提交一个看起来像视频的链接，但实际让服务器访问内网地址、localhost 或云元数据服务。VidLens 做了第一层防护：只允许 http/https，要求 host 在白名单或默认视频站域名里，DNS 解析后拒绝 private、loopback、link-local、multicast 等 IP，并且会清洗 URL 的 query 和 fragment，避免日志里泄露 token。
-
-我不会把它说成生产级 URL 下载安全，因为 yt-dlp 可能跟随重定向，DNS rebinding、下载大小硬限制、超时策略、用户级 cookies 管理都还需要继续补。
-
-### 项目证据
-
-- URL 校验入口：`internal/service/media.go:150`, `internal/service/media.go:152`
-- 默认允许视频域名、http/https 限制、localhost 拒绝、host allowlist、DNS 私网 IP 检查和 URL 清洗：`internal/service/remote_video_url.go:13`, `internal/service/remote_video_url.go:52`, `internal/service/remote_video_url.go:61`, `internal/service/remote_video_url.go:68`, `internal/service/remote_video_url.go:71`, `internal/service/remote_video_url.go:89`, `internal/service/remote_video_url.go:94`
-- 下载日志使用 sanitized URL：`internal/mq/consumer.go:282`, `internal/mq/consumer.go:286`
-- yt-dlp 参数支持 cookies/proxy，并限制下载格式到最高 720p：`internal/pkg/ytdlp/ytdlp.go:45`, `internal/pkg/ytdlp/ytdlp.go:54`, `internal/pkg/ytdlp/ytdlp.go:57`
-
-### 容易被追问
-
-**追问：为什么还不能说生产级？**
-
-因为当前校验在提交阶段做得比较多，但真正下载由 yt-dlp 执行，重定向链路、下载过程中的 DNS 变化、资源大小和耗时限制都还需要更严格地约束。面试里应该主动说出这个边界，反而更可信。
-
-## 7. 你用 AI 写项目，怎么证明自己懂？
+## 5. 为什么从 MySQL + Milvus 改成 PostgreSQL + pgvector？
 
 ### 直接回答
 
-我会坦诚说 AI 参与了实现加速，但项目不是“生成完就算”。真正让我理解项目的是不断用真实 bug 反推设计：长视频 ASR 一开始会因为音频过大失败，后来做了 FFmpeg 压缩和 300 秒切片；RAG 状态一开始前端不知道索引失败原因，后来加了 `video_rag_indexes` 状态；URL 下载上线后遇到 B 站 412、YouTube 网络问题，所以补了 cookies/proxy 配置和错误提示；重试调度也补过 claim 后 Kafka 投递失败的恢复。
+第一版用 MySQL 保存业务表、Milvus 保存向量。对于当前数据量和单体后端，两套持久化系统带来的配置、部署、备份和对账成本，高于专用向量库带来的收益。
 
-面试里我不会背“AI 提升效率”这种空话，而是讲我怎么定位日志、读源码、补测试、区分已实现和未来优化。
+pgvector 是 PostgreSQL 扩展，因此迁移后普通业务表、`video_chunks` 和向量投影可以统一放在 PostgreSQL。API Server 只连接 PostgreSQL，不做 MySQL/PostgreSQL 双写。`legacy_mysql`、迁移命令和 Milvus adapter 只是观察期审计或回滚资产，不是默认运行时依赖。
 
 ### 项目证据
 
-- 长视频 ASR 问题和修复记录：`docs/troubleshooting-and-interview-notes.md:38`, `docs/troubleshooting-and-interview-notes.md:47`, `docs/troubleshooting-and-interview-notes.md:61`
-- README 记录 300 秒切片和复用已有转写：`README.md:226`, `README.md:234`, `README.md:239`
-- URL 下载部署和代理/cookies 说明：`README.md:148`, `internal/pkg/ytdlp/ytdlp.go:63`
-- 重试调度恢复测试：`internal/mq/consumer_test.go:974`
+- Server 数据库入口：`cmd/server/database.go`
+- PostgreSQL 连接和模型迁移：`internal/database/postgres.go`、`internal/model/model.go`
+- 向量 backend factory：`internal/vector/factory.go`
+- 数据迁移与审计：`cmd/mysql-to-postgres/`、`internal/dbmigration/`
+- 迁移边界：`docs/postgresql-single-database-migration.md`、`docs/pgvector-migration.md`
 
 ### 当前限制
 
-AI 辅助项目最怕的是夸大。我的说法会保守：我能解释核心链路、读得懂关键源码、知道哪些是当前事实，哪些只是 roadmap。比如不会说 RocketMQ、Redisson、Function Calling、rerank、完整 quota 这些当前代码没有的东西。
+这不是说 pgvector 永远优于 Milvus。若未来向量规模、并发或 ANN 延迟经基准测试证明超出 PostgreSQL 的合理边界，再评估专用向量系统；目前不为简历堆叠两套数据库。
 
-## 面试前 15 分钟速刷顺序
+## 6. BYOK 解决了什么？API Key 怎么保存？
 
-1. 先背项目定位：AI 视频理解后端，核心是长任务和高成本 AI 流程的工程化。
-2. 再背三条主线：Kafka 异步任务、RAG 基于 ASR 转写、BYOK + URL 安全边界。
-3. 最后准备两个真实 bug：长视频 ASR 截断、RetryScheduler 投递失败恢复。
-4. 被问未来优化时，优先讲 URL 下载安全和 RAG 评估，不要把未来工作说成已经完成。
+### 直接回答
+
+公共部署不能长期消耗维护者自己的模型额度，因此用户可以配置 ASR、LLM 和 Embedding endpoint、model 与 API key。Key 使用服务端主密钥进行 AES-GCM 加密后保存，模型调用前才解密；模型字段禁止 JSON 序列化，列表接口只返回 mask 后的值。
+
+### 项目证据
+
+- Profile 模型：`internal/model/ai_profile.go`
+- 加解密：`internal/pkg/secret/crypto.go`
+- Profile 生命周期：`internal/service/ai_profile.go`
+- Client factory：`internal/ai/factory.go`
+
+### 当前限制
+
+项目已经有调用日志和日聚合，但没有完整价格表、余额、扣费和 quota，不应说成计费系统。
+
+## 7. URL 下载安全做到哪一层？
+
+### 直接回答
+
+URL 下载只作为自用便利功能维护。当前保留第一层边界：只允许 http/https、限制 host、DNS 解析后拒绝私网和特殊地址、执行前复检，并清洗日志中的 query 和 fragment。
+
+我不会把它说成生产级 URL 下载平台。重定向链、DNS rebinding、下载体积和耗时硬限制、用户 cookies 隔离仍有缺口；因为该功能不进入简历主线，后续只修明确安全问题，不继续扩大投入。
+
+### 项目证据
+
+- URL 边界：`internal/pkg/remoteurl/`、`internal/service/remote_video_url.go`
+- 下载执行：`internal/mq/consumer_download.go`、`internal/pkg/ytdlp/ytdlp.go`
+
+## 8. 项目由 AI 辅助开发，怎么证明自己理解？
+
+### 直接回答
+
+我会坦诚 AI 参与了实现，但不会用“AI 提效”替代理解。项目的可信证据是：我能从真实故障解释设计变化，例如长视频 ASR 失败后改成分段处理和片段复用，RAG 状态缺失后补状态表，RetryScheduler 认领后投递失败再补事务恢复，数据库从 MySQL + Milvus 收敛为 PostgreSQL + pgvector 并做独立迁移审计。
+
+回答时会区分三类内容：当前源码事实、历史故障、未来方向。RocketMQ、Redisson、Kafka exactly-once、完整 outbox、生产级 URL 安全和大规模收益都不会冒充已实现事实。
+
+### 项目证据
+
+- 长期事实源：`MEMORY.md`
+- 维护入口：`docs/backend-maintenance-map.md`
+- 故障记录：`docs/troubleshooting-and-interview-notes.md`
+- 阶段审计：`docs/superpowers/audits/2026-07-17-plan-completion-audit.md`
+
+## 面试前 15 分钟速刷
+
+1. 项目定位：AI 视频理解后端，核心是长任务和高成本 AI 流程的工程化。
+2. 四条主线：Kafka 状态与重试、分段 ASR、分片上传、pgvector + BM25 + RRF。
+3. 两个边界：首次 Kafka 投递尚无 outbox；upload session 尚未服务端持久化。
+4. 两个真实复盘：长视频 ASR 分段、RetryScheduler enqueue 失败恢复。
+5. 数据库口径：当前本地 PostgreSQL 单库；MySQL/Milvus 仅迁移历史和观察期回滚；远端切换不能提前声称完成。

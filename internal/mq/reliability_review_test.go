@@ -16,13 +16,15 @@ import (
 )
 
 type leaseCapturingRetryProducer struct {
-	tokens []string
-	tasks  []int64
-	err    error
+	tokens  []string
+	budgets []string
+	tasks   []int64
+	err     error
 }
 
 func (p *leaseCapturingRetryProducer) capture(ctx context.Context, taskID int64) error {
 	p.tokens = append(p.tokens, claimTokenFromContext(ctx))
+	p.budgets = append(p.budgets, retryBudgetIDFromContext(ctx))
 	p.tasks = append(p.tasks, taskID)
 	return p.err
 }
@@ -66,6 +68,69 @@ func TestRetrySchedulerPersistsMatchingDispatchLeaseBeforeEnqueue(t *testing.T) 
 	}
 }
 
+func TestInitialDispatchLeaseExpiryFlowsThroughSchedulerToConsumerHandoff(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	preparedAt := time.Date(2026, 7, 17, 11, 0, 0, 0, time.UTC)
+	initialLeaseUntil := preparedAt.Add(time.Minute)
+	task := &model.VideoTask{
+		UserID: 26, FileMD5: "12121212121212121212121212121212", Filename: "initial-recovery.mp4",
+		Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-initial-recovery", MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	prepared, err := repos.PrepareInitialTaskDispatch(repository.InitialTaskDispatchRequest{
+		Task: task, AllowedStatuses: []int8{model.TaskStatusPending},
+		JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing,
+		Now: preparedAt, LeaseUntil: initialLeaseUntil, Token: "abandoned-initial-token",
+	})
+	if err != nil {
+		t.Fatalf("prepare initial dispatch: %v", err)
+	}
+
+	schedulerNow := initialLeaseUntil.Add(time.Second)
+	producer := &leaseCapturingRetryProducer{}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		BatchSize: 10, Now: func() time.Time { return schedulerNow }, DispatchLease: 2 * time.Minute,
+		NewToken: func() string { return "scheduler-dispatch-token" },
+	})
+	if err := scheduler.RunOnce(context.Background()); err != nil {
+		t.Fatalf("scheduler RunOnce: %v", err)
+	}
+	if len(producer.tasks) != 1 || producer.tasks[0] != task.ID || len(producer.tokens) != 1 || producer.tokens[0] != "scheduler-dispatch-token" {
+		t.Fatalf("scheduler publish correlation = tasks:%v tokens:%v", producer.tasks, producer.tokens)
+	}
+	if len(producer.budgets) != 1 || producer.budgets[0] != prepared.RetryBudgetID {
+		t.Fatalf("scheduler retry budget = %v, want %q", producer.budgets, prepared.RetryBudgetID)
+	}
+
+	consumer := &Consumer{
+		repo: repos, processingLease: time.Hour,
+		now:      func() time.Time { return schedulerNow.Add(time.Second) },
+		newToken: func() string { return "consumer-processing-token" },
+	}
+	claim, err := consumer.claimTaskForMessage(task.ID, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, producer.tokens[0])
+	if err != nil {
+		t.Fatalf("consumer handoff: %v", err)
+	}
+	if claim.Outcome != repository.TaskLeaseAcquired || claim.Token != "consumer-processing-token" {
+		t.Fatalf("consumer claim = %+v", claim)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find processing task: %v", err)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
+	if err != nil {
+		t.Fatalf("find processing job: %v", err)
+	}
+	if current.Status != model.TaskStatusRunning || current.LeaseKind != model.TaskLeaseKindProcessing || current.ProcessingToken != claim.Token {
+		t.Fatalf("processing task = %+v", current)
+	}
+	if job == nil || job.Status != model.TaskStatusRunning || job.LeaseKind != model.TaskLeaseKindProcessing || job.ProcessingToken != claim.Token || job.RetryBudgetID != prepared.RetryBudgetID {
+		t.Fatalf("processing job = %+v", job)
+	}
+}
 func TestRetrySchedulerClaimRollsBackWhenTaskJobLeaseWriteFails(t *testing.T) {
 	repos, db := newConsumerLoopTestRepositories(t)
 	now := time.Date(2026, 7, 14, 5, 0, 0, 0, time.UTC)

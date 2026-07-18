@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNewMetricsServerUsesLoopbackAdminListenerAndOnlyMetricsRoute(t *testing.T) {
@@ -33,5 +35,25 @@ func TestMetricsAddressRejectsWildcardBindingWithoutExplicitOptIn(t *testing.T) 
 	t.Setenv("VIDLENS_METRICS_ALLOW_REMOTE", "true")
 	if got := metricsListenAddress(); got != "0.0.0.0:19090" {
 		t.Fatalf("opt-in addr=%q", got)
+	}
+}
+
+func TestServeMetricsStopsWhenContextIsCanceled(t *testing.T) {
+	t.Setenv("VIDLENS_METRICS_ADDR", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- serveMetrics(ctx, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serveMetrics returned error during shutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("metrics server did not stop after context cancellation")
 	}
 }
