@@ -34,15 +34,17 @@ func NewChatHandler(chatSvc *service.ChatService, profileSvc *service.AIProfileS
 func (h *ChatHandler) CreateSession(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	var req struct {
-		TaskID int64  `json:"task_id" binding:"required"`
-		Title  string `json:"title"`
+		TaskID          int64  `json:"task_id"`
+		ScopeType       string `json:"scope_type"`
+		KnowledgeBaseID int64  `json:"knowledge_base_id"`
+		Title           string `json:"title"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 
-	session, err := h.chatSvc.CreateSession(userID, req.TaskID, req.Title)
+	session, err := h.chatSvc.CreateScopedSession(userID, service.CreateChatSessionRequest{TaskID: req.TaskID, ScopeType: req.ScopeType, KnowledgeBaseID: req.KnowledgeBaseID, Title: req.Title})
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -53,7 +55,8 @@ func (h *ChatHandler) CreateSession(c *gin.Context) {
 func (h *ChatHandler) ListSessions(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Query("task_id"), 10, 64)
-	sessions, err := h.chatSvc.ListSessions(userID, taskID)
+	knowledgeBaseID, _ := strconv.ParseInt(c.Query("knowledge_base_id"), 10, 64)
+	sessions, err := h.chatSvc.ListSessionsWithFilter(userID, service.ListChatSessionsFilter{TaskID: taskID, KnowledgeBaseID: knowledgeBaseID, ScopeType: c.Query("scope_type")})
 	if err != nil {
 		response.InternalError(c, "查询会话失败")
 		return

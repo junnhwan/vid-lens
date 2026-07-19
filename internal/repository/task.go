@@ -45,6 +45,15 @@ func (r *TaskRepository) FindByIDForUpdate(id int64) (*model.VideoTask, error) {
 	return &task, nil
 }
 
+func (r *TaskRepository) ListByIDsForUser(userID int64, taskIDs []int64) ([]model.VideoTask, error) {
+	if len(taskIDs) == 0 {
+		return []model.VideoTask{}, nil
+	}
+	var tasks []model.VideoTask
+	err := r.db.Where("user_id = ? AND id IN ?", userID, taskIDs).Order("id ASC").Find(&tasks).Error
+	return tasks, err
+}
+
 // FindByIDWithDetail 查找任务并预加载关联的转录和总结
 func (r *TaskRepository) FindByIDWithDetail(id int64) (*model.VideoTask, error) {
 	var task model.VideoTask

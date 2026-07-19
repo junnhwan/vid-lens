@@ -105,20 +105,25 @@ func (DeterministicReranker) Rerank(_ context.Context, question string, chunks [
 	}
 
 	terms := ExtractQueryTerms(question)
-	adjacent := make(map[int]bool, len(chunks))
-	indices := make(map[int]bool, len(chunks))
+	type chunkPosition struct {
+		taskID int64
+		index  int
+	}
+	adjacent := make(map[chunkPosition]bool, len(chunks))
+	indices := make(map[chunkPosition]bool, len(chunks))
 	for _, chunk := range chunks {
-		indices[chunk.ChunkIndex] = true
+		indices[chunkPosition{chunk.TaskID, chunk.ChunkIndex}] = true
 	}
 	for _, chunk := range chunks {
-		if indices[chunk.ChunkIndex-1] || indices[chunk.ChunkIndex+1] {
-			adjacent[chunk.ChunkIndex] = true
+		key := chunkPosition{chunk.TaskID, chunk.ChunkIndex}
+		if indices[chunkPosition{chunk.TaskID, chunk.ChunkIndex - 1}] || indices[chunkPosition{chunk.TaskID, chunk.ChunkIndex + 1}] {
+			adjacent[key] = true
 		}
 	}
 
 	scored := make([]scoredChunk, 0, len(chunks))
 	for i, chunk := range chunks {
-		chunk.RerankScore = deterministicRerankScore(chunk, terms, adjacent[chunk.ChunkIndex])
+		chunk.RerankScore = deterministicRerankScore(chunk, terms, adjacent[chunkPosition{chunk.TaskID, chunk.ChunkIndex}])
 		scored = append(scored, scoredChunk{chunk: chunk, originalRank: i + 1})
 	}
 	sort.SliceStable(scored, func(i, j int) bool {

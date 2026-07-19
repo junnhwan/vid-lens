@@ -60,6 +60,21 @@ func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID in
 	if err := s.repos.Chat.CreateMessage(assistantMessage); err != nil {
 		return nil, err
 	}
+	sources := make([]model.ChatMessageSource, 0, len(citations))
+	seenTasks := make(map[int64]struct{}, len(citations))
+	for _, citation := range citations {
+		if citation.TaskID <= 0 {
+			continue
+		}
+		if _, ok := seenTasks[citation.TaskID]; ok {
+			continue
+		}
+		seenTasks[citation.TaskID] = struct{}{}
+		sources = append(sources, model.ChatMessageSource{MessageID: assistantMessage.ID, SessionID: sessionID, TaskID: citation.TaskID})
+	}
+	if err := s.repos.Chat.CreateMessageSources(userID, sources); err != nil {
+		return nil, err
+	}
 	_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 
 	return &AskResult{

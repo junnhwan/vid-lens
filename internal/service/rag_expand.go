@@ -44,7 +44,11 @@ func (e *ContextExpander) Expand(ctx context.Context, userID, taskID int64, embe
 			start = 0
 		}
 		end := citation.ChunkIndex + e.Radius
-		window, err := e.repos.VideoChunk.ListByIndexRange(userID, taskID, embeddingModel, start, end)
+		citationTaskID := citation.TaskID
+		if citationTaskID <= 0 {
+			citationTaskID = taskID
+		}
+		window, err := e.repos.VideoChunk.ListByIndexRange(userID, citationTaskID, embeddingModel, start, end)
 		if err != nil {
 			fallback := citation
 			fallback.Fallbacks = appendFallback(fallback.Fallbacks, "window_expansion_failed")

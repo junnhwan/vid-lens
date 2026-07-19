@@ -506,6 +506,8 @@ func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedCh
 		filteredContexts = append(filteredContexts, chunk)
 		citationID := "C" + strconv.Itoa(len(citations)+1)
 		citations = append(citations, Citation{
+			TaskID:      chunk.TaskID,
+			VideoTitle:  chunk.VideoTitle,
 			CitationID:  citationID,
 			EvidenceID:  chunk.EvidenceID,
 			ChunkID:     chunk.ChunkID,

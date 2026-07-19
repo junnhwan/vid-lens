@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -305,27 +306,44 @@ func (s *PGVectorStore) Search(ctx context.Context, query []float32, req service
 	if err := validateEmbedding(query, s.dim); err != nil {
 		return nil, err
 	}
+	taskIDs := normalizeVectorTaskIDs(req.TaskIDs)
+	if len(taskIDs) == 0 && req.TaskID > 0 {
+		taskIDs = []int64{req.TaskID}
+	}
+	if len(taskIDs) == 0 {
+		return nil, errors.New("task_ids must not be empty")
+	}
 	topK := req.TopK
 	if topK <= 0 {
 		topK = 5
 	}
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
-SELECT vector_id, chunk_id, chunk_index, content,
+	placeholders := make([]string, len(taskIDs))
+	args := make([]any, 0, len(taskIDs)+4)
+	args = append(args, formatPGVector(query), req.UserID)
+	for i, taskID := range taskIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+3)
+		args = append(args, taskID)
+	}
+	modelPos := len(taskIDs) + 3
+	limitPos := modelPos + 1
+	args = append(args, req.EmbeddingModel, topK)
+	sqlText := fmt.Sprintf(`
+SELECT vector_id, task_id, chunk_id, chunk_index, content,
        1 - (embedding <=> $1::vector) AS score
 FROM %s
-WHERE user_id = $2 AND task_id = $3 AND embedding_model = $4
+WHERE user_id = $2 AND task_id IN (%s) AND embedding_model = $%d
 ORDER BY embedding <=> $1::vector
-LIMIT $5`, s.table), formatPGVector(query), req.UserID, req.TaskID, req.EmbeddingModel, topK)
+LIMIT $%d`, s.table, strings.Join(placeholders, ","), modelPos, limitPos)
+	rows, err := s.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	results := make([]service.RetrievedChunk, 0, topK)
 	for rows.Next() {
 		var result service.RetrievedChunk
 		var score float64
-		if err := rows.Scan(&result.EvidenceID, &result.ChunkID, &result.ChunkIndex, &result.Content, &score); err != nil {
+		if err := rows.Scan(&result.EvidenceID, &result.TaskID, &result.ChunkID, &result.ChunkIndex, &result.Content, &score); err != nil {
 			return nil, err
 		}
 		if req.MinScore > 0 && float32(score) < req.MinScore {
@@ -338,6 +356,23 @@ LIMIT $5`, s.table), formatPGVector(query), req.UserID, req.TaskID, req.Embeddin
 		return nil, err
 	}
 	return results, nil
+}
+
+func normalizeVectorTaskIDs(taskIDs []int64) []int64 {
+	seen := make(map[int64]struct{}, len(taskIDs))
+	out := make([]int64, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 func (s *PGVectorStore) HealthCheck(ctx context.Context) error {

@@ -28,10 +28,20 @@ func (r *ChatRepository) UpdateSessionTitle(sessionID int64, title string) error
 }
 
 func (r *ChatRepository) ListSessions(userID int64, taskID int64) ([]model.ChatSession, error) {
+	return r.ListSessionsFiltered(userID, taskID, 0, "")
+}
+
+func (r *ChatRepository) ListSessionsFiltered(userID, taskID, knowledgeBaseID int64, scopeType string) ([]model.ChatSession, error) {
 	var sessions []model.ChatSession
 	query := r.db.Where("user_id = ?", userID)
 	if taskID > 0 {
 		query = query.Where("task_id = ?", taskID)
+	}
+	if knowledgeBaseID > 0 {
+		query = query.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+	if scopeType != "" {
+		query = query.Where("scope_type = ?", scopeType)
 	}
 	err := query.Order("updated_at desc, id desc").Find(&sessions).Error
 	return sessions, err

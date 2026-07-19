@@ -166,6 +166,19 @@ func (r *KnowledgeBaseRepository) ListVideosForUser(userID, knowledgeBaseID int6
 	return videos, err
 }
 
+// ListMembershipTaskIDsForUser returns the persisted membership edges after
+// verifying knowledge-base ownership. It intentionally does not filter invalid
+// or deleted tasks so callers can fail closed and report every unavailable ID.
+func (r *KnowledgeBaseRepository) ListMembershipTaskIDsForUser(userID, knowledgeBaseID int64) ([]int64, error) {
+	var taskIDs []int64
+	err := r.db.Table("knowledge_base_videos AS kbv").
+		Joins("JOIN knowledge_bases AS kb ON kb.id = kbv.knowledge_base_id").
+		Where("kb.id = ? AND kb.user_id = ?", knowledgeBaseID, userID).
+		Order("kbv.task_id ASC, kbv.id ASC").
+		Pluck("kbv.task_id", &taskIDs).Error
+	return taskIDs, err
+}
+
 func (r *KnowledgeBaseRepository) ListMemberTaskIDsForUser(userID, knowledgeBaseID int64) ([]int64, error) {
 	var taskIDs []int64
 	err := r.db.Table("knowledge_base_videos AS kbv").

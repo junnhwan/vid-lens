@@ -99,6 +99,9 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		return nil, fmt.Errorf("知识库会话暂不支持 Agent 问答")
+	}
 	if req.TopK <= 0 {
 		req.TopK = s.chatSvc.cfg.TopK
 	}
