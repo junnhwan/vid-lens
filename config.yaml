@@ -104,6 +104,8 @@ rag:
   recent_turns: 8
   embedding_dim: 1536
   vector_table: vidlens_rag_vectors
+  rerank_model: "Qwen/Qwen3-Reranker-4B"
+  rewrite_queries: 3
 
 milvus:
   collection: "vidlens_video_chunks"

@@ -60,7 +60,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if err != nil {
 		return nil, err
 	}
-	retrieval, err := s.newRetrievalPipeline(topK, chat).Retrieve(ctx, RetrievalPipelineRequest{
+	retrieval, err := s.newRetrievalPipeline(topK, chat, profile).Retrieve(ctx, RetrievalPipelineRequest{
 		UserID:         userID,
 		TaskID:         session.TaskID,
 		Question:       question,
@@ -167,7 +167,7 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 	return strings.Join(sections, "\n\n"), nil
 }
 
-func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *RetrievalPipeline {
+func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile ai.Profile) *RetrievalPipeline {
 	cfg := s.cfg.Retrieval
 	var rewriter QueryRewriter = NewLLMQueryRewriter(chat)
 	var expander *ContextExpander
@@ -189,6 +189,9 @@ func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient) *Retrie
 	var reranker Reranker
 	if cfg == nil || cfg.RerankerMode == RerankerModeDeterministic {
 		reranker = DeterministicReranker{}
+	} else if cfg.RerankerMode == RerankerModeModel && s.cfg.ModelRerankerFactory != nil {
+		profile.RerankModel = cfg.RerankerVersion
+		reranker = s.cfg.ModelRerankerFactory(profile)
 	}
 	return &RetrievalPipeline{repos: s.repos, retriever: s.retriever, rewriter: rewriter, expander: expander,
 		reranker: reranker, CandidateK: s.candidateK(topK), MinScore: s.cfg.MinScore, Config: cfg}

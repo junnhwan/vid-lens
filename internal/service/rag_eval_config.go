@@ -16,6 +16,7 @@ const (
 	ChunkerStrategySemanticBoundary = "semantic_boundary"
 	RerankerModeNone                = "none"
 	RerankerModeDeterministic       = "deterministic"
+	RerankerModeModel               = "model"
 )
 
 // RAGRetrievalConfig is a fully explicit, hashable experiment configuration.
@@ -97,7 +98,7 @@ func (c RAGRetrievalConfig) Validate() error {
 	if c.ChunkSize < 0 || (c.ChunkSize > 0 && c.ChunkOverlap >= c.ChunkSize) || c.ChunkOverlap < 0 {
 		problems = append(problems, "chunk size/overlap must satisfy size > overlap >= 0")
 	}
-	if c.RerankerMode != "" && c.RerankerMode != RerankerModeNone && c.RerankerMode != RerankerModeDeterministic {
+	if c.RerankerMode != "" && c.RerankerMode != RerankerModeNone && c.RerankerMode != RerankerModeDeterministic && c.RerankerMode != RerankerModeModel {
 		problems = append(problems, fmt.Sprintf("unsupported reranker_mode %q", c.RerankerMode))
 	}
 	if len(problems) > 0 {

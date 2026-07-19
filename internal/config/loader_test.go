@@ -54,7 +54,6 @@ func TestLoadReportsDeprecatedFieldMigration(t *testing.T) {
 		want string
 	}{
 		{name: "milvus collection", path: "collection", want: "milvus.collection"},
-		{name: "rerank model", path: "rerank_model", want: "--rerank-model"},
 		{name: "rerank endpoint", path: "rerank_endpoint", want: "--rerank-endpoint"},
 	}
 
@@ -144,5 +143,23 @@ cleanup:
 	}
 	if cfg.Cleanup.ScanIntervalSeconds != 30 || cfg.Cleanup.BatchSize != 20 || cfg.Cleanup.LeaseSeconds != 120 || cfg.Cleanup.RetryBackoffSeconds != 60 {
 		t.Fatalf("cleanup config = %+v", cfg.Cleanup)
+	}
+}
+
+func TestLoadParsesRerankModel(t *testing.T) {
+	path := writeLoaderTestConfig(t, `
+rag:
+  rerank_model: Qwen/Qwen3-Reranker-4B
+  rewrite_queries: 3
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RAG.RerankModel != "Qwen/Qwen3-Reranker-4B" {
+		t.Fatalf("rag.rerank_model = %q", cfg.RAG.RerankModel)
+	}
+	if cfg.RAG.RewriteQueries != 3 {
+		t.Fatalf("rag.rewrite_queries = %d", cfg.RAG.RewriteQueries)
 	}
 }

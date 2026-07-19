@@ -312,3 +312,13 @@ func TestDefaultRAGRetrievalConfigMatchesCurrentChunkerProvenance(t *testing.T) 
 		t.Fatalf("default chunker provenance = %q/%q, want %q/%q", cfg.ChunkerStrategy, cfg.ChunkerVersion, ChunkerStrategyRecursiveSentence, RecursiveSentenceChunkerVersion)
 	}
 }
+
+func TestRAGRetrievalConfigSupportsModelReranker(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableBM25 = false
+	cfg.RerankerMode = RerankerModeModel
+	cfg.RerankerVersion = "Qwen/Qwen3-Reranker-4B"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}

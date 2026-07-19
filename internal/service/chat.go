@@ -26,11 +26,12 @@ var (
 )
 
 type ChatConfig struct {
-	TopK        int
-	CandidateK  int
-	MinScore    float32
-	RecentTurns int
-	Retrieval   *RAGRetrievalConfig
+	TopK                 int
+	CandidateK           int
+	MinScore             float32
+	RecentTurns          int
+	Retrieval            *RAGRetrievalConfig
+	ModelRerankerFactory func(ai.Profile) Reranker
 }
 
 type RetrievalRequest struct {

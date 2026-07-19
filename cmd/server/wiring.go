@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -67,14 +68,23 @@ func productionRetrievalConfig(cfg config.RAGConfig) service.RAGRetrievalConfig 
 	retrieval := service.DefaultRAGRetrievalConfig()
 	retrieval.QueryMode = service.QueryModeOriginal
 	retrieval.RewriteQueries = 1
+	if cfg.RewriteQueries > 1 {
+		retrieval.QueryMode = service.QueryModeRewrite
+		retrieval.RewriteQueries = cfg.RewriteQueries
+	}
 	retrieval.TopK = cfg.TopK
 	retrieval.CandidateK = cfg.CandidateK
+	retrieval.EnableBM25 = false
 	retrieval.RRFK = 60
 	retrieval.NeighborRadius = 0
 	retrieval.MaxContextChars = 0
 	retrieval.MinVectorScore = cfg.MinScore
 	retrieval.RerankerMode = service.RerankerModeNone
 	retrieval.RerankerVersion = ""
+	if strings.TrimSpace(cfg.RerankModel) != "" {
+		retrieval.RerankerMode = service.RerankerModeModel
+		retrieval.RerankerVersion = strings.TrimSpace(cfg.RerankModel)
+	}
 	return retrieval
 }
 
@@ -104,12 +114,21 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	ragIndexSvc.SetAIRecorder(aiObserver)
 
 	retrievalCfg := productionRetrievalConfig(deps.cfg.RAG)
+	modelRerankerFactory := func(profile ai.Profile) service.Reranker {
+		client, err := aiFactory.NewRerankClient(profile)
+		if err != nil {
+			log.Printf("model reranker unavailable, falling back to vector order: %v", err)
+			return service.NewModelReranker(nil)
+		}
+		return service.NewModelReranker(client)
+	}
 	chatSvc := service.NewChatService(deps.repos, deps.ragRetriever, service.ChatConfig{
-		TopK:        deps.cfg.RAG.TopK,
-		CandidateK:  deps.cfg.RAG.CandidateK,
-		MinScore:    deps.cfg.RAG.MinScore,
-		RecentTurns: deps.cfg.RAG.RecentTurns,
-		Retrieval:   &retrievalCfg,
+		TopK:                 deps.cfg.RAG.TopK,
+		CandidateK:           deps.cfg.RAG.CandidateK,
+		MinScore:             deps.cfg.RAG.MinScore,
+		RecentTurns:          deps.cfg.RAG.RecentTurns,
+		Retrieval:            &retrievalCfg,
+		ModelRerankerFactory: modelRerankerFactory,
 	})
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))

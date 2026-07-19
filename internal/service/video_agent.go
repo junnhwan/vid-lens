@@ -113,7 +113,7 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	}
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	template := ClassifyVideoAgentTemplate(req.Question)
-	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat), chat)
+	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	trace := make([]VideoAgentStep, 0, 4)
 
 	search, step, err := tools.SearchTranscript(ctx, SearchTranscriptInput{

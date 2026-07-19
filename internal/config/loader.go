@@ -23,10 +23,6 @@ var deprecatedConfigFields = []deprecatedConfigField{
 		path:    []string{"rag", "rerank_endpoint"},
 		message: "配置字段 rag.rerank_endpoint 已删除；legacy 模型 rerank 请使用 cmd/rag-eval --rerank-endpoint",
 	},
-	{
-		path:    []string{"rag", "rerank_model"},
-		message: "配置字段 rag.rerank_model 已删除；legacy 模型 rerank 请使用 cmd/rag-eval --rerank-model",
-	},
 }
 
 // Load parses configuration shape and applies load-time defaults. Commands

@@ -732,7 +732,7 @@ func TestChatServiceBuildsRetrievalPipelineFromExplicitConfig(t *testing.T) {
 	cfg.RewriteQueries = 1
 	cfg.NeighborRadius = 0
 	svc := NewChatService(nil, &fakeRetriever{}, ChatConfig{Retrieval: &cfg})
-	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{})
+	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{}, ai.Profile{})
 	if pipeline.Config != &cfg {
 		t.Fatalf("pipeline config=%p want=%p", pipeline.Config, &cfg)
 	}
@@ -752,11 +752,36 @@ func TestChatServiceExplicitOriginalConfigDisablesRewriteExpansionAndRerank(t *t
 	cfg.RerankerMode = RerankerModeNone
 	cfg.RerankerVersion = ""
 	svc := NewChatService(nil, &fakeRetriever{}, ChatConfig{Retrieval: &cfg})
-	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{})
+	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{}, ai.Profile{})
 	if _, ok := pipeline.rewriter.(NoopQueryRewriter); !ok {
 		t.Fatalf("rewriter = %T, want NoopQueryRewriter", pipeline.rewriter)
 	}
 	if pipeline.expander != nil || pipeline.reranker != nil {
 		t.Fatalf("post retrieval stages = expander:%T reranker:%T, want both nil", pipeline.expander, pipeline.reranker)
+	}
+}
+
+func TestChatServiceBuildsConfiguredModelReranker(t *testing.T) {
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableBM25 = false
+	cfg.QueryMode = QueryModeOriginal
+	cfg.RewriteQueries = 1
+	cfg.NeighborRadius = 0
+	cfg.RerankerMode = RerankerModeModel
+	cfg.RerankerVersion = "Qwen/Qwen3-Reranker-4B"
+	called := false
+	svc := NewChatService(nil, &fakeRetriever{}, ChatConfig{
+		Retrieval: &cfg,
+		ModelRerankerFactory: func(profile ai.Profile) Reranker {
+			called = profile.RerankModel == "Qwen/Qwen3-Reranker-4B"
+			return DeterministicReranker{}
+		},
+	})
+	pipeline := svc.newRetrievalPipeline(cfg.TopK, &recordingChatClient{}, ai.Profile{})
+	if !called {
+		t.Fatal("model reranker factory was not called with configured model")
+	}
+	if _, ok := pipeline.reranker.(DeterministicReranker); !ok {
+		t.Fatalf("reranker = %T", pipeline.reranker)
 	}
 }

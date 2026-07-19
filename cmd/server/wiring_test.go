@@ -110,7 +110,7 @@ func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansionOrRerank(t *t
 	if cfg.QueryMode != service.QueryModeOriginal || cfg.RewriteQueries != 1 {
 		t.Fatalf("query config = mode:%q queries:%d, want original single query", cfg.QueryMode, cfg.RewriteQueries)
 	}
-	if !cfg.EnableVector || !cfg.EnableBM25 || cfg.RRFK != 60 {
+	if !cfg.EnableVector || cfg.EnableBM25 || cfg.RRFK != 60 {
 		t.Fatalf("hybrid config = %+v", cfg)
 	}
 	if cfg.TopK != 5 || cfg.CandidateK != 17 {
@@ -118,5 +118,21 @@ func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansionOrRerank(t *t
 	}
 	if cfg.NeighborRadius != 0 || cfg.RerankerMode != service.RerankerModeNone {
 		t.Fatalf("post retrieval config = neighbor:%d reranker:%q", cfg.NeighborRadius, cfg.RerankerMode)
+	}
+}
+
+func TestProductionRetrievalConfigUsesVectorModelRerank(t *testing.T) {
+	cfg := productionRetrievalConfig(config.RAGConfig{
+		TopK: 5, CandidateK: 20, MinScore: 0.25, RewriteQueries: 3,
+		RerankModel: "Qwen/Qwen3-Reranker-4B",
+	})
+	if cfg.QueryMode != service.QueryModeRewrite || cfg.RewriteQueries != 3 {
+		t.Fatalf("rewrite config = %q/%d", cfg.QueryMode, cfg.RewriteQueries)
+	}
+	if !cfg.EnableVector || cfg.EnableBM25 {
+		t.Fatalf("retriever config = vector:%v bm25:%v", cfg.EnableVector, cfg.EnableBM25)
+	}
+	if cfg.RerankerMode != service.RerankerModeModel || cfg.RerankerVersion != "Qwen/Qwen3-Reranker-4B" {
+		t.Fatalf("reranker config = %q/%q", cfg.RerankerMode, cfg.RerankerVersion)
 	}
 }
