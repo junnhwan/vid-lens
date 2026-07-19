@@ -61,6 +61,7 @@ docs/vidlensdocs.zip
 docs/vidlens-source-notes.html
 .playwright-mcp/
 .superpowers/
+.worktrees/
 /*.png
 
 # Local interview/reference drafts
