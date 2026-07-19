@@ -104,6 +104,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 
 	aiFactory := ai.NewFactoryWithAdmission(deps.providerAdmission)
 	userSvc := service.NewUserService(deps.repos.User, deps.cfg.JWT)
+	knowledgeBaseSvc := service.NewKnowledgeBaseService(deps.repos)
 	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
 	ragIndexSvc := service.NewRAGIndexService(deps.repos, deps.ragStore, service.RAGIndexConfig{
 		ChunkSize:    deps.cfg.RAG.ChunkSize,
@@ -186,11 +187,12 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 
 	return &serverApplication{
 		handlers: serverHandlers{
-			user:     handler.NewUserHandler(userSvc),
-			profiles: handler.NewAIProfileHandler(aiProfileSvc),
-			rag:      handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
-			chat:     handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
-			media:    handler.NewMediaHandler(mediaSvc),
+			user:           handler.NewUserHandler(userSvc),
+			profiles:       handler.NewAIProfileHandler(aiProfileSvc),
+			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
+			chat:           handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
+			media:          handler.NewMediaHandler(mediaSvc),
+			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,

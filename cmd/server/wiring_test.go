@@ -88,6 +88,9 @@ func TestWireServerApplicationIncludesDurableTaskCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wireServerApplication() error = %v", err)
 	}
+	if app.handlers.knowledgeBases == nil {
+		t.Fatal("knowledge base handler was not wired")
+	}
 	if app.taskCleanup == nil || app.taskCleanupScheduler == nil {
 		t.Fatalf("cleanup wiring = service:%v scheduler:%v", app.taskCleanup, app.taskCleanupScheduler)
 	}
