@@ -74,22 +74,22 @@ RetryScheduler 使用 dispatch token/version 认领到期任务；认领后 Kafk
 - `internal/pkg/ffmpeg/ffmpeg.go`
 - `docs/troubleshooting-and-interview-notes.md`
 
-## 三、PostgreSQL Durable Upload Session 与 MinIO
+## 三、Redis 分片进度与 MinIO 合并
 
 ### 30 秒回答
 
-大文件上传使用绑定用户的 durable upload session。PostgreSQL 保存不可变 manifest、accepted chunk 的精确 size/SHA-256 台账、completion lease 和稳定 task identity；MinIO 保存 chunk/final bytes；Redis 不参与上传正确性。complete 时服务端通过 `io.Pipe` 按序流式读取分片，重新计算完整 MD5，再在一个 PostgreSQL transaction 中创建 asset、task 并 CAS 完成 session。
+大文件上传先由前端计算完整文件 MD5，Redis Set 保存带 TTL 的已上传片号和上传规格，MinIO 保存分片并在完成时服务端合并。前端重进页面后只补传缺失片号；该协议仍以客户端 MD5 为会话标识，Redis 状态丢失会影响未完成上传的恢复。
 
 ### 当前边界
 
-应用层流式合并不会把完整视频一次载入内存，但字节经过 `MinIO → Go → MinIO`；abandoned session/孤儿对象后台回收以及 task 删除后的 completed 回执语义仍未完成。
+当前通过 MinIO `ComposeObject` 在对象存储侧按顺序合并，不把完整视频读入 Go 进程。Redis 状态带 TTL，不是耐久上传事实；TTL 到期、Redis 丢失和孤儿分片的后台回收仍是当前边界。
 
 ### 项目证据
 
-- `internal/model/upload_session*.go`
-- `internal/repository/upload_session.go`
-- `internal/service/upload_session*.go`
-- `internal/handler/upload_session.go`
+- `internal/service/media_chunk_upload.go`
+- `internal/handler/media.go`
+- `internal/storage/minio.go`
+- `cmd/server/router.go`
 - `web/src/chunkedUpload.js`
 - [上传专项](/interview/resume-grill/resume-core/chunk-upload/)
 

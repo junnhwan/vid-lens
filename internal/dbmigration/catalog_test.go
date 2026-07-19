@@ -13,11 +13,7 @@ func TestCatalogIncludesEveryLegacyModelExactlyOnce(t *testing.T) {
 		t.Fatalf("legacy catalog tables = %d, want %d", got, want)
 	}
 
-	postgresOnly := map[reflect.Type]struct{}{
-		reflect.TypeOf(&model.UploadSession{}):      {},
-		reflect.TypeOf(&model.UploadSessionChunk{}): {},
-	}
-	legacyModelTypes := make(map[reflect.Type]struct{}, len(model.AllModels())-len(postgresOnly))
+	legacyModelTypes := make(map[reflect.Type]struct{}, len(model.AllModels()))
 	allModelTypes := make(map[reflect.Type]struct{}, len(model.AllModels()))
 	for _, item := range model.AllModels() {
 		typeOf := reflect.TypeOf(item)
@@ -28,9 +24,7 @@ func TestCatalogIncludesEveryLegacyModelExactlyOnce(t *testing.T) {
 			t.Fatalf("AllModels contains duplicate model type %v", typeOf)
 		}
 		allModelTypes[typeOf] = struct{}{}
-		if _, excluded := postgresOnly[typeOf]; !excluded {
-			legacyModelTypes[typeOf] = struct{}{}
-		}
+		legacyModelTypes[typeOf] = struct{}{}
 	}
 	if got, want := len(legacyModelTypes), len(specs); got != want {
 		t.Fatalf("legacy runtime models = %d, catalog tables = %d", got, want)
@@ -164,17 +158,5 @@ func TestCatalogReturnsIndependentMetadata(t *testing.T) {
 	}
 	if reflect.ValueOf(first[0].Model).Pointer() == reflect.ValueOf(second[0].Model).Pointer() {
 		t.Fatal("catalog returned shared mutable model pointer")
-	}
-}
-
-func TestCatalogExcludesPostgresOnlyUploadSessionModels(t *testing.T) {
-	postgresOnly := map[reflect.Type]struct{}{
-		reflect.TypeOf(&model.UploadSession{}):      {},
-		reflect.TypeOf(&model.UploadSessionChunk{}): {},
-	}
-	for _, spec := range Catalog() {
-		if _, exists := postgresOnly[reflect.TypeOf(spec.Model)]; exists {
-			t.Errorf("legacy MySQL catalog must exclude PostgreSQL-only table %q", spec.Name)
-		}
 	}
 }

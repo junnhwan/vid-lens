@@ -97,20 +97,10 @@ export async function uploadFileInChunks({
     onProgress: (percent) => emitProgress(onProgress, 'hashing', percent * 0.1),
   })
   const totalChunks = Math.ceil(file.size / chunkSize)
-  const uploadSession = await api.createUploadSession({
-    filename: file.name,
-    file_size: file.size,
-    chunk_size: chunkSize,
-    total_chunks: totalChunks,
-    expected_md5: fileMD5,
-  })
-  const sessionID = uploadSession?.session_id
-  if (typeof sessionID !== 'string' || !sessionID.trim()) {
-    throw new Error('服务端未返回有效的上传会话')
-  }
+  const uploadState = await api.checkUpload(fileMD5, file.size, chunkSize, totalChunks)
   const uploaded = new Set(
-    Array.isArray(uploadSession?.uploaded)
-      ? uploadSession.uploaded.map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < totalChunks)
+    Array.isArray(uploadState?.uploaded)
+      ? uploadState.uploaded.map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < totalChunks)
       : [],
   )
 
@@ -150,7 +140,7 @@ export async function uploadFileInChunks({
     maxConcurrency,
   })
 
-  if (!uploadSession?.asset_available && uploadSession?.status !== 'completed' && pendingIndexes.length > 0) {
+  if (uploadState?.status !== 'completed' && pendingIndexes.length > 0) {
     let cursor = 0
     let fatalError = null
 
@@ -173,7 +163,7 @@ export async function uploadFileInChunks({
             await retryDelay(Math.min(1000 * (2 ** (attempt - 1)), 4000))
           }
           try {
-            await api.uploadSessionChunk(sessionID, index, chunk, (event) => {
+            await api.uploadChunk(fileMD5, index, chunk, (event) => {
               inflightLoaded.set(index, Math.min(Number(event?.loaded) || 0, chunk.size))
               emitUploadProgress(index, chunk.size, attempt)
             })
@@ -205,7 +195,7 @@ export async function uploadFileInChunks({
   }
 
   emitProgress(onProgress, 'merging', 95, { totalChunks })
-  const result = await api.completeUploadSession(sessionID)
+  const result = await api.mergeChunks(fileMD5, file.name, totalChunks, file.size, chunkSize)
   emitProgress(onProgress, 'completed', 100, { totalChunks })
   return result
 }

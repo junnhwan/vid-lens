@@ -13,7 +13,7 @@
 
 1. 只从 `resume-final-draft.md` 复制技术栈和项目经历。
 2. 数据库统一说 PostgreSQL + pgvector 单库；MySQL/Milvus 只用于迁移观察期回滚。
-3. 上传统一说 durable upload session + PostgreSQL ledger + MinIO bytes，不说 Redis Set/`ComposeObject` 当前协议。
+3. 上传统一说 Redis Set 记录临时分片进度、MinIO 保存并服务端合并分片；不要声称已实现 PostgreSQL durable upload session。
 4. RAG 统一说 ASR 原文、pgvector、BM25-style、RRF 和 citations。
 5. Kafka 统一按 at-least-once、数据库状态/lease 和可恢复失败解释，不声称 exactly-once 或 outbox 已完成。
 6. URL 下载只作为自用辅助入口，不作为核心简历能力，也不声称生产级 SSRF 防护。

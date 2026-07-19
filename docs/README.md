@@ -46,7 +46,7 @@
 - PostgreSQL 是唯一正式关系数据库；pgvector 是同一 PostgreSQL 的扩展。
 - `video_chunks` 是 RAG 文本事实源，pgvector 表是可重建向量投影。
 - MySQL 与 Milvus 只在迁移观察期作为离线回滚资产，不参与默认 server 运行，也没有双写。
-- 分片上传由 PostgreSQL 保存 session、manifest、chunk ledger 和 completion lease；MinIO 保存字节；Redis 不参与上传正确性。
+- 分片上传由 Redis Set 保存带 TTL 的临时片号与上传规格，MinIO 保存并合并分片字节；PostgreSQL 不保存分片进度。
 - 旧 `/upload-chunk`、`/check-upload`、`/merge-chunks`、Redis Set 进度和 ComposeObject 协议均已退役。
 
 ## 3. 架构变化时的最小同步清单

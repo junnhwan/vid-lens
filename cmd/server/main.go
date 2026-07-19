@@ -234,12 +234,11 @@ func main() {
 	}
 
 	r := newServerRouter(*cfg, serverHandlers{
-		user:           app.handlers.user,
-		profiles:       app.handlers.profiles,
-		rag:            app.handlers.rag,
-		chat:           app.handlers.chat,
-		media:          app.handlers.media,
-		uploadSessions: app.handlers.uploadSessions,
+		user:     app.handlers.user,
+		profiles: app.handlers.profiles,
+		rag:      app.handlers.rag,
+		chat:     app.handlers.chat,
+		media:    app.handlers.media,
 	}, app.rateLimiter, readinessChecks)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

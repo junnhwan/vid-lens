@@ -2,9 +2,9 @@
 
 ## 1. 面试口语答案
 
-> VidLens 的权限控制不靠前端隐藏按钮。登录成功后签发 JWT，Gin middleware 校验 Bearer token，把 `userID`、username 和 role 放入请求上下文。后续 task、upload session、AI profile、chat session 和 RAG 查询都必须以当前 userID 查询或再次校验 owner。
+> VidLens 的权限控制不靠前端隐藏按钮。登录成功后签发 JWT，Gin middleware 校验 Bearer token，把 `userID`、username 和 role 放入请求上下文。后续 task、AI profile、chat session 和 RAG 查询都必须以当前 userID 查询或再次校验 owner。当前 Redis 分片 key 仍以文件 MD5 为核心，不应包装成已经完成用户级 upload session 隔离。
 >
-> RAG 隔离尤其重要：pgvector Search 的 SQL 条件固定包含 `user_id + task_id + embedding_model`，关系 chunk 查询也使用同一 scope。这样即使用户猜到别人的 task ID，也不能只凭 taskID 召回内容。上传 session 同样绑定 userID，读取、上传分片和 complete 都带 owner 条件。
+> RAG 隔离尤其重要：pgvector Search 的 SQL 条件固定包含 `user_id + task_id + embedding_model`，关系 chunk 查询也使用同一 scope。这样即使用户猜到别人的 task ID，也不能只凭 taskID 召回内容。分片接口要求登录，但 Redis 上传状态仍按文件 MD5 建 key，不是 user-bound session；这是当前明确保留的边界，不能包装成完整的多租户上传隔离。
 >
 > 密码和 BYOK API Key 的处理不同。密码只需要验证，所以使用 bcrypt 单向哈希；API Key 运行时必须还原后调用用户 provider，因此用 AES-GCM 加密保存，接口只返回脱敏值。代码和日志不应输出明文 key。
 
@@ -13,12 +13,12 @@
 | 资源 | 当前约束 |
 |---|---|
 | Task | service/repository 读取后校验 `task.UserID` |
-| Upload session | repository 条件包含 `session_id + user_id` |
+| Chunk upload | 接口要求 JWT；临时 Redis key 仍以文件 MD5 为核心，不具备独立 session owner |
 | AI profile | CRUD 条件包含 `user_id`，默认 profile 也按用户选择 |
 | Chat | session/message 查询包含 `user_id` |
 | RAG relation | chunk/index 按 `user_id + task_id + model` |
 | pgvector | Search/Delete/manifest 按相同 scope |
-| MinIO object | 不把 object name 当权限；通过已鉴权 task/session 业务路径访问 |
+| MinIO object | 不把 object name 当权限；最终对象通过已鉴权 task 业务路径访问 |
 
 ## 3. 高频追问
 
@@ -43,9 +43,10 @@
 - `internal/middleware/auth.go`：JWT middleware。
 - `internal/pkg/jwt/`、`internal/pkg/secret/`：token 与 AES-GCM。
 - `internal/service/ai_profile.go`、`internal/repository/ai_profile.go`：BYOK owner 与脱敏响应。
-- `internal/repository/upload_session.go`、`internal/repository/chat.go`：用户条件。
+- `internal/handler/media.go`、`internal/service/media_chunk_upload.go`：分片接口与当前 MD5 状态边界。
+- `internal/repository/chat.go`：聊天用户条件。
 - `internal/vector/pgvector.go`：检索和删除 scope。
-- `internal/handler/*_test.go`、`internal/service/upload_session_test.go`：越权测试。
+- `internal/handler/*_test.go`、`internal/service/media_test.go`：鉴权与媒体服务测试。
 
 ## 5. 当前限制
 

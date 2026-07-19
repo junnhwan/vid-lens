@@ -11,7 +11,7 @@
 | 查看任务异步链路 | `internal/mq/producer.go`、`internal/mq/consumer_*.go`、`internal/mq/retry.go` |
 | 查看任务状态和 lease 状态机 | `internal/repository/task_lease*.go`、`internal/repository/task_job.go` |
 | 查看普通/URL 上传 | `internal/service/media*.go`、`internal/storage/minio.go` |
-| 查看耐久化分片上传 | `internal/handler/upload_session.go`、`internal/service/upload_session*.go`、`internal/repository/upload_session.go`、`internal/model/upload_session*.go` |
+| 查看分片上传与断点续传 | `internal/handler/media.go`、`internal/service/media_chunk_upload.go`、`web/src/chunkedUpload.js` |
 | 查看任务删除与资源清理 | `internal/service/task_cleanup*.go`、`internal/repository/task_cleanup_job.go`、`internal/model/task_cleanup_job.go` |
 | 查看聊天和 RAG 问答 | `internal/service/chat*.go`、`internal/service/rag_*.go` |
 | 查看向量后端选择 | `internal/vector/factory.go`、`internal/vector/backend.go` |
@@ -27,7 +27,7 @@
 ```text
 HTTP handler
   ├─ 普通文件上传 -> MinIO asset -> PostgreSQL VideoTask -> 用户主动投递分析/转写消息
-  ├─ 分片上传 -> PostgreSQL session/chunk ledger + MinIO bytes -> 流式校验/合并 -> PostgreSQL asset/task
+  ├─ 分片上传 -> Redis Set 临时片号 + MinIO chunks -> 服务端合并 -> PostgreSQL asset/task
   └─ URL 上传 -> PostgreSQL downloading task/job -> Kafka download topic
 
 Kafka consumer
@@ -95,7 +95,7 @@ RAG 问答
 - `media_tasks.go`：分析/转写投递、任务查询、删除和预签名 URL。
 - `internal/service/remote_video_url.go`：URL host allowlist、解析和目标地址校验。
 
-耐久化分片上传故意不塞回 `MediaService`：`UploadSessionService` 独立负责 PostgreSQL 会话状态机和 MinIO 字节边界。不要让 handler 直接操作 MinIO、上传表或 task 状态。
+`media_chunk_upload.go` 负责 Redis 进度、MinIO 分片和合并逻辑。Redis 状态带 TTL，属于可丢失的续传辅助状态，不是 PostgreSQL 业务事实。
 
 ### 3.3 任务删除与资源清理
 
@@ -165,12 +165,11 @@ RetryScheduler claim dispatch 后，如果 Kafka enqueue 失败，必须通过 `
 
 ### 4.4 上传状态
 
-- PostgreSQL `upload_sessions` 是上传生命周期、不可变 manifest、owner、完成 lease 和最终 task identity 的事实源；Redis 不参与上传正确性。
-- PostgreSQL `upload_session_chunks` 以 `(session_id, chunk_index)` 唯一约束保存已接受分片的 size、SHA-256 和 MinIO object name；同内容重试幂等，不同内容重试冲突。
-- MinIO 只保存字节。分片对象使用 `upload-sessions/<session_id>/chunks/<index>/<sha256>`，不能用全局 MD5 key 绕过用户边界。
-- complete 必须先持有带 token 的 completion lease，再按 manifest 顺序流式读取分片，同时校验单片大小、整文件大小和服务端 MD5。
-- asset/task 创建和 session 完成 CAS 位于同一个 PostgreSQL transaction；重复 complete 返回 session 保存的同一 task identity。
-- 分片清理是 best-effort，不得让已经成功提交的完成事务回滚。废弃 session 的对象生命周期清理仍需独立策略。
+- Redis Set `upload:chunks:<file_md5>` 保存已上传片号，旁路 key 保存 file size、chunk size、total 和完成状态，统一设置 24 小时 TTL。
+- MinIO 分片对象使用 `chunks/<file_md5>/<index>`；写入 MinIO 成功后再把片号加入 Redis。
+- merge 前检查上传规格和全部片号，并使用按文件 MD5 的 Redis lock 避免并发合并；合并后校验最终对象大小。
+- Redis 状态丢失会影响未完成上传的续传体验，但不会影响已经写入 PostgreSQL 的 asset/task；不要把它描述成 durable upload session。
+- 分片清理是 best-effort，失败只会留下临时对象，不应回滚已经成功创建的最终资产。
 - 资产可被多个 task 引用，删除 task 时只有没有活跃引用才删除对象。
 
 ### 4.5 删除与资源清理

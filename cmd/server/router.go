@@ -15,12 +15,11 @@ import (
 )
 
 type serverHandlers struct {
-	user           *handler.UserHandler
-	profiles       *handler.AIProfileHandler
-	rag            *handler.RAGHandler
-	chat           *handler.ChatHandler
-	media          *handler.MediaHandler
-	uploadSessions *handler.UploadSessionHandler
+	user     *handler.UserHandler
+	profiles *handler.AIProfileHandler
+	rag      *handler.RAGHandler
+	chat     *handler.ChatHandler
+	media    *handler.MediaHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -64,10 +63,9 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			{
 				media.POST("/upload", handlers.media.UploadFile)
 				media.POST("/upload-url", handlers.media.UploadByURL)
-				media.POST("/upload-sessions", handlers.uploadSessions.Create)
-				media.GET("/upload-sessions/:session_id", handlers.uploadSessions.Get)
-				media.PUT("/upload-sessions/:session_id/chunks/:index", handlers.uploadSessions.UploadChunk)
-				media.POST("/upload-sessions/:session_id/complete", handlers.uploadSessions.Complete)
+				media.POST("/upload-chunk", handlers.media.UploadChunk)
+				media.GET("/check-upload", handlers.media.CheckUpload)
+				media.POST("/merge-chunks", handlers.media.MergeChunks)
 				media.GET("/list", handlers.media.ListTasks)
 				media.GET("/task/:id", handlers.media.GetTaskDetail)
 				media.DELETE("/task/:id", handlers.media.DeleteTask)

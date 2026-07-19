@@ -14,7 +14,7 @@
 
 - PostgreSQL 是唯一正式关系数据库，pgvector 是同库扩展。
 - MySQL 和 Milvus仅作为迁移观察期回滚资产，不参与默认 server 运行，也没有双写。
-- 分片上传状态由 PostgreSQL upload session/chunk ledger 持有，MinIO 保存字节，Redis 不参与上传正确性。
+- 分片上传使用 Redis Set 记录已上传片号并设置 TTL，MinIO 保存和服务端合并分片；该状态属于可过期的临时续传状态。
 - RAG 使用 ASR 原文；`video_chunks` 是文本事实源，pgvector 是可重建向量投影。
 - 正式检索是 pgvector 向量召回、Go 侧 BM25-style 关键词召回和 RRF 融合；不能说专业搜索引擎 BM25 或线上模型 rerank。
 - task/job 入库与首次 Kafka enqueue 目前尚未实现 transactional outbox，不能声称原子提交或 exactly-once。

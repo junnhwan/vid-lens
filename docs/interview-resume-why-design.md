@@ -6,7 +6,7 @@
 
 - **单库边界**：PostgreSQL 持有业务关系事实，pgvector 保存同库可重建向量投影。
 - **长任务边界**：HTTP 创建/请求任务，Kafka consumer 执行下载、ASR、摘要和索引；PostgreSQL 保存 job、lease、失败和重试状态。
-- **上传边界**：PostgreSQL 保存 user-bound session/manifest/ledger，MinIO 保存 chunk/final bytes。
+- **上传边界**：Redis Set 保存带 TTL 的临时片号和上传规格，MinIO 保存 chunk/final bytes，PostgreSQL 只保存合并后的 asset/task。
 - **RAG 边界**：ASR 原文进入 `video_chunks`，向量与关键词候选经 RRF 融合，回答保存 citations 快照。
 - **删除边界**：PostgreSQL 先持久化 cleanup intent，再以 lease 驱动外部资源幂等清理。
 - **可观测边界**：结构化日志、task/job/AI call 状态、`/healthz`、`/readyz` 和独立 Prometheus `/metrics`；不能夸大成完整 OTel/APM。

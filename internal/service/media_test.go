@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"vid-lens/internal/config"
 	"vid-lens/internal/model"
@@ -38,6 +40,41 @@ func TestRemoteVideoURLValidatorRejectsUnsafeTargets(t *testing.T) {
 		if _, err := validator.validate(context.Background(), rawURL); err == nil {
 			t.Fatalf("expected %q to be rejected", rawURL)
 		}
+	}
+}
+
+func TestCheckUploadProgressRejectsStaleCompletedStateWithoutActiveAsset(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	redisServer := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	ctx := context.Background()
+	md5 := "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+	key := "upload:chunks:" + md5
+	rdb.Set(ctx, key+":status", "COMPLETED", 0)
+	rdb.Set(ctx, key+":file_size", 11, 0)
+	rdb.Set(ctx, key+":chunk_size", 5, 0)
+	rdb.Set(ctx, key+":total", 3, 0)
+
+	svc := &MediaService{repo: repos, rdb: rdb, cfg: config.UploadConfig{ChunkSize: 5}}
+	result, err := svc.CheckUploadProgress(ctx, md5, 11, 5, 3)
+	if err != nil {
+		t.Fatalf("CheckUploadProgress() error = %v", err)
+	}
+	if result["status"] == "completed" {
+		t.Fatalf("stale completed state must not skip upload: %#v", result)
+	}
+}
+
+func TestUploadSpecMatchesRejectsLegacyOrChangedChunkLayout(t *testing.T) {
+	if uploadSpecMatches([]interface{}{nil, nil, nil}, 117, 5, 24) {
+		t.Fatal("legacy upload state without metadata must not be resumed")
+	}
+	if uploadSpecMatches([]interface{}{"117", "1", "117"}, 117, 5, 24) {
+		t.Fatal("a 1 MiB layout must not be resumed as a 5 MiB layout")
+	}
+	if !uploadSpecMatches([]interface{}{"117", "5", "24"}, 117, 5, 24) {
+		t.Fatal("matching upload specification should be resumable")
 	}
 }
 

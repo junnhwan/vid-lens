@@ -31,20 +31,3 @@ func TestVideoRAGIndexManifestUsesVariableLengthHashColumn(t *testing.T) {
 		t.Fatalf("chunk_manifest_sha256 type = %q, want varchar(64)", got)
 	}
 }
-
-func TestAllModelsIncludesUploadSessionModels(t *testing.T) {
-	wanted := map[reflect.Type]bool{
-		reflect.TypeOf(&UploadSession{}):      false,
-		reflect.TypeOf(&UploadSessionChunk{}): false,
-	}
-	for _, candidate := range AllModels() {
-		if _, ok := wanted[reflect.TypeOf(candidate)]; ok {
-			wanted[reflect.TypeOf(candidate)] = true
-		}
-	}
-	for typeOf, found := range wanted {
-		if !found {
-			t.Errorf("AllModels() does not include %v", typeOf)
-		}
-	}
-}

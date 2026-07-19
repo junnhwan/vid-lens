@@ -26,7 +26,7 @@
 - Redis 限流 fail-open 的收益和风险是什么？
 - 请求限流、AI usage ledger 和计费系统有什么区别？
 
-## 3. 耐久化分片上传
+## 3. Redis 分片状态与断点续传
 
 专题：[`03-chunk-upload-resume.md`](03-chunk-upload-resume.md)
 
@@ -72,7 +72,7 @@
 - 哪些并发不变量由唯一约束、行锁或 CAS 保证？
 - JWT 中的 userID 如何进入 repository 查询？
 - 密码为什么 bcrypt，BYOK Key 为什么 AES-GCM？
-- RAG 和 upload session 如何防止跨用户访问？
+- RAG 如何防止跨用户访问？当前 Redis 分片协议的用户隔离边界是什么？
 - SQLite/miniredis/sqlmock 分别能证明什么、不能证明什么？
 - 哪些行为必须由真实 PostgreSQL/pgvector 集成测试验证？
 - 当前最大的 E2E 和部署验证缺口是什么？

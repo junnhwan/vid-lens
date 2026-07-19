@@ -13,12 +13,11 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 	router := newServerRouter(config.Config{
 		JWT: config.JWTConfig{Secret: "test-secret"},
 	}, serverHandlers{
-		user:           &handler.UserHandler{},
-		profiles:       &handler.AIProfileHandler{},
-		rag:            &handler.RAGHandler{},
-		chat:           &handler.ChatHandler{},
-		media:          &handler.MediaHandler{},
-		uploadSessions: &handler.UploadSessionHandler{},
+		user:     &handler.UserHandler{},
+		profiles: &handler.AIProfileHandler{},
+		rag:      &handler.RAGHandler{},
+		chat:     &handler.ChatHandler{},
+		media:    &handler.MediaHandler{},
 	}, nil, nil)
 
 	if router == nil {
@@ -29,11 +28,10 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		"GET /healthz":               "health endpoint",
 		"GET /readyz":                "readiness endpoint",
 		"POST /api/v1/user/register": "public registration",
-		"POST /api/v1/chat/sessions/:session_id/messages":             "chat message",
-		"POST /api/v1/media/upload-sessions":                          "create upload session",
-		"GET /api/v1/media/upload-sessions/:session_id":               "read upload session",
-		"PUT /api/v1/media/upload-sessions/:session_id/chunks/:index": "upload session chunk",
-		"POST /api/v1/media/upload-sessions/:session_id/complete":     "complete upload session",
+		"POST /api/v1/chat/sessions/:session_id/messages": "chat message",
+		"POST /api/v1/media/upload-chunk":                 "upload chunk",
+		"GET /api/v1/media/check-upload":                  "check uploaded chunks",
+		"POST /api/v1/media/merge-chunks":                 "merge uploaded chunks",
 	}
 	registered := make(map[string]struct{}, len(router.Routes()))
 	for _, route := range router.Routes() {
@@ -44,13 +42,14 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 			t.Errorf("missing %s route %s", description, route)
 		}
 	}
-	for _, legacy := range []string{
-		"POST /api/v1/media/upload-chunk",
-		"GET /api/v1/media/check-upload",
-		"POST /api/v1/media/merge-chunks",
+	for _, removed := range []string{
+		"POST /api/v1/media/upload-sessions",
+		"GET /api/v1/media/upload-sessions/:session_id",
+		"PUT /api/v1/media/upload-sessions/:session_id/chunks/:index",
+		"POST /api/v1/media/upload-sessions/:session_id/complete",
 	} {
-		if _, ok := registered[legacy]; ok {
-			t.Errorf("legacy chunk route is still registered: %s", legacy)
+		if _, ok := registered[removed]; ok {
+			t.Errorf("PostgreSQL upload-session route is still registered: %s", removed)
 		}
 	}
 }

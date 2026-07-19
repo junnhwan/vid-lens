@@ -124,7 +124,7 @@ WHERE datname = current_database();
 
 ## 8. 面试话术
 
-> 我不会把接口慢直接归因于 CPU。先看 CPU 与吞吐关系：CPU 高就区分 Go、FFmpeg 和 PostgreSQL；CPU 低但延迟高就查连接等待、Kafka lag、MinIO 和外部 AI。上传方面，普通上传和 durable complete 都是流式处理，不把完整视频放进 heap，但 session 合并会产生 MinIO 到 Go 再回 MinIO 的带宽成本。数据库已经切到 PostgreSQL，GORM 与 pgvector 分别有连接池，所以容量规划要计算总连接预算。项目已有 task、AI、ASR、RAG 和限流 Prometheus 指标，但没有完整 OTel 和正式容量结论。
+> 我不会把接口慢直接归因于 CPU。先看 CPU 与吞吐关系：CPU 高就区分 Go、FFmpeg 和 PostgreSQL；CPU 低但延迟高就查连接等待、Kafka lag、MinIO 和外部 AI。普通上传流式落临时文件，分片上传由 MinIO 保存并服务端合并；Redis 只保存临时片号。数据库已经切到 PostgreSQL，GORM 与 pgvector 分别有连接池，所以容量规划要计算总连接预算。
 
 ## 9. 不要夸大
 

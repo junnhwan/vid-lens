@@ -65,5 +65,5 @@ DELETE request
 ## 6. 当前限制
 
 - 不支持删除正在 queued/running 的任务；尚未实现取消协议和 consumer 协作终止。
-- completed upload session 指向已删除 task 时，重复 complete 的稳定响应仍有生命周期缺口。
+- 未完成上传的 Redis 临时状态与 MinIO 分片依赖 TTL 和 best-effort 清理，尚无持久化 session 回收器。
 - MinIO/向量删除持续失败时需要运维观察 cleanup 指标和错误记录；目前没有专门管理后台。

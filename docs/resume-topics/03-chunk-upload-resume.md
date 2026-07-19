@@ -1,155 +1,408 @@
-# 专题 3：耐久化分片上传与断点续传
+# 专题 3：分片上传与断点续传
 
-## 1. 推荐简历表述
+## 1. 简历原句
 
-> 设计用户级耐久化上传会话：由 PostgreSQL 持久化不可变 manifest、已接收分片台账、完成 lease 与最终任务身份，MinIO 保存分片和最终对象；支持断点恢复、同分片幂等、冲突检测、服务端完整性校验和重复完成请求幂等返回。
+采取分片上传与断点续传机制，通过 Redis Set 记录分片状态，使用 MinIO 存储分片并通过 ComposeObject 合并，提升弱网环境下大文件上传可靠性
 
-不要再写“Redis Set 是上传状态事实源”或“MinIO ComposeObject 合并”。那是已退役的旧协议。
+## 2. 这个点想证明什么
 
-## 2. 为什么要从全局 MD5 协议重构
+这条证明你处理过大文件上传场景，不只是普通 multipart 表单上传。它能体现文件工程、Redis 数据结构、对象存储、断点续传、服务端合并和并发合并控制。
 
-旧协议以客户端传入的 `file_md5` 作为全局会话身份，并把已上传片号存在 Redis。它有几个具体问题：
+## 3. 背景痛点
 
-- 会话没有绑定 `user_id`，不同用户提交同一 MD5 时容易共享状态边界；
-- Redis key 只保存临时进度，重启、过期或异常清理会丢失业务事实；
-- 客户端 MD5 只被信任，没有服务端对完整内容重新计算；
-- 相同 index 的不同内容没有稳定冲突语义；
-- merge 锁只能防并发执行，不能保存稳定的完成结果和 task identity；
-- Redis key、MinIO object 和数据库 task 分散，后续开发者很难判断谁是事实源。
+视频文件通常比较大，直接整文件上传会有几个问题：
 
-重构后的原则是：**PostgreSQL 管状态，MinIO 管字节，Redis 不参与上传正确性。**
+- 上传时间长，弱网容易中断。
+- 中断后如果重传整个文件，用户体验差。
+- 大请求长时间占用连接和服务端资源。
+- 合并请求被重复/重试发起可能造成重复对象和重复入库。
 
-## 3. 当前事实源与职责
+所以要把大文件拆成多个分片，每片独立上传，失败后只补传缺失分片。
 
-```text
-PostgreSQL
-├── upload_sessions
-│   ├── user_id + session_id 所有权
-│   ├── immutable manifest
-│   ├── active/completing/completed/failed/expired
-│   ├── completion token + lease expiry
-│   └── verified MD5 + asset_id + task_id
-└── upload_session_chunks
-    └── (session_id, chunk_index) -> exact size + SHA-256 + MinIO object name
+## 4. 主流程怎么讲
 
-MinIO
-├── upload-sessions/<session>/chunks/<index>/<sha256>
-└── final video object
+1. 前端按固定大小（项目里是 5MB）切分文件。
+2. 每个分片上传时带 `file_md5`、分片编号。
+3. 后端把分片写入 MinIO 临时对象路径 `chunks/<file_md5>/<chunk_number>`。
+4. **先落盘后记账**：MinIO 写成功后，把分片编号 `SAdd` 进 Redis Set。
+5. 前端恢复上传时查询 Redis Set，拿到已上传分片列表。
+6. 前端只补传缺失分片。
+7. 所有分片到齐后，后端校验完整性。
+8. 后端通过 MinIO `ComposeObject` 在对象存储侧合并成最终视频对象。
+9. 合并后创建或复用 `video_assets`，再创建 `video_tasks`。
 
-Redis
-└── 不保存上传会话或分片完成事实
+## 5. 具体实现怎么讲
+
+Redis Set 记录的是某个文件 MD5 下已经上传成功的分片编号。Set 的特点是天然去重，同一个分片重复上传不会产生重复状态。
+
+MinIO 存储两类对象：
+
+- 临时分片对象：`chunks/<file_md5>/<chunk_number>`。
+- 最终视频对象：`videos/<uuid>.<ext>`。
+
+合并时不把所有分片读回 Go 应用内存，而是调用 MinIO 的 `ComposeObject` 在对象存储侧合并。这样能减少应用内存压力和出口带宽。
+
+合并阶段是临界区，所以同一个 MD5 会用 Redis 锁保护，避免重复合并和重复创建 asset。
+
+分片大小定在 5MB（`config.yaml: chunk_size: 5242880`）。这不是拍脑袋：**5MB 是 S3/MinIO 多段上传的硬下限**，`ComposeObject` 底层是 UploadPartCopy，除最后一片外每片必须 ≥ 5MB，否则合并直接失败。所以 5MB 是协议逼出来的最小可行值。
+
+## 6. 代码证据路径
+
+- `internal/handler/media.go:66`：`UploadChunk` 分片上传入口；`:101` 查进度入口；`:119` 合并入口。
+- `internal/service/media.go:582`：`UploadChunk`，先落盘后记账（先 `PutObject` 再 `SAdd`）。
+- `internal/service/media.go:556`：`CheckUploadProgress`，`SMembers` 返回已上传分片。
+- `internal/service/media.go:601`：`MergeChunks`，秒传 → 非阻塞锁 → 完整性校验 → `ComposeObject` → 建 asset。
+- `internal/storage/minio.go:106`：`ComposeObject` 封装。
+- `internal/pkg/lock/redis_lock.go`：合并阶段 Redis 锁（非阻塞 `TryLock(ctx, 0)`）。
+- `config.yaml:70`：`chunk_size: 5242880`（5MB）。
+
+## 7. 代码真相 vs 简历话术（landmine，最重要）
+
+项目是 AI 写的，代码和简历话术有几处对不上，面试官一挖就露。下面 9 条必须提前心里有数，被问到要么说"这是 by-design 的 trade-off"，要么说"这是已知待优化项，方案是 X"。
+
+### 🚨 L1：没有内容完整性校验，只校验了"片数齐"
+
+简历写"结合 MD5 内容指纹"，但代码里 `file_md5` 全程是前端传的字符串，**服务端从不重算**。合并时只检查"0~totalChunks-1 每片都在 Set 里"（`media.go:629`），**从不重算合并后文件的 MD5 去比对 `file_md5`**，也没有单片 MD5。
+
+- 当前只做了**完备性**校验（片数齐），没做**内容完整性**校验。
+- 被问"怎么保证分片没损坏/被篡改"时老实答：要加强有两条路——①每片带单片 MD5，落盘后校验；②合并后重算整体 MD5 比对 `file_md5`，对不上拒绝建 asset。
+
+### 🚨 L2：5MB 是硬约束，不能更小
+
+被问"能不能用 1MB 分片，弱网恢复粒度更细？"——**不能**。`ComposeObject` 要求非末尾片 ≥ 5MB，低于 5MB 合并必失败。要更细分片就得放弃服务端合并（改成下载到应用内存拼接，但这又毁了"省内存"的卖点）。这是这一点的技术天花板。
+
+### ✅ L3（已修复）：临时分片合并后的清理
+
+`MergeChunks` 成功后**现在会清理**：`cleanupMergedChunks`（`media.go:670`）best-effort 删 `chunks/<file_md5>/*` + Redis 分片 key，保留 `:status=COMPLETED` 供 check-upload 识别。单个清理失败只记日志、不阻塞已成功的合并。
+
+- **原先是泄漏点**：合并后不删分片，MinIO 堆积。面试可讲"发现存储泄漏→加 best-effort 清理，失败不影响合并正确性"。
+- 仍存在的缺口：崩溃在 ComposeObject 与 Asset.Create 之间的**孤儿合并对象**（`videos/<uuid>`）不在清理范围，需单独回收（见 L7）。
+
+### 🚨 L4：`InitChunkedUpload` 是死代码
+
+`service/media.go:549` 定义了 `InitChunkedUpload`（写 `:total` 和 `:status=INIT`），但**没有任何路由/handler 调用它**（main.go 只注册了 upload-chunk / check-upload / merge-chunks 三个接口）。所以：
+
+- `:total` 从来不写，`totalChunks` 完全来自合并请求体。
+- 一个全新文件查进度返回的是 `{status:"uploading", uploaded:[]}`，不是 `new`。
+- 被问"total_chunks 存哪"：老实说"来自合并请求参数，服务端没单独存；预留的 init 接口当前没暴露到路由"。
+
+### 🚨 L5：完整性校验是 N 次 Redis 往返
+
+`media.go:629` 用 for 循环逐个 `SIsMember`，N 片 = N 次网络往返（2GB/5MB ≈ 410 次）。
+
+- 优化方案现成："可以改成一次 `SMembers` 拿全量到本地 map，再 O(N) 内存比对，把 N 次往返压成 1 次。" 主动认这个优化点。
+
+### 🚨 L6：分片状态/临时对象没有 user 隔离（by design 的去重）
+
+`chunks/<file_md5>/<n>` 和 `upload:chunks:<file_md5>` 都是**全局键**，不带 userID。所以同 MD5 的两个用户会共享分片对象和进度——这是**故意的跨用户内容去重**（秒传的延伸），不是漏洞。
+
+- 被问"用户隔离"：诚实答"asset 和分片按 MD5 全局共享，设计假设同 MD5 即同内容；严格隔离的话把 userID 拼进键即可，但会让跨用户去重失效，是个 trade-off。"
+
+### 🚨 L7：合并跨 Redis/MinIO/MySQL 三方，非原子
+
+`ComposeObject` 成功后如果崩溃在 `Asset.Create` 之前，会留下一个孤儿合并对象。下次重试：MD5 仍 miss → 锁已过期 → 重新合并生成**新 uuid 对象** → 建成功。所以**操作上能自愈，但会泄漏孤儿对象**，靠清理任务回收。
+
+### 🚨 L8：FileMD5 有 DB 唯一索引——它才是幂等底线，不是锁
+
+`asset.go:13` 上 `FileMD5` 带 `uniqueIndex`。所以就算合并锁完全失效，两个并发合并也只会一个 `Asset.Create` 成功、另一个撞唯一键失败（`media.go:661` 失败时删掉自己刚合并的对象，下次重试 `FindByMD5` 命中秒传）。**真正的幂等底线是 DB 唯一索引，锁只是挡昂贵 ComposeObject 的性能优化。** 答辩时主动承认这点反而显层次。
+
+### 🚨 L9：当前前端没接分片通道，只有 API 契约
+
+`web/` 里 `uploadChunk`/`mergeChunks`/`checkUpload` 只有 API 包装函数、没有任何调用方，也没有 `file.slice()` 和 MD5 计算；前端实际走整文件 `uploadFile`（`api.js:60`）。所以**这条分片链路当前几乎不被前端调用**。讲架构设计（切片在前端、后端只存+记+合并）是真的；但别跟面试官说"线上在跑"，也别在被要求演示前端切片代码时硬说有。
+
+> 这 9 条心里有数，面试官从任何角度挖都能接住。永远不要硬撑说"完美实现了"。
+
+## 8. 选型理由
+
+### Q：为什么用 Redis Set 记录分片状态？
+
+分片状态本质是一个"已完成编号集合"。Set 天然去重，适合判断某个分片是否已经上传（`SISMEMBER`），也方便返回全部已上传编号（`SMEMBERS`）。分片状态是临时高频数据，放 Redis 比放 MySQL 更轻。
+
+**追问"为什么不用 Bitmap？"** → Bitmap 对稠密连续编号省内存（`GETBIT` O(1)），但这里 N 只有几百（2GB/5MB ≈ 410），Set 更直观、可读、可调试，内存差可忽略；只有当 N 上万且稠密时才考虑 Bitmap。这种横向对比能加分。
+
+### Q：为什么是 5MB？
+
+5MB 是 S3/MinIO 多段上传对单个 part 的硬下限（末尾 part 除外）。`ComposeObject` 底层走 `UploadPartCopy`，非末尾片 < 5MB 会直接报错。所以 5MB 是能合并成功的最小分片大小。再小就得放弃服务端合并。
+
+### Q：为什么用 MinIO？
+
+视频和分片都属于对象数据，不适合放本地磁盘。本地磁盘和单机绑定，不利于扩容和容灾。MinIO 提供 S3 兼容对象存储能力，适合存视频文件，也方便后续切换云对象存储。
+
+### Q：为什么用 ComposeObject？
+
+ComposeObject 在对象存储侧用 `UploadPartCopy` 合并分片，后端不需要把所有分片下载到应用内存再拼接。对大文件来说，这能降低内存占用、IO 压力和出口带宽。数据全程不经过 Go 应用。
+
+### Q：为什么不直接用数据库存分片？
+
+数据库适合存元数据，不适合存视频二进制分片。分片对象放 MinIO，状态放 Redis，任务信息放 MySQL，职责更清楚。
+
+## 9. 高频问题与回答话术
+
+### Q1：断点续传怎么知道哪些分片不用传？
+
+后端用 Redis Set 记录某个 fileMD5 下已上传成功的分片编号。前端恢复上传时先查这个集合（`SMembers`），然后只上传缺失分片。
+
+### Q2：重复上传同一个分片怎么办？
+
+Redis Set 天然去重，同一个编号重复加入不会造成重复状态。MinIO 临时对象同名会被覆盖。最终以分片编号集合和合并前完整性校验为准。
+
+### Q3：合并前怎么校验完整性？
+
+根据 `total_chunks` 从 0 到 n-1 检查 Redis Set 中是否都存在对应编号（`SIsMember`）。只要缺一个分片，就不执行 ComposeObject，而是返回缺失分片信息。
+
+**注意区分两层校验**：这是**完备性**校验（片数齐），不是**内容完整性**校验。当前没有重算合并后文件的 MD5，也没有单片 MD5（见 L1）。要防损坏/篡改，需要补单片 MD5 或合并后重算整体 MD5 比对。
+
+### Q4：分片上传到 99% 断了怎么办？
+
+用户重新上传时，前端根据 fileMD5 查询已上传分片集合，只补传最后缺失的分片，不需要重传前面 99%。这就是断点续传的核心。
+
+### Q5：ComposeObject 失败怎么办？
+
+合并失败不会创建最终 asset，前端可以稍后重试合并。因为分片还在 MinIO 临时路径，Redis Set 也记录了已上传状态，只要分片没有清理，就不需要重新上传全部。
+
+### Q6：合并请求被重复/重试发起怎么办？（接口安全 ≠ 有没有按钮）
+
+合并阶段用非阻塞 Redis 锁（`TryLock(ctx, 0)`）保护同一 fileMD5。第一个请求拿到锁后执行合并，其他请求拿不到锁时先**二次查 MD5**（双检，可能第一个请求已经建好 asset），仍没有就返回"合并进行中"，避免重复 ComposeObject 和重复创建 asset。
+
+**关键**：真正的幂等底线是 `FileMD5` 的 DB 唯一索引（见 L8）——锁失效数据也不会重复，两个并发合并只会一个建 asset 成功、另一个撞唯一键失败。锁是性能优化，专门挡昂贵的 ComposeObject。合并是公开 HTTP 接口，要假设会被重复/重试调用（超时重发、代理重发、同 MD5 多会话同时完成、脚本/未来客户端），跟前端有没有按钮无关。
+
+### Q7：Redis 状态丢了怎么办？
+
+当前实现依赖 Redis Set 做断点状态。如果 Redis 状态丢失，最直接影响是前端不知道哪些分片已传，可能需要重新上传或补偿扫描 MinIO 临时对象 `chunks/<md5>/*` 重建 Set。生产上可以给上传会话元数据落 MySQL。
+
+**老实承认**：Redis 状态不是唯一可靠存储，丢了会影响续传体验。
+
+### Q8：临时分片怎么清理？
+
+合并成功后由 `cleanupMergedChunks`（`media.go:676`）best-effort 删除 `chunks/<md5>/*` 和 Redis 分片 key，保留 `:status=COMPLETED`。单个删除失败只记日志，不阻塞已成功的合并。剩余缺口：崩溃产生的孤儿合并对象（`videos/<uuid>`）需单独回收（见 L7）。
+
+### Q9：为什么不让前端直传 MinIO？
+
+前端直传（预签名 URL）可以减少后端带宽压力，但需要预签名 URL、权限控制、回调校验和对象名安全设计。当前项目先由后端接收分片，逻辑更集中，适合项目阶段。后续大规模部署可以考虑预签名直传。
+
+### Q10：分片大小怎么定？
+
+定在 5MB，这是 S3/MinIO 多段上传的硬下限（除末尾片外每片必须 ≥ 5MB），不能再小（见 L2）。上限受 part 数 ≤ 10000 约束（2GB/5MB ≈ 410 片，远低于上限）。不要说一个固定值"最优"，要说 5MB 是协议约束下的最小可行值。
+
+### Q11：完整性校验能不能优化？
+
+当前是 for 循环逐个 `SIsMember`，N 片 = N 次网络往返（见 L5）。可以改成一次 `SMembers` 拿全量到本地 map，再 O(N) 内存比对，把 N 次往返压成 1 次。
+
+## 10. 结合八股怎么答
+
+### S3/MinIO 多段上传
+
+- part 大小：除末尾 part 外必须 ≥ 5MB；part 数 ≤ 10000。
+- `ComposeObject` = `CreateMultipartUpload` + `UploadPartCopy`（服务端拷贝，数据不出对象存储）+ `CompleteMultipartUpload`。
+- 由此推导：分片下限 5MB、单文件 part 数上限 = 文件大小 / 分片大小。
+
+### Redis Set
+
+Set 适合去重集合，判断分片是否已上传用 `SISMEMBER`，返回已上传列表用 `SMEMBERS`，加成员用 `SADD`，设过期用 `EXPIRE`。
+
+### 对象存储
+
+MinIO 存的是对象，不是关系数据。对象存储适合大文件，MySQL 存元数据。
+
+### 幂等
+
+重复上传同一分片、重复合并请求都要按幂等考虑。Set 去重（分片层）和合并锁（合并层）是两个层面的幂等设计。秒传（MD5 命中直接建 task）是第三层幂等。
+
+### 大文件上传
+
+核心不是"能上传大文件"，而是失败恢复、状态记录、完整性校验和服务端资源控制。
+
+## 11. tradeoff
+
+分片上传比普通上传复杂，主动展示权衡意识：
+
+| 维度 | 选择 | 代价 |
+|---|---|---|
+| 分片大小 | 5MB（协议下限） | 牺牲更细的弱网恢复粒度 |
+| 分片传输 | 应用 buffer 5MB（`io.ReadAll`） | 内存 = 并发数 × 5MB，非零拷贝流式 |
+| 进度存储 | 只在 Redis | Redis 挂了无法续传，需重传或扫 MinIO 重建 |
+| 内容校验 | 仅完备性 | 不防损坏/篡改，需补 MD5 |
+| 状态键 | 全局 MD5 键 | 支持跨用户去重，但进度按 MD5 可见 |
+| 合并方式 | 服务端 ComposeObject | 依赖对象存储能力，非末尾片 ≥ 5MB |
+| 完整性检查 | 逐个 SIsMember | N 次往返，可优化为 1 次 SMembers |
+
+换来的收益是弱网失败后不用重传整个视频，大文件上传体验更可靠。
+
+## 12. 兜底保障
+
+- 分片重复上传：Redis Set 去重 + 对象覆盖。
+- 分片缺失：合并前完备性校验。
+- 合并并发：非阻塞 Redis 锁 + 双检 MD5。
+- ComposeObject 失败：不创建 asset，可重试合并。
+- 已有相同 MD5 asset：秒传，直接复用视频文件。
+- 合并中途崩溃：靠 MD5 复用 + 幂等重试自愈（孤儿对象靠清理任务回收）。
+
+## 13. 压力追问怎么顶
+
+### 面试官：你这个是不是只是普通上传？
+
+不是。普通上传是一次请求传完整文件，我这里是分片独立上传，Redis Set 记录已完成分片，断点续传时只补缺失分片，最后由 MinIO ComposeObject 在对象存储侧服务端合并。核心是断点状态和服务端合并。
+
+### 面试官：Redis 丢了不就断点续传失效？
+
+是的，Redis 状态丢失会影响续传体验，所以它不是唯一可靠存储。当前项目里分片状态是临时数据，丢失后可以重新上传或后续通过 MinIO 临时对象扫描补偿。生产上可以把上传会话元数据落 MySQL。
+
+### 面试官：能不能把分片设成 1MB，恢复粒度更细？
+
+不能。ComposeObject 底层是 S3 多段上传的 UploadPartCopy，非末尾片必须 ≥ 5MB，低于 5MB 合并必失败。5MB 是协议下限，要更细就得放弃服务端合并、改成应用内存拼接，反而丢了省内存的优势。
+
+### 面试官：怎么保证分片没被篡改？
+
+老实答：当前只做了完备性校验（片数齐），没做内容完整性校验。要加强可以加单片 MD5 落盘后校验，或合并后重算整体 MD5 比对 `file_md5`。
+
+### 面试官：有没有测过 GB 级？
+
+如果没有实际压测，不会说支持 GB 级。可以说 max_file_size 配了 2GB，这个设计面向大文件上传场景，使用分片和对象存储合并降低弱网重传成本，但具体容量要结合服务配置和压测结果确认。
+
+### 面试官：前端根本没有合并入口，锁防什么？是不是为了加锁而加锁？
+
+合并是公开 HTTP 接口，接口安全性跟前端有没有按钮无关——HTTP 本来就不可靠，超时重发、代理重试、脚本、未来接的客户端都可能造成并发。我清楚真正的幂等底线是 FileMD5 的 DB 唯一索引（就算锁失效也只会一个建 asset 成功、另一个撞唯一键失败，数据不会重复）。锁是性能优化，挡昂贵的 ComposeObject；双检让拿不到锁的请求复用结果而不是报错。当前前端没接分片通道是前端阶段的选择（见 L9），不影响后端接口该有的并发安全。
+
+## 14. 30 秒话术
+
+视频文件大，弱网中断后如果重传整个文件体验很差，所以我做了分片上传和断点续传。前端按 5MB 切片（5MB 是 S3 多段上传的硬下限），每片先写入 MinIO 临时路径，成功后把分片编号写入 Redis Set。恢复上传时前端查询已上传分片，只补传缺失部分。全部到齐后，后端校验完备性，并用 MinIO ComposeObject 在对象存储侧服务端合并，合并阶段用非阻塞 Redis 锁避免重复合并。
+
+## 15. 2 分钟话术
+
+这个点解决的是大视频上传可靠性。直接整文件上传在弱网环境下很容易中断，一旦失败就要重传全部文件。所以我让前端按 5MB 分片上传，每片都带 fileMD5 和分片编号。
+
+后端收到分片后先写 MinIO 临时对象（`chunks/<file_md5>/<n>`），写成功后才把分片编号 `SAdd` 进 Redis Set——这个"先落盘后记账"顺序很重要，反过来崩溃时会记一个不存在的分片导致合并失败。Redis Set 记录的是已上传编号集合，天然去重，前端恢复上传时可以查询这个集合，只补传缺失分片。
+
+等所有分片到齐后，后端先校验 Redis Set 中是否包含 0 到 totalChunks-1 的所有编号，再调用 MinIO ComposeObject 在对象存储侧合并成最终视频对象，Go 服务不需要把分片读回内存。
+
+合并是临界区，所以同一个 fileMD5 会加非阻塞 Redis 锁，抢不到就二次查 MD5 复用或返回"进行中"，避免重复合并和重复创建 asset。合并前先查 MD5，命中就秒传直接建 task，这是和第二条 MD5 复用衔接的。
+
+几个我清楚的 trade-off：5MB 是协议下限不能再小；分片状态目前只在 Redis，丢了得重传或扫 MinIO 重建；完整性目前只校验片数齐，没做内容 MD5 复核，要防篡改得加单片 MD5 或合并后重算。
+
+## 16. 5 分钟深讲版本
+
+我会先讲普通上传的问题。视频文件大，上传时间长，弱网中断概率高。如果一个 500MB 视频上传到 99% 失败，用户还要从头传，体验很差。所以我做了服务端分片续传。
+
+流程上，前端把文件切成 5MB 分片，每片上传到后端。为什么是 5MB？因为 ComposeObject 底层是 S3 多段上传的 UploadPartCopy，非末尾片必须 ≥ 5MB，这是协议硬约束。后端把分片写到 MinIO 临时路径，写成功后用 Redis Set 记录分片编号。这里用 Set 是因为分片编号天然是集合，重复上传同一片也只保留一份状态。注意是"先落盘后记账"，反过来会在崩溃时记一个不存在的分片。
+
+恢复上传时，前端先根据 fileMD5 查询已上传分片，只上传缺失编号。这样网络中断后可以继续，而不是从头开始。
+
+合并时，后端不会盲目合并，而是先根据 totalChunks 检查所有分片是否都存在。确认完整后调用 MinIO ComposeObject，让对象存储完成合并。这样 Go 服务不需要把所有分片读回内存再拼接，避免大文件占用内存。
+
+并发上，同一个文件的合并请求可能被重复/重试发起（超时重发、代理重发等，不是用户点按钮），所以我用非阻塞 Redis 锁保护合并流程，抢不到锁时二次查 MD5 复用或返回"进行中"。合并完成后创建最终视频对象和 asset。如果发现同 MD5 的 asset 已存在，就直接秒传复用。这个点和第二条的 MD5 复用是衔接的。
+
+最后我会主动说几个 trade-off 和已知缺口，体现我知道边界在哪：第一，5MB 是协议下限不能更小；第二，当前只做完备性校验没做内容 MD5 复核，要防篡改得补单片 MD5；第三，合并后已用 cleanupMergedChunks 清理分片（原先不清理是泄漏，已修复），但崩溃产生的孤儿合并对象还需单独回收；第四，Redis 状态丢了续传会失效，生产上应该把会话元数据落 MySQL。
+
+## 17. 不要这么说
+
+- 不要说实现了完整云厂商 multipart upload。
+- 不要说支持 GB 级文件，除非有压测。
+- 不要说 Redis 状态绝对可靠。
+- 不要说弱网成功率提升了具体百分比，除非有数据。
+- 不要忽略合并并发问题。
+- 不要说分片大小"越小越好"——会被 5MB 协议约束反杀。
+- 不要说做了内容完整性校验——当前只有完备性校验（片数齐）。
+- 不要说"防用户狂点合并按钮"——当前前端没有合并入口；要说"防合并请求被重复/重试发起"，且 DB 唯一索引才是幂等底线。
+
+---
+
+## 18. 升级为真正"秒传"的改造规划（前端整文件路径）
+
+### 现状（为什么现在不算秒传）
+
+当前前端走整文件 `uploadFile`（`api.js:60`），没有上传前 MD5 预检。第二次传同一文件：字节照传、临时文件照落盘，只是服务端 `FindByMD5` 命中后跳过 MinIO 上传和建 asset（`media.go:104-116`）。所以是**存储去重，不是带宽秒传**。
+
+### 目标
+
+上传前先算 MD5 → 查询 → 命中就 0 字节建 task。
+
+### 后端改动（小，约半天）
+
+新增 `POST /api/v1/media/rapid-upload`：
+
+- 入参 `{ file_md5, filename }`
+- `Asset.FindByMD5(file_md5)`：命中 → `createTaskFromAsset`（复用现有）→ 返回 `{instant:true, task}`；未命中 → `{instant:false}`
+- 复用 `FindByMD5` + `createTaskFromAsset`，约 20 行 + 路由 + 测试
+- 注意：现有 `check-upload`（`media.go:556`）只查 Redis 分片状态、**不查 asset**，不能直接当秒传接口用，建议新开
+
+### 前端改动（中等，MD5 哈希是主要工作量，约 1-2 天）
+
+1. 加 `spark-md5` 依赖（浏览器增量 MD5）
+2. 用 Web Worker 算文件 MD5（避免大文件卡 UI）：`Blob.slice` 分片读 + `SparkMD5.append`
+3. 上传流程改为：算 MD5（Worker，显示"计算指纹中"）→ 调 `rapid-upload` → 命中就秒传完成（0 字节）→ 未命中走原 `uploadFile`
+4. 最小可用版（MVP）：先不上 Worker、主线程算（大文件会卡几秒 UI），跑通秒传逻辑后再加 Worker 优化
+
+### 关键 trade-off / 坑
+
+- **浏览器算 MD5 本身慢**：500MB 文件哈希要几秒（CPU 密集）。秒传只在"命中"时净赚；"未命中"反而多了哈希延迟。优化：先算"采样指纹"（首尾各 1MB + 文件大小）预筛，命中再算全量（网盘做法）
+- **内存**：必须用 spark-md5 增量 + `Blob.slice`，不能整文件 `readAsArrayBuffer`，否则 GB 文件爆内存
+- **安全**：MD5 可碰撞，恶意客户端可伪造 MD5 骗秒传、拿到指向别人内容的 task（见 L1）；简历项目可接受，生产要换 SHA-256 或服务端复核
+- **秒传 ≠ 断点续传**：秒传是"整份已存在跳过上传"，断点续传是"部分已传补传"；当前前端两者都没接，本规划只做秒传
+
+### 要不要做
+
+面试角度：现在"MD5 内容指纹 + 复用"只在服务端成立，做了秒传才端到端坐实（强化第 2 条）。有时间建议做；没时间至少能讲清这套规划。
+
+---
+
+## 19. 端到端链路速查（从浏览器开始）
+
+> 前提：当前前端实际走整文件 `uploadFile`；下面是**分片上传这条链路的完整设计流程**（后端已实现、前端契约已定义但 web 未接）。面试讲这套设计，但要清楚哪步真写了、哪步是设计——见末尾对照表。
+
+### 数据流总览
+
+```
+浏览器
+  ① 选文件 +（设计）算整文件 MD5
+  ②（设计）秒传预检 ──命中──→ 0 字节直接建 task
+  ③ 切 5MB 分片
+  ▼ 每片 POST /upload-chunk  {file_md5, chunk_number, chunk}
+Gin handler (media.go:66)
+  │ LimitReader(5MB+1)：防超限 + 防 OOM（+1 是哨兵，区分"正好 5MB"和"超限截断"）
+  ▼
+service UploadChunk (media.go:582)
+  │ 先落盘：PutObject → MinIO  chunks/<md5>/<n>
+  │ 后记账：SAdd upload:chunks:<md5> + Expire 24h   (Redis Set，天然去重)
+  ▼ 返回 chunk_number
+（中断？）→ GET /check-upload → SMembers 拿已传片 → 只补缺失 ← 断点续传
+  ▼ 全部到齐
+POST /merge-chunks  {file_md5, filename, total_chunks}
+service MergeChunks (media.go:601)
+  │ FindByMD5 命中？ → 秒传：直接建 task，跳过合并
+  │ 非阻塞锁 vidlens:merge:<md5> + 拿不到锁双检 MD5
+  │ 完整性校验：SIsMember 查 0..n-1 片是否齐
+  │ ComposeObject → MinIO 服务端合并成 videos/<uuid>.<ext>
+  │ Asset.Create（FileMD5 唯一索引兜底）→ MySQL
+  ▼ 返回 task_id
+浏览器轮询 GET /media/task/:id → 用户触发 AI 分析（Kafka 异步，第 1 点）
 ```
 
-`video_assets` 仍以完整文件 MD5 支持资产复用；这与“恢复同一 upload session”是两个概念。
+### Happy path 逐层
 
-## 4. HTTP 协议
+1. **选文件 + 算 MD5**（浏览器）：`File` 对象 → 算整文件 MD5 当会话唯一 key。
+2. **切 5MB 分片**（浏览器）：`file.slice`，5MB 是 S3 `ComposeObject` 硬下限。
+3. **逐片上传 `POST /upload-chunk`**：handler `LimitReader(5MB+1)` 封顶 → service 先 `PutObject` 落 MinIO `chunks/<md5>/<n>`，后 `SAdd` 记 Redis Set（**先落盘后记账**）。
+4. **合并 `POST /merge-chunks`**：`FindByMD5` 秒传短路 → 非阻塞锁+双检 → 完整性校验 → `ComposeObject` 服务端合并 → `Asset.Create` → 建 task。
+5. **轮询任务**：`GET /media/task/:id` → 触发 AI 分析（进第 1 点 Kafka 链路）。
 
-```text
-POST /api/v1/media/upload-sessions
-GET  /api/v1/media/upload-sessions/:session_id
-PUT  /api/v1/media/upload-sessions/:session_id/chunks/:index
-POST /api/v1/media/upload-sessions/:session_id/complete
-```
+### 两个关键分支
 
-创建请求提交：
+- **断点续传**：断了重进 → `GET /check-upload`（`SMembers` 返回已传片）→ 本地 diff 出缺失片 → 只补缺失 → 回到逐片上传。前面 99% 不重传。
+- **秒传**：合并时 `FindByMD5` 命中已有 asset → 不合并、不重建 asset，直接给当前用户新建 task 指向同一 asset（存储级去重，非带宽秒传，见第 18 节）。
 
-```json
-{
-  "filename": "demo.mp4",
-  "file_size": 123456,
-  "chunk_size": 5242880,
-  "total_chunks": 1,
-  "expected_md5": "32位十六进制"
-}
-```
+### 实现现状对照表（防拷打核心）
 
-分片请求使用原始 `application/octet-stream`，不是 multipart。Handler 先读取服务端 manifest 计算该 index 的权威大小，再用 `http.MaxBytesReader` 限制请求体。
+| 步骤 | 后端 | 当前 web 前端 |
+|---|---|---|
+| 选文件 | — | ✅ |
+| 算整文件 MD5 | — | ❌ |
+| 秒传预检接口 | ❌（`check-upload` 只查分片状态，不查 asset） | ❌ |
+| 切 5MB 分片 | — | ❌ |
+| 分片上传 `upload-chunk` | ✅ | ❌（用整文件 `uploadFile`） |
+| 断点续传 `check-upload` | ✅ | ❌ |
+| 合并 `merge-chunks` | ✅ | ❌ |
+| 轮询任务 `task/:id` | ✅ | ✅ |
 
-## 5. 正常流程
+### 被追问"你前端做了吗"怎么答
 
-1. 前端增量计算完整文件 MD5，并提交 immutable manifest。
-2. Service 用 manifest fingerprint 和 active key 查找当前用户可恢复的 session；同一 manifest 可稳定恢复，不同用户互不共享 session。
-3. `GET session` 从 PostgreSQL chunk ledger 重建 `uploaded` 列表，而不是查询客户端或 Redis 缓存。
-4. 上传分片时，服务端把请求体写入有上限的临时文件，同时计算 SHA-256，并要求实际大小与 manifest 精确一致。
-5. 分片对象写入 content-addressed MinIO 路径，再插入 PostgreSQL ledger。
-6. 同 index、同 size/hash 的重试返回幂等结果；同 index、不同内容返回冲突，不能覆盖已经接受的字节。
-7. complete 先用 CAS 获取带 token 和过期时间的 completion lease；live lease 拒绝并发完成，过期 lease 可以回收。
-8. 如果存在 size/MD5 匹配的 active asset，可跳过再次上传字节并复用 asset。
-9. 否则按 chunk index 流式打开 MinIO 对象，通过 `io.Pipe` 写入最终对象，同时计算完整文件 MD5 和总大小；不把完整视频一次载入内存。
-10. 完整性通过后，在同一个 PostgreSQL transaction 中创建/锁定 asset、创建 task，并用 lease token CAS 将 session 标记为 completed，保存稳定的 `asset_id/task_id`。
-11. 重复 complete 返回 session 中同一个 task；成功后的临时 chunk 删除是 best-effort。
-
-## 6. 关键不变量
-
-### Owner isolation
-
-任何 `Get`、`AcceptChunk`、`Complete` 都使用 `user_id + session_id` 查找。不能仅凭 UUID 或 MD5 访问其他用户会话。
-
-### Immutable manifest
-
-`filename/file_size/chunk_size/total_chunks/expected_md5` 共同形成 fingerprint。恢复时不能把旧 session 换成另一种分片布局。
-
-### Exact chunk size
-
-除最后一片外，每片必须等于 `chunk_size`；最后一片大小由 `file_size - (total_chunks-1)*chunk_size` 唯一计算。过短和过长都拒绝。
-
-### Accepted-chunk idempotency
-
-唯一索引 `(session_id, chunk_index)` 是最终物理兜底。对象路径包含 SHA-256，冲突重试不会覆盖 winner 的对象。
-
-### Completion ownership
-
-只有持有当前 `completion_token` 的执行者能完成、释放或标记失败。仅有 `status=completing` 不足以证明所有权。
-
-### Stable completed result
-
-asset、task 和 completed session 必须在一个 PostgreSQL transaction 中提交。HTTP 重试不能创建第二个 task。
-
-## 7. 失败窗口怎么回答
-
-### MinIO 分片写成功，ledger 插入失败
-
-Service best-effort 删除刚写入的 candidate object。即使删除失败，该对象也不是事实源；没有 ledger 行就不会被 complete 使用。
-
-### complete 进程崩溃
-
-completion lease 到期后可由新 owner 回收。最终对象写入使用稳定命名且后续数据库提交带 CAS；外部对象和数据库无法共享事务，因此仍依赖幂等对象操作、lease 和可恢复重试，而不是声称分布式强事务。
-
-### 完整 MD5 或 size 不匹配
-
-session 标记为 `failed` 并保存受限错误信息，不创建 asset/task。客户端不能靠重新调用 complete 把损坏内容变成成功。
-
-### PostgreSQL 最终事务失败
-
-释放当前 completion claim，使会话回到可重试状态；事务回滚保证不会留下半创建 task/session 完成状态。
-
-### 临时分片清理失败
-
-完成结果仍然有效。清理是 best-effort，残留只影响存储成本。废弃/过期 session 的对象定时清理目前仍是后续工作，不能说已经完全解决。
-
-## 8. 当前限制
-
-- 前端完整 MD5 仍在上传前计算，超大文件会增加开始上传前的等待；可以进一步评估 Web Worker、分块 hash 流水线或服务端 checksum 协议。
-- 当前完成逻辑以应用层流式读取/写入实现完整 MD5 校验，不再依赖 ComposeObject；这会产生 MinIO 到应用再到 MinIO 的数据路径，是为了换取服务端内容校验和不受 5MiB Compose part 下限约束。
-- 废弃 session 与 orphan MinIO candidate object 还需要单独的生命周期扫描/保留策略。
-- completed session 当前依赖关联 task 返回重复完成结果；任务删除后的 session 生命周期需要继续明确，不能把它描述成永久回执。
-- 尚未做大规模弱网、并发 session 和 MinIO 故障注入压测。
-
-## 9. 项目证据路径
-
-- `internal/model/upload_session.go`
-- `internal/model/upload_session_chunk.go`
-- `internal/repository/upload_session.go`
-- `internal/service/upload_session.go`
-- `internal/service/upload_session_chunk.go`
-- `internal/service/upload_session_complete.go`
-- `internal/handler/upload_session.go`
-- `cmd/server/router.go`
-- `web/src/chunkedUpload.js`
-- `internal/service/upload_session_test.go`
-- `internal/handler/upload_session_test.go`
-- `internal/repository/upload_session_test.go`
-
-## 10. 面试口语版
-
-> 我一开始用客户端 MD5 加 Redis Set 记录分片片号，能做基础断点续传，但复盘后发现它没有用户级会话边界，Redis 过期会丢失事实，而且服务端没有重算完整文件内容。后来我把它重构成 PostgreSQL durable upload session：创建时固定 manifest，每个 session 绑定用户；每个已接受分片在数据库保存 index、精确大小、SHA-256 和 MinIO 对象名。同一个 index 重传相同内容是幂等，传不同内容直接冲突。完成时用带 token 的 lease 防止并发 complete，按顺序流式读取分片并在服务端重新计算完整 MD5 和大小，最后把 asset、task 和 session 完成状态放在一个 PostgreSQL 事务里提交。Redis 不再决定上传是否完成，重复 complete 会返回同一个 task。外部 MinIO 和 PostgreSQL 之间仍然不是分布式事务，所以我用 lease、稳定对象身份和可重试状态来收敛失败窗口。
+> 后端这条链路我完整实现了——4 个接口、Redis Set 状态、MinIO 服务端合并、非阻塞锁 + 双检、完整性校验、合并时秒传短路。前端当前主走了整文件上传通道，分片通道的接口和契约已就绪，编排待接。我没把没接线的说成线上在跑。

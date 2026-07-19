@@ -25,8 +25,6 @@ func AllModels() []interface{} {
 		&AIUsageLedger{},
 		&QuotaCompensation{},
 		&UserUsageDaily{},
-		&UploadSession{},
-		&UploadSessionChunk{},
 	}
 }
 

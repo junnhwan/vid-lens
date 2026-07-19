@@ -5,7 +5,7 @@
 ### 1. 为什么 VidLens 仍需要分布式锁？
 
 - 题目：锁的业务必要性。
-- 简答：Redis lock 主要用于跨实例保护昂贵、可重复触发的业务临界区，例如普通上传按完整 MD5 创建资产以及分析 Consumer 的并发处理。新的 durable upload session complete 不再依赖旧 merge lock，而使用 PostgreSQL token + expiry lease。
+- 简答：Redis lock 主要用于跨实例保护昂贵、可重复触发的业务临界区，例如分片合并和分析 Consumer 的并发处理。分片 merge 按完整文件 MD5 加锁，避免同一文件并发合并。
 - 深答：
 
   <details>
@@ -13,7 +13,7 @@
 
   本地 mutex 只能保护单进程，多实例下无法阻止两个请求同时做昂贵对象操作或两个 Consumer 同时处理同一视频。VidLens 的 Redis lock 使用随机 owner、TTL、WatchDog 和 owner-aware Lua unlock，降低重复计算和外部调用。
 
-  但锁不是正确性的唯一来源：`video_assets` 的唯一约束、task processing lease 和幂等状态转换才是物理兜底。上传 session 的 owner、manifest、chunk ledger 和 completion ownership 已归 PostgreSQL，不应为了“统一用 Redis”重新引入全局 merge lock。
+  但锁不是正确性的唯一来源：`video_assets` 的唯一约束、task processing lease 和幂等状态转换才是物理兜底。当前分片进度本来就是 Redis 临时状态，merge lock 只负责串行化同一 MD5 的合并。
   </details>
 
 - 延伸追问：
@@ -184,12 +184,12 @@
 
 ### 8. Redis 在分片上传里负责什么？
 
-- 简答：当前不负责。durable upload session 的 manifest、进度、chunk hash、完成 lease 和 task identity 都在 PostgreSQL；MinIO 只保存字节。Redis 停止不能让已经接受的 chunk 从业务台账消失。
-- 为什么改：旧 Redis 片号协议没有 user ownership、不可变 manifest、同片冲突和稳定完成回执，TTL 也会让业务事实消失。
-- Redis 当前职责：分布式锁、Lua 令牌桶和最近聊天记忆。
+- 简答：当前负责未完成上传的临时分片进度。Redis Set 保存片号和 TTL，MinIO 保存字节；Redis 状态丢失会导致续传进度需要重新建立，但不会删除已经完成并落库的任务。
+- 设计边界：当前协议没有 user-bound session、不可变 manifest、同片内容哈希和耐久完成回执，TTL 到期会丢失未完成上传进度，因此只能描述为便利性的断点续传。
+- Redis 当前职责：分片上传临时状态、分布式锁、Lua 令牌桶和最近聊天记忆。
 - 项目证据：
-  - `internal/service/upload_session*.go`
-  - `internal/repository/upload_session.go`
-  - `internal/model/upload_session*.go`
+  - `internal/service/media_chunk_upload.go`
+  - `internal/handler/media.go`
+  - `internal/storage/minio.go`
   - [上传专项](/interview/resume-grill/resume-core/chunk-upload/)
-- 当前边界：abandoned session 和孤儿对象回收仍需后台任务，但不能用本地内存或 Redis fallback 替代 PostgreSQL 事实。
+- 当前边界：孤儿分片回收和更强的服务端校验仍需完善；PostgreSQL 只保存合并完成后的 asset/task，不保存未完成分片台账。

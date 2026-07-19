@@ -26,7 +26,6 @@ type Repositories struct {
 	RetryBudget        *RetryBudgetRepository
 	UsageLedger        *UsageLedgerRepository
 	QuotaCompensation  *QuotaCompensationRepository
-	UploadSession      *UploadSessionRepository
 }
 
 // NewRepositories 创建所有 Repository 实例
@@ -50,7 +49,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		RetryBudget:        NewRetryBudgetRepository(db),
 		UsageLedger:        NewUsageLedgerRepository(db),
 		QuotaCompensation:  NewQuotaCompensationRepository(db),
-		UploadSession:      NewUploadSessionRepository(db),
 	}
 }
 

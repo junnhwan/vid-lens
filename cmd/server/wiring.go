@@ -114,11 +114,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
 
-	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.cfg.Upload, deps.cfg.Tools)
-	uploadSessionSvc := service.NewUploadSessionService(deps.repos, deps.minioStorage, service.UploadSessionConfig{
-		MaxFileSize:  deps.cfg.Upload.MaxFileSize,
-		MaxChunkSize: deps.cfg.Upload.ChunkSize,
-	})
+	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools)
 	var vectorCleaner service.TaskVectorCleaner
 	if deps.ragStore != nil {
 		vectorCleaner = deps.ragStore
@@ -171,12 +167,11 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 
 	return &serverApplication{
 		handlers: serverHandlers{
-			user:           handler.NewUserHandler(userSvc),
-			profiles:       handler.NewAIProfileHandler(aiProfileSvc),
-			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
-			chat:           handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
-			media:          handler.NewMediaHandler(mediaSvc),
-			uploadSessions: handler.NewUploadSessionHandler(uploadSessionSvc),
+			user:     handler.NewUserHandler(userSvc),
+			profiles: handler.NewAIProfileHandler(aiProfileSvc),
+			rag:      handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
+			chat:     handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
+			media:    handler.NewMediaHandler(mediaSvc),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,

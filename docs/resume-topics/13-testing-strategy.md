@@ -71,7 +71,8 @@ npm run build
 - `internal/model/postgres_integration_test.go`
 - `internal/repository/postgres_integration_test.go`
 - `internal/vector/pgvector_integration_test.go`
-- `internal/service/upload_session_test.go`
+- `internal/service/media_test.go`
+- `cmd/server/router_test.go`
 - `internal/service/task_cleanup_test.go`
 - `internal/mq/reliability_review_test.go`
 - `internal/middleware/ratelimit_test.go`

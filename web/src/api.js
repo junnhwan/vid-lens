@@ -74,16 +74,24 @@ export default {
   transcribe: (id) => api.post(`/media/transcribe/${id}`),
   downloadAudio: (id) => api.get(`/media/download-audio/${id}`),
 
-  // PostgreSQL 持久化上传会话：清单和进度以服务端记录为准
-  createUploadSession: (manifest) => api.post('/media/upload-sessions', manifest),
-  getUploadSession: (sessionID) => api.get(`/media/upload-sessions/${encodeURIComponent(sessionID)}`),
-  uploadSessionChunk: (sessionID, chunkNumber, chunkData, onProgress) =>
-    api.put(`/media/upload-sessions/${encodeURIComponent(sessionID)}/chunks/${chunkNumber}`, chunkData, {
-      headers: { 'Content-Type': 'application/octet-stream' },
+  // 分片上传：Redis Set 保存已落入 MinIO 的分片编号
+  checkUpload: (fileMD5, fileSize, chunkSize, totalChunks) => api.get('/media/check-upload', {
+    params: { file_md5: fileMD5, file_size: fileSize, chunk_size: chunkSize, total_chunks: totalChunks },
+  }),
+  uploadChunk: (fileMD5, chunkNumber, chunkData, onProgress) => {
+    const form = new FormData()
+    form.append('file_md5', fileMD5)
+    form.append('chunk_number', chunkNumber)
+    form.append('chunk', chunkData)
+    return api.post('/media/upload-chunk', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress,
+    })
+  },
+  mergeChunks: (fileMD5, filename, totalChunks, fileSize, chunkSize) =>
+    api.post('/media/merge-chunks', {
+      file_md5: fileMD5, filename, total_chunks: totalChunks, file_size: fileSize, chunk_size: chunkSize,
     }),
-  completeUploadSession: (sessionID) =>
-    api.post(`/media/upload-sessions/${encodeURIComponent(sessionID)}/complete`),
 
   // AI 配置
   getAIProfiles: () => api.get('/ai/profiles'),

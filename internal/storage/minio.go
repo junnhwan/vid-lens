@@ -89,17 +89,6 @@ func (s *MinIOStorage) UploadFile(ctx context.Context, objectName string, reader
 	return err
 }
 
-// PutObject implements the narrow object-store contract used by durable upload sessions.
-func (s *MinIOStorage) PutObject(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error {
-	return s.UploadFile(ctx, objectName, reader, size, contentType)
-}
-
-// OpenObject opens an object as a stream. Read errors can surface lazily from
-// the returned MinIO object, so callers must handle both read and close errors.
-func (s *MinIOStorage) OpenObject(ctx context.Context, objectName string) (io.ReadCloser, error) {
-	return s.client.GetObject(ctx, s.bucket, objectName, minio.GetObjectOptions{})
-}
-
 // UploadFromPath 上传本地文件
 func (s *MinIOStorage) UploadFromPath(ctx context.Context, localPath, objectName string, contentType string) (int64, error) {
 	info, err := s.client.FPutObject(ctx, s.bucket, objectName, localPath, minio.PutObjectOptions{

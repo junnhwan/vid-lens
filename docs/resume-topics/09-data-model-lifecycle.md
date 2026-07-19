@@ -4,7 +4,7 @@
 
 > 我没有把视频文件、用户任务、AI 结果和向量都塞进一张表。`video_assets` 表示可被多个任务复用的内容级对象，`video_tasks` 表示某个用户的一次业务任务；这样同 MD5 可以复用 MinIO 对象，但用户状态和权限仍相互独立。下载、转写、分析和索引再由 `task_jobs` 分开记录，避免一个 status 无法解释具体阶段。
 >
-> PostgreSQL 是唯一正式关系数据库。ASR 全文、分片结果、摘要、RAG chunk、索引状态、聊天、AI profile/调用记录、usage ledger、上传 session 和 cleanup intent 都有各自 owner。pgvector 表只是 `video_chunks` 的可重建向量投影，不是第二套业务真相。
+> PostgreSQL 是唯一正式关系数据库。ASR 全文、分片结果、摘要、RAG chunk、索引状态、聊天、AI profile/调用记录、usage ledger 和 cleanup intent 都有各自 owner。上传中的临时片号保存在 Redis，pgvector 表只是 `video_chunks` 的可重建向量投影。
 >
 > 关键并发不变量尽量落到数据库：资产 MD5 唯一约束、task/job 唯一组合、upload chunk 的 `(session_id, chunk_index)` 唯一约束、行锁和 token/version CAS。应用层判断用于给出业务语义，唯一约束和条件更新才是并发下的最后防线。
 
@@ -19,7 +19,7 @@
 | RAG | `video_chunks`、`video_rag_indexes`、pgvector projection | 文本事实、索引状态、向量投影 |
 | 会话 | `chat_sessions`、`chat_messages` | 全量聊天与 retrieval snapshot |
 | AI 治理 | call log、retry budget/attempt、usage ledger、compensation、daily usage | 调用审计与用量生命周期 |
-| 上传 | `upload_sessions`、`upload_session_chunks` | 不可变 manifest、进度和 completion lease |
+| 上传临时进度 | Redis `upload:chunks:<md5>` | 已上传片号、规格与 24 小时 TTL |
 
 `internal/model.AllModels()` 是 GORM 自动迁移模型的代码事实，不应在简历中长期写死“固定 N 张表”。
 
@@ -47,10 +47,10 @@ transcription -> video_chunks（事实）
 ### 上传
 
 ```text
-upload_session manifest
-  -> upload_session_chunks ledger
-  -> completion lease
-  -> asset + task transaction
+Redis chunk state
+  -> MinIO chunk objects
+  -> merge lock + ComposeObject
+  -> PostgreSQL asset + task
 ```
 
 Redis 不保存上传事实，MinIO 只保存字节。
@@ -73,12 +73,12 @@ Redis 不保存上传事实，MinIO 只保存字节。
 
 - `internal/model/model.go`：模型入口。
 - `internal/model/asset.go`、`task.go`、`task_job.go`：核心生命周期。
-- `internal/model/upload_session*.go`：耐久上传。
+- `internal/service/media_chunk_upload.go`：Redis 临时分片状态与 MinIO 合并，不属于 PostgreSQL 数据模型。
 - `internal/repository/asset.go`、`task_lease*.go`：行锁、唯一约束和 CAS。
 - `internal/vector/pgvector.go`：向量投影 schema 与 scope。
 
 ## 6. 当前限制
 
 - `video_tasks` 与 `task_jobs` 仍是兼容双层状态，需要继续防止语义漂移。
-- completed upload session 保存 task ID；若后续 cleanup 删除 task，重复 complete 的稳定回执生命周期尚需修复。
+- Redis 上传状态带 TTL，丢失后未完成上传需要重新检查或重传；当前没有 durable upload session。
 - GORM AutoMigrate 适合当前项目，但生产级复杂 schema 变更应采用版本化 migration。

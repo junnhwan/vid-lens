@@ -6,8 +6,8 @@
 
 1. `01-kafka-async.md`：异步链路、offset、processing lease 和失败窗口。
 2. `06-task-failure-governance.md`：错误分类、RetryScheduler 和最终状态。
-3. `03-chunk-upload-resume.md`：PostgreSQL durable upload session，是上传唯一权威专题。
-4. `02-redis-lock-md5-reuse.md`：分析消费锁、内容指纹和数据库幂等；不要与 upload completion lease 混淆。
+3. `03-chunk-upload-resume.md`：Redis 分片状态与 MinIO 合并，是上传唯一权威专题。
+4. `02-redis-lock-md5-reuse.md`：分析消费锁、分片合并锁、内容指纹和数据库幂等。
 5. `05-rag-hybrid-retrieval.md`：PostgreSQL + pgvector、BM25-style、RRF 和 citations。
 6. `04-redis-lua-rate-limit.md`：高成本接口限流与 Redis 故障策略。
 7. `08-large-video-handling.md`、`07-cpu-memory-io.md`：大视频边界和资源排查。
@@ -18,7 +18,7 @@
 ## 当前六个核心面试点
 
 - Kafka + PostgreSQL task/job 状态与 processing lease；
-- PostgreSQL durable upload session + MinIO 字节存储；
+- Redis Set 分片进度 + MinIO 字节存储与服务端合并；
 - 分段 ASR、片段结果持久化与失败片段复用；
 - Redis owner lock、WatchDog 与数据库幂等的职责边界；
 - PostgreSQL + pgvector + BM25-style + RRF 混合检索；

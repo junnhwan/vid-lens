@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/redis/go-redis/v9"
 	"vid-lens/internal/config"
 	"vid-lens/internal/mq"
 	"vid-lens/internal/repository"
@@ -35,6 +36,7 @@ type MediaService struct {
 	taskCleanup       *TaskCleanupService
 	remoteURLResolver remoteURLResolver
 	mq                mediaProducer
+	rdb               redis.Cmdable
 	cfg               config.UploadConfig
 	tools             config.ToolsConfig
 }
@@ -43,6 +45,7 @@ func NewMediaService(
 	repo *repository.Repositories,
 	storage *storage.MinIOStorage,
 	mqProducer *mq.Producer,
+	rdb redis.Cmdable,
 	cfg config.UploadConfig,
 	tools config.ToolsConfig,
 ) *MediaService {
@@ -50,6 +53,7 @@ func NewMediaService(
 		repo:    repo,
 		storage: storage,
 		mq:      mqProducer,
+		rdb:     rdb,
 		cfg:     cfg,
 		tools:   tools,
 	}

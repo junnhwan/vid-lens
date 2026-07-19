@@ -8,11 +8,11 @@ VidLens 是一个 Go 实现的 AI 长视频内容理解后端：视频进入 Min
 
 ## 2. 30 秒介绍
 
-> 我做的不是一次模型调用，而是一条长视频处理链路。大文件上传通过 PostgreSQL durable session 和 MinIO 支持断点恢复；长音频切片调用 ASR，并持久化每片结果；分钟级处理通过 Kafka 异步执行，PostgreSQL task/job 状态和 lease 处理重复消费与失败恢复；问答使用 ASR 原文构建 pgvector + BM25-style + RRF 混合检索，并返回引用片段。项目重点是让耗时、昂贵且容易失败的 AI 流程具备可恢复状态，而不是包装成高并发生产系统。
+> 我做的不是一次模型调用，而是一条长视频处理链路。大文件上传通过 Redis 临时分片状态和 MinIO 合并支持断点续传；长音频切片调用 ASR，并持久化每片结果；分钟级处理通过 Kafka 异步执行，PostgreSQL task/job 状态和 lease 处理重复消费与失败恢复；问答使用 ASR 原文构建 pgvector + BM25-style + RRF 混合检索，并返回引用片段。
 
 ## 3. 两分钟主线
 
-> 上传方面，PostgreSQL 保存绑定用户的 session、不可变 manifest、chunk ledger 和完成 lease，MinIO 只负责保存字节。服务端校验每片大小和 SHA-256，合并时使用 `io.Pipe` 流式读写并重新计算完整 MD5。Redis 不参与上传正确性，旧 Redis Set 和 ComposeObject 协议已经退役。
+> 上传方面，前端先计算完整文件 MD5，Redis Set 保存带 TTL 的已上传片号和上传规格，MinIO 保存分片并通过 ComposeObject 合并。该方案便于断点续传，但 Redis 状态丢失后需要重新上传，且当前会话仍以客户端文件 MD5 为核心标识。
 >
 > 处理方面，HTTP 只创建业务状态并触发后台流程，Kafka consumer 获取 PostgreSQL processing lease 后执行下载、转写、摘要或索引。长音频切片后逐片保存，重跑时可以复用已经成功的 ASR 片段。RetryScheduler 已有 dispatch lease 和 enqueue 失败恢复；首次 task/job 入库与 Kafka enqueue 的一致性窗口仍在专项治理，不能说已经有 outbox。
 >
@@ -22,7 +22,7 @@ VidLens 是一个 Go 实现的 AI 长视频内容理解后端：视频进入 Min
 
 ### 这是不是 AI 套壳？
 
-> 如果只是把视频发给模型再返回文本，那确实是套壳。这个项目的工程工作主要在模型调用之外：大文件的 durable upload session、分段 ASR 结果复用、Kafka 消费 lease、失败分类与重试、BYOK、RAG 数据隔离和可观测性。这些机制分别对应我实际遇到的长音频截断、状态缺失、外部服务失败和重复处理问题。
+> 如果只是把视频发给模型再返回文本，那确实是套壳。这个项目的工程工作主要在模型调用之外：Redis 分片状态与 MinIO 合并、分段 ASR 结果复用、Kafka 消费 lease、失败分类与重试、BYOK、RAG 数据隔离和可观测性。这些机制分别对应我实际遇到的长音频截断、状态缺失、外部服务失败和重复处理问题。
 
 ### 为什么需要 Kafka？
 
@@ -34,7 +34,7 @@ VidLens 是一个 Go 实现的 AI 长视频内容理解后端：视频进入 Min
 
 ### Redis 挂了，上传进度会不会丢？
 
-> 当前不会因为 Redis 丢失 upload session 事实。上传状态在 PostgreSQL，分片字节在 MinIO。Redis 故障会影响限流、分析锁和最近聊天缓存，但不应破坏已接受分片的 ledger。上传 complete 的并发所有权由 PostgreSQL token/lease 管理。
+> Redis 故障或 TTL 到期会丢失尚未完成的分片进度，但不会影响 PostgreSQL 中已完成的任务数据。当前分片进度属于临时状态，合并通过按文件 MD5 的 Redis 锁避免并发执行。
 
 ### 同库是不是 RAG 全链路强一致？
 
@@ -54,7 +54,7 @@ VidLens 是一个 Go 实现的 AI 长视频内容理解后端：视频进入 Min
 1. 当前简历：[`resume-final-draft.md`](./resume-final-draft.md)
 2. 异步任务：[`resume-topics/01-kafka-async.md`](./resume-topics/01-kafka-async.md)
 3. Redis 锁与内容复用：[`resume-topics/02-redis-lock-md5-reuse.md`](./resume-topics/02-redis-lock-md5-reuse.md)
-4. durable upload session：[`resume-topics/03-chunk-upload-resume.md`](./resume-topics/03-chunk-upload-resume.md)
+4. Redis 分片状态与 MinIO 合并：[`resume-topics/03-chunk-upload-resume.md`](./resume-topics/03-chunk-upload-resume.md)
 5. RAG：[`resume-topics/05-rag-hybrid-retrieval.md`](./resume-topics/05-rag-hybrid-retrieval.md)
 6. 资源排查：[`resume-topics/07-cpu-memory-io.md`](./resume-topics/07-cpu-memory-io.md)
 7. 真实故障：[`troubleshooting-and-interview-notes.md`](./troubleshooting-and-interview-notes.md)
