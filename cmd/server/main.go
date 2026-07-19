@@ -58,6 +58,17 @@ func loadServerConfig(path string) (*config.Config, error) {
 	return cfg, nil
 }
 
+func runtimeServerHandlers(app *serverApplication) serverHandlers {
+	return serverHandlers{
+		user:           app.handlers.user,
+		profiles:       app.handlers.profiles,
+		rag:            app.handlers.rag,
+		chat:           app.handlers.chat,
+		media:          app.handlers.media,
+		knowledgeBases: app.handlers.knowledgeBases,
+	}
+}
+
 func main() {
 	opts, err := parseServerOptions(os.Args[1:])
 	if err != nil {
@@ -233,13 +244,7 @@ func main() {
 		})
 	}
 
-	r := newServerRouter(*cfg, serverHandlers{
-		user:     app.handlers.user,
-		profiles: app.handlers.profiles,
-		rag:      app.handlers.rag,
-		chat:     app.handlers.chat,
-		media:    app.handlers.media,
-	}, app.rateLimiter, readinessChecks)
+	r := newServerRouter(*cfg, runtimeServerHandlers(app), app.rateLimiter, readinessChecks)
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	listener, err := net.Listen("tcp", addr)
