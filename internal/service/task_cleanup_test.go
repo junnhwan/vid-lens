@@ -89,6 +89,33 @@ func TestTaskCleanupRequestCommitsIntentWithTaskSoftDelete(t *testing.T) {
 	}
 }
 
+func TestTaskCleanupRequestRemovesKnowledgeBaseMembershipWithTaskSoftDelete(t *testing.T) {
+	repos, db := newMediaTestRepositoriesAndDB(t)
+	asset := createMediaTestAsset(t, repos, "33333333333333333333333333333334", "videos/kb-membership-delete.mp4")
+	task := createMediaTestTask(t, repos, 7, asset, "kb-membership-delete.mp4")
+	kb := &model.KnowledgeBase{UserID: task.UserID, Name: "cleanup-kb"}
+	if err := repos.KnowledgeBase.Create(kb); err != nil {
+		t.Fatalf("create KB: %v", err)
+	}
+	if _, err := repos.KnowledgeBase.AddVideoForUser(task.UserID, kb.ID, task.ID); err != nil {
+		t.Fatalf("add KB membership: %v", err)
+	}
+	cleanup := NewTaskCleanupService(repos, nil, nil, TaskCleanupConfig{})
+	if _, err := cleanup.RequestDelete(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("RequestDelete() error = %v", err)
+	}
+	var membershipCount int64
+	if err := db.Model(&model.KnowledgeBaseVideo{}).Where("knowledge_base_id = ? AND task_id = ?", kb.ID, task.ID).Count(&membershipCount).Error; err != nil {
+		t.Fatalf("count KB memberships: %v", err)
+	}
+	if membershipCount != 0 {
+		t.Fatalf("membership count after soft-delete transaction = %d, want 0", membershipCount)
+	}
+	if _, err := repos.Task.FindByID(task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("task lookup after RequestDelete() error = %v, want gorm.ErrRecordNotFound", err)
+	}
+}
+
 func TestTaskCleanupRetriesVectorFailureFromPersistedFacts(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	storage := &recordingObjectStorage{}
@@ -356,6 +383,13 @@ func TestTaskCleanupRequestRollsBackWhenIntentInsertFails(t *testing.T) {
 	if err := db.Exec(`CREATE TRIGGER fail_cleanup_intent BEFORE INSERT ON task_cleanup_jobs BEGIN SELECT RAISE(ABORT, 'forced intent failure'); END`).Error; err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
+	kb := &model.KnowledgeBase{UserID: task.UserID, Name: "rollback-kb"}
+	if err := repos.KnowledgeBase.Create(kb); err != nil {
+		t.Fatalf("create rollback KB: %v", err)
+	}
+	if _, err := repos.KnowledgeBase.AddVideoForUser(task.UserID, kb.ID, task.ID); err != nil {
+		t.Fatalf("add rollback membership: %v", err)
+	}
 	cleanup := NewTaskCleanupService(repos, nil, nil, TaskCleanupConfig{})
 
 	if _, err := cleanup.RequestDelete(context.Background(), task.UserID, task.ID); err == nil {
@@ -366,6 +400,13 @@ func TestTaskCleanupRequestRollsBackWhenIntentInsertFails(t *testing.T) {
 	}
 	if job, err := repos.TaskCleanup.FindByTaskID(task.ID); err != nil || job != nil {
 		t.Fatalf("rolled-back cleanup intent = %+v, %v", job, err)
+	}
+	var membershipCount int64
+	if err := db.Model(&model.KnowledgeBaseVideo{}).Where("knowledge_base_id = ? AND task_id = ?", kb.ID, task.ID).Count(&membershipCount).Error; err != nil {
+		t.Fatalf("count rolled-back membership: %v", err)
+	}
+	if membershipCount != 1 {
+		t.Fatalf("membership count after intent rollback = %d, want 1", membershipCount)
 	}
 }
 

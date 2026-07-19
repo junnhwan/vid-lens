@@ -325,3 +325,105 @@ func TestChatMessageSourceCreateIsOwnerSafeAndRequiresConsistentEdges(t *testing
 		t.Fatalf("source rows after rejected writes = %d, want 1", sourceCount)
 	}
 }
+
+func TestKnowledgeBaseMemberQueriesExcludeDeletedTasksConsistently(t *testing.T) {
+	db := newKnowledgeBaseTestDB(t)
+	owner := createKnowledgeBaseUser(t, db, "deleted-member-owner")
+	task1 := createKnowledgeBaseTask(t, db, owner.ID, "deleted-member-task-1")
+	task2 := createKnowledgeBaseTask(t, db, owner.ID, "deleted-member-task-2")
+	kb := &model.KnowledgeBase{UserID: owner.ID, Name: "deleted-member-kb"}
+	repo := NewKnowledgeBaseRepository(db)
+	if err := repo.Create(kb); err != nil {
+		t.Fatalf("create KB: %v", err)
+	}
+	for _, taskID := range []int64{task1.ID, task2.ID} {
+		if _, err := repo.AddVideoForUser(owner.ID, kb.ID, taskID); err != nil {
+			t.Fatalf("add member %d: %v", taskID, err)
+		}
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		locked, count, err := NewKnowledgeBaseRepository(tx).LockForUpdateAndCountMembers(owner.ID, kb.ID)
+		if err != nil {
+			return err
+		}
+		if locked == nil || count != 2 {
+			t.Fatalf("initial locked count = (%+v, %d), want KB and 2", locked, count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("initial locked count: %v", err)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return tx.Where("id = ?", task2.ID).Delete(&model.VideoTask{}).Error
+	}); err != nil {
+		t.Fatalf("soft-delete member task: %v", err)
+	}
+	count, err := repo.CountMembersForUser(owner.ID, kb.ID)
+	if err != nil || count != 1 {
+		t.Fatalf("CountMembersForUser() = (%d, %v), want (1, nil)", count, err)
+	}
+	ids, err := repo.ListMemberTaskIDsForUser(owner.ID, kb.ID)
+	if err != nil {
+		t.Fatalf("ListMemberTaskIDsForUser() error = %v", err)
+	}
+	if want := []int64{task1.ID}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("ListMemberTaskIDsForUser() = %v, want %v", ids, want)
+	}
+}
+
+func TestChatMessageSourceCreateEnforcesSessionScopeAndKnowledgeBaseMembership(t *testing.T) {
+	db := newKnowledgeBaseTestDB(t)
+	owner := createKnowledgeBaseUser(t, db, "scope-owner")
+	task1 := createKnowledgeBaseTask(t, db, owner.ID, "scope-task-1")
+	task2 := createKnowledgeBaseTask(t, db, owner.ID, "scope-task-2")
+	kb := &model.KnowledgeBase{UserID: owner.ID, Name: "scope-kb"}
+	kbRepo := NewKnowledgeBaseRepository(db)
+	if err := kbRepo.Create(kb); err != nil {
+		t.Fatalf("create KB: %v", err)
+	}
+	if _, err := kbRepo.AddVideoForUser(owner.ID, kb.ID, task1.ID); err != nil {
+		t.Fatalf("add KB member: %v", err)
+	}
+	chatRepo := NewChatRepository(db)
+	videoSession := &model.ChatSession{UserID: owner.ID, ScopeType: model.ChatScopeVideo, TaskID: task1.ID}
+	kbSession := &model.ChatSession{UserID: owner.ID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: kb.ID}
+	if err := chatRepo.CreateSession(videoSession); err != nil {
+		t.Fatalf("create video session: %v", err)
+	}
+	if err := chatRepo.CreateSession(kbSession); err != nil {
+		t.Fatalf("create KB session: %v", err)
+	}
+	videoMessage := &model.ChatMessage{SessionID: videoSession.ID, UserID: owner.ID, Role: "assistant", Content: "video"}
+	kbMessage := &model.ChatMessage{SessionID: kbSession.ID, UserID: owner.ID, Role: "assistant", Content: "kb"}
+	if err := chatRepo.CreateMessage(videoMessage); err != nil {
+		t.Fatalf("create video message: %v", err)
+	}
+	if err := chatRepo.CreateMessage(kbMessage); err != nil {
+		t.Fatalf("create KB message: %v", err)
+	}
+	if err := chatRepo.CreateMessageSource(owner.ID, &model.ChatMessageSource{MessageID: videoMessage.ID, SessionID: videoSession.ID, TaskID: task1.ID}); err != nil {
+		t.Fatalf("valid video source: %v", err)
+	}
+	if err := chatRepo.CreateMessageSource(owner.ID, &model.ChatMessageSource{MessageID: kbMessage.ID, SessionID: kbSession.ID, TaskID: task1.ID}); err != nil {
+		t.Fatalf("valid KB source: %v", err)
+	}
+	invalid := []struct {
+		name   string
+		source model.ChatMessageSource
+	}{
+		{"video task mismatch", model.ChatMessageSource{MessageID: videoMessage.ID, SessionID: videoSession.ID, TaskID: task2.ID}},
+		{"knowledge-base non-member", model.ChatMessageSource{MessageID: kbMessage.ID, SessionID: kbSession.ID, TaskID: task2.ID}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := chatRepo.CreateMessageSource(owner.ID, &tc.source); !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("CreateMessageSource() error = %v, want gorm.ErrRecordNotFound", err)
+			}
+		})
+	}
+	var sourceCount int64
+	db.Model(&model.ChatMessageSource{}).Count(&sourceCount)
+	if sourceCount != 2 {
+		t.Fatalf("source rows after scope rejection = %d, want 2", sourceCount)
+	}
+}

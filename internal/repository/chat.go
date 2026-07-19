@@ -88,8 +88,14 @@ func validateMessageSourceForUser(db *gorm.DB, userID int64, source *model.ChatM
 		Joins("JOIN chat_sessions AS cs ON cs.id = cm.session_id").
 		Joins("JOIN video_tasks AS vt ON vt.id = ? AND vt.deleted_at IS NULL", source.TaskID).
 		Where(
-			"cm.id = ? AND cm.user_id = ? AND cm.session_id = ? AND cs.id = ? AND cs.user_id = ? AND vt.user_id = ?",
+			"cm.id = ? AND cm.user_id = ? AND cm.session_id = ? AND cs.id = ? AND cs.user_id = ? AND vt.user_id = ? AND "+
+				"((cs.scope_type = ? AND cs.task_id = ?) OR (cs.scope_type = ? AND EXISTS ("+
+				"SELECT 1 FROM knowledge_base_videos AS kbv "+
+				"JOIN knowledge_bases AS kb ON kb.id = kbv.knowledge_base_id "+
+				"WHERE kbv.knowledge_base_id = cs.knowledge_base_id AND kbv.task_id = ? AND kb.user_id = ?"+
+				")))",
 			source.MessageID, userID, source.SessionID, source.SessionID, userID, userID,
+			model.ChatScopeVideo, source.TaskID, model.ChatScopeKnowledgeBase, source.TaskID, userID,
 		).
 		Count(&count).Error
 	if err != nil {

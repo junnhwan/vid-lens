@@ -104,6 +104,9 @@ func (s *TaskCleanupService) RequestDelete(ctx context.Context, userID, taskID i
 		if err := txRepos.Task.Delete(task.ID); err != nil {
 			return err
 		}
+		if err := txRepos.KnowledgeBase.DeleteMembershipsByTaskID(task.ID); err != nil {
+			return err
+		}
 		requested = job
 		return nil
 	})
@@ -277,6 +280,7 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 		repos.Summary.DeleteByTaskID,
 		repos.VideoChunk.DeleteByTaskID,
 		repos.RAGIndex.DeleteByTaskID,
+		repos.KnowledgeBase.DeleteMembershipsByTaskID,
 		repos.Chat.DeleteByTaskID,
 		repos.TaskJob.DeleteByTaskID,
 	} {

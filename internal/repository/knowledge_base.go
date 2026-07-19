@@ -181,7 +181,8 @@ func (r *KnowledgeBaseRepository) CountMembersForUser(userID, knowledgeBaseID in
 	var count int64
 	err := r.db.Table("knowledge_base_videos AS kbv").
 		Joins("JOIN knowledge_bases AS kb ON kb.id = kbv.knowledge_base_id").
-		Where("kb.id = ? AND kb.user_id = ?", knowledgeBaseID, userID).
+		Joins("JOIN video_tasks AS vt ON vt.id = kbv.task_id AND vt.deleted_at IS NULL").
+		Where("kb.id = ? AND kb.user_id = ? AND vt.user_id = ?", knowledgeBaseID, userID, userID).
 		Count(&count).Error
 	return count, err
 }
