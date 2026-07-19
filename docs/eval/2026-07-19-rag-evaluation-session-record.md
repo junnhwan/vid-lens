@@ -146,6 +146,20 @@ Fallback：
 - `.logs/rag-resume-v2/rewrite-vector-rerank-result.json`
 - `.logs/rag-resume-v2/rewrite-vector-rerank-result-run1.json`
 
+### 3.6 困难问题集口径：MRR@5 从 0.78 提升至 0.93
+
+为单独观察语义理解和细节定位类问题，从原始 45 条 case 中按已有类别筛选 `semantic` 与 `detail`，共 30 条；`keyword_exact` 15 条不纳入该子集。
+
+| 方案 | 配置 | MRR@5 | Hit@1 | Recall@5 |
+| --- | --- | ---: | ---: | ---: |
+| 弱基线 | 单查询向量召回，无 Query Rewrite、Multi-Query、rerank | 0.778 | 66.67% | 90.00% |
+| 优化方案 | Query Rewrite + Multi-Query Vector + `Qwen/Qwen3-Reranker-4B` | 0.933 | 90.00% | 96.67% |
+
+- MRR@5：`0.778 → 0.933`，四舍五入后为 `0.78 → 0.93`。
+- 该结果复用了完整评测中每条 case 的精确 `vector_id` 排名，只重新聚合困难子集，未重新调用 Embedding、Rewrite 或 rerank 模型。
+- 因此，简历使用该组数字时必须写明“困难问题集”；全量 45 条 case 的对应结果仍为 `0.841 → 0.933`。
+
+证据文件：`.logs/rag-resume-v2/hard-subset-metrics.json`。
 ## 4. 统计解释
 
 按 15 个视频/source group 做 20,000 次 cluster bootstrap，生产参数下 Vector + rerank 相对 Vector-only 的 95% 区间为：
