@@ -158,7 +158,7 @@ Fallback：
 
 ## 5. 当前代码状态
 
-当前工作区已完成但尚未提交、尚未部署：
+当前代码已提交并于 2026-07-19 部署到线上：
 
 - 正式检索关闭 BM25，使用 pgvector 向量候选召回。
 - 支持 `rag.rerank_model`，当前配置为 `Qwen/Qwen3-Reranker-4B`。
@@ -178,11 +178,20 @@ Fallback：
 - `internal/service/video_agent.go`
 - `config.yaml`
 
+提交与部署：
+
+- 功能提交：`9df4400 feat(rag): add query rewrite and model rerank`。
+- 评测记录提交：`e2d46b4 docs(eval): record RAG optimization results`。
+- 线上运行时已从 MySQL + Milvus 迁移为 PostgreSQL + pgvector；MySQL 与 Milvus 暂留作观察期回滚资产。
+- 远程关系迁移对账：20/20 张表匹配、关系校验通过、19 个 sequence 通过。
+- pgvector 重建与审计：143/143 条向量、16 个 scope、0 个问题。
+
 验证：
 
-- `go test ./...`：通过。
-- `go build ./cmd/server`：通过。
-- `git diff --check`：通过。
+- `go test ./...`、`go vet ./...`、`go build ./cmd/server`：通过。
+- 前端 `npm test`、`npm run build`：通过。
+- 线上 `/readyz` 与公网 `/health`：HTTP 200。
+- 部署二进制 SHA-256 与本地构建制品一致。
 
 ## 6. 最终简历建议
 
@@ -203,4 +212,4 @@ Fallback：
 2. 对 Query Rewrite 做第二次完整稳定复跑，记录中转站延迟分布。
 3. 评估是否按问题复杂度选择性启用 Query Rewrite，避免所有请求都承担 8～17 秒额外延迟。
 4. 分别消融 Query Rewrite、Multi-Query 和 rerank，避免把组合收益错误归因给单一组件。
-5. 在本地代码提交和部署前，再执行一次完整测试、配置检查和线上 smoke test。
+5. 继续观察线上 PostgreSQL/pgvector readiness、检索错误和 Query Rewrite/rerank fallback 日志。
