@@ -33,7 +33,7 @@ var migrationCatalog = []TableSpec{
 	withDependencies(autoIDTable("user_ai_profiles", &model.UserAIProfile{}), "users"),
 	withDependencies(autoIDTable("video_chunks", &model.VideoChunk{}), "users", "video_tasks"),
 	withDependencies(autoIDTable("video_rag_indexes", &model.VideoRAGIndex{}), "users", "video_tasks"),
-	withDependencies(autoIDTable("chat_sessions", &model.ChatSession{}), "users", "video_tasks"),
+	withDependencies(autoIDTable("chat_sessions", &model.LegacyChatSession{}), "users", "video_tasks"),
 	withDependencies(autoIDTable("chat_messages", &model.ChatMessage{}), "users", "chat_sessions"),
 	withDependencies(autoIDTable("ai_call_logs", &model.AICallLog{}), "users", "video_tasks", "chat_sessions"),
 	{

@@ -2,7 +2,7 @@ package model
 
 import "gorm.io/gorm"
 
-// AllModels 返回所有需要自动迁移的模型
+// AllModels returns the complete PostgreSQL online schema.
 func AllModels() []interface{} {
 	return []interface{}{
 		&User{},
@@ -17,7 +17,38 @@ func AllModels() []interface{} {
 		&UserAIProfile{},
 		&VideoChunk{},
 		&VideoRAGIndex{},
+		&KnowledgeBase{},
+		&KnowledgeBaseVideo{},
 		&ChatSession{},
+		&ChatMessage{},
+		&ChatMessageSource{},
+		&AICallLog{},
+		&AIRetryBudget{},
+		&AIRetryAttempt{},
+		&AIUsageLedger{},
+		&QuotaCompensation{},
+		&UserUsageDaily{},
+	}
+}
+
+// LegacyModels returns only the historical MySQL source schema copied by the
+// offline mysql-to-postgres command. It intentionally excludes online-only
+// knowledge-base tables and uses LegacyChatSession for chat_sessions.
+func LegacyModels() []interface{} {
+	return []interface{}{
+		&User{},
+		&VideoAsset{},
+		&VideoTask{},
+		&TaskJob{},
+		&TaskCleanupJob{},
+		&KafkaMessageFailure{},
+		&VideoTranscription{},
+		&VideoTranscriptionChunk{},
+		&AISummary{},
+		&UserAIProfile{},
+		&VideoChunk{},
+		&VideoRAGIndex{},
+		&LegacyChatSession{},
 		&ChatMessage{},
 		&AICallLog{},
 		&AIRetryBudget{},
@@ -28,9 +59,24 @@ func AllModels() []interface{} {
 	}
 }
 
-// Migrate 执行模型迁移，并兼容旧版本 video_tasks.file_md5 唯一索引。
+// Migrate executes the complete online schema migration.
 func Migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(AllModels()...); err != nil {
+	if err := normalizeChatSessionScope(db); err != nil {
+		return err
+	}
+	if err := migrateModels(db, AllModels()); err != nil {
+		return err
+	}
+	return normalizeChatSessionScope(db)
+}
+
+// MigrateLegacy upgrades only the offline historical MySQL source contract.
+func MigrateLegacy(db *gorm.DB) error {
+	return migrateModels(db, LegacyModels())
+}
+
+func migrateModels(db *gorm.DB, models []interface{}) error {
+	if err := db.AutoMigrate(models...); err != nil {
 		return err
 	}
 
@@ -46,4 +92,13 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func normalizeChatSessionScope(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ChatSession{}) || !db.Migrator().HasColumn(&ChatSession{}, "scope_type") {
+		return nil
+	}
+	return db.Table("chat_sessions").
+		Where("scope_type IS NULL OR scope_type = ''").
+		Updates(map[string]any{"scope_type": ChatScopeVideo, "knowledge_base_id": 0}).Error
 }

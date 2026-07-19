@@ -277,7 +277,7 @@ var logicalRelationships = []relationshipSpec{
 	{childTable: "video_rag_indexes", childColumn: "user_id", parentTable: "users", parentKey: "id", presence: relationshipRequired},
 	{childTable: "video_rag_indexes", childColumn: "task_id", parentTable: "video_tasks", parentKey: "id", presence: relationshipRequired},
 	{childTable: "chat_sessions", childColumn: "user_id", parentTable: "users", parentKey: "id", presence: relationshipRequired},
-	{childTable: "chat_sessions", childColumn: "task_id", parentTable: "video_tasks", parentKey: "id", presence: relationshipRequired},
+	{childTable: "chat_sessions", childColumn: "task_id", parentTable: "video_tasks", parentKey: "id", presence: relationshipWhenNonZero},
 	{childTable: "chat_messages", childColumn: "session_id", parentTable: "chat_sessions", parentKey: "id", presence: relationshipRequired},
 	{childTable: "chat_messages", childColumn: "user_id", parentTable: "users", parentKey: "id", presence: relationshipRequired},
 	{childTable: "ai_call_logs", childColumn: "user_id", parentTable: "users", parentKey: "id", presence: relationshipRequired},

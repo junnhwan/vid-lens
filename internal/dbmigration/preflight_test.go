@@ -358,3 +358,25 @@ func TestInspectTargetReadinessRejectsExistingColumnDrift(t *testing.T) {
 		t.Fatalf("target readiness = %+v, want drifted", readiness)
 	}
 }
+
+func TestLogicalRelationshipAuditIgnoresZeroTaskIDForKnowledgeBaseSession(t *testing.T) {
+	db := newPreflightTestDB(t)
+	user := model.User{Username: "kb-session-owner", PasswordHash: "hash"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	session := model.ChatSession{
+		UserID: user.ID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: 99, TaskID: 0, Title: "kb",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create knowledge-base session: %v", err)
+	}
+
+	audit, err := AuditLogicalRelationships(context.Background(), db)
+	if err != nil {
+		t.Fatalf("AuditLogicalRelationships() error = %v", err)
+	}
+	if !audit.Valid {
+		t.Fatalf("knowledge-base session task_id=0 reported as orphan: %+v", audit)
+	}
+}

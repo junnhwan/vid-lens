@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"vid-lens/internal/model"
 )
 
@@ -52,6 +53,49 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 	return r.db.Create(message).Error
 }
 
+func (r *ChatRepository) CreateMessageSource(source *model.ChatMessageSource) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
+		DoNothing: true,
+	}).Create(source).Error
+}
+
+func (r *ChatRepository) CreateMessageSources(sources []model.ChatMessageSource) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	return r.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
+		DoNothing: true,
+	}).Create(&sources).Error
+}
+
+func (r *ChatRepository) ListSourceTaskIDsByMessageID(userID, messageID int64) ([]int64, error) {
+	var taskIDs []int64
+	err := r.db.Table("chat_message_sources AS cms").
+		Joins("JOIN chat_messages AS cm ON cm.id = cms.message_id").
+		Where("cm.user_id = ? AND cms.message_id = ?", userID, messageID).
+		Distinct("cms.task_id").
+		Order("cms.task_id ASC").
+		Pluck("cms.task_id", &taskIDs).Error
+	return taskIDs, err
+}
+
+func (r *ChatRepository) ListSourceTaskIDsBySessionID(userID, sessionID int64) ([]int64, error) {
+	var taskIDs []int64
+	err := r.db.Table("chat_message_sources AS cms").
+		Joins("JOIN chat_sessions AS cs ON cs.id = cms.session_id").
+		Where("cs.user_id = ? AND cms.session_id = ?", userID, sessionID).
+		Distinct("cms.task_id").
+		Order("cms.task_id ASC").
+		Pluck("cms.task_id", &taskIDs).Error
+	return taskIDs, err
+}
+
+func (r *ChatRepository) DeleteMessageSourcesByTaskID(taskID int64) error {
+	return r.db.Where("task_id = ?", taskID).Delete(&model.ChatMessageSource{}).Error
+}
+
 func (r *ChatRepository) ListMessages(userID, sessionID int64) ([]model.ChatMessage, error) {
 	var messages []model.ChatMessage
 	err := r.db.Where("user_id = ? AND session_id = ?", userID, sessionID).
@@ -78,26 +122,40 @@ func (r *ChatRepository) ListRecentMessages(userID, sessionID int64, limit int) 
 	return messages, nil
 }
 
+// DeleteByTaskID removes direct video sessions and knowledge-base sessions whose
+// persisted source rows reference the task. Callers can compose this with
+// KnowledgeBaseRepository.DeleteMembershipsByTaskID in one repository transaction.
 func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var sessionIDs []int64
 		if err := tx.Model(&model.ChatSession{}).
-			Where("task_id = ?", taskID).
-			Pluck("id", &sessionIDs).Error; err != nil {
+			Distinct("chat_sessions.id").
+			Joins("LEFT JOIN chat_message_sources AS cms ON cms.session_id = chat_sessions.id").
+			Where("chat_sessions.task_id = ? OR (chat_sessions.scope_type = ? AND cms.task_id = ?)", taskID, model.ChatScopeKnowledgeBase, taskID).
+			Pluck("chat_sessions.id", &sessionIDs).Error; err != nil {
 			return err
 		}
 		if len(sessionIDs) > 0 {
+			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessageSource{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessage{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Where("id IN ?", sessionIDs).Delete(&model.ChatSession{}).Error; err != nil {
+				return err
+			}
 		}
-		return tx.Where("task_id = ?", taskID).Delete(&model.ChatSession{}).Error
+		return tx.Where("task_id = ?", taskID).Delete(&model.ChatMessageSource{}).Error
 	})
 }
 
 // DeleteSession 删除单个会话及其消息（调用方应已校验归属于该用户）
 func (r *ChatRepository) DeleteSession(sessionID int64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessageSource{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{}).Error; err != nil {
 			return err
 		}

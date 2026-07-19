@@ -87,6 +87,12 @@ func TestMigrationApplicationUpgradeSourceSchemaDoesNotOpenPostgres(t *testing.T
 			t.Errorf("upgrade-source-schema did not create %s", spec.Name)
 		}
 	}
+	if source.Migrator().HasTable(&model.KnowledgeBase{}) || source.Migrator().HasTable(&model.ChatMessageSource{}) {
+		t.Fatal("upgrade-source-schema created online knowledge-base tables in legacy source")
+	}
+	if source.Migrator().HasColumn(&model.LegacyChatSession{}, "scope_type") || source.Migrator().HasColumn(&model.LegacyChatSession{}, "knowledge_base_id") {
+		t.Fatal("upgrade-source-schema added online chat-session scope columns to legacy source")
+	}
 }
 
 func TestMigrationApplicationExecuteReconnectsBeforeIndependentAudit(t *testing.T) {
@@ -333,4 +339,32 @@ func newCLIWorkflowDB(t *testing.T, suffix string, migrate bool) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func TestMigrationApplicationUsesLegacySourceAndFullTargetMigrators(t *testing.T) {
+	app := newMigrationApplication(nil)
+	source := newCLIWorkflowDB(t, "legacy_contract", false)
+	target := newCLIWorkflowDB(t, "online_contract", false)
+
+	if err := app.migrateSource(source); err != nil {
+		t.Fatalf("source migrator error = %v", err)
+	}
+	if source.Migrator().HasTable(&model.KnowledgeBase{}) || source.Migrator().HasTable(&model.ChatMessageSource{}) {
+		t.Fatal("source migrator created online knowledge-base tables")
+	}
+	if source.Migrator().HasColumn(&model.LegacyChatSession{}, "scope_type") || source.Migrator().HasColumn(&model.LegacyChatSession{}, "knowledge_base_id") {
+		t.Fatal("source migrator created online chat-session columns")
+	}
+
+	if err := app.migrateTarget(target); err != nil {
+		t.Fatalf("target migrator error = %v", err)
+	}
+	for _, onlineModel := range []any{&model.KnowledgeBase{}, &model.KnowledgeBaseVideo{}, &model.ChatMessageSource{}} {
+		if !target.Migrator().HasTable(onlineModel) {
+			t.Fatalf("target migrator did not create %T", onlineModel)
+		}
+	}
+	if !target.Migrator().HasColumn(&model.ChatSession{}, "scope_type") || !target.Migrator().HasColumn(&model.ChatSession{}, "knowledge_base_id") {
+		t.Fatal("target migrator did not create chat-session scope columns")
+	}
 }
