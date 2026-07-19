@@ -53,18 +53,56 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 	return r.db.Create(message).Error
 }
 
-func (r *ChatRepository) CreateMessageSource(source *model.ChatMessageSource) error {
-	return r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
-		DoNothing: true,
-	}).Create(source).Error
+func (r *ChatRepository) CreateMessageSource(userID int64, source *model.ChatMessageSource) error {
+	if source == nil {
+		return gorm.ErrInvalidData
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := validateMessageSourceForUser(tx, userID, source); err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
+			DoNothing: true,
+		}).Create(source).Error
+	})
 }
 
-func (r *ChatRepository) CreateMessageSources(sources []model.ChatMessageSource) error {
+func (r *ChatRepository) CreateMessageSources(userID int64, sources []model.ChatMessageSource) error {
 	if len(sources) == 0 {
 		return nil
 	}
-	return r.db.Clauses(clause.OnConflict{
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for i := range sources {
+			if err := validateMessageSourceForUser(tx, userID, &sources[i]); err != nil {
+				return err
+			}
+		}
+		return createMessageSources(tx, sources)
+	})
+}
+
+func validateMessageSourceForUser(db *gorm.DB, userID int64, source *model.ChatMessageSource) error {
+	var count int64
+	err := db.Table("chat_messages AS cm").
+		Joins("JOIN chat_sessions AS cs ON cs.id = cm.session_id").
+		Joins("JOIN video_tasks AS vt ON vt.id = ? AND vt.deleted_at IS NULL", source.TaskID).
+		Where(
+			"cm.id = ? AND cm.user_id = ? AND cm.session_id = ? AND cs.id = ? AND cs.user_id = ? AND vt.user_id = ?",
+			source.MessageID, userID, source.SessionID, source.SessionID, userID, userID,
+		).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func createMessageSources(db *gorm.DB, sources []model.ChatMessageSource) error {
+	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
 		DoNothing: true,
 	}).Create(&sources).Error
@@ -135,16 +173,8 @@ func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
 			Pluck("chat_sessions.id", &sessionIDs).Error; err != nil {
 			return err
 		}
-		if len(sessionIDs) > 0 {
-			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessageSource{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessage{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id IN ?", sessionIDs).Delete(&model.ChatSession{}).Error; err != nil {
-				return err
-			}
+		if err := deleteChatSessions(tx, sessionIDs); err != nil {
+			return err
 		}
 		return tx.Where("task_id = ?", taskID).Delete(&model.ChatMessageSource{}).Error
 	})
@@ -153,12 +183,19 @@ func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
 // DeleteSession 删除单个会话及其消息（调用方应已校验归属于该用户）
 func (r *ChatRepository) DeleteSession(sessionID int64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessageSource{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("id = ?", sessionID).Delete(&model.ChatSession{}).Error
+		return deleteChatSessions(tx, []int64{sessionID})
 	})
+}
+
+func deleteChatSessions(db *gorm.DB, sessionIDs []int64) error {
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	if err := db.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessageSource{}).Error; err != nil {
+		return err
+	}
+	if err := db.Where("session_id IN ?", sessionIDs).Delete(&model.ChatMessage{}).Error; err != nil {
+		return err
+	}
+	return db.Where("id IN ?", sessionIDs).Delete(&model.ChatSession{}).Error
 }

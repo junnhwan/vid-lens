@@ -76,14 +76,23 @@ func (r *KnowledgeBaseRepository) UpdateForUser(userID int64, knowledgeBase *mod
 
 func (r *KnowledgeBaseRepository) DeleteForUser(userID, knowledgeBaseID int64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&model.KnowledgeBase{}).
-			Where("user_id = ? AND id = ?", userID, knowledgeBaseID).
-			Count(&count).Error; err != nil {
+		txRepo := NewKnowledgeBaseRepository(tx)
+		knowledgeBase, err := txRepo.FindByIDForUserForUpdate(userID, knowledgeBaseID)
+		if err != nil {
 			return err
 		}
-		if count == 0 {
+		if knowledgeBase == nil {
 			return gorm.ErrRecordNotFound
+		}
+
+		var sessionIDs []int64
+		if err := tx.Model(&model.ChatSession{}).
+			Where("scope_type = ? AND knowledge_base_id = ? AND user_id = ?", model.ChatScopeKnowledgeBase, knowledgeBaseID, userID).
+			Pluck("id", &sessionIDs).Error; err != nil {
+			return err
+		}
+		if err := deleteChatSessions(tx, sessionIDs); err != nil {
+			return err
 		}
 		if err := tx.Where("knowledge_base_id = ?", knowledgeBaseID).
 			Delete(&model.KnowledgeBaseVideo{}).Error; err != nil {
@@ -168,17 +177,33 @@ func (r *KnowledgeBaseRepository) ListMemberTaskIDsForUser(userID, knowledgeBase
 	return taskIDs, err
 }
 
-func (r *KnowledgeBaseRepository) CountMembers(knowledgeBaseID int64) (int64, error) {
+func (r *KnowledgeBaseRepository) CountMembersForUser(userID, knowledgeBaseID int64) (int64, error) {
 	var count int64
-	err := r.db.Model(&model.KnowledgeBaseVideo{}).
-		Where("knowledge_base_id = ?", knowledgeBaseID).
+	err := r.db.Table("knowledge_base_videos AS kbv").
+		Joins("JOIN knowledge_bases AS kb ON kb.id = kbv.knowledge_base_id").
+		Where("kb.id = ? AND kb.user_id = ?", knowledgeBaseID, userID).
 		Count(&count).Error
 	return count, err
 }
 
-// CountVideos is kept as a descriptive alias for callers that use video terms.
-func (r *KnowledgeBaseRepository) CountVideos(knowledgeBaseID int64) (int64, error) {
-	return r.CountMembers(knowledgeBaseID)
+// CountMembers is the owner-safe member-count primitive used by services.
+func (r *KnowledgeBaseRepository) CountMembers(userID, knowledgeBaseID int64) (int64, error) {
+	return r.CountMembersForUser(userID, knowledgeBaseID)
+}
+
+// LockForUpdateAndCountMembers must be called through a repository created by
+// Repositories.Transaction/TransactionContext. Locking the owner-scoped KB row
+// before counting serializes concurrent limit checks and member insertion.
+func (r *KnowledgeBaseRepository) LockForUpdateAndCountMembers(userID, knowledgeBaseID int64) (*model.KnowledgeBase, int64, error) {
+	knowledgeBase, err := r.FindByIDForUserForUpdate(userID, knowledgeBaseID)
+	if err != nil || knowledgeBase == nil {
+		return knowledgeBase, 0, err
+	}
+	count, err := r.CountMembersForUser(userID, knowledgeBaseID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return knowledgeBase, count, nil
 }
 
 func (r *KnowledgeBaseRepository) DeleteMembershipsByTaskID(taskID int64) error {

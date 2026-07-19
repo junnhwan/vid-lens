@@ -98,7 +98,11 @@ func normalizeChatSessionScope(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&ChatSession{}) || !db.Migrator().HasColumn(&ChatSession{}, "scope_type") {
 		return nil
 	}
+	updates := map[string]any{"scope_type": ChatScopeVideo}
+	if db.Migrator().HasColumn(&ChatSession{}, "knowledge_base_id") {
+		updates["knowledge_base_id"] = 0
+	}
 	return db.Table("chat_sessions").
 		Where("scope_type IS NULL OR scope_type = ''").
-		Updates(map[string]any{"scope_type": ChatScopeVideo, "knowledge_base_id": 0}).Error
+		Updates(updates).Error
 }
