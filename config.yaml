@@ -56,6 +56,9 @@ ai:
 
 tools:
   ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
+  # Optional. Missing binary => visual OCR stage skipped (ASR-only).
+  ocr_path: "tesseract"
+  ocr_lang: "chi_sim+eng"
   ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
   cookies_path: "D:/Download/www.bilibili.com_cookies.txt"
   proxy_url: ""

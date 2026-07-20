@@ -130,6 +130,24 @@ func (x *admittedEmbedding) Embed(c context.Context, s string) (vector []float32
 	return x.base.Embed(c, s)
 }
 
+type admittedVision struct {
+	base VisionClient
+	a    Admission
+	p, m string
+}
+
+func AdmitVision(b VisionClient, a Admission, p, m string) VisionClient {
+	return &admittedVision{b, a, p, m}
+}
+func (x *admittedVision) CaptionImage(c context.Context, imagePath, prompt string) (text string, err error) {
+	finish, err := beginAdmission(c, x.a, Call{Operation: "vision", Provider: x.p, Model: x.m, InputChars: utf8.RuneCountInString(prompt)})
+	if err != nil {
+		return "", err
+	}
+	defer func() { finish(err) }()
+	return x.base.CaptionImage(c, imagePath, prompt)
+}
+
 type admittedStrategy struct {
 	base      Strategy
 	a         Admission

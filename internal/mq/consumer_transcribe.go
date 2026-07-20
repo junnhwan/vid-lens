@@ -83,6 +83,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) erro
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
+	c.indexVisualAfterTranscription(ctx, task)
 	if err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
@@ -160,6 +161,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
+	c.indexVisualAfterTranscription(ctx, task)
 	if err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
@@ -324,4 +326,23 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 		LLMProvider: profile.LLMProvider,
 		LLMModel:    profile.LLMModel,
 	}), nil
+}
+
+// indexVisualAfterTranscription extracts keyframe OCR evidence. Failures are
+// logged only: ASR + RAG remain the product critical path when FailOpen.
+func (c *Consumer) indexVisualAfterTranscription(ctx context.Context, task *model.VideoTask) {
+	if c == nil || c.visualIndex == nil || task == nil {
+		return
+	}
+	if err := requireProcessingLease(ctx); err != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "skip visual index: lease lost", slog.String("error", observability.SafeError(err)))
+		return
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index started")
+	count, err := c.visualIndex(ctx, task)
+	if err != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index failed (continuing)", slog.String("error", observability.SafeError(err)))
+		return
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index completed", slog.Int("ocr_frames", count))
 }

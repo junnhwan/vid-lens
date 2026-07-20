@@ -114,8 +114,16 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID, taskID int64) ([]TextChunk
 	}
 
 	chunks := SplitTextIntoChunks(transcription.Content, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
+	if s.repos.VisualFrame != nil {
+		if frames, err := s.repos.VisualFrame.ListCompletedWithText(taskID); err == nil && len(frames) > 0 {
+			chunks = append(chunks, FormatOCRChunksForIndex(frames)...)
+		}
+	}
 	if len(chunks) == 0 {
 		return nil, fmt.Errorf("没有可索引的转写文本")
+	}
+	for i := range chunks {
+		chunks[i].Index = i
 	}
 	return chunks, nil
 }

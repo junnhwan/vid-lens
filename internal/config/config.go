@@ -100,18 +100,21 @@ func (k *KafkaConfig) applyDefaults() {
 }
 
 type AIConfig struct {
-	Provider           string `yaml:"provider"`
-	SiliconFlowAPIKey  string `yaml:"siliconflow_api_key"`
-	SiliconFlowBaseURL string `yaml:"siliconflow_base_url"`
-	MimoAPIKey         string `yaml:"mimo_api_key"`
-	MimoBaseURL        string `yaml:"mimo_base_url"`
-	ASRModel           string `yaml:"asr_model"`
-	LLMModel           string `yaml:"llm_model"`
+	Provider           string         `yaml:"provider"`
+	SiliconFlowAPIKey  string         `yaml:"siliconflow_api_key"`
+	SiliconFlowBaseURL string         `yaml:"siliconflow_base_url"`
+	MimoAPIKey         string         `yaml:"mimo_api_key"`
+	MimoBaseURL        string         `yaml:"mimo_base_url"`
+	ASRModel           string         `yaml:"asr_model"`
+	LLMModel           string         `yaml:"llm_model"`
 }
+
 
 type ToolsConfig struct {
 	FFmpegPath        string   `yaml:"ffmpeg_path"`
 	YtDlpPath         string   `yaml:"ytdlp_path"`
+	OCRPath           string   `yaml:"ocr_path"`
+	OCRLang           string   `yaml:"ocr_lang"`
 	CookiesPath       string   `yaml:"cookies_path"`
 	ProxyURL          string   `yaml:"proxy_url"`
 	AllowedVideoHosts []string `yaml:"allowed_video_hosts"`

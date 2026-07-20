@@ -161,6 +161,9 @@ func (s *TaskCleanupService) failClaim(jobID int64, token string, cause error) e
 }
 
 func (s *TaskCleanupService) executeClaimed(ctx context.Context, job *model.TaskCleanupJob, token string) error {
+	if err := s.deleteVisualFrameObjects(ctx, job.TaskID); err != nil {
+		return err
+	}
 	embeddingModels, err := collectTaskEmbeddingModels(s.repo, job.UserID, job.TaskID)
 	if err != nil {
 		return fmt.Errorf("collect vector cleanup facts: %w", err)
@@ -278,20 +281,46 @@ func collectTaskEmbeddingModels(repos *repository.Repositories, userID, taskID i
 	return models, nil
 }
 
+func (s *TaskCleanupService) deleteVisualFrameObjects(ctx context.Context, taskID int64) error {
+	if s.repo == nil || s.repo.VisualFrame == nil || s.objectDeleter == nil {
+		return nil
+	}
+	keys, err := s.repo.VisualFrame.ListObjectKeysByTaskID(taskID)
+	if err != nil {
+		return fmt.Errorf("list visual frame objects: %w", err)
+	}
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if err := s.objectDeleter.DeleteObject(ctx, key); err != nil {
+			return fmt.Errorf("delete visual frame object %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
 func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 	// Idempotent fallback for jobs created before RequestDelete started doing
 	// immediate chat cleanup.
 	if err := deleteTaskDerivedChatRows(repos, taskID); err != nil {
 		return err
 	}
-	for _, deleteRows := range []func(int64) error{
+	deleteFns := []func(int64) error{
 		repos.Transcription.DeleteByTaskID,
 		repos.TranscriptionChunk.DeleteByTaskID,
 		repos.Summary.DeleteByTaskID,
 		repos.VideoChunk.DeleteByTaskID,
 		repos.RAGIndex.DeleteByTaskID,
 		repos.TaskJob.DeleteByTaskID,
-	} {
+	}
+	if repos.VisualFrame != nil {
+		// Insert after transcription chunk cleanup so visual evidence rows are
+		// removed with other task-owned facts.
+		deleteFns = append(deleteFns[:2], append([]func(int64) error{repos.VisualFrame.DeleteByTaskID}, deleteFns[2:]...)...)
+	}
+	for _, deleteRows := range deleteFns {
 		if err := deleteRows(taskID); err != nil {
 			return err
 		}

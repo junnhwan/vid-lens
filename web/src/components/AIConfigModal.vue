@@ -13,10 +13,15 @@
           </div>
           <div v-else>
             <div class="config-actions">
-              <button class="btn-amber" @click="startCreate">+ 新建配置</button>
+              <button class="btn-secondary" @click="startCreate">+ 新建配置</button>
             </div>
             <div class="profile-grid">
-              <div v-for="profile in profiles" :key="profile.id" class="profile-card" :class="{ default: profile.is_default }">
+              <div
+                v-for="profile in profiles"
+                :key="profile.id"
+                class="profile-card"
+                :class="{ default: profile.is_default }"
+              >
                 <div class="profile-header">
                   <h4>{{ profile.name }}</h4>
                   <span v-if="profile.is_default" class="default-badge">默认</span>
@@ -25,12 +30,13 @@
                   <div class="detail-row"><span class="label">LLM:</span><span class="value">{{ profile.llm_provider }} / {{ profile.llm_model }}</span></div>
                   <div class="detail-row"><span class="label">ASR:</span><span class="value">{{ profile.asr_provider }} / {{ profile.asr_model }}</span></div>
                   <div class="detail-row"><span class="label">Embedding:</span><span class="value">{{ profile.embedding_provider }} / {{ profile.embedding_model }}</span></div>
-                </div>
+                  <div class="detail-row"><span class="label">Vision:</span><span class="value">{{ profile.vision_provider ? (profile.vision_provider + ' / ' + profile.vision_model) : '未配置（可 OCR）' }}</span></div>
+                  </div>
                 <div class="profile-actions">
                   <button class="action-btn" @click="startEdit(profile)">编辑</button>
                   <button class="action-btn test" @click="handleTest(profile)">测试</button>
                   <button class="action-btn danger" @click="handleDelete(profile.id)">删除</button>
-                </div>
+                  </div>
               </div>
             </div>
           </div>
@@ -223,6 +229,67 @@
               />
             </div>
           </div>
+
+          <div class="form-section">
+            <h3>🖼️ Vision 配置（可选 · 多模态画面理解）</h3>
+            <p class="form-hint">与对话 LLM 分开配置。对话模型不支持看图时，在这里填支持视觉的模型；留空则尝试本地 OCR 降级。</p>
+            <div class="form-group">
+              <label for="vision-provider">Provider</label>
+              <select
+                id="vision-provider"
+                class="form-input form-select"
+                :value="formData.vision_provider"
+                @change="onVisionProviderChange($event.target.value)"
+              >
+                <option value="">不使用多模态（仅 OCR 降级）</option>
+                <option v-for="p in VISION_PROVIDERS" :key="p.id" :value="p.id">
+                  {{ p.label }} — {{ p.description }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="vision-base-url">Base URL</label>
+              <input
+                id="vision-base-url"
+                v-model="formData.vision_base_url"
+                placeholder="https://api.openai.com/v1"
+                class="form-input"
+                :disabled="!formData.vision_provider"
+              />
+            </div>
+            <div class="form-group">
+              <label for="vision-api-key">API Key {{ isEditMode ? '(留空不改)' : '' }}</label>
+              <input
+                id="vision-api-key"
+                v-model="formData.vision_api_key"
+                type="password"
+                :placeholder="isEditMode ? '保持原有' : keyPlaceholder('vision', formData.vision_provider)"
+                class="form-input"
+                :disabled="!formData.vision_provider"
+              />
+              <div v-if="isEditMode && editingProfile?.vision_api_key_masked" class="masked-key">
+                当前: {{ editingProfile.vision_api_key_masked }}
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="vision-model">Model</label>
+              <input
+                id="vision-model"
+                v-model="formData.vision_model"
+                list="vision-model-suggestions"
+                placeholder="gpt-4o-mini / qwen-vl-..."
+                class="form-input"
+                :disabled="!formData.vision_provider"
+              />
+              <datalist id="vision-model-suggestions">
+                <option
+                  v-for="m in suggestedModels('vision', formData.vision_provider)"
+                  :key="m"
+                  :value="m"
+                />
+              </datalist>
+            </div>
+          </div>
           <div class="form-actions">
             <button class="btn-secondary" @click="cancelEdit" :disabled="loading">取消</button>
             <button class="btn-amber" @click="handleSubmit" :disabled="loading">{{ loading ? '保存中...' : '保存配置' }}</button>
@@ -247,9 +314,11 @@ import {
   ASR_PROVIDERS,
   EMBEDDING_PROVIDERS,
   LLM_PROVIDERS,
+  VISION_PROVIDERS,
   applyAsrProviderChange,
   applyEmbeddingProviderChange,
   applyLlmProviderChange,
+  applyVisionProviderChange,
   createDefaultAIProfileForm,
   isCustomCompatibleProvider,
   keyPlaceholder,
@@ -315,10 +384,17 @@ const handleSubmit = async () => {
   loading.value = true
   try {
     const payload = { ...formData.value }
+    if (!payload.vision_provider) {
+      payload.vision_provider = ''
+      payload.vision_base_url = ''
+      payload.vision_model = ''
+      payload.vision_api_key = ''
+    }
     if (isEditMode.value) {
       if (!payload.asr_api_key) delete payload.asr_api_key
       if (!payload.llm_api_key) delete payload.llm_api_key
       if (!payload.embedding_api_key) delete payload.embedding_api_key
+      if (!payload.vision_api_key) delete payload.vision_api_key
     }
     if (isEditMode.value) { await api.updateAIProfile(editingProfile.value.id, payload) }
     else { await api.createAIProfile(payload) }
@@ -596,5 +672,28 @@ defineExpose({ loadProfiles })
     border-radius: 0;
     padding: 1.5rem;
   }
+}
+
+.hosted-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+  font-weight: 600;
+}
+.empty-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 8px;
+}
+.profile-card.hosted {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.detail-row.hint .value {
+  color: var(--text-muted, #888);
+  font-size: 12px;
 }
 </style>

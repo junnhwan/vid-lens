@@ -28,6 +28,13 @@ export const LLM_PROVIDERS = /** @type {const} */ ([
   { id: 'openai_compatible', label: 'OpenAI 兼容', description: 'DeepSeek / 通义 / 自建等' },
 ])
 
+/** Vision / multimodal providers */
+export const VISION_PROVIDERS = /** @type {const} */ ([
+  { id: 'openai_compatible', label: 'OpenAI 兼容', description: 'GPT-4o / Qwen-VL / 自建多模态' },
+  { id: 'siliconflow', label: 'SiliconFlow', description: '硅基流动多模态' },
+  { id: 'mimo', label: 'MiMo', description: '若账号提供视觉模型' },
+])
+
 /** Embedding providers accepted by ai.Factory.NewEmbeddingClient */
 export const EMBEDDING_PROVIDERS = /** @type {const} */ ([
   { id: 'siliconflow', label: 'SiliconFlow', description: '硅基流动 Embedding' },
@@ -84,6 +91,27 @@ export const LLM_PRESETS = {
 }
 
 /** @type {Record<string, ProviderPreset>} */
+export const VISION_PRESETS = {
+  openai_compatible: {
+    baseURL: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    models: ['gpt-4o-mini', 'gpt-4o', 'qwen-vl-plus'],
+    keyPlaceholder: 'sk-xxx',
+  },
+  siliconflow: {
+    baseURL: 'https://api.siliconflow.cn/v1',
+    model: 'Qwen/Qwen2.5-VL-72B-Instruct',
+    models: ['Qwen/Qwen2.5-VL-72B-Instruct', 'Qwen/Qwen2-VL-72B-Instruct'],
+    keyPlaceholder: 'sk-xxx',
+  },
+  mimo: {
+    baseURL: 'https://api.xiaomimimo.com/v1',
+    model: '',
+    models: [],
+    keyPlaceholder: 'tp-xxx / sk-xxx',
+  },
+}
+
 export const EMBEDDING_PRESETS = {
   siliconflow: {
     endpoint: 'https://api.siliconflow.cn/v1/embeddings',
@@ -188,6 +216,29 @@ export function applyLlmProviderChange(form, nextProvider) {
  * @param {{ embedding_provider: string, embedding_endpoint: string, embedding_model: string, embedding_dim: number | null }} form
  * @param {string} nextProvider
  */
+export function applyVisionProviderChange(form, nextProvider) {
+  if (!String(nextProvider ?? '').trim()) {
+    return {
+      vision_provider: '',
+      vision_base_url: form.vision_base_url || '',
+      vision_model: form.vision_model || '',
+    }
+  }
+  const next = coerceProviderId(nextProvider, VISION_PROVIDERS, 'openai_compatible')
+  const prev = normalizeProviderId(form.vision_provider)
+  const prevPreset = VISION_PRESETS[prev] || {}
+  const nextPreset = VISION_PRESETS[next] || {}
+  return {
+    vision_provider: next,
+    vision_base_url: shouldReplacePresetField(form.vision_base_url, prevPreset.baseURL)
+      ? nextPreset.baseURL || ''
+      : form.vision_base_url,
+    vision_model: shouldReplacePresetField(form.vision_model, prevPreset.model)
+      ? nextPreset.model || ''
+      : form.vision_model,
+  }
+}
+
 export function applyEmbeddingProviderChange(form, nextProvider) {
   const next = coerceProviderId(nextProvider, EMBEDDING_PROVIDERS, 'siliconflow')
   const prev = normalizeProviderId(form.embedding_provider)
@@ -238,6 +289,10 @@ export function createDefaultAIProfileForm() {
     llm_api_key: '',
     ...emb,
     embedding_api_key: '',
+    vision_provider: '',
+    vision_base_url: '',
+    vision_api_key: '',
+    vision_model: '',
     is_default: false,
   }
 }
@@ -266,6 +321,10 @@ export function profileToFormData(profile) {
     embedding_api_key: '',
     embedding_model: profile.embedding_model || '',
     embedding_dim: profile.embedding_dim ?? null,
+    vision_provider: profile.vision_provider || '',
+    vision_base_url: profile.vision_base_url || '',
+    vision_api_key: '',
+    vision_model: profile.vision_model || '',
     is_default: !!profile.is_default,
   }
 }
@@ -281,6 +340,7 @@ export function suggestedModels(kind, provider) {
   if (kind === 'asr') return ASR_PRESETS[id]?.models || []
   if (kind === 'llm') return LLM_PRESETS[id]?.models || []
   if (kind === 'embedding') return EMBEDDING_PRESETS[id]?.models || []
+  if (kind === 'vision') return VISION_PRESETS[id]?.models || []
   return []
 }
 
@@ -294,6 +354,7 @@ export function keyPlaceholder(kind, provider) {
   if (kind === 'asr') return ASR_PRESETS[id]?.keyPlaceholder || 'sk-xxx'
   if (kind === 'llm') return LLM_PRESETS[id]?.keyPlaceholder || 'sk-xxx'
   if (kind === 'embedding') return EMBEDDING_PRESETS[id]?.keyPlaceholder || 'sk-xxx'
+  if (kind === 'vision') return VISION_PRESETS[id]?.keyPlaceholder || 'sk-xxx'
   return 'sk-xxx'
 }
 
