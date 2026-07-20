@@ -266,18 +266,29 @@ func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatS
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("知识库没有可检索视频")
 	}
+	tasks, err := s.repos.Task.ListByIDsForUser(userID, ids)
+	if err != nil {
+		return nil, err
+	}
+	visibleTasks := make(map[int64]struct{}, len(tasks))
+	for _, task := range tasks {
+		visibleTasks[task.ID] = struct{}{}
+	}
+	indexes, err := s.repos.RAGIndex.ListByTaskIDsAndModel(userID, ids, embeddingModel)
+	if err != nil {
+		return nil, err
+	}
+	indexedTasks := make(map[int64]struct{}, len(indexes))
+	for _, index := range indexes {
+		if index.Status == model.RAGIndexStatusIndexed {
+			indexedTasks[index.TaskID] = struct{}{}
+		}
+	}
 	unavailable := make([]int64, 0)
 	for _, taskID := range ids {
-		task, taskErr := s.repos.Task.FindByID(taskID)
-		if taskErr != nil || task == nil || task.UserID != userID || task.DeletedAt.Valid {
-			unavailable = append(unavailable, taskID)
-			continue
-		}
-		index, indexErr := s.repos.RAGIndex.FindByTaskAndModel(userID, taskID, embeddingModel)
-		if indexErr != nil {
-			return nil, indexErr
-		}
-		if index == nil || index.Status != model.RAGIndexStatusIndexed {
+		_, visible := visibleTasks[taskID]
+		_, indexed := indexedTasks[taskID]
+		if !visible || !indexed {
 			unavailable = append(unavailable, taskID)
 		}
 	}

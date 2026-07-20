@@ -62,6 +62,16 @@ func (r *RAGIndexRepository) FindByTaskAndModel(userID, taskID int64, embeddingM
 	return &index, nil
 }
 
+func (r *RAGIndexRepository) ListByTaskIDsAndModel(userID int64, taskIDs []int64, embeddingModel string) ([]model.VideoRAGIndex, error) {
+	if len(taskIDs) == 0 {
+		return []model.VideoRAGIndex{}, nil
+	}
+	var indexes []model.VideoRAGIndex
+	err := r.db.Where("user_id = ? AND embedding_model = ? AND task_id IN ?", userID, embeddingModel, taskIDs).
+		Order("task_id ASC").Find(&indexes).Error
+	return indexes, err
+}
+
 func (r *RAGIndexRepository) ListEmbeddingModelsByTask(userID, taskID int64) ([]string, error) {
 	var models []string
 	err := r.db.Model(&model.VideoRAGIndex{}).

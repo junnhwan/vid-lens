@@ -63,6 +63,30 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 	return r.db.Create(message).Error
 }
 
+// CreateExchange atomically persists both chat messages and normalized assistant sources.
+func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) error {
+	if userMessage == nil || assistantMessage == nil {
+		return gorm.ErrInvalidData
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(userMessage).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(assistantMessage).Error; err != nil {
+			return err
+		}
+		sources := make([]model.ChatMessageSource, 0, len(sourceTaskIDs))
+		for _, taskID := range sourceTaskIDs {
+			source := model.ChatMessageSource{MessageID: assistantMessage.ID, SessionID: assistantMessage.SessionID, TaskID: taskID}
+			if err := validateMessageSourceForUser(tx, userID, &source); err != nil {
+				return err
+			}
+			sources = append(sources, source)
+		}
+		return createMessageSources(tx, sources)
+	})
+}
+
 func (r *ChatRepository) CreateMessageSource(userID int64, source *model.ChatMessageSource) error {
 	if source == nil {
 		return gorm.ErrInvalidData
@@ -118,6 +142,9 @@ func validateMessageSourceForUser(db *gorm.DB, userID int64, source *model.ChatM
 }
 
 func createMessageSources(db *gorm.DB, sources []model.ChatMessageSource) error {
+	if len(sources) == 0 {
+		return nil
+	}
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "message_id"}, {Name: "task_id"}},
 		DoNothing: true,
