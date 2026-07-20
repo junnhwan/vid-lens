@@ -20,6 +20,10 @@ type Profile struct {
 	EmbeddingAPIKey   string
 	EmbeddingModel    string
 	EmbeddingDim      int
+	VisionProvider    string
+	VisionBaseURL     string
+	VisionAPIKey      string
+	VisionModel       string
 	RerankEndpoint    string
 	RerankModel       string
 }
@@ -77,6 +81,32 @@ func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
 	default:
 		return nil, fmt.Errorf("不支持的 Rerank provider: %s", profile.EmbeddingProvider)
 	}
+}
+
+func (f *Factory) NewVisionClient(profile Profile) (VisionClient, error) {
+	provider := normalizeProvider(profile.VisionProvider)
+	baseURL := strings.TrimSpace(profile.VisionBaseURL)
+	model := strings.TrimSpace(profile.VisionModel)
+	apiKey := strings.TrimSpace(profile.VisionAPIKey)
+	if provider == "" || baseURL == "" || model == "" || apiKey == "" {
+		return nil, fmt.Errorf("vision 未配置")
+	}
+	switch provider {
+	case "openai_compatible", "siliconflow":
+		return AdmitVision(NewOpenAIVisionClient(baseURL, apiKey, model), f.admission, provider, model), nil
+	case "mimo":
+		return AdmitVision(NewMimoVisionClient(baseURL, apiKey, model), f.admission, "mimo", model), nil
+	default:
+		return nil, fmt.Errorf("不支持的 Vision provider: %s", profile.VisionProvider)
+	}
+}
+
+// VisionConfigured reports whether the profile has a usable multimodal endpoint.
+func VisionConfigured(profile Profile) bool {
+	return strings.TrimSpace(profile.VisionProvider) != "" &&
+		strings.TrimSpace(profile.VisionBaseURL) != "" &&
+		strings.TrimSpace(profile.VisionModel) != "" &&
+		strings.TrimSpace(profile.VisionAPIKey) != ""
 }
 
 func (f *Factory) NewAnalysisStrategy(profile Profile) (Strategy, error) {

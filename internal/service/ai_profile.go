@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrAIProfileNotFound = errors.New("AI 配置不存在")
-	ErrAIProfileRequired = errors.New("请先配置 AI 服务")
+	ErrAIProfileNotFound     = errors.New("AI 配置不存在")
+	ErrAIProfileRequired     = errors.New("请先配置 AI 服务")
 )
+
 
 type AIProfileTester interface {
 	TestProfile(ctx context.Context, profile *DecryptedAIProfile) error
@@ -30,6 +31,8 @@ type AIProfileService struct {
 func NewAIProfileService(repo *repository.AIProfileRepository, codec *secret.Codec, tester AIProfileTester) *AIProfileService {
 	return &AIProfileService{repo: repo, codec: codec, tester: tester}
 }
+
+
 
 type AIProfileRequest struct {
 	Name              string `json:"name" binding:"required"`
@@ -46,7 +49,12 @@ type AIProfileRequest struct {
 	EmbeddingAPIKey   string `json:"embedding_api_key"`
 	EmbeddingModel    string `json:"embedding_model" binding:"required"`
 	EmbeddingDim      int    `json:"embedding_dim" binding:"required"`
-	IsDefault         bool   `json:"is_default"`
+	// Vision is optional multimodal caption config, separate from text LLM.
+	VisionProvider string `json:"vision_provider"`
+	VisionBaseURL  string `json:"vision_base_url"`
+	VisionAPIKey   string `json:"vision_api_key"`
+	VisionModel    string `json:"vision_model"`
+	IsDefault      bool   `json:"is_default"`
 }
 
 type AIProfileResponse struct {
@@ -65,7 +73,15 @@ type AIProfileResponse struct {
 	EmbeddingAPIKeyMasked string `json:"embedding_api_key_masked"`
 	EmbeddingModel        string `json:"embedding_model"`
 	EmbeddingDim          int    `json:"embedding_dim"`
+	VisionProvider        string `json:"vision_provider"`
+	VisionBaseURL         string `json:"vision_base_url"`
+	VisionAPIKeyMasked    string `json:"vision_api_key_masked"`
+	VisionModel           string `json:"vision_model"`
 	IsDefault             bool   `json:"is_default"`
+	// Source is "user" for BYOK rows, "hosted" for the free server pack.
+	Source string `json:"source,omitempty"`
+	// ReadOnly marks profiles that cannot be edited/deleted (hosted free pack).
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 type DecryptedAIProfile struct {
@@ -85,6 +101,11 @@ type DecryptedAIProfile struct {
 	EmbeddingAPIKey   string
 	EmbeddingModel    string
 	EmbeddingDim      int
+	VisionProvider    string
+	VisionBaseURL     string
+	VisionAPIKey      string
+	VisionModel       string
+	Source            string
 }
 
 func (s *AIProfileService) Create(userID int64, req AIProfileRequest) (*AIProfileResponse, error) {
@@ -149,6 +170,7 @@ func (s *AIProfileService) Delete(userID, id int64) error {
 	return s.repo.DeleteForUser(userID, id)
 }
 
+
 func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error {
 	if s.tester == nil {
 		return nil
@@ -171,6 +193,10 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 		EmbeddingAPIKey:   strings.TrimSpace(req.EmbeddingAPIKey),
 		EmbeddingModel:    strings.TrimSpace(req.EmbeddingModel),
 		EmbeddingDim:      req.EmbeddingDim,
+		VisionProvider:    normalizeProvider(req.VisionProvider),
+		VisionBaseURL:     strings.TrimRight(strings.TrimSpace(req.VisionBaseURL), "/"),
+		VisionAPIKey:      strings.TrimSpace(req.VisionAPIKey),
+		VisionModel:       strings.TrimSpace(req.VisionModel),
 	}
 	return s.tester.TestProfile(ctx, profile)
 }
@@ -223,8 +249,15 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 		EmbeddingAPIKey:   profile.EmbeddingAPIKey,
 		EmbeddingModel:    profile.EmbeddingModel,
 		EmbeddingDim:      profile.EmbeddingDim,
+		VisionProvider:    profile.VisionProvider,
+		VisionBaseURL:     profile.VisionBaseURL,
+		VisionAPIKey:      profile.VisionAPIKey,
+		VisionModel:       profile.VisionModel,
 	}, nil
 }
+
+
+
 
 func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest, existing *model.UserAIProfile) (*model.UserAIProfile, error) {
 	llmCipher, err := s.encryptOrKeep(strings.TrimSpace(req.LLMAPIKey), existing, "llm")
@@ -236,6 +269,10 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 		return nil, err
 	}
 	embeddingCipher, err := s.encryptOrKeep(strings.TrimSpace(req.EmbeddingAPIKey), existing, "embedding")
+	if err != nil {
+		return nil, err
+	}
+	visionCipher, err := s.encryptOrKeepOptional(strings.TrimSpace(req.VisionAPIKey), existing, "vision")
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +293,10 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 		EmbeddingAPIKeyCiphertext: embeddingCipher,
 		EmbeddingModel:            strings.TrimSpace(req.EmbeddingModel),
 		EmbeddingDim:              req.EmbeddingDim,
+		VisionProvider:            normalizeProvider(req.VisionProvider),
+		VisionBaseURL:             strings.TrimRight(strings.TrimSpace(req.VisionBaseURL), "/"),
+		VisionAPIKeyCiphertext:    visionCipher,
+		VisionModel:               strings.TrimSpace(req.VisionModel),
 		IsDefault:                 req.IsDefault,
 	}, nil
 }
@@ -274,8 +315,26 @@ func (s *AIProfileService) encryptOrKeep(plaintext string, existing *model.UserA
 		return existing.ASRAPIKeyCiphertext, nil
 	case "embedding":
 		return existing.EmbeddingAPIKeyCiphertext, nil
+	case "vision":
+		return existing.VisionAPIKeyCiphertext, nil
 	default:
 		return "", fmt.Errorf("unknown api key kind: %s", kind)
+	}
+}
+
+// encryptOrKeepOptional allows empty keys for optional services (vision).
+func (s *AIProfileService) encryptOrKeepOptional(plaintext string, existing *model.UserAIProfile, kind string) (string, error) {
+	if plaintext != "" {
+		return s.codec.Encrypt(plaintext)
+	}
+	if existing == nil {
+		return "", nil
+	}
+	switch kind {
+	case "vision":
+		return existing.VisionAPIKeyCiphertext, nil
+	default:
+		return s.encryptOrKeep(plaintext, existing, kind)
 	}
 }
 
@@ -296,8 +355,21 @@ func (s *AIProfileService) responseFromProfile(profile *model.UserAIProfile) *AI
 		EmbeddingAPIKeyMasked: s.maskCiphertext(profile.EmbeddingAPIKeyCiphertext),
 		EmbeddingModel:        profile.EmbeddingModel,
 		EmbeddingDim:          profile.EmbeddingDim,
+		VisionProvider:        profile.VisionProvider,
+		VisionBaseURL:         profile.VisionBaseURL,
+		VisionAPIKeyMasked:    s.maskOptionalCiphertext(profile.VisionAPIKeyCiphertext),
+		VisionModel:           profile.VisionModel,
 		IsDefault:             profile.IsDefault,
+		Source:                "user",
+		ReadOnly:              false,
 	}
+}
+
+func (s *AIProfileService) maskOptionalCiphertext(ciphertext string) string {
+	if strings.TrimSpace(ciphertext) == "" {
+		return ""
+	}
+	return s.maskCiphertext(ciphertext)
 }
 
 func (s *AIProfileService) maskCiphertext(ciphertext string) string {
@@ -321,6 +393,13 @@ func (s *AIProfileService) decryptProfile(profile *model.UserAIProfile) (*Decryp
 	if err != nil {
 		return nil, err
 	}
+	var visionKey string
+	if strings.TrimSpace(profile.VisionAPIKeyCiphertext) != "" {
+		visionKey, err = s.codec.Decrypt(profile.VisionAPIKeyCiphertext)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &DecryptedAIProfile{
 		ID:                profile.ID,
 		UserID:            profile.UserID,
@@ -338,6 +417,11 @@ func (s *AIProfileService) decryptProfile(profile *model.UserAIProfile) (*Decryp
 		EmbeddingAPIKey:   embeddingKey,
 		EmbeddingModel:    profile.EmbeddingModel,
 		EmbeddingDim:      profile.EmbeddingDim,
+		VisionProvider:    profile.VisionProvider,
+		VisionBaseURL:     profile.VisionBaseURL,
+		VisionAPIKey:      visionKey,
+		VisionModel:       profile.VisionModel,
+		Source:            "user",
 	}, nil
 }
 
@@ -359,6 +443,19 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 	}
 	if requireKeys && (strings.TrimSpace(req.LLMAPIKey) == "" || strings.TrimSpace(req.ASRAPIKey) == "" || strings.TrimSpace(req.EmbeddingAPIKey) == "") {
 		return fmt.Errorf("API Key 不能为空")
+	}
+	// Vision is optional; if any field is set, provider/url/model must all be present.
+	vp := strings.TrimSpace(req.VisionProvider)
+	vb := strings.TrimSpace(req.VisionBaseURL)
+	vm := strings.TrimSpace(req.VisionModel)
+	vk := strings.TrimSpace(req.VisionAPIKey)
+	if vp != "" || vb != "" || vm != "" || vk != "" {
+		if vp == "" || vb == "" || vm == "" {
+			return fmt.Errorf("Vision 配置不完整（需 provider、base_url、model；也可全部留空表示不用多模态）")
+		}
+		if requireKeys && vk == "" {
+			return fmt.Errorf("Vision API Key 不能为空")
+		}
 	}
 	return nil
 }

@@ -185,6 +185,29 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		})
 	}
 
+	visualCfg := service.DefaultVisualIndexConfig()
+	if cmd := strings.TrimSpace(deps.cfg.Tools.OCRPath); cmd != "" {
+		visualCfg.OCRCommand = cmd
+	}
+	if lang := strings.TrimSpace(deps.cfg.Tools.OCRLang); lang != "" {
+		visualCfg.OCRLang = lang
+	}
+	// Visual index stays enabled: Vision BYOK and/or local OCR decide what runs.
+	visualIndexSvc := service.NewVisualIndexService(deps.repos, deps.minioStorage, deps.cfg.Tools.FFmpegPath, visualCfg)
+	visualIndexSvc.SetVisionResolver(func(ctx context.Context, userID int64) (ai.VisionClient, error) {
+		profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
+		if err != nil {
+			return nil, err
+		}
+		if !ai.VisionConfigured(*profile) {
+			return nil, fmt.Errorf("vision not configured on default AI profile")
+		}
+		return aiFactory.NewVisionClient(*profile)
+	})
+	consumer.SetVisualIndexer(func(ctx context.Context, task *model.VideoTask) (int, error) {
+		return visualIndexSvc.BuildTaskVisualIndex(ctx, task)
+	})
+
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),

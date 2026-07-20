@@ -87,6 +87,7 @@ func (h *AIProfileHandler) Delete(c *gin.Context) {
 	response.OKWithMsg(c, "删除成功", nil)
 }
 
+
 func (h *AIProfileHandler) Test(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {

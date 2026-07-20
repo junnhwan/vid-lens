@@ -22,6 +22,8 @@ type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segm
 
 type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
 
+type visualIndexFunc func(ctx context.Context, task *model.VideoTask) (int, error)
+
 type downloadVideoFunc func(ctx context.Context, sourceURL string) (string, error)
 
 type uploadLocalFileFunc func(ctx context.Context, localPath, objectName, contentType string) error
@@ -61,6 +63,7 @@ type Consumer struct {
 	downloadURLPolicy      remoteurl.Policy
 	splitAudio             splitAudioFunc
 	ragIndex               ragIndexFunc
+	visualIndex            visualIndexFunc
 	ragProducer            ragIndexProducer
 	retryPolicy            TaskRetryPolicy
 	processingLease        time.Duration
@@ -141,6 +144,10 @@ func (c *Consumer) SetAIRecorder(recorder ai.CallRecorder) {
 
 func (c *Consumer) SetRAGIndexer(indexer ragIndexFunc) {
 	c.ragIndex = indexer
+}
+
+func (c *Consumer) SetVisualIndexer(indexer visualIndexFunc) {
+	c.visualIndex = indexer
 }
 
 func (c *Consumer) SetRAGIndexProducer(producer ragIndexProducer) {

@@ -17,6 +17,7 @@ type Repositories struct {
 	TaskMessageFailure *TaskMessageFailureRepository
 	Transcription      *TranscriptionRepository
 	TranscriptionChunk *TranscriptionChunkRepository
+	VisualFrame        *VideoVisualFrameRepository
 	Summary            *SummaryRepository
 	AIProfile          *AIProfileRepository
 	VideoChunk         *VideoChunkRepository
@@ -41,6 +42,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		TaskMessageFailure: NewTaskMessageFailureRepository(db),
 		Transcription:      NewTranscriptionRepository(db),
 		TranscriptionChunk: NewTranscriptionChunkRepository(db),
+		VisualFrame:        NewVideoVisualFrameRepository(db),
 		Summary:            NewSummaryRepository(db),
 		AIProfile:          NewAIProfileRepository(db),
 		VideoChunk:         NewVideoChunkRepository(db),

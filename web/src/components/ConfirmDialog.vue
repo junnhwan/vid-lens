@@ -15,7 +15,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   show: Boolean,
@@ -27,25 +27,26 @@ const props = defineProps({
   icon: { type: String, default: '⚠️' },
 })
 
-defineEmits(['confirm', 'cancel'])
+const emit = defineEmits(['confirm', 'cancel'])
 
 const panel = ref(null)
 
-// ESC 关闭
+// ESC → 取消（危险操作不直接确认）
 const onKeyDown = (e) => {
   if (e.key === 'Escape' && props.show) {
     e.preventDefault()
+    emit('cancel')
   }
 }
 onMounted(() => document.addEventListener('keydown', onKeyDown))
 onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 
-// 点击背景关闭（拖拽安全）
+// 背景点击：有取消时等同取消；仅确认时不关
 const handleBackdropMouseDown = (e) => {
   const start = e.target
   const up = (ev) => {
-    if (ev.target === start && start.classList.contains('confirm-backdrop')) {
-      // 不自动关闭，让用户点"取消"
+    if (ev.target === start && start.classList.contains('confirm-backdrop') && props.showCancel) {
+      emit('cancel')
     }
     document.removeEventListener('mouseup', up)
   }
