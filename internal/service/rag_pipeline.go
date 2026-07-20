@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -64,7 +65,8 @@ func NewConfiguredRetrievalPipeline(repos *repository.Repositories, retriever RA
 
 type RetrievalPipelineRequest struct {
 	UserID         int64
-	TaskID         int64
+	TaskID         int64 // deprecated compatibility; new callers use TaskIDs
+	TaskIDs        []int64
 	Question       string
 	Recent         []model.ChatMessage
 	TopK           int
@@ -88,6 +90,13 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	startedAt := time.Now()
 	if p == nil {
 		return RetrievalPipelineResult{}, fmt.Errorf("当前视频尚未构建 RAG 索引")
+	}
+	taskIDs := normalizeTaskIDs(req.TaskIDs)
+	if len(taskIDs) == 0 && req.TaskID > 0 {
+		taskIDs = []int64{req.TaskID}
+	}
+	if len(taskIDs) == 0 {
+		return RetrievalPipelineResult{}, fmt.Errorf("task_ids 不能为空")
 	}
 	enableVector, enableBM25 := true, true
 	if p.Config != nil {
@@ -135,14 +144,28 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			if err != nil {
 				return RetrievalPipelineResult{}, err
 			}
-			vectorChunks, err = p.retriever.Search(ctx, queryVector, RetrievalRequest{UserID: req.UserID, TaskID: req.TaskID, EmbeddingModel: req.EmbeddingModel, TopK: candidateK, MinScore: minScore})
+			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: candidateK, MinScore: minScore}
+			if len(taskIDs) == 1 {
+				retrievalReq.TaskID = taskIDs[0]
+			}
+			vectorChunks, err = p.retriever.Search(ctx, queryVector, retrievalReq)
 			if err != nil {
 				return RetrievalPipelineResult{}, err
 			}
+			if len(taskIDs) == 1 {
+				for i := range vectorChunks {
+					if vectorChunks[i].TaskID == 0 {
+						vectorChunks[i].TaskID = taskIDs[0]
+					}
+				}
+			}
 		}
 		if enableBM25 {
+			if len(taskIDs) != 1 {
+				return RetrievalPipelineResult{}, fmt.Errorf("multi-task retrieval does not support BM25")
+			}
 			var err error
-			keywordChunks, err = p.keywordChunks(req.UserID, req.TaskID, req.EmbeddingModel, query, candidateK)
+			keywordChunks, err = p.keywordChunks(req.UserID, taskIDs[0], req.EmbeddingModel, query, candidateK)
 			if err != nil {
 				return RetrievalPipelineResult{}, err
 			}
@@ -157,7 +180,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	citations := fuseCrossQueryChunks(perQuery, candidateK, rrfK)
 	var err error
 	if p.expander != nil {
-		citations, err = p.expander.Expand(ctx, req.UserID, req.TaskID, req.EmbeddingModel, citations)
+		citations, err = p.expander.Expand(ctx, req.UserID, 0, req.EmbeddingModel, citations)
 		if err != nil {
 			return RetrievalPipelineResult{}, err
 		}
@@ -166,6 +189,9 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		citations = p.reranker.Rerank(ctx, req.Question, citations, topK)
 	} else {
 		citations = capRetrievedChunks(citations, topK)
+	}
+	if err := p.hydrateVideoTitles(req.UserID, citations); err != nil {
+		return RetrievalPipelineResult{}, err
 	}
 	if metrics := observability.DefaultMetrics(); metrics != nil {
 		contextTokens := 0
@@ -212,6 +238,7 @@ func (p *RetrievalPipeline) keywordChunks(userID, taskID int64, embeddingModel, 
 	chunks := make([]RetrievedChunk, 0, len(keywordResults))
 	for _, result := range keywordResults {
 		chunks = append(chunks, RetrievedChunk{
+			TaskID:      taskID,
 			EvidenceID:  result.Chunk.VectorID,
 			ChunkID:     result.Chunk.ID,
 			ChunkIndex:  result.Chunk.ChunkIndex,
@@ -288,4 +315,30 @@ func rewriteQueriesForPipeline(p *RetrievalPipeline) int {
 		return p.Config.RewriteQueries
 	}
 	return 3
+}
+
+func (p *RetrievalPipeline) hydrateVideoTitles(userID int64, chunks []RetrievedChunk) error {
+	if p == nil || p.repos == nil || p.repos.Task == nil || len(chunks) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(chunks))
+	for _, chunk := range chunks {
+		ids = append(ids, chunk.TaskID)
+	}
+	tasks, err := p.repos.Task.ListByIDsForUser(userID, normalizeTaskIDs(ids))
+	if err != nil {
+		return err
+	}
+	titles := make(map[int64]string, len(tasks))
+	for _, task := range tasks {
+		title := strings.TrimSpace(task.Title)
+		if title == "" {
+			title = strings.TrimSpace(task.Filename)
+		}
+		titles[task.ID] = title
+	}
+	for i := range chunks {
+		chunks[i].VideoTitle = titles[chunks[i].TaskID]
+	}
+	return nil
 }

@@ -15,11 +15,12 @@ import (
 )
 
 type serverHandlers struct {
-	user     *handler.UserHandler
-	profiles *handler.AIProfileHandler
-	rag      *handler.RAGHandler
-	chat     *handler.ChatHandler
-	media    *handler.MediaHandler
+	user           *handler.UserHandler
+	profiles       *handler.AIProfileHandler
+	rag            *handler.RAGHandler
+	chat           *handler.ChatHandler
+	media          *handler.MediaHandler
+	knowledgeBases *handler.KnowledgeBaseHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -58,6 +59,16 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), handlers.chat.Ask)
 				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), handlers.chat.AskAgent)
 				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskStream)
+			}
+			knowledgeBases := auth.Group("/knowledge-bases")
+			{
+				knowledgeBases.POST("", handlers.knowledgeBases.Create)
+				knowledgeBases.GET("", handlers.knowledgeBases.List)
+				knowledgeBases.GET("/:id", handlers.knowledgeBases.Get)
+				knowledgeBases.PATCH("/:id", handlers.knowledgeBases.Update)
+				knowledgeBases.DELETE("/:id", handlers.knowledgeBases.Delete)
+				knowledgeBases.POST("/:id/videos", handlers.knowledgeBases.AddVideo)
+				knowledgeBases.DELETE("/:id/videos/:task_id", handlers.knowledgeBases.RemoveVideo)
 			}
 			media := auth.Group("/media")
 			{

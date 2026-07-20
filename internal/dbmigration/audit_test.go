@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/glebarez/sqlite"
 	"time"
 
 	"gorm.io/gorm"
@@ -129,5 +131,45 @@ func TestPostgresAuditSequencesRejectsSequenceThatCanReuseCopiedID(t *testing.T)
 	}
 	if _, err := AuditSequences(context.Background(), db); err != nil {
 		t.Fatalf("AuditSequences() after reset error = %v", err)
+	}
+}
+
+func TestAuditDataAcceptsKnowledgeBaseSessionWithZeroLegacyTaskID(t *testing.T) {
+	source, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"_source?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	target, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"_target?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open target: %v", err)
+	}
+	if err := model.MigrateLegacy(source); err != nil {
+		t.Fatalf("MigrateLegacy(source): %v", err)
+	}
+	if err := model.Migrate(target); err != nil {
+		t.Fatalf("Migrate(target): %v", err)
+	}
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	for _, db := range []*gorm.DB{source, target} {
+		if err := db.Create(&model.User{ID: 1, Username: "audit-kb", PasswordHash: "hash", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+	}
+	legacy := model.LegacyChatSession{ID: 1, UserID: 1, TaskID: 0, Title: "kb", CreatedAt: now, UpdatedAt: now}
+	if err := source.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+	if err := target.Create(&model.ChatSession{
+		ID: 1, UserID: 1, TaskID: 0, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: 9, Title: "kb", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create target session: %v", err)
+	}
+
+	report, err := AuditData(context.Background(), source, target)
+	if err != nil {
+		t.Fatalf("AuditData() error = %v; report=%+v", err, report)
+	}
+	if !report.SourceRelationships.Valid || !report.TargetRelationships.Valid {
+		t.Fatalf("relationship audits = source %+v target %+v", report.SourceRelationships, report.TargetRelationships)
 	}
 }

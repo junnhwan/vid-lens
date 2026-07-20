@@ -13,11 +13,12 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 	router := newServerRouter(config.Config{
 		JWT: config.JWTConfig{Secret: "test-secret"},
 	}, serverHandlers{
-		user:     &handler.UserHandler{},
-		profiles: &handler.AIProfileHandler{},
-		rag:      &handler.RAGHandler{},
-		chat:     &handler.ChatHandler{},
-		media:    &handler.MediaHandler{},
+		user:           &handler.UserHandler{},
+		profiles:       &handler.AIProfileHandler{},
+		rag:            &handler.RAGHandler{},
+		chat:           &handler.ChatHandler{},
+		media:          &handler.MediaHandler{},
+		knowledgeBases: &handler.KnowledgeBaseHandler{},
 	}, nil, nil)
 
 	if router == nil {
@@ -28,10 +29,17 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		"GET /healthz":               "health endpoint",
 		"GET /readyz":                "readiness endpoint",
 		"POST /api/v1/user/register": "public registration",
-		"POST /api/v1/chat/sessions/:session_id/messages": "chat message",
-		"POST /api/v1/media/upload-chunk":                 "upload chunk",
-		"GET /api/v1/media/check-upload":                  "check uploaded chunks",
-		"POST /api/v1/media/merge-chunks":                 "merge uploaded chunks",
+		"POST /api/v1/chat/sessions/:session_id/messages":    "chat message",
+		"POST /api/v1/media/upload-chunk":                    "upload chunk",
+		"GET /api/v1/media/check-upload":                     "check uploaded chunks",
+		"POST /api/v1/media/merge-chunks":                    "merge uploaded chunks",
+		"POST /api/v1/knowledge-bases":                       "create knowledge base",
+		"GET /api/v1/knowledge-bases":                        "list knowledge bases",
+		"GET /api/v1/knowledge-bases/:id":                    "get knowledge base",
+		"PATCH /api/v1/knowledge-bases/:id":                  "update knowledge base",
+		"DELETE /api/v1/knowledge-bases/:id":                 "delete knowledge base",
+		"POST /api/v1/knowledge-bases/:id/videos":            "add knowledge base video",
+		"DELETE /api/v1/knowledge-bases/:id/videos/:task_id": "remove knowledge base video",
 	}
 	registered := make(map[string]struct{}, len(router.Routes()))
 	for _, route := range router.Routes() {

@@ -119,3 +119,54 @@ func openPostgresModelTestDB(t *testing.T) (*gorm.DB, string) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db, schemaName
 }
+
+func TestPostgresMigrateBackfillsAndConstrainsChatSessionScope(t *testing.T) {
+	db, _ := openPostgresModelTestDB(t)
+	if err := db.Exec(`
+CREATE TABLE chat_sessions (
+	id BIGSERIAL PRIMARY KEY,
+	user_id BIGINT NOT NULL,
+	task_id BIGINT NOT NULL,
+	title VARCHAR(200),
+	created_at TIMESTAMPTZ,
+	updated_at TIMESTAMPTZ
+)`).Error; err != nil {
+		t.Fatalf("create historical chat_sessions: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO chat_sessions (user_id, task_id, title) VALUES (1, 42, 'old')`).Error; err != nil {
+		t.Fatalf("insert historical session: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	var migrated ChatSession
+	if err := db.First(&migrated, 1).Error; err != nil {
+		t.Fatalf("load migrated session: %v", err)
+	}
+	if migrated.ScopeType != ChatScopeVideo || migrated.TaskID != 42 || migrated.KnowledgeBaseID != 0 {
+		t.Fatalf("migrated session = %+v, want video/task=42/knowledge_base_id=0", migrated)
+	}
+
+	valid := []ChatSession{
+		{UserID: 1, ScopeType: ChatScopeVideo, TaskID: 7},
+		{UserID: 1, ScopeType: ChatScopeKnowledgeBase, KnowledgeBaseID: 9},
+	}
+	for i := range valid {
+		if err := db.Create(&valid[i]).Error; err != nil {
+			t.Fatalf("create valid scope %+v: %v", valid[i], err)
+		}
+	}
+	invalid := []ChatSession{
+		{UserID: 1, ScopeType: ChatScopeVideo},
+		{UserID: 1, ScopeType: ChatScopeVideo, TaskID: 7, KnowledgeBaseID: 9},
+		{UserID: 1, ScopeType: ChatScopeKnowledgeBase, TaskID: 7, KnowledgeBaseID: 9},
+		{UserID: 1, ScopeType: ChatScopeKnowledgeBase},
+		{UserID: 1, ScopeType: "unknown", TaskID: 7},
+	}
+	for i := range invalid {
+		if err := db.Create(&invalid[i]).Error; err == nil {
+			t.Fatalf("invalid scope combination was accepted: %+v", invalid[i])
+		}
+	}
+}

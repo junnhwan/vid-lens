@@ -68,7 +68,7 @@ func newMigrationApplication(output io.Writer) migrationApplication {
 		openSource:    openMySQLConnection,
 		openTarget:    openPostgresSchemaConnection,
 		acquireLock:   dbmigration.TryAcquireMigrationAdvisoryLock,
-		migrateSource: model.Migrate,
+		migrateSource: model.MigrateLegacy,
 		migrateTarget: model.Migrate,
 		dryRun:        dbmigration.DryRun,
 		copyData:      dbmigration.Copy,

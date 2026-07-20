@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
@@ -245,46 +247,39 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 	if topK <= 0 {
 		topK = 5
 	}
-	filter := fmt.Sprintf("%s == %d and %s == %d and %s == %q",
-		fieldUserID, req.UserID,
-		fieldTaskID, req.TaskID,
-		fieldEmbeddingModel, req.EmbeddingModel,
-	)
+	taskIDs := req.TaskIDs
+	if len(taskIDs) == 0 && req.TaskID > 0 {
+		taskIDs = []int64{req.TaskID}
+	}
+	filter, _, err := buildMilvusSearchFilter(req.UserID, taskIDs, req.EmbeddingModel)
+	if err != nil {
+		return nil, err
+	}
 	searchParam, err := entity.NewIndexAUTOINDEXSearchParam(1)
 	if err != nil {
 		return nil, err
 	}
-	resultSets, err := s.client.Search(
-		ctx,
-		s.collection,
-		nil,
-		filter,
-		[]string{fieldVectorID, fieldChunkID, fieldChunkIndex, fieldContent},
-		[]entity.Vector{entity.FloatVector(query)},
-		fieldEmbedding,
-		entity.COSINE,
-		topK,
-		searchParam,
-	)
+	resultSets, err := s.client.Search(ctx, s.collection, nil, filter,
+		[]string{fieldVectorID, fieldTaskID, fieldChunkID, fieldChunkIndex, fieldContent},
+		[]entity.Vector{entity.FloatVector(query)}, fieldEmbedding, entity.COSINE, topK, searchParam)
 	if err != nil {
 		return nil, err
 	}
 	if len(resultSets) == 0 {
 		return nil, nil
 	}
-
 	rs := resultSets[0]
 	if rs.Err != nil {
 		return nil, rs.Err
 	}
 	vectorIDCol := rs.Fields.GetColumn(fieldVectorID)
+	taskIDCol := rs.Fields.GetColumn(fieldTaskID)
 	chunkIDCol := rs.Fields.GetColumn(fieldChunkID)
 	chunkIndexCol := rs.Fields.GetColumn(fieldChunkIndex)
 	contentCol := rs.Fields.GetColumn(fieldContent)
-	if vectorIDCol == nil || chunkIDCol == nil || chunkIndexCol == nil || contentCol == nil {
+	if vectorIDCol == nil || taskIDCol == nil || chunkIDCol == nil || chunkIndexCol == nil || contentCol == nil {
 		return nil, fmt.Errorf("milvus search missing output fields")
 	}
-
 	results := make([]service.RetrievedChunk, 0, rs.ResultCount)
 	for i := 0; i < rs.ResultCount; i++ {
 		score := rs.Scores[i]
@@ -292,6 +287,10 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 			continue
 		}
 		vectorID, err := vectorIDCol.GetAsString(i)
+		if err != nil {
+			return nil, err
+		}
+		taskID, err := taskIDCol.GetAsInt64(i)
 		if err != nil {
 			return nil, err
 		}
@@ -307,15 +306,22 @@ func (s *MilvusStore) Search(ctx context.Context, query []float32, req service.R
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, service.RetrievedChunk{
-			EvidenceID: vectorID,
-			ChunkID:    chunkID,
-			ChunkIndex: int(chunkIndex),
-			Score:      score,
-			Content:    content,
-		})
+		results = append(results, service.RetrievedChunk{TaskID: taskID, EvidenceID: vectorID, ChunkID: chunkID, ChunkIndex: int(chunkIndex), Score: score, Content: content})
 	}
 	return results, nil
+}
+
+func buildMilvusSearchFilter(userID int64, taskIDs []int64, embeddingModel string) (string, []int64, error) {
+	ids := normalizeVectorTaskIDs(taskIDs)
+	if len(ids) == 0 {
+		return "", nil, fmt.Errorf("task_ids must not be empty")
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	filter := fmt.Sprintf("%s == %d and %s in [%s] and %s == %q", fieldUserID, userID, fieldTaskID, strings.Join(parts, ","), fieldEmbeddingModel, embeddingModel)
+	return filter, ids, nil
 }
 
 // HealthCheck verifies the Milvus server is healthy without changing collection state.

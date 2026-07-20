@@ -109,7 +109,10 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		step, err := failVideoAgentStep(step, "当前视频尚未构建 RAG 索引")
 		return SearchTranscriptResult{}, step, err
 	}
-	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest(input))
+	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
+		UserID: input.UserID, TaskIDs: []int64{input.TaskID}, Question: input.Question, Recent: input.Recent,
+		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
+	})
 	if err != nil {
 		step, err := failVideoAgentStep(step, err.Error())
 		return SearchTranscriptResult{}, step, err

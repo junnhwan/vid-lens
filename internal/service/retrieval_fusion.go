@@ -189,6 +189,6 @@ func describeRetrievedChunk(chunk RetrievedChunk) string {
 	if source == "" {
 		source = "unknown"
 	}
-	return fmt.Sprintf("[Chunk %d source=%s score=%.3f rrf=%.4f vector_rank=%d keyword_rank=%d]",
-		chunk.ChunkIndex, source, chunk.Score, chunk.RRFScore, chunk.VectorRank, chunk.KeywordRank)
+	return fmt.Sprintf("[Chunk task_id=%d video_title=%q index=%d source=%s score=%.3f rrf=%.4f vector_rank=%d keyword_rank=%d]",
+		chunk.TaskID, chunk.VideoTitle, chunk.ChunkIndex, source, chunk.Score, chunk.RRFScore, chunk.VectorRank, chunk.KeywordRank)
 }

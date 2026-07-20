@@ -13,15 +13,15 @@ func TestCatalogIncludesEveryLegacyModelExactlyOnce(t *testing.T) {
 		t.Fatalf("legacy catalog tables = %d, want %d", got, want)
 	}
 
-	legacyModelTypes := make(map[reflect.Type]struct{}, len(model.AllModels()))
-	allModelTypes := make(map[reflect.Type]struct{}, len(model.AllModels()))
-	for _, item := range model.AllModels() {
+	legacyModelTypes := make(map[reflect.Type]struct{}, len(model.LegacyModels()))
+	allModelTypes := make(map[reflect.Type]struct{}, len(model.LegacyModels()))
+	for _, item := range model.LegacyModels() {
 		typeOf := reflect.TypeOf(item)
 		if typeOf == nil || typeOf.Kind() != reflect.Ptr {
-			t.Fatalf("AllModels contains non-pointer model %T", item)
+			t.Fatalf("LegacyModels contains non-pointer model %T", item)
 		}
 		if _, exists := allModelTypes[typeOf]; exists {
-			t.Fatalf("AllModels contains duplicate model type %v", typeOf)
+			t.Fatalf("LegacyModels contains duplicate model type %v", typeOf)
 		}
 		allModelTypes[typeOf] = struct{}{}
 		legacyModelTypes[typeOf] = struct{}{}
@@ -158,5 +158,18 @@ func TestCatalogReturnsIndependentMetadata(t *testing.T) {
 	}
 	if reflect.ValueOf(first[0].Model).Pointer() == reflect.ValueOf(second[0].Model).Pointer() {
 		t.Fatal("catalog returned shared mutable model pointer")
+	}
+}
+
+func TestCatalogUsesLegacyChatSessionAndExcludesOnlineKnowledgeBaseTables(t *testing.T) {
+	for _, spec := range Catalog() {
+		switch spec.Name {
+		case "knowledge_bases", "knowledge_base_videos", "chat_message_sources":
+			t.Fatalf("legacy catalog unexpectedly contains online table %q", spec.Name)
+		case "chat_sessions":
+			if reflect.TypeOf(spec.Model) != reflect.TypeOf(&model.LegacyChatSession{}) {
+				t.Fatalf("chat_sessions catalog model = %T, want *model.LegacyChatSession", spec.Model)
+			}
+		}
 	}
 }

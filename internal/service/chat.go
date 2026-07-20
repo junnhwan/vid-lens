@@ -36,13 +36,16 @@ type ChatConfig struct {
 
 type RetrievalRequest struct {
 	UserID         int64
-	TaskID         int64
+	TaskID         int64 // deprecated compatibility; new callers use TaskIDs
+	TaskIDs        []int64
 	EmbeddingModel string
 	TopK           int
 	MinScore       float32
 }
 
 type RetrievedChunk struct {
+	TaskID                 int64    `json:"task_id"`
+	VideoTitle             string   `json:"video_title,omitempty"`
 	EvidenceID             string   `json:"evidence_id"`
 	ChunkID                int64    `json:"chunk_id"`
 	ChunkIndex             int      `json:"chunk_index"`
@@ -68,6 +71,8 @@ type RetrievedChunk struct {
 // expanded LLM context and anchor internals so API/SSE/snapshots cannot expose
 // the large retrieval window by accident.
 type Citation struct {
+	TaskID      int64   `json:"task_id"`
+	VideoTitle  string  `json:"video_title,omitempty"`
 	CitationID  string  `json:"citation_id"`
 	EvidenceID  string  `json:"evidence_id"`
 	ChunkID     int64   `json:"chunk_id"`
