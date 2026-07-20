@@ -1,8 +1,10 @@
-package service
+package ragtool
 
 import (
 	"testing"
 	"time"
+
+	"vid-lens/internal/service"
 )
 
 func TestVideoAgentAnswerEvalComputesCoverageCitationAndRates(t *testing.T) {
@@ -14,10 +16,10 @@ func TestVideoAgentAnswerEvalComputesCoverageCitationAndRates(t *testing.T) {
 				ExpectedAnswerPoints:  []string{"The Fire Nation starts the war."},
 			},
 			Answer: "Fire Nation starts the war, based on the cited transcript.",
-			Citations: []RetrievedChunk{
+			Citations: []service.RetrievedChunk{
 				{ChunkIndex: 2, Content: "The Fire Nation starts the war."},
 			},
-			Trace:    []VideoAgentStep{{Tool: VideoAgentToolSearchTranscript}, {Tool: VideoAgentToolBuildCitedAnswer}},
+			Trace:    []service.VideoAgentStep{{Tool: service.VideoAgentToolSearchTranscript}, {Tool: service.VideoAgentToolBuildCitedAnswer}},
 			Duration: 100 * time.Millisecond,
 		},
 		{
@@ -27,7 +29,7 @@ func TestVideoAgentAnswerEvalComputesCoverageCitationAndRates(t *testing.T) {
 				ExpectedAnswerPoints:  []string{"The Avatar keeps peace between four nations."},
 			},
 			Answer:          "当前视频片段中没有找到相关信息。",
-			Trace:           []VideoAgentStep{{Tool: VideoAgentToolSearchTranscript, Error: "no context"}},
+			Trace:           []service.VideoAgentStep{{Tool: service.VideoAgentToolSearchTranscript, Error: "no context"}},
 			Duration:        300 * time.Millisecond,
 			FallbackOrError: true,
 			Error:           "no context",

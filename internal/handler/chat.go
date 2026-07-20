@@ -135,6 +135,8 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// AskAgent handles experimental tool-loop video QA.
+// Prefer stream/sync chat for product work; do not expand agent as the default path.
 func (h *ChatHandler) AskAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
@@ -152,7 +154,7 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 		return
 	}
 	if h.agentSvc == nil {
-		response.BadRequest(c, "agent 服务不可用")
+		response.BadRequest(c, "agent 实验功能不可用")
 		return
 	}
 

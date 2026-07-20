@@ -37,9 +37,6 @@ tmp/
 *.log
 .logs/
 
-# Local frontend backup
-web/src/App-old.vue
-
 # Local design notes
 /CLAUDE.md
 AGENTS.md

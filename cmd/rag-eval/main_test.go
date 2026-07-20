@@ -5,15 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	rageval "vid-lens/internal/eval"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/service"
 )
 
@@ -127,8 +127,8 @@ func TestLoadCasesRejectsMissingRequiredFields(t *testing.T) {
 
 func TestRenderMarkdownDoesNotClaimRecallImprovedWhenOnlyMRRImproves(t *testing.T) {
 	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{5}, 19, "text-embedding-3-small", 5, 30, []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.939}},
-		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.974}},
+		{mode: "Vector only", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.939}},
+		{mode: "Vector + BM25 + RRF", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.974}},
 	})
 
 	if strings.Contains(markdown, "Recall@5 从 100.0% 提升至 100.0%") {
@@ -141,10 +141,10 @@ func TestRenderMarkdownDoesNotClaimRecallImprovedWhenOnlyMRRImproves(t *testing.
 
 func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 	results := []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 1, Categories: map[string]service.RAGEvalCategoryReport{"keyword_exact": {TotalCases: 1, EvaluableCases: 1, HitCases: 1, RecallAtK: 1.0, MRR: 1.0}}}},
-		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 2}},
-		{mode: "Rewrite + MultiQuery + RRF", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 3, RewriteFallbackCount: 2, RewriteFallbackRate: 0.5}},
-		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: service.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 4, AvgExpandedContextChars: 128, RerankChangedRankCount: 1}},
+		{mode: "Vector only", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 1, Categories: map[string]ragtool.RAGEvalCategoryReport{"keyword_exact": {TotalCases: 1, EvaluableCases: 1, HitCases: 1, RecallAtK: 1.0, MRR: 1.0}}}},
+		{mode: "Vector + BM25 + RRF", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 2}},
+		{mode: "Rewrite + MultiQuery + RRF", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 3, RewriteFallbackCount: 2, RewriteFallbackRate: 0.5}},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Rerank", report: ragtool.RAGEvalReport{RecallAtK: 1.0, MRR: 0.9, AvgLatencyMs: 4, AvgExpandedContextChars: 128, RerankChangedRankCount: 1}},
 	}
 
 	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{5}, 4, "text-embedding-3-small", 5, 30, results)
@@ -174,17 +174,17 @@ func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 
 func TestRenderMarkdownIncludesPerCategoryMetrics(t *testing.T) {
 	results := []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{
+		{mode: "Vector only", report: ragtool.RAGEvalReport{
 			RecallAtK: 1.0,
 			MRR:       1.0,
-			Categories: map[string]service.RAGEvalCategoryReport{
+			Categories: map[string]ragtool.RAGEvalCategoryReport{
 				"keyword_exact": {TotalCases: 2, EvaluableCases: 2, HitCases: 1, RecallAtK: 0.5, MRR: 0.5, NoResultRate: 0.5, AvgLatencyMs: 12.5},
 			},
 		}},
-		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: service.RAGEvalReport{
+		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: ragtool.RAGEvalReport{
 			RecallAtK: 1.0,
 			MRR:       1.0,
-			Categories: map[string]service.RAGEvalCategoryReport{
+			Categories: map[string]ragtool.RAGEvalCategoryReport{
 				"keyword_exact": {TotalCases: 2, EvaluableCases: 2, HitCases: 2, RecallAtK: 1.0, MRR: 1.0, NoResultRate: 0.0, AvgLatencyMs: 30.0, RerankChangedRankCount: 1},
 			},
 		}},
@@ -206,10 +206,10 @@ func TestRenderMarkdownIncludesPerCategoryMetrics(t *testing.T) {
 
 func TestRenderMarkdownRecordsHybridImprovementEvenWhenModelRerankRegresses(t *testing.T) {
 	results := []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
-		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
-		{mode: "Rewrite + MultiQuery + RRF", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.896}},
-		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.648}},
+		{mode: "Vector only", report: ragtool.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
+		{mode: "Vector + BM25 + RRF", report: ragtool.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
+		{mode: "Rewrite + MultiQuery + RRF", report: ragtool.RAGEvalReport{RecallAtK: 0.96, MRR: 0.896}},
+		{mode: "Rewrite + MultiQuery + RRF + Window + Model Rerank", report: ragtool.RAGEvalReport{RecallAtK: 0.96, MRR: 0.648}},
 	}
 
 	markdown := renderMarkdown(evalOptions{environment: "test", commit: "abc123"}, []int64{2, 5, 6}, 50, "text-embedding-3-small", 5, 30, results)
@@ -227,11 +227,11 @@ func TestRenderMarkdownRecordsHybridImprovementEvenWhenModelRerankRegresses(t *t
 
 func TestRenderMarkdownIncludesAgentAnswerEvaluation(t *testing.T) {
 	retrievalResults := []modeResult{
-		{mode: "Vector only", report: service.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
-		{mode: "Vector + BM25 + RRF", report: service.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
+		{mode: "Vector only", report: ragtool.RAGEvalReport{RecallAtK: 0.96, MRR: 0.837}},
+		{mode: "Vector + BM25 + RRF", report: ragtool.RAGEvalReport{RecallAtK: 0.98, MRR: 0.878}},
 	}
 	answerResults := []answerModeResult{
-		{mode: "Ordinary RAG answer", report: service.VideoAgentAnswerEvalReport{
+		{mode: "Ordinary RAG answer", report: ragtool.VideoAgentAnswerEvalReport{
 			TotalCases:          2,
 			AnswerPointCoverage: 0.50,
 			CitationHitRate:     0.50,
@@ -240,7 +240,7 @@ func TestRenderMarkdownIncludesAgentAnswerEvaluation(t *testing.T) {
 			FallbackErrorRate:   0,
 			AvgLatencyMs:        120,
 		}},
-		{mode: "Agentic answer", report: service.VideoAgentAnswerEvalReport{
+		{mode: "Agentic answer", report: ragtool.VideoAgentAnswerEvalReport{
 			TotalCases:          2,
 			AnswerPointCoverage: 0.75,
 			CitationHitRate:     1.00,

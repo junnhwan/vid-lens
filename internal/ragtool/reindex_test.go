@@ -1,4 +1,4 @@
-package service
+package ragtool
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/service"
 )
 
 type reindexSourceFake struct {
@@ -61,9 +62,9 @@ func (f reindexFactoryFake) NewEmbeddingClient(ai.Profile) (ai.EmbeddingClient, 
 	return f.client, nil
 }
 
-type reindexWriterFake struct{ vectors []RAGVector }
+type reindexWriterFake struct{ vectors []service.RAGVector }
 
-func (w *reindexWriterFake) UpsertChunks(_ context.Context, vectors []RAGVector) error {
+func (w *reindexWriterFake) UpsertChunks(_ context.Context, vectors []service.RAGVector) error {
 	w.vectors = append(w.vectors, vectors...)
 	return nil
 }

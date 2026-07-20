@@ -116,7 +116,7 @@ export default {
   sendChatMessage: (sessionId, question, topK = 5, mode = 'video_assistant') =>
     api.post(`/chat/sessions/${sessionId}/messages`, { question, top_k: topK, mode }),
 
-  // Agentic Video QA（非流式）：返回 { message_id, answer, template, citations, trace, model }
+  // Experimental agent video QA（非流式，非默认产品路径）：返回 { message_id, answer, template, citations, trace, model }
   sendAgentMessage: (sessionId, question, topK = 5) =>
     api.post(`/chat/sessions/${sessionId}/messages/agent`, { question, top_k: topK }),
 

@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"vid-lens/internal/ai"
 	"vid-lens/internal/config"
 	"vid-lens/internal/pkg/secret"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/vector"
@@ -45,7 +45,7 @@ type caseEvalContext struct {
 
 type modeResult struct {
 	mode   string
-	report service.RAGEvalReport
+	report ragtool.RAGEvalReport
 }
 
 func run(parent context.Context, opts evalOptions) error {
@@ -269,8 +269,8 @@ func prepareCases(ctx context.Context, cases []evalCase, repos *repository.Repos
 	return prepared, embeddingModel, taskIDs, nil
 }
 
-func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, topK int, progress evalProgress) (service.RAGEvalReport, error) {
-	results := make([]service.RAGEvalCaseResult, 0, len(cases))
+func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, topK int, progress evalProgress) (ragtool.RAGEvalReport, error) {
+	results := make([]ragtool.RAGEvalCaseResult, 0, len(cases))
 	for i, c := range cases {
 		progress.caseStep("vector search", i+1, len(cases), c.evalCase)
 		startedAt := time.Now()
@@ -282,23 +282,23 @@ func evaluateVectorOnly(ctx context.Context, cases []caseEvalContext, store serv
 		})
 		duration := time.Since(startedAt)
 		if err != nil {
-			return service.RAGEvalReport{}, fmt.Errorf("vector search task %d: %w", c.evalCase.TaskID, err)
+			return ragtool.RAGEvalReport{}, fmt.Errorf("vector search task %d: %w", c.evalCase.TaskID, err)
 		}
 		for i := range chunks {
 			chunks[i].Source = service.RetrievalSourceVector
 			chunks[i].VectorRank = i + 1
 		}
-		results = append(results, service.RAGEvalCaseResult{
+		results = append(results, ragtool.RAGEvalCaseResult{
 			Case:      c.evalCase.serviceCase(),
 			Citations: chunks,
 			Duration:  duration,
 		})
 	}
-	return service.EvaluateRAGRetrieval(results, topK), nil
+	return ragtool.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, topK, candidateK int, progress evalProgress) (service.RAGEvalReport, error) {
-	results := make([]service.RAGEvalCaseResult, 0, len(cases))
+func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, topK, candidateK int, progress evalProgress) (ragtool.RAGEvalReport, error) {
+	results := make([]ragtool.RAGEvalCaseResult, 0, len(cases))
 	for i, c := range cases {
 		progress.caseStep("hybrid retrieval", i+1, len(cases), c.evalCase)
 		startedAt := time.Now()
@@ -309,12 +309,12 @@ func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.
 			TopK:           candidateK,
 		})
 		if err != nil {
-			return service.RAGEvalReport{}, fmt.Errorf("hybrid vector search task %d: %w", c.evalCase.TaskID, err)
+			return ragtool.RAGEvalReport{}, fmt.Errorf("hybrid vector search task %d: %w", c.evalCase.TaskID, err)
 		}
 		terms := service.ExtractQueryTerms(c.evalCase.Question)
 		keywordResults, err := repos.VideoChunk.SearchByBM25(c.userID, c.evalCase.TaskID, c.profile.EmbeddingModel, terms, candidateK)
 		if err != nil {
-			return service.RAGEvalReport{}, fmt.Errorf("BM25 search task %d: %w", c.evalCase.TaskID, err)
+			return ragtool.RAGEvalReport{}, fmt.Errorf("BM25 search task %d: %w", c.evalCase.TaskID, err)
 		}
 		keywordChunks := make([]service.RetrievedChunk, 0, len(keywordResults))
 		for _, result := range keywordResults {
@@ -329,17 +329,17 @@ func evaluateHybrid(ctx context.Context, cases []caseEvalContext, store service.
 		}
 		chunks := service.FuseRetrievedChunks(vectorChunks, keywordChunks, topK, 0)
 		duration := time.Since(startedAt)
-		results = append(results, service.RAGEvalCaseResult{
+		results = append(results, ragtool.RAGEvalCaseResult{
 			Case:      c.evalCase.serviceCase(),
 			Citations: chunks,
 			Duration:  duration,
 		})
 	}
-	return service.EvaluateRAGRetrieval(results, topK), nil
+	return ragtool.EvaluateRAGRetrieval(results, topK), nil
 }
 
-func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, full bool, progress evalProgress) (service.RAGEvalReport, error) {
-	results := make([]service.RAGEvalCaseResult, 0, len(cases))
+func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, full bool, progress evalProgress) (ragtool.RAGEvalReport, error) {
+	results := make([]ragtool.RAGEvalCaseResult, 0, len(cases))
 	for i, c := range cases {
 		progress.caseStep("rewrite pipeline retrieval", i+1, len(cases), c.evalCase)
 		var expander *service.ContextExpander
@@ -368,9 +368,9 @@ func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store
 		})
 		duration := time.Since(startedAt)
 		if err != nil {
-			return service.RAGEvalReport{}, fmt.Errorf("pipeline eval task %d: %w", c.evalCase.TaskID, err)
+			return ragtool.RAGEvalReport{}, fmt.Errorf("pipeline eval task %d: %w", c.evalCase.TaskID, err)
 		}
-		results = append(results, service.RAGEvalCaseResult{
+		results = append(results, ragtool.RAGEvalCaseResult{
 			Case:                 c.evalCase.serviceCase(),
 			Citations:            result.Citations,
 			Duration:             duration,
@@ -379,7 +379,7 @@ func evaluateRewritePipeline(ctx context.Context, cases []caseEvalContext, store
 			RerankChangedRank:    rerankChangedRank(result.Citations),
 		})
 	}
-	return service.EvaluateRAGRetrieval(results, topK), nil
+	return ragtool.EvaluateRAGRetrieval(results, topK), nil
 }
 
 type rerankClientFactory interface {
@@ -397,8 +397,8 @@ func newLegacyModelReranker(factory rerankClientFactory, profile ai.Profile) ser
 	return service.NewModelReranker(client)
 }
 
-func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, progress evalProgress) (service.RAGEvalReport, error) {
-	results := make([]service.RAGEvalCaseResult, 0, len(cases))
+func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, progress evalProgress) (ragtool.RAGEvalReport, error) {
+	results := make([]ragtool.RAGEvalCaseResult, 0, len(cases))
 	for i, c := range cases {
 		progress.caseStep("model rerank retrieval", i+1, len(cases), c.evalCase)
 		expander := service.NewContextExpander(repos, 1, 4000)
@@ -423,9 +423,9 @@ func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, s
 		})
 		duration := time.Since(startedAt)
 		if err != nil {
-			return service.RAGEvalReport{}, fmt.Errorf("model rerank pipeline eval task %d: %w", c.evalCase.TaskID, err)
+			return ragtool.RAGEvalReport{}, fmt.Errorf("model rerank pipeline eval task %d: %w", c.evalCase.TaskID, err)
 		}
-		results = append(results, service.RAGEvalCaseResult{
+		results = append(results, ragtool.RAGEvalCaseResult{
 			Case:                 c.evalCase.serviceCase(),
 			Citations:            result.Citations,
 			Duration:             duration,
@@ -434,7 +434,7 @@ func evaluateModelRerankPipeline(ctx context.Context, cases []caseEvalContext, s
 			RerankChangedRank:    rerankChangedRank(result.Citations),
 		})
 	}
-	return service.EvaluateRAGRetrieval(results, topK), nil
+	return ragtool.EvaluateRAGRetrieval(results, topK), nil
 }
 
 func newEvalRewriter(factory *ai.Factory, profile ai.Profile) service.QueryRewriter {
@@ -492,8 +492,8 @@ func normalizeEvalRewrite(question string, rewrite service.RewriteResult) servic
 	return rewrite
 }
 
-func (c evalCase) serviceCase() service.RAGEvalCase {
-	return service.RAGEvalCase{
+func (c evalCase) serviceCase() ragtool.RAGEvalCase {
+	return ragtool.RAGEvalCase{
 		Category:              c.Category,
 		TaskHint:              c.TaskHint,
 		Question:              c.Question,

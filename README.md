@@ -38,7 +38,7 @@
 - **长视频分段 ASR**：分段转写并持久化结果，失败时只重试对应片段，已完成片段可以复用。
 - **分片上传与断点续传**：Redis Set 记录已落入 MinIO 的分片编号，前端恢复时只补传缺失分片，完成后由 MinIO 服务端合并最终对象。
 - **可恢复资源清理**：任务删除先持久化 cleanup intent，再通过 lease 与后台扫描恢复 pgvector、MinIO 和 PostgreSQL 的幂等清理；共享 asset 只由最后一个引用的 owner 删除。
-- **视频 RAG 问答**：以 ASR 转写为知识源，使用 pgvector 向量检索与 BM25 关键词检索，通过 RRF 融合并返回引用片段。
+- **视频 RAG 问答**：以 ASR 转写为知识源，默认 pgvector 向量检索并返回引用片段；可选 query rewrite / model rerank。BM25+RRF hybrid 在代码中保留，生产默认关闭（见 `cmd/server/wiring.go`）。
 - **AI 服务配置**：支持按用户配置 ASR、LLM、Embedding 服务，密钥加密保存。
 - **访问与调用治理**：Redis Lua 令牌桶限制高成本接口，并记录 AI 调用与任务处理指标。
 - **可观测性**：输出结构化日志，提供 Prometheus 指标和 Grafana 看板，便于定位任务阶段、重试和外部服务错误。
@@ -52,7 +52,7 @@
 ```text
 视频上传 → Kafka 任务 → 分段 ASR → PostgreSQL 持久化转写
                               ├→ LLM 摘要
-                              └→ Embedding → pgvector / BM25 → 引用式问答
+                              └→ Embedding → pgvector（可选 rewrite/rerank）→ 引用式问答
 ```
 
 ## 🛠️ 技术栈
@@ -61,7 +61,7 @@
 |---|---|
 | 后端 | Go、Gin、GORM |
 | 数据与中间件 | PostgreSQL + pgvector、Redis、Kafka |
-| 存储与检索 | MinIO、pgvector、BM25、RRF（Milvus 适配暂留作向量回滚） |
+| 存储与检索 | MinIO、pgvector（Milvus 适配暂留作向量回滚；BM25/RRF 代码保留，生产默认关） |
 | AI 接入 | OpenAI-compatible API、用户级 ASR / LLM / Embedding 配置 |
 | 前端 | Vue 3、Vite |
 | 音视频处理 | FFmpeg（音频提取与切片） |
@@ -121,23 +121,25 @@ vid-lens/
 ├── internal/handler/ # HTTP 接口层
 ├── internal/mq/      # Kafka 生产者、消费者、重试与租约
 ├── internal/service/ # 媒体、任务、RAG、聊天等业务服务
+├── internal/ragtool/ # 离线评测、投影审计、重建（非请求主路径）
 ├── internal/repository/ # 数据访问层
 ├── internal/storage/ # MinIO 对象存储
 ├── internal/vector/  # 向量存储接口、pgvector / Milvus 适配与后端工厂
-├── internal/eval/    # RAG 数据集、指标与评测产物
+├── internal/eval/    # 严格 RAG 评测 harness（配合 cmd/rag-eval）
 ├── web/              # 展示界面
 ├── deploy/           # 受测部署脚本及 Prometheus / Grafana 配置
-├── docs/images/      # README 截图
+├── docs/             # 维护文档；面试材料在 docs/archive/
 ├── docker-compose.yml
 └── config.yaml
 ```
 
 ## 📚 维护与迁移文档
 
+- [文档入口](docs/README.md)：事实源层级、默认应读/不应读的路径。
 - [后端维护地图](docs/backend-maintenance-map.md)：主链路、文件职责、不变量和常见修改入口。
 - [pgvector 迁移说明](docs/pgvector-migration.md)：向量重建流程、校验结果和回滚条件。
 - [PostgreSQL 单库迁移说明](docs/postgresql-single-database-migration.md)：业务表迁移证据、运行时边界和 MySQL 观察期退出计划。
-- [排障与面试记录](docs/troubleshooting-and-interview-notes.md)：已发生问题、根因、修复证据和当前限制。
+- [归档：排障与面试记录](docs/archive/interview/troubleshooting-and-interview-notes.md)：历史问题与面试材料（默认开发不必读）。
 
 ## 📄 License
 

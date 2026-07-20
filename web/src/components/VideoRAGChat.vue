@@ -194,10 +194,10 @@
             class="mode-toggle"
             :class="{ active: chatMode === 'agent' }"
             :disabled="loading || sessionLoading"
-            title="Agentic QA：工具调用链 + 引用 + 模板（非流式）"
+            title="实验功能：工具调用链 + 引用 + 模板（非流式，非默认产品路径）"
             @click="chatMode = 'agent'"
           >
-            Agentic QA
+            Agent 实验
           </button>
         </div>
         <div v-if="strictModeBlocked" class="chat-mode-warning">
@@ -305,13 +305,13 @@ const strictModeBlocked = computed(() => {
 
 const strictModeBlockedText = computed(() => {
   return chatMode.value === 'agent'
-    ? 'Agentic QA 依赖视频索引，请先构建索引。'
+    ? 'Agent 实验模式依赖视频索引，请先构建索引。'
     : '严格引用模式依赖视频索引，请先构建索引。'
 })
 
 const chatInputPlaceholder = computed(() => {
   if (chatMode.value === 'strict_rag') return '基于引用片段提问...'
-  if (chatMode.value === 'agent') return '让 Agentic QA 分析这个视频...'
+  if (chatMode.value === 'agent') return '让 Agent 实验模式分析这个视频...'
   return '问问这个视频...'
 })
 
@@ -685,7 +685,7 @@ const sendStreamQuestion = async (q, mode) => {
   }
 }
 
-// Agentic QA：非流式，等待接口返回后一次性插入 assistant 消息
+// Agent 实验模式：非流式，等待接口返回后一次性插入 assistant 消息
 const sendAgentQuestion = async (q) => {
   try {
     const res = await api.sendAgentMessage(sessionId.value, q, 5)
@@ -703,7 +703,7 @@ const sendAgentQuestion = async (q) => {
     scrollMessagesToBottom()
     refreshSessionTitles()
   } catch (err) {
-    emit('error', err.message || 'Agentic 问答失败')
+    emit('error', err.message || 'Agent 实验问答失败')
   } finally {
     loading.value = false
   }

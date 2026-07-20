@@ -8,6 +8,12 @@ import (
 	"vid-lens/internal/model"
 )
 
+// BuildRAGAnswerMessages builds the ordinary RAG answer prompt without chat memory.
+// Eval tooling uses this so it can score answers without importing chat internals.
+func BuildRAGAnswerMessages(citations []RetrievedChunk, question string) []ai.ChatMessage {
+	return buildRAGMessages(citations, nil, question)
+}
+
 // RAG/视频助手 prompt 消息构造和轻量文本判断。
 func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, question string) []ai.ChatMessage {
 	contextLines := make([]string, 0, len(contexts))

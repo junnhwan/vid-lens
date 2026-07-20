@@ -1,5 +1,8 @@
 package service
 
+// Video agent is an experimental tool-loop QA path.
+// Product default is stream/sync ChatService; keep agent changes isolated.
+
 import (
 	"context"
 	"encoding/json"

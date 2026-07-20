@@ -1,9 +1,11 @@
-package service
+package ragtool
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"vid-lens/internal/service"
 )
 
 func TestRAGEvalComputesRecallMRRAndSourceMix(t *testing.T) {
@@ -13,9 +15,9 @@ func TestRAGEvalComputesRecallMRRAndSourceMix(t *testing.T) {
 				Question:              "为什么分布式锁释放时要校验 owner？",
 				ExpectedChunkKeywords: []string{"owner", "锁"},
 			},
-			Citations: []RetrievedChunk{
-				{ChunkID: 1, ChunkIndex: 0, Source: RetrievalSourceVector, Content: "普通背景片段"},
-				{ChunkID: 2, ChunkIndex: 1, Source: RetrievalSourceHybrid, Content: "释放分布式锁前必须校验 owner，避免删掉别人的锁"},
+			Citations: []service.RetrievedChunk{
+				{ChunkID: 1, ChunkIndex: 0, Source: service.RetrievalSourceVector, Content: "普通背景片段"},
+				{ChunkID: 2, ChunkIndex: 1, Source: service.RetrievalSourceHybrid, Content: "释放分布式锁前必须校验 owner，避免删掉别人的锁"},
 			},
 			Duration: 15 * time.Millisecond,
 		},
@@ -47,7 +49,7 @@ func TestRAGEvalComputesRecallMRRAndSourceMix(t *testing.T) {
 	if report.AvgLatencyMs != 10 {
 		t.Fatalf("avg latency ms = %.3f, want 10", report.AvgLatencyMs)
 	}
-	if report.SourceCounts[RetrievalSourceVector] != 1 || report.SourceCounts[RetrievalSourceHybrid] != 1 {
+	if report.SourceCounts[service.RetrievalSourceVector] != 1 || report.SourceCounts[service.RetrievalSourceHybrid] != 1 {
 		t.Fatalf("source counts = %#v, want vector=1 hybrid=1", report.SourceCounts)
 	}
 	if len(report.Cases) != 2 || !report.Cases[0].Hit || report.Cases[0].FirstHitRank != 2 {
@@ -62,8 +64,8 @@ func TestRAGEvalTreatsEmptyExpectedKeywordsAsSkipped(t *testing.T) {
 	report := EvaluateRAGRetrieval([]RAGEvalCaseResult{
 		{
 			Case: RAGEvalCase{Question: "没有期望关键词的样例"},
-			Citations: []RetrievedChunk{
-				{ChunkID: 1, Content: "任意片段", Source: RetrievalSourceKeyword},
+			Citations: []service.RetrievedChunk{
+				{ChunkID: 1, Content: "任意片段", Source: service.RetrievalSourceKeyword},
 			},
 		},
 	}, 3)
@@ -94,10 +96,10 @@ func TestRAGEvalRunUsesRetrieverAndPreservesNoResultCases(t *testing.T) {
 		},
 	}
 	calls := 0
-	report, err := RunRAGEval(t.Context(), cases, 3, func(_ context.Context, _ RAGEvalCase, _ int) ([]RetrievedChunk, error) {
+	report, err := RunRAGEval(t.Context(), cases, 3, func(_ context.Context, _ RAGEvalCase, _ int) ([]service.RetrievedChunk, error) {
 		calls++
 		if calls == 1 {
-			return []RetrievedChunk{{ChunkID: 1, Content: "释放锁前校验 owner", Source: RetrievalSourceHybrid}}, nil
+			return []service.RetrievedChunk{{ChunkID: 1, Content: "释放锁前校验 owner", Source: service.RetrievalSourceHybrid}}, nil
 		}
 		return nil, nil
 	})
@@ -122,8 +124,8 @@ func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
 				Question:              "Redis 分布式锁风险？",
 				ExpectedChunkKeywords: []string{"Redis"},
 			},
-			Citations: []RetrievedChunk{
-				{ChunkID: 1, Content: "Redis 分布式锁风险", Source: RetrievalSourceHybrid},
+			Citations: []service.RetrievedChunk{
+				{ChunkID: 1, Content: "Redis 分布式锁风险", Source: service.RetrievalSourceHybrid},
 			},
 			Duration:             10 * time.Millisecond,
 			RewriteFallback:      true,
@@ -135,8 +137,8 @@ func TestRAGEvalAggregatesRewriteExpansionAndRerankMetrics(t *testing.T) {
 				Question:              "RAG 为什么要切片？",
 				ExpectedChunkKeywords: []string{"RAG"},
 			},
-			Citations: []RetrievedChunk{
-				{ChunkID: 2, Content: "RAG 切片", Source: RetrievalSourceVector},
+			Citations: []service.RetrievedChunk{
+				{ChunkID: 2, Content: "RAG 切片", Source: service.RetrievalSourceVector},
 			},
 			Duration:             20 * time.Millisecond,
 			ExpandedContextChars: 80,
@@ -162,7 +164,7 @@ func TestRAGEvalAggregatesMetricsByCategory(t *testing.T) {
 				Question:              "Where is SVG mentioned?",
 				ExpectedChunkKeywords: []string{"SVG"},
 			},
-			Citations: []RetrievedChunk{{ChunkID: 1, Content: "SVG UI", Source: RetrievalSourceKeyword}},
+			Citations: []service.RetrievedChunk{{ChunkID: 1, Content: "SVG UI", Source: service.RetrievalSourceKeyword}},
 			Duration:  10 * time.Millisecond,
 		},
 		{
@@ -180,7 +182,7 @@ func TestRAGEvalAggregatesMetricsByCategory(t *testing.T) {
 				Question:              "Which animation keeps the world balanced?",
 				ExpectedChunkKeywords: []string{"Avatar"},
 			},
-			Citations: []RetrievedChunk{{ChunkID: 2, Content: "Avatar keeps peace", Source: RetrievalSourceVector}},
+			Citations: []service.RetrievedChunk{{ChunkID: 2, Content: "Avatar keeps peace", Source: service.RetrievalSourceVector}},
 			Duration:  30 * time.Millisecond,
 		},
 	}, 5)
@@ -211,7 +213,7 @@ func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
 				Question:              "哪里提到 owner 校验？",
 				ExpectedChunkKeywords: []string{"owner 校验"},
 			},
-			Citations: []RetrievedChunk{
+			Citations: []service.RetrievedChunk{
 				{
 					ChunkID:       1,
 					ChunkIndex:    5,
@@ -234,23 +236,23 @@ func TestRAGEvalRecallAndMRRUseAnchorChunkNotExpandedWindow(t *testing.T) {
 }
 
 func TestRAGRetrievalConfigRequiresSingleVariableAblation(t *testing.T) {
-	base := DefaultRAGRetrievalConfig()
+	base := service.DefaultRAGRetrievalConfig()
 	candidate := base
 	candidate.RRFK = 30
-	if diff, err := ValidateSingleVariableAblation(base, candidate); err != nil || diff != "rrf_k" {
+	if diff, err := service.ValidateSingleVariableAblation(base, candidate); err != nil || diff != "rrf_k" {
 		t.Fatalf("single variable diff = %q, err=%v", diff, err)
 	}
 	candidate.NeighborRadius = 0
-	if _, err := ValidateSingleVariableAblation(base, candidate); err == nil {
+	if _, err := service.ValidateSingleVariableAblation(base, candidate); err == nil {
 		t.Fatal("two changed variables must be rejected")
 	}
 }
 
 func TestRAGRetrievalConfigSupportsVectorHybridNeighborAndQueryModes(t *testing.T) {
-	for _, cfg := range []RAGRetrievalConfig{
-		{Name: "vector", EnableVector: true, EnableBM25: false, QueryMode: QueryModeOriginal, TopK: 5, CandidateK: 20, RRFK: 60},
-		{Name: "hybrid", EnableVector: true, EnableBM25: true, QueryMode: QueryModePreprocess, TopK: 5, CandidateK: 20, RRFK: 30, NeighborRadius: 1, MaxContextChars: 4000},
-		{Name: "rewrite", EnableVector: true, EnableBM25: true, QueryMode: QueryModeRewrite, RewriteQueries: 3, TopK: 5, CandidateK: 20, RRFK: 60},
+	for _, cfg := range []service.RAGRetrievalConfig{
+		{Name: "vector", EnableVector: true, EnableBM25: false, QueryMode: service.QueryModeOriginal, TopK: 5, CandidateK: 20, RRFK: 60},
+		{Name: "hybrid", EnableVector: true, EnableBM25: true, QueryMode: service.QueryModePreprocess, TopK: 5, CandidateK: 20, RRFK: 30, NeighborRadius: 1, MaxContextChars: 4000},
+		{Name: "rewrite", EnableVector: true, EnableBM25: true, QueryMode: service.QueryModeRewrite, RewriteQueries: 3, TopK: 5, CandidateK: 20, RRFK: 60},
 	} {
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("config %+v error = %v", cfg, err)
@@ -259,47 +261,47 @@ func TestRAGRetrievalConfigSupportsVectorHybridNeighborAndQueryModes(t *testing.
 }
 
 func TestNormalizeRetrievalQueryIsDeterministicAndConservative(t *testing.T) {
-	got := NormalizeRetrievalQuery("  Redis\n  WatchDog 是什么？  ")
+	got := service.NormalizeRetrievalQuery("  Redis\n  WatchDog 是什么？  ")
 	if got != "Redis WatchDog 是什么?" {
-		t.Fatalf("NormalizeRetrievalQuery() = %q", got)
+		t.Fatalf("service.NormalizeRetrievalQuery() = %q", got)
 	}
 }
 
 func TestRAGRetrievalConfigRejectsTwoRetrieverMechanismChanges(t *testing.T) {
-	base := DefaultRAGRetrievalConfig()
+	base := service.DefaultRAGRetrievalConfig()
 	base.EnableBM25 = false
 	candidate := base
 	candidate.EnableVector = false
 	candidate.EnableBM25 = true
-	if _, err := ValidateSingleVariableAblation(base, candidate); err == nil {
+	if _, err := service.ValidateSingleVariableAblation(base, candidate); err == nil {
 		t.Fatal("vector-only to BM25-only changes two mechanisms and must be rejected")
 	}
 }
 
 func TestRAGRetrievalConfigIncludesChunkerAndRerankerInAblation(t *testing.T) {
-	base := DefaultRAGRetrievalConfig()
+	base := service.DefaultRAGRetrievalConfig()
 	candidate := base
-	candidate.RerankerMode = RerankerModeNone
-	factor, err := ValidateSingleVariableAblation(base, candidate)
+	candidate.RerankerMode = service.RerankerModeNone
+	factor, err := service.ValidateSingleVariableAblation(base, candidate)
 	if err != nil || factor != "reranker_mode" {
 		t.Fatalf("reranker factor = %q, err=%v", factor, err)
 	}
 
 	candidate = base
 	candidate.ChunkerVersion = "semantic-v2"
-	factor, err = ValidateSingleVariableAblation(base, candidate)
+	factor, err = service.ValidateSingleVariableAblation(base, candidate)
 	if err != nil || factor != "chunker_version" {
 		t.Fatalf("chunker factor = %q, err=%v", factor, err)
 	}
 }
 
 func TestStrictExperimentConfigRequiresExplicitChunkerAndReranker(t *testing.T) {
-	cfg := DefaultRAGRetrievalConfig()
+	cfg := service.DefaultRAGRetrievalConfig()
 	cfg.ChunkerVersion = ""
 	if err := cfg.ValidateStrictExperiment(); err == nil {
 		t.Fatal("strict experiment accepted hidden chunker version")
 	}
-	cfg = DefaultRAGRetrievalConfig()
+	cfg = service.DefaultRAGRetrievalConfig()
 	cfg.RerankerMode = ""
 	if err := cfg.ValidateStrictExperiment(); err == nil {
 		t.Fatal("strict experiment accepted hidden reranker mode")
@@ -307,16 +309,16 @@ func TestStrictExperimentConfigRequiresExplicitChunkerAndReranker(t *testing.T) 
 }
 
 func TestDefaultRAGRetrievalConfigMatchesCurrentChunkerProvenance(t *testing.T) {
-	cfg := DefaultRAGRetrievalConfig()
-	if cfg.ChunkerStrategy != ChunkerStrategyRecursiveSentence || cfg.ChunkerVersion != RecursiveSentenceChunkerVersion {
-		t.Fatalf("default chunker provenance = %q/%q, want %q/%q", cfg.ChunkerStrategy, cfg.ChunkerVersion, ChunkerStrategyRecursiveSentence, RecursiveSentenceChunkerVersion)
+	cfg := service.DefaultRAGRetrievalConfig()
+	if cfg.ChunkerStrategy != service.ChunkerStrategyRecursiveSentence || cfg.ChunkerVersion != service.RecursiveSentenceChunkerVersion {
+		t.Fatalf("default chunker provenance = %q/%q, want %q/%q", cfg.ChunkerStrategy, cfg.ChunkerVersion, service.ChunkerStrategyRecursiveSentence, service.RecursiveSentenceChunkerVersion)
 	}
 }
 
 func TestRAGRetrievalConfigSupportsModelReranker(t *testing.T) {
-	cfg := DefaultRAGRetrievalConfig()
+	cfg := service.DefaultRAGRetrievalConfig()
 	cfg.EnableBM25 = false
-	cfg.RerankerMode = RerankerModeModel
+	cfg.RerankerMode = service.RerankerModeModel
 	cfg.RerankerVersion = "Qwen/Qwen3-Reranker-4B"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)

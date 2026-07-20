@@ -1,10 +1,12 @@
-package service
+package ragtool
 
 import (
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"vid-lens/internal/service"
 )
 
 // RAGProjectionScope identifies one source-of-truth chunk set and its vector
@@ -107,13 +109,13 @@ type ragProjectionScopeKey struct {
 // delegates each comparison to AuditRAGProjection. Empty databases are valid:
 // an explicit single-scope audit still reports an empty source, while --all has
 // no requested scope to prove when both manifests are empty.
-func AuditAllRAGProjections(backend string, source []RAGSourceManifestEntry, target []RAGVectorManifestEntry) (RAGProjectionAuditSummary, error) {
+func AuditAllRAGProjections(backend string, source []RAGSourceManifestEntry, target []service.RAGVectorManifestEntry) (RAGProjectionAuditSummary, error) {
 	backend = strings.TrimSpace(backend)
 	summary := RAGProjectionAuditSummary{
 		Backend: backend, SourceCount: len(source), TargetCount: len(target),
 	}
 	sourceByScope := make(map[ragProjectionScopeKey][]RAGSourceManifestEntry)
-	targetByScope := make(map[ragProjectionScopeKey][]RAGVectorManifestEntry)
+	targetByScope := make(map[ragProjectionScopeKey][]service.RAGVectorManifestEntry)
 	scopes := make(map[ragProjectionScopeKey]struct{})
 	for _, entry := range source {
 		key := ragProjectionScopeKey{userID: entry.UserID, taskID: entry.TaskID, embeddingModel: strings.TrimSpace(entry.EmbeddingModel)}
@@ -158,7 +160,7 @@ func AuditAllRAGProjections(backend string, source []RAGSourceManifestEntry, tar
 // target is treated as a rebuildable projection. The check is deliberately
 // read-only and returns classified issues so maintenance commands can report
 // drift without deleting or rewriting data automatically.
-func AuditRAGProjection(scope RAGProjectionScope, source []RAGSourceManifestEntry, target []RAGVectorManifestEntry) (RAGProjectionAuditReport, error) {
+func AuditRAGProjection(scope RAGProjectionScope, source []RAGSourceManifestEntry, target []service.RAGVectorManifestEntry) (RAGProjectionAuditReport, error) {
 	if scope.UserID <= 0 || scope.TaskID <= 0 || strings.TrimSpace(scope.EmbeddingModel) == "" {
 		return RAGProjectionAuditReport{}, errors.New("RAG projection scope requires positive user and task IDs plus an embedding model")
 	}
@@ -193,7 +195,7 @@ func AuditRAGProjection(scope RAGProjectionScope, source []RAGSourceManifestEntr
 		sourceByEvidence[entry.EvidenceID] = entry
 	}
 
-	targetByEvidence := make(map[string]RAGVectorManifestEntry, len(target))
+	targetByEvidence := make(map[string]service.RAGVectorManifestEntry, len(target))
 	for _, entry := range target {
 		if err := validateTargetManifestEntry(scope, entry); err != nil {
 			report.Issues = append(report.Issues, RAGProjectionIssue{
@@ -281,11 +283,11 @@ func validateSourceManifestEntry(scope RAGProjectionScope, entry RAGSourceManife
 	return nil
 }
 
-func validateTargetManifestEntry(scope RAGProjectionScope, entry RAGVectorManifestEntry) error {
+func validateTargetManifestEntry(scope RAGProjectionScope, entry service.RAGVectorManifestEntry) error {
 	return validateSourceManifestEntry(scope, RAGSourceManifestEntry(entry))
 }
 
-func manifestMismatches(source RAGSourceManifestEntry, target RAGVectorManifestEntry) []string {
+func manifestMismatches(source RAGSourceManifestEntry, target service.RAGVectorManifestEntry) []string {
 	mismatches := make([]string, 0, 6)
 	if source.UserID != target.UserID {
 		mismatches = append(mismatches, fmt.Sprintf("user_id source=%d vector=%d", source.UserID, target.UserID))

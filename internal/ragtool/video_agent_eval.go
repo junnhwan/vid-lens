@@ -1,18 +1,18 @@
-package service
+package ragtool
 
 import (
 	"strings"
 	"time"
 	"unicode"
 
-	"vid-lens/internal/ai"
+	"vid-lens/internal/service"
 )
 
 type VideoAgentAnswerEvalCaseResult struct {
 	Case            RAGEvalCase
 	Answer          string
-	Citations       []RetrievedChunk
-	Trace           []VideoAgentStep
+	Citations       []service.RetrievedChunk
+	Trace           []service.VideoAgentStep
 	Duration        time.Duration
 	FallbackOrError bool
 	Error           string
@@ -123,11 +123,7 @@ func EvaluateVideoAgentAnswers(results []VideoAgentAnswerEvalCaseResult) VideoAg
 	return report
 }
 
-func BuildRAGAnswerMessages(citations []RetrievedChunk, question string) []ai.ChatMessage {
-	return buildRAGMessages(citations, nil, question)
-}
-
-func citationsContainExpectedKeywords(citations []RetrievedChunk, keywords []string) bool {
+func citationsContainExpectedKeywords(citations []service.RetrievedChunk, keywords []string) bool {
 	if len(keywords) == 0 {
 		return false
 	}

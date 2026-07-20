@@ -1,4 +1,4 @@
-package service
+package ragtool
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/service"
 )
 
 type RAGReindexSource interface {
@@ -24,7 +25,7 @@ type RAGReindexEmbeddingFactory interface {
 }
 
 type RAGVectorWriter interface {
-	UpsertChunks(context.Context, []RAGVector) error
+	UpsertChunks(context.Context, []service.RAGVector) error
 }
 
 type RAGReindexOptions struct {
@@ -139,7 +140,7 @@ func (r *RAGReindexer) Run(ctx context.Context, opts RAGReindexOptions) (RAGRein
 			if len(embedding) != chunk.EmbeddingDim {
 				return result, fmt.Errorf("chunk %d embedding dimension = %d, want %d", chunk.ID, len(embedding), chunk.EmbeddingDim)
 			}
-			if err := r.writer.UpsertChunks(ctx, []RAGVector{{
+			if err := r.writer.UpsertChunks(ctx, []service.RAGVector{{
 				VectorID: chunk.VectorID, UserID: chunk.UserID, TaskID: chunk.TaskID,
 				ChunkID: chunk.ID, ChunkIndex: chunk.ChunkIndex, ContentHash: chunk.ContentHash,
 				Content: chunk.Content, EmbeddingModel: chunk.EmbeddingModel, Vector: embedding,
@@ -209,4 +210,27 @@ func embedForReindex(ctx context.Context, client ai.EmbeddingClient, content str
 		}
 	}
 	return nil, lastErr
+}
+
+// embedWithAdmissionWait retries embedding when the provider admission layer asks
+// for a short wait. Kept local so reindex tooling does not depend on unexported
+// service helpers.
+func embedWithAdmissionWait(ctx context.Context, embedding ai.EmbeddingClient, input string) ([]float32, error) {
+	for {
+		vector, err := embedding.Embed(ctx, input)
+		if err == nil {
+			return vector, nil
+		}
+		var admissionErr *ai.AdmissionError
+		if !errors.As(err, &admissionErr) || admissionErr.Decision.RetryAfter <= 0 {
+			return nil, err
+		}
+		timer := time.NewTimer(admissionErr.Decision.RetryAfter)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

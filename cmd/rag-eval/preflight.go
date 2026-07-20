@@ -7,13 +7,14 @@ import (
 	"sort"
 	"strings"
 
+	"gorm.io/gorm"
+
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/vector"
-
-	"gorm.io/gorm"
 )
 
 // The preflight interfaces deliberately expose only read operations. This
@@ -151,15 +152,15 @@ func preflightCases(ctx context.Context, cases []evalCase, sources evalPreflight
 }
 
 func compareEvalManifests(source []repository.ChunkEvidenceManifestEntry, target []service.RAGVectorManifestEntry, backend string, userID, taskID int64, embeddingModel string) []string {
-	sourceEntries := make([]service.RAGSourceManifestEntry, 0, len(source))
+	sourceEntries := make([]ragtool.RAGSourceManifestEntry, 0, len(source))
 	for _, entry := range source {
-		sourceEntries = append(sourceEntries, service.RAGSourceManifestEntry{
+		sourceEntries = append(sourceEntries, ragtool.RAGSourceManifestEntry{
 			EvidenceID: entry.EvidenceID, UserID: entry.UserID, TaskID: entry.TaskID,
 			ChunkID: entry.ChunkID, ChunkIndex: entry.ChunkIndex, ContentHash: entry.ContentHash,
 			EmbeddingModel: entry.EmbeddingModel,
 		})
 	}
-	report, err := service.AuditRAGProjection(service.RAGProjectionScope{
+	report, err := ragtool.AuditRAGProjection(ragtool.RAGProjectionScope{
 		UserID: userID, TaskID: taskID, EmbeddingModel: embeddingModel, Backend: backend,
 	}, sourceEntries, target)
 	if err != nil {

@@ -57,6 +57,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				chat.DELETE("/sessions/:session_id", handlers.chat.DeleteSession)
 				chat.GET("/sessions/:session_id/messages", handlers.chat.ListMessages)
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), handlers.chat.Ask)
+				// Experimental: tool-loop agent QA. Not the default product path.
 				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), handlers.chat.AskAgent)
 				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskStream)
 			}

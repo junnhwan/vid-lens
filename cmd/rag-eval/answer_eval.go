@@ -7,18 +7,19 @@ import (
 	"time"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 )
 
 type answerModeResult struct {
 	mode   string
-	report service.VideoAgentAnswerEvalReport
+	report ragtool.VideoAgentAnswerEvalReport
 }
 
 func evaluateAnswerModes(ctx context.Context, cases []caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int, progress evalProgress) []answerModeResult {
-	ordinaryResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
-	agentResults := make([]service.VideoAgentAnswerEvalCaseResult, 0, len(cases))
+	ordinaryResults := make([]ragtool.VideoAgentAnswerEvalCaseResult, 0, len(cases))
+	agentResults := make([]ragtool.VideoAgentAnswerEvalCaseResult, 0, len(cases))
 	for i, c := range cases {
 		progress.caseStep("ordinary answer", i+1, len(cases), c.evalCase)
 		ordinaryResults = append(ordinaryResults, evaluateOrdinaryAnswer(ctx, c, store, repos, factory, topK, candidateK))
@@ -26,13 +27,13 @@ func evaluateAnswerModes(ctx context.Context, cases []caseEvalContext, store ser
 		agentResults = append(agentResults, evaluateAgenticAnswer(ctx, c, store, repos, factory, topK, candidateK))
 	}
 	return []answerModeResult{
-		{mode: "Ordinary RAG answer", report: service.EvaluateVideoAgentAnswers(ordinaryResults)},
-		{mode: "Agentic answer", report: service.EvaluateVideoAgentAnswers(agentResults)},
+		{mode: "Ordinary RAG answer", report: ragtool.EvaluateVideoAgentAnswers(ordinaryResults)},
+		{mode: "Agentic answer", report: ragtool.EvaluateVideoAgentAnswers(agentResults)},
 	}
 }
 
-func evaluateOrdinaryAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result service.VideoAgentAnswerEvalCaseResult) {
-	result = service.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
+func evaluateOrdinaryAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result ragtool.VideoAgentAnswerEvalCaseResult) {
+	result = ragtool.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
 	startedAt := time.Now()
 	defer func() {
 		result.Duration = time.Since(startedAt)
@@ -69,8 +70,8 @@ func evaluateOrdinaryAnswer(ctx context.Context, c caseEvalContext, store servic
 	return
 }
 
-func evaluateAgenticAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result service.VideoAgentAnswerEvalCaseResult) {
-	result = service.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
+func evaluateAgenticAnswer(ctx context.Context, c caseEvalContext, store service.RAGRetriever, repos *repository.Repositories, factory *ai.Factory, topK, candidateK int) (result ragtool.VideoAgentAnswerEvalCaseResult) {
+	result = ragtool.VideoAgentAnswerEvalCaseResult{Case: c.evalCase.serviceCase()}
 	startedAt := time.Now()
 	defer func() {
 		result.Duration = time.Since(startedAt)
@@ -138,7 +139,7 @@ func newAnswerEvalChatClient(factory *ai.Factory, profile ai.Profile) (ai.ChatCl
 	return factory.NewChatClient(profile)
 }
 
-func answerEvalErrorResult(result service.VideoAgentAnswerEvalCaseResult, err error) service.VideoAgentAnswerEvalCaseResult {
+func answerEvalErrorResult(result ragtool.VideoAgentAnswerEvalCaseResult, err error) ragtool.VideoAgentAnswerEvalCaseResult {
 	result.FallbackOrError = true
 	if err != nil {
 		result.Error = err.Error()

@@ -1,9 +1,11 @@
-package service
+package ragtool
 
 import (
 	"context"
 	"strings"
 	"time"
+
+	"vid-lens/internal/service"
 )
 
 type RAGEvalCase struct {
@@ -16,14 +18,14 @@ type RAGEvalCase struct {
 
 type RAGEvalCaseResult struct {
 	Case                 RAGEvalCase
-	Citations            []RetrievedChunk
+	Citations            []service.RetrievedChunk
 	Duration             time.Duration
 	RewriteFallback      bool
 	ExpandedContextChars int
 	RerankChangedRank    bool
 }
 
-type RAGEvalRetriever func(ctx context.Context, evalCase RAGEvalCase, topK int) ([]RetrievedChunk, error)
+type RAGEvalRetriever func(ctx context.Context, evalCase RAGEvalCase, topK int) ([]service.RetrievedChunk, error)
 
 type RAGEvalCaseReport struct {
 	Category           string   `json:"category,omitempty"`
@@ -276,11 +278,25 @@ func chunkMatchesExpectedKeywords(content string, keywords []string) bool {
 	return true
 }
 
-func anchorContentForEval(chunk RetrievedChunk) string {
+func anchorContentForEval(chunk service.RetrievedChunk) string {
 	if strings.TrimSpace(chunk.AnchorContent) != "" {
 		return chunk.AnchorContent
 	}
 	return chunk.Content
+}
+
+// sourceForRanks mirrors service retrieval fusion labels for offline scoring.
+func sourceForRanks(vectorRank, keywordRank int) string {
+	switch {
+	case vectorRank > 0 && keywordRank > 0:
+		return service.RetrievalSourceHybrid
+	case vectorRank > 0:
+		return service.RetrievalSourceVector
+	case keywordRank > 0:
+		return service.RetrievalSourceKeyword
+	default:
+		return ""
+	}
 }
 
 func durationMillis(duration time.Duration) float64 {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 )
@@ -145,12 +146,12 @@ func TestAuditConfiguredProjectionAllRequiresPGVector(t *testing.T) {
 }
 
 func TestWriteAuditSummaryIncludesAggregateAndScopeDetails(t *testing.T) {
-	summary := service.RAGProjectionAuditSummary{
+	summary := ragtool.RAGProjectionAuditSummary{
 		Backend: "pgvector", SourceCount: 2, TargetCount: 1,
-		Scopes: []service.RAGProjectionAuditReport{{
-			Scope:       service.RAGProjectionScope{UserID: 7, TaskID: 42, EmbeddingModel: "embed-v1", Backend: "pgvector"},
+		Scopes: []ragtool.RAGProjectionAuditReport{{
+			Scope:       ragtool.RAGProjectionScope{UserID: 7, TaskID: 42, EmbeddingModel: "embed-v1", Backend: "pgvector"},
 			SourceCount: 2, TargetCount: 1,
-			Issues: []service.RAGProjectionIssue{{Message: "projection row is missing"}},
+			Issues: []ragtool.RAGProjectionIssue{{Message: "projection row is missing"}},
 		}},
 	}
 	var out bytes.Buffer

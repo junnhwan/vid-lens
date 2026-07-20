@@ -14,6 +14,7 @@
 | 查看分片上传与断点续传 | `internal/handler/media.go`、`internal/service/media_chunk_upload.go`、`web/src/chunkedUpload.js` |
 | 查看任务删除与资源清理 | `internal/service/task_cleanup*.go`、`internal/repository/task_cleanup_job.go`、`internal/model/task_cleanup_job.go` |
 | 查看聊天和 RAG 问答 | `internal/service/chat*.go`、`internal/service/rag_*.go` |
+| 查看离线评测/审计/重建 | `internal/ragtool/`、`cmd/rag-eval`、`cmd/rag-audit`、`cmd/rag-reindex` |
 | 查看向量后端选择 | `internal/vector/factory.go`、`internal/vector/backend.go` |
 | 查看关系数据库迁移 | `cmd/mysql-to-postgres/`、`internal/dbmigration/`、`docs/postgresql-single-database-migration.md` |
 | 查看 pgvector 重建和迁移边界 | `cmd/rag-reindex/`、`cmd/rag-audit/`、`docs/pgvector-migration.md` |
@@ -118,6 +119,8 @@ RAG 问答
 - `chat_messages.go`：prompt 消息和视频概览问题判断。
 - `chat_memory.go`：RedisChatMemoryStore 的基础实现，不要与 ChatService 的问答编排混在一起。
 
+Agent 模式（`.../messages/agent`、`video_agent*.go`）是**实验功能**，不是默认产品路径；不要在未明确需求时扩展它。
+
 当前 `ChatModeVideoAssistant` 和 `ChatModeStrictRAG` 是两个有意保留的业务模式，不要用一个“万能 prompt”替代它们，除非先补充模式级测试。
 
 ### 3.5 RAG 和向量后端
@@ -135,9 +138,9 @@ RAG 问答
 - `rag_index_build.go`：索引构建编排、状态落库、embedding 和 chunk/向量投影写入阶段。
 - `rag_artifact.go`：稳定 evidence ID、chunk manifest 和 PostgreSQL chunk ID 到向量投影的绑定校验。
 
-- `rag_eval_config.go`：检索实验配置、严格校验和单变量消融约束。
+- `internal/service/rag_eval_config.go`（检索配置类型，产品与评测共用）：检索实验配置、严格校验和单变量消融约束。
 - `rag_eval_query.go`：确定性查询预处理适配，不负责 LLM rewrite。
-- `rag_eval.go`：评测输入/报告类型、指标聚合和执行器。
+- `internal/ragtool/eval.go`：离线评测输入/报告类型、指标聚合和执行器。
 
 详细迁移边界、checkpoint 和评测证据见 [`docs/pgvector-migration.md`](pgvector-migration.md)。
 

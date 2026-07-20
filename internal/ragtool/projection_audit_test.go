@@ -1,8 +1,10 @@
-package service
+package ragtool
 
 import (
 	"strings"
 	"testing"
+
+	"vid-lens/internal/service"
 )
 
 func TestAuditRAGProjectionAcceptsMatchingManifests(t *testing.T) {
@@ -11,7 +13,7 @@ func TestAuditRAGProjectionAcceptsMatchingManifests(t *testing.T) {
 		EvidenceID: "e1", UserID: 5, TaskID: 14, ChunkID: 21, ChunkIndex: 0,
 		ContentHash: "h1", EmbeddingModel: "embed-v1",
 	}}
-	target := []RAGVectorManifestEntry{{
+	target := []service.RAGVectorManifestEntry{{
 		EvidenceID: "e1", UserID: 5, TaskID: 14, ChunkID: 21, ChunkIndex: 0,
 		ContentHash: "h1", EmbeddingModel: "embed-v1",
 	}}
@@ -34,7 +36,7 @@ func TestAuditRAGProjectionClassifiesDrift(t *testing.T) {
 		{EvidenceID: "source-only", UserID: 5, TaskID: 14, ChunkID: 21, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "embed-v1"},
 		{EvidenceID: "changed", UserID: 5, TaskID: 14, ChunkID: 22, ChunkIndex: 1, ContentHash: "source-hash", EmbeddingModel: "embed-v1"},
 	}
-	target := []RAGVectorManifestEntry{
+	target := []service.RAGVectorManifestEntry{
 		{EvidenceID: "changed", UserID: 5, TaskID: 14, ChunkID: 999, ChunkIndex: 1, ContentHash: "vector-hash", EmbeddingModel: "embed-v1"},
 		{EvidenceID: "target-only", UserID: 5, TaskID: 14, ChunkID: 23, ChunkIndex: 2, ContentHash: "h3", EmbeddingModel: "embed-v1"},
 	}
@@ -69,7 +71,7 @@ func TestAuditRAGProjectionRejectsInvalidAndDuplicateEntries(t *testing.T) {
 		{EvidenceID: "dup", UserID: 5, TaskID: 14, ChunkID: 0, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "embed-v1"},
 		{EvidenceID: "dup", UserID: 5, TaskID: 14, ChunkID: 22, ChunkIndex: 1, ContentHash: "h2", EmbeddingModel: "embed-v1"},
 	}
-	target := []RAGVectorManifestEntry{
+	target := []service.RAGVectorManifestEntry{
 		{EvidenceID: "dup", UserID: 99, TaskID: 14, ChunkID: 0, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "embed-v1"},
 		{EvidenceID: "dup", UserID: 5, TaskID: 14, ChunkID: 22, ChunkIndex: 1, ContentHash: "h2", EmbeddingModel: "embed-v1"},
 	}
@@ -116,7 +118,7 @@ func TestAuditAllRAGProjectionsCoversSourceAndTargetOnlyScopes(t *testing.T) {
 		{EvidenceID: "shared", UserID: 1, TaskID: 10, ChunkID: 100, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "m1"},
 		{EvidenceID: "source-only", UserID: 2, TaskID: 20, ChunkID: 200, ChunkIndex: 0, ContentHash: "h2", EmbeddingModel: "m2"},
 	}
-	target := []RAGVectorManifestEntry{
+	target := []service.RAGVectorManifestEntry{
 		{EvidenceID: "shared", UserID: 1, TaskID: 10, ChunkID: 100, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "m1"},
 		{EvidenceID: "target-only", UserID: 3, TaskID: 30, ChunkID: 300, ChunkIndex: 0, ContentHash: "h3", EmbeddingModel: "m3"},
 	}

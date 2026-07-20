@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"vid-lens/internal/service"
+	"vid-lens/internal/ragtool"
 )
 
 func TestParseFlagsDefaultsToSafeDryRun(t *testing.T) {
@@ -166,14 +166,14 @@ func TestCheckpointLifecycleExecuteMarksCompletedAndAccumulatesProgress(t *testi
 	state := checkpoint{Signature: "scope", LastChunkID: 12, Processed: 2}
 	lifecycle := newCheckpointLifecycle(path, &state, func() time.Time { return now })
 
-	result, err := lifecycle.execute(func(lifecycle *checkpointLifecycle) (service.RAGReindexResult, error) {
+	result, err := lifecycle.execute(func(lifecycle *checkpointLifecycle) (ragtool.RAGReindexResult, error) {
 		if err := lifecycle.enterStage(checkpointFailureRebuildVectors); err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
 		if err := lifecycle.saveProgress(13, 1); err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
-		return service.RAGReindexResult{Candidates: 1, Processed: 1, LastChunkID: 13}, nil
+		return ragtool.RAGReindexResult{Candidates: 1, Processed: 1, LastChunkID: 13}, nil
 	})
 	if err != nil {
 		t.Fatalf("execute() error = %v", err)
@@ -201,11 +201,11 @@ func TestCheckpointLifecycleExecutePersistsFailedStageWithoutErrorDetails(t *tes
 	lifecycle := newCheckpointLifecycle(path, &state, func() time.Time { return now })
 	sensitiveErr := errors.New("embedding failed with api_key=do-not-persist")
 
-	_, err := lifecycle.execute(func(lifecycle *checkpointLifecycle) (service.RAGReindexResult, error) {
+	_, err := lifecycle.execute(func(lifecycle *checkpointLifecycle) (ragtool.RAGReindexResult, error) {
 		if err := lifecycle.enterStage(checkpointFailureRebuildVectors); err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
-		return service.RAGReindexResult{}, sensitiveErr
+		return ragtool.RAGReindexResult{}, sensitiveErr
 	})
 	if !errors.Is(err, sensitiveErr) {
 		t.Fatalf("execute() error = %v, want operation error", err)
@@ -241,8 +241,8 @@ func TestCheckpointLifecycleRecordsCompletionPersistenceFailure(t *testing.T) {
 		return nil
 	}
 
-	_, err := lifecycle.execute(func(_ *checkpointLifecycle) (service.RAGReindexResult, error) {
-		return service.RAGReindexResult{Processed: 1, LastChunkID: 13}, nil
+	_, err := lifecycle.execute(func(_ *checkpointLifecycle) (ragtool.RAGReindexResult, error) {
+		return ragtool.RAGReindexResult{Processed: 1, LastChunkID: 13}, nil
 	})
 	if !errors.Is(err, completionErr) {
 		t.Fatalf("execute() error = %v, want completion persistence error", err)

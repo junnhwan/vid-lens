@@ -17,6 +17,7 @@ import (
 	appdb "vid-lens/internal/database"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/secret"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/vector"
@@ -108,22 +109,22 @@ func validateReindexConfig(cfg *config.Config) error {
 	return errors.Join(cfg.ValidatePostgres(), cfg.ValidatePGVectorDestination())
 }
 
-func run(ctx context.Context, opts options) (service.RAGReindexResult, error) {
+func run(ctx context.Context, opts options) (ragtool.RAGReindexResult, error) {
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		return service.RAGReindexResult{}, err
+		return ragtool.RAGReindexResult{}, err
 	}
 	if err := validateReindexConfig(cfg); err != nil {
-		return service.RAGReindexResult{}, err
+		return ragtool.RAGReindexResult{}, err
 	}
 	connection, err := appdb.OpenPostgres(ctx, cfg.Database)
 	if err != nil {
-		return service.RAGReindexResult{}, fmt.Errorf("connect PostgreSQL: %w", err)
+		return ragtool.RAGReindexResult{}, fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	defer connection.Close()
 	repos := repository.NewRepositories(connection.GORM)
 
-	reindexOpts := service.RAGReindexOptions{
+	reindexOpts := ragtool.RAGReindexOptions{
 		UserID:               opts.userID,
 		TaskID:               opts.taskID,
 		EmbeddingModel:       opts.embeddingModel,
@@ -134,7 +135,7 @@ func run(ctx context.Context, opts options) (service.RAGReindexResult, error) {
 		RetryBaseDelay:       opts.retryBaseDelay,
 	}
 	if !opts.execute {
-		return service.NewRAGReindexer(repos.VideoChunk, nil, nil, nil).Run(ctx, reindexOpts)
+		return ragtool.NewRAGReindexer(repos.VideoChunk, nil, nil, nil).Run(ctx, reindexOpts)
 	}
 
 	signature, err := scopeSignature(checkpointScope{
@@ -143,37 +144,37 @@ func run(ctx context.Context, opts options) (service.RAGReindexResult, error) {
 		PostgresTable: cfg.RAG.VectorTable, EmbeddingDim: cfg.RAG.EmbeddingDim,
 	})
 	if err != nil {
-		return service.RAGReindexResult{}, err
+		return ragtool.RAGReindexResult{}, err
 	}
 	state := checkpoint{Version: checkpointVersion, Signature: signature}
 	if !opts.resetCheckpoint {
 		loaded, found, err := loadCheckpoint(opts.checkpointPath)
 		if err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
 		if found {
 			if loaded.Signature != signature {
-				return service.RAGReindexResult{}, errors.New("checkpoint does not match the current filters or pgvector destination; use --reset-checkpoint after verifying the scope")
+				return ragtool.RAGReindexResult{}, errors.New("checkpoint does not match the current filters or pgvector destination; use --reset-checkpoint after verifying the scope")
 			}
 			state = loaded
 		}
 	}
 	reindexOpts.AfterChunkID = state.LastChunkID
 	lifecycle := newCheckpointLifecycle(opts.checkpointPath, &state, time.Now)
-	return lifecycle.execute(func(lifecycle *checkpointLifecycle) (service.RAGReindexResult, error) {
+	return lifecycle.execute(func(lifecycle *checkpointLifecycle) (ragtool.RAGReindexResult, error) {
 		codecSecret := cfg.Security.APIKeySecret
 		if codecSecret == "" {
 			codecSecret = cfg.JWT.Secret
 		}
 		codec, err := secret.NewCodecFromPassphrase(codecSecret)
 		if err != nil {
-			return service.RAGReindexResult{}, fmt.Errorf("initialize API key codec: %w", err)
+			return ragtool.RAGReindexResult{}, fmt.Errorf("initialize API key codec: %w", err)
 		}
 		profiles := service.NewAIProfileService(repos.AIProfile, codec, nil)
 		factory := ai.NewFactory()
 
 		if err := lifecycle.enterStage(checkpointFailureConnectPGVector); err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
 		// This command intentionally targets pgvector even when rag.store is kept
 		// on Milvus for rollback. Reuse the shared application adapter so pgvector
@@ -183,12 +184,12 @@ func run(ctx context.Context, opts options) (service.RAGReindexResult, error) {
 		pgConfig.MaxIdleConns = 2
 		pgStore, err := vector.NewPGVectorStore(ctx, pgConfig)
 		if err != nil {
-			return service.RAGReindexResult{}, fmt.Errorf("connect pgvector destination: %w", err)
+			return ragtool.RAGReindexResult{}, fmt.Errorf("connect pgvector destination: %w", err)
 		}
 		defer pgStore.Close()
 
 		if err := lifecycle.enterStage(checkpointFailureRebuildVectors); err != nil {
-			return service.RAGReindexResult{}, err
+			return ragtool.RAGReindexResult{}, err
 		}
 		// Persist progress only after pgvector upsert succeeds. If this write
 		// fails, resuming may repeat one chunk, which is safe because upsert is
@@ -196,6 +197,6 @@ func run(ctx context.Context, opts options) (service.RAGReindexResult, error) {
 		reindexOpts.OnChunkComplete = func(chunk model.VideoChunk, processed int64) error {
 			return lifecycle.saveProgress(chunk.ID, processed)
 		}
-		return service.NewRAGReindexer(repos.VideoChunk, profiles, factory, pgStore).Run(ctx, reindexOpts)
+		return ragtool.NewRAGReindexer(repos.VideoChunk, profiles, factory, pgStore).Run(ctx, reindexOpts)
 	})
 }

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"vid-lens/internal/service"
+	"vid-lens/internal/ragtool"
 )
 
 const (
@@ -150,7 +150,7 @@ func newCheckpointLifecycle(path string, state *checkpoint, now func() time.Time
 	return &checkpointLifecycle{path: path, state: state, now: now, save: saveCheckpoint}
 }
 
-func (l *checkpointLifecycle) execute(operation func(*checkpointLifecycle) (service.RAGReindexResult, error)) (result service.RAGReindexResult, returnErr error) {
+func (l *checkpointLifecycle) execute(operation func(*checkpointLifecycle) (ragtool.RAGReindexResult, error)) (result ragtool.RAGReindexResult, returnErr error) {
 	if l == nil || l.state == nil {
 		return result, errors.New("checkpoint lifecycle state is required")
 	}

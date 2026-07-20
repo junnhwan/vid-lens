@@ -14,6 +14,7 @@ import (
 
 	"vid-lens/internal/config"
 	appdb "vid-lens/internal/database"
+	"vid-lens/internal/ragtool"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/vector"
@@ -53,7 +54,7 @@ func main() {
 	}
 }
 
-func writeAuditSummary(w io.Writer, summary service.RAGProjectionAuditSummary) {
+func writeAuditSummary(w io.Writer, summary ragtool.RAGProjectionAuditSummary) {
 	fmt.Fprintf(w, "rag audit complete: backend=%s scopes=%d source=%d target=%d issues=%d\n",
 		vector.NormalizeBackendName(summary.Backend), len(summary.Scopes), summary.SourceCount, summary.TargetCount, summary.IssueCount())
 	for _, report := range summary.Scopes {
@@ -124,23 +125,23 @@ type allRAGAuditTarget interface {
 	ListAllVectorManifest(context.Context) ([]service.RAGVectorManifestEntry, error)
 }
 
-func run(ctx context.Context, opts options) (service.RAGProjectionAuditSummary, error) {
+func run(ctx context.Context, opts options) (ragtool.RAGProjectionAuditSummary, error) {
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, err
+		return ragtool.RAGProjectionAuditSummary{}, err
 	}
 	if err := validateAuditConfig(cfg); err != nil {
-		return service.RAGProjectionAuditSummary{}, err
+		return ragtool.RAGProjectionAuditSummary{}, err
 	}
 	connection, err := appdb.OpenPostgres(ctx, cfg.Database)
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, fmt.Errorf("connect PostgreSQL: %w", err)
+		return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	defer connection.Close()
 
 	store, err := vector.NewStore(ctx, vector.BackendConfigFromApplication(cfg))
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, fmt.Errorf("connect vector backend: %w", err)
+		return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("connect vector backend: %w", err)
 	}
 	defer store.Close()
 
@@ -153,55 +154,55 @@ func run(ctx context.Context, opts options) (service.RAGProjectionAuditSummary, 
 // run and manifest orchestration here makes the behavior testable without live
 // infrastructure and prevents maintenance commands from reimplementing audit
 // semantics.
-func auditConfiguredProjection(ctx context.Context, opts options, backend string, source ragAuditSource, target ragAuditTarget) (service.RAGProjectionAuditSummary, error) {
+func auditConfiguredProjection(ctx context.Context, opts options, backend string, source ragAuditSource, target ragAuditTarget) (ragtool.RAGProjectionAuditSummary, error) {
 	backend = vector.NormalizeBackendName(backend)
 	if opts.all {
 		if backend != vector.DefaultBackend {
-			return service.RAGProjectionAuditSummary{}, fmt.Errorf("--all requires the pgvector backend, got %q", backend)
+			return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("--all requires the pgvector backend, got %q", backend)
 		}
 		allSource, ok := source.(allRAGAuditSource)
 		if !ok {
-			return service.RAGProjectionAuditSummary{}, errors.New("PostgreSQL source does not support an all-scope chunk manifest")
+			return ragtool.RAGProjectionAuditSummary{}, errors.New("PostgreSQL source does not support an all-scope chunk manifest")
 		}
 		allTarget, ok := target.(allRAGAuditTarget)
 		if !ok {
-			return service.RAGProjectionAuditSummary{}, errors.New("pgvector target does not support an all-scope vector manifest")
+			return ragtool.RAGProjectionAuditSummary{}, errors.New("pgvector target does not support an all-scope vector manifest")
 		}
 		sourceManifest, err := allSource.ListAllEvidenceManifest(ctx)
 		if err != nil {
-			return service.RAGProjectionAuditSummary{}, fmt.Errorf("list all PostgreSQL chunk manifests: %w", err)
+			return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("list all PostgreSQL chunk manifests: %w", err)
 		}
 		targetManifest, err := allTarget.ListAllVectorManifest(ctx)
 		if err != nil {
-			return service.RAGProjectionAuditSummary{}, fmt.Errorf("list all pgvector manifests: %w", err)
+			return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("list all pgvector manifests: %w", err)
 		}
-		return service.AuditAllRAGProjections(backend, ragSourceManifest(sourceManifest), targetManifest)
+		return ragtool.AuditAllRAGProjections(backend, ragSourceManifest(sourceManifest), targetManifest)
 	}
 
 	sourceManifest, err := source.ListEvidenceManifest(opts.userID, opts.taskID, opts.embeddingModel)
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, fmt.Errorf("list PostgreSQL chunk manifest: %w", err)
+		return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("list PostgreSQL chunk manifest: %w", err)
 	}
 	targetManifest, err := target.ListTaskVectorManifest(ctx, opts.userID, opts.taskID, opts.embeddingModel)
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, fmt.Errorf("list %s vector manifest: %w", backend, err)
+		return ragtool.RAGProjectionAuditSummary{}, fmt.Errorf("list %s vector manifest: %w", backend, err)
 	}
-	report, err := service.AuditRAGProjection(service.RAGProjectionScope{
+	report, err := ragtool.AuditRAGProjection(ragtool.RAGProjectionScope{
 		UserID: opts.userID, TaskID: opts.taskID, EmbeddingModel: opts.embeddingModel, Backend: backend,
 	}, ragSourceManifest(sourceManifest), targetManifest)
 	if err != nil {
-		return service.RAGProjectionAuditSummary{}, err
+		return ragtool.RAGProjectionAuditSummary{}, err
 	}
-	return service.RAGProjectionAuditSummary{
+	return ragtool.RAGProjectionAuditSummary{
 		Backend: backend, SourceCount: report.SourceCount, TargetCount: report.TargetCount,
-		Scopes: []service.RAGProjectionAuditReport{report},
+		Scopes: []ragtool.RAGProjectionAuditReport{report},
 	}, nil
 }
 
-func ragSourceManifest(entries []repository.ChunkEvidenceManifestEntry) []service.RAGSourceManifestEntry {
-	out := make([]service.RAGSourceManifestEntry, 0, len(entries))
+func ragSourceManifest(entries []repository.ChunkEvidenceManifestEntry) []ragtool.RAGSourceManifestEntry {
+	out := make([]ragtool.RAGSourceManifestEntry, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, service.RAGSourceManifestEntry{
+		out = append(out, ragtool.RAGSourceManifestEntry{
 			EvidenceID: entry.EvidenceID, UserID: entry.UserID, TaskID: entry.TaskID,
 			ChunkID: entry.ChunkID, ChunkIndex: entry.ChunkIndex, ContentHash: entry.ContentHash,
 			EmbeddingModel: entry.EmbeddingModel,
