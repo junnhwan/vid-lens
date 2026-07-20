@@ -38,7 +38,7 @@
 | `docs/archive/**` | 面试/简历/历史规划归档（见 [`docs/archive/README.md`](archive/README.md)） |
 | `docs/grill/**` | 本地面试拷打材料（gitignore） |
 | `docs/superpowers/**` | 本地规划草稿（gitignore） |
-| `book/**` | 旧面试 VitePress 站；**已 untrack + gitignore**，非产品事实源，可能仍含 MySQL/Milvus 叙述 |
+| `book/**` | 旧面试 VitePress 站；**已 untrack + gitignore**；独立仓 [vidlens-book-site](https://github.com/junnhwan/vidlens-book-site)，非产品事实源 |
 | `.worktrees/**` | 实验 worktree，不代表 main |
 | `.logs/**`、`.tmp/**` | 本地产物 |
 | 根目录 `server` / `*.exe` / `coverage.out` | 本地构建产物（gitignore） |

@@ -22,6 +22,12 @@
 
 ## 关于旧 `book/` 站点
 
-历史上仓库内有 VitePress 面试站 `book/` 与 `deploy-book.yml`。为减少 AI 误读（部分页面仍写 MySQL/Milvus 为默认栈），已从 git 跟踪移除并关闭自动部署。若本机仍有 `book/` 目录，仅作个人参考，**不能覆盖代码与维护地图**。需要长期保留时可拷到独立仓库。
+历史上仓库内有 VitePress 面试站 `book/` 与 `deploy-book.yml`。为减少 AI 误读（部分页面仍写 MySQL/Milvus 为默认栈），已从 git 跟踪移除并关闭自动部署。
+
+独立仓库（面试站专用，非产品真相）：
+
+- https://github.com/junnhwan/vidlens-book-site
+
+本机若仍有 `vid-lens/book/`，只是本地残留或嵌套 clone，**不能覆盖代码与维护地图**。建议在主仓外单独 clone 该仓，不要把面试站再塞回产品仓。
 
 归档不等于作废：面试时仍可用，但**不能覆盖代码与维护地图**。

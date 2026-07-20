@@ -133,7 +133,7 @@ vid-lens/
 └── config.yaml
 ```
 
-> 旧面试 VitePress 站 `book/` 已移出主开发路径（gitignore，不参与构建/部署）。产品与 AI 维护入口以 `docs/README.md` 为准。
+> 旧面试 VitePress 站已移出主开发路径（gitignore，不参与构建/部署）。独立仓：[vidlens-book-site](https://github.com/junnhwan/vidlens-book-site)。产品与 AI 维护入口以 `docs/README.md` 为准。
 
 ## 📚 维护与迁移文档
 
