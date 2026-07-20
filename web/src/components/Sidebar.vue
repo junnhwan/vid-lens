@@ -3,7 +3,7 @@
     <section class="sidebar-section">
       <div class="section-head">
         <h3 class="section-title">上传</h3>
-        <span class="section-hint">本地 / 链接</span>
+        <span class="section-hint">本地视频</span>
       </div>
 
       <div
@@ -27,24 +27,37 @@
         </button>
       </div>
 
-      <div class="upload-card url-card" :class="{ disabled: !user, uploading }" @click="handleUrlCardClick">
-        <div class="upload-glyph soft" aria-hidden="true">
-          <span class="upload-link">◎</span>
-        </div>
-        <div class="upload-copy">
-          <p class="upload-label">链接下载</p>
-          <p class="upload-sub">B 站 / YouTube 等公开链接</p>
-        </div>
-        <div class="url-input-group" @click.stop>
-          <input
-            v-model="videoUrl"
-            placeholder="https://..."
-            @keyup.enter="handleUrlUpload"
-            :disabled="!user || uploading"
-          />
-          <button type="button" class="upload-btn solid" @click="handleUrlUpload" :disabled="!user || uploading || !videoUrl">
-            开始
-          </button>
+      <!-- URL 下载：自用能力，默认收起，对外标 Beta，不抢主路径 -->
+      <div class="url-beta">
+        <button
+          type="button"
+          class="url-beta-toggle"
+          :aria-expanded="urlPanelOpen"
+          @click="toggleUrlPanel"
+        >
+          <span class="url-beta-label">从链接导入</span>
+          <span class="beta-badge">Beta</span>
+          <span class="url-beta-chevron" aria-hidden="true">{{ urlPanelOpen ? '▾' : '▸' }}</span>
+        </button>
+        <div v-if="urlPanelOpen" class="url-beta-body" :class="{ disabled: !user, uploading }">
+          <p class="url-beta-hint">实验功能 · 个人测试用，稳定性不保证</p>
+          <div class="url-input-group" @click.stop>
+            <input
+              ref="urlInput"
+              v-model="videoUrl"
+              placeholder="https://..."
+              @keyup.enter="handleUrlUpload"
+              :disabled="!user || uploading"
+            />
+            <button
+              type="button"
+              class="upload-btn solid"
+              @click="handleUrlUpload"
+              :disabled="!user || uploading || !videoUrl"
+            >
+              开始
+            </button>
+          </div>
         </div>
       </div>
 
@@ -98,7 +111,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
 const props = defineProps({
   user: Object,
@@ -114,6 +127,19 @@ const emit = defineEmits(['uploadFile', 'uploadUrl', 'openAuth', 'closeSidebar',
 const videoUrl = ref('')
 const dragging = ref(false)
 const fileInput = ref(null)
+const urlInput = ref(null)
+const urlPanelOpen = ref(false)
+
+const toggleUrlPanel = () => {
+  if (!props.user) {
+    emit('openAuth')
+    return
+  }
+  urlPanelOpen.value = !urlPanelOpen.value
+  if (urlPanelOpen.value) {
+    nextTick(() => urlInput.value?.focus())
+  }
+}
 
 const handleLocalUploadClick = (e) => {
   if (!props.user) {
@@ -121,10 +147,6 @@ const handleLocalUploadClick = (e) => {
     e.stopPropagation()
     emit('openAuth')
   }
-}
-
-const handleUrlCardClick = () => {
-  if (!props.user) emit('openAuth')
 }
 
 const triggerFileInput = () => {
@@ -236,11 +258,7 @@ const handleUrlUpload = () => {
   background: rgba(16, 22, 34, 0.55);
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.2s;
-  margin-bottom: 0.75rem;
-}
-
-.upload-card:last-of-type {
-  margin-bottom: 0;
+  margin-bottom: 0.65rem;
 }
 
 .upload-card:hover:not(.disabled),
@@ -272,12 +290,6 @@ const handleUrlUpload = () => {
   color: var(--vl-primary);
   font-size: 1.1rem;
   font-weight: 700;
-}
-
-.upload-glyph.soft {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: var(--vl-border);
-  color: var(--vl-info);
 }
 
 .upload-copy {
@@ -325,6 +337,74 @@ const handleUrlUpload = () => {
 .upload-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Beta 链接导入：次级入口 */
+.url-beta {
+  margin-top: 0.15rem;
+}
+
+.url-beta-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.35rem;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-align: left;
+  transition: color 0.2s;
+}
+
+.url-beta-toggle:hover {
+  color: var(--vl-text-secondary);
+}
+
+.url-beta-label {
+  flex: 0 1 auto;
+}
+
+.beta-badge {
+  font-family: var(--vl-font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vl-text-muted);
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  padding: 0.08rem 0.4rem;
+  line-height: 1.3;
+}
+
+.url-beta-chevron {
+  margin-left: auto;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.url-beta-body {
+  margin-top: 0.35rem;
+  padding: 0.75rem;
+  border-radius: var(--vl-radius);
+  border: 1px solid var(--vl-border);
+  background: rgba(7, 9, 15, 0.35);
+}
+
+.url-beta-body.disabled {
+  opacity: 0.5;
+}
+
+.url-beta-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  color: var(--vl-text-muted);
+  line-height: 1.45;
 }
 
 .url-input-group {

@@ -44,14 +44,6 @@
         </button>
       </div>
       <input v-model="searchQuery" class="search-box" placeholder="搜索文件名…  Ctrl+K" aria-label="搜索任务" />
-      <button
-        v-if="!compactList"
-        class="view-toggle"
-        @click="toggleView"
-        :title="viewMode === 'grid' ? '切换到列表视图' : '切换到网格视图'"
-      >
-        {{ viewMode === 'grid' ? '≡' : '▦' }}
-      </button>
     </div>
 
     <TransitionGroup
@@ -59,14 +51,14 @@
       name="task-list"
       tag="div"
       class="tasks-list"
-      :class="effectiveViewMode"
+      :class="{ list: compactList }"
     >
       <TaskCard
         v-for="t in filteredTasks"
         :key="t.id"
         :task="t"
         :loading="loading[t.id]"
-        :compact="effectiveViewMode === 'list'"
+        :compact="compactList"
         :selected="selectedId === t.id"
         @click="$emit('taskClick', t)"
         @delete="$emit('deleteTask', t)"
@@ -103,7 +95,10 @@
   <div v-else class="empty-state">
     <div class="empty-icon" aria-hidden="true">◇</div>
     <h3>还没有任务</h3>
-    <p>从左侧上传视频，或粘贴 B 站 / YouTube 链接开始分析</p>
+    <p>上传本地视频后，可提取文字、生成总结，并与视频对话</p>
+    <button type="button" class="empty-upload-btn" @click="$emit('requestUpload')">
+      上传视频
+    </button>
   </div>
 
   <!-- 回到顶部按钮 -->
@@ -134,26 +129,17 @@ const props = defineProps({
   searchKeyword: { type: String, default: '' },
 })
 
-const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search'])
+const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search', 'requestUpload'])
 
 const activeTab = ref('all')
 const searchQuery = ref(props.searchKeyword || '')
 const showScrollTop = ref(false)
-const viewMode = ref(localStorage.getItem('taskViewMode') || 'grid')
 
 const showInitialSkeleton = computed(() =>
   shouldShowInitialTaskSkeleton(props.tasks, props.initialLoading),
 )
 
 const hasActiveSearch = computed(() => !!(props.searchKeyword || '').trim() || !!(searchQuery.value || '').trim())
-
-// 分栏模式固定 list，更窄更易扫
-const effectiveViewMode = computed(() => (props.compactList ? 'list' : viewMode.value))
-
-const toggleView = () => {
-  viewMode.value = viewMode.value === 'grid' ? 'list' : 'grid'
-  localStorage.setItem('taskViewMode', viewMode.value)
-}
 
 const tabs = computed(() => [
   { key: 'all', label: '全部', count: props.tasks.length },
@@ -318,26 +304,6 @@ onUnmounted(() => {
   color: var(--vl-text-muted);
 }
 
-.view-toggle {
-  background: transparent;
-  border: 1px solid var(--vl-border);
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: var(--vl-radius-sm);
-  color: var(--vl-text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 1rem;
-  display: grid;
-  place-items: center;
-}
-
-.view-toggle:hover {
-  border-color: rgba(45, 212, 191, 0.4);
-  color: var(--vl-primary);
-  background: var(--vl-primary-dim);
-}
-
 .tasks-list {
   display: flex;
   flex-direction: column;
@@ -467,6 +433,27 @@ onUnmounted(() => {
   font-size: 0.9rem;
   max-width: 22rem;
   line-height: 1.5;
+}
+
+.empty-upload-btn {
+  margin-top: 1.15rem;
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--vl-font);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--vl-text-inverse);
+  background: linear-gradient(135deg, var(--vl-primary) 0%, #14b8a6 100%);
+  padding: 0.7rem 1.4rem;
+  border-radius: var(--vl-radius);
+  box-shadow: 0 4px 16px var(--vl-primary-glow);
+  transition: transform 0.2s var(--vl-ease), box-shadow 0.2s;
+}
+
+.empty-upload-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px var(--vl-primary-glow);
 }
 
 .skeleton-card {

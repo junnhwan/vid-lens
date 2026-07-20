@@ -142,8 +142,11 @@
         </div>
 
         <div v-if="task.jobs?.length" class="jobs-section">
-          <h4 class="section-title">处理明细</h4>
-          <div class="jobs-list">
+          <button type="button" class="jobs-toggle" @click="jobsExpanded = !jobsExpanded">
+            <span class="section-title">处理明细</span>
+            <span class="jobs-toggle-meta">{{ task.jobs.length }} 项 · {{ jobsExpanded ? '收起' : '展开' }}</span>
+          </button>
+          <div v-if="jobsExpanded" class="jobs-list">
             <div v-for="job in task.jobs" :key="job.id" class="job-item">
               <div class="job-header">
                 <span class="job-type">{{ jobTypeLabel(job.job_type) }}</span>
@@ -300,6 +303,7 @@ const router = useRouter()
 const activeTab = ref('overview')
 const transcriptionExpanded = ref(false)
 const summaryExpanded = ref(false)
+const jobsExpanded = ref(false)
 
 const tabs = computed(() => [
   { key: 'overview', label: '概览' },
@@ -402,6 +406,7 @@ watch(
     if (id === prev) return
     transcriptionExpanded.value = false
     summaryExpanded.value = false
+    jobsExpanded.value = false
     if (!props.task) {
       activeTab.value = 'overview'
       return
@@ -844,6 +849,39 @@ watch(
 
 .jobs-section {
   margin-top: 0.25rem;
+}
+
+.jobs-toggle {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  appearance: none;
+  border: 1px solid var(--vl-border);
+  background: rgba(7, 9, 15, 0.3);
+  border-radius: var(--vl-radius-sm);
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  margin-bottom: 0.55rem;
+  color: inherit;
+  text-align: left;
+}
+
+.jobs-toggle:hover {
+  border-color: var(--vl-border-strong);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.jobs-toggle .section-title {
+  margin: 0;
+}
+
+.jobs-toggle-meta {
+  font-size: 0.72rem;
+  color: var(--vl-text-muted);
+  font-family: var(--vl-font-mono);
+  white-space: nowrap;
 }
 
 .section-title {

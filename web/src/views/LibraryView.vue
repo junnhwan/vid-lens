@@ -38,6 +38,7 @@
           @chat="goChat"
           @retry="app.retryLoadTasks"
           @search="app.onSearchTasks"
+          @requestUpload="onRequestUpload"
         />
       </main>
 
@@ -87,6 +88,22 @@ const isMobile = computed(() => viewportW.value <= 900)
 
 const goChat = (task) => {
   router.push({ name: 'chat-task', params: { taskId: task.id } })
+}
+
+// 空态 CTA：未登录先登录；移动端打开侧栏方便选文件
+const onRequestUpload = () => {
+  if (!app.user) {
+    app.openAuth()
+    return
+  }
+  if (isMobile.value) {
+    app.sidebarOpen = true
+  }
+  // 下一帧再点上传按钮，等侧栏展开
+  requestAnimationFrame(() => {
+    const uploadBtn = document.querySelector('.sidebar .upload-btn')
+    if (uploadBtn && !uploadBtn.disabled) uploadBtn.click()
+  })
 }
 
 const onResize = () => {

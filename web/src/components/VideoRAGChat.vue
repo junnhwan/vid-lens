@@ -1,31 +1,38 @@
 <template>
   <div class="rag-chat">
-    <!-- 索引状态提示 -->
-    <div v-if="indexStatus.status !== 'indexed'" class="index-prompt">
-      <div class="prompt-icon">{{ indexIcon }}</div>
-      <p>{{ indexPromptText }}</p>
-
-      <!-- 索引构建按钮 -->
+    <!-- 索引状态：条状提示，不占半屏 -->
+    <div
+      v-if="indexStatus.status !== 'indexed' && !indexBannerDismissed"
+      class="index-banner"
+      :class="indexStatus.status"
+      role="status"
+    >
+      <span class="index-banner-text">{{ indexPromptText }}</span>
       <button
         v-if="indexStatus.status !== 'indexing'"
-        class="btn-amber"
+        type="button"
+        class="index-banner-btn"
         @click="buildIndex"
         :disabled="building"
       >
-        {{ building ? '构建中...' : indexButtonText }}
+        {{ building ? '构建中…' : indexButtonText }}
       </button>
-
-      <!-- 构建中提示 -->
-      <div v-if="indexStatus.status === 'indexing'" class="indexing-spinner">
-        <div class="spinner"></div>
-        <span>索引构建中，请稍候...</span>
+      <div v-else class="index-banner-spin">
+        <div class="spinner tiny"></div>
+        <span>构建中…</span>
       </div>
-
-      <!-- 失败时显示错误 -->
-      <div v-if="indexStatus.status === 'failed' && indexStatus.error" class="index-error">
-        <span class="error-label">失败原因:</span>
-        <span class="error-text">{{ indexStatus.error }}</span>
-      </div>
+      <button
+        v-if="indexStatus.status === 'not_indexed'"
+        type="button"
+        class="index-banner-dismiss"
+        aria-label="关闭提示"
+        @click="indexBannerDismissed = true"
+      >
+        ×
+      </button>
+    </div>
+    <div v-if="indexStatus.status === 'failed' && indexStatus.error" class="index-error-line">
+      {{ indexStatus.error }}
     </div>
 
     <div class="chat-container">
@@ -64,6 +71,23 @@
         </div>
       </div>
       <div class="chat-messages" ref="messagesContainer" @scroll="onMessagesScroll">
+        <!-- 空对话：示例问题 -->
+        <div v-if="!messages.length && !loading && !sessionLoading" class="chat-empty-hints">
+          <p class="chat-empty-title">试试这样问</p>
+          <div class="suggestion-row">
+            <button
+              v-for="s in suggestedQuestions"
+              :key="s"
+              type="button"
+              class="suggestion-chip"
+              :disabled="strictModeBlocked"
+              @click="useSuggestion(s)"
+            >
+              {{ s }}
+            </button>
+          </div>
+        </div>
+
         <div v-for="(msg, msgIdx) in messages" :key="msg.id || msgIdx" class="message" :class="msg.role">
           <div class="message-content">
             <button
@@ -80,7 +104,7 @@
             <div v-else class="message-text">{{ msg.content }}</div>
             <div v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</div>
             <div
-              v-if="msg.role === 'assistant' && (msg.template || msg.model)"
+              v-if="msg.role === 'assistant' && showAgentMeta && (msg.template || msg.model)"
               class="agent-meta"
             >
               <span v-if="msg.template" class="agent-tag agent-template">模板: {{ msg.template }}</span>
@@ -125,7 +149,6 @@
                 <div class="citation-meta">
                   <span class="citation-id">{{ citationDisplayLabel(idx) }}</span>
                   <span v-if="cite.source" class="citation-source">来源: {{ cite.source }}</span>
-                  <span v-if="cite.chunk_id" class="citation-chunk">Chunk: #{{ cite.chunk_id }}</span>
                 </div>
                 <div
                   class="citation-content"
@@ -145,7 +168,7 @@
                 </div>
               </div>
             </div>
-            <div v-if="msg.trace && msg.trace.length" class="agent-trace">
+            <div v-if="showAgentMeta && msg.trace && msg.trace.length" class="agent-trace">
               <div class="citations-header">
                 <span class="citations-title">工具调用</span>
               </div>
@@ -190,14 +213,24 @@
             严格引用
           </button>
           <button
+            v-if="advancedOpen || chatMode === 'agent'"
             type="button"
-            class="mode-toggle"
+            class="mode-toggle experimental"
             :class="{ active: chatMode === 'agent' }"
             :disabled="loading || sessionLoading"
-            title="实验功能：工具调用链 + 引用 + 模板（非流式，非默认产品路径）"
+            title="实验功能：工具调用链（非默认产品路径）"
             @click="chatMode = 'agent'"
           >
-            Agent 实验
+            Agent
+            <span class="mode-beta">Beta</span>
+          </button>
+          <button
+            type="button"
+            class="advanced-toggle"
+            :aria-expanded="advancedOpen"
+            @click="advancedOpen = !advancedOpen"
+          >
+            {{ advancedOpen ? '收起高级' : '高级' }}
           </button>
         </div>
         <div v-if="strictModeBlocked" class="chat-mode-warning">
@@ -228,7 +261,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '../api'
@@ -254,15 +287,18 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['error'])
+const app = inject('appCtx', null)
 
 const indexStatus = ref({ status: 'not_indexed', chunks: 0, error: '' })
 const building = ref(false)
+const indexBannerDismissed = ref(false)
 const messages = ref([])
 const sessions = ref([])
 const question = ref('')
 const loading = ref(false)
 const sessionLoading = ref(false)
 const chatMode = ref('video_assistant')
+const advancedOpen = ref(false)
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 const questionInput = ref(null)
@@ -277,26 +313,25 @@ let citationHighlightTimer = null
 
 const citationPreviewOptions = DEFAULT_CITATION_PREVIEW_OPTIONS
 
-const indexIcon = computed(() => {
-  switch (indexStatus.value.status) {
-    case 'indexing': return '⏳'
-    case 'failed': return '❌'
-    case 'indexed': return '✅'
-    default: return '🔍'
-  }
-})
+const suggestedQuestions = [
+  '这个视频主要讲了什么？',
+  '帮我提炼关键要点',
+  '有哪些值得记住的结论？',
+]
+
+const showAgentMeta = computed(() => chatMode.value === 'agent')
 
 const indexPromptText = computed(() => {
   switch (indexStatus.value.status) {
-    case 'indexing': return '正在构建视频索引；视频助手仍可先基于摘要和转写回答'
-    case 'failed': return '索引构建失败；严格引用不可用，视频助手仍可基于摘要和转写回答'
-    case 'not_indexed': return '严格引用需要先构建视频索引；视频助手可先基于摘要和转写回答'
-    default: return '严格引用需要先构建视频索引；视频助手可先基于摘要和转写回答'
+    case 'indexing': return '正在构建索引；视频助手仍可先基于摘要和转写回答'
+    case 'failed': return '索引构建失败；严格引用不可用，视频助手仍可用'
+    case 'not_indexed': return '严格引用需先构建索引；视频助手可先基于摘要和转写'
+    default: return '严格引用需先构建索引；视频助手可先基于摘要和转写'
   }
 })
 
 const indexButtonText = computed(() => {
-  return indexStatus.value.status === 'failed' ? '重新构建索引' : '构建视频索引'
+  return indexStatus.value.status === 'failed' ? '重新构建' : '构建索引'
 })
 
 const strictModeBlocked = computed(() => {
@@ -502,9 +537,8 @@ const newSession = async () => {
   }
 }
 
-const deleteCurrentSession = async () => {
+const runDeleteCurrentSession = async () => {
   if (!sessionId.value || sessionLoading.value) return
-  if (!window.confirm('确定删除当前对话？此操作不可恢复。')) return
   sessionLoading.value = true
   try {
     await api.deleteChatSession(sessionId.value)
@@ -520,6 +554,33 @@ const deleteCurrentSession = async () => {
   } finally {
     sessionLoading.value = false
   }
+}
+
+const deleteCurrentSession = () => {
+  if (!sessionId.value || sessionLoading.value) return
+  if (app?.openConfirm) {
+    app.openConfirm({
+      title: '删除当前对话',
+      message: '确定删除当前对话？此操作不可恢复。',
+      confirmText: '删除',
+      showCancel: true,
+      type: 'danger',
+      icon: '🗑️',
+      onConfirm: () => { runDeleteCurrentSession() },
+    })
+    return
+  }
+  if (window.confirm('确定删除当前对话？此操作不可恢复。')) {
+    runDeleteCurrentSession()
+  }
+}
+
+const useSuggestion = (text) => {
+  question.value = text
+  nextTick(() => {
+    autoResizeTextarea()
+    questionInput.value?.focus()
+  })
 }
 
 const scrollMessagesToBottom = (force = false) => {
@@ -777,80 +838,132 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.index-prompt {
+.index-banner {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 0.65rem;
   flex-wrap: wrap;
-  text-align: left;
-  padding: 0.85rem 1.25rem;
+  padding: 0.55rem 1rem;
   border-bottom: 1px solid var(--vl-border);
-  background:
-    linear-gradient(90deg, rgba(45, 212, 191, 0.06), transparent 55%),
-    rgba(7, 9, 15, 0.5);
-}
-
-.prompt-icon {
-  font-size: 1.2rem;
-  line-height: 1;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.55rem;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--vl-border);
-  flex-shrink: 0;
-}
-
-.index-prompt p {
+  background: rgba(45, 212, 191, 0.05);
+  font-size: 0.8rem;
   color: var(--vl-text-secondary);
-  margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.45;
+}
+
+.index-banner.failed {
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.index-banner.indexing {
+  background: rgba(240, 180, 41, 0.06);
+}
+
+.index-banner-text {
   flex: 1;
-  min-width: 200px;
+  min-width: 12rem;
+  line-height: 1.4;
 }
 
-.indexing-spinner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
+.index-banner-btn {
+  appearance: none;
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  background: var(--vl-primary-dim);
   color: var(--vl-primary);
-  font-size: 0.9rem;
-  margin: 0;
-}
-
-.index-error {
-  margin: 0;
-  flex: 1 1 100%;
-  padding: 0.65rem 0.85rem;
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(220, 38, 38, 0.08));
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 0.65rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.error-label {
-  color: var(--vl-danger);
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.error-text {
-  color: #fecaca;
-  font-size: 0.9rem;
+.index-banner-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.index-banner-spin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--vl-accent);
+  font-size: 0.78rem;
+}
+
+.index-banner-dismiss {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+}
+
+.index-error-line {
+  padding: 0.4rem 1rem;
+  font-size: 0.76rem;
   font-family: var(--vl-font-mono);
+  color: var(--vl-danger);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.2);
+  background: rgba(248, 113, 113, 0.06);
   word-break: break-word;
 }
 
-.index-info {
-  margin-top: 1rem;
-  color: var(--vl-success);
-  font-size: 0.9rem;
+.chat-empty-hints {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  padding: 2.5rem 1.25rem;
+  text-align: center;
+  min-height: 40%;
+}
+
+.chat-empty-title {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--vl-text-muted);
+  font-weight: 500;
+}
+
+.suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  max-width: 28rem;
+}
+
+.suggestion-chip {
+  appearance: none;
+  border: 1px solid var(--vl-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--vl-text-secondary);
+  font-size: 0.82rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.suggestion-chip:hover:not(:disabled) {
+  border-color: rgba(45, 212, 191, 0.4);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
+}
+
+.suggestion-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.spinner.tiny {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-width: 2px;
 }
 
 .chat-container {
@@ -1453,6 +1566,37 @@ onUnmounted(() => {
 .mode-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.mode-toggle.experimental {
+  color: var(--vl-text-muted);
+}
+
+.mode-beta {
+  margin-left: 0.25rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.advanced-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 0.72rem;
+  font-family: var(--vl-font-mono);
+  cursor: pointer;
+  padding: 0.38rem 0.55rem;
+  border-radius: 999px;
+  margin-left: 0.15rem;
+}
+
+.advanced-toggle:hover {
+  color: var(--vl-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .agent-meta {

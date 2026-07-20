@@ -142,7 +142,8 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   font-size: 1.15rem;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
+  /* 触屏也要看得见；桌面 hover 再加强 */
+  opacity: 0.55;
   transition: opacity 0.2s, color 0.2s, background 0.2s, border-color 0.2s;
   display: grid;
   place-items: center;
@@ -151,6 +152,12 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 .task-card:hover .task-delete,
 .task-delete:focus-visible {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .task-delete {
+    opacity: 0.85;
+  }
 }
 
 .task-delete:hover {

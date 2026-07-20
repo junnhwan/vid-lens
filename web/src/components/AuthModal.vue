@@ -4,21 +4,44 @@
       <div class="modal-panel">
         <button class="modal-close" @click="$emit('close')">×</button>
         <h2>{{ mode === 'login' ? '登录' : '注册' }}</h2>
-        <div class="auth-form">
-          <input v-model="form.username" placeholder="用户名" class="form-input" />
-          <input v-model="form.password" type="password" placeholder="密码" class="form-input" />
-          <input v-if="mode === 'register'" v-model="form.nickname" placeholder="昵称" class="form-input" />
-          <button class="btn-amber full" @click="handleSubmit" :disabled="loading">
+        <form class="auth-form" @submit.prevent="handleSubmit">
+          <input
+            v-model="form.username"
+            name="username"
+            autocomplete="username"
+            placeholder="用户名"
+            class="form-input"
+            :disabled="loading"
+          />
+          <input
+            v-model="form.password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="密码"
+            class="form-input"
+            :disabled="loading"
+          />
+          <input
+            v-if="mode === 'register'"
+            v-model="form.nickname"
+            name="nickname"
+            autocomplete="nickname"
+            placeholder="昵称"
+            class="form-input"
+            :disabled="loading"
+          />
+          <button type="submit" class="btn-amber full" :disabled="loading">
             {{ loading ? '处理中...' : (mode === 'login' ? '立即登录' : '提交注册') }}
           </button>
           <p class="auth-switch">
             {{ mode === 'login' ? '还没有账号？' : '已有账号？' }}
-            <button class="link-btn" @click="$emit('switchMode')">
+            <button type="button" class="link-btn" @click="$emit('switchMode')">
               {{ mode === 'login' ? '去注册' : '去登录' }}
             </button>
           </p>
           <p v-if="message" class="auth-msg" :class="{ error: isError }">{{ message }}</p>
-        </div>
+        </form>
       </div>
     </div>
   </transition>

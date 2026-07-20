@@ -66,6 +66,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigModal.vue'))
 
 import api from './api'
+import { normalizeListResponse } from './apiEnvelope.js'
 import { formatUploadError, formatUploadProgressMessage, uploadFileInChunks } from './chunkedUpload.js'
 import { buildStoredUser } from './authSession.js'
 import { writeLastChatTaskId } from './chatSelectionPolicy.js'
@@ -436,6 +437,8 @@ const handleAuth = async (formData) => {
       closeAuth()
       showToast(`欢迎回来，${sessionUser.nickname || sessionUser.username}`)
       await fetchTasks()
+      // 首登 / 无 AI 配置：引导去模型配置（主路径前置）
+      await maybePromptAIConfig()
     } else {
       authMsg.value = '注册成功，请登录'
       authError.value = false
@@ -478,6 +481,26 @@ const onConfigUpdated = () => {
   showToast('配置已更新')
 }
 
+/** 登录或恢复会话后：若无任何 AI profile，提示去配置（不强制阻塞） */
+const maybePromptAIConfig = async () => {
+  if (!user.value) return
+  try {
+    const list = normalizeListResponse(await api.getAIProfiles())
+    if (list.length > 0) return
+    openConfirm({
+      title: '配置模型服务',
+      message: '使用提取文字、总结和对话前，请先配置你的 AI 服务（自带 Key）。',
+      confirmText: '去配置',
+      showCancel: true,
+      type: 'primary',
+      icon: '⚙',
+      onConfirm: () => openConfig(),
+    })
+  } catch {
+    // 拉配置失败时不打扰；用户点「模型」仍可进
+  }
+}
+
 // 侧边栏（移动端）
 const toggleSidebar = () => { sidebarOpen.value = !sidebarOpen.value }
 const closeSidebar = () => { sidebarOpen.value = false }
@@ -512,6 +535,8 @@ const appCtx = reactive({
   loadMoreTasks,
   showToast,
   openAuth,
+  openConfig,
+  openConfirm,
   toggleSidebar,
   closeSidebar,
 })
@@ -579,7 +604,7 @@ onMounted(() => {
   if (saved) {
     try {
       user.value = JSON.parse(saved)
-      fetchTasks()
+      fetchTasks().then(() => maybePromptAIConfig())
     } catch (e) {}
   }
   window.addEventListener('online', handleOnline)
