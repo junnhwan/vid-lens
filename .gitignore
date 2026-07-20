@@ -61,5 +61,10 @@ docs/vidlens-source-notes.html
 .worktrees/
 /*.png
 
+# Interview VitePress site — removed from main product path (was stale vs PG/pgvector).
+# Keep a local copy if you still need it; do not re-add as product truth.
+# Prefer docs/archive/ for interview materials that stay in git.
+book/
+
 # Local interview/reference drafts
 other-grill-v2.md

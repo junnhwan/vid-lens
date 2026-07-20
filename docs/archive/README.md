@@ -4,7 +4,7 @@
 
 ## 给后续 AI 的规则
 
-- **默认不要读取** `docs/archive/**`、`docs/grill/**`、`book/**`。
+- **默认不要读取** `docs/archive/**`、`docs/grill/**`，以及本机可能残留的 `book/**`（`book/` 已从 git 主路径 untrack，并 gitignore）。
 - 只有用户明确要求面试/简历/复盘时，才进入本目录。
 - 做功能开发、修 bug、改架构时，只看：
   1. 代码（`cmd/server`、`internal/**`）
@@ -19,5 +19,9 @@
 | `interview/` | 面试 defense、QA 脚本、简历草稿、troubleshooting 笔记 |
 | `plans/` | 已完成/过期的实施规划 |
 | `resume-topics/` | 简历专题拆解（历史材料） |
+
+## 关于旧 `book/` 站点
+
+历史上仓库内有 VitePress 面试站 `book/` 与 `deploy-book.yml`。为减少 AI 误读（部分页面仍写 MySQL/Milvus 为默认栈），已从 git 跟踪移除并关闭自动部署。若本机仍有 `book/` 目录，仅作个人参考，**不能覆盖代码与维护地图**。需要长期保留时可拷到独立仓库。
 
 归档不等于作废：面试时仍可用，但**不能覆盖代码与维护地图**。

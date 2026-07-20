@@ -133,12 +133,15 @@ vid-lens/
 └── config.yaml
 ```
 
+> 旧面试 VitePress 站 `book/` 已移出主开发路径（gitignore，不参与构建/部署）。产品与 AI 维护入口以 `docs/README.md` 为准。
+
 ## 📚 维护与迁移文档
 
-- [文档入口](docs/README.md)：事实源层级、默认应读/不应读的路径。
+- [文档入口](docs/README.md)：事实源层级、AI 铁律、默认应读/不应读的路径。
 - [后端维护地图](docs/backend-maintenance-map.md)：主链路、文件职责、不变量和常见修改入口。
 - [pgvector 迁移说明](docs/pgvector-migration.md)：向量重建流程、校验结果和回滚条件。
 - [PostgreSQL 单库迁移说明](docs/postgresql-single-database-migration.md)：业务表迁移证据、运行时边界和 MySQL 观察期退出计划。
+- [评测资料说明](docs/eval/README.md)：离线 RAG/ASR 用例与会话记录边界。
 - [归档：排障与面试记录](docs/archive/interview/troubleshooting-and-interview-notes.md)：历史问题与面试材料（默认开发不必读）。
 
 ## 📄 License
