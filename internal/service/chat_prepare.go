@@ -69,9 +69,17 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	}
 
 	recentLimit := s.cfg.RecentTurns * 2
-	recent, err := s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
-	if err != nil {
-		return nil, err
+	var recent []model.ChatMessage
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		// Knowledge-base membership can change between turns. Until recent
+		// messages carry member-safe provenance, keep history display-only so a
+		// removed video's answer cannot be fed back into retrieval or generation.
+		recentLimit = 0
+	} else {
+		recent, err = s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pipeline := s.newRetrievalPipeline(topK, chat, profile)
 	if session.ScopeType == model.ChatScopeKnowledgeBase {

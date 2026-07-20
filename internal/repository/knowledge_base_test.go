@@ -148,6 +148,99 @@ func TestChatMessageSourcesListAndTaskDeletionCleansKnowledgeBaseScope(t *testin
 	}
 }
 
+func TestCreateExchangeRevalidatesCurrentScopeBeforeWriting(t *testing.T) {
+	t.Run("video task deleted with empty sources", func(t *testing.T) {
+		db := newKnowledgeBaseTestDB(t)
+		user := createKnowledgeBaseUser(t, db, "exchange-video-owner")
+		task := createKnowledgeBaseTask(t, db, user.ID, "exchange-video-task")
+		repo := NewChatRepository(db)
+		session := &model.ChatSession{UserID: user.ID, ScopeType: model.ChatScopeVideo, TaskID: task.ID}
+		if err := repo.CreateSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Delete(&model.VideoTask{}, task.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		err := repo.CreateExchange(user.ID,
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "user", Content: "q"},
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "assistant", Content: "a"},
+			nil,
+		)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("CreateExchange() error = %v, want gorm.ErrRecordNotFound", err)
+		}
+		assertChatMessageCount(t, db, session.ID, 0)
+	})
+
+	t.Run("knowledge base deleted with empty sources", func(t *testing.T) {
+		db := newKnowledgeBaseTestDB(t)
+		user := createKnowledgeBaseUser(t, db, "exchange-kb-owner")
+		kb := &model.KnowledgeBase{UserID: user.ID, Name: "exchange-kb"}
+		if err := NewKnowledgeBaseRepository(db).Create(kb); err != nil {
+			t.Fatal(err)
+		}
+		repo := NewChatRepository(db)
+		session := &model.ChatSession{UserID: user.ID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: kb.ID}
+		if err := repo.CreateSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Delete(&model.KnowledgeBase{}, kb.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		err := repo.CreateExchange(user.ID,
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "user", Content: "q"},
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "assistant", Content: "a"},
+			nil,
+		)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("CreateExchange() error = %v, want gorm.ErrRecordNotFound", err)
+		}
+		assertChatMessageCount(t, db, session.ID, 0)
+	})
+
+	t.Run("knowledge base source removed before write", func(t *testing.T) {
+		db := newKnowledgeBaseTestDB(t)
+		user := createKnowledgeBaseUser(t, db, "exchange-member-owner")
+		task := createKnowledgeBaseTask(t, db, user.ID, "exchange-member-task")
+		kbRepo := NewKnowledgeBaseRepository(db)
+		kb := &model.KnowledgeBase{UserID: user.ID, Name: "exchange-member-kb"}
+		if err := kbRepo.Create(kb); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := kbRepo.AddVideoForUser(user.ID, kb.ID, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		repo := NewChatRepository(db)
+		session := &model.ChatSession{UserID: user.ID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: kb.ID}
+		if err := repo.CreateSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if err := kbRepo.RemoveVideoForUser(user.ID, kb.ID, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		err := repo.CreateExchange(user.ID,
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "user", Content: "q"},
+			&model.ChatMessage{SessionID: session.ID, UserID: user.ID, Role: "assistant", Content: "a"},
+			[]int64{task.ID},
+		)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("CreateExchange() error = %v, want gorm.ErrRecordNotFound", err)
+		}
+		assertChatMessageCount(t, db, session.ID, 0)
+	})
+}
+
+func assertChatMessageCount(t *testing.T, db *gorm.DB, sessionID, want int64) {
+	t.Helper()
+	var count int64
+	if err := db.Model(&model.ChatMessage{}).Where("session_id = ?", sessionID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != want {
+		t.Fatalf("chat message count = %d, want %d", count, want)
+	}
+}
+
 func newKnowledgeBaseTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

@@ -232,6 +232,19 @@ func (s *KnowledgeBaseService) AddVideo(ctx context.Context, userID, knowledgeBa
 	}
 
 	return s.repos.TransactionContext(ctx, func(txRepos *repository.Repositories) error {
+		// Task cleanup locks task first and then related knowledge bases. Keep
+		// the same order here so a stale precheck cannot add a deleted task.
+		lockedTask, err := txRepos.Task.FindByIDForUpdate(taskID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrKnowledgeBaseTaskNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if lockedTask.UserID != userID || lockedTask.DeletedAt.Valid {
+			return ErrKnowledgeBaseTaskNotFound
+		}
+
 		lockedKB, count, err := txRepos.KnowledgeBase.LockForUpdateAndCountMembers(userID, knowledgeBaseID)
 		if err != nil {
 			return err
@@ -256,21 +269,21 @@ func (s *KnowledgeBaseService) AddVideo(ctx context.Context, userID, knowledgeBa
 	})
 }
 
-func (s *KnowledgeBaseService) RemoveVideo(_ context.Context, userID, knowledgeBaseID, taskID int64) error {
-	kb, err := s.repos.KnowledgeBase.FindByIDForUser(userID, knowledgeBaseID)
-	if err != nil {
-		return err
-	}
-	if kb == nil {
-		return ErrKnowledgeBaseNotFound
-	}
-	if err := s.repos.KnowledgeBase.RemoveVideoForUser(userID, knowledgeBaseID, taskID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrKnowledgeBaseVideoNotFound
+func (s *KnowledgeBaseService) RemoveVideo(ctx context.Context, userID, knowledgeBaseID, taskID int64) error {
+	err := s.repos.TransactionContext(ctx, func(txRepos *repository.Repositories) error {
+		kb, err := txRepos.KnowledgeBase.FindByIDForUserForUpdate(userID, knowledgeBaseID)
+		if err != nil {
+			return err
 		}
-		return err
+		if kb == nil {
+			return ErrKnowledgeBaseNotFound
+		}
+		return txRepos.KnowledgeBase.RemoveVideoForUser(userID, knowledgeBaseID, taskID)
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrKnowledgeBaseVideoNotFound
 	}
-	return nil
+	return err
 }
 
 func validateKnowledgeBaseText(name, description string) (string, string, error) {

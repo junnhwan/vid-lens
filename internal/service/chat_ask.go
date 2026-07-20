@@ -57,7 +57,9 @@ func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID in
 	if session, findErr := s.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
 		s.maybeAutoTitleSession(session, question)
 	}
-	_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
+	if recentLimit > 0 {
+		_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
+	}
 	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName}, nil
 }
 

@@ -220,6 +220,35 @@ func (r *KnowledgeBaseRepository) LockForUpdateAndCountMembers(userID, knowledge
 	return knowledgeBase, count, nil
 }
 
+// LockMembershipKnowledgeBasesByTaskID locks every currently related
+// knowledge-base row in ascending ID order. Callers use this before deleting
+// chat sources and membership edges so CreateExchange/RemoveVideo cannot race
+// past task cleanup.
+func (r *KnowledgeBaseRepository) LockMembershipKnowledgeBasesByTaskID(taskID int64) error {
+	var knowledgeBaseIDs []int64
+	if err := r.db.Model(&model.KnowledgeBaseVideo{}).
+		Where("task_id = ?", taskID).
+		Distinct("knowledge_base_id").
+		Order("knowledge_base_id ASC").
+		Pluck("knowledge_base_id", &knowledgeBaseIDs).Error; err != nil {
+		return err
+	}
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		var knowledgeBase model.KnowledgeBase
+		err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Where("id = ?", knowledgeBaseID).
+			First(&knowledgeBase).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *KnowledgeBaseRepository) DeleteMembershipsByTaskID(taskID int64) error {
 	return r.db.Where("task_id = ?", taskID).Delete(&model.KnowledgeBaseVideo{}).Error
 }

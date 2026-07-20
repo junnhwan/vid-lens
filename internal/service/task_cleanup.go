@@ -77,6 +77,9 @@ func (s *TaskCleanupService) RequestDelete(ctx context.Context, userID, taskID i
 			if existing.UserID != userID {
 				return ErrTaskForbidden
 			}
+			if err := deleteTaskDerivedChatRows(txRepos, taskID); err != nil {
+				return err
+			}
 			requested = existing
 			return nil
 		}
@@ -104,7 +107,9 @@ func (s *TaskCleanupService) RequestDelete(ctx context.Context, userID, taskID i
 		if err := txRepos.Task.Delete(task.ID); err != nil {
 			return err
 		}
-		if err := txRepos.KnowledgeBase.DeleteMembershipsByTaskID(task.ID); err != nil {
+		// Derived chat state is removed in the user-visible deletion
+		// transaction. External object/vector cleanup remains asynchronous.
+		if err := deleteTaskDerivedChatRows(txRepos, task.ID); err != nil {
 			return err
 		}
 		requested = job
@@ -274,14 +279,17 @@ func collectTaskEmbeddingModels(repos *repository.Repositories, userID, taskID i
 }
 
 func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
+	// Idempotent fallback for jobs created before RequestDelete started doing
+	// immediate chat cleanup.
+	if err := deleteTaskDerivedChatRows(repos, taskID); err != nil {
+		return err
+	}
 	for _, deleteRows := range []func(int64) error{
 		repos.Transcription.DeleteByTaskID,
 		repos.TranscriptionChunk.DeleteByTaskID,
 		repos.Summary.DeleteByTaskID,
 		repos.VideoChunk.DeleteByTaskID,
 		repos.RAGIndex.DeleteByTaskID,
-		repos.KnowledgeBase.DeleteMembershipsByTaskID,
-		repos.Chat.DeleteByTaskID,
 		repos.TaskJob.DeleteByTaskID,
 	} {
 		if err := deleteRows(taskID); err != nil {
@@ -289,4 +297,16 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 		}
 	}
 	return nil
+}
+
+func deleteTaskDerivedChatRows(repos *repository.Repositories, taskID int64) error {
+	// Keep the KB -> chat -> membership order shared with CreateExchange and
+	// member mutations. Sorting happens inside the lock helper.
+	if err := repos.KnowledgeBase.LockMembershipKnowledgeBasesByTaskID(taskID); err != nil {
+		return err
+	}
+	if err := repos.Chat.DeleteByTaskID(taskID); err != nil {
+		return err
+	}
+	return repos.KnowledgeBase.DeleteMembershipsByTaskID(taskID)
 }

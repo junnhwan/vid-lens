@@ -39,6 +39,14 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 	if err := repos.Chat.CreateSession(session); err != nil {
 		t.Fatal(err)
 	}
+	if err := repos.Chat.CreateMessage(&model.ChatMessage{
+		SessionID: session.ID,
+		UserID:    7,
+		Role:      "assistant",
+		Content:   "这条知识库数据库历史不能进入下一轮生成",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{
 		{{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, ChunkIndex: 1, Content: "A 介绍 owner 校验"}, {TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, ChunkIndex: 2, Content: "B 介绍租约恢复"}},
@@ -49,10 +57,22 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 	cfg := DefaultRAGRetrievalConfig()
 	cfg.NeighborRadius = 0
 	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, Retrieval: &cfg})
+	memory := &fakeChatMemoryStore{recent: []model.ChatMessage{{Role: "assistant", Content: "这条知识库 Redis 历史也不能进入下一轮生成"}}}
+	svc.SetMemoryStore(memory)
 
 	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "两个视频怎么处理失败恢复？", 0, &fakeEmbeddingClient{dim: 3}, chat, ai.Profile{EmbeddingModel: "embed-v1", LLMModel: "chat"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if memory.getCalls != 0 || memory.saveCalls != 0 {
+		t.Fatalf("knowledge-base memory calls get=%d save=%d, want 0,0", memory.getCalls, memory.saveCalls)
+	}
+	for _, call := range chat.messages {
+		for _, message := range call {
+			if strings.Contains(message.Content, "知识库数据库历史") || strings.Contains(message.Content, "知识库 Redis 历史") {
+				t.Fatalf("knowledge-base history leaked into generation: %+v", chat.messages)
+			}
+		}
 	}
 	if len(retriever.requests) != 3 {
 		t.Fatalf("requests=%+v", retriever.requests)

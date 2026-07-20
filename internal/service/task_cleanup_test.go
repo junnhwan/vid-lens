@@ -116,6 +116,52 @@ func TestTaskCleanupRequestRemovesKnowledgeBaseMembershipWithTaskSoftDelete(t *t
 	}
 }
 
+func TestTaskCleanupRequestImmediatelyDeletesDerivedChatSessions(t *testing.T) {
+	repos, db := newMediaTestRepositoriesAndDB(t)
+	asset := createMediaTestAsset(t, repos, "33333333333333333333333333333335", "videos/chat-delete.mp4")
+	task := createMediaTestTask(t, repos, 7, asset, "chat-delete.mp4")
+	kb := &model.KnowledgeBase{UserID: task.UserID, Name: "chat-cleanup-kb"}
+	if err := repos.KnowledgeBase.Create(kb); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.KnowledgeBase.AddVideoForUser(task.UserID, kb.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	videoSession := &model.ChatSession{UserID: task.UserID, ScopeType: model.ChatScopeVideo, TaskID: task.ID, Title: "video"}
+	kbSession := &model.ChatSession{UserID: task.UserID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: kb.ID, Title: "kb"}
+	for _, session := range []*model.ChatSession{videoSession, kbSession} {
+		if err := repos.Chat.CreateSession(session); err != nil {
+			t.Fatal(err)
+		}
+		userMessage := &model.ChatMessage{SessionID: session.ID, UserID: task.UserID, Role: "user", Content: "question"}
+		assistantMessage := &model.ChatMessage{SessionID: session.ID, UserID: task.UserID, Role: "assistant", Content: "answer"}
+		if err := repos.Chat.CreateExchange(task.UserID, userMessage, assistantMessage, []int64{task.ID}); err != nil {
+			t.Fatalf("create exchange for session %d: %v", session.ID, err)
+		}
+	}
+
+	cleanup := NewTaskCleanupService(repos, nil, nil, TaskCleanupConfig{})
+	if _, err := cleanup.RequestDelete(context.Background(), task.UserID, task.ID); err != nil {
+		t.Fatalf("RequestDelete() error = %v", err)
+	}
+	for _, sessionID := range []int64{videoSession.ID, kbSession.ID} {
+		found, err := repos.Chat.FindSessionForUser(task.UserID, sessionID)
+		if err != nil || found != nil {
+			t.Fatalf("session %d after RequestDelete() = (%+v, %v), want nil", sessionID, found, err)
+		}
+	}
+	var messageCount, sourceCount int64
+	if err := db.Model(&model.ChatMessage{}).Count(&messageCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.ChatMessageSource{}).Count(&sourceCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if messageCount != 0 || sourceCount != 0 {
+		t.Fatalf("derived chat rows after RequestDelete(): messages=%d sources=%d, want 0,0", messageCount, sourceCount)
+	}
+}
+
 func TestTaskCleanupRetriesVectorFailureFromPersistedFacts(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	storage := &recordingObjectStorage{}

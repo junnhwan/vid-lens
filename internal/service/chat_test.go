@@ -76,15 +76,19 @@ func (c *streamingRecordingChatClient) StreamChat(_ context.Context, messages []
 }
 
 type fakeChatMemoryStore struct {
-	recent []model.ChatMessage
-	saved  []model.ChatMessage
+	recent    []model.ChatMessage
+	saved     []model.ChatMessage
+	getCalls  int
+	saveCalls int
 }
 
 func (s *fakeChatMemoryStore) GetRecentMessages(_ context.Context, _ int64, _ int) ([]model.ChatMessage, error) {
+	s.getCalls++
 	return s.recent, nil
 }
 
 func (s *fakeChatMemoryStore) SaveRecentMessages(_ context.Context, _ int64, messages []model.ChatMessage, _ int) error {
+	s.saveCalls++
 	s.saved = append([]model.ChatMessage(nil), messages...)
 	return nil
 }

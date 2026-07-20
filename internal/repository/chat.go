@@ -63,12 +63,61 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 	return r.db.Create(message).Error
 }
 
-// CreateExchange atomically persists both chat messages and normalized assistant sources.
+// CreateExchange atomically revalidates the current chat scope before it
+// persists both messages and normalized assistant sources. Scope owners are
+// locked in the same order used by deletion/member mutations so a concurrent
+// lifecycle change either happens entirely before or entirely after the exchange.
 func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) error {
-	if userMessage == nil || assistantMessage == nil {
+	if userMessage == nil || assistantMessage == nil ||
+		userMessage.UserID != userID || assistantMessage.UserID != userID ||
+		userMessage.SessionID <= 0 || userMessage.SessionID != assistantMessage.SessionID {
 		return gorm.ErrInvalidData
 	}
+	sourceTaskIDs, err := normalizeSourceTaskIDs(sourceTaskIDs)
+	if err != nil {
+		return err
+	}
+
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Read the owner-scoped session first only to discover the resource lock
+		// order. The session is locked and compared again below before writes.
+		var observed model.ChatSession
+		if err := tx.Where("id = ? AND user_id = ?", userMessage.SessionID, userID).First(&observed).Error; err != nil {
+			return err
+		}
+
+		switch observed.ScopeType {
+		case model.ChatScopeVideo:
+			var task model.VideoTask
+			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
+				Where("id = ? AND user_id = ?", observed.TaskID, userID).
+				First(&task).Error; err != nil {
+				return err
+			}
+		case model.ChatScopeKnowledgeBase:
+			var knowledgeBase model.KnowledgeBase
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ? AND user_id = ?", observed.KnowledgeBaseID, userID).
+				First(&knowledgeBase).Error; err != nil {
+				return err
+			}
+		default:
+			return gorm.ErrInvalidData
+		}
+
+		var session model.ChatSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", observed.ID, userID).
+			First(&session).Error; err != nil {
+			return err
+		}
+		if !sameChatSessionScope(&observed, &session) {
+			return gorm.ErrRecordNotFound
+		}
+		if err := validateExchangeSources(tx, userID, &session, sourceTaskIDs); err != nil {
+			return err
+		}
+
 		if err := tx.Create(userMessage).Error; err != nil {
 			return err
 		}
@@ -77,14 +126,68 @@ func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMess
 		}
 		sources := make([]model.ChatMessageSource, 0, len(sourceTaskIDs))
 		for _, taskID := range sourceTaskIDs {
-			source := model.ChatMessageSource{MessageID: assistantMessage.ID, SessionID: assistantMessage.SessionID, TaskID: taskID}
-			if err := validateMessageSourceForUser(tx, userID, &source); err != nil {
-				return err
-			}
-			sources = append(sources, source)
+			sources = append(sources, model.ChatMessageSource{
+				MessageID: assistantMessage.ID,
+				SessionID: assistantMessage.SessionID,
+				TaskID:    taskID,
+			})
 		}
 		return createMessageSources(tx, sources)
 	})
+}
+
+func normalizeSourceTaskIDs(taskIDs []int64) ([]int64, error) {
+	unique := make([]int64, 0, len(taskIDs))
+	seen := make(map[int64]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID <= 0 {
+			return nil, gorm.ErrInvalidData
+		}
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		unique = append(unique, taskID)
+	}
+	return unique, nil
+}
+
+func sameChatSessionScope(left, right *model.ChatSession) bool {
+	return left != nil && right != nil &&
+		left.ID == right.ID && left.UserID == right.UserID &&
+		left.ScopeType == right.ScopeType && left.TaskID == right.TaskID &&
+		left.KnowledgeBaseID == right.KnowledgeBaseID
+}
+
+func validateExchangeSources(db *gorm.DB, userID int64, session *model.ChatSession, sourceTaskIDs []int64) error {
+	switch session.ScopeType {
+	case model.ChatScopeVideo:
+		for _, taskID := range sourceTaskIDs {
+			if taskID != session.TaskID {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		return nil
+	case model.ChatScopeKnowledgeBase:
+		if len(sourceTaskIDs) == 0 {
+			return nil
+		}
+		var count int64
+		err := db.Table("knowledge_base_videos AS kbv").
+			Joins("JOIN video_tasks AS vt ON vt.id = kbv.task_id AND vt.deleted_at IS NULL").
+			Where("kbv.knowledge_base_id = ? AND kbv.task_id IN ? AND vt.user_id = ?", session.KnowledgeBaseID, sourceTaskIDs, userID).
+			Distinct("kbv.task_id").
+			Count(&count).Error
+		if err != nil {
+			return err
+		}
+		if count != int64(len(sourceTaskIDs)) {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	default:
+		return gorm.ErrInvalidData
+	}
 }
 
 func (r *ChatRepository) CreateMessageSource(userID int64, source *model.ChatMessageSource) error {
