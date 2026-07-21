@@ -3,14 +3,17 @@ import assert from 'node:assert/strict'
 import {
   DEFAULT_SUMMARY_PREVIEW_OPTIONS,
   DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS,
+  taskResultExpandButtonLabel,
+  taskResultExpandMeta,
   taskResultNeedsExpansion,
   taskResultTextForDisplay,
 } from '../src/taskResultDisplayPolicy.js'
 
 const shortContent = '这是一段较短的结果。'
-const longSingleLine = '这是一段很长的识别文本'.repeat(120)
-const longTranscriptionLines = Array.from({ length: 12 }, (_, index) => `转写第${index + 1}行`).join('\n')
-const longSummaryLines = Array.from({ length: 10 }, (_, index) => `总结第${index + 1}行`).join('\n')
+// 需明显超过 DEFAULT maxChars(1800) / maxLines，才应触发展开
+const longSingleLine = '这是一段很长的识别文本'.repeat(200)
+const longTranscriptionLines = Array.from({ length: 20 }, (_, index) => `转写第${index + 1}行`).join('\n')
+const longSummaryLines = Array.from({ length: 18 }, (_, index) => `总结第${index + 1}行`).join('\n')
 
 assert.equal(
   taskResultNeedsExpansion(shortContent, DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS),
@@ -52,4 +55,21 @@ assert.equal(
   taskResultTextForDisplay(longSummaryLines, true, DEFAULT_SUMMARY_PREVIEW_OPTIONS),
   longSummaryLines,
   'expanded task result content should display the full original content',
+)
+
+const meta = taskResultExpandMeta(longTranscriptionLines)
+assert.equal(meta.lines, 20, 'expand meta should count lines')
+assert.ok(meta.chars > 0, 'expand meta should count characters')
+assert.match(meta.label, /字/, 'expand meta label should mention characters')
+
+assert.equal(
+  taskResultExpandButtonLabel(true, longTranscriptionLines),
+  '收起',
+  'expanded button label is collapse',
+)
+
+assert.match(
+  taskResultExpandButtonLabel(false, longTranscriptionLines),
+  /^展开全部 · /,
+  'collapsed button label includes full length hint',
 )

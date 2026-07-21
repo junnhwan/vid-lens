@@ -255,15 +255,26 @@
               </button>
             </div>
           </div>
-          <pre class="result-text">{{ transcriptionPreview }}</pre>
-          <button
-            v-if="showTranscriptionExpand"
-            type="button"
-            class="expand-btn"
-            @click="transcriptionExpanded = !transcriptionExpanded"
-          >
-            {{ transcriptionExpanded ? '收起' : '展开全部' }}
-          </button>
+          <div class="result-article" :class="{ expanded: transcriptionExpanded, collapsed: showTranscriptionExpand && !transcriptionExpanded }">
+            <pre class="result-text">{{ transcriptionPreview }}</pre>
+            <div
+              v-if="showTranscriptionExpand && !transcriptionExpanded"
+              class="result-fade"
+              aria-hidden="true"
+            ></div>
+          </div>
+          <div v-if="showTranscriptionExpand" class="expand-bar">
+            <button
+              type="button"
+              class="expand-btn"
+              :aria-expanded="transcriptionExpanded"
+              @click="toggleTranscriptionExpand"
+            >
+              <span class="expand-chevron" aria-hidden="true">{{ transcriptionExpanded ? '▴' : '▾' }}</span>
+              <span class="expand-label">{{ transcriptionExpandLabel }}</span>
+            </button>
+            <span v-if="!transcriptionExpanded" class="expand-hint">{{ transcriptionExpandMeta.label }}</span>
+          </div>
         </template>
         <div v-else class="result-empty">
           <p>还没有文字提取结果</p>
@@ -306,15 +317,26 @@
               </button>
             </div>
           </div>
-          <div class="result-markdown" v-html="renderMarkdown(summaryPreview)"></div>
-          <button
-            v-if="showSummaryExpand"
-            type="button"
-            class="expand-btn"
-            @click="summaryExpanded = !summaryExpanded"
-          >
-            {{ summaryExpanded ? '收起' : '展开全部' }}
-          </button>
+          <div class="result-article" :class="{ expanded: summaryExpanded, collapsed: showSummaryExpand && !summaryExpanded }">
+            <div class="result-markdown" v-html="renderMarkdown(summaryPreview)"></div>
+            <div
+              v-if="showSummaryExpand && !summaryExpanded"
+              class="result-fade"
+              aria-hidden="true"
+            ></div>
+          </div>
+          <div v-if="showSummaryExpand" class="expand-bar">
+            <button
+              type="button"
+              class="expand-btn"
+              :aria-expanded="summaryExpanded"
+              @click="toggleSummaryExpand"
+            >
+              <span class="expand-chevron" aria-hidden="true">{{ summaryExpanded ? '▴' : '▾' }}</span>
+              <span class="expand-label">{{ summaryExpandLabel }}</span>
+            </button>
+            <span v-if="!summaryExpanded" class="expand-hint">{{ summaryExpandMeta.label }}</span>
+          </div>
         </template>
         <div v-else class="result-empty">
           <p>还没有 AI 总结</p>
@@ -350,6 +372,10 @@ import { taskFailureMessage } from '../taskDetailPolicy.js'
 import {
   DEFAULT_SUMMARY_PREVIEW_OPTIONS,
   DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS,
+  FOCUS_SUMMARY_PREVIEW_OPTIONS,
+  FOCUS_TRANSCRIPTION_PREVIEW_OPTIONS,
+  taskResultExpandButtonLabel,
+  taskResultExpandMeta,
   taskResultNeedsExpansion,
   taskResultTextForDisplay,
 } from '../taskResultDisplayPolicy.js'
@@ -408,25 +434,51 @@ const tabs = computed(() => [
   },
 ])
 
+const transcriptionOptions = computed(() =>
+  props.readingFocus ? FOCUS_TRANSCRIPTION_PREVIEW_OPTIONS : DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS,
+)
+const summaryOptions = computed(() =>
+  props.readingFocus ? FOCUS_SUMMARY_PREVIEW_OPTIONS : DEFAULT_SUMMARY_PREVIEW_OPTIONS,
+)
+
 const transcriptionPreview = computed(() => {
   const content = props.task?.transcription?.content || ''
-  return taskResultTextForDisplay(content, transcriptionExpanded.value, DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS)
+  return taskResultTextForDisplay(content, transcriptionExpanded.value, transcriptionOptions.value)
 })
 
 const summaryPreview = computed(() => {
   const content = props.task?.summary?.content || ''
-  return taskResultTextForDisplay(content, summaryExpanded.value, DEFAULT_SUMMARY_PREVIEW_OPTIONS)
+  return taskResultTextForDisplay(content, summaryExpanded.value, summaryOptions.value)
 })
 
 const showTranscriptionExpand = computed(() => {
   const content = props.task?.transcription?.content || ''
-  return taskResultNeedsExpansion(content, DEFAULT_TRANSCRIPTION_PREVIEW_OPTIONS)
+  return taskResultNeedsExpansion(content, transcriptionOptions.value)
 })
 
 const showSummaryExpand = computed(() => {
   const content = props.task?.summary?.content || ''
-  return taskResultNeedsExpansion(content, DEFAULT_SUMMARY_PREVIEW_OPTIONS)
+  return taskResultNeedsExpansion(content, summaryOptions.value)
 })
+
+const transcriptionExpandMeta = computed(() =>
+  taskResultExpandMeta(props.task?.transcription?.content || ''),
+)
+const summaryExpandMeta = computed(() => taskResultExpandMeta(props.task?.summary?.content || ''))
+
+const transcriptionExpandLabel = computed(() =>
+  taskResultExpandButtonLabel(transcriptionExpanded.value, props.task?.transcription?.content || ''),
+)
+const summaryExpandLabel = computed(() =>
+  taskResultExpandButtonLabel(summaryExpanded.value, props.task?.summary?.content || ''),
+)
+
+const toggleTranscriptionExpand = () => {
+  transcriptionExpanded.value = !transcriptionExpanded.value
+}
+const toggleSummaryExpand = () => {
+  summaryExpanded.value = !summaryExpanded.value
+}
 
 const canUseRAG = computed(() => {
   return hasTranscriptionResult(props.task) || props.task?.status === 3
@@ -1326,24 +1378,98 @@ watch(
   border: 1px solid color-mix(in srgb, var(--vl-primary) 20%, transparent);
 }
 
+.result-article {
+  position: relative;
+}
+
+.result-article.collapsed .result-text,
+.result-article.collapsed .result-markdown {
+  /* 折叠时略压行距，视觉更「摘要」 */
+  max-height: none;
+}
+
+.result-fade {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4.5rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--vl-panel) 0%, transparent) 0%,
+    color-mix(in srgb, var(--vl-panel) 55%, transparent) 45%,
+    var(--vl-panel) 100%
+  );
+}
+
+.expand-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem 0.85rem;
+  margin-top: 0.35rem;
+  padding: 0.65rem 0 0.15rem;
+  border-top: 1px dashed color-mix(in srgb, var(--vl-border) 80%, transparent);
+}
+
 .expand-btn {
-  width: 100%;
-  margin-top: 0.75rem;
-  padding: 0.55rem 1rem;
-  border-radius: var(--vl-radius-sm);
-  border: 1px solid var(--vl-border);
-  background: transparent;
-  color: var(--vl-text-secondary);
-  font-weight: 600;
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: auto;
+  min-width: 10rem;
+  margin: 0;
+  padding: 0.5rem 1.05rem;
+  border-radius: 999px;
+  border: 1px solid var(--vl-border-strong);
+  background: color-mix(in srgb, var(--vl-surface) 70%, transparent);
+  color: var(--vl-text);
+  font-weight: 650;
+  font-size: 0.84rem;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  box-shadow: var(--vl-shadow-sm);
+  transition: border-color 0.18s, color 0.18s, background 0.18s, transform 0.18s, box-shadow 0.18s;
 }
 
 .expand-btn:hover {
   border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--vl-primary) 12%, transparent);
+}
+
+.expand-btn:active {
+  transform: translateY(0);
+}
+
+.expand-chevron {
+  font-size: 0.78rem;
+  line-height: 1;
+  opacity: 0.85;
+  color: var(--vl-primary);
+}
+
+.expand-label {
+  letter-spacing: 0.01em;
+}
+
+.expand-hint {
+  font-size: 0.75rem;
+  color: var(--vl-text-muted);
+  font-family: var(--vl-font-mono);
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expand-btn {
+    transition: none;
+  }
+  .expand-btn:hover {
+    transform: none;
+  }
 }
 
 .result-empty {
