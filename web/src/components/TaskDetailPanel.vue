@@ -13,7 +13,7 @@
   <aside
     v-else
     class="detail-panel"
-    :class="{ mobile: mobileSheet }"
+    :class="{ mobile: mobileSheet, focus: readingFocus }"
     role="region"
     :aria-label="task.title || task.filename"
   >
@@ -40,69 +40,88 @@
           <span class="meta-muted">{{ formatFileSize(task.file_size) }}</span>
         </div>
       </div>
-      <button
-        class="close-btn"
-        type="button"
-        @click="$emit('close')"
-        aria-label="关闭详情"
-        title="关闭"
-      >
-        ×
-      </button>
+      <div class="header-tools">
+        <button
+          v-if="!mobileSheet"
+          type="button"
+          class="tool-btn"
+          :class="{ active: readingFocus }"
+          :title="readingFocus ? '退出专注阅读' : '专注阅读（隐藏列表）'"
+          :aria-pressed="readingFocus"
+          @click="$emit('toggle-focus')"
+        >
+          {{ readingFocus ? '退出专注' : '专注阅读' }}
+        </button>
+        <button
+          v-if="canUseRAG"
+          type="button"
+          class="tool-btn chat"
+          @click="goChat"
+        >
+          去对话
+        </button>
+        <div class="more-wrap" ref="moreWrapRef">
+          <button
+            type="button"
+            class="tool-btn ghost"
+            :aria-expanded="moreOpen"
+            aria-haspopup="menu"
+            @click="moreOpen = !moreOpen"
+          >
+            更多
+          </button>
+          <div v-if="moreOpen" class="more-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              class="more-item"
+              :disabled="txPrimaryDisabled"
+              @click="runAndCloseMore(() => $emit('transcribe'))"
+            >
+              {{ hasTx ? '查看文字提取' : '提取文字' }}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="more-item"
+              :disabled="sumPrimaryDisabled"
+              @click="runAndCloseMore(() => $emit('analyze'))"
+            >
+              {{ hasSum ? '查看 AI 总结' : 'AI 总结' }}
+            </button>
+            <button
+              v-if="hasTx"
+              type="button"
+              role="menuitem"
+              class="more-item subtle"
+              :disabled="isActionDisabled"
+              @click="runAndCloseMore(() => $emit('retranscribe'))"
+            >
+              重新提取
+            </button>
+            <button
+              v-if="hasSum"
+              type="button"
+              role="menuitem"
+              class="more-item subtle"
+              :disabled="isActionDisabled"
+              @click="runAndCloseMore(() => $emit('reanalyze'))"
+            >
+              重新总结
+            </button>
+          </div>
+        </div>
+        <button
+          class="close-btn"
+          type="button"
+          @click="$emit('close')"
+          aria-label="关闭详情"
+          title="关闭"
+        >
+          ×
+        </button>
+      </div>
     </header>
-
-    <div class="detail-actions">
-      <div class="action-stack">
-        <button
-          class="action-btn"
-          :class="{ done: hasTx }"
-          type="button"
-          @click="$emit('transcribe')"
-          :disabled="txPrimaryDisabled"
-          :title="hasTx ? '文字已提取，请在下方 Tab 查看' : '提取视频文字'"
-        >
-          {{ txLabel }}
-        </button>
-        <button
-          v-if="hasTx && !isActionDisabled"
-          type="button"
-          class="rerun-link"
-          @click="$emit('retranscribe')"
-          title="重新调用 ASR，覆盖已有文字"
-        >
-          重新提取
-        </button>
-      </div>
-      <div class="action-stack">
-        <button
-          class="action-btn accent"
-          :class="{ done: hasSum }"
-          type="button"
-          @click="$emit('analyze')"
-          :disabled="sumPrimaryDisabled"
-          :title="hasSum ? '总结已生成，请在下方 Tab 查看' : '生成 AI 总结'"
-        >
-          {{ sumLabel }}
-        </button>
-        <button
-          v-if="hasSum && !isActionDisabled"
-          type="button"
-          class="rerun-link"
-          @click="$emit('reanalyze')"
-          title="重新调用模型，覆盖已有总结"
-        >
-          重新总结
-        </button>
-      </div>
-      <button
-        v-if="canUseRAG"
-        class="action-btn chat"
-        type="button"
-        @click="goChat"
-      >
-        去对话
-      </button>
-    </div>
 
     <nav class="detail-tabs" role="tablist" aria-label="详情分区">
       <button
@@ -314,7 +333,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useRouter } from 'vue-router'
@@ -347,15 +366,33 @@ const props = defineProps({
   loading: Boolean,
   /** 移动端全屏 sheet 模式（显示返回按钮） */
   mobileSheet: { type: Boolean, default: false },
+  /** 实验：专注阅读（父级隐藏列表） */
+  readingFocus: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close', 'transcribe', 'analyze', 'retranscribe', 'reanalyze', 'toast'])
+const emit = defineEmits(['close', 'transcribe', 'analyze', 'retranscribe', 'reanalyze', 'toggle-focus', 'toast'])
 
 const router = useRouter()
 const activeTab = ref('overview')
 const transcriptionExpanded = ref(false)
 const summaryExpanded = ref(false)
 const jobsExpanded = ref(false)
+const moreOpen = ref(false)
+const moreWrapRef = ref(null)
+
+const runAndCloseMore = (fn) => {
+  moreOpen.value = false
+  fn?.()
+}
+
+const onDocClick = (e) => {
+  if (!moreOpen.value) return
+  const el = moreWrapRef.value
+  if (el && !el.contains(e.target)) moreOpen.value = false
+}
+
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 const tabs = computed(() => [
   { key: 'overview', label: '概览' },
@@ -548,9 +585,13 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  padding: 1rem 1.15rem 0.85rem;
+  padding: 0.85rem 1.15rem 0.7rem;
   border-bottom: 1px solid var(--vl-border);
   flex-shrink: 0;
+}
+
+.detail-panel.focus .detail-header {
+  padding: 1rem 1.5rem 0.85rem;
 }
 
 .back-btn {
@@ -579,9 +620,9 @@ watch(
 }
 
 .detail-title {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.3rem;
   font-family: var(--vl-font-display);
-  font-size: 1.15rem;
+  font-size: 1.18rem;
   font-weight: 700;
   color: var(--vl-text);
   line-height: 1.35;
@@ -589,6 +630,11 @@ watch(
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.detail-panel.focus .detail-title {
+  font-size: 1.35rem;
+  -webkit-line-clamp: 3;
 }
 
 .header-meta {
@@ -607,6 +653,104 @@ watch(
 .meta-muted {
   font-family: var(--vl-font-mono);
   font-size: 0.74rem;
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.tool-btn {
+  appearance: none;
+  border: 1px solid var(--vl-border);
+  background: var(--vl-surface-hover);
+  color: var(--vl-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--vl-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.tool-btn:hover {
+  border-color: var(--vl-border-focus);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
+}
+
+.tool-btn.active {
+  border-color: var(--vl-border-focus);
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vl-primary) 20%, transparent);
+}
+
+.tool-btn.chat {
+  border-color: color-mix(in srgb, var(--vl-info) 35%, transparent);
+  color: var(--vl-info);
+  background: var(--vl-info-dim);
+}
+
+.tool-btn.chat:hover {
+  border-color: color-mix(in srgb, var(--vl-info) 55%, transparent);
+  background: color-mix(in srgb, var(--vl-info) 18%, transparent);
+}
+
+.tool-btn.ghost {
+  background: transparent;
+}
+
+.more-wrap {
+  position: relative;
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 9.5rem;
+  padding: 0.3rem;
+  border-radius: var(--vl-radius);
+  border: 1px solid var(--vl-border-strong);
+  background: var(--vl-panel);
+  box-shadow: var(--vl-shadow);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.more-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--vl-radius-sm);
+  color: var(--vl-text);
+  font-size: 0.84rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.more-item:hover:not(:disabled) {
+  background: var(--vl-surface-hover);
+  color: var(--vl-primary);
+}
+
+.more-item.subtle {
+  color: var(--vl-text-muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.more-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .close-btn {
@@ -631,26 +775,8 @@ watch(
   border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 
-.detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.85rem 1.15rem;
-  border-bottom: 1px solid var(--vl-border);
-  flex-shrink: 0;
-  align-items: flex-start;
-}
-
-.action-stack {
-  flex: 1;
-  min-width: 5.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
+/* 空态 / 概览内 CTA 仍用 action-btn */
 .action-btn {
-  width: 100%;
   min-width: 5.5rem;
   padding: 0.55rem 0.75rem;
   border-radius: var(--vl-radius-sm);
@@ -663,33 +789,7 @@ watch(
   transition: border-color 0.2s, color 0.2s, background 0.2s, opacity 0.2s;
 }
 
-.detail-actions > .action-btn.chat {
-  flex: 1;
-  width: auto;
-  align-self: stretch;
-}
-
-.action-btn:hover:not(:disabled) {
-  border-color: var(--vl-border-focus);
-  color: var(--vl-primary);
-  background: var(--vl-primary-dim);
-}
-
-.action-btn.accent {
-  border-color: var(--vl-accent-glow);
-  color: var(--vl-accent);
-  background: var(--vl-accent-dim);
-}
-
-.action-btn.chat {
-  border-color: color-mix(in srgb, var(--vl-info) 30%, transparent);
-  color: var(--vl-info);
-  background: var(--vl-info-dim);
-}
-
 .action-btn.solid {
-  flex: 0 1 auto;
-  width: auto;
   border-color: var(--vl-border-focus);
   color: var(--vl-text-inverse);
   background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
@@ -700,61 +800,28 @@ watch(
   cursor: not-allowed;
 }
 
-.action-btn.done:disabled {
-  opacity: 0.55;
-  color: var(--vl-text-muted);
-  border-color: var(--vl-border);
-  background: color-mix(in srgb, var(--vl-bg) 45%, transparent);
-  cursor: default;
-}
-
-.rerun-link {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--vl-text-muted);
-  font-size: 0.72rem;
-  font-weight: 500;
-  padding: 0.05rem 0.1rem;
-  cursor: pointer;
-  text-align: center;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  opacity: 0.8;
-}
-
-.rerun-link:hover {
-  color: var(--vl-text-secondary);
-  opacity: 1;
-}
-
-.icon-btn.subtle {
-  opacity: 0.75;
-  font-weight: 500;
-}
-
-.icon-btn.subtle:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .detail-tabs {
   display: flex;
   gap: 0.25rem;
-  padding: 0.55rem 1rem 0;
+  padding: 0.4rem 1rem 0;
   border-bottom: 1px solid var(--vl-border);
   flex-shrink: 0;
   overflow-x: auto;
 }
 
+.detail-panel.focus .detail-tabs {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
 .tab-btn {
   position: relative;
-  padding: 0.55rem 0.9rem 0.65rem;
+  padding: 0.55rem 0.95rem 0.65rem;
   border: none;
   background: transparent;
   color: var(--vl-text-muted);
   font-weight: 600;
-  font-size: 0.84rem;
+  font-size: 0.86rem;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
@@ -784,13 +851,23 @@ watch(
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 1rem 1.15rem 1.35rem;
+  padding: 1.1rem 1.25rem 1.5rem;
   scrollbar-width: thin;
   scrollbar-color: var(--vl-primary-glow) transparent;
 }
 
+.detail-panel.focus .detail-body {
+  padding: 1.35rem 1.75rem 2rem;
+}
+
 .tab-pane {
   animation: vl-fade-in-up 0.28s var(--vl-ease);
+  max-width: 48rem;
+}
+
+.detail-panel.focus .tab-pane {
+  max-width: 52rem;
+  margin: 0 auto;
 }
 
 .panel-loading-banner {
@@ -1113,19 +1190,21 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.9rem;
 }
 
 .result-toolbar h4 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--vl-text);
+  font-family: var(--vl-font-display);
 }
 
 .result-actions {
   display: flex;
   gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .icon-btn {
@@ -1145,41 +1224,77 @@ watch(
   background: var(--vl-primary-glow);
 }
 
+.icon-btn.subtle {
+  opacity: 0.8;
+  font-weight: 500;
+  border-color: var(--vl-border);
+  background: transparent;
+  color: var(--vl-text-muted);
+}
+
+.icon-btn.subtle:hover:not(:disabled) {
+  color: var(--vl-text-secondary);
+  border-color: var(--vl-border-strong);
+  background: var(--vl-surface-hover);
+}
+
+.icon-btn.subtle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 文档式阅读：弱化「卡片套卡片」，更像正文纸 */
 .result-text {
   margin: 0;
-  padding: 1rem 1.1rem;
-  border-radius: var(--vl-radius);
-  border: 1px solid var(--vl-border);
-  background: var(--vl-surface);
-  font-family: var(--vl-font-mono);
-  font-size: 0.86rem;
-  line-height: 1.75;
+  padding: 0.15rem 0.1rem 0.5rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--vl-font), var(--vl-font-mono);
+  font-size: 0.95rem;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
   white-space: pre-wrap;
-  color: var(--vl-text-secondary);
+  color: var(--vl-text);
   max-height: none;
   overflow: visible;
 }
 
+.detail-panel.focus .result-text {
+  font-size: 1.02rem;
+  line-height: 1.9;
+}
+
 .result-markdown {
-  padding: 1rem 1.1rem;
-  border-radius: var(--vl-radius);
-  border: 1px solid var(--vl-border);
-  background: var(--vl-surface);
-  line-height: 1.8;
+  padding: 0.15rem 0.1rem 0.5rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  line-height: 1.85;
   overflow: visible;
+}
+
+.detail-panel.focus .result-markdown {
+  font-size: 1.02rem;
 }
 
 .result-markdown :deep(h2),
 .result-markdown :deep(h3) {
   color: var(--vl-text);
-  margin: 1.1rem 0 0.55rem;
+  margin: 1.25rem 0 0.6rem;
   font-weight: 700;
+  font-family: var(--vl-font-display);
+  line-height: 1.35;
 }
 
 .result-markdown :deep(p) {
-  margin: 0 0 0.85rem;
-  color: var(--vl-text-secondary);
-  font-size: 0.9rem;
+  margin: 0 0 0.95rem;
+  color: var(--vl-text);
+  font-size: 0.96rem;
+}
+
+.detail-panel.focus .result-markdown :deep(p) {
+  font-size: 1.02rem;
 }
 
 .result-markdown :deep(strong) {
@@ -1189,12 +1304,12 @@ watch(
 
 .result-markdown :deep(ul) {
   padding-left: 1.35rem;
-  margin: 0 0 0.85rem;
+  margin: 0 0 0.95rem;
 }
 
 .result-markdown :deep(li) {
-  margin-bottom: 0.4rem;
-  color: var(--vl-text-secondary);
+  margin-bottom: 0.45rem;
+  color: var(--vl-text);
 }
 
 .result-markdown :deep(li::marker) {

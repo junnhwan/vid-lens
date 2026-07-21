@@ -550,17 +550,34 @@ onUnmounted(() => {
 }
 
 .tasks-section.split-mode .section-header h2 {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
+}
+
+.tasks-section.split-mode .section-header {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.7rem;
+  gap: 0.55rem;
 }
 
 .tasks-section.split-mode .search-box {
   min-width: 0;
   flex: 1 1 100%;
   width: 100%;
+  font-size: 0.82rem;
 }
 
 .tasks-section.split-mode .filter-tabs {
   flex: 1 1 100%;
+  gap: 0.25rem;
+}
+
+.tasks-section.split-mode .tab {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.tasks-section.split-mode .tab-count {
+  font-size: 0.7rem;
 }
 
 @media (max-width: 600px) {

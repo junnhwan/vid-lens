@@ -14,7 +14,13 @@
       @toast="(msg) => app.showToast(msg, true)"
     />
 
-    <div class="library-main" :class="{ 'has-selection': !!app.selectedTask }">
+    <div
+      class="library-main"
+      :class="{
+        'has-selection': !!app.selectedTask,
+        'reading-focus': readingFocus && !!app.selectedTask && !isMobile,
+      }"
+    >
       <!-- 左：任务列表 -->
       <main
         class="list-pane"
@@ -49,11 +55,13 @@
         <TaskDetailPanel
           :task="app.selectedTask"
           :loading="app.loading[app.selectedTask?.id]"
-          @close="app.closeDrawer"
+          :reading-focus="readingFocus"
+          @close="closeDetail"
           @transcribe="app.doTranscribe(app.selectedTask)"
           @analyze="app.doAnalyze(app.selectedTask)"
           @retranscribe="app.doRetranscribe(app.selectedTask)"
           @reanalyze="app.doReanalyze(app.selectedTask)"
+          @toggle-focus="readingFocus = !readingFocus"
           @toast="(msg) => app.showToast(msg)"
         />
       </div>
@@ -91,9 +99,16 @@ const router = useRouter()
 
 const viewportW = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)
 const isMobile = computed(() => viewportW.value <= 900)
+/** 实验：阅读专注模式 — 隐藏列表，正文吃满主区 */
+const readingFocus = ref(false)
 
 const goChat = (task) => {
   router.push({ name: 'chat-task', params: { taskId: task.id } })
+}
+
+const closeDetail = () => {
+  readingFocus.value = false
+  app.closeDrawer()
 }
 
 // 空态 CTA：未登录先登录；移动端打开侧栏方便选文件
@@ -114,6 +129,7 @@ const onRequestUpload = () => {
 
 const onResize = () => {
   viewportW.value = window.innerWidth
+  if (viewportW.value <= 900) readingFocus.value = false
 }
 
 // 支持把视频拖到页面任意位置上传（Sidebar 上传卡用 .stop 自行处理，不会重复触发）
@@ -142,7 +158,8 @@ onUnmounted(() => {
   display: flex;
   height: calc(100vh - var(--vl-nav-h));
   max-height: calc(100vh - var(--vl-nav-h));
-  max-width: 1440px;
+  /* 实验：略放宽主区上限，阅读时少「两边空」感 */
+  max-width: 1600px;
   margin: 0 auto;
   position: relative;
   overflow: hidden;
@@ -166,14 +183,30 @@ onUnmounted(() => {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  transition: flex 0.25s var(--vl-ease), max-width 0.25s var(--vl-ease), padding 0.25s var(--vl-ease);
+  transition:
+    flex 0.28s var(--vl-ease),
+    max-width 0.28s var(--vl-ease),
+    padding 0.28s var(--vl-ease),
+    opacity 0.22s var(--vl-ease),
+    transform 0.28s var(--vl-ease);
 }
 
-/* 有选中时左栏收窄，给详情更多阅读宽度 */
+/* 有选中：列表收成窄文件条，正文主导 */
 .library-main.has-selection .list-pane {
-  flex: 0 0 min(360px, 34%);
-  max-width: 400px;
-  padding-right: 0.85rem;
+  flex: 0 0 min(280px, 26%);
+  max-width: 300px;
+  padding: 1rem 0.65rem 1.5rem 1rem;
+}
+
+/* 阅读专注：列表滑出，详情全宽 */
+.library-main.reading-focus .list-pane {
+  flex: 0 0 0;
+  max-width: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transform: translateX(-8px);
 }
 
 .detail-pane {
@@ -181,11 +214,16 @@ onUnmounted(() => {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  padding: 1.35rem 1.5rem 1.75rem 0.35rem;
+  padding: 1rem 1.25rem 1.25rem 0.5rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   animation: vl-fade-in-up 0.28s var(--vl-ease);
+  transition: padding 0.28s var(--vl-ease);
+}
+
+.library-main.reading-focus .detail-pane {
+  padding: 0.75rem 1.75rem 1.25rem 1.75rem;
 }
 
 .detail-pane > :deep(.detail-panel) {
