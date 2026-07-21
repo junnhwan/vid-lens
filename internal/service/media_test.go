@@ -246,7 +246,7 @@ func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
 	}
 
 	svc := &MediaService{repo: repos, mq: producer}
-	if err := svc.RequestTranscribe(context.Background(), 7, task.ID); err != nil {
+	if err := svc.RequestTranscribe(context.Background(), 7, task.ID, false); err != nil {
 		t.Fatalf("RequestTranscribe: %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestRequestTranscribeEnqueueFailureRemainsRetryable(t *testing.T) {
 	}
 
 	svc := &MediaService{repo: repos, mq: producer}
-	err := svc.RequestTranscribe(context.Background(), 7, task.ID)
+	err := svc.RequestTranscribe(context.Background(), 7, task.ID, false)
 	assertStableInitialDispatchError(t, err)
 
 	assertInitialDispatchFailureIsRetryable(t, repos, task.ID, model.TaskJobTypeTranscribe, model.TaskStageTranscribing)
@@ -316,7 +316,7 @@ func TestRequestAnalysisEnqueueFailureRemainsRetryable(t *testing.T) {
 	}
 
 	svc := &MediaService{repo: repos, mq: producer}
-	err := svc.RequestAnalysis(context.Background(), 7, task.ID)
+	err := svc.RequestAnalysis(context.Background(), 7, task.ID, false)
 	assertStableInitialDispatchError(t, err)
 
 	assertInitialDispatchFailureIsRetryable(t, repos, task.ID, model.TaskJobTypeAnalyze, model.TaskStageSummarizing)
@@ -409,7 +409,7 @@ func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
 	}
 
 	svc := &MediaService{repo: repos, mq: producer}
-	if err := svc.RequestAnalysis(context.Background(), 7, task.ID); err != nil {
+	if err := svc.RequestAnalysis(context.Background(), 7, task.ID, false); err != nil {
 		t.Fatalf("RequestAnalysis: %v", err)
 	}
 

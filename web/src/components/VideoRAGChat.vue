@@ -197,41 +197,59 @@
             class="mode-toggle"
             :class="{ active: chatMode === 'video_assistant' }"
             :disabled="loading || sessionLoading"
-            title="结合摘要、转写和必要检索回答"
+            title="结合摘要、转写和必要检索回答（默认产品路径）"
             @click="chatMode = 'video_assistant'"
           >
             视频助手
           </button>
           <button
             type="button"
-            class="mode-toggle"
-            :class="{ active: chatMode === 'strict_rag' }"
-            :disabled="loading || sessionLoading"
-            title="只基于检索到的视频片段回答"
-            @click="chatMode = 'strict_rag'"
-          >
-            严格引用
-          </button>
-          <button
-            v-if="advancedOpen || chatMode === 'agent'"
-            type="button"
-            class="mode-toggle experimental"
-            :class="{ active: chatMode === 'agent' }"
-            :disabled="loading || sessionLoading"
-            title="实验功能：工具调用链（非默认产品路径）"
-            @click="chatMode = 'agent'"
-          >
-            Agent
-            <span class="mode-beta">Beta</span>
-          </button>
-          <button
-            type="button"
             class="advanced-toggle"
+            :class="{ open: advancedOpen || isExperimentalMode }"
             :aria-expanded="advancedOpen"
-            @click="advancedOpen = !advancedOpen"
+            :disabled="loading || sessionLoading"
+            title="严格引用 / Agent 等非默认路径"
+            @click="toggleAdvanced"
           >
-            {{ advancedOpen ? '收起高级' : '高级' }}
+            {{ advancedOpen ? '收起高级' : (isExperimentalMode ? '高级 · 使用中' : '高级') }}
           </button>
+        </div>
+        <div v-if="advancedOpen" class="advanced-panel" role="region" aria-label="高级对话选项">
+          <p class="advanced-panel-hint">
+            默认请用「视频助手」。以下模式偏评测 / 实验：严格引用无检索结果会拒答；Agent 为工具链实验能力。
+          </p>
+          <div class="advanced-panel-row">
+            <button
+              type="button"
+              class="mode-toggle experimental"
+              :class="{ active: chatMode === 'strict_rag' }"
+              :disabled="loading || sessionLoading"
+              title="只基于检索到的视频片段回答；无命中则失败"
+              @click="chatMode = 'strict_rag'"
+            >
+              严格引用
+            </button>
+            <button
+              type="button"
+              class="mode-toggle experimental"
+              :class="{ active: chatMode === 'agent' }"
+              :disabled="loading || sessionLoading"
+              title="实验功能：工具调用链（非默认产品路径）"
+              @click="chatMode = 'agent'"
+            >
+              Agent
+              <span class="mode-beta">Beta</span>
+            </button>
+            <button
+              v-if="isExperimentalMode"
+              type="button"
+              class="advanced-exit"
+              :disabled="loading || sessionLoading"
+              @click="exitExperimentalMode"
+            >
+              回到视频助手
+            </button>
+          </div>
         </div>
         <div v-if="strictModeBlocked" class="chat-mode-warning">
           {{ strictModeBlockedText }}
@@ -299,6 +317,26 @@ const loading = ref(false)
 const sessionLoading = ref(false)
 const chatMode = ref('video_assistant')
 const advancedOpen = ref(false)
+
+const isExperimentalMode = computed(
+  () => chatMode.value === 'strict_rag' || chatMode.value === 'agent',
+)
+
+/** 收起高级时退出严格引用 / Agent，避免模式仍在用但入口已隐藏 */
+const toggleAdvanced = () => {
+  if (advancedOpen.value) {
+    advancedOpen.value = false
+    if (isExperimentalMode.value) {
+      chatMode.value = 'video_assistant'
+    }
+    return
+  }
+  advancedOpen.value = true
+}
+
+const exitExperimentalMode = () => {
+  chatMode.value = 'video_assistant'
+}
 const sessionId = ref(null)
 const messagesContainer = ref(null)
 const questionInput = ref(null)
@@ -845,17 +883,17 @@ onUnmounted(() => {
   flex-wrap: wrap;
   padding: 0.55rem 1rem;
   border-bottom: 1px solid var(--vl-border);
-  background: rgba(45, 212, 191, 0.05);
+  background: var(--vl-primary-dim);
   font-size: 0.8rem;
   color: var(--vl-text-secondary);
 }
 
 .index-banner.failed {
-  background: rgba(248, 113, 113, 0.08);
+  background: var(--vl-danger-dim);
 }
 
 .index-banner.indexing {
-  background: rgba(240, 180, 41, 0.06);
+  background: var(--vl-accent-dim);
 }
 
 .index-banner-text {
@@ -866,7 +904,7 @@ onUnmounted(() => {
 
 .index-banner-btn {
   appearance: none;
-  border: 1px solid rgba(45, 212, 191, 0.4);
+  border: 1px solid var(--vl-border-focus);
   background: var(--vl-primary-dim);
   color: var(--vl-primary);
   font-weight: 600;
@@ -906,8 +944,8 @@ onUnmounted(() => {
   font-size: 0.76rem;
   font-family: var(--vl-font-mono);
   color: var(--vl-danger);
-  border-bottom: 1px solid rgba(248, 113, 113, 0.2);
-  background: rgba(248, 113, 113, 0.06);
+  border-bottom: 1px solid var(--vl-danger-dim);
+  background: var(--vl-danger-dim);
   word-break: break-word;
 }
 
@@ -940,7 +978,7 @@ onUnmounted(() => {
 .suggestion-chip {
   appearance: none;
   border: 1px solid var(--vl-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
   color: var(--vl-text-secondary);
   font-size: 0.82rem;
   padding: 0.5rem 0.85rem;
@@ -950,7 +988,7 @@ onUnmounted(() => {
 }
 
 .suggestion-chip:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
@@ -980,8 +1018,8 @@ onUnmounted(() => {
   padding: 0.6rem 1rem 0.6rem 1.1rem;
   border-bottom: 1px solid var(--vl-border);
   background:
-    linear-gradient(90deg, rgba(45, 212, 191, 0.04), transparent 40%),
-    rgba(7, 9, 15, 0.52);
+    linear-gradient(90deg, var(--vl-primary-dim), transparent 40%),
+    var(--vl-bg-elevated);
   min-height: 3.1rem;
 }
 
@@ -994,7 +1032,7 @@ onUnmounted(() => {
   overflow-x: auto;
   padding: 0.1rem 0;
   scrollbar-width: thin;
-  scrollbar-color: rgba(45, 212, 191, 0.25) transparent;
+  scrollbar-color: var(--vl-primary-glow) transparent;
 }
 
 .session-chips::-webkit-scrollbar {
@@ -1018,7 +1056,7 @@ onUnmounted(() => {
   padding: 0.4rem 0.75rem;
   border-radius: 999px;
   border: 1px solid var(--vl-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
   color: var(--vl-text-secondary);
   cursor: pointer;
   text-align: left;
@@ -1026,16 +1064,16 @@ onUnmounted(() => {
 }
 
 .session-chip:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.35);
+  border-color: var(--vl-primary-glow);
   color: var(--vl-text);
-  background: rgba(45, 212, 191, 0.06);
+  background: var(--vl-primary-dim);
 }
 
 .session-chip.active {
-  border-color: rgba(45, 212, 191, 0.5);
-  background: linear-gradient(135deg, rgba(45, 212, 191, 0.16), rgba(96, 165, 250, 0.08));
+  border-color: var(--vl-border-focus);
+  background: linear-gradient(135deg, var(--vl-primary-dim), var(--vl-info-dim));
   color: var(--vl-text);
-  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.12);
+  box-shadow: 0 0 0 1px var(--vl-primary-dim);
 }
 
 .session-chip:disabled {
@@ -1089,13 +1127,13 @@ onUnmounted(() => {
 }
 
 .session-btn:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
 
 .session-btn.danger:hover:not(:disabled) {
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: color-mix(in srgb, var(--vl-danger) 50%, transparent);
   color: var(--vl-danger);
   background: var(--vl-danger-dim);
 }
@@ -1131,13 +1169,13 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1.25rem;
   scrollbar-width: thin;
-  scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
+  scrollbar-color: var(--vl-primary-glow) transparent;
   background:
-    radial-gradient(ellipse 50% 30% at 50% 0%, rgba(45, 212, 191, 0.04), transparent 70%);
+    radial-gradient(ellipse 50% 30% at 50% 0%, var(--vl-primary-dim), transparent 70%);
 }
 
 .chat-messages::-webkit-scrollbar { width: 8px; }
-.chat-messages::-webkit-scrollbar-thumb { background: rgba(45, 212, 191, 0.3); border-radius: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--vl-primary-glow); border-radius: 4px; }
 
 .message {
   display: flex;
@@ -1149,13 +1187,13 @@ onUnmounted(() => {
 }
 
 .message.user .message-content {
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.18), rgba(96, 165, 250, 0.1));
-  border: 1px solid rgba(45, 212, 191, 0.32);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid var(--vl-primary-glow);
   color: var(--vl-text);
   max-width: min(72%, 40rem);
   padding: 0.95rem 1.15rem;
   border-radius: 1.05rem 1.05rem 0.3rem 1.05rem;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--vl-shadow-sm);
 }
 
 .message.assistant {
@@ -1164,13 +1202,13 @@ onUnmounted(() => {
 
 .message.assistant .message-content {
   position: relative;
-  background: linear-gradient(160deg, rgba(16, 22, 34, 0.72), rgba(12, 16, 24, 0.55));
+  background: linear-gradient(160deg, var(--vl-surface), var(--vl-panel));
   border: 1px solid var(--vl-border-strong);
-  color: #c5d0e0;
+  color: var(--vl-text-secondary);
   max-width: min(84%, 48rem);
   padding: 0.95rem 1.15rem;
   border-radius: 1.05rem 1.05rem 1.05rem 0.3rem;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--vl-shadow-sm);
 }
 
 .message-copy {
@@ -1178,8 +1216,8 @@ onUnmounted(() => {
   top: 0.4rem;
   right: 0.4rem;
   opacity: 0;
-  background: rgba(7, 9, 15, 0.75);
-  border: 1px solid rgba(139, 149, 168, 0.25);
+  background: var(--vl-panel);
+  border: 1px solid var(--vl-border);
   color: var(--vl-text-secondary);
   width: 1.7rem;
   height: 1.7rem;
@@ -1198,13 +1236,13 @@ onUnmounted(() => {
 
 .message-copy:hover {
   color: var(--vl-primary);
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
 }
 
 .message-copy.copied {
   color: var(--vl-success);
   opacity: 1;
-  border-color: rgba(74, 222, 128, 0.4);
+  border-color: color-mix(in srgb, var(--vl-success) 40%, transparent);
 }
 
 .message.loading {
@@ -1251,7 +1289,7 @@ onUnmounted(() => {
 }
 
 .message-text.markdown-body :deep(code) {
-  background: rgba(45, 212, 191, 0.1);
+  background: var(--vl-primary-dim);
   padding: 0.1rem 0.4rem;
   border-radius: 0.25rem;
   font-family: var(--vl-font-mono);
@@ -1262,7 +1300,7 @@ onUnmounted(() => {
 .citations {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(139, 149, 168, 0.15);
+  border-top: 1px solid var(--vl-border);
 }
 
 .citation-references {
@@ -1271,7 +1309,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 0.4rem;
   margin-bottom: 0.8rem;
-  color: #a8b3c7;
+  color: var(--vl-text-secondary);
   font-size: 0.82rem;
 }
 
@@ -1295,8 +1333,8 @@ onUnmounted(() => {
 
 .citation-reference-link:hover,
 .citation-reference-link:focus-visible {
-  background: rgba(45, 212, 191, 0.1);
-  outline: 2px solid rgba(45, 212, 191, 0.35);
+  background: var(--vl-primary-dim);
+  outline: 2px solid var(--vl-primary-glow);
   outline-offset: 1px;
 }
 
@@ -1311,13 +1349,13 @@ onUnmounted(() => {
 }
 
 .citations-title {
-  color: #a8b3c7;
+  color: var(--vl-text-secondary);
 }
 
 .citations-toggle,
 .citation-toggle {
   background: transparent;
-  border: 1px solid rgba(139, 149, 168, 0.2);
+  border: 1px solid var(--vl-border);
   color: var(--vl-primary);
   cursor: pointer;
   font-size: 0.75rem;
@@ -1329,28 +1367,28 @@ onUnmounted(() => {
 
 .citations-toggle:hover,
 .citation-toggle:hover {
-  background: rgba(45, 212, 191, 0.08);
-  border-color: rgba(45, 212, 191, 0.3);
+  background: var(--vl-primary-dim);
+  border-color: var(--vl-primary-glow);
 }
 
 .citation-item {
-  background: rgba(7, 9, 15, 0.35);
+  background: var(--vl-surface-hover);
   padding: 0.7rem 0.75rem;
   border-radius: 0.5rem;
   margin-bottom: 0.5rem;
-  border: 1px solid rgba(139, 149, 168, 0.1);
+  border: 1px solid var(--vl-border);
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 .citation-item:focus-visible {
-  outline: 2px solid rgba(45, 212, 191, 0.5);
+  outline: 2px solid var(--vl-border-focus);
   outline-offset: 2px;
 }
 
 .citation-item.highlighted {
   border-color: var(--vl-primary);
-  background: rgba(45, 212, 191, 0.1);
-  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+  background: var(--vl-primary-dim);
+  box-shadow: 0 0 0 3px var(--vl-primary-dim);
 }
 
 .citation-meta {
@@ -1371,10 +1409,10 @@ onUnmounted(() => {
   font-size: 0.75rem;
   color: var(--vl-info);
   font-family: var(--vl-font-mono);
-  background: rgba(96, 165, 250, 0.1);
+  background: var(--vl-info-dim);
   padding: 0.2rem 0.5rem;
   border-radius: 0.35rem;
-  border: 1px solid rgba(96, 165, 250, 0.2);
+  border: 1px solid var(--vl-info-dim);
 }
 
 .citation-chunk {
@@ -1392,7 +1430,7 @@ onUnmounted(() => {
 }
 
 .citation-content.collapsed {
-  color: #9aa6ba;
+  color: var(--vl-text-muted);
 }
 
 .citation-actions {
@@ -1408,13 +1446,13 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.7rem;
   background:
-    linear-gradient(180deg, rgba(12, 16, 24, 0.55), rgba(7, 9, 15, 0.72));
+    linear-gradient(180deg, var(--vl-panel), var(--vl-panel));
   backdrop-filter: blur(12px) saturate(140%);
 }
 
 .input-field {
   flex: 1;
-  background: rgba(7, 9, 15, 0.7);
+  background: var(--vl-panel);
   border: 1px solid var(--vl-border-strong);
   padding: 0.8rem 1.05rem;
   border-radius: var(--vl-radius);
@@ -1441,7 +1479,7 @@ onUnmounted(() => {
 }
 
 .btn-send {
-  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
   color: var(--vl-text-inverse);
   border: none;
   padding: 0.8rem 1.45rem;
@@ -1469,18 +1507,18 @@ onUnmounted(() => {
 }
 
 .btn-send.stop {
-  background: linear-gradient(135deg, #f87171, #dc2626);
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(248, 113, 113, 0.28);
+  background: linear-gradient(135deg, var(--vl-danger), color-mix(in srgb, var(--vl-danger) 80%, #000));
+  color: var(--vl-text-inverse);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 
 .btn-send.stop:hover {
-  box-shadow: 0 8px 22px rgba(248, 113, 113, 0.35);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 
 .btn-amber {
   background: var(--vl-primary);
-  color: var(--vl-bg);
+  color: var(--vl-text-inverse);
   border: none;
   padding: 0.75rem 1.75rem;
   border-radius: 0.75rem;
@@ -1492,7 +1530,7 @@ onUnmounted(() => {
 
 .btn-amber:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(45, 212, 191, 0.4);
+  box-shadow: 0 6px 24px var(--vl-primary-glow);
 }
 
 .btn-amber:disabled {
@@ -1503,7 +1541,7 @@ onUnmounted(() => {
 .spinner {
   width: 1.25rem;
   height: 1.25rem;
-  border: 2.5px solid rgba(45, 212, 191, 0.15);
+  border: 2.5px solid var(--vl-primary-dim);
   border-top-color: var(--vl-primary);
   border-radius: 50%;
   animation: vl-spin 0.8s linear infinite;
@@ -1517,7 +1555,7 @@ onUnmounted(() => {
   padding: 0.2rem;
   width: fit-content;
   max-width: 100%;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--vl-white-a03);
   border: 1px solid var(--vl-border);
   border-radius: 999px;
 }
@@ -1529,7 +1567,7 @@ onUnmounted(() => {
   padding: 0.35rem 0.55rem;
   border-radius: var(--vl-radius-sm);
   background: var(--vl-warning-dim);
-  border: 1px solid rgba(251, 191, 36, 0.22);
+  border: 1px solid color-mix(in srgb, var(--vl-warning) 30%, transparent);
 }
 
 .chat-input-row {
@@ -1553,12 +1591,12 @@ onUnmounted(() => {
 
 .mode-toggle:hover:not(:disabled) {
   color: var(--vl-text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--vl-white-a03);
 }
 
 .mode-toggle.active {
   background: var(--vl-primary-dim);
-  border-color: rgba(45, 212, 191, 0.35);
+  border-color: var(--vl-primary-glow);
   color: var(--vl-primary);
   font-weight: 600;
 }
@@ -1583,20 +1621,77 @@ onUnmounted(() => {
 
 .advanced-toggle {
   appearance: none;
-  border: none;
+  border: 1px dashed var(--vl-border);
   background: transparent;
   color: var(--vl-text-muted);
   font-size: 0.72rem;
   font-family: var(--vl-font-mono);
   cursor: pointer;
-  padding: 0.38rem 0.55rem;
+  padding: 0.38rem 0.65rem;
   border-radius: 999px;
   margin-left: 0.15rem;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
-.advanced-toggle:hover {
+.advanced-toggle:hover:not(:disabled) {
   color: var(--vl-text-secondary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--vl-white-a03);
+  border-color: var(--vl-border-strong);
+}
+
+.advanced-toggle.open {
+  color: var(--vl-text-secondary);
+  border-style: solid;
+  border-color: var(--vl-accent-glow);
+  background: var(--vl-accent-dim);
+}
+
+.advanced-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.advanced-panel {
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--vl-radius-sm, 0.5rem);
+  border: 1px solid var(--vl-accent-glow);
+  background: var(--vl-accent-dim);
+}
+
+.advanced-panel-hint {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--vl-text-muted);
+}
+
+.advanced-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.advanced-exit {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0.3rem 0.45rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.advanced-exit:hover:not(:disabled) {
+  color: var(--vl-text-secondary);
+}
+
+.advanced-exit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .agent-meta {
@@ -1611,15 +1706,15 @@ onUnmounted(() => {
   font-family: var(--vl-font-mono);
   padding: 0.2rem 0.5rem;
   border-radius: 0.35rem;
-  border: 1px solid rgba(139, 149, 168, 0.2);
-  background: rgba(139, 149, 168, 0.08);
-  color: #a8b3c7;
+  border: 1px solid var(--vl-border);
+  background: var(--vl-border);
+  color: var(--vl-text-secondary);
 }
 
 .agent-template {
   color: var(--vl-primary);
-  border-color: rgba(45, 212, 191, 0.3);
-  background: rgba(45, 212, 191, 0.1);
+  border-color: var(--vl-primary-glow);
+  background: var(--vl-primary-dim);
 }
 
 .agent-model {
@@ -1629,15 +1724,15 @@ onUnmounted(() => {
 .agent-trace {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(139, 149, 168, 0.15);
+  border-top: 1px solid var(--vl-border);
 }
 
 .trace-item {
-  background: rgba(7, 9, 15, 0.35);
+  background: var(--vl-surface-hover);
   padding: 0.55rem 0.75rem;
   border-radius: 0.5rem;
   margin-bottom: 0.5rem;
-  border: 1px solid rgba(139, 149, 168, 0.1);
+  border: 1px solid var(--vl-border);
 }
 
 .trace-meta {
@@ -1651,14 +1746,14 @@ onUnmounted(() => {
 
 .trace-tool {
   color: var(--vl-info);
-  background: rgba(96, 165, 250, 0.1);
+  background: var(--vl-info-dim);
   padding: 0.15rem 0.45rem;
   border-radius: 0.35rem;
-  border: 1px solid rgba(96, 165, 250, 0.2);
+  border: 1px solid var(--vl-info-dim);
 }
 
 .trace-name {
-  color: #a8b3c7;
+  color: var(--vl-text-secondary);
 }
 
 .trace-output {

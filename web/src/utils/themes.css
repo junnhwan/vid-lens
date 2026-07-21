@@ -1,0 +1,206 @@
+/*
+ * Theme palettes — override --vl-* by [data-theme].
+ * Keep THEME_IDS in theme.js / index.html FOUC script in sync.
+ * Default :root matches dark (FOUC-safe before data-theme is set).
+ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces — elevated/surface/panel stay lighter than page bg for nested cards */
+  --vl-bg: #07090f;
+  --vl-bg-elevated: #0c1018;
+  --vl-surface: rgba(22, 30, 44, 0.88);
+  --vl-surface-solid: #141b2a;
+  --vl-surface-hover: rgba(30, 40, 58, 0.92);
+  --vl-panel: rgba(16, 22, 34, 0.96);
+
+  /* Borders */
+  --vl-border: rgba(148, 163, 184, 0.12);
+  --vl-border-strong: rgba(148, 163, 184, 0.22);
+  --vl-border-focus: rgba(45, 212, 191, 0.45);
+
+  /* Text */
+  --vl-text: #e8eef6;
+  --vl-text-secondary: #94a3b8;
+  --vl-text-muted: #64748b;
+  --vl-text-inverse: #07090f;
+
+  /* Brand */
+  --vl-primary: #2dd4bf;
+  --vl-primary-deep: #14b8a6;
+  --vl-primary-dim: rgba(45, 212, 191, 0.14);
+  --vl-primary-glow: rgba(45, 212, 191, 0.28);
+  --vl-accent: #f0b429;
+  --vl-accent-dim: rgba(240, 180, 41, 0.14);
+  --vl-accent-glow: rgba(240, 180, 41, 0.25);
+  --vl-info: #60a5fa;
+  --vl-info-dim: rgba(96, 165, 250, 0.14);
+  --vl-success: #34d399;
+  --vl-success-dim: rgba(52, 211, 153, 0.14);
+  --vl-danger: #f87171;
+  --vl-danger-dim: rgba(248, 113, 113, 0.14);
+  --vl-warning: #fbbf24;
+  --vl-warning-dim: rgba(251, 191, 36, 0.14);
+
+  /* Chrome / atmosphere (minimal effects) */
+  --vl-nav-bg: rgba(7, 9, 15, 0.82);
+  --vl-overlay-scrim: rgba(0, 0, 0, 0.55);
+  --vl-white-a03: rgba(255, 255, 255, 0.03);
+  --vl-white-a08: rgba(255, 255, 255, 0.08);
+  --vl-app-bg-image: none;
+  --vl-grain-opacity: 0;
+  --vl-scrollbar-thumb: rgba(45, 212, 191, 0.28);
+  --vl-scrollbar-thumb-hover: rgba(45, 212, 191, 0.45);
+
+  --vl-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --vl-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+/* —— Light —— */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --vl-bg: #f4f6fa;
+  --vl-bg-elevated: #ffffff;
+  --vl-surface: #ffffff;
+  --vl-surface-solid: #ffffff;
+  --vl-surface-hover: #eef2f7;
+  --vl-panel: #ffffff;
+
+  --vl-border: rgba(15, 23, 42, 0.1);
+  --vl-border-strong: rgba(15, 23, 42, 0.16);
+  --vl-border-focus: rgba(13, 148, 136, 0.45);
+
+  --vl-text: #0f172a;
+  --vl-text-secondary: #475569;
+  --vl-text-muted: #64748b;
+  --vl-text-inverse: #ffffff;
+
+  --vl-primary: #0d9488;
+  --vl-primary-deep: #0f766e;
+  --vl-primary-dim: rgba(13, 148, 136, 0.12);
+  --vl-primary-glow: rgba(13, 148, 136, 0.22);
+  --vl-accent: #d97706;
+  --vl-accent-dim: rgba(217, 119, 6, 0.12);
+  --vl-accent-glow: rgba(217, 119, 6, 0.2);
+  --vl-info: #2563eb;
+  --vl-info-dim: rgba(37, 99, 235, 0.1);
+  --vl-success: #059669;
+  --vl-success-dim: rgba(5, 150, 105, 0.12);
+  --vl-danger: #dc2626;
+  --vl-danger-dim: rgba(220, 38, 38, 0.1);
+  --vl-warning: #d97706;
+  --vl-warning-dim: rgba(217, 119, 6, 0.12);
+
+  --vl-nav-bg: rgba(255, 255, 255, 0.86);
+  --vl-overlay-scrim: rgba(15, 23, 42, 0.4);
+  --vl-white-a03: rgba(15, 23, 42, 0.03);
+  --vl-white-a08: rgba(15, 23, 42, 0.06);
+  --vl-app-bg-image: none;
+  --vl-grain-opacity: 0;
+  --vl-scrollbar-thumb: rgba(13, 148, 136, 0.28);
+  --vl-scrollbar-thumb-hover: rgba(13, 148, 136, 0.45);
+
+  --vl-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  --vl-shadow-sm: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+
+/* —— Warm (cream + amber) —— */
+[data-theme="warm"] {
+  color-scheme: light;
+
+  --vl-bg: #f7f1e8;
+  --vl-bg-elevated: #fffaf3;
+  --vl-surface: #fffdf9;
+  --vl-surface-solid: #fffaf3;
+  --vl-surface-hover: #f3ebe0;
+  --vl-panel: #fffdf9;
+
+  --vl-border: rgba(92, 64, 38, 0.12);
+  --vl-border-strong: rgba(92, 64, 38, 0.2);
+  --vl-border-focus: rgba(180, 120, 40, 0.45);
+
+  --vl-text: #3b2a1a;
+  --vl-text-secondary: #6b5344;
+  --vl-text-muted: #8a7360;
+  --vl-text-inverse: #fffaf3;
+
+  --vl-primary: #b45309;
+  --vl-primary-deep: #92400e;
+  --vl-primary-dim: rgba(180, 83, 9, 0.12);
+  --vl-primary-glow: rgba(180, 83, 9, 0.22);
+  --vl-accent: #d97706;
+  --vl-accent-dim: rgba(217, 119, 6, 0.14);
+  --vl-accent-glow: rgba(217, 119, 6, 0.22);
+  --vl-info: #0369a1;
+  --vl-info-dim: rgba(3, 105, 161, 0.1);
+  --vl-success: #15803d;
+  --vl-success-dim: rgba(21, 128, 61, 0.12);
+  --vl-danger: #b91c1c;
+  --vl-danger-dim: rgba(185, 28, 28, 0.1);
+  --vl-warning: #ca8a04;
+  --vl-warning-dim: rgba(202, 138, 4, 0.12);
+
+  --vl-nav-bg: rgba(255, 250, 243, 0.9);
+  --vl-overlay-scrim: rgba(59, 42, 26, 0.4);
+  --vl-white-a03: rgba(59, 42, 26, 0.03);
+  --vl-white-a08: rgba(59, 42, 26, 0.07);
+  --vl-app-bg-image: none;
+  --vl-grain-opacity: 0;
+  --vl-scrollbar-thumb: rgba(180, 83, 9, 0.3);
+  --vl-scrollbar-thumb-hover: rgba(180, 83, 9, 0.48);
+
+  --vl-shadow: 0 8px 28px rgba(92, 64, 38, 0.1);
+  --vl-shadow-sm: 0 2px 10px rgba(92, 64, 38, 0.07);
+}
+
+/* —— Soft eye-care (muted green-gray, low blue) —— */
+[data-theme="soft"] {
+  color-scheme: light;
+
+  --vl-bg: #eef2ec;
+  --vl-bg-elevated: #f6f8f4;
+  --vl-surface: #fbfcf9;
+  --vl-surface-solid: #f6f8f4;
+  --vl-surface-hover: #e6ece3;
+  --vl-panel: #fbfcf9;
+
+  --vl-border: rgba(55, 72, 58, 0.12);
+  --vl-border-strong: rgba(55, 72, 58, 0.18);
+  --vl-border-focus: rgba(74, 124, 89, 0.45);
+
+  --vl-text: #243028;
+  --vl-text-secondary: #4a5c50;
+  --vl-text-muted: #6b7c70;
+  --vl-text-inverse: #f6f8f4;
+
+  --vl-primary: #4a7c59;
+  --vl-primary-deep: #3d684a;
+  --vl-primary-dim: rgba(74, 124, 89, 0.14);
+  --vl-primary-glow: rgba(74, 124, 89, 0.22);
+  --vl-accent: #a67c2d;
+  --vl-accent-dim: rgba(166, 124, 45, 0.12);
+  --vl-accent-glow: rgba(166, 124, 45, 0.2);
+  --vl-info: #3d6b8a;
+  --vl-info-dim: rgba(61, 107, 138, 0.1);
+  --vl-success: #3f7a52;
+  --vl-success-dim: rgba(63, 122, 82, 0.12);
+  --vl-danger: #b54a4a;
+  --vl-danger-dim: rgba(181, 74, 74, 0.1);
+  --vl-warning: #a67c2d;
+  --vl-warning-dim: rgba(166, 124, 45, 0.12);
+
+  --vl-nav-bg: rgba(246, 248, 244, 0.9);
+  --vl-overlay-scrim: rgba(36, 48, 40, 0.4);
+  --vl-white-a03: rgba(36, 48, 40, 0.03);
+  --vl-white-a08: rgba(36, 48, 40, 0.07);
+  --vl-app-bg-image: none;
+  --vl-grain-opacity: 0;
+  --vl-scrollbar-thumb: rgba(74, 124, 89, 0.3);
+  --vl-scrollbar-thumb-hover: rgba(74, 124, 89, 0.48);
+
+  --vl-shadow: 0 8px 28px rgba(36, 48, 40, 0.08);
+  --vl-shadow-sm: 0 2px 10px rgba(36, 48, 40, 0.06);
+}

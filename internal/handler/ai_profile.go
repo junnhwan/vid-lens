@@ -128,6 +128,44 @@ func (h *AIProfileHandler) Test(c *gin.Context) {
 	response.OK(c, gin.H{"ok": true})
 }
 
+func (h *AIProfileHandler) ListModels(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	var req service.ListModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	models, err := h.svc.ListModels(c.Request.Context(), userID, req)
+	if err != nil {
+		if errors.Is(err, service.ErrAIProfileNotFound) {
+			response.Fail(c, 404, err.Error())
+			return
+		}
+		response.BadRequest(c, "拉取模型列表失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"models": models})
+}
+
+func (h *AIProfileHandler) ProbeEmbeddingDim(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	var req service.ProbeEmbeddingDimRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	dim, err := h.svc.ProbeEmbeddingDim(c.Request.Context(), userID, req)
+	if err != nil {
+		if errors.Is(err, service.ErrAIProfileNotFound) {
+			response.Fail(c, 404, err.Error())
+			return
+		}
+		response.BadRequest(c, "检测维度失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"dimension": dim})
+}
+
 func validateAIProfileRequestBinding(req service.AIProfileRequest) error {
 	if req.Name == "" {
 		return errors.New("配置名称不能为空")

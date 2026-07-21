@@ -6,6 +6,19 @@
   <!-- ?v= 绕过 CDN 对错误 Content-Type 的旧缓存；服务端仍按路径提供 favicon.svg -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>映知</title>
+  <!-- FOUC: keep ids in sync with web/src/theme.js THEME_IDS -->
+  <script>
+    (function () {
+      try {
+        var k = 'vidlens-theme';
+        var allowed = { dark: 1, light: 1, warm: 1, soft: 1 };
+        var t = localStorage.getItem(k) || 'dark';
+        if (!allowed[t]) t = 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+        document.documentElement.style.colorScheme = t === 'dark' ? 'dark' : 'light';
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

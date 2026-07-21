@@ -91,7 +91,7 @@ const handleBackdropMouseDown = (e) => {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--vl-overlay-scrim);
   backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
@@ -131,7 +131,7 @@ const handleBackdropMouseDown = (e) => {
 
 .modal-close:hover {
   color: var(--vl-danger);
-  border-color: rgba(248, 113, 113, 0.4);
+  border-color: color-mix(in srgb, var(--vl-danger) 40%, transparent);
   background: var(--vl-danger-dim);
 }
 
@@ -153,7 +153,7 @@ const handleBackdropMouseDown = (e) => {
 
 .form-input {
   width: 100%;
-  background: rgba(7, 9, 15, 0.55);
+  background: var(--vl-surface);
   border: 1px solid var(--vl-border);
   padding: 0.75rem 0.95rem;
   border-radius: var(--vl-radius-sm);
@@ -200,14 +200,14 @@ const handleBackdropMouseDown = (e) => {
   margin: 0.15rem 0 0;
   background: var(--vl-success-dim);
   color: var(--vl-success);
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  border: 1px solid color-mix(in srgb, var(--vl-success) 30%, transparent);
   font-weight: 500;
 }
 
 .auth-msg.error {
   background: var(--vl-danger-dim);
   color: var(--vl-danger);
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 
 .modal-enter-active,

@@ -79,6 +79,34 @@ func (r *TaskRepository) FindByMD5(md5 string) (*model.VideoTask, error) {
 	return &task, nil
 }
 
+// ResultPresenceByTaskIDs 批量查询任务是否已有转写/总结（不取 content）。
+func (r *TaskRepository) ResultPresenceByTaskIDs(taskIDs []int64) (hasTranscription, hasSummary map[int64]bool, err error) {
+	hasTranscription = map[int64]bool{}
+	hasSummary = map[int64]bool{}
+	if len(taskIDs) == 0 {
+		return hasTranscription, hasSummary, nil
+	}
+	var txIDs []int64
+	if err = r.db.Model(&model.VideoTranscription{}).
+		Where("task_id IN ?", taskIDs).
+		Pluck("task_id", &txIDs).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, id := range txIDs {
+		hasTranscription[id] = true
+	}
+	var sumIDs []int64
+	if err = r.db.Model(&model.AISummary{}).
+		Where("task_id IN ?", taskIDs).
+		Pluck("task_id", &sumIDs).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, id := range sumIDs {
+		hasSummary[id] = true
+	}
+	return hasTranscription, hasSummary, nil
+}
+
 // ListByUserID 分页查询用户的视频任务列表，keyword 非空时按文件名/标题模糊搜索
 // 面试亮点：(user_id, created_at) 联合索引，天然按时间排序
 func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {

@@ -31,12 +31,46 @@
     </div>
 
     <div v-if="!compact" class="task-actions">
-      <button class="action-btn" @click.stop="$emit('transcribe')" :disabled="isActionDisabled">
-        提取文字
-      </button>
-      <button class="action-btn accent" @click.stop="$emit('analyze')" :disabled="isActionDisabled">
-        AI 总结
-      </button>
+      <div class="action-stack">
+        <button
+          class="action-btn"
+          :class="{ done: hasTx }"
+          @click.stop="$emit('transcribe')"
+          :disabled="txPrimaryDisabled"
+          :title="hasTx ? '文字已提取，可在详情查看' : '提取视频文字'"
+        >
+          {{ txLabel }}
+        </button>
+        <button
+          v-if="hasTx && !busy"
+          type="button"
+          class="rerun-link"
+          @click.stop="$emit('retranscribe')"
+          title="重新调用 ASR，覆盖已有文字"
+        >
+          重新提取
+        </button>
+      </div>
+      <div class="action-stack">
+        <button
+          class="action-btn accent"
+          :class="{ done: hasSum }"
+          @click.stop="$emit('analyze')"
+          :disabled="sumPrimaryDisabled"
+          :title="hasSum ? '总结已生成，可在详情查看' : '生成 AI 总结'"
+        >
+          {{ sumLabel }}
+        </button>
+        <button
+          v-if="hasSum && !busy"
+          type="button"
+          class="rerun-link"
+          @click.stop="$emit('reanalyze')"
+          title="重新调用模型，覆盖已有总结"
+        >
+          重新总结
+        </button>
+      </div>
       <button v-if="canChat" class="action-btn chat" @click.stop="$emit('chat')">
         去对话
       </button>
@@ -46,7 +80,15 @@
 
 <script setup>
 import { computed } from 'vue'
-import { isTaskActionDisabled } from '../taskActionPolicy.js'
+import {
+  hasSummaryResult,
+  hasTranscriptionResult,
+  isPrimaryAnalyzeDisabled,
+  isPrimaryTranscribeDisabled,
+  isTaskActionDisabled,
+  primaryAnalyzeLabel,
+  primaryTranscribeLabel,
+} from '../taskActionPolicy.js'
 import { formatTime, formatFileSize, getDetailedStatus } from '../utils/format.js'
 
 const props = defineProps({
@@ -56,11 +98,17 @@ const props = defineProps({
   selected: { type: Boolean, default: false },
 })
 
-defineEmits(['click', 'delete', 'transcribe', 'analyze', 'chat'])
+defineEmits(['click', 'delete', 'transcribe', 'analyze', 'retranscribe', 'reanalyze', 'chat'])
 
-const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
+const busy = computed(() => isTaskActionDisabled(props.task, props.loading))
+const hasTx = computed(() => hasTranscriptionResult(props.task))
+const hasSum = computed(() => hasSummaryResult(props.task))
+const txPrimaryDisabled = computed(() => isPrimaryTranscribeDisabled(props.task, props.loading))
+const sumPrimaryDisabled = computed(() => isPrimaryAnalyzeDisabled(props.task, props.loading))
+const txLabel = computed(() => primaryTranscribeLabel(props.task))
+const sumLabel = computed(() => primaryAnalyzeLabel(props.task))
 const detailedStatus = computed(() => getDetailedStatus(props.task))
-const canChat = computed(() => props.task?.transcription?.content || props.task?.status === 3)
+const canChat = computed(() => hasTranscriptionResult(props.task) || props.task?.status === 3)
 </script>
 
 <style scoped>
@@ -93,7 +141,7 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 }
 
 .task-card:hover {
-  border-color: rgba(45, 212, 191, 0.35);
+  border-color: var(--vl-primary-glow);
   background: var(--vl-surface-hover);
   box-shadow: var(--vl-shadow-sm);
   transform: translateY(-2px);
@@ -105,9 +153,9 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 }
 
 .task-card.selected {
-  border-color: rgba(45, 212, 191, 0.5);
-  background: rgba(45, 212, 191, 0.08);
-  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.15), var(--vl-shadow-sm);
+  border-color: var(--vl-border-focus);
+  background: var(--vl-primary-dim);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vl-primary) 15%, transparent), var(--vl-shadow-sm);
   transform: none;
 }
 
@@ -142,7 +190,6 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   font-size: 1.15rem;
   line-height: 1;
   cursor: pointer;
-  /* 触屏也要看得见；桌面 hover 再加强 */
   opacity: 0.55;
   transition: opacity 0.2s, color 0.2s, background 0.2s, border-color 0.2s;
   display: grid;
@@ -163,7 +210,7 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 .task-delete:hover {
   color: var(--vl-danger);
   background: var(--vl-danger-dim);
-  border-color: rgba(248, 113, 113, 0.35);
+  border-color: color-mix(in srgb, var(--vl-danger) 35%, transparent);
 }
 
 .task-header {
@@ -180,15 +227,15 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.14), rgba(96, 165, 250, 0.08));
-  border: 1px solid rgba(45, 212, 191, 0.22);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid color-mix(in srgb, var(--vl-primary) 22%, transparent);
 }
 
 .film-mark {
   width: 0.9rem;
   height: 0.9rem;
   border-radius: 0.2rem;
-  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-info));
   box-shadow: 0 0 10px var(--vl-primary-glow);
   position: relative;
 }
@@ -197,7 +244,7 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
   content: '';
   position: absolute;
   inset: 2px;
-  border: 1px solid rgba(7, 9, 15, 0.45);
+  border: 1px solid color-mix(in srgb, var(--vl-bg) 45%, transparent);
   border-radius: 0.1rem;
 }
 
@@ -256,19 +303,19 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 }
 
 .meta-status.pending {
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--vl-border);
   color: var(--vl-text-secondary);
-  border-color: rgba(148, 163, 184, 0.2);
+  border-color: var(--vl-border-strong);
 }
 .meta-status.queued {
   background: var(--vl-info-dim);
   color: var(--vl-info);
-  border-color: rgba(96, 165, 250, 0.3);
+  border-color: color-mix(in srgb, var(--vl-info) 30%, transparent);
 }
 .meta-status.running {
   background: var(--vl-accent-dim);
   color: var(--vl-accent);
-  border-color: rgba(240, 180, 41, 0.3);
+  border-color: color-mix(in srgb, var(--vl-accent) 30%, transparent);
 }
 .meta-status.running .status-dot {
   animation: vl-status-pulse 1.6s ease-in-out infinite;
@@ -276,76 +323,117 @@ const canChat = computed(() => props.task?.transcription?.content || props.task?
 .meta-status.completed {
   background: var(--vl-success-dim);
   color: var(--vl-success);
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: color-mix(in srgb, var(--vl-success) 30%, transparent);
 }
 .meta-status.failed {
   background: var(--vl-danger-dim);
   color: var(--vl-danger);
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 .meta-status.retrying {
   background: var(--vl-warning-dim);
   color: var(--vl-warning);
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: color-mix(in srgb, var(--vl-warning) 30%, transparent);
 }
 .meta-status.dead {
-  background: rgba(100, 116, 139, 0.15);
-  color: #94a3b8;
-  border-color: rgba(100, 116, 139, 0.3);
+  background: color-mix(in srgb, var(--vl-text-muted) 15%, transparent);
+  color: var(--vl-text-secondary);
+  border-color: color-mix(in srgb, var(--vl-text-muted) 30%, transparent);
 }
 
 .task-actions {
   display: flex;
   gap: 0.55rem;
+  align-items: flex-start;
+}
+
+.action-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
 }
 
 .action-btn {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   padding: 0.6rem 0.7rem;
   border-radius: var(--vl-radius-sm);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.35);
+  background: color-mix(in srgb, var(--vl-bg) 35%, transparent);
   color: var(--vl-text-secondary);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.82rem;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s, opacity 0.2s;
 }
 
 .action-btn:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
   transform: translateY(-1px);
 }
 
 .action-btn.accent {
-  border-color: rgba(240, 180, 41, 0.35);
+  border-color: color-mix(in srgb, var(--vl-accent) 35%, transparent);
   color: var(--vl-accent);
   background: var(--vl-accent-dim);
 }
 
 .action-btn.accent:hover:not(:disabled) {
-  border-color: rgba(240, 180, 41, 0.55);
-  color: #fcd34d;
-  background: rgba(240, 180, 41, 0.2);
+  border-color: color-mix(in srgb, var(--vl-accent) 55%, transparent);
+  color: var(--vl-accent);
+  background: var(--vl-accent-glow);
 }
 
 .action-btn.chat {
-  border-color: rgba(96, 165, 250, 0.35);
+  flex: 1;
+  align-self: stretch;
+  border-color: color-mix(in srgb, var(--vl-info) 35%, transparent);
   color: var(--vl-info);
   background: var(--vl-info-dim);
 }
 
 .action-btn.chat:hover:not(:disabled) {
-  border-color: rgba(96, 165, 250, 0.55);
-  background: rgba(96, 165, 250, 0.2);
+  border-color: color-mix(in srgb, var(--vl-info) 55%, transparent);
+  background: color-mix(in srgb, var(--vl-info) 20%, transparent);
 }
 
 .action-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
   transform: none;
+}
+
+.action-btn.done:disabled {
+  opacity: 0.55;
+  color: var(--vl-text-muted);
+  border-color: var(--vl-border);
+  background: color-mix(in srgb, var(--vl-bg) 50%, transparent);
+  cursor: default;
+}
+
+.rerun-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.1rem 0.15rem;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.75;
+  transition: color 0.15s, opacity 0.15s;
+}
+
+.rerun-link:hover {
+  color: var(--vl-text-secondary);
+  opacity: 1;
 }
 </style>

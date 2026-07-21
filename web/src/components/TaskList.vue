@@ -64,6 +64,8 @@
         @delete="$emit('deleteTask', t)"
         @transcribe="$emit('transcribe', t)"
         @analyze="$emit('analyze', t)"
+        @retranscribe="$emit('retranscribe', t)"
+        @reanalyze="$emit('reanalyze', t)"
         @chat="$emit('chat', t)"
       />
     </TransitionGroup>
@@ -129,7 +131,7 @@ const props = defineProps({
   searchKeyword: { type: String, default: '' },
 })
 
-const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'loadMore', 'chat', 'retry', 'search', 'requestUpload'])
+const emit = defineEmits(['taskClick', 'deleteTask', 'transcribe', 'analyze', 'retranscribe', 'reanalyze', 'loadMore', 'chat', 'retry', 'search', 'requestUpload'])
 
 const activeTab = ref('all')
 const searchQuery = ref(props.searchKeyword || '')
@@ -259,17 +261,17 @@ onUnmounted(() => {
 
 .tab:hover {
   color: var(--vl-text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--vl-white-a03);
 }
 
 .tab.active {
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
-  border-color: rgba(45, 212, 191, 0.3);
+  border-color: var(--vl-primary-glow);
 }
 
 .tab-count {
-  background: rgba(148, 163, 184, 0.14);
+  background: var(--vl-border);
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
   font-size: 0.7rem;
@@ -279,13 +281,13 @@ onUnmounted(() => {
 }
 
 .tab.active .tab-count {
-  background: rgba(45, 212, 191, 0.2);
+  background: color-mix(in srgb, var(--vl-primary) 20%, transparent);
   color: var(--vl-primary);
 }
 
 .search-box {
   padding: 0.55rem 0.85rem;
-  background: rgba(7, 9, 15, 0.45);
+  background: var(--vl-surface);
   border: 1px solid var(--vl-border);
   border-radius: var(--vl-radius-sm);
   color: var(--vl-text);
@@ -363,7 +365,7 @@ onUnmounted(() => {
 }
 
 .clear-search-btn:hover {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
@@ -388,7 +390,7 @@ onUnmounted(() => {
 }
 
 .load-more-btn:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
@@ -417,7 +419,7 @@ onUnmounted(() => {
   place-items: center;
   font-size: 1.5rem;
   background: var(--vl-primary-dim);
-  border: 1px solid rgba(45, 212, 191, 0.25);
+  border: 1px solid var(--vl-primary-glow);
 }
 
 .empty-state h3 {
@@ -444,7 +446,7 @@ onUnmounted(() => {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--vl-text-inverse);
-  background: linear-gradient(135deg, var(--vl-primary) 0%, #14b8a6 100%);
+  background: linear-gradient(135deg, var(--vl-primary) 0%, var(--vl-primary-deep) 100%);
   padding: 0.7rem 1.4rem;
   border-radius: var(--vl-radius);
   box-shadow: 0 4px 16px var(--vl-primary-glow);
@@ -473,7 +475,7 @@ onUnmounted(() => {
 .skeleton-icon {
   width: 2.75rem;
   height: 2.75rem;
-  background: rgba(148, 163, 184, 0.14);
+  background: var(--vl-border);
   border-radius: 0.7rem;
   flex-shrink: 0;
 }
@@ -488,14 +490,14 @@ onUnmounted(() => {
 
 .skeleton-title {
   height: 0.95rem;
-  background: rgba(148, 163, 184, 0.16);
+  background: var(--vl-border-strong);
   border-radius: 0.35rem;
   width: 55%;
 }
 
 .skeleton-meta {
   height: 0.7rem;
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--vl-border);
   border-radius: 0.35rem;
   width: 35%;
 }
@@ -508,7 +510,7 @@ onUnmounted(() => {
 .skeleton-btn {
   flex: 1;
   height: 2.15rem;
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--vl-border);
   border-radius: var(--vl-radius-sm);
 }
 
@@ -518,7 +520,7 @@ onUnmounted(() => {
   right: 1.5rem;
   width: 2.6rem;
   height: 2.6rem;
-  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
   border: none;
   border-radius: 50%;
   font-size: 1rem;

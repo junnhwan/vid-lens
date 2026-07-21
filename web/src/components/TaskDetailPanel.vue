@@ -52,22 +52,48 @@
     </header>
 
     <div class="detail-actions">
-      <button
-        class="action-btn"
-        type="button"
-        @click="$emit('transcribe')"
-        :disabled="isActionDisabled"
-      >
-        提取文字
-      </button>
-      <button
-        class="action-btn accent"
-        type="button"
-        @click="$emit('analyze')"
-        :disabled="isActionDisabled"
-      >
-        AI 总结
-      </button>
+      <div class="action-stack">
+        <button
+          class="action-btn"
+          :class="{ done: hasTx }"
+          type="button"
+          @click="$emit('transcribe')"
+          :disabled="txPrimaryDisabled"
+          :title="hasTx ? '文字已提取，请在下方 Tab 查看' : '提取视频文字'"
+        >
+          {{ txLabel }}
+        </button>
+        <button
+          v-if="hasTx && !isActionDisabled"
+          type="button"
+          class="rerun-link"
+          @click="$emit('retranscribe')"
+          title="重新调用 ASR，覆盖已有文字"
+        >
+          重新提取
+        </button>
+      </div>
+      <div class="action-stack">
+        <button
+          class="action-btn accent"
+          :class="{ done: hasSum }"
+          type="button"
+          @click="$emit('analyze')"
+          :disabled="sumPrimaryDisabled"
+          :title="hasSum ? '总结已生成，请在下方 Tab 查看' : '生成 AI 总结'"
+        >
+          {{ sumLabel }}
+        </button>
+        <button
+          v-if="hasSum && !isActionDisabled"
+          type="button"
+          class="rerun-link"
+          @click="$emit('reanalyze')"
+          title="重新调用模型，覆盖已有总结"
+        >
+          重新总结
+        </button>
+      </div>
       <button
         v-if="canUseRAG"
         class="action-btn chat"
@@ -199,6 +225,15 @@
               >
                 下载
               </button>
+              <button
+                type="button"
+                class="icon-btn subtle"
+                :disabled="isActionDisabled"
+                @click="$emit('retranscribe')"
+                title="重新调用 ASR"
+              >
+                重新提取
+              </button>
             </div>
           </div>
           <pre class="result-text">{{ transcriptionPreview }}</pre>
@@ -241,6 +276,15 @@
               >
                 下载
               </button>
+              <button
+                type="button"
+                class="icon-btn subtle"
+                :disabled="isActionDisabled"
+                @click="$emit('reanalyze')"
+                title="重新调用模型"
+              >
+                重新总结
+              </button>
             </div>
           </div>
           <div class="result-markdown" v-html="renderMarkdown(summaryPreview)"></div>
@@ -274,7 +318,15 @@ import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useRouter } from 'vue-router'
-import { isTaskActionDisabled } from '../taskActionPolicy.js'
+import {
+  hasSummaryResult,
+  hasTranscriptionResult,
+  isPrimaryAnalyzeDisabled,
+  isPrimaryTranscribeDisabled,
+  isTaskActionDisabled,
+  primaryAnalyzeLabel,
+  primaryTranscribeLabel,
+} from '../taskActionPolicy.js'
 import { taskFailureMessage } from '../taskDetailPolicy.js'
 import {
   DEFAULT_SUMMARY_PREVIEW_OPTIONS,
@@ -297,7 +349,7 @@ const props = defineProps({
   mobileSheet: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close', 'transcribe', 'analyze', 'toast'])
+const emit = defineEmits(['close', 'transcribe', 'analyze', 'retranscribe', 'reanalyze', 'toast'])
 
 const router = useRouter()
 const activeTab = ref('overview')
@@ -340,10 +392,16 @@ const showSummaryExpand = computed(() => {
 })
 
 const canUseRAG = computed(() => {
-  return !!(props.task?.transcription?.content || props.task?.status === 3)
+  return hasTranscriptionResult(props.task) || props.task?.status === 3
 })
 
 const isActionDisabled = computed(() => isTaskActionDisabled(props.task, props.loading))
+const hasTx = computed(() => hasTranscriptionResult(props.task))
+const hasSum = computed(() => hasSummaryResult(props.task))
+const txPrimaryDisabled = computed(() => isPrimaryTranscribeDisabled(props.task, props.loading))
+const sumPrimaryDisabled = computed(() => isPrimaryAnalyzeDisabled(props.task, props.loading))
+const txLabel = computed(() => primaryTranscribeLabel(props.task))
+const sumLabel = computed(() => primaryAnalyzeLabel(props.task))
 const failureMessage = computed(() => taskFailureMessage(props.task))
 const detailedStatus = computed(() => getDetailedStatus(props.task))
 const errorMsg = computed(() => getErrorMessage(props.task))
@@ -444,7 +502,7 @@ watch(
   align-items: center;
   justify-content: center;
   border-style: dashed;
-  background: rgba(12, 16, 24, 0.45);
+  background: color-mix(in srgb, var(--vl-panel) 45%, transparent);
 }
 
 .empty-inner {
@@ -460,16 +518,16 @@ watch(
   border-radius: 0.75rem;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.16), rgba(96, 165, 250, 0.1));
-  border: 1px solid rgba(45, 212, 191, 0.28);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid var(--vl-primary-glow);
 }
 
 .empty-core {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #5eead4, #0d9488 70%);
-  box-shadow: 0 0 12px rgba(45, 212, 191, 0.55);
+  background: radial-gradient(circle at 30% 30%, var(--vl-primary), var(--vl-primary-deep) 70%);
+  box-shadow: 0 0 12px var(--vl-border-focus);
 }
 
 .empty-inner h3 {
@@ -510,7 +568,7 @@ watch(
 }
 
 .back-btn:hover {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
@@ -570,7 +628,7 @@ watch(
 .close-btn:hover {
   color: var(--vl-danger);
   background: var(--vl-danger-dim);
-  border-color: rgba(248, 113, 113, 0.35);
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 
 .detail-actions {
@@ -580,48 +638,102 @@ watch(
   padding: 0.85rem 1.15rem;
   border-bottom: 1px solid var(--vl-border);
   flex-shrink: 0;
+  align-items: flex-start;
+}
+
+.action-stack {
+  flex: 1;
+  min-width: 5.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .action-btn {
-  flex: 1;
+  width: 100%;
   min-width: 5.5rem;
   padding: 0.55rem 0.75rem;
   border-radius: var(--vl-radius-sm);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.35);
+  background: var(--vl-surface-hover);
   color: var(--vl-text-secondary);
   font-weight: 600;
   font-size: 0.82rem;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s, opacity 0.2s;
+}
+
+.detail-actions > .action-btn.chat {
+  flex: 1;
+  width: auto;
+  align-self: stretch;
 }
 
 .action-btn:hover:not(:disabled) {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
 
 .action-btn.accent {
-  border-color: rgba(240, 180, 41, 0.35);
+  border-color: var(--vl-accent-glow);
   color: var(--vl-accent);
   background: var(--vl-accent-dim);
 }
 
 .action-btn.chat {
-  border-color: rgba(96, 165, 250, 0.35);
+  border-color: color-mix(in srgb, var(--vl-info) 30%, transparent);
   color: var(--vl-info);
   background: var(--vl-info-dim);
 }
 
 .action-btn.solid {
   flex: 0 1 auto;
-  border-color: rgba(45, 212, 191, 0.45);
+  width: auto;
+  border-color: var(--vl-border-focus);
   color: var(--vl-text-inverse);
-  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
 }
 
 .action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-btn.done:disabled {
+  opacity: 0.55;
+  color: var(--vl-text-muted);
+  border-color: var(--vl-border);
+  background: color-mix(in srgb, var(--vl-bg) 45%, transparent);
+  cursor: default;
+}
+
+.rerun-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--vl-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.05rem 0.1rem;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.8;
+}
+
+.rerun-link:hover {
+  color: var(--vl-text-secondary);
+  opacity: 1;
+}
+
+.icon-btn.subtle {
+  opacity: 0.75;
+  font-weight: 500;
+}
+
+.icon-btn.subtle:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -674,7 +786,7 @@ watch(
   overflow-y: auto;
   padding: 1rem 1.15rem 1.35rem;
   scrollbar-width: thin;
-  scrollbar-color: rgba(45, 212, 191, 0.28) transparent;
+  scrollbar-color: var(--vl-primary-glow) transparent;
 }
 
 .tab-pane {
@@ -688,8 +800,8 @@ watch(
   margin: -0.25rem 0 0.9rem;
   padding: 0.65rem 0.85rem;
   border-radius: var(--vl-radius-sm);
-  border: 1px solid rgba(45, 212, 191, 0.28);
-  background: rgba(45, 212, 191, 0.08);
+  border: 1px solid var(--vl-primary-glow);
+  background: var(--vl-primary-dim);
   color: var(--vl-primary);
   font-weight: 600;
   font-size: 0.84rem;
@@ -698,7 +810,7 @@ watch(
 .spinner {
   width: 1.35rem;
   height: 1.35rem;
-  border: 2px solid rgba(45, 212, 191, 0.2);
+  border: 2px solid color-mix(in srgb, var(--vl-primary) 20%, transparent);
   border-top-color: var(--vl-primary);
   border-radius: 50%;
   animation: vl-spin 0.75s linear infinite;
@@ -718,7 +830,7 @@ watch(
   padding: 0.75rem 0.85rem;
   border-radius: var(--vl-radius);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.4);
+  background: var(--vl-surface);
 }
 
 .meta-label {
@@ -756,19 +868,19 @@ watch(
 }
 
 .meta-status.pending {
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--vl-border);
   color: var(--vl-text-secondary);
-  border-color: rgba(148, 163, 184, 0.2);
+  border-color: var(--vl-border-strong);
 }
 .meta-status.queued {
   background: var(--vl-info-dim);
   color: var(--vl-info);
-  border-color: rgba(96, 165, 250, 0.3);
+  border-color: color-mix(in srgb, var(--vl-info) 30%, transparent);
 }
 .meta-status.running {
   background: var(--vl-accent-dim);
   color: var(--vl-accent);
-  border-color: rgba(240, 180, 41, 0.3);
+  border-color: color-mix(in srgb, var(--vl-accent) 30%, transparent);
 }
 .meta-status.running .status-dot {
   animation: vl-status-pulse 1.6s ease-in-out infinite;
@@ -776,22 +888,22 @@ watch(
 .meta-status.completed {
   background: var(--vl-success-dim);
   color: var(--vl-success);
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: color-mix(in srgb, var(--vl-success) 30%, transparent);
 }
 .meta-status.failed {
   background: var(--vl-danger-dim);
   color: var(--vl-danger);
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
 }
 .meta-status.retrying {
   background: var(--vl-warning-dim);
   color: var(--vl-warning);
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: color-mix(in srgb, var(--vl-warning) 30%, transparent);
 }
 .meta-status.dead {
-  background: rgba(100, 116, 139, 0.15);
-  color: #94a3b8;
-  border-color: rgba(100, 116, 139, 0.3);
+  background: var(--vl-border);
+  color: var(--vl-text-secondary);
+  border-color: color-mix(in srgb, var(--vl-text-muted) 30%, transparent);
 }
 
 .retry-info,
@@ -799,12 +911,12 @@ watch(
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
   border-radius: var(--vl-radius);
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid color-mix(in srgb, var(--vl-warning) 28%, transparent);
+  background: var(--vl-warning-dim);
 }
 
 .error-block {
-  border-color: rgba(248, 113, 113, 0.35);
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
   background: var(--vl-danger-dim);
 }
 
@@ -818,7 +930,7 @@ watch(
   margin: 0;
   font-size: 0.86rem;
   line-height: 1.55;
-  color: #fecaca;
+  color: var(--vl-danger);
   white-space: pre-wrap;
   font-family: var(--vl-font-mono);
 }
@@ -859,7 +971,7 @@ watch(
   gap: 0.75rem;
   appearance: none;
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.3);
+  background: var(--vl-surface-hover);
   border-radius: var(--vl-radius-sm);
   padding: 0.55rem 0.75rem;
   cursor: pointer;
@@ -870,7 +982,7 @@ watch(
 
 .jobs-toggle:hover {
   border-color: var(--vl-border-strong);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
 }
 
 .jobs-toggle .section-title {
@@ -902,7 +1014,7 @@ watch(
   padding: 0.75rem 0.85rem;
   border-radius: var(--vl-radius-sm);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.4);
+  background: var(--vl-surface);
 }
 
 .job-header {
@@ -969,7 +1081,7 @@ watch(
 }
 
 .job-error-text {
-  color: #fca5a5;
+  color: var(--vl-danger);
   font-family: var(--vl-font-mono);
   word-break: break-word;
 }
@@ -1019,7 +1131,7 @@ watch(
 .icon-btn {
   padding: 0.35rem 0.65rem;
   border-radius: var(--vl-radius-sm);
-  border: 1px solid rgba(45, 212, 191, 0.3);
+  border: 1px solid var(--vl-primary-glow);
   background: var(--vl-primary-dim);
   color: var(--vl-primary);
   font-size: 0.78rem;
@@ -1029,8 +1141,8 @@ watch(
 }
 
 .icon-btn:hover {
-  border-color: rgba(45, 212, 191, 0.5);
-  background: rgba(45, 212, 191, 0.22);
+  border-color: var(--vl-border-focus);
+  background: var(--vl-primary-glow);
 }
 
 .result-text {
@@ -1038,12 +1150,12 @@ watch(
   padding: 1rem 1.1rem;
   border-radius: var(--vl-radius);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.55);
+  background: var(--vl-surface);
   font-family: var(--vl-font-mono);
   font-size: 0.86rem;
   line-height: 1.75;
   white-space: pre-wrap;
-  color: #b8c5db;
+  color: var(--vl-text-secondary);
   max-height: none;
   overflow: visible;
 }
@@ -1052,7 +1164,7 @@ watch(
   padding: 1rem 1.1rem;
   border-radius: var(--vl-radius);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.55);
+  background: var(--vl-surface);
   line-height: 1.8;
   overflow: visible;
 }
@@ -1066,7 +1178,7 @@ watch(
 
 .result-markdown :deep(p) {
   margin: 0 0 0.85rem;
-  color: #b8c5db;
+  color: var(--vl-text-secondary);
   font-size: 0.9rem;
 }
 
@@ -1082,7 +1194,7 @@ watch(
 
 .result-markdown :deep(li) {
   margin-bottom: 0.4rem;
-  color: #b8c5db;
+  color: var(--vl-text-secondary);
 }
 
 .result-markdown :deep(li::marker) {
@@ -1090,13 +1202,13 @@ watch(
 }
 
 .result-markdown :deep(code) {
-  background: rgba(45, 212, 191, 0.1);
+  background: var(--vl-primary-dim);
   padding: 0.12rem 0.4rem;
   border-radius: 0.3rem;
   font-family: var(--vl-font-mono);
   font-size: 0.82rem;
   color: var(--vl-primary);
-  border: 1px solid rgba(45, 212, 191, 0.2);
+  border: 1px solid color-mix(in srgb, var(--vl-primary) 20%, transparent);
 }
 
 .expand-btn {
@@ -1114,7 +1226,7 @@ watch(
 }
 
 .expand-btn:hover {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }

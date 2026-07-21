@@ -58,7 +58,7 @@ const handleBackdropMouseDown = (e) => {
 .confirm-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--vl-overlay-scrim);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -122,7 +122,7 @@ const handleBackdropMouseDown = (e) => {
 .btn-cancel:hover {
   border-color: var(--vl-border-strong);
   color: var(--vl-text);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
 }
 
 .btn-confirm {
@@ -136,27 +136,27 @@ const handleBackdropMouseDown = (e) => {
 }
 
 .btn-confirm.danger {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: #fff;
+  background: linear-gradient(135deg, var(--vl-danger), var(--vl-danger));
+  color: var(--vl-text-inverse);
 }
 
 .btn-confirm.danger:hover {
-  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.35);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--vl-danger) 35%, transparent);
   transform: translateY(-1px);
 }
 
 .btn-confirm.warning {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: linear-gradient(135deg, var(--vl-warning), var(--vl-accent));
   color: var(--vl-text-inverse);
 }
 
 .btn-confirm.warning:hover {
-  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.35);
+  box-shadow: 0 6px 18px var(--vl-accent-glow);
   transform: translateY(-1px);
 }
 
 .btn-confirm.primary {
-  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
   color: var(--vl-text-inverse);
 }
 

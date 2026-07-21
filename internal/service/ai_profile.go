@@ -219,6 +219,127 @@ func (s *AIProfileService) TestSavedProfile(ctx context.Context, userID, id int6
 	return s.tester.TestProfile(ctx, decrypted)
 }
 
+// ListModelsRequest resolves upstream OpenAI-compatible GET /models.
+// Prefer base_url + api_key for draft forms; or profile_id + purpose to reuse stored keys.
+type ListModelsRequest struct {
+	BaseURL   string `json:"base_url"`
+	APIKey    string `json:"api_key"`
+	ProfileID int64  `json:"profile_id"`
+	// Purpose: llm | asr | embedding | vision — selects which stored URL/key when profile_id is set.
+	Purpose string `json:"purpose"`
+}
+
+// ListModels proxies OpenAI-compatible model listing. Does not require tester.
+func (s *AIProfileService) ListModels(ctx context.Context, userID int64, req ListModelsRequest) ([]string, error) {
+	baseURL := strings.TrimSpace(req.BaseURL)
+	apiKey := strings.TrimSpace(req.APIKey)
+	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
+	if purpose == "" {
+		purpose = "llm"
+	}
+
+	if req.ProfileID > 0 {
+		profile, err := s.repo.FindByIDForUser(userID, req.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		if profile == nil {
+			return nil, ErrAIProfileNotFound
+		}
+		decrypted, err := s.decryptProfile(profile)
+		if err != nil {
+			return nil, err
+		}
+		switch purpose {
+		case "asr":
+			if baseURL == "" {
+				baseURL = decrypted.ASRBaseURL
+			}
+			if apiKey == "" {
+				apiKey = decrypted.ASRAPIKey
+			}
+		case "embedding":
+			if baseURL == "" {
+				baseURL = decrypted.EmbeddingEndpoint
+			}
+			if apiKey == "" {
+				apiKey = decrypted.EmbeddingAPIKey
+			}
+		case "vision":
+			if baseURL == "" {
+				baseURL = decrypted.VisionBaseURL
+			}
+			if apiKey == "" {
+				apiKey = decrypted.VisionAPIKey
+			}
+		default: // llm
+			if baseURL == "" {
+				baseURL = decrypted.LLMBaseURL
+			}
+			if apiKey == "" {
+				apiKey = decrypted.LLMAPIKey
+			}
+		}
+	}
+
+	if baseURL == "" {
+		return nil, fmt.Errorf("Base URL 不能为空")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("API Key 不能为空（编辑已保存配置时可只传 profile_id）")
+	}
+	return ai.ListOpenAIModels(ctx, baseURL, apiKey)
+}
+
+// ProbeEmbeddingDimRequest resolves embedding endpoint/key/model for a one-shot dimension probe.
+type ProbeEmbeddingDimRequest struct {
+	Endpoint  string `json:"endpoint"`
+	APIKey    string `json:"api_key"`
+	Model     string `json:"model"`
+	ProfileID int64  `json:"profile_id"`
+}
+
+// ProbeEmbeddingDim embeds a short string and returns the vector length as dimension.
+func (s *AIProfileService) ProbeEmbeddingDim(ctx context.Context, userID int64, req ProbeEmbeddingDimRequest) (int, error) {
+	endpoint := strings.TrimSpace(req.Endpoint)
+	apiKey := strings.TrimSpace(req.APIKey)
+	model := strings.TrimSpace(req.Model)
+
+	if req.ProfileID > 0 {
+		profile, err := s.repo.FindByIDForUser(userID, req.ProfileID)
+		if err != nil {
+			return 0, err
+		}
+		if profile == nil {
+			return 0, ErrAIProfileNotFound
+		}
+		decrypted, err := s.decryptProfile(profile)
+		if err != nil {
+			return 0, err
+		}
+		if endpoint == "" {
+			endpoint = decrypted.EmbeddingEndpoint
+		}
+		if apiKey == "" {
+			apiKey = decrypted.EmbeddingAPIKey
+		}
+		if model == "" {
+			model = decrypted.EmbeddingModel
+		}
+	}
+
+	if endpoint == "" {
+		return 0, fmt.Errorf("Embedding Endpoint 不能为空")
+	}
+	if apiKey == "" {
+		return 0, fmt.Errorf("API Key 不能为空（编辑已保存配置时可只传 profile_id）")
+	}
+	if model == "" {
+		return 0, fmt.Errorf("Embedding 模型不能为空")
+	}
+	return ai.ProbeEmbeddingDimension(ctx, endpoint, apiKey, model)
+}
+
 func (s *AIProfileService) GetDefaultDecrypted(userID int64) (*DecryptedAIProfile, error) {
 	profile, err := s.repo.FindDefaultByUserID(userID)
 	if err != nil {

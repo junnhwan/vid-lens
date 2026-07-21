@@ -70,8 +70,8 @@ export default {
     api.get('/media/list', { params: { page, page_size: pageSize, keyword } }),
   getTask: (id) => api.get(`/media/task/${id}`),
   deleteTask: (id) => api.delete(`/media/task/${id}`),
-  analyze: (id) => api.post(`/media/analyze/${id}`),
-  transcribe: (id) => api.post(`/media/transcribe/${id}`),
+  analyze: (id, opts = {}) => api.post(`/media/analyze/${id}`, { force: !!opts.force }),
+  transcribe: (id, opts = {}) => api.post(`/media/transcribe/${id}`, { force: !!opts.force }),
   downloadAudio: (id) => api.get(`/media/download-audio/${id}`),
 
   // 分片上传：Redis Set 保存已落入 MinIO 的分片编号
@@ -99,6 +99,10 @@ export default {
   updateAIProfile: (id, profile) => api.put(`/ai/profiles/${id}`, profile),
   deleteAIProfile: (id) => api.delete(`/ai/profiles/${id}`),
   testAIProfile: (profile) => api.post('/ai/profiles/test', profile),
+  /** 拉取 OpenAI 兼容 GET /models；body: { base_url, api_key } 或 { profile_id, purpose } */
+  listAIModels: (body) => api.post('/ai/profiles/models', body),
+  /** 探测 embedding 维度；body: { endpoint, api_key, model } 或 { profile_id, model? } */
+  probeEmbeddingDim: (body) => api.post('/ai/profiles/embedding-dim', body),
 
   // RAG 索引
   buildRAGIndex: (taskId, rebuild = false) =>

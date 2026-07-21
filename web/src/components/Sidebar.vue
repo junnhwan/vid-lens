@@ -204,7 +204,7 @@ const handleUrlUpload = () => {
   height: 100%;
   min-height: 0;
   padding: 1.35rem 1.15rem;
-  background: rgba(8, 11, 18, 0.55);
+  background: var(--vl-surface);
   border-right: 1px solid var(--vl-border);
   overflow-x: hidden;
   overflow-y: auto;
@@ -255,7 +255,7 @@ const handleUrlUpload = () => {
   padding: 1rem;
   border-radius: var(--vl-radius-lg);
   border: 1px dashed var(--vl-border-strong);
-  background: rgba(16, 22, 34, 0.55);
+  background: var(--vl-surface);
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.2s;
   margin-bottom: 0.65rem;
@@ -263,9 +263,9 @@ const handleUrlUpload = () => {
 
 .upload-card:hover:not(.disabled),
 .upload-card.dragging:not(.disabled) {
-  border-color: rgba(45, 212, 191, 0.55);
+  border-color: var(--vl-border-focus);
   border-style: solid;
-  background: rgba(45, 212, 191, 0.06);
+  background: var(--vl-primary-dim);
   box-shadow: 0 0 0 3px var(--vl-primary-dim);
 }
 
@@ -285,8 +285,8 @@ const handleUrlUpload = () => {
   border-radius: 0.65rem;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.2), rgba(96, 165, 250, 0.1));
-  border: 1px solid rgba(45, 212, 191, 0.3);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--vl-primary) 20%, transparent), color-mix(in srgb, var(--vl-info) 10%, transparent));
+  border: 1px solid var(--vl-primary-glow);
   color: var(--vl-primary);
   font-size: 1.1rem;
   font-weight: 700;
@@ -314,7 +314,7 @@ const handleUrlUpload = () => {
   width: 100%;
   padding: 0.55rem 0.9rem;
   border-radius: var(--vl-radius-sm);
-  border: 1px solid rgba(45, 212, 191, 0.35);
+  border: 1px solid var(--vl-primary-glow);
   background: var(--vl-primary-dim);
   color: var(--vl-primary);
   font-weight: 600;
@@ -324,12 +324,12 @@ const handleUrlUpload = () => {
 }
 
 .upload-btn:hover:not(:disabled) {
-  background: rgba(45, 212, 191, 0.22);
+  background: color-mix(in srgb, var(--vl-primary) 22%, transparent);
   border-color: var(--vl-primary);
 }
 
 .upload-btn.solid {
-  background: linear-gradient(135deg, var(--vl-primary), #14b8a6);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-primary-deep));
   border-color: transparent;
   color: var(--vl-text-inverse);
 }
@@ -375,8 +375,8 @@ const handleUrlUpload = () => {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--vl-text-muted);
-  background: rgba(148, 163, 184, 0.12);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: var(--vl-border);
+  border: 1px solid var(--vl-border-strong);
   border-radius: 999px;
   padding: 0.08rem 0.4rem;
   line-height: 1.3;
@@ -393,7 +393,7 @@ const handleUrlUpload = () => {
   padding: 0.75rem;
   border-radius: var(--vl-radius);
   border: 1px solid var(--vl-border);
-  background: rgba(7, 9, 15, 0.35);
+  background: var(--vl-surface-hover);
 }
 
 .url-beta-body.disabled {
@@ -416,7 +416,7 @@ const handleUrlUpload = () => {
 .url-input-group input {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(7, 9, 15, 0.65);
+  background: var(--vl-surface);
   border: 1px solid var(--vl-border);
   border-radius: var(--vl-radius-sm);
   padding: 0.6rem 0.8rem;
@@ -441,8 +441,8 @@ const handleUrlUpload = () => {
   margin-top: 0.85rem;
   padding: 0.85rem;
   border-radius: var(--vl-radius);
-  border: 1px solid rgba(45, 212, 191, 0.25);
-  background: rgba(45, 212, 191, 0.06);
+  border: 1px solid var(--vl-primary-glow);
+  background: var(--vl-primary-dim);
   color: var(--vl-primary);
   font-size: 0.82rem;
   font-weight: 500;
@@ -450,7 +450,7 @@ const handleUrlUpload = () => {
 
 .progress-bar {
   height: 5px;
-  background: rgba(148, 163, 184, 0.15);
+  background: var(--vl-border-strong);
   border-radius: 999px;
   overflow: hidden;
   margin-bottom: 0.65rem;
@@ -458,7 +458,7 @@ const handleUrlUpload = () => {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--vl-primary), #5eead4);
+  background: linear-gradient(90deg, var(--vl-primary), var(--vl-primary-deep));
   border-radius: 999px;
   transition: width 0.3s ease;
   box-shadow: 0 0 8px var(--vl-primary-glow);
@@ -474,7 +474,7 @@ const handleUrlUpload = () => {
 .spinner {
   width: 1rem;
   height: 1rem;
-  border: 2px solid rgba(45, 212, 191, 0.2);
+  border: 2px solid color-mix(in srgb, var(--vl-primary) 20%, transparent);
   border-top-color: var(--vl-primary);
   border-radius: 50%;
   animation: vl-spin 0.75s linear infinite;
@@ -491,7 +491,7 @@ const handleUrlUpload = () => {
   padding: 0.85rem 0.7rem;
   border-radius: var(--vl-radius);
   border: 1px solid var(--vl-border);
-  background: rgba(16, 22, 34, 0.55);
+  background: var(--vl-surface);
   text-align: center;
   transition: border-color 0.2s, transform 0.2s;
 }
@@ -537,7 +537,7 @@ const handleUrlUpload = () => {
     transition: transform 0.3s var(--vl-ease);
     box-shadow: var(--vl-shadow);
     border-right: 1px solid var(--vl-border-strong);
-    background: rgba(7, 9, 15, 0.98);
+    background: var(--vl-panel);
   }
 
   @supports (height: 100dvh) {
@@ -555,7 +555,7 @@ const handleUrlUpload = () => {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--vl-overlay-scrim);
     z-index: 149;
   }
 }

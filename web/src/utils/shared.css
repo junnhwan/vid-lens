@@ -1,30 +1,36 @@
 /*
- * 映知 design system — dark optical lab aesthetic.
- * Import once from main.js. Prefer CSS variables over hardcoded gold/blue.
+ * 映知 design system — structural tokens + shared utilities.
+ * Color palettes live in themes.css ([data-theme]). Prefer CSS variables over hardcoded colors.
  */
 
 :root {
-  /* Surfaces */
+  /* Radius / shadow / motion — theme-independent structure */
+  --vl-radius-sm: 0.5rem;
+  --vl-radius: 0.75rem;
+  --vl-radius-lg: 1rem;
+  --vl-radius-xl: 1.25rem;
+  --vl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --vl-font: 'DM Sans', 'Noto Sans SC', system-ui, sans-serif;
+  --vl-font-display: 'Syne', 'Noto Sans SC', system-ui, sans-serif;
+  --vl-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --vl-nav-h: 64px;
+
+  /* Fallbacks if themes.css loads late (match dark defaults) */
   --vl-bg: #07090f;
   --vl-bg-elevated: #0c1018;
-  --vl-surface: rgba(16, 22, 34, 0.72);
-  --vl-surface-solid: #111827;
-  --vl-surface-hover: rgba(24, 32, 48, 0.88);
-  --vl-panel: rgba(12, 16, 24, 0.92);
-
-  /* Borders */
+  --vl-surface: rgba(22, 30, 44, 0.88);
+  --vl-surface-solid: #141b2a;
+  --vl-surface-hover: rgba(30, 40, 58, 0.92);
+  --vl-panel: rgba(16, 22, 34, 0.96);
   --vl-border: rgba(148, 163, 184, 0.12);
   --vl-border-strong: rgba(148, 163, 184, 0.22);
   --vl-border-focus: rgba(45, 212, 191, 0.45);
-
-  /* Text */
   --vl-text: #e8eef6;
   --vl-text-secondary: #94a3b8;
   --vl-text-muted: #64748b;
   --vl-text-inverse: #07090f;
-
-  /* Brand: teal (primary) + warm amber (accent) */
   --vl-primary: #2dd4bf;
+  --vl-primary-deep: #14b8a6;
   --vl-primary-dim: rgba(45, 212, 191, 0.14);
   --vl-primary-glow: rgba(45, 212, 191, 0.28);
   --vl-accent: #f0b429;
@@ -38,19 +44,16 @@
   --vl-danger-dim: rgba(248, 113, 113, 0.14);
   --vl-warning: #fbbf24;
   --vl-warning-dim: rgba(251, 191, 36, 0.14);
-
-  /* Radius / shadow / motion */
-  --vl-radius-sm: 0.5rem;
-  --vl-radius: 0.75rem;
-  --vl-radius-lg: 1rem;
-  --vl-radius-xl: 1.25rem;
+  --vl-nav-bg: rgba(7, 9, 15, 0.82);
+  --vl-overlay-scrim: rgba(0, 0, 0, 0.55);
+  --vl-white-a03: rgba(255, 255, 255, 0.03);
+  --vl-white-a08: rgba(255, 255, 255, 0.08);
+  --vl-app-bg-image: none;
+  --vl-grain-opacity: 0;
+  --vl-scrollbar-thumb: rgba(45, 212, 191, 0.28);
+  --vl-scrollbar-thumb-hover: rgba(45, 212, 191, 0.45);
   --vl-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
   --vl-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.25);
-  --vl-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --vl-font: 'DM Sans', 'Noto Sans SC', system-ui, sans-serif;
-  --vl-font-display: 'Syne', 'Noto Sans SC', system-ui, sans-serif;
-  --vl-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
-  --vl-nav-h: 64px;
 }
 
 /* Shared keyframes */
@@ -93,7 +96,7 @@
   font-size: 0.9rem;
   letter-spacing: 0.02em;
   color: var(--vl-text-inverse);
-  background: linear-gradient(135deg, var(--vl-primary) 0%, #14b8a6 100%);
+  background: linear-gradient(135deg, var(--vl-primary) 0%, var(--vl-primary-deep) 100%);
   padding: 0.7rem 1.4rem;
   border-radius: var(--vl-radius);
   box-shadow: 0 4px 16px var(--vl-primary-glow);

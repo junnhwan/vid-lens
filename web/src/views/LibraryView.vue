@@ -34,6 +34,8 @@
           @deleteTask="app.deleteTask"
           @transcribe="app.doTranscribe"
           @analyze="app.doAnalyze"
+          @retranscribe="app.doRetranscribe"
+          @reanalyze="app.doReanalyze"
           @loadMore="app.loadMoreTasks"
           @chat="goChat"
           @retry="app.retryLoadTasks"
@@ -50,6 +52,8 @@
           @close="app.closeDrawer"
           @transcribe="app.doTranscribe(app.selectedTask)"
           @analyze="app.doAnalyze(app.selectedTask)"
+          @retranscribe="app.doRetranscribe(app.selectedTask)"
+          @reanalyze="app.doReanalyze(app.selectedTask)"
           @toast="(msg) => app.showToast(msg)"
         />
       </div>
@@ -67,6 +71,8 @@
         @close="app.closeDrawer"
         @transcribe="app.doTranscribe(app.selectedTask)"
         @analyze="app.doAnalyze(app.selectedTask)"
+        @retranscribe="app.doRetranscribe(app.selectedTask)"
+        @reanalyze="app.doReanalyze(app.selectedTask)"
         @toast="(msg) => app.showToast(msg)"
       />
     </div>

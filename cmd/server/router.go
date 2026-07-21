@@ -49,6 +49,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				aiProfiles.PUT("/:id", handlers.profiles.Update)
 				aiProfiles.DELETE("/:id", handlers.profiles.Delete)
 				aiProfiles.POST("/test", handlers.profiles.Test)
+				aiProfiles.POST("/models", handlers.profiles.ListModels)
+					aiProfiles.POST("/embedding-dim", handlers.profiles.ProbeEmbeddingDim)
 			}
 			chat := auth.Group("/chat")
 			{

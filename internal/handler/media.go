@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/middleware"
@@ -150,8 +151,9 @@ func (h *MediaHandler) MergeChunks(c *gin.Context) {
 func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	force := parseForceFlag(c)
 
-	if err := h.svc.RequestAnalysis(c.Request.Context(), userID, taskID); err != nil {
+	if err := h.svc.RequestAnalysis(c.Request.Context(), userID, taskID, force); err != nil {
 		response.Fail(c, 400, err.Error())
 		return
 	}
@@ -164,13 +166,27 @@ func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	force := parseForceFlag(c)
 
-	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID); err != nil {
+	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID, force); err != nil {
 		response.Fail(c, 400, err.Error())
 		return
 	}
 
 	response.OKWithMsg(c, "文字提取任务已提交", gin.H{"task_id": taskID})
+}
+
+// parseForceFlag 读取 body/query 中的 force（重新提取/总结）
+func parseForceFlag(c *gin.Context) bool {
+	if q := c.Query("force"); q == "1" || strings.EqualFold(q, "true") {
+		return true
+	}
+	var body struct {
+		Force bool `json:"force"`
+	}
+	// 忽略 bind 错误：空 body 时 force=false
+	_ = c.ShouldBindJSON(&body)
+	return body.Force
 }
 
 // GetTaskDetail 查询任务详情（轮询用）

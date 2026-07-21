@@ -25,14 +25,6 @@
       @submit="handleAuth"
     />
 
-    <AIConfigModal
-      ref="aiConfigModal"
-      :show="showConfig"
-      @close="closeConfig"
-      @updated="onConfigUpdated"
-      @showConfirm="openConfirm"
-    />
-
     <ConfirmDialog
       :show="confirmState.show"
       :title="confirmState.title"
@@ -57,15 +49,14 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, provide, onMounted, onUnmounted, defineAsyncComponent, watch } from 'vue'
+import { ref, computed, reactive, provide, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import Navbar from './components/Navbar.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
-// 懒加载低频组件
-const AIConfigModal = defineAsyncComponent(() => import('./components/AIConfigModal.vue'))
-
 import api from './api'
+import { getStoredTheme, setTheme as applyStoredTheme, THEME_CHANGE_EVENT } from './theme.js'
 import { normalizeListResponse } from './apiEnvelope.js'
 import { formatUploadError, formatUploadProgressMessage, uploadFileInChunks } from './chunkedUpload.js'
 import { buildStoredUser } from './authSession.js'
@@ -90,10 +81,14 @@ const authLoading = ref(false)
 const authMsg = ref('')
 const authError = ref(false)
 const pollingTimers = ref({})
-const showConfig = ref(false)
-const aiConfigModal = ref(null)
 const sidebarOpen = ref(false)
 const offlineToast = ref(false)
+const theme = ref(getStoredTheme())
+const router = useRouter()
+
+const setTheme = (id) => {
+  theme.value = applyStoredTheme(id)
+}
 
 // 分页
 const currentPage = ref(1)
@@ -213,9 +208,39 @@ const fetchTasks = async (page = 1, append = false, keyword = searchKeyword.valu
   }
   try {
     const res = await api.listTasks(page, pageSize, keyword)
-    const list = res?.list || []
+    const enrich = (item, prev) => {
+      const hasTx = !!(
+        item.has_transcription ??
+        item.hasTranscription ??
+        prev?.has_transcription ??
+        prev?.transcription?.content
+      )
+      const hasSum = !!(
+        item.has_summary ??
+        item.hasSummary ??
+        prev?.has_summary ??
+        prev?.summary?.content
+      )
+      return {
+        ...(prev || {}),
+        ...item,
+        has_transcription: hasTx,
+        has_summary: hasSum,
+        // 列表不带正文：保留本会话已拉过的 content，避免灰显闪回
+        transcription: prev?.transcription?.content ? prev.transcription : item.transcription,
+        summary: prev?.summary?.content ? prev.summary : item.summary,
+      }
+    }
+    const byId = new Map(tasks.value.map((t) => [t.id, t]))
+    const list = (res?.list || []).map((item) => enrich(item, byId.get(item.id)))
+
     if (append) {
-      tasks.value = [...tasks.value, ...list]
+      const existingIds = new Set(tasks.value.map((t) => t.id))
+      const updates = new Map(list.map((t) => [t.id, t]))
+      tasks.value = [
+        ...tasks.value.map((t) => updates.get(t.id) || t),
+        ...list.filter((t) => !existingIds.has(t.id)),
+      ]
     } else {
       tasks.value = list
     }
@@ -303,17 +328,25 @@ const closeDrawer = () => {
   selectedTask.value = null
 }
 
-const doTranscribe = async (task) => {
-  if (task.transcription?.content || needsResultDetail(task, 'transcription')) {
-    selectedTask.value = task
-    await refreshTaskDetail(task.id)
-    return
+const doTranscribe = async (task, opts = {}) => {
+  const force = !!opts.force
+  if (!force) {
+    // 已有结果（详情 content / 列表标记 / 需拉详情）：只打开并刷新，不重复提交
+    if (
+      task.transcription?.content ||
+      task.has_transcription ||
+      needsResultDetail(task, 'transcription')
+    ) {
+      selectedTask.value = task
+      await refreshTaskDetail(task.id)
+      return
+    }
   }
   if (loading.value[task.id]) return
   loading.value[task.id] = true
   selectedTask.value = task
   try {
-    await api.transcribe(task.id)
+    await api.transcribe(task.id, { force })
     startPolling(task.id, 'transcription')
   } catch (err) {
     showToast(err.message || '请求失败', true)
@@ -321,17 +354,24 @@ const doTranscribe = async (task) => {
   }
 }
 
-const doAnalyze = async (task) => {
-  if (task.summary?.content || needsResultDetail(task, 'summary')) {
-    selectedTask.value = task
-    await refreshTaskDetail(task.id)
-    return
+const doAnalyze = async (task, opts = {}) => {
+  const force = !!opts.force
+  if (!force) {
+    if (
+      task.summary?.content ||
+      task.has_summary ||
+      needsResultDetail(task, 'summary')
+    ) {
+      selectedTask.value = task
+      await refreshTaskDetail(task.id)
+      return
+    }
   }
   if (loading.value[task.id]) return
   loading.value[task.id] = true
   selectedTask.value = task
   try {
-    await api.analyze(task.id)
+    await api.analyze(task.id, { force })
     startPolling(task.id, 'summary')
   } catch (err) {
     showToast(err.message || '请求失败', true)
@@ -339,8 +379,35 @@ const doAnalyze = async (task) => {
   }
 }
 
+const doRetranscribe = (task) => {
+  openConfirm({
+    title: '重新提取文字',
+    message: '将重新调用语音识别并覆盖现有文字提取结果，是否继续？',
+    confirmText: '重新提取',
+    showCancel: true,
+    type: 'primary',
+    icon: '↻',
+    onConfirm: () => doTranscribe(task, { force: true }),
+  })
+}
+
+const doReanalyze = (task) => {
+  openConfirm({
+    title: '重新生成总结',
+    message: '将重新调用模型并覆盖现有 AI 总结，是否继续？',
+    confirmText: '重新总结',
+    showCancel: true,
+    type: 'primary',
+    icon: '↻',
+    onConfirm: () => doAnalyze(task, { force: true }),
+  })
+}
+
 const mergeTaskIntoList = (detail) => {
   if (!detail?.id) return null
+  // 详情带 content 时同步列表侧「已完成」标记，便于卡片灰显主按钮
+  if (detail.transcription?.content) detail.has_transcription = true
+  if (detail.summary?.content) detail.has_summary = true
   const index = tasks.value.findIndex((t) => t.id === detail.id)
   if (index >= 0) {
     const merged = { ...tasks.value[index], ...detail }
@@ -467,18 +534,9 @@ const logout = () => {
   showToast('已退出')
 }
 
-// AI 配置相关
+// 设置 / AI 配置：独立页面（纯前端路由，复用既有 /ai/profiles API）
 const openConfig = () => {
-  showConfig.value = true
-  aiConfigModal.value?.loadProfiles()
-}
-
-const closeConfig = () => {
-  showConfig.value = false
-}
-
-const onConfigUpdated = () => {
-  showToast('配置已更新')
+  router.push({ name: 'settings' })
 }
 
 /** 登录或恢复会话后：若无任何 AI profile，提示去配置（不强制阻塞） */
@@ -532,13 +590,18 @@ const appCtx = reactive({
   deleteTask,
   doTranscribe,
   doAnalyze,
+  doRetranscribe,
+  doReanalyze,
   loadMoreTasks,
   showToast,
   openAuth,
   openConfig,
   openConfirm,
+  logout,
   toggleSidebar,
   closeSidebar,
+  theme,
+  setTheme,
 })
 provide('appCtx', appCtx)
 
@@ -549,7 +612,6 @@ const handleGlobalKeydown = (e) => {
     e.key === 'Escape' &&
     selectedTask.value &&
     !showAuth.value &&
-    !showConfig.value &&
     !confirmState.value.show
   ) {
     e.preventDefault()
@@ -590,10 +652,16 @@ const handleOffline = () => {
   offlineToast.value = true
 }
 
+const handleThemeChange = (e) => {
+  const next = e?.detail?.theme
+  if (next) theme.value = next
+  else theme.value = getStoredTheme()
+}
+
 
 // 弹层打开时锁住背景滚动，避免 fixed 层与页面滚动打架
 watch(
-  () => showAuth.value || showConfig.value || confirmState.value.show,
+  () => showAuth.value || confirmState.value.show,
   (open) => {
     document.body.style.overflow = open ? 'hidden' : ''
   },
@@ -607,15 +675,18 @@ onMounted(() => {
       fetchTasks().then(() => maybePromptAIConfig())
     } catch (e) {}
   }
+  theme.value = getStoredTheme()
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange)
 })
 
 onUnmounted(() => {
   window.removeEventListener('online', handleOnline)
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
   clearAllPolling()
   document.body.style.overflow = ''
 })
@@ -647,22 +718,17 @@ html, body {
   font-feature-settings: 'ss01' on, 'kern' on;
   letter-spacing: 0.01em;
   overflow-x: hidden;
-  background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(45, 212, 191, 0.12), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 95% 10%, rgba(96, 165, 250, 0.08), transparent 50%),
-    radial-gradient(ellipse 50% 50% at 70% 100%, rgba(240, 180, 41, 0.05), transparent 55%),
-    var(--vl-bg);
+  background: var(--vl-app-bg-image, none), var(--vl-bg);
 }
 
-/* subtle film grain — keep pointer-events off; do NOT force position on children
-   (that would override modal position:fixed via #app > * specificity) */
+/* optional film grain — opacity token defaults to 0 (minimal chrome) */
 #app::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.35;
+  opacity: var(--vl-grain-opacity, 0);
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
   background-size: 180px 180px;
   mix-blend-mode: soft-light;
@@ -683,22 +749,22 @@ a {
   right: 1.5rem;
   padding: 0.85rem 1.25rem;
   backdrop-filter: blur(16px) saturate(160%);
-  background: rgba(16, 185, 129, 0.92);
+  background: var(--vl-success);
   border-radius: var(--vl-radius);
   font-weight: 600;
   z-index: 1300;
   box-shadow: var(--vl-shadow);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--vl-white-a08);
   font-size: 0.88rem;
   letter-spacing: 0.02em;
-  color: #fff;
+  color: var(--vl-text-inverse);
   max-width: min(360px, calc(100vw - 2rem));
 }
 .toast.error {
-  background: rgba(239, 68, 68, 0.94);
+  background: var(--vl-danger);
 }
 .toast.offline {
-  background: rgba(71, 85, 105, 0.95);
+  background: var(--vl-text-muted);
   top: auto;
   bottom: 1.5rem;
 }
@@ -713,18 +779,18 @@ a {
 /* Thin scrollbar default */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(45, 212, 191, 0.28) transparent;
+  scrollbar-color: var(--vl-scrollbar-thumb) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(45, 212, 191, 0.28);
+  background: var(--vl-scrollbar-thumb);
   border-radius: 4px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(45, 212, 191, 0.45);
+  background: var(--vl-scrollbar-thumb-hover);
 }
 
 /* Library ↔ Chat page cross-fade (keyed by route.meta.pageKey so /chat/:id 不闪) */

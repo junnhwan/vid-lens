@@ -266,7 +266,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   flex-direction: column;
   border-right: 1px solid var(--vl-border);
   background:
-    linear-gradient(180deg, rgba(12, 16, 24, 0.72) 0%, rgba(8, 11, 18, 0.55) 100%);
+    linear-gradient(180deg, var(--vl-panel) 0%, var(--vl-panel) 100%);
   overflow: hidden;
 }
 
@@ -301,7 +301,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   font-weight: 600;
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
-  border: 1px solid rgba(45, 212, 191, 0.28);
+  border: 1px solid var(--vl-primary-glow);
   border-radius: 999px;
   padding: 0.12rem 0.45rem;
   line-height: 1.3;
@@ -321,7 +321,7 @@ const onChatError = (msg) => app.showToast(msg, true)
 }
 
 .back-link:hover {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: var(--vl-border-focus);
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
 }
@@ -351,14 +351,14 @@ const onChatError = (msg) => app.showToast(msg, true)
 }
 
 .video-item:hover {
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--vl-white-a03);
   border-color: var(--vl-border);
 }
 
 .video-item.active {
-  border-color: rgba(45, 212, 191, 0.42);
-  background: linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(96, 165, 250, 0.06));
-  box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.08);
+  border-color: var(--vl-border-focus);
+  background: linear-gradient(135deg, var(--vl-primary-dim), var(--vl-info-dim));
+  box-shadow: inset 0 0 0 1px var(--vl-primary-dim);
 }
 
 .video-item-icon {
@@ -366,7 +366,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   height: 0.5rem;
   border-radius: 2px;
   flex-shrink: 0;
-  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-info));
   opacity: 0.55;
   transition: opacity 0.2s, box-shadow 0.2s;
 }
@@ -426,7 +426,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   font-size: 1.1rem;
   color: var(--vl-primary);
   background: var(--vl-primary-dim);
-  border: 1px solid rgba(45, 212, 191, 0.28);
+  border: 1px solid var(--vl-primary-glow);
   margin-bottom: 0.35rem;
 }
 
@@ -450,7 +450,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgba(7, 9, 15, 0.22);
+  background: var(--vl-surface);
 }
 
 .mobile-current-bar {
@@ -475,15 +475,15 @@ const onChatError = (msg) => app.showToast(msg, true)
   height: 3.2rem;
   border-radius: 1rem;
   margin-bottom: 0.5rem;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.18), rgba(96, 165, 250, 0.1));
-  border: 1px solid rgba(45, 212, 191, 0.28);
-  box-shadow: 0 0 28px rgba(45, 212, 191, 0.12);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid var(--vl-primary-glow);
+  box-shadow: 0 0 28px var(--vl-primary-dim);
 }
 
 .placeholder-mark.warn {
-  background: linear-gradient(145deg, rgba(248, 113, 113, 0.18), rgba(239, 68, 68, 0.08));
-  border-color: rgba(248, 113, 113, 0.35);
-  box-shadow: 0 0 28px rgba(248, 113, 113, 0.12);
+  background: linear-gradient(145deg, var(--vl-danger-dim), var(--vl-danger-dim));
+  border-color: color-mix(in srgb, var(--vl-danger) 30%, transparent);
+  box-shadow: 0 0 28px var(--vl-danger-dim);
 }
 
 .placeholder-title {
@@ -504,7 +504,7 @@ const onChatError = (msg) => app.showToast(msg, true)
 .spinner {
   width: 1.35rem;
   height: 1.35rem;
-  border: 2.5px solid rgba(45, 212, 191, 0.15);
+  border: 2.5px solid var(--vl-primary-dim);
   border-top-color: var(--vl-primary);
   border-radius: 50%;
   animation: vl-spin 0.8s linear infinite;
@@ -527,9 +527,9 @@ const onChatError = (msg) => app.showToast(msg, true)
   width: 3.2rem;
   height: 3.2rem;
   border-radius: 1rem;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.25), rgba(96, 165, 250, 0.12));
-  border: 1px solid rgba(45, 212, 191, 0.35);
-  box-shadow: 0 0 28px rgba(45, 212, 191, 0.2);
+  background: linear-gradient(145deg, var(--vl-primary-glow), var(--vl-info-dim));
+  border: 1px solid var(--vl-primary-glow);
+  box-shadow: 0 0 28px var(--vl-primary-glow);
   margin-bottom: 0.5rem;
   display: grid;
   place-items: center;
@@ -539,8 +539,8 @@ const onChatError = (msg) => app.showToast(msg, true)
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #5eead4, #0d9488 70%, #134e4a);
-  box-shadow: 0 0 12px rgba(45, 212, 191, 0.7);
+  background: radial-gradient(circle at 30% 30%, var(--vl-primary), var(--vl-primary-deep) 70%, var(--vl-primary-deep));
+  box-shadow: 0 0 12px var(--vl-primary-glow);
 }
 
 .chat-gate h3 {
@@ -584,7 +584,7 @@ const onChatError = (msg) => app.showToast(msg, true)
     display: block;
     padding: 0.55rem 0.85rem;
     border-bottom: 1px solid var(--vl-border);
-    background: rgba(8, 11, 18, 0.65);
+    background: var(--vl-panel);
   }
 
   .mobile-switch {
@@ -604,7 +604,7 @@ const onChatError = (msg) => app.showToast(msg, true)
   }
 
   .mobile-switch:hover {
-    border-color: rgba(45, 212, 191, 0.4);
+    border-color: var(--vl-border-focus);
     background: var(--vl-primary-dim);
   }
 

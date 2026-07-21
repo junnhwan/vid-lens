@@ -26,10 +26,47 @@
       </button>
 
       <div class="nav-right">
+        <div class="theme-wrap" ref="themeWrapRef">
+          <button
+            type="button"
+            class="btn-ghost theme-btn"
+            :aria-expanded="themeOpen"
+            aria-haspopup="listbox"
+            aria-label="切换主题"
+            title="切换主题"
+            @click="themeOpen = !themeOpen"
+          >
+            <span class="theme-icon" aria-hidden="true">◐</span>
+            <span class="btn-label">{{ currentThemeLabel }}</span>
+          </button>
+          <div
+            v-if="themeOpen"
+            class="theme-menu"
+            role="listbox"
+            aria-label="主题列表"
+          >
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.id"
+              type="button"
+              role="option"
+              class="theme-option"
+              :class="{ active: currentTheme === opt.id }"
+              :aria-selected="currentTheme === opt.id"
+              @click="pickTheme(opt.id)"
+            >
+              <span class="theme-swatch" :style="{ background: opt.swatch }" aria-hidden="true"></span>
+              <span class="theme-option-text">
+                <span class="theme-option-label">{{ opt.label }}</span>
+                <span class="theme-option-hint">{{ opt.hint }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
         <template v-if="user">
-          <button class="btn-ghost" @click="$emit('openConfig')" title="模型配置" aria-label="模型配置">
+          <button class="btn-ghost" @click="$emit('openConfig')" title="设置：账号与模型" aria-label="设置">
             <span class="gear" aria-hidden="true">⚙</span>
-            <span class="btn-label">模型</span>
+            <span class="btn-label">设置</span>
           </button>
           <div class="user-badge">
             <span class="user-avatar">{{ user.nickname?.[0] || user.username?.[0] || 'U' }}</span>
@@ -44,9 +81,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { readLastChatTaskId } from '../chatSelectionPolicy.js'
+import { THEME_OPTIONS, getStoredTheme } from '../theme.js'
 
 defineProps({
   user: Object
@@ -54,9 +92,44 @@ defineProps({
 
 defineEmits(['logout', 'openAuth', 'openConfig', 'toggleSidebar'])
 
+const app = inject('appCtx', null)
 const route = useRoute()
+const themeOpen = ref(false)
+const themeWrapRef = ref(null)
+const themeOptions = THEME_OPTIONS
+
 const showUploadMenu = computed(() => route.name === 'library')
 const isChatRoute = computed(() => route.name === 'chat' || route.name === 'chat-task')
+
+const currentTheme = computed(() => app?.theme || getStoredTheme())
+const currentThemeLabel = computed(() => {
+  const hit = THEME_OPTIONS.find((o) => o.id === currentTheme.value)
+  return hit?.label || '主题'
+})
+
+const pickTheme = (id) => {
+  if (app?.setTheme) app.setTheme(id)
+  themeOpen.value = false
+}
+
+const onDocClick = (e) => {
+  if (!themeOpen.value) return
+  const el = themeWrapRef.value
+  if (el && !el.contains(e.target)) themeOpen.value = false
+}
+
+const onKeydown = (e) => {
+  if (e.key === 'Escape' && themeOpen.value) themeOpen.value = false
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
+})
 
 // 顶栏「对话」优先回到上次视频，避免总是落到 bare /chat → 第一个视频
 const chatLink = computed(() => {
@@ -76,7 +149,7 @@ const chatLink = computed(() => {
 .navbar {
   height: var(--vl-nav-h);
   backdrop-filter: blur(18px) saturate(160%);
-  background: rgba(7, 9, 15, 0.78);
+  background: var(--vl-nav-bg);
   border-bottom: 1px solid var(--vl-border);
   position: sticky;
   top: 0;
@@ -108,17 +181,17 @@ const chatLink = computed(() => {
   border-radius: 0.55rem;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, rgba(45, 212, 191, 0.2), rgba(96, 165, 250, 0.12));
-  border: 1px solid rgba(45, 212, 191, 0.35);
-  box-shadow: 0 0 20px rgba(45, 212, 191, 0.15);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid var(--vl-border-focus);
+  box-shadow: 0 0 20px var(--vl-primary-glow);
 }
 
 .mirror-core {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #5eead4, #0d9488 70%, #134e4a);
-  box-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
+  background: radial-gradient(circle at 30% 30%, var(--vl-primary), var(--vl-primary-deep) 70%);
+  box-shadow: 0 0 10px var(--vl-primary-glow);
 }
 
 .brand-text {
@@ -148,7 +221,7 @@ const chatLink = computed(() => {
   gap: 0.25rem;
   margin-left: 0.5rem;
   padding: 0.2rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
   border: 1px solid var(--vl-border);
   border-radius: 999px;
 }
@@ -203,6 +276,82 @@ const chatLink = computed(() => {
   gap: 0.65rem;
 }
 
+.theme-wrap {
+  position: relative;
+}
+
+.theme-btn .theme-icon {
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  min-width: 12.5rem;
+  padding: 0.35rem;
+  border-radius: var(--vl-radius);
+  border: 1px solid var(--vl-border-strong);
+  background: var(--vl-panel);
+  box-shadow: var(--vl-shadow);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.55rem;
+  border: none;
+  border-radius: var(--vl-radius-sm);
+  background: transparent;
+  color: var(--vl-text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.theme-option:hover {
+  background: var(--vl-surface-hover);
+}
+
+.theme-option.active {
+  background: var(--vl-primary-dim);
+  box-shadow: inset 0 0 0 1px var(--vl-border-focus);
+}
+
+.theme-swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--vl-border-strong);
+  flex-shrink: 0;
+}
+
+.theme-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.theme-option-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.theme-option-hint {
+  font-size: 0.72rem;
+  color: var(--vl-text-muted);
+}
+
 .btn-ghost {
   display: inline-flex;
   align-items: center;
@@ -236,7 +385,7 @@ const chatLink = computed(() => {
   padding: 0.25rem 0.7rem 0.25rem 0.25rem;
   border-radius: 999px;
   border: 1px solid var(--vl-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--vl-white-a03);
 }
 
 .user-avatar {
@@ -248,7 +397,7 @@ const chatLink = computed(() => {
   font-weight: 700;
   font-size: 0.8rem;
   color: var(--vl-text-inverse);
-  background: linear-gradient(135deg, var(--vl-primary), #38bdf8);
+  background: linear-gradient(135deg, var(--vl-primary), var(--vl-info));
 }
 
 .user-name {
