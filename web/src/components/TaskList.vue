@@ -22,7 +22,9 @@
   </section>
 
   <section v-else-if="loadError" class="empty-state">
-    <div class="empty-icon" aria-hidden="true">!</div>
+    <div class="empty-icon" aria-hidden="true">
+      <VlIcon :name="ICON.warn" size="xl" />
+    </div>
     <h3>任务列表加载失败</h3>
     <p>{{ loadError }}</p>
     <button class="load-more-btn" @click="$emit('retry')">重新加载</button>
@@ -35,7 +37,7 @@
     :class="{ 'split-mode': compactList }"
   >
     <div class="section-header">
-      <h2>我的任务</h2>
+      <h2 class="section-display">我的任务</h2>
       <div class="filter-tabs">
         <button v-for="tab in tabs" :key="tab.key"
                 :class="['tab', { active: activeTab === tab.key }]"
@@ -72,7 +74,9 @@
 
     <!-- 搜索 / Tab 过滤无结果 -->
     <div v-else class="empty-search">
-      <div class="empty-search-icon">⌀</div>
+      <div class="empty-search-icon" aria-hidden="true">
+        <VlIcon :name="ICON.search" size="lg" />
+      </div>
       <p v-if="hasActiveSearch">没有找到匹配「{{ searchQuery.trim() || searchKeyword }}」的任务</p>
       <p v-else-if="activeTab !== 'all'">当前筛选下没有任务，试试切换到「全部」</p>
       <p v-else>没有可展示的任务</p>
@@ -95,10 +99,13 @@
   </section>
 
   <div v-else class="empty-state">
-    <div class="empty-icon" aria-hidden="true">◇</div>
-    <h3>还没有任务</h3>
+    <div class="empty-icon" aria-hidden="true">
+      <VlIcon :name="ICON.empty" size="xl" />
+    </div>
+    <h3 class="empty-display">还没有任务</h3>
     <p>上传本地视频后，可提取文字、生成总结，并与视频对话</p>
     <button type="button" class="empty-upload-btn" @click="$emit('requestUpload')">
+      <VlIcon :name="ICON.upload" size="sm" />
       上传视频
     </button>
   </div>
@@ -106,7 +113,7 @@
   <!-- 回到顶部按钮 -->
   <transition name="scroll-top">
     <button v-if="showScrollTop" class="scroll-top-btn" @click="scrollToTop" aria-label="回到顶部">
-      ↑
+      <VlIcon :name="ICON.arrowUp" size="sm" />
     </button>
   </transition>
 </template>
@@ -114,6 +121,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import TaskCard from './TaskCard.vue'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 import { shouldShowInitialTaskSkeleton } from '../taskListLoadingPolicy.js'
 
 const props = defineProps({
@@ -231,9 +240,9 @@ onUnmounted(() => {
 .section-header h2 {
   margin: 0;
   font-family: var(--vl-font-display);
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-size: clamp(1.35rem, 2.4vw, 1.85rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
   color: var(--vl-text);
 }
 
@@ -411,21 +420,24 @@ onUnmounted(() => {
 }
 
 .empty-icon {
-  width: 3.5rem;
-  height: 3.5rem;
+  width: 3.75rem;
+  height: 3.75rem;
   margin-bottom: 1rem;
-  border-radius: 1rem;
+  border-radius: 1.1rem;
   display: grid;
   place-items: center;
-  font-size: 1.5rem;
-  background: var(--vl-primary-dim);
+  color: var(--vl-primary);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
   border: 1px solid var(--vl-primary-glow);
+  box-shadow: 0 0 28px var(--vl-primary-glow);
 }
 
 .empty-state h3 {
   margin: 0 0 0.4rem;
   font-family: var(--vl-font-display);
-  font-size: 1.25rem;
+  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
   color: var(--vl-text);
 }
 
@@ -442,6 +454,9 @@ onUnmounted(() => {
   appearance: none;
   border: none;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font-family: var(--vl-font);
   font-weight: 600;
   font-size: 0.9rem;

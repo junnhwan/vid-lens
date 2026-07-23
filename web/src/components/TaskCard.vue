@@ -9,11 +9,13 @@
     :aria-selected="selected"
     @click="$emit('click')"
   >
-    <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">×</button>
+    <button class="task-delete" @click.stop="$emit('delete')" title="删除" aria-label="删除任务">
+      <VlIcon :name="ICON.x" size="sm" />
+    </button>
 
     <div class="task-header">
       <div class="task-icon" aria-hidden="true">
-        <span class="film-mark"></span>
+        <VlIcon :name="ICON.film" size="md" />
       </div>
       <div class="task-info">
         <div class="task-name">{{ task.title || task.filename }}</div>
@@ -23,7 +25,11 @@
           <span class="meta-size">{{ formatFileSize(task.file_size) }}</span>
           <span class="meta-dot">·</span>
           <span class="meta-status" :class="detailedStatus.class">
-            <span class="status-dot" aria-hidden="true"></span>
+            <VlIcon
+              :name="detailedStatus.icon"
+              size="sm"
+              :spin="detailedStatus.class === 'running' || detailedStatus.class === 'retrying'"
+            />
             {{ detailedStatus.text }}
           </span>
         </div>
@@ -90,6 +96,8 @@ import {
   primaryTranscribeLabel,
 } from '../taskActionPolicy.js'
 import { formatTime, formatFileSize, getDetailedStatus } from '../utils/format.js'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 
 const props = defineProps({
   task: Object,
@@ -229,23 +237,12 @@ const canChat = computed(() => hasTranscriptionResult(props.task) || props.task?
   place-items: center;
   background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
   border: 1px solid color-mix(in srgb, var(--vl-primary) 22%, transparent);
+  color: var(--vl-primary);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
 }
 
-.film-mark {
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 0.2rem;
-  background: linear-gradient(135deg, var(--vl-primary), var(--vl-info));
-  box-shadow: 0 0 10px var(--vl-primary-glow);
-  position: relative;
-}
-
-.film-mark::after {
-  content: '';
-  position: absolute;
-  inset: 2px;
-  border: 1px solid color-mix(in srgb, var(--vl-bg) 45%, transparent);
-  border-radius: 0.1rem;
+.task-delete :deep(.vl-icon) {
+  display: block;
 }
 
 .task-info {
@@ -295,13 +292,6 @@ const canChat = computed(() => hasTranscriptionResult(props.task) || props.task?
   border: 1px solid transparent;
 }
 
-.status-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .meta-status.pending {
   background: var(--vl-border);
   color: var(--vl-text-secondary);
@@ -316,9 +306,6 @@ const canChat = computed(() => hasTranscriptionResult(props.task) || props.task?
   background: var(--vl-accent-dim);
   color: var(--vl-accent);
   border-color: color-mix(in srgb, var(--vl-accent) 30%, transparent);
-}
-.meta-status.running .status-dot {
-  animation: vl-status-pulse 1.6s ease-in-out infinite;
 }
 .meta-status.completed {
   background: var(--vl-success-dim);

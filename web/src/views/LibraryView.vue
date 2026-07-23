@@ -156,12 +156,13 @@ onUnmounted(() => {
  */
 .app-layout {
   display: flex;
-  height: calc(100vh - var(--vl-nav-h));
-  max-height: calc(100vh - var(--vl-nav-h));
+  height: calc(100dvh - var(--vl-nav-h));
+  max-height: calc(100dvh - var(--vl-nav-h));
   /* 实验：略放宽主区上限，阅读时少「两边空」感 */
   max-width: 1600px;
   margin: 0 auto;
   position: relative;
+  z-index: 1;
   overflow: hidden;
 }
 

@@ -1,6 +1,9 @@
 /**
  * 共享格式化工具函数，消除 TaskCard / TaskDrawer / Sidebar 间的重复代码。
+ * 状态 icon 返回 Lucide key（见 icons.js），由 VlIcon 渲染，禁止 emoji。
  */
+
+import { STATUS_ICON } from '../icons.js'
 
 export const formatTime = (str) => {
   if (!str) return '--'
@@ -29,40 +32,41 @@ export const statusText  = (s) => STATUS_TEXTS[s] || '未知'
 
 /**
  * 根据 task 的 status + stage + retry 状态，返回更精确的展示文本和样式类
+ * @returns {{ text: string, class: string, icon: string }}
  */
 export const getDetailedStatus = (task) => {
-  if (!task) return { text: '未知', class: 'pending', icon: '❓' }
+  if (!task) return { text: '未知', class: 'pending', icon: STATUS_ICON.unknown }
 
   const { status, stage, next_retry_at } = task
 
   // status=5 或 'dead' 字符串
   if (status === 5 || status === 'dead') {
-    return { text: '已终止', class: 'dead', icon: '⛔' }
+    return { text: '已终止', class: 'dead', icon: STATUS_ICON.dead }
   }
 
   // status=4 (failed) 且有 next_retry_at，说明等待重试
   if (status === 4 && next_retry_at) {
-    return { text: '等待重试', class: 'retrying', icon: '🔄' }
+    return { text: '等待重试', class: 'retrying', icon: STATUS_ICON.retrying }
   }
 
   // status=4 (failed) 且无 next_retry_at，说明已彻底失败
   if (status === 4) {
-    return { text: '失败', class: 'failed', icon: '❌' }
+    return { text: '失败', class: 'failed', icon: STATUS_ICON.failed }
   }
 
   // status=3 (completed)
   if (status === 3) {
-    return { text: '已完成', class: 'completed', icon: '✅' }
+    return { text: '已完成', class: 'completed', icon: STATUS_ICON.completed }
   }
 
   // status < 3 且有 stage，展示具体阶段
   if (status < 3 && stage) {
     const stageMap = {
-      downloading: { text: '下载中', class: 'running', icon: '⬇️' },
-      uploaded: { text: '已上传', class: 'queued', icon: '📤' },
-      transcribing: { text: '文字提取中', class: 'running', icon: '📝' },
-      summarizing: { text: 'AI 总结中', class: 'running', icon: '🤖' },
-      indexing: { text: '构建索引中', class: 'running', icon: '🔍' }
+      downloading: { text: '下载中', class: 'running', icon: STATUS_ICON.downloading },
+      uploaded: { text: '已上传', class: 'queued', icon: STATUS_ICON.uploaded },
+      transcribing: { text: '文字提取中', class: 'running', icon: STATUS_ICON.transcribing },
+      summarizing: { text: 'AI 总结中', class: 'running', icon: STATUS_ICON.summarizing },
+      indexing: { text: '构建索引中', class: 'running', icon: STATUS_ICON.indexing },
     }
     if (stageMap[stage]) {
       return stageMap[stage]
@@ -72,14 +76,14 @@ export const getDetailedStatus = (task) => {
   // 无 stage 时回退到基础 status 映射
   const baseStatus = { text: statusText(status), class: statusClass(status) }
   const iconMap = {
-    pending: '⏸️',
-    queued: '⏳',
-    running: '⏳',
-    completed: '✅',
-    failed: '❌',
-    dead: '⛔'
+    pending: STATUS_ICON.pending,
+    queued: STATUS_ICON.queued,
+    running: STATUS_ICON.running,
+    completed: STATUS_ICON.completed,
+    failed: STATUS_ICON.failed,
+    dead: STATUS_ICON.dead,
   }
-  baseStatus.icon = iconMap[baseStatus.class] || '❓'
+  baseStatus.icon = iconMap[baseStatus.class] || STATUS_ICON.unknown
   return baseStatus
 }
 

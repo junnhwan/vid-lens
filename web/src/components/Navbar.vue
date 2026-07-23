@@ -6,13 +6,20 @@
           <span class="mirror-core"></span>
         </span>
         <span class="brand-text">
-          映知
+          <span class="brand-zh">映知</span>
+          <span class="brand-en">VIDLENS</span>
         </span>
       </router-link>
 
       <nav v-if="user" class="nav-links" aria-label="页面切换">
-        <router-link :to="{ name: 'library' }" class="nav-link">视频库</router-link>
-        <router-link :to="chatLink" class="nav-link" :class="{ 'is-chat-active': isChatRoute }">对话</router-link>
+        <router-link :to="{ name: 'library' }" class="nav-link">
+          <VlIcon :name="ICON.library" size="sm" />
+          <span>视频库</span>
+        </router-link>
+        <router-link :to="chatLink" class="nav-link" :class="{ 'is-chat-active': isChatRoute }">
+          <VlIcon :name="ICON.message" size="sm" />
+          <span>对话</span>
+        </router-link>
       </nav>
 
       <!-- only useful on library (upload sidebar); chat has its own layout -->
@@ -22,7 +29,7 @@
         @click="$emit('toggleSidebar')"
         aria-label="切换上传侧栏"
       >
-        <span class="menu-bars" aria-hidden="true"></span>
+        <VlIcon :name="ICON.menu" size="md" />
       </button>
 
       <div class="nav-right">
@@ -36,7 +43,7 @@
             title="切换主题"
             @click="themeOpen = !themeOpen"
           >
-            <span class="theme-icon" aria-hidden="true">◐</span>
+            <VlIcon :name="ICON.palette" size="sm" />
             <span class="btn-label">{{ currentThemeLabel }}</span>
           </button>
           <div
@@ -65,7 +72,7 @@
         </div>
         <template v-if="user">
           <button class="btn-ghost" @click="$emit('openConfig')" title="设置：账号与模型" aria-label="设置">
-            <span class="gear" aria-hidden="true">⚙</span>
+            <VlIcon :name="ICON.settings" size="sm" />
             <span class="btn-label">设置</span>
           </button>
           <div class="user-badge">
@@ -85,6 +92,8 @@ import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { readLastChatTaskId } from '../chatSelectionPolicy.js'
 import { THEME_OPTIONS, getStoredTheme } from '../theme.js'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 
 defineProps({
   user: Object
@@ -148,12 +157,13 @@ const chatLink = computed(() => {
 <style scoped>
 .navbar {
   height: var(--vl-nav-h);
-  backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(170%);
   background: var(--vl-nav-bg);
   border-bottom: 1px solid var(--vl-border);
   position: sticky;
   top: 0;
   z-index: 100;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--vl-primary) 8%, transparent);
 }
 
 .nav-container {
@@ -201,18 +211,23 @@ const chatLink = computed(() => {
   letter-spacing: 0.04em;
   color: var(--vl-text);
   display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
+  flex-direction: column;
+  line-height: 1.05;
+  gap: 0.05rem;
 }
 
-.brand-text .en {
-  font-family: var(--vl-font-mono);
-  font-size: 0.68rem;
-  font-weight: 500;
+.brand-zh {
   letter-spacing: 0.12em;
+}
+
+.brand-en {
+  font-family: var(--vl-font-mono);
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--vl-primary);
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .nav-links {
@@ -221,19 +236,23 @@ const chatLink = computed(() => {
   gap: 0.25rem;
   margin-left: 0.5rem;
   padding: 0.2rem;
-  background: var(--vl-white-a03);
+  background: color-mix(in srgb, var(--vl-surface) 70%, transparent);
   border: 1px solid var(--vl-border);
   border-radius: 999px;
+  backdrop-filter: blur(12px);
 }
 
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.4rem 0.95rem;
   border-radius: 999px;
   font-size: 0.86rem;
   font-weight: 500;
   color: var(--vl-text-secondary);
   text-decoration: none;
-  transition: color 0.2s, background 0.2s;
+  transition: color 0.2s, background 0.2s, transform 0.2s;
 }
 
 .nav-link:hover {
@@ -245,6 +264,7 @@ const chatLink = computed(() => {
   color: var(--vl-text-inverse);
   background: var(--vl-primary);
   font-weight: 600;
+  box-shadow: 0 0 20px var(--vl-primary-glow);
 }
 
 .mobile-menu-btn {
@@ -255,18 +275,9 @@ const chatLink = computed(() => {
   border-radius: var(--vl-radius-sm);
   border: 1px solid var(--vl-border);
   background: var(--vl-surface);
+  color: var(--vl-primary);
   cursor: pointer;
   place-items: center;
-}
-
-.menu-bars {
-  width: 1rem;
-  height: 0.7rem;
-  display: block;
-  background:
-    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 0 / 100% 2px no-repeat,
-    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 50% / 100% 2px no-repeat,
-    linear-gradient(var(--vl-primary), var(--vl-primary)) 0 100% / 70% 2px no-repeat;
 }
 
 .nav-right {
@@ -278,12 +289,6 @@ const chatLink = computed(() => {
 
 .theme-wrap {
   position: relative;
-}
-
-.theme-btn .theme-icon {
-  font-size: 1rem;
-  line-height: 1;
-  opacity: 0.9;
 }
 
 .theme-menu {
@@ -373,11 +378,6 @@ const chatLink = computed(() => {
   background: var(--vl-primary-dim);
 }
 
-.gear {
-  font-size: 1rem;
-  line-height: 1;
-}
-
 .user-badge {
   display: flex;
   align-items: center;
@@ -460,7 +460,7 @@ const chatLink = computed(() => {
   .brand-text {
     font-size: 1.05rem;
   }
-  .brand-text .en {
+  .brand-en {
     display: none;
   }
 }

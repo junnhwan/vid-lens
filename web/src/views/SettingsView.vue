@@ -2,10 +2,14 @@
   <div class="settings-page">
     <header class="settings-header">
       <div class="settings-header-text">
+        <p class="settings-kicker">CONTROL SURFACE</p>
         <h1>设置</h1>
         <p class="settings-sub">外观、账号与 AI 模型服务</p>
       </div>
-      <router-link :to="{ name: 'library' }" class="back-link">← 返回视频库</router-link>
+      <router-link :to="{ name: 'library' }" class="back-link">
+        <VlIcon :name="ICON.arrowLeft" size="sm" />
+        返回视频库
+      </router-link>
     </header>
 
     <section class="settings-section" aria-labelledby="appearance-heading">
@@ -29,7 +33,9 @@
             <span class="theme-card-label">{{ opt.label }}</span>
             <span class="theme-card-hint">{{ opt.hint }}</span>
           </span>
-          <span v-if="currentTheme === opt.id" class="theme-card-check" aria-hidden="true">✓</span>
+          <span v-if="currentTheme === opt.id" class="theme-card-check" aria-hidden="true">
+            <VlIcon :name="ICON.check" size="sm" />
+          </span>
         </button>
       </div>
     </section>
@@ -75,6 +81,8 @@
 <script setup>
 import { computed, inject } from 'vue'
 import AIProfileEditor from '../components/AIProfileEditor.vue'
+import VlIcon from '../components/VlIcon.vue'
+import { ICON } from '../icons.js'
 import { THEME_OPTIONS, getStoredTheme } from '../theme.js'
 
 const app = inject('appCtx', null)
@@ -108,12 +116,23 @@ const onAIUpdated = () => {
   flex-wrap: wrap;
 }
 
+.settings-kicker {
+  margin: 0 0 0.4rem;
+  font-family: var(--vl-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--vl-primary);
+  opacity: 0.85;
+}
+
 .settings-header h1 {
   margin: 0 0 0.35rem;
   font-family: var(--vl-font-display, inherit);
-  font-size: 1.55rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
   color: var(--vl-text);
 }
 
@@ -124,6 +143,9 @@ const onAIUpdated = () => {
 }
 
 .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   color: var(--vl-text-secondary);
   text-decoration: none;
   font-size: 0.88rem;

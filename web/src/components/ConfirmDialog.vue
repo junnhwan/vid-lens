@@ -1,8 +1,17 @@
 <template>
   <transition name="confirm">
-    <div v-if="show" class="confirm-backdrop" @mousedown.self="handleBackdropMouseDown" role="dialog" aria-modal="true" :aria-label="title">
+    <div
+      v-if="show"
+      class="confirm-backdrop"
+      @mousedown.self="handleBackdropMouseDown"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="title"
+    >
       <div class="confirm-panel" ref="panel">
-        <div class="confirm-icon">{{ icon }}</div>
+        <div class="confirm-icon" :class="type">
+          <VlIcon :name="resolvedIcon" size="xl" :aria-hidden="true" />
+        </div>
         <h3 class="confirm-title">{{ title }}</h3>
         <p v-if="message" class="confirm-message">{{ message }}</p>
         <div class="confirm-actions">
@@ -15,7 +24,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import VlIcon from './VlIcon.vue'
+import { ICON, resolveIconKey } from '../icons.js'
 
 const props = defineProps({
   show: Boolean,
@@ -23,13 +34,15 @@ const props = defineProps({
   message: String,
   confirmText: { type: String, default: '确认' },
   showCancel: { type: Boolean, default: true },
-  type: { type: String, default: 'danger' },   // danger | warning | primary
-  icon: { type: String, default: '⚠️' },
+  type: { type: String, default: 'danger' }, // danger | warning | primary
+  /** Lucide key or legacy symbol; rendered via VlIcon */
+  icon: { type: String, default: ICON.alert },
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
 
 const panel = ref(null)
+const resolvedIcon = computed(() => resolveIconKey(props.icon, ICON.alert))
 
 // ESC → 取消（危险操作不直接确认）
 const onKeyDown = (e) => {
@@ -59,7 +72,7 @@ const handleBackdropMouseDown = (e) => {
   position: fixed;
   inset: 0;
   background: var(--vl-overlay-scrim);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px) saturate(140%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -72,24 +85,61 @@ const handleBackdropMouseDown = (e) => {
   background: var(--vl-panel);
   border: 1px solid var(--vl-border-strong);
   border-radius: var(--vl-radius-xl);
-  padding: 1.75rem 1.5rem 1.5rem;
+  padding: 1.85rem 1.6rem 1.55rem;
   max-width: 400px;
   width: min(400px, 100%);
   margin: auto;
   text-align: center;
-  box-shadow: var(--vl-shadow);
+  box-shadow: var(--vl-shadow), 0 0 0 1px color-mix(in srgb, var(--vl-primary) 8%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+
+.confirm-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--vl-primary), transparent);
+  opacity: 0.7;
 }
 
 .confirm-icon {
-  font-size: 1.75rem;
-  margin-bottom: 0.65rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0 auto 0.85rem;
+  border-radius: 1rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--vl-border);
+  background: var(--vl-white-a03);
+  color: var(--vl-text-secondary);
+}
+
+.confirm-icon.danger {
+  color: var(--vl-danger);
+  background: var(--vl-danger-dim);
+  border-color: color-mix(in srgb, var(--vl-danger) 35%, transparent);
+}
+
+.confirm-icon.warning {
+  color: var(--vl-warning);
+  background: var(--vl-warning-dim);
+  border-color: color-mix(in srgb, var(--vl-warning) 35%, transparent);
+}
+
+.confirm-icon.primary {
+  color: var(--vl-primary);
+  background: var(--vl-primary-dim);
+  border-color: color-mix(in srgb, var(--vl-primary) 35%, transparent);
 }
 
 .confirm-title {
   margin: 0 0 0.5rem;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
   font-family: var(--vl-font-display);
+  letter-spacing: -0.02em;
   color: var(--vl-text);
 }
 
@@ -97,7 +147,7 @@ const handleBackdropMouseDown = (e) => {
   margin: 0 0 1.35rem;
   color: var(--vl-text-secondary);
   font-size: 0.9rem;
-  line-height: 1.6;
+  line-height: 1.65;
   white-space: pre-wrap;
 }
 
@@ -115,7 +165,7 @@ const handleBackdropMouseDown = (e) => {
   border-radius: var(--vl-radius-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s var(--vl-ease);
   font-size: 0.88rem;
 }
 
@@ -131,12 +181,16 @@ const handleBackdropMouseDown = (e) => {
   border-radius: var(--vl-radius-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s var(--vl-ease), box-shadow 0.2s;
   font-size: 0.88rem;
 }
 
+.btn-confirm:active {
+  transform: scale(0.98);
+}
+
 .btn-confirm.danger {
-  background: linear-gradient(135deg, var(--vl-danger), var(--vl-danger));
+  background: linear-gradient(135deg, var(--vl-danger), color-mix(in srgb, var(--vl-danger) 80%, #000));
   color: var(--vl-text-inverse);
 }
 
@@ -165,9 +219,22 @@ const handleBackdropMouseDown = (e) => {
   transform: translateY(-1px);
 }
 
-.confirm-enter-active, .confirm-leave-active { transition: opacity 0.2s ease; }
-.confirm-enter-active .confirm-panel, .confirm-leave-active .confirm-panel { transition: transform 0.2s var(--vl-ease); }
-.confirm-enter-from, .confirm-leave-to { opacity: 0; }
-.confirm-enter-from .confirm-panel { transform: scale(0.96); }
-.confirm-leave-to .confirm-panel { transform: scale(0.96); }
+.confirm-enter-active,
+.confirm-leave-active {
+  transition: opacity 0.22s var(--vl-ease);
+}
+.confirm-enter-active .confirm-panel,
+.confirm-leave-active .confirm-panel {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.confirm-enter-from,
+.confirm-leave-to {
+  opacity: 0;
+}
+.confirm-enter-from .confirm-panel {
+  transform: scale(0.94) translateY(8px);
+}
+.confirm-leave-to .confirm-panel {
+  transform: scale(0.96) translateY(4px);
+}
 </style>

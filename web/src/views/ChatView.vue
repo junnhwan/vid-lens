@@ -16,7 +16,8 @@
           <span class="header-count" v-if="chattableTasks.length">{{ chattableTasks.length }}</span>
         </div>
         <button class="back-link" type="button" @click="goLibrary" title="返回视频库">
-          ← 视频库
+          <VlIcon :name="ICON.arrowLeft" size="sm" />
+          视频库
         </button>
       </div>
 
@@ -41,7 +42,9 @@
       </div>
 
       <div v-else class="video-list-empty">
-        <div class="empty-icon" aria-hidden="true">◎</div>
+        <div class="empty-icon" aria-hidden="true">
+          <VlIcon :name="ICON.film" size="xl" />
+        </div>
         <p>还没有可对话的视频</p>
         <p class="empty-hint">先在视频库提取文字，再回来提问</p>
         <button class="btn-amber small" type="button" @click="goLibrary">去提取文字</button>
@@ -87,6 +90,8 @@ import { computed, inject, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api'
 import VideoRAGChat from '../components/VideoRAGChat.vue'
+import VlIcon from '../components/VlIcon.vue'
+import { ICON } from '../icons.js'
 import { formatTime } from '../utils/format.js'
 import {
   parseChatTaskIdParam,
@@ -253,10 +258,12 @@ const onChatError = (msg) => app.showToast(msg, true)
 <style scoped>
 .chat-layout {
   display: flex;
-  height: calc(100vh - var(--vl-nav-h));
+  height: calc(100dvh - var(--vl-nav-h));
   max-width: 1440px;
   margin: 0 auto;
-  animation: vl-fade-in-up 0.35s var(--vl-ease) both;
+  animation: vl-fade-in-up 0.4s var(--vl-ease) both;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-sidebar {
@@ -308,6 +315,9 @@ const onChatError = (msg) => app.showToast(msg, true)
 }
 
 .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   background: transparent;
   border: 1px solid var(--vl-border);
   color: var(--vl-text-muted);
@@ -512,7 +522,7 @@ const onChatError = (msg) => app.showToast(msg, true)
 }
 
 .chat-gate {
-  min-height: calc(100vh - var(--vl-nav-h));
+  min-height: calc(100dvh - var(--vl-nav-h));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -520,7 +530,9 @@ const onChatError = (msg) => app.showToast(msg, true)
   gap: 0.75rem;
   padding: 2rem;
   text-align: center;
-  animation: vl-fade-in-up 0.35s var(--vl-ease) both;
+  animation: vl-fade-in-up 0.4s var(--vl-ease) both;
+  position: relative;
+  z-index: 1;
 }
 
 .gate-mark {
@@ -547,8 +559,9 @@ const onChatError = (msg) => app.showToast(msg, true)
   margin: 0;
   color: var(--vl-text);
   font-family: var(--vl-font-display);
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-size: clamp(1.35rem, 2.5vw, 1.85rem);
 }
 
 .gate-sub {

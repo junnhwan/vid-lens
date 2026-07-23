@@ -31,7 +31,11 @@
         <h2 class="detail-title">{{ task.title || task.filename }}</h2>
         <div class="header-meta">
           <span class="meta-status" :class="detailedStatus.class">
-            <span class="status-dot" aria-hidden="true"></span>
+            <VlIcon
+              :name="detailedStatus.icon"
+              size="sm"
+              :spin="detailedStatus.class === 'running' || detailedStatus.class === 'retrying'"
+            />
             {{ detailedStatus.text }}
           </span>
           <span class="meta-sep">·</span>
@@ -135,7 +139,9 @@
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
-        <span v-if="tab.badge" class="tab-badge">{{ tab.badge }}</span>
+        <span v-if="tab.badge" class="tab-badge" aria-label="已完成">
+          <VlIcon :name="ICON.check" size="sm" />
+        </span>
       </button>
     </nav>
 
@@ -180,7 +186,11 @@
           <div class="meta-card">
             <span class="meta-label">状态</span>
             <span class="meta-status" :class="detailedStatus.class">
-              <span class="status-dot" aria-hidden="true"></span>
+              <VlIcon
+                :name="detailedStatus.icon"
+                size="sm"
+                :spin="detailedStatus.class === 'running' || detailedStatus.class === 'retrying'"
+              />
               {{ detailedStatus.text }}
             </span>
           </div>
@@ -386,6 +396,8 @@ import {
   getErrorMessage,
   formatRelativeTime,
 } from '../utils/format.js'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 
 const props = defineProps({
   task: Object,
@@ -425,12 +437,12 @@ const tabs = computed(() => [
   {
     key: 'transcription',
     label: '文字提取',
-    badge: props.task?.transcription?.content ? '✓' : '',
+    badge: !!props.task?.transcription?.content,
   },
   {
     key: 'summary',
     label: 'AI 总结',
-    badge: props.task?.summary?.content ? '✓' : '',
+    badge: !!props.task?.summary?.content,
   },
 ])
 
@@ -989,13 +1001,6 @@ watch(
   border: 1px solid transparent;
 }
 
-.status-dot {
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .meta-status.pending {
   background: var(--vl-border);
   color: var(--vl-text-secondary);
@@ -1010,9 +1015,6 @@ watch(
   background: var(--vl-accent-dim);
   color: var(--vl-accent);
   border-color: color-mix(in srgb, var(--vl-accent) 30%, transparent);
-}
-.meta-status.running .status-dot {
-  animation: vl-status-pulse 1.6s ease-in-out infinite;
 }
 .meta-status.completed {
   background: var(--vl-success-dim);

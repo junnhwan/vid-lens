@@ -15,7 +15,7 @@
         @drop.prevent.stop="handleDrop"
       >
         <div class="upload-glyph" aria-hidden="true">
-          <span class="upload-arrow">↑</span>
+          <VlIcon :name="ICON.upload" size="md" />
         </div>
         <div class="upload-copy">
           <p class="upload-label">本地上传</p>
@@ -37,7 +37,11 @@
         >
           <span class="url-beta-label">从链接导入</span>
           <span class="beta-badge">Beta</span>
-          <span class="url-beta-chevron" aria-hidden="true">{{ urlPanelOpen ? '▾' : '▸' }}</span>
+          <VlIcon
+            class="url-beta-chevron"
+            :name="urlPanelOpen ? ICON.chevronDown : ICON.chevronRight"
+            size="sm"
+          />
         </button>
         <div v-if="urlPanelOpen" class="url-beta-body" :class="{ disabled: !user, uploading }">
           <p class="url-beta-hint">实验功能 · 个人测试用，稳定性不保证</p>
@@ -112,6 +116,8 @@
 
 <script setup>
 import { nextTick, ref } from 'vue'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 
 const props = defineProps({
   user: Object,

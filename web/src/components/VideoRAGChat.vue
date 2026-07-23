@@ -28,7 +28,7 @@
         aria-label="关闭提示"
         @click="indexBannerDismissed = true"
       >
-        ×
+        <VlIcon :name="ICON.x" size="sm" />
       </button>
     </div>
     <div v-if="indexStatus.status === 'failed' && indexStatus.error" class="index-error-line">
@@ -57,7 +57,8 @@
         </div>
         <div class="session-actions">
           <button type="button" class="session-btn" :disabled="sessionLoading" @click="newSession" title="新建对话">
-            ＋ 新对话
+            <VlIcon :name="ICON.plus" size="sm" />
+            新对话
           </button>
           <button
             type="button"
@@ -98,7 +99,7 @@
               :title="copiedMessageId === msg.id ? '已复制' : '复制回答'"
               @click="copyMessage(msg)"
             >
-              {{ copiedMessageId === msg.id ? '✓' : '⧉' }}
+              <VlIcon :name="copiedMessageId === msg.id ? ICON.check : ICON.copy" size="sm" />
             </button>
             <div v-if="msg.role === 'assistant'" class="message-text markdown-body" v-html="renderMarkdown(cleanMessageContent(msg))"></div>
             <div v-else class="message-text">{{ msg.content }}</div>
@@ -299,6 +300,8 @@ import {
   setMessageCitationsExpanded,
   stripInternalCitationTokens,
 } from '../citationDisplayPolicy.js'
+import VlIcon from './VlIcon.vue'
+import { ICON } from '../icons.js'
 
 const props = defineProps({
   task: Object
@@ -603,7 +606,7 @@ const deleteCurrentSession = () => {
       confirmText: '删除',
       showCancel: true,
       type: 'danger',
-      icon: '🗑️',
+      icon: ICON.trash,
       onConfirm: () => { runDeleteCurrentSession() },
     })
     return
@@ -747,7 +750,7 @@ const sendStreamQuestion = async (q, mode) => {
   const failStream = (reason) => {
     // 流式失败时若气泡还空着，回填错误说明，避免留一条空气泡
     if (!assistantMsg.content) {
-      assistantMsg.content = `⚠️ ${reason}`
+      assistantMsg.content = reason
     }
     emit('error', reason)
     finish()
@@ -1114,6 +1117,9 @@ onUnmounted(() => {
 }
 
 .session-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   background: transparent;
   border: 1px solid var(--vl-border);
   color: var(--vl-text-secondary);

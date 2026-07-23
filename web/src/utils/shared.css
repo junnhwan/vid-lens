@@ -9,11 +9,16 @@
   --vl-radius: 0.75rem;
   --vl-radius-lg: 1rem;
   --vl-radius-xl: 1.25rem;
-  --vl-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --vl-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --vl-font: 'DM Sans', 'Noto Sans SC', system-ui, sans-serif;
   --vl-font-display: 'Syne', 'Noto Sans SC', system-ui, sans-serif;
   --vl-font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
   --vl-nav-h: 64px;
+  --vl-orb-opacity: 0.5;
+  --vl-grid-opacity: 0.35;
+  --vl-grid-line: rgba(45, 212, 191, 0.07);
+  --vl-scan-opacity: 0.3;
+  --vl-vignette: rgba(3, 5, 10, 0.7);
 
   /* Fallbacks if themes.css loads late (match dark defaults) */
   --vl-bg: #07090f;
@@ -135,6 +140,25 @@
   border-radius: var(--vl-radius-lg);
   box-shadow: var(--vl-shadow-sm);
   backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* Display typography for section moments */
+.section-display,
+.empty-display {
+  font-family: var(--vl-font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+/* Glass panel utility for product surfaces */
+.vl-glass {
+  background: color-mix(in srgb, var(--vl-panel) 88%, transparent);
+  border: 1px solid var(--vl-border);
+  backdrop-filter: blur(18px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent),
+    var(--vl-shadow-sm);
 }
 
 /* Reduced motion */

@@ -1,18 +1,22 @@
 <template>
-  <div id="app">
-    <Navbar
-      :user="user"
-      @logout="logout"
-      @openAuth="openAuth"
-      @openConfig="openConfig"
-      @toggleSidebar="toggleSidebar"
-    />
+  <div id="app" class="app-shell">
+    <ImmersiveCanvas />
 
-    <router-view v-slot="{ Component, route }">
-      <transition name="page" mode="out-in">
-        <component :is="Component" :key="route.meta.pageKey || route.name" />
-      </transition>
-    </router-view>
+    <div class="app-chrome">
+      <Navbar
+        :user="user"
+        @logout="logout"
+        @openAuth="openAuth"
+        @openConfig="openConfig"
+        @toggleSidebar="toggleSidebar"
+      />
+
+      <router-view v-slot="{ Component, route }">
+        <transition name="page" mode="out-in">
+          <component :is="Component" :key="route.meta.pageKey || route.name" />
+        </transition>
+      </router-view>
+    </div>
 
     <AuthModal
       :show="showAuth"
@@ -39,7 +43,10 @@
 
     <!-- 离线提示 -->
     <transition name="toast">
-      <div v-if="offlineToast" class="toast offline">📡 网络已断开，部分功能不可用</div>
+      <div v-if="offlineToast" class="toast offline">
+        <VlIcon :name="ICON.wifiOff" size="sm" />
+        <span>网络已断开，部分功能不可用</span>
+      </div>
     </transition>
 
     <transition name="toast">
@@ -54,6 +61,9 @@ import { useRouter } from 'vue-router'
 import Navbar from './components/Navbar.vue'
 import AuthModal from './components/AuthModal.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import ImmersiveCanvas from './components/ImmersiveCanvas.vue'
+import VlIcon from './components/VlIcon.vue'
+import { ICON } from './icons.js'
 
 import api from './api'
 import { getStoredTheme, setTheme as applyStoredTheme, THEME_CHANGE_EVENT } from './theme.js'
@@ -107,7 +117,7 @@ const confirmState = ref({
   confirmText: '确认',
   showCancel: true,
   type: 'danger',
-  icon: '⚠️',
+  icon: ICON.alert,
   onConfirm: null
 })
 
@@ -288,7 +298,7 @@ const deleteTask = async (task) => {
     confirmText: '删除',
     showCancel: true,
     type: 'danger',
-    icon: '🗑️',
+    icon: ICON.trash,
     onConfirm: async () => {
       try {
         await api.deleteTask(task.id)
@@ -386,7 +396,7 @@ const doRetranscribe = (task) => {
     confirmText: '重新提取',
     showCancel: true,
     type: 'primary',
-    icon: '↻',
+    icon: ICON.rotate,
     onConfirm: () => doTranscribe(task, { force: true }),
   })
 }
@@ -398,7 +408,7 @@ const doReanalyze = (task) => {
     confirmText: '重新总结',
     showCancel: true,
     type: 'primary',
-    icon: '↻',
+    icon: ICON.rotate,
     onConfirm: () => doAnalyze(task, { force: true }),
   })
 }
@@ -551,7 +561,7 @@ const maybePromptAIConfig = async () => {
       confirmText: '去配置',
       showCancel: true,
       type: 'primary',
-      icon: '⚙',
+      icon: ICON.settings,
       onConfirm: () => openConfig(),
     })
   } catch {
@@ -710,28 +720,21 @@ html, body {
   background: var(--vl-bg);
 }
 
-#app {
-  min-height: 100vh;
+#app.app-shell {
+  min-height: 100dvh;
   position: relative;
   color: var(--vl-text);
   font-family: var(--vl-font);
   font-feature-settings: 'ss01' on, 'kern' on;
   letter-spacing: 0.01em;
   overflow-x: hidden;
-  background: var(--vl-app-bg-image, none), var(--vl-bg);
+  background: var(--vl-bg);
 }
 
-/* optional film grain — opacity token defaults to 0 (minimal chrome) */
-#app::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: var(--vl-grain-opacity, 0);
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
-  mix-blend-mode: soft-light;
+.app-chrome {
+  position: relative;
+  z-index: 1;
+  min-height: 100dvh;
 }
 
 button, input, textarea, select {
@@ -748,8 +751,8 @@ a {
   top: calc(var(--vl-nav-h) + 1rem);
   right: 1.5rem;
   padding: 0.85rem 1.25rem;
-  backdrop-filter: blur(16px) saturate(160%);
-  background: var(--vl-success);
+  backdrop-filter: blur(18px) saturate(170%);
+  background: color-mix(in srgb, var(--vl-success) 92%, #000);
   border-radius: var(--vl-radius);
   font-weight: 600;
   z-index: 1300;
@@ -759,21 +762,31 @@ a {
   letter-spacing: 0.02em;
   color: var(--vl-text-inverse);
   max-width: min(360px, calc(100vw - 2rem));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .toast.error {
-  background: var(--vl-danger);
+  background: color-mix(in srgb, var(--vl-danger) 92%, #000);
 }
 .toast.offline {
-  background: var(--vl-text-muted);
+  background: color-mix(in srgb, var(--vl-text-muted) 90%, #000);
   top: auto;
   bottom: 1.5rem;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
 }
 .toast-enter-active, .toast-leave-active {
-  transition: all 0.3s var(--vl-ease);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .toast-enter-from, .toast-leave-to {
   opacity: 0;
   transform: translateX(16px) scale(0.96);
+}
+.toast.offline.toast-enter-from,
+.toast.offline.toast-leave-to {
+  transform: translateX(-50%) translateY(12px) scale(0.96);
 }
 
 /* Thin scrollbar default */
@@ -796,15 +809,15 @@ a {
 /* Library ↔ Chat page cross-fade (keyed by route.meta.pageKey so /chat/:id 不闪) */
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.22s var(--vl-ease), transform 0.22s var(--vl-ease);
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .page-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(10px) scale(0.995);
 }
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px) scale(0.998);
 }
 @media (prefers-reduced-motion: reduce) {
   .page-enter-active,

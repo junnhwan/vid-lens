@@ -6,14 +6,22 @@
         <p>加载配置中…</p>
       </div>
       <div v-else-if="profiles.length === 0" class="empty-state">
-        <div class="empty-icon" aria-hidden="true">◇</div>
+        <div class="empty-icon" aria-hidden="true">
+          <VlIcon :name="ICON.settings" size="xl" />
+        </div>
         <p>还没有配置模型服务</p>
         <p class="empty-hint">转写、总结和对话都依赖 OpenAI 兼容的 BYOK 配置。</p>
-        <button type="button" class="btn-amber" @click="startCreate">新建配置</button>
+        <button type="button" class="btn-amber" @click="startCreate">
+          <VlIcon :name="ICON.plus" size="sm" />
+          新建配置
+        </button>
       </div>
       <div v-else>
         <div class="config-actions">
-          <button type="button" class="btn-secondary" @click="startCreate">+ 新建配置</button>
+          <button type="button" class="btn-secondary" @click="startCreate">
+            <VlIcon :name="ICON.plus" size="sm" />
+            新建配置
+          </button>
         </div>
         <div class="profile-grid">
           <div
@@ -482,6 +490,8 @@
 <script setup>
 import { computed, inject, onMounted, reactive, ref, watch } from 'vue'
 import api from '../api'
+import { ICON } from '../icons.js'
+import VlIcon from './VlIcon.vue'
 import { normalizeListResponse } from '../apiEnvelope.js'
 import {
   PRODUCT_PROVIDER,
@@ -565,7 +575,7 @@ const loadProfiles = async () => {
       confirmText: '知道了',
       showCancel: false,
       type: 'danger',
-      icon: '❌',
+      icon: ICON.xCircle,
     })
   } finally {
     profilesLoading.value = false
@@ -643,7 +653,7 @@ const setAsCurrent = async (profile) => {
       confirmText: '知道了',
       showCancel: false,
       type: 'danger',
-      icon: '❌',
+      icon: ICON.xCircle,
     })
   } finally {
     loading.value = false
@@ -793,7 +803,7 @@ const handleSubmit = async () => {
       confirmText: '知道了',
       showCancel: false,
       type: 'warning',
-      icon: '📝',
+      icon: ICON.fileText,
     })
     return
   }
@@ -853,7 +863,7 @@ const handleSubmit = async () => {
       confirmText: '知道了',
       showCancel: false,
       type: 'danger',
-      icon: '❌',
+      icon: ICON.xCircle,
     })
   } finally {
     loading.value = false
@@ -887,7 +897,7 @@ const handleDelete = (id) => {
     confirmText: '删除',
     showCancel: true,
     type: 'danger',
-    icon: '🗑️',
+    icon: ICON.trash,
     onConfirm: async () => {
       try {
         await api.deleteAIProfile(id)
@@ -901,7 +911,7 @@ const handleDelete = (id) => {
           confirmText: '知道了',
           showCancel: false,
           type: 'danger',
-          icon: '❌',
+          icon: ICON.xCircle,
         })
       }
     },
@@ -929,9 +939,15 @@ defineExpose({ loadProfiles, startCreate })
   color: var(--vl-text-muted);
 }
 .empty-icon {
-  font-size: 2.25rem;
-  opacity: 0.65;
-  margin-bottom: 0.5rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin: 0 auto 0.65rem;
+  border-radius: 1rem;
+  display: grid;
+  place-items: center;
+  color: var(--vl-primary);
+  background: linear-gradient(145deg, var(--vl-primary-dim), var(--vl-info-dim));
+  border: 1px solid var(--vl-primary-glow);
 }
 .empty-state p {
   margin: 0 0 0.4rem;
@@ -1421,6 +1437,10 @@ defineExpose({ loadProfiles, startCreate })
 }
 
 .btn-amber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   background: var(--vl-primary);
   color: var(--vl-text-inverse);
   border: none;
@@ -1432,6 +1452,10 @@ defineExpose({ loadProfiles, startCreate })
 }
 .btn-amber:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   background: transparent;
   border: 1px solid var(--vl-border-strong);
   color: var(--vl-text-secondary);
