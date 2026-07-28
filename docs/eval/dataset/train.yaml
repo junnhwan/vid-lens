@@ -1,0 +1,244 @@
+schema_version: "1"
+dataset_version: real-v1
+split: train
+cases:
+    - case_id: train-sw-def
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 视频中把软件定义成什么？
+      category: direct_qa
+      difficulty: easy
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 软件是现实的需求在计算机世界中的投影
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_0eac538931db_0
+          source: asr
+          relevance: 3
+    - case_id: train-good-code
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 好代码的几个特征是什么？
+      category: direct_qa
+      difficulty: easy
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: safe from bug（没有 bug）
+          required: true
+        - id: ap2
+          text: ready for change（易于修改）
+          required: true
+        - id: ap3
+          text: easy to understand（易于理解）
+          required: false
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_08b66f954749_4
+          source: asr
+          relevance: 3
+    - case_id: train-error-amp
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 需求分析出错会带来什么后果？为什么不能从一开始就设计完美需求？
+      category: direct_qa
+      difficulty: medium
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 错误放大效应：前面错了后面都会错
+          required: true
+        - id: ap2
+          text: 完美需求只在小众领域（如核电站）可能出现
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_9f01b0156ab7_6
+          source: asr
+          relevance: 3
+        - id: ev2
+          group_id: g2
+          context_ids:
+            - task_2_24c8c5861ea2_7
+          source: asr
+          relevance: 2
+    - case_id: train-sw-overview
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 这个视频主要讲了什么？
+      category: video_overview
+      difficulty: easy
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 软件的定义、软件构造、好代码的特征、复杂度管理
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_0eac538931db_0
+          source: asr
+          relevance: 2
+    - case_id: train-complexity-source
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 软件的复杂度可以从哪几个角度分析？
+      category: direct_qa
+      difficulty: medium
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 业务本身的复杂度
+          required: true
+        - id: ap2
+          text: 代码本身的复杂度
+          required: true
+        - id: ap3
+          text: 还有一层人的复杂度
+          required: false
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_a6ddf3ea82cb_1
+          source: asr
+          relevance: 3
+    - case_id: train-code-complexity
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 代码本身的复杂度分成哪两种？
+      category: direct_qa
+      difficulty: medium
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 修改的复杂度（读写放大，看多少改多少行）
+          required: true
+        - id: ap2
+          text: 理解的复杂度（抽象做得不好要看其他代码）
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_22be211ae4a7_2
+          source: asr
+          relevance: 3
+    - case_id: train-construction-scope
+      video_id: "2"
+      source_group: software_eng_lecture
+      split: train
+      task_id: 2
+      task_hint: 软件构造讲座
+      question: 软件构造包含哪些环节？是不是只写代码？
+      category: direct_qa
+      difficulty: easy
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 不只写代码，还含设计/原型/制造/debug/测试/code review
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_2_78676544587d_3
+          source: asr
+          relevance: 3
+    - case_id: train-react-dag
+      video_id: "10"
+      source_group: react_dynamic
+      split: train
+      task_id: 10
+      task_hint: 动态图 React 讲解
+      question: 动态图 React 相比串行 React 解决了什么问题？
+      category: direct_qa
+      difficulty: medium
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 串行 React 一个节点慢后面全阻塞
+          required: true
+        - id: ap2
+          text: 动态图用 DAG 依赖图并行调度，提高执行速度
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_10_f01efe2c26d3_0
+          source: asr
+          relevance: 3
+    - case_id: train-coding-agent-history
+      video_id: "14"
+      source_group: coding_agent_practice
+      split: train
+      task_id: 14
+      task_hint: coding agent 实践（英文）
+      question: Claude Code 之前的 coding agent 前身有哪些？
+      category: direct_qa
+      difficulty: medium
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: GitHub Copilot、Aider、AutoGPT 是前身
+          required: true
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_14_418825b065a6_5
+          source: asr
+          relevance: 3
+    - case_id: train-wsl-why
+      video_id: "24"
+      source_group: wsl_agent_setup
+      split: train
+      task_id: 24
+      task_hint: Windows WSL 跑 AI agent
+      question: 为什么 AI agent 在 WSL 里比在 PowerShell 里表现更好？
+      category: direct_qa
+      difficulty: easy
+      answerable: true
+      answer_points:
+        - id: ap1
+          text: 大模型训练语料多为 Linux 风格命令，在 Linux 环境出错率更低
+          required: true
+        - id: ap2
+          text: 与生产环境（Linux 服务器）更一致
+          required: false
+      evidence_ranges:
+        - id: ev1
+          group_id: g1
+          context_ids:
+            - task_24_2a3860e602dc_0
+          source: asr
+          relevance: 3
