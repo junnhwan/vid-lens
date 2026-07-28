@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
@@ -32,22 +32,22 @@ type ragIndexProducer interface {
 	EnqueueRAGIndex(ctx context.Context, taskID int64) error
 }
 
-type kafkaMessageReader interface {
-	FetchMessage(ctx context.Context) (kafka.Message, error)
-	CommitMessages(ctx context.Context, messages ...kafka.Message) error
+type messageReader interface {
+	Consume(ctx context.Context) (<-chan amqp.Delivery, error)
 	Close() error
 }
 
-type kafkaReaderFactory func(config kafka.ReaderConfig) kafkaMessageReader
+type messageReaderFactory func(queue, groupID string) messageReader
 
-type kafkaMessageHandler func(ctx context.Context, message kafka.Message) error
+type messageHandler func(ctx context.Context, delivery amqp.Delivery) error
 
-// Consumer Kafka 消费者
+// Consumer RabbitMQ 消费者
 // 面试亮点（消费端设计）：
-//  1. 消费者组：同一个 Group 下的多个消费者分摊不同分区的消息，天然负载均衡
-//  2. 基于 MD5 的 Key 路由：同一视频的消息一定进入同一分区，同一分区被同一消费者消费
-//     → 保证了同一个视频不会被两个消费者同时处理（配合分布式锁双重保障）
-//  3. 手动提交 offset：业务成功、失败已可靠移交 RetryScheduler，或毒消息已持久化隔离后才 commit
+//  1. manual ack：业务成功后才 Ack；handler 失败 Nack(requeue=true) 触发 at-least-once 重投
+//  2. 消费侧幂等键：同一 MessageId 重复投递由 Redis SETNX 挡住（amqp.Delivery.MessageId），
+//     与 task 状态机 CAS 双重保障——重复消费不产生重复 ASR/索引烧 token
+//  3. 毒消息隔离：unparseable 消息持久化到 kafka_message_failures 表后 Ack，
+//     不阻塞队列；MaxRetries 耗尽的 job 由 DLX 路由到 video-<jobtype>-dlq
 type Consumer struct {
 	repo                   *repository.Repositories
 	storage                *storage.MinIOStorage
@@ -71,8 +71,11 @@ type Consumer struct {
 	now                    func() time.Time
 	newToken               func() string
 
-	newKafkaReader       kafkaReaderFactory
+	newMessageReader     messageReaderFactory
 	readerRestartBackoff time.Duration
+	amqpURL              string
+	prefetch             int
+	idempotency          idempotencyChecker
 
 	downloadVideo   downloadVideoFunc
 	uploadLocalFile uploadLocalFileFunc
@@ -106,6 +109,8 @@ func NewConsumer(
 		now:               time.Now,
 		newToken:          uuid.NewString,
 		downloadURLPolicy: remoteurl.NewPolicy(nil, nil),
+		prefetch:          1,
+		idempotency:       newRedisIdempotencyChecker(rdb, 0),
 	}
 	consumer.uploadLocalFile = func(ctx context.Context, localPath, objectName, contentType string) error {
 		if consumer.storage == nil {
@@ -152,4 +157,15 @@ func (c *Consumer) SetVisualIndexer(indexer visualIndexFunc) {
 
 func (c *Consumer) SetRAGIndexProducer(producer ragIndexProducer) {
 	c.ragProducer = producer
+}
+
+// SetMQConfig wires the RabbitMQ connection URL and prefetch from config. The
+// consumer builds one connection+channel per queue lazily in runGroupConsumer.
+func (c *Consumer) SetMQConfig(brokers []string, prefetch int) {
+	if len(brokers) > 0 {
+		c.amqpURL = "amqp://" + brokers[0]
+	}
+	if prefetch > 0 {
+		c.prefetch = prefetch
+	}
 }

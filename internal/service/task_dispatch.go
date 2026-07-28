@@ -28,9 +28,28 @@ type initialDispatchSpec struct {
 	enqueue         func(context.Context, model.VideoTask) error
 }
 
-// enqueueInitialTask is the only service-level path for a first Kafka publish.
-// The database transaction commits a recoverable dispatch intent first; Kafka
-// success is finalized by the consumer's dispatch-to-processing lease handoff.
+// enqueueInitialTask is the only service-level path for a first RabbitMQ
+// publish. It implements the 投递一致性 lease (transactional outbox 等价):
+//
+//   - The business transaction commits a recoverable dispatch intent first
+//     (task → Queued + lease_kind=dispatch + lease_expires_at), THEN publishes
+//     to RabbitMQ with publisher confirm. RabbitMQ's publisher confirm is
+//     asynchronous — it guarantees the message reached the queue only via a
+//     later callback, so a crash between commit and the confirm callback would
+//     lose the message. The dispatch lease fills exactly that window: the
+//     RetryScheduler finds expired dispatch leases and re-publishes, so a
+//     process that crashed with the DB committed but the confirm not yet
+//     returned does not lose the task.
+//   - On publish failure RestoreRetryDispatch rolls the task back to a
+//     re-dispatchable state within the same call, closing the synchronous
+//     failure path.
+//   - Consumer success finalizes the handoff from dispatch lease to processing
+//     lease (claimTaskForMessage).
+//
+// This is the outbox pattern expressed as a same-table lease column rather than
+// a separate outbox table: the lease is already atomically coupled to the task
+// state machine, so a second table would be redundant. The narrative is
+// "投递一致性 lease" — see docs/specs/02-dispatch-consistency.md.
 func (s *MediaService) enqueueInitialTask(ctx context.Context, task *model.VideoTask, spec initialDispatchSpec) (repository.InitialTaskDispatch, error) {
 	if s == nil || s.repo == nil || s.mq == nil || spec.enqueue == nil {
 		return repository.InitialTaskDispatch{}, fmt.Errorf("initial task dispatch dependencies are unavailable")

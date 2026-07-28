@@ -9,7 +9,7 @@ type Config struct {
 	LegacyMySQL  LegacyMySQLConfig  `yaml:"legacy_mysql"`
 	Redis        RedisConfig        `yaml:"redis"`
 	MinIO        MinIOConfig        `yaml:"minio"`
-	Kafka        KafkaConfig        `yaml:"kafka"`
+	MQ           MQConfig           `yaml:"mq"`
 	AI           AIConfig           `yaml:"ai"`
 	Tools        ToolsConfig        `yaml:"tools"`
 	JWT          JWTConfig          `yaml:"jwt"`
@@ -75,27 +75,38 @@ type MinIOConfig struct {
 }
 
 // Defaults shared by the server and maintenance commands when the optional
-// topic fields are omitted from YAML.
+// queue fields are omitted from YAML.
 const (
-	DefaultKafkaDownloadTopic = "video-download"
-	DefaultKafkaRAGIndexTopic = "video-rag-index"
+	DefaultMQDownloadQueue = "video-download"
+	DefaultMQRAGIndexQueue = "video-rag-index"
 )
 
-type KafkaConfig struct {
+// MQConfig is the RabbitMQ-backed task queue configuration. VidLens uses MQ
+// for reliable task dispatch (durable dispatch lease handoff), failure
+// recovery (ack redelivery + dead-letter), and peak shaving (ASR quota is
+// scarce), not high-throughput log aggregation — which is why RabbitMQ was
+// chosen over Kafka. See docs/specs/02-dispatch-consistency.md.
+type MQConfig struct {
 	Brokers         []string `yaml:"brokers"`
-	AnalyzeTopic    string   `yaml:"analyze_topic"`
-	TranscribeTopic string   `yaml:"transcribe_topic"`
-	DownloadTopic   string   `yaml:"download_topic"`
-	RAGIndexTopic   string   `yaml:"rag_index_topic"`
+	AnalyzeQueue    string   `yaml:"analyze_queue"`
+	TranscribeQueue string   `yaml:"transcribe_queue"`
+	DownloadQueue   string   `yaml:"download_queue"`
+	RAGIndexQueue   string   `yaml:"rag_index_queue"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
+	// Prefetch caps the number of unacked deliveries per consumer. vid-lens runs
+	// one consumer goroutine per queue, so prefetch is the real concurrency knob.
+	Prefetch int `yaml:"prefetch"`
 }
 
-func (k *KafkaConfig) applyDefaults() {
-	if k.DownloadTopic == "" {
-		k.DownloadTopic = DefaultKafkaDownloadTopic
+func (m *MQConfig) applyDefaults() {
+	if m.DownloadQueue == "" {
+		m.DownloadQueue = DefaultMQDownloadQueue
 	}
-	if k.RAGIndexTopic == "" {
-		k.RAGIndexTopic = DefaultKafkaRAGIndexTopic
+	if m.RAGIndexQueue == "" {
+		m.RAGIndexQueue = DefaultMQRAGIndexQueue
+	}
+	if m.Prefetch <= 0 {
+		m.Prefetch = 1
 	}
 }
 

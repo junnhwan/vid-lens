@@ -16,13 +16,13 @@ import (
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/repository"
 
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // handleTranscribe 处理文字提取任务
-func (c *Consumer) handleTranscribe(ctx context.Context, msg kafka.Message) error {
+func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery) error {
 	var payload AnalyzePayload
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return err
 	}
 
@@ -169,6 +169,15 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	return c.summarizeTask(ctx, task)
 }
 
+// transcribeAudio splits long audio into 300s segments and persists each
+// segment's state independently (TranscriptionChunk), so an ASR failure
+// mid-video only re-runs the missing segment and reuses already-completed
+// results. This is the 片级 (segment-level) half of the failure-reuse story:
+// the same durable-retry idea that the job-level dispatch lease provides at MQ
+// granularity is applied here at ASR-segment granularity, forming the
+// "投递-处理-片级" three-layer failure-reuse chain. The real driver is the
+// ASR model's single-call ≤10MB limit, which makes 300s chunking a hard
+// requirement, not an optimisation.
 func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
 	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageTranscribing})
 	splitAudio := c.splitAudio

@@ -2,46 +2,25 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 )
 
-func TestRAGIndexMessageIncludesTaskIDAndTraceID(t *testing.T) {
-	ctx := ContextWithTraceID(context.Background(), "trace-rag-1")
-
-	msg := newRAGIndexMessage(ctx, 42)
-
-	if string(msg.Key) != "42" {
-		t.Fatalf("message key = %q, want task id", string(msg.Key))
-	}
-	var payload RAGIndexPayload
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload.TaskID != 42 {
-		t.Fatalf("payload task_id = %d, want 42", payload.TaskID)
-	}
-	if payload.TraceID != "trace-rag-1" {
-		t.Fatalf("payload trace_id = %q, want trace-rag-1", payload.TraceID)
-	}
-}
-
-func TestCreateTopicsRejectsInvalidConfiguration(t *testing.T) {
+func TestDeclareQueuesRejectsInvalidConfiguration(t *testing.T) {
 	tests := []struct {
 		name    string
 		brokers []string
-		topics  []string
+		specs   []QueueSpec
 	}{
-		{name: "missing brokers", topics: []string{"video-analyze"}},
-		{name: "missing topics", brokers: []string{"127.0.0.1:9092"}},
-		{name: "empty broker", brokers: []string{"  "}, topics: []string{"video-analyze"}},
-		{name: "empty topic", brokers: []string{"127.0.0.1:9092"}, topics: []string{"  "}},
+		{name: "missing brokers", specs: []QueueSpec{{Name: "video-analyze"}}},
+		{name: "missing specs", brokers: []string{"127.0.0.1:5672"}},
+		{name: "empty broker", brokers: []string{"  "}, specs: []QueueSpec{{Name: "video-analyze"}}},
+		{name: "empty queue name", brokers: []string{"127.0.0.1:5672"}, specs: []QueueSpec{{Name: "  "}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := CreateTopics(tt.brokers, tt.topics); err == nil {
-				t.Fatal("CreateTopics should reject invalid configuration")
+			if err := DeclareQueues(tt.brokers, tt.specs); err == nil {
+				t.Fatal("DeclareQueues should reject invalid configuration")
 			}
 		})
 	}
@@ -62,5 +41,14 @@ func TestPingBrokerRejectsInvalidConfiguration(t *testing.T) {
 				t.Fatal("PingBroker should reject invalid configuration")
 			}
 		})
+	}
+}
+
+func TestNewProducerRejectsInvalidBrokers(t *testing.T) {
+	if _, err := NewProducer(nil, "a", "b", "c", "d"); err == nil {
+		t.Fatal("NewProducer should reject empty brokers")
+	}
+	if _, err := NewProducer([]string{"  "}, "a", "b", "c", "d"); err == nil {
+		t.Fatal("NewProducer should reject empty broker")
 	}
 }

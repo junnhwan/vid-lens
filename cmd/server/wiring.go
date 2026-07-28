@@ -38,7 +38,7 @@ type serverApplication struct {
 	retryScheduler       *mq.RetryScheduler
 	taskCleanup          *service.TaskCleanupService
 	taskCleanupScheduler *service.TaskCleanupScheduler
-	kafka                config.KafkaConfig
+	mq                   config.MQConfig
 }
 
 func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
@@ -161,6 +161,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	}
 
 	consumer := mq.NewConsumer(deps.repos, deps.minioStorage, aiStrategy, deps.rdb, deps.cfg.Tools.FFmpegPath)
+	consumer.SetMQConfig(deps.cfg.MQ.Brokers, deps.cfg.MQ.Prefetch)
 	consumer.SetDownloadTools(deps.cfg.Tools.YtDlpPath, deps.cfg.Tools.FFmpegPath, deps.cfg.Tools.CookiesPath, deps.cfg.Tools.ProxyURL)
 	consumer.SetDownloadURLPolicy(deps.cfg.Tools.AllowedVideoHosts, nil)
 	consumer.SetRetryPolicy(mq.TaskRetryPolicy{
@@ -225,15 +226,15 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		}),
 		taskCleanup:          taskCleanup,
 		taskCleanupScheduler: taskCleanupScheduler,
-		kafka:                deps.cfg.Kafka,
+		mq:                   deps.cfg.MQ,
 	}, nil
 }
 
 func (a *serverApplication) Start(ctx context.Context) {
-	a.consumer.StartAnalyzeConsumer(ctx, a.kafka.Brokers, a.kafka.AnalyzeTopic, a.kafka.ConsumerGroup)
-	a.consumer.StartTranscribeConsumer(ctx, a.kafka.Brokers, a.kafka.TranscribeTopic, a.kafka.ConsumerGroup)
-	a.consumer.StartDownloadConsumer(ctx, a.kafka.Brokers, a.kafka.DownloadTopic, a.kafka.ConsumerGroup)
-	a.consumer.StartRAGIndexConsumer(ctx, a.kafka.Brokers, a.kafka.RAGIndexTopic, a.kafka.ConsumerGroup)
+	a.consumer.StartAnalyzeConsumer(ctx, a.mq.Brokers, a.mq.AnalyzeQueue, a.mq.ConsumerGroup)
+	a.consumer.StartTranscribeConsumer(ctx, a.mq.Brokers, a.mq.TranscribeQueue, a.mq.ConsumerGroup)
+	a.consumer.StartDownloadConsumer(ctx, a.mq.Brokers, a.mq.DownloadQueue, a.mq.ConsumerGroup)
+	a.consumer.StartRAGIndexConsumer(ctx, a.mq.Brokers, a.mq.RAGIndexQueue, a.mq.ConsumerGroup)
 	a.retryScheduler.Start(ctx)
 	a.taskCleanupScheduler.Start(ctx)
 }

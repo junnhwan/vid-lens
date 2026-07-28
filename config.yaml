@@ -33,14 +33,15 @@ minio:
   bucket: vidlens
   use_ssl: false
 
-kafka:
+mq:
   brokers:
-    - 127.0.0.1:19092
-  analyze_topic: "video-analyze"
-  transcribe_topic: "video-transcribe"
-  download_topic: "video-download"
-  rag_index_topic: "video-rag-index"
+    - 127.0.0.1:5672
+  analyze_queue: "video-analyze"
+  transcribe_queue: "video-transcribe"
+  download_queue: "video-download"
+  rag_index_queue: "video-rag-index"
   consumer_group: "vidlens-worker"
+  prefetch: 1
 
 ai:
   provider: "mimo"  # mimo / siliconflow

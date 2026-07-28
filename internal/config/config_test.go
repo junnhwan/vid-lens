@@ -63,17 +63,17 @@ tools:
 	}
 }
 
-func TestLoadParsesKafkaRAGIndexTopic(t *testing.T) {
+func TestLoadParsesMQRAGIndexQueue(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(`
-kafka:
+mq:
   brokers:
-    - localhost:19092
-  analyze_topic: "video-analyze"
-  transcribe_topic: "video-transcribe"
-  download_topic: "video-download"
-  rag_index_topic: "video-rag-index"
+    - localhost:5672
+  analyze_queue: "video-analyze"
+  transcribe_queue: "video-transcribe"
+  download_queue: "video-download"
+  rag_index_queue: "video-rag-index"
   consumer_group: "vidlens-worker"
 `), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -83,8 +83,8 @@ kafka:
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Kafka.RAGIndexTopic != "video-rag-index" {
-		t.Fatalf("rag_index_topic = %q, want video-rag-index", cfg.Kafka.RAGIndexTopic)
+	if cfg.MQ.RAGIndexQueue != "video-rag-index" {
+		t.Fatalf("rag_index_queue = %q, want video-rag-index", cfg.MQ.RAGIndexQueue)
 	}
 }
 
@@ -119,10 +119,10 @@ database:
 	}
 }
 
-func TestLoadAppliesKafkaTopicDefaults(t *testing.T) {
+func TestLoadAppliesMQQueueDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("kafka:\n  brokers:\n    - localhost:19092\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("mq:\n  brokers:\n    - localhost:5672\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -130,18 +130,18 @@ func TestLoadAppliesKafkaTopicDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Kafka.DownloadTopic != DefaultKafkaDownloadTopic {
-		t.Fatalf("download_topic = %q, want %q", cfg.Kafka.DownloadTopic, DefaultKafkaDownloadTopic)
+	if cfg.MQ.DownloadQueue != DefaultMQDownloadQueue {
+		t.Fatalf("download_queue = %q, want %q", cfg.MQ.DownloadQueue, DefaultMQDownloadQueue)
 	}
-	if cfg.Kafka.RAGIndexTopic != DefaultKafkaRAGIndexTopic {
-		t.Fatalf("rag_index_topic = %q, want %q", cfg.Kafka.RAGIndexTopic, DefaultKafkaRAGIndexTopic)
+	if cfg.MQ.RAGIndexQueue != DefaultMQRAGIndexQueue {
+		t.Fatalf("rag_index_queue = %q, want %q", cfg.MQ.RAGIndexQueue, DefaultMQRAGIndexQueue)
 	}
 }
 
-func TestLoadPreservesExplicitKafkaTopics(t *testing.T) {
+func TestLoadPreservesExplicitMQQueues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("kafka:\n  download_topic: custom-download\n  rag_index_topic: custom-rag\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("mq:\n  download_queue: custom-download\n  rag_index_queue: custom-rag\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -149,8 +149,8 @@ func TestLoadPreservesExplicitKafkaTopics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Kafka.DownloadTopic != "custom-download" || cfg.Kafka.RAGIndexTopic != "custom-rag" {
-		t.Fatalf("explicit topics were overwritten: %+v", cfg.Kafka)
+	if cfg.MQ.DownloadQueue != "custom-download" || cfg.MQ.RAGIndexQueue != "custom-rag" {
+		t.Fatalf("explicit queues were overwritten: %+v", cfg.MQ)
 	}
 }
 

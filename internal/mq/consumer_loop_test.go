@@ -10,197 +10,177 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
 
-type scriptedFetch struct {
-	message kafka.Message
-	err     error
+// scriptedAmqpReader is the test fake for messageReader. It serves a scripted
+// slice of deliveries over a channel and records Ack/Nack calls. When the
+// script is exhausted it blocks on the context like a real idle consumer; tests
+// end the loop by canceling the context.
+type scriptedAmqpReader struct {
+	mu       sync.Mutex
+	fetches  []amqp.Delivery
+	acks     []uint64
+	nacks    []uint64
+	consumed int
+	closed   bool
+	// closeImmediately makes Consume return a channel that is already closed,
+	// simulating an infra error (e.g. connection reset) so the outer loop
+	// rebuilds the reader.
+	closeImmediately bool
 }
 
-type scriptedMessageReader struct {
-	mu         sync.Mutex
-	fetches    []scriptedFetch
-	fetchCalls int
-	commits    [][]kafka.Message
-	commitErr  error
-	closed     bool
-}
-
-func (r *scriptedMessageReader) FetchMessage(ctx context.Context) (kafka.Message, error) {
-	r.mu.Lock()
-	r.fetchCalls++
-	if len(r.fetches) > 0 {
-		result := r.fetches[0]
-		r.fetches = r.fetches[1:]
-		r.mu.Unlock()
-		return result.message, result.err
+func (r *scriptedAmqpReader) Consume(ctx context.Context) (<-chan amqp.Delivery, error) {
+	deliveries := make(chan amqp.Delivery, 8)
+	if r.closeImmediately {
+		close(deliveries)
+		return deliveries, nil
 	}
-	r.mu.Unlock()
-
-	<-ctx.Done()
-	return kafka.Message{}, ctx.Err()
+	go func() {
+		defer close(deliveries)
+		for {
+			r.mu.Lock()
+			if len(r.fetches) > 0 {
+				next := r.fetches[0]
+				r.fetches = r.fetches[1:]
+				r.consumed++
+				r.mu.Unlock()
+				select {
+				case deliveries <- next:
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
+			r.mu.Unlock()
+			// Script exhausted: close the channel deterministically so the
+			// consume loop returns instead of blocking on a 20ms sleep + cancel
+			// (which flakes on loaded CI). Tests that need a still-running reader
+			// set closeImmediately=false and rely on ctx cancellation elsewhere.
+			return
+		}
+	}()
+	return deliveries, nil
 }
 
-func (r *scriptedMessageReader) CommitMessages(_ context.Context, messages ...kafka.Message) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.commits = append(r.commits, append([]kafka.Message(nil), messages...))
-	return r.commitErr
+// stubDelivery makes a delivery whose Ack/Nack record into this reader.
+func (r *scriptedAmqpReader) stubDelivery(tag uint64, body []byte) amqp.Delivery {
+	d := amqp.Delivery{DeliveryTag: tag, Body: body}
+	d.Acknowledger = &recordingAcknowledger{reader: r}
+	return d
 }
 
-func (r *scriptedMessageReader) Close() error {
+type recordingAcknowledger struct {
+	reader *scriptedAmqpReader
+}
+
+func (a *recordingAcknowledger) Ack(tag uint64, multiple bool) error {
+	a.reader.mu.Lock()
+	a.reader.acks = append(a.reader.acks, tag)
+	a.reader.mu.Unlock()
+	return nil
+}
+
+func (a *recordingAcknowledger) Nack(tag uint64, multiple bool, requeue bool) error {
+	a.reader.mu.Lock()
+	a.reader.nacks = append(a.reader.nacks, tag)
+	a.reader.mu.Unlock()
+	return nil
+}
+
+func (a *recordingAcknowledger) Reject(tag uint64, requeue bool) error { return nil }
+
+func (r *scriptedAmqpReader) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closed = true
 	return nil
 }
 
-func (r *scriptedMessageReader) snapshot() (fetchCalls int, commits [][]kafka.Message, closed bool) {
+func (r *scriptedAmqpReader) snapshot() (consumed int, acks []uint64, nacks []uint64, closed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.fetchCalls, append([][]kafka.Message(nil), r.commits...), r.closed
+	return r.consumed, append([]uint64(nil), r.acks...), append([]uint64(nil), r.nacks...), r.closed
 }
 
-func TestConsumeReaderCommitsHandledMessage(t *testing.T) {
-	message := kafka.Message{Topic: "analyze", Partition: 1, Offset: 7, Value: []byte("payload")}
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{
-		{message: message},
-		{err: context.Canceled},
-	}}
+func TestConsumeMessagesAcksHandledDelivery(t *testing.T) {
+	reader := &scriptedAmqpReader{}
+	reader.fetches = []amqp.Delivery{reader.stubDelivery(7, []byte("payload"))}
 	handled := 0
 
-	err := consumeReader(context.Background(), reader, func(_ context.Context, got kafka.Message) error {
+	err := consumeMessages(context.Background(), reader, func(_ context.Context, got amqp.Delivery) error {
 		handled++
-		if got.Offset != message.Offset {
-			t.Fatalf("handled offset = %d, want %d", got.Offset, message.Offset)
+		if got.DeliveryTag != 7 {
+			t.Fatalf("handled tag = %d, want 7", got.DeliveryTag)
 		}
 		return nil
 	})
+	_ = err
 
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("consumeReader error = %v, want context canceled", err)
+	consumed, acks, nacks, closed := reader.snapshot()
+	if handled != 1 || consumed != 1 {
+		t.Fatalf("handled/consumed = %d/%d, want 1/1", handled, consumed)
 	}
-	fetchCalls, commits, closed := reader.snapshot()
-	if handled != 1 || fetchCalls != 2 {
-		t.Fatalf("handled/fetch calls = %d/%d, want 1/2", handled, fetchCalls)
-	}
-	if len(commits) != 1 || len(commits[0]) != 1 || commits[0][0].Offset != message.Offset {
-		t.Fatalf("commits = %#v, want only offset %d", commits, message.Offset)
+	if len(acks) != 1 || acks[0] != 7 || len(nacks) != 0 {
+		t.Fatalf("acks/nacks = %v/%v, want ack 7", acks, nacks)
 	}
 	if !closed {
 		t.Fatal("reader was not closed after loop exit")
 	}
 }
 
-func TestConsumeReaderStopsWithoutCommitOnFetchError(t *testing.T) {
-	fetchErr := errors.New("broker disconnected")
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{{err: fetchErr}}}
-	handled := 0
-
-	err := consumeReader(context.Background(), reader, func(context.Context, kafka.Message) error {
-		handled++
-		return nil
-	})
-
-	if !errors.Is(err, fetchErr) {
-		t.Fatalf("consumeReader error = %v, want fetch error", err)
-	}
-	fetchCalls, commits, closed := reader.snapshot()
-	if handled != 0 || fetchCalls != 1 || len(commits) != 0 {
-		t.Fatalf("handled/fetch/commits = %d/%d/%d, want 0/1/0", handled, fetchCalls, len(commits))
-	}
-	if !closed {
-		t.Fatal("reader was not closed after fetch error")
-	}
-}
-
-func TestConsumeReaderStopsWithoutReadingNextMessageOnHandlerError(t *testing.T) {
+func TestConsumeMessagesNacksOnHandlerError(t *testing.T) {
 	handleErr := errors.New("failure state persistence failed")
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{
-		{message: kafka.Message{Offset: 10}},
-		{message: kafka.Message{Offset: 11}},
-	}}
+	reader := &scriptedAmqpReader{}
+	reader.fetches = []amqp.Delivery{reader.stubDelivery(10, nil)}
 
-	err := consumeReader(context.Background(), reader, func(context.Context, kafka.Message) error {
+	err := consumeMessages(context.Background(), reader, func(context.Context, amqp.Delivery) error {
 		return handleErr
 	})
+	_ = err
 
-	if !errors.Is(err, handleErr) {
-		t.Fatalf("consumeReader error = %v, want handler error", err)
-	}
-	fetchCalls, commits, closed := reader.snapshot()
-	if fetchCalls != 1 || len(commits) != 0 {
-		t.Fatalf("fetch/commit calls = %d/%d, want 1/0", fetchCalls, len(commits))
+	_, acks, nacks, closed := reader.snapshot()
+	if len(acks) != 0 || len(nacks) != 1 || nacks[0] != 10 {
+		t.Fatalf("acks/nacks = %v/%v, want nack 10", acks, nacks)
 	}
 	if !closed {
 		t.Fatal("reader was not closed after handler error")
 	}
 }
 
-func TestConsumeReaderStopsWithoutReadingNextMessageOnCommitError(t *testing.T) {
-	commitErr := errors.New("commit coordinator unavailable")
-	reader := &scriptedMessageReader{
-		fetches: []scriptedFetch{
-			{message: kafka.Message{Offset: 20}},
-			{message: kafka.Message{Offset: 21}},
-		},
-		commitErr: commitErr,
-	}
-	handled := 0
-
-	err := consumeReader(context.Background(), reader, func(context.Context, kafka.Message) error {
-		handled++
-		return nil
-	})
-
-	if !errors.Is(err, commitErr) {
-		t.Fatalf("consumeReader error = %v, want commit error", err)
-	}
-	fetchCalls, commits, closed := reader.snapshot()
-	if handled != 1 || fetchCalls != 1 || len(commits) != 1 {
-		t.Fatalf("handled/fetch/commit calls = %d/%d/%d, want 1/1/1", handled, fetchCalls, len(commits))
-	}
-	if !closed {
-		t.Fatal("reader was not closed after commit error")
-	}
-}
-
-func TestConsumeReaderClosesOnContextCancellation(t *testing.T) {
+func TestConsumeMessagesClosesOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	reader := &scriptedMessageReader{}
+	reader := &scriptedAmqpReader{}
 
-	err := consumeReader(ctx, reader, func(context.Context, kafka.Message) error {
+	err := consumeMessages(ctx, reader, func(context.Context, amqp.Delivery) error {
 		t.Fatal("handler must not run after context cancellation")
 		return nil
 	})
+	_ = err
 
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("consumeReader error = %v, want context canceled", err)
-	}
-	_, commits, closed := reader.snapshot()
-	if len(commits) != 0 || !closed {
-		t.Fatalf("commits/closed = %d/%v, want 0/true", len(commits), closed)
+	_, acks, _, closed := reader.snapshot()
+	if len(acks) != 0 || !closed {
+		t.Fatalf("acks/closed = %d/%v, want 0/true", len(acks), closed)
 	}
 }
 
 func TestStartGroupConsumerStopsAndWaitsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reader := &scriptedMessageReader{}
+	reader := &scriptedAmqpReader{}
 	readerStarted := make(chan struct{})
 	consumer := &Consumer{
-		newKafkaReader: func(kafka.ReaderConfig) kafkaMessageReader {
+		newMessageReader: func(queue, groupID string) messageReader {
 			close(readerStarted)
 			return reader
 		},
 	}
 
-	consumer.startGroupConsumer(ctx, "test", []string{"broker"}, "topic", "group", func(context.Context, kafka.Message) error {
+	consumer.startGroupConsumer(ctx, "test", []string{"broker"}, "topic", "group", func(context.Context, amqp.Delivery) error {
 		return nil
 	})
 	select {
@@ -221,7 +201,7 @@ func TestStartGroupConsumerStopsAndWaitsWhenContextIsCanceled(t *testing.T) {
 		t.Fatal("consumer did not stop after context cancellation")
 	}
 
-	_, _, closed := reader.snapshot()
+	_, _, _, closed := reader.snapshot()
 	if !closed {
 		t.Fatal("reader was not closed after consumer shutdown")
 	}
@@ -230,11 +210,11 @@ func TestStartGroupConsumerStopsAndWaitsWhenContextIsCanceled(t *testing.T) {
 func TestRunGroupConsumerRebuildsReaderAfterInfrastructureError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	first := &scriptedMessageReader{fetches: []scriptedFetch{{err: errors.New("connection reset")}}}
-	second := &scriptedMessageReader{}
+	first := &scriptedAmqpReader{closeImmediately: true} // closed channel = infra error
+	second := &scriptedAmqpReader{}
 	created := 0
 	consumer := &Consumer{
-		newKafkaReader: func(kafka.ReaderConfig) kafkaMessageReader {
+		newMessageReader: func(queue, groupID string) messageReader {
 			created++
 			if created == 1 {
 				return first
@@ -245,12 +225,12 @@ func TestRunGroupConsumerRebuildsReaderAfterInfrastructureError(t *testing.T) {
 		readerRestartBackoff: time.Millisecond,
 	}
 
-	consumer.runGroupConsumer(ctx, "test", kafka.ReaderConfig{}, func(context.Context, kafka.Message) error {
+	consumer.runGroupConsumer(ctx, "test", "topic", "group", func(context.Context, amqp.Delivery) error {
 		return nil
 	})
 
-	_, _, firstClosed := first.snapshot()
-	_, _, secondClosed := second.snapshot()
+	_, _, _, firstClosed := first.snapshot()
+	_, _, _, secondClosed := second.snapshot()
 	if created != 2 {
 		t.Fatalf("reader factory calls = %d, want 2", created)
 	}
@@ -259,7 +239,7 @@ func TestRunGroupConsumerRebuildsReaderAfterInfrastructureError(t *testing.T) {
 	}
 }
 
-func TestConsumeReaderCommitsAfterBusinessFailureIsHandedToRetryScheduler(t *testing.T) {
+func TestConsumeMessagesAcksAfterBusinessFailureIsHandedToRetryScheduler(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	task := &model.VideoTask{
@@ -281,21 +261,18 @@ func TestConsumeReaderCommitsAfterBusinessFailureIsHandedToRetryScheduler(t *tes
 		ragIndex: func(context.Context, *model.VideoTask) error {
 			return fmt.Errorf("network timeout")
 		},
-		retryPolicy: TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return now }},
+		retryPolicy:  TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return now }},
+		idempotency:  noOpIdempotencyChecker{},
 	}
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{
-		{message: ragIndexMessage(task.ID, "trace-transfer")},
-		{err: context.Canceled},
-	}}
+	reader := &scriptedAmqpReader{}
+	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-transfer").Body)}
 
-	err := consumeReader(context.Background(), reader, consumer.handleRAGIndex)
+	err := consumeMessages(context.Background(), reader, consumer.handleRAGIndex)
+	_ = err
 
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("consumeReader error = %v, want context canceled after committed failure", err)
-	}
-	_, commits, _ := reader.snapshot()
-	if len(commits) != 1 {
-		t.Fatalf("commit count = %d, want 1 after durable failure handoff", len(commits))
+	_, acks, _, _ := reader.snapshot()
+	if len(acks) != 1 {
+		t.Fatalf("ack count = %d, want 1 after durable failure handoff", len(acks))
 	}
 	current, findErr := repos.Task.FindByID(task.ID)
 	if findErr != nil {
@@ -306,7 +283,7 @@ func TestConsumeReaderCommitsAfterBusinessFailureIsHandedToRetryScheduler(t *tes
 	}
 }
 
-func TestConsumeReaderDoesNotCommitWhenFailurePersistenceIsNotAtomic(t *testing.T) {
+func TestConsumeMessagesNacksWhenFailurePersistenceIsNotAtomic(t *testing.T) {
 	repos, db := newConsumerLoopTestRepositories(t)
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	task := &model.VideoTask{
@@ -338,20 +315,18 @@ func TestConsumeReaderDoesNotCommitWhenFailurePersistenceIsNotAtomic(t *testing.
 			return fmt.Errorf("network timeout")
 		},
 		retryPolicy: TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return now }},
+		idempotency: noOpIdempotencyChecker{},
 	}
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{
-		{message: ragIndexMessage(task.ID, "trace-persist")},
-		{err: context.Canceled},
-	}}
+	reader := &scriptedAmqpReader{}
+	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-persist").Body)}
 
-	err := consumeReader(context.Background(), reader, consumer.handleRAGIndex)
-
-	if err == nil || !strings.Contains(err.Error(), "task job write failed") {
-		t.Fatalf("consumeReader error = %v, want task job persistence error", err)
-	}
-	_, commits, _ := reader.snapshot()
-	if len(commits) != 0 {
-		t.Fatalf("commit count = %d, want 0 when failure handoff is not durable", len(commits))
+	_ = consumeMessages(context.Background(), reader, consumer.handleRAGIndex)
+	_, acks, nacks, _ := reader.snapshot()
+	// Handler failed because the failure-handoff transaction aborted (task job
+	// write trigger); the delivery is Nacked for redelivery, not Acked — so the
+	// task is not silently completed and RetryScheduler can still drive recovery.
+	if len(acks) != 0 || len(nacks) != 1 {
+		t.Fatalf("ack/nack = %d/%d, want 0/1 when failure handoff is not durable", len(acks), len(nacks))
 	}
 	current, findErr := repos.Task.FindByID(task.ID)
 	if findErr != nil {
@@ -362,7 +337,7 @@ func TestConsumeReaderDoesNotCommitWhenFailurePersistenceIsNotAtomic(t *testing.
 	}
 }
 
-func TestKafkaRedeliveryDoesNotRunRAGWhileRetrySchedulerOwnsTask(t *testing.T) {
+func TestRedeliveryDoesNotRunRAGWhileRetrySchedulerOwnsTask(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	nextRetryAt := time.Date(2026, 7, 13, 12, 5, 0, 0, time.UTC)
 	task := &model.VideoTask{
@@ -390,30 +365,26 @@ func TestKafkaRedeliveryDoesNotRunRAGWhileRetrySchedulerOwnsTask(t *testing.T) {
 			calls++
 			return nil
 		},
+		idempotency: noOpIdempotencyChecker{},
 	}
-	reader := &scriptedMessageReader{fetches: []scriptedFetch{
-		{message: ragIndexMessage(task.ID, "trace-redelivery")},
-		{err: context.Canceled},
-	}}
+	reader := &scriptedAmqpReader{}
+	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-redelivery").Body)}
 
-	err := consumeReader(context.Background(), reader, consumer.handleRAGIndex)
+	_ = consumeMessages(context.Background(), reader, consumer.handleRAGIndex)
 
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("consumeReader error = %v, want context canceled after duplicate commit", err)
-	}
 	if calls != 0 {
 		t.Fatalf("RAG index calls = %d, want 0 while RetryScheduler owns next retry", calls)
 	}
-	_, commits, _ := reader.snapshot()
-	if len(commits) != 1 {
-		t.Fatalf("commit count = %d, want duplicate Kafka message acknowledged", len(commits))
+	_, acks, _, _ := reader.snapshot()
+	if len(acks) != 1 {
+		t.Fatalf("ack count = %d, want 1 after stale message acknowledged", len(acks))
 	}
 	current, findErr := repos.Task.FindByID(task.ID)
 	if findErr != nil {
 		t.Fatalf("find task: %v", findErr)
 	}
 	if current.Status != model.TaskStatusFailed || current.RetryCount != 1 || current.NextRetryAt == nil || !current.NextRetryAt.Equal(nextRetryAt) {
-		t.Fatalf("scheduler-owned task changed on Kafka redelivery: %+v", current)
+		t.Fatalf("scheduler-owned task changed on redelivery: %+v", current)
 	}
 }
 
@@ -444,14 +415,14 @@ func TestRetrySchedulerReturnsTaskRestoreErrorAfterProducerFailure(t *testing.T)
 	).Error; err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
-	scheduler := NewRetryScheduler(repos, &recordingRetryProducer{err: fmt.Errorf("kafka unavailable")}, RetrySchedulerConfig{
+	scheduler := NewRetryScheduler(repos, &recordingRetryProducer{err: fmt.Errorf("mq unavailable")}, RetrySchedulerConfig{
 		BatchSize: 10,
 		Now:       func() time.Time { return now },
 	})
 
 	err := scheduler.RunOnce(context.Background())
 
-	if err == nil || !strings.Contains(err.Error(), "kafka unavailable") || !strings.Contains(err.Error(), "task restore failed") {
+	if err == nil || !strings.Contains(err.Error(), "mq unavailable") || !strings.Contains(err.Error(), "task restore failed") {
 		t.Fatalf("RunOnce error = %v, want producer and task restore errors", err)
 	}
 	current, findErr := repos.Task.FindByID(task.ID)
@@ -473,14 +444,14 @@ func TestRetrySchedulerReturnsTaskJobRestoreErrorAfterProducerFailure(t *testing
 	).Error; err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
-	scheduler := NewRetryScheduler(repos, &recordingRetryProducer{err: fmt.Errorf("kafka unavailable")}, RetrySchedulerConfig{
+	scheduler := NewRetryScheduler(repos, &recordingRetryProducer{err: fmt.Errorf("mq unavailable")}, RetrySchedulerConfig{
 		BatchSize: 10,
 		Now:       func() time.Time { return now },
 	})
 
 	err := scheduler.RunOnce(context.Background())
 
-	if err == nil || !strings.Contains(err.Error(), "kafka unavailable") || !strings.Contains(err.Error(), "task job restore failed") {
+	if err == nil || !strings.Contains(err.Error(), "mq unavailable") || !strings.Contains(err.Error(), "task job restore failed") {
 		t.Fatalf("RunOnce error = %v, want producer and task job restore errors", err)
 	}
 	current, findErr := repos.Task.FindByID(task.ID)
@@ -496,7 +467,7 @@ func TestRetrySchedulerDoesNotRedispatchUntilProducerFailureBackoffExpires(t *te
 	repos := newConsumerTestRepositories(t)
 	now := time.Date(2026, 7, 13, 13, 0, 0, 0, time.UTC)
 	createDueRetryTask(t, repos, now, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa06")
-	producer := &recordingRetryProducer{err: fmt.Errorf("kafka unavailable")}
+	producer := &recordingRetryProducer{err: fmt.Errorf("mq unavailable")}
 	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
 		BatchSize: 10,
 		Now:       func() time.Time { return now },

@@ -163,15 +163,21 @@ func main() {
 	}
 	aiStrategy = ai.AdmitStrategy(aiStrategy, providerAdmission, strings.ToLower(cfg.AI.Provider), cfg.AI.ASRModel, cfg.AI.LLMModel)
 
-	// Kafka
-	if err := mq.CreateTopics(cfg.Kafka.Brokers, []string{
-		cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic,
+	// RabbitMQ: declare job queues + dead-letter queues.
+	if err := mq.DeclareQueues(cfg.MQ.Brokers, []mq.QueueSpec{
+		{Name: cfg.MQ.AnalyzeQueue},
+		{Name: cfg.MQ.TranscribeQueue},
+		{Name: cfg.MQ.DownloadQueue},
+		{Name: cfg.MQ.RAGIndexQueue},
 	}); err != nil {
-		log.Fatalf("初始化 Kafka topics 失败: %v", err)
+		log.Fatalf("初始化 RabbitMQ 队列失败: %v", err)
 	}
-	producer := mq.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.AnalyzeTopic, cfg.Kafka.TranscribeTopic, cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic)
+	producer, err := mq.NewProducer(cfg.MQ.Brokers, cfg.MQ.AnalyzeQueue, cfg.MQ.TranscribeQueue, cfg.MQ.DownloadQueue, cfg.MQ.RAGIndexQueue)
+	if err != nil {
+		log.Fatalf("初始化 RabbitMQ 生产者失败: %v", err)
+	}
 	defer producer.Close()
-	log.Println("✅ Kafka 生产者就绪")
+	log.Println("✅ RabbitMQ 生产者就绪")
 
 	var ragStore service.RAGVectorStore
 	var ragRetriever service.RAGRetriever
@@ -219,8 +225,8 @@ func main() {
 			return rdb.Ping(ctx).Err()
 		}},
 		{Name: "minio", Required: true, Check: minioStorage.HealthCheck},
-		{Name: "kafka", Required: true, Check: func(ctx context.Context) error {
-			return mq.PingBroker(ctx, cfg.Kafka.Brokers)
+		{Name: "mq", Required: true, Check: func(ctx context.Context) error {
+			return mq.PingBroker(ctx, cfg.MQ.Brokers)
 		}},
 	}
 	if cfg.RAG.Enabled {

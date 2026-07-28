@@ -19,12 +19,12 @@ import (
 	"vid-lens/internal/repository"
 
 	"github.com/google/uuid"
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func (c *Consumer) handleDownload(ctx context.Context, msg kafka.Message) error {
+func (c *Consumer) handleDownload(ctx context.Context, delivery amqp.Delivery) error {
 	var payload DownloadPayload
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return fmt.Errorf("解析下载消息失败: %w", err)
 	}
 

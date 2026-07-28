@@ -277,6 +277,13 @@ type RetrySchedulerConfig struct {
 	NewToken               func() string
 }
 
+// RetryScheduler is the poller half of the 投递一致性 lease (transactional
+// outbox 等价). It scans for tasks due for retry — which includes tasks whose
+// dispatch lease has expired — and re-publishes them. The expired-dispatch
+// branch is what closes the window RabbitMQ publisher confirm cannot: a process
+// that committed the task but crashed before the publisher-confirm callback
+// returned leaves an expired dispatch lease that this scheduler reclaims and
+// re-dispatches. See docs/specs/02-dispatch-consistency.md.
 type RetryScheduler struct {
 	repos    *repository.Repositories
 	producer retryProducer

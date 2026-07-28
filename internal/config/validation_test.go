@@ -11,9 +11,9 @@ func validServerConfig() Config {
 		Database: DatabaseConfig{Host: "127.0.0.1", Port: 5432, Username: "vidlens", DBName: "vidlens"},
 		Redis:    RedisConfig{Host: "127.0.0.1", Port: 6379, DB: 0},
 		MinIO:    MinIOConfig{Endpoint: "127.0.0.1:9000", Bucket: "vidlens"},
-		Kafka: KafkaConfig{
-			Brokers: []string{"127.0.0.1:9092"}, AnalyzeTopic: "video-analyze", TranscribeTopic: "video-transcribe",
-			DownloadTopic: "video-download", RAGIndexTopic: "video-rag-index", ConsumerGroup: "vidlens-worker",
+		MQ: MQConfig{
+			Brokers: []string{"127.0.0.1:5672"}, AnalyzeQueue: "video-analyze", TranscribeQueue: "video-transcribe",
+			DownloadQueue: "video-download", RAGIndexQueue: "video-rag-index", ConsumerGroup: "vidlens-worker",
 		},
 		AI:        AIConfig{Provider: "mimo"},
 		JWT:       JWTConfig{Secret: "test-secret", ExpireHours: 72},
@@ -70,14 +70,14 @@ func TestValidateMySQLRemainsAvailableForMigrationTools(t *testing.T) {
 func TestValidateServerReportsInvalidCoreFields(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.Server.Port = 70000
-	cfg.Kafka.Brokers = []string{"", "127.0.0.1:9092"}
+	cfg.MQ.Brokers = []string{"", "127.0.0.1:5672"}
 	cfg.JWT.Secret = ""
 
 	err := cfg.ValidateServer()
 	if err == nil {
 		t.Fatal("ValidateServer() error = nil, want invalid configuration error")
 	}
-	for _, field := range []string{"server.port", "kafka.brokers[0]", "jwt.secret"} {
+	for _, field := range []string{"server.port", "mq.brokers[0]", "jwt.secret"} {
 		if !strings.Contains(err.Error(), field) {
 			t.Errorf("ValidateServer() error %q does not mention %s", err, field)
 		}

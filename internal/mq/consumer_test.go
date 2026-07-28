@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -574,7 +574,7 @@ func TestHandleRAGIndexCarriesKafkaRetryBudgetIntoAIContext(t *testing.T) {
 		return nil
 	})
 	payload, _ := json.Marshal(RAGIndexPayload{TaskID: task.ID, TraceID: "trace-rag-budget", BudgetID: "rag-budget-1"})
-	if err := consumer.handleRAGIndex(context.Background(), kafka.Message{Value: payload}); err != nil {
+	if err := consumer.handleRAGIndex(context.Background(), amqp.Delivery{Body: payload}); err != nil {
 		t.Fatalf("handleRAGIndex: %v", err)
 	}
 	if got.RetryBudgetID != "rag-budget-1" {
@@ -1227,14 +1227,14 @@ func (p *recordingRAGIndexProducer) EnqueueRAGIndex(ctx context.Context, taskID 
 	return p.err
 }
 
-func downloadMessage(taskID int64, key string) kafka.Message {
+func downloadMessage(taskID int64, key string) amqp.Delivery {
 	payload, _ := json.Marshal(DownloadPayload{TaskID: taskID, Key: key})
-	return kafka.Message{Key: []byte(key), Value: payload}
+	return amqp.Delivery{MessageId: fmt.Sprintf("%s:%d", TaskJobDownload, taskID), RoutingKey: "video-download", Body: payload}
 }
 
-func ragIndexMessage(taskID int64, traceID string) kafka.Message {
+func ragIndexMessage(taskID int64, traceID string) amqp.Delivery {
 	payload, _ := json.Marshal(RAGIndexPayload{TaskID: taskID, TraceID: traceID})
-	return kafka.Message{Key: []byte(fmt.Sprint(taskID)), Value: payload}
+	return amqp.Delivery{MessageId: fmt.Sprintf("%s:%d", TaskJobRAGIndex, taskID), RoutingKey: "video-rag-index", Body: payload}
 }
 
 func md5Hex(data []byte) string {

@@ -3,7 +3,6 @@ package mq
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,7 +11,7 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type leaseCapturingRetryProducer struct {
@@ -338,7 +337,7 @@ func TestHandleRAGIndexSchedulerTokenMakesOldMessageStaleAndExecutesNewMessageOn
 		t.Fatalf("old message: %v", err)
 	}
 	payload, _ := json.Marshal(RAGIndexPayload{TaskID: task.ID, TraceID: "new", ClaimToken: "dispatch-rag"})
-	message := kafka.Message{Value: payload}
+	message := amqp.Delivery{Body: payload}
 	if err := consumer.handleRAGIndex(context.Background(), message); err != nil {
 		t.Fatalf("new message: %v", err)
 	}
@@ -350,23 +349,24 @@ func TestHandleRAGIndexSchedulerTokenMakesOldMessageStaleAndExecutesNewMessageOn
 	}
 }
 
-func TestPoisonAwareHandlerPersistsBadJSONAndMissingTaskThenAllowsCommit(t *testing.T) {
+func TestPoisonAwareHandlerPersistsBadJSONAndMissingTaskThenAllowsAck(t *testing.T) {
 	repos, db := newConsumerLoopTestRepositories(t)
 	consumer := &Consumer{repo: repos}
 	handler := consumer.poisonAwareHandler("rag_index", "rag-group", consumer.handleRAGIndex)
-	messages := []kafka.Message{
-		{Topic: "rag", Partition: 1, Offset: 10, Value: []byte("{bad")},
-		{Topic: "rag", Partition: 1, Offset: 11, Value: mustJSON(t, RAGIndexPayload{TaskID: 999})},
+	cases := []struct {
+		tag  uint64
+		body []byte
+	}{
+		{tag: 10, body: []byte("{bad")},
+		{tag: 11, body: mustJSON(t, RAGIndexPayload{TaskID: 999})},
 	}
-	for _, message := range messages {
-		reader := &scriptedMessageReader{fetches: []scriptedFetch{{message: message}, {err: context.Canceled}}}
-		err := consumeReader(context.Background(), reader, handler)
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("consume poison offset %d: %v", message.Offset, err)
-		}
-		_, commits, _ := reader.snapshot()
-		if len(commits) != 1 || commits[0][0].Offset != message.Offset {
-			t.Fatalf("commits for %d = %#v", message.Offset, commits)
+	for _, c := range cases {
+		reader := &scriptedAmqpReader{}
+		reader.fetches = []amqp.Delivery{reader.stubDelivery(c.tag, c.body)}
+		_ = consumeMessages(context.Background(), reader, handler)
+		_, acks, nacks, _ := reader.snapshot()
+		if len(acks) != 1 || acks[0] != c.tag {
+			t.Fatalf("acks for tag %d = %v, nacks=%v", c.tag, acks, nacks)
 		}
 	}
 	var failures []model.KafkaMessageFailure
@@ -385,7 +385,7 @@ func TestPoisonAwareHandlerReturnsErrorWhenQuarantineWriteFails(t *testing.T) {
 	}
 	consumer := &Consumer{repo: repos}
 	handler := consumer.poisonAwareHandler("rag_index", "rag-group", consumer.handleRAGIndex)
-	err := handler(context.Background(), kafka.Message{Topic: "rag", Partition: 0, Offset: 1, Value: []byte("bad")})
+	err := handler(context.Background(), amqp.Delivery{DeliveryTag: 1, RoutingKey: "rag", Body: []byte("bad")})
 	if err == nil || !strings.Contains(err.Error(), "quarantine unavailable") {
 		t.Fatalf("handler error = %v", err)
 	}

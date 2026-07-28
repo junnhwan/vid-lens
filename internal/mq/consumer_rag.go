@@ -13,12 +13,12 @@ import (
 	"vid-lens/internal/pkg/processingguard"
 	"vid-lens/internal/repository"
 
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func (c *Consumer) handleRAGIndex(ctx context.Context, msg kafka.Message) error {
+func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) error {
 	var payload RAGIndexPayload
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return fmt.Errorf("解析 RAG 索引消息失败: %w", err)
 	}
 

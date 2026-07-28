@@ -15,15 +15,15 @@ import (
 	"vid-lens/internal/pkg/lock"
 	"vid-lens/internal/repository"
 
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // handleAnalyze 处理视频分析任务
 // 严格遵循六步流程（对应面试文档 MQ 消费者开发规范）
-func (c *Consumer) handleAnalyze(ctx context.Context, msg kafka.Message) error {
+func (c *Consumer) handleAnalyze(ctx context.Context, delivery amqp.Delivery) error {
 	// 第 1 步：解析消息
 	var payload AnalyzePayload
-	if err := json.Unmarshal(msg.Value, &payload); err != nil {
+	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return fmt.Errorf("解析消息失败: %w", err)
 	}
 

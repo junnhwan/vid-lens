@@ -73,17 +73,17 @@ func (c *Config) ValidateServer() error {
 	problems.require("minio.endpoint", c.MinIO.Endpoint)
 	problems.require("minio.bucket", c.MinIO.Bucket)
 
-	if len(c.Kafka.Brokers) == 0 {
-		problems.add("kafka.brokers", "至少需要一个 broker")
+	if len(c.MQ.Brokers) == 0 {
+		problems.add("mq.brokers", "至少需要一个 broker")
 	}
-	for i, broker := range c.Kafka.Brokers {
-		problems.require(fmt.Sprintf("kafka.brokers[%d]", i), broker)
+	for i, broker := range c.MQ.Brokers {
+		problems.require(fmt.Sprintf("mq.brokers[%d]", i), broker)
 	}
-	problems.require("kafka.analyze_topic", c.Kafka.AnalyzeTopic)
-	problems.require("kafka.transcribe_topic", c.Kafka.TranscribeTopic)
-	problems.require("kafka.download_topic", c.Kafka.DownloadTopic)
-	problems.require("kafka.rag_index_topic", c.Kafka.RAGIndexTopic)
-	problems.require("kafka.consumer_group", c.Kafka.ConsumerGroup)
+	problems.require("mq.analyze_queue", c.MQ.AnalyzeQueue)
+	problems.require("mq.transcribe_queue", c.MQ.TranscribeQueue)
+	problems.require("mq.download_queue", c.MQ.DownloadQueue)
+	problems.require("mq.rag_index_queue", c.MQ.RAGIndexQueue)
+	problems.require("mq.consumer_group", c.MQ.ConsumerGroup)
 
 	problems.require("jwt.secret", c.JWT.Secret)
 	if c.JWT.ExpireHours <= 0 {

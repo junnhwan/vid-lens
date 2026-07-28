@@ -3,13 +3,13 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
-	"strconv"
+	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // AnalyzePayload 任务消息载荷
@@ -39,7 +39,7 @@ type RAGIndexPayload struct {
 type retryBudgetContextKey struct{}
 
 // ContextWithRetryBudgetID carries the durable retry-cycle identity into a
-// Kafka payload. It is exported so request services and internal handoffs use
+// message payload. It is exported so request services and internal handoffs use
 // exactly the same context contract as the RetryScheduler.
 func ContextWithRetryBudgetID(ctx context.Context, budgetID string) context.Context {
 	if budgetID == "" {
@@ -67,7 +67,7 @@ func retryBudgetIDFromContext(ctx context.Context) string {
 type claimTokenContextKey struct{}
 
 // ContextWithClaimToken carries the database-owned dispatch lease into the
-// Kafka payload. HTTP initial dispatches and RetryScheduler redispatches must
+// message payload. HTTP initial dispatches and RetryScheduler redispatches must
 // use the same contract so consumers can atomically hand it off to a processing
 // lease.
 func ContextWithClaimToken(ctx context.Context, token string) context.Context {
@@ -93,54 +93,127 @@ func claimTokenFromContext(ctx context.Context) string {
 	return ClaimTokenFromContext(ctx)
 }
 
-// Producer Kafka 生产者
-// 面试亮点（选型理由）：
+// Producer RabbitMQ 生产者
 //
-//	为什么选 Kafka 而不是 RocketMQ / RabbitMQ？
-//	1. Kafka 是 Go 后端生态中最主流的 MQ，社区活跃，Go 客户端成熟
-//	2. 天然支持消息持久化（磁盘落盘），不怕宕机丢消息
-//	3. 基于拉取模式消费，消费者按自己的节奏处理，天然削峰
-//	4. 分区机制支持水平扩展，未来增加消费者实例就能提升吞吐
-//	不选 RocketMQ 的理由：Go 客户端不够成熟，更偏 Java 生态
-//	不选 RabbitMQ 的理由：海量消息堆积能力不如 Kafka，Erlang 底层不好排查问题
+// 选型理由（痛点驱动，非名气驱动）：
+//
+// vid-lens 用 MQ 的真实痛点是 ① 耗时任务出 HTTP 请求、② 失败可恢复
+// （AI 服务挂任务不丢）、③ 削峰（ASR 配额有限需排队）。吞吐量级是用户
+// 级并发（个位到几十 QPS），不是日志管道（万级 TPS）。Kafka 的大杀器
+// ——partition 并行、ISR 副本、高吞吐日志聚合——一个用不上；选 Kafka
+// 是"堆名气"，面试一句"你吞吐不高为什么用 Kafka 不用 RabbitMQ"就答含糊。
+//
+// RabbitMQ 的 ack 重投 / 死信队列 / 优先级 / 路由天然咬合"任务可靠投递
+// + 失败可恢复 + ASR 排队"痛点。配置：classic persistent queue + publisher
+// confirm + manual ack + delivery_mode=2 持久化。不上 quorum queue（基于
+// Raft 强一致，单人项目面试问 Raft 答不实易翻车，作加分项提一句）。
+//
+// 与 dispatch lease 的分工边界（面试最可能被追的点）：
+// RabbitMQ publisher confirm 保证消息从 publisher 到 queue 的投递（异步
+// 回调确认），但 confirm 回调是异步的——进程崩在 confirm 回来前消息
+// 就丢了。dispatch lease（投递一致性 lease，transactional outbox 等价）
+// 填这个窗口：业务事务内同表写 lease，提交后 publish，进程在 commit 与
+// publisher confirm 回调之间崩溃由 RetryScheduler 发现过期 lease 补投。
+// 这层分工是必须写清的，否则 publisher confirm 看起来已足够、dispatch
+// lease 像多余——实则补的是 confirm 的盲区。
 type Producer struct {
-	analyzeWriter    *kafka.Writer
-	transcribeWriter *kafka.Writer
-	downloadWriter   *kafka.Writer
-	ragIndexWriter   *kafka.Writer
+	conn         *amqp.Connection
+	ch           *amqp.Channel
+	queues       map[string]string // jobType -> queue name
+	confirmCtx   context.Context
+	confirmStop  context.CancelFunc
+	returns      chan amqp.Return
+	confirmsDone chan error
 }
 
-// NewProducer 创建 Kafka 生产者
-func NewProducer(brokers []string, analyzeTopic, transcribeTopic, downloadTopic string, ragIndexTopic ...string) *Producer {
-	newWriter := func(topic string) *kafka.Writer {
-		if topic == "" {
-			return nil
-		}
-		return &kafka.Writer{
-			Addr:         kafka.TCP(brokers...),
-			Topic:        topic,
-			Balancer:     &kafka.LeastBytes{}, // 按负载均衡选择分区
-			RequiredAcks: kafka.RequireAll,    // 等所有 ISR 副本确认（消息不丢失）
-			MaxAttempts:  3,                   // 发送失败最多重试 3 次
-			Async:        false,               // 同步发送，确保消息投递成功
-		}
+// NewProducer 创建 RabbitMQ 生产者。连接与 channel 建立失败即返回错误，
+// 不留半初始化状态。Publisher confirm 模式：PublishWithDeferredConfirm
+// 异步返回 confirm 句柄，不阻塞等回调——正是为了保留"confirm 回调前进程
+// 崩"窗口由 dispatch lease 兜底的语义（同步 WaitForConfirms 会消掉这个窗口）。
+//
+// 但 confirm 不是 fire-and-forget：一个后台 goroutine 消费 NotifyConfirm 的
+// ack/nack 流，nack（broker 拒绝）被记日志。这是分工叙事里 RabbitMQ 原生
+// 兜底的那一半——dispatch lease 补的是 confirm 回调前的窗口，confirm 本身
+// 仍要被观测，否则 broker 侧等于 no-op。同时 mandatory=true + Return 监听
+// 捕获路由不到队列的 publish，避免消息静默丢失。
+func NewProducer(brokers []string, analyzeQueue, transcribeQueue, downloadQueue string, ragIndexQueue ...string) (*Producer, error) {
+	if len(brokers) == 0 {
+		return nil, fmt.Errorf("mq brokers must not be empty")
 	}
+	addr := strings.TrimSpace(brokers[0])
+	if addr == "" {
+		return nil, fmt.Errorf("mq broker must not be empty")
+	}
+	conn, err := amqp.Dial("amqp://" + addr)
+	if err != nil {
+		return nil, fmt.Errorf("dial rabbitmq %s: %w", addr, err)
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("open rabbitmq channel: %w", err)
+	}
+	if err := ch.Confirm(false); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, fmt.Errorf("enable publisher confirm: %w", err)
+	}
+	// Drain publisher confirms: ack = delivered, nack = broker rejected.
+	ackChan, nackChan := ch.NotifyConfirm(make(chan uint64, 64), make(chan uint64, 64))
+	// Capture unroutable publishes (mandatory=true routes these to Return).
+	returns := ch.NotifyReturn(make(chan amqp.Return, 64))
+	ctx, stop := context.WithCancel(context.Background())
+	p := &Producer{
+		conn: conn, ch: ch,
+		queues: map[string]string{
+			TaskJobAnalyze:    analyzeQueue,
+			TaskJobTranscribe: transcribeQueue,
+			TaskJobDownload:   downloadQueue,
+		},
+		confirmCtx: ctx, confirmStop: stop,
+		returns:     returns,
+	}
+	if len(ragIndexQueue) > 0 && ragIndexQueue[0] != "" {
+		p.queues[TaskJobRAGIndex] = ragIndexQueue[0]
+	}
+	go p.drainConfirms(ackChan, nackChan)
+	return p, nil
+}
 
-	var ragTopic string
-	if len(ragIndexTopic) > 0 {
-		ragTopic = ragIndexTopic[0]
-	}
-	return &Producer{
-		analyzeWriter:    newWriter(analyzeTopic),
-		transcribeWriter: newWriter(transcribeTopic),
-		downloadWriter:   newWriter(downloadTopic),
-		ragIndexWriter:   newWriter(ragTopic),
+// drainConfirms observes publisher confirms so the broker-side half of the
+// 投递一致性分工 is real, not a no-op. Acks are a no-op (the message reached
+// the queue); nacks mean the broker rejected the message and are logged —
+// recovery is the dispatch lease / RetryScheduler's job, not the publisher's.
+func (p *Producer) drainConfirms(ack, nack chan uint64) {
+	for {
+		select {
+		case <-p.confirmCtx.Done():
+			return
+		case tag, ok := <-ack:
+			if !ok {
+				return
+			}
+			_ = tag
+		case tag, ok := <-nack:
+			if !ok {
+				return
+			}
+			slog.Default().Warn("rabbitmq publisher confirm nack",
+				slog.Uint64("delivery_tag", tag))
+		case ret, ok := <-p.returns:
+			if !ok {
+				return
+			}
+			slog.Default().Warn("rabbitmq publish unroutable",
+				slog.String("exchange", ret.Exchange), slog.String("routing_key", ret.RoutingKey),
+				slog.Int("reply_code", int(ret.ReplyCode)), slog.String("reply_text", ret.ReplyText))
+		}
 	}
 }
 
-// EnqueueAnalyze 投递视频分析任务
-// 面试亮点：投递即返回，接口 RT 压缩到 50ms 以内
-// 使用 MD5 作为消息 Key → 同一视频的任务会被路由到同一分区，保证消费顺序
+// EnqueueAnalyze 投递视频分析任务。MessageId = "<jobType>:<taskID>" 作为
+// 消费侧幂等键：同一消息重复投递被 Redis SETNX 挡住，retry 产生新 taskID
+// 时键不同故放行。
 func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
 		TaskID:     taskID,
@@ -149,14 +222,10 @@ func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string)
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-
-	return p.analyzeWriter.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(md5), // Key = MD5，保证同视频进入同一分区
-		Value: payload,
-	})
+	return p.publish(TaskJobAnalyze, taskID, payload)
 }
 
-// EnqueueTranscribe 投递文字提取任务
+// EnqueueTranscribe 投递文字提取任务。
 func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
 		TaskID:     taskID,
@@ -165,11 +234,7 @@ func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 stri
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-
-	return p.transcribeWriter.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(md5),
-		Value: payload,
-	})
+	return p.publish(TaskJobTranscribe, taskID, payload)
 }
 
 func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string) error {
@@ -180,160 +245,161 @@ func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-
-	return p.downloadWriter.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(key),
-		Value: payload,
-	})
+	return p.publish(TaskJobDownload, taskID, payload)
 }
 
 func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
-	if p.ragIndexWriter == nil {
-		return fmt.Errorf("RAG 索引 Kafka topic 未配置")
+	queue := p.queues[TaskJobRAGIndex]
+	if queue == "" {
+		return fmt.Errorf("RAG 索引 RabbitMQ 队列未配置")
 	}
-	return p.ragIndexWriter.WriteMessages(ctx, newRAGIndexMessage(ctx, taskID))
-}
-
-func newRAGIndexMessage(ctx context.Context, taskID int64) kafka.Message {
 	payload, _ := json.Marshal(RAGIndexPayload{
 		TaskID:     taskID,
 		TraceID:    TraceIDFromContext(ctx),
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-	key := fmt.Sprint(taskID)
-	return kafka.Message{
-		Key:   []byte(key),
-		Value: payload,
-	}
+	return p.publish(TaskJobRAGIndex, taskID, payload)
 }
 
-// Close 关闭生产者
-func (p *Producer) Close() error {
-	err1 := closeWriter(p.analyzeWriter)
-	err2 := closeWriter(p.transcribeWriter)
-	err3 := closeWriter(p.downloadWriter)
-	err4 := closeWriter(p.ragIndexWriter)
-	if err1 != nil {
-		return err1
+// publish 用 PublishWithDeferredConfirm 异步投递。返回 nil 仅表示消息已
+// 写入 socket buffer，publisher confirm 回调前进程崩的消息由 dispatch lease
+// 兜底（见 Producer 选型注释的分工边界）。delivery_mode=2 持久化消息，
+// MessageId 作为消费侧幂等键。
+func (p *Producer) publish(jobType string, taskID int64, body []byte) error {
+	queue := p.queues[jobType]
+	if queue == "" {
+		return fmt.Errorf("mq queue for job type %q not configured", jobType)
 	}
-	if err2 != nil {
-		return err2
-	}
-	if err3 != nil {
-		return err3
-	}
-	return err4
-}
-
-func closeWriter(w *kafka.Writer) error {
-	if w == nil {
-		return nil
-	}
-	return w.Close()
-}
-
-// CreateTopics ensures the configured topics exist. kafka-go treats an existing
-// topic as an idempotent success; connectivity, authorization, and invalid
-// configuration errors are returned to the caller instead of being hidden.
-func CreateTopics(brokers []string, topics []string) error {
-	if len(brokers) == 0 {
-		return fmt.Errorf("kafka brokers must not be empty")
-	}
-	broker := strings.TrimSpace(brokers[0])
-	if broker == "" {
-		return fmt.Errorf("kafka broker must not be empty")
-	}
-	if len(topics) == 0 {
-		return fmt.Errorf("kafka topics must not be empty")
-	}
-
-	seen := make(map[string]struct{}, len(topics))
-	configs := make([]kafka.TopicConfig, 0, len(topics))
-	for _, rawTopic := range topics {
-		topic := strings.TrimSpace(rawTopic)
-		if topic == "" {
-			return fmt.Errorf("kafka topic must not be empty")
-		}
-		if _, exists := seen[topic]; exists {
-			continue
-		}
-		seen[topic] = struct{}{}
-		configs = append(configs, kafka.TopicConfig{
-			Topic:             topic,
-			NumPartitions:     4,
-			ReplicationFactor: 1,
-		})
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	bootstrap, err := kafka.DialContext(ctx, "tcp", broker)
+	messageID := fmt.Sprintf("%s:%d", jobType, taskID)
+	_, err := p.ch.PublishWithDeferredConfirm(
+		"",    // default exchange
+		queue, // routing key = queue name
+		true,  // mandatory: unroutable publishes come back via Return (drainConfirms logs them)
+		false, // immediate
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent, // = 2, 持久化消息
+			MessageId:    messageID,
+			Timestamp:    time.Now(),
+			Body:         body,
+		},
+	)
 	if err != nil {
-		return fmt.Errorf("connect kafka broker %s: %w", broker, err)
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = bootstrap.SetDeadline(deadline)
-	}
-	controller, err := bootstrap.Controller()
-	closeErr := bootstrap.Close()
-	if err != nil {
-		return fmt.Errorf("discover kafka controller: %w", err)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close kafka bootstrap connection: %w", closeErr)
-	}
-
-	controllerAddress := net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port))
-	conn, err := kafka.DialContext(ctx, "tcp", controllerAddress)
-	if err != nil {
-		return fmt.Errorf("connect kafka controller %s: %w", controllerAddress, err)
-	}
-	defer conn.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-	if err := conn.CreateTopics(configs...); err != nil {
-		return fmt.Errorf("create kafka topics: %w", err)
+		return fmt.Errorf("publish to queue %s: %w", queue, err)
 	}
 	return nil
 }
 
-// PingBroker checks that at least one configured Kafka broker accepts a TCP
-// connection. It deliberately does not create topics or perform any writes so
-// it is safe to use from a readiness probe.
+// Close 关闭生产者，停止 confirm/return 监听 goroutine 并释放连接。
+func (p *Producer) Close() error {
+	var errs []error
+	if p.confirmStop != nil {
+		p.confirmStop()
+	}
+	if p.ch != nil {
+		if err := p.ch.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close rabbitmq channel: %w", err))
+		}
+	}
+	if p.conn != nil {
+		if err := p.conn.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close rabbitmq connection: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// QueueSpec describes a job queue to be declared. Only Name is required; the DLQ
+// and DLX binding are derived from it.
+type QueueSpec struct {
+	Name string
+}
+
+// DeclareQueues declares each job queue as a classic persistent queue plus its
+// dead-letter queue. Messages whose consumer retries exhaust MaxRetries are
+// routed to video-<queue>-dlq via the x-dead-letter-exchange binding. Idempotent:
+// re-declaring a queue with identical parameters is a no-op.
+func DeclareQueues(brokers []string, specs []QueueSpec) error {
+	if len(brokers) == 0 {
+		return fmt.Errorf("mq brokers must not be empty")
+	}
+	addr := strings.TrimSpace(brokers[0])
+	if addr == "" {
+		return fmt.Errorf("mq broker must not be empty")
+	}
+	if len(specs) == 0 {
+		return fmt.Errorf("mq queue specs must not be empty")
+	}
+	conn, err := amqp.Dial("amqp://" + addr)
+	if err != nil {
+		return fmt.Errorf("dial rabbitmq %s: %w", addr, err)
+	}
+	defer func() { _ = conn.Close() }()
+	ch, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("open rabbitmq channel: %w", err)
+	}
+	defer func() { _ = ch.Close() }()
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			return fmt.Errorf("mq queue name must not be empty")
+		}
+		dlq := name + "-dlq"
+		dlx := name + "-dlx"
+		// Dead-letter exchange: a direct exchange that routes to the DLQ.
+		if err := ch.ExchangeDeclare(dlx, "direct", true, false, false, false, nil); err != nil {
+			return fmt.Errorf("declare dlx %s: %w", dlx, err)
+		}
+		if _, err := ch.QueueDeclare(dlq, true, false, false, false, nil); err != nil {
+			return fmt.Errorf("declare dlq %s: %w", dlq, err)
+		}
+		if err := ch.QueueBind(dlq, name, dlx, false, nil); err != nil {
+			return fmt.Errorf("bind dlq %s to dlx %s: %w", dlq, dlx, err)
+		}
+		// Job queue: durable, dead-letters to the per-queue DLX.
+		args := amqp.Table{"x-dead-letter-exchange": dlx}
+		if _, err := ch.QueueDeclare(name, true, false, false, false, args); err != nil {
+			return fmt.Errorf("declare queue %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// PingBroker checks that the RabbitMQ broker accepts a connection. It does not
+// declare queues or perform any writes, so it is safe to use from a readiness
+// probe.
 func PingBroker(ctx context.Context, brokers []string) error {
 	if len(brokers) == 0 {
-		return fmt.Errorf("kafka brokers must not be empty")
+		return fmt.Errorf("mq brokers must not be empty")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
 	var lastErr error
 	for _, rawBroker := range brokers {
 		broker := strings.TrimSpace(rawBroker)
 		if broker == "" {
-			lastErr = fmt.Errorf("kafka broker must not be empty")
+			lastErr = fmt.Errorf("mq broker must not be empty")
 			continue
 		}
-
-		conn, err := kafka.DialContext(ctx, "tcp", broker)
+		conn, err := amqp.Dial("amqp://" + broker)
 		if err != nil {
-			lastErr = fmt.Errorf("connect kafka broker %s: %w", broker, err)
+			lastErr = fmt.Errorf("dial rabbitmq broker %s: %w", broker, err)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			continue
 		}
 		if err := conn.Close(); err != nil {
-			lastErr = fmt.Errorf("close kafka broker connection: %w", err)
+			lastErr = fmt.Errorf("close rabbitmq broker connection: %w", err)
 			continue
 		}
 		return nil
 	}
 	if lastErr == nil {
-		return fmt.Errorf("kafka brokers must not be empty")
+		return fmt.Errorf("mq brokers must not be empty")
 	}
 	return lastErr
 }

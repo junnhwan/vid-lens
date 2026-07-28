@@ -50,7 +50,7 @@ func Load(path string) (*Config, error) {
 	} else if err != io.EOF {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
-	cfg.Kafka.applyDefaults()
+	cfg.MQ.applyDefaults()
 
 	if err := applyAIGovernanceEnv(&cfg.AIGovernance); err != nil {
 		return nil, fmt.Errorf("AI 治理配置无效: %w", err)

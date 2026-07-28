@@ -76,7 +76,7 @@ func TestWireServerApplicationIncludesDurableTaskCleanup(t *testing.T) {
 		TaskRetry: config.TaskRetryConfig{ScanIntervalSeconds: 30, BatchSize: 20},
 		Cleanup:   config.CleanupConfig{ScanIntervalSeconds: 30, BatchSize: 20, LeaseSeconds: 120, RetryBackoffSeconds: 60},
 		RateLimit: config.RateLimitConfig{Capacity: 10, Rate: 10},
-		Kafka:     config.KafkaConfig{Brokers: []string{"127.0.0.1:9092"}, AnalyzeTopic: "analyze", TranscribeTopic: "transcribe", DownloadTopic: "download", RAGIndexTopic: "rag", ConsumerGroup: "test"},
+		MQ:        config.MQConfig{Brokers: []string{"127.0.0.1:5672"}, AnalyzeQueue: "analyze", TranscribeQueue: "transcribe", DownloadQueue: "download", RAGIndexQueue: "rag", ConsumerGroup: "test"},
 	}
 	app, err := wireServerApplication(serverDependencies{
 		cfg:          cfg,

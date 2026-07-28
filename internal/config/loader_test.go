@@ -124,8 +124,8 @@ func TestLoadAcceptsEmptyConfigurationAndAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v, want value validation left to command-specific validators", err)
 	}
-	if cfg.Kafka.DownloadTopic != DefaultKafkaDownloadTopic || cfg.Kafka.RAGIndexTopic != DefaultKafkaRAGIndexTopic {
-		t.Fatalf("Kafka defaults = %q/%q", cfg.Kafka.DownloadTopic, cfg.Kafka.RAGIndexTopic)
+	if cfg.MQ.DownloadQueue != DefaultMQDownloadQueue || cfg.MQ.RAGIndexQueue != DefaultMQRAGIndexQueue {
+		t.Fatalf("MQ defaults = %q/%q", cfg.MQ.DownloadQueue, cfg.MQ.RAGIndexQueue)
 	}
 }
 
