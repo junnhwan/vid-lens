@@ -122,14 +122,18 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 	messages := buildRAGMessages(contexts, recent, question)
 	return &preparedRAGChat{
-		Session:     session,
-		Question:    question,
-		TopK:        topK,
-		RecentLimit: recentLimit,
-		Contexts:    contexts,
-		Citations:   citations,
-		Messages:    messages,
-		Policy:      policy,
+		Session:         session,
+		Question:        question,
+		TopK:            topK,
+		RecentLimit:     recentLimit,
+		Contexts:        contexts,
+		Citations:       citations,
+		Messages:        messages,
+		TaskIDs:         taskIDs,
+		EmbeddingModel:  profile.EmbeddingModel,
+		EmbeddingClient: embedding,
+		ChatClient:      chat,
+		Policy:          policy,
 	}, nil
 }
 

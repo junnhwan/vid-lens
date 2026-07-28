@@ -73,13 +73,19 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		}
 	}
 
-	finalized := finalizeAnswerCitations(answer, prepared.Citations)
-	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+	// Spec 07 ⑨ 轻量证据约束（与 ④ 正交：LLM 可用约束 vs 不可用降级）。见
+	// applyEvidenceConstraint（Ask / AskStream 共用）。流式路径的诚实边界（spec review A2）：
+	// ⑨ 是生成后校验，provider streaming 已把 delta 推给客户端，已发 delta 无法召回；
+	// ⑨ 的"违规结论被拒"落在持久化层——DB 存约束后版本、citations 事件发约束后引用，
+	// 不假装能回收已发 token。applyEvidenceConstraint 已内含 finalizeAnswerCitations，
+	// 此处不再二次 finalize（二次 finalize 会让已去 token 的答案回退到 fallback citation）。
+	constrained := s.applyEvidenceConstraint(ctx, prepared, answer)
+	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, constrained.answer, constrained.citations, prepared.RecentLimit, profile.LLMModel)
 	if err != nil {
 		return nil, err
 	}
 	result.Degraded = degraded
-	if err := emit(ChatStreamEvent{Type: "citations", Data: finalized.Citations}); err != nil {
+	if err := emit(ChatStreamEvent{Type: "citations", Data: constrained.citations}); err != nil {
 		return nil, err
 	}
 	if err := emit(ChatStreamEvent{Type: "done", Data: map[string]interface{}{

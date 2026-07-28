@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -128,9 +129,36 @@ type preparedRAGChat struct {
 	Contexts    []RetrievedChunk
 	Citations   []Citation
 	Messages    []ai.ChatMessage
+	// TaskIDs 是本次检索涉及的 task 范围（spec 07 证据约束重检索复用）。
+	// strict_rag / 单视频 = [session.TaskID]；KnowledgeBase = 集合内 video_ids。
+	TaskIDs []int64
+	// EmbeddingModel 是本次检索用的 embedding 模型名（spec 07 重检索复用）。
+	EmbeddingModel string
+	// EmbeddingClient / ChatClient 供 spec 07 证据约束重检索复用（reretrieveEvidence
+	// 走完整 Retrieve 链路需要 embedding 做 query 向量 + 可能的 query rewrite）。
+	// 生产路径注入真实 client；测试路径用 fake re-retriever 跳过本字段。
+	EmbeddingClient ai.EmbeddingClient
+	ChatClient      ai.ChatClient
 	// Policy 是本次问答的 ExecutionPolicy（spec 04）。spec 06 降级在其之上：
 	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
 	Policy ExecutionPolicy
+}
+
+// evidenceIDSet 返回本次检索集的 evidence id 范围（spec 07 证据约束校验用）。
+// 复用 Contexts（检索召回的原始片段，含 EvidenceID）；Citations 是其公开子集，
+// 证据范围以 Contexts 为准——⑨ 校验的是 LLM 引用是否在"本次检索集"内，Contexts
+// 就是本次检索集的事实表示。
+func (p *preparedRAGChat) evidenceIDSet() map[string]struct{} {
+	set := make(map[string]struct{})
+	if p == nil {
+		return set
+	}
+	for _, c := range p.Contexts {
+		if id := strings.TrimSpace(c.EvidenceID); id != "" {
+			set[id] = struct{}{}
+		}
+	}
+	return set
 }
 
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {

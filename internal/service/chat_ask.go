@@ -42,14 +42,63 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		return nil, llmErr
 	}
 
-	finalized := finalizeAnswerCitations(answer, prepared.Citations)
-	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+	// Spec 07 ⑨ 轻量证据约束（LLM 可用时的约束，与 ④ LLM 不可用降级正交）：见
+	// applyEvidenceConstraint（Ask / AskStream 共用，消除两处重复 closure）。
+	constrained := s.applyEvidenceConstraint(ctx, prepared, answer)
+	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, constrained.answer, constrained.citations, prepared.RecentLimit, profile.LLMModel)
 	if err != nil {
 		return nil, err
 	}
 	// 档1（rerank 失败→向量基线）不标 degraded（LLM 仍生成完整答案），但已被
 	// rag_pipeline 计一次档1触发。此处无需再标。
 	return result, nil
+}
+
+// applyEvidenceConstraint 是 Ask / AskStream 共用的 spec 07 ⑨ 证据约束入口
+// （spec review: Duplicated Code — 两处重复的 closure + disclaimer 合并此处）。
+// enforceEvidenceConstraint 已内含 finalizeAnswerCitations（无违规走标准清洗，违规
+// 走重检索补证据或"无证据支撑"标注），caller 不再二次 finalize——二次 finalize 会把
+// 已去掉引用 token 的答案再 finalize 一遍导致引用集回退到 fallback（spec 07）。
+func (s *ChatService) applyEvidenceConstraint(ctx context.Context, prepared *preparedRAGChat, answer string) evidenceConstraintOutcome {
+	return s.enforceEvidenceConstraint(ctx, prepared, answer, func(ctx context.Context, query string) ([]RetrievedChunk, error) {
+		return s.reretrieveEvidence(ctx, prepared, query)
+	})
+}
+
+// reretrieveEvidence 是 spec 07 证据约束的重检索入口：以违规结论涉及的 query
+// 复用 spec 04 检索链路（newRetrievalPipeline + Retrieve）补证据。
+//
+// 轻量边界（决策记录 §9.1）：单轮重检索，caller enforceEvidenceConstraint 已用
+// maxEvidenceReRetrieval=1 上限保证不无限循环。这里只负责"以给定 query 在原
+// session 的 task 范围重检索一次"。复用 prepared.TaskIDs / EmbeddingModel，
+// 不重建检索基础设施（spec 07 Implementation Decisions"复用现有 seam"）。
+//
+// 返回的 RetrievedChunk 由 enforceEvidenceConstraint 经 buildCitationSet 并入候选集。
+func (s *ChatService) reretrieveEvidence(ctx context.Context, prepared *preparedRAGChat, query string) ([]RetrievedChunk, error) {
+	if s == nil || prepared == nil {
+		return nil, nil
+	}
+	taskIDs := prepared.TaskIDs
+	if len(taskIDs) == 0 && prepared.Session != nil && prepared.Session.TaskID > 0 {
+		taskIDs = []int64{prepared.Session.TaskID}
+	}
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	pipeline := s.newRetrievalPipeline(prepared.TopK, prepared.ChatClient, ai.Profile{EmbeddingModel: prepared.EmbeddingModel})
+	pipeline.applyPolicy(prepared.Policy)
+	retrieval, err := pipeline.Retrieve(ctx, RetrievalPipelineRequest{
+		UserID:         prepared.Session.UserID,
+		TaskIDs:        taskIDs,
+		Question:       query,
+		TopK:           prepared.TopK,
+		EmbeddingModel: prepared.EmbeddingModel,
+		Embedding:      prepared.EmbeddingClient,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return retrieval.Citations, nil
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName string) (*AskResult, error) {

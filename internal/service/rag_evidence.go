@@ -44,6 +44,24 @@ func finalizeAnswerCitations(rawAnswer string, candidates []Citation) finalizedA
 	}
 }
 
+// parseReferencedCitationIDs parses the [Cx] tokens in answer (skipping Markdown
+// code regions) and returns the normalized referenced citation id set. Shared by
+// finalizeAnswerCitations and spec 07 ⑨ evidence-constraint violation detection
+// so both walk the same parse pipeline (no duplicated token-extraction logic).
+func parseReferencedCitationIDs(answer string) map[string]struct{} {
+	protected := extractMarkdownCodeRanges(answer)
+	tokens := extractCitationTokenRanges(answer, protected)
+	return collectReferencedCitationIDs(tokens)
+}
+
+// stripCitationTokensVisible returns the answer with [Cx] citation tokens removed
+// (the visible answer finalizeAnswerCitations produces when no citation selection
+// matters). Spec 07 ⑨ uses it to derive a re-retrieval query from the violating
+// LLM answer without re-implementing token stripping.
+func stripCitationTokensVisible(answer string) string {
+	return finalizeAnswerCitations(answer, nil).Answer
+}
+
 // selectAnswerCitations remains as a compatibility wrapper for callers that
 // only need citation selection.
 func selectAnswerCitations(answer string, candidates []Citation) []Citation {
