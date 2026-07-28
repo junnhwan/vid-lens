@@ -356,3 +356,54 @@ Source counts: hybrid=203, vector=29
 | 50 | true | 2 | 5 | 3572.86 ms |
 
 Source counts: hybrid=196, vector=36
+
+---
+
+## Strict Single-Variable Ablation (spec 01 sealed framework)
+
+与上方 legacy 50-case 报告口径不同：本节走 spec 01 strict 框架——frozen evidence
+（corpus/chunks/vectors 三 sha256 锁定）、单变量因子（`ValidateSingleVariableAblation`
+强制 candidate 只改一个业务开关）、dev split 非 sealed test、bootstrap CI。
+所有数字由 `cmd/rag-eval --strict` 在旧仓库真实 PG（localhost:5434，191 真实 chunk
++ text-embedding-3-small 向量）上产出，artifact 落 `artifacts/rag-eval/`。
+
+### rerank on/off（factor=reranker）
+
+- Date: 2026-07-28
+- Code commit: 2f0a73e
+- Dataset: real-v1 / dev split / 6 cases
+- Frozen evidence: corpus=22e1fb7d…, chunks=84ef0525…, vectors=057b2608…
+- Embedding model: text-embedding-3-small (user_id=5 admin-profile, dim=1536)
+- Chunker provenance: fixed_window / split-text-v1 / size 800 / overlap 120（对齐旧仓库 video_rag_indexes 实际索引）
+
+| Variant | reranker | nDCG@5 | MRR | Recall@5 | P95 latency |
+| --- | --- | ---: | ---: | ---: | ---: |
+| rrf_fusion (baseline) | none | 0.731 | 0.700 | 0.833 | 13338 ms |
+| rrf_rerank (candidate) | deterministic | 0.833 | 0.833 | 0.833 | 33272 ms |
+
+- Observed effect (nDCG@5): **+0.102**（相对 +13.9%）
+- Bootstrap 95% CI: [0, +0.204]，5000 iterations，cluster by video (cluster_count=2)
+- Status: **passed**（lower bound ≥ minimum_effect=0；guardrail answerability_f1 回归 0）
+- 来源：rerank 把 `dev-pitfall-companion` 相关 chunk 从 rank 5 重排到 rank 1
+- 未召回：`dev-pitfall-overview`（video_overview）两个 variant 都 recall=0——这是检索对 overview 类问题的真实弱点，rerank 无法救
+
+### 诚信约束（写简历/对外必须带）
+
+- **deterministic rerank 非真实 model-rerank**：strict eval 路径无 ModelRerankerFactory，
+  `rrf_rerank` 用 `DeterministicReranker` 代理。测的是 deterministic rerank 相对 none
+  的提升，**不是**真实 cross-encoder model-rerank 的 lift。线上 model-rerank 效果由
+  (B) 在线对比测，不由本节数字支撑。
+- **dev split 非 sealed test**：dev split 6 case，bootstrap cluster_count=2（按 video
+  聚类），CI 偏宽。sealed test 走单独审计流，本节未跑。
+- **BM25 hybrid 不是单变量**：vector→+BM25 伴随 enable_bm25 + candidate_k + rrf_k 三
+  因子同变（架构约束：hybrid 必须 RRF + 扩候选池），无法做成 strict 单变量对。BM25
+  hybrid 的收益只能从 legacy 50-case 报告引用，不进 strict 单变量证据链。
+- latency 代价诚实：rerank P95 13.3s → 33.3s（约 2.5×），含 query embedding API 调用。
+
+### 可用简历口径
+
+在自建 strict RAG 评测框架（frozen evidence + 单变量 + bootstrap CI）下，对 6 条真实
+视频 dev case 做单变量消融：仅开 deterministic rerank 这一个开关，nDCG@5 从 0.731 提
+到 0.833（+0.102，95% CI [0,+0.204]），原因是 rerank 把一条 case 的相关片段从第 5 位
+重排到第 1 位。不夸大为 model-rerank 收益——本节用的是 deterministic 代理，真实
+model-rerank 的线上效果需另行评测。
