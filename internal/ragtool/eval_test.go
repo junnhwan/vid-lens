@@ -283,14 +283,14 @@ func TestRAGRetrievalConfigIncludesChunkerAndRerankerInAblation(t *testing.T) {
 	candidate := base
 	candidate.RerankerMode = service.RerankerModeNone
 	factor, err := service.ValidateSingleVariableAblation(base, candidate)
-	if err != nil || factor != "reranker_mode" {
+	if err != nil || factor != "reranker" {
 		t.Fatalf("reranker factor = %q, err=%v", factor, err)
 	}
 
 	candidate = base
 	candidate.ChunkerVersion = "semantic-v2"
 	factor, err = service.ValidateSingleVariableAblation(base, candidate)
-	if err != nil || factor != "chunker_version" {
+	if err != nil || factor != "chunker" {
 		t.Fatalf("chunker factor = %q, err=%v", factor, err)
 	}
 }

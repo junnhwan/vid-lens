@@ -134,6 +134,11 @@ func (c RAGRetrievalConfig) ValidateStrictExperiment() error {
 
 // ValidateSingleVariableAblation enforces the dev discipline that a candidate
 // changes one retrieval factor only. Name is metadata and is ignored.
+//
+// factor 粒度对齐"业务开关"而非 struct 字段：reranker_mode+reranker_version
+// 合并为单个 "reranker" factor（开 rerank 同时设 mode+version，是同一业务开关
+// 的两面）；chunker_strategy+chunker_version 合并为 "chunker"。spec 01 的纪律
+// 是"一次只比一个业务开关"，不是"一次只改一个 struct 字段。
 func ValidateSingleVariableAblation(base, candidate RAGRetrievalConfig) (string, error) {
 	if err := base.ValidateStrictExperiment(); err != nil {
 		return "", fmt.Errorf("baseline: %w", err)
@@ -155,12 +160,10 @@ func ValidateSingleVariableAblation(base, candidate RAGRetrievalConfig) (string,
 		{"neighbor_radius", base.NeighborRadius != candidate.NeighborRadius},
 		{"max_context_chars", base.MaxContextChars != candidate.MaxContextChars},
 		{"min_vector_score", base.MinVectorScore != candidate.MinVectorScore},
-		{"chunker_strategy", base.ChunkerStrategy != candidate.ChunkerStrategy},
-		{"chunker_version", base.ChunkerVersion != candidate.ChunkerVersion},
+		{"chunker", base.ChunkerStrategy != candidate.ChunkerStrategy || base.ChunkerVersion != candidate.ChunkerVersion},
 		{"chunk_size", base.ChunkSize != candidate.ChunkSize},
 		{"chunk_overlap", base.ChunkOverlap != candidate.ChunkOverlap},
-		{"reranker_mode", base.RerankerMode != candidate.RerankerMode},
-		{"reranker_version", base.RerankerVersion != candidate.RerankerVersion},
+		{"reranker", base.RerankerMode != candidate.RerankerMode || base.RerankerVersion != candidate.RerankerVersion},
 	}
 	var changed []string
 	for _, f := range factors {
