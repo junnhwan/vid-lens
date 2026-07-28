@@ -13,6 +13,11 @@ import (
 )
 
 // 按模式准备 RAG 或视频上下文，并构造检索管线。
+//
+// Spec 04 (A段)：散落的 intent/scope → 检索参数硬编码统一由 ExecutionPolicy 表达。
+// 流程：识别 intent（占位 = classifyIntentPlaceholder）→ 取 ExecutionPolicy →
+// 按字段走检索/生成。video_assistant 模式的"检索失败→转写兜底"降级路径保留
+// （用户已拍板：ExecutionPolicy 只表达参数，兜底降级不进 policy）。
 func normalizeChatMode(mode ChatMode) ChatMode {
 	switch ChatMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
 	case ChatModeStrictRAG:
@@ -32,13 +37,14 @@ func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, user
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
+	// KnowledgeBase 会话强制走 RAG（跨视频检索，集合 scope），与 strict_rag 同路径。
 	if session.ScopeType == model.ChatScopeKnowledgeBase || mode == ChatModeStrictRAG {
-		return s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+		return s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 	}
-	return s.prepareVideoAssistantChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	return s.prepareVideoAssistantChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 }
 
-func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
+func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -61,19 +67,30 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	if err != nil {
 		return nil, err
 	}
+
+	// Spec 04 (A段)：intent → ExecutionPolicy 统一参数，消掉散落 if。
+	intent := classifyIntentPlaceholder(question, session, mode)
+	policy := PolicyFor(intent, scopeOfSession(session))
+	if !policy.Retrieve {
+		// strict_rag / KB 路径要求检索；policy.Retrieve=false 在此分支理论上不发生
+		// （占位分类器对 KB/strict 不产出 overview/small_talk 关检索）。防御性兜底。
+		return nil, errNoRetrievedContext
+	}
+
+	// 散落判定 1（topK 默认值 + topK>10→10 上限）由 ExecutionPolicy.ClampTopK
+	// 统一表达（spec 04 数字占位符 A段）。
+	topK = policy.ClampTopK(topK)
 	if topK <= 0 {
 		topK = s.cfg.TopK
 	}
-	if topK > 10 {
-		topK = 10
-	}
 
+	// 散落判定 2（recentLimit=0 when KB）由 policy.Scope==collection 统一表达。
+	// KnowledgeBase membership can change between turns. Until recent messages
+	// carry member-safe provenance, keep history display-only so a removed
+	// video's answer cannot be fed back into retrieval or generation.
 	recentLimit := s.cfg.RecentTurns * 2
 	var recent []model.ChatMessage
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		// Knowledge-base membership can change between turns. Until recent
-		// messages carry member-safe provenance, keep history display-only so a
-		// removed video's answer cannot be fed back into retrieval or generation.
+	if policy.Scope == ScopeCollection {
 		recentLimit = 0
 	} else {
 		recent, err = s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
@@ -81,16 +98,12 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 			return nil, err
 		}
 	}
+
 	pipeline := s.newRetrievalPipeline(topK, chat, profile)
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		cfg := DefaultRAGRetrievalConfig()
-		if pipeline.Config != nil {
-			cfg = *pipeline.Config
-		}
-		cfg.EnableVector = true
-		cfg.EnableBM25 = false
-		pipeline.Config = &cfg
-	}
+	// 散落判定 3（KB → 强制 EnableVector=true/EnableBM25=false）由
+	// policy.Scope==collection 统一表达；rerank 开关由 policy.Rerank 映射。
+	pipeline.applyPolicy(policy)
+
 	retrieval, err := pipeline.Retrieve(ctx, RetrievalPipelineRequest{
 		UserID:         userID,
 		TaskIDs:        taskIDs,
@@ -119,7 +132,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, userID, sessionID int6
 	}, nil
 }
 
-func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
+func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -141,11 +154,16 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, userID, ses
 	if err != nil {
 		return nil, err
 	}
-	if isVideoOverviewQuestion(question) {
+
+	// Spec 04 (A段)：散落判定 4（isVideoOverviewQuestion → 关检索走视频上下文）
+	// 由 ExecutionPolicy.Retrieve=false 统一表达。
+	intent := classifyIntentPlaceholder(question, session, mode)
+	policy := PolicyFor(intent, scopeOfSession(session))
+	if !policy.Retrieve {
 		return s.prepareVideoContextChat(session, question, recent, recentLimit)
 	}
 
-	prepared, ragErr := s.prepareRAGChat(ctx, userID, sessionID, question, topK, embedding, chat, profile)
+	prepared, ragErr := s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 	if ragErr == nil {
 		return prepared, nil
 	}

@@ -207,6 +207,57 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	}, nil
 }
 
+// applyPolicy 把 ExecutionPolicy（spec 04 A段）映射到现有 RAGRetrievalConfig 字段。
+// ExecutionPolicy 不新建检索参数，只生产 Config 的字段值。
+//
+// 映射（消掉散落 if）：
+//   - Scope==collection → 强制 EnableVector=true / EnableBM25=false
+//     （BM25 在多 task 下不支持，见 Retrieve 内 len(taskIDs)!=1 报错；KB 跨视频必纯向量）。
+//   - Rerank==false → RerankerMode=none / reranker 置 nil（关 rerank）。
+//   - Rerank==true → 保留 pipeline 已配置的 reranker（deterministic / model）。
+//   - Rewrite>0 → RewriteQueries（policy.Rewrite 字段写进 Config，避免该字段成为死字段）。
+//
+// 为避免覆盖调用方在 ChatConfig 里设的 topK/candidateK/minScore 等（Retrieve 在
+// p.Config != nil 时以 Config 为准），applyPolicy 只在 policy 需要变更字段时才物化
+// Config，且物化时以现有 p.Config 为底拷贝，不退回 DefaultRAGRetrievalConfig。
+func (p *RetrievalPipeline) applyPolicy(policy ExecutionPolicy) {
+	if p == nil {
+		return
+	}
+	needCollection := policy.Scope == ScopeCollection
+	needNoRerank := !policy.Rerank
+	// Rewrite 只在与现有 Config 的 RewriteQueries 不一致时才需要改；Config==nil 时
+	// 默认即 rewriteQueriesForPipeline 返回的 3，与 policy.Rewrite(3) 相同，无需物化，
+	// 否则会把 nil-Config 路径退回 DefaultRAGRetrievalConfig、覆盖 caller 的 topK。
+	needRewrite := policy.Rewrite > 0 && p.Config != nil && p.Config.RewriteQueries != policy.Rewrite
+	if !needCollection && !needNoRerank && !needRewrite {
+		// video scope + rerank on + rewrite 与默认一致：policy 无字段需要变更，保留原
+		// Config（含 nil），让 Retrieve 继续走 req.TopK / p.CandidateK 路径。
+		return
+	}
+	if p.Config == nil {
+		// 无显式 Config 但 policy 要求改字段（needCollection/needNoRerank）：物化一份
+		// 默认值再改字段。这种情况只见于未配 Retrieval 的 dev 路径。
+		defaults := DefaultRAGRetrievalConfig()
+		p.Config = &defaults
+	} else {
+		cfg := *p.Config
+		p.Config = &cfg
+	}
+	if needCollection {
+		p.Config.EnableVector = true
+		p.Config.EnableBM25 = false
+	}
+	if needNoRerank {
+		p.Config.RerankerMode = RerankerModeNone
+		p.Config.RerankerVersion = ""
+		p.reranker = nil
+	}
+	if needRewrite {
+		p.Config.RewriteQueries = policy.Rewrite
+	}
+}
+
 func (p *RetrievalPipeline) rewrite(ctx context.Context, req RetrievalPipelineRequest) (RewriteResult, error) {
 	rewriter := p.rewriter
 	if rewriter == nil {
