@@ -387,23 +387,74 @@ Source counts: hybrid=196, vector=36
 - 来源：rerank 把 `dev-pitfall-companion` 相关 chunk 从 rank 5 重排到 rank 1
 - 未召回：`dev-pitfall-overview`（video_overview）两个 variant 都 recall=0——这是检索对 overview 类问题的真实弱点，rerank 无法救
 
+### model rerank on/off（factor=reranker，non-sealed external API）
+
+承接上一节"deterministic 代理非真实 model-rerank"的诚信缺口，本节接真实
+cross-encoder（Qwen3-Reranker-4B over SiliconFlow `/v1/rerank`）进 strict 路径重跑，
+回答"deterministic 代理能否代表真实 model"。
+
+- Date: 2026-07-28
+- Code commit: 5293672（接线）+ 0cc057a（spec 05 解除编译阻塞后重跑）
+- Dataset: real-v1 / dev split / 6 cases（与上一节同一 frozen evidence，索引未变）
+- Frozen evidence: corpus=22e1fb7d…, chunks=84ef0525…, vectors=057b2608…（复用上一节三 sha，已重跑 snapshot 验证一致）
+- Embedding model: text-embedding-3-small (user_id=5 admin-profile, dim=1536)
+- Rerank model: Qwen/Qwen3-Reranker-4B，endpoint 由 admin profile 的 embedding_endpoint 推导（`router.tumuer.me/v1/embeddings` → `/v1/rerank`），api key 复用 embedding_api_key
+
+| Variant | reranker | nDCG@5 | MRR | Recall@5 | P95 latency |
+| --- | --- | ---: | ---: | ---: | ---: |
+| rrf_fusion (baseline) | none | 0.731 | 0.700 | 0.833 | 14618 ms |
+| rrf_model_rerank (candidate) | Qwen3-Reranker-4B | 0.833 | 0.833 | 0.833 | 28960 ms |
+
+- Observed effect (nDCG@5): **+0.102**（与 deterministic 档逐位相同）
+- Bootstrap 95% CI: [0, +0.204]，5000 iterations，cluster by video (cluster_count=2)
+- Status: **passed**（lower bound ≥ minimum_effect=0；guardrail answerability_f1 回归 0）
+- 来源：同 deterministic 档——`dev-pitfall-companion` rank 5→1，其余 5 case 排序无变化
+- 与 deterministic 档对比：nDCG@5/MRR/Recall 三指标逐位相等，提升**纯粹来自"rerank 这一步骤把该 case 拉到 rank1"，与用 deterministic 代理还是真实 cross-encoder 无关**
+
+### model vs deterministic 的诚实结论
+
+dev split 6 case 上，model rerank 与 deterministic rerank 产出**完全相同的检索序**
+（per-case first_relevant_rank 逐条一致）。这说明在本数据集的候选池规模（每 case 3-5
+条）下，deterministic 代理足以代表 rerank 这一步骤的价值；真实 cross-encoder 没有
+带来额外 lift，也没有引入退化。**但**这不能外推到更大候选池：legacy 50-case 报告
+里 model rerank 反而把 MRR 从 0.823 拉到 0.638——机制差异是 ModelReranker 丢弃 RRF
+score 纯按 model 重排（`rag_rerank.go:72-84`），在大候选池里更易打乱本就对的 RRF
+序；6 case 候选池小，恰好没打乱别的。两份数据并存，不互相否定。
+
+线上 model rerank 的最终取舍：spec 04 B段已让 `productionRetrievalConfig` 默认
+deterministic rerank on（dev 消融支持），`cfg.RerankModel` 非空时升级 model rerank
+作显式覆盖路径——本节证明该覆盖路径在本数据集上**不带来额外收益**，因此默认不开
+model rerank 是有证据支撑的保守选择。
+
 ### 诚信约束（写简历/对外必须带）
 
-- **deterministic rerank 非真实 model-rerank**：strict eval 路径无 ModelRerankerFactory，
-  `rrf_rerank` 用 `DeterministicReranker` 代理。测的是 deterministic rerank 相对 none
-  的提升，**不是**真实 cross-encoder model-rerank 的 lift。线上 model-rerank 效果由
-  (B) 在线对比测，不由本节数字支撑。
+- **deterministic 与 model rerank 数字一致**：dev 6 case 上两者 nDCG@5/MRR/Recall
+  逐位相等（均 +0.102，CI [0,+0.204]）。提升来自"rerank 把一条 case rank5→1"这一
+  步骤，与用 deterministic 代理还是真实 cross-encoder 无关。**不要**据此声称
+  "Qwen3-Reranker-4B 提升检索质量"——本数据集无法区分两者。
+- **model rerank 不进 frozen evidence 锁**：Qwen3-Reranker-4B 调外部 API，不可
+  bit-identible 复现。registry experiment `model-rerank-vs-none-dev` 标
+  `sealed:false / external_api:true`；frozen evidence 三 sha 复用 deterministic
+  那次（索引未变，已重跑 snapshot 验证），但 model rerank 结果本身**不在** frozen
+  evidence 锁内。
 - **dev split 非 sealed test**：dev split 6 case，bootstrap cluster_count=2（按 video
   聚类），CI 偏宽。sealed test 走单独审计流，本节未跑。
+- **不可外推到大候选池**：legacy 50-case 报告里 model rerank 反而把 MRR 从 0.823 拉
+  到 0.638（ModelReranker 丢弃 RRF 纯按 model 重排，大候选池易打乱对的 RRF 序）。6
+  case 候选池小（每 case 3-5 条），恰好没打乱。两份数据并存不互否。
 - **BM25 hybrid 不是单变量**：vector→+BM25 伴随 enable_bm25 + candidate_k + rrf_k 三
   因子同变（架构约束：hybrid 必须 RRF + 扩候选池），无法做成 strict 单变量对。BM25
   hybrid 的收益只能从 legacy 50-case 报告引用，不进 strict 单变量证据链。
-- latency 代价诚实：rerank P95 13.3s → 33.3s（约 2.5×），含 query embedding API 调用。
+- latency 代价诚实：deterministic rerank P95 13.3s→33.3s（约 2.5×）；model rerank
+  P95 14.6s→29.0s（约 2.0×），均含 query embedding API 调用。
 
 ### 可用简历口径
 
 在自建 strict RAG 评测框架（frozen evidence + 单变量 + bootstrap CI）下，对 6 条真实
-视频 dev case 做单变量消融：仅开 deterministic rerank 这一个开关，nDCG@5 从 0.731 提
-到 0.833（+0.102，95% CI [0,+0.204]），原因是 rerank 把一条 case 的相关片段从第 5 位
-重排到第 1 位。不夸大为 model-rerank 收益——本节用的是 deterministic 代理，真实
-model-rerank 的线上效果需另行评测。
+视频 dev case 做单变量消融：仅开 rerank 这一个开关，nDCG@5 从 0.731 提到 0.833
+（+0.102，95% CI [0,+0.204]），原因是 rerank 把一条 case 的相关片段从第 5 位重排到
+第 1 位。为验证"deterministic 代理能否代表真实 cross-encoder"，另接
+Qwen3-Reranker-4B 进 strict 路径重跑——两者在 dev 6 case 上产出逐位相等的检索序，
+说明本数据集规模下代理足以代表 rerank 步骤价值，真实 model-rerank 无额外 lift。据此
+让线上默认 deterministic rerank on、model rerank 仅作显式覆盖路径，是有证据支撑的
+保守选择。

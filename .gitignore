@@ -61,6 +61,7 @@ docs/vidlens-source-notes.html
 .superpowers/
 .worktrees/
 /*.png
+artifacts/
 
 # Interview VitePress site — removed from main product path (was stale vs PG/pgvector).
 # Keep a local copy if you still need it; do not re-add as product truth.

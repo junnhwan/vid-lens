@@ -41,6 +41,9 @@ experiments:
   - experiment_id: "model-rerank-vs-none-dev"
     dataset_version: "real-v1"
     status: preregistered
+    # 运行结果（不进 registry status 字段——registry 只管注册，结果落 artifact +
+    # resume-quant-results.md）。2026-07-28 跑通：nDCG@5 +0.102（与 deterministic
+    # 档逐位相同），CI [0,+0.204]，passed。model rerank 不进 frozen evidence 锁。
     baseline_variant: "rrf_fusion"
     # 同 rrf_fusion baseline（sha 与 rerank-vs-none-dev 实验一致）
     baseline_config_sha256: "91446d3d73fbefbcd8c713f16108046b9c0c1c880345fd419303dae9a2ac699c"
@@ -69,6 +72,6 @@ experiments:
         max_regression: 0.0
     candidates:
       - variant_id: "rrf_model_rerank"
-        commit: "__PENDING_RUN__"
+        commit: "5293672"
         # rrf_model_rerank.yaml sha256
-        config_sha256: "2e8669346c2e323c63525424d2c033fa58ef872fe4ab8d4f27cf817f907385f6"
+        config_sha256: "06f793bd791e8f748f4d790c8866304acba8303cbfb5b57f107abecc6581ccee"
