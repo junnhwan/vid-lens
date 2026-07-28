@@ -98,11 +98,12 @@ type ChatMemoryStore interface {
 }
 
 type ChatService struct {
-	repos     *repository.Repositories
-	retriever RAGRetriever
-	memory    ChatMemoryStore
-	recorder  ai.CallRecorder
-	cfg       ChatConfig
+	repos       *repository.Repositories
+	retriever   RAGRetriever
+	memory      ChatMemoryStore
+	recorder    ai.CallRecorder
+	cfg         ChatConfig
+	intentRouter *IntentRouter // spec 05：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
 }
 
 type AskResult struct {
@@ -177,4 +178,10 @@ func (s *ChatService) SetMemoryStore(memory ChatMemoryStore) {
 
 func (s *ChatService) SetAIRecorder(recorder ai.CallRecorder) {
 	s.recorder = recorder
+}
+
+// SetIntentRouter 注入 spec 05 级联 intent 分类器（nil 时 chat_prepare 降级占位
+// classifyIntentPlaceholder，保测试稳定）。生产路径由 wiring 注入；测试可不调。
+func (s *ChatService) SetIntentRouter(r *IntentRouter) {
+	s.intentRouter = r
 }

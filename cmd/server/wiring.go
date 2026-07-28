@@ -155,6 +155,9 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	})
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
+	// Spec 05：级联 intent 分类器注入 ChatService（规则层零依赖，LLM 兜底用本次
+	// 请求的 chat client，per-request 解析）。替换 spec 04 A段占位 classifyIntentPlaceholder。
+	chatSvc.SetIntentRouter(service.NewIntentRouter(service.NewRuleIntentClassifier()))
 
 	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools)
 	var vectorCleaner service.TaskVectorCleaner

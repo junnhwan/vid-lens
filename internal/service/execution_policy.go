@@ -150,11 +150,15 @@ func directQAPolicy(scope Scope) ExecutionPolicy {
 	}
 }
 
-// classifyIntentPlaceholder 是 (A) spec 05 真分类器落地前的占位。
+// classifyIntentPlaceholder 是 spec 04 A段的占位分类器。
+//
+// Deprecated: spec 05 已落地 RuleIntentClassifier + LLMIntentClassifier 级联
+// （IntentRouter）。本函数仅作降级 fallback（IntentRouter 为 nil 时）与测试桩
+// 保留——生产路径走 ChatService.classifyIntent → IntentRouter.Classify。删除风险：
+// 多个 spec 04 测试直接调用本函数断言占位行为，删它需同步改测试。
 //
 // 用现有 isVideoOverviewQuestion（概览句式命中）+ session.ScopeType（KnowledgeBase
-// → 跨视频 intent）作 intent 占位分类，把 ExecutionPolicy 路由打通。spec 05 落地后
-// 替换为 RuleIntentClassifier + LLMIntentClassifier 级联（CONTEXT.md）。
+// → 跨视频 intent）作 intent 占位分类，把 ExecutionPolicy 路由打通。
 //
 // 占位边界（用户已拍板）：KB / strict_rag 模式不产出 small_talk（仍走检索），
 // small_talk 仅 video scope 单视频下留接口位，避免破坏 strict_rag 必须检索的契约。
