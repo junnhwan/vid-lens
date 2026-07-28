@@ -63,7 +63,7 @@ func (r *IntentRouter) Classify(ctx context.Context, question string, session *m
 	// 用本次请求的 chat client 构造 LLM 兜底（per-request，复用已解析 profile，
 	// 不另起全局 profile 解析路径）。
 	llmClassifier := &LLMIntentClassifier{chat: chat}
-	llmIntent, llmConf, err := llmClassifier.Classify(ctx, question, recentTexts(recentIntents))
+	llmIntent, llmConf, err := llmClassifier.Classify(ctx, question, recentIntentLabels(recentIntents))
 	if err != nil {
 		return ruleIntent // LLM 出错 → 回退规则（spec line 57）
 	}
@@ -74,10 +74,10 @@ func (r *IntentRouter) Classify(ctx context.Context, question string, session *m
 	return ruleIntent
 }
 
-// recentTexts 把历史 intent 串成最近消息文本给 LLM 兜底消歧指代。
+// recentIntentLabels 把历史 intent 序列转成 LLM 兜底 prompt 用的最近"消息"文本。
 // audit trail：用 intent 标签而非原始消息——避免把用户原始对话全文灌进分类
 // prompt（噪声 + 隐私），intent 序列已足够给 LLM "上一轮在问什么类"的消歧信号。
-func recentTexts(recentIntents []Intent) []string {
+func recentIntentLabels(recentIntents []Intent) []string {
 	if len(recentIntents) == 0 {
 		return nil
 	}
@@ -88,16 +88,16 @@ func recentTexts(recentIntents []Intent) []string {
 	return out
 }
 
-// parseRecentIntents 从 recent messages 粗提历史 intent 序列（spec 05 历史 intent
-// 加权数据源）。复用 chat_memory.go GetRecentMessages，由 caller 在 prepare 阶段
-// 调用后传入 IntentRouter.Classify 的 recentIntents。
+// ParseRecentIntents 从 recent messages 粗提历史 intent 序列（spec 05 历史 intent
+// 加权数据源）。由 caller 在 prepare 阶段调用后传入 IntentRouter.Classify 的
+// recentIntents——是 IntentRouter 的自有方法，避免 caller 越权访问 r.rule 私有字段。
 //
 // audit trail（为何从 messages 而非持久化 intent 字段）：当前 ChatMessage 不存
 // intent 标签（schema 未动），故从 message role/content 粗提——user 消息按规则层
 // 跑一遍拿 intent，assistant 消息跳过（生成态 intent 无意义）。这是粗提，足够做
 // "连续同类加权"信号；真持久化 intent 是后续 schema 优化项，不进本 spec。
-func parseRecentIntents(messages []model.ChatMessage, rule *RuleIntentClassifier, session *model.ChatSession, mode ChatMode) []Intent {
-	if rule == nil {
+func (r *IntentRouter) ParseRecentIntents(messages []model.ChatMessage, session *model.ChatSession, mode ChatMode) []Intent {
+	if r == nil || r.rule == nil {
 		return nil
 	}
 	var intents []Intent
@@ -105,7 +105,7 @@ func parseRecentIntents(messages []model.ChatMessage, rule *RuleIntentClassifier
 		if !strings.EqualFold(msg.Role, "user") {
 			continue
 		}
-		intent, _ := rule.Classify(msg.Content, session, mode, nil)
+		intent, _ := r.rule.Classify(msg.Content, session, mode, nil)
 		intents = append(intents, intent)
 	}
 	return intents

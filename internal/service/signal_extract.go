@@ -210,11 +210,29 @@ func parseInt64(s string) int64 {
 }
 
 // --- 句式 signal 正则 ---
+//
+// 词表是单一事实源（spec 05 review: Duplicated Code）：RuleIntentClassifier 的
+// 关键词维度与 Signal 的句式 flag 共用同一份词表，避免两份平行词表手动漂移。
+// regex 用 strings.Join(words, "|") 从词表构造，词表改一处两处同步。
 
 var (
-	compareSignalRe = regexp.MustCompile(`对比|比较|异同|区别|相比|差异|不同`)
-	overviewSignalRe = regexp.MustCompile(`讲了什么|说了什么|主要内容|核心内容|核心观点|主要观点|视频概括|视频概览|总结一下|简单总结|简要总结|简要讲|概括一下|归纳一下|overview|summary|summarize`)
-	smallTalkSignalRe = regexp.MustCompile(`你好|您好|谢谢|感谢|在吗|早安|晚安|hi|hello|hey`)
+	overviewKeywords = []string{
+		"讲了什么", "说了什么", "主要内容", "核心内容", "核心观点", "主要观点",
+		"视频概括", "视频概览", "总结一下", "简单总结", "简要总结", "简要讲",
+		"概括一下", "归纳一下", "overview", "summary", "summarize",
+	}
+	compareKeywords = []string{
+		"对比", "比较", "异同", "区别", "相比", "差异", "不同",
+		"哪个好", "哪个更",
+	}
+	smallTalkKeywords = []string{
+		"你好", "您好", "谢谢", "感谢", "在吗", "早安", "晚安",
+		"hi", "hello", "hey",
+	}
+
+	compareSignalRe  = regexp.MustCompile(strings.Join(compareKeywords, "|"))
+	overviewSignalRe = regexp.MustCompile(strings.Join(overviewKeywords, "|"))
+	smallTalkSignalRe = regexp.MustCompile(strings.Join(smallTalkKeywords, "|"))
 )
 
 // extractEntities 粗提候选实体（spec 05 line 92，用于指代消解回指上文实体）。

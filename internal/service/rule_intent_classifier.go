@@ -155,16 +155,9 @@ func historyBump(recentIntents []Intent) map[Intent]float64 {
 
 // 关键词词表（扩 isVideoOverviewQuestion 的 contains 思路到全 taxonomy）。
 // audit trail：词表只收"几乎无歧义"的显式 intent 词，避免 over-claim 覆盖率。
+// overview/compare/smallTalk 词表复用 signal_extract.go 的单一事实源（避免两份
+// 平行词表漂移）；series/timeline 词表只规则层用（Signal 无对应 flag）。
 var (
-	overviewKeywords = []string{
-		"讲了什么", "说了什么", "主要内容", "核心内容", "核心观点", "主要观点",
-		"视频概括", "视频概览", "总结一下", "简单总结", "简要总结", "简要讲",
-		"概括一下", "归纳一下", "overview", "summary", "summarize",
-	}
-	compareKeywords = []string{
-		"对比", "比较", "异同", "区别", "相比", "差异", "不同",
-		"哪个好", "哪个更",
-	}
 	seriesLocateKeywords = []string{
 		"这些视频", "这组视频", "系列", "哪些视频", "哪个视频提到",
 		"哪期", "哪一期",
@@ -172,10 +165,6 @@ var (
 	timelineKeywords = []string{
 		"第几分钟", "第几分", "几点", "哪个时间", "哪个时刻", "哪一段",
 		"时间线", "时间轴",
-	}
-	smallTalkKeywords = []string{
-		"你好", "您好", "谢谢", "感谢", "在吗", "早安", "晚安",
-		"hi", "hello", "hey",
 	}
 )
 

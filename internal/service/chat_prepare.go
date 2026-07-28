@@ -94,13 +94,10 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 	// Spec 05 user story 10：timeline_locate intent 用 Signal 时间戳缩检索范围。
 	// TODO(audit trail)：RetrievalPipelineRequest 暂无时间过滤字段，ExtractSignals
-	// 时间戳已可提但未接入检索过滤——本 spec 只落地分类 + Signal 提取，时间戳→
+	// 时间戳已能提但未接入检索过滤——本 spec 只落地分类 + Signal 提取，时间戳→
 	// chunk 范围过滤的接线留后续（需 retrieval 层加 StartTimeMS/EndTimeMS 过滤
-	// 接口位 + chunk 表加时间戳列）。先留 intent 路由到位，过滤在 retrieval 层
-	// 落地后接。诚实标注：当前 timeline_locate 走 direct_qa 同参数检索，无时间缩范围。
-	if intent == IntentTimelineLocate {
-		_ = ExtractSignals(question) // 已能提时间戳，过滤接口位见上 TODO
-	}
+	// 接口位 + chunk 表加时间戳列）。诚实标注：当前 timeline_locate 走 direct_qa
+	// 同参数检索，无时间缩范围（user story 10 行为未落地，只留接口位 + TODO）。
 
 	// 散落判定 1（topK 默认值 + topK>10→10 上限）由 ExecutionPolicy.ClampTopK
 	// 统一表达（spec 04 数字占位符 A段）。
@@ -297,8 +294,8 @@ func (s *ChatService) classifyIntent(ctx context.Context, question string, sessi
 		return classifyIntentPlaceholder(question, session, mode)
 	}
 	var recentIntents []Intent
-	if s.intentRouter.rule != nil && len(recent) > 0 {
-		recentIntents = parseRecentIntents(recent, s.intentRouter.rule, session, mode)
+	if len(recent) > 0 {
+		recentIntents = s.intentRouter.ParseRecentIntents(recent, session, mode)
 	}
 	return s.intentRouter.Classify(ctx, question, session, mode, recentIntents, chat)
 }

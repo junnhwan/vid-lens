@@ -116,10 +116,11 @@ func TestRuleIntentClassifierDirectQAExactQuestion(t *testing.T) {
 	if intent != IntentDirectQA {
 		t.Fatalf("exact qa question intent = %q, want direct_qa", intent)
 	}
-	// "为什么" 关键词 0.6*0.5 + signal 0.5*0.3 = 0.45，低于短路 0.75 → 交给 LLM。
+	// direct_qa 是兜底 intent，弱命中不应高置信短路——避免误压其他 intent 的
+	// LLM 兜底。"为什么" 关键词 0.6*weightKeyword + signal 0.5*weightSignal ≈ 0.45，
+	// 低于 shortCircuitThreshold 0.75 → 交给 LLM 兜底。注：若调优后该 case 确实
+	// 应短路，回填常量并改本断言 + audit trail（spec line 80）。
 	if conf >= shortCircuitThreshold {
-		// direct_qa 是兜底，弱命中不应高置信短路（避免误压其他 intent 的 LLM 兜底）。
-		// 此约束锁住"direct_qa 不该抢短路"——即使 best 是 direct_qa，conf 仍 < 阈值。
-		// 注：若调优后该 case 确实应短路，回填常量并改本断言 + audit trail。
+		t.Fatalf("direct_qa weak-hit confidence = %.2f, want < %.2f (defer to LLM)", conf, shortCircuitThreshold)
 	}
 }
