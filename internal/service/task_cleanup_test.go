@@ -60,7 +60,7 @@ func TestTaskCleanupRequestCommitsIntentWithTaskSoftDelete(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	asset := createMediaTestAsset(t, repos, "33333333333333333333333333333333", "videos/durable-intent.mp4")
 	task := createMediaTestTask(t, repos, 7, asset, "durable-intent.mp4")
-	createTaskOwnedData(t, repos, task.ID, task.UserID, "embed-v1")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, task.FileMD5, "embed-v1")
 	cleanup := NewTaskCleanupService(repos, nil, nil, TaskCleanupConfig{})
 
 	job, err := cleanup.RequestDelete(context.Background(), task.UserID, task.ID)
@@ -168,7 +168,7 @@ func TestTaskCleanupRetriesVectorFailureFromPersistedFacts(t *testing.T) {
 	cleaner := &recordingTaskVectorCleaner{err: errors.New("pgvector unavailable")}
 	asset := createMediaTestAsset(t, repos, "44444444444444444444444444444444", "videos/vector-retry.mp4")
 	task := createMediaTestTask(t, repos, 7, asset, "vector-retry.mp4")
-	createTaskOwnedData(t, repos, task.ID, task.UserID, "embed-v1")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, task.FileMD5, "embed-v1")
 	now := time.Date(2026, 7, 17, 19, 0, 0, 0, time.UTC)
 	token := 0
 	cleanup := NewTaskCleanupService(repos, storage, cleaner, TaskCleanupConfig{
@@ -377,7 +377,7 @@ func TestTaskCleanupRetriesDatabaseFinalizationAfterObjectDeletion(t *testing.T)
 	storage := &recordingObjectStorage{}
 	asset := createMediaTestAsset(t, repos, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "videos/db-retry.mp4")
 	task := createMediaTestTask(t, repos, 7, asset, "db-retry.mp4")
-	createTaskOwnedData(t, repos, task.ID, task.UserID, "embed-v1")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, task.FileMD5, "embed-v1")
 	now := time.Date(2026, 7, 17, 22, 0, 0, 0, time.UTC)
 	cleanup := NewTaskCleanupService(repos, storage, nil, TaskCleanupConfig{
 		LeaseDuration: time.Minute,

@@ -88,6 +88,19 @@ func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.Vide
 	if c.ragProducer == nil {
 		return nil
 	}
+	// 内容+目标级索引去重（spec 03 第 66 行）：同 (file_md5, embedding_model)
+	// 已有成功索引 → 不重跑 embed，复用旧索引。索引重建（分块/embedding 模型
+	// 变更）后旧索引 status 被改写为非 indexed，本判定不命中 → 照常重索引，
+	// 旧索引不挡。三层幂等分工见 service/content_dedup.go 注释。
+	if c.repo != nil && c.repo.RAGIndex != nil && c.profiles != nil && task.FileMD5 != "" {
+		if profile, profileErr := c.profiles.GetDefaultAIProfile(task.UserID); profileErr == nil && profile != nil && profile.EmbeddingModel != "" {
+			if existing, findErr := c.repo.RAGIndex.FindByMD5AndModel(task.FileMD5, profile.EmbeddingModel); findErr == nil && existing != nil {
+				observability.Log(ctx, slog.Default(), slog.LevelInfo, "skip rag index: content+model already indexed",
+					slog.String("file_md5", task.FileMD5), slog.String("embedding_model", profile.EmbeddingModel))
+				return nil
+			}
+		}
+	}
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
@@ -167,6 +180,7 @@ func (c *Consumer) recordRAGIndexEnqueueFailure(task *model.VideoTask, err error
 	_ = c.repo.RAGIndex.Upsert(&model.VideoRAGIndex{
 		UserID:         task.UserID,
 		TaskID:         task.ID,
+		FileMD5:        task.FileMD5,
 		EmbeddingModel: profile.EmbeddingModel,
 		EmbeddingDim:   profile.EmbeddingDim,
 		Status:         model.RAGIndexStatusFailed,

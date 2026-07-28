@@ -128,7 +128,7 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Summary.Upsert(&model.AISummary{
-			TaskID: task.ID, Content: summary, ModelName: "mimo-v2.5",
+			TaskID: task.ID, FileMD5: task.FileMD5, Content: summary, ModelName: "mimo-v2.5",
 		})
 	}); err != nil {
 		return fmt.Errorf("保存总结失败: %w", err)

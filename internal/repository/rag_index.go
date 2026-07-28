@@ -34,6 +34,7 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 		index.BuildVersion = existing.BuildVersion
 	}
 	return r.db.Model(&existing).Updates(map[string]interface{}{
+		"file_md5":              index.FileMD5,
 		"embedding_dim":         index.EmbeddingDim,
 		"status":                index.Status,
 		"chunk_count":           index.ChunkCount,
@@ -47,6 +48,22 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 		"started_at":            index.StartedAt,
 		"finished_at":           index.FinishedAt,
 	}).Error
+}
+
+// FindByMD5AndModel 按内容指纹 + embedding 模型查找已成功索引的 RAG 索引行
+// （跨 task、跨用户）。仅复用 status=indexed 的成功结果：索引重建（分块/embedding
+// 模型变更）后旧索引行 status 会被 Upsert 改写，不再挡住重索引（spec 03 第 66 行）。
+func (r *RAGIndexRepository) FindByMD5AndModel(fileMD5, embeddingModel string) (*model.VideoRAGIndex, error) {
+	var index model.VideoRAGIndex
+	err := r.db.Where("file_md5 = ? AND embedding_model = ? AND status = ?", fileMD5, embeddingModel, model.RAGIndexStatusIndexed).
+		First(&index).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &index, nil
 }
 
 func (r *RAGIndexRepository) FindByTaskAndModel(userID, taskID int64, embeddingModel string) (*model.VideoRAGIndex, error) {

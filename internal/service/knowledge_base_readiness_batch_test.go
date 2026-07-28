@@ -36,7 +36,7 @@ func TestKnowledgeBaseReadinessUsesFixedBatchQueries(t *testing.T) {
 		if _, err := repos.KnowledgeBase.AddVideoForUser(7, kb.ID, task.ID); err != nil {
 			t.Fatal(err)
 		}
-		if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: task.ID, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
+		if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: task.ID, FileMD5: task.FileMD5, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,10 +75,10 @@ func TestKnowledgeBaseReadinessReportsMissingUnindexedAndModelSwitch(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: tasks[0].ID, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: tasks[0].ID, FileMD5: tasks[0].FileMD5, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: tasks[2].ID, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusFailed}); err != nil {
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: tasks[2].ID, FileMD5: tasks[2].FileMD5, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusFailed}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repos.Task.Delete(tasks[1].ID); err != nil {

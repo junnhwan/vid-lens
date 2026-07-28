@@ -455,7 +455,7 @@ func TestDeleteTaskKeepsSharedAssetObjectAndCleansTaskData(t *testing.T) {
 	asset := createMediaTestAsset(t, repos, "cccccccccccccccccccccccccccccccc", "videos/shared-delete.mp4")
 	taskA := createMediaTestTask(t, repos, 7, asset, "a.mp4")
 	taskB := createMediaTestTask(t, repos, 8, asset, "b.mp4")
-	createTaskOwnedData(t, repos, taskA.ID, taskA.UserID, "text-embedding-3-small")
+	createTaskOwnedData(t, repos, taskA.ID, taskA.UserID, taskA.FileMD5, "text-embedding-3-small")
 	if err := repos.TaskJob.UpsertQueued(taskA, model.TaskJobTypeTranscribe, model.TaskStageTranscribing, 3); err != nil {
 		t.Fatalf("create task job: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestDeleteTaskDeletesLastAssetReferenceAndObject(t *testing.T) {
 
 	asset := createMediaTestAsset(t, repos, "dddddddddddddddddddddddddddddddd", "videos/only-delete.mp4")
 	task := createMediaTestTask(t, repos, 7, asset, "only.mp4")
-	createTaskOwnedData(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, task.FileMD5, "text-embedding-3-small")
 
 	svc := newMediaTestServiceWithCleanup(repos, storage, cleaner)
 	if err := svc.DeleteTask(context.Background(), task.UserID, task.ID); err != nil {
@@ -528,7 +528,7 @@ func TestDeleteTaskPersistsRetryWhenVectorCleanupFails(t *testing.T) {
 
 	asset := createMediaTestAsset(t, repos, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "videos/vector-fail.mp4")
 	task := createMediaTestTask(t, repos, 7, asset, "vector-fail.mp4")
-	createTaskOwnedData(t, repos, task.ID, task.UserID, "text-embedding-3-small")
+	createTaskOwnedData(t, repos, task.ID, task.UserID, task.FileMD5, "text-embedding-3-small")
 
 	svc := newMediaTestServiceWithCleanup(repos, storage, cleaner)
 	if err := svc.DeleteTask(context.Background(), task.UserID, task.ID); err != nil {
@@ -646,15 +646,15 @@ func createMediaTestTask(t *testing.T, repos *repository.Repositories, userID in
 	return task
 }
 
-func createTaskOwnedData(t *testing.T, repos *repository.Repositories, taskID, userID int64, embeddingModel string) {
+func createTaskOwnedData(t *testing.T, repos *repository.Repositories, taskID, userID int64, fileMD5, embeddingModel string) {
 	t.Helper()
-	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: taskID, Content: "transcript", Words: 1}); err != nil {
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: taskID, FileMD5: fileMD5, Content: "transcript", Words: 1}); err != nil {
 		t.Fatalf("create transcription: %v", err)
 	}
 	if err := repos.TranscriptionChunk.UpsertCompleted(taskID, 0, "audio/chunk-0.mp3", "chunk transcript"); err != nil {
 		t.Fatalf("create transcription chunk: %v", err)
 	}
-	if err := repos.Summary.Create(&model.AISummary{TaskID: taskID, Content: "summary", ModelName: "llm"}); err != nil {
+	if err := repos.Summary.Create(&model.AISummary{TaskID: taskID, FileMD5: fileMD5, Content: "summary", ModelName: "llm"}); err != nil {
 		t.Fatalf("create summary: %v", err)
 	}
 	if err := repos.VideoChunk.ReplaceTaskChunks(taskID, embeddingModel, []model.VideoChunk{
@@ -674,6 +674,7 @@ func createTaskOwnedData(t *testing.T, repos *repository.Repositories, taskID, u
 	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{
 		UserID:         userID,
 		TaskID:         taskID,
+		FileMD5:        fileMD5,
 		EmbeddingModel: embeddingModel,
 		EmbeddingDim:   1536,
 		Status:         model.RAGIndexStatusIndexed,

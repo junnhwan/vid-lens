@@ -18,6 +18,7 @@ type ragIndexBuild struct {
 	service     *RAGIndexService
 	userID      int64
 	taskID      int64
+	fileMD5     string
 	modelName   string
 	expectedDim int
 	startedAt   time.Time
@@ -27,12 +28,20 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return nil, err
 	}
-	chunks, err := s.loadTaskIndexChunks(userID, taskID)
+	task, err := s.repos.Task.FindByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("任务不存在")
+	}
+	if task.UserID != userID {
+		return nil, fmt.Errorf("无权访问此任务")
+	}
+
+	chunks, err := s.loadTaskIndexChunks(userID, task)
 	if err != nil {
 		return nil, err
 	}
 
-	build := s.newRAGIndexBuild(userID, taskID, profile)
+	build := s.newRAGIndexBuild(userID, taskID, task.FileMD5, profile)
 	if err := build.start(); err != nil {
 		return nil, err
 	}
@@ -93,16 +102,12 @@ func (s *RAGIndexService) replaceVectorProjection(ctx context.Context, build *ra
 	return s.store.UpsertChunks(ctx, vectors)
 }
 
-func (s *RAGIndexService) loadTaskIndexChunks(userID, taskID int64) ([]TextChunk, error) {
-	task, err := s.repos.Task.FindByID(taskID)
-	if err != nil {
-		return nil, fmt.Errorf("任务不存在")
-	}
+func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTask) ([]TextChunk, error) {
 	if task.UserID != userID {
 		return nil, fmt.Errorf("无权访问此任务")
 	}
 
-	transcription, err := s.repos.Transcription.FindByTaskID(taskID)
+	transcription, err := s.repos.Transcription.FindByTaskID(task.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +120,7 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID, taskID int64) ([]TextChunk
 
 	chunks := SplitTextIntoChunks(transcription.Content, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
 	if s.repos.VisualFrame != nil {
-		if frames, err := s.repos.VisualFrame.ListCompletedWithText(taskID); err == nil && len(frames) > 0 {
+		if frames, err := s.repos.VisualFrame.ListCompletedWithText(task.ID); err == nil && len(frames) > 0 {
 			chunks = append(chunks, FormatOCRChunksForIndex(frames)...)
 		}
 	}
@@ -128,7 +133,7 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID, taskID int64) ([]TextChunk
 	return chunks, nil
 }
 
-func (s *RAGIndexService) newRAGIndexBuild(userID, taskID int64, profile ai.Profile) *ragIndexBuild {
+func (s *RAGIndexService) newRAGIndexBuild(userID, taskID int64, fileMD5 string, profile ai.Profile) *ragIndexBuild {
 	expectedDim := profile.EmbeddingDim
 	if expectedDim <= 0 {
 		expectedDim = s.cfg.EmbeddingDim
@@ -137,6 +142,7 @@ func (s *RAGIndexService) newRAGIndexBuild(userID, taskID int64, profile ai.Prof
 		service:     s,
 		userID:      userID,
 		taskID:      taskID,
+		fileMD5:     fileMD5,
 		modelName:   profile.EmbeddingModel,
 		expectedDim: expectedDim,
 		startedAt:   time.Now(),
@@ -169,6 +175,7 @@ func (b *ragIndexBuild) writeStatus(status string, chunkCount int, manifest, las
 	return b.service.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
 		UserID:              b.userID,
 		TaskID:              b.taskID,
+		FileMD5:             b.fileMD5,
 		EmbeddingModel:      b.modelName,
 		EmbeddingDim:        b.expectedDim,
 		Status:              status,

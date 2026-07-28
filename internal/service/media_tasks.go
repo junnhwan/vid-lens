@@ -31,6 +31,28 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 		return fmt.Errorf("任务已完成，可直接查看结果")
 	}
 
+	// 内容+目标级去重（spec 03）：force=false 且当前 task 无自有摘要时，
+	// 把短路查询从"当前 task 的摘要"提到"按 file_md5 查任意 task/任意用户的
+	// 成功摘要"。命中 → 复用，不重跑 LLM，返回"已完成可直接查看结果"
+	// （与原单 task 短路语义一致）。单 job 命中不替 task 做整体完成判定
+	// （spec 第 60 行：分析目标级独立）；全命中秒传到 Completed 走上传链路。
+	// 仅复用成功结果：摘要表行存在即成功（无 status 列，失败不落行，spec 第 14 行）。
+	if !force && summary == nil {
+		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeAnalyze, func(md5 string) (bool, error) {
+			existing, err := s.repo.Summary.FindByMD5(md5)
+			if err != nil {
+				return false, err
+			}
+			return existing != nil, nil
+		})
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if hit {
+			return fmt.Errorf("任务已完成，可直接查看结果")
+		}
+	}
+
 	_, err = s.enqueueInitialTask(ctx, task, initialDispatchSpec{
 		allowedStatuses: []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
 		jobType:         model.TaskJobTypeAnalyze,
@@ -67,6 +89,27 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	if transcription != nil && !force {
 		return fmt.Errorf("文字提取已完成，可直接查看结果")
 	}
+
+	// 内容+目标级去重（spec 03）：force=false 且当前 task 无自有转写时，
+	// 把短路查询从"当前 task 的转写"提到"按 file_md5 查任意 task/任意用户的
+	// 成功转写"。命中 → 复用，不重跑 ASR，返回"文字提取已完成，可直接查看结果"
+	// （与原单 task 短路语义一致）。分析目标级独立：转写命中不替 task 做整体
+	// 完成判定（摘要可能仍缺，用户可继续 RequestAnalysis，spec 第 60 行）。
+	if !force && transcription == nil {
+		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeTranscribe, func(md5 string) (bool, error) {
+			existing, err := s.repo.Transcription.FindByMD5(md5)
+			if err != nil {
+				return false, err
+			}
+			return existing != nil, nil
+		})
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if hit {
+			return fmt.Errorf("文字提取已完成，可直接查看结果")
+		}
+	}
 	if force && s.repo.TranscriptionChunk != nil {
 		// 清掉 ASR 分片完成标记，避免 re-run 复用旧片段
 		if err := s.repo.TranscriptionChunk.DeleteByTaskID(task.ID); err != nil {
@@ -99,6 +142,18 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 	}
 	if task.UserID != userID {
 		return nil, fmt.Errorf("无权访问此任务")
+	}
+	// 内容去重秒传场景（spec 03 第 65 行）：新 task 自己没有 transcription/summary
+	// 行（不复制行），按 file_md5 关联任意 task/任意用户的已有成功结果行展示。
+	if task.Transcription == nil && task.FileMD5 != "" {
+		if existing, lookupErr := s.repo.Transcription.FindByMD5(task.FileMD5); lookupErr == nil && existing != nil {
+			task.Transcription = existing
+		}
+	}
+	if task.Summary == nil && task.FileMD5 != "" {
+		if existing, lookupErr := s.repo.Summary.FindByMD5(task.FileMD5); lookupErr == nil && existing != nil {
+			task.Summary = existing
+		}
 	}
 	// 与列表一致：有正文即标记，便于前端合并后立刻灰显，无需再猜
 	if task.Transcription != nil && task.Transcription.Content != "" {

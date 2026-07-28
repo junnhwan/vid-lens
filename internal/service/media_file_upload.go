@@ -48,6 +48,17 @@ func (s *MediaService) UploadFile(ctx context.Context, userID int64, filename st
 }
 
 func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset *model.VideoAsset, status int8) (*UploadResult, error) {
+	// 内容+目标级去重（spec 03）：直接上传链路在文件层 Asset 秒传之后，
+	// 按 file_md5 查任意 task/任意用户的成功转写+摘要。全命中 → 新 task 秒传到
+	// Completed，不 enqueue 任何 job，零 AI 调用（spec 第 27 行）。
+	// 仅直接上传链路生效；URL 上传（md5(URL) 占位）不纳入主去重语义
+	// （spec 第 14、111 行，memory url-upload-not-narrative）。
+	dedup, _ := s.lookupContentDedup(asset.FileMD5)
+	if dedup.AllHit() && status == model.TaskStatusPending {
+		status = model.TaskStatusCompleted
+		recordContentDedupHit() // 转写+摘要全命中：省 ASR + 摘要 LLM 调用
+	}
+
 	var task *model.VideoTask
 	var activeAsset *model.VideoAsset
 	err := s.repo.Transaction(func(txRepos *repository.Repositories) error {
@@ -56,6 +67,11 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 			return err
 		}
 		activeAsset = lockedAsset
+		stage := model.TaskStageUploaded
+		if status == model.TaskStatusCompleted {
+			// 秒传到 Completed：跳过 Pending→Queued→Running，stage 落 none。
+			stage = model.TaskStageNone
+		}
 		task = &model.VideoTask{
 			UserID:   userID,
 			AssetID:  &lockedAsset.ID,
@@ -64,7 +80,7 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 			FileURL:  lockedAsset.ObjectName,
 			FileSize: lockedAsset.FileSize,
 			Status:   status,
-			Stage:    model.TaskStageUploaded,
+			Stage:    stage,
 			TraceID:  uuid.New().String(),
 		}
 		return txRepos.Task.Create(task)

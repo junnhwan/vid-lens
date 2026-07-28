@@ -75,7 +75,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	}
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Transcription.Upsert(&model.VideoTranscription{
-			TaskID: task.ID, Content: transcript, Words: len([]rune(transcript)),
+			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
@@ -153,7 +153,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Transcription.Upsert(&model.VideoTranscription{
-			TaskID: task.ID, Content: transcript, Words: len([]rune(transcript)),
+			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
 		return fmt.Errorf("保存转录失败: %w", err)

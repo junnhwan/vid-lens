@@ -20,8 +20,8 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 	if err := repos.Task.Create(taskB); err != nil {
 		t.Fatal(err)
 	}
-	for _, taskID := range []int64{taskA.ID, taskB.ID} {
-		if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: taskID, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
+	for _, task := range []*model.VideoTask{taskA, taskB} {
+		if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: task.ID, FileMD5: task.FileMD5, EmbeddingModel: "embed-v1", EmbeddingDim: 3, Status: model.RAGIndexStatusIndexed}); err != nil {
 			t.Fatal(err)
 		}
 	}

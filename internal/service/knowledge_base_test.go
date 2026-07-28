@@ -119,15 +119,15 @@ func TestKnowledgeBaseServiceAddVideoRequiresOwnedRetrievableTaskAndIsIdempotent
 		if err := svc.AddVideo(ctx, 7, kb.ID, task.ID); !errors.Is(err, ErrKnowledgeBaseTaskNotIndexed) {
 			t.Fatalf("unindexed AddVideo() error = %v", err)
 		}
-		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, "embed-b", model.RAGIndexStatusIndexed)
+		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, task.FileMD5, "embed-b", model.RAGIndexStatusIndexed)
 		if err := svc.AddVideo(ctx, 7, kb.ID, task.ID); !errors.Is(err, ErrKnowledgeBaseTaskNotIndexed) {
 			t.Fatalf("mismatched model AddVideo() error = %v", err)
 		}
-		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, "embed-a", model.RAGIndexStatusFailed)
+		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, task.FileMD5, "embed-a", model.RAGIndexStatusFailed)
 		if err := svc.AddVideo(ctx, 7, kb.ID, task.ID); !errors.Is(err, ErrKnowledgeBaseTaskNotIndexed) {
 			t.Fatalf("failed index AddVideo() error = %v", err)
 		}
-		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, "embed-a", model.RAGIndexStatusIndexed)
+		createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, task.FileMD5, "embed-a", model.RAGIndexStatusIndexed)
 		if err := svc.AddVideo(ctx, 7, kb.ID, task.ID); err != nil {
 			t.Fatalf("indexed AddVideo() error = %v", err)
 		}
@@ -152,7 +152,7 @@ func TestKnowledgeBaseServiceAddVideoLocksBeforeEnforcingFiftyMemberLimit(t *tes
 		task := createKnowledgeBaseTaskForServiceTest(t, repos, 7, fmt.Sprintf("member-%02d", i))
 		if i == 0 {
 			existing = task
-			createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, "embed-a", model.RAGIndexStatusIndexed)
+			createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, task.FileMD5, "embed-a", model.RAGIndexStatusIndexed)
 		}
 		if _, err := repos.KnowledgeBase.AddVideoForUser(7, kb.ID, task.ID); err != nil {
 			t.Fatalf("seed member %d: %v", i, err)
@@ -165,7 +165,7 @@ func TestKnowledgeBaseServiceAddVideoLocksBeforeEnforcingFiftyMemberLimit(t *tes
 	}
 
 	candidate := createKnowledgeBaseTaskForServiceTest(t, repos, 7, "candidate")
-	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, candidate.ID, "embed-a", model.RAGIndexStatusIndexed)
+	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, candidate.ID, candidate.FileMD5, "embed-a", model.RAGIndexStatusIndexed)
 	if err := svc.AddVideo(ctx, 7, kb.ID, candidate.ID); !errors.Is(err, ErrKnowledgeBaseVideoLimit) {
 		t.Fatalf("51st AddVideo() error = %v, want limit error", err)
 	}
@@ -192,8 +192,8 @@ func TestKnowledgeBaseServiceDetailReportsCurrentModelWithoutLeakingTasks(t *tes
 			t.Fatal(err)
 		}
 	}
-	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, withTitle.ID, "embed-a", model.RAGIndexStatusIndexed)
-	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, filenameOnly.ID, "embed-a", model.RAGIndexStatusFailed)
+	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, withTitle.ID, withTitle.FileMD5, "embed-a", model.RAGIndexStatusIndexed)
+	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, filenameOnly.ID, filenameOnly.FileMD5, "embed-a", model.RAGIndexStatusFailed)
 	// Corrupt/stale cross-user edge must not be exposed by detail assembly.
 	if err := db.Create(&model.KnowledgeBaseVideo{KnowledgeBaseID: kb.ID, TaskID: foreign.ID}).Error; err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestKnowledgeBaseServiceRemoveAndDeletePreserveVideoData(t *testing.T) {
 	createKnowledgeBaseDefaultProfileForServiceTest(t, repos, 7, "embed-a")
 	kb := createKnowledgeBaseForServiceTest(t, svc, 7, "lifecycle")
 	task := createKnowledgeBaseTaskForServiceTest(t, repos, 7, "kept-task")
-	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, "embed-a", model.RAGIndexStatusIndexed)
+	createKnowledgeBaseRAGIndexForServiceTest(t, repos, 7, task.ID, task.FileMD5, "embed-a", model.RAGIndexStatusIndexed)
 	chunk := &model.VideoChunk{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "source chunk", EmbeddingModel: "embed-a"}
 	if err := db.Create(chunk).Error; err != nil {
 		t.Fatal(err)
@@ -325,9 +325,9 @@ func createKnowledgeBaseTaskForServiceTest(t *testing.T, repos *repository.Repos
 	return task
 }
 
-func createKnowledgeBaseRAGIndexForServiceTest(t *testing.T, repos *repository.Repositories, userID, taskID int64, embeddingModel, status string) {
+func createKnowledgeBaseRAGIndexForServiceTest(t *testing.T, repos *repository.Repositories, userID, taskID int64, fileMD5, embeddingModel, status string) {
 	t.Helper()
-	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: userID, TaskID: taskID, EmbeddingModel: embeddingModel, EmbeddingDim: 3, Status: status, ChunkCount: 1}); err != nil {
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: userID, TaskID: taskID, FileMD5: fileMD5, EmbeddingModel: embeddingModel, EmbeddingDim: 3, Status: status, ChunkCount: 1}); err != nil {
 		t.Fatalf("upsert RAG index: %v", err)
 	}
 }

@@ -13,7 +13,8 @@ type VideoRAGIndex struct {
 	ID                  int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID              int64      `gorm:"index;uniqueIndex:idx_user_task_model;not null" json:"user_id"`
 	TaskID              int64      `gorm:"index;uniqueIndex:idx_user_task_model;not null" json:"task_id"`
-	EmbeddingModel      string     `gorm:"type:varchar(100);uniqueIndex:idx_user_task_model;not null" json:"embedding_model"`
+	FileMD5             string     `gorm:"type:char(32);not null;uniqueIndex:uk_rag_file_md5_model" json:"file_md5"`                              // 内容指纹，跨 task 去重键
+	EmbeddingModel      string     `gorm:"type:varchar(100);uniqueIndex:idx_user_task_model;not null;uniqueIndex:uk_rag_file_md5_model" json:"embedding_model"` // 内容+目标级去重第二维（模型），与 file_md5 组合唯一
 	EmbeddingDim        int        `gorm:"not null" json:"embedding_dim"`
 	Status              string     `gorm:"type:varchar(30);index;not null" json:"status"`
 	ChunkCount          int        `gorm:"default:0" json:"chunk_count"`
