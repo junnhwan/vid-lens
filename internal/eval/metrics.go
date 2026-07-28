@@ -36,6 +36,12 @@ type EvaluationCaseResult struct {
 	PredictedAnswerable bool               `json:"predicted_answerable"`
 	Response            string             `json:"response,omitempty"`
 	Failure             *RunFailure        `json:"failure,omitempty"`
+	// RetrieveLatencyMS is the wall-clock cost of one case's retrieval. Executor
+	// failures record 0 (by convention — the executor never completed) and stay in
+	// the P95 sample so latency cannot look healthier as failures rise. This is the
+	// only sanctioned executor-side schema extension; the strict dataset schema's
+	// `case` is untouched.
+	RetrieveLatencyMS int64 `json:"retrieve_latency_ms"`
 }
 
 type MetricResult struct {
@@ -51,6 +57,15 @@ type MetricResult struct {
 	AnswerabilityPrecision float64 `json:"answerability_precision"`
 	AnswerabilityRecall    float64 `json:"answerability_recall"`
 	AnswerabilityF1        float64 `json:"answerability_f1"`
+	// P95RetrieveLatencyMS is the nearest-rank 95th percentile of RetrieveLatencyMS
+	// over every case in this bucket. Failed cases contribute 0 and remain in the
+	// sample (the failure-as-zero convention) so a run cannot hide latency behind
+	// dropped failures.
+	P95RetrieveLatencyMS int64 `json:"p95_retrieve_latency_ms"`
+	// SuccessP95RetrieveLatencyMS is the same percentile restricted to cases with
+	// RetrieveLatencyMS > 0 (successful retrievals). It is a companion health
+	// number, not the headline; the headline P95 includes failures as zero.
+	SuccessP95RetrieveLatencyMS int64 `json:"success_p95_retrieve_latency_ms"`
 }
 
 type CaseMetric struct {
@@ -69,6 +84,7 @@ type CaseMetric struct {
 	FirstRelevantRank      int     `json:"first_relevant_rank"`
 	RelevantContextCount   int     `json:"relevant_context_count"`
 	RetrievedContextCount  int     `json:"retrieved_context_count"`
+	RetrieveLatencyMS      int64   `json:"retrieve_latency_ms"`
 }
 
 type MetricReport struct {
@@ -130,6 +146,7 @@ func evaluateCaseMetrics(result EvaluationCaseResult, cfg MetricConfig) CaseMetr
 		Answerable:          result.Case.Answerable,
 		PredictedAnswerable: result.PredictedAnswerable,
 		Failed:              result.Failure != nil,
+		RetrieveLatencyMS:   result.RetrieveLatencyMS,
 	}
 	limit := cfg.K
 	if len(result.Retrieved) < limit {
@@ -284,9 +301,15 @@ func aggregateCaseMetrics(cases []CaseMetric) MetricResult {
 	result := MetricResult{Cases: len(cases)}
 	var recall, reciprocalRank, ndcgSum, precision, complete float64
 	var tp, fp, fn int
+	latencies := make([]int64, 0, len(cases))
+	successLatencies := make([]int64, 0, len(cases))
 	for _, c := range cases {
 		if c.Failed {
 			result.FailedCases++
+		}
+		latencies = append(latencies, c.RetrieveLatencyMS)
+		if c.RetrieveLatencyMS > 0 {
+			successLatencies = append(successLatencies, c.RetrieveLatencyMS)
 		}
 		if c.Answerable {
 			result.EvaluableCases++
@@ -316,6 +339,8 @@ func aggregateCaseMetrics(cases []CaseMetric) MetricResult {
 		result.ContextPrecisionAtK = precision / denominator
 		result.CompleteEvidenceRecall = complete / denominator
 	}
+	result.P95RetrieveLatencyMS = p95NearestRank(latencies)
+	result.SuccessP95RetrieveLatencyMS = p95NearestRank(successLatencies)
 	if tp+fp > 0 {
 		result.AnswerabilityPrecision = float64(tp) / float64(tp+fp)
 	}
@@ -326,6 +351,27 @@ func aggregateCaseMetrics(cases []CaseMetric) MetricResult {
 		result.AnswerabilityF1 = 2 * result.AnswerabilityPrecision * result.AnswerabilityRecall / (result.AnswerabilityPrecision + result.AnswerabilityRecall)
 	}
 	return result
+}
+
+// p95NearestRank returns the nearest-rank 95th percentile of the sample: the
+// value at index ceil(0.95*n)-1 in ascending order. An empty sample yields 0.
+// Failed cases must remain in the caller's sample as zero so that the headline
+// P95 cannot improve by dropping failures; the success-only subset is the
+// caller's responsibility (pass only positive latencies).
+func p95NearestRank(sample []int64) int64 {
+	if len(sample) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), sample...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	idx := int(math.Ceil(0.95*float64(len(sorted)))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 func normalizeGroupKey(value string) string {

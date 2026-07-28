@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ChunkEvidence is the strict evaluator's backend-neutral view of one real
@@ -30,15 +31,22 @@ func (e ChunkEvidenceExecutor) Execute(ctx context.Context, c Case) (EvaluationC
 	if e.Retriever == nil {
 		return EvaluationCaseResult{}, &ExecutionError{Stage: "retrieval", Code: "retriever_missing", Err: fmt.Errorf("chunk evidence retriever is required")}
 	}
+	start := time.Now()
 	chunks, err := e.Retriever.Retrieve(ctx, c)
+	latency := time.Since(start).Milliseconds()
 	if err != nil {
-		return EvaluationCaseResult{}, &ExecutionError{Stage: "retrieval", Code: "retrieval_failed", Err: err}
+		// Failed retrievals record zero latency: the executor never completed, and
+		// the failure-as-zero convention keeps the P95 denominator honest.
+		return EvaluationCaseResult{RetrieveLatencyMS: 0}, &ExecutionError{Stage: "retrieval", Code: "retrieval_failed", Err: err}
 	}
 	contexts := make([]RetrievedContext, 0, len(chunks))
 	for i, chunk := range chunks {
 		contextID := strings.TrimSpace(chunk.ContextID)
 		if contextID == "" {
-			return EvaluationCaseResult{}, &ExecutionError{Stage: "evidence_mapping", Code: "stable_identity_missing", Err: fmt.Errorf("retrieved chunk %d has no stable context identity", i)}
+			// This is a failed case (returns ExecutionError); per the failure-as-zero
+			// convention (spec 01 line 73), failed cases record 0 latency so the
+			// success-subset P95 cannot be polluted by a failed case's retrieval time.
+			return EvaluationCaseResult{RetrieveLatencyMS: 0}, &ExecutionError{Stage: "evidence_mapping", Code: "stable_identity_missing", Err: fmt.Errorf("retrieved chunk %d has no stable context identity", i)}
 		}
 		videoID := strings.TrimSpace(chunk.VideoID)
 		if videoID == "" {
@@ -53,5 +61,5 @@ func (e ChunkEvidenceExecutor) Execute(ctx context.Context, c Case) (EvaluationC
 			Text: chunk.Text, TokenCount: chunk.TokenCount,
 		})
 	}
-	return EvaluationCaseResult{Retrieved: contexts, PredictedAnswerable: len(contexts) > 0}, nil
+	return EvaluationCaseResult{Retrieved: contexts, PredictedAnswerable: len(contexts) > 0, RetrieveLatencyMS: latency}, nil
 }

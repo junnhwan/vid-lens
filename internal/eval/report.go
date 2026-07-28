@@ -95,9 +95,9 @@ func writeSummaryCSV(path string, artifact RunArtifact) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-	_ = writer.Write([]string{"scope", "key", "cases", "evaluable_cases", "failed_cases", "failure_rate", "recall_at_k", "mrr", "ndcg_at_k", "context_precision_at_k", "complete_evidence_recall", "answerability_f1"})
+	_ = writer.Write([]string{"scope", "key", "cases", "evaluable_cases", "failed_cases", "failure_rate", "recall_at_k", "mrr", "ndcg_at_k", "context_precision_at_k", "complete_evidence_recall", "answerability_f1", "p95_retrieve_latency_ms", "success_p95_retrieve_latency_ms"})
 	write := func(scope, key string, metric MetricResult) {
-		_ = writer.Write([]string{scope, key, strconv.Itoa(metric.Cases), strconv.Itoa(metric.EvaluableCases), strconv.Itoa(metric.FailedCases), formatFloat(metric.FailureRate), formatFloat(metric.RecallAtK), formatFloat(metric.MRR), formatFloat(metric.NDCGAtK), formatFloat(metric.ContextPrecisionAtK), formatFloat(metric.CompleteEvidenceRecall), formatFloat(metric.AnswerabilityF1)})
+		_ = writer.Write([]string{scope, key, strconv.Itoa(metric.Cases), strconv.Itoa(metric.EvaluableCases), strconv.Itoa(metric.FailedCases), formatFloat(metric.FailureRate), formatFloat(metric.RecallAtK), formatFloat(metric.MRR), formatFloat(metric.NDCGAtK), formatFloat(metric.ContextPrecisionAtK), formatFloat(metric.CompleteEvidenceRecall), formatFloat(metric.AnswerabilityF1), strconv.FormatInt(metric.P95RetrieveLatencyMS, 10), strconv.FormatInt(metric.SuccessP95RetrieveLatencyMS, 10)})
 	}
 	write("overall", "all", artifact.Summary.Overall)
 	writeMetricMap := func(scope string, values map[string]MetricResult) {
@@ -151,17 +151,17 @@ func RenderMarkdownReport(artifact RunArtifact) string {
 	}
 	b.WriteString("\n## Case trace\n\n")
 	for _, c := range artifact.Cases {
-		fmt.Fprintf(&b, "- `%s`: recall=%.3f, rr=%.3f, ndcg=%.3f\n", c.CaseID, c.Metric.RecallAtK, c.Metric.ReciprocalRank, c.Metric.NDCGAtK)
+		fmt.Fprintf(&b, "- `%s`: recall=%.3f, rr=%.3f, ndcg=%.3f, latency=%dms\n", c.CaseID, c.Metric.RecallAtK, c.Metric.ReciprocalRank, c.Metric.NDCGAtK, c.Metric.RetrieveLatencyMS)
 	}
 	return b.String()
 }
 
 func renderMetricTable(b *strings.Builder, values map[string]MetricResult) {
-	b.WriteString("| Key | Cases | Failed | Failure Rate | Recall@K | MRR | nDCG@K | Context Precision@K | Complete Evidence Recall | Answerability F1 |\n")
-	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+	b.WriteString("| Key | Cases | Failed | Failure Rate | Recall@K | MRR | nDCG@K | Context Precision@K | Complete Evidence Recall | Answerability F1 | P95 Latency | Success P95 Latency |\n")
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, key := range sortedMetricKeys(values) {
 		m := values[key]
-		fmt.Fprintf(b, "| %s | %d | %d | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f |\n", key, m.Cases, m.FailedCases, m.FailureRate, m.RecallAtK, m.MRR, m.NDCGAtK, m.ContextPrecisionAtK, m.CompleteEvidenceRecall, m.AnswerabilityF1)
+		fmt.Fprintf(b, "| %s | %d | %d | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %.3f | %d | %d |\n", key, m.Cases, m.FailedCases, m.FailureRate, m.RecallAtK, m.MRR, m.NDCGAtK, m.ContextPrecisionAtK, m.CompleteEvidenceRecall, m.AnswerabilityF1, m.P95RetrieveLatencyMS, m.SuccessP95RetrieveLatencyMS)
 	}
 }
 
