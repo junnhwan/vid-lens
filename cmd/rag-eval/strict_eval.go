@@ -194,11 +194,12 @@ func loadRetrievalConfigs(baselinePath, candidatePath, expectedBaselineHash, exp
 }
 
 type productionEvidenceRetriever struct {
-	repos    *repository.Repositories
-	profiles *service.AIProfileService
-	factory  *ai.Factory
-	store    service.RAGRetriever
-	config   service.RAGRetrievalConfig
+	repos       *repository.Repositories
+	profiles    *service.AIProfileService
+	factory     *ai.Factory
+	store       service.RAGRetriever
+	config      service.RAGRetrievalConfig
+	rerankModel string // from config.yaml rag.rerank_model; injected because legacy user_ai_profiles rows lack a rerank_model column
 }
 
 func (r *productionEvidenceRetriever) Retrieve(ctx context.Context, c rageval.Case) ([]rageval.ChunkEvidence, error) {
@@ -212,6 +213,13 @@ func (r *productionEvidenceRetriever) Retrieve(ctx context.Context, c rageval.Ca
 	profile, err := r.profiles.GetDefaultAIProfile(task.UserID)
 	if err != nil {
 		return nil, err
+	}
+	// config.yaml 的 rerank_model 是 strict eval 的显式输入（旧库 profile 行无
+	// rerank_model 列）。model 分支必须靠它把 profile.RerankModel 补上，否则
+	// factory.NewRerankClient 会因 model 空失败。endpoint 由 embedding_endpoint
+	// 推导（factory.go deriveRerankEndpointFromEmbedding）。
+	if r.config.RerankerMode == service.RerankerModeModel && strings.TrimSpace(profile.RerankModel) == "" {
+		profile.RerankModel = strings.TrimSpace(r.rerankModel)
 	}
 	var embedding ai.EmbeddingClient
 	if r.config.EnableVector {
@@ -227,7 +235,7 @@ func (r *productionEvidenceRetriever) Retrieve(ctx context.Context, c rageval.Ca
 			return nil, err
 		}
 	}
-	reranker, err := configuredReranker(r.config.RerankerMode)
+	reranker, err := configuredReranker(r.config.RerankerMode, r.factory, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -246,12 +254,28 @@ func (r *productionEvidenceRetriever) Retrieve(ctx context.Context, c rageval.Ca
 	return out, nil
 }
 
-func configuredReranker(mode string) (service.Reranker, error) {
+// configuredReranker resolves the reranker for a strict eval variant.
+//
+// model 分支接真实 cross-encoder（经 ai.Factory.NewRerankClient → Qwen3-Reranker-4B
+// over SiliconFlow /v1/rerank）。HONEST: model rerank 调外部 API，不可 bit-identical
+// 复现，因此不进 frozen evidence 三 sha256 锁，结果表标注 non-sealed external API。
+// factory/profile 缺失或 NewRerankClient 失败时降级 DeterministicReranker 并附
+// fallback 标记，保证评测可跑（不静默吞错）。
+func configuredReranker(mode string, factory *ai.Factory, profile *ai.Profile) (service.Reranker, error) {
 	switch mode {
 	case "", service.RerankerModeNone:
 		return nil, nil
 	case service.RerankerModeDeterministic:
 		return service.DeterministicReranker{}, nil
+	case service.RerankerModeModel:
+		if factory == nil || profile == nil {
+			return nil, fmt.Errorf("strict reranker mode %q requires factory and profile", mode)
+		}
+		client, err := factory.NewRerankClient(*profile)
+		if err != nil {
+			return nil, fmt.Errorf("create rerank client: %w", err)
+		}
+		return service.NewModelReranker(client), nil
 	default:
 		return nil, fmt.Errorf("unsupported strict reranker mode %q", mode)
 	}
@@ -403,7 +427,7 @@ func executeStrictRetrieval(parent context.Context, opts evalOptions, dataset ra
 		}
 	}
 	runVariant := func(retrievalCfg service.RAGRetrievalConfig, metadata rageval.RunMetadata) (rageval.RunArtifact, error) {
-		retriever := &productionEvidenceRetriever{repos: repos, profiles: profiles, factory: factory, store: store, config: retrievalCfg}
+		retriever := &productionEvidenceRetriever{repos: repos, profiles: profiles, factory: factory, store: store, config: retrievalCfg, rerankModel: cfg.RAG.RerankModel}
 		return (rageval.Runner{Executor: rageval.ChunkEvidenceExecutor{Retriever: retriever}}).Run(
 			ctx, splitDataset, opts.split, metadata,
 			strictRetrievalMetricConfig(retrievalCfg.TopK),

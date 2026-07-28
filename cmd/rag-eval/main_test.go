@@ -580,15 +580,19 @@ func TestLoadRetrievalConfigsEnforcesHashAndSingleVariable(t *testing.T) {
 }
 
 func TestConfiguredRerankerAndEvidenceUseStrictConfigAndFullContext(t *testing.T) {
-	none, err := configuredReranker(service.RerankerModeNone)
+	none, err := configuredReranker(service.RerankerModeNone, nil, nil)
 	if err != nil || none != nil {
 		t.Fatalf("none reranker = %#v, err=%v", none, err)
 	}
-	deterministic, err := configuredReranker(service.RerankerModeDeterministic)
+	deterministic, err := configuredReranker(service.RerankerModeDeterministic, nil, nil)
 	if err != nil || deterministic == nil {
 		t.Fatalf("deterministic reranker = %#v, err=%v", deterministic, err)
 	}
-	if _, err := configuredReranker("unknown"); err == nil {
+	// model 分支在 factory/profile 缺失时必须报错，不静默降级。
+	if _, err := configuredReranker(service.RerankerModeModel, nil, nil); err == nil {
+		t.Fatal("model reranker without factory/profile must error")
+	}
+	if _, err := configuredReranker("unknown", nil, nil); err == nil {
 		t.Fatal("unsupported reranker error = nil")
 	}
 	chunk := service.RetrievedChunk{EvidenceID: "e1", AnchorContent: "anchor", Content: "expanded full context"}
