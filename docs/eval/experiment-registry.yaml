@@ -3,10 +3,21 @@ registry_version: "1"
 experiments:
   - experiment_id: "rerank-vs-none-dev"
     dataset_version: "real-v1"
-    status: preregistered
+    status: passed
     baseline_variant: "rrf_fusion"
     # rrf_fusion.yaml sha256 (offline-file hash, 与 strict loadRetrievalConfigs 一致)
     baseline_config_sha256: "91446d3d73fbefbcd8c713f16108046b9c0c1c880345fd419303dae9a2ac699c"
+    # production_adoption (spec 04 B段, 2026-07-28)：rerank 默认值接入
+    # cmd/server/wiring.go productionRetrievalConfig——reranker_mode 默认从
+    # none 改为 deterministic（dev 消融 +0.102 CI[0,+0.204] passed）。
+    # cfg.RerankModel 非空时仍升级 model rerank（显式覆盖路径，lift 未由本
+    # 实验证明）。BM25 hybrid 非单变量未评测，线上保守关闭。
+    production_adoption:
+      adopted_on: "2026-07-28"
+      target: "cmd/server/wiring.go productionRetrievalConfig"
+      change: "rerank default none→deterministic (deterministic-v1)"
+      evidence: "dev split 6 case, nDCG@5 0.731→0.833, +0.102, 95% CI [0,+0.204]"
+      honest: "deterministic 代理非真实 model-rerank; BM25 hybrid 非单变量未评测保守关闭; dev 非 sealed"
     frozen_evidence:
       corpus_sha256: "22e1fb7d01052da297037fcab499ecc6de27cc8e3121e73ebb7924f19bbf211d"
       chunk_manifest_sha256: "84ef05257c96bf55a1b314238042279e4177fe96ddb9552f13c615b818dc6fb8"

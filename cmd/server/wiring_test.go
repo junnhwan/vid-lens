@@ -108,7 +108,7 @@ func TestWireServerApplicationIncludesDurableTaskCleanup(t *testing.T) {
 	}
 }
 
-func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansionOrRerank(t *testing.T) {
+func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansion(t *testing.T) {
 	cfg := productionRetrievalConfig(config.RAGConfig{TopK: 5, CandidateK: 17, MinScore: 0.25})
 	if cfg.QueryMode != service.QueryModeOriginal || cfg.RewriteQueries != 1 {
 		t.Fatalf("query config = mode:%q queries:%d, want original single query", cfg.QueryMode, cfg.RewriteQueries)
@@ -119,8 +119,26 @@ func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansionOrRerank(t *t
 	if cfg.TopK != 5 || cfg.CandidateK != 17 {
 		t.Fatalf("retrieval sizes = topK:%d candidateK:%d", cfg.TopK, cfg.CandidateK)
 	}
-	if cfg.NeighborRadius != 0 || cfg.RerankerMode != service.RerankerModeNone {
-		t.Fatalf("post retrieval config = neighbor:%d reranker:%q", cfg.NeighborRadius, cfg.RerankerMode)
+	if cfg.NeighborRadius != 0 {
+		t.Fatalf("post retrieval config = neighbor:%d, want 0 (no expansion)", cfg.NeighborRadius)
+	}
+}
+
+// TestProductionRetrievalConfigAppliesEvalConclusion 锁定 spec 04 B段：rerank 默认
+// 值由 spec 01 dev 单变量消融结论驱动（experiment rerank-vs-none-dev, +0.102
+// CI [0,+0.204], passed），不再靠 cfg.RerankModel 是否非空手拍。BM25 因非单变量
+// 未评测保守关闭。任何回退到"rerank 默认 none / BM25 默认 on"的改动都会被此测试
+// 抓住，防止线上化结论漂移。
+func TestProductionRetrievalConfigAppliesEvalConclusion(t *testing.T) {
+	cfg := productionRetrievalConfig(config.RAGConfig{TopK: 5, CandidateK: 17, MinScore: 0.25})
+	if cfg.RerankerMode != service.RerankerModeDeterministic {
+		t.Fatalf("rerank default = %q, want deterministic (eval rerank-vs-none-dev +0.102 CI[0,+0.204] passed)", cfg.RerankerMode)
+	}
+	if cfg.RerankerVersion != "deterministic-v1" {
+		t.Fatalf("rerank version = %q, want deterministic-v1", cfg.RerankerVersion)
+	}
+	if cfg.EnableBM25 {
+		t.Fatalf("BM25 = on, want off (BM25 hybrid 非单变量未评测, 保守关闭)")
 	}
 }
 

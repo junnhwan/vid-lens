@@ -60,10 +60,28 @@ func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
 	}
 }
 
-// wireServerApplication constructs services, handlers, consumers, and retry
-// scheduling from already-initialized infrastructure. It deliberately does not
-// open network connections or start goroutines; those lifecycle actions belong
-// to Start and the caller's shutdown sequence.
+// productionRetrievalConfig is the eval-driven production retrieval configuration.
+//
+// spec 04 B段（评测驱动线上化）：rerank 默认值由 spec 01 dev 单变量消融结论驱动，
+// 不再靠 cfg.RerankModel 是否非空手拍。决策记录与 audit trail：
+//
+//   - experiment_id: rerank-vs-none-dev（docs/eval/experiment-registry.yaml +
+//     docs/eval/resume-quant-results.md "Strict Single-Variable Ablation"）
+//   - dev split 6 case, frozen evidence: baseline rrf_fusion(rerank=none) nDCG@5=0.731,
+//     candidate rrf_rerank(rerank=deterministic) nDCG@5=0.833.
+//   - observed effect +0.102, bootstrap 95% CI [0,+0.204], status=passed
+//     (lower bound ≥ minimum_effect=0; guardrail answerability_f1 回归 0).
+//   - 故默认 RerankerMode=deterministic / RerankerVersion=deterministic-v1.
+//
+// HONEST（写简历/对外必带的诚信约束，不可在改动里抹掉）：
+//   - deterministic rerank 非真实 model-rerank：strict eval 路径无
+//     ModelRerankerFactory，rrf_rerank 用 DeterministicReranker 代理。线上 model-rerank
+//     效果由 (B) 在线对比测，不由本节数字支撑。cfg.RerankModel 非空时仍升级到
+//     model rerank（保留显式覆盖路径），但 lift 未由本实验证明。
+//   - BM25 hybrid 非单变量：vector→+BM25 伴随 enable_bm25+candidate_k+rrf_k 三因子同变
+//     （架构约束：hybrid 必须 RRF + 扩候选池），无法做成 strict 单变量对。BM25 在线上
+//     保守关闭（EnableBM25=false），其收益只能从 legacy 50-case 报告引用，不进 strict
+//     单变量证据链。
 func productionRetrievalConfig(cfg config.RAGConfig) service.RAGRetrievalConfig {
 	retrieval := service.DefaultRAGRetrievalConfig()
 	retrieval.QueryMode = service.QueryModeOriginal
@@ -74,13 +92,17 @@ func productionRetrievalConfig(cfg config.RAGConfig) service.RAGRetrievalConfig 
 	}
 	retrieval.TopK = cfg.TopK
 	retrieval.CandidateK = cfg.CandidateK
+	// BM25 hybrid 非单变量未评测（见上方 HONEST），保守关闭。
 	retrieval.EnableBM25 = false
 	retrieval.RRFK = 60
 	retrieval.NeighborRadius = 0
 	retrieval.MaxContextChars = 0
 	retrieval.MinVectorScore = cfg.MinScore
-	retrieval.RerankerMode = service.RerankerModeNone
-	retrieval.RerankerVersion = ""
+	// spec 04 B段：rerank 默认 deterministic on（experiment rerank-vs-none-dev
+	// dev 消融 +0.102 CI [0,+0.204]，deterministic 代理）。cfg.RerankModel 非空时
+	// 升级到 model rerank（显式覆盖路径，lift 未由本实验证明）。
+	retrieval.RerankerMode = service.RerankerModeDeterministic
+	retrieval.RerankerVersion = "deterministic-v1"
 	if strings.TrimSpace(cfg.RerankModel) != "" {
 		retrieval.RerankerMode = service.RerankerModeModel
 		retrieval.RerankerVersion = strings.TrimSpace(cfg.RerankModel)
