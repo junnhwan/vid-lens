@@ -13,9 +13,9 @@ rrf_k: 60
 neighbor_radius: 0
 max_context_chars: 0
 min_vector_score: 0
-chunker_strategy: recursive_sentence
-chunker_version: recursive-sentence-v1
+chunker_strategy: fixed_window
+chunker_version: split-text-v1
 chunk_size: 800
-chunk_overlap: 100
+chunk_overlap: 120
 reranker_mode: none
 reranker_version: none-v0

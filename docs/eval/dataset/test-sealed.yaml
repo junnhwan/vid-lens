@@ -3,7 +3,7 @@ dataset_version: real-v1
 split: test
 cases:
     - case_id: test-agent-loop
-      video_id: "13"
+      video_id: 1d39e171ca34cd927cc76c5c35038554
       source_group: agent_series
       split: test
       task_id: 13
@@ -27,7 +27,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-agent-moat
-      video_id: "13"
+      video_id: 1d39e171ca34cd927cc76c5c35038554
       source_group: agent_series
       split: test
       task_id: 13
@@ -48,7 +48,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-agent-verify
-      video_id: "16"
+      video_id: fd6405e92437e85542415657fab2fd35
       source_group: agent_series
       split: test
       task_id: 16
@@ -69,7 +69,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-pyagent-uses
-      video_id: "25"
+      video_id: cc87b1fd646f1bbb1010530a136a11f0
       source_group: agent_series
       split: test
       task_id: 25
@@ -90,7 +90,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-codex-what
-      video_id: "30"
+      video_id: 013d02fcc36587fdaaa7c6a4d8d651e2
       source_group: ai_coding_tools
       split: test
       task_id: 30
@@ -111,7 +111,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-ccloud-src
-      video_id: "33"
+      video_id: 9e5d016c98443dbfe22bcaa0efa164db
       source_group: ai_coding_tools
       split: test
       task_id: 33
@@ -132,7 +132,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-tools-compare
-      video_id: "30"
+      video_id: 013d02fcc36587fdaaa7c6a4d8d651e2
       source_group: ai_coding_tools
       split: test
       task_id: 30
@@ -159,7 +159,7 @@ cases:
           source: asr
           relevance: 2
     - case_id: test-multiagent-pseudo
-      video_id: "13"
+      video_id: 1d39e171ca34cd927cc76c5c35038554
       source_group: agent_series
       split: test
       task_id: 13
@@ -180,7 +180,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-agent-audience
-      video_id: "13"
+      video_id: 1d39e171ca34cd927cc76c5c35038554
       source_group: agent_series
       split: test
       task_id: 13
@@ -201,7 +201,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-series-openccloud
-      video_id: "11"
+      video_id: add9fde4b2ff06d25f02ee944eec0f50
       source_group: agent_series
       split: test
       task_id: 11
@@ -222,7 +222,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: test-student-noanswer
-      video_id: "26"
+      video_id: 70e1edf456c2ca896b93f15311e92ac3
       source_group: student_journey
       split: test
       task_id: 26
@@ -240,7 +240,7 @@ cases:
           relevance: 1
       notes: 无答案 case：该视频是保研探索个人经历，不含分布式锁技术内容；negative_confusers 是开头片段（语义不相关，检验错误接受）。
     - case_id: test-codex-structure
-      video_id: "30"
+      video_id: 013d02fcc36587fdaaa7c6a4d8d651e2
       source_group: ai_coding_tools
       split: test
       task_id: 30
@@ -262,7 +262,7 @@ cases:
           relevance: 3
       notes: timeline_locate 用 context_ids 作稳定定位（ASR 时间戳全 0，按 annotation guide §5 用 context_ids 而非估算时间戳）。
     - case_id: test-student-noanswer2
-      video_id: "26"
+      video_id: 70e1edf456c2ca896b93f15311e92ac3
       source_group: student_journey
       split: test
       task_id: 26
@@ -280,7 +280,7 @@ cases:
           relevance: 1
       notes: 无答案 case：保研探索视频不含 RAG 检索技术内容。
     - case_id: test-smalltalk
-      video_id: "30"
+      video_id: 013d02fcc36587fdaaa7c6a4d8d651e2
       source_group: ai_coding_tools
       split: test
       task_id: 30

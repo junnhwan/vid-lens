@@ -3,7 +3,7 @@ dataset_version: real-v1
 split: dev
 cases:
     - case_id: dev-mem-forms
-      video_id: "8"
+      video_id: f74d4d5fb7722c3c85e83ededa28a06d
       source_group: memory_systems
       split: dev
       task_id: 8
@@ -24,7 +24,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: dev-moonzero-pain
-      video_id: "9"
+      video_id: b6c7ac15b0d03989dd9b604ca3998063
       source_group: memory_systems
       split: dev
       task_id: 9
@@ -45,11 +45,11 @@ cases:
           source: asr
           relevance: 3
     - case_id: dev-mem-compare
-      video_id: "8"
+      video_id: b6c7ac15b0d03989dd9b604ca3998063
       source_group: memory_systems
       split: dev
-      task_id: 8
-      task_hint: 记忆系统对比
+      task_id: 9
+      task_hint: 记忆系统对比（Moon Zero 侧）
       question: 项目自己的记忆系统和 Moon Zero 框架在落地方式上有什么区别？
       category: topic_compare
       difficulty: hard
@@ -66,7 +66,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: dev-pitfall-companion
-      video_id: "15"
+      video_id: 003b413828444582cd381e918d6a6841
       source_group: ai_pitfalls
       split: dev
       task_id: 15
@@ -87,7 +87,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: dev-pitfall-iteration
-      video_id: "15"
+      video_id: 003b413828444582cd381e918d6a6841
       source_group: ai_pitfalls
       split: dev
       task_id: 15
@@ -108,7 +108,7 @@ cases:
           source: asr
           relevance: 3
     - case_id: dev-pitfall-overview
-      video_id: "15"
+      video_id: 003b413828444582cd381e918d6a6841
       source_group: ai_pitfalls
       split: dev
       task_id: 15

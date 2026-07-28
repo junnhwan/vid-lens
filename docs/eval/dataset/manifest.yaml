@@ -1,50 +1,48 @@
 schema_version: "1"
 dataset_version: real-v1
 manifest:
-    sha256: 8a57f235388595cba68d6c25559f5748b202b341e69258ad1fb75898fa00432e
+    sha256: 80b2db3625d5d8d6f77725059e83c20079c3f87deef995ceb97b26997931e002
     splits:
         dev:
             sources:
                 - source_group: memory_systems
                   video_ids:
-                    - "8"
-                    - "9"
+                    - f74d4d5fb7722c3c85e83ededa28a06d
+                    - b6c7ac15b0d03989dd9b604ca3998063
                 - source_group: ai_pitfalls
                   video_ids:
-                    - "15"
-            content_sha256: 4c3d74b2f39659efd039bb87c2dfafe490cfaea3da6648596c86286e723f0967
+                    - 003b413828444582cd381e918d6a6841
+            content_sha256: b3f2529d98a789d5b3536d9ff8e377eaabd0cf195556719869a507c51bd29e77
         test:
             sources:
                 - source_group: agent_series
                   video_ids:
-                    - "11"
-                    - "12"
-                    - "13"
-                    - "16"
-                    - "25"
+                    - add9fde4b2ff06d25f02ee944eec0f50
+                    - 1d39e171ca34cd927cc76c5c35038554
+                    - fd6405e92437e85542415657fab2fd35
+                    - cc87b1fd646f1bbb1010530a136a11f0
                 - source_group: ai_coding_tools
                   video_ids:
-                    - "30"
-                    - "33"
-                    - "34"
+                    - 013d02fcc36587fdaaa7c6a4d8d651e2
+                    - 9e5d016c98443dbfe22bcaa0efa164db
                 - source_group: student_journey
                   video_ids:
-                    - "26"
+                    - 70e1edf456c2ca896b93f15311e92ac3
             sealed: true
-            content_sha256: 602f9b1774ad66035cefa70b43e8cd7da1772571de23fd09ed1af6100b42b66c
+            content_sha256: 0888d53a4e313a418daf1a45057a0acae0dad9e53353410c8beb9e2d4cd686a9
             access_token_sha256: deef9b1290e59d157a41e8326c7540776c7c46eec27c01325f93b9b85dd66b50
         train:
             sources:
                 - source_group: software_eng_lecture
                   video_ids:
-                    - "2"
+                    - 2cdbc4ef70592e6be97dab3704268fa7
                 - source_group: react_dynamic
                   video_ids:
-                    - "10"
+                    - 6e523b58fa96340f701cc9e38611854d
                 - source_group: coding_agent_practice
                   video_ids:
-                    - "14"
+                    - 3d7cb392e9e133d0c4e91ef90d0c3ada
                 - source_group: wsl_agent_setup
                   video_ids:
-                    - "24"
-            content_sha256: 2a228053e4bfbd80c1f96d4def3f4b3bea5050f42ecc19f3fff9365de50a7ab2
+                    - 108ff31e36cf173a239e7adb68e066e1
+            content_sha256: 3e4c81f7d5dcea2f796db846b69f004a3387480b7d5612b96ed861a77ab895a6

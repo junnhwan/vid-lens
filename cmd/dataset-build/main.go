@@ -32,6 +32,37 @@ import (
 	"vid-lens/internal/eval"
 )
 
+// taskFileMD5: 旧仓库 PG video_tasks.file_md5（eval strict 校验要求
+// case.video_id == task.FileMD5）。task 11/12 与 33/34 同 md5（同源视频）。
+var taskFileMD5 = map[string]string{
+	"2":  "2cdbc4ef70592e6be97dab3704268fa7",
+	"8":  "f74d4d5fb7722c3c85e83ededa28a06d",
+	"9":  "b6c7ac15b0d03989dd9b604ca3998063",
+	"10": "6e523b58fa96340f701cc9e38611854d",
+	"11": "add9fde4b2ff06d25f02ee944eec0f50",
+	"12": "add9fde4b2ff06d25f02ee944eec0f50",
+	"13": "1d39e171ca34cd927cc76c5c35038554",
+	"14": "3d7cb392e9e133d0c4e91ef90d0c3ada",
+	"15": "003b413828444582cd381e918d6a6841",
+	"16": "fd6405e92437e85542415657fab2fd35",
+	"24": "108ff31e36cf173a239e7adb68e066e1",
+	"25": "cc87b1fd646f1bbb1010530a136a11f0",
+	"26": "70e1edf456c2ca896b93f15311e92ac3",
+	"30": "013d02fcc36587fdaaa7c6a4d8d651e2",
+	"33": "9e5d016c98443dbfe22bcaa0efa164db",
+	"34": "9e5d016c98443dbfe22bcaa0efa164db",
+}
+
+func vid(taskID string) string { return taskFileMD5[taskID] }
+
+func vids(ids ...string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, taskFileMD5[id])
+	}
+	return out
+}
+
 func main() {
 	var (
 		outDir   = flag.String("out", "docs/eval/dataset", "output directory for the four dataset files")
@@ -46,7 +77,9 @@ func main() {
 
 	// source_group 划分（按内容来源，以 source_group 为最小单位划分 train/dev/test，
 	// 同 source_group/video_id 不得跨 split——annotation guide §2）。
-	// video_id 用 task_id 字符串（评测时 Retrieve 的 taskIDs 即 task_id）。
+	// video_id 必须填 task.file_md5（strict 校验：case.video_id == task.FileMD5，
+	// 见 cmd/rag-eval/artifact_snapshot.go line 81-84）。下方 taskFileMD5 从旧仓库
+	// PG（localhost:5434）video_tasks.file_md5 查得，eval 时 case.video_id 与之对齐。
 	const (
 		sgSoftwareEng    = "software_eng_lecture" // task 2
 		sgReactDynamic   = "react_dynamic"         // task 10
@@ -59,24 +92,28 @@ func main() {
 		sgStudentJourney = "student_journey"        // task 26（无答案 case 原料）
 	)
 
+	// taskFileMD5 / vid / vids 见包级定义。
+
 	dataset := eval.Dataset{
 		SchemaVersion: "1",
 		DatasetVersion: "real-v1",
 		Manifest: eval.SplitManifest{Splits: map[eval.Split]eval.SplitDefinition{
 			eval.SplitTrain: {Sources: []eval.SourceGroup{
-				{ID: sgSoftwareEng, VideoIDs: []string{"2"}},
-				{ID: sgReactDynamic, VideoIDs: []string{"10"}},
-				{ID: sgCodingPractice, VideoIDs: []string{"14"}},
-				{ID: sgWSLAgent, VideoIDs: []string{"24"}},
+				{ID: sgSoftwareEng, VideoIDs: vids("2")},
+				{ID: sgReactDynamic, VideoIDs: vids("10")},
+				{ID: sgCodingPractice, VideoIDs: vids("14")},
+				{ID: sgWSLAgent, VideoIDs: vids("24")},
 			}},
 			eval.SplitDev: {Sources: []eval.SourceGroup{
-				{ID: sgMemorySystems, VideoIDs: []string{"8", "9"}},
-				{ID: sgAIPitfalls, VideoIDs: []string{"15"}},
+				{ID: sgMemorySystems, VideoIDs: vids("8", "9")},
+				{ID: sgAIPitfalls, VideoIDs: vids("15")},
 			}},
 			eval.SplitTest: {Sources: []eval.SourceGroup{
-				{ID: sgAgentSeries, VideoIDs: []string{"11", "12", "13", "16", "25"}},
-				{ID: sgCodingTools, VideoIDs: []string{"30", "33", "34"}},
-				{ID: sgStudentJourney, VideoIDs: []string{"26"}},
+				// task 12 与 11 同 md5、34 与 33 同 md5（同源物理视频），
+				// strict manifest video_id 按 file_md5 去重，只保留 11/33。
+				{ID: sgAgentSeries, VideoIDs: vids("11", "13", "16", "25")},
+				{ID: sgCodingTools, VideoIDs: vids("30", "33")},
+				{ID: sgStudentJourney, VideoIDs: vids("26")},
 			}},
 		}},
 		Cases: buildCases(sgSoftwareEng, sgReactDynamic, sgCodingPractice, sgWSLAgent,
@@ -191,7 +228,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 0：软件定义 = 现实需求在计算机世界的投影 + 代码是负债。
 	cases = append(cases, eval.Case{
-		CaseID: "train-sw-def", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-sw-def", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "视频中把软件定义成什么？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -206,7 +243,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 4：好的代码三特征 safe from bug / ready for change / easy to understand。
 	cases = append(cases, eval.Case{
-		CaseID: "train-good-code", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-good-code", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "好代码的几个特征是什么？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -223,7 +260,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 6-7：错误放大效应 + 完美需求只在小众领域。
 	cases = append(cases, eval.Case{
-		CaseID: "train-error-amp", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-error-amp", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "需求分析出错会带来什么后果？为什么不能从一开始就设计完美需求？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -242,7 +279,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// overview：软件构造视频整体讲了什么（关检索走摘要直拼）。
 	cases = append(cases, eval.Case{
-		CaseID: "train-sw-overview", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-sw-overview", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "这个视频主要讲了什么？",
 		Category: "video_overview", Difficulty: "easy", Answerable: true,
@@ -257,7 +294,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 1：复杂度来源（业务复杂度 / 代码复杂度 / 人的复杂度）。
 	cases = append(cases, eval.Case{
-		CaseID: "train-complexity-source", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-complexity-source", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "软件的复杂度可以从哪几个角度分析？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -274,7 +311,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 2：代码复杂度分两种（修改的复杂度 = 读写放大 / 理解的复杂度）。
 	cases = append(cases, eval.Case{
-		CaseID: "train-code-complexity", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-code-complexity", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "代码本身的复杂度分成哪两种？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -290,7 +327,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 3：软件构造不只是写代码（设计/原型/测试/debug/code review）。
 	cases = append(cases, eval.Case{
-		CaseID: "train-construction-scope", VideoID: "2", SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
+		CaseID: "train-construction-scope", VideoID: vid("2"), SourceGroup: "software_eng_lecture", Split: eval.SplitTrain,
 		TaskID: 2, TaskHint: "软件构造讲座",
 		Question: "软件构造包含哪些环节？是不是只写代码？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -305,7 +342,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=react_dynamic (task 10 动态图 React，3 chunk)
 	cases = append(cases, eval.Case{
-		CaseID: "train-react-dag", VideoID: "10", SourceGroup: "react_dynamic", Split: eval.SplitTrain,
+		CaseID: "train-react-dag", VideoID: vid("10"), SourceGroup: "react_dynamic", Split: eval.SplitTrain,
 			TaskID: 10, TaskHint: "动态图 React 讲解",
 		Question: "动态图 React 相比串行 React 解决了什么问题？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -321,7 +358,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=coding_agent_practice (task 14 英文 Mario，coding agent 历史)
 	cases = append(cases, eval.Case{
-		CaseID: "train-coding-agent-history", VideoID: "14", SourceGroup: "coding_agent_practice", Split: eval.SplitTrain,
+		CaseID: "train-coding-agent-history", VideoID: vid("14"), SourceGroup: "coding_agent_practice", Split: eval.SplitTrain,
 			TaskID: 14, TaskHint: "coding agent 实践（英文）",
 		Question: "Claude Code 之前的 coding agent 前身有哪些？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -336,7 +373,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=wsl_agent_setup (task 24 WSL)
 	cases = append(cases, eval.Case{
-		CaseID: "train-wsl-why", VideoID: "24", SourceGroup: "wsl_agent_setup", Split: eval.SplitTrain,
+		CaseID: "train-wsl-why", VideoID: vid("24"), SourceGroup: "wsl_agent_setup", Split: eval.SplitTrain,
 			TaskID: 24, TaskHint: "Windows WSL 跑 AI agent",
 		Question: "为什么 AI agent 在 WSL 里比在 PowerShell 里表现更好？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -353,7 +390,7 @@ func buildCases(groups ...string) []eval.Case {
 	// ===== DEV =====
 	// source_group=memory_systems (task 8 项目记忆系统 + task 9 Moon Zero，跨视频同主题)
 	cases = append(cases, eval.Case{
-		CaseID: "dev-mem-forms", VideoID: "8", SourceGroup: "memory_systems", Split: eval.SplitDev,
+		CaseID: "dev-mem-forms", VideoID: vid("8"), SourceGroup: "memory_systems", Split: eval.SplitDev,
 			TaskID: 8, TaskHint: "项目记忆系统架构",
 		Question: "项目记忆系统有哪几种记忆形态？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -367,7 +404,7 @@ func buildCases(groups ...string) []eval.Case {
 	})
 
 	cases = append(cases, eval.Case{
-		CaseID: "dev-moonzero-pain", VideoID: "9", SourceGroup: "memory_systems", Split: eval.SplitDev,
+		CaseID: "dev-moonzero-pain", VideoID: vid("9"), SourceGroup: "memory_systems", Split: eval.SplitDev,
 			TaskID: 9, TaskHint: "Moon Zero 记忆框架",
 		Question: "Moon Zero 记忆框架要解决的核心痛点是什么？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -382,8 +419,8 @@ func buildCases(groups ...string) []eval.Case {
 
 	// 跨视频：topic_compare（memory_systems 内 task 8 vs task 9）
 	cases = append(cases, eval.Case{
-		CaseID: "dev-mem-compare", VideoID: "8", SourceGroup: "memory_systems", Split: eval.SplitDev,
-			TaskID: 8, TaskHint: "记忆系统对比",
+		CaseID: "dev-mem-compare", VideoID: vid("9"), SourceGroup: "memory_systems", Split: eval.SplitDev,
+			TaskID: 9, TaskHint: "记忆系统对比（Moon Zero 侧）",
 		Question: "项目自己的记忆系统和 Moon Zero 框架在落地方式上有什么区别？",
 		Category: "topic_compare", Difficulty: "hard", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -397,7 +434,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 0 续：把豆包当情绪伴侣越聊越焦虑（陷阱之一）。
 	cases = append(cases, eval.Case{
-		CaseID: "dev-pitfall-companion", VideoID: "15", SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
+		CaseID: "dev-pitfall-companion", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
 			TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "把豆包当情绪伴侣会怎么样？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -412,7 +449,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=ai_pitfalls (task 15)
 	cases = append(cases, eval.Case{
-		CaseID: "dev-pitfall-iteration", VideoID: "15", SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
+		CaseID: "dev-pitfall-iteration", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
 			TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "大模型的迭代节奏现在是什么状态？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -427,7 +464,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// overview（ai_pitfalls 整体）
 	cases = append(cases, eval.Case{
-		CaseID: "dev-pitfall-overview", VideoID: "15", SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
+		CaseID: "dev-pitfall-overview", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
 			TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "这期视频想讲什么？",
 		Category: "video_overview", Difficulty: "easy", Answerable: true,
@@ -444,7 +481,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=agent_series (task 11/12/13/16/25)
 	// 注意 task 11/12 内容重复（同一视频重传），用 task 13（演变策略，内容不重复）。
 	cases = append(cases, eval.Case{
-		CaseID: "test-agent-loop", VideoID: "13", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-agent-loop", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "Loop Engineering 和之前的 Prompt Engineering 是什么关系？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -459,7 +496,7 @@ func buildCases(groups ...string) []eval.Case {
 	})
 
 	cases = append(cases, eval.Case{
-		CaseID: "test-agent-moat", VideoID: "13", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-agent-moat", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "这一行（Agent 开发）的护城河是什么？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: true,
@@ -473,7 +510,7 @@ func buildCases(groups ...string) []eval.Case {
 	})
 
 	cases = append(cases, eval.Case{
-		CaseID: "test-agent-verify", VideoID: "16", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-agent-verify", VideoID: vid("16"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 16, TaskHint: "AI agent 自动化验证",
 		Question: "做 AI agent 开发时，作者花在写代码上的时间占比大概是多少？剩下时间花在哪？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -487,7 +524,7 @@ func buildCases(groups ...string) []eval.Case {
 	})
 
 	cases = append(cases, eval.Case{
-		CaseID: "test-pyagent-uses", VideoID: "25", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-pyagent-uses", VideoID: vid("25"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 25, TaskHint: "智能体本质与 pyagent",
 		Question: "pyagent 这个项目有哪几种用法？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -502,7 +539,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=ai_coding_tools (task 30 Codex + task 33/34 Claude Code，跨视频对比)
 	cases = append(cases, eval.Case{
-		CaseID: "test-codex-what", VideoID: "30", SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
+		CaseID: "test-codex-what", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 			TaskID: 30, TaskHint: "OpenAI Codex 使用指南",
 		Question: "Codex 是什么定位的产品？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -516,7 +553,7 @@ func buildCases(groups ...string) []eval.Case {
 	})
 
 	cases = append(cases, eval.Case{
-		CaseID: "test-ccloud-src", VideoID: "33", SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
+		CaseID: "test-ccloud-src", VideoID: vid("33"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 			TaskID: 33, TaskHint: "Claude Code 源码解析",
 		Question: "作者在 Claude Code 源码里找到的 cloud.tsx 文件是用来做什么的？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -531,7 +568,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// 跨视频：topic_compare（Codex vs Claude Code，ai_coding_tools 内）
 	cases = append(cases, eval.Case{
-		CaseID: "test-tools-compare", VideoID: "30", SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
+		CaseID: "test-tools-compare", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 			TaskID: 30, TaskHint: "Codex vs Claude Code 对比",
 		Question: "Codex 和 Claude Code 这两个 coding agent 在定位上是什么关系？",
 		Category: "topic_compare", Difficulty: "medium", Answerable: true,
@@ -549,7 +586,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 1：Multi-Agent 在年底被认为可能是伪需求。
 	cases = append(cases, eval.Case{
-		CaseID: "test-multiagent-pseudo", VideoID: "13", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-multiagent-pseudo", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "Multi-Agent 在什么时候被认为可能是伪需求？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
@@ -564,7 +601,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// chunk 0：这期视频面向什么人、讲什么（overview 变体，但走 direct_qa 检索）
 	cases = append(cases, eval.Case{
-		CaseID: "test-agent-audience", VideoID: "13", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-agent-audience", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "这期 Agent 开发视频主要面向什么人？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
@@ -579,7 +616,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// series_locate：Agent 系列里 OpenCloud 在哪期讲的（跨视频，agent_series 内）
 	cases = append(cases, eval.Case{
-		CaseID: "test-series-openccloud", VideoID: "11", SourceGroup: "agent_series", Split: eval.SplitTest,
+		CaseID: "test-series-openccloud", VideoID: vid("11"), SourceGroup: "agent_series", Split: eval.SplitTest,
 			TaskID: 11, TaskHint: "Agent 全栈知识系列",
 		Question: "Agent 系列里 OpenCloud 爆火标志着什么？",
 		Category: "series_locate", Difficulty: "medium", Answerable: true,
@@ -594,7 +631,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// source_group=student_journey (task 26) —— 无答案 case（问技术问题，但视频是保研探索，无答案）
 	cases = append(cases, eval.Case{
-		CaseID: "test-student-noanswer", VideoID: "26", SourceGroup: "student_journey", Split: eval.SplitTest,
+		CaseID: "test-student-noanswer", VideoID: vid("26"), SourceGroup: "student_journey", Split: eval.SplitTest,
 			TaskID: 26, TaskHint: "大二学生保研探索",
 		Question: "分布式锁释放时为什么要校验 owner？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: false,
@@ -607,7 +644,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// timeline_locate case（spec 05 需要，但 ASR 时间戳全 0，用 context_ids 作稳定定位）
 	cases = append(cases, eval.Case{
-		CaseID: "test-codex-structure", VideoID: "30", SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
+		CaseID: "test-codex-structure", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 			TaskID: 30, TaskHint: "Codex 使用指南",
 		Question: "Codex 视频分成哪几个部分来讲？",
 		Category: "timeline_locate", Difficulty: "medium", Answerable: true,
@@ -623,7 +660,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// 第二个无答案 case（task 26 问 RAG 技术，视频无此内容）
 	cases = append(cases, eval.Case{
-		CaseID: "test-student-noanswer2", VideoID: "26", SourceGroup: "student_journey", Split: eval.SplitTest,
+		CaseID: "test-student-noanswer2", VideoID: vid("26"), SourceGroup: "student_journey", Split: eval.SplitTest,
 			TaskID: 26, TaskHint: "大二学生保研探索",
 		Question: "BM25 混合检索和纯向量检索在 Recall@5 上差多少？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: false,
@@ -636,7 +673,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	// small_talk case（spec 05 需要，关检索关 LLM）
 	cases = append(cases, eval.Case{
-		CaseID: "test-smalltalk", VideoID: "30", SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
+		CaseID: "test-smalltalk", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 			TaskID: 30, TaskHint: "闲聊",
 		Question: "谢谢你的讲解",
 		Category: "small_talk", Difficulty: "easy", Answerable: false,
