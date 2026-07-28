@@ -187,6 +187,15 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	}
 	if p.reranker != nil {
 		citations = p.reranker.Rerank(ctx, req.Question, citations, topK)
+		// Spec 06 档1：rerank 失败 → 向量基线。ModelReranker 在 client 失败时已用
+		// fallbackRerankOrder 回退原序（= 无 rerank 的向量基线，spec 04 消融 vector_only
+		// 档），并在 chunk 上标 model_rerank_failed/model_rerank_unavailable。此处把该
+		// chunk 级 fallback 提升到 trace + 计一次档1触发，使降级链可观测（spec 06：
+		// 只做计数不做 trace，但 fallback 标记复用 rag_expand.go 的 Fallbacks 范式）。
+		if rerankFallbackReason := firstRerankFallback(citations); rerankFallbackReason != "" {
+			trace.Fallbacks = appendFallback(trace.Fallbacks, "rerank_failed_vector_baseline")
+			recordDegradationTier1()
+		}
 	} else {
 		citations = capRetrievedChunks(citations, topK)
 	}

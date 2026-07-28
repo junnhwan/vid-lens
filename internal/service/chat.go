@@ -105,10 +105,14 @@ type ChatService struct {
 }
 
 type AskResult struct {
-	MessageID int64      `json:"message_id"`
-	Answer    string     `json:"answer"`
-	Citations []Citation `json:"citations"`
-	Model     string     `json:"model"`
+	MessageID int64           `json:"message_id"`
+	Answer    string          `json:"answer"`
+	Citations []Citation      `json:"citations"`
+	Model     string          `json:"model"`
+	// Degraded 标记档2降级态（spec 06 决策记录第 10 节）：LLM 失败回退无 LLM 模式
+	// （检索片段+已有摘要直拼）时为 true，对外告知用户当前降级。档1 rerank 失败回退
+	// 向量基线后 LLM 仍生成完整答案，不标 degraded。
+	Degraded bool `json:"degraded,omitempty"`
 }
 
 type ChatStreamEvent struct {
@@ -124,6 +128,9 @@ type preparedRAGChat struct {
 	Contexts    []RetrievedChunk
 	Citations   []Citation
 	Messages    []ai.ChatMessage
+	// Policy 是本次问答的 ExecutionPolicy（spec 04）。spec 06 降级在其之上：
+	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
+	Policy ExecutionPolicy
 }
 
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {

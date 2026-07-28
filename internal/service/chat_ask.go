@@ -20,13 +20,36 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		return nil, err
 	}
 
-	answer, err := chat.Chat(ctx, prepared.Messages)
-	if err != nil {
-		return nil, err
+	answer, llmErr := chat.Chat(ctx, prepared.Messages)
+	if llmErr != nil {
+		// Spec 06 档2：LLM 失败 → 无 LLM 模式。该走 LLM 但 LLM 挂了 → 回退检索片段
+		// + 已有摘要直拼 + degraded:true，不调 LLM（决策记录第 6 节稀缺点）。
+		// 前置诚信检查：无 LLM 模式 = buildRAGMessages 降级补全，非从零新建——
+		// 片段拼装已有（prepared.Contexts / prepared.Messages），此处只补"不调 LLM +
+		// degraded 标志 + 复用 spec 03 FindByMD5 摘要"路径。
+		if shouldTriggerLLMDegradation(prepared.Policy, llmErr) {
+			degradedAnswer := s.applyTier2Degradation(ctx, prepared)
+			finalized := finalizeAnswerCitations(degradedAnswer, prepared.Citations)
+			result, saveErr := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+			if saveErr != nil {
+				return nil, saveErr
+			}
+			result.Degraded = true
+			return result, nil
+		}
+		// UseLLM=false 的 intent 不该走到 Chat（small_talk 占位未落地）；admission
+		// RetryAfter 在阈值内由 caller 重试，此处不降级、返回错误。
+		return nil, llmErr
 	}
 
 	finalized := finalizeAnswerCitations(answer, prepared.Citations)
-	return s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+	if err != nil {
+		return nil, err
+	}
+	// 档1（rerank 失败→向量基线）不标 degraded（LLM 仍生成完整答案），但已被
+	// rag_pipeline 计一次档1触发。此处无需再标。
+	return result, nil
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName string) (*AskResult, error) {

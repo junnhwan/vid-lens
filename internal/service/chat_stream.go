@@ -22,21 +22,52 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		return nil, err
 	}
 	var answer string
+	degraded := false
+	// emitAnswer 把一段文本按流式分片发出去（非流式与档2降级共用）。
+	emitAnswer := func(text string) error {
+		for _, chunk := range splitAnswerForStream(text, 80) {
+			if err := emit(ChatStreamEvent{Type: "answer", Data: chunk}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// applyTier2 是档2降级入口：LLM 失败 → 无 LLM 模式（片段+摘要直拼 + degraded），
+	// 不调 LLM（spec 06 稀缺点）。返回降级答案体，由 caller 发出并标 degraded。
+	applyTier2 := func() error {
+		degraded = true
+		// 档2 不调 LLM：丢弃已累积的部分 LLM delta，用降级答案体替代
+		// （spec 06 档2 = 片段+摘要直拼，不含部分 LLM 生成内容）。
+		answer = s.applyTier2Degradation(ctx, prepared)
+		return emitAnswer(answer)
+	}
 	if streaming, ok := chat.(ai.StreamingChatClient); ok {
-		err = streaming.StreamChat(ctx, prepared.Messages, func(delta string) error {
+		streamErr := streaming.StreamChat(ctx, prepared.Messages, func(delta string) error {
 			answer += delta
 			return emit(ChatStreamEvent{Type: "answer", Data: delta})
 		})
-		if err != nil {
-			return nil, err
+		if streamErr != nil {
+			if shouldTriggerLLMDegradation(prepared.Policy, streamErr) {
+				if err := applyTier2(); err != nil {
+					return nil, err
+				}
+			} else {
+				return nil, streamErr
+			}
 		}
 	} else {
-		answer, err = chat.Chat(ctx, prepared.Messages)
-		if err != nil {
-			return nil, err
-		}
-		for _, chunk := range splitAnswerForStream(answer, 80) {
-			if err := emit(ChatStreamEvent{Type: "answer", Data: chunk}); err != nil {
+		chatAnswer, chatErr := chat.Chat(ctx, prepared.Messages)
+		if chatErr != nil {
+			if shouldTriggerLLMDegradation(prepared.Policy, chatErr) {
+				if err := applyTier2(); err != nil {
+					return nil, err
+				}
+			} else {
+				return nil, chatErr
+			}
+		} else {
+			answer = chatAnswer
+			if err := emitAnswer(answer); err != nil {
 				return nil, err
 			}
 		}
@@ -47,6 +78,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 	if err != nil {
 		return nil, err
 	}
+	result.Degraded = degraded
 	if err := emit(ChatStreamEvent{Type: "citations", Data: finalized.Citations}); err != nil {
 		return nil, err
 	}
@@ -54,6 +86,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		"message_id": result.MessageID,
 		"model":      result.Model,
 		"answer":     result.Answer,
+		"degraded":   degraded,
 	}}); err != nil {
 		return nil, err
 	}

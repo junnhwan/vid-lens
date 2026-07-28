@@ -129,6 +129,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		Contexts:    contexts,
 		Citations:   citations,
 		Messages:    messages,
+		Policy:      policy,
 	}, nil
 }
 
@@ -187,6 +188,8 @@ func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, questi
 		RecentLimit: recentLimit,
 		Citations:   []Citation{},
 		Messages:    messages,
+		// 概览路径不走向量检索，无 rerank，故无档1 fallback；UseSummary=true 走 LLM。
+		Policy: ExecutionPolicy{Retrieve: false, UseSummary: true, UseLLM: true, Scope: scopeOfSession(session)},
 	}, nil
 }
 
