@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VidLens 前端 Mockup 索引</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { brand: {50:'#EEF2FF',100:'#E0E7FF',600:'#4F46E5',700:'#4338CA'} },
+    fontFamily: { sans: ['-apple-system','Segoe UI','PingFang SC','Microsoft YaHei','sans-serif'] },
+  } }
+}
+</script>
+</head>
+<body class="bg-zinc-50 text-zinc-800 font-sans antialiased">
+<div class="max-w-3xl mx-auto px-6 py-12">
+  <h1 class="text-2xl font-semibold mb-2">VidLens（映知）前端 Mockup</h1>
+  <p class="text-sm text-zinc-500 mb-8">静态线框图 · Tailwind CDN · 占位数据 · 无 API 逻辑。确认布局后进入实现阶段。</p>
+
+  <div class="space-y-4">
+    <a href="library.html" class="block bg-white border border-zinc-200 rounded-lg p-5 hover:border-brand-600 transition">
+      <div class="font-medium">1. 视频库 <span class="text-zinc-400 font-normal">library.html → /</span></div>
+      <p class="text-sm text-zinc-500 mt-1">左筛选栏 + 任务行式列表 + 右侧详情面板。含状态变体：Pending/Queued/Running/Completed/Failed/Dead、上传 Modal、空态、加载骨架。</p>
+    </a>
+    <a href="chat.html" class="block bg-white border border-zinc-200 rounded-lg p-5 hover:border-brand-600 transition">
+      <div class="font-medium">2. 单视频问答 <span class="text-zinc-400 font-normal">chat.html → /chat/:taskId</span></div>
+      <p class="text-sm text-zinc-500 mt-1">消息流 720px 限宽。流式打字、[Cx] 引用徽标、展开/收起引用卡片、strict_rag fail-closed 提示、TopK 控件。</p>
+    </a>
+    <a href="kb.html" class="block bg-white border border-zinc-200 rounded-lg p-5 hover:border-brand-600 transition">
+      <div class="font-medium">3. 知识库问答 <span class="text-zinc-400 font-normal">kb.html → /kb/:kbId</span></div>
+      <p class="text-sm text-zinc-500 mt-1">左侧成员视频栏 + 复用问答布局。引用卡片标注来源视频。含成员管理入口。</p>
+    </a>
+    <a href="settings.html" class="block bg-white border border-zinc-200 rounded-lg p-5 hover:border-brand-600 transition">
+      <div class="font-medium">4. AI Profile 设置 <span class="text-zinc-400 font-normal">settings.html → /settings</span></div>
+      <p class="text-sm text-zinc-500 mt-1">ASR/LLM/Embedding 三类 tab，列表 + 编辑表单，测试连通内联结果、设为默认、探测 embedding 维度。</p>
+    </a>
+  </div>
+
+  <div class="mt-10 text-xs text-zinc-400 space-y-1">
+    <p>状态色约定：Pending=zinc · Queued=sky · Running=amber(脉冲) · Completed=emerald · Failed=rose · Dead=zinc 实心</p>
+    <p>主色 Indigo-600 仅用于主按钮/激活态/链接；语义色 success/warning/error 集中在 Tailwind token。</p>
+  </div>
+</div>
+</body>
+</html>

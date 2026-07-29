@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案 A · 独立任务详情页 /task/:id · VidLens Mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { brand: {50:'#EEF2FF',100:'#E0E7FF',600:'#4F46E5',700:'#4338CA'} },
+    fontFamily: { sans: ['-apple-system','Segoe UI','PingFang SC','Microsoft YaHei','sans-serif'], mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] },
+  } }
+}
+</script>
+<style>
+  .pulse-dot { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+</style>
+</head>
+<body class="bg-zinc-50 text-zinc-800 font-sans antialiased text-sm">
+
+<div class="hidden md:flex flex-col h-screen">
+
+  <!-- Header：多一个返回 + 面包屑 -->
+  <header class="h-12 shrink-0 bg-white border-b border-zinc-200 flex items-center px-4 gap-4">
+    <div class="flex items-center gap-2 font-semibold text-[15px]">
+      <span class="w-6 h-6 rounded bg-brand-600 text-white flex items-center justify-center text-xs font-bold">映</span>
+      VidLens
+    </div>
+    <nav class="flex items-center gap-1 text-[13px] text-zinc-500 ml-2">
+      <a href="#" class="px-2.5 py-1 rounded hover:bg-zinc-100">视频库</a>
+      <span class="text-zinc-300">/</span>
+      <span class="px-2.5 py-1 text-zinc-700 font-medium">任务详情</span>
+    </nav>
+    <div class="ml-auto flex items-center gap-3">
+      <button class="h-8 px-3 rounded-md bg-brand-600 text-white text-[13px] font-medium hover:bg-brand-700">+ 上传视频</button>
+      <button class="w-8 h-8 rounded-full bg-zinc-200 text-zinc-600 text-xs font-medium flex items-center justify-center">ZJ</button>
+    </div>
+  </header>
+
+  <!-- 详情页主体：左摘要(40%) 右转写(60%) 双栏，整页无侧边列表 -->
+  <div class="flex-1 min-h-0 flex flex-col">
+
+    <!-- 页面工具条：返回 + 标题 + 状态 + 主操作 -->
+    <div class="shrink-0 bg-white border-b border-zinc-200 px-6 py-3.5 flex items-center gap-4">
+      <a href="#" class="h-8 px-2.5 rounded-md border border-zinc-300 text-[13px] text-zinc-600 hover:bg-zinc-50 flex items-center gap-1">← 视频库</a>
+      <div class="min-w-0 flex-1">
+        <h1 class="text-[16px] font-semibold truncate">深入理解 Kafka ISR 机制与副本同步延迟排查</h1>
+        <p class="text-xs text-zinc-400 mt-0.5">本地上传 · 1.2 GB · 01:12:08 · 创建于 2026-07-27 21:40 · 任务 #1031</p>
+      </div>
+      <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Completed
+      </span>
+      <div class="flex gap-2 shrink-0">
+        <button class="h-8 px-4 rounded-md bg-brand-600 text-white text-[13px] font-medium hover:bg-brand-700">去问答 →</button>
+        <button class="h-8 px-3 rounded-md border border-zinc-300 text-[13px] hover:bg-zinc-50" title="更多操作">⋯</button>
+      </div>
+    </div>
+
+    <!-- 三阶段进度（横向窄条，完成后折叠成一行徽标） -->
+    <div class="shrink-0 bg-white border-b border-zinc-200 px-6 py-2 flex items-center gap-6 text-xs">
+      <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px]">✓</span>ASR 转写 · 52 段</span>
+      <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px]">✓</span>LLM 摘要 · 已生成</span>
+      <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px]">✓</span>RAG 索引 · 48 chunks</span>
+      <span class="ml-auto text-zinc-400">全部完成于 2026-07-27 22:03</span>
+    </div>
+
+    <!-- 双栏内容区 -->
+    <div class="flex-1 min-h-0 flex">
+
+      <!-- 左栏：摘要（40%，独立滚动） -->
+      <section class="w-[40%] shrink-0 border-r border-zinc-200 flex flex-col bg-white">
+        <div class="px-6 pt-4 pb-2 flex items-center gap-2 border-b border-zinc-100">
+          <h2 class="text-[13px] font-semibold">内容摘要</h2>
+          <span class="text-[11px] text-zinc-400">deepseek-chat 生成</span>
+          <div class="ml-auto flex gap-1">
+            <button class="h-7 px-2 rounded text-xs text-zinc-500 hover:bg-zinc-100">复制</button>
+            <button class="h-7 px-2 rounded text-xs text-zinc-500 hover:bg-zinc-100">重新生成</button>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto px-6 py-4 text-[14px] leading-7 text-zinc-700">
+          <p>本视频从 Kafka ISR（In-Sync Replicas）机制的设计动机讲起，系统梳理了 ISR 收缩与扩张的触发条件、<code class="px-1 rounded bg-zinc-100 text-[12.5px] font-mono">replica.lag.time.max.ms</code> 参数在 0.9→2.5 版本间的语义变化，以及 HW / LEO 两个水位线在副本同步中的推进逻辑。</p>
+          <p class="mt-3">后半段以一次真实的线上告警为案例：某分区 ISR 从 3 收缩到 1，排查过程涉及 follower fetch 线程瓶颈、日志刷盘抖动与 leader 切换风暴，最终定位为 broker 端 <code class="px-1 rounded bg-zinc-100 text-[12.5px] font-mono">num.replica.fetchers</code> 配置不足叠加磁盘 io-util 打满。视频给出了三条可落地的调优建议与对应的监控指标。</p>
+          <h3 class="mt-5 mb-2 text-[13px] font-semibold text-zinc-800">关键结论</h3>
+          <ul class="list-disc pl-5 space-y-1.5 text-[13.5px]">
+            <li>ISR 判定在 0.9 之后只看时间维度，"偶尔追上的慢 follower"不会被踢出，是多数误解的根源。</li>
+            <li><code class="px-1 rounded bg-zinc-100 text-[12px] font-mono">num.replica.fetchers=1</code> 是大流量分区副本滞后的最常见单点瓶颈。</li>
+            <li>ISR shrink 不等于丢数据，要结合 HW 是否回退判断真实影响面。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 右栏：转写全文（60%，独立滚动） -->
+      <section class="flex-1 min-w-0 flex flex-col bg-zinc-50">
+        <div class="px-6 pt-4 pb-2 flex items-center gap-3 bg-white border-b border-zinc-100">
+          <h2 class="text-[13px] font-semibold">转写全文 <span class="text-zinc-400 font-normal">52 段</span></h2>
+          <div class="ml-auto flex items-center gap-2">
+            <div class="relative">
+              <input type="search" placeholder="在转写中搜索…" class="h-8 w-56 pl-8 pr-3 rounded-md border border-zinc-300 text-[13px] placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-600/30">
+              <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400">⌕</span>
+            </div>
+            <button class="h-8 px-2.5 rounded-md border border-zinc-300 text-xs text-zinc-600 hover:bg-zinc-50">导出 .txt</button>
+          </div>
+        </div>
+        <ol class="flex-1 overflow-y-auto px-6 py-3 space-y-1">
+          <li class="flex gap-4 px-3 py-2 rounded-md hover:bg-white">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-zinc-400 pt-1">#01</span>
+            <p class="text-[14px] leading-6 text-zinc-700">今天我们聊一个在 Kafka 生产环境几乎一定会碰到的问题：ISR 为什么会收缩，以及它收缩之后你的副本到底还安不安全。</p>
+          </li>
+          <li class="flex gap-4 px-3 py-2 rounded-md hover:bg-white">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-zinc-400 pt-1">#02</span>
+            <p class="text-[14px] leading-6 text-zinc-700">先明确一个概念，ISR 不是"同步副本的集合"这么简单，它是 leader 认为"有资格在我挂掉之后接替我"的副本集合。判断标准在 0.9 之前是 lag 条数加时间，0.9 之后只剩时间，就是 replica.lag.time.max.ms 这一个参数。</p>
+          </li>
+          <li class="flex gap-4 px-3 py-2 rounded-md bg-brand-50 border-l-2 border-brand-600">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-brand-700 pt-1">#03</span>
+            <p class="text-[14px] leading-6 text-zinc-800">这个参数默认 10 秒，意思是 follower 只要在 10 秒内追上过 leader，就不会被踢出 ISR。注意它是"追上过"而不是"持续追上"，所以一个长期滞后但偶尔能抓一把的 follower 反而可能一直留在 ISR 里，这是很多人误解的点。</p>
+          </li>
+          <li class="flex gap-4 px-3 py-2 rounded-md hover:bg-white">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-zinc-400 pt-1">#04</span>
+            <p class="text-[14px] leading-6 text-zinc-700">接下来看一次真实告警。线上某个 topic 的分区 12，ISR 从 [1,2,3] 突然变成 [1]，监控上 ISR shrink rate 直接打满，但消息并没有丢。为什么？</p>
+          </li>
+          <li class="flex gap-4 px-3 py-2 rounded-md hover:bg-white">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-zinc-400 pt-1">#05</span>
+            <p class="text-[14px] leading-6 text-zinc-700">排查的第一步永远是看 follower 的 fetch 延迟。broker 2 和 3 的 replica fetcher 线程 backlog 持续增长，说明不是网络问题，是 fetch 吞吐本身跟不上了。</p>
+          </li>
+          <li class="flex gap-4 px-3 py-2 rounded-md hover:bg-white">
+            <span class="w-10 shrink-0 text-right text-xs font-mono text-zinc-400 pt-1">#06</span>
+            <p class="text-[14px] leading-6 text-zinc-700">到这里可以下结论了：num.replica.fetchers 默认只有 1，单线程 fetch 在大流量分区上就是瓶颈。把它调到 3，配合磁盘从 SATA 换 NVMe，ISR 抖动再也没有出现过。</p>
+          </li>
+          <li class="py-4 text-center text-xs text-zinc-400">— 已加载 6 / 52 段，滚动加载更多 —</li>
+        </ol>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- 移动端：详情页顶 tab（摘要 / 转写） -->
+<div class="md:hidden flex flex-col min-h-screen">
+  <header class="h-12 shrink-0 bg-white border-b border-zinc-200 flex items-center px-4 gap-2">
+    <a href="#" class="text-zinc-500 text-lg">←</a>
+    <span class="font-semibold text-[15px] flex-1 truncate">Kafka ISR 机制与副本同步…</span>
+    <span class="px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">Completed</span>
+  </header>
+  <div class="bg-white border-b border-zinc-200 flex">
+    <button class="flex-1 py-2.5 text-[13px] font-medium text-brand-700 border-b-2 border-brand-600">摘要</button>
+    <button class="flex-1 py-2.5 text-[13px] text-zinc-500">转写全文</button>
+  </div>
+  <main class="flex-1 px-4 py-4 text-[14px] leading-7">
+    <p>本视频从 Kafka ISR 机制的设计动机讲起…（移动端 tab 内内容同桌面端对应栏）</p>
+  </main>
+</div>
+
+</body>
+</html>
