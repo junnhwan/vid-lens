@@ -47,3 +47,16 @@ func GetUserID(c *gin.Context) int64 {
 	}
 	return id.(int64)
 }
+
+// GetRole 从 gin.Context 中获取当前用户角色（USER / ADMIN / DEMO）。
+// 演示账号(DEMO)承载只读体验：AI 配置不可改、不可见细节、禁上传等写操作。
+func GetRole(c *gin.Context) string {
+	role, exists := c.Get("role")
+	if !exists {
+		return ""
+	}
+	if s, ok := role.(string); ok {
+		return s
+	}
+	return ""
+}

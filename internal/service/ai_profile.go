@@ -143,6 +143,30 @@ func (s *AIProfileService) List(userID int64) ([]AIProfileResponse, error) {
 	return responses, nil
 }
 
+// ListMasked 只暴露配置身份与模型名，隐藏 base_url / endpoint / provider / key。
+// 用于 DEMO 账号：陌生人登录后只能看到名字和模型，拿不到任何服务细节。
+func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error) {
+	profiles, err := s.repo.ListByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]AIProfileResponse, 0, len(profiles))
+	for i := range profiles {
+		p := &profiles[i]
+		responses = append(responses, AIProfileResponse{
+			ID:             p.ID,
+			Name:           p.Name,
+			LLMModel:       p.LLMModel,
+			ASRModel:       p.ASRModel,
+			EmbeddingModel: p.EmbeddingModel,
+			IsDefault:      p.IsDefault,
+			Source:         "user",
+			ReadOnly:       true,
+		})
+	}
+	return responses, nil
+}
+
 func (s *AIProfileService) Update(userID, id int64, req AIProfileRequest) (*AIProfileResponse, error) {
 	if err := validateAIProfileRequest(req, false); err != nil {
 		return nil, err

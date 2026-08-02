@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/middleware"
+	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
 	"vid-lens/internal/service"
 )
@@ -20,8 +21,22 @@ func NewAIProfileHandler(svc *service.AIProfileService) *AIProfileHandler {
 	return &AIProfileHandler{svc: svc}
 }
 
+// isDemoUser 演示账号：陌生人可登录，AI 配置只读且脱敏，禁止修改/测试。
+func isDemoUser(c *gin.Context) bool {
+	return middleware.GetRole(c) == model.RoleDemo
+}
+
 func (h *AIProfileHandler) List(c *gin.Context) {
 	userID := middleware.GetUserID(c)
+	if isDemoUser(c) {
+		profiles, err := h.svc.ListMasked(userID)
+		if err != nil {
+			response.InternalError(c, "查询 AI 配置失败")
+			return
+		}
+		response.OK(c, profiles)
+		return
+	}
 	profiles, err := h.svc.List(userID)
 	if err != nil {
 		response.InternalError(c, "查询 AI 配置失败")
@@ -31,6 +46,10 @@ func (h *AIProfileHandler) List(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) Create(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可修改 AI 配置")
+		return
+	}
 	userID := middleware.GetUserID(c)
 	var req service.AIProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -47,6 +66,10 @@ func (h *AIProfileHandler) Create(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) Update(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可修改 AI 配置")
+		return
+	}
 	userID := middleware.GetUserID(c)
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -73,6 +96,10 @@ func (h *AIProfileHandler) Update(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) Delete(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可修改 AI 配置")
+		return
+	}
 	userID := middleware.GetUserID(c)
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -89,6 +116,10 @@ func (h *AIProfileHandler) Delete(c *gin.Context) {
 
 
 func (h *AIProfileHandler) Test(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可测试 AI 配置")
+		return
+	}
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		response.BadRequest(c, "参数错误")
@@ -129,6 +160,10 @@ func (h *AIProfileHandler) Test(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) ListModels(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可拉取模型列表")
+		return
+	}
 	userID := middleware.GetUserID(c)
 	var req service.ListModelsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -148,6 +183,10 @@ func (h *AIProfileHandler) ListModels(c *gin.Context) {
 }
 
 func (h *AIProfileHandler) ProbeEmbeddingDim(c *gin.Context) {
+	if isDemoUser(c) {
+		response.Forbidden(c, "演示账号不可检测模型维度")
+		return
+	}
 	userID := middleware.GetUserID(c)
 	var req service.ProbeEmbeddingDimRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

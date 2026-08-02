@@ -57,6 +57,11 @@ func Unauthorized(c *gin.Context, msg string) {
 	Fail(c, http.StatusUnauthorized, msg)
 }
 
+// Forbidden 403 无权限（已认证但角色/资源不允许）
+func Forbidden(c *gin.Context, msg string) {
+	Fail(c, http.StatusForbidden, msg)
+}
+
 // InternalError 500 内部错误
 func InternalError(c *gin.Context, msg string) {
 	Fail(c, http.StatusInternalServerError, msg)
