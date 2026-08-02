@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertCircle, ArchiveX, ArrowRight, RotateCw, Loader2 } from 'lucide-react'
+import { AlertCircle, ArchiveX, ArrowRight, RotateCw, Loader2, Play } from 'lucide-react'
 import type { VideoTask } from '@/lib/types'
 import { TaskStatusEnum } from '@/lib/types'
 import { api, ApiError } from '@/lib/api'
@@ -18,12 +18,31 @@ export default function TaskCard({ task, index, selected, onSelect, onRetried }:
   onRetried?: () => void
 }) {
   const [retrying, setRetrying] = useState(false)
+  const [starting, setStarting] = useState(false)
   const toast = useToast()
   const badge = statusBadge(task.status)
   const phases = computePhases(task)
   const isDead = task.status === TaskStatusEnum.Dead
   const isFailed = task.status === TaskStatusEnum.Failed
   const isRunning = task.status === TaskStatusEnum.Running
+
+  // 待处理（已上传未转写）任务的入口：开始转写 → 后续摘要/索引在详情面板触发。
+  const canStartTranscribe = task.status === TaskStatusEnum.Pending && !task.has_transcription
+
+  const startTranscribe = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (starting) return
+    setStarting(true)
+    try {
+      await api.transcribe(task.id)
+      toast.success('已提交转写，稍后自动刷新')
+      onRetried?.()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '提交转写失败')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   // 失败重试：按后端 last_job_type 选对应投递端点。
   // 后端常量（internal/model/task_job.go）：transcribe / analyze / download / rag_index
@@ -120,13 +139,22 @@ export default function TaskCard({ task, index, selected, onSelect, onRetried }:
           )}
         </div>
 
-        {/* 右侧：大小 / 去问答 */}
+        {/* 右侧：大小 / 开始转写 / 去问答 */}
         {task.status === TaskStatusEnum.Completed ? (
           <a
             href={`/chat/${task.id}`}
             onClick={(e) => e.stopPropagation()}
             className="btn-line h-7 px-2.5 text-[10px] font-medium shrink-0 mt-0.5 flex items-center gap-1"
           >去问答 <ArrowRight className="w-3 h-3" /></a>
+        ) : canStartTranscribe ? (
+          <button
+            onClick={startTranscribe}
+            disabled={starting}
+            className="btn-line h-7 px-2.5 text-[10px] font-medium shrink-0 mt-0.5 flex items-center gap-1 disabled:opacity-50"
+            title="触发 ASR 转写，完成后可在详情面板生成摘要与索引"
+          >
+            {starting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}{starting ? '提交中' : '开始转写'}
+          </button>
         ) : (
           <span className="font-mono text-[10px] text-ink-4 shrink-0 pt-1">{fmtSize(task.file_size)}</span>
         )}

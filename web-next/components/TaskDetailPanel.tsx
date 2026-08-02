@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { ChevronsRight, X, ArrowRight, Check, Copy, RefreshCw, Search, Download, AlertTriangle, Database, PanelRightClose, Columns2, Square, Loader2 } from 'lucide-react'
+import { ChevronsRight, X, ArrowRight, Check, Copy, RefreshCw, Search, Download, AlertTriangle, Database, PanelRightClose, Columns2, Square, Loader2, Sparkles } from 'lucide-react'
 import type { VideoTask } from '@/lib/types'
 import { TaskStatusEnum } from '@/lib/types'
 import { api, ApiError } from '@/lib/api'
@@ -48,6 +48,20 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
       toast.success('已提交重新生成，稍后刷新可见')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : '重新生成失败')
+    } finally {
+      setRegening(false)
+    }
+  }
+
+  // 首次生成摘要：已转写但尚未摘摘要时展示（与 Regen 区分语义）
+  const genSummary = async () => {
+    if (!task || regening) return
+    setRegening(true)
+    try {
+      await api.analyze(task.id)
+      toast.success('已提交摘要生成，稍后刷新可见')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : '提交摘要失败')
     } finally {
       setRegening(false)
     }
@@ -153,6 +167,11 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
               <div className="text-[10px] font-medium text-ink-3">内容摘要</div>
               {task.summary?.model_name && <span className="font-mono text-[10px] text-ink-4">{task.summary.model_name}</span>}
               <div className="ml-auto flex gap-3">
+                {task.has_transcription && !task.has_summary && (
+                  <button onClick={genSummary} disabled={regening} className="text-[10px] font-medium text-sienna-700 hover:text-sienna-900 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {regening ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}生成摘要
+                  </button>
+                )}
                 <button onClick={copySummary} disabled={!task.summary?.content} className="text-[10px] font-medium text-ink-3 hover:text-ink-0 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"><Copy className="w-3 h-3" />Copy</button>
                 <button onClick={regenSummary} disabled={regening} className="text-[10px] font-medium text-ink-3 hover:text-ink-0 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
                   {regening ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}Regen
