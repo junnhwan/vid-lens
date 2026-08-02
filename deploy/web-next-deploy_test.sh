@@ -159,7 +159,8 @@ test_health_failure_rolls_back() {
 test_missing_vidlens_api_base_is_rejected() {
   new_case missing-env
 
-  if PATH="$stub_dir:$PATH" \
+  if env -u VIDLENS_API_BASE \
+    PATH="$stub_dir:$PATH" \
     CALL_LOG="$call_log" \
     DEPLOY_PATH="$deploy_dir" \
     DEPLOY_TMP_DIR="$artifact_dir" \
