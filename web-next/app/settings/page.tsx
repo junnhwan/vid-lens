@@ -34,6 +34,8 @@ export default function SettingsPage() {
   useEffect(() => { load() }, [load])
 
   const selected = profiles.find(p => p.id === selectedId) || null
+  // 演示账号(DEMO)的 profile 是只读的：隐藏新建/设默认/编辑表单，只展示模型清单。
+  const readOnly = profiles.length > 0 && profiles.every(p => p.read_only)
 
   return (
     <div className="flex flex-col h-screen">
@@ -52,7 +54,7 @@ export default function SettingsPage() {
             {(Object.keys(TAB_META) as Tab[]).map(t => (
               <button key={t} onClick={() => setTab(t)} className={`tab py-2 mr-7 ${tab === t ? 'on' : ''}`}>{TAB_META[t].label}</button>
             ))}
-            <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-2.5 ml-auto font-sans text-[10px] flex items-center gap-1"><Plus className="w-3 h-3" />新建 Profile</button>
+            {!readOnly && <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-2.5 ml-auto font-sans text-[10px] flex items-center gap-1"><Plus className="w-3 h-3" />新建 Profile</button>}
           </div>
 
           {err && <div className="mt-4 text-[12px] text-rust">{err}<button onClick={load} className="ml-2 underline">重试</button></div>}
@@ -84,9 +86,9 @@ export default function SettingsPage() {
                               {p.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
                               {!hasGroup && <span className="font-mono text-[9px] text-ink-4 border border-ink-0/20 px-1">未配{tab.toUpperCase()}</span>}
                             </div>
-                            <div className="font-mono text-[11px] text-ink-3 mt-0.5 truncate">{groupField(p, tab).provider || '—'} · {groupField(p, tab).base || '—'}</div>
+                            <div className="font-mono text-[11px] text-ink-3 mt-0.5 truncate">{readOnly ? (groupField(p, tab).model || '—') : `${groupField(p, tab).provider || '—'} · ${groupField(p, tab).base || '—'}`}</div>
                           </div>
-                          {!sel && !p.is_default && <button onClick={(e) => { e.stopPropagation(); setDefault(p.id) }} className="font-sans text-[10px] text-ink-4 hover:text-ink-0">设默认</button>}
+                          {!readOnly && !sel && !p.is_default && <button onClick={(e) => { e.stopPropagation(); setDefault(p.id) }} className="font-sans text-[10px] text-ink-4 hover:text-ink-0">设默认</button>}
                         </div>
                       </li>
                     )
@@ -101,14 +103,20 @@ export default function SettingsPage() {
 
             {/* 右：编辑表单 */}
             <section>
-              {showNewForm ? (
+              {readOnly ? (
+                selected ? (
+                  <ReadOnlyProfile profile={selected} />
+                ) : (
+                  <div className="font-sans text-[10px] text-ink-4 mb-2.5">查看 · 未选中</div>
+                )
+              ) : showNewForm ? (
                 <ProfileForm key="new" tab={tab} onChanged={load} onSaved={(id) => { setSelectedId(id); setShowNewForm(false) }} />
               ) : selected ? (
                 <ProfileForm key={selected.id} tab={tab} profile={selected} onChanged={load} />
               ) : (
                 <div className="font-sans text-[10px] text-ink-4 mb-2.5">编辑 · 未选中</div>
               )}
-              {!selected && !showNewForm && (
+              {!selected && !showNewForm && !readOnly && (
                 <div className="border border-dashed border-ink-0/20 py-12 text-center font-sans text-[12px] text-ink-4">从左侧选择一个 Profile，或新建</div>
               )}
             </section>
@@ -134,6 +142,33 @@ function groupField(p: AIProfile, tab: Tab): { provider: string; base: string; k
   if (tab === 'asr') return { provider: p.asr_provider, base: p.asr_base_url, keyMasked: p.asr_api_key_masked, model: p.asr_model }
   if (tab === 'llm') return { provider: p.llm_provider, base: p.llm_base_url, keyMasked: p.llm_api_key_masked, model: p.llm_model }
   return { provider: p.embedding_provider, base: p.embedding_endpoint, keyMasked: p.embedding_api_key_masked, model: p.embedding_model }
+}
+
+// 演示账号只读视图：只展示名字与模型名，不暴露服务地址/密钥，也不提供任何编辑入口。
+function ReadOnlyProfile({ profile }: { profile: AIProfile }) {
+  const rows: { label: string; value: string }[] = [
+    { label: 'LLM · 摘要问答', value: profile.llm_model },
+    { label: 'ASR · 转写', value: profile.asr_model },
+    { label: 'Embedding · 索引', value: profile.embedding_model },
+  ]
+  return (
+    <div className="space-y-4">
+      <div className="font-sans text-[10px] text-ink-4 mb-0.5">查看 · {profile.name}</div>
+      <div className="border border-ink-0/15 bg-paper-0 p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="font-sans text-[18px] font-medium text-ink-0">{profile.name}</span>
+          {profile.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
+        </div>
+        {rows.map(r => (
+          <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/10 pb-2.5 last:border-0 last:pb-0">
+            <span className="font-mono text-[10px] text-ink-4 wide uppercase">{r.label}</span>
+            <span className="font-mono text-[12.5px] text-ink-1">{r.value || '—'}</span>
+          </div>
+        ))}
+        <p className="font-sans text-[11px] text-ink-4 pt-1">演示账号配置为只读，服务地址与密钥已隐藏。</p>
+      </div>
+    </div>
+  )
 }
 
 // ============ 编辑/新建表单 ============
