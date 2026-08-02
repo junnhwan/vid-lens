@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -70,6 +71,9 @@ func TestLegacyBaselineManifestFreezesFilesAndRejectsResumeUse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// 冻结 digest 以 Git 提交的 LF 字节内容为准；Windows 工作区 checkout 为
+		// CRLF，先归一化，避免同一文件在本地/CI 上算出不同 digest。
+		content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 		sum := sha256.Sum256(content)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			t.Fatalf("%s digest = %s, want %s", path, got, want)
