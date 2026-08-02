@@ -14,6 +14,7 @@
 | 查看分片上传与断点续传 | `internal/handler/media.go`、`internal/service/media_chunk_upload.go`、`web/src/chunkedUpload.js` |
 | 查看任务删除与资源清理 | `internal/service/task_cleanup*.go`、`internal/repository/task_cleanup_job.go`、`internal/model/task_cleanup_job.go` |
 | 查看聊天和 RAG 问答 | `internal/service/chat*.go`、`internal/service/rag_*.go` |
+| 查看数据库表结构与字段 | `internal/model/`、`docs/database-schema.md`（逐字段面试版）、`docs/database-schema.svg`（表关系图）、`internal/vector/pgvector.go`（`vidlens_rag_vectors` 投影表） |
 | 查看离线评测/审计/重建 | `internal/ragtool/`、`cmd/rag-eval`、`cmd/rag-audit`、`cmd/rag-reindex` |
 | 查看向量后端选择 | `internal/vector/factory.go`、`internal/vector/backend.go` |
 | 查看关系数据库迁移 | `cmd/mysql-to-postgres/`、`internal/dbmigration/`、`docs/postgresql-single-database-migration.md` |
@@ -29,14 +30,14 @@
 HTTP handler
   ├─ 普通文件上传 -> MinIO asset -> PostgreSQL VideoTask -> 用户主动投递分析/转写消息
   ├─ 分片上传 -> Redis Set 临时片号 + MinIO chunks -> 服务端合并 -> PostgreSQL asset/task
-  └─ URL 上传 -> PostgreSQL downloading task/job -> Kafka download topic
+  └─ URL 上传 -> PostgreSQL downloading task/job -> RabbitMQ download queue
 
-Kafka consumer
+RabbitMQ consumer
   -> ClaimTaskProcessing(processing lease)
   -> 下载 / ASR / 摘要 / RAG 索引
   -> PostgreSQL 持久化阶段结果
   -> CompleteTaskProcessing 或 FailTaskProcessing
-  -> 只有业务完成或失败已可靠移交后才提交 Kafka offset
+  -> 只有业务完成或失败已可靠移交后才 ack 消息
 
 任务删除
   -> PostgreSQL transaction: task_cleanup_jobs intent + task soft-delete
@@ -53,28 +54,28 @@ RAG 问答
   -> AI 回答 -> PostgreSQL chat message + Redis 最近消息
 ```
 
-`cmd/server/main.go` 负责运行时组装；业务服务不应自行读取配置、重复创建 Kafka producer 或复制向量后端 switch。
+`cmd/server/main.go` 负责运行时组装；业务服务不应自行读取配置、重复创建 RabbitMQ producer 或复制向量后端 switch。
 
 ## 3. 当前文件职责边界
 
 ### 3.0 Server composition
 
 - `cmd/server/main.go`：启动参数、配置加载、基础设施连接、vector backend 初始化、HTTP server 和进程级关闭顺序；不再直接堆放 service/handler 构造和路由细节。
-- `cmd/server/wiring.go`：把已经连接好的 PostgreSQL/Redis/MinIO/Kafka/vector 依赖组装成 service、handler、consumer、业务 retry scheduler 和资源 cleanup scheduler；这里不创建网络连接，也不启动 goroutine。
+- `cmd/server/wiring.go`：把已经连接好的 PostgreSQL/Redis/MinIO/RabbitMQ/vector 依赖组装成 service、handler、consumer、业务 retry scheduler 和资源 cleanup scheduler；这里不创建网络连接，也不启动 goroutine。
 - `cmd/server/router.go`：Gin middleware、API 路由、健康检查路由和前端 SPA fallback；不负责业务对象构造。
 - `cmd/server/health.go`：liveness/readiness 的检查模型和响应策略。
 - `cmd/server/options.go`：server 命令行参数解析。
 
 这样拆分的目的不是引入 DI 框架，而是把“连接基础设施”“组装应用”和“注册 HTTP 路由”分成可单独阅读、测试和替换的边界。
 
-### 3.1 Kafka 和任务 lease
+### 3.1 RabbitMQ 和任务 lease
 
 - `internal/mq/consumer.go`：`Consumer` 依赖和构造，不放具体阶段处理逻辑。
-- `internal/mq/consumer_lifecycle.go`：reader 生命周期、手动 commit、poison message 持久化隔离和消费者启动。
+- `internal/mq/consumer_lifecycle.go`：reader 生命周期、手动 ack、poison message 持久化隔离和消费者启动。
 - `internal/mq/consumer_download.go`：下载阶段。
 - `internal/mq/consumer_transcribe.go`：音频提取、分段 ASR、chunk 状态。
 - `internal/mq/consumer_analyze.go`：摘要和标题。
-- `internal/mq/consumer_rag.go`：RAG index topic 的消费和投递失败 handoff。
+- `internal/mq/consumer_rag.go`：RAG index queue 的消费和投递失败 handoff。
 - `internal/mq/consumer_helpers.go`：跨阶段共享的 lease、trace 和状态辅助。
 - `internal/mq/retry.go`：扫描到期失败任务并投递重试消息；不要在这里复制 processing lease 的数据库更新。
 
@@ -146,9 +147,9 @@ Agent 模式（`.../messages/agent`、`video_agent*.go`）是**实验功能**，
 
 ## 4. 不可破坏的不变量
 
-### 4.1 Kafka offset
+### 4.1 消息 ack 与消费进度
 
-`consumer_lifecycle.go` 的 `consumeReader` 只有在 handler 返回成功后才 commit。handler 返回错误时 reader 会关闭并由外层重建；poison message 只有先写入隔离表后才被转换为可提交的成功结果。
+`consumer_lifecycle.go` 的 `consumeReader` 只有在 handler 返回成功后才 ack。handler 返回错误时 reader 会关闭并由外层重建；poison message 只有先写入隔离表后才被转换为已 ack 的成功结果。
 
 ### 4.2 Processing lease
 
@@ -160,11 +161,11 @@ Agent 模式（`.../messages/agent`、`video_agent*.go`）是**实验功能**，
 - `lease_expires_at`：过期后才允许接管；
 - `TaskJob` 对应阶段的状态和 token。
 
-数据库副作用应使用 repository 提供的 lease 方法，不要在 consumer 中直接更新这些字段。外部 AI、MinIO、Kafka 调用不是数据库事务的一部分，必须依赖 token、幂等记录或已持久化结果降低重复执行影响。
+数据库副作用应使用 repository 提供的 lease 方法，不要在 consumer 中直接更新这些字段。外部 AI、MinIO、RabbitMQ 调用不是数据库事务的一部分，必须依赖 token、幂等记录或已持久化结果降低重复执行影响。
 
 ### 4.3 Retry dispatch
 
-RetryScheduler claim dispatch 后，如果 Kafka enqueue 失败，必须通过 `RestoreRetryDispatch` 或等价的恢复路径让任务重新可扫描；不能只把任务留在 queued + 未过期 dispatch lease 状态。
+RetryScheduler claim dispatch 后，如果 RabbitMQ publish 失败，必须通过 `RestoreRetryDispatch` 或等价的恢复路径让任务重新可扫描；不能只把任务留在 queued + 未过期 dispatch lease 状态。
 
 ### 4.4 上传状态
 
@@ -195,7 +196,7 @@ RetryScheduler claim dispatch 后，如果 Kafka enqueue 失败，必须通过 `
 
 | 需求 | 修改位置 | 先补/运行的验证 |
 |---|---|---|
-| 新增 Kafka 阶段 | `producer.go`、对应 `consumer_*.go`、`retry.go`、`cmd/server/main.go` | `internal/mq` 测试、lease 测试、全量测试 |
+| 新增 RabbitMQ 阶段 | `producer.go`、对应 `consumer_*.go`、`retry.go`、`cmd/server/main.go`（新增 queue 默认值） | `internal/mq` 测试、lease 测试、全量测试 |
 | 修改任务重试状态 | `internal/repository/task_lease*.go`、`task_job.go` | repository lease 测试 + `go test -race ./internal/mq ./internal/repository` |
 | 新增上传方式 | `media_*.go`、handler、必要的 repository/storage | media 测试、边界和清理测试 |
 | 修改删除/资源清理 | `task_cleanup*.go`、cleanup repository、asset lifecycle、server wiring | intent 原子性、共享 asset、外部失败重试、lease 与 scheduler 测试 |
@@ -318,21 +319,21 @@ bash deploy/server-deploy_test.sh
 - host allowlist；
 - 对域名再次做 DNS 解析，并拒绝 loopback/private/unspecified/link-local/multicast 地址；
 - 去除 userinfo、fragment 和不必要 query；YouTube watch URL 只保留 `v`；
-- HTTP 创建任务时检查一次，Kafka consumer 进入真实 yt-dlp 路径前再检查一次。
+- HTTP 创建任务时检查一次，RabbitMQ consumer 进入真实 yt-dlp 路径前再检查一次。
 
 `internal/mq/consumer_download.go` 的执行期检查解决的是“任务入队后 URL 被篡改、过期或解析结果变化时仍完全不检查”的缺口，但它不是网络沙箱。yt-dlp 是外部进程，可能自行处理重定向或再次解析域名，Go 进程不能仅凭当前校验控制其全部后续网络请求。因此面试和文档中只能表述为“入口 + 执行前 allowlist/DNS 校验”，不能表述为已经完成生产级 SSRF 防护。若要达到更强边界，应在独立下载 worker、受限 egress 网络或代理层再次实施域名/IP策略。
 
 ## 9. 配置加载、校验与维护命令边界
 
-- `internal/config.Load` 负责读取 YAML、展开环境变量、检查已知弃用字段、使用 `KnownFields(true)` 严格解析，并归一化当前跨命令共享的 Kafka 默认值：`download_topic` 默认是 `video-download`，`rag_index_topic` 默认是 `video-rag-index`。
+- `internal/config.Load` 负责读取 YAML、展开环境变量、检查已知弃用字段、使用 `KnownFields(true)` 严格解析，并归一化当前跨命令共享的 MQ 默认值：`download_queue` 默认是 `video-download`，`rag_index_queue` 默认是 `video-rag-index`。
 - 未知顶层或嵌套字段、多个 YAML document 都会在加载阶段失败，避免拼写错误被静默忽略。`rag.collection` 会得到迁移到 `milvus.collection` 的明确提示；旧 `rag.rerank_model` / `rag.rerank_endpoint` 会指向 `cmd/rag-eval` 的 legacy CLI 参数。不要为兼容旧草稿重新放宽解析。
-- `cleanup` 独立配置扫描间隔、批量、lease 和失败退避，不复用 `task_retry`；两者分别处理资源回收与 Kafka 业务任务，失败语义不同。
+- `cleanup` 独立配置扫描间隔、批量、lease 和失败退避，不复用 `task_retry`；两者分别处理资源回收与 RabbitMQ 业务任务，失败语义不同。
 - `rag` 只保存 chunk、检索和 embedding 维度等后端中立参数；Milvus collection 属于 `milvus.collection`，pgvector 表名属于 `rag.vector_table`。`internal/vector.BackendConfig` 不再保留第二个顶层 collection 来源。
 - `Load` 故意不执行完整 server 校验：配置解析测试、RAG 评测和维护命令允许使用比常驻服务更窄的配置，不能因为缺少无关基础设施配置而失败。
 - `internal/config/validation.go` 按使用场景提供轻量结构校验：`ValidateServer` 检查常驻服务启动项；`ValidatePostgres` 检查正式 PostgreSQL 连接字段；`ValidateMySQL` 只检查离线迁移工具的 `legacy_mysql.*`；`ValidateVectorBackend` 只检查当前向量后端；`ValidateRAG` 再叠加索引/检索参数；`ValidatePGVectorDestination` 检查 rag-reindex 计划使用的 pgvector 连接形状和正数维度。它们只校验配置形状，不代替启动时的真实连接和 readiness。
-- server 在连接 PostgreSQL、Redis、MinIO、Kafka 或向量后端前执行 `ValidateServer`，不会读取或连接 `legacy_mysql`。`rag-audit` 和 `rag-eval` 组合正式 PostgreSQL + 当前向量后端校验；`rag-reindex` dry-run 与 execute 都校验正式 PostgreSQL 和计划目标维度，只有 execute 才初始化密钥、embedding client 和 pgvector writer。只有 `cmd/mysql-to-postgres` 使用 `ValidateMySQL`。
-- `cmd/server/main.go` 不再在启动流程中临时补 Kafka 默认值；server、`cmd/rag-audit`、`cmd/rag-eval` 和 `cmd/rag-reindex` 看到的是同一份配置语义。
-- 其他 Kafka topic 没有擅自补默认值，因为它们原本就是现有配置中的必填业务入口；不要仅为减少空值而改变启动失败语义。
+- server 在连接 PostgreSQL、Redis、MinIO、RabbitMQ 或向量后端前执行 `ValidateServer`，不会读取或连接 `legacy_mysql`。`rag-audit` 和 `rag-eval` 组合正式 PostgreSQL + 当前向量后端校验；`rag-reindex` dry-run 与 execute 都校验正式 PostgreSQL 和计划目标维度，只有 execute 才初始化密钥、embedding client 和 pgvector writer。只有 `cmd/mysql-to-postgres` 使用 `ValidateMySQL`。
+- `cmd/server/main.go` 不再在启动流程中临时补 MQ 默认值；server、`cmd/rag-audit`、`cmd/rag-eval` 和 `cmd/rag-reindex` 看到的是同一份配置语义。
+- 其他 RabbitMQ queue 没有擅自补默认值，因为它们原本就是现有配置中的必填业务入口；不要仅为减少空值而改变启动失败语义。
 - `internal/vector.BackendConfigFromApplication` 是应用配置到向量后端连接配置的唯一适配边界。`cmd/rag-reindex` 虽然明确写入 pgvector，但复用该适配器后再设置维护命令专用的较小连接池；这不表示它跟随当前 `rag.store` 选择。
 - `rag.store` 为空时由 `internal/vector.NormalizeBackendName` 归一化为 pgvector；Milvus 只在显式配置 `rag.store: milvus` 时作为迁移观察期回滚路径。不要把保留回滚适配器误写成“Milvus 已物理下线”。
 

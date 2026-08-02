@@ -47,7 +47,7 @@
 
 - 关系库：**PostgreSQL**（唯一正式 DB）
 - 向量：**pgvector**（`rag.store: pgvector`）；Milvus 仅显式回滚
-- 异步：Kafka topics `video-download` / `video-transcribe` / `video-analyze` / `video-rag-index`
+- 异步（RabbitMQ）：queues `video-download` / `video-transcribe` / `video-analyze` / `video-rag-index`
 - 对象存储：MinIO；缓存/锁/限流：Redis
 - 问答默认：stream / sync `ChatService`；**Agent 模式为实验功能**
 - 评测/审计/重建：`cmd/rag-eval`、`cmd/rag-audit`、`cmd/rag-reindex`，实现在 `internal/ragtool`（非产品主路径）
