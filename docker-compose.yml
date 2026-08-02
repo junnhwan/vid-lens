@@ -47,7 +47,8 @@ services:
       - MINIO_ROOT_PASSWORD=minioadmin
     command: server /data --console-address ":9001"
     volumes:
-      - ./data/minio:/data
+      # 挂老仓库 vid-lens-727 的 MinIO 数据（含历史视频对象）
+      - ../vid-lens-727/data/minio:/data
     networks:
       - vidlens-net
 
@@ -66,7 +67,8 @@ services:
       POSTGRES_DB: vidlens
       TZ: Asia/Shanghai
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      # 挂老仓库 vid-lens-727 的 PG 数据（含历史任务/转写/摘要/chunk/聊天）
+      - ../vid-lens-727/data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s

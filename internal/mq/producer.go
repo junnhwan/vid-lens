@@ -99,9 +99,9 @@ func claimTokenFromContext(ctx context.Context) string {
 //
 // vid-lens 用 MQ 的真实痛点是 ① 耗时任务出 HTTP 请求、② 失败可恢复
 // （AI 服务挂任务不丢）、③ 削峰（ASR 配额有限需排队）。吞吐量级是用户
-// 级并发（个位到几十 QPS），不是日志管道（万级 TPS）。Kafka 的大杀器
-// ——partition 并行、ISR 副本、高吞吐日志聚合——一个用不上；选 Kafka
-// 是"堆名气"，面试一句"你吞吐不高为什么用 Kafka 不用 RabbitMQ"就答含糊。
+// 级并发（个位到几十 QPS），不是日志管道（万级 TPS）——Kafka 的
+// partition 并行、ISR 副本、高吞吐日志聚合在用户级并发下都用不上，
+// 所以选 RabbitMQ 而非 Kafka（决策与故障矩阵见 docs/specs/02-dispatch-consistency.md）。
 //
 // RabbitMQ 的 ack 重投 / 死信队列 / 优先级 / 路由天然咬合"任务可靠投递
 // + 失败可恢复 + ASR 排队"痛点。配置：classic persistent queue + publisher

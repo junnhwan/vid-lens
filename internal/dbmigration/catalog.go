@@ -29,6 +29,7 @@ var migrationCatalog = []TableSpec{
 	autoIDTable("kafka_message_failures", &model.KafkaMessageFailure{}),
 	withDependencies(autoIDTable("video_transcriptions", &model.VideoTranscription{}), "video_tasks"),
 	withDependencies(autoIDTable("video_transcription_chunks", &model.VideoTranscriptionChunk{}), "video_tasks"),
+	withDependencies(autoIDTable("video_visual_frames", &model.VideoVisualFrame{}), "video_tasks"),
 	withDependencies(autoIDTable("ai_summaries", &model.AISummary{}), "video_tasks"),
 	withDependencies(autoIDTable("user_ai_profiles", &model.UserAIProfile{}), "users"),
 	withDependencies(autoIDTable("video_chunks", &model.VideoChunk{}), "users", "video_tasks"),

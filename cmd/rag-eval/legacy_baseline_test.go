@@ -57,7 +57,7 @@ func TestLegacyBaselineManifestFreezesFilesAndRejectsResumeUse(t *testing.T) {
 	if manifest.Provenance.EvaluatedCommit != "e962ebd0f491051056bf7ebfac7dd782c32a8124" {
 		t.Fatalf("evaluated commit = %q", manifest.Provenance.EvaluatedCommit)
 	}
-	if manifest.Provenance.ReportCommit != "e569a10402f725bf9e21cdaf271bfa4a43925f67" {
+	if manifest.Provenance.ReportCommit != "2dd15f9f6cafe32dd98b92cbb9320d0f0c8253ee" {
 		t.Fatalf("report commit = %q", manifest.Provenance.ReportCommit)
 	}
 	if manifest.Provenance.CaseCount != 50 || len(manifest.Provenance.TaskIDs) != 3 {

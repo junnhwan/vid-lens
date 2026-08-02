@@ -28,9 +28,9 @@
     "environment": "local",
     "evaluated_at": "2026-06-28",
     "evaluated_commit": "e962ebd0f491051056bf7ebfac7dd782c32a8124",
-    "report_commit": "e569a10402f725bf9e21cdaf271bfa4a43925f67",
+    "report_commit": "2dd15f9f6cafe32dd98b92cbb9320d0f0c8253ee",
     "report_path": "docs/eval/resume-quant-results.md",
-    "report_sha256": "271aa4ca70afd0d9427abb2037e8115a87e6186fd78ee615c1b3f3c8c1e44c22",
+    "report_sha256": "263be1ca044aadcd49f5456866fb1274f84eb0fb009c2b75bd23598b924ecbb5",
     "task_ids": [
       2,
       5,

@@ -21,7 +21,10 @@ env:
   DEPLOY_PATH: /opt/vidlens
   RUNTIME_GENERATION: postgres-pgvector-v1
   INTERNAL_READY_URL: http://127.0.0.1:18083/readyz
+  WEB_NEXT_HEALTH_URL: http://127.0.0.1:18084/
   PUBLIC_HEALTH_URL: http://vidlens.wanjune.qzz.io/health
+  # web-next 的 /api 代理目标（next 构建时求值，见 web-next/next.config.js）
+  VIDLENS_API_BASE: http://127.0.0.1:18083
 
 jobs:
   deploy:
@@ -31,7 +34,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Test deployment safety
-        run: bash deploy/server-deploy_test.sh
+        run: |
+          bash deploy/server-deploy_test.sh
+          bash deploy/web-next-deploy_test.sh
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -47,25 +52,29 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: web-next/package-lock.json
 
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: web
-
-      - name: Test frontend
-        run: npm test
-        working-directory: web
-
-      - name: Build frontend
-        run: npm run build
-        working-directory: web
-
-      - name: Build backend
+      - name: Build web-next frontend (primary)
+        working-directory: web-next
+        env:
+          VIDLENS_API_BASE: ${{ env.VIDLENS_API_BASE }}
         run: |
+          npm ci
+          npm run build
+
+      - name: Build legacy Vue frontend (Go static fallback)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build backend and package frontends
+        run: |
+          set -euo pipefail
           mkdir -p build
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o build/server ./cmd/server
           tar -czf build/web-dist.tar.gz -C web dist
+          tar -czf build/web-next-src.tar.gz --exclude=node_modules --exclude=.next --exclude=tsconfig.tsbuildinfo -C web-next .
 
       - name: Configure SSH
         env:
@@ -93,9 +102,11 @@ jobs:
           set -euo pipefail
           remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
           ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$remote_tmp'"
-          scp -i ~/.ssh/vidlens_deploy_key -P "$DEPLOY_PORT" build/server build/web-dist.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:$remote_tmp/"
+          scp -i ~/.ssh/vidlens_deploy_key -P "$DEPLOY_PORT" \
+            build/server build/web-dist.tar.gz build/web-next-src.tar.gz \
+            "$DEPLOY_USER@$DEPLOY_HOST:$remote_tmp/"
 
-      - name: Deploy and restart service
+      - name: Deploy backend and restart service
         env:
           DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.VIDLENS_DEPLOY_PORT || '22' }}
@@ -106,6 +117,18 @@ jobs:
           ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_TMP_DIR='$remote_tmp' GITHUB_SHA='$GITHUB_SHA' EXPECTED_RUNTIME_GENERATION='$RUNTIME_GENERATION' HEALTH_URL='$INTERNAL_READY_URL' bash -s" \
             < deploy/server-deploy.sh
+
+      - name: Deploy web-next frontend and restart service
+        env:
+          DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.VIDLENS_DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_TMP_DIR='$remote_tmp' GITHUB_SHA='$GITHUB_SHA' VIDLENS_API_BASE='$VIDLENS_API_BASE' WEB_NEXT_HEALTH_URL='$WEB_NEXT_HEALTH_URL' bash -s" \
+            < deploy/web-next-deploy.sh
 
       - name: Verify public health
         run: curl -fsS --retry 5 --retry-delay 2 "$PUBLIC_HEALTH_URL"

@@ -9,7 +9,7 @@ import (
 
 func TestCatalogIncludesEveryLegacyModelExactlyOnce(t *testing.T) {
 	specs := Catalog()
-	if got, want := len(specs), 20; got != want {
+	if got, want := len(specs), 21; got != want {
 		t.Fatalf("legacy catalog tables = %d, want %d", got, want)
 	}
 
@@ -78,6 +78,7 @@ func TestCatalogHasStableOrderAndCompleteKeyMetadata(t *testing.T) {
 		"kafka_message_failures",
 		"video_transcriptions",
 		"video_transcription_chunks",
+		"video_visual_frames",
 		"ai_summaries",
 		"user_ai_profiles",
 		"video_chunks",
@@ -127,11 +128,11 @@ func TestCatalogHasStableOrderAndCompleteKeyMetadata(t *testing.T) {
 		seen[spec.Name] = struct{}{}
 	}
 
-	budget := specs[15]
+	budget := specs[16]
 	if budget.Name != "ai_retry_budgets" || budget.PrimaryKey != "budget_id" || budget.AutoIncrement || budget.SequenceName != "" {
 		t.Errorf("retry budget key metadata = %+v", budget)
 	}
-	for _, spec := range append(specs[:15], specs[16:]...) {
+	for _, spec := range append(specs[:16], specs[17:]...) {
 		if spec.PrimaryKey != "id" || !spec.AutoIncrement || spec.SequenceName != spec.Name+"_id_seq" {
 			t.Errorf("table %q key metadata = pk %q auto=%v sequence=%q", spec.Name, spec.PrimaryKey, spec.AutoIncrement, spec.SequenceName)
 		}

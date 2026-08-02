@@ -57,6 +57,7 @@ type VideoTask struct {
 	TraceID         string         `gorm:"type:varchar(64);index" json:"trace_id"`
 	SourceType      string         `gorm:"type:varchar(20);index" json:"source_type"`
 	SourceURL       string         `gorm:"type:varchar(1000)" json:"source_url,omitempty"`
+	DemoVisible     bool           `gorm:"default:false;index" json:"demo_visible"` // 演示账号可见的精选视频
 	RetryCount      int            `gorm:"default:0" json:"retry_count"`
 	MaxRetries      int            `gorm:"default:3" json:"max_retries"`
 	NextRetryAt     *time.Time     `json:"next_retry_at,omitempty"`
