@@ -48,6 +48,11 @@ docs/DESIGN_UPDATES.md
 docs/backend-optimization-roadmap.md
 docs/superpowers/
 
+# Local docs — remote only exposes images used by README
+CONTEXT.md
+docs/*
+!docs/images/
+
 # Local resume drafts
 resume.md
 
