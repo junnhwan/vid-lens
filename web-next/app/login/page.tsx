@@ -3,8 +3,13 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import { api, setToken, getToken, ApiError } from '@/lib/api'
+
+// 演示账号（只读，供体验者自助进入）：一键登录，无需注册。
+// 账号密码即后端 RoleDemo 用户，本身设计为公开只读，明文写在代码里属预期。
+const DEMO_USERNAME = 'test'
+const DEMO_PASSWORD = 'test0236'
 
 // 登录/注册页。401 未授权统一跳此；已登录访问此页自动跳视频库。
 export default function LoginPage() {
@@ -30,6 +35,18 @@ export default function LoginPage() {
       const r = mode === 'login'
         ? await api.login(username.trim(), password)
         : await api.register(username.trim(), password, nickname.trim() || undefined)
+      setToken(r.token)
+      router.replace('/')
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : '请求失败')
+    } finally { setBusy(false) }
+  }
+
+  // 一键体验：直接以演示账号登录，跳过注册/表单填写。
+  const demoLogin = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await api.login(DEMO_USERNAME, DEMO_PASSWORD)
       setToken(r.token)
       router.replace('/')
     } catch (e) {
@@ -84,6 +101,26 @@ export default function LoginPage() {
             {mode === 'login' ? '登录' : '注册并登录'}
           </button>
         </form>
+
+        {/* 演示入口：一键登录，无需注册 */}
+        <div className="my-6 flex items-center gap-3">
+          <div className="h-px flex-1 bg-ink-0/10" />
+          <span className="font-sans text-[11px] text-ink-4">或</span>
+          <div className="h-px flex-1 bg-ink-0/10" />
+        </div>
+
+        <button
+          type="button"
+          onClick={demoLogin}
+          disabled={busy}
+          className="btn-line w-full h-10 font-sans text-[13px] font-medium flex items-center justify-center gap-1.5 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          一键体验演示账号
+        </button>
+        <p className="font-sans text-[11px] text-ink-4 mt-3 text-center leading-relaxed">
+          演示账号 <span className="font-mono text-ink-2">test</span> / <span className="font-mono text-ink-2">test0236</span> · 只读，可浏览视频转写与摘要并问答
+        </p>
 
         <p className="font-sans text-[11px] text-ink-4 mt-6 text-center leading-relaxed">
           {mode === 'login' ? '还没有账号？' : '已有账号？'}
