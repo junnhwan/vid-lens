@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { renderMarkdownInline } from '@/components/Markdown'
+import Markdown from '@/components/Markdown'
 import type { Citation } from '@/lib/types'
 
 // 引用脚注系统：
@@ -73,37 +73,39 @@ function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }
 // 把纯文本里的 [Cx] 标记（由后端 answer 文本里的引用占位）解析成 徽标 + 文本节点。
 // 后端 answer 是纯文本，引用通过独立 citations 事件发，文本里通常没有 [Cx] 标记——
 // 所以前端在渲染 answer 时按 citations 顺序在句末插入徽标更可控。这里提供两种：
-// 1) 若文本含 [C1] 字面量 → 替换成徽标
-// 2) 否则按传入的 refIds 在末尾追加徽标群
+// 1) 若文本含 [C1] 字面量 → 按引用位置拆分，每段仍走块级 Markdown
+// 2) 否则直接整段块级 Markdown 渲染 + 末尾徽标群
 export function renderAnswerWithCites(
   text: string,
   refIds: string[],
   onToggle: (id: string) => void,
   openIds: string[],
 ): React.ReactNode {
-  // 若文本里没有 [Cx] 字面量，直接渲染纯文本 + 末尾徽标
+  // 若文本里没有 [Cx] 字面量，直接块级渲染 + 末尾徽标
   if (!/\[C\d+\]/.test(text)) {
     return (
       <>
-        {renderMarkdownInline(text)}
+        <Markdown content={text} />
         {refIds.length > 0 && (
           <span className="ml-1">{refIds.map(id => <CiteBadge key={id} id={id} onToggle={onToggle} active={openIds.includes(id)} />)}</span>
         )}
       </>
     )
   }
-  // 文本含 [Cx] → 拆分替换
+  // 文本含 [Cx] → 拆分替换（每段仍走块级渲染，保持列表/段落结构）
   const parts: React.ReactNode[] = []
   const re = /\[C(\d+)\]/g
   let last = 0
   let m: RegExpExecArray | null
   let i = 0
   while ((m = re.exec(text))) {
-    parts.push(<span key={`t${i}`}>{renderMarkdownInline(text.slice(last, m.index))}</span>)
+    const seg = text.slice(last, m.index)
+    if (seg.trim()) parts.push(<Markdown key={`t${i}`} content={seg} />)
     const id = `C${m[1]}`
     parts.push(<CiteBadge key={i++} id={id} onToggle={onToggle} active={openIds.includes(id)} />)
     last = m.index + m[0].length
   }
-  parts.push(<span key="t-last">{renderMarkdownInline(text.slice(last))}</span>)
+  const tail = text.slice(last)
+  if (tail && tail.trim()) parts.push(<Markdown key="t-last" content={tail} />)
   return parts
 }
