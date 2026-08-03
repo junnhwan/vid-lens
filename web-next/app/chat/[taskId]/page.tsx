@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Crosshair, BookOpen, Database, AlertTriangle, Copy, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Crosshair, BookOpen, Database, AlertTriangle, Copy, RefreshCw, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
 import ChatInput from '@/components/ChatInput'
 import { CiteRef, CitationCards, renderAnswerWithCites } from '@/components/Citation'
@@ -40,6 +40,7 @@ function ChatView() {
 
   const [task, setTask] = useState<VideoTask | null>(null)
   const [session, setSession] = useState<ChatSession | null>(null)
+  const [sessions, setSessions] = useState<ChatSession[]>([])
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
   const [mode, setMode] = useState<ChatMode>('strict_rag') // mockup 默认严格 RAG
   const [topK, setTopK] = useState(4)
@@ -50,6 +51,11 @@ function ChatView() {
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
+
+  // 拉取本视频的全部会话（会话列表/切换用）
+  const loadSessions = useCallback(async () => {
+    try { setSessions(await api.listSessions({ task_id: taskId })) } catch { /* ignore */ }
+  }, [taskId])
 
   // 初始化：拉 task + RAG 状态 + 创建 session（?session= 复用）
   useEffect(() => {
@@ -88,9 +94,40 @@ function ChatView() {
         }).catch(() => {})
       }
       setSessionReady(true)
+      loadSessions()
     }
     init()
-  }, [taskId])
+  }, [taskId, loadSessions])
+
+  // 切换会话：加载该会话历史并写回 URL（可刷新还原）
+  const switchSession = async (sid: number) => {
+    const s = sessions.find(x => x.id === sid)
+    if (!s || s.id === session?.id) return
+    setSession(s)
+    setMessages([])
+    const url = new URLSearchParams(location.search)
+    url.set('session', String(sid))
+    history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
+    api.getMessages(sid).then(msgs => {
+      setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))
+    }).catch(() => {})
+  }
+
+  // 新建会话：清空会话状态并切到新会话
+  const newSession = async () => {
+    try {
+      const s = await api.createSession({ task_id: taskId, scope_type: 'video' })
+      setSession(s)
+      setMessages([])
+      setFailClosed(false)
+      const url = new URLSearchParams(location.search)
+      url.set('session', String(s.id))
+      history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
+      loadSessions()
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : '创建会话失败')
+    }
+  }
 
   // 自动滚到底
   useEffect(() => {
@@ -257,6 +294,29 @@ function ChatView() {
           {/* 左 sticky */}
           <aside className="w-[200px] shrink-0 hidden lg:block">
             <div className="sticky top-7 space-y-6">
+              {/* 会话列表：多会话保留 + 切换 + 新建 */}
+              <div>
+                <div className="font-sans text-[10px] text-ink-4 mb-2 flex items-center justify-between">
+                  <span>会话</span>
+                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-900 flex items-center gap-0.5" title="新建会话"><Plus className="w-3 h-3" />新建</button>
+                </div>
+                <ul className="space-y-1">
+                  {sessions.map(s => (
+                    <li key={s.id}>
+                      <button
+                        onClick={() => switchSession(s.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[12px] ${session?.id === s.id ? 'bg-sienna-500/10 text-sienna-700 font-medium' : 'text-ink-2 hover:bg-ink-2/10'}`}
+                      >
+                        <MessageCircle className="w-3 h-3 shrink-0" />
+                        <span className="truncate flex-1">会话 {s.id}</span>
+                        <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
+                      </button>
+                    </li>
+                  ))}
+                  {sessions.length === 0 && <li className="font-sans text-[11px] text-ink-4">暂无会话</li>}
+                </ul>
+              </div>
+              <div className="h-px bg-ink-0/15" />
               <div>
                 <div className="font-sans text-[10px] text-ink-4 mb-2">本视频</div>
                 <dl className="font-mono text-[11px] text-ink-3 space-y-1.5 leading-relaxed">
@@ -376,3 +436,11 @@ function MessageRow({ msg, idx, onToggleCite, mode, topK, onCopy, onRetry }: {
     </div>
   )
 }
+
+// 会话时间：MM-DD HH:mm
+function fmtSession(iso: string) {
+  const d = new Date(iso)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }

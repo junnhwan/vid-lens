@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, BookOpen, Settings2, Plus, Trash2, Database } from 'lucide-react'
+import { ArrowLeft, BookOpen, Settings2, Plus, Trash2, Database, MessageCircle } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
 import ChatInput from '@/components/ChatInput'
 import KBModal from '@/components/KBModal'
 import { CiteRef, CitationCards, renderAnswerWithCites } from '@/components/Citation'
 import { api, streamAsk, ApiError } from '@/lib/api'
+import { useRole } from '@/lib/useRole'
 import type { KnowledgeBase, Citation, ChatSession } from '@/lib/types'
 
 // /kb/:kbId — 跨视频问答。KB scope 自带严格 RAG 语义。
@@ -34,6 +35,7 @@ export default function KBChatPage() {
 
   const [kb, setKb] = useState<KnowledgeBase | null>(null)
   const [session, setSession] = useState<ChatSession | null>(null)
+  const [sessions, setSessions] = useState<ChatSession[]>([])
   const [messages, setMessages] = useState<Msg[]>([])
   const [streaming, setStreaming] = useState(false)
   const [topK, setTopK] = useState(8) // 跨视频默认 topK 大些
@@ -41,6 +43,13 @@ export default function KBChatPage() {
   const [searchInfo, setSearchInfo] = useState<{ hits?: string; cross?: number }>({})
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // 演示账号只读：隐藏管理成员/添加视频写入口，仅保留查看与问答。
+  const { isDemo } = useRole()
+
+  // 拉取本知识库的全部会话（会话列表/切换用）
+  const loadSessions = useCallback(async () => {
+    try { setSessions(await api.listSessions({ knowledge_base_id: kbId })) } catch { /* ignore */ }
+  }, [kbId])
 
   // 初始化：拉 KB 详情 + 创建 session（?session= 复用）+ 历史消息
   useEffect(() => {
@@ -66,9 +75,39 @@ export default function KBChatPage() {
       if (sid) {
         api.getMessages(sid).then(msgs => setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))).catch(() => {})
       }
+      loadSessions()
     }
     init()
-  }, [kbId])
+  }, [kbId, loadSessions])
+
+  // 切换会话：加载该会话历史并写回 URL（可刷新还原）
+  const switchSession = async (sid: number) => {
+    const s = sessions.find(x => x.id === sid)
+    if (!s || s.id === session?.id) return
+    setSession(s)
+    setMessages([])
+    setSearchInfo({})
+    const url = new URLSearchParams(location.search)
+    url.set('session', String(sid))
+    history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
+    api.getMessages(sid).then(msgs => setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))).catch(() => {})
+  }
+
+  // 新建会话：清空会话状态并切到新会话
+  const newSession = async () => {
+    try {
+      const s = await api.createSession({ knowledge_base_id: kbId, scope_type: 'knowledge_base' })
+      setSession(s)
+      setMessages([])
+      setSearchInfo({})
+      const url = new URLSearchParams(location.search)
+      url.set('session', String(s.id))
+      history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
+      loadSessions()
+    } catch (e) {
+      setMessages([{ role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
+    }
+  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -168,7 +207,9 @@ export default function KBChatPage() {
             <div className="font-sans text-[10px] text-ink-4">知识库 №KB-{pad(kbId)} · 跨视频严格 RAG</div>
             <div className="font-sans text-[16px] font-medium tight text-ink-0 truncate -mt-0.5">{kb?.name || '加载中…'}</div>
           </div>
-          <button onClick={() => setShowManage(true)} className="btn-line h-8 px-3 font-sans text-[11px] flex items-center gap-1.5"><Settings2 className="w-3.5 h-3.5" />管理成员</button>
+          {!isDemo && (
+            <button onClick={() => setShowManage(true)} className="btn-line h-8 px-3 font-sans text-[11px] flex items-center gap-1.5"><Settings2 className="w-3.5 h-3.5" />管理成员</button>
+          )}
           <ThemeSwitch />
         </div>
       </header>
@@ -178,6 +219,29 @@ export default function KBChatPage() {
           {/* 左 sticky：成员视频 + 引用汇总 + 检索元信息 */}
           <aside className="w-[220px] shrink-0 hidden lg:block">
             <div className="sticky top-7 space-y-6">
+              {/* 会话列表：多会话保留 + 切换 + 新建 */}
+              <div>
+                <div className="font-sans text-[10px] text-ink-4 mb-2 flex items-center justify-between">
+                  <span>会话</span>
+                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-900 flex items-center gap-0.5" title="新建会话"><Plus className="w-3 h-3" />新建</button>
+                </div>
+                <ul className="space-y-1">
+                  {sessions.map(s => (
+                    <li key={s.id}>
+                      <button
+                        onClick={() => switchSession(s.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[12px] ${session?.id === s.id ? 'bg-sienna-500/10 text-sienna-700 font-medium' : 'text-ink-2 hover:bg-ink-2/10'}`}
+                      >
+                        <MessageCircle className="w-3 h-3 shrink-0" />
+                        <span className="truncate flex-1">会话 {s.id}</span>
+                        <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
+                      </button>
+                    </li>
+                  ))}
+                  {sessions.length === 0 && <li className="font-sans text-[11px] text-ink-4">暂无会话</li>}
+                </ul>
+              </div>
+              <div className="h-px bg-ink-0/15" />
               <div>
                 <div className="font-sans text-[10px] text-ink-4 mb-2">知识库</div>
                 <dl className="font-mono text-[11px] text-ink-3 space-y-1.5 leading-relaxed">
@@ -202,7 +266,9 @@ export default function KBChatPage() {
                     <li className="font-sans text-[11px] text-ink-4">暂无成员</li>
                   )}
                 </ul>
-                <button onClick={() => setShowManage(true)} className="mt-2 w-full h-7 border border-dashed border-ink-0/30 font-sans text-[10px] text-ink-4 hover:border-sienna-500 hover:text-sienna-700 flex items-center justify-center gap-1"><Plus className="w-3 h-3" />添加视频</button>
+                {!isDemo && (
+                  <button onClick={() => setShowManage(true)} className="mt-2 w-full h-7 border border-dashed border-ink-0/30 font-sans text-[10px] text-ink-4 hover:border-sienna-500 hover:text-sienna-700 flex items-center justify-center gap-1"><Plus className="w-3 h-3" />添加视频</button>
+                )}
               </div>
               <div className="h-px bg-ink-0/15" />
               {/* 检索元信息 */}
@@ -302,4 +368,9 @@ function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }
 function fmt(iso: string) {
   const d = new Date(iso)
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+// 会话时间：MM-DD HH:mm
+function fmtSession(iso: string) {
+  const d = new Date(iso)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }

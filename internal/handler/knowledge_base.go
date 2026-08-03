@@ -20,6 +20,9 @@ func NewKnowledgeBaseHandler(svc *service.KnowledgeBaseService) *KnowledgeBaseHa
 }
 
 func (h *KnowledgeBaseHandler) Create(c *gin.Context) {
+	if denyIfDemo(c, "创建知识库") {
+		return
+	}
 	var req service.CreateKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -56,6 +59,9 @@ func (h *KnowledgeBaseHandler) Get(c *gin.Context) {
 }
 
 func (h *KnowledgeBaseHandler) Update(c *gin.Context) {
+	if denyIfDemo(c, "修改知识库") {
+		return
+	}
 	knowledgeBaseID, ok := parsePositiveKnowledgeBaseID(c, "id", "知识库 ID 错误")
 	if !ok {
 		return
@@ -74,6 +80,9 @@ func (h *KnowledgeBaseHandler) Update(c *gin.Context) {
 }
 
 func (h *KnowledgeBaseHandler) Delete(c *gin.Context) {
+	if denyIfDemo(c, "删除知识库") {
+		return
+	}
 	knowledgeBaseID, ok := parsePositiveKnowledgeBaseID(c, "id", "知识库 ID 错误")
 	if !ok {
 		return
@@ -86,6 +95,9 @@ func (h *KnowledgeBaseHandler) Delete(c *gin.Context) {
 }
 
 func (h *KnowledgeBaseHandler) AddVideo(c *gin.Context) {
+	if denyIfDemo(c, "添加知识库视频") {
+		return
+	}
 	knowledgeBaseID, ok := parsePositiveKnowledgeBaseID(c, "id", "知识库 ID 错误")
 	if !ok {
 		return
@@ -109,6 +121,9 @@ func (h *KnowledgeBaseHandler) AddVideo(c *gin.Context) {
 }
 
 func (h *KnowledgeBaseHandler) RemoveVideo(c *gin.Context) {
+	if denyIfDemo(c, "移除知识库视频") {
+		return
+	}
 	knowledgeBaseID, ok := parsePositiveKnowledgeBaseID(c, "id", "知识库 ID 错误")
 	if !ok {
 		return

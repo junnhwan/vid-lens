@@ -76,3 +76,38 @@ func TestDemoUserMediaMutationsRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestDemoUserKnowledgeBaseMutationsRejected 演示账号对知识库全部写操作
+// （创建/修改/删除/添加成员/移除成员）一律 403；读接口（列表/详情）不受影响。
+func TestDemoUserKnowledgeBaseMutationsRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	kb := NewKnowledgeBaseHandler(nil)
+	cases := []struct {
+		name    string
+		method  string
+		path    string
+		handler func(c *gin.Context)
+	}{
+		{name: "create", method: http.MethodPost, path: "/knowledge-bases", handler: kb.Create},
+		{name: "update", method: http.MethodPatch, path: "/knowledge-bases/1", handler: kb.Update},
+		{name: "delete", method: http.MethodDelete, path: "/knowledge-bases/1", handler: kb.Delete},
+		{name: "add-video", method: http.MethodPost, path: "/knowledge-bases/1/videos", handler: kb.AddVideo},
+		{name: "remove-video", method: http.MethodDelete, path: "/knowledge-bases/1/videos/2", handler: kb.RemoveVideo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			router.Handle(tc.method, tc.path, func(c *gin.Context) {
+				c.Set("role", model.RoleDemo)
+				c.Set("userID", int64(1))
+				tc.handler(c)
+			})
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403, body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
