@@ -73,6 +73,15 @@ func TestAutoTitleChatSessionFromQuestion(t *testing.T) {
 	if ok {
 		t.Fatal("empty question should not title")
 	}
+
+	// KB 会话：当前标题=知识库名（占位），首问后改写为提问本身
+	kbTitle, ok := AutoTitleChatSessionFromQuestion("Pie Agent", "Pie Agent", "", "loop 工程和 graph 工程有什么区别")
+	if !ok {
+		t.Fatal("expected KB auto title from first question")
+	}
+	if kbTitle != "loop 工程和 graph 工程有什么区别" {
+		t.Fatalf("got %q want %q", kbTitle, "loop 工程和 graph 工程有什么区别")
+	}
 }
 
 func TestSanitizeChatSessionTitleMaxLen(t *testing.T) {

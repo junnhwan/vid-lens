@@ -237,7 +237,7 @@ export default function KBChatPage() {
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[12px] ${session?.id === s.id ? 'bg-sienna-500/10 text-sienna-700 font-medium' : 'text-ink-2 hover:bg-ink-2/10'}`}
                       >
                         <MessageCircle className="w-3 h-3 shrink-0" />
-                        <span className="truncate flex-1">会话 {s.id}</span>
+                        <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
                         <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
                       </button>
                     </li>
@@ -290,7 +290,7 @@ export default function KBChatPage() {
           {/* 中：消息流 */}
           <div className="flex-1 min-w-0 max-w-[820px] space-y-7" aria-live="polite">
             <div className="pb-2">
-              <div className="font-mono text-[10px] text-ink-4">Session · {session ? new Date(session.created_at).toLocaleString('zh-CN') : ''}</div>
+              <div className="font-mono text-[10px] text-ink-4">Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}{session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}</div>
               <h1 className="font-sans text-[28px] leading-tight font-medium tight text-ink-0 mt-1.5">跨视频问答<span className="text-sienna-500">.</span></h1>
               <p className="font-sans italic text-[14px] text-ink-3 mt-1">本会话检索知识库全部视频，引用标注来源视频。</p>
             </div>

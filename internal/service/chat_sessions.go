@@ -84,21 +84,38 @@ func (s *ChatService) UpdateSessionTitle(userID, sessionID int64, title string) 
 }
 
 func (s *ChatService) maybeAutoTitleSession(session *model.ChatSession, firstUserQuestion string) {
-	if session == nil || session.ScopeType == model.ChatScopeKnowledgeBase || session.TaskID <= 0 {
+	if session == nil {
 		return
 	}
-	task, err := s.repos.Task.FindByID(session.TaskID)
-	if err != nil || task == nil {
-		return
+	switch session.ScopeType {
+	case model.ChatScopeVideo:
+		task, err := s.repos.Task.FindByID(session.TaskID)
+		if err != nil || task == nil {
+			return
+		}
+		next, ok := AutoTitleChatSessionFromQuestion(session.Title, task.Title, task.Filename, firstUserQuestion)
+		if !ok {
+			return
+		}
+		if err := s.repos.Chat.UpdateSessionTitle(session.ID, next); err != nil {
+			return
+		}
+		session.Title = next
+	case model.ChatScopeKnowledgeBase:
+		// KB 会话标题默认是知识库名（占位），首问后改写为提问本身，方便区分同一 KB 内的多个会话。
+		kb, err := s.repos.KnowledgeBase.FindByIDForUser(session.UserID, session.KnowledgeBaseID)
+		if err != nil || kb == nil {
+			return
+		}
+		next, ok := AutoTitleChatSessionFromQuestion(session.Title, kb.Name, "", firstUserQuestion)
+		if !ok {
+			return
+		}
+		if err := s.repos.Chat.UpdateSessionTitle(session.ID, next); err != nil {
+			return
+		}
+		session.Title = next
 	}
-	next, ok := AutoTitleChatSessionFromQuestion(session.Title, task.Title, task.Filename, firstUserQuestion)
-	if !ok {
-		return
-	}
-	if err := s.repos.Chat.UpdateSessionTitle(session.ID, next); err != nil {
-		return
-	}
-	session.Title = next
 }
 
 func (s *ChatService) ListSessions(userID, taskID int64) ([]model.ChatSession, error) {
