@@ -19,47 +19,40 @@
 
 ## 📖 项目简介
 
-映知是一个面向视频的 AI 知识库与问答平台：上传视频并转写后，把长视频变成可检索、可引用的文本知识，随后直接对视频内容提问，回答带引用片段、可回溯到原始视频。
+映知是一个面向视频的 AI 知识库与问答平台：上传视频并将视频音频转写为文字后，把长视频变成可检索、可引用的文本知识；多个视频归入知识库后，可直接跨视频提问，回答带引用片段、可回溯到原始视频。
 
 项目重点不在于简单调用模型，而是围绕长耗时任务、大文件传输、处理失败恢复和检索结果可追溯性，搭建一条可观察、可重试的处理链路。
 
-视频处理任务通过 RabbitMQ 异步调度，处理阶段、转写分片和聊天记录统一落库到 PostgreSQL；MinIO 负责对象存储，PostgreSQL 内的 pgvector 与关键词检索共同支撑视频 RAG 问答。`video_chunks` 是文本事实源，向量表是可重建的检索投影。
+视频处理任务通过 RabbitMQ 异步调度，处理阶段、转写分片和聊天记录统一落库到 PostgreSQL；MinIO 负责对象存储，PostgreSQL 内的 pgvector 与关键词检索共同支撑视频 RAG 问答。
 
 ## 🖼️ 项目截图
 
-| 工作台 | ASR 文字提取 |
+| 工作台总览 | 用户 AI 配置 |
 |---|---|
-| ![工作台总览](docs/images/readme-01-dashboard.png) | ![ASR 文字提取](docs/images/readme-02-transcription.png) |
+| ![工作台总览](docs/images/readme-01-dashboard.png) | ![用户 AI 配置](docs/images/readme-03-ai-profile.png) |
 
-| AI 摘要 | 用户 AI 配置 |
+| ASR 转写与 AI 摘要 | 跨视频 RAG 问答 |
 |---|---|
-| ![AI 摘要分析](docs/images/readme-03-summary.png) | ![用户 AI 配置](docs/images/readme-04-ai-profile.png) |
-
-| 视频 RAG 问答 |
-|---|
-| ![视频 RAG 问答](docs/images/readme-05-rag-chat.png) |
+| ![ASR 转写与 AI 摘要](docs/images/readme-02-transcribe-summary.png) | ![跨视频 RAG 问答](docs/images/readme-04-rag-chat.png) |
 
 ## ✨ 核心功能
 
-- **异步任务与失败恢复**：RabbitMQ 调度 ASR、摘要和 RAG 索引任务，PostgreSQL 记录阶段状态，失败任务按退避策略重试。选 RabbitMQ 而非 Kafka，是因为真实痛点是任务可靠投递、失败恢复与削峰，而非高吞吐日志。
-- **长视频分段 ASR**：分段转写并持久化结果，失败时只重试对应片段，已完成片段可以复用。
-- **分片上传与断点续传**：Redis Set 记录已落入 MinIO 的分片编号，前端恢复时只补传缺失分片，完成后由 MinIO 服务端合并最终对象。
-- **可恢复资源清理**：任务删除先持久化 cleanup intent，再通过 lease 与后台扫描恢复 pgvector、MinIO 和 PostgreSQL 的幂等清理；共享 asset 只由最后一个引用的 owner 删除。
-- **视频 RAG 问答**：以 ASR 转写为知识源，pgvector 向量检索并带引用片段返回；可选 query rewrite / model rerank。
-- **AI 服务配置**：支持按用户配置 ASR、LLM、Embedding 服务，密钥加密保存。
-- **访问与调用治理**：Redis Lua 令牌桶限制高成本接口，并记录 AI 调用与任务处理指标。
-- **可观测性**：输出结构化日志，提供 Prometheus 指标和 Grafana 看板，便于定位任务阶段、重试和外部服务错误。
+- **视频知识库**：上传视频，分段 ASR 转写生成可检索文本，支持分片上传与断点续传
+- **引用式问答**：以知识库内全部视频的转写为知识源，跨视频 pgvector 检索并带引用片段返回，支持 query rewrite / model rerank
+- **异步任务与失败恢复**：RabbitMQ 调度转写/摘要/索引，失败分片重试、已完成片段复用
+- **AI 服务配置**：用户 BYOK，ASR / LLM / Embedding 密钥加密保存
+- **可观测性**：结构化日志 + Prometheus 指标 + Grafana 看板
 
 ## 🏗️ 技术架构
 
-![映知后端架构图](docs/images/vidlens-architecture.png)
+![映知后端架构图](docs/images/vidlens-architecture.svg)
 
 典型处理流程：
 
 ```text
 视频上传 → RabbitMQ 任务 → 分段 ASR → PostgreSQL 持久化转写
                               ├→ LLM 摘要
-                              └→ Embedding → pgvector（可选 rewrite/rerank）→ 引用式问答
+                              └→ Embedding → pgvector（可选 rewrite/rerank）→ 跨视频引用式问答
 ```
 
 ## 🛠️ 技术栈
@@ -134,12 +127,6 @@ vid-lens/
 ├── docker-compose.yml
 └── config.yaml
 ```
-
-## 📚 文档
-
-- [文档入口](docs/README.md)：文档组织与阅读指引。
-- [后端维护地图](docs/backend-maintenance-map.md)：主链路、文件职责与常见修改入口。
-- [评测资料说明](docs/eval/README.md)：离线 RAG/ASR 评测用例。
 
 ## 📄 License
 
