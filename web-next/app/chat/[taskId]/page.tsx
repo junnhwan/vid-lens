@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Crosshair, BookOpen, Database, AlertTriangle, Copy, RefreshCw, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
+import UserMenu from '@/components/UserMenu'
 import ChatInput from '@/components/ChatInput'
 import { CiteRef, CitationCards, renderAnswerWithCites, citesFromSnapshot } from '@/components/Citation'
 import { useToast } from '@/components/Toast'
@@ -277,6 +278,7 @@ function ChatView() {
             </button>
           </div>
           <ThemeSwitch />
+          <UserMenu />
         </div>
       </header>
 

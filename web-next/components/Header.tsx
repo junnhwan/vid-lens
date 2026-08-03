@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { Upload } from 'lucide-react'
 import ThemeSwitch from './ThemeSwitch'
+import UserMenu from './UserMenu'
 import { useRole } from '@/lib/useRole'
 
-// 顶栏：logo + 三页导航 + 主题切换 + 上传 + 头像
+// 顶栏：logo + 三页导航 + 主题切换 + 上传 + 用户菜单（头像下拉：用户信息 + 退出登录）
 // 导航 active 态由当前路径决定。
 export default function Header({ active, onUpload }: { active: 'library' | 'kb' | 'settings'; onUpload?: () => void }) {
   const { isDemo } = useRole()
@@ -31,7 +32,7 @@ export default function Header({ active, onUpload }: { active: 'library' | 'kb' 
               <Upload className="w-3.5 h-3.5" /> 上传视频
             </button>
           )}
-          <button className="w-8 h-8 rounded-full bg-sienna-500 text-paper-0 text-[12px] font-medium flex items-center justify-center">ZJ</button>
+          <UserMenu />
         </div>
       </div>
     </header>

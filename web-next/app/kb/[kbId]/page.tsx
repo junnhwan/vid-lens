@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, BookOpen, Settings2, Plus, Trash2, Database, MessageCircle } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
+import UserMenu from '@/components/UserMenu'
 import ChatInput from '@/components/ChatInput'
 import KBModal from '@/components/KBModal'
 import { CiteRef, CitationCards, renderAnswerWithCites, citesFromSnapshot } from '@/components/Citation'
@@ -215,6 +216,7 @@ export default function KBChatPage() {
             <button onClick={() => setShowManage(true)} className="btn-line h-8 px-3 font-sans text-[11px] flex items-center gap-1.5"><Settings2 className="w-3.5 h-3.5" />管理成员</button>
           )}
           <ThemeSwitch />
+          <UserMenu />
         </div>
       </header>
 
