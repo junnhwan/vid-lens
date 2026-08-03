@@ -106,6 +106,10 @@ jobs:
             build/server build/web-dist.tar.gz build/web-next-src.tar.gz \
             "$DEPLOY_USER@$DEPLOY_HOST:$remote_tmp/"
 
+      # 两个部署步骤各自从共享暂存目录拷贝到自己的独立临时目录再执行：
+      # server-deploy.sh 结束时 rm -rf 自己的临时目录，若与 web-next 共用则会把
+      # 后者的产物一起删掉，导致 web-next 部署报 missing artifact。拆开目录后
+      # 各自清理互不干扰，部署脚本内置的 rollback 逻辑仍然生效。
       - name: Deploy backend and restart service
         env:
           DEPLOY_HOST: ${{ secrets.VIDLENS_DEPLOY_HOST }}
@@ -113,7 +117,10 @@ jobs:
           DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
         run: |
           set -euo pipefail
-          remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          shared_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          remote_tmp="/tmp/vidlens-deploy-server-${GITHUB_SHA}"
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$remote_tmp' && cp '$shared_tmp/server' '$shared_tmp/web-dist.tar.gz' '$remote_tmp/'"
           ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_TMP_DIR='$remote_tmp' GITHUB_SHA='$GITHUB_SHA' EXPECTED_RUNTIME_GENERATION='$RUNTIME_GENERATION' HEALTH_URL='$INTERNAL_READY_URL' bash -s" \
             < deploy/server-deploy.sh
@@ -125,7 +132,10 @@ jobs:
           DEPLOY_USER: ${{ secrets.VIDLENS_DEPLOY_USER }}
         run: |
           set -euo pipefail
-          remote_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          shared_tmp="/tmp/vidlens-deploy-${GITHUB_SHA}"
+          remote_tmp="/tmp/vidlens-deploy-web-${GITHUB_SHA}"
+          ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$remote_tmp' && cp '$shared_tmp/web-next-src.tar.gz' '$remote_tmp/'"
           ssh -i ~/.ssh/vidlens_deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' DEPLOY_TMP_DIR='$remote_tmp' GITHUB_SHA='$GITHUB_SHA' VIDLENS_API_BASE='$VIDLENS_API_BASE' WEB_NEXT_HEALTH_URL='$WEB_NEXT_HEALTH_URL' bash -s" \
             < deploy/web-next-deploy.sh
