@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { renderMarkdownInline } from '@/components/Markdown'
+import type { Citation } from '@/lib/types'
 
 // 引用脚注系统：
 // [Cx] 是上标小徽标，点击在回答正下方内联展开引用卡片（max-height 过渡 350ms），不要浮层。
@@ -15,6 +16,27 @@ export interface CiteRef {
   videoTitle?: string // kb 跨视频用
   finalRank?: number
   color?: string      // kb 跨视频色点
+}
+
+// 从后端消息的 retrieval_snapshot（JSON 字符串，引用快照）重建 CiteRef 列表。
+// 历史消息加载时用：后端每条 assistant 消息都持久化了引用快照，前端据此恢复引用片段。
+export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: number) => string): CiteRef[] {
+  if (!snapshot) return []
+  try {
+    const cs = JSON.parse(snapshot) as Citation[]
+    return cs.map((c) => ({
+      id: c.citation_id || `C${c.chunk_index}`,
+      chunkIndex: c.chunk_index,
+      score: c.score,
+      content: c.content,
+      source: c.source,
+      videoTitle: c.video_title,
+      finalRank: c.final_rank,
+      color: c.task_id && memberColor ? memberColor(c.task_id) : undefined,
+    }))
+  } catch {
+    return []
+  }
 }
 
 // 上标徽标。点击 toggle 对应卡片。

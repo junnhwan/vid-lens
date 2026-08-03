@@ -6,10 +6,10 @@ import Link from 'next/link'
 import { ArrowLeft, Crosshair, BookOpen, Database, AlertTriangle, Copy, RefreshCw, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
 import ChatInput from '@/components/ChatInput'
-import { CiteRef, CitationCards, renderAnswerWithCites } from '@/components/Citation'
+import { CiteRef, CitationCards, renderAnswerWithCites, citesFromSnapshot } from '@/components/Citation'
 import { useToast } from '@/components/Toast'
 import { api, streamAsk, ApiError } from '@/lib/api'
-import type { VideoTask, ChatSession, Citation, ChatMode } from '@/lib/types'
+import type { VideoTask, ChatSession, ChatMessage, Citation, ChatMode } from '@/lib/types'
 
 // /chat/:taskId — 单视频问答。
 // 820 限宽消息流 + 左 sticky 元信息栏。SSE: answer 增量 / citations / done / error。
@@ -57,41 +57,25 @@ function ChatView() {
     try { setSessions(await api.listSessions({ task_id: taskId })) } catch { /* ignore */ }
   }, [taskId])
 
-  // 初始化：拉 task + RAG 状态 + 创建 session（?session= 复用）
+  // 初始化：拉 task + RAG 状态 + 复用 URL 里的历史会话（无 ?session= 时不创建，
+  // 等到首次发送消息时才懒创建——避免"新建会话但没问答"产生一堆空会话）。
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {})
     api.getRagIndex(taskId).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
 
     const init = async () => {
-      // URL ?session= 复用历史会话
       const url = new URLSearchParams(location.search)
       const sidParam = url.get('session')
-      let sid: number | null = sidParam ? Number(sidParam) : null
-
-      if (!sid) {
-        try {
-          const s = await api.createSession({ task_id: taskId, scope_type: 'video' })
-          sid = s.id
-          setSession(s)
-          // 写回 URL 支持刷新还原
-          url.set('session', String(sid))
-          history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
-        } catch (e) {
-          setMessages([{ role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
-          setSessionReady(true)
-          return
-        }
-      } else {
+      const sid = sidParam ? Number(sidParam) : null
+      if (sid) {
         try {
           const list = await api.listSessions({ task_id: taskId })
-          setSession(list.find(x => x.id === sid) || null)
+          const s = list.find(x => x.id === sid) || null
+          setSession(s)
+          if (s) {
+            api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs))).catch(() => {})
+          }
         } catch { /* ignore */ }
-      }
-
-      if (sid) {
-        api.getMessages(sid).then(msgs => {
-          setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))
-        }).catch(() => {})
       }
       setSessionReady(true)
       loadSessions()
@@ -108,25 +92,17 @@ function ChatView() {
     const url = new URLSearchParams(location.search)
     url.set('session', String(sid))
     history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
-    api.getMessages(sid).then(msgs => {
-      setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))
-    }).catch(() => {})
+    api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs))).catch(() => {})
   }
 
-  // 新建会话：清空会话状态并切到新会话
-  const newSession = async () => {
-    try {
-      const s = await api.createSession({ task_id: taskId, scope_type: 'video' })
-      setSession(s)
-      setMessages([])
-      setFailClosed(false)
-      const url = new URLSearchParams(location.search)
-      url.set('session', String(s.id))
-      history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
-      loadSessions()
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '创建会话失败')
-    }
+  // 新建会话：只重置本地状态，不创建后端会话，首次发送时才真正创建
+  const newSession = () => {
+    setSession(null)
+    setMessages([])
+    setFailClosed(false)
+    const url = new URLSearchParams(location.search)
+    url.delete('session')
+    history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
   }
 
   // 自动滚到底
@@ -161,11 +137,27 @@ function ChatView() {
     })
   }, [])
 
-  // 发送：SSE 流式
+  // 发送：SSE 流式。首次发送时若尚无会话，先懒创建（避免空会话堆积）。
   const send = useCallback(async (q: string) => {
-    if (!session || streaming) return
+    if (streaming) return
     if (mode === 'strict_rag' && ragStatus && !ragStatus.indexed) { setFailClosed(true); return }
-    const sid = session.id
+
+    let sid = session?.id
+    if (!sid) {
+      try {
+        const s = await api.createSession({ task_id: taskId, scope_type: 'video' })
+        setSession(s)
+        sid = s.id
+        const url = new URLSearchParams(location.search)
+        url.set('session', String(sid))
+        history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
+        loadSessions()
+      } catch (e) {
+        setMessages(prev => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
+        return
+      }
+    }
+
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setStreaming(true)
@@ -188,7 +180,7 @@ function ChatView() {
     }
 
     try {
-      await streamAsk(sid, q, topK, mode, {
+      await streamAsk(sid!, q, topK, mode, {
         onAnswer: (delta) => appendDelta(delta),
         onCitations: (cs: Citation[]) => {
           const refs: CiteRef[] = cs.map((c, i) => ({
@@ -216,7 +208,7 @@ function ChatView() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [session, streaming, mode, ragStatus, topK, appendDelta])
+  }, [session?.id, streaming, mode, ragStatus, topK, appendDelta, loadSessions, taskId])
 
   const stop = () => { abortRef.current?.abort(); setStreaming(false) }
 
@@ -435,6 +427,16 @@ function MessageRow({ msg, idx, onToggleCite, mode, topK, onCopy, onRetry }: {
       )}
     </div>
   )
+}
+
+// 把后端历史消息转成页面 Msg：assistant 消息从 retrieval_snapshot 恢复引用片段。
+function parseMessages(msgs: ChatMessage[]): Msg[] {
+  return msgs.map(m => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content,
+    openCiteIds: [],
+    ...(m.role === 'assistant' ? { cites: citesFromSnapshot(m.retrieval_snapshot) } : {}),
+  }))
 }
 
 // 会话时间：MM-DD HH:mm

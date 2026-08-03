@@ -7,10 +7,10 @@ import { ArrowLeft, BookOpen, Settings2, Plus, Trash2, Database, MessageCircle }
 import ThemeSwitch from '@/components/ThemeSwitch'
 import ChatInput from '@/components/ChatInput'
 import KBModal from '@/components/KBModal'
-import { CiteRef, CitationCards, renderAnswerWithCites } from '@/components/Citation'
+import { CiteRef, CitationCards, renderAnswerWithCites, citesFromSnapshot } from '@/components/Citation'
 import { api, streamAsk, ApiError } from '@/lib/api'
 import { useRole } from '@/lib/useRole'
-import type { KnowledgeBase, Citation, ChatSession } from '@/lib/types'
+import type { KnowledgeBase, Citation, ChatSession, ChatMessage } from '@/lib/types'
 
 // /kb/:kbId — 跨视频问答。KB scope 自带严格 RAG 语义。
 // 左 sticky 栏：知识库成员视频列表(色点) + 引用按来源分组 + 跨卷检索元信息。
@@ -51,34 +51,36 @@ export default function KBChatPage() {
     try { setSessions(await api.listSessions({ knowledge_base_id: kbId })) } catch { /* ignore */ }
   }, [kbId])
 
-  // 初始化：拉 KB 详情 + 创建 session（?session= 复用）+ 历史消息
+  // 成员 → 色点映射。用 ref 读最新 kb，函数保持稳定，供 init/切换/流式复用。
+  const kbRef = useRef(kb)
+  useEffect(() => { kbRef.current = kb }, [kb])
+  const colorFor = useCallback((taskId: number) => {
+    const members = kbRef.current?.videos || []
+    const idx = members.findIndex(v => v.task_id === taskId)
+    return DOT_COLORS[idx >= 0 ? idx % DOT_COLORS.length : 0]
+  }, [])
+
+  // 初始化：拉 KB 详情 + 复用 URL 里的历史会话（无 ?session= 时不创建，
+  // 等到首次发送消息时才懒创建——避免"新建会话但没问答"产生一堆空会话）。
   useEffect(() => {
     api.getKB(kbId).then(setKb).catch(() => {})
     const init = async () => {
       const url = new URLSearchParams(location.search)
       const sidParam = url.get('session')
-      let sid: number | null = sidParam ? Number(sidParam) : null
-      if (!sid) {
-        try {
-          const s = await api.createSession({ knowledge_base_id: kbId, scope_type: 'knowledge_base' })
-          sid = s.id
-          setSession(s)
-          url.set('session', String(sid))
-          history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-        } catch (e) {
-          setMessages([{ role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
-          return
-        }
-      } else {
-        try { setSession((await api.listSessions({ knowledge_base_id: kbId })).find(x => x.id === sid) || null) } catch { /* ignore */ }
-      }
+      const sid = sidParam ? Number(sidParam) : null
       if (sid) {
-        api.getMessages(sid).then(msgs => setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))).catch(() => {})
+        try {
+          const s = (await api.listSessions({ knowledge_base_id: kbId })).find(x => x.id === sid) || null
+          setSession(s)
+          if (s) {
+            api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs, colorFor))).catch(() => {})
+          }
+        } catch { /* ignore */ }
       }
       loadSessions()
     }
     init()
-  }, [kbId, loadSessions])
+  }, [kbId, loadSessions, colorFor])
 
   // 切换会话：加载该会话历史并写回 URL（可刷新还原）
   const switchSession = async (sid: number) => {
@@ -90,36 +92,23 @@ export default function KBChatPage() {
     const url = new URLSearchParams(location.search)
     url.set('session', String(sid))
     history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-    api.getMessages(sid).then(msgs => setMessages(msgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, openCiteIds: [] })))).catch(() => {})
+    api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs, colorFor))).catch(() => {})
   }
 
-  // 新建会话：清空会话状态并切到新会话
-  const newSession = async () => {
-    try {
-      const s = await api.createSession({ knowledge_base_id: kbId, scope_type: 'knowledge_base' })
-      setSession(s)
-      setMessages([])
-      setSearchInfo({})
-      const url = new URLSearchParams(location.search)
-      url.set('session', String(s.id))
-      history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-      loadSessions()
-    } catch (e) {
-      setMessages([{ role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
-    }
+  // 新建会话：只重置本地状态，不创建后端会话，首次发送时才真正创建
+  const newSession = () => {
+    setSession(null)
+    setMessages([])
+    setSearchInfo({})
+    const url = new URLSearchParams(location.search)
+    url.delete('session')
+    history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
   }
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
-
-  // 成员 → 色点映射
-  const memberColor = useCallback((taskId: number) => {
-    const members = kb?.videos || []
-    const idx = members.findIndex(v => v.task_id === taskId)
-    return DOT_COLORS[idx >= 0 ? idx % DOT_COLORS.length : 0]
-  }, [kb])
 
   const appendDelta = useCallback((delta: string) => {
     setMessages(prev => {
@@ -132,8 +121,23 @@ export default function KBChatPage() {
   }, [])
 
   const send = useCallback(async (q: string) => {
-    if (!session || streaming) return
-    const sid = session.id
+    if (streaming) return
+    // 首次发送时若无会话，先懒创建（避免空会话堆积）
+    let sid = session?.id
+    if (!sid) {
+      try {
+        const s = await api.createSession({ knowledge_base_id: kbId, scope_type: 'knowledge_base' })
+        setSession(s)
+        sid = s.id
+        const url = new URLSearchParams(location.search)
+        url.set('session', String(sid))
+        history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
+        loadSessions()
+      } catch (e) {
+        setMessages(prev => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
+        return
+      }
+    }
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setStreaming(true)
@@ -154,7 +158,7 @@ export default function KBChatPage() {
     }
 
     try {
-      await streamAsk(sid, q, topK, 'strict_rag', {
+      await streamAsk(sid!, q, topK, 'strict_rag', {
         onAnswer: (delta) => appendDelta(delta),
         onCitations: (cs: Citation[]) => {
           const refs: CiteRef[] = cs.map((c, i) => ({
@@ -165,7 +169,7 @@ export default function KBChatPage() {
             source: c.source,
             videoTitle: c.video_title,
             finalRank: c.final_rank,
-            color: memberColor(c.task_id),
+            color: colorFor(c.task_id),
           }))
           patchLast({ cites: refs })
           // 跨卷统计
@@ -181,7 +185,7 @@ export default function KBChatPage() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [session, streaming, topK, appendDelta, memberColor])
+  }, [session?.id, streaming, topK, appendDelta, colorFor, loadSessions, kbId])
 
   const stop = () => { abortRef.current?.abort(); setStreaming(false) }
   const toggleCite = (msgIdx: number, id: string) => {
@@ -369,6 +373,17 @@ function fmt(iso: string) {
   const d = new Date(iso)
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+
+// 把后端历史消息转成页面 Msg：assistant 消息从 retrieval_snapshot 恢复引用片段。
+function parseMessages(msgs: ChatMessage[], colorFor: (taskId: number) => string): Msg[] {
+  return msgs.map(m => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content,
+    openCiteIds: [],
+    ...(m.role === 'assistant' ? { cites: citesFromSnapshot(m.retrieval_snapshot, colorFor) } : {}),
+  }))
+}
+
 // 会话时间：MM-DD HH:mm
 function fmtSession(iso: string) {
   const d = new Date(iso)
