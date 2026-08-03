@@ -15,6 +15,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// errStaleDispatch is returned by consumers when the message's dispatch lease no
+// longer matches the task (the task was re-dispatched with a newer lease). The
+// dedup handler treats it specially: release the idempotency key and Ack the
+// stale message as a no-op, so the RetryScheduler's fresh dispatch (same
+// MessageId) is not suppressed into a dead Queued state.
+var errStaleDispatch = errors.New("stale dispatch lease")
+
 func (c *Consumer) readerFactory() messageReaderFactory {
 	if c.newMessageReader != nil {
 		return c.newMessageReader
@@ -173,6 +180,13 @@ func (c *Consumer) dedupHandler(queue string, handler messageHandler) messageHan
 				// Release the dedup key so the Nack-requeued redelivery (same
 				// MessageId) is not suppressed — transient failures retry.
 				_ = c.idempotency.Release(ctx, queue, delivery.MessageId)
+				if errors.Is(err, errStaleDispatch) {
+					// Stale dispatch lease: the message is outdated but the task is
+					// not terminal. Ack it as a no-op instead of redelivering, so the
+					// RetryScheduler's fresh dispatch (same MessageId) is not
+					// suppressed by this stale message's dedup key.
+					return nil
+				}
 			}
 			return err
 		}

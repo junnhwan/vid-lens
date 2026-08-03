@@ -320,7 +320,7 @@ func TestConsumeMessagesNacksWhenFailurePersistenceIsNotAtomic(t *testing.T) {
 	reader := &scriptedAmqpReader{}
 	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-persist").Body)}
 
-	_ = consumeMessages(context.Background(), reader, consumer.handleRAGIndex)
+	_ = consumeMessages(context.Background(), reader, consumer.dedupHandler("video-rag-index", consumer.handleRAGIndex))
 	_, acks, nacks, _ := reader.snapshot()
 	// Handler failed because the failure-handoff transaction aborted (task job
 	// write trigger); the delivery is Nacked for redelivery, not Acked — so the
@@ -368,9 +368,11 @@ func TestRedeliveryDoesNotRunRAGWhileRetrySchedulerOwnsTask(t *testing.T) {
 		idempotency: noOpIdempotencyChecker{},
 	}
 	reader := &scriptedAmqpReader{}
-	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-redelivery").Body)}
+	redelivery := reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-redelivery").Body)
+	redelivery.MessageId = "rag_index:1"
+	reader.fetches = []amqp.Delivery{redelivery}
 
-	_ = consumeMessages(context.Background(), reader, consumer.handleRAGIndex)
+	_ = consumeMessages(context.Background(), reader, consumer.dedupHandler("video-rag-index", consumer.handleRAGIndex))
 
 	if calls != 0 {
 		t.Fatalf("RAG index calls = %d, want 0 while RetryScheduler owns next retry", calls)

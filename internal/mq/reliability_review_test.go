@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -333,7 +334,7 @@ func TestHandleRAGIndexSchedulerTokenMakesOldMessageStaleAndExecutesNewMessageOn
 	}
 	calls := 0
 	consumer := &Consumer{repo: repos, processingLease: time.Hour, now: func() time.Time { return now }, newToken: func() string { return "rag-worker" }, ragIndex: func(context.Context, *model.VideoTask) error { calls++; return nil }}
-	if err := consumer.handleRAGIndex(context.Background(), ragIndexMessage(task.ID, "old")); err != nil {
+	if err := consumer.handleRAGIndex(context.Background(), ragIndexMessage(task.ID, "old")); err == nil || !errors.Is(err, errStaleDispatch) {
 		t.Fatalf("old message: %v", err)
 	}
 	payload, _ := json.Marshal(RAGIndexPayload{TaskID: task.ID, TraceID: "new", ClaimToken: "dispatch-rag"})

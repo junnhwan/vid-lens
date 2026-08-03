@@ -40,7 +40,9 @@ func (c *Consumer) handleDownload(ctx context.Context, delivery amqp.Delivery) e
 	switch claim.Outcome {
 	case repository.TaskLeaseBusy:
 		return fmt.Errorf("下载 processing lease 正由其他消费者持有")
-	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
+	case repository.TaskLeaseStale:
+		return errStaleDispatch
+	case repository.TaskLeaseTerminal:
 		return nil
 	case repository.TaskLeaseAcquired:
 	default:

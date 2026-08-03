@@ -56,7 +56,9 @@ func (c *Consumer) handleAnalyze(ctx context.Context, delivery amqp.Delivery) er
 	switch claim.Outcome {
 	case repository.TaskLeaseBusy:
 		return fmt.Errorf("分析 processing lease 正由其他消费者持有")
-	case repository.TaskLeaseStale, repository.TaskLeaseTerminal:
+	case repository.TaskLeaseStale:
+		return errStaleDispatch
+	case repository.TaskLeaseTerminal:
 		return nil
 	case repository.TaskLeaseAcquired:
 	default:
@@ -128,7 +130,7 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Summary.Upsert(&model.AISummary{
-			TaskID: task.ID, FileMD5: task.FileMD5, Content: summary, ModelName: "mimo-v2.5",
+			TaskID: task.ID, FileMD5: task.FileMD5, Content: summary, ModelName: c.llmModelNameForTask(task),
 		})
 	}); err != nil {
 		return fmt.Errorf("保存总结失败: %w", err)
@@ -138,6 +140,18 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	}
 
 	return nil
+}
+
+// llmModelNameForTask 返回任务所属用户默认 profile 的 LLM 模型名，用于
+// AISummary.ModelName 记录（此前硬编码 "mimo-v2.5" 与真实调用模型不符）。
+// legacy（无 profile resolver）路径返回空串，由调用方按需忽略。
+func (c *Consumer) llmModelNameForTask(task *model.VideoTask) string {
+	if c.profiles != nil && c.aiFactory != nil {
+		if profile, err := c.profiles.GetDefaultAIProfile(task.UserID); err == nil && profile != nil {
+			return profile.LLMModel
+		}
+	}
+	return ""
 }
 
 // generateTitle 在转写文本就绪后调用 LLM 生成简洁视频标题并写回。
