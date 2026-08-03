@@ -47,12 +47,63 @@
 
 ![映知后端架构图](docs/images/vidlens-architecture.svg)
 
-典型处理流程：
+系统流程：
 
-```text
-视频上传 → RabbitMQ 任务 → 分段 ASR → PostgreSQL 持久化转写
-                              ├→ LLM 摘要
-                              └→ Embedding → pgvector（可选 rewrite/rerank）→ 跨视频引用式问答
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant Web as Next.js 工作台
+    participant API as Gin API
+    participant MQ as RabbitMQ
+    participant Worker as 消费者
+    participant Store as MinIO
+    participant PG as PostgreSQL+pgvector
+    participant AI as BYOK AI 服务
+
+    User->>Web: 上传视频（分片 / URL）
+    Web->>API: 提交任务
+    API->>PG: 创建任务
+    API-->>Web: 返回任务 ID
+
+    alt URL 上传
+        API->>MQ: 投递 video-download
+        MQ->>Worker: 异步消费
+        Worker->>Store: yt-dlp 下载并落库
+    end
+
+    User->>Web: 点击「开始转写」
+    Web->>API: 请求转写
+    API->>MQ: 投递 video-transcribe
+    MQ->>Worker: 异步消费
+    Worker->>Store: 下载原视频
+    Worker->>Worker: FFmpeg 提音 → 300s 分片
+    loop 每个分片
+        Worker->>AI: ASR 转写
+        alt 分片已完成
+            AI-->>Worker: 复用旧分片
+        end
+    end
+    Worker->>PG: 落库转写与分片状态
+    Worker->>MQ: 投递 video-rag-index
+    MQ->>Worker: 异步消费
+    Worker->>AI: Embedding 分块
+    Worker->>PG: 写入 video_chunks + pgvector
+
+    User->>Web: 点击「生成摘要」（可选）
+    Web->>API: 请求摘要
+    API->>MQ: 投递 video-analyze
+    MQ->>Worker: 异步消费
+    Worker->>AI: LLM 摘要
+    Worker->>PG: 落库摘要
+
+    User->>Web: 提问
+    Web->>API: 问答请求
+    API->>PG: pgvector 检索（单视频 / 跨知识库）
+    API->>AI: LLM 生成带引用回答
+    API->>PG: 落库会话与消息
+    API-->>Web: 返回引用式回答
+    Web-->>User: 展示回答与引用片段
 ```
 
 ## 🛠️ 技术栈
