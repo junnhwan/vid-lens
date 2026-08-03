@@ -17,7 +17,8 @@ export default function ThemeSwitch({ className = '' }: { className?: string }) 
   // 初始读 localStorage，避免 hydration 后再切一次
   useEffect(() => {
     const saved = localStorage.getItem('vidlens-theme') || 'light'
-    const norm: ThemeName = DARK_KEYS.includes(saved) ? 'dark' : 'light'
+    // 'dark' 是当前新值；DARK_KEYS 是旧版本主题名（ink）的迁移映射。
+    const norm: ThemeName = saved === 'dark' || DARK_KEYS.includes(saved) ? 'dark' : 'light'
     document.documentElement.setAttribute('data-theme', norm)
     setCurrent(norm)
   }, [])
