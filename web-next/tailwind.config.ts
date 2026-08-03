@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss'
 
-// 颜色 token 引用 CSS 变量；5 套主题在 globals.css 用 [data-theme] 切换变量值。
+// 颜色 token 引用 CSS 变量；2 套主题在 globals.css 用 [data-theme] 切换变量值。
 // 这样切主题只改 html 上的 data-theme 属性，Tailwind class 不变。
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],

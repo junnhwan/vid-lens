@@ -2,45 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============ 5 套主题 CSS 变量（从 mockup 逐字抄） ============
+/* ============ 2 套主题 CSS 变量 ============
    切主题只改 <html data-theme="...">，变量自动级联。
-   sienna=冷白+深琥珀(默认) / indigo=冷白+深靛 / verdigris=灰青+暖金
-   rust=米黄+锈红 / ink=暖黑+暖金(暗色)
+   light=冷白+深琥珀(默认) / dark=深灰蓝底+暖金(对比度已按 WCAG AA 调校)
    ========================================================== */
-:root, [data-theme="sienna"] {
+:root, [data-theme="light"] {
   --paper-0:#FFFFFF; --paper-1:#FAFAFB; --paper-2:#F1F1F3; --paper-3:#E5E5E8;
   --ink-0:#18181B; --ink-1:#27272A; --ink-2:#3F3F46; --ink-3:#52525B; --ink-4:#71717A; --ink-5:#A1A1AA;
   --accent-400:#C2622E; --accent-500:#9A4A1A; --accent-600:#7E3A12; --accent-700:#5C2A0D;
   --done:#3F7A4A; --fail:#C0392B;
   --skel-from:#F1F1F3; --skel-to:#E5E5E8;
 }
-[data-theme="indigo"] {
-  --paper-0:#FFFFFF; --paper-1:#F7F8FB; --paper-2:#EDF0F7; --paper-3:#DCE1ED;
-  --ink-0:#0E1530; --ink-1:#1E2748; --ink-2:#34406A; --ink-3:#5A6791; --ink-4:#7E89AD; --ink-5:#A2ABC7;
-  --accent-400:#3F62C2; --accent-500:#2B4A8C; --accent-600:#1D3468; --accent-700:#122450;
-  --done:#2A6B5E; --fail:#C0392B;
-  --skel-from:#EDF0F7; --skel-to:#DCE1ED;
-}
-[data-theme="verdigris"] {
-  --paper-0:#FFFFFF; --paper-1:#F7F9F6; --paper-2:#ECEFEC; --paper-3:#DEE3DD;
-  --ink-0:#0F1A16; --ink-1:#1F2B26; --ink-2:#33423C; --ink-3:#54635C; --ink-4:#7A8882; --ink-5:#9CA8A2;
-  --accent-400:#D9A44A; --accent-500:#B8842E; --accent-600:#8E631E; --accent-700:#6B4A14;
-  --done:#2F6B5E; --fail:#9B3A2A;
-  --skel-from:#ECEFEC; --skel-to:#DEE3DD;
-}
-[data-theme="rust"] {
-  --paper-0:#FFFFFF; --paper-1:#FBF8F2; --paper-2:#F2EBDD; --paper-3:#E4D8C0;
-  --ink-0:#2B1A0E; --ink-1:#3D2A1A; --ink-2:#573D29; --ink-3:#7A5940; --ink-4:#9C7A5C; --ink-5:#BB9A7C;
-  --accent-400:#C75A2E; --accent-500:#A03A18; --accent-600:#7A2A10; --accent-700:#561D0A;
-  --done:#6B7A2A; --fail:#7A2A1F;
-  --skel-from:#F2EBDD; --skel-to:#E4D8C0;
-}
-[data-theme="ink"] {
-  --paper-0:#0E0E11; --paper-1:#16161B; --paper-2:#1F1F26; --paper-3:#2A2A33;
-  --ink-0:#F4F4F6; --ink-1:#D4D4D9; --ink-2:#A8A8B0; --ink-3:#85858D; --ink-4:#5E5E66; --ink-5:#3F3F47;
-  --accent-400:#E0BE60; --accent-500:#C9A24A; --accent-600:#A88438; --accent-700:#856A2C;
-  --done:#5FA8A0; --fail:#D9623A;
-  --skel-from:#1F1F26; --skel-to:#2A2A33;
+[data-theme="dark"] {
+  /* 底不再是纯黑(#0E0E11)，改深灰蓝，文字对比度整体提亮；ink-4/ink-5 弱化文字也提亮，
+     保证正文与弱标签在暗底上都可读。 */
+  --paper-0:#16161C; --paper-1:#1D1D24; --paper-2:#24242C; --paper-3:#2C2C36;
+  --ink-0:#F2F2F5; --ink-1:#CFCED6; --ink-2:#ACACB6; --ink-3:#9494A0; --ink-4:#82828E; --ink-5:#63636F;
+  --accent-400:#E8C878; --accent-500:#D4A94E; --accent-600:#B98C38; --accent-700:#E0BE60;
+  --done:#63B3A8; --fail:#E0704F;
+  --skel-from:#24242C; --skel-to:#2C2C36;
 }
 
 body { -webkit-font-smoothing: antialiased; }
@@ -81,11 +61,6 @@ body { -webkit-font-smoothing: antialiased; }
 .btn-ink:hover { background:var(--ink-1); }
 .btn-line { border:1px solid var(--ink-0); color:var(--ink-0); }
 .btn-line:hover { background:var(--ink-0); color:var(--paper-0); }
-
-/* 主题切换器 swatch */
-.swatch { width:16px; height:16px; border-radius:2px; border:1px solid rgba(128,128,128,.25); cursor:pointer; transition: transform .15s, box-shadow .15s; }
-.swatch:hover { transform: scale(1.15); }
-.swatch.is-on { box-shadow: 0 0 0 2px var(--paper-0), 0 0 0 3px var(--ink-0); }
 
 /* 流式打字光标 */
 .caret::after { content:''; display:inline-block; width:.5em; height:1em; vertical-align:-0.15em; margin-left:1px; background:var(--accent-500); animation: blink 1s steps(2) infinite; }
