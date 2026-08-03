@@ -7,6 +7,7 @@ import { TaskStatusEnum } from '@/lib/types'
 import { api, ApiError } from '@/lib/api'
 import { statusBadge, statusLabel, computePhases, fmtSize, fmtRelTime, sourceLabel, Phase, PhaseState } from '@/lib/format'
 import { useToast } from '@/components/Toast'
+import { useRole } from '@/lib/useRole'
 
 // 任务卡片：各状态徽标 + 三阶段进度条 + 失败重试 + 完成态去问答。
 // 选中态由父组件给 className is-sel 控制（左侧 accent 指示条）。
@@ -20,6 +21,7 @@ export default function TaskCard({ task, index, selected, onSelect, onRetried }:
   const [retrying, setRetrying] = useState(false)
   const [starting, setStarting] = useState(false)
   const toast = useToast()
+  const { isDemo } = useRole()
   const badge = statusBadge(task.status)
   const phases = computePhases(task)
   const isDead = task.status === TaskStatusEnum.Dead
@@ -27,7 +29,8 @@ export default function TaskCard({ task, index, selected, onSelect, onRetried }:
   const isRunning = task.status === TaskStatusEnum.Running
 
   // 待处理（已上传未转写）任务的入口：开始转写 → 后续摘要/索引在详情面板触发。
-  const canStartTranscribe = task.status === TaskStatusEnum.Pending && !task.has_transcription
+  // 演示账号只读：隐藏写入口，只留已完成任务的问答。
+  const canStartTranscribe = !isDemo && task.status === TaskStatusEnum.Pending && !task.has_transcription
 
   const startTranscribe = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -47,8 +50,9 @@ export default function TaskCard({ task, index, selected, onSelect, onRetried }:
   // 失败重试：按后端 last_job_type 选对应投递端点。
   // 后端常量（internal/model/task_job.go）：transcribe / analyze / download / rag_index
   // download 没有对应前端入口（下载由 upload/upload-url 触发），此时禁用按钮提示重新上传。
+  // 演示账号只读：不提供重试入口。
   const retryJob = task.last_job_type
-  const canRetry = isFailed && retryJob !== 'download'
+  const canRetry = !isDemo && isFailed && retryJob !== 'download'
   const retryLabel = retryJob === 'rag_index' ? '重建索引'
     : retryJob === 'analyze' ? '重试摘要'
     : retryJob === 'transcribe' ? '重试转写'

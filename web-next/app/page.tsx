@@ -9,6 +9,7 @@ import TaskCard, { TaskCardSkeleton } from '@/components/TaskCard'
 import TaskDetailPanel from '@/components/TaskDetailPanel'
 import { api, ApiError } from '@/lib/api'
 import { TaskStatusEnum } from '@/lib/types'
+import { useRole } from '@/lib/useRole'
 import type { VideoTask, TaskStatus } from '@/lib/types'
 
 type StatusFilter = 'all' | 'running' | 'completed' | 'failed' | 'dead'
@@ -41,6 +42,7 @@ function LibraryView() {
   const [showUpload, setShowUpload] = useState(false)
   const [selectedTask, setSelectedTask] = useState<VideoTask | null>(null)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { isDemo } = useRole()
 
   // 拉列表
   const load = useCallback(async (silent = false) => {
@@ -187,7 +189,7 @@ function LibraryView() {
               ) : filtered.length === 0 ? (
                 <div className="py-16 text-center">
                   <div className="font-mono text-[10px] text-ink-4 wide uppercase mb-2">— {tasks.length === 0 ? '暂无视频' : '无匹配结果'} —</div>
-                  {tasks.length === 0 && (
+                  {tasks.length === 0 && !isDemo && (
                     <button onClick={() => setShowUpload(true)} className="btn-line h-8 px-3 mt-3 text-[12px] font-medium inline-flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" />上传第一个视频</button>
                   )}
                 </div>

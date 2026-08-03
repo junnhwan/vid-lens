@@ -21,6 +21,9 @@ func NewRAGHandler(indexSvc *service.RAGIndexService, profileSvc *service.AIProf
 }
 
 func (h *RAGHandler) BuildTaskIndex(c *gin.Context) {
+	if denyIfDemo(c, "触发索引") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || taskID <= 0 {

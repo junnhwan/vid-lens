@@ -3,10 +3,12 @@
 import Link from 'next/link'
 import { Upload } from 'lucide-react'
 import ThemeSwitch from './ThemeSwitch'
+import { useRole } from '@/lib/useRole'
 
 // 顶栏：logo + 三页导航 + 主题切换 + 上传 + 头像
 // 导航 active 态由当前路径决定。
 export default function Header({ active, onUpload }: { active: 'library' | 'kb' | 'settings'; onUpload?: () => void }) {
+  const { isDemo } = useRole()
   const navCls = (k: string) =>
     `px-2.5 py-1 rounded-md text-[13px] ${active === k ? 'bg-sienna-500/10 text-sienna-700 font-medium' : 'text-ink-3 hover:text-ink-0 hover:bg-ink-2/10'}`
   return (
@@ -24,7 +26,7 @@ export default function Header({ active, onUpload }: { active: 'library' | 'kb' 
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <ThemeSwitch />
-          {onUpload && (
+          {onUpload && !isDemo && (
             <button onClick={onUpload} className="btn-ink h-8 px-3 rounded-md flex items-center gap-1.5 text-[13px] font-medium">
               <Upload className="w-3.5 h-3.5" /> 上传视频
             </button>

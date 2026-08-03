@@ -26,6 +26,16 @@ func isDemoUser(c *gin.Context) bool {
 	return middleware.GetRole(c) == model.RoleDemo
 }
 
+// denyIfDemo 演示账号只读保护：命中即写 403 并返回 true，调用方应直接 return。
+// 演示账号只保留「视频列表 + 问答」；上传、异步触发、删除等变更一律拒绝。
+func denyIfDemo(c *gin.Context, action string) bool {
+	if !isDemoUser(c) {
+		return false
+	}
+	response.Forbidden(c, "演示账号仅可观看与问答，不可"+action)
+	return true
+}
+
 func (h *AIProfileHandler) List(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if isDemoUser(c) {

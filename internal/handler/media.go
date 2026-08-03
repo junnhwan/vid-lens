@@ -24,6 +24,9 @@ func NewMediaHandler(svc *service.MediaService) *MediaHandler {
 // UploadFile 普通文件上传
 // POST /api/v1/media/upload
 func (h *MediaHandler) UploadFile(c *gin.Context) {
+	if denyIfDemo(c, "上传视频") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 
 	file, header, err := c.Request.FormFile("file")
@@ -45,6 +48,9 @@ func (h *MediaHandler) UploadFile(c *gin.Context) {
 // UploadByURL 通过 URL 下载并上传
 // POST /api/v1/media/upload-url
 func (h *MediaHandler) UploadByURL(c *gin.Context) {
+	if denyIfDemo(c, "通过链接下载视频") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 
 	var req struct {
@@ -67,6 +73,9 @@ func (h *MediaHandler) UploadByURL(c *gin.Context) {
 // UploadChunk 保存一个分片，Redis Set 记录已落入 MinIO 的分片编号。
 // POST /api/v1/media/upload-chunk
 func (h *MediaHandler) UploadChunk(c *gin.Context) {
+	if denyIfDemo(c, "分片上传") {
+		return
+	}
 	fileMD5 := c.PostForm("file_md5")
 	chunkNumber, _ := strconv.Atoi(c.PostForm("chunk_number"))
 	if fileMD5 == "" || chunkNumber < 0 {
@@ -125,6 +134,9 @@ func (h *MediaHandler) CheckUpload(c *gin.Context) {
 // MergeChunks 校验 Redis 分片集合后由 MinIO 合并最终对象。
 // POST /api/v1/media/merge-chunks
 func (h *MediaHandler) MergeChunks(c *gin.Context) {
+	if denyIfDemo(c, "合并分片") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 	var req struct {
 		FileMD5     string `json:"file_md5" binding:"required"`
@@ -149,6 +161,9 @@ func (h *MediaHandler) MergeChunks(c *gin.Context) {
 // RequestAnalysis 提交 AI 分析
 // POST /api/v1/media/analyze/:id
 func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
+	if denyIfDemo(c, "生成摘要") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	force := parseForceFlag(c)
@@ -164,6 +179,9 @@ func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 // RequestTranscribe 提交文字提取
 // POST /api/v1/media/transcribe/:id
 func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
+	if denyIfDemo(c, "开始转写") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	force := parseForceFlag(c)
@@ -231,6 +249,9 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 // DeleteTask 删除任务
 // DELETE /api/v1/media/task/:id
 func (h *MediaHandler) DeleteTask(c *gin.Context) {
+	if denyIfDemo(c, "删除视频") {
+		return
+	}
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 

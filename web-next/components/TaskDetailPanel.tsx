@@ -9,6 +9,7 @@ import { api, ApiError } from '@/lib/api'
 import { statusBadge, statusLabel, computePhases, fmtRelTime } from '@/lib/format'
 import { useToast } from '@/components/Toast'
 import Markdown from '@/components/Markdown'
+import { useRole } from '@/lib/useRole'
 
 type ViewMode = 'narrow' | 'expand' | 'fullscreen'
 
@@ -27,6 +28,8 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
   const [ragErr, setRagErr] = useState('')
   const [regening, setRegening] = useState(false)
   const toast = useToast()
+  // 演示账号只读：隐藏 生成摘要 / Regen / 触发索引 等写入口，仅保留查看与问答。
+  const { isDemo } = useRole()
 
   // Copy 摘要到剪贴板
   const copySummary = async () => {
@@ -167,15 +170,17 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
               <div className="text-[10px] font-medium text-ink-3">内容摘要</div>
               {task.summary?.model_name && <span className="font-mono text-[10px] text-ink-4">{task.summary.model_name}</span>}
               <div className="ml-auto flex gap-3">
-                {task.has_transcription && !task.has_summary && (
+                {!isDemo && task.has_transcription && !task.has_summary && (
                   <button onClick={genSummary} disabled={regening} className="text-[10px] font-medium text-sienna-700 hover:text-sienna-900 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
                     {regening ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}生成摘要
                   </button>
                 )}
                 <button onClick={copySummary} disabled={!task.summary?.content} className="text-[10px] font-medium text-ink-3 hover:text-ink-0 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"><Copy className="w-3 h-3" />Copy</button>
-                <button onClick={regenSummary} disabled={regening} className="text-[10px] font-medium text-ink-3 hover:text-ink-0 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
-                  {regening ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}Regen
-                </button>
+                {!isDemo && (
+                  <button onClick={regenSummary} disabled={regening} className="text-[10px] font-medium text-ink-3 hover:text-ink-0 flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {regening ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}Regen
+                  </button>
+                )}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto scroll-thin px-7 pb-5">
@@ -264,9 +269,11 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
                 {ragStatus.indexed
                   ? <><span className="w-1.5 h-1.5 rounded-full bg-moss" /><span className="text-moss">已索引 · {ragStatus.chunks} chunks</span></>
                   : <><span className="w-1.5 h-1.5 rounded-full bg-ink-0/30" /><span className="text-ink-3">未索引</span>
-                    <button onClick={triggerIndex} disabled={triggering} className="btn-line h-6 px-2 text-[10px] ml-2 flex items-center gap-1 disabled:opacity-50">
-                      <Database className="w-3 h-3" />{triggering ? '触发中' : '触发索引'}
-                    </button></>}
+                    {!isDemo && (
+                      <button onClick={triggerIndex} disabled={triggering} className="btn-line h-6 px-2 text-[10px] ml-2 flex items-center gap-1 disabled:opacity-50">
+                        <Database className="w-3 h-3" />{triggering ? '触发中' : '触发索引'}
+                      </button>
+                    )}</>}
               </div>
             ) : <div className="sk h-4 w-32" />}
             {ragErr && <div className="text-[11px] text-rust mt-1">{ragErr}</div>}
