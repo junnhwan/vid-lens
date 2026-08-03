@@ -22,7 +22,9 @@ env:
   RUNTIME_GENERATION: postgres-pgvector-v1
   INTERNAL_READY_URL: http://127.0.0.1:18083/readyz
   WEB_NEXT_HEALTH_URL: http://127.0.0.1:18084/
-  PUBLIC_HEALTH_URL: http://vidlens.wanjune.qzz.io/health
+  # 公网站点由 cloudflared 隧道路由到 web-next(:18084)，无 /health 路由；
+  # 公网健康检查改为检查站点根路径（200 即页面可达），后端健康由内部 readyz 保证。
+  PUBLIC_HEALTH_URL: http://vidlens.wanjune.qzz.io/
   # web-next 的 /api 代理目标（next 构建时求值，见 web-next/next.config.js）
   VIDLENS_API_BASE: http://127.0.0.1:18083
 
