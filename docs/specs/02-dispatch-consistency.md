@@ -112,6 +112,23 @@ VidLens 的视频处理链路（ASR、摘要、RAG 索引）是又慢又贵又�
 
 ## Further Notes
 
+### 已知边界：消费侧消息去重与调度器重发的 40 分钟交互窗口
+
+**现象**（线上 2026-08-03 实测）：一批任务突然全部卡在 Queued，`task_jobs` 的 `lease_expires_at` 被 RetryScheduler 每 2 分钟续一次，状态永远停在 Queued；RabbitMQ 消费端没有新的 `analyze message received` 日志，publish 计数却在增长；唯一变化是 `retry_budget.go` 的 `record not found` 日志每轮都出现。
+
+**根因**：`consumer_lifecycle.go` 的 `dedupHandler` 用 Redis `SETNX mq:dedup:<queue>:<MessageId>` 做消费侧幂等，键 TTL 40 分钟（`idempotency.go` 默认 retention）。首次批量投递时（07:43–07:46）键被写入；随后服务器重启（08:00:58），调度器发现过期 dispatch lease 并重发**同一个 MessageId**（`analyze:<taskID>`）。消费者在 40 分钟窗口内看到键仍在，判定为重复投递，直接 Ack 为 no-op——业务逻辑从未执行，任务静默卡死。
+
+**触发条件**：服务器重启 + 调度器在 40 分钟内重发同一任务（即 dispatch lease 恢复路径与消费侧去重窗口重叠）。
+
+**影响**：任务不失败、不重试、不进入 DLQ，只是静默等待，直到 dedup 键 TTL 过期后调度器下一次重发才自愈。单次最多卡 40 分钟，但批量场景下表现为"整批卡死数小时"。
+
+**处置**：无需重启服务。等键过期自动恢复；或手动 `redis-cli --scan --pattern 'mq:dedup:*' | xargs redis-cli del` 立即恢复。
+
+**修复方向（未做，仅记录）**：dedup 键的本意是拦截"同一消息的立即重投"（Nack+requeue 场景），40 分钟 TTL 跨重启后把调度器重发也拦了。三个可选方向：
+1. 调度器重发使用带 generation 的 MessageId（如 `analyze:<taskID>:<cycle>`），与首次投递区分；
+2. dedup 键在任务状态机发生 dispatch 接管时释放（claim 时删键）；
+3. 缩短 dedup TTL 至逼近 requeue 间隔，而非 40 分钟。
+
 ### 与 00-refactor-decisions.md 的对齐
 
 - MQ 选型 = RabbitMQ（决策记录第 2.1 节）✅

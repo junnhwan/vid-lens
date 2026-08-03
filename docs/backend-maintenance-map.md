@@ -192,6 +192,19 @@ RetryScheduler claim dispatch 后，如果 RabbitMQ publish 失败，必须通�
 - pgvector 实现了 task/model scope 内的事务性 replace（同一 PostgreSQL 事务中先删旧投影再写新投影）；Milvus 仍走显式的 delete + upsert 兼容路径。两者都不保证“业务事实写入 + 向量发布”处于同一事务；pgvector 虽位于同一个 PostgreSQL，当前服务仍分阶段提交，失败后应依赖 RAG failed 状态和可重建索引恢复。
 - 向量后端切换前先做 manifest、固定评测集和 preflight；不要仅凭一次查询结果宣称性能提升。
 
+### 4.7 已知坑：任务卡 Queued 且调度器无限续 lease（消费侧去重吞掉重发）
+
+**症状**（线上 2026-08-03 实测）：一批任务全部卡在 Queued，`task_jobs.lease_expires_at` 每 2 分钟被续一次但状态不动；RabbitMQ 消费端不再出现 `analyze/transcribe message received` 日志；任务不失败、不重试、不进 DLQ。
+
+**根因**：`consumer_lifecycle.go` 的 `dedupHandler` 用 Redis `SETNX mq:dedup:<queue>:<MessageId>` 做消费侧幂等，键 TTL 40 分钟。服务器重启后，RetryScheduler 重发与首次投递**相同的 MessageId**（`analyze:<taskID>`），消费者在 40 分钟窗口内看到键仍在，判定为重复投递直接 Ack 为 no-op，业务逻辑从未执行。详见 `docs/specs/02-dispatch-consistency.md` 的"已知边界"小节。
+
+**排查三步**：
+1. `task_jobs` 中 status=1 且 `lease_expires_at` 持续被续 → 调度器在认领。
+2. RabbitMQ 管理面确认队列 publish 计数在涨、但日志无 `message received` → 消息被消费侧吞掉。
+3. `redis-cli --scan --pattern 'mq:dedup:*'` 有键且 TTL 未过期 → 命中此坑。
+
+**处置**：无需重启服务。等键 TTL 过期（单个最多 40 分钟）自动恢复；或 `redis-cli --scan --pattern 'mq:dedup:*' | xargs redis-cli del` 立即恢复。
+
 ## 5. 常见修改应该落在哪里
 
 | 需求 | 修改位置 | 先补/运行的验证 |
