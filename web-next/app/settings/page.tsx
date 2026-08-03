@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Info, CheckCircle, XCircle, PlugZap, Ruler, List, Eye, Star, Save, Trash2, Loader2 } from 'lucide-react'
 import Header from '@/components/Header'
 import { api, ApiError } from '@/lib/api'
+import { useRole } from '@/lib/useRole'
 import type { AIProfile, AIProfileRequest, ProfilePurpose } from '@/lib/types'
 
 // 设置页：ASR/LLM/Embedding 三 tab 作"筛选视角"。
@@ -20,6 +21,13 @@ const TAB_META: Record<Tab, { label: string; purpose: ProfilePurpose }> = {
 }
 
 export default function SettingsPage() {
+  // 演示账号：整个页面替换为只读模型清单（只显示三个模型名），不显示地址/密钥/编辑入口。
+  const { isDemo } = useRole()
+  if (isDemo) return <DemoProfilesView />
+  return <SettingsEditor />
+}
+
+function SettingsEditor() {
   const [tab, setTab] = useState<Tab>('asr')
   const [profiles, setProfiles] = useState<AIProfile[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,7 +77,9 @@ export default function SettingsPage() {
               ) : profiles.length === 0 ? (
                 <div className="py-10 text-center border border-dashed border-ink-0/20">
                   <div className="font-mono text-[10px] text-ink-4 wide uppercase mb-2">— 暂无 Profile —</div>
-                  <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-3 text-[10px] font-medium inline-flex items-center gap-1"><Plus className="w-3 h-3" />新建</button>
+                  {!readOnly && (
+                    <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-3 text-[10px] font-medium inline-flex items-center gap-1"><Plus className="w-3 h-3" />新建</button>
+                  )}
                 </div>
               ) : (
                 <ul className="space-y-2">
@@ -135,6 +145,72 @@ export default function SettingsPage() {
       load()
     } catch (e) { setErr(e instanceof ApiError ? e.message : '设默认失败') }
   }
+}
+
+// 演示账号只读视图：整页只显示每个 profile 的三个模型名（LLM/ASR/Embedding）。
+// 不显示服务地址、API Key、提供商，也没有任何输入框或新建/编辑/删除入口。
+function DemoProfilesView() {
+  const [profiles, setProfiles] = useState<AIProfile[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setProfiles(await api.listProfiles()); setErr('') } catch (e) { setErr(e instanceof ApiError ? e.message : '加载失败') } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const rows = (p: AIProfile) => [
+    { label: 'LLM · 摘要问答', value: p.llm_model },
+    { label: 'ASR · 转写', value: p.asr_model },
+    { label: 'Embedding · 索引', value: p.embedding_model },
+  ]
+
+  return (
+    <div className="flex flex-col h-screen">
+      <Header active="settings" />
+      <main className="flex-1 overflow-y-auto scroll-thin">
+        <div className="max-w-[920px] mx-auto px-8 py-8">
+          <div className="pb-6 border-b border-ink-0/15">
+            <div className="font-sans text-[10px] text-ink-4">设置 · 演示账号</div>
+            <h1 className="font-sans text-[36px] leading-[1.05] font-medium tight text-ink-0 mt-1.5">AI 模型<span className="text-sienna-500">.</span></h1>
+            <p className="font-sans italic text-[14px] text-ink-3 mt-1.5">演示账号仅展示当前使用的模型，配置只读，服务地址与密钥不对外显示。</p>
+          </div>
+
+          {err && <div className="mt-4 text-[12px] text-rust">{err}<button onClick={load} className="ml-2 underline">重试</button></div>}
+
+          {loading ? (
+            <div className="mt-7 space-y-3">
+              {[0, 1, 2].map(i => <div key={i} className="border border-ink-0/15 px-5 py-4"><div className="sk h-4 w-1/3 mb-2" /><div className="sk h-3 w-1/2" /></div>)}
+            </div>
+          ) : profiles.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="font-mono text-[10px] text-ink-4 wide uppercase mb-2">— 暂无模型配置 —</div>
+            </div>
+          ) : (
+            <div className="mt-7 space-y-4">
+              {profiles.map(p => (
+                <div key={p.id} className="border border-ink-0/15 bg-paper-0 p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="font-sans text-[18px] font-medium text-ink-0">{p.name}</span>
+                    {p.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
+                  </div>
+                  <div className="space-y-3">
+                    {rows(p).map(r => (
+                      <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/10 pb-2.5 last:border-0 last:pb-0">
+                        <span className="font-mono text-[10px] text-ink-4 wide uppercase">{r.label}</span>
+                        <span className="font-mono text-[12.5px] text-ink-1">{r.value || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  )
 }
 
 // 取 profile 在某 tab 下的字段组（asr/llm/embedding）
