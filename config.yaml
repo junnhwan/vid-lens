@@ -1,0 +1,148 @@
+# VidLens 配置文件
+
+server:
+  port: 8080
+  mode: debug  # debug / release
+
+database:
+  host: 127.0.0.1
+  port: 5433
+  username: vidlens
+  password: vidlens
+  dbname: vidlens
+  sslmode: disable
+
+legacy_mysql:
+  host: 127.0.0.1
+  port: 3307
+  username: root
+  password: root
+  dbname: vidlens
+  charset: utf8mb4
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+
+minio:
+  endpoint: 127.0.0.1:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  bucket: vidlens
+  use_ssl: false
+
+mq:
+  brokers:
+    - 127.0.0.1:5672
+  analyze_queue: "video-analyze"
+  transcribe_queue: "video-transcribe"
+  download_queue: "video-download"
+  rag_index_queue: "video-rag-index"
+  consumer_group: "vidlens-worker"
+  prefetch: 1
+
+ai:
+  # New deployments use capability-specific OpenAI-compatible endpoints.
+  # The shared fields are fallbacks for a single-relay setup.
+  provider: "${VIDLENS_AI_PROVIDER:-openai_compatible}"  # openai_compatible / siliconflow / mimo(legacy)
+  base_url: "${VIDLENS_AI_BASE_URL}"
+  api_key: "${VIDLENS_AI_API_KEY}"
+
+  llm_provider: "${VIDLENS_LLM_PROVIDER}"
+  llm_base_url: "${VIDLENS_LLM_BASE_URL}"
+  llm_api_key: "${VIDLENS_LLM_API_KEY}"
+  llm_model: "${VIDLENS_LLM_MODEL:-deepseek-ai/DeepSeek-V3}"
+
+  asr_provider: "${VIDLENS_ASR_PROVIDER}"
+  asr_base_url: "${VIDLENS_ASR_BASE_URL}"
+  asr_api_key: "${VIDLENS_ASR_API_KEY}"
+  asr_model: "${VIDLENS_ASR_MODEL:-FunAudioLLM/SenseVoiceSmall}"
+
+  embedding_provider: "${VIDLENS_EMBEDDING_PROVIDER}"
+  embedding_endpoint: "${VIDLENS_EMBEDDING_ENDPOINT}"
+  embedding_api_key: "${VIDLENS_EMBEDDING_API_KEY}"
+  embedding_model: "${VIDLENS_EMBEDDING_MODEL:-BAAI/bge-m3}"
+  embedding_dim: ${VIDLENS_EMBEDDING_DIM:-0}
+
+  rerank_provider: "${VIDLENS_RERANK_PROVIDER}"
+  rerank_endpoint: "${VIDLENS_RERANK_ENDPOINT}"
+  rerank_api_key: "${VIDLENS_RERANK_API_KEY}"
+  rerank_model: "${VIDLENS_RERANK_MODEL}"
+
+  vision_provider: "${VIDLENS_VISION_PROVIDER}"
+  vision_base_url: "${VIDLENS_VISION_BASE_URL}"
+  vision_api_key: "${VIDLENS_VISION_API_KEY}"
+  vision_model: "${VIDLENS_VISION_MODEL}"
+
+  # Legacy vendor-specific fields. Keep them only while migrating old setups.
+  mimo_api_key: "${MIMO_API_KEY}"
+  mimo_base_url: "${MIMO_BASE_URL:-https://token-plan-cn.xiaomimimo.com/v1}"
+
+  siliconflow_api_key: "${SILICONFLOW_API_KEY}"
+  siliconflow_base_url: "${SILICONFLOW_BASE_URL:-https://api.siliconflow.com/v1}"
+
+tools:
+  ffmpeg_path: "ffmpeg"
+  # Optional. Missing binary => visual OCR stage skipped (ASR-only).
+  ocr_path: "tesseract"
+  ocr_lang: "chi_sim+eng"
+  ytdlp_path: "yt-dlp"
+  cookies_path: ""
+  proxy_url: ""
+  allowed_video_hosts:
+    - bilibili.com
+    - b23.tv
+    - youtube.com
+    - youtu.be
+
+jwt:
+  secret: "change-me-in-production"
+  expire_hours: 72
+
+security:
+  # 16/24/32 字节 AES-GCM 密钥，用于加密用户自己提交的模型 API Key。
+  api_key_secret: "${VIDLENS_API_KEY_SECRET}"
+
+upload:
+  max_file_size: 2147483648  # 2GB
+  chunk_size: 5242880        # 5MB
+
+task_retry:
+  max_retries: 3
+  backoff_seconds: [60, 300, 900]
+  scan_interval_seconds: 30
+  batch_size: 20
+
+cleanup:
+  scan_interval_seconds: 30
+  batch_size: 20
+  lease_seconds: 120
+  retry_backoff_seconds: 60
+
+ratelimit:
+  capacity: 10    # 桶容量
+  rate: 10        # 每秒生成令牌数
+
+rag:
+  store: pgvector
+  enabled: true
+  chunk_size: 800
+  chunk_overlap: 120
+  top_k: 5
+  candidate_k: 30
+  min_score: 0.35
+  recent_turns: 8
+  embedding_dim: ${VIDLENS_RAG_EMBEDDING_DIM:-1536}
+  vector_table: vidlens_rag_vectors
+  rerank_model: "Qwen/Qwen3-Reranker-4B"
+  rewrite_queries: 3
+
+milvus:
+  collection: "vidlens_video_chunks"
+  address: "127.0.0.1:19530"
+  username: ""
+  password: ""
+  token: ""
+  database: "default"

@@ -1,0 +1,86 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vid-lens
+/server
+build/
+
+# Test
+*.test
+*.out
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+config.local.yaml
+.env
+.env.*
+!.env.example
+
+# Docker data
+data/
+
+# Dependencies (go.sum is tracked)
+vendor/
+
+# Temp files
+tmp/
+.tmp/
+*.tmp
+*.log
+.logs/
+.local/
+.pytest_cache/
+/bin/
+/web-next/
+
+# Local design notes
+/CLAUDE.md
+AGENTS.md
+MEMORY.md
+MEMORY.zh-CN.md
+DESIGN_UPDATES.md
+docs/DESIGN_UPDATES.md
+docs/backend-optimization-roadmap.md
+docs/superpowers/
+
+# Local-only project notes and personal materials
+CONTEXT.md
+/docs-private/
+/docs/drafts/
+/docs/personal/
+
+# Local resume drafts
+resume.md
+
+other-grill.md
+
+# Local work artifacts (not tracked)
+docs/site/
+docs/vidlensdocs.zip
+docs/vidlens-source-notes.html
+.playwright-mcp/
+.superpowers/
+.worktrees/
+/*.png
+artifacts/
+
+# Interview VitePress site — removed from main product path (was stale vs PG/pgvector).
+# Keep a local copy if you still need it; do not re-add as product truth.
+# Prefer docs-private/ for interview materials that stay local.
+book/
+
+# Local interview/reference drafts
+other-grill-v2.md

@@ -1,0 +1,90 @@
+/* PROTOTYPE C+ — 动效（融合 A 的 hover/脉冲/过渡） */
+
+.proto-root .proto-serif {
+  font-family: Georgia, "Noto Serif SC", serif;
+}
+
+.proto-fade-in {
+  animation: proto-fade-in 0.35s ease-out;
+}
+@keyframes proto-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.proto-slide-in-right {
+  animation: proto-slide-in-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes proto-slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+.proto-expand {
+  animation: proto-expand 0.25s ease-out;
+}
+@keyframes proto-expand {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 600px; }
+}
+
+.proto-card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.proto-card-hover:hover {
+  transform: translateY(-1px) scale(1.005);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+.proto-btn-lift {
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.proto-btn-lift:hover {
+  transform: translateY(-1px);
+}
+.proto-btn-lift:active {
+  transform: translateY(0);
+}
+
+.proto-pulse {
+  animation: proto-pulse 2s ease-in-out infinite;
+}
+@keyframes proto-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.proto-progress-bar {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.proto-row-hover {
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.proto-row-hover:hover {
+  background-color: rgba(251, 191, 36, 0.04);
+}
+
+.proto-backdrop {
+  animation: proto-backdrop-in 0.2s ease;
+}
+@keyframes proto-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.proto-modal-in {
+  animation: proto-modal-in 0.28s cubic-bezier(0.4, 0, 0.2,  1);
+}
+@keyframes proto-modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-fade-in, .proto-slide-in-right, .proto-expand, .proto-backdrop,
+  .proto-card-hover, .proto-btn-lift, .proto-progress-bar, .proto-pulse {
+    animation: none !important;
+    transition: none !important;
+  }
+}

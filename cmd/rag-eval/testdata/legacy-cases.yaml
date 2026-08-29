@@ -1,0 +1,9 @@
+# Public synthetic fixture for the legacy loader test. Real cases stay local.
+- task_id: 1
+  task_hint: "software architecture example"
+  category: direct_fact
+  question: "What does the example describe?"
+  expected_chunk_keywords:
+    - "architecture"
+  expected_answer_points:
+    - "The example describes software architecture."

@@ -1,0 +1,11 @@
+import './prototype.css'
+import { ProtoPageNav } from '@/components/prototype/c/Shell'
+
+export default function PrototypeLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      {children}
+      <ProtoPageNav />
+    </>
+  )
+}

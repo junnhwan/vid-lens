@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============ 2 套主题 CSS 变量 ============
+   切主题只改 <html data-theme="...">，变量自动级联。
+   light=冷白+深琥珀(默认) / dark=深灰蓝底+暖金(对比度已按 WCAG AA 调校)
+   ========================================================== */
+:root, [data-theme="light"] {
+  --paper-0:#FFFFFF; --paper-1:#FAFAFB; --paper-2:#F1F1F3; --paper-3:#E5E5E8;
+  --ink-0:#18181B; --ink-1:#27272A; --ink-2:#3F3F46; --ink-3:#52525B; --ink-4:#71717A; --ink-5:#A1A1AA;
+  --accent-400:#C2622E; --accent-500:#9A4A1A; --accent-600:#7E3A12; --accent-700:#5C2A0D;
+  --done:#3F7A4A; --fail:#C0392B;
+  --skel-from:#F1F1F3; --skel-to:#E5E5E8;
+}
+[data-theme="dark"] {
+  /* 底不再是纯黑(#0E0E11)，改深灰蓝，文字对比度整体提亮；ink-4/ink-5 弱化文字也提亮，
+     保证正文与弱标签在暗底上都可读。 */
+  --paper-0:#16161C; --paper-1:#1D1D24; --paper-2:#24242C; --paper-3:#2C2C36;
+  --ink-0:#F2F2F5; --ink-1:#CFCED6; --ink-2:#ACACB6; --ink-3:#9494A0; --ink-4:#82828E; --ink-5:#63636F;
+  --accent-400:#E8C878; --accent-500:#D4A94E; --accent-600:#B98C38; --accent-700:#E0BE60;
+  --done:#63B3A8; --fail:#E0704F;
+  --skel-from:#24242C; --skel-to:#2C2C36;
+}
+body { -webkit-font-smoothing: antialiased; }
+
+/* ============ 微交互类（从 4 个 mockup <style> 块合并，逐字抄） ============ */
+
+/* Running 脉冲点：opacity 2s 往返，不用闪烁 */
+.live { animation: live 2s ease-in-out infinite; }
+@keyframes live { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Running 进度条流光扫过 */
+.flow { background-size:200% 100%; background-image:linear-gradient(90deg,var(--accent-500),var(--accent-400),var(--accent-500)); animation: flow 1.8s linear infinite; }
+@keyframes flow { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* 列表行 hover：左侧 3px accent 指示条从 0 滑到 calc(100%-28px)，180ms */
+.entry { position:relative; transition: background .12s; }
+.entry::before { content:''; position:absolute; left:0; top:14px; height:0; width:2px; background:var(--accent-500); transition: height .18s ease; }
+.entry:hover { background:color-mix(in srgb, var(--accent-500) 5%, transparent); }
+.entry:hover::before, .entry.is-sel::before { height:calc(100% - 28px); }
+.entry.is-sel { background:color-mix(in srgb, var(--accent-500) 7%, transparent); }
+
+/* 详情面板宽度过渡 */
+.panel { transition: width .3s cubic-bezier(.4,0,.2,1); }
+
+/* 转写段 hit 高亮：accent 6% 底 + 左 2px inset 边框 */
+.hit { background:color-mix(in srgb, var(--accent-500) 6%, transparent); box-shadow: inset 2px 0 0 var(--accent-500); }
+
+/* 骨架屏 shimmer（不用转圈 spinner） */
+.sk { background:linear-gradient(90deg,var(--skel-from) 25%,var(--skel-to) 37%,var(--skel-from) 63%); background-size:400% 100%; animation: sk 1.5s ease infinite; }
+@keyframes sk { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
+
+/* 字距 */
+.tight { letter-spacing: -0.02em; }
+.wide  { letter-spacing: 0.1em; }
+
+/* 按钮 */
+.btn-ink { background:var(--ink-0); color:var(--paper-0); }
+.btn-ink:hover { background:var(--ink-1); }
+.btn-line { border:1px solid var(--ink-0); color:var(--ink-0); }
+.btn-line:hover { background:var(--ink-0); color:var(--paper-0); }
+
+/* 流式打字光标 */
+.caret::after { content:''; display:inline-block; width:.5em; height:1em; vertical-align:-0.15em; margin-left:1px; background:var(--accent-500); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity:0 } }
+
+/* 引用上标徽标 [C1] */
+.cite { font-family:'JetBrains Mono','Geist Mono',monospace; font-size:10px; font-weight:500; vertical-align:super; line-height:0; padding:1px 4px 2px; margin:0 1px; border:1px solid var(--accent-500); color:var(--accent-700); background:color-mix(in srgb,var(--accent-500) 8%,transparent); cursor:pointer; transition: background .15s; }
+.cite:hover { background:var(--accent-500); color:var(--paper-0); }
+
+/* 引用卡片展开过渡：max-height 0 → 240/280px，350ms */
+.cite-card { max-height:0; overflow:hidden; transition: max-height .35s ease, opacity .25s ease, margin .25s ease; opacity:0; margin-top:0; }
+.cite-card.open { max-height:280px; opacity:1; margin-top:14px; }
+
+/* 用户气泡 */
+.bubble-user { background:var(--ink-0); color:var(--paper-0); }
+
+/* 极细滚动条 */
+.scroll-thin::-webkit-scrollbar { width:6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--ink-0) 15%,transparent); }
+.no-scrollbar::-webkit-scrollbar { display:none; }
+.no-scrollbar { scrollbar-width:none; }
+
+/* 设置页：input 字段 */
+.field { border:1px solid color-mix(in srgb,var(--ink-0) 15%,transparent); background:var(--paper-1); }
+.field:focus-within { border-color:var(--accent-500); background:var(--paper-0); }
+.field input, .field select { background:transparent; }
+.field input:focus, .field select:focus { outline:none; }
+
+/* 设置页：tab */
+.tab { position:relative; color:var(--ink-3); }
+.tab.on { color:var(--ink-0); box-shadow: inset 0 -2px 0 var(--accent-500); }
+
+/* 设置页：测试结果 / 默认徽标 */
+.result-ok { color:var(--done); background:color-mix(in srgb,var(--done) 8%,transparent); }
+.result-err { color:var(--fail); background:color-mix(in srgb,var(--fail) 8%,transparent); }
+.default-badge { background:color-mix(in srgb,var(--accent-500) 10%,transparent); color:var(--accent-700); border:1px solid color-mix(in srgb,var(--accent-500) 30%,transparent); }
+
+/* 知识库：成员视频来源色点 */
+.src-dot { width:6px; height:6px; border-radius:1px; display:inline-block; }
+
+/* ============ C+A 工作台 UI 动效 ============ */
+.ui-root .ui-serif { font-family: Georgia, "Noto Serif SC", serif; }
+.ui-fade-in { animation: ui-fade-in 0.35s ease-out; }
+@keyframes ui-fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+.ui-card-hover { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.ui-card-hover:hover { transform: translateY(-1px) scale(1.005); box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+.ui-btn-lift { transition: transform .15s ease, background-color .15s ease; }
+.ui-btn-lift:hover { transform: translateY(-1px); }
+.ui-pulse { animation: ui-pulse 2s ease-in-out infinite; }
+@keyframes ui-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.ui-row-hover { transition: background-color .15s ease; }
+.ui-row-hover:hover { background-color: rgba(251,191,36,.04); }
+.ui-backdrop { animation: ui-backdrop-in .2s ease; }
+@keyframes ui-backdrop-in { from{opacity:0} to{opacity:1} }
+.ui-modal-in { animation: ui-modal-in .28s cubic-bezier(.4,0,.2,1); }
+@keyframes ui-modal-in { from{opacity:0;transform:scale(.96) translateY(8px)} to{opacity:1;transform:none} }
+.ui-input {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(231 229 228);
+  background: white;
+  font-size: 13px;
+  color: rgb(28 25 23);
+}
+.ui-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
+  border-color: rgb(251 191 36);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-fade-in, .ui-card-hover, .ui-btn-lift, .ui-pulse, .ui-backdrop, .ui-modal-in { animation:none!important; transition:none!important; }
+}
+
+/* ============ 产品打磨补丁 ============ */
+
+/* Toast 入场：轻微下滑+淡入，180ms */
+.toast-in { animation: toast-in .18s ease-out; }
+@keyframes toast-in { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: none; } }
+
+/* 全局可见 focus 环：键盘导航能看到焦点在哪。
+   只在键盘 focus 时出现（:focus-visible），鼠标点击不触发。 */
+:where(button, a, [role="button"], input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+/* 尊重用户的减少动效偏好：关掉所有装饰性动画。
+   流光/脉冲/骨架 shimmer 降为静态或减弱。 */
+@media (prefers-reduced-motion: reduce) {
+  .live, .flow, .sk, .caret::after, .toast-in, .panel { animation: none !important; transition: none !important; }
+  .flow { background-image: linear-gradient(90deg, var(--accent-500), var(--accent-400)); }
+}

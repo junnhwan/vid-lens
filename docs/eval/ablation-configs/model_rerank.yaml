@@ -1,0 +1,26 @@
+# Ablation variant: model_rerank.
+# RRF fusion baseline + post-retrieval rerank. Per spec 01 §model_rerank 代理
+# decision: the offline eval path's configuredReranker supports only
+# none/deterministic (no live ModelRerankerFactory). This variant therefore
+# uses the deterministic reranker as a proxy to keep all four variants runnable
+# (no placeholder variant). HONEST LABEL: "离线 eval 无真实 ModelRerankerFactory，
+# model_rerank 档以 deterministic 代理". The difference measured here is NOT a
+# real model-rerank lift; real model-rerank online effect is measured by (B) on
+# the live link, not by this offline eval. Compared vs vector_only baseline.
+name: model_rerank
+enable_vector: true
+enable_bm25: true
+query_mode: rewrite
+rewrite_queries: 3
+top_k: 5
+candidate_k: 20
+rrf_k: 60
+neighbor_radius: 1
+max_context_chars: 4000
+min_vector_score: 0
+chunker_strategy: fixed_window
+chunker_version: split-text-v1
+chunk_size: 800
+chunk_overlap: 120
+reranker_mode: deterministic
+reranker_version: deterministic-v1

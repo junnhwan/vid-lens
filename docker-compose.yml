@@ -1,0 +1,208 @@
+services:
+  # =========================================
+  # Legacy MySQL rollback source only
+  # Start only when needed: docker compose --profile legacy-mysql up -d mysql
+  # =========================================
+  mysql:
+    image: mysql:8.0
+    container_name: vidlens-mysql
+    profiles: ["legacy-mysql"]
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=vidlens
+      - TZ=Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 2. Redis (缓存 + 分布式锁)
+  # =========================================
+  redis:
+    image: redis:latest
+    container_name: vidlens-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 3. MinIO (对象存储)
+  # =========================================
+  minio:
+    image: minio/minio
+    container_name: vidlens-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      # 挂老仓库 vid-lens-727 的 MinIO 数据（含历史视频对象）
+      - ../vid-lens-727/data/minio:/data
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # PostgreSQL + pgvector (primary application database)
+  # Stores relational business data and RAG vectors; starts by default.
+  # =========================================
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: vidlens-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: vidlens
+      POSTGRES_PASSWORD: vidlens
+      POSTGRES_DB: vidlens
+      TZ: Asia/Shanghai
+    volumes:
+      # 挂老仓库 vid-lens-727 的 PG 数据（含历史任务/转写/摘要/chunk/聊天）
+      - ../vid-lens-727/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 4. Zookeeper (Kafka 依赖)
+  # =========================================
+  # =========================================
+  # 5. RabbitMQ (消息队列 — 任务可靠投递)
+  # 选 RabbitMQ 而非 Kafka：vid-lens 的 MQ 痛点是任务可靠投递 + 失败可恢复
+  # + 削峰（ASR 配额有限），不是高吞吐日志聚合；Kafka 的 partition/ISR/高吞吐
+  # 特性在用户级并发吞吐下用不上。详见 docs/decisions/02-dispatch-consistency.md。
+  # =========================================
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: vidlens-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # 管理面（DLQ 重投在此操作）
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 6. Milvus Etcd (rollback profile only)
+  # =========================================
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    profiles: ["milvus"]
+    container_name: vidlens-milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    command: etcd --advertise-client-urls=http://milvus-etcd:2379 --listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+    volumes:
+      - ./data/milvus/etcd:/etcd
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 7. Milvus Standalone (rollback profile only)
+  # Start with: docker compose --profile milvus up -d
+  # =========================================
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    profiles: ["milvus"]
+    container_name: vidlens-milvus
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19530:19530"
+    volumes:
+      - ./data/milvus/data:/var/lib/milvus
+    depends_on:
+      - milvus-etcd
+      - minio
+    networks:
+      - vidlens-net
+
+  # =========================================
+  # 8. Kafka UI (可视化管理)
+  # =========================================
+  # 9. Prometheus / Grafana（可选可观测性栈）
+  # docker compose --profile observability up -d prometheus grafana
+  # =========================================
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: vidlens-prometheus
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - vidlens-net
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    container_name: vidlens-grafana
+    profiles: ["observability"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - vidlens-net
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  vidlens-net:
+    driver: bridge
