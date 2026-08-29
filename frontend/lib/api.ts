@@ -1,7 +1,10 @@
 import type {
   AIProfile, AIProfileRequest, ProfilePurpose, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
-  PaginatedTasks, RAGIndexResult, SSEDone, SSEError, UploadResult, User, VideoTask,
+  PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
+  AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
+  AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
+  UploadResult, User, VideoTask,
 } from './types'
 
 // ============ 唯一后端出口 ============
@@ -130,42 +133,39 @@ export const api = {
 
 // ============ SSE 流式问答 ============
 // EventSource 不能带 Authorization header，手动 fetch + ReadableStream 解析 text/event-stream。
-// 事件：answer(增量 string) / citations([]Citation) / done(SSEDone) / error(SSEError)
-export interface SSEHandlers {
-  onAnswer: (delta: string) => void
-  onCitations: (cs: Citation[]) => void
-  onDone: (d: SSEDone) => void
-  onError: (e: SSEError) => void
-}
 
-export async function streamAsk(
-  sid: number,
-  question: string,
-  top_k: number,
-  mode: ChatMode,
-  h: SSEHandlers,
+type SSEDispatch = (event: string, data: unknown) => void
+
+async function consumeSSE(
+  path: string,
+  body: object,
+  dispatch: SSEDispatch,
   signal?: AbortSignal,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/chat/sessions/${sid}/messages/stream`, {
+): Promise<{ ok: boolean; status: number }> {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ question, top_k, mode }),
+    body: JSON.stringify(body),
     signal,
   })
   if (res.status === 401) {
-    h.onError({ message: '未登录或登录已过期' })
+    dispatch('error', { message: '未登录或登录已过期' })
     if (typeof window !== 'undefined') { clearToken(); location.href = '/login' }
-    return
+    return { ok: false, status: res.status }
   }
   if (!res.ok || !res.body) {
-    h.onError({ message: `流式请求失败 (${res.status})` })
-    return
+    dispatch('error', { message: `流式请求失败 (${res.status})` })
+    return { ok: false, status: res.status }
   }
+
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  // SSE 以 \n\n 分隔事件；data 行可能跨多行需拼接
   for (;;) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => {})
+      break
+    }
     const { done, value } = await reader.read()
     if (done) break
     buf += decoder.decode(value, { stream: true })
@@ -184,16 +184,108 @@ export async function streamAsk(
       if (!dataStr) continue
       let parsed: unknown
       try { parsed = JSON.parse(dataStr) } catch { parsed = dataStr }
-      switch (event) {
-        case 'answer': h.onAnswer(typeof parsed === 'string' ? parsed : '')
-          break
-        case 'citations': h.onCitations(parsed as Citation[])
-          break
-        case 'done': h.onDone(parsed as SSEDone)
-          break
-        case 'error': h.onError(parsed as SSEError)
-          break
-      }
+      dispatch(event, parsed)
     }
   }
+  return { ok: true, status: res.status }
+}
+
+export interface SSEHandlers {
+  onAnswer: (delta: string) => void
+  onCitations: (cs: Citation[]) => void
+  onDone: (d: SSEDone) => void
+  onError: (e: SSEError) => void
+}
+
+export async function streamAsk(
+  sid: number,
+  question: string,
+  top_k: number,
+  mode: ChatMode,
+  h: SSEHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  await consumeSSE(
+    `/chat/sessions/${sid}/messages/stream`,
+    { question, top_k, mode },
+    (event, data) => {
+      switch (event) {
+        case 'answer':
+          h.onAnswer(typeof data === 'string' ? data : '')
+          break
+        case 'citations':
+          h.onCitations(data as Citation[])
+          break
+        case 'done':
+          h.onDone(data as SSEDone)
+          break
+        case 'error':
+          h.onError(data as SSEError)
+          break
+        default:
+          break
+      }
+    },
+    signal,
+  )
+}
+
+/** 单视频 Agent SSE；后端仅接受 mode=agent */
+export async function streamAgent(
+  sid: number,
+  question: string,
+  opts: AgentStreamOptions,
+  h: AgentSSEHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body = {
+    question,
+    top_k: opts.top_k ?? 4,
+    mode: opts.mode ?? 'agent',
+    ...(opts.agent_profile ? { agent_profile: opts.agent_profile } : {}),
+  }
+  await consumeSSE(
+    `/chat/sessions/${sid}/messages/agent/stream`,
+    body,
+    (event, data) => {
+      switch (event) {
+        case 'run_start':
+          h.onRunStart?.(data as AgentRunStartEvent)
+          break
+        case 'step_start':
+          h.onStepStart?.(data as AgentStepEvent)
+          break
+        case 'step_done':
+          h.onStepDone?.(data as AgentStepEvent)
+          break
+        case 'step_error':
+          h.onStepError?.(data as AgentStepEvent)
+          break
+        case 'tool_call':
+          h.onToolCall?.(data as AgentToolCallEvent)
+          break
+        case 'tool_result':
+          h.onToolResult?.(data as AgentToolResultEvent)
+          break
+        case 'retrieve_hits':
+          h.onRetrieveHits?.(data as AgentRetrieveHitsEvent)
+          break
+        case 'answer':
+          h.onAnswer(typeof data === 'string' ? data : '')
+          break
+        case 'citations':
+          h.onCitations(data as Citation[])
+          break
+        case 'done':
+          h.onDone(data as AgentDoneEvent)
+          break
+        case 'error':
+          h.onError(data as SSEError)
+          break
+        default:
+          break
+      }
+    },
+    signal,
+  )
 }

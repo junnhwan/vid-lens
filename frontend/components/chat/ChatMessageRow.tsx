@@ -34,6 +34,7 @@ function TraceCollapse({ steps }: { steps: ChatTraceStep[] }) {
               <div>
                 <span className="font-medium text-stone-700">{s.label}</span>
                 {s.detail && <span className="text-stone-500"> · {s.detail}</span>}
+                {s.tool && <span className="text-stone-400 font-mono text-[10px]"> · {s.tool}</span>}
               </div>
             </div>
           ))}
@@ -113,6 +114,9 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, topK
         <div className={msg.streaming ? 'opacity-60' : 'ui-typewriter-cites-in'}>
           <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} />
         </div>
+      )}
+      {!msg.streaming && !msg.error && msg.content && (!msg.cites || msg.cites.length === 0) && (
+        <p className="text-[10px] text-stone-400 italic">本条回答未附带引用片段。</p>
       )}
     </div>
   )

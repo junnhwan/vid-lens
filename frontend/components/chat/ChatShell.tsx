@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { ReactNode, Ref } from 'react'
+import type { VideoChatMode } from '@/lib/types'
 import ChatSplitLayout from '@/components/chat/ChatSplitLayout'
 
 export function ChatHeader({ backHref, backLabel, kicker, title, actions }: {
@@ -45,6 +46,36 @@ export function ModeToggle({ mode, onChange }: {
       >
         严格 RAG
       </button>
+    </div>
+  )
+}
+
+/** 单视频聊天：普通 / 严格 RAG / Agent SSE */
+export function VideoModeToggle({ mode, onChange, disabled }: {
+  mode: VideoChatMode
+  onChange: (m: VideoChatMode) => void
+  disabled?: boolean
+}) {
+  const items: { key: VideoChatMode; label: string; title: string }[] = [
+    { key: 'strict_rag', label: '严格 RAG', title: '标准检索增强问答' },
+    { key: 'video_assistant', label: '普通', title: '普通视频助手' },
+    { key: 'agent', label: 'Agent', title: '多步工具 Agent（单视频）' },
+  ]
+  return (
+    <div className={`flex flex-wrap rounded-lg border border-stone-200 overflow-hidden text-[11px] max-w-full ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {items.map(item => (
+        <button
+          key={item.key}
+          type="button"
+          title={item.title}
+          onClick={() => onChange(item.key)}
+          className={`px-2.5 sm:px-3 py-1.5 transition-colors whitespace-nowrap ${
+            mode === item.key ? 'bg-stone-900 text-white' : 'text-stone-500 hover:bg-stone-50'
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
   )
 }

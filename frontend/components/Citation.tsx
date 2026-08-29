@@ -3,8 +3,6 @@
 import { useState } from 'react'
 import Markdown from '@/components/Markdown'
 import type { Citation } from '@/lib/types'
-
-// 引用脚注系统：
 // [Cx] 是上标小徽标，点击在回答正下方内联展开引用卡片（max-height 过渡 350ms），不要浮层。
 // 一条回答可能有多个 citation，共享一组卡片。
 export interface CiteRef {
@@ -23,7 +21,10 @@ export interface CiteRef {
 export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: number) => string): CiteRef[] {
   if (!snapshot) return []
   try {
-    const cs = JSON.parse(snapshot) as Citation[]
+    const parsed = JSON.parse(snapshot) as Citation[] | { citations?: Citation[] }
+    const cs: Citation[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.citations) ? parsed.citations : []
     return cs.map((c) => ({
       id: c.citation_id || `C${c.chunk_index}`,
       chunkIndex: c.chunk_index,

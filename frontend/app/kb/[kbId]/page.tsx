@@ -219,7 +219,8 @@ export default function KBChatPage() {
           <AgentTracePanel
             steps={activeTrace}
             streaming={streaming}
-            hint="知识库跨视频 strict_rag 流式问答。"
+            source="inferred"
+            emptyHint="知识库跨视频 strict_rag 流式问答。"
           />
         }
         header={

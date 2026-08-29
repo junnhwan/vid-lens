@@ -23,6 +23,15 @@ export default function ChatSplitLayout({
   const [dragging, setDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // 窄屏默认收起流水线，避免挤压对话区
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const sync = () => { if (mq.matches) setCollapsed(true) }
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     setDragging(true)

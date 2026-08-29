@@ -193,6 +193,8 @@ export interface RAGIndexResult {
 // ============ Chat ============
 export type ChatScopeType = 'video' | 'knowledge_base'
 export type ChatMode = 'video_assistant' | 'strict_rag'
+/** 单视频聊天页专用：在 ChatMode 基础上增加 Agent SSE */
+export type VideoChatMode = ChatMode | 'agent'
 
 export interface ChatSession {
   id: number
@@ -250,6 +252,82 @@ export interface SSEDone {
 }
 export interface SSEError {
   message: string
+  step_id?: string
+}
+
+// Agent SSE（POST .../messages/agent/stream，mode 须为 agent）
+export interface AgentRunStartEvent {
+  run_id: string
+  mode: string
+  scope_type: string
+  task_id?: number
+  kb_id?: number
+}
+
+export interface AgentStepEvent {
+  run_id: string
+  step_id: string
+  kind: string
+  label: string
+  status: string
+  detail?: string
+  query?: string
+  hits?: number
+  tool?: string
+  input?: unknown
+  output?: string
+  error?: string
+  ts?: string
+}
+
+export interface AgentToolCallEvent {
+  run_id: string
+  step_id: string
+  tool: string
+  input?: unknown
+}
+
+export interface AgentToolResultEvent {
+  run_id: string
+  step_id: string
+  output?: string
+  duration_ms?: number
+  error?: string
+}
+
+export interface AgentRetrieveHitsEvent {
+  run_id: string
+  step_id: string
+  query?: string
+  hits: number
+  sources?: string[]
+}
+
+export interface AgentDoneEvent {
+  run_id: string
+  message_id: number
+  degraded?: boolean
+  trace_summary?: { steps: number; tools: number; retrievals: number }
+}
+
+export interface AgentStreamOptions {
+  top_k?: number
+  mode?: 'agent'
+  agent_profile?: string
+}
+
+export interface AgentSSEHandlers {
+  onRunStart?: (d: AgentRunStartEvent) => void
+  onStepStart?: (d: AgentStepEvent) => void
+  onStepDone?: (d: AgentStepEvent) => void
+  onStepError?: (d: AgentStepEvent) => void
+  onToolCall?: (d: AgentToolCallEvent) => void
+  onToolResult?: (d: AgentToolResultEvent) => void
+  onRetrieveHits?: (d: AgentRetrieveHitsEvent) => void
+  onAnswer: (delta: string) => void
+  onCitations: (cs: Citation[]) => void
+  onDone: (d: AgentDoneEvent) => void
+  onError: (e: SSEError) => void
 }
 
 // ============ 知识库 ============

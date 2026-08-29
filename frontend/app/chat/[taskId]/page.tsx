@@ -4,16 +4,24 @@ import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Database, AlertTriangle, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
-import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ModeToggle, SidebarSection } from '@/components/chat/ChatShell'
+import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, VideoModeToggle, SidebarSection } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
 import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
-import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
+import {
+  agentTraceReducer,
+  emptyAgentTraceState,
+  streamTraceReducer,
+  tracePanelSource,
+  type AgentSSEPayload,
+  type AgentTraceState,
+  type ChatTraceStep,
+} from '@/components/chat/traceTypes'
 import { CiteRef } from '@/components/Citation'
 import { useToast } from '@/components/Toast'
-import { api, streamAsk, ApiError } from '@/lib/api'
+import { api, streamAsk, streamAgent, ApiError } from '@/lib/api'
 import { taskTitle } from '@/lib/format'
-import type { VideoTask, ChatSession, Citation, ChatMode } from '@/lib/types'
+import type { VideoTask, ChatSession, Citation, VideoChatMode } from '@/lib/types'
 
 export default function ChatPage() {
   return (
@@ -32,10 +40,12 @@ function ChatView() {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
-  const [mode, setMode] = useState<ChatMode>('strict_rag')
+  const [mode, setMode] = useState<VideoChatMode>('strict_rag')
   const [topK, setTopK] = useState(4)
   const [messages, setMessages] = useState<ChatMsg[]>([])
-  const [activeTrace, setActiveTrace] = useState<ChatTraceStep[]>([])
+  const [ragTrace, setRagTrace] = useState<ChatTraceStep[]>([])
+  const [agentTrace, setAgentTrace] = useState<AgentTraceState>(emptyAgentTraceState())
+  const [traceError, setTraceError] = useState<string | undefined>()
   const [streaming, setStreaming] = useState(false)
   const [failClosed, setFailClosed] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
@@ -85,7 +95,9 @@ function ChatView() {
   const newSession = () => {
     setSession(null)
     setMessages([])
-    setActiveTrace([])
+    setRagTrace([])
+    setAgentTrace(emptyAgentTraceState())
+    setTraceError(undefined)
     setFailClosed(false)
     const url = new URLSearchParams(location.search)
     url.delete('session')
@@ -98,8 +110,12 @@ function ChatView() {
   }, [messages, streaming])
 
   useEffect(() => {
-    setFailClosed(mode === 'strict_rag' && ragStatus != null && !ragStatus.indexed)
+    setFailClosed((mode === 'strict_rag' || mode === 'agent') && ragStatus != null && !ragStatus.indexed)
   }, [mode, ragStatus])
+
+  const isAgentMode = mode === 'agent'
+  const panelSteps = isAgentMode ? agentTrace.steps : ragTrace
+  const panelSource = tracePanelSource(panelSteps, isAgentMode)
 
   const triggerIndex = async () => {
     try {
@@ -123,7 +139,10 @@ function ChatView() {
 
   const send = useCallback(async (q: string) => {
     if (streaming) return
-    if (mode === 'strict_rag' && ragStatus && !ragStatus.indexed) { setFailClosed(true); return }
+    if ((mode === 'strict_rag' || mode === 'agent') && ragStatus && !ragStatus.indexed) {
+      setFailClosed(true)
+      return
+    }
 
     let sid = session?.id
     if (!sid) {
@@ -145,16 +164,7 @@ function ChatView() {
     abortRef.current = ctrl
     setStreaming(true)
     setFailClosed(false)
-
-    const startTrace = streamTraceReducer([], 'start')
-    setActiveTrace(startTrace)
-    let answerStarted = false
-
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', content: q },
-      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
-    ])
+    setTraceError(undefined)
 
     const patchLast = (patch: Partial<ChatMsg>) => {
       setMessages(prev => {
@@ -166,11 +176,86 @@ function ChatView() {
       })
     }
 
+    const mapCitations = (cs: Citation[]): CiteRef[] => cs.map((c, i) => ({
+      id: `C${i + 1}`,
+      chunkIndex: c.chunk_index,
+      score: c.score,
+      content: c.content,
+      source: c.source,
+      videoTitle: c.video_title,
+      finalRank: c.final_rank,
+    }))
+
+    if (isAgentMode) {
+      const initial = emptyAgentTraceState()
+      setAgentTrace(initial)
+      setMessages(prev => [
+        ...prev,
+        { role: 'user', content: q },
+        { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: [], agentRun: true },
+      ])
+
+      const bumpAgent = (event: AgentSSEPayload) => {
+        setAgentTrace(prev => {
+          const next = agentTraceReducer(prev, event)
+          patchLast({ trace: next.steps, agentRun: true })
+          if (next.fatalError) setTraceError(next.fatalError)
+          return next
+        })
+      }
+
+      try {
+        await streamAgent(sid!, q, { top_k: topK, mode: 'agent' }, {
+          onRunStart: d => bumpAgent({ type: 'run_start', data: d }),
+          onStepStart: d => bumpAgent({ type: 'step_start', data: d }),
+          onStepDone: d => bumpAgent({ type: 'step_done', data: d }),
+          onStepError: d => bumpAgent({ type: 'step_error', data: d }),
+          onToolCall: d => bumpAgent({ type: 'tool_call', data: d }),
+          onToolResult: d => bumpAgent({ type: 'tool_result', data: d }),
+          onRetrieveHits: d => bumpAgent({ type: 'retrieve_hits', data: d }),
+          onAnswer: delta => appendDelta(delta),
+          onCitations: cs => patchLast({ cites: mapCitations(cs) }),
+          onDone: () => {
+            bumpAgent({ type: 'done' })
+            patchLast({ streaming: false })
+          },
+          onError: e => {
+            bumpAgent({ type: 'error', data: { message: e.message, step_id: e.step_id } })
+            patchLast({ streaming: false, error: e.message })
+            setTraceError(e.message)
+          },
+        }, ctrl.signal)
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          patchLast({ streaming: false })
+        } else {
+          const msg = e instanceof ApiError ? e.message : 'Agent 流式请求失败'
+          patchLast({ streaming: false, error: msg })
+          setTraceError(msg)
+        }
+      } finally {
+        setStreaming(false)
+        abortRef.current = null
+      }
+      return
+    }
+
+    // 普通 RAG：保持原有 streamAsk 推断轨迹
+    const startTrace = streamTraceReducer([], 'start')
+    setRagTrace(startTrace)
+    let answerStarted = false
+
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: q },
+      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
+    ])
+
     const bumpTrace = (
       event: Parameters<typeof streamTraceReducer>[1],
       payload?: Parameters<typeof streamTraceReducer>[2],
     ) => {
-      setActiveTrace(prev => {
+      setRagTrace(prev => {
         const next = streamTraceReducer(prev, event, payload)
         patchLast({ trace: next })
         return next
@@ -187,16 +272,7 @@ function ChatView() {
           }
         },
         onCitations: (cs: Citation[]) => {
-          const refs: CiteRef[] = cs.map((c, i) => ({
-            id: `C${i + 1}`,
-            chunkIndex: c.chunk_index,
-            score: c.score,
-            content: c.content,
-            source: c.source,
-            videoTitle: c.video_title,
-            finalRank: c.final_rank,
-          }))
-          patchLast({ cites: refs })
+          patchLast({ cites: mapCitations(cs) })
           const sources = [...new Set(cs.map(c => c.video_title || c.source).filter(Boolean))] as string[]
           bumpTrace('citations', { hits: cs.length, sources })
         },
@@ -207,19 +283,22 @@ function ChatView() {
         onError: (e) => {
           bumpTrace('error', { error: e.message })
           patchLast({ streaming: false, error: e.message })
+          setTraceError(e.message)
         },
       }, ctrl.signal)
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         patchLast({ streaming: false })
       } else {
-        patchLast({ streaming: false, error: e instanceof ApiError ? e.message : '流式请求失败' })
+        const msg = e instanceof ApiError ? e.message : '流式请求失败'
+        patchLast({ streaming: false, error: msg })
+        setTraceError(msg)
       }
     } finally {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [session?.id, streaming, mode, ragStatus, topK, appendDelta, loadSessions, taskId])
+  }, [session?.id, streaming, mode, isAgentMode, ragStatus, topK, appendDelta, loadSessions, taskId])
 
   const stop = () => { abortRef.current?.abort(); setStreaming(false) }
 
@@ -265,16 +344,18 @@ function ChatView() {
     }
   }
 
-  const modeLabel = mode === 'strict_rag' ? '严格 RAG' : '普通问答'
+  const modeLabel = mode === 'agent' ? 'Agent 问答' : mode === 'strict_rag' ? '严格 RAG' : '普通问答'
 
   return (
     <ChatShell
       scrollRef={scrollRef}
       tracePanel={
         <AgentTracePanel
-          steps={activeTrace}
+          steps={panelSteps}
           streaming={streaming}
-          hint="单视频 strict_rag / video_assistant 流式问答。"
+          source={panelSource}
+          error={traceError}
+          emptyHint={isAgentMode ? 'Agent 将展示检索与工具步骤摘要。' : 'RAG 流式问答将展示检索与生成进度。'}
         />
       }
       header={
@@ -283,7 +364,7 @@ function ChatView() {
           backLabel="返回视频库"
           kicker={`任务 #${taskId} · 单视频问答`}
           title={task ? taskTitle(task) : '加载中…'}
-          actions={<ModeToggle mode={mode} onChange={setMode} />}
+          actions={<VideoModeToggle mode={mode} onChange={setMode} disabled={streaming} />}
         />
       }
       sidebar={
@@ -390,7 +471,11 @@ function ChatView() {
             <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
             <div>
               <div className="text-[14px] font-medium text-red-800">该视频尚未建立索引</div>
-              <p className="text-[12px] text-red-700/80 mt-1">strict_rag 模式强制走检索，无索引时无法回答。建立索引后即可基于转写内容做引用问答。</p>
+              <p className="text-[12px] text-red-700/80 mt-1">
+                {mode === 'agent'
+                  ? 'Agent 模式需要可检索的转写索引。建立索引后即可使用多步工具问答。'
+                  : 'strict_rag 模式强制走检索，无索引时无法回答。建立索引后即可基于转写内容做引用问答。'}
+              </p>
               <button
                 onClick={triggerIndex}
                 className="mt-2 h-8 px-3 rounded-lg border border-red-300 text-[11px] text-red-700 flex items-center gap-1 ui-btn-lift"
