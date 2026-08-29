@@ -23,6 +23,10 @@ type videoAgentAsker interface {
 	Ask(ctx context.Context, req service.VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
 }
 
+type videoResearchAsker interface {
+	AskResearch(ctx context.Context, req service.VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
+}
+
 func NewChatHandler(chatSvc *service.ChatService, profileSvc *service.AIProfileService, aiFactory *ai.Factory) *ChatHandler {
 	var agentSvc videoAgentAsker
 	if chatSvc != nil {
@@ -135,8 +139,9 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// AskAgent handles experimental tool-loop video QA.
-// Prefer stream/sync chat for product work; do not expand agent as the default path.
+// AskAgent handles the experimental tool-loop video QA path. mode=research
+// opts into the bounded goal-driven runner; the default remains the template
+// baseline for comparison and fallback.
 func (h *ChatHandler) AskAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
@@ -148,6 +153,7 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 	var req struct {
 		Question string `json:"question" binding:"required"`
 		TopK     int    `json:"top_k"`
+		Mode     string `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -171,6 +177,22 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 	chatClient, err := h.aiFactory.NewChatClient(*profile)
 	if err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Mode == "research" {
+		researcher, ok := h.agentSvc.(videoResearchAsker)
+		if !ok {
+			response.BadRequest(c, "Video Research Agent 实验功能不可用")
+			return
+		}
+		result, err := researcher.AskResearch(c.Request.Context(), service.VideoResearchRequest{
+			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK,
+		}, embeddingClient, chatClient, *profile)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.OK(c, result)
 		return
 	}
 

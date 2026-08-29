@@ -122,19 +122,36 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	trace := make([]VideoAgentStep, 0, 4)
 
-	search, step, err := tools.SearchTranscript(ctx, SearchTranscriptInput{
-		UserID:         req.UserID,
-		TaskID:         session.TaskID,
-		Question:       req.Question,
-		Recent:         recent,
-		TopK:           req.TopK,
-		EmbeddingModel: profile.EmbeddingModel,
-		Embedding:      embedding,
-	})
-	trace = append(trace, step)
+	searchArguments, err := json.Marshal(searchTranscriptToolArguments{Question: req.Question, TopK: req.TopK})
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
+	registry := tools.Registry()
+	if registry == nil {
+		return nil, newVideoAgentExecutionError(fmt.Errorf("video agent tool registry 不能为空"), trace)
+	}
+	searchExecution, err := registry.Execute(ctx, VideoAgentToolSearchTranscript, VideoAgentToolRequest{
+		Runtime: VideoAgentToolRuntime{
+			UserID:         req.UserID,
+			TaskID:         session.TaskID,
+			Recent:         recent,
+			TopK:           req.TopK,
+			EmbeddingModel: profile.EmbeddingModel,
+			Embedding:      embedding,
+		},
+		Arguments: searchArguments,
+	})
+	if err != nil {
+		trace = append(trace, searchExecution.Step)
+		return nil, newVideoAgentExecutionError(err, trace)
+	}
+	var search SearchTranscriptResult
+	if err := json.Unmarshal(searchExecution.Output, &search); err != nil {
+		step, stepErr := failVideoAgentStep(searchExecution.Step, fmt.Sprintf("tool output 解析失败: %v", err))
+		trace = append(trace, step)
+		return nil, newVideoAgentExecutionError(stepErr, trace)
+	}
+	trace = append(trace, searchExecution.Step)
 	if len(search.Citations) == 0 {
 		return nil, newVideoAgentExecutionError(fmt.Errorf("未检索到足够相关的视频片段"), trace)
 	}

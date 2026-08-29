@@ -22,9 +22,12 @@ import (
 )
 
 type fakeVideoAgentService struct {
-	result *service.VideoAgentResult
-	err    error
-	req    service.VideoAgentRequest
+	result         *service.VideoAgentResult
+	researchResult *service.VideoAgentResult
+	err            error
+	researchErr    error
+	req            service.VideoAgentRequest
+	researchReq    service.VideoResearchRequest
 }
 
 func (s *fakeVideoAgentService) Ask(_ context.Context, req service.VideoAgentRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
@@ -33,6 +36,14 @@ func (s *fakeVideoAgentService) Ask(_ context.Context, req service.VideoAgentReq
 		return nil, s.err
 	}
 	return s.result, nil
+}
+
+func (s *fakeVideoAgentService) AskResearch(_ context.Context, req service.VideoResearchRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
+	s.researchReq = req
+	if s.researchErr != nil {
+		return nil, s.researchErr
+	}
+	return s.researchResult, nil
 }
 
 func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
@@ -85,6 +96,41 @@ func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 	}
 	if agent.req.UserID != 7 || agent.req.SessionID != 22 || agent.req.TopK != 3 {
 		t.Fatalf("agent request = %+v", agent.req)
+	}
+}
+
+func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	profileSvc := newChatHandlerProfileServiceForTest(t)
+	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
+		t.Fatalf("Create profile: %v", err)
+	}
+	agent := &fakeVideoAgentService{researchResult: &service.VideoAgentResult{
+		Answer:   "research answer",
+		Template: string(service.VideoAgentResearchTemplate),
+	}}
+	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
+	handler.agentSvc = agent
+
+	router := gin.New()
+	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
+		c.Set("userID", int64(7))
+		handler.AskAgent(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/sessions/22/messages/agent", bytes.NewBufferString(`{"question":"请研究 owner 校验的证据","mode":"research","top_k":4}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if agent.researchReq.UserID != 7 || agent.researchReq.SessionID != 22 || agent.researchReq.Goal != "请研究 owner 校验的证据" || agent.researchReq.TopK != 4 {
+		t.Fatalf("research request = %+v", agent.researchReq)
+	}
+	if agent.req.Question != "" {
+		t.Fatalf("legacy agent path should not be called: %+v", agent.req)
 	}
 }
 

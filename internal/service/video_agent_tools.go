@@ -23,10 +23,23 @@ type VideoAgentTools struct {
 	repos    *repository.Repositories
 	pipeline *RetrievalPipeline
 	chat     ai.ChatClient
+	registry *VideoAgentToolRegistry
 }
 
 func NewVideoAgentTools(repos *repository.Repositories, pipeline *RetrievalPipeline, chat ai.ChatClient) *VideoAgentTools {
-	return &VideoAgentTools{repos: repos, pipeline: pipeline, chat: chat}
+	tools := &VideoAgentTools{repos: repos, pipeline: pipeline, chat: chat}
+	tools.registry = newVideoAgentToolRegistry(tools)
+	return tools
+}
+
+// Registry exposes the allow-listed tool seam to the future planner/executor.
+// Existing typed methods remain available while the template workflow is the
+// compatibility baseline.
+func (t *VideoAgentTools) Registry() *VideoAgentToolRegistry {
+	if t == nil {
+		return nil
+	}
+	return t.registry
 }
 
 type SearchTranscriptInput struct {
