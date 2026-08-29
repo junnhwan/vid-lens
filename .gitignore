@@ -37,6 +37,7 @@ vendor/
 
 # Temp files
 tmp/
+.tmp/
 *.tmp
 *.log
 .logs/
