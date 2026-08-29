@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -300,6 +301,37 @@ func TestChatHandlerAskAgentStreamWritesErrorEvent(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "event:error") || !strings.Contains(rec.Body.String(), "agent backend failed") {
 		t.Fatalf("body=%s", rec.Body.String())
+	}
+}
+
+func TestChatHandlerListMessagesReturnsAgentSnapshotVerbatim(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, repos, _ := newKnowledgeBaseHandlerServiceTestEnv(t)
+	task := createKnowledgeBaseHandlerTask(t, repos, 7, "agent-snapshot")
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, ScopeType: model.ChatScopeVideo}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	snapshot := `{"version":1,"run_id":"run-1","mode":"agent","steps":[],"citations":[]}`
+	if err := repos.Chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, UserID: 7, Role: "assistant", Content: "answer", RetrievalSnapshot: &snapshot}); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	h := NewChatHandler(service.NewChatService(repos, nil, service.ChatConfig{}), nil, nil)
+	r := gin.New()
+	r.GET("/chat/sessions/:session_id/messages", withTestUser(7), h.ListMessages)
+	rec := serveKnowledgeBaseRequest(r, http.MethodGet, "/chat/sessions/"+strconv.FormatInt(session.ID, 10)+"/messages", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Data []model.ChatMessage `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if len(body.Data) != 1 || body.Data[0].RetrievalSnapshot == nil || *body.Data[0].RetrievalSnapshot != snapshot {
+		t.Fatalf("messages = %+v", body.Data)
 	}
 }
 

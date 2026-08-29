@@ -338,8 +338,21 @@ export function traceFromSnapshot(snapshot?: string): ChatTraceStep[] | undefine
     }
     if (parsed && typeof parsed === 'object') {
       const obj = parsed as {
+        steps?: Array<{
+          step_id?: string
+          kind?: string
+          label?: string
+          status?: string
+          tool?: string
+          input?: unknown
+          output?: string
+          error?: string
+        }>
         trace?: Array<{ name?: string; tool?: string; output_ref?: string; error?: string }>
         citations?: unknown[]
+      }
+      if (Array.isArray(obj.steps)) {
+        return obj.steps.map((step, i) => persistedAgentStepToTrace(step, step.step_id || `hist-${i + 1}`))
       }
       if (Array.isArray(obj.trace) && obj.trace.length > 0) {
         return obj.trace.map((step, i) => legacyAgentStepToTrace(step, `hist-${i + 1}`))
@@ -350,6 +363,38 @@ export function traceFromSnapshot(snapshot?: string): ChatTraceStep[] | undefine
     }
   } catch { /* 非 JSON 或旧格式 */ }
   return undefined
+}
+
+function persistedAgentStepToTrace(
+  step: {
+    step_id?: string
+    kind?: string
+    label?: string
+    status?: string
+    tool?: string
+    input?: unknown
+    output?: string
+    error?: string
+  },
+  id: string,
+): ChatTraceStep {
+  const error = step.error
+  return {
+    id,
+    kind: kindFromBackend(step.kind || '', step.tool),
+    label: step.label || step.tool || '执行步骤',
+    status: stepStatusFromSnapshot(step.status),
+    tool: step.tool || undefined,
+    toolInput: formatToolInput(step.input),
+    toolOutput: step.output,
+    detail: error || step.output,
+    error,
+  }
+}
+
+function stepStatusFromSnapshot(status?: string): TraceStepStatus {
+  if (status === 'running' || status === 'done' || status === 'error') return status
+  return 'done'
 }
 
 function legacyAgentStepToTrace(

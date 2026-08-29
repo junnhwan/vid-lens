@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
@@ -95,7 +96,7 @@ func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
 }
 
 func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
-	return s.ask(ctx, req, embedding, chat, profile, nil, "", "")
+	return s.ask(ctx, req, embedding, chat, profile, nil, uuid.NewString(), AgentStreamMode)
 }
 
 func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, observer VideoAgentStepObserver, runID, mode string) (*VideoAgentResult, error) {
@@ -339,19 +340,7 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	if session, err := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); err == nil && session != nil {
 		s.chatSvc.maybeAutoTitleSession(session, question)
 	}
-	snapshot, err := json.Marshal(struct {
-		RunID     string           `json:"run_id,omitempty"`
-		Mode      string           `json:"mode,omitempty"`
-		Template  string           `json:"template"`
-		Citations []Citation       `json:"citations"`
-		Trace     []VideoAgentStep `json:"trace"`
-	}{
-		RunID:     result.RunID,
-		Mode:      result.Mode,
-		Template:  result.Template,
-		Citations: result.Citations,
-		Trace:     result.Trace,
-	})
+	snapshot, err := MarshalAgentSnapshot(result)
 	if err != nil {
 		return err
 	}

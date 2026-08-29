@@ -26,7 +26,10 @@ export function parseMessages(
       ? (traceFromSnapshot(m.retrieval_snapshot) ?? (cites?.length ? traceFromCitationCount(cites.length) : undefined))
       : undefined
     const agentRun = m.role === 'assistant' && Boolean(
-      m.retrieval_snapshot?.includes('"mode":"agent"') || m.retrieval_snapshot?.includes('"trace"'),
+      m.retrieval_snapshot?.includes('"mode":"agent"') ||
+      m.retrieval_snapshot?.includes('"mode":"research"') ||
+      m.retrieval_snapshot?.includes('"steps"') ||
+      m.retrieval_snapshot?.includes('"trace"'),
     )
     return {
       role: m.role as 'user' | 'assistant',

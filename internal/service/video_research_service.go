@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
@@ -87,6 +88,8 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		Citations: append([]Citation(nil), runResult.State.Citations...),
 		Trace:     trace,
 		Model:     profile.LLMModel,
+		RunID:     uuid.NewString(),
+		Mode:      string(VideoAgentResearchTemplate),
 	}
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err
