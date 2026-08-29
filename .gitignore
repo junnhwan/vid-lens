@@ -40,6 +40,9 @@ tmp/
 *.tmp
 *.log
 .logs/
+.local/
+/bin/
+/web-next/
 
 # Local design notes
 /CLAUDE.md
@@ -51,10 +54,11 @@ docs/DESIGN_UPDATES.md
 docs/backend-optimization-roadmap.md
 docs/superpowers/
 
-# Local docs — remote only exposes images used by README
+# Local-only project notes and personal materials
 CONTEXT.md
-docs/*
-!docs/images/
+/docs-private/
+/docs/drafts/
+/docs/personal/
 
 # Local resume drafts
 resume.md
@@ -73,7 +77,7 @@ artifacts/
 
 # Interview VitePress site — removed from main product path (was stale vs PG/pgvector).
 # Keep a local copy if you still need it; do not re-add as product truth.
-# Prefer docs/archive/ for interview materials that stay in git.
+# Prefer docs-private/ for interview materials that stay local.
 book/
 
 # Local interview/reference drafts

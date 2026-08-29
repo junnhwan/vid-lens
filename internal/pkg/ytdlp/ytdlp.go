@@ -12,7 +12,7 @@ import (
 )
 
 // DownloadVideo 通过 yt-dlp 下载视频
-// 面试亮点：yt-dlp 支持 B站/YouTube/抖音等主流平台，降低用户使用门槛
+// yt-dlp supports common video platforms so users can submit a URL directly.
 // 用户无需手动下载视频再上传，直接粘贴链接即可
 func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, cookiesPath, proxyURL, videoURL string) (string, error) {
 	outputPath := filepath.Join(os.TempDir(), uuid.New().String()+".mp4")

@@ -85,7 +85,7 @@ const (
 // for reliable task dispatch (durable dispatch lease handoff), failure
 // recovery (ack redelivery + dead-letter), and peak shaving (ASR quota is
 // scarce), not high-throughput log aggregation — which is why RabbitMQ was
-// chosen over Kafka. See docs/specs/02-dispatch-consistency.md.
+// chosen over Kafka. See docs/decisions/02-dispatch-consistency.md.
 type MQConfig struct {
 	Brokers         []string `yaml:"brokers"`
 	AnalyzeQueue    string   `yaml:"analyze_queue"`

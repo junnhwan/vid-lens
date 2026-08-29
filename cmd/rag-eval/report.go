@@ -13,7 +13,7 @@ func renderMarkdown(opts evalOptions, taskIDs []int64, caseCount int, embeddingM
 
 func renderMarkdownWithAgentAnswerEval(opts evalOptions, taskIDs []int64, caseCount int, embeddingModel string, topK, candidateK int, results []modeResult, answerResults []answerModeResult) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# VidLens Resume Quantification Results\n\n")
+	fmt.Fprintf(&b, "# VidLens RAG Evaluation Results\n\n")
 	fmt.Fprintf(&b, "## RAG Retrieval A/B Evaluation\n\n")
 	fmt.Fprintf(&b, "- Date: %s\n", time.Now().Format("2006-01-02"))
 	fmt.Fprintf(&b, "- Environment: %s\n", opts.environment)
@@ -57,20 +57,13 @@ func renderMarkdownWithAgentAnswerEval(opts evalOptions, taskIDs []int64, caseCo
 				if modelRerank.report.RecallAtK > base.RecallAtK || modelRerank.report.MRR > base.MRR {
 					fmt.Fprintf(&b, "Model Rerank changed ranking in this run; only claim it if the category metrics justify the specific scenario.\n\n")
 				} else {
-					fmt.Fprintf(&b, "Model Rerank did not improve ranking in this run; 不要写 model rerank 提升检索排名的简历 claim，建议默认关闭或仅作为后续可选优化继续评估。\n\n")
+					fmt.Fprintf(&b, "Model Rerank did not improve ranking in this run; keep it disabled or evaluate it further with a stronger dataset.\n\n")
 				}
 			} else {
 				fmt.Fprintf(&b, "\n")
 			}
-			fmt.Fprintf(&b, "Resume sentence:\n")
-			fmt.Fprintf(&b, "设计并实现 VidLens 视频 RAG 检索评测框架，支持 vector-only、BM25+RRF、query rewrite、多查询召回、相邻片段回填和 rerank 多模式对比；在自建 %d 条视频 QA case 上，BM25+RRF %s，%s，但 model rerank 本轮未证明排序收益，因此不作为简历提升 claim。\n\n",
-				caseCount,
-				recallResumeText(topK, base.RecallAtK, hybrid.report.RecallAtK),
-				mrrResumeText(base.MRR, hybrid.report.MRR))
 		} else {
-			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, the RAG 2.0 modes did not produce a safer aggregate improvement over vector-only retrieval. Do not write a resume claim about retrieval improvement from this run.\n\n")
-			fmt.Fprintf(&b, "Resume sentence:\n")
-			fmt.Fprintf(&b, "设计并实现 VidLens 视频 RAG 检索评测框架，支持 vector-only、BM25+RRF、query rewrite、多查询召回、相邻片段回填和 rerank 多模式对比；通过自建 %d 条视频 QA case 记录 Recall@%d、MRR、无结果率和检索延迟，为后续优化提供可量化依据。\n\n", caseCount, topK)
+			fmt.Fprintf(&b, "On this small self-built video QA evaluation set, the RAG 2.0 modes did not produce a safer aggregate improvement over vector-only retrieval. Treat this run as local evaluation evidence only.\n\n")
 		}
 	}
 	for _, result := range results {
@@ -200,26 +193,6 @@ func mrrComparisonText(base, opt float64) string {
 		return fmt.Sprintf("kept MRR at %.3f", opt)
 	}
 	return fmt.Sprintf("changed MRR from %.3f to %.3f", base, opt)
-}
-
-func recallResumeText(topK int, base, opt float64) string {
-	if opt > base {
-		return fmt.Sprintf("将 Recall@%d 从 %s 提升至 %s", topK, formatPercent(base), formatPercent(opt))
-	}
-	if opt == base {
-		return fmt.Sprintf("Recall@%d 均为 %s", topK, formatPercent(opt))
-	}
-	return fmt.Sprintf("Recall@%d 从 %s 变为 %s", topK, formatPercent(base), formatPercent(opt))
-}
-
-func mrrResumeText(base, opt float64) string {
-	if opt > base {
-		return fmt.Sprintf("MRR 从 %.3f 提升至 %.3f", base, opt)
-	}
-	if opt == base {
-		return fmt.Sprintf("MRR 均为 %.3f", opt)
-	}
-	return fmt.Sprintf("MRR 从 %.3f 变为 %.3f", base, opt)
 }
 
 func formatPercent(v float64) string {

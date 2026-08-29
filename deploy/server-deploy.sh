@@ -61,8 +61,6 @@ marker_file="$deploy_dir/.runtime-generation"
 
 [ -f "$tmp_dir/server" ] || die "missing server artifact: $tmp_dir/server"
 [ -s "$tmp_dir/server" ] || die "empty server artifact: $tmp_dir/server"
-[ -f "$tmp_dir/web-dist.tar.gz" ] || die "missing web artifact: $tmp_dir/web-dist.tar.gz"
-[ -s "$tmp_dir/web-dist.tar.gz" ] || die "empty web artifact: $tmp_dir/web-dist.tar.gz"
 [ -f "$marker_file" ] || die "runtime migration marker missing: $marker_file"
 actual_generation="$(cat "$marker_file")"
 # Command substitution strips trailing LF characters; remove one optional CR so
@@ -73,17 +71,13 @@ actual_generation="${actual_generation%$'\r'}"
 
 backup_dir="$deploy_dir/.logs/deploy-backups/$stamp"
 staged_server="$deploy_dir/server.new-$stamp"
-new_dist="$deploy_dir/web/dist.new-$stamp"
-old_dist="$deploy_dir/web/dist.old-$stamp"
-failed_dist="$deploy_dir/web/dist.failed-$stamp"
-restore_dist="$deploy_dir/web/dist.restore-$stamp"
+failed_server="$deploy_dir/server.failed-$stamp"
 
-for path in "$backup_dir" "$staged_server" "$new_dist" "$old_dist" "$failed_dist" "$restore_dist"; do
+for path in "$backup_dir" "$staged_server" "$failed_server"; do
   [ ! -e "$path" ] || die "deployment path already exists: $path"
 done
 
 had_server=0
-had_dist=0
 activation_started=0
 service_restart_attempted=0
 
@@ -98,7 +92,7 @@ rollback_on_error() {
     exit "$status"
   fi
 
-  warn "Deployment failed at line $line; restoring previous release from $backup_dir"
+  warn "Deployment failed at line $line; restoring previous server from $backup_dir"
   local rollback_ok=1
 
   if [ "$had_server" -eq 1 ] && [ -f "$backup_dir/server" ]; then
@@ -109,19 +103,7 @@ rollback_on_error() {
     rm -f -- "$deploy_dir/server" || rollback_ok=0
   fi
 
-  if [ -d "$deploy_dir/web/dist" ]; then
-    mv "$deploy_dir/web/dist" "$failed_dist" || rollback_ok=0
-  fi
-  if [ -d "$old_dist" ]; then
-    mv "$old_dist" "$deploy_dir/web/dist" || rollback_ok=0
-  elif [ "$had_dist" -eq 1 ] && [ -s "$backup_dir/web-dist.tar.gz" ]; then
-    mkdir -p "$restore_dist" \
-      && tar -xzf "$backup_dir/web-dist.tar.gz" -C "$restore_dist" --strip-components=1 \
-      && mv "$restore_dist" "$deploy_dir/web/dist" \
-      || rollback_ok=0
-  fi
-
-  rm -rf -- "$staged_server" "$new_dist" "$failed_dist" "$restore_dist"
+  rm -f -- "$staged_server" "$failed_server"
 
   if [ "$had_server" -eq 1 ]; then
     systemctl restart "$service_name" || rollback_ok=0
@@ -131,7 +113,7 @@ rollback_on_error() {
   fi
 
   if [ "$rollback_ok" -eq 1 ]; then
-    warn "Rollback restored previous release; failed artifacts retained at $tmp_dir"
+    warn "Rollback restored previous server; failed artifacts retained at $tmp_dir"
   else
     warn "Rollback was incomplete; inspect $backup_dir and service state immediately"
   fi
@@ -139,14 +121,10 @@ rollback_on_error() {
 }
 trap 'rollback_on_error $? $LINENO' ERR
 
-mkdir -p "$backup_dir" "$deploy_dir/web"
+mkdir -p "$backup_dir"
 if [ -f "$deploy_dir/server" ]; then
   had_server=1
   cp -p "$deploy_dir/server" "$backup_dir/server"
-fi
-if [ -d "$deploy_dir/web/dist" ]; then
-  had_dist=1
-  tar -czf "$backup_dir/web-dist.tar.gz" -C "$deploy_dir/web" dist
 fi
 if [ -f "$deploy_dir/config.yaml" ]; then
   cp -p "$deploy_dir/config.yaml" "$backup_dir/config.yaml"
@@ -155,20 +133,16 @@ cat > "$backup_dir/deployment-metadata.txt" <<METADATA
 requested_sha=$GITHUB_SHA
 runtime_generation=$EXPECTED_RUNTIME_GENERATION
 previous_server_present=$had_server
-previous_web_dist_present=$had_dist
 METADATA
 
 install -m 0755 "$tmp_dir/server" "$staged_server"
-mkdir -p "$new_dist"
-tar -xzf "$tmp_dir/web-dist.tar.gz" -C "$new_dist" --strip-components=1
-[ -f "$new_dist/index.html" ] || die 'web artifact does not contain dist/index.html'
 
+# Activate only after validation and staging have completed.
 activation_started=1
-mv "$staged_server" "$deploy_dir/server"
-if [ "$had_dist" -eq 1 ]; then
-  mv "$deploy_dir/web/dist" "$old_dist"
+if [ "$had_server" -eq 1 ]; then
+  mv "$deploy_dir/server" "$failed_server"
 fi
-mv "$new_dist" "$deploy_dir/web/dist"
+mv "$staged_server" "$deploy_dir/server"
 
 service_restart_attempted=1
 systemctl restart "$service_name"
@@ -181,8 +155,8 @@ trap - ERR
 if ! rm -rf -- "$tmp_dir"; then
   warn "Deployment succeeded but uploaded artifacts could not be removed: $tmp_dir"
 fi
-if [ -d "$old_dist" ] && ! rm -rf -- "$old_dist"; then
-  warn "Deployment succeeded but previous web staging directory could not be removed: $old_dist"
+if [ -e "$failed_server" ] && ! rm -f -- "$failed_server"; then
+  warn "Deployment succeeded but previous server could not be removed: $failed_server"
 fi
 
-log "Deployed $sha with runtime generation $EXPECTED_RUNTIME_GENERATION; backup saved to $backup_dir"
+log "Deployed server $sha with runtime generation $EXPECTED_RUNTIME_GENERATION; backup saved to $backup_dir"

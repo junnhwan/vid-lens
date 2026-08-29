@@ -10,7 +10,7 @@ import (
 )
 
 // contentDedupHits 统计内容+目标级去重的命中次数（spec 03 第 10 行：去重命中
-// 的计数可观测，为简历"省 N 次 AI 调用"提供可跑统计来源）。每次重复上传/
+// 的计数可观测，为运维指标提供可跑统计来源）。每次重复上传/
 // 重复请求命中已有成功结果（秒传到 Completed、不重跑 AI）即 +1。
 // 这是进程内计数器（非持久），长期运行后需接入 metrics 落盘；本 spec 只保证
 // 计数可观测、验收命令能跑出真实数字（spec 第 136 行"不许估算"）。
@@ -27,10 +27,9 @@ func recordContentDedupHit() { atomic.AddInt64(&contentDedupHits, 1) }
 // resetContentDedupHitsForTest 重置命中计数器到 0（仅测试用，隔离用例）。
 func resetContentDedupHitsForTest() { atomic.StoreInt64(&contentDedupHits, 0) }
 
-
 // 内容级 + 分析目标级去重（spec 03）。
 //
-// 三层幂等分工（写进注释，面试最可能被追的点）：
+// 三层幂等分工：
 //  1. 文件层（Asset file_md5 唯一索引 + FindByMD5 + CreateOrRestore）：
 //     复用资产对象，省带宽。同一内容不重传 MinIO。本 spec 不碰。
 //  2. 内容+目标层（本文件）：复用分析结果，省 AI token。同一 (file_md5,

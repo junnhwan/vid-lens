@@ -7,7 +7,7 @@ import (
 )
 
 // TaskStatus 任务状态枚举
-// 面试亮点：严格的状态机设计，防止非法状态流转
+// The status enum defines the task lifecycle and prevents ambiguous transitions.
 const (
 	TaskStatusPending   int8 = 0 // 待处理（文件已上传，等待分析）
 	TaskStatusQueued    int8 = 1 // 排队中（已投递消息队列）
@@ -39,7 +39,7 @@ const (
 )
 
 // VideoTask 视频任务记录 —— 整个异步架构的枢纽表
-// 面试亮点：
+// Key data boundaries:
 //  1. file_md5 字段实现内容级去重 + 秒传
 //  2. status 字段严格定义任务生命周期
 //  3. (status, created_at) 联合索引供调度器捞取积压任务

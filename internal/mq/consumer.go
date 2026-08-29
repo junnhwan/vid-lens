@@ -14,8 +14,8 @@ import (
 	"vid-lens/internal/storage"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/redis/go-redis/v9"
 )
 
 type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
@@ -42,7 +42,7 @@ type messageReaderFactory func(queue, groupID string) messageReader
 type messageHandler func(ctx context.Context, delivery amqp.Delivery) error
 
 // Consumer RabbitMQ 消费者
-// 面试亮点（消费端设计）：
+// Consumer guarantees:
 //  1. manual ack：业务成功后才 Ack；handler 失败 Nack(requeue=true) 触发 at-least-once 重投
 //  2. 消费侧幂等键：同一 MessageId 重复投递由 Redis SETNX 挡住（amqp.Delivery.MessageId），
 //     与 task 状态机 CAS 双重保障——重复消费不产生重复 ASR/索引烧 token

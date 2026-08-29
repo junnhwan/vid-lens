@@ -85,7 +85,7 @@ services:
   # 5. RabbitMQ (消息队列 — 任务可靠投递)
   # 选 RabbitMQ 而非 Kafka：vid-lens 的 MQ 痛点是任务可靠投递 + 失败可恢复
   # + 削峰（ASR 配额有限），不是高吞吐日志聚合；Kafka 的 partition/ISR/高吞吐
-  # 特性在用户级并发吞吐下用不上。详见 docs/specs/02-dispatch-consistency.md。
+  # 特性在用户级并发吞吐下用不上。详见 docs/decisions/02-dispatch-consistency.md。
   # =========================================
   rabbitmq:
     image: rabbitmq:3.13-management

@@ -1,0 +1,275 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://vidlens.local/schemas/rag-eval-dataset-v1.yaml"
+title: VidLens strict RAG evaluation dataset documents
+
+# 推荐使用 manifest + 单 split 文件的物理分离格式。combined_dataset 仅用于兼容
+# 内存中的完整数据集；sealed test 不应与 train/dev 放在同一个日常可读文件中。
+oneOf:
+  - $ref: "#/$defs/combined_dataset"
+  - $ref: "#/$defs/manifest_document"
+  - $ref: "#/$defs/split_document"
+
+$defs:
+  sha256:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+    description: 64 位小写十六进制 SHA-256；大写、短值和非十六进制值均无效。
+
+  dataset_identity:
+    type: object
+    required: [schema_version, dataset_version]
+    properties:
+      schema_version:
+        type: string
+        const: "1"
+      dataset_version:
+        type: string
+        minLength: 1
+
+  combined_dataset:
+    type: object
+    additionalProperties: false
+    required: [schema_version, dataset_version, manifest, cases]
+    properties:
+      schema_version:
+        type: string
+        const: "1"
+      dataset_version:
+        type: string
+        minLength: 1
+      manifest:
+        $ref: "#/$defs/split_manifest"
+      cases:
+        type: array
+        items:
+          $ref: "#/$defs/case"
+
+  manifest_document:
+    type: object
+    additionalProperties: false
+    description: 只保存 split 归属和摘要，不包含 question、answer_points 或 evidence。
+    required: [schema_version, dataset_version, manifest]
+    properties:
+      schema_version:
+        type: string
+        const: "1"
+      dataset_version:
+        type: string
+        minLength: 1
+      manifest:
+        $ref: "#/$defs/split_manifest"
+
+  split_document:
+    type: object
+    additionalProperties: false
+    description: 只保存一个 split 的 case；split 与每个 case.split 必须一致。
+    required: [schema_version, dataset_version, split, cases]
+    properties:
+      schema_version:
+        type: string
+        const: "1"
+      dataset_version:
+        type: string
+        minLength: 1
+      split:
+        $ref: "#/$defs/split"
+      cases:
+        type: array
+        items:
+          $ref: "#/$defs/case"
+
+  split:
+    enum: [train, dev, test]
+
+  split_manifest:
+    type: object
+    additionalProperties: false
+    required: [sha256, splits]
+    properties:
+      sha256:
+        $ref: "#/$defs/sha256"
+      splits:
+        type: object
+        additionalProperties: false
+        required: [train, dev, test]
+        properties:
+          train:
+            $ref: "#/$defs/split_definition"
+          dev:
+            $ref: "#/$defs/split_definition"
+          test:
+            allOf:
+              - $ref: "#/$defs/split_definition"
+              - type: object
+                required: [sealed, content_sha256, access_token_sha256]
+                properties:
+                  sealed:
+                    const: true
+                  content_sha256:
+                    $ref: "#/$defs/sha256"
+                  access_token_sha256:
+                    $ref: "#/$defs/sha256"
+
+  split_definition:
+    type: object
+    additionalProperties: false
+    required: [sources]
+    properties:
+      sources:
+        type: array
+        items:
+          $ref: "#/$defs/source_group"
+      sealed:
+        type: boolean
+      content_sha256:
+        allOf:
+          - $ref: "#/$defs/sha256"
+        description: ComputeSplitContentSHA256 计算出的规范化内容摘要；LoadSplitDataset 会重新计算并严格比对。
+      access_token_sha256:
+        $ref: "#/$defs/sha256"
+
+  source_group:
+    type: object
+    additionalProperties: false
+    required: [source_group, video_ids]
+    properties:
+      source_group:
+        type: string
+        minLength: 1
+      video_ids:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+
+  case:
+    type: object
+    additionalProperties: false
+    required:
+      - case_id
+      - video_id
+      - source_group
+      - split
+      - question
+      - category
+      - difficulty
+      - answerable
+    properties:
+      case_id:
+        type: string
+        minLength: 1
+      video_id:
+        type: string
+        minLength: 1
+      source_group:
+        type: string
+        minLength: 1
+      split:
+        $ref: "#/$defs/split"
+      task_id:
+        type: integer
+        minimum: 1
+      task_hint:
+        type: string
+      question:
+        type: string
+        minLength: 1
+      category:
+        type: string
+        minLength: 1
+      difficulty:
+        enum: [easy, medium, hard]
+      answerable:
+        type: boolean
+      answer_points:
+        type: array
+        items:
+          $ref: "#/$defs/answer_point"
+      evidence_ranges:
+        type: array
+        items:
+          $ref: "#/$defs/evidence_range"
+      negative_confusers:
+        type: array
+        items:
+          $ref: "#/$defs/evidence_range"
+      notes:
+        type: string
+    allOf:
+      - if:
+          properties:
+            answerable:
+              const: true
+          required: [answerable]
+        then:
+          required: [answer_points, evidence_ranges]
+          properties:
+            answer_points:
+              minItems: 1
+              contains:
+                type: object
+                properties:
+                  required:
+                    const: true
+                required: [required]
+            evidence_ranges:
+              minItems: 1
+
+  answer_point:
+    type: object
+    additionalProperties: false
+    required: [id, text, required]
+    properties:
+      id:
+        type: string
+        minLength: 1
+      text:
+        type: string
+        minLength: 1
+      required:
+        type: boolean
+
+  evidence_range:
+    type: object
+    additionalProperties: false
+    required: [id, group_id, source, relevance]
+    properties:
+      id:
+        type: string
+        minLength: 1
+      group_id:
+        type: string
+        minLength: 1
+      context_ids:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+      start_ms:
+        type: integer
+        minimum: 0
+      end_ms:
+        type: integer
+        exclusiveMinimum: 0
+      source:
+        enum: [asr, ocr, both]
+      relevance:
+        type: integer
+        minimum: 1
+        maximum: 3
+    anyOf:
+      - required: [context_ids]
+      - required: [start_ms, end_ms]
+
+# Go loader 还会执行 JSON Schema 难以完整表达的跨记录约束：
+# 1. case_id 全局唯一；answer_point.id 在 case 内唯一，且 answerable case 至少有一个 required point。
+# 2. evidence_ranges 与 negative_confusers 的 evidence id 在同一 case 内不可重复。
+# 3. source_group 在 manifest 中不可重复；video_id 在所有 source_group/split 中不可重复。
+# 4. case 必须属于 manifest 为其 split 声明的 source_group/video_id；单 split 文件中所有 case.split 必须一致。
+# 5. 时间定位必须满足 end_ms > start_ms；context_ids 不得为空或重复；二者至少提供一种。
+# 6. manifest.sha256、每个已加载 split 的 content_sha256 都按规范化内容重新计算并比对。
+# 7. 加载 test 还必须验证 token 并成功追加 access registry；该门禁由库层 Runner 再次检查，不只依赖操作约定。

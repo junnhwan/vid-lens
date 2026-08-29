@@ -14,7 +14,7 @@ import (
 const DefaultAudioSegmentSeconds = 300
 
 // ExtractAudio 从视频中提取音频
-// 面试亮点：FFmpeg 是 CPU 密集型任务，这正是需要异步处理的核心原因
+// Audio extraction is CPU-intensive and is therefore handled by the async pipeline.
 func ExtractAudio(ctx context.Context, ffmpegPath, inputPath string) (string, error) {
 	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("vidlens_%d.mp3", time.Now().UnixNano()))
 

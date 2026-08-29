@@ -101,14 +101,14 @@ func claimTokenFromContext(ctx context.Context) string {
 // （AI 服务挂任务不丢）、③ 削峰（ASR 配额有限需排队）。吞吐量级是用户
 // 级并发（个位到几十 QPS），不是日志管道（万级 TPS）——Kafka 的
 // partition 并行、ISR 副本、高吞吐日志聚合在用户级并发下都用不上，
-// 所以选 RabbitMQ 而非 Kafka（决策与故障矩阵见 docs/specs/02-dispatch-consistency.md）。
+// 所以选 RabbitMQ 而非 Kafka（决策与故障矩阵见 docs/decisions/02-dispatch-consistency.md）。
 //
 // RabbitMQ 的 ack 重投 / 死信队列 / 优先级 / 路由天然咬合"任务可靠投递
 // + 失败可恢复 + ASR 排队"痛点。配置：classic persistent queue + publisher
 // confirm + manual ack + delivery_mode=2 持久化。不上 quorum queue（基于
-// Raft 强一致，单人项目面试问 Raft 答不实易翻车，作加分项提一句）。
+// Raft-backed quorum queues are intentionally outside the current deployment scope.
 //
-// 与 dispatch lease 的分工边界（面试最可能被追的点）：
+// Boundary with the dispatch lease:
 // RabbitMQ publisher confirm 保证消息从 publisher 到 queue 的投递（异步
 // 回调确认），但 confirm 回调是异步的——进程崩在 confirm 回来前消息
 // 就丢了。dispatch lease（投递一致性 lease，transactional outbox 等价）
@@ -171,7 +171,7 @@ func NewProducer(brokers []string, analyzeQueue, transcribeQueue, downloadQueue 
 			TaskJobDownload:   downloadQueue,
 		},
 		confirmCtx: ctx, confirmStop: stop,
-		returns:     returns,
+		returns: returns,
 	}
 	if len(ragIndexQueue) > 0 && ragIndexQueue[0] != "" {
 		p.queues[TaskJobRAGIndex] = ragIndexQueue[0]

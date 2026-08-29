@@ -10,7 +10,7 @@ main
    └─ run
       ├─ strict=false → live/legacy evaluation
       │  ├─ load cases and config
-      │  ├─ connect MySQL and the configured vector backend
+      │  ├─ connect PostgreSQL and the configured vector backend
       │  ├─ preflight manifests before paid embedding/LLM calls
       │  ├─ execute retrieval and answer modes
       │  └─ render the Markdown report
@@ -22,7 +22,7 @@ main
 
 ## Rerank boundaries
 
-The repository has three distinct rerank paths. Keep them separate in code, reports, and interview claims:
+The repository has three distinct rerank paths. Keep them separate in code, reports, and evaluation conclusions:
 
 - The online `cmd/server` chat path wires `service.DeterministicReranker`; it does not read a model-rerank endpoint or model from `config.yaml`.
 - Strict evaluation accepts only the retrieval artifact's `reranker_mode` values `none` and `deterministic`. Legacy model-rerank CLI flags are rejected in strict mode.
@@ -31,7 +31,7 @@ The repository has three distinct rerank paths. Keep them separate in code, repo
 Without `--rerank-model`, the legacy command neither creates a rerank client nor executes or reports the model-rerank retrieval mode. This prevents an ordinary evaluation from silently making extra network or paid calls.
 
 ```powershell
-go run ./cmd/rag-eval --config config.yaml --cases docs/eval/rag-quant-cases.yaml `
+go run ./cmd/rag-eval --config config.yaml --cases docs-private/eval/rag-quant-cases.yaml `
   --rerank-model Qwen/Qwen3-Reranker-4B `
   --rerank-endpoint https://api.example.com/v1/rerank
 ```
@@ -56,7 +56,7 @@ Tests stay in `package main`, so moving an unexported helper between these files
 
 ## Invariants to preserve
 
-1. MySQL `video_chunks` is the source of truth; Milvus or pgvector is a rebuildable retrieval projection.
+1. PostgreSQL `video_chunks` is the source of truth; Milvus or pgvector is a rebuildable retrieval projection. Legacy MySQL is used only by migration tooling.
 2. The selected vector backend must come from `internal/vector.NewStore`; do not add another backend switch inside this command.
 3. Live evaluation must finish preflight before any paid embedding or LLM call.
 4. Strict evaluation must bind runs to the declared dataset, retrieval config, and frozen evidence hashes.

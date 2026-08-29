@@ -21,10 +21,10 @@ var faultMatrixRows = []struct {
 	name string
 	fn   func(*testing.T)
 }{
-	{"TestFaultMatrix_DBRollbackLeavesTaskUnchanged", TestFaultMatrix_DBRollbackLeavesTaskUnchanged},                         // row 1
+	{"TestFaultMatrix_DBRollbackLeavesTaskUnchanged", TestFaultMatrix_DBRollbackLeavesTaskUnchanged},                                                 // row 1
 	{"TestRetrySchedulerProducerFailureRestoresDispatchLeaseTransactionally", TestRetrySchedulerProducerFailureRestoresDispatchLeaseTransactionally}, // row 2
-	{"TestRetrySchedulerRecoversExpiredDispatchLeaseAfterCrash", TestRetrySchedulerRecoversExpiredDispatchLeaseAfterCrash}, // row 3
-	{"TestFaultMatrix_DuplicateMessageIsIdempotent", TestFaultMatrix_DuplicateMessageIsIdempotent},                          // row 4
+	{"TestRetrySchedulerRecoversExpiredDispatchLeaseAfterCrash", TestRetrySchedulerRecoversExpiredDispatchLeaseAfterCrash},                           // row 3
+	{"TestFaultMatrix_DuplicateMessageIsIdempotent", TestFaultMatrix_DuplicateMessageIsIdempotent},                                                   // row 4
 }
 
 // TestFaultMatrixHasFourRows asserts the four fault-matrix rows are present
@@ -41,7 +41,7 @@ func TestFaultMatrixHasFourRows(t *testing.T) {
 }
 
 // This file is the 4-row 故障矩阵 (fault matrix) acceptance seam for
-// docs/specs/02-dispatch-consistency.md. Each row is individually runnable.
+// docs/decisions/02-dispatch-consistency.md. Each row is individually runnable.
 // Rows 2 and 3 (publish-failure restore, expired-lease recovery) are covered
 // by existing tests in reliability_review_test.go and consumer_loop_test.go;
 // the count of runnable fault-matrix rows is asserted by TestFaultMatrixHasFourRows.
@@ -105,10 +105,10 @@ func TestFaultMatrix_DuplicateMessageIsIdempotent(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 	calls := 0
 	consumer := &Consumer{
-		repo: repos,
+		repo:            repos,
 		processingLease: time.Hour,
-		now:              func() time.Time { return now },
-		newToken:         func() string { return "row4-worker" },
+		now:             func() time.Time { return now },
+		newToken:        func() string { return "row4-worker" },
 		ragIndex: func(context.Context, *model.VideoTask) error {
 			calls++
 			return nil

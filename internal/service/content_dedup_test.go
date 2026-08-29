@@ -264,7 +264,7 @@ func TestContentDedupLockSerializesConcurrentSameContent(t *testing.T) {
 }
 
 // TestContentDedupHitCountIsObservable 命中计数可观测（spec 第 10 行）：每次去重
-// 命中 +1，是简历"省 N 次 AI 调用"的可跑统计来源。验收命令 = 跑本测试套件后
+// 命中 +1，是去重指标的可跑统计来源。验收命令 = 跑本测试套件后
 // ContentDedupHits() 返回真实命中数（非估算）。
 func TestContentDedupHitCountIsObservable(t *testing.T) {
 	// 重置进程内计数器到已知基线，隔离本测试。
@@ -308,4 +308,3 @@ func TestContentDedupHitCountIsObservable(t *testing.T) {
 		t.Fatalf("after RequestAnalysis hit, hits = %d, want 4", got)
 	}
 }
-

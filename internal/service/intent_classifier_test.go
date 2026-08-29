@@ -25,7 +25,7 @@ import (
 func TestIntentClassifierEvalOnDataset(t *testing.T) {
 	cases := loadClassifierEvalCases(t)
 	if len(cases) == 0 {
-		t.Skip("no dataset cases found at docs/eval/dataset (run from repo root)")
+		t.Skip("no dataset cases found at docs-private/eval/dataset (run from repo root)")
 	}
 
 	router := NewIntentRouter(NewRuleIntentClassifier())
@@ -130,30 +130,30 @@ func pct(part, total int) string {
 // intent）。test-sealed 不进分类评测（sealed 框架不进，spec line 105）。
 func loadClassifierEvalCases(t *testing.T) []eval.Case {
 	t.Helper()
-	// 从仓库根的 docs/eval/dataset/ 加载。测试可能从 internal/service 或根跑，
-	// 往上找 docs/eval/dataset/manifest.yaml 锚点定位根。
+	// 从仓库根的 docs-private/eval/dataset/ 加载。测试可能从 internal/service 或根跑，
+	// 往上找 docs-private/eval/dataset/manifest.yaml 锚点定位根。
 	roots := []string{
 		".", "..", "../..", "../../..", "../../../..",
 	}
 	var root string
 	for _, r := range roots {
-		if _, err := os.Stat(filepath.Join(r, "docs/eval/dataset/manifest.yaml")); err == nil {
+		if _, err := os.Stat(filepath.Join(r, "docs-private/eval/dataset/manifest.yaml")); err == nil {
 			root = r
 			break
 		}
 	}
 	if root == "" {
-		t.Logf("could not locate docs/eval/dataset/manifest.yaml from working dir; skipping eval")
+		t.Logf("could not locate docs-private/eval/dataset/manifest.yaml from working dir; skipping eval")
 		return nil
 	}
-	manifestRaw, err := os.ReadFile(filepath.Join(root, "docs/eval/dataset/manifest.yaml"))
+	manifestRaw, err := os.ReadFile(filepath.Join(root, "docs-private/eval/dataset/manifest.yaml"))
 	if err != nil {
 		t.Logf("read manifest: %v", err)
 		return nil
 	}
 	var all []eval.Case
 	for _, split := range []eval.Split{eval.SplitTrain, eval.SplitDev} {
-		splitRaw, err := os.ReadFile(filepath.Join(root, "docs/eval/dataset", string(split)+".yaml"))
+		splitRaw, err := os.ReadFile(filepath.Join(root, "docs-private/eval/dataset", string(split)+".yaml"))
 		if err != nil {
 			t.Logf("skip split %s: %v", split, err)
 			continue

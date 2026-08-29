@@ -98,11 +98,6 @@ file_evidence() {
 
 file_evidence artifact.server "$deploy_dir/server"
 file_evidence artifact.config "$deploy_dir/config.yaml"
-if [ -d "$deploy_dir/web/dist" ]; then
-  emit artifact.web_dist.exists true
-else
-  emit artifact.web_dist.exists false
-fi
 
 marker_file="$deploy_dir/.runtime-generation"
 if [ -f "$marker_file" ]; then

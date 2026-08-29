@@ -1,7 +1,7 @@
 // Command dataset-build constructs the VidLens strict RAG evaluation dataset
 // (manifest + train/dev/test split files) from real annotated cases.
 //
-// Spec 01 (docs/specs/01-eval-foundation.md): "标注直接在 YAML 文件里做，
+// Spec 01 (docs/decisions/01-evaluation-foundation.md): "标注直接在 YAML 文件里做，
 // 复用 schema 校验"——本工具把人工标注的 case 内容（question/answer_points/
 // evidence_ranges.context_ids 均基于真实 video_chunks.vector_id 与转写原文）
 // 序列化成 dataset-schema.yaml 要求的四个物理分离文件。
@@ -16,7 +16,7 @@
 //   - test split 由 SealSplit 自动 seal + token sha256。
 //   - train/dev 的 content_sha256 由 ComputeSplitContentSHA256 手动算后填入 manifest。
 //
-// 运行：go run ./cmd/dataset-build -out docs/eval/dataset -token $SEALED_TEST_TOKEN
+// 运行：go run ./cmd/dataset-build -out artifacts/eval/dataset -token $SEALED_TEST_TOKEN
 // token 明文不进仓库（仅本地生成 test split 时用）。
 package main
 
@@ -65,8 +65,8 @@ func vids(ids ...string) []string {
 
 func main() {
 	var (
-		outDir   = flag.String("out", "docs/eval/dataset", "output directory for the four dataset files")
-		token    = flag.String("token", "", "sealed test access token (plaintext; do NOT commit; leave empty to auto-generate a random one and print it once)")
+		outDir = flag.String("out", "artifacts/eval/dataset", "output directory for the four dataset files")
+		token  = flag.String("token", "", "sealed test access token (plaintext; do NOT commit; leave empty to auto-generate a random one and print it once)")
 	)
 	flag.Parse()
 
@@ -81,21 +81,21 @@ func main() {
 	// 见 cmd/rag-eval/artifact_snapshot.go line 81-84）。下方 taskFileMD5 从旧仓库
 	// PG（localhost:5434）video_tasks.file_md5 查得，eval 时 case.video_id 与之对齐。
 	const (
-		sgSoftwareEng    = "software_eng_lecture" // task 2
+		sgSoftwareEng    = "software_eng_lecture"  // task 2
 		sgReactDynamic   = "react_dynamic"         // task 10
 		sgCodingPractice = "coding_agent_practice" // task 14 (英文，中英混合 ASR 噪声)
 		sgWSLAgent       = "wsl_agent_setup"       // task 24
 		sgMemorySystems  = "memory_systems"        // task 8,9（跨视频同主题）
 		sgAIPitfalls     = "ai_pitfalls"           // task 15
-		sgAgentSeries    = "agent_series"           // task 11,12,13,16,25（跨视频 Agent 主题）
+		sgAgentSeries    = "agent_series"          // task 11,12,13,16,25（跨视频 Agent 主题）
 		sgCodingTools    = "ai_coding_tools"       // task 30,33,34（跨视频工具对比）
-		sgStudentJourney = "student_journey"        // task 26（无答案 case 原料）
+		sgStudentJourney = "student_journey"       // task 26（无答案 case 原料）
 	)
 
 	// taskFileMD5 / vid / vids 见包级定义。
 
 	dataset := eval.Dataset{
-		SchemaVersion: "1",
+		SchemaVersion:  "1",
 		DatasetVersion: "real-v1",
 		Manifest: eval.SplitManifest{Splits: map[eval.Split]eval.SplitDefinition{
 			eval.SplitTrain: {Sources: []eval.SourceGroup{
@@ -343,7 +343,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=react_dynamic (task 10 动态图 React，3 chunk)
 	cases = append(cases, eval.Case{
 		CaseID: "train-react-dag", VideoID: vid("10"), SourceGroup: "react_dynamic", Split: eval.SplitTrain,
-			TaskID: 10, TaskHint: "动态图 React 讲解",
+		TaskID: 10, TaskHint: "动态图 React 讲解",
 		Question: "动态图 React 相比串行 React 解决了什么问题？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -359,7 +359,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=coding_agent_practice (task 14 英文 Mario，coding agent 历史)
 	cases = append(cases, eval.Case{
 		CaseID: "train-coding-agent-history", VideoID: vid("14"), SourceGroup: "coding_agent_practice", Split: eval.SplitTrain,
-			TaskID: 14, TaskHint: "coding agent 实践（英文）",
+		TaskID: 14, TaskHint: "coding agent 实践（英文）",
 		Question: "Claude Code 之前的 coding agent 前身有哪些？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -374,7 +374,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=wsl_agent_setup (task 24 WSL)
 	cases = append(cases, eval.Case{
 		CaseID: "train-wsl-why", VideoID: vid("24"), SourceGroup: "wsl_agent_setup", Split: eval.SplitTrain,
-			TaskID: 24, TaskHint: "Windows WSL 跑 AI agent",
+		TaskID: 24, TaskHint: "Windows WSL 跑 AI agent",
 		Question: "为什么 AI agent 在 WSL 里比在 PowerShell 里表现更好？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -391,7 +391,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=memory_systems (task 8 项目记忆系统 + task 9 Moon Zero，跨视频同主题)
 	cases = append(cases, eval.Case{
 		CaseID: "dev-mem-forms", VideoID: vid("8"), SourceGroup: "memory_systems", Split: eval.SplitDev,
-			TaskID: 8, TaskHint: "项目记忆系统架构",
+		TaskID: 8, TaskHint: "项目记忆系统架构",
 		Question: "项目记忆系统有哪几种记忆形态？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -405,7 +405,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	cases = append(cases, eval.Case{
 		CaseID: "dev-moonzero-pain", VideoID: vid("9"), SourceGroup: "memory_systems", Split: eval.SplitDev,
-			TaskID: 9, TaskHint: "Moon Zero 记忆框架",
+		TaskID: 9, TaskHint: "Moon Zero 记忆框架",
 		Question: "Moon Zero 记忆框架要解决的核心痛点是什么？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -420,7 +420,7 @@ func buildCases(groups ...string) []eval.Case {
 	// 跨视频：topic_compare（memory_systems 内 task 8 vs task 9）
 	cases = append(cases, eval.Case{
 		CaseID: "dev-mem-compare", VideoID: vid("9"), SourceGroup: "memory_systems", Split: eval.SplitDev,
-			TaskID: 9, TaskHint: "记忆系统对比（Moon Zero 侧）",
+		TaskID: 9, TaskHint: "记忆系统对比（Moon Zero 侧）",
 		Question: "项目自己的记忆系统和 Moon Zero 框架在落地方式上有什么区别？",
 		Category: "topic_compare", Difficulty: "hard", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -435,7 +435,7 @@ func buildCases(groups ...string) []eval.Case {
 	// chunk 0 续：把豆包当情绪伴侣越聊越焦虑（陷阱之一）。
 	cases = append(cases, eval.Case{
 		CaseID: "dev-pitfall-companion", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
-			TaskID: 15, TaskHint: "AI 使用十大陷阱",
+		TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "把豆包当情绪伴侣会怎么样？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -450,7 +450,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=ai_pitfalls (task 15)
 	cases = append(cases, eval.Case{
 		CaseID: "dev-pitfall-iteration", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
-			TaskID: 15, TaskHint: "AI 使用十大陷阱",
+		TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "大模型的迭代节奏现在是什么状态？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -465,7 +465,7 @@ func buildCases(groups ...string) []eval.Case {
 	// overview（ai_pitfalls 整体）
 	cases = append(cases, eval.Case{
 		CaseID: "dev-pitfall-overview", VideoID: vid("15"), SourceGroup: "ai_pitfalls", Split: eval.SplitDev,
-			TaskID: 15, TaskHint: "AI 使用十大陷阱",
+		TaskID: 15, TaskHint: "AI 使用十大陷阱",
 		Question: "这期视频想讲什么？",
 		Category: "video_overview", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -482,7 +482,7 @@ func buildCases(groups ...string) []eval.Case {
 	// 注意 task 11/12 内容重复（同一视频重传），用 task 13（演变策略，内容不重复）。
 	cases = append(cases, eval.Case{
 		CaseID: "test-agent-loop", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 13, TaskHint: "Agent 开发演变",
+		TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "Loop Engineering 和之前的 Prompt Engineering 是什么关系？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -497,7 +497,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	cases = append(cases, eval.Case{
 		CaseID: "test-agent-moat", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 13, TaskHint: "Agent 开发演变",
+		TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "这一行（Agent 开发）的护城河是什么？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -511,7 +511,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	cases = append(cases, eval.Case{
 		CaseID: "test-agent-verify", VideoID: vid("16"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 16, TaskHint: "AI agent 自动化验证",
+		TaskID: 16, TaskHint: "AI agent 自动化验证",
 		Question: "做 AI agent 开发时，作者花在写代码上的时间占比大概是多少？剩下时间花在哪？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -525,7 +525,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	cases = append(cases, eval.Case{
 		CaseID: "test-pyagent-uses", VideoID: vid("25"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 25, TaskHint: "智能体本质与 pyagent",
+		TaskID: 25, TaskHint: "智能体本质与 pyagent",
 		Question: "pyagent 这个项目有哪几种用法？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -540,7 +540,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=ai_coding_tools (task 30 Codex + task 33/34 Claude Code，跨视频对比)
 	cases = append(cases, eval.Case{
 		CaseID: "test-codex-what", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
-			TaskID: 30, TaskHint: "OpenAI Codex 使用指南",
+		TaskID: 30, TaskHint: "OpenAI Codex 使用指南",
 		Question: "Codex 是什么定位的产品？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -554,7 +554,7 @@ func buildCases(groups ...string) []eval.Case {
 
 	cases = append(cases, eval.Case{
 		CaseID: "test-ccloud-src", VideoID: vid("33"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
-			TaskID: 33, TaskHint: "Claude Code 源码解析",
+		TaskID: 33, TaskHint: "Claude Code 源码解析",
 		Question: "作者在 Claude Code 源码里找到的 cloud.tsx 文件是用来做什么的？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -569,7 +569,7 @@ func buildCases(groups ...string) []eval.Case {
 	// 跨视频：topic_compare（Codex vs Claude Code，ai_coding_tools 内）
 	cases = append(cases, eval.Case{
 		CaseID: "test-tools-compare", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
-			TaskID: 30, TaskHint: "Codex vs Claude Code 对比",
+		TaskID: 30, TaskHint: "Codex vs Claude Code 对比",
 		Question: "Codex 和 Claude Code 这两个 coding agent 在定位上是什么关系？",
 		Category: "topic_compare", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -587,7 +587,7 @@ func buildCases(groups ...string) []eval.Case {
 	// chunk 1：Multi-Agent 在年底被认为可能是伪需求。
 	cases = append(cases, eval.Case{
 		CaseID: "test-multiagent-pseudo", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 13, TaskHint: "Agent 开发演变",
+		TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "Multi-Agent 在什么时候被认为可能是伪需求？",
 		Category: "direct_qa", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -602,7 +602,7 @@ func buildCases(groups ...string) []eval.Case {
 	// chunk 0：这期视频面向什么人、讲什么（overview 变体，但走 direct_qa 检索）
 	cases = append(cases, eval.Case{
 		CaseID: "test-agent-audience", VideoID: vid("13"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 13, TaskHint: "Agent 开发演变",
+		TaskID: 13, TaskHint: "Agent 开发演变",
 		Question: "这期 Agent 开发视频主要面向什么人？",
 		Category: "direct_qa", Difficulty: "easy", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -617,7 +617,7 @@ func buildCases(groups ...string) []eval.Case {
 	// series_locate：Agent 系列里 OpenCloud 在哪期讲的（跨视频，agent_series 内）
 	cases = append(cases, eval.Case{
 		CaseID: "test-series-openccloud", VideoID: vid("11"), SourceGroup: "agent_series", Split: eval.SplitTest,
-			TaskID: 11, TaskHint: "Agent 全栈知识系列",
+		TaskID: 11, TaskHint: "Agent 全栈知识系列",
 		Question: "Agent 系列里 OpenCloud 爆火标志着什么？",
 		Category: "series_locate", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -632,7 +632,7 @@ func buildCases(groups ...string) []eval.Case {
 	// source_group=student_journey (task 26) —— 无答案 case（问技术问题，但视频是保研探索，无答案）
 	cases = append(cases, eval.Case{
 		CaseID: "test-student-noanswer", VideoID: vid("26"), SourceGroup: "student_journey", Split: eval.SplitTest,
-			TaskID: 26, TaskHint: "大二学生保研探索",
+		TaskID: 26, TaskHint: "大二学生保研探索",
 		Question: "分布式锁释放时为什么要校验 owner？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: false,
 		NegativeConfusers: []eval.EvidenceRange{{
@@ -645,7 +645,7 @@ func buildCases(groups ...string) []eval.Case {
 	// timeline_locate case（spec 05 需要，但 ASR 时间戳全 0，用 context_ids 作稳定定位）
 	cases = append(cases, eval.Case{
 		CaseID: "test-codex-structure", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
-			TaskID: 30, TaskHint: "Codex 使用指南",
+		TaskID: 30, TaskHint: "Codex 使用指南",
 		Question: "Codex 视频分成哪几个部分来讲？",
 		Category: "timeline_locate", Difficulty: "medium", Answerable: true,
 		AnswerPoints: []eval.AnswerPoint{
@@ -661,7 +661,7 @@ func buildCases(groups ...string) []eval.Case {
 	// 第二个无答案 case（task 26 问 RAG 技术，视频无此内容）
 	cases = append(cases, eval.Case{
 		CaseID: "test-student-noanswer2", VideoID: vid("26"), SourceGroup: "student_journey", Split: eval.SplitTest,
-			TaskID: 26, TaskHint: "大二学生保研探索",
+		TaskID: 26, TaskHint: "大二学生保研探索",
 		Question: "BM25 混合检索和纯向量检索在 Recall@5 上差多少？",
 		Category: "direct_qa", Difficulty: "hard", Answerable: false,
 		NegativeConfusers: []eval.EvidenceRange{{
@@ -674,7 +674,7 @@ func buildCases(groups ...string) []eval.Case {
 	// small_talk case（spec 05 需要，关检索关 LLM）
 	cases = append(cases, eval.Case{
 		CaseID: "test-smalltalk", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
-			TaskID: 30, TaskHint: "闲聊",
+		TaskID: 30, TaskHint: "闲聊",
 		Question: "谢谢你的讲解",
 		Category: "small_talk", Difficulty: "easy", Answerable: false,
 		Notes: "small_talk：闲聊不检索不生成，answerable:false（无需 evidence）。",

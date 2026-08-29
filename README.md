@@ -11,7 +11,6 @@
 [![MinIO](https://img.shields.io/badge/MinIO-C72E49?style=flat&logo=minio&logoColor=white)](https://min.io)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?style=flat&logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
 [![Next.js](https://img.shields.io/badge/Next.js-14-000000?style=flat&logo=nextdotjs&logoColor=white)](https://nextjs.org)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
@@ -115,7 +114,7 @@ sequenceDiagram
 | 消息队列 | RabbitMQ |
 | 检索 | pgvector（向量检索）、BM25（关键词检索） |
 | AI 接入 | OpenAI-compatible API、用户级 ASR / LLM / Embedding 配置 |
-| 前端 | Next.js 14（`web-next`） |
+| 前端 | Next.js 14（`frontend`） |
 | 音视频处理 | FFmpeg（音频提取与切片） |
 | 监控 | Prometheus、Grafana |
 
@@ -145,7 +144,6 @@ Copy-Item .env.example .env
 # 编辑 .env 后启动
 go run ./cmd/server
 ```
-
 仍需按本机环境修改 `config.yaml` 中的 PostgreSQL、Redis、MinIO、RabbitMQ 与 FFmpeg 配置，确认 `rag.store: pgvector`。配置加载会拒绝未知字段，拼写错误会导致启动失败。登录后可在“模型配置”页面填写自己的 ASR、LLM、Embedding 服务。
 
 AI 相关的 `.env` 配置项如下：
@@ -192,7 +190,7 @@ go run ./cmd/server
 前端（Next.js 14）：
 
 ```bash
-cd web-next
+cd frontend
 npm install
 npm run dev -p 5173
 ```
@@ -212,12 +210,8 @@ vid-lens/
 │   ├── repository/   # 数据访问层
 │   ├── storage/      # MinIO 对象存储
 │   └── vector/       # 向量存储接口（pgvector）
-├── web-next/         # Next.js 14 前端
+├── frontend/         # Next.js 14 前端
 ├── docs/             # 文档与设计说明
 ├── docker-compose.yml
 └── config.yaml
 ```
-
-## 📄 License
-
-MIT License

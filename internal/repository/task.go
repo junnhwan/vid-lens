@@ -108,7 +108,7 @@ func (r *TaskRepository) ResultPresenceByTaskIDs(taskIDs []int64) (hasTranscript
 }
 
 // ListByUserID 分页查询用户的视频任务列表，keyword 非空时按文件名/标题模糊搜索
-// 面试亮点：(user_id, created_at) 联合索引，天然按时间排序
+// The (user_id, created_at) index supports stable chronological pagination.
 func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {
 	var tasks []model.VideoTask
 	var total int64

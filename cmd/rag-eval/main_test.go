@@ -134,7 +134,7 @@ func TestRenderMarkdownDoesNotClaimRecallImprovedWhenOnlyMRRImproves(t *testing.
 	if strings.Contains(markdown, "Recall@5 从 100.0% 提升至 100.0%") {
 		t.Fatalf("renderMarkdown() claimed equal Recall@5 improved:\n%s", markdown)
 	}
-	if !strings.Contains(markdown, "Recall@5 均为 100.0%") {
+	if !strings.Contains(markdown, "kept Recall@5 at 100.0%") {
 		t.Fatalf("renderMarkdown() missing equal Recall@5 wording:\n%s", markdown)
 	}
 }
@@ -161,13 +161,13 @@ func TestRenderMarkdownIncludesRAG2ModesAndMetrics(t *testing.T) {
 		"Expanded Context Hit Rate",
 		"Per-Category Metrics",
 		"keyword_exact",
-		"设计并实现 VidLens 视频 RAG 检索评测框架",
+		"On this small self-built video QA evaluation set",
 	} {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("renderMarkdown() missing %q:\n%s", want, markdown)
 		}
 	}
-	if strings.Contains(markdown, "提升") {
+	if strings.Contains(markdown, "improved Recall") || strings.Contains(markdown, "improved MRR") {
 		t.Fatalf("renderMarkdown() should not claim improvement when metrics are equal:\n%s", markdown)
 	}
 }
@@ -217,7 +217,7 @@ func TestRenderMarkdownRecordsHybridImprovementEvenWhenModelRerankRegresses(t *t
 	for _, want := range []string{
 		"BM25+RRF improved Recall@5 from 96.0% to 98.0% and improved MRR from 0.837 to 0.878",
 		"Model Rerank did not improve ranking in this run",
-		"不要写 model rerank 提升检索排名的简历 claim",
+		"keep it disabled or evaluate it further with a stronger dataset",
 	} {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("renderMarkdown() missing %q:\n%s", want, markdown)
@@ -382,7 +382,7 @@ func TestLoadSnapshotRetrievalConfigRequiresExplicitStrictProvenance(t *testing.
 }
 
 func TestLoadCasesKeepsLegacyBaselineCompatibility(t *testing.T) {
-	cases, err := loadCases("../../docs/eval/rag-quant-cases.yaml")
+	cases, err := loadCases("testdata/legacy-cases.yaml")
 	if err != nil {
 		t.Fatalf("loadCases() legacy error = %v", err)
 	}

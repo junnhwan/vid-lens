@@ -27,7 +27,7 @@ func NewUserService(repo *repository.UserRepository, jwtCfg config.JWTConfig) *U
 }
 
 // Register 用户注册
-// 面试亮点：对比原项目明文存储密码，这里使用 bcrypt 加密
+// Passwords are stored using bcrypt rather than plaintext.
 func (s *UserService) Register(username, password, nickname string) (*model.User, string, error) {
 	existing, _ := s.repo.FindByUsername(username)
 	if existing != nil {

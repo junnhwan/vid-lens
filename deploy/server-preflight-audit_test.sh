@@ -26,13 +26,11 @@ new_case() {
   output_file="$case_root/audit.out"
 
   mkdir -p \
-    "$deploy_dir/web/dist" \
     "$deploy_dir/data/mysql" \
     "$deploy_dir/data/postgres" \
     "$stub_dir"
   printf 'server-binary\n' > "$deploy_dir/server"
   printf 'database:\n  password: top-secret-password\n' > "$deploy_dir/config.yaml"
-  printf 'old-web\n' > "$deploy_dir/web/dist/index.html"
   printf 'postgres-pgvector-v1\n' > "$deploy_dir/.runtime-generation"
   printf 'mysql-data\n' > "$deploy_dir/data/mysql/table.dat"
   printf 'postgres-data\n' > "$deploy_dir/data/postgres/table.dat"
@@ -132,7 +130,6 @@ test_collects_only_non_secret_runtime_evidence() {
   assert_line "$output_file" "artifact.server.sha256=$(sha256sum "$deploy_dir/server" | awk '{ print $1 }')"
   assert_line "$output_file" 'artifact.config.exists=true'
   assert_line "$output_file" "artifact.config.sha256=$(sha256sum "$deploy_dir/config.yaml" | awk '{ print $1 }')"
-  assert_line "$output_file" 'artifact.web_dist.exists=true'
   assert_line "$output_file" 'data.mysql.exists=true'
   assert_line "$output_file" 'data.postgres.exists=true'
   assert_line "$output_file" 'data.redis.exists=false'

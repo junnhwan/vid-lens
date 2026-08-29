@@ -65,15 +65,15 @@ func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
 // spec 04 B段（评测驱动线上化）：rerank 默认值由 spec 01 dev 单变量消融结论驱动，
 // 不再靠 cfg.RerankModel 是否非空手拍。决策记录与 audit trail：
 //
-//   - experiment_id: rerank-vs-none-dev（docs/eval/experiment-registry.yaml +
-//     docs/eval/resume-quant-results.md "Strict Single-Variable Ablation"）
+//   - experiment_id: rerank-vs-none-dev（docs-private/eval/experiment-registry.yaml +
+//     artifacts/eval/rag-results.md "Strict Single-Variable Ablation"）
 //   - dev split 6 case, frozen evidence: baseline rrf_fusion(rerank=none) nDCG@5=0.731,
 //     candidate rrf_rerank(rerank=deterministic) nDCG@5=0.833.
 //   - observed effect +0.102, bootstrap 95% CI [0,+0.204], status=passed
 //     (lower bound ≥ minimum_effect=0; guardrail answerability_f1 回归 0).
 //   - 故默认 RerankerMode=deterministic / RerankerVersion=deterministic-v1.
 //
-// HONEST（写简历/对外必带的诚信约束，不可在改动里抹掉）：
+// External-claim guardrail (keep public descriptions aligned with runtime behavior):
 //   - deterministic rerank 非真实 model-rerank：strict eval 路径无
 //     ModelRerankerFactory，rrf_rerank 用 DeterministicReranker 代理。线上 model-rerank
 //     效果由 (B) 在线对比测，不由本节数字支撑。cfg.RerankModel 非空时仍升级到

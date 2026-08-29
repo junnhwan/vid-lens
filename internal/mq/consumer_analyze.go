@@ -19,7 +19,7 @@ import (
 )
 
 // handleAnalyze 处理视频分析任务
-// 严格遵循六步流程（对应面试文档 MQ 消费者开发规范）
+// The handler follows the six-step analysis workflow.
 func (c *Consumer) handleAnalyze(ctx context.Context, delivery amqp.Delivery) error {
 	// 第 1 步：解析消息
 	var payload AnalyzePayload
