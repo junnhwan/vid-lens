@@ -50,7 +50,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				aiProfiles.DELETE("/:id", handlers.profiles.Delete)
 				aiProfiles.POST("/test", handlers.profiles.Test)
 				aiProfiles.POST("/models", handlers.profiles.ListModels)
-					aiProfiles.POST("/embedding-dim", handlers.profiles.ProbeEmbeddingDim)
+				aiProfiles.POST("/embedding-dim", handlers.profiles.ProbeEmbeddingDim)
 			}
 			chat := auth.Group("/chat")
 			{
@@ -61,6 +61,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), handlers.chat.Ask)
 				// Experimental: tool-loop agent QA. Not the default product path.
 				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), handlers.chat.AskAgent)
+				chat.POST("/sessions/:session_id/messages/agent/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskAgentStream)
 				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskStream)
 			}
 			knowledgeBases := auth.Group("/knowledge-bases")

@@ -27,6 +27,10 @@ type videoResearchAsker interface {
 	AskResearch(ctx context.Context, req service.VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
 }
 
+type videoAgentStreamer interface {
+	Stream(ctx context.Context, req service.VideoAgentStreamRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(service.AgentStreamEvent) error) (*service.VideoAgentResult, error)
+}
+
 func NewChatHandler(chatSvc *service.ChatService, profileSvc *service.AIProfileService, aiFactory *ai.Factory) *ChatHandler {
 	var agentSvc videoAgentAsker
 	if chatSvc != nil {
@@ -256,5 +260,78 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 		log.Printf("chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
 		c.SSEvent("error", gin.H{"message": err.Error()})
 		c.Writer.Flush()
+	}
+}
+
+// AskAgentStream exposes the bounded, single-video template Agent as SSE.
+// Research mode and knowledge-base scope stay on their existing guarded paths.
+func (h *ChatHandler) AskAgentStream(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
+	if err != nil || sessionID <= 0 {
+		response.BadRequest(c, "会话 ID 错误")
+		return
+	}
+
+	var req struct {
+		Question     string `json:"question" binding:"required"`
+		TopK         int    `json:"top_k"`
+		Mode         string `json:"mode"`
+		AgentProfile string `json:"agent_profile"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	streamer, ok := h.agentSvc.(videoAgentStreamer)
+	if !ok {
+		response.BadRequest(c, "agent 流式功能不可用")
+		return
+	}
+
+	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	chatClient, err := h.aiFactory.NewChatClient(*profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	runID := ""
+	emit := func(event service.AgentStreamEvent) error {
+		if err := c.Request.Context().Err(); err != nil {
+			return err
+		}
+		if event.Type == service.AgentEventRunStart {
+			if start, ok := event.Data.(service.AgentRunStartEvent); ok {
+				runID = start.RunID
+			}
+		}
+		c.SSEvent(event.Type, event.Data)
+		c.Writer.Flush()
+		return c.Request.Context().Err()
+	}
+
+	_, err = streamer.Stream(c.Request.Context(), service.VideoAgentStreamRequest{
+		UserID: userID, SessionID: sessionID, Question: req.Question,
+		TopK: req.TopK, Mode: req.Mode, AgentProfile: req.AgentProfile,
+	}, embeddingClient, chatClient, *profile, emit)
+	if err != nil {
+		log.Printf("agent chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
+		if c.Request.Context().Err() == nil {
+			c.SSEvent(service.AgentEventError, service.AgentErrorEvent{RunID: runID, Message: err.Error()})
+			c.Writer.Flush()
+		}
 	}
 }

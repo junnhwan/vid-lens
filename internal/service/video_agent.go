@@ -36,6 +36,8 @@ type VideoAgentResult struct {
 	Citations []Citation       `json:"citations"`
 	Trace     []VideoAgentStep `json:"trace"`
 	Model     string           `json:"model"`
+	RunID     string           `json:"run_id,omitempty"`
+	Mode      string           `json:"mode,omitempty"`
 }
 
 type VideoAgentStep struct {
@@ -60,10 +62,18 @@ type VideoAgentService struct {
 type VideoAgentExecutionError struct {
 	Message string
 	Trace   []VideoAgentStep
+	Cause   error
 }
 
 func (e *VideoAgentExecutionError) Error() string {
 	return e.Message
+}
+
+func (e *VideoAgentExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 func NewVideoAgentService(chatSvc *ChatService) *VideoAgentService {
@@ -85,6 +95,10 @@ func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
 }
 
 func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
+	return s.ask(ctx, req, embedding, chat, profile, nil, "", "")
+}
+
+func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, observer VideoAgentStepObserver, runID, mode string) (*VideoAgentResult, error) {
 	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -95,15 +109,9 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	if s.chatSvc.retriever == nil {
 		return nil, fmt.Errorf("当前视频尚未构建 RAG 索引")
 	}
-	session, err := s.chatSvc.repos.Chat.FindSessionForUser(req.UserID, req.SessionID)
+	session, err := s.findVideoAgentSession(req.UserID, req.SessionID)
 	if err != nil {
 		return nil, err
-	}
-	if session == nil {
-		return nil, fmt.Errorf("无权访问此会话")
-	}
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		return nil, fmt.Errorf("知识库会话暂不支持 Agent 问答")
 	}
 	if req.TopK <= 0 {
 		req.TopK = s.chatSvc.cfg.TopK
@@ -120,6 +128,7 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
+	tools.SetStepObserver(observer)
 	trace := make([]VideoAgentStep, 0, 4)
 
 	searchArguments, err := json.Marshal(searchTranscriptToolArguments{Question: req.Question, TopK: req.TopK})
@@ -168,11 +177,36 @@ func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embe
 		Citations: finalized.Citations,
 		Trace:     trace,
 		Model:     profile.LLMModel,
+		RunID:     runID,
+		Mode:      mode,
 	}
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Question, result, recentLimit); err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*model.ChatSession, error) {
+	if s == nil || s.chatSvc == nil {
+		return nil, fmt.Errorf("agent chat service 不能为空")
+	}
+	if s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil {
+		return nil, fmt.Errorf("agent chat repository 不能为空")
+	}
+	session, err := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("无权访问此会话")
+	}
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		return nil, fmt.Errorf("知识库会话暂不支持 Agent 问答")
+	}
+	if session.ScopeType != "" && session.ScopeType != model.ChatScopeVideo {
+		return nil, fmt.Errorf("Agent 仅支持单视频会话")
+	}
+	return session, nil
 }
 
 func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentRequest, embeddingModel string, taskID int64, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
@@ -306,10 +340,14 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 		s.chatSvc.maybeAutoTitleSession(session, question)
 	}
 	snapshot, err := json.Marshal(struct {
+		RunID     string           `json:"run_id,omitempty"`
+		Mode      string           `json:"mode,omitempty"`
 		Template  string           `json:"template"`
 		Citations []Citation       `json:"citations"`
 		Trace     []VideoAgentStep `json:"trace"`
 	}{
+		RunID:     result.RunID,
+		Mode:      result.Mode,
 		Template:  result.Template,
 		Citations: result.Citations,
 		Trace:     result.Trace,
@@ -338,6 +376,7 @@ func newVideoAgentExecutionError(err error, trace []VideoAgentStep) error {
 	return &VideoAgentExecutionError{
 		Message: err.Error(),
 		Trace:   append([]VideoAgentStep(nil), trace...),
+		Cause:   err,
 	}
 }
 

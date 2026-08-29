@@ -24,6 +24,7 @@ type VideoAgentTools struct {
 	pipeline *RetrievalPipeline
 	chat     ai.ChatClient
 	registry *VideoAgentToolRegistry
+	observer VideoAgentStepObserver
 }
 
 func NewVideoAgentTools(repos *repository.Repositories, pipeline *RetrievalPipeline, chat ai.ChatClient) *VideoAgentTools {
@@ -40,6 +41,14 @@ func (t *VideoAgentTools) Registry() *VideoAgentToolRegistry {
 		return nil
 	}
 	return t.registry
+}
+
+// SetStepObserver attaches an optional observer to the existing typed tool
+// methods. The default non-streaming Agent leaves it unset.
+func (t *VideoAgentTools) SetStepObserver(observer VideoAgentStepObserver) {
+	if t != nil {
+		t.observer = observer
+	}
 }
 
 type SearchTranscriptInput struct {
@@ -118,8 +127,11 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		"question": input.Question,
 		"top_k":    input.TopK,
 	})
+	if err := t.notifyStepStart(step); err != nil {
+		return SearchTranscriptResult{}, step, err
+	}
 	if t == nil || t.pipeline == nil {
-		step, err := failVideoAgentStep(step, "当前视频尚未构建 RAG 索引")
+		step, err := t.failObservedStep(step, "当前视频尚未构建 RAG 索引")
 		return SearchTranscriptResult{}, step, err
 	}
 	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
@@ -127,11 +139,15 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 	})
 	if err != nil {
-		step, err := failVideoAgentStep(step, err.Error())
+		step, err = t.failObservedStep(step, err.Error())
 		return SearchTranscriptResult{}, step, err
 	}
 	step.OutputRef = fmt.Sprintf("citations:%d", len(result.Citations))
-	return SearchTranscriptResult(result), step, nil
+	searchResult := SearchTranscriptResult(result)
+	if err := t.notifyStepDone(step, searchResult); err != nil {
+		return SearchTranscriptResult{}, step, err
+	}
+	return searchResult, step, nil
 }
 
 func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input TranscriptWindowInput) (TranscriptWindowResult, VideoAgentStep, error) {
@@ -139,8 +155,11 @@ func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input Transcr
 		"chunk_index": input.ChunkIndex,
 		"radius":      input.Radius,
 	})
+	if err := t.notifyStepStart(step); err != nil {
+		return TranscriptWindowResult{}, step, err
+	}
 	if t == nil || t.repos == nil || t.repos.VideoChunk == nil {
-		step, err := failVideoAgentStep(step, "transcript chunk repository unavailable")
+		step, err := t.failObservedStep(step, "transcript chunk repository unavailable")
 		return TranscriptWindowResult{}, step, err
 	}
 	radius := input.Radius
@@ -154,11 +173,11 @@ func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input Transcr
 	end := input.ChunkIndex + radius
 	chunks, err := t.repos.VideoChunk.ListByIndexRange(input.UserID, input.TaskID, input.EmbeddingModel, start, end)
 	if err != nil {
-		step, err := failVideoAgentStep(step, err.Error())
+		step, err = t.failObservedStep(step, err.Error())
 		return TranscriptWindowResult{}, step, err
 	}
 	if len(chunks) == 0 {
-		step, err := failVideoAgentStep(step, "未找到相邻转写片段")
+		step, err := t.failObservedStep(step, "未找到相邻转写片段")
 		return TranscriptWindowResult{}, step, err
 	}
 	segments := videoChunksToSegments(chunks)
@@ -169,6 +188,9 @@ func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input Transcr
 		Content:    joinTranscriptSegments(segments),
 	}
 	step.OutputRef = fmt.Sprintf("window:%d-%d", result.StartIndex, result.EndIndex)
+	if err := t.notifyStepDone(step, result); err != nil {
+		return TranscriptWindowResult{}, step, err
+	}
 	return result, step, nil
 }
 
@@ -176,8 +198,11 @@ func (t *VideoAgentTools) SummarizeSegments(ctx context.Context, input Summarize
 	step := newVideoAgentStep("summarize segments", VideoAgentToolSummarizeSegments, map[string]any{
 		"segment_count": len(input.Segments),
 	})
+	if err := t.notifyStepStart(step); err != nil {
+		return SummarizeSegmentsResult{}, step, err
+	}
 	if t == nil || t.chat == nil {
-		step, err := failVideoAgentStep(step, "chat client 不能为空")
+		step, err := t.failObservedStep(step, "chat client 不能为空")
 		return SummarizeSegmentsResult{}, step, err
 	}
 	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
@@ -185,19 +210,26 @@ func (t *VideoAgentTools) SummarizeSegments(ctx context.Context, input Summarize
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n转写片段：\n%s\n\n请用中文归纳这些片段与问题相关的要点。", input.Question, joinTranscriptSegments(input.Segments))},
 	})
 	if err != nil {
-		step, err := failVideoAgentStep(step, err.Error())
+		step, err = t.failObservedStep(step, err.Error())
 		return SummarizeSegmentsResult{}, step, err
 	}
 	step.OutputRef = "summary"
-	return SummarizeSegmentsResult{Summary: strings.TrimSpace(answer)}, step, nil
+	result := SummarizeSegmentsResult{Summary: strings.TrimSpace(answer)}
+	if err := t.notifyStepDone(step, result); err != nil {
+		return SummarizeSegmentsResult{}, step, err
+	}
+	return result, step, nil
 }
 
 func (t *VideoAgentTools) CompareSegments(ctx context.Context, input CompareSegmentsInput) (CompareSegmentsResult, VideoAgentStep, error) {
 	step := newVideoAgentStep("compare segments", VideoAgentToolCompareSegments, map[string]any{
 		"group_count": len(input.Groups),
 	})
+	if err := t.notifyStepStart(step); err != nil {
+		return CompareSegmentsResult{}, step, err
+	}
 	if t == nil || t.chat == nil {
-		step, err := failVideoAgentStep(step, "chat client 不能为空")
+		step, err := t.failObservedStep(step, "chat client 不能为空")
 		return CompareSegmentsResult{}, step, err
 	}
 	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
@@ -205,19 +237,26 @@ func (t *VideoAgentTools) CompareSegments(ctx context.Context, input CompareSegm
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n片段组：\n%s\n\n请对比这些片段组的相同点、差异和变化。", input.Question, formatSegmentGroups(input.Groups))},
 	})
 	if err != nil {
-		step, err := failVideoAgentStep(step, err.Error())
+		step, err = t.failObservedStep(step, err.Error())
 		return CompareSegmentsResult{}, step, err
 	}
 	step.OutputRef = "comparison"
-	return CompareSegmentsResult{Comparison: strings.TrimSpace(answer)}, step, nil
+	result := CompareSegmentsResult{Comparison: strings.TrimSpace(answer)}
+	if err := t.notifyStepDone(step, result); err != nil {
+		return CompareSegmentsResult{}, step, err
+	}
+	return result, step, nil
 }
 
 func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCitedAnswerInput) (BuildCitedAnswerResult, VideoAgentStep, error) {
 	step := newVideoAgentStep("build cited answer", VideoAgentToolBuildCitedAnswer, map[string]any{
 		"citation_count": len(input.Citations),
 	})
+	if err := t.notifyStepStart(step); err != nil {
+		return BuildCitedAnswerResult{}, step, err
+	}
 	if t == nil || t.chat == nil {
-		step, err := failVideoAgentStep(step, "chat client 不能为空")
+		step, err := t.failObservedStep(step, "chat client 不能为空")
 		return BuildCitedAnswerResult{}, step, err
 	}
 	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
@@ -225,14 +264,43 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))},
 	})
 	if err != nil {
-		step, err := failVideoAgentStep(step, err.Error())
+		step, err = t.failObservedStep(step, err.Error())
 		return BuildCitedAnswerResult{}, step, err
 	}
 	step.OutputRef = "answer"
-	return BuildCitedAnswerResult{
+	result := BuildCitedAnswerResult{
 		Answer:    strings.TrimSpace(answer),
 		Citations: append([]RetrievedChunk(nil), input.Citations...),
-	}, step, nil
+	}
+	if err := t.notifyStepDone(step, result); err != nil {
+		return BuildCitedAnswerResult{}, step, err
+	}
+	return result, step, nil
+}
+
+func (t *VideoAgentTools) notifyStepStart(step VideoAgentStep) error {
+	if t == nil || t.observer == nil {
+		return nil
+	}
+	return t.observer.StepStart(step)
+}
+
+func (t *VideoAgentTools) notifyStepDone(step VideoAgentStep, output any) error {
+	if t == nil || t.observer == nil {
+		return nil
+	}
+	return t.observer.StepDone(step, output)
+}
+
+func (t *VideoAgentTools) failObservedStep(step VideoAgentStep, message string) (VideoAgentStep, error) {
+	step, err := failVideoAgentStep(step, message)
+	if t == nil || t.observer == nil {
+		return step, err
+	}
+	if observerErr := t.observer.StepError(step, err); observerErr != nil {
+		return step, observerErr
+	}
+	return step, err
 }
 
 func newVideoAgentStep(name, tool string, input map[string]any) VideoAgentStep {
