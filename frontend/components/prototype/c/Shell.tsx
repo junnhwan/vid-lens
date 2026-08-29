@@ -151,6 +151,8 @@ export function ProtoPageNav() {
 
   const pages = [
     { href: '/prototype/dashboard', label: '视频库' },
+    { href: '/prototype/qa-navigation', label: '问答入口' },
+    { href: '/prototype/agent-chat', label: 'Agent UI' },
     { href: '/prototype/kb', label: '知识库' },
     { href: '/prototype/chat/101', label: '单视频问答' },
     { href: '/prototype/kb/1', label: '跨视频问答' },
@@ -163,7 +165,7 @@ export function ProtoPageNav() {
       className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-1 px-2 py-1.5 rounded-full shadow-lg border border-white/20 proto-fade-in"
       style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)' }}
     >
-      <span className="text-[9px] uppercase tracking-widest text-violet-300/70 font-mono px-2">PROTOTYPE C+</span>
+      <span className="text-[9px] uppercase tracking-widest text-violet-300/70 font-mono px-2">原型预览</span>
       {pages.map(p => {
         const on = pathname === p.href || (p.href !== '/prototype/dashboard' && pathname.startsWith(p.href.replace(/\/\d+$/, '')))
         return (

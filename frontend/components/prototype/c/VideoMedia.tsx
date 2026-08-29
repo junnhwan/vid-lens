@@ -4,7 +4,7 @@ import { Play } from 'lucide-react'
 import { statusBadge, statusLabel } from '@/lib/format'
 import type { TaskStatus } from '@/lib/types'
 
-/** 暖色版渐变封面（融合 A 的视觉 + C 的色调） */
+/** 暖色渐变视频封面缩略图（装饰用，非真实播放器） */
 export const THUMB_GRADIENTS = [
   'from-amber-600/90 via-orange-500/75 to-stone-400/70',
   'from-stone-600/85 via-amber-700/60 to-amber-500/65',

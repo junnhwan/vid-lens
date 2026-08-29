@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { ReactNode, Ref } from 'react'
+import ChatSplitLayout from '@/components/chat/ChatSplitLayout'
 
 export function ChatHeader({ backHref, backLabel, kicker, title, actions }: {
   backHref: string
@@ -96,21 +97,28 @@ export function ChatFooter({ sidebarWidth = 'w-56', children, hint, footerAction
   )
 }
 
-export default function ChatShell({ header, sidebar, children, footer, scrollRef }: {
+export default function ChatShell({ header, sidebar, children, footer, scrollRef, tracePanel }: {
   header: ReactNode
   sidebar?: ReactNode
   children: ReactNode
   footer: ReactNode
   scrollRef?: Ref<HTMLDivElement>
+  tracePanel?: ReactNode
 }) {
   return (
     <div className="h-screen flex flex-col bg-[#f7f4ef] text-stone-800 overflow-hidden ui-root">
       {header}
       <div className="flex-1 flex min-h-0">
         {sidebar}
-        <div ref={scrollRef} role="main" className="flex-1 overflow-y-auto scroll-thin px-6 py-6">
-          <div className="max-w-2xl mx-auto space-y-6">{children}</div>
-        </div>
+        {tracePanel ? (
+          <ChatSplitLayout scrollRef={scrollRef} tracePanel={tracePanel}>
+            {children}
+          </ChatSplitLayout>
+        ) : (
+          <div ref={scrollRef} role="main" className="flex-1 overflow-y-auto scroll-thin px-6 py-6">
+            <div className="max-w-2xl mx-auto space-y-6">{children}</div>
+          </div>
+        )}
       </div>
       {footer}
     </div>

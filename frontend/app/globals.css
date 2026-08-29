@@ -101,7 +101,7 @@ body { -webkit-font-smoothing: antialiased; }
 /* 知识库：成员视频来源色点 */
 .src-dot { width:6px; height:6px; border-radius:1px; display:inline-block; }
 
-/* ============ C+A 工作台 UI 动效 ============ */
+/* ============ 暖色工作台 UI 动效（卡片 hover、弹窗、淡入等） ============ */
 .ui-root .ui-serif { font-family: Georgia, "Noto Serif SC", serif; }
 .ui-fade-in { animation: ui-fade-in 0.35s ease-out; }
 @keyframes ui-fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
@@ -132,8 +132,54 @@ body { -webkit-font-smoothing: antialiased; }
   box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
   border-color: rgb(251 191 36);
 }
+
+/* 聊天：柔和流式光标 + Agent 流水线动效 */
+.ui-typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgba(120, 113, 108, 0.5);
+  border-radius: 1px;
+  animation: ui-typewriter-cursor 1.4s ease-in-out infinite;
+}
+@keyframes ui-typewriter-cursor {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.65; }
+}
+.ui-typewriter-cites-in { animation: ui-typewriter-cites-in 0.4s ease-out; }
+@keyframes ui-typewriter-cites-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.ui-agent-glow {
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25), 0 4px 20px rgba(251, 191, 36, 0.12);
+}
+.ui-agent-shimmer {
+  background: linear-gradient(90deg, currentColor 0%, transparent 50%, currentColor 100%);
+  background-size: 200% 100%;
+  animation: ui-agent-shimmer 1.2s ease-in-out infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes ui-agent-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.ui-agent-scan { animation: ui-agent-scan 1.2s ease-in-out infinite; }
+@keyframes ui-agent-scan {
+  0% { width: 0; opacity: 0.5; }
+  50% { width: 70%; opacity: 1; }
+  100% { width: 100%; opacity: 0.5; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ui-fade-in, .ui-card-hover, .ui-btn-lift, .ui-pulse, .ui-backdrop, .ui-modal-in { animation:none!important; transition:none!important; }
+  .ui-fade-in, .ui-card-hover, .ui-btn-lift, .ui-pulse, .ui-backdrop, .ui-modal-in,
+  .ui-typewriter-cursor, .ui-typewriter-cites-in, .ui-agent-shimmer, .ui-agent-scan, .ui-agent-glow {
+    animation:none!important; transition:none!important;
+  }
 }
 
 /* ============ 产品打磨补丁 ============ */

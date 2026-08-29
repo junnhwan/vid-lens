@@ -1,6 +1,6 @@
 'use client'
 
-// C+A 融合工作台：C 侧栏/表格管理 + A 画廊条/缩略图/右侧抽屉
+// 原型：视频库工作台（侧栏导航、表格列表、顶部画廊条、渐变封面、居中详情弹窗）
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
@@ -60,7 +60,7 @@ export default function DashboardView({ tasks, loading, error, onRefresh, onUplo
   return (
     <ProtoShell active="dashboard" onUpload={onUpload}>
       <PageHero
-        kicker="工作台 · C+A 融合"
+        kicker="视频库 · 原型预览"
         title="视频知识库"
         desc="看起来像视频窗口，点进去是转写与摘要——管理用列表，研读用画廊。"
         actions={

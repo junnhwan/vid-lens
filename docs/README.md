@@ -7,6 +7,8 @@
 - [架构总览](architecture/overview.md)
 - [数据模型与存储边界](architecture/data-model.md)
 - [检索与回答链路](architecture/retrieval.md)
+- [Agent 流式契约（UI × 后端）](architecture/agent-streaming-contract.md)
+- [聊天 UI 已落地 × 后端待补齐](architecture/frontend-chat-agent-gaps.md)
 - [可靠性与幂等](architecture/reliability.md)
 - [架构图](images/vidlens-architecture.svg)
 - [数据库关系图](architecture/database-schema.svg)

@@ -1,6 +1,6 @@
 'use client'
 
-// PROTOTYPE C+ — 视频库工作台（选定方向：C 研读工作台 + A 动效）
+// 原型：视频库工作台定稿预览（左侧导航 + 列表/画廊 + 居中详情弹窗）
 // 访问：http://localhost:3000/prototype/dashboard
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'

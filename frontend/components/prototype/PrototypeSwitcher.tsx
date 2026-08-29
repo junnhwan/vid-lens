@@ -45,7 +45,7 @@ export default function PrototypeSwitcher({ variants, current, paramKey = 'varia
 
   return (
     <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-1 px-2 py-1.5 rounded-full shadow-lg border border-white/20"
+      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-1 px-2 py-1.5 rounded-full shadow-lg border border-white/20"
       style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)' }}
       role="toolbar"
       aria-label="原型变体切换"

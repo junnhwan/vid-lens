@@ -1,6 +1,6 @@
 'use client'
 
-// Variant C — 研读工作台：左侧富信息导航 + 右侧表格行 + 手风琴展开详情
+// 探索方案 C — 研读工作台：左侧富信息导航 + 右侧表格行 + 手风琴展开详情（定稿主骨架）
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import {

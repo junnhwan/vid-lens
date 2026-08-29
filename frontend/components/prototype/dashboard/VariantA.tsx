@@ -1,6 +1,6 @@
 'use client'
 
-// Variant A — 沉浸网格：无侧栏，大卡片瀑布流 + 居中 Spotlight 搜索 + 右侧滑出详情
+// 探索方案 A — 沉浸网格：无侧栏，大卡片瀑布流 + 居中搜索 + 右侧滑出详情
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import {

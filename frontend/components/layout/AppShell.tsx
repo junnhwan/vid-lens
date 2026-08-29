@@ -2,13 +2,15 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Video, Library, Settings, Upload } from 'lucide-react'
+import { Video, Library, Settings, Upload, MessageCircle } from 'lucide-react'
 import ThemeSwitch from '@/components/ThemeSwitch'
 import UserMenu from '@/components/UserMenu'
+import QaRecentShortcuts from '@/components/layout/QaRecentShortcuts'
 import { useRole } from '@/lib/useRole'
 
 const NAV = [
   { key: 'library', href: '/', icon: Video, label: '我的视频', desc: '管理与处理' },
+  { key: 'qa', href: '/qa', icon: MessageCircle, label: '问答', desc: '单视频 / 知识库' },
   { key: 'kb', href: '/kb', icon: Library, label: '知识库', desc: '跨视频问答' },
   { key: 'settings', href: '/settings', icon: Settings, label: 'AI 配置', desc: 'BYOK 密钥' },
 ] as const
@@ -42,7 +44,13 @@ export function MiniStat({ value, label, accent, warn }: { value: number | strin
 export default function AppShell({ children, onUpload }: { children: React.ReactNode; onUpload?: () => void }) {
   const pathname = usePathname()
   const { isDemo } = useRole()
-  const active = pathname.startsWith('/kb') ? 'kb' : pathname.startsWith('/settings') ? 'settings' : 'library'
+  const active = pathname.startsWith('/qa') || pathname.startsWith('/chat')
+    ? 'qa'
+    : pathname.startsWith('/kb')
+      ? 'kb'
+      : pathname.startsWith('/settings')
+        ? 'settings'
+        : 'library'
 
   return (
     <div className="h-screen flex bg-[#f7f4ef] text-stone-800 overflow-hidden ui-root">
@@ -75,6 +83,7 @@ export default function AppShell({ children, onUpload }: { children: React.React
             )
           })}
         </nav>
+        <QaRecentShortcuts />
         <div className="flex-1" />
         <div className="p-4 border-t border-stone-200 space-y-3">
           {onUpload && !isDemo && (

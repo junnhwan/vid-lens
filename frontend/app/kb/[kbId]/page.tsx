@@ -6,7 +6,9 @@ import { Settings2, Plus, Trash2, MessageCircle } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, SidebarSection } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
+import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import { parseMessages, fmtSession, fmtShortDate, type ChatMsg } from '@/components/chat/chatUtils'
+import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
 import KBModal from '@/components/KBModal'
 import { CiteRef } from '@/components/Citation'
 import { api, streamAsk, ApiError } from '@/lib/api'
@@ -24,6 +26,7 @@ export default function KBChatPage() {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [activeTrace, setActiveTrace] = useState<ChatTraceStep[]>([])
   const [streaming, setStreaming] = useState(false)
   const [topK, setTopK] = useState(8)
   const [showManage, setShowManage] = useState(false)
@@ -79,6 +82,7 @@ export default function KBChatPage() {
   const newSession = () => {
     setSession(null)
     setMessages([])
+    setActiveTrace([])
     setSearchInfo({})
     const url = new URLSearchParams(location.search)
     url.delete('session')
@@ -120,10 +124,15 @@ export default function KBChatPage() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setStreaming(true)
+
+    const startTrace = streamTraceReducer([], 'start')
+    setActiveTrace(startTrace)
+    let answerStarted = false
+
     setMessages(prev => [
       ...prev,
       { role: 'user', content: q },
-      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true },
+      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
     ])
 
     const patchLast = (patch: Partial<ChatMsg>) => {
@@ -136,9 +145,26 @@ export default function KBChatPage() {
       })
     }
 
+    const bumpTrace = (
+      event: Parameters<typeof streamTraceReducer>[1],
+      payload?: Parameters<typeof streamTraceReducer>[2],
+    ) => {
+      setActiveTrace(prev => {
+        const next = streamTraceReducer(prev, event, payload)
+        patchLast({ trace: next })
+        return next
+      })
+    }
+
     try {
       await streamAsk(sid!, q, topK, 'strict_rag', {
-        onAnswer: (delta) => appendDelta(delta),
+        onAnswer: (delta) => {
+          appendDelta(delta)
+          if (!answerStarted) {
+            answerStarted = true
+            bumpTrace('answer')
+          }
+        },
         onCitations: (cs: Citation[]) => {
           const refs: CiteRef[] = cs.map((c, i) => ({
             id: `C${i + 1}`,
@@ -153,9 +179,17 @@ export default function KBChatPage() {
           patchLast({ cites: refs })
           const taskIds = new Set(cs.map(c => c.task_id))
           setSearchInfo({ hits: `${cs.length}`, cross: taskIds.size })
+          const sources = [...new Set(cs.map(c => c.video_title).filter(Boolean))] as string[]
+          bumpTrace('citations', { hits: cs.length, sources })
         },
-        onDone: (d) => patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded }),
-        onError: (e) => patchLast({ streaming: false, error: e.message }),
+        onDone: (d) => {
+          bumpTrace('done')
+          patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded })
+        },
+        onError: (e) => {
+          bumpTrace('error', { error: e.message })
+          patchLast({ streaming: false, error: e.message })
+        },
       }, ctrl.signal)
     } catch (e) {
       patchLast({ streaming: false, error: e instanceof ApiError ? e.message : '流式请求失败' })
@@ -181,6 +215,13 @@ export default function KBChatPage() {
     <>
       <ChatShell
         scrollRef={scrollRef}
+        tracePanel={
+          <AgentTracePanel
+            steps={activeTrace}
+            streaming={streaming}
+            hint="知识库跨视频 strict_rag 流式问答。"
+          />
+        }
         header={
           <ChatHeader
             backHref="/kb"

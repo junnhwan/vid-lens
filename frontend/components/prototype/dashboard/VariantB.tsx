@@ -1,6 +1,6 @@
 'use client'
 
-// Variant B — 流水线看板：左侧图标轨 + 横向 Kanban 列（待处理/处理中/已完成/异常）
+// 探索方案 B — 流水线看板：左侧图标轨 + 横向 Kanban 列（待处理/处理中/已完成/异常）
 import Link from 'next/link'
 import { useState } from 'react'
 import {

@@ -1,4 +1,4 @@
-// PROTOTYPE C+ — 共享 mock 数据（未登录 / API 失败时兜底）
+// 原型页共享 mock 数据（未登录 / API 失败时兜底）
 
 import { TaskStatusEnum, type VideoTask, type KnowledgeBase, type AIProfile } from '@/lib/types'
 

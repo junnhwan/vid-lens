@@ -1,4 +1,4 @@
-/* PROTOTYPE C+ — 动效（融合 A 的 hover/脉冲/过渡） */
+/* 原型页动效：卡片 hover、脉冲、弹窗过渡（与正式页 globals.css 中 ui-* 类对应） */
 
 .proto-root .proto-serif {
   font-family: Georgia, "Noto Serif SC", serif;
@@ -83,8 +83,131 @@
 
 @media (prefers-reduced-motion: reduce) {
   .proto-fade-in, .proto-slide-in-right, .proto-expand, .proto-backdrop,
-  .proto-card-hover, .proto-btn-lift, .proto-progress-bar, .proto-pulse {
+  .proto-card-hover, .proto-btn-lift, .proto-progress-bar, .proto-pulse,
+  .proto-agent-pulse, .proto-agent-shimmer, .proto-agent-scan, .proto-agent-bounce, .proto-agent-glow, .proto-agent-type,
+  .proto-metro-bar-in, .proto-metro-progress, .proto-metro-line-fill, .proto-metro-node-pop, .proto-metro-ripple, .proto-metro-panel-in,
+  .proto-typewriter-cursor, .proto-typewriter-cites-in {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ============ Agent 原型动效 ============ */
+.proto-agent-pulse {
+  animation: proto-agent-pulse 1.5s ease-in-out infinite;
+}
+@keyframes proto-agent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.proto-agent-shimmer {
+  background: linear-gradient(90deg, currentColor 0%, transparent 50%, currentColor 100%);
+  background-size: 200% 100%;
+  animation: proto-agent-shimmer 1.2s ease-in-out infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes proto-agent-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.proto-agent-scan {
+  animation: proto-agent-scan 1.2s ease-in-out infinite;
+}
+@keyframes proto-agent-scan {
+  0% { width: 0; opacity: 0.5; }
+  50% { width: 70%; opacity: 1; }
+  100% { width: 100%; opacity: 0.5; }
+}
+
+.proto-agent-bounce {
+  animation: proto-agent-bounce 0.6s ease-in-out infinite;
+}
+@keyframes proto-agent-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.proto-agent-glow {
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.25), 0 4px 20px rgba(251, 191, 36, 0.12);
+}
+
+.proto-agent-type {
+  animation: proto-agent-type 0.03s steps(1) infinite;
+}
+@keyframes proto-agent-type {
+  50% { opacity: 0.7; }
+}
+
+/* 方案 E · 地铁条动效 */
+.proto-metro-bar-in {
+  animation: proto-metro-bar-in 0.35s ease-out;
+}
+@keyframes proto-metro-bar-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.proto-metro-progress {
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.45);
+}
+
+.proto-metro-line-fill {
+  animation: proto-metro-line-fill 0.6s ease-out forwards;
+}
+@keyframes proto-metro-line-fill {
+  from { transform: scaleX(0); transform-origin: left; }
+  to { transform: scaleX(1); transform-origin: left; }
+}
+
+.proto-metro-node-pop {
+  animation: proto-metro-node-pop 0.35s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+@keyframes proto-metro-node-pop {
+  0% { transform: scale(0.85); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.proto-metro-ripple {
+  animation: proto-metro-ripple 1.5s ease-out infinite;
+}
+@keyframes proto-metro-ripple {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.proto-metro-panel-in {
+  animation: proto-metro-panel-in 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes proto-metro-panel-in {
+  from { opacity: 0; transform: translateY(8px); max-height: 0; }
+  to { opacity: 1; transform: none; max-height: 200px; }
+}
+
+/* 打字机：柔和光标 + 引用淡入 */
+.proto-typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgba(120, 113, 108, 0.5);
+  border-radius: 1px;
+  animation: proto-typewriter-cursor 1.4s ease-in-out infinite;
+}
+@keyframes proto-typewriter-cursor {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.65; }
+}
+
+.proto-typewriter-cites-in {
+  animation: proto-typewriter-cites-in 0.4s ease-out;
+}
+@keyframes proto-typewriter-cites-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }

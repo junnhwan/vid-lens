@@ -6,7 +6,9 @@ import { Database, AlertTriangle, Trash2, MessageCircle, Plus } from 'lucide-rea
 import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ModeToggle, SidebarSection } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
+import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
+import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
 import { CiteRef } from '@/components/Citation'
 import { useToast } from '@/components/Toast'
 import { api, streamAsk, ApiError } from '@/lib/api'
@@ -33,6 +35,7 @@ function ChatView() {
   const [mode, setMode] = useState<ChatMode>('strict_rag')
   const [topK, setTopK] = useState(4)
   const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [activeTrace, setActiveTrace] = useState<ChatTraceStep[]>([])
   const [streaming, setStreaming] = useState(false)
   const [failClosed, setFailClosed] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
@@ -82,6 +85,7 @@ function ChatView() {
   const newSession = () => {
     setSession(null)
     setMessages([])
+    setActiveTrace([])
     setFailClosed(false)
     const url = new URLSearchParams(location.search)
     url.delete('session')
@@ -142,10 +146,14 @@ function ChatView() {
     setStreaming(true)
     setFailClosed(false)
 
+    const startTrace = streamTraceReducer([], 'start')
+    setActiveTrace(startTrace)
+    let answerStarted = false
+
     setMessages(prev => [
       ...prev,
       { role: 'user', content: q },
-      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true },
+      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
     ])
 
     const patchLast = (patch: Partial<ChatMsg>) => {
@@ -158,9 +166,26 @@ function ChatView() {
       })
     }
 
+    const bumpTrace = (
+      event: Parameters<typeof streamTraceReducer>[1],
+      payload?: Parameters<typeof streamTraceReducer>[2],
+    ) => {
+      setActiveTrace(prev => {
+        const next = streamTraceReducer(prev, event, payload)
+        patchLast({ trace: next })
+        return next
+      })
+    }
+
     try {
       await streamAsk(sid!, q, topK, mode, {
-        onAnswer: (delta) => appendDelta(delta),
+        onAnswer: (delta) => {
+          appendDelta(delta)
+          if (!answerStarted) {
+            answerStarted = true
+            bumpTrace('answer')
+          }
+        },
         onCitations: (cs: Citation[]) => {
           const refs: CiteRef[] = cs.map((c, i) => ({
             id: `C${i + 1}`,
@@ -172,9 +197,17 @@ function ChatView() {
             finalRank: c.final_rank,
           }))
           patchLast({ cites: refs })
+          const sources = [...new Set(cs.map(c => c.video_title || c.source).filter(Boolean))] as string[]
+          bumpTrace('citations', { hits: cs.length, sources })
         },
-        onDone: (d) => patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded }),
-        onError: (e) => patchLast({ streaming: false, error: e.message }),
+        onDone: (d) => {
+          bumpTrace('done')
+          patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded })
+        },
+        onError: (e) => {
+          bumpTrace('error', { error: e.message })
+          patchLast({ streaming: false, error: e.message })
+        },
       }, ctrl.signal)
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -237,6 +270,13 @@ function ChatView() {
   return (
     <ChatShell
       scrollRef={scrollRef}
+      tracePanel={
+        <AgentTracePanel
+          steps={activeTrace}
+          streaming={streaming}
+          hint="单视频 strict_rag / video_assistant 流式问答。"
+        />
+      }
       header={
         <ChatHeader
           backHref="/"
