@@ -112,3 +112,12 @@ export function sourceLabel(t: { source_type: string }): string {
     default: return '本地上传'
   }
 }
+
+export function taskTitle(t: { title?: string; filename: string; id?: number }): string {
+  return t.title || t.filename || (t.id != null ? `任务 #${t.id}` : '未命名')
+}
+
+export function stripMdPreview(s: string, maxLen = 120): string {
+  const plain = s.replace(/[#*`_>\-]/g, ' ').replace(/\s+/g, ' ').trim()
+  return plain.length > maxLen ? `${plain.slice(0, maxLen)}…` : plain
+}

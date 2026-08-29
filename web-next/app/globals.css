@@ -101,6 +101,41 @@ body { -webkit-font-smoothing: antialiased; }
 /* 知识库：成员视频来源色点 */
 .src-dot { width:6px; height:6px; border-radius:1px; display:inline-block; }
 
+/* ============ C+A 工作台 UI 动效 ============ */
+.ui-root .ui-serif { font-family: Georgia, "Noto Serif SC", serif; }
+.ui-fade-in { animation: ui-fade-in 0.35s ease-out; }
+@keyframes ui-fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+.ui-card-hover { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.ui-card-hover:hover { transform: translateY(-1px) scale(1.005); box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+.ui-btn-lift { transition: transform .15s ease, background-color .15s ease; }
+.ui-btn-lift:hover { transform: translateY(-1px); }
+.ui-pulse { animation: ui-pulse 2s ease-in-out infinite; }
+@keyframes ui-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.ui-row-hover { transition: background-color .15s ease; }
+.ui-row-hover:hover { background-color: rgba(251,191,36,.04); }
+.ui-backdrop { animation: ui-backdrop-in .2s ease; }
+@keyframes ui-backdrop-in { from{opacity:0} to{opacity:1} }
+.ui-modal-in { animation: ui-modal-in .28s cubic-bezier(.4,0,.2,1); }
+@keyframes ui-modal-in { from{opacity:0;transform:scale(.96) translateY(8px)} to{opacity:1;transform:none} }
+.ui-input {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(231 229 228);
+  background: white;
+  font-size: 13px;
+  color: rgb(28 25 23);
+}
+.ui-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
+  border-color: rgb(251 191 36);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-fade-in, .ui-card-hover, .ui-btn-lift, .ui-pulse, .ui-backdrop, .ui-modal-in { animation:none!important; transition:none!important; }
+}
+
 /* ============ 产品打磨补丁 ============ */
 
 /* Toast 入场：轻微下滑+淡入，180ms */

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Info, CheckCircle, XCircle, PlugZap, Ruler, List, Eye, Star, Save, Trash2, Loader2 } from 'lucide-react'
-import Header from '@/components/Header'
+import AppShell, { PageHero } from '@/components/layout/AppShell'
 import { api, ApiError } from '@/lib/api'
 import { useRole } from '@/lib/useRole'
 import type { AIProfile, AIProfileRequest, ProfilePurpose } from '@/lib/types'
@@ -46,94 +46,125 @@ function SettingsEditor() {
   const readOnly = profiles.length > 0 && profiles.every(p => p.read_only)
 
   return (
-    <div className="flex flex-col h-screen">
-      <Header active="settings" />
-      <main className="flex-1 overflow-y-auto scroll-thin">
-        <div className="max-w-[920px] mx-auto px-8 py-8">
-          {/* 章首 */}
-          <div className="pb-6 border-b border-ink-0/15">
-            <div className="font-sans text-[10px] text-ink-4">设置 · BYOK</div>
-            <h1 className="font-sans text-[36px] leading-[1.05] font-medium tight text-ink-0 mt-1.5">AI 服务 Profile<span className="text-sienna-500">.</span></h1>
-            <p className="font-sans italic text-[14px] text-ink-3 mt-1.5">自带密钥。三类配置各设一个默认，任务消费时按所属用户解析。</p>
+    <AppShell>
+      <PageHero
+        kicker="设置 · BYOK"
+        title="AI 服务配置"
+        desc="自带密钥。一个 Profile 同时包含 ASR / LLM / Embedding 三组配置，任务消费时按所属用户解析。"
+      />
+
+      <div className="px-8 pb-3">
+        <div className="flex items-center gap-1 border-b border-stone-200">
+          {(Object.keys(TAB_META) as Tab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2.5 text-[12px] border-b-2 -mb-px transition-colors duration-200 ${
+                tab === t ? 'border-amber-600 text-stone-900 font-medium' : 'border-transparent text-stone-400 hover:text-stone-600'
+              }`}
+            >
+              {TAB_META[t].label}
+            </button>
+          ))}
+          {!readOnly && (
+            <button
+              onClick={() => { setShowNewForm(true); setSelectedId(null) }}
+              className="ml-auto h-8 px-3 rounded-lg border border-stone-300 text-[11px] flex items-center gap-1 ui-btn-lift"
+            >
+              <Plus className="w-3 h-3" />新建 Profile
+            </button>
+          )}
+        </div>
+      </div>
+
+      <main className="flex-1 overflow-y-auto scroll-thin px-8 pb-24">
+        {err && (
+          <div className="mb-4 py-3 px-4 text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
+            {err}<button onClick={load} className="ml-2 underline">重试</button>
           </div>
+        )}
 
-          {/* 三 tab */}
-          <div className="flex items-center border-b border-ink-0/15 mt-6 font-mono text-[11px]">
-            {(Object.keys(TAB_META) as Tab[]).map(t => (
-              <button key={t} onClick={() => setTab(t)} className={`tab py-2 mr-7 ${tab === t ? 'on' : ''}`}>{TAB_META[t].label}</button>
-            ))}
-            {!readOnly && <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-2.5 ml-auto font-sans text-[10px] flex items-center gap-1"><Plus className="w-3 h-3" />新建 Profile</button>}
-          </div>
-
-          {err && <div className="mt-4 text-[12px] text-rust">{err}<button onClick={load} className="ml-2 underline">重试</button></div>}
-
-          {/* 左列表 + 右编辑表单 */}
-          <div className="grid grid-cols-[1fr_1.4fr] gap-10 mt-7">
-            {/* 左：列表 */}
-            <section>
-              <div className="font-mono text-[10px] text-ink-4 mb-2.5">{TAB_META[tab].label} Profile <span className="text-ink-3">{profiles.length}</span></div>
-              {loading ? (
-                <div className="space-y-2">{[0,1,2].map(i => <div key={i} className="border border-ink-0/15 px-4 py-3"><div className="sk h-4 w-2/3 mb-2" /><div className="sk h-3 w-1/2" /></div>)}</div>
-              ) : profiles.length === 0 ? (
-                <div className="py-10 text-center border border-dashed border-ink-0/20">
-                  <div className="font-mono text-[10px] text-ink-4 wide uppercase mb-2">— 暂无 Profile —</div>
-                  {!readOnly && (
-                    <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="btn-line h-7 px-3 text-[10px] font-medium inline-flex items-center gap-1"><Plus className="w-3 h-3" />新建</button>
-                  )}
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {profiles.map(p => {
-                    const sel = selectedId === p.id
-                    const hasGroup = Boolean(groupField(p, tab).provider)
-                    return (
-                      <li key={p.id} onClick={() => { setSelectedId(p.id); setShowNewForm(false) }}
-                        className={`border px-4 py-3 cursor-pointer ${sel ? 'border-sienna-500/40 bg-sienna-500/5' : 'border-ink-0/15 hover:bg-ink-0/[.03]'}`}>
-                        <div className="flex items-start gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`font-sans text-[15px] font-medium truncate ${sel ? 'text-ink-0' : 'text-ink-1'}`}>{p.name}</span>
-                              {p.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
-                              {!hasGroup && <span className="font-mono text-[9px] text-ink-4 border border-ink-0/20 px-1">未配{tab.toUpperCase()}</span>}
-                            </div>
-                            <div className="font-mono text-[11px] text-ink-3 mt-0.5 truncate">{readOnly ? (groupField(p, tab).model || '—') : `${groupField(p, tab).provider || '—'} · ${groupField(p, tab).base || '—'}`}</div>
-                          </div>
-                          {!readOnly && !sel && !p.is_default && <button onClick={(e) => { e.stopPropagation(); setDefault(p.id) }} className="font-sans text-[10px] text-ink-4 hover:text-ink-0">设默认</button>}
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              <div className="mt-5 font-mono text-[10px] text-ink-4 leading-relaxed flex items-start gap-1.5">
-                <Info className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>Create 时若该类无默认，将自动设为默认。设新默认会取消旧默认。</span>
+        <div className="grid lg:grid-cols-[1fr_1.4fr] gap-8">
+          <section className="ui-fade-in">
+            <div className="text-[10px] uppercase tracking-wider text-stone-400 mb-3">
+              {TAB_META[tab].label} · {profiles.length} 个
+            </div>
+            {loading ? (
+              <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-16 bg-stone-100 rounded-lg animate-pulse" />)}</div>
+            ) : profiles.length === 0 ? (
+              <div className="py-10 text-center border border-dashed border-stone-300 rounded-xl">
+                <div className="text-[12px] text-stone-400 mb-2">暂无 Profile</div>
+                {!readOnly && (
+                  <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] ui-btn-lift inline-flex items-center gap-1">
+                    <Plus className="w-3 h-3" />新建
+                  </button>
+                )}
               </div>
-            </section>
+            ) : (
+              <ul className="space-y-2">
+                {profiles.map((p, i) => {
+                  const sel = selectedId === p.id
+                  const hasGroup = Boolean(groupField(p, tab).provider)
+                  return (
+                    <li key={p.id}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { setSelectedId(p.id); setShowNewForm(false) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(p.id); setShowNewForm(false) } }}
+                        className={`w-full text-left p-4 rounded-xl border transition-all duration-200 ui-card-hover cursor-pointer ${
+                          sel ? 'border-amber-400/60 bg-amber-50/60 shadow-sm' : 'border-stone-200 bg-white hover:border-stone-300'
+                        }`}
+                        style={{ animationDelay: `${i * 50}ms` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-[15px] font-medium text-stone-900">{p.name}</span>
+                          {p.is_default && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+                          )}
+                          {!hasGroup && (
+                            <span className="text-[9px] text-stone-400 border border-stone-200 px-1 rounded">未配{tab.toUpperCase()}</span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-stone-500 mt-1 font-mono truncate">
+                          {readOnly ? (groupField(p, tab).model || '—') : `${groupField(p, tab).provider || '—'} · ${groupField(p, tab).base || '—'}`}
+                        </div>
+                        {!readOnly && !sel && !p.is_default && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setDefault(p.id) }}
+                            className="mt-2 text-[10px] text-stone-400 hover:text-stone-700"
+                          >
+                            设默认
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            <div className="mt-5 text-[10px] text-stone-400 leading-relaxed flex items-start gap-1.5">
+              <Info className="w-3 h-3 mt-0.5 shrink-0" />
+              <span>Create 时若该类无默认，将自动设为默认。设新默认会取消旧默认。</span>
+            </div>
+          </section>
 
-            {/* 右：编辑表单 */}
-            <section>
-              {readOnly ? (
-                selected ? (
-                  <ReadOnlyProfile profile={selected} />
-                ) : (
-                  <div className="font-sans text-[10px] text-ink-4 mb-2.5">查看 · 未选中</div>
-                )
-              ) : showNewForm ? (
-                <ProfileForm key="new" tab={tab} onChanged={load} onSaved={(id) => { setSelectedId(id); setShowNewForm(false) }} />
-              ) : selected ? (
-                <ProfileForm key={selected.id} tab={tab} profile={selected} onChanged={load} />
-              ) : (
-                <div className="font-sans text-[10px] text-ink-4 mb-2.5">编辑 · 未选中</div>
-              )}
-              {!selected && !showNewForm && !readOnly && (
-                <div className="border border-dashed border-ink-0/20 py-12 text-center font-sans text-[12px] text-ink-4">从左侧选择一个 Profile，或新建</div>
-              )}
-            </section>
-          </div>
+          <section className="ui-fade-in">
+            {readOnly ? (
+              selected ? <ReadOnlyProfile profile={selected} /> : (
+                <div className="border border-dashed border-stone-300 rounded-xl py-16 text-center text-[13px] text-stone-400">从左侧选择一个 Profile</div>
+              )
+            ) : showNewForm ? (
+              <ProfileForm key="new" tab={tab} onChanged={load} onSaved={(id) => { setSelectedId(id); setShowNewForm(false) }} />
+            ) : selected ? (
+              <ProfileForm key={selected.id} tab={tab} profile={selected} onChanged={load} />
+            ) : (
+              <div className="border border-dashed border-stone-300 rounded-xl py-16 text-center text-[13px] text-stone-400">从左侧选择一个 Profile，或新建</div>
+            )}
+          </section>
         </div>
       </main>
-    </div>
+    </AppShell>
   )
 
   async function setDefault(id: number) {
@@ -167,49 +198,50 @@ function DemoProfilesView() {
   ]
 
   return (
-    <div className="flex flex-col h-screen">
-      <Header active="settings" />
-      <main className="flex-1 overflow-y-auto scroll-thin">
-        <div className="max-w-[920px] mx-auto px-8 py-8">
-          <div className="pb-6 border-b border-ink-0/15">
-            <div className="font-sans text-[10px] text-ink-4">设置 · 演示账号</div>
-            <h1 className="font-sans text-[36px] leading-[1.05] font-medium tight text-ink-0 mt-1.5">AI 模型<span className="text-sienna-500">.</span></h1>
-            <p className="font-sans italic text-[14px] text-ink-3 mt-1.5">演示账号仅展示当前使用的模型，配置只读，服务地址与密钥不对外显示。</p>
+    <AppShell>
+      <PageHero
+        kicker="设置 · 演示账号"
+        title="AI 模型"
+        desc="演示账号仅展示当前使用的模型，配置只读，服务地址与密钥不对外显示。"
+      />
+
+      <main className="flex-1 overflow-y-auto scroll-thin px-8 pb-24">
+        {err && (
+          <div className="mb-4 py-3 px-4 text-[13px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg">
+            {err}<button onClick={load} className="ml-2 underline">重试</button>
           </div>
+        )}
 
-          {err && <div className="mt-4 text-[12px] text-rust">{err}<button onClick={load} className="ml-2 underline">重试</button></div>}
-
-          {loading ? (
-            <div className="mt-7 space-y-3">
-              {[0, 1, 2].map(i => <div key={i} className="border border-ink-0/15 px-5 py-4"><div className="sk h-4 w-1/3 mb-2" /><div className="sk h-3 w-1/2" /></div>)}
-            </div>
-          ) : profiles.length === 0 ? (
-            <div className="py-16 text-center">
-              <div className="font-mono text-[10px] text-ink-4 wide uppercase mb-2">— 暂无模型配置 —</div>
-            </div>
-          ) : (
-            <div className="mt-7 space-y-4">
-              {profiles.map(p => (
-                <div key={p.id} className="border border-ink-0/15 bg-paper-0 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="font-sans text-[18px] font-medium text-ink-0">{p.name}</span>
-                    {p.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
-                  </div>
-                  <div className="space-y-3">
-                    {rows(p).map(r => (
-                      <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/10 pb-2.5 last:border-0 last:pb-0">
-                        <span className="font-mono text-[10px] text-ink-4 wide uppercase">{r.label}</span>
-                        <span className="font-mono text-[12.5px] text-ink-1">{r.value || '—'}</span>
-                      </div>
-                    ))}
-                  </div>
+        {loading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map(i => <div key={i} className="h-24 bg-white border border-stone-200 rounded-xl animate-pulse" />)}
+          </div>
+        ) : profiles.length === 0 ? (
+          <div className="py-16 text-center text-[12px] text-stone-400">暂无模型配置</div>
+        ) : (
+          <div className="space-y-4">
+            {profiles.map(p => (
+              <div key={p.id} className="bg-white border border-stone-200 rounded-xl p-6 ui-card-hover">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-[18px] font-medium text-stone-900 ui-serif">{p.name}</span>
+                  {p.is_default && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <div className="space-y-3">
+                  {rows(p).map(r => (
+                    <div key={r.label} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-2.5 last:border-0 last:pb-0">
+                      <span className="text-[10px] text-stone-400 uppercase tracking-wider">{r.label}</span>
+                      <span className="text-[12.5px] text-stone-700 font-mono">{r.value || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </main>
-    </div>
+    </AppShell>
   )
 }
 
@@ -228,20 +260,22 @@ function ReadOnlyProfile({ profile }: { profile: AIProfile }) {
     { label: 'Embedding · 索引', value: profile.embedding_model },
   ]
   return (
-    <div className="space-y-4">
-      <div className="font-sans text-[10px] text-ink-4 mb-0.5">查看 · {profile.name}</div>
-      <div className="border border-ink-0/15 bg-paper-0 p-5 space-y-3">
+    <div className="space-y-4 ui-fade-in">
+      <div className="text-[10px] uppercase tracking-wider text-stone-400">查看 · {profile.name}</div>
+      <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="font-sans text-[18px] font-medium text-ink-0">{profile.name}</span>
-          {profile.is_default && <span className="default-badge font-sans text-[9px] px-1.5 py-0.5">默认</span>}
+          <span className="text-[18px] font-medium text-stone-900 ui-serif">{profile.name}</span>
+          {profile.is_default && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+          )}
         </div>
         {rows.map(r => (
-          <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/10 pb-2.5 last:border-0 last:pb-0">
-            <span className="font-mono text-[10px] text-ink-4 wide uppercase">{r.label}</span>
-            <span className="font-mono text-[12.5px] text-ink-1">{r.value || '—'}</span>
+          <div key={r.label} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-2.5 last:border-0 last:pb-0">
+            <span className="text-[10px] text-stone-400 uppercase tracking-wider">{r.label}</span>
+            <span className="text-[12.5px] text-stone-700 font-mono">{r.value || '—'}</span>
           </div>
         ))}
-        <p className="font-sans text-[11px] text-ink-4 pt-1">演示账号配置为只读，服务地址与密钥已隐藏。</p>
+        <p className="text-[11px] text-stone-400 pt-1">演示账号配置为只读，服务地址与密钥已隐藏。</p>
       </div>
     </div>
   )
@@ -351,101 +385,101 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="font-sans text-[10px] text-ink-4 mb-0.5">{isEdit ? `编辑 · ${profile?.name}` : '新建 · ' + TAB_META[tab].label}</div>
-      <div className="border border-ink-0/15 bg-paper-0 p-5 space-y-4">
-        {/* 名称 */}
-        <div>
-          <label className="block font-mono text-[10px] text-ink-3 mb-1.5">Profile 名称</label>
-          <div className="field px-3 h-9 flex items-center">
-            <input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} className="w-full font-mono text-[12.5px] text-ink-1 disabled:text-ink-4" />
+    <div className="space-y-4 ui-fade-in">
+      <div className="text-[10px] uppercase tracking-wider text-stone-400">{isEdit ? `编辑 · ${profile?.name}` : `新建 · ${TAB_META[tab].label}`}</div>
+      <div className="bg-white border border-stone-200 rounded-xl p-6 space-y-4">
+        <FormField label="Profile 名称">
+          <input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} className="ui-input disabled:text-stone-400" />
+          {isEdit && <p className="text-[10px] text-stone-400 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置。</p>}
+        </FormField>
+        <FormField label={fieldLabel.provider}>
+          <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="mimo / openai / siliconflow" className="ui-input font-mono" />
+        </FormField>
+        <FormField label={fieldLabel.base}>
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="ui-input font-mono" />
+        </FormField>
+        <FormField label={fieldLabel.key}>
+          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-stone-200 bg-stone-50">
+            <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isEdit ? '•••• 留空保留旧值' : 'sk-...'} className="flex-1 bg-transparent text-[13px] font-mono" />
+            <button onClick={() => setShowKey(s => !s)} className="text-stone-400 hover:text-stone-600"><Eye className="w-3.5 h-3.5" /></button>
           </div>
-          {isEdit && <p className="font-sans text-[10px] text-ink-4 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置。</p>}
-        </div>
-        {/* Provider */}
-        <div>
-          <label className="block font-mono text-[10px] text-ink-3 mb-1.5">{fieldLabel.provider}</label>
-          <div className="field px-3 h-9 flex items-center">
-            <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="mimo / openai / siliconflow" className="w-full font-mono text-[12.5px] text-ink-1" />
+          <p className="text-[10px] text-stone-400 mt-1">加密存储，使用 VIDLENS_API_KEY_SECRET。{isEdit && g.keyMasked ? `当前：${g.keyMasked}` : ''}</p>
+        </FormField>
+        <FormField label={fieldLabel.model}>
+          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-stone-200 bg-white focus-within:ring-2 focus-within:ring-amber-600/20 focus-within:border-amber-400">
+            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="模型名" className="flex-1 bg-transparent text-[13px] font-mono" />
+            <button onClick={probeModels} disabled={busy} className="text-[10px] text-stone-400 hover:text-stone-600 whitespace-nowrap flex items-center gap-1 disabled:opacity-50">
+              <List className="w-3 h-3" />探测
+            </button>
           </div>
-        </div>
-        {/* Base URL */}
-        <div>
-          <label className="block font-mono text-[10px] text-ink-3 mb-1.5">{fieldLabel.base}</label>
-          <div className="field px-3 h-9 flex items-center">
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="w-full font-mono text-[12.5px] text-ink-1" />
-          </div>
-        </div>
-        {/* API Key */}
-        <div>
-          <label className="block font-mono text-[10px] text-ink-3 mb-1.5">{fieldLabel.key}</label>
-          <div className="field px-3 h-9 flex items-center gap-2">
-            <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isEdit ? '•••• 留空保留旧值' : 'sk-...'} className="w-full font-mono text-[12.5px] text-ink-1" />
-            <button onClick={() => setShowKey(s => !s)} className="text-ink-4 hover:text-ink-0"><Eye className="w-3.5 h-3.5" /></button>
-          </div>
-          <p className="font-sans text-[10px] text-ink-4 mt-1">加密存储，使用 VIDLENS_API_KEY_SECRET。{isEdit && g.keyMasked ? `当前：${g.keyMasked}` : ''}</p>
-        </div>
-        {/* Model */}
-        <div>
-          <label className="block font-mono text-[10px] text-ink-3 mb-1.5">{fieldLabel.model}</label>
-          <div className="field px-3 h-9 flex items-center gap-2">
-            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="模型名" className="w-full font-mono text-[12.5px] text-ink-1" />
-            <button onClick={probeModels} disabled={busy} className="font-sans text-[10px] text-ink-4 hover:text-ink-0 whitespace-nowrap flex items-center gap-1 disabled:opacity-50"><List className="w-3 h-3" />探测</button>
-          </div>
-          {/* 探测结果 */}
           {models.length > 0 && (
-            <div className="mt-2 border border-ink-0/10 p-2.5 font-mono text-[11px] text-ink-2 space-y-0.5">
-              <div className="text-ink-4 text-[10px] mb-1">可用模型</div>
+            <div className="mt-2 border border-stone-200 rounded-lg p-2.5 text-[11px] text-stone-600 space-y-0.5">
+              <div className="text-stone-400 text-[10px] mb-1">可用模型</div>
               {models.map(m => (
-                <div key={m} className="cursor-pointer hover:text-sienna-700" onClick={() => setModel(m)}>
-                  {m}{m === model && <span className="text-sienna-700"> ← 当前</span>}
+                <div key={m} className="cursor-pointer hover:text-amber-800 font-mono" onClick={() => setModel(m)}>
+                  {m}{m === model && <span className="text-amber-700"> ← 当前</span>}
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </FormField>
 
-        {/* 测试连通 + 探测维度 */}
         <div className="flex items-center gap-2 pt-1">
-          <button onClick={testConn} disabled={busy || !isEdit} className="btn-ink h-8 px-3.5 font-sans text-[11px] flex items-center gap-1.5 disabled:opacity-50"><PlugZap className="w-3.5 h-3.5" />测试连通</button>
+          <button onClick={testConn} disabled={busy || !isEdit} className="h-8 px-3.5 rounded-lg bg-stone-900 text-white text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
+            <PlugZap className="w-3.5 h-3.5" />测试连通
+          </button>
           {tab === 'embedding' && (
-            <button onClick={probeDimFn} disabled={busy} className="btn-line h-8 px-3 font-sans text-[11px] flex items-center gap-1.5 disabled:opacity-50"><Ruler className="w-3.5 h-3.5" />探测维度</button>
+            <button onClick={probeDimFn} disabled={busy} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] ui-btn-lift disabled:opacity-50">
+              <Ruler className="w-3.5 h-3.5" />探测维度
+            </button>
           )}
-          {busy && <Loader2 className="w-3.5 h-3.5 text-ink-3 animate-spin" />}
+          {busy && <Loader2 className="w-3.5 h-3.5 text-stone-400 animate-spin" />}
         </div>
 
-        {/* 测试结果 */}
         {testResult && (
-          <div className={`${testResult.ok ? 'result-ok border-moss/30' : 'result-err border-rust/30'} border px-3 py-2.5 flex items-start gap-2`}>
+          <div className={`px-3 py-2.5 rounded-lg border flex items-start gap-2 text-[11px] ${
+            testResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
             {testResult.ok ? <CheckCircle className="w-4 h-4 mt-0.5" /> : <XCircle className="w-4 h-4 mt-0.5" />}
-            <div className="flex-1"><div className="font-sans text-[11px]">{testResult.msg}</div></div>
+            <div>{testResult.msg}</div>
           </div>
         )}
-        {/* 探测维度结果 */}
         {probeDim != null && (
-          <div className="border border-ink-0/15 bg-paper-1 px-3 py-2.5 flex items-start gap-2">
-            <Ruler className="w-4 h-4 mt-0.5 text-sienna-700" />
-            <div className="flex-1">
-              <div className="font-sans text-[11px] text-ink-3">Embedding 维度 = <span className="text-sienna-700">{probeDim}</span></div>
-              <p className="font-sans text-[12.5px] text-ink-2 mt-0.5">已与 pgvector projection 对齐，索引可直接写入。</p>
+          <div className="border border-stone-200 bg-stone-50 rounded-lg px-3 py-2.5 flex items-start gap-2">
+            <Ruler className="w-4 h-4 mt-0.5 text-amber-700" />
+            <div>
+              <div className="text-[11px] text-stone-600">Embedding 维度 = <span className="text-amber-800 font-medium">{probeDim}</span></div>
+              <p className="text-[12px] text-stone-500 mt-0.5">已与 pgvector projection 对齐，索引可直接写入。</p>
             </div>
           </div>
         )}
 
-        {/* 保存 */}
-        <div className="flex items-center gap-2 pt-3 border-t border-ink-0/10">
-          <button onClick={save} disabled={busy} className="btn-ink h-8 px-4 font-sans text-[11px] flex items-center gap-1.5 disabled:opacity-50">
+        <div className="flex items-center gap-2 pt-3 border-t border-stone-100">
+          <button onClick={save} disabled={busy} className="h-8 px-4 rounded-lg bg-stone-900 text-white text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}{isEdit ? '保存' : '创建'}
           </button>
           {isEdit && (
             <>
-              <button onClick={setDefault} disabled={busy} className="btn-line h-8 px-3 font-sans text-[11px] flex items-center gap-1.5 disabled:opacity-50"><Star className="w-3.5 h-3.5" />设为默认</button>
-              <button onClick={del} className="ml-auto font-sans text-[11px] text-rust hover:underline flex items-center gap-1"><Trash2 className="w-3.5 h-3.5" />删除</button>
+              <button onClick={setDefault} disabled={busy} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
+                <Star className="w-3.5 h-3.5" />设为默认
+              </button>
+              <button onClick={del} className="ml-auto text-[11px] text-red-600 hover:underline flex items-center gap-1">
+                <Trash2 className="w-3.5 h-3.5" />删除
+              </button>
             </>
           )}
         </div>
-        {err && <div className="text-[12px] text-rust">{err}</div>}
+        {err && <div className="text-[12px] text-red-600">{err}</div>}
       </div>
+    </div>
+  )
+}
+
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">{label}</label>
+      {children}
     </div>
   )
 }

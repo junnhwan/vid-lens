@@ -3,15 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Loader2, Sparkles, ArrowRight } from 'lucide-react'
 import { api, setToken, getToken, ApiError } from '@/lib/api'
 
-// 演示账号（只读，供体验者自助进入）：一键登录，无需注册。
-// 账号密码即后端 RoleDemo 用户，本身设计为公开只读，明文写在代码里属预期。
 const DEMO_USERNAME = 'test'
 const DEMO_PASSWORD = 'test0236'
 
-// 登录/注册页。401 未授权统一跳此；已登录访问此页自动跳视频库。
 export default function LoginPage() {
   const router = useRouter()
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -21,7 +18,6 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  // 已登录 → 跳视频库
   useEffect(() => {
     if (getToken()) router.replace('/')
   }, [router])
@@ -42,7 +38,6 @@ export default function LoginPage() {
     } finally { setBusy(false) }
   }
 
-  // 一键体验：直接以演示账号登录，跳过注册/表单填写。
   const demoLogin = async () => {
     setBusy(true); setErr('')
     try {
@@ -55,83 +50,118 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* 标题 */}
-        <div className="mb-8 text-center">
-          <Link href="/" className="inline-flex items-center gap-2.5">
-            <span className="w-8 h-8 rounded-md bg-ink-0 text-paper-0 flex items-center justify-center text-[15px] font-semibold">V</span>
-            <span className="text-[20px] font-semibold tracking-tight text-ink-0">VidLens · 映知</span>
-          </Link>
-          <p className="font-sans italic text-[13px] text-ink-3 mt-3">AI 长视频理解与可追溯问答</p>
+    <div className="min-h-screen flex ui-root">
+      <div className="hidden lg:flex w-[45%] bg-stone-900 text-[#faf8f5] flex-col justify-between p-12 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-amber-900/30 via-stone-900 to-stone-950" />
+        <div className="absolute -bottom-20 -right-20 w-80 h-80 rounded-full bg-amber-600/10 blur-3xl ui-pulse" />
+        <div className="relative ui-fade-in">
+          <div className="text-[36px] font-semibold ui-serif">映知</div>
+          <p className="text-[15px] text-stone-400 mt-3 italic leading-relaxed max-w-sm">
+            观之以映，释之以知
+          </p>
         </div>
-
-        {/* tab */}
-        <div className="flex border-b border-ink-0/15 mb-6 font-mono text-[11px]">
-          <button onClick={() => { setMode('login'); setErr('') }} className={`tab py-2 mr-6 ${mode === 'login' ? 'on' : ''}`}>登录</button>
-          <button onClick={() => { setMode('register'); setErr('') }} className={`tab py-2 mr-6 ${mode === 'register' ? 'on' : ''}`}>注册</button>
+        <div className="relative space-y-6 ui-fade-in" style={{ animationDelay: '100ms' }}>
+          <Feature num="01" title="视频转写" desc="长视频自动 ASR，分片处理，失败可重试" />
+          <Feature num="02" title="引用式问答" desc="每个回答带 [C1] 引用片段，可回溯原文" />
+          <Feature num="03" title="跨视频检索" desc="知识库内多视频联合 RAG，标注来源" />
         </div>
-
-        <form onSubmit={submit} className="space-y-4">
-          {mode === 'register' && (
-            <div>
-              <label className="block font-mono text-[10px] text-ink-3 mb-1.5">昵称（可选）</label>
-              <div className="field px-3 h-10 flex items-center">
-                <input value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full font-sans text-[13px] text-ink-1" placeholder="显示名" />
-              </div>
-            </div>
-          )}
-          <div>
-            <label className="block font-mono text-[10px] text-ink-3 mb-1.5">用户名</label>
-            <div className="field px-3 h-10 flex items-center">
-              <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus className="w-full font-sans text-[13px] text-ink-1" placeholder="2–50 字符" />
-            </div>
-          </div>
-          <div>
-            <label className="block font-mono text-[10px] text-ink-3 mb-1.5">密码</label>
-            <div className="field px-3 h-10 flex items-center">
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full font-sans text-[13px] text-ink-1" placeholder="至少 6 位" />
-            </div>
-          </div>
-
-          {err && <div className="text-[12px] text-rust">{err}</div>}
-
-          <button type="submit" disabled={busy} className="btn-ink w-full h-10 font-sans text-[13px] font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {mode === 'login' ? '登录' : '注册并登录'}
-          </button>
-        </form>
-
-        {/* 演示入口：一键登录，无需注册 */}
-        <div className="my-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-ink-0/10" />
-          <span className="font-sans text-[11px] text-ink-4">或</span>
-          <div className="h-px flex-1 bg-ink-0/10" />
+        <div className="relative text-[11px] text-stone-600">
+          <Link href="/" className="hover:text-stone-400 transition-colors">← 返回视频库</Link>
         </div>
-
-        <button
-          type="button"
-          onClick={demoLogin}
-          disabled={busy}
-          className="btn-line w-full h-10 font-sans text-[13px] font-medium flex items-center justify-center gap-1.5 disabled:opacity-50"
-        >
-          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          一键体验演示账号
-        </button>
-        <p className="font-sans text-[11px] text-ink-4 mt-3 text-center leading-relaxed">
-          演示账号 <span className="font-mono text-ink-2">test</span> / <span className="font-mono text-ink-2">test0236</span> · 只读，可浏览视频转写与摘要并问答
-        </p>
-
-        <p className="font-sans text-[11px] text-ink-4 mt-6 text-center leading-relaxed">
-          {mode === 'login' ? '还没有账号？' : '已有账号？'}
-          <button
-            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErr('') }}
-            className="ml-1 text-sienna-700 hover:underline"
-          >
-            {mode === 'login' ? '去注册' : '去登录'}
-          </button>
-        </p>
       </div>
+
+      <div className="flex-1 flex items-center justify-center px-6 py-12 bg-[#f7f4ef]">
+        <div className="w-full max-w-sm ui-fade-in">
+          <div className="lg:hidden mb-8 text-center">
+            <div className="text-[28px] font-semibold text-stone-900 ui-serif">映知</div>
+            <p className="text-[13px] text-stone-500 mt-1 italic">AI 长视频理解与可追溯问答</p>
+          </div>
+
+          <div className="flex gap-6 border-b border-stone-200 mb-6">
+            {(['login', 'register'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setErr('') }}
+                className={`pb-2.5 text-[13px] border-b-2 -mb-px transition-colors duration-200 ${
+                  mode === m ? 'border-amber-600 text-stone-900 font-medium' : 'border-transparent text-stone-400'
+                }`}
+              >
+                {m === 'login' ? '登录' : '注册'}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={submit} className="space-y-4">
+            {mode === 'register' && (
+              <Field label="昵称（可选）" value={nickname} onChange={setNickname} placeholder="显示名" />
+            )}
+            <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
+            <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
+
+            {err && <div className="text-[12px] text-red-600">{err}</div>}
+
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full h-11 rounded-lg bg-stone-900 text-white text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {mode === 'login' ? '登录' : '注册并登录'}
+              {!busy && <ArrowRight className="w-4 h-4" />}
+            </button>
+          </form>
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-stone-200" />
+            <span className="text-[11px] text-stone-400">或</span>
+            <div className="h-px flex-1 bg-stone-200" />
+          </div>
+
+          <button
+            type="button"
+            onClick={demoLogin}
+            disabled={busy}
+            className="w-full h-11 rounded-lg border border-stone-300 bg-white text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift hover:border-amber-400 hover:text-amber-900 transition-colors disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            一键体验演示账号
+          </button>
+          <p className="text-[11px] text-stone-400 mt-3 text-center">
+            演示账号 <span className="font-mono text-stone-500">test</span> / <span className="font-mono text-stone-500">test0236</span>
+            · 只读，可浏览视频转写与摘要并问答
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Feature({ num, title, desc }: { num: string; title: string; desc: string }) {
+  return (
+    <div className="flex gap-4">
+      <span className="text-[11px] font-mono text-amber-600/70 mt-0.5">{num}</span>
+      <div>
+        <div className="text-[14px] font-medium">{title}</div>
+        <div className="text-[12px] text-stone-500 mt-0.5">{desc}</div>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, type = 'text', value, onChange, placeholder, autoFocus }: {
+  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        className="w-full h-10 px-3 rounded-lg border border-stone-200 bg-white text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-600/20 focus:border-amber-400 transition-shadow"
+      />
     </div>
   )
 }

@@ -2,33 +2,20 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { ArrowLeft, Crosshair, BookOpen, Database, AlertTriangle, Copy, RefreshCw, Trash2, MessageCircle, Plus } from 'lucide-react'
-import ThemeSwitch from '@/components/ThemeSwitch'
-import UserMenu from '@/components/UserMenu'
+import { Database, AlertTriangle, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
-import { CiteRef, CitationCards, renderAnswerWithCites, citesFromSnapshot } from '@/components/Citation'
+import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ModeToggle, SidebarSection } from '@/components/chat/ChatShell'
+import ChatMessageRow from '@/components/chat/ChatMessageRow'
+import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
+import { CiteRef } from '@/components/Citation'
 import { useToast } from '@/components/Toast'
 import { api, streamAsk, ApiError } from '@/lib/api'
-import type { VideoTask, ChatSession, ChatMessage, Citation, ChatMode } from '@/lib/types'
-
-// /chat/:taskId — 单视频问答。
-// 820 限宽消息流 + 左 sticky 元信息栏。SSE: answer 增量 / citations / done / error。
-// mode: video_assistant(默认宽松) / strict_rag(强制 RAG，无索引 fail closed)。
-
-interface Msg {
-  role: 'user' | 'assistant'
-  content: string
-  cites?: CiteRef[]
-  openCiteIds?: string[]
-  streaming?: boolean
-  degraded?: boolean
-  error?: string
-}
+import { taskTitle } from '@/lib/format'
+import type { VideoTask, ChatSession, Citation, ChatMode } from '@/lib/types'
 
 export default function ChatPage() {
   return (
-    <Suspense fallback={<div className="flex-1" />}>
+    <Suspense fallback={<div className="h-screen bg-[#f7f4ef]" />}>
       <ChatView />
     </Suspense>
   )
@@ -43,9 +30,9 @@ function ChatView() {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
-  const [mode, setMode] = useState<ChatMode>('strict_rag') // mockup 默认严格 RAG
+  const [mode, setMode] = useState<ChatMode>('strict_rag')
   const [topK, setTopK] = useState(4)
-  const [messages, setMessages] = useState<Msg[]>([])
+  const [messages, setMessages] = useState<ChatMsg[]>([])
   const [streaming, setStreaming] = useState(false)
   const [failClosed, setFailClosed] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
@@ -53,13 +40,10 @@ function ChatView() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
 
-  // 拉取本视频的全部会话（会话列表/切换用）
   const loadSessions = useCallback(async () => {
     try { setSessions(await api.listSessions({ task_id: taskId })) } catch { /* ignore */ }
   }, [taskId])
 
-  // 初始化：拉 task + RAG 状态 + 复用 URL 里的历史会话（无 ?session= 时不创建，
-  // 等到首次发送消息时才懒创建——避免"新建会话但没问答"产生一堆空会话）。
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {})
     api.getRagIndex(taskId).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
@@ -84,7 +68,6 @@ function ChatView() {
     init()
   }, [taskId, loadSessions])
 
-  // 切换会话：加载该会话历史并写回 URL（可刷新还原）
   const switchSession = async (sid: number) => {
     const s = sessions.find(x => x.id === sid)
     if (!s || s.id === session?.id) return
@@ -96,7 +79,6 @@ function ChatView() {
     api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs))).catch(() => {})
   }
 
-  // 新建会话：只重置本地状态，不创建后端会话，首次发送时才真正创建
   const newSession = () => {
     setSession(null)
     setMessages([])
@@ -106,13 +88,11 @@ function ChatView() {
     history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
   }
 
-  // 自动滚到底
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
 
-  // strict_rag 无索引 → fail closed
   useEffect(() => {
     setFailClosed(mode === 'strict_rag' && ragStatus != null && !ragStatus.indexed)
   }, [mode, ragStatus])
@@ -125,7 +105,6 @@ function ChatView() {
     } catch { /* ignore */ }
   }
 
-  // 累加 delta 到最后一条 AI 消息
   const appendDelta = useCallback((delta: string) => {
     setMessages(prev => {
       if (prev.length === 0) return prev
@@ -138,7 +117,6 @@ function ChatView() {
     })
   }, [])
 
-  // 发送：SSE 流式。首次发送时若尚无会话，先懒创建（避免空会话堆积）。
   const send = useCallback(async (q: string) => {
     if (streaming) return
     if (mode === 'strict_rag' && ragStatus && !ragStatus.indexed) { setFailClosed(true); return }
@@ -170,7 +148,7 @@ function ChatView() {
       { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true },
     ])
 
-    const patchLast = (patch: Partial<Msg>) => {
+    const patchLast = (patch: Partial<ChatMsg>) => {
       setMessages(prev => {
         if (prev.length === 0) return prev
         const next = [...prev]
@@ -199,7 +177,6 @@ function ChatView() {
         onError: (e) => patchLast({ streaming: false, error: e.message }),
       }, ctrl.signal)
     } catch (e) {
-      // 用户主动 Stop 触发的 abort：静默收尾，不显示错误
       if (e instanceof DOMException && e.name === 'AbortError') {
         patchLast({ streaming: false })
       } else {
@@ -224,7 +201,6 @@ function ChatView() {
     })
   }
 
-  // 复制某条 AI 回答
   const copyAnswer = async (content: string) => {
     if (!content) return
     try {
@@ -235,9 +211,7 @@ function ChatView() {
     }
   }
 
-  // 重试某条：找到它对应的上一条用户提问重发
   const retryQuestion = (msgIdx: number) => {
-    // 找到这条 assistant 之前最近的 user 消息
     for (let i = msgIdx - 1; i >= 0; i--) {
       if (messages[i].role === 'user') {
         send(messages[i].content)
@@ -258,115 +232,79 @@ function ChatView() {
     }
   }
 
+  const modeLabel = mode === 'strict_rag' ? '严格 RAG' : '普通问答'
+
   return (
-    <div className="hidden md:flex flex-col h-screen border-t border-ink-0/15">
-      {/* Masthead */}
-      <header className="shrink-0 bg-paper-0 border-b border-ink-0/15">
-        <div className="flex items-center px-6 h-14 gap-4">
-          <Link href="/" className="flex items-center gap-2 text-ink-3 hover:text-ink-0" title="返回视频库">
-            <ArrowLeft className="w-4 h-4" /><span className="font-sans text-[11px]">返回视频库</span>
-          </Link>
-          <div className="h-5 w-px bg-ink-0/15" />
-          <div className="min-w-0 flex-1">
-            <div className="font-sans text-[10px] text-ink-4">任务 #{taskId} · 问答</div>
-            <div className="font-sans text-[16px] font-medium tight text-ink-0 truncate -mt-0.5">{task?.title || task?.filename || '加载中…'}</div>
-          </div>
-          <div className="flex items-center border border-ink-0/20">
-            <button onClick={() => setMode('video_assistant')} className={`px-2.5 h-7 font-sans text-[10px] ${mode === 'video_assistant' ? 'bg-ink-0 text-paper-0' : 'text-ink-3 hover:text-ink-0'}`}>普通</button>
-            <button onClick={() => setMode('strict_rag')} className={`px-2.5 h-7 font-sans text-[10px] flex items-center gap-1.5 ${mode === 'strict_rag' ? 'bg-ink-0 text-paper-0' : 'text-ink-3 hover:text-ink-0'}`}>
-              <Crosshair className="w-3 h-3" />严格 RAG
-            </button>
-          </div>
-          <ThemeSwitch />
-          <UserMenu />
-        </div>
-      </header>
+    <ChatShell
+      scrollRef={scrollRef}
+      header={
+        <ChatHeader
+          backHref="/"
+          backLabel="返回视频库"
+          kicker={`任务 #${taskId} · 单视频问答`}
+          title={task ? taskTitle(task) : '加载中…'}
+          actions={<ModeToggle mode={mode} onChange={setMode} />}
+        />
+      }
+      sidebar={
+        <ChatSidebar>
+          <div className="space-y-5">
+            <SidebarSection
+              title="会话"
+              action={
+                <button onClick={newSession} className="text-amber-700 hover:text-amber-900 flex items-center gap-0.5 text-[10px]" title="新建会话">
+                  <Plus className="w-3 h-3" />新建
+                </button>
+              }
+            >
+              <ul className="space-y-1">
+                {sessions.map(s => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => switchSession(s.id)}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] ui-row-hover ${
+                        session?.id === s.id ? 'bg-amber-50 text-amber-900 font-medium' : 'text-stone-600'
+                      }`}
+                    >
+                      <MessageCircle className="w-3 h-3 shrink-0" />
+                      <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
+                      <span className="font-mono text-[10px] text-stone-400 shrink-0">{fmtSession(s.created_at)}</span>
+                    </button>
+                  </li>
+                ))}
+                {sessions.length === 0 && <li className="text-[11px] text-stone-400">暂无会话</li>}
+              </ul>
+            </SidebarSection>
 
-      {/* 主体 */}
-      <main ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin">
-        <div className="max-w-[1100px] mx-auto px-8 py-7 flex gap-10">
-          {/* 左 sticky */}
-          <aside className="w-[200px] shrink-0 hidden lg:block">
-            <div className="sticky top-7 space-y-6">
-              {/* 会话列表：多会话保留 + 切换 + 新建 */}
-              <div>
-                <div className="font-sans text-[10px] text-ink-4 mb-2 flex items-center justify-between">
-                  <span>会话</span>
-                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-900 flex items-center gap-0.5" title="新建会话"><Plus className="w-3 h-3" />新建</button>
+            <div className="h-px bg-stone-200" />
+
+            <SidebarSection title="本视频">
+              <dl className="text-[11px] space-y-1.5">
+                <div className="flex justify-between"><dt className="text-stone-400">编号</dt><dd>{taskId}</dd></div>
+                <div className="flex justify-between">
+                  <dt className="text-stone-400">索引</dt>
+                  <dd className={ragStatus?.indexed ? 'text-emerald-700' : 'text-stone-400'}>
+                    {ragStatus?.indexed ? `${ragStatus.chunks} chunks` : '未索引'}
+                  </dd>
                 </div>
-                <ul className="space-y-1">
-                  {sessions.map(s => (
-                    <li key={s.id}>
-                      <button
-                        onClick={() => switchSession(s.id)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[12px] ${session?.id === s.id ? 'bg-sienna-500/10 text-sienna-700 font-medium' : 'text-ink-2 hover:bg-ink-2/10'}`}
-                      >
-                        <MessageCircle className="w-3 h-3 shrink-0" />
-                        <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
-                        <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
-                      </button>
-                    </li>
-                  ))}
-                  {sessions.length === 0 && <li className="font-sans text-[11px] text-ink-4">暂无会话</li>}
-                </ul>
-              </div>
-              <div className="h-px bg-ink-0/15" />
-              <div>
-                <div className="font-sans text-[10px] text-ink-4 mb-2">本视频</div>
-                <dl className="font-mono text-[11px] text-ink-3 space-y-1.5 leading-relaxed">
-                  <div className="flex justify-between"><dt className="text-ink-4">№</dt><dd className="text-ink-2">{taskId}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-4">索引</dt><dd className={ragStatus?.indexed ? 'text-moss' : 'text-ink-4'}>{ragStatus?.indexed ? `${ragStatus.chunks} chunks` : '未索引'}</dd></div>
-                  {task?.transcription && <div className="flex justify-between"><dt className="text-ink-4">转写</dt><dd className="text-ink-2">{task.transcription.words} 词</dd></div>}
-                </dl>
-              </div>
-              <div className="h-px bg-ink-0/15" />
-              <div>
-                <div className="font-sans text-[10px] text-ink-4 mb-1">当前模式</div>
-                <div className="font-mono text-[11px] text-ink-2">{mode === 'strict_rag' ? '严格 RAG' : '普通问答'} · top_k {topK}</div>
-                {mode === 'strict_rag' && ragStatus && !ragStatus.indexed && (
-                  <div className="font-sans text-[10px] text-rust mt-1">无索引 → fail closed</div>
+                {task?.transcription && (
+                  <div className="flex justify-between"><dt className="text-stone-400">转写</dt><dd>{task.transcription.words} 词</dd></div>
                 )}
-              </div>
-            </div>
-          </aside>
-
-          {/* 中：消息流 */}
-          <div className="flex-1 min-w-0 max-w-[820px] space-y-7" aria-live="polite">
-            <div className="text-center pb-2">
-              <div className="font-mono text-[10px] text-ink-4">Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}{session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}</div>
-              <p className="font-sans italic text-[14px] text-ink-3 mt-1.5">基于本卷转写内容的问答。引用以 [C1] 标注，点击展开原文片段。</p>
-            </div>
-
-            {!sessionReady ? (
-              <div className="space-y-2">
-                <div className="sk h-4 w-1/3" /><div className="sk h-4 w-2/3" />
-              </div>
-            ) : (
-              messages.map((m, i) => (
-                <MessageRow key={i} msg={m} idx={i} onToggleCite={toggleCite} mode={mode} topK={topK} onCopy={copyAnswer} onRetry={retryQuestion} />
-              ))
-            )}
-
-            {/* fail-closed 提示（独立显示在底部） */}
-            {failClosed && (
-              <div className="border border-rust/40 bg-rust/5 px-4 py-3">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-rust mt-0.5" />
-                  <div>
-                    <div className="font-sans text-[14px] font-medium text-rust">该视频尚未建立索引</div>
-                    <p className="font-sans text-[13px] text-ink-2 mt-1">strict_rag 模式强制走检索，无索引时无法回答。建立索引后即可基于转写内容做引用问答。</p>
-                    <button onClick={triggerIndex} className="btn-line h-7 px-2.5 font-sans text-[10px] mt-2.5 inline-flex items-center gap-1"><Database className="w-3 h-3" />触发 RAG 索引</button>
-                  </div>
-                </div>
-              </div>
-            )}
+                <div className="flex justify-between"><dt className="text-stone-400">模式</dt><dd>{modeLabel}</dd></div>
+              </dl>
+            </SidebarSection>
           </div>
-        </div>
-      </main>
-
-      {/* 底部输入 */}
-      <footer className="shrink-0 bg-paper-0 border-t border-ink-0/15">
-        <div className="max-w-[680px] mx-auto px-8 py-3.5">
+        </ChatSidebar>
+      }
+      footer={
+        <ChatFooter
+          hint="基于本卷转写 · 引用可追溯 · 无时间码"
+          footerAction={
+            <button onClick={clearSession} className="hover:text-red-600 flex items-center gap-1 ui-btn-lift">
+              <Trash2 className="w-3 h-3" />清空会话
+            </button>
+          }
+        >
           <ChatInput
             onSend={send}
             onStop={stop}
@@ -375,76 +313,54 @@ function ChatView() {
             topK={topK}
             onTopKChange={setTopK}
           />
-          <div className="flex items-center justify-between mt-2 font-mono text-[10px]">
-            <span className="text-ink-4">基于本卷转写 · 引用可追溯 · 无时间码</span>
-            <button onClick={clearSession} className="text-ink-4 hover:text-rust flex items-center gap-1"><Trash2 className="w-3 h-3" />清空会话</button>
+        </ChatFooter>
+      }
+    >
+      <>
+        <div className="text-center pb-2 ui-fade-in">
+          <div className="text-[10px] text-stone-400 font-mono">
+            Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}
+            {session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}
           </div>
+          <p className="text-[13px] text-stone-500 italic mt-1.5">基于本卷转写内容的问答。引用以 [C1] 标注，点击展开原文片段。</p>
         </div>
-      </footer>
-    </div>
+
+        {!sessionReady ? (
+          <div className="space-y-2">
+            <div className="h-4 w-1/3 bg-stone-200 rounded animate-pulse" />
+            <div className="h-4 w-2/3 bg-stone-200 rounded animate-pulse" />
+          </div>
+        ) : (
+          messages.map((m, i) => (
+            <ChatMessageRow
+              key={i}
+              msg={m}
+              idx={i}
+              onToggleCite={toggleCite}
+              modeLabel={modeLabel}
+              topK={topK}
+              onCopy={copyAnswer}
+              onRetry={retryQuestion}
+            />
+          ))
+        )}
+
+        {failClosed && (
+          <div className="flex gap-3 p-4 rounded-xl bg-red-50 border border-red-200 ui-fade-in">
+            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <div className="text-[14px] font-medium text-red-800">该视频尚未建立索引</div>
+              <p className="text-[12px] text-red-700/80 mt-1">strict_rag 模式强制走检索，无索引时无法回答。建立索引后即可基于转写内容做引用问答。</p>
+              <button
+                onClick={triggerIndex}
+                className="mt-2 h-8 px-3 rounded-lg border border-red-300 text-[11px] text-red-700 flex items-center gap-1 ui-btn-lift"
+              >
+                <Database className="w-3 h-3" />触发 RAG 索引
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    </ChatShell>
   )
 }
-
-// 单条消息
-function MessageRow({ msg, idx, onToggleCite, mode, topK, onCopy, onRetry }: {
-  msg: Msg
-  idx: number
-  onToggleCite: (msgIdx: number, id: string) => void
-  mode: ChatMode
-  topK: number
-  onCopy: (content: string) => void
-  onRetry: (msgIdx: number) => void
-}) {
-  if (msg.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="bubble-user font-sans text-[14px] leading-[1.7] px-4 py-2.5 max-w-[80%]">{msg.content}</div>
-      </div>
-    )
-  }
-  const citeIds = (msg.cites || []).map(c => c.id)
-  const toggle = (id: string) => onToggleCite(idx, id)
-  return (
-    <div className="space-y-1">
-      <div className="font-sans text-[10px] text-ink-4 flex items-center gap-2">
-        <BookOpen className="w-3 h-3" />VidLens · {mode === 'strict_rag' ? '严格 RAG' : '问答'} · top_k {topK}
-        {msg.streaming && <span className="text-sienna-700 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-sienna-500 live" />生成中</span>}
-        {msg.degraded && <span className="text-ink-4">（降级）</span>}
-      </div>
-      {msg.error ? (
-        <div className="border border-rust/40 bg-rust/5 px-4 py-2.5 font-sans text-[13px] text-rust">{msg.error}</div>
-      ) : (
-        <div className={`font-sans text-[15.5px] font-medium leading-[1.8] text-ink-0 ${msg.streaming ? 'caret' : ''}`}>
-          {renderAnswerWithCites(msg.content, citeIds, toggle, msg.openCiteIds || [])}
-        </div>
-      )}
-      {!msg.streaming && !msg.error && msg.content && (
-        <div className="flex items-center gap-3 pt-1 font-mono text-[10px] text-ink-4">
-          <button onClick={() => onCopy(msg.content)} className="hover:text-ink-0 flex items-center gap-1"><Copy className="w-3 h-3" />复制</button>
-          <button onClick={() => onRetry(idx)} className="hover:text-ink-0 flex items-center gap-1"><RefreshCw className="w-3 h-3" />重试</button>
-        </div>
-      )}
-      {msg.cites && msg.cites.length > 0 && (
-        <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} />
-      )}
-    </div>
-  )
-}
-
-// 把后端历史消息转成页面 Msg：assistant 消息从 retrieval_snapshot 恢复引用片段。
-function parseMessages(msgs: ChatMessage[]): Msg[] {
-  return msgs.map(m => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.content,
-    openCiteIds: [],
-    ...(m.role === 'assistant' ? { cites: citesFromSnapshot(m.retrieval_snapshot) } : {}),
-  }))
-}
-
-// 会话时间：MM-DD HH:mm
-function fmtSession(iso: string) {
-  const d = new Date(iso)
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }
