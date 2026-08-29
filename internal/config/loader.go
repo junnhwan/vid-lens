@@ -33,7 +33,10 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
 	}
 
-	expanded := []byte(os.ExpandEnv(string(data)))
+	if err := loadDotEnv(path); err != nil {
+		return nil, err
+	}
+	expanded := expandConfigEnvironment(data)
 	if err := rejectDeprecatedConfigFields(expanded); err != nil {
 		return nil, err
 	}

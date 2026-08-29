@@ -138,7 +138,32 @@ docker compose up -d
 
 ### 3. 配置本地参数
 
-按本机环境修改 `config.yaml` 中的 PostgreSQL、Redis、MinIO、RabbitMQ 与 FFmpeg 配置，确认 `rag.store: pgvector`。配置加载会拒绝未知字段，拼写错误会导致启动失败。登录后可在“模型配置”页面填写自己的 ASR、LLM、Embedding 服务。
+复制 `.env.example` 为 `.env`，填写本地 AI 配置；程序会在加载 `config.yaml` 时自动读取同目录 `.env`。已有的 Windows/进程环境变量优先于 `.env`，所以 CI 或部署环境不受本地文件影响。`.env` 已被 Git 忽略，不能提交真实密钥。
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env 后启动
+go run ./cmd/server
+```
+
+仍需按本机环境修改 `config.yaml` 中的 PostgreSQL、Redis、MinIO、RabbitMQ 与 FFmpeg 配置，确认 `rag.store: pgvector`。配置加载会拒绝未知字段，拼写错误会导致启动失败。登录后可在“模型配置”页面填写自己的 ASR、LLM、Embedding 服务。
+
+AI 相关的 `.env` 配置项如下：
+
+| 变量 | 用途 |
+| --- | --- |
+| `VIDLENS_AI_PROVIDER` | 服务端默认策略：`mimo` 或 `siliconflow` |
+| `MIMO_API_KEY` | MiMo 或其 OpenAI 兼容中转的 API Key |
+| `MIMO_BASE_URL` | MiMo/中转 Base URL，默认 Token Plan 地址 |
+| `SILICONFLOW_API_KEY` | SiliconFlow API Key |
+| `SILICONFLOW_BASE_URL` | SiliconFlow 或兼容中转 Base URL |
+| `VIDLENS_ASR_MODEL` | ASR 模型名 |
+| `VIDLENS_LLM_MODEL` | LLM 总结/聊天模型名 |
+| `VIDLENS_API_KEY_SECRET` | 加密用户模型配置 API Key 的服务端密钥 |
+| `VIDLENS_QUOTA_REDIS_DEFAULT_POLICY` | Redis 不可用时的默认配额策略 |
+| `VIDLENS_QUOTA_REDIS_AI_POLICY` | Redis 不可用时的 AI 配额策略 |
+
+除服务端默认策略外，用户登录后在“模型配置”页面保存的 ASR、LLM、Embedding、Vision 配置属于用户级 BYOK 配置，会覆盖默认 AI 策略。
 
 ### 4. 启动后端
 

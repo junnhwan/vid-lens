@@ -25,6 +25,9 @@ Thumbs.db
 
 # Config with secrets
 config.local.yaml
+.env
+.env.*
+!.env.example
 
 # Docker data
 data/
