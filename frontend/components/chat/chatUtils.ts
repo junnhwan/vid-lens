@@ -2,7 +2,7 @@ import type { ChatMessage } from '@/lib/types'
 import { citesFromSnapshot } from '@/components/Citation'
 import type { CiteRef } from '@/components/Citation'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
-import { traceFromCitationCount, traceFromSnapshot } from '@/components/chat/traceTypes'
+import { parseSnapshotTrace, traceFromCitationCount } from '@/components/chat/traceTypes'
 
 export interface ChatMsg {
   role: 'user' | 'assistant'
@@ -14,6 +14,7 @@ export interface ChatMsg {
   error?: string
   trace?: ChatTraceStep[]
   agentRun?: boolean
+  traceSource?: 'agent' | 'inferred' | 'legacy'
 }
 
 export function parseMessages(
@@ -22,21 +23,20 @@ export function parseMessages(
 ): ChatMsg[] {
   return msgs.map(m => {
     const cites = m.role === 'assistant' ? citesFromSnapshot(m.retrieval_snapshot, memberColor) : undefined
+    const snapshotTrace = m.role === 'assistant' ? parseSnapshotTrace(m.retrieval_snapshot) : undefined
     const trace = m.role === 'assistant'
-      ? (traceFromSnapshot(m.retrieval_snapshot) ?? (cites?.length ? traceFromCitationCount(cites.length) : undefined))
+      ? (snapshotTrace?.steps ?? (cites?.length ? traceFromCitationCount(cites.length) : undefined))
       : undefined
-    const agentRun = m.role === 'assistant' && Boolean(
-      m.retrieval_snapshot?.includes('"mode":"agent"') ||
-      m.retrieval_snapshot?.includes('"mode":"research"') ||
-      m.retrieval_snapshot?.includes('"steps"') ||
-      m.retrieval_snapshot?.includes('"trace"'),
-    )
+    const agentRun = Boolean(snapshotTrace?.isAgentEnvelope)
     return {
       role: m.role as 'user' | 'assistant',
       content: m.content,
       openCiteIds: [],
       ...(cites ? { cites } : {}),
-      ...(trace ? { trace, agentRun } : {}),
+      ...(trace ? {
+        trace,
+        ...(agentRun ? { agentRun: true, traceSource: snapshotTrace?.source } : {}),
+      } : {}),
     }
   })
 }

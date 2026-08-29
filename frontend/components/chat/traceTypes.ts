@@ -328,97 +328,160 @@ export function agentTraceReducer(state: AgentTraceState, event: AgentSSEPayload
   }
 }
 
-/** 解析 retrieval_snapshot：Agent envelope 或纯 citations 数组 */
-export function traceFromSnapshot(snapshot?: string): ChatTraceStep[] | undefined {
+/** 后端 version 1 Agent envelope 中单步快照（与 AgentSnapshotStep 对齐） */
+export interface AgentSnapshotStepJSON {
+  step_id?: string
+  kind?: string
+  label?: string
+  status?: string
+  tool?: string
+  input?: unknown
+  output?: string
+  error?: string
+  ts?: string
+}
+
+interface AgentSnapshotEnvelopeJSON {
+  version?: number
+  run_id?: string
+  mode?: string
+  template?: string
+  steps?: AgentSnapshotStepJSON[]
+  trace?: LegacyVideoAgentStepJSON[]
+  citations?: unknown[]
+}
+
+/** 旧版 Agent trace 条目（VideoAgentStep） */
+interface LegacyVideoAgentStepJSON {
+  name?: string
+  tool?: string
+  output_ref?: string
+  error?: string
+}
+
+export interface ParsedSnapshotTrace {
+  steps: ChatTraceStep[]
+  runId?: string
+  mode?: string
+  /** 是否为 Agent 终态 envelope（含 steps[] 或旧 trace[]），区别于纯 RAG citations */
+  isAgentEnvelope: boolean
+  source: TracePanelSource
+}
+
+/** 解析 retrieval_snapshot：优先回放 steps[]，兼容旧 trace[] 与纯 citations */
+export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | undefined {
   if (!snapshot) return undefined
   try {
     const parsed = JSON.parse(snapshot) as unknown
     if (Array.isArray(parsed)) {
-      return traceFromCitationCount(parsed.length)
+      const steps = traceFromCitationCount(parsed.length)
+      return { steps, isAgentEnvelope: false, source: steps.length ? 'inferred' : 'inferred' }
     }
-    if (parsed && typeof parsed === 'object') {
-      const obj = parsed as {
-        steps?: Array<{
-          step_id?: string
-          kind?: string
-          label?: string
-          status?: string
-          tool?: string
-          input?: unknown
-          output?: string
-          error?: string
-        }>
-        trace?: Array<{ name?: string; tool?: string; output_ref?: string; error?: string }>
-        citations?: unknown[]
+    if (!parsed || typeof parsed !== 'object') return undefined
+
+    const obj = parsed as AgentSnapshotEnvelopeJSON
+    const runId = obj.run_id?.trim() || undefined
+    const mode = obj.mode?.trim() || undefined
+
+    if (Array.isArray(obj.steps)) {
+      const steps = obj.steps.map((step, i) => snapshotStepToTrace(step, i, runId))
+      return {
+        steps,
+        runId,
+        mode,
+        isAgentEnvelope: true,
+        source: 'agent',
       }
-      if (Array.isArray(obj.steps)) {
-        return obj.steps.map((step, i) => persistedAgentStepToTrace(step, step.step_id || `hist-${i + 1}`))
+    }
+
+    if (Array.isArray(obj.trace) && obj.trace.length > 0) {
+      const steps = obj.trace.map((step, i) => legacyAgentStepToTrace(step, `hist-${i + 1}`, runId))
+      return {
+        steps,
+        runId,
+        mode,
+        isAgentEnvelope: true,
+        source: 'legacy',
       }
-      if (Array.isArray(obj.trace) && obj.trace.length > 0) {
-        return obj.trace.map((step, i) => legacyAgentStepToTrace(step, `hist-${i + 1}`))
+    }
+
+    if (Array.isArray(obj.citations)) {
+      const steps = traceFromCitationCount(obj.citations.length)
+      const isAgentEnvelope = Boolean(
+        obj.version === 1 || mode === 'agent' || mode === 'research' || obj.template,
+      )
+      return {
+        steps,
+        runId,
+        mode,
+        isAgentEnvelope,
+        source: isAgentEnvelope ? 'agent' : 'inferred',
       }
-      if (Array.isArray(obj.citations)) {
-        return traceFromCitationCount(obj.citations.length)
-      }
+    }
+
+    if (obj.version === 1 || mode === 'agent' || mode === 'research' || obj.template) {
+      return { steps: [], runId, mode, isAgentEnvelope: true, source: 'agent' }
     }
   } catch { /* 非 JSON 或旧格式 */ }
   return undefined
 }
 
-function persistedAgentStepToTrace(
-  step: {
-    step_id?: string
-    kind?: string
-    label?: string
-    status?: string
-    tool?: string
-    input?: unknown
-    output?: string
-    error?: string
-  },
-  id: string,
-): ChatTraceStep {
-  const error = step.error
+/** @deprecated 使用 parseSnapshotTrace；保留供仅需 steps 的调用方 */
+export function traceFromSnapshot(snapshot?: string): ChatTraceStep[] | undefined {
+  return parseSnapshotTrace(snapshot)?.steps
+}
+
+function snapshotStepToTrace(step: AgentSnapshotStepJSON, index: number, runId?: string): ChatTraceStep {
+  const id = step.step_id?.trim() || `s${index + 1}`
+  const error = step.error?.trim() || undefined
+  const output = step.output?.trim() || undefined
   return {
     id,
+    runId,
     kind: kindFromBackend(step.kind || '', step.tool),
-    label: step.label || step.tool || '执行步骤',
+    label: step.label?.trim() || step.tool?.trim() || '执行步骤',
     status: stepStatusFromSnapshot(step.status),
-    tool: step.tool || undefined,
+    tool: step.tool?.trim() || undefined,
     toolInput: formatToolInput(step.input),
-    toolOutput: step.output,
-    detail: error || step.output,
+    toolOutput: output,
+    detail: error || output,
     error,
   }
 }
 
 function stepStatusFromSnapshot(status?: string): TraceStepStatus {
-  if (status === 'running' || status === 'done' || status === 'error') return status
+  const normalized = status?.trim()
+  if (normalized === 'running' || normalized === 'done' || normalized === 'error') return normalized
+  if (normalized === 'cancelled') return 'error'
   return 'done'
 }
 
 function legacyAgentStepToTrace(
-  step: { name?: string; tool?: string; output_ref?: string; error?: string },
+  step: LegacyVideoAgentStepJSON,
   id: string,
+  runId?: string,
 ): ChatTraceStep {
-  const tool = step.tool || ''
+  const tool = step.tool?.trim() || ''
   const kind = kindFromBackend('', tool)
-  const hasError = Boolean(step.error)
+  const error = step.error?.trim() || undefined
+  const output = step.output_ref?.trim() || undefined
   return {
     id,
+    runId,
     kind,
-    label: step.name || tool || '执行步骤',
-    status: hasError ? 'error' : 'done',
+    label: step.name?.trim() || tool || '执行步骤',
+    status: error ? 'error' : 'done',
     tool: tool || undefined,
-    toolOutput: step.output_ref,
-    detail: hasError ? step.error : step.output_ref,
-    error: step.error,
+    toolOutput: output,
+    detail: error || output,
+    error,
   }
 }
 
 export function tracePanelSource(steps: ChatTraceStep[], agentMode: boolean): TracePanelSource {
   if (agentMode) return 'agent'
-  if (steps.some(s => s.id.startsWith('s') || s.id.startsWith('hist-'))) return 'legacy'
+  if (steps.some(s => /^s\d+$/.test(s.id))) return 'agent'
+  if (steps.some(s => s.id.startsWith('hist-'))) return 'legacy'
   if (steps.some(s => s.id === 'retrieve' || s.id === 'answer')) return 'inferred'
   return 'agent'
 }
