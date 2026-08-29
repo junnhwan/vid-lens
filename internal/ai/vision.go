@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,30 +27,22 @@ const DefaultVisionCaptionPrompt = `你是长视频画面理解助手。请阅�
 
 // OpenAIVisionClient calls OpenAI-compatible /chat/completions with image_url parts.
 type OpenAIVisionClient struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	authHeader string
-	authPrefix string
-	client     *http.Client
+	transport *protocolClient
+	model     string
 }
 
 func NewOpenAIVisionClient(baseURL, apiKey, model string) *OpenAIVisionClient {
 	return &OpenAIVisionClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		apiKey:     apiKey,
-		model:      model,
-		authHeader: "Authorization",
-		authPrefix: "Bearer ",
-		client:     &http.Client{Timeout: 3 * time.Minute},
+		transport: newProtocolClient(baseURL, apiKey, "openai_compatible", 3*time.Minute),
+		model:     strings.TrimSpace(model),
 	}
 }
 
 func NewMimoVisionClient(baseURL, apiKey, model string) *OpenAIVisionClient {
-	c := NewOpenAIVisionClient(baseURL, apiKey, model)
-	c.authHeader = "api-key"
-	c.authPrefix = ""
-	return c
+	return &OpenAIVisionClient{
+		transport: newLegacyMimoProtocolClient(baseURL, apiKey, 3*time.Minute),
+		model:     strings.TrimSpace(model),
+	}
 }
 
 func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt string) (string, error) {
@@ -84,21 +75,15 @@ func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := c.transport.newRequest(ctx, http.MethodPost, "chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set(c.authHeader, c.authPrefix+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	body, err := c.transport.do(req, "vision")
 	if err != nil {
-		return "", ProviderTransportError("openai_compatible", "vision", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", ProviderHTTPError("openai_compatible", "vision", resp.StatusCode, resp.Header, body)
+		return "", err
 	}
 	var result struct {
 		Choices []struct {

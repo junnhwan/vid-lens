@@ -105,6 +105,46 @@ func TestAIProfileServiceUpdateWithEmptyKeysKeepsExistingCiphertexts(t *testing.
 	}
 }
 
+func TestAIProfileServiceCanonicalizesNonMimoProvidersAndPersistsVisionUpdates(t *testing.T) {
+	svc, repos, _ := newAIProfileServiceForTest(t)
+	req := validAIProfileRequest()
+	req.LLMProvider = "my-relay"
+	req.ASRProvider = "siliconflow"
+	req.EmbeddingProvider = "custom-gateway"
+	req.VisionProvider = "siliconflow"
+	req.VisionBaseURL = "https://vision.example.com/v1"
+	req.VisionAPIKey = "sk-vision-secret"
+	req.VisionModel = "vision-model"
+
+	created, err := svc.Create(7, req)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.LLMProvider != "openai_compatible" || created.ASRProvider != "openai_compatible" || created.EmbeddingProvider != "openai_compatible" {
+		t.Fatalf("non-MIMO providers were not canonicalized: %+v", created)
+	}
+	if created.VisionProvider != "openai_compatible" {
+		t.Fatalf("vision provider = %q, want openai_compatible", created.VisionProvider)
+	}
+
+	updatedReq := req
+	updatedReq.VisionModel = "vision-model-v2"
+	updatedReq.LLMAPIKey = ""
+	updatedReq.ASRAPIKey = ""
+	updatedReq.EmbeddingAPIKey = ""
+	updatedReq.VisionAPIKey = ""
+	if _, err := svc.Update(7, created.ID, updatedReq); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	stored, err := repos.AIProfile.FindByIDForUser(7, created.ID)
+	if err != nil {
+		t.Fatalf("FindByIDForUser() error = %v", err)
+	}
+	if stored.VisionProvider != "openai_compatible" || stored.VisionModel != "vision-model-v2" || stored.VisionBaseURL != req.VisionBaseURL {
+		t.Fatalf("vision update was not persisted: %+v", stored)
+	}
+}
+
 func TestAIProfileServiceDefaultDecryptedProfile(t *testing.T) {
 	svc, _, _ := newAIProfileServiceForTest(t)
 	if _, err := svc.Create(7, validAIProfileRequest()); err != nil {

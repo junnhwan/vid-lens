@@ -145,10 +145,23 @@ func (c *Config) ValidateServer() error {
 		}
 	}
 
-	switch strings.ToLower(strings.TrimSpace(c.AI.Provider)) {
-	case "", "siliconflow", "mimo":
-	default:
-		problems.add("ai.provider", "仅支持 siliconflow 或 mimo")
+	aiProviders := []struct {
+		path  string
+		value string
+	}{
+		{path: "ai.provider", value: c.AI.Provider},
+		{path: "ai.llm_provider", value: c.AI.LLMProvider},
+		{path: "ai.asr_provider", value: c.AI.ASRProvider},
+		{path: "ai.embedding_provider", value: c.AI.EmbeddingProvider},
+		{path: "ai.rerank_provider", value: c.AI.RerankProvider},
+		{path: "ai.vision_provider", value: c.AI.VisionProvider},
+	}
+	for _, provider := range aiProviders {
+		switch strings.ToLower(strings.TrimSpace(provider.value)) {
+		case "", "openai_compatible", "siliconflow", "mimo":
+		default:
+			problems.add(provider.path, "仅支持 openai_compatible、siliconflow 或 mimo")
+		}
 	}
 
 	if c.RAG.Enabled {

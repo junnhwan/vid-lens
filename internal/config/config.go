@@ -111,15 +111,46 @@ func (m *MQConfig) applyDefaults() {
 }
 
 type AIConfig struct {
-	Provider           string         `yaml:"provider"`
-	SiliconFlowAPIKey  string         `yaml:"siliconflow_api_key"`
-	SiliconFlowBaseURL string         `yaml:"siliconflow_base_url"`
-	MimoAPIKey         string         `yaml:"mimo_api_key"`
-	MimoBaseURL        string         `yaml:"mimo_base_url"`
-	ASRModel           string         `yaml:"asr_model"`
-	LLMModel           string         `yaml:"llm_model"`
-}
+	// Provider is retained as a compatibility/observability label. New
+	// deployments should prefer capability-specific fields below. The shared
+	// fields remain a fallback for simple/single-relay deployments.
+	Provider string `yaml:"provider"`
+	BaseURL  string `yaml:"base_url"`
+	APIKey   string `yaml:"api_key"`
 
+	LLMProvider string `yaml:"llm_provider"`
+	LLMBaseURL  string `yaml:"llm_base_url"`
+	LLMAPIKey   string `yaml:"llm_api_key"`
+	LLMModel    string `yaml:"llm_model"`
+
+	ASRProvider string `yaml:"asr_provider"`
+	ASRBaseURL  string `yaml:"asr_base_url"`
+	ASRAPIKey   string `yaml:"asr_api_key"`
+	ASRModel    string `yaml:"asr_model"`
+
+	EmbeddingProvider string `yaml:"embedding_provider"`
+	EmbeddingEndpoint string `yaml:"embedding_endpoint"`
+	EmbeddingAPIKey   string `yaml:"embedding_api_key"`
+	EmbeddingModel    string `yaml:"embedding_model"`
+	EmbeddingDim      int    `yaml:"embedding_dim"`
+
+	RerankProvider string `yaml:"rerank_provider"`
+	RerankEndpoint string `yaml:"rerank_endpoint"`
+	RerankAPIKey   string `yaml:"rerank_api_key"`
+	RerankModel    string `yaml:"rerank_model"`
+
+	VisionProvider string `yaml:"vision_provider"`
+	VisionBaseURL  string `yaml:"vision_base_url"`
+	VisionAPIKey   string `yaml:"vision_api_key"`
+	VisionModel    string `yaml:"vision_model"`
+
+	// Legacy vendor-specific fields. They are read only when the resolved
+	// provider is the corresponding legacy label or during migration fallback.
+	SiliconFlowAPIKey  string `yaml:"siliconflow_api_key"`
+	SiliconFlowBaseURL string `yaml:"siliconflow_base_url"`
+	MimoAPIKey         string `yaml:"mimo_api_key"`
+	MimoBaseURL        string `yaml:"mimo_base_url"`
+}
 
 type ToolsConfig struct {
 	FFmpegPath        string   `yaml:"ffmpeg_path"`

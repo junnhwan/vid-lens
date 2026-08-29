@@ -24,8 +24,13 @@ type Profile struct {
 	VisionBaseURL     string
 	VisionAPIKey      string
 	VisionModel       string
-	RerankEndpoint    string
-	RerankModel       string
+	// Rerank is intentionally runtime-only for now: the production profile
+	// schema does not enable model rerank, while the legacy eval path can
+	// provide an explicit endpoint/model and optionally a separate key.
+	RerankProvider string
+	RerankEndpoint string
+	RerankAPIKey   string
+	RerankModel    string
 }
 
 type Factory struct{ admission Admission }
@@ -34,22 +39,23 @@ func NewFactory() *Factory                                 { return &Factory{} }
 func NewFactoryWithAdmission(admission Admission) *Factory { return &Factory{admission: admission} }
 
 func (f *Factory) NewASRStrategy(profile Profile) (Strategy, error) {
-	switch normalizeProvider(profile.ASRProvider) {
+	provider := profileProvider(profile.ASRProvider)
+	switch provider {
 	case "mimo":
 		return AdmitStrategy(NewMimoStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, "mimo", profile.ASRModel, profile.ASRModel), nil
-	case "siliconflow":
-		return AdmitStrategy(NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, normalizeProvider(profile.ASRProvider), profile.ASRModel, profile.ASRModel), nil
-	case "openai_compatible":
-		return AdmitStrategy(NewSiliconFlowStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, normalizeProvider(profile.ASRProvider), profile.ASRModel, profile.ASRModel), nil
+	case "openai_compatible", "siliconflow":
+		asr := &transcriptionStrategy{client: NewOpenAIAudioTranscriptionClient(profile.ASRBaseURL, profile.ASRAPIKey, profile.ASRModel)}
+		return AdmitStrategy(asr, f.admission, provider, profile.ASRModel, profile.ASRModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 ASR provider: %s", profile.ASRProvider)
 	}
 }
 
 func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
-	switch normalizeProvider(profile.LLMProvider) {
+	provider := profileProvider(profile.LLMProvider)
+	switch provider {
 	case "openai_compatible", "siliconflow":
-		return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, normalizeProvider(profile.LLMProvider), profile.LLMModel), nil
+		return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, provider, profile.LLMModel), nil
 	case "mimo":
 		return AdmitChat(NewMimoChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, "mimo", profile.LLMModel), nil
 	default:
@@ -58,16 +64,21 @@ func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
 }
 
 func (f *Factory) NewEmbeddingClient(profile Profile) (EmbeddingClient, error) {
-	switch normalizeProvider(profile.EmbeddingProvider) {
+	provider := profileProvider(profile.EmbeddingProvider)
+	switch provider {
 	case "openai_compatible", "siliconflow":
-		return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, normalizeProvider(profile.EmbeddingProvider), profile.EmbeddingModel), nil
+		return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, provider, profile.EmbeddingModel), nil
 	default:
 		return nil, fmt.Errorf("不支持的 Embedding provider: %s", profile.EmbeddingProvider)
 	}
 }
 
 func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
-	switch normalizeProvider(profile.EmbeddingProvider) {
+	provider := profileProvider(profile.RerankProvider)
+	if normalizeProvider(profile.RerankProvider) == "" {
+		provider = profileProvider(profile.EmbeddingProvider)
+	}
+	switch provider {
 	case "openai_compatible", "siliconflow":
 		endpoint := strings.TrimSpace(profile.RerankEndpoint)
 		if endpoint == "" {
@@ -77,14 +88,18 @@ func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
 			}
 			endpoint = derived
 		}
-		return NewOpenAIRerankClient(endpoint, profile.EmbeddingAPIKey, profile.RerankModel), nil
+		apiKey := strings.TrimSpace(profile.RerankAPIKey)
+		if apiKey == "" {
+			apiKey = profile.EmbeddingAPIKey
+		}
+		return NewOpenAIRerankClientWithProvider(endpoint, apiKey, profile.RerankModel, provider), nil
 	default:
 		return nil, fmt.Errorf("不支持的 Rerank provider: %s", profile.EmbeddingProvider)
 	}
 }
 
 func (f *Factory) NewVisionClient(profile Profile) (VisionClient, error) {
-	provider := normalizeProvider(profile.VisionProvider)
+	provider := profileProvider(profile.VisionProvider)
 	baseURL := strings.TrimSpace(profile.VisionBaseURL)
 	model := strings.TrimSpace(profile.VisionModel)
 	apiKey := strings.TrimSpace(profile.VisionAPIKey)
@@ -177,4 +192,14 @@ func (t *ProfileTester) TestProfile(ctx context.Context, profile Profile) error 
 
 func normalizeProvider(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+func profileProvider(provider string) string {
+	// Provider values on profiles are historical labels, not a closed enum.
+	// Only MIMO selects a different wire adapter; every other label uses the
+	// standard OpenAI-compatible protocol.
+	if normalizeProvider(provider) == "mimo" {
+		return "mimo"
+	}
+	return "openai_compatible"
 }

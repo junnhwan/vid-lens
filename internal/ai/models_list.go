@@ -23,6 +23,13 @@ const (
 // baseURL should be an OpenAI-compatible root such as https://api.example.com/v1
 // (not a .../chat/completions path). Embedding endpoints ending in /embeddings are normalized.
 func ListOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
+	return ListOpenAIModelsWithProvider(ctx, baseURL, apiKey, "openai_compatible")
+}
+
+// ListOpenAIModelsWithProvider is the compatibility-aware variant used when
+// an existing profile still carries a legacy provider authentication mode.
+// New profiles should use the default Bearer-auth OpenAI-compatible path.
+func ListOpenAIModelsWithProvider(ctx context.Context, baseURL, apiKey, provider string) ([]string, error) {
 	root, err := normalizeModelsBaseURL(baseURL)
 	if err != nil {
 		return nil, err
@@ -35,18 +42,16 @@ func ListOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, er
 		return nil, fmt.Errorf("API Key 不能为空")
 	}
 
-	reqURL := strings.TrimRight(root, "/") + "/models"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	transport := newProviderProtocolClient(root, apiKey, provider, modelsListTimeout)
+	req, err := transport.newRequest(ctx, http.MethodGet, "models", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: modelsListTimeout}
-	resp, err := client.Do(req)
+	resp, err := transport.send(req, "models")
 	if err != nil {
-		return nil, ProviderTransportError("openai_compatible", "models", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -58,10 +63,6 @@ func ListOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, er
 	if len(body) > modelsListMaxBytes {
 		return nil, fmt.Errorf("模型列表响应过大")
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, ProviderHTTPError("openai_compatible", "models", resp.StatusCode, resp.Header, body)
-	}
-
 	ids, err := parseOpenAIModelsResponse(body)
 	if err != nil {
 		return nil, err

@@ -99,7 +99,7 @@ export default {
   updateAIProfile: (id, profile) => api.put(`/ai/profiles/${id}`, profile),
   deleteAIProfile: (id) => api.delete(`/ai/profiles/${id}`),
   testAIProfile: (profile) => api.post('/ai/profiles/test', profile),
-  /** 拉取 OpenAI 兼容 GET /models；body: { base_url, api_key } 或 { profile_id, purpose } */
+  /** 拉取 OpenAI 兼容 GET /models；body: { base_url, api_key, provider? } 或 { profile_id, purpose } */
   listAIModels: (body) => api.post('/ai/profiles/models', body),
   /** 探测 embedding 维度；body: { endpoint, api_key, model } 或 { profile_id, model? } */
   probeEmbeddingDim: (body) => api.post('/ai/profiles/embedding-dim', body),

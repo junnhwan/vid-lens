@@ -82,6 +82,21 @@ const saved = normalizeFormForSave({
 assert.equal(saved.llm_provider, PRODUCT_PROVIDER)
 assert.equal(saved.asr_provider, PRODUCT_PROVIDER)
 
+const legacyMimoSaved = normalizeFormForSave(
+  {
+    ...fresh,
+    llm_provider: PRODUCT_PROVIDER,
+    asr_provider: 'mimo',
+    embedding_provider: 'siliconflow',
+    vision_provider: 'mimo',
+  },
+  { keepLegacyProviders: true },
+)
+assert.equal(legacyMimoSaved.llm_provider, PRODUCT_PROVIDER)
+assert.equal(legacyMimoSaved.asr_provider, 'mimo')
+assert.equal(legacyMimoSaved.embedding_provider, PRODUCT_PROVIDER)
+assert.equal(legacyMimoSaved.vision_provider, 'mimo')
+
 assert.ok(suggestedModels('llm', PRODUCT_PROVIDER).length >= 0)
 assert.equal(keyPlaceholder('llm', PRODUCT_PROVIDER).includes('sk'), true)
 

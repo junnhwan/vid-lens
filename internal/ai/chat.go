@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -26,32 +25,22 @@ type StreamingChatClient interface {
 }
 
 type OpenAIChatClient struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	authHeader string
-	authPrefix string
-	client     *http.Client
+	transport *protocolClient
+	model     string
 }
 
 func NewOpenAIChatClient(baseURL, apiKey, model string) *OpenAIChatClient {
 	return &OpenAIChatClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		apiKey:     apiKey,
-		model:      model,
-		authHeader: "Authorization",
-		authPrefix: "Bearer ",
-		client: &http.Client{
-			Timeout: 5 * time.Minute,
-		},
+		transport: newProtocolClient(baseURL, apiKey, "openai_compatible", 5*time.Minute),
+		model:     strings.TrimSpace(model),
 	}
 }
 
 func NewMimoChatClient(baseURL, apiKey, model string) *OpenAIChatClient {
-	client := NewOpenAIChatClient(baseURL, apiKey, model)
-	client.authHeader = "api-key"
-	client.authPrefix = ""
-	return client
+	return &OpenAIChatClient{
+		transport: newLegacyMimoProtocolClient(baseURL, apiKey, 5*time.Minute),
+		model:     strings.TrimSpace(model),
+	}
 }
 
 func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
@@ -66,22 +55,15 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (st
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := c.transport.newRequest(ctx, http.MethodPost, "chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set(c.authHeader, c.authPrefix+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	body, err := c.transport.do(req, "chat")
 	if err != nil {
-		return "", ProviderTransportError("openai_compatible", "chat", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", ProviderHTTPError("openai_compatible", "chat", resp.StatusCode, resp.Header, body)
+		return "", err
 	}
 
 	var result struct {
@@ -115,23 +97,17 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := c.transport.newRequest(ctx, http.MethodPost, "chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return err
 	}
-	req.Header.Set(c.authHeader, c.authPrefix+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.transport.send(req, "chat_stream")
 	if err != nil {
-		return ProviderTransportError("openai_compatible", "chat_stream", err)
+		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return ProviderHTTPError("openai_compatible", "chat_stream", resp.StatusCode, resp.Header, body)
-	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)

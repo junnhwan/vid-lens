@@ -251,7 +251,7 @@
             <div class="service-head-actions">
               <label class="check-row check-tight">
                 <input v-model="syncAsrFromLlm" type="checkbox" @change="applyAsrSync" />
-                跟随对话 URL/Key
+                跟随对话 URL/Key（需支持 ASR）
               </label>
               <button
                 type="button"
@@ -288,7 +288,7 @@
               </div>
             </div>
           </div>
-          <div v-else class="sync-banner">使用与对话相同的 Base URL / Key，只需填 ASR 模型</div>
+          <div v-else class="sync-banner">使用与对话相同的 Base URL / Key；仅当中转支持 <code>/audio/transcriptions</code> 时可用</div>
           <div class="form-group form-group-tight">
             <label for="asr-model">ASR 模型</label>
             <input
@@ -324,7 +324,7 @@
             <div class="service-head-actions">
               <label class="check-row check-tight">
                 <input v-model="syncEmbFromLlm" type="checkbox" @change="applyEmbSync" />
-                跟随对话 Key / 推导 Endpoint
+                跟随对话 Key / 推导 Endpoint（需支持 Embedding）
               </label>
               <button
                 type="button"
@@ -365,7 +365,7 @@
             </div>
           </div>
           <div v-else class="sync-banner">
-            Endpoint 将由对话 Base URL 推导为 <code>…/embeddings</code>，Key 跟随对话
+            Endpoint 将由对话 Base URL 推导为 <code>…/embeddings</code>，Key 跟随对话；仅当中转支持该接口时可用
           </div>
           <div class="emb-model-dim">
             <div class="form-group form-group-tight emb-model-col">
@@ -632,11 +632,15 @@ const setAsCurrent = async (profile) => {
   try {
     const form = profileToFormData(profile)
     form.is_default = true
+    const hasLegacyMimo = [
+      profile.llm_provider,
+      profile.asr_provider,
+      profile.embedding_provider,
+      profile.vision_provider,
+    ].some((provider) => String(provider || '').toLowerCase() === 'mimo')
     // 编辑态不传 Key → 服务端保留原密文
     const payload = normalizeFormForSave(form, {
-      keepLegacyProviders: ['mimo', 'siliconflow'].includes(
-        String(profile.llm_provider || '').toLowerCase(),
-      ),
+      keepLegacyProviders: hasLegacyMimo,
     })
     delete payload.asr_api_key
     delete payload.llm_api_key
@@ -715,6 +719,18 @@ const resolveListPayload = (purpose) => {
     payload.base_url = fd.vision_base_url || fd.llm_base_url
     payload.api_key = fd.vision_api_key || fd.llm_api_key
   }
+  payload.provider =
+    purpose === 'llm'
+      ? fd.llm_provider
+      : purpose === 'asr'
+        ? syncAsrFromLlm.value
+          ? fd.llm_provider
+          : fd.asr_provider
+        : purpose === 'embedding'
+          ? syncEmbFromLlm.value
+            ? fd.llm_provider
+            : fd.embedding_provider
+          : fd.vision_provider || fd.llm_provider
   if (isEditMode.value && editingProfile.value?.id && !payload.api_key) {
     payload.profile_id = editingProfile.value.id
   }
@@ -821,13 +837,17 @@ const handleSubmit = async () => {
     formData.value.vision_model = ''
   }
 
-  // Keep legacy provider ids when editing existing non-compatible profiles
+  // Keep only MIMO's legacy wire format. SiliconFlow uses the generic
+  // OpenAI-compatible adapters and is normalized on the next save.
   const keepLegacy =
     isEditMode.value &&
     editingProfile.value &&
-    ['mimo', 'siliconflow'].includes(
-      String(editingProfile.value.llm_provider || '').toLowerCase(),
-    )
+    [
+      editingProfile.value.llm_provider,
+      editingProfile.value.asr_provider,
+      editingProfile.value.embedding_provider,
+      editingProfile.value.vision_provider,
+    ].some((provider) => String(provider || '').toLowerCase() === 'mimo')
 
   const payload = normalizeFormForSave({ ...formData.value }, { keepLegacyProviders: keepLegacy })
 

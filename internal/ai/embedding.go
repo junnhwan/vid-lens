@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -16,20 +15,14 @@ type EmbeddingClient interface {
 }
 
 type OpenAIEmbeddingClient struct {
-	endpoint string
-	apiKey   string
-	model    string
-	client   *http.Client
+	transport *protocolClient
+	model     string
 }
 
 func NewOpenAIEmbeddingClient(endpoint, apiKey, model string) *OpenAIEmbeddingClient {
 	return &OpenAIEmbeddingClient{
-		endpoint: strings.TrimSpace(endpoint),
-		apiKey:   apiKey,
-		model:    model,
-		client: &http.Client{
-			Timeout: 2 * time.Minute,
-		},
+		transport: newProtocolClient(endpoint, apiKey, "openai_compatible", 2*time.Minute),
+		model:     strings.TrimSpace(model),
 	}
 }
 
@@ -43,22 +36,15 @@ func (c *OpenAIEmbeddingClient) Embed(ctx context.Context, input string) ([]floa
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewBuffer(jsonBody))
+	req, err := c.transport.newRequest(ctx, http.MethodPost, "", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	body, err := c.transport.do(req, "embedding")
 	if err != nil {
-		return nil, ProviderTransportError("openai_compatible", "embedding", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, ProviderHTTPError("openai_compatible", "embedding", resp.StatusCode, resp.Header, body)
+		return nil, err
 	}
 
 	var result struct {

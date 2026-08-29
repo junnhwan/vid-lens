@@ -97,6 +97,10 @@ func (r *AIProfileRepository) UpdateForUser(userID int64, profile *model.UserAIP
 		existing.EmbeddingAPIKeyCiphertext = profile.EmbeddingAPIKeyCiphertext
 		existing.EmbeddingModel = profile.EmbeddingModel
 		existing.EmbeddingDim = profile.EmbeddingDim
+		existing.VisionProvider = profile.VisionProvider
+		existing.VisionBaseURL = profile.VisionBaseURL
+		existing.VisionAPIKeyCiphertext = profile.VisionAPIKeyCiphertext
+		existing.VisionModel = profile.VisionModel
 		existing.IsDefault = profile.IsDefault
 
 		return tx.Save(&existing).Error

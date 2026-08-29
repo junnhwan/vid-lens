@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,11 +18,9 @@ const mimoMaxAudioDataBytes = 10 * 1024 * 1024
 // MimoStrategy 基于小米 MiMo API 的 AI 策略实现。
 // ASR 与 LLM 均走 OpenAI-compatible chat/completions 接口。
 type MimoStrategy struct {
-	apiKey   string
-	baseURL  string
-	asrModel string
-	llmModel string
-	client   *http.Client
+	transport *protocolClient
+	asrModel  string
+	llmModel  string
 }
 
 func NewMimoStrategy(apiKey, baseURL, asrModel, llmModel string) *MimoStrategy {
@@ -37,13 +34,9 @@ func NewMimoStrategy(apiKey, baseURL, asrModel, llmModel string) *MimoStrategy {
 		llmModel = "mimo-v2.5"
 	}
 	return &MimoStrategy{
-		apiKey:   apiKey,
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		asrModel: asrModel,
-		llmModel: llmModel,
-		client: &http.Client{
-			Timeout: 5 * time.Minute,
-		},
+		transport: newLegacyMimoProtocolClient(baseURL, apiKey, 5*time.Minute),
+		asrModel:  asrModel,
+		llmModel:  llmModel,
 	}
 }
 
@@ -125,22 +118,14 @@ func (s *MimoStrategy) chatCompletion(ctx context.Context, reqBody map[string]in
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
+	req, err := s.transport.newRequest(ctx, http.MethodPost, "chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", s.apiKey)
-
-	resp, err := s.client.Do(req)
+	body, err := s.transport.do(req, label)
 	if err != nil {
-		return "", ProviderTransportError("mimo", label, err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", ProviderHTTPError("mimo", label, resp.StatusCode, resp.Header, body)
+		return "", err
 	}
 
 	var result struct {
@@ -172,14 +157,4 @@ func audioDataURL(audioPath string) (string, error) {
 	}
 
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(fileBytes)), nil
-}
-
-func defaultSummarySystemPrompt() string {
-	return `你是一位资深信息架构师。请把用户提供的视频 ASR 转录文本整理成结构清晰、客观专业的 Markdown 分析报告。
-
-要求：
-1. 忽略口语废话、重复和明显识别错误。
-2. 不要输出开场白或结束语。
-3. 如果文本过短或无意义，直接输出"无法提取有效信息"。
-4. 输出必须包含：核心摘要、深度洞察、原始内容精选、领域标签。`
 }

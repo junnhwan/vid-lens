@@ -13,10 +13,9 @@ import (
 )
 
 var (
-	ErrAIProfileNotFound     = errors.New("AI 配置不存在")
-	ErrAIProfileRequired     = errors.New("请先配置 AI 服务")
+	ErrAIProfileNotFound = errors.New("AI 配置不存在")
+	ErrAIProfileRequired = errors.New("请先配置 AI 服务")
 )
-
 
 type AIProfileTester interface {
 	TestProfile(ctx context.Context, profile *DecryptedAIProfile) error
@@ -31,8 +30,6 @@ type AIProfileService struct {
 func NewAIProfileService(repo *repository.AIProfileRepository, codec *secret.Codec, tester AIProfileTester) *AIProfileService {
 	return &AIProfileService{repo: repo, codec: codec, tester: tester}
 }
-
-
 
 type AIProfileRequest struct {
 	Name              string `json:"name" binding:"required"`
@@ -194,7 +191,6 @@ func (s *AIProfileService) Delete(userID, id int64) error {
 	return s.repo.DeleteForUser(userID, id)
 }
 
-
 func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error {
 	if s.tester == nil {
 		return nil
@@ -204,20 +200,20 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 	}
 	profile := &DecryptedAIProfile{
 		Name:              strings.TrimSpace(req.Name),
-		LLMProvider:       normalizeProvider(req.LLMProvider),
+		LLMProvider:       normalizeAIProtocol(req.LLMProvider),
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKey:         strings.TrimSpace(req.LLMAPIKey),
 		LLMModel:          strings.TrimSpace(req.LLMModel),
-		ASRProvider:       normalizeProvider(req.ASRProvider),
+		ASRProvider:       normalizeAIProtocol(req.ASRProvider),
 		ASRBaseURL:        strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKey:         strings.TrimSpace(req.ASRAPIKey),
 		ASRModel:          strings.TrimSpace(req.ASRModel),
-		EmbeddingProvider: normalizeProvider(req.EmbeddingProvider),
+		EmbeddingProvider: normalizeAIProtocol(req.EmbeddingProvider),
 		EmbeddingEndpoint: strings.TrimSpace(req.EmbeddingEndpoint),
 		EmbeddingAPIKey:   strings.TrimSpace(req.EmbeddingAPIKey),
 		EmbeddingModel:    strings.TrimSpace(req.EmbeddingModel),
 		EmbeddingDim:      req.EmbeddingDim,
-		VisionProvider:    normalizeProvider(req.VisionProvider),
+		VisionProvider:    normalizeOptionalAIProtocol(req.VisionProvider),
 		VisionBaseURL:     strings.TrimRight(strings.TrimSpace(req.VisionBaseURL), "/"),
 		VisionAPIKey:      strings.TrimSpace(req.VisionAPIKey),
 		VisionModel:       strings.TrimSpace(req.VisionModel),
@@ -248,6 +244,7 @@ func (s *AIProfileService) TestSavedProfile(ctx context.Context, userID, id int6
 type ListModelsRequest struct {
 	BaseURL   string `json:"base_url"`
 	APIKey    string `json:"api_key"`
+	Provider  string `json:"provider"`
 	ProfileID int64  `json:"profile_id"`
 	// Purpose: llm | asr | embedding | vision — selects which stored URL/key when profile_id is set.
 	Purpose string `json:"purpose"`
@@ -257,6 +254,7 @@ type ListModelsRequest struct {
 func (s *AIProfileService) ListModels(ctx context.Context, userID int64, req ListModelsRequest) ([]string, error) {
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
+	provider := normalizeProvider(req.Provider)
 	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
 	if purpose == "" {
 		purpose = "llm"
@@ -304,6 +302,9 @@ func (s *AIProfileService) ListModels(ctx context.Context, userID int64, req Lis
 				apiKey = decrypted.LLMAPIKey
 			}
 		}
+		if provider == "" {
+			provider = providerForPurpose(*decrypted, purpose)
+		}
 	}
 
 	if baseURL == "" {
@@ -312,7 +313,20 @@ func (s *AIProfileService) ListModels(ctx context.Context, userID int64, req Lis
 	if apiKey == "" {
 		return nil, fmt.Errorf("API Key 不能为空（编辑已保存配置时可只传 profile_id）")
 	}
-	return ai.ListOpenAIModels(ctx, baseURL, apiKey)
+	return ai.ListOpenAIModelsWithProvider(ctx, baseURL, apiKey, provider)
+}
+
+func providerForPurpose(profile DecryptedAIProfile, purpose string) string {
+	switch purpose {
+	case "asr":
+		return profile.ASRProvider
+	case "embedding":
+		return profile.EmbeddingProvider
+	case "vision":
+		return profile.VisionProvider
+	default:
+		return profile.LLMProvider
+	}
 }
 
 // ProbeEmbeddingDimRequest resolves embedding endpoint/key/model for a one-shot dimension probe.
@@ -401,9 +415,6 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 	}, nil
 }
 
-
-
-
 func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest, existing *model.UserAIProfile) (*model.UserAIProfile, error) {
 	llmCipher, err := s.encryptOrKeep(strings.TrimSpace(req.LLMAPIKey), existing, "llm")
 	if err != nil {
@@ -425,20 +436,20 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 	return &model.UserAIProfile{
 		UserID:                    userID,
 		Name:                      strings.TrimSpace(req.Name),
-		LLMProvider:               normalizeProvider(req.LLMProvider),
+		LLMProvider:               normalizeAIProtocol(req.LLMProvider),
 		LLMBaseURL:                strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKeyCiphertext:       llmCipher,
 		LLMModel:                  strings.TrimSpace(req.LLMModel),
-		ASRProvider:               normalizeProvider(req.ASRProvider),
+		ASRProvider:               normalizeAIProtocol(req.ASRProvider),
 		ASRBaseURL:                strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKeyCiphertext:       asrCipher,
 		ASRModel:                  strings.TrimSpace(req.ASRModel),
-		EmbeddingProvider:         normalizeProvider(req.EmbeddingProvider),
+		EmbeddingProvider:         normalizeAIProtocol(req.EmbeddingProvider),
 		EmbeddingEndpoint:         strings.TrimSpace(req.EmbeddingEndpoint),
 		EmbeddingAPIKeyCiphertext: embeddingCipher,
 		EmbeddingModel:            strings.TrimSpace(req.EmbeddingModel),
 		EmbeddingDim:              req.EmbeddingDim,
-		VisionProvider:            normalizeProvider(req.VisionProvider),
+		VisionProvider:            normalizeOptionalAIProtocol(req.VisionProvider),
 		VisionBaseURL:             strings.TrimRight(strings.TrimSpace(req.VisionBaseURL), "/"),
 		VisionAPIKeyCiphertext:    visionCipher,
 		VisionModel:               strings.TrimSpace(req.VisionModel),
@@ -607,4 +618,21 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 
 func normalizeProvider(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+// normalizeAIProtocol keeps the persisted profile vocabulary small. Provider
+// names such as siliconflow, relay-a, or an arbitrary gateway label do not
+// select an implementation; only MIMO needs the legacy wire adapter.
+func normalizeAIProtocol(provider string) string {
+	if normalizeProvider(provider) == "mimo" {
+		return "mimo"
+	}
+	return "openai_compatible"
+}
+
+func normalizeOptionalAIProtocol(provider string) string {
+	if normalizeProvider(provider) == "" {
+		return ""
+	}
+	return normalizeAIProtocol(provider)
 }

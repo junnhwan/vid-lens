@@ -1,6 +1,7 @@
 /**
  * AI 配置表单：产品路径统一为 OpenAI 兼容（Base URL + Key + 模型）。
- * 后端仍接受 siliconflow/mimo 等历史 provider 值；前端新建默认写入 openai_compatible。
+ * 后端仍接受 siliconflow/mimo 等历史 provider 值；前端新建默认写入
+ * openai_compatible，只有旧 MIMO 配置保留其特殊 wire format。
  * 真正校验在服务端。
  */
 
@@ -295,7 +296,8 @@ export function createDefaultAIProfileForm() {
 }
 
 /**
- * Map saved profile into form; legacy mimo/siliconflow keep URL/model, provider coerced for UI.
+ * Map saved profile into form; legacy values keep URL/model so editing does
+ * not discard endpoint data before the save normalization step.
  * @param {Record<string, any>} profile
  */
 export function profileToFormData(profile) {
@@ -329,7 +331,8 @@ export function profileToFormData(profile) {
 }
 
 /**
- * When saving from product form, force openai_compatible unless editing legacy profile that still uses siliconflow/mimo.
+ * When saving from product form, force openai_compatible unless editing a
+ * legacy MIMO profile whose wire format is not standard OpenAI audio auth.
  * @param {Record<string, any>} formData
  * @param {{ keepLegacyProviders?: boolean }} [opts]
  */
@@ -337,7 +340,7 @@ export function normalizeFormForSave(formData, opts = {}) {
   const keep = !!opts.keepLegacyProviders
   const force = (p) => {
     const id = normalizeProviderId(p)
-    if (keep && (id === 'siliconflow' || id === 'mimo')) return id
+    if (keep && id === 'mimo') return id
     return PRODUCT_PROVIDER
   }
   return {

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -56,6 +55,14 @@ func loadServerConfig(path string) (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// serverAIProfile is the compatibility bridge for the process-level AI
+// configuration. New deployments use one generic base URL/key with separate
+// model names; the old vendor-specific fields remain readable for existing
+// installations during the migration window.
+func serverAIProfile(cfg config.AIConfig) ai.Profile {
+	return cfg.Profile()
 }
 
 func runtimeServerHandlers(app *serverApplication) serverHandlers {
@@ -145,23 +152,14 @@ func main() {
 	}
 	log.Println("✅ MinIO 连接成功")
 
-	// AI
-	var aiStrategy ai.Strategy
-	switch strings.ToLower(cfg.AI.Provider) {
-	case "", "siliconflow":
-		aiStrategy = ai.NewSiliconFlowStrategy(
-			cfg.AI.SiliconFlowAPIKey, cfg.AI.SiliconFlowBaseURL,
-			cfg.AI.ASRModel, cfg.AI.LLMModel,
-		)
-	case "mimo":
-		aiStrategy = ai.NewMimoStrategy(
-			cfg.AI.MimoAPIKey, cfg.AI.MimoBaseURL,
-			cfg.AI.ASRModel, cfg.AI.LLMModel,
-		)
-	default:
-		log.Fatalf("不支持的 AI provider: %s", cfg.AI.Provider)
+	// AI. The process-level default follows the same factory seam as user
+	// profiles. Vendor-specific fields are resolved only by serverAIProfile;
+	// request construction is owned by the protocol adapters.
+	aiFactory := ai.NewFactoryWithAdmission(providerAdmission)
+	aiStrategy, err := aiFactory.NewAnalysisStrategy(serverAIProfile(cfg.AI))
+	if err != nil {
+		log.Fatalf("初始化 AI 协议适配器失败: %v", err)
 	}
-	aiStrategy = ai.AdmitStrategy(aiStrategy, providerAdmission, strings.ToLower(cfg.AI.Provider), cfg.AI.ASRModel, cfg.AI.LLMModel)
 
 	// RabbitMQ: declare job queues + dead-letter queues.
 	if err := mq.DeclareQueues(cfg.MQ.Brokers, []mq.QueueSpec{

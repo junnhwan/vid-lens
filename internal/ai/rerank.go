@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -21,20 +20,20 @@ type RerankResult struct {
 }
 
 type OpenAIRerankClient struct {
-	endpoint string
-	apiKey   string
-	model    string
-	client   *http.Client
+	transport *protocolClient
+	endpoint  string // retained for compatibility with existing diagnostics/tests
+	model     string
 }
 
 func NewOpenAIRerankClient(endpoint, apiKey, model string) *OpenAIRerankClient {
+	return NewOpenAIRerankClientWithProvider(endpoint, apiKey, model, "openai_compatible")
+}
+
+func NewOpenAIRerankClientWithProvider(endpoint, apiKey, model, provider string) *OpenAIRerankClient {
 	return &OpenAIRerankClient{
-		endpoint: strings.TrimSpace(endpoint),
-		apiKey:   apiKey,
-		model:    strings.TrimSpace(model),
-		client: &http.Client{
-			Timeout: 2 * time.Minute,
-		},
+		transport: newProviderProtocolClient(endpoint, apiKey, provider, 2*time.Minute),
+		endpoint:  strings.TrimSpace(endpoint),
+		model:     strings.TrimSpace(model),
 	}
 }
 
@@ -42,7 +41,7 @@ func (c *OpenAIRerankClient) Rerank(ctx context.Context, query string, documents
 	if c == nil {
 		return nil, fmt.Errorf("rerank client is nil")
 	}
-	if strings.TrimSpace(c.endpoint) == "" {
+	if c.transport == nil || strings.TrimSpace(c.transport.baseURL) == "" {
 		return nil, fmt.Errorf("rerank endpoint is empty")
 	}
 	if strings.TrimSpace(c.model) == "" {
@@ -65,22 +64,15 @@ func (c *OpenAIRerankClient) Rerank(ctx context.Context, query string, documents
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewBuffer(jsonBody))
+	req, err := c.transport.newRequest(ctx, http.MethodPost, "", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	body, err := c.transport.do(req, "rerank")
 	if err != nil {
-		return nil, fmt.Errorf("Rerank 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Rerank 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	results, err := parseRerankResponse(body)

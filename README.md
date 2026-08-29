@@ -152,18 +152,32 @@ AI 相关的 `.env` 配置项如下：
 
 | 变量 | 用途 |
 | --- | --- |
-| `VIDLENS_AI_PROVIDER` | 服务端默认策略：`mimo` 或 `siliconflow` |
-| `MIMO_API_KEY` | MiMo 或其 OpenAI 兼容中转的 API Key |
-| `MIMO_BASE_URL` | MiMo/中转 Base URL，默认 Token Plan 地址 |
-| `SILICONFLOW_API_KEY` | SiliconFlow API Key |
-| `SILICONFLOW_BASE_URL` | SiliconFlow 或兼容中转 Base URL |
-| `VIDLENS_ASR_MODEL` | ASR 模型名 |
-| `VIDLENS_LLM_MODEL` | LLM 总结/聊天模型名 |
+| `VIDLENS_AI_PROVIDER` | 服务端默认配置标签：推荐 `openai_compatible`；`mimo` / `siliconflow` 仅兼容旧配置 |
+| `VIDLENS_AI_BASE_URL` / `VIDLENS_AI_API_KEY` | 单中转部署时的通用 fallback；多中转部署请使用下面的按能力配置 |
+| `VIDLENS_LLM_BASE_URL` / `VIDLENS_LLM_API_KEY` / `VIDLENS_LLM_MODEL` | 对话 Chat 根地址、Key、模型 |
+| `VIDLENS_ASR_BASE_URL` / `VIDLENS_ASR_API_KEY` / `VIDLENS_ASR_MODEL` | ASR 根地址、Key、模型 |
+| `VIDLENS_EMBEDDING_ENDPOINT` / `VIDLENS_EMBEDDING_API_KEY` / `VIDLENS_EMBEDDING_MODEL` | Embedding 完整 endpoint、Key、模型 |
+| `VIDLENS_EMBEDDING_DIM` | Embedding 维度；用于 smoke test / 默认 Profile 维度校验 |
+| `VIDLENS_RAG_EMBEDDING_DIM` | RAG 向量库目标维度，必须与实际 Embedding 返回维度一致 |
+| `VIDLENS_RERANK_ENDPOINT` / `VIDLENS_RERANK_API_KEY` / `VIDLENS_RERANK_MODEL` | Rerank 完整 endpoint、可选独立 Key、模型 |
+| `VIDLENS_VISION_BASE_URL` / `VIDLENS_VISION_API_KEY` / `VIDLENS_VISION_MODEL` | Vision 根地址、Key、模型 |
+| `MIMO_API_KEY` / `MIMO_BASE_URL` | 旧版 MIMO Token Plan 兼容配置；显式 `provider=mimo`，或迁移期仅配置旧 MIMO Key 时读取 |
+| `SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` | 旧版 SiliconFlow 配置；显式 `provider=siliconflow` 时读取，协议仍按通用 Bearer 方式调用 |
 | `VIDLENS_API_KEY_SECRET` | 加密用户模型配置 API Key 的服务端密钥 |
 | `VIDLENS_QUOTA_REDIS_DEFAULT_POLICY` | Redis 不可用时的默认配额策略 |
 | `VIDLENS_QUOTA_REDIS_AI_POLICY` | Redis 不可用时的 AI 配额策略 |
 
 除服务端默认策略外，用户登录后在“模型配置”页面保存的 ASR、LLM、Embedding、Vision 配置属于用户级 BYOK 配置，会覆盖默认 AI 策略。
+
+AI 调用按能力使用独立的协议适配：LLM/Vision 使用 `chat/completions`，Embedding 使用 `embeddings`，常见 ASR 使用 `audio/transcriptions`；Rerank 是独立的 `/rerank` 协议，不假设所有 OpenAI-compatible 中转都支持。一个中转是否同时提供这些能力，以实际 endpoint 和模型为准。
+
+当 Chat、ASR、Embedding、Rerank、Vision 使用不同中转时，分别填写对应的 `VIDLENS_*_BASE_URL`、`VIDLENS_*_API_KEY` 和模型变量即可。Chat/ASR/Vision 填 `/v1` 根地址；Embedding 填完整的 `/embeddings`；Rerank 填完整的 `/rerank`。需要测试真实上游时，可运行：
+
+```powershell
+go run ./cmd/ai-smoke --config config.yaml --image D:/path/to/test.png
+```
+
+不传 `--image` 会跳过 Vision；不传 `--audio` 会跳过 ASR。该命令直接调用协议适配器，不连接数据库、不写业务数据。
 
 ### 4. 启动后端
 
