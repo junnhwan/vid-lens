@@ -1,11 +1,11 @@
 # Ablation variant: vector_only (BASELINE).
 # Pure vector search, no BM25, no rerank, original (un-rewritten) query.
 # Single-variable baseline against which bm25_hybrid / rrf_fusion / model_rerank
-# are compared via paired bootstrap (spec 01 §消融实验配置 / CI 形式).
+# are compared via paired bootstrap (see docs/eval/README.md for the evaluation contract).
 #
 # NOTE on single-variable intent: the four variants are a progressive chain
 # (vector → +BM25 → +RRF fusion → +rerank). Each adjacent pair adds one
-# capability; CI comparisons are each-vs-vector_only baseline per spec 01.
+# capability; CI comparisons are each-vs-vector_only baseline.
 name: vector_only
 enable_vector: true
 enable_bm25: false

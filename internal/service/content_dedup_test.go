@@ -11,7 +11,7 @@ import (
 	"vid-lens/internal/repository"
 )
 
-// 内容+目标级去重的服务层验收（spec 03 第 84 行 seam）。
+// 内容+目标级去重的服务层验收（docs/$1 seam）。
 // 复用 media_file_upload_test.go 的 fake repos + recordingMediaProducer 范式：
 // 内存 SQLite + 录制型 mq producer，断言"第二次不 enqueue / 秒传到 Completed /
 // 结果按 file_md5 关联已有行 / 部分命中只跑缺失 job / 失败结果不被复用 /
@@ -65,7 +65,7 @@ func seedCompletedResults(t *testing.T, repos *repository.Repositories, fileMD5 
 }
 
 // TestContentDedupFullHitShortCircuitsToCompleted 重复上传同一内容（已全部处理过）
-// 时，新 task 秒传到 Completed，不 enqueue 任何 job，零 AI 调用（spec 第 27、34 行）。
+// 时，新 task 秒传到 Completed，不 enqueue 任何 job，零 AI 调用（见当前任务处理与去重约束）。
 func TestContentDedupFullHitShortCircuitsToCompleted(t *testing.T) {
 	svc, repos, producer, _ := newContentDedupTestService(t)
 	seedCompletedResults(t, repos, dedupTestMD5, 7)
@@ -97,7 +97,7 @@ func TestContentDedupFullHitShortCircuitsToCompleted(t *testing.T) {
 }
 
 // TestContentDedupFullHitDetailJoinsResultsByFileMD5 秒传到 Completed 的新 task 自己
-// 没有结果行，详情页按 file_md5 关联任意 task 的已有行展示（spec 第 65 行，跨用户复用）。
+// 没有结果行，详情页按 file_md5 关联任意 task 的已有行展示（当前实现约束，跨用户复用）。
 func TestContentDedupFullHitDetailJoinsResultsByFileMD5(t *testing.T) {
 	svc, repos, _, _ := newContentDedupTestService(t)
 	seedCompletedResults(t, repos, dedupTestMD5, 7)
@@ -128,7 +128,7 @@ func TestContentDedupFullHitDetailJoinsResultsByFileMD5(t *testing.T) {
 }
 
 // TestContentDedupPartialHitTranscriptionOnlyEnqueuesSummary 部分命中：转写已有但
-// 摘要没有 → 只跑摘要，不重跑转写（spec 第 11、60 行，分析目标级而非视频级去重）。
+// 摘要没有 → 只跑摘要，不重跑转写（分析目标级而非视频级去重）。
 func TestContentDedupPartialHitTranscriptionOnlyEnqueuesSummary(t *testing.T) {
 	svc, repos, producer, _ := newContentDedupTestService(t)
 	// 只预置转写，不预置摘要。
@@ -152,7 +152,7 @@ func TestContentDedupPartialHitTranscriptionOnlyEnqueuesSummary(t *testing.T) {
 
 	// RequestTranscribe 命中已有转写 → 不重跑 ASR，返回"已完成可直接查看结果"。
 	// 分析目标级独立：转写命中不替 task 做整体完成判定（摘要可能仍缺，
-	// 用户可继续 RequestAnalysis，spec 第 60 行）。
+	// 用户可继续 RequestAnalysis，当前实现约束）。
 	err = svc.RequestTranscribe(context.Background(), 8, result.TaskID, false)
 	if err == nil {
 		t.Fatal("RequestTranscribe on dedup-hit should return '已完成可直接查看结果', got nil")
@@ -168,7 +168,7 @@ func TestContentDedupPartialHitTranscriptionOnlyEnqueuesSummary(t *testing.T) {
 }
 
 // TestContentDedupRequestAnalysisReusesSummaryByFileMD5 RequestAnalysis force=false 命中
-// 任意 task 的成功摘要 → 不重跑 LLM，返回"已完成可直接查看结果"（spec 第 53 行，
+// 任意 task 的成功摘要 → 不重跑 LLM，返回"已完成可直接查看结果"（当前实现约束，
 // 查询从当前 task 提到 file_md5；与原单 task 短路语义一致）。
 func TestContentDedupRequestAnalysisReusesSummaryByFileMD5(t *testing.T) {
 	svc, repos, producer, _ := newContentDedupTestService(t)
@@ -191,7 +191,7 @@ func TestContentDedupRequestAnalysisReusesSummaryByFileMD5(t *testing.T) {
 }
 
 // TestContentDedupFailedResultNotReused 失败结果不被复用：只复用成功结果行
-// （转写/摘要表行存在即成功；失败不会落行）（spec 第 14 行）。
+// （转写/摘要表行存在即成功；失败不会落行）（当前实现约束）。
 func TestContentDedupFailedResultNotReused(t *testing.T) {
 	svc, repos, producer, _ := newContentDedupTestService(t)
 	// 用户 7 的 task 处于 Failed，且没有 transcription/summary 行（失败不落行）。
@@ -218,7 +218,7 @@ func TestContentDedupFailedResultNotReused(t *testing.T) {
 }
 
 // TestContentDedupForceOverridesReuse force=true 仍可强制重跑，去重不破坏重新分析能力
-// （spec 第 39 行）。
+// （当前实现约束）。
 func TestContentDedupForceOverridesReuse(t *testing.T) {
 	svc, repos, producer, _ := newContentDedupTestService(t)
 	seedCompletedResults(t, repos, dedupTestMD5, 7)
@@ -242,7 +242,7 @@ func TestContentDedupForceOverridesReuse(t *testing.T) {
 }
 
 // TestContentDedupLockSerializesConcurrentSameContent SETNX 内容锁在并发上传同内容时
-// 只让一个跑 AI、其余走复用（spec 第 6 行）。用 miniredis 验证第二个并发请求被锁挡住。
+// 只让一个跑 AI、其余走复用（见 docs/architecture/reliability.md）。用 miniredis 验证第二个并发请求被锁挡住。
 func TestContentDedupLockSerializesConcurrentSameContent(t *testing.T) {
 	svc, _, _, rdb := newContentDedupTestService(t)
 	ctx := context.Background()
@@ -263,7 +263,7 @@ func TestContentDedupLockSerializesConcurrentSameContent(t *testing.T) {
 	}
 }
 
-// TestContentDedupHitCountIsObservable 命中计数可观测（spec 第 10 行）：每次去重
+// TestContentDedupHitCountIsObservable 命中计数可观测（当前实现约束）：每次去重
 // 命中 +1，是去重指标的可跑统计来源。验收命令 = 跑本测试套件后
 // ContentDedupHits() 返回真实命中数（非估算）。
 func TestContentDedupHitCountIsObservable(t *testing.T) {

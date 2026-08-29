@@ -9,33 +9,33 @@ import (
 	"vid-lens/internal/ai"
 )
 
-// Spec 05: LLMIntentClassifier（LLM 兜底）。
+// docs/architecture/retrieval.md: LLMIntentClassifier（LLM 兜底）。
 //
 // 规则层未短路（confidence < shortCircuitThreshold）时调用，独立低温廉价模型，
 // 输出 (intent, confidence)。confidence<0.5 回退规则结果（CONTEXT.md 已定，
-// spec line 57）。
+// 当前实现约束）。
 //
-// 不照搬 wali 三段式阈值/0.8 短路/二次提取全套（决策记录 §4 "不 1:1 移植 wali"）：
-//   - 用 vid-lens 自己的 prompt（spec line 33），只问"这是哪类 intent + 多确信"，
+// 不照搬 wali 三段式阈值/0.8 短路/二次提取全套（当前实现约束 "不 1:1 移植 wali"）：
+//   - 用 vid-lens 自己的 prompt（当前实现约束），只问"这是哪类 intent + 多确信"，
 //     不做 wali 式二次提取（指代消解走 Signal 无副作用正则，不走 LLM 二次提取）。
 //   - 单次 LLM 调用，不级联多轮。
 //
-// 与规则层边界（spec line 30 / CONTEXT.md）：规则层是"快、便宜、可能漏判"，
-// LLM 兜底是"慢、贵、覆盖边界"。规则层短路省的就是这一层 LLM 调用（决策记录
+// 与规则层边界（当前实现约束 / CONTEXT.md）：规则层是"快、便宜、可能漏判"，
+// LLM 兜底是"慢、贵、覆盖边界"。规则层短路省的就是这一层 LLM 调用（当前实现约束
 // §4：省 LLM = 短路率派生结论）。
 
-// LLMIntentClassifier 是 LLM 兜底 intent 分类器（spec 05）。
+// LLMIntentClassifier 是 LLM 兜底 intent 分类器（docs/architecture/retrieval.md）。
 type LLMIntentClassifier struct {
 	chat ai.ChatClient
 }
 
 // NewLLMIntentClassifier 构造 LLM 兜底分类器。chat 为 nil 时 Classify 返回
-// (IntentDirectQA, 0)——IntentRouter 会回退规则结果（spec line 57）。
+// (IntentDirectQA, 0)——IntentRouter 会回退规则结果（当前实现约束）。
 func NewLLMIntentClassifier(chat ai.ChatClient) *LLMIntentClassifier {
 	return &LLMIntentClassifier{chat: chat}
 }
 
-// llmFallbackThreshold 是 LLM 结果回退规则结果的置信度门槛（spec line 57）。
+// llmFallbackThreshold 是 LLM 结果回退规则结果的置信度门槛（当前实现约束）。
 //
 // audit trail（为何这么定）：0.5 — "半信半疑"线。LLM 给的 confidence 低于此
 // 说明 LLM 自己也不确定，硬采信会把不确定错分带进 ExecutionPolicy 路由，不如
@@ -69,11 +69,11 @@ func (c *LLMIntentClassifier) Classify(ctx context.Context, question string, rec
 }
 
 // buildIntentClassifyMessages 构造 LLM intent 分类 prompt（vid-lens 自己语义，
-// 不照搬 wali 三段式，spec line 33）。
+// 不照搬 wali 三段式，当前实现约束）。
 //
 // audit trail：prompt 只问"哪类 intent + 多确信"，要求严格 JSON 输出。不给
 // 示例（避免 LLM 抄示例）、不做二次提取（指代消解走 Signal 正则，不走 LLM）。
-// taxonomy 用 vid-lens 6 类（决策记录 §4），不用 wali 的 DIAGNOSE/CONFIGURE。
+// taxonomy 用 vid-lens 6 类（当前实现约束），不用 wali 的 DIAGNOSE/CONFIGURE。
 func buildIntentClassifyMessages(question string, recent []string) []ai.ChatMessage {
 	var recentText strings.Builder
 	for i, msg := range recent {
@@ -133,7 +133,7 @@ func parseIntentResponse(text string) (Intent, float64, error) {
 }
 
 // normalizeLLMIntent 把 LLM 返回的 intent 串规整到 taxonomy，未识别归 direct_qa
-// （最安全的检索+rerank+LLM，spec line 33 不照搬 wali）。
+// （最安全的检索+rerank+LLM，当前实现约束 不照搬 wali）。
 func normalizeLLMIntent(s string) Intent {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {

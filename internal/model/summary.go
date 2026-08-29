@@ -8,7 +8,7 @@ import (
 // AI output is stored separately from the base transcription record.
 // 选用 TEXT 类型存储 Markdown 格式的分析结果，方便前端直接渲染
 //
-// file_md5 列承担内容+目标级去重（spec 03）：与 task_id 的 1:1 唯一索引解耦，
+// file_md5 列承担内容+目标级去重（docs/architecture/data-model.md）：与 task_id 的 1:1 唯一索引解耦，
 // 同一内容指纹跨 task/跨用户只允许一个成功摘要结果行（行存在即 Completed 语义）。
 // 三层幂等分工见 VideoTranscription 注释。
 type AISummary struct {

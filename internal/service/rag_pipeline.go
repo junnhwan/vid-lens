@@ -187,10 +187,10 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	}
 	if p.reranker != nil {
 		citations = p.reranker.Rerank(ctx, req.Question, citations, topK)
-		// Spec 06 档1：rerank 失败 → 向量基线。ModelReranker 在 client 失败时已用
-		// fallbackRerankOrder 回退原序（= 无 rerank 的向量基线，spec 04 消融 vector_only
+		// docs/architecture/reliability.md 档1：rerank 失败 → 向量基线。ModelReranker 在 client 失败时已用
+		// fallbackRerankOrder 回退原序（= 无 rerank 的向量基线，docs/architecture/retrieval.md 消融 vector_only
 		// 档），并在 chunk 上标 model_rerank_failed/model_rerank_unavailable。此处把该
-		// chunk 级 fallback 提升到 trace + 计一次档1触发，使降级链可观测（spec 06：
+		// chunk 级 fallback 提升到 trace + 计一次档1触发，使降级链可观测（docs/architecture/reliability.md：
 		// 只做计数不做 trace，但 fallback 标记复用 rag_expand.go 的 Fallbacks 范式）。
 		if rerankFallbackReason := firstRerankFallback(citations); rerankFallbackReason != "" {
 			trace.Fallbacks = appendFallback(trace.Fallbacks, "rerank_failed_vector_baseline")
@@ -216,7 +216,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	}, nil
 }
 
-// applyPolicy 把 ExecutionPolicy（spec 04 A段）映射到现有 RAGRetrievalConfig 字段。
+// applyPolicy 把 ExecutionPolicy（docs/architecture/retrieval.md A段）映射到现有 RAGRetrievalConfig 字段。
 // ExecutionPolicy 不新建检索参数，只生产 Config 的字段值。
 //
 // 映射（消掉散落 if）：

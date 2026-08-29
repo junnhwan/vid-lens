@@ -7,8 +7,8 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 05：IntentRouter 级联编排测外部可观察行为——规则层短路不调 LLM、
-// 规则层未短路调 LLM 兜底、LLM<0.5 回退规则、router nil 降级占位（spec line 109）。
+// docs/architecture/retrieval.md：IntentRouter 级联编排测外部可观察行为——规则层短路不调 LLM、
+// 规则层未短路调 LLM 兜底、LLM<0.5 回退规则、router nil 降级占位（当前实现约束）。
 
 func TestIntentRouterRuleShortCircuitsSkipsLLM(t *testing.T) {
 	// overview 问题规则层达短路阈值 → 不该调 LLM。
@@ -42,7 +42,7 @@ func TestIntentRouterLLMFallbackOnAmbiguous(t *testing.T) {
 }
 
 func TestIntentRouterLLMLowConfidenceFallsBackToRule(t *testing.T) {
-	// LLM confidence<0.5 → 回退规则结果（spec line 57）。
+	// LLM confidence<0.5 → 回退规则结果（当前实现约束）。
 	router := NewIntentRouter(NewRuleIntentClassifier())
 	videoSession := &model.ChatSession{ScopeType: model.ChatScopeVideo, TaskID: 1}
 	// 规则层 best 是 direct_qa（"分布式锁" 无明显 signal）；LLM 给 small_talk 0.3 < 0.5。
@@ -65,7 +65,7 @@ func TestIntentRouterNilChatSkipsLLMFallback(t *testing.T) {
 
 func TestIntentRouterNilRouterDegradesToPlaceholder(t *testing.T) {
 	// router nil → chat_prepare 降级占位。本测试直接验证 IntentRouter.Classify 的
-	// nil 接收者降级路径（保测试稳定，spec line 65）。
+	// nil 接收者降级路径（保测试稳定，当前实现约束）。
 	var router *IntentRouter
 	videoSession := &model.ChatSession{ScopeType: model.ChatScopeVideo, TaskID: 1}
 	intent := router.Classify(context.Background(), "这个视频主要讲了什么", videoSession, ChatModeVideoAssistant, nil, nil)

@@ -64,7 +64,7 @@ func TestAblationConfigsValidateAndFormProgressiveChain(t *testing.T) {
 	}
 
 	// Progressive-chain invariant: frozen retrieval-agnostic params (k, chunker,
-	// chunk size/overlap) MUST be identical across all variants — spec 01 §消融
+	// chunk size/overlap) MUST be identical across all variants — see docs/eval/README.md
 	// 实验配置 "每档冻结 k/boundary_tolerance_ms/.../min_evidence_coverage".
 	base := loaded["vector_only"]
 	for name, cfg := range loaded {
@@ -75,7 +75,7 @@ func TestAblationConfigsValidateAndFormProgressiveChain(t *testing.T) {
 		}
 	}
 
-	// Honest-label requirement (spec 01 §model_rerank 代理 + decision #3): the
+	// Honest-label requirement (docs/eval/README.md 的 model_rerank 代理标注约束): the
 	// model_rerank config file MUST carry the non-overclaiming proxy label so a
 	// reader cannot mistake the deterministic proxy for a real model-rerank lift.
 	modelRerankRaw, err := os.ReadFile(filepath.Join(root, "model_rerank.yaml"))
@@ -84,7 +84,7 @@ func TestAblationConfigsValidateAndFormProgressiveChain(t *testing.T) {
 	}
 	for _, want := range []string{"deterministic", "代理", "ModelRerankerFactory"} {
 		if !strings.Contains(string(modelRerankRaw), want) {
-			t.Fatalf("model_rerank.yaml missing honest-label token %q (spec 01 §model_rerank 代理)", want)
+			t.Fatalf("model_rerank.yaml missing honest-label token %q (docs/eval/README.md model_rerank 代理标注约束)", want)
 		}
 	}
 }

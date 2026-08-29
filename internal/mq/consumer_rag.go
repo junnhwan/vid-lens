@@ -90,7 +90,7 @@ func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.Vide
 	if c.ragProducer == nil {
 		return nil
 	}
-	// 内容+目标级索引去重（spec 03 第 66 行）：同 (file_md5, embedding_model)
+	// 内容+目标级索引去重（docs/$1）：同 (file_md5, embedding_model)
 	// 已有成功索引 → 不重跑 embed，复用旧索引。索引重建（分块/embedding 模型
 	// 变更）后旧索引 status 被改写为非 indexed，本判定不命中 → 照常重索引，
 	// 旧索引不挡。三层幂等分工见 service/content_dedup.go 注释。

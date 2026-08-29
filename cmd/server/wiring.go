@@ -62,8 +62,8 @@ func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
 
 // productionRetrievalConfig is the eval-driven production retrieval configuration.
 //
-// spec 04 B段（评测驱动线上化）：rerank 默认值由 spec 01 dev 单变量消融结论驱动，
-// 不再靠 cfg.RerankModel 是否非空手拍。决策记录与 audit trail：
+// docs/architecture/retrieval.md B段（评测驱动线上化）：rerank 默认值由 docs/eval/README.md dev 单变量消融结论驱动，
+// 不再靠 cfg.RerankModel 是否非空手拍。当前实现约束与 audit trail：
 //
 //   - experiment_id: rerank-vs-none-dev（docs-private/eval/experiment-registry.yaml +
 //     artifacts/eval/rag-results.md "Strict Single-Variable Ablation"）
@@ -98,7 +98,7 @@ func productionRetrievalConfig(cfg config.RAGConfig) service.RAGRetrievalConfig 
 	retrieval.NeighborRadius = 0
 	retrieval.MaxContextChars = 0
 	retrieval.MinVectorScore = cfg.MinScore
-	// spec 04 B段：rerank 默认 deterministic on（experiment rerank-vs-none-dev
+	// docs/architecture/retrieval.md B段：rerank 默认 deterministic on（experiment rerank-vs-none-dev
 	// dev 消融 +0.102 CI [0,+0.204]，deterministic 代理）。cfg.RerankModel 非空时
 	// 升级到 model rerank（显式覆盖路径，lift 未由本实验证明）。
 	retrieval.RerankerMode = service.RerankerModeDeterministic
@@ -155,8 +155,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	})
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
-	// Spec 05：级联 intent 分类器注入 ChatService（规则层零依赖，LLM 兜底用本次
-	// 请求的 chat client，per-request 解析）。替换 spec 04 A段占位 classifyIntentPlaceholder。
+	// docs/architecture/retrieval.md：级联 intent 分类器注入 ChatService（规则层零依赖，LLM 兜底用本次
+	// 请求的 chat client，per-request 解析）。替换 docs/architecture/retrieval.md A段占位 classifyIntentPlaceholder。
 	chatSvc.SetIntentRouter(service.NewIntentRouter(service.NewRuleIntentClassifier()))
 
 	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools)

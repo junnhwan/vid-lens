@@ -52,7 +52,7 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 
 // FindByMD5AndModel 按内容指纹 + embedding 模型查找已成功索引的 RAG 索引行
 // （跨 task、跨用户）。仅复用 status=indexed 的成功结果：索引重建（分块/embedding
-// 模型变更）后旧索引行 status 会被 Upsert 改写，不再挡住重索引（spec 03 第 66 行）。
+// 模型变更）后旧索引行 status 会被 Upsert 改写，不再挡住重索引（docs/$1）。
 func (r *RAGIndexRepository) FindByMD5AndModel(fileMD5, embeddingModel string) (*model.VideoRAGIndex, error) {
 	var index model.VideoRAGIndex
 	err := r.db.Where("file_md5 = ? AND embedding_model = ? AND status = ?", fileMD5, embeddingModel, model.RAGIndexStatusIndexed).

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Spec 05：Signal 提取只测提取结果对不对（spec line 118），不测正则实现细节。
+// docs/architecture/retrieval.md：Signal 提取只测提取结果对不对（当前实现约束），不测正则实现细节。
 // 时间戳/实体/句式标志的外部可观察行为。
 
 func TestExtractSignalsTimestamps(t *testing.T) {
@@ -97,7 +97,7 @@ func TestExtractSignalsEmptyQuestion(t *testing.T) {
 	}
 }
 
-// TestExtractSignalsNoSideEffects 锁定"无副作用"契约（spec 05 line 90）：
+// TestExtractSignalsNoSideEffects 锁定"无副作用"契约（见 docs/architecture/retrieval.md）：
 // 同一问题多次提取结果一致，不依赖任何外部状态。
 func TestExtractSignalsNoSideEffects(t *testing.T) {
 	q := "第15分钟讲了 Redis"

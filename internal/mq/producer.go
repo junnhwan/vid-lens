@@ -101,7 +101,7 @@ func claimTokenFromContext(ctx context.Context) string {
 // （AI 服务挂任务不丢）、③ 削峰（ASR 配额有限需排队）。吞吐量级是用户
 // 级并发（个位到几十 QPS），不是日志管道（万级 TPS）——Kafka 的
 // partition 并行、ISR 副本、高吞吐日志聚合在用户级并发下都用不上，
-// 所以选 RabbitMQ 而非 Kafka（决策与故障矩阵见 docs/decisions/02-dispatch-consistency.md）。
+// 所以选 RabbitMQ 而非 Kafka（可靠性与故障矩阵见 docs/architecture/reliability.md）。
 //
 // RabbitMQ 的 ack 重投 / 死信队列 / 优先级 / 路由天然咬合"任务可靠投递
 // + 失败可恢复 + ASR 排队"痛点。配置：classic persistent queue + publisher

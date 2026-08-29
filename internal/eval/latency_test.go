@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestRetrieveLatencyP95IncludesFailuresAsZero enforces the spec's anti-overclaim
+// TestRetrieveLatencyP95IncludesFailuresAsZero enforces the 评测文档中的 anti-overclaim
 // P95 rule: executor-failed answerable cases count their RetrieveLatencyMS as 0
 // and stay in the P95 sample (excluding failures would make P95 look healthier
 // the more the system fails — the same failure-hiding pattern the retrieval

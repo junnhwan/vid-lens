@@ -33,11 +33,11 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		return nil
 	}
 	// applyTier2 是档2降级入口：LLM 失败 → 无 LLM 模式（片段+摘要直拼 + degraded），
-	// 不调 LLM（spec 06 稀缺点）。返回降级答案体，由 caller 发出并标 degraded。
+	// 不调 LLM（docs/architecture/reliability.md 稀缺点）。返回降级答案体，由 caller 发出并标 degraded。
 	applyTier2 := func() error {
 		degraded = true
 		// 档2 不调 LLM：丢弃已累积的部分 LLM delta，用降级答案体替代
-		// （spec 06 档2 = 片段+摘要直拼，不含部分 LLM 生成内容）。
+		// （docs/architecture/reliability.md 档2 = 片段+摘要直拼，不含部分 LLM 生成内容）。
 		answer = s.applyTier2Degradation(ctx, prepared)
 		return emitAnswer(answer)
 	}
@@ -73,7 +73,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		}
 	}
 
-	// Spec 07 ⑨ 轻量证据约束（与 ④ 正交：LLM 可用约束 vs 不可用降级）。见
+	// docs/architecture/retrieval.md ⑨ 轻量证据约束（与 ④ 正交：LLM 可用约束 vs 不可用降级）。见
 	// applyEvidenceConstraint（Ask / AskStream 共用）。流式路径的诚实边界（spec review A2）：
 	// ⑨ 是生成后校验，provider streaming 已把 delta 推给客户端，已发 delta 无法召回；
 	// ⑨ 的"违规结论被拒"落在持久化层——DB 存约束后版本、citations 事件发约束后引用，

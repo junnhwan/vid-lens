@@ -44,7 +44,7 @@ func (e ChunkEvidenceExecutor) Execute(ctx context.Context, c Case) (EvaluationC
 		contextID := strings.TrimSpace(chunk.ContextID)
 		if contextID == "" {
 			// This is a failed case (returns ExecutionError); per the failure-as-zero
-			// convention (spec 01 line 73), failed cases record 0 latency so the
+			// convention (docs/eval/README.md 的失败样本计时约定), failed cases record 0 latency so the
 			// success-subset P95 cannot be polluted by a failed case's retrieval time.
 			return EvaluationCaseResult{RetrieveLatencyMS: 0}, &ExecutionError{Stage: "evidence_mapping", Code: "stable_identity_missing", Err: fmt.Errorf("retrieved chunk %d has no stable context identity", i)}
 		}

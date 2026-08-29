@@ -103,7 +103,7 @@ type ChatService struct {
 	memory      ChatMemoryStore
 	recorder    ai.CallRecorder
 	cfg         ChatConfig
-	intentRouter *IntentRouter // spec 05：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
+	intentRouter *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
 }
 
 type AskResult struct {
@@ -111,7 +111,7 @@ type AskResult struct {
 	Answer    string          `json:"answer"`
 	Citations []Citation      `json:"citations"`
 	Model     string          `json:"model"`
-	// Degraded 标记档2降级态（spec 06 决策记录第 10 节）：LLM 失败回退无 LLM 模式
+	// Degraded 标记档2降级态（docs/architecture/reliability.md 当前实现约束）：LLM 失败回退无 LLM 模式
 	// （检索片段+已有摘要直拼）时为 true，对外告知用户当前降级。档1 rerank 失败回退
 	// 向量基线后 LLM 仍生成完整答案，不标 degraded。
 	Degraded bool `json:"degraded,omitempty"`
@@ -130,22 +130,22 @@ type preparedRAGChat struct {
 	Contexts    []RetrievedChunk
 	Citations   []Citation
 	Messages    []ai.ChatMessage
-	// TaskIDs 是本次检索涉及的 task 范围（spec 07 证据约束重检索复用）。
+	// TaskIDs 是本次检索涉及的 task 范围（docs/architecture/retrieval.md 证据约束重检索复用）。
 	// strict_rag / 单视频 = [session.TaskID]；KnowledgeBase = 集合内 video_ids。
 	TaskIDs []int64
-	// EmbeddingModel 是本次检索用的 embedding 模型名（spec 07 重检索复用）。
+	// EmbeddingModel 是本次检索用的 embedding 模型名（docs/architecture/retrieval.md 重检索复用）。
 	EmbeddingModel string
-	// EmbeddingClient / ChatClient 供 spec 07 证据约束重检索复用（reretrieveEvidence
+	// EmbeddingClient / ChatClient 供 docs/architecture/retrieval.md 证据约束重检索复用（reretrieveEvidence
 	// 走完整 Retrieve 链路需要 embedding 做 query 向量 + 可能的 query rewrite）。
 	// 生产路径注入真实 client；测试路径用 fake re-retriever 跳过本字段。
 	EmbeddingClient ai.EmbeddingClient
 	ChatClient      ai.ChatClient
-	// Policy 是本次问答的 ExecutionPolicy（spec 04）。spec 06 降级在其之上：
+	// Policy 是本次问答的 ExecutionPolicy（docs/architecture/retrieval.md）。docs/architecture/reliability.md 降级在其之上：
 	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
 	Policy ExecutionPolicy
 }
 
-// evidenceIDSet 返回本次检索集的 evidence id 范围（spec 07 证据约束校验用）。
+// evidenceIDSet 返回本次检索集的 evidence id 范围（docs/architecture/retrieval.md 证据约束校验用）。
 // 复用 Contexts（检索召回的原始片段，含 EvidenceID）；Citations 是其公开子集，
 // 证据范围以 Contexts 为准——⑨ 校验的是 LLM 引用是否在"本次检索集"内，Contexts
 // 就是本次检索集的事实表示。
@@ -180,7 +180,7 @@ func (s *ChatService) SetAIRecorder(recorder ai.CallRecorder) {
 	s.recorder = recorder
 }
 
-// SetIntentRouter 注入 spec 05 级联 intent 分类器（nil 时 chat_prepare 降级占位
+// SetIntentRouter 注入 docs/architecture/retrieval.md 级联 intent 分类器（nil 时 chat_prepare 降级占位
 // classifyIntentPlaceholder，保测试稳定）。生产路径由 wiring 注入；测试可不调。
 func (s *ChatService) SetIntentRouter(r *IntentRouter) {
 	s.intentRouter = r

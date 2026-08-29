@@ -283,7 +283,7 @@ type RetrySchedulerConfig struct {
 // branch is what closes the window RabbitMQ publisher confirm cannot: a process
 // that committed the task but crashed before the publisher-confirm callback
 // returned leaves an expired dispatch lease that this scheduler reclaims and
-// re-dispatches. See docs/decisions/02-dispatch-consistency.md.
+// re-dispatches. See docs/architecture/reliability.md.
 type RetryScheduler struct {
 	repos    *repository.Repositories
 	producer retryProducer

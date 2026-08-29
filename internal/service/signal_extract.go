@@ -5,13 +5,13 @@ import (
 	"strings"
 )
 
-// Spec 05: 无副作用 Signal 提取（指代消解 + 检索过滤）。
+// docs/architecture/retrieval.md: 无副作用 Signal 提取（指代消解 + 检索过滤）。
 //
 // Signal = 纯正则从问题里提取的结构化线索（CONTEXT.md）：时间戳（毫秒区间）、
 // 实体、章节、比较标志。用于指代消解（"它/这个"→ 上文实体）与检索过滤（时间戳
 // 缩 chunk 时间范围）。
 //
-// 与 rag_rewrite LLM 改写边界（spec 05 line 38 / 93，两层正交）：
+// 与 rag_rewrite LLM 改写边界（见 docs/architecture/retrieval.md，两层正交）：
 //   - Signal 无副作用：纯正则，不调 LLM、不编造，先于 rewrite 提取结构化线索。
 //   - rewrite 有副作用：LLM 改写，可能补全/编造语义，后于 Signal。
 // 两层分工——Signal 给"可确定的结构化线索"，rewrite 给"语义级改写"，互不替代。
@@ -43,7 +43,7 @@ type Signals struct {
 	Entities []string
 }
 
-// ExtractSignals 从问题文本无副作用提取结构化线索（spec 05）。
+// ExtractSignals 从问题文本无副作用提取结构化线索（docs/architecture/retrieval.md）。
 //
 // 纯正则，零 LLM 调用，零编造。返回的 Signals 用于 RuleIntentClassifier 的 signal
 // 模式维度与 timeline_locate 的检索时间过滤。
@@ -60,12 +60,12 @@ func ExtractSignals(question string) Signals {
 
 // --- 时间戳正则 ---
 //
-// 覆盖中文视频问答常见时间表述（spec 05 line 46）：
+// 覆盖中文视频问答常见时间表述（见 docs/architecture/retrieval.md）：
 //   - "第15分钟" / "第15分" → 单点
 //   - "15:00" / "15分30秒" → 单点
 //   - "第15到20分钟" / "15:00-20:00" → 区间
 //
-// audit trail（决策记录 §4 硬约束，每个维度写为何这么定）：
+// audit trail（当前实现约束 硬约束，每个维度写为何这么定）：
 //   - 只认"分钟+秒"粒度，不认"小时"：视频问答时间几乎都在分钟级，认小时会引入
 //     "02:00" 是凌晨2点还是第2小时的歧义；保守认分钟级，歧义留给 rewrite 兜底。
 //   - 单点时间戳解析成 [start, start]：caller 用它做"时间点附近 chunk 过滤"，
@@ -211,7 +211,7 @@ func parseInt64(s string) int64 {
 
 // --- 句式 signal 正则 ---
 //
-// 词表是单一事实源（spec 05 review: Duplicated Code）：RuleIntentClassifier 的
+// 词表是单一事实源（docs/architecture/retrieval.md review: Duplicated Code）：RuleIntentClassifier 的
 // 关键词维度与 Signal 的句式 flag 共用同一份词表，避免两份平行词表手动漂移。
 // regex 用 strings.Join(words, "|") 从词表构造，词表改一处两处同步。
 
@@ -235,7 +235,7 @@ var (
 	smallTalkSignalRe = regexp.MustCompile(strings.Join(smallTalkKeywords, "|"))
 )
 
-// extractEntities 粗提候选实体（spec 05 line 92，用于指代消解回指上文实体）。
+// extractEntities 粗提候选实体（见 docs/architecture/retrieval.md，用于指代消解回指上文实体）。
 //
 // audit trail：粗提两种最无歧义的形态——引号包裹的名词（用户显式标注的实体）
 // 与连续大写英文（专有名词 / 技术术语）。中文专有名词粗提留作后续扩展，本版不

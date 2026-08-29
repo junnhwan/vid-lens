@@ -2,7 +2,7 @@ package service
 
 import "vid-lens/internal/model"
 
-// Spec 04 (A段): intent → 检索/生成参数映射值对象。
+// docs/architecture/retrieval.md (A段): intent → 检索/生成参数映射值对象。
 //
 // ExecutionPolicy 把"这次提问该不该检索、检索多大范围、要不要 rerank、要不要
 // rewrite、是否走 LLM、scope 是单视频还是集合"这一组原本散落在 prepareChatByMode
@@ -10,15 +10,15 @@ import "vid-lens/internal/model"
 //
 // 它不新建检索参数：所有字段都映射到现有 RAGRetrievalConfig（rag_eval_config.go）
 // 的 EnableVector/EnableBM25/RewriteQueries/TopK/RerankerMode 等。ExecutionPolicy 只是
-// 这些 Config 字段的生产方（spec 04 Implementation Decisions: "ExecutionPolicy 是
+// 这些 Config 字段的生产方（docs/architecture/retrieval.md 当前实现约束: "ExecutionPolicy 是
 // Config 的生产方，不是重建检索"）。
 //
-// intent taxonomy 取 spec 01 共享 query 池的 category 取值（spec 01 已拍板 category
-// 复用为 intent 标签，schema 不动）。真分类器是 spec 05 的事；本包用 placeholder
+// intent taxonomy 取 docs/eval/README.md 共享 query 池的 category 取值（docs/eval/README.md 已确定 category
+// 复用为 intent 标签，schema 不动）。真分类器是 docs/architecture/retrieval.md 的事；本包用 placeholder
 // 分类器 classifyIntentPlaceholder（现有 isVideoOverviewQuestion + session.ScopeType）
-// 把路由打通，spec 05 落地后替换占位为真分类器。
+// 把路由打通，docs/architecture/retrieval.md 落地后替换占位为真分类器。
 
-// Intent 是一次用户提问被识别出的处理类别（CONTEXT.md）。spec 01 共享 query 池的
+// Intent 是一次用户提问被识别出的处理类别（CONTEXT.md）。docs/eval/README.md 共享 query 池的
 // category 取值复用为 intent 标签，不另立字段。用命名类型而非裸 string，让编译器
 // 抓 PolicyFor(intent, scope) 的参数顺序互换。
 type Intent string
@@ -33,14 +33,14 @@ const (
 	ScopeCollection Scope = "collection"
 )
 
-// Intent taxonomy（spec 01 共享 query 池的 category 取值，复用为 intent 标签）。
+// Intent taxonomy（docs/eval/README.md 共享 query 池的 category 取值，复用为 intent 标签）。
 const (
 	IntentVideoOverview  Intent = "video_overview"  // 概览类问题，关检索走视频上下文直拼
 	IntentDirectQA       Intent = "direct_qa"       // 精确问答，开检索 + rerank
 	IntentTopicCompare   Intent = "topic_compare"  // 跨视频对比，Scope=collection
 	IntentSeriesLocate   Intent = "series_locate"  // 跨视频系列定位，Scope=collection
-	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位，开检索 + Signal 时间戳过滤（Signal 提取留 spec 05）
-	IntentSmallTalk      Intent = "small_talk"     // 闲聊，关检索关 LLM 直答（占位，真分类器在 spec 05）
+	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位，开检索 + Signal 时间戳过滤（Signal 提取留 docs/architecture/retrieval.md）
+	IntentSmallTalk      Intent = "small_talk"     // 闲聊，关检索关 LLM 直答（占位，真分类器在 docs/architecture/retrieval.md）
 )
 
 // ExecutionPolicy: intent → 检索/生成参数映射值对象（CONTEXT.md）。
@@ -57,7 +57,7 @@ type ExecutionPolicy struct {
 	Rewrite int
 	// UseSummary 控制是否走视频摘要/转写直拼而非检索（overview/兜底路径）。
 	UseSummary bool
-	// UseLLM 控制是否调用 LLM 生成答案（small_talk=false 留接口位，真分类器在 spec 05）。
+	// UseLLM 控制是否调用 LLM 生成答案（small_talk=false 留接口位，真分类器在 docs/architecture/retrieval.md）。
 	UseLLM bool
 	// Scope 是检索范围档：ScopeVideo（会话绑 task）或 ScopeCollection（会话绑 KnowledgeBase）。
 	Scope Scope
@@ -69,7 +69,7 @@ const MaxRetrievalTopK = 10
 
 // ClampTopK 把 caller 传入的 topK 规整到 [policy.TopK 默认, MaxRetrievalTopK]。
 // topK<=0 → policy 默认；topK>MaxRetrievalTopK → 截到上限。原 prepareRAGChat 两段
-// 散落 if（默认值 + 上限）由本函数统一表达（spec 04 数字占位符 A段）。
+// 散落 if（默认值 + 上限）由本函数统一表达（docs/architecture/retrieval.md 待评测指标 A段）。
 func (p ExecutionPolicy) ClampTopK(topK int) int {
 	if topK <= 0 {
 		topK = p.TopK
@@ -82,10 +82,10 @@ func (p ExecutionPolicy) ClampTopK(topK int) int {
 
 // PolicyFor 返回 intent + scope → ExecutionPolicy 的映射。
 //
-// 一个 switch 消掉 prepareChatByMode 的散落 if（决策记录第 4 节硬约束）。
+// 一个 switch 消掉 prepareChatByMode 的散落 if（当前实现约束硬约束）。
 // 每档参数选择的 audit trail 写在 case 注释里（反 overclaim：为什么 overview 关检索、
 // direct_qa 开 rerank、topic_compare scope=collection，以及每个数值为何这么定——
-// 决策记录 §4 硬约束"每个阈值必须写为什么这么定"）。
+// 当前实现约束 硬约束"每个阈值必须写为什么这么定"）。
 func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 	switch intent {
 	case IntentVideoOverview:
@@ -110,12 +110,12 @@ func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 		return directQAPolicy(ScopeCollection)
 	case IntentTimelineLocate:
 		// 时间线定位类问题靠检索 + Signal 时间戳过滤缩范围。Signal 提取（时间戳
-		// 正则等）是 spec 05 的事，本 spec 只留接口位：Retrieve 开、参数同 direct_qa，
-		// Signal 过滤在 spec 05 接到 Retrieve 路径后补。
+		// 正则等）是 docs/architecture/retrieval.md 的事，本 spec 只留接口位：Retrieve 开、参数同 direct_qa，
+		// Signal 过滤在 docs/architecture/retrieval.md 接到 Retrieve 路径后补。
 		return directQAPolicy(scope)
 	case IntentSmallTalk:
 		// 闲聊不烧检索 + 生成。占位分类器当前不会产出此 intent（见
-		// classifyIntentPlaceholder），policy 留接口位，真分类器（spec 05）落地后启用。
+		// classifyIntentPlaceholder），policy 留接口位，真分类器（docs/architecture/retrieval.md）落地后启用。
 		return ExecutionPolicy{
 			Retrieve: false,
 			UseLLM:   false,
@@ -130,7 +130,7 @@ func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 // directQAPolicy 是"检索 + rerank + LLM"档的共享构造（direct_qa / topic_compare /
 // series_locate / timeline_locate 共用，消掉 PolicyFor 里三份近似 struct 字面量）。
 //
-// audit trail（决策记录 §4 硬约束，每个阈值写理由）：
+// audit trail（当前实现约束 硬约束，每个阈值写理由）：
 //   - TopK=5：单次问答引用超过 5 条片段会让 LLM prompt 噪声上升、用户难以核对；
 //     5 是 productionRetrievalConfig 默认值，与线上 wiring 一致。prepareRAGChat 的
 //     topK>10→10 上限是防 caller 传过大值打爆 prompt，5 在上限内不受影响。
@@ -150,17 +150,17 @@ func directQAPolicy(scope Scope) ExecutionPolicy {
 	}
 }
 
-// classifyIntentPlaceholder 是 spec 04 A段的占位分类器。
+// classifyIntentPlaceholder 是 docs/architecture/retrieval.md A段的占位分类器。
 //
-// Deprecated: spec 05 已落地 RuleIntentClassifier + LLMIntentClassifier 级联
+// Deprecated: docs/architecture/retrieval.md 已落地 RuleIntentClassifier + LLMIntentClassifier 级联
 // （IntentRouter）。本函数仅作降级 fallback（IntentRouter 为 nil 时）与测试桩
 // 保留——生产路径走 ChatService.classifyIntent → IntentRouter.Classify。删除风险：
-// 多个 spec 04 测试直接调用本函数断言占位行为，删它需同步改测试。
+// 多个 docs/architecture/retrieval.md 测试直接调用本函数断言占位行为，删它需同步改测试。
 //
 // 用现有 isVideoOverviewQuestion（概览句式命中）+ session.ScopeType（KnowledgeBase
 // → 跨视频 intent）作 intent 占位分类，把 ExecutionPolicy 路由打通。
 //
-// 占位边界（用户已拍板）：KB / strict_rag 模式不产出 small_talk（仍走检索），
+// 占位边界（用户已确定）：KB / strict_rag 模式不产出 small_talk（仍走检索），
 // small_talk 仅 video scope 单视频下留接口位，避免破坏 strict_rag 必须检索的契约。
 func classifyIntentPlaceholder(question string, session *model.ChatSession, mode ChatMode) Intent {
 	// strict_rag 模式按定义必须检索（不产出 overview 关检索 / small_talk），

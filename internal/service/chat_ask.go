@@ -22,11 +22,11 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 
 	answer, llmErr := chat.Chat(ctx, prepared.Messages)
 	if llmErr != nil {
-		// Spec 06 档2：LLM 失败 → 无 LLM 模式。该走 LLM 但 LLM 挂了 → 回退检索片段
-		// + 已有摘要直拼 + degraded:true，不调 LLM（决策记录第 6 节稀缺点）。
+		// docs/architecture/reliability.md 档2：LLM 失败 → 无 LLM 模式。该走 LLM 但 LLM 挂了 → 回退检索片段
+		// + 已有摘要直拼 + degraded:true，不调 LLM（当前实现约束稀缺点）。
 		// 前置诚信检查：无 LLM 模式 = buildRAGMessages 降级补全，非从零新建——
 		// 片段拼装已有（prepared.Contexts / prepared.Messages），此处只补"不调 LLM +
-		// degraded 标志 + 复用 spec 03 FindByMD5 摘要"路径。
+		// degraded 标志 + 复用 docs/architecture/data-model.md FindByMD5 摘要"路径。
 		if shouldTriggerLLMDegradation(prepared.Policy, llmErr) {
 			degradedAnswer := s.applyTier2Degradation(ctx, prepared)
 			finalized := finalizeAnswerCitations(degradedAnswer, prepared.Citations)
@@ -42,7 +42,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		return nil, llmErr
 	}
 
-	// Spec 07 ⑨ 轻量证据约束（LLM 可用时的约束，与 ④ LLM 不可用降级正交）：见
+	// docs/architecture/retrieval.md ⑨ 轻量证据约束（LLM 可用时的约束，与 ④ LLM 不可用降级正交）：见
 	// applyEvidenceConstraint（Ask / AskStream 共用，消除两处重复 closure）。
 	constrained := s.applyEvidenceConstraint(ctx, prepared, answer)
 	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, constrained.answer, constrained.citations, prepared.RecentLimit, profile.LLMModel)
@@ -54,24 +54,24 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	return result, nil
 }
 
-// applyEvidenceConstraint 是 Ask / AskStream 共用的 spec 07 ⑨ 证据约束入口
-// （spec review: Duplicated Code — 两处重复的 closure + disclaimer 合并此处）。
+// applyEvidenceConstraint 是 Ask / AskStream 共用的 docs/architecture/retrieval.md ⑨ 证据约束入口
+// （代码复用约束 — 两处重复的 closure + disclaimer 合并此处）。
 // enforceEvidenceConstraint 已内含 finalizeAnswerCitations（无违规走标准清洗，违规
 // 走重检索补证据或"无证据支撑"标注），caller 不再二次 finalize——二次 finalize 会把
-// 已去掉引用 token 的答案再 finalize 一遍导致引用集回退到 fallback（spec 07）。
+// 已去掉引用 token 的答案再 finalize 一遍导致引用集回退到 fallback（docs/architecture/retrieval.md）。
 func (s *ChatService) applyEvidenceConstraint(ctx context.Context, prepared *preparedRAGChat, answer string) evidenceConstraintOutcome {
 	return s.enforceEvidenceConstraint(ctx, prepared, answer, func(ctx context.Context, query string) ([]RetrievedChunk, error) {
 		return s.reretrieveEvidence(ctx, prepared, query)
 	})
 }
 
-// reretrieveEvidence 是 spec 07 证据约束的重检索入口：以违规结论涉及的 query
-// 复用 spec 04 检索链路（newRetrievalPipeline + Retrieve）补证据。
+// reretrieveEvidence 是 docs/architecture/retrieval.md 证据约束的重检索入口：以违规结论涉及的 query
+// 复用 docs/architecture/retrieval.md 检索链路（newRetrievalPipeline + Retrieve）补证据。
 //
-// 轻量边界（决策记录 §9.1）：单轮重检索，caller enforceEvidenceConstraint 已用
+// 轻量边界（当前实现约束）：单轮重检索，caller enforceEvidenceConstraint 已用
 // maxEvidenceReRetrieval=1 上限保证不无限循环。这里只负责"以给定 query 在原
 // session 的 task 范围重检索一次"。复用 prepared.TaskIDs / EmbeddingModel，
-// 不重建检索基础设施（spec 07 Implementation Decisions"复用现有 seam"）。
+// 不重建检索基础设施（docs/architecture/retrieval.md 当前实现约束"复用现有 seam"）。
 //
 // 返回的 RetrievedChunk 由 enforceEvidenceConstraint 经 buildCitationSet 并入候选集。
 func (s *ChatService) reretrieveEvidence(ctx context.Context, prepared *preparedRAGChat, query string) ([]RetrievedChunk, error) {

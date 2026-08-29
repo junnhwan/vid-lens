@@ -137,7 +137,7 @@ func (c RAGRetrievalConfig) ValidateStrictExperiment() error {
 //
 // factor 粒度对齐"业务开关"而非 struct 字段：reranker_mode+reranker_version
 // 合并为单个 "reranker" factor（开 rerank 同时设 mode+version，是同一业务开关
-// 的两面）；chunker_strategy+chunker_version 合并为 "chunker"。spec 01 的纪律
+// 的两面）；chunker_strategy+chunker_version 合并为 "chunker"。docs/eval/README.md 的纪律
 // 是"一次只比一个业务开关"，不是"一次只改一个 struct 字段。
 func ValidateSingleVariableAblation(base, candidate RAGRetrievalConfig) (string, error) {
 	if err := base.ValidateStrictExperiment(); err != nil {

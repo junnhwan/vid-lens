@@ -11,16 +11,16 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 05 验收 = 仅分类层评测（决策记录 §4）。固化 case 集 = spec 01 共享 query 池
+// docs/architecture/retrieval.md 验收 = 仅分类层评测（当前实现约束）。固化 case 集 = docs/eval/README.md 共享 query 池
 // （category = 黄金 intent），跨规则层/LLM 层跑准确率/短路率/LLM 兜底命中率。
-// test-sealed 不进分类评测（spec line 105：sealed 框架不进）。
+// test-sealed 不进分类评测（当前实现约束：sealed 框架不进）。
 //
-// 运行命令（spec line 110）：
+// 运行命令（当前实现约束）：
 //   go test ./internal/service/ -run TestIntentClassifierEvalOnDataset -v
 //
 // LLM 兜底用 oracle chat client（返回黄金 intent + 0.9 置信度）代表"LLM 兜底
 // 若可用能命中什么"——真实 LLM 效果需线上对比测，本评测诚实标注"oracle 上界"
-// 而非真实 LLM 数字（决策记录 §4：不照搬 wali，不夸大 LLM 兜底）。
+// 而非真实 LLM 数字（当前实现约束：不照搬 wali，不夸大 LLM 兜底）。
 
 func TestIntentClassifierEvalOnDataset(t *testing.T) {
 	cases := loadClassifierEvalCases(t)
@@ -41,7 +41,7 @@ func TestIntentClassifierEvalOnDataset(t *testing.T) {
 	for _, c := range cases {
 		golden := Intent(c.Category)
 		session := videoSession
-		// spec 01 dataset 的 topic_compare case（如 dev-mem-compare）应在 KB scope 下
+		// docs/eval/README.md dataset 的 topic_compare case（如 dev-mem-compare）应在 KB scope 下
 		// 分类（跨视频对比是 KB 主用例）。用 category 推 session：compare/series → KB。
 		if golden == IntentTopicCompare || golden == IntentSeriesLocate {
 			session = kbSession
@@ -74,7 +74,7 @@ func TestIntentClassifierEvalOnDataset(t *testing.T) {
 			if finalIntent == golden {
 				nonShortLLMCorrect++
 			}
-			// LLM 兜底命中 = 未短路 + LLM 修正成功（决策记录 §4 验收定义）。
+			// LLM 兜底命中 = 未短路 + LLM 修正成功（当前实现约束 验收定义）。
 			if !ruleOK && finalIntent == golden {
 				llmFallbackHit++
 			}
@@ -98,9 +98,9 @@ func TestIntentClassifierEvalOnDataset(t *testing.T) {
 	overallAcc := pct(overallCorrect, n)
 	shortRate := pct(shortCircuited, n)
 	llmFallbackHitRate := pct(llmFallbackHit, n)
-	savedLLM := shortRate // 省 LLM 调用 = 短路率派生（决策记录 §4）
+	savedLLM := shortRate // 省 LLM 调用 = 短路率派生（当前实现约束）
 
-	t.Logf("=== Spec 05 分类层评测 (固化 case 集 %d 条, train+dev, sealed 不进) ===", n)
+	t.Logf("=== docs/architecture/retrieval.md 分类层评测 (固化 case 集 %d 条, train+dev, sealed 不进) ===", n)
 	t.Logf("规则层准确率:          %s (%d/%d)", ruleAcc, ruleCorrect, n)
 	t.Logf("规则层短路率:          %s (%d/%d)", shortRate, shortCircuited, n)
 	t.Logf("LLM 兜底命中率:        %s (%d/%d 未短路)", llmFallbackHitRate, llmFallbackHit, llmFallbackAttempts)
@@ -112,7 +112,7 @@ func TestIntentClassifierEvalOnDataset(t *testing.T) {
 		t.Logf("  [%s] %s (%d/%d)", cat, pct(e.correct, e.total), e.correct, e.total)
 	}
 
-	// 不在测试里断言具体准确率阈值——数字回填 spec 占位符（spec line 80），
+	// 不在测试里断言具体准确率阈值——数字由评测输出回填，不在测试中硬编码，
 	// 此处只保证评测能跑出真实数字。断言"评测跑出非空数字"防止退化。
 	if n == 0 || overallCorrect == 0 {
 		t.Fatalf("eval produced zero correct classifications (n=%d correct=%d)", n, overallCorrect)
@@ -126,8 +126,8 @@ func pct(part, total int) string {
 	return fmt.Sprintf("%.1f%%", float64(part)/float64(total)*100)
 }
 
-// loadClassifierEvalCases 加载 spec 01 train+dev split 的 case（category = 黄金
-// intent）。test-sealed 不进分类评测（sealed 框架不进，spec line 105）。
+// loadClassifierEvalCases 加载 docs/eval/README.md train+dev split 的 case（category = 黄金
+// intent）。test-sealed 不进分类评测（sealed 框架不进，当前实现约束）。
 func loadClassifierEvalCases(t *testing.T) []eval.Case {
 	t.Helper()
 	// 从仓库根的 docs-private/eval/dataset/ 加载。测试可能从 internal/service 或根跑，

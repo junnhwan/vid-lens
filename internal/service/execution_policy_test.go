@@ -10,7 +10,7 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 04 (A段) 行为验收：同一问题在不同 intent/scope 下走不同检索参数。
+// docs/architecture/retrieval.md (A段) 行为验收：同一问题在不同 intent/scope 下走不同检索参数。
 // 复用 chat_ask_test.go 的 fake retriever / scripted chat client 范式，只测外部可观察
 // 差异（是否检索、BM25 开关、跨视频召回、recent 历史关断），不测 ExecutionPolicy
 // 内部 struct 字段赋值细节。
@@ -205,7 +205,7 @@ func TestExecutionPolicyRerankSwitchMapsToRerankerMode(t *testing.T) {
 }
 
 func TestExecutionPolicyPlaceholderClassifierIntent(t *testing.T) {
-	// 占位分类器（spec 05 真分类器落地前的接口位）的 intent 判定。
+	// 占位分类器（docs/architecture/retrieval.md 真分类器落地前的接口位）的 intent 判定。
 	videoSession := &model.ChatSession{ScopeType: model.ChatScopeVideo, TaskID: 1}
 	kbSession := &model.ChatSession{ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: 9}
 
@@ -230,7 +230,7 @@ func TestExecutionPolicyPlaceholderClassifierIntent(t *testing.T) {
 }
 
 func TestExecutionPolicySmallTalkLeavesRetrievalOff(t *testing.T) {
-	// small_talk policy 留接口位（真分类器在 spec 05）：关检索关 LLM。
+	// small_talk policy 留接口位（真分类器在 docs/architecture/retrieval.md）：关检索关 LLM。
 	// 占位分类器不产出 small_talk，故只断言 PolicyFor 的可观察字段，不接端到端。
 	policy := PolicyFor(IntentSmallTalk, ScopeVideo)
 	if policy.Retrieve || policy.UseLLM || policy.UseSummary {
@@ -239,7 +239,7 @@ func TestExecutionPolicySmallTalkLeavesRetrievalOff(t *testing.T) {
 }
 
 func TestExecutionPolicyTimelineLocateLeavesSignalInterface(t *testing.T) {
-	// timeline_locate 开检索 + Signal 时间戳过滤接口位（Signal 提取留 spec 05，
+	// timeline_locate 开检索 + Signal 时间戳过滤接口位（Signal 提取留 docs/architecture/retrieval.md，
 	// 本 spec 只确认 Retrieve 开、参数同 direct_qa）。
 	policy := PolicyFor(IntentTimelineLocate, ScopeVideo)
 	if !policy.Retrieve || !policy.Rerank || !policy.UseLLM {

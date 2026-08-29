@@ -14,7 +14,7 @@ import (
 )
 
 // faultMatrixRows enumerates the four fault-matrix acceptance rows. The count
-// is the spec's hard deliverable ("__ 档故障矩阵（应为 4）"). Referencing the
+// is the 评测文档中的 hard deliverable ("__ 档故障矩阵（应为 4）"). Referencing the
 // row functions by value makes the compiler enforce their existence: if any is
 // removed, this package fails to build.
 var faultMatrixRows = []struct {
@@ -41,7 +41,7 @@ func TestFaultMatrixHasFourRows(t *testing.T) {
 }
 
 // This file is the 4-row 故障矩阵 (fault matrix) acceptance seam for
-// docs/decisions/02-dispatch-consistency.md. Each row is individually runnable.
+// docs/architecture/reliability.md. Each row is individually runnable.
 // Rows 2 and 3 (publish-failure restore, expired-lease recovery) are covered
 // by existing tests in reliability_review_test.go and consumer_loop_test.go;
 // the count of runnable fault-matrix rows is asserted by TestFaultMatrixHasFourRows.

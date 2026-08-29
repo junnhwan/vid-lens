@@ -36,7 +36,7 @@ func (r *TranscriptionRepository) FindByTaskID(taskID int64) (*model.VideoTransc
 
 // Upsert 创建或更新转录记录
 // 写入时带 file_md5，使 (file_md5) 唯一约束成为内容+目标级去重的持久兜底
-// （spec 03）：同内容重复 ASR 写入会撞唯一约束，调用方据此识别已有结果。
+// （docs/architecture/data-model.md）：同内容重复 ASR 写入会撞唯一约束，调用方据此识别已有结果。
 func (r *TranscriptionRepository) Upsert(t *model.VideoTranscription) error {
 	var existing model.VideoTranscription
 	err := r.db.Where("task_id = ?", t.TaskID).First(&existing).Error
@@ -54,7 +54,7 @@ func (r *TranscriptionRepository) Upsert(t *model.VideoTranscription) error {
 }
 
 // FindByMD5 按内容指纹查找已完成的转写结果（跨 task、跨用户）。
-// 行存在即转写已成功完成（转写表无 status 列），用于内容+目标级去重命中判定（spec 03）。
+// 行存在即转写已成功完成（转写表无 status 列），用于内容+目标级去重命中判定（docs/architecture/data-model.md）。
 func (r *TranscriptionRepository) FindByMD5(fileMD5 string) (*model.VideoTranscription, error) {
 	var t model.VideoTranscription
 	err := r.db.Where("file_md5 = ?", fileMD5).First(&t).Error

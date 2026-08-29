@@ -9,7 +9,7 @@ import (
 	"vid-lens/internal/model"
 )
 
-// 内容+目标级去重的持久兜底验收（spec 03 第 85 行 seam）。
+// 内容+目标级去重的持久兜底验收（docs/$1 seam）。
 // 验证 (file_md5, job_type) 唯一约束：同内容同分析目标并发写入时，
 // 只允许一个成功结果行落库（DB 兜底 Redis SETNX 失效后的语义）。
 // 范式参考 task_lease_test.go 的 CAS 并发断言。
@@ -30,7 +30,7 @@ func newDedupTestDB(t *testing.T) *gorm.DB {
 
 // TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow 同 file_md5 的转写行
 // 唯一约束：第二次插入（即使属不同 task）必须失败。这保证同内容重复 ASR
-// 只能有一个成功结果行，DB 兜底 Redis 失效后的去重语义（spec 第 7、71 行）。
+// 只能有一个成功结果行，DB 兜底 Redis 失效后的去重语义（见 docs/architecture/data-model.md）。
 func TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 	db := newDedupTestDB(t)
 	repos := NewRepositories(db)
@@ -100,7 +100,7 @@ func TestSummaryFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 
 // TestRAGIndexFileMD5AndModelUniqueAllowsDifferentModelsSameContent 同一 file_md5 +
 // 不同 embedding_model 允许各一行（索引按模型独立去重）；同 file_md5 + 同 model
-// 第二个必须失败。spec 第 66 行：索引重建换模型不被旧索引挡。
+// 第二个必须失败。索引重建换模型不被旧索引挡。
 func TestRAGIndexFileMD5AndModelUniqueAllowsDifferentModelsSameContent(t *testing.T) {
 	db := newDedupTestDB(t)
 	repos := NewRepositories(db)

@@ -8,18 +8,18 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 05: IntentRouter 级联编排（规则层短路 + LLM 兜底）。
+// docs/architecture/retrieval.md: IntentRouter 级联编排（规则层短路 + LLM 兜底）。
 //
-// 级联（CONTEXT.md + spec line 41）：
+// 级联（CONTEXT.md + 当前实现约束）：
 //  1. 规则层 RuleIntentClassifier 先跑：<1ms，confidence ≥ shortCircuitThreshold → 短路返回，不调 LLM。
 //  2. 规则层未短路 → 调 LLMIntentClassifier 兜底。
 //  3. LLM confidence ≥ llmFallbackThreshold → 采信 LLM 结果。
 //  4. LLM confidence < llmFallbackThreshold 或 LLM 不可用/出错 → 回退规则结果。
 //
-// 替换 spec 04 A段的 classifyIntentPlaceholder 占位。占位保留作降级 fallback：
+// 替换 docs/architecture/retrieval.md A段的 classifyIntentPlaceholder 占位。占位保留作降级 fallback：
 // router 为 nil 时（测试或 router 不可用）chat_prepare 降级到占位分类，保证测试稳定。
 
-// IntentRouter 是规则层 + LLM 兜底的级联 intent 分类器（spec 05）。
+// IntentRouter 是规则层 + LLM 兜底的级联 intent 分类器（docs/architecture/retrieval.md）。
 type IntentRouter struct {
 	rule *RuleIntentClassifier
 }
@@ -44,13 +44,13 @@ func NewIntentRouter(rule *RuleIntentClassifier) *IntentRouter {
 // messages 抽取 Content）。
 func (r *IntentRouter) Classify(ctx context.Context, question string, session *model.ChatSession, mode ChatMode, recentIntents []Intent, chat ai.ChatClient) Intent {
 	if r == nil {
-		// router 不可用 → 占位降级（保测试稳定，spec line 65）。
+		// router 不可用 → 占位降级（保测试稳定，当前实现约束）。
 		return classifyIntentPlaceholder(question, session, mode)
 	}
 
 	ruleIntent, ruleConf := r.rule.Classify(question, session, mode, recentIntents)
 
-	// 规则层短路：confidence 达阈值，不调 LLM（省 LLM 调用 = 短路率派生，决策记录 §4）。
+	// 规则层短路：confidence 达阈值，不调 LLM（省 LLM 调用 = 短路率派生，当前实现约束）。
 	if ruleConf >= shortCircuitThreshold {
 		return ruleIntent
 	}
@@ -65,12 +65,12 @@ func (r *IntentRouter) Classify(ctx context.Context, question string, session *m
 	llmClassifier := &LLMIntentClassifier{chat: chat}
 	llmIntent, llmConf, err := llmClassifier.Classify(ctx, question, recentIntentLabels(recentIntents))
 	if err != nil {
-		return ruleIntent // LLM 出错 → 回退规则（spec line 57）
+		return ruleIntent // LLM 出错 → 回退规则（当前实现约束）
 	}
 	if llmConf >= llmFallbackThreshold {
 		return llmIntent
 	}
-	// LLM confidence<0.5 → 回退规则结果（spec line 57）。
+	// LLM confidence<0.5 → 回退规则结果（当前实现约束）。
 	return ruleIntent
 }
 
@@ -88,7 +88,7 @@ func recentIntentLabels(recentIntents []Intent) []string {
 	return out
 }
 
-// ParseRecentIntents 从 recent messages 粗提历史 intent 序列（spec 05 历史 intent
+// ParseRecentIntents 从 recent messages 粗提历史 intent 序列（docs/architecture/retrieval.md 历史 intent
 // 加权数据源）。由 caller 在 prepare 阶段调用后传入 IntentRouter.Classify 的
 // recentIntents——是 IntentRouter 的自有方法，避免 caller 越权访问 r.rule 私有字段。
 //

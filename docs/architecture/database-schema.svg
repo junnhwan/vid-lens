@@ -13,7 +13,7 @@
 
   <!-- ===== 标题 ===== -->
   <text x="980" y="44" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="22" font-weight="700" fill="#0f172a">VidLens 数据库表关系总览（PostgreSQL + pgvector，25 张表）</text>
-  <text x="980" y="70" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="13" fill="#64748b">架构说明见 <tspan font-family="Courier New, monospace">docs/architecture/data-model.md</tspan>；MySQL / Milvus 为迁移回滚遗留，不在线</text>
+  <text x="980" y="70" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="13" fill="#64748b">架构说明见 <tspan font-family="Courier New, monospace">docs/architecture/data-model.md</tspan>；legacy_mysql 仅离线迁移，Milvus 仅显式回滚，默认向量后端为 pgvector</text>
 
   <!-- ===== 领域分区域 ===== -->
   <rect x="40" y="95" width="1920" height="110" rx="14" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="6 6"/>
@@ -70,8 +70,8 @@
     <!-- kafka_message_failures -->
     <rect x="1270" y="300" width="260" height="80" rx="9" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
     <text x="1400" y="323" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">kafka_message_failures</text>
-    <text x="1400" y="343" text-anchor="middle" font-size="11.5" fill="#64748b"><tspan x="1400">poison 消息隔离 · 幂等</tspan></text>
-    <text x="1400" y="359" text-anchor="middle" font-size="11.5" fill="#64748b"><tspan x="1400">UK(消费组,topic,partition,offset)</tspan></text>
+    <text x="1400" y="343" text-anchor="middle" font-size="11.5" fill="#64748b"><tspan x="1400">RabbitMQ poison 消息隔离 · 幂等</tspan></text>
+    <text x="1400" y="359" text-anchor="middle" font-size="11.5" fill="#64748b"><tspan x="1400">表名沿用 Kafka 历史命名 · UK(消费组,topic,partition,offset)</tspan></text>
   </g>
 
   <!-- ===== ③ 内容产物 ===== -->

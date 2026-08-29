@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 )
 
-// Spec 07（bullet ⑨）轻量证据约束生成。
+// docs/architecture/retrieval.md（bullet ⑨）轻量证据约束生成。
 //
-// 决策记录 §9.1 拍板"轻量"：不做完整 Planner-Executor-Critic Agent Loop
+// 当前实现约束 确定"轻量"：不做完整 Planner-Executor-Critic Agent Loop
 // （撞车 DOVideo + 工作量大），只在 LLM 生成后加一个单轮约束：
 //
 //   - 校验答案里 [Cx] 引用编号是否在本次检索集 evidence id 范围内（复用现有
@@ -18,18 +18,18 @@ import (
 //     （有上限，至多一次，不无限循环、不多轮 ReAct）。
 //   - 重检索后仍无证据 → 标注"无证据支撑"拒绝输出该结论。
 //
-// 与 ④ 正交（决策记录 §9.1）：⑨ 是 LLM 可用时的约束，④ 是 LLM 不可用时的降级。
-// LLM 可用 → 走 ⑨；LLM 不可用 → 走 ④。两者不冲突（spec 07 Further Notes "与 ④ 正交"）。
+// 与 ④ 正交（当前实现约束）：⑨ 是 LLM 可用时的约束，④ 是 LLM 不可用时的降级。
+// LLM 可用 → 走 ⑨；LLM 不可用 → 走 ④。两者不冲突（docs/architecture/retrieval.md 当前实现说明 "与 ④ 正交"）。
 //
 // 不接 video_agent 实验路径（agent 不进产品默认，⑨ 是单轮约束不撞车）。
 
-// maxEvidenceReRetrieval 是超范围违规后允许的重检索次数上限（spec 07 user
-// story 13"重检索有上限不无限循环"）。1 = 单轮校验 + 至多一次重检索（决策记录
+// maxEvidenceReRetrieval 是超范围违规后允许的重检索次数上限（docs/architecture/retrieval.md user
+// story 13"重检索有上限不无限循环"）。1 = 单轮校验 + 至多一次重检索（当前实现约束
 // §9.1 "轻量"）。该值固定为常量而非配置，避免被改成 >1 退化成多轮 ReAct
-// （spec 07 Out of Scope"不做多轮 ReAct"）。
+// （docs/architecture/retrieval.md 当前范围边界"不做多轮 ReAct"）。
 const maxEvidenceReRetrieval = 1
 
-// 证据约束链档数（spec 07 数字占位符）：校验 + 重检索 = 2（单轮轻量）。
+// 证据约束链档数（docs/architecture/retrieval.md 待评测指标）：校验 + 重检索 = 2（单轮轻量）。
 const evidenceConstraintChainTiers = 2
 
 // evidenceConstraintOutcome 描述一次证据约束校验的结果。
@@ -48,7 +48,7 @@ type evidenceConstraintOutcome struct {
 }
 
 // 证据约束触发计数器（进程内，长期运行需接 metrics 落盘；本 spec 只保证计数可观测，
-// 违规/重检索次数留 __ 长期采集，spec 07 第 127 行"不许估算"）。复用 spec 06 降级
+// 违规/重检索次数留 __ 长期采集，docs/$1"不许估算"）。复用 docs/architecture/reliability.md 降级
 // 计数的命名范式（ai_reliability.go）。
 var (
 	evidenceViolationTriggers    int64
@@ -56,10 +56,10 @@ var (
 	evidenceUnsupportedTriggers  int64
 )
 
-// EvidenceViolationTriggers 返回超范围引用违规触发次数（长期采集，spec 07 数字占位符）。
+// EvidenceViolationTriggers 返回超范围引用违规触发次数（长期采集，docs/architecture/retrieval.md 待评测指标）。
 func EvidenceViolationTriggers() int64 { return atomic.LoadInt64(&evidenceViolationTriggers) }
 
-// EvidenceReretrievalTriggers 返回重检索触发次数（长期采集，spec 07 数字占位符）。
+// EvidenceReretrievalTriggers 返回重检索触发次数（长期采集，docs/architecture/retrieval.md 待评测指标）。
 func EvidenceReretrievalTriggers() int64 { return atomic.LoadInt64(&evidenceReretrievalTriggers) }
 
 // EvidenceUnsupportedTriggers 返回重检索后仍无证据、标注"无证据支撑"的次数（长期采集）。
@@ -72,25 +72,25 @@ func resetEvidenceConstraintCountersForTest() {
 	atomic.StoreInt64(&evidenceUnsupportedTriggers, 0)
 }
 
-// enforceEvidenceConstraint 是 Ask / AskStream 共用的证据约束入口（spec 07）。
+// enforceEvidenceConstraint 是 Ask / AskStream 共用的证据约束入口（docs/architecture/retrieval.md）。
 //
 // 在 LLM 成功生成后、finalizeAnswerCitations 之前调用。它复用 finalizeAnswerCitations
 // 的引用解析范式（rag_evidence.go）解析 [Cx] 编号，校验是否在检索集 evidence id
 // 范围内。违规触发单轮重检索补证据；重检索后仍无证据 → 标注"无证据支撑"。
 //
-// 复用现有 seam（spec 07 Implementation Decisions"复用现有 seam，不重建"）：
+// 复用现有 seam（docs/architecture/retrieval.md 当前实现约束"复用现有 seam，不重建"）：
 //   - Citation + EvidenceID（chat.go）：已有证据绑定，⑨ 只校验不重建。
 //   - finalizeAnswerCitations（rag_evidence.go）：答案后处理已有，⑨ 接它之前加校验。
 //   - prompt [C1][C2] 引用要求（chat_messages.go）：已有，⑨ 解析它。
-//   - spec 04 检索链路（rag_pipeline.Retrieve）：超范围重检索复用它。
+//   - docs/architecture/retrieval.md 检索链路（rag_pipeline.Retrieve）：超范围重检索复用它。
 //
-// 轻量边界（反 Agent Loop，spec 07 Out of Scope）：
+// 轻量边界（反 Agent Loop，docs/architecture/retrieval.md 当前范围边界）：
 //   - 单轮校验 + 至多一次重检索（maxEvidenceReRetrieval=1），不无限循环。
 //   - 不做 Planner-Executor-Critic 多轮 ReAct。
 //   - 不接 video_agent 实验路径。
 //
-// re-retriever 注入重检索能力（spec 04 Retrieve）。生产路径 = s.newRetrievalPipeline +
-// Retrieve；测试路径用 fake re-retriever 控制证据补全（spec 07 Testing Decisions：
+// re-retriever 注入重检索能力（docs/architecture/retrieval.md Retrieve）。生产路径 = s.newRetrievalPipeline +
+// Retrieve；测试路径用 fake re-retriever 控制证据补全（docs/architecture/retrieval.md 测试约定：
 // fake LLM 注入超范围引用，断言约束链）。
 func (s *ChatService) enforceEvidenceConstraint(
 	ctx context.Context,
@@ -127,10 +127,10 @@ func (s *ChatService) enforceEvidenceConstraint(
 		}
 	}
 
-	// 违规：计一次违规触发（spec 07 user story 11"证据约束可观测"）。
+	// 违规：计一次违规触发（docs/architecture/retrieval.md 行为约束 11"证据约束可观测"）。
 	atomic.AddInt64(&evidenceViolationTriggers, 1)
 
-	// 单轮重检索补证据（spec 07 Solution 2"超范围处理：被拒→重检索"）。
+	// 单轮重检索补证据（docs/architecture/retrieval.md Solution 2"超范围处理：被拒→重检索"）。
 	// 以违规引用涉及的 LLM 原始答案片段作为重检索 query——LLM 既然引用了某编号说明
 	// 它认为那里有相关内容，用 LLM 的原始答案（去 [Cx] token 后）作 query 比用原
 	// 问题更贴合"补这条结论的证据"语义。
@@ -148,7 +148,7 @@ func (s *ChatService) enforceEvidenceConstraint(
 		}
 	}
 
-	// 重检索补证据（spec 07 Solution 2"超范围处理：被拒→重检索"）。
+	// 重检索补证据（docs/architecture/retrieval.md Solution 2"超范围处理：被拒→重检索"）。
 	//
 	// 关键决策（spec review A1/C1 修复）："补到证据"的判据 = 重检索是否带回【原检索集
 	// 没有的新 evidence id】，而不是 len(finalized.Citations)>0。后者会被 finalizeAnswerCitations
@@ -189,7 +189,7 @@ func (s *ChatService) enforceEvidenceConstraint(
 	}
 
 	// 重检索后仍无证据（reretrieved 为空 / 全是原检索集已有的重复）→ 标注"无证据支撑"
-	// 拒绝输出该结论（spec 07 Solution 2 + user story 3）。
+	// 拒绝输出该结论（docs/architecture/retrieval.md Solution 2 + 行为约束 3）。
 	atomic.AddInt64(&evidenceUnsupportedTriggers, 1)
 	rejected := buildUnsupportedAnswer(llmAnswer, violationRefs)
 	// 无证据支撑的结论不绑回任何 Citation（拒绝输出该结论）。
@@ -238,7 +238,7 @@ func reretrievalNewEvidenceIDs(reretrieved []RetrievedChunk, originalRange map[s
 // inRange 判定一条 evidence id 是否在检索集范围内（caller 注入，便于测试 fake）。
 func collectViolationEvidenceIDs(answer string, candidates []Citation, inRange func(string) bool) []string {
 	// 复用 parseReferencedCitationIDs（rag_evidence.go），与 finalizeAnswerCitations
-	// 走同一套 token 解析，避免重复实现（spec review: Duplicated Code parse pipeline）。
+	// 走同一套 token 解析，避免重复实现（代码复用约束 parse pipeline）。
 	referenced := parseReferencedCitationIDs(answer)
 
 	// candidates 是检索集对应的 Citation（CitationID 是 C1..Cn，EvidenceID 是真实证据）。
@@ -301,7 +301,7 @@ func stripCitationTokens(answer string) string {
 	return strings.TrimSpace(stripCitationTokensVisible(answer))
 }
 
-// buildUnsupportedAnswer 构造"无证据支撑"拒绝标注的答案体（spec 07 Solution 2
+// buildUnsupportedAnswer 构造"无证据支撑"拒绝标注的答案体（docs/architecture/retrieval.md Solution 2
 // "重检索后仍无证据 → 标注'无证据支撑'拒绝输出该结论"）。
 //
 // 诚实拒绝而非硬编：保留 LLM 原始答案的可见文本（去 [Cx] token），但在末尾标注

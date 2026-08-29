@@ -1,14 +1,14 @@
 // Command dataset-build constructs the VidLens strict RAG evaluation dataset
 // (manifest + train/dev/test split files) from real annotated cases.
 //
-// Spec 01 (docs/decisions/01-evaluation-foundation.md): "标注直接在 YAML 文件里做，
+// 评测数据约束（docs/eval/README.md）："标注直接在 YAML 文件里做，
 // 复用 schema 校验"——本工具把人工标注的 case 内容（question/answer_points/
 // evidence_ranges.context_ids 均基于真实 video_chunks.vector_id 与转写原文）
 // 序列化成 dataset-schema.yaml 要求的四个物理分离文件。
 //
-// case 内容的诚信约束（spec 01 + annotation-guide）：
-//   - evidence_ranges.context_ids 必须是真实 video_chunks.vector_id（旧仓库
-//     PG 的稳定 chunk identity，C-简化方案：直接用旧仓库 PG 当 SoT）。
+// case 内容的诚信约束（docs/eval/README.md + annotation-guide）：
+//   - evidence_ranges.context_ids 必须是真实 video_chunks.vector_id（PostgreSQL
+//     中稳定的 chunk identity，直接使用在线数据库作为 SoT）。
 //   - 不用字符位置估算时间戳（ASR 时间戳全 0，不可靠），evidence_ranges 全用
 //     context_ids，不填 start_ms/end_ms。
 //   - category 字段复用为 intent 标签（video_overview/direct_qa/topic_compare/
@@ -32,7 +32,7 @@ import (
 	"vid-lens/internal/eval"
 )
 
-// taskFileMD5: 旧仓库 PG video_tasks.file_md5（eval strict 校验要求
+// taskFileMD5: PostgreSQL video_tasks.file_md5（eval strict 校验要求
 // case.video_id == task.FileMD5）。task 11/12 与 33/34 同 md5（同源视频）。
 var taskFileMD5 = map[string]string{
 	"2":  "2cdbc4ef70592e6be97dab3704268fa7",
@@ -78,8 +78,8 @@ func main() {
 	// source_group 划分（按内容来源，以 source_group 为最小单位划分 train/dev/test，
 	// 同 source_group/video_id 不得跨 split——annotation guide §2）。
 	// video_id 必须填 task.file_md5（strict 校验：case.video_id == task.FileMD5，
-	// 见 cmd/rag-eval/artifact_snapshot.go line 81-84）。下方 taskFileMD5 从旧仓库
-	// PG（localhost:5434）video_tasks.file_md5 查得，eval 时 case.video_id 与之对齐。
+	// 见 cmd/rag-eval/artifact_snapshot.go 的稳定身份校验）。下方 taskFileMD5 从
+	// PostgreSQL video_tasks.file_md5 查得，eval 时 case.video_id 与之对齐。
 	const (
 		sgSoftwareEng    = "software_eng_lecture"  // task 2
 		sgReactDynamic   = "react_dynamic"         // task 10
@@ -217,7 +217,7 @@ func randomToken() string {
 //   - evidence_ranges.context_ids 指向答案所在的 chunk 的真实 vector_id。
 //   - difficulty 按 annotation guide §3：easy=单直接片段、问句接近原文；medium=同义
 //     理解/相邻证据；hard=多非相邻证据/易受干扰。
-//   - category 复用为 intent 标签（spec 01 拍板）。
+//   - category 复用为 intent 标签（见 docs/eval/README.md 的当前评测约束）。
 //   - 无答案 case（answerable:false）加 negative_confusers。
 func buildCases(groups ...string) []eval.Case {
 	_ = groups
@@ -642,7 +642,7 @@ func buildCases(groups ...string) []eval.Case {
 		Notes: "无答案 case：该视频是保研探索个人经历，不含分布式锁技术内容；negative_confusers 是开头片段（语义不相关，检验错误接受）。",
 	})
 
-	// timeline_locate case（spec 05 需要，但 ASR 时间戳全 0，用 context_ids 作稳定定位）
+	// timeline_locate case（docs/architecture/retrieval.md 需要，但 ASR 时间戳全 0，用 context_ids 作稳定定位）
 	cases = append(cases, eval.Case{
 		CaseID: "test-codex-structure", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 		TaskID: 30, TaskHint: "Codex 使用指南",
@@ -671,7 +671,7 @@ func buildCases(groups ...string) []eval.Case {
 		Notes: "无答案 case：保研探索视频不含 RAG 检索技术内容。",
 	})
 
-	// small_talk case（spec 05 需要，关检索关 LLM）
+	// small_talk case（docs/architecture/retrieval.md 需要，关检索关 LLM）
 	cases = append(cases, eval.Case{
 		CaseID: "test-smalltalk", VideoID: vid("30"), SourceGroup: "ai_coding_tools", Split: eval.SplitTest,
 		TaskID: 30, TaskHint: "闲聊",

@@ -14,10 +14,10 @@ import (
 
 // 按模式准备 RAG 或视频上下文，并构造检索管线。
 //
-// Spec 04 (A段)：散落的 intent/scope → 检索参数硬编码统一由 ExecutionPolicy 表达。
+// docs/architecture/retrieval.md (A段)：散落的 intent/scope → 检索参数硬编码统一由 ExecutionPolicy 表达。
 // 流程：识别 intent（占位 = classifyIntentPlaceholder）→ 取 ExecutionPolicy →
 // 按字段走检索/生成。video_assistant 模式的"检索失败→转写兜底"降级路径保留
-// （用户已拍板：ExecutionPolicy 只表达参数，兜底降级不进 policy）。
+// （用户已确定：ExecutionPolicy 只表达参数，兜底降级不进 policy）。
 func normalizeChatMode(mode ChatMode) ChatMode {
 	switch ChatMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
 	case ChatModeStrictRAG:
@@ -68,7 +68,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		return nil, err
 	}
 
-	// Spec 05：intent 分类用级联分类器（规则层短路 + LLM 兜底），替换 spec 04 A段
+	// docs/architecture/retrieval.md：intent 分类用级联分类器（规则层短路 + LLM 兜底），替换 docs/architecture/retrieval.md A段
 	// 占位 classifyIntentPlaceholder。历史 intent 加权需要 recent messages——先加载，
 	// 再分类（recent 仅 ScopeVideo 用；KB 关断 recent，recentIntents 也为空）。
 	recentLimit := s.cfg.RecentTurns * 2
@@ -92,15 +92,15 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		// （分类器对 KB/strict 不产出 overview/small_talk 关检索）。防御性兜底。
 		return nil, errNoRetrievedContext
 	}
-	// Spec 05 user story 10：timeline_locate intent 用 Signal 时间戳缩检索范围。
+	// docs/architecture/retrieval.md 的行为约束：timeline_locate intent 用 Signal 时间戳缩检索范围。
 	// TODO(audit trail)：RetrievalPipelineRequest 暂无时间过滤字段，ExtractSignals
 	// 时间戳已能提但未接入检索过滤——本 spec 只落地分类 + Signal 提取，时间戳→
 	// chunk 范围过滤的接线留后续（需 retrieval 层加 StartTimeMS/EndTimeMS 过滤
 	// 接口位 + chunk 表加时间戳列）。诚实标注：当前 timeline_locate 走 direct_qa
-	// 同参数检索，无时间缩范围（user story 10 行为未落地，只留接口位 + TODO）。
+	// 同参数检索，无时间缩范围（行为约束 10 行为未落地，只留接口位 + TODO）。
 
 	// 散落判定 1（topK 默认值 + topK>10→10 上限）由 ExecutionPolicy.ClampTopK
-	// 统一表达（spec 04 数字占位符 A段）。
+	// 统一表达（docs/architecture/retrieval.md 待评测指标 A段）。
 	topK = policy.ClampTopK(topK)
 	if topK <= 0 {
 		topK = s.cfg.TopK
@@ -170,7 +170,7 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, mode ChatMo
 		return nil, err
 	}
 
-	// Spec 05：级联分类器替换占位；recent 已加载，传历史 intent 加权。
+	// docs/architecture/retrieval.md：级联分类器替换占位；recent 已加载，传历史 intent 加权。
 	intent := s.classifyIntent(ctx, question, session, mode, recent, chat)
 	policy := PolicyFor(intent, scopeOfSession(session))
 	if !policy.Retrieve {
@@ -286,9 +286,9 @@ func retrievalChunkKey(chunk RetrievedChunk) string {
 	return fmt.Sprintf("task:%d:idx:%d:%s", chunk.TaskID, chunk.ChunkIndex, chunk.Content)
 }
 
-// classifyIntent 是 spec 05 intent 分类入口：优先走 IntentRouter 级联（规则层
+// classifyIntent 是 docs/architecture/retrieval.md intent 分类入口：优先走 IntentRouter 级联（规则层
 // 短路 + LLM 兜底），router 为 nil 时降级占位 classifyIntentPlaceholder（保测试
-// 稳定，spec line 65）。recent 用于历史 intent 加权 + LLM 兜底消歧指代。
+// 稳定，当前实现约束）。recent 用于历史 intent 加权 + LLM 兜底消歧指代。
 func (s *ChatService) classifyIntent(ctx context.Context, question string, session *model.ChatSession, mode ChatMode, recent []model.ChatMessage, chat ai.ChatClient) Intent {
 	if s.intentRouter == nil {
 		return classifyIntentPlaceholder(question, session, mode)

@@ -124,8 +124,8 @@ func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansion(t *testing.T
 	}
 }
 
-// TestProductionRetrievalConfigAppliesEvalConclusion 锁定 spec 04 B段：rerank 默认
-// 值由 spec 01 dev 单变量消融结论驱动（experiment rerank-vs-none-dev, +0.102
+// TestProductionRetrievalConfigAppliesEvalConclusion 锁定 docs/architecture/retrieval.md B段：rerank 默认
+// 值由 docs/eval/README.md dev 单变量消融结论驱动（experiment rerank-vs-none-dev, +0.102
 // CI [0,+0.204], passed），不再靠 cfg.RerankModel 是否非空手拍。BM25 因非单变量
 // 未评测保守关闭。任何回退到"rerank 默认 none / BM25 默认 on"的改动都会被此测试
 // 抓住，防止线上化结论漂移。

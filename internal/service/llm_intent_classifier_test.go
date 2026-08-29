@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Spec 05：LLM 兜底分类测外部可观察行为（intent 判定 + 回退阈值 + nil 兜底），
-// 不测 prompt 实现细节（spec line 117）。
+// docs/architecture/retrieval.md：LLM 兜底分类测外部可观察行为（intent 判定 + 回退阈值 + nil 兜底），
+// 不测 prompt 实现细节（当前实现约束）。
 
 func TestLLMIntentClassifierParsesResponse(t *testing.T) {
 	chat := &scriptedChatClient{responses: []string{`{"intent":"timeline_locate","confidence":0.9}`}}
@@ -85,7 +85,7 @@ func TestLLMIntentClassifierUnparsableReturnsError(t *testing.T) {
 }
 
 // TestLLMIntentClassifierPromptIncludesTaxonomy 锁定 prompt 含 vid-lens 6 类
-// taxonomy（不照搬 wali，spec line 33）。
+// taxonomy（不照搬 wali，当前实现约束）。
 func TestLLMIntentClassifierPromptIncludesTaxonomy(t *testing.T) {
 	chat := &scriptedChatClient{responses: []string{`{"intent":"direct_qa","confidence":0.6}`}}
 	c := NewLLMIntentClassifier(chat)

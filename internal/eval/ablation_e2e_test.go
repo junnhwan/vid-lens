@@ -12,15 +12,15 @@ import (
 )
 
 // TestSpec01AblationAcceptance is the single external-behavior acceptance seam
-// for spec 01. It loads a mini strict dataset (with a sealed test split) at the
+// for docs/eval/README.md. It loads a mini strict dataset (with a sealed test split) at the
 // library layer, runs all four ablation variants through Runner.Run, and
 // asserts the RunArtifact.Summary carries the complete metric set (incl. P95),
 // that executor-failed answerable cases remain in the retrieval denominator as
 // zero, that sealed-test loading without a token is rejected, that all three
 // artifact formats (JSON/JSONL/CSV/Markdown) are produced, and that the paired
 // CI analysis fires for each candidate-vs-vector_only pairing. The CLI guard in
-// cmd/rag-eval is intentionally NOT exercised here — per the spec's single-seam
-// decision #1, acceptance goes through the library Runner.Run path.
+// cmd/rag-eval is intentionally NOT exercised here — per the 评测文档中的 single-seam
+// 评测约束 #1, acceptance goes through the library Runner.Run path.
 func TestSpec01AblationAcceptance(t *testing.T) {
 	token := "spec01-sealed-token"
 	manifestRaw, testRaw := miniStrictDatasetYAML(t, token)
@@ -104,7 +104,7 @@ func TestSpec01AblationAcceptance(t *testing.T) {
 		t.Fatal("vector_only: FailedCases=0, want the forced-failure case recorded")
 	}
 
-	// 6. Three-format artifact production (spec user story 11): WriteArtifacts
+	// 6. Three-format artifact production (spec 行为约束 11): WriteArtifacts
 	// must emit metadata.json, cases.jsonl, summary.json, summary.csv, report.md.
 	// WriteArtifacts uses os.Mkdir (single level) on runDir, so the parent must exist.
 	tmpBase := t.TempDir()
@@ -141,7 +141,7 @@ func TestSpec01AblationAcceptance(t *testing.T) {
 		t.Fatalf("summary.json missing p95_retrieve_latency_ms")
 	}
 
-	// 7. Paired CI form (spec decision #4): each non-baseline variant paired vs
+	// 7. Paired CI form (spec 评测约束 #4): each non-baseline variant paired vs
 	// vector_only via AnalyzePairedRunArtifacts must produce a non-empty
 	// ExperimentAnalysis with a bootstrap CI. The mini dataset is too small for a
 	// meaningful CI, so we only assert the analysis fires and carries the shape
@@ -203,7 +203,7 @@ func miniRunMetadata(experimentID, variantID string) RunMetadata {
 
 // miniExperimentRegistry builds a preregistered experiment with vector_only as
 // baseline and the three other variants as candidates, so AnalyzePairedRunArtifacts
-// can bind each candidate vs the baseline per spec decision #4.
+// can bind each candidate vs the baseline per spec 评测约束 #4.
 func miniExperimentRegistry(t *testing.T) ExperimentRegistry {
 	t.Helper()
 	fill := strings.Repeat("a", 64)

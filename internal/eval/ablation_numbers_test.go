@@ -11,7 +11,7 @@ import (
 // TestSpec01PrintAblationNumbers is a NON-gating helper test: it runs the same
 // four-variant ablation the acceptance test runs and prints the headline
 // numbers (Recall@5, MRR, P95, failure rate) per variant to test output. The
-// spec's "数字占位符" section is backfilled from these printed numbers. It
+// 评测文档中的 "待评测指标" section is backfilled from these printed numbers. It
 // always passes — it only emits numbers; gating assertions live in
 // TestSpec01AblationAcceptance.
 func TestSpec01PrintAblationNumbers(t *testing.T) {

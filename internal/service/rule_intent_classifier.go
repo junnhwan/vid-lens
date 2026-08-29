@@ -6,22 +6,22 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 05: RuleIntentClassifier（规则层，短路）。
+// docs/architecture/retrieval.md: RuleIntentClassifier（规则层，短路）。
 //
-// 三维打分（CONTEXT.md + 决策记录 §9 第 3 条，重新定维度不搬 wali 三段式）：
+// 三维打分（CONTEXT.md + 当前检索链路约束，重新定维度不搬 wali 三段式）：
 //  1. 关键词命中：扩 isVideoOverviewQuestion 的 contains 思路到全 taxonomy
 //     （overview/direct_qa/topic_compare/series_locate/timeline_locate/small_talk）。
 //  2. signal 模式：ExtractSignals 给的时间戳/比较/概览/闲聊结构化线索辅助分类。
 //  3. 历史 intent 加权：会话最近 N 轮 intent 同类连续出现时提置信度。
 //
 // confidence 达阈值 → 短路返回，<1ms，不调 LLM。未达阈值由 IntentRouter 调
-// LLMIntentClassifier 兜底（spec 05 line 30）。
+// LLMIntentClassifier 兜底（见 docs/architecture/retrieval.md）。
 //
-// 阈值/权重 audit trail（决策记录 §4 硬约束"每个阈值写为什么这么定"）：
-// 先填初始值 + 写理由框架；真实数值在固化 case 集调优后回填（spec line 80）。
+// 阈值/权重 audit trail 遵循当前检索链路约束：每个阈值都要有可追溯理由。
+// 先填初始值 + 写理由框架；真实数值在固化 case 集调优后回填。
 // 见下方 scoreRuleIntent 各权重注释 + shortCircuitThreshold 注释。
 
-// RuleIntentClassifier 是规则层 intent 分类器（spec 05）。
+// RuleIntentClassifier 是规则层 intent 分类器（docs/architecture/retrieval.md）。
 //
 // 零外部依赖（不调 LLM、不查 DB），可被 IntentRouter 与测试直接构造。历史 intent
 // 加权由 caller 传入 recentIntents（IntentRouter 从 chat_memory 解析），本结构不
@@ -63,7 +63,7 @@ func (c *RuleIntentClassifier) Classify(question string, session *model.ChatSess
 // audit trail（为何这么定）：0.75 — 高于"半信半疑"（0.5）但留 25% 不确定空间
 // 给 LLM 兜底。低于此值说明三维打分只有弱命中（如只有 1 个 signal 命中、无
 // 关键词、无历史加权），交给 LLM 更稳。0.79 vs 0.81 边界 case 由固化集调优后
-// 校准——初始 0.75 是"宁可多调一次 LLM 也别错分"的保守起点（spec line 80）。
+// 校准——初始 0.75 是"宁可多调一次 LLM 也别错分"的保守起点。
 const shortCircuitThreshold = 0.75
 
 // 各维度权重（audit trail：为何这么分）。
@@ -108,7 +108,7 @@ func (c *RuleIntentClassifier) scoreByRule(q string, session *model.ChatSession,
 		IntentTimelineLocate: c.timelineLocateScore(lq, sig),
 		IntentSmallTalk:      c.smallTalkScore(lq, sig),
 	}
-	// 历史 intent 加权：同 intent 连续出现提置信度（决策记录 §9 第 3 条）。
+	// 历史 intent 加权：同 intent 连续出现提置信度（当前检索链路约束）。
 	for intent, bump := range historyBump(recentIntents) {
 		scores[intent] += bump
 	}

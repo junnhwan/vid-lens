@@ -9,19 +9,19 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 07 ⑨ 轻量证据约束行为测试（spec 第 99 行：internal/service/evidence_constraint_test.go）。
+// docs/architecture/retrieval.md ⑨ 轻量证据约束行为测试（当前实现约束：internal/service/evidence_constraint_test.go）。
 //
-// 只测外部行为（spec Testing Decisions）：
+// 只测外部行为（spec 测试约定）：
 //   - 引用在范围内 → 保留绑定（fake LLM 产出 [C1] [C2] 合法引用，断言 citations 含 C1/C2）。
 //   - 超范围引用被拒 + 触发单轮重检索补证据（fake LLM 注入 [C5] 编造编号或没检索到的片段，
 //     断言违规计数 +1、重检索计数 +1、补到证据后保留结论）。
 //   - 重检索后仍无证据 → 标注"无证据支撑"拒绝输出该结论（重检索返回空，断言 unsupported 计数 +1、
 //     答案含"无证据支撑"标注、citations 为空）。
 //   - 重检索有上限不无限循环（maxEvidenceReRetrieval=1，断言重检索至多一次）。
-//   - 约束链档数 = 2（校验 + 重检索，回填 spec 07 数字占位符）。
+//   - 约束链档数 = 2（校验 + 重检索，回填 docs/architecture/retrieval.md 待评测指标）。
 //
-// 直接测 enforceEvidenceConstraint 的外部行为（spec 07 验收 seam = internal/service 的证据
-// 约束行为），fake re-retriever 注入控制证据补全（spec 07 Testing Decisions：fake LLM 注入
+// 直接测 enforceEvidenceConstraint 的外部行为（docs/architecture/retrieval.md 验收 seam = internal/service 的证据
+// 约束行为），fake re-retriever 注入控制证据补全（docs/architecture/retrieval.md 测试约定：fake LLM 注入
 // 超范围引用，断言约束链）。另有一个 Ask 端到端测试验证接进现有 chat 链路无回归。
 
 func newEvidencePrepared(citations []Citation, contexts []RetrievedChunk) *preparedRAGChat {
@@ -177,7 +177,7 @@ func TestEvidenceConstraintReretrievalEmptyMarksUnsupported(t *testing.T) {
 	if EvidenceReretrievalTriggers() != 1 {
 		t.Fatalf("reretrieval triggers = %d, want 1", EvidenceReretrievalTriggers())
 	}
-	// 答案含"无证据支撑"标注（spec 07 user story 3 诚实拒绝而非硬编）。
+	// 答案含"无证据支撑"标注（docs/architecture/retrieval.md 行为约束 3 诚实拒绝而非硬编）。
 	if !strings.Contains(outcome.answer, "无证据支撑") {
 		t.Fatalf("answer = %q, want unsupported annotation", outcome.answer)
 	}
@@ -187,18 +187,18 @@ func TestEvidenceConstraintReretrievalEmptyMarksUnsupported(t *testing.T) {
 	}
 }
 
-// TestEvidenceConstraintChainTierCount 回填 spec 07 数字占位符"证据约束链档数 2"：
+// TestEvidenceConstraintChainTierCount 回填 docs/architecture/retrieval.md 待评测指标"证据约束链档数 2"：
 // 校验 + 重检索 = 2 档（单轮轻量，非多轮 ReAct）。
 func TestEvidenceConstraintChainTierCount(t *testing.T) {
 	if evidenceConstraintChainTiers != 2 {
-		t.Fatalf("evidence constraint chain tiers = %d, want 2 (validation + re-retrieval, spec 07)", evidenceConstraintChainTiers)
+		t.Fatalf("evidence constraint chain tiers = %d, want 2 (validation + re-retrieval, docs/architecture/retrieval.md)", evidenceConstraintChainTiers)
 	}
 	if maxEvidenceReRetrieval != 1 {
-		t.Fatalf("maxEvidenceReRetrieval = %d, want 1 (single re-retrieval, spec 07 lightweight)", maxEvidenceReRetrieval)
+		t.Fatalf("maxEvidenceReRetrieval = %d, want 1 (single re-retrieval, docs/architecture/retrieval.md lightweight)", maxEvidenceReRetrieval)
 	}
 }
 
-// TestEvidenceConstraintNoReretrievalLoop 验证不无限循环（spec 07 user story 13）：
+// TestEvidenceConstraintNoReretrievalLoop 验证不无限循环（docs/architecture/retrieval.md 行为约束 13）：
 // 重检索有上限 maxEvidenceReRetrieval=1，无论重检索结果如何都不二次重检索。
 func TestEvidenceConstraintNoReretrievalLoop(t *testing.T) {
 	resetEvidenceConstraintCountersForTest()
@@ -271,7 +271,7 @@ func TestEvidenceConstraintReretrievalOnlyDuplicatesMarksUnsupported(t *testing.
 }
 
 // TestEvidenceConstraintAskPathNoRegression 验证证据约束接进 Ask 链路后，合法引用场景
-// 不回归（spec 07"现有 chat_ask_test.go 作为不回归保障"）。fake LLM 产出合法 [C1]，
+// 不回归（docs/architecture/retrieval.md"现有 chat_ask_test.go 作为不回归保障"）。fake LLM 产出合法 [C1]，
 // 断言答案清洗、引用保留、无违规/重检索计数。
 func TestEvidenceConstraintAskPathNoRegression(t *testing.T) {
 	resetEvidenceConstraintCountersForTest()

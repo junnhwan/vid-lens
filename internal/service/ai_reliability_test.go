@@ -13,18 +13,18 @@ import (
 	"vid-lens/internal/repository"
 )
 
-// Spec 06 降级链行为测试（spec 第 112 行：internal/service/ai_reliability_test.go）。
+// docs/architecture/reliability.md 降级链行为测试（当前实现约束：internal/service/ai_reliability_test.go）。
 //
-// 只测外部行为（spec Testing Decisions）：
+// 只测外部行为（spec 测试约定）：
 //   - 档1：rerank 失败 → 回退向量基线（fake reranker 注入失败，断言降级链可用、
 //     fallback 标记命中、档1 计数 +1）。
 //   - 档2：LLM 失败 → 无 LLM 模式（fake LLM 注入失败，断言返回 degraded 答案而非
 //     错误、答案含检索片段 + 已有摘要、degraded:true、档2 计数 +1）。
-//   - 档2 复用 spec 03 FindByMD5 跨 task 摘要：另一 task 的成功摘要被拼进降级答案。
+//   - 档2 复用 docs/architecture/data-model.md FindByMD5 跨 task 摘要：另一 task 的成功摘要被拼进降级答案。
 //   - ExecutionPolicy UseLLM=false 的 intent 不误触发档2。
 //   - admission RetryAfter 超阈值触发档2、阈值内不降级（admission 协同）。
 //
-// 复用 chat_ask_test.go / chat_test.go 的 fake LLM/reranker 范式（spec 第 117 行）。
+// 复用 chat_ask_test.go / chat_test.go 的 fake LLM/reranker 范式（当前实现约束）。
 
 // reliabilityFailingChatClient 注入 LLM 失败，用于触发档2降级。
 type reliabilityFailingChatClient struct {
@@ -87,7 +87,7 @@ func TestDegradationTier1RerankFailureFallsBackToVectorBaseline(t *testing.T) {
 	if result.Answer == "" {
 		t.Fatal("Answer empty, want LLM-generated answer on tier1 (rerank fallback still runs LLM)")
 	}
-	// 档1 不标 degraded（LLM 仍生成完整答案，决策记录第 10 节 degraded 只针对档2）。
+	// 档1 不标 degraded（LLM 仍生成完整答案，当前实现约束 degraded 只针对档2）。
 	if result.Degraded {
 		t.Fatal("Degraded=true on tier1, want false (rerank fallback still produces full LLM answer)")
 	}
@@ -139,7 +139,7 @@ func TestDegradationTier2LLMFailureReturnsDegradedAnswerWithChunks(t *testing.T)
 func TestDegradationTier2ReusesSummaryByMD5AcrossTasks(t *testing.T) {
 	resetDegradationCountersForTest()
 	repos := newChatServiceTestRepositories(t)
-	// 另一个 task 持有相同 file_md5 的成功摘要（spec 03 FindByMD5 跨 task 复用）。
+	// 另一个 task 持有相同 file_md5 的成功摘要（docs/architecture/data-model.md FindByMD5 跨 task 复用）。
 	sourceTask := &model.VideoTask{UserID: 99, FileMD5: "sharemd5sharemd5sharemd5share", Filename: "src.mp4", FileURL: "videos/src.mp4"}
 	if err := repos.Task.Create(sourceTask); err != nil {
 		t.Fatalf("create source task: %v", err)
@@ -198,7 +198,7 @@ func TestDegradationAdmissionRetryAfterOverCutoffTriggersTier2(t *testing.T) {
 	if !shouldTriggerLLMDegradation(policy, longRetry) {
 		t.Fatal("RetryAfter=10s over cutoff did not trigger tier2")
 	}
-	// RetryAfter=2s（阈值内）→ 不触发档2（由 caller 重试，admission 协同 spec 06）。
+	// RetryAfter=2s（阈值内）→ 不触发档2（由 caller 重试，admission 协同 docs/architecture/reliability.md）。
 	shortRetry := &ai.AdmissionError{Decision: quota.Decision{Allowed: false, Scope: "provider", RetryAfter: 2 * time.Second}}
 	if shouldTriggerLLMDegradation(policy, shortRetry) {
 		t.Fatal("RetryAfter=2s under cutoff triggered tier2, want retry path")
@@ -254,7 +254,7 @@ func TestDegradationTier2StreamReturnsDegradedAnswer(t *testing.T) {
 }
 
 // TestDegradationAdmissionProviderErrorRetryAfterHonored 验证 429 ProviderError 的
-// RetryAfter 也走 admissionRetryAfterCutoff 语义（spec 06 协同一致性）：短 RetryAfter
+// RetryAfter 也走 admissionRetryAfterCutoff 语义（docs/architecture/reliability.md 协同一致性）：短 RetryAfter
 // 不降级（走重试路径）、长 RetryAfter 触发档2。修复 review 指出的"429 短 RetryAfter
 // 误触发档2"问题。
 func TestDegradationAdmissionProviderErrorRetryAfterHonored(t *testing.T) {
@@ -273,7 +273,7 @@ func TestDegradationAdmissionProviderErrorRetryAfterHonored(t *testing.T) {
 }
 
 // TestDegradationChainTierCount 断言降级链档数 = 3（档0正常/档1 rerank→向量基线/档2
-// LLM→无LLM模式），回填 spec 06 数字占位符"降级链档数 3"。
+// LLM→无LLM模式），回填 docs/architecture/reliability.md 待评测指标"降级链档数 3"。
 func TestDegradationChainTierCount(t *testing.T) {
 	// DegradationLevel 枚举覆盖档0/档1/档2 三档。
 	levels := []DegradationLevel{DegradationNone, DegradationRerankFallback, DegradationLLMUnavailable}
@@ -285,10 +285,10 @@ func TestDegradationChainTierCount(t *testing.T) {
 	}
 }
 
-// TestDegradationAvailabilityRate 回填 spec 06 数字占位符"降级可用率"：
+// TestDegradationAvailabilityRate 回填 docs/architecture/reliability.md 待评测指标"降级可用率"：
 // LLM 失败场景下返回 degraded 答案而非错误的占比。造 N 个 LLM 失败场景（UseLLM=true
 // 的 direct_qa intent + fake LLM 注入失败），断言 100% 返回 degraded 答案（非错误）。
-// 这是 spec 06 决策记录第 6 节稀缺点的直接验收：LLM 失败 → 回退无 LLM 模式而非全废。
+// 这是 docs/architecture/reliability.md 当前实现约束稀缺点的直接验收：LLM 失败 → 回退无 LLM 模式而非全废。
 func TestDegradationAvailabilityRate(t *testing.T) {
 	resetDegradationCountersForTest()
 	const scenarios = 5

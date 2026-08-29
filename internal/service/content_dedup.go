@@ -9,11 +9,11 @@ import (
 	"vid-lens/internal/model"
 )
 
-// contentDedupHits 统计内容+目标级去重的命中次数（spec 03 第 10 行：去重命中
+// contentDedupHits 统计内容+目标级去重的命中次数（docs/$1：去重命中
 // 的计数可观测，为运维指标提供可跑统计来源）。每次重复上传/
 // 重复请求命中已有成功结果（秒传到 Completed、不重跑 AI）即 +1。
 // 这是进程内计数器（非持久），长期运行后需接入 metrics 落盘；本 spec 只保证
-// 计数可观测、验收命令能跑出真实数字（spec 第 136 行"不许估算"）。
+// 计数可观测、验收命令能跑出真实数字（当前实现约束"不许估算"）。
 var contentDedupHits int64
 
 // ContentDedupHits 返回当前内容去重命中次数（用于验收命令与可观测性）。
@@ -21,13 +21,13 @@ func ContentDedupHits() int64 { return atomic.LoadInt64(&contentDedupHits) }
 
 // recordContentDedupHit 记录一次内容去重命中。命中 = 等价省一次对应 job_type
 // 的 AI 调用（ASR / 摘要 LLM / 索引 embed），故"省 AI 调用次数 = 命中次数"
-// （spec 第 128 行派生结论）。
+// （当前实现约束派生结论）。
 func recordContentDedupHit() { atomic.AddInt64(&contentDedupHits, 1) }
 
 // resetContentDedupHitsForTest 重置命中计数器到 0（仅测试用，隔离用例）。
 func resetContentDedupHitsForTest() { atomic.StoreInt64(&contentDedupHits, 0) }
 
-// 内容级 + 分析目标级去重（spec 03）。
+// 内容级 + 分析目标级去重（docs/architecture/data-model.md）。
 //
 // 三层幂等分工：
 //  1. 文件层（Asset file_md5 唯一索引 + FindByMD5 + CreateOrRestore）：
@@ -35,7 +35,7 @@ func resetContentDedupHitsForTest() { atomic.StoreInt64(&contentDedupHits, 0) }
 //  2. 内容+目标层（本文件）：复用分析结果，省 AI token。同一 (file_md5,
 //     job_type) 已有成功结果 → 复用，不重跑 AI。Redis SETNX 防并发抢占
 //     （短期），DB 唯一约束 (file_md5[, embedding_model]) 持久兜底（长期）。
-//  3. MQ 消息层（spec 02，internal/mq/idempotency.go 的 SETNX on MessageId）：
+//  3. MQ 消息层（docs/architecture/reliability.md，internal/mq/idempotency.go 的 SETNX on MessageId）：
 //     去重重复投递，保证 at-least-once 无副作用。
 //
 // 三层正交，各填各的窗口：文件层填"同内容重传"窗口、内容+目标层填"同内容
@@ -45,13 +45,13 @@ func resetContentDedupHitsForTest() { atomic.StoreInt64(&contentDedupHits, 0) }
 //
 // 索引去重特别注意：(file_md5, embedding_model) 而非复用 transcription。
 // 索引重建（分块/embedding 模型变更）后旧索引 status 被改写，不再挡住重索引
-// （spec 第 66 行）。索引去重因依赖 embedding_model，落在转写消费侧
+// （当前实现约束）。索引去重因依赖 embedding_model，落在转写消费侧
 // indexAfterTranscription（该处可解析用户默认 embedding 模型）；上传侧
 // createTaskFromAsset 只判定转写+摘要（不依赖 embedding 模型）。
 
 const (
 	// contentDedupLockTTL 是内容+目标级 Redis SETNX 锁的 TTL：处理时长 + guard。
-	// 与 spec 02 消息级幂等同一思想（lease + guard），但键不同：
+	// 与 docs/architecture/reliability.md 消息级幂等同一思想（lease + guard），但键不同：
 	//   mq:dedup:content:<file_md5>:<job_type>
 	// 一个请求跑 AI 期间其余并发请求拿不到锁 → 等待复用，避免同内容并发跑两遍。
 	// 处理完成后键随 TTL 过期（不主动 Del），这样 crash 在 AI 完成与写结果之间
@@ -82,9 +82,9 @@ func (d contentDedupDecision) AllHit() bool {
 }
 
 // lookupContentDedup 按 file_md5 查任意 task、任意用户的成功转写/摘要结果
-// （spec 03 第 59 行）。只复用成功结果：转写/摘要表行存在即成功完成
+// （docs/$1）。只复用成功结果：转写/摘要表行存在即成功完成
 // （这两表无 status 列，行存在 = Completed）。失败结果不会落行，故不会被复用
-// （spec 第 14 行）。
+// （当前实现约束）。
 func (s *MediaService) lookupContentDedup(fileMD5 string) (contentDedupDecision, error) {
 	dec := contentDedupDecision{}
 	if fileMD5 == "" {
@@ -130,10 +130,10 @@ func (s *MediaService) acquireContentDedupLock(ctx context.Context, fileMD5, job
 
 // completeTaskFromDedupHit 在内容去重全命中时把新 task 秒传到 Completed。
 // 不 enqueue 任何 job，结果行不复制——详情页按 file_md5 关联已有行展示
-// （见 GetTaskDetail 的 file_md5 join 路径，spec 第 65 行）。
+// （见 GetTaskDetail 的 file_md5 join 路径，当前实现约束）。
 //
 // 仅上传链路全命中（转写+摘要都有）调用；force=true 时不调用本路径
-// （force 仍可强制重跑，spec 第 39 行）。
+// （force 仍可强制重跑，当前实现约束）。
 func (s *MediaService) completeTaskFromDedupHit(taskID int64) error {
 	return s.repo.Task.UpdateStatusAndStage(taskID, model.TaskStatusCompleted, model.TaskStageNone, "")
 }
@@ -141,11 +141,11 @@ func (s *MediaService) completeTaskFromDedupHit(taskID int64) error {
 // reuseResultByFileMD5 封装 RequestAnalysis/RequestTranscribe 共用的内容去重
 // 短路范式：force=false 且当前 task 无自有结果行时，按 file_md5 查任意 task/
 // 任意用户的成功结果。命中 → 抢 SETNX 内容锁、记命中、返回"已完成可直接查看
-// 结果"（与原单 task 短路语义一致，不替 task 做整体完成判定——spec 第 60 行
+// 结果"（与原单 task 短路语义一致，不替 task 做整体完成判定——当前实现约束
 // 分析目标级独立）。find 返回 (existing, error)；existing 非空即命中。
 //
 // 三层幂等分工见本文件顶部注释。此 helper 与文件层 Asset 秒传、MQ 消息级
-// SETNX（spec 02）正交，不可合并到消息级层。
+// SETNX（docs/architecture/reliability.md）正交，不可合并到消息级层。
 func (s *MediaService) reuseResultByFileMD5(
 	ctx context.Context,
 	task *model.VideoTask,

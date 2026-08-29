@@ -6,8 +6,8 @@ import (
 	"vid-lens/internal/model"
 )
 
-// Spec 05：规则层分类只测外部可观察行为（intent 判定 + 是否达短路阈值），
-// 不测内部权重数值（spec line 117）。短路阈值通过 confidence ≥ shortCircuitThreshold
+// docs/architecture/retrieval.md：规则层分类只测外部可观察行为（intent 判定 + 是否达短路阈值），
+// 不测内部权重数值（当前实现约束）。短路阈值通过 confidence ≥ shortCircuitThreshold
 // 可观察。
 
 func TestRuleIntentClassifierOverviewShortCircuits(t *testing.T) {
@@ -119,7 +119,7 @@ func TestRuleIntentClassifierDirectQAExactQuestion(t *testing.T) {
 	// direct_qa 是兜底 intent，弱命中不应高置信短路——避免误压其他 intent 的
 	// LLM 兜底。"为什么" 关键词 0.6*weightKeyword + signal 0.5*weightSignal ≈ 0.45，
 	// 低于 shortCircuitThreshold 0.75 → 交给 LLM 兜底。注：若调优后该 case 确实
-	// 应短路，回填常量并改本断言 + audit trail（spec line 80）。
+	// 应短路，回填常量并改本断言 + audit trail（当前实现约束）。
 	if conf >= shortCircuitThreshold {
 		t.Fatalf("direct_qa weak-hit confidence = %.2f, want < %.2f (defer to LLM)", conf, shortCircuitThreshold)
 	}

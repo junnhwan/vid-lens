@@ -49,7 +49,7 @@ type initialDispatchSpec struct {
 // This is the outbox pattern expressed as a same-table lease column rather than
 // a separate outbox table: the lease is already atomically coupled to the task
 // state machine, so a second table would be redundant. The narrative is
-// "投递一致性 lease" — see docs/decisions/02-dispatch-consistency.md.
+// "投递一致性 lease" — see docs/architecture/reliability.md.
 func (s *MediaService) enqueueInitialTask(ctx context.Context, task *model.VideoTask, spec initialDispatchSpec) (repository.InitialTaskDispatch, error) {
 	if s == nil || s.repo == nil || s.mq == nil || spec.enqueue == nil {
 		return repository.InitialTaskDispatch{}, fmt.Errorf("initial task dispatch dependencies are unavailable")
