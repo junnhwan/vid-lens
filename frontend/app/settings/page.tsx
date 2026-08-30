@@ -54,13 +54,13 @@ function SettingsEditor() {
       />
 
       <div className="px-8 pb-3">
-        <div className="flex items-center gap-1 border-b border-stone-200">
+        <div className="flex items-center gap-1 border-b border-ink-0/8">
           {(Object.keys(TAB_META) as Tab[]).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`px-4 py-2.5 text-[12px] border-b-2 -mb-px transition-colors duration-200 ${
-                tab === t ? 'border-amber-600 text-stone-900 font-medium' : 'border-transparent text-stone-400 hover:text-stone-600'
+                tab === t ? 'border-sienna-500 text-ink-0 font-medium' : 'border-transparent text-ink-4 hover:text-ink-2'
               }`}
             >
               {TAB_META[t].label}
@@ -69,7 +69,7 @@ function SettingsEditor() {
           {!readOnly && (
             <button
               onClick={() => { setShowNewForm(true); setSelectedId(null) }}
-              className="ml-auto h-8 px-3 rounded-lg border border-stone-300 text-[11px] flex items-center gap-1 ui-btn-lift"
+              className="ml-auto h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] text-ink-2 flex items-center gap-1 ui-btn-lift hover:text-ink-0"
             >
               <Plus className="w-3 h-3" />新建 Profile
             </button>
@@ -86,16 +86,16 @@ function SettingsEditor() {
 
         <div className="grid lg:grid-cols-[1fr_1.4fr] gap-8">
           <section className="ui-fade-in">
-            <div className="text-[10px] uppercase tracking-wider text-stone-400 mb-3">
+            <div className="text-[12px] text-ink-4 mb-3">
               {TAB_META[tab].label} · {profiles.length} 个
             </div>
             {loading ? (
-              <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-16 bg-stone-100 rounded-lg animate-pulse" />)}</div>
+              <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-16 bg-paper-2 rounded-lg sk" />)}</div>
             ) : profiles.length === 0 ? (
-              <div className="py-10 text-center border border-dashed border-stone-300 rounded-xl">
-                <div className="text-[12px] text-stone-400 mb-2">暂无 Profile</div>
+              <div className="py-10 text-center border border-dashed border-ink-0/15 rounded-xl">
+                <div className="text-[12px] text-ink-4 mb-2">暂无 Profile</div>
                 {!readOnly && (
-                  <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] ui-btn-lift inline-flex items-center gap-1">
+                  <button onClick={() => { setShowNewForm(true); setSelectedId(null) }} className="h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] ui-btn-lift inline-flex items-center gap-1">
                     <Plus className="w-3 h-3" />新建
                   </button>
                 )}
@@ -112,27 +112,27 @@ function SettingsEditor() {
                         tabIndex={0}
                         onClick={() => { setSelectedId(p.id); setShowNewForm(false) }}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(p.id); setShowNewForm(false) } }}
-                        className={`w-full text-left p-4 rounded-xl border transition-all duration-200 ui-card-hover cursor-pointer ${
-                          sel ? 'border-amber-400/60 bg-amber-50/60 shadow-sm' : 'border-stone-200 bg-white hover:border-stone-300'
+                        className={`w-full text-left p-4 rounded-xl transition-colors duration-200 ui-card-hover cursor-pointer ${
+                          sel ? 'bg-sienna-500/8' : 'hover:bg-ink-0/4'
                         }`}
                         style={{ animationDelay: `${i * 50}ms` }}
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-[15px] font-medium text-stone-900">{p.name}</span>
+                          <span className="text-[15px] font-medium text-ink-0">{p.name}</span>
                           {p.is_default && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-sienna-500/10 text-sienna-700 border border-sienna-500/25">默认</span>
                           )}
                           {!hasGroup && (
-                            <span className="text-[9px] text-stone-400 border border-stone-200 px-1 rounded">未配{tab.toUpperCase()}</span>
+                            <span className="text-[9px] text-ink-4 border border-ink-0/10 px-1 rounded">未配{tab.toUpperCase()}</span>
                           )}
                         </div>
-                        <div className="text-[11px] text-stone-500 mt-1 font-mono truncate">
+                        <div className="text-[11px] text-ink-3 mt-1 font-mono truncate">
                           {readOnly ? (groupField(p, tab).model || '—') : `${groupField(p, tab).provider || '—'} · ${groupField(p, tab).base || '—'}`}
                         </div>
                         {!readOnly && !sel && !p.is_default && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setDefault(p.id) }}
-                            className="mt-2 text-[10px] text-stone-400 hover:text-stone-700"
+                            className="mt-2 text-[10px] text-ink-4 hover:text-ink-2"
                           >
                             设默认
                           </button>
@@ -143,7 +143,7 @@ function SettingsEditor() {
                 })}
               </ul>
             )}
-            <div className="mt-5 text-[10px] text-stone-400 leading-relaxed flex items-start gap-1.5">
+            <div className="mt-5 text-[10px] text-ink-4 leading-relaxed flex items-start gap-1.5">
               <Info className="w-3 h-3 mt-0.5 shrink-0" />
               <span>Create 时若该类无默认，将自动设为默认。设新默认会取消旧默认。</span>
             </div>
@@ -152,14 +152,14 @@ function SettingsEditor() {
           <section className="ui-fade-in">
             {readOnly ? (
               selected ? <ReadOnlyProfile profile={selected} /> : (
-                <div className="border border-dashed border-stone-300 rounded-xl py-16 text-center text-[13px] text-stone-400">从左侧选择一个 Profile</div>
+                <div className="border border-dashed border-ink-0/15 rounded-xl py-16 text-center text-[13px] text-ink-4">从左侧选择一个 Profile</div>
               )
             ) : showNewForm ? (
               <ProfileForm key="new" tab={tab} onChanged={load} onSaved={(id) => { setSelectedId(id); setShowNewForm(false) }} />
             ) : selected ? (
               <ProfileForm key={selected.id} tab={tab} profile={selected} onChanged={load} />
             ) : (
-              <div className="border border-dashed border-stone-300 rounded-xl py-16 text-center text-[13px] text-stone-400">从左侧选择一个 Profile，或新建</div>
+              <div className="border border-dashed border-ink-0/15 rounded-xl py-16 text-center text-[13px] text-ink-4">从左侧选择一个 Profile，或新建</div>
             )}
           </section>
         </div>
@@ -214,25 +214,25 @@ function DemoProfilesView() {
 
         {loading ? (
           <div className="space-y-3">
-            {[0, 1, 2].map(i => <div key={i} className="h-24 bg-white border border-stone-200 rounded-xl animate-pulse" />)}
+            {[0, 1, 2].map(i => <div key={i} className="h-24 bg-paper-0 border border-ink-0/8 rounded-xl sk" />)}
           </div>
         ) : profiles.length === 0 ? (
-          <div className="py-16 text-center text-[12px] text-stone-400">暂无模型配置</div>
+          <div className="py-16 text-center text-[12px] text-ink-4">暂无模型配置</div>
         ) : (
           <div className="space-y-4">
             {profiles.map(p => (
-              <div key={p.id} className="bg-white border border-stone-200 rounded-xl p-6 ui-card-hover">
+              <div key={p.id} className="bg-paper-0 border border-ink-0/8 rounded-xl p-6 ui-card-hover">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-[18px] font-medium text-stone-900 ui-serif">{p.name}</span>
+                  <span className="text-[18px] font-medium text-ink-0 ui-serif">{p.name}</span>
                   {p.is_default && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-sienna-500/10 text-sienna-700 border border-sienna-500/25">默认</span>
                   )}
                 </div>
                 <div className="space-y-3">
                   {rows(p).map(r => (
-                    <div key={r.label} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-2.5 last:border-0 last:pb-0">
-                      <span className="text-[10px] text-stone-400 uppercase tracking-wider">{r.label}</span>
-                      <span className="text-[12.5px] text-stone-700 font-mono">{r.value || '—'}</span>
+                    <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/6 pb-2.5 last:border-0 last:pb-0">
+                      <span className="text-[10px] text-ink-4 uppercase tracking-wider">{r.label}</span>
+                      <span className="text-[12.5px] text-ink-2 font-mono">{r.value || '—'}</span>
                     </div>
                   ))}
                 </div>
@@ -262,20 +262,20 @@ function ReadOnlyProfile({ profile }: { profile: AIProfile }) {
   return (
     <div className="space-y-4 ui-fade-in">
       <div className="text-[10px] uppercase tracking-wider text-stone-400">查看 · {profile.name}</div>
-      <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-3">
+      <div className="bg-paper-0 border border-ink-0/8 rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-2">
-          <span className="text-[18px] font-medium text-stone-900 ui-serif">{profile.name}</span>
+          <span className="text-[18px] font-medium text-ink-0 ui-serif">{profile.name}</span>
           {profile.is_default && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">默认</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-sienna-500/10 text-sienna-700 border border-sienna-500/25">默认</span>
           )}
         </div>
         {rows.map(r => (
-          <div key={r.label} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-2.5 last:border-0 last:pb-0">
-            <span className="text-[10px] text-stone-400 uppercase tracking-wider">{r.label}</span>
-            <span className="text-[12.5px] text-stone-700 font-mono">{r.value || '—'}</span>
+          <div key={r.label} className="flex items-center justify-between gap-4 border-b border-ink-0/6 pb-2.5 last:border-0 last:pb-0">
+            <span className="text-[10px] text-ink-4 uppercase tracking-wider">{r.label}</span>
+            <span className="text-[12.5px] text-ink-2 font-mono">{r.value || '—'}</span>
           </div>
         ))}
-        <p className="text-[11px] text-stone-400 pt-1">演示账号配置为只读，服务地址与密钥已隐藏。</p>
+        <p className="text-[11px] text-ink-4 pt-1">演示账号配置为只读，服务地址与密钥已隐藏。</p>
       </div>
     </div>
   )
@@ -386,11 +386,11 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
 
   return (
     <div className="space-y-4 ui-fade-in">
-      <div className="text-[10px] uppercase tracking-wider text-stone-400">{isEdit ? `编辑 · ${profile?.name}` : `新建 · ${TAB_META[tab].label}`}</div>
-      <div className="bg-white border border-stone-200 rounded-xl p-6 space-y-4">
+      <div className="text-[12px] text-ink-4">{isEdit ? `编辑 · ${profile?.name}` : `新建 · ${TAB_META[tab].label}`}</div>
+      <div className="bg-paper-0 border border-ink-0/8 rounded-xl p-6 space-y-4">
         <FormField label="Profile 名称">
-          <input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} className="ui-input disabled:text-stone-400" />
-          {isEdit && <p className="text-[10px] text-stone-400 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置。</p>}
+          <input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} className="ui-input disabled:text-ink-4" />
+          {isEdit && <p className="text-[10px] text-ink-4 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置。</p>}
         </FormField>
         <FormField label={fieldLabel.provider}>
           <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="mimo / openai / siliconflow" className="ui-input font-mono" />
@@ -399,25 +399,25 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
           <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="ui-input font-mono" />
         </FormField>
         <FormField label={fieldLabel.key}>
-          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-stone-200 bg-stone-50">
+          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-ink-0/10 bg-paper-1">
             <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isEdit ? '•••• 留空保留旧值' : 'sk-...'} className="flex-1 bg-transparent text-[13px] font-mono" />
-            <button onClick={() => setShowKey(s => !s)} className="text-stone-400 hover:text-stone-600"><Eye className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setShowKey(s => !s)} className="text-ink-4 hover:text-ink-2"><Eye className="w-3.5 h-3.5" /></button>
           </div>
-          <p className="text-[10px] text-stone-400 mt-1">加密存储，使用 VIDLENS_API_KEY_SECRET。{isEdit && g.keyMasked ? `当前：${g.keyMasked}` : ''}</p>
+          <p className="text-[10px] text-ink-4 mt-1">加密存储，使用 VIDLENS_API_KEY_SECRET。{isEdit && g.keyMasked ? `当前：${g.keyMasked}` : ''}</p>
         </FormField>
         <FormField label={fieldLabel.model}>
-          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-stone-200 bg-white focus-within:ring-2 focus-within:ring-amber-600/20 focus-within:border-amber-400">
+          <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-ink-0/10 bg-paper-0 focus-within:ring-2 focus-within:ring-sienna-500/20 focus-within:border-sienna-500">
             <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="模型名" className="flex-1 bg-transparent text-[13px] font-mono" />
-            <button onClick={probeModels} disabled={busy} className="text-[10px] text-stone-400 hover:text-stone-600 whitespace-nowrap flex items-center gap-1 disabled:opacity-50">
+            <button onClick={probeModels} disabled={busy} className="text-[10px] text-ink-4 hover:text-ink-2 whitespace-nowrap flex items-center gap-1 disabled:opacity-50">
               <List className="w-3 h-3" />探测
             </button>
           </div>
           {models.length > 0 && (
-            <div className="mt-2 border border-stone-200 rounded-lg p-2.5 text-[11px] text-stone-600 space-y-0.5">
-              <div className="text-stone-400 text-[10px] mb-1">可用模型</div>
+            <div className="mt-2 border border-ink-0/10 rounded-lg p-2.5 text-[11px] text-ink-2 space-y-0.5">
+              <div className="text-ink-4 text-[10px] mb-1">可用模型</div>
               {models.map(m => (
-                <div key={m} className="cursor-pointer hover:text-amber-800 font-mono" onClick={() => setModel(m)}>
-                  {m}{m === model && <span className="text-amber-700"> ← 当前</span>}
+                <div key={m} className="cursor-pointer hover:text-sienna-700 font-mono" onClick={() => setModel(m)}>
+                  {m}{m === model && <span className="text-sienna-700"> ← 当前</span>}
                 </div>
               ))}
             </div>
@@ -425,15 +425,15 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
         </FormField>
 
         <div className="flex items-center gap-2 pt-1">
-          <button onClick={testConn} disabled={busy || !isEdit} className="h-8 px-3.5 rounded-lg bg-stone-900 text-white text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
+          <button onClick={testConn} disabled={busy || !isEdit} className="h-8 px-3.5 rounded-lg bg-ink-0 text-paper-0 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
             <PlugZap className="w-3.5 h-3.5" />测试连通
           </button>
           {tab === 'embedding' && (
-            <button onClick={probeDimFn} disabled={busy} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] ui-btn-lift disabled:opacity-50">
+            <button onClick={probeDimFn} disabled={busy} className="h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] ui-btn-lift disabled:opacity-50">
               <Ruler className="w-3.5 h-3.5" />探测维度
             </button>
           )}
-          {busy && <Loader2 className="w-3.5 h-3.5 text-stone-400 animate-spin" />}
+          {busy && <Loader2 className="w-3.5 h-3.5 text-ink-4 animate-spin" />}
         </div>
 
         {testResult && (
@@ -445,22 +445,22 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
           </div>
         )}
         {probeDim != null && (
-          <div className="border border-stone-200 bg-stone-50 rounded-lg px-3 py-2.5 flex items-start gap-2">
-            <Ruler className="w-4 h-4 mt-0.5 text-amber-700" />
+          <div className="border border-ink-0/10 bg-paper-1 rounded-lg px-3 py-2.5 flex items-start gap-2">
+            <Ruler className="w-4 h-4 mt-0.5 text-sienna-700" />
             <div>
-              <div className="text-[11px] text-stone-600">Embedding 维度 = <span className="text-amber-800 font-medium">{probeDim}</span></div>
-              <p className="text-[12px] text-stone-500 mt-0.5">已与 pgvector projection 对齐，索引可直接写入。</p>
+              <div className="text-[11px] text-ink-2">Embedding 维度 = <span className="text-sienna-700 font-medium">{probeDim}</span></div>
+              <p className="text-[12px] text-ink-3 mt-0.5">已与 pgvector projection 对齐，索引可直接写入。</p>
             </div>
           </div>
         )}
 
-        <div className="flex items-center gap-2 pt-3 border-t border-stone-100">
-          <button onClick={save} disabled={busy} className="h-8 px-4 rounded-lg bg-stone-900 text-white text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
+        <div className="flex items-center gap-2 pt-3 border-t border-ink-0/8">
+          <button onClick={save} disabled={busy} className="h-8 px-4 rounded-lg bg-ink-0 text-paper-0 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}{isEdit ? '保存' : '创建'}
           </button>
           {isEdit && (
             <>
-              <button onClick={setDefault} disabled={busy} className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
+              <button onClick={setDefault} disabled={busy} className="h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
                 <Star className="w-3.5 h-3.5" />设为默认
               </button>
               <button onClick={del} className="ml-auto text-[11px] text-red-600 hover:underline flex items-center gap-1">
@@ -478,7 +478,7 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">{label}</label>
+      <label className="block text-[10px] uppercase tracking-wider text-ink-4 mb-1.5">{label}</label>
       {children}
     </div>
   )

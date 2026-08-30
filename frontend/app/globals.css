@@ -122,15 +122,15 @@ body { -webkit-font-smoothing: antialiased; }
   height: 2.5rem;
   padding: 0 0.75rem;
   border-radius: 0.5rem;
-  border: 1px solid rgb(231 229 228);
-  background: white;
+  border: 1px solid color-mix(in srgb, var(--ink-0) 12%, transparent);
+  background: var(--paper-0);
   font-size: 13px;
-  color: rgb(28 25 23);
+  color: var(--ink-0);
 }
 .ui-input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2);
-  border-color: rgb(251 191 36);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-500) 20%, transparent);
+  border-color: var(--accent-500);
 }
 
 /* 聊天：柔和流式光标 + Agent 流水线动效 */
@@ -140,7 +140,7 @@ body { -webkit-font-smoothing: antialiased; }
   height: 0.95em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: rgba(120, 113, 108, 0.5);
+  background: color-mix(in srgb, var(--ink-0) 45%, transparent);
   border-radius: 1px;
   animation: ui-typewriter-cursor 1.4s ease-in-out infinite;
 }
@@ -175,11 +175,140 @@ body { -webkit-font-smoothing: antialiased; }
   100% { width: 100%; opacity: 0.5; }
 }
 
+/* ============ Agent 透镜浮层（融合版 VariantM → 正式产品） ============ */
+.ui-root {
+  --ui-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ui-shadow-lens: 0 24px 48px color-mix(in srgb, var(--ink-0) 14%, transparent);
+}
+
+.ui-glass {
+  background: color-mix(in srgb, var(--paper-0) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--ink-0) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--paper-0) 70%, transparent),
+    var(--ui-shadow-lens);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ui-glass {
+    background: var(--paper-0);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+.ui-agent-pulse-opacity {
+  animation: ui-agent-pulse-opacity 1.5s ease-in-out infinite;
+}
+@keyframes ui-agent-pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.ui-agent-glow-lens {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-500) 40%, transparent),
+    0 8px 28px color-mix(in srgb, var(--accent-500) 14%, transparent);
+}
+
+.ui-lens-shell {
+  transform-origin: bottom right;
+  transition: opacity 240ms var(--ui-ease-out), transform 240ms var(--ui-ease-out);
+}
+.ui-lens-shell[data-mounted="false"] {
+  opacity: 0;
+  transform: translateY(12px) scale(0.95);
+}
+.ui-lens-shell[data-mounted="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.ui-lens-swap {
+  transform-origin: bottom right;
+  animation: ui-lens-swap 240ms var(--ui-ease-out) both;
+}
+@keyframes ui-lens-swap {
+  from { opacity: 0; transform: translateY(12px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+.ui-status-text {
+  transition: opacity 150ms var(--ui-ease-out);
+}
+.ui-status-text[data-changing="true"] {
+  opacity: 0;
+}
+
+.ui-item-in {
+  animation: ui-item-in 140ms var(--ui-ease-out) both;
+}
+@keyframes ui-item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.ui-acc {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ui-ease-out);
+}
+.ui-acc[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.ui-acc-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.ui-chevron {
+  transition: transform 200ms var(--ui-ease-out);
+}
+
+.ui-ev-stack {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+.ui-ev-stack[data-overflow="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--paper-0) 92%, transparent));
+}
+
+.ui-chat-bubble {
+  overflow-anchor: none;
+}
+
+.ui-quote-in {
+  animation: ui-quote-in 220ms var(--ui-ease-out) both;
+}
+@keyframes ui-quote-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ui-fade-in, .ui-card-hover, .ui-btn-lift, .ui-pulse, .ui-backdrop, .ui-modal-in,
-  .ui-typewriter-cursor, .ui-typewriter-cites-in, .ui-agent-shimmer, .ui-agent-scan, .ui-agent-glow {
-    animation:none!important; transition:none!important;
+  .ui-typewriter-cursor, .ui-typewriter-cites-in, .ui-agent-shimmer, .ui-agent-scan, .ui-agent-glow,
+  .ui-agent-pulse-opacity, .ui-status-text, .ui-item-in, .ui-acc, .ui-chevron {
+    animation: none !important;
+    transition: none !important;
   }
+  .ui-lens-swap, .ui-lens-shell, .ui-quote-in {
+    animation: ui-fade-only 180ms var(--ui-ease-out) both !important;
+    transform: none !important;
+  }
+}
+@keyframes ui-fade-only {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ============ 产品打磨补丁 ============ */

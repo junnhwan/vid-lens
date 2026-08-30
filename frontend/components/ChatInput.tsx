@@ -31,7 +31,7 @@ export default function ChatInput({
   }
 
   return (
-    <div className="rounded-xl border border-stone-200 bg-white focus-within:ring-2 focus-within:ring-amber-600/20 focus-within:border-amber-400 transition-shadow">
+    <div className="rounded-xl border border-ink-0/10 bg-paper-0 focus-within:ring-2 focus-within:ring-sienna-500/20 focus-within:border-sienna-500/40 transition-shadow">
       <textarea
         ref={taRef}
         rows={2}
@@ -41,40 +41,40 @@ export default function ChatInput({
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
         }}
         placeholder={placeholder}
-        className="w-full bg-transparent px-4 pt-3 pb-1 text-[14px] leading-relaxed text-stone-900 placeholder:text-stone-400 focus:outline-none resize-none"
+        className="w-full bg-transparent px-4 pt-3 pb-1 text-[14px] leading-relaxed text-ink-0 placeholder:text-ink-5 focus:outline-none resize-none"
       />
       <div className="flex items-center gap-3 px-3 pb-2.5">
-        <div className="flex items-center gap-2 text-[10px] text-stone-400">
+        <div className="flex items-center gap-2 text-[10px] text-ink-4">
           <span>TopK</span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => onTopKChange(Math.max(1, topK - 1))}
-              className="w-5 h-5 rounded border border-stone-200 text-stone-500 hover:bg-stone-50"
+              className="w-5 h-5 rounded border border-ink-0/10 text-ink-3 hover:bg-paper-1"
             >
               −
             </button>
-            <span className="w-5 text-center text-stone-700">{topK}</span>
+            <span className="w-5 text-center text-ink-1 tabular-nums">{topK}</span>
             <button
               onClick={() => onTopKChange(Math.min(20, topK + 1))}
-              className="w-5 h-5 rounded border border-stone-200 text-stone-500 hover:bg-stone-50"
+              className="w-5 h-5 rounded border border-ink-0/10 text-ink-3 hover:bg-paper-1"
             >
               +
             </button>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] text-stone-400">Enter 发送</span>
+          <span className="text-[10px] text-ink-4">Enter 发送</span>
           {streaming ? (
             <button
               onClick={onStop}
-              className="h-8 px-3 rounded-lg border border-red-300 text-red-700 text-[11px] flex items-center gap-1.5 ui-btn-lift"
+              className="h-8 px-3 rounded-lg border border-rust/30 text-rust text-[11px] flex items-center gap-1.5 ui-btn-lift"
             >
               <Square className="w-3.5 h-3.5" />停止
             </button>
           ) : (
             <button
               onClick={send}
-              className="h-8 px-3 rounded-lg bg-stone-900 text-white text-[11px] flex items-center gap-1.5 ui-btn-lift hover:bg-stone-800"
+              className="h-8 px-3 rounded-lg bg-ink-0 text-paper-0 text-[11px] flex items-center gap-1.5 ui-btn-lift hover:bg-ink-1"
             >
               <Send className="w-3.5 h-3.5" />发送
             </button>

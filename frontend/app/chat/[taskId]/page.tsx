@@ -7,6 +7,7 @@ import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, VideoModeToggle, SidebarSection } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
 import AgentTracePanel from '@/components/chat/AgentTracePanel'
+import AgentLensOverlay from '@/components/chat/AgentLensOverlay'
 import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
 import {
   agentTraceReducer,
@@ -25,7 +26,7 @@ import type { VideoTask, ChatSession, Citation, VideoChatMode } from '@/lib/type
 
 export default function ChatPage() {
   return (
-    <Suspense fallback={<div className="h-screen bg-[#f7f4ef]" />}>
+    <Suspense fallback={<div className="h-screen bg-paper-1" />}>
       <ChatView />
     </Suspense>
   )
@@ -346,17 +347,27 @@ function ChatView() {
 
   const modeLabel = mode === 'agent' ? 'Agent 问答' : mode === 'strict_rag' ? '严格 RAG' : '普通问答'
 
+  const lastAgentMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.agentRun)
+  const lensCites = lastAgentMsg?.cites || []
+
   return (
     <ChatShell
       scrollRef={scrollRef}
       tracePanel={
-        <AgentTracePanel
-          steps={panelSteps}
-          streaming={streaming}
-          source={panelSource}
-          error={traceError}
-          emptyHint={isAgentMode ? 'Agent 将展示检索与工具步骤摘要。' : 'RAG 流式问答将展示检索与生成进度。'}
-        />
+        isAgentMode ? undefined : (
+          <AgentTracePanel
+            steps={panelSteps}
+            streaming={streaming}
+            source={panelSource}
+            error={traceError}
+            emptyHint={isAgentMode ? 'Agent 将展示检索与工具步骤摘要。' : 'RAG 流式问答将展示检索与生成进度。'}
+          />
+        )
+      }
+      overlay={
+        isAgentMode ? (
+          <AgentLensOverlay steps={agentTrace.steps} cites={lensCites} />
+        ) : undefined
       }
       header={
         <ChatHeader
@@ -373,7 +384,7 @@ function ChatView() {
             <SidebarSection
               title="会话"
               action={
-                <button onClick={newSession} className="text-amber-700 hover:text-amber-900 flex items-center gap-0.5 text-[10px]" title="新建会话">
+                <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[10px]" title="新建会话">
                   <Plus className="w-3 h-3" />新建
                 </button>
               }
@@ -384,34 +395,34 @@ function ChatView() {
                     <button
                       onClick={() => switchSession(s.id)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] ui-row-hover ${
-                        session?.id === s.id ? 'bg-amber-50 text-amber-900 font-medium' : 'text-stone-600'
+                        session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
                       }`}
                     >
                       <MessageCircle className="w-3 h-3 shrink-0" />
                       <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
-                      <span className="font-mono text-[10px] text-stone-400 shrink-0">{fmtSession(s.created_at)}</span>
+                      <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
                     </button>
                   </li>
                 ))}
-                {sessions.length === 0 && <li className="text-[11px] text-stone-400">暂无会话</li>}
+                {sessions.length === 0 && <li className="text-[11px] text-ink-4">暂无会话</li>}
               </ul>
             </SidebarSection>
 
-            <div className="h-px bg-stone-200" />
+            <div className="h-px bg-ink-0/8" />
 
             <SidebarSection title="本视频">
               <dl className="text-[11px] space-y-1.5">
-                <div className="flex justify-between"><dt className="text-stone-400">编号</dt><dd>{taskId}</dd></div>
+                <div className="flex justify-between"><dt className="text-ink-4">编号</dt><dd>{taskId}</dd></div>
                 <div className="flex justify-between">
-                  <dt className="text-stone-400">索引</dt>
-                  <dd className={ragStatus?.indexed ? 'text-emerald-700' : 'text-stone-400'}>
+                  <dt className="text-ink-4">索引</dt>
+                  <dd className={ragStatus?.indexed ? 'text-moss' : 'text-ink-4'}>
                     {ragStatus?.indexed ? `${ragStatus.chunks} chunks` : '未索引'}
                   </dd>
                 </div>
                 {task?.transcription && (
-                  <div className="flex justify-between"><dt className="text-stone-400">转写</dt><dd>{task.transcription.words} 词</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">转写</dt><dd>{task.transcription.words} 词</dd></div>
                 )}
-                <div className="flex justify-between"><dt className="text-stone-400">模式</dt><dd>{modeLabel}</dd></div>
+                <div className="flex justify-between"><dt className="text-ink-4">模式</dt><dd>{modeLabel}</dd></div>
               </dl>
             </SidebarSection>
           </div>
@@ -439,17 +450,17 @@ function ChatView() {
     >
       <>
         <div className="text-center pb-2 ui-fade-in">
-          <div className="text-[10px] text-stone-400 font-mono">
+          <div className="text-[10px] text-ink-4 font-mono">
             Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}
             {session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}
           </div>
-          <p className="text-[13px] text-stone-500 italic mt-1.5">基于本卷转写内容的问答。引用以 [C1] 标注，点击展开原文片段。</p>
+          <p className="text-[13px] text-ink-3 italic mt-1.5">基于本卷转写内容的问答。引用以 [C1] 标注，点击展开原文片段。</p>
         </div>
 
         {!sessionReady ? (
           <div className="space-y-2">
-            <div className="h-4 w-1/3 bg-stone-200 rounded animate-pulse" />
-            <div className="h-4 w-2/3 bg-stone-200 rounded animate-pulse" />
+            <div className="h-4 w-1/3 bg-paper-2 rounded animate-pulse" />
+            <div className="h-4 w-2/3 bg-paper-2 rounded animate-pulse" />
           </div>
         ) : (
           messages.map((m, i) => (

@@ -50,40 +50,42 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex ui-root">
-      <div className="hidden lg:flex w-[45%] bg-stone-900 text-[#faf8f5] flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-amber-900/30 via-stone-900 to-stone-950" />
-        <div className="absolute -bottom-20 -right-20 w-80 h-80 rounded-full bg-amber-600/10 blur-3xl ui-pulse" />
+    <div className="min-h-screen flex ui-root bg-paper-1">
+      <div className="hidden lg:flex w-[42%] bg-ink-0 text-paper-0 flex-col justify-between p-12 relative overflow-hidden">
+        <div className="absolute -bottom-24 -right-16 w-72 h-72 rounded-full bg-sienna-600/15 blur-3xl" />
         <div className="relative ui-fade-in">
-          <div className="text-[36px] font-semibold ui-serif">映知</div>
-          <p className="text-[15px] text-stone-400 mt-3 italic leading-relaxed max-w-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-[8px] bg-paper-0 text-ink-0 text-[12px] font-semibold flex items-center justify-center">映</span>
+            <span className="text-[28px] font-semibold tracking-tight ui-serif">映知</span>
+          </div>
+          <p className="text-[15px] text-paper-0/45 mt-4 italic leading-relaxed max-w-sm">
             观之以映，释之以知
           </p>
         </div>
-        <div className="relative space-y-6 ui-fade-in" style={{ animationDelay: '100ms' }}>
-          <Feature num="01" title="视频转写" desc="长视频自动 ASR，分片处理，失败可重试" />
-          <Feature num="02" title="引用式问答" desc="每个回答带 [C1] 引用片段，可回溯原文" />
-          <Feature num="03" title="跨视频检索" desc="知识库内多视频联合 RAG，标注来源" />
+        <div className="relative space-y-7 ui-fade-in" style={{ animationDelay: '100ms' }}>
+          <Feature title="视频转写" desc="长视频自动 ASR，分片处理，失败可重试" />
+          <Feature title="引用式问答" desc="每个回答带 [C1] 引用片段，可回溯原文" />
+          <Feature title="跨视频检索" desc="知识库内多视频联合 RAG，标注来源" />
         </div>
-        <div className="relative text-[11px] text-stone-600">
-          <Link href="/" className="hover:text-stone-400 transition-colors">← 返回视频库</Link>
+        <div className="relative text-[12px] text-paper-0/40">
+          <Link href="/" className="hover:text-paper-0/70 transition-colors">← 返回视频库</Link>
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center px-6 py-12 bg-[#f7f4ef]">
+      <div className="flex-1 flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm ui-fade-in">
-          <div className="lg:hidden mb-8 text-center">
-            <div className="text-[28px] font-semibold text-stone-900 ui-serif">映知</div>
-            <p className="text-[13px] text-stone-500 mt-1 italic">AI 长视频理解与可追溯问答</p>
+          <div className="lg:hidden mb-8">
+            <div className="text-[28px] font-semibold text-ink-0 tracking-tight ui-serif">映知</div>
+            <p className="text-[13px] text-ink-3 mt-1">AI 长视频理解与可追溯问答</p>
           </div>
 
-          <div className="flex gap-6 border-b border-stone-200 mb-6">
+          <div className="flex gap-6 border-b border-ink-0/8 mb-6">
             {(['login', 'register'] as const).map(m => (
               <button
                 key={m}
                 onClick={() => { setMode(m); setErr('') }}
                 className={`pb-2.5 text-[13px] border-b-2 -mb-px transition-colors duration-200 ${
-                  mode === m ? 'border-amber-600 text-stone-900 font-medium' : 'border-transparent text-stone-400'
+                  mode === m ? 'border-sienna-500 text-ink-0 font-medium' : 'border-transparent text-ink-4'
                 }`}
               >
                 {m === 'login' ? '登录' : '注册'}
@@ -98,12 +100,12 @@ export default function LoginPage() {
             <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
             <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
 
-            {err && <div className="text-[12px] text-red-600">{err}</div>}
+            {err && <div className="text-[12px] text-rust">{err}</div>}
 
             <button
               type="submit"
               disabled={busy}
-              className="w-full h-11 rounded-lg bg-stone-900 text-white text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift disabled:opacity-50"
+              className="w-full h-11 rounded-lg bg-ink-0 text-paper-0 text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {mode === 'login' ? '登录' : '注册并登录'}
@@ -111,23 +113,19 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-stone-200" />
-            <span className="text-[11px] text-stone-400">或</span>
-            <div className="h-px flex-1 bg-stone-200" />
-          </div>
+          <div className="my-6 h-px bg-ink-0/8" />
 
           <button
             type="button"
             onClick={demoLogin}
             disabled={busy}
-            className="w-full h-11 rounded-lg border border-stone-300 bg-white text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift hover:border-amber-400 hover:text-amber-900 transition-colors disabled:opacity-50"
+            className="w-full h-11 rounded-lg border border-ink-0/10 bg-paper-0 text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift hover:border-sienna-500/40 hover:text-sienna-700 transition-colors disabled:opacity-50"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             一键体验演示账号
           </button>
-          <p className="text-[11px] text-stone-400 mt-3 text-center">
-            演示账号 <span className="font-mono text-stone-500">test</span> / <span className="font-mono text-stone-500">test0236</span>
+          <p className="text-[11px] text-ink-4 mt-3 text-center">
+            演示账号 <span className="font-mono text-ink-3">test</span> / <span className="font-mono text-ink-3">test0236</span>
             · 只读，可浏览视频转写与摘要并问答
           </p>
         </div>
@@ -136,14 +134,11 @@ export default function LoginPage() {
   )
 }
 
-function Feature({ num, title, desc }: { num: string; title: string; desc: string }) {
+function Feature({ title, desc }: { title: string; desc: string }) {
   return (
-    <div className="flex gap-4">
-      <span className="text-[11px] font-mono text-amber-600/70 mt-0.5">{num}</span>
-      <div>
-        <div className="text-[14px] font-medium">{title}</div>
-        <div className="text-[12px] text-stone-500 mt-0.5">{desc}</div>
-      </div>
+    <div>
+      <div className="text-[14px] font-medium">{title}</div>
+      <div className="text-[12px] text-paper-0/40 mt-1 leading-relaxed max-w-[32ch]">{desc}</div>
     </div>
   )
 }
@@ -153,14 +148,14 @@ function Field({ label, type = 'text', value, onChange, placeholder, autoFocus }
 }) {
   return (
     <div>
-      <label className="block text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">{label}</label>
+      <label className="block text-[12px] text-ink-4 mb-1.5">{label}</label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="w-full h-10 px-3 rounded-lg border border-stone-200 bg-white text-[13px] focus:outline-none focus:ring-2 focus:ring-amber-600/20 focus:border-amber-400 transition-shadow"
+        className="ui-input"
       />
     </div>
   )

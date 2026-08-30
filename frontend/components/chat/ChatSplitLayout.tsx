@@ -75,17 +75,17 @@ export default function ChatSplitLayout({
 
       {!collapsed && (
         <div
-          className="shrink-0 w-2 flex flex-col items-center justify-center bg-stone-100/80 border-x border-stone-200 hover:bg-amber-50/80 transition-colors group relative z-10"
+          className="shrink-0 w-2 flex flex-col items-center justify-center bg-paper-1/80 border-x border-ink-0/8 hover:bg-sienna-500/8 transition-colors group relative z-10"
           onMouseDown={onDragStart}
           role="separator"
           aria-orientation="vertical"
           aria-label="调整对话区与流水线宽度"
         >
-          <GripVertical className="w-3.5 h-3.5 text-stone-400 group-hover:text-amber-700 pointer-events-none" />
+          <GripVertical className="w-3.5 h-3.5 text-ink-4 group-hover:text-sienna-700 pointer-events-none" />
           <button
             type="button"
             onClick={e => { e.stopPropagation(); setCollapsed(true) }}
-            className="absolute top-3 -right-3 w-6 h-6 rounded-full bg-white border border-stone-200 shadow-sm flex items-center justify-center text-stone-500 hover:text-stone-800 hover:border-amber-300 ui-btn-lift"
+            className="absolute top-3 -right-3 w-6 h-6 rounded-full bg-paper-0 border border-ink-0/10 shadow-sm flex items-center justify-center text-ink-4 hover:text-ink-1 hover:border-sienna-500/40 ui-btn-lift"
             title="收起流水线"
           >
             <PanelRightClose className="w-3 h-3" />
@@ -95,7 +95,7 @@ export default function ChatSplitLayout({
 
       {!collapsed && (
         <aside
-          className="bg-[#faf8f5] overflow-y-auto min-h-0 transition-[width] duration-200 ease-out"
+          className="bg-paper-0/70 overflow-y-auto min-h-0 transition-[width] duration-200 ease-out"
           style={{ width: `${100 - chatPct}%`, minWidth: SIDE_MIN_PX }}
         >
           {tracePanel}
@@ -106,7 +106,7 @@ export default function ChatSplitLayout({
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 py-4 px-1.5 rounded-l-lg bg-[#faf8f5] border border-r-0 border-stone-200 shadow-md text-stone-500 hover:text-amber-800 hover:border-amber-300 ui-btn-lift"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 py-4 px-1.5 rounded-l-lg bg-paper-0 border border-r-0 border-ink-0/8 shadow-md text-ink-4 hover:text-sienna-700 hover:border-sienna-500/40 ui-btn-lift"
           title="展开流水线"
         >
           <PanelRightOpen className="w-4 h-4" />

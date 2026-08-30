@@ -14,7 +14,7 @@ type SourceFilter = 'all' | 'upload' | 'url'
 
 export default function LibraryPage() {
   return (
-    <Suspense fallback={<div className="h-screen bg-[#f7f4ef]" />}>
+    <Suspense fallback={<div className="h-screen bg-paper-1" />}>
       <LibraryPageView />
     </Suspense>
   )

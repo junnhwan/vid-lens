@@ -200,6 +200,16 @@ export default function KBChatPage() {
   }, [session?.id, streaming, topK, appendDelta, colorFor, loadSessions, kbId])
 
   const stop = () => { abortRef.current?.abort(); setStreaming(false) }
+
+  const clearSession = async () => {
+    if (!session) return
+    if (!window.confirm('确认清空当前会话的所有消息？此操作不可撤销。')) return
+    try {
+      await api.deleteSession(session.id)
+      router.push('/kb')
+    } catch { /* ignore */ }
+  }
+
   const toggleCite = (msgIdx: number, id: string) => {
     setMessages(prev => {
       const next = [...prev]
@@ -232,7 +242,7 @@ export default function KBChatPage() {
             actions={!isDemo ? (
               <button
                 onClick={() => setShowManage(true)}
-                className="h-8 px-3 rounded-lg border border-stone-200 text-[11px] flex items-center gap-1.5 ui-btn-lift hover:bg-stone-50"
+                className="h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] flex items-center gap-1.5 ui-btn-lift hover:bg-paper-1"
               >
                 <Settings2 className="w-3.5 h-3.5" />管理成员
               </button>
@@ -245,7 +255,7 @@ export default function KBChatPage() {
               <SidebarSection
                 title="会话"
                 action={
-                  <button onClick={newSession} className="text-amber-700 hover:text-amber-900 flex items-center gap-0.5 text-[10px]">
+                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[10px]">
                     <Plus className="w-3 h-3" />新建
                   </button>
                 }
@@ -256,35 +266,35 @@ export default function KBChatPage() {
                       <button
                         onClick={() => switchSession(s.id)}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] ui-row-hover ${
-                          session?.id === s.id ? 'bg-amber-50 text-amber-900 font-medium' : 'text-stone-600'
+                          session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
                         }`}
                       >
                         <MessageCircle className="w-3 h-3 shrink-0" />
                         <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
-                        <span className="font-mono text-[10px] text-stone-400 shrink-0">{fmtSession(s.created_at)}</span>
+                        <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
                       </button>
                     </li>
                   ))}
-                  {sessions.length === 0 && <li className="text-[11px] text-stone-400">暂无会话</li>}
+                  {sessions.length === 0 && <li className="text-[11px] text-ink-4">暂无会话</li>}
                 </ul>
               </SidebarSection>
 
-              <div className="h-px bg-stone-200" />
+              <div className="h-px bg-ink-0/8" />
 
               <SidebarSection title="知识库">
                 <dl className="text-[11px] space-y-1.5">
-                  <div className="flex justify-between"><dt className="text-stone-400">视频</dt><dd>{kb?.member_count ?? '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-stone-400">建立</dt><dd>{kb ? fmtShortDate(kb.created_at) : '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">视频</dt><dd>{kb?.member_count ?? '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">建立</dt><dd>{kb ? fmtShortDate(kb.created_at) : '—'}</dd></div>
                   {kb?.embedding_model && (
                     <div className="flex justify-between">
-                      <dt className="text-stone-400">模型</dt>
+                      <dt className="text-ink-4">模型</dt>
                       <dd className="truncate max-w-[100px]">{kb.embedding_model}</dd>
                     </div>
                   )}
                 </dl>
               </SidebarSection>
 
-              <div className="h-px bg-stone-200" />
+              <div className="h-px bg-ink-0/8" />
 
               <SidebarSection title={`成员视频 · ${kb?.videos?.length ?? 0}`}>
                 <ul className="space-y-1.5">
@@ -292,30 +302,30 @@ export default function KBChatPage() {
                     <li key={v.task_id} className="flex items-center gap-2 py-1">
                       <span className="src-dot" style={{ background: DOT_COLORS[i % DOT_COLORS.length] }} />
                       <span className="text-[12px] truncate flex-1">{v.title}</span>
-                      <span className={`text-[10px] font-mono ${v.retrievable ? 'text-emerald-700' : 'text-stone-400'}`}>
+                      <span className={`text-[10px] font-mono ${v.retrievable ? 'text-moss' : 'text-ink-4'}`}>
                         {v.retrievable ? '✓' : '—'}
                       </span>
                     </li>
                   ))}
-                  {(kb?.videos?.length ?? 0) === 0 && <li className="text-[11px] text-stone-400">暂无成员</li>}
+                  {(kb?.videos?.length ?? 0) === 0 && <li className="text-[11px] text-ink-4">暂无成员</li>}
                 </ul>
                 {!isDemo && (
                   <button
                     onClick={() => setShowManage(true)}
-                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-stone-300 text-[10px] text-stone-400 hover:border-amber-400 hover:text-amber-700 flex items-center justify-center gap-1 ui-btn-lift"
+                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-ink-0/15 text-[10px] text-ink-4 hover:border-sienna-500/40 hover:text-sienna-700 flex items-center justify-center gap-1 ui-btn-lift"
                   >
                     <Plus className="w-3 h-3" />添加视频
                   </button>
                 )}
               </SidebarSection>
 
-              <div className="h-px bg-stone-200" />
+              <div className="h-px bg-ink-0/8" />
 
               <SidebarSection title="检索信息">
                 <dl className="text-[11px] space-y-1.5">
-                  <div className="flex justify-between"><dt className="text-stone-400">命中</dt><dd>{searchInfo.hits ? `${searchInfo.hits} 条` : '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-stone-400">跨卷</dt><dd>{searchInfo.cross ? `${searchInfo.cross} 卷` : '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-stone-400">TopK</dt><dd>{topK}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">命中</dt><dd>{searchInfo.hits ? `${searchInfo.hits} 条` : '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">跨卷</dt><dd>{searchInfo.cross ? `${searchInfo.cross} 卷` : '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-ink-4">TopK</dt><dd>{topK}</dd></div>
                 </dl>
               </SidebarSection>
             </div>
@@ -326,8 +336,8 @@ export default function KBChatPage() {
             hint={`跨 ${kb?.member_count ?? 0} 个视频检索 · 引用标注来源 · 无时间码`}
             footerAction={
               <button
-                onClick={() => session && api.deleteSession(session.id).then(() => router.push('/kb'))}
-                className="hover:text-red-600 flex items-center gap-1 ui-btn-lift"
+                onClick={clearSession}
+                className="hover:text-rust flex items-center gap-1 ui-btn-lift"
               >
                 <Trash2 className="w-3 h-3" />清空会话
               </button>
@@ -346,12 +356,12 @@ export default function KBChatPage() {
       >
         <>
           <div className="pb-2 ui-fade-in">
-            <div className="text-[10px] text-stone-400 font-mono">
+            <div className="text-[10px] text-ink-4 font-mono">
               Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}
               {session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}
             </div>
-            <h1 className="text-[24px] font-semibold text-stone-900 mt-1.5 ui-serif">跨视频问答</h1>
-            <p className="text-[13px] text-stone-500 mt-1">本会话检索知识库全部视频，引用标注来源视频。</p>
+            <h1 className="text-[24px] font-semibold text-ink-0 mt-1.5 ui-serif">跨视频问答</h1>
+            <p className="text-[13px] text-ink-3 mt-1">本会话检索知识库全部视频，引用标注来源视频。</p>
           </div>
 
           {messages.map((m, i) => (

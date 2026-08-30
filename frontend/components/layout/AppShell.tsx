@@ -19,12 +19,12 @@ export function PageHero({ kicker, title, desc, actions }: {
   kicker?: string; title: string; desc?: string; actions?: React.ReactNode
 }) {
   return (
-    <header className="shrink-0 px-8 pt-8 pb-6 bg-gradient-to-b from-[#faf8f5] to-transparent ui-fade-in">
-      {kicker && <div className="text-[11px] text-stone-500 uppercase tracking-wider mb-1">{kicker}</div>}
+    <header className="shrink-0 px-8 pt-7 pb-5 ui-fade-in">
+      {kicker && <div className="text-[12px] text-ink-4 mb-1.5">{kicker}</div>}
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="text-[32px] font-semibold text-stone-900 leading-tight ui-serif">{title}</h1>
-          {desc && <p className="text-[14px] text-stone-500 mt-2 max-w-lg leading-relaxed">{desc}</p>}
+          <h1 className="text-[28px] font-semibold text-ink-0 leading-tight tracking-tight text-balance ui-serif">{title}</h1>
+          {desc && <p className="text-[14px] text-ink-3 mt-2 max-w-[48ch] leading-relaxed">{desc}</p>}
         </div>
         {actions}
       </div>
@@ -34,9 +34,9 @@ export function PageHero({ kicker, title, desc, actions }: {
 
 export function MiniStat({ value, label, accent, warn }: { value: number | string; label: string; accent?: boolean; warn?: boolean }) {
   return (
-    <div className="p-2 rounded-lg bg-white border border-stone-200 text-center ui-card-hover">
-      <div className={`text-[18px] font-semibold tabular-nums ${warn ? 'text-amber-600' : accent ? 'text-emerald-700' : 'text-stone-800'}`}>{value}</div>
-      <div className="text-[9px] text-stone-400 mt-0.5">{label}</div>
+    <div className="px-2 py-1.5 text-center">
+      <div className={`text-[18px] font-semibold tabular-nums tracking-tight ${warn ? 'text-sienna-600' : accent ? 'text-moss' : 'text-ink-0'}`}>{value}</div>
+      <div className="text-[10px] text-ink-5 mt-0.5">{label}</div>
     </div>
   )
 }
@@ -53,31 +53,41 @@ export default function AppShell({ children, onUpload }: { children: React.React
         : 'library'
 
   return (
-    <div className="h-screen flex bg-[#f7f4ef] text-stone-800 overflow-hidden ui-root">
-      <aside className="w-[260px] shrink-0 bg-[#faf8f5] border-r border-stone-200 flex flex-col">
-        <div className="p-6 border-b border-stone-200">
+    <div className="h-screen flex bg-paper-1 text-ink-0 overflow-hidden ui-root">
+      <aside className="w-[248px] shrink-0 bg-paper-0/70 border-r border-ink-0/8 flex flex-col">
+        <div className="px-5 py-6 border-b border-ink-0/8">
           <Link href="/" className="block group">
-            <div className="text-[22px] font-semibold tracking-tight text-stone-900 ui-serif group-hover:text-amber-900 transition-colors">映知</div>
-            <p className="text-[12px] text-stone-500 mt-1 italic leading-relaxed">观之以映，释之以知</p>
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-[7px] bg-ink-0 text-paper-0 text-[11px] font-semibold flex items-center justify-center tracking-tight">
+                映
+              </span>
+              <span className="text-[18px] font-semibold tracking-tight text-ink-0 ui-serif group-hover:text-sienna-700 transition-colors duration-200">
+                映知
+              </span>
+            </div>
+            <p className="text-[12px] text-ink-4 mt-2.5 leading-relaxed">观之以映，释之以知</p>
           </Link>
         </div>
-        <nav className="p-4 space-y-1">
+        <nav className="p-3 space-y-0.5">
           {NAV.map(({ key, href, icon: Icon, label, desc }) => {
             const on = active === key
             return (
               <Link
                 key={key}
                 href={href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${
-                  on ? 'bg-amber-50/80 shadow-sm' : 'hover:bg-stone-100/80'
+                className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-200 ${
+                  on ? 'bg-sienna-500/8 text-ink-0' : 'hover:bg-ink-0/4'
                 }`}
               >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${on ? 'bg-amber-100 text-amber-800' : 'bg-stone-100 text-stone-500'}`}>
+                {on && (
+                  <span className="absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-full bg-sienna-500" />
+                )}
+                <div className={`w-8 h-8 rounded-md flex items-center justify-center ${on ? 'text-sienna-700' : 'text-ink-4'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className={`text-[13px] ${on ? 'font-medium text-stone-900' : 'text-stone-700'}`}>{label}</div>
-                  <div className="text-[10px] text-stone-400">{desc}</div>
+                  <div className={`text-[13px] ${on ? 'font-medium text-ink-0' : 'text-ink-2'}`}>{label}</div>
+                  <div className="text-[10px] text-ink-5">{desc}</div>
                 </div>
               </Link>
             )
@@ -85,11 +95,11 @@ export default function AppShell({ children, onUpload }: { children: React.React
         </nav>
         <QaRecentShortcuts />
         <div className="flex-1" />
-        <div className="p-4 border-t border-stone-200 space-y-3">
+        <div className="p-4 border-t border-ink-0/8 space-y-3">
           {onUpload && !isDemo && (
             <button
               onClick={onUpload}
-              className="w-full h-10 rounded-lg bg-stone-900 text-[#faf8f5] text-[13px] font-medium flex items-center justify-center gap-2 hover:bg-stone-800 ui-btn-lift"
+              className="w-full h-10 rounded-lg bg-ink-0 text-paper-0 text-[13px] font-medium flex items-center justify-center gap-2 hover:bg-ink-1 ui-btn-lift"
             >
               <Upload className="w-4 h-4" />上传视频
             </button>
