@@ -52,18 +52,34 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if req.TopK > 10 {
 		req.TopK = 10
 	}
-	policy := req.Policy
-	if policy == (VideoResearchPolicy{}) {
-		policy = DefaultVideoResearchPolicy()
-	}
-	if err := policy.Validate(); err != nil {
-		return nil, err
-	}
 	runID := strings.TrimSpace(req.RunID)
 	if runID == "" {
 		runID = uuid.NewString()
 	}
-	frozenPolicy, budget := researchAgentPolicy(req.TopK, policy)
+	policy := req.Policy
+	var frozenPolicy frozenAgentPolicy
+	var budget frozenAgentBudget
+	if existing, lookupErr := s.chatSvc.repos.AgentExecution.GetRun(ctx, req.UserID, runID); lookupErr != nil {
+		return nil, lookupErr
+	} else if existing != nil {
+		// A run is an immutable execution contract. Do not validate or use a
+		// newly supplied policy before the historical snapshots are loaded.
+		if err := json.Unmarshal([]byte(existing.PolicySnapshot), &frozenPolicy); err != nil {
+			return nil, fmt.Errorf("decode frozen agent policy: %w", err)
+		}
+		if err := json.Unmarshal([]byte(existing.BudgetSnapshot), &budget); err != nil {
+			return nil, fmt.Errorf("decode frozen agent budget: %w", err)
+		}
+		policy = VideoResearchPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+	} else {
+		if policy == (VideoResearchPolicy{}) {
+			policy = DefaultVideoResearchPolicy()
+		}
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		frozenPolicy, budget = researchAgentPolicy(req.TopK, policy)
+	}
 	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget)
 	if err != nil {
 		return nil, err
@@ -71,10 +87,23 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozenPolicy); err != nil {
 		return nil, fmt.Errorf("decode frozen agent policy: %w", err)
 	}
+	if err := json.Unmarshal([]byte(run.BudgetSnapshot), &budget); err != nil {
+		return nil, fmt.Errorf("decode frozen agent budget: %w", err)
+	}
 	req.TopK = frozenPolicy.TopK
 	policy = VideoResearchPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("frozen research policy is invalid: %w", err)
+	}
+	if run.Status != model.AgentRunStatusRunning && run.Status != model.AgentRunStatusPending {
+		stored, storedErr := loadAgentRunResult(ctx, s, req.UserID, req.SessionID, runID)
+		if storedErr != nil {
+			return nil, storedErr
+		}
+		if stored != nil {
+			return stored, nil
+		}
+		return nil, fmt.Errorf("agent run is terminal: %s", run.Status)
 	}
 	defer func() {
 		if err == nil || errors.Is(err, errAgentExecutionBusy) {
@@ -133,7 +162,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		Mode:      string(VideoAgentResearchTemplate),
 		Memory:    memorySnapshot.Identity(),
 	}
-	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
+	if err := s.saveAgentRunExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err
 	}
 	rawAnswer, answerEvidence := researchAnswerLedgerInput(req.Goal, runResult)
@@ -161,17 +190,46 @@ func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, ru
 	if run.Mode != string(VideoAgentResearchTemplate) || run.ScopeType != model.ChatScopeVideo {
 		return nil, errors.New("agent run is not a resumable single-video research run")
 	}
-	if run.Status != model.AgentRunStatusRunning && run.Status != model.AgentRunStatusPending {
-		return nil, fmt.Errorf("agent run is terminal: %s", run.Status)
-	}
 	var policy frozenAgentPolicy
 	if err := json.Unmarshal([]byte(run.PolicySnapshot), &policy); err != nil {
 		return nil, fmt.Errorf("decode frozen agent policy: %w", err)
+	}
+	if run.Status != model.AgentRunStatusRunning && run.Status != model.AgentRunStatusPending {
+		stored, storedErr := loadAgentRunResult(ctx, s, userID, run.SessionID, run.ID)
+		if storedErr != nil {
+			return nil, storedErr
+		}
+		if stored != nil {
+			return stored, nil
+		}
+		return nil, fmt.Errorf("agent run is terminal: %s", run.Status)
 	}
 	return s.AskResearch(ctx, VideoResearchRequest{
 		UserID: userID, SessionID: run.SessionID, Goal: run.Goal, TopK: policy.TopK,
 		Policy: VideoResearchPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans}, RunID: run.ID,
 	}, embedding, chat, profile)
+}
+
+func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessionID int64, runID string) (*VideoAgentResult, error) {
+	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil {
+		return nil, errors.New("chat repository unavailable")
+	}
+	messages, err := s.chatSvc.repos.Chat.ListMessages(userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		if message.Role != "assistant" || message.RetrievalSnapshot == nil {
+			continue
+		}
+		snapshot, decodeErr := DecodeAgentSnapshot(*message.RetrievalSnapshot)
+		if decodeErr != nil || snapshot.RunID != runID || snapshot.Mode != string(VideoAgentResearchTemplate) {
+			continue
+		}
+		return &VideoAgentResult{Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory}, nil
+	}
+	return nil, nil
 }
 
 func researchAnswerLedgerInput(goal string, result *VideoResearchResult) (string, []Citation) {

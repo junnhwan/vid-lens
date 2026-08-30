@@ -69,10 +69,14 @@ func evidenceFunnelAgentPolicy(policy EvidenceFunnelPolicy) (frozenAgentPolicy, 
 			MaxVisualCandidates: policy.MaxVisualCandidates, MaxVisualSelections: policy.MaxVisualSelections,
 			MaxFinalEvidenceItems: policy.MaxFinalEvidenceItems,
 		}, frozenAgentBudget{
-			// Five replay-safe actions may each be retried explicitly once. The
+			// Replay-safe actions may each be retried explicitly once. The
 			// planner and answer LLM calls remain non-replayable and single-shot.
-			MaxSteps: len(evidenceFunnelActionOrder) + 5, MaxToolCalls: 9,
-			MaxLLMCalls: 3, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+			MaxSteps: len(evidenceFunnelActionOrder) + 5, MaxToolCalls: len(evidenceFunnelActionOrder) + 5,
+			// Four funnel actions are retrieval attempts; a retry is another real
+			// provider attempt and is included in the frozen budget.
+			MaxLLMCalls: 3, MaxVisionCalls: 0, MaxAttemptsPerStep: 2, MaxRetrievalCalls: 8,
+			MaxVisualCalls: 1, MaxFrames: policy.MaxVisualSelections, MaxPromptTokens: 32000,
+			MaxCompletionTokens: 8000, MaxCostMicros: 1000000, MaxDurationMs: 300000, MaxContextChars: 100000,
 		}
 }
 
@@ -416,6 +420,17 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 	if callKind == "" {
 		callKind = model.AgentCallKindTool
 	}
+	contextChars := int64(0)
+	if spec.LLMCall {
+		contextChars = int64(len([]rune(string(argumentsJSON))))
+	}
+	frameCount := 0
+	if spec.Action == evidenceFunnelConfirmVisual {
+		var candidates []EvidenceGapCandidate
+		if json.Unmarshal(argumentsJSON, &candidates) == nil {
+			frameCount = len(candidates)
+		}
+	}
 	attempt := 1
 	var claim repository.AgentStepClaim
 	for {
@@ -425,7 +440,9 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 			UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, Sequence: spec.Sequence,
 			Kind: spec.Kind, Action: spec.Action, SafeReason: "execute fixed evidence funnel action", InputSummary: string(summaryJSON),
 			ArgumentsDigest: argsDigest, CallDigest: callDigest, ToolName: spec.Action, CallKind: callKind, InternalCall: spec.Internal,
-			ReplaySafe: spec.ReplaySafe, LLMCall: spec.LLMCall, LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
+			ReplaySafe: spec.ReplaySafe, LLMCall: spec.LLMCall, RetrievalCall: spec.Kind == "retrieve", VisualCall: spec.Action == evidenceFunnelConfirmVisual,
+			FrameCount: frameCount, ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4,
+			LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
 		})
 		if err != nil {
 			return nil, err
@@ -460,7 +477,8 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 			UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
 			ErrorCode: "funnel_action_failure", ErrorMessage: safeAgentError(invokeErr), PromptTokens: result.Usage.PromptTokens,
 			CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros, UsageSource: result.Usage.UsageSource,
-			TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion, Cancelled: cancelled, Now: r.execution.now(),
+			TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion,
+			ContextChars: firstPositive(result.Usage.ContextChars, contextChars), ContextUsageSource: usageSourceForContext(firstPositive(result.Usage.ContextChars, contextChars)), MetricsJSON: usageMetrics(result.Usage), Cancelled: cancelled, Now: r.execution.now(),
 		})
 		if spec.ReplaySafe && !cancelled {
 			return nil, &evidenceFunnelReplayableFailure{cause: invokeErr}
@@ -477,9 +495,10 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 	}
 	completed, err := r.execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
 		UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
-		OutputRef: result.OutputRef, ResultCheckpoint: string(checkpoint), EvidenceRefs: retrievedEvidenceRefs(result.Evidence), MetricsJSON: string(metrics),
+		OutputRef: result.OutputRef, ResultCheckpoint: string(checkpoint), EvidenceRefs: retrievedEvidenceRefs(result.Evidence),
 		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros,
-		UsageSource: result.Usage.UsageSource, TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion, Now: r.execution.now(),
+		UsageSource: result.Usage.UsageSource, TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion,
+		ContextChars: firstPositive(result.Usage.ContextChars, contextChars), ContextUsageSource: usageSourceForContext(firstPositive(result.Usage.ContextChars, contextChars)), MetricsJSON: mergeAgentUsageMetrics(string(metrics), result.Usage, firstPositive(result.Usage.ContextChars, contextChars)), Now: r.execution.now(),
 	})
 	if err != nil {
 		return nil, err
@@ -735,7 +754,7 @@ func retrievedEvidenceRefs(evidence []RetrievedChunk) string {
 }
 
 func estimatedTextCallUsage(input, output string) VideoResearchPlannerCallUsage {
-	return VideoResearchPlannerCallUsage{PromptTokens: estimateAgentTokens(input), CompletionTokens: estimateAgentTokens(output), UsageSource: model.AgentCallUsageEstimated, TokenEstimated: true}
+	return VideoResearchPlannerCallUsage{PromptTokens: estimateAgentTokens(input), CompletionTokens: estimateAgentTokens(output), ContextChars: int64(len([]rune(input))), UsageSource: model.AgentCallUsageEstimated, TokenEstimated: true}
 }
 
 func boolInt(value bool) int {

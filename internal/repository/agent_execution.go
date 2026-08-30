@@ -30,26 +30,31 @@ type AgentExecutionRepository struct {
 }
 
 type AgentStepClaimRequest struct {
-	UserID          int64
-	RunID           string
-	StepID          string
-	Attempt         int
-	Sequence        int
-	Kind            string
-	Action          string
-	SafeReason      string
-	InputSummary    string
-	ArgumentsDigest string
-	CallDigest      string
-	ToolName        string
-	CallKind        string
-	InternalCall    bool
-	ReplaySafe      bool
-	LLMCall         bool
-	VisionCall      bool
-	LeaseToken      string
-	Now             time.Time
-	LeaseUntil      time.Time
+	UserID                int64
+	RunID                 string
+	StepID                string
+	Attempt               int
+	Sequence              int
+	Kind                  string
+	Action                string
+	SafeReason            string
+	InputSummary          string
+	ArgumentsDigest       string
+	CallDigest            string
+	ToolName              string
+	CallKind              string
+	InternalCall          bool
+	ReplaySafe            bool
+	LLMCall               bool
+	VisionCall            bool
+	RetrievalCall         bool
+	VisualCall            bool
+	FrameCount            int
+	ContextChars          int64
+	EstimatedPromptTokens int64
+	LeaseToken            string
+	Now                   time.Time
+	LeaseUntil            time.Time
 }
 
 type AgentStepClaim struct {
@@ -60,43 +65,48 @@ type AgentStepClaim struct {
 }
 
 type AgentStepCompletion struct {
-	UserID           int64
-	RunID            string
-	StepID           string
-	Attempt          int
-	LeaseToken       string
-	OutputRef        string
-	ResultCheckpoint string
-	EvidenceRefs     string
-	MetricsJSON      string
-	PromptTokens     int64
-	CompletionTokens int64
-	CostMicros       int64
-	UsageSource      string
-	TokenEstimated   bool
-	Currency         string
-	PriceVersion     string
-	Now              time.Time
+	UserID             int64
+	RunID              string
+	StepID             string
+	Attempt            int
+	LeaseToken         string
+	OutputRef          string
+	ResultCheckpoint   string
+	EvidenceRefs       string
+	MetricsJSON        string
+	PromptTokens       int64
+	CompletionTokens   int64
+	CostMicros         int64
+	UsageSource        string
+	TokenEstimated     bool
+	Currency           string
+	PriceVersion       string
+	ContextChars       int64
+	ContextUsageSource string
+	Now                time.Time
 }
 
 type AgentStepFailure struct {
-	UserID           int64
-	RunID            string
-	StepID           string
-	Attempt          int
-	LeaseToken       string
-	ErrorCode        string
-	ErrorMessage     string
-	Ambiguous        bool
-	Cancelled        bool
-	PromptTokens     int64
-	CompletionTokens int64
-	CostMicros       int64
-	UsageSource      string
-	TokenEstimated   bool
-	Currency         string
-	PriceVersion     string
-	Now              time.Time
+	UserID             int64
+	RunID              string
+	StepID             string
+	Attempt            int
+	LeaseToken         string
+	ErrorCode          string
+	ErrorMessage       string
+	Ambiguous          bool
+	Cancelled          bool
+	PromptTokens       int64
+	CompletionTokens   int64
+	CostMicros         int64
+	UsageSource        string
+	TokenEstimated     bool
+	Currency           string
+	PriceVersion       string
+	ContextChars       int64
+	ContextUsageSource string
+	MetricsJSON        string
+	Now                time.Time
 }
 
 type AgentRunTerminalUpdate struct {
@@ -346,7 +356,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 			Sequence: req.Sequence, Kind: req.Kind, Action: req.Action, Status: model.AgentStepStatusRunning,
 			SafeReason: req.SafeReason, InputSummary: defaultJSON(req.InputSummary, "{}"), ReplaySafe: req.ReplaySafe,
 			LeaseToken: req.LeaseToken, LeaseExpiresAt: &req.LeaseUntil, LeaseVersion: 1,
-			StartedAt: req.Now, CreatedAt: req.Now, UpdatedAt: req.Now,
+			StartedAt: req.Now, EstimatedPromptTokens: req.EstimatedPromptTokens, CreatedAt: req.Now, UpdatedAt: req.Now,
 		}
 		if err := tx.Create(&step).Error; err != nil {
 			return err
@@ -381,6 +391,24 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		if req.VisionCall {
 			updates["vision_calls_used"] = gorm.Expr("vision_calls_used + 1")
 		}
+		if req.RetrievalCall {
+			updates["retrieval_calls_used"] = gorm.Expr("retrieval_calls_used + 1")
+		}
+		if req.VisualCall {
+			updates["visual_calls_used"] = gorm.Expr("visual_calls_used + 1")
+		}
+		if req.FrameCount > 0 {
+			updates["frames_used"] = gorm.Expr("frames_used + ?", req.FrameCount)
+		}
+		if req.ContextChars > 0 {
+			updates["context_chars_used"] = gorm.Expr("context_chars_used + ?", req.ContextChars)
+			updates["context_usage_source"] = model.AgentCallUsageEstimated
+		}
+		if req.EstimatedPromptTokens > 0 {
+			updates["prompt_tokens_used"] = gorm.Expr("prompt_tokens_used + ?", req.EstimatedPromptTokens)
+			updates["token_usage_source"] = model.AgentCallUsageEstimated
+		}
+		updates["duration_ms_used"] = gorm.Expr("CASE WHEN duration_ms_used < ? THEN ? ELSE duration_ms_used END", durationMillis(run.CreatedAt, req.Now), durationMillis(run.CreatedAt, req.Now))
 		updated := tx.Model(&model.AgentRun{}).Where("id = ? AND user_id = ? AND version = ? AND status IN ?", run.ID, req.UserID, run.Version, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).Updates(updates)
 		if updated.Error != nil {
 			return updated.Error
@@ -402,6 +430,22 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		if req.VisionCall {
 			claim.Run.VisionCallsUsed++
 		}
+		if req.RetrievalCall {
+			claim.Run.RetrievalCallsUsed++
+		}
+		if req.VisualCall {
+			claim.Run.VisualCallsUsed++
+		}
+		claim.Run.FramesUsed += req.FrameCount
+		claim.Run.PromptTokensUsed += req.EstimatedPromptTokens
+		claim.Run.ContextCharsUsed += req.ContextChars
+		if req.EstimatedPromptTokens > 0 {
+			claim.Run.TokenUsageSource = model.AgentCallUsageEstimated
+		}
+		claim.Run.DurationMsUsed = maxInt64(claim.Run.DurationMsUsed, durationMillis(run.CreatedAt, req.Now))
+		if req.ContextChars > 0 {
+			claim.Run.ContextUsageSource = model.AgentCallUsageEstimated
+		}
 		return nil
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -414,14 +458,21 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 	if r == nil || r.db == nil || req.UserID <= 0 || req.RunID == "" || req.StepID == "" || req.Attempt <= 0 || req.LeaseToken == "" {
 		return false, gorm.ErrInvalidData
 	}
+	if req.PromptTokens < 0 || req.CompletionTokens < 0 || req.CostMicros < 0 || req.ContextChars < 0 {
+		return false, gorm.ErrInvalidData
+	}
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
 	digest := digestText(req.ResultCheckpoint)
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if !ownedActiveAgentRun(tx, req.UserID, req.RunID) {
-			return nil
+		var run model.AgentRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
 		}
 		var step model.AgentStep
 		if err := tx.Where("run_id = ? AND step_id = ? AND attempt = ?", req.RunID, req.StepID, req.Attempt).First(&step).Error; err != nil {
@@ -437,8 +488,19 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 		if usageSource == "" {
 			usageSource = model.AgentCallUsageUnknown
 		}
-		return tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
-			Updates(map[string]any{"status": model.AgentToolCallStatusCompleted, "output_ref": req.OutputRef, "result_checkpoint": req.ResultCheckpoint, "result_digest": digest, "evidence_refs": defaultJSON(req.EvidenceRefs, "[]"), "metrics_json": defaultJSON(req.MetricsJSON, "{}"), "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
+		if err := tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
+			Updates(map[string]any{"status": model.AgentToolCallStatusCompleted, "output_ref": req.OutputRef, "result_checkpoint": req.ResultCheckpoint, "result_digest": digest, "evidence_refs": defaultJSON(req.EvidenceRefs, "[]"), "metrics_json": enrichAgentMetrics(req.MetricsJSON, req.ContextChars, req.ContextUsageSource, usageSource, req.CostMicros), "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "context_chars": req.ContextChars, "context_usage_source": defaultUsageSource(req.ContextUsageSource, model.AgentCallUsageUnknown), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error; err != nil {
+			return err
+		}
+		usageUpdates := agentRunUsageUpdates(&run, promptTokenDelta(step.EstimatedPromptTokens, req.PromptTokens), req.CompletionTokens, req.CostMicros, usageSource, req.ContextChars, req.ContextUsageSource, durationMillis(run.CreatedAt, req.Now))
+		runUpdate := tx.Model(&model.AgentRun{}).Where("id = ? AND user_id = ? AND version = ?", run.ID, req.UserID, run.Version).Updates(usageUpdates)
+		if runUpdate.Error != nil {
+			return runUpdate.Error
+		}
+		if runUpdate.RowsAffected != 1 {
+			return errors.New("agent run usage CAS failed")
+		}
+		return nil
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -448,6 +510,9 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 
 func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFailure) (bool, error) {
 	if r == nil || r.db == nil || req.UserID <= 0 || req.RunID == "" || req.StepID == "" || req.Attempt <= 0 || req.LeaseToken == "" {
+		return false, gorm.ErrInvalidData
+	}
+	if req.PromptTokens < 0 || req.CompletionTokens < 0 || req.CostMicros < 0 || req.ContextChars < 0 {
 		return false, gorm.ErrInvalidData
 	}
 	if req.Now.IsZero() {
@@ -478,9 +543,17 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 			usageSource = model.AgentCallUsageUnknown
 		}
 		if err := tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
-			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error; err != nil {
+			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "context_chars": req.ContextChars, "context_usage_source": defaultUsageSource(req.ContextUsageSource, model.AgentCallUsageUnknown), "metrics_json": enrichAgentMetrics(req.MetricsJSON, req.ContextChars, req.ContextUsageSource, usageSource, req.CostMicros), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error; err != nil {
 			return err
 		}
+		runUpdate := tx.Model(&model.AgentRun{}).Where("id = ? AND user_id = ? AND version = ?", run.ID, req.UserID, run.Version).Updates(agentRunUsageUpdates(&run, promptTokenDelta(step.EstimatedPromptTokens, req.PromptTokens), req.CompletionTokens, req.CostMicros, usageSource, req.ContextChars, req.ContextUsageSource, durationMillis(run.CreatedAt, req.Now)))
+		if runUpdate.Error != nil {
+			return runUpdate.Error
+		}
+		if runUpdate.RowsAffected != 1 {
+			return errors.New("agent run usage CAS failed")
+		}
+		run.Version++
 		if req.Cancelled {
 			return markAgentRunCancelled(tx, &run, req.Now, "request_cancelled", req.ErrorCode, req.ErrorMessage)
 		}
@@ -532,7 +605,7 @@ func validateAgentRun(run *model.AgentRun) error {
 	if run.ScopeType == model.ChatScopeKnowledgeBase && (run.KnowledgeBaseID <= 0 || run.TaskID != 0) {
 		return gorm.ErrInvalidData
 	}
-	if run.MaxSteps <= 0 || run.MaxToolCalls < 0 || run.MaxLLMCalls < 0 || run.MaxVisionCalls < 0 || run.MaxAttemptsPerStep <= 0 {
+	if run.MaxSteps <= 0 || run.MaxToolCalls < 0 || run.MaxLLMCalls < 0 || run.MaxVisionCalls < 0 || run.MaxAttemptsPerStep <= 0 || run.MaxRetrievalCalls < 0 || run.MaxVisualCalls < 0 || run.MaxFrames < 0 || run.MaxPromptTokens < 0 || run.MaxCompletionTokens < 0 || run.MaxCostMicros < 0 || run.MaxDurationMs < 0 || run.MaxContextChars < 0 {
 		return gorm.ErrInvalidData
 	}
 	if !jsonObjectOrArray(run.ProfileSnapshot) || !jsonObjectOrArray(run.PolicySnapshot) || !jsonObjectOrArray(run.BudgetSnapshot) {
@@ -557,6 +630,9 @@ func validateAgentStepClaim(req AgentStepClaimRequest) error {
 	if !jsonObjectOrArray(defaultJSON(req.InputSummary, "{}")) {
 		return gorm.ErrInvalidData
 	}
+	if req.FrameCount < 0 || req.ContextChars < 0 || req.EstimatedPromptTokens < 0 {
+		return gorm.ErrInvalidData
+	}
 	return nil
 }
 
@@ -570,7 +646,31 @@ func agentBudgetExceeded(run model.AgentRun, req AgentStepClaimRequest) bool {
 	if req.LLMCall && run.LLMCallsUsed >= run.MaxLLMCalls {
 		return true
 	}
-	return req.VisionCall && run.VisionCallsUsed >= run.MaxVisionCalls
+	if req.VisionCall && run.VisionCallsUsed >= run.MaxVisionCalls {
+		return true
+	}
+	if req.RetrievalCall && run.MaxRetrievalCalls > 0 && run.RetrievalCallsUsed >= run.MaxRetrievalCalls {
+		return true
+	}
+	if req.VisualCall && run.MaxVisualCalls > 0 && run.VisualCallsUsed >= run.MaxVisualCalls {
+		return true
+	}
+	if req.FrameCount > 0 && run.MaxFrames > 0 && run.FramesUsed+req.FrameCount > run.MaxFrames {
+		return true
+	}
+	if run.MaxPromptTokens > 0 && run.PromptTokensUsed+req.EstimatedPromptTokens > run.MaxPromptTokens {
+		return true
+	}
+	if run.MaxCompletionTokens > 0 && run.CompletionTokensUsed >= run.MaxCompletionTokens {
+		return true
+	}
+	if run.MaxCostMicros > 0 && run.CostMicrosUsed >= run.MaxCostMicros {
+		return true
+	}
+	if run.MaxDurationMs > 0 && durationMillis(run.CreatedAt, req.Now) >= run.MaxDurationMs {
+		return true
+	}
+	return run.MaxContextChars > 0 && run.ContextCharsUsed+req.ContextChars > run.MaxContextChars
 }
 
 func markAgentRunBudgetExhausted(tx *gorm.DB, run *model.AgentRun, now time.Time, reason string) error {
@@ -656,4 +756,88 @@ func jsonObjectOrArray(value string) bool {
 	default:
 		return false
 	}
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func defaultUsageSource(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func mergeUsageSource(previous, current string, present bool) string {
+	if !present {
+		return defaultUsageSource(previous, model.AgentCallUsageUnknown)
+	}
+	current = defaultUsageSource(current, model.AgentCallUsageUnknown)
+	previous = defaultUsageSource(previous, model.AgentCallUsageUnknown)
+	if previous == model.AgentCallUsageUnknown {
+		return current
+	}
+	if current == model.AgentCallUsageUnknown || previous == current {
+		return previous
+	}
+	return model.AgentCallUsageMixed
+}
+
+func agentRunUsageUpdates(run *model.AgentRun, promptTokens, completionTokens, costMicros int64, usageSource string, _ int64, contextUsageSource string, durationMs int64) map[string]any {
+	updates := map[string]any{
+		"prompt_tokens_used":     gorm.Expr("prompt_tokens_used + ?", promptTokens),
+		"completion_tokens_used": gorm.Expr("completion_tokens_used + ?", completionTokens),
+		"cost_micros_used":       gorm.Expr("cost_micros_used + ?", costMicros),
+		"duration_ms_used":       gorm.Expr("CASE WHEN duration_ms_used < ? THEN ? ELSE duration_ms_used END", durationMs, durationMs),
+		"version":                gorm.Expr("version + 1"),
+	}
+	if promptTokens > 0 || completionTokens > 0 {
+		updates["token_usage_source"] = mergeUsageSource(run.TokenUsageSource, usageSource, true)
+	}
+	if costMicros > 0 {
+		updates["cost_usage_source"] = mergeUsageSource(run.CostUsageSource, usageSource, true)
+	}
+	if strings.TrimSpace(contextUsageSource) != "" {
+		updates["context_usage_source"] = mergeUsageSource(run.ContextUsageSource, contextUsageSource, true)
+	}
+	return updates
+}
+
+func promptTokenDelta(reserved, reported int64) int64 {
+	if reserved <= 0 {
+		return reported
+	}
+	if reported <= 0 {
+		return 0
+	}
+	return reported - reserved
+}
+
+func enrichAgentMetrics(raw string, contextChars int64, contextSource, usageSource string, costMicros int64) string {
+	metrics := map[string]any{}
+	if json.Unmarshal([]byte(defaultJSON(raw, "{}")), &metrics) != nil {
+		metrics = map[string]any{}
+	}
+	if contextChars > 0 {
+		metrics["context_chars"] = contextChars
+		metrics["context_usage_source"] = defaultUsageSource(contextSource, model.AgentCallUsageUnknown)
+	}
+	if usageSource == model.AgentCallUsageEstimated || usageSource == model.AgentCallUsageActual {
+		metrics["token_usage_source"] = usageSource
+	}
+	if costMicros > 0 {
+		metrics["cost_usage_source"] = usageSource
+	} else {
+		metrics["cost_usage_source"] = model.AgentCallUsageUnknown
+	}
+	encoded, err := json.Marshal(metrics)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }

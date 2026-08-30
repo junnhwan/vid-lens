@@ -104,6 +104,69 @@ func TestAgentExecutionPersistsFrozenRunAndIdempotentCompletedStep(t *testing.T)
 	}
 }
 
+func TestAgentExecutionPersistsAndEnforcesExtendedUsageBudgets(t *testing.T) {
+	repo := newAgentExecutionTestRepository(t)
+	now := time.Date(2026, 8, 30, 11, 0, 0, 0, time.UTC)
+	run := model.AgentRun{
+		ID: "run-usage-budget", UserID: 7, SessionID: 9, ScopeType: model.ChatScopeVideo, TaskID: 11,
+		Goal: "usage budget", Mode: "research", AgentProfile: "default", ProfileSnapshot: `{}`, PolicySnapshot: `{}`, BudgetSnapshot: `{}`,
+		Status: model.AgentRunStatusRunning, MaxSteps: 10, MaxToolCalls: 10, MaxLLMCalls: 10, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+		MaxRetrievalCalls: 1, MaxVisualCalls: 1, MaxFrames: 2, MaxPromptTokens: 4, MaxCompletionTokens: 3,
+		MaxCostMicros: 10, MaxDurationMs: 100000, MaxContextChars: 10, CreatedAt: now,
+	}
+	created, err := repo.CreateRun(context.Background(), &run)
+	if err != nil || !created {
+		t.Fatalf("CreateRun() = %v, %v", created, err)
+	}
+
+	retrieval := agentClaimRequest(run.ID, "usage-retrieval", "retrieval-worker", now.Add(time.Second))
+	retrieval.RetrievalCall, retrieval.ContextChars, retrieval.EstimatedPromptTokens = true, 6, 4
+	claim, err := repo.ClaimStep(context.Background(), retrieval)
+	if err != nil || claim.Outcome != AgentStepClaimAcquired {
+		t.Fatalf("retrieval ClaimStep() = %+v, %v", claim, err)
+	}
+	completed, err := repo.CompleteStep(context.Background(), AgentStepCompletion{
+		UserID: 7, RunID: run.ID, StepID: retrieval.StepID, Attempt: 1, LeaseToken: retrieval.LeaseToken,
+		ResultCheckpoint: `{}`, PromptTokens: 4, CompletionTokens: 2, CostMicros: 5, UsageSource: model.AgentCallUsageActual,
+		ContextChars: 6, ContextUsageSource: model.AgentCallUsageEstimated, Now: now.Add(2 * time.Second),
+	})
+	if err != nil || !completed {
+		t.Fatalf("retrieval CompleteStep() = %v, %v", completed, err)
+	}
+
+	visual := agentClaimRequest(run.ID, "usage-visual", "visual-worker", now.Add(3*time.Second))
+	visual.RetrievalCall, visual.VisualCall, visual.FrameCount, visual.ContextChars = false, true, 2, 4
+	visual.EstimatedPromptTokens = 0
+	claim, err = repo.ClaimStep(context.Background(), visual)
+	if err != nil || claim.Outcome != AgentStepClaimAcquired {
+		t.Fatalf("visual ClaimStep() = %+v, %v", claim, err)
+	}
+	completed, err = repo.CompleteStep(context.Background(), AgentStepCompletion{
+		UserID: 7, RunID: run.ID, StepID: visual.StepID, Attempt: 1, LeaseToken: visual.LeaseToken,
+		ResultCheckpoint: `{}`, CompletionTokens: 1, ContextChars: 4, ContextUsageSource: model.AgentCallUsageEstimated, Now: now.Add(4 * time.Second),
+	})
+	if err != nil || !completed {
+		t.Fatalf("visual CompleteStep() = %v, %v", completed, err)
+	}
+
+	blocked := agentClaimRequest(run.ID, "usage-retrieval-again", "blocked-worker", now.Add(5*time.Second))
+	blocked.RetrievalCall = true
+	claim, err = repo.ClaimStep(context.Background(), blocked)
+	if err != nil || claim.Outcome != AgentStepClaimExhausted {
+		t.Fatalf("retrieval budget ClaimStep() = %+v, %v", claim, err)
+	}
+	records, err := repo.GetExecution(context.Background(), 7, run.ID)
+	if err != nil || records == nil {
+		t.Fatalf("GetExecution() = %+v, %v", records, err)
+	}
+	if records.Run.Status != model.AgentRunStatusBudgetExhausted || records.Run.RetrievalCallsUsed != 1 || records.Run.VisualCallsUsed != 1 || records.Run.FramesUsed != 2 ||
+		records.Run.PromptTokensUsed != 4 || records.Run.CompletionTokensUsed != 3 || records.Run.CostMicrosUsed != 5 || records.Run.ContextCharsUsed != 10 ||
+		records.Run.DurationMsUsed <= 0 || records.Run.TokenUsageSource != model.AgentCallUsageMixed || records.Run.CostUsageSource != model.AgentCallUsageActual ||
+		records.Run.ContextUsageSource != model.AgentCallUsageEstimated {
+		t.Fatalf("extended usage counters = %+v", records.Run)
+	}
+}
+
 func TestAgentExecutionExpiredLeaseUsesCASAndFencesConcurrentOwners(t *testing.T) {
 	repo := newAgentExecutionTestRepository(t)
 	run := createAgentExecutionRun(t, repo, "run-cas", 3, 1)

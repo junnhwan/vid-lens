@@ -217,13 +217,14 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	now := execution.now()
 	definitions := r.registry.Definitions()
 	inputSummary, inputDigest := safePlannerInputSummary(state, definitions)
+	plannerContextChars := plannerContextChars(state, definitions)
 	callDigest := digestAgentValue(execution.runID + ":" + stepID + ":1:" + videoResearchPlannerCall + ":" + inputDigest)
 	claim, err := execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, Sequence: sequence,
 		Kind: "plan", Action: "select_next_action", SafeReason: "select the next allow-listed action",
 		InputSummary: inputSummary, ArgumentsDigest: inputDigest, CallDigest: callDigest,
 		ToolName: videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
-		ReplaySafe: false, LLMCall: true,
+		ReplaySafe: false, LLMCall: true, ContextChars: plannerContextChars, EstimatedPromptTokens: plannerContextChars / 4,
 		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
 	})
 	if err != nil {
@@ -267,7 +268,8 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
 			ErrorCode: "planner_failure", ErrorMessage: safeAgentError(planErr),
 			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
-			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion, Cancelled: cancelled,
+			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
+			ContextChars: usage.ContextChars, ContextUsageSource: usageContextSource(usage), MetricsJSON: usageMetrics(usage), Cancelled: cancelled,
 			Now: execution.now(),
 		})
 		return VideoResearchDecision{}, false, planErr
@@ -282,6 +284,7 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 		OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"), ResultCheckpoint: string(encoded),
 		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
 		UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
+		ContextChars: usage.ContextChars, ContextUsageSource: usageContextSource(usage), MetricsJSON: usageMetrics(usage),
 		Now: execution.now(),
 	})
 	if err != nil {
@@ -316,6 +319,13 @@ func safePlannerInputSummary(state VideoResearchState, tools []VideoAgentToolDef
 	return string(summary), inputDigest
 }
 
+func plannerContextChars(state VideoResearchState, tools []VideoAgentToolDefinition) int64 {
+	stateJSON, _ := json.Marshal(state)
+	toolsJSON, _ := json.Marshal(tools)
+	content := fmt.Sprintf("你是 VidLens 的视频研究计划器。%s%s", string(toolsJSON), string(stateJSON))
+	return int64(len([]rune(content)))
+}
+
 func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state VideoResearchState, runtime VideoAgentToolRuntime, decision VideoResearchDecision) (VideoAgentToolResult, VideoResearchObservation, bool, error) {
 	if r.execution == nil {
 		result, err := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
@@ -331,12 +341,13 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 	now := execution.now()
 	inputSummary := safeResearchArgumentsSummary(decision.Tool, decision.Arguments)
 	argsDigest := digestAgentValue(string(decision.Arguments))
+	contextChars := researchToolContextChars(decision.Tool, decision.Arguments)
 	claim, err := execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, Sequence: sequence,
 		Kind: videoAgentStepKind(decision.Tool), Action: decision.Tool, SafeReason: safeToolReason(decision.Tool),
 		InputSummary: inputSummary, ArgumentsDigest: argsDigest,
 		CallDigest: digestAgentValue(execution.runID + ":" + stepID + ":1:" + decision.Tool + ":" + argsDigest), ToolName: decision.Tool,
-		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool), VisionCall: visionAgentAction(decision.Tool),
+		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool), VisionCall: visionAgentAction(decision.Tool), RetrievalCall: retrievalAgentAction(decision.Tool), ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4,
 		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
 	})
 	if err != nil {
@@ -372,7 +383,8 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 		cancelled := errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded)
 		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
 			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "tool_failure", ErrorMessage: safeAgentError(toolErr), Cancelled: cancelled, Now: execution.now(),
+			ErrorCode: "tool_failure", ErrorMessage: safeAgentError(toolErr), ContextChars: contextChars, ContextUsageSource: usageSourceForContext(contextChars),
+			MetricsJSON: usageMetrics(VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}), Cancelled: cancelled, Now: execution.now(),
 		})
 		return result, VideoResearchObservation{}, false, toolErr
 	}
@@ -383,6 +395,7 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 	completed, err := execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
 		OutputRef: agentToolOutputRef(result.Step), ResultCheckpoint: string(checkpoint), EvidenceRefs: researchObservationEvidenceRefs(observation), Now: execution.now(),
+		ContextChars: contextChars, ContextUsageSource: usageSourceForContext(contextChars), MetricsJSON: usageMetrics(VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}),
 	})
 	if err != nil {
 		return result, observation, false, err
@@ -471,5 +484,69 @@ func researchObservationEvidenceRefs(observation VideoResearchObservation) strin
 		}
 	}
 	encoded, _ := json.Marshal(refs)
+	return string(encoded)
+}
+
+func researchToolContextChars(tool string, arguments json.RawMessage) int64 {
+	if !llmAgentAction(tool) {
+		return 0
+	}
+	return int64(len([]rune(string(arguments))))
+}
+
+func usageSourceForContext(contextChars int64) string {
+	if contextChars <= 0 {
+		return model.AgentCallUsageUnknown
+	}
+	return model.AgentCallUsageEstimated
+}
+
+func firstPositive(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func usageContextSource(usage VideoResearchPlannerCallUsage) string {
+	return usageSourceForContext(usage.ContextChars)
+}
+
+func usageMetrics(usage VideoResearchPlannerCallUsage) string {
+	metrics := map[string]any{"cost_usage_source": model.AgentCallUsageUnknown}
+	if usage.ContextChars > 0 {
+		metrics["context_chars"] = usage.ContextChars
+		metrics["context_usage_source"] = usageContextSource(usage)
+	}
+	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		metrics["token_usage_source"] = usage.UsageSource
+	}
+	if usage.CostMicros > 0 {
+		metrics["cost_usage_source"] = usage.UsageSource
+	}
+	encoded, _ := json.Marshal(metrics)
+	return string(encoded)
+}
+
+func mergeAgentUsageMetrics(raw string, usage VideoResearchPlannerCallUsage, contextChars int64) string {
+	metrics := map[string]any{}
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &metrics) != nil {
+		metrics = map[string]any{}
+	}
+	if contextChars > 0 {
+		metrics["context_chars"] = contextChars
+		metrics["context_usage_source"] = usageSourceForContext(contextChars)
+	}
+	if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		metrics["token_usage_source"] = usage.UsageSource
+	}
+	if usage.CostMicros > 0 {
+		metrics["cost_usage_source"] = usage.UsageSource
+	} else {
+		metrics["cost_usage_source"] = model.AgentCallUsageUnknown
+	}
+	encoded, _ := json.Marshal(metrics)
 	return string(encoded)
 }

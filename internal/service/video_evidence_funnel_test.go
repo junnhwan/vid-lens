@@ -72,6 +72,14 @@ func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 	if execution.Run.ToolCallsUsed != 5 || execution.Run.LLMCallsUsed != 3 || execution.Run.VisionCallsUsed != 0 || execution.Run.MaxAttemptsPerStep != 2 {
 		t.Fatalf("funnel budget counters = %+v", execution.Run)
 	}
+	if execution.Run.RetrievalCallsUsed != 4 || execution.Run.VisualCallsUsed != 1 || execution.Run.FramesUsed <= 0 ||
+		execution.Run.PromptTokensUsed <= 0 || execution.Run.CompletionTokensUsed <= 0 || execution.Run.CostMicrosUsed != 0 ||
+		execution.Run.DurationMsUsed < 0 || execution.Run.ContextCharsUsed <= 0 || execution.Run.TokenUsageSource != model.AgentCallUsageEstimated ||
+		execution.Run.CostUsageSource != model.AgentCallUsageUnknown || execution.Run.ContextUsageSource != model.AgentCallUsageEstimated ||
+		execution.Run.MaxRetrievalCalls != 8 || execution.Run.MaxVisualCalls != 1 || execution.Run.MaxFrames != 3 || execution.Run.MaxPromptTokens <= 0 ||
+		execution.Run.MaxCompletionTokens <= 0 || execution.Run.MaxCostMicros <= 0 || execution.Run.MaxDurationMs <= 0 || execution.Run.MaxContextChars <= 0 {
+		t.Fatalf("funnel extended budget counters = %+v", execution.Run)
+	}
 	for index, call := range execution.ToolCalls {
 		if call.ToolName != evidenceFunnelActionOrder[index] || call.CallDigest == "" || call.ArgumentsDigest == "" || call.Status != model.AgentToolCallStatusCompleted || call.MetricsJSON == "" || call.MetricsJSON == "{}" || strings.Contains(call.InputSummary, "核验 owner") || strings.Contains(call.InputSummary, "全局摘要") {
 			t.Fatalf("funnel call %d = %+v", index, call)

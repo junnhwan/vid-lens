@@ -45,11 +45,19 @@ type frozenAgentPolicy struct {
 }
 
 type frozenAgentBudget struct {
-	MaxSteps           int `json:"max_steps"`
-	MaxToolCalls       int `json:"max_tool_calls"`
-	MaxLLMCalls        int `json:"max_llm_calls"`
-	MaxVisionCalls     int `json:"max_vision_calls"`
-	MaxAttemptsPerStep int `json:"max_attempts_per_step"`
+	MaxSteps            int   `json:"max_steps"`
+	MaxToolCalls        int   `json:"max_tool_calls"`
+	MaxLLMCalls         int   `json:"max_llm_calls"`
+	MaxVisionCalls      int   `json:"max_vision_calls"`
+	MaxAttemptsPerStep  int   `json:"max_attempts_per_step"`
+	MaxRetrievalCalls   int   `json:"max_retrieval_calls"`
+	MaxVisualCalls      int   `json:"max_visual_calls"`
+	MaxFrames           int   `json:"max_frames"`
+	MaxPromptTokens     int64 `json:"max_prompt_tokens"`
+	MaxCompletionTokens int64 `json:"max_completion_tokens"`
+	MaxCostMicros       int64 `json:"max_cost_micros"`
+	MaxDurationMs       int64 `json:"max_duration_ms"`
+	MaxContextChars     int64 `json:"max_context_chars"`
 }
 
 func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, userID int64, session *model.ChatSession, goal, mode, agentProfile string, profile ai.Profile, policy frozenAgentPolicy, budget frozenAgentBudget) (*model.AgentRun, error) {
@@ -77,6 +85,9 @@ func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, us
 		AgentProfile: agentProfile, ProfileSnapshot: string(profileJSON), PolicySnapshot: string(policyJSON), BudgetSnapshot: string(budgetJSON),
 		Status: model.AgentRunStatusRunning, MaxSteps: budget.MaxSteps, MaxToolCalls: budget.MaxToolCalls,
 		MaxLLMCalls: budget.MaxLLMCalls, MaxVisionCalls: budget.MaxVisionCalls, MaxAttemptsPerStep: budget.MaxAttemptsPerStep,
+		MaxRetrievalCalls: budget.MaxRetrievalCalls, MaxVisualCalls: budget.MaxVisualCalls, MaxFrames: budget.MaxFrames,
+		MaxPromptTokens: budget.MaxPromptTokens, MaxCompletionTokens: budget.MaxCompletionTokens, MaxCostMicros: budget.MaxCostMicros,
+		MaxDurationMs: budget.MaxDurationMs, MaxContextChars: budget.MaxContextChars,
 		CreatedAt: time.Now().UTC(),
 	}
 	created, err := s.chatSvc.repos.AgentExecution.CreateRun(ctx, run)
@@ -112,6 +123,8 @@ func defaultTemplateAgentPolicy(topK int) (frozenAgentPolicy, frozenAgentBudget)
 	allowed := defaultAgentToolNames()
 	return frozenAgentPolicy{TopK: topK, MaxSteps: 16, AllowedTools: allowed}, frozenAgentBudget{
 		MaxSteps: 16, MaxToolCalls: 16, MaxLLMCalls: 2, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
+		MaxRetrievalCalls: 16, MaxVisualCalls: 0, MaxFrames: 0, MaxPromptTokens: 32000, MaxCompletionTokens: 8000,
+		MaxCostMicros: 1000000, MaxDurationMs: 300000, MaxContextChars: 100000,
 	}
 }
 
@@ -121,6 +134,8 @@ func researchAgentPolicy(topK int, policy VideoResearchPolicy) (frozenAgentPolic
 		// Each research iteration has one planner checkpoint plus one tool step.
 		MaxSteps: policy.MaxSteps*2 + 1, MaxToolCalls: policy.MaxSteps,
 		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
+		MaxRetrievalCalls: policy.MaxSteps, MaxVisualCalls: 0, MaxFrames: 0, MaxPromptTokens: 32000,
+		MaxCompletionTokens: 8000, MaxCostMicros: 1000000, MaxDurationMs: 300000, MaxContextChars: 100000,
 	}
 }
 
@@ -307,6 +322,10 @@ func safeToolReason(tool string) string {
 }
 
 func replaySafeAgentAction(tool string) bool {
+	return tool == VideoAgentToolSearchTranscript || tool == VideoAgentToolGetTranscriptWindow
+}
+
+func retrievalAgentAction(tool string) bool {
 	return tool == VideoAgentToolSearchTranscript || tool == VideoAgentToolGetTranscriptWindow
 }
 

@@ -402,6 +402,40 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	return nil
 }
 
+// saveAgentRunExchange persists a terminal Research exchange under the run's
+// idempotency key. A retry gets the original assistant message ID and does
+// not append a second user/assistant pair.
+func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, sessionID int64, question string, result *VideoAgentResult, recentLimit int) error {
+	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil || result == nil || strings.TrimSpace(result.RunID) == "" {
+		return errors.New("agent run exchange parameters are invalid")
+	}
+	snapshot, err := MarshalAgentSnapshot(result)
+	if err != nil {
+		return err
+	}
+	snapshotText := string(snapshot)
+	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
+	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model}
+	created, _, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, nil)
+	if err != nil {
+		return err
+	}
+	result.MessageID = assistantMessageID
+	if !created {
+		return nil
+	}
+	if session, findErr := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
+		s.chatSvc.maybeAutoTitleSession(session, question)
+	}
+	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
+	if s.chatSvc.memoryCapture != nil {
+		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
+			UserID: userID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
+		})
+	}
+	return nil
+}
+
 func (s *VideoAgentService) loadAgentMemorySnapshot(ctx context.Context, userID, taskID int64, runID, query string) *MemorySnapshot {
 	if s == nil || s.chatSvc == nil || s.chatSvc.longTermMemory == nil {
 		return nil

@@ -19,6 +19,7 @@ type VideoResearchPlannerCallUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	CostMicros       int64
+	ContextChars     int64
 	UsageSource      string
 	TokenEstimated   bool
 	Currency         string
@@ -84,11 +85,13 @@ func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, sta
 
 func estimatedPlannerCallUsage(messages []ai.ChatMessage, response string) VideoResearchPlannerCallUsage {
 	promptTokens := int64(0)
+	contextChars := int64(0)
 	for _, message := range messages {
 		promptTokens += estimateAgentTokens(message.Content)
+		contextChars += int64(len([]rune(message.Content)))
 	}
 	return VideoResearchPlannerCallUsage{
-		PromptTokens: promptTokens, CompletionTokens: estimateAgentTokens(response),
+		PromptTokens: promptTokens, CompletionTokens: estimateAgentTokens(response), ContextChars: contextChars,
 		UsageSource: model.AgentCallUsageEstimated, TokenEstimated: true,
 	}
 }
