@@ -54,6 +54,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 	cfg.MQ.applyDefaults()
+	cfg.Memory.applyDefaults()
 
 	if err := applyAIGovernanceEnv(&cfg.AIGovernance); err != nil {
 		return nil, fmt.Errorf("AI 治理配置无效: %w", err)

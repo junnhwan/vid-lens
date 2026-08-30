@@ -39,6 +39,8 @@ type serverApplication struct {
 	taskCleanup          *service.TaskCleanupService
 	taskCleanupScheduler *service.TaskCleanupScheduler
 	mq                   config.MQConfig
+	memoryWriter         *service.AsyncMemoryWriter
+	memoryCapture        *service.AsyncMemoryCapture
 }
 
 func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
@@ -155,6 +157,40 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	})
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
+	var memoryWriter *service.AsyncMemoryWriter
+	var memoryCapture *service.AsyncMemoryCapture
+	if deps.cfg.Memory.Enabled && deps.repos.Memory != nil {
+		authorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
+		provider := service.NewScopedMemoryProvider(
+			service.NewRepositoryMemoryRetriever(deps.repos.Memory),
+			authorizer,
+			service.AgentMemoryConfig{TopK: deps.cfg.Memory.TopK, MaxChars: deps.cfg.Memory.MaxChars, MaxTokens: deps.cfg.Memory.MaxTokens},
+		)
+		var projector service.MemoryProjector
+		if err := deps.repos.Memory.EnsureEmbeddingSchema(context.Background(), deps.cfg.RAG.EmbeddingDim); err != nil {
+			log.Printf("agent memory embedding projection unavailable; relational memory remains enabled: %v", err)
+		} else {
+			embedder := service.MemoryEmbedderFunc(func(ctx context.Context, userID int64, content string) (service.MemoryEmbedding, error) {
+				profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
+				if err != nil {
+					return service.MemoryEmbedding{}, err
+				}
+				client, err := aiFactory.NewEmbeddingClient(*profile)
+				if err != nil {
+					return service.MemoryEmbedding{}, err
+				}
+				vector, err := client.Embed(ctx, content)
+				if err != nil {
+					return service.MemoryEmbedding{}, err
+				}
+				return service.MemoryEmbedding{Model: profile.EmbeddingModel, Vector: vector}, nil
+			})
+			projector = service.NewRepositoryMemoryProjector(embedder, deps.repos.Memory)
+		}
+		memoryWriter = service.NewAsyncMemoryWriter(deps.repos.Memory, authorizer, projector, deps.cfg.Memory.QueueSize)
+		memoryCapture = service.NewAsyncMemoryCapture(service.ExplicitPreferenceExtractor{}, memoryWriter, deps.cfg.Memory.QueueSize)
+		chatSvc.SetLongTermMemory(provider, memoryCapture)
+	}
 	// docs/architecture/retrieval.md：级联 intent 分类器注入 ChatService（规则层零依赖，LLM 兜底用本次
 	// 请求的 chat client，per-request 解析）。替换 docs/architecture/retrieval.md A段占位 classifyIntentPlaceholder。
 	chatSvc.SetIntentRouter(service.NewIntentRouter(service.NewRuleIntentClassifier()))
@@ -252,6 +288,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		taskCleanup:          taskCleanup,
 		taskCleanupScheduler: taskCleanupScheduler,
 		mq:                   deps.cfg.MQ,
+		memoryWriter:         memoryWriter,
+		memoryCapture:        memoryCapture,
 	}, nil
 }
 
@@ -268,4 +306,12 @@ func (a *serverApplication) Wait() {
 	a.consumer.Wait()
 	a.retryScheduler.Wait()
 	a.taskCleanupScheduler.Wait()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if a.memoryCapture != nil {
+		_ = a.memoryCapture.Close(shutdownCtx)
+	}
+	if a.memoryWriter != nil {
+		_ = a.memoryWriter.Close(shutdownCtx)
+	}
 }

@@ -139,6 +139,13 @@ rag:
   rerank_model: "Qwen/Qwen3-Reranker-4B"
   rewrite_queries: 3
 
+memory:
+  enabled: false
+  top_k: 6
+  max_chars: 2000
+  max_tokens: 500
+  queue_size: 128
+
 milvus:
   collection: "vidlens_video_chunks"
   address: "127.0.0.1:19530"

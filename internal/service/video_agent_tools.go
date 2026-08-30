@@ -112,9 +112,10 @@ type CompareSegmentsResult struct {
 }
 
 type BuildCitedAnswerInput struct {
-	Question     string
-	Intermediate string
-	Citations    []RetrievedChunk
+	Question      string
+	Intermediate  string
+	Citations     []RetrievedChunk
+	MemoryContext string
 }
 
 type BuildCitedAnswerResult struct {
@@ -259,10 +260,14 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		step, err := t.failObservedStep(step, "chat client 不能为空")
 		return BuildCitedAnswerResult{}, step, err
 	}
-	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
+	messages := []ai.ChatMessage{
 		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"},
-		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))},
-	})
+	}
+	if memoryContext := strings.TrimSpace(input.MemoryContext); memoryContext != "" {
+		messages = append(messages, ai.ChatMessage{Role: "system", Content: memoryContext + "\n禁止把上述记忆作为 Claim 或引用证据；若它与当前视频片段冲突，以当前视频片段为准并说明不确定性。"})
+	}
+	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
+	answer, err := t.chat.Chat(ctx, messages)
 	if err != nil {
 		step, err = t.failObservedStep(step, err.Error())
 		return BuildCitedAnswerResult{}, step, err

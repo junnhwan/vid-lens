@@ -39,6 +39,7 @@ type VideoAgentResult struct {
 	Model     string           `json:"model"`
 	RunID     string           `json:"run_id,omitempty"`
 	Mode      string           `json:"mode,omitempty"`
+	Memory    *MemorySnapshot  `json:"memory,omitempty"`
 }
 
 type VideoAgentStep struct {
@@ -54,6 +55,7 @@ type VideoAgentTemplateRequest struct {
 	TaskID         int64
 	Question       string
 	EmbeddingModel string
+	MemoryContext  string
 }
 
 type VideoAgentService struct {
@@ -126,6 +128,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	if err != nil {
 		return nil, err
 	}
+	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Question)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
@@ -166,7 +169,11 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 		return nil, newVideoAgentExecutionError(fmt.Errorf("未检索到足够相关的视频片段"), trace)
 	}
 
-	answer, citations, trace, err := s.executeTemplate(ctx, tools, template, req, profile.EmbeddingModel, session.TaskID, search.Citations, trace)
+	memoryContext := ""
+	if memorySnapshot != nil {
+		memoryContext = memorySnapshot.PromptContext()
+	}
+	answer, citations, trace, err := s.executeTemplate(ctx, tools, template, req, profile.EmbeddingModel, session.TaskID, memoryContext, search.Citations, trace)
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
@@ -180,6 +187,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 		Model:     profile.LLMModel,
 		RunID:     runID,
 		Mode:      mode,
+		Memory:    memorySnapshot,
 	}
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Question, result, recentLimit); err != nil {
 		return nil, err
@@ -210,12 +218,13 @@ func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*mod
 	return session, nil
 }
 
-func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentRequest, embeddingModel string, taskID int64, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
+func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentRequest, embeddingModel string, taskID int64, memoryContext string, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
 	return ExecuteVideoAgentTemplate(ctx, tools, template, VideoAgentTemplateRequest{
 		UserID:         req.UserID,
 		TaskID:         taskID,
 		Question:       req.Question,
 		EmbeddingModel: embeddingModel,
+		MemoryContext:  memoryContext,
 	}, citations, trace)
 }
 
@@ -232,7 +241,7 @@ func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, temp
 		if err != nil {
 			return "", nil, trace, err
 		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations})
+		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations, MemoryContext: req.MemoryContext})
 		trace = append(trace, step)
 		if err != nil {
 			return "", nil, trace, err
@@ -249,7 +258,7 @@ func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, temp
 		if err != nil {
 			return "", nil, trace, err
 		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: comparison.Comparison, Citations: citations})
+		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: comparison.Comparison, Citations: citations, MemoryContext: req.MemoryContext})
 		trace = append(trace, step)
 		if err != nil {
 			return "", nil, trace, err
@@ -269,7 +278,7 @@ func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, temp
 		if err != nil {
 			return "", nil, trace, err
 		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations})
+		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations, MemoryContext: req.MemoryContext})
 		trace = append(trace, step)
 		if err != nil {
 			return "", nil, trace, err
@@ -277,9 +286,10 @@ func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, temp
 		return final.Answer, final.Citations, trace, nil
 	default:
 		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{
-			Question:     req.Question,
-			Intermediate: "请直接基于检索到的视频转写片段回答用户问题。",
-			Citations:    citations,
+			Question:      req.Question,
+			Intermediate:  "请直接基于检索到的视频转写片段回答用户问题。",
+			Citations:     citations,
+			MemoryContext: req.MemoryContext,
 		})
 		trace = append(trace, step)
 		if err != nil {
@@ -329,12 +339,13 @@ func loadAgentWindowGroups(ctx context.Context, tools *VideoAgentTools, userID, 
 }
 
 func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessionID int64, question string, result *VideoAgentResult, recentLimit int) error {
-	if err := s.chatSvc.repos.Chat.CreateMessage(&model.ChatMessage{
+	userMessage := &model.ChatMessage{
 		SessionID: sessionID,
 		UserID:    userID,
 		Role:      "user",
 		Content:   question,
-	}); err != nil {
+	}
+	if err := s.chatSvc.repos.Chat.CreateMessage(userMessage); err != nil {
 		return err
 	}
 	if session, err := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); err == nil && session != nil {
@@ -358,7 +369,31 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	}
 	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	result.MessageID = assistantMessage.ID
+	if s.chatSvc.memoryCapture != nil {
+		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
+			UserID: userID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
+		})
+	}
 	return nil
+}
+
+func (s *VideoAgentService) loadAgentMemorySnapshot(ctx context.Context, userID, taskID int64, runID, query string) *MemorySnapshot {
+	if s == nil || s.chatSvc == nil || s.chatSvc.longTermMemory == nil {
+		return nil
+	}
+	snapshot, err := s.chatSvc.longTermMemory.Snapshot(ctx, MemorySnapshotRequest{
+		UserID: userID,
+		Query:  query,
+		Scopes: []MemoryScope{
+			{Type: model.MemoryScopeUser, ID: fmt.Sprintf("%d", userID)},
+			{Type: model.MemoryScopeVideo, ID: fmt.Sprintf("%d", taskID)},
+			{Type: model.MemoryScopeRun, ID: runID},
+		},
+	})
+	if err != nil {
+		return nil
+	}
+	return &snapshot
 }
 
 func newVideoAgentExecutionError(err error, trace []VideoAgentStep) error {

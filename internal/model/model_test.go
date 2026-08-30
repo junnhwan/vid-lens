@@ -39,6 +39,8 @@ func TestAllModelsIncludesKnowledgeBaseModels(t *testing.T) {
 		reflect.TypeOf(&KnowledgeBase{}):      false,
 		reflect.TypeOf(&KnowledgeBaseVideo{}): false,
 		reflect.TypeOf(&ChatMessageSource{}):  false,
+		reflect.TypeOf(&AgentMemoryItem{}):    false,
+		reflect.TypeOf(&AgentMemoryEvent{}):   false,
 	}
 	for _, candidate := range AllModels() {
 		if _, ok := want[reflect.TypeOf(candidate)]; ok {

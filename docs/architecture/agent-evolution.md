@@ -28,7 +28,7 @@
 | 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验 | 已实现但为 opt-in、单视频、无视觉核验和账本 |
 | 研究入口 | `video_research_service.go` 的 `mode=research` 只接受单视频；知识库范围被拒绝 | 已实现实验入口，不应误称为完整产品 Agent |
 | 短期上下文 | `ChatMemoryStore` 只提供最近消息读取/保存；`RecentTurns` 是有限会话上下文 | 已实现短期记忆，不是长期语义记忆 |
-| 长期记忆 | 没有 `memory_items`、语义召回、冲突治理或用户删除契约 | 未实现，见 [agent-memory.md](agent-memory.md) |
+| 长期记忆 | 已有 owner-scoped item/event、四类 scope、受限 snapshot、冲突/撤回/删除语义、异步写入和可选 Agent 注入；在线语义排序与公开治理 API 尚未实现 | 最小切片已实现，见 [agent-memory.md](agent-memory.md) |
 | 证据账本 | 当前引用来自检索/快照，没有 Claim、Evidence、Claim-Evidence 独立关系和状态迁移 | 未实现，见 [agent-evidence.md](agent-evidence.md) |
 | 跨视频研究 | 标准 RAG 可按请求检索知识库；Agent 研究路径不接受 KB | 未实现 Agent 级跨视频研究 |
 
@@ -240,7 +240,7 @@ Run/Step 可使用 append-only event 或状态行加版本号实现；选择不�
 
 ### 长期记忆最小闭环
 
-在 PostgreSQL 建立带 scope/source/importance/expiry/status 的 memory item 和事件模型；先实现用户、单视频、知识库三种隔离；用现有短期消息接口作为上下文输入，不把 `ChatMemoryStore` 改名冒充长期记忆。写入异步、可删除、可观测，召回数量和 token 受限。
+已在 PostgreSQL 建立带 scope/source/importance/expiry/status 的 memory item 和事件模型，并覆盖 user、video、knowledge_base、run 四类隔离；现有 `ChatMemoryStore` 仍只表示短期消息。写入采用非阻塞 best-effort 队列，召回受 top-k/字符/token 限制，模板 Agent 可选注入并持久化 snapshot identity。后续增强在线 pgvector 语义排序、持久队列和公开治理 API。
 
 ### Evidence Ledger 与验证器
 

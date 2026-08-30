@@ -29,6 +29,7 @@ type AgentSnapshot struct {
 	Steps     []AgentSnapshotStep `json:"steps"`
 	Citations []Citation          `json:"citations"`
 	Trace     []VideoAgentStep    `json:"trace,omitempty"`
+	Memory    *MemorySnapshot     `json:"memory,omitempty"`
 }
 
 // AgentSnapshotStep is deliberately limited to safe execution metadata. It
@@ -137,6 +138,7 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 		return nil, fmt.Errorf("agent result 不能为空")
 	}
 	snapshot := NewAgentSnapshot(result.RunID, result.Mode, result.Template, result.Trace, result.Citations)
+	snapshot.Memory = result.Memory
 	result.RunID = snapshot.RunID
 	result.Mode = snapshot.Mode
 	return json.Marshal(snapshot)
@@ -166,6 +168,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 		Steps     []AgentSnapshotStep `json:"steps"`
 		Citations []Citation          `json:"citations"`
 		Trace     []VideoAgentStep    `json:"trace"`
+		Memory    *MemorySnapshot     `json:"memory"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		return AgentSnapshot{}, fmt.Errorf("agent snapshot 无效: %w", err)
@@ -179,7 +182,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 		return AgentSnapshot{
 			Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 			Template: envelope.Template, Steps: envelope.Steps, Citations: envelope.Citations,
-			Trace: append([]VideoAgentStep(nil), envelope.Trace...),
+			Trace: append([]VideoAgentStep(nil), envelope.Trace...), Memory: envelope.Memory,
 		}, nil
 	}
 
@@ -187,12 +190,14 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	if envelope.Trace != nil {
 		snapshot := NewAgentSnapshot(envelope.RunID, envelope.Mode, envelope.Template, envelope.Trace, envelope.Citations)
 		snapshot.Version = envelope.Version
+		snapshot.Memory = envelope.Memory
 		return snapshot, nil
 	}
 
 	return AgentSnapshot{
 		Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 		Template: envelope.Template, Steps: []AgentSnapshotStep{}, Citations: envelope.Citations,
+		Memory: envelope.Memory,
 	}, nil
 }
 

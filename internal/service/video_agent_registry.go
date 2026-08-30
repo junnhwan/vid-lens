@@ -177,9 +177,10 @@ type compareSegmentsToolArguments struct {
 }
 
 type buildCitedAnswerToolArguments struct {
-	Question     string           `json:"question"`
-	Intermediate string           `json:"intermediate"`
-	Citations    []RetrievedChunk `json:"citations"`
+	Question      string           `json:"question"`
+	Intermediate  string           `json:"intermediate"`
+	Citations     []RetrievedChunk `json:"citations"`
+	MemoryContext string           `json:"memory_context,omitempty"`
 }
 
 func newVideoAgentToolRegistry(tools *VideoAgentTools) *VideoAgentToolRegistry {
@@ -285,9 +286,10 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 					return failedVideoAgentToolResult(VideoAgentToolBuildCitedAnswer, "build cited answer", err)
 				}
 				result, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{
-					Question:     args.Question,
-					Intermediate: args.Intermediate,
-					Citations:    args.Citations,
+					Question:      args.Question,
+					Intermediate:  args.Intermediate,
+					Citations:     args.Citations,
+					MemoryContext: args.MemoryContext,
 				})
 				return marshalVideoAgentToolResult(result, step, err)
 			},

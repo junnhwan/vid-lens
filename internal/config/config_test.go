@@ -138,6 +138,21 @@ func TestLoadAppliesMQQueueDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadKeepsAgentMemoryDisabledWithBoundedDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  port: 8080\n"), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Memory.Enabled || cfg.Memory.TopK != 6 || cfg.Memory.MaxChars != 2000 || cfg.Memory.MaxTokens != 500 || cfg.Memory.QueueSize != 128 {
+		t.Fatalf("memory defaults = %+v", cfg.Memory)
+	}
+}
+
 func TestLoadPreservesExplicitMQQueues(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

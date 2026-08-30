@@ -98,19 +98,21 @@ type ChatMemoryStore interface {
 }
 
 type ChatService struct {
-	repos       *repository.Repositories
-	retriever   RAGRetriever
-	memory      ChatMemoryStore
-	recorder    ai.CallRecorder
-	cfg         ChatConfig
-	intentRouter *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
+	repos          *repository.Repositories
+	retriever      RAGRetriever
+	memory         ChatMemoryStore
+	longTermMemory MemoryProvider
+	memoryCapture  MemoryCapture
+	recorder       ai.CallRecorder
+	cfg            ChatConfig
+	intentRouter   *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
 }
 
 type AskResult struct {
-	MessageID int64           `json:"message_id"`
-	Answer    string          `json:"answer"`
-	Citations []Citation      `json:"citations"`
-	Model     string          `json:"model"`
+	MessageID int64      `json:"message_id"`
+	Answer    string     `json:"answer"`
+	Citations []Citation `json:"citations"`
+	Model     string     `json:"model"`
 	// Degraded 标记档2降级态（docs/architecture/reliability.md 当前实现约束）：LLM 失败回退无 LLM 模式
 	// （检索片段+已有摘要直拼）时为 true，对外告知用户当前降级。档1 rerank 失败回退
 	// 向量基线后 LLM 仍生成完整答案，不标 degraded。
@@ -174,6 +176,13 @@ func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg 
 
 func (s *ChatService) SetMemoryStore(memory ChatMemoryStore) {
 	s.memory = memory
+}
+
+// SetLongTermMemory enables the optional governed Agent memory path. Leaving
+// either dependency nil keeps all existing RAG and Agent behavior unchanged.
+func (s *ChatService) SetLongTermMemory(provider MemoryProvider, capture MemoryCapture) {
+	s.longTermMemory = provider
+	s.memoryCapture = capture
 }
 
 func (s *ChatService) SetAIRecorder(recorder ai.CallRecorder) {

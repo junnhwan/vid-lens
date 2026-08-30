@@ -19,6 +19,7 @@ type Config struct {
 	Cleanup      CleanupConfig      `yaml:"cleanup"`
 	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
 	RAG          RAGConfig          `yaml:"rag"`
+	Memory       MemoryConfig       `yaml:"memory"`
 	Milvus       MilvusConfig       `yaml:"milvus"`
 	AIGovernance AIGovernanceConfig `yaml:"-"`
 }
@@ -223,6 +224,32 @@ type RAGConfig struct {
 	VectorTable    string  `yaml:"vector_table"`
 	RerankModel    string  `yaml:"rerank_model"`
 	RewriteQueries int     `yaml:"rewrite_queries"`
+}
+
+// MemoryConfig controls the optional Agent-only long-term memory slice. It is
+// disabled by default so ordinary RAG and existing Agent behavior remain
+// unchanged unless an operator opts in.
+type MemoryConfig struct {
+	Enabled   bool `yaml:"enabled"`
+	TopK      int  `yaml:"top_k"`
+	MaxChars  int  `yaml:"max_chars"`
+	MaxTokens int  `yaml:"max_tokens"`
+	QueueSize int  `yaml:"queue_size"`
+}
+
+func (m *MemoryConfig) applyDefaults() {
+	if m.TopK <= 0 {
+		m.TopK = 6
+	}
+	if m.MaxChars <= 0 {
+		m.MaxChars = 2000
+	}
+	if m.MaxTokens <= 0 {
+		m.MaxTokens = 500
+	}
+	if m.QueueSize <= 0 {
+		m.QueueSize = 128
+	}
 }
 
 type MilvusConfig struct {

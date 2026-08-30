@@ -23,6 +23,8 @@ func AllModels() []interface{} {
 		&ChatSession{},
 		&ChatMessage{},
 		&ChatMessageSource{},
+		&AgentMemoryItem{},
+		&AgentMemoryEvent{},
 		&AICallLog{},
 		&AIRetryBudget{},
 		&AIRetryAttempt{},

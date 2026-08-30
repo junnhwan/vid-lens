@@ -1,16 +1,27 @@
 # VidLens Agent Memory：长期记忆设计
 
-状态：设计稿，尚未实现
+状态：最小纵向切片已实现；语义召回与持久队列仍待增强
 
-核验时间：2026-08-29（Asia/Shanghai）
+核验时间：2026-08-30（Asia/Shanghai）
 
 本文从 [agent-evolution.md](agent-evolution.md) 拆出长期记忆的边界和最小实现。长期记忆是 Agent 的上下文基础设施：它可以提供有限的历史信息，但不拥有目标分解、工具选择、验证或停止能力。
 
 ## 现状
 
-VidLens 当前只有短期会话上下文：`internal/service/chat.go` 中的 `ChatMemoryStore` 读取和保存最近消息，`RecentTurns` 控制数量；`video_agent.go` 和 research service 会把最近消息作为本次模型输入的一部分。它没有持久化的语义记忆、偏好模型、memory scope、冲突修订和删除 API。
+VidLens 的短期会话上下文仍由 `internal/service/chat.go` 中的 `ChatMemoryStore` 和 `RecentTurns` 管理；它没有被改名或冒充为长期记忆。长期记忆最小切片现已独立落在 `agent_memory_items`、`agent_memory_events`、`MemoryProvider` 和异步 `MemoryWriter` 上，并只在显式启用配置时接入模板 Video Agent。
 
-因此不能把当前 `ChatMemoryStore` 命名为 long-term memory，也不能因为它能跨请求保存最近消息就称其为 Agent。
+长期记忆仍不是 Agent：它不选择工具、不验证视频 Claim，也不拥有循环或停止条件。
+
+## 已实现的最小切片
+
+- `internal/model/memory.go` 定义 `user`、`video`、`knowledge_base`、`run` 四类 scope，以及 item/event 权威模型。item 包含 kind、content、source、importance、embedding ref、生命周期时间、status、version 和软删除字段。
+- `internal/repository/memory.go` 使用 GORM/PostgreSQL 保存 item 与追加事件；同一 owner/scope/kind 的不同内容会同时保留并标记 `conflicted`，精确重复内容不会静默覆盖原记录。
+- 删除采用 `deleted` 状态、版本递增、事件和 GORM tombstone；撤回采用 `withdrawn` 状态与事件。两者以及过期、无 `source_ref` 的记录都不会进入召回。
+- `ScopedMemoryProvider.Snapshot` 在查询前逐一校验用户、视频和知识库所有权，并在查询中再次固定 `user_id + scope_type + scope_id`。Run 尚无独立表，因此当前以 owner `user_id + run_id` 隔离。
+- Snapshot 使用稳定 schema/version hash 和确定性 memory id 顺序；召回同时受 top-k、字符和近似 token 上限控制。冲突项只会成组进入，不会只挑一个值冒充确定事实。
+- `AsyncMemoryWriter.Enqueue(candidate)` 和异步 extractor queue 都是非阻塞 best-effort side effect。关系 item 先持久化；pgvector embedding 投影失败只计为后台失败，不回滚 item，也不影响当前回答。
+- 默认 extractor 只识别用户明确表达的回答偏好，并只写 `user` scope；它不读取 assistant 内容。writer 还会拒绝 `agent_answer`/`assistant_response`，video/KB scope 只接受 `verified_claim`、`user_confirmation` 或 `manual` 来源。
+- `memory.enabled` 默认为 `false`。启用后模板 Video Agent 在执行前读取 `user + current video + current run` snapshot，把它作为单独的受限 system context 注入最终引用回答，并把 snapshot version/memory ids 写入既有 Agent 终态快照。普通 RAG、KB RAG、research loop 和现有 SSE 事件在关闭时不变。
 
 ## 参考启发与适用边界
 
@@ -88,6 +99,16 @@ MemoryWriter.enqueue(candidate_event) -> accepted/rejected/best-effort
 
 ## 落地约束
 
-第一版只需要 PostgreSQL 表、事务事件、pgvector 投影和异步 worker，不需要 Neo4j 或新的消息系统。写入/召回在现有 ChatService 和 research service 中以可选接口接入；关闭 memory 功能时，默认 RAG 和现有 Agent 结果必须保持一致。
+第一版使用 PostgreSQL 表、事务事件、可选 pgvector 投影和进程内异步 worker，不需要 Neo4j 或新的消息系统。关闭 memory 功能时，默认 RAG 和现有 Agent 结果保持一致。
 
-验收条件包括：scope 隔离、有限召回、可复现 snapshot、删除后不可召回、冲突可解释、写入失败不影响回答，以及任何 memory item 都能找到 source_ref。未实现前，文档和代码都应继续称它为“计划中的长期记忆基础设施”。
+本次测试已覆盖：用户隔离、四类 scope 隔离、资源越权拒绝、top-k/字符/token 上限、过期/撤回/删除/无来源过滤、冲突解释、稳定 snapshot ids/version、embedding 与异步写入失败时回答成功，以及关闭 memory 后全量现有测试不回归。
+
+## 剩余风险与后续边界
+
+- 当前在线召回按 scope、importance 和时间确定性排序；pgvector 已用于可选 embedding 写投影，但语义相似度 retriever 尚未接入在线 snapshot 排序。
+- extractor 是保守的规则实现；真实 LLM JSON extractor 仍应通过现有 AI profile 注入，并继续使用相同 candidate 校验和失败降级边界。
+- 异步队列当前是进程内有界队列，进程在排空前崩溃会丢失尚未执行的 best-effort 写入；需要更强交付保证时可复用 RabbitMQ，但不能让消息队列成为记忆事实源。
+- Run 没有独立持久化模型，本切片只能以 `user_id + run_id` 隔离 run memory；独立 Run/Step 表属于后续工作。
+- 本切片没有新增 HTTP 查看/删除接口；仓储已提供 owner-scoped withdraw/delete 与 tombstone 语义，公开 API 需在后续按现有 handler/鉴权模式单独验收。
+
+验证（2026-08-30）：`go test ./...`、`go vet ./...`、`go build ./cmd/server ./cmd/rag-eval ./cmd/rag-reindex ./cmd/rag-audit`、`git diff --check` 均通过；未修改前端。
