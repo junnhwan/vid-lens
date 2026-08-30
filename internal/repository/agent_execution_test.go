@@ -254,6 +254,45 @@ func TestAgentExecutionExplicitRetryPreservesAttemptHistoryAndRejectsUnsafeRepla
 	})
 }
 
+func TestAgentExecutionFinalReplaySafeFailureExhaustsRun(t *testing.T) {
+	repo := newAgentExecutionTestRepository(t)
+	run := createAgentExecutionRun(t, repo, "run-final-safe-failure", 4, 2)
+	now := run.CreatedAt.Add(time.Second)
+	first := agentClaimRequest(run.ID, "retrieve-1", "attempt-1", now)
+	claim, err := repo.ClaimStep(context.Background(), first)
+	if err != nil || claim.Outcome != AgentStepClaimAcquired {
+		t.Fatalf("first ClaimStep() = %+v, %v", claim, err)
+	}
+	if changed, err := repo.FailStep(context.Background(), AgentStepFailure{
+		UserID: 7, RunID: run.ID, StepID: first.StepID, Attempt: 1, LeaseToken: first.LeaseToken,
+		ErrorCode: "temporary_read_failure", ErrorMessage: "temporary read failure", Now: now.Add(time.Second),
+	}); err != nil || !changed {
+		t.Fatalf("first FailStep() = %v, %v", changed, err)
+	}
+	afterFirst, err := repo.GetRun(context.Background(), 7, run.ID)
+	if err != nil || afterFirst == nil || afterFirst.Status != model.AgentRunStatusRunning {
+		t.Fatalf("run after retryable failure = %+v, %v", afterFirst, err)
+	}
+
+	retry := agentClaimRequest(run.ID, first.StepID, "attempt-2", now.Add(2*time.Second))
+	retry.Attempt = 2
+	retry.CallDigest = digestText(run.ID + ":retrieve-1:2:" + retry.ArgumentsDigest)
+	claim, err = repo.ClaimStep(context.Background(), retry)
+	if err != nil || claim.Outcome != AgentStepClaimAcquired {
+		t.Fatalf("retry ClaimStep() = %+v, %v", claim, err)
+	}
+	if changed, err := repo.FailStep(context.Background(), AgentStepFailure{
+		UserID: 7, RunID: run.ID, StepID: retry.StepID, Attempt: 2, LeaseToken: retry.LeaseToken,
+		ErrorCode: "temporary_read_failure", ErrorMessage: "temporary read failure", Now: now.Add(3 * time.Second),
+	}); err != nil || !changed {
+		t.Fatalf("final FailStep() = %v, %v", changed, err)
+	}
+	afterFinal, err := repo.GetRun(context.Background(), 7, run.ID)
+	if err != nil || afterFinal == nil || afterFinal.Status != model.AgentRunStatusBudgetExhausted || afterFinal.StopReason != "attempt_budget_exhausted" {
+		t.Fatalf("run after final failure = %+v, %v", afterFinal, err)
+	}
+}
+
 func TestAgentExecutionEnforcesOwnerIsolationAndTerminalMonotonicity(t *testing.T) {
 	repo := newAgentExecutionTestRepository(t)
 	run := createAgentExecutionRun(t, repo, "run-owner", 2, 1)

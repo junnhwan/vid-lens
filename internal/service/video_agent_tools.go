@@ -148,7 +148,7 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 	})
 	if err != nil {
-		step, err = t.failObservedStep(step, err.Error())
+		step, err = t.failObservedStepWithCause(step, err)
 		return SearchTranscriptResult{}, step, err
 	}
 	step.OutputRef = fmt.Sprintf("citations:%d", len(result.Citations))
@@ -182,7 +182,7 @@ func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input Transcr
 	end := input.ChunkIndex + radius
 	chunks, err := t.repos.VideoChunk.ListByIndexRange(input.UserID, input.TaskID, input.EmbeddingModel, start, end)
 	if err != nil {
-		step, err = t.failObservedStep(step, err.Error())
+		step, err = t.failObservedStepWithCause(step, err)
 		return TranscriptWindowResult{}, step, err
 	}
 	if len(chunks) == 0 {
@@ -219,7 +219,7 @@ func (t *VideoAgentTools) SummarizeSegments(ctx context.Context, input Summarize
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n转写片段：\n%s\n\n请用中文归纳这些片段与问题相关的要点。", input.Question, joinTranscriptSegments(input.Segments))},
 	})
 	if err != nil {
-		step, err = t.failObservedStep(step, err.Error())
+		step, err = t.failObservedStepWithCause(step, err)
 		return SummarizeSegmentsResult{}, step, err
 	}
 	step.OutputRef = "summary"
@@ -246,7 +246,7 @@ func (t *VideoAgentTools) CompareSegments(ctx context.Context, input CompareSegm
 		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n片段组：\n%s\n\n请对比这些片段组的相同点、差异和变化。", input.Question, formatSegmentGroups(input.Groups))},
 	})
 	if err != nil {
-		step, err = t.failObservedStep(step, err.Error())
+		step, err = t.failObservedStepWithCause(step, err)
 		return CompareSegmentsResult{}, step, err
 	}
 	step.OutputRef = "comparison"
@@ -277,7 +277,7 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
 	answer, err := t.chat.Chat(ctx, messages)
 	if err != nil {
-		step, err = t.failObservedStep(step, err.Error())
+		step, err = t.failObservedStepWithCause(step, err)
 		return BuildCitedAnswerResult{}, step, err
 	}
 	step.OutputRef = "answer"
@@ -314,6 +314,15 @@ func (t *VideoAgentTools) notifyStepDone(step VideoAgentStep, output any) error 
 
 func (t *VideoAgentTools) failObservedStep(step VideoAgentStep, message string) (VideoAgentStep, error) {
 	step, err := failVideoAgentStep(step, message)
+	return t.notifyObservedStepError(step, err)
+}
+
+func (t *VideoAgentTools) failObservedStepWithCause(step VideoAgentStep, cause error) (VideoAgentStep, error) {
+	step.Error = safeAgentError(cause)
+	return t.notifyObservedStepError(step, cause)
+}
+
+func (t *VideoAgentTools) notifyObservedStepError(step VideoAgentStep, err error) (VideoAgentStep, error) {
 	if t == nil || t.observer == nil {
 		return step, err
 	}

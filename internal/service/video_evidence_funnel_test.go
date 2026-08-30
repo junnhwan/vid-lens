@@ -193,7 +193,11 @@ func TestWindowExpansionCheckpointRecoversLegacyRangeKnown(t *testing.T) {
 		wantKnown bool
 	}{
 		{name: "legacy valid range", raw: `{"range_start_second":10,"range_end_second":20,"window_count":1}`, wantKnown: true},
+		{name: "legacy valid range from zero", raw: `{"range_start_second":0,"range_end_second":20,"window_count":1}`, wantKnown: true},
 		{name: "legacy zero range", raw: `{"range_start_second":0,"range_end_second":0,"window_count":1}`, wantKnown: false},
+		{name: "legacy missing start", raw: `{"range_end_second":20,"window_count":1}`, wantKnown: false},
+		{name: "legacy missing end", raw: `{"range_start_second":10,"window_count":1}`, wantKnown: false},
+		{name: "legacy null start", raw: `{"range_start_second":null,"range_end_second":20,"window_count":1}`, wantKnown: false},
 		{name: "explicit unknown stays unknown", raw: `{"range_start_second":10,"range_end_second":20,"range_known":false,"window_count":1}`, wantKnown: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -205,6 +209,20 @@ func TestWindowExpansionCheckpointRecoversLegacyRangeKnown(t *testing.T) {
 				t.Fatalf("RangeKnown = %t, want %t for %s", checkpoint.RangeKnown, test.wantKnown, test.raw)
 			}
 		})
+	}
+}
+
+func TestEvidenceFunnelCancellationMarksRunCancelled(t *testing.T) {
+	repos, _, session := newVideoAgentTestSession(t)
+	agent := NewVideoAgentService(NewChatService(repos, &failingRetriever{err: context.Canceled}, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	req := EvidenceFunnelRequest{UserID: 7, SessionID: session.ID, Goal: "取消漏斗", TopK: 1, RunID: "funnel-cancelled"}
+
+	if _, err := agent.AskEvidenceFunnel(context.Background(), req, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AskEvidenceFunnel() error = %v, want context.Canceled", err)
+	}
+	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, req.RunID)
+	if err != nil || execution == nil || execution.Run.Status != model.AgentRunStatusCancelled || execution.Run.StopReason != "request_cancelled" {
+		t.Fatalf("cancelled execution = %+v, %v", execution, err)
 	}
 }
 

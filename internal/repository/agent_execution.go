@@ -88,6 +88,7 @@ type AgentStepFailure struct {
 	ErrorCode        string
 	ErrorMessage     string
 	Ambiguous        bool
+	Cancelled        bool
 	PromptTokens     int64
 	CompletionTokens int64
 	CostMicros       int64
@@ -458,8 +459,9 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 	}
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if !ownedActiveAgentRun(tx, req.UserID, req.RunID) {
-			return nil
+		var run model.AgentRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+			return err
 		}
 		var step model.AgentStep
 		if err := tx.Where("run_id = ? AND step_id = ? AND attempt = ?", req.RunID, req.StepID, req.Attempt).First(&step).Error; err != nil {
@@ -475,8 +477,17 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 		if usageSource == "" {
 			usageSource = model.AgentCallUsageUnknown
 		}
-		return tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
-			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
+		if err := tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
+			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error; err != nil {
+			return err
+		}
+		if req.Cancelled {
+			return markAgentRunCancelled(tx, &run, req.Now, "request_cancelled", req.ErrorCode, req.ErrorMessage)
+		}
+		if step.ReplaySafe && req.Attempt >= run.MaxAttemptsPerStep {
+			return markAgentRunBudgetExhausted(tx, &run, req.Now, "attempt_budget_exhausted")
+		}
+		return nil
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -572,6 +583,19 @@ func markAgentRunBudgetExhausted(tx *gorm.DB, run *model.AgentRun, now time.Time
 		return errors.New("agent run terminal CAS failed")
 	}
 	run.Status, run.StopReason, run.FinishedAt, run.Version = model.AgentRunStatusBudgetExhausted, reason, &now, run.Version+1
+	return nil
+}
+
+func markAgentRunCancelled(tx *gorm.DB, run *model.AgentRun, now time.Time, reason, errorCode, errorMessage string) error {
+	result := tx.Model(&model.AgentRun{}).Where("id = ? AND version = ? AND status IN ?", run.ID, run.Version, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).
+		Updates(map[string]any{"status": model.AgentRunStatusCancelled, "stop_reason": reason, "error_code": errorCode, "error_message": errorMessage, "finished_at": now, "updated_at": now, "version": gorm.Expr("version + 1")})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("agent run terminal CAS failed")
+	}
+	run.Status, run.StopReason, run.ErrorCode, run.ErrorMessage, run.FinishedAt, run.Version = model.AgentRunStatusCancelled, reason, errorCode, errorMessage, &now, run.Version+1
 	return nil
 }
 

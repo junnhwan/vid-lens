@@ -50,6 +50,155 @@ func (r *VideoResearchRunner) SetDurableExecution(repo *repository.AgentExecutio
 	return nil
 }
 
+func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *VideoResearchState, runtime VideoAgentToolRuntime) (bool, error) {
+	if r == nil || r.execution == nil || state == nil {
+		return false, nil
+	}
+	records, err := r.execution.repo.GetExecution(ctx, r.execution.userID, r.execution.runID)
+	if err != nil {
+		return false, err
+	}
+	if records == nil {
+		return false, errors.New("agent research execution not found")
+	}
+	if records.Run.TaskID != runtime.TaskID || records.Run.Goal != state.Goal {
+		return false, errors.New("persisted research execution scope does not match runtime")
+	}
+
+	for number := 1; number <= state.MaxSteps+1; number++ {
+		planID := fmt.Sprintf("plan-%d", number)
+		planStep, planCall, err := completedResearchRecord(records, planID)
+		if err != nil {
+			return false, err
+		}
+		if planStep == nil {
+			if hasCompletedResearchSequenceAfter(records.Steps, number*2-2) {
+				return false, fmt.Errorf("persisted research execution has a gap before %s", planID)
+			}
+			return false, nil
+		}
+		if planStep.Sequence != number*2-1 || planStep.Kind != "plan" || planStep.Action != "select_next_action" || planCall == nil || planCall.CallKind != model.AgentCallKindPlannerLLM || planCall.ToolName != videoResearchPlannerCall {
+			return false, fmt.Errorf("persisted planner record %s is invalid", planID)
+		}
+		_, expectedInputDigest := safePlannerInputSummary(*state, r.registry.Definitions())
+		if planCall.ArgumentsDigest != expectedInputDigest || planStep.ResultCheckpoint != planCall.ResultCheckpoint {
+			return false, fmt.Errorf("persisted planner record %s does not match recovered state", planID)
+		}
+		var storedDecision durableResearchDecision
+		if err := json.Unmarshal([]byte(planStep.ResultCheckpoint), &storedDecision); err != nil {
+			return false, fmt.Errorf("decode persisted planner decision %s: %w", planID, err)
+		}
+		decision, err := r.validatedResearchDecision(*state, runtime.TaskID, storedDecision.toDecision())
+		if err != nil {
+			return false, fmt.Errorf("validate persisted planner decision %s: %w", planID, err)
+		}
+		if decision.Done {
+			if toolStep, _, toolErr := completedResearchRecord(records, fmt.Sprintf("tool-%d", number)); toolErr != nil {
+				return false, toolErr
+			} else if toolStep != nil {
+				return false, fmt.Errorf("completed planner decision %s has an unexpected tool result", planID)
+			}
+			state.Status = VideoResearchStatusCompleted
+			state.StopReason = firstNonEmpty(decision.StopReason, "goal_satisfied")
+			return true, nil
+		}
+
+		toolID := fmt.Sprintf("tool-%d", number)
+		toolStep, toolCall, err := completedResearchRecord(records, toolID)
+		if err != nil {
+			return false, err
+		}
+		if toolStep == nil {
+			if hasCompletedResearchSequenceAfter(records.Steps, number*2-1) {
+				return false, fmt.Errorf("persisted research execution has a gap before %s", toolID)
+			}
+			return false, nil
+		}
+		expectedArgumentsDigest := digestAgentValue(string(decision.Arguments))
+		if toolStep.Sequence != number*2 || toolStep.Action != decision.Tool || toolCall == nil || toolCall.CallKind != model.AgentCallKindTool || toolCall.ToolName != decision.Tool || toolCall.ArgumentsDigest != expectedArgumentsDigest || toolStep.ResultCheckpoint != toolCall.ResultCheckpoint {
+			return false, fmt.Errorf("persisted tool record %s does not match planner decision", toolID)
+		}
+		var checkpoint durableResearchToolCheckpoint
+		if err := json.Unmarshal([]byte(toolStep.ResultCheckpoint), &checkpoint); err != nil {
+			return false, fmt.Errorf("decode persisted tool checkpoint %s: %w", toolID, err)
+		}
+		if checkpoint.Result.Step.Tool != decision.Tool || checkpoint.Observation.Tool != decision.Tool || checkpoint.Observation.Step.Tool != decision.Tool {
+			return false, fmt.Errorf("persisted tool checkpoint %s has inconsistent action provenance", toolID)
+		}
+		if err := validateObservedResearchEvidence(runtime.TaskID, checkpoint.Observation.NewEvidence); err != nil {
+			return false, err
+		}
+		applyRecoveredResearchStep(state, number, decision, checkpoint)
+		if decision.Replan {
+			state.ReplanCount++
+			if state.ReplanCount > state.MaxReplans {
+				return false, errors.New("persisted research execution exceeds replan limit")
+			}
+		}
+	}
+	return false, errors.New("persisted research execution exceeds step limit")
+}
+
+func completedResearchRecord(records *repository.AgentExecutionRecords, stepID string) (*model.AgentStep, *model.AgentToolCall, error) {
+	var completed *model.AgentStep
+	for index := range records.Steps {
+		step := &records.Steps[index]
+		if step.StepID != stepID || step.Status != model.AgentStepStatusCompleted {
+			continue
+		}
+		if completed != nil {
+			return nil, nil, fmt.Errorf("persisted research step %s has multiple completed attempts", stepID)
+		}
+		completed = step
+	}
+	if completed == nil {
+		return nil, nil, nil
+	}
+	var completedCall *model.AgentToolCall
+	for index := range records.ToolCalls {
+		call := &records.ToolCalls[index]
+		if call.AgentStepID != completed.ID {
+			continue
+		}
+		if call.Status != model.AgentToolCallStatusCompleted {
+			return nil, nil, fmt.Errorf("persisted research step %s has a non-completed tool call", stepID)
+		}
+		if completedCall != nil {
+			return nil, nil, fmt.Errorf("persisted research step %s has multiple tool calls", stepID)
+		}
+		completedCall = call
+	}
+	if completedCall == nil {
+		return nil, nil, fmt.Errorf("persisted research step %s is missing its tool call", stepID)
+	}
+	return completed, completedCall, nil
+}
+
+func hasCompletedResearchSequenceAfter(steps []model.AgentStep, sequence int) bool {
+	for _, step := range steps {
+		if step.Status == model.AgentStepStatusCompleted && step.Sequence > sequence {
+			return true
+		}
+	}
+	return false
+}
+
+func applyRecoveredResearchStep(state *VideoResearchState, number int, decision VideoResearchDecision, checkpoint durableResearchToolCheckpoint) {
+	observation := checkpoint.Observation
+	state.CurrentStep++
+	state.Steps = append(state.Steps, VideoResearchStep{
+		Number: number, Action: decision, Status: VideoResearchStepCompleted,
+		Trace: checkpoint.Result.Step, Observation: &observation,
+	})
+	state.Observations = append(state.Observations, observation)
+	state.Evidence = mergeVideoResearchEvidence(state.Evidence, observation.NewEvidence)
+	state.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
+	if observation.Answer != "" {
+		state.Answer = observation.Answer
+		state.Citations = append([]Citation(nil), observation.Citations...)
+	}
+}
+
 func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state VideoResearchState, runtime VideoAgentToolRuntime) (VideoResearchDecision, bool, error) {
 	if r.execution == nil {
 		decision, err := r.planner.NextDecision(ctx, state, r.registry.Definitions())
@@ -113,11 +262,12 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 		}
 	}
 	if planErr != nil {
+		cancelled := errors.Is(planErr, context.Canceled) || errors.Is(planErr, context.DeadlineExceeded)
 		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
 			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
 			ErrorCode: "planner_failure", ErrorMessage: safeAgentError(planErr),
 			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
-			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
+			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion, Cancelled: cancelled,
 			Now: execution.now(),
 		})
 		return VideoResearchDecision{}, false, planErr
@@ -219,9 +369,10 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 		observation, toolErr = r.observeResearchTool(state, runtime.TaskID, result)
 	}
 	if toolErr != nil {
+		cancelled := errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded)
 		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
 			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "tool_failure", ErrorMessage: safeAgentError(toolErr), Now: execution.now(),
+			ErrorCode: "tool_failure", ErrorMessage: safeAgentError(toolErr), Cancelled: cancelled, Now: execution.now(),
 		})
 		return result, VideoResearchObservation{}, false, toolErr
 	}

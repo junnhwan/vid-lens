@@ -52,7 +52,7 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	validationCompleted := false
 	defer func() {
 		var replayableFailure *evidenceFunnelReplayableFailure
-		if err == nil || validationCompleted || errors.Is(err, errAgentExecutionBusy) || errors.As(err, &replayableFailure) {
+		if err == nil || validationCompleted || errors.Is(err, errAgentExecutionBusy) {
 			return
 		}
 		status, reason := model.AgentRunStatusFailed, "evidence_funnel_failed"
@@ -60,6 +60,8 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 			status, reason = model.AgentRunStatusBudgetExhausted, "budget_exhausted"
 		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			status, reason = model.AgentRunStatusCancelled, "request_cancelled"
+		} else if errors.As(err, &replayableFailure) {
+			return
 		}
 		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
 	}()

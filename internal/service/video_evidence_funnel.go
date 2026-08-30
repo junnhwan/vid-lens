@@ -207,9 +207,23 @@ func (c *windowExpansionCheckpoint) UnmarshalJSON(data []byte) error {
 	}
 	*c = windowExpansionCheckpoint(decoded)
 	if _, present := fields["range_known"]; !present {
-		c.RangeKnown = c.RangeStart >= 0 && c.RangeEnd > c.RangeStart
+		start, startValid := legacyRangeSecond(fields, "range_start_second")
+		end, endValid := legacyRangeSecond(fields, "range_end_second")
+		c.RangeKnown = startValid && endValid && start >= 0 && end > start
 	}
 	return nil
+}
+
+func legacyRangeSecond(fields map[string]json.RawMessage, name string) (int64, bool) {
+	raw, present := fields[name]
+	if !present {
+		return 0, false
+	}
+	var value *int64
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return 0, false
+	}
+	return *value, true
 }
 
 type visualConfirmationCheckpoint struct {
@@ -441,13 +455,14 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 	}
 	result, invokeErr := invoke()
 	if invokeErr != nil {
+		cancelled := errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded)
 		_, _ = r.execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
 			UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
 			ErrorCode: "funnel_action_failure", ErrorMessage: safeAgentError(invokeErr), PromptTokens: result.Usage.PromptTokens,
 			CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros, UsageSource: result.Usage.UsageSource,
-			TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion, Now: r.execution.now(),
+			TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion, Cancelled: cancelled, Now: r.execution.now(),
 		})
-		if spec.ReplaySafe {
+		if spec.ReplaySafe && !cancelled {
 			return nil, &evidenceFunnelReplayableFailure{cause: invokeErr}
 		}
 		return nil, invokeErr

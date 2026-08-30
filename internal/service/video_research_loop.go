@@ -157,6 +157,15 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 	}
 	state.Memory = runtime.MemorySnapshot
 	result := &VideoResearchResult{State: state}
+	if r.execution != nil {
+		recoveredTerminal, recoverErr := r.recoverResearchState(ctx, &result.State, runtime)
+		if recoverErr != nil {
+			return r.fail(result, "recovery_failure", recoverErr)
+		}
+		if recoveredTerminal {
+			return result, nil
+		}
+	}
 
 	for {
 		if result.State.CurrentStep >= result.State.MaxSteps {

@@ -252,7 +252,7 @@ func (o *durableAgentStepObserver) StepError(step VideoAgentStep, cause error) e
 	}
 	failed, err := o.repo.FailStep(context.Background(), repository.AgentStepFailure{
 		UserID: o.userID, RunID: o.runID, StepID: o.active.stepID, Attempt: o.active.attempt, LeaseToken: o.active.token,
-		ErrorCode: "tool_failure", ErrorMessage: safeAgentError(cause), Now: o.now(),
+		ErrorCode: "tool_failure", ErrorMessage: safeAgentError(cause), Cancelled: errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded), Now: o.now(),
 	})
 	if err != nil {
 		return err
