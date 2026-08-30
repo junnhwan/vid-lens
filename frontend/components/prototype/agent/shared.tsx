@@ -139,13 +139,46 @@ export function UserBubble({ text }: { text: string }) {
   )
 }
 
-export function CiteChips({ cites, open, onToggle }: { cites: { id: string; text: string; video?: string }[]; open: string[]; onToggle: (id: string) => void }) {
+export function QuoteCard({
+  badge, video, time, text, selected, delayMs, compact, onClick,
+}: {
+  badge?: string
+  video?: string
+  time?: string
+  text: string
+  selected?: boolean
+  delayMs?: number
+  compact?: boolean
+  onClick?: () => void
+}) {
   return (
-    <div className="mt-3">
-      <div className="flex flex-wrap gap-1">
+    <article
+      onClick={onClick}
+      className={`proto-quote-in rounded-xl ring-1 ${
+        selected ? 'ring-sienna-500/40 bg-sienna-500/8' : 'ring-ink-0/10 bg-paper-1'
+      } ${compact ? 'px-3.5 py-3' : 'px-4 py-3.5'} ${onClick ? 'cursor-pointer proto-btn-lift' : ''}`}
+      style={delayMs ? { animationDelay: `${delayMs}ms` } : undefined}
+    >
+      <div className="flex items-baseline gap-2 min-w-0 mb-1.5">
+        {badge && <span className="font-mono text-[10px] text-sienna-700 shrink-0">{badge}</span>}
+        {time && <span className="text-[10px] tabular-nums text-ink-4 shrink-0">{time}</span>}
+        {video && <span className="text-[11px] text-sienna-700 truncate">{video}</span>}
+      </div>
+      <p className={compact ? 'text-[12px] leading-relaxed text-ink-1' : 'text-[13px] leading-[1.65] text-ink-1'}>
+        {text}
+      </p>
+    </article>
+  )
+}
+
+export function CiteChips({ cites, open, onToggle }: { cites: { id: string; text: string; video?: string; time?: string }[]; open: string[]; onToggle: (id: string) => void }) {
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap gap-1 mb-2.5">
         {cites.map(c => (
           <button
             key={c.id}
+            type="button"
             onClick={() => onToggle(c.id)}
             className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-colors proto-btn-lift ${
               open.includes(c.id) ? 'bg-sienna-600 text-paper-0 border-sienna-600' : 'bg-sienna-500/10 text-sienna-700 border-sienna-500/25'
@@ -155,16 +188,20 @@ export function CiteChips({ cites, open, onToggle }: { cites: { id: string; text
           </button>
         ))}
       </div>
-      {cites.map(c => (
-        <div key={c.id} className="proto-acc" data-open={open.includes(c.id) ? 'true' : 'false'}>
-          <div className="proto-acc-inner">
-            <div className="mt-2 p-3 rounded-lg bg-paper-0 ring-1 ring-sienna-500/20 text-[12px] text-ink-2">
-              {c.video && <div className="text-[10px] text-sienna-700 mb-1">{c.video}</div>}
-              {c.text}
-            </div>
-          </div>
-        </div>
-      ))}
+      <div className="space-y-2">
+        {cites.map((c, i) => (
+          <QuoteCard
+            key={c.id}
+            badge={c.id}
+            time={c.time}
+            video={c.video}
+            text={c.text}
+            selected={open.includes(c.id)}
+            delayMs={i * 50}
+            onClick={() => onToggle(c.id)}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -181,7 +218,7 @@ export function AnswerTypewriter({
 }: {
   content: string
   active: boolean
-  cites?: { id: string; text: string; video?: string }[]
+  cites?: { id: string; text: string; video?: string; time?: string }[]
   openCites?: string[]
   onToggleCite?: (id: string) => void
   className?: string
@@ -201,7 +238,7 @@ export function AnswerTypewriter({
           <span className="proto-typewriter-cursor" aria-hidden />
         )}
       </p>
-      {finished && cites && openCites && onToggleCite && (
+      {active && cites && openCites && onToggleCite && (
         <div className="proto-typewriter-cites-in">
           <CiteChips cites={cites} open={openCites} onToggle={onToggleCite} />
         </div>

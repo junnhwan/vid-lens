@@ -142,14 +142,22 @@
   .proto-card-hover, .proto-btn-lift, .proto-progress-bar, .proto-pulse,
   .proto-agent-pulse, .proto-agent-shimmer, .proto-agent-scan, .proto-agent-bounce, .proto-agent-glow, .proto-agent-type,
   .proto-metro-bar-in, .proto-metro-progress, .proto-metro-line-fill, .proto-metro-node-pop, .proto-metro-ripple, .proto-metro-panel-in,
-  .proto-typewriter-cursor, .proto-typewriter-cites-in,
+  .proto-typewriter-cursor,
   .proto-evidence-pin, .proto-graph-node-in, .proto-graph-edge-active,
   .proto-whisper-in, .proto-narrative-in, .proto-doc-line-in, .proto-lens-in,
-  .proto-lens-shell, .proto-status-text, .proto-agent-pulse-opacity,
-  .proto-item-in, .proto-acc, .proto-lens-swap, .proto-chevron {
+  .proto-status-text, .proto-agent-pulse-opacity,
+  .proto-item-in, .proto-acc, .proto-chevron {
     animation: none !important;
     transition: none !important;
   }
+  .proto-quote-in, .proto-typewriter-cites-in, .proto-lens-swap, .proto-lens-shell {
+    animation: proto-fade-only 180ms var(--ease-out) both !important;
+    transform: none !important;
+  }
+}
+@keyframes proto-fade-only {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ============ Agent 原型动效 ============ */
@@ -276,11 +284,7 @@
 }
 
 .proto-typewriter-cites-in {
-  animation: proto-typewriter-cites-in 180ms var(--ease-out);
-}
-@keyframes proto-typewriter-cites-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
+  animation: proto-quote-in 220ms var(--ease-out) both;
 }
 
 /* F/G/H · Research Agent */
@@ -344,11 +348,11 @@
 /* M · 透镜浮层：仅首次挂载入场，步骤更新不重播 */
 .proto-lens-shell {
   transform-origin: bottom right;
-  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+  transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out);
 }
 .proto-lens-shell[data-mounted="false"] {
   opacity: 0;
-  transform: translateY(8px) scale(0.97);
+  transform: translateY(12px) scale(0.95);
 }
 .proto-lens-shell[data-mounted="true"] {
   opacity: 1;
@@ -362,17 +366,23 @@
   opacity: 0;
 }
 
-/* 新步骤 / 新片段入场：只在挂载时播一次，不撑布局 */
+/* 过程步：短促入场，避免每步抢戏 */
 .proto-item-in {
-  animation: proto-item-in 180ms var(--ease-out) both;
+  animation: proto-item-in 140ms var(--ease-out) both;
 }
 @keyframes proto-item-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
 
-.proto-ev-stack .proto-item-in:nth-child(2) { animation-delay: 40ms; }
-.proto-ev-stack .proto-item-in:nth-child(3) { animation-delay: 80ms; }
+/* 证据 / 引用卡：演示里只出现几次，入场要能看见 */
+.proto-quote-in {
+  animation: proto-quote-in 220ms var(--ease-out) both;
+}
+@keyframes proto-quote-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
 
 /* 过程折叠：固定内高，展开不随步骤数长高 */
 .proto-acc {
@@ -395,10 +405,10 @@
 /* 透镜 card ↔ pill：从右下角长出来，对称收回 */
 .proto-lens-swap {
   transform-origin: bottom right;
-  animation: proto-lens-swap 200ms var(--ease-out) both;
+  animation: proto-lens-swap 240ms var(--ease-out) both;
 }
 @keyframes proto-lens-swap {
-  from { opacity: 0; transform: scale(0.97); }
+  from { opacity: 0; transform: translateY(12px) scale(0.94); }
   to { opacity: 1; transform: none; }
 }
 

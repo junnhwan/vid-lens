@@ -6,7 +6,7 @@ import type { AgentStep } from '@/components/prototype/agent/types'
 import { DEMO_RESEARCH_QUESTION } from '@/components/prototype/agent/types'
 import { collectEvidence } from '@/components/prototype/agent/useAgentDemo'
 import { stepToWhisper } from '@/components/prototype/agent/stepNarrative'
-import { StepIcon, StatusDot, UserBubble, AnswerTypewriter, AgentMark } from '@/components/prototype/agent/shared'
+import { StepIcon, UserBubble, AnswerTypewriter, AgentMark, QuoteCard } from '@/components/prototype/agent/shared'
 
 /** 文案切换：opacity 交叉淡入，避免步骤推进时整块闪切 */
 function CrossfadeText({ text, className }: { text: string; className?: string }) {
@@ -82,7 +82,7 @@ function EvidenceStack({ steps }: { steps: AgentStep[] }) {
   }, [evidence.length])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col px-4 py-2 overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col px-4 py-3 overflow-hidden">
       <div className="text-[11px] text-ink-4 mb-1.5 shrink-0">
         找到的片段{evidence.length > 0 ? ` · ${evidence.length}` : ''}
       </div>
@@ -93,17 +93,17 @@ function EvidenceStack({ steps }: { steps: AgentStep[] }) {
           className="proto-ev-stack flex-1 min-h-0"
           data-overflow={overflow ? 'true' : 'false'}
         >
-          <div ref={listRef} className="h-full overflow-y-auto space-y-1.5 pr-0.5">
-            {evidence.map(ev => (
-              <article
+          <div ref={listRef} className="h-full overflow-y-auto space-y-2 pr-2">
+            {evidence.map((ev, i) => (
+              <QuoteCard
                 key={ev.id}
-                className="proto-item-in rounded-lg bg-sienna-500/6 ring-1 ring-sienna-500/15 px-2.5 py-1.5"
-              >
-                {ev.video && (
-                  <div className="text-[9px] text-sienna-700 truncate">{ev.video}</div>
-                )}
-                <p className="text-[10px] text-ink-2 leading-snug mt-0.5">{ev.text}</p>
-              </article>
+                badge={ev.id}
+                time={ev.time}
+                video={ev.video}
+                text={ev.text}
+                delayMs={i * 50}
+                compact
+              />
             ))}
           </div>
         </div>
@@ -124,9 +124,6 @@ function LensCard({
   const total = steps.filter(s => s.kind !== 'answer').length
   const finished = doneCount === total && !running
 
-  const slots: (AgentStep | null)[] = [...trace.slice(-2)]
-  while (slots.length < 2) slots.unshift(null)
-
   const footerText = running
     ? stepToWhisper(running)
     : (trace.at(-1)?.label ?? '\u00a0')
@@ -134,13 +131,13 @@ function LensCard({
   const headerTitle = running ? '研究中' : finished ? '研究完成' : '研究进展'
 
   return (
-    <div className="proto-glass rounded-2xl overflow-hidden w-[min(360px,calc(100vw-2rem))] h-[min(420px,58vh)] min-h-[380px] flex flex-col">
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-ink-0/8">
-        <div className="flex items-center gap-2 text-[13px] font-medium text-ink-1">
+    <div className="proto-glass rounded-2xl overflow-hidden w-[min(400px,calc(100vw-2rem))] h-[min(460px,62vh)] min-h-[420px] flex flex-col">
+      <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-2.5 border-b border-ink-0/8">
+        <div className="flex items-center gap-2 text-[13px] font-medium text-ink-1 min-w-0">
           {running && <span className="w-2 h-2 rounded-full bg-sienna-500 proto-agent-pulse-opacity shrink-0" />}
           {headerTitle}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-[11px] text-ink-4 tabular-nums">{doneCount}/{total}</span>
           <button type="button" onClick={onMinimize} className="p-1.5 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-ink-0/5 transition-colors proto-btn-lift" title="收起">
             <Minimize2 className="w-4 h-4" />
@@ -149,33 +146,7 @@ function LensCard({
       </div>
 
       <div className="shrink-0 px-4 py-2 border-b border-ink-0/6">
-        <div className="text-[11px] text-ink-4 mb-1">进度</div>
-        <div className="h-6 overflow-x-auto overflow-y-hidden">
-          <MiniGraph steps={steps} />
-        </div>
-      </div>
-
-      <div className="shrink-0 px-4 py-2 border-b border-ink-0/6">
-        <div className="text-[11px] text-ink-4 mb-1">最近步骤</div>
-        <div className="space-y-1.5 min-h-[36px]">
-          {slots.map((step, i) => (
-            step ? (
-              <div
-                key={step.id}
-                className={`flex items-center gap-2 text-[11px] leading-tight ${step.status === 'running' ? 'text-sienna-700' : 'text-ink-2'}`}
-              >
-                <StatusDot status={step.status} />
-                <StepIcon kind={step.kind} className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                <span className="truncate flex-1">{step.label}</span>
-                {step.kind === 'plan' && step.replan && (
-                  <span className="text-[9px] text-sienna-700 shrink-0">重规划</span>
-                )}
-              </div>
-            ) : (
-              <div key={`empty-${i}`} className="h-[18px]" />
-            )
-          ))}
-        </div>
+        <MiniGraph steps={steps} />
       </div>
 
       <EvidenceStack steps={steps} />

@@ -11,6 +11,7 @@ export interface EvidenceChunk {
   id: string
   text: string
   video?: string
+  time?: string
   score?: number
 }
 
@@ -20,7 +21,7 @@ export type AgentStep =
   | { id: string; kind: 'observe'; label: string; detail: string; round: number; newEvidence?: EvidenceChunk[]; status: StepStatus }
   | { id: string; kind: 'retrieve'; label: string; query: string; hits: number; sources: string[]; round?: number; status: StepStatus }
   | { id: string; kind: 'tool'; label: string; tool: string; input: string; output?: string; round?: number; status: StepStatus }
-  | { id: string; kind: 'answer'; label: string; content: string; cites: { id: string; text: string; video?: string }[]; status: StepStatus }
+  | { id: string; kind: 'answer'; label: string; content: string; cites: { id: string; text: string; video?: string; time?: string }[]; status: StepStatus }
 
 export const DEMO_VIDEOS = [
   { id: 101, title: '2024 产品发布会全程' },
@@ -56,9 +57,9 @@ export const DEMO_STEPS_TEMPLATE: AgentStep[] = [
     id: 's4', kind: 'answer', label: '生成回答', status: 'pending',
     content: '根据转写，发布会重点介绍了三款产品：AI 助手（多模态理解）[C1]、知识库平台（跨视频 RAG）[C2]、开发者工具链（API + SDK）[C3]。',
     cites: [
-      { id: 'C1', text: '…AI 助手支持文本、图像和视频的多模态理解…', video: '2024 产品发布会全程' },
-      { id: 'C2', text: '…知识库平台可跨多个视频做严格 RAG 检索…', video: '2024 产品发布会全程' },
-      { id: 'C3', text: '…开发者工具链包含 API、SDK 与调试面板…', video: '创始人深度访谈' },
+      { id: 'C1', time: '12:04', text: 'AI 助手支持文本、图像和视频的多模态理解，主打个人效率。', video: '2024 产品发布会全程' },
+      { id: 'C2', time: '18:31', text: '知识库平台可跨多个视频做严格 RAG 检索，而不是只看单场转写。', video: '2024 产品发布会全程' },
+      { id: 'C3', time: '07:22', text: '开发者工具链包含 API、SDK 与调试面板，面向生态而不是功能清单。', video: '创始人深度访谈' },
     ],
   },
 ]
@@ -81,8 +82,8 @@ export const DEMO_RESEARCH_STEPS: AgentStep[] = [
     id: 'r1-observe', kind: 'observe', label: '观察证据缺口', round: 1, status: 'pending',
     detail: '仅覆盖发布会段落，访谈中对「开发者工具链」的强调尚未命中，证据不足。',
     newEvidence: [
-      { id: 'E1', text: '…AI 助手支持多模态理解，主打个人效率…', video: '2024 产品发布会全程', score: 0.91 },
-      { id: 'E2', text: '…知识库平台强调跨视频严格 RAG…', video: '2024 产品发布会全程', score: 0.88 },
+      { id: 'E1', time: '12:04', text: 'AI 助手支持文本、图像和视频的多模态理解，主打个人效率。', video: '2024 产品发布会全程', score: 0.91 },
+      { id: 'E2', time: '18:31', text: '知识库平台可跨多个视频做严格 RAG 检索，而不是只看单场转写。', video: '2024 产品发布会全程', score: 0.88 },
     ],
   },
   {
@@ -105,16 +106,16 @@ export const DEMO_RESEARCH_STEPS: AgentStep[] = [
     id: 'r2-observe', kind: 'observe', label: '证据已充分', round: 2, status: 'pending',
     detail: '已覆盖三款产品 × 两个来源，可生成带引用对比回答。',
     newEvidence: [
-      { id: 'E3', text: '…工具链包含 API、SDK 与调试面板，面向开发者生态…', video: '创始人深度访谈', score: 0.93 },
+      { id: 'E3', time: '07:22', text: '开发者工具链包含 API、SDK 与调试面板，面向生态而不是功能清单。', video: '创始人深度访谈', score: 0.93 },
     ],
   },
   {
     id: 'answer', kind: 'answer', label: '生成对比回答', status: 'pending',
     content: '发布会侧重功能亮相：AI 助手强调多模态 [C1]、知识库强调跨视频 RAG [C2]；访谈则突出开发者工具链的 API/SDK 生态 [C3]。同一 SKU 在不同语境下的卖点重心不同。',
     cites: [
-      { id: 'C1', text: '…AI 助手支持文本、图像和视频的多模态理解…', video: '2024 产品发布会全程' },
-      { id: 'C2', text: '…知识库平台可跨多个视频做严格 RAG 检索…', video: '2024 产品发布会全程' },
-      { id: 'C3', text: '…开发者工具链包含 API、SDK 与调试面板…', video: '创始人深度访谈' },
+      { id: 'C1', time: '12:04', text: 'AI 助手支持文本、图像和视频的多模态理解，主打个人效率。', video: '2024 产品发布会全程' },
+      { id: 'C2', time: '18:31', text: '知识库平台可跨多个视频做严格 RAG 检索，而不是只看单场转写。', video: '2024 产品发布会全程' },
+      { id: 'C3', time: '07:22', text: '开发者工具链包含 API、SDK 与调试面板，面向生态而不是功能清单。', video: '创始人深度访谈' },
     ],
   },
 ]
