@@ -17,7 +17,7 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	chatClient := &scriptedChatClient{responses: []string{
 		`{"done":false,"tool":"search_transcript","reason":"先定位转写证据","arguments":{"question":"owner 校验","top_k":1}}`,
 		"not-json",
-		`{"done":false,"tool":"build_cited_answer","reason":"证据已经足够，生成回答","arguments":{"question":"owner 校验","intermediate":"视频明确要求校验 owner。","citations":[{"task_id":1,"evidence_id":"ev-research-1","chunk_id":1,"chunk_index":2,"content":"owner 校验证据"}]}}`,
+		`{"done":false,"tool":"build_cited_answer","reason":"证据已经足够，生成回答","arguments":{"question":"owner 校验","intermediate":"视频明确要求校验 owner。","citations":[{"task_id":999,"evidence_id":"ev-research-1","chunk_id":999,"chunk_index":999,"content":"被篡改的引用","source":"planner-forged"}]}}`,
 		"最终研究答案 [C1]",
 		`{"done":true,"stop_reason":"已生成带引用回答"}`,
 	}}
@@ -37,7 +37,7 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if result.Answer != "最终研究答案" || result.Template != string(VideoAgentResearchTemplate) || result.Model != "chat-model" {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(result.Citations) != 1 || result.Citations[0].CitationID != "C1" {
+	if len(result.Citations) != 1 || result.Citations[0].CitationID != "C1" || result.Citations[0].TaskID != task.ID || result.Citations[0].ChunkID != 1 || result.Citations[0].Content != "owner 校验证据" || result.Citations[0].Source == "planner-forged" {
 		t.Fatalf("citations = %+v", result.Citations)
 	}
 	if traceTools(result.Trace) != "search_transcript|build_cited_answer" {
@@ -52,8 +52,9 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		t.Fatalf("messages = %+v", messages)
 	}
 	var snapshot struct {
-		Template string           `json:"template"`
-		Trace    []VideoAgentStep `json:"trace"`
+		Template  string           `json:"template"`
+		Trace     []VideoAgentStep `json:"trace"`
+		Citations []Citation       `json:"citations"`
 	}
 	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
@@ -61,11 +62,17 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if snapshot.Template != string(VideoAgentResearchTemplate) || traceTools(snapshot.Trace) != "search_transcript|build_cited_answer" {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
+	if len(snapshot.Citations) != 1 || snapshot.Citations[0].TaskID != task.ID || snapshot.Citations[0].ChunkID != 1 || snapshot.Citations[0].Content != "owner 校验证据" || snapshot.Citations[0].Source == "planner-forged" {
+		t.Fatalf("snapshot citations are not canonical: %+v", snapshot.Citations)
+	}
 	if strings.Contains(messages[1].Content, "[C") {
 		t.Fatalf("stored answer leaked citation markers: %q", messages[1].Content)
 	}
 	ledgerView, err := ledger.GetRun(context.Background(), 7, result.RunID)
 	if err != nil || ledgerView == nil || len(ledgerView.Claims) != 1 || len(ledgerView.Evidence) != 1 {
 		t.Fatalf("research ledger = %+v err=%v", ledgerView, err)
+	}
+	if ledgerView.Evidence[0].TaskID != task.ID || ledgerView.Evidence[0].QuoteText != "owner 校验证据" || ledgerView.Evidence[0].SourceRef != "ev-research-1" || strings.Contains(ledgerView.Evidence[0].StableLocator, "planner-forged") {
+		t.Fatalf("research ledger evidence is not canonical: %+v", ledgerView.Evidence[0])
 	}
 }

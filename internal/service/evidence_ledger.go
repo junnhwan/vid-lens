@@ -19,8 +19,6 @@ import (
 	"vid-lens/internal/repository"
 )
 
-const inferredASRSegmentSeconds int64 = 300
-
 type EvidenceLedgerService struct {
 	repos *repository.Repositories
 }
@@ -163,35 +161,40 @@ func (s *EvidenceLedgerService) buildEvidence(req EvidenceLedgerRecordRequest, c
 	}
 	quote := strings.TrimSpace(citation.Content)
 	artifact := model.AgentEvidence{
-		ID:              deterministicUUID("evidence", strconv.FormatInt(req.UserID, 10), req.RunID, sourceRef),
-		UserID:          req.UserID,
-		RunID:           req.RunID,
-		SourceRef:       sourceRef,
-		SourceType:      "rag_chunk",
-		TaskID:          taskID,
-		DocumentID:      fmt.Sprintf("video_chunk:%d", citation.ChunkID),
-		TimeRangeStatus: model.EvidenceTimeRangeUnknown,
-		QuoteText:       quote,
-		ContentHash:     sha256Hex(quote),
-		SourceRevision:  sourceRef,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                   deterministicUUID("evidence", strconv.FormatInt(req.UserID, 10), req.RunID, sourceRef),
+		UserID:               req.UserID,
+		RunID:                req.RunID,
+		SourceRef:            sourceRef,
+		SourceType:           "rag_chunk",
+		TaskID:               taskID,
+		DocumentID:           fmt.Sprintf("video_chunk:%d", citation.ChunkID),
+		TimeRangeStatus:      model.EvidenceTimeRangeUnknown,
+		QuoteText:            quote,
+		ContentHash:          sha256Hex(quote),
+		SourceRevision:       "",
+		SourceRevisionStatus: model.EvidenceSourceRevisionUnavailable,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	locator := map[string]any{
-		"task_id": citation.TaskID, "chunk_id": citation.ChunkID, "chunk_index": citation.ChunkIndex,
-		"evidence_id": sourceRef, "retrieval_source": citation.Source,
+		"task_id": taskID, "chunk_id": citation.ChunkID, "chunk_index": citation.ChunkIndex,
+		"evidence_id": sourceRef, "source_ref_kind": "rag_evidence_id", "retrieval_source": citation.Source,
+		"source_revision_status": model.EvidenceSourceRevisionUnavailable,
 	}
 	if resolved, ok, err := s.resolveTimeRange(taskID, quote); err != nil {
 		return model.AgentEvidence{}, err
 	} else if ok {
 		artifact.SourceType = resolved.sourceType
 		artifact.DocumentID = resolved.documentID
-		artifact.StartSecond = resolved.startSecond
-		artifact.EndSecond = resolved.endSecond
-		artifact.TimeRangeStatus = model.EvidenceTimeRangeKnown
 		locator["source_artifact"] = resolved.documentID
 		locator["range_basis"] = resolved.rangeBasis
+		if resolved.endSecond > resolved.startSecond && resolved.startSecond >= 0 {
+			artifact.StartSecond = resolved.startSecond
+			artifact.EndSecond = resolved.endSecond
+			artifact.TimeRangeStatus = model.EvidenceTimeRangeKnown
+		}
 	}
+	locator["time_range_status"] = artifact.TimeRangeStatus
 	encodedLocator, err := json.Marshal(locator)
 	if err != nil {
 		return model.AgentEvidence{}, err
@@ -226,13 +229,11 @@ func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, quote string) (re
 			if chunk.Status != model.TranscriptionChunkStatusCompleted || !evidenceTextMatches(quote, chunk.Content) {
 				continue
 			}
-			start, end, basis := int64(chunk.StartSecond), int64(chunk.EndSecond), "persisted_asr_segment"
+			start, end := int64(chunk.StartSecond), int64(chunk.EndSecond)
 			if end <= start {
-				start = int64(chunk.ChunkIndex) * inferredASRSegmentSeconds
-				end = start + inferredASRSegmentSeconds
-				basis = "inferred_fixed_asr_segment"
+				return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), rangeBasis: "unavailable"}, true, nil
 			}
-			return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), startSecond: start, endSecond: end, rangeBasis: basis}, true, nil
+			return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), startSecond: start, endSecond: end, rangeBasis: "persisted_asr_segment"}, true, nil
 		}
 	}
 	return s.resolveVisualRange(taskID, quote)
@@ -382,7 +383,7 @@ func buildLedgerClaim(req EvidenceLedgerRecordRequest, statement answerClaimStat
 			missingReference = true
 			continue
 		}
-		bindingStatus, reason := model.ClaimStatusVerified, "stable source and time range resolved"
+		bindingStatus, reason := model.ClaimStatusVerified, "explicit citation binding has a stable source and replayable time range; semantic entailment was not evaluated"
 		if artifact.TimeRangeStatus != model.EvidenceTimeRangeKnown {
 			bindingStatus, reason, unknownRange = model.ClaimStatusUncertain, "stable source resolved but time range is unavailable", true
 		}
@@ -401,7 +402,7 @@ func buildLedgerClaim(req EvidenceLedgerRecordRequest, statement answerClaimStat
 	case unknownRange:
 		claim.Status, claim.Confidence, claim.ValidationNote = model.ClaimStatusUncertain, 0.5, "evidence is stable but its video time range could not be resolved"
 	default:
-		claim.Status, claim.Confidence, claim.ValidationNote = model.ClaimStatusVerified, 0.9, "all cited evidence bindings have stable references and time ranges"
+		claim.Status, claim.Confidence, claim.ValidationNote = model.ClaimStatusVerified, 0.9, "all explicit citation bindings have stable references and replayable time ranges; natural-language semantic truth was not evaluated"
 	}
 	return claim, links
 }

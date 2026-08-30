@@ -16,6 +16,11 @@ const (
 )
 
 const (
+	EvidenceSourceRevisionAvailable   = "available"
+	EvidenceSourceRevisionUnavailable = "unavailable"
+)
+
+const (
 	ClaimEvidenceSupports    = "supports"
 	ClaimEvidenceContradicts = "contradicts"
 	ClaimEvidenceContext     = "context"
@@ -43,26 +48,28 @@ type AgentClaim struct {
 
 func (AgentClaim) TableName() string { return "agent_claims" }
 
-// AgentEvidence is a stable, replayable evidence artifact. SourceRef is the
-// existing RAG EvidenceID. StableLocator records the relational coordinates
-// needed to locate the source again without depending on the vector index.
+// AgentEvidence is a stable evidence artifact. SourceRef is the existing RAG
+// EvidenceID and selects an observed retrieval artifact; it is not a source
+// processing revision. StableLocator records the relational coordinates needed
+// to locate the source again without depending on the vector index.
 type AgentEvidence struct {
-	ID              string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	UserID          int64     `gorm:"not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:1;index:idx_agent_evidence_owner_run,priority:1;index" json:"user_id"`
-	RunID           string    `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:2;index:idx_agent_evidence_owner_run,priority:2;index" json:"run_id"`
-	SourceRef       string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:3;index" json:"source_ref"`
-	SourceType      string    `gorm:"type:varchar(40);not null;index" json:"source_type"`
-	TaskID          int64     `gorm:"not null;index" json:"task_id"`
-	DocumentID      string    `gorm:"type:varchar(100);not null;index" json:"document_id"`
-	StartSecond     int64     `gorm:"not null;default:0;check:chk_agent_evidence_start,start_second >= 0" json:"start_second"`
-	EndSecond       int64     `gorm:"not null;default:0;check:chk_agent_evidence_range,end_second >= start_second" json:"end_second"`
-	TimeRangeStatus string    `gorm:"type:varchar(20);not null;check:chk_agent_evidence_time_status,time_range_status IN ('known','unknown')" json:"time_range_status"`
-	QuoteText       string    `gorm:"type:text;not null" json:"quote_text"`
-	ContentHash     string    `gorm:"type:char(64);not null;index" json:"content_hash"`
-	StableLocator   string    `gorm:"type:text;not null" json:"stable_locator"`
-	SourceRevision  string    `gorm:"type:varchar(255);not null;default:''" json:"source_revision,omitempty"`
-	CreatedAt       time.Time `gorm:"not null;index" json:"created_at"`
-	UpdatedAt       time.Time `gorm:"not null" json:"updated_at"`
+	ID                   string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID               int64     `gorm:"not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:1;index:idx_agent_evidence_owner_run,priority:1;index" json:"user_id"`
+	RunID                string    `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:2;index:idx_agent_evidence_owner_run,priority:2;index" json:"run_id"`
+	SourceRef            string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_agent_evidence_owner_run_ref,priority:3;index" json:"source_ref"`
+	SourceType           string    `gorm:"type:varchar(40);not null;index" json:"source_type"`
+	TaskID               int64     `gorm:"not null;index" json:"task_id"`
+	DocumentID           string    `gorm:"type:varchar(100);not null;index" json:"document_id"`
+	StartSecond          int64     `gorm:"not null;default:0;check:chk_agent_evidence_start,start_second >= 0" json:"start_second"`
+	EndSecond            int64     `gorm:"not null;default:0;check:chk_agent_evidence_range,end_second >= start_second" json:"end_second"`
+	TimeRangeStatus      string    `gorm:"type:varchar(20);not null;check:chk_agent_evidence_time_status,time_range_status IN ('known','unknown')" json:"time_range_status"`
+	QuoteText            string    `gorm:"type:text;not null" json:"quote_text"`
+	ContentHash          string    `gorm:"type:char(64);not null;index" json:"content_hash"`
+	StableLocator        string    `gorm:"type:text;not null" json:"stable_locator"`
+	SourceRevision       string    `gorm:"type:varchar(255);not null;default:''" json:"source_revision,omitempty"`
+	SourceRevisionStatus string    `gorm:"type:varchar(20);not null;default:'unavailable';check:chk_agent_evidence_revision_status,source_revision_status IN ('available','unavailable')" json:"source_revision_status"`
+	CreatedAt            time.Time `gorm:"not null;index" json:"created_at"`
+	UpdatedAt            time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (AgentEvidence) TableName() string { return "agent_evidence" }

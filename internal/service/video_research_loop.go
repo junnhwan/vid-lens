@@ -171,6 +171,13 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 		if err := r.validateDecision(result.State, decision); err != nil {
 			return r.fail(result, "invalid_planner_decision", err)
 		}
+		if decision.Tool == VideoAgentToolBuildCitedAnswer {
+			canonicalArguments, err := canonicalizeResearchAnswerArguments(result.State.Evidence, runtime.TaskID, decision.Arguments)
+			if err != nil {
+				return r.fail(result, "invalid_planner_decision", err)
+			}
+			decision.Arguments = canonicalArguments
+		}
 		if decision.Done {
 			result.State.Status = VideoResearchStatusCompleted
 			result.State.StopReason = firstNonEmpty(decision.StopReason, "goal_satisfied")
@@ -211,6 +218,12 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 			result.State.Steps = append(result.State.Steps, step)
 			return r.fail(result, "observer_failure", err)
 		}
+		if err := validateObservedResearchEvidence(runtime.TaskID, observation.NewEvidence); err != nil {
+			step.Status = VideoResearchStepFailed
+			step.Error = err.Error()
+			result.State.Steps = append(result.State.Steps, step)
+			return r.fail(result, "observer_failure", err)
+		}
 		step.Status = VideoResearchStepCompleted
 		step.Observation = &observation
 		result.State.Steps = append(result.State.Steps, step)
@@ -246,11 +259,6 @@ func (r *VideoResearchRunner) validateDecision(state VideoResearchState, decisio
 	if _, err := r.registry.Lookup(decision.Tool); err != nil {
 		return err
 	}
-	if decision.Tool == VideoAgentToolBuildCitedAnswer {
-		if err := validateResearchAnswerEvidence(state.Evidence, decision.Arguments); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -280,7 +288,17 @@ func (DefaultVideoResearchObserver) Observe(state VideoResearchState, result Vid
 		if err := json.Unmarshal(result.Output, &answer); err != nil {
 			return VideoResearchObservation{}, fmt.Errorf("解析 build_cited_answer observation 失败: %w", err)
 		}
-		finalized := finalizeAnswerCitations(answer.Answer, buildCitations(state.Goal, answer.Citations))
+		canonical, err := canonicalizeResearchCitations(state.Evidence, 0, answer.Citations)
+		if err != nil {
+			return VideoResearchObservation{}, fmt.Errorf("canonicalize build_cited_answer observation 失败: %w", err)
+		}
+		answer.Citations = canonical
+		canonicalOutput, err := json.Marshal(answer)
+		if err != nil {
+			return VideoResearchObservation{}, fmt.Errorf("序列化 canonical build_cited_answer observation 失败: %w", err)
+		}
+		observation.Output = canonicalOutput
+		finalized := finalizeAnswerCitations(answer.Answer, buildCitations(state.Goal, canonical))
 		observation.Answer = finalized.Answer
 		observation.Citations = finalized.Citations
 	}
@@ -311,21 +329,79 @@ func videoResearchEvidenceKey(chunk RetrievedChunk) string {
 	return fmt.Sprintf("chunk:%d:%d", chunk.TaskID, chunk.ChunkID)
 }
 
-func validateResearchAnswerEvidence(evidence []RetrievedChunk, arguments json.RawMessage) error {
+func canonicalizeResearchAnswerArguments(evidence []RetrievedChunk, taskID int64, arguments json.RawMessage) (json.RawMessage, error) {
 	var input buildCitedAnswerToolArguments
-	if err := json.Unmarshal(arguments, &input); err != nil {
-		return fmt.Errorf("解析 build_cited_answer arguments 失败: %w", err)
+	if err := decodeVideoAgentToolArguments(VideoAgentToolRequest{Arguments: arguments}, &input); err != nil {
+		return nil, fmt.Errorf("解析 build_cited_answer arguments 失败: %w", err)
 	}
 	if len(input.Citations) == 0 {
-		return errors.New("build_cited_answer 必须提供已观察到的证据")
+		return nil, errors.New("build_cited_answer 必须提供已观察到的证据")
 	}
-	known := make(map[string]struct{}, len(evidence))
-	for _, chunk := range evidence {
-		known[videoResearchEvidenceKey(chunk)] = struct{}{}
+	canonical, err := canonicalizeResearchCitations(evidence, taskID, input.Citations)
+	if err != nil {
+		return nil, err
 	}
-	for _, citation := range input.Citations {
-		if _, ok := known[videoResearchEvidenceKey(citation)]; !ok {
-			return fmt.Errorf("build_cited_answer 引用了未观察到的证据: %s", videoResearchEvidenceKey(citation))
+	input.Citations = canonical
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 canonical build_cited_answer arguments 失败: %w", err)
+	}
+	return encoded, nil
+}
+
+func canonicalizeResearchCitations(evidence []RetrievedChunk, taskID int64, requested []RetrievedChunk) ([]RetrievedChunk, error) {
+	if len(requested) == 0 {
+		return nil, errors.New("build_cited_answer 必须提供已观察到的证据")
+	}
+	byEvidenceID := make(map[string]RetrievedChunk, len(evidence))
+	byChunk := make(map[string]RetrievedChunk, len(evidence))
+	for _, observed := range evidence {
+		if taskID > 0 && observed.TaskID != taskID {
+			return nil, fmt.Errorf("已观察证据越过当前视频边界: task:%d", observed.TaskID)
+		}
+		if evidenceID := strings.TrimSpace(observed.EvidenceID); evidenceID != "" {
+			key := "evidence:" + evidenceID
+			if _, exists := byEvidenceID[key]; exists {
+				return nil, fmt.Errorf("已观察证据标识不唯一: %s", key)
+			}
+			byEvidenceID[key] = observed
+		}
+		chunkKey := fmt.Sprintf("chunk:%d:%d", observed.TaskID, observed.ChunkID)
+		if _, exists := byChunk[chunkKey]; !exists {
+			byChunk[chunkKey] = observed
+		}
+	}
+
+	canonical := make([]RetrievedChunk, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
+	for _, citation := range requested {
+		var observed RetrievedChunk
+		var ok bool
+		if evidenceID := strings.TrimSpace(citation.EvidenceID); evidenceID != "" {
+			observed, ok = byEvidenceID["evidence:"+evidenceID]
+		} else {
+			observed, ok = byChunk[fmt.Sprintf("chunk:%d:%d", citation.TaskID, citation.ChunkID)]
+		}
+		if !ok {
+			return nil, fmt.Errorf("build_cited_answer 引用了未观察到的证据: %s", videoResearchEvidenceKey(citation))
+		}
+		key := videoResearchEvidenceKey(observed)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		canonical = append(canonical, observed)
+	}
+	return canonical, nil
+}
+
+func validateObservedResearchEvidence(taskID int64, evidence []RetrievedChunk) error {
+	if taskID <= 0 {
+		return nil
+	}
+	for _, observed := range evidence {
+		if observed.TaskID != taskID {
+			return fmt.Errorf("research observation 包含跨视频证据: task:%d", observed.TaskID)
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"vid-lens/internal/ai"
@@ -10,16 +11,19 @@ import (
 
 func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	if err := repos.TranscriptionChunk.UpsertCompleted(42, 0, "audio/chunk-0.mp3", "可复核的转写引用"); err != nil {
+	if err := repos.VisualFrame.ReplaceTaskFrames(42, []model.VideoVisualFrame{{
+		TaskID: 42, FrameIndex: 1, TimeMs: 12500, ObjectKey: "frames/42/1.jpg",
+		OCRText: "[画面] 可复核的视觉引用", Source: "scene", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	ledger := NewEvidenceLedgerService(repos)
 	req := EvidenceLedgerRecordRequest{
 		UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: "11111111-1111-1111-1111-111111111111",
 		RawAnswer: "已确认事实。[C1]\n可能还有第二个原因。\n没有引用的断言。",
-		Evidence:  []Citation{{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "可复核的转写引用", Source: RetrievalSourceHybrid}},
+		Evidence:  []Citation{{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: RetrievalSourceHybrid}},
 		Retrieved: []Citation{
-			{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "可复核的转写引用", Source: RetrievalSourceHybrid},
+			{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: RetrievalSourceHybrid},
 			{TaskID: 42, CitationID: "C2", EvidenceID: "unused-retrieval", ChunkID: 6, ChunkIndex: 4, Content: "本轮检索到但未引用的片段", Source: RetrievalSourceVector},
 		},
 	}
@@ -40,6 +44,9 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 	statuses := map[string]string{}
 	for _, claim := range view.Claims {
 		statuses[claim.Text] = claim.Status
+		if claim.Status == model.ClaimStatusVerified && !strings.Contains(claim.ValidationNote, "semantic truth was not evaluated") {
+			t.Fatalf("verified claim overstates validation: %+v", claim)
+		}
 	}
 	if statuses["已确认事实。"] != model.ClaimStatusVerified {
 		t.Fatalf("verified status map = %+v", statuses)
@@ -57,16 +64,49 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 			bound = evidence
 		}
 	}
-	if bound.SourceType != "transcript" || bound.TimeRangeStatus != model.EvidenceTimeRangeKnown || bound.StartSecond != 0 || bound.EndSecond != 300 {
+	if bound.SourceType != "visual_frame" || bound.TimeRangeStatus != model.EvidenceTimeRangeKnown || bound.StartSecond != 12 || bound.EndSecond != 13 {
 		t.Fatalf("bound evidence = %+v", bound)
 	}
-	if bound.TaskID != 42 || bound.DocumentID == "" || bound.QuoteText != "可复核的转写引用" || bound.ContentHash == "" || bound.StableLocator == "" {
+	if bound.TaskID != 42 || bound.DocumentID == "" || bound.QuoteText != "[画面] 可复核的视觉引用" || bound.ContentHash == "" || bound.StableLocator == "" {
 		t.Fatalf("evidence provenance incomplete: %+v", bound)
+	}
+	if bound.SourceRevision != "" || bound.SourceRevisionStatus != model.EvidenceSourceRevisionUnavailable || !strings.Contains(bound.StableLocator, `"source_ref_kind":"rag_evidence_id"`) {
+		t.Fatalf("source revision provenance = %+v", bound)
 	}
 
 	other, err := ledger.GetRun(context.Background(), 8, req.RunID)
 	if err != nil || other != nil {
 		t.Fatalf("cross-owner view = %+v, err=%v", other, err)
+	}
+}
+
+func TestEvidenceLedgerDoesNotInferTimeRangeFromChunkIndex(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	if err := repos.TranscriptionChunk.UpsertCompleted(42, 17, "audio/chunk-17.mp3", "没有真实时间范围的转写"); err != nil {
+		t.Fatal(err)
+	}
+	ledger := NewEvidenceLedgerService(repos)
+	req := EvidenceLedgerRecordRequest{
+		UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: "33333333-3333-3333-3333-333333333333",
+		RawAnswer: "该转写没有真实时间码。[C1]",
+		Evidence: []Citation{{
+			TaskID: 42, CitationID: "C1", EvidenceID: "stable-unknown-time", ChunkID: 17, ChunkIndex: 17,
+			Content: "没有真实时间范围的转写", Source: RetrievalSourceHybrid,
+		}},
+	}
+	if err := ledger.RecordAnswer(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ledger.GetRun(context.Background(), 7, req.RunID)
+	if err != nil || view == nil || len(view.Claims) != 1 || len(view.Evidence) != 1 {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	evidence := view.Evidence[0]
+	if evidence.SourceType != "transcript" || evidence.StartSecond != 0 || evidence.EndSecond != 0 || evidence.TimeRangeStatus != model.EvidenceTimeRangeUnknown {
+		t.Fatalf("chunk index produced a fabricated time range: %+v", evidence)
+	}
+	if view.Claims[0].Status != model.ClaimStatusUncertain {
+		t.Fatalf("claim status = %s, want uncertain", view.Claims[0].Status)
 	}
 }
 
@@ -135,7 +175,7 @@ func TestVideoAgentPersistsAnswerFactsWithoutChangingAnswer(t *testing.T) {
 		t.Fatalf("answer changed by ledger = %q", result.Answer)
 	}
 	view, err := ledger.GetRun(context.Background(), 7, result.RunID)
-	if err != nil || view == nil || len(view.Claims) != 1 || view.Claims[0].Status != model.ClaimStatusVerified {
+	if err != nil || view == nil || len(view.Claims) != 1 || view.Claims[0].Status != model.ClaimStatusUncertain {
 		t.Fatalf("agent ledger = %+v err=%v", view, err)
 	}
 }

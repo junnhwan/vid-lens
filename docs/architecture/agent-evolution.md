@@ -244,7 +244,7 @@ Run/Step 可使用 append-only event 或状态行加版本号实现；选择不�
 
 ### Evidence Ledger 与验证器
 
-已建立 Claim/Evidence/关系表，将现有 `EvidenceID`、引用原文、内容哈希、transcript/视觉来源和可解析时间范围写入统一证据引用。模板 Agent 与 research Agent 在保存回答后同步追加账本；无引用事实为 `unsupported`，显式不确定或证据缺时间定位的事实为 `uncertain`，不会阻塞原回答。更正追加 revision，不覆盖旧 Claim；鉴权 API 支持按 run 查询和追加人工更正。当前验证器只确认稳定来源、时间定位和显式引用绑定，不声称自然语言语义证明。
+已建立 Claim/Evidence/关系表，将现有 `EvidenceID`、引用原文、内容哈希、transcript/视觉来源和可解析时间范围写入统一证据引用。`EvidenceID` 是检索证据标识而非 source revision；没有真实处理版本时 revision 明确为空并标记 `unavailable`。模板 Agent 与 research Agent 在保存回答后同步追加账本；research Planner 只能选择本轮已观察证据，服务端在工具执行和 observation 两个边界 canonicalize 完整引用并拒绝跨视频 evidence，因此 API、聊天快照和账本不会采用 Planner 改写的 task/chunk/content/source。无引用事实为 `unsupported`，显式不确定或证据缺时间定位的事实为 `uncertain`，不会阻塞原回答。更正追加 revision，不覆盖旧 Claim；鉴权 API 支持按 run 查询和追加人工更正。`verified` 只确认显式绑定具有稳定来源和真实、可重放的时间定位，不代表完成自然语言语义蕴含或事实真值证明。
 
 ### Run/Step 可恢复执行
 

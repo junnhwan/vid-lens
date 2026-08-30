@@ -203,14 +203,15 @@ func TestDefaultVideoResearchObserverAddsSearchEvidence(t *testing.T) {
 }
 
 func TestDefaultVideoResearchObserverExtractsFinalAnswer(t *testing.T) {
+	canonical := RetrievedChunk{TaskID: 42, EvidenceID: "ev-1", ChunkID: 1, ChunkIndex: 2, Content: "owner 证据", Source: RetrievalSourceHybrid}
 	output, err := json.Marshal(BuildCitedAnswerResult{
 		Answer:    "最终答案 [C1]",
-		Citations: []RetrievedChunk{{EvidenceID: "ev-1", ChunkID: 1, ChunkIndex: 2, Content: "owner 证据"}},
+		Citations: []RetrievedChunk{{TaskID: 999, EvidenceID: "ev-1", ChunkID: 999, ChunkIndex: 999, Content: "tampered", Source: "forged"}},
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	observation, err := (DefaultVideoResearchObserver{}).Observe(VideoResearchState{Goal: "owner"}, VideoAgentToolResult{
+	observation, err := (DefaultVideoResearchObserver{}).Observe(VideoResearchState{Goal: "owner", Evidence: []RetrievedChunk{canonical}}, VideoAgentToolResult{
 		Output: output,
 		Step:   VideoAgentStep{Tool: VideoAgentToolBuildCitedAnswer},
 	})
@@ -219,6 +220,24 @@ func TestDefaultVideoResearchObserverExtractsFinalAnswer(t *testing.T) {
 	}
 	if observation.Answer != "最终答案" || len(observation.Citations) != 1 || observation.Citations[0].CitationID != "C1" {
 		t.Fatalf("observation = %+v", observation)
+	}
+	if observation.Citations[0].TaskID != canonical.TaskID || observation.Citations[0].ChunkID != canonical.ChunkID || observation.Citations[0].Content != canonical.Content || observation.Citations[0].Source != canonical.Source {
+		t.Fatalf("observer citations are not canonical: %+v", observation.Citations)
+	}
+	var persisted BuildCitedAnswerResult
+	if err := json.Unmarshal(observation.Output, &persisted); err != nil || len(persisted.Citations) != 1 || persisted.Citations[0].TaskID != canonical.TaskID || persisted.Citations[0].EvidenceID != canonical.EvidenceID || persisted.Citations[0].ChunkID != canonical.ChunkID || persisted.Citations[0].Content != canonical.Content || persisted.Citations[0].Source != canonical.Source {
+		t.Fatalf("canonical observation output = %+v err=%v", persisted, err)
+	}
+}
+
+func TestCanonicalizeResearchCitationsRejectsCrossVideoEvidence(t *testing.T) {
+	_, err := canonicalizeResearchCitations(
+		[]RetrievedChunk{{TaskID: 99, EvidenceID: "cross-video", ChunkID: 1, Content: "other video"}},
+		42,
+		[]RetrievedChunk{{EvidenceID: "cross-video"}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "越过当前视频边界") {
+		t.Fatalf("canonicalizeResearchCitations() error = %v, want cross-video rejection", err)
 	}
 }
 
