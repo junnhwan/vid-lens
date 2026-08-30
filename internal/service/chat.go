@@ -109,12 +109,6 @@ type ChatService struct {
 	intentRouter   *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
 }
 
-func (s *ChatService) SetEvidenceLedger(ledger *EvidenceLedgerService) {
-	if s != nil {
-		s.evidenceLedger = ledger
-	}
-}
-
 type AskResult struct {
 	MessageID int64      `json:"message_id"`
 	Answer    string     `json:"answer"`
@@ -172,32 +166,28 @@ func (p *preparedRAGChat) evidenceIDSet() map[string]struct{} {
 }
 
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {
+	return NewChatServiceWithDependencies(repos, retriever, cfg, ChatDependencies{})
+}
+
+type ChatDependencies struct {
+	Memory         ChatMemoryStore
+	LongTermMemory MemoryProvider
+	MemoryCapture  MemoryCapture
+	EvidenceLedger *EvidenceLedgerService
+	Recorder       ai.CallRecorder
+	IntentRouter   *IntentRouter
+}
+
+func NewChatServiceWithDependencies(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig, dependencies ChatDependencies) *ChatService {
 	if cfg.TopK <= 0 {
 		cfg.TopK = 5
 	}
 	if cfg.RecentTurns <= 0 {
 		cfg.RecentTurns = 8
 	}
-	return &ChatService{repos: repos, retriever: retriever, cfg: cfg}
-}
-
-func (s *ChatService) SetMemoryStore(memory ChatMemoryStore) {
-	s.memory = memory
-}
-
-// SetLongTermMemory enables the optional governed Agent memory path. Leaving
-// either dependency nil keeps all existing RAG and Agent behavior unchanged.
-func (s *ChatService) SetLongTermMemory(provider MemoryProvider, capture MemoryCapture) {
-	s.longTermMemory = provider
-	s.memoryCapture = capture
-}
-
-func (s *ChatService) SetAIRecorder(recorder ai.CallRecorder) {
-	s.recorder = recorder
-}
-
-// SetIntentRouter 注入 docs/architecture/retrieval.md 级联 intent 分类器（nil 时 chat_prepare 降级占位
-// classifyIntentPlaceholder，保测试稳定）。生产路径由 wiring 注入；测试可不调。
-func (s *ChatService) SetIntentRouter(r *IntentRouter) {
-	s.intentRouter = r
+	return &ChatService{
+		repos: repos, retriever: retriever, cfg: cfg,
+		memory: dependencies.Memory, longTermMemory: dependencies.LongTermMemory, memoryCapture: dependencies.MemoryCapture,
+		evidenceLedger: dependencies.EvidenceLedger, recorder: dependencies.Recorder, intentRouter: dependencies.IntentRouter,
+	}
 }

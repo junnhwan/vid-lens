@@ -33,6 +33,9 @@ export default function VideoDetailModal({ task, loading, onClose, onChanged }: 
   const [retrying, setRetrying] = useState(false)
   const [starting, setStarting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const taskID = task?.id
+  const summaryContent = task?.summary?.content
+  const transcriptionContent = task?.transcription?.content
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -41,12 +44,12 @@ export default function VideoDetailModal({ task, loading, onClose, onChanged }: 
   }, [onClose])
 
   useEffect(() => {
-    if (!task) return
-    setTab(task.summary?.content ? 'summary' : task.transcription?.content ? 'transcript' : 'progress')
+    if (!taskID) return
+    setTab(summaryContent ? 'summary' : transcriptionContent ? 'transcript' : 'progress')
     setSearch('')
     setRagStatus(null)
-    api.getRagIndex(task.id).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
-  }, [task?.id])
+    api.getRagIndex(taskID).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
+  }, [taskID, summaryContent, transcriptionContent])
 
   const transcriptParas = useMemo(() => {
     const c = task?.transcription?.content

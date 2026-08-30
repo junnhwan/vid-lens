@@ -6,6 +6,7 @@ import type {
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
   UploadResult, User, VideoTask,
 } from './types'
+import { SSEStreamDecoder } from './streamDecoder'
 
 // ============ 唯一后端出口 ============
 // 所有后端调用经此模块；dev 时 Next rewrites 把 /api → :8080。
@@ -159,33 +160,19 @@ async function consumeSSE(
   }
 
   const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
+  const decoder = new SSEStreamDecoder()
+  let completed = false
   for (;;) {
     if (signal?.aborted) {
       await reader.cancel().catch(() => {})
       break
     }
     const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let sep: number
-    while ((sep = buf.indexOf('\n\n')) >= 0) {
-      const raw = buf.slice(0, sep)
-      buf = buf.slice(sep + 2)
-      const lines = raw.split('\n')
-      let event = 'message'
-      const dataParts: string[] = []
-      for (const line of lines) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataParts.push(line.slice(5).trim())
-      }
-      const dataStr = dataParts.join('\n')
-      if (!dataStr) continue
-      let parsed: unknown
-      try { parsed = JSON.parse(dataStr) } catch { parsed = dataStr }
-      dispatch(event, parsed)
-    }
+    if (done) { completed = true; break }
+    for (const item of decoder.push(value)) dispatch(item.event, item.data)
+  }
+  if (completed) {
+    for (const item of decoder.finish()) dispatch(item.event, item.data)
   }
   return { ok: true, status: res.status }
 }

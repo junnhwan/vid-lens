@@ -475,7 +475,7 @@ func TestEvidenceFunnelCompletedCheckpointsAreIdempotent(t *testing.T) {
 	if second.RawAnswer != first.RawAnswer {
 		t.Fatalf("recovered result = %+v, want %+v", second, first)
 	}
-	records, err := runner.repos.AgentExecution.GetExecution(context.Background(), 7, runID)
+	records, err := runner.execution.journal.Recover(context.Background(), 7, runID)
 	if err != nil || records == nil || len(records.ToolCalls) != 7 {
 		t.Fatalf("idempotent records = %+v, %v", records, err)
 	}
@@ -483,27 +483,22 @@ func TestEvidenceFunnelCompletedCheckpointsAreIdempotent(t *testing.T) {
 
 func TestEvidenceFunnelExplicitlyRetriesReplaySafeStepWithNewAttempt(t *testing.T) {
 	runner, _, runID := newDirectEvidenceFunnelRunner(t, 9)
-	now := time.Now().UTC()
-	claim, err := runner.execution.repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
-		UserID: 7, RunID: runID, StepID: "funnel-context", Attempt: 1, Sequence: 1,
+	_, err := runner.execution.journal.Execute(context.Background(), AgentJournalStep{
+		UserID: 7, RunID: runID, StepID: "funnel-context", Sequence: 1,
 		Kind: "retrieve", Action: evidenceFunnelBrowseContext, SafeReason: "test prior replay-safe failure",
-		InputSummary: `{}`, ArgumentsDigest: digestAgentValue(`{"task_id":1}`), CallDigest: digestAgentValue("prior-safe-attempt"),
-		ToolName: evidenceFunnelBrowseContext, ReplaySafe: true, LeaseToken: "failed-safe-attempt", Now: now, LeaseUntil: now.Add(time.Minute),
+		InputSummary: `{}`, ArgumentsDigest: digestAgentValue(`{"task_id":1}`), ToolName: evidenceFunnelBrowseContext,
+		ReplaySafe: true, FailureCode: "temporary_read_failure",
+	}, func() (AgentJournalResult, error) {
+		return AgentJournalResult{}, errors.New("temporary read failure")
 	})
-	if err != nil || claim.Outcome != repository.AgentStepClaimAcquired {
-		t.Fatalf("initial ClaimStep() = %+v, %v", claim, err)
-	}
-	if failed, failErr := runner.execution.repo.FailStep(context.Background(), repository.AgentStepFailure{
-		UserID: 7, RunID: runID, StepID: "funnel-context", Attempt: 1, LeaseToken: "failed-safe-attempt",
-		ErrorCode: "temporary_read_failure", ErrorMessage: "temporary read failure", Now: now.Add(time.Second),
-	}); failErr != nil || !failed {
-		t.Fatalf("FailStep() = %v, %v", failed, failErr)
+	if err == nil || !strings.Contains(err.Error(), "temporary read failure") {
+		t.Fatalf("initial Journal Execute() error = %v", err)
 	}
 
 	if _, err := runner.Run(context.Background(), "owner"); err != nil {
 		t.Fatalf("explicit retry Run() error = %v", err)
 	}
-	records, err := runner.repos.AgentExecution.GetExecution(context.Background(), 7, runID)
+	records, err := runner.execution.journal.Recover(context.Background(), 7, runID)
 	if err != nil || records == nil || len(records.Steps) != 8 {
 		t.Fatalf("retry execution = %+v, %v", records, err)
 	}
@@ -548,7 +543,7 @@ func newDirectEvidenceFunnelRunner(t *testing.T, maxSteps int) (*evidenceFunnelR
 	runner := &evidenceFunnelRunner{
 		repos: repos, tools: tools, planner: NewLLMEvidenceGapPlanner(chatClient), policy: policy,
 		runtime:   VideoAgentToolRuntime{UserID: 7, TaskID: task.ID, TopK: 1, EmbeddingModel: "embed", Embedding: &fakeEmbeddingClient{dim: 3}},
-		execution: &evidenceFunnelExecution{repo: repos.AgentExecution, userID: 7, runID: runID, now: func() time.Time { return time.Now().UTC() }},
+		execution: &evidenceFunnelExecution{journal: NewAgentExecutionJournal(repos.AgentExecution), userID: 7, runID: runID},
 	}
 	return runner, chatClient, runID
 }

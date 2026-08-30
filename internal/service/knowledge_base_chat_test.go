@@ -56,9 +56,8 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 	chat := &scriptedChatClient{responses: []string{`{"queries":["owner 校验","租约恢复"]}`, "A 需要校验 owner。[C1] B 通过租约恢复。[C2]"}}
 	cfg := DefaultRAGRetrievalConfig()
 	cfg.NeighborRadius = 0
-	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, Retrieval: &cfg})
 	memory := &fakeChatMemoryStore{recent: []model.ChatMessage{{Role: "assistant", Content: "这条知识库 Redis 历史也不能进入下一轮生成"}}}
-	svc.SetMemoryStore(memory)
+	svc := NewChatServiceWithDependencies(repos, retriever, ChatConfig{TopK: 5, Retrieval: &cfg}, ChatDependencies{Memory: memory})
 
 	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "两个视频怎么处理失败恢复？", 0, &fakeEmbeddingClient{dim: 3}, chat, ai.Profile{EmbeddingModel: "embed-v1", LLMModel: "chat"})
 	if err != nil {

@@ -28,6 +28,7 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
   const [ragErr, setRagErr] = useState('')
   const [regening, setRegening] = useState(false)
   const toast = useToast()
+  const taskID = task?.id
   // 演示账号只读：隐藏 生成摘要 / Regen / 触发索引 等写入口，仅保留查看与问答。
   const { isDemo } = useRole()
 
@@ -86,10 +87,10 @@ export default function TaskDetailPanel({ task, onClose, viewMode, onViewMode }:
 
   // 拉取 RAG 索引状态（task?.id 变化时）
   useEffect(() => {
-    if (!task) return
+    if (!taskID) return
     setRagStatus(null); setRagErr('')
-    api.getRagIndex(task.id).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
-  }, [task?.id])
+    api.getRagIndex(taskID).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
+  }, [taskID])
 
   const triggerIndex = async () => {
     if (!task) return

@@ -83,7 +83,7 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.SetDurableExecution(repo, 7, run.ID); err != nil {
+	if err := runner.SetDurableExecution(NewAgentExecutionJournal(repo), 7, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), run.Goal, VideoAgentToolRuntime{UserID: 7, TaskID: 11})
@@ -223,7 +223,7 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.SetDurableExecution(repo, 7, run.ID); err != nil {
+	if err := runner.SetDurableExecution(NewAgentExecutionJournal(repo), 7, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := runner.Run(context.Background(), run.Goal, VideoAgentToolRuntime{UserID: 7, TaskID: 11})
@@ -268,7 +268,7 @@ func TestVideoResearchRunnerPersistsFailedPlannerAuditAndUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runner.SetDurableExecution(repo, 7, run.ID); err != nil {
+	if err := runner.SetDurableExecution(NewAgentExecutionJournal(repo), 7, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runner.Run(context.Background(), run.Goal, VideoAgentToolRuntime{UserID: 7, TaskID: 11}); err == nil {

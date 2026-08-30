@@ -1,7 +1,7 @@
 # Agent 问答流式契约（前端 UI × 后端实现）
 
 > **状态**：当前实现与后续扩展（2026-08-30）。
-> **关联原型**：`/prototype/agent-chat`（UI）、`/prototype/qa-navigation?variant=AB`（问答入口）
+> **关联原型**：开发时运行 `npm run dev:prototype`，访问 `/prototype/agent-chat`；原型不属于正式 production route tree。
 > **现有实现**：`POST /api/v1/chat/sessions/:id/messages/stream`（RAG 流式）、`POST .../messages/agent`（实验性 Agent，非流式）、`POST .../messages/agent/stream`（单视频 Agent SSE）
 
 ---
@@ -39,7 +39,7 @@ Content-Type: application/json
 | `done` | `{ answer?, degraded?, message_id? }` | 结束 |
 | `error` | `{ message }` | 失败 |
 
-前端消费：`frontend/lib/api.ts` → `streamAsk()`。
+前端消费：`frontend/lib/api.ts` → `streamAsk()`；任意网络 chunk 边界由 `frontend/lib/streamDecoder.ts` 解码。
 
 ### 2.2 Agent 非流式（实验）
 
@@ -232,10 +232,7 @@ done          { message_id: 456 }
 }
 ```
 
-它仍是聊天历史的兼容快照，不是可恢复的 Agent Run/Step 数据源。模板 Agent 的实际工具动作，以及 research Agent 的 Planner/工具动作，另行写入 `agent_runs`、`agent_steps`、`agent_tool_calls`；进程恢复只读取这些 PostgreSQL 权威记录。前端加载历史时：
-
-- 有 `agent_snapshot` → 渲染完整步骤时间线（无需重放 SSE）。
-- 仅有 `retrieval_snapshot` → 保持现网 [C1] 引用行为。
+它仍是聊天历史的兼容快照，不是可恢复的 Agent Run/Step 数据源。模板 Agent 的实际工具动作，以及 research Agent 的 Planner/工具动作，另行写入 `agent_runs`、`agent_steps`、`agent_tool_calls`；进程恢复只读取这些 PostgreSQL 权威记录。前端加载历史时，`snapshotTraceAdapter.ts` 在 `retrieval_snapshot` 中优先读取 version 1 `steps[]`，再兼容旧 `trace[]` 和 bare `Citation[]`。兼容解析与实时 `agentTraceReducer` 分离；刷新页面无需重放 SSE。
 
 Agent 回答完成后还会把 Claim、Evidence 和 Claim-Evidence 关系写入独立 PostgreSQL 账本。该副作用不新增 SSE event，不改变本文事件顺序；账本写入失败不会把已生成的普通 Agent 回答改成流式错误。账本只保存可见事实和稳定证据引用，不保存原始 Chain-of-Thought。
 
@@ -256,7 +253,7 @@ Agent 回答完成后还会把 Claim、Evidence 和 Claim-Evidence 关系写入�
 
 ## 7. 当前前端消费与后续扩展
 
-当前 `frontend/lib/api.ts` 的 `streamAgent()` 已消费真实的 `run_start`、`step_*`、`tool_*`、`retrieve_hits`、`answer`、`citations`、`done` 和 `error` 事件；聊天页单视频 Agent 模式直接使用该流，普通 RAG 和知识库问答保持原路径。
+当前 `frontend/lib/api.ts` 的 `streamAgent()` 已消费真实的 `run_start`、`step_*`、`tool_*`、`retrieve_hits`、`answer`、`citations`、`done` 和 `error` 事件。`useConversationSession` 统一拥有会话、取消和消息终态，实时 Agent 事件交给幂等 reducer；聊天页单视频 Agent 模式使用该流，普通 RAG 和知识库问答保持原端点和字段。
 
 后续扩展应分别验收：
 
@@ -279,7 +276,7 @@ export async function streamAgent(sid: number, question: string, opts: AgentStre
 }
 ```
 
-`AgentSSEHandlers` 当前映射到正式聊天页的 `agentTraceReducer`；原型组件仅作视觉参考。
+`AgentSSEHandlers` 由 `useConversationSession` 映射到正式聊天状态，再由 `agentTraceReducer` 处理步骤事件；原型组件位于独立开发 workspace，仅作视觉参考。
 
 ---
 
@@ -299,7 +296,7 @@ export async function streamAgent(sid: number, question: string, opts: AgentStre
 - [x] `streamAgent()` 已直接消费真实 Agent 事件；普通 RAG 路径不变。
 - [x] 后端单测覆盖事件顺序、取消、错误和知识库/模式拒绝。
 
-尚未实现的 Run/Step 独立持久化、知识库 Agent、研究模式流式化和 Provider token 级流式不属于当前端点的验收范围。
+知识库 Agent、研究模式流式化和 Provider token 级流式仍不属于当前端点的验收范围。Run/Step/ToolCall 独立持久化已经实现，并由 `AgentExecutionJournal` 统一恢复语义；它不改变本 SSE 契约。
 
 ---
 
@@ -310,3 +307,4 @@ export async function streamAgent(sid: number, question: string, opts: AgentStre
 | 2026-08-29 | 初版：基于原型 Agent UI A/B/C 与融合 D/E；对齐现有 `VideoAgentResult` / RAG SSE |
 | 2026-08-30 | 根据实际 Go/TypeScript 实现更新单视频 Agent SSE、事件顺序、范围限制和历史快照说明；移除将 `step_update`、`think` 当作当前事件的表述。 |
 | 2026-08-30 | 记录 Agent 证据账本作为回答后的兼容副作用；明确不新增 SSE 事件、不改变事件顺序。 |
+| 2026-08-30 | 对齐 `ConversationExecution`、`AgentExecutionJournal`、`ConversationSession`、独立 SSE decoder 与历史快照兼容适配器。 |

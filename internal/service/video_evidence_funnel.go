@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
@@ -157,10 +155,9 @@ type evidenceFunnelRunner struct {
 }
 
 type evidenceFunnelExecution struct {
-	repo   *repository.AgentExecutionRepository
-	userID int64
-	runID  string
-	now    func() time.Time
+	journal *AgentExecutionJournal
+	userID  int64
+	runID   string
 }
 
 type evidenceFunnelActionSpec struct {
@@ -374,7 +371,7 @@ func (r *evidenceFunnelRunner) ValidateAndRecord(ctx context.Context, req Eviden
 			}
 			metrics := map[string]any{"coverage": "evidence_claim_validation", "final_citation_count": len(req.Evidence), "claims": 0, "evidence": 0, "links": 0}
 			metrics["claims"], metrics["evidence"], metrics["links"] = len(view.Claims), len(view.Evidence), len(view.ClaimEvidence)
-			if err := r.execution.repo.MarkFinalEvidenceRefs(ctx, req.UserID, req.RunID, finalRefs); err != nil {
+			if err := r.execution.journal.MarkFinalEvidenceRefs(ctx, req.UserID, req.RunID, finalRefs); err != nil {
 				return evidenceFunnelActionResult{}, err
 			}
 			return evidenceFunnelActionResult{Checkpoint: metrics, OutputRef: "claims_validated", Metrics: metrics}, nil
@@ -431,82 +428,35 @@ func (r *evidenceFunnelRunner) execute(ctx context.Context, spec evidenceFunnelA
 			frameCount = len(candidates)
 		}
 	}
-	attempt := 1
-	var claim repository.AgentStepClaim
-	for {
-		now := r.execution.now()
-		callDigest := digestAgentValue(fmt.Sprintf("%s:%s:%d:%s:%s", r.execution.runID, spec.StepID, attempt, spec.Action, argsDigest))
-		claim, err = r.execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
-			UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, Sequence: spec.Sequence,
-			Kind: spec.Kind, Action: spec.Action, SafeReason: "execute fixed evidence funnel action", InputSummary: string(summaryJSON),
-			ArgumentsDigest: argsDigest, CallDigest: callDigest, ToolName: spec.Action, CallKind: callKind, InternalCall: spec.Internal,
-			ReplaySafe: spec.ReplaySafe, LLMCall: spec.LLMCall, RetrievalCall: spec.Kind == "retrieve", VisualCall: spec.Action == evidenceFunnelConfirmVisual,
-			FrameCount: frameCount, ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4,
-			LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
-		})
-		if err != nil {
-			return nil, err
+	journalResult, err := r.execution.journal.Execute(ctx, AgentJournalStep{
+		UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Sequence: spec.Sequence,
+		Kind: spec.Kind, Action: spec.Action, SafeReason: "execute fixed evidence funnel action", InputSummary: string(summaryJSON),
+		ArgumentsDigest: argsDigest, ToolName: spec.Action, CallKind: callKind, InternalCall: spec.Internal,
+		ReplaySafe: spec.ReplaySafe, RetryReplaySafe: spec.ReplaySafe, LLMCall: spec.LLMCall,
+		RetrievalCall: spec.Kind == "retrieve", VisualCall: spec.Action == evidenceFunnelConfirmVisual,
+		FrameCount: frameCount, ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4,
+		FailureCode: "funnel_action_failure",
+	}, func() (AgentJournalResult, error) {
+		result, invokeErr := invoke()
+		metrics, metricsErr := json.Marshal(result.Metrics)
+		if metricsErr != nil && invokeErr == nil {
+			invokeErr = metricsErr
 		}
-		switch claim.Outcome {
-		case repository.AgentStepClaimCompleted:
-			if claim.ToolCall == nil || claim.ToolCall.CallDigest != callDigest || claim.ToolCall.ArgumentsDigest != argsDigest || claim.ToolCall.ToolName != spec.Action || claim.ToolCall.CallKind != callKind {
-				return nil, errors.New("persisted evidence funnel checkpoint does not match fixed action input")
-			}
-			return json.RawMessage(claim.Step.ResultCheckpoint), nil
-		case repository.AgentStepClaimBusy:
-			return nil, errAgentExecutionBusy
-		case repository.AgentStepClaimExhausted:
-			return nil, errors.New("evidence funnel budget exhausted")
-		case repository.AgentStepClaimAmbiguous, repository.AgentStepClaimTerminal:
-			if spec.ReplaySafe && claim.Step.ReplaySafe && (claim.Step.Status == model.AgentStepStatusFailed || claim.Step.Status == model.AgentStepStatusAmbiguous) {
-				attempt = claim.Step.Attempt + 1
-				continue
-			}
-			return nil, fmt.Errorf("evidence funnel step %s cannot be replayed safely: %s", spec.StepID, claim.Outcome)
-		case repository.AgentStepClaimAcquired:
-			attempt = claim.Step.Attempt
-		default:
-			return nil, fmt.Errorf("evidence funnel step %s claim failed", spec.StepID)
-		}
-		break
-	}
-	result, invokeErr := invoke()
-	if invokeErr != nil {
-		cancelled := errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded)
-		_, _ = r.execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
-			UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "funnel_action_failure", ErrorMessage: safeAgentError(invokeErr), PromptTokens: result.Usage.PromptTokens,
-			CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros, UsageSource: result.Usage.UsageSource,
-			TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion,
-			ContextChars: firstPositive(result.Usage.ContextChars, contextChars), ContextUsageSource: usageSourceForContext(firstPositive(result.Usage.ContextChars, contextChars)), MetricsJSON: usageMetrics(result.Usage), Cancelled: cancelled, Now: r.execution.now(),
-		})
-		if spec.ReplaySafe && !cancelled {
-			return nil, &evidenceFunnelReplayableFailure{cause: invokeErr}
-		}
-		return nil, invokeErr
-	}
-	checkpoint, err := json.Marshal(result.Checkpoint)
-	if err != nil {
-		return nil, err
-	}
-	metrics, err := json.Marshal(result.Metrics)
-	if err != nil {
-		return nil, err
-	}
-	completed, err := r.execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
-		UserID: r.execution.userID, RunID: r.execution.runID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
-		OutputRef: result.OutputRef, ResultCheckpoint: string(checkpoint), EvidenceRefs: retrievedEvidenceRefs(result.Evidence),
-		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros,
-		UsageSource: result.Usage.UsageSource, TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency, PriceVersion: result.Usage.PriceVersion,
-		ContextChars: firstPositive(result.Usage.ContextChars, contextChars), ContextUsageSource: usageSourceForContext(firstPositive(result.Usage.ContextChars, contextChars)), MetricsJSON: mergeAgentUsageMetrics(string(metrics), result.Usage, firstPositive(result.Usage.ContextChars, contextChars)), Now: r.execution.now(),
+		return AgentJournalResult{
+			Checkpoint: result.Checkpoint, OutputRef: result.OutputRef, EvidenceRefs: retrievedEvidenceRefs(result.Evidence),
+			MetricsJSON: string(metrics), Usage: result.Usage,
+		}, invokeErr
 	})
 	if err != nil {
+		if spec.ReplaySafe && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, errAgentExecutionBusy) {
+			return nil, &evidenceFunnelReplayableFailure{cause: err}
+		}
 		return nil, err
 	}
-	if !completed {
-		return nil, errors.New("evidence funnel completion CAS failed")
+	if journalResult.BudgetExhausted {
+		return nil, errors.New("evidence funnel budget exhausted")
 	}
-	return checkpoint, nil
+	return journalResult.Checkpoint, nil
 }
 
 type evidenceFunnelReplayableFailure struct{ cause error }

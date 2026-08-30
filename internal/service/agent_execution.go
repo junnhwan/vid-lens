@@ -11,10 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
-	"vid-lens/internal/repository"
 )
 
 const agentStepLeaseDuration = 2 * time.Minute
@@ -61,53 +59,13 @@ type frozenAgentBudget struct {
 }
 
 func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, userID int64, session *model.ChatSession, goal, mode, agentProfile string, profile ai.Profile, policy frozenAgentPolicy, budget frozenAgentBudget) (*model.AgentRun, error) {
-	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.AgentExecution == nil {
+	if s == nil || s.executionJournal == nil {
 		return nil, errors.New("agent execution repository unavailable")
 	}
-	profileJSON, err := json.Marshal(safeAgentProfile(profile))
-	if err != nil {
-		return nil, err
-	}
-	policyJSON, err := json.Marshal(policy)
-	if err != nil {
-		return nil, err
-	}
-	budgetJSON, err := json.Marshal(budget)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(agentProfile) == "" {
-		agentProfile = "default"
-	}
-	run := &model.AgentRun{
-		ID: runID, UserID: userID, SessionID: session.ID, ScopeType: firstNonEmpty(session.ScopeType, model.ChatScopeVideo),
-		TaskID: session.TaskID, KnowledgeBaseID: session.KnowledgeBaseID, Goal: strings.TrimSpace(goal), Mode: mode,
-		AgentProfile: agentProfile, ProfileSnapshot: string(profileJSON), PolicySnapshot: string(policyJSON), BudgetSnapshot: string(budgetJSON),
-		Status: model.AgentRunStatusRunning, MaxSteps: budget.MaxSteps, MaxToolCalls: budget.MaxToolCalls,
-		MaxLLMCalls: budget.MaxLLMCalls, MaxVisionCalls: budget.MaxVisionCalls, MaxAttemptsPerStep: budget.MaxAttemptsPerStep,
-		MaxRetrievalCalls: budget.MaxRetrievalCalls, MaxVisualCalls: budget.MaxVisualCalls, MaxFrames: budget.MaxFrames,
-		MaxPromptTokens: budget.MaxPromptTokens, MaxCompletionTokens: budget.MaxCompletionTokens, MaxCostMicros: budget.MaxCostMicros,
-		MaxDurationMs: budget.MaxDurationMs, MaxContextChars: budget.MaxContextChars,
-		CreatedAt: time.Now().UTC(),
-	}
-	created, err := s.chatSvc.repos.AgentExecution.CreateRun(ctx, run)
-	if err != nil {
-		return nil, err
-	}
-	if created {
-		return run, nil
-	}
-	stored, err := s.chatSvc.repos.AgentExecution.GetRun(ctx, userID, runID)
-	if err != nil {
-		return nil, err
-	}
-	if stored == nil {
-		return nil, errors.New("agent run is unavailable for this owner")
-	}
-	if stored.SessionID != session.ID || stored.ScopeType != run.ScopeType || stored.TaskID != run.TaskID || stored.KnowledgeBaseID != run.KnowledgeBaseID || stored.Goal != run.Goal || stored.Mode != run.Mode || stored.AgentProfile != run.AgentProfile || stored.ProfileSnapshot != run.ProfileSnapshot {
-		return nil, errors.New("agent run frozen identity or profile does not match resume request")
-	}
-	return stored, nil
+	return s.executionJournal.EnsureRun(ctx, AgentJournalRunRequest{
+		RunID: runID, UserID: userID, Session: session, Goal: goal, Mode: mode, AgentProfile: agentProfile,
+		Profile: profile, Policy: policy, Budget: budget,
+	})
 }
 
 func safeAgentProfile(profile ai.Profile) frozenAgentProfile {
@@ -146,21 +104,10 @@ func defaultAgentToolNames() []string {
 }
 
 func (s *VideoAgentService) markAgentRunTerminal(ctx context.Context, userID int64, runID, status, reason string, err error) {
-	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.AgentExecution == nil {
+	if s == nil || s.executionJournal == nil {
 		return
 	}
-	errorCode, errorMessage := "", ""
-	if err != nil {
-		errorCode, errorMessage = reason, safeAgentError(err)
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	} else {
-		ctx = context.WithoutCancel(ctx)
-	}
-	_, _ = s.chatSvc.repos.AgentExecution.MarkRunTerminal(ctx, repository.AgentRunTerminalUpdate{
-		UserID: userID, RunID: runID, Status: status, StopReason: reason, ErrorCode: errorCode, ErrorMessage: errorMessage, Now: time.Now().UTC(),
-	})
+	s.executionJournal.MarkTerminal(ctx, userID, runID, status, reason, err)
 }
 
 func safeAgentError(err error) string {
@@ -176,7 +123,7 @@ func safeAgentError(err error) string {
 }
 
 type durableAgentStepObserver struct {
-	repo     *repository.AgentExecutionRepository
+	journal  *AgentExecutionJournal
 	userID   int64
 	runID    string
 	nextStep int
@@ -186,18 +133,16 @@ type durableAgentStepObserver struct {
 }
 
 type durableObservedStep struct {
-	stepID  string
-	attempt int
-	token   string
-	step    VideoAgentStep
+	lease agentJournalLease
+	step  VideoAgentStep
 }
 
-func newDurableAgentStepObserver(repo *repository.AgentExecutionRepository, userID int64, runID string, delegate VideoAgentStepObserver) *durableAgentStepObserver {
-	return &durableAgentStepObserver{repo: repo, userID: userID, runID: runID, delegate: delegate, now: func() time.Time { return time.Now().UTC() }}
+func newDurableAgentStepObserver(journal *AgentExecutionJournal, userID int64, runID string, delegate VideoAgentStepObserver) *durableAgentStepObserver {
+	return &durableAgentStepObserver{journal: journal, userID: userID, runID: runID, delegate: delegate, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (o *durableAgentStepObserver) StepStart(step VideoAgentStep) error {
-	if o == nil || o.repo == nil {
+	if o == nil || o.journal == nil {
 		return errors.New("durable agent observer unavailable")
 	}
 	if o.active != nil {
@@ -205,29 +150,20 @@ func (o *durableAgentStepObserver) StepStart(step VideoAgentStep) error {
 	}
 	o.nextStep++
 	stepID := fmt.Sprintf("s%d", o.nextStep)
-	now := o.now()
 	summary, argsDigest := safeToolInputSummary(step.Tool, step.Input)
-	callDigest := digestAgentValue(o.runID + ":" + stepID + ":1:" + step.Tool + ":" + argsDigest)
-	claim, err := o.repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
-		UserID: o.userID, RunID: o.runID, StepID: stepID, Attempt: 1, Sequence: o.nextStep,
+	lease, err := o.journal.beginObservedStep(context.Background(), AgentJournalStep{
+		UserID: o.userID, RunID: o.runID, StepID: stepID, Sequence: o.nextStep,
 		Kind: videoAgentStepKind(step.Tool), Action: step.Tool, SafeReason: safeToolReason(step.Tool), InputSummary: summary,
-		ArgumentsDigest: argsDigest, CallDigest: callDigest, ToolName: step.Tool,
-		ReplaySafe: replaySafeAgentAction(step.Tool), LLMCall: llmAgentAction(step.Tool), VisionCall: visionAgentAction(step.Tool),
-		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
+		ArgumentsDigest: argsDigest, ToolName: step.Tool, ReplaySafe: replaySafeAgentAction(step.Tool),
+		LLMCall: llmAgentAction(step.Tool), VisionCall: visionAgentAction(step.Tool), RetrievalCall: retrievalAgentAction(step.Tool),
 	})
 	if err != nil {
 		return err
 	}
-	if claim.Outcome != repository.AgentStepClaimAcquired {
-		return fmt.Errorf("agent step %s claim outcome: %s", stepID, claim.Outcome)
-	}
-	o.active = &durableObservedStep{stepID: stepID, attempt: 1, token: claim.Step.LeaseToken, step: step}
+	o.active = &durableObservedStep{lease: lease, step: step}
 	if o.delegate != nil {
 		if err := o.delegate.StepStart(step); err != nil {
-			_, _ = o.repo.FailStep(context.Background(), repository.AgentStepFailure{
-				UserID: o.userID, RunID: o.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-				ErrorCode: "stream_observer_failure", ErrorMessage: safeAgentError(err), Now: o.now(),
-			})
+			_ = o.journal.failObservedStep(context.Background(), o.userID, o.runID, lease, "stream_observer_failure", err)
 			o.active = nil
 			return err
 		}
@@ -239,20 +175,9 @@ func (o *durableAgentStepObserver) StepDone(step VideoAgentStep, output any) err
 	if o == nil || o.active == nil {
 		return errors.New("durable agent step done without start")
 	}
-	checkpoint, err := json.Marshal(output)
-	if err != nil {
-		return err
-	}
 	refs := agentEvidenceRefs(output)
-	completed, err := o.repo.CompleteStep(context.Background(), repository.AgentStepCompletion{
-		UserID: o.userID, RunID: o.runID, StepID: o.active.stepID, Attempt: o.active.attempt, LeaseToken: o.active.token,
-		OutputRef: agentToolOutputRef(step), ResultCheckpoint: string(checkpoint), EvidenceRefs: refs, Now: o.now(),
-	})
-	if err != nil {
+	if err := o.journal.completeObservedStep(context.Background(), o.userID, o.runID, o.active.lease, agentToolOutputRef(step), output, refs); err != nil {
 		return err
-	}
-	if !completed {
-		return errors.New("durable agent step completion CAS failed")
 	}
 	o.active = nil
 	if o.delegate != nil {
@@ -265,15 +190,8 @@ func (o *durableAgentStepObserver) StepError(step VideoAgentStep, cause error) e
 	if o == nil || o.active == nil {
 		return errors.New("durable agent step error without start")
 	}
-	failed, err := o.repo.FailStep(context.Background(), repository.AgentStepFailure{
-		UserID: o.userID, RunID: o.runID, StepID: o.active.stepID, Attempt: o.active.attempt, LeaseToken: o.active.token,
-		ErrorCode: "tool_failure", ErrorMessage: safeAgentError(cause), Cancelled: errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded), Now: o.now(),
-	})
-	if err != nil {
+	if err := o.journal.failObservedStep(context.Background(), o.userID, o.runID, o.active.lease, "tool_failure", cause); err != nil {
 		return err
-	}
-	if !failed {
-		return errors.New("durable agent step failure CAS failed")
 	}
 	o.active = nil
 	if o.delegate != nil {

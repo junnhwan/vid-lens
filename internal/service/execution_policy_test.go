@@ -120,14 +120,13 @@ func TestExecutionPolicyKnowledgeBaseIsCollectionScopeAndPureVector(t *testing.T
 	}
 
 	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{
-			{{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, Content: "A 的 owner 校验"}, {TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, Content: "B 的租约恢复"}},
+		{{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, Content: "A 的 owner 校验"}, {TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, Content: "B 的租约恢复"}},
 	}}
 	chat := &scriptedChatClient{responses: []string{`{"queries":["对比 owner"]}`, "A 校验 owner。[C1] B 租约恢复。[C2]"}}
 	cfg := DefaultRAGRetrievalConfig()
 	cfg.NeighborRadius = 0
-	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, Retrieval: &cfg})
 	memory := &fakeChatMemoryStore{recent: []model.ChatMessage{{Role: "assistant", Content: "KB Redis 旧历史也不该回灌"}}}
-	svc.SetMemoryStore(memory)
+	svc := NewChatServiceWithDependencies(repos, retriever, ChatConfig{TopK: 5, Retrieval: &cfg}, ChatDependencies{Memory: memory})
 
 	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "两个视频怎么处理失败恢复", 0, &fakeEmbeddingClient{dim: 3}, chat, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
 	if err != nil {
@@ -259,11 +258,11 @@ func TestExecutionPolicyUnknownIntentFallsBackToDirectQA(t *testing.T) {
 func TestExecutionPolicyClampTopKReplacesScatteredIf(t *testing.T) {
 	policy := PolicyFor(IntentDirectQA, ScopeVideo) // TopK=5
 	cases := []struct{ in, want int }{
-		{0, 5},      // <=0 → policy 默认
-		{3, 3},      // caller 传值在 [1,10] 内透传
-		{10, 10},    // 上限边界
-		{50, 10},    // 超上限截到 MaxRetrievalTopK
-		{-1, 5},     // 负值归默认
+		{0, 5},   // <=0 → policy 默认
+		{3, 3},   // caller 传值在 [1,10] 内透传
+		{10, 10}, // 上限边界
+		{50, 10}, // 超上限截到 MaxRetrievalTopK
+		{-1, 5},  // 负值归默认
 	}
 	for _, c := range cases {
 		got := policy.ClampTopK(c.in)

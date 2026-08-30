@@ -22,9 +22,8 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		"最终研究答案 [C1]",
 		`{"done":true,"stop_reason":"已生成带引用回答"}`,
 	}}
-	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
 	ledger := NewEvidenceLedgerService(repos)
-	chatSvc.SetEvidenceLedger(ledger)
+	chatSvc := NewChatServiceWithDependencies(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger})
 	agent := NewVideoAgentService(chatSvc)
 
 	result, err := agent.AskResearch(context.Background(), VideoResearchRequest{

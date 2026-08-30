@@ -12,89 +12,59 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"vid-lens/internal/ai"
 	"vid-lens/internal/middleware"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
-	"vid-lens/internal/pkg/secret"
-	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 )
 
-type fakeVideoAgentService struct {
+type fakeConversationExecution struct {
 	result         *service.VideoAgentResult
 	researchResult *service.VideoAgentResult
 	funnelResult   *service.VideoAgentResult
+	streamResult   *service.VideoAgentResult
+	events         []service.ConversationStreamEvent
 	err            error
 	researchErr    error
 	funnelErr      error
-	req            service.VideoAgentRequest
-	researchReq    service.VideoResearchRequest
-	funnelReq      service.EvidenceFunnelRequest
+	streamErr      error
+	request        service.ConversationRequest
+	streamRequest  service.ConversationRequest
+	canceled       bool
 }
 
-type fakeVideoAgentStreamService struct {
-	result   *service.VideoAgentResult
-	events   []service.AgentStreamEvent
-	err      error
-	request  service.VideoAgentStreamRequest
-	canceled bool
-}
-
-func (s *fakeVideoAgentStreamService) Ask(context.Context, service.VideoAgentRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile) (*service.VideoAgentResult, error) {
-	return nil, errors.New("unexpected legacy agent call")
-}
-
-func (s *fakeVideoAgentStreamService) Stream(ctx context.Context, req service.VideoAgentStreamRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile, emit func(service.AgentStreamEvent) error) (*service.VideoAgentResult, error) {
+func (s *fakeConversationExecution) Execute(_ context.Context, req service.ConversationRequest) (service.ConversationResult, error) {
 	s.request = req
+	switch req.Mode {
+	case "research":
+		return service.ConversationResult{Agent: s.researchResult}, s.researchErr
+	case string(service.VideoAgentEvidenceFunnelTemplate):
+		return service.ConversationResult{Agent: s.funnelResult}, s.funnelErr
+	default:
+		return service.ConversationResult{Agent: s.result}, s.err
+	}
+}
+
+func (s *fakeConversationExecution) Stream(ctx context.Context, req service.ConversationRequest, emit service.ConversationStreamSink) (service.ConversationResult, error) {
+	s.streamRequest = req
 	if s.canceled {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return service.ConversationResult{}, ctx.Err()
 	}
 	for _, event := range s.events {
 		if err := emit(event); err != nil {
-			return nil, err
+			return service.ConversationResult{}, err
 		}
 	}
-	if s.err != nil {
-		return nil, s.err
+	if s.streamErr != nil {
+		return service.ConversationResult{}, s.streamErr
 	}
-	return s.result, nil
-}
-
-func (s *fakeVideoAgentService) Ask(_ context.Context, req service.VideoAgentRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
-	s.req = req
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.result, nil
-}
-
-func (s *fakeVideoAgentService) AskResearch(_ context.Context, req service.VideoResearchRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
-	s.researchReq = req
-	if s.researchErr != nil {
-		return nil, s.researchErr
-	}
-	return s.researchResult, nil
-}
-
-func (s *fakeVideoAgentService) AskEvidenceFunnel(_ context.Context, req service.EvidenceFunnelRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
-	s.funnelReq = req
-	if s.funnelErr != nil {
-		return nil, s.funnelErr
-	}
-	return s.funnelResult, nil
+	return service.ConversationResult{Agent: s.streamResult}, nil
 }
 
 func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
-	}
-	agent := &fakeVideoAgentService{result: &service.VideoAgentResult{
+	execution := &fakeConversationExecution{result: &service.VideoAgentResult{
 		MessageID: 12,
 		Answer:    "agent answer",
 		Template:  string(service.VideoAgentSummarizeTopic),
@@ -102,8 +72,7 @@ func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 		Trace:     []service.VideoAgentStep{{Name: "search topic", Tool: service.VideoAgentToolSearchTranscript, OutputRef: "citations:1"}},
 		Model:     "chat-model",
 	}}
-	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	handler.agentSvc = agent
+	handler := NewChatHandler(nil, execution)
 
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
@@ -136,23 +105,18 @@ func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
 	if body.Code != 200 || body.Data.MessageID != 12 || body.Data.Template != string(service.VideoAgentSummarizeTopic) || len(body.Data.Trace) != 1 {
 		t.Fatalf("body = %+v", body)
 	}
-	if agent.req.UserID != 7 || agent.req.SessionID != 22 || agent.req.TopK != 3 {
-		t.Fatalf("agent request = %+v", agent.req)
+	if execution.request.Kind != service.ConversationKindAgent || execution.request.UserID != 7 || execution.request.SessionID != 22 || execution.request.TopK != 3 {
+		t.Fatalf("agent request = %+v", execution.request)
 	}
 }
 
 func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
-	}
-	agent := &fakeVideoAgentService{researchResult: &service.VideoAgentResult{
+	execution := &fakeConversationExecution{researchResult: &service.VideoAgentResult{
 		Answer:   "research answer",
 		Template: string(service.VideoAgentResearchTemplate),
 	}}
-	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	handler.agentSvc = agent
+	handler := NewChatHandler(nil, execution)
 
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
@@ -168,23 +132,15 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if agent.researchReq.UserID != 7 || agent.researchReq.SessionID != 22 || agent.researchReq.Goal != "请研究 owner 校验的证据" || agent.researchReq.TopK != 4 || agent.researchReq.RunID != "resume-run-1" {
-		t.Fatalf("research request = %+v", agent.researchReq)
-	}
-	if agent.req.Question != "" {
-		t.Fatalf("legacy agent path should not be called: %+v", agent.req)
+	if execution.request.UserID != 7 || execution.request.SessionID != 22 || execution.request.Question != "请研究 owner 校验的证据" || execution.request.TopK != 4 || execution.request.RunID != "resume-run-1" || execution.request.Mode != "research" {
+		t.Fatalf("research request = %+v", execution.request)
 	}
 }
 
 func TestChatHandlerAskAgentEvidenceFunnelModeUsesBoundedPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
-	}
-	agent := &fakeVideoAgentService{funnelResult: &service.VideoAgentResult{Answer: "validated", Template: string(service.VideoAgentEvidenceFunnelTemplate)}}
-	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	handler.agentSvc = agent
+	execution := &fakeConversationExecution{funnelResult: &service.VideoAgentResult{Answer: "validated", Template: string(service.VideoAgentEvidenceFunnelTemplate)}}
+	handler := NewChatHandler(nil, execution)
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
 		c.Set("userID", int64(7))
@@ -197,15 +153,15 @@ func TestChatHandlerAskAgentEvidenceFunnelModeUsesBoundedPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if agent.funnelReq.UserID != 7 || agent.funnelReq.SessionID != 22 || agent.funnelReq.Goal != "核验 owner" || agent.funnelReq.TopK != 3 || agent.funnelReq.RunID != "funnel-run" {
-		t.Fatalf("funnel request = %+v", agent.funnelReq)
+	if execution.request.UserID != 7 || execution.request.SessionID != 22 || execution.request.Question != "核验 owner" || execution.request.TopK != 3 || execution.request.RunID != "funnel-run" || execution.request.Mode != string(service.VideoAgentEvidenceFunnelTemplate) {
+		t.Fatalf("funnel request = %+v", execution.request)
 	}
 }
 
 func TestChatHandlerAskAgentRequiresAuthOnRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewChatHandler(nil, nil, ai.NewFactory())
+	handler := NewChatHandler(nil, nil)
 	router.POST("/api/v1/chat/sessions/:session_id/messages/agent", middleware.JWTAuth("secret"), handler.AskAgent)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/sessions/22/messages/agent", bytes.NewBufferString(`{"question":"q"}`))
@@ -221,7 +177,7 @@ func TestChatHandlerAskAgentRequiresAuthOnRoute(t *testing.T) {
 func TestChatHandlerAskAgentStreamRequiresAuthOnRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewChatHandler(nil, nil, ai.NewFactory())
+	handler := NewChatHandler(nil, nil)
 	router.POST("/api/v1/chat/sessions/:session_id/messages/agent/stream", middleware.JWTAuth("secret"), handler.AskAgentStream)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/sessions/22/messages/agent/stream", bytes.NewBufferString(`{"question":"q","mode":"agent"}`))
@@ -236,12 +192,8 @@ func TestChatHandlerAskAgentStreamRequiresAuthOnRoute(t *testing.T) {
 
 func TestChatHandlerAskAgentReturnsClearRAGMissingError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
-	}
-	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	handler.agentSvc = &fakeVideoAgentService{err: errors.New("当前视频尚未构建 RAG 索引")}
+	execution := &fakeConversationExecution{err: errors.New("当前视频尚未构建 RAG 索引")}
+	handler := NewChatHandler(nil, execution)
 
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
@@ -268,21 +220,16 @@ func TestChatHandlerAskAgentReturnsClearRAGMissingError(t *testing.T) {
 
 func TestChatHandlerAskAgentStreamWritesEventsAndForwardsRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
-	}
-	streamer := &fakeVideoAgentStreamService{
-		result: &service.VideoAgentResult{MessageID: 21, Answer: "agent answer"},
-		events: []service.AgentStreamEvent{
+	execution := &fakeConversationExecution{
+		streamResult: &service.VideoAgentResult{MessageID: 21, Answer: "agent answer"},
+		events: []service.ConversationStreamEvent{
 			{Type: service.AgentEventRunStart, Data: service.AgentRunStartEvent{RunID: "run-1", Mode: service.AgentStreamMode, ScopeType: model.ChatScopeVideo, TaskID: 9}},
 			{Type: service.AgentEventAnswer, Data: "agent answer"},
 			{Type: service.AgentEventCitations, Data: []service.Citation{}},
 			{Type: service.AgentEventDone, Data: service.AgentDoneEvent{RunID: "run-1", MessageID: 21}},
 		},
 	}
-	h := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	h.agentSvc = streamer
+	h := NewChatHandler(nil, execution)
 
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent/stream", func(c *gin.Context) {
@@ -305,23 +252,18 @@ func TestChatHandlerAskAgentStreamWritesEventsAndForwardsRequest(t *testing.T) {
 			t.Fatalf("stream body missing %q: %s", fragment, body)
 		}
 	}
-	if streamer.request.UserID != 7 || streamer.request.SessionID != 22 || streamer.request.Question != "总结一下" || streamer.request.TopK != 3 || streamer.request.Mode != "agent" || streamer.request.AgentProfile != "default" {
-		t.Fatalf("stream request = %+v", streamer.request)
+	if execution.streamRequest.Kind != service.ConversationKindAgent || execution.streamRequest.UserID != 7 || execution.streamRequest.SessionID != 22 || execution.streamRequest.Question != "总结一下" || execution.streamRequest.TopK != 3 || execution.streamRequest.Mode != "agent" || execution.streamRequest.AgentProfile != "default" {
+		t.Fatalf("stream request = %+v", execution.streamRequest)
 	}
 }
 
 func TestChatHandlerAskAgentStreamWritesErrorEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	profileSvc := newChatHandlerProfileServiceForTest(t)
-	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
-		t.Fatalf("Create profile: %v", err)
+	execution := &fakeConversationExecution{
+		events:    []service.ConversationStreamEvent{{Type: service.AgentEventRunStart, Data: service.AgentRunStartEvent{RunID: "run-error", Mode: service.AgentStreamMode, ScopeType: model.ChatScopeVideo}}},
+		streamErr: errors.New("agent backend failed"),
 	}
-	streamer := &fakeVideoAgentStreamService{
-		events: []service.AgentStreamEvent{{Type: service.AgentEventRunStart, Data: service.AgentRunStartEvent{RunID: "run-error", Mode: service.AgentStreamMode, ScopeType: model.ChatScopeVideo}}},
-		err:    errors.New("agent backend failed"),
-	}
-	h := NewChatHandler(nil, profileSvc, ai.NewFactory())
-	h.agentSvc = streamer
+	h := NewChatHandler(nil, execution)
 
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent/stream", func(c *gin.Context) {
@@ -354,7 +296,7 @@ func TestChatHandlerListMessagesReturnsAgentSnapshotVerbatim(t *testing.T) {
 		t.Fatalf("create message: %v", err)
 	}
 
-	h := NewChatHandler(service.NewChatService(repos, nil, service.ChatConfig{}), nil, nil)
+	h := NewChatHandler(service.NewChatService(repos, nil, service.ChatConfig{}), nil)
 	r := gin.New()
 	r.GET("/chat/sessions/:session_id/messages", withTestUser(7), h.ListMessages)
 	rec := serveKnowledgeBaseRequest(r, http.MethodGet, "/chat/sessions/"+strconv.FormatInt(session.ID, 10)+"/messages", "")
@@ -370,21 +312,4 @@ func TestChatHandlerListMessagesReturnsAgentSnapshotVerbatim(t *testing.T) {
 	if len(body.Data) != 1 || body.Data[0].RetrievalSnapshot == nil || *body.Data[0].RetrievalSnapshot != snapshot {
 		t.Fatalf("messages = %+v", body.Data)
 	}
-}
-
-func newChatHandlerProfileServiceForTest(t *testing.T) *service.AIProfileService {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.UserAIProfile{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	repos := repository.NewRepositories(db)
-	codec, err := secret.NewCodec("0123456789abcdef0123456789abcdef")
-	if err != nil {
-		t.Fatalf("NewCodec() error = %v", err)
-	}
-	return service.NewAIProfileService(repos.AIProfile, codec, nil)
 }

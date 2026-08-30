@@ -20,7 +20,7 @@ func TestChatHandlerCreatesAndListsKnowledgeBaseSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatSvc := service.NewChatService(repos, nil, service.ChatConfig{})
-	h := NewChatHandler(chatSvc, nil, nil)
+	h := NewChatHandler(chatSvc, nil)
 	r := gin.New()
 	r.POST("/chat/sessions", withTestUser(7), h.CreateSession)
 	r.GET("/chat/sessions", withTestUser(7), h.ListSessions)
@@ -39,7 +39,7 @@ func TestChatHandlerLegacyTaskIDStillCreatesVideoSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	_, repos, _ := newKnowledgeBaseHandlerServiceTestEnv(t)
 	task := createKnowledgeBaseHandlerTask(t, repos, 7, "legacy")
-	h := NewChatHandler(service.NewChatService(repos, nil, service.ChatConfig{}), nil, nil)
+	h := NewChatHandler(service.NewChatService(repos, nil, service.ChatConfig{}), nil)
 	r := gin.New()
 	r.POST("/chat/sessions", withTestUser(7), h.CreateSession)
 	rec := serveKnowledgeBaseRequest(r, http.MethodPost, "/chat/sessions", fmt.Sprintf(`{"task_id":%d}`, task.ID))

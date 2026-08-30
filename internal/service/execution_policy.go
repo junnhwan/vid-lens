@@ -37,10 +37,10 @@ const (
 const (
 	IntentVideoOverview  Intent = "video_overview"  // 概览类问题，关检索走视频上下文直拼
 	IntentDirectQA       Intent = "direct_qa"       // 精确问答，开检索 + rerank
-	IntentTopicCompare   Intent = "topic_compare"  // 跨视频对比，Scope=collection
-	IntentSeriesLocate   Intent = "series_locate"  // 跨视频系列定位，Scope=collection
-	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位，开检索 + Signal 时间戳过滤（Signal 提取留 docs/architecture/retrieval.md）
-	IntentSmallTalk      Intent = "small_talk"     // 闲聊，关检索关 LLM 直答（占位，真分类器在 docs/architecture/retrieval.md）
+	IntentTopicCompare   Intent = "topic_compare"   // 跨视频对比，Scope=collection
+	IntentSeriesLocate   Intent = "series_locate"   // 跨视频系列定位，Scope=collection
+	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位；当前显式降级为 direct_qa 参数，不伪造时间过滤
+	IntentSmallTalk      Intent = "small_talk"      // 闲聊，关检索关 LLM 直答（占位，真分类器在 docs/architecture/retrieval.md）
 )
 
 // ExecutionPolicy: intent → 检索/生成参数映射值对象（CONTEXT.md）。
@@ -109,9 +109,9 @@ func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 		// 故集合档关 BM25、纯向量。recent 历史关断（KB member-safe，见 prepareRAGChat）。
 		return directQAPolicy(ScopeCollection)
 	case IntentTimelineLocate:
-		// 时间线定位类问题靠检索 + Signal 时间戳过滤缩范围。Signal 提取（时间戳
-		// 正则等）是 docs/architecture/retrieval.md 的事，本 spec 只留接口位：Retrieve 开、参数同 direct_qa，
-		// Signal 过滤在 docs/architecture/retrieval.md 接到 Retrieve 路径后补。
+		// 当前 video_chunks 没有可信时间范围，故不能执行或宣称时间过滤。
+		// 保持 direct_qa 的检索与 rerank 参数，通过 citation 的已有时间信息回答定位；
+		// 未来只有在事实源提供可靠范围后才新增过滤契约。
 		return directQAPolicy(scope)
 	case IntentSmallTalk:
 		// 闲聊不烧检索 + 生成。占位分类器当前不会产出此 intent（见

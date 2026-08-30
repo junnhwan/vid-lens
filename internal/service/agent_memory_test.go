@@ -457,10 +457,9 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 			Content: "历史记忆说旧主题", SourceType: "user_confirmation", SourceRef: "message:1", Version: 2,
 		}},
 	}
-	chatSvc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
+	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
 		TaskID: task.ID, EvidenceID: "ev-current", ChunkID: 1, ChunkIndex: 0, Score: .9, Content: "当前视频证据说新主题",
-	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3})
-	chatSvc.SetLongTermMemory(staticMemoryProvider{snapshot: memory}, failingMemoryCapture{})
+	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: staticMemoryProvider{snapshot: memory}, MemoryCapture: failingMemoryCapture{}})
 	client := &scriptedChatClient{responses: []string{"not-json", "以当前证据为准 [C1]"}}
 	result, err := NewVideoAgentService(chatSvc).Ask(context.Background(), VideoAgentRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "主题是什么？", TopK: 1,
@@ -497,10 +496,9 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 
 func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
-	chatSvc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
+	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
 		TaskID: task.ID, EvidenceID: "ev-memory-fail-open", ChunkID: 1, ChunkIndex: 0, Score: .9, Content: "当前视频证据",
-	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3})
-	chatSvc.SetLongTermMemory(failingLongTermMemoryProvider{}, failingMemoryCapture{})
+	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: failingLongTermMemoryProvider{}, MemoryCapture: failingMemoryCapture{}})
 	agent := NewVideoAgentService(chatSvc)
 	result, err := agent.Ask(context.Background(), VideoAgentRequest{UserID: session.UserID, SessionID: session.ID, Question: "请回答", TopK: 1},
 		&fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "主回答成功 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})

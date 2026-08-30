@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": { "@/*": ["./*"] },
+    "incremental": true,
+    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo"
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "../components/**/*.ts",
+    "../components/**/*.tsx",
+    "../lib/**/*.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": ["../node_modules"]
+}

@@ -6,14 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
-
-var errAgentExecutionBusy = errors.New("agent execution step is owned by another worker")
 
 const videoResearchPlannerCall = "video_research_planner"
 
@@ -23,10 +18,9 @@ func (e *invalidResearchDecisionError) Error() string { return e.cause.Error() }
 func (e *invalidResearchDecisionError) Unwrap() error { return e.cause }
 
 type durableResearchExecution struct {
-	repo   *repository.AgentExecutionRepository
-	userID int64
-	runID  string
-	now    func() time.Time
+	journal *AgentExecutionJournal
+	userID  int64
+	runID   string
 }
 
 type durableResearchDecision struct {
@@ -42,11 +36,11 @@ type durableResearchToolCheckpoint struct {
 	Observation VideoResearchObservation `json:"observation"`
 }
 
-func (r *VideoResearchRunner) SetDurableExecution(repo *repository.AgentExecutionRepository, userID int64, runID string) error {
-	if r == nil || repo == nil || userID <= 0 || strings.TrimSpace(runID) == "" {
+func (r *VideoResearchRunner) SetDurableExecution(journal *AgentExecutionJournal, userID int64, runID string) error {
+	if r == nil || journal == nil || userID <= 0 || strings.TrimSpace(runID) == "" {
 		return errors.New("durable video research execution parameters are invalid")
 	}
-	r.execution = &durableResearchExecution{repo: repo, userID: userID, runID: runID, now: func() time.Time { return time.Now().UTC() }}
+	r.execution = &durableResearchExecution{journal: journal, userID: userID, runID: runID}
 	return nil
 }
 
@@ -54,7 +48,7 @@ func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *V
 	if r == nil || r.execution == nil || state == nil {
 		return false, nil
 	}
-	records, err := r.execution.repo.GetExecution(ctx, r.execution.userID, r.execution.runID)
+	records, err := r.execution.journal.Recover(ctx, r.execution.userID, r.execution.runID)
 	if err != nil {
 		return false, err
 	}
@@ -214,86 +208,44 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	execution := r.execution
 	sequence := state.CurrentStep*2 + 1
 	stepID := fmt.Sprintf("plan-%d", state.CurrentStep+1)
-	now := execution.now()
 	definitions := r.registry.Definitions()
 	inputSummary, inputDigest := safePlannerInputSummary(state, definitions)
 	plannerContextChars := plannerContextChars(state, definitions)
-	callDigest := digestAgentValue(execution.runID + ":" + stepID + ":1:" + videoResearchPlannerCall + ":" + inputDigest)
-	claim, err := execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
-		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, Sequence: sequence,
-		Kind: "plan", Action: "select_next_action", SafeReason: "select the next allow-listed action",
-		InputSummary: inputSummary, ArgumentsDigest: inputDigest, CallDigest: callDigest,
+	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
+		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
+		Kind: "plan", Action: "select_next_action", DigestAction: videoResearchPlannerCall,
+		SafeReason: "select the next allow-listed action", InputSummary: inputSummary, ArgumentsDigest: inputDigest,
 		ToolName: videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
-		ReplaySafe: false, LLMCall: true, ContextChars: plannerContextChars, EstimatedPromptTokens: plannerContextChars / 4,
-		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
+		LLMCall: true, ContextChars: plannerContextChars, EstimatedPromptTokens: plannerContextChars / 4,
+		FailureCode: "planner_failure",
+	}, func() (AgentJournalResult, error) {
+		decision, usage, planErr := callVideoResearchPlanner(ctx, r.planner, state, definitions)
+		if planErr == nil {
+			decision, planErr = r.validatedResearchDecision(state, runtime.TaskID, decision)
+			if planErr != nil {
+				planErr = &invalidResearchDecisionError{cause: planErr}
+			}
+		}
+		return AgentJournalResult{
+			Checkpoint: durableResearchDecisionFrom(decision), OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"),
+			Usage: usage, MetricsJSON: usageMetrics(usage),
+		}, planErr
 	})
 	if err != nil {
 		return VideoResearchDecision{}, false, err
 	}
-	switch claim.Outcome {
-	case repository.AgentStepClaimCompleted:
-		if claim.ToolCall == nil || claim.ToolCall.CallKind != model.AgentCallKindPlannerLLM || claim.ToolCall.ToolName != videoResearchPlannerCall || claim.ToolCall.ArgumentsDigest != inputDigest || claim.ToolCall.CallDigest != callDigest {
-			return VideoResearchDecision{}, false, errors.New("persisted planner call does not match the current safe input")
-		}
-		var stored durableResearchDecision
-		if err := json.Unmarshal([]byte(claim.Step.ResultCheckpoint), &stored); err != nil {
-			return VideoResearchDecision{}, false, fmt.Errorf("decode persisted planner decision: %w", err)
-		}
-		decision, err := r.validatedResearchDecision(state, runtime.TaskID, stored.toDecision())
-		if err != nil {
-			return VideoResearchDecision{}, false, fmt.Errorf("validate persisted planner decision: %w", err)
-		}
-		return decision, false, nil
-	case repository.AgentStepClaimExhausted:
+	if journalResult.BudgetExhausted {
 		return VideoResearchDecision{}, true, nil
-	case repository.AgentStepClaimBusy:
-		return VideoResearchDecision{}, false, errAgentExecutionBusy
-	case repository.AgentStepClaimAmbiguous, repository.AgentStepClaimTerminal:
-		return VideoResearchDecision{}, false, fmt.Errorf("planner step %s cannot be replayed safely: %s", stepID, claim.Outcome)
-	case repository.AgentStepClaimAcquired:
-	default:
-		return VideoResearchDecision{}, false, fmt.Errorf("planner step %s claim failed", stepID)
 	}
-
-	decision, usage, planErr := callVideoResearchPlanner(ctx, r.planner, state, definitions)
-	if planErr == nil {
-		decision, planErr = r.validatedResearchDecision(state, runtime.TaskID, decision)
-		if planErr != nil {
-			planErr = &invalidResearchDecisionError{cause: planErr}
-		}
+	var stored durableResearchDecision
+	if err := json.Unmarshal(journalResult.Checkpoint, &stored); err != nil {
+		return VideoResearchDecision{}, false, fmt.Errorf("decode persisted planner decision: %w", err)
 	}
-	if planErr != nil {
-		cancelled := errors.Is(planErr, context.Canceled) || errors.Is(planErr, context.DeadlineExceeded)
-		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
-			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "planner_failure", ErrorMessage: safeAgentError(planErr),
-			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
-			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
-			ContextChars: usage.ContextChars, ContextUsageSource: usageContextSource(usage), MetricsJSON: usageMetrics(usage), Cancelled: cancelled,
-			Now: execution.now(),
-		})
-		return VideoResearchDecision{}, false, planErr
-	}
-	checkpoint := durableResearchDecisionFrom(decision)
-	encoded, err := json.Marshal(checkpoint)
+	decision, err := r.validatedResearchDecision(state, runtime.TaskID, stored.toDecision())
 	if err != nil {
-		return VideoResearchDecision{}, false, err
+		return VideoResearchDecision{}, false, fmt.Errorf("validate persisted planner decision: %w", err)
 	}
-	completed, err := execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
-		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-		OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"), ResultCheckpoint: string(encoded),
-		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
-		UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
-		ContextChars: usage.ContextChars, ContextUsageSource: usageContextSource(usage), MetricsJSON: usageMetrics(usage),
-		Now: execution.now(),
-	})
-	if err != nil {
-		return VideoResearchDecision{}, false, err
-	}
-	if !completed {
-		return VideoResearchDecision{}, false, errors.New("planner completion CAS failed")
-	}
-	return checkpoint.toDecision(), false, nil
+	return decision, false, nil
 }
 
 func callVideoResearchPlanner(ctx context.Context, planner VideoResearchPlanner, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
@@ -338,72 +290,43 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 	execution := r.execution
 	sequence := state.CurrentStep*2 + 2
 	stepID := fmt.Sprintf("tool-%d", state.CurrentStep+1)
-	now := execution.now()
 	inputSummary := safeResearchArgumentsSummary(decision.Tool, decision.Arguments)
 	argsDigest := digestAgentValue(string(decision.Arguments))
 	contextChars := researchToolContextChars(decision.Tool, decision.Arguments)
-	claim, err := execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
-		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, Sequence: sequence,
+	usage := VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}
+	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
+		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
 		Kind: videoAgentStepKind(decision.Tool), Action: decision.Tool, SafeReason: safeToolReason(decision.Tool),
-		InputSummary: inputSummary, ArgumentsDigest: argsDigest,
-		CallDigest: digestAgentValue(execution.runID + ":" + stepID + ":1:" + decision.Tool + ":" + argsDigest), ToolName: decision.Tool,
-		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool), VisionCall: visionAgentAction(decision.Tool), RetrievalCall: retrievalAgentAction(decision.Tool), ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4,
-		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
+		InputSummary: inputSummary, ArgumentsDigest: argsDigest, ToolName: decision.Tool,
+		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool),
+		VisionCall: visionAgentAction(decision.Tool), RetrievalCall: retrievalAgentAction(decision.Tool),
+		ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4, FailureCode: "tool_failure",
+	}, func() (AgentJournalResult, error) {
+		result, toolErr := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
+		var observation VideoResearchObservation
+		if toolErr == nil {
+			observation, toolErr = r.observeResearchTool(state, runtime.TaskID, result)
+		}
+		return AgentJournalResult{
+			Checkpoint: durableResearchToolCheckpoint{Result: result, Observation: observation},
+			OutputRef:  agentToolOutputRef(result.Step), EvidenceRefs: researchObservationEvidenceRefs(observation),
+			Usage: usage, MetricsJSON: usageMetrics(usage),
+		}, toolErr
 	})
 	if err != nil {
 		return VideoAgentToolResult{}, VideoResearchObservation{}, false, err
 	}
-	switch claim.Outcome {
-	case repository.AgentStepClaimCompleted:
-		if claim.Step.Action != decision.Tool || claim.ToolCall == nil || claim.ToolCall.ToolName != decision.Tool || claim.ToolCall.ArgumentsDigest != argsDigest {
-			return VideoAgentToolResult{}, VideoResearchObservation{}, false, errors.New("persisted tool checkpoint does not match the validated action")
-		}
-		var stored durableResearchToolCheckpoint
-		if err := json.Unmarshal([]byte(claim.Step.ResultCheckpoint), &stored); err != nil {
-			return VideoAgentToolResult{}, VideoResearchObservation{}, false, fmt.Errorf("decode persisted tool checkpoint: %w", err)
-		}
-		return stored.Result, stored.Observation, false, nil
-	case repository.AgentStepClaimExhausted:
+	if journalResult.BudgetExhausted {
 		return VideoAgentToolResult{}, VideoResearchObservation{}, true, nil
-	case repository.AgentStepClaimBusy:
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, errAgentExecutionBusy
-	case repository.AgentStepClaimAmbiguous, repository.AgentStepClaimTerminal:
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, fmt.Errorf("tool step %s cannot be replayed safely: %s", stepID, claim.Outcome)
-	case repository.AgentStepClaimAcquired:
-	default:
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, fmt.Errorf("tool step %s claim failed", stepID)
 	}
-
-	result, toolErr := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
-	var observation VideoResearchObservation
-	if toolErr == nil {
-		observation, toolErr = r.observeResearchTool(state, runtime.TaskID, result)
+	var stored durableResearchToolCheckpoint
+	if err := json.Unmarshal(journalResult.Checkpoint, &stored); err != nil {
+		return VideoAgentToolResult{}, VideoResearchObservation{}, false, fmt.Errorf("decode persisted tool checkpoint: %w", err)
 	}
-	if toolErr != nil {
-		cancelled := errors.Is(toolErr, context.Canceled) || errors.Is(toolErr, context.DeadlineExceeded)
-		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
-			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "tool_failure", ErrorMessage: safeAgentError(toolErr), ContextChars: contextChars, ContextUsageSource: usageSourceForContext(contextChars),
-			MetricsJSON: usageMetrics(VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}), Cancelled: cancelled, Now: execution.now(),
-		})
-		return result, VideoResearchObservation{}, false, toolErr
+	if stored.Result.Step.Tool != decision.Tool || stored.Observation.Tool != decision.Tool {
+		return VideoAgentToolResult{}, VideoResearchObservation{}, false, errors.New("persisted tool checkpoint does not match the validated action")
 	}
-	checkpoint, err := json.Marshal(durableResearchToolCheckpoint{Result: result, Observation: observation})
-	if err != nil {
-		return result, observation, false, err
-	}
-	completed, err := execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
-		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-		OutputRef: agentToolOutputRef(result.Step), ResultCheckpoint: string(checkpoint), EvidenceRefs: researchObservationEvidenceRefs(observation), Now: execution.now(),
-		ContextChars: contextChars, ContextUsageSource: usageSourceForContext(contextChars), MetricsJSON: usageMetrics(VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}),
-	})
-	if err != nil {
-		return result, observation, false, err
-	}
-	if !completed {
-		return result, observation, false, errors.New("tool completion CAS failed")
-	}
-	return result, observation, false, nil
+	return stored.Result, stored.Observation, false, nil
 }
 
 func (r *VideoResearchRunner) validatedResearchDecision(state VideoResearchState, taskID int64, decision VideoResearchDecision) (VideoResearchDecision, error) {
@@ -532,7 +455,7 @@ func usageMetrics(usage VideoResearchPlannerCallUsage) string {
 
 func mergeAgentUsageMetrics(raw string, usage VideoResearchPlannerCallUsage, contextChars int64) string {
 	metrics := map[string]any{}
-	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &metrics) != nil {
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &metrics) != nil || metrics == nil {
 		metrics = map[string]any{}
 	}
 	if contextChars > 0 {

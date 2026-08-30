@@ -3,20 +3,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  Video, Settings, LogIn, Upload, MessageCircle,
+  Video, Settings, LogIn, Upload, MessageCircle, Brain,
 } from 'lucide-react'
 
-export type ProtoPage = 'dashboard' | 'chat' | 'settings' | 'login'
+export type ProtoPage = 'dashboard' | 'chat' | 'settings' | 'login' | 'memory'
 
 const NAV: { page: ProtoPage; href: string; icon: React.ReactNode; label: string; desc: string }[] = [
   { page: 'dashboard', href: '/prototype/dashboard', icon: <Video className="w-4 h-4" />, label: '工作台原型', desc: '视频库布局' },
   { page: 'chat', href: '/prototype/agent-chat', icon: <MessageCircle className="w-4 h-4" />, label: 'Agent 原型', desc: '问答 UI' },
   { page: 'settings', href: '/prototype/settings', icon: <Settings className="w-4 h-4" />, label: '设置原型', desc: 'AI 配置布局' },
+  { page: 'memory', href: '/prototype/memory', icon: <Brain className="w-4 h-4" />, label: '记忆治理原型', desc: '查看 / 撤回 / 删除' },
 ]
 
 export function detectPage(pathname: string): ProtoPage {
   if (pathname.startsWith('/prototype/agent-chat')) return 'chat'
   if (pathname.startsWith('/prototype/settings')) return 'settings'
+  if (pathname.startsWith('/prototype/memory')) return 'memory'
   if (pathname.startsWith('/prototype/login')) return 'login'
   return 'dashboard'
 }
@@ -172,6 +174,7 @@ export function ProtoPageNav() {
     { href: '/prototype', label: '入口' },
     { href: '/prototype/dashboard', label: '工作台' },
     { href: '/prototype/agent-chat', label: 'Agent' },
+    { href: '/prototype/memory', label: '记忆' },
   ]
 
   return (

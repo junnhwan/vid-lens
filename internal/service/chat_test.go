@@ -162,10 +162,9 @@ func TestChatServiceAskRecordsEmbeddingAndLLMCalls(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+	svc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "AI 调用审计测试片段"},
-	}}, ChatConfig{TopK: 5, MinScore: 0.3})
-	svc.SetAIRecorder(NewAIObserver(repos))
+	}}, ChatConfig{TopK: 5, MinScore: 0.3}, ChatDependencies{Recorder: NewAIObserver(repos)})
 
 	_, err := svc.Ask(context.Background(), 7, session.ID, "审计会记录哪些字段？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
 		EmbeddingProvider: "openai_compatible",
@@ -230,8 +229,7 @@ func TestChatServiceAskUsesRequestedTopKAndRedisRecentMemory(t *testing.T) {
 	memory := &fakeChatMemoryStore{recent: []model.ChatMessage{
 		{Role: "user", Content: "这条 Redis 最近记忆应该进入 prompt"},
 	}}
-	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, MinScore: 0.3, RecentTurns: 8})
-	svc.SetMemoryStore(memory)
+	svc := NewChatServiceWithDependencies(repos, retriever, ChatConfig{TopK: 5, MinScore: 0.3, RecentTurns: 8}, ChatDependencies{Memory: memory})
 
 	_, err := svc.Ask(context.Background(), 7, session.ID, "使用 topK 吗？", 3, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",

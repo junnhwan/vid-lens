@@ -2,22 +2,20 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"vid-lens/internal/ai"
 	"vid-lens/internal/middleware"
 	"vid-lens/internal/pkg/response"
 	"vid-lens/internal/service"
 )
 
 type ChatHandler struct {
-	chatSvc    *service.ChatService
-	agentSvc   videoAgentAsker
-	profileSvc *service.AIProfileService
-	aiFactory  *ai.Factory
-	ledgerSvc  *service.EvidenceLedgerService
+	chatSvc   *service.ChatService
+	execution conversationExecutor
+	ledgerSvc *service.EvidenceLedgerService
 }
 
 func (h *ChatHandler) SetEvidenceLedgerService(ledger *service.EvidenceLedgerService) {
@@ -68,28 +66,13 @@ func (h *ChatHandler) CorrectEvidenceClaim(c *gin.Context) {
 	response.OK(c, claim)
 }
 
-type videoAgentAsker interface {
-	Ask(ctx context.Context, req service.VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
+type conversationExecutor interface {
+	Execute(ctx context.Context, req service.ConversationRequest) (service.ConversationResult, error)
+	Stream(ctx context.Context, req service.ConversationRequest, sink service.ConversationStreamSink) (service.ConversationResult, error)
 }
 
-type videoResearchAsker interface {
-	AskResearch(ctx context.Context, req service.VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
-}
-
-type videoEvidenceFunnelAsker interface {
-	AskEvidenceFunnel(ctx context.Context, req service.EvidenceFunnelRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
-}
-
-type videoAgentStreamer interface {
-	Stream(ctx context.Context, req service.VideoAgentStreamRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(service.AgentStreamEvent) error) (*service.VideoAgentResult, error)
-}
-
-func NewChatHandler(chatSvc *service.ChatService, profileSvc *service.AIProfileService, aiFactory *ai.Factory) *ChatHandler {
-	var agentSvc videoAgentAsker
-	if chatSvc != nil {
-		agentSvc = service.NewVideoAgentService(chatSvc)
-	}
-	return &ChatHandler{chatSvc: chatSvc, agentSvc: agentSvc, profileSvc: profileSvc, aiFactory: aiFactory}
+func NewChatHandler(chatSvc *service.ChatService, execution conversationExecutor) *ChatHandler {
+	return &ChatHandler{chatSvc: chatSvc, execution: execution}
 }
 
 func (h *ChatHandler) CreateSession(c *gin.Context) {
@@ -172,28 +155,19 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 		return
 	}
 
-	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
+	if h.execution == nil {
+		response.BadRequest(c, "chat service unavailable")
+		return
+	}
+	result, err := h.execution.Execute(c.Request.Context(), service.ConversationRequest{
+		Kind: service.ConversationKindChat, UserID: userID, SessionID: sessionID,
+		Question: req.Question, TopK: req.TopK, Mode: req.Mode,
+	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	chatClient, err := h.aiFactory.NewChatClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	result, err := h.chatSvc.AskWithMode(c.Request.Context(), service.ChatMode(req.Mode), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	response.OK(c, result)
+	response.OK(c, result.Payload())
 }
 
 // AskAgent handles the experimental tool-loop video QA path. mode=research
@@ -217,70 +191,19 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	if h.agentSvc == nil {
+	if h.execution == nil {
 		response.BadRequest(c, "agent 实验功能不可用")
 		return
 	}
-
-	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
+	result, err := h.execution.Execute(c.Request.Context(), service.ConversationRequest{
+		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID,
+		Question: req.Question, TopK: req.TopK, Mode: req.Mode, RunID: req.RunID,
+	})
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	chatClient, err := h.aiFactory.NewChatClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if req.Mode == "research" {
-		researcher, ok := h.agentSvc.(videoResearchAsker)
-		if !ok {
-			response.BadRequest(c, "Video Research Agent 实验功能不可用")
-			return
-		}
-		result, err := researcher.AskResearch(c.Request.Context(), service.VideoResearchRequest{
-			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
-		}, embeddingClient, chatClient, *profile)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		response.OK(c, result)
-		return
-	}
-	if req.Mode == string(service.VideoAgentEvidenceFunnelTemplate) {
-		funnel, ok := h.agentSvc.(videoEvidenceFunnelAsker)
-		if !ok {
-			response.BadRequest(c, "Video Evidence Funnel 实验功能不可用")
-			return
-		}
-		result, err := funnel.AskEvidenceFunnel(c.Request.Context(), service.EvidenceFunnelRequest{
-			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
-		}, embeddingClient, chatClient, *profile)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		response.OK(c, result)
-		return
-	}
-
-	result, err := h.agentSvc.Ask(c.Request.Context(), service.VideoAgentRequest{
-		UserID:    userID,
-		SessionID: sessionID,
-		Question:  req.Question,
-		TopK:      req.TopK,
-	}, embeddingClient, chatClient, *profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	response.OK(c, result)
+	response.OK(c, result.Payload())
 }
 
 func (h *ChatHandler) AskStream(c *gin.Context) {
@@ -301,33 +224,29 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 		return
 	}
 
-	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
-	if err != nil {
-		response.BadRequest(c, err.Error())
+	if h.execution == nil {
+		response.BadRequest(c, "chat service unavailable")
 		return
 	}
-	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	chatClient, err := h.aiFactory.NewChatClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	_, err = h.chatSvc.AskStreamWithMode(c.Request.Context(), service.ChatMode(req.Mode), userID, sessionID, req.Question, req.TopK, embeddingClient, chatClient, *profile, func(event service.ChatStreamEvent) error {
+	started := false
+	_, err = h.execution.Stream(c.Request.Context(), service.ConversationRequest{
+		Kind: service.ConversationKindChat, UserID: userID, SessionID: sessionID,
+		Question: req.Question, TopK: req.TopK, Mode: req.Mode,
+	}, func(event service.ConversationStreamEvent) error {
+		startConversationSSE(c)
+		started = true
 		c.SSEvent(event.Type, event.Data)
 		c.Writer.Flush()
-		return nil
+		return c.Request.Context().Err()
 	})
 	if err != nil {
+		var preparation *service.ConversationPreparationError
+		if !started && errors.As(err, &preparation) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		log.Printf("chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
+		startConversationSSE(c)
 		c.SSEvent("error", gin.H{"message": err.Error()})
 		c.Writer.Flush()
 	}
@@ -353,36 +272,19 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	streamer, ok := h.agentSvc.(videoAgentStreamer)
-	if !ok {
+	if h.execution == nil {
 		response.BadRequest(c, "agent 流式功能不可用")
 		return
 	}
 
-	profile, err := h.profileSvc.GetDefaultAIProfile(userID)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	chatClient, err := h.aiFactory.NewChatClient(*profile)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
 	runID := ""
-	emit := func(event service.AgentStreamEvent) error {
+	started := false
+	emit := func(event service.ConversationStreamEvent) error {
 		if err := c.Request.Context().Err(); err != nil {
 			return err
 		}
+		startConversationSSE(c)
+		started = true
 		if event.Type == service.AgentEventRunStart {
 			if start, ok := event.Data.(service.AgentRunStartEvent); ok {
 				runID = start.RunID
@@ -393,15 +295,27 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 		return c.Request.Context().Err()
 	}
 
-	_, err = streamer.Stream(c.Request.Context(), service.VideoAgentStreamRequest{
-		UserID: userID, SessionID: sessionID, Question: req.Question,
+	_, err = h.execution.Stream(c.Request.Context(), service.ConversationRequest{
+		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID, Question: req.Question,
 		TopK: req.TopK, Mode: req.Mode, AgentProfile: req.AgentProfile,
-	}, embeddingClient, chatClient, *profile, emit)
+	}, emit)
 	if err != nil {
+		var preparation *service.ConversationPreparationError
+		if !started && errors.As(err, &preparation) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		log.Printf("agent chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
 		if c.Request.Context().Err() == nil {
+			startConversationSSE(c)
 			c.SSEvent(service.AgentEventError, service.AgentErrorEvent{RunID: runID, Message: err.Error()})
 			c.Writer.Flush()
 		}
 	}
+}
+
+func startConversationSSE(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
 }

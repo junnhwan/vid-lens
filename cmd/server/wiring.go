@@ -150,22 +150,20 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		}
 		return service.NewModelReranker(client)
 	}
-	chatSvc := service.NewChatService(deps.repos, deps.ragRetriever, service.ChatConfig{
+	chatConfig := service.ChatConfig{
 		TopK:                 deps.cfg.RAG.TopK,
 		CandidateK:           deps.cfg.RAG.CandidateK,
 		MinScore:             deps.cfg.RAG.MinScore,
 		RecentTurns:          deps.cfg.RAG.RecentTurns,
 		Retrieval:            &retrievalCfg,
 		ModelRerankerFactory: modelRerankerFactory,
-	})
+	}
 	evidenceLedgerSvc := service.NewEvidenceLedgerService(deps.repos)
-	chatSvc.SetEvidenceLedger(evidenceLedgerSvc)
-	chatSvc.SetAIRecorder(aiObserver)
-	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
 	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
 	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)
 	var memoryWriter *service.AsyncMemoryWriter
 	var memoryCapture *service.AsyncMemoryCapture
+	var longTermMemory service.MemoryProvider
 	if deps.cfg.Memory.Enabled && deps.repos.Memory != nil {
 		var projector service.MemoryProjector
 		var memoryEmbedder service.MemoryEmbedder
@@ -195,13 +193,15 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		}
 		provider := service.NewScopedMemoryProvider(memoryRetriever, memoryAuthorizer,
 			service.AgentMemoryConfig{TopK: deps.cfg.Memory.TopK, MaxChars: deps.cfg.Memory.MaxChars, MaxTokens: deps.cfg.Memory.MaxTokens})
+		longTermMemory = provider
 		memoryWriter = service.NewAsyncMemoryWriter(deps.repos.Memory, memoryAuthorizer, projector, deps.cfg.Memory.QueueSize)
 		memoryCapture = service.NewAsyncMemoryCapture(service.ExplicitPreferenceExtractor{}, memoryWriter, deps.cfg.Memory.QueueSize)
-		chatSvc.SetLongTermMemory(provider, memoryCapture)
 	}
-	// docs/architecture/retrieval.md：级联 intent 分类器注入 ChatService（规则层零依赖，LLM 兜底用本次
-	// 请求的 chat client，per-request 解析）。替换 docs/architecture/retrieval.md A段占位 classifyIntentPlaceholder。
-	chatSvc.SetIntentRouter(service.NewIntentRouter(service.NewRuleIntentClassifier()))
+	chatSvc := service.NewChatServiceWithDependencies(deps.repos, deps.ragRetriever, chatConfig, service.ChatDependencies{
+		Memory: service.NewRedisChatMemoryStore(deps.rdb), LongTermMemory: longTermMemory, MemoryCapture: memoryCapture,
+		EvidenceLedger: evidenceLedgerSvc, Recorder: aiObserver,
+		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
+	})
 
 	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools)
 	var vectorCleaner service.TaskVectorCleaner
@@ -278,7 +278,9 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		return visualIndexSvc.BuildTaskVisualIndex(ctx, task)
 	})
 
-	chatHandler := handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory)
+	videoAgentSvc := service.NewVideoAgentService(chatSvc)
+	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
+	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
 	chatHandler.SetEvidenceLedgerService(evidenceLedgerSvc)
 	return &serverApplication{
 		handlers: serverHandlers{

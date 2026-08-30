@@ -37,7 +37,8 @@ export default function PrototypeHubPage() {
             hint="只看 UI"
           >
             <HubLink href="/prototype/dashboard" label="工作台原型" desc="视频库布局定稿预览" />
-            <HubLink href="/prototype/agent-chat" label="Agent 问答原型" desc="融合版 / 极简版" primary />
+            <HubLink href="/prototype/agent-chat" label="Agent 问答原型" desc="融合版 / 极简版" />
+            <HubLink href="/prototype/memory" label="记忆治理原型" desc="偏好清单 / 档案柜 / 冲突台" primary />
             <HubLink href="/prototype/settings" label="设置页原型" desc="AI 配置布局" />
           </HubGroup>
         </div>

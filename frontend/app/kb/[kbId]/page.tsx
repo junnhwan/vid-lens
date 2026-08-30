@@ -6,36 +6,26 @@ import { Settings2, Plus, Trash2 } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
-import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
-import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
+import { parseMessages, fmtSession } from '@/components/chat/chatUtils'
+import { useConversationSession } from '@/components/chat/useConversationSession'
 import KBModal from '@/components/KBModal'
-import { CiteRef } from '@/components/Citation'
-import { api, streamAsk, ApiError } from '@/lib/api'
+import type { CiteRef } from '@/components/Citation'
+import { api } from '@/lib/api'
 import { useRole } from '@/lib/useRole'
-import type { KnowledgeBase, Citation, ChatSession } from '@/lib/types'
+import type { ChatMessage, Citation, KnowledgeBase } from '@/lib/types'
 
 const DOT_COLORS = ['#9A4A1A', '#2A6B5E', '#3F62C2', '#6B7A2A', '#8C3A4A', '#B8842E', '#5C2A0D', '#1D3468']
 
 export default function KBChatPage() {
   const params = useParams<{ kbId: string }>()
   const kbId = Number(params.kbId)
-  const router = useRouter()
+	const router = useRouter()
 
-  const [kb, setKb] = useState<KnowledgeBase | null>(null)
-  const [session, setSession] = useState<ChatSession | null>(null)
-  const [sessions, setSessions] = useState<ChatSession[]>([])
-  const [messages, setMessages] = useState<ChatMsg[]>([])
-  const [activeTrace, setActiveTrace] = useState<ChatTraceStep[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const topK = 8
-  const [showManage, setShowManage] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const { isDemo } = useRole()
-
-  const loadSessions = useCallback(async () => {
-    try { setSessions(await api.listSessions({ knowledge_base_id: kbId })) } catch { /* ignore */ }
-  }, [kbId])
+	const [kb, setKb] = useState<KnowledgeBase | null>(null)
+	const topK = 8
+	const [showManage, setShowManage] = useState(false)
+	const scrollRef = useRef<HTMLDivElement>(null)
+	const { isDemo } = useRole()
 
   const kbRef = useRef(kb)
   useEffect(() => { kbRef.current = kb }, [kb])
@@ -45,155 +35,30 @@ export default function KBChatPage() {
     return DOT_COLORS[idx >= 0 ? idx % DOT_COLORS.length : 0]
   }, [])
 
-  useEffect(() => {
-    api.getKB(kbId).then(setKb).catch(() => {})
-    const init = async () => {
-      const url = new URLSearchParams(location.search)
-      const sidParam = url.get('session')
-      const sid = sidParam ? Number(sidParam) : null
-      if (sid) {
-        try {
-          const s = (await api.listSessions({ knowledge_base_id: kbId })).find(x => x.id === sid) || null
-          setSession(s)
-          if (s) {
-            api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs, colorFor))).catch(() => {})
-          }
-        } catch { /* ignore */ }
-      }
-      loadSessions()
-    }
-    init()
-  }, [kbId, loadSessions, colorFor])
+	useEffect(() => { api.getKB(kbId).then(setKb).catch(() => {}) }, [kbId])
 
-  const switchSession = async (sid: number) => {
-    const s = sessions.find(x => x.id === sid)
-    if (!s || s.id === session?.id) return
-    setSession(s)
-    setMessages([])
-    const url = new URLSearchParams(location.search)
-    url.set('session', String(sid))
-    history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-    api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs, colorFor))).catch(() => {})
-  }
-
-  const newSession = () => {
-    setSession(null)
-    setMessages([])
-    setActiveTrace([])
-    const url = new URLSearchParams(location.search)
-    url.delete('session')
-    history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-  }
+	const parseHistory = useCallback((messages: ChatMessage[]) => parseMessages(messages, colorFor), [colorFor])
+	const mapCitations = useCallback((citations: Citation[]): CiteRef[] => citations.map((citation, index) => ({
+		id: `C${index + 1}`,
+		chunkIndex: citation.chunk_index,
+		score: citation.score,
+		content: citation.content,
+		source: citation.source,
+		videoTitle: citation.video_title,
+		finalRank: citation.final_rank,
+		color: colorFor(citation.task_id),
+	})), [colorFor])
+	const {
+		session, sessions, messages, streaming, switchSession, newSession, send, stop, toggleCite,
+	} = useConversationSession({
+		scopeType: 'knowledge_base', targetId: kbId, basePath: `/kb/${kbId}`,
+		mode: 'strict_rag', topK, parseHistory, mapCitations,
+	})
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
-
-  const appendDelta = useCallback((delta: string) => {
-    setMessages(prev => {
-      if (prev.length === 0) return prev
-      const next = [...prev]
-      const last = next[next.length - 1]
-      if (last && last.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + delta, streaming: true }
-      return next
-    })
-  }, [])
-
-  const send = useCallback(async (q: string) => {
-    if (streaming) return
-    let sid = session?.id
-    if (!sid) {
-      try {
-        const s = await api.createSession({ knowledge_base_id: kbId, scope_type: 'knowledge_base' })
-        setSession(s)
-        sid = s.id
-        const url = new URLSearchParams(location.search)
-        url.set('session', String(sid))
-        history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
-        loadSessions()
-      } catch (e) {
-        setMessages(prev => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
-        return
-      }
-    }
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    setStreaming(true)
-
-    const startTrace = streamTraceReducer([], 'start')
-    setActiveTrace(startTrace)
-    let answerStarted = false
-
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', content: q },
-      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
-    ])
-
-    const patchLast = (patch: Partial<ChatMsg>) => {
-      setMessages(prev => {
-        if (prev.length === 0) return prev
-        const next = [...prev]
-        const last = next[next.length - 1]
-        if (last && last.role === 'assistant') next[next.length - 1] = { ...last, ...patch }
-        return next
-      })
-    }
-
-    const bumpTrace = (
-      event: Parameters<typeof streamTraceReducer>[1],
-      payload?: Parameters<typeof streamTraceReducer>[2],
-    ) => {
-      setActiveTrace(prev => {
-        const next = streamTraceReducer(prev, event, payload)
-        patchLast({ trace: next })
-        return next
-      })
-    }
-
-    try {
-      await streamAsk(sid!, q, topK, 'strict_rag', {
-        onAnswer: (delta) => {
-          appendDelta(delta)
-          if (!answerStarted) {
-            answerStarted = true
-            bumpTrace('answer')
-          }
-        },
-        onCitations: (cs: Citation[]) => {
-          const refs: CiteRef[] = cs.map((c, i) => ({
-            id: `C${i + 1}`,
-            chunkIndex: c.chunk_index,
-            score: c.score,
-            content: c.content,
-            source: c.source,
-            videoTitle: c.video_title,
-            finalRank: c.final_rank,
-            color: colorFor(c.task_id),
-          }))
-          patchLast({ cites: refs })
-          const sources = [...new Set(cs.map(c => c.video_title).filter(Boolean))] as string[]
-          bumpTrace('citations', { hits: cs.length, sources })
-        },
-        onDone: (d) => {
-          bumpTrace('done')
-          patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded })
-        },
-        onError: (e) => {
-          bumpTrace('error', { error: e.message })
-          patchLast({ streaming: false, error: e.message })
-        },
-      }, ctrl.signal)
-    } catch (e) {
-      patchLast({ streaming: false, error: e instanceof ApiError ? e.message : '流式请求失败' })
-    } finally {
-      setStreaming(false)
-      abortRef.current = null
-    }
-  }, [session?.id, streaming, topK, appendDelta, colorFor, loadSessions, kbId])
-
-  const stop = () => { abortRef.current?.abort(); setStreaming(false) }
 
   const clearSession = async () => {
     if (!session) return
@@ -202,17 +67,6 @@ export default function KBChatPage() {
       await api.deleteSession(session.id)
       router.push('/kb')
     } catch { /* ignore */ }
-  }
-
-  const toggleCite = (msgIdx: number, id: string) => {
-    setMessages(prev => {
-      const next = [...prev]
-      const m = next[msgIdx]
-      if (!m) return prev
-      const open = m.openCiteIds || []
-      next[msgIdx] = { ...m, openCiteIds: open.includes(id) ? open.filter(x => x !== id) : [...open, id] }
-      return next
-    })
   }
 
   return (

@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:prototype": "next dev",
+    "dev:prototype": "next dev prototype -p 3001",
+    "build:prototype": "next build prototype",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --no-warnings --experimental-strip-types --test \"lib/**/*.test.ts\" \"components/chat/**/*.test.ts\""
   },
   "dependencies": {
     "next": "14.2.5",

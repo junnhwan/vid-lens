@@ -7,20 +7,12 @@ import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ChatModePicker, modeLabel as chatModeLabel } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
 import AgentLensOverlay from '@/components/chat/AgentLensOverlay'
-import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
-import {
-  agentTraceReducer,
-  emptyAgentTraceState,
-  streamTraceReducer,
-  type AgentSSEPayload,
-  type AgentTraceState,
-  type ChatTraceStep,
-} from '@/components/chat/traceTypes'
-import { CiteRef } from '@/components/Citation'
+import { fmtSession } from '@/components/chat/chatUtils'
+import { useConversationSession } from '@/components/chat/useConversationSession'
 import { useToast } from '@/components/Toast'
-import { api, streamAsk, streamAgent, ApiError } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { taskTitle } from '@/lib/format'
-import type { VideoTask, ChatSession, Citation, VideoChatMode } from '@/lib/types'
+import type { VideoTask, VideoChatMode } from '@/lib/types'
 
 export default function ChatPage() {
   return (
@@ -36,75 +28,38 @@ function ChatView() {
   const router = useRouter()
 
   const [task, setTask] = useState<VideoTask | null>(null)
-  const [session, setSession] = useState<ChatSession | null>(null)
-  const [sessions, setSessions] = useState<ChatSession[]>([])
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
   const [mode, setMode] = useState<VideoChatMode>('strict_rag')
   const topK = 4
-  const [messages, setMessages] = useState<ChatMsg[]>([])
-  const [ragTrace, setRagTrace] = useState<ChatTraceStep[]>([])
-  const [agentTrace, setAgentTrace] = useState<AgentTraceState>(emptyAgentTraceState())
-  const [streaming, setStreaming] = useState(false)
   const [failClosed, setFailClosed] = useState(false)
-  const [sessionReady, setSessionReady] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
-
-  const loadSessions = useCallback(async () => {
-    try { setSessions(await api.listSessions({ task_id: taskId })) } catch { /* ignore */ }
-  }, [taskId])
 
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {})
     api.getRagIndex(taskId).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
+  }, [taskId])
 
-    const init = async () => {
-      const url = new URLSearchParams(location.search)
-      const modeParam = url.get('mode')
-      if (modeParam === 'agent' || modeParam === 'video_assistant' || modeParam === 'strict_rag') {
-        setMode(modeParam)
-      }
-      const sidParam = url.get('session')
-      const sid = sidParam ? Number(sidParam) : null
-      if (sid) {
-        try {
-          const list = await api.listSessions({ task_id: taskId })
-          const s = list.find(x => x.id === sid) || null
-          setSession(s)
-          if (s) {
-            api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs))).catch(() => {})
-          }
-        } catch { /* ignore */ }
-      }
-      setSessionReady(true)
-      loadSessions()
-    }
-    init()
-  }, [taskId, loadSessions])
+  useEffect(() => {
+    const modeParam = new URLSearchParams(location.search).get('mode')
+    if (modeParam === 'agent' || modeParam === 'video_assistant' || modeParam === 'strict_rag') setMode(modeParam)
+  }, [taskId])
 
-  const switchSession = async (sid: number) => {
-    const s = sessions.find(x => x.id === sid)
-    if (!s || s.id === session?.id) return
-    setSession(s)
-    setMessages([])
-    const url = new URLSearchParams(location.search)
-    url.set('session', String(sid))
-    history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
-    api.getMessages(sid).then(msgs => setMessages(parseMessages(msgs))).catch(() => {})
-  }
+  const canSend = !((mode === 'strict_rag' || mode === 'agent') && ragStatus != null && !ragStatus.indexed)
+  const onBlocked = useCallback(() => setFailClosed(true), [])
+  const onBeforeSend = useCallback(() => setFailClosed(false), [])
+  const {
+    session, sessions, sessionReady, messages, agentTrace, streaming,
+    switchSession, newSession: resetSession, send, stop, toggleCite,
+  } = useConversationSession({
+    scopeType: 'video', targetId: taskId, basePath: `/chat/${taskId}`,
+    mode, topK, canSend, onBlocked, onBeforeSend,
+  })
 
-  const newSession = () => {
-    setSession(null)
-    setMessages([])
-    setRagTrace([])
-    setAgentTrace(emptyAgentTraceState())
+  const newSession = useCallback(() => {
+    resetSession()
     setFailClosed(false)
-    const url = new URLSearchParams(location.search)
-    url.delete('session')
-    const qs = url.toString()
-    history.replaceState(null, '', qs ? `/chat/${taskId}?${qs}` : `/chat/${taskId}`)
-  }
+  }, [resetSession])
 
   const changeMode = (next: VideoChatMode) => {
     setMode(next)
@@ -132,187 +87,6 @@ function ChatView() {
       setRagStatus({ indexed: r.indexed, chunks: r.chunks })
       setFailClosed(false)
     } catch { /* ignore */ }
-  }
-
-  const appendDelta = useCallback((delta: string) => {
-    setMessages(prev => {
-      if (prev.length === 0) return prev
-      const next = [...prev]
-      const last = next[next.length - 1]
-      if (last && last.role === 'assistant') {
-        next[next.length - 1] = { ...last, content: last.content + delta, streaming: true }
-      }
-      return next
-    })
-  }, [])
-
-  const send = useCallback(async (q: string) => {
-    if (streaming) return
-    if ((mode === 'strict_rag' || mode === 'agent') && ragStatus && !ragStatus.indexed) {
-      setFailClosed(true)
-      return
-    }
-
-    let sid = session?.id
-    if (!sid) {
-      try {
-        const s = await api.createSession({ task_id: taskId, scope_type: 'video' })
-        setSession(s)
-        sid = s.id
-        const url = new URLSearchParams(location.search)
-        url.set('session', String(sid))
-        history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
-        loadSessions()
-      } catch (e) {
-        setMessages(prev => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '', error: e instanceof ApiError ? e.message : '创建会话失败' }])
-        return
-      }
-    }
-
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    setStreaming(true)
-    setFailClosed(false)
-
-    const patchLast = (patch: Partial<ChatMsg>) => {
-      setMessages(prev => {
-        if (prev.length === 0) return prev
-        const next = [...prev]
-        const last = next[next.length - 1]
-        if (last && last.role === 'assistant') next[next.length - 1] = { ...last, ...patch }
-        return next
-      })
-    }
-
-    const mapCitations = (cs: Citation[]): CiteRef[] => cs.map((c, i) => ({
-      id: `C${i + 1}`,
-      chunkIndex: c.chunk_index,
-      score: c.score,
-      content: c.content,
-      source: c.source,
-      videoTitle: c.video_title,
-      finalRank: c.final_rank,
-    }))
-
-    if (isAgentMode) {
-      const initial = emptyAgentTraceState()
-      setAgentTrace(initial)
-      setMessages(prev => [
-        ...prev,
-        { role: 'user', content: q },
-        { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: [], agentRun: true },
-      ])
-
-      const bumpAgent = (event: AgentSSEPayload) => {
-        setAgentTrace(prev => {
-          const next = agentTraceReducer(prev, event)
-          patchLast({ trace: next.steps, agentRun: true })
-          return next
-        })
-      }
-
-      try {
-        await streamAgent(sid!, q, { top_k: topK, mode: 'agent' }, {
-          onRunStart: d => bumpAgent({ type: 'run_start', data: d }),
-          onStepStart: d => bumpAgent({ type: 'step_start', data: d }),
-          onStepDone: d => bumpAgent({ type: 'step_done', data: d }),
-          onStepError: d => bumpAgent({ type: 'step_error', data: d }),
-          onToolCall: d => bumpAgent({ type: 'tool_call', data: d }),
-          onToolResult: d => bumpAgent({ type: 'tool_result', data: d }),
-          onRetrieveHits: d => bumpAgent({ type: 'retrieve_hits', data: d }),
-          onAnswer: delta => appendDelta(delta),
-          onCitations: cs => patchLast({ cites: mapCitations(cs) }),
-          onDone: () => {
-            bumpAgent({ type: 'done' })
-            patchLast({ streaming: false })
-          },
-          onError: e => {
-            bumpAgent({ type: 'error', data: { message: e.message, step_id: e.step_id } })
-            patchLast({ streaming: false, error: e.message })
-          },
-        }, ctrl.signal)
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') {
-          patchLast({ streaming: false })
-        } else {
-          const msg = e instanceof ApiError ? e.message : 'Agent 流式请求失败'
-          patchLast({ streaming: false, error: msg })
-        }
-      } finally {
-        setStreaming(false)
-        abortRef.current = null
-      }
-      return
-    }
-
-    const startTrace = streamTraceReducer([], 'start')
-    setRagTrace(startTrace)
-    let answerStarted = false
-
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', content: q },
-      { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: startTrace },
-    ])
-
-    const bumpTrace = (
-      event: Parameters<typeof streamTraceReducer>[1],
-      payload?: Parameters<typeof streamTraceReducer>[2],
-    ) => {
-      setRagTrace(prev => {
-        const next = streamTraceReducer(prev, event, payload)
-        patchLast({ trace: next })
-        return next
-      })
-    }
-
-    try {
-      await streamAsk(sid!, q, topK, mode, {
-        onAnswer: (delta) => {
-          appendDelta(delta)
-          if (!answerStarted) {
-            answerStarted = true
-            bumpTrace('answer')
-          }
-        },
-        onCitations: (cs: Citation[]) => {
-          patchLast({ cites: mapCitations(cs) })
-          const sources = [...new Set(cs.map(c => c.video_title || c.source).filter(Boolean))] as string[]
-          bumpTrace('citations', { hits: cs.length, sources })
-        },
-        onDone: (d) => {
-          bumpTrace('done')
-          patchLast({ ...(d.answer ? { content: d.answer } : {}), streaming: false, degraded: d.degraded })
-        },
-        onError: (e) => {
-          bumpTrace('error', { error: e.message })
-          patchLast({ streaming: false, error: e.message })
-        },
-      }, ctrl.signal)
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        patchLast({ streaming: false })
-      } else {
-        const msg = e instanceof ApiError ? e.message : '流式请求失败'
-        patchLast({ streaming: false, error: msg })
-      }
-    } finally {
-      setStreaming(false)
-      abortRef.current = null
-    }
-  }, [session?.id, streaming, mode, isAgentMode, ragStatus, topK, appendDelta, loadSessions, taskId])
-
-  const stop = () => { abortRef.current?.abort(); setStreaming(false) }
-
-  const toggleCite = (msgIdx: number, id: string) => {
-    setMessages(prev => {
-      const next = [...prev]
-      const m = next[msgIdx]
-      if (!m) return prev
-      const open = m.openCiteIds || []
-      next[msgIdx] = { ...m, openCiteIds: open.includes(id) ? open.filter(x => x !== id) : [...open, id] }
-      return next
-    })
   }
 
   const copyAnswer = async (content: string) => {

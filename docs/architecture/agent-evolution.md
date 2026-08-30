@@ -274,9 +274,8 @@ Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保
 
 ### VidLens
 
-- [CONTEXT.md](../../CONTEXT.md)：当前实现、历史会话恢复信息和未实现边界（本地上下文文件，按仓库约定不纳入 Git）。
-- [AGENTS.md](../../AGENTS.md)：仓库边界、分支和提交要求。
-- [overview.md](overview.md)、[retrieval.md](retrieval.md)、[data-model.md](data-model.md)：当前 RAG、数据权威和基础设施边界。
+- [overview.md](overview.md)、[retrieval.md](retrieval.md)、[data-model.md](data-model.md)、[compatibility.md](compatibility.md)：当前执行、RAG、数据权威和兼容边界。
+- [agent_execution_journal.go](../../internal/service/agent_execution_journal.go)、[conversation_execution.go](../../internal/service/conversation_execution.go)：持久执行语义与聊天/Agent 请求编排的 deep module。
 - [video_agent.go](../../internal/service/video_agent.go)、[video_agent_stream.go](../../internal/service/video_agent_stream.go)、[video_agent_snapshot.go](../../internal/service/video_agent_snapshot.go)、[chat.go](../../internal/service/chat.go)：模板 Agent、流式协议、快照、RAG 和短期消息接口。
 - [video_research_loop.go](../../internal/service/video_research_loop.go)、[video_research_service.go](../../internal/service/video_research_service.go)、[video_agent_registry.go](../../internal/service/video_agent_registry.go)：受控研究循环、入口和工具白名单。
 - [video_evidence_funnel.go](../../internal/service/video_evidence_funnel.go)、[video_evidence_funnel_service.go](../../internal/service/video_evidence_funnel_service.go)：固定多粒度证据漏斗、有限候选 Planner 和 Evidence Ledger 校验入口。

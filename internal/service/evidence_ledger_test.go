@@ -388,11 +388,10 @@ func TestVideoAgentPersistsAnswerFactsWithoutChangingAnswer(t *testing.T) {
 	if err := repos.TranscriptionChunk.UpsertCompleted(task.ID, 0, "audio/chunk-0.mp3", "owner 校验引用片段"); err != nil {
 		t.Fatal(err)
 	}
-	chatSvc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
-		TaskID: task.ID, EvidenceID: "ev-agent-ledger", ChunkID: 1, ChunkIndex: 2, Content: "owner 校验引用片段",
-	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
 	ledger := NewEvidenceLedgerService(repos)
-	chatSvc.SetEvidenceLedger(ledger)
+	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
+		TaskID: task.ID, EvidenceID: "ev-agent-ledger", ChunkID: 1, ChunkIndex: 2, Content: "owner 校验引用片段",
+	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger})
 	agent := NewVideoAgentService(chatSvc)
 	result, err := agent.Ask(context.Background(), VideoAgentRequest{UserID: 7, SessionID: session.ID, Question: "为什么要校验 owner？", TopK: 1},
 		&fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "owner 必须校验。[C1]"}},

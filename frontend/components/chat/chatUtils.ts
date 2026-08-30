@@ -2,7 +2,8 @@ import type { ChatMessage } from '@/lib/types'
 import { citesFromSnapshot } from '@/components/Citation'
 import type { CiteRef } from '@/components/Citation'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
-import { parseSnapshotTrace, traceFromCitationCount } from '@/components/chat/traceTypes'
+import { traceFromCitationCount } from '@/components/chat/traceTypes'
+import { parseSnapshotTrace } from '@/components/chat/snapshotTraceAdapter'
 
 export interface ChatMsg {
   role: 'user' | 'assistant'

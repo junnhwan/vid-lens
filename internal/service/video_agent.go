@@ -61,6 +61,7 @@ type VideoAgentTemplateRequest struct {
 
 type VideoAgentService struct {
 	chatSvc                       *ChatService
+	executionJournal              *AgentExecutionJournal
 	evidenceFunnelResultPublisher func(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error)
 }
 
@@ -82,7 +83,11 @@ func (e *VideoAgentExecutionError) Unwrap() error {
 }
 
 func NewVideoAgentService(chatSvc *ChatService) *VideoAgentService {
-	return &VideoAgentService{chatSvc: chatSvc}
+	service := &VideoAgentService{chatSvc: chatSvc}
+	if chatSvc != nil && chatSvc.repos != nil && chatSvc.repos.AgentExecution != nil {
+		service.executionJournal = NewAgentExecutionJournal(chatSvc.repos.AgentExecution)
+	}
+	return service
 }
 
 func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
@@ -149,7 +154,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	tools.SetMemorySnapshot(memorySnapshot)
-	tools.SetStepObserver(newDurableAgentStepObserver(s.chatSvc.repos.AgentExecution, req.UserID, runID, observer))
+	tools.SetStepObserver(newDurableAgentStepObserver(s.executionJournal, req.UserID, runID, observer))
 	trace := make([]VideoAgentStep, 0, 4)
 
 	searchArguments, err := json.Marshal(searchTranscriptToolArguments{Question: req.Question, TopK: req.TopK})

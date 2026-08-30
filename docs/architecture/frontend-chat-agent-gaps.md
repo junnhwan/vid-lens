@@ -19,7 +19,7 @@
 | 侧栏「最近可问答」 | `AppShell` | 同上 |
 | 单视频 Agent 模式 | `/chat/:taskId` | `streamAgent()` → `/messages/agent/stream` |
 
-原型页 `/prototype/*` 仍保留作对比，**产品默认路径已是正式路由**。
+原型页仍保留作对比，但已迁入 `frontend/prototype/` 的独立 Next workspace。运行 `npm run dev:prototype` 后才能访问 `/prototype/*`；默认 `npm run build` 不再发现这些路由。
 
 ---
 
@@ -142,17 +142,17 @@ GET /api/v1/qa/hub
 }
 ```
 
-这解决了当前历史回放问题，但不替代目标架构中的独立 Run/Step/Claim/Evidence 模型。`parseMessages()` 已优先读取 `steps[]`，并兼容旧 `trace[]` 和纯 `Citation[]` 快照。
+这解决了当前历史回放问题，但不替代已经落地的独立 Run/Step/Claim/Evidence 权威模型。`parseMessages()` 通过 `snapshotTraceAdapter.ts` 优先读取 `steps[]`，并兼容旧 `trace[]` 和纯 `Citation[]` 快照。
 
 ---
 
 ## 5. 前端当前接入结果
 
-1. `frontend/lib/api.ts` 已提供 `streamAgent()`，解析当前真实 Agent SSE 事件，并支持 `AbortSignal`。
-2. `frontend/app/chat/[taskId]/page.tsx` 的单视频 Agent 模式调用 Agent SSE；普通 RAG 仍调用 `streamAsk()`。
-3. `frontend/app/kb/[kbId]/page.tsx` 暂不接入 Agent，继续使用 RAG 和推断轨迹。
-4. `agentTraceReducer` 按 `run_id + step_id` 幂等合并；`AgentTracePanel` 区分 `agent`、`inferred` 和 `legacy` 来源。
-5. 历史消息优先回放 Agent snapshot 的 `steps[]`，旧结构继续兼容。
+1. `frontend/lib/api.ts` 已提供 `streamAgent()`；`SSEStreamDecoder` 处理任意 chunk 边界并支持 `AbortSignal`。
+2. `useConversationSession` 统一正式视频/知识库页的会话加载、消息 patch、流式取消和终态；页面只保留各自的 scope 与展示策略。
+3. `frontend/app/chat/[taskId]/page.tsx` 的单视频 Agent 模式调用 Agent SSE；普通 RAG 仍调用 `streamAsk()`。
+4. `frontend/app/kb/[kbId]/page.tsx` 暂不接入 Agent，继续使用 RAG 和推断轨迹。
+5. `agentTraceReducer` 按 `run_id + step_id` 幂等合并；历史 `steps[]`、旧 `trace[]` 与 bare citations 只经快照适配器回放。
 
 ---
 
@@ -160,11 +160,12 @@ GET /api/v1/qa/hub
 
 | 区域 | 路径 |
 |------|------|
-| 聊天 D 布局 | `frontend/components/chat/ChatSplitLayout.tsx` |
+| 聊天布局与状态 | `frontend/components/chat/ChatShell.tsx`、`useConversationSession.ts` |
 | 右侧流水线 | `frontend/components/chat/AgentTracePanel.tsx` |
 | 轨迹类型 / 推断 | `frontend/components/chat/traceTypes.ts` |
-| 流式消费 | `frontend/lib/api.ts` → `streamAsk` / `streamAgent` |
-| 原型参考（可废弃） | `frontend/components/prototype/agent/VariantD.tsx` |
+| 流式消费 | `frontend/lib/api.ts`、`frontend/lib/streamDecoder.ts` |
+| 历史兼容 | `frontend/components/chat/snapshotTraceAdapter.ts` |
+| 原型 workspace | `frontend/prototype/`、`frontend/components/prototype/` |
 | Agent 后端（实验） | `internal/handler/chat.go`、`internal/service/` agent runner |
 | 路由注册 | `cmd/server/router.go` → `messages/agent` |
 

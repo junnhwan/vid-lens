@@ -59,7 +59,8 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	policy := req.Policy
 	var frozenPolicy frozenAgentPolicy
 	var budget frozenAgentBudget
-	if existing, lookupErr := s.chatSvc.repos.AgentExecution.GetRun(ctx, req.UserID, runID); lookupErr != nil {
+	journal := s.executionJournal
+	if existing, lookupErr := journal.GetRun(ctx, req.UserID, runID); lookupErr != nil {
 		return nil, lookupErr
 	} else if existing != nil {
 		// A run is an immutable execution contract. Do not validate or use a
@@ -129,7 +130,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err != nil {
 		return nil, err
 	}
-	if err := runner.SetDurableExecution(s.chatSvc.repos.AgentExecution, req.UserID, runID); err != nil {
+	if err := runner.SetDurableExecution(journal, req.UserID, runID); err != nil {
 		return nil, err
 	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
@@ -180,7 +181,8 @@ func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, ru
 	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.AgentExecution == nil {
 		return nil, errors.New("agent execution repository unavailable")
 	}
-	run, err := s.chatSvc.repos.AgentExecution.GetRun(ctx, userID, strings.TrimSpace(runID))
+	journal := s.executionJournal
+	run, err := journal.GetRun(ctx, userID, strings.TrimSpace(runID))
 	if err != nil {
 		return nil, err
 	}

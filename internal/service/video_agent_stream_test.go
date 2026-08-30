@@ -13,11 +13,10 @@ import (
 func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	chatClient := &scriptedChatClient{responses: []string{"not-json", "直接回答 [C1]"}}
-	chatSvc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
-		{TaskID: task.ID, EvidenceID: "ev-stream-1", ChunkID: 1, ChunkIndex: 2, Score: 0.91, Content: "stream citation"},
-	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
 	ledger := NewEvidenceLedgerService(repos)
-	chatSvc.SetEvidenceLedger(ledger)
+	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{
+		{TaskID: task.ID, EvidenceID: "ev-stream-1", ChunkID: 1, ChunkIndex: 2, Score: 0.91, Content: "stream citation"},
+	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger})
 	agent := NewVideoAgentService(chatSvc)
 
 	var events []AgentStreamEvent

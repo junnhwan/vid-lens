@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
@@ -73,7 +72,7 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	runner := &evidenceFunnelRunner{
 		repos: s.chatSvc.repos, tools: tools, planner: NewLLMEvidenceGapPlanner(chat), policy: policy,
 		runtime:   VideoAgentToolRuntime{UserID: req.UserID, TaskID: session.TaskID, TopK: policy.TopK, EmbeddingModel: profile.EmbeddingModel, Embedding: embedding},
-		execution: &evidenceFunnelExecution{repo: s.chatSvc.repos.AgentExecution, userID: req.UserID, runID: runID, now: func() time.Time { return time.Now().UTC() }},
+		execution: &evidenceFunnelExecution{journal: s.executionJournal, userID: req.UserID, runID: runID},
 	}
 	funnel, err := runner.Run(ctx, req.Goal)
 	if err != nil {
@@ -234,7 +233,7 @@ func evidenceFunnelTrace(ctx context.Context, service *VideoAgentService, userID
 	if service == nil || service.chatSvc == nil || service.chatSvc.repos == nil || service.chatSvc.repos.AgentExecution == nil {
 		return nil
 	}
-	records, err := service.chatSvc.repos.AgentExecution.GetExecution(ctx, userID, runID)
+	records, err := service.executionJournal.Recover(ctx, userID, runID)
 	if err != nil || records == nil {
 		return nil
 	}

@@ -92,12 +92,11 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		// （分类器对 KB/strict 不产出 overview/small_talk 关检索）。防御性兜底。
 		return nil, errNoRetrievedContext
 	}
-	// docs/architecture/retrieval.md 的行为约束：timeline_locate intent 用 Signal 时间戳缩检索范围。
-	// TODO(audit trail)：RetrievalPipelineRequest 暂无时间过滤字段，ExtractSignals
-	// 时间戳已能提但未接入检索过滤——本 spec 只落地分类 + Signal 提取，时间戳→
-	// chunk 范围过滤的接线留后续（需 retrieval 层加 StartTimeMS/EndTimeMS 过滤
-	// 接口位 + chunk 表加时间戳列）。诚实标注：当前 timeline_locate 走 direct_qa
-	// 同参数检索，无时间缩范围（行为约束 10 行为未落地，只留接口位 + TODO）。
+	// timeline_locate 当前是显式降级：Signal 可以识别问题中的时间表达，但现有
+	// video_chunks 没有可信的时间范围字段，RetrievalPipelineRequest 也不接受时间过滤。
+	// 因此它按 direct_qa 的相同参数检索，并让已有 citation 时间信息承担最终定位。
+	// 在不修改 schema 的前提下不得宣称或伪造服务端时间范围过滤；公开契约见
+	// docs/architecture/retrieval.md 的“时间线定位”小节。
 
 	// 散落判定 1（topK 默认值 + topK>10→10 上限）由 ExecutionPolicy.ClampTopK
 	// 统一表达（docs/architecture/retrieval.md 待评测指标 A段）。
