@@ -63,15 +63,15 @@ export interface AIProfileRequest {
   llm_base_url: string
   llm_api_key?: string
   llm_model: string
-  asr_provider?: string
-  asr_base_url?: string
+  asr_provider: string
+  asr_base_url: string
   asr_api_key?: string
-  asr_model?: string
-  embedding_provider?: string
-  embedding_endpoint?: string
+  asr_model: string
+  embedding_provider: string
+  embedding_endpoint: string
   embedding_api_key?: string
-  embedding_model?: string
-  embedding_dim?: number
+  embedding_model: string
+  embedding_dim: number
   vision_provider?: string
   vision_base_url?: string
   vision_api_key?: string

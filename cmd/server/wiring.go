@@ -130,6 +130,9 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	userSvc := service.NewUserService(deps.repos.User, deps.cfg.JWT)
 	knowledgeBaseSvc := service.NewKnowledgeBaseService(deps.repos)
 	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
+	if err := service.EnsureDemoAccount(deps.repos.User, deps.repos.AIProfile, secretCodec, deps.cfg.AI, deps.cfg.RAG); err != nil {
+		log.Printf("⚠️ 演示账号初始化失败: %v", err)
+	}
 	ragIndexSvc := service.NewRAGIndexService(deps.repos, deps.ragStore, service.RAGIndexConfig{
 		ChunkSize:    deps.cfg.RAG.ChunkSize,
 		ChunkOverlap: deps.cfg.RAG.ChunkOverlap,

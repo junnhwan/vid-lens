@@ -38,3 +38,8 @@ func (r *UserRepository) FindByID(id int64) (*model.User, error) {
 	}
 	return &user, nil
 }
+
+// UpdateRole updates the role for an existing user.
+func (r *UserRepository) UpdateRole(id int64, role string) error {
+	return r.db.Model(&model.User{}).Where("id = ?", id).Update("role", role).Error
+}

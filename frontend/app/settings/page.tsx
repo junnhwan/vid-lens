@@ -4,8 +4,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Info, CheckCircle, XCircle, PlugZap, Ruler, List, Eye, Star, Save, Trash2, Loader2 } from 'lucide-react'
 import AppShell, { PageHero } from '@/components/layout/AppShell'
 import { api, ApiError } from '@/lib/api'
+import {
+  buildProfileRequest,
+  emptyProfileGroups,
+  profileToGroups,
+  profileToRequest,
+  validateProfileGroups,
+  type ProfileGroupsDraft,
+  type ProfileGroupDraft,
+} from '@/lib/ai-profile'
 import { useRole } from '@/lib/useRole'
-import type { AIProfile, AIProfileRequest, ProfilePurpose } from '@/lib/types'
+import type { AIProfile, ProfilePurpose } from '@/lib/types'
 
 // 设置页：ASR/LLM/Embedding 三 tab 作"筛选视角"。
 // 后端一个 profile 同时含四组配置、is_default 单 bool、无 type 字段。
@@ -168,11 +177,10 @@ function SettingsEditor() {
   )
 
   async function setDefault(id: number) {
-    // 设为默认：后端通过 PUT 带 is_default:true，自动把其它置 false
     const p = profiles.find(x => x.id === id)
     if (!p) return
     try {
-      await api.updateProfile(id, { is_default: true })
+      await api.updateProfile(id, profileToRequest(p, { is_default: true }))
       load()
     } catch (e) { setErr(e instanceof ApiError ? e.message : '设默认失败') }
   }
@@ -292,10 +300,7 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
   const g = profile ? groupField(profile, tab) : { provider: '', base: '', keyMasked: '', model: '' }
 
   const [name, setName] = useState(profile?.name || '')
-  const [provider, setProvider] = useState(g.provider)
-  const [baseUrl, setBaseUrl] = useState(g.base)
-  const [apiKey, setApiKey] = useState('') // 编辑时不回显明文，留空保留旧值
-  const [model, setModel] = useState(g.model)
+  const [groups, setGroups] = useState<ProfileGroupsDraft>(() => profile ? profileToGroups(profile) : emptyProfileGroups())
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -303,40 +308,42 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
   const [models, setModels] = useState<string[]>([])
   const [probeDim, setProbeDim] = useState<number | null>(null)
 
-  // tab 切换时同步字段
+  const current = tab === 'embedding' ? groups.embedding : groups[tab]
+
   useEffect(() => {
     if (profile) {
-      const ng = groupField(profile, tab)
-      setProvider(ng.provider); setBaseUrl(ng.base); setModel(ng.model); setApiKey('')
-      setTestResult(null); setModels([]); setProbeDim(null)
+      setGroups(profileToGroups(profile))
+      setName(profile.name)
+      setTestResult(null)
+      setModels([])
+      setProbeDim(null)
     }
-  }, [tab, profile])
+  }, [profile])
+
+  const updateCurrent = (patch: Partial<ProfileGroupDraft> & { dim?: number }) => {
+    setGroups(prev => {
+      if (tab === 'embedding') {
+        return { ...prev, embedding: { ...prev.embedding, ...patch } }
+      }
+      return { ...prev, [tab]: { ...prev[tab], ...patch } }
+    })
+  }
 
   const fieldLabel = { provider: 'Provider', base: tab === 'embedding' ? 'Endpoint' : 'Base URL', key: 'API Key', model: 'Model' } as const
 
-  // 收集当前 tab 这一组的请求体片段（创建时需要完整四组，编辑时只 PATCH 当前组）
-  const currentGroupBody = () => {
-    if (tab === 'asr') return { asr_provider: provider, asr_base_url: baseUrl, asr_model: model, ...(apiKey ? { asr_api_key: apiKey } : {}) }
-    if (tab === 'llm') return { llm_provider: provider, llm_base_url: baseUrl, llm_model: model, ...(apiKey ? { llm_api_key: apiKey } : {}) }
-    return { embedding_provider: provider, embedding_endpoint: baseUrl, embedding_model: model, ...(apiKey ? { embedding_api_key: apiKey } : {}) }
-  }
-
   const save = async () => {
     if (!name.trim()) { setErr('请输入 Profile 名称'); return }
-    if (!provider.trim()) { setErr('请输入 Provider'); return }
-    if (!baseUrl.trim()) { setErr('请输入 Base URL / Endpoint'); return }
-    if (!model.trim()) { setErr('请输入 Model'); return }
+    const validationErr = validateProfileGroups(groups, !isEdit)
+    if (validationErr) { setErr(validationErr); return }
     setBusy(true); setErr('')
     try {
+      const body = buildProfileRequest(name, groups, { is_default: profile?.is_default })
       if (isEdit && profile) {
-        await api.updateProfile(profile.id, currentGroupBody())
+        await api.updateProfile(profile.id, body)
         onChanged()
-        setApiKey('')
         setTestResult({ ok: true, msg: '已保存' })
       } else {
-        // 新建：当前组 + 名称 + is_default（后端：该类无默认时自动设默认）
-        const body = { name: name.trim(), ...currentGroupBody(), is_default: false }
-        const created = await api.createProfile(body as AIProfileRequest)
+        const created = await api.createProfile(body)
         onSaved?.(created.id)
       }
     } catch (e) {
@@ -356,27 +363,31 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
   }
 
   const probeModels = async () => {
-    if (!baseUrl || !apiKey) { setErr('探测可用模型需先填 Base URL + API Key'); return }
+    if (!current.base || !current.apiKey) { setErr('探测可用模型需先填 Base URL + API Key'); return }
     setBusy(true); setErr('')
     try {
-      const r = await api.listModels(baseUrl, apiKey, profile?.id || 0, TAB_META[tab].purpose)
+      const r = await api.listModels(current.base, current.apiKey, profile?.id || 0, TAB_META[tab].purpose)
       setModels(r.models || [])
     } catch (e) { setErr(e instanceof ApiError ? e.message : '探测失败') } finally { setBusy(false) }
   }
 
   const probeDimFn = async () => {
     if (tab !== 'embedding') { setErr('仅 Embedding tab 可探测维度'); return }
-    if (!baseUrl || !apiKey || !model) { setErr('探测维度需先填 Endpoint + API Key + Model'); return }
+    if (!current.base || !current.apiKey || !current.model) { setErr('探测维度需先填 Endpoint + API Key + Model'); return }
     setBusy(true); setErr('')
     try {
-      const r = await api.probeEmbeddingDim(baseUrl, apiKey, model, profile?.id || 0)
+      const r = await api.probeEmbeddingDim(current.base, current.apiKey, current.model, profile?.id || 0)
       setProbeDim(r.dimension)
+      updateCurrent({ dim: r.dimension })
     } catch (e) { setErr(e instanceof ApiError ? e.message : '探测失败') } finally { setBusy(false) }
   }
 
   const setDefault = async () => {
     if (!profile) return
-    try { await api.updateProfile(profile.id, { is_default: true }); onChanged() } catch (e) { setErr(e instanceof ApiError ? e.message : '设默认失败') }
+    try {
+      await api.updateProfile(profile.id, profileToRequest(profile, { is_default: true, groups }))
+      onChanged()
+    } catch (e) { setErr(e instanceof ApiError ? e.message : '设默认失败') }
   }
   const del = async () => {
     if (!profile) return
@@ -386,28 +397,31 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
 
   return (
     <div className="space-y-4 ui-fade-in">
-      <div className="text-[12px] text-ink-4">{isEdit ? `编辑 · ${profile?.name}` : `新建 · ${TAB_META[tab].label}`}</div>
+      <div className="text-[12px] text-ink-4">
+        {isEdit ? `编辑 · ${profile?.name}` : `新建 · 完整 Profile`}
+        {!isEdit && <span className="block mt-1 text-[11px]">请在 LLM / ASR / Embedding 三个 Tab 下分别填写配置后创建。</span>}
+      </div>
       <div className="bg-paper-0 border border-ink-0/8 rounded-xl p-6 space-y-4">
         <FormField label="Profile 名称">
           <input value={name} onChange={(e) => setName(e.target.value)} disabled={isEdit} className="ui-input disabled:text-ink-4" />
-          {isEdit && <p className="text-[10px] text-ink-4 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置。</p>}
+          {isEdit && <p className="text-[10px] text-ink-4 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置，保存时提交完整 Profile。</p>}
         </FormField>
         <FormField label={fieldLabel.provider}>
-          <input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="mimo / openai / siliconflow" className="ui-input font-mono" />
+          <input value={current.provider} onChange={(e) => updateCurrent({ provider: e.target.value })} placeholder="mimo / openai / siliconflow" className="ui-input font-mono" />
         </FormField>
         <FormField label={fieldLabel.base}>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="ui-input font-mono" />
+          <input value={current.base} onChange={(e) => updateCurrent({ base: e.target.value })} placeholder="https://api.example.com/v1" className="ui-input font-mono" />
         </FormField>
         <FormField label={fieldLabel.key}>
           <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-ink-0/10 bg-paper-1">
-            <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isEdit ? '•••• 留空保留旧值' : 'sk-...'} className="flex-1 bg-transparent text-[13px] font-mono" />
+            <input type={showKey ? 'text' : 'password'} value={current.apiKey} onChange={(e) => updateCurrent({ apiKey: e.target.value })} placeholder={isEdit ? '•••• 留空保留旧值' : 'sk-...'} className="flex-1 bg-transparent text-[13px] font-mono" />
             <button onClick={() => setShowKey(s => !s)} className="text-ink-4 hover:text-ink-2"><Eye className="w-3.5 h-3.5" /></button>
           </div>
           <p className="text-[10px] text-ink-4 mt-1">加密存储，使用 VIDLENS_API_KEY_SECRET。{isEdit && g.keyMasked ? `当前：${g.keyMasked}` : ''}</p>
         </FormField>
         <FormField label={fieldLabel.model}>
           <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-ink-0/10 bg-paper-0 focus-within:ring-2 focus-within:ring-sienna-500/20 focus-within:border-sienna-500">
-            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="模型名" className="flex-1 bg-transparent text-[13px] font-mono" />
+            <input value={current.model} onChange={(e) => updateCurrent({ model: e.target.value })} placeholder="模型名" className="flex-1 bg-transparent text-[13px] font-mono" />
             <button onClick={probeModels} disabled={busy} className="text-[10px] text-ink-4 hover:text-ink-2 whitespace-nowrap flex items-center gap-1 disabled:opacity-50">
               <List className="w-3 h-3" />探测
             </button>
@@ -416,13 +430,26 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
             <div className="mt-2 border border-ink-0/10 rounded-lg p-2.5 text-[11px] text-ink-2 space-y-0.5">
               <div className="text-ink-4 text-[10px] mb-1">可用模型</div>
               {models.map(m => (
-                <div key={m} className="cursor-pointer hover:text-sienna-700 font-mono" onClick={() => setModel(m)}>
-                  {m}{m === model && <span className="text-sienna-700"> ← 当前</span>}
+                <div key={m} className="cursor-pointer hover:text-sienna-700 font-mono" onClick={() => updateCurrent({ model: m })}>
+                  {m}{m === current.model && <span className="text-sienna-700"> ← 当前</span>}
                 </div>
               ))}
             </div>
           )}
         </FormField>
+        {tab === 'embedding' && (
+          <FormField label="Embedding 维度">
+            <input
+              type="number"
+              min={1}
+              value={groups.embedding.dim || ''}
+              onChange={(e) => updateCurrent({ dim: Number(e.target.value) || 0 })}
+              placeholder="如 1024"
+              className="ui-input font-mono"
+            />
+            <p className="text-[10px] text-ink-4 mt-1">须与 rag.embedding_dim 及模型实际输出维度一致。</p>
+          </FormField>
+        )}
 
         <div className="flex items-center gap-2 pt-1">
           <button onClick={testConn} disabled={busy || !isEdit} className="h-8 px-3.5 rounded-lg bg-ink-0 text-paper-0 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
@@ -448,7 +475,7 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
           <div className="border border-ink-0/10 bg-paper-1 rounded-lg px-3 py-2.5 flex items-start gap-2">
             <Ruler className="w-4 h-4 mt-0.5 text-sienna-700" />
             <div>
-              <div className="text-[11px] text-ink-2">Embedding 维度 = <span className="text-sienna-700 font-medium">{probeDim}</span></div>
+              <div className="text-[11px] text-ink-2">Embedding 维度 = <span className="text-sienna-700 font-medium">{probeDim}</span>（已写入表单）</div>
               <p className="text-[12px] text-ink-3 mt-0.5">已与 pgvector projection 对齐，索引可直接写入。</p>
             </div>
           </div>

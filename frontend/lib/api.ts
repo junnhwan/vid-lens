@@ -74,7 +74,7 @@ export const api = {
   // ============ AI Profile ============
   listProfiles: () => req<AIProfile[]>('/ai/profiles', 'GET'),
   createProfile: (p: AIProfileRequest) => req<AIProfile>('/ai/profiles', 'POST', p),
-  updateProfile: (id: number, p: Partial<AIProfileRequest>) => req<AIProfile>(`/ai/profiles/${id}`, 'PUT', p),
+  updateProfile: (id: number, p: AIProfileRequest) => req<AIProfile>(`/ai/profiles/${id}`, 'PUT', p),
   deleteProfile: (id: number) => req<null>(`/ai/profiles/${id}`, 'DELETE'),
   testProfile: (payload: { id?: number } | AIProfileRequest) =>
     req<{ ok: boolean }>('/ai/profiles/test', 'POST', payload),
