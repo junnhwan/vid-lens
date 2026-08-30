@@ -111,7 +111,7 @@ export default function AgentChatBubble({
             <button
               type="button"
               onClick={() => setShowProcess(v => !v)}
-              className="text-[10px] text-ink-4 hover:text-ink-2 flex items-center gap-1 transition-colors w-full ui-btn-lift"
+              className="text-[10px] text-ink-4 hover:text-ink-2 flex items-center gap-1 transition-colors w-full"
             >
               <ChevronDown className={`w-3 h-3 ui-chevron ${showProcess ? 'rotate-180' : ''}`} />
               {showProcess ? '收起过程' : `研究过程（${doneProcessCount} 步）`}
@@ -169,12 +169,12 @@ export default function AgentChatBubble({
       {!msg.streaming && msg.content && (onCopy || onRetry) && (
         <div className="flex items-center gap-3 text-[10px] text-ink-4">
           {onCopy && (
-            <button onClick={() => onCopy(msg.content)} className="hover:text-ink-2 flex items-center gap-1 ui-btn-lift">
+            <button onClick={() => onCopy(msg.content)} className="hover:text-ink-2 flex items-center gap-1">
               <Copy className="w-3 h-3" />复制
             </button>
           )}
           {onRetry && (
-            <button onClick={() => onRetry(idx)} className="hover:text-ink-2 flex items-center gap-1 ui-btn-lift">
+            <button onClick={() => onRetry(idx)} className="hover:text-ink-2 flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />重试
             </button>
           )}

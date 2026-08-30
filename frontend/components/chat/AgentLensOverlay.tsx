@@ -140,7 +140,7 @@ function LensCard({ steps, cites, onMinimize }: {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-[11px] text-ink-4 tabular-nums">{doneCount}/{total || '—'}</span>
-          <button type="button" onClick={onMinimize} className="p-1.5 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-ink-0/5 transition-colors ui-btn-lift" title="收起">
+          <button type="button" onClick={onMinimize} className="p-1.5 rounded-lg text-ink-4 hover:text-ink-1 hover:bg-ink-0/5 transition-colors" title="收起">
             <Minimize2 className="w-4 h-4" />
           </button>
         </div>
@@ -172,8 +172,8 @@ function LensPill({ steps, citeCount, onExpand }: {
     <button
       type="button"
       onClick={onExpand}
-      className={`flex items-center gap-2.5 px-4 py-2.5 rounded-full ui-glass ui-btn-lift ${
-        running ? 'text-sienna-700 ui-agent-glow-lens' : 'text-ink-2'
+      className={`flex items-center gap-2.5 px-4 py-2.5 rounded-full ui-glass transition-colors ${
+        running ? 'text-sienna-700 ui-agent-glow-lens' : 'text-ink-2 hover:text-ink-1'
       }`}
     >
       {running && <span className="w-2 h-2 rounded-full bg-sienna-500 ui-agent-pulse-opacity shrink-0" />}

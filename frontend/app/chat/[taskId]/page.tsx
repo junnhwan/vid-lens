@@ -2,18 +2,16 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Database, AlertTriangle, Trash2, MessageCircle, Plus } from 'lucide-react'
+import { Database, AlertTriangle, Trash2 } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
-import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ChatModePicker, SidebarSection, modeLabel as chatModeLabel } from '@/components/chat/ChatShell'
+import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ChatModePicker, modeLabel as chatModeLabel } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
-import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import AgentLensOverlay from '@/components/chat/AgentLensOverlay'
 import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
 import {
   agentTraceReducer,
   emptyAgentTraceState,
   streamTraceReducer,
-  tracePanelSource,
   type AgentSSEPayload,
   type AgentTraceState,
   type ChatTraceStep,
@@ -46,7 +44,6 @@ function ChatView() {
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [ragTrace, setRagTrace] = useState<ChatTraceStep[]>([])
   const [agentTrace, setAgentTrace] = useState<AgentTraceState>(emptyAgentTraceState())
-  const [traceError, setTraceError] = useState<string | undefined>()
   const [streaming, setStreaming] = useState(false)
   const [failClosed, setFailClosed] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
@@ -102,7 +99,6 @@ function ChatView() {
     setMessages([])
     setRagTrace([])
     setAgentTrace(emptyAgentTraceState())
-    setTraceError(undefined)
     setFailClosed(false)
     const url = new URLSearchParams(location.search)
     url.delete('session')
@@ -129,8 +125,6 @@ function ChatView() {
   }, [mode, ragStatus])
 
   const isAgentMode = mode === 'agent'
-  const panelSteps = isAgentMode ? agentTrace.steps : ragTrace
-  const panelSource = tracePanelSource(panelSteps, isAgentMode)
 
   const triggerIndex = async () => {
     try {
@@ -179,7 +173,6 @@ function ChatView() {
     abortRef.current = ctrl
     setStreaming(true)
     setFailClosed(false)
-    setTraceError(undefined)
 
     const patchLast = (patch: Partial<ChatMsg>) => {
       setMessages(prev => {
@@ -214,7 +207,6 @@ function ChatView() {
         setAgentTrace(prev => {
           const next = agentTraceReducer(prev, event)
           patchLast({ trace: next.steps, agentRun: true })
-          if (next.fatalError) setTraceError(next.fatalError)
           return next
         })
       }
@@ -237,7 +229,6 @@ function ChatView() {
           onError: e => {
             bumpAgent({ type: 'error', data: { message: e.message, step_id: e.step_id } })
             patchLast({ streaming: false, error: e.message })
-            setTraceError(e.message)
           },
         }, ctrl.signal)
       } catch (e) {
@@ -246,7 +237,6 @@ function ChatView() {
         } else {
           const msg = e instanceof ApiError ? e.message : 'Agent 流式请求失败'
           patchLast({ streaming: false, error: msg })
-          setTraceError(msg)
         }
       } finally {
         setStreaming(false)
@@ -255,7 +245,6 @@ function ChatView() {
       return
     }
 
-    // 普通 RAG：保持原有 streamAsk 推断轨迹
     const startTrace = streamTraceReducer([], 'start')
     setRagTrace(startTrace)
     let answerStarted = false
@@ -298,7 +287,6 @@ function ChatView() {
         onError: (e) => {
           bumpTrace('error', { error: e.message })
           patchLast({ streaming: false, error: e.message })
-          setTraceError(e.message)
         },
       }, ctrl.signal)
     } catch (e) {
@@ -307,7 +295,6 @@ function ChatView() {
       } else {
         const msg = e instanceof ApiError ? e.message : '流式请求失败'
         patchLast({ streaming: false, error: msg })
-        setTraceError(msg)
       }
     } finally {
       setStreaming(false)
@@ -372,17 +359,6 @@ function ChatView() {
   return (
     <ChatShell
       scrollRef={scrollRef}
-      tracePanel={
-        isAgentMode ? undefined : (
-          <AgentTracePanel
-            steps={panelSteps}
-            streaming={streaming}
-            source={panelSource}
-            error={traceError}
-            emptyHint="发送后会显示检索进度。"
-          />
-        )
-      }
       overlay={
         isAgentMode ? (
           <AgentLensOverlay steps={agentTrace.steps} cites={lensCites} />
@@ -398,39 +374,37 @@ function ChatView() {
       }
       sidebar={
         <ChatSidebar>
-          <SidebarSection
-            title="会话"
-            action={
-              <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[11px]" title="新建会话">
-                <Plus className="w-3 h-3" />新建
-              </button>
-            }
-          >
+          <div className="h-14 px-4 border-b border-ink-0/8 flex items-center justify-between shrink-0">
+            <span className="text-[13px] font-medium text-ink-2">会话</span>
+            <button onClick={newSession} className="text-[12px] text-sienna-700 hover:text-sienna-600" title="新建会话">
+              新建
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 py-2">
             <ul className="space-y-0.5">
               {sessions.map(s => (
                 <li key={s.id}>
                   <button
                     onClick={() => switchSession(s.id)}
                     title={fmtSession(s.created_at)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[13px] ui-row-hover ${
+                    className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[13px] ui-row-hover ${
                       session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
                     }`}
                   >
-                    <MessageCircle className="w-3 h-3 shrink-0" />
                     <span className="truncate">{s.title || '新会话'}</span>
                   </button>
                 </li>
               ))}
-              {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2 py-1">还没有会话</li>}
+              {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2.5 py-2">还没有会话</li>}
             </ul>
-          </SidebarSection>
+          </div>
         </ChatSidebar>
       }
       footer={
         <ChatFooter
           footerAction={
             session ? (
-              <button onClick={clearSession} className="hover:text-red-600 flex items-center gap-1 ui-btn-lift">
+              <button onClick={clearSession} className="text-ink-4 hover:text-rust flex items-center gap-1 text-[11px]">
                 <Trash2 className="w-3 h-3" />清空会话
               </button>
             ) : undefined
@@ -484,7 +458,7 @@ function ChatView() {
               </p>
               <button
                 onClick={triggerIndex}
-                className="mt-2 h-8 px-3 rounded-lg border border-red-300 text-[11px] text-red-700 flex items-center gap-1 ui-btn-lift"
+                className="mt-2 h-8 px-3 rounded-lg border border-red-300 text-[11px] text-red-700 flex items-center gap-1 hover:bg-red-50"
               >
                 <Database className="w-3 h-3" />建立索引
               </button>

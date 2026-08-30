@@ -8,9 +8,9 @@ import type { ChatTraceStep } from '@/components/chat/traceTypes'
 import AgentChatBubble from '@/components/chat/AgentChatBubble'
 
 const TRACE_SOURCE_LABEL = {
-  agent: 'Agent 执行步骤',
-  legacy: '历史执行摘要',
-  inferred: '检索与生成',
+  agent: '研究过程',
+  legacy: '当时的检索',
+  inferred: '检索过程',
 } as const
 
 function TraceCollapse({
@@ -49,19 +49,8 @@ function TraceCollapse({
               <div className="min-w-0 space-y-0.5">
                 <div>
                   <span className="font-medium text-ink-1">{s.label}</span>
-                  {s.tool && <span className="text-ink-4 font-mono text-[10px]"> · {s.tool}</span>}
                   {s.detail && s.status !== 'error' && <span className="text-ink-3"> · {s.detail}</span>}
                 </div>
-                {s.toolInput && (
-                  <p className="text-[10px] text-stone-500 font-mono truncate" title={s.toolInput}>
-                    输入 {s.toolInput}
-                  </p>
-                )}
-                {s.toolOutput && s.status !== 'error' && (
-                  <p className="text-[10px] text-stone-500 font-mono truncate" title={s.toolOutput}>
-                    输出 {s.toolOutput}
-                  </p>
-                )}
                 {s.error && (
                   <p className="text-[10px] text-red-600">{s.error}</p>
                 )}
@@ -85,7 +74,7 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCo
   if (msg.role === 'user') {
     return (
       <div className="flex justify-end ui-fade-in">
-        <div className="bg-ink-0 text-paper-0 text-[14px] leading-relaxed px-4 py-2.5 rounded-2xl rounded-br-md max-w-[85%]">
+        <div className="bg-ink-0 text-paper-0 text-[15px] leading-relaxed px-4 py-2.5 rounded-2xl rounded-br-md max-w-[85%]">
           {msg.content}
         </div>
       </div>
@@ -140,12 +129,12 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCo
       {!msg.streaming && !msg.error && msg.content && (onCopy || onRetry) && (
         <div className="flex items-center gap-3 text-[10px] text-ink-4">
           {onCopy && (
-            <button onClick={() => onCopy(msg.content)} className="hover:text-ink-2 flex items-center gap-1 ui-btn-lift">
+            <button onClick={() => onCopy(msg.content)} className="hover:text-ink-2 flex items-center gap-1">
               <Copy className="w-3 h-3" />复制
             </button>
           )}
           {onRetry && (
-            <button onClick={() => onRetry(idx)} className="hover:text-ink-2 flex items-center gap-1 ui-btn-lift">
+            <button onClick={() => onRetry(idx)} className="hover:text-ink-2 flex items-center gap-1">
               <RefreshCw className="w-3 h-3" />重试
             </button>
           )}

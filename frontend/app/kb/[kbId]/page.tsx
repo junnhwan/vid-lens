@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Settings2, Plus, Trash2, MessageCircle } from 'lucide-react'
+import { Settings2, Plus, Trash2 } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
-import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, SidebarSection } from '@/components/chat/ChatShell'
+import ChatShell, { ChatHeader, ChatSidebar, ChatFooter } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
-import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
 import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
 import KBModal from '@/components/KBModal'
@@ -220,14 +219,6 @@ export default function KBChatPage() {
     <>
       <ChatShell
         scrollRef={scrollRef}
-        tracePanel={
-          <AgentTracePanel
-            steps={activeTrace}
-            streaming={streaming}
-            source="inferred"
-            emptyHint="知识库跨视频检索。"
-          />
-        }
         header={
           <ChatHeader
             backHref="/kb"
@@ -237,7 +228,7 @@ export default function KBChatPage() {
             actions={!isDemo ? (
               <button
                 onClick={() => setShowManage(true)}
-                className="h-8 px-3 rounded-lg border border-ink-0/10 text-[11px] flex items-center gap-1.5 ui-btn-lift hover:bg-paper-1"
+                className="h-8 px-3 rounded-lg border border-ink-0/10 text-[12px] flex items-center gap-1.5 hover:bg-paper-1 transition-colors"
               >
                 <Settings2 className="w-3.5 h-3.5" />管理成员
               </button>
@@ -246,35 +237,29 @@ export default function KBChatPage() {
         }
         sidebar={
           <ChatSidebar>
-            <div className="space-y-6">
-              <SidebarSection
-                title="会话"
-                action={
-                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[11px]">
-                    <Plus className="w-3 h-3" />新建
-                  </button>
-                }
-              >
-                <ul className="space-y-0.5">
-                  {sessions.map(s => (
-                    <li key={s.id}>
-                      <button
-                        onClick={() => switchSession(s.id)}
-                        title={fmtSession(s.created_at)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[13px] ui-row-hover ${
-                          session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
-                        }`}
-                      >
-                        <MessageCircle className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{s.title || '新会话'}</span>
-                      </button>
-                    </li>
-                  ))}
-                  {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2 py-1">还没有会话</li>}
-                </ul>
-              </SidebarSection>
-
-              <SidebarSection title={`成员 · ${kb?.videos?.length ?? 0}`}>
+            <div className="h-14 px-4 border-b border-ink-0/8 flex items-center justify-between shrink-0">
+              <span className="text-[13px] font-medium text-ink-2">会话</span>
+              <button onClick={newSession} className="text-[12px] text-sienna-700 hover:text-sienna-600">新建</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              <ul className="space-y-0.5">
+                {sessions.map(s => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => switchSession(s.id)}
+                      title={fmtSession(s.created_at)}
+                      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[13px] ui-row-hover ${
+                        session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
+                      }`}
+                    >
+                      <span className="truncate">{s.title || '新会话'}</span>
+                    </button>
+                  </li>
+                ))}
+                {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2.5 py-2">还没有会话</li>}
+              </ul>
+              <div className="mt-5 px-2.5">
+                <div className="text-[11px] text-ink-4 mb-2">成员 · {kb?.videos?.length ?? 0}</div>
                 <ul className="space-y-1.5">
                   {(kb?.videos || []).map((v, i) => (
                     <li key={v.task_id} className="flex items-center gap-2 py-0.5">
@@ -287,12 +272,12 @@ export default function KBChatPage() {
                 {!isDemo && (
                   <button
                     onClick={() => setShowManage(true)}
-                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-ink-0/15 text-[11px] text-ink-4 hover:border-sienna-500/40 hover:text-sienna-700 flex items-center justify-center gap-1 ui-btn-lift"
+                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-ink-0/15 text-[11px] text-ink-4 hover:border-sienna-500/40 hover:text-sienna-700 flex items-center justify-center gap-1"
                   >
                     <Plus className="w-3 h-3" />添加视频
                   </button>
                 )}
-              </SidebarSection>
+              </div>
             </div>
           </ChatSidebar>
         }
@@ -302,7 +287,7 @@ export default function KBChatPage() {
               session ? (
                 <button
                   onClick={clearSession}
-                  className="hover:text-rust flex items-center gap-1 ui-btn-lift"
+                  className="text-ink-4 hover:text-rust flex items-center gap-1 text-[11px]"
                 >
                   <Trash2 className="w-3 h-3" />清空会话
                 </button>
