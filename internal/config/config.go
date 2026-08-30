@@ -80,6 +80,10 @@ type MinIOConfig struct {
 const (
 	DefaultMQDownloadQueue = "video-download"
 	DefaultMQRAGIndexQueue = "video-rag-index"
+	DefaultASRConcurrency  = 3
+	DefaultASRMaxRetries   = 2
+	MaxASRConcurrency      = 16
+	MaxASRMaxRetries       = 5
 )
 
 // MQConfig is the RabbitMQ-backed task queue configuration. VidLens uses MQ
@@ -94,9 +98,14 @@ type MQConfig struct {
 	DownloadQueue   string   `yaml:"download_queue"`
 	RAGIndexQueue   string   `yaml:"rag_index_queue"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
-	// Prefetch caps the number of unacked deliveries per consumer. vid-lens runs
-	// one consumer goroutine per queue, so prefetch is the real concurrency knob.
+	// Prefetch caps buffered unacked deliveries. Each queue handler remains
+	// serial; ASRConcurrency controls bounded fan-out inside one video task.
 	Prefetch int `yaml:"prefetch"`
+	// ASRConcurrency bounds per-task provider calls. Provider admission and the
+	// shared retry budget still apply independently to every attempt.
+	ASRConcurrency    int   `yaml:"asr_concurrency"`
+	ASRMaxRetries     int   `yaml:"asr_max_retries"`
+	ASRRetryBackoffMS []int `yaml:"asr_retry_backoff_ms"`
 }
 
 func (m *MQConfig) applyDefaults() {
@@ -108,6 +117,12 @@ func (m *MQConfig) applyDefaults() {
 	}
 	if m.Prefetch <= 0 {
 		m.Prefetch = 1
+	}
+	if m.ASRConcurrency <= 0 {
+		m.ASRConcurrency = DefaultASRConcurrency
+	}
+	if len(m.ASRRetryBackoffMS) == 0 {
+		m.ASRRetryBackoffMS = []int{1000, 3000}
 	}
 }
 

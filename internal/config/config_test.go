@@ -136,6 +136,9 @@ func TestLoadAppliesMQQueueDefaults(t *testing.T) {
 	if cfg.MQ.RAGIndexQueue != DefaultMQRAGIndexQueue {
 		t.Fatalf("rag_index_queue = %q, want %q", cfg.MQ.RAGIndexQueue, DefaultMQRAGIndexQueue)
 	}
+	if cfg.MQ.ASRConcurrency != DefaultASRConcurrency || cfg.MQ.ASRMaxRetries != DefaultASRMaxRetries || len(cfg.MQ.ASRRetryBackoffMS) != 2 {
+		t.Fatalf("ASR processing defaults = %+v", cfg.MQ)
+	}
 }
 
 func TestLoadKeepsAgentMemoryDisabledWithBoundedDefaults(t *testing.T) {
@@ -166,6 +169,21 @@ func TestLoadPreservesExplicitMQQueues(t *testing.T) {
 	}
 	if cfg.MQ.DownloadQueue != "custom-download" || cfg.MQ.RAGIndexQueue != "custom-rag" {
 		t.Fatalf("explicit queues were overwritten: %+v", cfg.MQ)
+	}
+}
+
+func TestLoadAllowsDisablingInOperationASRRetries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("mq:\n  asr_max_retries: 0\n"), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.MQ.ASRMaxRetries != 0 || cfg.MQ.ASRConcurrency != DefaultASRConcurrency {
+		t.Fatalf("ASR controls = %+v", cfg.MQ)
 	}
 }
 

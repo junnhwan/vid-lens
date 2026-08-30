@@ -84,6 +84,23 @@ func TestValidateServerReportsInvalidCoreFields(t *testing.T) {
 	}
 }
 
+func TestValidateServerRejectsUnsafeASRConcurrencyAndBackoff(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.MQ.ASRConcurrency = MaxASRConcurrency + 1
+	cfg.MQ.ASRMaxRetries = -1
+	cfg.MQ.ASRRetryBackoffMS = []int{1000, 0}
+
+	err := cfg.ValidateServer()
+	if err == nil {
+		t.Fatal("ValidateServer() error = nil, want invalid ASR controls rejected")
+	}
+	for _, field := range []string{"mq.asr_concurrency", "mq.asr_max_retries", "mq.asr_retry_backoff_ms[1]"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("ValidateServer() error %q does not mention %s", err, field)
+		}
+	}
+}
+
 func TestValidateServerValidatesEnabledPGVectorConfiguration(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.RAG = RAGConfig{

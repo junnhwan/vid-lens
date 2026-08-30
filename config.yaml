@@ -42,6 +42,10 @@ mq:
   rag_index_queue: "video-rag-index"
   consumer_group: "vidlens-worker"
   prefetch: 1
+  # 单个视频内部并行的 ASR 请求上限；所有尝试仍经过 provider admission。
+  asr_concurrency: 3
+  asr_max_retries: 2
+  asr_retry_backoff_ms: [1000, 3000]
 
 ai:
   # New deployments use capability-specific OpenAI-compatible endpoints.

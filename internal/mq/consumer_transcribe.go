@@ -3,10 +3,12 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"vid-lens/internal/ai"
@@ -56,7 +58,9 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	}
 	defer os.Remove(videoPath)
 
+	audioExtractStartedAt := time.Now()
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
+	c.recordASRStage(ctx, task.ID, "audio_extract", stageStatus(err), time.Since(audioExtractStartedAt))
 	if err != nil {
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
@@ -75,13 +79,16 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
+	persistStartedAt := time.Now()
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Transcription.Upsert(&model.VideoTranscription{
 			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
+		c.recordASRStage(ctx, task.ID, "persistence", "failed", time.Since(persistStartedAt))
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
+	c.recordASRStage(ctx, task.ID, "persistence", "success", time.Since(persistStartedAt))
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
@@ -133,7 +140,9 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}
 	defer os.Remove(videoPath)
 
+	audioExtractStartedAt := time.Now()
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
+	c.recordASRStage(ctx, task.ID, "audio_extract", stageStatus(err), time.Since(audioExtractStartedAt))
 	if err != nil {
 		return fmt.Errorf("提取音频失败: %w", err)
 	}
@@ -153,13 +162,16 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
+	persistStartedAt := time.Now()
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.Transcription.Upsert(&model.VideoTranscription{
 			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
+		c.recordASRStage(ctx, task.ID, "persistence", "failed", time.Since(persistStartedAt))
 		return fmt.Errorf("保存转录失败: %w", err)
 	}
+	c.recordASRStage(ctx, task.ID, "persistence", "success", time.Since(persistStartedAt))
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
@@ -186,7 +198,9 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		slog.Int64("task_id", taskID),
 		slog.Int("segment_seconds", ffmpeg.DefaultAudioSegmentSeconds),
 		slog.Int("overlap_seconds", ffmpeg.DefaultAudioSegmentOverlapSeconds))
+	segmentStartedAt := time.Now()
 	segments, cleanupDir, err := c.prepareAudioSegments(ctx, audioPath)
+	c.recordASRStage(ctx, taskID, "segment_prepare", stageStatus(err), time.Since(segmentStartedAt))
 	if err != nil {
 		return "", err
 	}
@@ -201,7 +215,12 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunks prepared", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(segments)))
 
-	parts := make([]string, 0, len(segments))
+	parts := make([]string, len(segments))
+	type asrWork struct {
+		index   int
+		segment ffmpeg.AudioSegment
+	}
+	pending := make([]asrWork, 0, len(segments))
 	for i, segment := range segments {
 		if err := requireProcessingLease(ctx); err != nil {
 			return "", err
@@ -211,63 +230,129 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 				metrics.IncASRChunkReuse()
 			}
 			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk reused", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(segments)), slog.Int("output_chars", len([]rune(completed))))
-			parts = append(parts, completed)
+			parts[i] = completed
 			continue
 		}
 
+		persistStartedAt := time.Now()
 		if err := c.markTranscriptionChunkRunning(ctx, taskID, i, segment); err != nil {
+			c.recordASRStage(ctx, taskID, "persistence", "failed", time.Since(persistStartedAt))
 			return "", err
 		}
-		if err := requireProcessingLease(ctx); err != nil {
-			return "", err
+		c.recordASRStage(ctx, taskID, "persistence", "success", time.Since(persistStartedAt))
+		pending = append(pending, asrWork{index: i, segment: segment})
+	}
+
+	type asrResult struct {
+		work     asrWork
+		text     string
+		err      error
+		duration time.Duration
+	}
+	workerCount := c.asrConcurrency
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+	if workerCount > len(pending) {
+		workerCount = len(pending)
+	}
+	if workerCount > 0 {
+		jobs := make(chan asrWork, len(pending))
+		results := make(chan asrResult, workerCount)
+		var workers sync.WaitGroup
+		workers.Add(workerCount)
+		for worker := 0; worker < workerCount; worker++ {
+			go func() {
+				defer workers.Done()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case work, ok := <-jobs:
+						if !ok {
+							return
+						}
+						startedAt := time.Now()
+						chunkStrategy := c.retryingASRStrategy(ctx, taskID, work.index, strategy)
+						chunkCtx := withASROperationKey(ctx, taskID, work.index)
+						text, err := chunkStrategy.Transcribe(chunkCtx, work.segment.Path)
+						results <- asrResult{work: work, text: text, err: err, duration: time.Since(startedAt)}
+					}
+				}
+			}()
 		}
-		chunkStartedAt := time.Now()
-		text, transcribeErr := strategy.Transcribe(ctx, segment.Path)
-		if err := requireProcessingLease(ctx); err != nil {
-			return "", err
+		for _, work := range pending {
+			jobs <- work
 		}
-		if transcribeErr != nil {
+		close(jobs)
+		go func() {
+			workers.Wait()
+			close(results)
+		}()
+
+		failures := make([]error, len(segments))
+		for result := range results {
 			if metrics := observability.DefaultMetrics(); metrics != nil {
-				metrics.ObserveASRChunk("failed", time.Since(chunkStartedAt))
+				metrics.ObserveASRChunk(stageStatus(result.err), result.duration)
 			}
-			if err := c.markTranscriptionChunkFailed(ctx, taskID, i, segment.Path, transcribeErr); err != nil {
-				return "", err
+			if result.err != nil {
+				failures[result.work.index] = result.err
+				if ctx.Err() == nil {
+					persistStartedAt := time.Now()
+					persistErr := c.markTranscriptionChunkFailed(ctx, taskID, result.work.index, result.work.segment.Path, result.err)
+					c.recordASRStage(ctx, taskID, "persistence", stageStatus(persistErr), time.Since(persistStartedAt))
+					if persistErr != nil {
+						failures[result.work.index] = errors.Join(result.err, persistErr)
+					}
+				}
+				continue
 			}
-			if err := requireProcessingLease(ctx); err != nil {
-				return "", err
+
+			text := strings.TrimSpace(result.text)
+			parts[result.work.index] = text
+			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed",
+				slog.Int64("task_id", taskID), slog.Int("chunk_index", result.work.index+1),
+				slog.Int("chunk_count", len(segments)), slog.Int("output_chars", len([]rune(text))))
+			if text != "" {
+				persistStartedAt := time.Now()
+				persistErr := c.markTranscriptionChunkCompleted(ctx, taskID, result.work.index, result.work.segment, text)
+				c.recordASRStage(ctx, taskID, "persistence", stageStatus(persistErr), time.Since(persistStartedAt))
+				if persistErr != nil {
+					failures[result.work.index] = persistErr
+				}
 			}
-			return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, transcribeErr)
 		}
-		if metrics := observability.DefaultMetrics(); metrics != nil {
-			metrics.ObserveASRChunk("success", time.Since(chunkStartedAt))
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		text = strings.TrimSpace(text)
-		chars := len([]rune(text))
-		observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(segments)), slog.Int("output_chars", chars))
-		if text != "" {
-			if err := c.markTranscriptionChunkCompleted(ctx, taskID, i, segment, text); err != nil {
-				return "", err
+		for i, failure := range failures {
+			if failure != nil {
+				return "", fmt.Errorf("第 %d 段 ASR 失败: %w", i+1, failure)
 			}
-			if err := requireProcessingLease(ctx); err != nil {
-				return "", err
-			}
-			parts = append(parts, text)
 		}
 	}
 	if err := requireProcessingLease(ctx); err != nil {
 		return "", err
 	}
-	if len(parts) == 0 {
+	compactParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			compactParts = append(compactParts, part)
+		}
+	}
+	if len(compactParts) == 0 {
 		return "", fmt.Errorf("ASR 返回空结果")
 	}
 
-	stitched := transcript.Stitch(parts)
+	stitchStartedAt := time.Now()
+	stitched := transcript.Stitch(compactParts)
 	if !hasOverlappingAudioWindows(segments) {
 		// Compatibility adapters and historical tests provide path-only chunks.
 		// Without proof that the audio inputs overlap, deduplicating equal text
 		// could destroy legitimately repeated speech.
-		stitched = transcript.StitchResult{Content: strings.Join(parts, "\n\n")}
+		stitched = transcript.StitchResult{Content: strings.Join(compactParts, "\n\n")}
 	}
+	c.recordASRStage(ctx, taskID, "stitch", "success", time.Since(stitchStartedAt))
 	matchedBoundaries := 0
 	for _, boundary := range stitched.Boundaries {
 		if boundary.MatchRunes > 0 {
@@ -292,6 +377,57 @@ func hasOverlappingAudioWindows(segments []ffmpeg.AudioSegment) bool {
 		}
 	}
 	return true
+}
+
+func stageStatus(err error) string {
+	if err != nil {
+		return "failed"
+	}
+	return "success"
+}
+
+func (c *Consumer) recordASRStage(ctx context.Context, taskID int64, stage, status string, duration time.Duration) {
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		metrics.ObserveASRStage(stage, status, duration)
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr stage measured",
+		slog.Int64("task_id", taskID), slog.String("asr_stage", stage), slog.String("status", status),
+		slog.Float64("duration_ms", float64(duration)/float64(time.Millisecond)))
+}
+
+func withASROperationKey(ctx context.Context, taskID int64, chunkIndex int) context.Context {
+	metadata := ai.GovernanceContextFromContext(ctx)
+	metadata.OperationKey = fmt.Sprintf("task-%d-asr-chunk-%d", taskID, chunkIndex)
+	metadata.AttemptKey = ""
+	return ai.WithGovernanceContext(ctx, metadata)
+}
+
+func (c *Consumer) retryingASRStrategy(ctx context.Context, taskID int64, chunkIndex int, strategy ai.Strategy) ai.Strategy {
+	policy := c.asrRetryPolicy
+	metrics := observability.DefaultMetrics()
+	policy.BeginAttempt = func(attempt int) {
+		if metrics != nil {
+			metrics.IncASRProviderInflight()
+		}
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr provider request started",
+			slog.Int64("task_id", taskID), slog.Int("chunk_index", chunkIndex+1), slog.Int("attempt", attempt+1))
+	}
+	policy.ObserveAttempt = func(observation ai.ProviderAttemptObservation) {
+		if observation.Phase == "request" {
+			if metrics != nil {
+				metrics.DecASRProviderInflight()
+			}
+			c.recordASRStage(ctx, taskID, "provider_request", stageStatus(observation.Err), observation.Duration)
+		}
+		if observation.Phase == "retry_wait" {
+			c.recordASRStage(ctx, taskID, "retry_wait", "retry", observation.SleepDuration)
+			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr provider retry wait completed",
+				slog.Int64("task_id", taskID), slog.Int("chunk_index", chunkIndex+1),
+				slog.Int("attempt", observation.Attempt+1),
+				slog.Float64("requested_delay_ms", float64(observation.RetryDelay)/float64(time.Millisecond)))
+		}
+	}
+	return ai.RetryStrategy(strategy, policy)
 }
 
 func (c *Consumer) prepareAudioSegments(ctx context.Context, audioPath string) ([]ffmpeg.AudioSegment, string, error) {

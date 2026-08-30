@@ -147,6 +147,7 @@ func NewObservedStrategy(base Strategy, recorder CallRecorder, callCtx CallConte
 func (s *observedStrategy) Transcribe(ctx context.Context, audioPath string) (string, error) {
 	startedAt := time.Now()
 	text, err := s.base.Transcribe(ctx, audioPath)
+	observeProviderAttemptTiming(ctx, time.Since(startedAt))
 	recordCall(ctx, s.recorder, baseRecord(ctx, asrCallContext(s.callCtx), startedAt, 0, utf8.RuneCountInString(text), err))
 	return text, err
 }

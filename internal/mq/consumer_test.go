@@ -6,11 +6,13 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +33,71 @@ type recordingAI struct {
 	transcribeUsed   bool
 	transcripts      map[string]string
 	transcribeErrors map[string]error
+}
+
+type controlledASR struct {
+	mu      sync.Mutex
+	active  int
+	max     int
+	calls   []string
+	outputs map[string]string
+	errors  map[string]error
+	started chan string
+	release <-chan struct{}
+}
+
+func (a *controlledASR) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	a.mu.Lock()
+	a.active++
+	if a.active > a.max {
+		a.max = a.active
+	}
+	a.calls = append(a.calls, audioPath)
+	text, err := a.outputs[audioPath], a.errors[audioPath]
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.active--
+		a.mu.Unlock()
+	}()
+	if a.started != nil {
+		a.started <- audioPath
+	}
+	if a.release != nil {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-a.release:
+		}
+	}
+	return text, err
+}
+
+func (a *controlledASR) TranscribeChunks(context.Context, []string) (string, error) {
+	return "", nil
+}
+
+func (a *controlledASR) Summarize(context.Context, string) (string, error) { return "", nil }
+
+func (a *controlledASR) snapshot() (max int, calls []string, active int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.max, append([]string(nil), a.calls...), a.active
+}
+
+func (a *controlledASR) setError(path string, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.errors == nil {
+		a.errors = make(map[string]error)
+	}
+	a.errors[path] = err
+}
+
+func (a *controlledASR) resetCalls() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls = nil
 }
 
 type emptyProfileResolver struct{}
@@ -243,6 +310,11 @@ func TestTranscribeAudioLogsChunkMetrics(t *testing.T) {
 	for _, want := range []string{
 		"task_id=42",
 		"chunk_count=2",
+		"asr_stage=segment_prepare",
+		"asr_stage=provider_request",
+		"asr_stage=persistence",
+		"asr_stage=stitch",
+		"duration_ms=",
 		"chunk_index=1",
 		"output_chars=5",
 		"chunk_index=2",
@@ -437,6 +509,135 @@ func TestTranscribeAudioDoesNotReuseCompletedChunkFromDifferentSegmentStrategy(t
 	stored, err := repos.TranscriptionChunk.FindByTaskAndIndex(88, 0)
 	if err != nil || stored.SegmentKey != "new-key" || stored.Content != "新策略结果" {
 		t.Fatalf("stored = %+v, err = %v", stored, err)
+	}
+}
+
+func TestTranscribeAudioControlledConcurrencyReducesProviderLatencyAndKeepsOrder(t *testing.T) {
+	chunks := []string{"chunk-0.mp3", "chunk-1.mp3", "chunk-2.mp3", "chunk-3.mp3"}
+	release := make(chan struct{})
+	strategy := &controlledASR{
+		outputs: map[string]string{
+			chunks[0]: "zero", chunks[1]: "one", chunks[2]: "two", chunks[3]: "three",
+		},
+		started: make(chan string, len(chunks)),
+		release: release,
+	}
+	consumer := &Consumer{
+		asrConcurrency: 2,
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return chunks, nil
+		},
+	}
+
+	done := make(chan struct{})
+	var transcript string
+	var transcribeErr error
+	go func() {
+		defer close(done)
+		transcript, transcribeErr = consumer.transcribeAudio(context.Background(), 501, "audio.mp3", strategy)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-strategy.started:
+		case <-time.After(time.Second):
+			t.Fatal("two ASR requests did not overlap; bounded concurrency was not used")
+		}
+	}
+	max, _, _ := strategy.snapshot()
+	if max != 2 {
+		t.Fatalf("max provider concurrency=%d want=2", max)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent transcription did not finish")
+	}
+	if transcribeErr != nil || transcript != "zero\n\none\n\ntwo\n\nthree" {
+		t.Fatalf("transcript=%q err=%v", transcript, transcribeErr)
+	}
+	max, _, active := strategy.snapshot()
+	if max != 2 || active != 0 {
+		t.Fatalf("provider concurrency max=%d active=%d", max, active)
+	}
+}
+
+func TestTranscribeAudioCancellationStopsBoundedWorkers(t *testing.T) {
+	chunks := []string{"chunk-0.mp3", "chunk-1.mp3", "chunk-2.mp3", "chunk-3.mp3"}
+	strategy := &controlledASR{
+		outputs: map[string]string{},
+		started: make(chan string, len(chunks)),
+		release: make(chan struct{}),
+	}
+	consumer := &Consumer{
+		asrConcurrency: 2,
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return chunks, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := consumer.transcribeAudio(ctx, 502, "audio.mp3", strategy)
+		done <- err
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-strategy.started:
+		case <-time.After(time.Second):
+			t.Fatal("ASR workers did not start")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error=%v want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not stop ASR workers")
+	}
+	max, _, active := strategy.snapshot()
+	if max > 2 || active != 0 {
+		t.Fatalf("provider concurrency max=%d active=%d", max, active)
+	}
+}
+
+func TestTranscribeAudioPartialFailurePersistsSuccessesAndRetryReusesThem(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	chunks := []string{"chunk-0.mp3", "chunk-1.mp3", "chunk-2.mp3"}
+	providerFailure := &ai.ProviderError{Class: ai.ErrorInvalidRequest, StatusCode: 400, Retryable: false}
+	strategy := &controlledASR{
+		outputs: map[string]string{chunks[0]: "zero", chunks[1]: "one", chunks[2]: "two"},
+		errors:  map[string]error{chunks[1]: providerFailure},
+	}
+	consumer := &Consumer{
+		repo: repos, asrConcurrency: 2,
+		splitAudio: func(context.Context, string, string, int) ([]string, error) {
+			return chunks, nil
+		},
+	}
+
+	if _, err := consumer.transcribeAudio(context.Background(), 503, "audio.mp3", strategy); err == nil || !strings.Contains(err.Error(), "第 2 段") {
+		t.Fatalf("first transcription error=%v", err)
+	}
+	rows, err := repos.TranscriptionChunk.ListByTaskID(503)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	if rows[0].Status != model.TranscriptionChunkStatusCompleted || rows[1].Status != model.TranscriptionChunkStatusFailed || rows[2].Status != model.TranscriptionChunkStatusCompleted {
+		t.Fatalf("partial result statuses=%+v", rows)
+	}
+
+	strategy.setError(chunks[1], nil)
+	strategy.resetCalls()
+	transcript, err := consumer.transcribeAudio(context.Background(), 503, "audio.mp3", strategy)
+	if err != nil || transcript != "zero\n\none\n\ntwo" {
+		t.Fatalf("retry transcript=%q err=%v", transcript, err)
+	}
+	_, calls, _ := strategy.snapshot()
+	if len(calls) != 1 || calls[0] != chunks[1] {
+		t.Fatalf("retry provider calls=%v want only failed chunk", calls)
 	}
 }
 

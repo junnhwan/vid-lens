@@ -231,6 +231,13 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 
 	consumer := mq.NewConsumer(deps.repos, deps.minioStorage, aiStrategy, deps.rdb, deps.cfg.Tools.FFmpegPath)
 	consumer.SetMQConfig(deps.cfg.MQ.Brokers, deps.cfg.MQ.Prefetch)
+	asrBackoffs := make([]time.Duration, 0, len(deps.cfg.MQ.ASRRetryBackoffMS))
+	for _, milliseconds := range deps.cfg.MQ.ASRRetryBackoffMS {
+		if milliseconds > 0 {
+			asrBackoffs = append(asrBackoffs, time.Duration(milliseconds)*time.Millisecond)
+		}
+	}
+	consumer.SetASRProcessingConfig(deps.cfg.MQ.ASRConcurrency, deps.cfg.MQ.ASRMaxRetries, asrBackoffs)
 	consumer.SetDownloadTools(deps.cfg.Tools.YtDlpPath, deps.cfg.Tools.FFmpegPath, deps.cfg.Tools.CookiesPath, deps.cfg.Tools.ProxyURL)
 	consumer.SetDownloadURLPolicy(deps.cfg.Tools.AllowedVideoHosts, nil)
 	consumer.SetRetryPolicy(mq.TaskRetryPolicy{

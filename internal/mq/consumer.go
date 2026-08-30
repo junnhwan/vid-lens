@@ -43,6 +43,11 @@ type messageReaderFactory func(queue, groupID string) messageReader
 
 type messageHandler func(ctx context.Context, delivery amqp.Delivery) error
 
+const (
+	maxASRConcurrency = 16
+	maxASRMaxRetries  = 5
+)
+
 // Consumer RabbitMQ 消费者
 // Consumer guarantees:
 //  1. manual ack：业务成功后才 Ack；handler 失败 Nack(requeue=true) 触发 at-least-once 重投
@@ -65,6 +70,8 @@ type Consumer struct {
 	downloadURLPolicy      remoteurl.Policy
 	splitAudio             splitAudioFunc
 	splitAudioWindows      splitAudioWindowsFunc
+	asrConcurrency         int
+	asrRetryPolicy         ai.ProviderRetryPolicy
 	ragIndex               ragIndexFunc
 	visualIndex            visualIndexFunc
 	ragProducer            ragIndexProducer
@@ -108,6 +115,11 @@ func NewConsumer(
 		rdb:               rdb,
 		ffmpegPath:        ffmpegPath,
 		splitAudioWindows: ffmpeg.SplitAudioWindows,
+		asrConcurrency:    3,
+		asrRetryPolicy: ai.ProviderRetryPolicy{
+			MaxRetries: 2,
+			Backoffs:   []time.Duration{time.Second, 3 * time.Second},
+		},
 		processingLease:   30 * time.Minute,
 		now:               time.Now,
 		newToken:          uuid.NewString,
@@ -123,6 +135,27 @@ func NewConsumer(
 		return err
 	}
 	return consumer
+}
+
+// SetASRProcessingConfig controls concurrency and transient provider retries.
+// A zero concurrency leaves the safe default selected by NewConsumer; zero
+// retries explicitly disables in-operation provider retries.
+func (c *Consumer) SetASRProcessingConfig(concurrency, maxRetries int, backoffs []time.Duration) {
+	if concurrency > 0 {
+		if concurrency > maxASRConcurrency {
+			concurrency = maxASRConcurrency
+		}
+		c.asrConcurrency = concurrency
+	}
+	if maxRetries >= 0 {
+		if maxRetries > maxASRMaxRetries {
+			maxRetries = maxASRMaxRetries
+		}
+		c.asrRetryPolicy.MaxRetries = maxRetries
+	}
+	if len(backoffs) > 0 {
+		c.asrRetryPolicy.Backoffs = append([]time.Duration(nil), backoffs...)
+	}
 }
 
 // SetDownloadURLPolicy configures the admission-time URL checks used by the

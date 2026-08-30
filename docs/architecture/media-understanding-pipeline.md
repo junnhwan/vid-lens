@@ -2,7 +2,7 @@
 
 本文描述 VidLens 从“ASR 文本问答”演进为“带可信时间轴的多模态视频理解”的当前基线、目标模块、实施顺序和验收口径。它只讨论工程实现，不把模型输出本身当作事实。
 
-状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。重叠 ASR 时间窗、稳定 segment identity、毫秒级 window/core 元数据和确定性 transcript stitcher 继续作为上游事实；本次完成了语义切片、持久化 provenance、检索/引用/证据账本传递和旧索引重建识别。视觉分支解耦与在线视觉核验不在本次范围内。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
+状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。重叠 ASR 时间窗、稳定 segment identity、毫秒级 window/core 元数据和确定性 transcript stitcher 继续作为上游事实；ASR 分阶段延迟观测、受控并发、provider 级重试和部分失败复用也已实现。视觉分支解耦与在线视觉核验仍不在当前范围内。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
 
 ## 历史改造结论
 
@@ -68,15 +68,18 @@ VideoTask
 
 ### ASR 延迟
 
-当前耗时包含本地转码、固定切片、N 次串行外部 ASR、同步视觉处理和第二次视频下载。优化顺序应先减少不必要等待，再增加并发：
+ASR 关键路径已先建立分阶段观测，再把逐片 provider 调用改为固定 worker pool。视觉处理与第二次下载仍是后续独立优化项。
 
-- 记录 `audio_extract_ms`、`segment_prepare_ms`、每片 `asr_provider_ms`、`stitch_ms`、`visual_index_ms` 和端到端耗时。
-- ASR 分片使用有界并发，默认并发度必须受 provider admission、用户配额和 MQ worker 容量共同约束。
-- 已完成分片继续复用；并发失败只重试缺失片。
-- ASR 与视觉成为独立可恢复分支，复用同一下载资产；RAG 文本索引不必等待高成本 Vision 全量 caption。
-- OCR 可先离线覆盖，Vision 优先用于 RAG 命中的有限时间窗，而不是默认逐帧调用。
+- Prometheus 使用 `vidlens_asr_stage_duration_seconds{stage,status}` 记录 `audio_extract`、`segment_prepare`、`provider_request`、`retry_wait`、`stitch`、`persistence`。同一测量同时输出 `asr stage measured` 结构化日志及 `duration_ms`；task ID 只进日志，不进入指标 label。
+- `vidlens_asr_provider_inflight` 暴露当前 provider 请求数；原有 `vidlens_asr_chunk_duration_seconds` 继续表示一个逻辑分片包含重试等待在内的总耗时。
+- 单任务 worker 数由 `mq.asr_concurrency` 控制，默认 3、配置上限 16；只创建固定数量 worker，不按分片数量创建 goroutine。RabbitMQ transcribe consumer 的任务级并发、provider admission、用户/operation/provider/model 配额仍构成外层约束。
+- 每个 provider attempt 都独立计时。429、5xx、网络错误和超时只有在 provider adapter 明确标记可重试时才重试；429 和本地 admission rejection 优先采用 `Retry-After`，否则使用 `mq.asr_retry_backoff_ms`。默认最多额外请求 2 次，配置硬上限为 5；设为 0 可关闭单次任务内的 provider retry，任务级恢复仍由 RetryScheduler 负责。
+- retry attempt 使用稳定的 `task-{taskID}-asr-chunk-{index}:provider-retry:{n}` 身份；当 task job 绑定了 retry budget 时，额外请求继续消费同一持久化预算，正常首请求不消费额外重试额度。
+- worker 完成顺序不影响输出：结果写回原始 chunk index，最终仍按时间窗顺序交给同一个确定性 stitcher。
+- 单片最终失败不会取消其他片。成功片先写入 `video_transcription_chunks`，失败片记录失败和 retry count；本次任务返回最低失败索引的稳定错误。重复消费或任务级重试复用已完成且 segment key 匹配的片，只请求失败/缺失片。
+- 上游 context 取消会终止排队 worker、provider 请求和 retry wait；取消本身不增加分片失败次数。processing lease 和消息幂等门仍负责拒绝过期/重复消费者。
 
-增加并发前必须先有延迟直方图和 provider 429/5xx 指标；否则吞吐提升可能只是把等待转移到限流与重试。
+因此当前并发优化不会改变 overlap window、原始分片内容或 stitcher 算法；相同分片结果集合必须得到与串行实现相同的 transcript。
 
 ### RAG 语义不连续
 
@@ -298,6 +301,41 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 - `internal/mq/consumer_transcribe.go`：只在元数据证明窗口重叠时启用 stitcher；旧 path-only 分片保持兼容连接。
 - `internal/model/transcription_chunk.go`：segment key/version、window/core 毫秒范围；旧秒级范围继续供现有 evidence 路径读取。
 
+## ASR 延迟与受控并发代码切片
+
+本切片只修改后端编排、AI retry、配置、指标和测试，不改变 HTTP/SSE/前端协议，也不改变确定性拼接契约：
+
+```text
+提取音频（计时）
+  → overlap window 切片（计时）
+  → 读取并固定复用 completed chunks
+  → 将其余 chunks 标记 running
+  → 固定 N 个 worker 并发调用 ASR
+       每次 attempt：provider admission → 请求计时
+       transient failure：共享 retry budget → Retry-After/退避计时 → 重试
+  → coordinator 按完成事件持久化 success/failed
+  → 所有结果按 chunk index 归位
+  → 原确定性 stitcher（计时）
+  → 权威 transcript 持久化（计时）
+```
+
+配置位于 `mq`：
+
+```yaml
+asr_concurrency: 3
+asr_max_retries: 2
+asr_retry_backoff_ms: [1000, 3000]
+```
+
+实现边界：
+
+- `internal/mq/consumer_transcribe.go`：固定 worker pool、取消传播、稳定归位、部分失败持久化和阶段日志/指标。
+- `internal/ai/retry_policy.go`：可重试 ASR strategy、Retry-After、本地 admission rejection、稳定 attempt identity 及 request/retry-wait observation。
+- `internal/observability/metrics.go`：低基数阶段延迟直方图和 provider inflight gauge。
+- `internal/config/config.go` 与 `cmd/server/wiring.go`：默认值、YAML 解析和生产接线。
+
+验证覆盖并发上限、乱序完成后的稳定 transcript、并行请求确实重叠、context 取消、429 Retry-After、稳定 retry identity、部分失败后只重跑失败片，以及重复消费时 completed chunk 复用。测试使用受控 channel 而不是依赖脆弱的毫秒阈值判断并发收益。
+
 ## 发布、回滚与迁移
 
 - 新策略必须带版本，索引行记录构建策略；回滚只切换新任务策略，不删除旧源数据。
@@ -305,6 +343,7 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 - 新旧索引并存期间，以任务的 RAG index manifest 决定读取哪一版，不按“最新行看起来存在”猜测。
 - backfill 使用现有 `rag-reindex` 的 checkpoint 思路，限制用户、task、模型和批量大小。
 - 任何 stitcher 失败都保留原始分片，允许用旧拼接方式重建；不能只保存被合并后的不可逆文本。
+- 回滚受控并发只需把 `mq.asr_concurrency` 设为 `1`；原始 chunk 行、segment identity 和最终 transcript schema 不需要迁移或回写。
 
 ## 验证命令
 

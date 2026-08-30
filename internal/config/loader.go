@@ -41,7 +41,13 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg := Config{AIGovernance: defaultAIGovernanceConfig()}
+	cfg := Config{
+		AIGovernance: defaultAIGovernanceConfig(),
+		MQ: MQConfig{
+			ASRConcurrency: DefaultASRConcurrency, ASRMaxRetries: DefaultASRMaxRetries,
+			ASRRetryBackoffMS: []int{1000, 3000},
+		},
+	}
 	decoder := yaml.NewDecoder(bytes.NewReader(expanded))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil && err != io.EOF {

@@ -24,6 +24,8 @@ type Metrics struct {
 	asrChunkTotal         *prometheus.CounterVec
 	asrChunkDuration      prometheus.Histogram
 	asrChunkReuse         prometheus.Counter
+	asrStageDuration      *prometheus.HistogramVec
+	asrInflight           prometheus.Gauge
 	aiCallTotal           *prometheus.CounterVec
 	aiCallDuration        *prometheus.HistogramVec
 	aiTokensTotal         *prometheus.CounterVec
@@ -80,6 +82,12 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 		return nil, err
 	}
 	if m.asrChunkReuse, err = registerCounter(registerer, prometheus.NewCounter(prometheus.CounterOpts{Name: "vidlens_asr_chunk_reuse_total", Help: "Reused completed ASR chunks."})); err != nil {
+		return nil, err
+	}
+	if m.asrStageDuration, err = registerHistogramVec(registerer, prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "vidlens_asr_stage_duration_seconds", Help: "ASR pipeline stage duration in seconds.", Buckets: durationBuckets}, []string{"stage", "status"})); err != nil {
+		return nil, err
+	}
+	if m.asrInflight, err = registerGauge(registerer, prometheus.NewGauge(prometheus.GaugeOpts{Name: "vidlens_asr_provider_inflight", Help: "ASR provider requests currently in flight."})); err != nil {
 		return nil, err
 	}
 	if m.aiCallTotal, err = registerCounterVec(registerer, prometheus.NewCounterVec(prometheus.CounterOpts{Name: "vidlens_ai_call_total", Help: "AI provider call outcomes."}, []string{"kind", "provider", "model", "status"})); err != nil {
@@ -163,6 +171,21 @@ func (m *Metrics) IncASRChunkReuse() {
 		m.asrChunkReuse.Inc()
 	}
 }
+func (m *Metrics) ObserveASRStage(stage, status string, duration time.Duration) {
+	if m != nil {
+		m.asrStageDuration.WithLabelValues(normalizeASRStage(stage), normalizeStatus(status)).Observe(duration.Seconds())
+	}
+}
+func (m *Metrics) IncASRProviderInflight() {
+	if m != nil {
+		m.asrInflight.Inc()
+	}
+}
+func (m *Metrics) DecASRProviderInflight() {
+	if m != nil {
+		m.asrInflight.Dec()
+	}
+}
 func (m *Metrics) ObserveAICall(call AICallObservation) {
 	if m == nil {
 		return
@@ -241,6 +264,9 @@ func normalizeStatus(value string) string {
 }
 func normalizeStage(value string) string {
 	return normalize(value, set("downloading", "uploaded", "transcribing", "summarizing", "indexing", "none"))
+}
+func normalizeASRStage(value string) string {
+	return normalize(value, set("audio_extract", "segment_prepare", "provider_request", "retry_wait", "stitch", "persistence"))
 }
 func normalizeMemoryStage(value string) string {
 	return normalize(value, set("candidate", "writer_queue", "authorization", "persist", "embedding", "embedding_ref", "extractor_queue", "extractor"))
@@ -323,6 +349,17 @@ func registerHistogram(reg prometheus.Registerer, collector prometheus.Histogram
 	typed, ok := existing.(prometheus.Histogram)
 	if !ok {
 		return nil, fmt.Errorf("existing collector has type %T, want Histogram", existing)
+	}
+	return typed, nil
+}
+func registerGauge(reg prometheus.Registerer, collector prometheus.Gauge) (prometheus.Gauge, error) {
+	existing, err := register(reg, collector)
+	if err != nil {
+		return nil, err
+	}
+	typed, ok := existing.(prometheus.Gauge)
+	if !ok {
+		return nil, fmt.Errorf("existing collector has type %T, want Gauge", existing)
 	}
 	return typed, nil
 }

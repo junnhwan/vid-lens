@@ -84,6 +84,17 @@ func (c *Config) ValidateServer() error {
 	problems.require("mq.download_queue", c.MQ.DownloadQueue)
 	problems.require("mq.rag_index_queue", c.MQ.RAGIndexQueue)
 	problems.require("mq.consumer_group", c.MQ.ConsumerGroup)
+	if c.MQ.ASRConcurrency < 0 || c.MQ.ASRConcurrency > MaxASRConcurrency {
+		problems.add("mq.asr_concurrency", fmt.Sprintf("必须在 1..%d 之间，或留空使用默认值", MaxASRConcurrency))
+	}
+	if c.MQ.ASRMaxRetries < 0 || c.MQ.ASRMaxRetries > MaxASRMaxRetries {
+		problems.add("mq.asr_max_retries", fmt.Sprintf("必须在 0..%d 之间", MaxASRMaxRetries))
+	}
+	for i, milliseconds := range c.MQ.ASRRetryBackoffMS {
+		if milliseconds <= 0 {
+			problems.add(fmt.Sprintf("mq.asr_retry_backoff_ms[%d]", i), "必须为正数")
+		}
+	}
 
 	problems.require("jwt.secret", c.JWT.Secret)
 	if c.JWT.ExpireHours <= 0 {

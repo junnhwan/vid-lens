@@ -89,6 +89,29 @@ type governanceCapturingChat struct {
 	calls    int
 }
 
+type retryingTestStrategy struct {
+	errors   []error
+	contexts []GovernanceContext
+	calls    int
+}
+
+func (s *retryingTestStrategy) Transcribe(ctx context.Context, _ string) (string, error) {
+	s.contexts = append(s.contexts, GovernanceContextFromContext(ctx))
+	s.calls++
+	if s.calls <= len(s.errors) && s.errors[s.calls-1] != nil {
+		return "", s.errors[s.calls-1]
+	}
+	return "transcript", nil
+}
+
+func (s *retryingTestStrategy) TranscribeChunks(context.Context, []string) (string, error) {
+	return "", nil
+}
+
+func (s *retryingTestStrategy) Summarize(context.Context, string) (string, error) {
+	return "summary", nil
+}
+
 func (c *governanceCapturingChat) Chat(ctx context.Context, _ []ChatMessage) (string, error) {
 	c.contexts = append(c.contexts, GovernanceContextFromContext(ctx))
 	c.calls++
@@ -118,5 +141,58 @@ func TestRetryChatUsesStableOperationKeyForProviderAttempt(t *testing.T) {
 	}
 	if provider.contexts[1].RetryBudgetID != "budget-1" || provider.contexts[1].Subject != "user:7" {
 		t.Fatalf("retry lost governance metadata: %+v", provider.contexts[1])
+	}
+}
+
+func TestRetryStrategyHonorsASRRateLimitAndStableAttemptIdentity(t *testing.T) {
+	rateLimit := &ProviderError{Class: ErrorRateLimited, StatusCode: 429, Retryable: true, RetryAfter: 4 * time.Second}
+	provider := &retryingTestStrategy{errors: []error{rateLimit}}
+	var slept []time.Duration
+	var observations []ProviderAttemptObservation
+	strategy := RetryStrategy(provider, ProviderRetryPolicy{
+		MaxRetries: 2,
+		Backoffs:   []time.Duration{time.Second},
+		Sleep: func(_ context.Context, delay time.Duration) error {
+			slept = append(slept, delay)
+			return nil
+		},
+		ObserveAttempt: func(observation ProviderAttemptObservation) {
+			observations = append(observations, observation)
+		},
+	})
+	ctx := WithGovernanceContext(context.Background(), GovernanceContext{
+		RetryBudgetID: "budget-asr", OperationKey: "task-11-asr-chunk-3", Subject: "user:8",
+	})
+
+	text, err := strategy.Transcribe(ctx, "chunk.mp3")
+	if err != nil || text != "transcript" {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	if provider.calls != 2 || len(slept) != 1 || slept[0] != 4*time.Second {
+		t.Fatalf("calls=%d slept=%v", provider.calls, slept)
+	}
+	if provider.contexts[0].AttemptKey != "" || provider.contexts[1].AttemptKey != "task-11-asr-chunk-3:provider-retry:1" {
+		t.Fatalf("contexts=%+v", provider.contexts)
+	}
+	if len(observations) != 3 || observations[0].Phase != "request" || observations[0].RetryDelay != 4*time.Second || observations[1].Phase != "retry_wait" || observations[2].Phase != "request" || observations[2].Err != nil {
+		t.Fatalf("observations=%+v", observations)
+	}
+}
+
+func TestRetryStrategyStopsRetryWaitOnCancellation(t *testing.T) {
+	provider := &retryingTestStrategy{errors: []error{&ProviderError{Class: ErrorProvider5xx, Retryable: true}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	strategy := RetryStrategy(provider, ProviderRetryPolicy{
+		MaxRetries: 2,
+		Backoffs:   []time.Duration{time.Minute},
+		Sleep: func(ctx context.Context, _ time.Duration) error {
+			cancel()
+			return ctx.Err()
+		},
+	})
+
+	_, err := strategy.Transcribe(ctx, "chunk.mp3")
+	if !errors.Is(err, context.Canceled) || provider.calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, provider.calls)
 	}
 }
