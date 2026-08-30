@@ -67,6 +67,12 @@ func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLe
 	if s == nil || s.repos == nil || s.repos.EvidenceLedger == nil || req.UserID <= 0 || req.SessionID <= 0 || req.MessageID <= 0 || req.TaskID <= 0 || req.RunID == "" || req.RawAnswer == "" {
 		return gorm.ErrInvalidData
 	}
+	if err := validateLedgerEvidenceTask(req.TaskID, req.Evidence, "Evidence"); err != nil {
+		return err
+	}
+	if err := validateLedgerEvidenceTask(req.TaskID, req.Retrieved, "Retrieved"); err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	artifacts := make([]model.AgentEvidence, 0, len(req.Evidence)+len(req.Retrieved))
@@ -108,6 +114,15 @@ func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLe
 		return nil
 	}
 	return s.repos.EvidenceLedger.Append(ctx, repository.EvidenceLedgerBatch{Claims: claims, Evidence: artifacts, Links: links})
+}
+
+func validateLedgerEvidenceTask(taskID int64, citations []Citation, boundary string) error {
+	for _, citation := range citations {
+		if citation.TaskID != taskID {
+			return fmt.Errorf("evidence ledger %s item does not belong to current task", boundary)
+		}
+	}
+	return nil
 }
 
 func (s *EvidenceLedgerService) GetRun(ctx context.Context, userID int64, runID string) (*EvidenceLedgerView, error) {
@@ -224,14 +239,20 @@ type resolvedEvidenceRange struct {
 
 func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, citation Citation) (resolvedEvidenceRange, bool, error) {
 	quote := strings.TrimSpace(citation.Content)
-	if taskID <= 0 || strings.TrimSpace(quote) == "" {
+	if taskID <= 0 {
 		return resolvedEvidenceRange{}, false, nil
 	}
 	if isVisualOCRCitation(citation) {
+		if quote == "" {
+			return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires OCR text")
+		}
 		if _, ok := visualFrameIDFromSourceRef(citation.EvidenceID); !ok {
 			return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
 		}
 		return s.resolveVisualRange(taskID, citation.EvidenceID, quote)
+	}
+	if quote == "" {
+		return resolvedEvidenceRange{}, false, nil
 	}
 	return s.resolveTranscriptRange(taskID, citation, quote)
 }
@@ -340,7 +361,7 @@ func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quot
 		return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
 	}
 	if s.repos.VisualFrame == nil {
-		return resolvedEvidenceRange{}, false, nil
+		return resolvedEvidenceRange{}, false, errors.New("visual_ocr frame repository unavailable")
 	}
 	frames, err := s.repos.VisualFrame.ListCompletedWithText(taskID)
 	if err != nil {
@@ -363,7 +384,7 @@ func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quot
 			},
 		}, true, nil
 	}
-	return resolvedEvidenceRange{}, false, nil
+	return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence does not match an existing completed frame")
 }
 
 func isVisualOCRCitation(citation Citation) bool {

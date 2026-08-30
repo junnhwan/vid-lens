@@ -152,7 +152,7 @@ func TestAgentExecutionExpiredLeaseUsesCASAndFencesConcurrentOwners(t *testing.T
 	}
 }
 
-func TestAgentExecutionDoesNotReplayExpiredLLMAndExhaustsBudget(t *testing.T) {
+func TestAgentExecutionDoesNotReplayExpiredLLMAndStaysFailClosed(t *testing.T) {
 	repo := newAgentExecutionTestRepository(t)
 	run := createAgentExecutionRun(t, repo, "run-llm", 2, 1)
 	now := run.CreatedAt.Add(time.Second)
@@ -172,13 +172,86 @@ func TestAgentExecutionDoesNotReplayExpiredLLMAndExhaustsBudget(t *testing.T) {
 	retry.Attempt, retry.LeaseToken, retry.StepID = 2, "retry-worker", "answer-1"
 	retry.Now, retry.LeaseUntil = now.Add(3*time.Second), now.Add(4*time.Second)
 	claim, err = repo.ClaimStep(context.Background(), retry)
-	if err != nil || claim.Outcome != AgentStepClaimExhausted || claim.Run.Status != model.AgentRunStatusBudgetExhausted {
-		t.Fatalf("LLM budget claim = %+v, %v", claim, err)
+	if err != nil || claim.Outcome != AgentStepClaimAmbiguous || claim.Step.Attempt != 1 {
+		t.Fatalf("LLM retry claim = %+v, %v", claim, err)
 	}
-	changed, err := repo.MarkRunTerminal(context.Background(), AgentRunTerminalUpdate{UserID: 7, RunID: run.ID, Status: model.AgentRunStatusCompleted, StopReason: "late retry", Now: now.Add(5 * time.Second)})
+	records, err := repo.GetExecution(context.Background(), 7, run.ID)
+	if err != nil || records == nil || len(records.Steps) != 1 || records.Run.StepsUsed != 1 || records.Run.LLMCallsUsed != 1 {
+		t.Fatalf("unsafe retry consumed another attempt: %+v, %v", records, err)
+	}
+	changed, err := repo.MarkRunTerminal(context.Background(), AgentRunTerminalUpdate{UserID: 7, RunID: run.ID, Status: model.AgentRunStatusFailed, StopReason: "ambiguous_provider_result", Now: now.Add(5 * time.Second)})
+	if err != nil || !changed {
+		t.Fatalf("mark ambiguous run failed = %v, %v", changed, err)
+	}
+	changed, err = repo.MarkRunTerminal(context.Background(), AgentRunTerminalUpdate{UserID: 7, RunID: run.ID, Status: model.AgentRunStatusCompleted, StopReason: "late retry", Now: now.Add(6 * time.Second)})
 	if err != nil || changed {
 		t.Fatalf("terminal overwrite = %v, %v", changed, err)
 	}
+}
+
+func TestAgentExecutionExplicitRetryPreservesAttemptHistoryAndRejectsUnsafeReplay(t *testing.T) {
+	t.Run("replay safe creates next attempt", func(t *testing.T) {
+		repo := newAgentExecutionTestRepository(t)
+		run := createAgentExecutionRun(t, repo, "run-explicit-safe-retry", 4, 2)
+		now := run.CreatedAt.Add(time.Second)
+		first := agentClaimRequest(run.ID, "retrieve-1", "safe-attempt-1", now)
+		claim, err := repo.ClaimStep(context.Background(), first)
+		if err != nil || claim.Outcome != AgentStepClaimAcquired {
+			t.Fatalf("first ClaimStep() = %+v, %v", claim, err)
+		}
+		failed, err := repo.FailStep(context.Background(), AgentStepFailure{
+			UserID: 7, RunID: run.ID, StepID: first.StepID, Attempt: 1, LeaseToken: first.LeaseToken,
+			ErrorCode: "temporary_read_failure", ErrorMessage: "temporary read failure", Now: now.Add(time.Second),
+		})
+		if err != nil || !failed {
+			t.Fatalf("FailStep() = %v, %v", failed, err)
+		}
+		if same, sameErr := repo.ClaimStep(context.Background(), agentClaimRequest(run.ID, first.StepID, "same-attempt", now.Add(2*time.Second))); sameErr != nil || same.Outcome != AgentStepClaimTerminal {
+			t.Fatalf("same attempt retry = %+v, %v", same, sameErr)
+		}
+		retry := agentClaimRequest(run.ID, first.StepID, "safe-attempt-2", now.Add(3*time.Second))
+		retry.Attempt = 2
+		retry.CallDigest = digestText(run.ID + ":retrieve-1:2:" + retry.ArgumentsDigest)
+		claim, err = repo.ClaimStep(context.Background(), retry)
+		if err != nil || claim.Outcome != AgentStepClaimAcquired || claim.Step.Attempt != 2 {
+			t.Fatalf("explicit retry ClaimStep() = %+v, %v", claim, err)
+		}
+		records, err := repo.GetExecution(context.Background(), 7, run.ID)
+		if err != nil || records == nil || len(records.Steps) != 2 || records.Steps[0].Attempt != 1 || records.Steps[0].Status != model.AgentStepStatusFailed || records.Steps[1].Attempt != 2 || records.Steps[1].Status != model.AgentStepStatusRunning {
+			t.Fatalf("attempt history = %+v, %v", records, err)
+		}
+	})
+
+	t.Run("non replayable stays fail closed", func(t *testing.T) {
+		repo := newAgentExecutionTestRepository(t)
+		run := createAgentExecutionRun(t, repo, "run-explicit-unsafe-retry", 4, 2)
+		now := run.CreatedAt.Add(time.Second)
+		first := agentClaimRequest(run.ID, "answer-1", "unsafe-attempt-1", now)
+		first.Action, first.ToolName, first.ReplaySafe, first.LLMCall = "build_cited_answer", "build_cited_answer", false, true
+		claim, err := repo.ClaimStep(context.Background(), first)
+		if err != nil || claim.Outcome != AgentStepClaimAcquired {
+			t.Fatalf("first unsafe ClaimStep() = %+v, %v", claim, err)
+		}
+		failed, err := repo.FailStep(context.Background(), AgentStepFailure{
+			UserID: 7, RunID: run.ID, StepID: first.StepID, Attempt: 1, LeaseToken: first.LeaseToken,
+			Ambiguous: true, ErrorCode: "provider_result_unknown", ErrorMessage: "provider result unknown", Now: now.Add(time.Second),
+		})
+		if err != nil || !failed {
+			t.Fatalf("FailStep() = %v, %v", failed, err)
+		}
+		retry := first
+		retry.Attempt, retry.LeaseToken = 2, "unsafe-attempt-2"
+		retry.Now, retry.LeaseUntil = now.Add(2*time.Second), now.Add(3*time.Second)
+		retry.CallDigest = digestText(run.ID + ":answer-1:2:" + retry.ArgumentsDigest)
+		claim, err = repo.ClaimStep(context.Background(), retry)
+		if err != nil || claim.Outcome != AgentStepClaimAmbiguous {
+			t.Fatalf("unsafe explicit retry = %+v, %v, want fail-closed ambiguous", claim, err)
+		}
+		records, getErr := repo.GetExecution(context.Background(), 7, run.ID)
+		if getErr != nil || records == nil || len(records.Steps) != 1 {
+			t.Fatalf("unsafe retry created history row: %+v, %v", records, getErr)
+		}
+	})
 }
 
 func TestAgentExecutionEnforcesOwnerIsolationAndTerminalMonotonicity(t *testing.T) {

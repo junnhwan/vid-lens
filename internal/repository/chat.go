@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -69,17 +70,32 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 // locked in the same order used by deletion/member mutations so a concurrent
 // lifecycle change either happens entirely before or entirely after the exchange.
 func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) error {
+	_, _, _, err := r.createExchange(userID, "", userMessage, assistantMessage, sourceTaskIDs)
+	return err
+}
+
+// CreateAgentRunExchange creates at most one user/assistant exchange for a
+// durable Agent run. The lookup and insert happen while the session row is
+// locked, so concurrent requests for the same run observe the same messages.
+func (r *ChatRepository) CreateAgentRunExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) (created bool, userMessageID, assistantMessageID int64, err error) {
+	if strings.TrimSpace(runID) == "" {
+		return false, 0, 0, gorm.ErrInvalidData
+	}
+	return r.createExchange(userID, strings.TrimSpace(runID), userMessage, assistantMessage, sourceTaskIDs)
+}
+
+func (r *ChatRepository) createExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) (created bool, userMessageID, assistantMessageID int64, err error) {
 	if userMessage == nil || assistantMessage == nil ||
 		userMessage.UserID != userID || assistantMessage.UserID != userID ||
 		userMessage.SessionID <= 0 || userMessage.SessionID != assistantMessage.SessionID {
-		return gorm.ErrInvalidData
+		return false, 0, 0, gorm.ErrInvalidData
 	}
-	sourceTaskIDs, err := normalizeSourceTaskIDs(sourceTaskIDs)
+	sourceTaskIDs, err = normalizeSourceTaskIDs(sourceTaskIDs)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
 
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	err = r.db.Transaction(func(tx *gorm.DB) error {
 		// Read the owner-scoped session first only to discover the resource lock
 		// order. The session is locked and compared again below before writes.
 		var observed model.ChatSession
@@ -118,6 +134,23 @@ func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMess
 		if err := validateExchangeSources(tx, userID, &session, sourceTaskIDs); err != nil {
 			return err
 		}
+		if runID != "" {
+			var run model.AgentRun
+			if err := tx.Where("id = ? AND user_id = ? AND session_id = ? AND scope_type = ? AND task_id = ? AND knowledge_base_id = ?", runID, userID, session.ID, session.ScopeType, session.TaskID, session.KnowledgeBaseID).First(&run).Error; err != nil {
+				return err
+			}
+			existingAssistant, existingUser, err := findAgentRunExchange(tx, userID, session.ID, runID)
+			if err != nil {
+				return err
+			}
+			if existingAssistant != nil {
+				created, assistantMessageID = false, existingAssistant.ID
+				if existingUser != nil {
+					userMessageID = existingUser.ID
+				}
+				return nil
+			}
+		}
 
 		if err := tx.Create(userMessage).Error; err != nil {
 			return err
@@ -133,8 +166,42 @@ func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMess
 				TaskID:    taskID,
 			})
 		}
-		return createMessageSources(tx, sources)
+		if err := createMessageSources(tx, sources); err != nil {
+			return err
+		}
+		created, userMessageID, assistantMessageID = true, userMessage.ID, assistantMessage.ID
+		return nil
 	})
+	return created, userMessageID, assistantMessageID, err
+}
+
+func findAgentRunExchange(tx *gorm.DB, userID, sessionID int64, runID string) (*model.ChatMessage, *model.ChatMessage, error) {
+	var assistants []model.ChatMessage
+	if err := tx.Where("user_id = ? AND session_id = ? AND role = ? AND retrieval_snapshot IS NOT NULL", userID, sessionID, "assistant").Order("id DESC").Find(&assistants).Error; err != nil {
+		return nil, nil, err
+	}
+	for index := range assistants {
+		snapshot := assistants[index].RetrievalSnapshot
+		if snapshot == nil {
+			continue
+		}
+		var envelope struct {
+			RunID string `json:"run_id"`
+		}
+		if json.Unmarshal([]byte(*snapshot), &envelope) != nil || envelope.RunID != runID {
+			continue
+		}
+		var userMessage model.ChatMessage
+		err := tx.Where("user_id = ? AND session_id = ? AND role = ? AND id < ?", userID, sessionID, "user", assistants[index].ID).Order("id DESC").First(&userMessage).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &assistants[index], nil, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		return &assistants[index], &userMessage, nil
+	}
+	return nil, nil, nil
 }
 
 func normalizeSourceTaskIDs(taskIDs []int64) ([]int64, error) {

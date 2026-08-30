@@ -306,6 +306,34 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 			if prior.Status != model.AgentStepStatusFailed && prior.Status != model.AgentStepStatusAmbiguous {
 				return fmt.Errorf("agent step prior attempt is not retryable: %s", prior.Status)
 			}
+			if !prior.ReplaySafe || !req.ReplaySafe {
+				claim.Step = prior
+				claim.ToolCall, err = findAgentToolCall(tx, req.RunID, req.StepID, prior.Attempt)
+				if err != nil {
+					return err
+				}
+				if prior.Status == model.AgentStepStatusAmbiguous {
+					claim.Outcome = AgentStepClaimAmbiguous
+				} else {
+					claim.Outcome = AgentStepClaimTerminal
+				}
+				return nil
+			}
+			priorCall, err := findAgentToolCall(tx, req.RunID, req.StepID, prior.Attempt)
+			if err != nil {
+				return err
+			}
+			callKind := strings.TrimSpace(req.CallKind)
+			if callKind == "" {
+				callKind = model.AgentCallKindTool
+			}
+			callMatches := priorCall == nil && strings.TrimSpace(req.ToolName) == ""
+			if priorCall != nil {
+				callMatches = priorCall.ToolName == req.ToolName && priorCall.CallKind == callKind && priorCall.ArgumentsDigest == req.ArgumentsDigest
+			}
+			if prior.Sequence != req.Sequence || prior.Kind != req.Kind || prior.Action != req.Action || !callMatches {
+				return errors.New("agent step retry does not match prior attempt input")
+			}
 		}
 		if agentBudgetExceeded(run, req) {
 			claim.Outcome = AgentStepClaimExhausted

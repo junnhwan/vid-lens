@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -31,17 +32,53 @@ func TestSafeAgentProfileFreezesIdentityWithoutCredentialsOrRawEndpoints(t *test
 	}
 }
 
-func TestAgentPoliciesExposeActualSingleAttemptExecution(t *testing.T) {
+func TestAgentPoliciesExposeActualAttemptExecution(t *testing.T) {
 	_, templateBudget := defaultTemplateAgentPolicy(5)
 	_, researchBudget := researchAgentPolicy(5, DefaultVideoResearchPolicy())
 	_, funnelBudget := evidenceFunnelAgentPolicy(defaultEvidenceFunnelPolicy(5))
-	for name, budget := range map[string]frozenAgentBudget{
-		"template":        templateBudget,
-		"research":        researchBudget,
-		"evidence_funnel": funnelBudget,
+	for name, test := range map[string]struct {
+		budget frozenAgentBudget
+		want   int
+	}{
+		"template":        {budget: templateBudget, want: 1},
+		"research":        {budget: researchBudget, want: 1},
+		"evidence_funnel": {budget: funnelBudget, want: 2},
 	} {
-		if budget.MaxAttemptsPerStep != 1 {
-			t.Fatalf("%s max attempts per step = %d, want actual single execution", name, budget.MaxAttemptsPerStep)
+		if test.budget.MaxAttemptsPerStep != test.want {
+			t.Fatalf("%s max attempts per step = %d, want %d", name, test.budget.MaxAttemptsPerStep, test.want)
 		}
+	}
+}
+
+func TestEnsureAgentRunResumesFrozenPolicyAndBudgetAfterDefaultsChange(t *testing.T) {
+	repos, _, session := newVideoAgentTestSession(t)
+	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{}, ChatConfig{}))
+	profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"}
+	policy := defaultEvidenceFunnelPolicy(1)
+	frozenPolicy, budget := evidenceFunnelAgentPolicy(policy)
+
+	created, err := agent.ensureAgentRun(context.Background(), "frozen-config-run", 7, session, "owner", string(VideoAgentEvidenceFunnelTemplate), "bounded-evidence-funnel", profile, frozenPolicy, budget)
+	if err != nil {
+		t.Fatalf("create ensureAgentRun() error = %v", err)
+	}
+	storedPolicy, storedBudget := created.PolicySnapshot, created.BudgetSnapshot
+
+	changedPolicy := frozenPolicy
+	changedPolicy.MaxVisualCandidates++
+	changedBudget := budget
+	changedBudget.MaxAttemptsPerStep++
+	resumed, err := agent.ensureAgentRun(context.Background(), "frozen-config-run", 7, session, "owner", string(VideoAgentEvidenceFunnelTemplate), "bounded-evidence-funnel", profile, changedPolicy, changedBudget)
+	if err != nil {
+		t.Fatalf("resume ensureAgentRun() rejected historical frozen config: %v", err)
+	}
+	if resumed.PolicySnapshot != storedPolicy || resumed.BudgetSnapshot != storedBudget || resumed.MaxAttemptsPerStep != budget.MaxAttemptsPerStep {
+		t.Fatalf("resume replaced frozen config: %+v", resumed)
+	}
+	resumedPolicy, err := evidenceFunnelPolicyFromRun(resumed)
+	if err != nil {
+		t.Fatalf("evidenceFunnelPolicyFromRun() error = %v", err)
+	}
+	if resumedPolicy.MaxVisualCandidates != policy.MaxVisualCandidates {
+		t.Fatalf("runtime policy used changed defaults: %+v", resumedPolicy)
 	}
 }

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/repository"
 )
 
 func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
@@ -65,7 +69,7 @@ func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 	if err != nil || execution == nil || execution.Run.Status != model.AgentRunStatusCompleted || len(execution.Steps) != 8 || len(execution.ToolCalls) != 8 {
 		t.Fatalf("funnel execution = %+v, %v", execution, err)
 	}
-	if execution.Run.ToolCallsUsed != 5 || execution.Run.LLMCallsUsed != 3 || execution.Run.VisionCallsUsed != 0 || execution.Run.MaxAttemptsPerStep != 1 {
+	if execution.Run.ToolCallsUsed != 5 || execution.Run.LLMCallsUsed != 3 || execution.Run.VisionCallsUsed != 0 || execution.Run.MaxAttemptsPerStep != 2 {
 		t.Fatalf("funnel budget counters = %+v", execution.Run)
 	}
 	for index, call := range execution.ToolCalls {
@@ -182,6 +186,28 @@ func TestEvidenceFunnelDoesNotSelectVisualFramesWhenASRRangeIsUnknown(t *testing
 	}
 }
 
+func TestWindowExpansionCheckpointRecoversLegacyRangeKnown(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		raw       string
+		wantKnown bool
+	}{
+		{name: "legacy valid range", raw: `{"range_start_second":10,"range_end_second":20,"window_count":1}`, wantKnown: true},
+		{name: "legacy zero range", raw: `{"range_start_second":0,"range_end_second":0,"window_count":1}`, wantKnown: false},
+		{name: "explicit unknown stays unknown", raw: `{"range_start_second":10,"range_end_second":20,"range_known":false,"window_count":1}`, wantKnown: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var checkpoint windowExpansionCheckpoint
+			if err := json.Unmarshal([]byte(test.raw), &checkpoint); err != nil {
+				t.Fatal(err)
+			}
+			if checkpoint.RangeKnown != test.wantKnown {
+				t.Fatalf("RangeKnown = %t, want %t for %s", checkpoint.RangeKnown, test.wantKnown, test.raw)
+			}
+		})
+	}
+}
+
 func TestEvidenceFunnelValidationFailureLeavesOnlyPendingAssistantHistory(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	chunks := []model.VideoChunk{{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "待校验事实", ContentHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "validation-failure"}}
@@ -273,6 +299,127 @@ func TestEvidenceFunnelRecoversValidatedAnswerAfterPublishFailure(t *testing.T) 
 	}
 }
 
+type failOnceEvidenceRetriever struct {
+	calls   int
+	results []RetrievedChunk
+}
+
+func (r *failOnceEvidenceRetriever) Search(context.Context, []float32, RetrievalRequest) ([]RetrievedChunk, error) {
+	r.calls++
+	if r.calls == 1 {
+		return nil, errors.New("temporary retrieval failure")
+	}
+	return append([]RetrievedChunk(nil), r.results...), nil
+}
+
+func TestEvidenceFunnelRequestRetryAdvancesReplaySafeAttempt(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	chunks := []model.VideoChunk{{
+		UserID: 7, TaskID: task.ID, ChunkIndex: 1, Content: "显式重试后的 owner 证据", ContentHash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "request-retry-evidence",
+	}}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "embed", chunks); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, 1, "audio/1.mp3", chunks[0].Content, 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	retriever := &failOnceEvidenceRetriever{results: []RetrievedChunk{{
+		TaskID: task.ID, EvidenceID: chunks[0].VectorID, ChunkID: chunks[0].ID, ChunkIndex: chunks[0].ChunkIndex, Content: chunks[0].Content, Source: "vector",
+	}}}
+	agent := NewVideoAgentService(NewChatService(repos, retriever, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	req := EvidenceFunnelRequest{UserID: 7, SessionID: session.ID, Goal: "显式重试", TopK: 1, RunID: "funnel-request-retry"}
+	profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"}
+
+	if _, err := agent.AskEvidenceFunnel(context.Background(), req, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{}, profile); err == nil || !strings.Contains(err.Error(), "temporary retrieval failure") {
+		t.Fatalf("first AskEvidenceFunnel() error = %v", err)
+	}
+	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, req.RunID)
+	if err != nil || execution == nil || execution.Run.Status != model.AgentRunStatusRunning || len(execution.Steps) != 2 || execution.Steps[1].Status != model.AgentStepStatusFailed {
+		t.Fatalf("retryable first execution = %+v, %v", execution, err)
+	}
+
+	result, err := agent.AskEvidenceFunnel(context.Background(), req, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{
+		`{"done":false,"candidate_ids":["transcript-1"]}`,
+		"owner 证据在显式重试后确认。[C1]",
+	}}, profile)
+	if err != nil {
+		t.Fatalf("retry AskEvidenceFunnel() error = %v", err)
+	}
+	if result.Answer != "owner 证据在显式重试后确认。" {
+		t.Fatalf("retry result = %+v", result)
+	}
+	execution, err = repos.AgentExecution.GetExecution(context.Background(), 7, req.RunID)
+	if err != nil || execution == nil || execution.Run.Status != model.AgentRunStatusCompleted || len(execution.Steps) != 9 {
+		t.Fatalf("completed retry execution = %+v, %v", execution, err)
+	}
+	if execution.Steps[1].StepID != "funnel-transcript" || execution.Steps[1].Attempt != 1 || execution.Steps[1].Status != model.AgentStepStatusFailed || execution.Steps[2].StepID != "funnel-transcript" || execution.Steps[2].Attempt != 2 || execution.Steps[2].Status != model.AgentStepStatusCompleted {
+		t.Fatalf("request retry attempt history = %+v", execution.Steps[1:3])
+	}
+}
+
+func TestEvidenceFunnelPendingExchangeIsIdempotentForConcurrentRun(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "concurrent-pending-run.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		t.Fatal(err)
+	}
+	repos := repository.NewRepositories(db)
+	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "agent.mp4", FileURL: "videos/agent.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "agent"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatal(err)
+	}
+	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{}, ChatConfig{}))
+	profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"}
+	policy := defaultEvidenceFunnelPolicy(1)
+	frozenPolicy, budget := evidenceFunnelAgentPolicy(policy)
+	if _, err := agent.ensureAgentRun(context.Background(), "concurrent-pending-run", 7, session, "owner", string(VideoAgentEvidenceFunnelTemplate), "bounded-evidence-funnel", profile, frozenPolicy, budget); err != nil {
+		t.Fatal(err)
+	}
+
+	type saveResult struct {
+		userMessageID      int64
+		assistantMessageID int64
+		err                error
+	}
+	start := make(chan struct{})
+	results := make(chan saveResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			result := &VideoAgentResult{Template: string(VideoAgentEvidenceFunnelTemplate), RunID: "concurrent-pending-run", Mode: string(VideoAgentEvidenceFunnelTemplate), Model: "chat-model"}
+			_, userMessageID, err := agent.saveEvidenceFunnelPendingExchange(7, session.ID, "owner", result)
+			results <- saveResult{userMessageID: userMessageID, assistantMessageID: result.MessageID, err: err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	for _, result := range []saveResult{first, second} {
+		if result.err != nil {
+			t.Fatalf("saveEvidenceFunnelPendingExchange() error = %v", result.err)
+		}
+	}
+	if first.userMessageID != second.userMessageID || first.assistantMessageID != second.assistantMessageID {
+		t.Fatalf("concurrent run created different exchanges: first=%+v second=%+v", first, second)
+	}
+	messages, err := repos.Chat.ListMessages(7, session.ID)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("concurrent pending messages = %+v, %v", messages, err)
+	}
+}
+
 func TestEvidenceFunnelRejectsCrossVideoCandidatesAndCitations(t *testing.T) {
 	candidates := []EvidenceGapCandidate{{ID: "other", TaskID: 99, Content: "other video"}}
 	if _, err := selectGapCandidates(candidates, EvidenceGapDecision{CandidateIDs: []string{"other"}}, 1, 11); err == nil || !strings.Contains(err.Error(), "crosses") {
@@ -308,6 +455,37 @@ func TestEvidenceFunnelCompletedCheckpointsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestEvidenceFunnelExplicitlyRetriesReplaySafeStepWithNewAttempt(t *testing.T) {
+	runner, _, runID := newDirectEvidenceFunnelRunner(t, 9)
+	now := time.Now().UTC()
+	claim, err := runner.execution.repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
+		UserID: 7, RunID: runID, StepID: "funnel-context", Attempt: 1, Sequence: 1,
+		Kind: "retrieve", Action: evidenceFunnelBrowseContext, SafeReason: "test prior replay-safe failure",
+		InputSummary: `{}`, ArgumentsDigest: digestAgentValue(`{"task_id":1}`), CallDigest: digestAgentValue("prior-safe-attempt"),
+		ToolName: evidenceFunnelBrowseContext, ReplaySafe: true, LeaseToken: "failed-safe-attempt", Now: now, LeaseUntil: now.Add(time.Minute),
+	})
+	if err != nil || claim.Outcome != repository.AgentStepClaimAcquired {
+		t.Fatalf("initial ClaimStep() = %+v, %v", claim, err)
+	}
+	if failed, failErr := runner.execution.repo.FailStep(context.Background(), repository.AgentStepFailure{
+		UserID: 7, RunID: runID, StepID: "funnel-context", Attempt: 1, LeaseToken: "failed-safe-attempt",
+		ErrorCode: "temporary_read_failure", ErrorMessage: "temporary read failure", Now: now.Add(time.Second),
+	}); failErr != nil || !failed {
+		t.Fatalf("FailStep() = %v, %v", failed, failErr)
+	}
+
+	if _, err := runner.Run(context.Background(), "owner"); err != nil {
+		t.Fatalf("explicit retry Run() error = %v", err)
+	}
+	records, err := runner.repos.AgentExecution.GetExecution(context.Background(), 7, runID)
+	if err != nil || records == nil || len(records.Steps) != 8 {
+		t.Fatalf("retry execution = %+v, %v", records, err)
+	}
+	if records.Steps[0].StepID != "funnel-context" || records.Steps[0].Attempt != 1 || records.Steps[0].Status != model.AgentStepStatusFailed || records.Steps[1].StepID != "funnel-context" || records.Steps[1].Attempt != 2 || records.Steps[1].Status != model.AgentStepStatusCompleted {
+		t.Fatalf("retry attempts overwrote history: %+v", records.Steps[:2])
+	}
+}
+
 func TestEvidenceFunnelStopsBeforePlannerWhenBudgetIsExhausted(t *testing.T) {
 	runner, chatClient, _ := newDirectEvidenceFunnelRunner(t, 2)
 	_, err := runner.Run(context.Background(), "owner")
@@ -330,6 +508,7 @@ func newDirectEvidenceFunnelRunner(t *testing.T, maxSteps int) (*evidenceFunnelR
 	policy := defaultEvidenceFunnelPolicy(1)
 	frozenPolicy, budget := evidenceFunnelAgentPolicy(policy)
 	budget.MaxSteps = maxSteps
+	budget.MaxAttemptsPerStep = 2
 	run := &model.AgentRun{
 		ID: runID, UserID: 7, SessionID: session.ID, ScopeType: model.ChatScopeVideo, TaskID: task.ID, Goal: "owner", Mode: string(VideoAgentEvidenceFunnelTemplate), AgentProfile: "bounded-evidence-funnel",
 		ProfileSnapshot: `{}`, PolicySnapshot: mustJSONForTest(t, frozenPolicy), BudgetSnapshot: mustJSONForTest(t, budget), Status: model.AgentRunStatusRunning,

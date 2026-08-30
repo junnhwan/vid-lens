@@ -64,8 +64,17 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		runID = uuid.NewString()
 	}
 	frozenPolicy, budget := researchAgentPolicy(req.TopK, policy)
-	if _, err = s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget); err != nil {
+	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget)
+	if err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozenPolicy); err != nil {
+		return nil, fmt.Errorf("decode frozen agent policy: %w", err)
+	}
+	req.TopK = frozenPolicy.TopK
+	policy = VideoResearchPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+	if err := policy.Validate(); err != nil {
+		return nil, fmt.Errorf("frozen research policy is invalid: %w", err)
 	}
 	defer func() {
 		if err == nil || errors.Is(err, errAgentExecutionBusy) {

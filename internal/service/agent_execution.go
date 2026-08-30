@@ -93,8 +93,8 @@ func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, us
 	if stored == nil {
 		return nil, errors.New("agent run is unavailable for this owner")
 	}
-	if stored.SessionID != session.ID || stored.ScopeType != run.ScopeType || stored.TaskID != run.TaskID || stored.KnowledgeBaseID != run.KnowledgeBaseID || stored.Goal != run.Goal || stored.Mode != run.Mode || stored.AgentProfile != run.AgentProfile || stored.ProfileSnapshot != run.ProfileSnapshot || stored.PolicySnapshot != run.PolicySnapshot || stored.BudgetSnapshot != run.BudgetSnapshot {
-		return nil, errors.New("agent run frozen identity or policy does not match resume request")
+	if stored.SessionID != session.ID || stored.ScopeType != run.ScopeType || stored.TaskID != run.TaskID || stored.KnowledgeBaseID != run.KnowledgeBaseID || stored.Goal != run.Goal || stored.Mode != run.Mode || stored.AgentProfile != run.AgentProfile || stored.ProfileSnapshot != run.ProfileSnapshot {
+		return nil, errors.New("agent run frozen identity or profile does not match resume request")
 	}
 	return stored, nil
 }

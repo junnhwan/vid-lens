@@ -240,6 +240,75 @@ func TestEvidenceLedgerRejectsVisualOCRWithoutFrameProvenance(t *testing.T) {
 	}
 }
 
+func TestEvidenceLedgerRejectsCrossTaskEvidenceAtRecordBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		evidence  []Citation
+		retrieved []Citation
+	}{
+		{name: "published evidence", evidence: []Citation{{TaskID: 99, CitationID: "C1", EvidenceID: "cross-evidence", Content: "其他视频证据"}}},
+		{name: "retrieved evidence", evidence: []Citation{{TaskID: 42, CitationID: "C1", EvidenceID: "current-evidence", Content: "当前视频证据"}}, retrieved: []Citation{{TaskID: 99, EvidenceID: "cross-retrieved", Content: "其他视频检索结果"}}},
+		{name: "missing task identity", evidence: []Citation{{CitationID: "C1", EvidenceID: "missing-task", Content: "没有 task 身份"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repos := newChatServiceTestRepositories(t)
+			runID := "task-boundary-" + strings.ReplaceAll(test.name, " ", "-")
+			ledger := NewEvidenceLedgerService(repos)
+			err := ledger.RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+				UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: runID,
+				RawAnswer: "必须只使用当前视频。[C1]", Evidence: test.evidence, Retrieved: test.retrieved,
+			})
+			if err == nil || !strings.Contains(err.Error(), "task") {
+				t.Fatalf("RecordAnswer() error = %v, want current-task boundary rejection", err)
+			}
+			view, getErr := ledger.GetRun(context.Background(), 7, runID)
+			if getErr != nil || view != nil {
+				t.Fatalf("cross-task evidence polluted ledger: %+v, %v", view, getErr)
+			}
+		})
+	}
+}
+
+func TestEvidenceLedgerRejectsVisualOCRWhenFrameIsMissingOrTextDoesNotMatch(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	if err := repos.VisualFrame.ReplaceTaskFrames(42, []model.VideoVisualFrame{{
+		TaskID: 42, FrameIndex: 1, TimeMs: 12000, ObjectKey: "frames/42/1.jpg", OCRText: "实际 OCR 文本",
+		Source: "scene", CaptionMethod: "ocr", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	frames, err := repos.VisualFrame.ListCompletedWithText(42)
+	if err != nil || len(frames) != 1 {
+		t.Fatalf("frames = %+v, %v", frames, err)
+	}
+
+	for _, test := range []struct {
+		name       string
+		evidenceID string
+		content    string
+	}{
+		{name: "missing frame", evidenceID: "visual-frame:999999", content: "实际 OCR 文本"},
+		{name: "text mismatch", evidenceID: fmt.Sprintf("visual-frame:%d", frames[0].ID), content: "伪造 OCR 文本"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runID := "visual-binding-" + strings.ReplaceAll(test.name, " ", "-")
+			ledger := NewEvidenceLedgerService(repos)
+			citation := Citation{TaskID: 42, CitationID: "C1", EvidenceID: test.evidenceID, Content: test.content, Source: "visual_ocr"}
+			err := ledger.RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+				UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: runID,
+				RawAnswer: "画面证据。[C1]", Evidence: []Citation{citation}, Retrieved: []Citation{citation},
+			})
+			if err == nil || !strings.Contains(err.Error(), "visual") {
+				t.Fatalf("RecordAnswer() error = %v, want visual binding rejection", err)
+			}
+			view, getErr := ledger.GetRun(context.Background(), 7, runID)
+			if getErr != nil || view != nil {
+				t.Fatalf("invalid visual evidence polluted ledger: %+v, %v", view, getErr)
+			}
+		})
+	}
+}
+
 func TestEvidenceLedgerDoesNotInferTimeRangeFromChunkIndex(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	if err := repos.TranscriptionChunk.UpsertCompleted(42, 17, "audio/chunk-17.mp3", "没有真实时间范围的转写"); err != nil {

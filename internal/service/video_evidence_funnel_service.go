@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,9 +45,14 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if run.Status == model.AgentRunStatusCompleted {
 		return completedEvidenceFunnelResult(s, req.UserID, req.SessionID, runID)
 	}
+	policy, err = evidenceFunnelPolicyFromRun(run)
+	if err != nil {
+		return nil, err
+	}
 	validationCompleted := false
 	defer func() {
-		if err == nil || validationCompleted || errors.Is(err, errAgentExecutionBusy) {
+		var replayableFailure *evidenceFunnelReplayableFailure
+		if err == nil || validationCompleted || errors.Is(err, errAgentExecutionBusy) || errors.As(err, &replayableFailure) {
 			return
 		}
 		status, reason := model.AgentRunStatusFailed, "evidence_funnel_failed"
@@ -83,11 +89,10 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if existingMessage != nil {
 		result.MessageID = existingMessage.ID
 	} else {
-		pendingUserMessageID, err = s.saveEvidenceFunnelPendingExchange(req.UserID, req.SessionID, req.Goal, result)
+		createdPending, pendingUserMessageID, err = s.saveEvidenceFunnelPendingExchange(req.UserID, req.SessionID, req.Goal, result)
 		if err != nil {
 			return nil, err
 		}
-		createdPending = true
 	}
 	ledgerRequest := EvidenceLedgerRecordRequest{
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID, RunID: runID,
@@ -116,6 +121,33 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	return result, nil
 }
 
+func evidenceFunnelPolicyFromRun(run *model.AgentRun) (EvidenceFunnelPolicy, error) {
+	if run == nil {
+		return EvidenceFunnelPolicy{}, errors.New("agent run unavailable")
+	}
+	var frozen frozenAgentPolicy
+	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozen); err != nil {
+		return EvidenceFunnelPolicy{}, fmt.Errorf("decode frozen evidence funnel policy: %w", err)
+	}
+	if len(frozen.AllowedTools) != len(evidenceFunnelActionOrder) {
+		return EvidenceFunnelPolicy{}, errors.New("frozen evidence funnel action set is unsupported")
+	}
+	for index, action := range evidenceFunnelActionOrder {
+		if frozen.AllowedTools[index] != action {
+			return EvidenceFunnelPolicy{}, errors.New("frozen evidence funnel action order is unsupported")
+		}
+	}
+	policy := EvidenceFunnelPolicy{
+		TopK: frozen.TopK, MaxWindowSelections: frozen.MaxWindowSelections, WindowRadius: frozen.WindowRadius,
+		MaxVisualCandidates: frozen.MaxVisualCandidates, MaxVisualSelections: frozen.MaxVisualSelections,
+		MaxFinalEvidenceItems: frozen.MaxFinalEvidenceItems,
+	}
+	if policy.TopK <= 0 || policy.MaxWindowSelections <= 0 || policy.WindowRadius < 0 || policy.MaxVisualCandidates <= 0 || policy.MaxVisualSelections <= 0 || policy.MaxFinalEvidenceItems <= 0 {
+		return EvidenceFunnelPolicy{}, errors.New("frozen evidence funnel policy is invalid")
+	}
+	return policy, nil
+}
+
 func (s *VideoAgentService) publishEvidenceFunnelResult(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error) {
 	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil {
 		return false, errors.New("chat repository unavailable")
@@ -126,9 +158,9 @@ func (s *VideoAgentService) publishEvidenceFunnelResult(userID, sessionID, messa
 	return s.chatSvc.repos.Chat.UpdateAssistantResult(userID, sessionID, messageID, content, snapshot, modelName)
 }
 
-func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID int64, question string, result *VideoAgentResult) (int64, error) {
+func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID int64, question string, result *VideoAgentResult) (bool, int64, error) {
 	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil || result == nil {
-		return 0, errors.New("chat repository unavailable")
+		return false, 0, errors.New("chat repository unavailable")
 	}
 	pending := &VideoAgentResult{
 		Answer: evidenceFunnelPendingAnswer, Template: result.Template, Trace: result.Trace,
@@ -136,7 +168,7 @@ func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID 
 	}
 	snapshot, err := MarshalAgentSnapshot(pending)
 	if err != nil {
-		return 0, err
+		return false, 0, err
 	}
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
@@ -144,14 +176,17 @@ func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID 
 		SessionID: sessionID, UserID: userID, Role: "assistant", Content: evidenceFunnelPendingAnswer,
 		RetrievalSnapshot: &snapshotText, ModelName: result.Model,
 	}
-	if err := s.chatSvc.repos.Chat.CreateExchange(userID, userMessage, assistantMessage, nil); err != nil {
-		return 0, err
+	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, nil)
+	if err != nil {
+		return false, 0, err
 	}
-	result.MessageID = assistantMessage.ID
-	if session, findErr := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
-		s.chatSvc.maybeAutoTitleSession(session, question)
+	result.MessageID = assistantMessageID
+	if created {
+		if session, findErr := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
+			s.chatSvc.maybeAutoTitleSession(session, question)
+		}
 	}
-	return userMessage.ID, nil
+	return created, userMessageID, nil
 }
 
 func completedEvidenceFunnelResult(service *VideoAgentService, userID, sessionID int64, runID string) (*VideoAgentResult, error) {
