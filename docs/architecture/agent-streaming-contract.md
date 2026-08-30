@@ -45,7 +45,7 @@ Content-Type: application/json
 
 ```
 POST /api/v1/chat/sessions/{session_id}/messages/agent
-{ "question": "...", "top_k": 4, "mode": "" | "research" }
+{ "question": "...", "top_k": 4, "mode": "" | "research", "run_id": "optional existing research run" }
 ```
 
 **响应（已实现）** — `VideoAgentResult`：
@@ -64,6 +64,7 @@ POST /api/v1/chat/sessions/{session_id}/messages/agent
 ```
 
 - `mode=research`：走 `VideoResearchRunner`（有界 Planner/Tool/Observe），**仅单视频会话**，知识库会话当前返回错误。
+- `mode=research` 可携带同一 owner/session/goal 的既有 `run_id`，从 PostgreSQL 的完成 checkpoint 恢复；省略时创建新 Run。终态 Run 不会被该重试覆盖。
 - 默认 mode：模板化 tool-loop baseline。
 
 非流式接口保留为对照和降级路径。它返回的 `trace` 仍是兼容性的 `VideoAgentStep` 结构；统一的 `step_id/status` 轨迹由 Agent SSE 和 version 1 快照提供。
@@ -229,12 +230,14 @@ done          { message_id: 456 }
 }
 ```
 
-它仍是聊天历史的兼容快照，不是可恢复的 Agent Run/Step 数据源。前端加载历史时：
+它仍是聊天历史的兼容快照，不是可恢复的 Agent Run/Step 数据源。模板 Agent 的实际工具动作，以及 research Agent 的 Planner/工具动作，另行写入 `agent_runs`、`agent_steps`、`agent_tool_calls`；进程恢复只读取这些 PostgreSQL 权威记录。前端加载历史时：
 
 - 有 `agent_snapshot` → 渲染完整步骤时间线（无需重放 SSE）。
 - 仅有 `retrieval_snapshot` → 保持现网 [C1] 引用行为。
 
 Agent 回答完成后还会把 Claim、Evidence 和 Claim-Evidence 关系写入独立 PostgreSQL 账本。该副作用不新增 SSE event，不改变本文事件顺序；账本写入失败不会把已生成的普通 Agent 回答改成流式错误。账本只保存可见事实和稳定证据引用，不保存原始 Chain-of-Thought。
+
+执行持久化同样不新增 SSE event，也不改变 `run_start → step_* → done/error` 顺序。数据库只保存安全输入摘要、validated arguments/call digest、输出引用、可恢复的安全工具结果和错误分类；不保存或发送 provider prompt、Planner 草稿、API key 或 Chain-of-Thought。
 
 ---
 
@@ -255,7 +258,6 @@ Agent 回答完成后还会把 Claim、Evidence 和 Claim-Evidence 关系写入�
 
 后续扩展应分别验收：
 
-- 独立的 Run/Step/ToolCall 持久化和可恢复执行；
 - 知识库范围的 Agent 工具和跨视频引用；
 - `mode=research` 的流式观察；
 - Provider token 级答案流式化；

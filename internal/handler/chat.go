@@ -207,6 +207,7 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 		Question string `json:"question" binding:"required"`
 		TopK     int    `json:"top_k"`
 		Mode     string `json:"mode"`
+		RunID    string `json:"run_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -239,7 +240,7 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 			return
 		}
 		result, err := researcher.AskResearch(c.Request.Context(), service.VideoResearchRequest{
-			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK,
+			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
 		}, embeddingClient, chatClient, *profile)
 		if err != nil {
 			response.BadRequest(c, err.Error())

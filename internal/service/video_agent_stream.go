@@ -386,7 +386,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	observer := newVideoAgentStreamObserver(runID, streamEmit)
 	result, err := s.ask(ctx, VideoAgentRequest{
 		UserID: req.UserID, SessionID: req.SessionID, Question: req.Question, TopK: req.TopK,
-	}, embedding, chat, profile, observer, runID, req.Mode)
+	}, embedding, chat, profile, observer, runID, req.Mode, req.AgentProfile)
 	if err != nil {
 		_ = observer.Abort(err)
 		return nil, err

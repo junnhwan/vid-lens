@@ -105,10 +105,11 @@ type VideoResearchObserver interface {
 }
 
 type VideoResearchRunner struct {
-	registry *VideoAgentToolRegistry
-	planner  VideoResearchPlanner
-	observer VideoResearchObserver
-	policy   VideoResearchPolicy
+	registry  *VideoAgentToolRegistry
+	planner   VideoResearchPlanner
+	observer  VideoResearchObserver
+	policy    VideoResearchPolicy
+	execution *durableResearchExecution
 }
 
 func NewVideoResearchRunner(registry *VideoAgentToolRegistry, planner VideoResearchPlanner, observer VideoResearchObserver, policy VideoResearchPolicy) (*VideoResearchRunner, error) {
@@ -164,19 +165,18 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 			return result, nil
 		}
 
-		decision, err := r.planner.NextDecision(ctx, result.State, r.registry.Definitions())
+		decision, budgetExhausted, err := r.nextResearchDecision(ctx, result.State, runtime)
 		if err != nil {
-			return r.fail(result, "planner_failure", err)
-		}
-		if err := r.validateDecision(result.State, decision); err != nil {
-			return r.fail(result, "invalid_planner_decision", err)
-		}
-		if decision.Tool == VideoAgentToolBuildCitedAnswer {
-			canonicalArguments, err := canonicalizeResearchAnswerArguments(result.State.Evidence, runtime.TaskID, decision.Arguments)
-			if err != nil {
+			var invalidDecision *invalidResearchDecisionError
+			if errors.As(err, &invalidDecision) {
 				return r.fail(result, "invalid_planner_decision", err)
 			}
-			decision.Arguments = canonicalArguments
+			return r.fail(result, "planner_failure", err)
+		}
+		if budgetExhausted {
+			result.State.Status = VideoResearchStatusStopped
+			result.State.StopReason = "budget_exhausted"
+			return result, nil
 		}
 		if decision.Done {
 			result.State.Status = VideoResearchStatusCompleted
@@ -198,10 +198,12 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 			Action: decision,
 			Status: VideoResearchStepRunning,
 		}
-		toolResult, err := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{
-			Runtime:   runtime,
-			Arguments: decision.Arguments,
-		})
+		toolResult, observation, budgetExhausted, err := r.executeResearchTool(ctx, result.State, runtime, decision)
+		if budgetExhausted {
+			result.State.Status = VideoResearchStatusStopped
+			result.State.StopReason = "budget_exhausted"
+			return result, nil
+		}
 		result.State.CurrentStep++
 		step.Trace = toolResult.Step
 		if err != nil {
@@ -211,19 +213,6 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 			return r.fail(result, "tool_failure", err)
 		}
 
-		observation, err := r.observer.Observe(result.State, toolResult)
-		if err != nil {
-			step.Status = VideoResearchStepFailed
-			step.Error = err.Error()
-			result.State.Steps = append(result.State.Steps, step)
-			return r.fail(result, "observer_failure", err)
-		}
-		if err := validateObservedResearchEvidence(runtime.TaskID, observation.NewEvidence); err != nil {
-			step.Status = VideoResearchStepFailed
-			step.Error = err.Error()
-			result.State.Steps = append(result.State.Steps, step)
-			return r.fail(result, "observer_failure", err)
-		}
 		step.Status = VideoResearchStepCompleted
 		step.Observation = &observation
 		result.State.Steps = append(result.State.Steps, step)

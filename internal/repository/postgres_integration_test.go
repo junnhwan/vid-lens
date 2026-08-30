@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -464,6 +465,73 @@ func TestPostgresUsageLedgerLifecycleIsIdempotent(t *testing.T) {
 	replayedRelease, changed, releaseEvent, err := repo.Release(reservation.IdempotencyKey, "provider failed", now.Add(2*time.Minute))
 	if err != nil || changed || releaseEvent != nil || replayedRelease.Status != model.UsageLedgerReleased {
 		t.Fatalf("replay release ledger=%+v changed=%v event=%+v err=%v", replayedRelease, changed, releaseEvent, err)
+	}
+}
+
+func TestPostgresAgentStepClaimUsesRowLockAndCAS(t *testing.T) {
+	testDB := openPostgresRepositoryTestDB(t)
+	repo := NewAgentExecutionRepository(testDB.db)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	run := &model.AgentRun{
+		ID: "pg-agent-cas", UserID: 91, SessionID: 92, ScopeType: model.ChatScopeVideo, TaskID: 93,
+		Goal: "concurrent claim", Mode: "research", AgentProfile: "default",
+		ProfileSnapshot: `{}`, PolicySnapshot: `{}`, BudgetSnapshot: `{}`,
+		Status: model.AgentRunStatusRunning, MaxSteps: 3, MaxToolCalls: 3, MaxLLMCalls: 1, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+		CreatedAt: now,
+	}
+	if created, err := repo.CreateRun(context.Background(), run); err != nil || !created {
+		t.Fatalf("create agent run: created=%v err=%v", created, err)
+	}
+	start := make(chan struct{})
+	results := make(chan AgentStepClaim, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			argsDigest := digestText(`{"top_k":4}`)
+			claim, err := repo.ClaimStep(context.Background(), AgentStepClaimRequest{
+				UserID: 91, RunID: run.ID, StepID: "tool-1", Attempt: 1, Sequence: 1,
+				Kind: "retrieve", Action: "search_transcript", SafeReason: "retrieve evidence", InputSummary: `{"top_k":4}`,
+				ArgumentsDigest: argsDigest, CallDigest: digestText(run.ID + argsDigest), ToolName: "search_transcript", ReplaySafe: true,
+				LeaseToken: fmt.Sprintf("pg-worker-%d", i), Now: now, LeaseUntil: now.Add(time.Minute),
+			})
+			results <- claim
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent agent claim: %v", err)
+		}
+	}
+	acquired, busy := 0, 0
+	for claim := range results {
+		switch claim.Outcome {
+		case AgentStepClaimAcquired:
+			acquired++
+		case AgentStepClaimBusy:
+			busy++
+		}
+	}
+	if acquired != 1 || busy != 1 {
+		t.Fatalf("agent claim outcomes acquired=%d busy=%d", acquired, busy)
+	}
+	var steps, calls int64
+	if err := testDB.db.Model(&model.AgentStep{}).Where("run_id = ?", run.ID).Count(&steps).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := testDB.db.Model(&model.AgentToolCall{}).Where("run_id = ?", run.ID).Count(&calls).Error; err != nil {
+		t.Fatal(err)
+	}
+	if steps != 1 || calls != 1 {
+		t.Fatalf("agent rows steps=%d tool_calls=%d", steps, calls)
 	}
 }
 

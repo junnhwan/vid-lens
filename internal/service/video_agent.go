@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -98,10 +99,10 @@ func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
 }
 
 func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
-	return s.ask(ctx, req, embedding, chat, profile, nil, uuid.NewString(), AgentStreamMode)
+	return s.ask(ctx, req, embedding, chat, profile, nil, uuid.NewString(), AgentStreamMode, "default")
 }
 
-func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, observer VideoAgentStepObserver, runID, mode string) (*VideoAgentResult, error) {
+func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, observer VideoAgentStepObserver, runID, mode, agentProfile string) (result *VideoAgentResult, err error) {
 	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
 		return nil, fmt.Errorf("问题不能为空")
@@ -122,6 +123,20 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	if req.TopK > 10 {
 		req.TopK = 10
 	}
+	policy, budget := defaultTemplateAgentPolicy(req.TopK)
+	if _, err = s.ensureAgentRun(ctx, runID, req.UserID, session, req.Question, mode, agentProfile, profile, policy, budget); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		status, reason := model.AgentRunStatusFailed, "execution_failed"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status, reason = model.AgentRunStatusCancelled, "request_cancelled"
+		}
+		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
+	}()
 
 	recentLimit := s.chatSvc.cfg.RecentTurns * 2
 	recent, err := s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
@@ -133,7 +148,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	tools.SetMemorySnapshot(memorySnapshot)
-	tools.SetStepObserver(observer)
+	tools.SetStepObserver(newDurableAgentStepObserver(s.chatSvc.repos.AgentExecution, req.UserID, runID, observer))
 	trace := make([]VideoAgentStep, 0, 4)
 
 	searchArguments, err := json.Marshal(searchTranscriptToolArguments{Question: req.Question, TopK: req.TopK})
@@ -176,7 +191,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	}
 	candidateCitations := buildCitations(req.Question, citations)
 	finalized := finalizeAnswerCitations(answer, candidateCitations)
-	result := &VideoAgentResult{
+	result = &VideoAgentResult{
 		Answer:    finalized.Answer,
 		Template:  string(template),
 		Citations: finalized.Citations,
@@ -193,6 +208,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
 		RunID: runID, RawAnswer: answer, Evidence: candidateCitations, Retrieved: buildCitations(req.Question, search.Citations),
 	})
+	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "goal_satisfied", nil)
 	return result, nil
 }
 

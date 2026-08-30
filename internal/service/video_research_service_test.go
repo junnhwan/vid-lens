@@ -75,4 +75,16 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if ledgerView.Evidence[0].TaskID != task.ID || ledgerView.Evidence[0].QuoteText != "owner 校验证据" || ledgerView.Evidence[0].SourceRef != "ev-research-1" || strings.Contains(ledgerView.Evidence[0].StableLocator, "planner-forged") {
 		t.Fatalf("research ledger evidence is not canonical: %+v", ledgerView.Evidence[0])
 	}
+	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, result.RunID)
+	if err != nil || execution == nil || execution.Run.Status != "completed" || len(execution.Steps) != 5 || len(execution.ToolCalls) != 2 {
+		t.Fatalf("research execution = %+v err=%v", execution, err)
+	}
+	for _, call := range execution.ToolCalls {
+		if strings.Contains(call.InputSummary, "owner 校验") || strings.Contains(call.InputSummary, "被篡改") {
+			t.Fatalf("tool input summary leaked raw planner/tool input: %s", call.InputSummary)
+		}
+		if call.ArgumentsDigest == "" || call.CallDigest == "" || call.ResultDigest == "" {
+			t.Fatalf("tool call digests are incomplete: %+v", call)
+		}
+	}
 }

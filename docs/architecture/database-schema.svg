@@ -12,7 +12,7 @@
   <rect x="0" y="0" width="1960" height="1420" fill="#ffffff"/>
 
   <!-- ===== 标题 ===== -->
-  <text x="980" y="44" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="22" font-weight="700" fill="#0f172a">VidLens 数据库表关系总览（PostgreSQL + pgvector，25 张表）</text>
+  <text x="980" y="44" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="22" font-weight="700" fill="#0f172a">VidLens 核心数据库表关系总览（PostgreSQL + pgvector）</text>
   <text x="980" y="70" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, system-ui, sans-serif" font-size="13" fill="#64748b">架构说明见 <tspan font-family="Courier New, monospace">docs/architecture/data-model.md</tspan>；legacy_mysql 仅离线迁移，Milvus 仅显式回滚，默认向量后端为 pgvector</text>
 
   <!-- ===== 领域分区域 ===== -->

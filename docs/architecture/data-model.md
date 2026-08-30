@@ -2,7 +2,11 @@
 
 ## 在线持久化事实
 
-PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 长期记忆、Agent 证据账本以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义，关系图见 [database-schema.svg](database-schema.svg)。
+PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 执行状态、Agent 长期记忆、Agent 证据账本以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义，核心关系图见 [database-schema.svg](database-schema.svg)。
+
+Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张权威表组成。Run 在创建时冻结 owner、session、video scope、goal、脱敏 AI profile、工具白名单、policy 和 budget；Step 以 `(run_id, step_id, attempt)` 唯一，使用 lease token、过期时间和 version CAS 控制接管；ToolCall 保存经过验证的参数 digest、安全输入摘要、调用 digest、输出引用、结果 digest、证据引用、耗时、token/cost 和错误终态。已完成 step 的安全结果 checkpoint 用于 research loop 重建，不包含 provider prompt、Planner 草稿或 Chain-of-Thought。
+
+过期的只读检索 step 可以由另一个 worker 用 CAS 接管。LLM/视觉等不可安全重放的调用如果在 provider 返回和 PostgreSQL 终态提交之间中断，会进入 `ambiguous` 并 fail-closed；同一 attempt 不会自动再次调用，显式新 attempt 仍受 Run 创建时冻结的 attempt、step、tool、LLM 和 vision 预算限制。`completed`、`failed`、`cancelled`、`budget_exhausted` Run 都是单调终态，普通重试不能覆盖。
 
 长期记忆以 `agent_memory_items` 保存 owner/scope 下的最新 item 投影，以 `agent_memory_events` 保存创建、冲突、撤回和删除事件。item/event 是权威数据；`agent_memory_embeddings` 是启用 memory 后按需创建的 pgvector 在线语义召回投影，embedding 失败不会回滚关系 item。撤回或删除 item 时会在同一事务中移除对应投影，避免旧向量再次召回。具体权限、召回和治理边界见 [agent-memory.md](agent-memory.md)。
 
@@ -10,7 +14,7 @@ Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidenc
 
 `legacy_mysql` 只服务于 `cmd/mysql-to-postgres/` 的离线历史数据迁移和检查；在线 API、消费者和 RAG 服务不把 MySQL 当作数据源。
 
-任务和各处理阶段分别记录状态。处理租约使用 token、版本和过期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。
+任务和各处理阶段分别记录状态。处理租约使用 token、版本和过期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。Agent research 恢复只读取上述独立执行表；`chat_messages.retrieval_snapshot` 继续是历史 UI 的兼容派生快照，不能作为执行恢复依据。
 
 ## 检索数据
 

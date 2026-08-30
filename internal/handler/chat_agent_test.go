@@ -149,7 +149,7 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 		handler.AskAgent(c)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/chat/sessions/22/messages/agent", bytes.NewBufferString(`{"question":"请研究 owner 校验的证据","mode":"research","top_k":4}`))
+	req := httptest.NewRequest(http.MethodPost, "/chat/sessions/22/messages/agent", bytes.NewBufferString(`{"question":"请研究 owner 校验的证据","mode":"research","top_k":4,"run_id":"resume-run-1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -157,7 +157,7 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if agent.researchReq.UserID != 7 || agent.researchReq.SessionID != 22 || agent.researchReq.Goal != "请研究 owner 校验的证据" || agent.researchReq.TopK != 4 {
+	if agent.researchReq.UserID != 7 || agent.researchReq.SessionID != 22 || agent.researchReq.Goal != "请研究 owner 校验的证据" || agent.researchReq.TopK != 4 || agent.researchReq.RunID != "resume-run-1" {
 		t.Fatalf("research request = %+v", agent.researchReq)
 	}
 	if agent.req.Question != "" {

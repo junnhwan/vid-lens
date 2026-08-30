@@ -13,7 +13,7 @@
 - 证据漏斗是固定的检索/核验策略，不是自主 Agent。只有当有限状态、预算和工具白名单允许时，Agent 才能在漏斗节点之间选择下一步。
 - VidLens 保留“受控 Agent”：目标、状态、有限工具、硬预算、验证器和停止条件都由 Go 代码约束。不引入无限制 ReAct，不暴露原始 Chain-of-Thought。
 - 证据账本是研究结果的可审计边界：结论必须关联到视频、时间范围、模态和可重放的证据；记忆不能替代当前视频证据。
-- `chat_messages.retrieval_snapshot` 继续承担历史兼容和结果快照职责；真正的 Run/Step/Claim/Evidence 持久化应有独立的 PostgreSQL 领域模型，不能继续把完整 Agent 状态塞进聊天快照。
+- `chat_messages.retrieval_snapshot` 继续承担历史兼容和结果快照职责；Run/Step/ToolCall 与 Claim/Evidence 已使用独立 PostgreSQL 领域模型，执行恢复不读取聊天快照。
 
 ## 当前 VidLens 基线
 
@@ -24,8 +24,9 @@
 | 模板 Agent | `video_agent.go` 的 `direct_qa`、`summarize_topic`、`compare_topics`、`critique_topic` 由 Go 固定工具顺序编排 | 已实现，但不是自主研究 Agent |
 | Agent 工具 | `video_agent_registry.go` 只允许 `search_transcript`、`get_transcript_window`、`summarize_segments`、`compare_segments`、`build_cited_answer` | 已实现白名单和参数入口 |
 | Agent 流式事件 | `video_agent_stream.go` 有 `run_start`、步骤、工具调用/结果、检索命中、答案、引用、完成/错误事件 | 已实现事件外壳；答案仍是在执行完后按 80 字切片，不是 Provider token stream |
-| Agent 快照 | `video_agent_snapshot.go` 将安全执行元数据写入既有 `retrieval_snapshot`，兼容旧的 `template+citations+trace` | 已实现兼容快照，不是 Run/Step 真正持久化 |
-| 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验 | 已实现但为 opt-in、单视频、无视觉核验和账本 |
+| Agent 快照 | `video_agent_snapshot.go` 将安全执行元数据写入既有 `retrieval_snapshot`，兼容旧的 `template+citations+trace` | 已实现兼容快照，但不参与执行恢复 |
+| Agent 执行账本 | `agent_runs`、`agent_steps`、`agent_tool_calls` 冻结 scope/profile/policy/budget，以 attempt 唯一键、lease 和 CAS 持久化模板工具与 research planner/tool 动作 | 已实现单视频执行持久化；不可重放调用中断时 fail-closed |
+| 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验，并从 PostgreSQL checkpoint 恢复已完成动作 | 已实现 opt-in、单视频的可恢复 loop；仍无视觉核验 |
 | 研究入口 | `video_research_service.go` 的 `mode=research` 只接受单视频；知识库范围被拒绝 | 已实现实验入口，不应误称为完整产品 Agent |
 | 短期上下文 | `ChatMemoryStore` 只提供最近消息读取/保存；`RecentTurns` 是有限会话上下文 | 已实现短期记忆，不是长期语义记忆 |
 | 长期记忆 | 已有 owner-scoped item/event、四类 scope、受限 snapshot、冲突/撤回/删除语义、异步写入和可选 Agent 注入；在线语义排序与公开治理 API 尚未实现 | 最小切片已实现，见 [agent-memory.md](agent-memory.md) |
@@ -209,7 +210,7 @@ Planner 可返回安全的 `reason` 或 `stop_reason` 摘要，用于 UI 和审�
 
 当前 `AgentSnapshot` 适合聊天历史恢复：它保存 `run_id`、mode、template、步骤安全元数据、citations 和 legacy trace。它不能表达并发/重试、lease、Claim 状态迁移、工具成本、证据修订或中途恢复，因此不应继续扩展成万能 JSON。
 
-目标模型以 PostgreSQL 为权威：
+当前模型以 PostgreSQL 为权威：
 
 | 记录 | 最小字段 | 规则 |
 |---|---|---|
@@ -220,11 +221,11 @@ Planner 可返回安全的 `reason` 或 `stop_reason` 摘要，用于 UI 和审�
 | `agent_evidence` | evidence id、task/video、start/end、modality、content ref、source revision、provenance、retrieval step | Evidence 必须可重放、可定位；当前索引是投影，不是唯一账本 |
 | `agent_claim_evidence` | claim revision、evidence id、relation、verification result、reason | 多对多关系显式记录支持、反驳、上下文和验证失败 |
 
-Run/Step 可使用 append-only event 或状态行加版本号实现；选择不影响“PostgreSQL 为权威、Redis 为协调/缓存、向量索引可重建”的项目边界。终态回答可以继续写入 `retrieval_snapshot` 供历史 UI 快速读取，但它是派生快照，不是恢复依据。
+Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保留历史，ToolCall 与 Step attempt 一一对应。终态回答继续写入 `retrieval_snapshot` 供历史 UI 快速读取，但它是派生快照，不是恢复依据。
 
 ### 恢复和幂等
 
-工具执行前写 `running`，执行后以 `(run_id, step_id, attempt)` 幂等落盘；进程重启时只重取 lease 已过期且没有终态结果的步骤。只读检索可以安全重试，视觉调用和 LLM 调用需记录调用 digest，避免恢复时无界重复收费。已完成的 Evidence/Claim revision 不因重新运行而删除。
+工具执行前写 `running`，执行后以 `(run_id, step_id, attempt)` 幂等落盘；进程重启时只接管 lease 已过期且没有终态结果的只读步骤。Planner、LLM 和未来视觉调用记录调用 digest，若 lease 过期但没有持久终态则进入 `ambiguous` 并 fail-closed，同一 attempt 不自动重放；显式新 attempt 受冻结预算约束。已完成的 research Planner/tool checkpoint 可重建内存状态，Evidence/Claim revision 不因恢复而删除。
 
 ## 记忆和证据的关系
 
@@ -248,7 +249,7 @@ Run/Step 可使用 append-only event 或状态行加版本号实现；选择不�
 
 ### Run/Step 可恢复执行
 
-将研究 loop 从内存 `State` 提升为 PostgreSQL Run/Step；加入 lease、CAS、attempt、幂等和 budget snapshot；把当前 AgentSnapshot 变成兼容派生层。仍只支持单视频 read-only 工具，不扩大为通用任务执行器。
+已将研究 loop 从纯内存 `State` 提升为 PostgreSQL Run/Step/ToolCall：加入 lease、CAS、attempt、调用 digest、幂等结果 checkpoint 和 budget snapshot；AgentSnapshot 保持兼容派生层。当前仍只支持单视频既有白名单工具，不扩大为通用任务执行器，也不接入知识库 Agent。
 
 ### 固定证据漏斗与受控选择
 

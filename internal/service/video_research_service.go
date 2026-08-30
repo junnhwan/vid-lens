@@ -20,11 +20,12 @@ type VideoResearchRequest struct {
 	Goal      string
 	TopK      int
 	Policy    VideoResearchPolicy
+	RunID     string
 }
 
 // AskResearch runs the opt-in goal-driven path. The existing Ask method stays
 // as the deterministic template baseline for comparison and fallback.
-func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
+func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (result *VideoAgentResult, err error) {
 	req.Goal = strings.TrimSpace(req.Goal)
 	if req.Goal == "" {
 		return nil, fmt.Errorf("研究目标不能为空")
@@ -55,19 +56,42 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if policy == (VideoResearchPolicy{}) {
 		policy = DefaultVideoResearchPolicy()
 	}
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	runID := strings.TrimSpace(req.RunID)
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	frozenPolicy, budget := researchAgentPolicy(req.TopK, policy)
+	if _, err = s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err == nil || errors.Is(err, errAgentExecutionBusy) {
+			return
+		}
+		status, reason := model.AgentRunStatusFailed, "execution_failed"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status, reason = model.AgentRunStatusCancelled, "request_cancelled"
+		}
+		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
+	}()
 
 	recentLimit := s.chatSvc.cfg.RecentTurns * 2
 	recent, err := s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
 	if err != nil {
 		return nil, err
 	}
-	runID := uuid.NewString()
 	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	tools.SetMemorySnapshot(memorySnapshot)
 	runner, err := NewVideoResearchRunner(tools.Registry(), NewLLMVideoResearchPlanner(chat), DefaultVideoResearchObserver{}, policy)
 	if err != nil {
+		return nil, err
+	}
+	if err := runner.SetDurableExecution(s.chatSvc.repos.AgentExecution, req.UserID, runID); err != nil {
 		return nil, err
 	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
@@ -83,11 +107,14 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
+	if runResult.State.StopReason == "budget_exhausted" {
+		s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusBudgetExhausted, "budget_exhausted", nil)
+	}
 	if strings.TrimSpace(runResult.State.Answer) == "" {
 		return nil, newVideoAgentExecutionError(errors.New("研究任务未生成最终回答"), trace)
 	}
 
-	result := &VideoAgentResult{
+	result = &VideoAgentResult{
 		Answer:    runResult.State.Answer,
 		Template:  string(VideoAgentResearchTemplate),
 		Citations: append([]Citation(nil), runResult.State.Citations...),
@@ -105,7 +132,37 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
 		RunID: runID, RawAnswer: rawAnswer, Evidence: answerEvidence, Retrieved: buildCitations(req.Goal, runResult.State.Evidence),
 	})
+	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil)
 	return result, nil
+}
+
+// ResumeResearch reconstructs a running research loop exclusively from the
+// authoritative Run/Step/ToolCall records. retrieval_snapshot is never read.
+func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, runID string, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
+	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.AgentExecution == nil {
+		return nil, errors.New("agent execution repository unavailable")
+	}
+	run, err := s.chatSvc.repos.AgentExecution.GetRun(ctx, userID, strings.TrimSpace(runID))
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, errors.New("agent run not found")
+	}
+	if run.Mode != string(VideoAgentResearchTemplate) || run.ScopeType != model.ChatScopeVideo {
+		return nil, errors.New("agent run is not a resumable single-video research run")
+	}
+	if run.Status != model.AgentRunStatusRunning && run.Status != model.AgentRunStatusPending {
+		return nil, fmt.Errorf("agent run is terminal: %s", run.Status)
+	}
+	var policy frozenAgentPolicy
+	if err := json.Unmarshal([]byte(run.PolicySnapshot), &policy); err != nil {
+		return nil, fmt.Errorf("decode frozen agent policy: %w", err)
+	}
+	return s.AskResearch(ctx, VideoResearchRequest{
+		UserID: userID, SessionID: run.SessionID, Goal: run.Goal, TopK: policy.TopK,
+		Policy: VideoResearchPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans}, RunID: run.ID,
+	}, embedding, chat, profile)
 }
 
 func researchAnswerLedgerInput(goal string, result *VideoResearchResult) (string, []Citation) {
