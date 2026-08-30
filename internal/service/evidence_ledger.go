@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -197,13 +196,7 @@ func (s *EvidenceLedgerService) buildEvidence(req EvidenceLedgerRecordRequest, c
 		"evidence_id": sourceRef, "source_ref_kind": "rag_evidence_id", "retrieval_source": citation.Source,
 		"source_revision_status": model.EvidenceSourceRevisionUnavailable,
 	}
-	visualSource := isVisualOCRCitation(citation)
-	if visualSource {
-		artifact.SourceType = "visual_ocr"
-		artifact.DocumentID = sourceRef
-		locator["source_artifact"] = sourceRef
-	}
-	if resolved, ok, err := s.resolveTimeRange(taskID, citation); err != nil {
+	if resolved, ok, err := s.resolveTimeRange(req.UserID, taskID, citation); err != nil {
 		return model.AgentEvidence{}, err
 	} else if ok {
 		artifact.SourceType = resolved.sourceType
@@ -213,9 +206,11 @@ func (s *EvidenceLedgerService) buildEvidence(req EvidenceLedgerRecordRequest, c
 		for key, value := range resolved.locator {
 			locator[key] = value
 		}
-		if resolved.endSecond > resolved.startSecond && resolved.startSecond >= 0 {
-			artifact.StartSecond = resolved.startSecond
-			artifact.EndSecond = resolved.endSecond
+		if resolved.endMS > resolved.startMS && resolved.startMS >= 0 {
+			artifact.StartMS = resolved.startMS
+			artifact.EndMS = resolved.endMS
+			artifact.StartSecond = resolved.startMS / 1000
+			artifact.EndSecond = (resolved.endMS + 999) / 1000
 			artifact.TimeRangeStatus = model.EvidenceTimeRangeKnown
 		}
 	}
@@ -229,177 +224,45 @@ func (s *EvidenceLedgerService) buildEvidence(req EvidenceLedgerRecordRequest, c
 }
 
 type resolvedEvidenceRange struct {
-	sourceType  string
-	documentID  string
-	startSecond int64
-	endSecond   int64
-	rangeBasis  string
-	locator     map[string]any
+	sourceType string
+	documentID string
+	startMS    int64
+	endMS      int64
+	rangeBasis string
+	locator    map[string]any
 }
 
-func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, citation Citation) (resolvedEvidenceRange, bool, error) {
+func (s *EvidenceLedgerService) resolveTimeRange(userID, taskID int64, citation Citation) (resolvedEvidenceRange, bool, error) {
 	quote := strings.TrimSpace(citation.Content)
-	if taskID <= 0 {
+	if userID <= 0 || taskID <= 0 || quote == "" || s.repos.VideoChunk == nil {
 		return resolvedEvidenceRange{}, false, nil
 	}
-	if isVisualOCRCitation(citation) {
-		if quote == "" {
-			return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires OCR text")
-		}
-		if _, ok := visualFrameIDFromSourceRef(citation.EvidenceID); !ok {
-			return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
-		}
-		return s.resolveVisualRange(taskID, citation.EvidenceID, quote)
-	}
-	if quote == "" {
-		return resolvedEvidenceRange{}, false, nil
-	}
-	return s.resolveTranscriptRange(taskID, citation, quote)
-}
-
-func (s *EvidenceLedgerService) resolveTranscriptRange(taskID int64, citation Citation, quote string) (resolvedEvidenceRange, bool, error) {
-	if s.repos.TranscriptionChunk == nil {
-		return resolvedEvidenceRange{}, false, nil
-	}
-	chunks, err := s.repos.TranscriptionChunk.ListByTaskID(taskID)
+	chunk, err := s.repos.VideoChunk.FindByIdentity(userID, taskID, citation.ChunkID, citation.EvidenceID)
 	if err != nil {
 		return resolvedEvidenceRange{}, false, err
 	}
-	targetIndex, identityPresent, identityResolved, identityBasis, err := s.resolveTranscriptIdentity(taskID, citation)
+	if chunk == nil || !evidenceTextMatches(quote, chunk.Content) {
+		return resolvedEvidenceRange{}, false, nil
+	}
+	refs, err := ParseChunkSourceRefs(chunk.SourceRefs)
 	if err != nil {
 		return resolvedEvidenceRange{}, false, err
 	}
-	if identityPresent {
-		if !identityResolved {
-			return resolvedEvidenceRange{}, false, nil
-		}
-		for _, chunk := range chunks {
-			if chunk.ChunkIndex != targetIndex || chunk.Status != model.TranscriptionChunkStatusCompleted || !evidenceTextMatches(quote, chunk.Content) {
-				continue
-			}
-			return transcriptResolvedRange(chunk, identityBasis), true, nil
-		}
-		return resolvedEvidenceRange{}, false, nil
-	}
-
-	// Legacy evidence without any stable identity may use text only when it
-	// points to exactly one completed ASR segment. Duplicate text is ambiguous.
-	matches := make([]model.VideoTranscriptionChunk, 0, 1)
-	for _, chunk := range chunks {
-		if chunk.Status == model.TranscriptionChunkStatusCompleted && evidenceTextMatches(quote, chunk.Content) {
-			matches = append(matches, chunk)
-		}
-	}
-	if len(matches) != 1 {
-		return resolvedEvidenceRange{}, false, nil
-	}
-	return transcriptResolvedRange(matches[0], "unique_text_fallback"), true, nil
-}
-
-func (s *EvidenceLedgerService) resolveTranscriptIdentity(taskID int64, citation Citation) (int, bool, bool, string, error) {
-	evidenceID := strings.TrimSpace(citation.EvidenceID)
-	hasEvidenceID := evidenceID != ""
-	hasChunkID := citation.ChunkID > 0
-	// ChunkIndex is an int in the compatibility citation schema, so zero cannot
-	// distinguish an omitted value from the first chunk. Real retrieval records
-	// carry EvidenceID/ChunkID; a non-zero standalone index remains explicit.
-	hasChunkIndex := citation.ChunkIndex != 0
-	identityPresent := hasEvidenceID || hasChunkID || hasChunkIndex
-	if !identityPresent {
-		return 0, false, false, "", nil
-	}
-
-	resolved := make(map[int][]string)
-	if hasEvidenceID || hasChunkID {
-		if s.repos.VideoChunk == nil {
-			return 0, true, false, "", nil
-		}
-		chunks, err := s.repos.VideoChunk.ListAllByTaskID(taskID)
-		if err != nil {
-			return 0, true, false, "", err
-		}
-		for _, chunk := range chunks {
-			if hasEvidenceID && chunk.VectorID == evidenceID {
-				resolved[chunk.ChunkIndex] = append(resolved[chunk.ChunkIndex], "evidence_id")
-			}
-			if hasChunkID && chunk.ID == citation.ChunkID {
-				resolved[chunk.ChunkIndex] = append(resolved[chunk.ChunkIndex], "chunk_id")
-			}
-		}
-	}
-	if hasChunkIndex {
-		resolved[citation.ChunkIndex] = append(resolved[citation.ChunkIndex], "chunk_index")
-	}
-	if len(resolved) == 0 {
-		return 0, true, false, "", nil
-	}
-	if len(resolved) != 1 {
-		return 0, true, false, "", errors.New("transcript evidence identities resolve to different chunks")
-	}
-	for index, bases := range resolved {
-		sort.Strings(bases)
-		return index, true, true, strings.Join(bases, "+"), nil
-	}
-	return 0, true, false, "", nil
-}
-
-func transcriptResolvedRange(chunk model.VideoTranscriptionChunk, identityBasis string) resolvedEvidenceRange {
+	modality := normalizedChunkModality(chunk.Modality)
 	resolved := resolvedEvidenceRange{
-		sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), rangeBasis: "unavailable",
-		locator: map[string]any{"transcription_chunk_id": chunk.ID, "transcription_chunk_index": chunk.ChunkIndex, "identity_basis": identityBasis},
+		sourceType: modality, documentID: fmt.Sprintf("video_chunk:%d", chunk.ID), rangeBasis: "persisted_video_chunk_source_mapping",
+		locator: map[string]any{
+			"video_chunk_id": chunk.ID, "evidence_id": chunk.VectorID, "modality": modality,
+			"source_mapping_status": normalizedMappingStatus(chunk.SourceMappingStatus), "source_refs": refs,
+		},
 	}
-	start, end := int64(chunk.StartSecond), int64(chunk.EndSecond)
-	if end > start && start >= 0 {
-		resolved.startSecond, resolved.endSecond, resolved.rangeBasis = start, end, "persisted_asr_segment"
+	if len(refs) == 1 {
+		resolved.documentID = refs[0].StableID
 	}
-	return resolved
-}
-
-func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quote string) (resolvedEvidenceRange, bool, error) {
-	expectedFrameID, hasFrameID := visualFrameIDFromSourceRef(sourceRef)
-	if !hasFrameID {
-		return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
+	if normalizedMappingStatus(chunk.SourceMappingStatus) == model.ChunkSourceMapped && normalizedTimeRangeStatus(chunk.TimeRangeStatus, chunk.StartMS, chunk.EndMS) != model.ChunkTimeRangeUnknown {
+		resolved.startMS, resolved.endMS = chunk.StartMS, chunk.EndMS
 	}
-	if s.repos.VisualFrame == nil {
-		return resolvedEvidenceRange{}, false, errors.New("visual_ocr frame repository unavailable")
-	}
-	frames, err := s.repos.VisualFrame.ListCompletedWithText(taskID)
-	if err != nil {
-		return resolvedEvidenceRange{}, false, err
-	}
-	for _, frame := range frames {
-		if frame.ID != expectedFrameID {
-			continue
-		}
-		if !evidenceTextMatches(quote, frame.OCRText) {
-			continue
-		}
-		start := frame.TimeMs / 1000
-		return resolvedEvidenceRange{
-			sourceType: "visual_ocr", documentID: fmt.Sprintf("visual_frame:%d", frame.ID),
-			startSecond: start, endSecond: start + 1, rangeBasis: "keyframe_timestamp",
-			locator: map[string]any{
-				"frame_id": frame.ID, "frame_index": frame.FrameIndex, "time_ms": frame.TimeMs,
-				"object_key": frame.ObjectKey, "frame_source": frame.Source, "caption_method": frame.CaptionMethod,
-			},
-		}, true, nil
-	}
-	return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence does not match an existing completed frame")
-}
-
-func isVisualOCRCitation(citation Citation) bool {
-	source := strings.ToLower(strings.TrimSpace(citation.Source))
-	return source == "visual_ocr" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(citation.EvidenceID)), "visual-frame:")
-}
-
-func visualFrameIDFromSourceRef(sourceRef string) (int64, bool) {
-	const prefix = "visual-frame:"
-	sourceRef = strings.ToLower(strings.TrimSpace(sourceRef))
-	if !strings.HasPrefix(sourceRef, prefix) {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(sourceRef, prefix)), 10, 64)
-	return id, err == nil && id > 0
+	return resolved, true, nil
 }
 
 func evidenceTextMatches(quote, source string) bool {

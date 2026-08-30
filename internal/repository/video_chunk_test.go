@@ -210,3 +210,41 @@ func TestVideoChunkRepositoryListsAllEvidenceManifestInStableScopeOrder(t *testi
 		t.Fatalf("manifest = %+v, want stable all-scope ordering", manifest)
 	}
 }
+
+func TestVideoChunkRepositoryPersistsSourceMappingAndFindsOnlyStableIdentity(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	chunk := model.VideoChunk{UserID: 7, TaskID: 1, ChunkIndex: 9, Content: "mapped", ContentHash: "hash", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "evidence", Modality: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: `[{"source_type":"transcript","stable_id":"segment-a"}]`, ChunkerStrategy: "recursive_sentence", ChunkerVersion: model.CurrentRAGChunkerVersion}
+	if err := repo.ReplaceTaskChunks(1, "m", []model.VideoChunk{chunk}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.ListByTaskID(7, 1, "m")
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	if stored[0].SourceRefs != chunk.SourceRefs || stored[0].StartMS != 1000 || stored[0].Modality != model.ChunkModalityTranscript || stored[0].ChunkerVersion != model.CurrentRAGChunkerVersion {
+		t.Fatalf("stored provenance=%+v", stored[0])
+	}
+	found, err := repo.FindByIdentity(7, 1, stored[0].ID, stored[0].VectorID)
+	if err != nil || found == nil {
+		t.Fatalf("found=%+v err=%v", found, err)
+	}
+	byIndex, err := repo.FindByIdentity(7, 1, 0, "")
+	if err != nil || byIndex != nil {
+		t.Fatalf("identity-less lookup=%+v err=%v", byIndex, err)
+	}
+}
+
+func TestVideoChunkRepositoryReadsLegacyRowsWithUnknownSourceDefaults(t *testing.T) {
+	repo := newVideoChunkTestRepo(t)
+	legacy := model.VideoChunk{UserID: 7, TaskID: 2, ChunkIndex: 0, Content: "legacy", ContentHash: "legacy-hash", EmbeddingModel: "m", EmbeddingDim: 3, VectorID: "legacy-evidence"}
+	if err := repo.db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.ListByTaskID(7, 2, "m")
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	if stored[0].Modality != model.ChunkModalityUnknown || stored[0].TimeRangeStatus != model.ChunkTimeRangeUnknown || stored[0].SourceMappingStatus != model.ChunkSourceUnmapped || stored[0].SourceRefs != "[]" || stored[0].StartMS != 0 || stored[0].EndMS != 0 {
+		t.Fatalf("legacy defaults=%+v", stored[0])
+	}
+}

@@ -96,7 +96,7 @@ func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.Vide
 	// 旧索引不挡。三层幂等分工见 service/content_dedup.go 注释。
 	if c.repo != nil && c.repo.RAGIndex != nil && c.profiles != nil && task.FileMD5 != "" {
 		if profile, profileErr := c.profiles.GetDefaultAIProfile(task.UserID); profileErr == nil && profile != nil && profile.EmbeddingModel != "" {
-			if existing, findErr := c.repo.RAGIndex.FindByMD5AndModel(task.FileMD5, profile.EmbeddingModel); findErr == nil && existing != nil {
+			if existing, findErr := c.repo.RAGIndex.FindReusableByMD5AndModel(task.FileMD5, profile.EmbeddingModel, model.CurrentRAGChunkerVersion, model.CurrentRAGSourceMappingVersion, model.CurrentRAGIndexBuildVersion); findErr == nil && existing != nil {
 				observability.Log(ctx, slog.Default(), slog.LevelInfo, "skip rag index: content+model already indexed",
 					slog.String("file_md5", task.FileMD5), slog.String("embedding_model", profile.EmbeddingModel))
 				return nil
@@ -180,16 +180,18 @@ func (c *Consumer) recordRAGIndexEnqueueFailure(task *model.VideoTask, err error
 	now := time.Now()
 	errMsg := truncateError(fmt.Errorf("RAG 索引任务投递失败: %w", err))
 	_ = c.repo.RAGIndex.Upsert(&model.VideoRAGIndex{
-		UserID:         task.UserID,
-		TaskID:         task.ID,
-		FileMD5:        task.FileMD5,
-		EmbeddingModel: profile.EmbeddingModel,
-		EmbeddingDim:   profile.EmbeddingDim,
-		Status:         model.RAGIndexStatusFailed,
-		ChunkCount:     0,
-		LastError:      errMsg,
-		BuildVersion:   1,
-		StartedAt:      &now,
-		FinishedAt:     &now,
+		UserID:               task.UserID,
+		TaskID:               task.ID,
+		FileMD5:              task.FileMD5,
+		EmbeddingModel:       profile.EmbeddingModel,
+		EmbeddingDim:         profile.EmbeddingDim,
+		Status:               model.RAGIndexStatusFailed,
+		ChunkCount:           0,
+		LastError:            errMsg,
+		BuildVersion:         model.CurrentRAGIndexBuildVersion,
+		ChunkerVersion:       model.CurrentRAGChunkerVersion,
+		SourceMappingVersion: model.CurrentRAGSourceMappingVersion,
+		StartedAt:            &now,
+		FinishedAt:           &now,
 	})
 }

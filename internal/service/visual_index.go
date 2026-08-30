@@ -264,6 +264,10 @@ func errString(err error) string {
 // FormatOCRChunksForIndex turns completed visual frames into TextChunks so the
 // existing RAG indexer can embed them alongside speech transcription.
 func FormatOCRChunksForIndex(frames []model.VideoVisualFrame) []TextChunk {
+	return formatOCRChunksForIndex(frames, 800)
+}
+
+func formatOCRChunksForIndex(frames []model.VideoVisualFrame, chunkSize int) []TextChunk {
 	out := make([]TextChunk, 0, len(frames))
 	for _, frame := range frames {
 		text := strings.TrimSpace(frame.OCRText)
@@ -281,7 +285,18 @@ func FormatOCRChunksForIndex(frames []model.VideoVisualFrame) []TextChunk {
 			label = "画面OCR"
 		}
 		content := fmt.Sprintf("[%s %02d:%02d]\n%s", label, mm, ss, text)
-		out = append(out, TextChunk{Content: content})
+		modality := model.ChunkModalityVisualOCR
+		if frame.CaptionMethod == "vision" {
+			modality = model.ChunkModalityVisualCaption
+		}
+		stableID := fmt.Sprintf("visual-frame:%d", frame.ID)
+		observation := SourceTextObservation{Content: content, Modality: modality, Refs: []ChunkSourceRef{{
+			SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
+			StartMS: frame.TimeMs, EndMS: frame.TimeMs + 1, TimeRangeStatus: model.ChunkTimeRangeExact,
+			ObjectKey: frame.ObjectKey, CaptionMethod: frame.CaptionMethod,
+		}}}
+		chunks := SplitObservationsIntoChunks([]SourceTextObservation{observation}, chunkSize, 0)
+		out = append(out, chunks...)
 	}
 	return out
 }

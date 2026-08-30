@@ -34,20 +34,35 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 		index.BuildVersion = existing.BuildVersion
 	}
 	return r.db.Model(&existing).Updates(map[string]interface{}{
-		"file_md5":              index.FileMD5,
-		"embedding_dim":         index.EmbeddingDim,
-		"status":                index.Status,
-		"chunk_count":           index.ChunkCount,
-		"chunker_strategy":      index.ChunkerStrategy,
-		"chunker_version":       index.ChunkerVersion,
-		"chunk_size":            index.ChunkSize,
-		"chunk_overlap":         index.ChunkOverlap,
-		"chunk_manifest_sha256": index.ChunkManifestSHA256,
-		"last_error":            index.LastError,
-		"build_version":         index.BuildVersion,
-		"started_at":            index.StartedAt,
-		"finished_at":           index.FinishedAt,
+		"file_md5":               index.FileMD5,
+		"embedding_dim":          index.EmbeddingDim,
+		"status":                 index.Status,
+		"chunk_count":            index.ChunkCount,
+		"chunker_strategy":       index.ChunkerStrategy,
+		"chunker_version":        index.ChunkerVersion,
+		"chunk_size":             index.ChunkSize,
+		"chunk_overlap":          index.ChunkOverlap,
+		"chunk_manifest_sha256":  index.ChunkManifestSHA256,
+		"source_mapping_version": index.SourceMappingVersion,
+		"last_error":             index.LastError,
+		"build_version":          index.BuildVersion,
+		"started_at":             index.StartedAt,
+		"finished_at":            index.FinishedAt,
 	}).Error
+}
+
+func (r *RAGIndexRepository) FindReusableByMD5AndModel(fileMD5, embeddingModel, chunkerVersion, sourceMappingVersion string, buildVersion int) (*model.VideoRAGIndex, error) {
+	var index model.VideoRAGIndex
+	err := r.db.Where("file_md5 = ? AND embedding_model = ? AND status = ? AND build_version = ? AND chunker_version = ? AND source_mapping_version = ?",
+		fileMD5, embeddingModel, model.RAGIndexStatusIndexed, buildVersion, chunkerVersion, sourceMappingVersion).
+		First(&index).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &index, nil
 }
 
 // FindByMD5AndModel 按内容指纹 + embedding 模型查找已成功索引的 RAG 索引行

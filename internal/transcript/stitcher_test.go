@@ -49,3 +49,13 @@ func TestStitchSkipsBlankParts(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 }
+
+func TestStitchReportsRetainedObservationContributions(t *testing.T) {
+	result := Stitch([]string{"第一句。共享边界", "共享边界。第二句。"})
+	if result.Content != "第一句。共享边界。第二句。" {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if len(result.Contributions) != 2 || result.Contributions[0].PartIndex != 0 || result.Contributions[0].Content != "第一句。共享边界" || result.Contributions[1].PartIndex != 1 || result.Contributions[1].Content != "。第二句。" {
+		t.Fatalf("contributions = %+v", result.Contributions)
+	}
+}

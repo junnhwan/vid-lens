@@ -6,8 +6,15 @@ import (
 )
 
 type TextChunk struct {
-	Index   int
-	Content string
+	Index               int
+	Content             string
+	TokenCount          int
+	Modality            string
+	StartMS             int64
+	EndMS               int64
+	TimeRangeStatus     string
+	SourceMappingStatus string
+	SourceRefs          []ChunkSourceRef
 }
 
 // SplitTextIntoChunks splits text at the strongest available semantic boundary.
@@ -25,8 +32,11 @@ func SplitTextIntoChunks(text string, chunkSize, overlap int) []TextChunk {
 		overlap = 0
 	}
 
-	units := splitSemanticUnits(text, chunkSize, 0)
-	return packSemanticUnits(units, chunkSize, overlap)
+	// This compatibility helper is also used for bounded display excerpts, whose
+	// historical budget is character based. The provenance-aware RAG path uses
+	// SplitObservationsIntoChunks and its conservative token estimator.
+	units := splitSemanticUnitsBy(text, chunkSize, 0, runeCount)
+	return packSemanticUnitsBy(units, chunkSize, overlap, runeCount)
 }
 
 const (
@@ -37,10 +47,14 @@ const (
 )
 
 func splitSemanticUnits(text string, chunkSize, level int) []string {
+	return splitSemanticUnitsBy(text, chunkSize, level, EstimateChunkTokens)
+}
+
+func splitSemanticUnitsBy(text string, chunkSize, level int, measure func(string) int) []string {
 	if text == "" {
 		return nil
 	}
-	if runeCount(text) <= chunkSize {
+	if measure(text) <= chunkSize {
 		return []string{text}
 	}
 	if level >= hardBoundaryLevel {
@@ -54,7 +68,7 @@ func splitSemanticUnits(text string, chunkSize, level int) []string {
 
 	parts := splitAtBoundaryLevel(text, level)
 	if len(parts) <= 1 {
-		return splitSemanticUnits(text, chunkSize, level+1)
+		return splitSemanticUnitsBy(text, chunkSize, level+1, measure)
 	}
 
 	units := make([]string, 0, len(parts))
@@ -62,11 +76,11 @@ func splitSemanticUnits(text string, chunkSize, level int) []string {
 		if part == "" {
 			continue
 		}
-		if runeCount(part) <= chunkSize {
+		if measure(part) <= chunkSize {
 			units = append(units, part)
 			continue
 		}
-		units = append(units, splitSemanticUnits(part, chunkSize, level+1)...)
+		units = append(units, splitSemanticUnitsBy(part, chunkSize, level+1, measure)...)
 	}
 	return units
 }
@@ -151,31 +165,35 @@ func isClosingPunctuation(r rune) bool {
 }
 
 func packSemanticUnits(units []string, chunkSize, overlap int) []TextChunk {
+	return packSemanticUnitsBy(units, chunkSize, overlap, EstimateChunkTokens)
+}
+
+func packSemanticUnitsBy(units []string, chunkSize, overlap int, measure func(string) int) []TextChunk {
 	chunks := make([]TextChunk, 0, len(units))
 	for start := 0; start < len(units); {
 		end := start
-		contentRunes := 0
+		contentTokens := 0
 		for end < len(units) {
-			unitRunes := runeCount(units[end])
-			if end > start && contentRunes+unitRunes > chunkSize {
+			unitTokens := measure(units[end])
+			if end > start && contentTokens+unitTokens > chunkSize {
 				break
 			}
-			contentRunes += unitRunes
+			contentTokens += unitTokens
 			end++
-			if contentRunes >= chunkSize {
+			if contentTokens >= chunkSize {
 				break
 			}
 		}
 
 		content := strings.TrimSpace(strings.Join(units[start:end], ""))
 		if content != "" {
-			chunks = append(chunks, TextChunk{Index: len(chunks), Content: content})
+			chunks = append(chunks, TextChunk{Index: len(chunks), Content: content, TokenCount: measure(content)})
 		}
 		if end >= len(units) {
 			break
 		}
 
-		next := semanticOverlapStart(units, start, end, chunkSize, overlap)
+		next := semanticOverlapStartBy(units, start, end, chunkSize, overlap, measure)
 		if next <= start || next > end {
 			next = end
 		}
@@ -189,19 +207,23 @@ func packSemanticUnits(units []string, chunkSize, overlap int) []TextChunk {
 // alone. Rune-level fallback units naturally preserve character overlap for
 // text that has no semantic boundaries.
 func semanticOverlapStart(units []string, start, end, chunkSize, overlap int) int {
+	return semanticOverlapStartBy(units, start, end, chunkSize, overlap, EstimateChunkTokens)
+}
+
+func semanticOverlapStartBy(units []string, start, end, chunkSize, overlap int, measure func(string) int) int {
 	if overlap <= 0 || end >= len(units) {
 		return end
 	}
 
-	nextUnitRunes := runeCount(units[end])
-	suffixRunes := 0
+	nextUnitTokens := measure(units[end])
+	suffixTokens := 0
 	candidate := end
 	for i := end - 1; i > start; i-- {
-		unitRunes := runeCount(units[i])
-		if suffixRunes+unitRunes > overlap || suffixRunes+unitRunes+nextUnitRunes > chunkSize {
+		unitTokens := measure(units[i])
+		if suffixTokens+unitTokens > overlap || suffixTokens+unitTokens+nextUnitTokens > chunkSize {
 			break
 		}
-		suffixRunes += unitRunes
+		suffixTokens += unitTokens
 		candidate = i
 	}
 	return candidate
@@ -209,4 +231,12 @@ func semanticOverlapStart(units []string, start, end, chunkSize, overlap int) in
 
 func runeCount(text string) int {
 	return len([]rune(text))
+}
+
+// EstimateChunkTokens is a deterministic provider-independent upper budget:
+// valid UTF-8 text cannot produce more byte-level tokenizer pieces than input
+// bytes. It deliberately overbudgets common Latin and CJK text; provider usage
+// remains authoritative for billing and evaluation.
+func EstimateChunkTokens(text string) int {
+	return len([]byte(text))
 }

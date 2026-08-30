@@ -66,6 +66,34 @@ func TestRetrievalPipelineNoRewriterUsesOriginalQueryOnce(t *testing.T) {
 	}
 }
 
+func TestRetrievalPipelineTimeScopeDoesNotExpandIndexNeighbors(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	if err := repos.VideoChunk.ReplaceTaskChunks(1, "embed", []model.VideoChunk{
+		{UserID: 7, TaskID: 1, ChunkIndex: 0, Content: "requested window", ContentHash: "h0", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "v0", Modality: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: `[{"source_type":"transcript","stable_id":"s0"}]`},
+		{UserID: 7, TaskID: 1, ChunkIndex: 1, Content: "outside requested window", ContentHash: "h1", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "v1", Modality: model.ChunkModalityTranscript, StartMS: 3000, EndMS: 4000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: `[{"source_type":"transcript","stable_id":"s1"}]`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repos.VideoChunk.ListByTaskID(7, 1, "embed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{{TaskID: 1, EvidenceID: "v0", ChunkID: stored[0].ID, ChunkIndex: 0, Content: "requested window"}}}}
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.EnableBM25 = false
+	pipeline := &RetrievalPipeline{repos: repos, retriever: retriever, expander: NewContextExpander(repos, 1, 1000), CandidateK: 5, Config: &cfg}
+	result, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskID: 1, Question: "at 00:01", EmbeddingModel: "embed", Embedding: &fakeEmbeddingClient{dim: 3}, TimeRanges: []TimestampRange{{StartMS: 1500, EndMS: 1500}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Citations) != 1 || result.Citations[0].Content != "requested window" || result.Citations[0].AnchorContent != "" {
+		t.Fatalf("time-scoped citations = %+v", result.Citations)
+	}
+	if len(retriever.requests) != 1 || retriever.requests[0].TopK < 50 {
+		t.Fatalf("retriever requests = %+v, want widened pre-filter candidate budget", retriever.requests)
+	}
+}
+
 func TestRetrievalPipelineMultiQueryCallsVectorAndKeywordSearchPerQuery(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{

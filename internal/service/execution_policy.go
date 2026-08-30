@@ -39,7 +39,7 @@ const (
 	IntentDirectQA       Intent = "direct_qa"       // 精确问答，开检索 + rerank
 	IntentTopicCompare   Intent = "topic_compare"   // 跨视频对比，Scope=collection
 	IntentSeriesLocate   Intent = "series_locate"   // 跨视频系列定位，Scope=collection
-	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位；当前显式降级为 direct_qa 参数，不伪造时间过滤
+	IntentTimelineLocate Intent = "timeline_locate" // 时间线定位；只过滤具有可信持久化范围的 chunk
 	IntentSmallTalk      Intent = "small_talk"      // 闲聊，关检索关 LLM 直答（占位，真分类器在 docs/architecture/retrieval.md）
 )
 
@@ -109,9 +109,8 @@ func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 		// 故集合档关 BM25、纯向量。recent 历史关断（KB member-safe，见 prepareRAGChat）。
 		return directQAPolicy(ScopeCollection)
 	case IntentTimelineLocate:
-		// 当前 video_chunks 没有可信时间范围，故不能执行或宣称时间过滤。
-		// 保持 direct_qa 的检索与 rerank 参数，通过 citation 的已有时间信息回答定位；
-		// 未来只有在事实源提供可靠范围后才新增过滤契约。
+		// 使用 direct_qa 的召回/rerank 预算，并由 prepare 层把无副作用解析出的
+		// 时间范围交给检索管线。unknown 历史 chunk 被排除，避免伪造时间命中。
 		return directQAPolicy(scope)
 	case IntentSmallTalk:
 		// 闲聊不烧检索 + 生成。占位分类器当前不会产出此 intent（见

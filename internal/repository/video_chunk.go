@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strings"
@@ -73,6 +74,36 @@ func (r *VideoChunkRepository) ListByTaskID(userID, taskID int64, embeddingModel
 		Order("chunk_index asc").
 		Find(&chunks).Error
 	return chunks, err
+}
+
+func (r *VideoChunkRepository) ListByIDs(userID int64, taskIDs []int64, embeddingModel string, chunkIDs []int64) ([]model.VideoChunk, error) {
+	if len(taskIDs) == 0 || len(chunkIDs) == 0 {
+		return []model.VideoChunk{}, nil
+	}
+	var chunks []model.VideoChunk
+	err := r.db.Where("user_id = ? AND task_id IN ? AND embedding_model = ? AND id IN ?", userID, taskIDs, embeddingModel, chunkIDs).
+		Order("task_id asc, chunk_index asc").Find(&chunks).Error
+	return chunks, err
+}
+
+func (r *VideoChunkRepository) FindByIdentity(userID, taskID, chunkID int64, evidenceID string) (*model.VideoChunk, error) {
+	query := r.db.Where("user_id = ? AND task_id = ?", userID, taskID)
+	switch {
+	case chunkID > 0 && strings.TrimSpace(evidenceID) != "":
+		query = query.Where("id = ? AND vector_id = ?", chunkID, strings.TrimSpace(evidenceID))
+	case chunkID > 0:
+		query = query.Where("id = ?", chunkID)
+	case strings.TrimSpace(evidenceID) != "":
+		query = query.Where("vector_id = ?", strings.TrimSpace(evidenceID))
+	default:
+		return nil, nil
+	}
+	var chunk model.VideoChunk
+	err := query.First(&chunk).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &chunk, err
 }
 
 func (r *VideoChunkRepository) ListByIndexRange(userID, taskID int64, embeddingModel string, start, end int) ([]model.VideoChunk, error) {

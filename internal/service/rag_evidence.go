@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"vid-lens/internal/model"
 )
 
 const defaultCitationEvidenceRunes = 160
@@ -512,6 +514,13 @@ func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedCh
 	filteredContexts := make([]RetrievedChunk, 0, len(contexts))
 	citations := make([]Citation, 0, len(contexts))
 	for _, chunk := range contexts {
+		chunk.Modality = normalizedChunkModality(chunk.Modality)
+		chunk.TimeRangeStatus = normalizedTimeRangeStatus(chunk.TimeRangeStatus, chunk.StartMS, chunk.EndMS)
+		chunk.SourceMappingStatus = normalizedMappingStatus(chunk.SourceMappingStatus)
+		if chunk.SourceMappingStatus != model.ChunkSourceMapped || chunk.TimeRangeStatus == model.ChunkTimeRangeUnknown {
+			chunk.TimeRangeStatus = model.ChunkTimeRangeUnknown
+			chunk.StartMS, chunk.EndMS = 0, 0
+		}
 		anchor := strings.TrimSpace(chunk.AnchorContent)
 		if anchor == "" {
 			anchor = strings.TrimSpace(chunk.Content)
@@ -538,6 +547,9 @@ func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedCh
 			RRFScore:    chunk.RRFScore,
 			RerankScore: chunk.RerankScore,
 			FinalRank:   chunk.FinalRank,
+			Modality:    chunk.Modality, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
+			TimeRangeStatus: chunk.TimeRangeStatus, SourceMappingStatus: chunk.SourceMappingStatus,
+			SourceRefs: append([]ChunkSourceRef(nil), chunk.SourceRefs...),
 		})
 	}
 	return filteredContexts, citations

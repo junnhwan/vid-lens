@@ -2,11 +2,11 @@
 
 本文描述 VidLens 从“ASR 文本问答”演进为“带可信时间轴的多模态视频理解”的当前基线、目标模块、实施顺序和验收口径。它只讨论工程实现，不把模型输出本身当作事实。
 
-状态：设计已确认，按可回滚切片逐步实施。基线提交为 `063efff`（2026-08-30）。重叠 ASR 时间窗、稳定 segment identity、毫秒级 window/core 元数据和确定性 transcript stitcher 已实现；RAG source mapping 与视觉分支解耦尚未实施。
+状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。重叠 ASR 时间窗、稳定 segment identity、毫秒级 window/core 元数据和确定性 transcript stitcher 继续作为上游事实；本次完成了语义切片、持久化 provenance、检索/引用/证据账本传递和旧索引重建识别。视觉分支解耦与在线视觉核验不在本次范围内。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
 
-## 结论
+## 历史改造结论
 
-项目已经具备多模态雏形：场景帧与定时帧抽取、Vision/OCR、`video_visual_frames`、视觉文本入 RAG，以及 evidence funnel 中的视觉证据确认。当前主要问题不是“缺少一个 Vision 接口”，而是 ASR、视觉和 RAG 尚未汇合成同一条可信时间轴：
+项目已经具备多模态雏形：场景帧与定时帧抽取、Vision/OCR、`video_visual_frames`、视觉文本入 RAG，以及 evidence funnel 中的视觉证据确认。当时主要问题不是“缺少一个 Vision 接口”，而是 ASR、视觉和 RAG 尚未汇合成同一条可信时间轴：
 
 - ASR 以固定 300 秒、无重叠的音频文件串行调用，结果用空行直接拼接；上游硬切会永久破坏句子边界。
 - RAG 的递归句子切片器能保护已有标点边界，却无法恢复 ASR 已截断的语义；ASR 分片间的空行还会被当作强边界。
@@ -16,7 +16,7 @@
 
 改造的首要目标不是增加更多 Agent 工具，而是建立一个深模块：调用方只提交视频任务，模块产出带时间范围、模态和 provenance 的证据块。ASR 边界修复、视觉采样、语义切片和索引投影都隐藏在该模块内部，RAG、Agent、引用和前端共同消费同一接口。
 
-## 当前实现基线
+## 历史实现基线
 
 ### 视频处理
 
@@ -131,7 +131,79 @@ type TimelineBuilder interface {
 
 FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内实现细节，不对 handler、Agent 或前端暴露。
 
-## 数据契约
+## 来源映射与时间感知 RAG 实施规格
+
+### 编码前现状核对
+
+以下结论来自 `38cd22f` 的实际实现，而不是目标设计推断：
+
+- `video_transcriptions.content` 是问答与索引读取的拼接文本；`video_transcription_chunks.content` 保存各 ASR window 的原始 observation。新 observation 已有 `segment_key`、window/core 毫秒范围，旧行可能只有数据库 ID、秒级范围或完全没有时间。
+- `internal/service/chunk_splitter.go` 已按强标点、从句标点、空白、字符硬切递归选择边界，并只复用完整语义单元；但 `TextChunk` 只有 `Index/Content`，上游来源在切片时全部丢失，`chunk_size` 与 `token_count` 实际仍按 rune 数处理。
+- `video_chunks` 只有内容、序号、embedding 与 vector identity，没有 modality、时间范围、映射状态或 source refs。pgvector/Milvus 投影也只返回检索元数据和内容。
+- 视觉帧拥有真实 `time_ms`、数据库 ID、caption method 和对象 key，但 `FormatOCRChunksForIndex` 只把这些信息格式化进文本标签，没有保存结构化来源。
+- 向量检索结果、BM25 结果、公开 `Citation` 均不携带模态、时间或 source refs；`Source` 仅表示 vector/keyword/hybrid 召回通道，不应继续兼任 modality。
+- Evidence Ledger 会尝试把 RAG `chunk_index`、`chunk_id` 或 evidence ID 解析回一个 RAG chunk index，再读取同序号 `video_transcription_chunks`。这把两个独立序号空间错误地当成同一身份，chunker 改变后会产生错误时间和错误文档定位。
+- `video_rag_indexes` 已保存 chunker strategy/version、参数、manifest hash 和 build version，但在线去重只按 `file_md5 + embedding_model + indexed` 判断，未校验当前 source-mapping/build 版本，旧索引可能错误地阻止重建。
+- PostgreSQL schema 由 GORM `AutoMigrate` 扩展；MySQL 只用于离线迁移。新增字段必须允许旧行保留并可读取，不能要求部署时同步全量重建。
+
+### 本次目标数据模型
+
+`video_chunks` 新增以下可空或带安全默认值的事实字段：
+
+- `modality`：`transcript | visual_ocr | visual_caption | unknown`。`unknown` 只用于旧行或无法证明来源的降级数据。
+- `start_ms` / `end_ms`：来源覆盖的毫秒范围。只有 `end_ms > start_ms` 且来源事实支持时才可对外宣称时间范围。
+- `time_range_status`：`exact | coarse | unknown`。ASR window/core 没有 utterance/word timestamp 时只能是 `coarse`；视觉关键帧的 observation timestamp 可表示为精确的点范围；旧 `0/0` 保持 `unknown`。
+- `source_mapping_status`：`mapped | partial | unmapped`。它描述内容到 source refs 的映射完整性，不能由“有时间”间接推断。
+- `source_refs`：稳定 JSON 数组。每项至少包含 source type、stable observation ID、可用的 `segment_key`、事实表行 ID、该 observation 的时间范围和时间状态。ASR 优先以 `segment_key` 为 stable ID；没有 segment key 的历史 observation 只能使用持久化行 ID，且不得因此补造时间。
+- `chunker_strategy` / `chunker_version`：写入 chunk 行本身，使关系事实源可独立审计，不必只依赖索引状态行。
+
+`video_rag_indexes` 的 build/source-mapping version 与 chunk manifest 一并升级。manifest 必须覆盖 modality、时间状态、映射状态、source refs 和 chunker provenance；这些字段任一变化都应改变 manifest。在线内容去重只有在 build version、chunker version 和 source-mapping version 与当前实现一致时才可跳过索引。
+
+向量库继续只做可重建投影。检索命中后以 `chunk_id/evidence_id + user/task/model scope` 从 PostgreSQL 回填 provenance；不能信任旧向量 payload 伪装成来源事实。这样 pgvector 和兼容 Milvus 不需要在同一次部署中同步迁移 provenance schema。
+
+### 切片与来源映射算法
+
+1. 从已完成 ASR observation 按持久化顺序重放拼接：只有相邻 window 元数据证明存在 overlap 时才使用确定性 stitcher，否则使用旧的安全连接方式。
+2. 重放结果必须与 `video_transcriptions.content` 一致；不一致时整份 transcript 仍可索引，但标记 `unmapped + unknown`，不得猜测字符属于哪个 ASR 分片。
+3. stitcher 同时返回每个保留输出区间对应的原始 observation。被 overlap 去重的右侧前缀不再重复占有输出文本；保留下来的字符仍能回到至少一个真实 observation。
+4. 在带 source span 的文本上依次按段落/换行、完整句子、从句、空白选择边界；只有单个语义单元本身超过预算时才硬切。overlap 只复用完整单元，并合并这些单元的 source refs。
+5. `chunk_size`/`chunk_overlap` 在新 chunker version 中解释为保守 token 预算，不再把 rune count 写成 token count。实现使用确定、可测试的本地上界估算，避免依赖 embedding provider 的私有 tokenizer；任何输出 chunk 都不得超过配置预算，超长单元必须继续细分。
+6. transcript 与单个视觉 observation 不跨模态混装。视觉 OCR/caption chunk 直接引用 `video_visual_frames` 的稳定行 ID、真实 `time_ms`、caption method 和对象定位。
+
+### 检索、引用与 Evidence Ledger 契约
+
+- `RetrievedChunk` 和公开 `Citation` 传递 `modality`、`start_ms/end_ms`、`time_range_status`、`source_mapping_status` 和 `source_refs`。现有 `Source` 字段继续只表示召回通道。
+- BM25 从关系行直接填充 provenance；向量命中必须通过关系行批量回填。回填失败时结果只能降级为 `unknown/unmapped`，不能沿用 chunk index 猜来源。
+- 邻接上下文仍可扩大给 LLM，但公开 citation 始终指向 anchor chunk，并只公开 anchor 的时间和 source refs；不能把邻居的范围冒充为 anchor 范围。
+- Evidence Ledger 仅通过 citation 的 `chunk_id/evidence_id` 定位真实 `video_chunks` 行，再消费该行持久化的 source refs 和时间范围。删除 RAG index → ASR index 的所有映射逻辑，也不再用重复文本或 chunk index 选择一个 ASR observation。
+- 映射完整且时间可重放的 evidence 才可形成 `known` ledger range；历史 `unmapped/unknown` evidence 仍可作为稳定文本引用，但 Claim 必须保持 `uncertain`，不能升级为 `verified`。
+
+### 历史数据兼容与重建
+
+- 新 schema 对旧 `video_chunks` 使用 `modality=unknown`、`time_range_status=unknown`、`source_mapping_status=unmapped`、空 source refs。读取旧行不会失败，也不会出现伪造的 `0ms` 精确引用。
+- 已有 transcription observation 若能重放出完全一致的 transcript，可在显式重建时生成可靠 source refs；只有秒级持久化范围时标记 `coarse`，`0/0` 仍为 `unknown`。
+- 旧 RAG index 的 build/source-mapping version 不满足当前契约时，状态接口和去重判断应把它识别为需要重建；不会在服务启动时自动删除或重写历史向量。
+- `rag-reindex` 只重建已有关系 chunk 的向量投影，不能凭空补 provenance。要升级旧的语义切片和来源映射，必须重新执行 task RAG index build；两种操作在文档和状态中保持区分。
+- 回滚只切回旧读取行为或停止新 build；新增关系字段和原始 ASR/视觉 observation 保留，不做破坏性降级。
+
+### 本次验收标准
+
+- 中英文句子、段落和长从句测试证明：有可用边界时 chunk 不在句中截断；超长单元严格受 token 预算约束；overlap 不制造只含重复内容的尾块。
+- 索引集成测试证明：一个跨多个 ASR observation 的 RAG chunk 保存全部真实 source refs，重建后即使 chunk 数量或 index 改变，来源 stable ID 与时间范围不变。
+- 视觉索引测试证明：OCR 与 caption chunk 的 modality、frame stable ID 和 `time_ms` 被结构化持久化，而不是只存在于显示文本。
+- 存储测试覆盖新增字段、JSON source refs、时间范围查询/回填以及旧默认值读取。
+- 检索与 citation 测试覆盖向量和 BM25 provenance 传播，并证明 `Source` 与 modality 不混用。
+- Evidence Ledger 测试证明不再按 RAG chunk index 查 ASR；mapped citation 使用真实来源，unmapped 历史 citation 保持 unknown/uncertain。
+- index manifest/version 测试证明 provenance 或 chunker 版本改变会触发 rebuild 识别，旧 indexed 行不会被错误复用。
+- 不修改 `frontend/`；完成后运行 `go test ./...`、`go vet ./...` 和四个规定的 Go build 目标。
+
+### 实施结果
+
+- 新 RAG chunker 以段落/完整句子/从句/空白为递归边界，只对仍超预算的单元做安全硬切；overlap 只复用完整语义单元。RAG 路径的 `token_count` 使用 UTF-8 byte-level 保守上界，与展示引用的历史字符预算分离。
+- `video_chunks` 由 GORM 迁移增加 modality、毫秒范围、时间/映射状态、source refs 和 chunker provenance；旧行的数据库默认值为 `unknown/unmapped/[]`。
+- ASR 索引构建只在 observation 重放结果与权威 transcript 完全一致时写入 stable refs；不一致就整份降级为 `unmapped/unknown`。视觉 chunk 则直接保留 frame ID、`time_ms`、object key 和 caption method。
+- 向量命中以关系 `chunk_id` 回填 PostgreSQL provenance，BM25 直接携带同一关系事实；`timeline_locate` 只保留真实范围重叠的 mapped chunk。Citation 和 Evidence Ledger 不再从 RAG `chunk_index` 推导 ASR 身份。
+- 索引 build version 升级为 `2`，source mapping version 为 `source-map-v1`，chunker version 为 `recursive-sentence-source-v2`。manifest 纳入来源字段，状态接口将旧 indexed 行显式返回 `needs_rebuild`，内容去重也不再复用旧版本。
 
 ### 转录分片
 

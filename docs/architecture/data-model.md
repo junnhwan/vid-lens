@@ -22,7 +22,7 @@ Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidenc
 
 ## 检索数据
 
-转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容的主要事实来源。默认向量后端是 PostgreSQL 的 pgvector，向量投影写入配置的向量表；Milvus 仍保留兼容适配，但只有显式配置时才使用。
+转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容与来源映射的主要事实来源。每行保存 modality、毫秒范围、`exact/coarse/unknown` 时间状态、`mapped/partial/unmapped` 映射状态、稳定 source refs 和 chunker provenance。ASR source ref 优先使用 `segment_key`，视觉 source ref 使用稳定 frame observation ID；`chunk_index` 只表示展示顺序，不能映射 ASR identity。默认向量后端是 PostgreSQL 的 pgvector，向量投影写入配置的向量表；Milvus 仍保留兼容适配，但只有显式配置时才使用。检索命中必须从关系行回填 provenance，旧行安全降级为 `unknown/unmapped`。
 
 向量索引属于可重建投影，用于相似度检索和对账，不能替代 `video_chunks` 等关系数据中的源事实。对应的模型定义位于 [`internal/model/`](../../internal/model/)，向量适配器位于 [`internal/vector/`](../../internal/vector/)。
 

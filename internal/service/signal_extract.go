@@ -8,8 +8,8 @@ import (
 // docs/architecture/retrieval.md: 无副作用 Signal 提取（指代消解 + 检索过滤）。
 //
 // Signal = 纯正则从问题里提取的结构化线索（CONTEXT.md）：时间戳（毫秒区间）、
-// 实体、章节、比较标志。实体和句式可参与分类；时间戳目前只作为可审计的解析结果，
-// 尚未接入 chunk 时间范围过滤（见 docs/architecture/retrieval.md）。
+// 实体、章节、比较标志。实体和句式可参与分类；时间戳在 timeline_locate 下用于
+// 过滤具有可信持久化范围的 chunk（见 docs/architecture/retrieval.md）。
 //
 // 与 rag_rewrite LLM 改写边界（见 docs/architecture/retrieval.md，两层正交）：
 //   - Signal 无副作用：纯正则，不调 LLM、不编造，先于 rewrite 提取结构化线索。
@@ -30,8 +30,8 @@ type TimestampRange struct {
 
 // Signals 是一次提问的无副作用结构化线索。
 type Signals struct {
-	// Timestamps 是问题里提到的所有时间戳区间（毫秒）。当前检索层不消费该字段；
-	// 它为未来拥有可信 chunk 时间范围后的过滤契约保留。
+	// Timestamps 是问题里提到的所有时间戳区间（毫秒）。只有来源映射保存了可信
+	// 范围的 chunk 才能匹配；unknown 历史数据不会被当作命中。
 	Timestamps []TimestampRange
 	// HasCompare 命中比较句式（"对比"/"比较"/"异同"/"区别"），辅助 topic_compare intent。
 	HasCompare bool
@@ -47,7 +47,7 @@ type Signals struct {
 // ExtractSignals 从问题文本无副作用提取结构化线索（docs/architecture/retrieval.md）。
 //
 // 纯正则，零 LLM 调用，零编造。返回的 Signals 用于 RuleIntentClassifier 的 signal
-// 模式维度；timeline_locate 当前只分类、不执行时间过滤。
+// 模式维度；timeline_locate 会把确定解析出的范围交给检索管线。
 func ExtractSignals(question string) Signals {
 	q := strings.TrimSpace(question)
 	return Signals{

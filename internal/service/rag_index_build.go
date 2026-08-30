@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	ragIndexBuildVersion = 1
-	maxRAGIndexErrorLen  = 500
+	maxRAGIndexErrorLen = 500
 )
 
 type ragIndexBuild struct {
@@ -118,10 +117,17 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 		return nil, fmt.Errorf("向量数据库未启用")
 	}
 
-	chunks := SplitTextIntoChunks(transcription.Content, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
+	var transcriptionRows []model.VideoTranscriptionChunk
+	if s.repos.TranscriptionChunk != nil {
+		transcriptionRows, err = s.repos.TranscriptionChunk.ListByTaskID(task.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	chunks := buildTranscriptIndexChunks(transcription.Content, transcriptionRows, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
 	if s.repos.VisualFrame != nil {
 		if frames, err := s.repos.VisualFrame.ListCompletedWithText(task.ID); err == nil && len(frames) > 0 {
-			chunks = append(chunks, FormatOCRChunksForIndex(frames)...)
+			chunks = append(chunks, formatOCRChunksForIndex(frames, s.cfg.ChunkSize)...)
 		}
 	}
 	if len(chunks) == 0 {
@@ -173,22 +179,23 @@ func (b *ragIndexBuild) complete(chunkCount int, manifest string) error {
 
 func (b *ragIndexBuild) writeStatus(status string, chunkCount int, manifest, lastError string, finishedAt *time.Time) error {
 	return b.service.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
-		UserID:              b.userID,
-		TaskID:              b.taskID,
-		FileMD5:             b.fileMD5,
-		EmbeddingModel:      b.modelName,
-		EmbeddingDim:        b.expectedDim,
-		Status:              status,
-		ChunkCount:          chunkCount,
-		ChunkerStrategy:     b.service.cfg.ChunkerStrategy,
-		ChunkerVersion:      b.service.cfg.ChunkerVersion,
-		ChunkSize:           b.service.cfg.ChunkSize,
-		ChunkOverlap:        b.service.cfg.ChunkOverlap,
-		ChunkManifestSHA256: manifest,
-		LastError:           lastError,
-		BuildVersion:        ragIndexBuildVersion,
-		StartedAt:           &b.startedAt,
-		FinishedAt:          finishedAt,
+		UserID:               b.userID,
+		TaskID:               b.taskID,
+		FileMD5:              b.fileMD5,
+		EmbeddingModel:       b.modelName,
+		EmbeddingDim:         b.expectedDim,
+		Status:               status,
+		ChunkCount:           chunkCount,
+		ChunkerStrategy:      b.service.cfg.ChunkerStrategy,
+		ChunkerVersion:       b.service.cfg.ChunkerVersion,
+		ChunkSize:            b.service.cfg.ChunkSize,
+		ChunkOverlap:         b.service.cfg.ChunkOverlap,
+		ChunkManifestSHA256:  manifest,
+		SourceMappingVersion: model.CurrentRAGSourceMappingVersion,
+		LastError:            lastError,
+		BuildVersion:         model.CurrentRAGIndexBuildVersion,
+		StartedAt:            &b.startedAt,
+		FinishedAt:           finishedAt,
 	})
 }
 
@@ -219,16 +226,23 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 
 		hash := md5Hex(chunk.Content)
 		vectorID := ChunkEvidenceID(b.taskID, chunk.Index, hash)
+		sourceRefs, err := MarshalChunkSourceRefs(chunk.SourceRefs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode chunk source refs: %w", err)
+		}
 		dbChunks = append(dbChunks, model.VideoChunk{
 			UserID:         b.userID,
 			TaskID:         b.taskID,
 			ChunkIndex:     chunk.Index,
 			Content:        chunk.Content,
 			ContentHash:    hash,
-			TokenCount:     len([]rune(chunk.Content)),
+			TokenCount:     chunk.TokenCount,
 			EmbeddingModel: b.modelName,
 			EmbeddingDim:   b.expectedDim,
 			VectorID:       vectorID,
+			Modality:       chunk.Modality, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
+			TimeRangeStatus: chunk.TimeRangeStatus, SourceMappingStatus: chunk.SourceMappingStatus,
+			SourceRefs: sourceRefs, ChunkerStrategy: b.service.cfg.ChunkerStrategy, ChunkerVersion: b.service.cfg.ChunkerVersion,
 		})
 		vectors = append(vectors, RAGVector{
 			VectorID:       vectorID,

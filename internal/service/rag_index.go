@@ -18,7 +18,7 @@ const (
 	FixedWindowChunkerVersion  = "split-text-v1"
 
 	ChunkerStrategyRecursiveSentence = "recursive_sentence"
-	RecursiveSentenceChunkerVersion  = "recursive-sentence-v1"
+	RecursiveSentenceChunkerVersion  = model.CurrentRAGChunkerVersion
 )
 
 type RAGIndexConfig struct {
@@ -69,6 +69,7 @@ type RAGIndexResult struct {
 	Chunks         int    `json:"chunks"`
 	EmbeddingModel string `json:"embedding_model"`
 	LastError      string `json:"last_error"`
+	NeedsRebuild   bool   `json:"needs_rebuild,omitempty"`
 }
 
 func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cfg RAGIndexConfig) *RAGIndexService {
@@ -124,6 +125,9 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 		return nil, err
 	}
 	if index != nil {
+		if index.Status == model.RAGIndexStatusIndexed && (index.BuildVersion != model.CurrentRAGIndexBuildVersion || index.ChunkerVersion != s.cfg.ChunkerVersion || index.SourceMappingVersion != model.CurrentRAGSourceMappingVersion) {
+			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true}, nil
+		}
 		return &RAGIndexResult{
 			TaskID:         taskID,
 			Status:         index.Status,

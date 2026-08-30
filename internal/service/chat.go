@@ -42,50 +42,63 @@ type RetrievalRequest struct {
 	EmbeddingModel string
 	TopK           int
 	MinScore       float32
+	TimeRanges     []TimestampRange
 }
 
 type RetrievedChunk struct {
-	TaskID                 int64    `json:"task_id"`
-	VideoTitle             string   `json:"video_title,omitempty"`
-	EvidenceID             string   `json:"evidence_id"`
-	ChunkID                int64    `json:"chunk_id"`
-	ChunkIndex             int      `json:"chunk_index"`
-	Score                  float32  `json:"score"`
-	Content                string   `json:"content"`
-	AnchorContent          string   `json:"anchor_content,omitempty"`
-	Source                 string   `json:"source,omitempty"`
-	VectorRank             int      `json:"vector_rank,omitempty"`
-	KeywordRank            int      `json:"keyword_rank,omitempty"`
-	RRFScore               float64  `json:"rrf_score,omitempty"`
-	ExpandedFromChunkIndex int      `json:"expanded_from_chunk_index,omitempty"`
-	ExpandedWindowStart    int      `json:"expanded_window_start,omitempty"`
-	ExpandedWindowEnd      int      `json:"expanded_window_end,omitempty"`
-	WindowTruncated        bool     `json:"window_truncated,omitempty"`
-	RerankScore            float64  `json:"rerank_score,omitempty"`
-	FinalRank              int      `json:"final_rank,omitempty"`
-	MatchedQuery           string   `json:"matched_query,omitempty"`
-	CrossQueryRank         int      `json:"cross_query_rank,omitempty"`
-	Fallbacks              []string `json:"fallbacks,omitempty"`
+	TaskID                 int64            `json:"task_id"`
+	VideoTitle             string           `json:"video_title,omitempty"`
+	EvidenceID             string           `json:"evidence_id"`
+	ChunkID                int64            `json:"chunk_id"`
+	ChunkIndex             int              `json:"chunk_index"`
+	Score                  float32          `json:"score"`
+	Content                string           `json:"content"`
+	AnchorContent          string           `json:"anchor_content,omitempty"`
+	Source                 string           `json:"source,omitempty"`
+	VectorRank             int              `json:"vector_rank,omitempty"`
+	KeywordRank            int              `json:"keyword_rank,omitempty"`
+	RRFScore               float64          `json:"rrf_score,omitempty"`
+	ExpandedFromChunkIndex int              `json:"expanded_from_chunk_index,omitempty"`
+	ExpandedWindowStart    int              `json:"expanded_window_start,omitempty"`
+	ExpandedWindowEnd      int              `json:"expanded_window_end,omitempty"`
+	WindowTruncated        bool             `json:"window_truncated,omitempty"`
+	RerankScore            float64          `json:"rerank_score,omitempty"`
+	FinalRank              int              `json:"final_rank,omitempty"`
+	MatchedQuery           string           `json:"matched_query,omitempty"`
+	CrossQueryRank         int              `json:"cross_query_rank,omitempty"`
+	Fallbacks              []string         `json:"fallbacks,omitempty"`
+	Modality               string           `json:"modality"`
+	StartMS                int64            `json:"start_ms"`
+	EndMS                  int64            `json:"end_ms"`
+	TimeRangeStatus        string           `json:"time_range_status"`
+	SourceMappingStatus    string           `json:"source_mapping_status"`
+	SourceRefs             []ChunkSourceRef `json:"source_refs,omitempty"`
 }
 
 // Citation is the public, persisted evidence view. It intentionally excludes
 // expanded LLM context and anchor internals so API/SSE/snapshots cannot expose
 // the large retrieval window by accident.
 type Citation struct {
-	TaskID      int64   `json:"task_id"`
-	VideoTitle  string  `json:"video_title,omitempty"`
-	CitationID  string  `json:"citation_id"`
-	EvidenceID  string  `json:"evidence_id"`
-	ChunkID     int64   `json:"chunk_id"`
-	ChunkIndex  int     `json:"chunk_index"`
-	Score       float32 `json:"score"`
-	Content     string  `json:"content"`
-	Source      string  `json:"source,omitempty"`
-	VectorRank  int     `json:"vector_rank,omitempty"`
-	KeywordRank int     `json:"keyword_rank,omitempty"`
-	RRFScore    float64 `json:"rrf_score,omitempty"`
-	RerankScore float64 `json:"rerank_score,omitempty"`
-	FinalRank   int     `json:"final_rank,omitempty"`
+	TaskID              int64            `json:"task_id"`
+	VideoTitle          string           `json:"video_title,omitempty"`
+	CitationID          string           `json:"citation_id"`
+	EvidenceID          string           `json:"evidence_id"`
+	ChunkID             int64            `json:"chunk_id"`
+	ChunkIndex          int              `json:"chunk_index"`
+	Score               float32          `json:"score"`
+	Content             string           `json:"content"`
+	Source              string           `json:"source,omitempty"`
+	VectorRank          int              `json:"vector_rank,omitempty"`
+	KeywordRank         int              `json:"keyword_rank,omitempty"`
+	RRFScore            float64          `json:"rrf_score,omitempty"`
+	RerankScore         float64          `json:"rerank_score,omitempty"`
+	FinalRank           int              `json:"final_rank,omitempty"`
+	Modality            string           `json:"modality"`
+	StartMS             int64            `json:"start_ms"`
+	EndMS               int64            `json:"end_ms"`
+	TimeRangeStatus     string           `json:"time_range_status"`
+	SourceMappingStatus string           `json:"source_mapping_status"`
+	SourceRefs          []ChunkSourceRef `json:"source_refs,omitempty"`
 }
 
 type RAGRetriever interface {

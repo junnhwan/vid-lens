@@ -62,6 +62,8 @@ type AgentEvidence struct {
 	DocumentID           string    `gorm:"type:varchar(100);not null;index" json:"document_id"`
 	StartSecond          int64     `gorm:"not null;default:0;check:chk_agent_evidence_start,start_second >= 0" json:"start_second"`
 	EndSecond            int64     `gorm:"not null;default:0;check:chk_agent_evidence_range,end_second >= start_second" json:"end_second"`
+	StartMS              int64     `gorm:"not null;default:0;index" json:"start_ms"`
+	EndMS                int64     `gorm:"not null;default:0;index" json:"end_ms"`
 	TimeRangeStatus      string    `gorm:"type:varchar(20);not null;check:chk_agent_evidence_time_status,time_range_status IN ('known','unknown')" json:"time_range_status"`
 	QuoteText            string    `gorm:"type:text;not null" json:"quote_text"`
 	ContentHash          string    `gorm:"type:char(64);not null;index" json:"content_hash"`

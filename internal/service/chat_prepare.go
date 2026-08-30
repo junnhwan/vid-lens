@@ -92,12 +92,6 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		// （分类器对 KB/strict 不产出 overview/small_talk 关检索）。防御性兜底。
 		return nil, errNoRetrievedContext
 	}
-	// timeline_locate 当前是显式降级：Signal 可以识别问题中的时间表达，但现有
-	// video_chunks 没有可信的时间范围字段，RetrievalPipelineRequest 也不接受时间过滤。
-	// 因此它按 direct_qa 的相同参数检索，并让已有 citation 时间信息承担最终定位。
-	// 在不修改 schema 的前提下不得宣称或伪造服务端时间范围过滤；公开契约见
-	// docs/architecture/retrieval.md 的“时间线定位”小节。
-
 	// 散落判定 1（topK 默认值 + topK>10→10 上限）由 ExecutionPolicy.ClampTopK
 	// 统一表达（docs/architecture/retrieval.md 待评测指标 A段）。
 	topK = policy.ClampTopK(topK)
@@ -112,6 +106,10 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	// 散落判定 3（KB → 强制 EnableVector=true/EnableBM25=false）由
 	// policy.Scope==collection 统一表达；rerank 开关由 policy.Rerank 映射。
 	pipeline.applyPolicy(policy)
+	var timeRanges []TimestampRange
+	if intent == IntentTimelineLocate {
+		timeRanges = ExtractSignals(question).Timestamps
+	}
 
 	retrieval, err := pipeline.Retrieve(ctx, RetrievalPipelineRequest{
 		UserID:         userID,
@@ -121,6 +119,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		TopK:           topK,
 		EmbeddingModel: profile.EmbeddingModel,
 		Embedding:      embedding,
+		TimeRanges:     timeRanges,
 	})
 	if err != nil {
 		return nil, err

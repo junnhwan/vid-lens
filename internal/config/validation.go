@@ -207,8 +207,8 @@ func (c *Config) ValidateRAG() error {
 	}
 
 	var problems validationErrors
-	if c.RAG.ChunkSize <= 0 {
-		problems.add("rag.chunk_size", "必须为正数")
+	if c.RAG.ChunkSize < 4 {
+		problems.add("rag.chunk_size", "必须至少为 4，以容纳一个完整 UTF-8 字符")
 	}
 	if c.RAG.ChunkOverlap < 0 {
 		problems.add("rag.chunk_overlap", "不能为负数")

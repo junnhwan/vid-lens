@@ -28,19 +28,30 @@ type RAGVectorManifestEntry struct {
 // Auto-increment database IDs and timestamps are deliberately excluded.
 func ComputeChunkManifestSHA256(chunks []model.VideoChunk) (string, error) {
 	type entry struct {
-		UserID         int64  `json:"user_id"`
-		TaskID         int64  `json:"task_id"`
-		EmbeddingModel string `json:"embedding_model"`
-		ChunkIndex     int    `json:"chunk_index"`
-		VectorID       string `json:"vector_id"`
-		ContentHash    string `json:"content_hash"`
-		Content        string `json:"content"`
+		UserID              int64  `json:"user_id"`
+		TaskID              int64  `json:"task_id"`
+		EmbeddingModel      string `json:"embedding_model"`
+		ChunkIndex          int    `json:"chunk_index"`
+		VectorID            string `json:"vector_id"`
+		ContentHash         string `json:"content_hash"`
+		Content             string `json:"content"`
+		Modality            string `json:"modality"`
+		StartMS             int64  `json:"start_ms"`
+		EndMS               int64  `json:"end_ms"`
+		TimeRangeStatus     string `json:"time_range_status"`
+		SourceMappingStatus string `json:"source_mapping_status"`
+		SourceRefs          string `json:"source_refs"`
+		ChunkerStrategy     string `json:"chunker_strategy"`
+		ChunkerVersion      string `json:"chunker_version"`
 	}
 	manifest := make([]entry, 0, len(chunks))
 	for _, chunk := range chunks {
 		manifest = append(manifest, entry{
 			UserID: chunk.UserID, TaskID: chunk.TaskID, EmbeddingModel: chunk.EmbeddingModel,
 			ChunkIndex: chunk.ChunkIndex, VectorID: chunk.VectorID, ContentHash: chunk.ContentHash, Content: chunk.Content,
+			Modality: chunk.Modality, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
+			TimeRangeStatus: chunk.TimeRangeStatus, SourceMappingStatus: chunk.SourceMappingStatus,
+			SourceRefs: chunk.SourceRefs, ChunkerStrategy: chunk.ChunkerStrategy, ChunkerVersion: chunk.ChunkerVersion,
 		})
 	}
 	sort.Slice(manifest, func(i, j int) bool {

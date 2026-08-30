@@ -22,32 +22,49 @@ type Boundary struct {
 }
 
 type StitchResult struct {
-	Content    string
-	Boundaries []Boundary
+	Content       string
+	Boundaries    []Boundary
+	Contributions []Contribution
+}
+
+// Contribution identifies the exact text retained from one input observation.
+// Content includes any deterministic separator inserted while joining that
+// observation, so concatenating contributions reproduces StitchResult.Content.
+type Contribution struct {
+	PartIndex int
+	Content   string
 }
 
 // Stitch removes normalized suffix/prefix duplication created by overlapping
 // audio windows. Punctuation and whitespace do not participate in matching,
 // but original text is preserved in the output.
 func Stitch(parts []string) StitchResult {
-	nonEmpty := make([]string, 0, len(parts))
-	for _, part := range parts {
+	type indexedPart struct {
+		index   int
+		content string
+	}
+	nonEmpty := make([]indexedPart, 0, len(parts))
+	for index, part := range parts {
 		if part = strings.TrimSpace(part); part != "" {
-			nonEmpty = append(nonEmpty, part)
+			nonEmpty = append(nonEmpty, indexedPart{index: index, content: part})
 		}
 	}
 	if len(nonEmpty) == 0 {
 		return StitchResult{}
 	}
 
-	result := StitchResult{Content: nonEmpty[0], Boundaries: make([]Boundary, 0, len(nonEmpty)-1)}
+	result := StitchResult{Content: nonEmpty[0].content, Boundaries: make([]Boundary, 0, len(nonEmpty)-1), Contributions: []Contribution{{PartIndex: nonEmpty[0].index, Content: nonEmpty[0].content}}}
 	for i := 1; i < len(nonEmpty); i++ {
-		merged, matchRunes, prefixRunes := stitchPair(result.Content, nonEmpty[i])
+		before := result.Content
+		merged, matchRunes, prefixRunes := stitchPair(before, nonEmpty[i].content)
 		method := "append"
 		if matchRunes > 0 {
 			method = "exact_normalized_overlap"
 		}
 		result.Content = merged
+		if appended := strings.TrimPrefix(merged, before); appended != "" {
+			result.Contributions = append(result.Contributions, Contribution{PartIndex: nonEmpty[i].index, Content: appended})
+		}
 		result.Boundaries = append(result.Boundaries, Boundary{
 			LeftPart: i - 1, RightPart: i, Method: method,
 			MatchRunes: matchRunes, PrefixRunes: prefixRunes,

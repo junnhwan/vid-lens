@@ -72,6 +72,7 @@ type RetrievalPipelineRequest struct {
 	TopK           int
 	EmbeddingModel string
 	Embedding      ai.EmbeddingClient
+	TimeRanges     []TimestampRange
 }
 
 type RetrievalPipelineResult struct {
@@ -144,7 +145,11 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			if err != nil {
 				return RetrievalPipelineResult{}, err
 			}
-			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: candidateK, MinScore: minScore}
+			searchK := candidateK
+			if len(req.TimeRanges) > 0 && searchK < 50 {
+				searchK = 50
+			}
+			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: searchK, MinScore: minScore, TimeRanges: append([]TimestampRange(nil), req.TimeRanges...)}
 			if len(taskIDs) == 1 {
 				retrievalReq.TaskID = taskIDs[0]
 			}
@@ -170,6 +175,14 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 				return RetrievalPipelineResult{}, err
 			}
 		}
+		if err := p.hydrateChunkProvenance(req.UserID, taskIDs, req.EmbeddingModel, vectorChunks); err != nil {
+			return RetrievalPipelineResult{}, err
+		}
+		if err := p.hydrateChunkProvenance(req.UserID, taskIDs, req.EmbeddingModel, keywordChunks); err != nil {
+			return RetrievalPipelineResult{}, err
+		}
+		vectorChunks = filterChunksByTimeRanges(vectorChunks, req.TimeRanges)
+		keywordChunks = filterChunksByTimeRanges(keywordChunks, req.TimeRanges)
 		fused := FuseRetrievedChunks(vectorChunks, keywordChunks, candidateK, rrfK)
 		for i := range fused {
 			fused[i].MatchedQuery = query
@@ -179,7 +192,10 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 
 	citations := fuseCrossQueryChunks(perQuery, candidateK, rrfK)
 	var err error
-	if p.expander != nil {
+	// A time-scoped request must not silently widen the LLM context with
+	// index-adjacent chunks outside the requested interval. Public provenance
+	// belongs to the anchor, and temporal expansion needs a separate contract.
+	if p.expander != nil && len(req.TimeRanges) == 0 {
 		citations, err = p.expander.Expand(ctx, req.UserID, 0, req.EmbeddingModel, citations)
 		if err != nil {
 			return RetrievalPipelineResult{}, err
@@ -214,6 +230,31 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		Rewrite:   rewrite,
 		Trace:     trace,
 	}, nil
+}
+
+func filterChunksByTimeRanges(chunks []RetrievedChunk, ranges []TimestampRange) []RetrievedChunk {
+	if len(ranges) == 0 {
+		return chunks
+	}
+	filtered := make([]RetrievedChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.TimeRangeStatus == model.ChunkTimeRangeUnknown || chunk.EndMS <= chunk.StartMS {
+			continue
+		}
+		for _, timeRange := range ranges {
+			matches := false
+			if timeRange.StartMS == timeRange.EndMS {
+				matches = chunk.StartMS <= timeRange.StartMS && timeRange.StartMS < chunk.EndMS
+			} else {
+				matches = chunk.StartMS < timeRange.EndMS && chunk.EndMS > timeRange.StartMS
+			}
+			if matches {
+				filtered = append(filtered, chunk)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 // applyPolicy 把 ExecutionPolicy（docs/architecture/retrieval.md A段）映射到现有 RAGRetrievalConfig 字段。
@@ -307,8 +348,77 @@ func (p *RetrievalPipeline) keywordChunks(userID, taskID int64, embeddingModel, 
 			Source:      RetrievalSourceKeyword,
 			KeywordRank: result.Rank,
 		})
+		applyChunkProvenance(&chunks[len(chunks)-1], result.Chunk)
 	}
 	return chunks, nil
+}
+
+func (p *RetrievalPipeline) hydrateChunkProvenance(userID int64, taskIDs []int64, embeddingModel string, chunks []RetrievedChunk) error {
+	if len(chunks) == 0 || p == nil || p.repos == nil || p.repos.VideoChunk == nil {
+		return nil
+	}
+	ids := make([]int64, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.ChunkID > 0 {
+			ids = append(ids, chunk.ChunkID)
+		}
+	}
+	stored, err := p.repos.VideoChunk.ListByIDs(userID, taskIDs, embeddingModel, ids)
+	if err != nil {
+		return err
+	}
+	byID := make(map[int64]model.VideoChunk, len(stored))
+	for _, chunk := range stored {
+		byID[chunk.ID] = chunk
+	}
+	for i := range chunks {
+		if storedChunk, ok := byID[chunks[i].ChunkID]; ok && (chunks[i].EvidenceID == "" || storedChunk.VectorID == chunks[i].EvidenceID) {
+			applyChunkProvenance(&chunks[i], storedChunk)
+		} else {
+			chunks[i].Modality, chunks[i].TimeRangeStatus, chunks[i].SourceMappingStatus = model.ChunkModalityUnknown, model.ChunkTimeRangeUnknown, model.ChunkSourceUnmapped
+		}
+	}
+	return nil
+}
+
+func applyChunkProvenance(target *RetrievedChunk, chunk model.VideoChunk) {
+	if target == nil {
+		return
+	}
+	target.Modality = normalizedChunkModality(chunk.Modality)
+	target.StartMS, target.EndMS = chunk.StartMS, chunk.EndMS
+	target.SourceMappingStatus = normalizedMappingStatus(chunk.SourceMappingStatus)
+	target.TimeRangeStatus = normalizedTimeRangeStatus(chunk.TimeRangeStatus, chunk.StartMS, chunk.EndMS)
+	target.SourceRefs = sourceRefsForModelChunk(chunk)
+	if target.SourceMappingStatus != model.ChunkSourceMapped || target.TimeRangeStatus == model.ChunkTimeRangeUnknown {
+		target.TimeRangeStatus = model.ChunkTimeRangeUnknown
+		target.StartMS, target.EndMS = 0, 0
+	}
+}
+
+func normalizedChunkModality(value string) string {
+	switch value {
+	case model.ChunkModalityTranscript, model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption:
+		return value
+	}
+	return model.ChunkModalityUnknown
+}
+
+func normalizedTimeRangeStatus(value string, start, end int64) string {
+	if end <= start || start < 0 {
+		return model.ChunkTimeRangeUnknown
+	}
+	if value == model.ChunkTimeRangeExact || value == model.ChunkTimeRangeCoarse {
+		return value
+	}
+	return model.ChunkTimeRangeUnknown
+}
+
+func normalizedMappingStatus(value string) string {
+	if value == model.ChunkSourceMapped || value == model.ChunkSourcePartial {
+		return value
+	}
+	return model.ChunkSourceUnmapped
 }
 
 func fuseCrossQueryChunks(rankLists [][]RetrievedChunk, topK int, k float64) []RetrievedChunk {
