@@ -29,7 +29,7 @@
 | 研究入口 | `video_research_service.go` 的 `mode=research` 只接受单视频；知识库范围被拒绝 | 已实现实验入口，不应误称为完整产品 Agent |
 | 短期上下文 | `ChatMemoryStore` 只提供最近消息读取/保存；`RecentTurns` 是有限会话上下文 | 已实现短期记忆，不是长期语义记忆 |
 | 长期记忆 | 已有 owner-scoped item/event、四类 scope、受限 snapshot、冲突/撤回/删除语义、异步写入和可选 Agent 注入；在线语义排序与公开治理 API 尚未实现 | 最小切片已实现，见 [agent-memory.md](agent-memory.md) |
-| 证据账本 | 当前引用来自检索/快照，没有 Claim、Evidence、Claim-Evidence 独立关系和状态迁移 | 未实现，见 [agent-evidence.md](agent-evidence.md) |
+| 证据账本 | 已有独立 Claim、Evidence、Claim-Evidence PostgreSQL 模型；模板 Agent 与 research Agent 将检索命中和回答事实写入账本，状态覆盖 hypothesized、verified、corrected、unsupported、uncertain | 最小纵向切片已实现，见 [agent-evidence.md](agent-evidence.md) |
 | 跨视频研究 | 标准 RAG 可按请求检索知识库；Agent 研究路径不接受 KB | 未实现 Agent 级跨视频研究 |
 
 上述判断以源码为准，架构背景见 [overview.md](overview.md)、[retrieval.md](retrieval.md) 和 [data-model.md](data-model.md)。
@@ -244,7 +244,7 @@ Run/Step 可使用 append-only event 或状态行加版本号实现；选择不�
 
 ### Evidence Ledger 与验证器
 
-建立 Claim/Evidence/关系表和合法状态迁移；将 `EvidenceID`、chunk 时间范围、transcript/OCR 来源迁入统一证据引用；把 unsupported、冲突、修订和 provenance 变成可查询结果。答案生成只读取验证通过或明确降级的 Claim。
+已建立 Claim/Evidence/关系表，将现有 `EvidenceID`、引用原文、内容哈希、transcript/视觉来源和可解析时间范围写入统一证据引用。模板 Agent 与 research Agent 在保存回答后同步追加账本；无引用事实为 `unsupported`，显式不确定或证据缺时间定位的事实为 `uncertain`，不会阻塞原回答。更正追加 revision，不覆盖旧 Claim；鉴权 API 支持按 run 查询和追加人工更正。当前验证器只确认稳定来源、时间定位和显式引用绑定，不声称自然语言语义证明。
 
 ### Run/Step 可恢复执行
 

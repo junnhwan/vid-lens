@@ -155,6 +155,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		Retrieval:            &retrievalCfg,
 		ModelRerankerFactory: modelRerankerFactory,
 	})
+	evidenceLedgerSvc := service.NewEvidenceLedgerService(deps.repos)
+	chatSvc.SetEvidenceLedger(evidenceLedgerSvc)
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
 	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
@@ -273,12 +275,14 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		return visualIndexSvc.BuildTaskVisualIndex(ctx, task)
 	})
 
+	chatHandler := handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory)
+	chatHandler.SetEvidenceLedgerService(evidenceLedgerSvc)
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
 			profiles:       handler.NewAIProfileHandler(aiProfileSvc),
 			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
-			chat:           handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
+			chat:           chatHandler,
 			media:          handler.NewMediaHandler(mediaSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc),

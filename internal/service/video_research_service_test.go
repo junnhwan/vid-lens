@@ -22,6 +22,8 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		`{"done":true,"stop_reason":"已生成带引用回答"}`,
 	}}
 	chatSvc := NewChatService(repos, retriever, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	ledger := NewEvidenceLedgerService(repos)
+	chatSvc.SetEvidenceLedger(ledger)
 	agent := NewVideoAgentService(chatSvc)
 
 	result, err := agent.AskResearch(context.Background(), VideoResearchRequest{
@@ -61,5 +63,9 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	}
 	if strings.Contains(messages[1].Content, "[C") {
 		t.Fatalf("stored answer leaked citation markers: %q", messages[1].Content)
+	}
+	ledgerView, err := ledger.GetRun(context.Background(), 7, result.RunID)
+	if err != nil || ledgerView == nil || len(ledgerView.Claims) != 1 || len(ledgerView.Evidence) != 1 {
+		t.Fatalf("research ledger = %+v err=%v", ledgerView, err)
 	}
 }

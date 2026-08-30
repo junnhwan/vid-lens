@@ -65,6 +65,11 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				chat.POST("/sessions/:session_id/messages/agent/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskAgentStream)
 				chat.POST("/sessions/:session_id/messages/stream", middleware.RateLimit(rateLimiter), handlers.chat.AskStream)
 			}
+			agentLedger := auth.Group("/agent/evidence-ledgers")
+			{
+				agentLedger.GET("/:run_id", handlers.chat.GetEvidenceLedger)
+				agentLedger.POST("/claims/:claim_id/corrections", handlers.chat.CorrectEvidenceClaim)
+			}
 			knowledgeBases := auth.Group("/knowledge-bases")
 			{
 				knowledgeBases.POST("", handlers.knowledgeBases.Create)

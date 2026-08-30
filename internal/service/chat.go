@@ -103,9 +103,16 @@ type ChatService struct {
 	memory         ChatMemoryStore
 	longTermMemory MemoryProvider
 	memoryCapture  MemoryCapture
+	evidenceLedger *EvidenceLedgerService
 	recorder       ai.CallRecorder
 	cfg            ChatConfig
 	intentRouter   *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
+}
+
+func (s *ChatService) SetEvidenceLedger(ledger *EvidenceLedgerService) {
+	if s != nil {
+		s.evidenceLedger = ledger
+	}
 }
 
 type AskResult struct {

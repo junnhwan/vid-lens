@@ -2,9 +2,11 @@
 
 ## 在线持久化事实
 
-PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 长期记忆以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义，关系图见 [database-schema.svg](database-schema.svg)。
+PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 长期记忆、Agent 证据账本以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义，关系图见 [database-schema.svg](database-schema.svg)。
 
 长期记忆以 `agent_memory_items` 保存 owner/scope 下的最新 item 投影，以 `agent_memory_events` 保存创建、冲突、撤回和删除事件。item/event 是权威数据；`agent_memory_embeddings` 是启用 memory 后按需创建的 pgvector 在线语义召回投影，embedding 失败不会回滚关系 item。撤回或删除 item 时会在同一事务中移除对应投影，避免旧向量再次召回。具体权限、召回和治理边界见 [agent-memory.md](agent-memory.md)。
+
+Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidence` 三张权威表组成。Claim 保存可审计事实、状态、置信度和追加式 revision；Evidence 保存 RAG `EvidenceID`、视频/文档定位、引用原文、内容哈希、来源 revision 及时间区间；关系表显式保存支持、反驳或上下文关系。时间不能从 ASR 分段或视觉帧可靠解析时，Evidence 保留 `time_range_status=unknown`，对应 Claim 降级为 `uncertain`，不会伪造时间码。账本按 `user_id + run_id` 隔离，不替代聊天历史快照，也不保存 prompt、Planner 草稿或 Chain-of-Thought。
 
 `legacy_mysql` 只服务于 `cmd/mysql-to-postgres/` 的离线历史数据迁移和检查；在线 API、消费者和 RAG 服务不把 MySQL 当作数据源。
 

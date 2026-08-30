@@ -277,7 +277,21 @@
 - 只依赖“Planner/Executor/Critic”名称就获得可靠自主规划；
 - 只靠 frame/scene/dHash 采样就获得完整视频内容覆盖。
 
-## 6. 来源索引
+## 6. VidLens 当前实现（2026-08-30）
+
+VidLens 已落地证据账本的最小纵向切片：
+
+- `agent_claims` 保存回答事实、`hypothesized`、`verified`、`corrected`、`unsupported`、`uncertain` 状态，以及不覆盖历史的 root/revision 链；
+- `agent_evidence` 保存当前 Agent 检索结果的稳定 `EvidenceID`、task/document 定位、引用原文、SHA-256、来源 revision 和时间区间状态；
+- `agent_claim_evidence` 保存事实与证据的显式支持关系及绑定核验结果；
+- 模板 Agent 和非流式 research Agent 都在原回答保存后写入账本；写入失败只记录服务端错误，不改变回答、引用或既有 SSE 事件；
+- 事实后的 `[C#]` 仅在服务端作为绑定标记使用，展示前仍按原逻辑移除；未绑定事实不会被删除，而是标为 `unsupported` 或 `uncertain`；
+- ASR 分段或视觉帧能够定位引用时保存可重放时间范围；不能可靠定位时保存 `0/0 + time_range_status=unknown` 并降级 Claim，禁止根据语义 chunk 序号伪造时间码；
+- `GET /api/v1/agent/evidence-ledgers/:run_id` 按 owner 查询账本，`POST /api/v1/agent/evidence-ledgers/claims/:claim_id/corrections` 追加人工更正；demo 用户保持只读。
+
+当前没有实现自然语言蕴含证明、视觉补检漏斗、密码学防篡改或独立 Run/Step 恢复。账本不持久化 prompt、Planner 草稿或原始 Chain-of-Thought。
+
+## 7. 来源索引
 
 ### AGI-saber
 

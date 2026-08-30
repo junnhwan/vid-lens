@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -188,7 +189,20 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Question, result, recentLimit); err != nil {
 		return nil, err
 	}
+	s.persistEvidenceLedger(ctx, EvidenceLedgerRecordRequest{
+		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
+		RunID: runID, RawAnswer: answer, Evidence: candidateCitations, Retrieved: buildCitations(req.Question, search.Citations),
+	})
 	return result, nil
+}
+
+func (s *VideoAgentService) persistEvidenceLedger(ctx context.Context, req EvidenceLedgerRecordRequest) {
+	if s == nil || s.chatSvc == nil || s.chatSvc.evidenceLedger == nil {
+		return
+	}
+	if err := s.chatSvc.evidenceLedger.RecordAnswer(ctx, req); err != nil {
+		log.Printf("agent evidence ledger write failed: user_id=%d session_id=%d run_id=%s err=%v", req.UserID, req.SessionID, req.RunID, err)
+	}
 }
 
 func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*model.ChatSession, error) {

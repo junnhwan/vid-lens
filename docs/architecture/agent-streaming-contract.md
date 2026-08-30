@@ -234,6 +234,8 @@ done          { message_id: 456 }
 - 有 `agent_snapshot` → 渲染完整步骤时间线（无需重放 SSE）。
 - 仅有 `retrieval_snapshot` → 保持现网 [C1] 引用行为。
 
+Agent 回答完成后还会把 Claim、Evidence 和 Claim-Evidence 关系写入独立 PostgreSQL 账本。该副作用不新增 SSE event，不改变本文事件顺序；账本写入失败不会把已生成的普通 Agent 回答改成流式错误。账本只保存可见事实和稳定证据引用，不保存原始 Chain-of-Thought。
+
 ---
 
 ## 6. 范围与权限（单视频 vs 知识库）
@@ -303,3 +305,4 @@ export async function streamAgent(sid: number, question: string, opts: AgentStre
 |------|------|
 | 2026-08-29 | 初版：基于原型 Agent UI A/B/C 与融合 D/E；对齐现有 `VideoAgentResult` / RAG SSE |
 | 2026-08-30 | 根据实际 Go/TypeScript 实现更新单视频 Agent SSE、事件顺序、范围限制和历史快照说明；移除将 `step_update`、`think` 当作当前事件的表述。 |
+| 2026-08-30 | 记录 Agent 证据账本作为回答后的兼容副作用；明确不新增 SSE 事件、不改变事件顺序。 |

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -99,7 +100,29 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err
 	}
+	rawAnswer, answerEvidence := researchAnswerLedgerInput(req.Goal, runResult)
+	s.persistEvidenceLedger(ctx, EvidenceLedgerRecordRequest{
+		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
+		RunID: runID, RawAnswer: rawAnswer, Evidence: answerEvidence, Retrieved: buildCitations(req.Goal, runResult.State.Evidence),
+	})
 	return result, nil
+}
+
+func researchAnswerLedgerInput(goal string, result *VideoResearchResult) (string, []Citation) {
+	if result == nil {
+		return "", nil
+	}
+	for i := len(result.State.Observations) - 1; i >= 0; i-- {
+		observation := result.State.Observations[i]
+		if observation.Tool != VideoAgentToolBuildCitedAnswer {
+			continue
+		}
+		var answer BuildCitedAnswerResult
+		if err := json.Unmarshal(observation.Output, &answer); err == nil && strings.TrimSpace(answer.Answer) != "" {
+			return answer.Answer, buildCitations(goal, answer.Citations)
+		}
+	}
+	return result.State.Answer, append([]Citation(nil), result.State.Citations...)
 }
 
 func videoResearchTrace(result *VideoResearchResult) []VideoAgentStep {

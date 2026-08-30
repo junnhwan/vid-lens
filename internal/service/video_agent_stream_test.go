@@ -13,9 +13,12 @@ import (
 func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	chatClient := &scriptedChatClient{responses: []string{"not-json", "直接回答 [C1]"}}
-	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+	chatSvc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
 		{TaskID: task.ID, EvidenceID: "ev-stream-1", ChunkID: 1, ChunkIndex: 2, Score: 0.91, Content: "stream citation"},
-	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}))
+	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3})
+	ledger := NewEvidenceLedgerService(repos)
+	chatSvc.SetEvidenceLedger(ledger)
+	agent := NewVideoAgentService(chatSvc)
 
 	var events []AgentStreamEvent
 	result, err := agent.Stream(context.Background(), VideoAgentStreamRequest{
@@ -85,6 +88,9 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	}
 	if answer, ok := events[9].Data.(string); !ok || answer != result.Answer {
 		t.Fatalf("answer event = %#v, result answer=%q", events[9].Data, result.Answer)
+	}
+	if ledgerView, err := ledger.GetRun(context.Background(), session.UserID, result.RunID); err != nil || ledgerView == nil || len(ledgerView.Claims) != 1 {
+		t.Fatalf("stream ledger = %+v err=%v", ledgerView, err)
 	}
 }
 
