@@ -28,6 +28,7 @@
 | Agent 执行账本 | `agent_runs`、`agent_steps`、`agent_tool_calls` 冻结 scope/profile/policy/budget，以 attempt 唯一键、lease 和 CAS 持久化模板工具与 research planner/tool 动作 | 已实现单视频执行持久化；不可重放调用中断时 fail-closed |
 | 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验，并从 PostgreSQL checkpoint 恢复已完成动作 | 已实现 opt-in、单视频的可恢复 loop；仍无视觉核验 |
 | 研究入口 | `video_research_service.go` 的 `mode=research` 只接受单视频；知识库范围被拒绝 | 已实现实验入口，不应误称为完整产品 Agent |
+| 固定证据漏斗 | `mode=evidence_funnel` 固定执行全局摘要/元数据、transcript、时间窗、既有视觉/OCR 和 Evidence/Claim 校验；两个 Planner 节点只能选择有限候选 ID 或结束 | 已实现 opt-in 单视频漏斗；不调用开放工具、不新增视觉 provider 调用、不接入知识库 |
 | 短期上下文 | `ChatMemoryStore` 只提供最近消息读取/保存；`RecentTurns` 是有限会话上下文 | 已实现短期记忆，不是长期语义记忆 |
 | 长期记忆 | 已有 owner-scoped item/event、四类 scope、受限 snapshot、冲突/撤回/删除语义、异步写入和可选 Agent 注入；在线语义排序与公开治理 API 尚未实现 | 最小切片已实现，见 [agent-memory.md](agent-memory.md) |
 | 证据账本 | 已有独立 Claim、Evidence、Claim-Evidence PostgreSQL 模型；模板 Agent 与 research Agent 将检索命中和回答事实写入账本，状态覆盖 hypothesized、verified、corrected、unsupported、uncertain | 最小纵向切片已实现，见 [agent-evidence.md](agent-evidence.md) |
@@ -142,28 +143,30 @@ flowchart LR
 
 ## 证据漏斗：固定策略，不是自主 Agent
 
-VidLens 的默认漏斗应先使用便宜且可重放的信号，再按证据缺口请求更贵的模态：
+显式 `mode=evidence_funnel` 先使用便宜且可重放的信号，再按证据缺口读取更细粒度的已有模态：
 
 ```text
 全局视频摘要/元数据
-  → transcript + OCR 的混合召回
-  → 相关 clip / transcript window
-  → 目标时间范围的帧、OCR 或视觉检查
+  → transcript 检索
+  → 相关 transcript window 与时间范围扩展
+  → 目标时间范围的既有视觉帧/OCR 确认
   → Claim 绑定与时间码校验
   → Verifier 决定支持、冲突、不支持或继续补检
 ```
 
-这是一个有限状态工作流：每个箭头、输入、输出、预算和失败降级都可预先定义。它不会因为能调用工具就变成 Agent。Agent 只在验证器报告“缺口是什么”时，从白名单中的下一步候选中选择动作；不能跳出漏斗调用未注册工具。
+这是一个固定八步的有限状态工作流：每个箭头、输入/输出 schema、预算和失败语义由 Go 定义。两个 Planner 动作分别只从 transcript 命中和视觉/OCR 帧的有限候选 ID 中选择补哪个缺口或结束；它们不能选择工具、改变顺序、提供自由参数或调用候选外资源。Planner 输入只保存摘要 digest 和候选 digest，输出 checkpoint 只保存校验后的候选 ID；prompt、自由草稿和 Chain-of-Thought 不落盘。
 
-当前 VidLens 已有的等价基础是 transcript/OCR 时间片段、`EvidenceID`、窗口扩展和引用校验；全局视觉摘要、按需帧检查和多模态 Claim 账本仍是后续能力。细节见 [agent-evidence.md](agent-evidence.md)。
+每一级都复用同一 Run/Step/ToolCall 的 lease、CAS、attempt 和 checkpoint：`metrics` 记录命中与覆盖范围，ToolCall 自带耗时，`evidence_refs` 记录该级观察，`final_evidence_refs` 投影最终是否引用。最后一步同步写入并读取 Evidence Ledger 完成 Claim/Evidence 校验。视觉确认只读取当前视频已经完成的 OCR/视觉索引；在线 VLM 帧检查仍未启用，vision budget 固定为零。细节见 [agent-evidence.md](agent-evidence.md)。
 
 ## 受控 Agent 的运行规则
 
 ### 工具白名单
 
-当前注册表保留五个工具，均为单视频、读路径或答案构建：
+现有 `research` 注册表继续保留五个工具，均为单视频、读路径或答案构建：
 
 `search_transcript`、`get_transcript_window`、`summarize_segments`、`compare_segments`、`build_cited_answer`。
+
+`evidence_funnel` 不把新动作加入这个通用注册表，而是使用服务端固定的八动作列表。Planner 只看到候选 evidence ID，不看到或返回工具名；因此漏斗不会扩大既有 research 工具白名单。
 
 后续可以在同一注册表机制上增加有限工具，但每个工具必须声明 scope、输入 schema、输出 schema、估算成本、是否产生证据以及是否允许在当前 profile 使用。候选包括：
 
@@ -216,7 +219,7 @@ Planner 可返回安全的 `reason` 或 `stop_reason` 摘要，用于 UI 和审�
 |---|---|---|
 | `agent_runs` | id、user/session、scope、goal、profile、policy snapshot、status、budget counters、stop reason、created/updated/finished | Run 创建时冻结 scope 和策略；终态不可被普通重试覆盖 |
 | `agent_steps` | run id、step id、attempt、action、status、safe reason、input/output refs、started/finished、error、cost | 每次动作一条；重试增加 attempt，不覆盖历史；可用 lease/CAS 恢复 |
-| `agent_tool_calls` | step id、tool name、validated args digest、result digest、latency、token/cost、evidence ids | 只存脱敏参数和结果引用；工具名必须来自注册表 |
+| `agent_tool_calls` | step id、call kind、tool/action name、validated args digest、result digest、latency、token/cost/usage source、metrics、evidence ids、final evidence ids | 只存脱敏参数摘要和安全 checkpoint；普通工具名来自注册表，固定漏斗动作来自服务端常量 |
 | `agent_claims` | run id、claim id、text、kind、status、confidence、current revision、created/updated | Claim 修订追加新 revision；当前投影可查询，历史仍可审计 |
 | `agent_evidence` | evidence id、task/video、start/end、modality、content ref、source revision、provenance、retrieval step | Evidence 必须可重放、可定位；当前索引是投影，不是唯一账本 |
 | `agent_claim_evidence` | claim revision、evidence id、relation、verification result、reason | 多对多关系显式记录支持、反驳、上下文和验证失败 |
@@ -225,7 +228,7 @@ Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保
 
 ### 恢复和幂等
 
-工具执行前写 `running`，执行后以 `(run_id, step_id, attempt)` 幂等落盘；进程重启时只接管 lease 已过期且没有终态结果的只读步骤。Planner、LLM 和未来视觉调用记录调用 digest，若 lease 过期但没有持久终态则进入 `ambiguous` 并 fail-closed，同一 attempt 不自动重放；显式新 attempt 受冻结预算约束。已完成的 research Planner/tool checkpoint 可重建内存状态，Evidence/Claim revision 不因恢复而删除。
+工具执行前写 `running`，执行后以 `(run_id, step_id, attempt)` 幂等落盘；进程重启时只接管 lease 已过期且没有终态结果的只读步骤。Planner、LLM 和未来视觉调用记录调用 digest，若 lease 过期但没有持久终态则进入 `ambiguous` 并 fail-closed，同一 attempt 不自动重放；显式新 attempt 受冻结预算约束。Planner 是独立 `planner_llm` ToolCall，完成与失败都会保存调用状态和可用 usage 元数据；现有 ChatClient 没有 provider usage 时 token 明确标记为估算，cost 不伪造。已完成的 research 或 funnel checkpoint 可重建内存状态，Evidence/Claim revision 不因恢复而删除。
 
 ## 记忆和证据的关系
 
@@ -253,7 +256,7 @@ Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保
 
 ### 固定证据漏斗与受控选择
 
-先实现全局/clip/window/visual 的有限工具和统一 Observation，再允许 Planner 在有限候选中选择下一步。漏斗本身保持确定性；Agent 只负责在“补哪个缺口、何时结束”上做受约束决策。
+已通过非流式 `mode=evidence_funnel` 实现全局摘要/元数据、transcript、window、既有视觉/OCR、引用答案和 Evidence/Claim 校验。漏斗顺序和预算保持确定性；Planner 只负责在有限候选中选择“补哪个缺口”或结束。默认 RAG、既有 research 工具注册表和 Agent SSE 契约均未改变。
 
 ### 跨视频和报告写入
 
@@ -274,6 +277,7 @@ Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保
 - [overview.md](overview.md)、[retrieval.md](retrieval.md)、[data-model.md](data-model.md)：当前 RAG、数据权威和基础设施边界。
 - [video_agent.go](../../internal/service/video_agent.go)、[video_agent_stream.go](../../internal/service/video_agent_stream.go)、[video_agent_snapshot.go](../../internal/service/video_agent_snapshot.go)、[chat.go](../../internal/service/chat.go)：模板 Agent、流式协议、快照、RAG 和短期消息接口。
 - [video_research_loop.go](../../internal/service/video_research_loop.go)、[video_research_service.go](../../internal/service/video_research_service.go)、[video_agent_registry.go](../../internal/service/video_agent_registry.go)：受控研究循环、入口和工具白名单。
+- [video_evidence_funnel.go](../../internal/service/video_evidence_funnel.go)、[video_evidence_funnel_service.go](../../internal/service/video_evidence_funnel_service.go)：固定多粒度证据漏斗、有限候选 Planner 和 Evidence Ledger 校验入口。
 
 ### 外部项目
 

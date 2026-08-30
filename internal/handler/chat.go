@@ -76,6 +76,10 @@ type videoResearchAsker interface {
 	AskResearch(ctx context.Context, req service.VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
 }
 
+type videoEvidenceFunnelAsker interface {
+	AskEvidenceFunnel(ctx context.Context, req service.EvidenceFunnelRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*service.VideoAgentResult, error)
+}
+
 type videoAgentStreamer interface {
 	Stream(ctx context.Context, req service.VideoAgentStreamRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(service.AgentStreamEvent) error) (*service.VideoAgentResult, error)
 }
@@ -240,6 +244,22 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 			return
 		}
 		result, err := researcher.AskResearch(c.Request.Context(), service.VideoResearchRequest{
+			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
+		}, embeddingClient, chatClient, *profile)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.OK(c, result)
+		return
+	}
+	if req.Mode == string(service.VideoAgentEvidenceFunnelTemplate) {
+		funnel, ok := h.agentSvc.(videoEvidenceFunnelAsker)
+		if !ok {
+			response.BadRequest(c, "Video Evidence Funnel 实验功能不可用")
+			return
+		}
+		result, err := funnel.AskEvidenceFunnel(c.Request.Context(), service.EvidenceFunnelRequest{
 			UserID: userID, SessionID: sessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
 		}, embeddingClient, chatClient, *profile)
 		if err != nil {

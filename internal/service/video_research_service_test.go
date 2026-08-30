@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
@@ -76,9 +77,10 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		t.Fatalf("research ledger evidence is not canonical: %+v", ledgerView.Evidence[0])
 	}
 	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, result.RunID)
-	if err != nil || execution == nil || execution.Run.Status != "completed" || len(execution.Steps) != 5 || len(execution.ToolCalls) != 2 {
+	if err != nil || execution == nil || execution.Run.Status != "completed" || len(execution.Steps) != 5 || len(execution.ToolCalls) != 5 {
 		t.Fatalf("research execution = %+v err=%v", execution, err)
 	}
+	plannerCalls := 0
 	for _, call := range execution.ToolCalls {
 		if strings.Contains(call.InputSummary, "owner 校验") || strings.Contains(call.InputSummary, "被篡改") {
 			t.Fatalf("tool input summary leaked raw planner/tool input: %s", call.InputSummary)
@@ -86,5 +88,14 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		if call.ArgumentsDigest == "" || call.CallDigest == "" || call.ResultDigest == "" {
 			t.Fatalf("tool call digests are incomplete: %+v", call)
 		}
+		if call.CallKind == model.AgentCallKindPlannerLLM {
+			plannerCalls++
+			if call.ToolName != videoResearchPlannerCall || call.UsageSource != model.AgentCallUsageEstimated || !call.TokenEstimated || call.PromptTokens <= 0 || call.Status != model.AgentToolCallStatusCompleted {
+				t.Fatalf("planner call metadata = %+v", call)
+			}
+		}
+	}
+	if plannerCalls != 3 || execution.Run.ToolCallsUsed != 2 || execution.Run.LLMCallsUsed != 4 {
+		t.Fatalf("planner/tool counters = planner:%d run:%+v", plannerCalls, execution.Run)
 	}
 }

@@ -45,7 +45,7 @@ Content-Type: application/json
 
 ```
 POST /api/v1/chat/sessions/{session_id}/messages/agent
-{ "question": "...", "top_k": 4, "mode": "" | "research", "run_id": "optional existing research run" }
+{ "question": "...", "top_k": 4, "mode": "" | "research" | "evidence_funnel", "run_id": "optional existing run" }
 ```
 
 **响应（已实现）** — `VideoAgentResult`：
@@ -65,6 +65,8 @@ POST /api/v1/chat/sessions/{session_id}/messages/agent
 
 - `mode=research`：走 `VideoResearchRunner`（有界 Planner/Tool/Observe），**仅单视频会话**，知识库会话当前返回错误。
 - `mode=research` 可携带同一 owner/session/goal 的既有 `run_id`，从 PostgreSQL 的完成 checkpoint 恢复；省略时创建新 Run。终态 Run 不会被该重试覆盖。
+- `mode=evidence_funnel`：走服务端固定的“摘要/元数据 → transcript → 时间窗 → 视觉/OCR → Evidence/Claim”单视频漏斗。Planner 只在有限候选 ID 中选择要补的证据缺口或结束；动作顺序、schema、白名单和预算不能由请求或模型修改。
+- `evidence_funnel` 每一级动作与两个受限 Planner 决策都写入 Run/Step/ToolCall；命中、耗时、覆盖、原始 evidence refs 和最终引用 refs 可审计。它只读取既有 OCR/视觉索引，不触发开放式视觉浏览。
 - 默认 mode：模板化 tool-loop baseline。
 
 非流式接口保留为对照和降级路径。它返回的 `trace` 仍是兼容性的 `VideoAgentStep` 结构；统一的 `step_id/status` 轨迹由 Agent SSE 和 version 1 快照提供。
@@ -95,7 +97,7 @@ POST /api/v1/chat/sessions/{session_id}/messages/agent/stream
 | `mode` | 当前只能是 `agent`；省略时服务端默认使用 `agent`，其他值会返回流式接口错误 |
 | `agent_profile` | 已保留扩展字段；当前首个流式切片不让它改变安全上限 |
 
-会话 `scope_type` 由 session 决定。当前流式端点只支持单视频会话；知识库会话和 `mode=research` 仍由该端点拒绝。
+会话 `scope_type` 由 session 决定。当前流式端点只支持单视频会话；知识库会话、`mode=research` 和 `mode=evidence_funnel` 仍由该端点拒绝。证据漏斗只接入上述非流式实验端点，因此没有新增或修改 SSE 事件。
 
 ### 3.2 SSE 事件一览
 

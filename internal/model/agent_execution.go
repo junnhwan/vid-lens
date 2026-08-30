@@ -25,6 +25,18 @@ const (
 	AgentToolCallStatusAmbiguous = "ambiguous"
 )
 
+const (
+	AgentCallKindTool       = "tool"
+	AgentCallKindPlannerLLM = "planner_llm"
+	AgentCallKindValidation = "validation"
+)
+
+const (
+	AgentCallUsageUnknown   = "unknown"
+	AgentCallUsageEstimated = "estimated"
+	AgentCallUsageActual    = "actual"
+)
+
 // AgentRun freezes the identity, scope, profile, policy, and budget of one
 // Agent execution. Snapshot fields contain server-created JSON without API
 // keys or prompt text. PostgreSQL is authoritative for recovery.
@@ -95,35 +107,43 @@ type AgentStep struct {
 
 func (AgentStep) TableName() string { return "agent_steps" }
 
-// AgentToolCall records one allow-listed tool invocation for a step attempt.
-// Arguments are represented by a digest and a safe summary; the checkpoint is
-// the server-validated result used for recovery, not a prompt transcript.
+// AgentToolCall records one allow-listed tool, internal Planner LLM, or
+// validation invocation for a step attempt. Arguments are represented by a
+// digest and a safe summary; the checkpoint is the server-validated result
+// used for recovery, not a prompt transcript.
 type AgentToolCall struct {
-	ID               string     `gorm:"type:varchar(36);primaryKey" json:"id"`
-	RunID            string     `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_tool_attempt,priority:1;index" json:"run_id"`
-	StepID           string     `gorm:"type:varchar(80);not null;uniqueIndex:idx_agent_tool_attempt,priority:2" json:"step_id"`
-	Attempt          int        `gorm:"not null;uniqueIndex:idx_agent_tool_attempt,priority:3" json:"attempt"`
-	AgentStepID      string     `gorm:"type:varchar(36);not null;uniqueIndex;index" json:"agent_step_id"`
-	ToolName         string     `gorm:"type:varchar(80);not null;index" json:"tool_name"`
-	Status           string     `gorm:"type:varchar(20);not null;index;check:chk_agent_tool_status,status IN ('running','completed','failed','ambiguous')" json:"status"`
-	InputSummary     string     `gorm:"type:text;not null;default:'{}'" json:"input_summary"`
-	ArgumentsDigest  string     `gorm:"type:char(64);not null;index" json:"arguments_digest"`
-	CallDigest       string     `gorm:"type:char(64);not null;index" json:"call_digest"`
-	OutputRef        string     `gorm:"type:text;not null;default:''" json:"output_ref,omitempty"`
-	ResultCheckpoint string     `gorm:"type:text;not null;default:''" json:"-"`
-	ResultDigest     string     `gorm:"type:char(64);not null;default:'';index" json:"result_digest,omitempty"`
-	EvidenceRefs     string     `gorm:"type:text;not null;default:'[]'" json:"evidence_refs"`
-	ErrorCode        string     `gorm:"type:varchar(80);not null;default:''" json:"error_code,omitempty"`
-	ErrorMessage     string     `gorm:"type:text;not null;default:''" json:"error_message,omitempty"`
-	DurationMs       int64      `gorm:"not null;default:0" json:"duration_ms"`
-	PromptTokens     int64      `gorm:"not null;default:0" json:"prompt_tokens"`
-	CompletionTokens int64      `gorm:"not null;default:0" json:"completion_tokens"`
-	CostMicros       int64      `gorm:"not null;default:0" json:"cost_micros"`
-	StartedAt        time.Time  `gorm:"not null" json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at,omitempty"`
-	CreatedAt        time.Time  `gorm:"not null;index" json:"created_at"`
-	UpdatedAt        time.Time  `gorm:"not null" json:"updated_at"`
-	Step             AgentStep  `gorm:"foreignKey:AgentStepID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
+	ID                string     `gorm:"type:varchar(36);primaryKey" json:"id"`
+	RunID             string     `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_tool_attempt,priority:1;index" json:"run_id"`
+	StepID            string     `gorm:"type:varchar(80);not null;uniqueIndex:idx_agent_tool_attempt,priority:2" json:"step_id"`
+	Attempt           int        `gorm:"not null;uniqueIndex:idx_agent_tool_attempt,priority:3" json:"attempt"`
+	AgentStepID       string     `gorm:"type:varchar(36);not null;uniqueIndex;index" json:"agent_step_id"`
+	CallKind          string     `gorm:"type:varchar(24);not null;default:'tool';index;check:chk_agent_call_kind,call_kind IN ('tool','planner_llm','validation')" json:"call_kind"`
+	ToolName          string     `gorm:"type:varchar(80);not null;index" json:"tool_name"`
+	Status            string     `gorm:"type:varchar(20);not null;index;check:chk_agent_tool_status,status IN ('running','completed','failed','ambiguous')" json:"status"`
+	InputSummary      string     `gorm:"type:text;not null;default:'{}'" json:"input_summary"`
+	ArgumentsDigest   string     `gorm:"type:char(64);not null;index" json:"arguments_digest"`
+	CallDigest        string     `gorm:"type:char(64);not null;index" json:"call_digest"`
+	OutputRef         string     `gorm:"type:text;not null;default:''" json:"output_ref,omitempty"`
+	ResultCheckpoint  string     `gorm:"type:text;not null;default:''" json:"-"`
+	ResultDigest      string     `gorm:"type:char(64);not null;default:'';index" json:"result_digest,omitempty"`
+	EvidenceRefs      string     `gorm:"type:text;not null;default:'[]'" json:"evidence_refs"`
+	FinalEvidenceRefs string     `gorm:"type:text;not null;default:'[]'" json:"final_evidence_refs"`
+	MetricsJSON       string     `gorm:"type:text;not null;default:'{}'" json:"metrics"`
+	ErrorCode         string     `gorm:"type:varchar(80);not null;default:''" json:"error_code,omitempty"`
+	ErrorMessage      string     `gorm:"type:text;not null;default:''" json:"error_message,omitempty"`
+	DurationMs        int64      `gorm:"not null;default:0" json:"duration_ms"`
+	PromptTokens      int64      `gorm:"not null;default:0" json:"prompt_tokens"`
+	CompletionTokens  int64      `gorm:"not null;default:0" json:"completion_tokens"`
+	CostMicros        int64      `gorm:"not null;default:0" json:"cost_micros"`
+	UsageSource       string     `gorm:"type:varchar(16);not null;default:'unknown';check:chk_agent_call_usage_source,usage_source IN ('unknown','estimated','actual')" json:"usage_source"`
+	TokenEstimated    bool       `gorm:"not null;default:false" json:"token_estimated"`
+	Currency          string     `gorm:"type:varchar(10);not null;default:''" json:"currency,omitempty"`
+	PriceVersion      string     `gorm:"type:varchar(30);not null;default:''" json:"price_version,omitempty"`
+	StartedAt         time.Time  `gorm:"not null" json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	CreatedAt         time.Time  `gorm:"not null;index" json:"created_at"`
+	UpdatedAt         time.Time  `gorm:"not null" json:"updated_at"`
+	Step              AgentStep  `gorm:"foreignKey:AgentStepID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
 }
 
 func (AgentToolCall) TableName() string { return "agent_tool_calls" }

@@ -288,9 +288,10 @@ VidLens 已落地证据账本的最小纵向切片：
 - 事实后的 `[C#]` 仅在服务端作为绑定标记使用，展示前仍按原逻辑移除；未绑定事实不会被删除，而是标为 `unsupported` 或 `uncertain`；
 - ASR 分段或视觉帧能够定位引用时保存可重放时间范围；不能可靠定位时保存 `0/0 + time_range_status=unknown` 并降级 Claim，禁止根据语义 chunk 序号伪造时间码；
 - research Planner 提交的引用只用于选择本轮已观察 `Evidence`；服务端在最终回答工具执行前按 `EvidenceID` 或 task/chunk identity 替换为完整 canonical evidence，并在 observation 边界再次规范化，因此 Planner 不能改写 `task_id`、`chunk_id`、引用文本或来源，跨视频 evidence 会被拒绝；API 结果、聊天快照和账本复用这份 canonical evidence；
+- 非流式 `mode=evidence_funnel` 已按“全局摘要/元数据 → transcript → 时间窗扩展 → 既有视觉/OCR → Evidence/Claim 校验”固定顺序运行。Planner 只能选择有限候选 ID 或结束；每一级的命中、覆盖、耗时、observed/final evidence refs 都写入 Run/Step/ToolCall，最终校验同步写入本账本。视觉层当前只确认已持久化 OCR/视觉帧，不调用在线 VLM，也不把未检查帧描述成已检查；
 - `GET /api/v1/agent/evidence-ledgers/:run_id` 按 owner 查询账本，`POST /api/v1/agent/evidence-ledgers/claims/:claim_id/corrections` 追加人工更正；demo 用户保持只读。
 
-`verified` 只表示 Claim 与显式引用已绑定，而且来源标识和真实时间范围可供重放核对；它不表示系统已经证明引用在自然语言语义上蕴含 Claim，也不表示 Claim 是客观真理。当前没有实现自然语言蕴含证明、视觉补检漏斗、密码学防篡改或独立 Run/Step 恢复。账本不持久化 prompt、Planner 草稿或原始 Chain-of-Thought。
+`verified` 只表示 Claim 与显式引用已绑定，而且来源标识和真实时间范围可供重放核对；它不表示系统已经证明引用在自然语言语义上蕴含 Claim，也不表示 Claim 是客观真理。当前没有实现自然语言蕴含证明、在线 VLM 帧检查、密码学防篡改或知识库 Agent。账本和固定漏斗都不持久化 prompt、Planner 草稿或原始 Chain-of-Thought。
 
 ## 7. 来源索引
 

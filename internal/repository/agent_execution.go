@@ -42,6 +42,8 @@ type AgentStepClaimRequest struct {
 	ArgumentsDigest string
 	CallDigest      string
 	ToolName        string
+	CallKind        string
+	InternalCall    bool
 	ReplaySafe      bool
 	LLMCall         bool
 	VisionCall      bool
@@ -66,22 +68,34 @@ type AgentStepCompletion struct {
 	OutputRef        string
 	ResultCheckpoint string
 	EvidenceRefs     string
+	MetricsJSON      string
 	PromptTokens     int64
 	CompletionTokens int64
 	CostMicros       int64
+	UsageSource      string
+	TokenEstimated   bool
+	Currency         string
+	PriceVersion     string
 	Now              time.Time
 }
 
 type AgentStepFailure struct {
-	UserID       int64
-	RunID        string
-	StepID       string
-	Attempt      int
-	LeaseToken   string
-	ErrorCode    string
-	ErrorMessage string
-	Ambiguous    bool
-	Now          time.Time
+	UserID           int64
+	RunID            string
+	StepID           string
+	Attempt          int
+	LeaseToken       string
+	ErrorCode        string
+	ErrorMessage     string
+	Ambiguous        bool
+	PromptTokens     int64
+	CompletionTokens int64
+	CostMicros       int64
+	UsageSource      string
+	TokenEstimated   bool
+	Currency         string
+	PriceVersion     string
+	Now              time.Time
 }
 
 type AgentRunTerminalUpdate struct {
@@ -150,10 +164,53 @@ func (r *AgentExecutionRepository) GetExecution(ctx context.Context, userID int6
 	if err := r.db.WithContext(ctx).Where("run_id = ?", run.ID).Order("sequence ASC, attempt ASC").Find(&records.Steps).Error; err != nil {
 		return nil, err
 	}
-	if err := r.db.WithContext(ctx).Where("run_id = ?", run.ID).Order("created_at ASC, id ASC").Find(&records.ToolCalls).Error; err != nil {
+	if err := r.db.WithContext(ctx).Table("agent_tool_calls AS c").Select("c.*").
+		Joins("JOIN agent_steps AS s ON s.id = c.agent_step_id").
+		Where("c.run_id = ?", run.ID).Order("s.sequence ASC, c.attempt ASC, c.id ASC").Scan(&records.ToolCalls).Error; err != nil {
 		return nil, err
 	}
 	return records, nil
+}
+
+// MarkFinalEvidenceRefs projects the final citation selection onto each
+// completed call. It never changes the call's original evidence set.
+func (r *AgentExecutionRepository) MarkFinalEvidenceRefs(ctx context.Context, userID int64, runID string, finalRefs []string) error {
+	if r == nil || r.db == nil || userID <= 0 || strings.TrimSpace(runID) == "" {
+		return gorm.ErrInvalidData
+	}
+	wanted := make(map[string]struct{}, len(finalRefs))
+	for _, ref := range finalRefs {
+		if ref = strings.TrimSpace(ref); ref != "" {
+			wanted[ref] = struct{}{}
+		}
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run model.AgentRun
+		if err := tx.Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error; err != nil {
+			return err
+		}
+		var calls []model.AgentToolCall
+		if err := tx.Where("run_id = ? AND status = ?", run.ID, model.AgentToolCallStatusCompleted).Find(&calls).Error; err != nil {
+			return err
+		}
+		for _, call := range calls {
+			var observed []string
+			if err := json.Unmarshal([]byte(defaultJSON(call.EvidenceRefs, "[]")), &observed); err != nil {
+				return err
+			}
+			selected := make([]string, 0, len(observed))
+			for _, ref := range observed {
+				if _, ok := wanted[ref]; ok {
+					selected = append(selected, ref)
+				}
+			}
+			encoded, _ := json.Marshal(selected)
+			if err := tx.Model(&model.AgentToolCall{}).Where("id = ?", call.ID).Update("final_evidence_refs", string(encoded)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ClaimStep creates or recovers one step attempt under the frozen run budget.
@@ -267,11 +324,15 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		}
 		var toolCall *model.AgentToolCall
 		if strings.TrimSpace(req.ToolName) != "" {
+			callKind := strings.TrimSpace(req.CallKind)
+			if callKind == "" {
+				callKind = model.AgentCallKindTool
+			}
 			call := model.AgentToolCall{
 				ID: uuid.NewString(), RunID: req.RunID, StepID: req.StepID, Attempt: req.Attempt, AgentStepID: step.ID,
-				ToolName: req.ToolName, Status: model.AgentToolCallStatusRunning,
+				CallKind: callKind, ToolName: req.ToolName, Status: model.AgentToolCallStatusRunning,
 				InputSummary: defaultJSON(req.InputSummary, "{}"), ArgumentsDigest: req.ArgumentsDigest, CallDigest: req.CallDigest,
-				EvidenceRefs: "[]", StartedAt: req.Now, CreatedAt: req.Now, UpdatedAt: req.Now,
+				EvidenceRefs: "[]", FinalEvidenceRefs: "[]", MetricsJSON: "{}", StartedAt: req.Now, CreatedAt: req.Now, UpdatedAt: req.Now,
 			}
 			if err := tx.Create(&call).Error; err != nil {
 				return err
@@ -282,7 +343,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 			"status": model.AgentRunStatusRunning, "steps_used": gorm.Expr("steps_used + 1"),
 			"version": gorm.Expr("version + 1"), "updated_at": req.Now,
 		}
-		if toolCall != nil {
+		if toolCall != nil && !req.InternalCall {
 			updates["tool_calls_used"] = gorm.Expr("tool_calls_used + 1")
 		}
 		if req.LLMCall {
@@ -303,7 +364,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		claim.Run.Status = model.AgentRunStatusRunning
 		claim.Run.Version++
 		claim.Run.StepsUsed++
-		if toolCall != nil {
+		if toolCall != nil && !req.InternalCall {
 			claim.Run.ToolCallsUsed++
 		}
 		if req.LLMCall {
@@ -343,8 +404,12 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 			return updated.Error
 		}
 		changed = true
+		usageSource := strings.TrimSpace(req.UsageSource)
+		if usageSource == "" {
+			usageSource = model.AgentCallUsageUnknown
+		}
 		return tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
-			Updates(map[string]any{"status": model.AgentToolCallStatusCompleted, "output_ref": req.OutputRef, "result_checkpoint": req.ResultCheckpoint, "result_digest": digest, "evidence_refs": defaultJSON(req.EvidenceRefs, "[]"), "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
+			Updates(map[string]any{"status": model.AgentToolCallStatusCompleted, "output_ref": req.OutputRef, "result_checkpoint": req.ResultCheckpoint, "result_digest": digest, "evidence_refs": defaultJSON(req.EvidenceRefs, "[]"), "metrics_json": defaultJSON(req.MetricsJSON, "{}"), "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -378,8 +443,12 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 			return updated.Error
 		}
 		changed = true
+		usageSource := strings.TrimSpace(req.UsageSource)
+		if usageSource == "" {
+			usageSource = model.AgentCallUsageUnknown
+		}
 		return tx.Model(&model.AgentToolCall{}).Where("agent_step_id = ? AND status = ?", step.ID, model.AgentToolCallStatusRunning).
-			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
+			Updates(map[string]any{"status": toolStatus, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "prompt_tokens": req.PromptTokens, "completion_tokens": req.CompletionTokens, "cost_micros": req.CostMicros, "usage_source": usageSource, "token_estimated": req.TokenEstimated, "currency": strings.TrimSpace(req.Currency), "price_version": strings.TrimSpace(req.PriceVersion), "finished_at": req.Now, "duration_ms": durationMillis(step.StartedAt, req.Now), "updated_at": req.Now}).Error
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -440,6 +509,12 @@ func validateAgentStepClaim(req AgentStepClaimRequest) error {
 	if strings.TrimSpace(req.ToolName) != "" && (len(req.ArgumentsDigest) != 64 || len(req.CallDigest) != 64) {
 		return gorm.ErrInvalidData
 	}
+	if req.InternalCall && (strings.TrimSpace(req.ToolName) == "" || strings.TrimSpace(req.CallKind) == "") {
+		return gorm.ErrInvalidData
+	}
+	if req.CallKind != "" && req.CallKind != model.AgentCallKindTool && req.CallKind != model.AgentCallKindPlannerLLM && req.CallKind != model.AgentCallKindValidation {
+		return gorm.ErrInvalidData
+	}
 	if !jsonObjectOrArray(defaultJSON(req.InputSummary, "{}")) {
 		return gorm.ErrInvalidData
 	}
@@ -450,7 +525,7 @@ func agentBudgetExceeded(run model.AgentRun, req AgentStepClaimRequest) bool {
 	if run.StepsUsed >= run.MaxSteps {
 		return true
 	}
-	if strings.TrimSpace(req.ToolName) != "" && run.ToolCallsUsed >= run.MaxToolCalls {
+	if strings.TrimSpace(req.ToolName) != "" && !req.InternalCall && run.ToolCallsUsed >= run.MaxToolCalls {
 		return true
 	}
 	if req.LLMCall && run.LLMCallsUsed >= run.MaxLLMCalls {

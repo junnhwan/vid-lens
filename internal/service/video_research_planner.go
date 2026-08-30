@@ -8,10 +8,25 @@ import (
 	"strings"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 type LLMVideoResearchPlanner struct {
 	chat ai.ChatClient
+}
+
+type VideoResearchPlannerCallUsage struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	CostMicros       int64
+	UsageSource      string
+	TokenEstimated   bool
+	Currency         string
+	PriceVersion     string
+}
+
+type VideoResearchPlannerWithUsage interface {
+	NextDecisionWithUsage(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error)
 }
 
 func NewLLMVideoResearchPlanner(chat ai.ChatClient) *LLMVideoResearchPlanner {
@@ -19,19 +34,24 @@ func NewLLMVideoResearchPlanner(chat ai.ChatClient) *LLMVideoResearchPlanner {
 }
 
 func (p *LLMVideoResearchPlanner) NextDecision(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, error) {
+	decision, _, err := p.NextDecisionWithUsage(ctx, state, tools)
+	return decision, err
+}
+
+func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
 	if p == nil || p.chat == nil {
-		return VideoResearchDecision{}, errors.New("video research planner chat client 不能为空")
+		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, errors.New("video research planner chat client 不能为空")
 	}
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
-		return VideoResearchDecision{}, fmt.Errorf("序列化 video research state 失败: %w", err)
+		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, fmt.Errorf("序列化 video research state 失败: %w", err)
 	}
 	toolsJSON, err := json.Marshal(tools)
 	if err != nil {
-		return VideoResearchDecision{}, fmt.Errorf("序列化 video research tools 失败: %w", err)
+		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, fmt.Errorf("序列化 video research tools 失败: %w", err)
 	}
 
-	response, err := p.chat.Chat(ctx, []ai.ChatMessage{
+	messages := []ai.ChatMessage{
 		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。只输出 JSON。"},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
@@ -52,11 +72,45 @@ func (p *LLMVideoResearchPlanner) NextDecision(ctx context.Context, state VideoR
 - arguments 必须是合法 JSON 对象。
 - 不要输出 Markdown、解释或额外字段。
 `, string(toolsJSON), string(stateJSON))},
-	})
-	if err != nil {
-		return VideoResearchDecision{}, err
 	}
-	return parseLLMVideoResearchDecision(response)
+	response, err := p.chat.Chat(ctx, messages)
+	usage := estimatedPlannerCallUsage(messages, response)
+	if err != nil {
+		return VideoResearchDecision{}, usage, err
+	}
+	decision, err := parseLLMVideoResearchDecision(response)
+	return decision, usage, err
+}
+
+func estimatedPlannerCallUsage(messages []ai.ChatMessage, response string) VideoResearchPlannerCallUsage {
+	promptTokens := int64(0)
+	for _, message := range messages {
+		promptTokens += estimateAgentTokens(message.Content)
+	}
+	return VideoResearchPlannerCallUsage{
+		PromptTokens: promptTokens, CompletionTokens: estimateAgentTokens(response),
+		UsageSource: model.AgentCallUsageEstimated, TokenEstimated: true,
+	}
+}
+
+func estimateAgentTokens(text string) int64 {
+	tokens, asciiRunes := int64(0), 0
+	flushASCII := func() {
+		if asciiRunes > 0 {
+			tokens += int64((asciiRunes + 3) / 4)
+			asciiRunes = 0
+		}
+	}
+	for _, value := range text {
+		if value <= 127 {
+			asciiRunes++
+			continue
+		}
+		flushASCII()
+		tokens++
+	}
+	flushASCII()
+	return tokens
 }
 
 func parseLLMVideoResearchDecision(text string) (VideoResearchDecision, error) {

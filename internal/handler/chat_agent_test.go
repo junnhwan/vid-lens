@@ -26,10 +26,13 @@ import (
 type fakeVideoAgentService struct {
 	result         *service.VideoAgentResult
 	researchResult *service.VideoAgentResult
+	funnelResult   *service.VideoAgentResult
 	err            error
 	researchErr    error
+	funnelErr      error
 	req            service.VideoAgentRequest
 	researchReq    service.VideoResearchRequest
+	funnelReq      service.EvidenceFunnelRequest
 }
 
 type fakeVideoAgentStreamService struct {
@@ -75,6 +78,14 @@ func (s *fakeVideoAgentService) AskResearch(_ context.Context, req service.Video
 		return nil, s.researchErr
 	}
 	return s.researchResult, nil
+}
+
+func (s *fakeVideoAgentService) AskEvidenceFunnel(_ context.Context, req service.EvidenceFunnelRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*service.VideoAgentResult, error) {
+	s.funnelReq = req
+	if s.funnelErr != nil {
+		return nil, s.funnelErr
+	}
+	return s.funnelResult, nil
 }
 
 func TestChatHandlerAskAgentReturnsAgenticResponse(t *testing.T) {
@@ -162,6 +173,32 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 	}
 	if agent.req.Question != "" {
 		t.Fatalf("legacy agent path should not be called: %+v", agent.req)
+	}
+}
+
+func TestChatHandlerAskAgentEvidenceFunnelModeUsesBoundedPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	profileSvc := newChatHandlerProfileServiceForTest(t)
+	if _, err := profileSvc.Create(7, validHandlerAIProfileRequest()); err != nil {
+		t.Fatalf("Create profile: %v", err)
+	}
+	agent := &fakeVideoAgentService{funnelResult: &service.VideoAgentResult{Answer: "validated", Template: string(service.VideoAgentEvidenceFunnelTemplate)}}
+	handler := NewChatHandler(nil, profileSvc, ai.NewFactory())
+	handler.agentSvc = agent
+	router := gin.New()
+	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
+		c.Set("userID", int64(7))
+		handler.AskAgent(c)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/chat/sessions/22/messages/agent", bytes.NewBufferString(`{"question":"核验 owner","mode":"evidence_funnel","top_k":3,"run_id":"funnel-run"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if agent.funnelReq.UserID != 7 || agent.funnelReq.SessionID != 22 || agent.funnelReq.Goal != "核验 owner" || agent.funnelReq.TopK != 3 || agent.funnelReq.RunID != "funnel-run" {
+		t.Fatalf("funnel request = %+v", agent.funnelReq)
 	}
 }
 

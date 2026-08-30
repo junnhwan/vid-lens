@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
 
 var errAgentExecutionBusy = errors.New("agent execution step is owned by another worker")
+
+const videoResearchPlannerCall = "video_research_planner"
 
 type invalidResearchDecisionError struct{ cause error }
 
@@ -63,14 +66,15 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	sequence := state.CurrentStep*2 + 1
 	stepID := fmt.Sprintf("plan-%d", state.CurrentStep+1)
 	now := execution.now()
-	inputSummary, _ := json.Marshal(map[string]any{
-		"schema": 1, "goal_digest": "sha256:" + digestAgentValue(state.Goal),
-		"completed_steps": state.CurrentStep, "evidence_count": len(state.Evidence), "pending_question_count": len(state.PendingQuestions),
-	})
+	definitions := r.registry.Definitions()
+	inputSummary, inputDigest := safePlannerInputSummary(state, definitions)
+	callDigest := digestAgentValue(execution.runID + ":" + stepID + ":1:" + videoResearchPlannerCall + ":" + inputDigest)
 	claim, err := execution.repo.ClaimStep(ctx, repository.AgentStepClaimRequest{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, Sequence: sequence,
 		Kind: "plan", Action: "select_next_action", SafeReason: "select the next allow-listed action",
-		InputSummary: string(inputSummary), ReplaySafe: false, LLMCall: true,
+		InputSummary: inputSummary, ArgumentsDigest: inputDigest, CallDigest: callDigest,
+		ToolName: videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
+		ReplaySafe: false, LLMCall: true,
 		LeaseToken: uuid.NewString(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
 	})
 	if err != nil {
@@ -78,6 +82,9 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	}
 	switch claim.Outcome {
 	case repository.AgentStepClaimCompleted:
+		if claim.ToolCall == nil || claim.ToolCall.CallKind != model.AgentCallKindPlannerLLM || claim.ToolCall.ToolName != videoResearchPlannerCall || claim.ToolCall.ArgumentsDigest != inputDigest || claim.ToolCall.CallDigest != callDigest {
+			return VideoResearchDecision{}, false, errors.New("persisted planner call does not match the current safe input")
+		}
 		var stored durableResearchDecision
 		if err := json.Unmarshal([]byte(claim.Step.ResultCheckpoint), &stored); err != nil {
 			return VideoResearchDecision{}, false, fmt.Errorf("decode persisted planner decision: %w", err)
@@ -98,7 +105,7 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 		return VideoResearchDecision{}, false, fmt.Errorf("planner step %s claim failed", stepID)
 	}
 
-	decision, planErr := r.planner.NextDecision(ctx, state, r.registry.Definitions())
+	decision, usage, planErr := callVideoResearchPlanner(ctx, r.planner, state, definitions)
 	if planErr == nil {
 		decision, planErr = r.validatedResearchDecision(state, runtime.TaskID, decision)
 		if planErr != nil {
@@ -108,7 +115,10 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	if planErr != nil {
 		_, _ = execution.repo.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
 			UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: "planner_failure", ErrorMessage: safeAgentError(planErr), Now: execution.now(),
+			ErrorCode: "planner_failure", ErrorMessage: safeAgentError(planErr),
+			PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
+			UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
+			Now: execution.now(),
 		})
 		return VideoResearchDecision{}, false, planErr
 	}
@@ -119,7 +129,10 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	}
 	completed, err := execution.repo.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Attempt: 1, LeaseToken: claim.Step.LeaseToken,
-		OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"), ResultCheckpoint: string(encoded), Now: execution.now(),
+		OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"), ResultCheckpoint: string(encoded),
+		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CostMicros: usage.CostMicros,
+		UsageSource: usage.UsageSource, TokenEstimated: usage.TokenEstimated, Currency: usage.Currency, PriceVersion: usage.PriceVersion,
+		Now: execution.now(),
 	})
 	if err != nil {
 		return VideoResearchDecision{}, false, err
@@ -128,6 +141,29 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 		return VideoResearchDecision{}, false, errors.New("planner completion CAS failed")
 	}
 	return checkpoint.toDecision(), false, nil
+}
+
+func callVideoResearchPlanner(ctx context.Context, planner VideoResearchPlanner, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
+	if observed, ok := planner.(VideoResearchPlannerWithUsage); ok {
+		return observed.NextDecisionWithUsage(ctx, state, tools)
+	}
+	decision, err := planner.NextDecision(ctx, state, tools)
+	return decision, VideoResearchPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}, err
+}
+
+func safePlannerInputSummary(state VideoResearchState, tools []VideoAgentToolDefinition) (string, string) {
+	toolNames := make([]string, 0, len(tools))
+	for _, definition := range tools {
+		toolNames = append(toolNames, definition.Name)
+	}
+	stateJSON, _ := json.Marshal(state)
+	inputDigest := digestAgentValue("video-research-planner:v1:" + string(stateJSON) + ":" + strings.Join(toolNames, ","))
+	summary, _ := json.Marshal(map[string]any{
+		"schema": 1, "planner_version": "video-research-planner:v1", "input_digest": "sha256:" + inputDigest,
+		"goal_digest": "sha256:" + digestAgentValue(state.Goal), "candidate_tools": toolNames,
+		"completed_steps": state.CurrentStep, "evidence_count": len(state.Evidence), "pending_question_count": len(state.PendingQuestions),
+	})
+	return string(summary), inputDigest
 }
 
 func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state VideoResearchState, runtime VideoAgentToolRuntime, decision VideoResearchDecision) (VideoAgentToolResult, VideoResearchObservation, bool, error) {

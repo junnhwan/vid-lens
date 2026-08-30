@@ -33,10 +33,15 @@ type frozenAgentProfile struct {
 }
 
 type frozenAgentPolicy struct {
-	TopK         int      `json:"top_k"`
-	MaxSteps     int      `json:"max_steps"`
-	MaxReplans   int      `json:"max_replans"`
-	AllowedTools []string `json:"allowed_tools"`
+	TopK                  int      `json:"top_k"`
+	MaxSteps              int      `json:"max_steps"`
+	MaxReplans            int      `json:"max_replans"`
+	AllowedTools          []string `json:"allowed_tools"`
+	MaxWindowSelections   int      `json:"max_window_selections,omitempty"`
+	WindowRadius          int      `json:"window_radius,omitempty"`
+	MaxVisualCandidates   int      `json:"max_visual_candidates,omitempty"`
+	MaxVisualSelections   int      `json:"max_visual_selections,omitempty"`
+	MaxFinalEvidenceItems int      `json:"max_final_evidence_items,omitempty"`
 }
 
 type frozenAgentBudget struct {

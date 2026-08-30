@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -304,6 +305,16 @@ func (r *ChatRepository) ListRecentMessages(userID, sessionID int64, limit int) 
 		messages[len(desc)-1-i] = desc[i]
 	}
 	return messages, nil
+}
+
+func (r *ChatRepository) UpdateAssistantSnapshot(userID, sessionID, messageID int64, snapshot string) (bool, error) {
+	if userID <= 0 || sessionID <= 0 || messageID <= 0 || strings.TrimSpace(snapshot) == "" {
+		return false, gorm.ErrInvalidData
+	}
+	result := r.db.Model(&model.ChatMessage{}).
+		Where("id = ? AND user_id = ? AND session_id = ? AND role = ?", messageID, userID, sessionID, "assistant").
+		Update("retrieval_snapshot", snapshot)
+	return result.RowsAffected == 1, result.Error
 }
 
 // DeleteByTaskID removes direct video sessions and knowledge-base sessions whose
