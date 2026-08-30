@@ -7,6 +7,7 @@
 - [架构总览](architecture/overview.md)
 - [数据模型与存储边界](architecture/data-model.md)
 - [检索与回答链路](architecture/retrieval.md)
+- [视频理解管线改造计划](architecture/media-understanding-pipeline.md)
 - [Agent 流式契约（UI × 后端）](architecture/agent-streaming-contract.md)
 - [聊天 UI 已落地 × 后端现状与待补齐](architecture/frontend-chat-agent-gaps.md)
 - [Agent 总体设计与实施路线](architecture/agent-evolution.md)

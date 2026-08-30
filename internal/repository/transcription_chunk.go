@@ -11,6 +11,15 @@ type TranscriptionChunkRepository struct {
 	db *gorm.DB
 }
 
+type TranscriptionChunkTimeline struct {
+	SegmentKey       string
+	SegmenterVersion string
+	WindowStartMS    int64
+	WindowEndMS      int64
+	CoreStartMS      int64
+	CoreEndMS        int64
+}
+
 func NewTranscriptionChunkRepository(db *gorm.DB) *TranscriptionChunkRepository {
 	return &TranscriptionChunkRepository{db: db}
 }
@@ -34,6 +43,13 @@ func (r *TranscriptionChunkRepository) ListByTaskID(taskID int64) ([]model.Video
 }
 
 func (r *TranscriptionChunkRepository) UpsertRunning(taskID int64, chunkIndex int, audioObject string) error {
+	return r.UpsertRunningWithTimeline(taskID, chunkIndex, audioObject, TranscriptionChunkTimeline{})
+}
+
+func (r *TranscriptionChunkRepository) UpsertRunningWithTimeline(taskID int64, chunkIndex int, audioObject string, timeline TranscriptionChunkTimeline) error {
+	if err := validateTranscriptionTimeline(timeline); err != nil {
+		return err
+	}
 	existing, err := r.FindByTaskAndIndex(taskID, chunkIndex)
 	if err != nil {
 		return err
@@ -43,13 +59,22 @@ func (r *TranscriptionChunkRepository) UpsertRunning(taskID int64, chunkIndex in
 			TaskID:      taskID,
 			ChunkIndex:  chunkIndex,
 			AudioObject: audioObject,
-			Status:      model.TranscriptionChunkStatusRunning,
+			SegmentKey:  timeline.SegmentKey, SegmenterVersion: timeline.SegmenterVersion,
+			WindowStartMS: timeline.WindowStartMS, WindowEndMS: timeline.WindowEndMS,
+			CoreStartMS: timeline.CoreStartMS, CoreEndMS: timeline.CoreEndMS,
+			Status: model.TranscriptionChunkStatusRunning,
 		}).Error
 	}
 	return r.db.Model(existing).Updates(map[string]interface{}{
-		"audio_object": audioObject,
-		"status":       model.TranscriptionChunkStatusRunning,
-		"error_msg":    "",
+		"audio_object":      audioObject,
+		"segment_key":       timeline.SegmentKey,
+		"segmenter_version": timeline.SegmenterVersion,
+		"window_start_ms":   timeline.WindowStartMS,
+		"window_end_ms":     timeline.WindowEndMS,
+		"core_start_ms":     timeline.CoreStartMS,
+		"core_end_ms":       timeline.CoreEndMS,
+		"status":            model.TranscriptionChunkStatusRunning,
+		"error_msg":         "",
 	}).Error
 }
 
@@ -91,6 +116,53 @@ func (r *TranscriptionChunkRepository) UpsertCompletedWithRange(taskID int64, ch
 		"chars":        chars,
 		"error_msg":    "",
 	}).Error
+}
+
+func (r *TranscriptionChunkRepository) UpsertCompletedWithTimeline(taskID int64, chunkIndex int, audioObject, content string, timeline TranscriptionChunkTimeline) error {
+	if err := validateTranscriptionTimeline(timeline); err != nil {
+		return err
+	}
+	// Content is the raw ASR observation for the full overlap window. The
+	// compatibility second range must therefore cover the window; core range is
+	// persisted separately for later source ownership and semantic chunking.
+	startSecond := int(timeline.WindowStartMS / 1000)
+	endSecond := int((timeline.WindowEndMS + 999) / 1000)
+	if timeline.WindowEndMS == 0 {
+		startSecond, endSecond = 0, 0
+	}
+	existing, err := r.FindByTaskAndIndex(taskID, chunkIndex)
+	if err != nil {
+		return err
+	}
+	values := map[string]interface{}{
+		"audio_object": audioObject, "segment_key": timeline.SegmentKey, "segmenter_version": timeline.SegmenterVersion,
+		"window_start_ms": timeline.WindowStartMS, "window_end_ms": timeline.WindowEndMS,
+		"core_start_ms": timeline.CoreStartMS, "core_end_ms": timeline.CoreEndMS,
+		"start_second": startSecond, "end_second": endSecond,
+		"status": model.TranscriptionChunkStatusCompleted, "content": content,
+		"chars": len([]rune(content)), "error_msg": "",
+	}
+	if existing == nil {
+		return r.db.Create(&model.VideoTranscriptionChunk{
+			TaskID: taskID, ChunkIndex: chunkIndex, AudioObject: audioObject,
+			SegmentKey: timeline.SegmentKey, SegmenterVersion: timeline.SegmenterVersion,
+			WindowStartMS: timeline.WindowStartMS, WindowEndMS: timeline.WindowEndMS,
+			CoreStartMS: timeline.CoreStartMS, CoreEndMS: timeline.CoreEndMS,
+			StartSecond: startSecond, EndSecond: endSecond,
+			Status: model.TranscriptionChunkStatusCompleted, Content: content, Chars: len([]rune(content)),
+		}).Error
+	}
+	return r.db.Model(existing).Updates(values).Error
+}
+
+func validateTranscriptionTimeline(timeline TranscriptionChunkTimeline) error {
+	if timeline.WindowStartMS < 0 || timeline.WindowEndMS < timeline.WindowStartMS || timeline.CoreStartMS < 0 || timeline.CoreEndMS < timeline.CoreStartMS {
+		return gorm.ErrInvalidData
+	}
+	if timeline.CoreEndMS > 0 && (timeline.CoreStartMS < timeline.WindowStartMS || timeline.CoreEndMS > timeline.WindowEndMS) {
+		return gorm.ErrInvalidData
+	}
+	return nil
 }
 
 func (r *TranscriptionChunkRepository) UpsertFailed(taskID int64, chunkIndex int, audioObject, errMsg string) error {

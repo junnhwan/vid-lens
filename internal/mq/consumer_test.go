@@ -20,6 +20,7 @@ import (
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
+	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/repository"
 )
 
@@ -371,6 +372,71 @@ func TestTranscribeAudioPersistsFailedChunk(t *testing.T) {
 	}
 	if chunk.Status != model.TranscriptionChunkStatusFailed || chunk.ErrorMsg == "" || chunk.RetryCount != 1 {
 		t.Fatalf("failed chunk = %+v", chunk)
+	}
+}
+
+func TestTranscribeAudioUsesStableSegmentIdentityAndStitchesOverlap(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	tmpDir := t.TempDir()
+	chunkA := filepath.Join(tmpDir, "chunk-a.mp3")
+	chunkB := filepath.Join(tmpDir, "chunk-b.mp3")
+	for _, path := range []string{chunkA, chunkB} {
+		if err := os.WriteFile(path, []byte("audio"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	segments := []ffmpeg.AudioSegment{
+		{Index: 0, Path: chunkA, WindowStartMS: 0, WindowEndMS: 305_000, CoreStartMS: 0, CoreEndMS: 300_000, SegmentKey: "segment-0", Version: ffmpeg.AudioSegmenterVersion},
+		{Index: 1, Path: chunkB, WindowStartMS: 295_000, WindowEndMS: 600_000, CoreStartMS: 300_000, CoreEndMS: 600_000, SegmentKey: "segment-1", Version: ffmpeg.AudioSegmenterVersion},
+	}
+	ai := &recordingAI{transcripts: map[string]string{
+		chunkA: "边界前正在解释向量数据库的工作原理",
+		chunkB: "向量数据库的工作原理。然后进入检索部分。",
+	}}
+	consumer := &Consumer{
+		repo: repos, ai: ai, ffmpegPath: "ffmpeg",
+		splitAudioWindows: func(context.Context, string, string, int, int) ([]ffmpeg.AudioSegment, string, error) {
+			return segments, "", nil
+		},
+	}
+	result, err := consumer.transcribeAudio(context.Background(), 77, "audio.mp3", ai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "边界前正在解释向量数据库的工作原理。然后进入检索部分。" {
+		t.Fatalf("result = %q", result)
+	}
+	stored, err := repos.TranscriptionChunk.ListByTaskID(77)
+	if err != nil || len(stored) != 2 {
+		t.Fatalf("stored = %+v, err = %v", stored, err)
+	}
+	if stored[0].SegmentKey != "segment-0" || stored[0].StartSecond != 0 || stored[0].EndSecond != 305 || stored[1].SegmentKey != "segment-1" || stored[1].StartSecond != 295 || stored[1].EndSecond != 600 {
+		t.Fatalf("stored timeline = %+v", stored)
+	}
+}
+
+func TestTranscribeAudioDoesNotReuseCompletedChunkFromDifferentSegmentStrategy(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	if err := repos.TranscriptionChunk.UpsertCompletedWithTimeline(88, 0, "old.mp3", "旧策略结果", repository.TranscriptionChunkTimeline{SegmentKey: "old-key"}); err != nil {
+		t.Fatal(err)
+	}
+	ai := &recordingAI{transcripts: map[string]string{"new.mp3": "新策略结果"}}
+	consumer := &Consumer{
+		repo: repos, ai: ai,
+		splitAudioWindows: func(context.Context, string, string, int, int) ([]ffmpeg.AudioSegment, string, error) {
+			return []ffmpeg.AudioSegment{{Index: 0, Path: "new.mp3", SegmentKey: "new-key", Version: ffmpeg.AudioSegmenterVersion}}, "", nil
+		},
+	}
+	result, err := consumer.transcribeAudio(context.Background(), 88, "audio.mp3", ai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "新策略结果" || len(ai.transcribeInput) != 1 {
+		t.Fatalf("result = %q, inputs = %#v", result, ai.transcribeInput)
+	}
+	stored, err := repos.TranscriptionChunk.FindByTaskAndIndex(88, 0)
+	if err != nil || stored.SegmentKey != "new-key" || stored.Content != "新策略结果" {
+		t.Fatalf("stored = %+v, err = %v", stored, err)
 	}
 }
 

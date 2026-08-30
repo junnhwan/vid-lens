@@ -20,6 +20,8 @@ import (
 
 type splitAudioFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error)
 
+type splitAudioWindowsFunc func(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds, overlapSeconds int) ([]ffmpeg.AudioSegment, string, error)
+
 type ragIndexFunc func(ctx context.Context, task *model.VideoTask) error
 
 type visualIndexFunc func(ctx context.Context, task *model.VideoTask) (int, error)
@@ -62,6 +64,7 @@ type Consumer struct {
 	proxyURL               string
 	downloadURLPolicy      remoteurl.Policy
 	splitAudio             splitAudioFunc
+	splitAudioWindows      splitAudioWindowsFunc
 	ragIndex               ragIndexFunc
 	visualIndex            visualIndexFunc
 	ragProducer            ragIndexProducer
@@ -104,7 +107,7 @@ func NewConsumer(
 		ai:                aiStrategy,
 		rdb:               rdb,
 		ffmpegPath:        ffmpegPath,
-		splitAudio:        ffmpeg.SplitAudio,
+		splitAudioWindows: ffmpeg.SplitAudioWindows,
 		processingLease:   30 * time.Minute,
 		now:               time.Now,
 		newToken:          uuid.NewString,

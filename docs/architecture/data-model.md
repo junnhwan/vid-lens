@@ -16,6 +16,8 @@ Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidenc
 
 任务和各处理阶段分别记录状态。处理租约使用 token、版本和过期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。Agent research 与 `evidence_funnel` 恢复只读取上述独立执行表；`chat_messages.retrieval_snapshot` 继续是历史 UI 的兼容派生快照，不能作为执行恢复依据。
 
+`video_transcription_chunks` 保存每次 ASR observation 的稳定 `segment_key`、segmenter version、实际送入 provider 的 `window_start_ms/window_end_ms`，以及互不重叠的 `core_start_ms/core_end_ms`。当前 `overlap_windows_v1` 使用相邻重叠音频帮助恢复跨硬边界语句；旧 `start_second/end_second` 继续作为现有证据路径的兼容投影，并覆盖产生该行原始文本的完整 window，而不是更窄的 core。path-only 旧分片没有足够 provenance，不能启用文本去重拼接。
+
 `evidence_funnel` 在校验前只写入带 `run_id` 的不可用 assistant 占位消息，用于取得 Claim 所需的稳定 `message_id`；Evidence/Claim 校验完成后才在同一消息上同时发布正文和终态 snapshot。校验失败时占位消息保留为明确不可用状态，不会把未验证答案注入后续聊天历史。已完成 Run 的同一 `run_id` 从终态消息幂等返回，执行恢复仍不依赖该消息。
 
 ## 检索数据

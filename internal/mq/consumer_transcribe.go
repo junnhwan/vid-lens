@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/repository"
+	"vid-lens/internal/transcript"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -182,47 +182,47 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 // requirement, not an optimisation.
 func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
 	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageTranscribing})
-	splitAudio := c.splitAudio
-	if splitAudio == nil {
-		splitAudio = ffmpeg.SplitAudio
-	}
-
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunking started", slog.Int64("task_id", taskID), slog.Int("segment_seconds", ffmpeg.DefaultAudioSegmentSeconds))
-	chunks, err := splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunking started",
+		slog.Int64("task_id", taskID),
+		slog.Int("segment_seconds", ffmpeg.DefaultAudioSegmentSeconds),
+		slog.Int("overlap_seconds", ffmpeg.DefaultAudioSegmentOverlapSeconds))
+	segments, cleanupDir, err := c.prepareAudioSegments(ctx, audioPath)
 	if err != nil {
 		return "", err
 	}
 	if err := requireProcessingLease(ctx); err != nil {
 		return "", err
 	}
-	if len(chunks) == 0 {
+	if len(segments) == 0 {
 		return "", fmt.Errorf("没有可转写的音频片段")
 	}
-	defer os.RemoveAll(filepath.Dir(chunks[0]))
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunks prepared", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(chunks)))
+	if cleanupDir != "" {
+		defer os.RemoveAll(cleanupDir)
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunks prepared", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(segments)))
 
-	parts := make([]string, 0, len(chunks))
-	for i, chunk := range chunks {
+	parts := make([]string, 0, len(segments))
+	for i, segment := range segments {
 		if err := requireProcessingLease(ctx); err != nil {
 			return "", err
 		}
-		if completed := c.completedTranscriptionChunk(taskID, i); completed != "" {
+		if completed := c.completedTranscriptionChunk(taskID, i, segment.SegmentKey); completed != "" {
 			if metrics := observability.DefaultMetrics(); metrics != nil {
 				metrics.IncASRChunkReuse()
 			}
-			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk reused", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", len([]rune(completed))))
+			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk reused", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(segments)), slog.Int("output_chars", len([]rune(completed))))
 			parts = append(parts, completed)
 			continue
 		}
 
-		if err := c.markTranscriptionChunkRunning(ctx, taskID, i, chunk); err != nil {
+		if err := c.markTranscriptionChunkRunning(ctx, taskID, i, segment); err != nil {
 			return "", err
 		}
 		if err := requireProcessingLease(ctx); err != nil {
 			return "", err
 		}
 		chunkStartedAt := time.Now()
-		text, transcribeErr := strategy.Transcribe(ctx, chunk)
+		text, transcribeErr := strategy.Transcribe(ctx, segment.Path)
 		if err := requireProcessingLease(ctx); err != nil {
 			return "", err
 		}
@@ -230,7 +230,7 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 			if metrics := observability.DefaultMetrics(); metrics != nil {
 				metrics.ObserveASRChunk("failed", time.Since(chunkStartedAt))
 			}
-			if err := c.markTranscriptionChunkFailed(ctx, taskID, i, chunk, transcribeErr); err != nil {
+			if err := c.markTranscriptionChunkFailed(ctx, taskID, i, segment.Path, transcribeErr); err != nil {
 				return "", err
 			}
 			if err := requireProcessingLease(ctx); err != nil {
@@ -243,9 +243,9 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		}
 		text = strings.TrimSpace(text)
 		chars := len([]rune(text))
-		observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", chars))
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed", slog.Int64("task_id", taskID), slog.Int("chunk_index", i+1), slog.Int("chunk_count", len(segments)), slog.Int("output_chars", chars))
 		if text != "" {
-			if err := c.markTranscriptionChunkCompleted(ctx, taskID, i, chunk, text); err != nil {
+			if err := c.markTranscriptionChunkCompleted(ctx, taskID, i, segment, text); err != nil {
 				return "", err
 			}
 			if err := requireProcessingLease(ctx); err != nil {
@@ -261,17 +261,70 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		return "", fmt.Errorf("ASR 返回空结果")
 	}
 
-	transcript := strings.Join(parts, "\n\n")
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr transcription completed", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(chunks)), slog.Int("output_chars", len([]rune(transcript))))
-	return transcript, nil
+	stitched := transcript.Stitch(parts)
+	if !hasOverlappingAudioWindows(segments) {
+		// Compatibility adapters and historical tests provide path-only chunks.
+		// Without proof that the audio inputs overlap, deduplicating equal text
+		// could destroy legitimately repeated speech.
+		stitched = transcript.StitchResult{Content: strings.Join(parts, "\n\n")}
+	}
+	matchedBoundaries := 0
+	for _, boundary := range stitched.Boundaries {
+		if boundary.MatchRunes > 0 {
+			matchedBoundaries++
+		}
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr transcription completed",
+		slog.Int64("task_id", taskID), slog.Int("chunk_count", len(segments)),
+		slog.Int("boundary_count", len(stitched.Boundaries)), slog.Int("matched_boundaries", matchedBoundaries),
+		slog.Int("output_chars", len([]rune(stitched.Content))))
+	return stitched.Content, nil
 }
 
-func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int) string {
+func hasOverlappingAudioWindows(segments []ffmpeg.AudioSegment) bool {
+	if len(segments) < 2 {
+		return false
+	}
+	for i := 1; i < len(segments); i++ {
+		previous, current := segments[i-1], segments[i]
+		if previous.SegmentKey == "" || current.SegmentKey == "" || previous.Version == "" || current.Version == "" || previous.WindowEndMS <= current.WindowStartMS {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Consumer) prepareAudioSegments(ctx context.Context, audioPath string) ([]ffmpeg.AudioSegment, string, error) {
+	// Tests and explicitly injected legacy adapters keep the old path-only seam.
+	// Production consumers use the richer overlap-window adapter configured by
+	// NewConsumer.
+	if c.splitAudio != nil {
+		paths, err := c.splitAudio(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds)
+		if err != nil {
+			return nil, "", err
+		}
+		segments := make([]ffmpeg.AudioSegment, 0, len(paths))
+		for i, path := range paths {
+			segments = append(segments, ffmpeg.AudioSegment{Index: i, Path: path})
+		}
+		return segments, "", nil
+	}
+	split := c.splitAudioWindows
+	if split == nil {
+		split = ffmpeg.SplitAudioWindows
+	}
+	return split(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds, ffmpeg.DefaultAudioSegmentOverlapSeconds)
+}
+
+func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int, segmentKey string) string {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
 		return ""
 	}
 	chunk, err := c.repo.TranscriptionChunk.FindByTaskAndIndex(taskID, chunkIndex)
 	if err != nil || chunk == nil {
+		return ""
+	}
+	if segmentKey != "" && chunk.SegmentKey != segmentKey {
 		return ""
 	}
 	if chunk.Status == model.TranscriptionChunkStatusCompleted && strings.TrimSpace(chunk.Content) != "" {
@@ -280,22 +333,30 @@ func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int) str
 	return ""
 }
 
-func (c *Consumer) markTranscriptionChunkRunning(ctx context.Context, taskID int64, chunkIndex int, audioObject string) error {
+func (c *Consumer) markTranscriptionChunkRunning(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
 		return nil
 	}
 	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.TranscriptionChunk.UpsertRunning(taskID, chunkIndex, audioObject)
+		return repos.TranscriptionChunk.UpsertRunningWithTimeline(taskID, chunkIndex, segment.Path, transcriptionChunkTimeline(segment))
 	})
 }
 
-func (c *Consumer) markTranscriptionChunkCompleted(ctx context.Context, taskID int64, chunkIndex int, audioObject, content string) error {
+func (c *Consumer) markTranscriptionChunkCompleted(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment, content string) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
 		return nil
 	}
 	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.TranscriptionChunk.UpsertCompleted(taskID, chunkIndex, audioObject, content)
+		return repos.TranscriptionChunk.UpsertCompletedWithTimeline(taskID, chunkIndex, segment.Path, content, transcriptionChunkTimeline(segment))
 	})
+}
+
+func transcriptionChunkTimeline(segment ffmpeg.AudioSegment) repository.TranscriptionChunkTimeline {
+	return repository.TranscriptionChunkTimeline{
+		SegmentKey: segment.SegmentKey, SegmenterVersion: segment.Version,
+		WindowStartMS: segment.WindowStartMS, WindowEndMS: segment.WindowEndMS,
+		CoreStartMS: segment.CoreStartMS, CoreEndMS: segment.CoreEndMS,
+	}
 }
 
 func (c *Consumer) markTranscriptionChunkFailed(ctx context.Context, taskID int64, chunkIndex int, audioObject string, cause error) error {
