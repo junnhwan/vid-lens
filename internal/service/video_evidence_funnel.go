@@ -189,6 +189,7 @@ type windowExpansionCheckpoint struct {
 	Evidence    []RetrievedChunk `json:"evidence"`
 	RangeStart  int64            `json:"range_start_second,omitempty"`
 	RangeEnd    int64            `json:"range_end_second,omitempty"`
+	RangeKnown  bool             `json:"range_known"`
 	WindowCount int              `json:"window_count"`
 }
 
@@ -231,10 +232,6 @@ func (r *evidenceFunnelRunner) Run(ctx context.Context, goal string) (*EvidenceF
 	if err := json.Unmarshal(searchRaw, &search); err != nil {
 		return nil, err
 	}
-	if len(search.Citations) == 0 {
-		return nil, errors.New("未检索到足够相关的视频片段")
-	}
-
 	windowCandidates := transcriptGapCandidates(search.Citations)
 	windowDecision, err := r.selectGaps(ctx, 3, evidenceFunnelSelectWindows, goal, windowCandidates, r.policy.MaxWindowSelections)
 	if err != nil {
@@ -248,7 +245,7 @@ func (r *evidenceFunnelRunner) Run(ctx context.Context, goal string) (*EvidenceF
 	windowsRaw, err := r.execute(ctx, evidenceFunnelActionSpec{StepID: "funnel-windows", Sequence: 4, Action: evidenceFunnelExpandWindows, Kind: "retrieve", ReplaySafe: true},
 		selectedWindows, map[string]any{"schema": 1, "candidate_ids": candidateIDs(selectedWindows), "radius": r.policy.WindowRadius}, func() (evidenceFunnelActionResult, error) {
 			checkpoint, err := r.expandWindows(ctx, selectedWindows)
-			return evidenceFunnelActionResult{Checkpoint: checkpoint, OutputRef: fmt.Sprintf("windows:%d", checkpoint.WindowCount), Evidence: checkpoint.Evidence, Metrics: map[string]any{"hits": len(checkpoint.Evidence), "windows": checkpoint.WindowCount, "range_start_second": checkpoint.RangeStart, "range_end_second": checkpoint.RangeEnd, "coverage": "transcript_window"}}, err
+			return evidenceFunnelActionResult{Checkpoint: checkpoint, OutputRef: fmt.Sprintf("windows:%d", checkpoint.WindowCount), Evidence: checkpoint.Evidence, Metrics: map[string]any{"hits": len(checkpoint.Evidence), "windows": checkpoint.WindowCount, "range_start_second": checkpoint.RangeStart, "range_end_second": checkpoint.RangeEnd, "range_known": checkpoint.RangeKnown, "coverage": "transcript_window"}}, err
 		})
 	if err != nil {
 		return nil, err
@@ -259,7 +256,7 @@ func (r *evidenceFunnelRunner) Run(ctx context.Context, goal string) (*EvidenceF
 	}
 
 	var visualCandidates []EvidenceGapCandidate
-	if !windowDecision.Done {
+	if !windowDecision.Done && windows.RangeKnown {
 		visualCandidates, err = r.visualGapCandidates(windows.RangeStart, windows.RangeEnd)
 		if err != nil {
 			return nil, err
@@ -288,11 +285,12 @@ func (r *evidenceFunnelRunner) Run(ctx context.Context, goal string) (*EvidenceF
 	}
 
 	allEvidence := mergeFunnelEvidence(r.runtime.TaskID, r.policy.MaxFinalEvidenceItems, search.Citations, windows.Evidence, visual.Evidence)
-	if len(allEvidence) == 0 {
-		return nil, errors.New("证据漏斗没有产生可引用证据")
-	}
-	answerRaw, err := r.execute(ctx, evidenceFunnelActionSpec{StepID: "funnel-answer", Sequence: 7, Action: evidenceFunnelBuildAnswer, Kind: "answer", ReplaySafe: false, LLMCall: true},
+	answerRaw, err := r.execute(ctx, evidenceFunnelActionSpec{StepID: "funnel-answer", Sequence: 7, Action: evidenceFunnelBuildAnswer, Kind: "answer", ReplaySafe: len(allEvidence) == 0, LLMCall: len(allEvidence) > 0},
 		map[string]any{"goal": goal, "summary": videoContext.Summary, "evidence": allEvidence}, map[string]any{"schema": 1, "goal_digest": "sha256:" + digestAgentValue(goal), "summary_digest": "sha256:" + digestAgentValue(videoContext.Summary), "evidence_count": len(allEvidence)}, func() (evidenceFunnelActionResult, error) {
+			if len(allEvidence) == 0 {
+				answer := BuildCitedAnswerResult{Answer: "未找到可用于回答该问题的 transcript、时间窗或视觉/OCR 证据，因此目前无法确认，结论不确定。", Citations: []RetrievedChunk{}}
+				return evidenceFunnelActionResult{Checkpoint: answer, OutputRef: "no_evidence", Metrics: map[string]any{"hits": 0, "coverage": "no_evidence"}}, nil
+			}
 			intermediate := "按固定证据漏斗核验。全局摘要仅作定位背景，具体事实必须引用 transcript、时间窗或视觉/OCR 证据。"
 			if videoContext.SummaryAvailable {
 				intermediate += "\n全局摘要：" + videoContext.Summary
@@ -329,16 +327,25 @@ func (r *evidenceFunnelRunner) ValidateAndRecord(ctx context.Context, req Eviden
 			if err != nil {
 				return evidenceFunnelActionResult{}, err
 			}
+			if view == nil || len(view.Claims) == 0 {
+				return evidenceFunnelActionResult{}, errors.New("evidence claim validation produced no auditable claims")
+			}
+			for _, claim := range view.Claims {
+				if claim.Status == model.ClaimStatusUnsupported {
+					return evidenceFunnelActionResult{}, errors.New("evidence claim validation rejected an unsupported answer claim")
+				}
+			}
 			metrics := map[string]any{"coverage": "evidence_claim_validation", "final_citation_count": len(req.Evidence), "claims": 0, "evidence": 0, "links": 0}
-			if view != nil {
-				metrics["claims"], metrics["evidence"], metrics["links"] = len(view.Claims), len(view.Evidence), len(view.ClaimEvidence)
+			metrics["claims"], metrics["evidence"], metrics["links"] = len(view.Claims), len(view.Evidence), len(view.ClaimEvidence)
+			if err := r.execution.repo.MarkFinalEvidenceRefs(ctx, req.UserID, req.RunID, finalRefs); err != nil {
+				return evidenceFunnelActionResult{}, err
 			}
 			return evidenceFunnelActionResult{Checkpoint: metrics, OutputRef: "claims_validated", Metrics: metrics}, nil
 		})
 	if err != nil {
 		return err
 	}
-	return r.execution.repo.MarkFinalEvidenceRefs(ctx, req.UserID, req.RunID, finalRefs)
+	return nil
 }
 
 func (r *evidenceFunnelRunner) selectGaps(ctx context.Context, sequence int, action, goal string, candidates []EvidenceGapCandidate, maxSelections int) (EvidenceGapDecision, error) {
@@ -492,6 +499,9 @@ func (r *evidenceFunnelRunner) expandWindows(ctx context.Context, selected []Evi
 			if _, ok := selectedIndex[chunk.ChunkIndex]; !ok || chunk.Status != model.TranscriptionChunkStatusCompleted {
 				continue
 			}
+			if chunk.StartSecond < 0 || chunk.EndSecond <= chunk.StartSecond {
+				continue
+			}
 			if !hasRange || int64(chunk.StartSecond) < checkpoint.RangeStart {
 				checkpoint.RangeStart = int64(chunk.StartSecond)
 			}
@@ -500,11 +510,15 @@ func (r *evidenceFunnelRunner) expandWindows(ctx context.Context, selected []Evi
 			}
 			hasRange = true
 		}
+		checkpoint.RangeKnown = hasRange
 	}
 	return checkpoint, validateFunnelEvidenceScope(r.runtime.TaskID, checkpoint.Evidence)
 }
 
 func (r *evidenceFunnelRunner) visualGapCandidates(startSecond, endSecond int64) ([]EvidenceGapCandidate, error) {
+	if startSecond < 0 || endSecond <= startSecond {
+		return nil, nil
+	}
 	if r.repos == nil || r.repos.VisualFrame == nil {
 		return nil, errors.New("visual frame repository unavailable")
 	}
@@ -515,7 +529,7 @@ func (r *evidenceFunnelRunner) visualGapCandidates(startSecond, endSecond int64)
 	candidates := make([]EvidenceGapCandidate, 0, len(frames))
 	for _, frame := range frames {
 		second := frame.TimeMs / 1000
-		if endSecond > startSecond && (second < startSecond-15 || second > endSecond+15) {
+		if second < startSecond-15 || second > endSecond+15 {
 			continue
 		}
 		candidates = append(candidates, EvidenceGapCandidate{ID: fmt.Sprintf("visual-%d", frame.ID), Kind: "visual_ocr", EvidenceID: fmt.Sprintf("visual-frame:%d", frame.ID), TaskID: frame.TaskID, ChunkIndex: frame.FrameIndex, StartSecond: second, EndSecond: second + 1, Content: frame.OCRText})

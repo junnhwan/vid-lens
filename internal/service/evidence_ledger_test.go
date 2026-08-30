@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -64,7 +65,7 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 			bound = evidence
 		}
 	}
-	if bound.SourceType != "visual_frame" || bound.TimeRangeStatus != model.EvidenceTimeRangeKnown || bound.StartSecond != 12 || bound.EndSecond != 13 {
+	if bound.SourceType != "visual_ocr" || bound.TimeRangeStatus != model.EvidenceTimeRangeKnown || bound.StartSecond != 12 || bound.EndSecond != 13 {
 		t.Fatalf("bound evidence = %+v", bound)
 	}
 	if bound.TaskID != 42 || bound.DocumentID == "" || bound.QuoteText != "[画面] 可复核的视觉引用" || bound.ContentHash == "" || bound.StableLocator == "" {
@@ -77,6 +78,48 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 	other, err := ledger.GetRun(context.Background(), 8, req.RunID)
 	if err != nil || other != nil {
 		t.Fatalf("cross-owner view = %+v, err=%v", other, err)
+	}
+}
+
+func TestEvidenceLedgerUsesVisualOCRProvenanceWhenTextAlsoMatchesTranscript(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	sharedText := "画面和转写都包含的 owner 校验"
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 0, "audio/chunk-0.mp3", sharedText, 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.VisualFrame.ReplaceTaskFrames(42, []model.VideoVisualFrame{{
+		TaskID: 42, FrameIndex: 7, TimeMs: 45500, ObjectKey: "frames/42/7.jpg", OCRText: sharedText,
+		Source: "scene", CaptionMethod: "ocr", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	frames, err := repos.VisualFrame.ListCompletedWithText(42)
+	if err != nil || len(frames) != 1 {
+		t.Fatalf("frames = %+v, %v", frames, err)
+	}
+	runID := "22222222-2222-2222-2222-222222222222"
+	citation := Citation{
+		TaskID: 42, CitationID: "C1", EvidenceID: fmt.Sprintf("visual-frame:%d", frames[0].ID),
+		ChunkIndex: frames[0].FrameIndex, Content: sharedText, Source: "visual_ocr",
+	}
+	if err := NewEvidenceLedgerService(repos).RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+		UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: runID,
+		RawAnswer: "画面确认 owner 校验。[C1]", Evidence: []Citation{citation}, Retrieved: []Citation{citation},
+	}); err != nil {
+		t.Fatalf("RecordAnswer() error = %v", err)
+	}
+	view, err := NewEvidenceLedgerService(repos).GetRun(context.Background(), 7, runID)
+	if err != nil || view == nil || len(view.Evidence) != 1 {
+		t.Fatalf("ledger view = %+v, %v", view, err)
+	}
+	evidence := view.Evidence[0]
+	if evidence.SourceType != "visual_ocr" || evidence.DocumentID != fmt.Sprintf("visual_frame:%d", frames[0].ID) || evidence.StartSecond != 45 || evidence.EndSecond != 46 || evidence.TimeRangeStatus != model.EvidenceTimeRangeKnown {
+		t.Fatalf("visual OCR evidence = %+v", evidence)
+	}
+	for _, want := range []string{`"retrieval_source":"visual_ocr"`, `"frame_id":`, `"time_ms":45500`, `"object_key":"frames/42/7.jpg"`} {
+		if !strings.Contains(evidence.StableLocator, want) {
+			t.Fatalf("stable locator %s missing %s", evidence.StableLocator, want)
+		}
 	}
 }
 

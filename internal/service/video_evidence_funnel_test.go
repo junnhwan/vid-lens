@@ -26,7 +26,8 @@ func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index, content := range []string{"前置背景", "owner 校验来自 transcript", "后置背景"} {
-		if err := repos.TranscriptionChunk.UpsertCompleted(task.ID, index, fmt.Sprintf("audio-%d", index), content); err != nil {
+		startSecond := index * 30
+		if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, index, fmt.Sprintf("audio-%d", index), content, startSecond, startSecond+20); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,6 +95,120 @@ func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 	snapshot, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
 	if err != nil || snapshot.RunID != result.RunID || len(snapshot.Steps) != 8 {
 		t.Fatalf("funnel compatibility snapshot = %+v, %v", snapshot, err)
+	}
+	recovered, err := agent.AskEvidenceFunnel(context.Background(), EvidenceFunnelRequest{UserID: 7, SessionID: session.ID, Goal: "核验 owner", TopK: 1, RunID: result.RunID}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"})
+	if err != nil || recovered.MessageID != result.MessageID || recovered.Answer != result.Answer || len(recovered.Trace) != 8 {
+		t.Fatalf("completed funnel recovery = %+v, %v", recovered, err)
+	}
+	messages, err = repos.Chat.ListMessages(7, session.ID)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("idempotent funnel messages = %+v, %v", messages, err)
+	}
+}
+
+func TestVideoEvidenceFunnelKeepsEightStepsAndReturnsUncertainWithoutTranscriptEvidence(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	if err := repos.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{{
+		TaskID: task.ID, FrameIndex: 9, TimeMs: 90000, ObjectKey: "frames/9.jpg", OCRText: "整段视频中的任意画面", Source: "interval", CaptionMethod: "ocr", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	chatClient := &scriptedChatClient{}
+	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	result, err := agent.AskEvidenceFunnel(context.Background(), EvidenceFunnelRequest{
+		UserID: 7, SessionID: session.ID, Goal: "没有命中的问题", TopK: 1, RunID: "funnel-no-evidence",
+	}, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("AskEvidenceFunnel() error = %v", err)
+	}
+	if len(result.Citations) != 0 || !strings.Contains(result.Answer, "无法确认") || !strings.Contains(result.Answer, "不确定") {
+		t.Fatalf("no-evidence result = %+v", result)
+	}
+	if got := traceTools(result.Trace); got != strings.Join(evidenceFunnelActionOrder, "|") {
+		t.Fatalf("no-evidence trace = %s", got)
+	}
+	if len(chatClient.messages) != 0 {
+		t.Fatalf("no-evidence path invoked planner/answer LLM %d times", len(chatClient.messages))
+	}
+	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, result.RunID)
+	if err != nil || execution == nil || len(execution.Steps) != 8 || execution.Run.LLMCallsUsed != 0 || execution.Run.VisionCallsUsed != 0 {
+		t.Fatalf("no-evidence execution = %+v, %v", execution, err)
+	}
+	if execution.ToolCalls[5].EvidenceRefs != "[]" || execution.ToolCalls[5].FinalEvidenceRefs != "[]" {
+		t.Fatalf("unknown-range visual call selected frames: %+v", execution.ToolCalls[5])
+	}
+	ledger, err := NewEvidenceLedgerService(repos).GetRun(context.Background(), 7, result.RunID)
+	if err != nil || ledger == nil || len(ledger.Claims) != 1 || ledger.Claims[0].Status != model.ClaimStatusUncertain || len(ledger.Evidence) != 0 {
+		t.Fatalf("no-evidence ledger = %+v, %v", ledger, err)
+	}
+}
+
+func TestEvidenceFunnelDoesNotSelectVisualFramesWhenASRRangeIsUnknown(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	chunks := []model.VideoChunk{{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "owner transcript", ContentHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "unknown-range"}}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "embed", chunks); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompleted(task.ID, 0, "audio-0", "owner transcript"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{{
+		TaskID: task.ID, FrameIndex: 20, TimeMs: 200000, ObjectKey: "frames/20.jpg", OCRText: "不应被选择", Source: "interval", CaptionMethod: "ocr", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	chatClient := &scriptedChatClient{responses: []string{`{"done":false,"candidate_ids":["transcript-1"]}`, "owner transcript [C1]。"}}
+	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
+		TaskID: task.ID, EvidenceID: "unknown-range-hit", ChunkID: chunks[0].ID, ChunkIndex: 0, Content: chunks[0].Content, Source: "vector",
+	}}}, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	result, err := agent.AskEvidenceFunnel(context.Background(), EvidenceFunnelRequest{
+		UserID: 7, SessionID: session.ID, Goal: "owner", TopK: 1, RunID: "funnel-unknown-asr-range",
+	}, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"})
+	if err != nil {
+		t.Fatalf("AskEvidenceFunnel() error = %v", err)
+	}
+	if len(chatClient.messages) != 2 {
+		t.Fatalf("planner/answer calls = %d, want no visual planner call", len(chatClient.messages))
+	}
+	for _, citation := range result.Citations {
+		if citation.Source == "visual_ocr" || strings.HasPrefix(citation.EvidenceID, "visual-frame:") {
+			t.Fatalf("unknown ASR range selected visual citation: %+v", citation)
+		}
+	}
+	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, result.RunID)
+	if err != nil || execution == nil || execution.ToolCalls[5].EvidenceRefs != "[]" {
+		t.Fatalf("unknown-range execution = %+v, %v", execution, err)
+	}
+}
+
+func TestEvidenceFunnelValidationFailureLeavesOnlyPendingAssistantHistory(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	chunks := []model.VideoChunk{{UserID: 7, TaskID: task.ID, ChunkIndex: 0, Content: "待校验事实", ContentHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "validation-failure"}}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "embed", chunks); err != nil {
+		t.Fatal(err)
+	}
+	generated := "这是一条未验证答案。"
+	chatClient := &scriptedChatClient{responses: []string{`{"done":false,"candidate_ids":["transcript-1"]}`, generated}}
+	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
+		TaskID: task.ID, EvidenceID: "validation-hit", ChunkID: chunks[0].ID, ChunkIndex: 0, Content: chunks[0].Content, Source: "vector",
+	}}}, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	_, err := agent.AskEvidenceFunnel(context.Background(), EvidenceFunnelRequest{
+		UserID: 7, SessionID: session.ID, Goal: "校验失败", TopK: 1, RunID: "funnel-validation-failure",
+	}, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"})
+	if err == nil || !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("AskEvidenceFunnel() error = %v", err)
+	}
+	messages, listErr := repos.Chat.ListMessages(7, session.ID)
+	if listErr != nil || len(messages) != 2 || messages[1].Content != evidenceFunnelPendingAnswer || strings.Contains(messages[1].Content, "未验证答案") || messages[1].RetrievalSnapshot == nil {
+		t.Fatalf("validation-failure messages = %+v, %v", messages, listErr)
+	}
+	snapshot, decodeErr := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
+	if decodeErr != nil || snapshot.RunID != "funnel-validation-failure" || len(snapshot.Citations) != 0 {
+		t.Fatalf("pending validation snapshot = %+v, %v", snapshot, decodeErr)
+	}
+	ledger, ledgerErr := NewEvidenceLedgerService(repos).GetRun(context.Background(), 7, "funnel-validation-failure")
+	if ledgerErr != nil || ledger == nil || len(ledger.Claims) != 1 || ledger.Claims[0].Status != model.ClaimStatusUnsupported {
+		t.Fatalf("rejected claim ledger = %+v, %v", ledger, ledgerErr)
 	}
 }
 

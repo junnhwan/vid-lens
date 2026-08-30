@@ -317,6 +317,19 @@ func (r *ChatRepository) UpdateAssistantSnapshot(userID, sessionID, messageID in
 	return result.RowsAffected == 1, result.Error
 }
 
+// UpdateAssistantResult publishes a validated assistant answer and its
+// compatibility snapshot together. This prevents a final answer from becoming
+// visible with a stale, pre-validation snapshot (or vice versa).
+func (r *ChatRepository) UpdateAssistantResult(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error) {
+	if userID <= 0 || sessionID <= 0 || messageID <= 0 || strings.TrimSpace(content) == "" || strings.TrimSpace(snapshot) == "" {
+		return false, gorm.ErrInvalidData
+	}
+	result := r.db.Model(&model.ChatMessage{}).
+		Where("id = ? AND user_id = ? AND session_id = ? AND role = ?", messageID, userID, sessionID, "assistant").
+		Updates(map[string]any{"content": content, "retrieval_snapshot": snapshot, "model_name": modelName})
+	return result.RowsAffected == 1, result.Error
+}
+
 // DeleteByTaskID removes direct video sessions and knowledge-base sessions whose
 // persisted source rows reference the task. Callers can compose this with
 // KnowledgeBaseRepository.DeleteMembershipsByTaskID in one repository transaction.

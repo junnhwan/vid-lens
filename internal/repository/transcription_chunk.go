@@ -54,6 +54,16 @@ func (r *TranscriptionChunkRepository) UpsertRunning(taskID int64, chunkIndex in
 }
 
 func (r *TranscriptionChunkRepository) UpsertCompleted(taskID int64, chunkIndex int, audioObject, content string) error {
+	return r.UpsertCompletedWithRange(taskID, chunkIndex, audioObject, content, 0, 0)
+}
+
+// UpsertCompletedWithRange persists a completed ASR segment with an optional
+// provider/decoder supplied time range. A 0/0 range explicitly means that the
+// segment timing is unknown; callers must not derive it from ChunkIndex.
+func (r *TranscriptionChunkRepository) UpsertCompletedWithRange(taskID int64, chunkIndex int, audioObject, content string, startSecond, endSecond int) error {
+	if startSecond < 0 || endSecond < startSecond {
+		return gorm.ErrInvalidData
+	}
 	existing, err := r.FindByTaskAndIndex(taskID, chunkIndex)
 	if err != nil {
 		return err
@@ -64,6 +74,8 @@ func (r *TranscriptionChunkRepository) UpsertCompleted(taskID int64, chunkIndex 
 			TaskID:      taskID,
 			ChunkIndex:  chunkIndex,
 			AudioObject: audioObject,
+			StartSecond: startSecond,
+			EndSecond:   endSecond,
 			Status:      model.TranscriptionChunkStatusCompleted,
 			Content:     content,
 			Chars:       chars,
@@ -72,6 +84,8 @@ func (r *TranscriptionChunkRepository) UpsertCompleted(taskID int64, chunkIndex 
 	}
 	return r.db.Model(existing).Updates(map[string]interface{}{
 		"audio_object": audioObject,
+		"start_second": startSecond,
+		"end_second":   endSecond,
 		"status":       model.TranscriptionChunkStatusCompleted,
 		"content":      content,
 		"chars":        chars,

@@ -158,6 +158,8 @@ flowchart LR
 
 每一级都复用同一 Run/Step/ToolCall 的 lease、CAS、attempt 和 checkpoint：`metrics` 记录命中与覆盖范围，ToolCall 自带耗时，`evidence_refs` 记录该级观察，`final_evidence_refs` 投影最终是否引用。最后一步同步写入并读取 Evidence Ledger 完成 Claim/Evidence 校验。视觉确认只读取当前视频已经完成的 OCR/视觉索引；在线 VLM 帧检查仍未启用，vision budget 固定为零。细节见 [agent-evidence.md](agent-evidence.md)。
 
+空 transcript 命中不会改变上述状态机：后续时间窗、视觉候选、视觉确认、答案构建和校验动作仍按固定顺序留下空 checkpoint，最终返回无引用的明确“不确定/无法确认”结果。视觉候选只有在持久化 ASR segment 提供真实 `start/end` 后才能生成；`0/0 + unknown` 不会退化为从整段视频任意取帧。最终答案先以不可用占位消息取得稳定 `message_id`，只有 Evidence/Claim 校验完成后才原位发布；校验失败不会把普通未验证答案留在聊天历史，Run/Step 表仍是恢复事实源。
+
 ## 受控 Agent 的运行规则
 
 ### 工具白名单

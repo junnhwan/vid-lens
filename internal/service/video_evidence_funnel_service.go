@@ -12,6 +12,8 @@ import (
 	"vid-lens/internal/model"
 )
 
+const evidenceFunnelPendingAnswer = "证据校验尚未完成，当前回答不可用。"
+
 // AskEvidenceFunnel runs the explicit, single-video, bounded evidence funnel.
 // It does not alter the default RAG or the existing research loop.
 func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceFunnelRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (result *VideoAgentResult, err error) {
@@ -35,11 +37,16 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if runID == "" {
 		runID = uuid.NewString()
 	}
-	if _, err = s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentEvidenceFunnelTemplate), "bounded-evidence-funnel", profile, frozenPolicy, budget); err != nil {
+	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentEvidenceFunnelTemplate), "bounded-evidence-funnel", profile, frozenPolicy, budget)
+	if err != nil {
 		return nil, err
 	}
+	if run.Status == model.AgentRunStatusCompleted {
+		return completedEvidenceFunnelResult(s, req.UserID, req.SessionID, runID)
+	}
+	validationCompleted := false
 	defer func() {
-		if err == nil || errors.Is(err, errAgentExecutionBusy) {
+		if err == nil || validationCompleted || errors.Is(err, errAgentExecutionBusy) {
 			return
 		}
 		status, reason := model.AgentRunStatusFailed, "evidence_funnel_failed"
@@ -72,10 +79,15 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if err != nil {
 		return nil, err
 	}
+	createdPending, pendingUserMessageID := false, int64(0)
 	if existingMessage != nil {
 		result.MessageID = existingMessage.ID
-	} else if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
-		return nil, err
+	} else {
+		pendingUserMessageID, err = s.saveEvidenceFunnelPendingExchange(req.UserID, req.SessionID, req.Goal, result)
+		if err != nil {
+			return nil, err
+		}
+		createdPending = true
 	}
 	ledgerRequest := EvidenceLedgerRecordRequest{
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID, RunID: runID,
@@ -84,17 +96,70 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if err := runner.ValidateAndRecord(ctx, ledgerRequest, sortedFinalEvidenceRefs(funnel.Citations)); err != nil {
 		return nil, fmt.Errorf("evidence funnel validation failed: %w", err)
 	}
+	validationCompleted = true
 	result.Trace = evidenceFunnelTrace(ctx, s, req.UserID, runID)
 	if snapshot, snapshotErr := MarshalAgentSnapshot(result); snapshotErr != nil {
 		return nil, snapshotErr
-	} else if updated, updateErr := s.chatSvc.repos.Chat.UpdateAssistantSnapshot(req.UserID, req.SessionID, result.MessageID, string(snapshot)); updateErr != nil || !updated {
+	} else if updated, updateErr := s.chatSvc.repos.Chat.UpdateAssistantResult(req.UserID, req.SessionID, result.MessageID, result.Answer, string(snapshot), result.Model); updateErr != nil || !updated {
 		if updateErr == nil {
-			updateErr = errors.New("assistant message disappeared before funnel snapshot update")
+			updateErr = errors.New("assistant message disappeared before validated funnel answer publish")
 		}
 		return nil, updateErr
 	}
+	_ = s.chatSvc.refreshRecentMemory(ctx, req.UserID, req.SessionID, recentLimit)
+	if createdPending && pendingUserMessageID > 0 && s.chatSvc.memoryCapture != nil {
+		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
+			UserID: req.UserID, UserText: req.Goal, SourceRef: fmt.Sprintf("chat_message:%d", pendingUserMessageID),
+		})
+	}
 	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "evidence_validated", nil)
 	return result, nil
+}
+
+func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID int64, question string, result *VideoAgentResult) (int64, error) {
+	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil || result == nil {
+		return 0, errors.New("chat repository unavailable")
+	}
+	pending := &VideoAgentResult{
+		Answer: evidenceFunnelPendingAnswer, Template: result.Template, Trace: result.Trace,
+		Model: result.Model, RunID: result.RunID, Mode: result.Mode, Citations: []Citation{},
+	}
+	snapshot, err := MarshalAgentSnapshot(pending)
+	if err != nil {
+		return 0, err
+	}
+	snapshotText := string(snapshot)
+	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
+	assistantMessage := &model.ChatMessage{
+		SessionID: sessionID, UserID: userID, Role: "assistant", Content: evidenceFunnelPendingAnswer,
+		RetrievalSnapshot: &snapshotText, ModelName: result.Model,
+	}
+	if err := s.chatSvc.repos.Chat.CreateExchange(userID, userMessage, assistantMessage, nil); err != nil {
+		return 0, err
+	}
+	result.MessageID = assistantMessage.ID
+	if session, findErr := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
+		s.chatSvc.maybeAutoTitleSession(session, question)
+	}
+	return userMessage.ID, nil
+}
+
+func completedEvidenceFunnelResult(service *VideoAgentService, userID, sessionID int64, runID string) (*VideoAgentResult, error) {
+	message, err := findAgentRunMessage(service, userID, sessionID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if message == nil || message.RetrievalSnapshot == nil || message.Content == evidenceFunnelPendingAnswer {
+		return nil, errors.New("completed evidence funnel answer is unavailable")
+	}
+	snapshot, err := DecodeAgentSnapshot(*message.RetrievalSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	return &VideoAgentResult{
+		Answer: message.Content, Template: snapshot.Template, Citations: snapshot.Citations, Trace: snapshot.Trace,
+		Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory,
+	}, nil
 }
 
 func findAgentRunMessage(service *VideoAgentService, userID, sessionID int64, runID string) (*model.ChatMessage, error) {

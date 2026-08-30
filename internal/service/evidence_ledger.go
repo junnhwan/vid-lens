@@ -181,13 +181,22 @@ func (s *EvidenceLedgerService) buildEvidence(req EvidenceLedgerRecordRequest, c
 		"evidence_id": sourceRef, "source_ref_kind": "rag_evidence_id", "retrieval_source": citation.Source,
 		"source_revision_status": model.EvidenceSourceRevisionUnavailable,
 	}
-	if resolved, ok, err := s.resolveTimeRange(taskID, quote); err != nil {
+	visualSource := isVisualOCRCitation(citation)
+	if visualSource {
+		artifact.SourceType = "visual_ocr"
+		artifact.DocumentID = sourceRef
+		locator["source_artifact"] = sourceRef
+	}
+	if resolved, ok, err := s.resolveTimeRange(taskID, citation); err != nil {
 		return model.AgentEvidence{}, err
 	} else if ok {
 		artifact.SourceType = resolved.sourceType
 		artifact.DocumentID = resolved.documentID
 		locator["source_artifact"] = resolved.documentID
 		locator["range_basis"] = resolved.rangeBasis
+		for key, value := range resolved.locator {
+			locator[key] = value
+		}
 		if resolved.endSecond > resolved.startSecond && resolved.startSecond >= 0 {
 			artifact.StartSecond = resolved.startSecond
 			artifact.EndSecond = resolved.endSecond
@@ -209,16 +218,16 @@ type resolvedEvidenceRange struct {
 	startSecond int64
 	endSecond   int64
 	rangeBasis  string
+	locator     map[string]any
 }
 
-func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, quote string) (resolvedEvidenceRange, bool, error) {
+func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, citation Citation) (resolvedEvidenceRange, bool, error) {
+	quote := strings.TrimSpace(citation.Content)
 	if taskID <= 0 || strings.TrimSpace(quote) == "" {
 		return resolvedEvidenceRange{}, false, nil
 	}
-	if looksLikeVisualEvidence(quote) {
-		if resolved, ok, err := s.resolveVisualRange(taskID, quote); ok || err != nil {
-			return resolved, ok, err
-		}
+	if isVisualOCRCitation(citation) {
+		return s.resolveVisualRange(taskID, citation.EvidenceID, quote)
 	}
 	if s.repos.TranscriptionChunk != nil {
 		chunks, err := s.repos.TranscriptionChunk.ListByTaskID(taskID)
@@ -236,10 +245,13 @@ func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, quote string) (re
 			return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), startSecond: start, endSecond: end, rangeBasis: "persisted_asr_segment"}, true, nil
 		}
 	}
-	return s.resolveVisualRange(taskID, quote)
+	if looksLikeVisualEvidence(quote) {
+		return s.resolveVisualRange(taskID, "", quote)
+	}
+	return resolvedEvidenceRange{}, false, nil
 }
 
-func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, quote string) (resolvedEvidenceRange, bool, error) {
+func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quote string) (resolvedEvidenceRange, bool, error) {
 	if s.repos.VisualFrame == nil {
 		return resolvedEvidenceRange{}, false, nil
 	}
@@ -247,14 +259,40 @@ func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, quote string) (
 	if err != nil {
 		return resolvedEvidenceRange{}, false, err
 	}
+	expectedFrameID, hasFrameID := visualFrameIDFromSourceRef(sourceRef)
 	for _, frame := range frames {
+		if hasFrameID && frame.ID != expectedFrameID {
+			continue
+		}
 		if !evidenceTextMatches(quote, frame.OCRText) {
 			continue
 		}
 		start := frame.TimeMs / 1000
-		return resolvedEvidenceRange{sourceType: "visual_frame", documentID: fmt.Sprintf("visual_frame:%d", frame.ID), startSecond: start, endSecond: start + 1, rangeBasis: "keyframe_timestamp"}, true, nil
+		return resolvedEvidenceRange{
+			sourceType: "visual_ocr", documentID: fmt.Sprintf("visual_frame:%d", frame.ID),
+			startSecond: start, endSecond: start + 1, rangeBasis: "keyframe_timestamp",
+			locator: map[string]any{
+				"frame_id": frame.ID, "frame_index": frame.FrameIndex, "time_ms": frame.TimeMs,
+				"object_key": frame.ObjectKey, "frame_source": frame.Source, "caption_method": frame.CaptionMethod,
+			},
+		}, true, nil
 	}
 	return resolvedEvidenceRange{}, false, nil
+}
+
+func isVisualOCRCitation(citation Citation) bool {
+	source := strings.ToLower(strings.TrimSpace(citation.Source))
+	return source == "visual_ocr" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(citation.EvidenceID)), "visual-frame:")
+}
+
+func visualFrameIDFromSourceRef(sourceRef string) (int64, bool) {
+	const prefix = "visual-frame:"
+	sourceRef = strings.ToLower(strings.TrimSpace(sourceRef))
+	if !strings.HasPrefix(sourceRef, prefix) {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(sourceRef, prefix)), 10, 64)
+	return id, err == nil && id > 0
 }
 
 func looksLikeVisualEvidence(quote string) bool {
