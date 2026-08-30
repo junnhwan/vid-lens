@@ -1,7 +1,7 @@
-# 聊天 UI 已落地能力 × 后端待补齐接口
+# 聊天 UI 已落地能力 × 后端现状与待补齐接口
 
-> **状态**：2026-08-29  
-> **前端**：`frontend/app/chat/`、`frontend/app/kb/[kbId]/`、`frontend/app/qa/`  
+> **状态**：2026-08-30
+> **前端**：`frontend/app/chat/`、`frontend/app/kb/[kbId]/`、`frontend/app/qa/`
 > **关联**：详细 SSE 事件设计见 [agent-streaming-contract.md](./agent-streaming-contract.md)
 
 ---
@@ -11,12 +11,13 @@
 | 能力 | 落点 | 数据来源（当前） |
 |------|------|------------------|
 | 方案 D 布局（对话主区 ~72%、可拖拽、右侧可收起） | `/chat/:taskId`、`/kb/:kbId` | 纯前端 |
-| 右侧「执行流水线」面板 | 同上 | **前端根据 RAG SSE 推断**（见 §2.2） |
-| 消息内可折叠「思考与检索轨迹」 | `ChatMessageRow` | 历史消息从 `retrieval_snapshot` 条数推断 |
+| 右侧「执行流水线」面板 | 同上 | 单视频 Agent 使用真实 SSE；普通 RAG / 知识库仍根据 RAG SSE 推断 |
+| 消息内可折叠「思考与检索轨迹」 | `ChatMessageRow` | Agent 优先读取 `steps[]`；旧消息继续兼容 `trace[]` 或引用条数推断 |
 | 流式回答 + 柔和光标 | `streamAsk` → `answer` 事件 | **已实现** |
 | 引用卡片完成后淡入 | `citations` 事件后 | **已实现** |
 | 问答入口页 `/qa` | 单视频 / 知识库列表 | `GET /media/tasks`、`GET /knowledge-bases` |
 | 侧栏「最近可问答」 | `AppShell` | 同上 |
+| 单视频 Agent 模式 | `/chat/:taskId` | `streamAgent()` → `/messages/agent/stream` |
 
 原型页 `/prototype/*` 仍保留作对比，**产品默认路径已是正式路由**。
 
@@ -49,7 +50,7 @@ GET /api/v1/chat/sessions/{session_id}/messages
 | 字段 | 前端用途 |
 |------|----------|
 | `content` | 回答正文 |
-| `retrieval_snapshot` | JSON 字符串 → 引用列表 + 降级轨迹（仅「检索 N 条」） |
+| `retrieval_snapshot` | JSON 字符串 → Agent `steps[]`/引用；旧消息降级为 `trace[]` 或「检索 N 条」 |
 
 ### 2.3 会话与范围
 
@@ -59,93 +60,50 @@ GET /api/v1/chat/sessions/{session_id}/messages
 | `POST /chat/sessions` + `scope_type: knowledge_base` + `knowledge_base_id` | 知识库问答 |
 | `GET /chat/sessions?task_id=` / `?knowledge_base_id=` | 侧栏会话列表 |
 
----
+### 2.4 单视频 Agent SSE（当前已实现）
 
-## 3. 后端待补齐（才能完整驱动 Agent UI）
-
-以下按**优先级**排列。未实现前，右侧流水线只能显示「检索 / 生成」两步推断，**无法展示真实思考、工具调用、多轮 Agent 步骤**。
-
-### P0 — Agent 流式 SSE（推荐）
-
-**端点（提案）**
+单视频 `/chat/:taskId` 的 Agent 模式调用：
 
 ```
 POST /api/v1/chat/sessions/{session_id}/messages/agent/stream
+{ "question", "top_k", "mode": "agent", "agent_profile"? }
 ```
 
-**请求体**
+当前端点只接受 `mode=agent` 和单视频 session。知识库 session、`mode=research`、`step_update`、`step_delta` 和 `think` 事件均不属于当前流式契约。后端复用已有模板 Video Agent，不输出原始 Chain-of-Thought。
 
-```json
-{
-  "question": "…",
-  "top_k": 4,
-  "mode": "" | "research"
-}
+当前成功路径为：
+
+```
+run_start
+→ step_start + tool_call + tool_result [+ retrieve_hits] + step_done  （工具步）
+→ step_start + tool_call + tool_result                              （回答步，等待完成）
+→ answer（分片）× N
+→ citations
+→ step_done（回答步）
+→ done
 ```
 
-**建议 SSE 事件**（与 `agent-streaming-contract.md` 一致）：
+前端消费位置：`frontend/lib/api.ts` → `streamAgent()`；轨迹合并位置：`frontend/components/chat/traceTypes.ts`。
 
-| event | 说明 | 前端映射 |
-|-------|------|----------|
-| `step_start` | `{ "step_id", "kind": "think"\|"retrieve"\|"tool"\|"answer", "label" }` | 右侧时间线节点 → running |
-| `step_delta` | 思考文本或工具输出片段 | 节点详情区增量 |
-| `retrieve_hits` | `{ "query", "hits", "sources"[] }` | 检索节点完成 |
-| `tool_call` | `{ "tool", "input" }` | 工具节点 |
-| `tool_result` | `{ "output" }` | 工具完成 |
-| `answer` | 回答增量（与 RAG 相同） | 对话区流式 |
-| `citations` | `Citation[]` | 引用卡片 |
-| `step_done` | `{ "step_id", "status": "done"\|"error" }` | 节点完成 |
-| `done` | `{ "message_id", "degraded?" }` | 整轮结束 |
-| `error` | `{ "message" }` | 失败 |
+## 3. 后端后续缺口
 
-**验收**：前端可删除 `streamTraceReducer` 的推断逻辑，改为直接消费 SSE。
+Agent SSE 的第一条纵向切片已经完成。当前右侧流水线的真实事件范围、事件顺序和限制以 [Agent 流式契约](./agent-streaming-contract.md) 为准；以下是后续独立能力，不应和已完成的 SSE 接入混在一起。
 
-### P1 — Agent 非流式增强（过渡方案）
+### 3.1 Run/Step 可恢复持久化
 
-在现有 `POST .../messages/agent` 响应中扩展 `trace` 结构，使一次性返回也能渲染右侧栏（无 Live 动效）：
+当前 Agent trace 会以 version 1 envelope 写入 `chat_messages.retrieval_snapshot`，足够支持历史消息回放，但不能支持中断后恢复、重试、步骤级查询或独立运行审计。
 
-```json
-{
-  "answer": "…",
-  "citations": [],
-  "trace": [
-    {
-      "step_id": "s1",
-      "kind": "think",
-      "label": "理解问题",
-      "status": "done",
-      "detail": "…",
-      "started_at": "…",
-      "ended_at": "…"
-    },
-    {
-      "step_id": "s2",
-      "kind": "retrieve",
-      "label": "检索转写",
-      "status": "done",
-      "query": "…",
-      "hits": 6,
-      "sources": ["视频标题"]
-    },
-    {
-      "step_id": "s3",
-      "kind": "tool",
-      "label": "调用工具",
-      "status": "done",
-      "tool": "summarize_segments",
-      "input": "…",
-      "output": "…"
-    }
-  ]
-}
-```
+目标模型见 [Agent 总体设计与实施路线](./agent-evolution.md)：独立的 `agent_runs`、`agent_steps`、`agent_tool_calls`、`agent_claims`、`agent_evidence` 和关联表；PostgreSQL 是权威来源，快照只做兼容视图。
 
-**额外要求**：
+### 3.2 知识库范围 Agent
 
-- 知识库会话支持 Agent（当前 `mode=research` 对 KB 会话报错）
-- `trace` 持久化到 `chat_messages` 或独立表，历史消息可回放流水线
+需要将检索工具和证据对象从单 `task_id` 扩展为 session scope-aware，并保留 `task_id`、`video_title`、`evidence_id` 等跨视频定位信息。还需要单独验收权限、空索引、部分视频失败、跨视频引用和成本上限。
 
-### P2 — RAG 流式中间事件（可选，减轻推断）
+### 3.3 研究模式流式化
+
+`mode=research` 目前仍是非流式的有界 Planner/Tool/Observe 实验路径；它与当前模板 Agent SSE 不绑定在同一个改动中。后续需要为 planner、工具执行、观察和停止原因设计安全的流式摘要，但不能输出原始思维链。
+
+### 3.4 RAG 流式中间事件（可选）
 
 在现有 `messages/stream` 上**可选**增加事件（不破坏旧客户端）：
 
@@ -157,7 +115,7 @@ POST /api/v1/chat/sessions/{session_id}/messages/agent/stream
 
 前端收到后即可替换当前的「先发问题 → 猜检索 running」推断。
 
-### P3 — 问答入口聚合 API（性能优化，非必须）
+### 3.5 问答入口聚合 API（性能优化，非必须）
 
 当前 `/qa` 调用 `listTasks` + `listKBs` 两次请求。若视频量大，可增加：
 
@@ -170,32 +128,31 @@ GET /api/v1/qa/hub
 
 ---
 
-## 4. 数据模型建议（持久化 trace）
+## 4. 数据模型现状与目标
 
-为支持「刷新后会话内流水线可回放」，建议在 assistant 消息上增加其一：
-
-**方案 A** — 扩展 `chat_messages.metadata`（JSONB）：
+当前已采用复用 `retrieval_snapshot` 的 version 1 Agent envelope：
 
 ```json
 {
-  "agent_trace": [ /* ChatTraceStep[] */ ],
-  "agent_mode": "research"
+  "version": 1,
+  "run_id": "uuid",
+  "mode": "agent",
+  "steps": [ /* AgentStepEvent 终态数组 */ ],
+  "citations": [ /* 与现网 Citation 相同 */ ]
 }
 ```
 
-**方案 B** — 复用并规范 `retrieval_snapshot` 为结构化对象（含 `trace` + `citations`）。
-
-前端 `parseMessages()` 已预留 `trace` 字段，后端落库后只需在 GET messages 时返回即可。
+这解决了当前历史回放问题，但不替代目标架构中的独立 Run/Step/Claim/Evidence 模型。`parseMessages()` 已优先读取 `steps[]`，并兼容旧 `trace[]` 和纯 `Citation[]` 快照。
 
 ---
 
-## 5. 前端接入清单（后端就绪后）
+## 5. 前端当前接入结果
 
-1. `frontend/lib/api.ts` 增加 `streamAgent()`，解析 §3 P0 事件。
-2. `chat/[taskId]/page.tsx`、`kb/[kbId]/page.tsx`：模式切换增加「Agent / 研究」时走 agent 端点。
-3. 删除或降级 `streamTraceReducer` 推断逻辑。
-4. `AgentTracePanel` 提示文案改为真实步骤来源。
-5. （可选）`useTypewriter` 用于 agent 非流式一次性 `answer` 字段。
+1. `frontend/lib/api.ts` 已提供 `streamAgent()`，解析当前真实 Agent SSE 事件，并支持 `AbortSignal`。
+2. `frontend/app/chat/[taskId]/page.tsx` 的单视频 Agent 模式调用 Agent SSE；普通 RAG 仍调用 `streamAsk()`。
+3. `frontend/app/kb/[kbId]/page.tsx` 暂不接入 Agent，继续使用 RAG 和推断轨迹。
+4. `agentTraceReducer` 按 `run_id + step_id` 幂等合并；`AgentTracePanel` 区分 `agent`、`inferred` 和 `legacy` 来源。
+5. 历史消息优先回放 Agent snapshot 的 `steps[]`，旧结构继续兼容。
 
 ---
 
@@ -206,18 +163,16 @@ GET /api/v1/qa/hub
 | 聊天 D 布局 | `frontend/components/chat/ChatSplitLayout.tsx` |
 | 右侧流水线 | `frontend/components/chat/AgentTracePanel.tsx` |
 | 轨迹类型 / 推断 | `frontend/components/chat/traceTypes.ts` |
-| 流式消费 | `frontend/lib/api.ts` → `streamAsk` |
+| 流式消费 | `frontend/lib/api.ts` → `streamAsk` / `streamAgent` |
 | 原型参考（可废弃） | `frontend/components/prototype/agent/VariantD.tsx` |
-| Agent 后端（实验） | `internal/handler/chat_agent.go`、`internal/service/` agent runner |
+| Agent 后端（实验） | `internal/handler/chat.go`、`internal/service/` agent runner |
 | 路由注册 | `cmd/server/router.go` → `messages/agent` |
 
 ---
 
-## 7. 分阶段建议
+## 7. 后续验证顺序
 
-| 阶段 | 后端 | 前端 | 用户体验 |
-|------|------|------|----------|
-| **当前** | RAG stream | D 布局 + 推断流水线 | 对话体验完整；右侧为简化两步 |
-| **+P1** | agent REST + trace | 接 agent API | 结束后可看完整步骤 |
-| **+P0** | agent stream | 接 SSE | Live 流水线 + 与原型 D 一致 |
-| **+P2** | RAG 中间事件 | 替换推断 | 严格 RAG 也有真实检索时点 |
+- 先以现有单视频 Agent SSE 为基线，补浏览器联调和断开/取消场景验证。
+- 再实现长期记忆的范围隔离、有限召回、异步失败降级和删除语义。
+- 随后建立 Claim/Evidence 账本，再扩展多粒度证据漏斗和知识库范围 Agent。
+- 每项能力独立提交，commit subject 直接描述实际变更，不使用进度编号或阶段代号。
