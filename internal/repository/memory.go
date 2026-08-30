@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +18,8 @@ import (
 )
 
 const memoryEmbeddingTable = "agent_memory_embeddings"
+
+var memoryAppendLocks [256]sync.Mutex
 
 type MemoryRepository struct {
 	db *gorm.DB
@@ -58,9 +63,18 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 	if item.Importance < 0 || item.Importance > 1 {
 		return MemoryAppendResult{}, gorm.ErrInvalidData
 	}
+	lockKey := fmt.Sprintf("%d\x00%s\x00%s\x00%s", item.UserID, item.ScopeType, item.ScopeID, item.Kind)
+	lock := &memoryAppendLocks[memoryLockHash(lockKey)%uint64(len(memoryAppendLocks))]
+	lock.Lock()
+	defer lock.Unlock()
 
 	var result MemoryAppendResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(memoryLockHash(lockKey))).Error; err != nil {
+				return err
+			}
+		}
 		var existing []model.AgentMemoryItem
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ? AND status IN ?",
@@ -108,6 +122,12 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 	return result, err
 }
 
+func memoryLockHash(value string) uint64 {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(value))
+	return hash.Sum64()
+}
+
 func createMemoryEvent(tx *gorm.DB, item *model.AgentMemoryItem, eventType, sourceRef string) error {
 	return tx.Create(&model.AgentMemoryEvent{
 		ID: uuid.NewString(), MemoryID: item.ID, UserID: item.UserID,
@@ -140,10 +160,101 @@ func (r *MemoryRepository) ListRecallable(ctx context.Context, userID int64, sco
 	if first {
 		return []model.AgentMemoryItem{}, nil
 	}
-	var items []model.AgentMemoryItem
+	var seeds []model.AgentMemoryItem
 	err := query.Where(scopeQuery).
-		Order("importance DESC, created_at DESC, id ASC").Limit(limit).Find(&items).Error
-	return items, err
+		Order("importance DESC, created_at DESC, id ASC").Limit(limit).Find(&seeds).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.expandRecallableConflicts(ctx, userID, seeds, now)
+}
+
+// SearchRecallable uses the pgvector projection for semantic seed ranking, then
+// expands every seeded conflict group from the relational source of truth.
+func (r *MemoryRepository) SearchRecallable(ctx context.Context, userID int64, scopes map[string][]string, embeddingModel string, vector []float32, limit int, now time.Time) ([]model.AgentMemoryItem, error) {
+	if r == nil || r.db == nil || userID <= 0 || len(scopes) == 0 || len(vector) == 0 || limit <= 0 {
+		return []model.AgentMemoryItem{}, nil
+	}
+	vectorLiteral := formatMemoryVector(vector)
+	query := r.db.WithContext(ctx).Model(&model.AgentMemoryItem{}).
+		Select("agent_memory_items.*, 1 - (ame.embedding <=> ?::vector) AS semantic_score", vectorLiteral).
+		Joins("JOIN "+memoryEmbeddingTable+" AS ame ON ame.memory_id = agent_memory_items.id").
+		Where("agent_memory_items.user_id = ? AND agent_memory_items.status IN ? AND agent_memory_items.source_ref <> ''", userID, []string{model.MemoryStatusActive, model.MemoryStatusConflicted}).
+		Where("agent_memory_items.expires_at IS NULL OR agent_memory_items.expires_at > ?", now).
+		Where("ame.embedding_model = ?", strings.TrimSpace(embeddingModel))
+	scopeQuery := r.db.Session(&gorm.Session{NewDB: true})
+	first := true
+	for scopeType, scopeIDs := range scopes {
+		if len(scopeIDs) == 0 {
+			continue
+		}
+		condition := r.db.Where("agent_memory_items.scope_type = ? AND agent_memory_items.scope_id IN ?", scopeType, scopeIDs)
+		if first {
+			scopeQuery, first = condition, false
+		} else {
+			scopeQuery = scopeQuery.Or(condition)
+		}
+	}
+	if first {
+		return []model.AgentMemoryItem{}, nil
+	}
+	var seeds []model.AgentMemoryItem
+	if err := query.Where(scopeQuery).Order("semantic_score DESC, agent_memory_items.importance DESC, agent_memory_items.id ASC").Limit(limit).Find(&seeds).Error; err != nil {
+		return nil, err
+	}
+	return r.expandRecallableConflicts(ctx, userID, seeds, now)
+}
+
+func (r *MemoryRepository) expandRecallableConflicts(ctx context.Context, userID int64, seeds []model.AgentMemoryItem, now time.Time) ([]model.AgentMemoryItem, error) {
+	items := append([]model.AgentMemoryItem(nil), seeds...)
+	seen := make(map[string]struct{}, len(items))
+	conflictQuery := r.db.Session(&gorm.Session{NewDB: true})
+	first := true
+	for _, item := range seeds {
+		seen[item.ID] = struct{}{}
+		if item.Status != model.MemoryStatusConflicted {
+			continue
+		}
+		condition := r.db.Where("scope_type = ? AND scope_id = ? AND kind = ?", item.ScopeType, item.ScopeID, item.Kind)
+		if first {
+			conflictQuery, first = condition, false
+		} else {
+			conflictQuery = conflictQuery.Or(condition)
+		}
+	}
+	if !first {
+		var siblings []model.AgentMemoryItem
+		if err := r.db.WithContext(ctx).Where("user_id = ? AND status IN ? AND source_ref <> ''", userID, []string{model.MemoryStatusActive, model.MemoryStatusConflicted}).
+			Where("expires_at IS NULL OR expires_at > ?", now).Where(conflictQuery).Find(&siblings).Error; err != nil {
+			return nil, err
+		}
+		for _, sibling := range siblings {
+			if _, ok := seen[sibling.ID]; ok {
+				continue
+			}
+			seen[sibling.ID] = struct{}{}
+			items = append(items, sibling)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := items[i], items[j]
+		if left.SemanticScore != nil || right.SemanticScore != nil {
+			if left.SemanticScore == nil {
+				return false
+			}
+			if right.SemanticScore == nil {
+				return true
+			}
+			if *left.SemanticScore != *right.SemanticScore {
+				return *left.SemanticScore > *right.SemanticScore
+			}
+		}
+		if left.Importance != right.Importance {
+			return left.Importance > right.Importance
+		}
+		return left.ID < right.ID
+	})
+	return items, nil
 }
 
 func (r *MemoryRepository) WithdrawForUser(ctx context.Context, userID int64, memoryID, sourceRef string) error {
@@ -172,6 +283,11 @@ func (r *MemoryRepository) transition(ctx context.Context, userID int64, memoryI
 		}
 		if err := tx.Model(&model.AgentMemoryItem{}).Where("id = ? AND user_id = ?", memoryID, userID).Updates(updates).Error; err != nil {
 			return err
+		}
+		if tx.Migrator().HasTable(memoryEmbeddingTable) {
+			if err := tx.Exec("DELETE FROM "+memoryEmbeddingTable+" WHERE memory_id = ? AND user_id = ?", memoryID, userID).Error; err != nil {
+				return err
+			}
 		}
 		return createMemoryEvent(tx, &item, eventType, sourceRef)
 	})
@@ -224,11 +340,7 @@ func (r *MemoryRepository) UpsertEmbedding(ctx context.Context, item model.Agent
 	if r == nil || r.db == nil || item.ID == "" || item.UserID <= 0 || strings.TrimSpace(modelName) == "" || len(vector) == 0 {
 		return "", gorm.ErrInvalidData
 	}
-	parts := make([]string, len(vector))
-	for i, value := range vector {
-		parts[i] = strconv.FormatFloat(float64(value), 'g', -1, 32)
-	}
-	vectorLiteral := "[" + strings.Join(parts, ",") + "]"
+	vectorLiteral := formatMemoryVector(vector)
 	statement := fmt.Sprintf(`INSERT INTO %s
 		(memory_id, user_id, scope_type, scope_id, embedding_model, embedding_dim, embedding, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?::vector, NOW())
@@ -242,6 +354,14 @@ func (r *MemoryRepository) UpsertEmbedding(ctx context.Context, item model.Agent
 	return memoryEmbeddingTable + ":" + item.ID, nil
 }
 
+func formatMemoryVector(vector []float32) string {
+	parts := make([]string, len(vector))
+	for i, value := range vector {
+		parts[i] = strconv.FormatFloat(float64(value), 'g', -1, 32)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
 func (r *MemoryRepository) FindForUser(ctx context.Context, userID int64, memoryID string) (*model.AgentMemoryItem, error) {
 	var item model.AgentMemoryItem
 	err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", strings.TrimSpace(memoryID), userID).First(&item).Error
@@ -249,4 +369,20 @@ func (r *MemoryRepository) FindForUser(ctx context.Context, userID int64, memory
 		return nil, nil
 	}
 	return &item, err
+}
+
+func (r *MemoryRepository) ListForUser(ctx context.Context, userID int64, scopeType, scopeID string) ([]model.AgentMemoryItem, error) {
+	if r == nil || r.db == nil || userID <= 0 {
+		return nil, gorm.ErrInvalidData
+	}
+	query := r.db.WithContext(ctx).Where("user_id = ?", userID)
+	if strings.TrimSpace(scopeType) != "" {
+		query = query.Where("scope_type = ?", strings.TrimSpace(scopeType))
+	}
+	if strings.TrimSpace(scopeID) != "" {
+		query = query.Where("scope_id = ?", strings.TrimSpace(scopeID))
+	}
+	var items []model.AgentMemoryItem
+	err := query.Order("updated_at DESC, id ASC").Find(&items).Error
+	return items, err
 }

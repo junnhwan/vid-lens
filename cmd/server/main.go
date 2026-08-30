@@ -73,6 +73,7 @@ func runtimeServerHandlers(app *serverApplication) serverHandlers {
 		chat:           app.handlers.chat,
 		media:          app.handlers.media,
 		knowledgeBases: app.handlers.knowledgeBases,
+		memory:         app.handlers.memory,
 	}
 }
 

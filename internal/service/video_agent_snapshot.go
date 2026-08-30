@@ -22,14 +22,14 @@ const (
 // retained as a write-side compatibility alias for clients that still decode
 // the previous Agent envelope.
 type AgentSnapshot struct {
-	Version   int                 `json:"version"`
-	RunID     string              `json:"run_id"`
-	Mode      string              `json:"mode"`
-	Template  string              `json:"template,omitempty"`
-	Steps     []AgentSnapshotStep `json:"steps"`
-	Citations []Citation          `json:"citations"`
-	Trace     []VideoAgentStep    `json:"trace,omitempty"`
-	Memory    *MemorySnapshot     `json:"memory,omitempty"`
+	Version   int                     `json:"version"`
+	RunID     string                  `json:"run_id"`
+	Mode      string                  `json:"mode"`
+	Template  string                  `json:"template,omitempty"`
+	Steps     []AgentSnapshotStep     `json:"steps"`
+	Citations []Citation              `json:"citations"`
+	Trace     []VideoAgentStep        `json:"trace,omitempty"`
+	Memory    *MemorySnapshotIdentity `json:"memory,omitempty"`
 }
 
 // AgentSnapshotStep is deliberately limited to safe execution metadata. It
@@ -161,14 +161,14 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	}
 
 	var envelope struct {
-		Version   int                 `json:"version"`
-		RunID     string              `json:"run_id"`
-		Mode      string              `json:"mode"`
-		Template  string              `json:"template"`
-		Steps     []AgentSnapshotStep `json:"steps"`
-		Citations []Citation          `json:"citations"`
-		Trace     []VideoAgentStep    `json:"trace"`
-		Memory    *MemorySnapshot     `json:"memory"`
+		Version   int                     `json:"version"`
+		RunID     string                  `json:"run_id"`
+		Mode      string                  `json:"mode"`
+		Template  string                  `json:"template"`
+		Steps     []AgentSnapshotStep     `json:"steps"`
+		Citations []Citation              `json:"citations"`
+		Trace     []VideoAgentStep        `json:"trace"`
+		Memory    *MemorySnapshotIdentity `json:"memory"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		return AgentSnapshot{}, fmt.Errorf("agent snapshot 无效: %w", err)

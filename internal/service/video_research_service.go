@@ -60,8 +60,11 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err != nil {
 		return nil, err
 	}
+	runID := uuid.NewString()
+	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
+	tools.SetMemorySnapshot(memorySnapshot)
 	runner, err := NewVideoResearchRunner(tools.Registry(), NewLLMVideoResearchPlanner(chat), DefaultVideoResearchObserver{}, policy)
 	if err != nil {
 		return nil, err
@@ -73,6 +76,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		TopK:           req.TopK,
 		EmbeddingModel: profile.EmbeddingModel,
 		Embedding:      embedding,
+		MemorySnapshot: memorySnapshot,
 	})
 	trace := videoResearchTrace(runResult)
 	if err != nil {
@@ -88,8 +92,9 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		Citations: append([]Citation(nil), runResult.State.Citations...),
 		Trace:     trace,
 		Model:     profile.LLMModel,
-		RunID:     uuid.NewString(),
+		RunID:     runID,
 		Mode:      string(VideoAgentResearchTemplate),
+		Memory:    memorySnapshot.Identity(),
 	}
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err

@@ -27,6 +27,7 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	metrics.IncASRChunkReuse()
 	metrics.ObserveRAG("hybrid", 30*time.Millisecond, 5, 120)
 	metrics.IncRateLimit("ai", "allowed")
+	metrics.ObserveMemoryBackground("embedding", "failed")
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -34,9 +35,16 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	}
 	forbidden := map[string]bool{"trace_id": true, "task_id": true, "job_id": true, "user_id": true}
 	foundTaskMetric := false
+	foundMemoryMetric := false
 	for _, family := range families {
 		if family.GetName() == "vidlens_task_stage_total" {
 			foundTaskMetric = true
+		}
+		if family.GetName() == "vidlens_memory_background_total" {
+			foundMemoryMetric = true
+			if len(family.Metric) != 1 || family.Metric[0].Label[0].GetValue() != "embedding" || family.Metric[0].Label[1].GetValue() != "failed" {
+				t.Fatalf("memory metric labels = %+v", family.Metric)
+			}
 		}
 		for _, metric := range family.Metric {
 			for _, label := range metric.Label {
@@ -48,6 +56,9 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	}
 	if !foundTaskMetric {
 		t.Fatal("vidlens_task_stage_total not gathered")
+	}
+	if !foundMemoryMetric {
+		t.Fatal("vidlens_memory_background_total not gathered")
 	}
 
 	rr := httptest.NewRecorder()

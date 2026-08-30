@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/repository"
 )
 
@@ -73,6 +75,22 @@ type MemorySnapshot struct {
 	Items         []MemorySnapshotItem `json:"items"`
 	Conflicts     []MemoryConflict     `json:"conflicts"`
 	Budget        MemorySnapshotBudget `json:"budget"`
+}
+
+// MemorySnapshotIdentity is the only memory metadata persisted in chat/run
+// history. Full memory content remains in the request-local snapshot so a later
+// delete or withdrawal does not leave a second durable copy in chat history.
+type MemorySnapshotIdentity struct {
+	SchemaVersion string   `json:"schema_version"`
+	Version       string   `json:"version"`
+	MemoryIDs     []string `json:"memory_ids"`
+}
+
+func (s *MemorySnapshot) Identity() *MemorySnapshotIdentity {
+	if s == nil {
+		return nil
+	}
+	return &MemorySnapshotIdentity{SchemaVersion: s.SchemaVersion, Version: s.Version, MemoryIDs: append([]string(nil), s.MemoryIDs...)}
 }
 
 type MemoryProvider interface {
@@ -210,7 +228,7 @@ func filterAndSortMemoryItems(items []model.AgentMemoryItem, userID int64, scope
 	}
 	filtered := make([]model.AgentMemoryItem, 0, len(items))
 	for _, item := range items {
-		if item.UserID != userID || strings.TrimSpace(item.SourceRef) == "" || item.DeletedAt.Valid {
+		if item.UserID != userID || strings.TrimSpace(item.SourceRef) == "" || item.DeletedAt.Valid || containsSensitiveMemoryContent(item.Content) {
 			continue
 		}
 		if item.Status != model.MemoryStatusActive && item.Status != model.MemoryStatusConflicted {
@@ -228,6 +246,17 @@ func filterAndSortMemoryItems(items []model.AgentMemoryItem, userID int64, scope
 		left, right := filtered[i], filtered[j]
 		if memoryScopePriority(left.ScopeType) != memoryScopePriority(right.ScopeType) {
 			return memoryScopePriority(left.ScopeType) < memoryScopePriority(right.ScopeType)
+		}
+		if left.SemanticScore != nil || right.SemanticScore != nil {
+			if left.SemanticScore == nil {
+				return false
+			}
+			if right.SemanticScore == nil {
+				return true
+			}
+			if *left.SemanticScore != *right.SemanticScore {
+				return *left.SemanticScore > *right.SemanticScore
+			}
 		}
 		if left.Importance != right.Importance {
 			return left.Importance > right.Importance
@@ -429,10 +458,44 @@ func (s MemorySnapshot) PromptContext() string {
 	return strings.TrimSpace(builder.String())
 }
 
-type RepositoryMemoryRetriever struct{ repository *repository.MemoryRepository }
+type memoryRecallRepository interface {
+	ListRecallable(context.Context, int64, map[string][]string, int, time.Time) ([]model.AgentMemoryItem, error)
+	SearchRecallable(context.Context, int64, map[string][]string, string, []float32, int, time.Time) ([]model.AgentMemoryItem, error)
+}
 
-func NewRepositoryMemoryRetriever(memory *repository.MemoryRepository) *RepositoryMemoryRetriever {
+type RepositoryMemoryRetriever struct{ repository memoryRecallRepository }
+
+func NewRepositoryMemoryRetriever(memory memoryRecallRepository) *RepositoryMemoryRetriever {
 	return &RepositoryMemoryRetriever{repository: memory}
+}
+
+type SemanticMemoryRetriever struct {
+	repository memoryRecallRepository
+	embedder   MemoryEmbedder
+}
+
+func NewSemanticMemoryRetriever(memory memoryRecallRepository, embedder MemoryEmbedder) *SemanticMemoryRetriever {
+	return &SemanticMemoryRetriever{repository: memory, embedder: embedder}
+}
+
+func (r *SemanticMemoryRetriever) Retrieve(ctx context.Context, request MemoryRetrieveRequest) ([]model.AgentMemoryItem, error) {
+	if r == nil || r.repository == nil {
+		return nil, errors.New("memory repository 未配置")
+	}
+	scopes := make(map[string][]string)
+	for _, scope := range request.Scopes {
+		scopes[scope.Type] = append(scopes[scope.Type], scope.ID)
+	}
+	if r.embedder != nil && strings.TrimSpace(request.Query) != "" {
+		embedding, err := r.embedder.EmbedMemory(ctx, request.UserID, request.Query)
+		if err == nil && len(embedding.Vector) > 0 {
+			items, searchErr := r.repository.SearchRecallable(ctx, request.UserID, scopes, embedding.Model, embedding.Vector, request.Limit, request.Now)
+			if searchErr == nil && len(items) > 0 {
+				return items, nil
+			}
+		}
+	}
+	return r.repository.ListRecallable(ctx, request.UserID, scopes, request.Limit, request.Now)
 }
 
 func (r *RepositoryMemoryRetriever) Retrieve(ctx context.Context, request MemoryRetrieveRequest) ([]model.AgentMemoryItem, error) {
@@ -450,6 +513,58 @@ type RepositoryMemoryAuthorizer struct{ repos *repository.Repositories }
 
 func NewRepositoryMemoryAuthorizer(repos *repository.Repositories) *RepositoryMemoryAuthorizer {
 	return &RepositoryMemoryAuthorizer{repos: repos}
+}
+
+type MemoryGovernanceService struct {
+	repository *repository.MemoryRepository
+	authorizer MemoryScopeAuthorizer
+}
+
+func NewMemoryGovernanceService(memory *repository.MemoryRepository, authorizer MemoryScopeAuthorizer) *MemoryGovernanceService {
+	return &MemoryGovernanceService{repository: memory, authorizer: authorizer}
+}
+
+func (s *MemoryGovernanceService) List(ctx context.Context, userID int64, scope MemoryScope) ([]model.AgentMemoryItem, error) {
+	if s == nil || s.repository == nil || s.authorizer == nil {
+		return nil, errors.New("memory governance service 未配置")
+	}
+	if err := s.authorizer.Authorize(ctx, userID, scope, false); err != nil {
+		return nil, err
+	}
+	return s.repository.ListForUser(ctx, userID, scope.Type, scope.ID)
+}
+
+func (s *MemoryGovernanceService) Withdraw(ctx context.Context, userID int64, memoryID string) error {
+	item, err := s.authorizedItem(ctx, userID, memoryID, true)
+	if err != nil {
+		return err
+	}
+	return s.repository.WithdrawForUser(ctx, userID, item.ID, "user_request:"+item.ID)
+}
+
+func (s *MemoryGovernanceService) Delete(ctx context.Context, userID int64, memoryID string) error {
+	item, err := s.authorizedItem(ctx, userID, memoryID, true)
+	if err != nil {
+		return err
+	}
+	return s.repository.DeleteForUser(ctx, userID, item.ID, "user_request:"+item.ID)
+}
+
+func (s *MemoryGovernanceService) authorizedItem(ctx context.Context, userID int64, memoryID string, write bool) (*model.AgentMemoryItem, error) {
+	if s == nil || s.repository == nil || s.authorizer == nil {
+		return nil, errors.New("memory governance service 未配置")
+	}
+	item, err := s.repository.FindForUser(ctx, userID, memoryID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, errors.New("记忆不存在或无权限")
+	}
+	if err := s.authorizer.Authorize(ctx, userID, MemoryScope{Type: item.ScopeType, ID: item.ScopeID}, write); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (a *RepositoryMemoryAuthorizer) Authorize(_ context.Context, userID int64, scope MemoryScope, write bool) error {
@@ -560,6 +675,7 @@ func NewAsyncMemoryWriter(store memoryWriteStore, authorizer MemoryScopeAuthoriz
 
 func (w *AsyncMemoryWriter) Enqueue(candidate MemoryCandidate) MemoryEnqueueResult {
 	if err := validateMemoryCandidate(candidate); err != nil {
+		observeMemoryBackground("candidate", "rejected")
 		return MemoryEnqueueResult{Reason: err.Error()}
 	}
 	if w == nil || w.store == nil || w.authorizer == nil {
@@ -568,9 +684,11 @@ func (w *AsyncMemoryWriter) Enqueue(candidate MemoryCandidate) MemoryEnqueueResu
 	select {
 	case w.queue <- candidate:
 		w.accepted.Add(1)
+		observeMemoryBackground("writer_queue", "accepted")
 		return MemoryEnqueueResult{Accepted: true}
 	default:
 		w.dropped.Add(1)
+		observeMemoryBackground("writer_queue", "dropped")
 		return MemoryEnqueueResult{Reason: "memory writer queue full"}
 	}
 }
@@ -592,6 +710,7 @@ func (w *AsyncMemoryWriter) run(ctx context.Context) {
 
 func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate) error {
 	if err := w.authorizer.Authorize(ctx, candidate.UserID, candidate.Scope, true); err != nil {
+		observeMemoryBackground("authorization", "failed")
 		return err
 	}
 	item := &model.AgentMemoryItem{
@@ -603,6 +722,7 @@ func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate
 	}
 	result, err := w.store.Append(ctx, item)
 	if err != nil {
+		observeMemoryBackground("persist", "failed")
 		return err
 	}
 	if w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
@@ -610,12 +730,17 @@ func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate
 	}
 	ref, err := w.projector.Project(ctx, result.Item)
 	if err != nil {
+		observeMemoryBackground("embedding", "failed")
 		return err
 	}
 	if strings.TrimSpace(ref) == "" {
 		return nil
 	}
-	return w.store.SetEmbeddingRef(ctx, result.Item.UserID, result.Item.ID, ref)
+	if err := w.store.SetEmbeddingRef(ctx, result.Item.UserID, result.Item.ID, ref); err != nil {
+		observeMemoryBackground("embedding_ref", "failed")
+		return err
+	}
+	return nil
 }
 
 func validateMemoryCandidate(candidate MemoryCandidate) error {
@@ -631,6 +756,12 @@ func validateMemoryCandidate(candidate MemoryCandidate) error {
 	}
 	if candidate.Importance < 0 || candidate.Importance > 1 {
 		return errors.New("memory importance 必须在 0..1")
+	}
+	if utf8.RuneCountInString(candidate.Content) > 1000 {
+		return errors.New("memory content 超过安全长度上限")
+	}
+	if containsSensitiveMemoryContent(candidate.Content) {
+		return errors.New("memory content 可能包含凭据或敏感信息")
 	}
 	if candidate.SourceType == "assistant_response" || candidate.SourceType == "agent_answer" {
 		return errors.New("未经验证的 Agent 回答不能写入长期记忆")
@@ -746,8 +877,10 @@ func (c *AsyncMemoryCapture) EnqueueExtraction(request MemoryExtractionRequest) 
 	}
 	select {
 	case c.queue <- request:
+		observeMemoryBackground("extractor_queue", "accepted")
 		return MemoryEnqueueResult{Accepted: true}
 	default:
+		observeMemoryBackground("extractor_queue", "dropped")
 		return MemoryEnqueueResult{Reason: "memory extractor queue full"}
 	}
 }
@@ -761,12 +894,19 @@ func (c *AsyncMemoryCapture) run(ctx context.Context) {
 		case request := <-c.queue:
 			candidates, err := c.extractor.Extract(ctx, request)
 			if err != nil {
+				observeMemoryBackground("extractor", "failed")
 				continue
 			}
 			for _, candidate := range candidates {
 				_ = c.writer.Enqueue(candidate)
 			}
 		}
+	}
+}
+
+func observeMemoryBackground(stage, status string) {
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		metrics.ObserveMemoryBackground(stage, status)
 	}
 }
 
@@ -790,27 +930,47 @@ type ExplicitPreferenceExtractor struct{}
 
 func (ExplicitPreferenceExtractor) Extract(_ context.Context, request MemoryExtractionRequest) ([]MemoryCandidate, error) {
 	text := strings.TrimSpace(request.UserText)
-	if text == "" {
+	if text == "" || containsSensitiveMemoryContent(text) {
 		return nil, nil
 	}
 	lower := strings.ToLower(text)
-	hints := []string{"请以后", "以后请", "我喜欢", "我偏好", "请用中文", "请用英文", "prefer", "always answer"}
-	matched := false
-	for _, hint := range hints {
-		if strings.Contains(lower, strings.ToLower(hint)) {
-			matched = true
-			break
-		}
+	preference := ""
+	switch {
+	case strings.Contains(lower, "请用中文") || strings.Contains(lower, "中文回答"):
+		preference = "回答语言：中文"
+	case strings.Contains(lower, "请用英文") || strings.Contains(lower, "answer in english"):
+		preference = "回答语言：英文"
+	case strings.Contains(lower, "简洁") || strings.Contains(lower, "简短") || strings.Contains(lower, "concise"):
+		preference = "回答风格：简洁"
+	case strings.Contains(lower, "详细") || strings.Contains(lower, "in detail"):
+		preference = "回答风格：详细"
+	case strings.Contains(lower, "要点") || strings.Contains(lower, "bullet"):
+		preference = "回答格式：优先使用要点列表"
 	}
-	if !matched {
+	if preference == "" {
 		return nil, nil
-	}
-	if utf8.RuneCountInString(text) > 500 {
-		text = string([]rune(text)[:500])
 	}
 	return []MemoryCandidate{{
 		UserID: request.UserID,
 		Scope:  MemoryScope{Type: model.MemoryScopeUser, ID: strconv.FormatInt(request.UserID, 10)},
-		Kind:   "response_preference", Content: text, SourceType: "user_message", SourceRef: strings.TrimSpace(request.SourceRef), Importance: 0.7,
+		Kind:   "response_preference", Content: preference, SourceType: "user_message", SourceRef: strings.TrimSpace(request.SourceRef), Importance: 0.7,
 	}}, nil
+}
+
+var sensitiveMemoryPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(api[_ -]?key|secret|password|passwd|access[_ -]?token|refresh[_ -]?token|bearer|private[_ -]?key)\b`),
+	regexp.MustCompile(`(?i)\b(sk|pk)-[a-z0-9_-]{12,}\b`),
+	regexp.MustCompile(`(?i)\bAKIA[0-9A-Z]{16}\b`),
+	regexp.MustCompile(`(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----`),
+	regexp.MustCompile(`\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b`),
+	regexp.MustCompile(`(?i)\bpostgres(?:ql)?://[^\s:@]+:[^\s@]+@`),
+}
+
+func containsSensitiveMemoryContent(content string) bool {
+	for _, pattern := range sensitiveMemoryPatterns {
+		if pattern.MatchString(content) {
+			return true
+		}
+	}
+	return false
 }

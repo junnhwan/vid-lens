@@ -157,20 +157,17 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	})
 	chatSvc.SetAIRecorder(aiObserver)
 	chatSvc.SetMemoryStore(service.NewRedisChatMemoryStore(deps.rdb))
+	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
+	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)
 	var memoryWriter *service.AsyncMemoryWriter
 	var memoryCapture *service.AsyncMemoryCapture
 	if deps.cfg.Memory.Enabled && deps.repos.Memory != nil {
-		authorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
-		provider := service.NewScopedMemoryProvider(
-			service.NewRepositoryMemoryRetriever(deps.repos.Memory),
-			authorizer,
-			service.AgentMemoryConfig{TopK: deps.cfg.Memory.TopK, MaxChars: deps.cfg.Memory.MaxChars, MaxTokens: deps.cfg.Memory.MaxTokens},
-		)
 		var projector service.MemoryProjector
+		var memoryEmbedder service.MemoryEmbedder
 		if err := deps.repos.Memory.EnsureEmbeddingSchema(context.Background(), deps.cfg.RAG.EmbeddingDim); err != nil {
 			log.Printf("agent memory embedding projection unavailable; relational memory remains enabled: %v", err)
 		} else {
-			embedder := service.MemoryEmbedderFunc(func(ctx context.Context, userID int64, content string) (service.MemoryEmbedding, error) {
+			memoryEmbedder = service.MemoryEmbedderFunc(func(ctx context.Context, userID int64, content string) (service.MemoryEmbedding, error) {
 				profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
 				if err != nil {
 					return service.MemoryEmbedding{}, err
@@ -185,9 +182,15 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 				}
 				return service.MemoryEmbedding{Model: profile.EmbeddingModel, Vector: vector}, nil
 			})
-			projector = service.NewRepositoryMemoryProjector(embedder, deps.repos.Memory)
+			projector = service.NewRepositoryMemoryProjector(memoryEmbedder, deps.repos.Memory)
 		}
-		memoryWriter = service.NewAsyncMemoryWriter(deps.repos.Memory, authorizer, projector, deps.cfg.Memory.QueueSize)
+		var memoryRetriever service.MemoryRetriever = service.NewRepositoryMemoryRetriever(deps.repos.Memory)
+		if memoryEmbedder != nil {
+			memoryRetriever = service.NewSemanticMemoryRetriever(deps.repos.Memory, memoryEmbedder)
+		}
+		provider := service.NewScopedMemoryProvider(memoryRetriever, memoryAuthorizer,
+			service.AgentMemoryConfig{TopK: deps.cfg.Memory.TopK, MaxChars: deps.cfg.Memory.MaxChars, MaxTokens: deps.cfg.Memory.MaxTokens})
+		memoryWriter = service.NewAsyncMemoryWriter(deps.repos.Memory, memoryAuthorizer, projector, deps.cfg.Memory.QueueSize)
 		memoryCapture = service.NewAsyncMemoryCapture(service.ExplicitPreferenceExtractor{}, memoryWriter, deps.cfg.Memory.QueueSize)
 		chatSvc.SetLongTermMemory(provider, memoryCapture)
 	}
@@ -278,6 +281,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			chat:           handler.NewChatHandler(chatSvc, aiProfileSvc, aiFactory),
 			media:          handler.NewMediaHandler(mediaSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
+			memory:         handler.NewMemoryHandler(memoryGovernanceSvc),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,

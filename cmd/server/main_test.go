@@ -51,15 +51,19 @@ func TestRuntimeServerHandlersIncludesKnowledgeBaseHandler(t *testing.T) {
 		chat:           &handler.ChatHandler{},
 		media:          &handler.MediaHandler{},
 		knowledgeBases: &handler.KnowledgeBaseHandler{},
+		memory:         &handler.MemoryHandler{},
 	}
 	app := &serverApplication{handlers: expected}
 
 	got := runtimeServerHandlers(app)
 	if got.user != expected.user || got.profiles != expected.profiles || got.rag != expected.rag ||
-		got.chat != expected.chat || got.media != expected.media || got.knowledgeBases != expected.knowledgeBases {
+		got.chat != expected.chat || got.media != expected.media || got.knowledgeBases != expected.knowledgeBases || got.memory != expected.memory {
 		t.Fatalf("runtime handlers were not preserved: got=%+v expected=%+v", got, expected)
 	}
 	if got.knowledgeBases == nil {
 		t.Fatal("runtime knowledge base handler is nil")
+	}
+	if got.memory == nil {
+		t.Fatal("runtime memory handler is nil")
 	}
 }

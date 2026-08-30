@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,4 +110,101 @@ func TestMemoryRepositoryRejectsMissingSourceRef(t *testing.T) {
 		t.Fatal("Append() accepted item without source_ref")
 	}
 	_ = fmt.Sprint(err)
+}
+
+func TestMemoryRepositoryExpandsCompleteConflictGroupAfterLimit(t *testing.T) {
+	repo := NewMemoryRepository(newMemoryRepositoryTestDB(t))
+	ctx := context.Background()
+	items := []*model.AgentMemoryItem{
+		{ID: "other", UserID: 1, ScopeType: model.MemoryScopeUser, ScopeID: "1", Kind: "format", Content: "要点", SourceType: "user_message", SourceRef: "message:0", Importance: 1, Status: model.MemoryStatusActive, Version: 1},
+		{ID: "conflict-a", UserID: 1, ScopeType: model.MemoryScopeUser, ScopeID: "1", Kind: "language", Content: "中文", SourceType: "user_message", SourceRef: "message:1", Importance: .9, Status: model.MemoryStatusActive, Version: 1},
+		{ID: "conflict-b", UserID: 1, ScopeType: model.MemoryScopeUser, ScopeID: "1", Kind: "language", Content: "英文", SourceType: "user_message", SourceRef: "message:2", Importance: .8, Status: model.MemoryStatusActive, Version: 1},
+	}
+	for _, item := range items {
+		if _, err := repo.Append(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.ListRecallable(ctx, 1, map[string][]string{model.MemoryScopeUser: {"1"}}, 2, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, item := range got {
+		ids[item.ID] = true
+	}
+	if len(got) != 3 || !ids["conflict-a"] || !ids["conflict-b"] {
+		t.Fatalf("limited recall split conflict group: %+v", got)
+	}
+}
+
+func TestMemoryRepositorySerializesConcurrentFirstConflictWrites(t *testing.T) {
+	repo := NewMemoryRepository(newMemoryRepositoryTestDB(t))
+	ctx := context.Background()
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wait sync.WaitGroup
+	for index, content := range []string{"中文", "英文"} {
+		wait.Add(1)
+		go func(index int, content string) {
+			defer wait.Done()
+			<-start
+			_, err := repo.Append(ctx, &model.AgentMemoryItem{
+				ID: fmt.Sprintf("concurrent-%d", index), UserID: 1, ScopeType: model.MemoryScopeUser, ScopeID: "1",
+				Kind: "language", Content: content, SourceType: "user_message", SourceRef: fmt.Sprintf("message:%d", index),
+				Importance: .8, Status: model.MemoryStatusActive, Version: 1,
+			})
+			errs <- err
+		}(index, content)
+	}
+	close(start)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := repo.ListRecallable(ctx, 1, map[string][]string{model.MemoryScopeUser: {"1"}}, 10, time.Now().UTC())
+	if err != nil || len(items) != 2 {
+		t.Fatalf("concurrent items = %+v err=%v", items, err)
+	}
+	for _, item := range items {
+		if item.Status != model.MemoryStatusConflicted {
+			t.Fatalf("concurrent conflict silently won: %+v", items)
+		}
+	}
+}
+
+func TestMemoryRepositoryLifecycleRemovesEmbeddingProjection(t *testing.T) {
+	db := newMemoryRepositoryTestDB(t)
+	if err := db.Exec(`CREATE TABLE agent_memory_embeddings (memory_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMemoryRepository(db)
+	ctx := context.Background()
+	for _, id := range []string{"withdraw-me", "delete-me"} {
+		if _, err := repo.Append(ctx, &model.AgentMemoryItem{
+			ID: id, UserID: 1, ScopeType: model.MemoryScopeUser, ScopeID: "1", Kind: id, Content: id,
+			SourceType: "user_message", SourceRef: "message:" + id, Importance: .5, Status: model.MemoryStatusActive, Version: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec("INSERT INTO agent_memory_embeddings (memory_id, user_id) VALUES (?, ?)", id, 1).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.WithdrawForUser(ctx, 1, "withdraw-me", "user_request:1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteForUser(ctx, 1, "delete-me", "user_request:2"); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Table("agent_memory_embeddings").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("stale embedding projections = %d", count)
+	}
 }

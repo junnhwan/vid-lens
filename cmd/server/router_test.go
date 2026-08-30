@@ -19,6 +19,7 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		chat:           &handler.ChatHandler{},
 		media:          &handler.MediaHandler{},
 		knowledgeBases: &handler.KnowledgeBaseHandler{},
+		memory:         &handler.MemoryHandler{},
 	}, nil, nil)
 
 	if router == nil {
@@ -41,6 +42,9 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		"DELETE /api/v1/knowledge-bases/:id":                           "delete knowledge base",
 		"POST /api/v1/knowledge-bases/:id/videos":                      "add knowledge base video",
 		"DELETE /api/v1/knowledge-bases/:id/videos/:task_id":           "remove knowledge base video",
+		"GET /api/v1/memories":                                         "list memories",
+		"POST /api/v1/memories/:memory_id/withdraw":                    "withdraw memory",
+		"DELETE /api/v1/memories/:memory_id":                           "delete memory",
 	}
 	registered := make(map[string]struct{}, len(router.Routes()))
 	for _, route := range router.Routes() {

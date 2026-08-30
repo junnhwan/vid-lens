@@ -15,24 +15,25 @@ import (
 var durationBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 
 type Metrics struct {
-	gatherer             prometheus.Gatherer
-	taskStageTotal       *prometheus.CounterVec
-	taskStageDuration    *prometheus.HistogramVec
-	taskRetryTotal       *prometheus.CounterVec
-	taskDeadTotal        *prometheus.CounterVec
-	kafkaJobDuration     *prometheus.HistogramVec
-	asrChunkTotal        *prometheus.CounterVec
-	asrChunkDuration     prometheus.Histogram
-	asrChunkReuse        prometheus.Counter
-	aiCallTotal          *prometheus.CounterVec
-	aiCallDuration       *prometheus.HistogramVec
-	aiTokensTotal        *prometheus.CounterVec
-	aiEstimatedCost      *prometheus.CounterVec
-	aiUsageUnknown       *prometheus.CounterVec
-	ragRetrievalDuration *prometheus.HistogramVec
-	ragResultCount       *prometheus.GaugeVec
-	ragContextTokens     *prometheus.GaugeVec
-	rateLimitDecision    *prometheus.CounterVec
+	gatherer              prometheus.Gatherer
+	taskStageTotal        *prometheus.CounterVec
+	taskStageDuration     *prometheus.HistogramVec
+	taskRetryTotal        *prometheus.CounterVec
+	taskDeadTotal         *prometheus.CounterVec
+	kafkaJobDuration      *prometheus.HistogramVec
+	asrChunkTotal         *prometheus.CounterVec
+	asrChunkDuration      prometheus.Histogram
+	asrChunkReuse         prometheus.Counter
+	aiCallTotal           *prometheus.CounterVec
+	aiCallDuration        *prometheus.HistogramVec
+	aiTokensTotal         *prometheus.CounterVec
+	aiEstimatedCost       *prometheus.CounterVec
+	aiUsageUnknown        *prometheus.CounterVec
+	ragRetrievalDuration  *prometheus.HistogramVec
+	ragResultCount        *prometheus.GaugeVec
+	ragContextTokens      *prometheus.GaugeVec
+	rateLimitDecision     *prometheus.CounterVec
+	memoryBackgroundTotal *prometheus.CounterVec
 }
 
 type AICallObservation struct {
@@ -108,7 +109,16 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 	if m.rateLimitDecision, err = registerCounterVec(registerer, prometheus.NewCounterVec(prometheus.CounterOpts{Name: "vidlens_ratelimit_decision_total", Help: "Rate-limit decisions."}, []string{"scope", "result"})); err != nil {
 		return nil, err
 	}
+	if m.memoryBackgroundTotal, err = registerCounterVec(registerer, prometheus.NewCounterVec(prometheus.CounterOpts{Name: "vidlens_memory_background_total", Help: "Agent memory background pipeline outcomes."}, []string{"stage", "status"})); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+func (m *Metrics) ObserveMemoryBackground(stage, status string) {
+	if m != nil {
+		m.memoryBackgroundTotal.WithLabelValues(normalizeMemoryStage(stage), normalizeMemoryStatus(status)).Inc()
+	}
 }
 
 func (m *Metrics) Handler() http.Handler {
@@ -231,6 +241,12 @@ func normalizeStatus(value string) string {
 }
 func normalizeStage(value string) string {
 	return normalize(value, set("downloading", "uploaded", "transcribing", "summarizing", "indexing", "none"))
+}
+func normalizeMemoryStage(value string) string {
+	return normalize(value, set("candidate", "writer_queue", "authorization", "persist", "embedding", "embedding_ref", "extractor_queue", "extractor"))
+}
+func normalizeMemoryStatus(value string) string {
+	return normalize(value, set("accepted", "dropped", "rejected", "failed", "success"))
 }
 func normalizeJobType(value string) string {
 	return normalize(value, set("download", "transcribe", "analyze", "rag_index"))

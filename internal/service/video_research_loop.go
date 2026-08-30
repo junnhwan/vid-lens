@@ -89,6 +89,7 @@ type VideoResearchState struct {
 	Steps            []VideoResearchStep        `json:"steps,omitempty"`
 	Answer           string                     `json:"answer,omitempty"`
 	Citations        []Citation                 `json:"citations,omitempty"`
+	Memory           *MemorySnapshot            `json:"memory,omitempty"`
 }
 
 type VideoResearchResult struct {
@@ -153,6 +154,7 @@ func (r *VideoResearchRunner) Run(ctx context.Context, goal string, runtime Vide
 	if err != nil {
 		return nil, err
 	}
+	state.Memory = runtime.MemorySnapshot
 	result := &VideoResearchResult{State: state}
 
 	for {

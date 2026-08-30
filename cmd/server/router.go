@@ -21,6 +21,7 @@ type serverHandlers struct {
 	chat           *handler.ChatHandler
 	media          *handler.MediaHandler
 	knowledgeBases *handler.KnowledgeBaseHandler
+	memory         *handler.MemoryHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -73,6 +74,12 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				knowledgeBases.DELETE("/:id", handlers.knowledgeBases.Delete)
 				knowledgeBases.POST("/:id/videos", handlers.knowledgeBases.AddVideo)
 				knowledgeBases.DELETE("/:id/videos/:task_id", handlers.knowledgeBases.RemoveVideo)
+			}
+			memories := auth.Group("/memories")
+			{
+				memories.GET("", handlers.memory.List)
+				memories.POST("/:memory_id/withdraw", handlers.memory.Withdraw)
+				memories.DELETE("/:memory_id", handlers.memory.Delete)
 			}
 			media := auth.Group("/media")
 			{

@@ -167,6 +167,7 @@ func TestMemorySnapshotExcludesExpiredDeletedWithdrawnAndSourcelessItems(t *test
 		memoryItem("withdrawn", 1, model.MemoryScopeUser, "1", "c", "撤回", "message:3", 1, now),
 		memoryItem("deleted", 1, model.MemoryScopeUser, "1", "d", "删除", "message:4", 1, now),
 		memoryItem("sourceless", 1, model.MemoryScopeUser, "1", "e", "无来源", "", 1, now),
+		memoryItem("sensitive", 1, model.MemoryScopeUser, "1", "f", "API Key sk-abcdefghijklmnopqrstuvwxyz", "message:5", 1, now),
 	}
 	items[1].ExpiresAt = &past
 	items[2].Status = model.MemoryStatusWithdrawn
@@ -276,6 +277,85 @@ type fakeMemoryEmbedder struct{}
 
 func (fakeMemoryEmbedder) EmbedMemory(_ context.Context, _ int64, content string) (MemoryEmbedding, error) {
 	return MemoryEmbedding{Model: "fake-embedding", Vector: []float32{float32(len(content)), 1}}, nil
+}
+
+type fakeMemoryRecallRepository struct {
+	searchItems  []model.AgentMemoryItem
+	listItems    []model.AgentMemoryItem
+	searchErr    error
+	searchCalls  int
+	listCalls    int
+	searchModel  string
+	searchVector []float32
+}
+
+func (r *fakeMemoryRecallRepository) SearchRecallable(_ context.Context, _ int64, _ map[string][]string, modelName string, vector []float32, _ int, _ time.Time) ([]model.AgentMemoryItem, error) {
+	r.searchCalls++
+	r.searchModel = modelName
+	r.searchVector = append([]float32(nil), vector...)
+	return append([]model.AgentMemoryItem(nil), r.searchItems...), r.searchErr
+}
+
+func (r *fakeMemoryRecallRepository) ListRecallable(_ context.Context, _ int64, _ map[string][]string, _ int, _ time.Time) ([]model.AgentMemoryItem, error) {
+	r.listCalls++
+	return append([]model.AgentMemoryItem(nil), r.listItems...), nil
+}
+
+type failingMemoryEmbedder struct{}
+
+func (failingMemoryEmbedder) EmbedMemory(context.Context, int64, string) (MemoryEmbedding, error) {
+	return MemoryEmbedding{}, errors.New("embedding unavailable")
+}
+
+func TestSemanticMemoryRetrieverUsesQueryEmbeddingAndFallsBack(t *testing.T) {
+	now := time.Now().UTC()
+	semanticItem := memoryItem("semantic", 1, model.MemoryScopeUser, "1", "preference", "semantic", "message:1", .5, now)
+	repository := &fakeMemoryRecallRepository{searchItems: []model.AgentMemoryItem{semanticItem}}
+	retriever := NewSemanticMemoryRetriever(repository, fakeMemoryEmbedder{})
+	items, err := retriever.Retrieve(context.Background(), MemoryRetrieveRequest{
+		UserID: 1, Query: "meaningful query", Scopes: []MemoryScope{{Type: model.MemoryScopeUser, ID: "1"}}, Limit: 3, Now: now,
+	})
+	if err != nil || len(items) != 1 || items[0].ID != "semantic" {
+		t.Fatalf("semantic retrieve = %+v err=%v", items, err)
+	}
+	if repository.searchCalls != 1 || repository.listCalls != 0 || repository.searchModel != "fake-embedding" || len(repository.searchVector) == 0 {
+		t.Fatalf("semantic search calls=%d list=%d model=%q vector=%v", repository.searchCalls, repository.listCalls, repository.searchModel, repository.searchVector)
+	}
+
+	fallback := &fakeMemoryRecallRepository{listItems: []model.AgentMemoryItem{semanticItem}}
+	items, err = NewSemanticMemoryRetriever(fallback, failingMemoryEmbedder{}).Retrieve(context.Background(), MemoryRetrieveRequest{
+		UserID: 1, Query: "query", Scopes: []MemoryScope{{Type: model.MemoryScopeUser, ID: "1"}}, Limit: 3, Now: now,
+	})
+	if err != nil || len(items) != 1 || fallback.searchCalls != 0 || fallback.listCalls != 1 {
+		t.Fatalf("fallback retrieve = %+v err=%v search=%d list=%d", items, err, fallback.searchCalls, fallback.listCalls)
+	}
+
+	missingProjection := &fakeMemoryRecallRepository{listItems: []model.AgentMemoryItem{semanticItem}}
+	items, err = NewSemanticMemoryRetriever(missingProjection, fakeMemoryEmbedder{}).Retrieve(context.Background(), MemoryRetrieveRequest{
+		UserID: 1, Query: "query", Scopes: []MemoryScope{{Type: model.MemoryScopeUser, ID: "1"}}, Limit: 3, Now: now,
+	})
+	if err != nil || len(items) != 1 || missingProjection.searchCalls != 1 || missingProjection.listCalls != 1 {
+		t.Fatalf("missing projection fallback = %+v err=%v search=%d list=%d", items, err, missingProjection.searchCalls, missingProjection.listCalls)
+	}
+}
+
+func TestExplicitPreferenceExtractorNormalizesAndRejectsCredentials(t *testing.T) {
+	extractor := ExplicitPreferenceExtractor{}
+	candidates, err := extractor.Extract(context.Background(), MemoryExtractionRequest{
+		UserID: 1, UserText: "以后请简洁回答，不要复述这段原文", SourceRef: "message:1",
+	})
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("normalized extraction = %+v err=%v", candidates, err)
+	}
+	if candidates[0].Content != "回答风格：简洁" || strings.Contains(candidates[0].Content, "不要复述") {
+		t.Fatalf("extractor retained raw text: %+v", candidates[0])
+	}
+	candidates, err = extractor.Extract(context.Background(), MemoryExtractionRequest{
+		UserID: 1, UserText: "以后回答时带上我的 API Key sk-abcdefghijklmnopqrstuvwxyz", SourceRef: "message:2",
+	})
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("credential-bearing preference was extracted: %+v err=%v", candidates, err)
+	}
 }
 
 type recordingMemoryEmbeddingStore struct {
@@ -409,6 +489,9 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 	}
 	if snapshot.Memory == nil || snapshot.Memory.Version != memory.Version || !reflect.DeepEqual(snapshot.Memory.MemoryIDs, memory.MemoryIDs) {
 		t.Fatalf("persisted memory snapshot = %+v", snapshot.Memory)
+	}
+	if strings.Contains(*messages[1].RetrievalSnapshot, "历史记忆说旧主题") || strings.Contains(*messages[1].RetrievalSnapshot, "message:1") {
+		t.Fatalf("chat history retained memory content/source: %s", *messages[1].RetrievalSnapshot)
 	}
 }
 

@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -29,6 +31,7 @@ type VideoAgentToolRuntime struct {
 	TopK           int
 	EmbeddingModel string
 	Embedding      ai.EmbeddingClient
+	MemorySnapshot *MemorySnapshot
 }
 
 // VideoAgentToolRequest is the only input surface exposed by the registry.
@@ -177,10 +180,9 @@ type compareSegmentsToolArguments struct {
 }
 
 type buildCitedAnswerToolArguments struct {
-	Question      string           `json:"question"`
-	Intermediate  string           `json:"intermediate"`
-	Citations     []RetrievedChunk `json:"citations"`
-	MemoryContext string           `json:"memory_context,omitempty"`
+	Question     string           `json:"question"`
+	Intermediate string           `json:"intermediate"`
+	Citations    []RetrievedChunk `json:"citations"`
 }
 
 func newVideoAgentToolRegistry(tools *VideoAgentTools) *VideoAgentToolRegistry {
@@ -286,10 +288,9 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 					return failedVideoAgentToolResult(VideoAgentToolBuildCitedAnswer, "build cited answer", err)
 				}
 				result, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{
-					Question:      args.Question,
-					Intermediate:  args.Intermediate,
-					Citations:     args.Citations,
-					MemoryContext: args.MemoryContext,
+					Question:     args.Question,
+					Intermediate: args.Intermediate,
+					Citations:    args.Citations,
 				})
 				return marshalVideoAgentToolResult(result, step, err)
 			},
@@ -301,8 +302,13 @@ func decodeVideoAgentToolArguments(request VideoAgentToolRequest, target any) er
 	if len(request.Arguments) == 0 {
 		return errors.New("tool arguments 不能为空")
 	}
-	if err := json.Unmarshal(request.Arguments, target); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(request.Arguments))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("tool arguments 无效: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("tool arguments 只能包含一个 JSON 对象")
 	}
 	return nil
 }

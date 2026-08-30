@@ -45,6 +45,30 @@ func TestVideoResearchRunnerExecutesAndObservesToolActions(t *testing.T) {
 	}
 }
 
+func TestVideoResearchRunnerProvidesStructuredMemorySnapshotToPlanner(t *testing.T) {
+	registry := NewVideoAgentToolRegistry()
+	planner := &scriptedVideoResearchPlanner{decisions: []VideoResearchDecision{{Done: true, StopReason: "done"}}}
+	runner, err := NewVideoResearchRunner(registry, planner, &recordingVideoResearchObserver{}, VideoResearchPolicy{MaxSteps: 1, MaxReplans: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory := &MemorySnapshot{
+		SchemaVersion: MemorySnapshotSchemaVersion,
+		Version:       MemorySnapshotSchemaVersion + ":research",
+		MemoryIDs:     []string{"memory-research"},
+		Items: []MemorySnapshotItem{{
+			ID: "memory-research", ScopeType: "video", ScopeID: "1", Kind: "topic", Content: "trusted snapshot", SourceRef: "message:1",
+		}},
+	}
+	result, err := runner.Run(context.Background(), "research", VideoAgentToolRuntime{MemorySnapshot: memory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planner.states) != 1 || planner.states[0].Memory != memory || result.State.Memory != memory {
+		t.Fatalf("research memory state = planner:%+v result:%+v", planner.states, result.State.Memory)
+	}
+}
+
 func TestVideoResearchRunnerStopsAtStepBudget(t *testing.T) {
 	registry := NewVideoAgentToolRegistry()
 	tool := &scriptedVideoResearchTool{
@@ -201,10 +225,12 @@ func TestDefaultVideoResearchObserverExtractsFinalAnswer(t *testing.T) {
 type scriptedVideoResearchPlanner struct {
 	decisions []VideoResearchDecision
 	calls     int
+	states    []VideoResearchState
 }
 
-func (p *scriptedVideoResearchPlanner) NextDecision(_ context.Context, _ VideoResearchState, _ []VideoAgentToolDefinition) (VideoResearchDecision, error) {
+func (p *scriptedVideoResearchPlanner) NextDecision(_ context.Context, state VideoResearchState, _ []VideoAgentToolDefinition) (VideoResearchDecision, error) {
 	p.calls++
+	p.states = append(p.states, state)
 	if len(p.decisions) == 0 {
 		return VideoResearchDecision{}, errors.New("no scripted planner decision")
 	}
