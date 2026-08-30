@@ -111,7 +111,7 @@ func safeAgentProfile(profile ai.Profile) frozenAgentProfile {
 func defaultTemplateAgentPolicy(topK int) (frozenAgentPolicy, frozenAgentBudget) {
 	allowed := defaultAgentToolNames()
 	return frozenAgentPolicy{TopK: topK, MaxSteps: 16, AllowedTools: allowed}, frozenAgentBudget{
-		MaxSteps: 16, MaxToolCalls: 16, MaxLLMCalls: 2, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+		MaxSteps: 16, MaxToolCalls: 16, MaxLLMCalls: 2, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
 	}
 }
 
@@ -120,7 +120,7 @@ func researchAgentPolicy(topK int, policy VideoResearchPolicy) (frozenAgentPolic
 	return frozenAgentPolicy{TopK: topK, MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans, AllowedTools: allowed}, frozenAgentBudget{
 		// Each research iteration has one planner checkpoint plus one tool step.
 		MaxSteps: policy.MaxSteps*2 + 1, MaxToolCalls: policy.MaxSteps,
-		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
 	}
 }
 

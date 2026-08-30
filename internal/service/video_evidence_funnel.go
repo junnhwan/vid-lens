@@ -70,7 +70,7 @@ func evidenceFunnelAgentPolicy(policy EvidenceFunnelPolicy) (frozenAgentPolicy, 
 			MaxFinalEvidenceItems: policy.MaxFinalEvidenceItems,
 		}, frozenAgentBudget{
 			MaxSteps: len(evidenceFunnelActionOrder), MaxToolCalls: 6,
-			MaxLLMCalls: 3, MaxVisionCalls: 0, MaxAttemptsPerStep: 2,
+			MaxLLMCalls: 3, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
 		}
 }
 

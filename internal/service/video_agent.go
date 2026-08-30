@@ -60,7 +60,8 @@ type VideoAgentTemplateRequest struct {
 }
 
 type VideoAgentService struct {
-	chatSvc *ChatService
+	chatSvc                       *ChatService
+	evidenceFunnelResultPublisher func(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error)
 }
 
 type VideoAgentExecutionError struct {

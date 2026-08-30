@@ -18,13 +18,18 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	frames, err := repos.VisualFrame.ListCompletedWithText(42)
+	if err != nil || len(frames) != 1 {
+		t.Fatalf("frames = %+v, %v", frames, err)
+	}
+	visualEvidenceID := fmt.Sprintf("visual-frame:%d", frames[0].ID)
 	ledger := NewEvidenceLedgerService(repos)
 	req := EvidenceLedgerRecordRequest{
 		UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: "11111111-1111-1111-1111-111111111111",
 		RawAnswer: "已确认事实。[C1]\n可能还有第二个原因。\n没有引用的断言。",
-		Evidence:  []Citation{{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: RetrievalSourceHybrid}},
+		Evidence:  []Citation{{TaskID: 42, CitationID: "C1", EvidenceID: visualEvidenceID, ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: "visual_ocr"}},
 		Retrieved: []Citation{
-			{TaskID: 42, CitationID: "C1", EvidenceID: "stable-evidence-1", ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: RetrievalSourceHybrid},
+			{TaskID: 42, CitationID: "C1", EvidenceID: visualEvidenceID, ChunkID: 5, ChunkIndex: 3, Content: "[画面] 可复核的视觉引用", Source: "visual_ocr"},
 			{TaskID: 42, CitationID: "C2", EvidenceID: "unused-retrieval", ChunkID: 6, ChunkIndex: 4, Content: "本轮检索到但未引用的片段", Source: RetrievalSourceVector},
 		},
 	}
@@ -61,7 +66,7 @@ func TestEvidenceLedgerRecordsVerifiedUncertainAndUnsupportedClaims(t *testing.T
 
 	var bound model.AgentEvidence
 	for _, evidence := range view.Evidence {
-		if evidence.SourceRef == "stable-evidence-1" {
+		if evidence.SourceRef == visualEvidenceID {
 			bound = evidence
 		}
 	}
@@ -120,6 +125,118 @@ func TestEvidenceLedgerUsesVisualOCRProvenanceWhenTextAlsoMatchesTranscript(t *t
 		if !strings.Contains(evidence.StableLocator, want) {
 			t.Fatalf("stable locator %s missing %s", evidence.StableLocator, want)
 		}
+	}
+}
+
+func TestEvidenceLedgerResolvesDuplicateTranscriptTextByStableIdentity(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	sharedText := "重复出现的 owner 校验说明"
+	videoChunks := []model.VideoChunk{
+		{UserID: 7, TaskID: 42, ChunkIndex: 1, Content: sharedText, ContentHash: "11111111111111111111111111111111", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "duplicate-transcript-1"},
+		{UserID: 7, TaskID: 42, ChunkIndex: 2, Content: sharedText, ContentHash: "22222222222222222222222222222222", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "duplicate-transcript-2"},
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(42, "embed", videoChunks); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 1, "audio/1.mp3", sharedText, 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 2, "audio/2.mp3", sharedText, 30, 40); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		citation Citation
+	}{
+		{name: "evidence id", citation: Citation{TaskID: 42, EvidenceID: videoChunks[1].VectorID, Content: sharedText}},
+		{name: "chunk id", citation: Citation{TaskID: 42, ChunkID: videoChunks[1].ID, Content: sharedText}},
+		{name: "chunk index", citation: Citation{TaskID: 42, ChunkIndex: 2, Content: sharedText}},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.citation.CitationID = "C1"
+			runID := fmt.Sprintf("duplicate-transcript-identity-%d", index)
+			ledger := NewEvidenceLedgerService(repos)
+			if err := ledger.RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+				UserID: 7, SessionID: 9, MessageID: int64(20 + index), TaskID: 42, RunID: runID,
+				RawAnswer: "引用第二处重复转写。[C1]", Evidence: []Citation{test.citation},
+			}); err != nil {
+				t.Fatalf("RecordAnswer() error = %v", err)
+			}
+			view, err := ledger.GetRun(context.Background(), 7, runID)
+			if err != nil || view == nil || len(view.Evidence) != 1 {
+				t.Fatalf("ledger view = %+v, %v", view, err)
+			}
+			got := view.Evidence[0]
+			if got.DocumentID == "transcription_chunk:0" || got.StartSecond != 30 || got.EndSecond != 40 || got.TimeRangeStatus != model.EvidenceTimeRangeKnown {
+				t.Fatalf("identity %s resolved duplicate text to %+v, want second transcript range", test.name, got)
+			}
+		})
+	}
+}
+
+func TestEvidenceLedgerTextFallbackRequiresUniqueMatchAndNoIdentity(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 1, "audio/1.mp3", "重复转写", 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 2, "audio/2.mp3", "重复转写", 30, 40); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(42, 3, "audio/3.mp3", "唯一转写", 50, 60); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name       string
+		runID      string
+		text       string
+		wantStatus string
+		wantStart  int64
+	}{
+		{name: "duplicate rejected", runID: "text-fallback-duplicate", text: "重复转写", wantStatus: model.EvidenceTimeRangeUnknown},
+		{name: "unique accepted", runID: "text-fallback-unique", text: "唯一转写", wantStatus: model.EvidenceTimeRangeKnown, wantStart: 50},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ledger := NewEvidenceLedgerService(repos)
+			citation := Citation{TaskID: 42, CitationID: "C1", Content: test.text}
+			if err := ledger.RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+				UserID: 7, SessionID: 9, MessageID: 30, TaskID: 42, RunID: test.runID,
+				RawAnswer: "转写证据。[C1]", Evidence: []Citation{citation},
+			}); err != nil {
+				t.Fatalf("RecordAnswer() error = %v", err)
+			}
+			view, err := ledger.GetRun(context.Background(), 7, test.runID)
+			if err != nil || view == nil || len(view.Evidence) != 1 {
+				t.Fatalf("ledger view = %+v, %v", view, err)
+			}
+			if got := view.Evidence[0]; got.TimeRangeStatus != test.wantStatus || got.StartSecond != test.wantStart {
+				t.Fatalf("fallback evidence = %+v", got)
+			}
+		})
+	}
+}
+
+func TestEvidenceLedgerRejectsVisualOCRWithoutFrameProvenance(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	if err := repos.VisualFrame.ReplaceTaskFrames(42, []model.VideoVisualFrame{{
+		TaskID: 42, FrameIndex: 1, TimeMs: 12000, ObjectKey: "frames/42/1.jpg", OCRText: "相同 OCR 文本",
+		Source: "scene", CaptionMethod: "ocr", Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	citation := Citation{TaskID: 42, CitationID: "C1", Content: "相同 OCR 文本", Source: "visual_ocr"}
+	err := NewEvidenceLedgerService(repos).RecordAnswer(context.Background(), EvidenceLedgerRecordRequest{
+		UserID: 7, SessionID: 9, MessageID: 11, TaskID: 42, RunID: "visual-without-frame-id",
+		RawAnswer: "画面证据。[C1]", Evidence: []Citation{citation},
+	})
+	if err == nil || !strings.Contains(err.Error(), "visual-frame") {
+		t.Fatalf("RecordAnswer() error = %v, want missing visual-frame provenance rejection", err)
+	}
+	view, getErr := NewEvidenceLedgerService(repos).GetRun(context.Background(), 7, "visual-without-frame-id")
+	if getErr != nil || view != nil {
+		t.Fatalf("rejected visual evidence polluted ledger: %+v, %v", view, getErr)
 	}
 }
 

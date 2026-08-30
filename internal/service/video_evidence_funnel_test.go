@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -64,7 +65,7 @@ func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 	if err != nil || execution == nil || execution.Run.Status != model.AgentRunStatusCompleted || len(execution.Steps) != 8 || len(execution.ToolCalls) != 8 {
 		t.Fatalf("funnel execution = %+v, %v", execution, err)
 	}
-	if execution.Run.ToolCallsUsed != 5 || execution.Run.LLMCallsUsed != 3 || execution.Run.VisionCallsUsed != 0 {
+	if execution.Run.ToolCallsUsed != 5 || execution.Run.LLMCallsUsed != 3 || execution.Run.VisionCallsUsed != 0 || execution.Run.MaxAttemptsPerStep != 1 {
 		t.Fatalf("funnel budget counters = %+v", execution.Run)
 	}
 	for index, call := range execution.ToolCalls {
@@ -209,6 +210,66 @@ func TestEvidenceFunnelValidationFailureLeavesOnlyPendingAssistantHistory(t *tes
 	ledger, ledgerErr := NewEvidenceLedgerService(repos).GetRun(context.Background(), 7, "funnel-validation-failure")
 	if ledgerErr != nil || ledger == nil || len(ledger.Claims) != 1 || ledger.Claims[0].Status != model.ClaimStatusUnsupported {
 		t.Fatalf("rejected claim ledger = %+v, %v", ledger, ledgerErr)
+	}
+}
+
+func TestEvidenceFunnelRecoversValidatedAnswerAfterPublishFailure(t *testing.T) {
+	repos, task, session := newVideoAgentTestSession(t)
+	chunks := []model.VideoChunk{{
+		UserID: 7, TaskID: task.ID, ChunkIndex: 1, Content: "可恢复发布的 owner 证据", ContentHash: "cccccccccccccccccccccccccccccccc",
+		EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "publish-recovery-evidence",
+	}}
+	if err := repos.VideoChunk.ReplaceTaskChunks(task.ID, "embed", chunks); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, 1, "audio/1.mp3", chunks[0].Content, 10, 20); err != nil {
+		t.Fatal(err)
+	}
+	retriever := &fakeRetriever{results: []RetrievedChunk{{
+		TaskID: task.ID, EvidenceID: chunks[0].VectorID, ChunkID: chunks[0].ID, ChunkIndex: chunks[0].ChunkIndex, Content: chunks[0].Content, Source: "vector",
+	}}}
+	agent := NewVideoAgentService(NewChatService(repos, retriever, ChatConfig{TopK: 1, CandidateK: 1, MinScore: 0.1}))
+	publishErr := errors.New("forced assistant publish failure")
+	agent.evidenceFunnelResultPublisher = func(int64, int64, int64, string, string, string) (bool, error) {
+		return false, publishErr
+	}
+	req := EvidenceFunnelRequest{UserID: 7, SessionID: session.ID, Goal: "恢复发布", TopK: 1, RunID: "funnel-publish-recovery"}
+	profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "chat-model"}
+	_, err := agent.AskEvidenceFunnel(context.Background(), req, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{
+		`{"done":false,"candidate_ids":["transcript-1"]}`,
+		"owner 证据可恢复发布。[C1]",
+	}}, profile)
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("first AskEvidenceFunnel() error = %v", err)
+	}
+	messages, listErr := repos.Chat.ListMessages(7, session.ID)
+	if listErr != nil || len(messages) != 2 || messages[1].Content != evidenceFunnelPendingAnswer {
+		t.Fatalf("publish-failure messages = %+v, %v", messages, listErr)
+	}
+	execution, getErr := repos.AgentExecution.GetExecution(context.Background(), 7, req.RunID)
+	if getErr != nil || execution == nil || execution.Run.Status != model.AgentRunStatusRunning || len(execution.Steps) != 8 || execution.Steps[7].Status != model.AgentStepStatusCompleted {
+		t.Fatalf("validated pending execution = %+v, %v", execution, getErr)
+	}
+
+	agent.evidenceFunnelResultPublisher = nil
+	recoveryChat := &scriptedChatClient{}
+	recovered, err := agent.AskEvidenceFunnel(context.Background(), req, &fakeEmbeddingClient{dim: 3}, recoveryChat, profile)
+	if err != nil {
+		t.Fatalf("recovery AskEvidenceFunnel() error = %v", err)
+	}
+	if recovered.Answer != "owner 证据可恢复发布。" || len(recovered.Citations) != 1 || recovered.MessageID != messages[1].ID {
+		t.Fatalf("recovered result = %+v", recovered)
+	}
+	if len(recoveryChat.messages) != 0 {
+		t.Fatalf("recovery repeated planner or answer calls: %d", len(recoveryChat.messages))
+	}
+	messages, listErr = repos.Chat.ListMessages(7, session.ID)
+	if listErr != nil || len(messages) != 2 || messages[1].Content != recovered.Answer {
+		t.Fatalf("recovered messages = %+v, %v", messages, listErr)
+	}
+	execution, getErr = repos.AgentExecution.GetExecution(context.Background(), 7, req.RunID)
+	if getErr != nil || execution == nil || execution.Run.Status != model.AgentRunStatusCompleted || len(execution.Steps) != 8 {
+		t.Fatalf("recovered execution = %+v, %v", execution, getErr)
 	}
 }
 

@@ -30,3 +30,18 @@ func TestSafeAgentProfileFreezesIdentityWithoutCredentialsOrRawEndpoints(t *test
 		}
 	}
 }
+
+func TestAgentPoliciesExposeActualSingleAttemptExecution(t *testing.T) {
+	_, templateBudget := defaultTemplateAgentPolicy(5)
+	_, researchBudget := researchAgentPolicy(5, DefaultVideoResearchPolicy())
+	_, funnelBudget := evidenceFunnelAgentPolicy(defaultEvidenceFunnelPolicy(5))
+	for name, budget := range map[string]frozenAgentBudget{
+		"template":        templateBudget,
+		"research":        researchBudget,
+		"evidence_funnel": funnelBudget,
+	} {
+		if budget.MaxAttemptsPerStep != 1 {
+			t.Fatalf("%s max attempts per step = %d, want actual single execution", name, budget.MaxAttemptsPerStep)
+		}
+	}
+}

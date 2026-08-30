@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -227,31 +228,117 @@ func (s *EvidenceLedgerService) resolveTimeRange(taskID int64, citation Citation
 		return resolvedEvidenceRange{}, false, nil
 	}
 	if isVisualOCRCitation(citation) {
+		if _, ok := visualFrameIDFromSourceRef(citation.EvidenceID); !ok {
+			return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
+		}
 		return s.resolveVisualRange(taskID, citation.EvidenceID, quote)
 	}
-	if s.repos.TranscriptionChunk != nil {
-		chunks, err := s.repos.TranscriptionChunk.ListByTaskID(taskID)
-		if err != nil {
-			return resolvedEvidenceRange{}, false, err
+	return s.resolveTranscriptRange(taskID, citation, quote)
+}
+
+func (s *EvidenceLedgerService) resolveTranscriptRange(taskID int64, citation Citation, quote string) (resolvedEvidenceRange, bool, error) {
+	if s.repos.TranscriptionChunk == nil {
+		return resolvedEvidenceRange{}, false, nil
+	}
+	chunks, err := s.repos.TranscriptionChunk.ListByTaskID(taskID)
+	if err != nil {
+		return resolvedEvidenceRange{}, false, err
+	}
+	targetIndex, identityPresent, identityResolved, identityBasis, err := s.resolveTranscriptIdentity(taskID, citation)
+	if err != nil {
+		return resolvedEvidenceRange{}, false, err
+	}
+	if identityPresent {
+		if !identityResolved {
+			return resolvedEvidenceRange{}, false, nil
 		}
 		for _, chunk := range chunks {
-			if chunk.Status != model.TranscriptionChunkStatusCompleted || !evidenceTextMatches(quote, chunk.Content) {
+			if chunk.ChunkIndex != targetIndex || chunk.Status != model.TranscriptionChunkStatusCompleted || !evidenceTextMatches(quote, chunk.Content) {
 				continue
 			}
-			start, end := int64(chunk.StartSecond), int64(chunk.EndSecond)
-			if end <= start {
-				return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), rangeBasis: "unavailable"}, true, nil
-			}
-			return resolvedEvidenceRange{sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), startSecond: start, endSecond: end, rangeBasis: "persisted_asr_segment"}, true, nil
+			return transcriptResolvedRange(chunk, identityBasis), true, nil
+		}
+		return resolvedEvidenceRange{}, false, nil
+	}
+
+	// Legacy evidence without any stable identity may use text only when it
+	// points to exactly one completed ASR segment. Duplicate text is ambiguous.
+	matches := make([]model.VideoTranscriptionChunk, 0, 1)
+	for _, chunk := range chunks {
+		if chunk.Status == model.TranscriptionChunkStatusCompleted && evidenceTextMatches(quote, chunk.Content) {
+			matches = append(matches, chunk)
 		}
 	}
-	if looksLikeVisualEvidence(quote) {
-		return s.resolveVisualRange(taskID, "", quote)
+	if len(matches) != 1 {
+		return resolvedEvidenceRange{}, false, nil
 	}
-	return resolvedEvidenceRange{}, false, nil
+	return transcriptResolvedRange(matches[0], "unique_text_fallback"), true, nil
+}
+
+func (s *EvidenceLedgerService) resolveTranscriptIdentity(taskID int64, citation Citation) (int, bool, bool, string, error) {
+	evidenceID := strings.TrimSpace(citation.EvidenceID)
+	hasEvidenceID := evidenceID != ""
+	hasChunkID := citation.ChunkID > 0
+	// ChunkIndex is an int in the compatibility citation schema, so zero cannot
+	// distinguish an omitted value from the first chunk. Real retrieval records
+	// carry EvidenceID/ChunkID; a non-zero standalone index remains explicit.
+	hasChunkIndex := citation.ChunkIndex != 0
+	identityPresent := hasEvidenceID || hasChunkID || hasChunkIndex
+	if !identityPresent {
+		return 0, false, false, "", nil
+	}
+
+	resolved := make(map[int][]string)
+	if hasEvidenceID || hasChunkID {
+		if s.repos.VideoChunk == nil {
+			return 0, true, false, "", nil
+		}
+		chunks, err := s.repos.VideoChunk.ListAllByTaskID(taskID)
+		if err != nil {
+			return 0, true, false, "", err
+		}
+		for _, chunk := range chunks {
+			if hasEvidenceID && chunk.VectorID == evidenceID {
+				resolved[chunk.ChunkIndex] = append(resolved[chunk.ChunkIndex], "evidence_id")
+			}
+			if hasChunkID && chunk.ID == citation.ChunkID {
+				resolved[chunk.ChunkIndex] = append(resolved[chunk.ChunkIndex], "chunk_id")
+			}
+		}
+	}
+	if hasChunkIndex {
+		resolved[citation.ChunkIndex] = append(resolved[citation.ChunkIndex], "chunk_index")
+	}
+	if len(resolved) == 0 {
+		return 0, true, false, "", nil
+	}
+	if len(resolved) != 1 {
+		return 0, true, false, "", errors.New("transcript evidence identities resolve to different chunks")
+	}
+	for index, bases := range resolved {
+		sort.Strings(bases)
+		return index, true, true, strings.Join(bases, "+"), nil
+	}
+	return 0, true, false, "", nil
+}
+
+func transcriptResolvedRange(chunk model.VideoTranscriptionChunk, identityBasis string) resolvedEvidenceRange {
+	resolved := resolvedEvidenceRange{
+		sourceType: "transcript", documentID: fmt.Sprintf("transcription_chunk:%d", chunk.ID), rangeBasis: "unavailable",
+		locator: map[string]any{"transcription_chunk_id": chunk.ID, "transcription_chunk_index": chunk.ChunkIndex, "identity_basis": identityBasis},
+	}
+	start, end := int64(chunk.StartSecond), int64(chunk.EndSecond)
+	if end > start && start >= 0 {
+		resolved.startSecond, resolved.endSecond, resolved.rangeBasis = start, end, "persisted_asr_segment"
+	}
+	return resolved
 }
 
 func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quote string) (resolvedEvidenceRange, bool, error) {
+	expectedFrameID, hasFrameID := visualFrameIDFromSourceRef(sourceRef)
+	if !hasFrameID {
+		return resolvedEvidenceRange{}, false, errors.New("visual_ocr evidence requires visual-frame:<id> provenance")
+	}
 	if s.repos.VisualFrame == nil {
 		return resolvedEvidenceRange{}, false, nil
 	}
@@ -259,9 +346,8 @@ func (s *EvidenceLedgerService) resolveVisualRange(taskID int64, sourceRef, quot
 	if err != nil {
 		return resolvedEvidenceRange{}, false, err
 	}
-	expectedFrameID, hasFrameID := visualFrameIDFromSourceRef(sourceRef)
 	for _, frame := range frames {
-		if hasFrameID && frame.ID != expectedFrameID {
+		if frame.ID != expectedFrameID {
 			continue
 		}
 		if !evidenceTextMatches(quote, frame.OCRText) {
@@ -293,11 +379,6 @@ func visualFrameIDFromSourceRef(sourceRef string) (int64, bool) {
 	}
 	id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(sourceRef, prefix)), 10, 64)
 	return id, err == nil && id > 0
-}
-
-func looksLikeVisualEvidence(quote string) bool {
-	quote = strings.TrimSpace(quote)
-	return strings.HasPrefix(quote, "[画面")
 }
 
 func evidenceTextMatches(quote, source string) bool {

@@ -100,7 +100,7 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	result.Trace = evidenceFunnelTrace(ctx, s, req.UserID, runID)
 	if snapshot, snapshotErr := MarshalAgentSnapshot(result); snapshotErr != nil {
 		return nil, snapshotErr
-	} else if updated, updateErr := s.chatSvc.repos.Chat.UpdateAssistantResult(req.UserID, req.SessionID, result.MessageID, result.Answer, string(snapshot), result.Model); updateErr != nil || !updated {
+	} else if updated, updateErr := s.publishEvidenceFunnelResult(req.UserID, req.SessionID, result.MessageID, result.Answer, string(snapshot), result.Model); updateErr != nil || !updated {
 		if updateErr == nil {
 			updateErr = errors.New("assistant message disappeared before validated funnel answer publish")
 		}
@@ -114,6 +114,16 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	}
 	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "evidence_validated", nil)
 	return result, nil
+}
+
+func (s *VideoAgentService) publishEvidenceFunnelResult(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error) {
+	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil {
+		return false, errors.New("chat repository unavailable")
+	}
+	if s.evidenceFunnelResultPublisher != nil {
+		return s.evidenceFunnelResultPublisher(userID, sessionID, messageID, content, snapshot, modelName)
+	}
+	return s.chatSvc.repos.Chat.UpdateAssistantResult(userID, sessionID, messageID, content, snapshot, modelName)
 }
 
 func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID int64, question string, result *VideoAgentResult) (int64, error) {
