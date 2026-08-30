@@ -19,18 +19,9 @@ export default function ChatSplitLayout({
   scrollRef?: Ref<HTMLDivElement>
 }) {
   const [chatPct, setChatPct] = useState(CHAT_DEFAULT)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const [dragging, setDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-
-  // 窄屏默认收起流水线，避免挤压对话区
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)')
-    const sync = () => { if (mq.matches) setCollapsed(true) }
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -79,14 +70,14 @@ export default function ChatSplitLayout({
           onMouseDown={onDragStart}
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整对话区与流水线宽度"
+          aria-label="调整对话区宽度"
         >
           <GripVertical className="w-3.5 h-3.5 text-ink-4 group-hover:text-sienna-700 pointer-events-none" />
           <button
             type="button"
             onClick={e => { e.stopPropagation(); setCollapsed(true) }}
             className="absolute top-3 -right-3 w-6 h-6 rounded-full bg-paper-0 border border-ink-0/10 shadow-sm flex items-center justify-center text-ink-4 hover:text-ink-1 hover:border-sienna-500/40 ui-btn-lift"
-            title="收起流水线"
+            title="收起过程"
           >
             <PanelRightClose className="w-3 h-3" />
           </button>
@@ -107,10 +98,10 @@ export default function ChatSplitLayout({
           type="button"
           onClick={() => setCollapsed(false)}
           className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 py-4 px-1.5 rounded-l-lg bg-paper-0 border border-r-0 border-ink-0/8 shadow-md text-ink-4 hover:text-sienna-700 hover:border-sienna-500/40 ui-btn-lift"
-          title="展开流水线"
+          title="查看过程"
         >
           <PanelRightOpen className="w-4 h-4" />
-          <span className="text-[9px] [writing-mode:vertical-rl] tracking-wider">流水线</span>
+          <span className="text-[9px] [writing-mode:vertical-rl] tracking-wider">过程</span>
         </button>
       )}
     </div>

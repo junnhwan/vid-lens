@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Database, AlertTriangle, Trash2, MessageCircle, Plus } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
-import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, VideoModeToggle, SidebarSection } from '@/components/chat/ChatShell'
+import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ChatModePicker, SidebarSection, modeLabel as chatModeLabel } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
 import AgentTracePanel from '@/components/chat/AgentTracePanel'
 import AgentLensOverlay from '@/components/chat/AgentLensOverlay'
@@ -42,7 +42,7 @@ function ChatView() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
   const [mode, setMode] = useState<VideoChatMode>('strict_rag')
-  const [topK, setTopK] = useState(4)
+  const topK = 4
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [ragTrace, setRagTrace] = useState<ChatTraceStep[]>([])
   const [agentTrace, setAgentTrace] = useState<AgentTraceState>(emptyAgentTraceState())
@@ -64,6 +64,10 @@ function ChatView() {
 
     const init = async () => {
       const url = new URLSearchParams(location.search)
+      const modeParam = url.get('mode')
+      if (modeParam === 'agent' || modeParam === 'video_assistant' || modeParam === 'strict_rag') {
+        setMode(modeParam)
+      }
       const sidParam = url.get('session')
       const sid = sidParam ? Number(sidParam) : null
       if (sid) {
@@ -102,7 +106,17 @@ function ChatView() {
     setFailClosed(false)
     const url = new URLSearchParams(location.search)
     url.delete('session')
-    history.replaceState(null, '', `/chat/${taskId}?${url.toString()}`)
+    const qs = url.toString()
+    history.replaceState(null, '', qs ? `/chat/${taskId}?${qs}` : `/chat/${taskId}`)
+  }
+
+  const changeMode = (next: VideoChatMode) => {
+    setMode(next)
+    const url = new URLSearchParams(location.search)
+    if (next === 'strict_rag') url.delete('mode')
+    else url.set('mode', next)
+    const qs = url.toString()
+    history.replaceState(null, '', qs ? `/chat/${taskId}?${qs}` : `/chat/${taskId}`)
   }
 
   useEffect(() => {
@@ -345,7 +359,12 @@ function ChatView() {
     }
   }
 
-  const modeLabel = mode === 'agent' ? 'Agent 问答' : mode === 'strict_rag' ? '严格 RAG' : '普通问答'
+  const modeLabel = chatModeLabel(mode)
+  const placeholder = mode === 'agent'
+    ? '需要对比、归纳时用 Agent…'
+    : mode === 'video_assistant'
+      ? '就这部视频随便问问…'
+      : '就转写内容提问…'
 
   const lastAgentMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.agentRun)
   const lensCites = lastAgentMsg?.cites || []
@@ -360,7 +379,7 @@ function ChatView() {
             streaming={streaming}
             source={panelSource}
             error={traceError}
-            emptyHint={isAgentMode ? 'Agent 将展示检索与工具步骤摘要。' : 'RAG 流式问答将展示检索与生成进度。'}
+            emptyHint="发送后会显示检索进度。"
           />
         )
       }
@@ -372,90 +391,69 @@ function ChatView() {
       header={
         <ChatHeader
           backHref="/"
-          backLabel="返回视频库"
-          kicker={`任务 #${taskId} · 单视频问答`}
+          backLabel="视频库"
+          kicker="单视频问答"
           title={task ? taskTitle(task) : '加载中…'}
-          actions={<VideoModeToggle mode={mode} onChange={setMode} disabled={streaming} />}
         />
       }
       sidebar={
         <ChatSidebar>
-          <div className="space-y-5">
-            <SidebarSection
-              title="会话"
-              action={
-                <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[10px]" title="新建会话">
-                  <Plus className="w-3 h-3" />新建
-                </button>
-              }
-            >
-              <ul className="space-y-1">
-                {sessions.map(s => (
-                  <li key={s.id}>
-                    <button
-                      onClick={() => switchSession(s.id)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] ui-row-hover ${
-                        session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
-                      }`}
-                    >
-                      <MessageCircle className="w-3 h-3 shrink-0" />
-                      <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
-                      <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
-                    </button>
-                  </li>
-                ))}
-                {sessions.length === 0 && <li className="text-[11px] text-ink-4">暂无会话</li>}
-              </ul>
-            </SidebarSection>
-
-            <div className="h-px bg-ink-0/8" />
-
-            <SidebarSection title="本视频">
-              <dl className="text-[11px] space-y-1.5">
-                <div className="flex justify-between"><dt className="text-ink-4">编号</dt><dd>{taskId}</dd></div>
-                <div className="flex justify-between">
-                  <dt className="text-ink-4">索引</dt>
-                  <dd className={ragStatus?.indexed ? 'text-moss' : 'text-ink-4'}>
-                    {ragStatus?.indexed ? `${ragStatus.chunks} chunks` : '未索引'}
-                  </dd>
-                </div>
-                {task?.transcription && (
-                  <div className="flex justify-between"><dt className="text-ink-4">转写</dt><dd>{task.transcription.words} 词</dd></div>
-                )}
-                <div className="flex justify-between"><dt className="text-ink-4">模式</dt><dd>{modeLabel}</dd></div>
-              </dl>
-            </SidebarSection>
-          </div>
+          <SidebarSection
+            title="会话"
+            action={
+              <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[11px]" title="新建会话">
+                <Plus className="w-3 h-3" />新建
+              </button>
+            }
+          >
+            <ul className="space-y-0.5">
+              {sessions.map(s => (
+                <li key={s.id}>
+                  <button
+                    onClick={() => switchSession(s.id)}
+                    title={fmtSession(s.created_at)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[13px] ui-row-hover ${
+                      session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
+                    }`}
+                  >
+                    <MessageCircle className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{s.title || '新会话'}</span>
+                  </button>
+                </li>
+              ))}
+              {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2 py-1">还没有会话</li>}
+            </ul>
+          </SidebarSection>
         </ChatSidebar>
       }
       footer={
         <ChatFooter
-          hint="基于本卷转写 · 引用可追溯 · 无时间码"
           footerAction={
-            <button onClick={clearSession} className="hover:text-red-600 flex items-center gap-1 ui-btn-lift">
-              <Trash2 className="w-3 h-3" />清空会话
-            </button>
+            session ? (
+              <button onClick={clearSession} className="hover:text-red-600 flex items-center gap-1 ui-btn-lift">
+                <Trash2 className="w-3 h-3" />清空会话
+              </button>
+            ) : undefined
           }
         >
           <ChatInput
             onSend={send}
             onStop={stop}
             streaming={streaming}
-            placeholder="就转写内容提问…"
-            topK={topK}
-            onTopKChange={setTopK}
+            placeholder={placeholder}
+            leading={<ChatModePicker mode={mode} onChange={changeMode} disabled={streaming} />}
           />
         </ChatFooter>
       }
     >
       <>
-        <div className="text-center pb-2 ui-fade-in">
-          <div className="text-[10px] text-ink-4 font-mono">
-            Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}
-            {session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}
-          </div>
-          <p className="text-[13px] text-ink-3 italic mt-1.5">基于本卷转写内容的问答。引用以 [C1] 标注，点击展开原文片段。</p>
-        </div>
+        {messages.length === 0 && sessionReady && !failClosed && (
+          <p className="text-[13px] text-ink-4 ui-fade-in">
+            {mode === 'agent'
+              ? 'Agent 会分步检索并归纳。适合对比、跨片段的问题。'
+              : '就这部视频的转写提问。回答会附带来源。'}
+          </p>
+        )}
 
         {!sessionReady ? (
           <div className="space-y-2">
@@ -470,7 +468,6 @@ function ChatView() {
               idx={i}
               onToggleCite={toggleCite}
               modeLabel={modeLabel}
-              topK={topK}
               onCopy={copyAnswer}
               onRetry={retryQuestion}
             />
@@ -481,17 +478,15 @@ function ChatView() {
           <div className="flex gap-3 p-4 rounded-xl bg-red-50 border border-red-200 ui-fade-in">
             <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
             <div>
-              <div className="text-[14px] font-medium text-red-800">该视频尚未建立索引</div>
+              <div className="text-[14px] font-medium text-red-800">还没有建立检索索引</div>
               <p className="text-[12px] text-red-700/80 mt-1">
-                {mode === 'agent'
-                  ? 'Agent 模式需要可检索的转写索引。建立索引后即可使用多步工具问答。'
-                  : 'strict_rag 模式强制走检索，无索引时无法回答。建立索引后即可基于转写内容做引用问答。'}
+                {mode === 'agent' ? 'Agent' : '引用问答'}需要先索引转写。建好后就可以带着来源回答。
               </p>
               <button
                 onClick={triggerIndex}
                 className="mt-2 h-8 px-3 rounded-lg border border-red-300 text-[11px] text-red-700 flex items-center gap-1 ui-btn-lift"
               >
-                <Database className="w-3 h-3" />触发 RAG 索引
+                <Database className="w-3 h-3" />建立索引
               </button>
             </div>
           </div>

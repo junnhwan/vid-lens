@@ -46,14 +46,13 @@ function TraceStepIcon({ kind }: { kind: string }) {
 export default function AgentChatBubble({
   msg,
   idx,
-  modeLabel,
   onToggleCite,
   onCopy,
   onRetry,
 }: {
   msg: ChatMsg
   idx: number
-  modeLabel: string
+  modeLabel?: string
   onToggleCite: (msgIdx: number, id: string) => void
   onCopy?: (content: string) => void
   onRetry?: (msgIdx: number) => void
@@ -81,7 +80,7 @@ export default function AgentChatBubble({
       <div className="space-y-2 ui-fade-in">
         <div className="flex items-center gap-2 text-[10px] text-ink-4">
           <AgentMark />
-          映知 · {modeLabel}
+          映知 Agent
         </div>
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-[13px] text-red-700">{msg.error}</div>
       </div>
@@ -92,7 +91,7 @@ export default function AgentChatBubble({
     <div className="space-y-2 ui-fade-in w-full">
       <div className="flex items-center gap-2 text-[10px] text-ink-4">
         <AgentMark />
-        映知 Agent · {modeLabel}
+        映知 Agent
         {msg.streaming && (
           <span className="text-sienna-700 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-sienna-500 ui-agent-pulse-opacity" />

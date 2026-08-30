@@ -111,7 +111,7 @@ function QaHubView() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-ink-0 truncate">{taskTitle(v)}</div>
-                        <div className="text-[11px] text-ink-4">任务 #{v.id} · 严格 RAG · 引用可追溯</div>
+                        <div className="text-[11px] text-ink-4">本视频转写问答</div>
                       </div>
                       <ChevronRight className="w-4 h-4 text-ink-4 shrink-0" />
                     </Link>

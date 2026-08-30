@@ -49,9 +49,6 @@ function TimelineStep({ step }: { step: ChatTraceStep }) {
       {step.toolOutput && step.status === 'done' && (
         <p className="text-[10px] text-moss mt-1 line-clamp-2">{step.toolOutput}</p>
       )}
-      {step.durationMs != null && step.status === 'done' && (
-        <p className="text-[9px] text-ink-4 mt-0.5">{step.durationMs}ms</p>
-      )}
       {step.kind === 'retrieve' && step.status === 'running' && (
         <div className="mt-2 h-1 rounded-full bg-paper-2 overflow-hidden">
           <div className="h-full bg-sienna-500 ui-agent-scan" />
@@ -62,9 +59,9 @@ function TimelineStep({ step }: { step: ChatTraceStep }) {
 }
 
 const SOURCE_HINT: Record<TracePanelSource, string> = {
-  agent: '步骤来自 Agent 流式事件（工具调用与检索摘要）。',
-  inferred: '步骤根据 RAG 流式事件推断，仅含检索与生成两步。',
-  legacy: '历史消息从快照恢复的执行摘要。',
+  agent: '检索与工具步骤会显示在这里。',
+  inferred: '发送问题后，这里会显示检索和生成进度。',
+  legacy: '来自历史回答的检索摘要。',
 }
 
 export default function AgentTracePanel({
@@ -85,11 +82,11 @@ export default function AgentTracePanel({
   return (
     <div className="p-4 h-full bg-paper-0/70">
       <div className="flex items-center justify-between mb-3 gap-2">
-        <div className="text-[10px] uppercase tracking-wider text-ink-4">执行流水线</div>
+        <div className="text-[11px] text-ink-4">过程</div>
         {streaming && (
           <span className="text-[10px] text-sienna-700 flex items-center gap-1 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-sienna-500 ui-agent-pulse-opacity" />
-            Live
+            进行中
           </span>
         )}
       </div>
@@ -103,7 +100,7 @@ export default function AgentTracePanel({
       {visible.length === 0 ? (
         <div className="space-y-2">
           <p className="text-[12px] text-ink-4 italic">
-            {streaming ? '等待 Agent 返回步骤…' : (emptyHint || '发送问题后，执行步骤将显示在这里。')}
+            {streaming ? '正在检索…' : (emptyHint || '发送问题后，进度会显示在这里。')}
           </p>
         </div>
       ) : (

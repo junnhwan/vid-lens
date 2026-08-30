@@ -1,17 +1,16 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
 import { Send, Square } from 'lucide-react'
 
 export default function ChatInput({
-  onSend, onStop, streaming, placeholder, topK, onTopKChange,
+  onSend, onStop, streaming, placeholder, leading,
 }: {
   onSend: (q: string) => void
   onStop: () => void
   streaming: boolean
   placeholder: string
-  topK: number
-  onTopKChange: (n: number) => void
+  leading?: ReactNode
 }) {
   const [text, setText] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -43,27 +42,9 @@ export default function ChatInput({
         placeholder={placeholder}
         className="w-full bg-transparent px-4 pt-3 pb-1 text-[14px] leading-relaxed text-ink-0 placeholder:text-ink-5 focus:outline-none resize-none"
       />
-      <div className="flex items-center gap-3 px-3 pb-2.5">
-        <div className="flex items-center gap-2 text-[10px] text-ink-4">
-          <span>TopK</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => onTopKChange(Math.max(1, topK - 1))}
-              className="w-5 h-5 rounded border border-ink-0/10 text-ink-3 hover:bg-paper-1"
-            >
-              −
-            </button>
-            <span className="w-5 text-center text-ink-1 tabular-nums">{topK}</span>
-            <button
-              onClick={() => onTopKChange(Math.min(20, topK + 1))}
-              className="w-5 h-5 rounded border border-ink-0/10 text-ink-3 hover:bg-paper-1"
-            >
-              +
-            </button>
-          </div>
-        </div>
+      <div className="flex items-center gap-2 px-2.5 pb-2.5">
+        {leading}
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10px] text-ink-4">Enter 发送</span>
           {streaming ? (
             <button
               onClick={onStop}

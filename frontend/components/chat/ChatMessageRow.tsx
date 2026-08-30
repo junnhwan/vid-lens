@@ -74,12 +74,11 @@ function TraceCollapse({
   )
 }
 
-export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, topK, onCopy, onRetry }: {
+export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCopy, onRetry }: {
   msg: ChatMsg
   idx: number
   onToggleCite: (msgIdx: number, id: string) => void
   modeLabel: string
-  topK?: number
   onCopy?: (content: string) => void
   onRetry?: (msgIdx: number) => void
 }) {
@@ -114,7 +113,7 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, topK
     <div className="space-y-2 ui-fade-in">
       <div className="flex items-center gap-2 text-[10px] text-ink-4">
         <BookOpen className="w-3 h-3" />
-        映知 · {modeLabel}{topK != null ? ` · top_k ${topK}` : ''}
+        映知 · {modeLabel}
         {msg.streaming && (
           <span className="text-sienna-700 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-sienna-500 ui-agent-pulse-opacity" />生成中

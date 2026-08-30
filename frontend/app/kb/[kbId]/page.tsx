@@ -7,7 +7,7 @@ import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, SidebarSection } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
 import AgentTracePanel from '@/components/chat/AgentTracePanel'
-import { parseMessages, fmtSession, fmtShortDate, type ChatMsg } from '@/components/chat/chatUtils'
+import { parseMessages, fmtSession, type ChatMsg } from '@/components/chat/chatUtils'
 import { streamTraceReducer, type ChatTraceStep } from '@/components/chat/traceTypes'
 import KBModal from '@/components/KBModal'
 import { CiteRef } from '@/components/Citation'
@@ -28,9 +28,8 @@ export default function KBChatPage() {
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [activeTrace, setActiveTrace] = useState<ChatTraceStep[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [topK, setTopK] = useState(8)
+  const topK = 8
   const [showManage, setShowManage] = useState(false)
-  const [searchInfo, setSearchInfo] = useState<{ hits?: string; cross?: number }>({})
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const { isDemo } = useRole()
@@ -72,7 +71,6 @@ export default function KBChatPage() {
     if (!s || s.id === session?.id) return
     setSession(s)
     setMessages([])
-    setSearchInfo({})
     const url = new URLSearchParams(location.search)
     url.set('session', String(sid))
     history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
@@ -83,7 +81,6 @@ export default function KBChatPage() {
     setSession(null)
     setMessages([])
     setActiveTrace([])
-    setSearchInfo({})
     const url = new URLSearchParams(location.search)
     url.delete('session')
     history.replaceState(null, '', `/kb/${kbId}?${url.toString()}`)
@@ -177,8 +174,6 @@ export default function KBChatPage() {
             color: colorFor(c.task_id),
           }))
           patchLast({ cites: refs })
-          const taskIds = new Set(cs.map(c => c.task_id))
-          setSearchInfo({ hits: `${cs.length}`, cross: taskIds.size })
           const sources = [...new Set(cs.map(c => c.video_title).filter(Boolean))] as string[]
           bumpTrace('citations', { hits: cs.length, sources })
         },
@@ -230,14 +225,14 @@ export default function KBChatPage() {
             steps={activeTrace}
             streaming={streaming}
             source="inferred"
-            emptyHint="知识库跨视频 strict_rag 流式问答。"
+            emptyHint="知识库跨视频检索。"
           />
         }
         header={
           <ChatHeader
             backHref="/kb"
-            backLabel="返回知识库"
-            kicker={`知识库 KB-${pad(kbId)} · 跨视频严格 RAG`}
+            backLabel="知识库"
+            kicker="跨视频问答"
             title={kb?.name || '加载中…'}
             actions={!isDemo ? (
               <button
@@ -251,118 +246,84 @@ export default function KBChatPage() {
         }
         sidebar={
           <ChatSidebar>
-            <div className="space-y-5">
+            <div className="space-y-6">
               <SidebarSection
                 title="会话"
                 action={
-                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[10px]">
+                  <button onClick={newSession} className="text-sienna-700 hover:text-sienna-600 flex items-center gap-0.5 text-[11px]">
                     <Plus className="w-3 h-3" />新建
                   </button>
                 }
               >
-                <ul className="space-y-1">
+                <ul className="space-y-0.5">
                   {sessions.map(s => (
                     <li key={s.id}>
                       <button
                         onClick={() => switchSession(s.id)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[12px] ui-row-hover ${
+                        title={fmtSession(s.created_at)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[13px] ui-row-hover ${
                           session?.id === s.id ? 'bg-sienna-500/8 text-sienna-800 font-medium' : 'text-ink-3'
                         }`}
                       >
                         <MessageCircle className="w-3 h-3 shrink-0" />
-                        <span className="truncate flex-1">{s.title || `会话 ${s.id}`}</span>
-                        <span className="font-mono text-[10px] text-ink-4 shrink-0">{fmtSession(s.created_at)}</span>
+                        <span className="truncate">{s.title || '新会话'}</span>
                       </button>
                     </li>
                   ))}
-                  {sessions.length === 0 && <li className="text-[11px] text-ink-4">暂无会话</li>}
+                  {sessions.length === 0 && <li className="text-[12px] text-ink-4 px-2 py-1">还没有会话</li>}
                 </ul>
               </SidebarSection>
 
-              <div className="h-px bg-ink-0/8" />
-
-              <SidebarSection title="知识库">
-                <dl className="text-[11px] space-y-1.5">
-                  <div className="flex justify-between"><dt className="text-ink-4">视频</dt><dd>{kb?.member_count ?? '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-4">建立</dt><dd>{kb ? fmtShortDate(kb.created_at) : '—'}</dd></div>
-                  {kb?.embedding_model && (
-                    <div className="flex justify-between">
-                      <dt className="text-ink-4">模型</dt>
-                      <dd className="truncate max-w-[100px]">{kb.embedding_model}</dd>
-                    </div>
-                  )}
-                </dl>
-              </SidebarSection>
-
-              <div className="h-px bg-ink-0/8" />
-
-              <SidebarSection title={`成员视频 · ${kb?.videos?.length ?? 0}`}>
+              <SidebarSection title={`成员 · ${kb?.videos?.length ?? 0}`}>
                 <ul className="space-y-1.5">
                   {(kb?.videos || []).map((v, i) => (
-                    <li key={v.task_id} className="flex items-center gap-2 py-1">
+                    <li key={v.task_id} className="flex items-center gap-2 py-0.5">
                       <span className="src-dot" style={{ background: DOT_COLORS[i % DOT_COLORS.length] }} />
                       <span className="text-[12px] truncate flex-1">{v.title}</span>
-                      <span className={`text-[10px] font-mono ${v.retrievable ? 'text-moss' : 'text-ink-4'}`}>
-                        {v.retrievable ? '✓' : '—'}
-                      </span>
                     </li>
                   ))}
-                  {(kb?.videos?.length ?? 0) === 0 && <li className="text-[11px] text-ink-4">暂无成员</li>}
+                  {(kb?.videos?.length ?? 0) === 0 && <li className="text-[12px] text-ink-4">暂无成员</li>}
                 </ul>
                 {!isDemo && (
                   <button
                     onClick={() => setShowManage(true)}
-                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-ink-0/15 text-[10px] text-ink-4 hover:border-sienna-500/40 hover:text-sienna-700 flex items-center justify-center gap-1 ui-btn-lift"
+                    className="mt-2 w-full h-7 rounded-lg border border-dashed border-ink-0/15 text-[11px] text-ink-4 hover:border-sienna-500/40 hover:text-sienna-700 flex items-center justify-center gap-1 ui-btn-lift"
                   >
                     <Plus className="w-3 h-3" />添加视频
                   </button>
                 )}
-              </SidebarSection>
-
-              <div className="h-px bg-ink-0/8" />
-
-              <SidebarSection title="检索信息">
-                <dl className="text-[11px] space-y-1.5">
-                  <div className="flex justify-between"><dt className="text-ink-4">命中</dt><dd>{searchInfo.hits ? `${searchInfo.hits} 条` : '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-4">跨卷</dt><dd>{searchInfo.cross ? `${searchInfo.cross} 卷` : '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-ink-4">TopK</dt><dd>{topK}</dd></div>
-                </dl>
               </SidebarSection>
             </div>
           </ChatSidebar>
         }
         footer={
           <ChatFooter
-            hint={`跨 ${kb?.member_count ?? 0} 个视频检索 · 引用标注来源 · 无时间码`}
             footerAction={
-              <button
-                onClick={clearSession}
-                className="hover:text-rust flex items-center gap-1 ui-btn-lift"
-              >
-                <Trash2 className="w-3 h-3" />清空会话
-              </button>
+              session ? (
+                <button
+                  onClick={clearSession}
+                  className="hover:text-rust flex items-center gap-1 ui-btn-lift"
+                >
+                  <Trash2 className="w-3 h-3" />清空会话
+                </button>
+              ) : undefined
             }
           >
             <ChatInput
               onSend={send}
               onStop={stop}
               streaming={streaming}
-              placeholder="就知识库全部视频提问…"
-              topK={topK}
-              onTopKChange={setTopK}
+              placeholder="就知识库里的视频提问…"
             />
           </ChatFooter>
         }
       >
         <>
-          <div className="pb-2 ui-fade-in">
-            <div className="text-[10px] text-ink-4 font-mono">
-              Session · {session ? (session.title || `会话 ${session.id}`) : '新会话'}
-              {session ? ` · ${new Date(session.created_at).toLocaleString('zh-CN')}` : ''}
-            </div>
-            <h1 className="text-[24px] font-semibold text-ink-0 mt-1.5 ui-serif">跨视频问答</h1>
-            <p className="text-[13px] text-ink-3 mt-1">本会话检索知识库全部视频，引用标注来源视频。</p>
-          </div>
+          {messages.length === 0 && (
+            <p className="text-[13px] text-ink-4 ui-fade-in">
+              会在知识库全部视频里检索，引用会标出来源。
+            </p>
+          )}
 
           {messages.map((m, i) => (
             <ChatMessageRow
@@ -370,8 +331,7 @@ export default function KBChatPage() {
               msg={m}
               idx={i}
               onToggleCite={toggleCite}
-              modeLabel="跨视频严格 RAG"
-              topK={topK}
+              modeLabel="跨视频问答"
             />
           ))}
         </>
@@ -388,5 +348,3 @@ export default function KBChatPage() {
     </>
   )
 }
-
-function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }
