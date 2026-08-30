@@ -1,24 +1,20 @@
 'use client'
 
-// 三种 Agent 问答 UI 变体，?variant=A|B|C 切换。演示思考/检索/工具/回答动效。
+// Agent 问答 UI 原型 — 仅保留两个定稿方向
+// 访问：http://localhost:3000/prototype/agent-chat?style=full|simple
 
-import { Suspense, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
-import PrototypeSwitcher from '@/components/prototype/PrototypeSwitcher'
 import { useAgentDemo } from '@/components/prototype/agent/useAgentDemo'
-import { VARIANTS, type AgentVariantKey } from '@/components/prototype/agent/types'
-import { ScopePicker, DemoControls } from '@/components/prototype/agent/shared'
-import AgentVariantA from '@/components/prototype/agent/VariantA'
-import AgentVariantB from '@/components/prototype/agent/VariantB'
-import AgentVariantC from '@/components/prototype/agent/VariantC'
-import AgentVariantD from '@/components/prototype/agent/VariantD'
-import { AgentVariantE } from '@/components/prototype/agent/VariantE'
+import { AGENT_STYLES, type AgentStyleKey } from '@/components/prototype/agent/types'
+import { DemoControls } from '@/components/prototype/agent/shared'
+import { AgentVariantL } from '@/components/prototype/agent/VariantL'
+import { AgentVariantM } from '@/components/prototype/agent/VariantM'
 
 export default function AgentChatPrototypePage() {
   return (
-    <Suspense fallback={<div className="h-screen bg-[#f7f4ef]" />}>
+    <Suspense fallback={<div className="h-[100dvh] bg-paper-1" />}>
       <AgentChatPrototypeView />
     </Suspense>
   )
@@ -26,56 +22,47 @@ export default function AgentChatPrototypePage() {
 
 function AgentChatPrototypeView() {
   const sp = useSearchParams()
-  const variant = (sp.get('variant') ?? 'D') as AgentVariantKey
-  const [scope, setScope] = useState<'video' | 'kb'>('video')
-  const [videoId, setVideoId] = useState(101)
-  const [kbId, setKbId] = useState(1)
-  const { steps, running, run, reset } = useAgentDemo(true)
+  const router = useRouter()
+  const style = (sp.get('style') ?? 'full') as AgentStyleKey
+  const { steps, running, run, reset } = useAgentDemo(true, 'research')
 
-  const scopeLayout = variant === 'A' ? 'tabs' : variant === 'B' ? 'pills' : 'cards'
+  const setStyle = (next: AgentStyleKey) => {
+    const q = new URLSearchParams(sp.toString())
+    q.set('style', next)
+    router.replace(`?${q.toString()}`, { scroll: false })
+  }
 
   return (
-    <div className="h-screen flex flex-col bg-[#f7f4ef] text-stone-800 overflow-hidden proto-root">
-      <header className="shrink-0 bg-[#faf8f5] border-b border-stone-200 px-6 py-4">
-        <div className="flex items-start gap-4 flex-wrap">
-          <Link href="/prototype/dashboard" className="text-[12px] text-stone-500 hover:text-stone-800 mt-1">← 返回</Link>
-          <div className="flex-1 min-w-[200px]">
-            <div className="text-[10px] text-stone-400 uppercase tracking-wider">Agent 问答 UI 探索</div>
-            <h1 className="text-[18px] font-semibold text-stone-900 proto-serif">思考 · 检索 · 工具 · 回答</h1>
-            <p className="text-[12px] text-stone-500 mt-1 max-w-xl">
-              为后续 Agent 化预留视觉方案。底部 ← → 切换三种布局；顶部可切换「单视频 / 知识库」问答范围。
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <DemoControls running={running} onRun={run} onReset={reset} />
-            <div className="w-[280px]">
-              <ScopePicker
-                scope={scope}
-                onScope={setScope}
-                layout={scopeLayout as 'tabs' | 'pills' | 'cards'}
-                videoId={videoId}
-                kbId={kbId}
-                onVideo={setVideoId}
-                onKb={setKbId}
-              />
+    <div className="h-[100dvh] flex flex-col bg-paper-1 text-ink-0 overflow-hidden proto-root">
+      <header className="shrink-0 bg-paper-0/80 border-b border-ink-0/8 px-6 py-3">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <Link href="/prototype" className="text-[12px] text-ink-4 hover:text-ink-1 shrink-0">原型入口</Link>
+            <div className="h-4 w-px bg-ink-0/10 shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-medium text-ink-0 tracking-tight">Agent 问答</h1>
+              <p className="text-[11px] text-ink-4 truncate">mock 演示 · 正式产品请用 <Link href="/chat/101" className="text-sienna-700 hover:underline">/chat/101</Link></p>
             </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex rounded-lg border border-ink-0/10 overflow-hidden text-[11px]">
+              {AGENT_STYLES.map(s => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setStyle(s.key)}
+                  className={`px-3 py-1.5 transition-colors ${style === s.key ? 'bg-ink-0 text-paper-0' : 'text-ink-3 hover:bg-ink-0/4'}`}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+            <DemoControls running={running} onRun={run} onReset={reset} />
           </div>
         </div>
       </header>
 
-      {variant === 'D' && <AgentVariantD steps={steps} />}
-      {variant === 'E' && <AgentVariantE steps={steps} />}
-      {variant === 'A' && <AgentVariantA steps={steps} />}
-      {variant === 'B' && <AgentVariantB steps={steps} />}
-      {variant === 'C' && <AgentVariantC steps={steps} />}
-
-      <footer className="shrink-0 border-t border-stone-200 bg-[#faf8f5] px-6 py-3 text-[10px] text-stone-400 text-center">
-        原型演示 · 不发真实请求 · 状态见左侧/内嵌/右侧工作区
-      </footer>
-
-      <div className="pb-20">
-        <PrototypeSwitcher variants={[...VARIANTS]} current={variant} />
-      </div>
+      {style === 'full' ? <AgentVariantM steps={steps} /> : <AgentVariantL steps={steps} />}
     </div>
   )
 }

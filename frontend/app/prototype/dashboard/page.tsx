@@ -13,7 +13,7 @@ import { MOCK_TASKS } from '@/components/prototype/c/mocks'
 
 export default function PrototypeDashboardPage() {
   return (
-    <Suspense fallback={<div className="h-screen bg-[#f7f4ef]" />}>
+    <Suspense fallback={<div className="h-[100dvh] bg-paper-1" />}>
       <PrototypeDashboardView />
     </Suspense>
   )

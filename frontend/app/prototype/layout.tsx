@@ -5,6 +5,7 @@ export default function PrototypeLayout({ children }: { children: React.ReactNod
   return (
     <>
       {children}
+      <div className="proto-grain" aria-hidden />
       <ProtoPageNav />
     </>
   )
