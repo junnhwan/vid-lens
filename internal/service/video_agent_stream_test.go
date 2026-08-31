@@ -14,9 +14,10 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	repos, task, session := newVideoAgentTestSession(t)
 	chatClient := &scriptedChatClient{responses: []string{"not-json", "直接回答 [C1]"}}
 	ledger := NewEvidenceLedgerService(repos)
+	policyService := NewMemoryPolicyService(repos.Memory, true)
 	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{
 		{TaskID: task.ID, EvidenceID: "ev-stream-1", ChunkID: 1, ChunkIndex: 2, Score: 0.91, Content: "stream citation"},
-	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger})
+	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger, MemoryPolicy: policyService})
 	agent := NewVideoAgentService(chatSvc)
 
 	var events []AgentStreamEvent
@@ -55,7 +56,7 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	}
 
 	runStart, ok := events[0].Data.(AgentRunStartEvent)
-	if !ok || runStart.RunID != result.RunID || runStart.Mode != AgentStreamMode || runStart.TaskID != task.ID {
+	if !ok || runStart.RunID != result.RunID || runStart.Mode != AgentStreamMode || runStart.TaskID != task.ID || runStart.MemoryPolicy.Reason != model.MemoryPolicyReasonUserDisabled {
 		t.Fatalf("run_start = %#v", events[0].Data)
 	}
 	startIDs := make(map[string]struct{})
@@ -82,7 +83,7 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	if len(startIDs) != 2 || len(terminalIDs) != len(startIDs) {
 		t.Fatalf("step lifecycle starts=%v terminals=%v", startIDs, terminalIDs)
 	}
-	if done, ok := events[len(events)-1].Data.(AgentDoneEvent); !ok || done.RunID != result.RunID || done.MessageID != result.MessageID || done.TraceSummary.Steps != len(result.Trace) {
+	if done, ok := events[len(events)-1].Data.(AgentDoneEvent); !ok || done.RunID != result.RunID || done.MessageID != result.MessageID || done.TraceSummary.Steps != len(result.Trace) || done.MemoryPolicy != result.MemoryPolicy {
 		t.Fatalf("done = %#v, trace=%#v", events[len(events)-1].Data, result.Trace)
 	}
 	if answer, ok := events[9].Data.(string); !ok || answer != result.Answer {

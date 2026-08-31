@@ -46,6 +46,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if session.ScopeType == model.ChatScopeKnowledgeBase {
 		return nil, errors.New("知识库会话暂不支持 Video Research Agent")
 	}
+	memoryPolicy := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
 	if req.TopK <= 0 {
 		req.TopK = s.chatSvc.cfg.TopK
 	}
@@ -122,7 +123,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if err != nil {
 		return nil, err
 	}
-	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal)
+	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
 	tools.SetMemorySnapshot(memorySnapshot)
@@ -154,14 +155,15 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	}
 
 	result = &VideoAgentResult{
-		Answer:    runResult.State.Answer,
-		Template:  string(VideoAgentResearchTemplate),
-		Citations: append([]Citation(nil), runResult.State.Citations...),
-		Trace:     trace,
-		Model:     profile.LLMModel,
-		RunID:     runID,
-		Mode:      string(VideoAgentResearchTemplate),
-		Memory:    memorySnapshot.Identity(),
+		Answer:       runResult.State.Answer,
+		Template:     string(VideoAgentResearchTemplate),
+		Citations:    append([]Citation(nil), runResult.State.Citations...),
+		Trace:        trace,
+		Model:        profile.LLMModel,
+		RunID:        runID,
+		Mode:         string(VideoAgentResearchTemplate),
+		Memory:       memorySnapshot.Identity(),
+		MemoryPolicy: memoryPolicy,
 	}
 	if err := s.saveAgentRunExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err
@@ -229,7 +231,7 @@ func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessi
 		if decodeErr != nil || snapshot.RunID != runID || snapshot.Mode != string(VideoAgentResearchTemplate) {
 			continue
 		}
-		return &VideoAgentResult{Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory}, nil
+		return &VideoAgentResult{Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
 	}
 	return nil, nil
 }

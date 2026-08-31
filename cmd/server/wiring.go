@@ -161,6 +161,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	evidenceLedgerSvc := service.NewEvidenceLedgerService(deps.repos)
 	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
 	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)
+	memoryPolicySvc := service.NewMemoryPolicyService(deps.repos.Memory, deps.cfg.Memory.Enabled)
 	var memoryWriter *service.AsyncMemoryWriter
 	var memoryCapture *service.AsyncMemoryCapture
 	var longTermMemory service.MemoryProvider
@@ -199,6 +200,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	}
 	chatSvc := service.NewChatServiceWithDependencies(deps.repos, deps.ragRetriever, chatConfig, service.ChatDependencies{
 		Memory: service.NewRedisChatMemoryStore(deps.rdb), LongTermMemory: longTermMemory, MemoryCapture: memoryCapture,
+		MemoryPolicy:   memoryPolicySvc,
 		EvidenceLedger: evidenceLedgerSvc, Recorder: aiObserver,
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
 	})
@@ -297,7 +299,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			chat:           chatHandler,
 			media:          handler.NewMediaHandler(mediaSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
-			memory:         handler.NewMemoryHandler(memoryGovernanceSvc),
+			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,

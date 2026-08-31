@@ -25,6 +25,8 @@ func AllModels() []interface{} {
 		&ChatMessageSource{},
 		&AgentMemoryItem{},
 		&AgentMemoryEvent{},
+		&AgentMemoryPreference{},
+		&AgentMemoryPolicyEvent{},
 		&AgentRun{},
 		&AgentStep{},
 		&AgentToolCall{},
@@ -74,10 +76,16 @@ func Migrate(db *gorm.DB) error {
 	if err := normalizeChatSessionScope(db); err != nil {
 		return err
 	}
+	if err := normalizeChatSessionMemoryPolicy(db); err != nil {
+		return err
+	}
 	if err := migrateModels(db, AllModels()); err != nil {
 		return err
 	}
-	return normalizeChatSessionScope(db)
+	if err := normalizeChatSessionScope(db); err != nil {
+		return err
+	}
+	return normalizeChatSessionMemoryPolicy(db)
 }
 
 // MigrateLegacy upgrades only the offline historical MySQL source contract.
@@ -114,5 +122,18 @@ func normalizeChatSessionScope(db *gorm.DB) error {
 	}
 	return db.Table("chat_sessions").
 		Where("scope_type IS NULL OR scope_type = ''").
+		Updates(updates).Error
+}
+
+func normalizeChatSessionMemoryPolicy(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&ChatSession{}) || !db.Migrator().HasColumn(&ChatSession{}, "memory_policy") {
+		return nil
+	}
+	updates := map[string]any{"memory_policy": MemorySessionPolicyInherit}
+	if db.Migrator().HasColumn(&ChatSession{}, "memory_policy_version") {
+		updates["memory_policy_version"] = 0
+	}
+	return db.Table("chat_sessions").
+		Where("memory_policy IS NULL OR memory_policy = ''").
 		Updates(updates).Error
 }

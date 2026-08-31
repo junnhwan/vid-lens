@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -31,7 +32,7 @@ func (s *ChatService) CreateScopedSession(userID int64, req CreateChatSessionReq
 		scopeType = model.ChatScopeVideo
 	}
 
-	session := &model.ChatSession{UserID: userID, ScopeType: scopeType}
+	session := &model.ChatSession{UserID: userID, ScopeType: scopeType, MemoryPolicy: model.MemorySessionPolicyInherit}
 	switch scopeType {
 	case model.ChatScopeVideo:
 		if req.TaskID <= 0 || req.KnowledgeBaseID != 0 {
@@ -64,6 +65,13 @@ func (s *ChatService) CreateScopedSession(userID int64, req CreateChatSessionReq
 	}
 	if err := s.repos.Chat.CreateSession(session); err != nil {
 		return nil, err
+	}
+	if s.memoryPolicy != nil {
+		if err := s.memoryPolicy.AttachToSession(context.Background(), session); err != nil {
+			policy := s.memoryPolicy.FailClosed(session)
+			session.MemoryPolicy = policy.SessionPolicy
+			session.EffectiveMemoryPolicy = &policy
+		}
 	}
 	return session, nil
 }
@@ -127,7 +135,20 @@ func (s *ChatService) ListSessionsWithFilter(userID int64, filter ListChatSessio
 	if scopeType != "" && scopeType != model.ChatScopeVideo && scopeType != model.ChatScopeKnowledgeBase {
 		return nil, fmt.Errorf("scope_type 必须为 video 或 knowledge_base")
 	}
-	return s.repos.Chat.ListSessionsFiltered(userID, filter.TaskID, filter.KnowledgeBaseID, scopeType)
+	sessions, err := s.repos.Chat.ListSessionsFiltered(userID, filter.TaskID, filter.KnowledgeBaseID, scopeType)
+	if err != nil {
+		return nil, err
+	}
+	if s.memoryPolicy != nil {
+		if err := s.memoryPolicy.AttachToSessions(context.Background(), userID, sessions); err != nil {
+			for index := range sessions {
+				policy := s.memoryPolicy.FailClosed(&sessions[index])
+				sessions[index].MemoryPolicy = policy.SessionPolicy
+				sessions[index].EffectiveMemoryPolicy = &policy
+			}
+		}
+	}
+	return sessions, nil
 }
 
 func (s *ChatService) ListMessages(userID, sessionID int64) ([]model.ChatMessage, error) {

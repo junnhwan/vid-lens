@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"vid-lens/internal/model"
 )
 
 const AgentSnapshotVersion = 1
@@ -22,14 +23,15 @@ const (
 // retained as a write-side compatibility alias for clients that still decode
 // the previous Agent envelope.
 type AgentSnapshot struct {
-	Version   int                     `json:"version"`
-	RunID     string                  `json:"run_id"`
-	Mode      string                  `json:"mode"`
-	Template  string                  `json:"template,omitempty"`
-	Steps     []AgentSnapshotStep     `json:"steps"`
-	Citations []Citation              `json:"citations"`
-	Trace     []VideoAgentStep        `json:"trace,omitempty"`
-	Memory    *MemorySnapshotIdentity `json:"memory,omitempty"`
+	Version      int                         `json:"version"`
+	RunID        string                      `json:"run_id"`
+	Mode         string                      `json:"mode"`
+	Template     string                      `json:"template,omitempty"`
+	Steps        []AgentSnapshotStep         `json:"steps"`
+	Citations    []Citation                  `json:"citations"`
+	Trace        []VideoAgentStep            `json:"trace,omitempty"`
+	Memory       *MemorySnapshotIdentity     `json:"memory,omitempty"`
+	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 // AgentSnapshotStep is deliberately limited to safe execution metadata. It
@@ -139,6 +141,8 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 	}
 	snapshot := NewAgentSnapshot(result.RunID, result.Mode, result.Template, result.Trace, result.Citations)
 	snapshot.Memory = result.Memory
+	snapshot.MemoryPolicy = normalizeSnapshotMemoryPolicy(result.MemoryPolicy)
+	result.MemoryPolicy = snapshot.MemoryPolicy
 	result.RunID = snapshot.RunID
 	result.Mode = snapshot.Mode
 	return json.Marshal(snapshot)
@@ -157,18 +161,19 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 		if arrayCitations == nil {
 			arrayCitations = []Citation{}
 		}
-		return AgentSnapshot{Citations: arrayCitations, Steps: []AgentSnapshotStep{}}, nil
+		return AgentSnapshot{Citations: arrayCitations, Steps: []AgentSnapshotStep{}, MemoryPolicy: normalizeSnapshotMemoryPolicy(model.EffectiveMemoryPolicy{})}, nil
 	}
 
 	var envelope struct {
-		Version   int                     `json:"version"`
-		RunID     string                  `json:"run_id"`
-		Mode      string                  `json:"mode"`
-		Template  string                  `json:"template"`
-		Steps     []AgentSnapshotStep     `json:"steps"`
-		Citations []Citation              `json:"citations"`
-		Trace     []VideoAgentStep        `json:"trace"`
-		Memory    *MemorySnapshotIdentity `json:"memory"`
+		Version      int                         `json:"version"`
+		RunID        string                      `json:"run_id"`
+		Mode         string                      `json:"mode"`
+		Template     string                      `json:"template"`
+		Steps        []AgentSnapshotStep         `json:"steps"`
+		Citations    []Citation                  `json:"citations"`
+		Trace        []VideoAgentStep            `json:"trace"`
+		Memory       *MemorySnapshotIdentity     `json:"memory"`
+		MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 	}
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		return AgentSnapshot{}, fmt.Errorf("agent snapshot 无效: %w", err)
@@ -177,12 +182,13 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	if envelope.Citations == nil {
 		envelope.Citations = []Citation{}
 	}
+	envelope.MemoryPolicy = normalizeSnapshotMemoryPolicy(envelope.MemoryPolicy)
 	if envelope.Steps != nil {
 		envelope.Steps = normalizeAgentSnapshotSteps(envelope.Steps)
 		return AgentSnapshot{
 			Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 			Template: envelope.Template, Steps: envelope.Steps, Citations: envelope.Citations,
-			Trace: append([]VideoAgentStep(nil), envelope.Trace...), Memory: envelope.Memory,
+			Trace: append([]VideoAgentStep(nil), envelope.Trace...), Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,
 		}, nil
 	}
 
@@ -191,14 +197,26 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 		snapshot := NewAgentSnapshot(envelope.RunID, envelope.Mode, envelope.Template, envelope.Trace, envelope.Citations)
 		snapshot.Version = envelope.Version
 		snapshot.Memory = envelope.Memory
+		snapshot.MemoryPolicy = envelope.MemoryPolicy
 		return snapshot, nil
 	}
 
 	return AgentSnapshot{
 		Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 		Template: envelope.Template, Steps: []AgentSnapshotStep{}, Citations: envelope.Citations,
-		Memory: envelope.Memory,
+		Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,
 	}, nil
+}
+
+func normalizeSnapshotMemoryPolicy(policy model.EffectiveMemoryPolicy) model.EffectiveMemoryPolicy {
+	if strings.TrimSpace(policy.SessionPolicy) == "" {
+		policy.SessionPolicy = model.MemorySessionPolicyInherit
+	}
+	if strings.TrimSpace(policy.Reason) == "" {
+		policy.EffectiveEnabled = false
+		policy.Reason = model.MemoryPolicyReasonUnavailable
+	}
+	return policy
 }
 
 func normalizeAgentSnapshotSteps(steps []AgentSnapshotStep) []AgentSnapshotStep {

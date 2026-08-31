@@ -567,7 +567,7 @@ func (s *MemoryGovernanceService) authorizedItem(ctx context.Context, userID int
 	return item, nil
 }
 
-func (a *RepositoryMemoryAuthorizer) Authorize(_ context.Context, userID int64, scope MemoryScope, write bool) error {
+func (a *RepositoryMemoryAuthorizer) Authorize(ctx context.Context, userID int64, scope MemoryScope, write bool) error {
 	if a == nil || a.repos == nil || userID <= 0 {
 		return errors.New("memory authorizer 未配置")
 	}
@@ -610,8 +610,15 @@ func (a *RepositoryMemoryAuthorizer) Authorize(_ context.Context, userID int64, 
 			return errors.New("无权访问此知识库记忆")
 		}
 	case model.MemoryScopeRun:
-		if strings.TrimSpace(scope.ID) == "" {
+		if strings.TrimSpace(scope.ID) == "" || a.repos.AgentExecution == nil {
 			return errors.New("run memory scope 无效")
+		}
+		run, err := a.repos.AgentExecution.GetRun(ctx, userID, scope.ID)
+		if err != nil {
+			return err
+		}
+		if run == nil {
+			return errors.New("无权访问此 run 记忆")
 		}
 	default:
 		return errors.New("不支持的 memory scope")
@@ -621,6 +628,7 @@ func (a *RepositoryMemoryAuthorizer) Authorize(_ context.Context, userID int64, 
 
 type MemoryCandidate struct {
 	UserID       int64
+	SessionID    int64
 	Scope        MemoryScope
 	Kind         string
 	Content      string
@@ -643,6 +651,10 @@ type MemoryWriter interface {
 type memoryWriteStore interface {
 	Append(ctx context.Context, item *model.AgentMemoryItem) (repository.MemoryAppendResult, error)
 	SetEmbeddingRef(ctx context.Context, userID int64, memoryID, ref string) error
+}
+
+type capturedMemoryWriteStore interface {
+	AppendCaptured(ctx context.Context, sessionID int64, item *model.AgentMemoryItem) (repository.MemoryAppendResult, bool, error)
 }
 
 type MemoryProjector interface {
@@ -720,10 +732,19 @@ func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate
 		Importance: candidate.Importance, EmbeddingRef: strings.TrimSpace(candidate.EmbeddingRef),
 		Status: model.MemoryStatusActive, Version: 1, ExpiresAt: candidate.ExpiresAt,
 	}
-	result, err := w.store.Append(ctx, item)
+	capturedStore, ok := w.store.(capturedMemoryWriteStore)
+	if !ok {
+		observeMemoryBackground("policy", "failed_closed")
+		return errors.New("memory writer store 不支持会话授权复核")
+	}
+	result, allowed, err := capturedStore.AppendCaptured(ctx, candidate.SessionID, item)
 	if err != nil {
 		observeMemoryBackground("persist", "failed")
 		return err
+	}
+	if !allowed {
+		observeMemoryBackground("policy", "disabled")
+		return nil
 	}
 	if w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
 		return nil
@@ -748,7 +769,7 @@ func validateMemoryCandidate(candidate MemoryCandidate) error {
 	candidate.Content = strings.TrimSpace(candidate.Content)
 	candidate.SourceType = strings.TrimSpace(candidate.SourceType)
 	candidate.SourceRef = strings.TrimSpace(candidate.SourceRef)
-	if candidate.UserID <= 0 || !validMemoryScopeType(candidate.Scope.Type) || strings.TrimSpace(candidate.Scope.ID) == "" {
+	if candidate.UserID <= 0 || candidate.SessionID <= 0 || !validMemoryScopeType(candidate.Scope.Type) || strings.TrimSpace(candidate.Scope.ID) == "" {
 		return errors.New("memory candidate scope 无效")
 	}
 	if candidate.Kind == "" || candidate.Content == "" || candidate.SourceRef == "" || candidate.SourceType == "" {
@@ -840,6 +861,7 @@ func (p *RepositoryMemoryProjector) Project(ctx context.Context, item model.Agen
 
 type MemoryExtractionRequest struct {
 	UserID    int64
+	SessionID int64
 	UserText  string
 	SourceRef string
 }
@@ -872,7 +894,7 @@ func NewAsyncMemoryCapture(extractor MemoryExtractor, writer MemoryWriter, queue
 }
 
 func (c *AsyncMemoryCapture) EnqueueExtraction(request MemoryExtractionRequest) MemoryEnqueueResult {
-	if c == nil || c.extractor == nil || c.writer == nil || request.UserID <= 0 || strings.TrimSpace(request.SourceRef) == "" {
+	if c == nil || c.extractor == nil || c.writer == nil || request.UserID <= 0 || request.SessionID <= 0 || strings.TrimSpace(request.SourceRef) == "" {
 		return MemoryEnqueueResult{Reason: "memory extraction request 无效"}
 	}
 	select {
@@ -951,9 +973,9 @@ func (ExplicitPreferenceExtractor) Extract(_ context.Context, request MemoryExtr
 		return nil, nil
 	}
 	return []MemoryCandidate{{
-		UserID: request.UserID,
-		Scope:  MemoryScope{Type: model.MemoryScopeUser, ID: strconv.FormatInt(request.UserID, 10)},
-		Kind:   "response_preference", Content: preference, SourceType: "user_message", SourceRef: strings.TrimSpace(request.SourceRef), Importance: 0.7,
+		UserID: request.UserID, SessionID: request.SessionID,
+		Scope: MemoryScope{Type: model.MemoryScopeUser, ID: strconv.FormatInt(request.UserID, 10)},
+		Kind:  "response_preference", Content: preference, SourceType: "user_message", SourceRef: strings.TrimSpace(request.SourceRef), Importance: 0.7,
 	}}, nil
 }
 

@@ -27,6 +27,69 @@ const (
 	MemoryEventDeleted    = "deleted"
 )
 
+const (
+	MemorySessionPolicyInherit  = "inherit"
+	MemorySessionPolicyEnabled  = "enabled"
+	MemorySessionPolicyDisabled = "disabled"
+)
+
+const (
+	MemoryPolicyTargetUser    = "user"
+	MemoryPolicyTargetSession = "session"
+)
+
+const (
+	MemoryPolicyReasonCapabilityDisabled = "capability_disabled"
+	MemoryPolicyReasonSessionDisabled    = "session_disabled"
+	MemoryPolicyReasonSessionEnabled     = "session_enabled"
+	MemoryPolicyReasonUserEnabled        = "user_enabled"
+	MemoryPolicyReasonUserDisabled       = "user_disabled"
+	MemoryPolicyReasonUnavailable        = "policy_unavailable"
+)
+
+// EffectiveMemoryPolicy is the one resolved policy consumed by chat and Agent
+// callers. Raw inputs remain visible for UI state and optimistic concurrency.
+type EffectiveMemoryPolicy struct {
+	CapabilityEnabled     bool   `json:"capability_enabled"`
+	UserEnabled           bool   `json:"user_enabled"`
+	UserPreferenceVersion int64  `json:"user_preference_version"`
+	SessionPolicy         string `json:"session_policy"`
+	SessionPolicyVersion  int64  `json:"session_policy_version"`
+	EffectiveEnabled      bool   `json:"effective_enabled"`
+	Reason                string `json:"reason"`
+}
+
+// AgentMemoryPreference stores a user's default authorization. Absence of a
+// row is intentionally equivalent to enabled=false, version=0.
+type AgentMemoryPreference struct {
+	UserID    int64     `gorm:"primaryKey;not null" json:"user_id"`
+	Enabled   bool      `gorm:"not null;default:false" json:"enabled"`
+	Version   int64     `gorm:"not null;default:1" json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (AgentMemoryPreference) TableName() string { return "agent_memory_preferences" }
+
+// AgentMemoryPolicyEvent is append-only policy audit metadata. It deliberately
+// excludes prompts, answers and memory contents.
+type AgentMemoryPolicyEvent struct {
+	ID                string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID            int64     `gorm:"not null;index" json:"user_id"`
+	ActorUserID       int64     `gorm:"not null;index" json:"actor_user_id"`
+	TargetType        string    `gorm:"type:varchar(20);not null;index;check:chk_agent_memory_policy_target,target_type IN ('user','session')" json:"target_type"`
+	TargetID          string    `gorm:"type:varchar(100);not null;index" json:"target_id"`
+	PreviousValue     string    `gorm:"type:varchar(20);not null" json:"previous_value"`
+	NewValue          string    `gorm:"type:varchar(20);not null" json:"new_value"`
+	Version           int64     `gorm:"not null" json:"version"`
+	CapabilityEnabled bool      `gorm:"not null" json:"capability_enabled"`
+	EffectiveBefore   bool      `gorm:"not null" json:"effective_before"`
+	EffectiveAfter    bool      `gorm:"not null" json:"effective_after"`
+	OccurredAt        time.Time `gorm:"not null;index" json:"occurred_at"`
+}
+
+func (AgentMemoryPolicyEvent) TableName() string { return "agent_memory_policy_events" }
+
 // AgentMemoryItem is the authoritative, owner-scoped memory record. Embeddings
 // are a rebuildable projection referenced by EmbeddingRef; the item remains
 // usable when that projection is unavailable.

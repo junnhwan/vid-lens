@@ -8,14 +8,17 @@ const (
 )
 
 type ChatSession struct {
-	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID          int64     `gorm:"index;not null" json:"user_id"`
-	TaskID          int64     `gorm:"index;not null" json:"task_id"`
-	ScopeType       string    `gorm:"type:varchar(30);not null;default:'video';index:idx_chat_sessions_scope_knowledge_base,priority:1;check:chk_chat_sessions_scope,((scope_type = 'video' AND task_id > 0 AND knowledge_base_id = 0) OR (scope_type = 'knowledge_base' AND task_id = 0 AND knowledge_base_id > 0))" json:"scope_type"`
-	KnowledgeBaseID int64     `gorm:"not null;default:0;index:idx_chat_sessions_scope_knowledge_base,priority:2" json:"knowledge_base_id"`
-	Title           string    `gorm:"type:varchar(200)" json:"title"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                    int64                  `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID                int64                  `gorm:"index;not null" json:"user_id"`
+	TaskID                int64                  `gorm:"index;not null" json:"task_id"`
+	ScopeType             string                 `gorm:"type:varchar(30);not null;default:'video';index:idx_chat_sessions_scope_knowledge_base,priority:1;check:chk_chat_sessions_scope,((scope_type = 'video' AND task_id > 0 AND knowledge_base_id = 0) OR (scope_type = 'knowledge_base' AND task_id = 0 AND knowledge_base_id > 0))" json:"scope_type"`
+	KnowledgeBaseID       int64                  `gorm:"not null;default:0;index:idx_chat_sessions_scope_knowledge_base,priority:2" json:"knowledge_base_id"`
+	Title                 string                 `gorm:"type:varchar(200)" json:"title"`
+	MemoryPolicy          string                 `gorm:"type:varchar(20);not null;default:'inherit';check:chk_chat_sessions_memory_policy,memory_policy IN ('inherit','enabled','disabled')" json:"memory_policy"`
+	MemoryPolicyVersion   int64                  `gorm:"not null;default:0" json:"memory_policy_version"`
+	EffectiveMemoryPolicy *EffectiveMemoryPolicy `gorm:"-" json:"effective_memory_policy,omitempty"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 }
 
 func (ChatSession) TableName() string {

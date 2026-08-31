@@ -31,6 +31,7 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	if err != nil {
 		return nil, err
 	}
+	memoryPolicy := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
 	policy := defaultEvidenceFunnelPolicy(req.TopK)
 	frozenPolicy, budget := evidenceFunnelAgentPolicy(policy)
 	runID := strings.TrimSpace(req.RunID)
@@ -81,6 +82,7 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 	result = &VideoAgentResult{
 		Answer: funnel.Answer, Template: string(VideoAgentEvidenceFunnelTemplate), Citations: funnel.Citations,
 		Trace: evidenceFunnelTrace(ctx, s, req.UserID, runID), Model: profile.LLMModel, RunID: runID, Mode: string(VideoAgentEvidenceFunnelTemplate),
+		MemoryPolicy: memoryPolicy,
 	}
 	existingMessage, err := findAgentRunMessage(s, req.UserID, req.SessionID, runID)
 	if err != nil {
@@ -113,9 +115,9 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 		return nil, updateErr
 	}
 	_ = s.chatSvc.refreshRecentMemory(ctx, req.UserID, req.SessionID, recentLimit)
-	if createdPending && pendingUserMessageID > 0 && s.chatSvc.memoryCapture != nil {
+	if createdPending && pendingUserMessageID > 0 && result.MemoryPolicy.EffectiveEnabled && s.chatSvc.memoryCapture != nil {
 		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
-			UserID: req.UserID, UserText: req.Goal, SourceRef: fmt.Sprintf("chat_message:%d", pendingUserMessageID),
+			UserID: req.UserID, SessionID: req.SessionID, UserText: req.Goal, SourceRef: fmt.Sprintf("chat_message:%d", pendingUserMessageID),
 		})
 	}
 	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "evidence_validated", nil)
@@ -165,7 +167,7 @@ func (s *VideoAgentService) saveEvidenceFunnelPendingExchange(userID, sessionID 
 	}
 	pending := &VideoAgentResult{
 		Answer: evidenceFunnelPendingAnswer, Template: result.Template, Trace: result.Trace,
-		Model: result.Model, RunID: result.RunID, Mode: result.Mode, Citations: []Citation{},
+		Model: result.Model, RunID: result.RunID, Mode: result.Mode, Citations: []Citation{}, MemoryPolicy: result.MemoryPolicy,
 	}
 	snapshot, err := MarshalAgentSnapshot(pending)
 	if err != nil {
@@ -204,7 +206,7 @@ func completedEvidenceFunnelResult(service *VideoAgentService, userID, sessionID
 	}
 	return &VideoAgentResult{
 		Answer: message.Content, Template: snapshot.Template, Citations: snapshot.Citations, Trace: snapshot.Trace,
-		Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory,
+		Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy,
 	}, nil
 }
 

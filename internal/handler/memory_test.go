@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -61,6 +62,70 @@ func TestMemoryHandlerListsOwnMemoryAndCannotDeleteAnotherUsersMemory(t *testing
 	other, err := repo.FindForUser(context.Background(), 2, "other")
 	if err != nil || other == nil || other.Status == model.MemoryStatusDeleted {
 		t.Fatalf("cross-owner memory mutated: %+v err=%v", other, err)
+	}
+}
+
+func TestMemoryPolicyHandlerDefaultsOffUpdatesWithVersionsAndScopesSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.ChatSession{}, &model.AgentMemoryPreference{}, &model.AgentMemoryPolicyEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	session := model.ChatSession{UserID: 1, TaskID: 10, ScopeType: model.ChatScopeVideo, MemoryPolicy: model.MemorySessionPolicyInherit}
+	otherSession := model.ChatSession{UserID: 2, TaskID: 20, ScopeType: model.ChatScopeVideo, MemoryPolicy: model.MemorySessionPolicyInherit}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&otherSession).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.NewMemoryRepository(db)
+	handler := NewMemoryHandler(nil, service.NewMemoryPolicyService(repo, true))
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("userID", int64(1)) })
+	router.GET("/memories/preferences", handler.GetPreference)
+	router.PATCH("/memories/preferences", handler.UpdatePreference)
+	router.GET("/chat/sessions/:session_id/memory-policy", handler.GetSessionPolicy)
+	router.PATCH("/chat/sessions/:session_id/memory-policy", handler.UpdateSessionPolicy)
+
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	preference := request(http.MethodGet, "/memories/preferences", "")
+	if preference.Code != http.StatusOK || !containsAll(preference.Body.String(), `"enabled":false`, `"version":0`, `"reason":"user_disabled"`) {
+		t.Fatalf("default preference code=%d body=%s", preference.Code, preference.Body.String())
+	}
+	preference = request(http.MethodPatch, "/memories/preferences", `{"enabled":true,"expected_version":0}`)
+	if preference.Code != http.StatusOK || !containsAll(preference.Body.String(), `"enabled":true`, `"version":1`, `"effective_enabled":true`) {
+		t.Fatalf("updated preference code=%d body=%s", preference.Code, preference.Body.String())
+	}
+	stale := request(http.MethodPatch, "/memories/preferences", `{"enabled":false,"expected_version":0}`)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale preference code=%d body=%s", stale.Code, stale.Body.String())
+	}
+
+	path := "/chat/sessions/" + strconv.FormatInt(session.ID, 10) + "/memory-policy"
+	sessionPolicy := request(http.MethodGet, path, "")
+	if sessionPolicy.Code != http.StatusOK || !containsAll(sessionPolicy.Body.String(), `"policy":"inherit"`, `"effective_enabled":true`, `"reason":"user_enabled"`) {
+		t.Fatalf("inherited session policy code=%d body=%s", sessionPolicy.Code, sessionPolicy.Body.String())
+	}
+	sessionPolicy = request(http.MethodPatch, path, `{"policy":"disabled","expected_version":0}`)
+	if sessionPolicy.Code != http.StatusOK || !containsAll(sessionPolicy.Body.String(), `"policy":"disabled"`, `"version":1`, `"effective_enabled":false`, `"reason":"session_disabled"`) {
+		t.Fatalf("disabled session policy code=%d body=%s", sessionPolicy.Code, sessionPolicy.Body.String())
+	}
+	otherPath := "/chat/sessions/" + strconv.FormatInt(otherSession.ID, 10) + "/memory-policy"
+	if crossOwner := request(http.MethodGet, otherPath, ""); crossOwner.Code != http.StatusForbidden {
+		t.Fatalf("cross-owner session policy code=%d body=%s", crossOwner.Code, crossOwner.Body.String())
 	}
 }
 

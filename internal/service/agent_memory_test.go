@@ -116,6 +116,13 @@ func TestRepositoryMemoryAuthorizerEnforcesOwnedUserVideoAndKnowledgeBase(t *tes
 	if err := repos.KnowledgeBase.Create(otherKB); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repos.AgentExecution.CreateRun(context.Background(), &model.AgentRun{
+		ID: "run-owned", UserID: session.UserID, SessionID: session.ID, ScopeType: model.ChatScopeVideo, TaskID: task.ID,
+		Goal: "memory authorization", Mode: "agent", AgentProfile: "default",
+		ProfileSnapshot: "{}", PolicySnapshot: "{}", BudgetSnapshot: "{}", MaxSteps: 1, MaxAttemptsPerStep: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	authorizer := NewRepositoryMemoryAuthorizer(repos)
 	for _, scope := range []MemoryScope{
 		{Type: model.MemoryScopeUser, ID: fmt.Sprint(session.UserID)},
@@ -245,6 +252,11 @@ func (s *fakeMemoryWriteStore) Append(_ context.Context, item *model.AgentMemory
 	return repository.MemoryAppendResult{Item: *item, Created: true}, nil
 }
 
+func (s *fakeMemoryWriteStore) AppendCaptured(ctx context.Context, _ int64, item *model.AgentMemoryItem) (repository.MemoryAppendResult, bool, error) {
+	result, err := s.Append(ctx, item)
+	return result, err == nil, err
+}
+
 func (*fakeMemoryWriteStore) SetEmbeddingRef(context.Context, int64, string, string) error {
 	return nil
 }
@@ -342,7 +354,7 @@ func TestSemanticMemoryRetrieverUsesQueryEmbeddingAndFallsBack(t *testing.T) {
 func TestExplicitPreferenceExtractorNormalizesAndRejectsCredentials(t *testing.T) {
 	extractor := ExplicitPreferenceExtractor{}
 	candidates, err := extractor.Extract(context.Background(), MemoryExtractionRequest{
-		UserID: 1, UserText: "以后请简洁回答，不要复述这段原文", SourceRef: "message:1",
+		UserID: 1, SessionID: 1, UserText: "以后请简洁回答，不要复述这段原文", SourceRef: "message:1",
 	})
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("normalized extraction = %+v err=%v", candidates, err)
@@ -351,7 +363,7 @@ func TestExplicitPreferenceExtractorNormalizesAndRejectsCredentials(t *testing.T
 		t.Fatalf("extractor retained raw text: %+v", candidates[0])
 	}
 	candidates, err = extractor.Extract(context.Background(), MemoryExtractionRequest{
-		UserID: 1, UserText: "以后回答时带上我的 API Key sk-abcdefghijklmnopqrstuvwxyz", SourceRef: "message:2",
+		UserID: 1, SessionID: 1, UserText: "以后回答时带上我的 API Key sk-abcdefghijklmnopqrstuvwxyz", SourceRef: "message:2",
 	})
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("credential-bearing preference was extracted: %+v err=%v", candidates, err)
@@ -370,11 +382,11 @@ func (s *recordingMemoryEmbeddingStore) UpsertEmbedding(_ context.Context, item 
 }
 
 func TestAsyncMemoryCaptureAndEmbeddingUseFakeSeams(t *testing.T) {
-	candidate := MemoryCandidate{UserID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "concise", SourceType: "user_message", SourceRef: "message:1", Importance: .6}
+	candidate := MemoryCandidate{UserID: 1, SessionID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "concise", SourceType: "user_message", SourceRef: "message:1", Importance: .6}
 	recordingWriter := &recordingMemoryWriter{}
 	capture := NewAsyncMemoryCapture(fakeMemoryExtractor{candidates: []MemoryCandidate{candidate}}, recordingWriter, 2)
 	defer capture.Close(context.Background())
-	if result := capture.EnqueueExtraction(MemoryExtractionRequest{UserID: 1, UserText: "please be concise", SourceRef: "message:1"}); !result.Accepted {
+	if result := capture.EnqueueExtraction(MemoryExtractionRequest{UserID: 1, SessionID: 1, UserText: "please be concise", SourceRef: "message:1"}); !result.Accepted {
 		t.Fatalf("EnqueueExtraction() = %+v", result)
 	}
 	waitForMemoryCondition(t, func() bool {
@@ -398,10 +410,10 @@ func TestAsyncMemoryWriterRequiresSourceAndEmbeddingFailureKeepsRelationalItem(t
 	store := &fakeMemoryWriteStore{}
 	writer := NewAsyncMemoryWriter(store, fakeMemoryAuthorizer{}, failingMemoryProjector{}, 4)
 	defer writer.Close(context.Background())
-	if got := writer.Enqueue(MemoryCandidate{UserID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "中文", SourceType: "user_message", Importance: .5}); got.Accepted {
+	if got := writer.Enqueue(MemoryCandidate{UserID: 1, SessionID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "中文", SourceType: "user_message", Importance: .5}); got.Accepted {
 		t.Fatalf("sourceless candidate accepted: %+v", got)
 	}
-	got := writer.Enqueue(MemoryCandidate{UserID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "中文", SourceType: "user_message", SourceRef: "message:1", Importance: .5})
+	got := writer.Enqueue(MemoryCandidate{UserID: 1, SessionID: 1, Scope: MemoryScope{Type: model.MemoryScopeUser, ID: "1"}, Kind: "preference", Content: "中文", SourceType: "user_message", SourceRef: "message:1", Importance: .5})
 	if !got.Accepted {
 		t.Fatalf("candidate rejected: %+v", got)
 	}
@@ -420,7 +432,7 @@ func TestAsyncMemoryWriterRejectsUnverifiedAgentAnswerAsVideoMemory(t *testing.T
 	writer := NewAsyncMemoryWriter(&fakeMemoryWriteStore{}, fakeMemoryAuthorizer{}, nil, 1)
 	defer writer.Close(context.Background())
 	result := writer.Enqueue(MemoryCandidate{
-		UserID: 1, Scope: MemoryScope{Type: model.MemoryScopeVideo, ID: "10"}, Kind: "fact", Content: "模型猜测",
+		UserID: 1, SessionID: 1, Scope: MemoryScope{Type: model.MemoryScopeVideo, ID: "10"}, Kind: "fact", Content: "模型猜测",
 		SourceType: "agent_answer", SourceRef: "message:9", Importance: .8,
 	})
 	if result.Accepted || !strings.Contains(result.Reason, "不能写入") {
@@ -448,6 +460,10 @@ func (p staticMemoryProvider) Snapshot(context.Context, MemorySnapshotRequest) (
 
 func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
+	policyService := NewMemoryPolicyService(repos.Memory, true)
+	if _, err := policyService.UpdateSessionPolicy(context.Background(), session.UserID, session.ID, model.MemorySessionPolicyEnabled, 0); err != nil {
+		t.Fatal(err)
+	}
 	memory := MemorySnapshot{
 		SchemaVersion: MemorySnapshotSchemaVersion,
 		Version:       MemorySnapshotSchemaVersion + ":stable",
@@ -459,7 +475,7 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 	}
 	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
 		TaskID: task.ID, EvidenceID: "ev-current", ChunkID: 1, ChunkIndex: 0, Score: .9, Content: "当前视频证据说新主题",
-	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: staticMemoryProvider{snapshot: memory}, MemoryCapture: failingMemoryCapture{}})
+	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: staticMemoryProvider{snapshot: memory}, MemoryCapture: failingMemoryCapture{}, MemoryPolicy: policyService})
 	client := &scriptedChatClient{responses: []string{"not-json", "以当前证据为准 [C1]"}}
 	result, err := NewVideoAgentService(chatSvc).Ask(context.Background(), VideoAgentRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "主题是什么？", TopK: 1,
@@ -496,9 +512,13 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 
 func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
+	policyService := NewMemoryPolicyService(repos.Memory, true)
+	if _, err := policyService.UpdateSessionPolicy(context.Background(), session.UserID, session.ID, model.MemorySessionPolicyEnabled, 0); err != nil {
+		t.Fatal(err)
+	}
 	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
 		TaskID: task.ID, EvidenceID: "ev-memory-fail-open", ChunkID: 1, ChunkIndex: 0, Score: .9, Content: "当前视频证据",
-	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: failingLongTermMemoryProvider{}, MemoryCapture: failingMemoryCapture{}})
+	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: failingLongTermMemoryProvider{}, MemoryCapture: failingMemoryCapture{}, MemoryPolicy: policyService})
 	agent := NewVideoAgentService(chatSvc)
 	result, err := agent.Ask(context.Background(), VideoAgentRequest{UserID: session.UserID, SessionID: session.ID, Question: "请回答", TopK: 1},
 		&fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "主回答成功 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})

@@ -26,22 +26,24 @@ const (
 )
 
 type VideoAgentRequest struct {
-	UserID    int64
-	SessionID int64
-	Question  string
-	TopK      int
+	UserID       int64
+	SessionID    int64
+	Question     string
+	TopK         int
+	MemoryPolicy *model.EffectiveMemoryPolicy
 }
 
 type VideoAgentResult struct {
-	MessageID int64                   `json:"message_id"`
-	Answer    string                  `json:"answer"`
-	Template  string                  `json:"template"`
-	Citations []Citation              `json:"citations"`
-	Trace     []VideoAgentStep        `json:"trace"`
-	Model     string                  `json:"model"`
-	RunID     string                  `json:"run_id,omitempty"`
-	Mode      string                  `json:"mode,omitempty"`
-	Memory    *MemorySnapshotIdentity `json:"memory,omitempty"`
+	MessageID    int64                       `json:"message_id"`
+	Answer       string                      `json:"answer"`
+	Template     string                      `json:"template"`
+	Citations    []Citation                  `json:"citations"`
+	Trace        []VideoAgentStep            `json:"trace"`
+	Model        string                      `json:"model"`
+	RunID        string                      `json:"run_id,omitempty"`
+	Mode         string                      `json:"mode,omitempty"`
+	Memory       *MemorySnapshotIdentity     `json:"memory,omitempty"`
+	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 type VideoAgentStep struct {
@@ -123,6 +125,11 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	if err != nil {
 		return nil, err
 	}
+	memoryPolicy := req.MemoryPolicy
+	if memoryPolicy == nil {
+		resolved := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
+		memoryPolicy = &resolved
+	}
 	if req.TopK <= 0 {
 		req.TopK = s.chatSvc.cfg.TopK
 	}
@@ -149,7 +156,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	if err != nil {
 		return nil, err
 	}
-	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Question)
+	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Question, *memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
@@ -198,14 +205,15 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	candidateCitations := buildCitations(req.Question, citations)
 	finalized := finalizeAnswerCitations(answer, candidateCitations)
 	result = &VideoAgentResult{
-		Answer:    finalized.Answer,
-		Template:  string(template),
-		Citations: finalized.Citations,
-		Trace:     trace,
-		Model:     profile.LLMModel,
-		RunID:     runID,
-		Mode:      mode,
-		Memory:    memorySnapshot.Identity(),
+		Answer:       finalized.Answer,
+		Template:     string(template),
+		Citations:    finalized.Citations,
+		Trace:        trace,
+		Model:        profile.LLMModel,
+		RunID:        runID,
+		Mode:         mode,
+		Memory:       memorySnapshot.Identity(),
+		MemoryPolicy: *memoryPolicy,
 	}
 	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Question, result, recentLimit); err != nil {
 		return nil, err
@@ -399,9 +407,9 @@ func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessi
 	}
 	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	result.MessageID = assistantMessage.ID
-	if s.chatSvc.memoryCapture != nil {
+	if result.MemoryPolicy.EffectiveEnabled && s.chatSvc.memoryCapture != nil {
 		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
-			UserID: userID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
+			UserID: userID, SessionID: sessionID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
 		})
 	}
 	return nil
@@ -433,16 +441,16 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 		s.chatSvc.maybeAutoTitleSession(session, question)
 	}
 	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
-	if s.chatSvc.memoryCapture != nil {
+	if result.MemoryPolicy.EffectiveEnabled && s.chatSvc.memoryCapture != nil {
 		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
-			UserID: userID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
+			UserID: userID, SessionID: sessionID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
 		})
 	}
 	return nil
 }
 
-func (s *VideoAgentService) loadAgentMemorySnapshot(ctx context.Context, userID, taskID int64, runID, query string) *MemorySnapshot {
-	if s == nil || s.chatSvc == nil || s.chatSvc.longTermMemory == nil {
+func (s *VideoAgentService) loadAgentMemorySnapshot(ctx context.Context, userID, taskID int64, runID, query string, policy model.EffectiveMemoryPolicy) *MemorySnapshot {
+	if s == nil || s.chatSvc == nil || s.chatSvc.longTermMemory == nil || !policy.EffectiveEnabled {
 		return nil
 	}
 	snapshot, err := s.chatSvc.longTermMemory.Snapshot(ctx, MemorySnapshotRequest{

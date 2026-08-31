@@ -109,7 +109,9 @@ func TestChatServiceAskRetrievesChunksAndStoresMessages(t *testing.T) {
 	retriever := &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "分布式锁释放时要校验 owner"},
 	}}
-	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, MinScore: 0.3, RecentTurns: 8})
+	svc := NewChatServiceWithDependencies(repos, retriever, ChatConfig{TopK: 5, MinScore: 0.3, RecentTurns: 8}, ChatDependencies{
+		MemoryPolicy: NewMemoryPolicyService(repos.Memory, true),
+	})
 
 	result, err := svc.Ask(context.Background(), 7, session.ID, "为什么要校验 owner？", 0, embedding, chatClient, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
@@ -123,6 +125,9 @@ func TestChatServiceAskRetrievesChunksAndStoresMessages(t *testing.T) {
 	}
 	if len(result.Citations) != 1 {
 		t.Fatalf("citations = %+v", result.Citations)
+	}
+	if result.MemoryPolicy.EffectiveEnabled || result.MemoryPolicy.Reason != model.MemoryPolicyReasonUserDisabled {
+		t.Fatalf("memory policy = %+v", result.MemoryPolicy)
 	}
 
 	joinedPrompt := ""
@@ -621,9 +626,9 @@ func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
+	svc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "流式问答片段"},
-	}}, ChatConfig{TopK: 5, MinScore: 0.3})
+	}}, ChatConfig{TopK: 5, MinScore: 0.3}, ChatDependencies{MemoryPolicy: NewMemoryPolicyService(repos.Memory, true)})
 
 	var events []ChatStreamEvent
 	result, err := svc.AskStream(context.Background(), 7, session.ID, "如何流式？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
@@ -655,6 +660,14 @@ func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
 	}
 	if lastAnswerIndex < 0 || citationIndex <= lastAnswerIndex || doneIndex <= citationIndex {
 		t.Fatalf("event order = %#v, want answer... -> citations -> done", events)
+	}
+	done, ok := events[doneIndex].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("done data = %#v", events[doneIndex].Data)
+	}
+	policy, ok := done["memory_policy"].(model.EffectiveMemoryPolicy)
+	if !ok || policy.EffectiveEnabled || policy.Reason != model.MemoryPolicyReasonUserDisabled {
+		t.Fatalf("done memory policy = %#v", done["memory_policy"])
 	}
 }
 

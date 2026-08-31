@@ -123,6 +123,7 @@ type ChatService struct {
 	memory         ChatMemoryStore
 	longTermMemory MemoryProvider
 	memoryCapture  MemoryCapture
+	memoryPolicy   *MemoryPolicyService
 	evidenceLedger *EvidenceLedgerService
 	recorder       ai.CallRecorder
 	cfg            ChatConfig
@@ -130,10 +131,11 @@ type ChatService struct {
 }
 
 type AskResult struct {
-	MessageID int64      `json:"message_id"`
-	Answer    string     `json:"answer"`
-	Citations []Citation `json:"citations"`
-	Model     string     `json:"model"`
+	MessageID    int64                       `json:"message_id"`
+	Answer       string                      `json:"answer"`
+	Citations    []Citation                  `json:"citations"`
+	Model        string                      `json:"model"`
+	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 	// Degraded 标记档2降级态（docs/architecture/reliability.md 当前实现约束）：LLM 失败回退无 LLM 模式
 	// （检索片段+已有摘要直拼）时为 true，对外告知用户当前降级。档1 rerank 失败回退
 	// 向量基线后 LLM 仍生成完整答案，不标 degraded。
@@ -193,6 +195,7 @@ type ChatDependencies struct {
 	Memory         ChatMemoryStore
 	LongTermMemory MemoryProvider
 	MemoryCapture  MemoryCapture
+	MemoryPolicy   *MemoryPolicyService
 	EvidenceLedger *EvidenceLedgerService
 	Recorder       ai.CallRecorder
 	IntentRouter   *IntentRouter
@@ -207,7 +210,7 @@ func NewChatServiceWithDependencies(repos *repository.Repositories, retriever RA
 	}
 	return &ChatService{
 		repos: repos, retriever: retriever, cfg: cfg,
-		memory: dependencies.Memory, longTermMemory: dependencies.LongTermMemory, memoryCapture: dependencies.MemoryCapture,
+		memory: dependencies.Memory, longTermMemory: dependencies.LongTermMemory, memoryCapture: dependencies.MemoryCapture, memoryPolicy: dependencies.MemoryPolicy,
 		evidenceLedger: dependencies.EvidenceLedger, recorder: dependencies.Recorder, intentRouter: dependencies.IntentRouter,
 	}
 }

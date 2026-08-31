@@ -36,17 +36,19 @@ func TestVideoRAGIndexManifestUsesVariableLengthHashColumn(t *testing.T) {
 
 func TestAllModelsIncludesKnowledgeBaseModels(t *testing.T) {
 	want := map[reflect.Type]bool{
-		reflect.TypeOf(&KnowledgeBase{}):      false,
-		reflect.TypeOf(&KnowledgeBaseVideo{}): false,
-		reflect.TypeOf(&ChatMessageSource{}):  false,
-		reflect.TypeOf(&AgentMemoryItem{}):    false,
-		reflect.TypeOf(&AgentMemoryEvent{}):   false,
-		reflect.TypeOf(&AgentRun{}):           false,
-		reflect.TypeOf(&AgentStep{}):          false,
-		reflect.TypeOf(&AgentToolCall{}):      false,
-		reflect.TypeOf(&AgentClaim{}):         false,
-		reflect.TypeOf(&AgentEvidence{}):      false,
-		reflect.TypeOf(&AgentClaimEvidence{}): false,
+		reflect.TypeOf(&KnowledgeBase{}):          false,
+		reflect.TypeOf(&KnowledgeBaseVideo{}):     false,
+		reflect.TypeOf(&ChatMessageSource{}):      false,
+		reflect.TypeOf(&AgentMemoryItem{}):        false,
+		reflect.TypeOf(&AgentMemoryEvent{}):       false,
+		reflect.TypeOf(&AgentMemoryPreference{}):  false,
+		reflect.TypeOf(&AgentMemoryPolicyEvent{}): false,
+		reflect.TypeOf(&AgentRun{}):               false,
+		reflect.TypeOf(&AgentStep{}):              false,
+		reflect.TypeOf(&AgentToolCall{}):          false,
+		reflect.TypeOf(&AgentClaim{}):             false,
+		reflect.TypeOf(&AgentEvidence{}):          false,
+		reflect.TypeOf(&AgentClaimEvidence{}):     false,
 	}
 	for _, candidate := range AllModels() {
 		if _, ok := want[reflect.TypeOf(candidate)]; ok {
@@ -77,6 +79,12 @@ func TestLegacyModelsKeepHistoricalChatSessionContract(t *testing.T) {
 		if _, ok := parsed.FieldsByDBName["knowledge_base_id"]; ok {
 			t.Fatal("legacy chat session unexpectedly requires knowledge_base_id")
 		}
+		if _, ok := parsed.FieldsByDBName["memory_policy"]; ok {
+			t.Fatal("legacy chat session unexpectedly requires memory_policy")
+		}
+		if _, ok := parsed.FieldsByDBName["memory_policy_version"]; ok {
+			t.Fatal("legacy chat session unexpectedly requires memory_policy_version")
+		}
 	}
 	if !found {
 		t.Fatal("LegacyModels() does not include LegacyChatSession")
@@ -105,8 +113,8 @@ func TestMigrateBackfillsChatSessionScopeAndRejectsInvalidCombinations(t *testin
 	if err := db.First(&session).Error; err != nil {
 		t.Fatalf("load migrated session: %v", err)
 	}
-	if session.ScopeType != ChatScopeVideo || session.KnowledgeBaseID != 0 || session.TaskID != 42 {
-		t.Fatalf("migrated session = %+v, want video scope with task 42", session)
+	if session.ScopeType != ChatScopeVideo || session.KnowledgeBaseID != 0 || session.TaskID != 42 || session.MemoryPolicy != MemorySessionPolicyInherit || session.MemoryPolicyVersion != 0 {
+		t.Fatalf("migrated session = %+v, want video scope with inherited memory policy", session)
 	}
 	if err := db.Create(&ChatSession{UserID: 1, ScopeType: ChatScopeKnowledgeBase, KnowledgeBaseID: 7}).Error; err != nil {
 		t.Fatalf("create valid knowledge-base session: %v", err)
@@ -116,6 +124,9 @@ func TestMigrateBackfillsChatSessionScopeAndRejectsInvalidCombinations(t *testin
 	}
 	if err := db.Create(&ChatSession{UserID: 1, ScopeType: ChatScopeKnowledgeBase, TaskID: 9, KnowledgeBaseID: 7}).Error; err == nil {
 		t.Fatal("invalid knowledge-base scope with task_id>0 was accepted")
+	}
+	if err := db.Create(&ChatSession{UserID: 1, ScopeType: ChatScopeVideo, TaskID: 42, MemoryPolicy: "sometimes"}).Error; err == nil {
+		t.Fatal("invalid session memory policy was accepted")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 func TestMarshalAgentSnapshotUsesVersionedReplayableStepEnvelope(t *testing.T) {
@@ -66,6 +67,9 @@ func TestAgentSnapshotEmptyTraceStillUsesEmptyArrays(t *testing.T) {
 	}
 	if got.Steps == nil || got.Citations == nil || len(got.Steps) != 0 || len(got.Citations) != 0 {
 		t.Fatalf("empty snapshot arrays = steps:%#v citations:%#v", got.Steps, got.Citations)
+	}
+	if got.MemoryPolicy.EffectiveEnabled || got.MemoryPolicy.SessionPolicy != model.MemorySessionPolicyInherit || got.MemoryPolicy.Reason != model.MemoryPolicyReasonUnavailable {
+		t.Fatalf("legacy-compatible fail-closed memory policy = %+v", got.MemoryPolicy)
 	}
 }
 

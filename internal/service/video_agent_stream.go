@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 const (
@@ -44,11 +45,12 @@ type AgentStreamEvent struct {
 }
 
 type AgentRunStartEvent struct {
-	RunID           string `json:"run_id"`
-	Mode            string `json:"mode"`
-	ScopeType       string `json:"scope_type"`
-	TaskID          int64  `json:"task_id,omitempty"`
-	KnowledgeBaseID int64  `json:"kb_id,omitempty"`
+	RunID           string                      `json:"run_id"`
+	Mode            string                      `json:"mode"`
+	ScopeType       string                      `json:"scope_type"`
+	TaskID          int64                       `json:"task_id,omitempty"`
+	KnowledgeBaseID int64                       `json:"kb_id,omitempty"`
+	MemoryPolicy    model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 type AgentStepEvent struct {
@@ -99,10 +101,11 @@ type AgentRetrieveHitsEvent struct {
 }
 
 type AgentDoneEvent struct {
-	RunID        string            `json:"run_id"`
-	MessageID    int64             `json:"message_id"`
-	Degraded     bool              `json:"degraded"`
-	TraceSummary AgentTraceSummary `json:"trace_summary"`
+	RunID        string                      `json:"run_id"`
+	MessageID    int64                       `json:"message_id"`
+	Degraded     bool                        `json:"degraded"`
+	TraceSummary AgentTraceSummary           `json:"trace_summary"`
+	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 type AgentTraceSummary struct {
@@ -366,6 +369,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	if err != nil {
 		return nil, err
 	}
+	memoryPolicy := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
 	runID := uuid.NewString()
 	streamEmit := func(event AgentStreamEvent) error {
 		if err := ctx.Err(); err != nil {
@@ -378,6 +382,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 		Data: AgentRunStartEvent{
 			RunID: runID, Mode: req.Mode, ScopeType: session.ScopeType,
 			TaskID: session.TaskID, KnowledgeBaseID: session.KnowledgeBaseID,
+			MemoryPolicy: memoryPolicy,
 		},
 	}); err != nil {
 		return nil, err
@@ -385,7 +390,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 
 	observer := newVideoAgentStreamObserver(runID, streamEmit)
 	result, err := s.ask(ctx, VideoAgentRequest{
-		UserID: req.UserID, SessionID: req.SessionID, Question: req.Question, TopK: req.TopK,
+		UserID: req.UserID, SessionID: req.SessionID, Question: req.Question, TopK: req.TopK, MemoryPolicy: &memoryPolicy,
 	}, embedding, chat, profile, observer, runID, req.Mode, req.AgentProfile)
 	if err != nil {
 		_ = observer.Abort(err)
@@ -408,6 +413,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
 		RunID: result.RunID, MessageID: result.MessageID, Degraded: false,
 		TraceSummary: agentTraceSummary(result.Trace),
+		MemoryPolicy: result.MemoryPolicy,
 	}}); err != nil {
 		return nil, err
 	}

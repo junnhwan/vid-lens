@@ -19,6 +19,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	if err != nil {
 		return nil, err
 	}
+	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
 
 	answer, llmErr := chat.Chat(ctx, prepared.Messages)
 	if llmErr != nil {
@@ -35,6 +36,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 				return nil, saveErr
 			}
 			result.Degraded = true
+			result.MemoryPolicy = memoryPolicy
 			return result, nil
 		}
 		// UseLLM=false 的 intent 不该走到 Chat（small_talk 占位未落地）；admission
@@ -49,6 +51,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	if err != nil {
 		return nil, err
 	}
+	result.MemoryPolicy = memoryPolicy
 	// 档1（rerank 失败→向量基线）不标 degraded（LLM 仍生成完整答案），但已被
 	// rag_pipeline 计一次档1触发。此处无需再标。
 	return result, nil

@@ -21,6 +21,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 	if err != nil {
 		return nil, err
 	}
+	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
 	var answer string
 	degraded := false
 	// emitAnswer 把一段文本按流式分片发出去（非流式与档2降级共用）。
@@ -85,14 +86,16 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		return nil, err
 	}
 	result.Degraded = degraded
+	result.MemoryPolicy = memoryPolicy
 	if err := emit(ChatStreamEvent{Type: "citations", Data: constrained.citations}); err != nil {
 		return nil, err
 	}
 	if err := emit(ChatStreamEvent{Type: "done", Data: map[string]interface{}{
-		"message_id": result.MessageID,
-		"model":      result.Model,
-		"answer":     result.Answer,
-		"degraded":   degraded,
+		"message_id":    result.MessageID,
+		"model":         result.Model,
+		"answer":        result.Answer,
+		"degraded":      degraded,
+		"memory_policy": memoryPolicy,
 	}}); err != nil {
 		return nil, err
 	}

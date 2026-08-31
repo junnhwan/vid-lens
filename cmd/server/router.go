@@ -57,6 +57,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			{
 				chat.POST("/sessions", handlers.chat.CreateSession)
 				chat.GET("/sessions", handlers.chat.ListSessions)
+				chat.GET("/sessions/:session_id/memory-policy", handlers.memory.GetSessionPolicy)
+				chat.PATCH("/sessions/:session_id/memory-policy", handlers.memory.UpdateSessionPolicy)
 				chat.DELETE("/sessions/:session_id", handlers.chat.DeleteSession)
 				chat.GET("/sessions/:session_id/messages", handlers.chat.ListMessages)
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), handlers.chat.Ask)
@@ -82,6 +84,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			}
 			memories := auth.Group("/memories")
 			{
+				memories.GET("/preferences", handlers.memory.GetPreference)
+				memories.PATCH("/preferences", handlers.memory.UpdatePreference)
 				memories.GET("", handlers.memory.List)
 				memories.POST("/:memory_id/withdraw", handlers.memory.Withdraw)
 				memories.DELETE("/:memory_id", handlers.memory.Delete)
