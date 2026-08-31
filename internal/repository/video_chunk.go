@@ -117,6 +117,19 @@ func (r *VideoChunkRepository) ListByIndexRange(userID, taskID int64, embeddingM
 	return chunks, err
 }
 
+func (r *VideoChunkRepository) ListVisualByTimeRange(userID, taskID int64, embeddingModel string, startMS, endMS int64, limit int) ([]model.VideoChunk, error) {
+	if limit <= 0 || limit > 24 {
+		limit = 24
+	}
+	var chunks []model.VideoChunk
+	err := r.db.Where(
+		"user_id = ? AND task_id = ? AND embedding_model = ? AND modality IN ? AND start_ms < ? AND end_ms > ? AND time_range_status <> ?",
+		userID, taskID, embeddingModel,
+		[]string{model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption}, endMS, startMS, model.ChunkTimeRangeUnknown,
+	).Order("start_ms asc, modality asc, chunk_index asc").Limit(limit).Find(&chunks).Error
+	return chunks, err
+}
+
 func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel string, terms []string, limit int) ([]VideoChunkSearchResult, error) {
 	terms = normalizeSearchTerms(terms)
 	if len(terms) == 0 {

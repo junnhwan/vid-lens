@@ -17,6 +17,23 @@ import (
 	"vid-lens/internal/repository"
 )
 
+func TestConfirmVisualCandidatesPreservesCaptionModalityAndExactTime(t *testing.T) {
+	checkpoint := confirmVisualCandidates([]EvidenceGapCandidate{{
+		Kind: model.ChunkModalityVisualCaption, EvidenceID: "visual-frame:7",
+		TaskID: 9, ChunkIndex: 2, Content: "画面中的折线图出现回落",
+		StartSecond: 12, EndSecond: 13, StartMS: 12_345, EndMS: 12_346,
+		TimeStatus: model.ChunkTimeRangeExact,
+		SourceRefs: []ChunkSourceRef{{SourceType: model.ChunkModalityVisualCaption, StableID: "visual-frame:vf-7", StartMS: 12_345, EndMS: 12_346, TimeRangeStatus: model.ChunkTimeRangeExact}},
+	}})
+	if len(checkpoint.Evidence) != 1 {
+		t.Fatalf("evidence = %+v", checkpoint.Evidence)
+	}
+	got := checkpoint.Evidence[0]
+	if got.Modality != model.ChunkModalityVisualCaption || got.StartMS != 12_345 || got.EndMS != 12_346 || got.TimeRangeStatus != model.ChunkTimeRangeExact || len(got.SourceRefs) != 1 {
+		t.Fatalf("caption evidence = %+v", got)
+	}
+}
+
 func TestVideoEvidenceFunnelRunsFixedOrderAndPersistsCoverage(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	if err := repos.Summary.Create(&model.AISummary{TaskID: task.ID, FileMD5: task.FileMD5, Content: "全局摘要只用于定位", ModelName: "summary-model"}); err != nil {

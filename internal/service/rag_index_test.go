@@ -591,3 +591,31 @@ func TestChunkEvidenceIDIsStableAndContentBound(t *testing.T) {
 		t.Fatalf("ids first=%q second=%q changed=%q", first, second, changed)
 	}
 }
+
+func TestRAGIndexServiceBuildsVisualOnlyIndex(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "visualonlyvisualonlyvisualonly01", Filename: "slides.mp4", FileURL: "videos/slides.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repos.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{{
+		TaskID: task.ID, FrameIndex: 0, FrameKey: "vf_slide", TimeMs: 10_000, StartMS: 10_000, EndMS: 10_001,
+		TimeStatus: model.ChunkTimeRangeExact, OCRText: "架构图：队列到索引", Source: "scene", SamplingVersion: visualSamplingVersion,
+		OCRStatus: model.VisualFrameStatusCompleted, VisionStatus: model.VisualFrameStatusSkipped, Status: model.VisualFrameStatusCompleted,
+	}}); err != nil {
+		t.Fatalf("persist visual frame: %v", err)
+	}
+	store := &fakeVectorStore{}
+	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 100, EmbeddingDim: 3})
+	result, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{EmbeddingModel: "embed", EmbeddingDim: 3})
+	if err != nil {
+		t.Fatalf("visual-only BuildTaskIndex() error = %v", err)
+	}
+	if result.Chunks != 1 || len(store.upserts) != 1 {
+		t.Fatalf("result/store = %+v/%+v", result, store.upserts)
+	}
+	stored, err := repos.VideoChunk.ListByTaskID(7, task.ID, "embed")
+	if err != nil || len(stored) != 1 || stored[0].Modality != model.ChunkModalityVisualOCR || stored[0].StartMS != 10_000 {
+		t.Fatalf("stored visual-only chunks = %+v, err=%v", stored, err)
+	}
+}

@@ -2,7 +2,7 @@
 
 本文描述 VidLens 从“ASR 文本问答”演进为“带可信时间轴的多模态视频理解”的当前基线、目标模块、实施顺序和验收口径。它只讨论工程实现，不把模型输出本身当作事实。
 
-状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。重叠 ASR 时间窗、稳定 segment identity、毫秒级 window/core 元数据和确定性 transcript stitcher 继续作为上游事实；ASR 分阶段延迟观测、受控并发、provider 级重试和部分失败复用也已实现。视觉分支解耦与在线视觉核验仍不在当前范围内。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
+状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。2026-08-31 又完成了后端多模态切片：视觉分支不再等待 ASR 成功，RAG 可从 visual-only 输入构建，OCR 与 Vision 描述保留独立稳定时间映射，标准检索和 research Agent 能消费带模态的视觉证据。查询时重新调用在线 VLM 读取原始像素仍不在当前范围；`inspect_visual_window` 只检查已持久化的 OCR/Vision observation。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
 
 ## 历史改造结论
 
@@ -266,6 +266,30 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 - 文本 RAG 可先完成；视觉产物完成后做增量视觉 projection，而不是重做全部 transcript embedding。
 
 验收：视觉 provider 不可用时 ASR/RAG 可用；重复帧不重复付费；视觉完成不会覆盖 transcript 源事实。
+
+### 多模态后端实施规格
+
+本次实现只修改 Go 后端和架构文档，不改变 `frontend/`。外部调用方继续提交视频任务；媒体消费者内部把 ASR 与视觉理解作为两个可独立成功、失败和降级的分支。视觉分支在视频资产可用后立即启动，不再位于“ASR 成功并保存 transcript”之后。无音轨是可识别的媒体能力缺失，不等同于 provider 故障：它允许任务以 `visual-only` 证据继续；ASR 网络、配额和 provider 错误仍执行既有 provider 级有界重试并保存分片错误，重试耗尽但已有视觉证据时不再阻塞 visual-only RAG。
+
+RAG build 接受三种合法输入：`transcript-only`、`visual-only` 和 `mixed`。只有两种模态都没有可索引 observation 时才失败。视觉产物比 transcript 晚到时，使用同一个 task/model 的 replace projection 重建关系 chunk 与向量投影；PostgreSQL 仍是事实源，pgvector/Milvus 仍只是可重建投影。
+
+关键帧 observation 使用确定性的 frame key、采样策略版本和半开时间范围 `[start_ms,end_ms)`。OCR 原文与 Vision caption 分开持久化、分开生成 `visual_ocr` / `visual_caption` chunk，但共享同一个稳定 frame source ref；任何一方失败都不能覆盖另一方成功结果。旧行继续从 `time_ms` 和现有字段兼容读取，不能补造不存在的精确区间。
+
+检索在原 vector/keyword RRF 之后执行模态感知融合。规则层只判断问题是否明显依赖画面、文本或需要核对冲突；它不生成答案。视觉问题提升 OCR/caption，普通内容问题保留 transcript 优先，冲突问题在候选允许时至少保留一条 transcript 和一条 visual evidence。每个结果保留召回通道、模态分数、时间范围和 source refs，`Source` 不兼任 modality。
+
+受控 research Agent 在既有注册表中增加 `search_visual_evidence` 和 `inspect_visual_window`。前者只搜索当前 task 的视觉 chunk；后者只能读取服务端绑定的 task、合法时间范围和有上限的已持久化帧 observation，不能接受 URL、路径、SQL 或跨视频 ID。Planner 对字幕、图表、幻灯片、颜色/布局、纯演示、无 transcript 和“画面是否与解说一致”类问题可选择视觉工具；未调用工具时不得宣称已查看画面。
+
+回答生成输入为每条证据标明 `modality + [start_ms,end_ms) + time_range_status`。公开 citation 继续返回结构化模态、毫秒范围、时间状态、映射状态和 source refs。若 transcript 与 visual evidence 冲突，回答必须分别引用并明确不确定性，不能让 caption 覆盖 ASR，也不能让 ASR 覆盖画面。
+
+可观测性记录 ASR/视觉分支结果、索引输入模式、各模态候选/最终命中数和降级原因；指标 label 只使用固定枚举，不使用 task、文件名或问题文本。测试覆盖无音轨、纯演示、字幕、图表、OCR 与 caption 双映射、模态融合、冲突多样性、Agent scope/时间窗限制、引用字段、单分支失败和双分支为空。
+
+当前代码切片的实际边界如下：
+
+- transcribe consumer 一取得视频任务就启动视觉分支；无音轨、ASR 空结果或 provider 失败而视觉已有可索引 observation 时，任务以 visual-only 方式进入 RAG，并记录 fail-open 指标；两条分支都失败时仍走原失败状态机；
+- `video_visual_frames` 同时保存稳定 `frame_key`、采样版本、`[start_ms,end_ms)`、OCR/Vision 独立状态、错误和文本。RAG build version 3 / source-map-v2 使旧 projection 明确需要重建；
+- `visual_ocr` 与 `visual_caption` 作为两个 chunk 共享稳定 frame source ref，纯字幕、图表说明和无语音演示无需伪造 transcript；
+- 模态规则只影响检索排序和冲突多样性，不修改关系事实或覆盖一种模态；回答 prompt 与 citation 均携带模态和时间；
+- research 工具只能在当前 owner/task 和最大十分钟窗口内搜索、读取最多八条已持久化视觉 observation。它不接收文件路径或外部 URL，也不把“有视觉索引”误称为一次新的在线像素核验。
 
 ### 多模态检索与 Agent 视觉核验
 

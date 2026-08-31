@@ -31,6 +31,8 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	metrics.ObserveRAG("hybrid", 30*time.Millisecond, 5, 120)
 	metrics.IncRateLimit("ai", "allowed")
 	metrics.ObserveMemoryBackground("embedding", "failed")
+	metrics.ObserveMultimodalEvidence("visual_index", "visual_ocr", "success")
+	metrics.SetRAGModalityResults("visual", "visual_caption", 2)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -40,6 +42,8 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	foundTaskMetric := false
 	foundMemoryMetric := false
 	foundASRStageMetric := false
+	foundMultimodalMetric := false
+	foundRAGModalityMetric := false
 	for _, family := range families {
 		if family.GetName() == "vidlens_task_stage_total" {
 			foundTaskMetric = true
@@ -52,6 +56,12 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 		}
 		if family.GetName() == "vidlens_asr_stage_duration_seconds" {
 			foundASRStageMetric = true
+		}
+		if family.GetName() == "vidlens_multimodal_evidence_total" {
+			foundMultimodalMetric = true
+		}
+		if family.GetName() == "vidlens_rag_modality_result_count" {
+			foundRAGModalityMetric = true
 		}
 		for _, metric := range family.Metric {
 			for _, label := range metric.Label {
@@ -69,6 +79,9 @@ func TestMetricsCanReuseRegistryAndExposeLowCardinalityLabels(t *testing.T) {
 	}
 	if !foundASRStageMetric {
 		t.Fatal("vidlens_asr_stage_duration_seconds not gathered")
+	}
+	if !foundMultimodalMetric || !foundRAGModalityMetric {
+		t.Fatalf("multimodal metrics gathered=%v modality_results=%v", foundMultimodalMetric, foundRAGModalityMetric)
 	}
 
 	rr := httptest.NewRecorder()

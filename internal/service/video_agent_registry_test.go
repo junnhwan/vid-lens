@@ -14,7 +14,9 @@ func TestVideoAgentToolRegistryExposesDefaultDefinitions(t *testing.T) {
 		VideoAgentToolBuildCitedAnswer,
 		VideoAgentToolCompareSegments,
 		VideoAgentToolGetTranscriptWindow,
+		VideoAgentToolInspectVisualWindow,
 		VideoAgentToolSearchTranscript,
+		VideoAgentToolSearchVisualEvidence,
 		VideoAgentToolSummarizeSegments,
 	}
 	if len(definitions) != len(wantNames) {

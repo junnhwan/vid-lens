@@ -48,13 +48,6 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) e
 	task.TraceID = traceID
 	ctx = c.contextForTaskJob(ctx, task, TaskJobRAGIndex, payload.BudgetID)
 
-	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
-	if err != nil {
-		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, err, claim.Token)
-	}
-	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
-		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("缺少转录文本，无法构建 RAG 索引"), claim.Token)
-	}
 	if c.ragIndex == nil {
 		return c.recordTaskFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, fmt.Errorf("RAG 索引器未初始化"), claim.Token)
 	}

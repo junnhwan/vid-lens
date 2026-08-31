@@ -28,6 +28,12 @@
 
 公开 citation 同时返回 `modality`、毫秒范围、时间状态、source mapping 状态和稳定 source refs。`Source` 仍只表示 vector/keyword/hybrid 召回通道。时间过滤会把候选召回预算临时放大到上限后再筛选，且不执行可能跨越请求范围的 chunk-index 邻接扩展；历史索引若没有可靠映射，结果可为空并触发现有的受控降级。
 
+## 模态感知融合
+
+关系事实中的证据模态分为 `transcript`、`visual_ocr` 和 `visual_caption`。检索仍先执行查询改写、vector/keyword 召回、RRF、关系回填和 rerank，然后在候选集上执行低成本模态排序：普通内容问题保持 transcript 优先；字幕、图表、幻灯片、颜色、布局和“画面显示什么”等问题提升视觉证据；询问“画面与解说是否一致”时，若候选允许，最终集合至少保留一条 transcript 和一条视觉证据。
+
+模态排序不把 OCR 或 caption 合并进 transcript，也不把 `Source` 改写成模态。每个候选另外保存 `modality_intent`、`modality_score` 和 `modality_rank`，最终 citation 继续携带原始 `modality`、半开时间范围和稳定 source refs。视觉召回失败时 transcript 可继续回答并明确未取得画面证据；transcript 缺失时 visual-only 索引仍可回答字幕、演示和图表类问题；两者冲突时生成器必须分别引用并保留不确定性。
+
 ## 实验性路径
 
-显式调用 `/chat/.../messages/agent` 时，Video Agent 可以使用白名单工具执行有界的研究循环。该路径有最大步数和重规划次数限制，并通过观察结果绑定证据；它不改变标准聊天接口的默认行为。
+显式调用 `/chat/.../messages/agent` 时，Video Agent 可以使用白名单工具执行有界的研究循环。除 transcript 工具外，`search_visual_evidence` 可限定为视觉模态检索，`inspect_visual_window` 可在当前视频的合法时间范围内读取有上限的已持久化 OCR/Vision observation。该路径有最大步数和重规划次数限制，并通过观察结果绑定证据；它不改变标准聊天接口的默认行为，也不执行查询时在线 VLM 像素分析。

@@ -79,14 +79,18 @@ func evidenceFunnelAgentPolicy(policy EvidenceFunnelPolicy) (frozenAgentPolicy, 
 }
 
 type EvidenceGapCandidate struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	EvidenceID  string `json:"evidence_id,omitempty"`
-	TaskID      int64  `json:"task_id"`
-	ChunkIndex  int    `json:"chunk_index,omitempty"`
-	StartSecond int64  `json:"start_second,omitempty"`
-	EndSecond   int64  `json:"end_second,omitempty"`
-	Content     string `json:"content"`
+	ID          string           `json:"id"`
+	Kind        string           `json:"kind"`
+	EvidenceID  string           `json:"evidence_id,omitempty"`
+	TaskID      int64            `json:"task_id"`
+	ChunkIndex  int              `json:"chunk_index,omitempty"`
+	StartSecond int64            `json:"start_second,omitempty"`
+	EndSecond   int64            `json:"end_second,omitempty"`
+	Content     string           `json:"content"`
+	StartMS     int64            `json:"-"`
+	EndMS       int64            `json:"-"`
+	TimeStatus  string           `json:"-"`
+	SourceRefs  []ChunkSourceRef `json:"-"`
 }
 
 type EvidenceGapDecision struct {
@@ -553,7 +557,24 @@ func (r *evidenceFunnelRunner) visualGapCandidates(startSecond, endSecond int64)
 		if second < startSecond-15 || second > endSecond+15 {
 			continue
 		}
-		candidates = append(candidates, EvidenceGapCandidate{ID: fmt.Sprintf("visual-%d", frame.ID), Kind: "visual_ocr", EvidenceID: fmt.Sprintf("visual-frame:%d", frame.ID), TaskID: frame.TaskID, ChunkIndex: frame.FrameIndex, StartSecond: second, EndSecond: second + 1, Content: frame.OCRText})
+		content := strings.TrimSpace(frame.OCRText)
+		modality := model.ChunkModalityVisualOCR
+		if content == "" {
+			content = strings.TrimSpace(frame.VisionCaption)
+			modality = model.ChunkModalityVisualCaption
+		}
+		if content == "" {
+			continue
+		}
+		startMS, endMS, timeStatus := visualFrameRange(frame)
+		candidates = append(candidates, EvidenceGapCandidate{
+			ID: fmt.Sprintf("visual-%d", frame.ID), Kind: modality,
+			EvidenceID: fmt.Sprintf("visual-frame:%d", frame.ID), TaskID: frame.TaskID,
+			ChunkIndex: frame.FrameIndex, StartSecond: startMS / 1000,
+			EndSecond: (endMS + 999) / 1000, Content: content,
+			StartMS: startMS, EndMS: endMS, TimeStatus: timeStatus,
+			SourceRefs: []ChunkSourceRef{{SourceType: modality, StableID: visualFrameStableID(frame), SourceRowID: frame.ID, StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus, ObjectKey: frame.ObjectKey}},
+		})
 		if len(candidates) >= r.policy.MaxVisualCandidates {
 			break
 		}
@@ -565,7 +586,15 @@ func confirmVisualCandidates(selected []EvidenceGapCandidate) visualConfirmation
 	checkpoint := visualConfirmationCheckpoint{FrameCount: len(selected)}
 	hasRange := false
 	for _, candidate := range selected {
-		checkpoint.Evidence = append(checkpoint.Evidence, RetrievedChunk{TaskID: candidate.TaskID, EvidenceID: candidate.EvidenceID, ChunkIndex: candidate.ChunkIndex, Content: candidate.Content, Source: "visual_ocr"})
+		checkpoint.Evidence = append(checkpoint.Evidence, RetrievedChunk{
+			TaskID: candidate.TaskID, EvidenceID: candidate.EvidenceID,
+			ChunkIndex: candidate.ChunkIndex, Content: candidate.Content,
+			Source: candidate.Kind, Modality: candidate.Kind,
+			StartMS: candidate.StartMS, EndMS: candidate.EndMS,
+			TimeRangeStatus:     candidate.TimeStatus,
+			SourceMappingStatus: model.ChunkSourceMapped,
+			SourceRefs:          candidate.SourceRefs,
+		})
 		if !hasRange || candidate.StartSecond < checkpoint.RangeStart {
 			checkpoint.RangeStart = candidate.StartSecond
 		}

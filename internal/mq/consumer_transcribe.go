@@ -51,9 +51,17 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	defer stopLease()
 	task.TraceID = traceIDForTask(payload.TraceID, task)
 	ctx = c.contextForTaskJob(ctx, task, TaskJobTranscribe, payload.BudgetID)
+	// The visual branch starts from the video task, not from an ASR success.
+	// Its independent download is intentional until the storage adapter exposes
+	// a safe shared local-asset lease.
+	waitVisual := c.startVisualIndexBranch(ctx, task)
+	defer waitVisual()
 
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
+		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
+			return degradeErr
+		}
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 	defer os.Remove(videoPath)
@@ -62,17 +70,26 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
 	c.recordASRStage(ctx, task.ID, "audio_extract", stageStatus(err), time.Since(audioExtractStartedAt))
 	if err != nil {
+		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
+			return degradeErr
+		}
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 	defer os.Remove(audioPath)
 
 	taskAI, err := c.strategyForTask(task)
 	if err != nil {
+		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
+			return degradeErr
+		}
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 
 	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
+		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
+			return degradeErr
+		}
 		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
 	}
 
@@ -92,7 +109,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	c.indexVisualAfterTranscription(ctx, task)
+	_ = waitVisual()
 	if err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
@@ -139,11 +156,16 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return fmt.Errorf("下载视频失败: %w", err)
 	}
 	defer os.Remove(videoPath)
+	waitVisual := c.startVisualIndexBranch(ctx, task)
+	defer waitVisual()
 
 	audioExtractStartedAt := time.Now()
 	audioPath, err := ffmpeg.ExtractAudio(ctx, c.ffmpegPath, videoPath)
 	c.recordASRStage(ctx, task.ID, "audio_extract", stageStatus(err), time.Since(audioExtractStartedAt))
 	if err != nil {
+		if outcome := waitVisual(); outcome.err == nil && outcome.count > 0 {
+			return c.indexAfterTranscription(ctx, task)
+		}
 		return fmt.Errorf("提取音频失败: %w", err)
 	}
 	defer os.Remove(audioPath)
@@ -156,6 +178,9 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 
 	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
+		if outcome := waitVisual(); outcome.err == nil && outcome.count > 0 {
+			return c.indexAfterTranscription(ctx, task)
+		}
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
 
@@ -175,7 +200,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	c.indexVisualAfterTranscription(ctx, task)
+	_ = waitVisual()
 	if err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
@@ -536,21 +561,65 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 	}), nil
 }
 
-// indexVisualAfterTranscription extracts keyframe OCR evidence. Failures are
-// logged only: ASR + RAG remain the product critical path when FailOpen.
-func (c *Consumer) indexVisualAfterTranscription(ctx context.Context, task *model.VideoTask) {
+type visualIndexOutcome struct {
+	count int
+	err   error
+}
+
+func (c *Consumer) completeTranscribeWithVisualOnly(ctx context.Context, task *model.VideoTask, token string, asrErr error, waitVisual func() visualIndexOutcome) (bool, error) {
+	if waitVisual == nil || task == nil {
+		return false, nil
+	}
+	visual := waitVisual()
+	if visual.err != nil || visual.count <= 0 {
+		return false, nil
+	}
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		metrics.ObserveMultimodalEvidence("asr_branch", "visual", "fail_open")
+	}
+	observability.Log(ctx, slog.Default(), slog.LevelWarn, "asr unavailable; continuing with visual-only evidence",
+		slog.Int("visual_frames", visual.count), slog.String("asr_error", observability.SafeError(asrErr)))
+	if err := c.indexAfterTranscription(ctx, task); err != nil {
+		return true, err
+	}
+	parentStatus, parentStage := int8(model.TaskStatusCompleted), model.TaskStageNone
+	if c.ragProducer != nil {
+		parentStatus, parentStage = model.TaskStatusRunning, model.TaskStageIndexing
+	}
+	_, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{
+		TaskID: task.ID, JobType: TaskJobTranscribe, JobStage: model.TaskStageTranscribing,
+		Token: token, TaskStatus: parentStatus, TaskStage: parentStage, Now: c.currentTime(),
+	})
+	return true, err
+}
+
+func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.VideoTask) func() visualIndexOutcome {
 	if c == nil || c.visualIndex == nil || task == nil {
-		return
+		return func() visualIndexOutcome { return visualIndexOutcome{} }
 	}
-	if err := requireProcessingLease(ctx); err != nil {
-		observability.Log(ctx, slog.Default(), slog.LevelWarn, "skip visual index: lease lost", slog.String("error", observability.SafeError(err)))
-		return
+	result := make(chan visualIndexOutcome, 1)
+	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index branch started")
+	go func() {
+		count, err := c.visualIndex(ctx, task)
+		result <- visualIndexOutcome{count: count, err: err}
+	}()
+	var once sync.Once
+	var outcome visualIndexOutcome
+	return func() visualIndexOutcome {
+		once.Do(func() {
+			outcome = <-result
+			if outcome.err != nil {
+				if metrics := observability.DefaultMetrics(); metrics != nil {
+					metrics.ObserveMultimodalEvidence("visual_index", "visual", "failed")
+				}
+				observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index branch failed (continuing)", slog.String("error", observability.SafeError(outcome.err)))
+				return
+			}
+			if metrics := observability.DefaultMetrics(); metrics != nil {
+				metrics.ObserveMultimodalEvidence("visual_index", "visual", "success")
+			}
+			observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index branch completed", slog.Int("visual_frames", outcome.count))
+		})
+		return outcome
 	}
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index started")
-	count, err := c.visualIndex(ctx, task)
-	if err != nil {
-		observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index failed (continuing)", slog.String("error", observability.SafeError(err)))
-		return
-	}
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index completed", slog.Int("ocr_frames", count))
 }

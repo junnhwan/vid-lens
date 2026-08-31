@@ -36,10 +36,21 @@ func (r *VideoVisualFrameRepository) ListByTaskID(taskID int64) ([]model.VideoVi
 
 func (r *VideoVisualFrameRepository) ListCompletedWithText(taskID int64) ([]model.VideoVisualFrame, error) {
 	var frames []model.VideoVisualFrame
-	err := r.db.Where("task_id = ? AND status = ? AND ocr_text <> ''", taskID, model.VisualFrameStatusCompleted).
+	err := r.db.Where("task_id = ? AND status = ? AND (ocr_text <> '' OR vision_caption <> '')", taskID, model.VisualFrameStatusCompleted).
 		Order("time_ms asc, frame_index asc").
 		Find(&frames).Error
 	return frames, err
+}
+
+func (r *VideoVisualFrameRepository) ListCompletedInRange(taskID, startMS, endMS int64, limit int) ([]model.VideoVisualFrame, error) {
+	var frames []model.VideoVisualFrame
+	query := r.db.Where("task_id = ? AND status = ? AND time_ms >= ? AND time_ms < ? AND (ocr_text <> '' OR vision_caption <> '')",
+		taskID, model.VisualFrameStatusCompleted, startMS, endMS).
+		Order("time_ms asc, frame_index asc")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	return frames, query.Find(&frames).Error
 }
 
 func (r *VideoVisualFrameRepository) ListObjectKeysByTaskID(taskID int64) ([]string, error) {

@@ -8,15 +8,18 @@ import (
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/repository"
 )
 
 const (
-	VideoAgentToolSearchTranscript    = "search_transcript"
-	VideoAgentToolGetTranscriptWindow = "get_transcript_window"
-	VideoAgentToolSummarizeSegments   = "summarize_segments"
-	VideoAgentToolCompareSegments     = "compare_segments"
-	VideoAgentToolBuildCitedAnswer    = "build_cited_answer"
+	VideoAgentToolSearchTranscript     = "search_transcript"
+	VideoAgentToolGetTranscriptWindow  = "get_transcript_window"
+	VideoAgentToolSummarizeSegments    = "summarize_segments"
+	VideoAgentToolCompareSegments      = "compare_segments"
+	VideoAgentToolBuildCitedAnswer     = "build_cited_answer"
+	VideoAgentToolSearchVisualEvidence = "search_visual_evidence"
+	VideoAgentToolInspectVisualWindow  = "inspect_visual_window"
 )
 
 type VideoAgentTools struct {
@@ -74,6 +77,24 @@ type SearchTranscriptResult struct {
 	Citations []RetrievedChunk
 	Rewrite   RewriteResult
 	Trace     RetrievalTrace
+}
+
+type SearchVisualEvidenceInput = SearchTranscriptInput
+type SearchVisualEvidenceResult = SearchTranscriptResult
+
+type InspectVisualWindowInput struct {
+	UserID         int64
+	TaskID         int64
+	EmbeddingModel string
+	StartMS        int64
+	EndMS          int64
+	MaxFrames      int
+}
+
+type InspectVisualWindowResult struct {
+	StartMS  int64            `json:"start_ms"`
+	EndMS    int64            `json:"end_ms"`
+	Evidence []RetrievedChunk `json:"evidence"`
 }
 
 type TranscriptWindowInput struct {
@@ -157,6 +178,88 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		return SearchTranscriptResult{}, step, err
 	}
 	return searchResult, step, nil
+}
+
+func (t *VideoAgentTools) SearchVisualEvidence(ctx context.Context, input SearchVisualEvidenceInput) (SearchVisualEvidenceResult, VideoAgentStep, error) {
+	step := newVideoAgentStep("search visual evidence", VideoAgentToolSearchVisualEvidence, map[string]any{"question": input.Question, "top_k": input.TopK})
+	if err := t.notifyStepStart(step); err != nil {
+		return SearchVisualEvidenceResult{}, step, err
+	}
+	if t == nil || t.pipeline == nil {
+		step, err := t.failObservedStep(step, "当前视频尚未构建视觉索引")
+		return SearchVisualEvidenceResult{}, step, err
+	}
+	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
+		UserID: input.UserID, TaskIDs: []int64{input.TaskID}, Question: input.Question, Recent: input.Recent,
+		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
+		Modalities: []string{model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption},
+	})
+	if err != nil {
+		step, err = t.failObservedStepWithCause(step, err)
+		return SearchVisualEvidenceResult{}, step, err
+	}
+	step.OutputRef = fmt.Sprintf("visual-citations:%d", len(result.Citations))
+	searchResult := SearchVisualEvidenceResult(result)
+	if err := t.notifyStepDone(step, searchResult); err != nil {
+		return SearchVisualEvidenceResult{}, step, err
+	}
+	return searchResult, step, nil
+}
+
+func (t *VideoAgentTools) InspectVisualWindow(ctx context.Context, input InspectVisualWindowInput) (InspectVisualWindowResult, VideoAgentStep, error) {
+	step := newVideoAgentStep("inspect visual window", VideoAgentToolInspectVisualWindow, map[string]any{"start_ms": input.StartMS, "end_ms": input.EndMS, "max_frames": input.MaxFrames})
+	if err := t.notifyStepStart(step); err != nil {
+		return InspectVisualWindowResult{}, step, err
+	}
+	metricStatus := "failed"
+	defer func() {
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.ObserveMultimodalEvidence("agent_inspect", "visual", metricStatus)
+		}
+	}()
+	if t == nil || t.repos == nil || t.repos.VideoChunk == nil {
+		step, err := t.failObservedStep(step, "visual chunk repository unavailable")
+		return InspectVisualWindowResult{}, step, err
+	}
+	if input.StartMS < 0 || input.EndMS <= input.StartMS || input.EndMS-input.StartMS > 10*60*1000 {
+		step, err := t.failObservedStep(step, "visual window 必须是十分钟内的合法半开时间范围")
+		return InspectVisualWindowResult{}, step, err
+	}
+	maxFrames := input.MaxFrames
+	if maxFrames <= 0 {
+		maxFrames = 3
+	}
+	if maxFrames > 8 {
+		maxFrames = 8
+	}
+	rows, err := t.repos.VideoChunk.ListVisualByTimeRange(input.UserID, input.TaskID, input.EmbeddingModel, input.StartMS, input.EndMS, maxFrames*2)
+	if err != nil {
+		step, err = t.failObservedStepWithCause(step, err)
+		return InspectVisualWindowResult{}, step, err
+	}
+	evidence := make([]RetrievedChunk, 0, len(rows))
+	seenFrames := make(map[string]struct{})
+	for _, row := range rows {
+		refs := sourceRefsForModelChunk(row)
+		frameKey := row.VectorID
+		if len(refs) > 0 && refs[0].StableID != "" {
+			frameKey = refs[0].StableID
+		}
+		if _, ok := seenFrames[frameKey]; !ok && len(seenFrames) >= maxFrames {
+			continue
+		}
+		seenFrames[frameKey] = struct{}{}
+		chunk := RetrievedChunk{TaskID: row.TaskID, EvidenceID: row.VectorID, ChunkID: row.ID, ChunkIndex: row.ChunkIndex, Content: row.Content, Source: "visual_inspection"}
+		applyChunkProvenance(&chunk, row)
+		evidence = append(evidence, chunk)
+	}
+	result := InspectVisualWindowResult{StartMS: input.StartMS, EndMS: input.EndMS, Evidence: evidence}
+	step.OutputRef = fmt.Sprintf("visual-window:%d-%d:%d", input.StartMS, input.EndMS, len(evidence))
+	if err := t.notifyStepDone(step, result); err != nil {
+		return InspectVisualWindowResult{}, step, err
+	}
+	metricStatus = "success"
+	return result, step, nil
 }
 
 func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input TranscriptWindowInput) (TranscriptWindowResult, VideoAgentStep, error) {
@@ -269,7 +372,7 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		return BuildCitedAnswerResult{}, step, err
 	}
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"},
+		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"},
 	}
 	if memoryContext := trustedMemoryPromptContext(t.memory); memoryContext != "" {
 		messages = append(messages, ai.ChatMessage{Role: "system", Content: memoryContext + "\n禁止把上述记忆作为 Claim 或引用证据；若它与当前视频片段冲突，以当前视频片段为准并说明不确定性。"})
@@ -383,7 +486,8 @@ func formatSegmentGroups(groups []TranscriptSegmentGroup) string {
 func formatRetrievedChunks(chunks []RetrievedChunk) string {
 	lines := make([]string, 0, len(chunks))
 	for index, chunk := range chunks {
-		lines = append(lines, fmt.Sprintf("[C%d] (chunk %d) %s", index+1, chunk.ChunkIndex, strings.TrimSpace(chunk.Content)))
+		lines = append(lines, fmt.Sprintf("[C%d] (chunk %d, modality=%s, time=[%d,%d), time_status=%s) %s", index+1, chunk.ChunkIndex,
+			chunk.Modality, chunk.StartMS, chunk.EndMS, chunk.TimeRangeStatus, strings.TrimSpace(chunk.Content)))
 	}
 	return strings.Join(lines, "\n")
 }

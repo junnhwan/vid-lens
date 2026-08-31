@@ -73,6 +73,7 @@ type RetrievalPipelineRequest struct {
 	EmbeddingModel string
 	Embedding      ai.EmbeddingClient
 	TimeRanges     []TimestampRange
+	Modalities     []string
 }
 
 type RetrievalPipelineResult struct {
@@ -149,7 +150,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			if len(req.TimeRanges) > 0 && searchK < 50 {
 				searchK = 50
 			}
-			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: searchK, MinScore: minScore, TimeRanges: append([]TimestampRange(nil), req.TimeRanges...)}
+			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: searchK, MinScore: minScore, TimeRanges: append([]TimestampRange(nil), req.TimeRanges...), Modalities: append([]string(nil), req.Modalities...)}
 			if len(taskIDs) == 1 {
 				retrievalReq.TaskID = taskIDs[0]
 			}
@@ -183,6 +184,8 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		}
 		vectorChunks = filterChunksByTimeRanges(vectorChunks, req.TimeRanges)
 		keywordChunks = filterChunksByTimeRanges(keywordChunks, req.TimeRanges)
+		vectorChunks = filterChunksByModalities(vectorChunks, req.Modalities)
+		keywordChunks = filterChunksByModalities(keywordChunks, req.Modalities)
 		fused := FuseRetrievedChunks(vectorChunks, keywordChunks, candidateK, rrfK)
 		for i := range fused {
 			fused[i].MatchedQuery = query
@@ -202,7 +205,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		}
 	}
 	if p.reranker != nil {
-		citations = p.reranker.Rerank(ctx, req.Question, citations, topK)
+		citations = p.reranker.Rerank(ctx, req.Question, citations, candidateK)
 		// docs/architecture/reliability.md 档1：rerank 失败 → 向量基线。ModelReranker 在 client 失败时已用
 		// fallbackRerankOrder 回退原序（= 无 rerank 的向量基线，docs/architecture/retrieval.md 消融 vector_only
 		// 档），并在 chunk 上标 model_rerank_failed/model_rerank_unavailable。此处把该
@@ -212,18 +215,23 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			trace.Fallbacks = appendFallback(trace.Fallbacks, "rerank_failed_vector_baseline")
 			recordDegradationTier1()
 		}
-	} else {
-		citations = capRetrievedChunks(citations, topK)
 	}
+	citations = rankRetrievedModalities(req.Question, citations, topK)
 	if err := p.hydrateVideoTitles(req.UserID, citations); err != nil {
 		return RetrievalPipelineResult{}, err
 	}
 	if metrics := observability.DefaultMetrics(); metrics != nil {
 		contextTokens := 0
+		modalityCounts := make(map[string]int)
 		for _, citation := range citations {
 			contextTokens += (utf8.RuneCountInString(citation.Content) + 3) / 4
+			modalityCounts[normalizedChunkModality(citation.Modality)]++
 		}
 		metrics.ObserveRAG("hybrid", time.Since(startedAt), len(citations), contextTokens)
+		intent := classifyModalityIntent(req.Question)
+		for _, modality := range []string{model.ChunkModalityTranscript, model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption} {
+			metrics.SetRAGModalityResults(intent, modality, modalityCounts[modality])
+		}
 	}
 	return RetrievalPipelineResult{
 		Citations: citations,

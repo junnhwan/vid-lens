@@ -53,7 +53,7 @@ func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, sta
 	}
 
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。只输出 JSON。"},
+		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。你必须区分转写、OCR 和画面描述；未调用视觉工具时不得声称已经查看画面。只输出 JSON。"},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
 工具白名单（只能选择其中的 name）：
@@ -68,7 +68,9 @@ func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, sta
 规则：
 - done=false 时必须填写 tool、reason 和 arguments。
 - done=true 时 tool 必须为空；只有证据足够或已经明确无法继续时才结束。
-- 第一步通常先调用 search_transcript；后续根据 observations 和 evidence 决定是否展开窗口、总结或生成带引用回答。
+- 普通解说问题通常先调用 search_transcript。字幕、图表、幻灯片、颜色、布局、纯演示、无转写或画面/解说是否一致的问题，应调用 search_visual_evidence。
+- 已有带时间的 transcript 或 visual 命中且问题需要核对画面时，调用 inspect_visual_window，只检查命中时间附近的小窗口。
+- transcript 与视觉证据冲突时保留双方，继续补齐另一模态或生成明确标注不确定性的带引用回答，不得选择一方覆盖另一方。
 - 如果当前证据不足，需要调整检索策略时，将 replan=true；不要无理由重复同一个动作。
 - arguments 必须是合法 JSON 对象。
 - 不要输出 Markdown、解释或额外字段。

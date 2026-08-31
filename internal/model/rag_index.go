@@ -9,8 +9,8 @@ const (
 	RAGIndexStatusFailed       = "failed"
 	RAGIndexStatusNeedsRebuild = "needs_rebuild"
 
-	CurrentRAGIndexBuildVersion    = 2
-	CurrentRAGSourceMappingVersion = "source-map-v1"
+	CurrentRAGIndexBuildVersion    = 3
+	CurrentRAGSourceMappingVersion = "source-map-v2"
 	CurrentRAGChunkerVersion       = "recursive-sentence-source-v2"
 )
 

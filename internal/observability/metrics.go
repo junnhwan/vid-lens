@@ -34,6 +34,8 @@ type Metrics struct {
 	ragRetrievalDuration  *prometheus.HistogramVec
 	ragResultCount        *prometheus.GaugeVec
 	ragContextTokens      *prometheus.GaugeVec
+	multimodalEvidence    *prometheus.CounterVec
+	ragModalityResults    *prometheus.GaugeVec
 	rateLimitDecision     *prometheus.CounterVec
 	memoryBackgroundTotal *prometheus.CounterVec
 }
@@ -112,6 +114,12 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 		return nil, err
 	}
 	if m.ragContextTokens, err = registerGaugeVec(registerer, prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "vidlens_rag_context_tokens", Help: "Context size estimate of the latest RAG retrieval."}, []string{"mode"})); err != nil {
+		return nil, err
+	}
+	if m.multimodalEvidence, err = registerCounterVec(registerer, prometheus.NewCounterVec(prometheus.CounterOpts{Name: "vidlens_multimodal_evidence_total", Help: "Multimodal pipeline and fallback outcomes."}, []string{"stage", "modality", "status"})); err != nil {
+		return nil, err
+	}
+	if m.ragModalityResults, err = registerGaugeVec(registerer, prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "vidlens_rag_modality_result_count", Help: "Latest RAG result count by intent and evidence modality."}, []string{"intent", "modality"})); err != nil {
 		return nil, err
 	}
 	if m.rateLimitDecision, err = registerCounterVec(registerer, prometheus.NewCounterVec(prometheus.CounterOpts{Name: "vidlens_ratelimit_decision_total", Help: "Rate-limit decisions."}, []string{"scope", "result"})); err != nil {
@@ -224,6 +232,16 @@ func (m *Metrics) ObserveRAG(mode string, duration time.Duration, resultCount, c
 	m.ragResultCount.WithLabelValues(mode).Set(float64(resultCount))
 	m.ragContextTokens.WithLabelValues(mode).Set(float64(contextTokens))
 }
+func (m *Metrics) ObserveMultimodalEvidence(stage, modality, status string) {
+	if m != nil {
+		m.multimodalEvidence.WithLabelValues(normalizeMultimodalStage(stage), normalizeModality(modality), normalizeStatus(status)).Inc()
+	}
+}
+func (m *Metrics) SetRAGModalityResults(intent, modality string, count int) {
+	if m != nil {
+		m.ragModalityResults.WithLabelValues(normalizeModalityIntent(intent), normalizeModality(modality)).Set(float64(count))
+	}
+}
 func (m *Metrics) IncRateLimit(scope, result string) {
 	if m != nil {
 		m.rateLimitDecision.WithLabelValues(normalizeScope(scope), normalizeRateLimitResult(result)).Inc()
@@ -282,6 +300,15 @@ func normalizeErrorCode(value string) string {
 }
 func normalizeRAGMode(value string) string {
 	return normalize(value, set("vector", "bm25", "hybrid", "rerank"))
+}
+func normalizeMultimodalStage(value string) string {
+	return normalize(value, set("visual_index", "asr_branch", "rag_index", "retrieval", "agent_inspect"))
+}
+func normalizeModality(value string) string {
+	return normalize(value, set("transcript", "visual_ocr", "visual_caption", "visual", "mixed", "none"))
+}
+func normalizeModalityIntent(value string) string {
+	return normalize(value, set("text", "visual", "mixed", "conflict"))
 }
 func normalizeScope(value string) string {
 	return normalize(value, set("default", "ai", "upload", "chat"))

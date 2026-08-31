@@ -169,6 +169,17 @@ type transcriptWindowToolArguments struct {
 	Radius     int `json:"radius"`
 }
 
+type visualSearchToolArguments struct {
+	Question string `json:"question"`
+	TopK     int    `json:"top_k"`
+}
+
+type visualWindowToolArguments struct {
+	StartMS   int64 `json:"start_ms"`
+	EndMS     int64 `json:"end_ms"`
+	MaxFrames int   `json:"max_frames"`
+}
+
 type summarizeSegmentsToolArguments struct {
 	Question string              `json:"question"`
 	Segments []TranscriptSegment `json:"segments"`
@@ -219,6 +230,38 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 					TopK:           topK,
 					EmbeddingModel: request.Runtime.EmbeddingModel,
 					Embedding:      request.Runtime.Embedding,
+				})
+				return marshalVideoAgentToolResult(result, step, err)
+			},
+		},
+		&videoAgentToolAdapter{
+			definition: VideoAgentToolDefinition{Name: VideoAgentToolSearchVisualEvidence, Description: "在当前视频的 OCR 和画面描述中检索视觉证据；字幕、图表、幻灯片、颜色、布局、纯演示或画面/解说冲突问题应优先考虑。"},
+			execute: func(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
+				var args visualSearchToolArguments
+				if err := decodeVideoAgentToolArguments(request, &args); err != nil {
+					return failedVideoAgentToolResult(VideoAgentToolSearchVisualEvidence, "search visual evidence", err)
+				}
+				topK := args.TopK
+				if topK <= 0 {
+					topK = request.Runtime.TopK
+				}
+				result, step, err := tools.SearchVisualEvidence(ctx, SearchVisualEvidenceInput{
+					UserID: request.Runtime.UserID, TaskID: request.Runtime.TaskID, Question: args.Question, Recent: request.Runtime.Recent,
+					TopK: topK, EmbeddingModel: request.Runtime.EmbeddingModel, Embedding: request.Runtime.Embedding,
+				})
+				return marshalVideoAgentToolResult(result, step, err)
+			},
+		},
+		&videoAgentToolAdapter{
+			definition: VideoAgentToolDefinition{Name: VideoAgentToolInspectVisualWindow, Description: "读取当前视频指定时间附近已持久化的 OCR/画面描述。只允许十分钟内窗口，最多八帧；用于核对命中时间附近画面或画面与解说冲突。"},
+			execute: func(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
+				var args visualWindowToolArguments
+				if err := decodeVideoAgentToolArguments(request, &args); err != nil {
+					return failedVideoAgentToolResult(VideoAgentToolInspectVisualWindow, "inspect visual window", err)
+				}
+				result, step, err := tools.InspectVisualWindow(ctx, InspectVisualWindowInput{
+					UserID: request.Runtime.UserID, TaskID: request.Runtime.TaskID, EmbeddingModel: request.Runtime.EmbeddingModel,
+					StartMS: args.StartMS, EndMS: args.EndMS, MaxFrames: args.MaxFrames,
 				})
 				return marshalVideoAgentToolResult(result, step, err)
 			},

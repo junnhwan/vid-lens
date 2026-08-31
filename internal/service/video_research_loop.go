@@ -274,12 +274,19 @@ func (DefaultVideoResearchObserver) Observe(state VideoResearchState, result Vid
 		Output: append(json.RawMessage(nil), result.Output...),
 		Step:   result.Step,
 	}
-	if result.Step.Tool == VideoAgentToolSearchTranscript {
+	if result.Step.Tool == VideoAgentToolSearchTranscript || result.Step.Tool == VideoAgentToolSearchVisualEvidence {
 		var search SearchTranscriptResult
 		if err := json.Unmarshal(result.Output, &search); err != nil {
-			return VideoResearchObservation{}, fmt.Errorf("解析 search_transcript observation 失败: %w", err)
+			return VideoResearchObservation{}, fmt.Errorf("解析 %s observation 失败: %w", result.Step.Tool, err)
 		}
 		observation.NewEvidence = append([]RetrievedChunk(nil), search.Citations...)
+	}
+	if result.Step.Tool == VideoAgentToolInspectVisualWindow {
+		var inspected InspectVisualWindowResult
+		if err := json.Unmarshal(result.Output, &inspected); err != nil {
+			return VideoResearchObservation{}, fmt.Errorf("解析 inspect_visual_window observation 失败: %w", err)
+		}
+		observation.NewEvidence = append([]RetrievedChunk(nil), inspected.Evidence...)
 	}
 	if result.Step.Tool == VideoAgentToolBuildCitedAnswer {
 		var answer BuildCitedAnswerResult

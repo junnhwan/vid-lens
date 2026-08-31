@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 )
 
 const (
@@ -110,31 +112,55 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 	if err != nil {
 		return nil, err
 	}
-	if transcription == nil || transcription.Content == "" {
-		return nil, fmt.Errorf("请先完成文字提取")
-	}
 	if s.store == nil {
 		return nil, fmt.Errorf("向量数据库未启用")
 	}
 
+	chunks := make([]TextChunk, 0)
 	var transcriptionRows []model.VideoTranscriptionChunk
-	if s.repos.TranscriptionChunk != nil {
+	if transcription != nil && strings.TrimSpace(transcription.Content) != "" && s.repos.TranscriptionChunk != nil {
 		transcriptionRows, err = s.repos.TranscriptionChunk.ListByTaskID(task.ID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	chunks := buildTranscriptIndexChunks(transcription.Content, transcriptionRows, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
+	if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
+		chunks = append(chunks, buildTranscriptIndexChunks(transcription.Content, transcriptionRows, s.cfg.ChunkSize, s.cfg.ChunkOverlap)...)
+	}
+	var visualLoadErr error
 	if s.repos.VisualFrame != nil {
 		if frames, err := s.repos.VisualFrame.ListCompletedWithText(task.ID); err == nil && len(frames) > 0 {
 			chunks = append(chunks, formatOCRChunksForIndex(frames, s.cfg.ChunkSize)...)
+		} else if err != nil {
+			visualLoadErr = err
+			if metrics := observability.DefaultMetrics(); metrics != nil {
+				metrics.ObserveMultimodalEvidence("rag_index", "visual", "failed")
+			}
 		}
 	}
 	if len(chunks) == 0 {
-		return nil, fmt.Errorf("没有可索引的转写文本")
+		if metrics := observability.DefaultMetrics(); metrics != nil {
+			metrics.ObserveMultimodalEvidence("rag_index", "none", "failed")
+		}
+		if visualLoadErr != nil {
+			return nil, fmt.Errorf("读取视觉索引证据: %w", visualLoadErr)
+		}
+		return nil, fmt.Errorf("没有可索引的文本或视觉证据")
 	}
+	hasTranscript, hasVisual := false, false
 	for i := range chunks {
 		chunks[i].Index = i
+		hasTranscript = hasTranscript || chunks[i].Modality == model.ChunkModalityTranscript
+		hasVisual = hasVisual || chunks[i].Modality == model.ChunkModalityVisualOCR || chunks[i].Modality == model.ChunkModalityVisualCaption
+	}
+	if metrics := observability.DefaultMetrics(); metrics != nil {
+		modality := "mixed"
+		if hasTranscript && !hasVisual {
+			modality = model.ChunkModalityTranscript
+		} else if hasVisual && !hasTranscript {
+			modality = "visual"
+		}
+		metrics.ObserveMultimodalEvidence("rag_index", modality, "success")
 	}
 	return chunks, nil
 }

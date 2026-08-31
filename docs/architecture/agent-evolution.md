@@ -1,6 +1,6 @@
 # VidLens Video Research Agent：总体设计与实施路线
 
-状态：设计核验稿
+状态：设计核验稿；受限持久化视觉证据工具已于 2026-08-31 落地
 
 核验时间：2026-08-29（Asia/Shanghai）
 
@@ -22,11 +22,11 @@
 | 默认聊天 | `ChatService` 组织查询改写、关键词/向量召回、RRF、上下文扩展、重排和引用校验；只从检索上下文生成答案 | 已实现，继续作为默认路径 |
 | 证据身份 | `RetrievedChunk` 有稳定 `EvidenceID`，公开 `Citation` 带视频、chunk、分数和来源 | 已实现，是账本的可复用基础 |
 | 模板 Agent | `video_agent.go` 的 `direct_qa`、`summarize_topic`、`compare_topics`、`critique_topic` 由 Go 固定工具顺序编排 | 已实现，但不是自主研究 Agent |
-| Agent 工具 | `video_agent_registry.go` 只允许 `search_transcript`、`get_transcript_window`、`summarize_segments`、`compare_segments`、`build_cited_answer` | 已实现白名单和参数入口 |
+| Agent 工具 | `video_agent_registry.go` 允许五个 transcript/答案工具，以及 `search_visual_evidence`、`inspect_visual_window` 两个 owner/task/time scoped 视觉工具 | 已实现七工具白名单和参数入口；视觉检查只读持久化 observation |
 | Agent 流式事件 | `video_agent_stream.go` 有 `run_start`、步骤、工具调用/结果、检索命中、答案、引用、完成/错误事件 | 已实现事件外壳；答案仍是在执行完后按 80 字切片，不是 Provider token stream |
 | Agent 快照 | `video_agent_snapshot.go` 将安全执行元数据写入既有 `retrieval_snapshot`，兼容旧的 `template+citations+trace` | 已实现兼容快照，但不参与执行恢复 |
 | Agent 执行账本 | `agent_runs`、`agent_steps`、`agent_tool_calls` 冻结 scope/profile/policy/budget，以 attempt 唯一键、lease 和 CAS 持久化模板工具与 research planner/tool 动作 | 已实现单视频执行持久化；不可重放调用中断时 fail-closed |
-| 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验，并从 PostgreSQL checkpoint 恢复已完成动作 | 已实现 opt-in、单视频的可恢复 loop；仍无视觉核验 |
+| 受控研究循环 | `video_research_loop.go` 有 LLM planner、工具注册表、observe、`MaxSteps=8`、`MaxReplans=2`、证据绑定校验，并从 PostgreSQL checkpoint 恢复已完成动作 | 已实现 opt-in、单视频的可恢复 loop；可按问题选择持久化视觉证据，但仍无查询时在线 VLM |
 | 研究入口 | `video_research_service.go` 的 `mode=research` 只接受单视频；知识库范围被拒绝 | 已实现实验入口，不应误称为完整产品 Agent |
 | 固定证据漏斗 | `mode=evidence_funnel` 固定执行全局摘要/元数据、transcript、时间窗、既有视觉/OCR 和 Evidence/Claim 校验；两个 Planner 节点只能选择有限候选 ID 或结束 | 已实现 opt-in 单视频漏斗；不调用开放工具、不新增视觉 provider 调用、不接入知识库 |
 | 短期上下文 | `ChatMemoryStore` 只提供最近消息读取/保存；`RecentTurns` 是有限会话上下文 | 已实现短期记忆，不是长期语义记忆 |
@@ -164,17 +164,17 @@ flowchart LR
 
 ### 工具白名单
 
-现有 `research` 注册表继续保留五个工具，均为单视频、读路径或答案构建：
+现有 `research` 注册表包含七个工具，均为单视频、读路径或答案构建：
 
-`search_transcript`、`get_transcript_window`、`summarize_segments`、`compare_segments`、`build_cited_answer`。
+`search_transcript`、`get_transcript_window`、`summarize_segments`、`compare_segments`、`search_visual_evidence`、`inspect_visual_window`、`build_cited_answer`。
+
+`search_visual_evidence` 只返回当前 task 的 `visual_ocr` / `visual_caption` chunk。`inspect_visual_window` 的 task 由服务端运行时注入，只接受合法半开时间范围并限制为最多十分钟、八条 observation；它读取已有索引，不接受路径、URL 或查询时在线 VLM 调用。Planner 遇到字幕、图表、幻灯片、画面布局、无 transcript 或声画冲突问题时可以选择这两个工具，未调用时不得声称已查看画面。
 
 `evidence_funnel` 不把新动作加入这个通用注册表，而是使用服务端固定的八动作列表。Planner 只看到候选 evidence ID，不看到或返回工具名；因此漏斗不会扩大既有 research 工具白名单。
 
 后续可以在同一注册表机制上增加有限工具，但每个工具必须声明 scope、输入 schema、输出 schema、估算成本、是否产生证据以及是否允许在当前 profile 使用。候选包括：
 
 - `browse_video_summary`：读取预计算的全局摘要/目录；
-- `search_visual_evidence`：查找已存在的视觉/OCR 索引；
-- `inspect_visual_window`：只对已绑定的有限时间窗口做视觉检查；
 - `extract_claims`、`verify_evidence`：生成或核验结构化 Claim；
 - `build_cited_answer`：只消费账本中可展示的证据；
 - `create_report`：未来的受审批写工具，默认关闭。

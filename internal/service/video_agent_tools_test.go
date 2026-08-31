@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 func TestVideoAgentToolSearchTranscriptCallsRetrievalPipeline(t *testing.T) {
@@ -121,8 +122,8 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	chatClient := &scriptedChatClient{responses: []string{"最终回答"}}
 	tools := NewVideoAgentTools(nil, nil, chatClient)
 	citations := []RetrievedChunk{
-		{ChunkID: 10, ChunkIndex: 3, Content: "第一条唯一引用片段"},
-		{ChunkID: 20, ChunkIndex: 7, Content: "第二条唯一引用片段"},
+		{ChunkID: 10, ChunkIndex: 3, Content: "第一条唯一引用片段", Modality: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeCoarse},
+		{ChunkID: 20, ChunkIndex: 7, Content: "第二条唯一引用片段", Modality: model.ChunkModalityVisualOCR, StartMS: 3000, EndMS: 3001, TimeRangeStatus: model.ChunkTimeRangeExact},
 	}
 
 	result, step, err := tools.BuildCitedAnswer(context.Background(), BuildCitedAnswerInput{
@@ -148,8 +149,8 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 		}
 	}
 	for _, wantMapping := range []string{
-		"[C1] (chunk 3) 第一条唯一引用片段",
-		"[C2] (chunk 7) 第二条唯一引用片段",
+		"[C1] (chunk 3, modality=transcript, time=[1000,2000), time_status=coarse) 第一条唯一引用片段",
+		"[C2] (chunk 7, modality=visual_ocr, time=[3000,3001), time_status=exact) 第二条唯一引用片段",
 	} {
 		if !strings.Contains(chatClient.messages[0][1].Content, wantMapping) {
 			t.Fatalf("agent evidence prompt = %q, missing concrete mapping %q", chatClient.messages[0][1].Content, wantMapping)
@@ -157,6 +158,32 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	}
 	if step.Tool != VideoAgentToolBuildCitedAnswer || step.OutputRef == "" {
 		t.Fatalf("step = %+v", step)
+	}
+}
+
+func TestInspectVisualWindowEnforcesScopeRangeAndFrameBudget(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	refs, err := MarshalChunkSourceRefs([]ChunkSourceRef{{SourceType: model.ChunkModalityVisualOCR, StableID: "visual-frame:vf-1", SourceRowID: 10, StartMS: 10_000, EndMS: 10_001, TimeRangeStatus: model.ChunkTimeRangeExact}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.VideoChunk{
+		{UserID: 7, TaskID: 11, ChunkIndex: 1, Content: "[画面OCR 00:10] 字幕 A", ContentHash: "a", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "visual-a", Modality: model.ChunkModalityVisualOCR, StartMS: 10_000, EndMS: 10_001, TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: refs},
+		{UserID: 7, TaskID: 12, ChunkIndex: 2, Content: "其他视频", ContentHash: "b", EmbeddingModel: "embed", EmbeddingDim: 3, VectorID: "visual-other", Modality: model.ChunkModalityVisualOCR, StartMS: 10_000, EndMS: 10_001, TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: refs},
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(11, "embed", rows[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(12, "embed", rows[1:]); err != nil {
+		t.Fatal(err)
+	}
+	tools := NewVideoAgentTools(repos, nil, nil)
+	result, _, err := tools.InspectVisualWindow(context.Background(), InspectVisualWindowInput{UserID: 7, TaskID: 11, EmbeddingModel: "embed", StartMS: 9_000, EndMS: 11_000, MaxFrames: 1})
+	if err != nil || len(result.Evidence) != 1 || result.Evidence[0].EvidenceID != "visual-a" || result.Evidence[0].TaskID != 11 {
+		t.Fatalf("inspection = %+v, err=%v", result, err)
+	}
+	if _, _, err := tools.InspectVisualWindow(context.Background(), InspectVisualWindowInput{UserID: 7, TaskID: 11, EmbeddingModel: "embed", StartMS: 0, EndMS: 11 * 60 * 1000}); err == nil {
+		t.Fatal("oversized visual window was accepted")
 	}
 }
 

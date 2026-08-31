@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 )
+
+const visualSamplingVersion = "scene-interval-v2"
 
 // VisualIndexConfig controls keyframe sampling and caption cost/quality trade-offs.
 // Business intent: surface on-screen content ASR cannot hear (PPT/board), not every frame.
@@ -106,8 +109,9 @@ func (s *VisualIndexService) SetVisionResolver(fn func(ctx context.Context, user
 	}
 }
 
-// BuildTaskVisualIndex downloads the task video, extracts keyframes, captions them
-// (vision then OCR), uploads evidence frames, and replaces video_visual_frames.
+// BuildTaskVisualIndex downloads the task video, extracts keyframes, runs OCR
+// and Vision as independent observations, uploads evidence frames, and replaces
+// video_visual_frames.
 // Returns count of frames that produced non-empty text.
 func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *model.VideoTask) (int, error) {
 	if s == nil || !s.cfg.Enabled {
@@ -161,27 +165,51 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 		if err := ctx.Err(); err != nil {
 			return textCount, err
 		}
+		startMS, endMS := frame.TimeMs, frame.TimeMs+1
 		row := model.VideoVisualFrame{
-			TaskID:     task.ID,
-			FrameIndex: i,
-			TimeMs:     frame.TimeMs,
-			Source:     frame.Source,
-			Status:     model.VisualFrameStatusPending,
+			TaskID: task.ID, FrameIndex: i, FrameKey: stableVisualFrameKey(task.ID, frame.TimeMs, frame.Source),
+			TimeMs: frame.TimeMs, StartMS: startMS, EndMS: endMS, TimeStatus: model.ChunkTimeRangeExact,
+			Source: frame.Source, SamplingVersion: visualSamplingVersion,
+			Status: model.VisualFrameStatusPending, OCRStatus: model.VisualFrameStatusPending, VisionStatus: model.VisualFrameStatusPending,
 		}
 
-		text, method, capErr := s.captionFrame(ctx, vision, ocrOK, frame.Path)
-		if capErr != nil {
-			row.Status = model.VisualFrameStatusFailed
-			row.ErrorMsg = truncateVisualErr(capErr.Error())
-		} else {
-			row.OCRText = text
-			row.CaptionMethod = method
-			if strings.TrimSpace(text) == "" {
-				row.Status = model.VisualFrameStatusSkipped
+		// OCR and Vision are separate observations of the same sampled frame.
+		// Running both prevents a caption from erasing slide/subtitle text and
+		// preserves disagreements for retrieval and answer-time uncertainty.
+		if ocrOK && s.recognizeOCR != nil {
+			ocrText, ocrErr := s.recognizeOCR(ctx, frame.Path)
+			if ocrErr != nil {
+				row.OCRStatus, row.OCRError = model.VisualFrameStatusFailed, truncateVisualErr(ocrErr.Error())
+			} else if row.OCRText = strings.TrimSpace(ocrText); row.OCRText != "" {
+				row.OCRStatus = model.VisualFrameStatusCompleted
 			} else {
-				row.Status = model.VisualFrameStatusCompleted
-				textCount++
+				row.OCRStatus = model.VisualFrameStatusSkipped
 			}
+		} else {
+			row.OCRStatus = model.VisualFrameStatusSkipped
+		}
+		if vision != nil {
+			caption, captionErr := vision.CaptionImage(ctx, frame.Path, ai.DefaultVisionCaptionPrompt)
+			if captionErr != nil {
+				row.VisionStatus, row.VisionError = model.VisualFrameStatusFailed, truncateVisualErr(captionErr.Error())
+			} else if row.VisionCaption = strings.TrimSpace(caption); row.VisionCaption != "" {
+				row.VisionStatus = model.VisualFrameStatusCompleted
+			} else {
+				row.VisionStatus = model.VisualFrameStatusSkipped
+			}
+		} else {
+			row.VisionStatus = model.VisualFrameStatusSkipped
+		}
+		row.CaptionMethod = visualCaptionMethod(row)
+		switch {
+		case row.OCRText != "" || row.VisionCaption != "":
+			row.Status = model.VisualFrameStatusCompleted
+			textCount++
+		case row.OCRStatus == model.VisualFrameStatusFailed || row.VisionStatus == model.VisualFrameStatusFailed:
+			row.Status = model.VisualFrameStatusFailed
+			row.ErrorMsg = firstVisualError(row.VisionError, row.OCRError)
+		default:
+			row.Status = model.VisualFrameStatusSkipped
 		}
 
 		objectKey := visualFrameObjectKey(task.ID, i, frame.TimeMs)
@@ -212,38 +240,40 @@ func (s *VisualIndexService) loadVisionClient(ctx context.Context, userID int64)
 	return client, nil
 }
 
-func (s *VisualIndexService) captionFrame(ctx context.Context, vision ai.VisionClient, ocrOK bool, imagePath string) (text, method string, err error) {
-	if vision != nil {
-		caption, vErr := vision.CaptionImage(ctx, imagePath, ai.DefaultVisionCaptionPrompt)
-		if vErr == nil {
-			caption = strings.TrimSpace(caption)
-			if caption != "" {
-				return caption, "vision", nil
-			}
-			// empty vision output: fall through to OCR if available
-		} else if !ocrOK {
-			return "", "", vErr
-		} else {
-			observability.Log(ctx, slog.Default(), slog.LevelDebug, "vision caption failed; trying ocr",
-				slog.String("error", observability.SafeError(vErr)))
-		}
-	}
-	if ocrOK && s.recognizeOCR != nil {
-		ocrText, oErr := s.recognizeOCR(ctx, imagePath)
-		if oErr != nil {
-			return "", "", oErr
-		}
-		return strings.TrimSpace(ocrText), "ocr", nil
-	}
-	return "", "", fmt.Errorf("no caption method available")
-}
-
 func visualFrameObjectKey(taskID int64, frameIndex int, timeMs int64) string {
 	return filepath.ToSlash(filepath.Join(
 		"visual-frames",
 		fmt.Sprintf("task-%d", taskID),
 		fmt.Sprintf("frame-%04d-%dms.jpg", frameIndex, timeMs),
 	))
+}
+
+func stableVisualFrameKey(taskID, timeMS int64, source string) string {
+	payload := fmt.Sprintf("%s:%d:%d:%s", visualSamplingVersion, taskID, timeMS, strings.TrimSpace(source))
+	sum := sha256.Sum256([]byte(payload))
+	return fmt.Sprintf("vf_%x", sum[:12])
+}
+
+func visualCaptionMethod(frame model.VideoVisualFrame) string {
+	switch {
+	case strings.TrimSpace(frame.VisionCaption) != "" && strings.TrimSpace(frame.OCRText) != "":
+		return "vision+ocr"
+	case strings.TrimSpace(frame.VisionCaption) != "":
+		return "vision"
+	case strings.TrimSpace(frame.OCRText) != "":
+		return "ocr"
+	default:
+		return ""
+	}
+}
+
+func firstVisualError(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return "visual analysis produced no evidence"
 }
 
 func truncateVisualErr(msg string) string {
@@ -261,8 +291,8 @@ func errString(err error) string {
 	return err.Error()
 }
 
-// FormatOCRChunksForIndex turns completed visual frames into TextChunks so the
-// existing RAG indexer can embed them alongside speech transcription.
+// FormatOCRChunksForIndex is retained for callers while emitting every visual
+// observation. OCR and Vision captions remain separate modalities.
 func FormatOCRChunksForIndex(frames []model.VideoVisualFrame) []TextChunk {
 	return formatOCRChunksForIndex(frames, 800)
 }
@@ -270,33 +300,49 @@ func FormatOCRChunksForIndex(frames []model.VideoVisualFrame) []TextChunk {
 func formatOCRChunksForIndex(frames []model.VideoVisualFrame, chunkSize int) []TextChunk {
 	out := make([]TextChunk, 0, len(frames))
 	for _, frame := range frames {
-		text := strings.TrimSpace(frame.OCRText)
-		if text == "" {
-			continue
+		frameChunkStart := len(out)
+		startMS, endMS, timeStatus := visualFrameRange(frame)
+		stableID := visualFrameStableID(frame)
+		appendObservation := func(text, label, modality, method string) {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				return
+			}
+			sec := startMS / 1000
+			content := fmt.Sprintf("[%s %02d:%02d]\n%s", label, sec/60, sec%60, text)
+			observation := SourceTextObservation{Content: content, Modality: modality, Refs: []ChunkSourceRef{{
+				SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
+				StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus,
+				ObjectKey: frame.ObjectKey, CaptionMethod: method,
+			}}}
+			out = append(out, SplitObservationsIntoChunks([]SourceTextObservation{observation}, chunkSize, 0)...)
 		}
-		sec := frame.TimeMs / 1000
-		mm := sec / 60
-		ss := sec % 60
-		label := "画面"
-		switch frame.CaptionMethod {
-		case "vision":
-			label = "画面理解"
-		case "ocr":
-			label = "画面OCR"
+		appendObservation(frame.OCRText, "画面OCR", model.ChunkModalityVisualOCR, "ocr")
+		// Historical rows stored a Vision caption in OCRText with method=vision.
+		if strings.TrimSpace(frame.VisionCaption) != "" {
+			appendObservation(frame.VisionCaption, "画面理解", model.ChunkModalityVisualCaption, "vision")
+		} else if frame.CaptionMethod == "vision" {
+			// Remove the OCR copy emitted above for this legacy row.
+			out = out[:frameChunkStart]
+			appendObservation(frame.OCRText, "画面理解", model.ChunkModalityVisualCaption, "vision")
 		}
-		content := fmt.Sprintf("[%s %02d:%02d]\n%s", label, mm, ss, text)
-		modality := model.ChunkModalityVisualOCR
-		if frame.CaptionMethod == "vision" {
-			modality = model.ChunkModalityVisualCaption
-		}
-		stableID := fmt.Sprintf("visual-frame:%d", frame.ID)
-		observation := SourceTextObservation{Content: content, Modality: modality, Refs: []ChunkSourceRef{{
-			SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
-			StartMS: frame.TimeMs, EndMS: frame.TimeMs + 1, TimeRangeStatus: model.ChunkTimeRangeExact,
-			ObjectKey: frame.ObjectKey, CaptionMethod: frame.CaptionMethod,
-		}}}
-		chunks := SplitObservationsIntoChunks([]SourceTextObservation{observation}, chunkSize, 0)
-		out = append(out, chunks...)
 	}
 	return out
+}
+
+func visualFrameStableID(frame model.VideoVisualFrame) string {
+	if key := strings.TrimSpace(frame.FrameKey); key != "" {
+		return "visual-frame:" + key
+	}
+	return fmt.Sprintf("visual-frame:%d", frame.ID)
+}
+
+func visualFrameRange(frame model.VideoVisualFrame) (int64, int64, string) {
+	if frame.EndMS > frame.StartMS && frame.StartMS >= 0 && (frame.TimeStatus == model.ChunkTimeRangeExact || frame.TimeStatus == model.ChunkTimeRangeCoarse) {
+		return frame.StartMS, frame.EndMS, frame.TimeStatus
+	}
+	if frame.TimeMs >= 0 {
+		return frame.TimeMs, frame.TimeMs + 1, model.ChunkTimeRangeExact
+	}
+	return 0, 0, model.ChunkTimeRangeUnknown
 }

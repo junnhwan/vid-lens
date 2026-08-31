@@ -290,11 +290,11 @@ VidLens 已落地证据账本的最小纵向切片：
 - research Planner 提交的引用只用于选择本轮已观察 `Evidence`；服务端在最终回答工具执行前按 `EvidenceID` 或 task/chunk identity 替换为完整 canonical evidence，并在 observation 边界再次规范化，因此 Planner 不能改写 `task_id`、`chunk_id`、引用文本或来源，跨视频 evidence 会被拒绝；API 结果、聊天快照和账本复用这份 canonical evidence；
 - 非流式 `mode=evidence_funnel` 已按“全局摘要/元数据 → transcript → 时间窗扩展 → 既有视觉/OCR → Evidence/Claim 校验”固定顺序运行。Planner 只能选择有限候选 ID 或结束；每一级的命中、覆盖、耗时、observed/final evidence refs 都写入 Run/Step/ToolCall，最终校验同步写入本账本。视觉层当前只确认已持久化 OCR/视觉帧，不调用在线 VLM，也不把未检查帧描述成已检查；
 - 空 transcript 命中仍执行全部八个固定动作并产生明确的无证据/不确定回答，不生成引用，也不调用 Planner 或答案 LLM；ASR 时间范围为 `0/0 + unknown` 时不生成视觉候选，禁止从整段视频任意选择 OCR 帧；
-- `visual_ocr` Evidence 以显式 retrieval source 和 `visual-frame:<id>` 定位持久化帧，Ledger 保存准确的 frame ID/index、`time_ms`、对象键、帧来源和 caption method；即使 OCR 文本与 transcript 重合，也不会被误记为 transcript Evidence；
+- `visual_ocr` 与 `visual_caption` Evidence 以显式 modality 和稳定 frame source ref 定位持久化帧，Ledger 保存准确的 frame ID/index、半开毫秒范围、对象键、采样版本和 observation 来源；OCR 与 Vision 描述分开入索引，即使文本与 transcript 重合，也不会被误记为 transcript Evidence；
 - 证据漏斗聊天历史采用“不可用占位消息 → 校验成功后原位发布”的两段式写入；Evidence/Claim 校验失败时不保留普通未验证 assistant 答案，完成 checkpoint 和同一 `run_id` 的恢复/幂等语义保持不变；
 - `GET /api/v1/agent/evidence-ledgers/:run_id` 按 owner 查询账本，`POST /api/v1/agent/evidence-ledgers/claims/:claim_id/corrections` 追加人工更正；demo 用户保持只读。
 
-`verified` 只表示 Claim 与显式引用已绑定，而且来源标识和真实时间范围可供重放核对；它不表示系统已经证明引用在自然语言语义上蕴含 Claim，也不表示 Claim 是客观真理。当前没有实现自然语言蕴含证明、在线 VLM 帧检查、密码学防篡改或知识库 Agent。账本和固定漏斗都不持久化 prompt、Planner 草稿或原始 Chain-of-Thought。
+`verified` 只表示 Claim 与显式引用已绑定，而且来源标识和真实时间范围可供重放核对；它不表示系统已经证明引用在自然语言语义上蕴含 Claim，也不表示 Claim 是客观真理。research Agent 可以检查已有 OCR/Vision observation，但当前没有实现自然语言蕴含证明、查询时在线 VLM 原始像素检查、密码学防篡改或知识库 Agent。账本和固定漏斗都不持久化 prompt、Planner 草稿或原始 Chain-of-Thought。
 
 ## 7. 来源索引
 

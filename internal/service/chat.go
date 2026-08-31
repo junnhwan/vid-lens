@@ -43,6 +43,7 @@ type RetrievalRequest struct {
 	TopK           int
 	MinScore       float32
 	TimeRanges     []TimestampRange
+	Modalities     []string
 }
 
 type RetrievedChunk struct {
@@ -73,6 +74,9 @@ type RetrievedChunk struct {
 	TimeRangeStatus        string           `json:"time_range_status"`
 	SourceMappingStatus    string           `json:"source_mapping_status"`
 	SourceRefs             []ChunkSourceRef `json:"source_refs,omitempty"`
+	ModalityRank           int              `json:"modality_rank,omitempty"`
+	ModalityScore          float64          `json:"modality_score,omitempty"`
+	ModalityIntent         string           `json:"modality_intent,omitempty"`
 }
 
 // Citation is the public, persisted evidence view. It intentionally excludes
@@ -99,6 +103,9 @@ type Citation struct {
 	TimeRangeStatus     string           `json:"time_range_status"`
 	SourceMappingStatus string           `json:"source_mapping_status"`
 	SourceRefs          []ChunkSourceRef `json:"source_refs,omitempty"`
+	ModalityRank        int              `json:"modality_rank,omitempty"`
+	ModalityScore       float64          `json:"modality_score,omitempty"`
+	ModalityIntent      string           `json:"modality_intent,omitempty"`
 }
 
 type RAGRetriever interface {

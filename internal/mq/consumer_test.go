@@ -102,6 +102,86 @@ func (a *controlledASR) resetCalls() {
 
 type emptyProfileResolver struct{}
 
+func TestVisualIndexBranchStartsWithoutWaitingForASRAndMemoizesResult(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	c := &Consumer{visualIndex: func(ctx context.Context, task *model.VideoTask) (int, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		close(started)
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-release:
+			return 3, nil
+		}
+	}}
+
+	wait := c.startVisualIndexBranch(context.Background(), &model.VideoTask{ID: 42})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("visual branch did not start independently")
+	}
+	close(release)
+	first := wait()
+	second := wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if first.err != nil || first.count != 3 || second != first || calls != 1 {
+		t.Fatalf("visual outcomes first=%+v second=%+v calls=%d", first, second, calls)
+	}
+}
+
+func TestASRFailureContinuesToVisualOnlyRAGWhenVisualEvidenceExists(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Now()
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "78787878787878787878787878787878", Filename: "silent-demo.mp4",
+		Status: model.TaskStatusQueued, Stage: model.TaskStageTranscribing, MaxRetries: 3,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := repos.ClaimTaskProcessing(repository.TaskProcessingClaimRequest{
+		TaskID: task.ID, JobType: TaskJobTranscribe, Stage: model.TaskStageTranscribing,
+		Now: now, LeaseUntil: now.Add(time.Hour), NewToken: "visual-only-worker",
+	})
+	if err != nil || claim.Outcome != repository.TaskLeaseAcquired {
+		t.Fatalf("claim=%+v err=%v", claim, err)
+	}
+	producer := &recordingRAGIndexProducer{}
+	consumer := &Consumer{repo: repos, ragProducer: producer, now: func() time.Time { return now }}
+	ctx := withProcessingLeaseOwner(context.Background(), &processingLeaseOwner{
+		repos: repos, taskID: task.ID, jobType: TaskJobTranscribe, token: claim.Token,
+		now: func() time.Time { return now },
+	})
+	handled, err := consumer.completeTranscribeWithVisualOnly(ctx, task, claim.Token, errors.New("ASR 返回空结果"), func() visualIndexOutcome {
+		return visualIndexOutcome{count: 4}
+	})
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if len(producer.taskIDs) != 1 || producer.taskIDs[0] != task.ID {
+		t.Fatalf("rag enqueues=%v", producer.taskIDs)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != model.TaskStatusRunning || current.Stage != model.TaskStageIndexing || current.ProcessingToken != "" {
+		t.Fatalf("visual-only task state=%+v", current)
+	}
+	transcribeJob, _ := repos.TaskJob.FindByTaskAndType(task.ID, TaskJobTranscribe)
+	ragJob, _ := repos.TaskJob.FindByTaskAndType(task.ID, TaskJobRAGIndex)
+	if transcribeJob == nil || transcribeJob.Status != model.TaskStatusCompleted || ragJob == nil || ragJob.Status != model.TaskStatusQueued {
+		t.Fatalf("transcribe=%+v rag=%+v", transcribeJob, ragJob)
+	}
+}
+
 func (emptyProfileResolver) GetDefaultAIProfile(int64) (*ai.Profile, error) {
 	return nil, nil
 }

@@ -549,7 +549,8 @@ func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedCh
 			FinalRank:   chunk.FinalRank,
 			Modality:    chunk.Modality, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
 			TimeRangeStatus: chunk.TimeRangeStatus, SourceMappingStatus: chunk.SourceMappingStatus,
-			SourceRefs: append([]ChunkSourceRef(nil), chunk.SourceRefs...),
+			SourceRefs:   append([]ChunkSourceRef(nil), chunk.SourceRefs...),
+			ModalityRank: chunk.ModalityRank, ModalityScore: chunk.ModalityScore, ModalityIntent: chunk.ModalityIntent,
 		})
 	}
 	return filteredContexts, citations

@@ -27,3 +27,41 @@ func TestFormatOCRChunksForIndexPrefixesTimestamp(t *testing.T) {
 		t.Fatalf("second chunk missing timestamp: %q", got[1].Content)
 	}
 }
+
+func TestFormatVisualChunksKeepsOCRAndCaptionAsSeparateStableEvidence(t *testing.T) {
+	frames := []model.VideoVisualFrame{{
+		ID: 19, FrameKey: "vf_stable", TimeMs: 42_000, StartMS: 42_000, EndMS: 42_001,
+		TimeStatus: model.ChunkTimeRangeExact, OCRText: "季度收入 120 万", VisionCaption: "柱状图显示收入增长",
+		ObjectKey: "visual/task/frame.jpg", Status: model.VisualFrameStatusCompleted,
+	}}
+	chunks := FormatOCRChunksForIndex(frames)
+	if len(chunks) != 2 {
+		t.Fatalf("visual chunks = %+v, want OCR and caption", chunks)
+	}
+	if chunks[0].Modality != model.ChunkModalityVisualOCR || chunks[1].Modality != model.ChunkModalityVisualCaption {
+		t.Fatalf("modalities = %q/%q", chunks[0].Modality, chunks[1].Modality)
+	}
+	for _, chunk := range chunks {
+		if chunk.StartMS != 42_000 || chunk.EndMS != 42_001 || chunk.TimeRangeStatus != model.ChunkTimeRangeExact || len(chunk.SourceRefs) != 1 {
+			t.Fatalf("unstable visual time mapping: %+v", chunk)
+		}
+		if chunk.SourceRefs[0].StableID != "visual-frame:vf_stable" || chunk.SourceRefs[0].SourceRowID != 19 {
+			t.Fatalf("source ref = %+v", chunk.SourceRefs[0])
+		}
+	}
+}
+
+func TestFormatVisualChunksConvertsLongLegacyVisionRowsWithoutLeakingOCRModality(t *testing.T) {
+	chunks := formatOCRChunksForIndex([]model.VideoVisualFrame{{
+		ID: 21, TimeMs: 10_000, OCRText: strings.Repeat("视觉描述。", 40),
+		CaptionMethod: "vision", Status: model.VisualFrameStatusCompleted,
+	}}, 32)
+	if len(chunks) < 2 {
+		t.Fatalf("legacy chunks = %+v", chunks)
+	}
+	for _, chunk := range chunks {
+		if chunk.Modality != model.ChunkModalityVisualCaption {
+			t.Fatalf("legacy vision row leaked modality %q", chunk.Modality)
+		}
+	}
+}
