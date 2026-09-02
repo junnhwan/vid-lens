@@ -7,7 +7,7 @@ import (
 	"vid-lens/internal/handler"
 )
 
-func TestServerAIProfileUsesGenericConfigAndLegacyFallback(t *testing.T) {
+func TestServerAIProfileUsesGenericConfigFallbacks(t *testing.T) {
 	profile := serverAIProfile(config.AIConfig{
 		Provider: "openai_compatible",
 		BaseURL:  "https://relay.example.com/v1",
@@ -22,24 +22,13 @@ func TestServerAIProfileUsesGenericConfigAndLegacyFallback(t *testing.T) {
 		t.Fatalf("generic endpoint/key were not shared: %+v", profile)
 	}
 
-	legacy := serverAIProfile(config.AIConfig{
-		Provider:    "mimo",
-		MimoBaseURL: "https://mimo.example.com/v1",
-		MimoAPIKey:  "mimo-key",
-		LLMModel:    "mimo-chat",
-		ASRModel:    "mimo-asr",
+	labeled := serverAIProfile(config.AIConfig{
+		Provider: "openai_compatible",
+		BaseURL:  "https://relay.example.com/v1",
+		APIKey:   "sk-relay",
 	})
-	if legacy.LLMProvider != "mimo" || legacy.ASRProvider != "mimo" || legacy.LLMBaseURL != "https://mimo.example.com/v1" || legacy.LLMAPIKey != "mimo-key" {
-		t.Fatalf("legacy MIMO fallback was not preserved: %+v", legacy)
-	}
-
-	inferred := serverAIProfile(config.AIConfig{
-		Provider:    "openai_compatible",
-		MimoBaseURL: "https://mimo.example.com/v1",
-		MimoAPIKey:  "old-mimo-key",
-	})
-	if inferred.LLMProvider != "mimo" || inferred.LLMBaseURL != "https://mimo.example.com/v1" || inferred.LLMAPIKey != "old-mimo-key" {
-		t.Fatalf("old key-only MIMO configuration was not inferred: %+v", inferred)
+	if labeled.LLMProvider != "openai_compatible" || labeled.LLMBaseURL != "https://relay.example.com/v1" || labeled.LLMAPIKey != "sk-relay" {
+		t.Fatalf("shared-only configuration was not resolved: %+v", labeled)
 	}
 }
 

@@ -231,8 +231,7 @@ func main() {
 	if cfg.RAG.Enabled {
 		readinessChecks = append(readinessChecks, dependencyCheck{
 			Name: "vector",
-			// RAG is an explicitly enabled optional capability during the
-			// current Milvus-to-pgvector migration period.
+			// RAG is an explicitly enabled optional capability.
 			Required: false,
 			Check: func(ctx context.Context) error {
 				if ragStore == nil {

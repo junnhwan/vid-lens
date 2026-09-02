@@ -15,7 +15,7 @@ func validServerConfig() Config {
 			Brokers: []string{"127.0.0.1:5672"}, AnalyzeQueue: "video-analyze", TranscribeQueue: "video-transcribe",
 			DownloadQueue: "video-download", RAGIndexQueue: "video-rag-index", ConsumerGroup: "vidlens-worker",
 		},
-		AI:        AIConfig{Provider: "mimo"},
+		AI:        AIConfig{Provider: "openai_compatible"},
 		JWT:       JWTConfig{Secret: "test-secret", ExpireHours: 72},
 		Upload:    UploadConfig{MaxFileSize: 2 << 30, ChunkSize: 5 << 20},
 		TaskRetry: TaskRetryConfig{MaxRetries: 3, BackoffSeconds: []int{60, 300, 900}, ScanIntervalSeconds: 30, BatchSize: 20},
@@ -29,15 +29,6 @@ func TestValidateServerAcceptsCompleteConfigurationWithoutRAG(t *testing.T) {
 
 	if err := cfg.ValidateServer(); err != nil {
 		t.Fatalf("ValidateServer() error = %v", err)
-	}
-}
-
-func TestValidateServerDoesNotRequireLegacyMySQL(t *testing.T) {
-	cfg := validServerConfig()
-	cfg.LegacyMySQL = LegacyMySQLConfig{}
-
-	if err := cfg.ValidateServer(); err != nil {
-		t.Fatalf("ValidateServer() error = %v, want PostgreSQL-only server config to pass", err)
 	}
 }
 
@@ -55,15 +46,6 @@ func TestValidateServerReportsInvalidPostgresFields(t *testing.T) {
 		if !strings.Contains(err.Error(), field) {
 			t.Errorf("ValidateServer() error %q does not mention %s", err, field)
 		}
-	}
-}
-
-func TestValidateMySQLRemainsAvailableForMigrationTools(t *testing.T) {
-	cfg := validServerConfig()
-	cfg.LegacyMySQL = LegacyMySQLConfig{Host: "127.0.0.1", Port: 3306, Username: "vidlens", DBName: "vidlens"}
-
-	if err := cfg.ValidateMySQL(); err != nil {
-		t.Fatalf("ValidateMySQL() error = %v", err)
 	}
 }
 
@@ -125,23 +107,22 @@ func TestValidateRAGEmptyStoreUsesPGVectorDefault(t *testing.T) {
 		Enabled: true, ChunkSize: 800, ChunkOverlap: 120,
 		TopK: 5, CandidateK: 30, MinScore: 0.35, RecentTurns: 8, EmbeddingDim: 1536,
 	}
-	cfg.Milvus = MilvusConfig{}
 
 	if err := cfg.ValidateRAG(); err != nil {
 		t.Fatalf("ValidateRAG() error = %v, want empty store to use PostgreSQL/pgvector", err)
 	}
 }
 
-func TestValidateRAGAllowsMilvusRollbackWithoutPostgres(t *testing.T) {
+func TestValidateRAGRejectsRetiredMilvusStore(t *testing.T) {
 	cfg := validServerConfig()
 	cfg.RAG = RAGConfig{
 		Enabled: true, Store: "milvus", ChunkSize: 800, ChunkOverlap: 120,
 		TopK: 5, CandidateK: 30, MinScore: 0.35, RecentTurns: 8, EmbeddingDim: 1536,
 	}
-	cfg.Milvus.Address = "127.0.0.1:19530"
 
-	if err := cfg.ValidateRAG(); err != nil {
-		t.Fatalf("ValidateRAG() error = %v", err)
+	err := cfg.ValidateRAG()
+	if err == nil || !strings.Contains(err.Error(), "rag.store") {
+		t.Fatalf("ValidateRAG() error = %v, want rag.store rejection", err)
 	}
 }
 

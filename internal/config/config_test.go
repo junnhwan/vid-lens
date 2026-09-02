@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestLoadExpandsEnvironmentVariablesForMimoConfig(t *testing.T) {
-	t.Setenv("MIMO_API_KEY", "tp-test-key")
+func TestLoadExpandsEnvironmentVariables(t *testing.T) {
+	t.Setenv("TEST_LOAD_API_KEY", "tp-test-key")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -15,11 +15,11 @@ func TestLoadExpandsEnvironmentVariablesForMimoConfig(t *testing.T) {
 server:
   port: 8080
 ai:
-  provider: mimo
-  mimo_api_key: "${MIMO_API_KEY}"
-  mimo_base_url: "https://token-plan-cn.xiaomimimo.com/v1"
-  asr_model: "mimo-v2.5-asr"
-  llm_model: "mimo-v2.5"
+  provider: openai_compatible
+  api_key: "${TEST_LOAD_API_KEY}"
+  base_url: "https://relay.example.com/v1"
+  asr_model: "asr-model"
+  llm_model: "chat-model"
 `), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -29,11 +29,11 @@ ai:
 		t.Fatalf("load config: %v", err)
 	}
 
-	if cfg.AI.Provider != "mimo" {
-		t.Fatalf("expected provider mimo, got %q", cfg.AI.Provider)
+	if cfg.AI.Provider != "openai_compatible" {
+		t.Fatalf("expected provider openai_compatible, got %q", cfg.AI.Provider)
 	}
-	if cfg.AI.MimoAPIKey != "tp-test-key" {
-		t.Fatalf("expected expanded API key, got %q", cfg.AI.MimoAPIKey)
+	if cfg.AI.APIKey != "tp-test-key" {
+		t.Fatalf("expected expanded API key, got %q", cfg.AI.APIKey)
 	}
 }
 
@@ -201,13 +201,6 @@ database:
 rag:
   store: pgvector
   vector_table: vidlens_rag_vectors
-legacy_mysql:
-  host: 127.0.0.1
-  port: 3307
-  username: root
-  password: secret
-  dbname: vidlens
-  charset: utf8mb4
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +214,6 @@ legacy_mysql:
 	}
 	if cfg.RAG.VectorTable != "vidlens_rag_vectors" {
 		t.Fatalf("rag.vector_table = %q", cfg.RAG.VectorTable)
-	}
-	if cfg.LegacyMySQL.Port != 3307 || cfg.LegacyMySQL.Charset != "utf8mb4" {
-		t.Fatalf("legacy MySQL = %+v", cfg.LegacyMySQL)
 	}
 }
 

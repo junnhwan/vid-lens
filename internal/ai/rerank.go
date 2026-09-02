@@ -31,7 +31,7 @@ func NewOpenAIRerankClient(endpoint, apiKey, model string) *OpenAIRerankClient {
 
 func NewOpenAIRerankClientWithProvider(endpoint, apiKey, model, provider string) *OpenAIRerankClient {
 	return &OpenAIRerankClient{
-		transport: newProviderProtocolClient(endpoint, apiKey, provider, 2*time.Minute),
+		transport: newProtocolClient(endpoint, apiKey, provider, 2*time.Minute),
 		endpoint:  strings.TrimSpace(endpoint),
 		model:     strings.TrimSpace(model),
 	}

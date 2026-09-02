@@ -28,9 +28,10 @@ type ModelMetadata struct {
 	OCR       ModelRef `json:"ocr,omitempty"`
 }
 
-type MilvusMetadata struct {
-	Collection string            `json:"collection"`
-	Partition  string            `json:"partition,omitempty"`
+// VectorStoreMetadata records the identity of the vector projection the run
+// retrieved from.
+type VectorStoreMetadata struct {
+	Table      string            `json:"table"`
 	IndexType  string            `json:"index_type"`
 	MetricType string            `json:"metric_type"`
 	Parameters map[string]string `json:"parameters,omitempty"`
@@ -60,9 +61,9 @@ type RunMetadata struct {
 	Environment          string         `json:"environment"`
 	ExperimentID         string         `json:"experiment_id"`
 	VariantID            string         `json:"variant_id"`
-	Models               ModelMetadata  `json:"models"`
-	Milvus               MilvusMetadata `json:"milvus"`
-	Prompt               PromptMetadata `json:"prompt"`
+	Models               ModelMetadata      `json:"models"`
+	VectorStore          VectorStoreMetadata `json:"vector_store"`
+	Prompt               PromptMetadata     `json:"prompt"`
 }
 
 func (m RunMetadata) Validate() error {
@@ -95,8 +96,8 @@ func (m RunMetadata) Validate() error {
 	if strings.TrimSpace(m.Models.Embedding.Name) == "" || strings.TrimSpace(m.Models.Embedding.Provider) == "" {
 		problems = append(problems, "missing embedding model identity")
 	}
-	if strings.TrimSpace(m.Milvus.Collection) == "" || strings.TrimSpace(m.Milvus.IndexType) == "" || strings.TrimSpace(m.Milvus.MetricType) == "" {
-		problems = append(problems, "missing Milvus collection/index/metric metadata")
+	if strings.TrimSpace(m.VectorStore.Table) == "" || strings.TrimSpace(m.VectorStore.IndexType) == "" || strings.TrimSpace(m.VectorStore.MetricType) == "" {
+		problems = append(problems, "missing vector store table/index/metric metadata")
 	}
 	if strings.TrimSpace(m.Prompt.Name) == "" || strings.TrimSpace(m.Prompt.Version) == "" || strings.TrimSpace(m.Prompt.SHA256) == "" {
 		problems = append(problems, "missing prompt identity")

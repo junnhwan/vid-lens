@@ -12,7 +12,7 @@ Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张
 
 Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidence` 三张权威表组成。Claim 保存可审计事实、状态、置信度和追加式 revision；Evidence 保存 RAG `EvidenceID`、视频/文档定位、引用原文、内容哈希、独立的 `source_revision`/`source_revision_status` provenance 及时间区间；关系表显式保存支持、反驳或上下文关系。`EvidenceID` 只标识检索 evidence，不能写入 `source_revision`；当前没有真实处理版本时 revision 为空且状态为 `unavailable`。时间不能从持久化 ASR 范围或视觉帧可靠解析时，Evidence 必须保留 `0/0 + time_range_status=unknown`，对应 Claim 降级为 `uncertain`，不能根据 `chunk_index` 推导时间码。`verified` 仅表示显式绑定具备稳定来源和真实、可重放时间范围，不表示自然语言语义证明。research Planner 的引用会按本轮已观察 Evidence canonicalize，跨视频 evidence 被拒绝；账本按 `user_id + run_id` 隔离，不替代聊天历史快照，也不保存 prompt、Planner 草稿或 Chain-of-Thought。
 
-`legacy_mysql` 只服务于 `cmd/mysql-to-postgres/` 的离线历史数据迁移和检查；在线 API、消费者和 RAG 服务不把 MySQL 当作数据源。
+`legacy_mysql`、`cmd/mysql-to-postgres/` 等历史 MySQL 迁移设施已退役；在线 API、消费者和 RAG 服务只把 PostgreSQL 当作数据源。
 
 任务和各处理阶段分别记录状态。处理租约使用 token、版本和过期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。Agent research 与 `evidence_funnel` 恢复只读取上述独立执行表；`chat_messages.retrieval_snapshot` 继续是历史 UI 的兼容派生快照，不能作为执行恢复依据。
 
@@ -22,7 +22,7 @@ Agent 证据账本由 `agent_claims`、`agent_evidence` 和 `agent_claim_evidenc
 
 ## 检索数据
 
-转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容与来源映射的主要事实来源。每行保存 modality、毫秒范围、`exact/coarse/unknown` 时间状态、`mapped/partial/unmapped` 映射状态、稳定 source refs 和 chunker provenance。ASR source ref 优先使用 `segment_key`，视觉 source ref 使用稳定 frame observation ID；`chunk_index` 只表示展示顺序，不能映射 ASR identity。默认向量后端是 PostgreSQL 的 pgvector，向量投影写入配置的向量表；Milvus 仍保留兼容适配，但只有显式配置时才使用。检索命中必须从关系行回填 provenance，旧行安全降级为 `unknown/unmapped`。
+转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容与来源映射的主要事实来源。每行保存 modality、毫秒范围、`exact/coarse/unknown` 时间状态、`mapped/partial/unmapped` 映射状态、稳定 source refs 和 chunker provenance。ASR source ref 优先使用 `segment_key`，视觉 source ref 使用稳定 frame observation ID；`chunk_index` 只表示展示顺序，不能映射 ASR identity。pgvector 是唯一的向量后端，向量投影写入配置的向量表。检索命中必须从关系行回填 provenance，旧行安全降级为 `unknown/unmapped`。
 
 向量索引属于可重建投影，用于相似度检索和对账，不能替代 `video_chunks` 等关系数据中的源事实。对应的模型定义位于 [`internal/model/`](../../internal/model/)，向量适配器位于 [`internal/vector/`](../../internal/vector/)。
 

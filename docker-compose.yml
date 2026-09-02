@@ -1,26 +1,6 @@
 services:
   # =========================================
-  # Legacy MySQL rollback source only
-  # Start only when needed: docker compose --profile legacy-mysql up -d mysql
-  # =========================================
-  mysql:
-    image: mysql:8.0
-    container_name: vidlens-mysql
-    profiles: ["legacy-mysql"]
-    ports:
-      - "3307:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=root
-      - MYSQL_DATABASE=vidlens
-      - TZ=Asia/Shanghai
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    volumes:
-      - ./data/mysql:/var/lib/mysql
-    networks:
-      - vidlens-net
-
-  # =========================================
-  # 2. Redis (缓存 + 分布式锁)
+  # 1. Redis (缓存 + 分布式锁)
   # =========================================
   redis:
     image: redis:latest
@@ -34,7 +14,7 @@ services:
       - vidlens-net
 
   # =========================================
-  # 3. MinIO (对象存储)
+  # 2. MinIO (对象存储)
   # =========================================
   minio:
     image: minio/minio
@@ -79,10 +59,7 @@ services:
       - vidlens-net
 
   # =========================================
-  # 4. Zookeeper (Kafka 依赖)
-  # =========================================
-  # =========================================
-  # 5. RabbitMQ (消息队列 — 任务可靠投递)
+  # 3. RabbitMQ (消息队列 — 任务可靠投递)
   # 选 RabbitMQ 而非 Kafka：vid-lens 的 MQ 痛点是任务可靠投递 + 失败可恢复
   # + 削峰（ASR 配额有限），不是高吞吐日志聚合；Kafka 的 partition/ISR/高吞吐
   # 特性在用户级并发吞吐下用不上。详见 docs/decisions/02-dispatch-consistency.md。
@@ -100,53 +77,7 @@ services:
       - vidlens-net
 
   # =========================================
-  # 6. Milvus Etcd (rollback profile only)
-  # =========================================
-  milvus-etcd:
-    image: quay.io/coreos/etcd:v3.5.18
-    profiles: ["milvus"]
-    container_name: vidlens-milvus-etcd
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    command: etcd --advertise-client-urls=http://milvus-etcd:2379 --listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
-    volumes:
-      - ./data/milvus/etcd:/etcd
-    networks:
-      - vidlens-net
-
-  # =========================================
-  # 7. Milvus Standalone (rollback profile only)
-  # Start with: docker compose --profile milvus up -d
-  # =========================================
-  milvus:
-    image: milvusdb/milvus:v2.4.15
-    profiles: ["milvus"]
-    container_name: vidlens-milvus
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      ETCD_ENDPOINTS: milvus-etcd:2379
-      MINIO_ADDRESS: minio:9000
-      MINIO_ACCESS_KEY_ID: minioadmin
-      MINIO_SECRET_ACCESS_KEY: minioadmin
-    ports:
-      - "19530:19530"
-    volumes:
-      - ./data/milvus/data:/var/lib/milvus
-    depends_on:
-      - milvus-etcd
-      - minio
-    networks:
-      - vidlens-net
-
-  # =========================================
-  # 8. Kafka UI (可视化管理)
-  # =========================================
-  # 9. Prometheus / Grafana（可选可观测性栈）
+  # 4. Prometheus / Grafana（可选可观测性栈）
   # docker compose --profile observability up -d prometheus grafana
   # =========================================
   prometheus:

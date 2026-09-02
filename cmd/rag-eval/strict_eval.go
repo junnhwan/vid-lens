@@ -422,7 +422,7 @@ func executeStrictRetrieval(parent context.Context, opts evalOptions, dataset ra
 			ConfigSHA256: configHash, Environment: opts.environment,
 			ExperimentID: opts.experimentID, VariantID: variantID,
 			Models: rageval.ModelMetadata{Embedding: rageval.ModelRef{Provider: "user-profile", Name: "resolved-per-task"}},
-			Milvus: rageval.MilvusMetadata{Collection: cfg.Milvus.Collection, IndexType: "collection-configured", MetricType: "COSINE"},
+			VectorStore: rageval.VectorStoreMetadata{Table: cfg.RAG.VectorTable, IndexType: "table-configured", MetricType: "COSINE"},
 			Prompt: rageval.PromptMetadata{Name: "retrieval-only", Version: "1", SHA256: hex.EncodeToString(promptSum[:])},
 		}
 	}

@@ -38,13 +38,6 @@ func NewOpenAIVisionClient(baseURL, apiKey, model string) *OpenAIVisionClient {
 	}
 }
 
-func NewMimoVisionClient(baseURL, apiKey, model string) *OpenAIVisionClient {
-	return &OpenAIVisionClient{
-		transport: newLegacyMimoProtocolClient(baseURL, apiKey, 3*time.Minute),
-		model:     strings.TrimSpace(model),
-	}
-}
-
 func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt string) (string, error) {
 	if c == nil {
 		return "", fmt.Errorf("vision client is nil")

@@ -176,9 +176,9 @@ func run(ctx context.Context, opts options) (ragtool.RAGReindexResult, error) {
 		if err := lifecycle.enterStage(checkpointFailureConnectPGVector); err != nil {
 			return ragtool.RAGReindexResult{}, err
 		}
-		// This command intentionally targets pgvector even when rag.store is kept
-		// on Milvus for rollback. Reuse the shared application adapter so pgvector
-		// connection fields cannot drift from the server and audit commands.
+		// This command always targets pgvector, the only vector backend.
+		// Reuse the shared application adapter so pgvector connection fields
+		// cannot drift from the server and audit commands.
 		pgConfig := vector.BackendConfigFromApplication(cfg).PGVector
 		pgConfig.MaxOpenConns = 4
 		pgConfig.MaxIdleConns = 2

@@ -42,7 +42,7 @@ func ListOpenAIModelsWithProvider(ctx context.Context, baseURL, apiKey, provider
 		return nil, fmt.Errorf("API Key 不能为空")
 	}
 
-	transport := newProviderProtocolClient(root, apiKey, provider, modelsListTimeout)
+	transport := newProtocolClient(root, apiKey, provider, modelsListTimeout)
 	req, err := transport.newRequest(ctx, http.MethodGet, "models", nil)
 	if err != nil {
 		return nil, err

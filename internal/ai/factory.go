@@ -40,37 +40,18 @@ func NewFactoryWithAdmission(admission Admission) *Factory { return &Factory{adm
 
 func (f *Factory) NewASRStrategy(profile Profile) (Strategy, error) {
 	provider := profileProvider(profile.ASRProvider)
-	switch provider {
-	case "mimo":
-		return AdmitStrategy(NewMimoStrategy(profile.ASRAPIKey, profile.ASRBaseURL, profile.ASRModel, profile.ASRModel), f.admission, "mimo", profile.ASRModel, profile.ASRModel), nil
-	case "openai_compatible", "siliconflow":
-		asr := &transcriptionStrategy{client: NewOpenAIAudioTranscriptionClient(profile.ASRBaseURL, profile.ASRAPIKey, profile.ASRModel)}
-		return AdmitStrategy(asr, f.admission, provider, profile.ASRModel, profile.ASRModel), nil
-	default:
-		return nil, fmt.Errorf("不支持的 ASR provider: %s", profile.ASRProvider)
-	}
+	asr := &transcriptionStrategy{client: NewOpenAIAudioTranscriptionClient(profile.ASRBaseURL, profile.ASRAPIKey, profile.ASRModel)}
+	return AdmitStrategy(asr, f.admission, provider, profile.ASRModel, profile.ASRModel), nil
 }
 
 func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
 	provider := profileProvider(profile.LLMProvider)
-	switch provider {
-	case "openai_compatible", "siliconflow":
-		return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, provider, profile.LLMModel), nil
-	case "mimo":
-		return AdmitChat(NewMimoChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, "mimo", profile.LLMModel), nil
-	default:
-		return nil, fmt.Errorf("不支持的 LLM provider: %s", profile.LLMProvider)
-	}
+	return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, provider, profile.LLMModel), nil
 }
 
 func (f *Factory) NewEmbeddingClient(profile Profile) (EmbeddingClient, error) {
 	provider := profileProvider(profile.EmbeddingProvider)
-	switch provider {
-	case "openai_compatible", "siliconflow":
-		return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, provider, profile.EmbeddingModel), nil
-	default:
-		return nil, fmt.Errorf("不支持的 Embedding provider: %s", profile.EmbeddingProvider)
-	}
+	return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, provider, profile.EmbeddingModel), nil
 }
 
 func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
@@ -78,24 +59,19 @@ func (f *Factory) NewRerankClient(profile Profile) (RerankClient, error) {
 	if normalizeProvider(profile.RerankProvider) == "" {
 		provider = profileProvider(profile.EmbeddingProvider)
 	}
-	switch provider {
-	case "openai_compatible", "siliconflow":
-		endpoint := strings.TrimSpace(profile.RerankEndpoint)
-		if endpoint == "" {
-			derived, ok := deriveRerankEndpointFromEmbedding(profile.EmbeddingEndpoint)
-			if !ok {
-				return nil, fmt.Errorf("无法从 Embedding endpoint 推导 Rerank endpoint，请显式配置 rerank endpoint")
-			}
-			endpoint = derived
+	endpoint := strings.TrimSpace(profile.RerankEndpoint)
+	if endpoint == "" {
+		derived, ok := deriveRerankEndpointFromEmbedding(profile.EmbeddingEndpoint)
+		if !ok {
+			return nil, fmt.Errorf("无法从 Embedding endpoint 推导 Rerank endpoint，请显式配置 rerank endpoint")
 		}
-		apiKey := strings.TrimSpace(profile.RerankAPIKey)
-		if apiKey == "" {
-			apiKey = profile.EmbeddingAPIKey
-		}
-		return NewOpenAIRerankClientWithProvider(endpoint, apiKey, profile.RerankModel, provider), nil
-	default:
-		return nil, fmt.Errorf("不支持的 Rerank provider: %s", profile.EmbeddingProvider)
+		endpoint = derived
 	}
+	apiKey := strings.TrimSpace(profile.RerankAPIKey)
+	if apiKey == "" {
+		apiKey = profile.EmbeddingAPIKey
+	}
+	return NewOpenAIRerankClientWithProvider(endpoint, apiKey, profile.RerankModel, provider), nil
 }
 
 func (f *Factory) NewVisionClient(profile Profile) (VisionClient, error) {
@@ -106,14 +82,7 @@ func (f *Factory) NewVisionClient(profile Profile) (VisionClient, error) {
 	if provider == "" || baseURL == "" || model == "" || apiKey == "" {
 		return nil, fmt.Errorf("vision 未配置")
 	}
-	switch provider {
-	case "openai_compatible", "siliconflow":
-		return AdmitVision(NewOpenAIVisionClient(baseURL, apiKey, model), f.admission, provider, model), nil
-	case "mimo":
-		return AdmitVision(NewMimoVisionClient(baseURL, apiKey, model), f.admission, "mimo", model), nil
-	default:
-		return nil, fmt.Errorf("不支持的 Vision provider: %s", profile.VisionProvider)
-	}
+	return AdmitVision(NewOpenAIVisionClient(baseURL, apiKey, model), f.admission, provider, model), nil
 }
 
 // VisionConfigured reports whether the profile has a usable multimodal endpoint.
@@ -196,10 +165,10 @@ func normalizeProvider(provider string) string {
 
 func profileProvider(provider string) string {
 	// Provider values on profiles are historical labels, not a closed enum.
-	// Only MIMO selects a different wire adapter; every other label uses the
-	// standard OpenAI-compatible protocol.
-	if normalizeProvider(provider) == "mimo" {
-		return "mimo"
+	// Every label uses the standard OpenAI-compatible wire protocol; the raw
+	// label is preserved for admission and observability records.
+	if normalizeProvider(provider) == "" {
+		return "openai_compatible"
 	}
-	return "openai_compatible"
+	return normalizeProvider(provider)
 }

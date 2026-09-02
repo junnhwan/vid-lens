@@ -86,22 +86,29 @@ func TestOpenAIChatClientStreamsChatCompletionDeltas(t *testing.T) {
 	}
 }
 
-func TestFactoryCreatesMimoChatClientWithAPIKeyHeader(t *testing.T) {
-	var gotAPIKey string
+func TestFactoryPreservesHistoricalProviderLabel(t *testing.T) {
 	var gotAuthorization string
+	var gotModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAPIKey = r.Header.Get("api-key")
 		gotAuthorization = r.Header.Get("Authorization")
+
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotModel = body.Model
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"answer"}}]}`))
 	}))
 	defer server.Close()
 
 	client, err := NewFactory().NewChatClient(Profile{
-		LLMProvider: "mimo",
+		LLMProvider: "relay-a",
 		LLMBaseURL:  server.URL + "/v1",
-		LLMAPIKey:   "tp-chat",
-		LLMModel:    "mimo-v2.5",
+		LLMAPIKey:   "sk-relay",
+		LLMModel:    "chat-model",
 	})
 	if err != nil {
 		t.Fatalf("NewChatClient() error = %v", err)
@@ -109,23 +116,11 @@ func TestFactoryCreatesMimoChatClientWithAPIKeyHeader(t *testing.T) {
 	if _, err := client.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hello"}}); err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}
-	if gotAPIKey != "tp-chat" {
-		t.Fatalf("api-key = %q, want tp-chat", gotAPIKey)
+	if gotAuthorization != "Bearer sk-relay" {
+		t.Fatalf("Authorization = %q, want Bearer sk-relay", gotAuthorization)
 	}
-	if gotAuthorization != "" {
-		t.Fatalf("Authorization = %q, want empty", gotAuthorization)
-	}
-}
-
-func TestFactoryRejectsMimoEmbeddingProvider(t *testing.T) {
-	_, err := NewFactory().NewEmbeddingClient(Profile{
-		EmbeddingProvider: "mimo",
-		EmbeddingEndpoint: "https://token-plan-cn.xiaomimimo.com/v1/embeddings",
-		EmbeddingAPIKey:   "tp-embedding",
-		EmbeddingModel:    "mimo-embedding",
-	})
-	if err == nil {
-		t.Fatal("NewEmbeddingClient() succeeded for unsupported mimo embedding provider")
+	if gotModel != "chat-model" {
+		t.Fatalf("model = %q", gotModel)
 	}
 }
 

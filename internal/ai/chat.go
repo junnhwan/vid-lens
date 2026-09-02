@@ -36,13 +36,6 @@ func NewOpenAIChatClient(baseURL, apiKey, model string) *OpenAIChatClient {
 	}
 }
 
-func NewMimoChatClient(baseURL, apiKey, model string) *OpenAIChatClient {
-	return &OpenAIChatClient{
-		transport: newLegacyMimoProtocolClient(baseURL, apiKey, 5*time.Minute),
-		model:     strings.TrimSpace(model),
-	}
-}
-
 func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
 	reqBody := map[string]interface{}{
 		"model":    c.model,

@@ -169,9 +169,9 @@ func (c *Config) ValidateServer() error {
 	}
 	for _, provider := range aiProviders {
 		switch strings.ToLower(strings.TrimSpace(provider.value)) {
-		case "", "openai_compatible", "siliconflow", "mimo":
+		case "", "openai_compatible", "siliconflow":
 		default:
-			problems.add(provider.path, "仅支持 openai_compatible、siliconflow 或 mimo")
+			problems.add(provider.path, "仅支持 openai_compatible 或 siliconflow")
 		}
 	}
 
@@ -192,20 +192,6 @@ func (c *Config) ValidatePostgres() error {
 	problems.port("database.port", c.Database.Port)
 	problems.require("database.username", c.Database.Username)
 	problems.require("database.dbname", c.Database.DBName)
-	return problems.err()
-}
-
-// ValidateMySQL checks the legacy MySQL source fields used only by migration
-// and rollback-period audit commands. It does not try to connect to MySQL.
-func (c *Config) ValidateMySQL() error {
-	if c == nil {
-		return fmt.Errorf("配置校验失败: config: 不能为空")
-	}
-	var problems validationErrors
-	problems.require("legacy_mysql.host", c.LegacyMySQL.Host)
-	problems.port("legacy_mysql.port", c.LegacyMySQL.Port)
-	problems.require("legacy_mysql.username", c.LegacyMySQL.Username)
-	problems.require("legacy_mysql.dbname", c.LegacyMySQL.DBName)
 	return problems.err()
 }
 
@@ -259,10 +245,8 @@ func (c *Config) ValidateVectorBackend() error {
 	switch strings.ToLower(strings.TrimSpace(c.RAG.Store)) {
 	case "", "pgvector":
 		problems.merge(c.validatePGVectorDestination(false))
-	case "milvus":
-		problems.require("milvus.address", c.Milvus.Address)
 	default:
-		problems.add("rag.store", "仅支持 milvus 或 pgvector")
+		problems.add("rag.store", "仅支持 pgvector")
 	}
 	return problems.err()
 }

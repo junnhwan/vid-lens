@@ -10,7 +10,7 @@ import (
 
 // Store is the application-facing contract shared by the configured vector
 // backends. Keeping backend construction here prevents server commands and
-// evaluation tools from drifting into separate Milvus/pgvector switch logic.
+// evaluation tools from drifting into separate backend switch logic.
 type Store interface {
 	service.RAGVectorStore
 	service.RAGRetriever
@@ -25,7 +25,6 @@ type Store interface {
 type BackendConfig struct {
 	Backend   string
 	Dimension int
-	Milvus    MilvusConfig
 	PGVector  PGVectorConfig
 }
 
@@ -40,15 +39,6 @@ func BackendConfigFromApplication(cfg *config.Config) BackendConfig {
 	return BackendConfig{
 		Backend:   cfg.RAG.Store,
 		Dimension: cfg.RAG.EmbeddingDim,
-		Milvus: MilvusConfig{
-			Address:    cfg.Milvus.Address,
-			Collection: cfg.Milvus.Collection,
-			Username:   cfg.Milvus.Username,
-			Password:   cfg.Milvus.Password,
-			Token:      cfg.Milvus.Token,
-			Database:   cfg.Milvus.Database,
-			Dim:        cfg.RAG.EmbeddingDim,
-		},
 		PGVector: PGVectorConfig{
 			Host:         cfg.Database.Host,
 			Port:         cfg.Database.Port,
@@ -65,17 +55,10 @@ func BackendConfigFromApplication(cfg *config.Config) BackendConfig {
 }
 
 // NewStore creates and health-checks the selected vector backend. An empty
-// backend uses pgvector, matching the single-database application architecture;
-// Milvus remains available only through an explicit rollback configuration.
+// backend uses pgvector, matching the single-database application architecture.
 func NewStore(ctx context.Context, cfg BackendConfig) (Store, error) {
 	backend := NormalizeBackendName(cfg.Backend)
 	switch backend {
-	case "milvus":
-		milvusCfg := cfg.Milvus
-		if milvusCfg.Dim == 0 {
-			milvusCfg.Dim = cfg.Dimension
-		}
-		return NewMilvusStore(ctx, milvusCfg)
 	case "pgvector":
 		pgCfg := cfg.PGVector
 		if pgCfg.Dim == 0 {

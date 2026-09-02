@@ -6,7 +6,6 @@ import "fmt"
 type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	Database     DatabaseConfig     `yaml:"database"`
-	LegacyMySQL  LegacyMySQLConfig  `yaml:"legacy_mysql"`
 	Redis        RedisConfig        `yaml:"redis"`
 	MinIO        MinIOConfig        `yaml:"minio"`
 	MQ           MQConfig           `yaml:"mq"`
@@ -20,7 +19,6 @@ type Config struct {
 	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
 	RAG          RAGConfig          `yaml:"rag"`
 	Memory       MemoryConfig       `yaml:"memory"`
-	Milvus       MilvusConfig       `yaml:"milvus"`
 	AIGovernance AIGovernanceConfig `yaml:"-"`
 }
 
@@ -38,22 +36,6 @@ type DatabaseConfig struct {
 	Password string `yaml:"password"`
 	DBName   string `yaml:"dbname"`
 	SSLMode  string `yaml:"sslmode"`
-}
-
-// LegacyMySQLConfig is retained temporarily for the offline migration and
-// rollback-period audit tool. The API server never reads this configuration.
-type LegacyMySQLConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	DBName   string `yaml:"dbname"`
-	Charset  string `yaml:"charset"`
-}
-
-func (d *LegacyMySQLConfig) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		d.Username, d.Password, d.Host, d.Port, d.DBName, d.Charset)
 }
 
 type RedisConfig struct {
@@ -159,13 +141,6 @@ type AIConfig struct {
 	VisionBaseURL  string `yaml:"vision_base_url"`
 	VisionAPIKey   string `yaml:"vision_api_key"`
 	VisionModel    string `yaml:"vision_model"`
-
-	// Legacy vendor-specific fields. They are read only when the resolved
-	// provider is the corresponding legacy label or during migration fallback.
-	SiliconFlowAPIKey  string `yaml:"siliconflow_api_key"`
-	SiliconFlowBaseURL string `yaml:"siliconflow_base_url"`
-	MimoAPIKey         string `yaml:"mimo_api_key"`
-	MimoBaseURL        string `yaml:"mimo_base_url"`
 }
 
 type ToolsConfig struct {
@@ -224,8 +199,8 @@ type RouteRateLimit struct {
 	Rate     int `yaml:"rate"`
 }
 
-// RAGConfig controls indexing and retrieval. Store defaults to pgvector; use
-// an explicit "milvus" value only during the temporary rollback window.
+// RAGConfig controls indexing and retrieval. PostgreSQL's pgvector is the
+// only vector backend.
 type RAGConfig struct {
 	Enabled        bool    `yaml:"enabled"`
 	Store          string  `yaml:"store"`
@@ -265,13 +240,4 @@ func (m *MemoryConfig) applyDefaults() {
 	if m.QueueSize <= 0 {
 		m.QueueSize = 128
 	}
-}
-
-type MilvusConfig struct {
-	Address    string `yaml:"address"`
-	Collection string `yaml:"collection"`
-	Username   string `yaml:"username"`
-	Password   string `yaml:"password"`
-	Token      string `yaml:"token"`
-	Database   string `yaml:"database"`
 }

@@ -40,22 +40,22 @@ func TestAIConfigProfileResolvesIndependentCapabilityEndpoints(t *testing.T) {
 	}
 }
 
-func TestAIConfigProfileKeepsLegacyMimoPerCapabilityOverride(t *testing.T) {
+func TestAIConfigProfileNormalizesProviderLabels(t *testing.T) {
 	profile := (AIConfig{
 		Provider:    "openai_compatible",
 		LLMBaseURL:  "https://chat.example.com/v1",
 		LLMAPIKey:   "chat-key",
 		LLMModel:    "chat-model",
-		ASRProvider: "mimo",
-		MimoBaseURL: "https://mimo.example.com/v1",
-		MimoAPIKey:  "mimo-key",
-		ASRModel:    "mimo-asr",
+		ASRProvider: "relay-a",
+		ASRBaseURL:  "https://asr.example.com/v1",
+		ASRAPIKey:   "asr-key",
+		ASRModel:    "asr-model",
 	}).Profile()
 
 	if profile.LLMProvider != "openai_compatible" || profile.LLMBaseURL != "https://chat.example.com/v1" {
 		t.Fatalf("LLM profile = %+v", profile)
 	}
-	if profile.ASRProvider != "mimo" || profile.ASRBaseURL != "https://mimo.example.com/v1" || profile.ASRAPIKey != "mimo-key" {
-		t.Fatalf("ASR legacy profile = %+v", profile)
+	if profile.ASRProvider != "relay-a" || profile.ASRBaseURL != "https://asr.example.com/v1" || profile.ASRAPIKey != "asr-key" {
+		t.Fatalf("ASR labeled profile = %+v", profile)
 	}
 }

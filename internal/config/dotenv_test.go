@@ -17,7 +17,7 @@ func TestLoadReadsDotEnvNextToConfigAndExpandsDefaults(t *testing.T) {
 	unsetEnvForTest(t, "VIDLENS_QUOTA_REDIS_DEFAULT_POLICY")
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(`
 # local AI relay settings
-export TEST_DOTENV_PROVIDER = mimo
+export TEST_DOTENV_PROVIDER = openai_compatible
 TEST_DOTENV_KEY='dotenv-key'
 TEST_DOTENV_URL="http://relay.example/v1"
 VIDLENS_QUOTA_REDIS_DEFAULT_POLICY=fail_closed
@@ -26,9 +26,9 @@ VIDLENS_QUOTA_REDIS_DEFAULT_POLICY=fail_closed
 	}
 	if err := os.WriteFile(configPath, []byte(`
 ai:
-  provider: "${TEST_DOTENV_PROVIDER:-siliconflow}"
-  mimo_api_key: "${TEST_DOTENV_KEY}"
-  mimo_base_url: "${TEST_DOTENV_URL:-https://default.example/v1}"
+  provider: "${TEST_DOTENV_PROVIDER:-openai_compatible}"
+  api_key: "${TEST_DOTENV_KEY}"
+  base_url: "${TEST_DOTENV_URL:-https://default.example/v1}"
 tools:
   proxy_url: "${TEST_DOTENV_FALLBACK:-http://fallback.example}"
 `), 0o600); err != nil {
@@ -39,7 +39,7 @@ tools:
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.AI.Provider != "mimo" || cfg.AI.MimoAPIKey != "dotenv-key" || cfg.AI.MimoBaseURL != "http://relay.example/v1" {
+	if cfg.AI.Provider != "openai_compatible" || cfg.AI.APIKey != "dotenv-key" || cfg.AI.BaseURL != "http://relay.example/v1" {
 		t.Fatalf("AI config = %+v", cfg.AI)
 	}
 	if cfg.AIGovernance.RedisDefaultPolicy != RedisPolicyFailClosed {

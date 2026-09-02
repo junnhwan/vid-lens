@@ -36,20 +36,6 @@ func newProtocolClient(baseURL, apiKey, provider string, timeout time.Duration) 
 	}
 }
 
-func newLegacyMimoProtocolClient(baseURL, apiKey string, timeout time.Duration) *protocolClient {
-	c := newProtocolClient(baseURL, apiKey, "mimo", timeout)
-	c.authHeader = "api-key"
-	c.authPrefix = ""
-	return c
-}
-
-func newProviderProtocolClient(baseURL, apiKey, provider string, timeout time.Duration) *protocolClient {
-	if normalizeProvider(provider) == "mimo" {
-		return newLegacyMimoProtocolClient(baseURL, apiKey, timeout)
-	}
-	return newProtocolClient(baseURL, apiKey, "openai_compatible", timeout)
-}
-
 func (c *protocolClient) endpoint(path string) string {
 	if c == nil {
 		return ""

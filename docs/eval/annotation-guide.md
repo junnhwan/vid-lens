@@ -87,7 +87,7 @@ loader 只有在 token 验证成功、test 内容摘要匹配且 access event �
 
 语料、chunk manifest、向量 artifact、配置和 prompt 的摘要必须绑定实际文件，而不是信任调用方手填。使用 `BindArtifactFileDigests` 从文件字节计算 SHA-256 写入 `RunMetadata`，产出前或复核时使用 `VerifyArtifactFileDigests` 重新计算；文件被替换或修改后必须失败。
 
-报告还应保留代码 commit、数据集版本、manifest/content 摘要、模型身份、Milvus collection/index/metric 参数和逐 case 结果。所有摘要均执行严格的小写 SHA-256 校验。
+报告还应保留代码 commit、数据集版本、manifest/content 摘要、模型身份、向量表/index/metric 参数和逐 case 结果。所有摘要均执行严格的小写 SHA-256 校验。
 
 ## 10. 复核与争议处理
 

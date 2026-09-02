@@ -116,7 +116,7 @@ func TestWriteArtifactsEmitsTraceableJSONLJSONCSVAndMarkdown(t *testing.T) {
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		t.Fatalf("metadata JSON error = %v", err)
 	}
-	if metadata.Commit != "abc123" || metadata.DatasetSHA256 == "" || metadata.Milvus.Collection != "video_chunks_eval" || metadata.Prompt.SHA256 == "" {
+	if metadata.Commit != "abc123" || metadata.DatasetSHA256 == "" || metadata.VectorStore.Table != "video_chunks_eval" || metadata.Prompt.SHA256 == "" {
 		t.Fatalf("metadata = %+v, missing trace fields", metadata)
 	}
 	casesRaw, _ := os.ReadFile(paths.CasesJSONL)
@@ -191,7 +191,7 @@ func validRunMetadata() RunMetadata {
 		ExperimentID:         "exp-1",
 		VariantID:            "vector-only",
 		Models:               ModelMetadata{Embedding: ModelRef{Provider: "openai-compatible", Name: "embedding-model", Version: "fixture"}},
-		Milvus:               MilvusMetadata{Collection: "video_chunks_eval", Partition: "dev", IndexType: "HNSW", MetricType: "COSINE", Parameters: map[string]string{"M": "16"}},
+		VectorStore:          VectorStoreMetadata{Table: "video_chunks_eval", IndexType: "HNSW", MetricType: "COSINE", Parameters: map[string]string{"M": "16"}},
 		Prompt:               PromptMetadata{Name: "rag-answer", Version: "v1", SHA256: strings.Repeat("7", 64), Temperature: 0},
 	}
 }

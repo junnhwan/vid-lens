@@ -42,35 +42,6 @@ func AllModels() []interface{} {
 	}
 }
 
-// LegacyModels returns only the historical MySQL source schema copied by the
-// offline mysql-to-postgres command. It intentionally excludes online-only
-// knowledge-base tables and uses LegacyChatSession for chat_sessions.
-func LegacyModels() []interface{} {
-	return []interface{}{
-		&User{},
-		&VideoAsset{},
-		&VideoTask{},
-		&TaskJob{},
-		&TaskCleanupJob{},
-		&KafkaMessageFailure{},
-		&VideoTranscription{},
-		&VideoTranscriptionChunk{},
-		&VideoVisualFrame{},
-		&AISummary{},
-		&UserAIProfile{},
-		&VideoChunk{},
-		&VideoRAGIndex{},
-		&LegacyChatSession{},
-		&ChatMessage{},
-		&AICallLog{},
-		&AIRetryBudget{},
-		&AIRetryAttempt{},
-		&AIUsageLedger{},
-		&QuotaCompensation{},
-		&UserUsageDaily{},
-	}
-}
-
 // Migrate executes the complete online schema migration.
 func Migrate(db *gorm.DB) error {
 	if err := normalizeChatSessionScope(db); err != nil {
@@ -86,11 +57,6 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	return normalizeChatSessionMemoryPolicy(db)
-}
-
-// MigrateLegacy upgrades only the offline historical MySQL source contract.
-func MigrateLegacy(db *gorm.DB) error {
-	return migrateModels(db, LegacyModels())
 }
 
 func migrateModels(db *gorm.DB, models []interface{}) error {

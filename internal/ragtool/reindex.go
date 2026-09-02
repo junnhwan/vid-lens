@@ -48,7 +48,7 @@ type RAGReindexResult struct {
 }
 
 // RAGReindexer rebuilds destination vectors from PostgreSQL video_chunks. Source
-// rows are never modified or deleted, so Milvus remains a rollback path.
+// rows are never modified or deleted.
 type RAGReindexer struct {
 	source   RAGReindexSource
 	profiles RAGReindexProfileProvider

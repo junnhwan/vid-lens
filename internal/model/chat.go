@@ -25,22 +25,6 @@ func (ChatSession) TableName() string {
 	return "chat_sessions"
 }
 
-// LegacyChatSession is the historical MySQL migration contract. It must stay
-// free of online-only scope columns so --upgrade-source-schema never requires
-// the retired source database to adopt the knowledge-base schema.
-type LegacyChatSession struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID    int64     `gorm:"index;not null" json:"user_id"`
-	TaskID    int64     `gorm:"index;not null" json:"task_id"`
-	Title     string    `gorm:"type:varchar(200)" json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (LegacyChatSession) TableName() string {
-	return "chat_sessions"
-}
-
 type ChatMessage struct {
 	ID                int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	SessionID         int64     `gorm:"index;not null" json:"session_id"`

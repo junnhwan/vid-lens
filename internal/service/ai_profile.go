@@ -622,11 +622,9 @@ func normalizeProvider(provider string) string {
 
 // normalizeAIProtocol keeps the persisted profile vocabulary small. Provider
 // names such as siliconflow, relay-a, or an arbitrary gateway label do not
-// select an implementation; only MIMO needs the legacy wire adapter.
+// select an implementation; every profile uses the OpenAI-compatible wire
+// protocol.
 func normalizeAIProtocol(provider string) string {
-	if normalizeProvider(provider) == "mimo" {
-		return "mimo"
-	}
 	return "openai_compatible"
 }
 

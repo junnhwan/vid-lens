@@ -92,8 +92,8 @@ func (s *RAGIndexService) replaceVectorProjection(ctx context.Context, build *ra
 		return replacer.ReplaceTaskChunks(ctx, build.userID, build.taskID, build.modelName, vectors)
 	}
 
-	// Compatibility path for stores such as Milvus that do not support an
-	// atomic delete-and-replace operation. Keep the weaker behavior explicit.
+	// Fallback path for stores that do not implement the atomic
+	// delete-and-replace operation. Keep the weaker behavior explicit.
 	if err := s.store.DeleteTaskChunks(ctx, build.userID, build.taskID, build.modelName); err != nil {
 		return err
 	}

@@ -17,10 +17,9 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 - `internal/mq/`：RabbitMQ 投递、消费、重试、手动确认和处理租约
 - `internal/repository/`：关系数据访问和持久化边界
 - `internal/storage/`：MinIO 对象存储适配器
-- `internal/vector/`：pgvector 默认实现和 Milvus 兼容适配器
+- `internal/vector/`：pgvector 唯一向量后端实现
 - `internal/ai/`：LLM、ASR、Embedding、Rerank、Vision 协议适配及调用治理
 - `internal/observability/`：结构化日志、指标和运行状态观测
-- `internal/dbmigration/`、`cmd/mysql-to-postgres/`：仅用于离线历史数据迁移和检查
 - `frontend/app/`：正式 Next.js 产品路由
 - `frontend/components/chat/`：`ConversationSession`、历史快照适配和聊天展示模块
 - `frontend/prototype/`：独立的开发原型 Next workspace，不进入默认 production build
@@ -53,8 +52,7 @@ Agent 的 Template、Research 和 Evidence Funnel 策略保持独立；它们只
 
 ## 设计边界
 
-- PostgreSQL 是在线业务数据源，也承载 `video_chunks` 和默认的 pgvector 投影。
-- `legacy_mysql` 只供离线迁移工具使用，在线 API 和消费者不读取它。
-- Milvus 只在显式配置回滚兼容后端时使用，不是当前默认在线向量后端。
+- PostgreSQL 是在线业务数据源，也承载 `video_chunks` 和 pgvector 投影；历史 MySQL 数据源与迁移工具已退役。
+- pgvector 是唯一的向量后端。
 - MinIO 保存视频、音频和其他大对象；Redis 用于限流、配额、缓存和短期协调状态，不承担主要业务事实。
 - RabbitMQ 负责长耗时阶段的异步调度和失败恢复；向量索引是可重建投影，不能替代关系数据中的源事实。

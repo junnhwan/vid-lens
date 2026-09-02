@@ -196,7 +196,7 @@ func miniRunMetadata(experimentID, variantID string) RunMetadata {
 		CorpusSHA256: fill, ChunkManifestSHA256: fill, VectorArtifactSHA256: fill,
 		ConfigSHA256: fill,
 		Models: ModelMetadata{Embedding: ModelRef{Provider: "test", Name: "test-embed"}},
-		Milvus: MilvusMetadata{Collection: "test", IndexType: "hnsw", MetricType: "cosine"},
+		VectorStore: VectorStoreMetadata{Table: "test", IndexType: "hnsw", MetricType: "cosine"},
 		Prompt: PromptMetadata{Name: "retrieval-only", Version: "1", SHA256: fill},
 	}
 }

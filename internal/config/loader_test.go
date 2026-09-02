@@ -53,7 +53,7 @@ func TestLoadReportsDeprecatedFieldMigration(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "milvus collection", path: "collection", want: "milvus.collection"},
+		{name: "rag collection", path: "collection", want: "rag.vector_table"},
 		{name: "rerank endpoint", path: "rerank_endpoint", want: "--rerank-endpoint"},
 	}
 
@@ -83,7 +83,7 @@ tools:
 	}
 }
 
-func TestLoadParsesMilvusCollection(t *testing.T) {
+func TestLoadRejectsRemovedMilvusBackend(t *testing.T) {
 	path := writeLoaderTestConfig(t, `
 rag:
   store: pgvector
@@ -92,12 +92,8 @@ milvus:
   collection: vidlens_video_chunks
 `)
 
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if cfg.Milvus.Collection != "vidlens_video_chunks" {
-		t.Fatalf("milvus.collection = %q, want vidlens_video_chunks", cfg.Milvus.Collection)
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() error = nil, want removed top-level milvus field to be rejected")
 	}
 }
 

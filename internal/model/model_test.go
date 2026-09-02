@@ -62,35 +62,6 @@ func TestAllModelsIncludesKnowledgeBaseModels(t *testing.T) {
 	}
 }
 
-func TestLegacyModelsKeepHistoricalChatSessionContract(t *testing.T) {
-	var found bool
-	for _, candidate := range LegacyModels() {
-		if reflect.TypeOf(candidate) != reflect.TypeOf(&LegacyChatSession{}) {
-			continue
-		}
-		found = true
-		parsed, err := schema.Parse(candidate, &sync.Map{}, schema.NamingStrategy{})
-		if err != nil {
-			t.Fatalf("parse legacy chat session: %v", err)
-		}
-		if _, ok := parsed.FieldsByDBName["scope_type"]; ok {
-			t.Fatal("legacy chat session unexpectedly requires scope_type")
-		}
-		if _, ok := parsed.FieldsByDBName["knowledge_base_id"]; ok {
-			t.Fatal("legacy chat session unexpectedly requires knowledge_base_id")
-		}
-		if _, ok := parsed.FieldsByDBName["memory_policy"]; ok {
-			t.Fatal("legacy chat session unexpectedly requires memory_policy")
-		}
-		if _, ok := parsed.FieldsByDBName["memory_policy_version"]; ok {
-			t.Fatal("legacy chat session unexpectedly requires memory_policy_version")
-		}
-	}
-	if !found {
-		t.Fatal("LegacyModels() does not include LegacyChatSession")
-	}
-}
-
 func TestMigrateBackfillsChatSessionScopeAndRejectsInvalidCombinations(t *testing.T) {
 	db := newModelSQLiteTestDB(t)
 	if err := db.Exec(`CREATE TABLE chat_sessions (

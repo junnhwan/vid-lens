@@ -17,7 +17,7 @@ type deprecatedConfigField struct {
 var deprecatedConfigFields = []deprecatedConfigField{
 	{
 		path:    []string{"rag", "collection"},
-		message: "配置字段 rag.collection 已弃用，请迁移到 milvus.collection",
+		message: "配置字段 rag.collection 已删除；pgvector 使用 rag.vector_table",
 	},
 	{
 		path:    []string{"rag", "rerank_endpoint"},

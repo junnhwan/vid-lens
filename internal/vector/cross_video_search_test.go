@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"reflect"
 	"regexp"
 	"testing"
 
@@ -26,21 +25,5 @@ func TestPGVectorStoreSearchFiltersTaskSetAndReturnsTaskID(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestMilvusTaskSetFilterUsesValidatedSortedIDs(t *testing.T) {
-	filter, ids, err := buildMilvusSearchFilter(7, []int64{3, 2, 3}, "embed")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(ids, []int64{2, 3}) {
-		t.Fatalf("ids=%v", ids)
-	}
-	if filter != `user_id == 7 and task_id in [2,3] and embedding_model == "embed"` {
-		t.Fatalf("filter=%s", filter)
-	}
-	if _, _, err := buildMilvusSearchFilter(7, []int64{0, -1}, "embed"); err == nil {
-		t.Fatal("expected empty task set error")
 	}
 }

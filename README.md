@@ -150,7 +150,7 @@ AI 相关的 `.env` 配置项如下：
 
 | 变量 | 用途 |
 | --- | --- |
-| `VIDLENS_AI_PROVIDER` | 服务端默认配置标签：推荐 `openai_compatible`；`mimo` / `siliconflow` 仅兼容旧配置 |
+| `VIDLENS_AI_PROVIDER` | 服务端默认配置标签：所有标签都走 OpenAI-compatible 协议，仅用于观测记录 |
 | `VIDLENS_AI_BASE_URL` / `VIDLENS_AI_API_KEY` | 单中转部署时的通用 fallback；多中转部署请使用下面的按能力配置 |
 | `VIDLENS_LLM_BASE_URL` / `VIDLENS_LLM_API_KEY` / `VIDLENS_LLM_MODEL` | 对话 Chat 根地址、Key、模型 |
 | `VIDLENS_ASR_BASE_URL` / `VIDLENS_ASR_API_KEY` / `VIDLENS_ASR_MODEL` | ASR 根地址、Key、模型 |
@@ -159,8 +159,6 @@ AI 相关的 `.env` 配置项如下：
 | `VIDLENS_RAG_EMBEDDING_DIM` | RAG 向量库目标维度，必须与实际 Embedding 返回维度一致 |
 | `VIDLENS_RERANK_ENDPOINT` / `VIDLENS_RERANK_API_KEY` / `VIDLENS_RERANK_MODEL` | Rerank 完整 endpoint、可选独立 Key、模型 |
 | `VIDLENS_VISION_BASE_URL` / `VIDLENS_VISION_API_KEY` / `VIDLENS_VISION_MODEL` | Vision 根地址、Key、模型 |
-| `MIMO_API_KEY` / `MIMO_BASE_URL` | 旧版 MIMO Token Plan 兼容配置；显式 `provider=mimo`，或迁移期仅配置旧 MIMO Key 时读取 |
-| `SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` | 旧版 SiliconFlow 配置；显式 `provider=siliconflow` 时读取，协议仍按通用 Bearer 方式调用 |
 | `VIDLENS_API_KEY_SECRET` | 加密用户模型配置 API Key 的服务端密钥 |
 | `VIDLENS_QUOTA_REDIS_DEFAULT_POLICY` | Redis 不可用时的默认配额策略 |
 | `VIDLENS_QUOTA_REDIS_AI_POLICY` | Redis 不可用时的 AI 配额策略 |

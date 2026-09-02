@@ -144,7 +144,7 @@ func buildLiveEvidenceSnapshot(ctx context.Context, dataset rageval.Dataset, spl
 
 		vectors, err := sources.vectors.ListTaskVectorManifest(ctx, group.userID, group.taskID, group.embeddingModel)
 		if err != nil {
-			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("load Milvus vector manifest for task %d model %q: %w", group.taskID, group.embeddingModel, err)
+			return rageval.Dataset{}, rageval.EvidenceSnapshot{}, fmt.Errorf("load vector manifest for task %d model %q: %w", group.taskID, group.embeddingModel, err)
 		}
 		for _, vector := range vectors {
 			snapshot.Vectors = append(snapshot.Vectors, rageval.VectorSnapshotEntry{

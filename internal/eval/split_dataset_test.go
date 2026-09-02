@@ -187,7 +187,7 @@ func sealedTestRunMetadata() RunMetadata {
 		VectorArtifactSHA256: strings.Repeat("5", 64), ConfigSHA256: strings.Repeat("6", 64),
 		Split: SplitTest, Environment: "test", ExperimentID: "exp-final", VariantID: "candidate",
 		Models: ModelMetadata{Embedding: ModelRef{Provider: "fixture", Name: "embedding"}},
-		Milvus: MilvusMetadata{Collection: "eval", IndexType: "HNSW", MetricType: "COSINE"},
+		VectorStore: VectorStoreMetadata{Table: "eval", IndexType: "HNSW", MetricType: "COSINE"},
 		Prompt: PromptMetadata{Name: "answer", Version: "v1", SHA256: strings.Repeat("7", 64)},
 	}
 }

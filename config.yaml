@@ -12,14 +12,6 @@ database:
   dbname: vidlens
   sslmode: disable
 
-legacy_mysql:
-  host: 127.0.0.1
-  port: 3307
-  username: root
-  password: root
-  dbname: vidlens
-  charset: utf8mb4
-
 redis:
   host: 127.0.0.1
   port: 6379
@@ -50,7 +42,7 @@ mq:
 ai:
   # New deployments use capability-specific OpenAI-compatible endpoints.
   # The shared fields are fallbacks for a single-relay setup.
-  provider: "${VIDLENS_AI_PROVIDER:-openai_compatible}"  # openai_compatible / siliconflow / mimo(legacy)
+  provider: "${VIDLENS_AI_PROVIDER:-openai_compatible}"  # openai_compatible / siliconflow(label alias)
   base_url: "${VIDLENS_AI_BASE_URL}"
   api_key: "${VIDLENS_AI_API_KEY}"
 
@@ -79,13 +71,6 @@ ai:
   vision_base_url: "${VIDLENS_VISION_BASE_URL}"
   vision_api_key: "${VIDLENS_VISION_API_KEY}"
   vision_model: "${VIDLENS_VISION_MODEL}"
-
-  # Legacy vendor-specific fields. Keep them only while migrating old setups.
-  mimo_api_key: "${MIMO_API_KEY}"
-  mimo_base_url: "${MIMO_BASE_URL:-https://token-plan-cn.xiaomimimo.com/v1}"
-
-  siliconflow_api_key: "${SILICONFLOW_API_KEY}"
-  siliconflow_base_url: "${SILICONFLOW_BASE_URL:-https://api.siliconflow.com/v1}"
 
 tools:
   ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
@@ -150,11 +135,3 @@ memory:
   max_chars: 2000
   max_tokens: 500
   queue_size: 128
-
-milvus:
-  collection: "vidlens_video_chunks"
-  address: "127.0.0.1:19530"
-  username: ""
-  password: ""
-  token: ""
-  database: "default"
