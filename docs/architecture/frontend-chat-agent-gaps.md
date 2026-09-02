@@ -1,6 +1,6 @@
 # 聊天 UI 已落地能力 × 后端现状与待补齐接口
 
-> **状态**：2026-08-30
+> **状态**：2026-09-02
 > **前端**：`frontend/app/chat/`、`frontend/app/kb/[kbId]/`、`frontend/app/qa/`
 > **关联**：详细 SSE 事件设计见 [agent-streaming-contract.md](./agent-streaming-contract.md)
 
@@ -87,23 +87,17 @@ run_start
 
 ## 3. 后端后续缺口
 
-Agent SSE 的第一条纵向切片已经完成。当前右侧流水线的真实事件范围、事件顺序和限制以 [Agent 流式契约](./agent-streaming-contract.md) 为准；以下是后续独立能力，不应和已完成的 SSE 接入混在一起。
+Agent SSE 的第一条纵向切片已经完成，Run/Step/ToolCall/Claim/Evidence 权威持久化也已落地（见 [Agent 总体设计与实施路线](./agent-evolution.md) 与[数据模型](./data-model.md)）。当前右侧流水线的真实事件范围、事件顺序和限制以 [Agent 流式契约](./agent-streaming-contract.md) 为准；以下是后续独立能力，不应和已完成的 SSE 接入混在一起。
 
-### 3.1 Run/Step 可恢复持久化
-
-当前 Agent trace 会以 version 1 envelope 写入 `chat_messages.retrieval_snapshot`，足够支持历史消息回放，但不能支持中断后恢复、重试、步骤级查询或独立运行审计。
-
-目标模型见 [Agent 总体设计与实施路线](./agent-evolution.md)：独立的 `agent_runs`、`agent_steps`、`agent_tool_calls`、`agent_claims`、`agent_evidence` 和关联表；PostgreSQL 是权威来源，快照只做兼容视图。
-
-### 3.2 知识库范围 Agent
+### 3.1 知识库范围 Agent
 
 需要将检索工具和证据对象从单 `task_id` 扩展为 session scope-aware，并保留 `task_id`、`video_title`、`evidence_id` 等跨视频定位信息。还需要单独验收权限、空索引、部分视频失败、跨视频引用和成本上限。
 
-### 3.3 研究模式流式化
+### 3.2 研究模式流式化
 
 `mode=research` 目前仍是非流式的有界 Planner/Tool/Observe 实验路径；它与当前模板 Agent SSE 不绑定在同一个改动中。后续需要为 planner、工具执行、观察和停止原因设计安全的流式摘要，但不能输出原始思维链。
 
-### 3.4 RAG 流式中间事件（可选）
+### 3.3 RAG 流式中间事件（可选）
 
 在现有 `messages/stream` 上**可选**增加事件（不破坏旧客户端）：
 
@@ -115,7 +109,7 @@ Agent SSE 的第一条纵向切片已经完成。当前右侧流水线的真实�
 
 前端收到后即可替换当前的「先发问题 → 猜检索 running」推断。
 
-### 3.5 问答入口聚合 API（性能优化，非必须）
+### 3.4 问答入口聚合 API（性能优化，非必须）
 
 当前 `/qa` 调用 `listTasks` + `listKBs` 两次请求。若视频量大，可增加：
 
@@ -161,7 +155,7 @@ GET /api/v1/qa/hub
 | 区域 | 路径 |
 |------|------|
 | 聊天布局与状态 | `frontend/components/chat/ChatShell.tsx`、`useConversationSession.ts` |
-| 右侧流水线 | `frontend/components/chat/AgentTracePanel.tsx` |
+| 右侧流水线 | `frontend/components/chat/AgentLensOverlay.tsx`、`frontend/components/chat/chatUtils.ts` |
 | 轨迹类型 / 推断 | `frontend/components/chat/traceTypes.ts` |
 | 流式消费 | `frontend/lib/api.ts`、`frontend/lib/streamDecoder.ts` |
 | 历史兼容 | `frontend/components/chat/snapshotTraceAdapter.ts` |

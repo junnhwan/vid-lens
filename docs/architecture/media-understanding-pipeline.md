@@ -2,11 +2,11 @@
 
 本文描述 VidLens 从“ASR 文本问答”演进为“带可信时间轴的多模态视频理解”的当前基线、目标模块、实施顺序和验收口径。它只讨论工程实现，不把模型输出本身当作事实。
 
-状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。2026-08-31 又完成了后端多模态切片：视觉分支不再等待 ASR 成功，RAG 可从 visual-only 输入构建，OCR 与 Vision 描述保留独立稳定时间映射，标准检索和 research Agent 能消费带模态的视觉证据。查询时重新调用在线 VLM 读取原始像素仍不在当前范围；`inspect_visual_window` 只检查已持久化的 OCR/Vision observation。为保留改造决策上下文，下方前三节记录更早的历史管线；`38cd22f` 的编码前事实以“来源映射与时间感知 RAG 实施规格”为准。
+状态：“来源映射与时间感知 RAG”已按本文契约实施，实施基线为 `38cd22f`（2026-08-30）。2026-08-31 又完成了后端多模态切片：视觉分支不再等待 ASR 成功，RAG 可从 visual-only 输入构建，OCR 与 Vision 描述保留独立稳定时间映射，标准检索和 research Agent 能消费带模态的视觉证据。查询时重新调用在线 VLM 读取原始像素仍不在当前范围；`inspect_visual_window` 只检查已持久化的 OCR/Vision observation。本文其余部分是这些已落地契约的设计依据与验收口径，保留作决策上下文。
 
-## 历史改造结论
+## 历史改造结论（改造前的起点状态）
 
-项目已经具备多模态雏形：场景帧与定时帧抽取、Vision/OCR、`video_visual_frames`、视觉文本入 RAG，以及 evidence funnel 中的视觉证据确认。当时主要问题不是“缺少一个 Vision 接口”，而是 ASR、视觉和 RAG 尚未汇合成同一条可信时间轴：
+项目在改造前已经具备多模态雏形：场景帧与定时帧抽取、Vision/OCR、`video_visual_frames`、视觉文本入 RAG，以及 evidence funnel 中的视觉证据确认。当时主要问题不是“缺少一个 Vision 接口”，而是 ASR、视觉和 RAG 尚未汇合成同一条可信时间轴：
 
 - ASR 以固定 300 秒、无重叠的音频文件串行调用，结果用空行直接拼接；上游硬切会永久破坏句子边界。
 - RAG 的递归句子切片器能保护已有标点边界，却无法恢复 ASR 已截断的语义；ASR 分片间的空行还会被当作强边界。
@@ -16,9 +16,9 @@
 
 改造的首要目标不是增加更多 Agent 工具，而是建立一个深模块：调用方只提交视频任务，模块产出带时间范围、模态和 provenance 的证据块。ASR 边界修复、视觉采样、语义切片和索引投影都隐藏在该模块内部，RAG、Agent、引用和前端共同消费同一接口。
 
-## 历史实现基线
+## 历史实现基线（改造前）
 
-### 视频处理
+### 视频处理（改造前主路径）
 
 当前主路径为：
 
@@ -52,9 +52,9 @@ VideoTask
 - 视觉处理保持 fail-open：视觉失败不能让已有 ASR 问答完全不可用。
 - 默认标准 RAG、显式 research Agent 和 evidence funnel 的产品边界不合并。
 
-## 根因分析
+## 根因分析（改造前的问题定性）
 
-### ASR 断句
+### ASR 断句（改造前）
 
 固定时长切音频本身不是错误；错误在于切片没有上下文重叠，且拼接器不知道相邻片段的时间范围和重叠内容。只在下游按标点重新切文本无法恢复丢失的语音上下文。
 
@@ -66,7 +66,7 @@ VideoTask
 4. 精确对齐失败时不让 LLM 静默改写原文；保留两个原始分片及低置信度边界，使用安全连接策略，并记录指标供后续评估。
 5. provider 若能返回 utterance/word timestamps，则由 provider adapter 提供精确时间；纯文本 provider 只能给出 coarse window，不能按字符比例伪造精确时间。
 
-### ASR 延迟
+### ASR 延迟（改造前的关键路径问题）
 
 ASR 关键路径已先建立分阶段观测，再把逐片 provider 调用改为固定 worker pool。视觉处理与第二次下载仍是后续独立优化项。
 
@@ -81,7 +81,7 @@ ASR 关键路径已先建立分阶段观测，再把逐片 provider 调用改为
 
 因此当前并发优化不会改变 overlap window、原始分片内容或 stitcher 算法；相同分片结果集合必须得到与串行实现相同的 transcript。
 
-### RAG 语义不连续
+### RAG 语义不连续（改造前的信息损失点）
 
 当前句子优先切片已经比固定字符切片更安全，但仍存在三个信息损失点：
 
@@ -128,9 +128,9 @@ type TimelineBuilder interface {
 
 模块内部存在真实 seam：
 
-- `ASR adapter`：生产环境的 OpenAI-compatible/MiMo provider 与测试 scripted adapter。
+- `ASR adapter`：生产环境的 OpenAI-compatible provider 与测试 scripted adapter。
 - `Vision adapter`：生产 Vision provider 与本地 OCR/测试 adapter。
-- `Evidence projection adapter`：PostgreSQL 源行与 pgvector/Milvus 投影。
+- `Evidence projection adapter`：PostgreSQL 源行与 pgvector 投影。
 
 FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内实现细节，不对 handler、Agent 或前端暴露。
 
@@ -142,12 +142,12 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 
 - `video_transcriptions.content` 是问答与索引读取的拼接文本；`video_transcription_chunks.content` 保存各 ASR window 的原始 observation。新 observation 已有 `segment_key`、window/core 毫秒范围，旧行可能只有数据库 ID、秒级范围或完全没有时间。
 - `internal/service/chunk_splitter.go` 已按强标点、从句标点、空白、字符硬切递归选择边界，并只复用完整语义单元；但 `TextChunk` 只有 `Index/Content`，上游来源在切片时全部丢失，`chunk_size` 与 `token_count` 实际仍按 rune 数处理。
-- `video_chunks` 只有内容、序号、embedding 与 vector identity，没有 modality、时间范围、映射状态或 source refs。pgvector/Milvus 投影也只返回检索元数据和内容。
+- `video_chunks` 只有内容、序号、embedding 与 vector identity，没有 modality、时间范围、映射状态或 source refs。pgvector 投影也只返回检索元数据和内容。
 - 视觉帧拥有真实 `time_ms`、数据库 ID、caption method 和对象 key，但 `FormatOCRChunksForIndex` 只把这些信息格式化进文本标签，没有保存结构化来源。
 - 向量检索结果、BM25 结果、公开 `Citation` 均不携带模态、时间或 source refs；`Source` 仅表示 vector/keyword/hybrid 召回通道，不应继续兼任 modality。
 - Evidence Ledger 会尝试把 RAG `chunk_index`、`chunk_id` 或 evidence ID 解析回一个 RAG chunk index，再读取同序号 `video_transcription_chunks`。这把两个独立序号空间错误地当成同一身份，chunker 改变后会产生错误时间和错误文档定位。
 - `video_rag_indexes` 已保存 chunker strategy/version、参数、manifest hash 和 build version，但在线去重只按 `file_md5 + embedding_model + indexed` 判断，未校验当前 source-mapping/build 版本，旧索引可能错误地阻止重建。
-- PostgreSQL schema 由 GORM `AutoMigrate` 扩展；MySQL 只用于离线迁移。新增字段必须允许旧行保留并可读取，不能要求部署时同步全量重建。
+- PostgreSQL schema 由 GORM `AutoMigrate` 扩展。新增字段必须允许旧行保留并可读取，不能要求部署时同步全量重建。
 
 ### 本次目标数据模型
 
@@ -162,7 +162,7 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 
 `video_rag_indexes` 的 build/source-mapping version 与 chunk manifest 一并升级。manifest 必须覆盖 modality、时间状态、映射状态、source refs 和 chunker provenance；这些字段任一变化都应改变 manifest。在线内容去重只有在 build version、chunker version 和 source-mapping version 与当前实现一致时才可跳过索引。
 
-向量库继续只做可重建投影。检索命中后以 `chunk_id/evidence_id + user/task/model scope` 从 PostgreSQL 回填 provenance；不能信任旧向量 payload 伪装成来源事实。这样 pgvector 和兼容 Milvus 不需要在同一次部署中同步迁移 provenance schema。
+向量库继续只做可重建投影。检索命中后以 `chunk_id/evidence_id + user/task/model scope` 从 PostgreSQL 回填 provenance；不能信任旧向量 payload 伪装成来源事实。这样 pgvector 不需要在同一次部署中同步迁移 provenance schema。
 
 ### 切片与来源映射算法
 
@@ -271,7 +271,7 @@ FFmpeg 音频窗口生成、transcript stitcher 和语义 packing 是进程内�
 
 本次实现只修改 Go 后端和架构文档，不改变 `frontend/`。外部调用方继续提交视频任务；媒体消费者内部把 ASR 与视觉理解作为两个可独立成功、失败和降级的分支。视觉分支在视频资产可用后立即启动，不再位于“ASR 成功并保存 transcript”之后。无音轨是可识别的媒体能力缺失，不等同于 provider 故障：它允许任务以 `visual-only` 证据继续；ASR 网络、配额和 provider 错误仍执行既有 provider 级有界重试并保存分片错误，重试耗尽但已有视觉证据时不再阻塞 visual-only RAG。
 
-RAG build 接受三种合法输入：`transcript-only`、`visual-only` 和 `mixed`。只有两种模态都没有可索引 observation 时才失败。视觉产物比 transcript 晚到时，使用同一个 task/model 的 replace projection 重建关系 chunk 与向量投影；PostgreSQL 仍是事实源，pgvector/Milvus 仍只是可重建投影。
+RAG build 接受三种合法输入：`transcript-only`、`visual-only` 和 `mixed`。只有两种模态都没有可索引 observation 时才失败。视觉产物比 transcript 晚到时，使用同一个 task/model 的 replace projection 重建关系 chunk 与向量投影；PostgreSQL 仍是事实源，pgvector 仍只是可重建投影。
 
 关键帧 observation 使用确定性的 frame key、采样策略版本和半开时间范围 `[start_ms,end_ms)`。OCR 原文与 Vision caption 分开持久化、分开生成 `visual_ocr` / `visual_caption` chunk，但共享同一个稳定 frame source ref；任何一方失败都不能覆盖另一方成功结果。旧行继续从 `time_ms` 和现有字段兼容读取，不能补造不存在的精确区间。
 

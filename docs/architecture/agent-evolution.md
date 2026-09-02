@@ -62,49 +62,15 @@
 
 ## 外部参考核验
 
-本节把“源码事实”和“对 VidLens 的推断”分开。所有本地仓库在核验时工作树干净；commit 是本次核验的可复现基线。
+本节把“源码事实”和“对 VidLens 的推断”分开。四个外部仓库（AGI-saber-go、Microsoft/DeepVideoDiscovery、mupozg823/timecode-agent、DOVideo-AI）的来源身份、commit 基线、逐文件实现与“不直接照搬”边界统一记录在 [Agent 与视频证据架构调研](./agent-evidence.md)，本文不重复调研细节，只保留对总体设计起作用的结论：
 
-### AGI-saber / AGI-saber-go：长期记忆基础设施
+| 来源 | 对本设计的作用 |
+|---|---|
+| AGI-saber-go 分层记忆 + 异步写入 | `agent-memory.md` 最小记忆切片的分层接口、有限召回与治理边界来源 |
+| DeepVideoDiscovery 多粒度检索 | 证据漏斗“全局→clip→时间窗→帧”的粒度递进原型 |
+| timecode-agent Claim 状态机 | Claim/Evidence 追加式账本与 `uncertain/verified` 状态语义来源 |
+| DOVideo-AI 上下文模型 + Critic 闭环 | 受控重规划、Checkpoint 边界和预算输入的设计参照 |
 
-来源身份需要特别说明：用户指定的公开地址 [AGI-saber/AGI-saber-go](https://github.com/AGI-saber/AGI-saber-go) 在核验时不可访问；本地目录 `D:\dev\agent-learn\other\AGI-saber-go` 的 `origin` 实际是 [wujingle488-crypto/AGI-saber](https://github.com/wujingle488-crypto/AGI-saber)，checkout `f85a1da776de76dafbf9302d147a18ad0ea0bdaf`，提交时间 2026-06-28。以下结论严格针对这个本地 checkout，不把仓库身份差异隐去。
-
-| 真正解决的问题 | 核心实现 | 对 VidLens 的借鉴 | 不直接照搬 |
-|---|---|---|---|
-| 让多轮 Agent 在会话外保留可召回的用户上下文，并将短期、长期、偏好和可选图关系分层 | `internal/memory/memory.py` 的 `ShortTerm` 滑动窗口、`LongTerm` 重要性/余弦相似度召回、去重与衰减、`Preference`；`memory_writer.py` 异步串行写入并从回复抽取记忆；`restore.py` 负责尽力恢复；`graph_memory.py` 提供可选 Neo4j 一跳扩展 | 分层内存接口；将写入与请求主链路解耦；有限 top-k、阈值、TTL/衰减、去重、可删除；在运行开始形成 memory snapshot | 初期不引入 Neo4j、图规划、通用工具沙箱、任意异步 Agent runtime；它的 `Item` 元数据较少，数据库同步部分存在 best-effort/占位实现，不能当成完整生产记忆规范 |
-
-该项目还提供 `internal/agent/planner.py` 和 `graph_runtime.py`：有工具计划、依赖/竞态组、并行、重试和快照恢复。这些是 Run/Step 恢复的启发，但其中的工具面和通用编排范围明显大于 VidLens 当前需要。这里“初期只采用分层记忆和治理，不采用图运行时”是基于 VidLens 单视频、读路径和 PostgreSQL 约束的设计推断。
-
-### Microsoft/DeepVideoDiscovery：长视频的多粒度证据检索
-
-来源：[官方仓库](https://github.com/microsoft/DeepVideoDiscovery)、[论文](https://arxiv.org/abs/2505.18079)。本地 checkout 为 `64414b2f35d26809a39740a5a319889f46e29b94`，提交时间 2025-11-03。
-
-| 真正解决的问题 | 核心实现 | 对 VidLens 的借鉴 | 不直接照搬 |
-|---|---|---|---|
-| 在超长视频中先粗定位、再按需要检查局部内容，降低一次性把所有帧交给模型的成本 | `dvd/build_database.py` 建立带时间、caption、subject registry、fps 的向量数据库；`global_browse_tool` 以 clip 描述做全局浏览；`clip_search_tool` 语义召回 clip 并按时间排序；`frame_inspect_tool` 对指定时间段均匀采样帧并调用 VLM | 将“全局→clip/摘要→时间窗口→帧/视觉”的粒度递进固化为有限证据漏斗；视觉检查必须由已有时间范围触发；保留 lite/transcript-first 降级路径 | 它是动态 function-call loop，依赖 OpenAI 工具调用和内存消息列表，没有 VidLens 所需的 Claim/Evidence 账本、持久 Run/Step 或业务权限；不能把其 THINK→ACT→OBSERVE 文案作为输出 CoT，也不能把任意多轮 loop 原样放入线上 |
-
-索引构建中的 `frame_caption.py` 会将多帧和 transcript 汇总为 clip caption，并合并 subject registry；这是离线视觉索引，不是在线 Agent 证据结论。`dvd/dvd_core.py` 的 Agent 工具集合和 `max_iterations` 说明它提供的是“受迭代上限约束的研究式工具循环”，不是无限自主能力。这里把它映射为“多粒度检索工具设计”是事实到 VidLens 的架构推断。
-
-### mupozg823/timecode-agent：时间码 Claim 与追加式证据账本
-
-来源：[官方仓库](https://github.com/mupozg823/timecode-agent)。本地 checkout 为 `02f7c5a9ce1c09b4ba49177d2a4dc8e9ee1bbc03`，版本提交时间 2026-08-07。
-
-| 真正解决的问题 | 核心实现 | 对 VidLens 的借鉴 | 不直接照搬 |
-|---|---|---|---|
-| 让“视频中发生了什么”的判断能定位到时间范围，并可在后续观察中修订 | `src/video_agent/checkpoint_schema.py` 定义 `hypothesized → verified/corrected` 的有向状态约束、有限时间 span、confidence 和 typed observation；`checkpoint_store.py` 以 JSONL 锁定追加并投影 latest；`transcript_evidence.py` 用稳定 segment identity 与时间重叠判断支持；`verification.py` 审计 transcript/visual provenance；`ask_types.py` 将 partial/unobserved 与“没有证据证明为零”分开 | 在 VidLens 建立 Claim、Evidence、关系和时间重叠校验；让更正追加而不是覆盖历史；把“无证据”作为明确不确定性；将 transcript/OCR/视觉 provenance 作为不同模态记录 | 它的 ledger 是本地文件、CLI 和外部 coding-agent harness；状态枚举原生只有 `hypothesized`、`verified`、`corrected`，`unsupported` 主要出现在审计/问答层；不能直接替换 VidLens PostgreSQL、权限、会话和 SSE 模型 |
-
-“Claim 状态机在 VidLens 采用更细的产品状态”属于设计推断：可保留参考项目的 `hypothesized`、`verified`、`corrected` 语义，同时为 VidLens 的报告审计增加 `unsupported`/`contradicted` 投影，但必须定义合法迁移和来源，而不能声称这些状态都已在 timecode-agent 中实现。
-
-### DOVideo-AI：视频分析、去重和工具化闭环
-
-来源：[官方仓库](https://github.com/Xiaoc7r/DOVideo-AI)。本地 checkout 为 `caed156914e4cb4fc76e729f8fd79004674a1c75`，提交时间 2026-07-27。
-
-| 真正解决的问题 | 核心实现 | 对 VidLens 的借鉴 | 不直接照搬 |
-|---|---|---|---|
-| 把长视频处理成可检索、可追踪、可恢复的结构化分析任务 | `VideoContext` 统一 ASR/OCR/frame/timestamp；`VideoEvidenceRetrievalService` 将 embedding、关键词和 OCR 相关性融合；`LongVideoContextService` 按 5 分钟 chunk 做相关选择并限制上下文字符数 | 统一时间轴上下文；检索分数中保留模态来源；对上下文大小设置硬上限；视觉与语音分开降级 | VidLens 已有 PostgreSQL/pgvector/RAG 投影，不能复制其 MySQL+Redis+Qdrant 全套；其 5 分钟和 24,000 字符是实现参数，不是通用标准 |
-| 让 Agent 产物可重试、可恢复、可评估 | `AgentLoopService` 的 Planner→Executor→Critic→定向补证据，`AgentState` 保存 goal/plan/result/critique/round；`AgentCheckpointService` 持久化 plan、execution、critic、result；预算有轮次、时长、估算 token 和成本；`AgentTelemetry` 与 `TaskEventService` 发送进度 | 受控重规划；Critic 只提出结构化反馈和 required timestamps；每个关键边界保存 Checkpoint；把 cost/latency/token/round 作为策略输入；用事件协议连接 UI | 它的 Checkpoint 是目标键下的可变 payload，不是 Claim/Evidence 追加账本；它的 `EvidenceVerificationService` 仍以 ASR/OCR 文本匹配为主，不能代替来源级视觉核验；其业务异步链和多模式体系不应先引入 VidLens |
-| 处理成本和重复视频 | 分片上传、Redis 恢复、MinIO、内容指纹+目标锁、用户/全局 token bucket、有限重试；相邻帧 perceptual hash 去重，scene-change keyframe 与 30 秒 fallback | 借鉴内容指纹、相邻帧去重、有限重试和用户/全局预算的思想；在未来视觉工具中记录采样策略和 dedup 结果 | 基础设施已经是 VidLens 明确边界外的扩展；视频内容 hash 不能自动证明两个视频语义等价，perceptual hash 也不能用于 Claim 支持 |
-
-因此，DOVideo-AI 最值得借鉴的是“上下文模型 + 受控 Critic 闭环 + 可恢复边界”，不是其具体中间件组合。
 
 ## VidLens 目标架构
 
