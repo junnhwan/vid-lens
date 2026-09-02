@@ -15,7 +15,6 @@
 - [Agent 与视频证据架构调研](architecture/agent-evidence.md)
 - [可靠性与幂等](architecture/reliability.md)
 - [架构图](images/vidlens-architecture.svg)
-- [数据库关系图](architecture/database-schema.svg)
 - [评测资料](eval/README.md)
 - [压测与故障演练](operations/stress-testing.md)
 

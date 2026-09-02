@@ -2,7 +2,7 @@
 
 ## 在线持久化事实
 
-PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 执行状态、Agent 长期记忆、Agent 证据账本以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义，核心关系图见 [database-schema.svg](database-schema.svg)。
+PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 执行状态、Agent 长期记忆、Agent 证据账本以及 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义。
 
 Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张权威表组成。Run 在创建时冻结 owner、session、video scope、goal、脱敏 AI profile、工具白名单、policy 和 budget；Step 以 `(run_id, step_id, attempt)` 唯一，使用 lease token、过期时间和 version CAS 控制接管；ToolCall 同时覆盖普通工具、Planner LLM 和验证动作，保存经过验证的参数 digest、安全输入摘要、调用 digest、输出引用、结果 digest、证据引用、最终引用投影、分级命中/覆盖指标、耗时、token/cost 及 usage 来源和错误终态。Planner 的 token 只能从 provider 实际 usage 或明确标记为 estimated 的估算值写入；没有价格表时 cost 保持未知的零值而不伪造费用。已完成 step 的安全结果 checkpoint 用于 research loop 和固定证据漏斗重建，不包含 provider prompt、Planner 草稿或 Chain-of-Thought。
 
