@@ -4,7 +4,7 @@
 
 核验时间：2026-08-29（Asia/Shanghai）
 
-本文根据历史会话 `codex://threads/01a00d09-b46e-7ab1-997a-bf56cec51604`、VidLens 当前主分支源码，以及 `D:\dev\agent-learn\other` 下四个本地 checkout 重新整理。历史会话可以读取；它给出的核心判断是：VidLens 当时是“模板驱动的工具型视频 RAG”，下一步应演进为“可验证、受控、可恢复的 Video Research Agent”。本文保留这个方向，但以当前代码重新核验了“已经存在”和“仍然只是设计”的边界。
+本文基于 VidLens 当前主分支源码和已确认的外部项目资料整理，重点区分当前已实现能力与后续设计方向。本文保留“从模板驱动的工具型视频 RAG 演进为可验证、受控、可恢复的 Video Research Agent”这一方向，并以当前代码重新核验“已经存在”和“仍然只是设计”的边界。
 
 ## 设计结论
 
@@ -248,7 +248,4 @@ Run/Step 当前采用状态行加版本号：Run 终态单调，Step attempt 保
 
 ### 外部项目
 
-- AGI-saber：本地 `D:\dev\agent-learn\other\AGI-saber-go`，remote 与用户给出的项目名不一致；重点文件 `internal/memory/memory.py`、`graph_memory.py`、`memory_writer.py`、`restore.py`、`planner.py`、`graph_runtime.py`、`config/config.py`。
-- DeepVideoDiscovery：本地 `D:\dev\agent-learn\other\DeepVideoDiscovery`；重点文件 `dvd/dvd_core.py`、`dvd/build_database.py`、`dvd/frame_caption.py`、`dvd/video_utils.py`、`README.md`。
-- timecode-agent：本地 `D:\dev\agent-learn\other\timecode-agent`；重点文件 `src/video_agent/checkpoint_schema.py`、`checkpoint_store.py`、`checkpoints.py`、`transcript_evidence.py`、`verification.py`、`ask_types.py`、`docs/ARCHITECTURE.md`。
-- DOVideo-AI：本地 `D:\dev\agent-learn\other\DOVideo-AI`；重点文件 `server/src/main/java/com/example/server/service/AgentLoopService.java`、`AgentCheckpointService.java`、`EvidenceVerificationService.java`、`LongVideoContextService.java`、`VideoEvidenceRetrievalService.java`、`server/src/main/java/com/example/server/dto/AgentState.java`、`VideoContext.java`、`schema.sql`。
+外部项目的公开仓库、固定 commit 和实现摘要统一记录在[Agent 与视频证据架构调研](agent-evidence.md)中；本文不记录本地 checkout 路径。

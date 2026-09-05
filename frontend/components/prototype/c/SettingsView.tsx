@@ -129,7 +129,7 @@ function ProfileFormMock({ profile, tab }: { profile: AIProfile; tab: Tab }) {
       </div>
 
       <Field label="Profile 名称" value={profile.name} disabled />
-      <Field label="Provider" value={g.provider} placeholder="openai / mimo / siliconflow" />
+      <Field label="Provider" value={g.provider} placeholder="openai_compatible / siliconflow" />
       <Field label={tab === 'embedding' ? 'Endpoint' : 'Base URL'} value={g.base} placeholder="https://api.example.com/v1" />
       <div>
         <label className="block text-[12px] text-ink-4 mb-1.5">API Key</label>

@@ -299,7 +299,7 @@ func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFa
 		t.Fatalf("seed old chunks: %v", err)
 	}
 
-	store := &fakeVectorStore{deleteErr: fmt.Errorf("milvus delete failed")}
+	store := &fakeVectorStore{deleteErr: fmt.Errorf("pgvector delete failed")}
 	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 12, EmbeddingDim: 3})
 	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
@@ -422,7 +422,7 @@ func TestRAGIndexServiceRecordsFailedStatusWhenVectorStoreFails(t *testing.T) {
 		t.Fatalf("upsert transcription: %v", err)
 	}
 
-	svc := NewRAGIndexService(repos, &fakeVectorStore{err: fmt.Errorf("milvus service unavailable")}, RAGIndexConfig{ChunkSize: 10, EmbeddingDim: 3})
+	svc := NewRAGIndexService(repos, &fakeVectorStore{err: fmt.Errorf("pgvector service unavailable")}, RAGIndexConfig{ChunkSize: 10, EmbeddingDim: 3})
 	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
 		EmbeddingDim:   3,

@@ -127,9 +127,9 @@ memory item 的 created/conflicted/withdrawn/deleted 事件仍由 `agent_memory_
 
 ## 参考启发与适用边界
 
-[AGI-saber 本地 checkout](https://github.com/wujingle488-crypto/AGI-saber) 的 `internal/memory/memory.py` 将 ShortTerm、LongTerm、Preference 分层，长期项有 embedding、importance、相似度召回、去重和衰减；`memory_writer.py` 通过异步单 worker 将抽取和写入解耦；`restore.py` 在运行前恢复上下文；`graph_memory.py` 可选 Neo4j 图扩展。
+[AGI-saber 的公开代码快照](https://github.com/wujingle488-crypto/AGI-saber) 的 `internal/memory/memory.py` 将 ShortTerm、LongTerm、Preference 分层，长期项有 embedding、importance、相似度召回、去重和衰减；`memory_writer.py` 通过异步单 worker 将抽取和写入解耦；`restore.py` 在运行前恢复上下文；`graph_memory.py` 可选 Neo4j 图扩展。
 
-这是“接口分层、异步写入、有限召回和治理”的有用参考。它的本地提交为 `f85a1da776de76dafbf9302d147a18ad0ea0bdaf`；用户指定的 [AGI-saber/AGI-saber-go](https://github.com/AGI-saber/AGI-saber-go) 地址在核验时不可访问，目录 remote 实际指向上述仓库。以下是基于本地源码的判断。
+这是“接口分层、异步写入、有限召回和治理”的有用参考。代码快照为 `f85a1da776de76dafbf9302d147a18ad0ea0bdaf`；用户指定的 [AGI-saber/AGI-saber-go](https://github.com/AGI-saber/AGI-saber-go) 地址在核验时不可访问，公开仓库身份仍需上游恢复后重新确认。以下判断仅针对该代码快照。
 
 不照搬其通用图运行时、Neo4j、工具沙箱或 planner。其 `Item` 模型没有足够的 VidLens source/scope/consent 语义，部分持久化同步是 best-effort/占位；这些实现只能作启发，不能作为生产契约。
 

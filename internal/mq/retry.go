@@ -105,7 +105,6 @@ func isRetryableError(err error) bool {
 		"http 503",
 		"http 504",
 		"minio",
-		"milvus",
 	}
 	for _, marker := range retryable {
 		if strings.Contains(text, marker) {

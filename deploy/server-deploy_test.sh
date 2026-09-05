@@ -129,7 +129,7 @@ test_missing_runtime_marker_blocks_before_mutation() {
 
 test_runtime_marker_mismatch_blocks_before_mutation() {
   new_case marker-mismatch
-  printf 'mysql-milvus-v1\n' > "$deploy_dir/.runtime-generation"
+  printf 'unknown-runtime-v0\n' > "$deploy_dir/.runtime-generation"
 
   if run_deploy >"$case_root/stdout" 2>"$case_root/stderr"; then
     fail 'deployment unexpectedly accepted a mismatched marker'

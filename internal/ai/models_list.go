@@ -26,9 +26,9 @@ func ListOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, er
 	return ListOpenAIModelsWithProvider(ctx, baseURL, apiKey, "openai_compatible")
 }
 
-// ListOpenAIModelsWithProvider is the compatibility-aware variant used when
-// an existing profile still carries a legacy provider authentication mode.
-// New profiles should use the default Bearer-auth OpenAI-compatible path.
+// ListOpenAIModelsWithProvider is the provider-labeled variant used by profile
+// model discovery. The label is retained for observability; requests use the
+// standard Bearer-auth OpenAI-compatible path.
 func ListOpenAIModelsWithProvider(ctx context.Context, baseURL, apiKey, provider string) ([]string, error) {
 	root, err := normalizeModelsBaseURL(baseURL)
 	if err != nil {

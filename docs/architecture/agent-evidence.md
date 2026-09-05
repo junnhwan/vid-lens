@@ -17,7 +17,7 @@
 
 | 项目 | 本次能确认的核心能力 | 对 VidLens 最有价值的启发 | 不能直接搬用的部分 |
 | --- | --- | --- | --- |
-| AGI-saber/AGI-saber-go | 用户给出的公开入口无法解析，但本地 checkout `wujingle488-crypto/AGI-saber` 可核验到分层记忆、异步记忆写入和可选图记忆 | 分层 memory provider、有限召回、去重/衰减、异步写入 | 不应隐藏仓库身份差异，也不应把其通用图运行时或工具沙箱直接搬入 VidLens |
+| AGI-saber/AGI-saber-go | 用户给出的公开入口无法解析；可获取的 `wujingle488-crypto/AGI-saber` 代码快照包含分层记忆、异步记忆写入和可选图记忆 | 分层 memory provider、有限召回、去重/衰减、异步写入 | 不应隐藏仓库身份差异，也不应把其通用图运行时或工具沙箱直接搬入 VidLens |
 | Microsoft/DeepVideoDiscovery | 全局摘要/主体视图 → 片段语义检索 → 原始帧检查的多粒度视频检索 | 为 VidLens 建立逐级收窄、每级留下时间范围的证据漏斗 | 论文配置、模型和 benchmark 结果不能当作当前仓库或 VidLens 的默认保证 |
 | mupozg823/timecode-agent | 以时间码为中心的 checkpoint、追加式理解/编辑账本、支持状态和证据校验 | 把 claim、支撑、修订、覆盖度和编辑引用做成一等数据 | 它是本地 Python + 外部编码 Agent harness，不是通用内置 LLM 或密码学防篡改系统 |
 | DOVideo-AI | 面向生产任务的 ASR/OCR/关键帧上下文构建、邻帧去重、混合检索、幂等与 checkpoint | 把内容哈希、目标哈希、异步任务和结构化证据约束组合起来 | Java/Spring/Redis/MySQL/MinIO/Qdrant 的重量级栈、MD5 和 substring 校验不适合原样迁移 |
@@ -34,9 +34,9 @@
 ### 实际核验结果
 
 - **[源码事实]** 上述仓库入口和组织入口在核验时返回 GitHub 404；官方搜索 API 返回 `total_count: 0`、`items: []`。因此无法进入该仓库的 README、commit、目录树、论文或具体模块。
-- **[本地源码事实]** `D:\dev\agent-learn\other\AGI-saber-go` 的 `origin` 实际为 [`wujingle488-crypto/AGI-saber`](https://github.com/wujingle488-crypto/AGI-saber)，checkout 为 `f85a1da776de76dafbf9302d147a18ad0ea0bdaf`，提交时间为 2026-06-28；它是 Python 实现，目录名和用户给出的 `AGI-saber-go` 公共地址并不一致。
-- **[本地源码事实]** 该 checkout 的 `internal/memory/memory.py` 提供 `ShortTerm` 滑动窗口、`LongTerm` 的 embedding/importance 召回、Jaccard 去重、decay/TTL 和 `Preference`；`memory_writer.py` 以异步队列和单 worker 写入，并从回复抽取偏好/事实；`graph_memory.py` 是可选 Neo4j 关系扩展；`restore.py` 恢复上下文；`planner.py`、`graph_runtime.py` 还包括工具计划、依赖/竞态组、并行、重试和快照钩子。
-- **[核验边界]** 因此可以使用本地 checkout 说明其实现，但不能把它重新标注为已确认的 `AGI-saber/AGI-saber-go` Go 官方仓库；公开身份和版本仍需上游恢复后重新确认。
+- **[代码快照事实]** 可获取的 [`wujingle488-crypto/AGI-saber`](https://github.com/wujingle488-crypto/AGI-saber) 快照为 commit `f85a1da776de76dafbf9302d147a18ad0ea0bdaf`，提交时间为 2026-06-28；它是 Python 实现，目录名和用户给出的 `AGI-saber-go` 公共地址并不一致。
+- **[代码快照事实]** 该快照的 `internal/memory/memory.py` 提供 `ShortTerm` 滑动窗口、`LongTerm` 的 embedding/importance 召回、Jaccard 去重、decay/TTL 和 `Preference`；`memory_writer.py` 以异步队列和单 worker 写入，并从回复抽取偏好/事实；`graph_memory.py` 是可选 Neo4j 关系扩展；`restore.py` 恢复上下文；`planner.py`、`graph_runtime.py` 还包括工具计划、依赖/竞态组、并行、重试和快照钩子。
+- **[核验边界]** 因此可以使用该代码快照说明其实现，但不能把它重新标注为已确认的 `AGI-saber/AGI-saber-go` Go 官方仓库；公开身份和版本仍需上游恢复后重新确认。
 
 ### 真正解决的问题与实现方式
 
@@ -167,7 +167,7 @@
 ### 来源、版本与实际核验对象
 
 - 官方仓库：[Xiaoc7r/DOVideo-AI](https://github.com/Xiaoc7r/DOVideo-AI)。
-- 本次代码快照：本地 checkout commit [`caed156914e4cb4fc76e729f8fd79004674a1c75`](https://github.com/Xiaoc7r/DOVideo-AI/tree/caed156914e4cb4fc76e729f8fd79004674a1c75)，提交时间为 2026-07-27。
+- 本次代码快照：commit [`caed156914e4cb4fc76e729f8fd79004674a1c75`](https://github.com/Xiaoc7r/DOVideo-AI/tree/caed156914e4cb4fc76e729f8fd79004674a1c75)，提交时间为 2026-07-27。
 - 核验时间：**2026-08-29（Asia/Shanghai）**。
 - 实际打开的文件：[`README.md`](https://github.com/Xiaoc7r/DOVideo-AI/blob/caed156914e4cb4fc76e729f8fd79004674a1c75/README.md)、[`VideoContextService.java`](https://github.com/Xiaoc7r/DOVideo-AI/blob/caed156914e4cb4fc76e729f8fd79004674a1c75/server/src/main/java/com/example/server/service/VideoContextService.java)、`VideoContext.java`、`VideoChunkingService.java`、`LongVideoContextService.java`、`VideoEvidenceRetrievalService.java`、`QdrantVectorStore.java`、`AgentLoopService.java`、`AgentState.java`、`AnalysisResult.java`、`EvidenceVerificationService.java`、`AgentCheckpointService.java`、`AgentCheckpointRepository.java`、`AnalysisDispatchService.java`、`AnalysisTaskKeys.java`、`MediaIngestService.java`、`MediaService.java`、`ChunkUploadService.java`、`VideoAnalysisConsumer.java`、`TaskEventService.java` 和 `server/src/main/resources/schema.sql`。
 - 本次核验范围内未找到该项目对应的论文或独立 benchmark；README 的产品说明和源码行为不替代外部效果评测。

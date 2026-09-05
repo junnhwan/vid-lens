@@ -963,7 +963,7 @@ func TestHandleRAGIndexFailureSchedulesRetryButKeepsTranscription(t *testing.T) 
 		},
 	}
 	consumer.SetRAGIndexer(func(context.Context, *model.VideoTask) error {
-		return fmt.Errorf("milvus service unavailable")
+		return fmt.Errorf("pgvector service unavailable")
 	})
 
 	if err := consumer.handleRAGIndex(context.Background(), ragIndexMessage(task.ID, "trace-rag-fail")); err != nil {

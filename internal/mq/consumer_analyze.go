@@ -143,7 +143,7 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 }
 
 // llmModelNameForTask 返回任务所属用户默认 profile 的 LLM 模型名，用于
-// AISummary.ModelName 记录（此前硬编码 "mimo-v2.5" 与真实调用模型不符）。
+// AISummary.ModelName 记录（此前硬编码固定模型名，与真实调用模型不符）。
 // legacy（无 profile resolver）路径返回空串，由调用方按需忽略。
 func (c *Consumer) llmModelNameForTask(task *model.VideoTask) string {
 	if c.profiles != nil && c.aiFactory != nil {

@@ -56,7 +56,7 @@ Tests stay in `package main`, so moving an unexported helper between these files
 
 ## Invariants to preserve
 
-1. PostgreSQL `video_chunks` is the source of truth; Milvus or pgvector is a rebuildable retrieval projection. Legacy MySQL is used only by migration tooling.
+1. PostgreSQL `video_chunks` is the source of truth; pgvector is the only supported, rebuildable retrieval projection. Historical MySQL migration tooling is retired and is not part of this command.
 2. The selected vector backend must come from `internal/vector.NewStore`; do not add another backend switch inside this command.
 3. Live evaluation must finish preflight before any paid embedding or LLM call.
 4. Strict evaluation must bind runs to the declared dataset, retrieval config, and frozen evidence hashes.

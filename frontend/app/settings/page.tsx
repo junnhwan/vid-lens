@@ -407,7 +407,7 @@ function ProfileForm({ tab, profile, onChanged, onSaved }: {
           {isEdit && <p className="text-[10px] text-ink-4 mt-1">名称创建后不可改；当前编辑 {TAB_META[tab].label} 这一组的配置，保存时提交完整 Profile。</p>}
         </FormField>
         <FormField label={fieldLabel.provider}>
-          <input value={current.provider} onChange={(e) => updateCurrent({ provider: e.target.value })} placeholder="mimo / openai / siliconflow" className="ui-input font-mono" />
+          <input value={current.provider} onChange={(e) => updateCurrent({ provider: e.target.value })} placeholder="openai_compatible / siliconflow" className="ui-input font-mono" />
         </FormField>
         <FormField label={fieldLabel.base}>
           <input value={current.base} onChange={(e) => updateCurrent({ base: e.target.value })} placeholder="https://api.example.com/v1" className="ui-input font-mono" />

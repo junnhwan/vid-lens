@@ -510,7 +510,7 @@ func TestChatServiceAskWithModeVideoAssistantFallsBackToTranscriptionWhenRetriev
 		"not-json",
 		"这是检索故障后的转写兜底回答",
 	}}
-	svc := NewChatService(repos, &failingRetriever{err: errors.New("milvus search unavailable")}, ChatConfig{TopK: 5, MinScore: 0.3})
+	svc := NewChatService(repos, &failingRetriever{err: errors.New("pgvector search unavailable")}, ChatConfig{TopK: 5, MinScore: 0.3})
 
 	result, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "检索坏了还能回答吗？", 0, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
@@ -577,7 +577,7 @@ func TestChatServiceAskWithModeStrictRAGPropagatesRetrieverFailure(t *testing.T)
 		t.Fatalf("create session: %v", err)
 	}
 
-	retrievalErr := errors.New("milvus search unavailable")
+	retrievalErr := errors.New("pgvector search unavailable")
 	svc := NewChatService(repos, &failingRetriever{err: retrievalErr}, ChatConfig{TopK: 5, MinScore: 0.3})
 	_, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "严格检索", 0, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json"}}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
