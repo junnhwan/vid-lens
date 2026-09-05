@@ -71,6 +71,12 @@ func TestBuildCitationsUsesAnchorInsteadOfExpandedContext(t *testing.T) {
 	if !strings.Contains(anchor, got.Content) {
 		t.Fatalf("citation must be verbatim anchor evidence: %q", got.Content)
 	}
+	if got.AnchorQuote != got.Content || got.DisplayContext != anchor {
+		t.Fatalf("public evidence layers = anchor_quote:%q display_context:%q", got.AnchorQuote, got.DisplayContext)
+	}
+	if got.DisplayContextTruncated {
+		t.Fatal("display context should not claim truncation when it is the source anchor")
+	}
 	if utf8.RuneCountInString(got.Content) > defaultCitationEvidenceRunes {
 		t.Fatalf("citation runes = %d, want <= %d", utf8.RuneCountInString(got.Content), defaultCitationEvidenceRunes)
 	}

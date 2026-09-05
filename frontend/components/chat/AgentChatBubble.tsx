@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Copy, RefreshCw } from 'lucide-react'
 import { CitationCards, renderAnswerWithCites } from '@/components/Citation'
+import type { CiteRef } from '@/components/Citation'
 import type { ChatMsg } from '@/components/chat/chatUtils'
 import { traceStepToWhisper } from '@/components/chat/agentNarrative'
 
@@ -49,6 +50,7 @@ export default function AgentChatBubble({
   onToggleCite,
   onCopy,
   onRetry,
+  onPlayCitation,
 }: {
   msg: ChatMsg
   idx: number
@@ -56,6 +58,7 @@ export default function AgentChatBubble({
   onToggleCite: (msgIdx: number, id: string) => void
   onCopy?: (content: string) => void
   onRetry?: (msgIdx: number) => void
+  onPlayCitation?: (citation: CiteRef) => void
 }) {
   const [showProcess, setShowProcess] = useState(true)
   const processBoxRef = useRef<HTMLDivElement>(null)
@@ -183,7 +186,7 @@ export default function AgentChatBubble({
 
       {msg.cites && msg.cites.length > 0 && (
         <div className={msg.streaming ? 'opacity-60' : 'ui-typewriter-cites-in'}>
-          <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} />
+          <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} onPlayCitation={onPlayCitation} />
         </div>
       )}
     </div>

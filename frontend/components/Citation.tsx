@@ -1,15 +1,27 @@
 'use client'
 
 import { useState } from 'react'
+import { Play } from 'lucide-react'
 import Markdown from '@/components/Markdown'
 import type { Citation } from '@/lib/types'
 // [Cx] 是上标小徽标，点击在回答正下方内联展开引用卡片（max-height 过渡 350ms），不要浮层。
 // 一条回答可能有多个 citation，共享一组卡片。
 export interface CiteRef {
   id: string          // "C1"
+  taskId?: number
   chunkIndex: number
   score: number
   content: string
+  anchorQuote?: string
+  displayContext?: string
+  modality?: string
+  startMS?: number
+  endMS?: number
+  timeRangeStatus?: string
+  contextStartMS?: number
+  contextEndMS?: number
+  displayContextTruncated?: boolean
+  sourceRefs?: Citation['source_refs']
   source?: string
   videoTitle?: string // kb 跨视频用
   finalRank?: number
@@ -27,9 +39,20 @@ export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: numb
       : Array.isArray(parsed.citations) ? parsed.citations : []
     return cs.map((c) => ({
       id: c.citation_id || `C${c.chunk_index}`,
+      taskId: c.task_id,
       chunkIndex: c.chunk_index,
       score: c.score,
       content: c.content,
+      anchorQuote: c.anchor_quote || c.content,
+      displayContext: c.display_context || c.content,
+      modality: c.modality,
+      startMS: c.start_ms,
+      endMS: c.end_ms,
+      timeRangeStatus: c.time_range_status,
+      contextStartMS: c.context_start_ms,
+      contextEndMS: c.context_end_ms,
+      displayContextTruncated: c.display_context_truncated,
+      sourceRefs: c.source_refs,
       source: c.source,
       videoTitle: c.video_title,
       finalRank: c.final_rank,
@@ -48,7 +71,11 @@ export function CiteBadge({ id, onToggle, active }: { id: string; onToggle: (id:
 }
 
 // 引用卡片群：跟在回答下方。openIds 控制哪些展开。
-export function CitationCards({ refs, openIds }: { refs: CiteRef[]; openIds: string[] }) {
+export function CitationCards({ refs, openIds, onPlayCitation }: {
+  refs: CiteRef[]
+  openIds: string[]
+  onPlayCitation?: (citation: CiteRef) => void
+}) {
   return (
     <>
       {refs.map((r) => (
@@ -59,14 +86,55 @@ export function CitationCards({ refs, openIds }: { refs: CiteRef[]; openIds: str
               <span className="text-sienna-700">{r.id}{r.videoTitle ? ` · ${r.videoTitle}` : ` · 片段 #${pad(r.chunkIndex)}`}</span>
               <span>score {r.score.toFixed(2)}</span>
               {r.source && <span className="border border-ink-0/20 px-1">{r.source}</span>}
+              {r.modality && <span className="border border-ink-0/20 px-1">{modalityLabel(r.modality)}</span>}
+              {hasReplayRange(r) && <span>{formatTimeRange(r.startMS!, r.endMS!)}</span>}
               {r.finalRank && <span className="border border-ink-0/20 px-1">rank {r.finalRank}</span>}
             </div>
-            <p className="font-sans text-[13.5px] leading-[1.75] text-ink-1 hit px-2 py-1">{r.content}</p>
+            <p className="font-sans text-[13.5px] leading-[1.75] text-ink-1 hit px-2 py-1">{r.displayContext || r.content}</p>
+            {r.anchorQuote && r.displayContext && r.anchorQuote !== r.displayContext && (
+              <p className="font-sans text-[11px] leading-relaxed text-sienna-800 bg-sienna-500/8 rounded-md mx-2 mt-1 px-2 py-1">
+                支持片段：{r.anchorQuote}
+              </p>
+            )}
+            {onPlayCitation && hasReplayRange(r) && (
+              <button
+                type="button"
+                onClick={() => onPlayCitation(r)}
+                className="mt-2 ml-2 inline-flex items-center gap-1.5 rounded-md border border-ink-0/15 px-2 py-1 text-[11px] text-ink-2 hover:bg-paper-2"
+              >
+                <Play className="w-3 h-3" fill="currentColor" />回放原视频
+              </button>
+            )}
           </div>
         </div>
       ))}
     </>
   )
+}
+
+function hasReplayRange(cite: CiteRef) {
+  return Number.isFinite(cite.startMS) && Number.isFinite(cite.endMS) && (cite.endMS || 0) > (cite.startMS || 0)
+}
+
+function formatTimeRange(startMS: number, endMS: number) {
+  return `${formatTime(startMS)}–${formatTime(endMS)}`
+}
+
+function formatTime(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function modalityLabel(modality: string) {
+  if (modality === 'transcript') return '字幕'
+  if (modality === 'visual_ocr') return '画面 OCR'
+  if (modality === 'visual_caption') return '画面描述'
+  return modality
 }
 
 function pad(n: number) { return n < 10 ? `0${n}` : `${n}` }

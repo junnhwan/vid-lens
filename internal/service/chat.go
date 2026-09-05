@@ -47,13 +47,16 @@ type RetrievalRequest struct {
 }
 
 type RetrievedChunk struct {
-	TaskID                 int64            `json:"task_id"`
-	VideoTitle             string           `json:"video_title,omitempty"`
-	EvidenceID             string           `json:"evidence_id"`
-	ChunkID                int64            `json:"chunk_id"`
-	ChunkIndex             int              `json:"chunk_index"`
-	Score                  float32          `json:"score"`
-	Content                string           `json:"content"`
+	TaskID     int64   `json:"task_id"`
+	VideoTitle string  `json:"video_title,omitempty"`
+	EvidenceID string  `json:"evidence_id"`
+	ChunkID    int64   `json:"chunk_id"`
+	ChunkIndex int     `json:"chunk_index"`
+	Score      float32 `json:"score"`
+	// Content is the generation context after optional parent/window expansion.
+	Content string `json:"content"`
+	// AnchorContent is the compact retrieval unit and source-backed text used
+	// to derive the public evidence quote.
 	AnchorContent          string           `json:"anchor_content,omitempty"`
 	Source                 string           `json:"source,omitempty"`
 	VectorRank             int              `json:"vector_rank,omitempty"`
@@ -83,29 +86,39 @@ type RetrievedChunk struct {
 // expanded LLM context and anchor internals so API/SSE/snapshots cannot expose
 // the large retrieval window by accident.
 type Citation struct {
-	TaskID              int64            `json:"task_id"`
-	VideoTitle          string           `json:"video_title,omitempty"`
-	CitationID          string           `json:"citation_id"`
-	EvidenceID          string           `json:"evidence_id"`
-	ChunkID             int64            `json:"chunk_id"`
-	ChunkIndex          int              `json:"chunk_index"`
-	Score               float32          `json:"score"`
-	Content             string           `json:"content"`
-	Source              string           `json:"source,omitempty"`
-	VectorRank          int              `json:"vector_rank,omitempty"`
-	KeywordRank         int              `json:"keyword_rank,omitempty"`
-	RRFScore            float64          `json:"rrf_score,omitempty"`
-	RerankScore         float64          `json:"rerank_score,omitempty"`
-	FinalRank           int              `json:"final_rank,omitempty"`
-	Modality            string           `json:"modality"`
-	StartMS             int64            `json:"start_ms"`
-	EndMS               int64            `json:"end_ms"`
-	TimeRangeStatus     string           `json:"time_range_status"`
-	SourceMappingStatus string           `json:"source_mapping_status"`
-	SourceRefs          []ChunkSourceRef `json:"source_refs,omitempty"`
-	ModalityRank        int              `json:"modality_rank,omitempty"`
-	ModalityScore       float64          `json:"modality_score,omitempty"`
-	ModalityIntent      string           `json:"modality_intent,omitempty"`
+	TaskID     int64   `json:"task_id"`
+	VideoTitle string  `json:"video_title,omitempty"`
+	CitationID string  `json:"citation_id"`
+	EvidenceID string  `json:"evidence_id"`
+	ChunkID    int64   `json:"chunk_id"`
+	ChunkIndex int     `json:"chunk_index"`
+	Score      float32 `json:"score"`
+	Content    string  `json:"content"`
+	// AnchorQuote is the smallest verbatim source excerpt selected for the claim.
+	// Content remains as a compatibility alias for older clients.
+	AnchorQuote string `json:"anchor_quote,omitempty"`
+	// DisplayContext is source observation context for humans, separate from the
+	// expanded retrieval context sent to the model.
+	DisplayContext          string           `json:"display_context,omitempty"`
+	Source                  string           `json:"source,omitempty"`
+	VectorRank              int              `json:"vector_rank,omitempty"`
+	KeywordRank             int              `json:"keyword_rank,omitempty"`
+	RRFScore                float64          `json:"rrf_score,omitempty"`
+	RerankScore             float64          `json:"rerank_score,omitempty"`
+	FinalRank               int              `json:"final_rank,omitempty"`
+	Modality                string           `json:"modality"`
+	StartMS                 int64            `json:"start_ms"`
+	EndMS                   int64            `json:"end_ms"`
+	TimeRangeStatus         string           `json:"time_range_status"`
+	ContextStartMS          int64            `json:"context_start_ms"`
+	ContextEndMS            int64            `json:"context_end_ms"`
+	ContextTimeStatus       string           `json:"context_time_range_status"`
+	DisplayContextTruncated bool             `json:"display_context_truncated"`
+	SourceMappingStatus     string           `json:"source_mapping_status"`
+	SourceRefs              []ChunkSourceRef `json:"source_refs,omitempty"`
+	ModalityRank            int              `json:"modality_rank,omitempty"`
+	ModalityScore           float64          `json:"modality_score,omitempty"`
+	ModalityIntent          string           `json:"modality_intent,omitempty"`
 }
 
 type RAGRetriever interface {

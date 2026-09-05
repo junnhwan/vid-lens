@@ -293,11 +293,47 @@ func (h *MediaHandler) DownloadAudio(c *gin.Context) {
 		return
 	}
 
-	url, err := h.svc.GetPresignedURL(c.Request.Context(), taskID)
+	url, err := h.svc.GetPlaybackURL(c.Request.Context(), userID, taskID)
 	if err != nil {
 		response.InternalError(c, "获取下载链接失败")
 		return
 	}
 
 	response.OK(c, gin.H{"download_url": url, "filename": task.Filename})
+}
+
+// GetTimeline returns canonical transcript/visual source atoms for playback
+// and inspection. It is intentionally separate from retrieval.
+// GET /api/v1/media/task/:id/timeline
+func (h *MediaHandler) GetTimeline(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "任务 ID 错误")
+		return
+	}
+	timeline, err := h.svc.GetVideoTimeline(c.Request.Context(), userID, taskID)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, err.Error())
+		return
+	}
+	response.OK(c, timeline)
+}
+
+// GetPlaybackURL returns a short-lived owner-scoped URL for native video
+// playback. Stable citation data never stores this signed URL.
+// GET /api/v1/media/task/:id/playback
+func (h *MediaHandler) GetPlaybackURL(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "任务 ID 错误")
+		return
+	}
+	url, err := h.svc.GetPlaybackURL(c.Request.Context(), userID, taskID)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"playback_url": url})
 }

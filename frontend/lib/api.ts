@@ -4,7 +4,7 @@ import type {
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
-  UploadResult, User, VideoTask,
+  UploadResult, User, VideoTask, VideoTimeline,
 } from './types'
 import { SSEStreamDecoder } from './streamDecoder'
 
@@ -94,6 +94,8 @@ export const api = {
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),
+  getTaskPlaybackUrl: (id: number) => req<{ playback_url: string }>(`/media/task/${id}/playback`, 'GET'),
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
   transcribe: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST'),

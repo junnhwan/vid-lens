@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { BookOpen, ChevronDown, Copy, RefreshCw, Brain } from 'lucide-react'
 import { CitationCards, renderAnswerWithCites } from '@/components/Citation'
+import type { CiteRef } from '@/components/Citation'
 import type { ChatMsg } from '@/components/chat/chatUtils'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
 import AgentChatBubble from '@/components/chat/AgentChatBubble'
@@ -63,13 +64,14 @@ function TraceCollapse({
   )
 }
 
-export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCopy, onRetry }: {
+export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCopy, onRetry, onPlayCitation }: {
   msg: ChatMsg
   idx: number
   onToggleCite: (msgIdx: number, id: string) => void
   modeLabel: string
   onCopy?: (content: string) => void
   onRetry?: (msgIdx: number) => void
+  onPlayCitation?: (citation: CiteRef) => void
 }) {
   if (msg.role === 'user') {
     return (
@@ -90,6 +92,7 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCo
         onToggleCite={onToggleCite}
         onCopy={onCopy}
         onRetry={onRetry}
+        onPlayCitation={onPlayCitation}
       />
     )
   }
@@ -143,7 +146,7 @@ export default function ChatMessageRow({ msg, idx, onToggleCite, modeLabel, onCo
 
       {msg.cites && msg.cites.length > 0 && (
         <div className={msg.streaming ? 'opacity-60' : 'ui-typewriter-cites-in'}>
-          <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} />
+          <CitationCards refs={msg.cites} openIds={msg.openCiteIds || []} onPlayCitation={onPlayCitation} />
         </div>
       )}
       {!msg.streaming && !msg.error && msg.content && (!msg.cites || msg.cites.length === 0) && (

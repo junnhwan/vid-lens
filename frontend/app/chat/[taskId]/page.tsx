@@ -6,13 +6,15 @@ import { Database, AlertTriangle, Trash2 } from 'lucide-react'
 import ChatInput from '@/components/ChatInput'
 import ChatShell, { ChatHeader, ChatSidebar, ChatFooter, ChatModePicker, modeLabel as chatModeLabel } from '@/components/chat/ChatShell'
 import ChatMessageRow from '@/components/chat/ChatMessageRow'
+import EvidencePlayer, { type PlaybackRange } from '@/components/chat/EvidencePlayer'
 import AgentLensOverlay from '@/components/chat/AgentLensOverlay'
 import { fmtSession } from '@/components/chat/chatUtils'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import { useToast } from '@/components/Toast'
 import { api, ApiError } from '@/lib/api'
 import { taskTitle } from '@/lib/format'
-import type { VideoTask, VideoChatMode } from '@/lib/types'
+import type { CiteRef } from '@/components/Citation'
+import type { VideoTask, VideoChatMode, VideoTimeline } from '@/lib/types'
 
 export default function ChatPage() {
   return (
@@ -28,6 +30,9 @@ function ChatView() {
   const router = useRouter()
 
   const [task, setTask] = useState<VideoTask | null>(null)
+  const [timeline, setTimeline] = useState<VideoTimeline | null>(null)
+  const [playbackUrl, setPlaybackUrl] = useState<string>()
+  const [activeRange, setActiveRange] = useState<PlaybackRange | null>(null)
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunks: number } | null>(null)
   const [mode, setMode] = useState<VideoChatMode>('strict_rag')
   const topK = 4
@@ -38,6 +43,8 @@ function ChatView() {
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {})
     api.getRagIndex(taskId).then(r => setRagStatus({ indexed: r.indexed, chunks: r.chunks })).catch(() => {})
+    api.getTimeline(taskId).then(setTimeline).catch(() => setTimeline(null))
+    api.getTaskPlaybackUrl(taskId).then(r => setPlaybackUrl(r.playback_url)).catch(() => setPlaybackUrl(undefined))
   }, [taskId])
 
   useEffect(() => {
@@ -98,6 +105,12 @@ function ChatView() {
       toast.error('复制失败')
     }
   }
+
+  const playCitation = useCallback((citation: CiteRef) => {
+    if (citation.taskId && citation.taskId !== taskId) return
+    if (!Number.isFinite(citation.startMS) || !Number.isFinite(citation.endMS) || (citation.endMS || 0) <= (citation.startMS || 0)) return
+    setActiveRange({ startMS: citation.startMS!, endMS: citation.endMS!, label: citation.anchorQuote || citation.content })
+  }, [taskId])
 
   const retryQuestion = (msgIdx: number) => {
     for (let i = msgIdx - 1; i >= 0; i--) {
@@ -195,6 +208,13 @@ function ChatView() {
       }
     >
       <>
+        <EvidencePlayer
+          timeline={timeline}
+          playbackUrl={playbackUrl}
+          activeRange={activeRange}
+          onSelectRange={setActiveRange}
+        />
+
         {messages.length === 0 && sessionReady && !failClosed && (
           <p className="text-[13px] text-ink-4 ui-fade-in">
             {mode === 'agent'
@@ -218,6 +238,7 @@ function ChatView() {
               modeLabel={modeLabel}
               onCopy={copyAnswer}
               onRetry={retryQuestion}
+              onPlayCitation={playCitation}
             />
           ))
         )}

@@ -227,12 +227,53 @@ export interface Citation {
   chunk_index: number // 显示"片段 #N"
   score: number
   content: string
+  anchor_quote?: string
+  display_context?: string
+  start_ms: number
+  end_ms: number
+  time_range_status: 'exact' | 'coarse' | 'unknown' | string
+  context_start_ms?: number
+  context_end_ms?: number
+  context_time_range_status?: 'exact' | 'coarse' | 'unknown' | string
+  display_context_truncated?: boolean
+  source_mapping_status?: 'mapped' | 'partial' | 'unmapped' | string
+  source_refs?: ChunkSourceRef[]
+  modality?: 'transcript' | 'visual_ocr' | 'visual_caption' | string
   source?: string // vector | hybrid | keyword
   vector_rank?: number
   keyword_rank?: number
   rrf_score?: number
   rerank_score?: number
   final_rank?: number
+}
+
+export interface ChunkSourceRef {
+  source_type: string
+  stable_id: string
+  segment_key?: string
+  source_row_id?: number
+  start_ms: number
+  end_ms: number
+  time_range_status: 'exact' | 'coarse' | 'unknown' | string
+  object_key?: string
+  caption_method?: string
+}
+
+export interface TimelineAtom {
+  id: string
+  modality: 'transcript' | 'visual_ocr' | 'visual_caption' | string
+  content: string
+  start_ms: number
+  end_ms: number
+  time_range_status: 'exact' | 'coarse' | 'unknown' | string
+  source?: string
+  source_refs?: ChunkSourceRef[]
+}
+
+export interface VideoTimeline {
+  task_id: number
+  title?: string
+  atoms: TimelineAtom[]
 }
 
 export interface AskResult {

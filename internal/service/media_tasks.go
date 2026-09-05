@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
@@ -215,6 +216,62 @@ func (s *MediaService) GetPresignedURL(ctx context.Context, taskID int64) (strin
 	task, err := s.repo.Task.FindByID(taskID)
 	if err != nil {
 		return "", err
+	}
+	return s.storage.GetPresignedURL(ctx, task.FileURL)
+}
+
+// GetVideoTimeline returns the task-scoped canonical source projection used by
+// the evidence UI. It never reads retrieval chunks, so expanded model context
+// cannot become public timeline content by accident.
+func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int64) (*VideoTimeline, error) {
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task.UserID != userID {
+		return nil, fmt.Errorf("无权访问此任务")
+	}
+	transcriptRows, err := s.repo.TranscriptionChunk.ListByTaskID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("读取转写时间线失败: %w", err)
+	}
+	// Older successful tasks may only have the compatibility full-transcript
+	// row. Preserve that source in the timeline without inventing timestamps.
+	if len(transcriptRows) == 0 {
+		if transcription, lookupErr := s.repo.Transcription.FindByTaskID(taskID); lookupErr != nil {
+			return nil, fmt.Errorf("读取转写时间线失败: %w", lookupErr)
+		} else if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
+			transcriptRows = []model.VideoTranscriptionChunk{{
+				ID: transcription.ID, TaskID: taskID, ChunkIndex: 0,
+				SegmentKey: fmt.Sprintf("transcription:%d", transcription.ID),
+				Status:     model.TranscriptionChunkStatusCompleted, Content: transcription.Content,
+			}}
+		}
+	}
+	frames, err := s.repo.VisualFrame.ListByTaskID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("读取视觉时间线失败: %w", err)
+	}
+	timeline := BuildVideoTimeline(taskID, transcriptRows, frames)
+	timeline.Title = task.Title
+	if strings.TrimSpace(timeline.Title) == "" {
+		timeline.Title = task.Filename
+	}
+	return &timeline, nil
+}
+
+// GetPlaybackURL is owner-scoped and short-lived. A citation persists source
+// identity and timestamps, never a signed URL.
+func (s *MediaService) GetPlaybackURL(ctx context.Context, userID, taskID int64) (string, error) {
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil {
+		return "", err
+	}
+	if task.UserID != userID {
+		return "", fmt.Errorf("无权访问此任务")
+	}
+	if strings.TrimSpace(task.FileURL) == "" {
+		return "", fmt.Errorf("视频对象不存在")
 	}
 	return s.storage.GetPresignedURL(ctx, task.FileURL)
 }
