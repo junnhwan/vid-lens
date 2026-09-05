@@ -1,3 +1,5 @@
+name: vid-lens-core
+
 services:
   # =========================================
   # 1. Redis (缓存 + 分布式锁)
@@ -27,8 +29,8 @@ services:
       - MINIO_ROOT_PASSWORD=minioadmin
     command: server /data --console-address ":9001"
     volumes:
-      # 挂老仓库 vid-lens-727 的 MinIO 数据（含历史视频对象）
-      - ../vid-lens-727/data/minio:/data
+      # Override VIDLENS_DATA_ROOT locally to reuse an existing data root.
+      - ${VIDLENS_DATA_ROOT:-./data}/minio:/data
     networks:
       - vidlens-net
 
@@ -47,8 +49,8 @@ services:
       POSTGRES_DB: vidlens
       TZ: Asia/Shanghai
     volumes:
-      # 挂老仓库 vid-lens-727 的 PG 数据（含历史任务/转写/摘要/chunk/聊天）
-      - ../vid-lens-727/data/postgres:/var/lib/postgresql/data
+      # Override VIDLENS_DATA_ROOT locally to reuse an existing data root.
+      - ${VIDLENS_DATA_ROOT:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -75,64 +77,6 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     networks:
       - vidlens-net
-
-  # =========================================
-  # 4. Prometheus / Grafana（可选可观测性栈）
-  # docker compose --profile observability up -d prometheus grafana
-  # =========================================
-  prometheus:
-    image: prom/prometheus:v3.5.0
-    container_name: vidlens-prometheus
-    profiles: ["observability"]
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-    ports:
-      - "127.0.0.1:9090:9090"
-    volumes:
-      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-    networks:
-      - vidlens-net
-
-  grafana:
-    image: grafana/grafana:12.0.2
-    container_name: vidlens-grafana
-    profiles: ["observability"]
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_AUTH_DISABLE_LOGIN_FORM: "false"
-      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
-    volumes:
-      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-    networks:
-      - vidlens-net
-
-volumes:
-  prometheus-data:
-  grafana-data:
 
 networks:
   vidlens-net:

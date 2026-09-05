@@ -133,7 +133,15 @@ sequenceDiagram
 docker compose up -d
 ```
 
-默认启动 PostgreSQL + pgvector、Redis、RabbitMQ、MinIO；`--profile observability` 额外启动 Prometheus 与 Grafana。容器数据落在项目下的 `data/` 目录。
+默认启动 PostgreSQL + pgvector、Redis、RabbitMQ、MinIO。
+
+默认 Compose 项目名为 `vid-lens-core`，只包含运行项目所需的四个核心服务。Prometheus 与 Grafana 使用独立的 `docker-compose.observability.yml`，需要时单独启动：
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
+
+默认数据目录为当前项目的 `data/`。本机如果存在历史目录 `../vid-lens-727/data/`，`make start` 会自动优先复用它；也可以通过 `VIDLENS_DATA_ROOT` 显式指定数据根目录。不要使用 `docker compose down -v` 清理数据卷。
 
 ### 3. 配置本地参数
 
@@ -194,6 +202,26 @@ npm run dev -p 5173
 ```
 
 开发页面：`http://127.0.0.1:5173`（`/api` 改写代理到 `:8080`）。
+
+### 6. Windows 一键启动
+
+本机安装 Make 后，可以在项目根目录使用：
+
+```powershell
+make start       # 核心 Docker + 后端 + 前端
+make status      # 查看核心容器和应用端口
+make stop        # 停止本次开发环境，不删除数据
+make obs-up      # 可选：单独启动 Prometheus/Grafana
+```
+
+`make start` 会先确认选定的 PostgreSQL/MinIO 数据目录存在，再启动 `vid-lens-core`，然后分别打开后端和前端窗口。它不会启动历史 Kafka、Milvus、MySQL 容器，也不会执行 `down -v`。
+
+如果使用其他本地数据目录，可以在当前 PowerShell 会话中设置：
+
+```powershell
+$env:VIDLENS_DATA_ROOT = 'D:/path/to/vidlens-data'
+make start
+```
 
 ## 📁 项目结构
 
