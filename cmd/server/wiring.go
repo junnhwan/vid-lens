@@ -273,7 +273,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	}
 	// Visual index stays enabled: Vision BYOK and/or local OCR decide what runs.
 	visualIndexSvc := service.NewVisualIndexService(deps.repos, deps.minioStorage, deps.cfg.Tools.FFmpegPath, visualCfg)
-	visualIndexSvc.SetVisionResolver(func(ctx context.Context, userID int64) (ai.VisionClient, error) {
+	visionResolver := func(ctx context.Context, userID int64) (ai.VisionClient, error) {
 		profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
 		if err != nil {
 			return nil, err
@@ -282,12 +282,23 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			return nil, fmt.Errorf("vision not configured on default AI profile")
 		}
 		return aiFactory.NewVisionClient(*profile)
-	})
+	}
+	visualIndexSvc.SetVisionResolver(visionResolver)
 	consumer.SetVisualIndexer(func(ctx context.Context, task *model.VideoTask) (int, error) {
 		return visualIndexSvc.BuildTaskVisualIndex(ctx, task)
 	})
 
 	videoAgentSvc := service.NewVideoAgentService(chatSvc)
+	visualInvestigator := service.NewVisualInvestigator(deps.repos, deps.minioStorage, deps.cfg.Tools.FFmpegPath)
+	visualInvestigator.SetVisionResolver(visionResolver)
+	visualInvestigator.SetVisionModelResolver(func(ctx context.Context, userID int64) (string, error) {
+		profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
+		if err != nil {
+			return "", err
+		}
+		return profile.VisionModel, nil
+	})
+	videoAgentSvc.SetVisualInvestigator(visualInvestigator)
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
 	chatHandler.SetEvidenceLedgerService(evidenceLedgerSvc)

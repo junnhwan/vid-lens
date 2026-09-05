@@ -180,6 +180,13 @@ type visualWindowToolArguments struct {
 	MaxFrames int   `json:"max_frames"`
 }
 
+type investigateVisualToolArguments struct {
+	Goal          string            `json:"goal"`
+	RequiredFacts []RequiredFact    `json:"required_facts"`
+	SeedWindows   []VisualTimeRange `json:"seed_windows"`
+	Budget        VisualBudget      `json:"budget"`
+}
+
 type summarizeSegmentsToolArguments struct {
 	Question string              `json:"question"`
 	Segments []TranscriptSegment `json:"segments"`

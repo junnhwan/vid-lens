@@ -80,7 +80,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		if err := policy.Validate(); err != nil {
 			return nil, err
 		}
-		frozenPolicy, budget = researchAgentPolicy(req.TopK, policy)
+		frozenPolicy, budget = researchAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
 	}
 	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget)
 	if err != nil {
@@ -126,6 +126,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
+	tools.SetVisualInvestigator(s.visualInvestigator)
 	tools.SetMemorySnapshot(memorySnapshot)
 	runner, err := NewVideoResearchRunner(tools.Registry(), NewLLMVideoResearchPlanner(chat), DefaultVideoResearchObserver{}, policy)
 	if err != nil {

@@ -17,6 +17,7 @@ type KeyFrame struct {
 	Path   string
 	TimeMs int64
 	Source string // scene | interval
+	Args   []string
 }
 
 // ExtractKeyFramesOptions controls scene-change and fallback interval sampling.
@@ -88,6 +89,55 @@ func ExtractKeyFrames(ctx context.Context, ffmpegPath, inputPath string, opts Ex
 		return nil, "", fmt.Errorf("关键帧抽取完成但没有输出帧")
 	}
 	return merged, outputDir, nil
+}
+
+// ExtractFramesAtTimes materializes original-resolution frames for a bounded
+// query-time investigation. The requested timestamps are retained as the
+// evidence timestamps; FFmpeg is only responsible for decoding the frame.
+// Callers own cleanup of the returned work directory.
+func ExtractFramesAtTimes(ctx context.Context, ffmpegPath, inputPath string, timesMS []int64) ([]KeyFrame, string, error) {
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	if strings.TrimSpace(inputPath) == "" {
+		return nil, "", fmt.Errorf("query frame input is empty")
+	}
+	if len(timesMS) == 0 {
+		return nil, "", fmt.Errorf("query frame timestamps are empty")
+	}
+
+	outputDir, err := os.MkdirTemp("", "vidlens_query_frames_*")
+	if err != nil {
+		return nil, "", err
+	}
+	frames := make([]KeyFrame, 0, len(timesMS))
+	for index, timeMS := range timesMS {
+		if err := ctx.Err(); err != nil {
+			os.RemoveAll(outputDir)
+			return nil, "", err
+		}
+		if timeMS < 0 {
+			os.RemoveAll(outputDir)
+			return nil, "", fmt.Errorf("query frame timestamp must not be negative: %d", timeMS)
+		}
+		path := filepath.Join(outputDir, fmt.Sprintf("frame_%04d_%dms.jpg", index, timeMS))
+		seconds := fmt.Sprintf("%.3f", float64(timeMS)/1000.0)
+		args := []string{
+			"-hide_banner", "-y", "-i", inputPath, "-ss", seconds,
+			"-frames:v", "1", "-q:v", "2", path,
+		}
+		stderr, runErr := runFFmpegCapture(ctx, ffmpegPath, args)
+		if runErr != nil {
+			os.RemoveAll(outputDir)
+			return nil, "", fmt.Errorf("query frame at %dms: %w (%s)", timeMS, runErr, trimLog(stderr))
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			os.RemoveAll(outputDir)
+			return nil, "", fmt.Errorf("query frame at %dms was not materialized: %w", timeMS, statErr)
+		}
+		frames = append(frames, KeyFrame{Path: path, TimeMs: timeMS, Source: "query", Args: append([]string(nil), args...)})
+	}
+	return frames, outputDir, nil
 }
 
 func extractSceneFrames(ctx context.Context, ffmpegPath, inputPath, outDir string, opts ExtractKeyFramesOptions) ([]KeyFrame, error) {

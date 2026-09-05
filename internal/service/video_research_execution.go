@@ -299,7 +299,7 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 		Kind: videoAgentStepKind(decision.Tool), Action: decision.Tool, SafeReason: safeToolReason(decision.Tool),
 		InputSummary: inputSummary, ArgumentsDigest: argsDigest, ToolName: decision.Tool,
 		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool),
-		VisionCall: visionAgentAction(decision.Tool), RetrievalCall: retrievalAgentAction(decision.Tool),
+		VisionCall: visionAgentAction(decision.Tool), VisualCall: visualAgentAction(decision.Tool), FrameCount: visualFrameBudget(decision.Tool, decision.Arguments), RetrievalCall: retrievalAgentAction(decision.Tool),
 		ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4, FailureCode: "tool_failure",
 	}, func() (AgentJournalResult, error) {
 		result, toolErr := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})

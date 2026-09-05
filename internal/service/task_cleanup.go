@@ -282,12 +282,23 @@ func collectTaskEmbeddingModels(repos *repository.Repositories, userID, taskID i
 }
 
 func (s *TaskCleanupService) deleteVisualFrameObjects(ctx context.Context, taskID int64) error {
-	if s.repo == nil || s.repo.VisualFrame == nil || s.objectDeleter == nil {
+	if s.repo == nil || s.objectDeleter == nil {
 		return nil
 	}
-	keys, err := s.repo.VisualFrame.ListObjectKeysByTaskID(taskID)
-	if err != nil {
-		return fmt.Errorf("list visual frame objects: %w", err)
+	keys := []string{}
+	if s.repo.VisualFrame != nil {
+		visualKeys, err := s.repo.VisualFrame.ListObjectKeysByTaskID(taskID)
+		if err != nil {
+			return fmt.Errorf("list visual frame objects: %w", err)
+		}
+		keys = append(keys, visualKeys...)
+	}
+	if s.repo.VisualObservation != nil {
+		queryKeys, err := s.repo.VisualObservation.ListObjectKeysByTaskID(taskID)
+		if err != nil {
+			return fmt.Errorf("list query visual objects: %w", err)
+		}
+		keys = append(keys, queryKeys...)
 	}
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
@@ -319,6 +330,9 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 		// Insert after transcription chunk cleanup so visual evidence rows are
 		// removed with other task-owned facts.
 		deleteFns = append(deleteFns[:2], append([]func(int64) error{repos.VisualFrame.DeleteByTaskID}, deleteFns[2:]...)...)
+	}
+	if repos.VisualObservation != nil {
+		deleteFns = append(deleteFns, repos.VisualObservation.DeleteByTaskID)
 	}
 	for _, deleteRows := range deleteFns {
 		if err := deleteRows(taskID); err != nil {

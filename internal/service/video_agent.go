@@ -65,6 +65,7 @@ type VideoAgentService struct {
 	chatSvc                       *ChatService
 	executionJournal              *AgentExecutionJournal
 	evidenceFunnelResultPublisher func(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error)
+	visualInvestigator            VisualInvestigator
 }
 
 type VideoAgentExecutionError struct {
@@ -90,6 +91,12 @@ func NewVideoAgentService(chatSvc *ChatService) *VideoAgentService {
 		service.executionJournal = NewAgentExecutionJournal(chatSvc.repos.AgentExecution)
 	}
 	return service
+}
+
+func (s *VideoAgentService) SetVisualInvestigator(investigator VisualInvestigator) {
+	if s != nil {
+		s.visualInvestigator = investigator
+	}
 }
 
 func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
@@ -160,6 +167,7 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	template := ClassifyVideoAgentTemplate(req.Question)
 	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
+	tools.SetVisualInvestigator(s.visualInvestigator)
 	tools.SetMemorySnapshot(memorySnapshot)
 	tools.SetStepObserver(newDurableAgentStepObserver(s.executionJournal, req.UserID, runID, observer))
 	trace := make([]VideoAgentStep, 0, 4)

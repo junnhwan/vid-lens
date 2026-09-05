@@ -20,15 +20,17 @@ const (
 	VideoAgentToolBuildCitedAnswer     = "build_cited_answer"
 	VideoAgentToolSearchVisualEvidence = "search_visual_evidence"
 	VideoAgentToolInspectVisualWindow  = "inspect_visual_window"
+	VideoAgentToolInvestigateVisual    = "investigate_visual"
 )
 
 type VideoAgentTools struct {
-	repos    *repository.Repositories
-	pipeline *RetrievalPipeline
-	chat     ai.ChatClient
-	registry *VideoAgentToolRegistry
-	observer VideoAgentStepObserver
-	memory   *MemorySnapshot
+	repos              *repository.Repositories
+	pipeline           *RetrievalPipeline
+	chat               ai.ChatClient
+	registry           *VideoAgentToolRegistry
+	observer           VideoAgentStepObserver
+	memory             *MemorySnapshot
+	visualInvestigator VisualInvestigator
 }
 
 func NewVideoAgentTools(repos *repository.Repositories, pipeline *RetrievalPipeline, chat ai.ChatClient) *VideoAgentTools {
@@ -61,6 +63,39 @@ func (t *VideoAgentTools) SetMemorySnapshot(snapshot *MemorySnapshot) {
 	if t != nil {
 		t.memory = snapshot
 	}
+}
+
+// SetVisualInvestigator adds the query-time visual tool only when the server
+// has wired the media materializer. Keeping it optional preserves the existing
+// offline-text agent baseline and makes feature availability explicit.
+func (t *VideoAgentTools) SetVisualInvestigator(investigator VisualInvestigator) {
+	if t == nil {
+		return
+	}
+	t.visualInvestigator = investigator
+	if investigator == nil || t.registry == nil {
+		return
+	}
+	if _, err := t.registry.Lookup(VideoAgentToolInvestigateVisual); err == nil {
+		return
+	}
+	_ = t.registry.Register(&videoAgentToolAdapter{
+		definition: VideoAgentToolDefinition{
+			Name:        VideoAgentToolInvestigateVisual,
+			Description: "在当前视频已有时间线/视觉证据定位的小窗口内，按硬预算读取少量原始帧并返回可回放的查询时视觉观察。",
+		},
+		execute: func(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
+			var args investigateVisualToolArguments
+			if err := decodeVideoAgentToolArguments(request, &args); err != nil {
+				return failedVideoAgentToolResult(VideoAgentToolInvestigateVisual, "investigate visual", err)
+			}
+			result, step, err := t.InvestigateVisual(ctx, InvestigateVisualInput{
+				UserID: request.Runtime.UserID, TaskID: request.Runtime.TaskID,
+				Goal: args.Goal, RequiredFacts: args.RequiredFacts, SeedWindows: args.SeedWindows, Budget: args.Budget,
+			})
+			return marshalVideoAgentToolResult(result, step, err)
+		},
+	})
 }
 
 type SearchTranscriptInput struct {
@@ -96,6 +131,17 @@ type InspectVisualWindowResult struct {
 	EndMS    int64            `json:"end_ms"`
 	Evidence []RetrievedChunk `json:"evidence"`
 }
+
+type InvestigateVisualInput struct {
+	UserID        int64
+	TaskID        int64
+	Goal          string
+	RequiredFacts []RequiredFact
+	SeedWindows   []VisualTimeRange
+	Budget        VisualBudget
+}
+
+type InvestigateVisualResult = Investigation
 
 type TranscriptWindowInput struct {
 	UserID         int64
@@ -259,6 +305,32 @@ func (t *VideoAgentTools) InspectVisualWindow(ctx context.Context, input Inspect
 		return InspectVisualWindowResult{}, step, err
 	}
 	metricStatus = "success"
+	return result, step, nil
+}
+
+func (t *VideoAgentTools) InvestigateVisual(ctx context.Context, input InvestigateVisualInput) (InvestigateVisualResult, VideoAgentStep, error) {
+	step := newVideoAgentStep("investigate visual", VideoAgentToolInvestigateVisual, map[string]any{
+		"seed_windows": input.SeedWindows, "max_frames": input.Budget.MaxFrames, "max_vlm_calls": input.Budget.MaxVLMCalls,
+	})
+	if err := t.notifyStepStart(step); err != nil {
+		return InvestigateVisualResult{}, step, err
+	}
+	if t == nil || t.visualInvestigator == nil {
+		step, err := t.failObservedStep(step, "query-time visual investigator unavailable")
+		return InvestigateVisualResult{}, step, err
+	}
+	result, err := t.visualInvestigator.Inspect(ctx, InspectRequest{
+		UserID: input.UserID, TaskID: input.TaskID, Goal: input.Goal,
+		RequiredFacts: input.RequiredFacts, SeedWindows: input.SeedWindows, Budget: input.Budget,
+	})
+	if err != nil {
+		step, err = t.failObservedStepWithCause(step, err)
+		return InvestigateVisualResult{}, step, err
+	}
+	step.OutputRef = fmt.Sprintf("visual-investigation:%s:%d", result.TraceRef, len(result.Observations))
+	if err := t.notifyStepDone(step, result); err != nil {
+		return InvestigateVisualResult{}, step, err
+	}
 	return result, step, nil
 }
 

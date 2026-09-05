@@ -70,6 +70,8 @@ func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, sta
 - done=true 时 tool 必须为空；只有证据足够或已经明确无法继续时才结束。
 - 普通解说问题通常先调用 search_transcript。字幕、图表、幻灯片、颜色、布局、纯演示、无转写或画面/解说是否一致的问题，应调用 search_visual_evidence。
 - 已有带时间的 transcript 或 visual 命中且问题需要核对画面时，调用 inspect_visual_window，只检查命中时间附近的小窗口。
+- 只有在已有观察提供了 seed_windows 后，才调用 investigate_visual；它会从当前视频原始像素取少量帧。required_facts、seed_windows 和 budget 必须来自已观察证据，不能填写 URL、文件路径或其他 task。
+- investigate_visual 返回的是带来源和时间的 query-time observation，不是独立语义核验；不要把 unverified observation 写成已证明的事实。
 - transcript 与视觉证据冲突时保留双方，继续补齐另一模态或生成明确标注不确定性的带引用回答，不得选择一方覆盖另一方。
 - 如果当前证据不足，需要调整检索策略时，将 replan=true；不要无理由重复同一个动作。
 - arguments 必须是合法 JSON 对象。

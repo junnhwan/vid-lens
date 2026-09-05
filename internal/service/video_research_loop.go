@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"vid-lens/internal/model"
 )
 
 type VideoResearchStatus string
@@ -288,6 +290,13 @@ func (DefaultVideoResearchObserver) Observe(state VideoResearchState, result Vid
 		}
 		observation.NewEvidence = append([]RetrievedChunk(nil), inspected.Evidence...)
 	}
+	if result.Step.Tool == VideoAgentToolInvestigateVisual {
+		var investigated InvestigateVisualResult
+		if err := json.Unmarshal(result.Output, &investigated); err != nil {
+			return VideoResearchObservation{}, fmt.Errorf("解析 investigate_visual observation 失败: %w", err)
+		}
+		observation.NewEvidence = visualInvestigationEvidence(investigated)
+	}
 	if result.Step.Tool == VideoAgentToolBuildCitedAnswer {
 		var answer BuildCitedAnswerResult
 		if err := json.Unmarshal(result.Output, &answer); err != nil {
@@ -308,6 +317,29 @@ func (DefaultVideoResearchObserver) Observe(state VideoResearchState, result Vid
 		observation.Citations = finalized.Citations
 	}
 	return observation, nil
+}
+
+func visualInvestigationEvidence(investigation InvestigateVisualResult) []RetrievedChunk {
+	evidence := make([]RetrievedChunk, 0, len(investigation.Observations))
+	for index, observed := range investigation.Observations {
+		if observed.Status != model.VisualObservationStatusObserved || observed.ObjectKey == "" || strings.TrimSpace(observed.Observation) == "" {
+			continue
+		}
+		content := observed.Observation
+		if len(observed.StructuredFacts) > 0 {
+			content = strings.Join(observed.StructuredFacts, "；")
+		}
+		evidence = append(evidence, RetrievedChunk{
+			TaskID: observed.TaskID, EvidenceID: "visual-observation:" + observed.ID, ChunkIndex: index,
+			Content: content, AnchorContent: content, Source: "visual_investigation",
+			Modality: "image", StartMS: observed.StartMS, EndMS: observed.EndMS,
+			TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped,
+			SourceRefs: []ChunkSourceRef{{SourceType: "image", StableID: "visual-observation:" + observed.ID,
+				StartMS: observed.StartMS, EndMS: observed.EndMS, TimeRangeStatus: model.ChunkTimeRangeExact,
+				ObjectKey: observed.ObjectKey, CaptionMethod: "query_vlm"}},
+		})
+	}
+	return evidence
 }
 
 func mergeVideoResearchEvidence(existing, added []RetrievedChunk) []RetrievedChunk {

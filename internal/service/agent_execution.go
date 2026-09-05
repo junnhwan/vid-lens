@@ -87,12 +87,24 @@ func defaultTemplateAgentPolicy(topK int) (frozenAgentPolicy, frozenAgentBudget)
 }
 
 func researchAgentPolicy(topK int, policy VideoResearchPolicy) (frozenAgentPolicy, frozenAgentBudget) {
+	return researchAgentPolicyWithVisual(topK, policy, false)
+}
+
+func researchAgentPolicyWithVisual(topK int, policy VideoResearchPolicy, visualEnabled bool) (frozenAgentPolicy, frozenAgentBudget) {
 	allowed := defaultAgentToolNames()
+	maxVisionCalls, maxVisualCalls, maxFrames := 0, 0, 0
+	if visualEnabled {
+		allowed = append(allowed, VideoAgentToolInvestigateVisual)
+		sort.Strings(allowed)
+		// One research step may invoke the investigator once. The investigator
+		// owns its smaller per-call VLM/frame budget and reports its usage.
+		maxVisionCalls, maxVisualCalls, maxFrames = 1, 1, 8
+	}
 	return frozenAgentPolicy{TopK: topK, MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans, AllowedTools: allowed}, frozenAgentBudget{
 		// Each research iteration has one planner checkpoint plus one tool step.
 		MaxSteps: policy.MaxSteps*2 + 1, MaxToolCalls: policy.MaxSteps,
-		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: 0, MaxAttemptsPerStep: 1,
-		MaxRetrievalCalls: policy.MaxSteps, MaxVisualCalls: 0, MaxFrames: 0, MaxPromptTokens: 32000,
+		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: maxVisionCalls, MaxAttemptsPerStep: 1,
+		MaxRetrievalCalls: policy.MaxSteps, MaxVisualCalls: maxVisualCalls, MaxFrames: maxFrames, MaxPromptTokens: 32000,
 		MaxCompletionTokens: 8000, MaxCostMicros: 1000000, MaxDurationMs: 300000, MaxContextChars: 100000,
 	}
 }
@@ -234,6 +246,8 @@ func safeToolReason(tool string) string {
 		return "compare selected transcript segment groups"
 	case VideoAgentToolBuildCitedAnswer:
 		return "build the cited answer from observed evidence"
+	case VideoAgentToolInvestigateVisual:
+		return "inspect bounded raw frames from the current video"
 	default:
 		return "execute an allow-listed Agent tool"
 	}
@@ -251,7 +265,23 @@ func llmAgentAction(tool string) bool {
 	return tool == VideoAgentToolSummarizeSegments || tool == VideoAgentToolCompareSegments || tool == VideoAgentToolBuildCitedAnswer
 }
 
-func visionAgentAction(string) bool { return false }
+func visionAgentAction(tool string) bool { return tool == VideoAgentToolInvestigateVisual }
+
+func visualAgentAction(tool string) bool { return tool == VideoAgentToolInvestigateVisual }
+
+func visualFrameBudget(tool string, arguments json.RawMessage) int {
+	if tool != VideoAgentToolInvestigateVisual {
+		return 0
+	}
+	var input investigateVisualToolArguments
+	if err := json.Unmarshal(arguments, &input); err != nil || input.Budget.MaxFrames <= 0 {
+		return 8
+	}
+	if input.Budget.MaxFrames > 8 {
+		return 8
+	}
+	return input.Budget.MaxFrames
+}
 
 func digestAgentValue(value string) string {
 	sum := sha256.Sum256([]byte(value))
