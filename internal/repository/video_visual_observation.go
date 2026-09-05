@@ -18,6 +18,21 @@ func NewVideoVisualObservationRepository(db *gorm.DB) *VideoVisualObservationRep
 	return &VideoVisualObservationRepository{db: db}
 }
 
+func (r *VideoVisualObservationRepository) FindByID(ctx context.Context, userID, taskID int64, id string) (*model.VideoVisualObservation, error) {
+	if r == nil || r.db == nil || userID <= 0 || taskID <= 0 || id == "" {
+		return nil, gorm.ErrInvalidData
+	}
+	var row model.VideoVisualObservation
+	err := r.db.WithContext(ctx).Where("user_id = ? AND task_id = ? AND id = ?", userID, taskID, id).First(&row).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (r *VideoVisualObservationRepository) Append(ctx context.Context, observation *model.VideoVisualObservation) error {
 	if r == nil || r.db == nil || observation == nil {
 		return gorm.ErrInvalidData

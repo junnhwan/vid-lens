@@ -101,8 +101,14 @@ func (s *VideoAgentService) AskEvidenceFunnel(ctx context.Context, req EvidenceF
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID, RunID: runID,
 		RawAnswer: funnel.RawAnswer, Evidence: funnel.Citations, Retrieved: buildCitations(req.Goal, funnel.Evidence),
 	}
+	if err := s.inspectAnswer(ctx, &ledgerRequest, result, embedding, chat, profile); err != nil {
+		return nil, err
+	}
 	if err := runner.ValidateAndRecord(ctx, ledgerRequest, sortedFinalEvidenceRefs(funnel.Citations)); err != nil {
 		return nil, fmt.Errorf("evidence funnel validation failed: %w", err)
+	}
+	if err := s.enforceStoredInspection(ctx, ledgerRequest, result); err != nil {
+		return nil, err
 	}
 	validationCompleted = true
 	result.Trace = evidenceFunnelTrace(ctx, s, req.UserID, runID)

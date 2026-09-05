@@ -110,6 +110,7 @@ func (r *EvidenceLedgerRepository) AppendCorrection(ctx context.Context, userID 
 		correction.Revision = latest.Revision + 1
 		correction.SupersedesClaimID = latest.ID
 		correction.Text = correctedText
+		correction.Inspection = nil // a changed claim must never inherit semantic approval
 		correction.Status = model.ClaimStatusCorrected
 		if correction.Confidence > 0.5 {
 			correction.Confidence = 0.5

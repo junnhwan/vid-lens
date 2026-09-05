@@ -73,7 +73,7 @@ func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "直接回答" || result.Template != string(VideoAgentDirectQA) || result.Model != "chat-model" {
+	if result.Answer != inspectorBlockedAnswer || result.Template != string(VideoAgentDirectQA) || result.Model != "chat-model" {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(result.Citations) != 1 || result.Citations[0].Content != "owner 校验引用片段" {
@@ -131,13 +131,13 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if len(chatClient.messages) != 2 || !messagesContain(chatClient.messages[1], "前邻居上下文只给模型") || !messagesContain(chatClient.messages[1], "后邻居上下文也只给模型") {
+	if len(chatClient.messages) != 3 || !messagesContain(chatClient.messages[1], "前邻居上下文只给模型") || !messagesContain(chatClient.messages[1], "后邻居上下文也只给模型") {
 		t.Fatalf("final answer prompt lost expanded context: %+v", chatClient.messages)
 	}
 	if !messagesContain(chatClient.messages[1], "[C1]") || !messagesContain(chatClient.messages[1], "[C2]") || !messagesContain(chatClient.messages[1], "完全无关的第二条唯一文本") {
 		t.Fatalf("final answer prompt lost candidate citations: %+v", chatClient.messages[1])
 	}
-	if result.Answer != "工具结果会反馈给模型，另一条说明最终文件列表" || strings.Contains(result.Answer, "[C") {
+	if result.Answer != inspectorBlockedAnswer || strings.Contains(result.Answer, "[C") {
 		t.Fatalf("result answer = %q, want clean answer", result.Answer)
 	}
 	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C1" || result.Citations[1].CitationID != "C2" {
@@ -207,13 +207,13 @@ func TestVideoAgentAskSummarizeExecutesWindowSummarizeAndBuildAnswer(t *testing.
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "最终总结回答" || result.Template != string(VideoAgentSummarizeTopic) {
+	if result.Answer != inspectorBlockedAnswer || result.Template != string(VideoAgentSummarizeTopic) {
 		t.Fatalf("result = %+v", result)
 	}
 	if traceTools(result.Trace) != "search_transcript|get_transcript_window|summarize_segments|build_cited_answer" {
 		t.Fatalf("trace = %+v", result.Trace)
 	}
-	if len(chatClient.messages) != 3 {
+	if len(chatClient.messages) != 4 {
 		t.Fatalf("chat calls = %d, want rewrite, summarize and final answer", len(chatClient.messages))
 	}
 	if !messagesContain(chatClient.messages[1], "chunk-0 背景") || !messagesContain(chatClient.messages[1], "chunk-2 风险") {
@@ -248,13 +248,13 @@ func TestVideoAgentAskCompareExecutesWindowCompareAndBuildAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "最终对比回答" || result.Template != string(VideoAgentCompareTopics) {
+	if result.Answer != inspectorBlockedAnswer || result.Template != string(VideoAgentCompareTopics) {
 		t.Fatalf("result = %+v", result)
 	}
 	if traceTools(result.Trace) != "search_transcript|get_transcript_window|get_transcript_window|compare_segments|build_cited_answer" {
 		t.Fatalf("trace = %+v", result.Trace)
 	}
-	if len(chatClient.messages) != 3 {
+	if len(chatClient.messages) != 4 {
 		t.Fatalf("chat calls = %d, want rewrite, compare and final answer", len(chatClient.messages))
 	}
 	if !messagesContain(chatClient.messages[1], "前半段观点") || !messagesContain(chatClient.messages[1], "后半段变化") {
@@ -288,13 +288,13 @@ func TestVideoAgentAskCritiqueExecutesWindowSummarizeAndBuildAnswer(t *testing.T
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "最终风险回答" || result.Template != string(VideoAgentCritiqueTopic) {
+	if result.Answer != inspectorBlockedAnswer || result.Template != string(VideoAgentCritiqueTopic) {
 		t.Fatalf("result = %+v", result)
 	}
 	if traceTools(result.Trace) != "search_transcript|get_transcript_window|summarize_segments|build_cited_answer" {
 		t.Fatalf("trace = %+v", result.Trace)
 	}
-	if len(chatClient.messages) != 3 {
+	if len(chatClient.messages) != 4 {
 		t.Fatalf("chat calls = %d, want rewrite, critique summarize and final answer", len(chatClient.messages))
 	}
 	if !messagesContain(chatClient.messages[1], "问题、风险、不足或不严谨") {

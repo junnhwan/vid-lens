@@ -166,14 +166,17 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: memoryPolicy,
 	}
-	if err := s.saveAgentRunExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
-		return nil, err
-	}
 	rawAnswer, answerEvidence := researchAnswerLedgerInput(req.Goal, runResult)
-	s.persistEvidenceLedger(ctx, EvidenceLedgerRecordRequest{
+	ledgerReq := EvidenceLedgerRecordRequest{
 		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
 		RunID: runID, RawAnswer: rawAnswer, Evidence: answerEvidence, Retrieved: buildCitations(req.Goal, runResult.State.Evidence),
-	})
+	}
+	if err := s.inspectAnswer(ctx, &ledgerReq, result, embedding, chat, profile); err != nil {
+		return nil, err
+	}
+	if err := s.publishInspectedAnswer(ctx, req.Goal, ledgerReq, result); err != nil {
+		return nil, err
+	}
 	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil)
 	return result, nil
 }

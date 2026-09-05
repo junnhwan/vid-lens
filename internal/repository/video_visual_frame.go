@@ -1,10 +1,23 @@
 package repository
 
 import (
+	"context"
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
 )
+
+func (r *VideoVisualFrameRepository) FindForUser(ctx context.Context, userID, taskID, frameID int64) (*model.VideoVisualFrame, error) {
+	var row model.VideoVisualFrame
+	err := r.db.WithContext(ctx).Where("task_id = ? AND id = ? AND task_id IN (SELECT id FROM video_tasks WHERE user_id = ?)", taskID, frameID, userID).First(&row).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
 
 type VideoVisualFrameRepository struct {
 	db *gorm.DB

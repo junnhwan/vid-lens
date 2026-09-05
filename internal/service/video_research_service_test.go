@@ -34,7 +34,7 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AskResearch() error = %v", err)
 	}
-	if result.Answer != "最终研究答案" || result.Template != string(VideoAgentResearchTemplate) || result.Model != "chat-model" {
+	if result.Answer != inspectorBlockedAnswer || result.Template != string(VideoAgentResearchTemplate) || result.Model != "chat-model" {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(result.Citations) != 1 || result.Citations[0].CitationID != "C1" || result.Citations[0].TaskID != task.ID || result.Citations[0].ChunkID != 1 || result.Citations[0].Content != "owner 校验证据" || result.Citations[0].Source == "planner-forged" {
@@ -48,7 +48,7 @@ func TestVideoAgentAskResearchRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMessages() error = %v", err)
 	}
-	if len(messages) != 2 || messages[1].Content != "最终研究答案" || messages[1].RetrievalSnapshot == nil {
+	if len(messages) != 2 || messages[1].Content != inspectorBlockedAnswer || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
 	var snapshot struct {
@@ -185,7 +185,7 @@ func TestVideoAgentResearchUsesFrozenPolicyWhenCurrentPolicyIsInvalid(t *testing
 	if err != nil {
 		t.Fatalf("AskResearch() with invalid current policy error = %v", err)
 	}
-	if result.Answer != "冻结 policy 仍可恢复" {
+	if result.Answer != inspectorBlockedAnswer {
 		t.Fatalf("frozen-policy result = %+v", result)
 	}
 	run, err := repos.AgentExecution.GetRun(context.Background(), 7, runID)

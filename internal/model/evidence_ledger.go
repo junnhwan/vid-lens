@@ -30,20 +30,51 @@ const (
 // answer. Corrections append another row under RootClaimID with a higher
 // Revision; existing rows are never rewritten into a new meaning.
 type AgentClaim struct {
-	ID                string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	RootClaimID       string    `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_claim_root_revision,priority:1;index" json:"root_claim_id"`
-	Revision          int       `gorm:"not null;default:1;uniqueIndex:idx_agent_claim_root_revision,priority:2" json:"revision"`
-	SupersedesClaimID string    `gorm:"type:varchar(36);not null;default:'';index" json:"supersedes_claim_id,omitempty"`
-	UserID            int64     `gorm:"not null;index:idx_agent_claim_owner_run,priority:1;index:idx_agent_claim_owner_session,priority:1" json:"user_id"`
-	SessionID         int64     `gorm:"not null;index:idx_agent_claim_owner_session,priority:2" json:"session_id"`
-	MessageID         int64     `gorm:"not null;index" json:"message_id"`
-	RunID             string    `gorm:"type:varchar(36);not null;index:idx_agent_claim_owner_run,priority:2;index" json:"run_id"`
-	Kind              string    `gorm:"type:varchar(40);not null;default:'answer_fact';index" json:"kind"`
-	Text              string    `gorm:"type:text;not null" json:"text"`
-	Status            string    `gorm:"type:varchar(20);not null;index;check:chk_agent_claim_status,status IN ('hypothesized','verified','corrected','unsupported','uncertain')" json:"status"`
-	Confidence        float64   `gorm:"type:double precision;not null;default:0;check:chk_agent_claim_confidence,confidence >= 0 AND confidence <= 1" json:"confidence"`
-	ValidationNote    string    `gorm:"type:text;not null;default:''" json:"validation_note,omitempty"`
-	CreatedAt         time.Time `gorm:"not null;index" json:"created_at"`
+	Inspection        *ClaimInspection `gorm:"serializer:json;type:text" json:"inspection,omitempty"`
+	ID                string           `gorm:"type:varchar(36);primaryKey" json:"id"`
+	RootClaimID       string           `gorm:"type:varchar(36);not null;uniqueIndex:idx_agent_claim_root_revision,priority:1;index" json:"root_claim_id"`
+	Revision          int              `gorm:"not null;default:1;uniqueIndex:idx_agent_claim_root_revision,priority:2" json:"revision"`
+	SupersedesClaimID string           `gorm:"type:varchar(36);not null;default:'';index" json:"supersedes_claim_id,omitempty"`
+	UserID            int64            `gorm:"not null;index:idx_agent_claim_owner_run,priority:1;index:idx_agent_claim_owner_session,priority:1" json:"user_id"`
+	SessionID         int64            `gorm:"not null;index:idx_agent_claim_owner_session,priority:2" json:"session_id"`
+	MessageID         int64            `gorm:"not null;index" json:"message_id"`
+	RunID             string           `gorm:"type:varchar(36);not null;index:idx_agent_claim_owner_run,priority:2;index" json:"run_id"`
+	Kind              string           `gorm:"type:varchar(40);not null;default:'answer_fact';index" json:"kind"`
+	Text              string           `gorm:"type:text;not null" json:"text"`
+	Status            string           `gorm:"type:varchar(20);not null;index;check:chk_agent_claim_status,status IN ('hypothesized','verified','corrected','unsupported','uncertain')" json:"status"`
+	Confidence        float64          `gorm:"type:double precision;not null;default:0;check:chk_agent_claim_confidence,confidence >= 0 AND confidence <= 1" json:"confidence"`
+	ValidationNote    string           `gorm:"type:text;not null;default:''" json:"validation_note,omitempty"`
+	CreatedAt         time.Time        `gorm:"not null;index" json:"created_at"`
+}
+
+// ClaimInspection is an immutable semantic check of this specific claim revision.
+// Evidence snapshots preserve what was checked even after retrieval reindexing.
+type ClaimInspection struct {
+	CandidateHash   string              `json:"candidate_hash"`
+	Version         string              `json:"version"`
+	Model           string              `json:"model"`
+	Claim           string              `json:"claim"`
+	Result          string              `json:"result"`
+	Reason          string              `json:"reason"`
+	CounterQuery    string              `json:"counter_query"`
+	SearchCompleted bool                `json:"search_completed"`
+	Evidence        []InspectedEvidence `json:"evidence"`
+	CheckedAt       time.Time           `json:"checked_at"`
+}
+
+type InspectedEvidence struct {
+	AnchorQuote    string `json:"anchor_quote,omitempty"`
+	SourceRef      string `json:"source_ref"`
+	Content        string `json:"content"`
+	ContentHash    string `json:"content_hash"`
+	SourceRevision string `json:"source_revision"`
+	SourceRefs     string `json:"source_refs"`
+	Modality       string `json:"modality"`
+	StartMS        int64  `json:"start_ms"`
+	EndMS          int64  `json:"end_ms"`
+	Cited          bool   `json:"cited"`
+	Relation       string `json:"relation"`
+	Reason         string `json:"reason"`
 }
 
 func (AgentClaim) TableName() string { return "agent_claims" }

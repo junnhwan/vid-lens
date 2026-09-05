@@ -24,14 +24,16 @@ type EvidenceLedgerService struct {
 }
 
 type EvidenceLedgerRecordRequest struct {
-	UserID    int64
-	SessionID int64
-	MessageID int64
-	TaskID    int64
-	RunID     string
-	RawAnswer string
-	Evidence  []Citation // candidates whose Cn identifiers appear in RawAnswer
-	Retrieved []Citation // all retrieval artifacts observed during the run
+	UserID             int64
+	SessionID          int64
+	MessageID          int64
+	TaskID             int64
+	RunID              string
+	RawAnswer          string
+	Evidence           []Citation // candidates whose Cn identifiers appear in RawAnswer
+	Retrieved          []Citation // all retrieval artifacts observed during the run
+	Inspections        []model.ClaimInspection
+	inspectionRecorded bool
 }
 
 type EvidenceLedgerView struct {
@@ -62,6 +64,9 @@ func NewEvidenceLedgerService(repos *repository.Repositories) *EvidenceLedgerSer
 // RecordAnswer extracts only user-visible answer statements and citation
 // bindings. It persists no prompt, planner scratchpad, or chain-of-thought.
 func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLedgerRecordRequest) error {
+	if req.inspectionRecorded {
+		return nil
+	}
 	req.RunID, req.RawAnswer = strings.TrimSpace(req.RunID), strings.TrimSpace(req.RawAnswer)
 	if s == nil || s.repos == nil || s.repos.EvidenceLedger == nil || req.UserID <= 0 || req.SessionID <= 0 || req.MessageID <= 0 || req.TaskID <= 0 || req.RunID == "" || req.RawAnswer == "" {
 		return gorm.ErrInvalidData
@@ -78,10 +83,32 @@ func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLe
 	byCitationID := make(map[string]model.AgentEvidence, len(req.Evidence))
 	bySourceRef := make(map[string]model.AgentEvidence, len(req.Evidence)+len(req.Retrieved))
 	allEvidence := append(append([]Citation(nil), req.Retrieved...), req.Evidence...)
+	inspected := map[string]model.InspectedEvidence{}
+	for _, check := range req.Inspections {
+		for _, e := range check.Evidence {
+			inspected[e.SourceRef] = e
+		}
+	}
 	for _, citation := range allEvidence {
 		artifact, err := s.buildEvidence(req, citation, now)
 		if err != nil {
 			return err
+		}
+		if e, ok := inspected[artifact.SourceRef]; ok {
+			artifact.QuoteText, artifact.ContentHash = e.Content, e.ContentHash
+			artifact.SourceRevision, artifact.SourceRevisionStatus = e.SourceRevision, model.EvidenceSourceRevisionAvailable
+			if e.SourceRevision == "" {
+				artifact.SourceRevisionStatus = model.EvidenceSourceRevisionUnavailable
+			}
+			artifact.SourceType = e.Modality
+			locator, err := json.Marshal(map[string]any{"task_id": req.TaskID, "evidence_id": e.SourceRef, "modality": e.Modality, "source_snapshot": json.RawMessage(e.SourceRefs), "source_revision_status": artifact.SourceRevisionStatus, "time_range_status": model.EvidenceTimeRangeKnown})
+			if err != nil {
+				return err
+			}
+			artifact.StableLocator = string(locator)
+			artifact.StartMS, artifact.EndMS = e.StartMS, e.EndMS
+			artifact.StartSecond, artifact.EndSecond = e.StartMS/1000, (e.EndMS+999)/1000
+			artifact.TimeRangeStatus = model.EvidenceTimeRangeKnown
 		}
 		if _, exists := bySourceRef[artifact.SourceRef]; exists {
 			continue
@@ -106,6 +133,37 @@ func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLe
 	links := make([]model.AgentClaimEvidence, 0, len(statements))
 	for i, statement := range statements {
 		claim, claimLinks := buildLedgerClaim(req, statement, i, byCitationID, now)
+		if req.Inspections != nil {
+			if len(req.Inspections) != len(statements) || req.Inspections[i].Claim != statement.text {
+				return gorm.ErrInvalidData
+			}
+			check := req.Inspections[i]
+			claim.Inspection = &check
+			claim.Confidence = 0 // semantic result is not a calibrated probability
+			claim.Status = model.ClaimStatusUncertain
+			if check.Result == "support" {
+				claim.Status = model.ClaimStatusVerified
+			}
+			if check.Result == "contradict" {
+				claim.Status = model.ClaimStatusUnsupported
+			}
+			claim.ValidationNote = check.Reason
+			claimLinks = nil
+			for _, e := range check.Evidence {
+				artifact, ok := bySourceRef[e.SourceRef]
+				if !ok {
+					return gorm.ErrInvalidData
+				}
+				relation, status := model.ClaimEvidenceContext, model.ClaimStatusUncertain
+				if e.Relation == "support" {
+					relation, status = model.ClaimEvidenceSupports, model.ClaimStatusVerified
+				}
+				if e.Relation == "contradict" {
+					relation, status = model.ClaimEvidenceContradicts, model.ClaimStatusVerified
+				}
+				claimLinks = append(claimLinks, model.AgentClaimEvidence{ClaimID: claim.ID, EvidenceID: artifact.ID, Relation: relation, VerificationStatus: status, ValidationReason: e.Reason, CreatedAt: now})
+			}
+		}
 		claims = append(claims, claim)
 		links = append(links, claimLinks...)
 	}

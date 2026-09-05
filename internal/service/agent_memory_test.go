@@ -486,7 +486,7 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 	if result.Memory == nil || !reflect.DeepEqual(result.Memory.MemoryIDs, []string{"memory-1"}) {
 		t.Fatalf("result memory = %+v", result.Memory)
 	}
-	finalMessages := client.messages[len(client.messages)-1]
+	finalMessages := client.messages[1]
 	joined := ""
 	for _, message := range finalMessages {
 		joined += message.Content + "\n"
@@ -525,7 +525,7 @@ func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "主回答成功" || len(result.Citations) != 1 || result.Memory != nil {
+	if result.Answer != inspectorBlockedAnswer || len(result.Citations) != 1 || result.Memory != nil {
 		t.Fatalf("result = %+v", result)
 	}
 }

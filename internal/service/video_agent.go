@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -223,24 +222,18 @@ func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embe
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: *memoryPolicy,
 	}
-	if err := s.saveAgentExchange(ctx, req.UserID, req.SessionID, req.Question, result, recentLimit); err != nil {
+	ledgerReq := EvidenceLedgerRecordRequest{
+		UserID: req.UserID, SessionID: req.SessionID, TaskID: session.TaskID,
+		RunID: runID, RawAnswer: answer, Evidence: candidateCitations, Retrieved: buildCitations(req.Question, search.Citations),
+	}
+	if err := s.inspectAnswer(ctx, &ledgerReq, result, embedding, chat, profile); err != nil {
 		return nil, err
 	}
-	s.persistEvidenceLedger(ctx, EvidenceLedgerRecordRequest{
-		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
-		RunID: runID, RawAnswer: answer, Evidence: candidateCitations, Retrieved: buildCitations(req.Question, search.Citations),
-	})
+	if err := s.publishInspectedAnswer(ctx, req.Question, ledgerReq, result); err != nil {
+		return nil, err
+	}
 	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "goal_satisfied", nil)
 	return result, nil
-}
-
-func (s *VideoAgentService) persistEvidenceLedger(ctx context.Context, req EvidenceLedgerRecordRequest) {
-	if s == nil || s.chatSvc == nil || s.chatSvc.evidenceLedger == nil {
-		return
-	}
-	if err := s.chatSvc.evidenceLedger.RecordAnswer(ctx, req); err != nil {
-		log.Printf("agent evidence ledger write failed: user_id=%d session_id=%d run_id=%s err=%v", req.UserID, req.SessionID, req.RunID, err)
-	}
 }
 
 func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*model.ChatSession, error) {

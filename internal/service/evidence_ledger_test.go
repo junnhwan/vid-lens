@@ -408,7 +408,7 @@ func TestEvidenceLedgerKeepsUnknownTimeRangeUncertainAndAppendsCorrection(t *tes
 	}
 }
 
-func TestVideoAgentPersistsAnswerFactsWithoutChangingAnswer(t *testing.T) {
+func TestVideoAgentPersistsCandidateButBlocksUninspectedAnswer(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	if err := repos.TranscriptionChunk.UpsertCompleted(task.ID, 0, "audio/chunk-0.mp3", "owner 校验引用片段"); err != nil {
 		t.Fatal(err)
@@ -424,7 +424,7 @@ func TestVideoAgentPersistsAnswerFactsWithoutChangingAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Answer != "owner 必须校验。" {
+	if result.Answer != inspectorBlockedAnswer {
 		t.Fatalf("answer changed by ledger = %q", result.Answer)
 	}
 	view, err := ledger.GetRun(context.Background(), 7, result.RunID)

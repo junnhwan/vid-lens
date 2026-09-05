@@ -369,7 +369,7 @@ func (r *evidenceFunnelRunner) ValidateAndRecord(ctx context.Context, req Eviden
 				return evidenceFunnelActionResult{}, errors.New("evidence claim validation produced no auditable claims")
 			}
 			for _, claim := range view.Claims {
-				if claim.Status == model.ClaimStatusUnsupported {
+				if claim.Status == model.ClaimStatusUnsupported && claim.Inspection == nil {
 					return evidenceFunnelActionResult{}, errors.New("evidence claim validation rejected an unsupported answer claim")
 				}
 			}

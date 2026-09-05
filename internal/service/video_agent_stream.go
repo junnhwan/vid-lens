@@ -411,7 +411,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 		return nil, err
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
-		RunID: result.RunID, MessageID: result.MessageID, Degraded: false,
+		RunID: result.RunID, MessageID: result.MessageID, Degraded: result.Answer == inspectorBlockedAnswer,
 		TraceSummary: agentTraceSummary(result.Trace),
 		MemoryPolicy: result.MemoryPolicy,
 	}}); err != nil {
