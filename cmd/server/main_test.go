@@ -1,11 +1,29 @@
 package main
 
 import (
+	"net"
 	"testing"
 
 	"vid-lens/internal/config"
 	"vid-lens/internal/handler"
 )
+
+func TestServerListenAddressDefaultsToLoopback(t *testing.T) {
+	got := serverListenAddress(config.ServerConfig{Port: 8080})
+	if got != "127.0.0.1:8080" {
+		t.Fatalf("serverListenAddress() = %q, want loopback address", got)
+	}
+}
+
+func TestServerListenAddressAllowsExplicitHost(t *testing.T) {
+	got := serverListenAddress(config.ServerConfig{Host: "0.0.0.0", Port: 8080})
+	if got != "0.0.0.0:8080" {
+		t.Fatalf("serverListenAddress() = %q, want explicit host", got)
+	}
+	if _, _, err := net.SplitHostPort(got); err != nil {
+		t.Fatalf("serverListenAddress() returned invalid address: %v", err)
+	}
+}
 
 func TestServerAIProfileUsesGenericConfigFallbacks(t *testing.T) {
 	profile := serverAIProfile(config.AIConfig{

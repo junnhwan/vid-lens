@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,6 +57,14 @@ func loadServerConfig(path string) (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func serverListenAddress(cfg config.ServerConfig) string {
+	host := strings.TrimSpace(cfg.Host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(cfg.Port))
 }
 
 // serverAIProfile is the compatibility bridge for the process-level AI
@@ -250,7 +260,7 @@ func main() {
 
 	r := newServerRouter(*cfg, runtimeServerHandlers(app), app.rateLimiter, readinessChecks)
 
-	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	addr := serverListenAddress(cfg.Server)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("服务启动失败: %v", err)

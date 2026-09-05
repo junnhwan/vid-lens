@@ -1,6 +1,8 @@
 # VidLens 配置文件
 
 server:
+  # Local development binds to loopback by default; override for a reverse proxy or LAN deployment.
+  host: "${VIDLENS_SERVER_HOST:-127.0.0.1}"
   port: 8080
   mode: debug  # debug / release
 

@@ -124,6 +124,7 @@ sequenceDiagram
 
 - Go 1.24+
 - Docker / Docker Compose
+- 本地开发默认只监听 `127.0.0.1:8080`；如需让反向代理或局域网访问，可在 `.env` 设置 `VIDLENS_SERVER_HOST`
 - FFmpeg 和 yt-dlp，并确保它们在 PATH 中，或在 `.env` 中配置 `VIDLENS_FFMPEG_PATH` / `VIDLENS_YTDLP_PATH`
 - 可用的 ASR、LLM、Embedding 服务
 
