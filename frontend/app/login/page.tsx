@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Sparkles, ArrowRight } from 'lucide-react'
 import { api, setToken, getToken, ApiError } from '@/lib/api'
+import { Icon } from '@/components/ui/Icon'
+
+// 登录/注册:视觉对齐深色放映厅设计系统,认证逻辑与后端契约不变。
 
 const DEMO_USERNAME = 'test'
 const DEMO_PASSWORD = 'test0236'
@@ -50,83 +52,56 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex ui-root bg-paper-1">
-      <div className="hidden lg:flex w-[42%] bg-ink-0 text-paper-0 flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute -bottom-24 -right-16 w-72 h-72 rounded-full bg-sienna-600/15 blur-3xl" />
-        <div className="relative ui-fade-in">
-          <div className="flex items-center gap-2.5">
-            <span className="w-8 h-8 rounded-[8px] bg-paper-0 text-ink-0 text-[12px] font-semibold flex items-center justify-center">映</span>
-            <span className="text-[28px] font-semibold tracking-tight ui-serif">映知</span>
+    <div className="login-wrap">
+      <div className="login-side">
+        <div className="login-brand">
+          <div className="brand-mark" style={{ width: 38, height: 38 }} />
+          <div>
+            <div className="brand-name" style={{ fontSize: 24 }}>映知</div>
+            <div className="brand-sub">VIDLENS</div>
           </div>
-          <p className="text-[15px] text-paper-0/45 mt-4 italic leading-relaxed max-w-sm">
-            观之以映，释之以知
-          </p>
         </div>
-        <div className="relative space-y-7 ui-fade-in" style={{ animationDelay: '100ms' }}>
-          <Feature title="视频转写" desc="长视频自动 ASR，分片处理，失败可重试" />
-          <Feature title="引用式问答" desc="每个回答带 [C1] 引用片段，可回溯原文" />
-          <Feature title="跨视频检索" desc="知识库内多视频联合 RAG，标注来源" />
+        <p className="login-claim">观之以映,释之以知。</p>
+        <div className="login-features">
+          <Feature icon="activity" title="视频转写" desc="长视频自动 ASR,分片处理,失败可重试" />
+          <Feature icon="target" title="引用式问答" desc="每个回答带时间点引用,可回放核对到画面" />
+          <Feature icon="shield-check" title="Agent 检证" desc="回答保存后经独立证据核验,不确定就明说" />
         </div>
-        <div className="relative text-[12px] text-paper-0/40">
-          <Link href="/" className="hover:text-paper-0/70 transition-colors">← 返回视频库</Link>
+        <div className="login-foot">
+          <Link href="/">← 返回工作台</Link>
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm ui-fade-in">
-          <div className="lg:hidden mb-8">
-            <div className="text-[28px] font-semibold text-ink-0 tracking-tight ui-serif">映知</div>
-            <p className="text-[13px] text-ink-3 mt-1">AI 长视频理解与可追溯问答</p>
+      <div className="login-main">
+        <div className="login-card">
+          <div className="seg" style={{ marginBottom: 18 }}>
+            <button className={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setErr('') }}>登录</button>
+            <button className={mode === 'register' ? 'on' : ''} onClick={() => { setMode('register'); setErr('') }}>注册</button>
           </div>
 
-          <div className="flex gap-6 border-b border-ink-0/8 mb-6">
-            {(['login', 'register'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setErr('') }}
-                className={`pb-2.5 text-[13px] border-b-2 -mb-px transition-colors duration-200 ${
-                  mode === m ? 'border-sienna-500 text-ink-0 font-medium' : 'border-transparent text-ink-4'
-                }`}
-              >
-                {m === 'login' ? '登录' : '注册'}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="login-form">
             {mode === 'register' && (
-              <Field label="昵称（可选）" value={nickname} onChange={setNickname} placeholder="显示名" />
+              <Field label="昵称(可选)" value={nickname} onChange={setNickname} placeholder="显示名" />
             )}
             <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
             <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
 
-            {err && <div className="text-[12px] text-rust">{err}</div>}
+            {err && <div className="login-err">{err}</div>}
 
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full h-11 rounded-lg bg-ink-0 text-paper-0 text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {mode === 'login' ? '登录' : '注册并登录'}
-              {!busy && <ArrowRight className="w-4 h-4" />}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: 40 }} disabled={busy}>
+              {busy ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
             </button>
           </form>
 
-          <div className="my-6 h-px bg-ink-0/8" />
+          <div className="login-divider" />
 
-          <button
-            type="button"
-            onClick={demoLogin}
-            disabled={busy}
-            className="w-full h-11 rounded-lg border border-ink-0/10 bg-paper-0 text-[14px] font-medium flex items-center justify-center gap-2 ui-btn-lift hover:border-sienna-500/40 hover:text-sienna-700 transition-colors disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          <button type="button" className="btn" style={{ width: '100%', height: 40 }} onClick={demoLogin} disabled={busy}>
+            <Icon name="bulb" size="sm" />
             一键体验演示账号
           </button>
-          <p className="text-[11px] text-ink-4 mt-3 text-center">
-            演示账号 <span className="font-mono text-ink-3">test</span> / <span className="font-mono text-ink-3">test0236</span>
-            · 只读，可浏览视频转写与摘要并问答
+          <p className="login-demo-hint">
+            演示账号 <span className="mono">{DEMO_USERNAME}</span> / <span className="mono">{DEMO_PASSWORD}</span>
+            · 只读,可浏览转写与摘要并问答
           </p>
         </div>
       </div>
@@ -134,11 +109,14 @@ export default function LoginPage() {
   )
 }
 
-function Feature({ title, desc }: { title: string; desc: string }) {
+function Feature({ icon, title, desc }: { icon: 'activity' | 'target' | 'shield-check'; title: string; desc: string }) {
   return (
-    <div>
-      <div className="text-[14px] font-medium">{title}</div>
-      <div className="text-[12px] text-paper-0/40 mt-1 leading-relaxed max-w-[32ch]">{desc}</div>
+    <div className="login-feature">
+      <span className="agent-mark"><Icon name={icon} /></span>
+      <div>
+        <b>{title}</b>
+        <p>{desc}</p>
+      </div>
     </div>
   )
 }
@@ -147,16 +125,9 @@ function Field({ label, type = 'text', value, onChange, placeholder, autoFocus }
   label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean
 }) {
   return (
-    <div>
-      <label className="block text-[12px] text-ink-4 mb-1.5">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        className="ui-input"
-      />
+    <div style={{ marginBottom: 14 }}>
+      <label className="field-label">{label}</label>
+      <input className="input" type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} autoFocus={autoFocus} />
     </div>
   )
 }

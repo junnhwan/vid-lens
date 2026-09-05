@@ -4,7 +4,7 @@ import type {
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
-  UploadResult, User, VideoTask, VideoTimeline,
+  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline,
 } from './types'
 import { SSEStreamDecoder } from './streamDecoder'
 
@@ -91,6 +91,20 @@ export const api = {
     return req<UploadResult>('/media/upload', 'POST', fd)
   },
   uploadUrl: (url: string) => req<UploadResult>('/media/upload-url', 'POST', { url }),
+  checkUpload: (file_md5: string, file_size: number, chunk_size: number, total_chunks: number) =>
+    req<UploadProgressInfo>(
+      `/media/check-upload?file_md5=${file_md5}&file_size=${file_size}&chunk_size=${chunk_size}&total_chunks=${total_chunks}`,
+      'GET',
+    ),
+  uploadChunk: (file_md5: string, chunk_number: number, chunk: Blob) => {
+    const fd = new FormData()
+    fd.append('file_md5', file_md5)
+    fd.append('chunk_number', String(chunk_number))
+    fd.append('chunk', chunk)
+    return req<{ chunk_number: number }>('/media/upload-chunk', 'POST', fd)
+  },
+  mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number }) =>
+    req<UploadResult>('/media/merge-chunks', 'POST', p),
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),

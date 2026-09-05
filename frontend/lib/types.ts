@@ -174,6 +174,12 @@ export interface UploadResult {
   trace_id: string
 }
 
+// GET /media/check-upload 的响应:已上传分片编号列表,支持断点续传
+export interface UploadProgressInfo {
+  status: string // 'uploading' | 'completed'
+  uploaded: number[]
+}
+
 export interface PaginatedTasks {
   list: VideoTask[]
   total: number
