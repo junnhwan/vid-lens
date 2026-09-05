@@ -313,7 +313,7 @@ func formatOCRChunksForIndex(frames []model.VideoVisualFrame, chunkSize int) []T
 			observation := SourceTextObservation{Content: content, Modality: modality, Refs: []ChunkSourceRef{{
 				SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
 				StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus,
-				ObjectKey: frame.ObjectKey, CaptionMethod: method,
+				ObjectKey: frame.ObjectKey, ArtifactKind: model.VisualArtifactKindFrame, CaptionMethod: method,
 			}}}
 			out = append(out, SplitObservationsIntoChunks([]SourceTextObservation{observation}, chunkSize, 0)...)
 		}

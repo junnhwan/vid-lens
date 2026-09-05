@@ -573,7 +573,7 @@ func (r *evidenceFunnelRunner) visualGapCandidates(startSecond, endSecond int64)
 			ChunkIndex: frame.FrameIndex, StartSecond: startMS / 1000,
 			EndSecond: (endMS + 999) / 1000, Content: content,
 			StartMS: startMS, EndMS: endMS, TimeStatus: timeStatus,
-			SourceRefs: []ChunkSourceRef{{SourceType: modality, StableID: visualFrameStableID(frame), SourceRowID: frame.ID, StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus, ObjectKey: frame.ObjectKey}},
+			SourceRefs: []ChunkSourceRef{{SourceType: modality, StableID: visualFrameStableID(frame), SourceRowID: frame.ID, StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus, ObjectKey: frame.ObjectKey, ArtifactKind: model.VisualArtifactKindFrame}},
 		})
 		if len(candidates) >= r.policy.MaxVisualCandidates {
 			break

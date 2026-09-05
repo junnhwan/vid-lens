@@ -65,6 +65,8 @@ type VideoAgentService struct {
 	executionJournal              *AgentExecutionJournal
 	evidenceFunnelResultPublisher func(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error)
 	visualInvestigator            VisualInvestigator
+	evidenceVisionResolver        EvidenceInspectorVisionResolver
+	evidenceArtifactDownloader    VisualArtifactDownloader
 }
 
 type VideoAgentExecutionError struct {
@@ -96,6 +98,17 @@ func (s *VideoAgentService) SetVisualInvestigator(investigator VisualInvestigato
 	if s != nil {
 		s.visualInvestigator = investigator
 	}
+}
+
+// SetEvidenceInspectorVisualVerifier wires the independent pixel verifier.
+// The resolver and downloader are server-owned so evidence citations never
+// supply an arbitrary URL or local path.
+func (s *VideoAgentService) SetEvidenceInspectorVisualVerifier(resolver EvidenceInspectorVisionResolver, downloader VisualArtifactDownloader) {
+	if s == nil {
+		return
+	}
+	s.evidenceVisionResolver = resolver
+	s.evidenceArtifactDownloader = downloader
 }
 
 func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {

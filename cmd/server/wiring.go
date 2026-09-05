@@ -299,6 +299,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		return profile.VisionModel, nil
 	})
 	videoAgentSvc.SetVisualInvestigator(visualInvestigator)
+	videoAgentSvc.SetEvidenceInspectorVisualVerifier(visionResolver, deps.minioStorage.DownloadToTemp)
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
 	chatHandler.SetEvidenceLedgerService(evidenceLedgerSvc)

@@ -63,18 +63,32 @@ type ClaimInspection struct {
 }
 
 type InspectedEvidence struct {
-	AnchorQuote    string `json:"anchor_quote,omitempty"`
-	SourceRef      string `json:"source_ref"`
-	Content        string `json:"content"`
-	ContentHash    string `json:"content_hash"`
-	SourceRevision string `json:"source_revision"`
-	SourceRefs     string `json:"source_refs"`
-	Modality       string `json:"modality"`
-	StartMS        int64  `json:"start_ms"`
-	EndMS          int64  `json:"end_ms"`
-	Cited          bool   `json:"cited"`
-	Relation       string `json:"relation"`
-	Reason         string `json:"reason"`
+	AnchorQuote          string `json:"anchor_quote,omitempty"`
+	SourceRef            string `json:"source_ref"`
+	Content              string `json:"content"`
+	ContentHash          string `json:"content_hash"`
+	SourceRevision       string `json:"source_revision"`
+	SourceRefs           string `json:"source_refs"`
+	Modality             string `json:"modality"`
+	ArtifactKind         string `json:"artifact_kind,omitempty"`
+	ObjectKey            string `json:"object_key,omitempty"`
+	Source               string `json:"source,omitempty"`
+	CapturePolicyVersion string `json:"capture_policy_version,omitempty"`
+	Model                string `json:"model,omitempty"`
+	PromptVersion        string `json:"prompt_version,omitempty"`
+	StartMS              int64  `json:"start_ms"`
+	EndMS                int64  `json:"end_ms"`
+	Cited                bool   `json:"cited"`
+	PixelRequired        bool   `json:"pixel_required,omitempty"`
+	PixelChecked         bool   `json:"pixel_checked,omitempty"`
+	PixelObservation     string `json:"pixel_observation,omitempty"`
+	PixelObservationHash string `json:"pixel_observation_hash,omitempty"`
+	PixelRelation        string `json:"pixel_relation,omitempty"`
+	PixelReason          string `json:"pixel_reason,omitempty"`
+	PixelModel           string `json:"pixel_model,omitempty"`
+	PixelPromptVersion   string `json:"pixel_prompt_version,omitempty"`
+	Relation             string `json:"relation"`
+	Reason               string `json:"reason"`
 }
 
 func (AgentClaim) TableName() string { return "agent_claims" }

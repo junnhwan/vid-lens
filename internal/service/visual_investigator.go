@@ -105,6 +105,7 @@ type VisualObservation struct {
 	TaskID               int64    `json:"task_id"`
 	VideoRevision        string   `json:"video_revision"`
 	FrameRef             string   `json:"frame_ref"`
+	ArtifactKind         string   `json:"artifact_kind"`
 	FFmpegArgs           []string `json:"ffmpeg_args,omitempty"`
 	ObjectKey            string   `json:"object_key,omitempty"`
 	StartMS              int64    `json:"start_ms"`
@@ -570,7 +571,8 @@ func (s *QueryVisualInvestigator) inspectFrame(ctx context.Context, req InspectR
 	row := model.VideoVisualObservation{
 		ID: uuid.NewString(), UserID: req.UserID, TaskID: req.TaskID, TraceRef: traceRef,
 		CacheKey: cacheKey, VideoRevision: videoRevision,
-		FrameRef: "query-frame:" + frameHashHex[:24], FFmpegArgs: string(ffmpegArgs), ObjectKey: objectKey,
+		FrameRef: "query-frame:" + frameHashHex[:24], ArtifactKind: model.VisualArtifactKindFrame,
+		FFmpegArgs: string(ffmpegArgs), ObjectKey: objectKey,
 		StartMS: frame.TimeMs, EndMS: frame.TimeMs + 1, Source: queryVisualSource,
 		CapturePolicyVersion: queryVisualCapturePolicyVersion, Model: modelName,
 		PromptVersion: queryVisualPromptVersion, Observation: observationText,
@@ -659,7 +661,8 @@ func visualObservationFromModel(row model.VideoVisualObservation) VisualObservat
 	_ = json.Unmarshal([]byte(row.FFmpegArgs), &ffmpegArgs)
 	return VisualObservation{
 		ID: row.ID, TaskID: row.TaskID, VideoRevision: row.VideoRevision, FrameRef: row.FrameRef,
-		FFmpegArgs: ffmpegArgs, ObjectKey: row.ObjectKey, StartMS: row.StartMS, EndMS: row.EndMS, Source: row.Source,
+		ArtifactKind: firstNonEmpty(strings.TrimSpace(row.ArtifactKind), model.VisualArtifactKindFrame),
+		FFmpegArgs:   ffmpegArgs, ObjectKey: row.ObjectKey, StartMS: row.StartMS, EndMS: row.EndMS, Source: row.Source,
 		CapturePolicyVersion: row.CapturePolicyVersion, Model: row.Model, PromptVersion: row.PromptVersion,
 		Observation: row.Observation, StructuredFacts: facts, Gaps: gaps, RawResponseHash: row.RawResponseHash,
 		Status: row.Status, Error: row.ErrorMsg,

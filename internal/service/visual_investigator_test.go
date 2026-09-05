@@ -85,7 +85,7 @@ func TestVisualInvestigatorCapturesReplayableEvidenceWithinBudget(t *testing.T) 
 	if len(result.Observations) != 2 || len(uploadedKeys) != 2 || vision.calls != 1 {
 		t.Fatalf("observations=%+v uploaded=%v vision_calls=%d", result.Observations, uploadedKeys, vision.calls)
 	}
-	if result.Observations[0].Source != queryVisualSource || result.Observations[0].ObjectKey == "" || result.Observations[0].Model != "vision-test" || result.Observations[0].EndMS != result.Observations[0].StartMS+1 || len(result.Observations[0].FFmpegArgs) != 2 {
+	if result.Observations[0].Source != queryVisualSource || result.Observations[0].ArtifactKind != model.VisualArtifactKindFrame || result.Observations[0].ObjectKey == "" || result.Observations[0].Model != "vision-test" || result.Observations[0].EndMS != result.Observations[0].StartMS+1 || len(result.Observations[0].FFmpegArgs) != 2 {
 		t.Fatalf("observation provenance = %+v", result.Observations[0])
 	}
 	if len(result.ClaimBindings) != 1 || result.ClaimBindings[0].Status != "unverified" {

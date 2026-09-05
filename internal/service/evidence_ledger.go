@@ -101,7 +101,15 @@ func (s *EvidenceLedgerService) RecordAnswer(ctx context.Context, req EvidenceLe
 				artifact.SourceRevisionStatus = model.EvidenceSourceRevisionUnavailable
 			}
 			artifact.SourceType = e.Modality
-			locator, err := json.Marshal(map[string]any{"task_id": req.TaskID, "evidence_id": e.SourceRef, "modality": e.Modality, "source_snapshot": json.RawMessage(e.SourceRefs), "source_revision_status": artifact.SourceRevisionStatus, "time_range_status": model.EvidenceTimeRangeKnown})
+			locator, err := json.Marshal(map[string]any{
+				"task_id": req.TaskID, "evidence_id": e.SourceRef, "modality": e.Modality,
+				"artifact_kind": e.ArtifactKind, "object_key": e.ObjectKey, "source": e.Source,
+				"capture_policy_version": e.CapturePolicyVersion, "model": e.Model, "prompt_version": e.PromptVersion,
+				"pixel_required": e.PixelRequired, "pixel_checked": e.PixelChecked, "pixel_relation": e.PixelRelation,
+				"pixel_reason": e.PixelReason, "pixel_model": e.PixelModel, "pixel_prompt_version": e.PixelPromptVersion,
+				"pixel_observation_hash": e.PixelObservationHash, "source_snapshot": json.RawMessage(e.SourceRefs),
+				"source_revision_status": artifact.SourceRevisionStatus, "time_range_status": model.EvidenceTimeRangeKnown,
+			})
 			if err != nil {
 				return err
 			}

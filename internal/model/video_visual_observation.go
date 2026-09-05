@@ -8,6 +8,12 @@ const (
 	VisualObservationStatusFailed   = "failed"
 )
 
+const (
+	VisualArtifactKindFrame = "frame"
+	VisualArtifactKindCrop  = "crop"
+	VisualArtifactKindClip  = "clip"
+)
+
 // VideoVisualObservation is an append-only query-time observation. It is
 // deliberately separate from VideoVisualFrame: offline indexing can replace
 // its projection, while an investigation must remain replayable.
@@ -19,6 +25,7 @@ type VideoVisualObservation struct {
 	CacheKey             string    `gorm:"type:char(64);uniqueIndex;not null" json:"cache_key"`
 	VideoRevision        string    `gorm:"type:varchar(255);index;not null" json:"video_revision"`
 	FrameRef             string    `gorm:"type:varchar(160);index;not null" json:"frame_ref"`
+	ArtifactKind         string    `gorm:"type:varchar(20);index;not null;default:'frame'" json:"artifact_kind"`
 	FFmpegArgs           string    `gorm:"type:text;not null;default:'[]'" json:"ffmpeg_args"`
 	ObjectKey            string    `gorm:"type:varchar(500);not null" json:"object_key"`
 	StartMS              int64     `gorm:"index;not null" json:"start_ms"`

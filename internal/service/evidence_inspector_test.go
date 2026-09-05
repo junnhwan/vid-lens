@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -245,19 +247,83 @@ func TestInspectedPublicationLedgerFailureNeverPublishes(t *testing.T) {
 
 func TestEvidenceInspectorReusesQueryVisualObservation(t *testing.T) {
 	repos, req, _ := inspectorFixture(t)
-	row := &model.VideoVisualObservation{ID: "query-observed", UserID: 7, TaskID: req.TaskID, CacheKey: "key", VideoRevision: "33333333333333333333333333333333", ObjectKey: "frame.jpg", FrameRef: "frame-hash", StartMS: 1000, EndMS: 1001, Status: model.VisualObservationStatusObserved, Observation: `{"facts":["价格是十元。"],"gaps":[]}`, StructuredFacts: `["价格是十元。"]`, StructuredGaps: `[]`}
+	row := &model.VideoVisualObservation{ID: "query-observed", UserID: 7, TaskID: req.TaskID, CacheKey: "key", VideoRevision: "33333333333333333333333333333333", ArtifactKind: model.VisualArtifactKindFrame, ObjectKey: "frame.jpg", FrameRef: "frame-hash", StartMS: 1000, EndMS: 1001, Source: queryVisualSource, CapturePolicyVersion: queryVisualCapturePolicyVersion, Model: "investigator-model", PromptVersion: queryVisualPromptVersion, Status: model.VisualObservationStatusObserved, Observation: `{"facts":["价格是十元。"],"gaps":[]}`, StructuredFacts: `["价格是十元。"]`, StructuredGaps: `[]`}
 	if err := repos.VisualObservation.Append(context.Background(), row); err != nil {
 		t.Fatal(err)
 	}
 	req.Evidence = []Citation{{TaskID: req.TaskID, CitationID: "C1", EvidenceID: "visual-observation:" + row.ID, Content: "价格是十元。"}}
 	calls := 0
 	inspector := &EvidenceInspector{repos: repos, chat: inspectorJudge(t, "insufficient", &calls), search: func(context.Context, string) ([]Citation, error) { return nil, nil }}
+	pixelVision := &investigatorVisionClient{response: `{"relation":"support","observation":"画面中直接可见价格为十元。","reason":"像素文字与 claim 一致。"}`}
+	artifactPath := filepath.Join(t.TempDir(), "frame.jpg")
+	if err := os.WriteFile(artifactPath, []byte("jpeg-pixels"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inspector.SetVisualPixelVerifier(pixelVision, "pixel-model", func(_ context.Context, objectKey string) (string, error) {
+		if objectKey != row.ObjectKey {
+			t.Fatalf("object key = %q, want %q", objectKey, row.ObjectKey)
+		}
+		return artifactPath, nil
+	})
 	checks, _, err := inspector.Inspect(context.Background(), req)
 	if err != nil || checks[0].Result != "support" || checks[0].Evidence[0].Modality != "image" || !strings.Contains(checks[0].Evidence[0].SourceRefs, "frame-hash") {
 		t.Fatalf("query image not inspected: %+v %v", checks, err)
 	}
+	evidence := checks[0].Evidence[0]
+	if pixelVision.calls != 1 || !evidence.PixelChecked || evidence.PixelRelation != "support" || evidence.PixelModel != "pixel-model" || evidence.PixelPromptVersion != evidenceInspectorPixelVersion || evidence.ObjectKey != row.ObjectKey || evidence.ArtifactKind != model.VisualArtifactKindFrame || evidence.Source != row.Source || evidence.CapturePolicyVersion != row.CapturePolicyVersion || evidence.Model != row.Model || evidence.PromptVersion != row.PromptVersion || evidence.PixelObservationHash == "" {
+		t.Fatalf("pixel evidence provenance incomplete: %+v calls=%d", evidence, pixelVision.calls)
+	}
+	req.Inspections = checks
+	ledger := NewEvidenceLedgerService(repos)
+	if err := ledger.RecordAnswer(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ledger.GetRun(context.Background(), req.UserID, req.RunID)
+	if err != nil || view == nil || len(view.Claims) != 1 || view.Claims[0].Inspection == nil {
+		t.Fatalf("pixel inspection was not persisted: %+v err=%v", view, err)
+	}
+	stored := view.Claims[0].Inspection.Evidence[0]
+	if stored.ObjectKey != row.ObjectKey || stored.PixelRelation != "support" || !strings.Contains(view.Evidence[0].StableLocator, `"pixel_prompt_version":"`+evidenceInspectorPixelVersion+`"`) {
+		t.Fatalf("ledger lost pixel provenance: inspection=%+v evidence=%+v", stored, view.Evidence[0])
+	}
 	if inspectionsAllowPublication(checks, "另一条未经检查的结论。[C1]") {
 		t.Fatal("approval reused for another claim")
+	}
+}
+
+func TestEvidenceInspectorPixelFailureCannotSupportQueryVisualEvidence(t *testing.T) {
+	repos, req, _ := inspectorFixture(t)
+	row := &model.VideoVisualObservation{ID: "query-pixel-failure", UserID: 7, TaskID: req.TaskID, CacheKey: "pixel-failure-key", VideoRevision: "33333333333333333333333333333333", ArtifactKind: model.VisualArtifactKindFrame, ObjectKey: "query/frame.jpg", FrameRef: "pixel-failure-frame", StartMS: 1000, EndMS: 1001, Source: queryVisualSource, CapturePolicyVersion: queryVisualCapturePolicyVersion, Model: "investigator-model", PromptVersion: queryVisualPromptVersion, Status: model.VisualObservationStatusObserved, Observation: `{"facts":["价格是十元。"],"gaps":[]}`, StructuredFacts: `["价格是十元。"]`, StructuredGaps: `[]`}
+	if err := repos.VisualObservation.Append(context.Background(), row); err != nil {
+		t.Fatal(err)
+	}
+	req.Evidence = []Citation{{TaskID: req.TaskID, CitationID: "C1", EvidenceID: "visual-observation:" + row.ID, Content: "价格是十元。"}}
+	calls := 0
+	inspector := &EvidenceInspector{repos: repos, chat: inspectorJudge(t, "insufficient", &calls), search: func(context.Context, string) ([]Citation, error) { return nil, nil }}
+	inspector.SetVisualPixelVerifier(&investigatorVisionClient{response: `not-json`}, "pixel-model", func(context.Context, string) (string, error) {
+		return "", errors.New("object unavailable")
+	})
+	checks, _, err := inspector.Inspect(context.Background(), req)
+	if err != nil || len(checks) != 1 || checks[0].Result != "insufficient" || checks[0].Evidence[0].PixelChecked || checks[0].Evidence[0].PixelRelation != "insufficient" || inspectionsAllowPublication(checks, req.RawAnswer) {
+		t.Fatalf("pixel failure authorized publication: checks=%+v err=%v", checks, err)
+	}
+}
+
+func TestEvidenceInspectorPixelContradictionWinsOverTextSupport(t *testing.T) {
+	repos, req, _ := inspectorFixture(t)
+	row := &model.VideoVisualObservation{ID: "query-pixel-contradiction", UserID: 7, TaskID: req.TaskID, CacheKey: "pixel-contradiction-key", VideoRevision: "33333333333333333333333333333333", ArtifactKind: model.VisualArtifactKindFrame, ObjectKey: "query/contradiction.jpg", FrameRef: "contradiction-frame", StartMS: 1000, EndMS: 1001, Source: queryVisualSource, CapturePolicyVersion: queryVisualCapturePolicyVersion, Model: "investigator-model", PromptVersion: queryVisualPromptVersion, Status: model.VisualObservationStatusObserved, Observation: `{"facts":["价格是十元。"],"gaps":[]}`, StructuredFacts: `["价格是十元。"]`, StructuredGaps: `[]`}
+	if err := repos.VisualObservation.Append(context.Background(), row); err != nil {
+		t.Fatal(err)
+	}
+	req.Evidence = []Citation{{TaskID: req.TaskID, CitationID: "C1", EvidenceID: "visual-observation:" + row.ID, Content: "价格是十元。"}}
+	calls := 0
+	inspector := &EvidenceInspector{repos: repos, chat: inspectorJudge(t, "insufficient", &calls), search: func(context.Context, string) ([]Citation, error) { return nil, nil }}
+	inspector.SetVisualPixelVerifier(&investigatorVisionClient{response: `{"relation":"contradict","observation":"画面价格为二十元。","reason":"像素中的价格与 claim 冲突。"}`}, "pixel-model", func(context.Context, string) (string, error) {
+		return filepath.Join(t.TempDir(), "contradiction.jpg"), nil
+	})
+	checks, _, err := inspector.Inspect(context.Background(), req)
+	if err != nil || len(checks) != 1 || checks[0].Result != "contradict" || !strings.Contains(checks[0].Reason, "pixel") {
+		t.Fatalf("pixel contradiction did not block publication: checks=%+v err=%v", checks, err)
 	}
 }
 

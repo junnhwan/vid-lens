@@ -336,7 +336,7 @@ func visualInvestigationEvidence(investigation InvestigateVisualResult) []Retrie
 			TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped,
 			SourceRefs: []ChunkSourceRef{{SourceType: "image", StableID: "visual-observation:" + observed.ID,
 				StartMS: observed.StartMS, EndMS: observed.EndMS, TimeRangeStatus: model.ChunkTimeRangeExact,
-				ObjectKey: observed.ObjectKey, CaptionMethod: "query_vlm"}},
+				ObjectKey: observed.ObjectKey, ArtifactKind: firstNonEmpty(observed.ArtifactKind, model.VisualArtifactKindFrame), CaptionMethod: "query_vlm"}},
 		})
 	}
 	return evidence

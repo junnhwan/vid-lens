@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// VisionClient captions a single image for visual indexing (PPT/board/scene).
-// Product path: turn keyframes into searchable text when ASR cannot hear on-screen content.
+// VisionClient reads a single image for visual indexing or independent evidence inspection.
+// The product path turns keyframes into searchable text when ASR cannot hear on-screen content;
+// the inspector uses the same capability with a claim-specific verification prompt.
 type VisionClient interface {
 	CaptionImage(ctx context.Context, imagePath, prompt string) (string, error)
 }

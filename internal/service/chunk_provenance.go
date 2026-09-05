@@ -11,6 +11,7 @@ import (
 type ChunkSourceRef struct {
 	SourceType      string `json:"source_type"`
 	StableID        string `json:"stable_id"`
+	ArtifactKind    string `json:"artifact_kind,omitempty"`
 	SegmentKey      string `json:"segment_key,omitempty"`
 	SourceRowID     int64  `json:"source_row_id,omitempty"`
 	StartMS         int64  `json:"start_ms"`

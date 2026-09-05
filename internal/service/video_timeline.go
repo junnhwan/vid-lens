@@ -73,7 +73,7 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 			ref := ChunkSourceRef{
 				SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
 				StartMS: startMS, EndMS: endMS, TimeRangeStatus: status,
-				ObjectKey: frame.ObjectKey, CaptionMethod: method,
+				ObjectKey: frame.ObjectKey, ArtifactKind: model.VisualArtifactKindFrame, CaptionMethod: method,
 			}
 			atoms = append(atoms, TimelineAtom{
 				ID: fmt.Sprintf("%s:%s", modality, stableID), Modality: modality,
