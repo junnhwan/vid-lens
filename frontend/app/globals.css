@@ -485,6 +485,11 @@ svg { display: block; }
 
 .ws-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
+/* 迷你播放器(聊天右栏):与 .mini-player 叠加使用 */
+.player-card.compact .player-controls { padding: 8px 12px; gap: 10px; }
+.player-card.compact .pp-btn { width: 30px; height: 30px; }
+.player-card.compact .scrub { height: 20px; }
+
 .summary-block { margin-top: 20px; }
 .summary-block .card-pad h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .summary-body { font-size: 13px; color: var(--tx-2); line-height: 1.75; }

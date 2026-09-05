@@ -117,6 +117,8 @@ export const api = {
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),
   getRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET'),
   triggerRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'POST'),
+  downloadAudio: (id: number) =>
+    req<{ download_url: string; filename: string }>(`/media/download-audio/${id}`, 'GET'),
 
   // ============ Chat ============
   createSession: (params: { task_id?: number; scope_type?: ChatScopeType; knowledge_base_id?: number; title?: string; mode?: ChatMode }) =>
