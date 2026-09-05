@@ -124,7 +124,7 @@ sequenceDiagram
 
 - Go 1.24+
 - Docker / Docker Compose
-- FFmpeg，并在 `config.yaml` 中配置 `tools.ffmpeg_path`
+- FFmpeg 和 yt-dlp，并确保它们在 PATH 中，或在 `.env` 中配置 `VIDLENS_FFMPEG_PATH` / `VIDLENS_YTDLP_PATH`
 - 可用的 ASR、LLM、Embedding 服务
 
 ### 2. 启动中间件
@@ -146,6 +146,8 @@ docker compose -f docker-compose.observability.yml up -d
 ### 3. 配置本地参数
 
 复制 `.env.example` 为 `.env`，填写本地 AI 配置；程序会在加载 `config.yaml` 时自动读取同目录 `.env`。已有的 Windows/进程环境变量优先于 `.env`，所以 CI 或部署环境不受本地文件影响。`.env` 已被 Git 忽略，不能提交真实密钥。
+
+`config.yaml` 不再包含机器专属的 FFmpeg、yt-dlp 或 cookies 路径。默认从 PATH 查找 `ffmpeg` 和 `yt-dlp`；Windows 本机若使用固定安装目录，将实际路径写入 `.env` 的 `VIDLENS_FFMPEG_PATH`、`VIDLENS_YTDLP_PATH` 和可选的 `VIDLENS_COOKIES_PATH`。
 
 ```powershell
 Copy-Item .env.example .env

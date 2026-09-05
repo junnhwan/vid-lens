@@ -73,13 +73,14 @@ ai:
   vision_model: "${VIDLENS_VISION_MODEL}"
 
 tools:
-  ffmpeg_path: "D:/tools/ffmpeg/bin/ffmpeg.exe"
+  # Prefer local .env overrides; fall back to binaries available on PATH.
+  ffmpeg_path: "${VIDLENS_FFMPEG_PATH:-ffmpeg}"
   # 重叠 ASR 时间窗还会使用同目录、同扩展名的 ffprobe 可执行文件。
   # Optional. Missing binary => visual OCR stage skipped (ASR-only).
   ocr_path: "tesseract"
   ocr_lang: "chi_sim+eng"
-  ytdlp_path: "D:/tools/yt-dlp/yt-dlp.exe"
-  cookies_path: "D:/Download/www.bilibili.com_cookies.txt"
+  ytdlp_path: "${VIDLENS_YTDLP_PATH:-yt-dlp}"
+  cookies_path: "${VIDLENS_COOKIES_PATH:-}"
   proxy_url: ""
   allowed_video_hosts:
     - bilibili.com

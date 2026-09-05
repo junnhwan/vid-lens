@@ -19,21 +19,49 @@ function Test-ListeningPort([int]$Port) {
     ).Count -gt 0
 }
 
-function Resolve-DataRoot {
-    $configured = [Environment]::GetEnvironmentVariable('VIDLENS_DATA_ROOT')
-    if ([string]::IsNullOrWhiteSpace($configured)) {
-        $dotenvPath = Join-Path $repoRoot '.env'
-        if (Test-Path -LiteralPath $dotenvPath) {
-            $dotenvValue = Get-Content -LiteralPath $dotenvPath | Where-Object { $_ -match '^\s*VIDLENS_DATA_ROOT\s*=\s*(.*?)\s*$' } | Select-Object -First 1
-            if ($null -ne $dotenvValue -and $dotenvValue -match '^\s*VIDLENS_DATA_ROOT\s*=\s*(.*?)\s*$') {
-                $configured = $Matches[1].Trim()
-                if (($configured.StartsWith('"') -and $configured.EndsWith('"')) -or
-                    ($configured.StartsWith("'") -and $configured.EndsWith("'"))) {
-                    $configured = $configured.Substring(1, $configured.Length - 2)
-                }
+function Get-ConfiguredEnvValue([string]$Name) {
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        return $value.Trim()
+    }
+
+    $dotenvPath = Join-Path $repoRoot '.env'
+    if (Test-Path -LiteralPath $dotenvPath) {
+        $pattern = '^\s*' + [regex]::Escape($Name) + '\s*=\s*(.*?)\s*$'
+        $dotenvValue = Get-Content -LiteralPath $dotenvPath | Where-Object { $_ -match $pattern } | Select-Object -First 1
+        if ($null -ne $dotenvValue -and $dotenvValue -match $pattern) {
+            $value = $Matches[1].Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
+                ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+                $value = $value.Substring(1, $value.Length - 2)
             }
+            return $value
         }
     }
+
+    return $null
+}
+
+function Resolve-ExecutablePath([string]$Configured, [string]$Fallback) {
+    $candidate = $Configured
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = $Fallback
+    }
+    if ([System.IO.Path]::IsPathRooted($candidate)) {
+        if (Test-Path -LiteralPath $candidate) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+        return $null
+    }
+    $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command) {
+        return $null
+    }
+    return $command.Source
+}
+
+function Resolve-DataRoot {
+    $configured = Get-ConfiguredEnvValue 'VIDLENS_DATA_ROOT'
     if (-not [string]::IsNullOrWhiteSpace($configured)) {
         if ([System.IO.Path]::IsPathRooted($configured)) {
             return [System.IO.Path]::GetFullPath($configured)
@@ -68,13 +96,13 @@ foreach ($requiredPath in @(
 if (-not $InfraOnly) {
     Require-Command 'go'
     Require-Command 'npm'
-    foreach ($requiredPath in @(
-        (Join-Path $repoRoot 'frontend\node_modules'),
-        'D:\tools\ffmpeg\bin\ffmpeg.exe'
-    )) {
-        if (-not (Test-Path -LiteralPath $requiredPath)) {
-            throw "Preflight failed: '$requiredPath' was not found. The script stopped."
-        }
+    $nodeModulesPath = Join-Path $repoRoot 'frontend\node_modules'
+    if (-not (Test-Path -LiteralPath $nodeModulesPath)) {
+        throw "Preflight failed: '$nodeModulesPath' was not found. The script stopped."
+    }
+    $ffmpegPath = Resolve-ExecutablePath (Get-ConfiguredEnvValue 'VIDLENS_FFMPEG_PATH') 'ffmpeg'
+    if ($null -eq $ffmpegPath) {
+        throw 'Preflight failed: FFmpeg was not found. Install it on PATH or set VIDLENS_FFMPEG_PATH in .env.'
     }
 }
 
