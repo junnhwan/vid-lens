@@ -126,10 +126,7 @@ export function MemorySection({ user }: { user: User | null }) {
 
   return (
     <>
-      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>记忆治理</h3>
-      <p style={{ fontSize: 12.5, color: 'var(--tx-3)', marginBottom: 16 }}>
-        记忆按用户 / 视频 / 知识库 / 会话隔离,写入异步进行;撤回不会删除历史,只是不再参与召回。
-      </p>
+      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>记忆治理</h3>
 
       {loading && <div className="empty card"><p>正在加载记忆治理…</p></div>}
       {!loading && loadError && (
@@ -147,10 +144,7 @@ export function MemorySection({ user }: { user: User | null }) {
           <div className="pref-row">
             <div className="pr-body">
               <b>长期记忆偏好</b>
-              <span>
-                开启后回答参考召回的记忆,会话结束后异步抽取偏好与事实,冲突时保留版本并降低置信度
-                {pref.reason ? ` · ${reasonText(pref.reason)}` : ''}
-              </span>
+              <span>{pref.reason ? reasonText(pref.reason) : '开启后会在回答中召回已保存的偏好'}</span>
             </div>
             <button
               className={`switch${pref.enabled ? ' on' : ''}`}
@@ -174,7 +168,6 @@ export function MemorySection({ user }: { user: User | null }) {
             <div className="empty card">
               <Icon name="bulb" size="lg" />
               <b>还没有长期记忆</b>
-              <p>开启偏好后,会话结束时会异步总结出可复用的偏好与事实。</p>
             </div>
           ) : items.map(m => (
             <div key={m.id} className={`memory-item${m.status === 'withdrawn' ? ' withdrawn' : ''}`}>

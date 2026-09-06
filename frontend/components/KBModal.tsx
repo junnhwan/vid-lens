@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Plus, Loader2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { VideoTask, KnowledgeBase } from '@/lib/types'
+import { Modal } from '@/components/ui/Modal'
 
 export default function KBModal({ mode, kb, onClose, onChanged }: {
   mode: 'create' | 'manage'
@@ -24,12 +24,6 @@ export default function KBModal({ mode, kb, onClose, onChanged }: {
       api.listTasks(1, 200).then(r => setTasks(r.list || [])).catch(() => {})
     }
   }, [mode, kb])
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
 
   const create = async () => {
     if (!name.trim()) { setErr('请输入知识库名称'); return }
@@ -64,80 +58,52 @@ export default function KBModal({ mode, kb, onClose, onChanged }: {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-0/40 ui-backdrop" onClick={onClose}>
-      <div className="bg-paper-0 border border-ink-0/8 rounded-xl w-full max-w-lg ui-modal-in shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center px-5 h-12 border-b border-ink-0/8">
-          <div className="text-[14px] font-medium text-ink-0">{mode === 'create' ? '新建知识库' : `管理成员 · ${kb?.name}`}</div>
-          <button onClick={onClose} className="ml-auto w-7 h-7 rounded-lg flex items-center justify-center text-ink-4 hover:text-ink-1 hover:bg-paper-1">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+  const dirty = mode === 'create' && !!(name || description)
 
-        {mode === 'create' ? (
-          <div className="p-5 space-y-4">
-            <Field label="名称" value={name} onChange={setName} placeholder="分布式系统 · 核心知识库" autoFocus />
-            <div>
-              <label className="block text-[10px] uppercase tracking-wider text-ink-4 mb-1.5">描述</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full h-20 px-3 py-2 rounded-lg border border-ink-0/8 bg-paper-0 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-sienna-500/20 focus:border-sienna-500/40"
-                placeholder="跨视频严格 RAG 问答用"
-              />
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <button onClick={create} disabled={busy} className="h-8 px-4 rounded-lg bg-ink-0 text-paper-0 text-[11px] flex items-center gap-1.5 ui-btn-lift disabled:opacity-50">
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}创建
-              </button>
-              <span className="text-[10px] text-ink-4">创建后可添加多个视频做跨视频问答</span>
-            </div>
-            {err && <div className="text-[12px] text-red-600">{err}</div>}
-          </div>
-        ) : (
-          <div className="p-5">
-            <div className="text-[11px] text-ink-3 mb-2">勾选视频加入知识库（已完成转写/索引的视频可检索）</div>
-            <div className="max-h-80 overflow-y-auto scroll-thin border border-ink-0/8 rounded-lg divide-y divide-ink-0/6">
-              {tasks.length === 0 ? (
-                <div className="py-8 text-center text-[12px] text-ink-4">暂无可选视频</div>
-              ) : tasks.map(t => {
-                const on = memberIds.has(t.id)
-                return (
-                  <label key={t.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer ui-row-hover ${on ? 'bg-sienna-500/8' : ''}`}>
-                    <input type="checkbox" checked={on} onChange={() => toggleMember(t.id)} className="accent-sienna-600" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] text-ink-0 truncate">{t.title || t.filename}</div>
-                      <div className="text-[10px] text-ink-4 font-mono">{t.source_type === 'url' ? 'URL' : '本地'} · {t.has_transcription ? '已转写' : '无转写'}</div>
-                    </div>
-                  </label>
-                )
-              })}
-            </div>
-            <div className="flex items-center gap-3 pt-3 mt-1">
-              <span className="text-[10px] text-ink-4 font-mono">已选 {memberIds.size} 个视频</span>
-              <button onClick={onClose} className="ml-auto h-8 px-3 rounded-lg border border-ink-0/8 text-[11px] ui-btn-lift hover:bg-paper-1">完成</button>
-            </div>
-            {err && <div className="text-[12px] text-red-600 mt-2">{err}</div>}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, value, onChange, placeholder, autoFocus }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean
-}) {
   return (
-    <div>
-      <label className="block text-[10px] uppercase tracking-wider text-ink-4 mb-1.5">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        className="w-full h-10 px-3 rounded-lg border border-ink-0/8 bg-paper-0 text-[13px] focus:outline-none focus:ring-2 focus:ring-sienna-500/20 focus:border-sienna-500/40"
-      />
-    </div>
+    <Modal
+      title={mode === 'create' ? '新建知识库' : `管理成员 · ${kb?.name}`}
+      onClose={onClose}
+      confirmOnClose={dirty}
+      width={520}
+      footer={mode === 'create' ? (
+        <>
+          <button className="btn" onClick={onClose}>取消</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void create()}>创建</button>
+        </>
+      ) : (
+        <button className="btn btn-primary" onClick={onClose}>完成</button>
+      )}
+    >
+      {mode === 'create' ? (
+        <>
+          <label className="field-label">名称</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="名称" autoFocus />
+          <label className="field-label" style={{ marginTop: 12 }}>描述</label>
+          <textarea className="input" style={{ height: 80, padding: '10px 12px' }} value={description} onChange={e => setDescription(e.target.value)} />
+          {err && <div className="login-err" style={{ marginTop: 10 }}>{err}</div>}
+        </>
+      ) : (
+        <>
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            {tasks.length === 0 ? (
+              <div className="empty"><b>暂无可选视频</b></div>
+            ) : tasks.map(t => {
+              const on = memberIds.has(t.id)
+              return (
+                <label key={t.id} className="kb-member-row" style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" checked={on} onChange={() => void toggleMember(t.id)} />
+                  <span className="nm">
+                    <b>{t.title || t.filename}</b>
+                    <span>{t.has_transcription ? '已转写' : '无转写'}</span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          {err && <div className="login-err" style={{ marginTop: 10 }}>{err}</div>}
+        </>
+      )}
+    </Modal>
   )
 }

@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange, hasReplayRange } from '@/components/Citation'
-import { parseAnswerTokens, type AnswerToken } from '@/components/chat/answerTokens'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
 import { FunnelTrack } from '@/components/chat/FunnelTrack'
 import { LedgerClaims, LedgerDrawer, latestClaimsByRoot } from '@/components/chat/EvidenceLedger'
+import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
 import type { ChatMsg } from '@/components/chat/chatUtils'
@@ -365,7 +365,6 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   <div className="brand-mark" />
                   <h2>{isVideo ? '问这段视频' : `问「${scopeName}」`}</h2>
                 </div>
-                <p>每个回答都带可回放的时间点引用。点下面的问题,或直接输入。</p>
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
@@ -454,7 +453,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
-                placeholder={isVideo ? '问这段视频…回答会标注口述还是画面' : '向整个知识库提问…回答会注明每个片段来自哪场视频'}
+                placeholder={isVideo ? '问这段视频…' : '向知识库提问…'}
               />
               <button className="ask-send" disabled={streaming} onClick={() => submit()} aria-label="发送">
                 <Icon name="send" />
@@ -494,11 +493,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
             pendingExperimental ? (
               <>
                 <RunHeader mode={pendingExperimental} runId={null} />
-                <p style={{ fontSize: 11, color: 'var(--tx-4)', marginBottom: 10 }}>
-                  {pendingExperimental === 'research'
-                    ? '受限 Planner 循环运行中(非流式接口):Planner 只能从工具白名单中选择动作,investigate_visual 会在已定位的时间窗内按硬预算读取少量原始帧。'
-                    : '顺序与预算由服务端固定(非流式接口):Planner 只能在有限候选里选择补哪个缺口。'}
-                </p>
+                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>运行中…</p>
                 {pendingExperimental === 'evidence_funnel' && <FunnelTrack steps={[]} />}
                 <div className="rail-empty" style={{ paddingTop: 34 }}>
                   <span className="pulse" style={{ marginBottom: 10 }} />
@@ -511,12 +506,8 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
             ) : agentRail ? (
               <>
                 <RunHeader mode={(agentRail.mode as AgentUIMode) || 'agent'} runId={agentRail.runId} />
-                <p style={{ fontSize: 11, color: 'var(--tx-4)', marginBottom: 10 }}>
-                  {agentRail.mode === 'research'
-                    ? '受限 Planner 循环:只能从工具白名单中选择动作;investigate_visual 会在已定位的时间窗内按硬预算读取少量原始帧。'
-                    : agentRail.mode === 'evidence_funnel'
-                      ? '顺序与预算由服务端固定,Planner 只能在有限候选里选择补哪个缺口。'
-                      : '模板 direct_qa:先检索,再构建引用回答;保存后由独立核验决定是否发布。'}
+                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>
+                  {agentRail.mode === 'research' ? '受限研究循环' : agentRail.mode === 'evidence_funnel' ? '固定漏斗' : '检索后核验发布'}
                 </p>
                 {agentRail.mode === 'evidence_funnel' && <FunnelTrack steps={agentRail.steps} />}
                 {agentRail.steps.length > 0 ? (
@@ -538,9 +529,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   <span className="chip chip-mute mono">strict_rag</span>
                   <span className="chip chip-warn">推断</span>
                 </div>
-                <p style={{ fontSize: 11, color: 'var(--tx-4)', marginBottom: 10 }}>
-                  实际流事件只有 answer / citations / done,以下检索过程由前端推断展示。
-                </p>
+                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>检索过程由前端推断</p>
                 {ragTrace.length > 0 ? (
                   <div className="steps">
                     {ragTrace.map(step => <TraceStepView key={step.id} step={step} />)}
@@ -548,7 +537,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                 ) : (
                   <div className="rail-empty" style={{ paddingTop: 44 }}>
                     <Icon name="target" size="lg" />
-                    <p style={{ marginTop: 10 }}>发起一次提问后,<br />检索与生成状态会出现在这里。</p>
+                    <p style={{ marginTop: 10 }}>提问后会显示检索过程</p>
                   </div>
                 )}
               </>
@@ -614,7 +603,6 @@ function AgentMessageView({
   claimsCount?: number
 }) {
   const toast = useToast()
-  const tokens = useMemo(() => parseAnswerTokens(msg.content), [msg.content])
   const cites = msg.cites || []
   const isAgentRun = !!msg.agentRun
   const agentMode = (isAgentRun ? (msg.agentMode as AgentUIMode | undefined) ?? 'agent' : undefined)
@@ -624,8 +612,6 @@ function AgentMessageView({
     const hit = cites.find(c => c.id === `C${no}`)
     if (hit) onOpenEvidence(hit, cites)
   }
-
-  const paragraphs = useMemo(() => splitParagraphs(tokens), [tokens])
 
   const copyAnswer = () => {
     if (navigator.clipboard) {
@@ -646,21 +632,9 @@ function AgentMessageView({
         <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : '快速问答'}</span>
       </div>
       <div className="answer">
-        {paragraphs.map((para, pi) => (
-          <p key={pi}>
-            {para.map((tk, ti) => typeof tk === 'string'
-              ? <span key={ti}>{tk}</span>
-              : (
-                <button key={ti} className="cite" title="查看证据详情" onClick={() => openCite(tk.cite)}>
-                  C{tk.cite}
-                </button>
-              ))}
-          </p>
-        ))}
+        <MarkdownAnswer content={msg.content} onCite={openCite} />
         {waitingServer && (
-          <span className="chip chip-mute" title="研究/漏斗为非流式接口,等待期没有过程事件">
-            服务端执行中,完成后一次性回放
-          </span>
+          <span className="chip chip-mute">服务端执行中…</span>
         )}
         {msg.streaming && !waitingServer && <span className="stream-cursor" />}
       </div>
@@ -738,22 +712,6 @@ function AgentMessageView({
   )
 }
 
-function splitParagraphs(tokens: AnswerToken[]): AnswerToken[][] {
-  const paras: AnswerToken[][] = [[]]
-  for (const tk of tokens) {
-    if (typeof tk === 'string') {
-      tk.split('\n').forEach((seg, i) => {
-        if (i > 0) paras.push([])
-        if (seg) paras[paras.length - 1].push(seg)
-      })
-    } else {
-      paras[paras.length - 1].push(tk)
-    }
-  }
-  return paras
-}
-
-/** strict 快速问答的推断步骤 */
 function TraceStepView({ step }: { step: ChatTraceStep }) {
   const cls = step.status === 'running' ? 'running' : step.status === 'error' ? 'error' : 'done'
   return (

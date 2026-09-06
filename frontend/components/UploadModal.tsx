@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import { MD5 } from '@/lib/md5'
 import { fmtSize } from '@/lib/format'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { Modal } from '@/components/ui/Modal'
 
 // 上传模态:本地文件(分片 + 断点续传)与视频链接两个通道。
 // 分片大小与后端 config.yaml 的 upload.chunk_size 默认值(5MB)一致。
@@ -33,12 +34,6 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
   const seq = useRef(0)
   const rowsRef = useRef<UploadRow[]>([])
   rowsRef.current = rows
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
 
   const patchRow = (id: number, patch: Partial<UploadRow>) => {
     setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)))
@@ -114,14 +109,14 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
     }
   }
 
+  const inFlight = urlBusy || rows.some(r => r.phase === 'hashing' || r.phase === 'uploading' || r.phase === 'merging')
+
   return (
-    <div className="overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal">
-        <div className="modal-head">
-          <h3>上传视频</h3>
-          <button className="btn btn-ic btn-ghost" onClick={onClose} aria-label="关闭"><Icon name="x" /></button>
-        </div>
-        <div className="modal-body">
+    <Modal
+      title="上传视频"
+      onClose={onClose}
+      confirmOnClose={inFlight || !!url ? '关闭会中断未完成的上传,已填内容也会丢失。确定关闭?' : false}
+    >
           <div className="seg" style={{ marginBottom: 14 }}>
             <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>本地文件</button>
             <button className={tab === 'url' ? 'on' : ''} onClick={() => setTab('url')}>视频链接</button>
@@ -141,7 +136,7 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
               >
                 <Icon name="upload" />
                 <b>拖入视频文件,或点击选择</b>
-                <span>分片上传,中断后重选同一文件可续传 · 单文件 2 GB 以内</span>
+                <span>单文件 2 GB 以内</span>
               </div>
               <input
                 ref={fileRef}
@@ -174,17 +169,14 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
                 value={url}
                 onChange={e => setUrl(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !urlBusy) void uploadUrl() }}
-                placeholder="https://www.bilibili.com/video/… 或任意可下载地址"
+                placeholder="https://www.bilibili.com/video/… 或可下载地址"
                 autoFocus
               />
-              <p className="field-help">服务端用 yt-dlp 拉取,下载阶段单独排队,失败可独立重试。</p>
               <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={urlBusy} onClick={() => void uploadUrl()}>
                 创建下载任务
               </button>
             </div>
           )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

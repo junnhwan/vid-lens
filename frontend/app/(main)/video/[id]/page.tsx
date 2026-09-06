@@ -14,9 +14,11 @@ import { fmtRelTime, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
+import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { expandTranscript } from '@/lib/transcript'
 
 // 视频工作台:播放器 + 多模态时间轴 + 画面证据 + 检索索引 + 摘要。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
@@ -76,7 +78,10 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const [playheadMs, setPlayheadMs] = useState(0)
   const [busy, setBusy] = useState<ActionKind | ''>('')
 
-  useCrumb(['视频库', task ? taskTitle(task) : `视频 #${taskId}`])
+  useCrumb([
+    { label: '视频库', href: '/library' },
+    { label: task ? taskTitle(task) : `视频 #${taskId}` },
+  ])
 
   useEffect(() => {
     let active = true
@@ -146,6 +151,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     () => (timeline?.atoms || []).filter(a => a.modality === 'transcript'),
     [timeline],
   )
+  const transcriptRows = useMemo(() => expandTranscript(transcriptAtoms), [transcriptAtoms])
   const visualAtoms = useMemo(
     () => (timeline?.atoms || []).filter(a => a.modality === 'visual_ocr' || a.modality === 'visual_caption'),
     [timeline],
@@ -173,7 +179,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     return null
   }, [taskId])
 
-  const liveIndex = transcriptAtoms.findIndex(
+  const liveIndex = transcriptRows.findIndex(
     a => playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1),
   )
 
@@ -255,7 +261,6 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
         <div className="empty">
           <Icon name="activity" size="lg" />
           <b>转写完成后就能看到时间轴</b>
-          <p>时间轴会把解说转写与画面观察排在同一条可回放的时间线上。</p>
         </div>
       )
     }
@@ -264,7 +269,6 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
         <div className="empty">
           <Icon name="activity" size="lg" />
           <b>时间轴暂无数据</b>
-          <p>转写分片仍在处理,还没有产生可定位的时间片段。</p>
         </div>
       )
     }
@@ -310,9 +314,9 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             </div>
           </>
         )}
-        {transcriptAtoms.length > 0 && (
+        {transcriptRows.length > 0 && (
           <div className="transcript-list">
-            {transcriptAtoms.map((a, i) => (
+            {transcriptRows.map((a, i) => (
               <div key={a.id} className={`t-row${i === liveIndex ? ' live' : ''}`} onClick={() => seek(a.start_ms)}>
                 <span className="ts">{formatTime(a.start_ms)}</span>
                 <span className="tx">{a.content}</span>
@@ -330,17 +334,13 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
         <div className="empty">
           <Icon name="eye" size="lg" />
           <b>没有画面索引</b>
-          <p>视觉分支会与转写并行:关键帧 OCR 与画面描述分开入索引,失败不影响文本问答。</p>
         </div>
       )
     }
     return (
       <>
-        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 12 }}>
-          关键帧经感知哈希去重后,OCR 与画面描述分别入索引。下面 {frames.length} 帧都带稳定时间戳,点击时间码即可回放。
-        </p>
-        <p style={{ fontSize: 11.5, color: 'var(--tx-4)', marginBottom: 12 }}>
-          帧图像存储在对象存储,当前版本未开放浏览器预览,卡片展示索引时保存的画面观察文本。
+        <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 12 }}>
+          {frames.length} 帧 · 点击时间码回放
         </p>
         <div className="frames-grid">
           {frames.map(f => (
@@ -377,7 +377,6 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
         <div className="empty">
           <Icon name="layers" size="lg" />
           <b>索引状态不可用</b>
-          <p>查询索引需要已配置默认 AI Profile(用于向量维度校验);配置后即可在这里查看与重建索引。</p>
         </div>
       )
     }
@@ -397,9 +396,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
           )}
         </div>
         {index.needs_rebuild && (
-          <p style={{ fontSize: 11.5, color: 'var(--tx-4)', marginTop: 12 }}>
-            投影已过期(needs_rebuild)。重建索引只重做检索投影,不重做转写。
-          </p>
+          <p style={{ fontSize: 13, color: 'var(--tx-4)', marginTop: 12 }}>索引已过期,需要重建</p>
         )}
         <button
           className="btn btn-sm"
@@ -506,13 +503,12 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                     {task.summary.model_name} · {fmtRelTime(task.summary.created_at)}
                   </span>
                 </h3>
-                <div className="summary-body">{renderMiniMarkdown(task.summary.content)}</div>
+                <div className="summary-body"><MarkdownAnswer content={task.summary.content} /></div>
               </div>
             ) : (
               <div className="empty card">
                 <Icon name="wand" size="lg" />
                 <b>还没有摘要</b>
-                <p>摘要由 LLM 基于转写生成,生成后可以在这里直接阅读。</p>
               </div>
             )}
           </div>
@@ -533,33 +529,4 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
       </div>
     </div>
   )
-}
-
-// 摘要是 Markdown:这里只渲染原型 summaryHTML 覆盖的子集(段落 / "- " 列表 / **加粗** / # 标题)。
-function renderMiniMarkdown(md: string) {
-  const blocks: React.ReactNode[] = []
-  let listItems: string[] = []
-  const flushList = (key: string) => {
-    if (listItems.length === 0) return
-    const items = listItems
-    blocks.push(<ul key={key}>{items.map((item, i) => <li key={i}>{mdInline(item)}</li>)}</ul>)
-    listItems = []
-  }
-  md.split('\n').forEach((raw, i) => {
-    const ln = raw.trim()
-    if (!ln) { flushList(`ul-${i}`); return }
-    if (ln.startsWith('- ')) { listItems.push(ln.slice(2)); return }
-    flushList(`ul-${i}`)
-    if (/^#{1,6}\s/.test(ln)) {
-      blocks.push(<p key={i}><b>{mdInline(ln.replace(/^#{1,6}\s/, ''))}</b></p>)
-    } else {
-      blocks.push(<p key={i}>{mdInline(ln)}</p>)
-    }
-  })
-  flushList('ul-end')
-  return blocks
-}
-
-function mdInline(s: string): React.ReactNode[] {
-  return s.split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 === 1 ? <b key={i}>{part}</b> : part))
 }

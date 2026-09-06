@@ -6,14 +6,14 @@ import type { User } from '@/lib/types'
 import { useCrumb } from '@/components/shell/AppShell'
 import { AIProfilesSection } from '@/components/settings/AIProfilesSection'
 import { MemorySection } from '@/components/settings/MemorySection'
-
-// 设置页:BYOK AI 服务配置 + 记忆治理,左侧导航两个 tab。
-// 演示账号(role=DEMO)在后端对所有写操作直接拒绝,这里以只读态呈现,不做假象。
+import { useTheme } from '@/components/theme/ThemeProvider'
+import { Icon } from '@/components/ui/Icon'
 
 export default function SettingsPage() {
-  useCrumb(['设置'])
+  useCrumb([{ label: '设置' }])
   const [tab, setTab] = useState<'ai' | 'mem'>('ai')
   const [user, setUser] = useState<User | null>(null)
+  const { theme, setTheme } = useTheme()
 
   useEffect(() => {
     let active = true
@@ -24,6 +24,19 @@ export default function SettingsPage() {
   return (
     <div className="page">
       <div className="section-head" style={{ marginTop: 0 }}><h2>设置</h2></div>
+      <div className="pref-row" style={{ marginBottom: 22 }}>
+        <div className="pr-body">
+          <b>外观</b>
+        </div>
+        <div className="seg">
+          <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>
+            <Icon name="moon" size="sm" />深色
+          </button>
+          <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>
+            <Icon name="sun" size="sm" />浅色
+          </button>
+        </div>
+      </div>
       <div className="settings-grid">
         <div className="settings-nav">
           <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>AI 服务</button>

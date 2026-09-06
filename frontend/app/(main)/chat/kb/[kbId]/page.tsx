@@ -22,7 +22,11 @@ export default function KBChatPage({ params }: { params: { kbId: string } }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  useCrumb(['知识库', kb?.name || `知识库 #${kbId}`, '问答'])
+  useCrumb([
+    { label: '知识库', href: '/kb' },
+    { label: kb?.name || `知识库 #${kbId}` },
+    { label: '问答' },
+  ])
 
   useEffect(() => {
     let active = true

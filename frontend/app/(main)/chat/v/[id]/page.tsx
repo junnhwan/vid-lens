@@ -24,7 +24,11 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  useCrumb(['视频库', task ? taskTitle(task) : `视频 #${taskId}`, '问答'])
+  useCrumb([
+    { label: '视频库', href: '/library' },
+    { label: task ? taskTitle(task) : `视频 #${taskId}`, href: `/video/${taskId}` },
+    { label: '问答' },
+  ])
 
   useEffect(() => {
     let active = true

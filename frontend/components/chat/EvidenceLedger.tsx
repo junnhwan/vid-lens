@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { Icon, type IconName } from '@/components/ui/Icon'
 import { useToast } from '@/components/Toast'
+import { DrawerVeil } from '@/components/ui/Modal'
 
 // 证据账本:GET /agent/evidence-ledgers/:run_id 的展示层。
 // claim 状态色、置信、反例检索 counter_query、像素核验结果、关联证据跳证据抽屉,
@@ -297,7 +298,7 @@ export function LedgerDrawer({ runId, view, loading, error, cites, modeLabel = '
   const refresh = () => onRetry(runId)
   return (
     <>
-      <div className="drawer-veil" onClick={onClose} />
+      <DrawerVeil onClose={onClose} />
       <div className="drawer" style={{ width: 520 }} role="dialog" aria-label="证据账本">
         <div className="drawer-head">
           <Icon name="shield-check" />
@@ -313,8 +314,8 @@ export function LedgerDrawer({ runId, view, loading, error, cites, modeLabel = '
             <span className="chip chip-mute">{view ? `${latestClaimsByRoot(view.claims).length} 条 claim · ${(view.evidence ?? []).length} 条证据` : '—'}</span>
             <span className="chip chip-mute">追加式,不覆盖历史</span>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 14 }}>
-            每条回答事实都会与证据显式绑定。「已验证」表示来源与时间范围可回放核对,不代表语义真值;你可以对不确定的判断追加人工更正。
+          <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 14 }}>
+            「已验证」表示来源可回放,不代表语义真值。
           </p>
           {loading && <div className="rail-empty" style={{ paddingTop: 30 }}><p>正在加载证据账本…</p></div>}
           {!loading && error && (

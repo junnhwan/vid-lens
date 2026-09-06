@@ -8,6 +8,7 @@ import { fmtRelTime } from '@/lib/format'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { Modal } from '@/components/ui/Modal'
 
 // 知识库:跨视频问答入口(卡片进入问答)+ 新建 + 成员速览。
 // 对应原型 #/kb;新建知识库是后端已有能力(原型里为演示关闭)。
@@ -15,7 +16,7 @@ import { Icon } from '@/components/ui/Icon'
 export default function KBListPage() {
   const router = useRouter()
   const toast = useToast()
-  useCrumb(['知识库'])
+  useCrumb([{ label: '知识库' }])
 
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +54,6 @@ export default function KBListPage() {
     <div className="page page-wide">
       <div className="section-head" style={{ marginTop: 0 }}>
         <h2>知识库</h2>
-        <span style={{ fontSize: 12.5, color: 'var(--tx-3)' }}>跨视频提问,回答会注明每个片段来自哪场视频</span>
         <span className="more" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</span>
       </div>
 
@@ -64,7 +64,6 @@ export default function KBListPage() {
           <div className="empty">
             <Icon name="folder" size="lg" />
             <b>还没有知识库</b>
-            <p>知识库把多个视频放进同一个检索范围,回答会注明每个片段来自哪场视频。</p>
             <button className="btn btn-sm btn-primary" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</button>
           </div>
         </div>
@@ -103,24 +102,23 @@ export default function KBListPage() {
       )}
 
       {createOpen && (
-        <div className="overlay" onClick={e => { if (e.target === e.currentTarget) setCreateOpen(false) }}>
-          <div className="modal" style={{ width: 460 }}>
-            <div className="modal-head">
-              <h3>新建知识库</h3>
-              <button className="btn btn-ic btn-ghost" onClick={() => setCreateOpen(false)} aria-label="关闭"><Icon name="x" /></button>
-            </div>
-            <div className="modal-body">
-              <label className="field-label">名称</label>
-              <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="例如:AI 前沿追踪" autoFocus />
-              <label className="field-label" style={{ marginTop: 12 }}>描述(可选)</label>
-              <input className="input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="这个库收录什么内容" />
-            </div>
-            <div className="modal-foot">
+        <Modal
+          title="新建知识库"
+          onClose={() => setCreateOpen(false)}
+          confirmOnClose={!!(name || desc)}
+          width={460}
+          footer={(
+            <>
               <button className="btn" onClick={() => setCreateOpen(false)}>取消</button>
               <button className="btn btn-primary" disabled={creating} onClick={() => void create()}>创建</button>
-            </div>
-          </div>
-        </div>
+            </>
+          )}
+        >
+          <label className="field-label">名称</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="例如:AI 前沿追踪" autoFocus />
+          <label className="field-label" style={{ marginTop: 12 }}>描述(可选)</label>
+          <input className="input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="这个库收录什么" />
+        </Modal>
       )}
     </div>
   )
@@ -145,7 +143,7 @@ function KBMembers({ kbId, fallbackName }: { kbId: number; fallbackName: string 
     return (
       <div className="card">
         <div className="empty" style={{ padding: 22 }}>
-          <p>「{fallbackName}」还没有成员视频。在视频库上传并在设置中加入后,提问时会自动纳入检索范围。</p>
+          <p>「{fallbackName}」还没有成员视频。</p>
         </div>
       </div>
     )

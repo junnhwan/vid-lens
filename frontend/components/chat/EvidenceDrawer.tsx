@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect } from 'react'
 import type { CiteRef } from '@/components/Citation'
 import { formatTime, formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { ModalityTag, modalityView } from '@/components/ui/ModalityTag'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { DrawerVeil } from '@/components/ui/Modal'
 
 // 证据详情抽屉:行内 C# chip / 引用卡点开。展示模态、毫秒范围、anchor quote、
 // 召回通道等后端真实携带的元数据;「跳转回放」由宿主决定行为(单视频内 seek
@@ -31,12 +31,6 @@ function timeStatusText(status?: string): string {
 export function EvidenceDrawer({ cite, fallbackTitle, canJump, jumpDisabledHint, onJump, onClose }: EvidenceDrawerProps) {
   const toast = useToast()
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const title = cite.videoTitle || fallbackTitle
   const quote = cite.anchorQuote || cite.content
   const hasRange = hasReplayRange(cite)
@@ -53,7 +47,7 @@ export function EvidenceDrawer({ cite, fallbackTitle, canJump, jumpDisabledHint,
 
   return (
     <>
-      <div className="drawer-veil" onClick={onClose} />
+      <DrawerVeil onClose={onClose} />
       <div className="drawer" role="dialog" aria-label="证据详情">
         <div className="drawer-head">
           <span

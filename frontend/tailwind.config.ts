@@ -12,7 +12,8 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Space Grotesk"', '-apple-system', '"Segoe UI"', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', 'sans-serif'],
+        sans: ['"Noto Sans SC"', '"PingFang SC"', '"Hiragino Sans GB"', '"Microsoft YaHei"', 'sans-serif'],
+        serif: ['"Noto Serif SC"', '"Songti SC"', 'serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', '"Cascadia Code"', 'Consolas', 'monospace'],
       },
     },

@@ -7,9 +7,7 @@ import { api, getToken } from '@/lib/api'
 import type { User } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import UploadModal from '@/components/UploadModal'
-
-// 应用外壳:左侧导航 rail + 顶栏(面包屑 / 搜索 / 上传)。
-// 页面通过 useCrumb() 设置面包屑,通过 useShell().openUpload 打开上传模态。
+import { useTheme } from '@/components/theme/ThemeProvider'
 
 interface ShellCtx {
   user: User | null
@@ -24,16 +22,23 @@ export function useShell(): ShellCtx {
   return c
 }
 
-/** 面包屑由页面自己声明,最后一项加粗(与原型 setCrumb 一致)。 */
-export function useCrumb(items: string[]) {
+export interface CrumbItem {
+  label: string
+  href?: string
+}
+
+export function useCrumb(items: CrumbItem[]) {
   const { setCrumb } = useContext(CrumbSetter)
-  const key = items.join('\u0001')
+  const key = items.map(i => `${i.label}\u0001${i.href || ''}`).join('\u0002')
   useEffect(() => {
-    setCrumb(key.split('\u0001'))
+    setCrumb(key.split('\u0002').filter(Boolean).map(row => {
+      const [label, href] = row.split('\u0001')
+      return { label, href: href || undefined }
+    }))
   }, [key, setCrumb])
 }
 
-const CrumbSetter = createContext<{ setCrumb: (items: string[]) => void }>({ setCrumb: () => {} })
+const CrumbSetter = createContext<{ setCrumb: (items: CrumbItem[]) => void }>({ setCrumb: () => {} })
 
 const NAV = [
   { href: '/', label: '工作台', icon: 'home', match: (p: string) => p === '/' },
@@ -44,7 +49,8 @@ const NAV = [
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const [crumb, setCrumb] = useState<string[]>([])
+  const { theme, toggle } = useTheme()
+  const [crumb, setCrumb] = useState<CrumbItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
 
@@ -56,22 +62,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     api.profile().then(setUser).catch(() => { /* 401 由 api 层统一跳登录 */ })
   }, [router])
 
-  // 全局 "/" 键 → 视频库并聚焦过滤框(与原型一致)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null
-      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
-      if (e.key === '/' && !typing) {
-        e.preventDefault()
-        router.push('/library?focus=1')
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [router])
-
   const openUpload = useCallback(() => setUploadOpen(true), [])
-  const setCrumbStable = useCallback((items: string[]) => setCrumb(items), [])
+  const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
   const initial = (user?.nickname || user?.username || '').trim().charAt(0).toUpperCase() || '·'
 
@@ -94,6 +86,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
             <div className="rail-spacer" />
+            <button
+              className="nav-item"
+              onClick={toggle}
+              aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+              {theme === 'dark' ? '浅色' : '深色'}
+            </button>
             <Link href="/settings" className={`nav-item${pathname.startsWith('/settings') ? ' active' : ''}`}>
               <Icon name="settings" />
               设置
@@ -109,23 +109,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="main">
             <header className="topbar">
-              <div className="crumb">
-                {crumb.map((item, i) => (
-                  i === crumb.length - 1
-                    ? <b key={i}>{item}</b>
-                    : <span key={i} style={{ display: 'flex', gap: 8 }}>{item}<span className="div">/</span></span>
-                ))}
-              </div>
-              <div className="topbar-spacer" />
-              <button className="searchbox" onClick={() => router.push('/library?focus=1')}>
-                <Icon name="search" size="sm" />
-                搜索视频、知识库、会话
-                <kbd>/</kbd>
-              </button>
-              <button className="btn btn-primary btn-sm" onClick={openUpload}>
-                <Icon name="upload" size="sm" />
-                上传视频
-              </button>
+              <nav className="crumb" aria-label="面包屑">
+                {crumb.map((item, i) => {
+                  const last = i === crumb.length - 1
+                  return (
+                    <span key={`${item.label}-${i}`} className="crumb-seg">
+                      {i > 0 && <span className="div">/</span>}
+                      {last || !item.href
+                        ? <b>{item.label}</b>
+                        : <Link href={item.href}>{item.label}</Link>}
+                    </span>
+                  )
+                })}
+              </nav>
             </header>
             <div className="content" id="content">{children}</div>
           </div>

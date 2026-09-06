@@ -5,7 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import type { AIProfile } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import { useToast } from '@/components/Toast'
-import { ProfileFormModal } from '@/components/settings/ProfileFormModal'
+import { ProfileForm } from '@/components/settings/ProfileForm'
 
 // BYOK AI 服务配置:profile 列表(一个 profile 覆盖 llm / asr / embedding / vision 四组能力),
 // 外加 rerank 的真实状态(服务端为确定性 rerank,无 profile 配置项,按"未启用"如实呈现)。
@@ -58,21 +58,28 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
     }
   }
 
+  if (editorOpen) {
+    return (
+      <ProfileForm
+        profile={editing}
+        onClose={() => setEditorOpen(false)}
+        onSaved={() => void load()}
+      />
+    )
+  }
+
   return (
     <>
-      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>AI 服务 (BYOK)</h3>
-      <p style={{ fontSize: 12.5, color: 'var(--tx-3)', marginBottom: 16 }}>
-        按配置覆盖对话 / 语音 / 向量 / 视觉四组能力,API Key 加密保存在服务端;一个中转是否支持某能力,以实际 endpoint 为准。
-        {!readOnly && (
-          <button
-            className="btn btn-sm btn-primary"
-            style={{ marginLeft: 10 }}
-            onClick={() => { setEditing(undefined); setEditorOpen(true) }}
-          >
-            <Icon name="plus" size="sm" />新建配置
-          </button>
-        )}
-      </p>
+      <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>AI 服务</h3>
+      {!readOnly && (
+        <button
+          className="btn btn-sm btn-primary"
+          style={{ marginBottom: 16 }}
+          onClick={() => { setEditing(undefined); setEditorOpen(true) }}
+        >
+          <Icon name="plus" size="sm" />新建配置
+        </button>
+      )}
 
       {loading && <div className="empty card"><p>正在加载 AI 配置…</p></div>}
       {!loading && loadError && (
@@ -88,7 +95,6 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
         <div className="empty card">
           <Icon name="cpu" size="lg" />
           <b>还没有配置 AI 服务</b>
-          <p>创建一个配置并设为默认后,问答、转写与索引都会使用它。</p>
           {!readOnly && (
             <button className="btn btn-sm btn-primary" style={{ marginTop: 10 }} onClick={() => { setEditing(undefined); setEditorOpen(true) }}>
               <Icon name="plus" size="sm" />新建配置
@@ -108,24 +114,6 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
           onDelete={() => void removeProfile(p)}
         />
       ))}
-
-      <div className="card card-pad" style={{ marginTop: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Icon name="shield" /><b style={{ fontSize: 13 }}>密钥安全</b>
-        </div>
-        <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 6, lineHeight: 1.7 }}>
-          用户级配置会覆盖服务端默认策略;密钥以加密形式落库,日志与账本都不记录密钥原文。
-          切换模型不会重做已完成的转写,但更换向量模型会触发索引 needs_rebuild。
-        </p>
-      </div>
-
-      {editorOpen && (
-        <ProfileFormModal
-          profile={editing}
-          onClose={() => setEditorOpen(false)}
-          onSaved={() => void load()}
-        />
-      )}
     </>
   )
 }
