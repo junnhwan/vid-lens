@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { api, getToken } from '@/lib/api'
+import { api, clearToken, getToken } from '@/lib/api'
 import type { User } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
@@ -66,6 +66,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const openUpload = useCallback(() => setUploadOpen(true), [])
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
+  const logout = useCallback(() => {
+    clearToken()
+    router.replace('/login')
+  }, [router])
+
   const initial = (user?.nickname || user?.username || '').trim().charAt(0).toUpperCase() || '·'
 
   return (
@@ -106,6 +111,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <span>{user?.role === 'DEMO' ? '演示账号 · 只读' : '个人工作区'}</span>
               </span>
             </Link>
+            <button className="nav-item" onClick={logout} aria-label="退出登录">
+              <Icon name="logout" />
+              退出登录
+            </button>
           </aside>
 
           <div className="main">
