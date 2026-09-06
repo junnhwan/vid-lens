@@ -161,6 +161,18 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     setPlayheadMs(ms)
   }, [])
 
+  // 播放签名 URL 只有 5 分钟有效期,过期后重取一次并原位恢复
+  const refreshPlaybackUrl = useCallback(async () => {
+    try {
+      const playback = await api.getTaskPlaybackUrl(taskId)
+      if (playback?.playback_url) {
+        setPlaybackUrl(playback.playback_url)
+        return playback.playback_url
+      }
+    } catch { /* 保持失败态 */ }
+    return null
+  }, [taskId])
+
   const liveIndex = transcriptAtoms.findIndex(
     a => playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1),
   )
@@ -411,6 +423,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             src={playbackUrl}
             title={title}
             onPlayhead={setPlayheadMs}
+            onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
 

@@ -456,6 +456,14 @@ svg { display: block; }
 .player-card { border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong); background: #0d0c0a; box-shadow: var(--shadow-1); }
 .player-stage { position: relative; aspect-ratio: 16/9; background: #0b0a08; }
 .player-stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.player-fallback {
+  position: absolute; inset: 0; display: none;
+  background:
+    radial-gradient(70% 90% at 50% 30%, rgba(226,168,75,.16), transparent 60%),
+    linear-gradient(160deg, #191611, #0d0c0a);
+}
+.player-stage.novideo video { display: none; }
+.player-stage.novideo .player-fallback { display: block; }
 .player-hud {
   position: absolute; left: 14px; top: 12px;
   font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em;

@@ -23,6 +23,8 @@ export interface CiteRef {
   source?: string
   videoTitle?: string // kb 跨视频用
   finalRank?: number
+  evidenceId?: string      // 后端 evidence_id,证据抽屉展示用
+  sourceMappingStatus?: string // source_mapping_status: mapped/partial/unmapped
   color?: string      // kb 跨视频色点
 }
 
@@ -54,6 +56,8 @@ export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: numb
       source: c.source,
       videoTitle: c.video_title,
       finalRank: c.final_rank,
+      evidenceId: c.evidence_id,
+      sourceMappingStatus: c.source_mapping_status,
       color: c.task_id && memberColor ? memberColor(c.task_id) : undefined,
     }))
   } catch {

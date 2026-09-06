@@ -33,13 +33,15 @@ interface VideoPlayerProps {
   fallbackText?: string
   /** 播放头变化回调(≈4Hz 节流),供时间轴联动 */
   onPlayhead?: (ms: number, playing: boolean) => void
+  /** 播放源加载失败时调用(签名 URL 过期后重新获取);返回新 URL 则原位恢复播放,返回 null 判定为不可用 */
+  onNeedRefresh?: () => Promise<string | null>
   className?: string
 }
 
 const PLAYHEAD_NOTIFY_MS = 250
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
-  function VideoPlayer({ src, title, compact, fallbackText, onPlayhead, className }, ref) {
+  function VideoPlayer({ src, title, compact, fallbackText, onPlayhead, onNeedRefresh, className }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null)
     const fillRef = useRef<HTMLDivElement | null>(null)
     const curRef = useRef<HTMLDivElement | null>(null)
@@ -54,7 +56,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [durationMs, setDurationMs] = useState(0)
     const [playing, setPlaying] = useState(false)
     const [failed, setFailed] = useState(false)
-    const playable = !!src && !failed
+    const [srcOverride, setSrcOverride] = useState<string | null>(null)
+    const activeSrc = srcOverride ?? src
+    const playable = !!activeSrc && !failed
+    // 签名 URL 过期原位恢复:换源后把播放头与播放状态还原
+    const resumeRef = useRef<{ ms: number; autoplay: boolean } | null>(null)
+    const onNeedRefreshRef = useRef(onNeedRefresh)
+    onNeedRefreshRef.current = onNeedRefresh
 
     const paint = useCallback(() => {
       const video = videoRef.current
@@ -91,8 +99,29 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     }, [paint])
 
     useEffect(() => {
+      setSrcOverride(null)
       setFailed(false)
     }, [src])
+
+    const handleVideoError = useCallback(() => {
+      if (!onNeedRefreshRef.current) {
+        setFailed(true)
+        return
+      }
+      void (async () => {
+        const video = videoRef.current
+        const resume = video ? { ms: video.currentTime * 1000, autoplay: !video.paused } : null
+        try {
+          const fresh = await onNeedRefreshRef.current?.()
+          if (fresh && fresh !== (videoRef.current?.currentSrc || videoRef.current?.src || '')) {
+            resumeRef.current = resume
+            setSrcOverride(fresh)
+            return
+          }
+        } catch { /* 刷新失败按不可用处理 */ }
+        setFailed(true)
+      })()
+    }, [])
 
     const seek = useCallback((ms: number, autoplay = false) => {
       const video = videoRef.current
@@ -145,21 +174,27 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     return (
       <div className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}`}>
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
-          {src && (
+          {activeSrc && (
             <video
               ref={videoRef}
-              src={src}
+              src={activeSrc}
               playsInline
               preload="metadata"
               onLoadedMetadata={e => {
                 const d = e.currentTarget.duration
                 if (Number.isFinite(d)) setDurationMs(d * 1000)
+                const resume = resumeRef.current
+                if (resume) {
+                  resumeRef.current = null
+                  try { e.currentTarget.currentTime = resume.ms / 1000 } catch { /* 忽略 */ }
+                  if (resume.autoplay) void e.currentTarget.play().catch(() => {})
+                }
                 paint()
               }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
-              onError={() => setFailed(true)}
+              onError={handleVideoError}
             />
           )}
           <div className="player-fallback">

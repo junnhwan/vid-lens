@@ -3,6 +3,8 @@
 const backendUrl = process.env.VIDLENS_API_BASE || 'http://localhost:8080'
 
 const nextConfig = {
+  // rewrites 代理 /api → 后端;SSE 流式回答经常超过默认 30s,放宽代理超时
+  experimental: { proxyTimeout: 180_000 },
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${backendUrl}/api/:path*` },
