@@ -9,6 +9,8 @@ import (
 
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 // 任务提交、查询、删除和对象访问；不负责具体文件上传。
@@ -274,4 +276,27 @@ func (s *MediaService) GetPlaybackURL(ctx context.Context, userID, taskID int64)
 		return "", fmt.Errorf("视频对象不存在")
 	}
 	return s.storage.GetPresignedURL(ctx, task.FileURL)
+}
+
+// UpdateTaskTitle 由用户改写展示标题。不重建索引；已有标题不会被后续自动生成覆盖
+// （自动生成只在标题为空时写入）。
+func (s *MediaService) UpdateTaskTitle(ctx context.Context, userID, taskID int64, title string) (*model.VideoTask, error) {
+	title = model.SanitizeVideoTitle(title)
+	if title == "" {
+		return nil, ErrTaskTitleRequired
+	}
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, err
+	}
+	if task.UserID != userID {
+		return nil, ErrTaskNotFound
+	}
+	if err := s.repo.Task.UpdateTitle(taskID, title); err != nil {
+		return nil, err
+	}
+	return s.GetTaskDetail(ctx, userID, taskID)
 }

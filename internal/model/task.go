@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -91,4 +92,20 @@ type VideoTask struct {
 
 func (VideoTask) TableName() string {
 	return "video_tasks"
+}
+
+const videoTitleMaxRunes = 60
+
+// SanitizeVideoTitle 规整标题：去首尾空白与引号、合并换行、限长。
+// 自动生成与用户编辑共用，避免两套规则漂移。
+func SanitizeVideoTitle(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "\"'")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > videoTitleMaxRunes {
+		s = string(r[:videoTitleMaxRunes])
+	}
+	return strings.TrimSpace(s)
 }

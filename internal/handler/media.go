@@ -222,6 +222,40 @@ func (h *MediaHandler) GetTaskDetail(c *gin.Context) {
 	response.OK(c, task)
 }
 
+// UpdateTaskTitle 用户编辑视频标题
+// PATCH /api/v1/media/task/:id
+func (h *MediaHandler) UpdateTaskTitle(c *gin.Context) {
+	if denyIfDemo(c, "修改视频标题") {
+		return
+	}
+	userID := middleware.GetUserID(c)
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "任务 ID 错误")
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	task, err := h.svc.UpdateTaskTitle(c.Request.Context(), userID, taskID, req.Title)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskNotFound):
+			response.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrTaskTitleRequired):
+			response.BadRequest(c, err.Error())
+		default:
+			response.InternalError(c, "修改标题失败")
+		}
+		return
+	}
+	response.OK(c, task)
+}
+
 // ListTasks 任务列表
 // GET /api/v1/media/list?page=1&page_size=20
 func (h *MediaHandler) ListTasks(c *gin.Context) {

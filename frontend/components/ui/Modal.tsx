@@ -88,6 +88,46 @@ export function Modal({
   )
 }
 
+export function ConfirmModal({
+  title,
+  children,
+  confirmLabel = '确定',
+  danger,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  title: string
+  children: React.ReactNode
+  confirmLabel?: string
+  danger?: boolean
+  busy?: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      width={420}
+      footer={(
+        <>
+          <button className="btn" disabled={busy} onClick={onClose}>取消</button>
+          <button
+            className={danger ? 'btn btn-danger' : 'btn btn-primary'}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? '处理中…' : confirmLabel}
+          </button>
+        </>
+      )}
+    >
+      <p style={{ fontSize: 13.5, color: 'var(--tx-2)', lineHeight: 1.65, margin: 0 }}>{children}</p>
+    </Modal>
+  )
+}
+
 export function DrawerVeil({ onClose }: { onClose: () => void }) {
   const downOnBackdrop = useRef(false)
 

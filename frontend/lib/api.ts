@@ -109,6 +109,8 @@ export const api = {
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  updateTaskTitle: (id: number, title: string) =>
+    req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
   getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),
   getTaskPlaybackUrl: (id: number) => req<{ playback_url: string }>(`/media/task/${id}/playback`, 'GET'),
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),

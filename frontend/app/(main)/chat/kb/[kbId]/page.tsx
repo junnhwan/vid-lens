@@ -24,7 +24,7 @@ export default function KBChatPage({ params }: { params: { kbId: string } }) {
 
   useCrumb([
     { label: '知识库', href: '/kb' },
-    { label: kb?.name || `知识库 #${kbId}` },
+    { label: kb?.name || `知识库 #${kbId}`, href: `/kb/${kbId}` },
     { label: '问答' },
   ])
 

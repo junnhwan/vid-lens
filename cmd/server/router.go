@@ -99,6 +99,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.POST("/merge-chunks", handlers.media.MergeChunks)
 				media.GET("/list", handlers.media.ListTasks)
 				media.GET("/task/:id", handlers.media.GetTaskDetail)
+				media.PATCH("/task/:id", handlers.media.UpdateTaskTitle)
 				media.DELETE("/task/:id", handlers.media.DeleteTask)
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestTranscribe)

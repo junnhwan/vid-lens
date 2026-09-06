@@ -202,7 +202,7 @@ func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, st
 	return tx.RowsAffected > 0, nil
 }
 
-// UpdateTitle 写回 AI 生成的视频标题
+// UpdateTitle 写回视频标题（自动生成或用户编辑）。
 func (r *TaskRepository) UpdateTitle(id int64, title string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("title", title).Error
 }

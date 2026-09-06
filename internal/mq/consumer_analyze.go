@@ -200,7 +200,7 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title generation failed", slog.String("error", observability.SafeError(chatErr)))
 		return nil
 	}
-	title = sanitizeVideoTitle(title)
+	title = model.SanitizeVideoTitle(title)
 	if title == "" {
 		return nil
 	}
@@ -230,19 +230,6 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
-}
-
-// sanitizeVideoTitle 规整 LLM 返回的标题：去首尾空白与引号、合并换行、限长。
-func sanitizeVideoTitle(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.Trim(s, "\"'")
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > 60 {
-		s = string(r[:60])
-	}
-	return strings.TrimSpace(s)
 }
 
 const titleSystemPrompt = `根据用户提供的视频语音转写文本，生成一个简洁准确的视频标题。

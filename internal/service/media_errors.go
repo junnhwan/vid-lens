@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrTaskNotFound            = errors.New("任务不存在")
 	ErrTaskForbidden           = errors.New("无权删除此任务")
+	ErrTaskTitleRequired       = errors.New("标题不能为空")
 	ErrTaskCleanupUnavailable  = errors.New("任务清理服务未初始化")
 	ErrTaskDispatchUnavailable = errors.New("系统繁忙，请稍后重试")
 

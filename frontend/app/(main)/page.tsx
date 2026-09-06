@@ -10,6 +10,7 @@ import { VideoCard } from '@/components/VideoCard'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { ConfirmModal } from '@/components/ui/Modal'
 import { ProcessStrip } from '@/components/ProcessStrip'
 
 export default function DashboardPage() {
@@ -20,6 +21,8 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+
+  const [retrying, setRetrying] = useState<VideoTask | null>(null)
 
   useEffect(() => {
     let active = true
@@ -54,6 +57,7 @@ export default function DashboardPage() {
   }
 
   const retry = async (t: VideoTask) => {
+    setRetrying(null)
     try {
       if (t.last_job_type === 'analyze') await api.analyze(t.id)
       else await api.transcribe(t.id)
@@ -84,7 +88,7 @@ export default function DashboardPage() {
                   {failed
                     ? noRetry
                       ? <span className="chip chip-mute">请删除后重新添加</span>
-                      : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); void retry(t) }}>重试</button>
+                      : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); setRetrying(t) }}>重试</button>
                     : <span className={`chip ${t.status === 2 ? 'chip-acc' : 'chip-mute'}`}>{t.status === 2 ? '处理中' : '排队中'}</span>}
                 </div>
               )
@@ -141,6 +145,16 @@ export default function DashboardPage() {
           !loading && <div className="empty"><b>还没有会话</b></div>
         )}
       </div>
+      {retrying && (
+        <ConfirmModal
+          title="重新提交任务?"
+          confirmLabel="重试"
+          onClose={() => setRetrying(null)}
+          onConfirm={() => void retry(retrying)}
+        >
+          「{taskTitle(retrying)}」的失败步骤会重新入队,可能再次消耗模型额度。
+        </ConfirmModal>
+      )}
     </div>
   )
 }

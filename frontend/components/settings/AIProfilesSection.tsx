@@ -138,10 +138,10 @@ function ProfileCard({ profile, testing, readOnly, onTest, onEdit, onDelete }: {
           )}
           {hosted && <span className="chip chip-info">平台内置</span>}
         </div>
-        <CapabilityLine label="对话模型" value={`${profile.llm_model} · ${profile.llm_base_url}`} />
-        <CapabilityLine label="语音识别" value={`${profile.asr_model} · ${profile.asr_base_url}`} />
-        <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维 · ${profile.embedding_endpoint}`} />
-        <CapabilityLine label="视觉模型" value={profile.vision_model ? `${profile.vision_model} · ${profile.vision_base_url}` : '未配置'} muted={!profile.vision_model} />
+        <CapabilityLine label="对话模型" value={profile.llm_model} />
+        <CapabilityLine label="语音识别" value={profile.asr_model} />
+        <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维`} />
+        <CapabilityLine label="视觉模型" value={profile.vision_model || '未配置'} muted={!profile.vision_model} />
         <CapabilityLine label="重排序" value="未启用 · 确定性 rerank 生效中" muted />
       </div>
       <button className="btn btn-sm" disabled={testing || readOnly} title={readOnly ? '演示账号不可测试 AI 配置' : undefined} onClick={onTest}>
@@ -171,7 +171,7 @@ function CapabilityLine({ label, value, muted }: { label: string; value: string;
   return (
     <div className="pc-line">
       <span className="k">{label}</span>
-      <span className="v mono" style={muted ? { color: 'var(--tx-4)' } : undefined}>{value}</span>
+      <span className="v" style={muted ? { color: 'var(--tx-4)' } : undefined}>{value}</span>
     </div>
   )
 }

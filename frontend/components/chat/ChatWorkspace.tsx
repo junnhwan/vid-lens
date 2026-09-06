@@ -18,6 +18,7 @@ import { Icon } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { DrawerVeil } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
+import { fmtRelTime } from '@/lib/format'
 import type { Citation, ChatScopeType, EvidenceLedgerView, VideoChatMode } from '@/lib/types'
 
 // 聊天工作区:中央会话流 + 右栏(迷你播放器 / 执行过程 / 证据账本)+ 模式胶囊行。
@@ -121,8 +122,11 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const [askTall, setAskTall] = useState(false)
   const [ledgerByRun, setLedgerByRun] = useState<Record<string, LedgerState>>({})
 
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const historyRef = useRef<HTMLDivElement>(null)
+
   const {
-    messages, ragTrace, agentTrace, streaming, send, stop, newSession,
+    session, sessions, messages, ragTrace, agentTrace, streaming, send, stop, newSession, switchSession, loadSessions,
   } = useConversationSession({
     scopeType,
     targetId,
@@ -208,6 +212,27 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   useEffect(() => {
     syncAsk(inputRef.current)
   }, [input])
+
+  useEffect(() => {
+    if (!historyOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) setHistoryOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [historyOpen])
+
+  const removeHistorySession = async (sessionId: number) => {
+    if (!window.confirm('删除这个会话?删除后聊天记录不可恢复。')) return
+    try {
+      await api.deleteSession(sessionId)
+      if (session?.id === sessionId) newSession()
+      await loadSessions()
+      toast.success('会话已删除')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '删除失败')
+    }
+  }
 
   const submit = useCallback((text?: string) => {
     const q = (text ?? input).trim()
@@ -454,13 +479,51 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                 </>
               )}
             </div>
-            <div className="composer-tools">
+            <div className="composer-tools" ref={historyRef}>
+              <button
+                type="button"
+                className="btn btn-ic btn-ghost"
+                aria-label="历史会话"
+                title="历史会话"
+                disabled={streaming}
+                onClick={() => {
+                  if (!historyOpen) void loadSessions()
+                  setHistoryOpen(v => !v)
+                }}
+              >
+                <Icon name="message" />
+              </button>
+              {historyOpen && (
+                <div className="session-pop" role="listbox" aria-label="历史会话">
+                  <div className="session-pop-head">这个范围的会话</div>
+                  {sessions.length === 0 ? (
+                    <div className="session-pop-empty">还没有历史会话</div>
+                  ) : sessions.map(item => (
+                    <div
+                      key={item.id}
+                      className={`session-pop-row${session?.id === item.id ? ' on' : ''}`}
+                      onClick={() => { void switchSession(item.id); setHistoryOpen(false) }}
+                    >
+                      <span className="q">{item.title || '未命名会话'}</span>
+                      <span className="when">{fmtRelTime(item.updated_at)}</span>
+                      <button
+                        className="session-del"
+                        title="删除会话"
+                        aria-label="删除会话"
+                        onClick={e => { e.stopPropagation(); void removeHistorySession(item.id) }}
+                      >
+                        <Icon name="trash" size="sm" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <button
                 type="button"
                 className="btn btn-ic btn-ghost"
                 aria-label="新会话"
                 title="新会话"
-                onClick={() => newSession()}
+                onClick={() => { newSession(); setHistoryOpen(false) }}
                 disabled={streaming}
               >
                 <Icon name="plus" />

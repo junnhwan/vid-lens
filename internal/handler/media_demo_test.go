@@ -57,6 +57,7 @@ func TestDemoUserMediaMutationsRejected(t *testing.T) {
 		{name: "analyze", method: http.MethodPost, path: "/media/analyze/1", handler: media.RequestAnalysis},
 		{name: "transcribe", method: http.MethodPost, path: "/media/transcribe/1", handler: media.RequestTranscribe},
 		{name: "delete", method: http.MethodDelete, path: "/media/task/1", handler: media.DeleteTask},
+		{name: "update-title", method: http.MethodPatch, path: "/media/task/1", handler: media.UpdateTaskTitle},
 		{name: "rag-index", method: http.MethodPost, path: "/media/task/1/rag-index", handler: rag.BuildTaskIndex},
 	}
 	for _, tc := range cases {

@@ -15,10 +15,11 @@ import { formatTime } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
-import { useCrumb } from '@/components/shell/AppShell'
+import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
-import { Modal } from '@/components/ui/Modal'
+import { ConfirmModal, Modal } from '@/components/ui/Modal'
+import KBModal from '@/components/KBModal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { VideoStill } from '@/components/VideoPoster'
@@ -30,6 +31,13 @@ import { VideoStill } from '@/components/VideoPoster'
 
 type TabKey = 'tl' | 'vf' | 'idx'
 type ActionKind = 'transcribe' | 'analyze' | 'index' | 'download'
+type ConfirmAction = {
+  kind: Exclude<ActionKind, 'download'>
+  force?: boolean
+  title: string
+  body: string
+  confirmLabel: string
+}
 
 interface VisualFrameView {
   key: string
@@ -116,6 +124,8 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const taskId = Number(params.id)
   const router = useRouter()
   const toast = useToast()
+  const { user } = useShell()
+  const readOnly = user?.role === 'DEMO'
   const playerRef = useRef<VideoPlayerHandle>(null)
   const prevTransRef = useRef(false)
 
@@ -137,6 +147,11 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [railTip, setRailTip] = useState<{ left: number; text: string; timeMs: number } | null>(null)
   const liveRowRef = useRef<HTMLDivElement>(null)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [titleBusy, setTitleBusy] = useState(false)
+  const [kbOpen, setKbOpen] = useState(false)
+  const [pendingAction, setPendingAction] = useState<ConfirmAction | null>(null)
 
   useCrumb([
     { label: '视频库', href: '/library' },
@@ -300,6 +315,30 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     } finally {
       setBusy('')
     }
+  }
+
+  const saveTitle = async () => {
+    if (!task || titleBusy) return
+    const next = titleDraft.trim()
+    if (!next) { toast.info('标题不能为空'); return }
+    setTitleBusy(true)
+    try {
+      const fresh = await api.updateTaskTitle(task.id, next)
+      setTask(fresh)
+      setEditingTitle(false)
+      toast.success('标题已更新')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : '保存标题失败')
+    } finally {
+      setTitleBusy(false)
+    }
+  }
+
+  const confirmAndRun = async () => {
+    if (!pendingAction || busy) return
+    const { kind, force } = pendingAction
+    setPendingAction(null)
+    await runAction(kind, force)
   }
 
   if (loading) {
@@ -504,7 +543,12 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
           className="btn btn-sm"
           style={{ marginTop: 14 }}
           disabled={busy !== ''}
-          onClick={() => void runAction('index')}
+          onClick={() => setPendingAction({
+            kind: 'index',
+            title: index.indexed ? '重建检索索引?' : '建立检索索引?',
+            body: '会按当前向量模型生成检索投影,不重做转写,但会消耗 embedding 额度。',
+            confirmLabel: index.indexed ? '重建索引' : '建立索引',
+          })}
         >
           <Icon name="layers" size="sm" />
           {index.indexed ? '重建索引' : '建立索引'}
@@ -517,6 +561,39 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     <div className="page-fill">
       <div className="ws">
         <div className="ws-stage">
+          <div className="ws-heading">
+            {editingTitle ? (
+              <form
+                className="ws-title-form"
+                onSubmit={e => { e.preventDefault(); void saveTitle() }}
+              >
+                <input
+                  className="input"
+                  value={titleDraft}
+                  maxLength={60}
+                  autoFocus
+                  onChange={e => setTitleDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') setEditingTitle(false) }}
+                />
+                <button className="btn btn-sm btn-primary" type="submit" disabled={titleBusy}>保存</button>
+                <button className="btn btn-sm" type="button" onClick={() => setEditingTitle(false)}>取消</button>
+              </form>
+            ) : (
+              <>
+                <h2>{title}</h2>
+                {!readOnly && (
+                  <button
+                    className="btn btn-ic btn-ghost"
+                    aria-label="编辑标题"
+                    title="编辑标题"
+                    onClick={() => { setTitleDraft(task.title || task.filename || ''); setEditingTitle(true) }}
+                  >
+                    <Icon name="pencil" size="sm" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
           <VideoPlayer
             ref={playerRef}
             src={playbackUrl}
@@ -547,7 +624,13 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
               </button>
             )}
             {task.has_transcription ? (
-              <button className="btn" disabled={busy !== ''} onClick={() => void runAction('transcribe', true)}>
+              <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
+                kind: 'transcribe',
+                force: true,
+                title: '重新转写?',
+                body: '会再次调用语音识别。已完成的分片不会重复计费,但仍可能产生新的 ASR 费用。',
+                confirmLabel: '重新转写',
+              })}>
                 <Icon name="refresh" size="sm" />重新转写
               </button>
             ) : processing ? (
@@ -559,11 +642,19 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                 <Icon name="activity" size="sm" />开始转写
               </button>
             )}
-            <button className="btn" disabled={busy !== ''} onClick={() => void runAction('index')}>
+            <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
+              kind: 'index',
+              title: index?.indexed ? '重建检索索引?' : '建立检索索引?',
+              body: '会按当前向量模型生成检索投影,不重做转写,但会消耗 embedding 额度。',
+              confirmLabel: index?.indexed ? '重建索引' : '建立索引',
+            })}>
               <Icon name="layers" size="sm" />{index?.indexed ? '重建索引' : '建立索引'}
             </button>
             <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
               <Icon name="download" size="sm" />下载音频
+            </button>
+            <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
+              <Icon name="folder" size="sm" />加入知识库
             </button>
             <span style={{ flex: 1 }} />
             <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
@@ -588,7 +679,12 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                       className="btn btn-sm"
                       style={{ marginTop: 10 }}
                       disabled={busy !== ''}
-                      onClick={() => void runAction(task.last_job_type === 'analyze' ? 'analyze' : 'transcribe')}
+                      onClick={() => setPendingAction({
+                        kind: task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
+                        title: '重新提交任务?',
+                        body: '失败步骤会重新入队,可能再次消耗模型额度。',
+                        confirmLabel: '重试',
+                      })}
                     >
                       重试
                     </button>
@@ -623,6 +719,26 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             <MarkdownAnswer content={task.summary.content} domainTags />
           </div>
         </Modal>
+      )}
+      {kbOpen && (
+        <KBModal
+          mode="assign"
+          taskId={task.id}
+          indexed={!!index?.indexed}
+          onClose={() => setKbOpen(false)}
+          onChanged={() => toast.success('知识库成员已更新')}
+        />
+      )}
+      {pendingAction && (
+        <ConfirmModal
+          title={pendingAction.title}
+          confirmLabel={pendingAction.confirmLabel}
+          busy={busy !== ''}
+          onClose={() => setPendingAction(null)}
+          onConfirm={() => void confirmAndRun()}
+        >
+          {pendingAction.body}
+        </ConfirmModal>
       )}
     </div>
   )

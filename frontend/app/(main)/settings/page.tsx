@@ -7,7 +7,7 @@ import { useCrumb } from '@/components/shell/AppShell'
 import { AIProfilesSection } from '@/components/settings/AIProfilesSection'
 import { MemorySection } from '@/components/settings/MemorySection'
 import { useTheme } from '@/components/theme/ThemeProvider'
-import { Icon } from '@/components/ui/Icon'
+import type { ThemeMode } from '@/lib/theme'
 
 export default function SettingsPage() {
   useCrumb([{ label: '设置' }])
@@ -24,17 +24,13 @@ export default function SettingsPage() {
   return (
     <div className="page">
       <div className="section-head" style={{ marginTop: 0 }}><h2>设置</h2></div>
-      <div className="pref-row" style={{ marginBottom: 22 }}>
-        <div className="pr-body">
-          <b>外观</b>
+      <div className="theme-pick-block">
+        <div className="section-head" style={{ marginTop: 0 }}>
+          <h2>外观</h2>
         </div>
-        <div className="seg">
-          <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>
-            <Icon name="moon" size="sm" />深色
-          </button>
-          <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>
-            <Icon name="sun" size="sm" />浅色
-          </button>
+        <div className="theme-pick">
+          <ThemeCard mode="dark" label="深色" hint="放映厅" active={theme === 'dark'} onSelect={() => setTheme('dark')} />
+          <ThemeCard mode="light" label="浅色" hint="阅读" active={theme === 'light'} onSelect={() => setTheme('light')} />
         </div>
       </div>
       <div className="settings-grid">
@@ -47,5 +43,27 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function ThemeCard({ mode, label, hint, active, onSelect }: {
+  mode: ThemeMode
+  label: string
+  hint: string
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button type="button" className={`theme-card${active ? ' on' : ''}`} onClick={onSelect}>
+      <span className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true">
+        <span className="theme-swatch-bar" />
+        <span className="theme-swatch-line" />
+        <span className="theme-swatch-line short" />
+      </span>
+      <span className="theme-card-copy">
+        <b>{label}</b>
+        <span>{hint}</span>
+      </span>
+    </button>
   )
 }

@@ -35,6 +35,7 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		"POST /api/v1/media/upload-chunk":                                  "upload chunk",
 		"GET /api/v1/media/check-upload":                                   "check uploaded chunks",
 		"POST /api/v1/media/merge-chunks":                                  "merge uploaded chunks",
+		"PATCH /api/v1/media/task/:id":                                     "update video title",
 		"POST /api/v1/knowledge-bases":                                     "create knowledge base",
 		"GET /api/v1/knowledge-bases":                                      "list knowledge bases",
 		"GET /api/v1/knowledge-bases/:id":                                  "get knowledge base",
