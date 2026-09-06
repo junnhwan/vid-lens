@@ -15,6 +15,8 @@ export interface ChatMsg {
   error?: string
   trace?: ChatTraceStep[]
   agentRun?: boolean
+  /** Agent 运行 ID（SSE done 事件或历史快照 run_id），用于拉取证据账本 */
+  agentRunId?: string
   traceSource?: 'agent' | 'inferred' | 'legacy'
 }
 
@@ -34,6 +36,7 @@ export function parseMessages(
       content: m.content,
       openCiteIds: [],
       ...(cites ? { cites } : {}),
+      ...(snapshotTrace?.runId ? { agentRunId: snapshotTrace.runId } : {}),
       ...(trace ? {
         trace,
         ...(agentRun ? { agentRun: true, traceSource: snapshotTrace?.source } : {}),

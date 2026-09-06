@@ -1,6 +1,6 @@
 import type {
-  AIProfile, AIProfileRequest, ProfilePurpose, AskResult, AuthResult,
-  ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
+  AIProfile, AIProfileRequest, ProfilePurpose, AgentClaim, AskResult, AuthResult,
+  ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, EvidenceLedgerView, KnowledgeBase,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
@@ -148,6 +148,12 @@ export const api = {
     req<null>(`/knowledge-bases/${id}/videos`, 'POST', { task_id }),
   removeKBVideo: (id: number, task_id: number) =>
     req<null>(`/knowledge-bases/${id}/videos/${task_id}`, 'DELETE'),
+
+  // ============ 证据账本 (Agent / 研究 / 漏斗运行后按 run_id 查询) ============
+  getEvidenceLedger: (runId: string) =>
+    req<EvidenceLedgerView>(`/agent/evidence-ledgers/${encodeURIComponent(runId)}`, 'GET'),
+  correctEvidenceClaim: (claimId: string, payload: { text: string; reason: string }) =>
+    req<AgentClaim>(`/agent/evidence-ledgers/claims/${encodeURIComponent(claimId)}/corrections`, 'POST', payload),
 }
 
 // ============ SSE 流式问答 ============

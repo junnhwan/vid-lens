@@ -15,11 +15,21 @@ export interface ChatTraceStep {
   query?: string
   hits?: number
   sources?: string[]
+  /** retrieve_hits 携带的命中预览（score / 视频 / 片段号），渲染原型样式的命中卡 */
+  hitRows?: AgentHitPreview[]
   tool?: string
   toolInput?: string
   toolOutput?: string
   durationMs?: number
   error?: string
+}
+
+/** SSE retrieve_hits.chunks_preview 的行（SSE 不带时间码，故无时间列） */
+export interface AgentHitPreview {
+  task_id?: number
+  video_title?: string
+  chunk_index?: number
+  score?: number
 }
 
 export type TracePanelSource = 'agent' | 'inferred' | 'legacy'
@@ -192,6 +202,7 @@ export interface AgentRetrieveHitsPayload {
   query?: string
   hits: number
   sources?: string[]
+  chunks_preview?: AgentHitPreview[]
 }
 
 function kindFromBackend(kind: string, tool?: string): TraceStepKind {
@@ -314,6 +325,7 @@ export function agentTraceReducer(state: AgentTraceState, event: AgentSSEPayload
           query: event.data.query,
           hits: event.data.hits,
           sources: event.data.sources,
+          hitRows: event.data.chunks_preview,
           detail: event.data.hits > 0
             ? `命中 ${event.data.hits} 条${event.data.sources?.length ? ` · ${event.data.sources.slice(0, 3).join('、')}` : ''}`
             : '未命中引用',

@@ -156,9 +156,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
           onRetrieveHits: data => dispatch({ type: 'agent_event', event: { type: 'retrieve_hits', data } }),
           onAnswer: delta => dispatch({ type: 'answer_delta', delta }),
           onCitations: citations => dispatch({ type: 'patch_last', patch: { cites: mapCitations(citations) } }),
-          onDone: () => {
+          onDone: done => {
             dispatch({ type: 'agent_event', event: { type: 'done' } })
-            dispatch({ type: 'stream_done' })
+            // run_id 记到消息上（证据账本按它查询），degraded=true 表示核验未通过、
+            // 回答已被服务端替换为阻断文案
+            dispatch({
+              type: 'stream_done',
+              patch: { degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
+            })
           },
           onError: error => {
             dispatch({ type: 'agent_event', event: { type: 'error', data: { message: error.message, step_id: error.step_id } } })
