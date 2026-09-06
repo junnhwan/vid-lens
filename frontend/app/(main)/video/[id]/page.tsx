@@ -19,6 +19,8 @@ import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { expandTranscript } from '@/lib/transcript'
+import { ProcessStrip } from '@/components/ProcessStrip'
+import { VideoStill } from '@/components/VideoPoster'
 
 // 视频工作台:播放器 + 多模态时间轴 + 画面证据 + 检索索引 + 摘要。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
@@ -77,6 +79,8 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const [tab, setTab] = useState<TabKey>('tl')
   const [playheadMs, setPlayheadMs] = useState(0)
   const [busy, setBusy] = useState<ActionKind | ''>('')
+  const [headSnap, setHeadSnap] = useState(false)
+  const liveRowRef = useRef<HTMLDivElement>(null)
 
   useCrumb([
     { label: '视频库', href: '/library' },
@@ -162,9 +166,11 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     [timeline],
   )
 
-  const seek = useCallback((ms: number, autoplay = true) => {
-    playerRef.current?.seek(ms, autoplay)
+  const seek = useCallback((ms: number, autoplay = true, cue?: string) => {
+    playerRef.current?.seek(ms, autoplay, cue)
     setPlayheadMs(ms)
+    setHeadSnap(true)
+    window.setTimeout(() => setHeadSnap(false), 280)
   }, [])
 
   // 播放签名 URL 只有 5 分钟有效期,过期后重取一次并原位恢复
@@ -182,6 +188,18 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const liveIndex = transcriptRows.findIndex(
     a => playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1),
   )
+
+  useEffect(() => {
+    const el = liveRowRef.current
+    if (!el) return
+    const root = el.closest('.rail-body')
+    if (!(root instanceof HTMLElement)) return
+    const rootBox = root.getBoundingClientRect()
+    const box = el.getBoundingClientRect()
+    if (box.top < rootBox.top + 12 || box.bottom > rootBox.bottom - 12) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [liveIndex])
 
   const runAction = async (kind: Exclude<ActionKind, 'download'>, force = false) => {
     if (!task || busy) return
@@ -299,7 +317,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                   title={a.content}
                 />
               ))}
-              <div className="tl-head" style={{ left: `${(playheadMs / durPct) * 100}%` }} />
+              <div className={`tl-head${headSnap ? ' snap' : ''}`} style={{ left: `${(playheadMs / durPct) * 100}%` }} />
             </div>
             <div className="tl-scale mono">
               {Array.from({ length: 6 }, (_, i) => (
@@ -317,7 +335,12 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
         {transcriptRows.length > 0 && (
           <div className="transcript-list">
             {transcriptRows.map((a, i) => (
-              <div key={a.id} className={`t-row${i === liveIndex ? ' live' : ''}`} onClick={() => seek(a.start_ms)}>
+              <div
+                key={a.id}
+                ref={i === liveIndex ? liveRowRef : undefined}
+                className={`t-row${i === liveIndex ? ' live' : ''}`}
+                onClick={() => seek(a.start_ms)}
+              >
                 <span className="ts">{formatTime(a.start_ms)}</span>
                 <span className="tx">{a.content}</span>
               </div>
@@ -346,9 +369,10 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
           {frames.map(f => (
             <div className="frame-card" key={f.key}>
               <div className="vthumb-art" style={{ aspectRatio: '16/9', position: 'relative' }}>
+                <VideoStill src={playbackUrl} timeMs={f.timeMs} seed={`${taskId}-${f.key}`} />
                 <span
                   className="mono"
-                  style={{ position: 'absolute', left: 8, top: 6, fontSize: 10.5, color: 'var(--tx-2)', background: 'rgba(10,9,7,.6)', padding: '1px 6px', borderRadius: 5 }}
+                  style={{ position: 'absolute', left: 8, top: 6, zIndex: 2, fontSize: 10.5, color: 'var(--tx-2)', background: 'rgba(10,9,7,.6)', padding: '1px 6px', borderRadius: 5 }}
                 >
                   {formatTime(f.timeMs)}
                 </span>
@@ -419,10 +443,15 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             ref={playerRef}
             src={playbackUrl}
             title={title}
-            onPlayhead={setPlayheadMs}
+            onPlayhead={ms => setPlayheadMs(ms)}
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
+          {processing && (
+            <div style={{ marginTop: 12 }}>
+              <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} />
+            </div>
+          )}
 
           <div className="ws-actions">
             {task.has_summary ? (

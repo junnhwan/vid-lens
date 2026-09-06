@@ -10,6 +10,7 @@ import { VideoCard } from '@/components/VideoCard'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { ProcessStrip } from '@/components/ProcessStrip'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -53,39 +54,39 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <div className="section-head" style={{ marginTop: 0 }}>
-        <h2>继续处理</h2>
-        <span className="more" onClick={() => router.push('/library')}>全部视频 <Icon name="chev-r" size="sm" /></span>
-      </div>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {loading && <div className="card card-pad" style={{ color: 'var(--tx-3)' }}>正在加载…</div>}
-        {!loading && processing.map(t => {
-          const failed = t.status === 4 || t.status === 5
-          const noRetry = failed && t.last_job_type === 'download'
-          return (
-            <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
-              <div className="proc-left">
-                <h5>{taskTitle(t)}</h5>
-                <div className="stage">
+      {processing.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: 0 }}>
+            <h2>继续处理</h2>
+            <span className="more" onClick={() => router.push('/library')}>全部视频 <Icon name="chev-r" size="sm" /></span>
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {processing.map(t => {
+              const failed = t.status === 4 || t.status === 5
+              const noRetry = failed && t.last_job_type === 'download'
+              return (
+                <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
+                  <div className="proc-left">
+                    <h5>{taskTitle(t)}</h5>
+                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} />
+                  </div>
                   {failed
-                    ? <span style={{ color: 'var(--bad)' }}>{t.error_msg || '处理失败'}</span>
-                    : stageOrIdle(t)}
+                    ? noRetry
+                      ? <span className="chip chip-mute">请删除后重新添加</span>
+                      : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); void retry(t) }}>重试</button>
+                    : <span className={`chip ${t.status === 2 ? 'chip-acc' : 'chip-mute'}`}>{t.status === 2 ? '处理中' : '排队中'}</span>}
                 </div>
-              </div>
-              {failed
-                ? noRetry
-                  ? <span className="chip chip-mute">请删除后重新添加</span>
-                  : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); void retry(t) }}>重试</button>
-                : <span className={`chip ${t.status === 2 ? 'chip-acc' : 'chip-mute'}`}>{t.status === 2 ? '处理中' : '排队中'}</span>}
-            </div>
-          )
-        })}
-        {!loading && processing.length === 0 && (
-          <div className="empty"><b>没有进行中的任务</b></div>
-        )}
-      </div>
+              )
+            })}
+          </div>
+        </>
+      )}
 
-      <div className="section-head">
+      {loading && processing.length === 0 && (
+        <div className="card card-pad" style={{ color: 'var(--tx-3)', marginBottom: 8 }}>正在加载…</div>
+      )}
+
+      <div className="section-head" style={{ marginTop: processing.length > 0 || loading ? undefined : 0 }}>
         <h2>最近视频</h2>
         <span className="more" onClick={() => router.push('/library')}>视频库 <Icon name="chev-r" size="sm" /></span>
       </div>
@@ -123,12 +124,4 @@ export default function DashboardPage() {
       </div>
     </div>
   )
-}
-
-function stageOrIdle(t: VideoTask): string {
-  const labels: Record<string, string> = {
-    downloading: '下载中', uploaded: '已上传', transcribing: '转写中',
-    visual_indexing: '画面索引中', summarizing: '生成摘要中', indexing: '构建索引中', none: '处理中',
-  }
-  return labels[t.stage] || '处理中'
 }

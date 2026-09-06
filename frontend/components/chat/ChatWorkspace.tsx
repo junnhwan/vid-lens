@@ -16,6 +16,7 @@ import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPl
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
+import { DrawerVeil } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
 import type { Citation, ChatScopeType, EvidenceLedgerView, VideoChatMode } from '@/lib/types'
 
@@ -115,6 +116,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
   const [ledgerDrawerRun, setLedgerDrawerRun] = useState<string | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
+  const [railOpen, setRailOpen] = useState(false)
   const [elapsed, setElapsed] = useState<string | null>(null)
   const [ledgerByRun, setLedgerByRun] = useState<Record<string, LedgerState>>({})
 
@@ -220,7 +222,8 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
 
   const jumpToCitation = useCallback((cite: CiteRef) => {
     if (isVideo) {
-      playerRef.current?.seek(cite.startMS || 0, true)
+      playerRef.current?.seek(cite.startMS || 0, true, cite.id)
+      if (window.matchMedia('(max-width: 1080px)').matches) setRailOpen(true)
     } else if (cite.taskId) {
       // 知识库范围没有统一的迷你播放器:跳到该片段所属视频的工作台
       router.push(`/video/${cite.taskId}`)
@@ -446,6 +449,13 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
               <button className="meta-link" style={{ marginLeft: 8 }} onClick={() => newSession()} disabled={streaming}>
                 新会话
               </button>
+              <button
+                type="button"
+                className="meta-link chat-rail-toggle"
+                onClick={() => setRailOpen(true)}
+              >
+                <Icon name="list" size="sm" />过程
+              </button>
             </div>
             <div className="ask-bar" style={{ marginTop: 0 }}>
               <textarea
@@ -470,7 +480,14 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
         </div>
       </div>
 
-      <aside className="rail-panel">
+      {railOpen && <div className="chat-rail-veil"><DrawerVeil onClose={() => setRailOpen(false)} /></div>}
+
+      <aside className={`rail-panel${railOpen ? ' open' : ''}`}>
+        <div className="rail-mobile-head">
+          <button type="button" className="btn btn-ic btn-ghost" onClick={() => setRailOpen(false)} aria-label="关闭">
+            <Icon name="x" />
+          </button>
+        </div>
         {isVideo && playbackUrl && (
           <div style={{ margin: '14px 14px 0' }}>
             <VideoPlayer ref={playerRef} src={playbackUrl} title={scopeName} compact className="mini-player" onNeedRefresh={refreshPlaybackUrl} />

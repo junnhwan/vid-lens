@@ -16,8 +16,8 @@ import { formatTime } from '@/components/Citation'
 // 显示 .player-fallback,不做任何假播放。时间一律以毫秒对外,内部换算秒驱动 <video>。
 
 export interface VideoPlayerHandle {
-  /** 跳转到指定毫秒;autoplay 时若暂停中则自动播放 */
-  seek: (ms: number, autoplay?: boolean) => void
+  /** 跳转到指定毫秒;autoplay 时若暂停中则自动播放;cue 会在画面上闪一下引用标 */
+  seek: (ms: number, autoplay?: boolean, cue?: string) => void
   currentTime: () => number
   playing: () => boolean
   pause: () => void
@@ -57,6 +57,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [playing, setPlaying] = useState(false)
     const [failed, setFailed] = useState(false)
     const [srcOverride, setSrcOverride] = useState<string | null>(null)
+    const [cue, setCue] = useState<string | null>(null)
+    const [cueOn, setCueOn] = useState(false)
+    const cueTimer = useRef(0)
     const activeSrc = srcOverride ?? src
     const playable = !!activeSrc && !failed
     // 签名 URL 过期原位恢复:换源后把播放头与播放状态还原
@@ -123,7 +126,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       })()
     }, [])
 
-    const seek = useCallback((ms: number, autoplay = false) => {
+    const seek = useCallback((ms: number, autoplay = false, cueLabel?: string) => {
       const video = videoRef.current
       if (!video || !playable) return
       const dur = Number.isFinite(video.duration) && video.duration > 0 ? video.duration * 1000 : durationMs
@@ -134,7 +137,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       if (autoplay && video.paused) void video.play().catch(() => {})
       paint()
       lastNotifyRef.current = 0
+      if (cueLabel) {
+        setCue(cueLabel)
+        setCueOn(true)
+        window.clearTimeout(cueTimer.current)
+        cueTimer.current = window.setTimeout(() => setCueOn(false), 1100)
+      } else {
+        setCueOn(true)
+        window.clearTimeout(cueTimer.current)
+        cueTimer.current = window.setTimeout(() => setCueOn(false), 420)
+      }
     }, [playable, durationMs, paint])
+
+    useEffect(() => () => window.clearTimeout(cueTimer.current), [])
 
     useImperativeHandle(ref, () => ({
       seek,
@@ -172,7 +187,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     }
 
     return (
-      <div className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}`}>
+      <div className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
           {activeSrc && (
             <video
@@ -208,6 +223,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </div>
           </div>
           <div className="player-hud mono" ref={hudRef}>00:00{title ? ` · ${title}` : ''}</div>
+          {cue && <span className={`player-cue mono${cueOn ? ' on' : ''}`}>{cue}</span>}
         </div>
         <div className="player-controls">
           <button className="pp-btn" disabled={!playable} onClick={toggle} aria-label={playing ? '暂停' : '播放'}>
