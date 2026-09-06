@@ -1,16 +1,21 @@
 'use client'
 
 import { useMemo } from 'react'
-import { parseInline, parseMarkdown, type InlineNode } from '@/lib/markdown'
+import { parseInline, parseMarkdown, peelDomainTags, type InlineNode } from '@/lib/markdown'
 
 export function MarkdownAnswer({
   content,
   onCite,
+  domainTags = false,
 }: {
   content: string
   onCite?: (n: number) => void
+  domainTags?: boolean
 }) {
-  const blocks = useMemo(() => parseMarkdown(content), [content])
+  const { blocks, tags } = useMemo(() => {
+    const parsed = parseMarkdown(content)
+    return domainTags ? peelDomainTags(parsed) : { blocks: parsed, tags: [] as string[] }
+  }, [content, domainTags])
   if (!content) return null
   return (
     <>
@@ -50,6 +55,15 @@ export function MarkdownAnswer({
         }
         return <p key={i}><Inline text={block.text} onCite={onCite} /></p>
       })}
+      {tags.length > 0 && (
+        <div className="domain-tags">
+          {tags.map((tag, i) => (
+            <span key={`${tag}-${i}`} className={`domain-tag t${i % 4}`} style={{ animationDelay: `${i * 70}ms` }}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
     </>
   )
 }

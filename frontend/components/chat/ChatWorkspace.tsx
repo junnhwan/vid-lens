@@ -118,6 +118,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
   const [railOpen, setRailOpen] = useState(false)
   const [elapsed, setElapsed] = useState<string | null>(null)
+  const [askTall, setAskTall] = useState(false)
   const [ledgerByRun, setLedgerByRun] = useState<Record<string, LedgerState>>({})
 
   const {
@@ -195,18 +196,24 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     }
   }, [streaming])
 
-  const autoGrow = (el: HTMLTextAreaElement | null) => {
+  const syncAsk = (el: HTMLTextAreaElement | null) => {
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(120, el.scrollHeight)}px`
+    const h = Math.min(160, Math.max(36, el.scrollHeight))
+    el.style.height = `${h}px`
+    const next = h > 44
+    setAskTall(v => (v === next ? v : next))
   }
+
+  useEffect(() => {
+    syncAsk(inputRef.current)
+  }, [input])
 
   const submit = useCallback((text?: string) => {
     const q = (text ?? input).trim()
     if (!q) { toast.info('先输入一个问题'); return }
     if (streaming) return
     setInput('')
-    if (inputRef.current) inputRef.current.style.height = 'auto'
     void send(q)
   }, [input, streaming, send, toast])
 
@@ -398,6 +405,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
 
         <div className="composer">
           <div className="composer-inner">
+            <div className="composer-toolbar">
             <div className="mode-row">
               <button
                 className={`mode-pill${mode === 'strict_rag' ? ' on' : ''}`}
@@ -445,9 +453,17 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   </button>
                 </>
               )}
-              <span className="mode-note">{MODE_NOTE[mode]}</span>
-              <button className="meta-link" style={{ marginLeft: 8 }} onClick={() => newSession()} disabled={streaming}>
-                新会话
+            </div>
+            <div className="composer-tools">
+              <button
+                type="button"
+                className="btn btn-ic btn-ghost"
+                aria-label="新会话"
+                title="新会话"
+                onClick={() => newSession()}
+                disabled={streaming}
+              >
+                <Icon name="plus" />
               </button>
               <button
                 type="button"
@@ -457,9 +473,11 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                 <Icon name="list" size="sm" />过程
               </button>
             </div>
-            <div className="ask-bar" style={{ marginTop: 0 }}>
+            </div>
+            <p className="mode-note">{MODE_NOTE[mode]}</p>
+            <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
-                ref={el => { inputRef.current = el; autoGrow(el) }}
+                ref={el => { inputRef.current = el }}
                 rows={1}
                 value={input}
                 onChange={e => setInput(e.target.value)}
@@ -489,8 +507,17 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
           </button>
         </div>
         {isVideo && playbackUrl && (
-          <div style={{ margin: '14px 14px 0' }}>
+          <div className="mini-player-block">
             <VideoPlayer ref={playerRef} src={playbackUrl} title={scopeName} compact className="mini-player" onNeedRefresh={refreshPlaybackUrl} />
+            <button
+              type="button"
+              className="mini-workbench"
+              aria-label="打开视频工作台"
+              title="视频工作台"
+              onClick={() => router.push(`/video/${targetId}`)}
+            >
+              <Icon name="video" size="sm" />
+            </button>
           </div>
         )}
         <div className="rail-tabs">

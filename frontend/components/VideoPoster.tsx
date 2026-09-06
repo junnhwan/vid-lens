@@ -53,7 +53,7 @@ export function VideoStill({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [url, setUrl] = useState<string | null>(src ?? null)
-  const [visible, setVisible] = useState(!taskId)
+  const [shown, setShown] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -61,22 +61,21 @@ export function VideoStill({
   }, [src])
 
   useEffect(() => {
-    if (!taskId || src) return
     const el = hostRef.current
-    if (!el) return
+    if (!el || shown) return
     const io = new IntersectionObserver(([entry]) => {
-      if (entry?.isIntersecting) setVisible(true)
+      if (entry?.isIntersecting) setShown(true)
     }, { rootMargin: '80px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [taskId, src])
+  }, [shown])
 
   useEffect(() => {
-    if (!visible || src || !taskId) return
+    if (!shown || src || !taskId) return
     let alive = true
     void playbackFor(taskId).then(u => { if (alive) setUrl(u) })
     return () => { alive = false }
-  }, [visible, src, taskId])
+  }, [shown, src, taskId])
 
   useEffect(() => {
     const v = videoRef.current
@@ -94,7 +93,7 @@ export function VideoStill({
   return (
     <div ref={hostRef} className={className} style={{ position: 'relative', overflow: 'hidden', width: '100%', height: '100%' }}>
       <PosterArt seed={seed || String(taskId || '')} />
-      {url && (
+      {shown && url && (
         <video
           ref={videoRef}
           src={url}

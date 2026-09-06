@@ -62,6 +62,7 @@ export function Modal({
   children,
   footer,
   width,
+  className,
 }: {
   title: string
   onClose: () => void
@@ -69,10 +70,11 @@ export function Modal({
   children: React.ReactNode
   footer?: React.ReactNode
   width?: number | string
+  className?: string
 }) {
   return (
     <Overlay onClose={onClose} confirmOnClose={confirmOnClose}>
-      <div className="modal" style={width ? { width } : undefined}>
+      <div className={`modal${className ? ` ${className}` : ''}`} style={width ? { width } : undefined}>
         <div className="modal-head">
           <h3>{title}</h3>
           <button className="btn btn-ic btn-ghost" onClick={() => { if (shouldClose(confirmOnClose)) onClose() }} aria-label="关闭">

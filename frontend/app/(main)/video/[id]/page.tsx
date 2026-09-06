@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import {
@@ -18,11 +18,12 @@ import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { Modal } from '@/components/ui/Modal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { VideoStill } from '@/components/VideoPoster'
 
-// 视频工作台:播放器 + 多模态时间轴 + 画面证据 + 检索索引 + 摘要。
+// 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
 // /timeline 的原子(转写、OCR、画面描述同轨),帧图像无浏览器预览通道,
 // 卡片展示索引时保存的画面观察文本,回放统一 seek 播放器。
@@ -38,6 +39,20 @@ interface VisualFrameView {
   caption?: string
   hasOcr: boolean
   hasCaption: boolean
+}
+
+function visualTipSections(text: string): { label: string; body: string }[] {
+  const raw = text.trim()
+  if (!raw) return []
+  const chunks = raw.split(/(?=\d+\)\s*)/).map(s => s.trim()).filter(Boolean)
+  if (chunks.length > 1) {
+    return chunks.map(chunk => {
+      const m = chunk.match(/^\d+\)\s*([^:：\n]+)[:：]?\s*([\s\S]*)$/)
+      if (m) return { label: m[1].trim(), body: m[2].trim() }
+      return { label: '', body: chunk }
+    })
+  }
+  return [{ label: '', body: raw }]
 }
 
 function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
@@ -63,6 +78,40 @@ function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
   return [...map.values()].sort((a, b) => a.timeMs - b.timeMs)
 }
 
+function FrameRead({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [canToggle, setCanToggle] = useState(false)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => {
+      if (open) return
+      setCanToggle(el.scrollHeight > el.clientHeight + 2)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [children, open])
+
+  return (
+    <div>
+      <div ref={ref} className={`frame-read${open ? ' open' : ''}`}>{children}</div>
+      {canToggle && (
+        <button
+          type="button"
+          className="frame-more"
+          onClick={e => { e.stopPropagation(); setOpen(v => !v) }}
+        >
+          {open ? '收起' : '展开'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function VideoWorkbenchPage({ params }: { params: { id: string } }) {
   const taskId = Number(params.id)
   const router = useRouter()
@@ -77,9 +126,16 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<TabKey>('tl')
+  const [seen, setSeen] = useState<Record<TabKey, boolean>>({ tl: true, vf: false, idx: false })
+  const openTab = (key: TabKey) => {
+    setTab(key)
+    setSeen(s => (s[key] ? s : { ...s, [key]: true }))
+  }
   const [playheadMs, setPlayheadMs] = useState(0)
   const [busy, setBusy] = useState<ActionKind | ''>('')
   const [headSnap, setHeadSnap] = useState(false)
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const [railTip, setRailTip] = useState<{ left: number; text: string; timeMs: number } | null>(null)
   const liveRowRef = useRef<HTMLDivElement>(null)
 
   useCrumb([
@@ -192,7 +248,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   useEffect(() => {
     const el = liveRowRef.current
     if (!el) return
-    const root = el.closest('.rail-body')
+    const root = el.closest('.rail-pane')
     if (!(root instanceof HTMLElement)) return
     const rootBox = root.getBoundingClientRect()
     const box = el.getBoundingClientRect()
@@ -294,6 +350,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
       <>
         {hasRail && (
           <>
+            <div className="tl-rail-wrap">
             <div
               className="tl-rail"
               onPointerDown={e => {
@@ -301,6 +358,20 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                 const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
                 seek(ratio * timelineMs)
               }}
+              onPointerMove={e => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                const ms = ratio * timelineMs
+                const hits = visualAtoms.filter(a => ms >= a.start_ms && ms <= Math.max(a.end_ms, a.start_ms + 1))
+                const atom = hits.length > 0 ? hits[hits.length - 1] : null
+                if (!atom?.content) { setRailTip(null); return }
+                setRailTip({
+                  left: Math.max(16, Math.min(rect.width - 16, e.clientX - rect.left)),
+                  text: atom.content,
+                  timeMs: atom.start_ms,
+                })
+              }}
+              onPointerLeave={() => setRailTip(null)}
             >
               {transcriptAtoms.map(a => (
                 <div
@@ -314,10 +385,21 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
                   key={`tv-${a.id}`}
                   className={`tl-seg ${a.modality === 'visual_ocr' ? 't-ocr' : 't-caption'}`}
                   style={{ left: `${(a.start_ms / durPct) * 100}%`, width: `max(6px, ${((a.end_ms - a.start_ms) / durPct) * 100}%)` }}
-                  title={a.content}
                 />
               ))}
               <div className={`tl-head${headSnap ? ' snap' : ''}`} style={{ left: `${(playheadMs / durPct) * 100}%` }} />
+            </div>
+            {railTip && (
+              <div className="tl-tip" style={{ ['--tip-x' as string]: `${railTip.left}px` }} role="tooltip">
+                <span className="tl-tip-time">{formatTime(railTip.timeMs)}</span>
+                {visualTipSections(railTip.text).map((sec, i) => (
+                  <div key={i} className="tl-tip-sec">
+                    {sec.label && <div className="tl-tip-k">{sec.label}</div>}
+                    <div className="tl-tip-v">{sec.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
             </div>
             <div className="tl-scale mono">
               {Array.from({ length: 6 }, (_, i) => (
@@ -328,7 +410,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
               <span><i style={{ background: 'rgba(154,145,127,.5)' }} />解说转写</span>
               <span><i style={{ background: 'rgba(226,168,75,.6)' }} />画面 OCR</span>
               <span><i style={{ background: 'rgba(134,180,201,.55)' }} />画面描述</span>
-              <span style={{ marginLeft: 'auto', color: 'var(--tx-4)' }}>点击任意位置跳转</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--tx-4)' }}>悬停色块看画面 · 点击跳转</span>
             </div>
           </>
         )}
@@ -362,31 +444,27 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
     }
     return (
       <>
-        <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 12 }}>
-          {frames.length} 帧 · 点击时间码回放
+        <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 10 }}>
+          {frames.length} 帧
         </p>
-        <div className="frames-grid">
+        <div className="frames-list">
           {frames.map(f => (
-            <div className="frame-card" key={f.key}>
-              <div className="vthumb-art" style={{ aspectRatio: '16/9', position: 'relative' }}>
+            <div className="frame-row" key={f.key} onClick={() => seek(f.timeMs)}>
+              <div className="frame-still">
                 <VideoStill src={playbackUrl} timeMs={f.timeMs} seed={`${taskId}-${f.key}`} />
-                <span
-                  className="mono"
-                  style={{ position: 'absolute', left: 8, top: 6, zIndex: 2, fontSize: 10.5, color: 'var(--tx-2)', background: 'rgba(10,9,7,.6)', padding: '1px 6px', borderRadius: 5 }}
-                >
-                  {formatTime(f.timeMs)}
-                </span>
               </div>
-              <div className="fc-body">
-                <div className="row">
-                  <span className="fc-time mono" style={{ cursor: 'pointer' }} onClick={() => seek(f.timeMs)}>{formatTime(f.timeMs)}</span>
+              <div className="frame-copy">
+                <div className="frame-meta">
+                  <span className="frame-time">{formatTime(f.timeMs)}</span>
                   <span style={{ display: 'inline-flex', gap: 4 }}>
                     {f.hasOcr && <ModalityTag modality="visual_ocr" />}
                     {f.hasCaption && <ModalityTag modality="visual_caption" />}
                   </span>
                 </div>
-                {f.ocr && <div className="fc-text mono" style={{ fontSize: 10.5, letterSpacing: '.02em' }}>{f.ocr}</div>}
-                {f.caption && <div className="fc-text" style={f.ocr ? { marginTop: 5 } : undefined}>{f.caption}</div>}
+                <FrameRead>
+                  {f.caption && <div className="frame-caption">{f.caption}</div>}
+                  {f.ocr && <div className="frame-ocr">{f.ocr}</div>}
+                </FrameRead>
               </div>
             </div>
           ))}
@@ -436,9 +514,9 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
   }
 
   return (
-    <div className="page page-wide">
+    <div className="page-fill">
       <div className="ws">
-        <div>
+        <div className="ws-stage">
           <VideoPlayer
             ref={playerRef}
             src={playbackUrl}
@@ -448,17 +526,14 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
           {processing && (
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 12, flex: 'none' }}>
               <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} />
             </div>
           )}
 
           <div className="ws-actions">
             {task.has_summary ? (
-              <button
-                className="btn"
-                onClick={() => document.getElementById('summaryBlock')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              >
+              <button className="btn" onClick={() => setSummaryOpen(true)}>
                 <Icon name="file" size="sm" />查看摘要
               </button>
             ) : (
@@ -497,7 +572,7 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
           </div>
 
           {failed && (
-            <div className="card card-pad" style={{ marginTop: 14, borderColor: 'rgba(224,131,115,.35)' }}>
+            <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'rgba(224,131,115,.35)' }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
                 <div style={{ flex: 1 }}>
@@ -522,40 +597,33 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
               </div>
             </div>
           )}
-
-          <div className="summary-block" id="summaryBlock">
-            {task.summary ? (
-              <div className="card card-pad">
-                <h3>
-                  <Icon name="file" size="sm" />AI 摘要
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--tx-4)', fontWeight: 500 }}>
-                    {task.summary.model_name} · {fmtRelTime(task.summary.created_at)}
-                  </span>
-                </h3>
-                <div className="summary-body"><MarkdownAnswer content={task.summary.content} /></div>
-              </div>
-            ) : (
-              <div className="empty card">
-                <Icon name="wand" size="lg" />
-                <b>还没有摘要</b>
-              </div>
-            )}
-          </div>
         </div>
 
-        <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="card ws-rail">
           <div className="rail-tabs" style={{ padding: '10px 14px 0' }}>
             {([['tl', '转写时间轴'], ['vf', '画面证据'], ['idx', '检索索引']] as const).map(([key, label]) => (
-              <button key={key} className={`rail-tab${tab === key ? ' on' : ''}`} onClick={() => setTab(key)}>
+              <button key={key} className={`rail-tab${tab === key ? ' on' : ''}`} onClick={() => openTab(key)}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="rail-body" style={{ padding: '16px 18px 26px' }}>
-            {tab === 'tl' ? renderTL() : tab === 'vf' ? renderVF() : renderIdx()}
+          <div className="rail-body">
+            <div className={`rail-pane${tab === 'tl' ? ' on' : ''}`}>{seen.tl ? renderTL() : null}</div>
+            <div className={`rail-pane${tab === 'vf' ? ' on' : ''}`}>{seen.vf ? renderVF() : null}</div>
+            <div className={`rail-pane${tab === 'idx' ? ' on' : ''}`}>{seen.idx ? renderIdx() : null}</div>
           </div>
         </div>
       </div>
+      {summaryOpen && task.summary && (
+        <Modal title="AI 摘要" className="modal-read" onClose={() => setSummaryOpen(false)}>
+          <p className="summary-modal-meta">
+            {task.summary.model_name} · {fmtRelTime(task.summary.created_at)}
+          </p>
+          <div className="summary-body">
+            <MarkdownAnswer content={task.summary.content} domainTags />
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

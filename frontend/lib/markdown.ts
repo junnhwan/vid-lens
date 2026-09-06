@@ -23,9 +23,35 @@ const UL = /^[-*]\s+(.+)$/
 const OL = /^\d+[.)]\s+(.+)$/
 const QUOTE = /^>\s?(.*)$/
 const SPECIAL_START = /^(#{1,3}\s|```|[-*]\s|\d+[.)]\s|>)/
+const MD_LANG = /^(markdown|md)$/i
+const LOOKS_LIKE_MD = /^(#{1,3}\s|[-*]\s|\d+[.)]\s)/m
+
+/** 模型有时把整篇摘要包进 ```markdown 围栏。整篇只有这一层时拆掉再解析。 */
+export function unwrapMarkdownFence(src: string): string {
+  let text = src.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trim()
+  for (let n = 0; n < 2; n++) {
+    const lines = text.split('\n')
+    const open = lines[0]?.match(FENCE_OPEN)
+    if (!open) break
+    const lang = open[1] || ''
+    let closeAt = -1
+    for (let i = 1; i < lines.length; i++) {
+      if (FENCE_CLOSE.test(lines[i])) { closeAt = i; break }
+    }
+    const inner = (closeAt === -1 ? lines.slice(1) : lines.slice(1, closeAt)).join('\n')
+    const rest = closeAt === -1 ? '' : lines.slice(closeAt + 1).join('\n').trim()
+    if (rest) break
+    if (MD_LANG.test(lang) || (lang === '' && LOOKS_LIKE_MD.test(inner.trim()))) {
+      text = inner.trim()
+      continue
+    }
+    break
+  }
+  return text
+}
 
 export function parseMarkdown(src: string): MdBlock[] {
-  const lines = src.replace(/\r\n/g, '\n').split('\n')
+  const lines = unwrapMarkdownFence(src).split('\n')
   const blocks: MdBlock[] = []
   let i = 0
   while (i < lines.length) {
@@ -116,4 +142,35 @@ export function parseInline(text: string): InlineNode[] {
   }
   if (cursor < text.length) nodes.push({ type: 'text', text: text.slice(cursor) })
   return nodes
+}
+
+function cleanTag(raw: string): string {
+  return raw.replace(/^[`*#\s-]+|[`*#\s]+$/g, '').replace(/\*\*/g, '').trim()
+}
+
+function splitTags(raw: string): string[] {
+  return raw.split(/[、，,;；|/]/).map(cleanTag).filter(t => t.length > 0 && t.length <= 18)
+}
+
+/** 摘要末尾「领域标签」抽成独立标签,不再当普通标题+列表渲染。 */
+export function peelDomainTags(blocks: MdBlock[]): { blocks: MdBlock[]; tags: string[] } {
+  let idx = -1
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]
+    if (b.type === 'h' && /领域标签/.test(b.text)) { idx = i; break }
+  }
+  if (idx >= 0) {
+    const tags: string[] = []
+    for (const b of blocks.slice(idx + 1)) {
+      if (b.type === 'ul' || b.type === 'ol') tags.push(...b.items.map(cleanTag))
+      else if (b.type === 'p') tags.push(...splitTags(b.text))
+    }
+    return { blocks: blocks.slice(0, idx), tags: tags.filter(Boolean) }
+  }
+  const last = blocks[blocks.length - 1]
+  if (last?.type === 'p') {
+    const m = last.text.match(/^(?:\*\*)?领域标签(?:\*\*)?[：:]\s*(.+)$/)
+    if (m) return { blocks: blocks.slice(0, -1), tags: splitTags(m[1]) }
+  }
+  return { blocks, tags: [] }
 }
