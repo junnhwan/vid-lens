@@ -54,7 +54,8 @@ func TestDeploymentHasThreeDistinctProvisionedDashboardsWithoutOCR(t *testing.T)
 			t.Fatalf("parse %s: %v", path, err)
 		}
 	}
-	compose, err := os.ReadFile(filepath.Join(root, "docker-compose.yml"))
+	// 可观测栈自 a3f8956 起拆分到独立 compose 文件,主 docker-compose.yml 不再携带该 profile。
+	compose, err := os.ReadFile(filepath.Join(root, "docker-compose.observability.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
