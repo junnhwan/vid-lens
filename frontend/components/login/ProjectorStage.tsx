@@ -1,13 +1,8 @@
 'use client'
 
-const CUES = [
-  { t: '00:14', cite: 'C1', text: '他把第一性原理拆成可验证的三步。', kind: '口述' },
-  { t: '01:02', cite: 'C2', text: '白板上出现了完整的调用链。', kind: '画面' },
-  { t: '03:41', cite: 'C3', text: '结论被钉回这一帧,而不是整段转写。', kind: '引用' },
-  { t: '07:18', cite: 'C1', text: '同一句话再次出现时,时间码没有漂。', kind: '口述' },
-]
+import './stage.css'
 
-const TICKS = ['00:00', '02:30', '05:00', '07:30', '10:00']
+const WAVE = [28, 62, 88, 44, 96, 58, 80, 36, 72, 90, 40, 84, 52, 76, 34, 68]
 
 export function ProjectorStage() {
   return (
@@ -15,36 +10,69 @@ export function ProjectorStage() {
       <div className="px-grain" />
       <div className="px-vignette" />
       <div className="px-beam" />
-      <div className="px-sprocket px-sprocket-l" />
-      <div className="px-sprocket px-sprocket-r" />
 
-      <div className="px-reel">
-        <i /><i /><i />
-      </div>
+      <div className="px-story">
+        <div className="px-row">
+          <div className="px-gate">
+            <div className="px-sprockets" />
+            <div className="px-picture">
+              <div className="px-file">
+                <span className="px-play" />
+              </div>
+              <div className="px-scene" />
+              <i className="px-ocr a" />
+              <i className="px-ocr b" />
+              <i className="px-ocr c" />
+              <div className="px-scanline" />
+              <span className="px-badge mono">C1</span>
+              <span className="px-tc mono">00:14</span>
+            </div>
+            <div className="px-sprockets" />
+          </div>
 
-      <div className="px-telecine">
-        <div className="px-ticks">
-          {TICKS.map(t => <span key={t} className="mono">{t}</span>)}
+          <div className="px-side">
+            <div className="px-wave">
+              {WAVE.map((h, i) => (
+                <i key={i} style={{ '--h': `${h}%`, animationDelay: `${i * 0.05}s` } as React.CSSProperties} />
+              ))}
+            </div>
+            <div className="px-graph">
+              <span className="n n1" />
+              <span className="n n2" />
+              <span className="n n3" />
+              <span className="n n4" />
+              <span className="n n5" />
+              <i className="e e1" />
+              <i className="e e2" />
+              <i className="e e3" />
+              <i className="e e4" />
+            </div>
+          </div>
         </div>
-        <div className="px-track">
-          <span className="px-seg px-seg-a" />
-          <span className="px-seg px-seg-b" />
-          <span className="px-seg px-seg-c" />
+
+        <div className="px-timeline">
+          <span className="px-seg s1" />
+          <span className="px-seg s2" />
+          <span className="px-seg s3" />
+          <span className="px-pin p1 mono">C1</span>
+          <span className="px-pin p2 mono">C2</span>
           <span className="px-head" />
         </div>
-        <div className="px-cues">
-          {CUES.map((c, i) => (
-            <div key={c.t} className="px-cue" style={{ animationDelay: `${0.4 + i * 0.55}s` }}>
-              <span className="px-cue-t mono">{c.t}</span>
-              <span className="px-cue-k">{c.kind}</span>
-              <span className="px-cue-cite mono">{c.cite}</span>
-              <span className="px-cue-tx">{c.text}</span>
-            </div>
-          ))}
+
+        <div className="px-frames">
+          <div className="px-tile t1"><i /><b /></div>
+          <div className="px-tile t2"><i /><b /></div>
+          <div className="px-tile t3"><i /><b /></div>
+          <div className="px-tile t4"><i /><b /></div>
+        </div>
+
+        <div className="px-beats">
+          <i className="d1" />
+          <i className="d2" />
+          <i className="d3" />
+          <i className="d4" />
         </div>
       </div>
-
-      <div className="px-scan" />
     </div>
   )
 }

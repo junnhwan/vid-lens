@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { api, getToken } from '@/lib/api'
 import type { User } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
+import { BrandMark } from '@/components/ui/BrandMark'
 import UploadModal from '@/components/UploadModal'
 import { useTheme } from '@/components/theme/ThemeProvider'
 
@@ -73,7 +74,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="app">
           <aside className="rail">
             <Link href="/" className="brand">
-              <div className="brand-mark" />
+              <BrandMark />
               <div>
                 <div className="brand-name">映知</div>
                 <div className="brand-sub">VIDLENS</div>

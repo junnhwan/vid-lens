@@ -15,6 +15,7 @@ import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { BrandMark } from '@/components/ui/BrandMark'
 import { api } from '@/lib/api'
 import type { Citation, ChatScopeType, EvidenceLedgerView, VideoChatMode } from '@/lib/types'
 
@@ -362,7 +363,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
             {messages.length === 0 ? (
               <div className="chat-empty">
                 <div className="hello">
-                  <div className="brand-mark" />
+                  <BrandMark size={40} />
                   <h2>{isVideo ? '问这段视频' : `问「${scopeName}」`}</h2>
                 </div>
               </div>

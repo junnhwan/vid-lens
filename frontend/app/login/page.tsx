@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { api, setToken, getToken, ApiError } from '@/lib/api'
 import { Icon } from '@/components/ui/Icon'
 import { ProjectorStage } from '@/components/login/ProjectorStage'
+import { BrandMark } from '@/components/ui/BrandMark'
 
 const DEMO_USERNAME = 'test'
 const DEMO_PASSWORD = 'test0236'
@@ -52,42 +53,45 @@ export default function LoginPage() {
 
   return (
     <div className="login-wrap">
-      <div className="login-stage-col">
-        <ProjectorStage />
-        <Link href="/" className="login-brand-float">
-          <div className="brand-mark" style={{ width: 36, height: 36 }} />
-          <div>
-            <div className="brand-name" style={{ fontSize: 22 }}>映知</div>
-            <div className="brand-sub">VIDLENS</div>
-          </div>
-        </Link>
-      </div>
+      <Link href="/" className="login-brand-float">
+        <BrandMark size={36} />
+        <div>
+          <div className="brand-name" style={{ fontSize: 22 }}>映知</div>
+          <div className="brand-sub">VIDLENS</div>
+        </div>
+      </Link>
 
-      <div className="login-main">
-        <div className="login-card">
-          <div className="seg" style={{ marginBottom: 18 }}>
-            <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setErr('') }}>登录</button>
-            <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => { setMode('register'); setErr('') }}>注册</button>
-          </div>
+      <div className="login-compose">
+        <div className="login-stage-col">
+          <ProjectorStage />
+        </div>
 
-          <form onSubmit={submit} className="login-form">
-            {mode === 'register' && (
-              <Field label="昵称(可选)" value={nickname} onChange={setNickname} placeholder="显示名" />
-            )}
-            <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
-            <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
-            {err && <div className="login-err">{err}</div>}
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', height: 42 }} disabled={busy}>
-              {busy ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
+        <div className="login-main">
+          <div className="login-card">
+            <div className="seg" style={{ marginBottom: 18 }}>
+              <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setErr('') }}>登录</button>
+              <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => { setMode('register'); setErr('') }}>注册</button>
+            </div>
+
+            <form onSubmit={submit} className="login-form">
+              {mode === 'register' && (
+                <Field label="昵称(可选)" value={nickname} onChange={setNickname} placeholder="显示名" />
+              )}
+              <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
+              <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
+              {err && <div className="login-err">{err}</div>}
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', height: 42 }} disabled={busy}>
+                {busy ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
+              </button>
+            </form>
+
+            <div className="login-divider" />
+
+            <button type="button" className="btn" style={{ width: '100%', height: 42 }} onClick={demoLogin} disabled={busy}>
+              <Icon name="bulb" size="sm" />
+              演示账号
             </button>
-          </form>
-
-          <div className="login-divider" />
-
-          <button type="button" className="btn" style={{ width: '100%', height: 42 }} onClick={demoLogin} disabled={busy}>
-            <Icon name="bulb" size="sm" />
-            演示账号
-          </button>
+          </div>
         </div>
       </div>
     </div>
