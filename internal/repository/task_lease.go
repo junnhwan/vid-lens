@@ -64,6 +64,12 @@ type TaskDispatchClaimRequest struct {
 	Now             time.Time
 	LeaseUntil      time.Time
 	Token           string
+	// RedispatchBackoff damps repeated re-publishes of an expired dispatch
+	// lease whose message may still be queued behind prefetch. When the claim
+	// reason is an expired lease (not a due failure), next_retry_at is set so
+	// the next expired-lease sweep waits out the backoff. Zero keeps the old
+	// undamped behavior.
+	RedispatchBackoff time.Duration
 }
 
 type TaskDispatchRestoreRequest struct {

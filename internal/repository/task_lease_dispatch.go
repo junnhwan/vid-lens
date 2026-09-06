@@ -43,21 +43,36 @@ func (r *Repositories) ClaimRetryDispatch(req TaskDispatchClaimRequest) (bool, e
 		}
 
 		newVersion := task.LeaseVersion + 1
+		// A due failure is being retried now, so its next_retry_at clears. An
+		// expired dispatch lease re-publish is damped by RedispatchBackoff:
+		// with the original message possibly still queued behind prefetch, an
+		// undamped sweep re-published a duplicate every lease expiry and the
+		// queue piled up. The next sweep for the same task waits out the backoff.
+		nextRetryAt := req.Now.Add(req.RedispatchBackoff)
+		dampRedispatch := !dueFailure && req.RedispatchBackoff > 0
+		if !dampRedispatch {
+			nextRetryAt = time.Time{}
+		}
+		taskUpdates := map[string]interface{}{
+			"status":           model.TaskStatusQueued,
+			"last_job_type":    req.JobType,
+			"processing_token": req.Token,
+			"lease_kind":       model.TaskLeaseKindDispatch,
+			"lease_expires_at": req.LeaseUntil,
+			"lease_version":    newVersion,
+			"error_msg":        "",
+			"finished_at":      nil,
+		}
+		if dampRedispatch {
+			taskUpdates["next_retry_at"] = nextRetryAt
+		} else {
+			taskUpdates["next_retry_at"] = nil
+		}
+		// stage stays untouched on the task row: a queued task has not entered
+		// the stage yet; ClaimTaskProcessing writes the stage with started_at.
 		taskTx := repos.db.Model(&model.VideoTask{}).
 			Where("id = ? AND lease_version = ?", task.ID, req.ExpectedVersion).
-			Updates(map[string]interface{}{
-				"status":            model.TaskStatusQueued,
-				"stage":             req.Stage,
-				"last_job_type":     req.JobType,
-				"processing_token":  req.Token,
-				"lease_kind":        model.TaskLeaseKindDispatch,
-				"lease_expires_at":  req.LeaseUntil,
-				"lease_version":     newVersion,
-				"next_retry_at":     nil,
-				"error_msg":         "",
-				"stage_started_at":  req.Now,
-				"stage_finished_at": nil,
-			})
+			Updates(taskUpdates)
 		if taskTx.Error != nil {
 			return taskTx.Error
 		}
@@ -65,20 +80,25 @@ func (r *Repositories) ClaimRetryDispatch(req TaskDispatchClaimRequest) (bool, e
 			return nil
 		}
 
+		jobUpdates := map[string]interface{}{
+			"status":           model.TaskStatusQueued,
+			"stage":            req.Stage,
+			"processing_token": req.Token,
+			"lease_kind":       model.TaskLeaseKindDispatch,
+			"lease_expires_at": req.LeaseUntil,
+			"lease_version":    newVersion,
+			"finished_at":      nil,
+			"last_error_code":  "",
+			"last_error_msg":   "",
+		}
+		if dampRedispatch {
+			jobUpdates["next_retry_at"] = nextRetryAt
+		} else {
+			jobUpdates["next_retry_at"] = nil
+		}
 		jobTx := repos.db.Model(&model.TaskJob{}).
 			Where("id = ? AND lease_version = ?", job.ID, job.LeaseVersion).
-			Updates(map[string]interface{}{
-				"status":           model.TaskStatusQueued,
-				"stage":            req.Stage,
-				"processing_token": req.Token,
-				"lease_kind":       model.TaskLeaseKindDispatch,
-				"lease_expires_at": req.LeaseUntil,
-				"lease_version":    newVersion,
-				"next_retry_at":    nil,
-				"last_error_code":  "",
-				"last_error_msg":   "",
-				"finished_at":      nil,
-			})
+			Updates(jobUpdates)
 		if jobTx.Error != nil {
 			return jobTx.Error
 		}

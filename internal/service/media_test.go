@@ -229,7 +229,7 @@ func TestUploadByURLCreatesTaskWithoutAssetBeforeDownloadWhenForeignKeysAreEnfor
 	}
 }
 
-func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
+func TestRequestTranscribeQueuesTaskKeepingStageUntilWorkerClaim(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	producer := &recordingMediaProducer{}
 	task := &model.VideoTask{
@@ -254,8 +254,8 @@ func TestRequestTranscribeQueuesTaskWithTranscribingStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageTranscribing {
-		t.Fatalf("status/stage = %d/%q, want queued/transcribing", current.Status, current.Stage)
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageUploaded {
+		t.Fatalf("status/stage = %d/%q, want queued/uploaded (stage advances at worker claim, not dispatch)", current.Status, current.Stage)
 	}
 	if current.ProcessingToken == "" || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil {
 		t.Fatalf("transcribe dispatch lease = token:%q kind:%q expires:%v", current.ProcessingToken, current.LeaseKind, current.LeaseExpiresAt)
@@ -392,7 +392,7 @@ func assertInitialDispatchFailureIsRetryable(t *testing.T, repos *repository.Rep
 	t.Fatalf("task %d is not visible to retry scheduler", taskID)
 }
 
-func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
+func TestRequestAnalysisQueuesTaskKeepingStageUntilWorkerClaim(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	producer := &recordingMediaProducer{}
 	task := &model.VideoTask{
@@ -417,8 +417,8 @@ func TestRequestAnalysisQueuesTaskWithSummarizingStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageSummarizing {
-		t.Fatalf("status/stage = %d/%q, want queued/summarizing", current.Status, current.Stage)
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageUploaded {
+		t.Fatalf("status/stage = %d/%q, want queued/uploaded (stage advances at worker claim, not dispatch)", current.Status, current.Stage)
 	}
 	if current.ProcessingToken == "" || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil {
 		t.Fatalf("analyze dispatch lease = token:%q kind:%q expires:%v", current.ProcessingToken, current.LeaseKind, current.LeaseExpiresAt)

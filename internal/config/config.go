@@ -173,6 +173,11 @@ type TaskRetryConfig struct {
 	BackoffSeconds      []int `yaml:"backoff_seconds"`
 	ScanIntervalSeconds int   `yaml:"scan_interval_seconds"`
 	BatchSize           int   `yaml:"batch_size"`
+	// RedispatchBackoffSeconds damps expired-dispatch-lease re-publishes: the
+	// dispatch lease cannot tell "message lost before publisher confirm" from
+	// "message still queued behind prefetch", so each sweep re-publish waits
+	// out this backoff before repeating. Zero selects the 5-minute default.
+	RedispatchBackoffSeconds int `yaml:"redispatch_backoff_seconds"`
 }
 
 // CleanupConfig controls durable task-resource cleanup independently from

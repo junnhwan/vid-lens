@@ -272,8 +272,14 @@ type RetrySchedulerConfig struct {
 	Interval               time.Duration
 	DispatchFailureBackoff time.Duration
 	DispatchLease          time.Duration
-	Now                    func() time.Time
-	NewToken               func() string
+	// RedispatchBackoff damps expired-dispatch-lease re-publishes. The lease
+	// cannot distinguish "message lost before publisher confirm" from
+	// "message still queued behind prefetch", so without damping the sweep
+	// re-published a duplicate (same MessageId) every lease expiry and the
+	// queue piled up while consumers were busy. Zero selects the default.
+	RedispatchBackoff time.Duration
+	Now               func() time.Time
+	NewToken          func() string
 }
 
 // RetryScheduler is the poller half of the 投递一致性 lease (transactional
@@ -302,6 +308,9 @@ func NewRetryScheduler(repos *repository.Repositories, producer retryProducer, c
 	}
 	if config.DispatchLease <= 0 {
 		config.DispatchLease = 2 * time.Minute
+	}
+	if config.RedispatchBackoff <= 0 {
+		config.RedispatchBackoff = 5 * time.Minute
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -355,6 +364,7 @@ func (s *RetryScheduler) RunOnce(ctx context.Context) error {
 			TaskID: task.ID, JobType: task.LastJobType, Stage: stage,
 			ExpectedVersion: task.LeaseVersion, Now: now,
 			LeaseUntil: now.Add(s.config.DispatchLease), Token: claimToken,
+			RedispatchBackoff: s.config.RedispatchBackoff,
 		})
 		if err != nil {
 			return err

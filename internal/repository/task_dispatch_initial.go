@@ -96,30 +96,30 @@ func (r *Repositories) prepareInitialDispatchTask(req InitialTaskDispatchRequest
 }
 
 func initialDispatchTaskUpdates(req InitialTaskDispatchRequest, leaseVersion int64) map[string]interface{} {
+	// stage is intentionally NOT written here: status=queued plus the worker's
+	// later claim is what makes a task "processing". Writing the target stage at
+	// dispatch time made queued tasks (started_at still NULL) indistinguishable
+	// from running ones for the frontend. The task keeps its current stage until
+	// ClaimTaskProcessing transitions it with started_at set.
 	return map[string]interface{}{
-		"status":            model.TaskStatusQueued,
-		"stage":             req.Stage,
-		"last_job_type":     req.JobType,
-		"retry_count":       0,
-		"next_retry_at":     nil,
-		"error_msg":         "",
-		"last_error_code":   "",
-		"last_error_msg":    "",
-		"processing_token":  req.Token,
-		"lease_kind":        model.TaskLeaseKindDispatch,
-		"lease_expires_at":  req.LeaseUntil,
-		"lease_version":     leaseVersion,
-		"stage_started_at":  req.Now,
-		"stage_finished_at": nil,
-		"finished_at":       nil,
+		"status":           model.TaskStatusQueued,
+		"last_job_type":    req.JobType,
+		"retry_count":      0,
+		"next_retry_at":    nil,
+		"error_msg":        "",
+		"last_error_code":  "",
+		"last_error_msg":   "",
+		"processing_token": req.Token,
+		"lease_kind":       model.TaskLeaseKindDispatch,
+		"lease_expires_at": req.LeaseUntil,
+		"lease_version":    leaseVersion,
+		"finished_at":      nil,
 	}
 }
 
 func applyInitialDispatchState(task *model.VideoTask, req InitialTaskDispatchRequest, leaseVersion int64) {
 	leaseUntil := req.LeaseUntil
-	stageStartedAt := req.Now
 	task.Status = model.TaskStatusQueued
-	task.Stage = req.Stage
 	task.LastJobType = req.JobType
 	task.RetryCount = 0
 	task.NextRetryAt = nil
@@ -130,7 +130,8 @@ func applyInitialDispatchState(task *model.VideoTask, req InitialTaskDispatchReq
 	task.LeaseKind = model.TaskLeaseKindDispatch
 	task.LeaseExpiresAt = &leaseUntil
 	task.LeaseVersion = leaseVersion
-	task.StageStartedAt = &stageStartedAt
 	task.StageFinishedAt = nil
 	task.FinishedAt = nil
+	// Keep the task's current stage (initial stage for a new task); see the
+	// stage note in initialDispatchTaskUpdates.
 }

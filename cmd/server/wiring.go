@@ -316,8 +316,9 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		rateLimiter: rateLimiter,
 		consumer:    consumer,
 		retryScheduler: mq.NewRetryScheduler(deps.repos, deps.producer, mq.RetrySchedulerConfig{
-			BatchSize: deps.cfg.TaskRetry.BatchSize,
-			Interval:  time.Duration(deps.cfg.TaskRetry.ScanIntervalSeconds) * time.Second,
+			BatchSize:         deps.cfg.TaskRetry.BatchSize,
+			Interval:          time.Duration(deps.cfg.TaskRetry.ScanIntervalSeconds) * time.Second,
+			RedispatchBackoff: time.Duration(deps.cfg.TaskRetry.RedispatchBackoffSeconds) * time.Second,
 		}),
 		taskCleanup:          taskCleanup,
 		taskCleanupScheduler: taskCleanupScheduler,

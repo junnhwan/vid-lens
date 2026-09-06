@@ -107,6 +107,9 @@ task_retry:
   backoff_seconds: [60, 300, 900]
   scan_interval_seconds: 30
   batch_size: 20
+  # 过期 dispatch lease 的补投阻尼：lease 无法区分"消息丢失"与"消息仍在
+  # prefetch 后排队"，每次补投后须等满该间隔才会再次补投，避免重复消息堆积。
+  redispatch_backoff_seconds: 300
 
 cleanup:
   scan_interval_seconds: 30

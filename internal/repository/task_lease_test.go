@@ -38,7 +38,9 @@ func TestPrepareInitialTaskDispatchPersistsRecoverableLeaseAndBudgetAtomically(t
 	if err != nil {
 		t.Fatalf("find task job: %v", err)
 	}
-	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageTranscribing || current.LastJobType != model.TaskJobTypeTranscribe || current.ProcessingToken != prepared.Token || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil || current.LeaseVersion != 1 {
+	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageUploaded || current.LastJobType != model.TaskJobTypeTranscribe || current.ProcessingToken != prepared.Token || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil || current.LeaseVersion != 1 {
+		// Dispatch keeps the task's stage (uploaded); the transcribe worker's
+		// claim is what transitions the stage with started_at set.
 		t.Fatalf("prepared task = %+v", current)
 	}
 	if job == nil || job.Status != model.TaskStatusQueued || job.ProcessingToken != prepared.Token || job.LeaseKind != model.TaskLeaseKindDispatch || job.LeaseExpiresAt == nil || job.LeaseVersion != current.LeaseVersion || job.RetryBudgetID != prepared.RetryBudgetID {
