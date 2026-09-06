@@ -849,6 +849,9 @@ svg { display: block; }
 .profile-card .pc-body .t { display: flex; align-items: center; gap: 9px; }
 .profile-card .pc-body .t b { font-size: 13.5px; font-weight: 600; }
 .profile-card .pc-body .d { font-size: 11.5px; color: var(--tx-3); margin-top: 3px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-card .pc-line { display: flex; align-items: baseline; gap: 9px; margin-top: 4px; min-width: 0; }
+.profile-card .pc-line .k { width: 56px; flex: none; font-size: 10.5px; color: var(--tx-4); }
+.profile-card .pc-line .v { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--tx-3); }
 
 .memory-item { display: flex; gap: 12px; padding: 13px 15px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); align-items: flex-start; }
 .memory-item + .memory-item { margin-top: 10px; }
@@ -860,6 +863,7 @@ svg { display: block; }
 .memory-item.withdrawn .mi-text { text-decoration: line-through; text-decoration-color: var(--tx-4); }
 
 .switch { position: relative; width: 36px; height: 21px; border-radius: 99px; background: var(--bg-4); border: 1px solid var(--line-strong); transition: background 0.2s var(--ease); flex: none; }
+button.switch { padding: 0; cursor: pointer; }
 .switch::after { content: ""; position: absolute; left: 2.5px; top: 2.5px; width: 14px; height: 14px; border-radius: 50%; background: var(--tx-2); transition: all 0.2s var(--ease); }
 .switch.on { background: var(--acc); border-color: var(--acc); }
 .switch.on::after { left: 17.5px; background: var(--acc-ink); }
