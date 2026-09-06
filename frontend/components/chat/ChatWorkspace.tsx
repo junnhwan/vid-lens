@@ -6,6 +6,7 @@ import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { parseAnswerTokens, type AnswerToken } from '@/components/chat/answerTokens'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
+import { FunnelTrack } from '@/components/chat/FunnelTrack'
 import { LedgerClaims, LedgerDrawer, latestClaimsByRoot } from '@/components/chat/EvidenceLedger'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -23,11 +24,28 @@ import type { Citation, ChatScopeType, EvidenceLedgerView, VideoChatMode } from 
 // - Agent 检证(单视频):streamAgent + agentTraceReducer 渲染真实步骤时间轴
 //   (direct_qa 实际步骤 = search_transcript → build_cited_answer);run 结束按 done
 //   事件的 run_id 拉取证据账本,核验未通过时显示阻断发布警示。知识库范围后端直接拒绝,保持禁用。
-// - 研究/漏斗:当前为非流式接口,禁用态明示。
+// - 深入研究 / 证据漏斗(单视频,实验):非流式 api.askAgent(mode=research|evidence_funnel)。
+//   等待期只显示诚实状态(不做假 SSE);结果到达后在右栏一次性回放执行轨迹——
+//   研究模式为 Planner 循环步骤(MaxSteps 8 / MaxReplans 2,含 investigate_visual 工具卡),
+//   漏斗模式为固定八步轨道;账本/引用与 agent 模式同一套组件。
 
 const TOP_K = 4
 
-type ChatUIMode = Extract<VideoChatMode, 'strict_rag' | 'agent'>
+type ChatUIMode = Extract<VideoChatMode, 'strict_rag' | 'agent' | 'research' | 'evidence_funnel'>
+type AgentUIMode = 'agent' | 'research' | 'evidence_funnel'
+
+const MODE_LABEL: Record<AgentUIMode, string> = {
+  agent: 'Agent 检证',
+  research: '深入研究',
+  evidence_funnel: '证据漏斗',
+}
+
+const MODE_NOTE: Record<ChatUIMode, string> = {
+  strict_rag: '一次检索,直接给出带引用的回答',
+  agent: '检索后生成回答,答案经独立证据核验',
+  research: '受限 Planner 循环,可做查询时像素核验',
+  evidence_funnel: '固定八步漏斗,逐步收窄证据范围',
+}
 
 interface LedgerState {
   loading: boolean
@@ -158,6 +176,10 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     messages.find(m => m.role === 'assistant' && m.agentRunId === runId)?.cites || []
   , [messages])
 
+  const modeForRun = useCallback((runId: string) =>
+    messages.find(m => m.role === 'assistant' && m.agentRunId === runId)?.agentMode
+  , [messages])
+
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -208,22 +230,42 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     (isVideo ? !!playbackUrl : !!cite.taskId) && hasReplayRange(cite)
   , [isVideo, playbackUrl])
 
-  // 右栏执行过程:Agent 运行用真实 trace(进行中或刚结束),否则历史 Agent 消息用快照 trace
+  // 右栏执行过程:Agent 运行用真实 trace(进行中或刚结束),否则历史 Agent 消息用快照 trace。
+  // 历史消息即使没有步骤(运行失败/被停止)也保留其模式,避免误显示成 strict 推断面板。
   const agentRail = useMemo(() => {
     if (agentTrace.runId != null || agentTrace.steps.length > 0) {
-      return { steps: agentTrace.steps, runId: agentTrace.runId, live: true }
+      return { steps: agentTrace.steps, runId: agentTrace.runId, mode: agentTrace.mode ?? undefined, live: true }
     }
-    if (!streaming && lastAssistant?.agentRun && lastAssistant.trace?.length) {
-      return { steps: lastAssistant.trace, runId: lastAssistant.agentRunId ?? null, live: false }
+    if (lastAssistant?.agentRun) {
+      return { steps: lastAssistant.trace ?? [], runId: lastAssistant.agentRunId ?? null, mode: lastAssistant.agentMode, live: streaming }
     }
     return null
   }, [agentTrace, streaming, lastAssistant])
+
+  // 非流式研究/漏斗的等待期:没有任何事件流,只保留诚实状态,不模拟逐步进度
+  const pendingExperimental = (streaming && agentTrace.steps.length === 0
+    && (agentTrace.mode === 'research' || agentTrace.mode === 'evidence_funnel'))
+    ? agentTrace.mode as 'research' | 'evidence_funnel'
+    : null
 
   const agentBlocked = !streaming && !!lastAssistant?.agentRun && !!lastAssistant.degraded
 
   const statusLine = (() => {
     if (streaming) {
       const generating = lastMessage?.role === 'assistant' && lastMessage.content.length > 0
+      if ((mode === 'research' || mode === 'evidence_funnel') && !generating) {
+        return (
+          <>
+            <span className="pulse" />
+            <span>
+              {mode === 'research'
+                ? '深入研究运行中…(非流式接口,完成后一次性回放轨迹)'
+                : '证据漏斗运行中…(非流式接口,完成后一次性回放轨迹)'}
+            </span>
+            <button className="meta-link stop" onClick={stop}>停止</button>
+          </>
+        )
+      }
       return (
         <>
           <span className="pulse" />
@@ -262,7 +304,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
         <div className="rail-empty" style={{ paddingTop: 44 }}>
           <Icon name="shield-check" size="lg" />
           <p style={{ marginTop: 10 }}>
-            快速问答不写证据账本。<br />完成一次 Agent 检证后,每条事实的支撑情况会列在这里。
+            快速问答不写证据账本。<br />完成一次 Agent 检证、深入研究或证据漏斗后,<br />每条事实的支撑情况会列在这里。
           </p>
         </div>
       )
@@ -297,9 +339,9 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     return (
       <>
         <div className="run-meta">
-          <span className="chip chip-mute mono">agent</span>
+          <span className="chip chip-mute mono">{lastAgentMsg?.agentMode || 'agent'}</span>
           <span className="chip chip-mute">
-            {latestClaimsByRoot(state.view.claims).length} 条 claim · {state.view.evidence.length} 条证据
+            {latestClaimsByRoot(state.view.claims).length} 条 claim · {(state.view.evidence ?? []).length} 条证据
           </span>
         </div>
         <LedgerClaims
@@ -370,11 +412,19 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   >
                     <Icon name="target" size="sm" />Agent 检证
                   </button>
-                  <button className="mode-pill" disabled title="研究模式当前为非流式接口,尚未接入前端">
+                  <button
+                    className={`mode-pill${mode === 'research' ? ' on' : ''}`}
+                    disabled={streaming}
+                    onClick={() => setMode('research')}
+                  >
                     <Icon name="zoom-scan" size="sm" />深入研究
                     <span className="chip chip-mute" style={{ height: 18, fontSize: 10, padding: '0 6px' }}>实验</span>
                   </button>
-                  <button className="mode-pill" disabled title="证据漏斗当前为非流式接口,尚未接入前端">
+                  <button
+                    className={`mode-pill${mode === 'evidence_funnel' ? ' on' : ''}`}
+                    disabled={streaming}
+                    onClick={() => setMode('evidence_funnel')}
+                  >
                     <Icon name="filter" size="sm" />证据漏斗
                     <span className="chip chip-mute" style={{ height: 18, fontSize: 10, padding: '0 6px' }}>实验</span>
                   </button>
@@ -387,11 +437,12 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   <button className="mode-pill" disabled title="研究模式仅支持单视频会话">
                     <Icon name="zoom-scan" size="sm" />深入研究
                   </button>
+                  <button className="mode-pill" disabled title="证据漏斗仅支持单视频会话">
+                    <Icon name="filter" size="sm" />证据漏斗
+                  </button>
                 </>
               )}
-              <span className="mode-note">
-                {mode === 'strict_rag' ? '一次检索,直接给出带引用的回答' : '检索后生成回答,答案经独立证据核验'}
-              </span>
+              <span className="mode-note">{MODE_NOTE[mode]}</span>
               <button className="meta-link" style={{ marginLeft: 8 }} onClick={() => newSession()} disabled={streaming}>
                 新会话
               </button>
@@ -440,25 +491,44 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
         </div>
         <div className="rail-body">
           {railTab === 'run' ? (
-            agentRail ? (
+            pendingExperimental ? (
               <>
-                <div className="run-meta">
-                  <span className="chip chip-acc"><Icon name="target" size="sm" />Agent 检证</span>
-                  {agentRail.runId && (
-                    <span className="rid mono" title={agentRail.runId}>{agentRail.runId.slice(0, 8)}</span>
-                  )}
-                </div>
+                <RunHeader mode={pendingExperimental} runId={null} />
                 <p style={{ fontSize: 11, color: 'var(--tx-4)', marginBottom: 10 }}>
-                  模板 direct_qa:先检索,再构建引用回答;保存后由独立核验决定是否发布。
+                  {pendingExperimental === 'research'
+                    ? '受限 Planner 循环运行中(非流式接口):Planner 只能从工具白名单中选择动作,investigate_visual 会在已定位的时间窗内按硬预算读取少量原始帧。'
+                    : '顺序与预算由服务端固定(非流式接口):Planner 只能在有限候选里选择补哪个缺口。'}
                 </p>
+                {pendingExperimental === 'evidence_funnel' && <FunnelTrack steps={[]} />}
+                <div className="rail-empty" style={{ paddingTop: 34 }}>
+                  <span className="pulse" style={{ marginBottom: 10 }} />
+                  <p style={{ marginTop: 10 }}>
+                    {pendingExperimental === 'research' ? '深入研究运行中…' : '证据漏斗运行中…'}
+                    <br />完成后在这里一次性回放执行轨迹。
+                  </p>
+                </div>
+              </>
+            ) : agentRail ? (
+              <>
+                <RunHeader mode={(agentRail.mode as AgentUIMode) || 'agent'} runId={agentRail.runId} />
+                <p style={{ fontSize: 11, color: 'var(--tx-4)', marginBottom: 10 }}>
+                  {agentRail.mode === 'research'
+                    ? '受限 Planner 循环:只能从工具白名单中选择动作;investigate_visual 会在已定位的时间窗内按硬预算读取少量原始帧。'
+                    : agentRail.mode === 'evidence_funnel'
+                      ? '顺序与预算由服务端固定,Planner 只能在有限候选里选择补哪个缺口。'
+                      : '模板 direct_qa:先检索,再构建引用回答;保存后由独立核验决定是否发布。'}
+                </p>
+                {agentRail.mode === 'evidence_funnel' && <FunnelTrack steps={agentRail.steps} />}
                 {agentRail.steps.length > 0 ? (
-                  <div className="steps">
+                  <div className="steps" style={agentRail.mode === 'evidence_funnel' ? { marginTop: 12 } : undefined}>
                     {agentRail.steps.map(step => <AgentTraceStepView key={step.id} step={step} />)}
                   </div>
                 ) : (
                   <div className="rail-empty" style={{ paddingTop: 44 }}>
                     <Icon name="target" size="lg" />
-                    <p style={{ marginTop: 10 }}>等待运行事件…</p>
+                    <p style={{ marginTop: 10 }}>
+                      {agentRail.live ? '等待运行事件…' : '这次运行没有留下执行步骤(可能失败或已停止)。'}
+                    </p>
                   </div>
                 )}
               </>
@@ -505,6 +575,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
           loading={ledgerByRun[ledgerDrawerRun]?.loading}
           error={ledgerByRun[ledgerDrawerRun]?.error}
           cites={citesForRun(ledgerDrawerRun)}
+          modeLabel={modeForRun(ledgerDrawerRun) || 'agent'}
           onRetry={runId => void fetchLedger(runId)}
           onOpenEvidence={openEvidenceFromLedger}
           onClose={() => setLedgerDrawerRun(null)}
@@ -515,6 +586,21 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
 }
 
 // ---- 消息渲染 ----
+
+/** 右栏运行头部:三种 Agent 路径的模式 chip + 预算标注 + run_id */
+function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null }) {
+  return (
+    <div className="run-meta">
+      <span className="chip chip-acc">
+        <Icon name={mode === 'research' ? 'zoom-scan' : mode === 'evidence_funnel' ? 'filter' : 'target'} size="sm" />
+        {MODE_LABEL[mode]}
+      </span>
+      {mode === 'research' && <span className="chip chip-mute mono">MaxSteps 8 · MaxReplans 2</span>}
+      {mode === 'evidence_funnel' && <span className="chip chip-mute">固定八步</span>}
+      {runId && <span className="rid mono" title={runId}>{runId.slice(0, 8)}</span>}
+    </div>
+  )
+}
 
 function AgentMessageView({
   msg, fallbackTitle, onOpenEvidence, canJump, onJump, onOpenLedger, claimsCount,
@@ -531,6 +617,8 @@ function AgentMessageView({
   const tokens = useMemo(() => parseAnswerTokens(msg.content), [msg.content])
   const cites = msg.cites || []
   const isAgentRun = !!msg.agentRun
+  const agentMode = (isAgentRun ? (msg.agentMode as AgentUIMode | undefined) ?? 'agent' : undefined)
+  const waitingServer = !!msg.streaming && !!agentMode && agentMode !== 'agent' && msg.content.length === 0
 
   const openCite = (no: number) => {
     const hit = cites.find(c => c.id === `C${no}`)
@@ -551,9 +639,11 @@ function AgentMessageView({
   return (
     <div className="msg msg-agent">
       <div className="who">
-        <span className="agent-mark"><Icon name={isAgentRun ? 'target' : 'bolt'} /></span>
+        <span className="agent-mark">
+          <Icon name={agentMode === 'research' ? 'zoom-scan' : agentMode === 'evidence_funnel' ? 'filter' : isAgentRun ? 'target' : 'bolt'} />
+        </span>
         映知
-        <span style={{ color: 'var(--tx-4)' }}>{isAgentRun ? 'Agent 检证' : '快速问答'}</span>
+        <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : '快速问答'}</span>
       </div>
       <div className="answer">
         {paragraphs.map((para, pi) => (
@@ -567,8 +657,18 @@ function AgentMessageView({
               ))}
           </p>
         ))}
-        {msg.streaming && <span className="stream-cursor" />}
+        {waitingServer && (
+          <span className="chip chip-mute" title="研究/漏斗为非流式接口,等待期没有过程事件">
+            服务端执行中,完成后一次性回放
+          </span>
+        )}
+        {msg.streaming && !waitingServer && <span className="stream-cursor" />}
       </div>
+      {!msg.streaming && !msg.content && !msg.error && (
+        <div style={{ marginTop: 8 }}>
+          <span className="chip chip-mute">已停止,本轮没有生成回答</span>
+        </div>
+      )}
       {msg.degraded && (
         <div style={{ marginTop: 8 }}>
           {isAgentRun ? (
@@ -625,7 +725,7 @@ function AgentMessageView({
                 <Icon name="shield-check" size="sm" />证据账本{typeof claimsCount === 'number' ? ` · ${claimsCount} 条 claim` : ''}
               </button>
             )}
-            <span className="chip chip-mute mono">agent</span>
+            <span className="chip chip-mute mono">{agentMode || 'agent'}</span>
           </>
         ) : (
           <span className="chip chip-mute mono">strict_rag</span>

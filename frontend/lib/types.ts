@@ -200,8 +200,8 @@ export interface RAGIndexResult {
 // ============ Chat ============
 export type ChatScopeType = 'video' | 'knowledge_base'
 export type ChatMode = 'video_assistant' | 'strict_rag'
-/** 单视频聊天页专用：在 ChatMode 基础上增加 Agent SSE */
-export type VideoChatMode = ChatMode | 'agent'
+/** 单视频聊天页专用：ChatMode 之外另有 agent SSE 与两个非流式实验模式 */
+export type VideoChatMode = ChatMode | 'agent' | 'research' | 'evidence_funnel'
 
 export interface ChatSession {
   id: number
@@ -290,6 +290,31 @@ export interface AskResult {
   model: string
   degraded?: boolean
 }
+
+// 非流式 Agent 接口（POST .../messages/agent，mode=research|evidence_funnel）
+// 对应 internal/service.VideoAgentResult 的 JSON tag。
+export interface AgentResultStep {
+  name?: string
+  tool?: string
+  input?: Record<string, unknown>
+  output_ref?: string
+  error?: string
+}
+
+export interface AgentAskResult {
+  message_id: number
+  answer: string
+  template: string
+  citations: Citation[]
+  trace: AgentResultStep[]
+  model: string
+  run_id?: string
+  mode?: string
+  memory?: unknown
+}
+
+/** 研究模式与漏斗模式的阻断发布文案与 EvidenceInspector 一致，前端按该前缀判定 degraded */
+export const BLOCKED_ANSWER_PREFIX = '现有证据不足或存在冲突'
 
 // SSE 事件：answer=增量 string / citations=[]Citation / done={message_id,model,answer,degraded} / error={message}
 export interface SSEDone {
@@ -476,6 +501,33 @@ export interface AgentSSEHandlers {
   onCitations: (cs: Citation[]) => void
   onDone: (d: AgentDoneEvent) => void
   onError: (e: SSEError) => void
+}
+
+// ============ 记忆治理 (设置页) ============
+// GET /memories/preferences、PATCH /memories/preferences（乐观锁 expected_version）。
+export interface MemoryPreferenceView {
+  enabled: boolean
+  version: number
+  capability_enabled: boolean
+  effective_enabled: boolean
+  reason: string
+}
+
+// GET /memories?scope_type&scope_id → model.MemoryItem 列表。
+export interface MemoryItem {
+  id: string
+  scope_type: 'user' | 'video' | 'knowledge_base' | 'run' | string
+  scope_id: string
+  kind: string
+  content: string
+  source_type: string
+  source_ref: string
+  importance: number
+  status: 'active' | 'conflicted' | 'withdrawn' | 'deleted' | string
+  version: number
+  last_used_at?: string
+  created_at: string
+  updated_at: string
 }
 
 // ============ 知识库 ============

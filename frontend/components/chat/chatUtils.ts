@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@/lib/types'
+import { BLOCKED_ANSWER_PREFIX } from '@/lib/types'
 import { citesFromSnapshot } from '@/components/Citation'
 import type { CiteRef } from '@/components/Citation'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -15,9 +16,17 @@ export interface ChatMsg {
   error?: string
   trace?: ChatTraceStep[]
   agentRun?: boolean
-  /** Agent 运行 ID（SSE done 事件或历史快照 run_id），用于拉取证据账本 */
+  /** Agent 运行 ID（SSE done 事件、非流式结果 run_id 或历史快照），用于拉取证据账本 */
   agentRunId?: string
+  /** agent | research | evidence_funnel：决定消息署名、模式 chip 与右栏轨迹形态 */
+  agentMode?: string
   traceSource?: 'agent' | 'inferred' | 'legacy'
+}
+
+/** EvidenceInspector 阻断发布时的替换文案（与后端 inspectorBlockedAnswer 对齐），
+    非流式 research/funnel 结果没有 degraded 字段，按该前缀判定 */
+export function isBlockedAnswer(answer: string): boolean {
+  return answer.startsWith(BLOCKED_ANSWER_PREFIX)
 }
 
 export function parseMessages(
@@ -37,6 +46,7 @@ export function parseMessages(
       openCiteIds: [],
       ...(cites ? { cites } : {}),
       ...(snapshotTrace?.runId ? { agentRunId: snapshotTrace.runId } : {}),
+      ...(agentRun && snapshotTrace?.mode ? { agentMode: snapshotTrace.mode } : {}),
       ...(trace ? {
         trace,
         ...(agentRun ? { agentRun: true, traceSource: snapshotTrace?.source } : {}),

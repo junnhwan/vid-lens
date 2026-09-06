@@ -40,10 +40,11 @@ function statusView(status?: string) {
   return CLAIM_STATUS_VIEW[status || ''] || CLAIM_STATUS_VIEW.hypothesized
 }
 
-/** 更正会追加更高修订号的新行:按 root_claim_id 分组,只展示最新修订 */
-export function latestClaimsByRoot(claims: AgentClaim[]): AgentClaim[] {
+/** 更正会追加更高修订号的新行:按 root_claim_id 分组,只展示最新修订。
+    后端 nil 切片序列化为 null,入参需容忍空值 */
+export function latestClaimsByRoot(claims: AgentClaim[] | null | undefined): AgentClaim[] {
   const byRoot = new Map<string, AgentClaim>()
-  for (const claim of claims) {
+  for (const claim of claims ?? []) {
     const key = claim.root_claim_id || claim.id
     const current = byRoot.get(key)
     if (!current || claim.revision > current.revision) byRoot.set(key, claim)
@@ -93,7 +94,7 @@ export interface LedgerClaimsProps {
 }
 
 export function LedgerClaims({ view, cites, onOpenEvidence, onCorrected }: LedgerClaimsProps) {
-  const claims = useMemo(() => latestClaimsByRoot(view.claims), [view.claims])
+  const claims = useMemo(() => latestClaimsByRoot(view.claims ?? []), [view.claims])
   if (claims.length === 0) {
     return (
       <div className="rail-empty" style={{ paddingTop: 30 }}>
@@ -137,10 +138,10 @@ function ClaimCard({ claim, view, cites, onOpenEvidence, onCorrected }: ClaimCar
   const inspectResult = inspection ? INSPECT_RESULT_VIEW[inspection.result] || INSPECT_RESULT_VIEW.insufficient : null
 
   const rows = useMemo(() => (
-    view.claim_evidence
+    (view.claim_evidence ?? [])
       .filter(link => link.claim_id === claim.id)
       .map(link => {
-        const evidence = view.evidence.find(e => e.id === link.evidence_id)
+        const evidence = (view.evidence ?? []).find(e => e.id === link.evidence_id)
         return { link, evidence, cite: evidence ? resolveCite(evidence, cites) : undefined }
       })
       .filter(row => row.evidence || row.cite)
@@ -232,8 +233,8 @@ function ClaimCard({ claim, view, cites, onOpenEvidence, onCorrected }: ClaimCar
               <span className="mono" style={{ fontSize: 10.5 }}>counter_query: {inspection.counter_query}</span>
             </div>
           )}
-          {inspection.evidence.some(e => e.pixel_checked || e.pixel_required) && (
-            inspection.evidence.filter(e => e.pixel_checked || e.pixel_required).map((e, i) => (
+          {(inspection.evidence ?? []).some(e => e.pixel_checked || e.pixel_required) && (
+            (inspection.evidence ?? []).filter(e => e.pixel_checked || e.pixel_required).map((e, i) => (
               <div key={`${e.source_ref}-${i}`} className="claim-note" style={{ marginTop: 6 }}>
                 <Icon name="eye" size="sm" />
                 <span>
@@ -285,12 +286,14 @@ export interface LedgerDrawerProps {
   loading?: boolean
   error?: string
   cites: CiteRef[]
+  /** 产生该 run 的聊天路径:agent | research | evidence_funnel */
+  modeLabel?: string
   onRetry: (runId: string) => void
   onOpenEvidence: (cite: CiteRef, cites: CiteRef[]) => void
   onClose: () => void
 }
 
-export function LedgerDrawer({ runId, view, loading, error, cites, onRetry, onOpenEvidence, onClose }: LedgerDrawerProps) {
+export function LedgerDrawer({ runId, view, loading, error, cites, modeLabel = 'agent', onRetry, onOpenEvidence, onClose }: LedgerDrawerProps) {
   const refresh = () => onRetry(runId)
   return (
     <>
@@ -306,8 +309,8 @@ export function LedgerDrawer({ runId, view, loading, error, cites, onRetry, onOp
         </div>
         <div className="drawer-body">
           <div className="run-meta" style={{ marginBottom: 14 }}>
-            <span className="chip chip-mute mono">agent</span>
-            <span className="chip chip-mute">{view ? `${latestClaimsByRoot(view.claims).length} 条 claim · ${view.evidence.length} 条证据` : '—'}</span>
+            <span className="chip chip-mute mono">{modeLabel}</span>
+            <span className="chip chip-mute">{view ? `${latestClaimsByRoot(view.claims).length} 条 claim · ${(view.evidence ?? []).length} 条证据` : '—'}</span>
             <span className="chip chip-mute">追加式,不覆盖历史</span>
           </div>
           <p style={{ fontSize: 12, color: 'var(--tx-3)', marginBottom: 14 }}>

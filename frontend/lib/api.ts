@@ -1,6 +1,7 @@
 import type {
-  AIProfile, AIProfileRequest, ProfilePurpose, AgentClaim, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, ProfilePurpose, AgentClaim, AgentAskResult, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, EvidenceLedgerView, KnowledgeBase,
+  MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
@@ -134,7 +135,19 @@ export const api = {
   getMessages: (sid: number) => req<ChatMessage[]>(`/chat/sessions/${sid}/messages`, 'GET'),
   ask: (sid: number, question: string, top_k: number, mode?: ChatMode) =>
     req<AskResult>(`/chat/sessions/${sid}/messages`, 'POST', { question, top_k, mode }),
+  /** 非流式 Agent 接口：mode=research | evidence_funnel，完成后一次性返回 trace/citations/run_id */
+  askAgent: (sid: number, question: string, top_k: number, mode: 'research' | 'evidence_funnel') =>
+    req<AgentAskResult>(`/chat/sessions/${sid}/messages/agent`, 'POST', { question, top_k, mode }),
   deleteSession: (sid: number) => req<{ deleted: boolean }>(`/chat/sessions/${sid}`, 'DELETE'),
+
+  // ============ 记忆治理 (设置页) ============
+  getMemoryPreference: () => req<MemoryPreferenceView>('/memories/preferences', 'GET'),
+  updateMemoryPreference: (enabled: boolean, expected_version: number) =>
+    req<MemoryPreferenceView>('/memories/preferences', 'PATCH', { enabled, expected_version }),
+  listMemories: (scope_type = 'user', scope_id: string) =>
+    req<MemoryItem[]>(`/memories?scope_type=${encodeURIComponent(scope_type)}&scope_id=${encodeURIComponent(scope_id)}`, 'GET'),
+  withdrawMemory: (id: string) => req<null>(`/memories/${encodeURIComponent(id)}/withdraw`, 'POST'),
+  deleteMemory: (id: string) => req<null>(`/memories/${encodeURIComponent(id)}`, 'DELETE'),
 
   // ============ 知识库 ============
   listKBs: () => req<KnowledgeBase[]>('/knowledge-bases', 'GET'),

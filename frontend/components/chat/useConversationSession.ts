@@ -9,6 +9,8 @@ import {
   emptyConversationSessionState,
 } from '@/components/chat/conversationSession'
 import { api, ApiError, streamAgent, streamAsk } from '@/lib/api'
+import { isBlockedAnswer } from '@/components/chat/chatUtils'
+import { traceFromAgentResult } from '@/components/chat/snapshotTraceAdapter'
 import type { ChatMessage, ChatScopeType, ChatSession, Citation, VideoChatMode } from '@/lib/types'
 
 interface ConversationSessionOptions {
@@ -141,11 +143,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
 
     const controller = new AbortController()
     abortRef.current = controller
-    const agentMode = mode === 'agent'
-    dispatch({ type: agentMode ? 'agent_start' : 'rag_start', question })
+    dispatch(
+      mode === 'strict_rag' || mode === 'video_assistant'
+        ? { type: 'rag_start', question }
+        : { type: 'agent_start', question, mode },
+    )
 
     try {
-      if (agentMode) {
+      if (mode === 'agent') {
         await streamAgent(sessionId, question, { top_k: topK, mode: 'agent' }, {
           onRunStart: data => dispatch({ type: 'agent_event', event: { type: 'run_start', data } }),
           onStepStart: data => dispatch({ type: 'agent_event', event: { type: 'step_start', data } }),
@@ -170,6 +175,19 @@ export function useConversationSession(options: ConversationSessionOptions) {
             dispatch({ type: 'stream_error', message: error.message })
           },
         }, controller.signal)
+      } else if (mode === 'research' || mode === 'evidence_funnel') {
+        // 研究/漏斗走非流式接口：等待期只有诚实状态，不做假 SSE；结果到达后一次性回放轨迹
+        const result = await api.askAgent(sessionId, question, topK, mode)
+        const parsed = traceFromAgentResult(result)
+        dispatch({
+          type: 'agent_replay',
+          steps: parsed.steps,
+          runId: parsed.runId,
+          mode,
+          content: result.answer,
+          cites: mapCitations(result.citations || []),
+          degraded: isBlockedAnswer(result.answer),
+        })
       } else {
         let answerStarted = false
         await streamAsk(sessionId, question, topK, mode, {
@@ -196,7 +214,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         dispatch({ type: 'stream_cancelled' })
       } else {
-        dispatch({ type: 'stream_error', message: error instanceof ApiError ? error.message : agentMode ? 'Agent 流式请求失败' : '流式请求失败' })
+        const fallback = mode === 'agent'
+          ? 'Agent 流式请求失败'
+          : mode === 'research'
+            ? '深入研究请求失败'
+            : mode === 'evidence_funnel'
+              ? '证据漏斗请求失败'
+              : '流式请求失败'
+        dispatch({ type: 'stream_error', message: error instanceof ApiError ? error.message : fallback })
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null

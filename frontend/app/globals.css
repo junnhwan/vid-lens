@@ -750,6 +750,8 @@ svg { display: block; }
 .funnel-step.active { border-color: var(--acc-line); background: var(--acc-dim); color: var(--acc-strong); }
 .funnel-step.ok { color: var(--tx-2); }
 .funnel-step.ok .fn { color: var(--ok); }
+.funnel-step.err { color: var(--bad); }
+.funnel-step.err .fn { color: var(--bad); }
 .funnel-step .fd { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--tx-4); }
 
 .rail-empty { padding: 30px 10px; text-align: center; color: var(--tx-4); font-size: 12px; }

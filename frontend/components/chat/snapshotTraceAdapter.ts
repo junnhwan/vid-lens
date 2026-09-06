@@ -44,8 +44,7 @@ export interface ParsedSnapshotTrace {
 }
 
 /** Compatibility adapter for persisted retrieval_snapshot formats only. */
-export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | undefined {
-  if (!snapshot) return undefined
+export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | undefined {  if (!snapshot) return undefined
   try {
     const parsed = JSON.parse(snapshot) as unknown
     if (Array.isArray(parsed)) {
@@ -128,3 +127,47 @@ function formatSnapshotInput(input: unknown): string | undefined {
     return String(input)
   }
 }
+
+/** 非流式 Agent 接口（/messages/agent，mode=research|evidence_funnel）返回的
+    VideoAgentResult.trace（name/tool/input/output_ref/error）→ 可回放的步骤轨迹。
+    步骤形状与历史快照的 legacy trace 一致，复用同一套字段判定；无时长信息，不伪造。 */
+export function traceFromAgentResult(result: {
+  run_id?: string
+  mode?: string
+  template?: string
+  trace?: AgentResultStepJSON[]
+}): ParsedSnapshotTrace {
+  const runId = result.run_id?.trim() || undefined
+  const mode = result.mode?.trim() || result.template?.trim() || undefined
+  const steps = Array.isArray(result.trace)
+    ? result.trace.map((step, index) => agentResultStepToTrace(step, `s${index + 1}`, runId))
+    : []
+  return { steps, runId, mode, isAgentEnvelope: true, source: 'agent' }
+}
+
+interface AgentResultStepJSON {
+  name?: string
+  tool?: string
+  input?: unknown
+  output_ref?: string
+  error?: string
+}
+
+function agentResultStepToTrace(step: AgentResultStepJSON, id: string, runId?: string): ChatTraceStep {
+  const tool = step.tool?.trim() || ''
+  const error = step.error?.trim() || undefined
+  const output = step.output_ref?.trim() || undefined
+  return {
+    id,
+    runId,
+    kind: snapshotKind('', tool),
+    label: step.name?.trim() || tool || '执行步骤',
+    status: error ? 'error' : 'done',
+    tool: tool || undefined,
+    toolInput: formatSnapshotInput(step.input),
+    toolOutput: output,
+    detail: error || output,
+    error,
+  }
+}
+
