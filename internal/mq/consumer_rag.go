@@ -73,15 +73,26 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) e
 		return fmt.Errorf("完成 RAG processing lease 失败: %w", err)
 	}
 	if !completed {
+		// The task lease is held by another active job (e.g. the transcribe job
+		// is still inside generateTitle). The other owner's completion boundary
+		// re-checks the index row, so finishing the task stays its job; log so
+		// the deferred completion is visible instead of silent.
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "rag index built; task completion deferred to current lease owner",
+			slog.Int64("task_id", task.ID))
 		return nil
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "rag index completed")
 	return nil
 }
 
-func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) error {
+// indexAfterTranscription enqueues the rag-index job after ASR material is
+// persisted. It reports whether a rag run will actually follow: a content+model
+// dedup hit or a missing producer means no rag message was published, so the
+// caller must finish the task itself instead of handing final completion to a
+// rag job that will never exist.
+func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) (bool, error) {
 	if c.ragProducer == nil {
-		return nil
+		return false, nil
 	}
 	// 内容+目标级索引去重（docs/$1）：同 (file_md5, embedding_model)
 	// 已有成功索引 → 不重跑 embed，复用旧索引。索引重建（分块/embedding 模型
@@ -92,35 +103,35 @@ func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.Vide
 			if existing, findErr := c.repo.RAGIndex.FindReusableByMD5AndModel(task.FileMD5, profile.EmbeddingModel, model.CurrentRAGChunkerVersion, model.CurrentRAGSourceMappingVersion, model.CurrentRAGIndexBuildVersion); findErr == nil && existing != nil {
 				observability.Log(ctx, slog.Default(), slog.LevelInfo, "skip rag index: content+model already indexed",
 					slog.String("file_md5", task.FileMD5), slog.String("embedding_model", profile.EmbeddingModel))
-				return nil
+				return false, nil
 			}
 		}
 	}
 	if err := requireProcessingLease(ctx); err != nil {
-		return err
+		return false, err
 	}
 	var budgetID string
 	if c.repo != nil && c.repo.TaskJob != nil {
 		if err := c.repo.TaskJob.UpsertQueued(task, TaskJobRAGIndex, model.TaskStageIndexing, task.MaxRetries); err != nil {
 			observability.Log(ctx, slog.Default(), slog.LevelError, "persist rag index job state failed", slog.String("error", observability.SafeError(err)))
-			return fmt.Errorf("persist rag index job state: %w", err)
+			return false, fmt.Errorf("persist rag index job state: %w", err)
 		}
 		if err := requireProcessingLease(ctx); err != nil {
-			return err
+			return false, err
 		}
 		var err error
 		budgetID, err = c.repo.EnsureTaskJobRetryBudget(task.ID, TaskJobRAGIndex, c.currentTime())
 		if err != nil {
-			return fmt.Errorf("persist rag index retry budget: %w", err)
+			return false, fmt.Errorf("persist rag index retry budget: %w", err)
 		}
 	}
 	ctx = ContextWithRetryBudgetID(ContextWithTraceID(ctx, task.TraceID), budgetID)
 	if err := requireProcessingLease(ctx); err != nil {
-		return err
+		return false, err
 	}
 	enqueueErr := c.ragProducer.EnqueueRAGIndex(ctx, task.ID)
 	if err := requireProcessingLease(ctx); err != nil {
-		return err
+		return false, err
 	}
 	if enqueueErr != nil {
 		observability.Log(ctx, slog.Default(), slog.LevelError, "enqueue rag index failed", slog.String("error", observability.SafeError(enqueueErr)))
@@ -142,20 +153,20 @@ func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.Vide
 				RetryCount: 1, MaxRetries: policy.MaxRetries, NextRetryAt: &nextRetryAt, Now: now,
 			})
 			if handoffErr != nil {
-				return fmt.Errorf("persist rag enqueue failure handoff: %w", handoffErr)
+				return false, fmt.Errorf("persist rag enqueue failure handoff: %w", handoffErr)
 			}
 			if !updated {
-				return ErrProcessingLeaseLost
+				return false, ErrProcessingLeaseLost
 			}
 		} else if c.repo != nil && c.repo.TaskJob != nil {
 			// Compatibility for direct/non-consumer invocations: persist the child
 			// failure, but only a processing owner may mutate the parent workflow.
 			_ = c.repo.TaskJob.RecordTerminalFailure(task.ID, TaskJobRAGIndex, model.TaskStageIndexing, "enqueue_failed", truncateError(enqueueErr), 1, policyMaxRetries(c.retryPolicy), model.TaskStatusFailed)
 		}
-		return fmt.Errorf("enqueue rag index: %w", enqueueErr)
+		return false, fmt.Errorf("enqueue rag index: %w", enqueueErr)
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "rag index enqueued")
-	return nil
+	return true, nil
 }
 
 func policyMaxRetries(policy TaskRetryPolicy) int {

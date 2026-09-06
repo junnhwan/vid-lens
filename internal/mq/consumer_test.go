@@ -732,7 +732,13 @@ func TestIndexAfterTranscriptionEnqueuesRAGIndexAndDoesNotCallIndexer(t *testing
 		return nil
 	})
 
-	consumer.indexAfterTranscription(context.Background(), task)
+	enqueued, err := consumer.indexAfterTranscription(context.Background(), task)
+	if err != nil {
+		t.Fatalf("index after transcription: %v", err)
+	}
+	if !enqueued {
+		t.Fatal("indexAfterTranscription should report the rag message as enqueued")
+	}
 
 	if calls != 0 {
 		t.Fatalf("rag index calls = %d, want async enqueue only", calls)
@@ -763,7 +769,7 @@ func TestIndexAfterTranscriptionCreatesQueuedRAGIndexJob(t *testing.T) {
 	consumer := &Consumer{repo: repos}
 	consumer.SetRAGIndexProducer(producer)
 
-	if err := consumer.indexAfterTranscription(context.Background(), task); err != nil {
+	if _, err := consumer.indexAfterTranscription(context.Background(), task); err != nil {
 		t.Fatalf("index after transcription: %v", err)
 	}
 
@@ -805,7 +811,9 @@ func TestIndexAfterTranscriptionRecordsRAGIndexFailureWhenEnqueueFails(t *testin
 	}
 	consumer.SetRAGIndexProducer(&recordingRAGIndexProducer{err: fmt.Errorf("kafka unavailable")})
 
-	consumer.indexAfterTranscription(context.Background(), task)
+	if _, err := consumer.indexAfterTranscription(context.Background(), task); err == nil {
+		t.Fatal("indexAfterTranscription should surface the enqueue failure")
+	}
 
 	index, err := repos.RAGIndex.FindByTaskAndModel(task.UserID, task.ID, profile.EmbeddingModel)
 	if err != nil {

@@ -110,24 +110,62 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 		return err
 	}
 	_ = waitVisual()
-	if err := c.indexAfterTranscription(ctx, task); err != nil {
+	ragEnqueued, err := c.indexAfterTranscription(ctx, task)
+	if err != nil {
 		return err
 	}
 	if err := c.generateTitle(ctx, task, transcript); err != nil {
 		return err
 	}
+	return c.completeTranscribeAfterIndex(ctx, task, claim.Token, ragEnqueued)
+}
+
+// completeTranscribeAfterIndex finishes the transcribe job's processing lease
+// and decides who owns final task completion. Final completion is only handed
+// to the rag job when a rag message is actually in flight and the rag index has
+// not already been delivered; otherwise the task is completed here. Handing
+// completion to a rag run that already gave up (its CompleteTaskProcessing CAS
+// was rejected while the transcribe lease was held, its message is Acked and
+// the dedup key retained) or that was never enqueued (content+model dedup hit)
+// leaves the task stuck at running/indexing forever — that is the completion
+// race this boundary closes.
+func (c *Consumer) completeTranscribeAfterIndex(ctx context.Context, task *model.VideoTask, token string, ragEnqueued bool) error {
+	handoffToRAG := ragEnqueued && !c.ragIndexAlreadyDelivered(ctx, task.ID)
 	parentStatus, parentStage := int8(model.TaskStatusCompleted), model.TaskStageNone
-	if c.ragProducer != nil {
+	if handoffToRAG {
 		parentStatus, parentStage = model.TaskStatusRunning, model.TaskStageIndexing
 	}
-	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{TaskID: task.ID, JobType: TaskJobTranscribe, JobStage: model.TaskStageTranscribing, Token: claim.Token, TaskStatus: parentStatus, TaskStage: parentStage, Now: c.currentTime()})
+	completed, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{
+		TaskID: task.ID, JobType: TaskJobTranscribe, JobStage: model.TaskStageTranscribing,
+		Token: token, TaskStatus: parentStatus, TaskStage: parentStage, Now: c.currentTime(),
+	})
 	if err != nil {
 		return err
 	}
 	if !completed {
-		return nil
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "transcribe completion deferred: processing lease held elsewhere",
+			slog.Int64("task_id", task.ID))
 	}
 	return nil
+}
+
+// ragIndexAlreadyDelivered reports whether the rag side has already produced
+// its terminal outcome (status=indexed) for this task. A delivered index means
+// no rag run remains: the enqueued job either already built the index or never
+// needs to run again.
+func (c *Consumer) ragIndexAlreadyDelivered(ctx context.Context, taskID int64) bool {
+	if c.repo == nil || c.repo.RAGIndex == nil {
+		return false
+	}
+	delivered, err := c.repo.RAGIndex.ExistsIndexedByTaskID(taskID)
+	if err != nil {
+		// Fail toward the handoff: the rag consumer still completes the task in
+		// the common path, so an unavailable index probe must not complete early.
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "probe rag index delivery failed",
+			slog.Int64("task_id", taskID), slog.String("error", observability.SafeError(err)))
+		return false
+	}
+	return delivered
 }
 
 // processVideo 核心业务：FFmpeg → ASR → LLM
@@ -164,7 +202,10 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	c.recordASRStage(ctx, task.ID, "audio_extract", stageStatus(err), time.Since(audioExtractStartedAt))
 	if err != nil {
 		if outcome := waitVisual(); outcome.err == nil && outcome.count > 0 {
-			return c.indexAfterTranscription(ctx, task)
+			if _, indexErr := c.indexAfterTranscription(ctx, task); indexErr != nil {
+				return indexErr
+			}
+			return c.summarizeTask(ctx, task)
 		}
 		return fmt.Errorf("提取音频失败: %w", err)
 	}
@@ -179,7 +220,10 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
 		if outcome := waitVisual(); outcome.err == nil && outcome.count > 0 {
-			return c.indexAfterTranscription(ctx, task)
+			if _, indexErr := c.indexAfterTranscription(ctx, task); indexErr != nil {
+				return indexErr
+			}
+			return c.summarizeTask(ctx, task)
 		}
 		return fmt.Errorf("语音转文字失败: %w", err)
 	}
@@ -201,7 +245,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 		return err
 	}
 	_ = waitVisual()
-	if err := c.indexAfterTranscription(ctx, task); err != nil {
+	if _, err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
 
@@ -579,18 +623,11 @@ func (c *Consumer) completeTranscribeWithVisualOnly(ctx context.Context, task *m
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelWarn, "asr unavailable; continuing with visual-only evidence",
 		slog.Int("visual_frames", visual.count), slog.String("asr_error", observability.SafeError(asrErr)))
-	if err := c.indexAfterTranscription(ctx, task); err != nil {
+	ragEnqueued, err := c.indexAfterTranscription(ctx, task)
+	if err != nil {
 		return true, err
 	}
-	parentStatus, parentStage := int8(model.TaskStatusCompleted), model.TaskStageNone
-	if c.ragProducer != nil {
-		parentStatus, parentStage = model.TaskStatusRunning, model.TaskStageIndexing
-	}
-	_, err := c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{
-		TaskID: task.ID, JobType: TaskJobTranscribe, JobStage: model.TaskStageTranscribing,
-		Token: token, TaskStatus: parentStatus, TaskStage: parentStage, Now: c.currentTime(),
-	})
-	return true, err
+	return true, c.completeTranscribeAfterIndex(ctx, task, token, ragEnqueued)
 }
 
 func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.VideoTask) func() visualIndexOutcome {

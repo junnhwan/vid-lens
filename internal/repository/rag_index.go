@@ -65,6 +65,21 @@ func (r *RAGIndexRepository) FindReusableByMD5AndModel(fileMD5, embeddingModel, 
 	return &index, nil
 }
 
+// ExistsIndexedByTaskID reports whether a successful (status=indexed) build
+// already exists for the task. The transcribe completion boundary uses it to
+// detect a rag job that already delivered its outcome — e.g. it built the
+// index while the transcribe job still owned the processing lease, its
+// CompleteTaskProcessing CAS was rejected, and its message is gone. In that
+// state no future rag run exists, so the transcribe job must finish the task
+// itself instead of handing completion to a job that will never run.
+func (r *RAGIndexRepository) ExistsIndexedByTaskID(taskID int64) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.VideoRAGIndex{}).
+		Where("task_id = ? AND status = ?", taskID, model.RAGIndexStatusIndexed).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // FindByMD5AndModel 按内容指纹 + embedding 模型查找已成功索引的 RAG 索引行
 // （跨 task、跨用户）。仅复用 status=indexed 的成功结果：索引重建（分块/embedding
 // 模型变更）后旧索引行 status 会被 Upsert 改写，不再挡住重索引（docs/$1）。
