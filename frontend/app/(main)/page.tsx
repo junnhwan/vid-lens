@@ -42,6 +42,17 @@ export default function DashboardPage() {
     return t ? taskTitle(t) : null
   }, [tasks])
 
+  const removeSession = async (s: ChatSession) => {
+    if (!window.confirm('删除这个会话?删除后聊天记录不可恢复。')) return
+    try {
+      await api.deleteSession(s.id)
+      setSessions(list => list.filter(item => item.id !== s.id))
+      toast.success('会话已删除')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : '删除失败')
+    }
+  }
+
   const retry = async (t: VideoTask) => {
     try {
       if (t.last_job_type === 'analyze') await api.analyze(t.id)
@@ -111,12 +122,20 @@ export default function DashboardPage() {
           const where = isKb ? '知识库会话' : taskTitleById(s.task_id) || '单视频会话'
           const href = isKb ? `/chat/kb/${s.knowledge_base_id}?session=${s.id}` : `/chat/v/${s.task_id}?session=${s.id}`
           return (
-            <button key={s.id} className="session-row" onClick={() => router.push(href)}>
+            <div key={s.id} className="session-row" onClick={() => router.push(href)}>
               <Icon name="message" />
               <span className="q">{s.title || '未命名会话'}</span>
               <span className="where">{where}</span>
               <span className="where">{fmtRelTime(s.updated_at)}</span>
-            </button>
+              <button
+                className="session-del"
+                title="删除会话"
+                aria-label="删除会话"
+                onClick={e => { e.stopPropagation(); void removeSession(s) }}
+              >
+                <Icon name="trash" size="sm" />
+              </button>
+            </div>
           )
         }) : (
           !loading && <div className="empty"><b>还没有会话</b></div>
