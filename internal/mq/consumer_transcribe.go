@@ -637,6 +637,17 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 	result := make(chan visualIndexOutcome, 1)
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index branch started")
 	go func() {
+		// The cap bounds concurrent frame-extraction + vision/OCR fan-out across
+		// tasks; a queued branch waits here without holding provider resources.
+		if c.visualSlots != nil {
+			select {
+			case c.visualSlots <- struct{}{}:
+				defer func() { <-c.visualSlots }()
+			case <-ctx.Done():
+				result <- visualIndexOutcome{err: ctx.Err()}
+				return
+			}
+		}
 		count, err := c.visualIndex(ctx, task)
 		result <- visualIndexOutcome{count: count, err: err}
 	}()

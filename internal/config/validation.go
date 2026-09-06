@@ -87,6 +87,12 @@ func (c *Config) ValidateServer() error {
 	if c.MQ.ASRConcurrency < 0 || c.MQ.ASRConcurrency > MaxASRConcurrency {
 		problems.add("mq.asr_concurrency", fmt.Sprintf("必须在 1..%d 之间，或留空使用默认值", MaxASRConcurrency))
 	}
+	if c.MQ.TranscribePrefetch < 0 || c.MQ.TranscribePrefetch > MaxASRConcurrency {
+		problems.add("mq.transcribe_prefetch", fmt.Sprintf("必须在 1..%d 之间，或留空回退 mq.prefetch", MaxASRConcurrency))
+	}
+	if c.MQ.VisualConcurrency < 0 || c.MQ.VisualConcurrency > MaxVisualConcurrency {
+		problems.add("mq.visual_concurrency", fmt.Sprintf("必须在 1..%d 之间，或留空表示不限制", MaxVisualConcurrency))
+	}
 	if c.MQ.ASRMaxRetries < 0 || c.MQ.ASRMaxRetries > MaxASRMaxRetries {
 		problems.add("mq.asr_max_retries", fmt.Sprintf("必须在 0..%d 之间", MaxASRMaxRetries))
 	}

@@ -67,6 +67,7 @@ const (
 	DefaultASRMaxRetries   = 2
 	MaxASRConcurrency      = 16
 	MaxASRMaxRetries       = 5
+	MaxVisualConcurrency   = 8
 )
 
 // MQConfig is the RabbitMQ-backed task queue configuration. VidLens uses MQ
@@ -81,9 +82,20 @@ type MQConfig struct {
 	DownloadQueue   string   `yaml:"download_queue"`
 	RAGIndexQueue   string   `yaml:"rag_index_queue"`
 	ConsumerGroup   string   `yaml:"consumer_group"`
-	// Prefetch caps buffered unacked deliveries. Each queue handler remains
-	// serial; ASRConcurrency controls bounded fan-out inside one video task.
+	// Prefetch caps buffered unacked deliveries per queue (default 1). The
+	// consumer runs a worker pool of the same size, so a queue prefetch above
+	// one runs that many tasks concurrently; ASRConcurrency still bounds the
+	// provider fan-out inside each task.
 	Prefetch int `yaml:"prefetch"`
+	// TranscribePrefetch overrides Prefetch for the transcribe queue only.
+	// Transcription is the longest stage (download + ASR + visual branch +
+	// title LLM), so serial processing here is the pipeline bottleneck while
+	// each extra concurrent task multiplies provider load (relay rate limits).
+	// Zero falls back to Prefetch.
+	TranscribePrefetch int `yaml:"transcribe_prefetch"`
+	// VisualConcurrency caps visual index branches (keyframe extraction +
+	// vision/OCR) running concurrently across tasks. Zero keeps them uncapped.
+	VisualConcurrency int `yaml:"visual_concurrency"`
 	// ASRConcurrency bounds per-task provider calls. Provider admission and the
 	// shared retry budget still apply independently to every attempt.
 	ASRConcurrency    int   `yaml:"asr_concurrency"`

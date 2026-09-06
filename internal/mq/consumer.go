@@ -85,7 +85,14 @@ type Consumer struct {
 	readerRestartBackoff time.Duration
 	amqpURL              string
 	prefetch             int
+	prefetchByQueue      map[string]int
 	idempotency          idempotencyChecker
+
+	// visualConcurrency caps concurrently running visual index branches across
+	// tasks (frame extraction + per-frame vision LLM / OCR are the heaviest
+	// fan-out per video). Zero keeps the branch uncapped.
+	visualConcurrency int
+	visualSlots       chan struct{}
 
 	downloadVideo   downloadVideoFunc
 	uploadLocalFile uploadLocalFileFunc
@@ -204,4 +211,50 @@ func (c *Consumer) SetMQConfig(brokers []string, prefetch int) {
 	if prefetch > 0 {
 		c.prefetch = prefetch
 	}
+}
+
+// SetQueuePrefetch overrides the shared prefetch for one queue. It must be
+// called before the consumers start. Raising the transcribe prefetch only
+// parallelizes because runGroupConsumer dispatches deliveries to a worker pool
+// of the same size; with a worker pool of one, extra prefetch just buffers.
+func (c *Consumer) SetQueuePrefetch(queue string, prefetch int) {
+	if c == nil || queue == "" || prefetch <= 0 {
+		return
+	}
+	if c.prefetchByQueue == nil {
+		c.prefetchByQueue = make(map[string]int, 2)
+	}
+	c.prefetchByQueue[queue] = prefetch
+}
+
+// prefetchForQueue resolves the per-queue prefetch override, falling back to
+// the shared prefetch, and never returns less than one.
+func (c *Consumer) prefetchForQueue(queue string) int {
+	if c == nil {
+		return 1
+	}
+	if override, ok := c.prefetchByQueue[queue]; ok && override > 0 {
+		return override
+	}
+	if c.prefetch > 0 {
+		return c.prefetch
+	}
+	return 1
+}
+
+// SetVisualConcurrency caps concurrent visual index branches across tasks. It
+// must be called before the consumers start; zero keeps the branch uncapped.
+// The cap protects relayed/vision providers from a prefetch-sized burst of
+// frame-caption requests on top of the ASR fan-out.
+func (c *Consumer) SetVisualConcurrency(concurrency int) {
+	if c == nil {
+		return
+	}
+	if concurrency <= 0 {
+		c.visualConcurrency = 0
+		c.visualSlots = nil
+		return
+	}
+	c.visualConcurrency = concurrency
+	c.visualSlots = make(chan struct{}, concurrency)
 }

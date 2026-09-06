@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"vid-lens/internal/model"
@@ -38,11 +39,21 @@ func (c *Consumer) restartBackoff() time.Duration {
 	return time.Second
 }
 
-// consumeMessages is the at-least-once consume loop. On handler success the
-// delivery is Acked; on handler failure it is Nacked with requeue=true so
-// RabbitMQ redelivers. Any consume/ack/nack infra error closes the reader;
-// the outer runGroupConsumer rebuilds it after backoff.
+// consumeMessages is the at-least-once consume loop with one in-flight handler
+// at a time. On handler success the delivery is Acked; on handler failure it is
+// Nacked with requeue=true so RabbitMQ redelivers. Any consume/ack/nack infra
+// error closes the reader; the outer runGroupConsumer rebuilds it after backoff.
 func consumeMessages(ctx context.Context, reader messageReader, handler messageHandler) (err error) {
+	return consumeMessagesN(ctx, reader, handler, 1)
+}
+
+// consumeMessagesN dispatches deliveries to a bounded pool of handler
+// goroutines. workers>1 lets one queue process several tasks concurrently —
+// prefetch alone only buffers unacked deliveries on the channel. Ack/Nack stay
+// safe across goroutines (amqp091-go serializes channel writes internally);
+// the first infra error stops dispatch, waits out in-flight handlers, and
+// closes the reader so the outer loop rebuilds it.
+func consumeMessagesN(ctx context.Context, reader messageReader, handler messageHandler, workers int) (err error) {
 	defer func() {
 		if closeErr := reader.Close(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("关闭 RabbitMQ reader 失败: %w", closeErr))
@@ -53,36 +64,88 @@ func consumeMessages(ctx context.Context, reader messageReader, handler messageH
 	if err != nil {
 		return fmt.Errorf("启动 RabbitMQ 消费失败: %w", err)
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case delivery, ok := <-deliveries:
-			if !ok {
-				return fmt.Errorf("RabbitMQ 消费通道已关闭")
-			}
-			if handleErr := handler(ctx, delivery); handleErr != nil {
-				// Handler failed: nack with requeue so RabbitMQ redelivers (at-least-once).
-				// A poison message (unparseable / missing task) is isolated by
-				// poisonAwareHandler which returns nil after persisting it, so it is
-				// Acked here instead of redelivered forever.
-				if nackErr := delivery.Nack(false, true); nackErr != nil {
-					return fmt.Errorf("处理消息失败且 nack 失败: handler=%w nack=%w", handleErr, nackErr)
+	if workers <= 1 {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case delivery, ok := <-deliveries:
+				if !ok {
+					return fmt.Errorf("RabbitMQ 消费通道已关闭")
 				}
-				continue
-			}
-			if ackErr := delivery.Ack(false); ackErr != nil {
-				return fmt.Errorf("ack 消息失败: %w", ackErr)
+				if handleErr := handler(ctx, delivery); handleErr != nil {
+					// Handler failed: nack with requeue so RabbitMQ redelivers (at-least-once).
+					// A poison message (unparseable / missing task) is isolated by
+					// poisonAwareHandler which returns nil after persisting it, so it is
+					// Acked here instead of redelivered forever.
+					if nackErr := delivery.Nack(false, true); nackErr != nil {
+						return fmt.Errorf("处理消息失败且 nack 失败: handler=%w nack=%w", handleErr, nackErr)
+					}
+					continue
+				}
+				if ackErr := delivery.Ack(false); ackErr != nil {
+					return fmt.Errorf("ack 消息失败: %w", ackErr)
+				}
 			}
 		}
 	}
+
+	var inFlight sync.WaitGroup
+	var failOnce sync.Once
+	var firstErr error
+	fail := func(err error) {
+		failOnce.Do(func() { firstErr = err })
+	}
+	sem := make(chan struct{}, workers)
+	for firstErr == nil {
+		select {
+		case <-ctx.Done():
+			inFlight.Wait()
+			return ctx.Err()
+		case delivery, ok := <-deliveries:
+			if !ok {
+				inFlight.Wait()
+				if firstErr != nil {
+					return firstErr
+				}
+				return fmt.Errorf("RabbitMQ 消费通道已关闭")
+			}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				inFlight.Wait()
+				return ctx.Err()
+			}
+			inFlight.Add(1)
+			go func(delivery amqp.Delivery) {
+				defer inFlight.Done()
+				defer func() { <-sem }()
+				if handleErr := handler(ctx, delivery); handleErr != nil {
+					if nackErr := delivery.Nack(false, true); nackErr != nil {
+						fail(fmt.Errorf("处理消息失败且 nack 失败: handler=%w nack=%w", handleErr, nackErr))
+					}
+					return
+				}
+				if ackErr := delivery.Ack(false); ackErr != nil {
+					fail(fmt.Errorf("ack 消息失败: %w", ackErr))
+				}
+			}(delivery)
+		}
+	}
+	inFlight.Wait()
+	return firstErr
 }
 
 func (c *Consumer) runGroupConsumer(ctx context.Context, name string, queue, groupID string, handler messageHandler) {
+	// The worker pool matches the per-queue prefetch: prefetch bounds unacked
+	// deliveries on the broker side, the pool bounds concurrent handlers, and
+	// per-queue prefetch above one is what lets one queue run several tasks
+	// concurrently (e.g. 2-3 transcribe videos in parallel per server).
+	workers := c.prefetchForQueue(queue)
 	for ctx.Err() == nil {
 		reader := c.readerFactory()(queue, groupID)
-		observability.Log(ctx, slog.Default(), slog.LevelInfo, "rabbitmq consumer started", slog.String("consumer", name), slog.String("queue", queue), slog.String("group", groupID))
-		err := consumeMessages(ctx, reader, handler)
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "rabbitmq consumer started", slog.String("consumer", name), slog.String("queue", queue), slog.String("group", groupID), slog.Int("workers", workers))
+		err := consumeMessagesN(ctx, reader, handler, workers)
 		if ctx.Err() != nil {
 			return
 		}

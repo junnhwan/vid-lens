@@ -36,6 +36,12 @@ mq:
   rag_index_queue: "video-rag-index"
   consumer_group: "vidlens-worker"
   prefetch: 1
+  # 转写队列单独放开的 prefetch（同时是并发 handler 数）。转写串行是流水线
+  # 瓶颈（每视频含下载+ASR+视觉分支+标题 LLM）；每多一个并发任务会同比放大
+  # provider 压力（中转站限流风险），2-3 是保守起步值。留空回退 prefetch。
+  transcribe_prefetch: 2
+  # 跨任务的视觉索引分支（抽帧+视觉 LLM/OCR）并发上限；0 表示不限制。
+  visual_concurrency: 2
   # 单个视频内部并行的 ASR 请求上限；所有尝试仍经过 provider admission。
   asr_concurrency: 3
   asr_max_retries: 2

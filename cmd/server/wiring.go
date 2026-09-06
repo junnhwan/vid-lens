@@ -233,6 +233,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 
 	consumer := mq.NewConsumer(deps.repos, deps.minioStorage, aiStrategy, deps.rdb, deps.cfg.Tools.FFmpegPath)
 	consumer.SetMQConfig(deps.cfg.MQ.Brokers, deps.cfg.MQ.Prefetch)
+	consumer.SetQueuePrefetch(deps.cfg.MQ.TranscribeQueue, deps.cfg.MQ.TranscribePrefetch)
+	consumer.SetVisualConcurrency(deps.cfg.MQ.VisualConcurrency)
 	asrBackoffs := make([]time.Duration, 0, len(deps.cfg.MQ.ASRRetryBackoffMS))
 	for _, milliseconds := range deps.cfg.MQ.ASRRetryBackoffMS {
 		if milliseconds > 0 {
