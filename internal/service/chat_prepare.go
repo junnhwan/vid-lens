@@ -56,22 +56,15 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		return nil, err
 	}
 
-	// docs/architecture/retrieval.md：intent 分类用级联分类器（规则层短路 + LLM 兜底），替换 docs/architecture/retrieval.md A段
-	// 占位 classifyIntentPlaceholder。历史 intent 加权需要 recent messages——先加载，
-	// 再分类（recent 仅 ScopeVideo 用；KB 关断 recent，recentIntents 也为空）。
+	// Share authorized recent history across Chat and Agent before retrieval.
 	recentLimit := s.cfg.RecentTurns * 2
-	var recent []model.ChatMessage
-	// KnowledgeBase membership can change between turns. Until recent messages
-	// carry member-safe provenance, keep history display-only so a removed
-	// video's answer cannot be fed back into retrieval or generation.
-	if session.ScopeType != model.ChatScopeKnowledgeBase {
-		recent, err = s.loadRecentMessages(ctx, userID, sessionID, recentLimit)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		recentLimit = 0
+	recent, err := s.loadScopeSafeRecentMessages(ctx, userID, session, taskIDs, recentLimit)
+	if err != nil {
+		return nil, err
 	}
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		recentLimit = 0
+	} // KB never publishes provenance-free Redis history.
 
 	intent := s.classifyIntent(ctx, question, session, mode, recent, chat)
 	policy := PolicyFor(intent, scopeOfSession(session))
@@ -86,9 +79,6 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	if topK <= 0 {
 		topK = s.cfg.TopK
 	}
-
-	// recentLimit=0 when KB 由 policy.Scope==collection 统一表达（上方已按 KB 设 0）。
-	_ = recentLimit
 
 	pipeline := s.newRetrievalPipeline(topK, chat, profile)
 	// 知识库混合检索（EnableVector=true/EnableBM25=true）由
@@ -122,6 +112,9 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 
 	messages := buildRAGMessages(contexts, recent, question)
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		messages = append([]ai.ChatMessage{{Role: "system", Content: evidenceCoveragePrompt(taskIDs, retrieval.Citations)}}, messages...)
+	}
 	if session.ScopeType != model.ChatScopeKnowledgeBase {
 		contextText, contextErr := s.videoContextText(session.TaskID)
 		if contextErr != nil {
@@ -130,14 +123,15 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		messages = append([]ai.ChatMessage{{Role: "system", Content: "有限视频上下文（不是可引用片段）：\n" + contextText}}, messages...)
 	}
 	return &preparedRAGChat{
-		Session:     session,
-		Question:    question,
-		TopK:        topK,
-		RecentLimit: recentLimit,
-		Contexts:    contexts,
-		Citations:   citations,
-		Messages:    messages,
-		Policy:      policy,
+		FrozenMemberIDs: append([]int64(nil), taskIDs...),
+		Session:         session,
+		Question:        question,
+		TopK:            topK,
+		RecentLimit:     recentLimit,
+		Contexts:        contexts,
+		Citations:       citations,
+		Messages:        messages,
+		Policy:          policy,
 	}, nil
 }
 
@@ -208,7 +202,7 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 			return "", err
 		}
 		if summary != nil && strings.TrimSpace(summary.Content) != "" {
-			sections = append(sections, "视频摘要：\n"+trimRunes(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
+			sections = append(sections, "视频摘要：\n"+boundedVideoText(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
 		}
 	}
 	if s.repos.Transcription != nil {
@@ -217,7 +211,7 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 			return "", err
 		}
 		if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
-			sections = append(sections, "视频转写：\n"+trimRunes(strings.TrimSpace(transcription.Content), maxVideoContextRunes))
+			sections = append(sections, "视频转写：\n"+boundedVideoText(strings.TrimSpace(transcription.Content), maxVideoContextRunes))
 		}
 	}
 	if len(sections) == 0 {

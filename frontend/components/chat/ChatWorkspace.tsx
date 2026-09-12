@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
+import { AnswerFeedback } from '@/components/chat/AnswerFeedback'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -578,7 +579,7 @@ function AgentMessageView({
               <span className="cno">{cite.id}</span>
               <div className="cbody">
                 <div className="chead">
-                  <span className="cvideo">{cite.videoTitle || fallbackTitle}</span>
+                  <span className="cvideo">{cite.videoTitle || (cite.taskId ? `视频 ${cite.taskId}` : fallbackTitle)}</span>
                   {hasReplayRange(cite) && <span className="ctime mono">{formatTimeRange(cite.startMS, cite.endMS)}</span>}
                   <ModalityTag modality={cite.modality} />
                   {cite.timeRangeStatus && cite.timeRangeStatus !== 'exact' && (
@@ -614,6 +615,7 @@ function AgentMessageView({
           <Icon name="file" size="sm" />复制回答
         </button>
       </div>
+      {sessionId && msg.messageId && !msg.streaming && <AnswerFeedback key={`${sessionId}:${msg.messageId}`} sessionId={sessionId} messageId={msg.messageId} />}
     </div>
   )
 }

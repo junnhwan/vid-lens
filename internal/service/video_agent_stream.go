@@ -102,6 +102,9 @@ type AgentRetrieveHitsEvent struct {
 }
 
 type AgentDoneEvent struct {
+	StopReason   string                      `json:"stop_reason,omitempty"`
+	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
 	Answer       string                      `json:"answer"`
 	RunID        string                      `json:"run_id"`
 	MessageID    int64                       `json:"message_id"`
@@ -419,6 +422,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 		return nil, err
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
+		StopReason: result.StopReason, BudgetNotice: result.BudgetNotice, Budget: result.Budget,
 		RunID: result.RunID, MessageID: result.MessageID, Answer: result.Answer, Degraded: result.Degraded,
 		TraceSummary: agentTraceSummary(result.Trace),
 		MemoryPolicy: result.MemoryPolicy,

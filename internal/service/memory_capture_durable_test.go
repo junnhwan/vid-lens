@@ -20,7 +20,7 @@ func TestDurableCaptureIsCommittedWithAnswerAndRechecksConsent(t *testing.T) {
 			chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{}, ChatConfig{TopK: 5}, ChatDependencies{MemoryPolicy: policies})
 			agent := NewVideoAgentService(chatSvc)
 			client := &scriptedChatClient{responses: []string{testSearchDecision, `{"done":true}`, "两个视频的证据 [C1][C2]"}}
-			request := VideoAgentLoopRequest{UserID: 7, SessionID: session.ID, Goal: "请用中文回答 owner", RunID: "memory-durable-run"}
+			request := VideoAgentLoopRequest{UserID: 7, SessionID: session.ID, Goal: "以后请用中文回答 owner", RunID: "memory-durable-run"}
 			profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"}
 			if _, err := agent.RunAgent(ctx, request, &fakeEmbeddingClient{dim: 3}, client, profile); err != nil {
 				t.Fatal(err)

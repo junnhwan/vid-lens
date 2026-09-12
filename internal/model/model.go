@@ -23,6 +23,7 @@ func AllModels() []interface{} {
 		&KnowledgeBaseVideo{},
 		&ChatSession{},
 		&ChatMessage{},
+		&ChatFeedback{},
 		&ChatMessageSource{},
 		&AgentMemoryItem{},
 		&MemoryCaptureJob{},

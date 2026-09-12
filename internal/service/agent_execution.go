@@ -44,19 +44,26 @@ type frozenAgentPolicy struct {
 }
 
 type frozenAgentBudget struct {
-	MaxSteps            int   `json:"max_steps"`
-	MaxToolCalls        int   `json:"max_tool_calls"`
-	MaxLLMCalls         int   `json:"max_llm_calls"`
-	MaxVisionCalls      int   `json:"max_vision_calls"`
-	MaxAttemptsPerStep  int   `json:"max_attempts_per_step"`
-	MaxRetrievalCalls   int   `json:"max_retrieval_calls"`
-	MaxVisualCalls      int   `json:"max_visual_calls"`
-	MaxFrames           int   `json:"max_frames"`
-	MaxPromptTokens     int64 `json:"max_prompt_tokens"`
-	MaxCompletionTokens int64 `json:"max_completion_tokens"`
-	MaxCostMicros       int64 `json:"max_cost_micros"`
-	MaxDurationMs       int64 `json:"max_duration_ms"`
-	MaxContextChars     int64 `json:"max_context_chars"`
+	SchemaVersion       int                        `json:"schema_version,omitempty"`
+	ProfileID           int64                      `json:"profile_id,omitempty"`
+	Source              string                     `json:"source,omitempty"`
+	Requested           *model.AgentBudgetOverride `json:"requested,omitempty"`
+	ReserveInputTokens  int64                      `json:"reserve_input_tokens,omitempty"`
+	ReserveOutputTokens int64                      `json:"reserve_output_tokens,omitempty"`
+	ReserveDurationMs   int64                      `json:"reserve_duration_ms,omitempty"`
+	MaxSteps            int                        `json:"max_steps"`
+	MaxToolCalls        int                        `json:"max_tool_calls"`
+	MaxLLMCalls         int                        `json:"max_llm_calls"`
+	MaxVisionCalls      int                        `json:"max_vision_calls"`
+	MaxAttemptsPerStep  int                        `json:"max_attempts_per_step"`
+	MaxRetrievalCalls   int                        `json:"max_retrieval_calls"`
+	MaxVisualCalls      int                        `json:"max_visual_calls"`
+	MaxFrames           int                        `json:"max_frames"`
+	MaxPromptTokens     int64                      `json:"max_prompt_tokens"`
+	MaxCompletionTokens int64                      `json:"max_completion_tokens"`
+	MaxCostMicros       int64                      `json:"max_cost_micros"`
+	MaxDurationMs       int64                      `json:"max_duration_ms"`
+	MaxContextChars     int64                      `json:"max_context_chars"`
 }
 
 func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, userID int64, session *model.ChatSession, goal, mode, agentProfile string, profile ai.Profile, policy frozenAgentPolicy, budget frozenAgentBudget) (*model.AgentRun, error) {

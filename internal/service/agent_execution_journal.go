@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 var (
 	errAgentExecutionBusy            = errors.New("agent execution step is owned by another worker")
 	errAgentExecutionBudgetExhausted = errors.New("agent execution budget exhausted")
+	errAgentRunDurationLimit         = errors.New("agent run duration limit reached")
 )
 
 // AgentExecutionStore is the persistence seam used by AgentExecutionJournal.
@@ -133,23 +135,31 @@ func (j *AgentExecutionJournal) MarkFinalEvidenceRefs(ctx context.Context, userI
 	return j.store.MarkFinalEvidenceRefs(ctx, userID, strings.TrimSpace(runID), refs)
 }
 
-func (j *AgentExecutionJournal) MarkTerminal(ctx context.Context, userID int64, runID, status, reason string, cause error) {
+func (j *AgentExecutionJournal) MarkTerminal(ctx context.Context, userID int64, runID, status, reason string, cause error) error {
 	if j == nil || j.store == nil {
-		return
+		return errors.New("agent execution journal unavailable")
 	}
 	errorCode, errorMessage := "", ""
 	if cause != nil {
 		errorCode, errorMessage = reason, safeAgentError(cause)
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	} else {
-		ctx = context.WithoutCancel(ctx)
-	}
-	_, _ = j.store.MarkRunTerminal(ctx, repository.AgentRunTerminalUpdate{
+	ctx, cancel := agentFinalizationContext(ctx)
+	defer cancel()
+	_, err := j.store.MarkRunTerminal(ctx, repository.AgentRunTerminalUpdate{
 		UserID: userID, RunID: strings.TrimSpace(runID), Status: status, StopReason: reason,
 		ErrorCode: errorCode, ErrorMessage: errorMessage, Now: j.now(),
 	})
+	if err != nil {
+		slog.Error("agent terminal persistence failed", "run_id", runID, "user_id", userID, "error", err)
+	}
+	return err
+}
+
+func agentFinalizationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 }
 
 type AgentJournalStep struct {
@@ -249,14 +259,20 @@ func (j *AgentExecutionJournal) Execute(ctx context.Context, spec AgentJournalSt
 	}
 
 	result, invokeErr := invoke()
+	finalCtx, finalCancel := agentFinalizationContext(ctx)
+	defer finalCancel()
 	contextChars := firstPositive(result.Usage.ContextChars, spec.ContextChars)
 	metricsJSON := mergeAgentUsageMetrics(result.MetricsJSON, result.Usage, contextChars)
 	if invokeErr != nil {
 		cancelled := errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded)
+		durationLimit := cancelled && errors.Is(context.Cause(ctx), errAgentRunDurationLimit)
 		failureCode := firstNonEmpty(spec.FailureCode, "agent_action_failure")
-		changed, failErr := j.store.FailStep(context.WithoutCancel(ctx), repository.AgentStepFailure{
+		if durationLimit {
+			failureCode = "duration_limit"
+		}
+		changed, failErr := j.store.FailStep(finalCtx, repository.AgentStepFailure{
 			UserID: spec.UserID, RunID: spec.RunID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
-			ErrorCode: failureCode, ErrorMessage: safeAgentError(invokeErr), Cancelled: cancelled,
+			ErrorCode: failureCode, ErrorMessage: safeAgentError(invokeErr), Cancelled: cancelled && !durationLimit, DurationLimit: durationLimit,
 			PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros,
 			UsageSource: result.Usage.UsageSource, TokenEstimated: result.Usage.TokenEstimated, Currency: result.Usage.Currency,
 			PriceVersion: result.Usage.PriceVersion, ContextChars: contextChars, ContextUsageSource: usageSourceForContext(contextChars),
@@ -275,7 +291,7 @@ func (j *AgentExecutionJournal) Execute(ctx context.Context, spec AgentJournalSt
 	if err != nil {
 		return AgentJournalExecution{}, err
 	}
-	changed, err := j.store.CompleteStep(context.WithoutCancel(ctx), repository.AgentStepCompletion{
+	changed, err := j.store.CompleteStep(finalCtx, repository.AgentStepCompletion{
 		UserID: spec.UserID, RunID: spec.RunID, StepID: spec.StepID, Attempt: attempt, LeaseToken: claim.Step.LeaseToken,
 		OutputRef: result.OutputRef, ResultCheckpoint: string(checkpoint), EvidenceRefs: result.EvidenceRefs, MetricsJSON: metricsJSON,
 		PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, CostMicros: result.Usage.CostMicros,

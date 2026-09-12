@@ -96,6 +96,7 @@ type AgentStepFailure struct {
 	ErrorMessage       string
 	Ambiguous          bool
 	Cancelled          bool
+	DurationLimit      bool
 	PromptTokens       int64
 	CompletionTokens   int64
 	CostMicros         int64
@@ -172,6 +173,17 @@ func (r *AgentExecutionRepository) ListSessionTerminalRuns(ctx context.Context, 
 	}
 	runs := []model.AgentRun{}
 	err := r.db.WithContext(ctx).Where("user_id = ? AND session_id = ? AND status IN ?", userID, sessionID, []string{model.AgentRunStatusFailed, model.AgentRunStatusCancelled, model.AgentRunStatusBudgetExhausted}).Order("created_at DESC").Limit(20).Find(&runs).Error
+	return runs, err
+}
+
+// Recent state includes active runs so a refresh never loses pending execution
+// identity. Committed answers are deduplicated against message snapshots by UI.
+func (r *AgentExecutionRepository) ListSessionRecentRuns(ctx context.Context, userID, sessionID int64) ([]model.AgentRun, error) {
+	if r == nil || r.db == nil || userID <= 0 || sessionID <= 0 {
+		return nil, gorm.ErrInvalidData
+	}
+	runs := []model.AgentRun{}
+	err := r.db.WithContext(ctx).Where("user_id = ? AND session_id = ?", userID, sessionID).Order("created_at DESC").Limit(20).Find(&runs).Error
 	return runs, err
 }
 
@@ -563,6 +575,9 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 			return errors.New("agent run usage CAS failed")
 		}
 		run.Version++
+		if req.DurationLimit {
+			return markAgentRunBudgetExhausted(tx, &run, req.Now, "duration_limit")
+		}
 		if req.Cancelled {
 			return markAgentRunCancelled(tx, &run, req.Now, "request_cancelled", req.ErrorCode, req.ErrorMessage)
 		}

@@ -25,6 +25,7 @@ type Repositories struct {
 	RAGIndex           *RAGIndexRepository
 	KnowledgeBase      *KnowledgeBaseRepository
 	Chat               *ChatRepository
+	Feedback           *ChatFeedbackRepository
 	Memory             *MemoryRepository
 	AgentExecution     *AgentExecutionRepository
 	AICallLog          *AICallLogRepository
@@ -53,6 +54,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		RAGIndex:           NewRAGIndexRepository(db),
 		KnowledgeBase:      NewKnowledgeBaseRepository(db),
 		Chat:               NewChatRepository(db),
+		Feedback:           NewChatFeedbackRepository(db),
 		Memory:             NewMemoryRepository(db),
 		AgentExecution:     NewAgentExecutionRepository(db),
 		AICallLog:          NewAICallLogRepository(db),

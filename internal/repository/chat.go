@@ -1,8 +1,10 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -70,8 +72,12 @@ func (r *ChatRepository) CreateMessage(message *model.ChatMessage) error {
 // persists both messages and normalized assistant sources. Scope owners are
 // locked in the same order used by deletion/member mutations so a concurrent
 // lifecycle change either happens entirely before or entirely after the exchange.
-func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) error {
-	_, _, _, err := r.createExchange(userID, "", userMessage, assistantMessage, sourceTaskIDs)
+func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64, frozenScope ...[]int64) error {
+	var members []int64
+	if len(frozenScope) > 0 {
+		members = frozenScope[0]
+	}
+	_, _, _, err := r.createExchange(userID, "", userMessage, assistantMessage, sourceTaskIDs, members)
 	return err
 }
 
@@ -82,10 +88,16 @@ func (r *ChatRepository) CreateAgentRunExchange(userID int64, runID string, user
 	if strings.TrimSpace(runID) == "" {
 		return false, 0, 0, gorm.ErrInvalidData
 	}
-	return r.createExchange(userID, strings.TrimSpace(runID), userMessage, assistantMessage, sourceTaskIDs, captureMemory...)
+	return r.createExchange(userID, strings.TrimSpace(runID), userMessage, assistantMessage, sourceTaskIDs, nil, captureMemory...)
 }
 
-func (r *ChatRepository) createExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64, captureMemory ...bool) (created bool, userMessageID, assistantMessageID int64, err error) {
+func (r *ChatRepository) CreateAgentRunExchangeContext(ctx context.Context, userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64, captureMemory ...bool) (bool, int64, int64, error) {
+	copy := *r
+	copy.db = r.db.WithContext(ctx)
+	return copy.CreateAgentRunExchange(userID, runID, userMessage, assistantMessage, sourceTaskIDs, captureMemory...)
+}
+
+func (r *ChatRepository) createExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs, frozenMembers []int64, captureMemory ...bool) (created bool, userMessageID, assistantMessageID int64, err error) {
 	if userMessage == nil || assistantMessage == nil ||
 		userMessage.UserID != userID || assistantMessage.UserID != userID ||
 		userMessage.SessionID <= 0 || userMessage.SessionID != assistantMessage.SessionID {
@@ -132,6 +144,25 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 		if !sameChatSessionScope(&observed, &session) {
 			return gorm.ErrRecordNotFound
 		}
+		if session.ScopeType == model.ChatScopeKnowledgeBase && frozenMembers != nil {
+			current, err := NewKnowledgeBaseRepository(tx).ListMemberTaskIDsForUser(userID, session.KnowledgeBaseID)
+			if err != nil {
+				return err
+			}
+			expected, err := normalizeSourceTaskIDs(frozenMembers)
+			if err != nil {
+				return err
+			}
+			sort.Slice(expected, func(i, j int) bool { return expected[i] < expected[j] })
+			if len(current) != len(expected) {
+				return errors.New("知识库成员已变更，请重新提问")
+			}
+			for i := range current {
+				if current[i] != expected[i] {
+					return errors.New("知识库成员已变更，请重新提问")
+				}
+			}
+		}
 		if err := validateExchangeSources(tx, userID, &session, sourceTaskIDs); err != nil {
 			return err
 		}
@@ -170,7 +201,7 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 		if err := createMessageSources(tx, sources); err != nil {
 			return err
 		}
-		if r.durableMemoryCapture && runID != "" && len(captureMemory) > 0 && captureMemory[0] {
+		if r.durableMemoryCapture && (runID == "" || (len(captureMemory) > 0 && captureMemory[0])) {
 			if err := enqueueMemoryCapture(tx, userMessage); err != nil {
 				return err
 			}

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { CiteRef } from '@/components/Citation'
 import { parseMessages, type ChatMsg } from '@/components/chat/chatUtils'
 import { mergeRunHistory } from './conversationHistory'
+import { recoverConversationRun } from '@/lib/conversationRecovery'
+import { budgetProgress } from '@/lib/budgetNotice'
 import {
   conversationSessionReducer,
   emptyConversationSessionState,
@@ -157,6 +159,8 @@ export function useConversationSession(options: ConversationSessionOptions) {
     }
 
     const controller = new AbortController()
+    let runId: string | undefined
+    let streamFailed = false
     abortRef.current = controller
     const deliver = (action: ConversationSessionAction) => {
       if (abortRef.current === controller && !controller.signal.aborted) dispatch(action)
@@ -196,7 +200,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       if (mode === 'agent') {
         await streamAgent(sessionId, question, { top_k: topK, mode: 'agent' }, {
           ...processHandlers,
-          onRunStart: data => update({ type: 'agent_event', event: { type: 'run_start', data } }),
+          onRunStart: data => { runId = data.run_id; update({ type: 'agent_event', event: { type: 'run_start', data } }) },
           onStepStart: data => update({ type: 'agent_event', event: { type: 'step_start', data } }),
           onStepDone: data => update({ type: 'agent_event', event: { type: 'step_done', data } }),
           onStepError: data => update({ type: 'agent_event', event: { type: 'step_error', data } }),
@@ -206,15 +210,18 @@ export function useConversationSession(options: ConversationSessionOptions) {
           onAnswer: delta => update({ type: 'answer_delta', delta }),
           onCitations: citations => update({ type: 'patch_last', patch: { cites: mapCitations(citations) } }),
           onDone: done => {
+            const budget = budgetProgress(done.stop_reason, done.budget_notice)
+            if (budget) update({ type: 'progress', event: budget })
             update({ type: 'agent_event', event: { type: 'done' } })
             // done is authoritative; budget-limited runs may deliver evidence
             // excerpts instead of a model-generated answer.
             update({
               type: 'stream_done',
-              patch: { ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
+              patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
             })
           },
           onError: error => {
+            streamFailed = true
             update({ type: 'agent_event', event: { type: 'error', data: { message: error.message, step_id: error.step_id } } })
             update({ type: 'stream_error', message: error.message })
           },
@@ -229,12 +236,13 @@ export function useConversationSession(options: ConversationSessionOptions) {
             update({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
           },
           onDone: done => {
-            update({ type: 'stream_done', patch: { ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded } })
+            update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded } })
           },
           onError: error => update({ type: 'stream_error', message: error.message }),
         }, controller.signal)
       }
     } catch (error) {
+      streamFailed = true
       if (error instanceof DOMException && error.name === 'AbortError') {
         update({ type: 'stream_cancelled' })
       } else {
@@ -243,13 +251,22 @@ export function useConversationSession(options: ConversationSessionOptions) {
       }
     } finally {
       flush()
+      if (streamFailed && runId && !controller.signal.aborted && abortRef.current === controller) {
+        const recovered = await recoverConversationRun(runId, {
+          detail: () => api.getRunDetail(sessionId, runId!),
+          messages: async () => parseHistory(await api.getMessages(sessionId)),
+          runId: message => message.agentRunId,
+        }, controller.signal)
+        if (recovered.message) update({ type: 'stream_done', patch: recovered.message })
+        else update({ type: 'stream_error', message: recovered.notice || '运行状态待确认' })
+      }
       if (abortRef.current === controller) {
         dispatch({ type: 'stream_cancelled' })
         abortRef.current = null
         flushRef.current = null
       }
     }
-  }, [state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations])
+  }, [state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations, parseHistory])
 
   const stop = useCallback(() => {
     flushRef.current?.()

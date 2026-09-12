@@ -31,7 +31,7 @@ func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, que
 			Content: "检索到的视频片段：\n" + strings.Join(contextLines, "\n\n"),
 		},
 	}
-	for _, msg := range recent {
+	for _, msg := range boundedConversationContext(recent) {
 		if msg.Role == "user" || msg.Role == "assistant" {
 			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content})
 		}
@@ -51,7 +51,7 @@ func buildVideoAssistantMessages(videoContext string, recent []model.ChatMessage
 			Content: "可用的视频上下文：\n" + videoContext,
 		},
 	}
-	for _, msg := range recent {
+	for _, msg := range boundedConversationContext(recent) {
 		if msg.Role == "user" || msg.Role == "assistant" {
 			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content})
 		}

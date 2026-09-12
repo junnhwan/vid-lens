@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 	"vid-lens/internal/repository"
 )
 
@@ -24,12 +27,13 @@ type durableResearchExecution struct {
 }
 
 type durableResearchDecision struct {
-	PublicSummary string          `json:"public_summary,omitempty"`
-	Done          bool            `json:"done"`
-	Tool          string          `json:"tool,omitempty"`
-	Arguments     json.RawMessage `json:"arguments,omitempty"`
-	Replan        bool            `json:"replan,omitempty"`
-	StopReason    string          `json:"stop_reason,omitempty"`
+	BudgetNotice  *AgentBudgetNotice `json:"budget_notice,omitempty"`
+	PublicSummary string             `json:"public_summary,omitempty"`
+	Done          bool               `json:"done"`
+	Tool          string             `json:"tool,omitempty"`
+	Arguments     json.RawMessage    `json:"arguments,omitempty"`
+	Replan        bool               `json:"replan,omitempty"`
+	StopReason    string             `json:"stop_reason,omitempty"`
 }
 
 type durableResearchToolCheckpoint struct {
@@ -87,6 +91,7 @@ func (r *VideoAgentLoopRunner) recoverResearchState(ctx context.Context, state *
 		if err != nil {
 			return false, fmt.Errorf("validate persisted planner decision %s: %w", planID, err)
 		}
+		state.BudgetNotice = storedDecision.BudgetNotice
 		if decision.Done {
 			if toolStep, _, toolErr := completedResearchRecord(records, fmt.Sprintf("tool-%d", number)); toolErr != nil {
 				return false, toolErr
@@ -124,9 +129,15 @@ func (r *VideoAgentLoopRunner) recoverResearchState(ctx context.Context, state *
 			return false, err
 		}
 		applyRecoveredResearchStep(state, number, decision, checkpoint)
+		if state.ArgumentCorrections > 1 {
+			return false, errors.New("工具参数纠正次数已用尽")
+		}
 		if state.Answer != "" {
 			state.Status = VideoAgentLoopStatusCompleted
 			state.StopReason = "answer_generated"
+			if state.BudgetNotice != nil {
+				state.StopReason = "budget_finalized"
+			}
 			return true, nil
 		}
 		if decision.Replan {
@@ -186,13 +197,21 @@ func hasCompletedResearchSequenceAfter(steps []model.AgentStep, sequence int) bo
 func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision VideoAgentLoopDecision, checkpoint durableResearchToolCheckpoint) {
 	observation := checkpoint.Observation
 	state.CurrentStep++
-	state.Steps = append(state.Steps, VideoAgentLoopStep{
+	step := VideoAgentLoopStep{
 		Number: number, Action: decision, Status: VideoAgentLoopStepCompleted,
 		Trace: checkpoint.Result.Step, Observation: &observation,
-	})
+	}
+	if observation.ErrorClass == "invalid_arguments" {
+		step.Status = VideoAgentLoopStepFailed
+		step.Error = strings.Join(observation.UnresolvedQuestions, "；")
+	}
+	state.Steps = append(state.Steps, step)
 	state.Observations = append(state.Observations, observation)
 	state.Evidence = mergeVideoAgentLoopEvidence(state.Evidence, observation.NewEvidence)
 	state.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
+	if observation.ErrorClass == "invalid_arguments" {
+		state.ArgumentCorrections++
+	}
 	if observation.Answer != "" {
 		state.Answer = observation.Answer
 		state.Citations = append([]Citation(nil), observation.Citations...)
@@ -200,6 +219,9 @@ func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision
 }
 
 func (r *VideoAgentLoopRunner) nextResearchDecisionCheckpoint(ctx context.Context, state VideoAgentLoopState, runtime VideoAgentToolRuntime) (VideoAgentLoopDecision, bool, error) {
+	if r.execution != nil {
+		ctx = observability.WithCorrelation(ctx, observability.Correlation{TraceID: r.execution.runID, Stage: fmt.Sprintf("plan-%d", state.CurrentStep+1), Attempt: 1})
+	}
 	if r.execution == nil {
 		decision, err := r.chooseDecision(ctx, state, r.registry.Definitions())
 		if err != nil {
@@ -216,13 +238,21 @@ func (r *VideoAgentLoopRunner) nextResearchDecisionCheckpoint(ctx context.Contex
 	stepID := fmt.Sprintf("plan-%d", state.CurrentStep+1)
 	definitions := r.registry.Definitions()
 	inputSummary, inputDigest := safePlannerInputSummary(state, definitions)
-	plannerContextChars := plannerContextChars(state, definitions)
+	plannerMessages, buildErr := buildPlannerMessages(state, definitions)
+	if buildErr != nil {
+		return VideoAgentLoopDecision{}, false, buildErr
+	}
+	plannerUsage := estimatedPlannerCallUsage(plannerMessages, "")
+	forcedFinal := state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1
+	if forcedFinal {
+		plannerUsage = VideoAgentLoopPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}
+	}
 	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
 		Kind: "plan", Action: "select_next_action", DigestAction: videoAgentLoopPlannerCall,
 		SafeReason: "select the next allow-listed action", InputSummary: inputSummary, ArgumentsDigest: inputDigest,
 		ToolName: videoAgentLoopPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
-		LLMCall: true, ContextChars: plannerContextChars, EstimatedPromptTokens: plannerContextChars / 4,
+		LLMCall: !forcedFinal, ContextChars: plannerUsage.ContextChars, EstimatedPromptTokens: plannerUsage.PromptTokens,
 		FailureCode: "planner_failure",
 	}, func() (AgentJournalResult, error) {
 		decision, usage, planErr := r.chooseDecisionWithUsage(ctx, state, definitions)
@@ -232,8 +262,12 @@ func (r *VideoAgentLoopRunner) nextResearchDecisionCheckpoint(ctx context.Contex
 				planErr = &invalidResearchDecisionError{cause: planErr}
 			}
 		}
+		checkpoint := durableResearchDecisionFrom(decision)
+		if checkpoint.BudgetNotice == nil {
+			checkpoint.BudgetNotice = state.BudgetNotice
+		}
 		return AgentJournalResult{
-			Checkpoint: durableResearchDecisionFrom(decision), OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"),
+			Checkpoint: checkpoint, OutputRef: firstNonEmpty(decision.Tool, decision.StopReason, "done"),
 			Usage: usage, MetricsJSON: usageMetrics(usage),
 		}, planErr
 	})
@@ -263,6 +297,7 @@ func callVideoAgentLoopPlanner(ctx context.Context, planner VideoAgentLoopPlanne
 }
 
 func safePlannerInputSummary(state VideoAgentLoopState, tools []VideoAgentToolDefinition) (string, string) {
+	state.BudgetNotice = nil // Reservation timing is recorded in the decision, not a replay input.
 	toolNames := make([]string, 0, len(tools))
 	for _, definition := range tools {
 		toolNames = append(toolNames, definition.Name)
@@ -278,19 +313,23 @@ func safePlannerInputSummary(state VideoAgentLoopState, tools []VideoAgentToolDe
 }
 
 func plannerContextChars(state VideoAgentLoopState, tools []VideoAgentToolDefinition) int64 {
-	stateJSON, _ := json.Marshal(state)
-	toolsJSON, _ := json.Marshal(tools)
-	content := fmt.Sprintf("你是 VidLens 的视频研究计划器。%s%s", string(toolsJSON), string(stateJSON))
-	return int64(len([]rune(content)))
+	messages, _ := buildPlannerMessages(state, tools)
+	return estimatedPlannerCallUsage(messages, "").ContextChars
 }
 
 func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state VideoAgentLoopState, runtime VideoAgentToolRuntime, decision VideoAgentLoopDecision) (VideoAgentToolResult, VideoAgentLoopObservation, bool, error) {
+	if r.execution != nil {
+		ctx = observability.WithCorrelation(ctx, observability.Correlation{TraceID: r.execution.runID, Stage: fmt.Sprintf("tool-%d", state.CurrentStep+1), Attempt: 1})
+	}
 	if err := runtime.checkScope(ctx, state.Evidence); err != nil {
 		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
 	}
 	if r.execution == nil {
 		result, err := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
 		if err != nil {
+			if observation, ok := recoverableToolObservation(result, err); ok {
+				return result, observation, false, nil
+			}
 			return result, VideoAgentLoopObservation{}, false, err
 		}
 		observation, err := r.observeResearchTool(state, runtime.TaskID, result)
@@ -303,18 +342,40 @@ func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state Vi
 	argsDigest := digestAgentValue(string(decision.Arguments))
 	contextChars := researchToolContextChars(decision.Tool, decision.Arguments)
 	usage := VideoAgentLoopPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}
+	estimatedPrompt := int64(0)
+	if decision.Tool == VideoAgentToolBuildCitedAnswer {
+		var args buildCitedAnswerToolArguments
+		if err := json.Unmarshal(decision.Arguments, &args); err != nil {
+			return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
+		}
+		messages := buildCitedAnswerMessages(BuildCitedAnswerInput{ScopeTaskIDs: runtime.TaskIDs, Question: args.Question, Intermediate: args.Intermediate, Citations: args.Citations, Recent: runtime.Recent}, runtime.MemorySnapshot)
+		usage = estimatedPlannerCallUsage(messages, "")
+		contextChars, estimatedPrompt = usage.ContextChars, usage.PromptTokens
+		run, err := execution.journal.GetRun(ctx, execution.userID, execution.runID)
+		if err != nil {
+			return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
+		}
+		if run != nil {
+			// Reserve is a minimum kept for finalization, not the final call's
+			// ceiling. Spend only the frozen run's remaining output allowance.
+			runtime.MaxOutputTokens = run.MaxCompletionTokens - run.CompletionTokensUsed
+		}
+		runtime.ReportUsage = func(reported VideoAgentLoopPlannerCallUsage) { usage = reported }
+	}
 	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
 		Kind: videoAgentStepKind(decision.Tool), Action: decision.Tool, SafeReason: safeToolReason(decision.Tool),
 		InputSummary: inputSummary, ArgumentsDigest: argsDigest, ToolName: decision.Tool,
 		ReplaySafe: replaySafeAgentAction(decision.Tool), LLMCall: llmAgentAction(decision.Tool),
 		VisionCall: visionAgentAction(decision.Tool), VisualCall: visualAgentAction(decision.Tool), FrameCount: visualFrameBudget(decision.Tool, decision.Arguments), RetrievalCall: retrievalAgentAction(decision.Tool),
-		ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4, FailureCode: "tool_failure",
+		ContextChars: contextChars, EstimatedPromptTokens: estimatedPrompt, FailureCode: "tool_failure",
 	}, func() (AgentJournalResult, error) {
 		result, toolErr := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
 		var observation VideoAgentLoopObservation
 		if toolErr == nil {
 			observation, toolErr = r.observeResearchTool(state, runtime.TaskID, result)
+		} else if corrected, ok := recoverableToolObservation(result, toolErr); ok {
+			observation, toolErr = corrected, nil
 		}
 		return AgentJournalResult{
 			Checkpoint: durableResearchToolCheckpoint{Result: result, Observation: observation},
@@ -348,6 +409,27 @@ func (r *VideoAgentLoopRunner) validatedResearchDecision(state VideoAgentLoopSta
 			return VideoAgentLoopDecision{}, err
 		}
 		decision.Arguments = canonical
+		var bound buildCitedAnswerToolArguments
+		if err := json.Unmarshal(canonical, &bound); err != nil {
+			return VideoAgentLoopDecision{}, err
+		}
+		bound.Question = state.Goal
+		decision.Arguments, _ = json.Marshal(bound)
+	}
+	if decision.Tool == VideoAgentToolInvestigateVisual && state.MaxVisualFrames > 0 {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(decision.Arguments, &fields); err != nil {
+			return decision, err
+		}
+		var budget VisualBudget
+		if err := json.Unmarshal(fields["budget"], &budget); err != nil {
+			return decision, err
+		}
+		if budget.MaxFrames <= 0 || budget.MaxFrames > state.MaxVisualFrames {
+			budget.MaxFrames = state.MaxVisualFrames
+		}
+		fields["budget"], _ = json.Marshal(budget)
+		decision.Arguments, _ = json.Marshal(fields)
 	}
 	decision.PublicSummary = trimRunes(strings.TrimSpace(decision.PublicSummary), 240)
 	return decision, nil
@@ -365,7 +447,7 @@ func (r *VideoAgentLoopRunner) observeResearchTool(state VideoAgentLoopState, ta
 }
 
 func durableResearchDecisionFrom(decision VideoAgentLoopDecision) durableResearchDecision {
-	return durableResearchDecision{PublicSummary: decision.PublicSummary, Done: decision.Done, Tool: decision.Tool, Arguments: append(json.RawMessage(nil), decision.Arguments...), Replan: decision.Replan, StopReason: decision.StopReason}
+	return durableResearchDecision{BudgetNotice: decision.BudgetNotice, PublicSummary: decision.PublicSummary, Done: decision.Done, Tool: decision.Tool, Arguments: append(json.RawMessage(nil), decision.Arguments...), Replan: decision.Replan, StopReason: decision.StopReason}
 }
 
 func (d durableResearchDecision) toDecision() VideoAgentLoopDecision {
@@ -373,7 +455,7 @@ func (d durableResearchDecision) toDecision() VideoAgentLoopDecision {
 	if d.Done {
 		reason = ""
 	}
-	return VideoAgentLoopDecision{PublicSummary: d.PublicSummary, Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
+	return VideoAgentLoopDecision{BudgetNotice: d.BudgetNotice, PublicSummary: d.PublicSummary, Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
 }
 
 func safeResearchArgumentsSummary(tool string, arguments json.RawMessage) string {
@@ -487,15 +569,55 @@ func (r *VideoAgentLoopRunner) chooseDecisionWithUsage(ctx context.Context, stat
 	var u VideoAgentLoopPlannerCallUsage
 	var err error
 	_, finalToolErr := r.registry.Lookup(VideoAgentToolBuildCitedAnswer)
-	if finalToolErr != nil || state.CurrentStep < state.MaxSteps-1 {
-		d, u, err = callVideoAgentLoopPlanner(ctx, r.planner, state, definitions)
+	if finalToolErr != nil || (state.BudgetNotice == nil && state.CurrentStep < state.MaxSteps-1) {
+		planCtx := ctx
+		cancel := func() {}
+		var run *model.AgentRun
+		var budget frozenAgentBudget
+		if finalToolErr == nil && r.execution != nil {
+			run, err = r.execution.journal.GetRun(ctx, r.execution.userID, r.execution.runID)
+			if err != nil {
+				return d, u, err
+			}
+			if run != nil {
+				if err = json.Unmarshal([]byte(run.BudgetSnapshot), &budget); err != nil {
+					return d, u, err
+				}
+				if budget.SchemaVersion >= 1 && budget.ReserveDurationMs > 0 && run.MaxDurationMs > budget.ReserveDurationMs {
+					planCtx, cancel = context.WithDeadlineCause(ctx, run.CreatedAt.Add(time.Duration(run.MaxDurationMs-budget.ReserveDurationMs)*time.Millisecond), errPlannerFinalReserve)
+				}
+			}
+		}
+		defer cancel()
+		d, u, err = callVideoAgentLoopPlanner(planCtx, r.planner, state, definitions)
+		var finish *ai.ChatFinishError
+		dimension := ""
+		if errors.Is(context.Cause(planCtx), errPlannerFinalReserve) {
+			dimension = "duration_ms"
+		}
+		if errors.As(err, &finish) && finish.Reason == "length" {
+			dimension = "output_tokens"
+		}
+		if err != nil && ctx.Err() == nil && dimension != "" && run != nil && budget.SchemaVersion >= 1 {
+			// Discard the incomplete model decision, keep its usage, and route
+			// through the ordinary journaled writer with the remaining budget.
+			notice := &AgentBudgetNotice{Dimension: dimension, UsageSource: u.UsageSource}
+			if dimension == "duration_ms" {
+				notice.Used, notice.Reserve, notice.Limit = time.Since(run.CreatedAt).Milliseconds(), budget.ReserveDurationMs, run.MaxDurationMs
+			} else {
+				notice.Used, notice.Reserve, notice.Limit = run.CompletionTokensUsed+u.CompletionTokens, budget.ReserveOutputTokens, run.MaxCompletionTokens
+			}
+			state.BudgetNotice, err = notice, nil
+		}
 	}
-	if finalToolErr == nil && err == nil && (state.CurrentStep >= state.MaxSteps-1 || d.Done || (d.Replan && state.ReplanCount >= state.MaxReplans)) {
+	if finalToolErr == nil && err == nil && (state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1 || d.Done || (d.Replan && state.ReplanCount >= state.MaxReplans)) {
 		args, encodeErr := json.Marshal(buildCitedAnswerToolArguments{Question: state.Goal, Intermediate: "基于已有证据回答；明确说明未确认的信息与视觉限制。", Citations: state.Evidence})
 		if encodeErr != nil {
 			return d, u, encodeErr
 		}
-		d = VideoAgentLoopDecision{Tool: VideoAgentToolBuildCitedAnswer, Reason: "deliver available evidence and gaps", Arguments: args}
+		d = VideoAgentLoopDecision{BudgetNotice: state.BudgetNotice, Tool: VideoAgentToolBuildCitedAnswer, Reason: "deliver available evidence and gaps", Arguments: args}
 	}
 	return d, u, err
 }
+
+var errPlannerFinalReserve = errors.New("planner reached reserved final answer time")

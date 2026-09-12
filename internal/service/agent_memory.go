@@ -474,6 +474,12 @@ type SemanticMemoryRetriever struct {
 	embedder   MemoryEmbedder
 }
 
+// Relational persistence succeeded; only its rebuildable projection failed.
+type MemoryProjectionError struct{ Cause error }
+
+func (e *MemoryProjectionError) Error() string { return e.Cause.Error() }
+func (e *MemoryProjectionError) Unwrap() error { return e.Cause }
+
 func NewSemanticMemoryRetriever(memory memoryRecallRepository, embedder MemoryEmbedder) *SemanticMemoryRetriever {
 	return &SemanticMemoryRetriever{repository: memory, embedder: embedder}
 }
@@ -481,6 +487,34 @@ func NewSemanticMemoryRetriever(memory memoryRecallRepository, embedder MemoryEm
 func (r *SemanticMemoryRetriever) Retrieve(ctx context.Context, request MemoryRetrieveRequest) ([]model.AgentMemoryItem, error) {
 	if r == nil || r.repository == nil {
 		return nil, errors.New("memory repository 未配置")
+	}
+	// User preferences are a bounded relational lookup, independent of embeddings.
+	if direct, ok := r.repository.(interface {
+		ListStructuredPreferences(context.Context, int64, time.Time) ([]model.AgentMemoryItem, error)
+	}); ok {
+		var result []model.AgentMemoryItem
+		var scoped []MemoryScope
+		for _, scope := range request.Scopes {
+			if scope.Type == model.MemoryScopeUser {
+				items, err := direct.ListStructuredPreferences(ctx, request.UserID, request.Now)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, items...)
+			} else {
+				scoped = append(scoped, scope)
+			}
+		}
+		if len(scoped) == 0 {
+			return result, nil
+		}
+		// Small non-user corrections are also available without a provider call.
+		scopes := make(map[string][]string)
+		for _, scope := range scoped {
+			scopes[scope.Type] = append(scopes[scope.Type], scope.ID)
+		}
+		items, err := r.repository.ListRecallable(ctx, request.UserID, scopes, request.Limit, request.Now)
+		return append(result, items...), err
 	}
 	scopes := make(map[string][]string)
 	for _, scope := range request.Scopes {
@@ -754,20 +788,20 @@ func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate
 		observeMemoryBackground("policy", "disabled")
 		return nil
 	}
-	if result.Item.Status == model.MemoryStatusDeleted || result.Item.Status == model.MemoryStatusWithdrawn || w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
+	if strings.HasPrefix(result.Item.Kind, "response.") || result.Item.Status == model.MemoryStatusDeleted || result.Item.Status == model.MemoryStatusWithdrawn || w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
 		return nil
 	}
 	ref, err := w.projector.Project(ctx, result.Item)
 	if err != nil {
 		observeMemoryBackground("embedding", "failed")
-		return err
+		return &MemoryProjectionError{Cause: err}
 	}
 	if strings.TrimSpace(ref) == "" {
 		return nil
 	}
 	if err := w.store.SetEmbeddingRef(ctx, result.Item.UserID, result.Item.ID, ref); err != nil {
 		observeMemoryBackground("embedding_ref", "failed")
-		return err
+		return &MemoryProjectionError{Cause: err}
 	}
 	return nil
 }
@@ -963,28 +997,7 @@ func (ExplicitPreferenceExtractor) Extract(_ context.Context, request MemoryExtr
 	if text == "" || containsSensitiveMemoryContent(text) {
 		return nil, nil
 	}
-	lower := strings.ToLower(text)
-	preference := ""
-	switch {
-	case strings.Contains(lower, "请用中文") || strings.Contains(lower, "中文回答"):
-		preference = "回答语言：中文"
-	case strings.Contains(lower, "请用英文") || strings.Contains(lower, "answer in english"):
-		preference = "回答语言：英文"
-	case strings.Contains(lower, "简洁") || strings.Contains(lower, "简短") || strings.Contains(lower, "concise"):
-		preference = "回答风格：简洁"
-	case strings.Contains(lower, "详细") || strings.Contains(lower, "in detail"):
-		preference = "回答风格：详细"
-	case strings.Contains(lower, "要点") || strings.Contains(lower, "bullet"):
-		preference = "回答格式：优先使用要点列表"
-	}
-	if preference == "" {
-		return nil, nil
-	}
-	return []MemoryCandidate{{
-		UserID: request.UserID, SessionID: request.SessionID,
-		Scope: MemoryScope{Type: model.MemoryScopeUser, ID: strconv.FormatInt(request.UserID, 10)},
-		Kind:  "response_preference", Content: preference, SourceType: "user_message", SourceRef: strings.TrimSpace(request.SourceRef), Importance: 0.7,
-	}}, nil
+	return extractStructuredPreferences(request), nil
 }
 
 var sensitiveMemoryPatterns = []*regexp.Regexp{

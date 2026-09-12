@@ -42,6 +42,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := Config{
+		AgentBudget:  DefaultAgentBudgetConfig(),
 		AIGovernance: defaultAIGovernanceConfig(),
 		MQ: MQConfig{
 			ASRConcurrency: DefaultASRConcurrency, ASRMaxRetries: DefaultASRMaxRetries,
@@ -58,6 +59,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析配置文件失败: 配置文件不能包含多个 YAML 文档")
 	} else if err != io.EOF {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if err := cfg.AgentBudget.Validate(); err != nil {
+		return nil, err
 	}
 	cfg.MQ.applyDefaults()
 	cfg.Memory.applyDefaults()

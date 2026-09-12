@@ -160,13 +160,14 @@ type ChatStreamEvent struct {
 }
 
 type preparedRAGChat struct {
-	Session     *model.ChatSession
-	Question    string
-	TopK        int
-	RecentLimit int
-	Contexts    []RetrievedChunk
-	Citations   []Citation
-	Messages    []ai.ChatMessage
+	FrozenMemberIDs []int64
+	Session         *model.ChatSession
+	Question        string
+	TopK            int
+	RecentLimit     int
+	Contexts        []RetrievedChunk
+	Citations       []Citation
+	Messages        []ai.ChatMessage
 	// Policy 是本次问答的 ExecutionPolicy（docs/architecture/retrieval.md）。docs/architecture/reliability.md 降级在其之上：
 	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
 	Policy ExecutionPolicy

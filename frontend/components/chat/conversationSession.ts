@@ -101,14 +101,14 @@ export function conversationSessionReducer(
       return {
         ...state,
         agentTrace: trace,
-        messages: patchLastAssistant(state.messages, current => ({ ...current, trace: trace.steps, agentRun: true })),
+        messages: patchLastAssistant(state.messages, current => ({ ...current, trace: trace.steps, agentRun: true, ...(action.event.type === 'run_start' ? { agentRunId: action.event.data.run_id } : {}) })),
       }
     }
     case 'stream_done':
       return {
         ...state,
         streaming: false,
-        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'done'), ...(action.patch || {}) })),
+        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, error: undefined, cancelled: undefined, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'done'), ...(action.patch || {}) })),
       }
     case 'stream_error': {
       const ragTrace = state.ragTrace.length

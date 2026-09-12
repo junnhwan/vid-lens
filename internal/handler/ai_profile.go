@@ -124,7 +124,6 @@ func (h *AIProfileHandler) Delete(c *gin.Context) {
 	response.OKWithMsg(c, "删除成功", nil)
 }
 
-
 func (h *AIProfileHandler) Test(c *gin.Context) {
 	if isDemoUser(c) {
 		response.Forbidden(c, "演示账号不可测试 AI 配置")
@@ -229,4 +228,8 @@ func validateAIProfileRequestBinding(req service.AIProfileRequest) error {
 		return errors.New("embedding 配置不完整")
 	}
 	return nil
+}
+
+func (h *AIProfileHandler) BudgetOptions(c *gin.Context) {
+	response.OK(c, gin.H{"version": 1, "defaults": h.svc.AgentBudgetOptions().Defaults, "limits": h.svc.AgentBudgetOptions().Limits, "visual_available": true})
 }

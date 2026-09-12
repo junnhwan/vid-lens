@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
+	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
 
@@ -32,6 +34,9 @@ func (c *DurableMemoryCapture) process(ctx context.Context) (bool, error) {
 	jobCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	message, err := c.repo.MemoryCaptureMessage(jobCtx, *job)
+	if job.ExtractorVersion != model.MemoryExtractorVersion {
+		err = fmt.Errorf("unsupported memory extractor version: %s", job.ExtractorVersion)
+	}
 	if err == nil && message != nil {
 		inputs, policyErr := c.repo.ResolveMemoryPolicyInputs(jobCtx, job.UserID, job.SessionID)
 		err = policyErr
@@ -54,6 +59,8 @@ func (c *DurableMemoryCapture) process(ctx context.Context) (bool, error) {
 	if ctx.Err() != nil {
 		return true, ctx.Err()
 	} // Leave the lease for recovery.
+	var projectionError *MemoryProjectionError
+	job.ProjectionPending = errors.As(err, &projectionError) || job.ProjectionPending
 	if finishErr := c.repo.FinishMemoryCapture(ctx, *job, err == nil); finishErr != nil {
 		return true, finishErr
 	}

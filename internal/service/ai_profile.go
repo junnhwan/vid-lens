@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"vid-lens/internal/config"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -22,30 +24,32 @@ type AIProfileTester interface {
 }
 
 type AIProfileService struct {
-	repo   *repository.AIProfileRepository
-	codec  *secret.Codec
-	tester AIProfileTester
+	budgetConfig config.AgentBudgetConfig
+	repo         *repository.AIProfileRepository
+	codec        *secret.Codec
+	tester       AIProfileTester
 }
 
 func NewAIProfileService(repo *repository.AIProfileRepository, codec *secret.Codec, tester AIProfileTester) *AIProfileService {
-	return &AIProfileService{repo: repo, codec: codec, tester: tester}
+	return &AIProfileService{repo: repo, codec: codec, tester: tester, budgetConfig: config.DefaultAgentBudgetConfig()}
 }
 
 type AIProfileRequest struct {
-	Name              string `json:"name" binding:"required"`
-	LLMProvider       string `json:"llm_provider" binding:"required"`
-	LLMBaseURL        string `json:"llm_base_url" binding:"required"`
-	LLMAPIKey         string `json:"llm_api_key"`
-	LLMModel          string `json:"llm_model" binding:"required"`
-	ASRProvider       string `json:"asr_provider" binding:"required"`
-	ASRBaseURL        string `json:"asr_base_url" binding:"required"`
-	ASRAPIKey         string `json:"asr_api_key"`
-	ASRModel          string `json:"asr_model" binding:"required"`
-	EmbeddingProvider string `json:"embedding_provider" binding:"required"`
-	EmbeddingEndpoint string `json:"embedding_endpoint" binding:"required"`
-	EmbeddingAPIKey   string `json:"embedding_api_key"`
-	EmbeddingModel    string `json:"embedding_model" binding:"required"`
-	EmbeddingDim      int    `json:"embedding_dim" binding:"required"`
+	AgentBudget       model.AgentBudgetField `json:"agent_budget"`
+	Name              string                 `json:"name" binding:"required"`
+	LLMProvider       string                 `json:"llm_provider" binding:"required"`
+	LLMBaseURL        string                 `json:"llm_base_url" binding:"required"`
+	LLMAPIKey         string                 `json:"llm_api_key"`
+	LLMModel          string                 `json:"llm_model" binding:"required"`
+	ASRProvider       string                 `json:"asr_provider" binding:"required"`
+	ASRBaseURL        string                 `json:"asr_base_url" binding:"required"`
+	ASRAPIKey         string                 `json:"asr_api_key"`
+	ASRModel          string                 `json:"asr_model" binding:"required"`
+	EmbeddingProvider string                 `json:"embedding_provider" binding:"required"`
+	EmbeddingEndpoint string                 `json:"embedding_endpoint" binding:"required"`
+	EmbeddingAPIKey   string                 `json:"embedding_api_key"`
+	EmbeddingModel    string                 `json:"embedding_model" binding:"required"`
+	EmbeddingDim      int                    `json:"embedding_dim" binding:"required"`
 	// Vision is optional multimodal caption config, separate from text LLM.
 	VisionProvider string `json:"vision_provider"`
 	VisionBaseURL  string `json:"vision_base_url"`
@@ -55,26 +59,29 @@ type AIProfileRequest struct {
 }
 
 type AIProfileResponse struct {
-	ID                    int64  `json:"id"`
-	Name                  string `json:"name"`
-	LLMProvider           string `json:"llm_provider"`
-	LLMBaseURL            string `json:"llm_base_url"`
-	LLMAPIKeyMasked       string `json:"llm_api_key_masked"`
-	LLMModel              string `json:"llm_model"`
-	ASRProvider           string `json:"asr_provider"`
-	ASRBaseURL            string `json:"asr_base_url"`
-	ASRAPIKeyMasked       string `json:"asr_api_key_masked"`
-	ASRModel              string `json:"asr_model"`
-	EmbeddingProvider     string `json:"embedding_provider"`
-	EmbeddingEndpoint     string `json:"embedding_endpoint"`
-	EmbeddingAPIKeyMasked string `json:"embedding_api_key_masked"`
-	EmbeddingModel        string `json:"embedding_model"`
-	EmbeddingDim          int    `json:"embedding_dim"`
-	VisionProvider        string `json:"vision_provider"`
-	VisionBaseURL         string `json:"vision_base_url"`
-	VisionAPIKeyMasked    string `json:"vision_api_key_masked"`
-	VisionModel           string `json:"vision_model"`
-	IsDefault             bool   `json:"is_default"`
+	AgentBudget           *model.AgentBudgetOverride  `json:"agent_budget"`
+	EffectiveAgentBudget  *config.ResolvedAgentBudget `json:"effective_agent_budget"`
+	AgentBudgetError      string                      `json:"agent_budget_error,omitempty"`
+	ID                    int64                       `json:"id"`
+	Name                  string                      `json:"name"`
+	LLMProvider           string                      `json:"llm_provider"`
+	LLMBaseURL            string                      `json:"llm_base_url"`
+	LLMAPIKeyMasked       string                      `json:"llm_api_key_masked"`
+	LLMModel              string                      `json:"llm_model"`
+	ASRProvider           string                      `json:"asr_provider"`
+	ASRBaseURL            string                      `json:"asr_base_url"`
+	ASRAPIKeyMasked       string                      `json:"asr_api_key_masked"`
+	ASRModel              string                      `json:"asr_model"`
+	EmbeddingProvider     string                      `json:"embedding_provider"`
+	EmbeddingEndpoint     string                      `json:"embedding_endpoint"`
+	EmbeddingAPIKeyMasked string                      `json:"embedding_api_key_masked"`
+	EmbeddingModel        string                      `json:"embedding_model"`
+	EmbeddingDim          int                         `json:"embedding_dim"`
+	VisionProvider        string                      `json:"vision_provider"`
+	VisionBaseURL         string                      `json:"vision_base_url"`
+	VisionAPIKeyMasked    string                      `json:"vision_api_key_masked"`
+	VisionModel           string                      `json:"vision_model"`
+	IsDefault             bool                        `json:"is_default"`
 	// Source is "user" for BYOK rows, "hosted" for the free server pack.
 	Source string `json:"source,omitempty"`
 	// ReadOnly marks profiles that cannot be edited/deleted (hosted free pack).
@@ -394,6 +401,10 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 	if err != nil {
 		return nil, err
 	}
+	return providerFromDecrypted(profile), nil
+}
+
+func providerFromDecrypted(profile *DecryptedAIProfile) *ai.Profile {
 	return &ai.Profile{
 		LLMProvider:       profile.LLMProvider,
 		LLMBaseURL:        profile.LLMBaseURL,
@@ -412,10 +423,30 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 		VisionBaseURL:     profile.VisionBaseURL,
 		VisionAPIKey:      profile.VisionAPIKey,
 		VisionModel:       profile.VisionModel,
-	}, nil
+	}
 }
 
 func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest, existing *model.UserAIProfile) (*model.UserAIProfile, error) {
+	if req.AgentBudget.Present {
+		if err := s.budgetConfig.ValidateOverride(req.AgentBudget.Value); err != nil {
+			return nil, err
+		}
+	}
+	var budgetJSON *string
+	if existing != nil {
+		budgetJSON = existing.AgentBudgetJSON
+	}
+	if req.AgentBudget.Present {
+		budgetJSON = nil
+		if req.AgentBudget.Value != nil {
+			data, err := json.Marshal(req.AgentBudget.Value)
+			if err != nil {
+				return nil, err
+			}
+			value := string(data)
+			budgetJSON = &value
+		}
+	}
 	llmCipher, err := s.encryptOrKeep(strings.TrimSpace(req.LLMAPIKey), existing, "llm")
 	if err != nil {
 		return nil, err
@@ -434,6 +465,7 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 	}
 
 	return &model.UserAIProfile{
+		AgentBudgetJSON:           budgetJSON,
 		UserID:                    userID,
 		Name:                      strings.TrimSpace(req.Name),
 		LLMProvider:               normalizeAIProtocol(req.LLMProvider),
@@ -495,7 +527,13 @@ func (s *AIProfileService) encryptOrKeepOptional(plaintext string, existing *mod
 }
 
 func (s *AIProfileService) responseFromProfile(profile *model.UserAIProfile) *AIProfileResponse {
+	budget, effective, budgetErr := s.resolveStoredBudget(profile)
+	errorMessage := ""
+	if budgetErr != nil {
+		errorMessage = budgetErr.Error()
+	}
 	return &AIProfileResponse{
+		AgentBudget: budget, EffectiveAgentBudget: effective, AgentBudgetError: errorMessage,
 		ID:                    profile.ID,
 		Name:                  profile.Name,
 		LLMProvider:           profile.LLMProvider,

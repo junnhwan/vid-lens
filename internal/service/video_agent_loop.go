@@ -50,16 +50,18 @@ func (p VideoAgentLoopPolicy) Validate() error {
 }
 
 type VideoAgentLoopDecision struct {
-	Done          bool            `json:"done"`
-	Tool          string          `json:"tool,omitempty"`
-	Reason        string          `json:"reason,omitempty"`
-	PublicSummary string          `json:"public_summary,omitempty"`
-	Arguments     json.RawMessage `json:"arguments,omitempty"`
-	Replan        bool            `json:"replan,omitempty"`
-	StopReason    string          `json:"stop_reason,omitempty"`
+	BudgetNotice  *AgentBudgetNotice `json:"-"` // Server routing only; never accepted from model JSON.
+	Done          bool               `json:"done"`
+	Tool          string             `json:"tool,omitempty"`
+	Reason        string             `json:"reason,omitempty"`
+	PublicSummary string             `json:"public_summary,omitempty"`
+	Arguments     json.RawMessage    `json:"arguments,omitempty"`
+	Replan        bool               `json:"replan,omitempty"`
+	StopReason    string             `json:"stop_reason,omitempty"`
 }
 
 type VideoAgentLoopObservation struct {
+	ErrorClass          string           `json:"error_class,omitempty"`
 	Tool                string           `json:"tool"`
 	Output              json.RawMessage  `json:"output,omitempty"`
 	Step                VideoAgentStep   `json:"step"`
@@ -79,21 +81,26 @@ type VideoAgentLoopStep struct {
 }
 
 type VideoAgentLoopState struct {
-	ScopeTaskIDs     []int64                     `json:"scope_task_ids,omitempty"`
-	Goal             string                      `json:"goal"`
-	Status           VideoAgentLoopStatus        `json:"status"`
-	CurrentStep      int                         `json:"current_step"`
-	ReplanCount      int                         `json:"replan_count"`
-	MaxSteps         int                         `json:"max_steps"`
-	MaxReplans       int                         `json:"max_replans"`
-	StopReason       string                      `json:"stop_reason,omitempty"`
-	PendingQuestions []string                    `json:"pending_questions,omitempty"`
-	Evidence         []RetrievedChunk            `json:"evidence,omitempty"`
-	Observations     []VideoAgentLoopObservation `json:"observations,omitempty"`
-	Steps            []VideoAgentLoopStep        `json:"steps,omitempty"`
-	Answer           string                      `json:"answer,omitempty"`
-	Citations        []Citation                  `json:"citations,omitempty"`
-	Memory           *MemorySnapshot             `json:"memory,omitempty"`
+	VideoMaps           []VideoMap                   `json:"video_maps,omitempty"`
+	MaxVisualFrames     int                          `json:"max_visual_frames,omitempty"`
+	ArgumentCorrections int                          `json:"argument_corrections,omitempty"`
+	BudgetNotice        *AgentBudgetNotice           `json:"budget_notice,omitempty"`
+	Conversation        []ConversationContextMessage `json:"conversation,omitempty"`
+	ScopeTaskIDs        []int64                      `json:"scope_task_ids,omitempty"`
+	Goal                string                       `json:"goal"`
+	Status              VideoAgentLoopStatus         `json:"status"`
+	CurrentStep         int                          `json:"current_step"`
+	ReplanCount         int                          `json:"replan_count"`
+	MaxSteps            int                          `json:"max_steps"`
+	MaxReplans          int                          `json:"max_replans"`
+	StopReason          string                       `json:"stop_reason,omitempty"`
+	PendingQuestions    []string                     `json:"pending_questions,omitempty"`
+	Evidence            []RetrievedChunk             `json:"evidence,omitempty"`
+	Observations        []VideoAgentLoopObservation  `json:"observations,omitempty"`
+	Steps               []VideoAgentLoopStep         `json:"steps,omitempty"`
+	Answer              string                       `json:"answer,omitempty"`
+	Citations           []Citation                   `json:"citations,omitempty"`
+	Memory              *MemorySnapshot              `json:"memory,omitempty"`
 }
 
 type VideoAgentLoopResult struct {
@@ -160,6 +167,9 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		return nil, err
 	}
 	state.Memory = runtime.MemorySnapshot
+	state.VideoMaps = append([]VideoMap(nil), runtime.VideoMaps...)
+	state.MaxVisualFrames = runtime.MaxVisualFrames
+	state.Conversation = boundedConversationContext(runtime.Recent)
 	state.ScopeTaskIDs = append([]int64(nil), runtime.TaskIDs...)
 	if err := runtime.checkScope(ctx, nil); err != nil {
 		return nil, err
@@ -185,6 +195,9 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		if result.State.Answer != "" {
 			result.State.Status = VideoAgentLoopStatusCompleted
 			result.State.StopReason = "answer_generated"
+			if result.State.BudgetNotice != nil {
+				result.State.StopReason = "budget_finalized"
+			}
 			return result, nil
 		}
 		if result.State.CurrentStep >= result.State.MaxSteps {
@@ -193,6 +206,18 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 			return result, nil
 		}
 
+		if result.State.BudgetNotice == nil {
+			notice, noticeErr := r.explorationBudgetNotice(ctx, result.State, runtime)
+			if noticeErr != nil {
+				return r.fail(result, "budget_lookup_failed", noticeErr)
+			}
+			result.State.BudgetNotice = notice
+			if notice != nil {
+				if err := emitProgress(ctx, ConversationProgress{ID: "budget", Kind: "budget", Label: "预算限制，正在整理已有证据", Status: "done", Detail: fmt.Sprintf("%s：已用 %d，下一步预计 %d，收尾预留 %d，上限 %d（估算）", budgetDimensionLabel(notice.Dimension), notice.Used, notice.EstimatedNext, notice.Reserve, notice.Limit)}); err != nil {
+					return r.fail(result, "request_cancelled", err)
+				}
+			}
+		}
 		decision, budgetExhausted, err := r.nextResearchDecision(ctx, result.State, runtime)
 		if err != nil {
 			var invalidDecision *invalidResearchDecisionError
@@ -205,6 +230,12 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 			result.State.Status = VideoAgentLoopStatusStopped
 			result.State.StopReason = "budget_exhausted"
 			return result, nil
+		}
+		if decision.BudgetNotice != nil {
+			result.State.BudgetNotice = decision.BudgetNotice
+			if err := emitProgress(ctx, ConversationProgress{ID: "budget", Kind: "budget", Label: "规划达到限制，正在整理已有证据", Status: "done", Detail: budgetDimensionLabel(decision.BudgetNotice.Dimension)}); err != nil {
+				return r.fail(result, "request_cancelled", err)
+			}
 		}
 		if decision.Done {
 			result.State.Status = VideoAgentLoopStatusCompleted
@@ -245,6 +276,14 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 			return r.fail(result, "scope_changed", err)
 		}
 		step.Status = VideoAgentLoopStepCompleted
+		if observation.ErrorClass == "invalid_arguments" {
+			result.State.ArgumentCorrections++
+			step.Status = VideoAgentLoopStepFailed
+			step.Error = strings.Join(observation.UnresolvedQuestions, "；")
+			if result.State.ArgumentCorrections > 1 {
+				return r.fail(result, "invalid_arguments", errors.New("工具参数纠正次数已用尽"))
+			}
+		}
 		step.Observation = &observation
 		result.State.Steps = append(result.State.Steps, step)
 		result.State.Observations = append(result.State.Observations, observation)
@@ -309,6 +348,13 @@ func (DefaultVideoAgentLoopObserver) Observe(state VideoAgentLoopState, result V
 			return VideoAgentLoopObservation{}, fmt.Errorf("解析 inspect_visual_window observation 失败: %w", err)
 		}
 		observation.NewEvidence = append([]RetrievedChunk(nil), inspected.Evidence...)
+	}
+	if result.Step.Tool == VideoAgentToolGetTranscriptWindow {
+		var window TranscriptWindowResult
+		if err := json.Unmarshal(result.Output, &window); err != nil {
+			return VideoAgentLoopObservation{}, fmt.Errorf("解析 transcript window: %w", err)
+		}
+		observation.NewEvidence = window.Evidence
 	}
 	if result.Step.Tool == VideoAgentToolInvestigateVisual {
 		var investigated InvestigateVisualResult

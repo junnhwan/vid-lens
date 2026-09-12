@@ -42,7 +42,7 @@ export async function readConversationStream(
       const { done, value } = await reader.read()
       if (done) {
         for (const item of decoder.finish()) emit(item.event, item.data)
-        if (!terminal && !signal?.aborted) emit('error', { message: '连接已中断，回答尚未确认保存。请重试。' })
+        if (!terminal && !signal?.aborted) emit('error', { code: 'stream_interrupted', message: '连接已中断，正在核对运行状态。' })
         break
       }
       for (const item of decoder.push(value)) emit(item.event, item.data)

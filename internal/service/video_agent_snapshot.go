@@ -23,6 +23,9 @@ const (
 // retained as a write-side compatibility alias for clients that still decode
 // the previous Agent envelope.
 type AgentSnapshot struct {
+	StopReason   string                      `json:"stop_reason,omitempty"`
+	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
 	Degraded     bool                        `json:"degraded,omitempty"`
 	Version      int                         `json:"version"`
 	RunID        string                      `json:"run_id"`
@@ -163,6 +166,7 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 	}
 	snapshot.Memory = result.Memory
 	snapshot.Degraded = result.Degraded
+	snapshot.StopReason, snapshot.BudgetNotice, snapshot.Budget = result.StopReason, result.BudgetNotice, result.Budget
 	snapshot.MemoryPolicy = normalizeSnapshotMemoryPolicy(result.MemoryPolicy)
 	result.MemoryPolicy = snapshot.MemoryPolicy
 	result.RunID = snapshot.RunID
@@ -187,6 +191,9 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	}
 
 	var envelope struct {
+		StopReason   string                      `json:"stop_reason,omitempty"`
+		BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+		Budget       *frozenAgentBudget          `json:"budget,omitempty"`
 		Degraded     bool                        `json:"degraded"`
 		Version      int                         `json:"version"`
 		RunID        string                      `json:"run_id"`
@@ -209,6 +216,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	if envelope.Steps != nil {
 		envelope.Steps = normalizeAgentSnapshotSteps(envelope.Steps)
 		return AgentSnapshot{
+			StopReason: envelope.StopReason, BudgetNotice: envelope.BudgetNotice, Budget: envelope.Budget,
 			Degraded: envelope.Degraded, Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 			Template: envelope.Template, Steps: envelope.Steps, Citations: envelope.Citations,
 			Trace: append([]VideoAgentStep(nil), envelope.Trace...), Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,
@@ -225,6 +233,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	}
 
 	return AgentSnapshot{
+		StopReason: envelope.StopReason, BudgetNotice: envelope.BudgetNotice, Budget: envelope.Budget,
 		Degraded: envelope.Degraded, Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 		Template: envelope.Template, Steps: []AgentSnapshotStep{}, Citations: envelope.Citations,
 		Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,

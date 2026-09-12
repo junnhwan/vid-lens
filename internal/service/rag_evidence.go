@@ -268,13 +268,13 @@ func findMatchingBacktickRun(text string, start, limit, openingLength int) int {
 	return -1
 }
 
-// extractCitationTokenRanges scans top-level square brackets outside Markdown
-// code and returns byte ranges only when the whole bracket content is a
-// citation list. Byte offsets allow removal without rewriting Unicode text.
+// extractCitationTokenRanges scans complete square-bracket groups outside
+// Markdown code. An unmatched prose bracket (such as time=[start,end)) must
+// not hide later citations, while complete nested groups remain literal.
 func extractCitationTokenRanges(answer string, protected []markdownCodeRange) []citationTokenRange {
 	ranges := make([]citationTokenRange, 0)
-	depth := 0
-	start := -1
+	stack := make([]int, 0)
+	closing := make(map[int]int)
 	protectedIndex := 0
 	for byteIndex, r := range answer {
 		for protectedIndex < len(protected) && byteIndex >= protected[protectedIndex].end {
@@ -286,29 +286,34 @@ func extractCitationTokenRanges(answer string, protected []markdownCodeRange) []
 
 		switch r {
 		case '[':
-			if depth == 0 {
-				start = byteIndex
-			}
-			depth++
+			stack = append(stack, byteIndex)
 		case ']':
-			if depth == 0 {
+			if len(stack) == 0 {
 				continue
 			}
-			depth--
-			if depth != 0 {
-				continue
-			}
-
-			end := byteIndex + utf8.RuneLen(r)
-			if start < 0 || isEscapedAt(answer, start) || isMarkdownCitationLabel(answer, start, end) {
-				start = -1
-				continue
-			}
-			ids, ok := parseCitationList(answer[start+1 : byteIndex])
-			if ok {
-				ranges = append(ranges, citationTokenRange{start: start, end: end, ids: ids})
-			}
-			start = -1
+			start := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			closing[start] = byteIndex
+		}
+	}
+	// Only matched groups suppress their nested brackets. Unmatched opening
+	// brackets are ordinary text, so the next complete [Cx] is considered.
+	skipUntil := 0
+	for start, r := range answer {
+		if r != '[' || start < skipUntil {
+			continue
+		}
+		close, matched := closing[start]
+		if !matched {
+			continue
+		}
+		end := close + 1
+		skipUntil = end
+		if isEscapedAt(answer, start) || isMarkdownCitationLabel(answer, start, end) {
+			continue
+		}
+		if ids, ok := parseCitationList(answer[start+1 : close]); ok {
+			ranges = append(ranges, citationTokenRange{start: start, end: end, ids: ids})
 		}
 	}
 	return ranges
@@ -434,9 +439,6 @@ func selectReferencedCitations(referenced map[string]struct{}, candidates []Cita
 		selectedIDs[normalizedID] = struct{}{}
 	}
 	if len(selected) > 0 {
-		if len(selected) > 2 {
-			selected = selected[:2]
-		}
 		return selected
 	}
 	return fallbackCitations(candidates, 1)

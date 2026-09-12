@@ -7,6 +7,8 @@ import { traceFromCitationCount } from '@/components/chat/traceTypes'
 import { parseSnapshotTrace } from '@/components/chat/snapshotTraceAdapter'
 
 export interface ChatMsg {
+  messageId?: number
+  runStatus?: string
   role: 'user' | 'assistant'
   content: string
   cites?: CiteRef[]
@@ -46,6 +48,7 @@ export function parseMessages(
       : undefined
     const agentRun = Boolean(snapshotTrace?.isAgentEnvelope)
     return {
+      messageId: m.id,
       role: m.role as 'user' | 'assistant',
       content: m.content,
       createdAt: Date.parse(m.created_at),

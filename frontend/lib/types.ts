@@ -27,7 +27,30 @@ export interface AuthResult {
 // 注意：没有 type 字段。一个 profile 同时含 llm/asr/embedding/vision 四组配置。
 // is_default 是单个 bool（snake_case），设新默认时后端把同类其它置 false——
 // 但"同类"在后端按 profile 整体，不按 type 分。
+export interface AgentBudgetOverride {
+  version: 1
+  max_tool_calls: number
+  max_duration_seconds: number
+  max_input_tokens: number
+  max_output_tokens: number
+  max_visual_frames?: number
+}
+export interface AgentBudgetOptions {
+  version: number
+  defaults: AgentBudgetOverride
+  limits: Record<Exclude<keyof AgentBudgetOverride, 'version'>, { min: number; max: number; unit: string }>
+  visual_available: boolean
+}
+export interface EffectiveAgentBudget {
+  values: AgentBudgetOverride
+  source: string
+  adjustments?: string[]
+  policy_version: number
+}
 export interface AIProfile {
+  agent_budget?: AgentBudgetOverride | null
+  effective_agent_budget?: EffectiveAgentBudget | null
+  agent_budget_error?: string
   id: number
   name: string
   // LLM 组
@@ -58,6 +81,7 @@ export interface AIProfile {
 
 // 创建/更新请求。api_key 明文（创建必填，更新可空保留旧值）；masked 字段不回传。
 export interface AIProfileRequest {
+  agent_budget?: AgentBudgetOverride | null
   name: string
   llm_provider: string
   llm_base_url: string
@@ -291,6 +315,17 @@ export interface AskResult {
   degraded?: boolean
 }
 
+export interface AnswerFeedbackInput {
+  rating: 'helpful' | 'problem'
+  category: '' | 'content' | 'citation' | 'incomplete' | 'slow'
+  note: string
+}
+export interface AnswerFeedback extends AnswerFeedbackInput {
+  message_id: number
+  run_id?: string
+  updated_at: string
+}
+
 // 非流式 Agent 接口（POST .../messages/agent，mode=research|evidence_funnel）
 // 对应 internal/service.VideoAgentResult 的 JSON tag。
 export interface AgentResultStep {
@@ -385,6 +420,8 @@ export interface AgentRetrieveHitsEvent {
 }
 
 export interface AgentDoneEvent {
+  stop_reason?: string
+  budget_notice?: import('./budgetNotice').BudgetNotice
   answer?: string
   run_id: string
   message_id: number

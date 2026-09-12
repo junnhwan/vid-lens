@@ -152,6 +152,7 @@ function ProfileCard({ profile, testing, readOnly, onTest, onEdit, onDelete }: {
         disabled={hosted || readOnly}
         title={hosted ? '平台内置配置不可修改' : readOnly ? '演示账号不可修改 AI 配置' : undefined}
         onClick={onEdit}
+        aria-label={`编辑 ${profile.name}`}
       >
         <Icon name="pencil" size="sm" />
       </button>
@@ -160,6 +161,7 @@ function ProfileCard({ profile, testing, readOnly, onTest, onEdit, onDelete }: {
         disabled={hosted || readOnly}
         title={hosted ? '平台内置配置不可删除' : readOnly ? '演示账号不可删除 AI 配置' : undefined}
         onClick={onDelete}
+        aria-label={`删除 ${profile.name}`}
       >
         <Icon name="trash" size="sm" />
       </button>

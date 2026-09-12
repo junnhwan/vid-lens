@@ -92,6 +92,15 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 		if atoms[i].Modality != atoms[j].Modality {
 			return timelineModalityRank(atoms[i].Modality) < timelineModalityRank(atoms[j].Modality)
 		}
+		unknownI := atoms[i].TimeRangeStatus == model.ChunkTimeRangeUnknown
+		unknownJ := atoms[j].TimeRangeStatus == model.ChunkTimeRangeUnknown
+		if unknownI || unknownJ {
+			// Repository transcript rows arrive in chunk_index order. Preserve that
+			// order when timestamps cannot establish chronology; lexical IDs cannot.
+			// Group unknowns separately from known zero-time atoms to keep the
+			// comparator transitive while SliceStable preserves their input order.
+			return unknownI && !unknownJ
+		}
 		return atoms[i].ID < atoms[j].ID
 	})
 	return VideoTimeline{TaskID: taskID, Atoms: atoms}

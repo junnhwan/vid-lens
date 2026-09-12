@@ -4,6 +4,7 @@ import "fmt"
 
 // Config 全局配置结构体
 type Config struct {
+	AgentBudget  AgentBudgetConfig  `yaml:"agent_budget"`
 	Server       ServerConfig       `yaml:"server"`
 	Database     DatabaseConfig     `yaml:"database"`
 	Redis        RedisConfig        `yaml:"redis"`

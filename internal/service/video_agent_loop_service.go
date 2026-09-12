@@ -32,6 +32,9 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if req.Goal == "" {
 		return nil, fmt.Errorf("问题不能为空")
 	}
+	if len([]rune(req.Goal)) > 1000 {
+		return nil, errors.New("问题过长")
+	}
 	if s == nil || s.chatSvc == nil || s.executionJournal == nil {
 		return nil, errors.New("agent chat service 不能为空")
 	}
@@ -96,6 +99,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			return nil, err
 		}
 		frozenPolicy, budget = loopAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
+		applyResolvedAgentBudget(ctx, &frozenPolicy, &budget, s.visualInvestigator != nil)
 		frozenPolicy.MemberTaskIDs = memberIDs
 	}
 	if len(memberIDs) > 0 && !sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) {
@@ -131,26 +135,34 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			return
 		}
 		status, reason := model.AgentRunStatusFailed, "execution_failed"
+		var finish *ai.ChatFinishError
+		if errors.As(err, &finish) {
+			reason = "provider_" + finish.Reason
+			if finish.Reason == "length" {
+				reason = "output_limit"
+			}
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			status, reason = model.AgentRunStatusCancelled, "request_cancelled"
+			if errors.Is(context.Cause(ctx), errAgentRunDurationLimit) {
+				status, reason = model.AgentRunStatusBudgetExhausted, "duration_limit"
+			}
 		}
 		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
 	}()
 
 	if budget.MaxDurationMs > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(budget.MaxDurationMs)*time.Millisecond)
+		ctx, cancel = context.WithDeadlineCause(ctx, run.CreatedAt.Add(time.Duration(budget.MaxDurationMs)*time.Millisecond), errAgentRunDurationLimit)
 		defer cancel()
 	}
 	recentLimit := s.chatSvc.cfg.RecentTurns * 2
-	var recent []model.ChatMessage
-	if len(memberIDs) == 0 {
-		recent, err = s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
-	} else {
-		recentLimit = 0
-	}
+	recent, err := s.chatSvc.loadScopeSafeRecentMessages(ctx, req.UserID, session, memberIDs, recentLimit)
 	if err != nil {
 		return nil, err
+	}
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		recentLimit = 0
 	}
 	memorySnapshot := s.loadSessionAgentMemorySnapshot(ctx, req.UserID, session, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
@@ -202,16 +214,26 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			return nil
 		}
 	}
+	mapTaskIDs := memberIDs
+	if len(mapTaskIDs) == 0 {
+		mapTaskIDs = []int64{session.TaskID}
+	}
+	videoMaps, err := s.chatSvc.loadVideoMaps(ctx, req.UserID, mapTaskIDs)
+	if err != nil {
+		return nil, err
+	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
-		UserID:         req.UserID,
-		TaskID:         session.TaskID,
-		TaskIDs:        memberIDs,
-		ValidateScope:  validateScope,
-		Recent:         recent,
-		TopK:           req.TopK,
-		EmbeddingModel: profile.EmbeddingModel,
-		Embedding:      embedding,
-		MemorySnapshot: memorySnapshot,
+		VideoMaps:       videoMaps,
+		MaxVisualFrames: budget.MaxFrames,
+		UserID:          req.UserID,
+		TaskID:          session.TaskID,
+		TaskIDs:         memberIDs,
+		ValidateScope:   validateScope,
+		Recent:          recent,
+		TopK:            req.TopK,
+		EmbeddingModel:  profile.EmbeddingModel,
+		Embedding:       embedding,
+		MemorySnapshot:  memorySnapshot,
 	})
 	if err == nil && validateScope != nil {
 		err = validateScope(ctx)
@@ -235,7 +257,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			progress = append(progress, ConversationProgress{ID: id, PlanID: id, RunID: runID, Kind: "plan", Label: "规划下一步", Status: "done", Detail: publicDecisionSummary(step.Action, 0)})
 		}
 	}
-	degraded := runResult.State.StopReason == "budget_exhausted"
+	degraded := runResult.State.StopReason == "budget_exhausted" || runResult.State.StopReason == "budget_finalized"
 	if degraded && strings.TrimSpace(runResult.State.Answer) == "" {
 		fallback := agentBudgetAnswer(req.Goal, runResult.State.Evidence)
 		runResult.State.Answer, runResult.State.Citations = fallback.Answer, fallback.Citations
@@ -245,6 +267,9 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	}
 
 	result = &VideoAgentResult{
+		StopReason:   runResult.State.StopReason,
+		BudgetNotice: runResult.State.BudgetNotice,
+		Budget:       &budget,
 		Progress:     progress,
 		Degraded:     degraded,
 		Answer:       runResult.State.Answer,
@@ -267,10 +292,12 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		return nil, err
 	}
 	status := model.AgentRunStatusCompleted
-	if degraded {
+	if runResult.State.StopReason == "budget_exhausted" {
 		status = model.AgentRunStatusBudgetExhausted
 	}
-	s.markAgentRunTerminal(ctx, req.UserID, runID, status, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil)
+	if err := s.executionJournal.MarkTerminal(ctx, req.UserID, runID, status, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -328,7 +355,7 @@ func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessi
 		if decodeErr != nil || snapshot.RunID != runID {
 			continue
 		}
-		return &VideoAgentResult{Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
+		return &VideoAgentResult{StopReason: snapshot.StopReason, BudgetNotice: snapshot.BudgetNotice, Budget: snapshot.Budget, Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
 	}
 	return nil, nil
 }

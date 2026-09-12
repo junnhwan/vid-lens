@@ -129,7 +129,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	aiFactory := ai.NewFactoryWithAdmission(deps.providerAdmission)
 	userSvc := service.NewUserService(deps.repos.User, deps.cfg.JWT)
 	knowledgeBaseSvc := service.NewKnowledgeBaseService(deps.repos)
-	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)})
+	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)}).WithAgentBudgetConfig(deps.cfg.AgentBudget)
 	if err := service.EnsureDemoAccount(deps.repos.User, deps.repos.AIProfile, secretCodec, deps.cfg.AI, deps.cfg.RAG); err != nil {
 		log.Printf("⚠️ 演示账号初始化失败: %v", err)
 	}
@@ -309,6 +309,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			profiles:       handler.NewAIProfileHandler(aiProfileSvc),
 			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
 			chat:           chatHandler,
+			feedback:       handler.NewChatFeedbackHandler(deps.repos.Feedback),
 			media:          handler.NewMediaHandler(mediaSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),

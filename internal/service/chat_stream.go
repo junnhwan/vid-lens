@@ -35,6 +35,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		return nil, err
 	}
 	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
+	s.injectChatPreferences(ctx, prepared, memoryPolicy)
 	var answer string
 	degraded := false
 	// emitAnswer 把一段文本按流式分片发出去（非流式与档2降级共用）。
@@ -86,7 +87,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 
 	// The done event replaces provider deltas with the persisted, citation-cleaned answer.
 	constrained := finalizeChatAnswer(prepared, answer)
-	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, constrained.Answer, constrained.Citations, prepared.RecentLimit, profile.LLMModel)
+	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, constrained.Answer, constrained.Citations, prepared.RecentLimit, profile.LLMModel, prepared.FrozenMemberIDs)
 	if err != nil {
 		return nil, err
 	}

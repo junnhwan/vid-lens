@@ -1,10 +1,12 @@
 import {
+  progressTrace,
   traceFromCitationCount,
   type ChatTraceStep,
   type TracePanelSource,
   type TraceStepKind,
   type TraceStepStatus,
 } from './traceTypes.ts'
+import { budgetProgress, type BudgetNotice } from '../../lib/budgetNotice.ts'
 
 export interface AgentSnapshotStepJSON {
   step_id?: string
@@ -19,6 +21,8 @@ export interface AgentSnapshotStepJSON {
 }
 
 interface AgentSnapshotEnvelopeJSON {
+  stop_reason?: string
+  budget_notice?: BudgetNotice
   degraded?: boolean
   version?: number
   run_id?: string
@@ -58,7 +62,10 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
     const runId = obj.run_id?.trim() || undefined
     const mode = obj.mode?.trim() || undefined
     if (Array.isArray(obj.steps)) {
-      return { ...(obj.degraded ? { degraded: true } : {}), steps: obj.steps.map((step, index) => snapshotStepToTrace(step, index, runId)), runId, mode, isAgentEnvelope: true, source: 'agent' }
+      let steps = obj.steps.map((step, index) => snapshotStepToTrace(step, index, runId))
+      const budget = budgetProgress(obj.stop_reason, obj.budget_notice)
+      if (budget) steps = progressTrace(steps, budget)
+      return { ...(obj.degraded ? { degraded: true } : {}), steps, runId, mode, isAgentEnvelope: true, source: 'agent' }
     }
     if (Array.isArray(obj.trace) && obj.trace.length > 0) {
       return { steps: obj.trace.map((step, index) => legacyAgentStepToTrace(step, `hist-${index + 1}`, runId)), runId, mode, isAgentEnvelope: true, source: 'legacy' }

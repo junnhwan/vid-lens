@@ -19,6 +19,7 @@ type serverHandlers struct {
 	profiles       *handler.AIProfileHandler
 	rag            *handler.RAGHandler
 	chat           *handler.ChatHandler
+	feedback       *handler.ChatFeedbackHandler
 	media          *handler.MediaHandler
 	knowledgeBases *handler.KnowledgeBaseHandler
 	memory         *handler.MemoryHandler
@@ -46,6 +47,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			aiProfiles := auth.Group("/ai/profiles")
 			{
 				aiProfiles.GET("", handlers.profiles.List)
+				aiProfiles.GET("/budget-options", handlers.profiles.BudgetOptions)
 				aiProfiles.POST("", handlers.profiles.Create)
 				aiProfiles.PUT("/:id", handlers.profiles.Update)
 				aiProfiles.DELETE("/:id", handlers.profiles.Delete)
@@ -55,6 +57,12 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			}
 			chat := auth.Group("/chat")
 			{
+				if handlers.feedback != nil {
+					chat.GET("/feedback/candidates", handlers.feedback.Candidates)
+					chat.PUT("/sessions/:session_id/messages/:message_id/feedback", handlers.feedback.Put)
+					chat.GET("/sessions/:session_id/messages/:message_id/feedback", handlers.feedback.Get)
+					chat.DELETE("/sessions/:session_id/messages/:message_id/feedback", handlers.feedback.Delete)
+				}
 				chat.POST("/sessions", handlers.chat.CreateSession)
 				chat.GET("/sessions", handlers.chat.ListSessions)
 				chat.GET("/sessions/:session_id/memory-policy", handlers.memory.GetSessionPolicy)

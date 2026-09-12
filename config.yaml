@@ -147,3 +147,25 @@ memory:
   max_chars: 2000
   max_tokens: 500
   queue_size: 128
+
+# Agent run budgets apply only to new Agent executions.
+agent_budget:
+  defaults:
+    version: 1
+    max_tool_calls: ${AGENT_BUDGET_TOOL_CALLS:-8}
+    max_duration_seconds: ${AGENT_BUDGET_DURATION_SECONDS:-480}
+    max_input_tokens: ${AGENT_BUDGET_INPUT_TOKENS:-65536}
+    max_output_tokens: ${AGENT_BUDGET_OUTPUT_TOKENS:-24576}
+    max_visual_frames: ${AGENT_BUDGET_VISUAL_FRAMES:-8}
+  limits:
+    max_tool_calls: {min: 2, max: ${AGENT_BUDGET_MAX_TOOL_CALLS:-32}, unit: calls}
+    max_duration_seconds: {min: 90, max: ${AGENT_BUDGET_MAX_DURATION_SECONDS:-900}, unit: seconds}
+    max_input_tokens: {min: 8192, max: ${AGENT_BUDGET_MAX_INPUT_TOKENS:-262144}, unit: tokens}
+    max_output_tokens: {min: 2048, max: ${AGENT_BUDGET_MAX_OUTPUT_TOKENS:-32768}, unit: tokens}
+    max_visual_frames: {min: 1, max: ${AGENT_BUDGET_MAX_VISUAL_FRAMES:-32}, unit: frames}
+  final_answer_reserve:
+    tool_calls: 1
+    llm_calls: 1
+    input_tokens: 4096
+    output_tokens: 2048
+    duration_seconds: 240

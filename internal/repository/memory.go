@@ -78,7 +78,7 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 		// Replaying a durable source must not resurrect its withdrawn/deleted item.
 		var replay []model.AgentMemoryItem
 		replayQuery := tx.Unscoped().Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ? AND content = ?", item.UserID, item.ScopeType, item.ScopeID, item.Kind, item.Content)
-		if item.SourceType == "user_message" {
+		if item.SourceType == "user_message" && !structuredPreferenceKind(item.Kind) {
 			replayQuery = replayQuery.Where("source_ref = ? OR status IN ?", item.SourceRef, []string{model.MemoryStatusDeleted, model.MemoryStatusWithdrawn})
 		} else {
 			replayQuery = replayQuery.Where("source_ref = ?", item.SourceRef)
@@ -90,6 +90,18 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 			result.Item = replay[0]
 			return nil
 		}
+		if structuredPreferenceKind(item.Kind) && item.SourceType == "user_message" {
+			var prior []model.AgentMemoryItem
+			if err := tx.Unscoped().Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ?", item.UserID, item.ScopeType, item.ScopeID, item.Kind).Find(&prior).Error; err != nil {
+				return err
+			}
+			for _, old := range prior {
+				if memoryMessageSourceID(old.SourceRef) >= memoryMessageSourceID(item.SourceRef) && old.SourceRef != item.SourceRef {
+					result.Item = old
+					return nil // A late worker cannot overwrite a newer choice or tombstone.
+				}
+			}
+		}
 		var existing []model.AgentMemoryItem
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ? AND status IN ?",
@@ -98,28 +110,41 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 			return err
 		}
 		for _, candidate := range existing {
-			if strings.EqualFold(strings.TrimSpace(candidate.Content), item.Content) {
+			if strings.EqualFold(strings.TrimSpace(candidate.Content), item.Content) && !structuredPreferenceKind(item.Kind) {
 				result.Item = candidate
 				return nil
 			}
 		}
 
 		if len(existing) > 0 {
-			item.Status = model.MemoryStatusConflicted
-			for i := range existing {
-				current := &existing[i]
-				result.ConflictIDs = append(result.ConflictIDs, current.ID)
-				if current.Status == model.MemoryStatusConflicted {
-					continue
+			if structuredPreferenceKind(item.Kind) && item.SourceType == "user_message" {
+				for _, old := range existing {
+					old.Status = model.MemoryStatusWithdrawn
+					old.Version++
+					if err := tx.Model(&model.AgentMemoryItem{}).Where("id = ?", old.ID).Updates(map[string]any{"status": old.Status, "version": old.Version}).Error; err != nil {
+						return err
+					}
+					if err := createMemoryEvent(tx, &old, "superseded", item.SourceRef); err != nil {
+						return err
+					}
 				}
-				current.Status = model.MemoryStatusConflicted
-				current.Version++
-				if err := tx.Model(&model.AgentMemoryItem{}).Where("id = ? AND user_id = ?", current.ID, item.UserID).
-					Updates(map[string]any{"status": current.Status, "version": current.Version}).Error; err != nil {
-					return err
-				}
-				if err := createMemoryEvent(tx, current, model.MemoryEventConflicted, item.SourceRef); err != nil {
-					return err
+			} else {
+				item.Status = model.MemoryStatusConflicted
+				for i := range existing {
+					current := &existing[i]
+					result.ConflictIDs = append(result.ConflictIDs, current.ID)
+					if current.Status == model.MemoryStatusConflicted {
+						continue
+					}
+					current.Status = model.MemoryStatusConflicted
+					current.Version++
+					if err := tx.Model(&model.AgentMemoryItem{}).Where("id = ? AND user_id = ?", current.ID, item.UserID).
+						Updates(map[string]any{"status": current.Status, "version": current.Version}).Error; err != nil {
+						return err
+					}
+					if err := createMemoryEvent(tx, current, model.MemoryEventConflicted, item.SourceRef); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -181,7 +206,11 @@ func (r *MemoryRepository) ListRecallable(ctx context.Context, userID int64, sco
 	if err != nil {
 		return nil, err
 	}
-	return r.expandRecallableConflicts(ctx, userID, seeds, now)
+	items, err := r.expandRecallableConflicts(ctx, userID, seeds, now)
+	if err != nil {
+		return nil, err
+	}
+	return r.filterLiveMemorySources(ctx, userID, items)
 }
 
 // SearchRecallable uses the pgvector projection for semantic seed ranking, then
@@ -217,7 +246,11 @@ func (r *MemoryRepository) SearchRecallable(ctx context.Context, userID int64, s
 	if err := query.Where(scopeQuery).Order("semantic_score DESC, agent_memory_items.importance DESC, agent_memory_items.id ASC").Limit(limit).Find(&seeds).Error; err != nil {
 		return nil, err
 	}
-	return r.expandRecallableConflicts(ctx, userID, seeds, now)
+	items, err := r.expandRecallableConflicts(ctx, userID, seeds, now)
+	if err != nil {
+		return nil, err
+	}
+	return r.filterLiveMemorySources(ctx, userID, items)
 }
 
 func (r *MemoryRepository) expandRecallableConflicts(ctx context.Context, userID int64, seeds []model.AgentMemoryItem, now time.Time) ([]model.AgentMemoryItem, error) {

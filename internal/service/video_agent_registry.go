@@ -26,15 +26,19 @@ type VideoAgentToolDefinition struct {
 // serialized into a planner action. Tool arguments remain JSON so a future
 // planner can produce them without knowing concrete Go input types.
 type VideoAgentToolRuntime struct {
-	TaskIDs        []int64
-	ValidateScope  func(context.Context) error
-	UserID         int64
-	TaskID         int64
-	Recent         []model.ChatMessage
-	TopK           int
-	EmbeddingModel string
-	Embedding      ai.EmbeddingClient
-	MemorySnapshot *MemorySnapshot
+	VideoMaps       []VideoMap
+	MaxVisualFrames int
+	MaxOutputTokens int64
+	ReportUsage     func(VideoAgentLoopPlannerCallUsage)
+	TaskIDs         []int64
+	ValidateScope   func(context.Context) error
+	UserID          int64
+	TaskID          int64
+	Recent          []model.ChatMessage
+	TopK            int
+	EmbeddingModel  string
+	Embedding       ai.EmbeddingClient
+	MemorySnapshot  *MemorySnapshot
 }
 
 // VideoAgentToolRequest is the only input surface exposed by the registry.
@@ -343,9 +347,13 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 					return failedVideoAgentToolResult(VideoAgentToolBuildCitedAnswer, "build cited answer", err)
 				}
 				result, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{
-					Question:     args.Question,
-					Intermediate: args.Intermediate,
-					Citations:    args.Citations,
+					ScopeTaskIDs:    request.Runtime.TaskIDs,
+					MaxOutputTokens: request.Runtime.MaxOutputTokens,
+					ReportUsage:     request.Runtime.ReportUsage,
+					Recent:          request.Runtime.Recent,
+					Question:        args.Question,
+					Intermediate:    args.Intermediate,
+					Citations:       args.Citations,
 				})
 				return marshalVideoAgentToolResult(result, step, err)
 			},
@@ -353,9 +361,17 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 	}
 }
 
-func decodeVideoAgentToolArguments(request VideoAgentToolRequest, target any) error {
+func decodeVideoAgentToolArguments(request VideoAgentToolRequest, target any) (err error) {
+	defer func() {
+		if err != nil {
+			err = &InvalidToolArguments{Cause: err}
+		}
+	}()
 	if len(request.Arguments) == 0 {
 		return errors.New("tool arguments 不能为空")
+	}
+	if strings.TrimSpace(string(request.Arguments)) == "null" {
+		return errors.New("tool arguments 必须为对象")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(request.Arguments))
 	decoder.DisallowUnknownFields()
@@ -376,6 +392,18 @@ func decodeVideoAgentToolArguments(request VideoAgentToolRequest, target any) er
 			return errors.New("tool arguments 的 question 不能为空")
 		}
 	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(request.Arguments, &fields)
+	switch args := target.(type) {
+	case *transcriptWindowToolArguments:
+		if _, ok := fields["chunk_index"]; !ok || args.ChunkIndex < 0 || args.Radius < 0 {
+			return errors.New("chunk_index 必填且不能为负，radius不能为负")
+		}
+	case *visualWindowToolArguments:
+		if args.StartMS < 0 || args.EndMS <= args.StartMS || args.EndMS-args.StartMS > 600000 {
+			return errors.New("visual window 必须为十分钟内合法时间范围")
+		}
+	}
 	return nil
 }
 
@@ -392,6 +420,6 @@ func marshalVideoAgentToolResult(value any, step VideoAgentStep, executionErr er
 }
 
 func failedVideoAgentToolResult(tool, name string, err error) (VideoAgentToolResult, error) {
-	step, stepErr := failVideoAgentStep(newVideoAgentStep(name, tool, nil), err.Error())
-	return VideoAgentToolResult{Step: step}, stepErr
+	step, _ := failVideoAgentStep(newVideoAgentStep(name, tool, nil), err.Error())
+	return VideoAgentToolResult{Step: step}, err
 }

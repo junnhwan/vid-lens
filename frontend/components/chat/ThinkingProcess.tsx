@@ -24,7 +24,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   const duration = message.processStartedAt
     ? Math.max(0, Math.floor(((message.processFinishedAt ?? now) - message.processStartedAt) / 1000))
     : undefined
-  const summary = live ? active?.label ?? '正在连接…' : message.error ? '本轮未完成' : message.cancelled ? '已停止' : message.degraded ? '已结束 · 有限结果' : `已完成 ${steps.length} 个步骤`
+  const summary = live ? active?.label ?? '正在连接…' : ['pending', 'running'].includes(message.runStatus ?? '') ? '服务端仍在执行' : message.error ? '本轮未完成' : message.cancelled ? '已停止' : message.degraded ? '已结束 · 有限结果' : `已完成 ${steps.length} 个步骤`
   const attached = new Set(steps.map(step => step.kind === 'answer' ? 'answer' : step.id))
   return (
     <section className={styles.process} aria-label="思考与执行过程">

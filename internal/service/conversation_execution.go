@@ -86,7 +86,7 @@ func (e *ConversationExecution) Execute(ctx context.Context, req ConversationReq
 	if err := validateConversationMode(req); err != nil {
 		return ConversationResult{}, err
 	}
-	embedding, chat, profile, err := e.prepareClients(req.UserID)
+	ctx, embedding, chat, profile, err := e.prepareRequest(ctx, req)
 	if err != nil {
 		return ConversationResult{}, &ConversationPreparationError{Cause: err}
 	}
@@ -118,7 +118,7 @@ func (e *ConversationExecution) Stream(ctx context.Context, req ConversationRequ
 	if err := validateConversationMode(req); err != nil {
 		return ConversationResult{}, err
 	}
-	embedding, chat, profile, err := e.prepareClients(req.UserID)
+	ctx, embedding, chat, profile, err := e.prepareRequest(ctx, req)
 	if err != nil {
 		return ConversationResult{}, &ConversationPreparationError{Cause: err}
 	}

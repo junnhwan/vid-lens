@@ -1,5 +1,5 @@
 import type {
-  AIProfile, AIProfileRequest, ProfilePurpose, AgentAskResult, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, AgentAskResult, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
   MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
@@ -74,6 +74,7 @@ export const api = {
   profile: () => req<User>('/user/profile', 'GET'),
 
   // ============ AI Profile ============
+  budgetOptions: () => req<AgentBudgetOptions>('/ai/profiles/budget-options', 'GET'),
   listProfiles: () => req<AIProfile[]>('/ai/profiles', 'GET'),
   createProfile: (p: AIProfileRequest) => req<AIProfile>('/ai/profiles', 'POST', p),
   updateProfile: (id: number, p: AIProfileRequest) => req<AIProfile>(`/ai/profiles/${id}`, 'PUT', p),
@@ -135,13 +136,16 @@ export const api = {
     return req<ChatSession[]>(`/chat/sessions${qs ? `?${qs}` : ''}`, 'GET')
   },
   getMessages: (sid: number) => req<ChatMessage[]>(`/chat/sessions/${sid}/messages`, 'GET'),
+  getAnswerFeedback: (sid: number, mid: number) => req<import('./types').AnswerFeedback | null>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'GET'),
+  saveAnswerFeedback: (sid: number, mid: number, feedback: import('./types').AnswerFeedbackInput) => req<import('./types').AnswerFeedback>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'PUT', feedback),
+  clearAnswerFeedback: (sid: number, mid: number) => req<unknown>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'DELETE'),
   getRunHistory: (sid: number) => req<import('../components/chat/conversationHistory').RunHistory[]>(`/chat/sessions/${sid}/runs`, 'GET'),
   ask: (sid: number, question: string, top_k: number, mode?: ChatMode) =>
     req<AskResult>(`/chat/sessions/${sid}/messages`, 'POST', { question, top_k, mode }),
   deleteSession: (sid: number) => req<{ deleted: boolean }>(`/chat/sessions/${sid}`, 'DELETE'),
 
   // ============ 记忆治理 (设置页) ============
-  getMemoryCaptureStatus: () => req<{ pending:number; processing:number; failed:number }>('/memories/capture-status', 'GET'),
+  getMemoryCaptureStatus: () => req<{ pending:number; processing:number; failed:number; projection_pending:number }>('/memories/capture-status', 'GET'),
   retryMemoryCaptures: () => req<unknown>('/memories/capture-retry', 'POST'),
   getMemoryPreference: () => req<MemoryPreferenceView>('/memories/preferences', 'GET'),
   updateMemoryPreference: (enabled: boolean, expected_version: number) =>

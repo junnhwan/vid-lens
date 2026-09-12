@@ -76,15 +76,7 @@ func serverAIProfile(cfg config.AIConfig) ai.Profile {
 }
 
 func runtimeServerHandlers(app *serverApplication) serverHandlers {
-	return serverHandlers{
-		user:           app.handlers.user,
-		profiles:       app.handlers.profiles,
-		rag:            app.handlers.rag,
-		chat:           app.handlers.chat,
-		media:          app.handlers.media,
-		knowledgeBases: app.handlers.knowledgeBases,
-		memory:         app.handlers.memory,
-	}
+ return app.handlers
 }
 
 func main() {

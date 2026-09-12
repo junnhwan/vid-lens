@@ -49,7 +49,7 @@ function importanceText(v: number): string {
 export function MemorySection({ user }: { user: User | null }) {
   const toast = useToast()
   const [pref, setPref] = useState<MemoryPreferenceView | null>(null)
-  const [capture,setCapture] = useState<{pending:number;processing:number;failed:number} | null>(null)
+  const [capture,setCapture] = useState<{pending:number;processing:number;failed:number;projection_pending?:number} | null>(null)
   const [captureError,setCaptureError] = useState('')
   const [retrying,setRetrying] = useState(false)
   const [items, setItems] = useState<MemoryItem[]>([])
@@ -169,7 +169,7 @@ export function MemorySection({ user }: { user: User | null }) {
           )}
 
           <div className="pref-row" style={{marginTop:18}}>
-            <div className="pr-body"><b>后台记忆任务</b><span>{captureError || (capture ? `等待 ${capture.pending} · 处理中 ${capture.processing} · 失败 ${capture.failed}` : '加载中…')}</span><span>失败会有限重试；重试前仍会检查当前授权。</span></div>
+            <div className="pr-body"><b>后台记忆任务</b><span>{captureError || (capture ? `等待 ${capture.pending} · 处理中 ${capture.processing} · 失败 ${capture.failed} · 已保存但索引待修复 ${capture.projection_pending ?? 0}` : '加载中…')}</span><span>失败会有限重试；重试前仍会检查当前授权。语言、详略、格式偏好可直接读取，无需向量索引。</span></div>
             {!!capture?.failed && <button className="btn btn-sm" disabled={retrying} onClick={async()=>{setRetrying(true);try{await api.retryMemoryCaptures();if(user)await load(user.id);toast.success('失败任务已重新排队')}catch(e){toast.error(e instanceof Error?e.message:'重试失败')}finally{setRetrying(false)}}}>{retrying?'排队中…':'重试失败任务'}</button>}
             <button className="btn btn-sm btn-ghost" onClick={()=>user && void load(user.id)}>刷新</button>
           </div>

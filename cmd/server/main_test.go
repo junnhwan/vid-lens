@@ -56,6 +56,7 @@ func TestRuntimeServerHandlersIncludesKnowledgeBaseHandler(t *testing.T) {
 		profiles:       &handler.AIProfileHandler{},
 		rag:            &handler.RAGHandler{},
 		chat:           &handler.ChatHandler{},
+		feedback:       &handler.ChatFeedbackHandler{},
 		media:          &handler.MediaHandler{},
 		knowledgeBases: &handler.KnowledgeBaseHandler{},
 		memory:         &handler.MemoryHandler{},
@@ -64,7 +65,7 @@ func TestRuntimeServerHandlersIncludesKnowledgeBaseHandler(t *testing.T) {
 
 	got := runtimeServerHandlers(app)
 	if got.user != expected.user || got.profiles != expected.profiles || got.rag != expected.rag ||
-		got.chat != expected.chat || got.media != expected.media || got.knowledgeBases != expected.knowledgeBases || got.memory != expected.memory {
+		got.chat != expected.chat || got.feedback != expected.feedback || got.media != expected.media || got.knowledgeBases != expected.knowledgeBases || got.memory != expected.memory {
 		t.Fatalf("runtime handlers were not preserved: got=%+v expected=%+v", got, expected)
 	}
 	if got.knowledgeBases == nil {
@@ -72,5 +73,8 @@ func TestRuntimeServerHandlersIncludesKnowledgeBaseHandler(t *testing.T) {
 	}
 	if got.memory == nil {
 		t.Fatal("runtime memory handler is nil")
+	}
+	if got.feedback == nil {
+		t.Fatal("runtime feedback handler is nil")
 	}
 }

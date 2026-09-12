@@ -21,7 +21,7 @@ func enqueueMemoryCapture(tx *gorm.DB, message *model.ChatMessage) error {
 	if !allowed {
 		return nil
 	}
-	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.MemoryCaptureJob{MessageID: message.ID, UserID: message.UserID, SessionID: message.SessionID, Status: "pending", AvailableAt: time.Now().UTC()}).Error
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.MemoryCaptureJob{ExtractorVersion: model.MemoryExtractorVersion, MessageID: message.ID, UserID: message.UserID, SessionID: message.SessionID, Status: "pending", AvailableAt: time.Now().UTC()}).Error
 }
 
 // ClaimMemoryCapture uses CAS after a non-locking read. Competing workers can
@@ -41,7 +41,7 @@ func (r *MemoryRepository) ClaimMemoryCapture(ctx context.Context, now time.Time
 		return nil, err
 	}
 	token := uuid.NewString()
-	result := r.db.WithContext(ctx).Model(&model.MemoryCaptureJob{}).Where("message_id = ? AND status = ? AND lease_token = ? AND available_at <= ?", job.MessageID, job.Status, job.LeaseToken, now).
+	result := r.db.WithContext(ctx).Model(&model.MemoryCaptureJob{}).Where("message_id = ? AND extractor_version = ? AND status = ? AND lease_token = ? AND available_at <= ?", job.MessageID, job.ExtractorVersion, job.Status, job.LeaseToken, now).
 		Updates(map[string]any{"status": "processing", "lease_token": token, "available_at": now.Add(time.Minute), "attempts": gorm.Expr("attempts + 1")})
 	if result.Error != nil {
 		return nil, result.Error
@@ -55,9 +55,10 @@ func (r *MemoryRepository) ClaimMemoryCapture(ctx context.Context, now time.Time
 }
 
 type MemoryCaptureStatus struct {
-	Pending    int64 `json:"pending"`
-	Processing int64 `json:"processing"`
-	Failed     int64 `json:"failed"`
+	ProjectionPending int64 `json:"projection_pending"`
+	Pending           int64 `json:"pending"`
+	Processing        int64 `json:"processing"`
+	Failed            int64 `json:"failed"`
 }
 
 func (r *MemoryRepository) CaptureStatus(ctx context.Context, userID int64) (MemoryCaptureStatus, error) {
@@ -76,6 +77,9 @@ func (r *MemoryRepository) CaptureStatus(ctx context.Context, userID int64) (Mem
 		case "failed":
 			status.Failed = row.Total
 		}
+	}
+	if err == nil {
+		err = r.db.WithContext(ctx).Model(&model.MemoryCaptureJob{}).Where("user_id = ? AND projection_pending = ?", userID, true).Count(&status.ProjectionPending).Error
 	}
 	return status, err
 }
@@ -104,5 +108,5 @@ func (r *MemoryRepository) FinishMemoryCapture(ctx context.Context, job model.Me
 			status = "failed"
 		}
 	}
-	return r.db.WithContext(ctx).Model(&model.MemoryCaptureJob{}).Where("message_id = ? AND lease_token = ? AND status = ?", job.MessageID, job.LeaseToken, "processing").Updates(map[string]any{"status": status, "available_at": next, "lease_token": ""}).Error
+	return r.db.WithContext(ctx).Model(&model.MemoryCaptureJob{}).Where("message_id = ? AND extractor_version = ? AND lease_token = ? AND status = ?", job.MessageID, job.ExtractorVersion, job.LeaseToken, "processing").Updates(map[string]any{"status": status, "available_at": next, "lease_token": "", "projection_pending": job.ProjectionPending && !success}).Error
 }

@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
-import type { AIProfile, AIProfileRequest, ProfilePurpose } from '@/lib/types'
+import type { AIProfile, AIProfileRequest, ProfilePurpose, AgentBudgetOverride, AgentBudgetOptions } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import { useToast } from '@/components/Toast'
 import { ModelCombobox } from '@/components/settings/ModelCombobox'
@@ -47,6 +47,19 @@ export function ProfileForm({ profile, onClose, onSaved }: {
   const [err, setErr] = useState('')
   const [models, setModels] = useState<Partial<Record<ProfilePurpose, string[]>>>({})
   const [probing, setProbing] = useState(false)
+  const [budgetOptions, setBudgetOptions] = useState<AgentBudgetOptions | null>(null)
+  const [budgetError, setBudgetError] = useState('')
+  const [customBudget, setCustomBudget] = useState(!!profile?.agent_budget)
+  const [budgetDraft, setBudgetDraft] = useState<Partial<Record<keyof AgentBudgetOverride, string>>>(() => Object.fromEntries(Object.entries(profile?.agent_budget || {}).map(([k, v]) => [k, String(v)])))
+  useEffect(() => {
+    let live = true
+    api.budgetOptions().then(options => { if (live) setBudgetOptions(options) }).catch(() => { if (live) setBudgetError('预算选项加载失败，请重新打开表单重试') })
+    return () => { live = false }
+  }, [])
+  const budgetFields = [
+    ['max_tool_calls', '最多工具调用次数'], ['max_duration_seconds', '最长运行时间（秒）'],
+    ['max_input_tokens', '累计输入 Token'], ['max_output_tokens', '累计输出 Token'], ['max_visual_frames', '最多检查帧数'],
+  ] as const
 
   const dirty = useMemo(() => {
     if (!editing) return !!(name || llm.base_url || llm.api_key || llm.model || asr.base_url || embedding.base_url)
@@ -69,7 +82,19 @@ export function ProfileForm({ profile, onClose, onSaved }: {
     if (!embedding.provider.trim() || !embedding.base_url.trim() || !embedding.model.trim()) { setErr('embedding 配置不完整'); return null }
     const dim = Number(embeddingDim)
     if (!Number.isFinite(dim) || dim <= 0) { setErr('embedding 维度需为正数:先探测,或手动填写'); return null }
+    let agentBudget: AgentBudgetOverride | null = null
+    if (customBudget) {
+      if (!budgetOptions) { setErr(budgetError || '正在加载预算选项'); return null }
+      agentBudget = { ...budgetOptions.defaults }
+      for (const [key, label] of budgetFields) {
+        const value = Number(budgetDraft[key] ?? budgetOptions.defaults[key])
+        const range = budgetOptions.limits[key]
+        if (!Number.isSafeInteger(value) || value < range.min || value > range.max) { setErr(`${label}须为 ${range.min}–${range.max} 之间的整数`); return null }
+        agentBudget[key] = value
+      }
+    }
     return {
+      agent_budget: agentBudget,
       name: name.trim(),
       llm_provider: llm.provider.trim(), llm_base_url: llm.base_url.trim(), llm_model: llm.model.trim(),
       ...(llm.api_key.trim() ? { llm_api_key: llm.api_key.trim() } : {}),
@@ -195,6 +220,31 @@ export function ProfileForm({ profile, onClose, onSaved }: {
           purpose="vision" models={models.vision || []} onPull={pullModels}
           keyPlaceholder={editing ? `留空保留现有密钥(${profile?.vision_api_key_masked})` : 'sk-…'}
         />
+      )}
+
+      {!profile?.read_only && profile?.source !== 'hosted' && (
+        <details style={{ marginTop: 22 }}>
+          <summary className="field-label" style={{ cursor: 'pointer' }}>Agent 执行预算</summary>
+          <p style={{ color: 'var(--tx-3)', fontSize: 13 }}>仅用于此配置下新开始的 Agent 运行，不影响普通 Chat；Token 用量可能为估算，不代表模型思考强度。</p>
+          {profile?.agent_budget_error && <p role="alert">{profile.agent_budget_error}；可恢复默认或重新填写预算修复。</p>}
+          {budgetError && <p role="alert">{budgetError}</p>}
+          <div style={{ display: 'flex', gap: 18, margin: '12px 0' }}>
+            <label><input type="radio" name="budget-mode" checked={!customBudget} onChange={() => setCustomBudget(false)} /> 跟随服务端默认值</label>
+            <label><input type="radio" name="budget-mode" checked={customBudget} onChange={() => setCustomBudget(true)} disabled={!budgetOptions} /> 自定义</label>
+          </div>
+          {budgetOptions && budgetFields.map(([key, label]) => {
+            if (key === 'max_visual_frames' && !budgetOptions.visual_available) return null
+            const range = budgetOptions.limits[key]
+            return <label key={key} style={{ display: 'block', marginTop: 10 }}>
+              <span className="field-label">{label} {key === 'max_visual_frames' && !visionEnabled ? '（未启用视觉模型，设置保留但当前不生效）' : ''}</span>
+              <input className="input mono" type="number" step={1} min={range.min} max={range.max} disabled={!customBudget} value={customBudget ? budgetDraft[key] ?? budgetOptions.defaults[key] : budgetOptions.defaults[key]} onChange={e => setBudgetDraft(draft => ({ ...draft, [key]: e.target.value }))} />
+              <small style={{ color: 'var(--tx-3)' }}>允许范围 {range.min}–{range.max}</small>
+            </label>
+          })}
+          {profile?.effective_agent_budget?.adjustments?.map(note => <p key={note}>{note}</p>)}
+          <button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => { setCustomBudget(false); setBudgetDraft({}) }}>恢复默认</button>
+          <p style={{ fontSize: 13, color: 'var(--tx-3)' }}>保存后新运行生效，进行中的运行保持原预算。修改预算无需重新输入 API Key。</p>
+        </details>
       )}
 
       <div className="pref-row" style={{ marginTop: 18 }}>

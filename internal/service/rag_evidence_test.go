@@ -266,8 +266,8 @@ func TestFinalizeAnswerCitationsCleansAnswerWithoutRewritingOtherBrackets(t *tes
 	if got.Answer != want {
 		t.Fatalf("clean answer = %q, want %q", got.Answer, want)
 	}
-	if len(got.Citations) != 2 || got.Citations[0].CitationID != "C1" || got.Citations[1].CitationID != "C2" {
-		t.Fatalf("citations = %#v, want top-ranked C1/C2 only", got.Citations)
+	if len(got.Citations) != 4 || got.Citations[0].CitationID != "C1" || got.Citations[3].CitationID != "C4" {
+		t.Fatalf("citations = %#v, want all referenced C1 through C4", got.Citations)
 	}
 }
 
@@ -350,6 +350,88 @@ func TestFinalizeAnswerCitationsPreservesNestedBracketsAndMarkdownLinks(t *testi
 	}
 	if len(got.Citations) != 1 || got.Citations[0].CitationID != "C2" {
 		t.Fatalf("citations = %#v, want only top-level non-link C2", got.Citations)
+	}
+}
+
+func TestFinalizeAnswerCitationsRecoversAfterHalfOpenTimeMetadata(t *testing.T) {
+	candidates := []Citation{{CitationID: "C1"}, {CitationID: "C2"}, {CitationID: "C3"}, {CitationID: "C4"}, {CitationID: "C5"}}
+	raw := "可回放依据：\n" +
+		"- visual_caption，time=[300000,300001)，第一项 [C1]。\n" +
+		"- visual_caption，time=[383900,383901)，第三项 [C3]。\n" +
+		"- visual_caption，time=[388766,388767)，第二项 [C2]。\n" +
+		"- visual_caption，time=[426500,426501)，第四项 [C4]。\n" +
+		"其他内容尚未确认 [C1][C2][C3][C4]。"
+	got := finalizeAnswerCitations(raw, candidates)
+	if len(got.Citations) != 4 || got.Citations[0].CitationID != "C1" || got.Citations[3].CitationID != "C4" {
+		t.Fatalf("half-open metadata swallowed citations: %+v", got.Citations)
+	}
+	for _, citation := range got.Citations {
+		if citation.CitationID == "C5" {
+			t.Fatal("unreferenced evidence was selected")
+		}
+	}
+	if strings.Contains(got.Answer, "[C") || !strings.Contains(got.Answer, "time=[300000,300001)") {
+		t.Fatalf("did not clean only internal citations: %q", got.Answer)
+	}
+	if ids := parseReferencedCitationIDs(raw); len(ids) != 4 {
+		t.Fatalf("shared extraction did not recover citations: %+v", ids)
+	}
+}
+
+func TestUnclosedProseBracketsKeepCodeEscapesAndNestedGroupsProtected(t *testing.T) {
+	raw := "未完成的普通说明 [text\n" +
+		"代码 `[C1]`；转义 \\[C2]；嵌套 [[C3]]；链接 [C4](doc.md)；有效 [C5]；不存在 [C99]。"
+	candidates := []Citation{{CitationID: "C1"}, {CitationID: "C2"}, {CitationID: "C3"}, {CitationID: "C4"}, {CitationID: "C5"}}
+	got := finalizeAnswerCitations(raw, candidates)
+	if len(got.Citations) != 1 || got.Citations[0].CitationID != "C5" {
+		t.Fatalf("invalid evidence selection: %+v", got.Citations)
+	}
+	for _, literal := range []string{"`[C1]`", `\[C2]`, "[[C3]]", "[C4](doc.md)", "[text"} {
+		if !strings.Contains(got.Answer, literal) {
+			t.Fatalf("literal %q was rewritten: %q", literal, got.Answer)
+		}
+	}
+	if strings.Contains(got.Answer, "[C5]") || strings.Contains(got.Answer, "[C99]") {
+		t.Fatalf("internal markers remain: %q", got.Answer)
+	}
+}
+
+func TestFinalCitationsRetainFourStepsAndComparisonPartner(t *testing.T) {
+	for _, comparison := range []bool{false, true} {
+		name := "four_steps"
+		if comparison {
+			name = "two_videos"
+		}
+		t.Run(name, func(t *testing.T) {
+			candidates := []Citation{
+				{CitationID: "C1", TaskID: 11, ChunkID: 101, EvidenceID: "step-1", Content: "第一步"},
+				{CitationID: "C2", TaskID: 11, ChunkID: 102, EvidenceID: "step-2", Content: "第二步"},
+				{CitationID: "C3", TaskID: 11, ChunkID: 103, EvidenceID: "step-3", Content: "第三步"},
+				{CitationID: "C4", TaskID: 11, ChunkID: 104, EvidenceID: "step-4", Content: "第四步"},
+				{CitationID: "C5", TaskID: 11, ChunkID: 105, EvidenceID: "unused", Content: "未引用"},
+			}
+			if comparison {
+				candidates[2].TaskID = 22
+				candidates[3].TaskID = 22
+			}
+			// Duplicate candidate IDs and unknown answer IDs cannot expand selection.
+			candidates = append(candidates, candidates[2])
+			got := finalizeAnswerCitations("一[C1]，二[C2]，三[C3]，四[C4]。再看[C4][C99]。", candidates)
+			if len(got.Citations) != 4 {
+				t.Fatalf("lost step/partner evidence: %+v", got.Citations)
+			}
+			for i, citation := range got.Citations {
+				if citation.CitationID != candidates[i].CitationID || citation.TaskID != candidates[i].TaskID || citation.ChunkID != candidates[i].ChunkID || citation.EvidenceID != candidates[i].EvidenceID {
+					t.Fatalf("citation provenance changed: %+v", got.Citations)
+				}
+			}
+			if comparison && got.Citations[3].TaskID != 22 {
+				t.Fatal("comparison partner discarded")
+			}
+			if strings.Contains(got.Answer, "[C") {
+				t.Fatalf("markers remain: %q", got.Answer)
+			}
+		})
 	}
 }
 

@@ -20,6 +20,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		return nil, err
 	}
 	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
+	s.injectChatPreferences(ctx, prepared, memoryPolicy)
 
 	answer, llmErr := chat.Chat(ctx, prepared.Messages)
 	if llmErr != nil {
@@ -31,7 +32,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		if shouldTriggerLLMDegradation(prepared.Policy, llmErr) {
 			degradedAnswer := s.applyTier2Degradation(ctx, prepared)
 			finalized := finalizeAnswerCitations(degradedAnswer, prepared.Citations)
-			result, saveErr := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+			result, saveErr := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.FrozenMemberIDs)
 			if saveErr != nil {
 				return nil, saveErr
 			}
@@ -45,7 +46,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	}
 
 	finalized := finalizeChatAnswer(prepared, answer)
-	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel)
+	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.FrozenMemberIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func finalizeChatAnswer(prepared *preparedRAGChat, answer string) finalizedAnswe
 	return finalizeAnswerCitations(answer, prepared.Citations)
 }
 
-func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName string) (*AskResult, error) {
+func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName string, frozenMembers ...[]int64) (*AskResult, error) {
 	snapshot, err := json.Marshal(citations)
 	if err != nil {
 		return nil, err
@@ -78,7 +79,7 @@ func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID in
 		seenTasks[citation.TaskID] = struct{}{}
 		sourceTaskIDs = append(sourceTaskIDs, citation.TaskID)
 	}
-	if err := s.repos.Chat.CreateExchange(userID, userMessage, assistantMessage, sourceTaskIDs); err != nil {
+	if err := s.repos.Chat.CreateExchange(userID, userMessage, assistantMessage, sourceTaskIDs, frozenMembers...); err != nil {
 		return nil, err
 	}
 

@@ -11,6 +11,41 @@ import (
 	"time"
 )
 
+// ChatFinishError means the provider ended generation without a complete answer.
+// PartialContent is preserved for the caller's usage accounting and recovery UI.
+type ChatFinishError struct {
+	Reason         string
+	PartialContent string
+}
+
+func (e *ChatFinishError) Error() string {
+	switch e.Reason {
+	case "length":
+		return "模型输出达到单次输出上限，回答未完整生成"
+	case "content_filter":
+		return "模型服务因内容过滤停止输出，回答未完整生成"
+	default:
+		return "模型输出未正常完成: " + e.Reason
+	}
+}
+func chatFinishError(reason, partial string) error {
+	if reason == "length" || reason == "content_filter" {
+		return &ChatFinishError{Reason: reason, PartialContent: partial}
+	}
+	return nil
+}
+
+type chatProviderUsage struct {
+	PromptTokens     *int64 `json:"prompt_tokens"`
+	CompletionTokens *int64 `json:"completion_tokens"`
+}
+
+func (u *chatProviderUsage) report(ctx context.Context) {
+	if u != nil && u.PromptTokens != nil && u.CompletionTokens != nil && *u.PromptTokens >= 0 && *u.CompletionTokens >= 0 {
+		reportChatUsage(ctx, *u.PromptTokens, *u.CompletionTokens)
+	}
+}
+
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -43,6 +78,7 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (st
 		"messages": messages,
 	}
 
+	applyChatBudget(ctx, reqBody)
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
@@ -60,8 +96,10 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (st
 	}
 
 	var result struct {
+		Usage   *chatProviderUsage `json:"usage"`
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -69,10 +107,12 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []ChatMessage) (st
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("解析 LLM 响应失败: %w", err)
 	}
+	result.Usage.report(ctx)
 	if len(result.Choices) == 0 {
 		return "", fmt.Errorf("LLM 返回空结果")
 	}
-	return strings.TrimSpace(stripThinkTags(result.Choices[0].Message.Content)), nil
+	answer := strings.TrimSpace(stripThinkTags(result.Choices[0].Message.Content))
+	return answer, chatFinishError(result.Choices[0].FinishReason, answer)
 }
 
 func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessage, emit func(delta string) error) error {
@@ -85,6 +125,10 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		"messages": messages,
 	}
 
+	applyChatBudget(ctx, reqBody)
+	if _, ok := ctx.Value(chatBudgetKey{}).(chatCallBudget); ok {
+		reqBody["stream_options"] = map[string]bool{"include_usage": true}
+	}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
@@ -105,13 +149,22 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		return fmt.Errorf("模型未返回 SSE 流式响应，请检查模型服务的 streaming 支持")
 	}
 	var splitter thinkingSplitter
+	var partial strings.Builder
 	output := func(reasoning bool, text string) error {
 		if reasoning {
 			return emitProviderReasoning(ctx, text)
 		}
+		partial.WriteString(text)
 		return emit(text)
 	}
 	finished := false
+	finishReason := ""
+	finish := func() error {
+		if err := splitter.push("", true, output); err != nil {
+			return err
+		}
+		return chatFinishError(finishReason, partial.String())
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
@@ -125,9 +178,10 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			return splitter.push("", true, output)
+			return finish()
 		}
 		var envelope struct {
+			Usage *chatProviderUsage `json:"usage"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -142,13 +196,15 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
 			return fmt.Errorf("解析 LLM 流式响应失败: %w", err)
 		}
+		envelope.Usage.report(ctx)
 		if envelope.Error != nil {
 			return fmt.Errorf("模型流式响应失败: %s", envelope.Error.Message)
 		}
 		if len(envelope.Choices) > 0 {
 			choice := envelope.Choices[0]
-			if choice.FinishReason != nil {
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				finished = true
+				finishReason = *choice.FinishReason
 			}
 			reasoning := choice.Delta.ReasoningContent
 			if reasoning == "" {
@@ -175,7 +231,7 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 	if !finished {
 		return fmt.Errorf("模型流式响应意外中断，未收到完成标记")
 	}
-	return splitter.push("", true, output)
+	return finish()
 }
 
 func parseChatCompletionStreamDelta(data string) (string, error) {

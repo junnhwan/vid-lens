@@ -99,8 +99,8 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 		}
 	}
 	for _, wantMapping := range []string{
-		"[C1] (chunk 3, modality=transcript, time=[1000,2000), time_status=coarse) 第一条唯一引用片段",
-		"[C2] (chunk 7, modality=visual_ocr, time=[3000,3001), time_status=exact) 第二条唯一引用片段",
+		"[C1] (task_id=0, chunk 3, modality=transcript, time=[1000,2000), time_status=coarse) 第一条唯一引用片段",
+		"[C2] (task_id=0, chunk 7, modality=visual_ocr, time=[3000,3001), time_status=exact) 第二条唯一引用片段",
 	} {
 		if !strings.Contains(chatClient.messages[0][1].Content, wantMapping) {
 			t.Fatalf("agent evidence prompt = %q, missing concrete mapping %q", chatClient.messages[0][1].Content, wantMapping)

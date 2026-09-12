@@ -31,6 +31,9 @@ type VideoAgentRequest struct {
 }
 
 type VideoAgentResult struct {
+	StopReason   string                      `json:"stop_reason,omitempty"`
+	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
 	Progress     []ConversationProgress      `json:"progress,omitempty"`
 	Degraded     bool                        `json:"degraded,omitempty"`
 	MessageID    int64                       `json:"message_id"`
@@ -135,7 +138,9 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	for _, c := range result.Citations {
 		sourceIDs = append(sourceIDs, c.TaskID)
 	}
-	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, normalizeTaskIDs(sourceIDs), result.MemoryPolicy.EffectiveEnabled)
+	finalCtx, cancel := agentFinalizationContext(ctx)
+	defer cancel()
+	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchangeContext(finalCtx, userID, result.RunID, userMessage, assistantMessage, normalizeTaskIDs(sourceIDs), result.MemoryPolicy.EffectiveEnabled)
 	if err != nil {
 		return err
 	}

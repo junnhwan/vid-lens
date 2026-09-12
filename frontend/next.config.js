@@ -12,7 +12,7 @@ const nextConfig = {
   // "Cannot find module './xxx.js'")。
   distDir: process.env.NODE_ENV === 'production' ? '.next' : '.next-dev',
   // rewrites 代理 /api → 后端;SSE 流式回答经常超过默认 30s,放宽代理超时
-  experimental: { proxyTimeout: 180_000 },
+  experimental: { proxyTimeout: 960_000 },
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${backendUrl}/api/:path*` },

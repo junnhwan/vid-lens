@@ -83,6 +83,7 @@ func (r *AIProfileRepository) UpdateForUser(userID int64, profile *model.UserAIP
 			}
 		}
 
+		existing.AgentBudgetJSON = profile.AgentBudgetJSON
 		existing.Name = profile.Name
 		existing.LLMProvider = profile.LLMProvider
 		existing.LLMBaseURL = profile.LLMBaseURL

@@ -10,12 +10,13 @@ import (
 )
 
 type ChatRunHistory struct {
-	RunID     string                 `json:"run_id"`
-	Question  string                 `json:"question"`
-	Status    string                 `json:"status"`
-	Error     string                 `json:"error,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
-	Steps     []ConversationProgress `json:"steps"`
+	StopReason string                 `json:"stop_reason,omitempty"`
+	RunID      string                 `json:"run_id"`
+	Question   string                 `json:"question"`
+	Status     string                 `json:"status"`
+	Error      string                 `json:"error,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	Steps      []ConversationProgress `json:"steps"`
 }
 
 // Failed runs do not have a committed assistant message. Return only public
@@ -32,7 +33,7 @@ func (s *ChatService) ListUnfinishedRunHistory(ctx context.Context, userID, sess
 	if s.repos.AgentExecution == nil {
 		return history, nil
 	}
-	runs, err := s.repos.AgentExecution.ListSessionTerminalRuns(ctx, userID, sessionID)
+	runs, err := s.repos.AgentExecution.ListSessionRecentRuns(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -44,12 +45,15 @@ func (s *ChatService) ListUnfinishedRunHistory(ctx context.Context, userID, sess
 		if records == nil || records.Run.SessionID != sessionID {
 			continue
 		}
-		item := ChatRunHistory{RunID: run.ID, Question: run.Goal, Status: run.Status, Error: run.ErrorMessage, CreatedAt: run.CreatedAt, Steps: []ConversationProgress{}}
+		item := ChatRunHistory{StopReason: run.StopReason, RunID: run.ID, Question: run.Goal, Status: run.Status, Error: run.ErrorMessage, CreatedAt: run.CreatedAt, Steps: []ConversationProgress{}}
 		latest := map[string]int{}
 		for _, step := range records.Steps {
 			status := "done"
 			if step.Status != model.AgentStepStatusCompleted {
 				status = "error"
+				if run.Status == model.AgentRunStatusPending || run.Status == model.AgentRunStatusRunning {
+					status = "running"
+				}
 				if run.Status == model.AgentRunStatusCancelled {
 					status = "cancelled"
 				}

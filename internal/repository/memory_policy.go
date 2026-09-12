@@ -240,6 +240,15 @@ func (r *MemoryRepository) AppendCaptured(ctx context.Context, sessionID int64, 
 		if err := validateCapturedMemoryScope(tx, &session, item); err != nil {
 			return err
 		}
+		if item.SourceType == "user_message" && (structuredPreferenceKind(item.Kind) || strings.HasPrefix(item.SourceRef, "chat_message:")) {
+			var count int64
+			if err := tx.Model(&model.ChatMessage{}).Where("id = ? AND user_id = ? AND session_id = ? AND role = ?", memoryMessageSourceID(item.SourceRef), item.UserID, sessionID, "user").Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return nil
+			}
+		}
 		appended, err = NewMemoryRepository(tx).Append(ctx, item)
 		if err != nil {
 			return err
