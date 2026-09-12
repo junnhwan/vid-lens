@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,33 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
+
+func TestKnowledgeToolHonorsResultLimitWithoutChangingGlobalConfig(t *testing.T) {
+	repos, _, ids := knowledgeAgentFixture(t)
+	cfg := DefaultRAGRetrievalConfig()
+	cfg.TopK, cfg.EnableVector, cfg.EnableBM25 = 5, false, true
+	pipeline := &RetrievalPipeline{repos: repos, Config: &cfg, rewriter: NoopQueryRewriter{}}
+	tools := NewVideoAgentTools(repos, pipeline, nil)
+	runtime := VideoAgentToolRuntime{UserID: 7, TaskIDs: ids, EmbeddingModel: "embed", TopK: 2}
+	for _, count := range []int{1, 2} {
+		result, err := tools.Registry().Execute(context.Background(), VideoAgentToolSearchTranscript, VideoAgentToolRequest{
+			Runtime: runtime, Arguments: []byte(fmt.Sprintf(`{"question":"owner","top_k":%d}`, count)),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output SearchTranscriptResult
+		if err := json.Unmarshal(result.Output, &output); err != nil {
+			t.Fatal(err)
+		}
+		if len(output.Citations) != count {
+			t.Fatalf("requested %d citations, got %d", count, len(output.Citations))
+		}
+	}
+	if pipeline.Config.TopK != 5 {
+		t.Fatal("tool mutated shared retrieval configuration")
+	}
+}
 
 func knowledgeAgentFixture(t *testing.T) (*repository.Repositories, *model.ChatSession, []int64) {
 	t.Helper()

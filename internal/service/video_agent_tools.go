@@ -50,6 +50,18 @@ func (t *VideoAgentTools) Registry() *VideoAgentToolRegistry {
 	return t.registry
 }
 
+// A tool's bounded result count takes precedence over the deployment default.
+// Copy the configuration so one search cannot change subsequent tool calls.
+func (t *VideoAgentTools) retrievalPipelineForTopK(topK int) *RetrievalPipeline {
+	pipeline := *t.pipeline
+	if topK > 0 && pipeline.Config != nil {
+		cfg := *pipeline.Config
+		cfg.TopK = topK
+		pipeline.Config = &cfg
+	}
+	return &pipeline
+}
+
 // SetStepObserver attaches an optional observer to the existing typed tool
 // methods. The default non-streaming Agent leaves it unset.
 func (t *VideoAgentTools) SetStepObserver(observer VideoAgentStepObserver) {
@@ -189,7 +201,7 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		step, err := t.failObservedStep(step, "当前视频尚未构建 RAG 索引")
 		return SearchTranscriptResult{}, step, err
 	}
-	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
+	result, err := t.retrievalPipelineForTopK(input.TopK).Retrieve(ctx, RetrievalPipelineRequest{
 		UserID: input.UserID, TaskID: input.TaskID, TaskIDs: input.TaskIDs, Question: input.Question, Recent: input.Recent,
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 	})
@@ -214,7 +226,7 @@ func (t *VideoAgentTools) SearchVisualEvidence(ctx context.Context, input Search
 		step, err := t.failObservedStep(step, "当前视频尚未构建视觉索引")
 		return SearchVisualEvidenceResult{}, step, err
 	}
-	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
+	result, err := t.retrievalPipelineForTopK(input.TopK).Retrieve(ctx, RetrievalPipelineRequest{
 		UserID: input.UserID, TaskID: input.TaskID, TaskIDs: input.TaskIDs, Question: input.Question, Recent: input.Recent,
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 		Modalities: []string{model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption},
