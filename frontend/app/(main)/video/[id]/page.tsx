@@ -120,7 +120,7 @@ function FrameRead({ children }: { children: ReactNode }) {
   )
 }
 
-export default function VideoWorkbenchPage({ params }: { params: { id: string } }) {
+export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string } }) {
   const taskId = Number(params.id)
   const router = useRouter()
   const toast = useToast()
@@ -595,6 +595,8 @@ export default function VideoWorkbenchPage({ params }: { params: { id: string } 
             )}
           </div>
           <VideoPlayer
+            key={`${taskId}-${searchParams?.t || '0'}`}
+            initialTimeMs={searchParams?.t ? Number(searchParams.t) : undefined}
             ref={playerRef}
             src={playbackUrl}
             title={title}

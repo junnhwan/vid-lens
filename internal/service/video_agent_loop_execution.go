@@ -120,7 +120,7 @@ func (r *VideoAgentLoopRunner) recoverResearchState(ctx context.Context, state *
 		if checkpoint.Result.Step.Tool != decision.Tool || checkpoint.Observation.Tool != decision.Tool || checkpoint.Observation.Step.Tool != decision.Tool {
 			return false, fmt.Errorf("persisted tool checkpoint %s has inconsistent action provenance", toolID)
 		}
-		if err := validateObservedResearchEvidence(runtime.TaskID, checkpoint.Observation.NewEvidence); err != nil {
+		if err := runtime.checkScope(ctx, checkpoint.Observation.NewEvidence); err != nil {
 			return false, err
 		}
 		applyRecoveredResearchStep(state, number, decision, checkpoint)
@@ -285,6 +285,9 @@ func plannerContextChars(state VideoAgentLoopState, tools []VideoAgentToolDefini
 }
 
 func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state VideoAgentLoopState, runtime VideoAgentToolRuntime, decision VideoAgentLoopDecision) (VideoAgentToolResult, VideoAgentLoopObservation, bool, error) {
+	if err := runtime.checkScope(ctx, state.Evidence); err != nil {
+		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
+	}
 	if r.execution == nil {
 		result, err := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
 		if err != nil {

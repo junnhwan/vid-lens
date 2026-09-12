@@ -100,6 +100,7 @@ func (t *VideoAgentTools) SetVisualInvestigator(investigator VisualInvestigator)
 }
 
 type SearchTranscriptInput struct {
+	TaskIDs        []int64
 	UserID         int64
 	TaskID         int64
 	Question       string
@@ -189,7 +190,7 @@ func (t *VideoAgentTools) SearchTranscript(ctx context.Context, input SearchTran
 		return SearchTranscriptResult{}, step, err
 	}
 	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
-		UserID: input.UserID, TaskIDs: []int64{input.TaskID}, Question: input.Question, Recent: input.Recent,
+		UserID: input.UserID, TaskID: input.TaskID, TaskIDs: input.TaskIDs, Question: input.Question, Recent: input.Recent,
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 	})
 	if err != nil {
@@ -214,7 +215,7 @@ func (t *VideoAgentTools) SearchVisualEvidence(ctx context.Context, input Search
 		return SearchVisualEvidenceResult{}, step, err
 	}
 	result, err := t.pipeline.Retrieve(ctx, RetrievalPipelineRequest{
-		UserID: input.UserID, TaskIDs: []int64{input.TaskID}, Question: input.Question, Recent: input.Recent,
+		UserID: input.UserID, TaskID: input.TaskID, TaskIDs: input.TaskIDs, Question: input.Question, Recent: input.Recent,
 		TopK: input.TopK, EmbeddingModel: input.EmbeddingModel, Embedding: input.Embedding,
 		Modalities: []string{model.ChunkModalityVisualOCR, model.ChunkModalityVisualCaption},
 	})

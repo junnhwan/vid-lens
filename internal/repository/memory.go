@@ -75,6 +75,21 @@ func (r *MemoryRepository) Append(ctx context.Context, item *model.AgentMemoryIt
 				return err
 			}
 		}
+		// Replaying a durable source must not resurrect its withdrawn/deleted item.
+		var replay []model.AgentMemoryItem
+		replayQuery := tx.Unscoped().Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ? AND content = ?", item.UserID, item.ScopeType, item.ScopeID, item.Kind, item.Content)
+		if item.SourceType == "user_message" {
+			replayQuery = replayQuery.Where("source_ref = ? OR status IN ?", item.SourceRef, []string{model.MemoryStatusDeleted, model.MemoryStatusWithdrawn})
+		} else {
+			replayQuery = replayQuery.Where("source_ref = ?", item.SourceRef)
+		}
+		if err := replayQuery.Order("created_at ASC").Limit(1).Find(&replay).Error; err != nil {
+			return err
+		}
+		if len(replay) > 0 {
+			result.Item = replay[0]
+			return nil
+		}
 		var existing []model.AgentMemoryItem
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND scope_type = ? AND scope_id = ? AND kind = ? AND status IN ?",

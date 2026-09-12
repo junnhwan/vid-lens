@@ -11,7 +11,8 @@ import (
 )
 
 type ChatRepository struct {
-	db *gorm.DB
+	durableMemoryCapture bool
+	db                   *gorm.DB
 }
 
 func NewChatRepository(db *gorm.DB) *ChatRepository {
@@ -77,14 +78,14 @@ func (r *ChatRepository) CreateExchange(userID int64, userMessage, assistantMess
 // CreateAgentRunExchange creates at most one user/assistant exchange for a
 // durable Agent run. The lookup and insert happen while the session row is
 // locked, so concurrent requests for the same run observe the same messages.
-func (r *ChatRepository) CreateAgentRunExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) (created bool, userMessageID, assistantMessageID int64, err error) {
+func (r *ChatRepository) CreateAgentRunExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64, captureMemory ...bool) (created bool, userMessageID, assistantMessageID int64, err error) {
 	if strings.TrimSpace(runID) == "" {
 		return false, 0, 0, gorm.ErrInvalidData
 	}
-	return r.createExchange(userID, strings.TrimSpace(runID), userMessage, assistantMessage, sourceTaskIDs)
+	return r.createExchange(userID, strings.TrimSpace(runID), userMessage, assistantMessage, sourceTaskIDs, captureMemory...)
 }
 
-func (r *ChatRepository) createExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64) (created bool, userMessageID, assistantMessageID int64, err error) {
+func (r *ChatRepository) createExchange(userID int64, runID string, userMessage, assistantMessage *model.ChatMessage, sourceTaskIDs []int64, captureMemory ...bool) (created bool, userMessageID, assistantMessageID int64, err error) {
 	if userMessage == nil || assistantMessage == nil ||
 		userMessage.UserID != userID || assistantMessage.UserID != userID ||
 		userMessage.SessionID <= 0 || userMessage.SessionID != assistantMessage.SessionID {
@@ -168,6 +169,11 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 		}
 		if err := createMessageSources(tx, sources); err != nil {
 			return err
+		}
+		if r.durableMemoryCapture && runID != "" && len(captureMemory) > 0 && captureMemory[0] {
+			if err := enqueueMemoryCapture(tx, userMessage); err != nil {
+				return err
+			}
 		}
 		created, userMessageID, assistantMessageID = true, userMessage.ID, assistantMessage.ID
 		return nil

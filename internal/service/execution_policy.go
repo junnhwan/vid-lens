@@ -105,8 +105,7 @@ func PolicyFor(intent Intent, scope Scope) ExecutionPolicy {
 		return directQAPolicy(scope)
 	case IntentTopicCompare, IntentSeriesLocate:
 		// 跨视频对比/系列定位必须放大检索范围到集合内 video_ids。
-		// BM25 在多 task 下不支持（rag_pipeline.go 检测 len(taskIDs)!=1 报错），
-		// 故集合档关 BM25、纯向量。recent 历史关断（KB member-safe，见 prepareRAGChat）。
+		// 集合同时使用向量和 BM25；历史正文仍保持 member-safe，见 prepareRAGChat。
 		return directQAPolicy(ScopeCollection)
 	case IntentTimelineLocate:
 		// 使用 direct_qa 的召回/rerank 预算，并由 prepare 层把无副作用解析出的

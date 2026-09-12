@@ -141,6 +141,8 @@ export const api = {
   deleteSession: (sid: number) => req<{ deleted: boolean }>(`/chat/sessions/${sid}`, 'DELETE'),
 
   // ============ 记忆治理 (设置页) ============
+  getMemoryCaptureStatus: () => req<{ pending:number; processing:number; failed:number }>('/memories/capture-status', 'GET'),
+  retryMemoryCaptures: () => req<unknown>('/memories/capture-retry', 'POST'),
   getMemoryPreference: () => req<MemoryPreferenceView>('/memories/preferences', 'GET'),
   updateMemoryPreference: (enabled: boolean, expected_version: number) =>
     req<MemoryPreferenceView>('/memories/preferences', 'PATCH', { enabled, expected_version }),
@@ -151,6 +153,10 @@ export const api = {
 
   // ============ 知识库 ============
   listKBs: () => req<KnowledgeBase[]>('/knowledge-bases', 'GET'),
+  testKnowledgeRetrieval: (id: number, question: string, mode: string, top_k = 5) => req<import('./knowledge').RetrievalTestResult>(`/knowledge-bases/${id}/retrieval-test`, 'POST', { question, mode, top_k }),
+  getRunDetail: (sid: number, rid: string) => req<import('./knowledge').RunDetail>(`/chat/sessions/${sid}/runs/${encodeURIComponent(rid)}`, 'GET'),
+  getSessionMemoryPolicy: (sid: number) => req<import('./knowledge').SessionMemoryPolicy>(`/chat/sessions/${sid}/memory-policy`, 'GET'),
+  updateSessionMemoryPolicy: (sid: number, policy: string, expected_version: number) => req<import('./knowledge').SessionMemoryPolicy>(`/chat/sessions/${sid}/memory-policy`, 'PATCH', { policy, expected_version }),
   getKB: (id: number) => req<KnowledgeBase>(`/knowledge-bases/${id}`, 'GET'),
   createKB: (name: string, description: string) =>
     req<KnowledgeBase>('/knowledge-bases', 'POST', { name, description }),

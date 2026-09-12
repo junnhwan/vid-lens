@@ -25,6 +25,7 @@ func AllModels() []interface{} {
 		&ChatMessage{},
 		&ChatMessageSource{},
 		&AgentMemoryItem{},
+		&MemoryCaptureJob{},
 		&AgentMemoryEvent{},
 		&AgentMemoryPreference{},
 		&AgentMemoryPolicyEvent{},

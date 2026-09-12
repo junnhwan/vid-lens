@@ -91,7 +91,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	_ = recentLimit
 
 	pipeline := s.newRetrievalPipeline(topK, chat, profile)
-	// 散落判定 3（KB → 强制 EnableVector=true/EnableBM25=false）由
+	// 知识库混合检索（EnableVector=true/EnableBM25=true）由
 	// policy.Scope==collection 统一表达；rerank 开关由 policy.Rerank 映射。
 	pipeline.applyPolicy(policy)
 	var timeRanges []TimestampRange

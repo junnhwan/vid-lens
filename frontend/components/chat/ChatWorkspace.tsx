@@ -17,6 +17,11 @@ import { Icon } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { DrawerVeil } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
+import { KnowledgeSources, KnowledgeEvidence } from '@/components/knowledge/KnowledgeSources'
+import { RunDetails, SessionMemoryControl } from '@/components/knowledge/RunDetails'
+import { replayLink } from '@/lib/knowledge'
+import knowledgeStyles from '@/components/knowledge/KnowledgeWorkspace.module.css'
+import type { KnowledgeBase } from '@/lib/types'
 import { fmtRelTime } from '@/lib/format'
 import type { Citation, ChatScopeType, VideoChatMode } from '@/lib/types'
 
@@ -42,6 +47,7 @@ const MODE_NOTE: Record<ChatUIMode, string> = {
 
 
 interface ChatWorkspaceProps {
+  knowledgeBase?: KnowledgeBase
   scopeType: ChatScopeType
   targetId: number
   scopeName: string
@@ -88,7 +94,7 @@ function formatDuration(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
 }
 
-export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const router = useRouter()
   const toast = useToast()
@@ -132,7 +138,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
 
   useEffect(() => {
     const el = scrollRef.current
-    if (el && followOutputRef.current) el.scrollTop = el.scrollHeight
+    if (el && followOutputRef.current && messages.length > 0) el.scrollTop = el.scrollHeight
   }, [messages])
 
   useEffect(() => {
@@ -194,7 +200,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
       if (window.matchMedia('(max-width: 1080px)').matches) setRailOpen(true)
     } else if (cite.taskId) {
       // 知识库范围没有统一的迷你播放器:跳到该片段所属视频的工作台
-      router.push(`/video/${cite.taskId}`)
+      router.push(replayLink(cite.taskId, cite.startMS, cite.timeRangeStatus))
     }
   }, [isVideo, router])
 
@@ -256,6 +262,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   return (
     <div className="chat-wrap">
       <div className="chat-col">
+        {knowledgeBase && <KnowledgeSources kb={knowledgeBase} hitIds={new Set([...(lastAssistant?.cites || []).map(c=>c.taskId || 0), ...agentTrace.steps.flatMap(s=>(s.hitRows || []).map(h=>h.task_id || 0))])} />}
         <div className="chat-scroll" ref={scrollRef} onScroll={event => {
           const el = event.currentTarget
           followOutputRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
@@ -267,6 +274,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   <BrandMark size={40} />
                   <h2>{isVideo ? '问这段视频' : `问「${scopeName}」`}</h2>
                 </div>
+                {!isVideo && <><p className={knowledgeStyles.intro}>把分散的视频连成可追溯的知识。比较观点、追踪主题，让每一个发现都有出处。</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
@@ -279,6 +287,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   <AgentMessageView
                     key={i}
                     msg={msg}
+                    sessionId={session?.id}
                     fallbackTitle={scopeName}
                     onOpenEvidence={openEvidence}
                     canJump={citationJumpable}
@@ -301,7 +310,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
               >
                 <Icon name="bolt" size="sm" />Chat
               </button>
-              {isVideo && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />Agent</button>}
+              <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? 'Agent' : '跨视频研究'}</button>
             </div>
             <div className="composer-tools" ref={historyRef}>
               <button
@@ -376,11 +385,11 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
               </button>
             </div>
             <div className="chat-status">{statusLine}</div>
-            <div className="suggest-row" style={{ marginTop: 2 }}>
+            {isVideo && <div className="suggest-row" style={{ marginTop: 2 }}>
               {suggestions.map(s => (
                 <button key={s} className="suggest" disabled={streaming} onClick={() => submit(s)}>{s}</button>
               ))}
-            </div>
+            </div>}
           </div>
         </div>
       </div>
@@ -411,12 +420,15 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
           <button className={`rail-tab${railTab === 'run' ? ' on' : ''}`} onClick={() => setRailTab('run')}>
             执行过程
           </button>
+          {!isVideo && <button className={`rail-tab${railTab === 'ev' ? ' on' : ''}`} onClick={()=>setRailTab('ev')}>来源证据 · {lastAssistant?.cites?.length || 0}</button>}
 
         </div>
         <div className="rail-body">
-          {agentRail ? (
+          {session && <SessionMemoryControl key={session.id} sessionId={session.id} disabled={streaming} />}
+          {!isVideo && railTab === 'ev' ? <KnowledgeEvidence cites={lastAssistant?.cites || []} onOpen={openEvidence} /> : agentRail ? (
               <>
                 <RunHeader mode={(agentRail.mode as AgentUIMode) || 'agent'} runId={agentRail.runId} />
+                {session && agentRail.runId && <RunDetails key={agentRail.runId} sessionId={session.id} runId={agentRail.runId} live={agentRail.live} />}
                 <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>
                   {agentRail.mode === 'research' ? '受限研究循环' : agentRail.mode === 'evidence_funnel' ? '固定漏斗' : '自主工具调用'}
                 </p>
@@ -489,8 +501,9 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, fallbackTitle, onOpenEvidence, canJump, onJump,
+  msg, sessionId, fallbackTitle, onOpenEvidence, canJump, onJump,
 }: {
+  sessionId?: number
   msg: ChatMsg
   fallbackTitle: string
   onOpenEvidence: (cite: CiteRef, cites: CiteRef[]) => void
@@ -527,6 +540,7 @@ function AgentMessageView({
         <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : 'Chat'}</span>
       </div>
       <ThinkingProcess message={msg} />
+      {sessionId && msg.agentRunId && !msg.streaming && <RunDetails sessionId={sessionId} runId={msg.agentRunId} live={false} />}
       <div className="answer">
         <MarkdownAnswer content={msg.content} onCite={openCite} />
         {waitingServer && (
@@ -568,7 +582,7 @@ function AgentMessageView({
                   {hasReplayRange(cite) && <span className="ctime mono">{formatTimeRange(cite.startMS, cite.endMS)}</span>}
                   <ModalityTag modality={cite.modality} />
                   {cite.timeRangeStatus && cite.timeRangeStatus !== 'exact' && (
-                    <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>粗粒度时间</span>
+                    <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>{cite.timeRangeStatus === 'unknown' ? '时间未知' : '粗粒度时间'}</span>
                   )}
                 </div>
                 <div className="cquote">{cite.anchorQuote || cite.content}</div>

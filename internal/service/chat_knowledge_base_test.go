@@ -121,7 +121,7 @@ func TestKnowledgeBaseChatForcesStrictRAGAndRejectsUnavailableMembers(t *testing
 	}
 }
 
-func TestVideoAgentRejectsKnowledgeBaseSession(t *testing.T) {
+func TestKnowledgeAgentRejectsEmptyCollection(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	kb := &model.KnowledgeBase{UserID: 7, Name: "kb"}
 	if err := repos.KnowledgeBase.Create(kb); err != nil {
@@ -133,7 +133,7 @@ func TestVideoAgentRejectsKnowledgeBaseSession(t *testing.T) {
 	}
 	svc := NewVideoAgentService(NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5}))
 	_, err := svc.Ask(context.Background(), VideoAgentRequest{UserID: 7, SessionID: session.ID, Question: "总结"}, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
-	if err == nil || !strings.Contains(err.Error(), "知识库会话") {
+	if err == nil || !strings.Contains(err.Error(), "没有可检索视频") {
 		t.Fatalf("err = %v", err)
 	}
 }

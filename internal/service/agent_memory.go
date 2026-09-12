@@ -520,6 +520,14 @@ type MemoryGovernanceService struct {
 	authorizer MemoryScopeAuthorizer
 }
 
+func (s *MemoryGovernanceService) CaptureStatus(ctx context.Context, userID int64) (repository.MemoryCaptureStatus, error) {
+	return s.repository.CaptureStatus(ctx, userID)
+}
+
+func (s *MemoryGovernanceService) RetryFailedCaptures(ctx context.Context, userID int64) error {
+	return s.repository.RetryFailedCaptures(ctx, userID)
+}
+
 func NewMemoryGovernanceService(memory *repository.MemoryRepository, authorizer MemoryScopeAuthorizer) *MemoryGovernanceService {
 	return &MemoryGovernanceService{repository: memory, authorizer: authorizer}
 }
@@ -746,7 +754,7 @@ func (w *AsyncMemoryWriter) write(ctx context.Context, candidate MemoryCandidate
 		observeMemoryBackground("policy", "disabled")
 		return nil
 	}
-	if w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
+	if result.Item.Status == model.MemoryStatusDeleted || result.Item.Status == model.MemoryStatusWithdrawn || w.projector == nil || strings.TrimSpace(result.Item.EmbeddingRef) != "" {
 		return nil
 	}
 	ref, err := w.projector.Project(ctx, result.Item)

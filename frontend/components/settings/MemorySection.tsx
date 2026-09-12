@@ -11,6 +11,10 @@ import { useToast } from '@/components/Toast'
 // 撤回不删除历史,只是不再参与召回;删除才是彻底移除。
 
 const SOURCE_TEXT: Record<string, string> = {
+  user_message: '用户明确表达',
+  user_preference: '明确回答偏好',
+  user_explicit: '用户明确偏好',
+  user_confirmation: '用户确认',
   conversation_summary: '会话总结',
   manual: '人工添加',
   session_summary: '会话总结',
@@ -45,6 +49,9 @@ function importanceText(v: number): string {
 export function MemorySection({ user }: { user: User | null }) {
   const toast = useToast()
   const [pref, setPref] = useState<MemoryPreferenceView | null>(null)
+  const [capture,setCapture] = useState<{pending:number;processing:number;failed:number} | null>(null)
+  const [captureError,setCaptureError] = useState('')
+  const [retrying,setRetrying] = useState(false)
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -57,10 +64,12 @@ export function MemorySection({ user }: { user: User | null }) {
     try {
       const [p, list] = await Promise.all([
         api.getMemoryPreference(),
-        api.listMemories('user', String(userId)).catch(() => [] as MemoryItem[]),
+        api.listMemories('user', String(userId)),
       ])
       setPref(p)
       setItems(list)
+      setCaptureError('')
+      try { setCapture(await api.getMemoryCaptureStatus()) } catch { setCapture(null);setCaptureError('后台记忆任务状态暂不可用') }
     } catch (e) {
       setLoadError(e instanceof ApiError ? e.message : '记忆治理信息加载失败')
     } finally {
@@ -159,6 +168,11 @@ export function MemorySection({ user }: { user: User | null }) {
             <p style={{ fontSize: 11.5, color: 'var(--tx-4)', marginTop: 8 }}>{reasonText(pref.reason || '') || '当前记忆能力未生效。'}</p>
           )}
 
+          <div className="pref-row" style={{marginTop:18}}>
+            <div className="pr-body"><b>后台记忆任务</b><span>{captureError || (capture ? `等待 ${capture.pending} · 处理中 ${capture.processing} · 失败 ${capture.failed}` : '加载中…')}</span><span>失败会有限重试；重试前仍会检查当前授权。</span></div>
+            {!!capture?.failed && <button className="btn btn-sm" disabled={retrying} onClick={async()=>{setRetrying(true);try{await api.retryMemoryCaptures();if(user)await load(user.id);toast.success('失败任务已重新排队')}catch(e){toast.error(e instanceof Error?e.message:'重试失败')}finally{setRetrying(false)}}}>{retrying?'排队中…':'重试失败任务'}</button>}
+            <button className="btn btn-sm btn-ghost" onClick={()=>user && void load(user.id)}>刷新</button>
+          </div>
           <div className="section-head" style={{ marginTop: 24 }}>
             <h2 style={{ fontSize: 14 }}>已有记忆</h2>
             <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{items.length} 条 · 用户范围</span>

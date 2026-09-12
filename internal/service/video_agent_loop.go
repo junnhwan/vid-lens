@@ -79,6 +79,7 @@ type VideoAgentLoopStep struct {
 }
 
 type VideoAgentLoopState struct {
+	ScopeTaskIDs     []int64                     `json:"scope_task_ids,omitempty"`
 	Goal             string                      `json:"goal"`
 	Status           VideoAgentLoopStatus        `json:"status"`
 	CurrentStep      int                         `json:"current_step"`
@@ -159,6 +160,10 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		return nil, err
 	}
 	state.Memory = runtime.MemorySnapshot
+	state.ScopeTaskIDs = append([]int64(nil), runtime.TaskIDs...)
+	if err := runtime.checkScope(ctx, nil); err != nil {
+		return nil, err
+	}
 	result := &VideoAgentLoopResult{State: state}
 	if r.execution != nil {
 		recoveredTerminal, recoverErr := r.recoverResearchState(ctx, &result.State, runtime)
@@ -171,6 +176,9 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 	}
 
 	for {
+		if err := runtime.checkScope(ctx, result.State.Evidence); err != nil {
+			return r.fail(result, "scope_changed", err)
+		}
 		if err := ctx.Err(); err != nil {
 			return r.fail(result, "request_cancelled", err)
 		}
@@ -233,6 +241,9 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 			return r.fail(result, "tool_failure", err)
 		}
 
+		if err := runtime.checkScope(ctx, observation.NewEvidence); err != nil {
+			return r.fail(result, "scope_changed", err)
+		}
 		step.Status = VideoAgentLoopStepCompleted
 		step.Observation = &observation
 		result.State.Steps = append(result.State.Steps, step)

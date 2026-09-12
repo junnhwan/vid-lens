@@ -1,6 +1,6 @@
 # VidLens Agent Memory：长期记忆设计
 
-状态：长期记忆最小切片与用户授权、会话级策略已形成后端契约；持久队列与知识库 Agent 接入仍待增强
+状态：长期记忆治理、知识库 Agent 召回及事务持久任务已接入；自动抽取仍采用保守的明确偏好规则。
 
 核验时间：2026-09-12（Asia/Shanghai）
 
@@ -76,7 +76,7 @@ memory item 的 created/conflicted/withdrawn/deleted 事件仍由 `agent_memory_
 
 ## 后端与前端契约
 
-本次只实现后端；前端可按以下契约后续接入。所有接口都要求 JWT，user id 只取服务端认证上下文。
+前端设置页与会话研究侧栏已接入以下契约。所有接口都要求 JWT，user id 只取服务端认证上下文。
 
 普通 JSON 接口沿用 `{ "code": 200, "message": "success", "data": ... }` 响应信封。请求格式错误返回 400；未认证返回 401；其他用户的会话统一返回 403，避免暴露资源是否存在；`expected_version` 过期返回 409；存储或策略服务不可用返回 500。前端应以 HTTP 状态码处理错误，并在 409 后重新 GET，不应自动覆盖。
 
@@ -201,16 +201,22 @@ MemoryWriter.enqueue(candidate_event) -> accepted/rejected/best-effort
 
 ## 落地约束
 
-第一版使用 PostgreSQL 表、事务事件、可选 pgvector 投影和进程内异步 worker，不需要 Neo4j 或新的消息系统。关闭 memory 功能时，默认 RAG 和现有 Agent 结果保持一致。
+生产路径使用 PostgreSQL 表、事务持久任务、可选 pgvector 投影和后台 worker，不需要新增消息系统。关闭 memory 功能时，默认 RAG 和现有 Agent 结果保持一致。
 
 本次测试已覆盖：用户隔离、四类 scope 隔离、资源越权拒绝、top-k/字符/token 上限、过期/撤回/删除/无来源过滤、冲突解释与并发完整性、删除向量投影、稳定 snapshot ids/version、planner 参数注入拒绝、敏感偏好过滤、语义检索及关系降级、embedding 与异步写入失败时回答成功、历史快照最小化；同时覆盖能力/用户/会话真值表、历史会话默认 `inherit`、默认关闭不召回也不 capture、版本冲突、并发单一胜者、策略审计、跨用户 API 拒绝、session/问答/SSE effective policy，以及已排队 capture 在关闭后写入前被事务复核拒绝。
 
 ## 剩余风险与后续边界
 
 - extractor 是保守的规则实现；真实 LLM JSON extractor 仍应通过现有 AI profile 注入，并继续使用相同 candidate 校验和失败降级边界。
-- 异步队列当前是进程内有界队列，进程在排空前崩溃会丢失尚未执行的 best-effort 写入；需要更强交付保证时可复用 RabbitMQ，但不能让消息队列成为记忆事实源。
+- Agent 完成消息与 memory_capture_jobs 在同一事务提交。任务只保存原消息 ID，不复制正文；worker 使用 60 秒 CAS 租约和 45 秒处理超时，最多 5 次尝试，失败任务可由 owner 从设置页重试。进程崩溃后回收过期租约。任务入队与真正写入均检查会话授权；关闭功能不会启动 worker。
 - Run memory 的读取按 `agent_runs.user_id + run_id` 校验，自动写入还要求该 Run 属于 candidate 的同一 session；历史上只按非空 run id 放行的行为不再保留。
-- 当前没有知识库 Agent；因此 `knowledge_base` scope 已具备模型、权限、召回和治理能力，但只会在后续真正的 scope-aware KB Agent 接入，不能把普通 KB RAG 描述为已使用长期记忆。
+- 知识库 Agent 召回 user、knowledge_base、run 范围；普通 KB Chat 仍不使用长期记忆。自动抽取仅写用户明确偏好，不把跨视频答案写成事实记忆。
 - 聊天历史采用“只保存 snapshot identity”的删除语义：删除后旧内容不能从历史快照恢复，但历史中仍保留当时用过的 memory id/version 作为最小审计标识。
 
 验证（2026-09-12）：`go test ./...`、`go vet ./...`、`go build ./cmd/server ./cmd/rag-eval ./cmd/rag-reindex ./cmd/rag-audit`、记忆策略并发路径的 `go test -race`、`git diff --check` 均通过；未修改前端。
+
+## 持久任务与治理界面
+
+`GET /api/v1/memories/capture-status` 返回当前用户的 pending/processing/failed 数量；`POST /api/v1/memories/capture-retry` 重新排队该用户的失败任务。原始正文只从 owner-scoped user message 读取，消息或会话删除后任务不再产生记忆。任务完成使用 lease token CAS，旧 worker 不能完成新租约。
+
+精确来源重放复用原 item；已撤回或删除的自动偏好不因后台重试重新建立。投影失败保留关系事实并进入有限重试。不同来源重复内容在撤回/删除后也不会自动复活相同偏好；后续人工纠正/重新建立应使用明确治理操作。记忆 UI 展示任务状态、重试入口和会话覆盖，读取失败不伪装成空记忆列表。

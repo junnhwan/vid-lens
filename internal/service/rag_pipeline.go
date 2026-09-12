@@ -64,6 +64,7 @@ func NewConfiguredRetrievalPipeline(repos *repository.Repositories, retriever RA
 }
 
 type RetrievalPipelineRequest struct {
+	Debug          bool
 	UserID         int64
 	TaskID         int64 // deprecated compatibility; new callers use TaskIDs
 	TaskIDs        []int64
@@ -83,9 +84,17 @@ type RetrievalPipelineResult struct {
 }
 
 type RetrievalTrace struct {
-	OriginalQuery    string   `json:"original_query,omitempty"`
-	RewrittenQueries []string `json:"rewritten_queries,omitempty"`
-	Fallbacks        []string `json:"fallbacks,omitempty"`
+	Stages           []RetrievalStage `json:"stages,omitempty"`
+	DurationMS       int64            `json:"duration_ms"`
+	OriginalQuery    string           `json:"original_query,omitempty"`
+	RewrittenQueries []string         `json:"rewritten_queries,omitempty"`
+	Fallbacks        []string         `json:"fallbacks,omitempty"`
+}
+
+type RetrievalStage struct {
+	Name      string     `json:"name"`
+	Query     string     `json:"query,omitempty"`
+	Citations []Citation `json:"citations"`
 }
 
 func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineRequest) (RetrievalPipelineResult, error) {
@@ -167,13 +176,19 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			}
 		}
 		if enableBM25 {
-			if len(taskIDs) != 1 {
-				return RetrievalPipelineResult{}, fmt.Errorf("multi-task retrieval does not support BM25")
-			}
 			var err error
-			keywordChunks, err = p.keywordChunks(req.UserID, taskIDs[0], req.EmbeddingModel, query, candidateK)
+			keywordChunks, err = p.collectionKeywordChunks(ctx, req.UserID, taskIDs, req.EmbeddingModel, query, candidateK)
 			if err != nil {
 				return RetrievalPipelineResult{}, err
+			}
+		}
+		allowed := make(map[int64]bool, len(taskIDs))
+		for _, id := range taskIDs {
+			allowed[id] = true
+		}
+		for _, chunk := range vectorChunks {
+			if !allowed[chunk.TaskID] {
+				return RetrievalPipelineResult{}, fmt.Errorf("retriever returned evidence outside the authorized scope")
 			}
 		}
 		if err := p.hydrateChunkProvenance(req.UserID, taskIDs, req.EmbeddingModel, vectorChunks); err != nil {
@@ -187,6 +202,17 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		vectorChunks = filterChunksByModalities(vectorChunks, req.Modalities)
 		keywordChunks = filterChunksByModalities(keywordChunks, req.Modalities)
 		fused := FuseRetrievedChunks(vectorChunks, keywordChunks, candidateK, rrfK)
+		if req.Debug {
+			for _, stage := range []struct {
+				name   string
+				chunks []RetrievedChunk
+			}{{"vector", vectorChunks}, {"keyword", keywordChunks}, {"fusion", fused}} {
+				if err := p.hydrateVideoTitles(req.UserID, stage.chunks); err != nil {
+					return RetrievalPipelineResult{}, err
+				}
+				trace.Stages = append(trace.Stages, RetrievalStage{Name: stage.name, Query: query, Citations: buildCitations(req.Question, stage.chunks)})
+			}
+		}
 		for i := range fused {
 			fused[i].MatchedQuery = query
 		}
@@ -233,6 +259,10 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			metrics.SetRAGModalityResults(intent, modality, modalityCounts[modality])
 		}
 	}
+	trace.DurationMS = time.Since(startedAt).Milliseconds()
+	if req.Debug {
+		trace.Stages = append(trace.Stages, RetrievalStage{Name: "final", Citations: buildCitations(req.Question, citations)})
+	}
 	return RetrievalPipelineResult{
 		Citations: citations,
 		Rewrite:   rewrite,
@@ -269,7 +299,7 @@ func filterChunksByTimeRanges(chunks []RetrievedChunk, ranges []TimestampRange) 
 // ExecutionPolicy 不新建检索参数，只生产 Config 的字段值。
 //
 // 映射（消掉散落 if）：
-//   - Scope==collection → 强制 EnableVector=true / EnableBM25=false
+//   - Scope==collection → 强制 EnableVector=true / EnableBM25=true
 //     （BM25 在多 task 下不支持，见 Retrieve 内 len(taskIDs)!=1 报错；KB 跨视频必纯向量）。
 //   - Rerank==false → RerankerMode=none / reranker 置 nil（关 rerank）。
 //   - Rerank==true → 保留 pipeline 已配置的 reranker（deterministic / model）。
@@ -304,7 +334,7 @@ func (p *RetrievalPipeline) applyPolicy(policy ExecutionPolicy) {
 	}
 	if needCollection {
 		p.Config.EnableVector = true
-		p.Config.EnableBM25 = false
+		p.Config.EnableBM25 = true
 	}
 	if needNoRerank {
 		p.Config.RerankerMode = RerankerModeNone
@@ -337,17 +367,21 @@ func (p *RetrievalPipeline) rewrite(ctx context.Context, req RetrievalPipelineRe
 }
 
 func (p *RetrievalPipeline) keywordChunks(userID, taskID int64, embeddingModel, query string, limit int) ([]RetrievedChunk, error) {
+	return p.collectionKeywordChunks(context.Background(), userID, []int64{taskID}, embeddingModel, query, limit)
+}
+
+func (p *RetrievalPipeline) collectionKeywordChunks(ctx context.Context, userID int64, taskIDs []int64, embeddingModel, query string, limit int) ([]RetrievedChunk, error) {
 	if p.repos == nil || p.repos.VideoChunk == nil {
 		return nil, nil
 	}
-	keywordResults, err := p.repos.VideoChunk.SearchByBM25(userID, taskID, embeddingModel, ExtractQueryTerms(query), limit)
+	keywordResults, err := p.repos.VideoChunk.SearchTasksByBM25(ctx, userID, taskIDs, embeddingModel, ExtractQueryTerms(query), limit)
 	if err != nil {
 		return nil, err
 	}
 	chunks := make([]RetrievedChunk, 0, len(keywordResults))
 	for _, result := range keywordResults {
 		chunks = append(chunks, RetrievedChunk{
-			TaskID:      taskID,
+			TaskID:      result.Chunk.TaskID,
 			EvidenceID:  result.Chunk.VectorID,
 			ChunkID:     result.Chunk.ID,
 			ChunkIndex:  result.Chunk.ChunkIndex,

@@ -26,6 +26,8 @@ type VideoAgentToolDefinition struct {
 // serialized into a planner action. Tool arguments remain JSON so a future
 // planner can produce them without knowing concrete Go input types.
 type VideoAgentToolRuntime struct {
+	TaskIDs        []int64
+	ValidateScope  func(context.Context) error
 	UserID         int64
 	TaskID         int64
 	Recent         []model.ChatMessage
@@ -121,6 +123,37 @@ func (r *VideoAgentToolRegistry) Definitions() []VideoAgentToolDefinition {
 }
 
 func (r *VideoAgentToolRegistry) Execute(ctx context.Context, name string, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
+	if err := request.Runtime.checkScope(ctx, nil); err != nil {
+		return VideoAgentToolResult{}, err
+	}
+	if len(request.Runtime.TaskIDs) > 0 {
+		var args map[string]json.RawMessage
+		if err := json.Unmarshal(request.Arguments, &args); err != nil {
+			return VideoAgentToolResult{}, err
+		}
+		var selected int64
+		if raw, ok := args["task_id"]; ok {
+			if err := json.Unmarshal(raw, &selected); err != nil || selected <= 0 {
+				return VideoAgentToolResult{}, errors.New("task_id 必须是授权视频标识")
+			}
+			found := false
+			for _, id := range request.Runtime.TaskIDs {
+				if id == selected {
+					found = true
+				}
+			}
+			if !found {
+				return VideoAgentToolResult{}, errors.New("工具不能访问知识库范围外的视频")
+			}
+			delete(args, "task_id")
+			request.Arguments, _ = json.Marshal(args)
+			request.Runtime.TaskID = selected
+			request.Runtime.TaskIDs = []int64{selected}
+		}
+		if name != VideoAgentToolSearchTranscript && name != VideoAgentToolSearchVisualEvidence && name != VideoAgentToolBuildCitedAnswer && selected == 0 {
+			return VideoAgentToolResult{}, errors.New("窗口工具必须指定已命中视频的 task_id")
+		}
+	}
 	tool, err := r.Lookup(name)
 	if err != nil {
 		return VideoAgentToolResult{
@@ -221,9 +254,16 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 				if topK <= 0 {
 					topK = request.Runtime.TopK
 				}
+				if request.Runtime.TopK > 0 && topK > request.Runtime.TopK {
+					topK = request.Runtime.TopK
+				}
+				if topK > 10 {
+					topK = 10
+				}
 				result, step, err := tools.SearchTranscript(ctx, SearchTranscriptInput{
 					UserID:         request.Runtime.UserID,
 					TaskID:         request.Runtime.TaskID,
+					TaskIDs:        request.Runtime.TaskIDs,
 					Question:       args.Question,
 					Recent:         request.Runtime.Recent,
 					TopK:           topK,
@@ -244,8 +284,15 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 				if topK <= 0 {
 					topK = request.Runtime.TopK
 				}
+				if request.Runtime.TopK > 0 && topK > request.Runtime.TopK {
+					topK = request.Runtime.TopK
+				}
+				if topK > 10 {
+					topK = 10
+				}
 				result, step, err := tools.SearchVisualEvidence(ctx, SearchVisualEvidenceInput{
-					UserID: request.Runtime.UserID, TaskID: request.Runtime.TaskID, Question: args.Question, Recent: request.Runtime.Recent,
+					TaskIDs: request.Runtime.TaskIDs,
+					UserID:  request.Runtime.UserID, TaskID: request.Runtime.TaskID, Question: args.Question, Recent: request.Runtime.Recent,
 					TopK: topK, EmbeddingModel: request.Runtime.EmbeddingModel, Embedding: request.Runtime.Embedding,
 				})
 				return marshalVideoAgentToolResult(result, step, err)

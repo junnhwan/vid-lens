@@ -131,6 +131,15 @@ func (r *VideoChunkRepository) ListVisualByTimeRange(userID, taskID int64, embed
 }
 
 func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel string, terms []string, limit int) ([]VideoChunkSearchResult, error) {
+	return r.SearchTasksByBM25(context.Background(), userID, []int64{taskID}, embeddingModel, terms, limit)
+}
+
+// SearchTasksByBM25 uses one authorized collection as the corpus, so scores
+// share document-frequency and length statistics across videos.
+func (r *VideoChunkRepository) SearchTasksByBM25(ctx context.Context, userID int64, taskIDs []int64, embeddingModel string, terms []string, limit int) ([]VideoChunkSearchResult, error) {
+	if userID <= 0 || len(taskIDs) == 0 {
+		return nil, nil
+	}
 	terms = normalizeSearchTerms(terms)
 	if len(terms) == 0 {
 		return nil, nil
@@ -142,7 +151,9 @@ func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel
 		limit = 50
 	}
 
-	chunks, err := r.ListByTaskID(userID, taskID, embeddingModel)
+	var chunks []model.VideoChunk
+	err := r.db.WithContext(ctx).Where("user_id = ? AND task_id IN ? AND embedding_model = ?", userID, taskIDs, embeddingModel).
+		Order("task_id ASC, chunk_index ASC, id ASC").Find(&chunks).Error
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +166,9 @@ func (r *VideoChunkRepository) SearchByBM25(userID, taskID int64, embeddingModel
 	docFreq := make(map[string]int, len(terms))
 	totalLength := 0.0
 	for i, chunk := range chunks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		tokens := tokenizeBM25Text(chunk.Content)
 		length := float64(len(tokens))
 		if length <= 0 {

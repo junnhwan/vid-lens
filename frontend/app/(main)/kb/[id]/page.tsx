@@ -151,8 +151,9 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
           </button>
         )}
         <span style={{ flex: 1 }} />
+        <button className="btn btn-ghost" onClick={() => router.push(`/kb/${kb.id}/retrieval`)}><Icon name="search" size="sm" />检索测试台</button>
         <button className="btn btn-primary" onClick={() => router.push(`/chat/kb/${kb.id}`)}>
-          <Icon name="message" size="sm" />进入问答
+          <Icon name="message" size="sm" />进入研究工作区
         </button>
       </div>
 

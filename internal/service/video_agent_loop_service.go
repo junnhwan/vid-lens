@@ -45,8 +45,12 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if session == nil {
 		return nil, errors.New("无权访问此会话")
 	}
+	var memberIDs []int64
 	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		return nil, errors.New("知识库会话暂不支持 Agent")
+		memberIDs, err = s.chatSvc.sessionRetrievalTaskIDs(req.UserID, session, profile.EmbeddingModel)
+		if err != nil {
+			return nil, err
+		}
 	}
 	memoryPolicy := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
 	if req.TopK <= 0 {
@@ -92,6 +96,10 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			return nil, err
 		}
 		frozenPolicy, budget = loopAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
+		frozenPolicy.MemberTaskIDs = memberIDs
+	}
+	if len(memberIDs) > 0 && !sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) {
+		return nil, errKnowledgeMembershipChanged
 	}
 	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentLoopTemplate), "default", profile, frozenPolicy, budget)
 	if err != nil {
@@ -135,17 +143,25 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		defer cancel()
 	}
 	recentLimit := s.chatSvc.cfg.RecentTurns * 2
-	recent, err := s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
+	var recent []model.ChatMessage
+	if len(memberIDs) == 0 {
+		recent, err = s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
+	} else {
+		recentLimit = 0
+	}
 	if err != nil {
 		return nil, err
 	}
-	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal, memoryPolicy)
+	memorySnapshot := s.loadSessionAgentMemorySnapshot(ctx, req.UserID, session, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	pipeline := s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile)
 	// The Planner supplies the search query; do not hide another LLM call inside a tool.
 	pipeline.rewriter = NoopQueryRewriter{}
 	tools := NewVideoAgentTools(s.chatSvc.repos, pipeline, chat)
 	tools.SetVisualInvestigator(s.visualInvestigator)
+	if len(memberIDs) > 0 {
+		tools.Registry().useCollectionSchemas()
+	}
 	tools.SetMemorySnapshot(memorySnapshot)
 	tools.SetStepObserver(req.Observer)
 	tools.emitAnswer = req.EmitAnswer
@@ -170,15 +186,36 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if err := runner.SetDurableExecution(journal, req.UserID, runID); err != nil {
 		return nil, err
 	}
+	var validateScope func(context.Context) error
+	if len(memberIDs) > 0 {
+		validateScope = func(checkCtx context.Context) error {
+			if err := checkCtx.Err(); err != nil {
+				return err
+			}
+			current, checkErr := s.chatSvc.sessionRetrievalTaskIDs(req.UserID, session, profile.EmbeddingModel)
+			if checkErr != nil {
+				return checkErr
+			}
+			if !sameTaskIDs(memberIDs, current) {
+				return errKnowledgeMembershipChanged
+			}
+			return nil
+		}
+	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
 		UserID:         req.UserID,
 		TaskID:         session.TaskID,
+		TaskIDs:        memberIDs,
+		ValidateScope:  validateScope,
 		Recent:         recent,
 		TopK:           req.TopK,
 		EmbeddingModel: profile.EmbeddingModel,
 		Embedding:      embedding,
 		MemorySnapshot: memorySnapshot,
 	})
+	if err == nil && validateScope != nil {
+		err = validateScope(ctx)
+	}
 	trace := videoAgentLoopTrace(runResult)
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)

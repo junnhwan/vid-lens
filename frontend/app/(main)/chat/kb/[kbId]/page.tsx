@@ -7,8 +7,7 @@ import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
 import { Icon } from '@/components/ui/Icon'
 
-// 知识库问答(/chat/kb/:id)。后端只支持 strict 快速问答(跨视频检索),
-// Agent/研究/漏斗在 UI 以禁用态呈现,不做假象。
+// 知识库问答与跨视频研究共用实时会话工作区。
 
 const SUGGESTIONS = [
   '这些视频共同讨论了什么主题?',
@@ -67,6 +66,7 @@ export default function KBChatPage({ params }: { params: { kbId: string } }) {
 
   return (
     <ChatWorkspace
+      knowledgeBase={kb}
       scopeType="knowledge_base"
       targetId={kbId}
       scopeName={kb.name}

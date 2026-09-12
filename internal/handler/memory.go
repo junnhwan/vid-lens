@@ -19,6 +19,23 @@ type MemoryHandler struct {
 	policyService *service.MemoryPolicyService
 }
 
+func (h *MemoryHandler) CaptureStatus(c *gin.Context) {
+	result, err := h.service.CaptureStatus(c.Request.Context(), middleware.GetUserID(c))
+	if err != nil {
+		response.InternalError(c, "读取记忆任务状态失败")
+		return
+	}
+	response.OK(c, result)
+}
+
+func (h *MemoryHandler) RetryCaptures(c *gin.Context) {
+	if err := h.service.RetryFailedCaptures(c.Request.Context(), middleware.GetUserID(c)); err != nil {
+		response.InternalError(c, "重试记忆任务失败")
+		return
+	}
+	response.OK(c, gin.H{"queued": true})
+}
+
 func NewMemoryHandler(memory *service.MemoryGovernanceService, policy ...*service.MemoryPolicyService) *MemoryHandler {
 	handler := &MemoryHandler{service: memory}
 	if len(policy) > 0 {

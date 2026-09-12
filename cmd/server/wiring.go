@@ -40,7 +40,7 @@ type serverApplication struct {
 	taskCleanupScheduler *service.TaskCleanupScheduler
 	mq                   config.MQConfig
 	memoryWriter         *service.AsyncMemoryWriter
-	memoryCapture        *service.AsyncMemoryCapture
+	memoryCapture        *service.DurableMemoryCapture
 }
 
 func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
@@ -162,7 +162,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)
 	memoryPolicySvc := service.NewMemoryPolicyService(deps.repos.Memory, deps.cfg.Memory.Enabled)
 	var memoryWriter *service.AsyncMemoryWriter
-	var memoryCapture *service.AsyncMemoryCapture
+	var memoryCapture *service.DurableMemoryCapture
 	var longTermMemory service.MemoryProvider
 	if deps.cfg.Memory.Enabled && deps.repos.Memory != nil {
 		var projector service.MemoryProjector
@@ -195,10 +195,11 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			service.AgentMemoryConfig{TopK: deps.cfg.Memory.TopK, MaxChars: deps.cfg.Memory.MaxChars, MaxTokens: deps.cfg.Memory.MaxTokens})
 		longTermMemory = provider
 		memoryWriter = service.NewAsyncMemoryWriter(deps.repos.Memory, memoryAuthorizer, projector, deps.cfg.Memory.QueueSize)
-		memoryCapture = service.NewAsyncMemoryCapture(service.ExplicitPreferenceExtractor{}, memoryWriter, deps.cfg.Memory.QueueSize)
+		deps.repos.Chat.EnableDurableMemoryCapture(true)
+		memoryCapture = service.NewDurableMemoryCapture(deps.repos.Memory, service.ExplicitPreferenceExtractor{}, memoryWriter)
 	}
 	chatSvc := service.NewChatServiceWithDependencies(deps.repos, deps.ragRetriever, chatConfig, service.ChatDependencies{
-		Memory: service.NewRedisChatMemoryStore(deps.rdb), LongTermMemory: longTermMemory, MemoryCapture: memoryCapture,
+		Memory: service.NewRedisChatMemoryStore(deps.rdb), LongTermMemory: longTermMemory,
 		MemoryPolicy: memoryPolicySvc,
 		Recorder:     aiObserver,
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),

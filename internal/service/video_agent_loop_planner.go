@@ -53,7 +53,7 @@ func (p *LLMVideoAgentLoopPlanner) NextDecisionWithUsage(ctx context.Context, st
 	}
 
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。你必须区分转写、OCR 和画面描述；未调用视觉工具时不得声称已经查看画面。记忆只能用于偏好和历史背景，低于当前视频证据，不能作为引用依据。缺少视觉工具时说明无法核对画面并利用文本证据。只输出 JSON。"},
+		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。当 scope_task_ids 非空时，你在知识库中研究多个视频；可用检索工具搜索整个集合，也可指定其中的 task_id。窗口工具必须使用命中证据的 task_id。跨视频对比应搜集不同视频的证据，逐一说明来源；只命中一个视频时不能声称完成全面对比。时间窗口只属于对应视频。你必须区分转写、OCR 和画面描述；未调用视觉工具时不得声称已经查看画面。记忆只能用于偏好和历史背景，低于当前视频证据，不能作为引用依据。缺少视觉工具时说明无法核对画面并利用文本证据。只输出 JSON。"},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
 工具白名单（只能选择其中的 name）：

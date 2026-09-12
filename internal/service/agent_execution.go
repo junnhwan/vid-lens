@@ -30,6 +30,7 @@ type frozenAgentProfile struct {
 }
 
 type frozenAgentPolicy struct {
+	MemberTaskIDs         []int64  `json:"member_task_ids,omitempty"`
 	EngineVersion         int      `json:"engine_version,omitempty"`
 	TopK                  int      `json:"top_k"`
 	MaxSteps              int      `json:"max_steps"`

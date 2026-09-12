@@ -153,32 +153,28 @@ func TestExecutionPolicyKnowledgeBaseIsCollectionScopeAndPureVector(t *testing.T
 	}
 }
 
-func TestExecutionPolicyCollectionScopeDisablesBM25(t *testing.T) {
-	// Scope=collection 直接断言 BM25 被关（policy→config 行为可观察差异）。
-	// 用 seedVideoChunks + 真 BM25 路径：若 BM25 仍开，多 task 会在 Retrieve 内报错
-	// "multi-task retrieval does not support BM25"；关掉则只走向量不报错。
+func TestExecutionPolicyCollectionScopeRetrievesKeywordsAcrossVideos(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "embed", []string{"kw-one"})
-	seedVideoChunks(t, repos, 7, 2, "embed", []string{"kw-two"})
-	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{{EvidenceID: "v1", ChunkID: 1, Content: "向量片段"}}}}
+	seedVideoChunks(t, repos, 7, 1, "embed", []string{"owner token"})
+	seedVideoChunks(t, repos, 7, 2, "embed", []string{"owner lease"})
+	seedVideoChunks(t, repos, 8, 3, "embed", []string{"owner private"})
 	cfg := DefaultRAGRetrievalConfig()
 	cfg.NeighborRadius = 0
-	pipeline := &RetrievalPipeline{repos: repos, retriever: retriever, Config: &cfg}
-
-	// 不 applyPolicy（仍 BM25=on）：多 task 应报错。
-	_, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskIDs: []int64{1, 2}, Question: "q", EmbeddingModel: "embed", Embedding: &fakeEmbeddingClient{dim: 3}})
-	if err == nil || !strings.Contains(err.Error(), "multi-task retrieval does not support BM25") {
-		t.Fatalf("baseline multi-task BM25 err = %v, want BM25 unsupported", err)
+	p := &RetrievalPipeline{repos: repos, retriever: &fakeRetriever{}, Config: &cfg}
+	p.applyPolicy(PolicyFor(IntentTopicCompare, ScopeCollection))
+	result, err := p.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskIDs: []int64{1, 2}, Question: "owner", EmbeddingModel: "embed", Embedding: &fakeEmbeddingClient{dim: 3}})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// applyPolicy(collection) 关 BM25：多 task 走纯向量不报错。
-	pipeline2 := &RetrievalPipeline{repos: repos, retriever: retriever, Config: &cfg}
-	pipeline2.applyPolicy(PolicyFor(IntentTopicCompare, ScopeCollection))
-	if _, err := pipeline2.Retrieve(context.Background(), RetrievalPipelineRequest{UserID: 7, TaskIDs: []int64{1, 2}, Question: "q", EmbeddingModel: "embed", Embedding: &fakeEmbeddingClient{dim: 3}}); err != nil {
-		t.Fatalf("collection scope should disable BM25 and allow multi-task vector retrieval, err = %v", err)
+	found := map[int64]bool{}
+	for _, c := range result.Citations {
+		found[c.TaskID] = true
+		if c.KeywordRank == 0 {
+			t.Fatalf("missing keyword rank: %+v", c)
+		}
 	}
-	if pipeline2.Config.EnableBM25 {
-		t.Fatalf("collection scope should set EnableBM25=false, got cfg=%+v", pipeline2.Config)
+	if len(found) != 2 || !found[1] || !found[2] {
+		t.Fatalf("wrong corpus: %+v", result.Citations)
 	}
 }
 

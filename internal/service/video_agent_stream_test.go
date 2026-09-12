@@ -170,7 +170,7 @@ func TestVideoAgentStreamStopsPromptlyWhenRequestIsCanceled(t *testing.T) {
 	}
 }
 
-func TestVideoAgentStreamKeepsResearchAndKnowledgeBaseScopesClosed(t *testing.T) {
+func TestVideoAgentStreamRejectsRetiredModeAndMissingKnowledgeBase(t *testing.T) {
 	repos, _, session := newVideoAgentTestSession(t)
 	agent := NewVideoAgentService(NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5}))
 	profile := ai.Profile{EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model"}
@@ -189,7 +189,7 @@ func TestVideoAgentStreamKeepsResearchAndKnowledgeBaseScopesClosed(t *testing.T)
 	_, err = agent.Stream(context.Background(), VideoAgentStreamRequest{
 		UserID: session.UserID, SessionID: kbSession.ID, Question: "知识库测试", Mode: AgentStreamMode,
 	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{}, profile, func(AgentStreamEvent) error { return nil })
-	if err == nil || err.Error() != "知识库会话暂不支持 Agent 问答" {
+	if err == nil || err.Error() != "知识库不存在或无权限" {
 		t.Fatalf("knowledge-base stream error = %v", err)
 	}
 }

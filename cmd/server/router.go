@@ -62,6 +62,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				chat.DELETE("/sessions/:session_id", handlers.chat.DeleteSession)
 				chat.GET("/sessions/:session_id/messages", handlers.chat.ListMessages)
 				chat.GET("/sessions/:session_id/runs", handlers.chat.ListRunHistory)
+				chat.GET("/sessions/:session_id/runs/:run_id", handlers.chat.GetRunDetail)
 				chat.POST("/sessions/:session_id/messages", middleware.RateLimit(rateLimiter), handlers.chat.Ask)
 				// Experimental: tool-loop agent QA. Not the default product path.
 				chat.POST("/sessions/:session_id/messages/agent", middleware.RateLimit(rateLimiter), handlers.chat.AskAgent)
@@ -73,6 +74,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				knowledgeBases.POST("", handlers.knowledgeBases.Create)
 				knowledgeBases.GET("", handlers.knowledgeBases.List)
 				knowledgeBases.GET("/:id", handlers.knowledgeBases.Get)
+				knowledgeBases.POST("/:id/retrieval-test", middleware.RateLimit(rateLimiter), handlers.chat.TestKnowledgeRetrieval)
 				knowledgeBases.PATCH("/:id", handlers.knowledgeBases.Update)
 				knowledgeBases.DELETE("/:id", handlers.knowledgeBases.Delete)
 				knowledgeBases.POST("/:id/videos", handlers.knowledgeBases.AddVideo)
@@ -81,6 +83,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			memories := auth.Group("/memories")
 			{
 				memories.GET("/preferences", handlers.memory.GetPreference)
+				memories.GET("/capture-status", handlers.memory.CaptureStatus)
+				memories.POST("/capture-retry", middleware.RateLimit(rateLimiter), handlers.memory.RetryCaptures)
 				memories.PATCH("/preferences", handlers.memory.UpdatePreference)
 				memories.GET("", handlers.memory.List)
 				memories.POST("/:memory_id/withdraw", handlers.memory.Withdraw)

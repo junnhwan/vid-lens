@@ -24,6 +24,7 @@ export interface VideoPlayerHandle {
 }
 
 interface VideoPlayerProps {
+  initialTimeMs?: number
   src: string | null
   /** HUD 左上角展示的标题(时间码 · 标题) */
   title?: string
@@ -41,8 +42,9 @@ interface VideoPlayerProps {
 const PLAYHEAD_NOTIFY_MS = 250
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
-  function VideoPlayer({ src, title, compact, fallbackText, onPlayhead, onNeedRefresh, className }, ref) {
+  function VideoPlayer({ initialTimeMs, src, title, compact, fallbackText, onPlayhead, onNeedRefresh, className }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null)
+    const initialSeekApplied = useRef(false)
     const fillRef = useRef<HTMLDivElement | null>(null)
     const curRef = useRef<HTMLDivElement | null>(null)
     const timeRef = useRef<HTMLElement | null>(null)
@@ -198,6 +200,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               onLoadedMetadata={e => {
                 const d = e.currentTarget.duration
                 if (Number.isFinite(d)) setDurationMs(d * 1000)
+                if (!initialSeekApplied.current && initialTimeMs !== undefined && Number.isFinite(initialTimeMs) && initialTimeMs >= 0) {
+                  e.currentTarget.currentTime = Math.min(initialTimeMs / 1000, Number.isFinite(d) ? Math.max(0,d - .01) : initialTimeMs / 1000)
+                  initialSeekApplied.current = true
+                }
                 const resume = resumeRef.current
                 if (resume) {
                   resumeRef.current = null

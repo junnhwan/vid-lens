@@ -108,10 +108,7 @@ func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*mod
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		return nil, fmt.Errorf("知识库会话暂不支持 Agent 问答")
-	}
-	if session.ScopeType != "" && session.ScopeType != model.ChatScopeVideo {
+	if session.ScopeType != "" && session.ScopeType != model.ChatScopeVideo && session.ScopeType != model.ChatScopeKnowledgeBase {
 		return nil, fmt.Errorf("Agent 仅支持单视频会话")
 	}
 	return session, nil
@@ -134,7 +131,11 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
 	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model}
-	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, nil)
+	sourceIDs := make([]int64, 0, len(result.Citations))
+	for _, c := range result.Citations {
+		sourceIDs = append(sourceIDs, c.TaskID)
+	}
+	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, normalizeTaskIDs(sourceIDs), result.MemoryPolicy.EffectiveEnabled)
 	if err != nil {
 		return err
 	}
@@ -163,15 +164,23 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 }
 
 func (s *VideoAgentService) loadAgentMemorySnapshot(ctx context.Context, userID, taskID int64, runID, query string, policy model.EffectiveMemoryPolicy) *MemorySnapshot {
+	return s.loadSessionAgentMemorySnapshot(ctx, userID, &model.ChatSession{TaskID: taskID}, runID, query, policy)
+}
+
+func (s *VideoAgentService) loadSessionAgentMemorySnapshot(ctx context.Context, userID int64, session *model.ChatSession, runID, query string, policy model.EffectiveMemoryPolicy) *MemorySnapshot {
 	if s == nil || s.chatSvc == nil || s.chatSvc.longTermMemory == nil || !policy.EffectiveEnabled {
 		return nil
+	}
+	scope := MemoryScope{Type: model.MemoryScopeVideo, ID: fmt.Sprintf("%d", session.TaskID)}
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		scope = MemoryScope{Type: model.MemoryScopeKnowledgeBase, ID: fmt.Sprintf("%d", session.KnowledgeBaseID)}
 	}
 	snapshot, err := s.chatSvc.longTermMemory.Snapshot(ctx, MemorySnapshotRequest{
 		UserID: userID,
 		Query:  query,
 		Scopes: []MemoryScope{
 			{Type: model.MemoryScopeUser, ID: fmt.Sprintf("%d", userID)},
-			{Type: model.MemoryScopeVideo, ID: fmt.Sprintf("%d", taskID)},
+			scope,
 			{Type: model.MemoryScopeRun, ID: runID},
 		},
 	})
