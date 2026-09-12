@@ -37,9 +37,11 @@ func TestVideoAgentStreamEmitsStableEventsForPlannerAgent(t *testing.T) {
 
 	wantTypes := []string{
 		AgentEventRunStart,
+		"progress", "progress",
 		AgentEventStepStart, AgentEventToolCall, AgentEventToolResult, AgentEventRetrieveHits, AgentEventStepDone,
+		"progress", "progress",
 		AgentEventStepStart, AgentEventToolCall, AgentEventAnswer,
-		AgentEventToolResult, AgentEventCitations, AgentEventStepDone, AgentEventDone,
+		AgentEventToolResult, "progress", "progress", AgentEventCitations, AgentEventStepDone, AgentEventDone,
 	}
 	gotTypes := make([]string, 0, len(events))
 	for _, event := range events {
@@ -85,8 +87,8 @@ func TestVideoAgentStreamEmitsStableEventsForPlannerAgent(t *testing.T) {
 	if done, ok := events[len(events)-1].Data.(AgentDoneEvent); !ok || done.RunID != result.RunID || done.MessageID != result.MessageID || done.TraceSummary.Steps != len(result.Trace) || done.MemoryPolicy != result.MemoryPolicy {
 		t.Fatalf("done = %#v, trace=%#v", events[len(events)-1].Data, result.Trace)
 	}
-	if answer, ok := events[8].Data.(string); !ok || answer != "直接回答 [C1]" {
-		t.Fatalf("answer event = %#v, result answer=%q", events[8].Data, result.Answer)
+	if answer, ok := events[12].Data.(string); !ok || answer != "直接回答 [C1]" {
+		t.Fatalf("answer event = %#v, result answer=%q", events[12].Data, result.Answer)
 	}
 
 }
@@ -110,7 +112,7 @@ func TestVideoAgentStreamEmitsStepErrorAndStopsOnToolFailure(t *testing.T) {
 	for _, event := range events {
 		gotTypes = append(gotTypes, event.Type)
 	}
-	wantTypes := []string{AgentEventRunStart, AgentEventStepStart, AgentEventToolCall, AgentEventStepError}
+	wantTypes := []string{AgentEventRunStart, "progress", "progress", AgentEventStepStart, AgentEventToolCall, AgentEventStepError}
 	if len(gotTypes) != len(wantTypes) {
 		t.Fatalf("event types = %#v, want %#v", gotTypes, wantTypes)
 	}

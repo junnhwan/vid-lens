@@ -108,14 +108,14 @@ function legacyAgentStepToTrace(step: LegacyVideoAgentStepJSON, id: string, runI
 function snapshotKind(kind: string, tool?: string): TraceStepKind {
   if (kind === 'retrieve' || tool === 'search_transcript') return 'retrieve'
   if (kind === 'answer' || tool === 'build_cited_answer') return 'answer'
-  if (kind === 'think' || kind === 'plan' || kind === 'observe' || kind === 'tool') return kind
+  if (kind === 'think' || kind === 'plan' || kind === 'observe' || kind === 'tool' || kind === 'save') return kind
   return 'tool'
 }
 
 function snapshotStatus(status?: string): TraceStepStatus {
   const normalized = status?.trim()
   if (normalized === 'running' || normalized === 'done' || normalized === 'error') return normalized
-  if (normalized === 'cancelled') return 'error'
+  if (normalized === 'cancelled') return 'cancelled'
   return 'done'
 }
 

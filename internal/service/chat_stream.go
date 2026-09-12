@@ -16,9 +16,22 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 	if emit == nil {
 		return nil, fmt.Errorf("stream emit 不能为空")
 	}
+	ctx = context.WithValue(ctx, conversationProgressKey{}, conversationProgressContext{
+		emit:      func(p ConversationProgress) error { return emit(ChatStreamEvent{Type: "progress", Data: p}) },
+		reasoning: func(p ConversationReasoning) error { return emit(ChatStreamEvent{Type: "reasoning", Data: p}) },
+	})
+	if err := emitProgress(ctx, ConversationProgress{ID: "prepare", Kind: "plan", Label: "读取会话与视频上下文", Status: "running"}); err != nil {
+		return nil, err
+	}
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
 	prepared, err := s.prepareChatByMode(ctx, normalizeChatMode(mode), userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
+		return nil, err
+	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "prepare", Kind: "plan", Label: "上下文已就绪", Status: "done"}); err != nil {
+		return nil, err
+	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Label: "生成回答", Status: "running"}); err != nil {
 		return nil, err
 	}
 	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
@@ -40,10 +53,17 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		// 档2 不调 LLM：丢弃已累积的部分 LLM delta，用降级答案体替代
 		// （docs/architecture/reliability.md 档2 = 片段+摘要直拼，不含部分 LLM 生成内容）。
 		answer = s.applyTier2Degradation(ctx, prepared)
+		if err := emit(ChatStreamEvent{Type: "answer_reset", Data: ""}); err != nil {
+			return err
+		}
 		return emitAnswer(answer)
 	}
-	if streaming, ok := chat.(ai.StreamingChatClient); ok {
-		streamErr := streaming.StreamChat(ctx, prepared.Messages, func(delta string) error {
+	{
+		streamErr := ai.StreamResponse(ctx, chat, prepared.Messages, func(event ai.StreamDelta) error {
+			if event.Kind == "reasoning" {
+				return emitReasoning(ctx, "answer", event.Text)
+			}
+			delta := event.Text
 			answer += delta
 			return emit(ChatStreamEvent{Type: "answer", Data: delta})
 		})
@@ -56,22 +76,12 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 				return nil, streamErr
 			}
 		}
-	} else {
-		chatAnswer, chatErr := chat.Chat(ctx, prepared.Messages)
-		if chatErr != nil {
-			if shouldTriggerLLMDegradation(prepared.Policy, chatErr) {
-				if err := applyTier2(); err != nil {
-					return nil, err
-				}
-			} else {
-				return nil, chatErr
-			}
-		} else {
-			answer = chatAnswer
-			if err := emitAnswer(answer); err != nil {
-				return nil, err
-			}
-		}
+	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Label: "回答已生成", Status: "done"}); err != nil {
+		return nil, err
+	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "save", Kind: "save", Label: "保存回答与引用", Status: "running"}); err != nil {
+		return nil, err
 	}
 
 	// The done event replaces provider deltas with the persisted, citation-cleaned answer.
@@ -82,6 +92,9 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 	}
 	result.Degraded = degraded
 	result.MemoryPolicy = memoryPolicy
+	if err := emitProgress(ctx, ConversationProgress{ID: "save", Kind: "save", Label: "回答已保存", Status: "done"}); err != nil {
+		return nil, err
+	}
 	if err := emit(ChatStreamEvent{Type: "citations", Data: constrained.Citations}); err != nil {
 		return nil, err
 	}

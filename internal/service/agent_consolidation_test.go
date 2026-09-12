@@ -44,6 +44,13 @@ type incrementalAgentClient struct {
 
 func (c *incrementalAgentClient) StreamChat(ctx context.Context, messages []ai.ChatMessage, emit func(string) error) error {
 	c.streams++
+	if len(messages) > 0 && strings.Contains(messages[0].Content, "计划器") {
+		answer, err := c.scriptedChatClient.Chat(ctx, messages)
+		if err != nil {
+			return err
+		}
+		return emit(answer)
+	}
 	c.streaming = true
 	defer func() { c.streaming = false }()
 	for _, delta := range []string{"最终", "回答 [C1]"} {
@@ -84,7 +91,7 @@ func TestAgentStreamsProviderDeltasAndOnlyFinishesAfterPersistence(t *testing.T)
 				}
 				return nil
 			})
-			if deltas != 2 || client.streams != 1 || len(client.messages) != 2 {
+			if deltas != 2 || client.streams != 3 || len(client.messages) != 2 {
 				t.Fatalf("calls/deltas: %+v %d", client, deltas)
 			}
 			if failSave {

@@ -10,6 +10,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test:stream": "node scripts/test-stream-proxy.cjs",
     "test": "node --no-warnings --experimental-strip-types --test \"lib/**/*.test.ts\" \"components/chat/**/*.test.ts\""
   },
   "dependencies": {

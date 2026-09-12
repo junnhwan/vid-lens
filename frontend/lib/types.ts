@@ -399,6 +399,9 @@ export interface AgentStreamOptions {
 }
 
 export interface AgentSSEHandlers {
+  onProgress?: (event: import('./conversationStream').ProgressEvent) => void
+  onReasoning?: (event: import('./conversationStream').ReasoningEvent) => void
+  onAnswerReset?: () => void
   onRunStart?: (d: AgentRunStartEvent) => void
   onStepStart?: (d: AgentStepEvent) => void
   onStepDone?: (d: AgentStepEvent) => void

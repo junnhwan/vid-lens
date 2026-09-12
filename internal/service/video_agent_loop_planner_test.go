@@ -2,9 +2,37 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestLLMVideoAgentLoopPlannerReceivesToolArgumentSchemas(t *testing.T) {
+	chat := &scriptedChatClient{responses: []string{`{"done":false,"tool":"search_transcript","reason":"locate evidence","arguments":{"question":"four steps"}}`}}
+	definitions := NewVideoAgentTools(nil, nil, nil).Registry().Definitions()
+	_, err := NewLLMVideoAgentLoopPlanner(chat).NextDecision(context.Background(), VideoAgentLoopState{Goal: "four steps"}, definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := chat.messages[0][1].Content
+	for _, definition := range definitions {
+		var schema map[string]any
+		if err := json.Unmarshal(definition.InputSchema, &schema); err != nil {
+			t.Fatalf("%s has no valid input schema: %v", definition.Name, err)
+		}
+		encoded, _ := json.Marshal(definition)
+		if !strings.Contains(prompt, string(encoded)) {
+			t.Fatalf("planner did not receive %s argument schema", definition.Name)
+		}
+		if schema["additionalProperties"] != false || schema["properties"] == nil || schema["required"] == nil {
+			t.Fatalf("%s schema does not define its accepted arguments", definition.Name)
+		}
+	}
+	var visualSchema map[string]any
+	if err := json.Unmarshal(videoAgentToolInputSchema(VideoAgentToolInvestigateVisual), &visualSchema); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestLLMVideoAgentLoopPlannerParsesDecisionAndCodeFence(t *testing.T) {
 	chat := &scriptedChatClient{responses: []string{"```json\n{\"done\":false,\"tool\":\"search_transcript\",\"reason\":\"先定位证据\",\"arguments\":{\"question\":\"owner\"}}\n```"}}

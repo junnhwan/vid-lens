@@ -31,6 +31,7 @@ type VideoAgentRequest struct {
 }
 
 type VideoAgentResult struct {
+	Progress     []ConversationProgress      `json:"progress,omitempty"`
 	Degraded     bool                        `json:"degraded,omitempty"`
 	MessageID    int64                       `json:"message_id"`
 	Answer       string                      `json:"answer"`

@@ -8,6 +8,7 @@ import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
+import { ThinkingProcess } from '@/components/chat/ThinkingProcess'
 import type { ChatMsg } from '@/components/chat/chatUtils'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
@@ -93,6 +94,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const toast = useToast()
   const playerRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const followOutputRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const startedAtRef = useRef(0)
 
@@ -117,6 +119,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     topK: TOP_K,
     mapCitations,
     onBeforeSend: () => {
+      followOutputRef.current = true
       startedAtRef.current = performance.now()
       setElapsed(null)
       setRailTab('run')
@@ -129,7 +132,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
 
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && followOutputRef.current) el.scrollTop = el.scrollHeight
   }, [messages])
 
   useEffect(() => {
@@ -203,7 +206,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   // 历史消息即使没有步骤(运行失败/被停止)也保留其模式,避免误显示成 strict 推断面板。
   const agentRail = useMemo(() => {
     if (agentTrace.runId != null || agentTrace.steps.length > 0) {
-      return { steps: agentTrace.steps, runId: agentTrace.runId, mode: agentTrace.mode ?? undefined, live: true }
+      return { steps: agentTrace.steps, runId: agentTrace.runId, mode: agentTrace.mode ?? undefined, live: streaming && !agentTrace.finished }
     }
     if (lastAssistant?.agentRun) {
       return { steps: lastAssistant.trace ?? [], runId: lastAssistant.agentRunId ?? null, mode: lastAssistant.agentMode, live: streaming }
@@ -253,7 +256,10 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   return (
     <div className="chat-wrap">
       <div className="chat-col">
-        <div className="chat-scroll" ref={scrollRef}>
+        <div className="chat-scroll" ref={scrollRef} onScroll={event => {
+          const el = event.currentTarget
+          followOutputRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+        }}>
           <div className="chat-inner">
             {messages.length === 0 ? (
               <div className="chat-empty">
@@ -431,9 +437,9 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
               <>
                 <div className="run-meta">
                   <span className="chip chip-mute mono">chat</span>
-                  <span className="chip chip-warn">推断</span>
+                  <span className="chip chip-mute">{lastAssistant?.traceSource === 'server' ? '实时' : '历史摘要'}</span>
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>检索过程由前端推断</p>
+                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>{lastAssistant?.traceSource === 'server' ? '来自服务端的实际执行进度' : '发送问题后查看执行过程'}</p>
                 {ragTrace.length > 0 ? (
                   <div className="steps">
                     {ragTrace.map(step => <TraceStepView key={step.id} step={step} />)}
@@ -520,6 +526,7 @@ function AgentMessageView({
         映知
         <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : 'Chat'}</span>
       </div>
+      <ThinkingProcess message={msg} />
       <div className="answer">
         <MarkdownAnswer content={msg.content} onCite={openCite} />
         {waitingServer && (
@@ -647,6 +654,8 @@ function AgentTraceStepView({ step }: { step: ChatTraceStep }) {
               </div>
             ))}
           </div>
+        ) : step.kind === 'plan' && step.detail ? (
+          <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{step.detail}</span>
         ) : step.tool ? (
           <div className="tool-card">
             <div className="tool-head">

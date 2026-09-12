@@ -7,7 +7,7 @@ import type {
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
   UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline,
 } from './types'
-import { SSEStreamDecoder } from './streamDecoder'
+import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
 // ============ 唯一后端出口 ============
 // 所有后端调用经此模块；dev 时 Next rewrites 把 /api → :8080。
@@ -135,6 +135,7 @@ export const api = {
     return req<ChatSession[]>(`/chat/sessions${qs ? `?${qs}` : ''}`, 'GET')
   },
   getMessages: (sid: number) => req<ChatMessage[]>(`/chat/sessions/${sid}/messages`, 'GET'),
+  getRunHistory: (sid: number) => req<import('../components/chat/conversationHistory').RunHistory[]>(`/chat/sessions/${sid}/runs`, 'GET'),
   ask: (sid: number, question: string, top_k: number, mode?: ChatMode) =>
     req<AskResult>(`/chat/sessions/${sid}/messages`, 'POST', { question, top_k, mode }),
   deleteSession: (sid: number) => req<{ deleted: boolean }>(`/chat/sessions/${sid}`, 'DELETE'),
@@ -191,25 +192,11 @@ async function consumeSSE(
     return { ok: false, status: res.status }
   }
 
-  const reader = res.body.getReader()
-  const decoder = new SSEStreamDecoder()
-  let completed = false
-  for (;;) {
-    if (signal?.aborted) {
-      await reader.cancel().catch(() => {})
-      break
-    }
-    const { done, value } = await reader.read()
-    if (done) { completed = true; break }
-    for (const item of decoder.push(value)) dispatch(item.event, item.data)
-  }
-  if (completed) {
-    for (const item of decoder.finish()) dispatch(item.event, item.data)
-  }
+  await readConversationStream(res.body, dispatch, signal)
   return { ok: true, status: res.status }
 }
 
-export interface SSEHandlers {
+export interface SSEHandlers extends ProcessHandlers {
   onAnswer: (delta: string) => void
   onCitations: (cs: Citation[]) => void
   onDone: (d: SSEDone) => void
@@ -229,6 +216,9 @@ export async function streamAsk(
     { question, top_k, mode },
     (event, data) => {
       switch (event) {
+        case 'progress': h.onProgress?.(data as ProgressEvent); break
+        case 'reasoning': h.onReasoning?.(data as ReasoningEvent); break
+        case 'answer_reset': h.onAnswerReset?.(); break
         case 'answer':
           h.onAnswer(typeof data === 'string' ? data : '')
           break
@@ -268,6 +258,9 @@ export async function streamAgent(
     body,
     (event, data) => {
       switch (event) {
+        case 'progress': h.onProgress?.(data as ProgressEvent); break
+        case 'reasoning': h.onReasoning?.(data as ReasoningEvent); break
+        case 'answer_reset': h.onAnswerReset?.(); break
         case 'run_start':
           h.onRunStart?.(data as AgentRunStartEvent)
           break

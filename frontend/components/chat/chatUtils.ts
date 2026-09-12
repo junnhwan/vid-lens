@@ -20,7 +20,12 @@ export interface ChatMsg {
   agentRunId?: string
   /** agent | research | evidence_funnel：决定消息署名、模式 chip 与右栏轨迹形态 */
   agentMode?: string
-  traceSource?: 'agent' | 'inferred' | 'legacy'
+  traceSource?: 'agent' | 'inferred' | 'legacy' | 'server'
+  reasoning?: Record<string, string>
+  processStartedAt?: number
+  processFinishedAt?: number
+  cancelled?: boolean
+  createdAt?: number
 }
 
 /** EvidenceInspector 阻断发布时的替换文案（与后端 inspectorBlockedAnswer 对齐），
@@ -43,6 +48,7 @@ export function parseMessages(
     return {
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      createdAt: Date.parse(m.created_at),
       ...(snapshotTrace?.degraded ? { degraded: true } : {}),
       openCiteIds: [],
       ...(cites ? { cites } : {}),

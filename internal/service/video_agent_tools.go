@@ -376,8 +376,12 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
 	var answer string
 	var err error
-	if streaming, ok := t.chat.(ai.StreamingChatClient); ok && t.emitAnswer != nil {
-		err = streaming.StreamChat(ctx, messages, func(delta string) error {
+	if t.emitAnswer != nil {
+		err = ai.StreamResponse(ctx, t.chat, messages, func(event ai.StreamDelta) error {
+			if event.Kind == "reasoning" {
+				return emitReasoning(ctx, "answer", event.Text)
+			}
+			delta := event.Text
 			if err := ctx.Err(); err != nil {
 				return err
 			}

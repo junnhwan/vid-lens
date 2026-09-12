@@ -17,8 +17,9 @@ import (
 // VideoAgentToolDefinition is the stable, planner-facing description of a
 // tool. The implementation details stay behind VideoAgentTool.
 type VideoAgentToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 }
 
 // VideoAgentToolRuntime contains request-scoped dependencies that must not be
@@ -152,7 +153,9 @@ type videoAgentToolAdapter struct {
 }
 
 func (a *videoAgentToolAdapter) Definition() VideoAgentToolDefinition {
-	return a.definition
+	definition := a.definition
+	definition.InputSchema = videoAgentToolInputSchema(definition.Name)
+	return definition
 }
 
 func (a *videoAgentToolAdapter) Execute(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
@@ -160,6 +163,8 @@ func (a *videoAgentToolAdapter) Execute(ctx context.Context, request VideoAgentT
 }
 
 type searchTranscriptToolArguments struct {
+	// Query is a compatibility alias for planner-generated search requests.
+	Query    string `json:"query,omitempty"`
 	Question string `json:"question"`
 	TopK     int    `json:"top_k"`
 }
@@ -169,10 +174,7 @@ type transcriptWindowToolArguments struct {
 	Radius     int `json:"radius"`
 }
 
-type visualSearchToolArguments struct {
-	Question string `json:"question"`
-	TopK     int    `json:"top_k"`
-}
+type visualSearchToolArguments = searchTranscriptToolArguments
 
 type visualWindowToolArguments struct {
 	StartMS   int64 `json:"start_ms"`
@@ -315,6 +317,17 @@ func decodeVideoAgentToolArguments(request VideoAgentToolRequest, target any) er
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("tool arguments 只能包含一个 JSON 对象")
+	}
+	if args, ok := target.(*searchTranscriptToolArguments); ok {
+		question, query := strings.TrimSpace(args.Question), strings.TrimSpace(args.Query)
+		if question != "" && query != "" && question != query {
+			return errors.New("tool arguments 的 question 与 query 不能冲突")
+		}
+		args.Question = firstNonEmpty(question, query)
+		args.Query = ""
+		if args.Question == "" {
+			return errors.New("tool arguments 的 question 不能为空")
+		}
 	}
 	return nil
 }

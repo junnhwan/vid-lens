@@ -14,7 +14,7 @@ test('snapshot adapter prefers versioned steps and preserves cancelled terminal 
   assert.equal(parsed?.source, 'agent')
   assert.equal(parsed?.runId, 'run-2')
   assert.equal(parsed?.steps.length, 1)
-  assert.equal(parsed?.steps[0]?.status, 'error')
+  assert.equal(parsed?.steps[0]?.status, 'cancelled')
   assert.equal(parsed?.steps[0]?.error, '已取消')
 })
 

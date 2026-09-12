@@ -1,8 +1,8 @@
 /** 聊天页右侧「执行流水线」步骤（与后端 Agent SSE step_id 对齐） */
 
-export type TraceStepStatus = 'pending' | 'running' | 'done' | 'error'
+export type TraceStepStatus = 'pending' | 'running' | 'done' | 'error' | 'cancelled'
 
-export type TraceStepKind = 'think' | 'retrieve' | 'tool' | 'answer' | 'plan' | 'observe'
+export type TraceStepKind = 'think' | 'retrieve' | 'tool' | 'answer' | 'plan' | 'observe' | 'save'
 
 export interface ChatTraceStep {
   /** 后端 step_id，如 s1、s2；RAG 推断步骤使用固定 id */
@@ -22,6 +22,10 @@ export interface ChatTraceStep {
   toolOutput?: string
   durationMs?: number
   error?: string
+  planId?: string
+  evidenceRefs?: string[]
+  startedAt?: string
+  replan?: boolean
 }
 
 /** SSE retrieve_hits.chunks_preview 的行（SSE 不带时间码，故无时间列） */
@@ -166,6 +170,7 @@ export interface AgentRunStartPayload {
 }
 
 export interface AgentStepPayload {
+  plan_id?: string
   run_id: string
   step_id: string
   kind: string
@@ -244,6 +249,8 @@ function mergeStep(steps: ChatTraceStep[], stepId: string, patch: Partial<ChatTr
 
 function stepFromPayload(data: AgentStepPayload): Partial<ChatTraceStep> {
   return {
+    planId: data.plan_id,
+    startedAt: data.ts,
     runId: data.run_id,
     kind: kindFromBackend(data.kind, data.tool),
     label: data.label,
@@ -259,6 +266,7 @@ function stepFromPayload(data: AgentStepPayload): Partial<ChatTraceStep> {
 }
 
 export function agentTraceReducer(state: AgentTraceState, event: AgentSSEPayload): AgentTraceState {
+  if ('data' in event && 'run_id' in event.data && event.type !== 'run_start' && state.runId && state.runId !== event.data.run_id) return state
   switch (event.type) {
     case 'run_start': {
       return {
@@ -313,7 +321,7 @@ export function agentTraceReducer(state: AgentTraceState, event: AgentSSEPayload
           toolOutput: event.data.output,
           durationMs: event.data.duration_ms,
           error: event.data.error,
-          status: event.data.error ? 'error' : undefined,
+          ...(event.data.error ? { status: 'error' as const } : {}),
         }),
       }
     case 'retrieve_hits':
@@ -332,10 +340,23 @@ export function agentTraceReducer(state: AgentTraceState, event: AgentSSEPayload
         }),
       }
     case 'done':
-      return { ...state, finished: true }
+      return { ...state, finished: true, steps: finishTrace(state.steps, 'done') }
     case 'error':
-      return { ...state, finished: true, fatalError: event.data.message }
+      return { ...state, finished: true, fatalError: event.data.message, steps: finishTrace(state.steps, 'error') }
     default:
       return state
   }
+}
+
+export function finishTrace(steps: ChatTraceStep[], status: TraceStepStatus): ChatTraceStep[] {
+  return steps.map(step => step.status === 'running' || step.status === 'pending' ? { ...step, status } : step)
+}
+
+export function progressTrace(steps: ChatTraceStep[], p: import('../../lib/conversationStream.ts').ProgressEvent): ChatTraceStep[] {
+  return mergeStep(steps, p.id, {
+    kind: p.kind as TraceStepKind, label: p.label, status: p.status, detail: p.detail,
+    runId: p.run_id, planId: p.plan_id, tool: p.tool, evidenceRefs: p.evidence_refs,
+    replan: p.replan, ...(p.duration_ms !== undefined ? { durationMs: p.duration_ms } : {}),
+    ...(p.status === 'running' ? { startedAt: p.ts } : {}),
+  })
 }

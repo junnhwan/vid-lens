@@ -166,6 +166,15 @@ func (r *AgentExecutionRepository) GetRun(ctx context.Context, userID int64, run
 	return &run, nil
 }
 
+func (r *AgentExecutionRepository) ListSessionTerminalRuns(ctx context.Context, userID, sessionID int64) ([]model.AgentRun, error) {
+	if r == nil || r.db == nil || userID <= 0 || sessionID <= 0 {
+		return nil, gorm.ErrInvalidData
+	}
+	runs := []model.AgentRun{}
+	err := r.db.WithContext(ctx).Where("user_id = ? AND session_id = ? AND status IN ?", userID, sessionID, []string{model.AgentRunStatusFailed, model.AgentRunStatusCancelled, model.AgentRunStatusBudgetExhausted}).Order("created_at DESC").Limit(20).Find(&runs).Error
+	return runs, err
+}
+
 func (r *AgentExecutionRepository) GetExecution(ctx context.Context, userID int64, runID string) (*AgentExecutionRecords, error) {
 	run, err := r.GetRun(ctx, userID, runID)
 	if err != nil || run == nil {

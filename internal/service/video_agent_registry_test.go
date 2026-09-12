@@ -130,3 +130,72 @@ func (t *stubVideoAgentTool) Definition() VideoAgentToolDefinition {
 func (t *stubVideoAgentTool) Execute(_ context.Context, _ VideoAgentToolRequest) (VideoAgentToolResult, error) {
 	return VideoAgentToolResult{}, nil
 }
+
+func TestVideoAgentToolRegistryAcceptsPlannerSearchQuery(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{
+		{ChunkID: 1, ChunkIndex: 2, Content: "Registry 检索片段"},
+	}}}
+	pipeline := &RetrievalPipeline{repos: repos, retriever: retriever, rewriter: NoopQueryRewriter{}, CandidateK: 5}
+	tools := NewVideoAgentTools(repos, pipeline, &recordingChatClient{})
+	embedding := &fakeEmbeddingClient{dim: 3}
+	arguments := json.RawMessage(`{"query":"四步 框架 第一步 第二步 第三步 第四步 步骤"}`)
+
+	result, err := tools.Registry().Execute(context.Background(), VideoAgentToolSearchTranscript, VideoAgentToolRequest{
+		Runtime: VideoAgentToolRuntime{
+			UserID:         7,
+			TaskID:         11,
+			EmbeddingModel: "text-embedding-3-small",
+			Embedding:      embedding,
+		},
+		Arguments: arguments,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Step.Tool != VideoAgentToolSearchTranscript || result.Step.Error != "" {
+		t.Fatalf("step = %+v", result.Step)
+	}
+
+	if len(embedding.inputs) != 1 || embedding.inputs[0] != "四步 框架 第一步 第二步 第三步 第四步 步骤" {
+		t.Fatalf("planner query was lost before retrieval: %+v", embedding.inputs)
+	}
+	var output SearchTranscriptResult
+	if err := json.Unmarshal(result.Output, &output); err != nil {
+		t.Fatalf("Unmarshal() error = %v, output = %s", err, result.Output)
+	}
+	if len(output.Citations) != 1 || output.Citations[0].Content != "Registry 检索片段" {
+		t.Fatalf("citations = %+v", output.Citations)
+	}
+	if len(retriever.requests) != 1 || len(retriever.requests[0].TaskIDs) != 1 || retriever.requests[0].TaskIDs[0] != 11 || retriever.requests[0].TopK != 5 {
+		t.Fatalf("retrieval requests = %+v", retriever.requests)
+	}
+}
+
+func TestVideoAgentSearchArgumentsAliasValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, arguments, want string
+		invalid               bool
+	}{
+		{"canonical", `{"question":"four steps"}`, "four steps", false},
+		{"query alias", `{"query":"four steps"}`, "four steps", false},
+		{"matching aliases", `{"question":"four steps","query":" four steps "}`, "four steps", false},
+		{"conflicting aliases", `{"question":"four steps","query":"other topic"}`, "", true},
+		{"unknown field", `{"query":"four steps","task_id":999}`, "", true},
+		{"empty query", `{"query":" "}`, "", true},
+		{"wrong type", `{"query":42}`, "", true},
+		{"null", `null`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var args visualSearchToolArguments
+			// Transcript and visual search share this exact decoder/type.
+			err := decodeVideoAgentToolArguments(VideoAgentToolRequest{Arguments: json.RawMessage(tc.arguments)}, &args)
+			if (err != nil) != tc.invalid {
+				t.Fatalf("error = %v, want invalid=%v", err, tc.invalid)
+			}
+			if err == nil && (args.Question != tc.want || args.Query != "") {
+				t.Fatalf("query was not normalized: %+v", args)
+			}
+		})
+	}
+}

@@ -39,4 +39,26 @@ test('conversation session reducer keeps replayed Agent events idempotent', () =
   assert.equal(state.messages[1]?.trace?.length, 1)
   assert.equal(state.messages[1]?.streaming, false)
   assert.equal(state.messages[1]?.error, undefined)
+  assert.equal(state.messages[1]?.trace?.[0]?.status, 'cancelled')
+})
+
+test('reasoning stays separate and final persisted answer replaces deltas including empty answers', () => {
+  let state = conversationSessionReducer(emptyConversationSessionState(), { type: 'agent_start', question: '研究' })
+  state = conversationSessionReducer(state, { type: 'reasoning', event: { call_id: 'plan-1', delta: '检查证据' } })
+  state = conversationSessionReducer(state, { type: 'answer_delta', delta: '临时答案' })
+  state = conversationSessionReducer(state, { type: 'progress', event: { id: 'save', kind: 'save', label: '保存', status: 'running' } })
+  state = conversationSessionReducer(state, { type: 'stream_done', patch: { content: '' } })
+  state = conversationSessionReducer(state, { type: 'stream_cancelled' })
+  assert.equal(state.messages[1]?.content, '')
+  assert.equal(state.messages[1]?.reasoning?.['plan-1'], '检查证据')
+  assert.equal(state.messages[1]?.cancelled, undefined)
+  assert.equal(state.messages[1]?.trace?.[0]?.status, 'done')
+})
+
+test('failed planning closes the live timeline before any tool starts', () => {
+  let state = conversationSessionReducer(emptyConversationSessionState(), { type: 'agent_start', question: '研究' })
+  state = conversationSessionReducer(state, { type: 'progress', event: { id: 'plan-1', kind: 'plan', label: '规划', status: 'running' } })
+  state = conversationSessionReducer(state, { type: 'stream_error', message: 'invalid arguments' })
+  assert.equal(state.messages[1]?.trace?.[0]?.status, 'error')
+  assert.equal(state.agentTrace.finished, true)
 })

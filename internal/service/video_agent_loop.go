@@ -50,12 +50,13 @@ func (p VideoAgentLoopPolicy) Validate() error {
 }
 
 type VideoAgentLoopDecision struct {
-	Done       bool            `json:"done"`
-	Tool       string          `json:"tool,omitempty"`
-	Reason     string          `json:"reason,omitempty"`
-	Arguments  json.RawMessage `json:"arguments,omitempty"`
-	Replan     bool            `json:"replan,omitempty"`
-	StopReason string          `json:"stop_reason,omitempty"`
+	Done          bool            `json:"done"`
+	Tool          string          `json:"tool,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
+	PublicSummary string          `json:"public_summary,omitempty"`
+	Arguments     json.RawMessage `json:"arguments,omitempty"`
+	Replan        bool            `json:"replan,omitempty"`
+	StopReason    string          `json:"stop_reason,omitempty"`
 }
 
 type VideoAgentLoopObservation struct {
@@ -69,29 +70,29 @@ type VideoAgentLoopObservation struct {
 }
 
 type VideoAgentLoopStep struct {
-	Number      int                       `json:"number"`
+	Number      int                        `json:"number"`
 	Action      VideoAgentLoopDecision     `json:"action"`
 	Status      VideoAgentLoopStepStatus   `json:"status"`
-	Trace       VideoAgentStep            `json:"trace"`
+	Trace       VideoAgentStep             `json:"trace"`
 	Observation *VideoAgentLoopObservation `json:"observation,omitempty"`
-	Error       string                    `json:"error,omitempty"`
+	Error       string                     `json:"error,omitempty"`
 }
 
 type VideoAgentLoopState struct {
-	Goal             string                     `json:"goal"`
+	Goal             string                      `json:"goal"`
 	Status           VideoAgentLoopStatus        `json:"status"`
-	CurrentStep      int                        `json:"current_step"`
-	ReplanCount      int                        `json:"replan_count"`
-	MaxSteps         int                        `json:"max_steps"`
-	MaxReplans       int                        `json:"max_replans"`
-	StopReason       string                     `json:"stop_reason,omitempty"`
-	PendingQuestions []string                   `json:"pending_questions,omitempty"`
-	Evidence         []RetrievedChunk           `json:"evidence,omitempty"`
+	CurrentStep      int                         `json:"current_step"`
+	ReplanCount      int                         `json:"replan_count"`
+	MaxSteps         int                         `json:"max_steps"`
+	MaxReplans       int                         `json:"max_replans"`
+	StopReason       string                      `json:"stop_reason,omitempty"`
+	PendingQuestions []string                    `json:"pending_questions,omitempty"`
+	Evidence         []RetrievedChunk            `json:"evidence,omitempty"`
 	Observations     []VideoAgentLoopObservation `json:"observations,omitempty"`
 	Steps            []VideoAgentLoopStep        `json:"steps,omitempty"`
-	Answer           string                     `json:"answer,omitempty"`
-	Citations        []Citation                 `json:"citations,omitempty"`
-	Memory           *MemorySnapshot            `json:"memory,omitempty"`
+	Answer           string                      `json:"answer,omitempty"`
+	Citations        []Citation                  `json:"citations,omitempty"`
+	Memory           *MemorySnapshot             `json:"memory,omitempty"`
 }
 
 type VideoAgentLoopResult struct {

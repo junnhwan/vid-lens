@@ -63,10 +63,11 @@ func (p *LLMVideoAgentLoopPlanner) NextDecisionWithUsage(ctx context.Context, st
 %s
 
 输出格式：
-{"done":false,"tool":"工具名称","reason":"为什么现在需要这个工具","arguments":{},"replan":false}
+{"done":false,"tool":"工具名称","reason":"为什么现在需要这个工具","public_summary":"向用户简要说明已有证据的不足及下一步目的","arguments":{},"replan":false}
 
 规则：
 - done=false 时必须填写 tool、reason 和 arguments。
+- public_summary 是展示给用户的简要决策说明，最多 120 字，只描述已有证据、局限和下一步目的；不要输出私密上下文或内部思考草稿。
 - done=true 时 tool 必须为空；只有证据足够或已经明确无法继续时才结束。
 - 普通解说问题通常先调用 search_transcript。字幕、图表、幻灯片、颜色、布局、纯演示、无转写或画面/解说是否一致的问题，应调用 search_visual_evidence。
 - 已有带时间的 transcript 或 visual 命中且问题需要核对画面时，调用 inspect_visual_window，只检查命中时间附近的小窗口。
@@ -74,11 +75,25 @@ func (p *LLMVideoAgentLoopPlanner) NextDecisionWithUsage(ctx context.Context, st
 - investigate_visual 返回的是带来源和时间的 query-time observation，不是独立语义核验；不要把 unverified observation 写成已证明的事实。
 - transcript 与视觉证据冲突时保留双方，继续补齐另一模态或生成明确标注不确定性的带引用回答，不得选择一方覆盖另一方。
 - 如果当前证据不足，需要调整检索策略时，将 replan=true；不要无理由重复同一个动作。
+- arguments 必须遵守所选工具的 input_schema：只填写列出的字段并满足 required，不能自行猜测字段名。
+- 检索词放在 question 字段，例如 search_transcript 的 arguments 为 {"question":"四步框架", "top_k":4}。
+- build_cited_answer 的 citations 只选择当前 evidence 中的 evidence_id 或 task_id/chunk_id，不生成证据正文或新的标识。
 - arguments 必须是合法 JSON 对象。
 - 不要输出 Markdown、解释或额外字段。
 `, string(toolsJSON), string(stateJSON))},
 	}
-	response, err := p.chat.Chat(ctx, messages)
+	var response string
+	if observer := progressContext(ctx); observer.reasoning != nil {
+		err = ai.StreamResponse(ctx, p.chat, messages, func(delta ai.StreamDelta) error {
+			if delta.Kind == "reasoning" {
+				return emitReasoning(ctx, observer.callID, delta.Text)
+			}
+			response += delta.Text
+			return nil
+		})
+	} else {
+		response, err = p.chat.Chat(ctx, messages)
+	}
 	usage := estimatedPlannerCallUsage(messages, response)
 	if err != nil {
 		return VideoAgentLoopDecision{}, usage, err

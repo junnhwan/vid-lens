@@ -2,7 +2,9 @@
 
 `frontend/components/chat/ChatWorkspace.tsx` 是正式 Chat / Agent 工作区。视频提供两种模式，知识库只提供 Chat。`useConversationSession` 统一会话加载、发送、取消、消息更新和终态处理。
 
-Agent 仅走流式实时分支；research/funnel 选择器、专属等待流程、FunnelTrack 与 EvidenceLedger 已移除。普通 Chat 仍使用现有 SSE，右栏检索进度是前端推断；Agent 步骤来自真实工具事件。最终 done.answer 覆盖累计 token，引用使用最终 citations。
+Agent 仅走流式实时分支；research/funnel 选择器、专属等待流程、FunnelTrack 与 EvidenceLedger 已移除。Chat 和 Agent 都使用真实后端进度事件，消息内 ThinkingProcess 时间轴展示规划、工具、简要决策说明和模型接口提供的 reasoning。右栏复用同一轨迹。最终 done.answer 覆盖累计 token，引用使用最终 citations。
+
+正文和 reasoning 分通道，以 32 毫秒批次更新，完成/错误事件到来前先刷新缓冲。用户向上滚动时暂停自动跟随。取消、断流和失败结束运行中节点；旧请求回调不得更新新会话。reasoning 仅实时展示，成功 Agent 历史回放公开规划摘要与工具步骤。Next 关闭默认压缩以避免 SSE 在响应结束后整段出现，详见 agent-streaming-contract.md。
 
 历史模式名称仅保留在 `snapshotTraceAdapter` 和历史消息显示中。旧消息可以打开基础引用与时间跳转。记忆设置继续由 `MemorySection` 和 memory API 提供。
 

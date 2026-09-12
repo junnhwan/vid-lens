@@ -10,7 +10,7 @@ import (
 	"vid-lens/internal/model"
 )
 
-const AgentSnapshotVersion = 1
+const AgentSnapshotVersion = 2
 
 const (
 	AgentStepStatusDone      = "done"
@@ -141,6 +141,26 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 		return nil, fmt.Errorf("agent result 不能为空")
 	}
 	snapshot := NewAgentSnapshot(result.RunID, result.Mode, result.Template, result.Trace, result.Citations)
+	if len(result.Progress) > 0 {
+		steps := make([]AgentSnapshotStep, 0, len(snapshot.Steps)+len(result.Progress))
+		included := map[string]bool{}
+		for index, step := range snapshot.Steps {
+			planID := fmt.Sprintf("plan-%d", index+1)
+			for _, p := range result.Progress {
+				if p.ID == planID {
+					included[p.ID] = true
+					steps = append(steps, AgentSnapshotStep{StepID: p.ID, Kind: p.Kind, Label: p.Label, Status: p.Status, Output: p.Detail, TS: p.TS, Input: map[string]any{}})
+				}
+			}
+			steps = append(steps, step)
+		}
+		for _, p := range result.Progress {
+			if !included[p.ID] {
+				steps = append(steps, AgentSnapshotStep{StepID: p.ID, Kind: p.Kind, Label: p.Label, Status: p.Status, Output: p.Detail, TS: p.TS, Input: map[string]any{}})
+			}
+		}
+		snapshot.Steps = steps
+	}
 	snapshot.Memory = result.Memory
 	snapshot.Degraded = result.Degraded
 	snapshot.MemoryPolicy = normalizeSnapshotMemoryPolicy(result.MemoryPolicy)

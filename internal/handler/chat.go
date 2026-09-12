@@ -178,7 +178,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 		return
 	}
 	started := false
-	_, err = h.execution.Stream(c.Request.Context(), service.ConversationRequest{
+	_, err = h.streamConversation(c, service.ConversationRequest{
 		Kind: service.ConversationKindChat, UserID: userID, SessionID: sessionID,
 		Question: req.Question, TopK: req.TopK, Mode: req.Mode,
 	}, func(event service.ConversationStreamEvent) error {
@@ -243,7 +243,7 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 		return c.Request.Context().Err()
 	}
 
-	_, err = h.execution.Stream(c.Request.Context(), service.ConversationRequest{
+	_, err = h.streamConversation(c, service.ConversationRequest{
 		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID, Question: req.Question,
 		TopK: req.TopK, Mode: req.Mode, AgentProfile: req.AgentProfile,
 	}, emit)
@@ -264,6 +264,7 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 
 func startConversationSSE(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("X-Accel-Buffering", "no")
 	c.Header("Connection", "keep-alive")
 }

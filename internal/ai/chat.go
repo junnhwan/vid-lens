@@ -101,6 +101,17 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		return err
 	}
 	defer resp.Body.Close()
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return fmt.Errorf("模型未返回 SSE 流式响应，请检查模型服务的 streaming 支持")
+	}
+	var splitter thinkingSplitter
+	output := func(reasoning bool, text string) error {
+		if reasoning {
+			return emitProviderReasoning(ctx, text)
+		}
+		return emit(text)
+	}
+	finished := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
@@ -114,7 +125,38 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			return nil
+			return splitter.push("", true, output)
+		}
+		var envelope struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+			Choices []struct {
+				FinishReason *string `json:"finish_reason"`
+				Delta        struct {
+					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+			return fmt.Errorf("解析 LLM 流式响应失败: %w", err)
+		}
+		if envelope.Error != nil {
+			return fmt.Errorf("模型流式响应失败: %s", envelope.Error.Message)
+		}
+		if len(envelope.Choices) > 0 {
+			choice := envelope.Choices[0]
+			if choice.FinishReason != nil {
+				finished = true
+			}
+			reasoning := choice.Delta.ReasoningContent
+			if reasoning == "" {
+				reasoning = choice.Delta.Reasoning
+			}
+			if err := emitProviderReasoning(ctx, reasoning); err != nil {
+				return err
+			}
 		}
 		delta, err := parseChatCompletionStreamDelta(data)
 		if err != nil {
@@ -123,14 +165,17 @@ func (c *OpenAIChatClient) StreamChat(ctx context.Context, messages []ChatMessag
 		if delta == "" {
 			continue
 		}
-		if err := emit(delta); err != nil {
+		if err := splitter.push(delta, false, output); err != nil {
 			return err
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("读取 LLM 流式响应失败: %w", err)
 	}
-	return nil
+	if !finished {
+		return fmt.Errorf("模型流式响应意外中断，未收到完成标记")
+	}
+	return splitter.push("", true, output)
 }
 
 func parseChatCompletionStreamDelta(data string) (string, error) {

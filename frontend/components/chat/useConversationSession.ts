@@ -4,9 +4,11 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import type { CiteRef } from '@/components/Citation'
 import { parseMessages, type ChatMsg } from '@/components/chat/chatUtils'
+import { mergeRunHistory } from './conversationHistory'
 import {
   conversationSessionReducer,
   emptyConversationSessionState,
+  type ConversationSessionAction,
 } from '@/components/chat/conversationSession'
 import { api, ApiError, streamAgent, streamAsk } from '@/lib/api'
 import type { ChatMessage, ChatScopeType, ChatSession, Citation, VideoChatMode } from '@/lib/types'
@@ -38,6 +40,12 @@ export function useConversationSession(options: ConversationSessionOptions) {
   const [sessionReady, setSessionReady] = useState(false)
   const [state, dispatch] = useReducer(conversationSessionReducer, undefined, emptyConversationSessionState)
   const abortRef = useRef<AbortController | null>(null)
+  const loadVersion = useRef(0)
+  const flushRef = useRef<(() => void) | null>(null)
+  const loadHistory = useCallback(async (sid: number) => {
+    const [messages, runs] = await Promise.all([api.getMessages(sid), api.getRunHistory(sid).catch(() => [])])
+    return mergeRunHistory(parseHistory(messages), runs)
+  }, [parseHistory])
 
   const sessionFilter = useCallback(() => (
     scopeType === 'knowledge_base'
@@ -57,7 +65,9 @@ export function useConversationSession(options: ConversationSessionOptions) {
 
   useEffect(() => {
     let active = true
+    const version = ++loadVersion.current
     abortRef.current?.abort()
+    abortRef.current = null
     setSession(null)
     setSessionReady(false)
     dispatch({ type: 'reset' })
@@ -70,15 +80,15 @@ export function useConversationSession(options: ConversationSessionOptions) {
       setSession(selected)
       if (selected) {
         try {
-          const messages = await api.getMessages(selected.id)
-          if (active) dispatch({ type: 'load_messages', messages: parseHistory(messages) })
+          const messages = await loadHistory(selected.id)
+          if (active && version === loadVersion.current) dispatch({ type: 'load_messages', messages })
         } catch { /* keep an empty, usable session */ }
       }
       if (active) setSessionReady(true)
     }
     void init()
-    return () => { active = false }
-  }, [loadSessions, parseHistory])
+    return () => { active = false; abortRef.current?.abort(); abortRef.current = null }
+  }, [loadSessions, loadHistory])
 
   const replaceSessionInURL = useCallback((sessionId?: number) => {
     const url = new URLSearchParams(location.search)
@@ -91,16 +101,23 @@ export function useConversationSession(options: ConversationSessionOptions) {
   const switchSession = useCallback(async (sessionId: number) => {
     const selected = sessions.find(item => item.id === sessionId)
     if (!selected || selected.id === session?.id) return
+    const version = ++loadVersion.current
+    abortRef.current?.abort()
+    abortRef.current = null
+    dispatch({ type: 'reset' })
     setSession(selected)
     dispatch({ type: 'load_messages', messages: [] })
     replaceSessionInURL(sessionId)
     try {
-      const messages = await api.getMessages(sessionId)
-      dispatch({ type: 'load_messages', messages: parseHistory(messages) })
+      const messages = await loadHistory(sessionId)
+      if (version === loadVersion.current) dispatch({ type: 'load_messages', messages })
     } catch { /* keep selected session usable */ }
-  }, [sessions, session?.id, replaceSessionInURL, parseHistory])
+  }, [sessions, session?.id, replaceSessionInURL, loadHistory])
 
   const newSession = useCallback(() => {
+    ++loadVersion.current
+    abortRef.current?.abort()
+    abortRef.current = null
     setSession(null)
     dispatch({ type: 'reset' })
     replaceSessionInURL()
@@ -141,6 +158,34 @@ export function useConversationSession(options: ConversationSessionOptions) {
 
     const controller = new AbortController()
     abortRef.current = controller
+    const deliver = (action: ConversationSessionAction) => {
+      if (abortRef.current === controller && !controller.signal.aborted) dispatch(action)
+    }
+    let pendingAnswer = ''
+    const pendingReasoning = new Map<string, import('@/lib/conversationStream').ReasoningEvent>()
+    let batchTimer: ReturnType<typeof setTimeout> | undefined
+    const flush = () => {
+      clearTimeout(batchTimer)
+      batchTimer = undefined
+      for (const event of pendingReasoning.values()) deliver({ type: 'reasoning', event })
+      pendingReasoning.clear()
+      if (pendingAnswer) deliver({ type: 'answer_delta', delta: pendingAnswer })
+      pendingAnswer = ''
+    }
+    const update = (action: ConversationSessionAction) => {
+      if (action.type === 'answer_delta') pendingAnswer += action.delta
+      else if (action.type === 'reasoning') {
+        const old = pendingReasoning.get(action.event.call_id)
+        pendingReasoning.set(action.event.call_id, { ...action.event, delta: (old?.delta ?? '') + action.event.delta })
+      } else { flush(); deliver(action); return }
+      batchTimer ??= setTimeout(flush, 32)
+    }
+    flushRef.current = flush
+    const processHandlers = {
+      onProgress: (event: import('@/lib/conversationStream').ProgressEvent) => update({ type: 'progress', event }),
+      onReasoning: (event: import('@/lib/conversationStream').ReasoningEvent) => update({ type: 'reasoning', event }),
+      onAnswerReset: () => update({ type: 'patch_last', patch: { content: '' } }),
+    }
     dispatch(
       mode === 'chat'
         ? { type: 'rag_start', question }
@@ -150,66 +195,67 @@ export function useConversationSession(options: ConversationSessionOptions) {
     try {
       if (mode === 'agent') {
         await streamAgent(sessionId, question, { top_k: topK, mode: 'agent' }, {
-          onRunStart: data => dispatch({ type: 'agent_event', event: { type: 'run_start', data } }),
-          onStepStart: data => dispatch({ type: 'agent_event', event: { type: 'step_start', data } }),
-          onStepDone: data => dispatch({ type: 'agent_event', event: { type: 'step_done', data } }),
-          onStepError: data => dispatch({ type: 'agent_event', event: { type: 'step_error', data } }),
-          onToolCall: data => dispatch({ type: 'agent_event', event: { type: 'tool_call', data } }),
-          onToolResult: data => dispatch({ type: 'agent_event', event: { type: 'tool_result', data } }),
-          onRetrieveHits: data => dispatch({ type: 'agent_event', event: { type: 'retrieve_hits', data } }),
-          onAnswer: delta => dispatch({ type: 'answer_delta', delta }),
-          onCitations: citations => dispatch({ type: 'patch_last', patch: { cites: mapCitations(citations) } }),
+          ...processHandlers,
+          onRunStart: data => update({ type: 'agent_event', event: { type: 'run_start', data } }),
+          onStepStart: data => update({ type: 'agent_event', event: { type: 'step_start', data } }),
+          onStepDone: data => update({ type: 'agent_event', event: { type: 'step_done', data } }),
+          onStepError: data => update({ type: 'agent_event', event: { type: 'step_error', data } }),
+          onToolCall: data => update({ type: 'agent_event', event: { type: 'tool_call', data } }),
+          onToolResult: data => update({ type: 'agent_event', event: { type: 'tool_result', data } }),
+          onRetrieveHits: data => update({ type: 'agent_event', event: { type: 'retrieve_hits', data } }),
+          onAnswer: delta => update({ type: 'answer_delta', delta }),
+          onCitations: citations => update({ type: 'patch_last', patch: { cites: mapCitations(citations) } }),
           onDone: done => {
-            dispatch({ type: 'agent_event', event: { type: 'done' } })
-            // run_id 记到消息上（证据账本按它查询），degraded=true 表示核验未通过、
-            // 回答已被服务端替换为阻断文案
-            dispatch({
+            update({ type: 'agent_event', event: { type: 'done' } })
+            // done is authoritative; budget-limited runs may deliver evidence
+            // excerpts instead of a model-generated answer.
+            update({
               type: 'stream_done',
               patch: { ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
             })
           },
           onError: error => {
-            dispatch({ type: 'agent_event', event: { type: 'error', data: { message: error.message, step_id: error.step_id } } })
-            dispatch({ type: 'stream_error', message: error.message })
+            update({ type: 'agent_event', event: { type: 'error', data: { message: error.message, step_id: error.step_id } } })
+            update({ type: 'stream_error', message: error.message })
           },
         }, controller.signal)
       } else {
-        let answerStarted = false
         await streamAsk(sessionId, question, topK, mode, {
+          ...processHandlers,
           onAnswer: delta => {
-            dispatch({ type: 'answer_delta', delta })
-            if (!answerStarted) {
-              answerStarted = true
-              dispatch({ type: 'rag_event', event: 'answer' })
-            }
+            update({ type: 'answer_delta', delta })
           },
           onCitations: citations => {
-            dispatch({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
-            const sources = [...new Set(citations.map(item => item.video_title || item.source).filter(Boolean))] as string[]
-            dispatch({ type: 'rag_event', event: 'citations', payload: { hits: citations.length, sources } })
+            update({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
           },
           onDone: done => {
-            dispatch({ type: 'rag_event', event: 'done' })
-            dispatch({ type: 'stream_done', patch: { ...(done.answer ? { content: done.answer } : {}), degraded: done.degraded } })
+            update({ type: 'stream_done', patch: { ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded } })
           },
-          onError: error => dispatch({ type: 'stream_error', message: error.message }),
+          onError: error => update({ type: 'stream_error', message: error.message }),
         }, controller.signal)
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        dispatch({ type: 'stream_cancelled' })
+        update({ type: 'stream_cancelled' })
       } else {
         const fallback = mode === 'agent' ? 'Agent 流式请求失败' : '流式请求失败'
-        dispatch({ type: 'stream_error', message: error instanceof ApiError ? error.message : fallback })
+        update({ type: 'stream_error', message: error instanceof ApiError ? error.message : fallback })
       }
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
-      dispatch({ type: 'stream_cancelled' })
+      flush()
+      if (abortRef.current === controller) {
+        dispatch({ type: 'stream_cancelled' })
+        abortRef.current = null
+        flushRef.current = null
+      }
     }
   }, [state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations])
 
   const stop = useCallback(() => {
+    flushRef.current?.()
+    flushRef.current = null
     abortRef.current?.abort()
+    abortRef.current = null
     dispatch({ type: 'stream_cancelled' })
   }, [])
 

@@ -99,6 +99,9 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		timeRanges = ExtractSignals(question).Timestamps
 	}
 
+	if err := emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索视频证据", Status: "running"}); err != nil {
+		return nil, err
+	}
 	retrieval, err := pipeline.Retrieve(ctx, RetrievalPipelineRequest{
 		UserID:         userID,
 		TaskIDs:        taskIDs,
@@ -110,9 +113,13 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		TimeRanges:     timeRanges,
 	})
 	if err != nil {
+		_ = emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索未完成", Status: "error", Detail: err.Error()})
 		return nil, err
 	}
 	contexts, citations := buildCitationSet(question, retrieval.Citations)
+	if err := emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索完成", Status: "done", Detail: fmt.Sprintf("找到 %d 条候选引用", len(citations))}); err != nil {
+		return nil, err
+	}
 
 	messages := buildRAGMessages(contexts, recent, question)
 	if session.ScopeType != model.ChatScopeKnowledgeBase {

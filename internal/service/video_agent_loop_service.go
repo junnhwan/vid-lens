@@ -149,6 +149,20 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	tools.SetMemorySnapshot(memorySnapshot)
 	tools.SetStepObserver(req.Observer)
 	tools.emitAnswer = req.EmitAnswer
+	var progress []ConversationProgress
+	parentProgress := progressContext(ctx)
+	progressSink := parentProgress.emit
+	parentProgress.emit = func(p ConversationProgress) error {
+		p.RunID = runID
+		if p.Status != "running" {
+			progress = append(progress, p)
+		}
+		if progressSink != nil {
+			return progressSink(p)
+		}
+		return nil
+	}
+	ctx = context.WithValue(ctx, conversationProgressKey{}, parentProgress)
 	runner, err := NewVideoAgentLoopRunner(tools.Registry(), NewLLMVideoAgentLoopPlanner(chat), DefaultVideoAgentLoopObserver{}, policy)
 	if err != nil {
 		return nil, err
@@ -169,6 +183,21 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
+	// Recovered plans are not re-emitted as fresh work, but their public
+	// summaries must remain available in the final history snapshot.
+	for _, step := range runResult.State.Steps {
+		id := fmt.Sprintf("plan-%d", step.Number)
+		found := false
+		for _, p := range progress {
+			if p.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			progress = append(progress, ConversationProgress{ID: id, PlanID: id, RunID: runID, Kind: "plan", Label: "规划下一步", Status: "done", Detail: publicDecisionSummary(step.Action, 0)})
+		}
+	}
 	degraded := runResult.State.StopReason == "budget_exhausted"
 	if degraded && strings.TrimSpace(runResult.State.Answer) == "" {
 		fallback := agentBudgetAnswer(req.Goal, runResult.State.Evidence)
@@ -179,6 +208,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	}
 
 	result = &VideoAgentResult{
+		Progress:     progress,
 		Degraded:     degraded,
 		Answer:       runResult.State.Answer,
 		Template:     string(VideoAgentLoopTemplate),
@@ -190,7 +220,13 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: memoryPolicy,
 	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "save", Kind: "save", Label: "保存回答与引用", Status: "running"}); err != nil {
+		return nil, err
+	}
 	if err := s.saveAgentRunExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
+		return nil, err
+	}
+	if err := emitProgress(ctx, ConversationProgress{ID: "save", Kind: "save", Label: "保存回答与引用", Status: "done"}); err != nil {
 		return nil, err
 	}
 	status := model.AgentRunStatusCompleted

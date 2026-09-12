@@ -54,6 +54,7 @@ type AgentRunStartEvent struct {
 }
 
 type AgentStepEvent struct {
+	PlanID    string `json:"plan_id,omitempty"`
 	RunID     string `json:"run_id"`
 	StepID    string `json:"step_id"`
 	Kind      string `json:"kind"`
@@ -303,7 +304,8 @@ func (o *videoAgentStreamObserver) emitRetrieveHits(stepID string, step VideoAge
 func (o *videoAgentStreamObserver) stepEvent(observed *observedAgentStep, status, message string) AgentStepEvent {
 	step := observed.step
 	return AgentStepEvent{
-		RunID: o.runID, StepID: observed.id, Kind: videoAgentStepKind(step.Tool),
+		PlanID: fmt.Sprintf("plan-%s", strings.TrimPrefix(observed.id, "s")),
+		RunID:  o.runID, StepID: observed.id, Kind: videoAgentStepKind(step.Tool),
 		Label: step.Name, Status: status, Tool: step.Tool, Input: step.Input,
 		Output: step.OutputRef, Error: firstNonEmpty(step.Error, message),
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
@@ -388,6 +390,16 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	}
 
 	observer := newVideoAgentStreamObserver(runID, streamEmit)
+	ctx = context.WithValue(ctx, conversationProgressKey{}, conversationProgressContext{
+		emit: func(p ConversationProgress) error {
+			p.RunID = runID
+			return streamEmit(AgentStreamEvent{Type: "progress", Data: p})
+		},
+		reasoning: func(p ConversationReasoning) error {
+			p.RunID = runID
+			return streamEmit(AgentStreamEvent{Type: "reasoning", Data: p})
+		},
+	})
 	result, err := s.RunAgent(ctx, VideoAgentLoopRequest{
 		UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK,
 		RunID: runID, Observer: observer, EmitAnswer: func(delta string) error {

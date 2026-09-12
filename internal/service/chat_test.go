@@ -658,6 +658,13 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 	if result.Answer != "第一段第二段" {
 		t.Fatalf("answer = %q, want accumulated streaming answer", result.Answer)
 	}
+	var answerEvents []ChatStreamEvent
+	for _, event := range events {
+		if event.Type != "progress" {
+			answerEvents = append(answerEvents, event)
+		}
+	}
+	events = answerEvents
 	if len(events) != 4 {
 		t.Fatalf("events = %#v, want two answer deltas, final citations and done", events)
 	}
