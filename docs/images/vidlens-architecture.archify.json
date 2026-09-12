@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "映知 · 视频理解与证据问答",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1320,
+      740
+    ]
+  },
+  "components": [
+    {
+      "id": "workspace",
+      "type": "frontend",
+      "label": "Next.js 工作台",
+      "sublabel": "播放器 · 时间线 · 引用回看",
+      "pos": [
+        40,
+        310
+      ],
+      "size": [
+        220,
+        80
+      ]
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "Go / Gin 后端",
+      "sublabel": "API · 会话执行 · 任务管理",
+      "pos": [
+        380,
+        310
+      ],
+      "size": [
+        220,
+        80
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "RAG 与视频 Agent",
+      "sublabel": "检索 · 视觉调查 · 证据核验",
+      "pos": [
+        720,
+        310
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "用户 AI 服务",
+      "sublabel": "LLM / Vision / ASR / 向量",
+      "pos": [
+        1080,
+        310
+      ],
+      "size": [
+        220,
+        80
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "限流 · 配额 · 缓存",
+      "pos": [
+        380,
+        70
+      ],
+      "size": [
+        220,
+        80
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL + pgvector",
+      "sublabel": "业务事实 · 来源映射 · 检索投影",
+      "pos": [
+        720,
+        70
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "RabbitMQ",
+      "sublabel": "阶段调度 · 重试 · 消费控制",
+      "pos": [
+        380,
+        570
+      ],
+      "size": [
+        220,
+        80
+      ]
+    },
+    {
+      "id": "workers",
+      "type": "backend",
+      "label": "视频处理消费者",
+      "sublabel": "ASR / 视觉分支 · 摘要 · 索引",
+      "pos": [
+        720,
+        570
+      ],
+      "size": [
+        240,
+        80
+      ]
+    },
+    {
+      "id": "media",
+      "type": "cloud",
+      "label": "MinIO + FFmpeg",
+      "sublabel": "媒体存储 · 提音 · 按需抽帧",
+      "pos": [
+        1080,
+        570
+      ],
+      "size": [
+        220,
+        80
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "workspace",
+      "to": "server",
+      "label": "HTTP / SSE",
+      "variant": "emphasis"
+    },
+    {
+      "from": "server",
+      "to": "agent",
+      "label": "问答执行",
+      "variant": "emphasis"
+    },
+    {
+      "from": "agent",
+      "to": "providers",
+      "label": "模型调用",
+      "variant": "emphasis"
+    },
+    {
+      "from": "server",
+      "to": "redis",
+      "label": "配额检查"
+    },
+    {
+      "from": "agent",
+      "to": "postgres",
+      "label": "检索与持久化"
+    },
+    {
+      "from": "server",
+      "to": "queue",
+      "label": "投递任务",
+      "variant": "dashed",
+      "labelAt": [
+        490,
+        480
+      ]
+    },
+    {
+      "from": "queue",
+      "to": "workers",
+      "label": "异步消费",
+      "variant": "dashed"
+    },
+    {
+      "from": "workers",
+      "to": "media",
+      "label": "处理媒体"
+    },
+    {
+      "from": "agent",
+      "to": "media",
+      "label": "按需看画面",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "先定位，再查看",
+      "items": [
+        "转写 / OCR / 画面描述共同检索",
+        "来源与时间精度贯穿引用和播放器"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "受控执行与证据核验",
+      "items": [
+        "Research 在单视频内按预算选择工具",
+        "候选回答核对 Claim 与 Evidence"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "共享依赖与运行边界",
+      "items": [
+        "消费者也调用 AI 并写入 PostgreSQL",
+        "API 与消费者由同一 Go 服务启动"
+      ]
+    }
+  ]
+}

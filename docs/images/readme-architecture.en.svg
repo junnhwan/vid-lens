@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 960" role="img" aria-labelledby="readme-architecture.en-title readme-architecture.en-desc">
+<title id="readme-architecture.en-title">VidLens · System architecture</title>
+<desc id="readme-architecture.en-desc">Next.js connects to Go APIs for asynchronous video processing and Chat / Agent execution, sharing PostgreSQL, MinIO, Redis and AI providers.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#aea697"/></marker><marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#e2a84b"/></marker><marker id="arrow-link" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#86b4c9"/></marker></defs>
+<style>text{font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;fill:#f4efe6}.title{font-family:"Noto Serif SC","Microsoft YaHei",serif;font-size:32px;font-weight:600}.name{font-size:24px;font-weight:600}.body{font-size:20px;fill:#d2cbbd}.meta{font-size:16px;fill:#aea697}.tag{font-size:16px;fill:#e2a84b;letter-spacing:2px}.edge{fill:none;stroke:#aea697;stroke-width:2;marker-end:url(#arrow)}</style>
+<rect width="1200" height="960" rx="16" fill="#141210"/>
+<text x="48" y="60" class="title">VidLens · System architecture</text>
+<text x="48" y="92" class="meta">From video ingestion to source-linked answers</text>
+<rect x="48" y="264" width="1104" height="384" rx="16" fill="#1a1815" stroke="#494237"/>
+<text x="72" y="296" class="meta">GO BACKEND · APIs &amp; background consumers</text>
+<rect x="48" y="720" width="1104" height="156" rx="16" fill="#1a1815" stroke="#494237"/>
+<path class="edge" d="M600 224 V312"/>
+<path class="edge" d="M440 400 V420 Q440 428 432 428 H328 Q320 428 320 436 V460"/>
+<path class="edge" d="M760 400 V420 Q760 428 768 428 H872 Q880 428 880 436 V460"/>
+<path class="edge" d="M600 648 V720"/>
+<rect x="620" y="240" width="256" height="24" rx="0" fill="#141210" stroke="#141210"/>
+<text x="628" y="256" class="meta">HTTP / SSE · status readback</text>
+<rect x="620" y="668" width="420" height="24" rx="0" fill="#141210" stroke="#141210"/>
+<text x="628" y="684" class="meta">Shared persistence &amp; model access</text>
+<rect x="240" y="128" width="720" height="96" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="264" y="164" class="name">Next.js workspace</text>
+<text x="264" y="200" class="body">Video library · Knowledge bases · Chat · Source playback</text>
+<rect x="240" y="312" width="720" height="88" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="264" y="348" class="name">Go / Gin API</text>
+<text x="264" y="384" class="body">Access scope · Task management · Conversation execution</text>
+<rect x="72" y="460" width="516" height="164" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="96" y="496" class="name">Asynchronous media pipeline</text>
+<text x="96" y="532" class="body">RabbitMQ · Retries · Leases · Idempotency</text>
+<text x="96" y="564" class="body">Import → Transcription &amp; visuals → Indexing</text>
+<text x="96" y="596" class="body">FFmpeg / yt-dlp · ASR · OCR / Vision</text>
+<rect x="612" y="460" width="516" height="164" rx="12" fill="#2a2319" stroke="#e2a84b"/>
+<text x="636" y="496" class="name">Chat &amp; Agent</text>
+<text x="636" y="532" class="body">Hybrid search / Rerank · Maps · Frame tools</text>
+<text x="636" y="564" class="body">Plan → Tools → Observe → Cited answer</text>
+<text x="636" y="596" class="body">Budgets · Run journal · Preferences · Feedback</text>
+<rect x="64" y="736" width="244" height="124" rx="12" fill="#2a2319" stroke="#e2a84b"/>
+<text x="80" y="768" class="name">PostgreSQL</text>
+<text x="80" y="804" class="meta">App state &amp; evidence</text>
+<text x="80" y="832" class="meta">pgvector projection</text>
+<rect x="340" y="736" width="244" height="124" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="356" y="768" class="name">MinIO</text>
+<text x="356" y="804" class="meta">Video · Audio · Frames</text>
+<text x="356" y="832" class="meta">Media object storage</text>
+<rect x="616" y="736" width="244" height="124" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="632" y="768" class="name">Redis</text>
+<text x="632" y="804" class="meta">Cache · Limits · Quotas</text>
+<text x="632" y="832" class="meta">Transient coordination</text>
+<rect x="892" y="736" width="244" height="124" rx="12" fill="#211e1a" stroke="#494237"/>
+<text x="908" y="768" class="name">AI providers</text>
+<text x="908" y="804" class="meta">LLM · ASR · Vision</text>
+<text x="908" y="832" class="meta">Embedding · Rerank</text>
+<path d="M48 904 H1152" stroke="#494237"/>
+<text x="48" y="936" class="meta">Across the stack · Structured logs · Prometheus / Grafana</text>
+</svg>

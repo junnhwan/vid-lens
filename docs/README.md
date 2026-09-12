@@ -14,7 +14,8 @@
 - [Agent 长期记忆设计](architecture/agent-memory.md)
 - [Agent 与视频证据架构调研](architecture/agent-evidence.md)
 - [可靠性与幂等](architecture/reliability.md)
-- [架构图](images/vidlens-architecture.svg)
+- [架构图](images/readme-architecture.svg) · [English](images/readme-architecture.en.svg)
+- [架构图 HTML 源文件](images/readme-architecture.html) · [English](images/readme-architecture.en.html)
 - [评测资料](eval/README.md)
 - [压测与故障演练](operations/stress-testing.md)
 
