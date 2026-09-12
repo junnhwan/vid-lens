@@ -83,7 +83,7 @@ func TestDefaultDisabledPolicySkipsAgentRecallAndCapture(t *testing.T) {
 	})
 	result, err := NewVideoAgentService(chatSvc).Ask(context.Background(), VideoAgentRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "请简洁回答", TopK: 1,
-	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "回答 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
+	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("", task.ID, 1), "回答 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}

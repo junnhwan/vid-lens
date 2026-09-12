@@ -19,6 +19,7 @@ export interface AgentSnapshotStepJSON {
 }
 
 interface AgentSnapshotEnvelopeJSON {
+  degraded?: boolean
   version?: number
   run_id?: string
   mode?: string
@@ -36,6 +37,7 @@ interface LegacyVideoAgentStepJSON {
 }
 
 export interface ParsedSnapshotTrace {
+  degraded?: boolean
   steps: ChatTraceStep[]
   runId?: string
   mode?: string
@@ -56,7 +58,7 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
     const runId = obj.run_id?.trim() || undefined
     const mode = obj.mode?.trim() || undefined
     if (Array.isArray(obj.steps)) {
-      return { steps: obj.steps.map((step, index) => snapshotStepToTrace(step, index, runId)), runId, mode, isAgentEnvelope: true, source: 'agent' }
+      return { ...(obj.degraded ? { degraded: true } : {}), steps: obj.steps.map((step, index) => snapshotStepToTrace(step, index, runId)), runId, mode, isAgentEnvelope: true, source: 'agent' }
     }
     if (Array.isArray(obj.trace) && obj.trace.length > 0) {
       return { steps: obj.trace.map((step, index) => legacyAgentStepToTrace(step, `hist-${index + 1}`, runId)), runId, mode, isAgentEnvelope: true, source: 'legacy' }

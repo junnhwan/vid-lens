@@ -29,3 +29,10 @@ test('snapshot adapter keeps legacy trace and bare citation compatibility isolat
   assert.equal(citations?.source, 'inferred')
   assert.equal(citations?.steps[0]?.hits, 2)
 })
+
+
+test('budget-limited Agent history retains its degraded result', () => {
+  const parsed = parseSnapshotTrace(JSON.stringify({ version: 1, mode: 'agent', run_id: 'budget', steps: [], citations: [], degraded: true }))
+  assert.equal(parsed?.degraded, true)
+  assert.equal(parsed?.runId, 'budget')
+})

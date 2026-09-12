@@ -84,13 +84,13 @@ func TestVideoAgentSyncAndStreamPersistTheSameSnapshotShape(t *testing.T) {
 
 	syncResult, err := agent.Ask(context.Background(), VideoAgentRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "为什么要统一？", TopK: 1,
-	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "同步回答 [C1]"}}, profile)
+	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("ev-unified", task.ID, 1), "同步回答 [C1]"}}, profile)
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
 	streamResult, err := agent.Stream(context.Background(), VideoAgentStreamRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "为什么要统一？", TopK: 1, Mode: AgentStreamMode,
-	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "流式回答 [C1]"}}, profile, func(AgentStreamEvent) error {
+	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("ev-unified", task.ID, 1), "流式回答 [C1]"}}, profile, func(AgentStreamEvent) error {
 		return nil
 	})
 	if err != nil {

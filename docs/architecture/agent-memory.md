@@ -2,13 +2,13 @@
 
 状态：长期记忆最小切片与用户授权、会话级策略已形成后端契约；持久队列与知识库 Agent 接入仍待增强
 
-核验时间：2026-08-31（Asia/Shanghai）
+核验时间：2026-09-12（Asia/Shanghai）
 
 本文从 [agent-evolution.md](agent-evolution.md) 拆出长期记忆的边界和最小实现。长期记忆是 Agent 的上下文基础设施：它可以提供有限的历史信息，但不拥有目标分解、工具选择、验证或停止能力。
 
 ## 现状
 
-VidLens 的短期会话上下文仍由 `internal/service/chat.go` 中的 `ChatMemoryStore` 和 `RecentTurns` 管理；它没有被改名或冒充为长期记忆。长期记忆最小切片独立落在 `agent_memory_items`、`agent_memory_events`、`MemoryProvider` 和异步 `MemoryWriter` 上。`memory.enabled` 只表示部署是否提供长期记忆能力；即使部署启用能力，用户仍须通过用户默认偏好或会话覆盖显式允许，模板 Video Agent 才能召回和写入长期记忆。
+VidLens 的短期会话上下文仍由 `internal/service/chat.go` 中的 `ChatMemoryStore` 和 `RecentTurns` 管理；它没有被改名或冒充为长期记忆。长期记忆最小切片独立落在 `agent_memory_items`、`agent_memory_events`、`MemoryProvider` 和异步 `MemoryWriter` 上。`memory.enabled` 只表示部署是否提供长期记忆能力；即使部署启用能力，用户仍须通过用户默认偏好或会话覆盖显式允许，自主 Agent 才能召回和写入长期记忆。
 
 长期记忆仍不是 Agent：它不选择工具、不验证视频 Claim，也不拥有循环或停止条件。
 
@@ -17,11 +17,11 @@ VidLens 的短期会话上下文仍由 `internal/service/chat.go` 中的 `ChatMe
 - `internal/model/memory.go` 定义 `user`、`video`、`knowledge_base`、`run` 四类 scope，以及 item/event 权威模型。item 包含 kind、content、source、importance、embedding ref、生命周期时间、status、version 和软删除字段。
 - `internal/repository/memory.go` 使用 GORM/PostgreSQL 保存 item 与追加事件；同一 owner/scope/kind 的不同内容会同时保留并标记 `conflicted`，精确重复内容不会静默覆盖原记录。PostgreSQL advisory transaction lock 解决首条记录尚不存在时的并发写竞争，有限查询命中冲突项后会从关系表扩展完整冲突组。
 - 删除采用 `deleted` 状态、版本递增、事件和 GORM tombstone；撤回采用 `withdrawn` 状态与事件。两者会在同一事务中移除 pgvector 投影，并且与过期、无 `source_ref` 的记录一样不会进入召回。
-- `ScopedMemoryProvider.Snapshot` 在查询前逐一校验用户、视频和知识库所有权，并在查询中再次固定 `user_id + scope_type + scope_id`。Run 尚无独立表，因此当前以 owner `user_id + run_id` 隔离。
+- `ScopedMemoryProvider.Snapshot` 在查询前逐一校验用户、视频和知识库所有权，并在查询中再次固定 `user_id + scope_type + scope_id`。Run 授权通过 AgentExecution.GetRun 校验真实执行记录的 owner；不能只生成随机 run_id 代替授权。
 - Snapshot 使用稳定 schema/version hash 和确定性 memory id 顺序；召回同时受 top-k、字符和近似 token 上限控制。冲突项只会成组进入，不会只挑一个值冒充确定事实。
 - `AsyncMemoryWriter.Enqueue(candidate)` 和异步 extractor queue 都是非阻塞 best-effort side effect。关系 item 先持久化；pgvector embedding 投影失败只计入 `vidlens_memory_background_total`，不回滚 item，也不影响当前回答。
 - 默认 extractor 只识别用户明确表达的回答偏好，输出固定的规范化偏好文本，并只写 `user` scope；包含凭据、token、私钥或数据库认证 URL 的输入会被丢弃，不保存用户原始文本。writer 还会拒绝敏感内容、`agent_answer`/`assistant_response`，读取侧也会排除可能由旧版本留下的敏感 item；video/KB scope 只接受 `verified_claim`、`user_confirmation` 或 `manual` 来源。
-- `memory.enabled` 默认为 `false`，是不可被用户或会话覆盖的能力总开关。能力启用后仍需计算用户默认偏好与会话策略；只有 effective policy 为 enabled 时，模板 Video Agent 和非流式 research Agent 才会在执行前读取 `user + current video + current run` snapshot。最终回答工具只能使用服务端注入的可信 snapshot；planner 参数不包含 `memory_context`，未知字段会被拒绝。聊天历史只持久化 snapshot schema/version/memory ids，不保留内容或 source ref。
+- `memory.enabled` 默认为 `false`，是不可被用户或会话覆盖的能力总开关。能力启用后仍需计算用户默认偏好与会话策略；只有 effective policy 为 enabled 时，唯一自主 Agent 才会在执行前读取 `user + current video + current run` snapshot。最终回答工具只能使用服务端注入的可信 snapshot；planner 参数不包含 `memory_context`，未知字段会被拒绝。聊天历史只持久化 snapshot schema/version/memory ids，不保留内容或 source ref。
 - 当当前 AI profile 的 embedding 与 pgvector 投影可用时，snapshot 以请求 `query` 的语义相似度产生候选；embedding、投影或在线向量查询不可用/为空时退回关系排序。普通 RAG、KB RAG 和现有 SSE 行为在关闭 memory 时不变。
 - 已提供鉴权后的 `GET /api/v1/memories`、`POST /api/v1/memories/:memory_id/withdraw` 和 `DELETE /api/v1/memories/:memory_id`；服务端始终以 JWT user id 和资源 owner 再次校验，客户端不能指定其他 owner。
 
@@ -57,7 +57,7 @@ VidLens 的短期会话上下文仍由 `internal/service/chat.go` 中的 `ChatMe
 | `true` | `inherit` | `true` | `true` | `user_enabled` |
 | `true` | `inherit` | `false`/无记录 | `false` | `user_disabled` |
 
-策略只控制长期记忆，不影响 `ChatMemoryStore` 的短期最近消息、普通视频/KB RAG、证据账本或已有聊天历史。关闭任何一层开关都不会删除、撤回或修改已有 memory item；重新启用后，未过期且未撤回/删除的既有记忆可以再次进入召回候选。
+策略只控制长期记忆，不影响 `ChatMemoryStore` 的短期最近消息、普通视频/KB RAG或已有聊天历史。关闭任何一层开关都不会删除、撤回或修改已有 memory item；重新启用后，未过期且未撤回/删除的既有记忆可以再次进入召回候选。
 
 ### 读写执行规则
 
@@ -213,4 +213,4 @@ MemoryWriter.enqueue(candidate_event) -> accepted/rejected/best-effort
 - 当前没有知识库 Agent；因此 `knowledge_base` scope 已具备模型、权限、召回和治理能力，但只会在后续真正的 scope-aware KB Agent 接入，不能把普通 KB RAG 描述为已使用长期记忆。
 - 聊天历史采用“只保存 snapshot identity”的删除语义：删除后旧内容不能从历史快照恢复，但历史中仍保留当时用过的 memory id/version 作为最小审计标识。
 
-验证（2026-08-31）：`go test ./...`、`go vet ./...`、`go build ./cmd/server ./cmd/rag-eval ./cmd/rag-reindex ./cmd/rag-audit`、记忆策略并发路径的 `go test -race`、`git diff --check` 均通过；未修改前端。
+验证（2026-09-12）：`go test ./...`、`go vet ./...`、`go build ./cmd/server ./cmd/rag-eval ./cmd/rag-reindex ./cmd/rag-audit`、记忆策略并发路径的 `go test -race`、`git diff --check` 均通过；未修改前端。

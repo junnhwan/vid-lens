@@ -12,12 +12,10 @@ func TestVideoAgentToolRegistryExposesDefaultDefinitions(t *testing.T) {
 	definitions := registry.Definitions()
 	wantNames := []string{
 		VideoAgentToolBuildCitedAnswer,
-		VideoAgentToolCompareSegments,
 		VideoAgentToolGetTranscriptWindow,
 		VideoAgentToolInspectVisualWindow,
 		VideoAgentToolSearchTranscript,
 		VideoAgentToolSearchVisualEvidence,
-		VideoAgentToolSummarizeSegments,
 	}
 	if len(definitions) != len(wantNames) {
 		t.Fatalf("definition count = %d, want %d: %+v", len(definitions), len(wantNames), definitions)

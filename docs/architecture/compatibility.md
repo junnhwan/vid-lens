@@ -13,3 +13,7 @@
 | prototype UI 组件 | 正式 `frontend/app/` 与 `frontend/components/chat/` | 前端设计 workspace | 原型决策完成并归档后删除；不得从正式产品模块导入 prototype 组件 |
 
 Run/Step/ToolCall 的权威数据只来自 PostgreSQL 执行表。聊天 `retrieval_snapshot`、旧 `trace[]` 和 UI 推断步骤始终是展示兼容层，不能提供 lease、checkpoint、预算或终态事实。
+
+## 两模式迁移
+
+新在线请求只接受 `chat | agent`。旧 `strict_rag`、`video_assistant`、`research` 和 `evidence_funnel` 只保留内部迁移常量或历史展示，不存在独立在线引擎。新 Agent policy 使用 engine_version=2，旧未完成 run 不自动转换续跑；旧完成消息仍可回放。

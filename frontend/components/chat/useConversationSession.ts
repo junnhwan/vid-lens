@@ -9,8 +9,6 @@ import {
   emptyConversationSessionState,
 } from '@/components/chat/conversationSession'
 import { api, ApiError, streamAgent, streamAsk } from '@/lib/api'
-import { isBlockedAnswer } from '@/components/chat/chatUtils'
-import { traceFromAgentResult } from '@/components/chat/snapshotTraceAdapter'
 import type { ChatMessage, ChatScopeType, ChatSession, Citation, VideoChatMode } from '@/lib/types'
 
 interface ConversationSessionOptions {
@@ -144,7 +142,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
     const controller = new AbortController()
     abortRef.current = controller
     dispatch(
-      mode === 'strict_rag' || mode === 'video_assistant'
+      mode === 'chat'
         ? { type: 'rag_start', question }
         : { type: 'agent_start', question, mode },
     )
@@ -167,7 +165,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
             // 回答已被服务端替换为阻断文案
             dispatch({
               type: 'stream_done',
-              patch: { degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
+              patch: { ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
             })
           },
           onError: error => {
@@ -175,19 +173,6 @@ export function useConversationSession(options: ConversationSessionOptions) {
             dispatch({ type: 'stream_error', message: error.message })
           },
         }, controller.signal)
-      } else if (mode === 'research' || mode === 'evidence_funnel') {
-        // 研究/漏斗走非流式接口：等待期只有诚实状态，不做假 SSE；结果到达后一次性回放轨迹
-        const result = await api.askAgent(sessionId, question, topK, mode)
-        const parsed = traceFromAgentResult(result)
-        dispatch({
-          type: 'agent_replay',
-          steps: parsed.steps,
-          runId: parsed.runId,
-          mode,
-          content: result.answer,
-          cites: mapCitations(result.citations || []),
-          degraded: isBlockedAnswer(result.answer),
-        })
       } else {
         let answerStarted = false
         await streamAsk(sessionId, question, topK, mode, {
@@ -214,13 +199,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         dispatch({ type: 'stream_cancelled' })
       } else {
-        const fallback = mode === 'agent'
-          ? 'Agent 流式请求失败'
-          : mode === 'research'
-            ? '深入研究请求失败'
-            : mode === 'evidence_funnel'
-              ? '证据漏斗请求失败'
-              : '流式请求失败'
+        const fallback = mode === 'agent' ? 'Agent 流式请求失败' : '流式请求失败'
         dispatch({ type: 'stream_error', message: error instanceof ApiError ? error.message : fallback })
       }
     } finally {

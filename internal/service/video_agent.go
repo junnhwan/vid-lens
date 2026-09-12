@@ -5,12 +5,10 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
@@ -33,6 +31,7 @@ type VideoAgentRequest struct {
 }
 
 type VideoAgentResult struct {
+	Degraded     bool                        `json:"degraded,omitempty"`
 	MessageID    int64                       `json:"message_id"`
 	Answer       string                      `json:"answer"`
 	Template     string                      `json:"template"`
@@ -53,20 +52,10 @@ type VideoAgentStep struct {
 	Error     string         `json:"error,omitempty"`
 }
 
-type VideoAgentTemplateRequest struct {
-	UserID         int64
-	TaskID         int64
-	Question       string
-	EmbeddingModel string
-}
-
 type VideoAgentService struct {
-	chatSvc                       *ChatService
-	executionJournal              *AgentExecutionJournal
-	evidenceFunnelResultPublisher func(userID, sessionID, messageID int64, content, snapshot, modelName string) (bool, error)
-	visualInvestigator            VisualInvestigator
-	evidenceVisionResolver        EvidenceInspectorVisionResolver
-	evidenceArtifactDownloader    VisualArtifactDownloader
+	chatSvc            *ChatService
+	executionJournal   *AgentExecutionJournal
+	visualInvestigator VisualInvestigator
 }
 
 type VideoAgentExecutionError struct {
@@ -100,153 +89,8 @@ func (s *VideoAgentService) SetVisualInvestigator(investigator VisualInvestigato
 	}
 }
 
-// SetEvidenceInspectorVisualVerifier wires the independent pixel verifier.
-// The resolver and downloader are server-owned so evidence citations never
-// supply an arbitrary URL or local path.
-func (s *VideoAgentService) SetEvidenceInspectorVisualVerifier(resolver EvidenceInspectorVisionResolver, downloader VisualArtifactDownloader) {
-	if s == nil {
-		return
-	}
-	s.evidenceVisionResolver = resolver
-	s.evidenceArtifactDownloader = downloader
-}
-
-func ClassifyVideoAgentTemplate(question string) VideoAgentTemplate {
-	question = strings.TrimSpace(question)
-	if containsAny(question, "对比", "区别", "前后", "变化") {
-		return VideoAgentCompareTopics
-	}
-	if containsAny(question, "总结", "归纳", "概括") {
-		return VideoAgentSummarizeTopic
-	}
-	if containsAny(question, "问题", "风险", "不足", "不严谨", "反驳") {
-		return VideoAgentCritiqueTopic
-	}
-	return VideoAgentDirectQA
-}
-
 func (s *VideoAgentService) Ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
-	return s.ask(ctx, req, embedding, chat, profile, nil, uuid.NewString(), AgentStreamMode, "default")
-}
-
-func (s *VideoAgentService) ask(ctx context.Context, req VideoAgentRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, observer VideoAgentStepObserver, runID, mode, agentProfile string) (result *VideoAgentResult, err error) {
-	req.Question = strings.TrimSpace(req.Question)
-	if req.Question == "" {
-		return nil, fmt.Errorf("问题不能为空")
-	}
-	if s == nil || s.chatSvc == nil {
-		return nil, fmt.Errorf("agent chat service 不能为空")
-	}
-	if s.chatSvc.retriever == nil {
-		return nil, fmt.Errorf("当前视频尚未构建 RAG 索引")
-	}
-	session, err := s.findVideoAgentSession(req.UserID, req.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	memoryPolicy := req.MemoryPolicy
-	if memoryPolicy == nil {
-		resolved := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
-		memoryPolicy = &resolved
-	}
-	if req.TopK <= 0 {
-		req.TopK = s.chatSvc.cfg.TopK
-	}
-	if req.TopK > 10 {
-		req.TopK = 10
-	}
-	policy, budget := defaultTemplateAgentPolicy(req.TopK)
-	if _, err = s.ensureAgentRun(ctx, runID, req.UserID, session, req.Question, mode, agentProfile, profile, policy, budget); err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err == nil {
-			return
-		}
-		status, reason := model.AgentRunStatusFailed, "execution_failed"
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			status, reason = model.AgentRunStatusCancelled, "request_cancelled"
-		}
-		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
-	}()
-
-	recentLimit := s.chatSvc.cfg.RecentTurns * 2
-	recent, err := s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
-	if err != nil {
-		return nil, err
-	}
-	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Question, *memoryPolicy)
-	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
-	template := ClassifyVideoAgentTemplate(req.Question)
-	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
-	tools.SetVisualInvestigator(s.visualInvestigator)
-	tools.SetMemorySnapshot(memorySnapshot)
-	tools.SetStepObserver(newDurableAgentStepObserver(s.executionJournal, req.UserID, runID, observer))
-	trace := make([]VideoAgentStep, 0, 4)
-
-	searchArguments, err := json.Marshal(searchTranscriptToolArguments{Question: req.Question, TopK: req.TopK})
-	if err != nil {
-		return nil, newVideoAgentExecutionError(err, trace)
-	}
-	registry := tools.Registry()
-	if registry == nil {
-		return nil, newVideoAgentExecutionError(fmt.Errorf("video agent tool registry 不能为空"), trace)
-	}
-	searchExecution, err := registry.Execute(ctx, VideoAgentToolSearchTranscript, VideoAgentToolRequest{
-		Runtime: VideoAgentToolRuntime{
-			UserID:         req.UserID,
-			TaskID:         session.TaskID,
-			Recent:         recent,
-			TopK:           req.TopK,
-			EmbeddingModel: profile.EmbeddingModel,
-			Embedding:      embedding,
-		},
-		Arguments: searchArguments,
-	})
-	if err != nil {
-		trace = append(trace, searchExecution.Step)
-		return nil, newVideoAgentExecutionError(err, trace)
-	}
-	var search SearchTranscriptResult
-	if err := json.Unmarshal(searchExecution.Output, &search); err != nil {
-		step, stepErr := failVideoAgentStep(searchExecution.Step, fmt.Sprintf("tool output 解析失败: %v", err))
-		trace = append(trace, step)
-		return nil, newVideoAgentExecutionError(stepErr, trace)
-	}
-	trace = append(trace, searchExecution.Step)
-	if len(search.Citations) == 0 {
-		return nil, newVideoAgentExecutionError(fmt.Errorf("未检索到足够相关的视频片段"), trace)
-	}
-
-	answer, citations, trace, err := s.executeTemplate(ctx, tools, template, req, profile.EmbeddingModel, session.TaskID, search.Citations, trace)
-	if err != nil {
-		return nil, newVideoAgentExecutionError(err, trace)
-	}
-	candidateCitations := buildCitations(req.Question, citations)
-	finalized := finalizeAnswerCitations(answer, candidateCitations)
-	result = &VideoAgentResult{
-		Answer:       finalized.Answer,
-		Template:     string(template),
-		Citations:    finalized.Citations,
-		Trace:        trace,
-		Model:        profile.LLMModel,
-		RunID:        runID,
-		Mode:         mode,
-		Memory:       memorySnapshot.Identity(),
-		MemoryPolicy: *memoryPolicy,
-	}
-	ledgerReq := EvidenceLedgerRecordRequest{
-		UserID: req.UserID, SessionID: req.SessionID, TaskID: session.TaskID,
-		RunID: runID, RawAnswer: answer, Evidence: candidateCitations, Retrieved: buildCitations(req.Question, search.Citations),
-	}
-	if err := s.inspectAnswer(ctx, &ledgerReq, result, embedding, chat, profile); err != nil {
-		return nil, err
-	}
-	if err := s.publishInspectedAnswer(ctx, req.Question, ledgerReq, result); err != nil {
-		return nil, err
-	}
-	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, "goal_satisfied", nil)
-	return result, nil
+	return s.RunAgent(ctx, VideoAgentLoopRequest{UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK}, embedding, chat, profile)
 }
 
 func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*model.ChatSession, error) {
@@ -272,169 +116,15 @@ func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*mod
 	return session, nil
 }
 
-func (s *VideoAgentService) executeTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentRequest, embeddingModel string, taskID int64, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
-	return ExecuteVideoAgentTemplate(ctx, tools, template, VideoAgentTemplateRequest{
-		UserID:         req.UserID,
-		TaskID:         taskID,
-		Question:       req.Question,
-		EmbeddingModel: embeddingModel,
-	}, citations, trace)
-}
-
-func ExecuteVideoAgentTemplate(ctx context.Context, tools *VideoAgentTools, template VideoAgentTemplate, req VideoAgentTemplateRequest, citations []RetrievedChunk, trace []VideoAgentStep) (string, []RetrievedChunk, []VideoAgentStep, error) {
-	switch template {
-	case VideoAgentSummarizeTopic:
-		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, len(citations))
-		trace = append(trace, windowTrace...)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		summary, step, err := tools.SummarizeSegments(ctx, SummarizeSegmentsInput{Question: req.Question, Segments: segments})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		return final.Answer, final.Citations, trace, nil
-	case VideoAgentCompareTopics:
-		groups, windowTrace, err := loadAgentWindowGroups(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, 2)
-		trace = append(trace, windowTrace...)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		comparison, step, err := tools.CompareSegments(ctx, CompareSegmentsInput{Question: req.Question, Groups: groups})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: comparison.Comparison, Citations: citations})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		return final.Answer, final.Citations, trace, nil
-	case VideoAgentCritiqueTopic:
-		segments, windowTrace, err := loadAgentWindowSegments(ctx, tools, req.UserID, req.TaskID, req.EmbeddingModel, citations, len(citations))
-		trace = append(trace, windowTrace...)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		summary, step, err := tools.SummarizeSegments(ctx, SummarizeSegmentsInput{
-			Question: "围绕用户问题总结这些片段中的问题、风险、不足或不严谨之处：" + req.Question,
-			Segments: segments,
-		})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{Question: req.Question, Intermediate: summary.Summary, Citations: citations})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		return final.Answer, final.Citations, trace, nil
-	default:
-		final, step, err := tools.BuildCitedAnswer(ctx, BuildCitedAnswerInput{
-			Question:     req.Question,
-			Intermediate: "请直接基于检索到的视频转写片段回答用户问题。",
-			Citations:    citations,
-		})
-		trace = append(trace, step)
-		if err != nil {
-			return "", nil, trace, err
-		}
-		return final.Answer, final.Citations, trace, nil
-	}
-}
-
-func loadAgentWindowSegments(ctx context.Context, tools *VideoAgentTools, userID, taskID int64, embeddingModel string, citations []RetrievedChunk, maxWindows int) ([]TranscriptSegment, []VideoAgentStep, error) {
-	groups, trace, err := loadAgentWindowGroups(ctx, tools, userID, taskID, embeddingModel, citations, maxWindows)
-	if err != nil {
-		return nil, trace, err
-	}
-	segments := make([]TranscriptSegment, 0)
-	for _, group := range groups {
-		segments = append(segments, group.Segments...)
-	}
-	return segments, trace, nil
-}
-
-func loadAgentWindowGroups(ctx context.Context, tools *VideoAgentTools, userID, taskID int64, embeddingModel string, citations []RetrievedChunk, maxWindows int) ([]TranscriptSegmentGroup, []VideoAgentStep, error) {
-	if maxWindows <= 0 || maxWindows > len(citations) {
-		maxWindows = len(citations)
-	}
-	groups := make([]TranscriptSegmentGroup, 0, maxWindows)
-	trace := make([]VideoAgentStep, 0, maxWindows)
-	for i := 0; i < maxWindows; i++ {
-		citation := citations[i]
-		window, step, err := tools.GetTranscriptWindow(ctx, TranscriptWindowInput{
-			UserID:         userID,
-			TaskID:         taskID,
-			EmbeddingModel: embeddingModel,
-			ChunkIndex:     citation.ChunkIndex,
-			Radius:         1,
-		})
-		trace = append(trace, step)
-		if err != nil {
-			return nil, trace, err
-		}
-		groups = append(groups, TranscriptSegmentGroup{
-			Label:    fmt.Sprintf("chunk_%d_window_%d_%d", citation.ChunkIndex, window.StartIndex, window.EndIndex),
-			Segments: window.Segments,
-		})
-	}
-	return groups, trace, nil
-}
-
-func (s *VideoAgentService) saveAgentExchange(ctx context.Context, userID, sessionID int64, question string, result *VideoAgentResult, recentLimit int) error {
-	userMessage := &model.ChatMessage{
-		SessionID: sessionID,
-		UserID:    userID,
-		Role:      "user",
-		Content:   question,
-	}
-	if err := s.chatSvc.repos.Chat.CreateMessage(userMessage); err != nil {
-		return err
-	}
-	if session, err := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); err == nil && session != nil {
-		s.chatSvc.maybeAutoTitleSession(session, question)
-	}
-	snapshot, err := MarshalAgentSnapshot(result)
-	if err != nil {
-		return err
-	}
-	snapshotText := string(snapshot)
-	assistantMessage := &model.ChatMessage{
-		SessionID:         sessionID,
-		UserID:            userID,
-		Role:              "assistant",
-		Content:           result.Answer,
-		RetrievalSnapshot: &snapshotText,
-		ModelName:         result.Model,
-	}
-	if err := s.chatSvc.repos.Chat.CreateMessage(assistantMessage); err != nil {
-		return err
-	}
-	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
-	result.MessageID = assistantMessage.ID
-	if result.MemoryPolicy.EffectiveEnabled && s.chatSvc.memoryCapture != nil {
-		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
-			UserID: userID, SessionID: sessionID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
-		})
-	}
-	return nil
-}
-
 // saveAgentRunExchange persists a terminal Research exchange under the run's
 // idempotency key. A retry gets the original assistant message ID and does
 // not append a second user/assistant pair.
 func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, sessionID int64, question string, result *VideoAgentResult, recentLimit int) error {
 	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.Chat == nil || result == nil || strings.TrimSpace(result.RunID) == "" {
 		return errors.New("agent run exchange parameters are invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	snapshot, err := MarshalAgentSnapshot(result)
 	if err != nil {
@@ -443,12 +133,20 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
 	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model}
-	created, _, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, nil)
+	created, userMessageID, assistantMessageID, err := s.chatSvc.repos.Chat.CreateAgentRunExchange(userID, result.RunID, userMessage, assistantMessage, nil)
 	if err != nil {
 		return err
 	}
 	result.MessageID = assistantMessageID
 	if !created {
+		stored, err := loadAgentRunResult(ctx, s, userID, sessionID, result.RunID)
+		if err != nil {
+			return err
+		}
+		if stored == nil {
+			return errors.New("persisted agent answer unavailable")
+		}
+		*result = *stored
 		return nil
 	}
 	if session, findErr := s.chatSvc.repos.Chat.FindSessionForUser(userID, sessionID); findErr == nil && session != nil {
@@ -457,7 +155,7 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	_ = s.chatSvc.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	if result.MemoryPolicy.EffectiveEnabled && s.chatSvc.memoryCapture != nil {
 		_ = s.chatSvc.memoryCapture.EnqueueExtraction(MemoryExtractionRequest{
-			UserID: userID, SessionID: sessionID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessage.ID),
+			UserID: userID, SessionID: sessionID, UserText: question, SourceRef: fmt.Sprintf("chat_message:%d", userMessageID),
 		})
 	}
 	return nil

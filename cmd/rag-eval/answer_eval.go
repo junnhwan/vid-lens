@@ -83,37 +83,24 @@ func evaluateAgenticAnswer(ctx context.Context, c caseEvalContext, store service
 	}
 	pipeline := newAnswerEvalPipeline(c, store, repos, candidateK)
 	tools := service.NewVideoAgentTools(repos, pipeline, chat)
-	search, step, err := tools.SearchTranscript(ctx, service.SearchTranscriptInput{
-		UserID:         c.userID,
-		TaskID:         c.evalCase.TaskID,
-		Question:       c.evalCase.Question,
-		TopK:           topK,
-		EmbeddingModel: c.profile.EmbeddingModel,
-		Embedding:      c.embedding,
+	runner, err := service.NewVideoAgentLoopRunner(tools.Registry(), service.NewLLMVideoAgentLoopPlanner(chat), service.DefaultVideoAgentLoopObserver{}, service.DefaultVideoAgentLoopPolicy())
+	if err != nil {
+		return answerEvalErrorResult(result, err)
+	}
+	run, err := runner.Run(ctx, c.evalCase.Question, service.VideoAgentToolRuntime{
+		UserID: c.userID, TaskID: c.evalCase.TaskID, TopK: topK,
+		EmbeddingModel: c.profile.EmbeddingModel, Embedding: c.embedding,
 	})
-	result.Trace = append(result.Trace, step)
+	if run != nil {
+		result.Answer = run.State.Answer
+		result.Citations = run.State.Evidence
+		for _, step := range run.State.Steps {
+			result.Trace = append(result.Trace, step.Trace)
+		}
+	}
 	if err != nil {
-		result = answerEvalErrorResult(result, err)
-		return
+		return answerEvalErrorResult(result, err)
 	}
-	if len(search.Citations) == 0 {
-		result = answerEvalErrorResult(result, fmt.Errorf("no retrieved citations"))
-		return
-	}
-	template := service.ClassifyVideoAgentTemplate(c.evalCase.Question)
-	answer, citations, trace, err := service.ExecuteVideoAgentTemplate(ctx, tools, template, service.VideoAgentTemplateRequest{
-		UserID:         c.userID,
-		TaskID:         c.evalCase.TaskID,
-		Question:       c.evalCase.Question,
-		EmbeddingModel: c.profile.EmbeddingModel,
-	}, search.Citations, result.Trace)
-	result.Trace = trace
-	result.Citations = citations
-	if err != nil {
-		result = answerEvalErrorResult(result, err)
-		return
-	}
-	result.Answer = answer
 	return
 }
 

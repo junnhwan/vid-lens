@@ -199,9 +199,9 @@ export interface RAGIndexResult {
 
 // ============ Chat ============
 export type ChatScopeType = 'video' | 'knowledge_base'
-export type ChatMode = 'video_assistant' | 'strict_rag'
+export type ChatMode = 'chat'
 /** 单视频聊天页专用：ChatMode 之外另有 agent SSE 与两个非流式实验模式 */
-export type VideoChatMode = ChatMode | 'agent' | 'research' | 'evidence_funnel'
+export type VideoChatMode = 'chat' | 'agent'
 
 export interface ChatSession {
   id: number
@@ -385,6 +385,7 @@ export interface AgentRetrieveHitsEvent {
 }
 
 export interface AgentDoneEvent {
+  answer?: string
   run_id: string
   message_id: number
   degraded?: boolean
@@ -395,98 +396,6 @@ export interface AgentStreamOptions {
   top_k?: number
   mode?: 'agent'
   agent_profile?: string
-}
-
-// ============ 证据账本 (GET /agent/evidence-ledgers/:run_id) ============
-// 逐字段对应 internal/model/evidence_ledger.go 的 JSON tag;user_id 等前端不用的列省略。
-
-export interface ClaimInspectionEvidence {
-  anchor_quote?: string
-  source_ref: string
-  content: string
-  content_hash: string
-  source_revision: string
-  source_refs: string
-  modality: string
-  artifact_kind?: string
-  object_key?: string
-  source?: string
-  start_ms: number
-  end_ms: number
-  cited: boolean
-  pixel_required?: boolean
-  pixel_checked?: boolean
-  pixel_observation?: string
-  pixel_observation_hash?: string
-  pixel_relation?: string
-  pixel_reason?: string
-  pixel_model?: string
-  pixel_prompt_version?: string
-  relation: string // support | contradict | insufficient
-  reason: string
-}
-
-export interface ClaimInspection {
-  candidate_hash: string
-  version: string
-  model: string
-  claim: string
-  result: string // support | contradict | insufficient
-  reason: string
-  counter_query: string
-  search_completed: boolean
-  evidence: ClaimInspectionEvidence[]
-  checked_at: string
-}
-
-export interface AgentClaim {
-  inspection?: ClaimInspection
-  id: string
-  root_claim_id: string
-  revision: number
-  supersedes_claim_id?: string
-  session_id: number
-  message_id: number
-  run_id: string
-  kind: string
-  text: string
-  status: 'hypothesized' | 'verified' | 'corrected' | 'unsupported' | 'uncertain' | string
-  confidence: number
-  validation_note?: string
-  created_at: string
-}
-
-export interface AgentEvidenceArtifact {
-  id: string
-  run_id: string
-  source_ref: string
-  source_type: string
-  task_id: number
-  document_id: string
-  start_ms: number
-  end_ms: number
-  time_range_status: 'known' | 'unknown' | string
-  quote_text: string
-  stable_locator: string
-  source_revision?: string
-  source_revision_status: string
-  created_at: string
-}
-
-export interface AgentClaimEvidenceLink {
-  claim_id: string
-  evidence_id: string
-  relation: 'supports' | 'contradicts' | 'context' | string
-  verification_status: 'verified' | 'unsupported' | 'uncertain' | string
-  validation_reason?: string
-  created_at: string
-}
-
-export interface EvidenceLedgerView {
-  run_id: string
-  claims: AgentClaim[]
-  evidence: AgentEvidenceArtifact[]
-  claim_evidence: AgentClaimEvidenceLink[]
 }
 
 export interface AgentSSEHandlers {

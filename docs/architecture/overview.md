@@ -28,7 +28,7 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 
 ## 视频处理链路
 
-当前链路的 ASR 边界、时间轴证据、多模态索引和延迟改造计划见[视频理解管线改造计划](media-understanding-pipeline.md)。该计划以已有 Vision/OCR 和证据账本为基线，不另建第二套视频事实源。
+当前链路的 ASR 边界、时间轴证据、多模态索引和延迟改造计划见[视频理解管线改造计划](media-understanding-pipeline.md)。该计划以已有 Vision/OCR 和视觉观察为基线，不另建第二套视频事实源。
 
 1. 前端上传视频或提交远程视频地址。
 2. API 在 PostgreSQL 创建任务和阶段记录，再把下载、转写、摘要和索引阶段投递到 RabbitMQ。
@@ -38,9 +38,9 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 
 ## 问答链路
 
-标准问答和显式 Agent 请求都先进入 `ConversationExecution`：它统一 profile/client 准备、模式选择和取消传播，之后分别调用标准聊天或受限 Agent。标准问答由意图路由选择执行策略，再进入检索、排序、证据约束和回答生成。具体阶段见[检索与回答链路](retrieval.md)。
+标准问答和显式 Agent 请求都先进入 `ConversationExecution`：它统一 profile/client 准备、模式选择和取消传播，之后分别调用标准聊天或受限 Agent。标准问答由意图路由选择执行策略，再进入检索、排序、回答生成与基础引用清洗。具体阶段见[检索与回答链路](retrieval.md)。
 
-Agent 的 Template、Research 和 Evidence Funnel 策略保持独立；它们只通过 `AgentExecutionJournal` 共享 Run 创建/恢复、lease/CAS、checkpoint、预算和单调终态语义。`/chat/.../messages/agent` 是显式调用的实验性 Video Agent 工具循环，不是默认产品问答路径；默认请求仍使用标准聊天接口。
+产品只提供 Chat 与自主 Agent。Agent 同步/SSE 接口使用同一 Planner/Tool/Observe 循环，保留工具白名单、预算、视觉工具和长期记忆；独立模板、固定漏斗及 Inspector/Claim 账本已退役。发布通过 run 幂等事务保存，具体见 [Agent 执行](agent-evolution.md)。
 
 前端的正式视频聊天与知识库聊天通过 `useConversationSession` 共用会话加载、发送、取消、消息 patch 和终态处理；SSE chunk 边界由独立 decoder 处理。旧持久快照只在兼容适配器中解析，不能参与实时 trace reducer 或后端执行恢复。兼容字段的 owner 与删除条件见[兼容边界清单](compatibility.md)。
 

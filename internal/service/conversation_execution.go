@@ -60,8 +60,7 @@ type ConversationClientFactory interface {
 
 type ConversationAgent interface {
 	Ask(context.Context, VideoAgentRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile) (*VideoAgentResult, error)
-	AskResearch(context.Context, VideoResearchRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile) (*VideoAgentResult, error)
-	AskEvidenceFunnel(context.Context, EvidenceFunnelRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile) (*VideoAgentResult, error)
+	RunAgent(context.Context, VideoAgentLoopRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile) (*VideoAgentResult, error)
 	Stream(context.Context, VideoAgentStreamRequest, ai.EmbeddingClient, ai.ChatClient, ai.Profile, func(AgentStreamEvent) error) (*VideoAgentResult, error)
 }
 
@@ -84,6 +83,9 @@ func NewConversationExecution(chat ConversationChat, agent ConversationAgent, pr
 }
 
 func (e *ConversationExecution) Execute(ctx context.Context, req ConversationRequest) (ConversationResult, error) {
+	if err := validateConversationMode(req); err != nil {
+		return ConversationResult{}, err
+	}
 	embedding, chat, profile, err := e.prepareClients(req.UserID)
 	if err != nil {
 		return ConversationResult{}, &ConversationPreparationError{Cause: err}
@@ -93,20 +95,13 @@ func (e *ConversationExecution) Execute(ctx context.Context, req ConversationReq
 			return ConversationResult{}, errors.New("agent 实验功能不可用")
 		}
 		var result *VideoAgentResult
-		switch req.Mode {
-		case "research":
-			result, err = e.agent.AskResearch(ctx, VideoResearchRequest{
-				UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
-			}, embedding, chat, profile)
-		case string(VideoAgentEvidenceFunnelTemplate):
-			result, err = e.agent.AskEvidenceFunnel(ctx, EvidenceFunnelRequest{
-				UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
-			}, embedding, chat, profile)
-		default:
-			result, err = e.agent.Ask(ctx, VideoAgentRequest{
-				UserID: req.UserID, SessionID: req.SessionID, Question: req.Question, TopK: req.TopK,
-			}, embedding, chat, profile)
+		if req.Mode != "" && req.Mode != AgentStreamMode {
+			return ConversationResult{}, errors.New("执行模式已退役，请使用 agent 重新提问")
 		}
+		result, err = e.agent.RunAgent(ctx, VideoAgentLoopRequest{
+			UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK, RunID: req.RunID,
+		}, embedding, chat, profile)
+
 		return ConversationResult{Agent: result}, err
 	}
 	if e.chat == nil {
@@ -119,6 +114,9 @@ func (e *ConversationExecution) Execute(ctx context.Context, req ConversationReq
 func (e *ConversationExecution) Stream(ctx context.Context, req ConversationRequest, sink ConversationStreamSink) (ConversationResult, error) {
 	if sink == nil {
 		return ConversationResult{}, errors.New("conversation stream sink 不能为空")
+	}
+	if err := validateConversationMode(req); err != nil {
+		return ConversationResult{}, err
 	}
 	embedding, chat, profile, err := e.prepareClients(req.UserID)
 	if err != nil {
@@ -165,4 +163,17 @@ func (e *ConversationExecution) prepareClients(userID int64) (ai.EmbeddingClient
 		return nil, nil, ai.Profile{}, err
 	}
 	return embedding, chat, *profile, nil
+}
+
+func validateConversationMode(req ConversationRequest) error {
+	if req.Kind == ConversationKindAgent {
+		if req.Mode == "" || req.Mode == AgentStreamMode {
+			return nil
+		}
+	} else if req.Kind == ConversationKindChat {
+		if req.Mode == "" || req.Mode == string(ChatModeNatural) {
+			return nil
+		}
+	}
+	return errors.New("执行模式已退役或无效，请使用 chat 或 agent 重新提问")
 }

@@ -476,7 +476,7 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{{
 		TaskID: task.ID, EvidenceID: "ev-current", ChunkID: 1, ChunkIndex: 0, Score: .9, Content: "当前视频证据说新主题",
 	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: staticMemoryProvider{snapshot: memory}, MemoryCapture: failingMemoryCapture{}, MemoryPolicy: policyService})
-	client := &scriptedChatClient{responses: []string{"not-json", "以当前证据为准 [C1]"}}
+	client := &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("ev-current", task.ID, 1), "以当前证据为准 [C1]"}}
 	result, err := NewVideoAgentService(chatSvc).Ask(context.Background(), VideoAgentRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "主题是什么？", TopK: 1,
 	}, &fakeEmbeddingClient{dim: 3}, client, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
@@ -486,7 +486,7 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 	if result.Memory == nil || !reflect.DeepEqual(result.Memory.MemoryIDs, []string{"memory-1"}) {
 		t.Fatalf("result memory = %+v", result.Memory)
 	}
-	finalMessages := client.messages[1]
+	finalMessages := client.messages[2]
 	joined := ""
 	for _, message := range finalMessages {
 		joined += message.Content + "\n"
@@ -521,11 +521,11 @@ func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	}}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: .3}, ChatDependencies{LongTermMemory: failingLongTermMemoryProvider{}, MemoryCapture: failingMemoryCapture{}, MemoryPolicy: policyService})
 	agent := NewVideoAgentService(chatSvc)
 	result, err := agent.Ask(context.Background(), VideoAgentRequest{UserID: session.UserID, SessionID: session.ID, Question: "请回答", TopK: 1},
-		&fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "主回答成功 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
+		&fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("ev-memory-fail-open", task.ID, 1), "主回答成功 [C1]"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != inspectorBlockedAnswer || len(result.Citations) != 1 || result.Memory != nil {
+	if result.Answer != "主回答成功" || len(result.Citations) != 1 || result.Memory != nil {
 		t.Fatalf("result = %+v", result)
 	}
 }

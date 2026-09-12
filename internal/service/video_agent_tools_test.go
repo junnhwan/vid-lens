@@ -68,56 +68,6 @@ func TestVideoAgentToolGetTranscriptWindowLoadsNeighborChunks(t *testing.T) {
 	}
 }
 
-func TestVideoAgentToolSummarizeSegmentsCallsChatClient(t *testing.T) {
-	chatClient := &scriptedChatClient{responses: []string{"总结结果"}}
-	tools := NewVideoAgentTools(nil, nil, chatClient)
-
-	result, step, err := tools.SummarizeSegments(context.Background(), SummarizeSegmentsInput{
-		Question: "总结 Redis 风险",
-		Segments: []TranscriptSegment{
-			{ChunkIndex: 1, Content: "Redis owner 风险"},
-			{ChunkIndex: 2, Content: "释放锁要校验 owner"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("SummarizeSegments() error = %v", err)
-	}
-	if result.Summary != "总结结果" {
-		t.Fatalf("summary = %q", result.Summary)
-	}
-	if len(chatClient.messages) != 1 || !messagesContain(chatClient.messages[0], "Redis owner 风险") {
-		t.Fatalf("chat messages = %+v", chatClient.messages)
-	}
-	if step.Tool != VideoAgentToolSummarizeSegments || step.OutputRef == "" {
-		t.Fatalf("step = %+v", step)
-	}
-}
-
-func TestVideoAgentToolCompareSegmentsCallsChatClientWithGroups(t *testing.T) {
-	chatClient := &scriptedChatClient{responses: []string{"对比结果"}}
-	tools := NewVideoAgentTools(nil, nil, chatClient)
-
-	result, step, err := tools.CompareSegments(context.Background(), CompareSegmentsInput{
-		Question: "对比前后变化",
-		Groups: []TranscriptSegmentGroup{
-			{Label: "A", Segments: []TranscriptSegment{{ChunkIndex: 1, Content: "前半段说法"}}},
-			{Label: "B", Segments: []TranscriptSegment{{ChunkIndex: 8, Content: "后半段说法"}}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("CompareSegments() error = %v", err)
-	}
-	if result.Comparison != "对比结果" {
-		t.Fatalf("comparison = %q", result.Comparison)
-	}
-	if len(chatClient.messages) != 1 || !messagesContain(chatClient.messages[0], "前半段说法") || !messagesContain(chatClient.messages[0], "后半段说法") {
-		t.Fatalf("chat messages = %+v", chatClient.messages)
-	}
-	if step.Tool != VideoAgentToolCompareSegments || step.OutputRef == "" {
-		t.Fatalf("step = %+v", step)
-	}
-}
-
 func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	chatClient := &scriptedChatClient{responses: []string{"最终回答"}}
 	tools := NewVideoAgentTools(nil, nil, chatClient)
