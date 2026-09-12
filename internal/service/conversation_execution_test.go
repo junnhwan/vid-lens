@@ -26,8 +26,7 @@ func (stubConversationClientFactory) NewChatClient(ai.Profile) (ai.ChatClient, e
 
 type recordingConversationAgent struct {
 	template VideoAgentRequest
-	research VideoResearchRequest
-	funnel   EvidenceFunnelRequest
+	research VideoAgentLoopRequest
 	stream   VideoAgentStreamRequest
 	events   []AgentStreamEvent
 	wait     bool
@@ -62,14 +61,11 @@ func (a *recordingConversationAgent) Ask(_ context.Context, req VideoAgentReques
 	a.template = req
 	return &VideoAgentResult{Answer: "template"}, nil
 }
-func (a *recordingConversationAgent) AskResearch(_ context.Context, req VideoResearchRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*VideoAgentResult, error) {
+func (a *recordingConversationAgent) RunAgent(_ context.Context, req VideoAgentLoopRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*VideoAgentResult, error) {
 	a.research = req
 	return &VideoAgentResult{Answer: "research"}, nil
 }
-func (a *recordingConversationAgent) AskEvidenceFunnel(_ context.Context, req EvidenceFunnelRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile) (*VideoAgentResult, error) {
-	a.funnel = req
-	return &VideoAgentResult{Answer: "funnel"}, nil
-}
+
 func (a *recordingConversationAgent) Stream(ctx context.Context, req VideoAgentStreamRequest, _ ai.EmbeddingClient, _ ai.ChatClient, _ ai.Profile, emit func(AgentStreamEvent) error) (*VideoAgentResult, error) {
 	a.stream = req
 	if a.wait {
@@ -90,7 +86,7 @@ func TestConversationExecutionSelectsAgentModeBehindOneInterface(t *testing.T) {
 
 	result, err := execution.Execute(context.Background(), ConversationRequest{
 		Kind: ConversationKindAgent, UserID: 7, SessionID: 22, Question: "goal", TopK: 4,
-		Mode: "research", RunID: "run-1",
+		Mode: "agent", RunID: "run-1",
 	})
 	if err != nil || result.Agent == nil || result.Agent.Answer != "research" {
 		t.Fatalf("research Execute() = %+v, %v", result, err)
@@ -101,10 +97,10 @@ func TestConversationExecutionSelectsAgentModeBehindOneInterface(t *testing.T) {
 
 	result, err = execution.Execute(context.Background(), ConversationRequest{
 		Kind: ConversationKindAgent, UserID: 7, SessionID: 22, Question: "verify", TopK: 3,
-		Mode: string(VideoAgentEvidenceFunnelTemplate), RunID: "run-2",
+		Mode: "evidence_funnel", RunID: "run-2",
 	})
-	if err != nil || result.Agent == nil || result.Agent.Answer != "funnel" || agent.funnel.RunID != "run-2" {
-		t.Fatalf("funnel Execute() = %+v, %v request=%+v", result, err, agent.funnel)
+	if err == nil || result.Agent != nil {
+		t.Fatalf("funnel Execute() = %+v, %v", result, err)
 	}
 }
 
@@ -138,12 +134,12 @@ func TestConversationExecutionPreservesChatModeEventsAndCancellation(t *testing.
 	execution := NewConversationExecution(chat, nil, stubConversationProfileProvider{}, stubConversationClientFactory{})
 	var events []ConversationStreamEvent
 	_, err := execution.Stream(context.Background(), ConversationRequest{
-		Kind: ConversationKindChat, UserID: 7, SessionID: 22, Question: "q", Mode: string(ChatModeVideoAssistant),
+		Kind: ConversationKindChat, UserID: 7, SessionID: 22, Question: "q", Mode: string(ChatModeNatural),
 	}, func(event ConversationStreamEvent) error {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil || chat.mode != ChatModeVideoAssistant || len(events) != 2 || events[0].Type != "answer" || events[1].Type != "done" {
+	if err != nil || chat.mode != ChatModeNatural || len(events) != 2 || events[0].Type != "answer" || events[1].Type != "done" {
 		t.Fatalf("chat Stream() events=%+v mode=%q err=%v", events, chat.mode, err)
 	}
 

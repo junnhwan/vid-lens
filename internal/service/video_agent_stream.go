@@ -101,6 +101,7 @@ type AgentRetrieveHitsEvent struct {
 }
 
 type AgentDoneEvent struct {
+	Answer       string                      `json:"answer"`
 	RunID        string                      `json:"run_id"`
 	MessageID    int64                       `json:"message_id"`
 	Degraded     bool                        `json:"degraded"`
@@ -344,9 +345,7 @@ func agentTraceSummary(trace []VideoAgentStep) AgentTraceSummary {
 	return summary
 }
 
-// AskStream/Stream run the existing bounded template Agent and adapt its
-// actual tool execution to SSE events. They intentionally do not expose
-// research mode or knowledge-base scope in this first streaming slice.
+// AskStream/Stream adapt the bounded single-video loop to live tool and answer events.
 func (s *VideoAgentService) AskStream(ctx context.Context, req VideoAgentStreamRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile, emit func(AgentStreamEvent) error) (*VideoAgentResult, error) {
 	return s.Stream(ctx, req, embedding, chat, profile, emit)
 }
@@ -389,18 +388,15 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	}
 
 	observer := newVideoAgentStreamObserver(runID, streamEmit)
-	result, err := s.ask(ctx, VideoAgentRequest{
-		UserID: req.UserID, SessionID: req.SessionID, Question: req.Question, TopK: req.TopK, MemoryPolicy: &memoryPolicy,
-	}, embedding, chat, profile, observer, runID, req.Mode, req.AgentProfile)
+	result, err := s.RunAgent(ctx, VideoAgentLoopRequest{
+		UserID: req.UserID, SessionID: req.SessionID, Goal: req.Question, TopK: req.TopK,
+		RunID: runID, Observer: observer, EmitAnswer: func(delta string) error {
+			return streamEmit(AgentStreamEvent{Type: AgentEventAnswer, Data: delta})
+		},
+	}, embedding, chat, profile)
 	if err != nil {
 		_ = observer.Abort(err)
 		return nil, err
-	}
-	for _, chunk := range splitAnswerForStream(result.Answer, 80) {
-		if err := streamEmit(AgentStreamEvent{Type: AgentEventAnswer, Data: chunk}); err != nil {
-			_ = observer.Abort(err)
-			return nil, err
-		}
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventCitations, Data: result.Citations}); err != nil {
 		_ = observer.Abort(err)
@@ -411,7 +407,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 		return nil, err
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
-		RunID: result.RunID, MessageID: result.MessageID, Degraded: result.Answer == inspectorBlockedAnswer,
+		RunID: result.RunID, MessageID: result.MessageID, Answer: result.Answer, Degraded: result.Degraded,
 		TraceSummary: agentTraceSummary(result.Trace),
 		MemoryPolicy: result.MemoryPolicy,
 	}}); err != nil {

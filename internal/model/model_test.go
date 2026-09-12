@@ -46,9 +46,6 @@ func TestAllModelsIncludesKnowledgeBaseModels(t *testing.T) {
 		reflect.TypeOf(&AgentRun{}):               false,
 		reflect.TypeOf(&AgentStep{}):              false,
 		reflect.TypeOf(&AgentToolCall{}):          false,
-		reflect.TypeOf(&AgentClaim{}):             false,
-		reflect.TypeOf(&AgentEvidence{}):          false,
-		reflect.TypeOf(&AgentClaimEvidence{}):     false,
 	}
 	for _, candidate := range AllModels() {
 		if _, ok := want[reflect.TypeOf(candidate)]; ok {

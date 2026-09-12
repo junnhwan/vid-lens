@@ -26,7 +26,6 @@ type Repositories struct {
 	KnowledgeBase      *KnowledgeBaseRepository
 	Chat               *ChatRepository
 	Memory             *MemoryRepository
-	EvidenceLedger     *EvidenceLedgerRepository
 	AgentExecution     *AgentExecutionRepository
 	AICallLog          *AICallLogRepository
 	RetryBudget        *RetryBudgetRepository
@@ -55,7 +54,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		KnowledgeBase:      NewKnowledgeBaseRepository(db),
 		Chat:               NewChatRepository(db),
 		Memory:             NewMemoryRepository(db),
-		EvidenceLedger:     NewEvidenceLedgerRepository(db),
 		AgentExecution:     NewAgentExecutionRepository(db),
 		AICallLog:          NewAICallLogRepository(db),
 		RetryBudget:        NewRetryBudgetRepository(db),

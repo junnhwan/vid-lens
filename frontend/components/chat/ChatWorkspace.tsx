@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation'
 import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
-import { FunnelTrack } from '@/components/chat/FunnelTrack'
-import { LedgerClaims, LedgerDrawer, latestClaimsByRoot } from '@/components/chat/EvidenceLedger'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -19,42 +17,28 @@ import { BrandMark } from '@/components/ui/BrandMark'
 import { DrawerVeil } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
 import { fmtRelTime } from '@/lib/format'
-import type { Citation, ChatScopeType, EvidenceLedgerView, VideoChatMode } from '@/lib/types'
+import type { Citation, ChatScopeType, VideoChatMode } from '@/lib/types'
 
-// 聊天工作区:中央会话流 + 右栏(迷你播放器 / 执行过程 / 证据账本)+ 模式胶囊行。
-// 单视频(/chat/v/:id)与知识库(/chat/kb/:id)共用。
-// - strict 快速问答:streamAsk,SSE 只有 answer/citations/done,右栏执行过程为前端推断。
-// - Agent 检证(单视频):streamAgent + agentTraceReducer 渲染真实步骤时间轴
-//   (direct_qa 实际步骤 = search_transcript → build_cited_answer);run 结束按 done
-//   事件的 run_id 拉取证据账本,核验未通过时显示阻断发布警示。知识库范围后端直接拒绝,保持禁用。
-// - 深入研究 / 证据漏斗(单视频,实验):非流式 api.askAgent(mode=research|evidence_funnel)。
-//   等待期只显示诚实状态(不做假 SSE);结果到达后在右栏一次性回放执行轨迹——
-//   研究模式为 Planner 循环步骤(MaxSteps 8 / MaxReplans 2,含 investigate_visual 工具卡),
-//   漏斗模式为固定八步轨道;账本/引用与 agent 模式同一套组件。
+// Shared Chat / Agent workspace. Historical mode labels are display-only.
+// Agent steps come from live tool events; Chat progress remains inferred.
 
 const TOP_K = 4
 
-type ChatUIMode = Extract<VideoChatMode, 'strict_rag' | 'agent' | 'research' | 'evidence_funnel'>
+type ChatUIMode = VideoChatMode
 type AgentUIMode = 'agent' | 'research' | 'evidence_funnel'
 
 const MODE_LABEL: Record<AgentUIMode, string> = {
-  agent: 'Agent 检证',
+  agent: 'Agent',
   research: '深入研究',
   evidence_funnel: '证据漏斗',
 }
 
 const MODE_NOTE: Record<ChatUIMode, string> = {
-  strict_rag: '一次检索,直接给出带引用的回答',
-  agent: '检索后生成回答,答案经独立证据核验',
-  research: '受限 Planner 循环,可做查询时像素核验',
-  evidence_funnel: '固定八步漏斗,逐步收窄证据范围',
+  chat: '结合视频内容自然问答、解释与总结',
+  agent: '按问题调用文本和视觉工具,逐步分析后回答',
 }
 
-interface LedgerState {
-  loading: boolean
-  view?: EvidenceLedgerView
-  error?: string
-}
+
 
 interface ChatWorkspaceProps {
   scopeType: ChatScopeType
@@ -113,14 +97,12 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const startedAtRef = useRef(0)
 
   const [input, setInput] = useState('')
-  const [mode, setMode] = useState<ChatUIMode>('strict_rag')
+  const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
-  const [ledgerDrawerRun, setLedgerDrawerRun] = useState<string | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
   const [railOpen, setRailOpen] = useState(false)
   const [elapsed, setElapsed] = useState<string | null>(null)
   const [askTall, setAskTall] = useState(false)
-  const [ledgerByRun, setLedgerByRun] = useState<Record<string, LedgerState>>({})
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const historyRef = useRef<HTMLDivElement>(null)
@@ -144,49 +126,6 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
   const lastAssistant = lastMessage && lastMessage.role === 'assistant' ? lastMessage : null
 
-  // 最近一条 Agent 运行消息:账本 tab 与自动拉取都跟着它走
-  const lastAgentMsg = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg.role === 'assistant' && msg.agentRunId) return msg
-    }
-    return null
-  }, [messages])
-  const lastAgentRunId = lastAgentMsg?.agentRunId ?? null
-
-  const fetchLedger = useCallback(async (runId: string) => {
-    setLedgerByRun(prev => ({ ...prev, [runId]: { ...(prev[runId] || {}), loading: true, error: undefined } }))
-    try {
-      const view = await api.getEvidenceLedger(runId)
-      setLedgerByRun(prev => ({ ...prev, [runId]: { loading: false, view: view ?? undefined } }))
-    } catch (e) {
-      setLedgerByRun(prev => ({
-        ...prev,
-        [runId]: { loading: false, error: e instanceof Error ? e.message : '证据账本加载失败' },
-      }))
-    }
-  }, [])
-
-  // run 结束(done 事件把 run_id 写到消息上)自动拉取账本;出错时等用户手动重试
-  useEffect(() => {
-    if (!lastAgentRunId || streaming) return
-    const state = ledgerByRun[lastAgentRunId]
-    if (state?.loading || state?.view || state?.error) return
-    void fetchLedger(lastAgentRunId)
-  }, [lastAgentRunId, streaming, ledgerByRun, fetchLedger])
-
-  const openLedgerDrawer = useCallback((runId: string) => {
-    setLedgerDrawerRun(runId)
-    if (!ledgerByRun[runId]) void fetchLedger(runId)
-  }, [ledgerByRun, fetchLedger])
-
-  const citesForRun = useCallback((runId: string) =>
-    messages.find(m => m.role === 'assistant' && m.agentRunId === runId)?.cites || []
-  , [messages])
-
-  const modeForRun = useCallback((runId: string) =>
-    messages.find(m => m.role === 'assistant' && m.agentRunId === runId)?.agentMode
-  , [messages])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -246,12 +185,6 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     setDrawerCite({ cite, cites })
   }, [])
 
-  // 账本抽屉里点开证据详情时先收起账本抽屉,避免两个抽屉叠放
-  const openEvidenceFromLedger = useCallback((cite: CiteRef, cites: CiteRef[]) => {
-    setLedgerDrawerRun(null)
-    setDrawerCite({ cite, cites })
-  }, [])
-
   const jumpToCitation = useCallback((cite: CiteRef) => {
     if (isVideo) {
       playerRef.current?.seek(cite.startMS || 0, true, cite.id)
@@ -278,34 +211,16 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     return null
   }, [agentTrace, streaming, lastAssistant])
 
-  // 非流式研究/漏斗的等待期:没有任何事件流,只保留诚实状态,不模拟逐步进度
-  const pendingExperimental = (streaming && agentTrace.steps.length === 0
-    && (agentTrace.mode === 'research' || agentTrace.mode === 'evidence_funnel'))
-    ? agentTrace.mode as 'research' | 'evidence_funnel'
-    : null
-
   const agentBlocked = !streaming && !!lastAssistant?.agentRun && !!lastAssistant.degraded
 
   const statusLine = (() => {
     if (streaming) {
       const generating = lastMessage?.role === 'assistant' && lastMessage.content.length > 0
-      if ((mode === 'research' || mode === 'evidence_funnel') && !generating) {
-        return (
-          <>
-            <span className="pulse" />
-            <span>
-              {mode === 'research'
-                ? '深入研究运行中…(非流式接口,完成后一次性回放轨迹)'
-                : '证据漏斗运行中…(非流式接口,完成后一次性回放轨迹)'}
-            </span>
-            <button className="meta-link stop" onClick={stop}>停止</button>
-          </>
-        )
-      }
+
       return (
         <>
           <span className="pulse" />
-          <span>{generating ? '正在生成回答…' : mode === 'agent' ? '正在检索与核验…' : '检索中,稍等…'}</span>
+          <span>{generating ? '正在生成回答…' : mode === 'agent' ? '正在分析视频…' : '检索中,稍等…'}</span>
           <button className="meta-link stop" onClick={stop}>停止</button>
         </>
       )
@@ -320,7 +235,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     if (agentBlocked) {
       return (
         <span style={{ color: 'var(--warn)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="shield" size="sm" />核验未通过,回答被阻断发布
+          <Icon name="shield" size="sm" />本轮仅提供有限信息
         </span>
       )
     }
@@ -334,61 +249,6 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
     return null
   })()
 
-  const ledgerTabBody = (() => {
-    if (!lastAgentRunId) {
-      return (
-        <div className="rail-empty" style={{ paddingTop: 44 }}>
-          <Icon name="shield-check" size="lg" />
-          <p style={{ marginTop: 10 }}>
-            快速问答不写证据账本。<br />完成一次 Agent 检证、深入研究或证据漏斗后,<br />每条事实的支撑情况会列在这里。
-          </p>
-        </div>
-      )
-    }
-    const state = ledgerByRun[lastAgentRunId]
-    if (!state || state.loading) {
-      return (
-        <div className="rail-empty" style={{ paddingTop: 44 }}>
-          <Icon name="shield-check" size="lg" />
-          <p style={{ marginTop: 10 }}>正在加载证据账本…</p>
-        </div>
-      )
-    }
-    if (state.error) {
-      return (
-        <div className="rail-empty" style={{ paddingTop: 44 }}>
-          <Icon name="alert" size="lg" />
-          <p style={{ marginTop: 10 }}>{state.error}</p>
-          <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => void fetchLedger(lastAgentRunId)}>
-            <Icon name="refresh" size="sm" />重试
-          </button>
-        </div>
-      )
-    }
-    if (!state.view) {
-      return (
-        <div className="rail-empty" style={{ paddingTop: 44 }}>
-          <p>这次运行没有留下证据账本。</p>
-        </div>
-      )
-    }
-    return (
-      <>
-        <div className="run-meta">
-          <span className="chip chip-mute mono">{lastAgentMsg?.agentMode || 'agent'}</span>
-          <span className="chip chip-mute">
-            {latestClaimsByRoot(state.view.claims).length} 条 claim · {(state.view.evidence ?? []).length} 条证据
-          </span>
-        </div>
-        <LedgerClaims
-          view={state.view}
-          cites={lastAgentMsg?.cites || []}
-          onOpenEvidence={openEvidence}
-          onCorrected={() => void fetchLedger(lastAgentRunId)}
-        />
-      </>
-    )
-  })()
 
   return (
     <div className="chat-wrap">
@@ -417,10 +277,6 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                     onOpenEvidence={openEvidence}
                     canJump={citationJumpable}
                     onJump={jumpToCitation}
-                    onOpenLedger={msg.agentRunId ? () => openLedgerDrawer(msg.agentRunId as string) : undefined}
-                    claimsCount={msg.agentRunId && ledgerByRun[msg.agentRunId]?.view
-                      ? latestClaimsByRoot(ledgerByRun[msg.agentRunId]!.view!.claims).length
-                      : undefined}
                   />
                 )
               )
@@ -433,51 +289,13 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
             <div className="composer-toolbar">
             <div className="mode-row">
               <button
-                className={`mode-pill${mode === 'strict_rag' ? ' on' : ''}`}
+                className={`mode-pill${mode === 'chat' ? ' on' : ''}`}
                 disabled={streaming}
-                onClick={() => setMode('strict_rag')}
+                onClick={() => setMode('chat')}
               >
-                <Icon name="bolt" size="sm" />快速问答
+                <Icon name="bolt" size="sm" />Chat
               </button>
-              {isVideo ? (
-                <>
-                  <button
-                    className={`mode-pill${mode === 'agent' ? ' on' : ''}`}
-                    disabled={streaming}
-                    onClick={() => setMode('agent')}
-                  >
-                    <Icon name="target" size="sm" />Agent 检证
-                  </button>
-                  <button
-                    className={`mode-pill${mode === 'research' ? ' on' : ''}`}
-                    disabled={streaming}
-                    onClick={() => setMode('research')}
-                  >
-                    <Icon name="zoom-scan" size="sm" />深入研究
-                    <span className="chip chip-mute" style={{ height: 18, fontSize: 10, padding: '0 6px' }}>实验</span>
-                  </button>
-                  <button
-                    className={`mode-pill${mode === 'evidence_funnel' ? ' on' : ''}`}
-                    disabled={streaming}
-                    onClick={() => setMode('evidence_funnel')}
-                  >
-                    <Icon name="filter" size="sm" />证据漏斗
-                    <span className="chip chip-mute" style={{ height: 18, fontSize: 10, padding: '0 6px' }}>实验</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="mode-pill" disabled title="知识库范围的 Agent 后端会直接拒绝,当前仅支持快速问答">
-                    <Icon name="target" size="sm" />Agent 检证
-                  </button>
-                  <button className="mode-pill" disabled title="研究模式仅支持单视频会话">
-                    <Icon name="zoom-scan" size="sm" />深入研究
-                  </button>
-                  <button className="mode-pill" disabled title="证据漏斗仅支持单视频会话">
-                    <Icon name="filter" size="sm" />证据漏斗
-                  </button>
-                </>
-              )}
+              {isVideo && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />Agent</button>}
             </div>
             <div className="composer-tools" ref={historyRef}>
               <button
@@ -587,37 +405,15 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
           <button className={`rail-tab${railTab === 'run' ? ' on' : ''}`} onClick={() => setRailTab('run')}>
             执行过程
           </button>
-          <button className={`rail-tab${railTab === 'ev' ? ' on' : ''}`} onClick={() => setRailTab('ev')}>
-            证据账本
-            <span className="badge">
-              {lastAgentRunId && ledgerByRun[lastAgentRunId]?.view
-                ? latestClaimsByRoot(ledgerByRun[lastAgentRunId]!.view!.claims).length
-                : 0}
-            </span>
-          </button>
+
         </div>
         <div className="rail-body">
-          {railTab === 'run' ? (
-            pendingExperimental ? (
-              <>
-                <RunHeader mode={pendingExperimental} runId={null} />
-                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>运行中…</p>
-                {pendingExperimental === 'evidence_funnel' && <FunnelTrack steps={[]} />}
-                <div className="rail-empty" style={{ paddingTop: 34 }}>
-                  <span className="pulse" style={{ marginBottom: 10 }} />
-                  <p style={{ marginTop: 10 }}>
-                    {pendingExperimental === 'research' ? '深入研究运行中…' : '证据漏斗运行中…'}
-                    <br />完成后在这里一次性回放执行轨迹。
-                  </p>
-                </div>
-              </>
-            ) : agentRail ? (
+          {agentRail ? (
               <>
                 <RunHeader mode={(agentRail.mode as AgentUIMode) || 'agent'} runId={agentRail.runId} />
                 <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>
-                  {agentRail.mode === 'research' ? '受限研究循环' : agentRail.mode === 'evidence_funnel' ? '固定漏斗' : '检索后核验发布'}
+                  {agentRail.mode === 'research' ? '受限研究循环' : agentRail.mode === 'evidence_funnel' ? '固定漏斗' : '自主工具调用'}
                 </p>
-                {agentRail.mode === 'evidence_funnel' && <FunnelTrack steps={agentRail.steps} />}
                 {agentRail.steps.length > 0 ? (
                   <div className="steps" style={agentRail.mode === 'evidence_funnel' ? { marginTop: 12 } : undefined}>
                     {agentRail.steps.map(step => <AgentTraceStepView key={step.id} step={step} />)}
@@ -634,7 +430,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
             ) : (
               <>
                 <div className="run-meta">
-                  <span className="chip chip-mute mono">strict_rag</span>
+                  <span className="chip chip-mute mono">chat</span>
                   <span className="chip chip-warn">推断</span>
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>检索过程由前端推断</p>
@@ -649,8 +445,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
                   </div>
                 )}
               </>
-            )
-          ) : ledgerTabBody}
+            )}
         </div>
       </aside>
 
@@ -665,19 +460,7 @@ export function ChatWorkspace({ scopeType, targetId, scopeName, playbackUrl, ref
         />
       )}
 
-      {ledgerDrawerRun && (
-        <LedgerDrawer
-          runId={ledgerDrawerRun}
-          view={ledgerByRun[ledgerDrawerRun]?.view}
-          loading={ledgerByRun[ledgerDrawerRun]?.loading}
-          error={ledgerByRun[ledgerDrawerRun]?.error}
-          cites={citesForRun(ledgerDrawerRun)}
-          modeLabel={modeForRun(ledgerDrawerRun) || 'agent'}
-          onRetry={runId => void fetchLedger(runId)}
-          onOpenEvidence={openEvidenceFromLedger}
-          onClose={() => setLedgerDrawerRun(null)}
-        />
-      )}
+
     </div>
   )
 }
@@ -700,15 +483,13 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, fallbackTitle, onOpenEvidence, canJump, onJump, onOpenLedger, claimsCount,
+  msg, fallbackTitle, onOpenEvidence, canJump, onJump,
 }: {
   msg: ChatMsg
   fallbackTitle: string
   onOpenEvidence: (cite: CiteRef, cites: CiteRef[]) => void
   canJump: (cite: CiteRef) => boolean
   onJump: (cite: CiteRef) => void
-  onOpenLedger?: () => void
-  claimsCount?: number
 }) {
   const toast = useToast()
   const cites = msg.cites || []
@@ -737,7 +518,7 @@ function AgentMessageView({
           <Icon name={agentMode === 'research' ? 'zoom-scan' : agentMode === 'evidence_funnel' ? 'filter' : isAgentRun ? 'target' : 'bolt'} />
         </span>
         映知
-        <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : '快速问答'}</span>
+        <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : 'Chat'}</span>
       </div>
       <div className="answer">
         <MarkdownAnswer content={msg.content} onCite={openCite} />
@@ -754,8 +535,8 @@ function AgentMessageView({
       {msg.degraded && (
         <div style={{ marginTop: 8 }}>
           {isAgentRun ? (
-            <span className="chip chip-warn" title="独立核验未通过,回答已被替换为阻断文案,引用仅供核对">
-              <Icon name="shield" size="sm" />核验未通过,阻断发布
+            <span className="chip chip-warn" title="本轮未完成完整分析，请留意回答中的限制说明">
+              <Icon name="shield" size="sm" />有限结果
             </span>
           ) : (
             <span className="chip chip-warn" title="生成阶段异常,回答由片段与摘要直拼,未经过完整模型生成">
@@ -802,15 +583,11 @@ function AgentMessageView({
       <div className="answer-meta">
         {isAgentRun ? (
           <>
-            {onOpenLedger && (
-              <button className="meta-link acc" onClick={onOpenLedger}>
-                <Icon name="shield-check" size="sm" />证据账本{typeof claimsCount === 'number' ? ` · ${claimsCount} 条 claim` : ''}
-              </button>
-            )}
+
             <span className="chip chip-mute mono">{agentMode || 'agent'}</span>
           </>
         ) : (
-          <span className="chip chip-mute mono">strict_rag</span>
+          <span className="chip chip-mute mono">chat</span>
         )}
         <button className="meta-link" onClick={copyAnswer}>
           <Icon name="file" size="sm" />复制回答

@@ -24,6 +24,7 @@ const (
 )
 
 type VideoAgentTools struct {
+	emitAnswer         func(string) error
 	repos              *repository.Repositories
 	pipeline           *RetrievalPipeline
 	chat               ai.ChatClient
@@ -162,29 +163,6 @@ type TranscriptSegment struct {
 	ChunkID    int64  `json:"chunk_id,omitempty"`
 	ChunkIndex int    `json:"chunk_index"`
 	Content    string `json:"content"`
-}
-
-type TranscriptSegmentGroup struct {
-	Label    string              `json:"label"`
-	Segments []TranscriptSegment `json:"segments"`
-}
-
-type SummarizeSegmentsInput struct {
-	Question string
-	Segments []TranscriptSegment
-}
-
-type SummarizeSegmentsResult struct {
-	Summary string
-}
-
-type CompareSegmentsInput struct {
-	Question string
-	Groups   []TranscriptSegmentGroup
-}
-
-type CompareSegmentsResult struct {
-	Comparison string
 }
 
 type BuildCitedAnswerInput struct {
@@ -378,60 +356,6 @@ func (t *VideoAgentTools) GetTranscriptWindow(ctx context.Context, input Transcr
 	return result, step, nil
 }
 
-func (t *VideoAgentTools) SummarizeSegments(ctx context.Context, input SummarizeSegmentsInput) (SummarizeSegmentsResult, VideoAgentStep, error) {
-	step := newVideoAgentStep("summarize segments", VideoAgentToolSummarizeSegments, map[string]any{
-		"segment_count": len(input.Segments),
-	})
-	if err := t.notifyStepStart(step); err != nil {
-		return SummarizeSegmentsResult{}, step, err
-	}
-	if t == nil || t.chat == nil {
-		step, err := t.failObservedStep(step, "chat client 不能为空")
-		return SummarizeSegmentsResult{}, step, err
-	}
-	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频转写总结工具。只能基于给定转写片段总结，不要补充外部知识。"},
-		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n转写片段：\n%s\n\n请用中文归纳这些片段与问题相关的要点。", input.Question, joinTranscriptSegments(input.Segments))},
-	})
-	if err != nil {
-		step, err = t.failObservedStepWithCause(step, err)
-		return SummarizeSegmentsResult{}, step, err
-	}
-	step.OutputRef = "summary"
-	result := SummarizeSegmentsResult{Summary: strings.TrimSpace(answer)}
-	if err := t.notifyStepDone(step, result); err != nil {
-		return SummarizeSegmentsResult{}, step, err
-	}
-	return result, step, nil
-}
-
-func (t *VideoAgentTools) CompareSegments(ctx context.Context, input CompareSegmentsInput) (CompareSegmentsResult, VideoAgentStep, error) {
-	step := newVideoAgentStep("compare segments", VideoAgentToolCompareSegments, map[string]any{
-		"group_count": len(input.Groups),
-	})
-	if err := t.notifyStepStart(step); err != nil {
-		return CompareSegmentsResult{}, step, err
-	}
-	if t == nil || t.chat == nil {
-		step, err := t.failObservedStep(step, "chat client 不能为空")
-		return CompareSegmentsResult{}, step, err
-	}
-	answer, err := t.chat.Chat(ctx, []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频转写对比工具。只能比较给定片段，不要补充外部知识。"},
-		{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n片段组：\n%s\n\n请对比这些片段组的相同点、差异和变化。", input.Question, formatSegmentGroups(input.Groups))},
-	})
-	if err != nil {
-		step, err = t.failObservedStepWithCause(step, err)
-		return CompareSegmentsResult{}, step, err
-	}
-	step.OutputRef = "comparison"
-	result := CompareSegmentsResult{Comparison: strings.TrimSpace(answer)}
-	if err := t.notifyStepDone(step, result); err != nil {
-		return CompareSegmentsResult{}, step, err
-	}
-	return result, step, nil
-}
-
 func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCitedAnswerInput) (BuildCitedAnswerResult, VideoAgentStep, error) {
 	step := newVideoAgentStep("build cited answer", VideoAgentToolBuildCitedAnswer, map[string]any{
 		"citation_count": len(input.Citations),
@@ -450,7 +374,22 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		messages = append(messages, ai.ChatMessage{Role: "system", Content: memoryContext + "\n禁止把上述记忆作为 Claim 或引用证据；若它与当前视频片段冲突，以当前视频片段为准并说明不确定性。"})
 	}
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
-	answer, err := t.chat.Chat(ctx, messages)
+	var answer string
+	var err error
+	if streaming, ok := t.chat.(ai.StreamingChatClient); ok && t.emitAnswer != nil {
+		err = streaming.StreamChat(ctx, messages, func(delta string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			answer += delta
+			return t.emitAnswer(delta)
+		})
+	} else {
+		answer, err = t.chat.Chat(ctx, messages)
+		if err == nil && t.emitAnswer != nil {
+			err = t.emitAnswer(answer)
+		}
+	}
 	if err != nil {
 		step, err = t.failObservedStepWithCause(step, err)
 		return BuildCitedAnswerResult{}, step, err
@@ -538,21 +477,6 @@ func joinTranscriptSegments(segments []TranscriptSegment) string {
 		lines = append(lines, fmt.Sprintf("[chunk %d] %s", segment.ChunkIndex, content))
 	}
 	return strings.Join(lines, "\n")
-}
-
-func formatSegmentGroups(groups []TranscriptSegmentGroup) string {
-	var builder strings.Builder
-	for _, group := range groups {
-		label := strings.TrimSpace(group.Label)
-		if label == "" {
-			label = "segment_group"
-		}
-		builder.WriteString(label)
-		builder.WriteString(":\n")
-		builder.WriteString(joinTranscriptSegments(group.Segments))
-		builder.WriteString("\n")
-	}
-	return strings.TrimSpace(builder.String())
 }
 
 func formatRetrievedChunks(chunks []RetrievedChunk) string {

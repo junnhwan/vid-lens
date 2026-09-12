@@ -11,11 +11,11 @@ import (
 	"vid-lens/internal/model"
 )
 
-type LLMVideoResearchPlanner struct {
+type LLMVideoAgentLoopPlanner struct {
 	chat ai.ChatClient
 }
 
-type VideoResearchPlannerCallUsage struct {
+type VideoAgentLoopPlannerCallUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	CostMicros       int64
@@ -26,34 +26,34 @@ type VideoResearchPlannerCallUsage struct {
 	PriceVersion     string
 }
 
-type VideoResearchPlannerWithUsage interface {
-	NextDecisionWithUsage(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error)
+type VideoAgentLoopPlannerWithUsage interface {
+	NextDecisionWithUsage(ctx context.Context, state VideoAgentLoopState, tools []VideoAgentToolDefinition) (VideoAgentLoopDecision, VideoAgentLoopPlannerCallUsage, error)
 }
 
-func NewLLMVideoResearchPlanner(chat ai.ChatClient) *LLMVideoResearchPlanner {
-	return &LLMVideoResearchPlanner{chat: chat}
+func NewLLMVideoAgentLoopPlanner(chat ai.ChatClient) *LLMVideoAgentLoopPlanner {
+	return &LLMVideoAgentLoopPlanner{chat: chat}
 }
 
-func (p *LLMVideoResearchPlanner) NextDecision(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, error) {
+func (p *LLMVideoAgentLoopPlanner) NextDecision(ctx context.Context, state VideoAgentLoopState, tools []VideoAgentToolDefinition) (VideoAgentLoopDecision, error) {
 	decision, _, err := p.NextDecisionWithUsage(ctx, state, tools)
 	return decision, err
 }
 
-func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
+func (p *LLMVideoAgentLoopPlanner) NextDecisionWithUsage(ctx context.Context, state VideoAgentLoopState, tools []VideoAgentToolDefinition) (VideoAgentLoopDecision, VideoAgentLoopPlannerCallUsage, error) {
 	if p == nil || p.chat == nil {
-		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, errors.New("video research planner chat client 不能为空")
+		return VideoAgentLoopDecision{}, VideoAgentLoopPlannerCallUsage{}, errors.New("video research planner chat client 不能为空")
 	}
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
-		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, fmt.Errorf("序列化 video research state 失败: %w", err)
+		return VideoAgentLoopDecision{}, VideoAgentLoopPlannerCallUsage{}, fmt.Errorf("序列化 video research state 失败: %w", err)
 	}
 	toolsJSON, err := json.Marshal(tools)
 	if err != nil {
-		return VideoResearchDecision{}, VideoResearchPlannerCallUsage{}, fmt.Errorf("序列化 video research tools 失败: %w", err)
+		return VideoAgentLoopDecision{}, VideoAgentLoopPlannerCallUsage{}, fmt.Errorf("序列化 video research tools 失败: %w", err)
 	}
 
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。你必须区分转写、OCR 和画面描述；未调用视觉工具时不得声称已经查看画面。只输出 JSON。"},
+		{Role: "system", Content: "你是 VidLens 的视频研究计划器。你只能从给定工具中选择下一步，不能直接编造证据。你必须区分转写、OCR 和画面描述；未调用视觉工具时不得声称已经查看画面。记忆只能用于偏好和历史背景，低于当前视频证据，不能作为引用依据。缺少视觉工具时说明无法核对画面并利用文本证据。只输出 JSON。"},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
 工具白名单（只能选择其中的 name）：
@@ -81,20 +81,20 @@ func (p *LLMVideoResearchPlanner) NextDecisionWithUsage(ctx context.Context, sta
 	response, err := p.chat.Chat(ctx, messages)
 	usage := estimatedPlannerCallUsage(messages, response)
 	if err != nil {
-		return VideoResearchDecision{}, usage, err
+		return VideoAgentLoopDecision{}, usage, err
 	}
-	decision, err := parseLLMVideoResearchDecision(response)
+	decision, err := parseLLMVideoAgentLoopDecision(response)
 	return decision, usage, err
 }
 
-func estimatedPlannerCallUsage(messages []ai.ChatMessage, response string) VideoResearchPlannerCallUsage {
+func estimatedPlannerCallUsage(messages []ai.ChatMessage, response string) VideoAgentLoopPlannerCallUsage {
 	promptTokens := int64(0)
 	contextChars := int64(0)
 	for _, message := range messages {
 		promptTokens += estimateAgentTokens(message.Content)
 		contextChars += int64(len([]rune(message.Content)))
 	}
-	return VideoResearchPlannerCallUsage{
+	return VideoAgentLoopPlannerCallUsage{
 		PromptTokens: promptTokens, CompletionTokens: estimateAgentTokens(response), ContextChars: contextChars,
 		UsageSource: model.AgentCallUsageEstimated, TokenEstimated: true,
 	}
@@ -120,16 +120,16 @@ func estimateAgentTokens(text string) int64 {
 	return tokens
 }
 
-func parseLLMVideoResearchDecision(text string) (VideoResearchDecision, error) {
-	text = stripVideoResearchCodeFence(text)
-	var decision VideoResearchDecision
+func parseLLMVideoAgentLoopDecision(text string) (VideoAgentLoopDecision, error) {
+	text = stripVideoAgentLoopCodeFence(text)
+	var decision VideoAgentLoopDecision
 	if err := json.Unmarshal([]byte(text), &decision); err != nil {
-		return VideoResearchDecision{}, fmt.Errorf("解析 video research planner 输出失败: %w", err)
+		return VideoAgentLoopDecision{}, fmt.Errorf("解析 video research planner 输出失败: %w", err)
 	}
 	return decision, nil
 }
 
-func stripVideoResearchCodeFence(text string) string {
+func stripVideoAgentLoopCodeFence(text string) string {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "```") {
 		return text

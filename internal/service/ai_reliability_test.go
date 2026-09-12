@@ -77,7 +77,7 @@ func TestDegradationTier1RerankFailureFallsBackToVectorBaseline(t *testing.T) {
 		return NewModelReranker(&fakeRerankClient{err: errors.New("rerank service down")})
 	})
 
-	result, err := svc.Ask(context.Background(), 7, session.ID, "片段里讲了什么？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
+	result, err := svc.Ask(context.Background(), 7, session.ID, "owner 校验如何实现？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
 		LLMModel:       "chat-model",
 	})
@@ -322,4 +322,3 @@ func TestDegradationAvailabilityRate(t *testing.T) {
 		t.Fatalf("degradation availability rate = %d%%, want 100%% (returned=%d/%d)", rate, returnedDegraded, scenarios)
 	}
 }
-

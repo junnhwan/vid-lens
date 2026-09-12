@@ -23,6 +23,7 @@ const (
 // retained as a write-side compatibility alias for clients that still decode
 // the previous Agent envelope.
 type AgentSnapshot struct {
+	Degraded     bool                        `json:"degraded,omitempty"`
 	Version      int                         `json:"version"`
 	RunID        string                      `json:"run_id"`
 	Mode         string                      `json:"mode"`
@@ -141,6 +142,7 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 	}
 	snapshot := NewAgentSnapshot(result.RunID, result.Mode, result.Template, result.Trace, result.Citations)
 	snapshot.Memory = result.Memory
+	snapshot.Degraded = result.Degraded
 	snapshot.MemoryPolicy = normalizeSnapshotMemoryPolicy(result.MemoryPolicy)
 	result.MemoryPolicy = snapshot.MemoryPolicy
 	result.RunID = snapshot.RunID
@@ -165,6 +167,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	}
 
 	var envelope struct {
+		Degraded     bool                        `json:"degraded"`
 		Version      int                         `json:"version"`
 		RunID        string                      `json:"run_id"`
 		Mode         string                      `json:"mode"`
@@ -186,7 +189,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	if envelope.Steps != nil {
 		envelope.Steps = normalizeAgentSnapshotSteps(envelope.Steps)
 		return AgentSnapshot{
-			Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
+			Degraded: envelope.Degraded, Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 			Template: envelope.Template, Steps: envelope.Steps, Citations: envelope.Citations,
 			Trace: append([]VideoAgentStep(nil), envelope.Trace...), Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,
 		}, nil
@@ -202,7 +205,7 @@ func DecodeAgentSnapshot(raw string) (AgentSnapshot, error) {
 	}
 
 	return AgentSnapshot{
-		Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
+		Degraded: envelope.Degraded, Version: envelope.Version, RunID: envelope.RunID, Mode: envelope.Mode,
 		Template: envelope.Template, Steps: []AgentSnapshotStep{}, Citations: envelope.Citations,
 		Memory: envelope.Memory, MemoryPolicy: envelope.MemoryPolicy,
 	}, nil

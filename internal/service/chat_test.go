@@ -379,7 +379,7 @@ func TestChatServiceAskFallsBackWhenQueryRewriteFails(t *testing.T) {
 	}
 }
 
-func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
+func TestChatServiceAskAllowsNoRetrievedContext(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "video.mp4", FileURL: "videos/d.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -395,8 +395,8 @@ func TestChatServiceAskRejectsNoRetrievedContext(t *testing.T) {
 		EmbeddingModel: "text-embedding-3-small",
 		LLMModel:       "chat-model",
 	})
-	if err == nil {
-		t.Fatal("Ask() succeeded without retrieved context")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -563,55 +563,6 @@ func TestChatServiceAskWithModeVideoAssistantDoesNotFallbackWhenRequestIsCancele
 	}
 	if len(chatClient.messages) != 1 {
 		t.Fatalf("chat calls = %d, want rewrite only and no fallback answer", len(chatClient.messages))
-	}
-}
-
-func TestChatServiceAskWithModeStrictRAGPropagatesRetrieverFailure(t *testing.T) {
-	repos := newChatServiceTestRepositories(t)
-	task := &model.VideoTask{UserID: 7, FileMD5: "a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6", Filename: "strict-error.mp4", FileURL: "videos/strict-error.mp4"}
-	if err := repos.Task.Create(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
-	if err := repos.Chat.CreateSession(session); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	retrievalErr := errors.New("pgvector search unavailable")
-	svc := NewChatService(repos, &failingRetriever{err: retrievalErr}, ChatConfig{TopK: 5, MinScore: 0.3})
-	_, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "严格检索", 0, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json"}}, ai.Profile{
-		EmbeddingModel: "text-embedding-3-small",
-		LLMModel:       "chat-model",
-	})
-	if !errors.Is(err, retrievalErr) {
-		t.Fatalf("err = %v, want retriever failure", err)
-	}
-}
-
-func TestChatServiceAskWithModeStrictRAGStillRejectsNoRetrievedContext(t *testing.T) {
-	repos := newChatServiceTestRepositories(t)
-	task := &model.VideoTask{UserID: 7, FileMD5: "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", Filename: "strict.mp4", FileURL: "videos/strict.mp4"}
-	if err := repos.Task.Create(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
-	if err := repos.Chat.CreateSession(session); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if err := repos.Summary.Create(&model.AISummary{TaskID: task.ID, Content: "即使有摘要，严格模式也必须要求检索引用。", ModelName: "chat-model"}); err != nil {
-		t.Fatalf("create summary: %v", err)
-	}
-
-	svc := NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5, MinScore: 0.3})
-	_, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "没有相关内容？", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{
-		EmbeddingModel: "text-embedding-3-small",
-		LLMModel:       "chat-model",
-	})
-	if err == nil {
-		t.Fatal("AskWithMode() strict_rag succeeded without retrieved context")
-	}
-	if !strings.Contains(err.Error(), "未检索到足够相关的视频片段") {
-		t.Fatalf("err = %v, want no retrieved context error", err)
 	}
 }
 

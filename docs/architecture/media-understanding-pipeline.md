@@ -45,12 +45,12 @@ VideoTask
 
 ### 已有能力应保留
 
-- PostgreSQL 继续作为转录分片、视觉帧、RAG chunk 和证据账本的事实源。
+- PostgreSQL 继续作为转录分片、视觉帧、RAG chunk 和视觉观察的事实源。
 - pgvector 继续是默认可重建检索投影；不引入第二套向量事实源。
 - ASR 分片级完成状态和失败复用继续保留，重试不能重做已完成的昂贵调用。
 - 当前递归句子切片器作为降级实现保留；无时间数据或旧数据仍可构建文本索引。
 - 视觉处理保持 fail-open：视觉失败不能让已有 ASR 问答完全不可用。
-- 默认标准 RAG、显式 research Agent 和 evidence funnel 的产品边界不合并。
+- 2026-09-12 起产品入口统一 Chat / Agent，独立 research/funnel 与 Claim 账本已退役；本文的视频处理与时间定位边界不变。
 
 ## 根因分析（改造前的问题定性）
 

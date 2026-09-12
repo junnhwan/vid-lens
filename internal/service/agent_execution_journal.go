@@ -152,64 +152,6 @@ func (j *AgentExecutionJournal) MarkTerminal(ctx context.Context, userID int64, 
 	})
 }
 
-type agentJournalLease struct {
-	stepID  string
-	attempt int
-	token   string
-}
-
-func (j *AgentExecutionJournal) beginObservedStep(ctx context.Context, spec AgentJournalStep) (agentJournalLease, error) {
-	now := j.now()
-	callDigest := digestAgentValue(fmt.Sprintf("%s:%s:1:%s:%s", spec.RunID, spec.StepID, spec.Action, spec.ArgumentsDigest))
-	claim, err := j.store.ClaimStep(ctx, repository.AgentStepClaimRequest{
-		UserID: spec.UserID, RunID: spec.RunID, StepID: spec.StepID, Attempt: 1, Sequence: spec.Sequence,
-		Kind: spec.Kind, Action: spec.Action, SafeReason: spec.SafeReason, InputSummary: spec.InputSummary,
-		ArgumentsDigest: spec.ArgumentsDigest, CallDigest: callDigest, ToolName: firstNonEmpty(spec.ToolName, spec.Action),
-		CallKind: firstNonEmpty(spec.CallKind, model.AgentCallKindTool), ReplaySafe: spec.ReplaySafe,
-		LLMCall: spec.LLMCall, VisionCall: spec.VisionCall, RetrievalCall: spec.RetrievalCall,
-		LeaseToken: j.newLeaseToken(), Now: now, LeaseUntil: now.Add(agentStepLeaseDuration),
-	})
-	if err != nil {
-		return agentJournalLease{}, err
-	}
-	if claim.Outcome != repository.AgentStepClaimAcquired {
-		return agentJournalLease{}, fmt.Errorf("agent step %s claim outcome: %s", spec.StepID, claim.Outcome)
-	}
-	return agentJournalLease{stepID: spec.StepID, attempt: claim.Step.Attempt, token: claim.Step.LeaseToken}, nil
-}
-
-func (j *AgentExecutionJournal) completeObservedStep(ctx context.Context, userID int64, runID string, lease agentJournalLease, outputRef string, checkpoint any, evidenceRefs string) error {
-	encoded, err := json.Marshal(checkpoint)
-	if err != nil {
-		return err
-	}
-	changed, err := j.store.CompleteStep(ctx, repository.AgentStepCompletion{
-		UserID: userID, RunID: runID, StepID: lease.stepID, Attempt: lease.attempt, LeaseToken: lease.token,
-		OutputRef: outputRef, ResultCheckpoint: string(encoded), EvidenceRefs: evidenceRefs, Now: j.now(),
-	})
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return errors.New("agent step completion CAS failed")
-	}
-	return nil
-}
-
-func (j *AgentExecutionJournal) failObservedStep(ctx context.Context, userID int64, runID string, lease agentJournalLease, code string, cause error) error {
-	changed, err := j.store.FailStep(ctx, repository.AgentStepFailure{
-		UserID: userID, RunID: runID, StepID: lease.stepID, Attempt: lease.attempt, LeaseToken: lease.token,
-		ErrorCode: code, ErrorMessage: safeAgentError(cause), Cancelled: errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded), Now: j.now(),
-	})
-	if err != nil {
-		return err
-	}
-	if !changed {
-		return errors.New("agent step failure CAS failed")
-	}
-	return nil
-}
-
 type AgentJournalStep struct {
 	UserID                int64
 	RunID                 string
@@ -241,7 +183,7 @@ type AgentJournalResult struct {
 	OutputRef    string
 	EvidenceRefs string
 	MetricsJSON  string
-	Usage        VideoResearchPlannerCallUsage
+	Usage        VideoAgentLoopPlannerCallUsage
 }
 
 type AgentJournalExecution struct {

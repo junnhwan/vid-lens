@@ -38,7 +38,7 @@ func (s *fakeConversationExecution) Execute(_ context.Context, req service.Conve
 	switch req.Mode {
 	case "research":
 		return service.ConversationResult{Agent: s.researchResult}, s.researchErr
-	case string(service.VideoAgentEvidenceFunnelTemplate):
+	case "evidence_funnel":
 		return service.ConversationResult{Agent: s.funnelResult}, s.funnelErr
 	default:
 		return service.ConversationResult{Agent: s.result}, s.err
@@ -114,7 +114,7 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	execution := &fakeConversationExecution{researchResult: &service.VideoAgentResult{
 		Answer:   "research answer",
-		Template: string(service.VideoAgentResearchTemplate),
+		Template: string(service.VideoAgentLoopTemplate),
 	}}
 	handler := NewChatHandler(nil, execution)
 
@@ -139,7 +139,7 @@ func TestChatHandlerAskAgentResearchModeUsesResearchPath(t *testing.T) {
 
 func TestChatHandlerAskAgentEvidenceFunnelModeUsesBoundedPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	execution := &fakeConversationExecution{funnelResult: &service.VideoAgentResult{Answer: "validated", Template: string(service.VideoAgentEvidenceFunnelTemplate)}}
+	execution := &fakeConversationExecution{funnelResult: &service.VideoAgentResult{Answer: "validated", Template: "evidence_funnel"}}
 	handler := NewChatHandler(nil, execution)
 	router := gin.New()
 	router.POST("/chat/sessions/:session_id/messages/agent", func(c *gin.Context) {
@@ -153,7 +153,7 @@ func TestChatHandlerAskAgentEvidenceFunnelModeUsesBoundedPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if execution.request.UserID != 7 || execution.request.SessionID != 22 || execution.request.Question != "核验 owner" || execution.request.TopK != 3 || execution.request.RunID != "funnel-run" || execution.request.Mode != string(service.VideoAgentEvidenceFunnelTemplate) {
+	if execution.request.UserID != 7 || execution.request.SessionID != 22 || execution.request.Question != "核验 owner" || execution.request.TopK != 3 || execution.request.RunID != "funnel-run" || execution.request.Mode != "evidence_funnel" {
 		t.Fatalf("funnel request = %+v", execution.request)
 	}
 }

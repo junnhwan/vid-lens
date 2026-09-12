@@ -1,5 +1,4 @@
 import type { ChatMsg } from './chatUtils.ts'
-import type { CiteRef } from '@/components/Citation'
 import {
   agentTraceReducer,
   emptyAgentTraceState,
@@ -31,21 +30,11 @@ export type ConversationSessionAction =
   | { type: 'append_messages'; messages: ChatMsg[] }
   | { type: 'reset' }
   | { type: 'rag_start'; question: string }
-  | { type: 'agent_start'; question: string; mode?: 'agent' | 'research' | 'evidence_funnel' }
+  | { type: 'agent_start'; question: string; mode?: 'agent' }
   | { type: 'answer_delta'; delta: string }
   | { type: 'patch_last'; patch: Partial<ChatMsg> }
   | { type: 'rag_event'; event: RAGEvent; payload?: RAGPayload }
   | { type: 'agent_event'; event: AgentSSEPayload }
-  /** 非流式 research/funnel：结果到达后一次性回放整段轨迹 */
-  | {
-      type: 'agent_replay'
-      steps: ChatTraceStep[]
-      runId?: string
-      mode: 'research' | 'evidence_funnel'
-      content: string
-      cites: CiteRef[]
-      degraded: boolean
-    }
   | { type: 'stream_done'; patch?: Partial<ChatMsg> }
   | { type: 'stream_error'; message: string }
   | { type: 'stream_cancelled' }
@@ -102,31 +91,6 @@ export function conversationSessionReducer(
         ...state,
         agentTrace: trace,
         messages: patchLastAssistant(state.messages, current => ({ ...current, trace: trace.steps, agentRun: true })),
-      }
-    }
-    case 'agent_replay': {
-      // 非流式 research/funnel：接口返回后一次性回放整段执行轨迹（不做假的逐步动画）
-      const agentTrace: AgentTraceState = {
-        runId: action.runId ?? null,
-        mode: action.mode,
-        steps: action.steps,
-        finished: true,
-      }
-      return {
-        ...state,
-        streaming: false,
-        agentTrace,
-        messages: patchLastAssistant(state.messages, current => ({
-          ...current,
-          content: action.content,
-          cites: action.cites,
-          trace: action.steps,
-          agentRun: true,
-          agentMode: action.mode,
-          agentRunId: action.runId,
-          degraded: action.degraded,
-          streaming: false,
-        })),
       }
     }
     case 'stream_done':

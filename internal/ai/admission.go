@@ -107,7 +107,11 @@ func (x *admittedChat) StreamChat(c context.Context, m []ChatMessage, emit func(
 	defer func() { finish(err) }()
 	streaming, ok := x.base.(StreamingChatClient)
 	if !ok {
-		return errors.New("base chat client does not support streaming")
+		answer, err := x.base.Chat(c, m)
+		if err != nil {
+			return err
+		}
+		return emit(answer)
 	}
 	return streaming.StreamChat(c, m, emit)
 }

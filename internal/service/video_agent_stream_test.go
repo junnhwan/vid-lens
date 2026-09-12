@@ -10,14 +10,13 @@ import (
 	"vid-lens/internal/model"
 )
 
-func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T) {
+func TestVideoAgentStreamEmitsStableEventsForPlannerAgent(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
-	chatClient := &scriptedChatClient{responses: []string{"not-json", "直接回答 [C1]"}}
-	ledger := NewEvidenceLedgerService(repos)
+	chatClient := &scriptedChatClient{responses: []string{testSearchDecision, testAnswerDecision("ev-stream-1", task.ID, 1), "直接回答 [C1]"}}
 	policyService := NewMemoryPolicyService(repos.Memory, true)
 	chatSvc := NewChatServiceWithDependencies(repos, &fakeRetriever{results: []RetrievedChunk{
 		{TaskID: task.ID, EvidenceID: "ev-stream-1", ChunkID: 1, ChunkIndex: 2, Score: 0.91, Content: "stream citation"},
-	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{EvidenceLedger: ledger, MemoryPolicy: policyService})
+	}}, ChatConfig{TopK: 5, CandidateK: 5, MinScore: 0.3}, ChatDependencies{MemoryPolicy: policyService})
 	agent := NewVideoAgentService(chatSvc)
 
 	var events []AgentStreamEvent
@@ -39,8 +38,8 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	wantTypes := []string{
 		AgentEventRunStart,
 		AgentEventStepStart, AgentEventToolCall, AgentEventToolResult, AgentEventRetrieveHits, AgentEventStepDone,
-		AgentEventStepStart, AgentEventToolCall, AgentEventToolResult,
-		AgentEventAnswer, AgentEventCitations, AgentEventStepDone, AgentEventDone,
+		AgentEventStepStart, AgentEventToolCall, AgentEventAnswer,
+		AgentEventToolResult, AgentEventCitations, AgentEventStepDone, AgentEventDone,
 	}
 	gotTypes := make([]string, 0, len(events))
 	for _, event := range events {
@@ -86,12 +85,10 @@ func TestVideoAgentStreamEmitsStableEventsForExistingTemplateAgent(t *testing.T)
 	if done, ok := events[len(events)-1].Data.(AgentDoneEvent); !ok || done.RunID != result.RunID || done.MessageID != result.MessageID || done.TraceSummary.Steps != len(result.Trace) || done.MemoryPolicy != result.MemoryPolicy {
 		t.Fatalf("done = %#v, trace=%#v", events[len(events)-1].Data, result.Trace)
 	}
-	if answer, ok := events[9].Data.(string); !ok || answer != result.Answer {
-		t.Fatalf("answer event = %#v, result answer=%q", events[9].Data, result.Answer)
+	if answer, ok := events[8].Data.(string); !ok || answer != "直接回答 [C1]" {
+		t.Fatalf("answer event = %#v, result answer=%q", events[8].Data, result.Answer)
 	}
-	if ledgerView, err := ledger.GetRun(context.Background(), session.UserID, result.RunID); err != nil || ledgerView == nil || len(ledgerView.Claims) != 1 {
-		t.Fatalf("stream ledger = %+v err=%v", ledgerView, err)
-	}
+
 }
 
 func TestVideoAgentStreamEmitsStepErrorAndStopsOnToolFailure(t *testing.T) {
@@ -100,7 +97,7 @@ func TestVideoAgentStreamEmitsStepErrorAndStopsOnToolFailure(t *testing.T) {
 	var events []AgentStreamEvent
 	_, err := agent.Stream(context.Background(), VideoAgentStreamRequest{
 		UserID: session.UserID, SessionID: session.ID, Question: "测试检索失败", Mode: AgentStreamMode,
-	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json"}}, ai.Profile{
+	}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision}}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model",
 	}, func(event AgentStreamEvent) error {
 		events = append(events, event)
@@ -140,7 +137,7 @@ func TestVideoAgentStreamStopsPromptlyWhenRequestIsCanceled(t *testing.T) {
 	go func() {
 		_, err := agent.Stream(ctx, VideoAgentStreamRequest{
 			UserID: session.UserID, SessionID: session.ID, Question: "取消测试", Mode: AgentStreamMode,
-		}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json"}}, ai.Profile{
+		}, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{testSearchDecision}}, ai.Profile{
 			EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model",
 		}, func(event AgentStreamEvent) error {
 			events = append(events, event)
@@ -149,7 +146,11 @@ func TestVideoAgentStreamStopsPromptlyWhenRequestIsCanceled(t *testing.T) {
 		resultCh <- err
 	}()
 
-	<-retriever.started
+	select {
+	case <-retriever.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("retrieval did not start")
+	}
 	cancel()
 	select {
 	case err := <-resultCh:

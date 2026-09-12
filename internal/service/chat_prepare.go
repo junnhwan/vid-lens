@@ -12,21 +12,9 @@ import (
 	"vid-lens/internal/model"
 )
 
-// 按模式准备 RAG 或视频上下文，并构造检索管线。
-//
-// docs/architecture/retrieval.md (A段)：散落的 intent/scope → 检索参数硬编码统一由 ExecutionPolicy 表达。
-// 流程：识别 intent（占位 = classifyIntentPlaceholder）→ 取 ExecutionPolicy →
-// 按字段走检索/生成。video_assistant 模式的"检索失败→转写兜底"降级路径保留
-// （用户已确定：ExecutionPolicy 只表达参数，兜底降级不进 policy）。
+// All new Chat requests use natural video context or member-scoped KB retrieval.
 func normalizeChatMode(mode ChatMode) ChatMode {
-	switch ChatMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
-	case ChatModeStrictRAG:
-		return ChatModeStrictRAG
-	case ChatModeVideoAssistant:
-		return ChatModeVideoAssistant
-	default:
-		return ChatModeVideoAssistant
-	}
+	return ChatModeNatural
 }
 
 func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
@@ -38,7 +26,7 @@ func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, user
 		return nil, fmt.Errorf("无权访问此会话")
 	}
 	// KnowledgeBase 会话强制走 RAG（跨视频检索，集合 scope），与 strict_rag 同路径。
-	if session.ScopeType == model.ChatScopeKnowledgeBase || mode == ChatModeStrictRAG {
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
 		return s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 	}
 	return s.prepareVideoAssistantChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
@@ -125,23 +113,24 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		return nil, err
 	}
 	contexts, citations := buildCitationSet(question, retrieval.Citations)
-	if len(citations) == 0 {
-		return nil, errNoRetrievedContext
-	}
+
 	messages := buildRAGMessages(contexts, recent, question)
+	if session.ScopeType != model.ChatScopeKnowledgeBase {
+		contextText, contextErr := s.videoContextText(session.TaskID)
+		if contextErr != nil {
+			return nil, contextErr
+		}
+		messages = append([]ai.ChatMessage{{Role: "system", Content: "有限视频上下文（不是可引用片段）：\n" + contextText}}, messages...)
+	}
 	return &preparedRAGChat{
-		Session:         session,
-		Question:        question,
-		TopK:            topK,
-		RecentLimit:     recentLimit,
-		Contexts:        contexts,
-		Citations:       citations,
-		Messages:        messages,
-		TaskIDs:         taskIDs,
-		EmbeddingModel:  profile.EmbeddingModel,
-		EmbeddingClient: embedding,
-		ChatClient:      chat,
-		Policy:          policy,
+		Session:     session,
+		Question:    question,
+		TopK:        topK,
+		RecentLimit: recentLimit,
+		Contexts:    contexts,
+		Citations:   citations,
+		Messages:    messages,
+		Policy:      policy,
 	}, nil
 }
 
@@ -225,7 +214,7 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 		}
 	}
 	if len(sections) == 0 {
-		return "", fmt.Errorf("当前视频没有可用的摘要或转写上下文")
+		return "当前视频没有可用上下文；不能确认视频特定事实。", nil
 	}
 	return strings.Join(sections, "\n\n"), nil
 }
@@ -288,14 +277,12 @@ func retrievalChunkKey(chunk RetrievedChunk) string {
 // 短路 + LLM 兜底），router 为 nil 时降级占位 classifyIntentPlaceholder（保测试
 // 稳定，当前实现约束）。recent 用于历史 intent 加权 + LLM 兜底消歧指代。
 func (s *ChatService) classifyIntent(ctx context.Context, question string, session *model.ChatSession, mode ChatMode, recent []model.ChatMessage, chat ai.ChatClient) Intent {
-	if s.intentRouter == nil {
-		return classifyIntentPlaceholder(question, session, mode)
-	}
 	var recentIntents []Intent
-	if len(recent) > 0 {
+	if s.intentRouter != nil {
 		recentIntents = s.intentRouter.ParseRecentIntents(recent, session, mode)
 	}
-	return s.intentRouter.Classify(ctx, question, session, mode, recentIntents, chat)
+	intent, _ := NewRuleIntentClassifier().Classify(question, session, mode, recentIntents)
+	return intent
 }
 
 func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatSession, embeddingModel string) ([]int64, error) {

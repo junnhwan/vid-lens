@@ -6,31 +6,33 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
 
-const VideoAgentResearchTemplate VideoAgentTemplate = "research"
+const VideoAgentLoopTemplate VideoAgentTemplate = "agent"
 
-type VideoResearchRequest struct {
-	UserID    int64
-	SessionID int64
-	Goal      string
-	TopK      int
-	Policy    VideoResearchPolicy
-	RunID     string
+type VideoAgentLoopRequest struct {
+	UserID     int64
+	SessionID  int64
+	Goal       string
+	TopK       int
+	Policy     VideoAgentLoopPolicy
+	RunID      string
+	Observer   VideoAgentStepObserver
+	EmitAnswer func(string) error
 }
 
-// AskResearch runs the opt-in goal-driven path. The existing Ask method stays
-// as the deterministic template baseline for comparison and fallback.
-func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (result *VideoAgentResult, err error) {
+// RunAgent is the single owner-scoped Planner/Tool/Observe execution path.
+func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequest, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (result *VideoAgentResult, err error) {
 	req.Goal = strings.TrimSpace(req.Goal)
 	if req.Goal == "" {
-		return nil, fmt.Errorf("研究目标不能为空")
+		return nil, fmt.Errorf("问题不能为空")
 	}
-	if s == nil || s.chatSvc == nil {
+	if s == nil || s.chatSvc == nil || s.executionJournal == nil {
 		return nil, errors.New("agent chat service 不能为空")
 	}
 	if s.chatSvc.retriever == nil {
@@ -44,7 +46,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		return nil, errors.New("无权访问此会话")
 	}
 	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		return nil, errors.New("知识库会话暂不支持 Video Research Agent")
+		return nil, errors.New("知识库会话暂不支持 Agent")
 	}
 	memoryPolicy := s.chatSvc.effectiveMemoryPolicyForRequest(ctx, session)
 	if req.TopK <= 0 {
@@ -64,6 +66,9 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	if existing, lookupErr := journal.GetRun(ctx, req.UserID, runID); lookupErr != nil {
 		return nil, lookupErr
 	} else if existing != nil {
+		if existing.SessionID != req.SessionID || existing.TaskID != session.TaskID || existing.Goal != req.Goal {
+			return nil, errors.New("agent run scope or goal mismatch")
+		}
 		// A run is an immutable execution contract. Do not validate or use a
 		// newly supplied policy before the historical snapshots are loaded.
 		if err := json.Unmarshal([]byte(existing.PolicySnapshot), &frozenPolicy); err != nil {
@@ -72,17 +77,23 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		if err := json.Unmarshal([]byte(existing.BudgetSnapshot), &budget); err != nil {
 			return nil, fmt.Errorf("decode frozen agent budget: %w", err)
 		}
-		policy = VideoResearchPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+		if existing.Mode != AgentStreamMode || frozenPolicy.EngineVersion != 2 {
+			if existing.Status == model.AgentRunStatusCompleted {
+				return loadAgentRunResult(ctx, s, req.UserID, req.SessionID, runID)
+			}
+			return nil, errors.New("旧执行模式不能继续运行，请重新提问")
+		}
+		policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
 	} else {
-		if policy == (VideoResearchPolicy{}) {
-			policy = DefaultVideoResearchPolicy()
+		if policy == (VideoAgentLoopPolicy{}) {
+			policy = DefaultVideoAgentLoopPolicy()
 		}
 		if err := policy.Validate(); err != nil {
 			return nil, err
 		}
-		frozenPolicy, budget = researchAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
+		frozenPolicy, budget = loopAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
 	}
-	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentResearchTemplate), "default", profile, frozenPolicy, budget)
+	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentLoopTemplate), "default", profile, frozenPolicy, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +104,7 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		return nil, fmt.Errorf("decode frozen agent budget: %w", err)
 	}
 	req.TopK = frozenPolicy.TopK
-	policy = VideoResearchPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+	policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("frozen research policy is invalid: %w", err)
 	}
@@ -118,6 +129,11 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		s.markAgentRunTerminal(ctx, req.UserID, runID, status, reason, err)
 	}()
 
+	if budget.MaxDurationMs > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(budget.MaxDurationMs)*time.Millisecond)
+		defer cancel()
+	}
 	recentLimit := s.chatSvc.cfg.RecentTurns * 2
 	recent, err := s.chatSvc.loadRecentMessages(ctx, req.UserID, req.SessionID, recentLimit)
 	if err != nil {
@@ -125,10 +141,15 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 	}
 	memorySnapshot := s.loadAgentMemorySnapshot(ctx, req.UserID, session.TaskID, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
-	tools := NewVideoAgentTools(s.chatSvc.repos, s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile), chat)
+	pipeline := s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile)
+	// The Planner supplies the search query; do not hide another LLM call inside a tool.
+	pipeline.rewriter = NoopQueryRewriter{}
+	tools := NewVideoAgentTools(s.chatSvc.repos, pipeline, chat)
 	tools.SetVisualInvestigator(s.visualInvestigator)
 	tools.SetMemorySnapshot(memorySnapshot)
-	runner, err := NewVideoResearchRunner(tools.Registry(), NewLLMVideoResearchPlanner(chat), DefaultVideoResearchObserver{}, policy)
+	tools.SetStepObserver(req.Observer)
+	tools.emitAnswer = req.EmitAnswer
+	runner, err := NewVideoAgentLoopRunner(tools.Registry(), NewLLMVideoAgentLoopPlanner(chat), DefaultVideoAgentLoopObserver{}, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -144,46 +165,45 @@ func (s *VideoAgentService) AskResearch(ctx context.Context, req VideoResearchRe
 		Embedding:      embedding,
 		MemorySnapshot: memorySnapshot,
 	})
-	trace := videoResearchTrace(runResult)
+	trace := videoAgentLoopTrace(runResult)
 	if err != nil {
 		return nil, newVideoAgentExecutionError(err, trace)
 	}
-	if runResult.State.StopReason == "budget_exhausted" {
-		s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusBudgetExhausted, "budget_exhausted", nil)
+	degraded := runResult.State.StopReason == "budget_exhausted"
+	if degraded && strings.TrimSpace(runResult.State.Answer) == "" {
+		fallback := agentBudgetAnswer(req.Goal, runResult.State.Evidence)
+		runResult.State.Answer, runResult.State.Citations = fallback.Answer, fallback.Citations
 	}
 	if strings.TrimSpace(runResult.State.Answer) == "" {
-		return nil, newVideoAgentExecutionError(errors.New("研究任务未生成最终回答"), trace)
+		return nil, newVideoAgentExecutionError(errors.New("Agent 未生成最终回答"), trace)
 	}
 
 	result = &VideoAgentResult{
+		Degraded:     degraded,
 		Answer:       runResult.State.Answer,
-		Template:     string(VideoAgentResearchTemplate),
+		Template:     string(VideoAgentLoopTemplate),
 		Citations:    append([]Citation(nil), runResult.State.Citations...),
 		Trace:        trace,
 		Model:        profile.LLMModel,
 		RunID:        runID,
-		Mode:         string(VideoAgentResearchTemplate),
+		Mode:         string(VideoAgentLoopTemplate),
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: memoryPolicy,
 	}
-	rawAnswer, answerEvidence := researchAnswerLedgerInput(req.Goal, runResult)
-	ledgerReq := EvidenceLedgerRecordRequest{
-		UserID: req.UserID, SessionID: req.SessionID, MessageID: result.MessageID, TaskID: session.TaskID,
-		RunID: runID, RawAnswer: rawAnswer, Evidence: answerEvidence, Retrieved: buildCitations(req.Goal, runResult.State.Evidence),
-	}
-	if err := s.inspectAnswer(ctx, &ledgerReq, result, embedding, chat, profile); err != nil {
+	if err := s.saveAgentRunExchange(ctx, req.UserID, req.SessionID, req.Goal, result, recentLimit); err != nil {
 		return nil, err
 	}
-	if err := s.publishInspectedAnswer(ctx, req.Goal, ledgerReq, result); err != nil {
-		return nil, err
+	status := model.AgentRunStatusCompleted
+	if degraded {
+		status = model.AgentRunStatusBudgetExhausted
 	}
-	s.markAgentRunTerminal(ctx, req.UserID, runID, model.AgentRunStatusCompleted, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil)
+	s.markAgentRunTerminal(ctx, req.UserID, runID, status, firstNonEmpty(runResult.State.StopReason, "goal_satisfied"), nil)
 	return result, nil
 }
 
-// ResumeResearch reconstructs a running research loop exclusively from the
+// ResumeAgent reconstructs a running research loop exclusively from the
 // authoritative Run/Step/ToolCall records. retrieval_snapshot is never read.
-func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, runID string, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
+func (s *VideoAgentService) ResumeAgent(ctx context.Context, userID int64, runID string, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*VideoAgentResult, error) {
 	if s == nil || s.chatSvc == nil || s.chatSvc.repos == nil || s.chatSvc.repos.AgentExecution == nil {
 		return nil, errors.New("agent execution repository unavailable")
 	}
@@ -195,7 +215,7 @@ func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, ru
 	if run == nil {
 		return nil, errors.New("agent run not found")
 	}
-	if run.Mode != string(VideoAgentResearchTemplate) || run.ScopeType != model.ChatScopeVideo {
+	if run.Mode != string(VideoAgentLoopTemplate) || run.ScopeType != model.ChatScopeVideo {
 		return nil, errors.New("agent run is not a resumable single-video research run")
 	}
 	var policy frozenAgentPolicy
@@ -212,9 +232,9 @@ func (s *VideoAgentService) ResumeResearch(ctx context.Context, userID int64, ru
 		}
 		return nil, fmt.Errorf("agent run is terminal: %s", run.Status)
 	}
-	return s.AskResearch(ctx, VideoResearchRequest{
+	return s.RunAgent(ctx, VideoAgentLoopRequest{
 		UserID: userID, SessionID: run.SessionID, Goal: run.Goal, TopK: policy.TopK,
-		Policy: VideoResearchPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans}, RunID: run.ID,
+		Policy: VideoAgentLoopPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans}, RunID: run.ID,
 	}, embedding, chat, profile)
 }
 
@@ -232,32 +252,15 @@ func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessi
 			continue
 		}
 		snapshot, decodeErr := DecodeAgentSnapshot(*message.RetrievalSnapshot)
-		if decodeErr != nil || snapshot.RunID != runID || snapshot.Mode != string(VideoAgentResearchTemplate) {
+		if decodeErr != nil || snapshot.RunID != runID {
 			continue
 		}
-		return &VideoAgentResult{Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
+		return &VideoAgentResult{Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
 	}
 	return nil, nil
 }
 
-func researchAnswerLedgerInput(goal string, result *VideoResearchResult) (string, []Citation) {
-	if result == nil {
-		return "", nil
-	}
-	for i := len(result.State.Observations) - 1; i >= 0; i-- {
-		observation := result.State.Observations[i]
-		if observation.Tool != VideoAgentToolBuildCitedAnswer {
-			continue
-		}
-		var answer BuildCitedAnswerResult
-		if err := json.Unmarshal(observation.Output, &answer); err == nil && strings.TrimSpace(answer.Answer) != "" {
-			return answer.Answer, buildCitations(goal, answer.Citations)
-		}
-	}
-	return result.State.Answer, append([]Citation(nil), result.State.Citations...)
-}
-
-func videoResearchTrace(result *VideoResearchResult) []VideoAgentStep {
+func videoAgentLoopTrace(result *VideoAgentLoopResult) []VideoAgentStep {
 	if result == nil {
 		return nil
 	}
@@ -266,4 +269,21 @@ func videoResearchTrace(result *VideoResearchResult) []VideoAgentStep {
 		trace = append(trace, step.Trace)
 	}
 	return trace
+}
+
+// Budget exhaustion must not discard evidence already obtained. No additional model call.
+func agentBudgetAnswer(goal string, evidence []RetrievedChunk) finalizedAnswer {
+	if len(evidence) > 3 {
+		evidence = evidence[:3]
+	}
+	citations := buildCitations(goal, evidence)
+	text := "本轮分析预算已用尽，未完成进一步核对。"
+	if len(citations) == 0 {
+		return finalizedAnswer{Answer: text + "当前没有足够证据确认视频中的答案。", Citations: []Citation{}}
+	}
+	text += "以下是已取得的视频证据摘录，不代表完整结论：\n"
+	for i, c := range citations {
+		text += fmt.Sprintf("\n%d. %s [C%d]\n", i+1, c.Content, i+1)
+	}
+	return finalizeAnswerCitations(text, citations)
 }

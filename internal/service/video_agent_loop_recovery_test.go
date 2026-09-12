@@ -15,7 +15,7 @@ import (
 	"vid-lens/internal/repository"
 )
 
-func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *testing.T) {
+func TestVideoAgentLoopRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -35,14 +35,14 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 		t.Fatalf("CreateRun() = %v, %v", created, err)
 	}
 	registry := NewVideoAgentToolRegistry()
-	tool := &scriptedVideoResearchTool{definition: VideoAgentToolDefinition{Name: "inspect"}, output: json.RawMessage(`{"value":"must-not-run"}`)}
+	tool := &scriptedVideoAgentLoopTool{definition: VideoAgentToolDefinition{Name: "inspect"}, output: json.RawMessage(`{"value":"must-not-run"}`)}
 	if err := registry.Register(tool); err != nil {
 		t.Fatal(err)
 	}
 
 	planDecision := durableResearchDecision{Tool: "inspect", Arguments: json.RawMessage(`{"query":"owner"}`)}
 	planCheckpoint, _ := json.Marshal(planDecision)
-	initialState, err := NewVideoResearchState(run.Goal, VideoResearchPolicy{MaxSteps: 3, MaxReplans: 1})
+	initialState, err := NewVideoAgentLoopState(run.Goal, VideoAgentLoopPolicy{MaxSteps: 3, MaxReplans: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 	claim, err := repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
 		UserID: 7, RunID: run.ID, StepID: "plan-1", Attempt: 1, Sequence: 1, Kind: "plan", Action: "select_next_action",
 		SafeReason: "select next action", InputSummary: plannerSummary, ArgumentsDigest: plannerDigest,
-		CallDigest: digestAgentValue(run.ID + ":plan-1:1:" + videoResearchPlannerCall + ":" + plannerDigest),
-		ToolName:   videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: false, LLMCall: true,
+		CallDigest: digestAgentValue(run.ID + ":plan-1:1:" + videoAgentLoopPlannerCall + ":" + plannerDigest),
+		ToolName:   videoAgentLoopPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: false, LLMCall: true,
 		LeaseToken: "planner-1", Now: now.Add(time.Second), LeaseUntil: now.Add(time.Minute),
 	})
 	if err != nil || claim.Outcome != repository.AgentStepClaimAcquired {
@@ -62,7 +62,7 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 	}
 
 	toolResult := VideoAgentToolResult{Output: json.RawMessage(`{"value":"persisted"}`), Step: VideoAgentStep{Name: "inspect", Tool: "inspect", OutputRef: "persisted-result"}}
-	observation := VideoResearchObservation{Tool: "inspect", Output: toolResult.Output, Step: toolResult.Step}
+	observation := VideoAgentLoopObservation{Tool: "inspect", Output: toolResult.Output, Step: toolResult.Step}
 	toolCheckpoint, _ := json.Marshal(durableResearchToolCheckpoint{Result: toolResult, Observation: observation})
 	argsDigest := digestAgentValue(string(planDecision.Arguments))
 	claim, err = repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
@@ -78,8 +78,8 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 		t.Fatalf("complete tool = %v, %v", changed, err)
 	}
 
-	planner := &scriptedVideoResearchPlanner{decisions: []VideoResearchDecision{{Done: true, StopReason: "recovered"}}}
-	runner, err := NewVideoResearchRunner(registry, planner, &recordingVideoResearchObserver{}, VideoResearchPolicy{MaxSteps: 3, MaxReplans: 1})
+	planner := &scriptedVideoAgentLoopPlanner{decisions: []VideoAgentLoopDecision{{Done: true, StopReason: "recovered"}}}
+	runner, err := NewVideoAgentLoopRunner(registry, planner, &recordingVideoAgentLoopObserver{}, VideoAgentLoopPolicy{MaxSteps: 3, MaxReplans: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 	if err != nil {
 		t.Fatalf("recovered Run() error = %v", err)
 	}
-	if result.State.Status != VideoResearchStatusCompleted || result.State.CurrentStep != 1 || tool.calls != 0 || planner.calls != 1 {
+	if result.State.Status != VideoAgentLoopStatusCompleted || result.State.CurrentStep != 1 || tool.calls != 0 || planner.calls != 1 {
 		t.Fatalf("recovered state=%+v tool_calls=%d planner_calls=%d", result.State, tool.calls, planner.calls)
 	}
 	if len(result.State.Observations) != 1 || string(result.State.Observations[0].Output) != `{"value":"persisted"}` {
@@ -111,7 +111,7 @@ func TestVideoResearchRunnerRecoversCompletedCheckpointsWithoutRepeatingTool(t *
 	}
 }
 
-func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testing.T) {
+func TestVideoAgentLoopRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -131,25 +131,25 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 		t.Fatalf("CreateRun() = %v, %v", created, err)
 	}
 	registry := NewVideoAgentToolRegistry()
-	tool := &scriptedVideoResearchTool{definition: VideoAgentToolDefinition{Name: VideoAgentToolSearchTranscript}, output: json.RawMessage(`{"value":"must-not-run"}`)}
+	tool := &scriptedVideoAgentLoopTool{definition: VideoAgentToolDefinition{Name: VideoAgentToolSearchTranscript}, output: json.RawMessage(`{"value":"must-not-run"}`)}
 	if err := registry.Register(tool); err != nil {
 		t.Fatal(err)
 	}
-	policy := VideoResearchPolicy{MaxSteps: 4, MaxReplans: 1}
-	recoveredState, err := NewVideoResearchState(run.Goal, policy)
+	policy := VideoAgentLoopPolicy{MaxSteps: 4, MaxReplans: 1}
+	recoveredState, err := NewVideoAgentLoopState(run.Goal, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	persistPlan := func(number int, state VideoResearchState, decision durableResearchDecision) {
+	persistPlan := func(number int, state VideoAgentLoopState, decision durableResearchDecision) {
 		t.Helper()
 		stepID := fmt.Sprintf("plan-%d", number)
 		summary, inputDigest := safePlannerInputSummary(state, registry.Definitions())
 		claim, claimErr := repo.ClaimStep(context.Background(), repository.AgentStepClaimRequest{
 			UserID: 7, RunID: run.ID, StepID: stepID, Attempt: 1, Sequence: number*2 - 1,
 			Kind: "plan", Action: "select_next_action", SafeReason: "select next action", InputSummary: summary,
-			ArgumentsDigest: inputDigest, CallDigest: digestAgentValue(run.ID + ":" + stepID + ":1:" + videoResearchPlannerCall + ":" + inputDigest),
-			ToolName: videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: false, LLMCall: true,
+			ArgumentsDigest: inputDigest, CallDigest: digestAgentValue(run.ID + ":" + stepID + ":1:" + videoAgentLoopPlannerCall + ":" + inputDigest),
+			ToolName: videoAgentLoopPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: false, LLMCall: true,
 			LeaseToken: stepID, Now: now.Add(time.Duration(number*10) * time.Second), LeaseUntil: now.Add(time.Hour),
 		})
 		if claimErr != nil || claim.Outcome != repository.AgentStepClaimAcquired {
@@ -163,7 +163,7 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 			t.Fatalf("complete %s = %v, %v", stepID, changed, completeErr)
 		}
 	}
-	persistTool := func(number, attempt int, decision durableResearchDecision, result VideoAgentToolResult, observation VideoResearchObservation, fail bool) {
+	persistTool := func(number, attempt int, decision durableResearchDecision, result VideoAgentToolResult, observation VideoAgentLoopObservation, fail bool) {
 		t.Helper()
 		stepID := fmt.Sprintf("tool-%d", number)
 		argsDigest := digestAgentValue(string(decision.Arguments))
@@ -195,31 +195,31 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 			t.Fatalf("complete %s attempt %d = %v, %v", stepID, attempt, changed, completeErr)
 		}
 	}
-	applyExpected := func(number int, decision durableResearchDecision, result VideoAgentToolResult, observation VideoResearchObservation) {
+	applyExpected := func(number int, decision durableResearchDecision, result VideoAgentToolResult, observation VideoAgentLoopObservation) {
 		action := decision.toDecision()
 		recoveredState.CurrentStep++
-		recoveredState.Steps = append(recoveredState.Steps, VideoResearchStep{Number: number, Action: action, Status: VideoResearchStepCompleted, Trace: result.Step, Observation: &observation})
+		recoveredState.Steps = append(recoveredState.Steps, VideoAgentLoopStep{Number: number, Action: action, Status: VideoAgentLoopStepCompleted, Trace: result.Step, Observation: &observation})
 		recoveredState.Observations = append(recoveredState.Observations, observation)
-		recoveredState.Evidence = mergeVideoResearchEvidence(recoveredState.Evidence, observation.NewEvidence)
+		recoveredState.Evidence = mergeVideoAgentLoopEvidence(recoveredState.Evidence, observation.NewEvidence)
 		recoveredState.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
 	}
 
 	firstDecision := durableResearchDecision{Tool: VideoAgentToolSearchTranscript, Arguments: json.RawMessage(`{"question":"first","top_k":1}`)}
 	firstResult := VideoAgentToolResult{Output: json.RawMessage(`{"value":"first"}`), Step: VideoAgentStep{Name: "first", Tool: VideoAgentToolSearchTranscript, OutputRef: "first-result"}}
-	firstObservation := VideoResearchObservation{Tool: VideoAgentToolSearchTranscript, Output: firstResult.Output, Step: firstResult.Step}
+	firstObservation := VideoAgentLoopObservation{Tool: VideoAgentToolSearchTranscript, Output: firstResult.Output, Step: firstResult.Step}
 	persistPlan(1, recoveredState, firstDecision)
-	persistTool(1, 1, firstDecision, VideoAgentToolResult{}, VideoResearchObservation{}, true)
+	persistTool(1, 1, firstDecision, VideoAgentToolResult{}, VideoAgentLoopObservation{}, true)
 	persistTool(1, 2, firstDecision, firstResult, firstObservation, false)
 	applyExpected(1, firstDecision, firstResult, firstObservation)
 
 	secondDecision := durableResearchDecision{Tool: VideoAgentToolSearchTranscript, Arguments: json.RawMessage(`{"question":"second","top_k":1}`)}
 	secondResult := VideoAgentToolResult{Output: json.RawMessage(`{"value":"second"}`), Step: VideoAgentStep{Name: "second", Tool: VideoAgentToolSearchTranscript, OutputRef: "second-result"}}
-	secondObservation := VideoResearchObservation{Tool: VideoAgentToolSearchTranscript, Output: secondResult.Output, Step: secondResult.Step}
+	secondObservation := VideoAgentLoopObservation{Tool: VideoAgentToolSearchTranscript, Output: secondResult.Output, Step: secondResult.Step}
 	persistPlan(2, recoveredState, secondDecision)
 	persistTool(2, 1, secondDecision, secondResult, secondObservation, false)
 
-	planner := &scriptedVideoResearchPlanner{decisions: []VideoResearchDecision{{Done: true, StopReason: "continued"}}}
-	runner, err := NewVideoResearchRunner(registry, planner, &recordingVideoResearchObserver{}, policy)
+	planner := &scriptedVideoAgentLoopPlanner{decisions: []VideoAgentLoopDecision{{Done: true, StopReason: "continued"}}}
+	runner, err := NewVideoAgentLoopRunner(registry, planner, &recordingVideoAgentLoopObserver{}, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.State.Status != VideoResearchStatusCompleted || result.State.CurrentStep != 2 || len(result.State.Steps) != 2 || planner.calls != 1 || tool.calls != 0 {
+	if result.State.Status != VideoAgentLoopStatusCompleted || result.State.CurrentStep != 2 || len(result.State.Steps) != 2 || planner.calls != 1 || tool.calls != 0 {
 		t.Fatalf("continued state=%+v planner_calls=%d tool_calls=%d", result.State, planner.calls, tool.calls)
 	}
 	if result.State.Steps[0].Trace.OutputRef != "first-result" || result.State.Steps[1].Trace.OutputRef != "second-result" {
@@ -238,7 +238,7 @@ func TestVideoResearchRunnerContinuesAfterCompletedStepsAndRetryAttempt(t *testi
 	}
 }
 
-func TestVideoResearchRunnerPersistsFailedPlannerAuditAndUsage(t *testing.T) {
+func TestVideoAgentLoopRunnerPersistsFailedPlannerAuditAndUsage(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -257,14 +257,14 @@ func TestVideoResearchRunnerPersistsFailedPlannerAuditAndUsage(t *testing.T) {
 	if created, err := repo.CreateRun(context.Background(), run); err != nil || !created {
 		t.Fatalf("CreateRun() = %v, %v", created, err)
 	}
-	planner := &usageVideoResearchPlanner{
+	planner := &usageVideoAgentLoopPlanner{
 		err: errors.New("provider unavailable"),
-		usage: VideoResearchPlannerCallUsage{
+		usage: VideoAgentLoopPlannerCallUsage{
 			PromptTokens: 120, CompletionTokens: 3, CostMicros: 77,
 			UsageSource: model.AgentCallUsageActual, Currency: "USD", PriceVersion: "test-v1",
 		},
 	}
-	runner, err := NewVideoResearchRunner(NewVideoAgentToolRegistry(), planner, &recordingVideoResearchObserver{}, VideoResearchPolicy{MaxSteps: 1})
+	runner, err := NewVideoAgentLoopRunner(NewVideoAgentToolRegistry(), planner, &recordingVideoAgentLoopObserver{}, VideoAgentLoopPolicy{MaxSteps: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,19 +287,19 @@ func TestVideoResearchRunnerPersistsFailedPlannerAuditAndUsage(t *testing.T) {
 	}
 }
 
-type usageVideoResearchPlanner struct {
-	decision VideoResearchDecision
-	usage    VideoResearchPlannerCallUsage
+type usageVideoAgentLoopPlanner struct {
+	decision VideoAgentLoopDecision
+	usage    VideoAgentLoopPlannerCallUsage
 	err      error
 	calls    int
 }
 
-func (p *usageVideoResearchPlanner) NextDecision(ctx context.Context, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, error) {
+func (p *usageVideoAgentLoopPlanner) NextDecision(ctx context.Context, state VideoAgentLoopState, tools []VideoAgentToolDefinition) (VideoAgentLoopDecision, error) {
 	decision, _, err := p.NextDecisionWithUsage(ctx, state, tools)
 	return decision, err
 }
 
-func (p *usageVideoResearchPlanner) NextDecisionWithUsage(_ context.Context, _ VideoResearchState, _ []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
+func (p *usageVideoAgentLoopPlanner) NextDecisionWithUsage(_ context.Context, _ VideoAgentLoopState, _ []VideoAgentToolDefinition) (VideoAgentLoopDecision, VideoAgentLoopPlannerCallUsage, error) {
 	p.calls++
 	return p.decision, p.usage, p.err
 }

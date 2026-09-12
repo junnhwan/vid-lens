@@ -201,7 +201,11 @@ func (r *retryingChat) Chat(ctx context.Context, messages []ChatMessage) (string
 func (r *retryingChat) StreamChat(ctx context.Context, messages []ChatMessage, emit func(string) error) error {
 	streaming, ok := r.base.(StreamingChatClient)
 	if !ok {
-		return errors.New("base chat client does not support streaming")
+		answer, err := r.Chat(ctx, messages)
+		if err != nil {
+			return err
+		}
+		return emit(answer)
 	}
 	operationKey := r.policy.operationKey(ctx)
 	return streaming.StreamChat(providerRetryContext(ctx, operationKey, 0), messages, emit)

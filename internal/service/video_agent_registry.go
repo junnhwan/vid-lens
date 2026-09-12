@@ -187,16 +187,6 @@ type investigateVisualToolArguments struct {
 	Budget        VisualBudget      `json:"budget"`
 }
 
-type summarizeSegmentsToolArguments struct {
-	Question string              `json:"question"`
-	Segments []TranscriptSegment `json:"segments"`
-}
-
-type compareSegmentsToolArguments struct {
-	Question string                   `json:"question"`
-	Groups   []TranscriptSegmentGroup `json:"groups"`
-}
-
 type buildCitedAnswerToolArguments struct {
 	Question     string           `json:"question"`
 	Intermediate string           `json:"intermediate"`
@@ -289,40 +279,6 @@ func defaultVideoAgentToolAdapters(tools *VideoAgentTools) []VideoAgentTool {
 					EmbeddingModel: request.Runtime.EmbeddingModel,
 					ChunkIndex:     args.ChunkIndex,
 					Radius:         args.Radius,
-				})
-				return marshalVideoAgentToolResult(result, step, err)
-			},
-		},
-		&videoAgentToolAdapter{
-			definition: VideoAgentToolDefinition{
-				Name:        VideoAgentToolSummarizeSegments,
-				Description: "只基于给定转写片段提取与问题相关的要点。",
-			},
-			execute: func(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
-				var args summarizeSegmentsToolArguments
-				if err := decodeVideoAgentToolArguments(request, &args); err != nil {
-					return failedVideoAgentToolResult(VideoAgentToolSummarizeSegments, "summarize segments", err)
-				}
-				result, step, err := tools.SummarizeSegments(ctx, SummarizeSegmentsInput{
-					Question: args.Question,
-					Segments: args.Segments,
-				})
-				return marshalVideoAgentToolResult(result, step, err)
-			},
-		},
-		&videoAgentToolAdapter{
-			definition: VideoAgentToolDefinition{
-				Name:        VideoAgentToolCompareSegments,
-				Description: "比较多个转写片段组中的共同点、差异和变化。",
-			},
-			execute: func(ctx context.Context, request VideoAgentToolRequest) (VideoAgentToolResult, error) {
-				var args compareSegmentsToolArguments
-				if err := decodeVideoAgentToolArguments(request, &args); err != nil {
-					return failedVideoAgentToolResult(VideoAgentToolCompareSegments, "compare segments", err)
-				}
-				result, step, err := tools.CompareSegments(ctx, CompareSegmentsInput{
-					Question: args.Question,
-					Groups:   args.Groups,
 				})
 				return marshalVideoAgentToolResult(result, step, err)
 			},

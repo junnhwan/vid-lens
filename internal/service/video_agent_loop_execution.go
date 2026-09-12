@@ -10,7 +10,7 @@ import (
 	"vid-lens/internal/repository"
 )
 
-const videoResearchPlannerCall = "video_research_planner"
+const videoAgentLoopPlannerCall = "video_research_planner"
 
 type invalidResearchDecisionError struct{ cause error }
 
@@ -33,10 +33,10 @@ type durableResearchDecision struct {
 
 type durableResearchToolCheckpoint struct {
 	Result      VideoAgentToolResult     `json:"result"`
-	Observation VideoResearchObservation `json:"observation"`
+	Observation VideoAgentLoopObservation `json:"observation"`
 }
 
-func (r *VideoResearchRunner) SetDurableExecution(journal *AgentExecutionJournal, userID int64, runID string) error {
+func (r *VideoAgentLoopRunner) SetDurableExecution(journal *AgentExecutionJournal, userID int64, runID string) error {
 	if r == nil || journal == nil || userID <= 0 || strings.TrimSpace(runID) == "" {
 		return errors.New("durable video research execution parameters are invalid")
 	}
@@ -44,7 +44,7 @@ func (r *VideoResearchRunner) SetDurableExecution(journal *AgentExecutionJournal
 	return nil
 }
 
-func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *VideoResearchState, runtime VideoAgentToolRuntime) (bool, error) {
+func (r *VideoAgentLoopRunner) recoverResearchState(ctx context.Context, state *VideoAgentLoopState, runtime VideoAgentToolRuntime) (bool, error) {
 	if r == nil || r.execution == nil || state == nil {
 		return false, nil
 	}
@@ -71,7 +71,7 @@ func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *V
 			}
 			return false, nil
 		}
-		if planStep.Sequence != number*2-1 || planStep.Kind != "plan" || planStep.Action != "select_next_action" || planCall == nil || planCall.CallKind != model.AgentCallKindPlannerLLM || planCall.ToolName != videoResearchPlannerCall {
+		if planStep.Sequence != number*2-1 || planStep.Kind != "plan" || planStep.Action != "select_next_action" || planCall == nil || planCall.CallKind != model.AgentCallKindPlannerLLM || planCall.ToolName != videoAgentLoopPlannerCall {
 			return false, fmt.Errorf("persisted planner record %s is invalid", planID)
 		}
 		_, expectedInputDigest := safePlannerInputSummary(*state, r.registry.Definitions())
@@ -92,7 +92,7 @@ func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *V
 			} else if toolStep != nil {
 				return false, fmt.Errorf("completed planner decision %s has an unexpected tool result", planID)
 			}
-			state.Status = VideoResearchStatusCompleted
+			state.Status = VideoAgentLoopStatusCompleted
 			state.StopReason = firstNonEmpty(decision.StopReason, "goal_satisfied")
 			return true, nil
 		}
@@ -123,6 +123,11 @@ func (r *VideoResearchRunner) recoverResearchState(ctx context.Context, state *V
 			return false, err
 		}
 		applyRecoveredResearchStep(state, number, decision, checkpoint)
+		if state.Answer != "" {
+			state.Status = VideoAgentLoopStatusCompleted
+			state.StopReason = "answer_generated"
+			return true, nil
+		}
 		if decision.Replan {
 			state.ReplanCount++
 			if state.ReplanCount > state.MaxReplans {
@@ -177,15 +182,15 @@ func hasCompletedResearchSequenceAfter(steps []model.AgentStep, sequence int) bo
 	return false
 }
 
-func applyRecoveredResearchStep(state *VideoResearchState, number int, decision VideoResearchDecision, checkpoint durableResearchToolCheckpoint) {
+func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision VideoAgentLoopDecision, checkpoint durableResearchToolCheckpoint) {
 	observation := checkpoint.Observation
 	state.CurrentStep++
-	state.Steps = append(state.Steps, VideoResearchStep{
-		Number: number, Action: decision, Status: VideoResearchStepCompleted,
+	state.Steps = append(state.Steps, VideoAgentLoopStep{
+		Number: number, Action: decision, Status: VideoAgentLoopStepCompleted,
 		Trace: checkpoint.Result.Step, Observation: &observation,
 	})
 	state.Observations = append(state.Observations, observation)
-	state.Evidence = mergeVideoResearchEvidence(state.Evidence, observation.NewEvidence)
+	state.Evidence = mergeVideoAgentLoopEvidence(state.Evidence, observation.NewEvidence)
 	state.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
 	if observation.Answer != "" {
 		state.Answer = observation.Answer
@@ -193,11 +198,11 @@ func applyRecoveredResearchStep(state *VideoResearchState, number int, decision 
 	}
 }
 
-func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state VideoResearchState, runtime VideoAgentToolRuntime) (VideoResearchDecision, bool, error) {
+func (r *VideoAgentLoopRunner) nextResearchDecision(ctx context.Context, state VideoAgentLoopState, runtime VideoAgentToolRuntime) (VideoAgentLoopDecision, bool, error) {
 	if r.execution == nil {
-		decision, err := r.planner.NextDecision(ctx, state, r.registry.Definitions())
+		decision, err := r.chooseDecision(ctx, state, r.registry.Definitions())
 		if err != nil {
-			return VideoResearchDecision{}, false, err
+			return VideoAgentLoopDecision{}, false, err
 		}
 		decision, err = r.validatedResearchDecision(state, runtime.TaskID, decision)
 		if err != nil {
@@ -213,13 +218,13 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 	plannerContextChars := plannerContextChars(state, definitions)
 	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
-		Kind: "plan", Action: "select_next_action", DigestAction: videoResearchPlannerCall,
+		Kind: "plan", Action: "select_next_action", DigestAction: videoAgentLoopPlannerCall,
 		SafeReason: "select the next allow-listed action", InputSummary: inputSummary, ArgumentsDigest: inputDigest,
-		ToolName: videoResearchPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
+		ToolName: videoAgentLoopPlannerCall, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true,
 		LLMCall: true, ContextChars: plannerContextChars, EstimatedPromptTokens: plannerContextChars / 4,
 		FailureCode: "planner_failure",
 	}, func() (AgentJournalResult, error) {
-		decision, usage, planErr := callVideoResearchPlanner(ctx, r.planner, state, definitions)
+		decision, usage, planErr := r.chooseDecisionWithUsage(ctx, state, definitions)
 		if planErr == nil {
 			decision, planErr = r.validatedResearchDecision(state, runtime.TaskID, decision)
 			if planErr != nil {
@@ -232,31 +237,31 @@ func (r *VideoResearchRunner) nextResearchDecision(ctx context.Context, state Vi
 		}, planErr
 	})
 	if err != nil {
-		return VideoResearchDecision{}, false, err
+		return VideoAgentLoopDecision{}, false, err
 	}
 	if journalResult.BudgetExhausted {
-		return VideoResearchDecision{}, true, nil
+		return VideoAgentLoopDecision{}, true, nil
 	}
 	var stored durableResearchDecision
 	if err := json.Unmarshal(journalResult.Checkpoint, &stored); err != nil {
-		return VideoResearchDecision{}, false, fmt.Errorf("decode persisted planner decision: %w", err)
+		return VideoAgentLoopDecision{}, false, fmt.Errorf("decode persisted planner decision: %w", err)
 	}
 	decision, err := r.validatedResearchDecision(state, runtime.TaskID, stored.toDecision())
 	if err != nil {
-		return VideoResearchDecision{}, false, fmt.Errorf("validate persisted planner decision: %w", err)
+		return VideoAgentLoopDecision{}, false, fmt.Errorf("validate persisted planner decision: %w", err)
 	}
 	return decision, false, nil
 }
 
-func callVideoResearchPlanner(ctx context.Context, planner VideoResearchPlanner, state VideoResearchState, tools []VideoAgentToolDefinition) (VideoResearchDecision, VideoResearchPlannerCallUsage, error) {
-	if observed, ok := planner.(VideoResearchPlannerWithUsage); ok {
+func callVideoAgentLoopPlanner(ctx context.Context, planner VideoAgentLoopPlanner, state VideoAgentLoopState, tools []VideoAgentToolDefinition) (VideoAgentLoopDecision, VideoAgentLoopPlannerCallUsage, error) {
+	if observed, ok := planner.(VideoAgentLoopPlannerWithUsage); ok {
 		return observed.NextDecisionWithUsage(ctx, state, tools)
 	}
 	decision, err := planner.NextDecision(ctx, state, tools)
-	return decision, VideoResearchPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}, err
+	return decision, VideoAgentLoopPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}, err
 }
 
-func safePlannerInputSummary(state VideoResearchState, tools []VideoAgentToolDefinition) (string, string) {
+func safePlannerInputSummary(state VideoAgentLoopState, tools []VideoAgentToolDefinition) (string, string) {
 	toolNames := make([]string, 0, len(tools))
 	for _, definition := range tools {
 		toolNames = append(toolNames, definition.Name)
@@ -271,18 +276,18 @@ func safePlannerInputSummary(state VideoResearchState, tools []VideoAgentToolDef
 	return string(summary), inputDigest
 }
 
-func plannerContextChars(state VideoResearchState, tools []VideoAgentToolDefinition) int64 {
+func plannerContextChars(state VideoAgentLoopState, tools []VideoAgentToolDefinition) int64 {
 	stateJSON, _ := json.Marshal(state)
 	toolsJSON, _ := json.Marshal(tools)
 	content := fmt.Sprintf("你是 VidLens 的视频研究计划器。%s%s", string(toolsJSON), string(stateJSON))
 	return int64(len([]rune(content)))
 }
 
-func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state VideoResearchState, runtime VideoAgentToolRuntime, decision VideoResearchDecision) (VideoAgentToolResult, VideoResearchObservation, bool, error) {
+func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state VideoAgentLoopState, runtime VideoAgentToolRuntime, decision VideoAgentLoopDecision) (VideoAgentToolResult, VideoAgentLoopObservation, bool, error) {
 	if r.execution == nil {
 		result, err := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
 		if err != nil {
-			return result, VideoResearchObservation{}, false, err
+			return result, VideoAgentLoopObservation{}, false, err
 		}
 		observation, err := r.observeResearchTool(state, runtime.TaskID, result)
 		return result, observation, false, err
@@ -293,7 +298,7 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 	inputSummary := safeResearchArgumentsSummary(decision.Tool, decision.Arguments)
 	argsDigest := digestAgentValue(string(decision.Arguments))
 	contextChars := researchToolContextChars(decision.Tool, decision.Arguments)
-	usage := VideoResearchPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}
+	usage := VideoAgentLoopPlannerCallUsage{ContextChars: contextChars, UsageSource: model.AgentCallUsageUnknown}
 	journalResult, err := execution.journal.Execute(ctx, AgentJournalStep{
 		UserID: execution.userID, RunID: execution.runID, StepID: stepID, Sequence: sequence,
 		Kind: videoAgentStepKind(decision.Tool), Action: decision.Tool, SafeReason: safeToolReason(decision.Tool),
@@ -303,7 +308,7 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 		ContextChars: contextChars, EstimatedPromptTokens: contextChars / 4, FailureCode: "tool_failure",
 	}, func() (AgentJournalResult, error) {
 		result, toolErr := r.registry.Execute(ctx, decision.Tool, VideoAgentToolRequest{Runtime: runtime, Arguments: decision.Arguments})
-		var observation VideoResearchObservation
+		var observation VideoAgentLoopObservation
 		if toolErr == nil {
 			observation, toolErr = r.observeResearchTool(state, runtime.TaskID, result)
 		}
@@ -314,56 +319,56 @@ func (r *VideoResearchRunner) executeResearchTool(ctx context.Context, state Vid
 		}, toolErr
 	})
 	if err != nil {
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, err
+		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
 	}
 	if journalResult.BudgetExhausted {
-		return VideoAgentToolResult{}, VideoResearchObservation{}, true, nil
+		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, true, nil
 	}
 	var stored durableResearchToolCheckpoint
 	if err := json.Unmarshal(journalResult.Checkpoint, &stored); err != nil {
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, fmt.Errorf("decode persisted tool checkpoint: %w", err)
+		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, fmt.Errorf("decode persisted tool checkpoint: %w", err)
 	}
 	if stored.Result.Step.Tool != decision.Tool || stored.Observation.Tool != decision.Tool {
-		return VideoAgentToolResult{}, VideoResearchObservation{}, false, errors.New("persisted tool checkpoint does not match the validated action")
+		return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, errors.New("persisted tool checkpoint does not match the validated action")
 	}
 	return stored.Result, stored.Observation, false, nil
 }
 
-func (r *VideoResearchRunner) validatedResearchDecision(state VideoResearchState, taskID int64, decision VideoResearchDecision) (VideoResearchDecision, error) {
+func (r *VideoAgentLoopRunner) validatedResearchDecision(state VideoAgentLoopState, taskID int64, decision VideoAgentLoopDecision) (VideoAgentLoopDecision, error) {
 	if err := r.validateDecision(state, decision); err != nil {
-		return VideoResearchDecision{}, err
+		return VideoAgentLoopDecision{}, err
 	}
 	if decision.Tool == VideoAgentToolBuildCitedAnswer {
 		canonical, err := canonicalizeResearchAnswerArguments(state.Evidence, taskID, decision.Arguments)
 		if err != nil {
-			return VideoResearchDecision{}, err
+			return VideoAgentLoopDecision{}, err
 		}
 		decision.Arguments = canonical
 	}
 	return decision, nil
 }
 
-func (r *VideoResearchRunner) observeResearchTool(state VideoResearchState, taskID int64, result VideoAgentToolResult) (VideoResearchObservation, error) {
+func (r *VideoAgentLoopRunner) observeResearchTool(state VideoAgentLoopState, taskID int64, result VideoAgentToolResult) (VideoAgentLoopObservation, error) {
 	observation, err := r.observer.Observe(state, result)
 	if err != nil {
-		return VideoResearchObservation{}, err
+		return VideoAgentLoopObservation{}, err
 	}
 	if err := validateObservedResearchEvidence(taskID, observation.NewEvidence); err != nil {
-		return VideoResearchObservation{}, err
+		return VideoAgentLoopObservation{}, err
 	}
 	return observation, nil
 }
 
-func durableResearchDecisionFrom(decision VideoResearchDecision) durableResearchDecision {
+func durableResearchDecisionFrom(decision VideoAgentLoopDecision) durableResearchDecision {
 	return durableResearchDecision{Done: decision.Done, Tool: decision.Tool, Arguments: append(json.RawMessage(nil), decision.Arguments...), Replan: decision.Replan, StopReason: decision.StopReason}
 }
 
-func (d durableResearchDecision) toDecision() VideoResearchDecision {
+func (d durableResearchDecision) toDecision() VideoAgentLoopDecision {
 	reason := "select the persisted allow-listed action"
 	if d.Done {
 		reason = ""
 	}
-	return VideoResearchDecision{Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
+	return VideoAgentLoopDecision{Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
 }
 
 func safeResearchArgumentsSummary(tool string, arguments json.RawMessage) string {
@@ -379,16 +384,6 @@ func safeResearchArgumentsSummary(tool string, arguments json.RawMessage) string
 		if json.Unmarshal(arguments, &input) == nil {
 			summary["chunk_index"], summary["radius"] = input.ChunkIndex, input.Radius
 		}
-	case VideoAgentToolSummarizeSegments:
-		var input summarizeSegmentsToolArguments
-		if json.Unmarshal(arguments, &input) == nil {
-			summary["question_digest"], summary["segment_count"] = "sha256:"+digestAgentValue(input.Question), len(input.Segments)
-		}
-	case VideoAgentToolCompareSegments:
-		var input compareSegmentsToolArguments
-		if json.Unmarshal(arguments, &input) == nil {
-			summary["question_digest"], summary["group_count"] = "sha256:"+digestAgentValue(input.Question), len(input.Groups)
-		}
 	case VideoAgentToolBuildCitedAnswer:
 		var input buildCitedAnswerToolArguments
 		if json.Unmarshal(arguments, &input) == nil {
@@ -399,7 +394,7 @@ func safeResearchArgumentsSummary(tool string, arguments json.RawMessage) string
 	return string(encoded)
 }
 
-func researchObservationEvidenceRefs(observation VideoResearchObservation) string {
+func researchObservationEvidenceRefs(observation VideoAgentLoopObservation) string {
 	refs := make([]string, 0, len(observation.NewEvidence))
 	for _, item := range observation.NewEvidence {
 		if item.EvidenceID != "" {
@@ -433,11 +428,11 @@ func firstPositive(values ...int64) int64 {
 	return 0
 }
 
-func usageContextSource(usage VideoResearchPlannerCallUsage) string {
+func usageContextSource(usage VideoAgentLoopPlannerCallUsage) string {
 	return usageSourceForContext(usage.ContextChars)
 }
 
-func usageMetrics(usage VideoResearchPlannerCallUsage) string {
+func usageMetrics(usage VideoAgentLoopPlannerCallUsage) string {
 	metrics := map[string]any{"cost_usage_source": model.AgentCallUsageUnknown}
 	if usage.ContextChars > 0 {
 		metrics["context_chars"] = usage.ContextChars
@@ -453,7 +448,7 @@ func usageMetrics(usage VideoResearchPlannerCallUsage) string {
 	return string(encoded)
 }
 
-func mergeAgentUsageMetrics(raw string, usage VideoResearchPlannerCallUsage, contextChars int64) string {
+func mergeAgentUsageMetrics(raw string, usage VideoAgentLoopPlannerCallUsage, contextChars int64) string {
 	metrics := map[string]any{}
 	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &metrics) != nil || metrics == nil {
 		metrics = map[string]any{}
@@ -472,4 +467,30 @@ func mergeAgentUsageMetrics(raw string, usage VideoResearchPlannerCallUsage, con
 	}
 	encoded, _ := json.Marshal(metrics)
 	return string(encoded)
+}
+
+// Reserve the last tool slot for one final answer, including explicit evidence gaps.
+func (r *VideoAgentLoopRunner) chooseDecision(ctx context.Context, state VideoAgentLoopState, definitions []VideoAgentToolDefinition) (VideoAgentLoopDecision, error) {
+	d, _, err := r.chooseDecisionWithUsage(ctx, state, definitions)
+	return d, err
+}
+func (r *VideoAgentLoopRunner) chooseDecisionWithUsage(ctx context.Context, state VideoAgentLoopState, definitions []VideoAgentToolDefinition) (VideoAgentLoopDecision, VideoAgentLoopPlannerCallUsage, error) {
+	if err := ctx.Err(); err != nil {
+		return VideoAgentLoopDecision{}, VideoAgentLoopPlannerCallUsage{}, err
+	}
+	var d VideoAgentLoopDecision
+	var u VideoAgentLoopPlannerCallUsage
+	var err error
+	_, finalToolErr := r.registry.Lookup(VideoAgentToolBuildCitedAnswer)
+	if finalToolErr != nil || state.CurrentStep < state.MaxSteps-1 {
+		d, u, err = callVideoAgentLoopPlanner(ctx, r.planner, state, definitions)
+	}
+	if finalToolErr == nil && err == nil && (state.CurrentStep >= state.MaxSteps-1 || d.Done || (d.Replan && state.ReplanCount >= state.MaxReplans)) {
+		args, encodeErr := json.Marshal(buildCitedAnswerToolArguments{Question: state.Goal, Intermediate: "基于已有证据回答；明确说明未确认的信息与视觉限制。", Citations: state.Evidence})
+		if encodeErr != nil {
+			return d, u, encodeErr
+		}
+		d = VideoAgentLoopDecision{Tool: VideoAgentToolBuildCitedAnswer, Reason: "deliver available evidence and gaps", Arguments: args}
+	}
+	return d, u, err
 }

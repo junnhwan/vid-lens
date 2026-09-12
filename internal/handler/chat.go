@@ -15,55 +15,6 @@ import (
 type ChatHandler struct {
 	chatSvc   *service.ChatService
 	execution conversationExecutor
-	ledgerSvc *service.EvidenceLedgerService
-}
-
-func (h *ChatHandler) SetEvidenceLedgerService(ledger *service.EvidenceLedgerService) {
-	if h != nil {
-		h.ledgerSvc = ledger
-	}
-}
-
-func (h *ChatHandler) GetEvidenceLedger(c *gin.Context) {
-	if h == nil || h.ledgerSvc == nil {
-		response.InternalError(c, "证据账本服务不可用")
-		return
-	}
-	view, err := h.ledgerSvc.GetRun(c.Request.Context(), middleware.GetUserID(c), c.Param("run_id"))
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if view == nil {
-		response.Forbidden(c, "无权访问此证据账本或账本不存在")
-		return
-	}
-	response.OK(c, view)
-}
-
-func (h *ChatHandler) CorrectEvidenceClaim(c *gin.Context) {
-	if denyIfDemo(c, "更正 Agent Claim") {
-		return
-	}
-	if h == nil || h.ledgerSvc == nil {
-		response.InternalError(c, "证据账本服务不可用")
-		return
-	}
-	var req service.EvidenceClaimCorrectionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
-		return
-	}
-	claim, err := h.ledgerSvc.CorrectClaim(c.Request.Context(), middleware.GetUserID(c), c.Param("claim_id"), req)
-	if err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-	if claim == nil {
-		response.Forbidden(c, "无权更正此 Claim 或 Claim 不存在")
-		return
-	}
-	response.OK(c, claim)
 }
 
 type conversationExecutor interface {
@@ -170,9 +121,7 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	response.OK(c, result.Payload())
 }
 
-// AskAgent handles the experimental tool-loop video QA path. mode=research
-// opts into the bounded goal-driven runner; the default remains the template
-// baseline for comparison and fallback.
+// AskAgent runs the same Agent loop synchronously, including owner-scoped run replay.
 func (h *ChatHandler) AskAgent(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
@@ -252,8 +201,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	}
 }
 
-// AskAgentStream exposes the bounded, single-video template Agent as SSE.
-// Research mode and knowledge-base scope stay on their existing guarded paths.
+// AskAgentStream exposes the bounded single-video Agent loop as SSE.
 func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)

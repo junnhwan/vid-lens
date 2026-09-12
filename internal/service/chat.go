@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -15,6 +14,7 @@ import (
 type ChatMode string
 
 const (
+	ChatModeNatural        ChatMode = "chat"
 	ChatModeVideoAssistant ChatMode = "video_assistant"
 	ChatModeStrictRAG      ChatMode = "strict_rag"
 )
@@ -137,7 +137,6 @@ type ChatService struct {
 	longTermMemory MemoryProvider
 	memoryCapture  MemoryCapture
 	memoryPolicy   *MemoryPolicyService
-	evidenceLedger *EvidenceLedgerService
 	recorder       ai.CallRecorder
 	cfg            ChatConfig
 	intentRouter   *IntentRouter // docs/architecture/retrieval.md：级联 intent 分类；nil 时降级占位 classifyIntentPlaceholder
@@ -168,36 +167,9 @@ type preparedRAGChat struct {
 	Contexts    []RetrievedChunk
 	Citations   []Citation
 	Messages    []ai.ChatMessage
-	// TaskIDs 是本次检索涉及的 task 范围（docs/architecture/retrieval.md 证据约束重检索复用）。
-	// strict_rag / 单视频 = [session.TaskID]；KnowledgeBase = 集合内 video_ids。
-	TaskIDs []int64
-	// EmbeddingModel 是本次检索用的 embedding 模型名（docs/architecture/retrieval.md 重检索复用）。
-	EmbeddingModel string
-	// EmbeddingClient / ChatClient 供 docs/architecture/retrieval.md 证据约束重检索复用（reretrieveEvidence
-	// 走完整 Retrieve 链路需要 embedding 做 query 向量 + 可能的 query rewrite）。
-	// 生产路径注入真实 client；测试路径用 fake re-retriever 跳过本字段。
-	EmbeddingClient ai.EmbeddingClient
-	ChatClient      ai.ChatClient
 	// Policy 是本次问答的 ExecutionPolicy（docs/architecture/retrieval.md）。docs/architecture/reliability.md 降级在其之上：
 	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
 	Policy ExecutionPolicy
-}
-
-// evidenceIDSet 返回本次检索集的 evidence id 范围（docs/architecture/retrieval.md 证据约束校验用）。
-// 复用 Contexts（检索召回的原始片段，含 EvidenceID）；Citations 是其公开子集，
-// 证据范围以 Contexts 为准——⑨ 校验的是 LLM 引用是否在"本次检索集"内，Contexts
-// 就是本次检索集的事实表示。
-func (p *preparedRAGChat) evidenceIDSet() map[string]struct{} {
-	set := make(map[string]struct{})
-	if p == nil {
-		return set
-	}
-	for _, c := range p.Contexts {
-		if id := strings.TrimSpace(c.EvidenceID); id != "" {
-			set[id] = struct{}{}
-		}
-	}
-	return set
 }
 
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {
@@ -209,7 +181,6 @@ type ChatDependencies struct {
 	LongTermMemory MemoryProvider
 	MemoryCapture  MemoryCapture
 	MemoryPolicy   *MemoryPolicyService
-	EvidenceLedger *EvidenceLedgerService
 	Recorder       ai.CallRecorder
 	IntentRouter   *IntentRouter
 }
@@ -224,6 +195,6 @@ func NewChatServiceWithDependencies(repos *repository.Repositories, retriever RA
 	return &ChatService{
 		repos: repos, retriever: retriever, cfg: cfg,
 		memory: dependencies.Memory, longTermMemory: dependencies.LongTermMemory, memoryCapture: dependencies.MemoryCapture, memoryPolicy: dependencies.MemoryPolicy,
-		evidenceLedger: dependencies.EvidenceLedger, recorder: dependencies.Recorder, intentRouter: dependencies.IntentRouter,
+		recorder: dependencies.Recorder, intentRouter: dependencies.IntentRouter,
 	}
 }

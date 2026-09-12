@@ -158,7 +158,6 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		Retrieval:            &retrievalCfg,
 		ModelRerankerFactory: modelRerankerFactory,
 	}
-	evidenceLedgerSvc := service.NewEvidenceLedgerService(deps.repos)
 	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
 	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)
 	memoryPolicySvc := service.NewMemoryPolicyService(deps.repos.Memory, deps.cfg.Memory.Enabled)
@@ -200,8 +199,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	}
 	chatSvc := service.NewChatServiceWithDependencies(deps.repos, deps.ragRetriever, chatConfig, service.ChatDependencies{
 		Memory: service.NewRedisChatMemoryStore(deps.rdb), LongTermMemory: longTermMemory, MemoryCapture: memoryCapture,
-		MemoryPolicy:   memoryPolicySvc,
-		EvidenceLedger: evidenceLedgerSvc, Recorder: aiObserver,
+		MemoryPolicy: memoryPolicySvc,
+		Recorder:     aiObserver,
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
 	})
 
@@ -301,10 +300,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		return profile.VisionModel, nil
 	})
 	videoAgentSvc.SetVisualInvestigator(visualInvestigator)
-	videoAgentSvc.SetEvidenceInspectorVisualVerifier(visionResolver, deps.minioStorage.DownloadToTemp)
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
-	chatHandler.SetEvidenceLedgerService(evidenceLedgerSvc)
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
