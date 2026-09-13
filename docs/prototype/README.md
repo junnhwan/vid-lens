@@ -38,7 +38,7 @@
 | 证据账本 / 人工更正 | `GET /agent/evidence-ledgers/:run_id`、`POST .../claims/:claim_id/corrections`;Claim 状态与 revision 链 |
 | 深入研究 (实验) | `POST .../messages/agent` `mode=research`:受限 Planner 循环 MaxSteps 8 / MaxReplans 2,白名单含 `investigate_visual`(在已定位时间窗内按硬预算读取原始帧) |
 | 证据漏斗 (实验) | `mode=evidence_funnel` 固定八步,Planner 只在有限候选中选择;视觉确认只读已持久化 OCR/视觉 observation |
-| 引用回放 | 引用携带 modality / 毫秒范围 / anchor quote / source refs;`GET /media/task/:id/playback` 与 `/timeline` 支撑跳转和时间轴 |
+| 引用回放 | 引用携带 modality / 毫秒范围 / anchor quote / source refs;`GET /media/task/:id/playback` 返回站内流地址、`GET /media/task/:id/stream` 输出字节(Range 供跳转),`/timeline` 支撑时间轴 |
 | 转写状态机 | 分片进度、worker 并发、重试预算、已完成分片复用(mq.asr_* 配置) |
 
 ## 已知演绎(原型与真实实现的差异)

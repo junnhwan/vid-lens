@@ -205,7 +205,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
 	})
 
-	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools)
+	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools, deps.cfg.JWT)
 	var vectorCleaner service.TaskVectorCleaner
 	if deps.ragStore != nil {
 		vectorCleaner = deps.ragStore

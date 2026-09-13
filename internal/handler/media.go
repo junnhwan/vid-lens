@@ -2,13 +2,16 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/middleware"
+	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
 	"vid-lens/internal/service"
 )
@@ -327,7 +330,9 @@ func (h *MediaHandler) DownloadAudio(c *gin.Context) {
 		return
 	}
 
-	url, err := h.svc.GetPlaybackURL(c.Request.Context(), userID, taskID)
+	// Downloads need a direct storage link: proxying the whole file through the
+	// API only buys a filename the client cannot honour cross-origin anyway.
+	url, err := h.svc.GetDownloadURL(c.Request.Context(), userID, taskID)
 	if err != nil {
 		response.InternalError(c, "获取下载链接失败")
 		return
@@ -354,8 +359,9 @@ func (h *MediaHandler) GetTimeline(c *gin.Context) {
 	response.OK(c, timeline)
 }
 
-// GetPlaybackURL returns a short-lived owner-scoped URL for native video
-// playback. Stable citation data never stores this signed URL.
+// GetPlaybackURL returns the same-origin stream path for native video
+// playback. Stable citation data stores task identity and timestamps, never
+// this credential.
 // GET /api/v1/media/task/:id/playback
 func (h *MediaHandler) GetPlaybackURL(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -370,4 +376,52 @@ func (h *MediaHandler) GetPlaybackURL(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"playback_url": url})
+}
+
+// StreamTaskMedia serves the stored video bytes.
+// GET /api/v1/media/task/:id/stream?token=...
+//
+// The credential arrives as a query parameter because <video> and <img> cannot
+// attach an Authorization header, and http.ServeContent provides the Range
+// handling that seeking depends on. This route is deliberately outside the
+// JWT group so a stale session token in the browser's request headers cannot
+// override the task-scoped credential.
+func (h *MediaHandler) StreamTaskMedia(c *gin.Context) {
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	task, object, contentType, err := h.svc.OpenTaskMedia(c.Request.Context(), taskID, c.Query("token"))
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	defer object.Close()
+
+	info, err := object.Stat()
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	if contentType != "" {
+		c.Header("Content-Type", contentType)
+	}
+	// Private keeps the task-scoped URL out of shared caches; the credential is
+	// valid for hours, so no-store would re-fetch the whole file each visit.
+	c.Header("Cache-Control", "private, max-age=300")
+	// ServeContent handles Range, If-Modified-Since and HEAD from the seekable
+	// object reader, so seeking works without a second code path.
+	http.ServeContent(c.Writer, c.Request, objectNameFor(task), info.LastModified, object)
+}
+
+// objectNameFor gives ServeContent a name with an extension, which it uses to
+// derive Content-Type when the stored metadata does not provide one.
+func objectNameFor(task *model.VideoTask) string {
+	if name := path.Base(strings.TrimSpace(task.FileURL)); name != "." && name != "/" && name != "" {
+		return name
+	}
+	return fmt.Sprintf("task-%d", task.ID)
 }

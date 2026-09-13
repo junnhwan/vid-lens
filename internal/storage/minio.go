@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -14,6 +15,16 @@ import (
 )
 
 const minComposePartSize int64 = 5 * 1024 * 1024
+
+// Object is a seekable, closable handle on one stored object. Serving media
+// needs io.ReadSeeker so the HTTP layer can honor Range requests, plus
+// modification time for validators; callers depend on this interface rather
+// than the SDK type so they stay testable.
+type Object interface {
+	io.ReadSeeker
+	io.Closer
+	Stat() (minio.ObjectInfo, error)
+}
 
 // objectPartOpener 按需打开一个待合并的源对象。
 type objectPartOpener func(context.Context, minio.CopySrcOptions) (io.ReadCloser, error)
@@ -100,23 +111,68 @@ func (s *MinIOStorage) UploadFromPath(ctx context.Context, localPath, objectName
 	return info.Size, nil
 }
 
-// GetPresignedURL 生成预签名下载 URL（5分钟有效）
+// presignedTTL bounds how long a browser-initiated download link stays valid.
+const presignedTTL = 5 * time.Minute
+
+// contentTypeForObject returns the response content type for a known media
+// extension, or "" when the stored object metadata should be used as-is.
+func contentTypeForObject(objectName string) string {
+	switch strings.ToLower(filepath.Ext(objectName)) {
+	case ".mp4":
+		return "video/mp4"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	default:
+		return ""
+	}
+}
+
+// OpenObject returns the object as a seekable reader so callers can serve it
+// with http.ServeContent, which needs io.ReadSeeker plus Stat to honor Range
+// requests. The MinIO endpoint is usually a loopback address only the
+// application can reach, so streaming through the API is the portable way to
+// hand media bytes to a browser.
+func (s *MinIOStorage) OpenObject(ctx context.Context, objectName string) (Object, error) {
+	object, err := s.client.GetObject(ctx, s.bucket, objectName, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("open object %s: %w", objectName, err)
+	}
+	if _, err := object.Stat(); err != nil {
+		_ = object.Close()
+		return nil, fmt.Errorf("stat object %s: %w", objectName, err)
+	}
+	return object, nil
+}
+
+// ObjectContentType reports the content type to serve for an object. The
+// extension wins for the media kinds this application stores: chunked uploads
+// merge parts as application/octet-stream, so stored metadata is not reliable
+// there and a browser needs a real video type to play the response.
+func (s *MinIOStorage) ObjectContentType(ctx context.Context, objectName string) string {
+	if contentType := contentTypeForObject(objectName); contentType != "" {
+		return contentType
+	}
+	info, err := s.client.StatObject(ctx, s.bucket, objectName, minio.StatObjectOptions{})
+	if err == nil {
+		return strings.TrimSpace(info.ContentType)
+	}
+	return ""
+}
+
+// GetPresignedURL signs a URL the browser can hit directly. It only stays
+// usable where the MinIO endpoint is resolvable from the client, so it is for
+// download links that do not traverse the API.
 func (s *MinIOStorage) GetPresignedURL(ctx context.Context, objectName string) (string, error) {
 	reqParams := make(url.Values)
-	if ext := filepath.Ext(objectName); ext != "" {
-		switch ext {
-		case ".mp4":
-			reqParams.Set("response-content-type", "video/mp4")
-		case ".mp3":
-			reqParams.Set("response-content-type", "audio/mpeg")
-		case ".wav":
-			reqParams.Set("response-content-type", "audio/wav")
-		}
+	if contentType := contentTypeForObject(objectName); contentType != "" {
+		reqParams.Set("response-content-type", contentType)
 	}
 
-	presignedURL, err := s.client.PresignedGetObject(ctx, s.bucket, objectName, 5*time.Minute, reqParams)
+	presignedURL, err := s.client.PresignedGetObject(ctx, s.bucket, objectName, presignedTTL, reqParams)
 	if err != nil {
-		return "", fmt.Errorf("生成预签名 URL 失败: %w", err)
+		return "", err
 	}
 	return presignedURL.String(), nil
 }

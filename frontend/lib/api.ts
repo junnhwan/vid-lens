@@ -15,6 +15,25 @@ import { readConversationStream, type ProcessHandlers, type ProgressEvent, type 
 const API_BASE = '/api/v1'
 const TOKEN_KEY = 'vidlens-token'
 
+type PlaybackSource = { playback_url: string }
+
+// 播放地址由后端给的是站内路径(带任务级凭证,后端知道自己的路由前缀),
+// 前端补上 API 前缀才能直接塞进 <video src>。
+function absolutePlaybackUrl(path: string): string {
+  if (!path) return ''
+  return path.startsWith('/') ? `${API_BASE}${path}` : path
+}
+
+// playbackSrc 取可直接播放的地址;后端不可用时返回 null,由播放器走兜底文案。
+export async function playbackSrc(taskId: number): Promise<string | null> {
+  const r = await getTaskPlaybackUrl(taskId)
+  return r?.playback_url ? absolutePlaybackUrl(r.playback_url) : null
+}
+
+function getTaskPlaybackUrl(id: number): Promise<PlaybackSource> {
+  return req<PlaybackSource>(`/media/task/${id}/playback`, 'GET')
+}
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
   return localStorage.getItem(TOKEN_KEY)
@@ -113,7 +132,7 @@ export const api = {
   updateTaskTitle: (id: number, title: string) =>
     req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
   getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),
-  getTaskPlaybackUrl: (id: number) => req<{ playback_url: string }>(`/media/task/${id}/playback`, 'GET'),
+  playbackSrc,
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
   transcribe: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST'),

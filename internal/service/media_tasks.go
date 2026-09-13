@@ -5,13 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 
 	"vid-lens/internal/model"
+	"vid-lens/internal/pkg/jwt"
 	"vid-lens/internal/repository"
+	"vid-lens/internal/storage"
 
 	"gorm.io/gorm"
 )
+
+// errMediaTokenInvalid covers every rejection reason for a playback credential:
+// malformed, expired, wrong task, or wrong owner. The distinction is never
+// surfaced to the caller so probing cannot confirm whether a task exists.
+var errMediaTokenInvalid = errors.New("播放凭证无效或已过期")
 
 // 任务提交、查询、删除和对象访问；不负责具体文件上传。
 // RequestAnalysis 提交 AI 分析。force=true 时允许覆盖已有总结（重新调用模型）。
@@ -262,9 +270,66 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 	return &timeline, nil
 }
 
-// GetPlaybackURL is owner-scoped and short-lived. A citation persists source
-// identity and timestamps, never a signed URL.
+// playbackPathPrefix is the single place that knows the stream route shape.
+// The frontend prefixes it with the API base to build a request path; keeping
+// the two in sync here avoids a second copy of the route string.
+const playbackPathPrefix = "/media/task/"
+
+// GetPlaybackURL returns a same-origin stream path carrying a task-scoped
+// credential. A signed MinIO URL cannot be used here: its host is the storage
+// endpoint (loopback on the server), which no browser can reach.
 func (s *MediaService) GetPlaybackURL(ctx context.Context, userID, taskID int64) (string, error) {
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil {
+		return "", err
+	}
+	if task.UserID != userID {
+		return "", fmt.Errorf("无权访问此任务")
+	}
+	if strings.TrimSpace(task.FileURL) == "" {
+		return "", fmt.Errorf("视频对象不存在")
+	}
+
+	token, err := jwt.GenerateMediaToken(userID, taskID, s.playbackSecret, jwt.MediaTokenTTL)
+	if err != nil {
+		return "", fmt.Errorf("生成播放凭证失败: %w", err)
+	}
+	return fmt.Sprintf("%s%d/stream?token=%s", playbackPathPrefix, taskID, url.QueryEscape(token)), nil
+}
+
+// OpenTaskMedia validates a playback credential and resolves it to the task's
+// stored object. The credential is task-scoped, so a URL shared for one video
+// cannot be replayed against another.
+func (s *MediaService) OpenTaskMedia(ctx context.Context, taskID int64, token string) (*model.VideoTask, storage.Object, string, error) {
+	claims, err := jwt.ParseMediaToken(token, s.playbackSecret)
+	if err != nil {
+		return nil, nil, "", errMediaTokenInvalid
+	}
+	if claims.TaskID != taskID {
+		return nil, nil, "", errMediaTokenInvalid
+	}
+
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil {
+		return nil, nil, "", errMediaTokenInvalid
+	}
+	// Ownership is re-checked against the credential's user, not the request,
+	// so a deleted or reassigned task cannot be read through a stale token.
+	if task.UserID != claims.UserID || strings.TrimSpace(task.FileURL) == "" {
+		return nil, nil, "", errMediaTokenInvalid
+	}
+
+	object, err := s.storage.OpenObject(ctx, task.FileURL)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return task, object, s.storage.ObjectContentType(ctx, task.FileURL), nil
+}
+
+// GetDownloadURL returns a direct storage link for the task media. Callers use
+// this for file downloads, where a same-origin API stream would have to proxy
+// every byte.
+func (s *MediaService) GetDownloadURL(ctx context.Context, userID, taskID int64) (string, error) {
 	task, err := s.repo.Task.FindByID(taskID)
 	if err != nil {
 		return "", err

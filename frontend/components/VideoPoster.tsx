@@ -8,7 +8,7 @@ const urlCache = new Map<number, Promise<string | null>>()
 function playbackFor(taskId: number): Promise<string | null> {
   let hit = urlCache.get(taskId)
   if (!hit) {
-    hit = api.getTaskPlaybackUrl(taskId).then(r => r.playback_url).catch(() => null)
+    hit = api.playbackSrc(taskId).catch(() => null)
     urlCache.set(taskId, hit)
   }
   return hit

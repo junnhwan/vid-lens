@@ -118,6 +118,12 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.GET("/download-audio/:id", handlers.media.DownloadAudio)
 			}
 		}
+
+		// Media bytes carry their own task-scoped credential in the query
+		// string because browser media elements cannot send Authorization.
+		// Registering outside the JWT group keeps a stale session token in the
+		// request headers from overriding that credential.
+		api.GET("/media/task/:id/stream", handlers.media.StreamTaskMedia)
 	}
 
 	r.GET("/health", livenessHandler()) // 保留旧路径兼容已有监控

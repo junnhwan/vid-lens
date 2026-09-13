@@ -184,12 +184,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       const [tl, idx, playback] = await Promise.all([
         detail.has_transcription ? api.getTimeline(taskId).catch(() => null) : Promise.resolve(null),
         api.getRagIndex(taskId).catch(() => null),
-        api.getTaskPlaybackUrl(taskId).catch(() => null),
+        api.playbackSrc(taskId).catch(() => null),
       ])
       if (!active) return
       setTimeline(tl)
       setIndex(idx)
-      setPlaybackUrl(playback?.playback_url || null)
+      setPlaybackUrl(playback)
     })()
     return () => { active = false }
   }, [taskId])
@@ -244,17 +244,18 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     window.setTimeout(() => setHeadSnap(false), 280)
   }, [])
 
-  // 播放签名 URL 只有 5 分钟有效期,过期后重取一次并原位恢复
+  // 播放地址现在是站内路径 + 任务级凭证,不再因 5 分钟签名到期而失效;
+  // 这里仅在加载失败时重取一次,用于凭证过期或对象稍后才可用的情形。
   const refreshPlaybackUrl = useCallback(async () => {
     try {
-      const playback = await api.getTaskPlaybackUrl(taskId)
-      if (playback?.playback_url) {
-        setPlaybackUrl(playback.playback_url)
-        return playback.playback_url
+      const src = await api.playbackSrc(taskId)
+      if (src) {
+        setPlaybackUrl(src)
+        return src
       }
     } catch { /* 保持失败态 */ }
     return null
-  }, [taskId])
+  }, [taskId, setPlaybackUrl])
 
   const liveIndex = transcriptRows.findIndex(
     a => playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1),

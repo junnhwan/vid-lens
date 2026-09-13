@@ -49,19 +49,20 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
       if (!active) return
       setTask(detail)
       setLoading(false)
-      const playback = await api.getTaskPlaybackUrl(taskId).catch(() => null)
-      if (active && playback?.playback_url) setPlaybackUrl(playback.playback_url)
+      const playback = await api.playbackSrc(taskId).catch(() => null)
+      if (active && playback) setPlaybackUrl(playback)
     })()
     return () => { active = false }
   }, [taskId])
 
-  // 签名播放 URL 只有 5 分钟有效期:播放器加载失败时重取一次
+  // 播放地址为站内路径 + 任务级凭证,不再有 5 分钟签名到期问题;
+  // 加载失败时重取一次,覆盖凭证过期或对象临时不可用。
   const refreshPlaybackUrl = async () => {
     try {
-      const playback = await api.getTaskPlaybackUrl(taskId)
-      if (playback?.playback_url) {
-        setPlaybackUrl(playback.playback_url)
-        return playback.playback_url
+      const src = await api.playbackSrc(taskId)
+      if (src) {
+        setPlaybackUrl(src)
+        return src
       }
     } catch { /* 保持失败态 */ }
     return null
