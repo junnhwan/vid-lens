@@ -149,6 +149,7 @@ func (s *AIProfileService) List(userID int64) ([]AIProfileResponse, error) {
 
 // ListMasked 只暴露配置身份与模型名，隐藏 base_url / endpoint / provider / key。
 // 用于 DEMO 账号：陌生人登录后只能看到名字和模型，拿不到任何服务细节。
+// 维度与视觉模型名属于能力描述而非接入细节,照常返回,否则演示页会显示成 0 维 / 未配置。
 func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error) {
 	profiles, err := s.repo.ListByUserID(userID)
 	if err != nil {
@@ -163,6 +164,8 @@ func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error)
 			LLMModel:       p.LLMModel,
 			ASRModel:       p.ASRModel,
 			EmbeddingModel: p.EmbeddingModel,
+			EmbeddingDim:   p.EmbeddingDim,
+			VisionModel:    p.VisionModel,
 			IsDefault:      p.IsDefault,
 			Source:         "user",
 			ReadOnly:       true,

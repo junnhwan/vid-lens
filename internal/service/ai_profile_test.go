@@ -192,6 +192,49 @@ func TestAIProfileServiceTestSavedProfileByIDDecryptsAndCallsTester(t *testing.T
 	}
 }
 
+func TestAIProfileServiceListMaskedKeepsCapabilityFieldsHidesEndpoints(t *testing.T) {
+	svc, _, _ := newAIProfileServiceForTest(t)
+	req := validAIProfileRequest()
+	req.VisionProvider = "openai_compatible"
+	req.VisionBaseURL = "https://vision.example.com/v1"
+	req.VisionAPIKey = "sk-vision-secret"
+	req.VisionModel = "vision-model"
+	if _, err := svc.Create(7, req); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	profiles, err := svc.ListMasked(7)
+	if err != nil {
+		t.Fatalf("ListMasked() error = %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("ListMasked() returned %d profiles, want 1", len(profiles))
+	}
+	got := profiles[0]
+	if got.EmbeddingDim != 1536 || got.VisionModel != "vision-model" {
+		t.Fatalf("masked profile lost capability fields: %+v", got)
+	}
+	if got.EmbeddingModel != "text-embedding-3-small" || got.LLMModel != "chat-model" {
+		t.Fatalf("masked profile lost model names: %+v", got)
+	}
+	if !got.ReadOnly {
+		t.Fatal("masked profile must be read-only")
+	}
+	for label, value := range map[string]string{
+		"llm_base_url":        got.LLMBaseURL,
+		"asr_base_url":        got.ASRBaseURL,
+		"embedding_endpoint":  got.EmbeddingEndpoint,
+		"vision_base_url":     got.VisionBaseURL,
+		"llm_api_key_masked":  got.LLMAPIKeyMasked,
+		"asr_api_key_masked":  got.ASRAPIKeyMasked,
+		"vision_api_key_mask": got.VisionAPIKeyMasked,
+	} {
+		if value != "" {
+			t.Fatalf("masked profile leaked %s = %q", label, value)
+		}
+	}
+}
+
 func TestAIProfileServiceFirstProfileBecomesDefaultWhenUnset(t *testing.T) {
 	svc, repos, _ := newAIProfileServiceForTest(t)
 	req := validAIProfileRequest()
