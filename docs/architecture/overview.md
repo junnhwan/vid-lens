@@ -21,14 +21,14 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 - `internal/ai/`：LLM、ASR、Embedding、Rerank、Vision 协议适配及调用治理
 - `internal/observability/`：结构化日志、指标和运行状态观测
 - `frontend/app/`：正式 Next.js 产品路由
-- `frontend/components/chat/`：`ConversationSession`、历史快照适配和聊天展示模块
+- `frontend/components/chat/`：`ConversationSession`、会话快照适配和聊天展示模块
 - `frontend/prototype/`：独立的开发原型 Next workspace，不进入默认 production build
 
 `frontend/go.mod` 仅是 Go 工具链的模块边界：npm 的可复现依赖 `flatted` 自带 `golang/` 示例源码，若没有该边界，安装前端依赖后从仓库根运行 `go test ./...` 会把第三方示例误当成本项目包。该空模块不包含业务 Go 代码，也不参与前端构建。
 
 ## 视频处理链路
 
-当前链路的 ASR 边界、时间轴证据、多模态索引和延迟改造计划见[视频理解管线改造计划](media-understanding-pipeline.md)。该计划以已有 Vision/OCR 和视觉观察为基线，不另建第二套视频事实源。
+当前链路的 ASR 边界、时间轴证据和多模态索引见[视频理解管线](media-understanding-pipeline.md)。系统以 PostgreSQL 中的转写与视觉观察作为视频事实源，不另建第二套视频事实源。
 
 1. 前端上传视频或提交远程视频地址。
 2. API 在 PostgreSQL 创建任务和阶段记录，再把下载、转写、摘要和索引阶段投递到 RabbitMQ。
@@ -40,9 +40,9 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 
 标准问答和显式 Agent 请求都先进入 `ConversationExecution`：它统一 profile/client 准备、模式选择和取消传播，之后分别调用标准聊天或受限 Agent。标准问答由意图路由选择执行策略，再进入检索、排序、回答生成与基础引用清洗。具体阶段见[检索与回答链路](retrieval.md)。
 
-产品只提供 Chat 与自主 Agent。Agent 同步/SSE 接口使用同一 Planner/Tool/Observe 循环，保留工具白名单、预算、视觉工具和长期记忆；独立模板、固定漏斗及 Inspector/Claim 账本已退役。发布通过 run 幂等事务保存，具体见 [Agent 执行](agent-evolution.md)。
+产品只提供 Chat 与自主 Agent。Agent 同步/SSE 接口使用同一 Planner/Tool/Observe 循环，执行范围受工具白名单、预算、视觉工具和长期记忆策略约束；发布通过 run 幂等事务保存，具体见 [Agent 执行](agent-evolution.md)。
 
-前端的正式视频聊天与知识库聊天通过 `useConversationSession` 共用会话加载、发送、取消、消息 patch 和终态处理；SSE chunk 边界由独立 decoder 处理。旧持久快照只在兼容适配器中解析，不能参与实时 trace reducer 或后端执行恢复。兼容字段的 owner 与删除条件见[兼容边界清单](compatibility.md)。
+前端的正式视频聊天与知识库聊天通过 `useConversationSession` 共用会话加载、发送、取消、消息 patch 和终态处理；SSE chunk 边界由独立 decoder 处理。会话快照用于展示，执行恢复由 Run/Step/ToolCall 提供。字段与执行权威边界见[在线协议与执行边界](compatibility.md)。
 
 ## Repository seam 决策
 
@@ -52,7 +52,7 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 
 ## 设计边界
 
-- PostgreSQL 是在线业务数据源，也承载 `video_chunks` 和 pgvector 投影；历史 MySQL 数据源与迁移工具已退役。
+- PostgreSQL 是在线业务数据源，也承载 `video_chunks` 和 pgvector 投影。
 - pgvector 是唯一的向量后端。
 - MinIO 保存视频、音频和其他大对象；Redis 用于限流、配额、缓存和短期协调状态，不承担主要业务事实。
 - RabbitMQ 负责长耗时阶段的异步调度和失败恢复；向量索引是可重建投影，不能替代关系数据中的源事实。

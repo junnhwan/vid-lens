@@ -20,13 +20,13 @@
 
 Chat 使用规则信号区分闲聊、整体总结、普通问题与时间定位，不增加每轮必经的 LLM 分类。单视频上下文包含有限摘要/转写和近期对话，普通问题运行一轮检索管线。空命中可以解释一般知识，但不能声称已确认视频事实或编造引用。
 
-生成后仅清洗内部引用标记、选择候选引用并保存，不再强制重检索或逐句 Inspector 核验。知识库只使用当前授权成员，历史内容仍仅展示，不重新注入模型。
+生成后清洗内部引用标记、选择候选引用并保存。知识库只使用当前授权成员，模型上下文按当前成员范围加载。
 
 ## 时间线定位
 
-`timeline_locate` 使用规则层解析“15:00”“第 15 分钟”或显式区间，并只保留与该范围重叠、且 `time_range_status` 为 `exact/coarse` 的候选 chunk。单点按半开区间包含关系匹配，范围按重叠关系匹配；`unknown` 历史数据不会被当作时间命中。向量后端仍是可重建投影，候选命中后由 PostgreSQL `video_chunks` 回填并校验时间、模态和 source refs，再执行时间过滤。
+`timeline_locate` 使用规则层解析“15:00”“第 15 分钟”或显式区间，并只保留与该范围重叠、且 `time_range_status` 为 `exact/coarse` 的候选 chunk。单点按半开区间包含关系匹配，范围按重叠关系匹配；`unknown` 时间状态不会被当作时间命中。向量后端仍是可重建投影，候选命中后由 PostgreSQL `video_chunks` 回填并校验时间、模态和 source refs，再执行时间过滤。
 
-公开 citation 同时返回 `modality`、毫秒范围、时间状态、source mapping 状态和稳定 source refs。`Source` 仍只表示 vector/keyword/hybrid 召回通道。时间过滤会把候选召回预算临时放大到上限后再筛选，且不执行可能跨越请求范围的 chunk-index 邻接扩展；历史索引若没有可靠映射，结果可为空并触发现有的受控降级。
+公开 citation 同时返回 `modality`、毫秒范围、时间状态、source mapping 状态和稳定 source refs。`Source` 只表示 vector/keyword/hybrid 召回通道。时间过滤会把候选召回预算临时放大到上限后再筛选，且不执行可能跨越请求范围的 chunk-index 邻接扩展；没有可靠映射时结果可为空并触发现有的受控降级。
 
 ## 模态感知融合
 
@@ -36,7 +36,7 @@ Chat 使用规则信号区分闲聊、整体总结、普通问题与时间定位
 
 ## Agent 路径
 
-`agent` 使用 [唯一自主循环](agent-evolution.md)，按问题调用文本或视觉工具。独立 research/funnel 模式已退役，Chat 不进入 Agent 循环。
+`agent` 使用 [唯一自主循环](agent-evolution.md)，按问题调用文本或视觉工具；Chat 保持标准检索与回答链路。
 
 ## 知识库混合检索与测试台
 

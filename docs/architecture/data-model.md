@@ -4,25 +4,24 @@
 
 PostgreSQL 是在线关系数据源，负责保存用户、资产、视频任务、任务阶段、转写、摘要、知识库、聊天会话、Agent 执行状态、Agent 长期记忆、 AI 调用和配额记录。当前在线 schema 由 `internal/model.AllModels()` 定义。
 
-Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张权威表组成。Run 在创建时冻结 owner、session、video scope、goal、脱敏 AI profile、工具白名单、policy 和 budget；Step 以 `(run_id, step_id, attempt)` 唯一，使用 lease token、过期时间和 version CAS 控制接管；ToolCall 同时覆盖普通工具、Planner LLM 和验证动作，保存经过验证的参数 digest、安全输入摘要、调用 digest、输出引用、结果 digest、证据引用、最终引用投影、分级命中/覆盖指标、耗时、token/cost 及 usage 来源和错误终态。Planner 的 token 只能从 provider 实际 usage 或明确标记为 estimated 的估算值写入；没有价格表时 cost 保持未知的零值而不伪造费用。已完成 step 的安全结果 checkpoint 用于 唯一 Agent 循环重建，不包含 provider prompt、Planner 草稿或 Chain-of-Thought。
+Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张权威表组成。Run 在创建时冻结 owner、session、video scope、goal、脱敏 AI profile、工具白名单、policy 和 budget；Step 以 `(run_id, step_id, attempt)` 唯一，使用 lease token、到期时间和 version CAS 控制接管；ToolCall 同时覆盖普通工具、Planner LLM 和验证动作，保存经过验证的参数 digest、安全输入摘要、调用 digest、输出引用、结果 digest、证据引用、最终引用投影、分级命中/覆盖指标、耗时、token/cost 及 usage 来源和错误终态。Planner 的 token 只能从 provider 实际 usage 或明确标记为 estimated 的估算值写入；没有价格表时 cost 保持未知的零值而不伪造费用。已完成 step 的安全结果 checkpoint 用于 Agent 循环重建，不包含 provider prompt、Planner 草稿或 Chain-of-Thought。
 
-过期的只读检索 step 可以由另一个 worker 用 CAS 接管。LLM/视觉等不可安全重放的调用如果在 provider 返回和 PostgreSQL 终态提交之间中断，会进入 `ambiguous` 并 fail-closed；同一 attempt 不会自动再次调用，显式新 attempt 仍受 Run 创建时冻结的 attempt、step、tool、LLM 和 vision 预算限制。`completed`、`failed`、`cancelled`、`budget_exhausted` Run 都是单调终态，普通重试不能覆盖。
+lease 到期的只读检索 step 可以由另一个 worker 用 CAS 接管。LLM/视觉等不可安全重放的调用如果在 provider 返回和 PostgreSQL 终态提交之间中断，会进入 `ambiguous` 并 fail-closed；同一 attempt 不会自动再次调用，显式新 attempt 仍受 Run 创建时冻结的 attempt、step、tool、LLM 和 vision 预算限制。`completed`、`failed`、`cancelled`、`budget_exhausted` Run 都是单调终态，普通重试不能覆盖。
 
-长期记忆以 `agent_memory_items` 保存 owner/scope 下的最新 item 投影，以 `agent_memory_events` 保存创建、冲突、撤回和删除事件。item/event 是权威数据；`agent_memory_embeddings` 是启用 memory 后按需创建的 pgvector 在线语义召回投影，embedding 失败不会回滚关系 item。撤回或删除 item 时会在同一事务中移除对应投影，避免旧向量再次召回。具体权限、召回和治理边界见 [agent-memory.md](agent-memory.md)。
+长期记忆以 `agent_memory_items` 保存 owner/scope 下的最新 item 投影，以 `agent_memory_events` 保存创建、冲突、撤回和删除事件。item/event 是权威数据；`agent_memory_embeddings` 是启用 memory 后按需创建的 pgvector 在线语义召回投影，embedding 失败不会回滚关系 item。撤回或删除 item 时会在同一事务中移除对应投影，避免已撤回内容再次召回。具体权限、召回和治理边界见 [agent-memory.md](agent-memory.md)。
 
-旧 `agent_claims`、`agent_evidence` 和 `agent_claim_evidence` 已从在线迁移注册与仓储装配移除；不执行 DROP。基础引用仍存于聊天快照，视觉观察单独保存，记忆来源限制不变。
+基础引用存于聊天快照，视觉观察单独保存，记忆来源限制不变。在线 API、消费者和 RAG 服务以 PostgreSQL 作为关系数据源。
 
-`legacy_mysql`、`cmd/mysql-to-postgres/` 等历史 MySQL 迁移设施已退役；在线 API、消费者和 RAG 服务只把 PostgreSQL 当作数据源。
 
-任务和各处理阶段分别记录状态。处理租约使用 token、版本和过期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。Agent 恢复只读取上述独立执行表；`chat_messages.retrieval_snapshot` 继续是历史 UI 的兼容派生快照，不能作为执行恢复依据。
+任务和各处理阶段分别记录状态。处理租约使用 token、版本和到期时间做数据库 CAS，使下载、转写、摘要和 RAG 索引能够独立重试，并能在故障后继续处理已完成的部分。Agent 恢复只读取上述独立执行表；`chat_messages.retrieval_snapshot` 是面向会话展示的派生快照，不提供执行恢复依据。
 
-`video_transcription_chunks` 保存每次 ASR observation 的稳定 `segment_key`、segmenter version、实际送入 provider 的 `window_start_ms/window_end_ms`，以及互不重叠的 `core_start_ms/core_end_ms`。当前 `overlap_windows_v1` 使用相邻重叠音频帮助恢复跨硬边界语句；旧 `start_second/end_second` 继续作为现有证据路径的兼容投影，并覆盖产生该行原始文本的完整 window，而不是更窄的 core。path-only 旧分片没有足够 provenance，不能启用文本去重拼接。
+`video_transcription_chunks` 保存每次 ASR observation 的稳定 `segment_key`、segmenter version、实际送入 provider 的 `window_start_ms/window_end_ms`，以及互不重叠的 `core_start_ms/core_end_ms`。`overlap_windows_v1` 使用相邻重叠音频帮助恢复跨硬边界语句；`start_second/end_second` 作为现有证据路径的秒级时间投影，覆盖产生该行原始文本的完整 window，而不是更窄的 core。缺少 provenance 的分片不参与文本去重拼接。
 
-唯一 Agent 直接通过 CreateAgentRunExchange 事务保存最终消息与快照，按 run 去重；成功后才刷新近期历史和触发偏好提取。完成 run 重放复用原 message_id。
+Agent 直接通过 CreateAgentRunExchange 事务保存最终消息与快照，按 run 去重；成功后才刷新近期消息和触发偏好提取。完成 run 重放复用原 message_id。
 
 ## 检索数据
 
-转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容与来源映射的主要事实来源。每行保存 modality、毫秒范围、`exact/coarse/unknown` 时间状态、`mapped/partial/unmapped` 映射状态、稳定 source refs 和 chunker provenance。ASR source ref 优先使用 `segment_key`，视觉 source ref 使用稳定 frame observation ID；`chunk_index` 只表示展示顺序，不能映射 ASR identity。pgvector 是唯一的向量后端，向量投影写入配置的向量表。检索命中必须从关系行回填 provenance，旧行安全降级为 `unknown/unmapped`。
+转写内容按检索粒度写入 `video_chunks`，这是 RAG 内容与来源映射的主要事实来源。每行保存 modality、毫秒范围、`exact/coarse/unknown` 时间状态、`mapped/partial/unmapped` 映射状态、稳定 source refs 和 chunker provenance。ASR source ref 优先使用 `segment_key`，视觉 source ref 使用稳定 frame observation ID；`chunk_index` 只表示展示顺序，不能映射 ASR identity。pgvector 是唯一的向量后端，向量投影写入配置的向量表。检索命中必须从关系行回填 provenance；缺少完整来源映射的行安全降级为 `unknown/unmapped`。
 
 向量索引属于可重建投影，用于相似度检索和对账，不能替代 `video_chunks` 等关系数据中的源事实。对应的模型定义位于 [`internal/model/`](../../internal/model/)，向量适配器位于 [`internal/vector/`](../../internal/vector/)。
 
@@ -33,6 +32,5 @@ Agent 执行状态由 `agent_runs`、`agent_steps` 和 `agent_tool_calls` 三张
 - Redis：限流、配额、缓存和短期协调状态
 - PostgreSQL：业务状态、转写内容、聊天记录、检索事实和审计数据
 
-`kafka_message_failures` 是在线 schema 中仍在使用的 poison 消息隔离表，但表名沿用了历史 Kafka 命名；当前消息传输使用 RabbitMQ，不应根据表名推断实际消息中间件。
 
 外部对象和向量投影清理必须具备幂等性；数据库中的任务状态负责记录清理意图和最终处理结果。
