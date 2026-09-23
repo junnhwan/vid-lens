@@ -23,13 +23,15 @@ const defaultPGVectorTable = "vidlens_rag_vectors"
 var pgVectorIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type PGVectorConfig struct {
-	Host            string
-	Port            int
-	Username        string
-	Password        string
-	Database        string
-	SSLMode         string
-	TableName       string
+	Host      string
+	Port      int
+	Username  string
+	Password  string
+	Database  string
+	SSLMode   string
+	TableName string
+	// Dim remains the configured default for callers that need a fallback.
+	// The storage column itself is unbounded so profiles can use their own dimensions.
 	Dim             int
 	MaxOpenConns    int
 	MaxIdleConns    int
@@ -64,7 +66,6 @@ func (c PGVectorConfig) DSN() (string, error) {
 type PGVectorStore struct {
 	db    *sql.DB
 	table string
-	dim   int
 }
 
 func NewPGVectorStore(ctx context.Context, cfg PGVectorConfig) (*PGVectorStore, error) {
@@ -117,7 +118,7 @@ func NewPGVectorStoreWithDB(db *sql.DB, cfg PGVectorConfig) (*PGVectorStore, err
 }
 
 func newPGVectorStore(db *sql.DB, cfg PGVectorConfig) *PGVectorStore {
-	return &PGVectorStore{db: db, table: quotePGVectorIdentifier(cfg.TableName), dim: cfg.Dim}
+	return &PGVectorStore{db: db, table: quotePGVectorIdentifier(cfg.TableName)}
 }
 
 func (c *PGVectorConfig) normalize() error {
@@ -162,11 +163,15 @@ CREATE TABLE IF NOT EXISTS %s (
     embedding_model TEXT NOT NULL,
     content TEXT NOT NULL,
     embedding_dim INTEGER NOT NULL,
-    embedding vector(%d) NOT NULL,
+    embedding vector NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)`, s.table, s.dim)
+)
+`, s.table)
 	if _, err := s.db.ExecContext(ctx, createTable); err != nil {
+		return err
+	}
+	if err := s.ensureUnboundedEmbeddingColumn(ctx); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, fmt.Sprintf(
@@ -174,6 +179,31 @@ CREATE TABLE IF NOT EXISTS %s (
 		strings.Trim(s.table, `"`), s.table,
 	))
 	return err
+}
+
+// ensureUnboundedEmbeddingColumn migrates older vector(n) columns without
+// discarding their values. Each row records its own embedding_dim, so searches
+// can safely select only vectors matching the query dimension.
+func (s *PGVectorStore) ensureUnboundedEmbeddingColumn(ctx context.Context) error {
+	var columnType string
+	if err := s.db.QueryRowContext(ctx, `
+SELECT format_type(a.atttypid, a.atttypmod)
+FROM pg_attribute a
+WHERE a.attrelid = to_regclass($1) AND a.attname = 'embedding' AND NOT a.attisdropped`, s.table).Scan(&columnType); err != nil {
+		return fmt.Errorf("inspect pgvector embedding column: %w", err)
+	}
+	if columnType == "vector" {
+		return nil
+	}
+	if !strings.HasPrefix(columnType, "vector(") {
+		return fmt.Errorf("unexpected pgvector embedding column type %q", columnType)
+	}
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`ALTER TABLE %s ALTER COLUMN embedding TYPE vector USING embedding::vector`, s.table,
+	)); err != nil {
+		return fmt.Errorf("migrate pgvector embedding column to flexible dimensions: %w", err)
+	}
+	return nil
 }
 
 func (s *PGVectorStore) UpsertChunks(ctx context.Context, vectors []service.RAGVector) error {
@@ -303,7 +333,7 @@ func (s *PGVectorStore) Search(ctx context.Context, query []float32, req service
 	if s == nil || s.db == nil {
 		return nil, errors.New("postgres vector store is not initialized")
 	}
-	if err := validateEmbedding(query, s.dim); err != nil {
+	if err := validateEmbedding(query, 0); err != nil {
 		return nil, err
 	}
 	taskIDs := normalizeVectorTaskIDs(req.TaskIDs)
@@ -318,7 +348,7 @@ func (s *PGVectorStore) Search(ctx context.Context, query []float32, req service
 		topK = 5
 	}
 	placeholders := make([]string, len(taskIDs))
-	args := make([]any, 0, len(taskIDs)+4)
+	args := make([]any, 0, len(taskIDs)+5)
 	args = append(args, formatPGVector(query), req.UserID)
 	for i, taskID := range taskIDs {
 		placeholders[i] = fmt.Sprintf("$%d", i+3)
@@ -326,14 +356,14 @@ func (s *PGVectorStore) Search(ctx context.Context, query []float32, req service
 	}
 	modelPos := len(taskIDs) + 3
 	limitPos := modelPos + 1
-	args = append(args, req.EmbeddingModel, topK)
+	args = append(args, req.EmbeddingModel, len(query), topK)
 	sqlText := fmt.Sprintf(`
 SELECT vector_id, task_id, chunk_id, chunk_index, content,
        1 - (embedding <=> $1::vector) AS score
 FROM %s
-WHERE user_id = $2 AND task_id IN (%s) AND embedding_model = $%d
+WHERE user_id = $2 AND task_id IN (%s) AND embedding_model = $%d AND embedding_dim = $%d
 ORDER BY embedding <=> $1::vector
-LIMIT $%d`, s.table, strings.Join(placeholders, ","), modelPos, limitPos)
+LIMIT $%d`, s.table, strings.Join(placeholders, ","), modelPos, modelPos+1, limitPos+1)
 	rows, err := s.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
@@ -399,7 +429,7 @@ func (s *PGVectorStore) validateVector(vector service.RAGVector) error {
 	if vector.ChunkID <= 0 {
 		return errors.New("chunk id must reference a persisted relational chunk")
 	}
-	return validateEmbedding(vector.Vector, s.dim)
+	return validateEmbedding(vector.Vector, 0)
 }
 
 func validateEmbedding(vector []float32, expectedDim int) error {

@@ -49,10 +49,6 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return nil, err
 	}
-	if build.expectedDim != s.cfg.EmbeddingDim {
-		return build.fail(ctx, fmt.Errorf("embedding 维度必须等于系统配置 %d，当前配置 %d", s.cfg.EmbeddingDim, build.expectedDim))
-	}
-
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return nil, err
 	}

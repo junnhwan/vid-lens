@@ -63,6 +63,9 @@ func TestPGVectorStoreEnsureSchema(t *testing.T) {
 	defer cleanup()
 	mock.ExpectExec(`CREATE EXTENSION IF NOT EXISTS vector`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(`CREATE TABLE IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT format_type`).
+		WithArgs("\"vidlens_rag_vectors\"").
+		WillReturnRows(sqlmock.NewRows([]string{"format_type"}).AddRow("vector"))
 	mock.ExpectExec(`CREATE INDEX IF NOT EXISTS`).WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := store.EnsureSchema(context.Background()); err != nil {
 		t.Fatalf("EnsureSchema() error = %v", err)
@@ -177,7 +180,7 @@ func TestPGVectorStoreSearchConvertsDistanceToSimilarity(t *testing.T) {
 	store, mock, cleanup := newMockPGStore(t, testPGConfig())
 	defer cleanup()
 	mock.ExpectQuery(`SELECT vector_id`).
-		WithArgs("[1,0,0]", int64(7), int64(8), "embed-model", 3).
+		WithArgs("[1,0,0]", int64(7), int64(8), "embed-model", 3, 3).
 		WillReturnRows(sqlmock.NewRows([]string{"vector_id", "task_id", "chunk_id", "chunk_index", "content", "score"}).
 			AddRow("v-1", int64(8), int64(9), 2, "hello", 0.9).
 			AddRow("v-2", int64(8), int64(10), 3, "below threshold", 0.2))
