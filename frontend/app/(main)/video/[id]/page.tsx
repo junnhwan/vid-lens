@@ -56,7 +56,7 @@ function indexConfirm(index: RAGIndexResult): ConfirmAction {
   const replacing = index.indexed || index.needs_rebuild || index.status === 'needs_rebuild'
   return {
     kind: 'index', title: `${label}？`, confirmLabel: label,
-    body: `建立后，视频问答可按内容含义找到相关转写片段并定位视频位置；只播放视频、查看转写或摘要无需建立索引。系统会将已有转写文字发送给当前配置的向量模型，调用 Embedding 并消耗额度；不会重新转写，也不会修改原视频或转写文字。${replacing ? '现有检索索引将被替换。' : ''}`,
+    body: `建立后，视频问答可按内容含义找到相关片段并定位视频位置；只播放视频、查看转写或摘要无需建立索引。系统会将已有转写文字及已生成的画面文字、画面描述（如有）发送给当前配置的向量模型，调用 Embedding 并消耗额度；不会重新转写，也不会修改原视频或这些文字。${replacing ? '现有检索索引将被替换。' : ''}`,
   }
 }
 
