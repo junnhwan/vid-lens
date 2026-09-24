@@ -77,10 +77,3 @@ export function formatTime(ms?: number): string {
 export function formatTimeRange(startMS?: number, endMS?: number): string {
   return `${formatTime(startMS)} – ${formatTime(endMS)}`
 }
-
-export function modalityLabel(modality?: string): string {
-  if (modality === 'transcript') return '转写'
-  if (modality === 'visual_ocr') return '画面 OCR'
-  if (modality === 'visual_caption') return '画面描述'
-  return modality || ''
-}

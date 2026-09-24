@@ -404,23 +404,6 @@ select.input { cursor: pointer; }
 /* ============================================================
    工作台 (Dashboard)
    ============================================================ */
-.hero-ask {
-  position: relative; overflow: hidden;
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line-strong);
-  background:
-    radial-gradient(90% 140% at 85% -20%, rgba(226, 168, 75, 0.13), transparent 55%),
-    radial-gradient(50% 90% at 8% 110%, rgba(134, 180, 201, 0.07), transparent 60%),
-    var(--bg-1);
-  padding: 30px 34px 26px;
-}
-.hero-ask::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(115deg, transparent 46%, rgba(240, 188, 104, 0.05) 49%, transparent 53%);
-}
-.hero-ask h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-.hero-ask h1 em { font-style: normal; color: var(--acc-strong); }
-.hero-ask .sub { color: var(--tx-2); font-size: 13.5px; margin-top: 6px; }
 .ask-bar {
   margin-top: 18px; display: flex; align-items: center; gap: 10px;
   background: var(--bg-2); border: 1px solid var(--line-strong);
@@ -444,7 +427,6 @@ select.input { cursor: pointer; }
 }
 .ask-send:hover { background: var(--acc-strong); }
 .ask-send:active { transform: scale(0.94); }
-.ask-scope { display: flex; align-items: center; gap: 7px; padding: 0 4px 7px; flex-wrap: wrap; position: relative; }
 
 .suggest-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .suggest {
@@ -680,8 +662,6 @@ select.input { cursor: pointer; }
 .player-card.compact .pp-btn { width: 30px; height: 30px; }
 .player-card.compact .scrub { height: 20px; }
 
-.summary-block { margin-top: 20px; }
-.summary-block .card-pad h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .summary-body { font-family: var(--font-read); font-size: 15.5px; color: var(--tx-1); line-height: 1.85; }
 .summary-body ul { margin: 8px 0 8px 18px; display: grid; gap: 5px; }
 .summary-body b, .summary-body strong { color: var(--tx-1); }
@@ -773,9 +753,6 @@ select.input { cursor: pointer; }
   padding: 0; border: 0; background: none; cursor: pointer;
 }
 .frame-more:hover { color: var(--acc-strong); }
-.frame-card { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: var(--bg-1); }
-.frame-card .fc-time { font-family: var(--font-mono); font-size: 10.5px; color: var(--acc-strong); cursor: pointer; }
-.frame-card .fc-text { font-size: 11.5px; color: var(--tx-2); line-height: 1.55; }
 
 /* 索引状态 */
 .idx-list { display: grid; gap: 0; }
@@ -1116,16 +1093,6 @@ select.input { cursor: pointer; }
 .hit-row .hv { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tx-2); }
 .hit-row .ht { font-family: var(--font-mono); font-size: 10px; color: var(--tx-4); flex: none; }
 
-.funnel-track { display: grid; gap: 5px; }
-.funnel-step { display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--tx-3); padding: 5px 9px; border-radius: 8px; background: var(--bg-2); border: 1px solid transparent; }
-.funnel-step .fn { font-family: var(--font-mono); font-size: 10px; color: var(--tx-4); width: 14px; }
-.funnel-step.active { border-color: var(--acc-line); background: var(--acc-dim); color: var(--acc-strong); }
-.funnel-step.ok { color: var(--tx-2); }
-.funnel-step.ok .fn { color: var(--ok); }
-.funnel-step.err { color: var(--bad); }
-.funnel-step.err .fn { color: var(--bad); }
-.funnel-step .fd { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--tx-4); }
-
 .rail-empty { padding: 30px 10px; text-align: center; color: var(--tx-4); font-size: 12px; }
 
 /* 证据抽屉内容 */
@@ -1139,31 +1106,6 @@ select.input { cursor: pointer; }
 .ev-meta-cell .k { font-size: 10.5px; color: var(--tx-4); letter-spacing: 0.06em; margin-bottom: 3px; }
 .ev-meta-cell .v { font-size: 12px; color: var(--tx-1); font-weight: 600; }
 .ev-meta-cell .v.mono { font-weight: 500; }
-
-.claim-card { border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; background: var(--bg-1); margin-bottom: 10px; }
-.claim-top { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-.claim-text { font-size: 13px; line-height: 1.65; color: var(--tx-1); }
-.claim-evis { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.claim-ev {
-  display: flex; gap: 9px; align-items: baseline;
-  font-size: 11.5px; color: var(--tx-2);
-  padding: 7px 10px; border-radius: 8px; background: var(--bg-2);
-  cursor: pointer; transition: background 0.15s var(--ease);
-}
-.claim-ev:hover { background: var(--bg-3); }
-.claim-ev .eid { font-family: var(--font-mono); font-size: 9.5px; color: var(--tx-4); flex: none; }
-.claim-note { margin-top: 9px; font-size: 11.5px; color: var(--tx-3); display: flex; gap: 6px; align-items: baseline; }
-.inspect-line { margin-top: 9px; font-family: var(--font-mono); font-size: 10px; color: var(--tx-4); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-
-.correction-box { margin-top: 12px; }
-.correction-box textarea {
-  width: 100%; min-height: 64px; resize: vertical;
-  border-radius: 9px; border: 1px solid var(--line-strong);
-  background: var(--bg-0); color: var(--tx-1);
-  font-size: 12.5px; padding: 9px 11px;
-}
-.correction-box textarea:focus { border-color: var(--acc-line); }
-.correction-box textarea:focus:not(:focus-visible) { outline: none; }
 
 /* ============================================================
    知识库
@@ -1191,23 +1133,6 @@ select.input { cursor: pointer; }
 .kb-member-row .nm { flex: 1; min-width: 0; }
 .kb-member-row .nm b { display: block; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb-member-row .nm span { font-size: 11px; color: var(--tx-3); }
-
-/* 范围选择浮层 (工作台) */
-.scope-pop {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: var(--z-pop);
-  min-width: 220px; max-height: 240px; overflow-y: auto;
-  background: var(--bg-2); border: 1px solid var(--line-strong);
-  border-radius: 11px; box-shadow: var(--shadow-2);
-  padding: 6px; display: flex; flex-direction: column; gap: 2px;
-  animation: pop-in 0.2s var(--ease);
-}
-.scope-pop button {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px 10px; border-radius: 8px; font-size: 12.5px; color: var(--tx-2);
-  text-align: left;
-}
-.scope-pop button:hover { background: var(--bg-3); color: var(--tx-1); }
-.scope-pop button.on { color: var(--acc-strong); background: var(--acc-dim); }
 
 /* ============================================================
    设置

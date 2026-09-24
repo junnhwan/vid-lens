@@ -60,14 +60,3 @@ export function CardSkeleton({ count = 4, gridClass = 'video-grid' }: { count?: 
     </div>
   )
 }
-
-/** 列表行骨架（工作台「继续处理/最近会话」等）。 */
-export function RowSkeleton({ count = 3 }: { count?: number }) {
-  return (
-    <div className="card" role="status" aria-label="内容加载中" style={{ display: 'grid', gap: 10, padding: 12 }}>
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="skel" style={{ height: 46 }} />
-      ))}
-    </div>
-  )
-}

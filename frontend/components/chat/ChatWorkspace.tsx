@@ -273,13 +273,13 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
             ) : (
               messages.map((msg, i) => msg.role === 'user'
                 ? (
-                  <div key={i} className="msg msg-user" ref={node => { questionRefs.current[i] = node }}>
+                  <div key={`${session?.id ?? 'new'}-${msg.messageId ?? i}`} className="msg msg-user" ref={node => { questionRefs.current[i] = node }}>
                     <div className="bubble">{msg.content}</div>
                   </div>
                 )
                 : (
                   <AgentMessageView
-                    key={i}
+                    key={`${session?.id ?? 'new'}-${msg.messageId ?? i}`}
                     msg={msg}
                     sessionId={session?.id}
                     fallbackTitle={scopeName}

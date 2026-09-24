@@ -1,18 +1,3 @@
-import { TaskStatus, TaskStatusEnum } from './types'
-
-// 任务状态 → 中文标签
-// status: 0 Pending / 1 Queued / 2 Running / 3 Completed / 4 Failed / 5 Dead
-export function statusLabel(s: TaskStatus): string {
-  switch (s) {
-    case TaskStatusEnum.Pending: return '待处理'
-    case TaskStatusEnum.Queued: return '排队中'
-    case TaskStatusEnum.Running: return '处理中'
-    case TaskStatusEnum.Completed: return '已完成'
-    case TaskStatusEnum.Failed: return '失败'
-    case TaskStatusEnum.Dead: return '已废弃'
-  }
-}
-
 // 播放/转写时钟统一出口: 不足 1h 为 MM:SS(分秒补零), 超过 1h 为 H:MM:SS。
 export function formatClock(ms?: number): string {
   if (!Number.isFinite(ms)) return '--:--'
@@ -90,9 +75,4 @@ export function indexStatusText(indexStatus: string, retrievable: boolean): stri
   if (indexStatus === 'building') return '索引构建中'
   if (indexStatus === 'failed') return '索引失败'
   return indexStatus || '未索引'
-}
-
-export function stripMdPreview(s: string, maxLen = 120): string {
-  const plain = s.replace(/[#*`_>\-]/g, ' ').replace(/\s+/g, ' ').trim()
-  return plain.length > maxLen ? `${plain.slice(0, maxLen)}…` : plain
 }
