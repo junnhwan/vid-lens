@@ -8,10 +8,13 @@ services:
     image: redis:latest
     container_name: vidlens-redis
     ports:
-      - "6379:6379"
+      # Bind loopback only and allow overriding the host port when 6379 is
+      # already taken by another project (VIDLENS_REDIS_PORT).
+      - "127.0.0.1:${VIDLENS_REDIS_PORT:-6379}:6379"
     command: redis-server --appendonly yes
     volumes:
-      - ./data/redis:/data
+      # Override VIDLENS_DATA_ROOT locally to reuse an existing data root.
+      - ${VIDLENS_DATA_ROOT:-./data}/redis:/data
     networks:
       - vidlens-net
 
@@ -22,8 +25,8 @@ services:
     image: minio/minio
     container_name: vidlens-minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
@@ -42,7 +45,7 @@ services:
     image: pgvector/pgvector:pg17
     container_name: vidlens-postgres
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: vidlens
       POSTGRES_PASSWORD: vidlens
@@ -70,8 +73,8 @@ services:
     image: rabbitmq:3.13-management
     container_name: vidlens-rabbitmq
     ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # 管理面（DLQ 重投在此操作）
+      - "127.0.0.1:5672:5672"    # AMQP
+      - "127.0.0.1:15672:15672"  # 管理面（DLQ 重投在此操作）
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
