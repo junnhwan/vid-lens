@@ -33,6 +33,15 @@ func (r *TaskRepository) FindByID(id int64) (*model.VideoTask, error) {
 	return &task, nil
 }
 
+// SetVisualDisabled changes future processing only while the task is idle.
+// The status predicate prevents a setting change from racing a visual branch.
+func (r *TaskRepository) SetVisualDisabled(userID, taskID int64, disabled bool) (bool, error) {
+	result := r.db.Model(&model.VideoTask{}).
+		Where("id = ? AND user_id = ? AND status NOT IN ?", taskID, userID, []int8{model.TaskStatusQueued, model.TaskStatusRunning}).
+		Updates(map[string]interface{}{"visual_disabled": disabled, "updated_at": time.Now()})
+	return result.RowsAffected > 0, result.Error
+}
+
 // FindByIDForUpdate serializes deletion against worker status transitions.
 // SQLite unit tests cannot prove row-lock behavior;
 // TestPostgresForUpdateBlocksConcurrentTransaction verifies it on PostgreSQL.

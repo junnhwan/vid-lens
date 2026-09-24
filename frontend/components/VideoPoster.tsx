@@ -82,7 +82,7 @@ export function VideoStill({
     if (!v || !url) return
     const seek = () => {
       const t = Math.max(0.05, (timeMs || 800) / 1000)
-      try { v.currentTime = Number.isFinite(v.duration) && v.duration > 0 ? Math.min(t, v.duration * 0.2) : t } catch { /* 忽略 */ }
+      try { v.currentTime = Number.isFinite(v.duration) && v.duration > 0 ? Math.min(t, Math.max(0, v.duration - 0.05)) : t } catch { /* 忽略 */ }
       if (onDuration && Number.isFinite(v.duration) && v.duration > 0) onDuration(v.duration * 1000)
     }
     v.addEventListener('loadedmetadata', seek)

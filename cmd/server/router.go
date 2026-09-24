@@ -108,6 +108,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.GET("/list", handlers.media.ListTasks)
 				media.GET("/task/:id", handlers.media.GetTaskDetail)
 				media.GET("/task/:id/transcription-progress", handlers.media.GetTranscriptionProgress)
+				media.PATCH("/task/:id/visual-setting", handlers.media.SetTaskVisualDisabled)
 				media.PATCH("/task/:id", handlers.media.UpdateTaskTitle)
 				media.DELETE("/task/:id", handlers.media.DeleteTask)
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
@@ -125,6 +126,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 		// Registering outside the JWT group keeps a stale session token in the
 		// request headers from overriding that credential.
 		api.GET("/media/task/:id/stream", handlers.media.StreamTaskMedia)
+		api.GET("/media/task/:id/visual-frame/:frame_id", handlers.media.StreamTaskVisualFrame)
 	}
 
 	r.GET("/health", livenessHandler()) // 保留旧路径兼容已有监控

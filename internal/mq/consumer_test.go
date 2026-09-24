@@ -136,6 +136,17 @@ func TestVisualIndexBranchStartsWithoutWaitingForASRAndMemoizesResult(t *testing
 	}
 }
 
+func TestVisualIndexBranchSkipsDisabledTask(t *testing.T) {
+	called := false
+	c := &Consumer{visualIndex: func(context.Context, *model.VideoTask) (int, error) {
+		called = true
+		return 1, nil
+	}}
+	if outcome := c.startVisualIndexBranch(context.Background(), &model.VideoTask{ID: 42, VisualDisabled: true})(); outcome.count != 0 || outcome.err != nil || called {
+		t.Fatalf("disabled task ran visual index: outcome=%+v called=%v", outcome, called)
+	}
+}
+
 func TestASRFailureContinuesToVisualOnlyRAGWhenVisualEvidenceExists(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Now()

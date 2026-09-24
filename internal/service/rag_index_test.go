@@ -574,6 +574,40 @@ func TestRAGIndexServiceGetTaskIndexStatusUsesRAGIndexState(t *testing.T) {
 	}
 }
 
+func TestRAGIndexStatusNeedsRebuildAfterVisualFramesChange(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "99999999999999999999999999999999", Filename: "long.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	finished := time.Now().Add(-time.Hour)
+	index := &model.VideoRAGIndex{
+		UserID: 7, TaskID: task.ID, FileMD5: task.FileMD5, EmbeddingModel: "embed", EmbeddingDim: 3,
+		Status: model.RAGIndexStatusIndexed, BuildVersion: model.CurrentRAGIndexBuildVersion,
+		ChunkerVersion: model.CurrentRAGChunkerVersion, SourceMappingVersion: model.CurrentRAGSourceMappingVersion, FinishedAt: &finished,
+	}
+	if err := repos.RAGIndex.Upsert(index); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{{TaskID: task.ID, FrameIndex: 0, TimeMs: 5_760_000, Status: model.VisualFrameStatusCompleted, OCRText: "结尾"}}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{EmbeddingDim: 3})
+	status, err := svc.GetTaskIndexStatus(context.Background(), 7, task.ID, ai.Profile{EmbeddingModel: "embed"})
+	if err != nil || status.Status != model.RAGIndexStatusNeedsRebuild {
+		t.Fatalf("new visual evidence must stale old index: status=%+v err=%v", status, err)
+	}
+	finished = time.Now().Add(time.Minute)
+	index.FinishedAt = &finished
+	if err := repos.RAGIndex.Upsert(index); err != nil {
+		t.Fatal(err)
+	}
+	status, err = svc.GetTaskIndexStatus(context.Background(), 7, task.ID, ai.Profile{EmbeddingModel: "embed"})
+	if err != nil || !status.Indexed {
+		t.Fatalf("rebuilt index should be current: status=%+v err=%v", status, err)
+	}
+}
+
 func newRAGIndexTestRepositories(t *testing.T) *repository.Repositories {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

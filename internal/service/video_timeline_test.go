@@ -78,3 +78,14 @@ func TestBuildVideoTimelineDoesNotInventUnknownTime(t *testing.T) {
 		t.Fatalf("atom = %#v, want unknown range", atom)
 	}
 }
+
+func TestVisualCoverageCountsSavedResultsIncludingFramesWithoutText(t *testing.T) {
+	got := visualCoverage([]model.VideoVisualFrame{
+		{TimeMs: 0, ObjectKey: "first.jpg", Status: model.VisualFrameStatusCompleted, OCRText: "标题"},
+		{TimeMs: 60_000, ObjectKey: "middle.jpg", Status: model.VisualFrameStatusSkipped},
+		{TimeMs: 5_760_000, ObjectKey: "last.jpg", Status: model.VisualFrameStatusCompleted, VisionCaption: "结尾"},
+	})
+	if got == nil || got.SampledFrames != 3 || got.PreviewFrames != 3 || got.EvidenceFrames != 2 || got.FirstMS != 0 || got.LastMS != 5_760_000 || got.LargestGapMS != 5_700_000 || got.EvidenceFirstMS == nil || *got.EvidenceFirstMS != 0 || got.EvidenceLastMS == nil || *got.EvidenceLastMS != 5_760_000 {
+		t.Fatalf("visual coverage = %+v", got)
+	}
+}

@@ -663,7 +663,7 @@ func (c *Consumer) completeTranscribeWithVisualOnly(ctx context.Context, task *m
 }
 
 func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.VideoTask) func() visualIndexOutcome {
-	if c == nil || c.visualIndex == nil || task == nil {
+	if c == nil || c.visualIndex == nil || task == nil || task.VisualDisabled {
 		return func() visualIndexOutcome { return visualIndexOutcome{} }
 	}
 	result := make(chan visualIndexOutcome, 1)

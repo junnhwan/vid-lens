@@ -2,10 +2,23 @@ package repository
 
 import (
 	"context"
+	"time"
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
 )
+
+func (r *VideoVisualFrameRepository) LatestUpdatedAt(taskID int64) (*time.Time, error) {
+	var frame model.VideoVisualFrame
+	err := r.db.Where("task_id = ?", taskID).Order("updated_at DESC").First(&frame).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &frame.UpdatedAt, nil
+}
 
 func (r *VideoVisualFrameRepository) FindForUser(ctx context.Context, userID, taskID, frameID int64) (*model.VideoVisualFrame, error) {
 	var row model.VideoVisualFrame

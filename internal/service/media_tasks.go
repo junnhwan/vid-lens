@@ -160,6 +160,19 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	return nil
 }
 
+// SetTaskVisualDisabled controls whether future transcribe runs extract frames.
+// Existing frame rows, object images, and RAG projections are preserved.
+func (s *MediaService) SetTaskVisualDisabled(ctx context.Context, userID, taskID int64, disabled bool) (*model.VideoTask, error) {
+	updated, err := s.repo.Task.SetVisualDisabled(userID, taskID, disabled)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return nil, fmt.Errorf("视频不存在或正在处理，请等待任务结束后再修改画面证据设置")
+	}
+	return s.GetTaskDetail(ctx, userID, taskID)
+}
+
 // GetTaskDetail 获取任务详情
 func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) (*model.VideoTask, error) {
 	task, err := s.repo.Task.FindByIDWithDetail(taskID)
@@ -312,6 +325,7 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 		return nil, fmt.Errorf("读取视觉时间线失败: %w", err)
 	}
 	timeline := BuildVideoTimeline(taskID, transcriptRows, frames)
+	timeline.VisualCoverage = visualCoverage(frames)
 	timeline.Title = task.Title
 	if strings.TrimSpace(timeline.Title) == "" {
 		timeline.Title = task.Filename
@@ -373,6 +387,24 @@ func (s *MediaService) OpenTaskMedia(ctx context.Context, taskID int64, token st
 		return nil, nil, "", err
 	}
 	return task, object, s.storage.ObjectContentType(ctx, task.FileURL), nil
+}
+
+// OpenTaskVisualFrame resolves a saved frame through its task-scoped media
+// credential. The browser never receives a storage object key as a URL.
+func (s *MediaService) OpenTaskVisualFrame(ctx context.Context, taskID, frameID int64, token string) (storage.Object, error) {
+	claims, err := jwt.ParseMediaToken(token, s.playbackSecret)
+	if err != nil || claims.TaskID != taskID {
+		return nil, errMediaTokenInvalid
+	}
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil || task.UserID != claims.UserID {
+		return nil, errMediaTokenInvalid
+	}
+	frame, err := s.repo.VisualFrame.FindForUser(ctx, claims.UserID, taskID, frameID)
+	if err != nil || frame == nil || strings.TrimSpace(frame.ObjectKey) == "" {
+		return nil, errMediaTokenInvalid
+	}
+	return s.storage.OpenObject(ctx, frame.ObjectKey)
 }
 
 // GetDownloadURL returns a direct storage link for the task media. Callers use

@@ -191,7 +191,19 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 		return &RAGIndexResult{TaskID: taskID, Status: "queued", EmbeddingModel: modelName, BuildPhase: "queued"}, nil
 	}
 	if index != nil {
-		if index.Status == model.RAGIndexStatusIndexed && (index.BuildVersion != model.CurrentRAGIndexBuildVersion || index.ChunkerVersion != s.cfg.ChunkerVersion || index.SourceMappingVersion != model.CurrentRAGSourceMappingVersion) {
+		visualChanged := false
+		if index.Status == model.RAGIndexStatusIndexed && s.repos.VisualFrame != nil {
+			latest, latestErr := s.repos.VisualFrame.LatestUpdatedAt(taskID)
+			if latestErr != nil {
+				return nil, latestErr
+			}
+			builtAt := index.UpdatedAt
+			if index.FinishedAt != nil {
+				builtAt = *index.FinishedAt
+			}
+			visualChanged = latest != nil && latest.After(builtAt)
+		}
+		if index.Status == model.RAGIndexStatusIndexed && (visualChanged || index.BuildVersion != model.CurrentRAGIndexBuildVersion || index.ChunkerVersion != s.cfg.ChunkerVersion || index.SourceMappingVersion != model.CurrentRAGSourceMappingVersion) {
 			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true, ProgressAt: &index.UpdatedAt}, nil
 		}
 		return &RAGIndexResult{

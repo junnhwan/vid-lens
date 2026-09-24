@@ -23,6 +23,7 @@ type stubObjectStore struct {
 	body        []byte
 	contentType string
 	opened      int
+	openedKey   string
 }
 
 func (s *stubObjectStore) DeleteObject(context.Context, string) error { return nil }
@@ -47,12 +48,43 @@ func (s *stubObjectStore) GetPresignedURL(context.Context, string) (string, erro
 
 func (s *stubObjectStore) ObjectContentType(context.Context, string) string { return s.contentType }
 
-func (s *stubObjectStore) OpenObject(context.Context, string) (storage.Object, error) {
+func (s *stubObjectStore) OpenObject(_ context.Context, key string) (storage.Object, error) {
 	s.opened++
+	s.openedKey = key
 	return &stubObject{
 		Reader:     bytes.NewReader(s.body),
 		objectInfo: minio.ObjectInfo{Size: int64(len(s.body))},
 	}, nil
+}
+
+func TestOpenTaskVisualFrameUsesSavedFrameAndTaskCredential(t *testing.T) {
+	svc, store, task := newPlaybackTestService(t)
+	frame := model.VideoVisualFrame{TaskID: task.ID, FrameIndex: 0, TimeMs: 90_000, ObjectKey: "visual-frames/task/frame-90000ms.jpg", Status: model.VisualFrameStatusCompleted}
+	if err := svc.repo.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{frame}); err != nil {
+		t.Fatalf("save visual frame: %v", err)
+	}
+	stored, err := svc.repo.VisualFrame.ListByTaskID(task.ID)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("read visual frame: %v, %#v", err, stored)
+	}
+	path, err := svc.GetPlaybackURL(context.Background(), task.UserID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := path[strings.Index(path, "token=")+len("token="):]
+	object, err := svc.OpenTaskVisualFrame(context.Background(), task.ID, stored[0].ID, token)
+	if err != nil {
+		t.Fatalf("OpenTaskVisualFrame: %v", err)
+	}
+	object.Close()
+	if store.openedKey != frame.ObjectKey {
+		t.Fatalf("opened %q, want saved frame %q", store.openedKey, frame.ObjectKey)
+	}
+	store.opened = 0
+	otherToken, _ := jwt.GenerateMediaToken(99, task.ID, mediaTestSecret, time.Hour)
+	if _, err := svc.OpenTaskVisualFrame(context.Background(), task.ID, stored[0].ID, otherToken); err == nil || store.opened != 0 {
+		t.Fatalf("another owner's token should be rejected before storage: err=%v opens=%d", err, store.opened)
+	}
 }
 
 type stubObject struct {

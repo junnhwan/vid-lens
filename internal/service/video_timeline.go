@@ -23,9 +23,60 @@ type TimelineAtom struct {
 }
 
 type VideoTimeline struct {
-	TaskID int64          `json:"task_id"`
-	Title  string         `json:"title,omitempty"`
-	Atoms  []TimelineAtom `json:"atoms"`
+	TaskID         int64           `json:"task_id"`
+	Title          string          `json:"title,omitempty"`
+	Atoms          []TimelineAtom  `json:"atoms"`
+	VisualCoverage *VisualCoverage `json:"visual_coverage,omitempty"`
+}
+
+// VisualCoverage reports persisted extraction results, including frames with
+// no readable OCR/caption. It is not a percentage or an expected-work count.
+type VisualCoverage struct {
+	SampledFrames   int    `json:"sampled_frames"`
+	PreviewFrames   int    `json:"preview_frames"`
+	EvidenceFrames  int    `json:"evidence_frames"`
+	FirstMS         int64  `json:"first_ms"`
+	LastMS          int64  `json:"last_ms"`
+	LargestGapMS    int64  `json:"largest_gap_ms"`
+	EvidenceFirstMS *int64 `json:"evidence_first_ms,omitempty"`
+	EvidenceLastMS  *int64 `json:"evidence_last_ms,omitempty"`
+}
+
+func visualCoverage(frames []model.VideoVisualFrame) *VisualCoverage {
+	if len(frames) == 0 {
+		return nil
+	}
+	times := make([]int64, 0, len(frames))
+	coverage := &VisualCoverage{SampledFrames: len(frames)}
+	for _, frame := range frames {
+		if frame.TimeMs >= 0 {
+			times = append(times, frame.TimeMs)
+		}
+		if strings.TrimSpace(frame.ObjectKey) != "" {
+			coverage.PreviewFrames++
+		}
+		if frame.Status == model.VisualFrameStatusCompleted && (strings.TrimSpace(frame.OCRText) != "" || strings.TrimSpace(frame.VisionCaption) != "") {
+			coverage.EvidenceFrames++
+			if coverage.EvidenceFirstMS == nil || frame.TimeMs < *coverage.EvidenceFirstMS {
+				first := frame.TimeMs
+				coverage.EvidenceFirstMS = &first
+			}
+			if coverage.EvidenceLastMS == nil || frame.TimeMs > *coverage.EvidenceLastMS {
+				last := frame.TimeMs
+				coverage.EvidenceLastMS = &last
+			}
+		}
+	}
+	if len(times) > 0 {
+		sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+		coverage.FirstMS, coverage.LastMS = times[0], times[len(times)-1]
+		for i := 1; i < len(times); i++ {
+			if gap := times[i] - times[i-1]; gap > coverage.LargestGapMS {
+				coverage.LargestGapMS = gap
+			}
+		}
+	}
+	return coverage
 }
 
 // BuildVideoTimeline projects the existing ASR window and visual-frame rows

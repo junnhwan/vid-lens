@@ -34,6 +34,7 @@ interface VideoPlayerProps {
   fallbackText?: string
   /** 播放头变化回调(≈4Hz 节流),供时间轴联动 */
   onPlayhead?: (ms: number, playing: boolean) => void
+  onDuration?: (ms: number) => void
   /** 播放源加载失败时调用(签名 URL 过期后重新获取);返回新 URL 则原位恢复播放,返回 null 判定为不可用 */
   onNeedRefresh?: () => Promise<string | null>
   className?: string
@@ -42,7 +43,7 @@ interface VideoPlayerProps {
 const PLAYHEAD_NOTIFY_MS = 250
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
-  function VideoPlayer({ initialTimeMs, src, title, compact, fallbackText, onPlayhead, onNeedRefresh, className }, ref) {
+  function VideoPlayer({ initialTimeMs, src, title, compact, fallbackText, onPlayhead, onDuration, onNeedRefresh, className }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null)
     const initialSeekApplied = useRef(false)
     const fillRef = useRef<HTMLDivElement | null>(null)
@@ -54,6 +55,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const lastNotifyRef = useRef(0)
     const onPlayheadRef = useRef(onPlayhead)
     onPlayheadRef.current = onPlayhead
+    const onDurationRef = useRef(onDuration)
+    onDurationRef.current = onDuration
 
     const [durationMs, setDurationMs] = useState(0)
     const [playing, setPlaying] = useState(false)
@@ -199,7 +202,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               preload="metadata"
               onLoadedMetadata={e => {
                 const d = e.currentTarget.duration
-                if (Number.isFinite(d)) setDurationMs(d * 1000)
+                if (Number.isFinite(d)) {
+                  setDurationMs(d * 1000)
+                  onDurationRef.current?.(d * 1000)
+                }
                 if (!initialSeekApplied.current && initialTimeMs !== undefined && Number.isFinite(initialTimeMs) && initialTimeMs >= 0) {
                   e.currentTarget.currentTime = Math.min(initialTimeMs / 1000, Number.isFinite(d) ? Math.max(0,d - .01) : initialTimeMs / 1000)
                   initialSeekApplied.current = true

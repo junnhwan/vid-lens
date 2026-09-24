@@ -16,6 +16,21 @@ type investigatorVisionClient struct {
 	response string
 }
 
+func TestVisualInvestigatorSkipsDisabledVideoBeforeDownloading(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "video.mp4", FileURL: "videos/video.mp4", VisualDisabled: true}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	inv := NewVisualInvestigator(repos, nil, "ffmpeg")
+	called := false
+	inv.SetVideoDownloader(func(context.Context, string) (string, error) { called = true; return "", nil })
+	_, err := inv.Inspect(context.Background(), InspectRequest{UserID: 7, TaskID: task.ID, Goal: "看图", SeedWindows: []VisualTimeRange{{StartMS: 0, EndMS: 1000}}})
+	if err == nil || called {
+		t.Fatalf("disabled video should reject visual investigation before download: err=%v called=%v", err, called)
+	}
+}
+
 func (c *investigatorVisionClient) CaptionImage(_ context.Context, _, _ string) (string, error) {
 	c.calls++
 	return c.response, nil

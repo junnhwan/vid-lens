@@ -225,6 +225,31 @@ func (h *MediaHandler) GetTaskDetail(c *gin.Context) {
 	response.OK(c, task)
 }
 
+// SetTaskVisualDisabled changes future automatic visual processing for one video.
+func (h *MediaHandler) SetTaskVisualDisabled(c *gin.Context) {
+	if denyIfDemo(c, "修改画面证据设置") {
+		return
+	}
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "视频编号无效")
+		return
+	}
+	var req struct {
+		Disabled *bool `json:"disabled" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Disabled == nil {
+		response.BadRequest(c, "请提供 disabled 布尔值")
+		return
+	}
+	task, err := h.svc.SetTaskVisualDisabled(c.Request.Context(), middleware.GetUserID(c), taskID, *req.Disabled)
+	if err != nil {
+		response.Fail(c, http.StatusConflict, err.Error())
+		return
+	}
+	response.OK(c, task)
+}
+
 // GET /api/v1/media/task/:id/transcription-progress
 func (h *MediaHandler) GetTranscriptionProgress(c *gin.Context) {
 	userID := middleware.GetUserID(c)
@@ -431,6 +456,30 @@ func (h *MediaHandler) StreamTaskMedia(c *gin.Context) {
 	// ServeContent handles Range, If-Modified-Since and HEAD from the seekable
 	// object reader, so seeking works without a second code path.
 	http.ServeContent(c.Writer, c.Request, objectNameFor(task), info.LastModified, object)
+}
+
+// StreamTaskVisualFrame serves the exact saved image for one evidence row.
+func (h *MediaHandler) StreamTaskVisualFrame(c *gin.Context) {
+	taskID, taskErr := strconv.ParseInt(c.Param("id"), 10, 64)
+	frameID, frameErr := strconv.ParseInt(c.Param("frame_id"), 10, 64)
+	if taskErr != nil || frameErr != nil || taskID <= 0 || frameID <= 0 {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	object, err := h.svc.OpenTaskVisualFrame(c.Request.Context(), taskID, frameID, c.Query("token"))
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	defer object.Close()
+	info, err := object.Stat()
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Content-Type", "image/jpeg")
+	c.Header("Cache-Control", "private, max-age=300")
+	http.ServeContent(c.Writer, c.Request, fmt.Sprintf("frame-%d.jpg", frameID), info.LastModified, object)
 }
 
 // objectNameFor gives ServeContent a name with an extension, which it uses to

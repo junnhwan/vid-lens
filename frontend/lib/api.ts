@@ -30,6 +30,14 @@ export async function playbackSrc(taskId: number): Promise<string | null> {
   return r?.playback_url ? absolutePlaybackUrl(r.playback_url) : null
 }
 
+// A saved evidence image is served through a task-scoped media credential.
+// The storage object key is never used as a browser URL.
+export function visualFrameSrc(taskId: number, frameId: number, playbackUrl: string | null): string | null {
+  if (!playbackUrl || !Number.isSafeInteger(frameId) || frameId <= 0) return null
+  const token = new URL(playbackUrl, window.location.origin).searchParams.get('token')
+  return token ? `${API_BASE}/media/task/${taskId}/visual-frame/${frameId}?token=${encodeURIComponent(token)}` : null
+}
+
 function getTaskPlaybackUrl(id: number): Promise<PlaybackSource> {
   return req<PlaybackSource>(`/media/task/${id}/playback`, 'GET')
 }
@@ -129,11 +137,13 @@ export const api = {
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  setTaskVisualDisabled: (id: number, disabled: boolean) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { disabled }),
   getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
   updateTaskTitle: (id: number, title: string) =>
     req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
   getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),
   playbackSrc,
+  visualFrameSrc,
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
   transcribe: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST'),

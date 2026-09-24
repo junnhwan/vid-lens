@@ -166,6 +166,7 @@ export interface VideoTask {
   trace_id: string
   source_type: 'upload' | 'chunked' | 'url'
   source_url?: string
+	visual_disabled: boolean
   retry_count: number
   max_retries: number
   next_retry_at?: string
@@ -343,6 +344,16 @@ export interface VideoTimeline {
   task_id: number
   title?: string
   atoms: TimelineAtom[]
+  visual_coverage?: {
+    sampled_frames: number
+    preview_frames: number
+    evidence_frames: number
+    first_ms: number
+    last_ms: number
+    largest_gap_ms: number
+    evidence_first_ms?: number
+    evidence_last_ms?: number
+  }
 }
 
 export interface AskResult {

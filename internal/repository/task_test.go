@@ -23,6 +23,30 @@ func newTestRepositories(t *testing.T) *Repositories {
 	return NewRepositories(db)
 }
 
+func TestSetVisualDisabledRequiresOwnerAndIdleTask(t *testing.T) {
+	repos := newTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Filename: "video.mp4", Status: model.TaskStatusPending}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repos.Task.SetVisualDisabled(8, task.ID, true); err != nil || changed {
+		t.Fatalf("other owner changed setting: changed=%v err=%v", changed, err)
+	}
+	if changed, err := repos.Task.SetVisualDisabled(7, task.ID, true); err != nil || !changed {
+		t.Fatalf("owner could not change idle task: changed=%v err=%v", changed, err)
+	}
+	current, _ := repos.Task.FindByID(task.ID)
+	if !current.VisualDisabled {
+		t.Fatal("visual choice was not persisted")
+	}
+	if err := repos.Task.UpdateStatus(task.ID, model.TaskStatusRunning, model.TaskStageTranscribing); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := repos.Task.SetVisualDisabled(7, task.ID, false); err != nil || changed {
+		t.Fatalf("running task changed setting: changed=%v err=%v", changed, err)
+	}
+}
+
 func TestVideoAssetCanBackMultipleUserTasksWithSameMD5(t *testing.T) {
 	repos := newTestRepositories(t)
 

@@ -18,7 +18,7 @@ import (
 	"vid-lens/internal/storage"
 )
 
-const visualSamplingVersion = "scene-interval-v2"
+const visualSamplingVersion = "scene-interval-v3"
 
 // VisualIndexConfig controls keyframe sampling and caption cost/quality trade-offs.
 // Business intent: surface on-screen content ASR cannot hear (PPT/board), not every frame.
@@ -119,6 +119,9 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	}
 	if task == nil {
 		return 0, fmt.Errorf("task is nil")
+	}
+	if task.VisualDisabled {
+		return 0, nil
 	}
 	if s.storage == nil {
 		return 0, fmt.Errorf("object storage is unavailable")

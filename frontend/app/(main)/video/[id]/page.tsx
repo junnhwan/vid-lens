@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { api, ApiError } from '@/lib/api'
 import {
   TaskStatusEnum,
@@ -29,8 +30,8 @@ import { VideoStill } from '@/components/VideoPoster'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
-// /timeline 的原子(转写、OCR、画面描述同轨),帧图像无浏览器预览通道,
-// 卡片展示索引时保存的画面观察文本,回放统一 seek 播放器。
+// /timeline 的原子(转写、OCR、画面描述同轨)。画面卡片读取对应已保存帧；
+// 点击卡片仍按该帧时间跳转播放器。
 
 type TabKey = 'tl' | 'vf' | 'idx'
 type ActionKind = 'transcribe' | 'analyze' | 'index' | 'download'
@@ -76,6 +77,7 @@ function indexPhase(index: RAGIndexResult): string {
 
 interface VisualFrameView {
   key: string
+  frameId?: number
   timeMs: number
   endMs: number
   ocr?: string
@@ -105,7 +107,7 @@ function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
     const key = atom.source_refs?.[0]?.stable_id || atom.id
     let view = map.get(key)
     if (!view) {
-      view = { key, timeMs: atom.start_ms, endMs: atom.end_ms, hasOcr: false, hasCaption: false }
+      view = { key, frameId: atom.source_refs?.[0]?.source_row_id, timeMs: atom.start_ms, endMs: atom.end_ms, hasOcr: false, hasCaption: false }
       map.set(key, view)
     }
     view.timeMs = Math.min(view.timeMs, atom.start_ms)
@@ -119,6 +121,13 @@ function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
     }
   }
   return [...map.values()].sort((a, b) => a.timeMs - b.timeMs)
+}
+
+function FramePreview({ src, timeMs }: { src: string | null; timeMs: number }) {
+  const [failed, setFailed] = useState(false)
+  return src && !failed
+    ? <Image src={src} alt={`${formatTime(timeMs)} 的已保存画面帧`} fill sizes="(max-width: 900px) 100vw, 300px" unoptimized onError={() => setFailed(true)} style={{ objectFit: 'cover' }} />
+    : <div className="muted" role="status" style={{ padding: 12, fontSize: 12 }}>帧预览不可用</div>
 }
 
 function FrameRead({ children }: { children: ReactNode }) {
@@ -168,6 +177,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [timeline, setTimeline] = useState<VideoTimeline | null>(null)
   const [index, setIndex] = useState<RAGIndexResult | null>(null)
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
+  const [videoDurationMs, setVideoDurationMs] = useState(0)
+  const [visualSettingBusy, setVisualSettingBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<TabKey>('tl')
@@ -201,6 +212,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     setTimeline(null)
     setIndex(null)
     setPlaybackUrl(null)
+    setVideoDurationMs(0)
     setPlayheadMs(0)
     void (async () => {
       let detail: VideoTask
@@ -217,7 +229,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       prevTransRef.current = detail.has_transcription
       setLoading(false)
       const [tl, idx, playback] = await Promise.all([
-        detail.has_transcription ? api.getTimeline(taskId).catch(() => null) : Promise.resolve(null),
+        api.getTimeline(taskId).catch(() => null),
         api.getRagIndex(taskId).catch(() => null),
         api.playbackSrc(taskId).catch(() => null),
       ])
@@ -385,6 +397,19 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     await runAction(kind, force)
   }
 
+  const setVisualDisabled = async (disabled: boolean) => {
+    if (!task || visualSettingBusy) return
+    setVisualSettingBusy(true)
+    try {
+      setTask(await api.setTaskVisualDisabled(task.id, disabled))
+      toast.success(disabled ? '已关闭此视频后续画面证据生成' : '已开启此视频后续画面证据生成')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : '画面证据设置保存失败')
+    } finally {
+      setVisualSettingBusy(false)
+    }
+  }
+
   if (loading) {
     return <div className="page"><div className="empty"><b>加载中…</b></div></div>
   }
@@ -518,24 +543,32 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   const renderVF = () => {
-    if (frames.length === 0) {
-      return (
-        <div className="empty">
-          <Icon name="eye" size="lg" />
-          <b>没有画面索引</b>
-        </div>
-      )
-    }
+    const coverage = timeline?.visual_coverage
+    const tailUncovered = !!coverage && videoDurationMs > 0 &&
+      coverage.last_ms + Math.max(60_000, coverage.largest_gap_ms * 1.5) < videoDurationMs
+    const evidenceTailUncovered = !!coverage && coverage.evidence_last_ms !== undefined && videoDurationMs > 0 &&
+      coverage.evidence_last_ms + Math.max(60_000, coverage.largest_gap_ms * 1.5) < videoDurationMs
     return (
       <>
-        <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 10 }}>
-          {frames.length} 帧
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
+          <input type="checkbox" checked={!task.visual_disabled} disabled={readOnly || processing || visualSettingBusy} onChange={e => void setVisualDisabled(!e.target.checked)} />
+          后续生成画面证据
+        </label>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          关闭后，下次转写会跳过抽帧、OCR 和画面描述，后续问答也不会按需抽帧；转写与摘要照常进行。已有画面证据和检索索引保留，重建索引仍会纳入已有画面文字。开启后需再次转写才会重新生成，不会立即补做；成功生成的新帧会替换旧视觉记录，索引会提示重建。{processing ? '当前任务结束后可修改。' : ''}
         </p>
+        {coverage ? <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 10 }} role="status">
+          已保存采样帧 {coverage.sampled_frames} 张，其中 {coverage.evidence_frames} 张生成了 OCR 或描述、{coverage.preview_frames} 张有预览。
+          采样时间 {formatTime(coverage.first_ms)}–{formatTime(coverage.last_ms)}{videoDurationMs > 0 ? ` / 视频总长 ${formatTime(videoDurationMs)}` : '；视频总长待加载'}。
+          {coverage.evidence_first_ms !== undefined && coverage.evidence_last_ms !== undefined ? ` 有文字证据的时间范围 ${formatTime(coverage.evidence_first_ms)}–${formatTime(coverage.evidence_last_ms)}。` : ' 尚无可用的 OCR 或描述文字。'}
+          {tailUncovered ? ` 后段尚无采样帧，采样仅到 ${formatTime(coverage.last_ms)}。` : evidenceTailUncovered ? ' 后段采样帧尚未产出文字证据。' : ''}
+        </p> : <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>尚无已保存的画面采样帧。</p>}
+        {frames.length === 0 && <div className="empty"><Icon name="eye" size="lg" /><b>没有画面文字证据</b></div>}
         <div className="frames-list">
           {frames.map(f => (
             <div className="frame-row" key={f.key} onClick={() => seek(f.timeMs)}>
               <div className="frame-still">
-                <VideoStill src={playbackUrl} timeMs={f.timeMs} seed={`${taskId}-${f.key}`} />
+                <FramePreview key={`${f.frameId}-${playbackUrl || ''}`} src={f.frameId ? api.visualFrameSrc(taskId, f.frameId, playbackUrl) : null} timeMs={f.timeMs} />
               </div>
               <div className="frame-copy">
                 <div className="frame-meta">
@@ -650,6 +683,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             src={playbackUrl}
             title={title}
             onPlayhead={ms => setPlayheadMs(ms)}
+            onDuration={setVideoDurationMs}
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
