@@ -9,6 +9,7 @@ import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
+import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 
 export default function KBListPage() {
   const router = useRouter()
@@ -57,29 +58,15 @@ export default function KBListPage() {
       </div>
 
       {loading ? (
-        <div className="card card-pad" style={{ color: 'var(--tx-3)', fontSize: 12.5 }}>加载中…</div>
+        <LoadingBlock variant="card" />
       ) : loadError ? (
-        <div className="card">
-          <div className="empty">
-            <Icon name="alert" size="lg" />
-            <b>{loadError}</b>
-            <button
-              className="btn btn-sm"
-              style={{ marginTop: 10 }}
-              onClick={() => { setLoading(true); setReloadTick(t => t + 1) }}
-            >
-              <Icon name="refresh" size="sm" />重试
-            </button>
-          </div>
-        </div>
+        <ErrorState message={loadError} onRetry={() => { setLoading(true); setReloadTick(t => t + 1) }} />
       ) : kbs.length === 0 ? (
-        <div className="card">
-          <div className="empty">
-            <Icon name="folder" size="lg" />
-            <b>还没有知识库</b>
-            <button className="btn btn-sm btn-primary" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</button>
-          </div>
-        </div>
+        <EmptyState
+          icon="folder"
+          title="还没有知识库"
+          action={<button className="btn btn-sm btn-primary" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</button>}
+        />
       ) : (
         <div className="kb-grid">
           {kbs.map(k => (

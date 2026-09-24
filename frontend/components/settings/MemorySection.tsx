@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import type { MemoryItem, MemoryPreferenceView, User } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import { useToast } from '@/components/Toast'
+import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 
 // 记忆治理(设置页):用户级长期记忆偏好开关 + 已有记忆的撤回/删除。
 // 后端只有一个用户偏好开关(能力开关 × 用户偏好),会话总结异步抽取与召回都由它统一控制;
@@ -133,15 +134,9 @@ export function MemorySection({ user }: { user: User | null }) {
     <>
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>记忆治理</h3>
 
-      {loading && <div className="empty card"><p>正在加载记忆治理…</p></div>}
+      {loading && <LoadingBlock label="正在加载记忆治理…" variant="card" />}
       {!loading && loadError && (
-        <div className="empty card">
-          <Icon name="alert" size="lg" />
-          <b>{loadError}</b>
-          <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => user && void load(user.id)}>
-            <Icon name="refresh" size="sm" />重试
-          </button>
-        </div>
+        <ErrorState message={loadError} onRetry={() => user && void load(user.id)} />
       )}
 
       {!loading && !loadError && pref && (

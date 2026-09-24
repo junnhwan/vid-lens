@@ -6,6 +6,7 @@ import type { VideoTask } from '@/lib/types'
 import { taskCategory, type TaskCategory } from '@/lib/taskStatus'
 import { taskTitle } from '@/lib/format'
 import { VideoCard } from '@/components/VideoCard'
+import { CardSkeleton, EmptyState, ErrorState } from '@/components/ui/AsyncState'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { Icon } from '@/components/ui/Icon'
 
@@ -19,6 +20,7 @@ export default function LibraryPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reloadTick, setReloadTick] = useState(0)
   const [filter, setFilter] = useState<'all' | TaskCategory>('all')
   const [keyword, setKeyword] = useState('')
 
@@ -37,7 +39,7 @@ export default function LibraryPage() {
       }
     })()
     return () => { active = false }
-  }, [uploadRevision])
+  }, [uploadRevision, reloadTick])
 
   const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2)
   useEffect(() => {
@@ -88,16 +90,18 @@ export default function LibraryPage() {
         </div>
       </div>
 
-      {error && <div className="card card-pad" style={{ color: 'var(--bad)' }}>{error}</div>}
+      {error && (
+        <ErrorState message={error} onRetry={() => { setError(''); setLoading(true); setReloadTick(t => t + 1) }} />
+      )}
+
+      {loading && !error && <CardSkeleton count={8} />}
 
       {!error && !loading && tasks.length === 0 && (
-        <div className="card">
-          <div className="empty">
-            <Icon name="video" size="lg" />
-            <b>还没有视频</b>
-            <button className="btn btn-sm btn-primary" onClick={openUpload}><Icon name="upload" size="sm" />上传视频</button>
-          </div>
-        </div>
+        <EmptyState
+          icon="video"
+          title="还没有视频"
+          action={<button className="btn btn-sm btn-primary" onClick={openUpload}><Icon name="upload" size="sm" />上传视频</button>}
+        />
       )}
 
       {list.length > 0 && (
@@ -107,12 +111,7 @@ export default function LibraryPage() {
       )}
 
       {!error && !loading && tasks.length > 0 && list.length === 0 && (
-        <div className="card">
-          <div className="empty">
-            <Icon name="search" size="lg" />
-            <b>没有匹配的视频</b>
-          </div>
-        </div>
+        <EmptyState icon="search" title="没有匹配的视频" />
       )}
 
       {total > tasks.length && (

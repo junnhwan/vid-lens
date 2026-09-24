@@ -8,6 +8,7 @@ import { useToast } from '@/components/Toast'
 import { ProfileForm } from '@/components/settings/ProfileForm'
 import { exportProfile, parseProfileImport } from '@/lib/profileTransfer'
 import { CapabilityProbe, type ProbeTarget } from '@/components/settings/CapabilityProbe'
+import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 
 // BYOK AI 服务配置:profile 列表(一个 profile 覆盖 llm / asr / embedding / vision 四组能力),
 // 外加 rerank 的真实状态(服务端为确定性 rerank,无 profile 配置项,按"未启用"如实呈现)。
@@ -105,15 +106,9 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
         <div style={{ display: 'flex', gap: 8 }}><button className="btn btn-sm btn-primary" onClick={() => { setEditing(undefined); setEditorOpen(true) }}>确认并编辑</button><button className="btn btn-sm" onClick={() => setImportDraft(null)}>取消导入</button></div>
       </div>}
 
-      {loading && <div className="empty card"><p>正在加载 AI 配置…</p></div>}
+      {loading && <LoadingBlock label="正在加载 AI 配置…" variant="card" />}
       {!loading && loadError && (
-        <div className="empty card">
-          <Icon name="alert" size="lg" />
-          <b>{loadError}</b>
-          <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => void load()}>
-            <Icon name="refresh" size="sm" />重试
-          </button>
-        </div>
+        <ErrorState message={loadError} onRetry={() => void load()} />
       )}
       {!loading && !loadError && profiles.length === 0 && (
         <div className="empty card">

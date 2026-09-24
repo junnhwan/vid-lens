@@ -9,6 +9,7 @@ import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal, Modal } from '@/components/ui/Modal'
+import { LoadingBlock } from '@/components/ui/AsyncState'
 import KBModal from '@/components/KBModal'
 
 export default function KBDetailPage({ params }: { params: { id: string } }) {
@@ -92,7 +93,7 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
   }
 
   if (loading) {
-    return <div className="page"><div className="empty"><b>加载中…</b></div></div>
+    return <div className="page"><LoadingBlock /></div>
   }
   if (loadError || !kb) {
     return (

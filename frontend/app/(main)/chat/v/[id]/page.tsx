@@ -7,6 +7,7 @@ import { taskTitle } from '@/lib/format'
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
 import { Icon } from '@/components/ui/Icon'
+import { LoadingBlock } from '@/components/ui/AsyncState'
 
 // 单视频问答(/chat/v/:id)。本阶段仅快速问答(strict_rag SSE);
 // 播放源签名 URL 供右栏迷你播放器与引用回放使用。
@@ -65,7 +66,7 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
   }
 
   if (loading) {
-    return <div className="page"><div className="empty"><b>加载中…</b></div></div>
+    return <div className="page"><LoadingBlock /></div>
   }
   if (loadError || !task) {
     return (

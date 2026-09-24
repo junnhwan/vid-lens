@@ -15,6 +15,7 @@ import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { EmptyState } from '@/components/ui/AsyncState'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { DrawerVeil } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
@@ -428,12 +429,11 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     {agentRail.steps.map(step => <AgentTraceStepView key={step.id} step={step} />)}
                   </div>
                 ) : (
-                  <div className="rail-empty" style={{ paddingTop: 44 }}>
-                    <Icon name="target" size="lg" />
-                    <p style={{ marginTop: 10 }}>
-                      {agentRail.live ? '等待运行事件…' : '这次运行没有留下执行步骤(可能失败或已停止)。'}
-                    </p>
-                  </div>
+                  <EmptyState
+                    variant="bare"
+                    icon="target"
+                    desc={agentRail.live ? '等待运行事件…' : '这次运行没有留下执行步骤(可能失败或已停止)。'}
+                  />
                 )}
               </>
             ) : (
@@ -448,10 +448,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     {(ragTrace.length > 0 ? ragTrace : lastAssistant?.trace ?? []).map(step => <TraceStepView key={step.id} step={step} />)}
                   </div>
                 ) : (
-                  <div className="rail-empty" style={{ paddingTop: 44 }}>
-                    <Icon name="target" size="lg" />
-                    <p style={{ marginTop: 10 }}>提问后会显示检索过程</p>
-                  </div>
+                  <EmptyState variant="bare" icon="target" desc="提问后会显示检索过程" />
                 )}
               </>
             )}

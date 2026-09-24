@@ -369,6 +369,18 @@ select.input { cursor: pointer; }
 .empty b { color: var(--tx-2); font-size: 15px; font-weight: 600; }
 .empty p { font-size: 14px; max-width: 320px; }
 
+/* 骨架屏 */
+.skel {
+  position: relative; overflow: hidden;
+  background: var(--bg-3); border-radius: var(--r-ctl);
+}
+.skel::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tx-1) 7%, transparent), transparent);
+  animation: skel-shimmer 1.4s var(--ease) infinite;
+}
+@keyframes skel-shimmer { to { transform: translateX(100%); } }
+
 /* 进度条 (分片/任务) */
 .meter { height: 4px; border-radius: 99px; background: var(--bg-3); overflow: hidden; }
 .meter > i { display: block; height: 100%; border-radius: inherit; background: var(--acc); transition: width 0.4s var(--ease); }

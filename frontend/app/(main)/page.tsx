@@ -12,6 +12,7 @@ import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal } from '@/components/ui/Modal'
+import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 
@@ -85,19 +86,7 @@ export default function DashboardPage() {
   if (!loading && loadError) {
     return (
       <div className="page">
-        <div className="card">
-          <div className="empty">
-            <Icon name="alert" size="lg" />
-            <b>{loadError}</b>
-            <button
-              className="btn btn-sm"
-              style={{ marginTop: 10 }}
-              onClick={() => { setLoading(true); setReloadTick(t => t + 1) }}
-            >
-              <Icon name="refresh" size="sm" />重试
-            </button>
-          </div>
-        </div>
+        <ErrorState message={loadError} onRetry={() => { setLoading(true); setReloadTick(t => t + 1) }} />
       </div>
     )
   }
@@ -138,7 +127,7 @@ export default function DashboardPage() {
       )}
 
       {loading && processing.length === 0 && (
-        <div className="card card-pad" style={{ color: 'var(--tx-3)', marginBottom: 8 }}>正在加载…</div>
+        <LoadingBlock label="正在加载…" variant="card" />
       )}
 
       <div className="section-head" style={{ marginTop: processing.length > 0 || loading ? undefined : 0 }}>
@@ -149,13 +138,11 @@ export default function DashboardPage() {
         <div className="video-grid">{tasks.slice(0, 4).map(t => <VideoCard key={t.id} task={t} />)}</div>
       ) : (
         !loading && (
-          <div className="card">
-            <div className="empty">
-              <Icon name="video" size="lg" />
-              <b>还没有视频</b>
-              <button className="btn btn-sm btn-primary" onClick={() => router.push('/library')}>去视频库</button>
-            </div>
-          </div>
+          <EmptyState
+            icon="video"
+            title="还没有视频"
+            action={<button className="btn btn-sm btn-primary" onClick={() => router.push('/library')}>去视频库</button>}
+          />
         )
       )}
 
@@ -182,7 +169,7 @@ export default function DashboardPage() {
             </div>
           )
         }) : (
-          !loading && <div className="empty"><b>还没有会话</b></div>
+          !loading && <EmptyState variant="bare" title="还没有会话" />
         )}
       </div>
       {retrying && (
