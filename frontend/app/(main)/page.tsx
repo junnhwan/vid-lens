@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [reloadTick, setReloadTick] = useState(0)
 
   const [retrying, setRetrying] = useState<VideoTask | null>(null)
 
@@ -32,15 +34,16 @@ export default function DashboardPage() {
     void (async () => {
       const [taskPage, sessionList] = await Promise.all([
         api.listTasks(1, 50).catch(() => null),
-        api.listSessions().catch(() => []),
+        api.listSessions().catch(() => null),
       ])
       if (!active) return
       setTasks(taskPage?.list || [])
-      setSessions(sessionList)
+      setSessions(sessionList || [])
+      setLoadError(taskPage && sessionList ? '' : '数据加载失败,请检查网络或服务状态后重试')
       setLoading(false)
     })()
     return () => { active = false }
-  }, [uploadRevision])
+  }, [uploadRevision, reloadTick])
 
   const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2 || summaryFailureView(t)?.scheduled)
   useEffect(() => {
@@ -77,6 +80,26 @@ export default function DashboardPage() {
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : '重试失败')
     }
+  }
+
+  if (!loading && loadError) {
+    return (
+      <div className="page">
+        <div className="card">
+          <div className="empty">
+            <Icon name="alert" size="lg" />
+            <b>{loadError}</b>
+            <button
+              className="btn btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => { setLoading(true); setReloadTick(t => t + 1) }}
+            >
+              <Icon name="refresh" size="sm" />重试
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

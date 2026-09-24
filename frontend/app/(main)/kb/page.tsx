@@ -17,6 +17,8 @@ export default function KBListPage() {
 
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [reloadTick, setReloadTick] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
@@ -25,11 +27,11 @@ export default function KBListPage() {
   useEffect(() => {
     let active = true
     api.listKBs()
-      .then(list => { if (active) setKbs(list) })
-      .catch(() => { if (active) toast.error('知识库列表加载失败') })
+      .then(list => { if (active) { setKbs(list); setLoadError('') } })
+      .catch(() => { if (active) setLoadError('知识库列表加载失败,请检查网络或服务状态后重试') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [toast])
+  }, [reloadTick])
 
   const create = async () => {
     if (!name.trim()) { toast.info('先给知识库起个名字'); return }
@@ -56,6 +58,20 @@ export default function KBListPage() {
 
       {loading ? (
         <div className="card card-pad" style={{ color: 'var(--tx-3)', fontSize: 12.5 }}>加载中…</div>
+      ) : loadError ? (
+        <div className="card">
+          <div className="empty">
+            <Icon name="alert" size="lg" />
+            <b>{loadError}</b>
+            <button
+              className="btn btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => { setLoading(true); setReloadTick(t => t + 1) }}
+            >
+              <Icon name="refresh" size="sm" />重试
+            </button>
+          </div>
+        </div>
       ) : kbs.length === 0 ? (
         <div className="card">
           <div className="empty">

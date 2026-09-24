@@ -350,7 +350,7 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
       <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 6 }}>
         {purpose === 'embedding' ? '填写完整 Embedding 接口地址，例如 https://api.siliconflow.cn/v1/embeddings；请求直接发送到此地址。' : `填写服务商要求的 API 基础地址，例如硅基流动 https://api.siliconflow.cn/v1；系统会追加 ${purpose === 'asr' ? '/audio/transcriptions' : '/chat/completions'}。不要填写完整接口路径。`}
       </p>
-      {validateModelURL(group.base_url, purpose === 'embedding', group.preset) && <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{validateModelURL(group.base_url, purpose === 'embedding', group.preset)}</p>}
+      {validateModelURL(group.base_url, purpose === 'embedding', group.preset) && <p role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>{validateModelURL(group.base_url, purpose === 'embedding', group.preset)}</p>}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
         <input className="input" type="password" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} />
         <div style={{ display: 'flex', gap: 8 }}>

@@ -182,6 +182,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [visualSettingBusy, setVisualSettingBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [subError, setSubError] = useState('')
+  const [subReloadTick, setSubReloadTick] = useState(0)
   const [tab, setTab] = useState<TabKey>('tl')
   const [seen, setSeen] = useState<Record<TabKey, boolean>>({ tl: true, vf: false, idx: false })
   const openTab = (key: TabKey) => {
@@ -229,6 +231,15 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       setTask(detail)
       prevTransRef.current = detail.has_transcription
       setLoading(false)
+    })()
+    return () => { active = false }
+  }, [taskId])
+
+  // 时间轴/索引失败不再静默成空面板，给出错误态+重试；播放源失败由播放器 fallback 文案提示。
+  useEffect(() => {
+    let active = true
+    setSubError('')
+    void (async () => {
       const [tl, idx, playback] = await Promise.all([
         api.getTimeline(taskId).catch(() => null),
         api.getRagIndex(taskId).catch(() => null),
@@ -238,9 +249,10 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       setTimeline(tl)
       setIndex(idx)
       setPlaybackUrl(playback)
+      if (!tl || !idx) setSubError('时间轴或索引数据加载失败')
     })()
     return () => { active = false }
-  }, [taskId])
+  }, [taskId, subReloadTick])
 
   const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
   const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
@@ -677,6 +689,15 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               </>
             )}
           </div>
+          {subError && (
+            <div className="card card-pad" style={{ marginTop: 10, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ color: 'var(--bad)', display: 'flex' }}><Icon name="alert" /></span>
+              <b style={{ flex: 1, fontSize: 13 }}>{subError}</b>
+              <button className="btn btn-sm" onClick={() => setSubReloadTick(t => t + 1)}>
+                <Icon name="refresh" size="sm" />重试
+              </button>
+            </div>
+          )}
           <VideoPlayer
             key={`${taskId}-${searchParams?.t || '0'}`}
             initialTimeMs={searchParams?.t ? Number(searchParams.t) : undefined}
@@ -688,114 +709,116 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
-          {processing && (
-            <div style={{ marginTop: 12, flex: 'none' }}>
-              <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
-            </div>
-          )}
-          {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
-
-          <div className="ws-actions">
-            {task.has_summary ? (
-              <button className="btn" onClick={() => setSummaryOpen(true)}>
-                <Icon name="file" size="sm" />查看摘要
-              </button>
-            ) : (
-              <button
-                className="btn"
-                disabled={busy !== '' || processing || !task.has_transcription}
-                title={!task.has_transcription ? '转写完成后才能生成摘要' : processing ? `当前${taskStateView(task).text}；等待该任务结束后可生成摘要` : undefined}
-                onClick={() => void runAction('analyze')}
-              >
-                <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : '生成摘要'}
-              </button>
+          <div className="ws-stage-scroll">
+            {processing && (
+              <div style={{ marginTop: 12, flex: 'none' }}>
+                <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
+              </div>
             )}
-            {task.has_transcription ? (
-              <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
-                kind: 'transcribe',
-                force: true,
-                title: '重新转写?',
-                body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
-                confirmLabel: '重新转写',
-              })}>
-                <Icon name="refresh" size="sm" />重新转写
-              </button>
-            ) : processing ? (
-              <button className="btn" disabled>
-                <Icon name="activity" size="sm" />等待转写
-              </button>
-            ) : (
-              <button className="btn" disabled={busy !== ''} onClick={() => void runAction('transcribe')}>
-                <Icon name="activity" size="sm" />开始转写
-              </button>
-            )}
-            <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
-              <Icon name="layers" size="sm" />{indexActionLabel(index)}
-            </button>
-            <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
-              <Icon name="download" size="sm" />下载音频
-            </button>
-            <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
-              <Icon name="folder" size="sm" />加入知识库
-            </button>
-            <span style={{ flex: 1 }} />
-            <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
-              <Icon name="message" size="sm" />进入问答
-            </button>
-          </div>
-          <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
-          {((!task.has_summary && task.has_transcription && processing) || (!task.has_summary && task.summary_progress)) && (
-            <div className="ws-action-status">
-              {!task.has_summary && task.has_transcription && processing && (
-                <span className="muted" style={{ fontSize: 12 }} role="status">当前{taskStateView(task).text}，任务结束后可生成摘要</span>
-              )}
-              {!task.has_summary && task.summary_progress && (
-                <span className="muted" style={{ fontSize: 12 }} role="status">
-                  摘要{task.summary_progress.phase === 'merging' ? '合并总结' : '分段处理'}：{task.summary_progress.completed}/{task.summary_progress.total}
-                  {task.summary_progress.current > 0 ? ` · 第 ${task.summary_progress.current} 段${task.summary_progress.end_ms > task.summary_progress.start_ms ? `（${Math.floor(task.summary_progress.start_ms / 1000)}–${Math.ceil(task.summary_progress.end_ms / 1000)} 秒）` : '（时间未记录）'}` : ''}
-                  {task.summary_progress.failed_part ? task.summary_progress.phase === 'merging' ? ` · 第 ${task.summary_progress.failed_part} 组合并失败，完整总结尚未生成` : ` · 第 ${task.summary_progress.failed_part} 段失败，尚未覆盖全片` : ''}
-                </span>
-              )}
-            </div>
-          )}
+            {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
 
-          {failed && (
-            <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'rgba(224,131,115,.35)' }}>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
-                <div style={{ flex: 1 }}>
-                  <b style={{ fontSize: 13 }}>{summaryFailure?.category || (task.status === TaskStatusEnum.Dead ? '任务已废弃' : '处理失败')}</b>
-                  {summaryFailure ? <>
-                    <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.retry}</p>
-                    <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.advice}</p>
-                    <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => {
-                      void navigator.clipboard.writeText(summaryFailure.diagnosticId).then(() => toast.success('诊断编号已复制')).catch(() => toast.error('复制失败，请手动复制编号'))
-                    }}>诊断编号：{summaryFailure.diagnosticId} · 复制</button>
-                  </> : <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>
-                    {task.error_msg || task.last_error_msg || '处理过程中出现错误'}
-                    {task.max_retries > 0 ? ` · 重试 ${task.retry_count}/${task.max_retries}` : ''}
-                  </p>}
-                  {urlJob ? (
-                    <span className="chip chip-mute" style={{ marginTop: 10 }}>URL 任务,请删除后重新添加</span>
-                  ) : !summaryFailure?.scheduled && (
-                    <button
-                      className="btn btn-sm"
-                      style={{ marginTop: 10 }}
-                      disabled={busy !== ''}
-                      onClick={() => setPendingAction({
-                        kind: task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
-                        title: '重新提交任务?',
-                        body: summaryFailure ? `${summaryFailure.advice} 重新提交可能再次消耗模型额度。` : '失败步骤会重新入队,可能再次消耗模型额度。',
-                        confirmLabel: '重试',
-                      })}
-                    >
-                      重试
-                    </button>
-                  )}
+            <div className="ws-actions">
+              {task.has_summary ? (
+                <button className="btn" onClick={() => setSummaryOpen(true)}>
+                  <Icon name="file" size="sm" />查看摘要
+                </button>
+              ) : (
+                <button
+                  className="btn"
+                  disabled={busy !== '' || processing || !task.has_transcription}
+                  title={!task.has_transcription ? '转写完成后才能生成摘要' : processing ? `当前${taskStateView(task).text}；等待该任务结束后可生成摘要` : undefined}
+                  onClick={() => void runAction('analyze')}
+                >
+                  <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : '生成摘要'}
+                </button>
+              )}
+              {task.has_transcription ? (
+                <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
+                  kind: 'transcribe',
+                  force: true,
+                  title: '重新转写?',
+                  body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
+                  confirmLabel: '重新转写',
+                })}>
+                  <Icon name="refresh" size="sm" />重新转写
+                </button>
+              ) : processing ? (
+                <button className="btn" disabled>
+                  <Icon name="activity" size="sm" />等待转写
+                </button>
+              ) : (
+                <button className="btn" disabled={busy !== ''} onClick={() => void runAction('transcribe')}>
+                  <Icon name="activity" size="sm" />开始转写
+                </button>
+              )}
+              <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
+                <Icon name="layers" size="sm" />{indexActionLabel(index)}
+              </button>
+              <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
+                <Icon name="download" size="sm" />下载音频
+              </button>
+              <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
+                <Icon name="folder" size="sm" />加入知识库
+              </button>
+              <span style={{ flex: 1 }} />
+              <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
+                <Icon name="message" size="sm" />进入问答
+              </button>
+            </div>
+            <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
+            {((!task.has_summary && task.has_transcription && processing) || (!task.has_summary && task.summary_progress)) && (
+              <div className="ws-action-status">
+                {!task.has_summary && task.has_transcription && processing && (
+                  <span className="muted" style={{ fontSize: 12 }} role="status">当前{taskStateView(task).text}，任务结束后可生成摘要</span>
+                )}
+                {!task.has_summary && task.summary_progress && (
+                  <span className="muted" style={{ fontSize: 12 }} role="status">
+                    摘要{task.summary_progress.phase === 'merging' ? '合并总结' : '分段处理'}：{task.summary_progress.completed}/{task.summary_progress.total}
+                    {task.summary_progress.current > 0 ? ` · 第 ${task.summary_progress.current} 段${task.summary_progress.end_ms > task.summary_progress.start_ms ? `（${Math.floor(task.summary_progress.start_ms / 1000)}–${Math.ceil(task.summary_progress.end_ms / 1000)} 秒）` : '（时间未记录）'}` : ''}
+                    {task.summary_progress.failed_part ? task.summary_progress.phase === 'merging' ? ` · 第 ${task.summary_progress.failed_part} 组合并失败，完整总结尚未生成` : ` · 第 ${task.summary_progress.failed_part} 段失败，尚未覆盖全片` : ''}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {failed && (
+              <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'rgba(224,131,115,.35)' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
+                  <div style={{ flex: 1 }}>
+                    <b style={{ fontSize: 13 }}>{summaryFailure?.category || (task.status === TaskStatusEnum.Dead ? '任务已废弃' : '处理失败')}</b>
+                    {summaryFailure ? <>
+                      <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.retry}</p>
+                      <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.advice}</p>
+                      <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => {
+                        void navigator.clipboard.writeText(summaryFailure.diagnosticId).then(() => toast.success('诊断编号已复制')).catch(() => toast.error('复制失败，请手动复制编号'))
+                      }}>诊断编号：{summaryFailure.diagnosticId} · 复制</button>
+                    </> : <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>
+                      {task.error_msg || task.last_error_msg || '处理过程中出现错误'}
+                      {task.max_retries > 0 ? ` · 重试 ${task.retry_count}/${task.max_retries}` : ''}
+                    </p>}
+                    {urlJob ? (
+                      <span className="chip chip-mute" style={{ marginTop: 10 }}>URL 任务,请删除后重新添加</span>
+                    ) : !summaryFailure?.scheduled && (
+                      <button
+                        className="btn btn-sm"
+                        style={{ marginTop: 10 }}
+                        disabled={busy !== ''}
+                        onClick={() => setPendingAction({
+                          kind: task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
+                          title: '重新提交任务?',
+                          body: summaryFailure ? `${summaryFailure.advice} 重新提交可能再次消耗模型额度。` : '失败步骤会重新入队,可能再次消耗模型额度。',
+                          confirmLabel: '重试',
+                        })}
+                      >
+                        重试
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="card ws-rail">
