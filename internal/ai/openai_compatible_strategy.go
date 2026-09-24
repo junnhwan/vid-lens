@@ -28,10 +28,7 @@ func (s *OpenAICompatibleStrategy) TranscribeChunks(ctx context.Context, audioPa
 }
 
 func (s *OpenAICompatibleStrategy) Summarize(ctx context.Context, text string) (string, error) {
-	content, err := s.chat.Chat(ctx, []ChatMessage{
-		{Role: "system", Content: defaultSummarySystemPrompt()},
-		{Role: "user", Content: text},
-	})
+	content, err := s.chat.Chat(ctx, summaryMessages(ctx, text))
 	if err != nil {
 		return "", err
 	}

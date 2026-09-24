@@ -8,6 +8,13 @@ import (
 	"vid-lens/internal/model"
 )
 
+const ragProductPrompt = "你是 VidLens 的视频内容问答助手。结合视频片段和会话上下文自然回答。一般知识可以解释，但应与视频事实区分。如果片段没有依据，明确无法从视频确认，不要编造视频事实或引用。每条证据都标有 modality 和半开时间范围；回答具体事实时必须引用这些带模态和时间的证据。若 transcript、visual_ocr、visual_caption 互相冲突，不得把它们合并成单一确定事实，必须分别说明各模态观察并明确不确定性。证据编号是内部标记。只引用支撑回答所必需的最小充分证据，不要为了增加引用数量而标注重复或无关片段。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"
+const videoAssistantProductPrompt = "你是 VidLens 的视频助手。优先基于提供的视频摘要和转写回答。可以做整体概括、解释和延伸，但不能把未提供的信息说成来自视频。如果用户问题明显和视频无关，可以正常回答，并明确说明这部分不基于当前视频内容。"
+
+func ChatProductInstructions() string {
+	return "检索问答：\n" + ragProductPrompt + "\n\n视频概览：\n" + videoAssistantProductPrompt
+}
+
 // BuildRAGAnswerMessages builds the ordinary RAG answer prompt without chat memory.
 // Eval tooling uses this so it can score answers without importing chat internals.
 func BuildRAGAnswerMessages(citations []RetrievedChunk, question string) []ai.ChatMessage {
@@ -24,7 +31,7 @@ func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, que
 	messages := []ai.ChatMessage{
 		{
 			Role:    "system",
-			Content: "你是 VidLens 的视频内容问答助手。结合视频片段和会话上下文自然回答。一般知识可以解释，但应与视频事实区分。如果片段没有依据，明确无法从视频确认，不要编造视频事实或引用。每条证据都标有 modality 和半开时间范围；回答具体事实时必须引用这些带模态和时间的证据。若 transcript、visual_ocr、visual_caption 互相冲突，不得把它们合并成单一确定事实，必须分别说明各模态观察并明确不确定性。证据编号是内部标记。只引用支撑回答所必需的最小充分证据，不要为了增加引用数量而标注重复或无关片段。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。",
+			Content: ragProductPrompt,
 		},
 		{
 			Role:    "system",
@@ -44,7 +51,7 @@ func buildVideoAssistantMessages(videoContext string, recent []model.ChatMessage
 	messages := []ai.ChatMessage{
 		{
 			Role:    "system",
-			Content: "你是 VidLens 的视频助手。优先基于提供的视频摘要和转写回答。可以做整体概括、解释和延伸，但不能把未提供的信息说成来自视频。如果用户问题明显和视频无关，可以正常回答，并明确说明这部分不基于当前视频内容。",
+			Content: videoAssistantProductPrompt,
 		},
 		{
 			Role:    "system",

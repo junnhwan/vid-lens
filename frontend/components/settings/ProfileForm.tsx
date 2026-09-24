@@ -1,12 +1,14 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { AIProfile, AIProfileRequest, ProfilePurpose, AgentBudgetOverride, AgentBudgetOptions } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
 import { useToast } from '@/components/Toast'
 import { ModelCombobox } from '@/components/settings/ModelCombobox'
 import { PROVIDER_PRESETS, matchPreset } from '@/lib/providerPresets'
+import { useShell } from '@/components/shell/AppShell'
+import { CapabilityProbe, type ProbeTarget } from '@/components/settings/CapabilityProbe'
 
 interface GroupDraft {
   provider: string
@@ -28,29 +30,33 @@ function fromProfile(provider: string, baseUrl: string, model: string): GroupDra
   }
 }
 
-export function ProfileForm({ profile, onClose, onSaved }: {
+export function ProfileForm({ profile, imported, onClose, onSaved }: {
   profile?: AIProfile
+  imported?: AIProfileRequest
   onClose: () => void
   onSaved: () => void
 }) {
   const toast = useToast()
+  const { registerLeaveGuard } = useShell()
   const editing = !!profile
-  const [name, setName] = useState(profile?.name || '')
-  const [llm, setLlm] = useState<GroupDraft>(fromProfile(profile?.llm_provider || '', profile?.llm_base_url || '', profile?.llm_model || ''))
-  const [asr, setAsr] = useState<GroupDraft>(fromProfile(profile?.asr_provider || '', profile?.asr_base_url || '', profile?.asr_model || ''))
-  const [embedding, setEmbedding] = useState<GroupDraft>(fromProfile(profile?.embedding_provider || '', profile?.embedding_endpoint || '', profile?.embedding_model || ''))
-  const [embeddingDim, setEmbeddingDim] = useState<string>(profile?.embedding_dim ? String(profile.embedding_dim) : '')
-  const [vision, setVision] = useState<GroupDraft>(fromProfile(profile?.vision_provider || '', profile?.vision_base_url || '', profile?.vision_model || ''))
-  const [visionEnabled, setVisionEnabled] = useState(!!profile?.vision_model)
-  const [isDefault, setIsDefault] = useState(profile?.is_default || false)
+  const [name, setName] = useState(imported?.name || profile?.name || '')
+  const [llm, setLlm] = useState<GroupDraft>(fromProfile(imported?.llm_provider || profile?.llm_provider || '', imported?.llm_base_url || profile?.llm_base_url || '', imported?.llm_model || profile?.llm_model || ''))
+  const [asr, setAsr] = useState<GroupDraft>(fromProfile(imported?.asr_provider || profile?.asr_provider || '', imported?.asr_base_url || profile?.asr_base_url || '', imported?.asr_model || profile?.asr_model || ''))
+  const [embedding, setEmbedding] = useState<GroupDraft>(fromProfile(imported?.embedding_provider || profile?.embedding_provider || '', imported?.embedding_endpoint || profile?.embedding_endpoint || '', imported?.embedding_model || profile?.embedding_model || ''))
+  const [embeddingDim, setEmbeddingDim] = useState<string>(imported?.embedding_dim ? String(imported.embedding_dim) : profile?.embedding_dim ? String(profile.embedding_dim) : '')
+  const [vision, setVision] = useState<GroupDraft>(fromProfile(imported?.vision_provider || profile?.vision_provider || '', imported?.vision_base_url || profile?.vision_base_url || '', imported?.vision_model || profile?.vision_model || ''))
+  const [visionEnabled, setVisionEnabled] = useState(!!(imported?.vision_model || profile?.vision_model))
+  const [isDefault, setIsDefault] = useState(imported?.is_default || profile?.is_default || false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [models, setModels] = useState<Partial<Record<ProfilePurpose, string[]>>>({})
+  const [listStatus, setListStatus] = useState<Partial<Record<ProfilePurpose, string>>>({})
+  useEffect(() => { setListStatus({}) }, [llm, asr, embedding, vision])
   const [probing, setProbing] = useState(false)
   const [budgetOptions, setBudgetOptions] = useState<AgentBudgetOptions | null>(null)
   const [budgetError, setBudgetError] = useState('')
-  const [customBudget, setCustomBudget] = useState(!!profile?.agent_budget)
-  const [budgetDraft, setBudgetDraft] = useState<Partial<Record<keyof AgentBudgetOverride, string>>>(() => Object.fromEntries(Object.entries(profile?.agent_budget || {}).map(([k, v]) => [k, String(v)])))
+  const [customBudget, setCustomBudget] = useState(!!(imported?.agent_budget || profile?.agent_budget))
+  const [budgetDraft, setBudgetDraft] = useState<Partial<Record<keyof AgentBudgetOverride, string>>>(() => Object.fromEntries(Object.entries(imported?.agent_budget || profile?.agent_budget || {}).map(([k, v]) => [k, String(v)])))
   useEffect(() => {
     let live = true
     api.budgetOptions().then(options => { if (live) setBudgetOptions(options) }).catch(() => { if (live) setBudgetError('预算选项加载失败，请重新打开表单重试') })
@@ -61,13 +67,20 @@ export function ProfileForm({ profile, onClose, onSaved }: {
     ['max_input_tokens', '累计输入 Token'], ['max_output_tokens', '累计输出 Token'], ['max_visual_frames', '最多检查帧数'],
   ] as const
 
-  const dirty = useMemo(() => {
-    if (!editing) return !!(name || llm.base_url || llm.api_key || llm.model || asr.base_url || embedding.base_url)
-    return true
-  }, [editing, name, llm, asr, embedding])
+  const currentSnapshot = useMemo(() => JSON.stringify({ name, llm, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft }), [name, llm, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft])
+  const initialSnapshot = useRef(currentSnapshot)
+  const saved = useRef(false)
+  const dirty = !!imported || currentSnapshot !== initialSnapshot.current
+
+  useEffect(() => {
+    if (!dirty || saved.current) { registerLeaveGuard(null); return }
+    registerLeaveGuard(() => window.confirm('当前 AI 配置有未保存修改。放弃修改并离开吗？'))
+    return () => registerLeaveGuard(null)
+  }, [dirty, registerLeaveGuard])
 
   const back = () => {
-    if (dirty && !window.confirm('离开后已填写的内容会丢失,确定返回?')) return
+    if (dirty && !window.confirm('当前 AI 配置有未保存修改。放弃修改并返回吗？')) return
+    registerLeaveGuard(null)
     onClose()
   }
 
@@ -80,6 +93,10 @@ export function ProfileForm({ profile, onClose, onSaved }: {
     if (!llm.provider.trim() || !llm.base_url.trim() || !llm.model.trim()) { setErr('LLM 配置不完整'); return null }
     if (!asr.provider.trim() || !asr.base_url.trim() || !asr.model.trim()) { setErr('ASR 配置不完整'); return null }
     if (!embedding.provider.trim() || !embedding.base_url.trim() || !embedding.model.trim()) { setErr('embedding 配置不完整'); return null }
+    for (const [label, url, endpoint, preset] of [['对话', llm.base_url, false, llm.preset], ['语音识别', asr.base_url, false, asr.preset], ['向量', embedding.base_url, true, embedding.preset], ...(visionEnabled ? [['视觉', vision.base_url, false, vision.preset]] : [])] as [string, string, boolean, string][]) {
+      const problem = validateModelURL(url, endpoint, preset)
+      if (problem) { setErr(`${label}地址：${problem}`); return null }
+    }
     const dim = Number(embeddingDim)
     if (!Number.isFinite(dim) || dim <= 0) { setErr('embedding 维度需为正数:先探测,或手动填写'); return null }
     let agentBudget: AgentBudgetOverride | null = null
@@ -120,6 +137,8 @@ export function ProfileForm({ profile, onClose, onSaved }: {
     try {
       if (editing && profile) await api.updateProfile(profile.id, req)
       else await api.createProfile(req)
+      saved.current = true
+      registerLeaveGuard(null)
       toast.success(editing ? '配置已更新' : '配置已创建')
       onSaved()
       onClose()
@@ -132,17 +151,25 @@ export function ProfileForm({ profile, onClose, onSaved }: {
 
   const pullModels = async (purpose: ProfilePurpose, group: GroupDraft) => {
     if (!group.base_url.trim() || (!group.api_key.trim() && !profileId)) {
-      toast.info('先填 Base URL 与 API Key(编辑时留空 Key 用已存密钥)')
+      setListStatus(previous => ({ ...previous, [purpose]: '请先填写地址和 API Key；编辑已保存配置可留空密钥' }))
       return
     }
+    setListStatus(previous => ({ ...previous, [purpose]: '正在读取模型列表…' }))
     try {
       const res = await api.listModels(group.base_url.trim(), group.api_key.trim(), profileId, purpose)
       setModels(prev => ({ ...prev, [purpose]: res.models || [] }))
-      toast.success(`拉取到 ${res.models?.length ?? 0} 个模型`)
+      setListStatus(previous => ({ ...previous, [purpose]: `列表接口返回 ${res.models?.length ?? 0} 个模型；尚未验证所选模型能否调用` }))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '拉取模型列表失败')
+      setListStatus(previous => ({ ...previous, [purpose]: e instanceof ApiError ? e.message : '拉取模型列表失败' }))
     }
   }
+
+  const probeTargets: ProbeTarget[] = [
+    { purpose: 'llm', label: '对话', model: llm.model, base_url: llm.base_url, api_key: llm.api_key, provider: llm.provider, profile_id: profileId },
+    { purpose: 'asr', label: '语音识别', model: asr.model, base_url: asr.base_url, api_key: asr.api_key, provider: asr.provider, profile_id: profileId },
+    { purpose: 'embedding', label: '向量', model: embedding.model, base_url: embedding.base_url, api_key: embedding.api_key, provider: embedding.provider, profile_id: profileId, embedding_dim: Number(embeddingDim) || undefined },
+    ...(visionEnabled ? [{ purpose: 'vision' as const, label: '视觉', model: vision.model, base_url: vision.base_url, api_key: vision.api_key, provider: vision.provider, profile_id: profileId }] : []),
+  ]
 
   const probeDim = async () => {
     if (probing) return
@@ -171,25 +198,30 @@ export function ProfileForm({ profile, onClose, onSaved }: {
 
       <label className="field-label">配置名称</label>
       <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="例如:硅基流动" />
+      <details style={{ marginTop: 12, fontSize: 13 }}>
+        <summary>服务地址填写示例与拼接规则</summary>
+        <p>本项目使用 OpenAI 兼容协议。对话、语音识别、视觉填 API 基础地址；例如硅基流动 <code>https://api.siliconflow.cn/v1</code>、OpenAI <code>https://api.openai.com/v1</code>、DeepSeek 对话 <code>https://api.deepseek.com/v1</code>。系统分别追加 <code>/chat/completions</code>、<code>/audio/transcriptions</code>、<code>/chat/completions</code>。</p>
+        <p>向量模型填完整接口，例如 <code>https://api.siliconflow.cn/v1/embeddings</code>，系统不会再追加路径。各服务商支持的能力与模型不同，先核对其文档。硅基流动和 OpenAI 只填主域名会漏掉 <code>/v1</code>；DeepSeek 对话可按其接口使用主域名或 <code>/v1</code>。将完整接口填进基础地址会重复路径。</p>
+      </details>
 
       <GroupBlock
         title="对话模型"
         group={llm} setGroup={setGroup(setLlm)}
-        purpose="llm" models={models.llm || []} onPull={pullModels}
+        purpose="llm" models={models.llm || []} onPull={pullModels} listStatus={listStatus.llm}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.llm_api_key_masked})` : 'sk-…'}
         required
       />
       <GroupBlock
         title="语音识别"
         group={asr} setGroup={setGroup(setAsr)}
-        purpose="asr" models={models.asr || []} onPull={pullModels}
+        purpose="asr" models={models.asr || []} onPull={pullModels} listStatus={listStatus.asr}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.asr_api_key_masked})` : 'sk-…'}
         required
       />
       <GroupBlock
         title="向量模型"
         group={embedding} setGroup={setGroup(setEmbedding)}
-        purpose="embedding" models={models.embedding || []} onPull={pullModels}
+        purpose="embedding" models={models.embedding || []} onPull={pullModels} listStatus={listStatus.embedding}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.embedding_api_key_masked})` : 'sk-…'}
         urlPlaceholder="https://…/v1/embeddings"
         required
@@ -217,10 +249,12 @@ export function ProfileForm({ profile, onClose, onSaved }: {
         <GroupBlock
           title=""
           group={vision} setGroup={setGroup(setVision)}
-          purpose="vision" models={models.vision || []} onPull={pullModels}
+          purpose="vision" models={models.vision || []} onPull={pullModels} listStatus={listStatus.vision}
           keyPlaceholder={editing ? `留空保留现有密钥(${profile?.vision_api_key_masked})` : 'sk-…'}
         />
       )}
+
+      <CapabilityProbe targets={probeTargets} disabled={busy} />
 
       {!profile?.read_only && profile?.source !== 'hosted' && (
         <details style={{ marginTop: 22 }}>
@@ -281,13 +315,14 @@ function applyPreset(presetId: string, group: GroupDraft): Partial<GroupDraft> {
   }
 }
 
-function GroupBlock({ title, group, setGroup, purpose, models, onPull, keyPlaceholder, urlPlaceholder, required }: {
+function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatus, keyPlaceholder, urlPlaceholder, required }: {
   title: string
   group: GroupDraft
   setGroup: (patch: Partial<GroupDraft>) => void
   purpose: ProfilePurpose
   models: string[]
   onPull: (purpose: ProfilePurpose, group: GroupDraft) => void
+  listStatus?: string
   keyPlaceholder: string
   urlPlaceholder?: string
   required?: boolean
@@ -312,6 +347,10 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, keyPlaceh
           onChange={e => setGroup({ base_url: e.target.value })}
         />
       </div>
+      <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 6 }}>
+        {purpose === 'embedding' ? '填写完整 Embedding 接口地址，例如 https://api.siliconflow.cn/v1/embeddings；请求直接发送到此地址。' : `填写服务商要求的 API 基础地址，例如硅基流动 https://api.siliconflow.cn/v1；系统会追加 ${purpose === 'asr' ? '/audio/transcriptions' : '/chat/completions'}。不要填写完整接口路径。`}
+      </p>
+      {validateModelURL(group.base_url, purpose === 'embedding', group.preset) && <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{validateModelURL(group.base_url, purpose === 'embedding', group.preset)}</p>}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
         <input className="input" type="password" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} />
         <div style={{ display: 'flex', gap: 8 }}>
@@ -319,6 +358,24 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, keyPlaceh
           <button type="button" className="btn btn-sm" style={{ flex: 'none' }} onClick={() => onPull(purpose, group)}>拉模型</button>
         </div>
       </div>
+      {listStatus && <p aria-live="polite" style={{ fontSize: 12 }}>{listStatus}</p>}
     </div>
   )
+}
+
+function validateModelURL(value: string, embedding: boolean, preset: string): string | null {
+  if (!value.trim()) return null
+  let url: URL
+  try { url = new URL(value) } catch { return '请输入完整的 http(s) URL' }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) return '只允许不含账号、查询参数和片段的 http(s) 地址'
+  const path = url.pathname.replace(/\/+$/, '')
+  if (/(\/v1){2}(\/|$)/i.test(path)) return '路径中重复出现 /v1，请删掉多余的一段'
+  if (embedding) {
+    if (!path.endsWith('/embeddings')) return '向量模型需要完整接口地址，末尾应为 /embeddings'
+  } else if (/\/(chat\/completions|audio\/transcriptions|embeddings|models)$/i.test(path)) {
+    return '这里填写基础地址，不要包含完整接口路径'
+  } else if ((!path || path === '/') && (preset === 'siliconflow' || preset === 'openai' || ['api.siliconflow.cn', 'api.openai.com'].includes(url.hostname.toLowerCase()))) {
+    return '该服务商的示例地址需要包含 /v1'
+  }
+  return null
 }

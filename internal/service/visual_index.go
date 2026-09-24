@@ -131,6 +131,16 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	}
 
 	vision, visionErr := s.loadVisionClient(ctx, task.UserID)
+	visionPrompt := ai.DefaultVisionCaptionPrompt
+	if s.repos.AIProfile != nil {
+		preference, err := s.repos.AIProfile.PromptPreference(task.UserID, "vision")
+		if err != nil {
+			return 0, err
+		}
+		if preference != "" {
+			visionPrompt += "\n用户画面描述偏好（不得编造不可见内容）：\n" + preference + "\n如有冲突，遵守前面的事实与格式要求。"
+		}
+	}
 	ocrOK := s.ocr != nil && s.ocr.Available(ctx)
 	if vision == nil && !ocrOK {
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index skipped: no vision profile and ocr unavailable",
@@ -192,7 +202,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 			row.OCRStatus = model.VisualFrameStatusSkipped
 		}
 		if vision != nil {
-			caption, captionErr := vision.CaptionImage(ctx, frame.Path, ai.DefaultVisionCaptionPrompt)
+			caption, captionErr := vision.CaptionImage(ctx, frame.Path, visionPrompt)
 			if captionErr != nil {
 				row.VisionStatus, row.VisionError = model.VisualFrameStatusFailed, truncateVisualErr(captionErr.Error())
 			} else if row.VisionCaption = strings.TrimSpace(caption); row.VisionCaption != "" {

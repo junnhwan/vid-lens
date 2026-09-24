@@ -119,10 +119,7 @@ func (s *CompositeStrategy) TranscribeChunks(ctx context.Context, audioPaths []s
 }
 
 func (s *CompositeStrategy) Summarize(ctx context.Context, text string) (string, error) {
-	return s.chat.Chat(ctx, []ChatMessage{
-		{Role: "system", Content: defaultSummarySystemPrompt()},
-		{Role: "user", Content: text},
-	})
+	return s.chat.Chat(ctx, summaryMessages(ctx, text))
 }
 
 type ProfileTester struct {

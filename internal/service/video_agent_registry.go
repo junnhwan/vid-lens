@@ -26,19 +26,20 @@ type VideoAgentToolDefinition struct {
 // serialized into a planner action. Tool arguments remain JSON so a future
 // planner can produce them without knowing concrete Go input types.
 type VideoAgentToolRuntime struct {
-	VideoMaps       []VideoMap
-	MaxVisualFrames int
-	MaxOutputTokens int64
-	ReportUsage     func(VideoAgentLoopPlannerCallUsage)
-	TaskIDs         []int64
-	ValidateScope   func(context.Context) error
-	UserID          int64
-	TaskID          int64
-	Recent          []model.ChatMessage
-	TopK            int
-	EmbeddingModel  string
-	Embedding       ai.EmbeddingClient
-	MemorySnapshot  *MemorySnapshot
+	AnswerPreference string
+	VideoMaps        []VideoMap
+	MaxVisualFrames  int
+	MaxOutputTokens  int64
+	ReportUsage      func(VideoAgentLoopPlannerCallUsage)
+	TaskIDs          []int64
+	ValidateScope    func(context.Context) error
+	UserID           int64
+	TaskID           int64
+	Recent           []model.ChatMessage
+	TopK             int
+	EmbeddingModel   string
+	Embedding        ai.EmbeddingClient
+	MemorySnapshot   *MemorySnapshot
 }
 
 // VideoAgentToolRequest is the only input surface exposed by the registry.

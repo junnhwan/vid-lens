@@ -170,6 +170,15 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	// The Planner supplies the search query; do not hide another LLM call inside a tool.
 	pipeline.rewriter = NoopQueryRewriter{}
 	tools := NewVideoAgentTools(s.chatSvc.repos, pipeline, chat)
+	answerPreference := ""
+	if s.chatSvc.repos.AIProfile != nil {
+		preference, err := s.chatSvc.repos.AIProfile.PromptPreference(req.UserID, "agent")
+		if err != nil {
+			return nil, err
+		}
+		tools.SetAnswerPreference(preference)
+		answerPreference = preference
+	}
 	tools.SetVisualInvestigator(s.visualInvestigator)
 	if len(memberIDs) > 0 {
 		tools.Registry().useCollectionSchemas()
@@ -223,17 +232,18 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		return nil, err
 	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
-		VideoMaps:       videoMaps,
-		MaxVisualFrames: budget.MaxFrames,
-		UserID:          req.UserID,
-		TaskID:          session.TaskID,
-		TaskIDs:         memberIDs,
-		ValidateScope:   validateScope,
-		Recent:          recent,
-		TopK:            req.TopK,
-		EmbeddingModel:  profile.EmbeddingModel,
-		Embedding:       embedding,
-		MemorySnapshot:  memorySnapshot,
+		AnswerPreference: answerPreference,
+		VideoMaps:        videoMaps,
+		MaxVisualFrames:  budget.MaxFrames,
+		UserID:           req.UserID,
+		TaskID:           session.TaskID,
+		TaskIDs:          memberIDs,
+		ValidateScope:    validateScope,
+		Recent:           recent,
+		TopK:             req.TopK,
+		EmbeddingModel:   profile.EmbeddingModel,
+		Embedding:        embedding,
+		MemorySnapshot:   memorySnapshot,
 	})
 	if err == nil && validateScope != nil {
 		err = validateScope(ctx)

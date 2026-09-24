@@ -23,7 +23,13 @@ const (
 	VideoAgentToolInvestigateVisual    = "investigate_visual"
 )
 
+const agentFinalProductPrompt = "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"
+const agentFinalStylePrompt = "面向用户用自然语言解释结论与缺口。定位需要时用分钟:秒描述；task_id、modality、time_status 等字段名与原始毫秒区间属于来源元数据，由引用卡呈现，不要逐项抄入正文。不要扩展与用户问题无关的背景。"
+
+func AgentProductInstructions() string { return agentFinalProductPrompt + "\n" + agentFinalStylePrompt }
+
 type VideoAgentTools struct {
+	answerPreference   string
 	emitAnswer         func(string) error
 	repos              *repository.Repositories
 	pipeline           *RetrievalPipeline
@@ -32,6 +38,12 @@ type VideoAgentTools struct {
 	observer           VideoAgentStepObserver
 	memory             *MemorySnapshot
 	visualInvestigator VisualInvestigator
+}
+
+func (t *VideoAgentTools) SetAnswerPreference(preference string) {
+	if t != nil {
+		t.answerPreference = preference
+	}
 }
 
 func NewVideoAgentTools(repos *repository.Repositories, pipeline *RetrievalPipeline, chat ai.ChatClient) *VideoAgentTools {
@@ -402,6 +414,9 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		return BuildCitedAnswerResult{}, step, err
 	}
 	messages := buildCitedAnswerMessages(input, t.memory)
+	if t.answerPreference != "" {
+		messages = appendUserPromptPreference(messages, t.answerPreference)
+	}
 	var providerUsage *ai.ChatUsage
 	maxOutput := input.MaxOutputTokens
 	if maxOutput <= 0 {
@@ -540,7 +555,7 @@ func formatRetrievedChunks(chunks []RetrievedChunk) string {
 func buildCitedAnswerMessages(input BuildCitedAnswerInput, memory *MemorySnapshot) []ai.ChatMessage {
 	input.Citations = boundedFinalEvidence(input.Citations)
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"},
+		{Role: "system", Content: agentFinalProductPrompt},
 	}
 	if memoryContext := trustedMemoryPromptContext(memory); memoryContext != "" {
 		messages = append(messages, ai.ChatMessage{Role: "system", Content: memoryContext + "\n禁止把上述记忆作为 Claim 或引用证据；若它与当前视频片段冲突，以当前视频片段为准并说明不确定性。"})
@@ -551,7 +566,7 @@ func buildCitedAnswerMessages(input BuildCitedAnswerInput, memory *MemorySnapsho
 	if coverage := evidenceCoveragePrompt(input.ScopeTaskIDs, input.Citations); coverage != "" {
 		messages = append(messages, ai.ChatMessage{Role: "system", Content: coverage})
 	}
-	messages[0].Content += "\n面向用户用自然语言解释结论与缺口。定位需要时用分钟:秒描述；task_id、modality、time_status 等字段名与原始毫秒区间属于来源元数据，由引用卡呈现，不要逐项抄入正文。不要扩展与用户问题无关的背景。"
+	messages[0].Content += "\n" + agentFinalStylePrompt
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
 	return messages
 }

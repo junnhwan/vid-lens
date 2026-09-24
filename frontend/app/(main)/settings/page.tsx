@@ -3,17 +3,19 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { User } from '@/lib/types'
-import { useCrumb } from '@/components/shell/AppShell'
+import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { AIProfilesSection } from '@/components/settings/AIProfilesSection'
 import { MemorySection } from '@/components/settings/MemorySection'
+import { PromptPreferencesSection } from '@/components/settings/PromptPreferencesSection'
 import { useTheme } from '@/components/theme/ThemeProvider'
 import type { ThemeMode } from '@/lib/theme'
 
 export default function SettingsPage() {
   useCrumb([{ label: '设置' }])
-  const [tab, setTab] = useState<'ai' | 'mem'>('ai')
+  const [tab, setTab] = useState<'ai' | 'mem' | 'prompts'>('ai')
   const [user, setUser] = useState<User | null>(null)
   const { theme, setTheme } = useTheme()
+  const { confirmLeave } = useShell()
 
   useEffect(() => {
     let active = true
@@ -35,11 +37,12 @@ export default function SettingsPage() {
       </div>
       <div className="settings-grid">
         <div className="settings-nav">
-          <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>AI 服务</button>
-          <button className={tab === 'mem' ? 'on' : ''} onClick={() => setTab('mem')}>记忆治理</button>
+          <button className={tab === 'ai' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('ai') }}>AI 服务</button>
+          <button className={tab === 'mem' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('mem') }}>记忆治理</button>
+          <button className={tab === 'prompts' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('prompts') }}>提示词</button>
         </div>
         <div>
-          {tab === 'ai' ? <AIProfilesSection readOnly={user?.role === 'DEMO'} /> : <MemorySection user={user} />}
+          {tab === 'ai' ? <AIProfilesSection readOnly={user?.role === 'DEMO'} /> : tab === 'prompts' ? <PromptPreferencesSection readOnly={user?.role === 'DEMO'} /> : <MemorySection user={user} />}
         </div>
       </div>
     </div>

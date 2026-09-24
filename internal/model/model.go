@@ -18,6 +18,7 @@ func AllModels() []interface{} {
 		&AISummary{},
 		&SummaryPart{},
 		&UserAIProfile{},
+		&UserPromptPreference{},
 		&VideoChunk{},
 		&VideoRAGIndex{},
 		&KnowledgeBase{},

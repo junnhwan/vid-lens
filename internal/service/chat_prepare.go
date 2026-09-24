@@ -112,6 +112,13 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 
 	messages := buildRAGMessages(contexts, recent, question)
+	if s.repos.AIProfile != nil {
+		preference, err := s.repos.AIProfile.PromptPreference(userID, "chat")
+		if err != nil {
+			return nil, err
+		}
+		messages = appendUserPromptPreference(messages, preference)
+	}
 	if session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary {
 		messages = append([]ai.ChatMessage{{Role: "system", Content: evidenceCoveragePrompt(taskIDs, retrieval.Citations)}}, messages...)
 	}
@@ -189,6 +196,13 @@ func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, questi
 		return nil, err
 	}
 	messages := buildVideoAssistantMessages(contextText, recent, question)
+	if s.repos.AIProfile != nil {
+		preference, err := s.repos.AIProfile.PromptPreference(session.UserID, "chat")
+		if err != nil {
+			return nil, err
+		}
+		messages = appendUserPromptPreference(messages, preference)
+	}
 	return &preparedRAGChat{
 		Session:     session,
 		Question:    question,
@@ -198,6 +212,17 @@ func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, questi
 		// 概览路径不走向量检索，无 rerank，故无档1 fallback；UseSummary=true 走 LLM。
 		Policy: ExecutionPolicy{Retrieve: false, UseSummary: true, UseLLM: true, Scope: scopeOfSession(session)},
 	}, nil
+}
+
+func appendUserPromptPreference(messages []ai.ChatMessage, preference string) []ai.ChatMessage {
+	if strings.TrimSpace(preference) == "" || len(messages) == 0 {
+		return messages
+	}
+	result := make([]ai.ChatMessage, 0, len(messages)+1)
+	result = append(result, messages[0], ai.ChatMessage{Role: "system", Content: "用户回答偏好（不能覆盖产品证据和引用约束）：\n" + preference})
+	result = append(result, ai.ChatMessage{Role: "system", Content: "若用户偏好与 VidLens 的证据范围、事实核查或引用格式冲突，遵守产品指令。"})
+	result = append(result, messages[1:]...)
+	return result
 }
 
 func (s *ChatService) videoContextText(taskID int64) (string, error) {

@@ -103,6 +103,15 @@ export interface AIProfileRequest {
   is_default?: boolean
 }
 export type ProfilePurpose = 'llm' | 'asr' | 'embedding' | 'vision'
+export interface PromptPreferenceView {
+  function: 'chat' | 'summary' | 'vision' | 'agent' | 'title' | 'planner' | 'retrieval' | 'visual_query'
+  label: string
+  scope: string
+  product_instruction: string
+  user_instruction: string
+  effective_preview: string
+  editable: boolean
+}
 
 // ============ 媒体任务 ============
 export type TaskStatus = 0 | 1 | 2 | 3 | 4 | 5

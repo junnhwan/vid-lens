@@ -163,6 +163,9 @@ func validatePublicHTTPURL(raw string) error {
 	if host == "" {
 		return fmt.Errorf("Base URL 缺少主机名")
 	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("Base URL 不能包含账号、查询参数或片段")
+	}
 	lower := strings.ToLower(host)
 	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") || lower == "0.0.0.0" {
 		return fmt.Errorf("不允许访问本地地址")
@@ -178,6 +181,9 @@ func validatePublicHTTPURL(raw string) error {
 	}
 	return nil
 }
+
+// ValidateProbeURL applies the same destination restrictions as model listing.
+func ValidateProbeURL(raw string) error { return validatePublicHTTPURL(raw) }
 
 func isPublicIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||

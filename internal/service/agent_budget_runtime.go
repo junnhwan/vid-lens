@@ -57,6 +57,7 @@ func (r *VideoAgentLoopRunner) explorationBudgetNotice(ctx context.Context, stat
 	}
 	p := estimatedPlannerCallUsage(messages, "")
 	finalMessages := buildCitedAnswerMessages(BuildCitedAnswerInput{ScopeTaskIDs: runtime.TaskIDs, Question: state.Goal, Recent: runtime.Recent, Citations: boundedFinalEvidence(state.Evidence), Intermediate: "根据已有证据说明已知与缺口"}, runtime.MemorySnapshot)
+	finalMessages = appendUserPromptPreference(finalMessages, runtime.AnswerPreference)
 	f := estimatedPlannerCallUsage(finalMessages, "")
 	reserveInput := max(budget.ReserveInputTokens, f.PromptTokens)
 	checks := []AgentBudgetNotice{

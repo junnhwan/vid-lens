@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { api, clearToken, getToken } from '@/lib/api'
@@ -14,6 +14,8 @@ interface ShellCtx {
   user: User | null
   openUpload: () => void
   uploadRevision: number
+  registerLeaveGuard: (guard: (() => boolean) | null) => void
+  confirmLeave: () => boolean
 }
 
 const ShellContext = createContext<ShellCtx | null>(null)
@@ -57,6 +59,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadRevision, setUploadRevision] = useState(0)
+  const leaveGuard = useRef<(() => boolean) | null>(null)
+  const restoringHistory = useRef(false)
+  const registerLeaveGuard = useCallback((guard: (() => boolean) | null) => { leaveGuard.current = guard }, [])
+  const confirmLeave = useCallback(() => leaveGuard.current?.() ?? true, [])
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!leaveGuard.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    const interceptLink = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      const link = target?.closest('a[href]') as HTMLAnchorElement | null
+      if (!link || !leaveGuard.current || link.target === '_blank' || link.hasAttribute('download') || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+      const url = new URL(link.href, location.href)
+      if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return
+      if (!leaveGuard.current()) event.preventDefault()
+    }
+    const onPopState = (event: PopStateEvent) => {
+      if (restoringHistory.current) { restoringHistory.current = false; return }
+      if (leaveGuard.current && !leaveGuard.current()) {
+        event.stopImmediatePropagation()
+        restoringHistory.current = true
+        history.go(1)
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    document.addEventListener('click', interceptLink, true)
+    window.addEventListener('popstate', onPopState, true)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', interceptLink, true); window.removeEventListener('popstate', onPopState, true) }
+  }, [])
 
   useEffect(() => {
     if (!getToken()) {
@@ -70,14 +104,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
   const logout = useCallback(() => {
+    if (!confirmLeave()) return
     clearToken()
     router.replace('/login')
-  }, [router])
+  }, [router, confirmLeave])
 
   const initial = (user?.nickname || user?.username || '').trim().charAt(0).toUpperCase() || '·'
 
   return (
-    <ShellContext.Provider value={{ user, openUpload, uploadRevision }}>
+    <ShellContext.Provider value={{ user, openUpload, uploadRevision, registerLeaveGuard, confirmLeave }}>
       <CrumbSetter.Provider value={{ setCrumb: setCrumbStable }}>
         <div className="app">
           <aside className="rail">

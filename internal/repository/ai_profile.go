@@ -16,6 +16,33 @@ func NewAIProfileRepository(db *gorm.DB) *AIProfileRepository {
 	return &AIProfileRepository{db: db}
 }
 
+func (r *AIProfileRepository) PromptPreference(userID int64, function string) (string, error) {
+	var row model.UserPromptPreference
+	err := r.db.Where("user_id = ? AND function = ?", userID, function).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return row.Text, nil
+}
+
+func (r *AIProfileRepository) SetPromptPreference(userID int64, function, text string) error {
+	if text == "" {
+		return r.db.Where("user_id = ? AND function = ?", userID, function).Delete(&model.UserPromptPreference{}).Error
+	}
+	var row model.UserPromptPreference
+	err := r.db.Where("user_id = ? AND function = ?", userID, function).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.db.Create(&model.UserPromptPreference{UserID: userID, Function: function, Text: text}).Error
+	}
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&row).Update("text", text).Error
+}
+
 func (r *AIProfileRepository) Create(profile *model.UserAIProfile) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if profile.IsDefault {

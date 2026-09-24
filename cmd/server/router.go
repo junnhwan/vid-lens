@@ -48,12 +48,15 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			{
 				aiProfiles.GET("", handlers.profiles.List)
 				aiProfiles.GET("/budget-options", handlers.profiles.BudgetOptions)
+				aiProfiles.GET("/prompt-preferences", handlers.profiles.PromptPreferences)
+				aiProfiles.PUT("/prompt-preferences/:function", handlers.profiles.SetPromptPreference)
 				aiProfiles.POST("", handlers.profiles.Create)
 				aiProfiles.PUT("/:id", handlers.profiles.Update)
 				aiProfiles.DELETE("/:id", handlers.profiles.Delete)
 				aiProfiles.POST("/test", handlers.profiles.Test)
 				aiProfiles.POST("/models", handlers.profiles.ListModels)
 				aiProfiles.POST("/embedding-dim", handlers.profiles.ProbeEmbeddingDim)
+				aiProfiles.POST("/probe", handlers.profiles.ProbeCapability)
 			}
 			chat := auth.Group("/chat")
 			{

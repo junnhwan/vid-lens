@@ -614,12 +614,14 @@ func (s *QueryVisualInvestigator) resolveVisionModel(ctx context.Context, userID
 
 func buildQueryVisualPrompt(goal string, required []RequiredFact) string {
 	encoded, _ := json.Marshal(required)
-	return fmt.Sprintf(`你是 VidLens 的查询时视觉取证器。只根据当前图片回答，不要补充图片外的信息。
+	return fmt.Sprintf(QueryVisualPromptTemplate, goal, string(encoded))
+}
+
+const QueryVisualPromptTemplate = `你是 VidLens 的查询时视觉取证器。只根据当前图片回答，不要补充图片外的信息。
 用户问题：%s
 必要事实（仅用于检查，不要编造）：%s
 请只输出 JSON：{"facts":["可直接从画面观察到的事实"],"gaps":["仍缺少的信息"]}。
-如果文字或细节看不清，请明确写入 gaps；不要输出置信度，不要声称已经看过其他帧。`, goal, string(encoded))
-}
+如果文字或细节看不清，请明确写入 gaps；不要输出置信度，不要声称已经看过其他帧。`
 
 func parseQueryVisualResponse(raw string) ([]string, []string) {
 	var parsed struct {

@@ -261,7 +261,7 @@ func newAIProfileServiceForTest(t *testing.T) (*AIProfileService, *repository.Re
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.UserAIProfile{}); err != nil {
+	if err := db.AutoMigrate(&model.UserAIProfile{}, &model.UserPromptPreference{}); err != nil {
 		t.Fatalf("AutoMigrate() error = %v", err)
 	}
 	repos := repository.NewRepositories(db)

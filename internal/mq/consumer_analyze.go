@@ -107,6 +107,13 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
 		return fmt.Errorf("缺少转录文本，无法生成 AI 总结")
 	}
+	if c.repo.AIProfile != nil {
+		preference, err := c.repo.AIProfile.PromptPreference(task.UserID, "summary")
+		if err != nil {
+			return fmt.Errorf("读取摘要偏好失败: %w", err)
+		}
+		ctx = ai.WithSummaryPreference(ctx, preference)
+	}
 
 	if err := c.generateTitle(ctx, task, transcription.Content); err != nil {
 		return err
@@ -123,6 +130,10 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	limit, err := summaryInputLimit()
 	if err != nil {
 		return err
+	}
+	limit -= len(ai.SummaryPreference(ctx))
+	if limit <= 512 {
+		return fmt.Errorf("摘要偏好占用过多上下文，请缩短后重试")
 	}
 	var summary string
 	var summarizeErr error
@@ -211,7 +222,7 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 		return err
 	}
 	title, chatErr := chatClient.Chat(ctx, []ai.ChatMessage{
-		{Role: "system", Content: titleSystemPrompt},
+		{Role: "system", Content: ai.TitleSystemPrompt},
 		{Role: "user", Content: truncateRunes(transcript, 1000)},
 	})
 	if err := requireProcessingLease(ctx); err != nil {
@@ -252,11 +263,3 @@ func truncateRunes(s string, n int) string {
 	}
 	return string(r[:n])
 }
-
-const titleSystemPrompt = `根据用户提供的视频语音转写文本，生成一个简洁准确的视频标题。
-
-要求：
-1. 使用中文，不超过 30 个字。
-2. 概括视频核心主题，客观中性，不要标题党或夸张表述。
-3. 只输出标题文本本身，不要引号、序号、前缀（如"标题："）、换行或任何解释。
-4. 若文本过短或无实质内容，输出"未命名视频"。`

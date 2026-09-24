@@ -1,5 +1,5 @@
 import type {
-  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, AgentAskResult, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AgentAskResult, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
   MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
@@ -102,6 +102,8 @@ export const api = {
 
   // ============ AI Profile ============
   budgetOptions: () => req<AgentBudgetOptions>('/ai/profiles/budget-options', 'GET'),
+  promptPreferences: () => req<PromptPreferenceView[]>('/ai/profiles/prompt-preferences', 'GET'),
+  setPromptPreference: (functionName: PromptPreferenceView['function'], text: string) => req<{ saved: boolean }>(`/ai/profiles/prompt-preferences/${functionName}`, 'PUT', { text }),
   listProfiles: () => req<AIProfile[]>('/ai/profiles', 'GET'),
   createProfile: (p: AIProfileRequest) => req<AIProfile>('/ai/profiles', 'POST', p),
   updateProfile: (id: number, p: AIProfileRequest) => req<AIProfile>(`/ai/profiles/${id}`, 'PUT', p),
@@ -112,6 +114,8 @@ export const api = {
     req<{ models: string[] }>('/ai/profiles/models', 'POST', { base_url, api_key, profile_id, purpose }),
   probeEmbeddingDim: (endpoint: string, api_key: string, model: string, profile_id: number) =>
     req<{ dimension: number }>('/ai/profiles/embedding-dim', 'POST', { endpoint, api_key, model, profile_id }),
+  probeCapability: (payload: { purpose: ProfilePurpose; base_url: string; api_key: string; model: string; provider: string; profile_id: number; embedding_dim?: number }) =>
+    req<{ dimension: number }>('/ai/profiles/probe', 'POST', payload),
 
   // ============ 媒体 ============
   uploadFile: (file: File) => {

@@ -48,6 +48,15 @@ func (a *aiProfileTesterAdapter) TestProfile(ctx context.Context, profile *servi
 	})
 }
 
+func (a *aiProfileTesterAdapter) ProbeCapability(ctx context.Context, p *service.DecryptedAIProfile, purpose string) (int, error) {
+	return a.tester.ProbeCapability(ctx, ai.Profile{
+		LLMProvider: p.LLMProvider, LLMBaseURL: p.LLMBaseURL, LLMAPIKey: p.LLMAPIKey, LLMModel: p.LLMModel,
+		ASRProvider: p.ASRProvider, ASRBaseURL: p.ASRBaseURL, ASRAPIKey: p.ASRAPIKey, ASRModel: p.ASRModel,
+		EmbeddingProvider: p.EmbeddingProvider, EmbeddingEndpoint: p.EmbeddingEndpoint, EmbeddingAPIKey: p.EmbeddingAPIKey, EmbeddingModel: p.EmbeddingModel, EmbeddingDim: p.EmbeddingDim,
+		VisionProvider: p.VisionProvider, VisionBaseURL: p.VisionBaseURL, VisionAPIKey: p.VisionAPIKey, VisionModel: p.VisionModel,
+	}, purpose)
+}
+
 func loadServerConfig(path string) (*config.Config, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -76,7 +85,7 @@ func serverAIProfile(cfg config.AIConfig) ai.Profile {
 }
 
 func runtimeServerHandlers(app *serverApplication) serverHandlers {
- return app.handlers
+	return app.handlers
 }
 
 func main() {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"vid-lens/internal/config"
 
@@ -388,6 +389,118 @@ func (s *AIProfileService) ProbeEmbeddingDim(ctx context.Context, userID int64, 
 	return ai.ProbeEmbeddingDimension(ctx, endpoint, apiKey, model)
 }
 
+// ProbeCapability invokes the selected model with a small synthetic input.
+// Only the requested capability is resolved, so an unsaved draft may be tested.
+type ProbeCapabilityRequest struct {
+	Purpose      string `json:"purpose"`
+	BaseURL      string `json:"base_url"`
+	APIKey       string `json:"api_key"`
+	Model        string `json:"model"`
+	Provider     string `json:"provider"`
+	ProfileID    int64  `json:"profile_id"`
+	EmbeddingDim int    `json:"embedding_dim"`
+}
+
+func (s *AIProfileService) ProbeCapability(ctx context.Context, userID int64, req ProbeCapabilityRequest) (int, error) {
+	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
+	if purpose != "llm" && purpose != "asr" && purpose != "embedding" && purpose != "vision" {
+		return 0, fmt.Errorf("未知模型能力")
+	}
+	prober, ok := s.tester.(interface {
+		ProbeCapability(context.Context, *DecryptedAIProfile, string) (int, error)
+	})
+	if !ok {
+		return 0, fmt.Errorf("模型探测暂不可用")
+	}
+	base, key, modelName := strings.TrimSpace(req.BaseURL), strings.TrimSpace(req.APIKey), strings.TrimSpace(req.Model)
+	provider := strings.TrimSpace(req.Provider)
+	if req.ProfileID > 0 {
+		stored, err := s.repo.FindByIDForUser(userID, req.ProfileID)
+		if err != nil {
+			return 0, err
+		}
+		if stored == nil {
+			return 0, ErrAIProfileNotFound
+		}
+		p, err := s.decryptProfile(stored)
+		if err != nil {
+			return 0, err
+		}
+		switch purpose {
+		case "llm":
+			if base == "" {
+				base = p.LLMBaseURL
+			}
+			if key == "" {
+				key = p.LLMAPIKey
+			}
+			if modelName == "" {
+				modelName = p.LLMModel
+			}
+			if provider == "" {
+				provider = p.LLMProvider
+			}
+		case "asr":
+			if base == "" {
+				base = p.ASRBaseURL
+			}
+			if key == "" {
+				key = p.ASRAPIKey
+			}
+			if modelName == "" {
+				modelName = p.ASRModel
+			}
+			if provider == "" {
+				provider = p.ASRProvider
+			}
+		case "embedding":
+			if base == "" {
+				base = p.EmbeddingEndpoint
+			}
+			if key == "" {
+				key = p.EmbeddingAPIKey
+			}
+			if modelName == "" {
+				modelName = p.EmbeddingModel
+			}
+			if provider == "" {
+				provider = p.EmbeddingProvider
+			}
+		case "vision":
+			if base == "" {
+				base = p.VisionBaseURL
+			}
+			if key == "" {
+				key = p.VisionAPIKey
+			}
+			if modelName == "" {
+				modelName = p.VisionModel
+			}
+			if provider == "" {
+				provider = p.VisionProvider
+			}
+		}
+	}
+	if base == "" || key == "" || modelName == "" {
+		return 0, fmt.Errorf("请先填写该能力的地址、模型和 API Key")
+	}
+	if err := ai.ValidateProbeURL(base); err != nil {
+		return 0, err
+	}
+	p := &DecryptedAIProfile{}
+	switch purpose {
+	case "llm":
+		p.LLMBaseURL, p.LLMAPIKey, p.LLMModel, p.LLMProvider = base, key, modelName, provider
+	case "asr":
+		p.ASRBaseURL, p.ASRAPIKey, p.ASRModel, p.ASRProvider = base, key, modelName, provider
+	case "embedding":
+		p.EmbeddingEndpoint, p.EmbeddingAPIKey, p.EmbeddingModel, p.EmbeddingProvider, p.EmbeddingDim = base, key, modelName, provider, req.EmbeddingDim
+	case "vision":
+		p.VisionBaseURL, p.VisionAPIKey, p.VisionModel, p.VisionProvider = base, key, modelName, provider
+	}
+	return prober.ProbeCapability(ctx, p, purpose)
+}
+
 func (s *AIProfileService) GetDefaultDecrypted(userID int64) (*DecryptedAIProfile, error) {
 	profile, err := s.repo.FindDefaultByUserID(userID)
 	if err != nil {
@@ -638,6 +751,16 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 	if req.EmbeddingDim <= 0 {
 		return fmt.Errorf("embedding 维度必须大于 0")
 	}
+	for _, item := range []struct {
+		label, value string
+		full         bool
+	}{
+		{"LLM", req.LLMBaseURL, false}, {"ASR", req.ASRBaseURL, false}, {"Embedding", req.EmbeddingEndpoint, true},
+	} {
+		if err := validateProfileURL(item.value, item.full); err != nil {
+			return fmt.Errorf("%s 地址: %w", item.label, err)
+		}
+	}
 	if requireKeys && (strings.TrimSpace(req.LLMAPIKey) == "" || strings.TrimSpace(req.ASRAPIKey) == "" || strings.TrimSpace(req.EmbeddingAPIKey) == "") {
 		return fmt.Errorf("API Key 不能为空")
 	}
@@ -652,6 +775,35 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 		}
 		if requireKeys && vk == "" {
 			return fmt.Errorf("Vision API Key 不能为空")
+		}
+		if err := validateProfileURL(vb, false); err != nil {
+			return fmt.Errorf("Vision 地址: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateProfileURL(raw string, fullEmbedding bool) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("需填写不含账号或参数的 http(s) 地址")
+	}
+	path := strings.TrimRight(strings.ToLower(u.Path), "/")
+	if !fullEmbedding && path == "" && (strings.EqualFold(u.Hostname(), "api.siliconflow.cn") || strings.EqualFold(u.Hostname(), "api.openai.com")) {
+		return fmt.Errorf("此服务商的基础地址需包含 /v1")
+	}
+	if strings.Contains(path, "/v1/v1") {
+		return fmt.Errorf("/v1 重复")
+	}
+	if fullEmbedding {
+		if !strings.HasSuffix(path, "/embeddings") {
+			return fmt.Errorf("需填写以 /embeddings 结尾的完整接口地址")
+		}
+	} else {
+		for _, suffix := range []string{"/chat/completions", "/audio/transcriptions", "/embeddings", "/models"} {
+			if strings.HasSuffix(path, suffix) {
+				return fmt.Errorf("请填写 API 基础地址，不要包含完整接口路径")
+			}
 		}
 	}
 	return nil

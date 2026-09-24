@@ -182,6 +182,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 	}
 	leaves := summaryLeaves(full, rows, limit-450)
 	modelName := c.llmModelNameForTask(task)
+	hashModelName := modelName + "\x00" + ai.SummaryPreference(ctx)
 	// A changed transcript, model or plan invalidates old checkpoints together.
 	stored, err := c.repo.SummaryPart.List(task.ID)
 	if err != nil {
@@ -192,7 +193,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		if part.Level != 0 {
 			continue
 		}
-		if part.PartIndex >= len(leaves) || part.InputHash != summaryHash(modelName, summaryPartPrompt(leaves[part.PartIndex], part.PartIndex, len(leaves))) {
+		if part.PartIndex >= len(leaves) || part.InputHash != summaryHash(hashModelName, summaryPartPrompt(leaves[part.PartIndex], part.PartIndex, len(leaves))) {
 			reset = true
 			break
 		}
@@ -207,7 +208,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		if len(prompt) > limit {
 			return "", fmt.Errorf("摘要第 %d/%d 段超过模型输入预算", i+1, len(leaves))
 		}
-		part := &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(modelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS, Status: "pending"}
+		part := &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS, Status: "pending"}
 		if err := c.ensureSummaryPart(ctx, part); err != nil {
 			return "", err
 		}
@@ -215,7 +216,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 	current := make([]summaryInput, 0, len(leaves))
 	for i, leaf := range leaves {
 		prompt := summaryPartPrompt(leaf, i, len(leaves))
-		text, err := c.completeSummaryPart(ctx, strategy, &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(modelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS}, prompt, summaryIntermediateOutputTokens)
+		text, err := c.completeSummaryPart(ctx, strategy, &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS}, prompt, summaryIntermediateOutputTokens)
 		if err != nil {
 			return "", fmt.Errorf("摘要第 %d/%d 段失败，已覆盖 %d/%d 段: %w", i+1, len(leaves), i, len(leaves), err)
 		}
@@ -229,14 +230,14 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		next := make([]summaryInput, 0, len(groups))
 		for i, group := range groups {
 			prompt := summaryMergePrompt(group, level)
-			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(modelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS, Status: "pending"}
+			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS, Status: "pending"}
 			if err := c.ensureSummaryPart(ctx, part); err != nil {
 				return "", err
 			}
 		}
 		for i, group := range groups {
 			prompt := summaryMergePrompt(group, level)
-			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(modelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS}
+			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS}
 			outputTokens := int64(summaryIntermediateOutputTokens)
 			if len(groups) == 1 {
 				outputTokens = summaryOutputTokens
