@@ -58,6 +58,18 @@ func TestObservedFailuresUseControlledErrorCodes(t *testing.T) {
 	}
 }
 
+func TestSummaryAuditKeepsProviderRequestIDWhenPresent(t *testing.T) {
+	recorder := &recordingCallRecorder{}
+	client := NewObservedChatClient(errorChatClient{&ProviderError{Class: ErrorProvider5xx, StatusCode: 504, RequestID: "upstream-42", Retryable: true}}, recorder,
+		CallContext{UserID: 7, Provider: "openai_compatible", Model: "example"})
+	ctx := observability.WithCorrelation(context.Background(), observability.Correlation{TraceID: "trace-42", TaskID: 42, JobID: 8, JobType: "analyze", Stage: "summarizing", Attempt: 3})
+	_, _ = client.Chat(ctx, nil)
+	got := recorder.records[0]
+	if got.ProviderRequestID != "upstream-42" || got.ErrorCode != "provider_5xx" || got.TraceID != "trace-42" || got.Attempt != 3 {
+		t.Fatalf("summary audit correlation = %+v", got)
+	}
+}
+
 type errorChatClient struct{ err error }
 
 func (c errorChatClient) Chat(context.Context, []ChatMessage) (string, error) { return "", c.err }

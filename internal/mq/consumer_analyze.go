@@ -125,6 +125,13 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 		return err
 	}
 	if summarizeErr != nil {
+		attrs := []slog.Attr{slog.String("model", c.llmModelNameForTask(task)), slog.String("error", observability.SafeError(summarizeErr))}
+		var providerErr *ai.ProviderError
+		if errors.As(summarizeErr, &providerErr) {
+			attrs = append(attrs, slog.String("provider", providerErr.Provider), slog.String("error_class", string(providerErr.Class)),
+				slog.Int("http_status", providerErr.StatusCode), slog.String("provider_request_id", providerErr.RequestID))
+		}
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "ai summary call failed", attrs...)
 		return fmt.Errorf("AI 总结失败: %w", summarizeErr)
 	}
 

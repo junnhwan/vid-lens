@@ -23,6 +23,7 @@ import KBModal from '@/components/KBModal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { taskStateView } from '@/lib/taskStatus'
+import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoStill } from '@/components/VideoPoster'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
@@ -228,10 +229,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }, [taskId])
 
   const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
+  const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
 
-  // 处理中每 5s 轮询任务详情;转写刚完成或任务刚完成时补拉时间轴与索引
+  // 处理中或等待摘要自动重试时轮询；重试调度会清除 next_retry_at 并重新入队。
   useEffect(() => {
-    if (!processing) return
+    if (!processing && !awaitingSummaryRetry) return
     const iv = setInterval(() => {
       void (async () => {
         try {
@@ -253,7 +255,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       })()
     }, 5000)
     return () => clearInterval(iv)
-  }, [processing, taskId])
+  }, [processing, awaitingSummaryRetry, taskId])
 
   useEffect(() => {
     if (!processing && busy !== 'index' && index?.status !== 'indexing' && index?.status !== 'queued') return
@@ -403,6 +405,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   const failed = task.status === TaskStatusEnum.Failed || task.status === TaskStatusEnum.Dead
+  const summaryFailure = summaryFailureView(task)
   const urlJob = failed && task.last_job_type === 'download'
   const title = taskTitle(task)
 
@@ -712,14 +715,20 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
                 <div style={{ flex: 1 }}>
-                  <b style={{ fontSize: 13 }}>{task.status === TaskStatusEnum.Dead ? '任务已废弃' : '处理失败'}</b>
-                  <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>
+                  <b style={{ fontSize: 13 }}>{summaryFailure?.category || (task.status === TaskStatusEnum.Dead ? '任务已废弃' : '处理失败')}</b>
+                  {summaryFailure ? <>
+                    <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.retry}</p>
+                    <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>{summaryFailure.advice}</p>
+                    <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => {
+                      void navigator.clipboard.writeText(summaryFailure.diagnosticId).then(() => toast.success('诊断编号已复制')).catch(() => toast.error('复制失败，请手动复制编号'))
+                    }}>诊断编号：{summaryFailure.diagnosticId} · 复制</button>
+                  </> : <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 4 }}>
                     {task.error_msg || task.last_error_msg || '处理过程中出现错误'}
                     {task.max_retries > 0 ? ` · 重试 ${task.retry_count}/${task.max_retries}` : ''}
-                  </p>
+                  </p>}
                   {urlJob ? (
                     <span className="chip chip-mute" style={{ marginTop: 10 }}>URL 任务,请删除后重新添加</span>
-                  ) : (
+                  ) : !summaryFailure?.scheduled && (
                     <button
                       className="btn btn-sm"
                       style={{ marginTop: 10 }}
@@ -727,7 +736,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                       onClick={() => setPendingAction({
                         kind: task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
                         title: '重新提交任务?',
-                        body: '失败步骤会重新入队,可能再次消耗模型额度。',
+                        body: summaryFailure ? `${summaryFailure.advice} 重新提交可能再次消耗模型额度。` : '失败步骤会重新入队,可能再次消耗模型额度。',
                         confirmLabel: '重试',
                       })}
                     >

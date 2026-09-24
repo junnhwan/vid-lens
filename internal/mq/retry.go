@@ -114,6 +114,19 @@ func isRetryableError(err error) bool {
 	return false
 }
 
+// Keep the provider category for summary calls while status/next_retry_at
+// continue to describe scheduling and exhaustion independently.
+func summaryFailureCode(jobType, stage string, failure error, fallback string) string {
+	if jobType != TaskJobAnalyze || stage != model.TaskStageSummarizing {
+		return fallback
+	}
+	var providerErr *ai.ProviderError
+	if errors.As(failure, &providerErr) {
+		return string(providerErr.Class)
+	}
+	return fallback
+}
+
 func (c *Consumer) SetRetryPolicy(policy TaskRetryPolicy) {
 	c.retryPolicy = policy.normalized()
 }
@@ -156,27 +169,30 @@ func (c *Consumer) recordTaskFailure(taskID int64, jobType, stage string, failur
 		errMsg := truncateError(failure)
 		if !isRetryableError(failure) {
 			metricCode = "non_retryable_error"
-			if err := repos.Task.RecordTerminalFailure(taskID, jobType, stage, "non_retryable_error", errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed); err != nil {
+			code := summaryFailureCode(jobType, stage, failure, "non_retryable_error")
+			if err := repos.Task.RecordTerminalFailure(taskID, jobType, stage, code, errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed); err != nil {
 				return err
 			}
-			return repos.TaskJob.RecordTerminalFailure(taskID, jobType, stage, "non_retryable_error", errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed)
+			return repos.TaskJob.RecordTerminalFailure(taskID, jobType, stage, code, errMsg, task.RetryCount, maxRetries, model.TaskStatusFailed)
 		}
 
 		nextRetryCount := task.RetryCount + 1
 		if nextRetryCount > maxRetries {
 			metricCode, metricDead = "retry_exhausted", true
-			if err := repos.Task.RecordTerminalFailure(taskID, jobType, stage, "retry_exhausted", errMsg, nextRetryCount, maxRetries, model.TaskStatusDead); err != nil {
+			code := summaryFailureCode(jobType, stage, failure, "retry_exhausted")
+			if err := repos.Task.RecordTerminalFailure(taskID, jobType, stage, code, errMsg, nextRetryCount, maxRetries, model.TaskStatusDead); err != nil {
 				return err
 			}
-			return repos.TaskJob.RecordTerminalFailure(taskID, jobType, stage, "retry_exhausted", errMsg, nextRetryCount, maxRetries, model.TaskStatusDead)
+			return repos.TaskJob.RecordTerminalFailure(taskID, jobType, stage, code, errMsg, nextRetryCount, maxRetries, model.TaskStatusDead)
 		}
 
 		metricCode, metricRetry = "retryable_error", true
 		nextRetryAt := policy.Now().Add(policy.retryDelay(nextRetryCount, failure))
-		if err := repos.Task.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt); err != nil {
+		code := summaryFailureCode(jobType, stage, failure, "retryable_error")
+		if err := repos.Task.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt, code); err != nil {
 			return err
 		}
-		return repos.TaskJob.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt)
+		return repos.TaskJob.RecordRetryableFailure(taskID, jobType, stage, errMsg, nextRetryCount, maxRetries, nextRetryAt, code)
 	})
 	if err != nil {
 		return err
@@ -239,6 +255,7 @@ func (c *Consumer) recordLeasedTaskFailure(taskID int64, jobType, stage string, 
 			metricRetry = true
 		}
 	}
+	req.ErrorCode = summaryFailureCode(jobType, stage, failure, req.ErrorCode)
 	updated, err := c.repo.FailTaskProcessing(req)
 	if err != nil {
 		return err

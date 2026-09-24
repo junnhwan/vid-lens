@@ -131,11 +131,15 @@ func (r *TaskJobRepository) MarkCompleted(taskID int64, jobType, stage string) e
 		}).Error
 }
 
-func (r *TaskJobRepository) RecordRetryableFailure(taskID int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time) error {
+func (r *TaskJobRepository) RecordRetryableFailure(taskID int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time, errorCode ...string) error {
 	if err := r.ensureJob(taskID, jobType, stage, maxRetries); err != nil {
 		return err
 	}
 	now := time.Now()
+	code := "retryable_error"
+	if len(errorCode) > 0 && errorCode[0] != "" {
+		code = errorCode[0]
+	}
 	return r.db.Model(&model.TaskJob{}).
 		Where("task_id = ? AND job_type = ?", taskID, jobType).
 		Updates(map[string]interface{}{
@@ -144,7 +148,7 @@ func (r *TaskJobRepository) RecordRetryableFailure(taskID int64, jobType, stage,
 			"retry_count":     retryCount,
 			"max_retries":     maxRetries,
 			"next_retry_at":   nextRetryAt,
-			"last_error_code": "retryable_error",
+			"last_error_code": code,
 			"last_error_msg":  errMsg,
 			"finished_at":     &now,
 		}).Error

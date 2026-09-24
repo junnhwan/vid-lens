@@ -207,13 +207,17 @@ func (r *TaskRepository) UpdateTitle(id int64, title string) error {
 	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("title", title).Error
 }
 
-func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time) error {
+func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time, errorCode ...string) error {
 	now := time.Now()
+	code := "retryable_error"
+	if len(errorCode) > 0 && errorCode[0] != "" {
+		code = errorCode[0]
+	}
 	updates := map[string]interface{}{
 		"status":            model.TaskStatusFailed,
 		"stage":             stage,
 		"error_msg":         errMsg,
-		"last_error_code":   "retryable_error",
+		"last_error_code":   code,
 		"last_error_msg":    errMsg,
 		"last_job_type":     jobType,
 		"retry_count":       retryCount,

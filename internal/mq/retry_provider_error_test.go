@@ -46,6 +46,16 @@ func TestIsRetryableErrorUsesTypedProviderError(t *testing.T) {
 	}
 }
 
+func TestSummaryFailureCodePreservesProviderClassOnlyForSummary(t *testing.T) {
+	failure := fmt.Errorf("AI 总结失败: %w", &ai.ProviderError{Class: ai.ErrorProvider5xx, StatusCode: 504, Retryable: true})
+	if got := summaryFailureCode(TaskJobAnalyze, model.TaskStageSummarizing, failure, "retry_exhausted"); got != "provider_5xx" {
+		t.Fatalf("summary code = %q", got)
+	}
+	if got := summaryFailureCode(TaskJobTranscribe, model.TaskStageTranscribing, failure, "retry_exhausted"); got != "retry_exhausted" {
+		t.Fatalf("transcribe code = %q", got)
+	}
+}
+
 func TestRecordTaskFailureUsesProviderRetryAfterAsLowerBound(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Date(2026, 7, 14, 13, 0, 0, 0, time.UTC)

@@ -198,6 +198,14 @@ func llmCallContext(callCtx CallContext) CallContext {
 
 func baseRecord(ctx context.Context, callCtx CallContext, startedAt time.Time, inputChars, outputChars int, err error) CallRecord {
 	callCtx = enrichCallContext(ctx, callCtx)
+	// Summary failures need a provider-side handle when the upstream supplied one.
+	// Transport failures and many gateways do not provide a request ID.
+	if callCtx.Stage == model.TaskStageSummarizing && callCtx.ProviderRequestID == "" {
+		var providerErr *ProviderError
+		if errors.As(err, &providerErr) {
+			callCtx.ProviderRequestID = providerErr.RequestID
+		}
+	}
 	status, errCode, errMsg := model.AICallStatusSuccess, "", ""
 	if err != nil {
 		status, errCode, errMsg = model.AICallStatusFailed, classifyProviderError(err), observability.SafeError(err)

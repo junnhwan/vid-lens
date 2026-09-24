@@ -6,6 +6,7 @@ import type { VideoTask } from '@/lib/types'
 import { fmtRelTime, fmtSize, sourceLabel, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
 import { taskCategory, taskStateView } from '@/lib/taskStatus'
+import { summaryFailureView } from '@/lib/summaryFailure'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { VideoStill } from '@/components/VideoPoster'
 
@@ -14,6 +15,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
   const state = taskStateView(task)
   const ready = task.status === 3 && task.has_transcription
   const failed = task.status === 4 || task.status === 5
+  const summaryFailure = summaryFailureView(task)
   const cat = taskCategory(task)
   const [durationMs, setDurationMs] = useState(0)
 
@@ -37,9 +39,9 @@ export function VideoCard({ task }: { task: VideoTask }) {
         {cat === 'processing' && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
         )}
-        {failed && task.error_msg && (
+        {failed && (summaryFailure || task.error_msg) && (
           <div className="mini-prog">
-            <div className="row"><b style={{ color: 'var(--bad)' }}>{task.error_msg}</b></div>
+            <div className="row"><b style={{ color: 'var(--bad)' }}>{summaryFailure ? `${summaryFailure.category} · ${summaryFailure.retry}` : task.error_msg}</b></div>
           </div>
         )}
       </div>
