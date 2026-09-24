@@ -22,7 +22,7 @@ import (
 // smaller model; a larger value requires an explicit configured window.
 const summaryDefaultContextTokens = 8192
 const summaryOutputTokens = 2048
-const summaryIntermediateOutputTokens = 512
+const summaryIntermediateOutputTokens = 1536
 const summaryReservedTokens = 2048
 const summaryPromptVersion = "summary_tree_v1"
 
