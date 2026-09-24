@@ -147,6 +147,7 @@ type AskResult struct {
 	Answer       string                      `json:"answer"`
 	Citations    []Citation                  `json:"citations"`
 	Model        string                      `json:"model"`
+	ProfileID    int64                       `json:"profile_id,omitempty"`
 	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
 	// Degraded marks either an unavailable retrieval path with video-context
 	// fallback or an LLM failure with a limited answer. Rerank fallback alone

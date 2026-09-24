@@ -40,12 +40,12 @@ PostgreSQL 的 `agent_memory_items`、`agent_memory_events` 和 `memory_capture_
 | 能力开关 `memory.enabled` | 会话策略 | 用户默认偏好 | effective | reason |
 |---|---|---|---|---|
 | false | 任意 | 任意 | false | `capability_disabled` |
-| true | disabled | 任意 | false | `session_disabled` |
-| true | enabled | 任意 | true | `session_enabled` |
+| true | 任意 | false/无记录 | false | `user_disabled` |
+| true | disabled | true | false | `session_disabled` |
+| true | enabled | true | true | `session_enabled` |
 | true | inherit | true | true | `user_enabled` |
-| true | inherit | false/无记录 | false | `user_disabled` |
 
-能力开关和用户默认值均默认为关闭，空会话策略按 `inherit` 处理。策略读取失败时问答可以继续，长期记忆 fail closed，响应使用 `policy_unavailable`，不能伪装成用户主动关闭。
+能力开关和用户默认值均默认为关闭，空会话策略按 `inherit` 处理。用户总开关是必要授权，会话级开启不能覆盖个人关闭；服务端能力开关仅限制可用性，关闭时仍可保存用户未来生效的选择。策略读取失败时问答可以继续，长期记忆 fail closed，响应使用 `policy_unavailable`，不能伪装成用户主动关闭。
 
 关闭策略阻止后续召回和自动写入，不删除已有 item；重新开启后，仍有效的既有记录可以重新进入候选。治理接口始终允许用户查看、撤回和删除自己的数据。
 

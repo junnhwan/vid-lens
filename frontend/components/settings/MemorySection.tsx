@@ -82,11 +82,7 @@ export function MemorySection({ user }: { user: User | null }) {
   }, [user, load])
 
   const togglePref = async () => {
-    if (!pref || savingPref) return
-    if (!pref.capability_enabled) {
-      toast.info(reasonText(pref.reason || '') || '服务端未开启记忆能力')
-      return
-    }
+    if (!pref || savingPref || user?.role === 'DEMO') return
     setSavingPref(true)
     try {
       const next = await api.updateMemoryPreference(!pref.enabled, pref.version)
@@ -153,17 +149,16 @@ export function MemorySection({ user }: { user: User | null }) {
           <div className="pref-row">
             <div className="pr-body">
               <b>长期记忆偏好</b>
-              <span>{pref.reason ? reasonText(pref.reason) : '开启后会在回答中召回已保存的偏好'}</span>
+              <span>自动写入仅提取你明确要求长期沿用的回答语言、详略和格式偏好，供你的 Chat 和 Agent 会话读取。Agent 还可读取你已授权的视频或知识库范围内的既有记忆；视频事实仍按当轮证据核对。</span>
             </div>
             <button
               className={`switch${pref.enabled ? ' on' : ''}`}
-              disabled={savingPref || !pref.capability_enabled}
-              title={!pref.capability_enabled ? (reasonText(pref.reason || '') || '服务端未开启记忆能力') : undefined}
-              style={!pref.capability_enabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+              disabled={savingPref || user?.role === 'DEMO'}
               onClick={() => void togglePref()}
               aria-label="长期记忆偏好开关"
             />
           </div>
+          <p style={{ fontSize: 11.5, color: 'var(--tx-4)', marginTop: 8 }}>关闭后不再读取或新增长期记忆，已有记录保留。下方可逐条撤回或删除用户范围的记忆；会话设置只能在这里开启且服务端允许时使用记忆。服务端停用能力时仍可保存你的选择，恢复服务后才会生效。</p>
           {pref.capability_enabled && !pref.effective_enabled && (
             <p style={{ fontSize: 11.5, color: 'var(--tx-4)', marginTop: 8 }}>{reasonText(pref.reason || '') || '当前记忆能力未生效。'}</p>
           )}

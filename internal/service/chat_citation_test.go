@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -71,10 +70,11 @@ func TestChatSeparatesLLMContextFromPublicCitation(t *testing.T) {
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("stored messages = %#v", messages)
 	}
-	var snapshot []Citation
-	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
+	decoded, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
+	if err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
 	}
+	snapshot := decoded.Citations
 	if len(snapshot) != 1 || snapshot[0].Content != citation.Content {
 		t.Fatalf("snapshot = %#v, citation = %#v", snapshot, citation)
 	}
@@ -144,10 +144,11 @@ func TestChatPublishesOnlyAnswerReferencedCitations(t *testing.T) {
 	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
-	var snapshot []Citation
-	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
+	decoded, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
+	if err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
 	}
+	snapshot := decoded.Citations
 	if len(snapshot) != 2 || snapshot[0].CitationID != "C1" || snapshot[1].CitationID != "C3" {
 		t.Fatalf("snapshot citations = %+v, want only public C1 and C3", snapshot)
 	}
@@ -174,7 +175,7 @@ func TestChatStreamEmitsFinalAnswerReferencedCitations(t *testing.T) {
 
 	var events []ChatStreamEvent
 	result, err := svc.AskStream(context.Background(), 8, session.ID, "重试状态怎么保存？", 3, &fakeEmbeddingClient{dim: 3}, chatClient, ai.Profile{
-		EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model",
+		ID: 42, EmbeddingModel: "text-embedding-3-small", LLMModel: "chat-model",
 	}, func(event ChatStreamEvent) error {
 		events = append(events, event)
 		return nil
@@ -241,12 +242,16 @@ func TestChatStreamEmitsFinalAnswerReferencedCitations(t *testing.T) {
 	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
-	var snapshot []Citation
-	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
+	decoded, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
+	if err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
 	}
+	snapshot := decoded.Citations
 	if len(snapshot) != 2 || snapshot[0].CitationID != "C1" || snapshot[1].CitationID != "C3" {
 		t.Fatalf("snapshot citations = %+v, want stable candidate order C1, C3", snapshot)
+	}
+	if messages[1].ExecutionMode != "chat" || messages[1].ModelName != "chat-model" || messages[1].ProfileID != 42 || len(decoded.Steps) == 0 {
+		t.Fatalf("missing frozen execution metadata or safe trace: %+v, steps=%+v", messages[1], decoded.Steps)
 	}
 }
 

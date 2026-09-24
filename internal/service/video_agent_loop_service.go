@@ -115,6 +115,10 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if err := json.Unmarshal([]byte(run.BudgetSnapshot), &budget); err != nil {
 		return nil, fmt.Errorf("decode frozen agent budget: %w", err)
 	}
+	var frozenProfile frozenAgentProfile
+	if err := json.Unmarshal([]byte(run.ProfileSnapshot), &frozenProfile); err != nil {
+		return nil, fmt.Errorf("decode frozen agent profile: %w", err)
+	}
 	req.TopK = frozenPolicy.TopK
 	policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
 	if err := policy.Validate(); err != nil {
@@ -286,11 +290,15 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		Template:     string(VideoAgentLoopTemplate),
 		Citations:    append([]Citation(nil), runResult.State.Citations...),
 		Trace:        trace,
-		Model:        profile.LLMModel,
+		Model:        frozenProfile.LLMModel,
+		ProfileID:    frozenProfile.ProfileID,
 		RunID:        runID,
 		Mode:         string(VideoAgentLoopTemplate),
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: memoryPolicy,
+	}
+	if result.ProfileID == 0 {
+		result.ProfileID = budget.ProfileID
 	}
 	if err := emitProgress(ctx, ConversationProgress{ID: "save", Kind: "save", Label: "保存回答与引用", Status: "running"}); err != nil {
 		return nil, err
@@ -365,7 +373,7 @@ func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessi
 		if decodeErr != nil || snapshot.RunID != runID {
 			continue
 		}
-		return &VideoAgentResult{StopReason: snapshot.StopReason, BudgetNotice: snapshot.BudgetNotice, Budget: snapshot.Budget, Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
+		return &VideoAgentResult{StopReason: snapshot.StopReason, BudgetNotice: snapshot.BudgetNotice, Budget: snapshot.Budget, Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, ProfileID: message.ProfileID, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
 	}
 	return nil, nil
 }

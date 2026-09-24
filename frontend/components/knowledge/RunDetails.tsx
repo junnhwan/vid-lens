@@ -48,5 +48,5 @@ export function SessionMemoryControl({ sessionId, disabled }: { sessionId: numbe
   }
   return <div className={styles.memory}><label>本次会话的长期记忆<br/><select aria-label="会话记忆策略" value={view?.policy || 'inherit'} disabled={!view || busy || disabled || !view.effective_memory_policy.capability_enabled} onChange={e=>void change(e.target.value as SessionMemoryPolicy['policy'])}>
     <option value="inherit">沿用我的默认设置</option><option value="enabled">在此会话中开启</option><option value="disabled">在此会话中关闭</option>
-  </select></label><p>{error || (view ? !view.effective_memory_policy.capability_enabled ? '服务端尚未开启记忆能力' : view.effective_memory_policy.effective_enabled ? '记住回答偏好；视频事实仍以当前证据为准' : '不召回或新增长期记忆' : '加载记忆设置…')}</p></div>
+  </select></label><p>{error || (view ? !view.effective_memory_policy.capability_enabled ? '服务端尚未开启记忆能力' : !view.effective_memory_policy.user_enabled ? '请先在设置 → 记忆中开启个人长期记忆；会话设置不能越过个人选择' : view.effective_memory_policy.effective_enabled ? '记住回答偏好；视频事实仍以当前证据为准' : '不召回或新增长期记忆' : '加载记忆设置…')}</p></div>
 }

@@ -34,6 +34,8 @@ type ChatMessage struct {
 	Content           string    `gorm:"type:text;not null" json:"content"`
 	RetrievalSnapshot *string   `gorm:"type:json" json:"retrieval_snapshot,omitempty"`
 	ModelName         string    `gorm:"type:varchar(100)" json:"model_name,omitempty"`
+	ExecutionMode     string    `gorm:"type:varchar(30)" json:"execution_mode,omitempty"`
+	ProfileID         int64     `gorm:"not null;default:0" json:"profile_id,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 

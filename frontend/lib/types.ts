@@ -296,6 +296,8 @@ export interface ChatMessage {
   content: string
   retrieval_snapshot?: string // JSON 字符串指针，非对象
   model_name?: string
+  execution_mode?: string
+  profile_id?: number
   created_at: string
 }
 
@@ -372,6 +374,7 @@ export interface AskResult {
   answer: string
   citations: Citation[]
   model: string
+  profile_id?: number
   degraded?: boolean
   degradation_reason?: string
   diagnostic_id?: string
@@ -417,6 +420,7 @@ export const BLOCKED_ANSWER_PREFIX = '现有证据不足或存在冲突'
 export interface SSEDone {
   message_id: number
   model: string
+  profile_id?: number
   answer: string
   degraded?: boolean
   degradation_reason?: string
@@ -489,6 +493,8 @@ export interface AgentDoneEvent {
   answer?: string
   run_id: string
   message_id: number
+  model?: string
+  profile_id?: number
   degraded?: boolean
   trace_summary?: { steps: number; tools: number; retrievals: number }
 }

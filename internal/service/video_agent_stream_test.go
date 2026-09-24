@@ -122,7 +122,7 @@ func TestVideoAgentStreamEmitsStepErrorAndStopsOnToolFailure(t *testing.T) {
 		}
 	}
 	stepError := events[len(events)-1].Data.(AgentStepEvent)
-	if stepError.Status != "error" || stepError.Error != "retrieval unavailable" {
+	if stepError.Status != "error" || stepError.Error != safeAgentStepError("retrieval unavailable") {
 		t.Fatalf("step_error = %#v", stepError)
 	}
 }

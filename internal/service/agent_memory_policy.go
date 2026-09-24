@@ -183,6 +183,10 @@ func ResolveEffectiveMemoryPolicy(capabilityEnabled, userEnabled bool, userVersi
 		policy.Reason = model.MemoryPolicyReasonCapabilityDisabled
 		return policy
 	}
+	if !userEnabled {
+		policy.Reason = model.MemoryPolicyReasonUserDisabled
+		return policy
+	}
 	switch sessionPolicy {
 	case model.MemorySessionPolicyDisabled:
 		policy.Reason = model.MemoryPolicyReasonSessionDisabled
@@ -190,12 +194,8 @@ func ResolveEffectiveMemoryPolicy(capabilityEnabled, userEnabled bool, userVersi
 		policy.EffectiveEnabled = true
 		policy.Reason = model.MemoryPolicyReasonSessionEnabled
 	default:
-		policy.EffectiveEnabled = userEnabled
-		if userEnabled {
-			policy.Reason = model.MemoryPolicyReasonUserEnabled
-		} else {
-			policy.Reason = model.MemoryPolicyReasonUserDisabled
-		}
+		policy.EffectiveEnabled = true
+		policy.Reason = model.MemoryPolicyReasonUserEnabled
 	}
 	return policy
 }

@@ -18,6 +18,7 @@ export interface AgentSnapshotStepJSON {
   output?: string
   error?: string
   ts?: string
+  duration_ms?: number
 }
 
 interface AgentSnapshotEnvelopeJSON {
@@ -69,7 +70,8 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
       let steps = obj.steps.map((step, index) => snapshotStepToTrace(step, index, runId))
       const budget = budgetProgress(obj.stop_reason, obj.budget_notice)
       if (budget) steps = progressTrace(steps, budget)
-      return { ...(obj.degraded ? { degraded: true } : {}), steps, runId, mode, isAgentEnvelope: true, source: 'agent' }
+      const isAgentEnvelope = mode !== 'chat'
+      return { ...(obj.degraded ? { degraded: true } : {}), ...(obj.degradation_reason ? { degradationReason: obj.degradation_reason } : {}), ...(obj.diagnostic_id ? { diagnosticId: obj.diagnostic_id } : {}), steps, runId, mode, isAgentEnvelope, source: isAgentEnvelope ? 'agent' : 'server' }
     }
     if (Array.isArray(obj.trace) && obj.trace.length > 0) {
       return { steps: obj.trace.map((step, index) => legacyAgentStepToTrace(step, `hist-${index + 1}`, runId)), runId, mode, isAgentEnvelope: true, source: 'legacy' }
@@ -103,6 +105,7 @@ function snapshotStepToTrace(step: AgentSnapshotStepJSON, index: number, runId?:
     tool: step.tool?.trim() || undefined,
     toolInput: formatSnapshotInput(step.input),
     toolOutput: output,
+    durationMs: step.duration_ms,
     detail: error || output,
     error,
   }
@@ -122,7 +125,7 @@ function legacyAgentStepToTrace(step: LegacyVideoAgentStepJSON, id: string, runI
 function snapshotKind(kind: string, tool?: string): TraceStepKind {
   if (kind === 'retrieve' || tool === 'search_transcript') return 'retrieve'
   if (kind === 'answer' || tool === 'build_cited_answer') return 'answer'
-  if (kind === 'think' || kind === 'plan' || kind === 'observe' || kind === 'tool' || kind === 'save') return kind
+  if (kind === 'think' || kind === 'prepare' || kind === 'plan' || kind === 'observe' || kind === 'tool' || kind === 'save') return kind
   return 'tool'
 }
 

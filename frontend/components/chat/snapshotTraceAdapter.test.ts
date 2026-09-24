@@ -44,3 +44,13 @@ test('Chat retrieval fallback survives history reload without becoming an Agent 
   assert.equal(parsed?.diagnosticId, 'trace-123')
   assert.equal(parsed?.isAgentEnvelope, false)
 })
+
+test('saved Chat stages return as public execution records after reload', () => {
+  const parsed = parseSnapshotTrace(JSON.stringify({ mode: 'chat', citations: [], steps: [
+    { step_id: 'retrieve', kind: 'retrieve', label: '检索视频证据', status: 'done', tool: 'video_evidence_search', input: { summary: '授权范围' }, output: '找到 2 条候选引用', duration_ms: 123 },
+  ] }))
+  assert.equal(parsed?.isAgentEnvelope, false)
+  assert.equal(parsed?.source, 'server')
+  assert.equal(parsed?.steps[0]?.durationMs, 123)
+  assert.match(parsed?.steps[0]?.toolInput || '', /授权范围/)
+})

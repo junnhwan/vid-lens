@@ -8,6 +8,8 @@ import { parseSnapshotTrace } from '@/components/chat/snapshotTraceAdapter'
 
 export interface ChatMsg {
   messageId?: number
+  modelName?: string
+  profileId?: number
   runStatus?: string
   role: 'user' | 'assistant'
   content: string
@@ -53,6 +55,8 @@ export function parseMessages(
       messageId: m.id,
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      ...(m.model_name ? { modelName: m.model_name } : {}),
+      ...(m.profile_id ? { profileId: m.profile_id } : {}),
       createdAt: Date.parse(m.created_at),
       ...(m.role === 'assistant' && msgs[index - 1]?.role === 'user' ? {
         processStartedAt: Date.parse(msgs[index - 1].created_at),
@@ -64,10 +68,11 @@ export function parseMessages(
       openCiteIds: [],
       ...(cites ? { cites } : {}),
       ...(snapshotTrace?.runId ? { agentRunId: snapshotTrace.runId } : {}),
-      ...(agentRun && snapshotTrace?.mode ? { agentMode: snapshotTrace.mode } : {}),
+      ...(agentRun && (m.execution_mode || snapshotTrace?.mode) ? { agentMode: m.execution_mode || snapshotTrace?.mode } : {}),
       ...(trace ? {
         trace,
-        ...(agentRun ? { agentRun: true, traceSource: snapshotTrace?.source } : {}),
+        ...(snapshotTrace?.source ? { traceSource: snapshotTrace.source } : {}),
+        ...(agentRun ? { agentRun: true } : {}),
       } : {}),
     }
   })

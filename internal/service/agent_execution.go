@@ -17,6 +17,7 @@ import (
 const agentStepLeaseDuration = 2 * time.Minute
 
 type frozenAgentProfile struct {
+	ProfileID               int64  `json:"profile_id,omitempty"`
 	LLMProvider             string `json:"llm_provider"`
 	LLMModel                string `json:"llm_model"`
 	LLMEndpointDigest       string `json:"llm_endpoint_digest"`
@@ -78,6 +79,7 @@ func (s *VideoAgentService) ensureAgentRun(ctx context.Context, runID string, us
 
 func safeAgentProfile(profile ai.Profile) frozenAgentProfile {
 	return frozenAgentProfile{
+		ProfileID:   profile.ID,
 		LLMProvider: profile.LLMProvider, LLMModel: profile.LLMModel, LLMEndpointDigest: digestAgentValue(strings.TrimSpace(profile.LLMBaseURL)),
 		EmbeddingProvider: profile.EmbeddingProvider, EmbeddingModel: profile.EmbeddingModel, EmbeddingDim: profile.EmbeddingDim,
 		EmbeddingEndpointDigest: digestAgentValue(strings.TrimSpace(profile.EmbeddingEndpoint)),

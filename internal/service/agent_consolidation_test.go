@@ -115,6 +115,9 @@ func (c *recordingPreferenceCapture) EnqueueExtraction(req MemoryExtractionReque
 func TestAgentReplayDoesNotRecallOrExtractMemoryAgain(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	policy := NewMemoryPolicyService(repos.Memory, true)
+	if _, err := policy.UpdatePreference(context.Background(), 7, true, 0); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := policy.UpdateSessionPolicy(context.Background(), 7, session.ID, model.MemorySessionPolicyEnabled, 0); err != nil {
 		t.Fatal(err)
 	}

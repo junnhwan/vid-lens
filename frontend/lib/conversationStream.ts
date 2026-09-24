@@ -8,6 +8,8 @@ export interface ProgressEvent {
   label: string
   status: 'running' | 'done' | 'error' | 'cancelled'
   detail?: string
+  input_summary?: string
+  output_summary?: string
   tool?: string
   evidence_refs?: string[]
   replan?: boolean

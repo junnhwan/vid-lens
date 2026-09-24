@@ -461,6 +461,9 @@ func (p staticMemoryProvider) Snapshot(context.Context, MemorySnapshotRequest) (
 func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	policyService := NewMemoryPolicyService(repos.Memory, true)
+	if _, err := policyService.UpdatePreference(context.Background(), session.UserID, true, 0); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := policyService.UpdateSessionPolicy(context.Background(), session.UserID, session.ID, model.MemorySessionPolicyEnabled, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -513,6 +516,9 @@ func TestVideoAgentInjectsMemoryBelowCurrentEvidenceAndPersistsSnapshotIdentity(
 func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	repos, task, session := newVideoAgentTestSession(t)
 	policyService := NewMemoryPolicyService(repos.Memory, true)
+	if _, err := policyService.UpdatePreference(context.Background(), session.UserID, true, 0); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := policyService.UpdateSessionPolicy(context.Background(), session.UserID, session.ID, model.MemorySessionPolicyEnabled, 0); err != nil {
 		t.Fatal(err)
 	}

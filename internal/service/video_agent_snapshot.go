@@ -73,7 +73,12 @@ func NewAgentSnapshot(runID, mode, template string, trace []VideoAgentStep, cita
 	citationCopy := make([]Citation, len(citations))
 	copy(citationCopy, citations)
 
-	legacyTrace := append([]VideoAgentStep(nil), trace...)
+	legacyTrace := make([]VideoAgentStep, 0, len(trace))
+	for _, step := range trace {
+		step.Input = safeAgentStepInput(step)
+		step.Error = safeAgentStepError(step.Error)
+		legacyTrace = append(legacyTrace, step)
+	}
 	return AgentSnapshot{
 		Version:   AgentSnapshotVersion,
 		RunID:     runID,
@@ -86,7 +91,7 @@ func NewAgentSnapshot(runID, mode, template string, trace []VideoAgentStep, cita
 }
 
 func agentSnapshotStep(number int, step VideoAgentStep) AgentSnapshotStep {
-	input := cloneAgentStepInput(step.Input)
+	input := safeAgentStepInput(step)
 	status := AgentStepStatusDone
 	if strings.TrimSpace(step.Error) != "" {
 		status = AgentStepStatusError
@@ -99,20 +104,40 @@ func agentSnapshotStep(number int, step VideoAgentStep) AgentSnapshotStep {
 		Tool:   strings.TrimSpace(step.Tool),
 		Input:  input,
 		Output: strings.TrimSpace(step.OutputRef),
-		Error:  strings.TrimSpace(step.Error),
+		Error:  safeAgentStepError(step.Error),
 		TS:     time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }
 
-func cloneAgentStepInput(input map[string]any) map[string]any {
-	if input == nil {
+func safeAgentStepInput(step VideoAgentStep) map[string]any {
+	if len(step.Input) == 0 {
 		return map[string]any{}
 	}
-	clone := make(map[string]any, len(input))
-	for key, value := range input {
-		clone[key] = value
+	encoded, _ := json.Marshal(step.Input)
+	summary := map[string]any{"arguments_digest": "sha256:" + digestAgentValue(string(encoded))}
+	input := step.Input
+	if raw, ok := step.Input["arguments"].(string); ok {
+		var nested map[string]any
+		if json.Unmarshal([]byte(raw), &nested) == nil {
+			input = nested
+		}
 	}
-	return clone
+	for _, key := range []string{"top_k", "chunk_index", "radius", "start_ms", "end_ms", "task_id", "citation_count"} {
+		if value, ok := input[key]; ok {
+			switch value.(type) {
+			case int, int32, int64, float32, float64:
+				summary[key] = value
+			}
+		}
+	}
+	return summary
+}
+
+func safeAgentStepError(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	return "步骤失败；查看运行状态或重试"
 }
 
 func agentSnapshotStepLabel(step VideoAgentStep) string {

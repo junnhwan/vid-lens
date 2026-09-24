@@ -134,6 +134,12 @@ func TestAppendCapturedRechecksPolicyScopeAndKeepsExistingMemoryOnOptOut(t *test
 	if _, _, err := repo.UpdateSessionMemoryPolicy(ctx, 5, session.ID, model.MemorySessionPolicyEnabled, 0, true); err != nil {
 		t.Fatal(err)
 	}
+	if _, allowed, err := repo.AppendCaptured(ctx, session.ID, newItem("still-disabled", "个人关闭")); err != nil || allowed {
+		t.Fatalf("session override bypassed user choice: allowed=%v err=%v", allowed, err)
+	}
+	if _, err := repo.UpdateMemoryPreference(ctx, 5, true, 0, true); err != nil {
+		t.Fatal(err)
+	}
 	if _, allowed, err := repo.AppendCaptured(ctx, session.ID, newItem("kept", "显式开启")); err != nil || !allowed {
 		t.Fatalf("enabled capture allowed=%v err=%v", allowed, err)
 	}

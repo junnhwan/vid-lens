@@ -364,16 +364,14 @@ func validSessionMemoryPolicy(policy string) bool {
 }
 
 func effectiveMemoryEnabled(capabilityEnabled, userEnabled bool, sessionPolicy string) bool {
-	if !capabilityEnabled {
+	if !capabilityEnabled || !userEnabled {
 		return false
 	}
 	switch normalizeSessionMemoryPolicy(sessionPolicy) {
-	case model.MemorySessionPolicyEnabled:
-		return true
 	case model.MemorySessionPolicyDisabled:
 		return false
 	default:
-		return userEnabled
+		return true
 	}
 }
 

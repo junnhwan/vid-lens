@@ -28,7 +28,7 @@ import { formatDuration } from '@/lib/duration'
 import type { Citation, ChatScopeType, VideoChatMode, VideoQuestionResult } from '@/lib/types'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
-// Agent steps come from live tool events; Chat progress remains inferred.
+// Agent steps come from live tool events; new Chat answers retain server-safe progress.
 
 const TOP_K = 4
 
@@ -364,7 +364,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               </button>
             </div>
             </div>
-            <p className="mode-note">{scopeType === 'video_library' ? '范围：整个视频库中已建立索引的视频' : scopeType === 'knowledge_base' ? `范围：知识库「${scopeName}」的成员视频` : MODE_NOTE[mode]}</p>
+            <p className="mode-note">{scopeType === 'video_library' ? '范围：整个视频库中已建立索引的视频' : scopeType === 'knowledge_base' ? `范围：知识库「${scopeName}」的成员视频` : MODE_NOTE[mode]} · 模式和当前默认 AI 配置从发送的下一轮起生效；历史回答保留当轮实际模型与配置。</p>
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
@@ -440,12 +440,12 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               <>
                 <div className="run-meta">
                   <span className="chip chip-mute mono">chat</span>
-                  <span className="chip chip-mute">{lastAssistant?.traceSource === 'server' ? '实时' : '历史摘要'}</span>
+                  <span className="chip chip-mute">{streaming ? '实时' : lastAssistant?.traceSource === 'server' ? '已保存记录' : '历史摘要'}</span>
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>{lastAssistant?.traceSource === 'server' ? '来自服务端的实际执行进度' : '发送问题后查看执行过程'}</p>
-                {ragTrace.length > 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--tx-4)', marginBottom: 10 }}>{lastAssistant?.traceSource === 'server' ? '服务端记录的阶段与调用摘要；模型内部推理未保存' : '发送问题后查看执行过程'}</p>
+                {(ragTrace.length > 0 ? ragTrace : lastAssistant?.trace ?? []).length > 0 ? (
                   <div className="steps">
-                    {ragTrace.map(step => <TraceStepView key={step.id} step={step} />)}
+                    {(ragTrace.length > 0 ? ragTrace : lastAssistant?.trace ?? []).map(step => <TraceStepView key={step.id} step={step} />)}
                   </div>
                 ) : (
                   <div className="rail-empty" style={{ paddingTop: 44 }}>
@@ -608,6 +608,8 @@ function AgentMessageView({
         ) : (
           <span className="chip chip-mute mono">chat</span>
         )}
+        <span className="chip chip-mute">{msg.modelName ? `${msg.degraded ? '尝试模型' : '模型'}：${msg.modelName}` : '模型未记录'}</span>
+        <span className="chip chip-mute">{msg.profileId ? `配置 #${msg.profileId}` : '配置未记录'}</span>
         <button className="meta-link" onClick={copyAnswer}>
           <Icon name="file" size="sm" />复制回答
         </button>
@@ -636,6 +638,7 @@ function TraceStepView({ step }: { step: ChatTraceStep }) {
           </span>
         </div>
       )}
+      {(step.tool || step.toolInput || step.toolOutput || step.kind === 'prepare') && <details className="step-body"><summary>{step.kind === 'prepare' ? '上下文准备详情' : step.kind === 'retrieve' ? '检索详情' : '步骤详情'}</summary>{step.tool && <p>实际调用：{step.tool}</p>}{step.toolInput && <p>输入摘要：{step.toolInput}</p>}{step.toolOutput && <p>结果摘要：{step.toolOutput}</p>}</details>}
     </div>
   )
 }
@@ -653,6 +656,7 @@ function AgentTraceStepView({ step }: { step: ChatTraceStep }) {
         {durationMs && <span className="step-dur mono">{formatDuration(durationMs)}</span>}
       </div>
       <div className="step-body">
+        {(step.kind === 'plan' || step.tool) && <details><summary>{step.kind === 'plan' ? '模型计划摘要' : '工具调用详情'}</summary>{step.tool && <p>{step.kind === 'plan' ? '计划下一步' : '实际调用'}：{step.tool}</p>}{step.toolInput && <p>输入摘要：{step.toolInput}</p>}{step.toolOutput && <p>结果摘要：{step.toolOutput}</p>}{step.error && <p>失败：{step.error}</p>}</details>}
         {showHits ? (
           <div className="hits-card">
             <div className="hits-q">

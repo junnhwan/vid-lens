@@ -17,13 +17,17 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 
 func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
 	ctx = withChatCorrelation(ctx)
+	ctx = withChatExecutionRecord(ctx, mode, profile)
+	_ = emitProgress(ctx, ConversationProgress{ID: "prepare", Kind: "prepare", Status: "running"})
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
 	prepared, err := s.prepareChatByMode(ctx, normalizeChatMode(mode), userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
 		return nil, err
 	}
+	_ = emitProgress(ctx, ConversationProgress{ID: "prepare", Kind: "prepare", Status: "done"})
 	memoryPolicy := s.effectiveMemoryPolicyForRequest(ctx, prepared.Session)
 	s.injectChatPreferences(ctx, prepared, memoryPolicy)
+	_ = emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Status: "running"})
 
 	answer, llmErr := chat.Chat(ctx, prepared.Messages)
 	if llmErr != nil {
@@ -35,7 +39,8 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		if shouldTriggerLLMDegradation(prepared.Policy, llmErr) {
 			degradedAnswer := s.applyTier2Degradation(ctx, prepared)
 			finalized := finalizeAnswerCitations(degradedAnswer, prepared.Citations)
-			degradationReason := ""
+			_ = emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Status: "done"})
+			degradationReason := "generation_unavailable"
 			if prepared.DegradationReason != "" {
 				degradationReason = "retrieval_and_generation_unavailable"
 			}
@@ -53,6 +58,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	}
 
 	finalized := finalizeChatAnswer(prepared, answer)
+	_ = emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Status: "done"})
 	result, err := s.saveChatExchangeWithStatus(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.DegradationReason, prepared.FrozenMemberIDs)
 	if err != nil {
 		return nil, err
@@ -77,22 +83,28 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 	if degradationReason != "" {
 		diagnosticID = observability.CorrelationFromContext(ctx).TraceID
 	}
-	if degradationReason == "" {
-		snapshot, err = json.Marshal(citations)
-	} else {
-		snapshot, err = json.Marshal(struct {
-			Citations         []Citation `json:"citations"`
-			Degraded          bool       `json:"degraded"`
-			DegradationReason string     `json:"degradation_reason"`
-			DiagnosticID      string     `json:"diagnostic_id,omitempty"`
-		}{citations, true, degradationReason, diagnosticID})
+	record := chatExecutionFromContext(ctx)
+	mode := "chat"
+	profile := ai.Profile{}
+	steps := []chatExecutionStep{}
+	if record != nil {
+		mode, profile = record.Mode, record.Profile
+		steps = record.completedSteps()
 	}
+	snapshot, err = json.Marshal(struct {
+		Citations         []Citation          `json:"citations"`
+		Steps             []chatExecutionStep `json:"steps"`
+		Mode              string              `json:"mode"`
+		Degraded          bool                `json:"degraded,omitempty"`
+		DegradationReason string              `json:"degradation_reason,omitempty"`
+		DiagnosticID      string              `json:"diagnostic_id,omitempty"`
+	}{citations, steps, mode, degradationReason != "", degradationReason, diagnosticID})
 	if err != nil {
 		return nil, err
 	}
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
-	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: answer, RetrievalSnapshot: &snapshotText, ModelName: modelName}
+	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: answer, RetrievalSnapshot: &snapshotText, ModelName: modelName, ExecutionMode: mode, ProfileID: profile.ID}
 	sourceTaskIDs := make([]int64, 0, len(citations))
 	seenTasks := make(map[int64]struct{}, len(citations))
 	for _, citation := range citations {
@@ -116,7 +128,7 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 	if recentLimit > 0 {
 		_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	}
-	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID}, nil
+	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName, ProfileID: profile.ID, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID}, nil
 }
 
 func withChatCorrelation(ctx context.Context) context.Context {

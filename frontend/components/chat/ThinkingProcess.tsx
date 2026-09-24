@@ -58,7 +58,7 @@ function ProcessStep({ step, reasoning, now }: { step: ChatTraceStep; reasoning?
       {step.replan && <span className={styles.badge}>调整检索策略</span>}
       {!!step.evidenceRefs?.length && <span className={styles.badge}>参考已有 {step.evidenceRefs.length} 条证据</span>}
       {step.query && <p className={styles.detail}>检索：{step.query}</p>}
-      {step.tool && step.kind !== 'plan' && <details className={styles.tool}><summary>工具详情</summary><code>{step.tool}</code>{step.toolInput && <pre>{step.toolInput}</pre>}{step.toolOutput && <p>{step.toolOutput}</p>}</details>}
+      {(step.tool || step.toolInput || step.toolOutput || step.kind === 'plan' || step.kind === 'prepare') && <details className={styles.tool}><summary>{step.kind === 'plan' ? '模型计划摘要' : step.kind === 'prepare' ? '上下文准备详情' : '工具调用详情'}</summary>{step.tool && step.kind !== 'plan' && <p>实际调用：<code>{step.tool}</code></p>}{step.toolInput && <p>输入摘要：{step.toolInput}</p>}{step.toolOutput && <p>结果摘要：{step.toolOutput}</p>}{step.kind === 'plan' && step.detail && <p>{step.detail}</p>}</details>}
       {reasoning && <Reasoning text={reasoning} />}
     </div>
   </li>

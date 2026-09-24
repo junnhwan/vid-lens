@@ -7,6 +7,7 @@ import (
 )
 
 type Profile struct {
+	ID                int64
 	LLMProvider       string
 	LLMBaseURL        string
 	LLMAPIKey         string

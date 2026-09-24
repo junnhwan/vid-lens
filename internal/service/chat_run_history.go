@@ -45,7 +45,7 @@ func (s *ChatService) ListUnfinishedRunHistory(ctx context.Context, userID, sess
 		if records == nil || records.Run.SessionID != sessionID {
 			continue
 		}
-		item := ChatRunHistory{StopReason: run.StopReason, RunID: run.ID, Question: run.Goal, Status: run.Status, Error: run.ErrorMessage, CreatedAt: run.CreatedAt, Steps: []ConversationProgress{}}
+		item := ChatRunHistory{StopReason: run.StopReason, RunID: run.ID, Question: run.Goal, Status: run.Status, Error: safeAgentStepError(run.ErrorMessage), CreatedAt: run.CreatedAt, Steps: []ConversationProgress{}}
 		latest := map[string]int{}
 		for _, step := range records.Steps {
 			status := "done"
@@ -72,7 +72,7 @@ func (s *ChatService) ListUnfinishedRunHistory(ctx context.Context, userID, sess
 				p.PlanID = fmt.Sprintf("plan-%d", step.Sequence/2)
 			}
 			if step.ErrorMessage != "" {
-				p.Detail = step.ErrorMessage
+				p.Detail = safeAgentStepError(step.ErrorMessage)
 			}
 			if index, ok := latest[p.ID]; ok {
 				item.Steps[index] = p

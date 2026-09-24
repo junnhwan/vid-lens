@@ -2,7 +2,7 @@
 
 export type TraceStepStatus = 'pending' | 'running' | 'done' | 'error' | 'cancelled'
 
-export type TraceStepKind = 'think' | 'retrieve' | 'tool' | 'answer' | 'plan' | 'observe' | 'save'
+export type TraceStepKind = 'think' | 'prepare' | 'retrieve' | 'tool' | 'answer' | 'plan' | 'observe' | 'save'
 
 export interface ChatTraceStep {
   /** 后端 step_id，如 s1、s2；RAG 推断步骤使用固定 id */
@@ -36,7 +36,7 @@ export interface AgentHitPreview {
   score?: number
 }
 
-export type TracePanelSource = 'agent' | 'inferred' | 'legacy'
+export type TracePanelSource = 'agent' | 'inferred' | 'legacy' | 'server'
 
 export interface AgentTraceState {
   runId: string | null
@@ -355,7 +355,7 @@ export function finishTrace(steps: ChatTraceStep[], status: TraceStepStatus): Ch
 export function progressTrace(steps: ChatTraceStep[], p: import('../../lib/conversationStream.ts').ProgressEvent): ChatTraceStep[] {
   return mergeStep(steps, p.id, {
     kind: p.kind as TraceStepKind, label: p.label, status: p.status, detail: p.detail,
-    runId: p.run_id, planId: p.plan_id, tool: p.tool, evidenceRefs: p.evidence_refs,
+    runId: p.run_id, planId: p.plan_id, tool: p.tool, toolInput: p.input_summary, toolOutput: p.output_summary, evidenceRefs: p.evidence_refs,
     replan: p.replan, ...(p.duration_ms !== undefined ? { durationMs: p.duration_ms } : {}),
     ...(p.status === 'running' ? { startedAt: p.ts } : {}),
   })

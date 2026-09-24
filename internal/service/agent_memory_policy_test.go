@@ -20,7 +20,7 @@ func TestResolveEffectiveMemoryPolicyTruthTable(t *testing.T) {
 	}{
 		{name: "capability off dominates", capability: false, user: true, session: model.MemorySessionPolicyEnabled, reason: model.MemoryPolicyReasonCapabilityDisabled},
 		{name: "session disabled dominates user", capability: true, user: true, session: model.MemorySessionPolicyDisabled, reason: model.MemoryPolicyReasonSessionDisabled},
-		{name: "session enabled overrides user", capability: true, user: false, session: model.MemorySessionPolicyEnabled, enabled: true, reason: model.MemoryPolicyReasonSessionEnabled},
+		{name: "user opt-out dominates session", capability: true, user: false, session: model.MemorySessionPolicyEnabled, reason: model.MemoryPolicyReasonUserDisabled},
 		{name: "inherit enabled user", capability: true, user: true, session: model.MemorySessionPolicyInherit, enabled: true, reason: model.MemoryPolicyReasonUserEnabled},
 		{name: "inherit defaults off", capability: true, user: false, session: "", reason: model.MemoryPolicyReasonUserDisabled},
 	}

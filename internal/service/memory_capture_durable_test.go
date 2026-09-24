@@ -14,6 +14,9 @@ func TestDurableCaptureIsCommittedWithAnswerAndRechecksConsent(t *testing.T) {
 			repos.Chat.EnableDurableMemoryCapture(true)
 			ctx := context.Background()
 			policies := NewMemoryPolicyService(repos.Memory, true)
+			if _, err := policies.UpdatePreference(ctx, 7, true, 0); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := policies.UpdateSessionPolicy(ctx, 7, session.ID, "enabled", 0); err != nil {
 				t.Fatal(err)
 			}

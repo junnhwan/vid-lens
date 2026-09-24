@@ -103,7 +103,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		TimeRanges:     timeRanges,
 	})
 	if err != nil {
-		_ = emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索未完成", Status: "error", Detail: err.Error()})
+		_ = emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索未完成", Status: "error", Detail: "检索未完成"})
 		return nil, err
 	}
 	contexts, citations := buildCitationSet(question, retrieval.Citations)

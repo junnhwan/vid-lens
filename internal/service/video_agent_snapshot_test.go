@@ -42,7 +42,7 @@ func TestMarshalAgentSnapshotUsesVersionedReplayableStepEnvelope(t *testing.T) {
 	if step.StepID != "s1" || step.Kind != "retrieve" || step.Label != "检索转写片段" || step.Status != AgentStepStatusDone {
 		t.Fatalf("snapshot step = %+v", step)
 	}
-	if step.Tool != VideoAgentToolSearchTranscript || step.Output != "citations:2" || step.Input["top_k"] != float64(4) {
+	if step.Tool != VideoAgentToolSearchTranscript || step.Output != "citations:2" || step.Input["arguments_digest"] == nil {
 		t.Fatalf("snapshot step details = %+v", step)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, step.TS); err != nil {
@@ -185,7 +185,7 @@ func TestAgentSnapshotMarksFailureAndCancellationAsTerminalErrors(t *testing.T) 
 			if err != nil {
 				t.Fatalf("DecodeAgentSnapshot() error = %v", err)
 			}
-			if len(got.Steps) != 1 || got.Steps[0].Status != AgentStepStatusError || got.Steps[0].Error != tt.err {
+			if len(got.Steps) != 1 || got.Steps[0].Status != AgentStepStatusError || got.Steps[0].Error != safeAgentStepError(tt.err) {
 				t.Fatalf("terminal error step = %+v", got.Steps)
 			}
 		})

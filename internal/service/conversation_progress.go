@@ -9,18 +9,20 @@ import (
 
 // Progress is public execution metadata, separate from provider reasoning.
 type ConversationProgress struct {
-	ID           string   `json:"id"`
-	RunID        string   `json:"run_id,omitempty"`
-	PlanID       string   `json:"plan_id,omitempty"`
-	Kind         string   `json:"kind"`
-	Label        string   `json:"label"`
-	Status       string   `json:"status"`
-	Detail       string   `json:"detail,omitempty"`
-	Tool         string   `json:"tool,omitempty"`
-	EvidenceRefs []string `json:"evidence_refs,omitempty"`
-	Replan       bool     `json:"replan,omitempty"`
-	DurationMs   int64    `json:"duration_ms,omitempty"`
-	TS           string   `json:"ts"`
+	ID            string   `json:"id"`
+	RunID         string   `json:"run_id,omitempty"`
+	PlanID        string   `json:"plan_id,omitempty"`
+	Kind          string   `json:"kind"`
+	Label         string   `json:"label"`
+	Status        string   `json:"status"`
+	Detail        string   `json:"detail,omitempty"`
+	InputSummary  string   `json:"input_summary,omitempty"`
+	OutputSummary string   `json:"output_summary,omitempty"`
+	Tool          string   `json:"tool,omitempty"`
+	EvidenceRefs  []string `json:"evidence_refs,omitempty"`
+	Replan        bool     `json:"replan,omitempty"`
+	DurationMs    int64    `json:"duration_ms,omitempty"`
+	TS            string   `json:"ts"`
 }
 type ConversationReasoning struct {
 	CallID string `json:"call_id"`
@@ -43,6 +45,16 @@ func emitProgress(ctx context.Context, p ConversationProgress) error {
 		return err
 	}
 	p.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	if record := chatExecutionFromContext(ctx); record != nil {
+		step := record.observe(p)
+		p.Kind, p.Label, p.Tool = step.Kind, step.Label, step.Tool
+		if summary, ok := step.Input["summary"].(string); ok {
+			p.InputSummary = summary
+		}
+		p.OutputSummary = step.Output
+		p.Detail = step.Output
+		p.DurationMs = step.DurationMs
+	}
 	if sink := progressContext(ctx).emit; sink != nil {
 		return sink(p)
 	}
@@ -84,7 +96,7 @@ func (r *VideoAgentLoopRunner) nextResearchDecision(ctx context.Context, state V
 	progress.DurationMs = time.Since(started).Milliseconds()
 	if err != nil {
 		progress.Status = "error"
-		progress.Detail = err.Error()
+		progress.Detail = "规划未完成；请查看运行状态或重试"
 	} else if exhausted {
 		progress.Status = "cancelled"
 		progress.Detail = "已达到执行预算，停止规划"

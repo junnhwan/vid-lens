@@ -42,6 +42,7 @@ type VideoAgentResult struct {
 	Citations    []Citation                  `json:"citations"`
 	Trace        []VideoAgentStep            `json:"trace"`
 	Model        string                      `json:"model"`
+	ProfileID    int64                       `json:"profile_id,omitempty"`
 	RunID        string                      `json:"run_id,omitempty"`
 	Mode         string                      `json:"mode,omitempty"`
 	Memory       *MemorySnapshotIdentity     `json:"memory,omitempty"`
@@ -133,7 +134,7 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	}
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
-	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model}
+	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model, ExecutionMode: "agent", ProfileID: result.ProfileID}
 	sourceIDs := make([]int64, 0, len(result.Citations))
 	for _, c := range result.Citations {
 		sourceIDs = append(sourceIDs, c.TaskID)

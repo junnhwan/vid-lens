@@ -102,6 +102,8 @@ type AgentRetrieveHitsEvent struct {
 }
 
 type AgentDoneEvent struct {
+	Model        string                      `json:"model,omitempty"`
+	ProfileID    int64                       `json:"profile_id,omitempty"`
 	StopReason   string                      `json:"stop_reason,omitempty"`
 	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
 	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
@@ -177,7 +179,7 @@ func (o *videoAgentStreamObserver) StepStart(step VideoAgentStep) error {
 		RunID:  o.runID,
 		StepID: observed.id,
 		Tool:   step.Tool,
-		Input:  step.Input,
+		Input:  safeAgentStepInput(step),
 	})
 }
 
@@ -309,8 +311,8 @@ func (o *videoAgentStreamObserver) stepEvent(observed *observedAgentStep, status
 	return AgentStepEvent{
 		PlanID: fmt.Sprintf("plan-%s", strings.TrimPrefix(observed.id, "s")),
 		RunID:  o.runID, StepID: observed.id, Kind: videoAgentStepKind(step.Tool),
-		Label: step.Name, Status: status, Tool: step.Tool, Input: step.Input,
-		Output: step.OutputRef, Error: firstNonEmpty(step.Error, message),
+		Label: step.Name, Status: status, Tool: step.Tool, Input: safeAgentStepInput(step),
+		Output: step.OutputRef, Error: safeAgentStepError(firstNonEmpty(step.Error, message)),
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }
@@ -422,6 +424,7 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 		return nil, err
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
+		Model: result.Model, ProfileID: result.ProfileID,
 		StopReason: result.StopReason, BudgetNotice: result.BudgetNotice, Budget: result.Budget,
 		RunID: result.RunID, MessageID: result.MessageID, Answer: result.Answer, Degraded: result.Degraded,
 		TraceSummary: agentTraceSummary(result.Trace),

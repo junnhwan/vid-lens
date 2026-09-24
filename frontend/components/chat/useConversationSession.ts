@@ -219,7 +219,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
             // excerpts instead of a model-generated answer.
             update({
               type: 'stream_done',
-              patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
+              patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, modelName: done.model, profileId: done.profile_id, ...(done.run_id ? { agentRunId: done.run_id } : {}) },
             })
           },
           onError: error => {
@@ -238,7 +238,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
             update({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
           },
           onDone: done => {
-            update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, degradationReason: done.degradation_reason, diagnosticId: done.diagnostic_id } })
+            update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, degradationReason: done.degradation_reason, diagnosticId: done.diagnostic_id, modelName: done.model, profileId: done.profile_id } })
           },
           onError: error => update({ type: 'stream_error', message: error.message }),
         }, controller.signal)

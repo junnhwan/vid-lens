@@ -21,6 +21,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		reasoning: func(p ConversationReasoning) error { return emit(ChatStreamEvent{Type: "reasoning", Data: p}) },
 	})
 	ctx = withChatCorrelation(ctx)
+	ctx = withChatExecutionRecord(ctx, mode, profile)
 	if err := emitProgress(ctx, ConversationProgress{ID: "prepare", Kind: "plan", Label: "读取会话与视频上下文", Status: "running"}); err != nil {
 		return nil, err
 	}
@@ -55,6 +56,8 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		degraded = true
 		if degradationReason != "" {
 			degradationReason = "retrieval_and_generation_unavailable"
+		} else {
+			degradationReason = "generation_unavailable"
 		}
 		// 档2 不调 LLM：丢弃已累积的部分 LLM delta，用降级答案体替代
 		// （docs/architecture/reliability.md 档2 = 片段+摘要直拼，不含部分 LLM 生成内容）。
@@ -108,6 +111,7 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 	if err := emit(ChatStreamEvent{Type: "done", Data: map[string]interface{}{
 		"message_id":         result.MessageID,
 		"model":              result.Model,
+		"profile_id":         result.ProfileID,
 		"answer":             result.Answer,
 		"degraded":           degraded,
 		"degradation_reason": degradationReason,

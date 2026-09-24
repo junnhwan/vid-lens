@@ -16,7 +16,7 @@ export interface RunDetail {
 
 export interface SessionMemoryPolicy {
   session_id: number; policy: 'inherit' | 'enabled' | 'disabled'; version: number
-  effective_memory_policy: { effective_enabled: boolean; capability_enabled: boolean; reason: string }
+  effective_memory_policy: { effective_enabled: boolean; capability_enabled: boolean; user_enabled: boolean; reason: string }
 }
 
 export function replayLink(taskId: number, startMS?: number, timeStatus?: string): string {

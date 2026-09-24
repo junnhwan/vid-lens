@@ -522,6 +522,7 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 
 func providerFromDecrypted(profile *DecryptedAIProfile) *ai.Profile {
 	return &ai.Profile{
+		ID:                profile.ID,
 		LLMProvider:       profile.LLMProvider,
 		LLMBaseURL:        profile.LLMBaseURL,
 		LLMAPIKey:         profile.LLMAPIKey,
