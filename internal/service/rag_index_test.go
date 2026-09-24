@@ -446,7 +446,7 @@ func TestRAGIndexServiceRecordsFailedStatusWhenVectorStoreFails(t *testing.T) {
 	}
 }
 
-func TestRAGIndexServiceRejectsProfileDimDifferentFromCollectionDim(t *testing.T) {
+func TestRAGIndexServiceAcceptsProfileDimDifferentFromCollectionDefault(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "99999999999999999999999999999999", Filename: "video.mp4", FileURL: "videos/g.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -457,12 +457,15 @@ func TestRAGIndexServiceRejectsProfileDimDifferentFromCollectionDim(t *testing.T
 	}
 
 	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{ChunkSize: 10, EmbeddingDim: 1536})
-	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 1024}, ai.Profile{
+	result, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 1024}, ai.Profile{
 		EmbeddingModel: "custom-embedding",
 		EmbeddingDim:   1024,
 	})
-	if err == nil {
-		t.Fatal("BuildTaskIndex() succeeded with profile dim different from collection dim")
+	if err != nil {
+		t.Fatalf("BuildTaskIndex() rejected profile dimension 1024 with collection default 1536: %v", err)
+	}
+	if result == nil || !result.Indexed {
+		t.Fatalf("BuildTaskIndex() result = %+v, want indexed", result)
 	}
 }
 

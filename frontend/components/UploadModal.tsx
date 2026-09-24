@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import { MD5 } from '@/lib/md5'
 import { fmtSize } from '@/lib/format'
@@ -21,10 +22,13 @@ interface UploadRow {
   phase: 'hashing' | 'uploading' | 'merging' | 'done' | 'error'
   pct: number
   error?: string
+  taskId?: number
+  alreadyProcessed?: boolean
 }
 
 export default function UploadModal({ onClose, onUploaded }: { onClose: () => void; onUploaded?: (taskId: number) => void }) {
   const toast = useToast()
+  const router = useRouter()
   const [tab, setTab] = useState<'file' | 'url'>('file')
   const [rows, setRows] = useState<UploadRow[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -73,8 +77,8 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
       const result = await api.mergeChunks({
         file_md5: fileMd5, filename: file.name, total_chunks: totalChunks, file_size: file.size, chunk_size: CHUNK_SIZE,
       })
-      patchRow(id, { phase: 'done', pct: 100 })
-      toast.success('上传完成,任务已创建并进入队列')
+      patchRow(id, { phase: 'done', pct: 100, taskId: result.task_id, alreadyProcessed: result.status === 3 })
+      toast.success(result.status === 3 ? '文件已上传，已复用现有转写和摘要' : '文件已上传。请打开视频详情，点击“开始转写”才会启动处理')
       onUploaded?.(result.task_id)
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : '上传失败'
@@ -104,7 +108,7 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
       case 'hashing': return '校验文件…'
       case 'uploading': return '上传中'
       case 'merging': return '合并分片…'
-      case 'done': return '已上传,等待处理'
+      case 'done': return r.alreadyProcessed ? '文件已上传 · 已复用现有处理结果' : '文件已上传 · 转写尚未开始'
       case 'error': return r.error || '失败'
     }
   }
@@ -154,6 +158,7 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
                   <div className="un">
                     <b>{r.name}</b>
                     <span>{r.sizeLabel} · {phaseText(r)}</span>
+                    {r.taskId && <button className="btn btn-sm" style={{ marginTop: 4 }} onClick={() => { onClose(); router.push(`/video/${r.taskId}`) }}>{r.alreadyProcessed ? '查看视频' : '查看视频并开始转写'}</button>}
                   </div>
                   <div className={`meter${r.phase === 'done' ? ' meter-ok' : ''}${r.phase === 'error' ? ' meter-err' : ''}`}>
                     <i style={{ width: `${r.pct}%` }} />

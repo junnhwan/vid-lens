@@ -225,6 +225,22 @@ func (h *MediaHandler) GetTaskDetail(c *gin.Context) {
 	response.OK(c, task)
 }
 
+// GET /api/v1/media/task/:id/transcription-progress
+func (h *MediaHandler) GetTranscriptionProgress(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "视频编号无效")
+		return
+	}
+	progress, err := h.svc.GetTranscriptionProgress(c.Request.Context(), userID, taskID)
+	if err != nil {
+		response.Fail(c, 404, err.Error())
+		return
+	}
+	response.OK(c, progress)
+}
+
 // UpdateTaskTitle 用户编辑视频标题
 // PATCH /api/v1/media/task/:id
 func (h *MediaHandler) UpdateTaskTitle(c *gin.Context) {

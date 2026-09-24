@@ -522,7 +522,7 @@ func TestTranscribeAudioPersistsFailedChunk(t *testing.T) {
 	if chunk == nil {
 		t.Fatal("expected failed chunk row")
 	}
-	if chunk.Status != model.TranscriptionChunkStatusFailed || chunk.ErrorMsg == "" || chunk.RetryCount != 1 {
+	if chunk.Status != model.TranscriptionChunkStatusFailed || chunk.ErrorMsg == "" || chunk.RetryCount != 0 {
 		t.Fatalf("failed chunk = %+v", chunk)
 	}
 }

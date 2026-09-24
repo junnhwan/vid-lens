@@ -2,6 +2,7 @@ package repository
 
 import (
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -47,5 +48,34 @@ func TestTranscriptionChunkRepositoryRejectsCoreOutsideWindow(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid timeline error")
+	}
+}
+
+func TestTranscriptionChunkRepositoryTracksRetryWaitAndNextAttempt(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.VideoTranscriptionChunk{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewTranscriptionChunkRepository(db)
+	if err := repo.UpsertPendingWithTimeline(9, 0, "private.mp3", TranscriptionChunkTimeline{}); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().Add(time.Minute)
+	if err := repo.MarkRetryWait(9, 0, 1, "local_admission", until); err != nil {
+		t.Fatal(err)
+	}
+	chunk, err := repo.FindByTaskAndIndex(9, 0)
+	if err != nil || chunk == nil || chunk.Status != model.TranscriptionChunkStatusRetryWait || chunk.RetryCount != 1 || chunk.WaitReason != "local_admission" || chunk.NextRetryAt == nil {
+		t.Fatalf("retry wait chunk = %+v, error = %v", chunk, err)
+	}
+	if err := repo.MarkAttempt(9, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	chunk, err = repo.FindByTaskAndIndex(9, 0)
+	if err != nil || chunk == nil || chunk.Status != model.TranscriptionChunkStatusRunning || chunk.NextRetryAt != nil || chunk.WaitReason != "" {
+		t.Fatalf("next attempt chunk = %+v, error = %v", chunk, err)
 	}
 }

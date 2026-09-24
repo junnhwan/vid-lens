@@ -8,15 +8,17 @@ import { fmtRelTime, taskTitle } from '@/lib/format'
 import { taskCategory, taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoCard } from '@/components/VideoCard'
-import { useCrumb } from '@/components/shell/AppShell'
+import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal } from '@/components/ui/Modal'
 import { ProcessStrip } from '@/components/ProcessStrip'
+import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 
 export default function DashboardPage() {
   const router = useRouter()
   const toast = useToast()
+  const { uploadRevision } = useShell()
   useCrumb([{ label: '工作台' }])
 
   const [tasks, setTasks] = useState<VideoTask[]>([])
@@ -38,7 +40,7 @@ export default function DashboardPage() {
       setLoading(false)
     })()
     return () => { active = false }
-  }, [])
+  }, [uploadRevision])
 
   const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2 || summaryFailureView(t)?.scheduled)
   useEffect(() => {
@@ -95,6 +97,7 @@ export default function DashboardPage() {
                   <div className="proc-left">
                     <h5>{taskTitle(t)}</h5>
                     <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} />
+                    {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
                   </div>
                   {failed

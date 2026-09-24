@@ -5,7 +5,7 @@ import type {
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
-  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline,
+  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress,
 } from './types'
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
@@ -129,6 +129,7 @@ export const api = {
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
   updateTaskTitle: (id: number, title: string) =>
     req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
   getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),

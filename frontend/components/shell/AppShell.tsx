@@ -13,6 +13,7 @@ import { useTheme } from '@/components/theme/ThemeProvider'
 interface ShellCtx {
   user: User | null
   openUpload: () => void
+  uploadRevision: number
 }
 
 const ShellContext = createContext<ShellCtx | null>(null)
@@ -54,6 +55,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [crumb, setCrumb] = useState<CrumbItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadRevision, setUploadRevision] = useState(0)
 
   useEffect(() => {
     if (!getToken()) {
@@ -74,7 +76,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const initial = (user?.nickname || user?.username || '').trim().charAt(0).toUpperCase() || '·'
 
   return (
-    <ShellContext.Provider value={{ user, openUpload }}>
+    <ShellContext.Provider value={{ user, openUpload, uploadRevision }}>
       <CrumbSetter.Provider value={{ setCrumb: setCrumbStable }}>
         <div className="app">
           <aside className="rail">
@@ -136,7 +138,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="content" id="content">{children}</div>
           </div>
         </div>
-        {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} />}
+        {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onUploaded={() => setUploadRevision(n => n + 1)} />}
       </CrumbSetter.Provider>
     </ShellContext.Provider>
   )

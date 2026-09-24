@@ -304,7 +304,7 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		}
 
 		persistStartedAt := time.Now()
-		if err := c.markTranscriptionChunkRunning(ctx, taskID, i, segment); err != nil {
+		if err := c.markTranscriptionChunkPending(ctx, taskID, i, segment); err != nil {
 			c.recordASRStage(ctx, taskID, "persistence", "failed", time.Since(persistStartedAt))
 			return "", err
 		}
@@ -342,6 +342,10 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 							return
 						}
 						startedAt := time.Now()
+						if err := c.markTranscriptionChunkRunning(ctx, taskID, work.index, work.segment); err != nil {
+							results <- asrResult{work: work, err: err}
+							continue
+						}
 						chunkStrategy := c.retryingASRStrategy(ctx, taskID, work.index, strategy)
 						chunkCtx := withASROperationKey(ctx, taskID, work.index)
 						text, err := chunkStrategy.Transcribe(chunkCtx, work.segment.Path)
@@ -475,6 +479,11 @@ func (c *Consumer) retryingASRStrategy(ctx context.Context, taskID int64, chunkI
 	policy := c.asrRetryPolicy
 	metrics := observability.DefaultMetrics()
 	policy.BeginAttempt = func(attempt int) {
+		if c.repo != nil && c.repo.TranscriptionChunk != nil {
+			if err := c.repo.TranscriptionChunk.MarkAttempt(taskID, chunkIndex, attempt); err != nil {
+				observability.Log(ctx, slog.Default(), slog.LevelWarn, "asr attempt progress update failed", slog.Int64("task_id", taskID), slog.Int("chunk_index", chunkIndex+1), slog.String("error", observability.SafeError(err)))
+			}
+		}
 		if metrics != nil {
 			metrics.IncASRProviderInflight()
 		}
@@ -487,6 +496,20 @@ func (c *Consumer) retryingASRStrategy(ctx context.Context, taskID int64, chunkI
 				metrics.DecASRProviderInflight()
 			}
 			c.recordASRStage(ctx, taskID, "provider_request", stageStatus(observation.Err), observation.Duration)
+			if observation.Err != nil && observation.RetryDelay > 0 && c.repo != nil && c.repo.TranscriptionChunk != nil {
+				reason := "provider_retry"
+				var providerErr *ai.ProviderError
+				var admissionErr *ai.AdmissionError
+				switch {
+				case errors.As(observation.Err, &admissionErr):
+					reason = "local_admission"
+				case errors.As(observation.Err, &providerErr) && providerErr.Class == ai.ErrorRateLimited:
+					reason = "provider_rate_limit"
+				}
+				if err := c.repo.TranscriptionChunk.MarkRetryWait(taskID, chunkIndex, observation.Attempt+1, reason, time.Now().Add(observation.RetryDelay)); err != nil {
+					observability.Log(ctx, slog.Default(), slog.LevelWarn, "asr retry progress update failed", slog.Int64("task_id", taskID), slog.Int("chunk_index", chunkIndex+1), slog.String("error", observability.SafeError(err)))
+				}
+			}
 		}
 		if observation.Phase == "retry_wait" {
 			c.recordASRStage(ctx, taskID, "retry_wait", "retry", observation.SleepDuration)
@@ -544,6 +567,15 @@ func (c *Consumer) markTranscriptionChunkRunning(ctx context.Context, taskID int
 	}
 	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
 		return repos.TranscriptionChunk.UpsertRunningWithTimeline(taskID, chunkIndex, segment.Path, transcriptionChunkTimeline(segment))
+	})
+}
+
+func (c *Consumer) markTranscriptionChunkPending(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment) error {
+	if c.repo == nil || c.repo.TranscriptionChunk == nil {
+		return nil
+	}
+	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		return repos.TranscriptionChunk.UpsertPendingWithTimeline(taskID, chunkIndex, segment.Path, transcriptionChunkTimeline(segment))
 	})
 }
 

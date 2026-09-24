@@ -188,6 +188,37 @@ export interface VideoTask {
   has_summary: boolean
 }
 
+export interface TranscriptionProgress {
+  task_id: number
+  status: TaskStatus
+  stage: TaskStage
+  job_status: TaskStatus
+  job_retry_count: number
+  job_max_retries: number
+  job_next_retry_at?: string
+  started_at?: string
+  updated_at: string
+  video_concurrency: number
+  chunk_concurrency: number
+  total: number
+  pending: number
+  running: number
+  retry_waiting: number
+  completed: number
+  failed: number
+  chunks: Array<{
+    index: number
+    status: 'pending' | 'running' | 'retry_wait' | 'completed' | 'failed'
+    start_ms: number
+    end_ms: number
+    retry_count: number
+    wait_reason?: 'local_admission' | 'provider_rate_limit' | 'provider_retry'
+    next_retry_at?: string
+    content?: string
+    updated_at: string
+  }>
+}
+
 export interface UploadResult {
   task_id: number
   file_md5: string

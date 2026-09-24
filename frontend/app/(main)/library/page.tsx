@@ -12,7 +12,7 @@ import { Icon } from '@/components/ui/Icon'
 const PAGE_SIZE = 100
 
 export default function LibraryPage() {
-  const { openUpload } = useShell()
+  const { openUpload, uploadRevision } = useShell()
   useCrumb([{ label: '视频库' }])
 
   const [tasks, setTasks] = useState<VideoTask[]>([])
@@ -37,7 +37,7 @@ export default function LibraryPage() {
       }
     })()
     return () => { active = false }
-  }, [])
+  }, [uploadRevision])
 
   const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2)
   useEffect(() => {

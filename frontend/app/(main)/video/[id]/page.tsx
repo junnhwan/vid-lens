@@ -22,6 +22,7 @@ import { ConfirmModal, Modal } from '@/components/ui/Modal'
 import KBModal from '@/components/KBModal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
+import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoStill } from '@/components/VideoPoster'
@@ -55,7 +56,7 @@ function indexConfirm(index: RAGIndexResult): ConfirmAction {
   const replacing = index.indexed || index.needs_rebuild || index.status === 'needs_rebuild'
   return {
     kind: 'index', title: `${label}？`, confirmLabel: label,
-    body: `会调用当前向量模型处理已有转写文字并消耗 Embedding 额度；不会重新转写或修改原视频和转写文字。${replacing ? '现有检索索引将被替换。' : ''}`,
+    body: `建立后，视频问答可按内容含义找到相关转写片段并定位视频位置；只播放视频、查看转写或摘要无需建立索引。系统会将已有转写文字发送给当前配置的向量模型，调用 Embedding 并消耗额度；不会重新转写，也不会修改原视频或转写文字。${replacing ? '现有检索索引将被替换。' : ''}`,
   }
 }
 
@@ -320,7 +321,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     try {
       if (kind === 'transcribe') {
         await api.transcribe(task.id, force)
-        toast.success('转写已重新入队,已完成的分片不会重复调用')
+        toast.success(force ? '重新转写已排队，将再次调用语音识别' : '转写任务已排队，等待并发名额')
       } else if (kind === 'analyze') {
         await api.analyze(task.id, force)
         toast.success('摘要任务已加入队列,完成后会出现在这里')
@@ -657,6 +658,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
             </div>
           )}
+          {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
 
           <div className="ws-actions">
             {task.has_summary ? (
@@ -688,7 +690,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 kind: 'transcribe',
                 force: true,
                 title: '重新转写?',
-                body: '会再次调用语音识别。已完成的分片不会重复计费,但仍可能产生新的 ASR 费用。',
+                body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
                 confirmLabel: '重新转写',
               })}>
                 <Icon name="refresh" size="sm" />重新转写

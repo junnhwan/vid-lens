@@ -9,6 +9,7 @@ import { taskCategory, taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { VideoStill } from '@/components/VideoPoster'
+import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 
 export function VideoCard({ task }: { task: VideoTask }) {
   const router = useRouter()
@@ -39,6 +40,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
         {cat === 'processing' && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
         )}
+        {(task.stage === 'transcribing' && (task.status === 1 || task.status === 2)) && <TranscriptionProgressPanel task={task} compact />}
         {failed && (summaryFailure || task.error_msg) && (
           <div className="mini-prog">
             <div className="row"><b style={{ color: 'var(--bad)' }}>{summaryFailure ? `${summaryFailure.category} · ${summaryFailure.retry}` : task.error_msg}</b></div>

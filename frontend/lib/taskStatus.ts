@@ -50,7 +50,7 @@ export function stageLabel(stage: TaskStage): string {
 
 function queuedStageLabel(stage: TaskStage): string {
   const names: Partial<Record<TaskStage, string>> = {
-    downloading: '等待下载', transcribing: '等待转写', visual_indexing: '等待画面分析',
+    downloading: '等待下载', transcribing: '等待转写启动或并发名额', visual_indexing: '等待画面分析',
     summarizing: '等待生成摘要', indexing: '等待检索索引',
   }
   return names[stage] || '等待任务启动'

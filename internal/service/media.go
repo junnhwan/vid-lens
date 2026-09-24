@@ -55,6 +55,7 @@ type MediaService struct {
 	rdb               redis.Cmdable
 	cfg               config.UploadConfig
 	tools             config.ToolsConfig
+	transcriptionMQ   config.MQConfig
 	// playbackSecret signs the task-scoped credentials embedded in playback
 	// URLs. Browser media elements cannot send an Authorization header, so the
 	// credential has to travel in the URL itself.
@@ -83,6 +84,10 @@ func NewMediaService(
 
 func (s *MediaService) SetTaskCleanupService(cleanup *TaskCleanupService) {
 	s.taskCleanup = cleanup
+}
+
+func (s *MediaService) SetTranscriptionConfig(cfg config.MQConfig) {
+	s.transcriptionMQ = cfg
 }
 
 type UploadResult struct {

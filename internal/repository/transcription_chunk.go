@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 	"vid-lens/internal/model"
@@ -47,6 +48,14 @@ func (r *TranscriptionChunkRepository) UpsertRunning(taskID int64, chunkIndex in
 }
 
 func (r *TranscriptionChunkRepository) UpsertRunningWithTimeline(taskID int64, chunkIndex int, audioObject string, timeline TranscriptionChunkTimeline) error {
+	return r.upsertPrepared(taskID, chunkIndex, audioObject, timeline, model.TranscriptionChunkStatusRunning)
+}
+
+func (r *TranscriptionChunkRepository) UpsertPendingWithTimeline(taskID int64, chunkIndex int, audioObject string, timeline TranscriptionChunkTimeline) error {
+	return r.upsertPrepared(taskID, chunkIndex, audioObject, timeline, model.TranscriptionChunkStatusPending)
+}
+
+func (r *TranscriptionChunkRepository) upsertPrepared(taskID int64, chunkIndex int, audioObject string, timeline TranscriptionChunkTimeline, status string) error {
 	if err := validateTranscriptionTimeline(timeline); err != nil {
 		return err
 	}
@@ -62,7 +71,7 @@ func (r *TranscriptionChunkRepository) UpsertRunningWithTimeline(taskID int64, c
 			SegmentKey:  timeline.SegmentKey, SegmenterVersion: timeline.SegmenterVersion,
 			WindowStartMS: timeline.WindowStartMS, WindowEndMS: timeline.WindowEndMS,
 			CoreStartMS: timeline.CoreStartMS, CoreEndMS: timeline.CoreEndMS,
-			Status: model.TranscriptionChunkStatusRunning,
+			Status: status,
 		}).Error
 	}
 	return r.db.Model(existing).Updates(map[string]interface{}{
@@ -73,8 +82,24 @@ func (r *TranscriptionChunkRepository) UpsertRunningWithTimeline(taskID int64, c
 		"window_end_ms":     timeline.WindowEndMS,
 		"core_start_ms":     timeline.CoreStartMS,
 		"core_end_ms":       timeline.CoreEndMS,
-		"status":            model.TranscriptionChunkStatusRunning,
+		"status":            status,
 		"error_msg":         "",
+		"wait_reason":       "",
+		"next_retry_at":     nil,
+	}).Error
+}
+
+func (r *TranscriptionChunkRepository) MarkAttempt(taskID int64, chunkIndex, retryCount int) error {
+	return r.db.Model(&model.VideoTranscriptionChunk{}).Where("task_id = ? AND chunk_index = ?", taskID, chunkIndex).Updates(map[string]interface{}{
+		"status": model.TranscriptionChunkStatusRunning, "retry_count": retryCount,
+		"wait_reason": "", "next_retry_at": nil,
+	}).Error
+}
+
+func (r *TranscriptionChunkRepository) MarkRetryWait(taskID int64, chunkIndex, retryCount int, reason string, until time.Time) error {
+	return r.db.Model(&model.VideoTranscriptionChunk{}).Where("task_id = ? AND chunk_index = ?", taskID, chunkIndex).Updates(map[string]interface{}{
+		"status": model.TranscriptionChunkStatusRetryWait, "retry_count": retryCount,
+		"wait_reason": reason, "next_retry_at": until,
 	}).Error
 }
 
@@ -140,7 +165,7 @@ func (r *TranscriptionChunkRepository) UpsertCompletedWithTimeline(taskID int64,
 		"core_start_ms": timeline.CoreStartMS, "core_end_ms": timeline.CoreEndMS,
 		"start_second": startSecond, "end_second": endSecond,
 		"status": model.TranscriptionChunkStatusCompleted, "content": content,
-		"chars": len([]rune(content)), "error_msg": "",
+		"chars": len([]rune(content)), "error_msg": "", "wait_reason": "", "next_retry_at": nil,
 	}
 	if existing == nil {
 		return r.db.Create(&model.VideoTranscriptionChunk{
@@ -180,14 +205,16 @@ func (r *TranscriptionChunkRepository) UpsertFailed(taskID int64, chunkIndex int
 			AudioObject: audioObject,
 			Status:      model.TranscriptionChunkStatusFailed,
 			ErrorMsg:    errMsg,
-			RetryCount:  1,
+			RetryCount:  0,
 		}).Error
 	}
 	return r.db.Model(existing).Updates(map[string]interface{}{
-		"audio_object": audioObject,
-		"status":       model.TranscriptionChunkStatusFailed,
-		"error_msg":    errMsg,
-		"retry_count":  existing.RetryCount + 1,
+		"audio_object":  audioObject,
+		"status":        model.TranscriptionChunkStatusFailed,
+		"error_msg":     errMsg,
+		"retry_count":   existing.RetryCount,
+		"wait_reason":   "",
+		"next_retry_at": nil,
 	}).Error
 }
 
