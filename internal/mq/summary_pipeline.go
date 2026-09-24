@@ -21,7 +21,7 @@ import (
 // overhead, output and provider variance. Operators can lower this for a
 // smaller model; a larger value requires an explicit configured window.
 const summaryDefaultContextTokens = 8192
-const summaryOutputTokens = 1536
+const summaryOutputTokens = 2048
 const summaryIntermediateOutputTokens = 512
 const summaryReservedTokens = 2048
 const summaryPromptVersion = "summary_tree_v1"

@@ -2,10 +2,15 @@ package mq
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
 
@@ -76,5 +81,36 @@ func TestSummarizeLongResumesAfterFailedPart(t *testing.T) {
 	}
 	if len(second.calls) == 0 || strings.Contains(second.calls[0], "第 1/") {
 		t.Fatalf("completed first segment was rerun: %+v", second.calls)
+	}
+}
+
+func TestSummarizeLongRequestsEnoughOutputForEveryPart(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{UserID: 1, FileMD5: "34343434343434343434343434343434", Filename: "long.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		reason := "stop"
+		if request.MaxTokens < 1000 {
+			reason = "length"
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"核心摘要\"}}]}\n\n")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":%q}]}\n\ndata: [DONE]\n\n", reason)
+	}))
+	defer server.Close()
+	c := &Consumer{repo: repos}
+	strategy := ai.NewOpenAICompatibleStrategy("", server.URL, "", "model")
+	full := strings.Repeat("需要总结的完整转写。", 120)
+	got, err := c.summarizeLong(context.Background(), task, full, strategy, 1200)
+	if err != nil || got != "核心摘要" {
+		t.Fatalf("summary = %q, error = %v", got, err)
 	}
 }

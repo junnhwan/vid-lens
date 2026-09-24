@@ -191,6 +191,14 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 		return &RAGIndexResult{TaskID: taskID, Status: "queued", EmbeddingModel: modelName, BuildPhase: "queued"}, nil
 	}
 	if index != nil {
+		if index.Status == model.RAGIndexStatusIndexing && time.Since(index.UpdatedAt) >= time.Hour &&
+			(taskErr != nil || task.Stage != model.TaskStageIndexing || (task.Status != model.TaskStatusQueued && task.Status != model.TaskStatusRunning)) {
+			return &RAGIndexResult{
+				TaskID: taskID, Status: model.RAGIndexStatusFailed, Indexed: false,
+				Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel,
+				LastError: "索引构建已中断，请重新构建", ProgressAt: &index.UpdatedAt,
+			}, nil
+		}
 		visualChanged := false
 		if index.Status == model.RAGIndexStatusIndexed && s.repos.VisualFrame != nil {
 			latest, latestErr := s.repos.VisualFrame.LatestUpdatedAt(taskID)

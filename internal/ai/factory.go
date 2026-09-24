@@ -120,7 +120,7 @@ func (s *CompositeStrategy) TranscribeChunks(ctx context.Context, audioPaths []s
 }
 
 func (s *CompositeStrategy) Summarize(ctx context.Context, text string) (string, error) {
-	return s.chat.Chat(ctx, summaryMessages(ctx, text))
+	return summarizeWithChat(ctx, s.chat, text)
 }
 
 type ProfileTester struct {

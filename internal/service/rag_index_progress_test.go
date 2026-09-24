@@ -67,6 +67,33 @@ func TestRAGIndexBuildRejectsExistingClaimBeforeEmbedding(t *testing.T) {
 	}
 }
 
+func TestStaleIndexBuildCanBeRetried(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "56565656565656565656565656565656", Filename: "video.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: "source text"}); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{
+		UserID: 7, TaskID: task.ID, FileMD5: task.FileMD5, EmbeddingModel: "embed", EmbeddingDim: 3,
+		Status: model.RAGIndexStatusIndexing, StartedAt: &old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile := ai.Profile{EmbeddingModel: "embed", EmbeddingDim: 3}
+	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{ChunkSize: 20, EmbeddingDim: 3})
+	status, err := svc.GetTaskIndexStatus(context.Background(), 7, task.ID, profile)
+	if err != nil || status.Status != model.RAGIndexStatusFailed || status.LastError == "" {
+		t.Fatalf("stale status = %+v, error = %v", status, err)
+	}
+	if _, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, profile); err != nil {
+		t.Fatalf("retry stale build: %v", err)
+	}
+}
+
 func TestRAGIndexStatusReportsQueuedAndCompletedChunkCounts(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "34343434343434343434343434343434", Filename: "video.mp4", Status: model.TaskStatusQueued, Stage: model.TaskStageIndexing}

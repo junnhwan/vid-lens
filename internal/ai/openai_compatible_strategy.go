@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"strings"
 )
 
 // OpenAICompatibleStrategy composes the standard audio transcription and
@@ -28,9 +27,5 @@ func (s *OpenAICompatibleStrategy) TranscribeChunks(ctx context.Context, audioPa
 }
 
 func (s *OpenAICompatibleStrategy) Summarize(ctx context.Context, text string) (string, error) {
-	content, err := s.chat.Chat(ctx, summaryMessages(ctx, text))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(stripThinkTags(content)), nil
+	return summarizeWithChat(ctx, s.chat, text)
 }
