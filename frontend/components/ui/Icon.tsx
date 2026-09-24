@@ -75,6 +75,13 @@ const PATHS = {
       <path d="M6 6l12 12" />
     </>
   ),
+  menu: (
+    <>
+      <path d="M4 6l16 0" />
+      <path d="M4 12l16 0" />
+      <path d="M4 18l16 0" />
+    </>
+  ),
   check: <path d="M5 12l5 5l10 -11" />,
   alert: (
     <>

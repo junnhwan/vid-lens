@@ -216,6 +216,7 @@ svg { display: block; }
   backdrop-filter: blur(14px);
   z-index: 20;
 }
+.topbar-menu { display: none; }
 .crumb { display: flex; align-items: center; gap: 0; font-size: 14px; color: var(--tx-3); min-width: 0; }
 .crumb-seg { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .crumb b { color: var(--tx-1); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1341,7 +1342,28 @@ button.switch { padding: 0; cursor: pointer; }
 }
 @media (max-width: 860px) {
   .chat-entry-scopes { grid-template-columns: 1fr; }
-  .rail { display: none; }
+  /* 侧栏改为汉堡抽屉:默认移出左边界,点汉堡滑入,点击其余区域遮罩关闭 */
+  .topbar-menu {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; flex: none; margin-left: -6px;
+    border-radius: var(--r-ctl); border: 1px solid var(--line-strong);
+    background: var(--bg-2); color: var(--tx-1); cursor: pointer;
+  }
+  .topbar-menu:hover { background: var(--bg-3); }
+  .rail {
+    display: flex;
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: var(--z-drawer);
+    width: min(280px, 84vw);
+    transform: translateX(-102%);
+    transition: transform 0.28s var(--ease);
+    overflow-y: auto;
+    box-shadow: var(--shadow-2);
+  }
+  .rail.open { transform: none; }
+  .rail-veil {
+    position: fixed; inset: 0; z-index: var(--z-veil);
+    background: rgba(10, 9, 7, 0.5);
+  }
   .page { padding: 22px 18px 60px; }
 }
 

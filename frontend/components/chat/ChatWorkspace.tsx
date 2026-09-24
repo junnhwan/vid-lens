@@ -24,7 +24,7 @@ import { RunDetails, SessionMemoryControl } from '@/components/knowledge/RunDeta
 import { replayLink } from '@/lib/knowledge'
 import knowledgeStyles from '@/components/knowledge/KnowledgeWorkspace.module.css'
 import type { KnowledgeBase } from '@/lib/types'
-import { fmtRelTime, formatClock, fmtScore } from '@/lib/format'
+import { fmtRelTime, formatClock, fmtScore, fmtTimeOfDay } from '@/lib/format'
 import { formatDuration } from '@/lib/duration'
 import type { Citation, ChatScopeType, VideoChatMode, VideoQuestionResult } from '@/lib/types'
 
@@ -612,7 +612,7 @@ function AgentMessageView({
         </button>
       </div>
       {sessionId && msg.messageId && !msg.streaming && <AnswerFeedback key={`${sessionId}:${msg.messageId}`} sessionId={sessionId} messageId={msg.messageId} />}
-      <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…'}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{msg.processStartedAt && msg.processFinishedAt ? ` · 用时 ${formatDuration(msg.processFinishedAt - msg.processStartedAt)}` : ''}{msg.createdAt ? ` · ${new Date(msg.createdAt).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}</>}</div>
+      <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…'}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{msg.processStartedAt && msg.processFinishedAt ? ` · 用时 ${formatDuration(msg.processFinishedAt - msg.processStartedAt)}` : ''}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
     </div>
   )
 }

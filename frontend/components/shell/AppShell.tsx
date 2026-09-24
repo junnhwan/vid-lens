@@ -59,6 +59,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadRevision, setUploadRevision] = useState(0)
+  const [railOpen, setRailOpen] = useState(false)
   const leaveGuard = useRef<(() => boolean) | null>(null)
   const restoringHistory = useRef(false)
   const registerLeaveGuard = useCallback((guard: (() => boolean) | null) => { leaveGuard.current = guard }, [])
@@ -100,6 +101,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     api.profile().then(setUser).catch(() => { /* 401 由 api 层统一跳登录 */ })
   }, [router])
 
+  useEffect(() => { setRailOpen(false) }, [pathname])
+  useEffect(() => {
+    if (!railOpen) return
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setRailOpen(false) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [railOpen])
+
   const openUpload = useCallback(() => setUploadOpen(true), [])
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
@@ -115,7 +124,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <ShellContext.Provider value={{ user, openUpload, uploadRevision, registerLeaveGuard, confirmLeave }}>
       <CrumbSetter.Provider value={{ setCrumb: setCrumbStable }}>
         <div className="app">
-          <aside className="rail">
+          {railOpen && <div className="rail-veil" onClick={() => setRailOpen(false)} />}
+          <aside id="rail" className={`rail${railOpen ? ' open' : ''}`}>
             <Link href="/" className="brand">
               <BrandMark />
               <div>
@@ -161,6 +171,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="main">
             <header className="topbar">
+              <button
+                className="topbar-menu"
+                onClick={() => setRailOpen(o => !o)}
+                aria-label={railOpen ? '关闭菜单' : '打开菜单'}
+                aria-expanded={railOpen}
+                aria-controls="rail"
+              >
+                <Icon name={railOpen ? 'x' : 'menu'} />
+              </button>
               <nav className="crumb" aria-label="面包屑">
                 {crumb.map((item, i) => {
                   const last = i === crumb.length - 1

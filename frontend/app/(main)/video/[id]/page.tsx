@@ -28,6 +28,7 @@ import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPa
 import { taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoStill } from '@/components/VideoPoster'
+import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
@@ -182,6 +183,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [visualSettingBusy, setVisualSettingBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const [subError, setSubError] = useState('')
   const [subReloadTick, setSubReloadTick] = useState(0)
   const [tab, setTab] = useState<TabKey>('tl')
@@ -233,7 +235,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       setLoading(false)
     })()
     return () => { active = false }
-  }, [taskId])
+  }, [taskId, reloadKey])
 
   // 时间轴/索引失败不再静默成空面板，给出错误态+重试；播放源失败由播放器 fallback 文案提示。
   useEffect(() => {
@@ -424,21 +426,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   if (loading) {
-    return <div className="page"><div className="empty"><b>加载中…</b></div></div>
+    return <div className="page"><LoadingBlock label="正在加载…" variant="card" /></div>
   }
   if (loadError || !task) {
     return (
       <div className="page">
-        <div className="card">
-          <div className="empty">
-            <Icon name="alert" size="lg" />
-            <b>视频加载失败</b>
-            <p>{loadError || '任务不存在'}</p>
-            <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => router.push('/library')}>
-              <Icon name="chev-l" size="sm" />返回视频库
-            </button>
-          </div>
-        </div>
+        <ErrorState message={loadError || '视频加载失败'} onRetry={() => setReloadKey(k => k + 1)} />
       </div>
     )
   }

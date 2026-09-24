@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { TaskStatusEnum, type TranscriptionProgress, type VideoTask } from '@/lib/types'
-import { formatClock, fmtDateTime } from '@/lib/format'
+import { formatClock, fmtDateTime, fmtTimeOfDay } from '@/lib/format'
 
 function elapsed(start?: string) {
   if (!start) return ''
@@ -64,7 +64,7 @@ export function TranscriptionProgressPanel({ task, compact = false }: { task: Vi
       {current.map(c => <div key={c.index} style={{ marginTop: 5 }}>
         第 {c.index}/{progress.total} 段 {c.end_ms > c.start_ms ? `(${formatClock(c.start_ms)}–${formatClock(c.end_ms)})` : '（时间未记录）'} · {c.status === 'running' ? '调用中' : waitLabel(c.wait_reason)}
         {c.retry_count > 0 ? ` · 已重试 ${c.retry_count} 次` : ''}
-        {c.next_retry_at ? ` · 预计 ${new Date(c.next_retry_at).toLocaleTimeString()} 后重试` : ''}
+        {c.next_retry_at ? ` · 预计 ${fmtTimeOfDay(c.next_retry_at)} 后重试` : ''}
       </div>)}
       {!compact && completed.length > 0 && <details style={{ marginTop: 8 }} open={active}>
         <summary>已完成分片与文字（{completed.length}）</summary>

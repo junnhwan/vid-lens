@@ -6,8 +6,7 @@ import type { VideoTask, VideoQuestionResult } from '@/lib/types'
 import { taskTitle } from '@/lib/format'
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
-import { Icon } from '@/components/ui/Icon'
-import { LoadingBlock } from '@/components/ui/AsyncState'
+import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 
 // 单视频问答(/chat/v/:id)。本阶段仅快速问答(strict_rag SSE);
 // 播放源签名 URL 供右栏迷你播放器与引用回放使用。
@@ -18,6 +17,7 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const [questions, setQuestions] = useState<VideoQuestionResult | null>(null)
 
   useCrumb([
@@ -50,7 +50,7 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
       if (active && playback) setPlaybackUrl(playback)
     })()
     return () => { active = false }
-  }, [taskId])
+  }, [taskId, reloadKey])
 
   // 播放地址为站内路径 + 任务级凭证,不再有 5 分钟签名到期问题;
   // 加载失败时重取一次,覆盖凭证过期或对象临时不可用。
@@ -71,13 +71,7 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
   if (loadError || !task) {
     return (
       <div className="page">
-        <div className="card">
-          <div className="empty">
-            <Icon name="alert" size="lg" />
-            <b>视频加载失败</b>
-            <p>{loadError || '任务不存在'}</p>
-          </div>
-        </div>
+        <ErrorState message={loadError || '视频加载失败'} onRetry={() => setReloadKey(k => k + 1)} />
       </div>
     )
   }

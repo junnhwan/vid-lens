@@ -5,7 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
-import { Icon } from '@/components/ui/Icon'
+import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 
 // 知识库问答与跨视频研究共用实时会话工作区。
 
@@ -20,6 +20,7 @@ export default function KBChatPage({ params }: { params: { kbId: string } }) {
   const [kb, setKb] = useState<KnowledgeBase | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   useCrumb([
     { label: '知识库', href: '/kb' },
@@ -45,21 +46,15 @@ export default function KBChatPage({ params }: { params: { kbId: string } }) {
       }
     })()
     return () => { active = false }
-  }, [kbId])
+  }, [kbId, reloadKey])
 
   if (loading) {
-    return <div className="page"><div className="empty"><b>加载中…</b></div></div>
+    return <div className="page"><LoadingBlock label="正在加载…" variant="card" /></div>
   }
   if (loadError || !kb) {
     return (
       <div className="page">
-        <div className="card">
-          <div className="empty">
-            <Icon name="alert" size="lg" />
-            <b>知识库加载失败</b>
-            <p>{loadError || '知识库不存在'}</p>
-          </div>
-        </div>
+        <ErrorState message={loadError || '知识库加载失败'} onRetry={() => setReloadKey(k => k + 1)} />
       </div>
     )
   }

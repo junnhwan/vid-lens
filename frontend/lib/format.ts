@@ -34,6 +34,11 @@ export function fmtDateTime(iso: string): string {
   const d = new Date(iso)
   return `${fmtDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+// 一天中的时刻 HH:MM(本地),不随运行环境 locale 变化
+export function fmtTimeOfDay(iso: string | number): string {
+  const d = new Date(iso)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 // 检索相关度展示精度统一: 两位小数
 export function fmtScore(score?: number): string {
