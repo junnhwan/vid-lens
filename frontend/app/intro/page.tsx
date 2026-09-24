@@ -4,6 +4,7 @@ import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
 import { IntroMotion } from './IntroMotion'
 import { IntroStage } from './IntroStage'
+import { RevealText } from './RevealText'
 import './intro.css'
 
 export const metadata: Metadata = {
@@ -54,8 +55,9 @@ export default function IntroPage() {
           <div className="intro-hero-copy rv">
             <p className="intro-kicker">观之以映 · 释之以知</p>
             <h1>
-              让视频成为可检索、可追问、
-              <em>可回放验证</em>的知识库
+              <RevealText delay={120}>
+                让视频成为可检索、可追问、<em>可回放验证</em>的知识库
+              </RevealText>
             </h1>
             <p className="intro-lead">
               映知 VidLens 把你的视频变成可以对话的内容：自动转写语音、识别画面、建立语义索引；随后直接提问，或让
@@ -77,26 +79,33 @@ export default function IntroPage() {
         </section>
 
         <section className="intro-sec rv">
-          <h2 className="intro-h2">它解决什么</h2>
-          <p className="intro-sec-lead">
-            看过的课程、会议和访谈散落在视频文件里，想找某句话只能凭记忆拖动进度条。映知把「看」变成「问」：内容先被整理成带时间的文字与画面证据，之后用自然语言检索和追问，答案始终指向原片位置。
-          </p>
+          <div className="intro-sec-head">
+            <h2 className="intro-h2">它解决什么</h2>
+            <p className="intro-sec-lead">
+              看过的课程、会议和访谈散落在视频文件里，想找某句话只能凭记忆拖动进度条。映知把「看」变成「问」：内容先被整理成带时间的文字与画面证据，之后用自然语言检索和追问，答案始终指向原片位置。
+            </p>
+          </div>
         </section>
 
         <section className="intro-sec rv">
           <h2 className="intro-h2">典型使用流程</h2>
-          <ol className="intro-flow">
-            {FLOW.map((s, i) => (
-              <li key={s.title} className="rv-item">
-                <span className="intro-flow-no mono">{String(i + 1).padStart(2, '0')}</span>
-                <span className="intro-flow-icon">
-                  <Icon name={s.icon} />
-                </span>
-                <b>{s.title}</b>
-                <p>{s.desc}</p>
-              </li>
-            ))}
-          </ol>
+          <div className="intro-flow-wrap">
+            <svg className="intro-flow-link" viewBox="0 0 1000 44" preserveAspectRatio="none" aria-hidden="true">
+              <path pathLength={1} d="M 70 36 C 180 36, 200 6, 268 6 C 336 6, 344 36, 468 36 C 560 36, 566 6, 668 6 C 770 6, 786 36, 930 36" />
+            </svg>
+            <ol className="intro-flow">
+              {FLOW.map((s, i) => (
+                <li key={s.title} className="rv-item">
+                  <span className="intro-flow-no mono">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="intro-flow-icon">
+                    <Icon name={s.icon} />
+                  </span>
+                  <b>{s.title}</b>
+                  <p>{s.desc}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
           <p className="intro-note">
             上传后处理不会自动开始：进入视频详情手动启动转写，之后按需生成摘要、建立索引。每一步的状态和等待原因都会显示。
           </p>

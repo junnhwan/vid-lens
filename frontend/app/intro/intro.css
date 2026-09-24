@@ -23,6 +23,39 @@
     var(--bg-0);
   scrollbar-width: thin;
   scrollbar-color: var(--bg-4) transparent;
+  /* 极光辉光 / 网格:纯 CSS 绘制,零 JS、零 canvas,滚动时合成层开销极低 */
+  position: relative;
+  isolation: isolate;
+}
+/* 流动极光:固定在滚动容器顶部区域,缓慢漂移 */
+.intro-root::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  right: -12%;
+  width: min(760px, 78vw);
+  height: 620px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 16%, transparent), transparent 72%);
+  filter: blur(70px);
+  animation: i-aurora 26s ease-in-out infinite alternate;
+}
+.intro-root::after {
+  content: "";
+  position: absolute;
+  top: 32%;
+  left: -16%;
+  width: min(620px, 70vw);
+  height: 520px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 9%, transparent), transparent 74%);
+  filter: blur(70px);
+  animation: i-aurora 32s ease-in-out infinite alternate-reverse;
+}
+@keyframes i-aurora {
+  to { transform: translate(-60px, 40px) scale(1.12); }
 }
 .intro-root::-webkit-scrollbar { width: 9px; }
 .intro-root::-webkit-scrollbar-thumb {
@@ -104,6 +137,17 @@
   background-position: 0 calc(100% - 3px);
   background-size: 100% 7px;
 }
+/* 逐字浮出:由 RevealText 生成的 .char;<em> 整体作为一个单元,不拆字符,
+   否则 -webkit-text-fill-color 继承会把渐变标题的字变成透明。 */
+.intro-hero h1 .char {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(14px);
+  filter: blur(6px);
+  animation: i-char 620ms var(--ease) forwards;
+  animation-delay: var(--cd, 0ms);
+}
+@keyframes i-char { to { opacity: 1; transform: none; filter: blur(0); } }
 .intro-lead {
   margin-top: 20px;
   font-size: 16px;
@@ -131,12 +175,12 @@
 }
 .intro-cta-ghost:hover { border-color: var(--acc-line); background: var(--bg-2); }
 
-/* ---------- 首屏静态示意图 ---------- */
+/* ---------- 首屏交互示意图(监视器 + 三轨时间线) ---------- */
 .intro-stage {
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: linear-gradient(180deg, var(--bg-1), color-mix(in srgb, var(--bg-0) 70%, var(--bg-1)));
-  box-shadow: var(--shadow-1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 24px 60px rgba(0, 0, 0, 0.35);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -150,15 +194,77 @@
 }
 .is-frame {
   position: relative;
-  height: 152px;
+  height: 172px;
+  overflow: hidden;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--acc) 22%, transparent), transparent 60%),
     repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 9px),
     var(--bg-3);
-  display: grid;
-  place-items: center;
 }
+/* 多帧交叉淡入 + 极缓推近(ken-burns): 图片叠加,只有 .on 可见 */
+.is-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1);
+  transition: opacity 520ms var(--ease);
+}
+.is-frame img.on {
+  opacity: 1;
+  animation: is-kenburns 16s ease-in-out infinite alternate;
+}
+@keyframes is-kenburns {
+  from { transform: scale(1) translate(0, 0); }
+  to { transform: scale(1.07) translate(-6px, 4px); }
+}
+/* 定时扫光 */
+.is-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 236, 200, 0.14) 50%, transparent 60%);
+  background-size: 300% 100%;
+  animation: is-sweep 6.5s var(--ease) infinite;
+}
+@keyframes is-sweep {
+  0%, 62% { background-position: 130% 0; }
+  100% { background-position: -60% 0; }
+}
+.is-frame::after {
+  /* 压暗图片,保证角标与时间码可读 */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-0) 30%, transparent), color-mix(in srgb, var(--bg-0) 62%, transparent));
+}
+.is-live, .is-chapter, .is-play, .is-tc { position: absolute; z-index: 2; }
+.is-live {
+  right: 10px; top: 10px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  border-radius: 99px;
+  color: var(--acc-strong);
+  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
+  border: 1px solid var(--acc-line);
+}
+.is-chapter {
+  left: 10px; top: 10px;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  color: var(--tx-3);
+  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
+  backdrop-filter: blur(6px);
+}
+.is-chapter b { color: var(--acc-strong); font-weight: 600; }
 .is-play {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
   display: grid;
   place-items: center;
   width: 42px; height: 42px;
@@ -166,33 +272,130 @@
   background: color-mix(in srgb, var(--bg-0) 55%, transparent);
   border: 1px solid var(--line-strong);
   color: var(--tx-1);
+  cursor: pointer;
+  transition: transform 200ms var(--ease), border-color 200ms var(--ease), color 200ms var(--ease);
+}
+.is-play:hover {
+  transform: translate(-50%, -50%) scale(1.08);
+  border-color: var(--acc-line);
+  color: var(--acc-strong);
 }
 .is-play .ic { width: 18px; height: 18px; }
 .is-tc {
-  position: absolute;
   right: 10px; bottom: 10px;
   font-size: 11px;
   padding: 3px 7px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg-0) 72%, transparent);
-  color: var(--tx-2);
+  color: var(--tx-1);
+  font-variant-numeric: tabular-nums;
 }
-.is-meta {
+
+/* ---------- 三轨时间线 ---------- */
+.is-deck { display: flex; flex-direction: column; gap: 6px; }
+.is-tracks {
+  /* 标签栏宽度:轨道内容区从这之后开始,播放头用同一变量换算才能对齐 */
+  --lbl-gutter: 74px;
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 4px;
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
 }
-.is-meta b { font-size: 13.5px; font-weight: 600; color: var(--tx-1); }
-.is-tags { margin-left: auto; display: flex; gap: 6px; }
-.is-tag {
-  font-style: normal;
-  font-size: 11px;
-  padding: 2.5px 7px;
+.is-track {
+  position: relative;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+/* 轨道可用区:避开左侧标签,chip 的百分比定位相对这一层 */
+.is-track-body {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: var(--lbl-gutter);
+  right: 4px;
+}
+.is-track-lbl {
+  position: absolute;
+  left: 7px; top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  font-size: 8.5px;
+  letter-spacing: 0.13em;
+  color: var(--tx-4);
+  pointer-events: none;
+}
+.is-chap, .is-seg {
+  position: absolute;
+  top: 5px; bottom: 5px;
   border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  color: var(--tx-3);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 0 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+  transition: background 220ms var(--ease), color 220ms var(--ease), border-color 220ms var(--ease);
+}
+.is-chap.active, .is-seg.active {
   background: var(--acc-dim);
+  border-color: var(--acc);
   color: var(--acc-strong);
+  box-shadow: 0 0 14px rgba(226, 168, 75, 0.2);
+}
+/* 放不下文字的 chip:整体淡出成纯色块(完整名字见 tooltip / 下方转写行),
+   不做"开…"式截断;IntroStage 的 ResizeObserver 负责检测并加 .tight。
+   必须写在 .active 之后:激活 chip 同样可能放不下,不能被 active 颜色覆盖 */
+.is-chap.tight, .is-seg.tight { color: transparent; }
+.is-seg:hover { border-color: var(--acc-line); }
+.is-seg span {
+  position: relative; top: 50%; display: block;
+  transform: translateY(-50%);
+  overflow: hidden;
+}
+.is-track-ev { height: 40px; }
+.is-thumb {
+  position: absolute;
+  top: 4px;
+  width: 62px; height: 30px;
+  padding: 0;
+  transform: translateX(-50%);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  cursor: pointer;
+  transition: transform 200ms var(--ease), border-color 220ms var(--ease), box-shadow 220ms var(--ease);
+}
+.is-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.is-thumb:hover { transform: translateX(-50%) scale(1.14); border-color: var(--acc-line); z-index: 5; }
+.is-thumb.active { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc-line), 0 0 14px rgba(226, 168, 75, 0.3); }
+.is-playhead {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--acc-strong);
+  box-shadow: 0 0 12px rgba(240, 188, 104, 0.65);
+  pointer-events: none;
+  z-index: 6;
+}
+.is-playhead::before {
+  content: "";
+  position: absolute;
+  top: -4px; left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top: 7px solid var(--acc-strong);
 }
 .is-lines { display: flex; flex-direction: column; gap: 2px; }
 .is-line {
@@ -202,6 +405,8 @@
   color: var(--tx-3);
   padding: 7px 10px 7px 58px;
   border-radius: 8px;
+  border-left: 2px solid transparent;
+  transition: background 300ms var(--ease), color 300ms var(--ease), border-color 300ms var(--ease);
 }
 .is-line .is-t {
   position: absolute;
@@ -212,6 +417,7 @@
 .is-line.hit {
   background: var(--acc-dim);
   color: var(--tx-1);
+  border-left-color: var(--acc);
 }
 .is-line.hit .is-t { color: var(--acc-strong); }
 .is-qa {
@@ -221,6 +427,21 @@
   flex-direction: column;
   gap: 8px;
 }
+.is-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.is-chip {
+  font-family: var(--i-sans);
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 5px 10px;
+  border-radius: 99px;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-2);
+  color: var(--tx-3);
+  transition: border-color 180ms var(--ease), color 180ms var(--ease), transform 150ms var(--ease);
+}
+.is-chip:hover { border-color: var(--acc-line); color: var(--acc-strong); transform: translateY(-1px); }
+.is-chip:active { transform: scale(0.96); }
 .is-q {
   align-self: flex-end;
   max-width: 88%;
@@ -251,7 +472,12 @@
   border-radius: 6px;
   border: 1px solid var(--acc-line);
   color: var(--acc-strong);
+  background: transparent;
+  cursor: pointer;
+  transition: box-shadow 200ms var(--ease), transform 150ms var(--ease);
 }
+.is-cite-idle { opacity: 0.5; cursor: default; }
+.is-cite:not(.is-cite-idle):hover { box-shadow: 0 0 16px rgba(226, 168, 75, 0.28); transform: translateY(-1px); }
 .is-cite .ic { width: 11px; height: 11px; stroke-width: 2.4; }
 
 /* ---------- 区块 ---------- */
@@ -268,17 +494,49 @@
   margin-bottom: 14px;
 }
 .intro-sec-lead { color: var(--tx-2); font-size: 15.5px; line-height: 1.85; max-width: 46em; }
+/* 标题左 / 正文右:纯文字区块不再挤在左侧留下大片空白 */
+.intro-sec-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr);
+  gap: 10px clamp(28px, 4vw, 56px);
+  align-items: start;
+}
+.intro-sec-head .intro-h2 { margin-bottom: 0; }
+.intro-sec-head .intro-sec-lead { max-width: 40em; }
 .intro-note { margin-top: 18px; font-size: 13.5px; color: var(--tx-3); }
 .intro-note a { color: var(--acc-strong); }
 .intro-note a:hover { text-decoration: underline; }
 
 /* 使用流程 */
+/* 连线图层:装饰性 SVG,滚动到此处由 IntroMotion 加 .lit 触发描边生长 */
+.intro-flow-wrap { position: relative; }
+.intro-flow-link {
+  position: absolute;
+  left: 6%; right: 6%;
+  top: 16px;
+  width: 88%;
+  height: 44px;
+  pointer-events: none;
+  z-index: 0;
+}
+.intro-flow-link path {
+  fill: none;
+  stroke: var(--acc-line);
+  stroke-width: 1.6;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.intro-flow-wrap.lit .intro-flow-link path { animation: i-draw 2.6s var(--ease) 0.15s forwards; }
+@keyframes i-draw { to { stroke-dashoffset: 0; } }
+
 .intro-flow {
   list-style: none;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   margin-top: 24px;
+  position: relative;
+  z-index: 1;
 }
 .intro-flow li {
   position: relative;
@@ -320,8 +578,41 @@
   border-radius: var(--r-card);
   background: var(--bg-1);
   padding: 20px 18px;
+  position: relative;
+  overflow: hidden;
   transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
 }
+/* 追光描边(悬停出现) + 跟随鼠标的顶部柔光 */
+.intro-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--i-ang, 0deg), transparent 0 72%, var(--acc) 84%, var(--acc-strong) 90%, transparent 97%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 380ms var(--ease);
+  animation: i-spin 3.6s linear infinite;
+}
+.intro-card:hover::before { opacity: 1; }
+@property --i-ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes i-spin { to { --i-ang: 360deg; } }
+.intro-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 340ms var(--ease);
+  background: radial-gradient(300px circle at var(--i-mx, 50%) var(--i-my, 50%), color-mix(in srgb, var(--acc) 9%, transparent), transparent 62%);
+}
+.intro-card:hover::after { opacity: 1; }
+.intro-card > *, .intro-card > .intro-card-icon { position: relative; z-index: 1; }
 .intro-card:hover { border-color: var(--acc-line); background: var(--bg-2); }
 .intro-card-icon {
   display: grid;
@@ -381,6 +672,7 @@
 }
 .intro-stage > :nth-child(2) { --d: 65ms; }
 .intro-stage > :nth-child(3) { --d: 130ms; }
+.intro-stage > :nth-child(4) { --d: 195ms; }
 .intro-flow li:nth-child(2), .intro-card:nth-child(2) { --d: 45ms; }
 .intro-flow li:nth-child(3), .intro-card:nth-child(3) { --d: 90ms; }
 .intro-flow li:nth-child(4), .intro-card:nth-child(4) { --d: 135ms; }
@@ -415,12 +707,22 @@
   .intro-hero-stage { order: -1; }
   .intro-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .intro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .is-frame { height: 132px; }
+  .is-frame { height: 156px; }
+  .intro-flow-link { display: none; }
+  .intro-card { transform: none !important; }
+  .intro-sec-head { grid-template-columns: 1fr; gap: 8px; }
+  .intro-sec-head .intro-sec-lead { max-width: none; }
 }
 @media (max-width: 620px) {
   .intro-topnav > a:not(.intro-cta-sm) { display: none; }
   .intro-flow, .intro-grid { grid-template-columns: 1fr; }
-  .is-frame { height: 108px; }
+  .is-frame { height: 112px; }
+  .is-tracks { --lbl-gutter: 56px; }
+  .is-track { height: 26px; }
+  .is-track-ev { height: 34px; }
+  .is-thumb { width: 52px; height: 26px; }
+  .is-track-lbl { font-size: 7.5px; letter-spacing: 0.08em; }
+  .is-chap, .is-seg { font-size: 9.5px; padding: 0 5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -440,4 +742,13 @@
   .intro-cta .ic, .intro-cta-sm .ic, .intro-top { transition: none; }
   .intro-flow li:hover, .intro-card:hover { transform: none; box-shadow: none; }
   .intro-cta:hover .ic, .intro-cta-sm:hover .ic { transform: none; }
+  /* 融合动效全量降级:极光/扫光/缓推/逐字/追光一律静止,内容完整可见 */
+  .intro-root::before, .intro-root::after { animation: none; }
+  .is-sheen { animation: none; display: none; }
+  .is-frame img.on { animation: none; }
+  .intro-hero h1 .char { opacity: 1; transform: none; filter: none; animation: none; }
+  .intro-card::before, .intro-card::after { animation: none; }
+  .intro-card::before { transition: none; }
+  .is-play, .is-thumb, .is-chip, .is-cite, .is-chap, .is-seg,
+  .is-line, .is-playhead { transition: none; }
 }

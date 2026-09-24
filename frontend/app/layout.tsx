@@ -24,7 +24,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link id="gfonts" href={FONT_LINK} rel="stylesheet" media="print" />
+        {/* media="print"→all 的切换会让 React 报一次属性不匹配,这里显式压掉 */}
+        <link id="gfonts" href={FONT_LINK} rel="stylesheet" media="print" suppressHydrationWarning />
         <noscript>
           <link href={FONT_LINK} rel="stylesheet" />
         </noscript>
