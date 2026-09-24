@@ -404,7 +404,15 @@ func (s *RetryScheduler) RunOnce(ctx context.Context) error {
 				return fmt.Errorf("consume retry budget: %w", consumeErr)
 			}
 			if !decision.Allowed {
-				return &ai.RetryBudgetError{Decision: decision}
+				closed, closeErr := s.repos.ExhaustRetryDispatch(task.ID, task.LastJobType, stage, claimToken, now)
+				if closeErr != nil {
+					return fmt.Errorf("end exhausted retry dispatch: %w", closeErr)
+				}
+				if closed {
+					observability.Log(ctx, slog.Default(), slog.LevelWarn, "retry budget exhausted; task requires manual retry",
+						slog.Int64("task_id", task.ID), slog.String("job_type", task.LastJobType))
+				}
+				continue
 			}
 		}
 		retryCtx := contextWithClaimToken(contextForTaskJob(ctx, &task, job), claimToken)

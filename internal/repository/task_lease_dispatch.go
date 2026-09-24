@@ -212,3 +212,59 @@ func (r *Repositories) RestoreRetryDispatch(req TaskDispatchRestoreRequest) (boo
 	})
 	return restored, err
 }
+
+// ExhaustRetryDispatch closes a claimed retry when its shared retry budget can
+// no longer issue another attempt. The dispatch token fences older schedulers.
+func (r *Repositories) ExhaustRetryDispatch(taskID int64, jobType, stage, token string, now time.Time) (bool, error) {
+	if r == nil || r.Task == nil || r.TaskJob == nil {
+		return false, fmt.Errorf("任务仓储未初始化")
+	}
+	if taskID <= 0 || jobType == "" || token == "" {
+		return false, fmt.Errorf("结束重试 dispatch lease 参数不完整")
+	}
+	const message = "AI 重试额度已耗尽，请手动重试"
+	closed := false
+	err := r.Transaction(func(repos *Repositories) error {
+		task, err := repos.Task.FindByID(taskID)
+		if err != nil {
+			return err
+		}
+		job, err := repos.TaskJob.FindByTaskAndType(taskID, jobType)
+		if err != nil || job == nil {
+			return err
+		}
+		if task.ProcessingToken != token || task.LeaseKind != model.TaskLeaseKindDispatch ||
+			job.ProcessingToken != token || job.LeaseKind != model.TaskLeaseKindDispatch {
+			return nil
+		}
+		version := task.LeaseVersion + 1
+		taskTx := repos.db.Model(&model.VideoTask{}).
+			Where("id = ? AND processing_token = ? AND lease_kind = ? AND lease_version = ?", taskID, token, model.TaskLeaseKindDispatch, task.LeaseVersion).
+			Updates(map[string]interface{}{
+				"status": model.TaskStatusDead, "stage": stage,
+				"error_msg": message, "last_error_code": "retry_budget_exhausted", "last_error_msg": message,
+				"next_retry_at": nil, "processing_token": "", "lease_kind": "", "lease_expires_at": nil,
+				"lease_version": version, "stage_finished_at": now, "finished_at": now,
+			})
+		if taskTx.Error != nil || taskTx.RowsAffected != 1 {
+			return taskTx.Error
+		}
+		jobTx := repos.db.Model(&model.TaskJob{}).
+			Where("id = ? AND processing_token = ? AND lease_kind = ? AND lease_version = ?", job.ID, token, model.TaskLeaseKindDispatch, job.LeaseVersion).
+			Updates(map[string]interface{}{
+				"status": model.TaskStatusDead, "stage": stage,
+				"last_error_code": "retry_budget_exhausted", "last_error_msg": message,
+				"next_retry_at": nil, "processing_token": "", "lease_kind": "", "lease_expires_at": nil,
+				"lease_version": version, "finished_at": now,
+			})
+		if jobTx.Error != nil {
+			return jobTx.Error
+		}
+		if jobTx.RowsAffected != 1 {
+			return fmt.Errorf("子任务重试额度结束 CAS 失败")
+		}
+		closed = true
+		return nil
+	})
+	return closed, err
+}

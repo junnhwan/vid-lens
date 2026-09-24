@@ -1509,6 +1509,58 @@ func TestRetrySchedulerConsumesAndForwardsBoundRetryBudget(t *testing.T) {
 	}
 }
 
+func TestRetrySchedulerStopsExhaustedBudget(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	now := time.Date(2026, 7, 14, 15, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-time.Second)
+	task := &model.VideoTask{
+		UserID: 7, FileMD5: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Filename: "retry-budget.mp4",
+		Status: model.TaskStatusFailed, Stage: model.TaskStageSummarizing,
+		RetryCount: 1, MaxRetries: 3, NextRetryAt: &dueAt, LastJobType: TaskJobAnalyze,
+	}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TaskJob.UpsertQueued(task, TaskJobAnalyze, model.TaskStageSummarizing, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.TaskJob.RecordRetryableFailure(task.ID, TaskJobAnalyze, model.TaskStageSummarizing, "provider 504", 1, 3, dueAt); err != nil {
+		t.Fatal(err)
+	}
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, TaskJobAnalyze)
+	if err != nil || job == nil {
+		t.Fatalf("job = %+v, error = %v", job, err)
+	}
+	budgetID := "exhausted-budget"
+	if _, err := repos.RetryBudget.Ensure(repository.RetryBudgetSpec{
+		BudgetID: budgetID, TaskID: task.ID, JobID: job.ID, Operation: TaskJobAnalyze,
+		MaxAttempts: 1, Deadline: now.Add(time.Hour), Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.RetryBudget.Consume(budgetID, "provider:prior", model.RetryAttemptLayerProvider, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.TaskJob.BindRetryBudget(task.ID, TaskJobAnalyze, budgetID); err != nil {
+		t.Fatal(err)
+	}
+	producer := &recordingRetryProducer{}
+	scheduler := NewRetryScheduler(repos, producer, RetrySchedulerConfig{
+		Now: func() time.Time { return now }, NewToken: func() string { return "dispatch-token" },
+	})
+	if err := scheduler.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil || current.Status != model.TaskStatusDead || current.NextRetryAt != nil || current.LeaseKind != "" {
+		t.Fatalf("task = %+v, error = %v", current, err)
+	}
+	job, err = repos.TaskJob.FindByTaskAndType(task.ID, TaskJobAnalyze)
+	if err != nil || job.Status != model.TaskStatusDead || job.NextRetryAt != nil || job.LeaseKind != "" {
+		t.Fatalf("job = %+v, error = %v", job, err)
+	}
+}
+
 func TestRetrySchedulerRequeuesRAGIndexJob(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
