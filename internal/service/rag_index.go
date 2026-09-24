@@ -63,13 +63,19 @@ type RAGIndexService struct {
 }
 
 type RAGIndexResult struct {
-	TaskID         int64  `json:"task_id"`
-	Status         string `json:"status"`
-	Indexed        bool   `json:"indexed"`
-	Chunks         int    `json:"chunks"`
-	EmbeddingModel string `json:"embedding_model"`
-	LastError      string `json:"last_error"`
-	NeedsRebuild   bool   `json:"needs_rebuild,omitempty"`
+	TaskID          int64      `json:"task_id"`
+	Status          string     `json:"status"`
+	Indexed         bool       `json:"indexed"`
+	Chunks          int        `json:"chunks"`
+	EmbeddingModel  string     `json:"embedding_model"`
+	LastError       string     `json:"last_error"`
+	NeedsRebuild    bool       `json:"needs_rebuild,omitempty"`
+	TotalChunks     int        `json:"total_chunks"`
+	CompletedChunks int        `json:"completed_chunks"`
+	BuildPhase      string     `json:"build_phase"`
+	WaitReason      string     `json:"wait_reason"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	ProgressAt      *time.Time `json:"progress_at,omitempty"`
 }
 
 func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cfg RAGIndexConfig) *RAGIndexService {
@@ -89,16 +95,39 @@ func NewRAGIndexService(repos *repository.Repositories, store RAGVectorStore, cf
 }
 
 func embedWithAdmissionWait(ctx context.Context, embedding ai.EmbeddingClient, input string) ([]float32, error) {
+	return embedWithAdmissionProgress(ctx, embedding, input, nil)
+}
+
+func embedWithAdmissionProgress(ctx context.Context, embedding ai.EmbeddingClient, input string, onWait func(string, time.Time) error) ([]float32, error) {
+	providerRetries := 0
 	for {
 		vector, err := embedding.Embed(ctx, input)
 		if err == nil {
 			return vector, nil
 		}
 		var admissionErr *ai.AdmissionError
-		if !errors.As(err, &admissionErr) || admissionErr.Decision.RetryAfter <= 0 {
+		reason := "local_admission"
+		wait := time.Duration(0)
+		if errors.As(err, &admissionErr) {
+			wait = admissionErr.Decision.RetryAfter
+		} else {
+			var providerErr *ai.ProviderError
+			if !errors.As(err, &providerErr) || providerErr.Class != ai.ErrorRateLimited || providerErr.RetryAfter <= 0 || providerRetries >= 2 {
+				return nil, err
+			}
+			providerRetries++
+			reason = "provider_rate_limit"
+			wait = providerErr.RetryAfter
+		}
+		if wait <= 0 {
 			return nil, err
 		}
-		timer := time.NewTimer(admissionErr.Decision.RetryAfter)
+		if onWait != nil {
+			if err := onWait(reason, time.Now().Add(wait)); err != nil {
+				return nil, err
+			}
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -157,20 +186,29 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 	if err != nil {
 		return nil, err
 	}
+	task, taskErr := s.repos.Task.FindByID(taskID)
+	if taskErr == nil && task.UserID == userID && (task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning) && task.Stage == model.TaskStageIndexing && (index == nil || index.Status != model.RAGIndexStatusIndexing) {
+		return &RAGIndexResult{TaskID: taskID, Status: "queued", EmbeddingModel: modelName, BuildPhase: "queued"}, nil
+	}
 	if index != nil {
 		if index.Status == model.RAGIndexStatusIndexed && (index.BuildVersion != model.CurrentRAGIndexBuildVersion || index.ChunkerVersion != s.cfg.ChunkerVersion || index.SourceMappingVersion != model.CurrentRAGSourceMappingVersion) {
-			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true}, nil
+			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true, ProgressAt: &index.UpdatedAt}, nil
 		}
 		return &RAGIndexResult{
-			TaskID:         taskID,
-			Status:         index.Status,
-			Indexed:        index.Status == model.RAGIndexStatusIndexed,
-			Chunks:         index.ChunkCount,
-			EmbeddingModel: index.EmbeddingModel,
-			LastError:      index.LastError,
+			TaskID:          taskID,
+			Status:          index.Status,
+			Indexed:         index.Status == model.RAGIndexStatusIndexed,
+			Chunks:          index.ChunkCount,
+			EmbeddingModel:  index.EmbeddingModel,
+			LastError:       index.LastError,
+			TotalChunks:     index.TotalChunks,
+			CompletedChunks: index.CompletedChunks,
+			BuildPhase:      index.BuildPhase,
+			WaitReason:      index.WaitReason,
+			NextRetryAt:     index.NextRetryAt,
+			ProgressAt:      &index.UpdatedAt,
 		}, nil
 	}
-
 	chunks, err := s.repos.VideoChunk.ListByTaskID(userID, taskID, modelName)
 	if err != nil {
 		return nil, err

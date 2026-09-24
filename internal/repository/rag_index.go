@@ -2,8 +2,10 @@ package repository
 
 import (
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"vid-lens/internal/model"
 )
 
@@ -13,6 +15,38 @@ type RAGIndexRepository struct {
 
 func NewRAGIndexRepository(db *gorm.DB) *RAGIndexRepository {
 	return &RAGIndexRepository{db: db}
+}
+
+// ClaimBuild atomically reserves one task/model projection. An abandoned claim
+// may be reclaimed after an hour; active builds refresh updated_at as they run.
+func (r *RAGIndexRepository) ClaimBuild(index *model.VideoRAGIndex) (bool, error) {
+	created := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(index)
+	if created.Error != nil {
+		return false, created.Error
+	}
+	if created.RowsAffected > 0 {
+		return true, nil
+	}
+	result := r.db.Model(&model.VideoRAGIndex{}).
+		Where("user_id = ? AND task_id = ? AND embedding_model = ? AND (status <> ? OR updated_at < ?)", index.UserID, index.TaskID, index.EmbeddingModel, model.RAGIndexStatusIndexing, time.Now().Add(-time.Hour)).
+		Updates(map[string]interface{}{
+			"status": model.RAGIndexStatusIndexing, "file_md5": index.FileMD5,
+			"embedding_dim": index.EmbeddingDim, "chunk_count": 0,
+			"total_chunks": index.TotalChunks, "completed_chunks": 0,
+			"build_phase": index.BuildPhase, "wait_reason": "", "next_retry_at": nil,
+			"last_error": "", "started_at": index.StartedAt, "finished_at": nil,
+			"updated_at": time.Now(),
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
+// UpdateBuild only accepts progress from the owner that claimed started_at.
+func (r *RAGIndexRepository) UpdateBuild(userID, taskID int64, embeddingModel string, startedAt time.Time, fields map[string]interface{}) (bool, error) {
+	fields["updated_at"] = time.Now()
+	result := r.db.Model(&model.VideoRAGIndex{}).
+		Where("user_id = ? AND task_id = ? AND embedding_model = ? AND status = ? AND started_at = ?", userID, taskID, embeddingModel, model.RAGIndexStatusIndexing, startedAt).
+		Updates(fields)
+	return result.RowsAffected > 0, result.Error
 }
 
 func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {

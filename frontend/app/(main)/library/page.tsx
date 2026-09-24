@@ -39,6 +39,15 @@ export default function LibraryPage() {
     return () => { active = false }
   }, [])
 
+  const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2)
+  useEffect(() => {
+    if (!hasActiveTasks) return
+    const iv = setInterval(() => {
+      void api.listTasks(1, PAGE_SIZE).then(page => { setTasks(page.list); setTotal(page.total) }).catch(() => {})
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [hasActiveTasks])
+
   const list = useMemo(() => tasks.filter(t => {
     if (keyword && !taskTitle(t).toLowerCase().includes(keyword.toLowerCase())) return false
     if (filter === 'all') return true

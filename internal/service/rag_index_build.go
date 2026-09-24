@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 const (
 	maxRAGIndexErrorLen = 500
 )
+
+var ErrRAGIndexAlreadyBuilding = errors.New("索引正在构建中，请等待现有任务完成")
 
 type ragIndexBuild struct {
 	service     *RAGIndexService
@@ -37,24 +40,26 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 		return nil, fmt.Errorf("无权访问此任务")
 	}
 
-	chunks, err := s.loadTaskIndexChunks(userID, task)
-	if err != nil {
-		return nil, err
-	}
-
 	build := s.newRAGIndexBuild(userID, taskID, task.FileMD5, profile)
 	if err := build.start(); err != nil {
 		return nil, err
 	}
-	if err := checkRAGBuildContext(ctx); err != nil {
-		return nil, err
+	chunks, err := s.loadTaskIndexChunks(userID, task)
+	if err != nil {
+		return build.fail(ctx, err)
+	}
+	if err := build.setTotal(len(chunks)); err != nil {
+		return build.fail(ctx, err)
 	}
 	if err := checkRAGBuildContext(ctx); err != nil {
-		return nil, err
+		return build.fail(ctx, err)
 	}
 
 	dbChunks, vectors, err := build.embedChunks(ctx, embedding, profile, chunks)
 	if err != nil {
+		return build.fail(ctx, err)
+	}
+	if err := build.progress("writing", len(chunks), "", nil); err != nil {
 		return build.fail(ctx, err)
 	}
 	manifest, err := build.persistChunkSource(ctx, dbChunks, vectors)
@@ -178,7 +183,33 @@ func (s *RAGIndexService) newRAGIndexBuild(userID, taskID int64, fileMD5 string,
 }
 
 func (b *ragIndexBuild) start() error {
-	return b.writeStatus(model.RAGIndexStatusIndexing, 0, "", "", nil)
+	claimed, err := b.service.repos.RAGIndex.ClaimBuild(&model.VideoRAGIndex{
+		UserID: b.userID, TaskID: b.taskID, FileMD5: b.fileMD5,
+		EmbeddingModel: b.modelName, EmbeddingDim: b.expectedDim,
+		Status:     model.RAGIndexStatusIndexing,
+		BuildPhase: "preparing", BuildVersion: model.CurrentRAGIndexBuildVersion,
+		StartedAt: &b.startedAt,
+	})
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrRAGIndexAlreadyBuilding
+	}
+	return nil
+}
+
+func (b *ragIndexBuild) setTotal(total int) error {
+	ok, err := b.service.repos.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
+		"total_chunks": total, "build_phase": "embedding",
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("索引构建占用已失效")
+	}
+	return nil
 }
 
 func (b *ragIndexBuild) fail(ctx context.Context, cause error) (*RAGIndexResult, error) {
@@ -190,35 +221,46 @@ func (b *ragIndexBuild) fail(ctx context.Context, cause error) (*RAGIndexResult,
 	if len(errMsg) > maxRAGIndexErrorLen {
 		errMsg = errMsg[:maxRAGIndexErrorLen]
 	}
-	_ = b.writeStatus(model.RAGIndexStatusFailed, 0, "", errMsg, &finishedAt)
+	_, _ = b.service.repos.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
+		"status": model.RAGIndexStatusFailed, "build_phase": "failed", "wait_reason": "", "next_retry_at": nil,
+		"last_error": errMsg, "finished_at": finishedAt,
+	})
 	return nil, cause
 }
 
 func (b *ragIndexBuild) complete(chunkCount int, manifest string) error {
 	finishedAt := time.Now()
-	return b.writeStatus(model.RAGIndexStatusIndexed, chunkCount, manifest, "", &finishedAt)
+	ok, err := b.service.repos.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
+		"status": model.RAGIndexStatusIndexed, "chunk_count": chunkCount,
+		"completed_chunks": chunkCount, "total_chunks": chunkCount,
+		"build_phase": "completed", "wait_reason": "", "next_retry_at": nil,
+		"chunk_manifest_sha256": manifest, "finished_at": finishedAt,
+		"chunker_strategy": b.service.cfg.ChunkerStrategy, "chunker_version": b.service.cfg.ChunkerVersion,
+		"chunk_size": b.service.cfg.ChunkSize, "chunk_overlap": b.service.cfg.ChunkOverlap,
+		"source_mapping_version": model.CurrentRAGSourceMappingVersion,
+		"build_version":          model.CurrentRAGIndexBuildVersion,
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("索引构建占用已失效")
+	}
+	return nil
 }
 
-func (b *ragIndexBuild) writeStatus(status string, chunkCount int, manifest, lastError string, finishedAt *time.Time) error {
-	return b.service.repos.RAGIndex.Upsert(&model.VideoRAGIndex{
-		UserID:               b.userID,
-		TaskID:               b.taskID,
-		FileMD5:              b.fileMD5,
-		EmbeddingModel:       b.modelName,
-		EmbeddingDim:         b.expectedDim,
-		Status:               status,
-		ChunkCount:           chunkCount,
-		ChunkerStrategy:      b.service.cfg.ChunkerStrategy,
-		ChunkerVersion:       b.service.cfg.ChunkerVersion,
-		ChunkSize:            b.service.cfg.ChunkSize,
-		ChunkOverlap:         b.service.cfg.ChunkOverlap,
-		ChunkManifestSHA256:  manifest,
-		SourceMappingVersion: model.CurrentRAGSourceMappingVersion,
-		LastError:            lastError,
-		BuildVersion:         model.CurrentRAGIndexBuildVersion,
-		StartedAt:            &b.startedAt,
-		FinishedAt:           finishedAt,
+func (b *ragIndexBuild) progress(phase string, completed int, waitReason string, retryAt *time.Time) error {
+	ok, err := b.service.repos.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
+		"build_phase": phase, "completed_chunks": completed,
+		"wait_reason": waitReason, "next_retry_at": retryAt,
 	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("索引构建占用已失效")
+	}
+	return nil
 }
 
 func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingClient, profile ai.Profile, chunks []TextChunk) ([]model.VideoChunk, []RAGVector, error) {
@@ -235,7 +277,12 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 		if err := checkRAGBuildContext(ctx); err != nil {
 			return nil, nil, err
 		}
-		vector, err := embedWithAdmissionWait(ctx, embedding, chunk.Content)
+		if err := b.progress("embedding", len(dbChunks), "", nil); err != nil {
+			return nil, nil, err
+		}
+		vector, err := embedWithAdmissionProgress(ctx, embedding, chunk.Content, func(reason string, retryAt time.Time) error {
+			return b.progress("waiting", len(dbChunks), reason, &retryAt)
+		})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -276,6 +323,9 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 			EmbeddingModel: b.modelName,
 			Vector:         vector,
 		})
+		if err := b.progress("embedding", len(dbChunks), "", nil); err != nil {
+			return nil, nil, err
+		}
 	}
 	return dbChunks, vectors, nil
 }

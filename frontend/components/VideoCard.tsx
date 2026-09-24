@@ -35,7 +35,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
           <span style={{ marginLeft: 'auto' }}>{fmtRelTime(task.updated_at)}</span>
         </div>
         {cat === 'processing' && (
-          <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} />
+          <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
         )}
         {failed && task.error_msg && (
           <div className="mini-prog">

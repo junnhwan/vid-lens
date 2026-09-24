@@ -22,6 +22,7 @@ import { ConfirmModal, Modal } from '@/components/ui/Modal'
 import KBModal from '@/components/KBModal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
+import { taskStateView } from '@/lib/taskStatus'
 import { VideoStill } from '@/components/VideoPoster'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
@@ -37,6 +38,38 @@ type ConfirmAction = {
   title: string
   body: string
   confirmLabel: string
+}
+
+function indexActionLabel(index: RAGIndexResult | null): string {
+  if (!index) return '索引状态不可用'
+  if (index.status === 'queued') return '索引排队中…'
+  if (index.status === 'indexing') return '索引构建中…'
+  if (index.status === 'failed') return '索引失败，重试'
+  if (index.status === 'needs_rebuild' || index.needs_rebuild) return '需要重建索引'
+  return index.indexed ? '重建索引' : '建立索引'
+}
+
+function indexConfirm(index: RAGIndexResult): ConfirmAction {
+  const label = indexActionLabel(index)
+  const replacing = index.indexed || index.needs_rebuild || index.status === 'needs_rebuild'
+  return {
+    kind: 'index', title: `${label}？`, confirmLabel: label,
+    body: `会调用当前向量模型处理已有转写文字并消耗 Embedding 额度；不会重新转写或修改原视频和转写文字。${replacing ? '现有检索索引将被替换。' : ''}`,
+  }
+}
+
+function indexPhase(index: RAGIndexResult): string {
+  if (index.status === 'queued') return '等待索引任务启动'
+  if (index.status === 'failed') return '索引失败'
+  if (index.status === 'indexed') return '已完成'
+  if (index.status === 'needs_rebuild') return '等待重建'
+  if (index.status === 'not_indexed') return '尚未建立'
+  const phases: Record<string, string> = {
+    preparing: '准备文本块', embedding: '调用 Embedding 模型',
+    waiting: index.wait_reason === 'local_admission' ? '等待本地模型额度' : index.wait_reason === 'provider_rate_limit' ? '等待第三方模型限流重试' : '等待重试',
+    writing: '写入向量', completed: '已完成',
+  }
+  return phases[index.build_phase] || '等待进度更新'
 }
 
 interface VisualFrameView {
@@ -222,6 +255,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     return () => clearInterval(iv)
   }, [processing, taskId])
 
+  useEffect(() => {
+    if (!processing && busy !== 'index' && index?.status !== 'indexing' && index?.status !== 'queued') return
+    const iv = setInterval(() => { void api.getRagIndex(taskId).then(setIndex).catch(() => {}) }, 5000)
+    return () => clearInterval(iv)
+  }, [processing, busy, index?.status, taskId])
+
   const transcriptAtoms = useMemo(
     () => (timeline?.atoms || []).filter(a => a.modality === 'transcript'),
     [timeline],
@@ -286,7 +325,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       } else {
         const r = await api.triggerRagIndex(task.id)
         setIndex(r)
-        toast.success('索引构建已开始,重建只重做投影,不重做转写')
+        if (r.status === 'indexed') toast.success('索引构建完成')
+        else toast.info(r.status === 'queued' ? '索引任务正在排队' : '索引正在构建中')
       }
       const fresh = await api.getTask(task.id).catch(() => null)
       if (fresh) {
@@ -524,6 +564,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     }
     const stateView = index.indexed
       ? { chip: 'chip-ok', text: '已建立' }
+      : index.status === 'indexing'
+        ? { chip: 'chip-acc', text: '构建中' }
+        : index.status === 'queued'
+          ? { chip: 'chip-mute', text: '排队中' }
+          : index.status === 'failed'
+            ? { chip: 'chip-bad', text: '失败' }
       : index.needs_rebuild
         ? { chip: 'chip-warn', text: '需要重建' }
         : { chip: 'chip-mute', text: '未建立' }
@@ -531,8 +577,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       <>
         <div className="idx-list">
           <div className="idx-row"><span className="k">状态</span><span className="v"><span className={`chip ${stateView.chip}`}>{stateView.text}</span></span></div>
-          <div className="idx-row"><span className="k">证据块</span><span className="v mono">{index.chunks} 块</span></div>
+          <div className="idx-row"><span className="k">阶段</span><span className="v">{indexPhase(index)}</span></div>
+          <div className="idx-row"><span className="k">证据块</span><span className="v mono">{index.status === 'indexing' && index.total_chunks > 0 ? `${index.completed_chunks} / ${index.total_chunks} 块已完成 Embedding` : `${index.chunks} 块`}</span></div>
           <div className="idx-row"><span className="k">向量模型</span><span className="v mono">{index.embedding_model || '—'}</span></div>
+          {index.next_retry_at && <div className="idx-row"><span className="k">下次重试</span><span className="v">{new Date(index.next_retry_at).toLocaleString()}</span></div>}
+          {index.progress_at && <div className="idx-row"><span className="k">最近进度</span><span className="v">{fmtRelTime(index.progress_at)}</span></div>}
           {index.last_error && (
             <div className="idx-row"><span className="k">最近错误</span><span className="v" style={{ color: 'var(--bad)', fontSize: 12 }}>{index.last_error}</span></div>
           )}
@@ -543,16 +592,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
         <button
           className="btn btn-sm"
           style={{ marginTop: 14 }}
-          disabled={busy !== ''}
-          onClick={() => setPendingAction({
-            kind: 'index',
-            title: index.indexed ? '重建检索索引?' : '建立检索索引?',
-            body: '会按当前向量模型生成检索投影,不重做转写,但会消耗 embedding 额度。',
-            confirmLabel: index.indexed ? '重建索引' : '建立索引',
-          })}
+          disabled={busy !== '' || index.status === 'indexing' || index.status === 'queued'}
+          onClick={() => setPendingAction(indexConfirm(index))}
         >
           <Icon name="layers" size="sm" />
-          {index.indexed ? '重建索引' : '建立索引'}
+          {indexActionLabel(index)}
         </button>
       </>
     )
@@ -607,7 +651,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           />
           {processing && (
             <div style={{ marginTop: 12, flex: 'none' }}>
-              <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} />
+              <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
             </div>
           )}
 
@@ -620,11 +664,14 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               <button
                 className="btn"
                 disabled={busy !== '' || processing || !task.has_transcription}
-                title={!task.has_transcription ? '转写完成后才能生成摘要' : undefined}
+                title={!task.has_transcription ? '转写完成后才能生成摘要' : processing ? `当前${taskStateView(task).text}；等待该任务结束后可生成摘要` : undefined}
                 onClick={() => void runAction('analyze')}
               >
                 <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : '生成摘要'}
               </button>
+            )}
+            {!task.has_summary && task.has_transcription && processing && (
+              <span className="muted" style={{ fontSize: 12 }}>当前{taskStateView(task).text}，任务结束后可生成摘要</span>
             )}
             {task.has_transcription ? (
               <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
@@ -645,13 +692,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 <Icon name="activity" size="sm" />开始转写
               </button>
             )}
-            <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
-              kind: 'index',
-              title: index?.indexed ? '重建检索索引?' : '建立检索索引?',
-              body: '会按当前向量模型生成检索投影,不重做转写,但会消耗 embedding 额度。',
-              confirmLabel: index?.indexed ? '重建索引' : '建立索引',
-            })}>
-              <Icon name="layers" size="sm" />{index?.indexed ? '重建索引' : '建立索引'}
+            <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
+              <Icon name="layers" size="sm" />{indexActionLabel(index)}
             </button>
             <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
               <Icon name="download" size="sm" />下载音频

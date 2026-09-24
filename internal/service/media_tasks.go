@@ -32,6 +32,9 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 		return fmt.Errorf("无权操作此任务")
 	}
 	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusQueued {
+		if task.Stage == model.TaskStageIndexing {
+			return fmt.Errorf("当前正在排队或构建检索索引，任务结束后可生成摘要")
+		}
 		return fmt.Errorf("任务正在处理中，请勿重复提交")
 	}
 	summary, err := s.repo.Summary.FindByTaskID(task.ID)

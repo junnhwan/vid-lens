@@ -521,6 +521,7 @@ select.input { cursor: pointer; }
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
   margin-top: 8px;
 }
+.proc-legend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 3px; color: var(--tx-3); font-size: 10px; text-align: center; }
 .proc-beat {
   display: block; height: 5px; border-radius: 99px;
   background: var(--bg-3);

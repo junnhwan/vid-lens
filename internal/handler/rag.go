@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/ai"
@@ -36,14 +39,34 @@ func (h *RAGHandler) BuildTaskIndex(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	current, err := h.indexSvc.GetTaskIndexStatus(c.Request.Context(), userID, taskID, *profile)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if current.Status == "queued" || current.Status == "indexing" {
+		response.OK(c, current)
+		return
+	}
 	embeddingClient, err := h.aiFactory.NewEmbeddingClient(*profile)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	result, err := h.indexSvc.BuildTaskIndex(c.Request.Context(), userID, taskID, embeddingClient, *profile)
+	// The build is synchronous today, but leaving the detail page must not
+	// cancel an already claimed projection and leave its persisted status stale.
+	buildCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), time.Hour)
+	defer cancel()
+	result, err := h.indexSvc.BuildTaskIndex(buildCtx, userID, taskID, embeddingClient, *profile)
 	if err != nil {
+		if errors.Is(err, service.ErrRAGIndexAlreadyBuilding) {
+			current, statusErr := h.indexSvc.GetTaskIndexStatus(c.Request.Context(), userID, taskID, *profile)
+			if statusErr == nil {
+				response.OK(c, current)
+				return
+			}
+		}
 		response.BadRequest(c, err.Error())
 		return
 	}

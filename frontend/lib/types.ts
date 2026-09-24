@@ -219,6 +219,12 @@ export interface RAGIndexResult {
   embedding_model: string
   last_error: string
   needs_rebuild?: boolean // 向量模型/切片器变更后投影过期,重建只重做投影不重做转写
+  total_chunks: number
+  completed_chunks: number
+  build_phase: string
+  wait_reason: string
+  next_retry_at?: string
+  progress_at?: string
 }
 
 // ============ Chat ============

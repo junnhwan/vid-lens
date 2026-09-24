@@ -28,6 +28,7 @@ export function processBeats(task: {
   status: number
   stage: string
   has_transcription: boolean
+  last_job_type?: string
 }): ProcessBeat[] {
   const ids: ProcessBeatId[] = ['ingest', 'asr', 'visual', 'index']
   if (task.status === 4 || task.status === 5) {
@@ -40,7 +41,7 @@ export function processBeats(task: {
   }
 
   const i = stageIndex(task.stage)
-  const running = task.status === 2 || task.status === 1
+  const running = task.status === 2
   const completed = task.status === 3
 
   const ingest: ProcessBeatState = i >= 2 || completed ? 'done' : running && i <= 1 ? 'running' : 'queued'
@@ -54,13 +55,11 @@ export function processBeats(task: {
     : running && i === 4
       ? 'running'
       : 'queued'
-  const index: ProcessBeatState = completed
+  const index: ProcessBeatState = completed && task.last_job_type === 'rag_index'
     ? 'done'
-    : running && i >= 5
+    : running && task.stage === 'indexing'
       ? 'running'
-      : asr === 'done'
-        ? 'queued'
-        : 'queued'
+      : 'queued'
 
   return [
     { id: 'ingest', state: ingest },

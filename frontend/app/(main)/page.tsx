@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import type { ChatSession, VideoTask } from '@/lib/types'
 import { fmtRelTime, taskTitle } from '@/lib/format'
-import { taskCategory } from '@/lib/taskStatus'
+import { taskCategory, taskStateView } from '@/lib/taskStatus'
 import { VideoCard } from '@/components/VideoCard'
 import { useCrumb } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
@@ -38,6 +38,15 @@ export default function DashboardPage() {
     })()
     return () => { active = false }
   }, [])
+
+  const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2)
+  useEffect(() => {
+    if (!hasActiveTasks) return
+    const iv = setInterval(() => {
+      void api.listTasks(1, 50).then(page => setTasks(page.list)).catch(() => {})
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [hasActiveTasks])
 
   const processing = tasks.filter(t => taskCategory(t) !== 'ready')
   const taskTitleById = useCallback((id: number) => {
@@ -83,13 +92,13 @@ export default function DashboardPage() {
                 <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
                   <div className="proc-left">
                     <h5>{taskTitle(t)}</h5>
-                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} />
+                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} />
                   </div>
                   {failed
                     ? noRetry
                       ? <span className="chip chip-mute">请删除后重新添加</span>
                       : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); setRetrying(t) }}>重试</button>
-                    : <span className={`chip ${t.status === 2 ? 'chip-acc' : 'chip-mute'}`}>{t.status === 2 ? '处理中' : '排队中'}</span>}
+                    : <span className={`chip ${taskStateView(t).chip}`}>{taskStateView(t).text}</span>}
                 </div>
               )
             })}

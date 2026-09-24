@@ -29,21 +29,29 @@ export function taskStateView(t: VideoTask): TaskStateView {
       ? { chip: 'chip-ok', text: '可问答' }
       : { chip: 'chip-mute', text: '已完成' }
   }
-  if (t.status === TaskStatusEnum.Queued) return { chip: 'chip-mute', text: '排队中' }
+  if (t.status === TaskStatusEnum.Queued) return { chip: 'chip-mute', text: `排队中 · ${queuedStageLabel(t.stage)}` }
   if (t.status === TaskStatusEnum.Running) return { chip: 'chip-acc', text: stageLabel(t.stage), live: true }
   return { chip: 'chip-mute', text: '待处理' }
 }
 
 const STAGE_LABELS: Record<TaskStage, string> = {
-  none: '处理中',
+  none: '等待处理',
   downloading: '下载中',
   uploaded: '已上传',
-  transcribing: '转写中',
-  visual_indexing: '画面索引中',
+  transcribing: 'ASR 转写中',
+  visual_indexing: '画面分析中',
   summarizing: '生成摘要中',
-  indexing: '构建索引中',
+  indexing: '构建检索索引中',
 }
 
 export function stageLabel(stage: TaskStage): string {
-  return STAGE_LABELS[stage] || '处理中'
+  return STAGE_LABELS[stage] || '等待处理'
+}
+
+function queuedStageLabel(stage: TaskStage): string {
+  const names: Partial<Record<TaskStage, string>> = {
+    downloading: '等待下载', transcribing: '等待转写', visual_indexing: '等待画面分析',
+    summarizing: '等待生成摘要', indexing: '等待检索索引',
+  }
+  return names[stage] || '等待任务启动'
 }

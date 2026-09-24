@@ -23,6 +23,11 @@ type VideoRAGIndex struct {
 	EmbeddingDim         int        `gorm:"not null" json:"embedding_dim"`
 	Status               string     `gorm:"type:varchar(30);index;not null" json:"status"`
 	ChunkCount           int        `gorm:"default:0" json:"chunk_count"`
+	TotalChunks          int        `gorm:"default:0" json:"total_chunks"`
+	CompletedChunks      int        `gorm:"default:0" json:"completed_chunks"`
+	BuildPhase           string     `gorm:"type:varchar(30)" json:"build_phase"`
+	WaitReason           string     `gorm:"type:varchar(50)" json:"wait_reason"`
+	NextRetryAt          *time.Time `json:"next_retry_at,omitempty"`
 	ChunkerStrategy      string     `gorm:"type:varchar(50)" json:"chunker_strategy"`
 	ChunkerVersion       string     `gorm:"type:varchar(50)" json:"chunker_version"`
 	ChunkSize            int        `gorm:"default:0" json:"chunk_size"`
