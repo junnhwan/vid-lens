@@ -120,7 +120,18 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	summary, summarizeErr := taskAI.Summarize(ctx, transcription.Content)
+	limit, err := summaryInputLimit()
+	if err != nil {
+		return err
+	}
+	var summary string
+	var summarizeErr error
+	if len(transcription.Content) <= limit {
+		// Keep the single-call path for short videos.
+		summary, summarizeErr = taskAI.Summarize(ctx, transcription.Content)
+	} else {
+		summary, summarizeErr = c.summarizeLong(ctx, task, transcription.Content, taskAI, limit)
+	}
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
@@ -133,6 +144,9 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 		}
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "ai summary call failed", attrs...)
 		return fmt.Errorf("AI 总结失败: %w", summarizeErr)
+	}
+	if strings.TrimSpace(summary) == "" {
+		return fmt.Errorf("AI 总结失败: 模型返回空摘要")
 	}
 
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {

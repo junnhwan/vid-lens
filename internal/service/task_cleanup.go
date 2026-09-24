@@ -322,6 +322,7 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 		repos.Transcription.DeleteByTaskID,
 		repos.TranscriptionChunk.DeleteByTaskID,
 		repos.Summary.DeleteByTaskID,
+		repos.SummaryPart.DeleteByTaskID,
 		repos.VideoChunk.DeleteByTaskID,
 		repos.RAGIndex.DeleteByTaskID,
 		repos.TaskJob.DeleteByTaskID,

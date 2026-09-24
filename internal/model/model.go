@@ -16,6 +16,7 @@ func AllModels() []interface{} {
 		&VideoVisualFrame{},
 		&VideoVisualObservation{},
 		&AISummary{},
+		&SummaryPart{},
 		&UserAIProfile{},
 		&VideoChunk{},
 		&VideoRAGIndex{},

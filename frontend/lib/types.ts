@@ -182,6 +182,7 @@ export interface VideoTask {
   asset?: VideoAsset
   transcription?: VideoTranscription
   summary?: AISummary
+  summary_progress?: { phase: 'segments' | 'merging'; completed: number; total: number; current: number; start_ms: number; end_ms: number; failed_part?: number }
   jobs?: TaskJob[]
   has_transcription: boolean
   has_summary: boolean

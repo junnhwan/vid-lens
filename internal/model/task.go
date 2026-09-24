@@ -86,8 +86,9 @@ type VideoTask struct {
 
 	// 列表用轻量标记（非 DB 列）：是否已有转写/总结，避免把大字段 content 塞进 list。
 	// 用值类型 bool（不用 *bool + omitempty），保证 JSON 始终带上 true/false，前端可直接灰显主按钮。
-	HasTranscription bool `gorm:"-" json:"has_transcription"`
-	HasSummary       bool `gorm:"-" json:"has_summary"`
+	HasTranscription bool             `gorm:"-" json:"has_transcription"`
+	HasSummary       bool             `gorm:"-" json:"has_summary"`
+	SummaryProgress  *SummaryProgress `gorm:"-" json:"summary_progress,omitempty"`
 }
 
 func (VideoTask) TableName() string {

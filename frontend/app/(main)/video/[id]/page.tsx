@@ -676,6 +676,13 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             {!task.has_summary && task.has_transcription && processing && (
               <span className="muted" style={{ fontSize: 12 }}>当前{taskStateView(task).text}，任务结束后可生成摘要</span>
             )}
+            {!task.has_summary && task.summary_progress && (
+              <span className="muted" style={{ fontSize: 12 }} role="status">
+                摘要{task.summary_progress.phase === 'merging' ? '合并总结' : '分段处理'}：{task.summary_progress.completed}/{task.summary_progress.total}
+                {task.summary_progress.current > 0 ? ` · 第 ${task.summary_progress.current} 段${task.summary_progress.end_ms > task.summary_progress.start_ms ? `（${Math.floor(task.summary_progress.start_ms / 1000)}–${Math.ceil(task.summary_progress.end_ms / 1000)} 秒）` : '（时间未记录）'}` : ''}
+                {task.summary_progress.failed_part ? task.summary_progress.phase === 'merging' ? ` · 第 ${task.summary_progress.failed_part} 组合并失败，完整总结尚未生成` : ` · 第 ${task.summary_progress.failed_part} 段失败，尚未覆盖全片` : ''}
+              </span>
+            )}
             {task.has_transcription ? (
               <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
                 kind: 'transcribe',

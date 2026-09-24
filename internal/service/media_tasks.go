@@ -44,6 +44,18 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if summary != nil && !force {
 		return fmt.Errorf("任务已完成，可直接查看结果")
 	}
+	// A forced regeneration must not expose the previous report as the result
+	// of a failed or only partially completed new run.
+	if force && summary != nil {
+		if err := s.repo.Summary.DeleteByTaskID(task.ID); err != nil {
+			return fmt.Errorf("清除旧摘要失败: %w", err)
+		}
+	}
+	if force && s.repo.SummaryPart != nil {
+		if err := s.repo.SummaryPart.DeleteByTaskID(task.ID); err != nil {
+			return fmt.Errorf("清除旧摘要分段失败: %w", err)
+		}
+	}
 
 	// 内容+目标级去重（docs/architecture/data-model.md）：force=false 且当前 task 无自有摘要时，
 	// 把短路查询从"当前 task 的摘要"提到"按 file_md5 查任意 task/任意用户的
@@ -175,6 +187,40 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 	}
 	if task.Summary != nil && task.Summary.Content != "" {
 		task.HasSummary = true
+	}
+	if !task.HasSummary && s.repo.SummaryPart != nil {
+		parts, progressErr := s.repo.SummaryPart.List(task.ID)
+		if progressErr != nil {
+			return nil, fmt.Errorf("读取摘要进度失败: %w", progressErr)
+		}
+		if len(parts) > 0 {
+			progress := &model.SummaryProgress{Phase: "segments"}
+			maxLevel := 0
+			for _, part := range parts {
+				if part.Level > maxLevel {
+					maxLevel = part.Level
+				}
+			}
+			if maxLevel > 0 {
+				progress.Phase = "merging"
+			}
+			for _, part := range parts {
+				if part.Level != maxLevel {
+					continue
+				}
+				progress.Total++
+				if part.Status == "completed" {
+					progress.Completed++
+				}
+				if part.Status == "failed" {
+					progress.FailedPart = part.PartIndex + 1
+				}
+				if part.Status != "completed" && progress.Current == 0 {
+					progress.Current, progress.StartMS, progress.EndMS = part.PartIndex+1, part.StartMS, part.EndMS
+				}
+			}
+			task.SummaryProgress = progress
+		}
 	}
 	return task, nil
 }
