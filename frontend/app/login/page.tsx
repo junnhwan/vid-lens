@@ -79,7 +79,7 @@ export default function LoginPage() {
               )}
               <Field label="用户名" value={username} onChange={setUsername} placeholder="2–50 字符" autoFocus={mode === 'login'} />
               <Field label="密码" type="password" value={password} onChange={setPassword} placeholder="至少 6 位" />
-              {err && <div className="login-err">{err}</div>}
+              {err && <div className="form-err">{err}</div>}
               <button type="submit" className="btn btn-primary" style={{ width: '100%', height: 42 }} disabled={busy}>
                 {busy ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}
               </button>

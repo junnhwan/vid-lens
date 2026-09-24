@@ -177,7 +177,7 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
                 placeholder="https://www.bilibili.com/video/… 或可下载地址"
                 autoFocus
               />
-              <button className="btn btn-primary" style={{ marginTop: 12 }} disabled={urlBusy} onClick={() => void uploadUrl()}>
+              <button className={`btn btn-primary${urlBusy ? ' is-loading' : ''}`} aria-busy={urlBusy || undefined} style={{ marginTop: 12 }} disabled={urlBusy} onClick={() => void uploadUrl()}>
                 创建下载任务
               </button>
             </div>

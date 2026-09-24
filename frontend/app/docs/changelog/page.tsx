@@ -1,3 +1,7 @@
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = { title: '更新日志 · 映知文档' }
+
 export default function DocsChangelogPage() {
   return (
     <article className="docs-article">

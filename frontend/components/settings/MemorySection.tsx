@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { MemoryItem, MemoryPreferenceView, User } from '@/lib/types'
 import { Icon } from '@/components/ui/Icon'
+import { fmtDate } from '@/lib/format'
 import { useToast } from '@/components/Toast'
 import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 
@@ -36,9 +37,7 @@ function reasonText(reason: string): string {
 }
 
 function fmtDay(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return Number.isNaN(new Date(iso).getTime()) ? '' : fmtDate(iso)
 }
 
 function importanceText(v: number): string {

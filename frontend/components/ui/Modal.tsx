@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { Icon } from '@/components/ui/Icon'
 
 const DEFAULT_CONFIRM = '关闭后已填写的内容会丢失,确定关闭?'
@@ -72,11 +72,35 @@ export function Modal({
   width?: number | string
   className?: string
 }) {
+  const labelId = useId()
+  const boxRef = useRef<HTMLDivElement | null>(null)
+
+  // 打开时焦点移入首个可交互元素(无可聚焦项则落在容器),关闭归还给触发元素。
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null
+    const el = boxRef.current
+    if (el) {
+      const first = el.querySelector<HTMLElement>(
+        '.modal-body input:not([disabled]), .modal-body textarea:not([disabled]), .modal-body select:not([disabled]), .modal-body button:not([disabled]), .modal-body [href], .modal-body [tabindex]:not([tabindex="-1"])',
+      )
+      ;(first ?? el).focus()
+    }
+    return () => { prev?.focus?.() }
+  }, [])
+
   return (
     <Overlay onClose={onClose} confirmOnClose={confirmOnClose}>
-      <div className={`modal${className ? ` ${className}` : ''}`} style={width ? { width } : undefined}>
+      <div
+        ref={boxRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelId}
+        className={`modal${className ? ` ${className}` : ''}`}
+        style={width ? { width } : undefined}
+      >
         <div className="modal-head">
-          <h3>{title}</h3>
+          <h3 id={labelId}>{title}</h3>
           <button className="btn btn-ic btn-ghost" onClick={() => { if (shouldClose(confirmOnClose)) onClose() }} aria-label="关闭">
             <Icon name="x" />
           </button>

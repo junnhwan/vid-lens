@@ -2,6 +2,7 @@
 
 import type { CiteRef } from '@/components/Citation'
 import { formatTime, formatTimeRange, hasReplayRange } from '@/components/Citation'
+import { fmtScore } from '@/lib/format'
 import { ModalityTag, modalityView } from '@/components/ui/ModalityTag'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
@@ -79,7 +80,7 @@ export function EvidenceDrawer({ cite, fallbackTitle, canJump, jumpDisabledHint,
             <div className="ev-meta-cell"><div className="k">时间状态</div><div className="v">{timeStatusText(cite.timeRangeStatus)}</div></div>
             <div className="ev-meta-cell"><div className="k">证据 ID</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.evidenceId || cite.id}</div></div>
             <div className="ev-meta-cell"><div className="k">召回通道</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.source || '—'}</div></div>
-            <div className="ev-meta-cell"><div className="k">相关度</div><div className="v mono" style={{ fontWeight: 500 }}>{Number.isFinite(cite.score) ? cite.score.toFixed(3) : '—'}</div></div>
+            <div className="ev-meta-cell"><div className="k">相关度</div><div className="v mono" style={{ fontWeight: 500 }}>{fmtScore(cite.score)}</div></div>
             <div className="ev-meta-cell"><div className="k">来源映射</div><div className="v">{cite.sourceMappingStatus || '—'}</div></div>
           </div>
           <div className="field-label">展示上下文</div>

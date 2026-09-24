@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatClock } from '@/lib/format'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import type { VideoQuestionResult } from '@/lib/types'
@@ -19,6 +20,6 @@ export function VideoQuestionsPanel({ taskId, revision }: { taskId: number; revi
   return <section className="video-questions-panel" aria-label="基于视频内容的推荐问题">
     <div className="video-questions-head"><strong>可以问这段视频</strong><button type="button" onClick={() => void load()} disabled={loading}>{loading ? '读取中…' : '刷新推荐'}</button></div>
     <p>{result?.message || '正在读取已有转写、摘要和画面证据…'}</p>
-    {!!result?.questions.length && <div className="video-questions-list">{result.questions.map(item => <button key={item.question} type="button" onClick={() => router.push(`/chat/v/${taskId}?ask=${encodeURIComponent(item.question)}`)}><span>{item.question}</span><small>{item.source}{item.time_ms != null ? ` · ${Math.floor(item.time_ms / 60000)}:${String(Math.floor(item.time_ms / 1000) % 60).padStart(2, '0')}` : ''}</small></button>)}</div>}
+    {!!result?.questions.length && <div className="video-questions-list">{result.questions.map(item => <button key={item.question} type="button" onClick={() => router.push(`/chat/v/${taskId}?ask=${encodeURIComponent(item.question)}`)}><span>{item.question}</span><small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></button>)}</div>}
   </section>
 }

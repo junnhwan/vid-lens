@@ -3,11 +3,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { TaskStatusEnum, type TranscriptionProgress, type VideoTask } from '@/lib/types'
-
-function clock(ms: number) {
-  const seconds = Math.floor(ms / 1000)
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
+import { formatClock, fmtDateTime } from '@/lib/format'
 
 function elapsed(start?: string) {
   if (!start) return ''
@@ -63,17 +59,17 @@ export function TranscriptionProgressPanel({ task, compact = false }: { task: Vi
         服务配置：每进程最多 {progress.video_concurrency} 个转写视频，每视频最多 {progress.chunk_concurrency} 个 ASR 分片并发
         {active ? ` · 已等待/运行 ${elapsed(progress.started_at || task.created_at)}` : ''}
       </div>
-      {progress.job_next_retry_at && <div className="muted">任务自动重试 {progress.job_retry_count}/{progress.job_max_retries} · 下次 {new Date(progress.job_next_retry_at).toLocaleString()}</div>}
+      {progress.job_next_retry_at && <div className="muted">任务自动重试 {progress.job_retry_count}/{progress.job_max_retries} · 下次 {fmtDateTime(progress.job_next_retry_at)}</div>}
       {stale && <div style={{ color: 'var(--warn)' }}>最近状态超过 2 分钟未更新，可能停滞，请稍后刷新核对。</div>}
       {current.map(c => <div key={c.index} style={{ marginTop: 5 }}>
-        第 {c.index}/{progress.total} 段 {c.end_ms > c.start_ms ? `(${clock(c.start_ms)}–${clock(c.end_ms)})` : '（时间未记录）'} · {c.status === 'running' ? '调用中' : waitLabel(c.wait_reason)}
+        第 {c.index}/{progress.total} 段 {c.end_ms > c.start_ms ? `(${formatClock(c.start_ms)}–${formatClock(c.end_ms)})` : '（时间未记录）'} · {c.status === 'running' ? '调用中' : waitLabel(c.wait_reason)}
         {c.retry_count > 0 ? ` · 已重试 ${c.retry_count} 次` : ''}
         {c.next_retry_at ? ` · 预计 ${new Date(c.next_retry_at).toLocaleTimeString()} 后重试` : ''}
       </div>)}
       {!compact && completed.length > 0 && <details style={{ marginTop: 8 }} open={active}>
         <summary>已完成分片与文字（{completed.length}）</summary>
         {completed.map(c => <div key={c.index} style={{ marginTop: 8 }}>
-          <b>第 {c.index}/{progress.total} 段 {c.end_ms > c.start_ms ? `${clock(c.start_ms)}–${clock(c.end_ms)}` : '时间未记录'}</b>
+          <b>第 {c.index}/{progress.total} 段 {c.end_ms > c.start_ms ? `${formatClock(c.start_ms)}–${formatClock(c.end_ms)}` : '时间未记录'}</b>
           <p style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{c.content || '该分片未返回文字'}</p>
         </div>)}
       </details>}

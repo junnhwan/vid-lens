@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
@@ -54,7 +55,7 @@ export default function KBListPage() {
     <div className="page page-wide">
       <div className="section-head" style={{ marginTop: 0 }}>
         <h2>知识库</h2>
-        <span className="more" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</span>
+        <button className="more" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</button>
       </div>
 
       {loading ? (
@@ -70,7 +71,7 @@ export default function KBListPage() {
       ) : (
         <div className="kb-grid">
           {kbs.map(k => (
-            <div key={k.id} className="kb-card" onClick={() => router.push(`/kb/${k.id}`)}>
+            <Link key={k.id} className="kb-card" href={`/kb/${k.id}`}>
               <div className="kb-top">
                 <div className="kb-icon" style={{ background: 'var(--acc-dim)', color: 'var(--acc-strong)', borderColor: 'var(--acc-line)' }}>
                   <Icon name="folder" />
@@ -86,7 +87,7 @@ export default function KBListPage() {
                   查看成员 <Icon name="chev-r" size="sm" />
                 </span>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

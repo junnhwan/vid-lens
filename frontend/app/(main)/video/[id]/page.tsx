@@ -11,7 +11,7 @@ import {
   type VideoTask,
   type VideoTimeline,
 } from '@/lib/types'
-import { fmtRelTime, taskTitle } from '@/lib/format'
+import { fmtRelTime, fmtDateTime, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
@@ -529,9 +529,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               ))}
             </div>
             <div className="tl-legend">
-              <span><i style={{ background: 'rgba(154,145,127,.5)' }} />解说转写</span>
-              <span><i style={{ background: 'rgba(226,168,75,.6)' }} />画面 OCR</span>
-              <span><i style={{ background: 'rgba(134,180,201,.55)' }} />画面描述</span>
+              <span><i style={{ background: 'color-mix(in srgb, var(--mute) 50%, transparent)' }} />解说转写</span>
+              <span><i style={{ background: 'color-mix(in srgb, var(--acc) 60%, transparent)' }} />画面 OCR</span>
+              <span><i style={{ background: 'color-mix(in srgb, var(--info) 55%, transparent)' }} />画面描述</span>
               <span style={{ marginLeft: 'auto', color: 'var(--tx-4)' }}>悬停色块看画面 · 点击跳转</span>
             </div>
           </>
@@ -579,7 +579,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
         {frames.length === 0 && <div className="empty"><Icon name="eye" size="lg" /><b>没有画面文字证据</b></div>}
         <div className="frames-list">
           {frames.map(f => (
-            <div className="frame-row" key={f.key} onClick={() => seek(f.timeMs)}>
+            <button type="button" className="frame-row" key={f.key} onClick={() => seek(f.timeMs)}>
               <div className="frame-still">
                 <FramePreview key={`${f.frameId}-${playbackUrl || ''}`} src={f.frameId ? api.visualFrameSrc(taskId, f.frameId, playbackUrl) : null} timeMs={f.timeMs} />
               </div>
@@ -596,7 +596,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                   {f.ocr && <div className="frame-ocr">{f.ocr}</div>}
                 </FrameRead>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </>
@@ -630,7 +630,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           <div className="idx-row"><span className="k">阶段</span><span className="v">{indexPhase(index)}</span></div>
           <div className="idx-row"><span className="k">证据块</span><span className="v mono">{index.status === 'indexing' && index.total_chunks > 0 ? `${index.completed_chunks} / ${index.total_chunks} 块已完成 Embedding` : `${index.chunks} 块`}</span></div>
           <div className="idx-row"><span className="k">向量模型</span><span className="v mono">{index.embedding_model || '—'}</span></div>
-          {index.next_retry_at && <div className="idx-row"><span className="k">下次重试</span><span className="v">{new Date(index.next_retry_at).toLocaleString()}</span></div>}
+          {index.next_retry_at && <div className="idx-row"><span className="k">下次重试</span><span className="v">{fmtDateTime(index.next_retry_at)}</span></div>}
           {index.progress_at && <div className="idx-row"><span className="k">最近进度</span><span className="v">{fmtRelTime(index.progress_at)}</span></div>}
           {index.last_error && (
             <div className="idx-row"><span className="k">最近错误</span><span className="v" style={{ color: 'var(--bad)', fontSize: 12 }}>{index.last_error}</span></div>
@@ -724,7 +724,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 </button>
               ) : (
                 <button
-                  className="btn"
+                  className={`btn${busy === 'analyze' ? ' is-loading' : ''}`}
+                  aria-busy={busy === 'analyze' || undefined}
                   disabled={busy !== '' || processing || !task.has_transcription}
                   title={!task.has_transcription ? '转写完成后才能生成摘要' : processing ? `当前${taskStateView(task).text}；等待该任务结束后可生成摘要` : undefined}
                   onClick={() => void runAction('analyze')}
@@ -747,7 +748,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                   <Icon name="activity" size="sm" />等待转写
                 </button>
               ) : (
-                <button className="btn" disabled={busy !== ''} onClick={() => void runAction('transcribe')}>
+                <button className={`btn${busy === 'transcribe' ? ' is-loading' : ''}`} aria-busy={busy === 'transcribe' || undefined} disabled={busy !== ''} onClick={() => void runAction('transcribe')}>
                   <Icon name="activity" size="sm" />开始转写
                 </button>
               )}
@@ -782,7 +783,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             )}
 
             {failed && (
-              <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'rgba(224,131,115,.35)' }}>
+              <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'color-mix(in srgb, var(--bad) 35%, transparent)' }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                   <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
                   <div style={{ flex: 1 }}>

@@ -1,4 +1,8 @@
 import { CodeBlock } from './CodeBlock'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = { title: '快速开始 · 映知文档' }
+
 
 export default function DocsQuickstartPage() {
   return (

@@ -43,7 +43,6 @@
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-0) 88%, transparent);
   backdrop-filter: saturate(140%) blur(16px);
-  z-index: 20;
 }
 .docs-brand { display: flex; align-items: center; gap: 10px; flex: none; }
 .docs-brand b { display: block; font-size: 15px; font-weight: 650; letter-spacing: 0.01em; color: var(--tx-1); }
@@ -147,6 +146,8 @@
   color: var(--tx-4);
   padding: 0 0 10px 12px;
 }
+.docs-toc summary { list-style: none; cursor: default; }
+.docs-toc summary::-webkit-details-marker { display: none; }
 .docs-toc a {
   display: block;
   padding: 5.5px 12px;
@@ -338,21 +339,6 @@
 .docs-callout.info::before { background: var(--info); }
 .docs-callout b { display: block; margin-bottom: 4px; color: var(--tx-1); font-size: 14px; font-weight: 650; }
 
-/* 表格 */
-.docs-article table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 18px 0;
-  font-size: 14.5px;
-}
-.docs-article th, .docs-article td {
-  border: 1px solid var(--line);
-  padding: 9px 12px;
-  text-align: left;
-  vertical-align: top;
-}
-.docs-article th { background: var(--bg-2); color: var(--tx-1); font-weight: 650; }
-
 /* 更新日志条目 */
 .docs-log {
   border: 1px solid var(--line);
@@ -381,7 +367,14 @@
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1180px) {
-  .docs-toc { display: none; }
+  /* TOC 不再消失:折叠为正文顶部的「本页内容」 */
+  .docs-shell { flex-wrap: wrap; }
+  .docs-toc { order: -1; position: static; width: 100%; max-height: none; padding: 18px 0 0; }
+  .docs-toc summary { cursor: pointer; }
+  .docs-toc summary::after { content: "▾"; margin-left: 6px; color: var(--tx-4); font-size: 10px; }
+}
+@media (max-width: 620px) {
+  .docs-article code { white-space: normal; overflow-wrap: anywhere; }
 }
 @media (max-width: 860px) {
   .docs-body { flex-direction: column; }

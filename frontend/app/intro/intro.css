@@ -126,6 +126,7 @@
   border: 1px solid var(--line-strong);
   color: var(--tx-1);
   font-weight: 500;
+  background: transparent; /* 覆写 .btn 实心底,与主按钮拉开重量 */
   transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
 }
 .intro-cta-ghost:hover { border-color: var(--acc-line); background: var(--bg-2); }
@@ -405,6 +406,10 @@
 .intro-cta:hover .ic, .intro-cta-sm:hover .ic { transform: translateX(2px); }
 
 /* ---------- 窄屏 ---------- */
+/* 中屏 1021–1300: 五列流程卡每卡不足 200px,先降三列 */
+@media (max-width: 1300px) {
+  .intro-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 1020px) {
   .intro-hero { grid-template-columns: 1fr; padding-top: 40px; }
   .intro-hero-stage { order: -1; }

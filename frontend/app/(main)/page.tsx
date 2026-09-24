@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import type { ChatSession, VideoTask } from '@/lib/types'
@@ -97,7 +98,7 @@ export default function DashboardPage() {
         <>
           <div className="section-head" style={{ marginTop: 0 }}>
             <h2>继续处理</h2>
-            <span className="more" onClick={() => router.push('/library')}>全部视频 <Icon name="chev-r" size="sm" /></span>
+            <Link className="more" href="/library">全部视频 <Icon name="chev-r" size="sm" /></Link>
           </div>
           <div style={{ display: 'grid', gap: 10 }}>
             {processing.map(t => {
@@ -107,7 +108,7 @@ export default function DashboardPage() {
               return (
                 <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
                   <div className="proc-left">
-                    <h5>{taskTitle(t)}</h5>
+                    <h5><Link href={`/video/${t.id}`}>{taskTitle(t)}</Link></h5>
                     <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} />
                     {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
@@ -132,7 +133,7 @@ export default function DashboardPage() {
 
       <div className="section-head" style={{ marginTop: processing.length > 0 || loading ? undefined : 0 }}>
         <h2>最近视频</h2>
-        <span className="more" onClick={() => router.push('/library')}>视频库 <Icon name="chev-r" size="sm" /></span>
+        <Link className="more" href="/library">视频库 <Icon name="chev-r" size="sm" /></Link>
       </div>
       {tasks.length > 0 ? (
         <div className="video-grid">{tasks.slice(0, 4).map(t => <VideoCard key={t.id} task={t} />)}</div>
@@ -146,7 +147,10 @@ export default function DashboardPage() {
         )
       )}
 
-      <div className="section-head"><h2>最近会话</h2></div>
+      <div className="section-head">
+        <h2>最近会话</h2>
+        {sessions.length > 8 && <Link className="more" href="/chat">全部会话 <Icon name="chev-r" size="sm" /></Link>}
+      </div>
       <div className="card" style={{ padding: 8 }}>
         {sessions.length > 0 ? sessions.slice(0, 8).map(s => {
           const isKb = s.knowledge_base_id > 0
@@ -155,7 +159,7 @@ export default function DashboardPage() {
           return (
             <div key={s.id} className="session-row" onClick={() => router.push(href)}>
               <Icon name="message" />
-              <span className="q">{s.title || '未命名会话'}</span>
+              <Link className="q" href={href}>{s.title || '未命名会话'}</Link>
               <span className="where">{where}</span>
               <span className="where">{fmtRelTime(s.updated_at)}</span>
               <button

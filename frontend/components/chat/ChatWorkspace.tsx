@@ -24,7 +24,7 @@ import { RunDetails, SessionMemoryControl } from '@/components/knowledge/RunDeta
 import { replayLink } from '@/lib/knowledge'
 import knowledgeStyles from '@/components/knowledge/KnowledgeWorkspace.module.css'
 import type { KnowledgeBase } from '@/lib/types'
-import { fmtRelTime } from '@/lib/format'
+import { fmtRelTime, formatClock, fmtScore } from '@/lib/format'
 import { formatDuration } from '@/lib/duration'
 import type { Citation, ChatScopeType, VideoChatMode, VideoQuestionResult } from '@/lib/types'
 
@@ -268,7 +268,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                   <h2>{isVideo ? '问这段视频' : scopeType === 'video_library' ? '问整个视频库' : `问「${scopeName}」`}</h2>
                 </div>
                 {!isVideo && <><p className={knowledgeStyles.intro}>{scopeType === 'video_library' ? '仅检索你的视频库中已用当前向量模型建好索引的视频。' : '仅检索当前知识库的成员视频。'}</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);if(scopeType !== 'video_library')setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
-                {isVideo && <div className="video-question-intro"><p>{videoQuestions?.message || '正在读取视频内容推荐问题…'} {refreshQuestions && <button type="button" className="question-refresh" onClick={refreshQuestions}>刷新</button>}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${Math.floor(item.time_ms / 60000)}:${String(Math.floor(item.time_ms / 1000) % 60).padStart(2, '0')}` : ''}</small></span></button>)}</div>}
+                {isVideo && <div className="video-question-intro"><p>{videoQuestions?.message || '正在读取视频内容推荐问题…'} {refreshQuestions && <button type="button" className="question-refresh" onClick={refreshQuestions}>刷新</button>}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</div>}
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
@@ -662,7 +662,7 @@ function AgentTraceStepView({ step }: { step: ChatTraceStep }) {
             </div>
             {step.hitRows!.map((row, i) => (
               <div key={i} className="hit-row">
-                <span className="hs mono">{typeof row.score === 'number' ? row.score.toFixed(2) : '—'}</span>
+                <span className="hs mono">{fmtScore(row.score)}</span>
                 <span className="hv">
                   {row.video_title || '本视频'}{row.chunk_index != null ? ` · 片段 #${row.chunk_index}` : ''}
                 </span>

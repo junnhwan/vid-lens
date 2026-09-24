@@ -29,7 +29,7 @@ export function PosterArt({ seed, className }: { seed: string; className?: strin
         position: 'absolute', inset: 0,
         background: `radial-gradient(70% 90% at ${28 + (hue % 30)}% 32%, hsla(${hue},42%,48%,.45), transparent 58%),
           radial-gradient(50% 70% at 74% 70%, hsla(${(hue + 40) % 360},35%,42%,.28), transparent 62%),
-          linear-gradient(150deg, #2a241c, #12100c 62%, #1c1812)`,
+          linear-gradient(150deg, var(--art-a), var(--art-b) 62%, var(--art-c))`,
       }}
     />
   )

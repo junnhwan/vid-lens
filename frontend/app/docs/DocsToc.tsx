@@ -99,17 +99,22 @@ export function DocsToc() {
 
   return (
     <nav className="docs-toc" aria-label="本页目录">
-      <span className="docs-toc-title">本页内容</span>
-      {items.map(item => (
-        <a
-          key={item.id}
-          href={`#${item.id}`}
-          className={`${item.level === 3 ? 'lv3' : ''}${active === item.id ? ' active' : ''}`}
-          onClick={e => jump(e, item.id)}
-        >
-          {item.text}
-        </a>
-      ))}
+      {/* 宽屏:details 常开、summary 呈静态标题;≤1180 移到正文顶部,可折叠 */}
+      <details className="docs-toc-d" open>
+        <summary className="docs-toc-title">本页内容</summary>
+        <div className="docs-toc-list">
+          {items.map(item => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              className={`${item.level === 3 ? 'lv3' : ''}${active === item.id ? ' active' : ''}`}
+              onClick={e => jump(e, item.id)}
+            >
+              {item.text}
+            </a>
+          ))}
+        </div>
+      </details>
     </nav>
   )
 }

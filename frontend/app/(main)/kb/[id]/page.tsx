@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
@@ -179,10 +180,10 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
           {videos.map(v => (
             <div key={v.task_id} className="kb-member-row" onClick={() => router.push(`/video/${v.task_id}`)}>
               <span className="vt" />
-              <span className="nm">
+              <Link className="nm" href={`/video/${v.task_id}`}>
                 <b>{v.title || `任务 #${v.task_id}`}</b>
                 <span className="mono">{indexStatusText(v.index_status, v.retrievable)}</span>
-              </span>
+              </Link>
               <button className="btn btn-sm btn-ghost" onClick={e => { e.stopPropagation(); router.push(`/chat/v/${v.task_id}`) }}>单独提问</button>
               {!readOnly && (
                 <button

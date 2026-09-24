@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import type { VideoTask } from '@/lib/types'
 import { fmtRelTime, fmtSize, sourceLabel, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
@@ -12,7 +12,6 @@ import { VideoStill } from '@/components/VideoPoster'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 
 export function VideoCard({ task }: { task: VideoTask }) {
-  const router = useRouter()
   const state = taskStateView(task)
   const ready = task.status === 3 && task.has_transcription
   const failed = task.status === 4 || task.status === 5
@@ -21,7 +20,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
   const [durationMs, setDurationMs] = useState(0)
 
   return (
-    <div className="vcard" onClick={() => router.push(`/video/${task.id}`)}>
+    <Link className="vcard" href={`/video/${task.id}`}>
       <div className="vthumb">
         <VideoStill
           taskId={failed ? undefined : task.id}
@@ -47,6 +46,6 @@ export function VideoCard({ task }: { task: VideoTask }) {
           </div>
         )}
       </div>
-    </div>
+    </Link>
   )
 }

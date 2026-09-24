@@ -3,6 +3,7 @@
 // 本文件只保留已验证的快照解析,供 useConversationSession / chatUtils 使用。
 
 import type { Citation } from '@/lib/types'
+import { formatClock } from '@/lib/format'
 
 export interface CiteRef {
   id: string          // "C1"
@@ -70,14 +71,7 @@ export function hasReplayRange(cite: Pick<CiteRef, 'startMS' | 'endMS'>): boolea
 }
 
 export function formatTime(ms?: number): string {
-  if (!Number.isFinite(ms)) return '--:--'
-  const total = Math.max(0, Math.floor((ms || 0) / 1000))
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const seconds = total % 60
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  return formatClock(ms)
 }
 
 export function formatTimeRange(startMS?: number, endMS?: number): string {

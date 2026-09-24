@@ -48,6 +48,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const initialSeekApplied = useRef(false)
     const fillRef = useRef<HTMLDivElement | null>(null)
     const curRef = useRef<HTMLDivElement | null>(null)
+    const scrubRef = useRef<HTMLDivElement | null>(null)
     const timeRef = useRef<HTMLElement | null>(null)
     const hudRef = useRef<HTMLDivElement | null>(null)
     const rafRef = useRef(0)
@@ -84,6 +85,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       }
       if (timeRef.current) timeRef.current.textContent = formatTime(ms)
       if (hudRef.current) hudRef.current.textContent = `${formatTime(ms)}${title ? ` · ${title}` : ''}`
+      if (scrubRef.current) {
+        scrubRef.current.setAttribute('aria-valuenow', String(Math.round(ms)))
+        scrubRef.current.setAttribute('aria-valuetext', formatTime(ms))
+      }
     }, [durationMs, title])
 
     // 播放头:用 rAF 直接写 DOM(避免 60Hz 重渲染),对父级按 ~4Hz 节流通知
@@ -190,6 +195,25 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       draggingRef.current = false
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
+    // 键盘 seek: ←/→ 5s, PgUp/PgDn 10% 或 30s 取小, Home/End 跳两端
+    const onScrubKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!playable || durationMs <= 0) return
+      const cur = videoRef.current ? videoRef.current.currentTime * 1000 : 0
+      const big = Math.min(30000, durationMs * 0.1)
+      const last = Math.max(0, durationMs - 250)
+      let next: number | null = null
+      switch (e.key) {
+        case 'ArrowRight': next = cur + 5000; break
+        case 'ArrowLeft': next = cur - 5000; break
+        case 'PageUp': next = cur + big; break
+        case 'PageDown': next = cur - big; break
+        case 'Home': next = 0; break
+        case 'End': next = last; break
+        default: return
+      }
+      e.preventDefault()
+      seek(Math.max(0, Math.min(last, next)), playing)
+    }
 
     return (
       <div className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
@@ -242,7 +266,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             <Icon name={playing ? 'pause' : 'play'} />
           </button>
           <div
+            ref={scrubRef}
             className="scrub"
+            role="slider"
+            aria-label="播放进度"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(durationMs)}
+            aria-valuenow={0}
+            tabIndex={playable ? 0 : -1}
+            onKeyDown={onScrubKey}
             style={playable ? undefined : { pointerEvents: 'none', opacity: 0.5 }}
             onPointerDown={onScrubDown}
             onPointerMove={onScrubMove}

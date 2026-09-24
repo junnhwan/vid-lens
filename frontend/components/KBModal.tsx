@@ -123,7 +123,7 @@ export default function KBModal({ mode, kb, taskId, indexed, onClose, onChanged 
           <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="名称" autoFocus />
           <label className="field-label" style={{ marginTop: 12 }}>描述</label>
           <textarea className="input" style={{ height: 80, padding: '10px 12px' }} value={description} onChange={e => setDescription(e.target.value)} />
-          {err && <div className="login-err" style={{ marginTop: 10 }}>{err}</div>}
+          {err && <div className="form-err" style={{ marginTop: 10 }}>{err}</div>}
         </>
       ) : (
         <>
@@ -179,7 +179,7 @@ export default function KBModal({ mode, kb, taskId, indexed, onClose, onChanged 
               })
             )}
           </div>
-          {err && <div className="login-err" style={{ marginTop: 10 }}>{err}</div>}
+          {err && <div className="form-err" style={{ marginTop: 10 }}>{err}</div>}
         </>
       )}
     </Modal>

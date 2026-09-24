@@ -1,6 +1,6 @@
-import { TaskStatus, TaskStatusEnum, TaskStage } from './types'
+import { TaskStatus, TaskStatusEnum } from './types'
 
-// 任务状态 → 中文标签 + 颜色类（对应 mockup 徽标配色）
+// 任务状态 → 中文标签
 // status: 0 Pending / 1 Queued / 2 Running / 3 Completed / 4 Failed / 5 Dead
 export function statusLabel(s: TaskStatus): string {
   switch (s) {
@@ -13,69 +13,31 @@ export function statusLabel(s: TaskStatus): string {
   }
 }
 
-// 徽标 class：底色 + 文字色 + 是否脉冲点
-export function statusBadge(s: TaskStatus): { cls: string; live: boolean } {
-  switch (s) {
-    case TaskStatusEnum.Pending:
-      return { cls: 'bg-ink-0/5 text-ink-3', live: false }
-    case TaskStatusEnum.Queued:
-      return { cls: 'bg-ink-0/5 text-ink-3', live: false }
-    case TaskStatusEnum.Running:
-      return { cls: 'bg-sienna-500/10 text-sienna-700', live: true }
-    case TaskStatusEnum.Completed:
-      return { cls: 'bg-moss/10 text-moss', live: false }
-    case TaskStatusEnum.Failed:
-      return { cls: 'bg-rust/10 text-rust', live: false }
-    case TaskStatusEnum.Dead:
-      return { cls: 'bg-ink-0 text-paper-0', live: false }
-  }
+// 播放/转写时钟统一出口: 不足 1h 为 MM:SS(分秒补零), 超过 1h 为 H:MM:SS。
+export function formatClock(ms?: number): string {
+  if (!Number.isFinite(ms)) return '--:--'
+  const total = Math.max(0, Math.floor((ms || 0) / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`
 }
 
-// 三阶段进度：根据 task 的 stage + has_transcription/has_summary + RAG 索引推断
-// 返回每阶段 { label, state: 'done'|'running'|'queued', pct }
-export type PhaseState = 'done' | 'running' | 'queued'
-export interface Phase { label: string; state: PhaseState; pct: number; detail?: string }
+// 日期时间统一出口: YYYY-MM-DD HH:MM(不再裸用 toLocaleString)
+export function fmtDate(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+export function fmtDateTime(iso: string): string {
+  const d = new Date(iso)
+  return `${fmtDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
-export function computePhases(task: {
-  status: TaskStatus
-  stage: TaskStage
-  has_transcription: boolean
-  has_summary: boolean
-}): Phase[] {
-  const { status, stage, has_transcription, has_summary } = task
-  // ASR 阶段
-  let asr: PhaseState = 'queued'
-  let asrPct = 5
-  if (has_transcription) { asr = 'done'; asrPct = 100 }
-  else if (stage === 'transcribing' || stage === 'visual_indexing') { asr = 'running'; asrPct = 55 }
-  else if (stage === 'downloading' || stage === 'uploaded') { asr = 'running'; asrPct = 20 }
-
-  // 摘要阶段
-  let sum: PhaseState = 'queued'
-  let sumPct = 5
-  if (has_summary) { sum = 'done'; sumPct = 100 }
-  else if (stage === 'summarizing') { sum = 'running'; sumPct = 60 }
-  else if (asr === 'done') { sum = 'queued'; sumPct = 5 }
-
-  // 索引阶段（RAG，无独立 stage 字段，简化：summarizing 之后或 indexing）
-  let idx: PhaseState = 'queued'
-  let idxPct = 5
-  if (stage === 'indexing' || stage === 'visual_indexing') { idx = 'running'; idxPct = 50 }
-  else if (sum === 'done') { idx = 'queued'; idxPct = 5 }
-
-  // 失败态全部标灰
-  if (status === TaskStatusEnum.Failed || status === TaskStatusEnum.Dead) {
-    return [
-      { label: '转写', state: 'queued', pct: 5 },
-      { label: '摘要', state: 'queued', pct: 5 },
-      { label: '索引', state: 'queued', pct: 5 },
-    ]
-  }
-  return [
-    { label: '转写', state: asr, pct: asrPct },
-    { label: '摘要', state: sum, pct: sumPct },
-    { label: '索引', state: idx, pct: idxPct },
-  ]
+// 检索相关度展示精度统一: 两位小数
+export function fmtScore(score?: number): string {
+  return typeof score === 'number' && Number.isFinite(score) ? score.toFixed(2) : '—'
 }
 
 // 文件大小格式化

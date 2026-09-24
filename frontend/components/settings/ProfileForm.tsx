@@ -293,7 +293,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         />
       </div>
 
-      {err && <div className="login-err" style={{ marginTop: 14 }}>{err}</div>}
+      {err && <div className="form-err" style={{ marginTop: 14 }}>{err}</div>}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
         <button type="button" className="btn" onClick={back} disabled={busy}>取消</button>
