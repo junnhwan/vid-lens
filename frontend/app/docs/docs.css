@@ -154,11 +154,14 @@
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--tx-4);
-  transition: color 0.18s var(--ease), border-color 0.18s var(--ease);
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease),
+    padding-left 0.18s var(--ease);
 }
 .docs-toc a.lv3 { padding-left: 24px; font-size: 12px; }
 .docs-toc a:hover { color: var(--tx-2); }
-.docs-toc a.active { color: var(--acc-strong); border-left-color: var(--acc); }
+/* 高亮用 padding 位移而非 transform:与 sticky 容器共存会抖 */
+.docs-toc a.active { color: var(--acc-strong); border-left-color: var(--acc); padding-left: 14px; }
+.docs-toc a.lv3.active { padding-left: 26px; }
 
 /* ---------- 正文排版 ---------- */
 .docs-article {
@@ -298,7 +301,8 @@
   transition: background 0.18s var(--ease), color 0.18s var(--ease);
 }
 .docs-copy:hover { background: var(--bg-3); color: var(--tx-1); }
-.docs-copy.done { color: var(--ok); }
+.docs-copy.done { color: var(--ok); animation: copy-pop 180ms var(--ease); }
+@keyframes copy-pop { 40% { transform: scale(1.08); } }
 .docs-code pre { padding: 14px 16px; overflow-x: auto; }
 .docs-code pre code {
   font-family: var(--d-mono);
@@ -401,4 +405,5 @@
 @media (prefers-reduced-motion: reduce) {
   .docs-main { scroll-behavior: auto; }
   .docs-nav-item, .docs-topnav > a, .docs-toc a, .docs-copy, .docs-article p a { transition: none; }
+  .docs-copy.done { animation: none; }
 }

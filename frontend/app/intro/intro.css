@@ -45,7 +45,10 @@
   background: color-mix(in srgb, var(--bg-0) 86%, transparent);
   backdrop-filter: saturate(140%) blur(16px);
   border-bottom: 1px solid var(--line);
+  transition: box-shadow 200ms var(--ease);
 }
+/* 滚动后只加阴影，不切背景（避免掉帧） */
+.intro-root.is-scrolled .intro-top { box-shadow: var(--shadow-1); }
 .intro-brand { display: flex; align-items: center; gap: 10px; flex: none; }
 .intro-brand b { display: block; font-size: 15px; font-weight: 650; letter-spacing: 0.01em; color: var(--tx-1); }
 .intro-brand i { display: block; font-style: normal; font-size: 10px; letter-spacing: 0.18em; color: var(--tx-4); }
@@ -352,19 +355,28 @@
 .intro-foot-links a:hover { color: var(--tx-1); }
 
 /* ---------- 滚动揭示: JS 不可用或减少动态效果时,内容保持完整可见 ---------- */
+/* 揭示用 animation(带 stagger 延迟),transform/opacity 的 transition 留给 hover,
+   否则卡片的 --d 延迟会把 hover 反馈一起拖慢。 */
 .intro-root.motion-ready .rv,
 .intro-root.motion-ready .rv-item {
   transition:
-    opacity 520ms var(--ease),
-    transform 520ms var(--ease),
+    transform 240ms var(--ease),
     border-color 180ms var(--ease),
-    background-color 180ms var(--ease);
-  transition-delay: var(--d, 0ms);
+    background-color 180ms var(--ease),
+    box-shadow 220ms var(--ease);
 }
 .intro-root.motion-ready .rv:not(.in),
 .intro-root.motion-ready .rv-item:not(.in) {
   opacity: 0;
   transform: translateY(14px);
+}
+.intro-root.motion-ready .rv.in,
+.intro-root.motion-ready .rv-item.in {
+  animation: rise-in 260ms var(--ease) var(--d, 0ms) backwards;
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .intro-stage > :nth-child(2) { --d: 65ms; }
 .intro-stage > :nth-child(3) { --d: 130ms; }
@@ -373,6 +385,24 @@
 .intro-flow li:nth-child(4), .intro-card:nth-child(4) { --d: 135ms; }
 .intro-flow li:nth-child(5), .intro-card:nth-child(5) { --d: 180ms; }
 .intro-card:nth-child(6) { --d: 225ms; }
+
+/* ---------- hover 微反馈: 卡片抬升 / 图标缩放 / 按钮箭头 ---------- */
+.intro-flow-icon, .intro-card-icon {
+  transition: transform 160ms var(--ease);
+}
+.intro-flow li:hover { transform: translateY(-2px); box-shadow: var(--shadow-1); }
+.intro-flow li:hover .intro-flow-icon { transform: scale(1.06); }
+.intro-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-1); }
+.intro-card:hover .intro-card-icon { transform: scale(1.06); }
+.intro-cta, .intro-cta-sm {
+  transition: background 0.18s var(--ease), color 0.18s var(--ease),
+    box-shadow 180ms var(--ease);
+}
+.intro-cta:hover, .intro-cta-sm:hover {
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--acc) 26%, transparent);
+}
+.intro-cta .ic, .intro-cta-sm .ic { transition: transform 180ms var(--ease); }
+.intro-cta:hover .ic, .intro-cta-sm:hover .ic { transform: translateX(2px); }
 
 /* ---------- 窄屏 ---------- */
 @media (max-width: 1020px) {
@@ -392,10 +422,17 @@
   .intro-root.motion-ready .rv,
   .intro-root.motion-ready .rv-item,
   .intro-root.motion-ready .rv:not(.in),
-  .intro-root.motion-ready .rv-item:not(.in) {
+  .intro-root.motion-ready .rv-item:not(.in),
+  .intro-root.motion-ready .rv.in,
+  .intro-root.motion-ready .rv-item.in {
     opacity: 1;
     transform: none;
     transition: none;
+    animation: none;
   }
-  .intro-flow li, .intro-card, .intro-topnav > a, .intro-cta-ghost { transition: none; }
+  .intro-flow li, .intro-card, .intro-topnav > a, .intro-cta-ghost,
+  .intro-cta, .intro-cta-sm, .intro-flow-icon, .intro-card-icon,
+  .intro-cta .ic, .intro-cta-sm .ic, .intro-top { transition: none; }
+  .intro-flow li:hover, .intro-card:hover { transform: none; box-shadow: none; }
+  .intro-cta:hover .ic, .intro-cta-sm:hover .ic { transform: none; }
 }

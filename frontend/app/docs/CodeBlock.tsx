@@ -60,7 +60,7 @@ export function CodeBlock({ lang = 'text', children }: CodeBlockProps) {
     <div className="docs-code">
       <div className="docs-code-bar">
         <span className="docs-code-lang">{LABEL[lang] || lang.toUpperCase()}</span>
-        <button type="button" className={`docs-copy${done ? ' done' : ''}`} onClick={onCopy} aria-label="复制代码">
+        <button type="button" className={`docs-copy${done ? ' done' : ''}`} onClick={onCopy} aria-label="复制代码" aria-live="polite">
           {done ? '已复制' : '复制'}
         </button>
       </div>

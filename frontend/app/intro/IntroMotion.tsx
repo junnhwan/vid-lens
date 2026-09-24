@@ -7,8 +7,19 @@ export function IntroMotion({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = rootRef.current
-    if (!root || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    if (!('IntersectionObserver' in window)) return
+    if (!root) return
+
+    // 顶栏滚动阴影与动效偏好无关，只切阴影不切背景。
+    const onScroll = () => root.classList.toggle('is-scrolled', root.scrollTop > 8)
+    root.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return () => root.removeEventListener('scroll', onScroll)
+    }
+    if (!('IntersectionObserver' in window)) {
+      return () => root.removeEventListener('scroll', onScroll)
+    }
 
     const targets = Array.from(root.querySelectorAll<HTMLElement>('.rv, .rv-item'))
     if (targets.length === 0) return
@@ -33,7 +44,10 @@ export function IntroMotion({ children }: { children: React.ReactNode }) {
       if (!target.classList.contains('in')) observer.observe(target)
     }
 
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      root.removeEventListener('scroll', onScroll)
+    }
   }, [])
 
   return <div className="intro-root" ref={rootRef}>{children}</div>
