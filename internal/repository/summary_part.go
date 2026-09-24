@@ -40,7 +40,7 @@ func (r *SummaryPartRepository) Upsert(part *model.SummaryPart) error {
 		return r.db.Create(part).Error
 	}
 	return r.db.Model(existing).Updates(map[string]any{
-		"input_hash": part.InputHash, "model_name": part.ModelName, "start_ms": part.StartMS,
+		"input_hash": part.InputHash, "input_limit": part.InputLimit, "model_name": part.ModelName, "start_ms": part.StartMS,
 		"end_ms": part.EndMS, "status": part.Status, "content": part.Content, "error_msg": part.ErrorMsg,
 	}).Error
 }

@@ -31,30 +31,9 @@ type summaryInput struct {
 	startMS, endMS int64
 }
 
-func summaryInputLimit() (int, error) {
-	window := summaryDefaultContextTokens
-	if raw := strings.TrimSpace(os.Getenv("VIDLENS_SUMMARY_CONTEXT_TOKENS")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 4096 {
-			return 0, fmt.Errorf("VIDLENS_SUMMARY_CONTEXT_TOKENS 必须为不小于 4096 的整数")
-		}
-		window = parsed
-	}
-	limit := window - summaryOutputTokens - summaryReservedTokens
-	if limit <= 512 {
-		return 0, fmt.Errorf("摘要模型上下文不足以保留输出预算")
-	}
-	return limit, nil
-}
-
-func summaryHash(modelName, input string) string {
-	h := sha256.Sum256([]byte(summaryPromptVersion + "\x00" + modelName + "\x00" + input))
-	return hex.EncodeToString(h[:])
-}
-
-// splitSummaryInput preserves every rune and gives each subpart a range
-// interpolated within its ASR window when one observation exceeds the budget.
-func splitSummaryInput(in summaryInput, limit int) []summaryInput {
+// Keep the original ASR-boundary plan for tasks that already have matching
+// checkpoints. Changing their leaves midway would discard completed calls.
+func splitSummaryInputLegacy(in summaryInput, limit int) []summaryInput {
 	if len(in.text) <= limit {
 		return []summaryInput{in}
 	}
@@ -81,7 +60,31 @@ func splitSummaryInput(in summaryInput, limit int) []summaryInput {
 	return result
 }
 
-func summaryLeaves(full string, rows []model.VideoTranscriptionChunk, limit int) []summaryInput {
+func summaryInputLimit(profileWindow int) (int, error) {
+	window := profileWindow
+	if window == 0 {
+		window = summaryDefaultContextTokens
+	}
+	if raw := strings.TrimSpace(os.Getenv("VIDLENS_SUMMARY_CONTEXT_TOKENS")); raw != "" && profileWindow == 0 {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 4096 {
+			return 0, fmt.Errorf("VIDLENS_SUMMARY_CONTEXT_TOKENS 必须为不小于 4096 的整数")
+		}
+		window = parsed
+	}
+	limit := window - summaryOutputTokens - summaryReservedTokens
+	if limit <= 512 {
+		return 0, fmt.Errorf("摘要模型上下文不足以保留输出预算")
+	}
+	return limit, nil
+}
+
+func summaryHash(modelName, input string) string {
+	h := sha256.Sum256([]byte(summaryPromptVersion + "\x00" + modelName + "\x00" + input))
+	return hex.EncodeToString(h[:])
+}
+
+func summaryInputs(full string, rows []model.VideoTranscriptionChunk) []summaryInput {
 	observations := make([]string, 0, len(rows))
 	valid := make([]model.VideoTranscriptionChunk, 0, len(rows))
 	for _, row := range rows {
@@ -120,11 +123,66 @@ func summaryLeaves(full string, rows []model.VideoTranscriptionChunk, limit int)
 	if len(inputs) == 0 {
 		inputs = []summaryInput{{text: full}}
 	} // legacy or changed ASR: cover canonical text, no invented time
+	return inputs
+}
+
+func summaryLeaves(full string, rows []model.VideoTranscriptionChunk, limit int) []summaryInput {
+	return packSummaryLeaves(summaryInputs(full, rows), limit)
+}
+
+func summaryLeavesLegacy(full string, rows []model.VideoTranscriptionChunk, limit int) []summaryInput {
 	var leaves []summaryInput
-	for _, input := range inputs {
-		leaves = append(leaves, splitSummaryInput(input, limit)...)
+	for _, input := range summaryInputs(full, rows) {
+		leaves = append(leaves, splitSummaryInputLegacy(input, limit)...)
 	}
 	return leaves
+}
+
+// ASR windows are audio boundaries, not an appropriate unit of model work.
+// Fill each model input up to its byte budget while preserving the canonical
+// transcript and chronological order. A split within an ASR window gets an
+// interpolated range; unknown timing stays unknown.
+func packSummaryLeaves(inputs []summaryInput, limit int) []summaryInput {
+	packed := make([]summaryInput, 0, len(inputs))
+	for _, input := range inputs {
+		runes := []rune(input.text)
+		for start := 0; start < len(runes); {
+			if len(packed) == 0 || len(packed[len(packed)-1].text) == limit {
+				packed = append(packed, summaryInput{})
+			}
+			last := &packed[len(packed)-1]
+			room := limit - len(last.text)
+			end, size := start, 0
+			for end < len(runes) && size+utf8.RuneLen(runes[end]) <= room {
+				size += utf8.RuneLen(runes[end])
+				end++
+			}
+			if end == start {
+				if last.text == "" {
+					end = start + 1 // Caller reports an over-budget prompt for an impossible tiny limit.
+				} else {
+					packed = append(packed, summaryInput{})
+					continue
+				}
+			}
+			pieceStart, pieceEnd := int64(0), int64(0)
+			if input.endMS > input.startMS {
+				span := input.endMS - input.startMS
+				pieceStart = input.startMS + span*int64(start)/int64(len(runes))
+				pieceEnd = input.startMS + span*int64(end)/int64(len(runes))
+			}
+			if last.text == "" {
+				last.startMS, last.endMS = pieceStart, pieceEnd
+			} else if last.endMS <= last.startMS || pieceEnd <= pieceStart {
+				last.startMS, last.endMS = 0, 0
+			} else {
+				last.endMS = pieceEnd
+			}
+			last.text += string(runes[start:end])
+			start = end
+		}
+	}
+	return packed
 }
 
 func summaryRowsOverlap(rows []model.VideoTranscriptionChunk) bool {
@@ -188,6 +246,12 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 	if err != nil {
 		return "", err
 	}
+	if !summaryCheckpointsMatch(stored, leaves, hashModelName) {
+		legacy := summaryLeavesLegacy(full, rows, limit-450)
+		if summaryCheckpointsMatch(stored, legacy, hashModelName) {
+			leaves = legacy
+		}
+	}
 	reset := false
 	for _, part := range stored {
 		if part.Level != 0 {
@@ -208,7 +272,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		if len(prompt) > limit {
 			return "", fmt.Errorf("摘要第 %d/%d 段超过模型输入预算", i+1, len(leaves))
 		}
-		part := &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS, Status: "pending"}
+		part := &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), InputLimit: limit, ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS, Status: "pending"}
 		if err := c.ensureSummaryPart(ctx, part); err != nil {
 			return "", err
 		}
@@ -216,7 +280,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 	current := make([]summaryInput, 0, len(leaves))
 	for i, leaf := range leaves {
 		prompt := summaryPartPrompt(leaf, i, len(leaves))
-		text, err := c.completeSummaryPart(ctx, strategy, &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS}, prompt, summaryIntermediateOutputTokens)
+		text, err := c.completeSummaryPart(ctx, strategy, &model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), InputLimit: limit, ModelName: modelName, StartMS: leaf.startMS, EndMS: leaf.endMS}, prompt, summaryIntermediateOutputTokens)
 		if err != nil {
 			return "", fmt.Errorf("摘要第 %d/%d 段失败，已覆盖 %d/%d 段: %w", i+1, len(leaves), i, len(leaves), err)
 		}
@@ -230,14 +294,14 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		next := make([]summaryInput, 0, len(groups))
 		for i, group := range groups {
 			prompt := summaryMergePrompt(group, level)
-			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS, Status: "pending"}
+			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), InputLimit: limit, ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS, Status: "pending"}
 			if err := c.ensureSummaryPart(ctx, part); err != nil {
 				return "", err
 			}
 		}
 		for i, group := range groups {
 			prompt := summaryMergePrompt(group, level)
-			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS}
+			part := &model.SummaryPart{TaskID: task.ID, Level: level, PartIndex: i, InputHash: summaryHash(hashModelName, prompt), InputLimit: limit, ModelName: modelName, StartMS: group[0].startMS, EndMS: group[len(group)-1].endMS}
 			outputTokens := int64(summaryIntermediateOutputTokens)
 			if len(groups) == 1 {
 				outputTokens = summaryOutputTokens
@@ -254,6 +318,20 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 		return "", fmt.Errorf("摘要没有覆盖完整转写")
 	}
 	return current[0].text, nil
+}
+
+func summaryCheckpointsMatch(stored []model.SummaryPart, leaves []summaryInput, hashModelName string) bool {
+	found := false
+	for _, part := range stored {
+		if part.Level != 0 {
+			continue
+		}
+		found = true
+		if part.PartIndex >= len(leaves) || part.InputHash != summaryHash(hashModelName, summaryPartPrompt(leaves[part.PartIndex], part.PartIndex, len(leaves))) {
+			return false
+		}
+	}
+	return found
 }
 
 func (c *Consumer) ensureSummaryPart(ctx context.Context, part *model.SummaryPart) error {

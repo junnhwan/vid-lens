@@ -266,6 +266,84 @@ func TestSummarizeTaskReusesExistingTranscription(t *testing.T) {
 	}
 }
 
+func TestSummarizeTaskSelectsSingleCallFromProfileWindow(t *testing.T) {
+	t.Setenv("VIDLENS_SUMMARY_CONTEXT_TOKENS", "")
+	for _, tc := range []struct {
+		name       string
+		window     int
+		wantSingle bool
+	}{
+		{name: "fits configured window", window: 16384, wantSingle: true},
+		{name: "exceeds configured window", window: 8192, wantSingle: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repos := newConsumerTestRepositories(t)
+			task := &model.VideoTask{UserID: 1, FileMD5: "abababababababababababababababab", Filename: "window.mp4", Status: model.TaskStatusCompleted}
+			if err := repos.Task.Create(task); err != nil {
+				t.Fatal(err)
+			}
+			full := strings.Repeat("context ", 700)
+			if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: full}); err != nil {
+				t.Fatal(err)
+			}
+			strategy := &recordingAI{}
+			consumer := &Consumer{repo: repos, ai: strategy, profiles: staticProfileResolver{profile: &ai.Profile{LLMContextTokens: tc.window}}}
+			if err := consumer.summarizeTask(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+			parts, err := repos.SummaryPart.List(task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantSingle && (strategy.summarizeInput != full || len(parts) != 0) {
+				t.Fatalf("single call was not selected: input bytes=%d, parts=%d", len(strategy.summarizeInput), len(parts))
+			}
+			if !tc.wantSingle && len(parts) < 2 {
+				t.Fatalf("long input was not split: parts=%d", len(parts))
+			}
+		})
+	}
+}
+
+func TestSummarizeTaskKeepsCheckpointWhenProfileWindowIncreases(t *testing.T) {
+	t.Setenv("VIDLENS_SUMMARY_CONTEXT_TOKENS", "")
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{UserID: 1, FileMD5: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Filename: "resume.mp4", Status: model.TaskStatusCompleted}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	first, second := strings.Repeat("甲", 1000), strings.Repeat("乙", 1000)
+	full := first + "\n\n" + second
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{TaskID: task.ID, Content: full}); err != nil {
+		t.Fatal(err)
+	}
+	for i, content := range []string{first, second} {
+		if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, i, "source", content, i*300, (i+1)*300); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := repos.TranscriptionChunk.ListByTaskID(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := summaryLeavesLegacy(full, rows, summaryDefaultContextTokens-summaryOutputTokens-summaryReservedTokens-450)
+	if len(legacy) != 2 {
+		t.Fatalf("legacy leaves = %d", len(legacy))
+	}
+	prompt := summaryPartPrompt(legacy[0], 0, 2)
+	if err := repos.SummaryPart.Upsert(&model.SummaryPart{TaskID: task.ID, Level: 0, PartIndex: 0, InputHash: summaryHash("\x00", prompt), Status: "completed", Content: "已有首段摘要"}); err != nil {
+		t.Fatal(err)
+	}
+	strategy := &summaryPipelineAI{}
+	consumer := &Consumer{repo: repos, ai: strategy, profiles: staticProfileResolver{profile: &ai.Profile{LLMContextTokens: 16384}}}
+	if err := consumer.summarizeTask(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if len(strategy.calls) == 0 || !strings.Contains(strategy.calls[0], "第 2/2 段") {
+		t.Fatalf("old checkpoint was not reused; model calls=%d", len(strategy.calls))
+	}
+}
+
 func TestProcessVideoReusesExistingTranscriptionBeforeDownloadingVideo(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	task := &model.VideoTask{

@@ -41,6 +41,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const editing = !!profile
   const [name, setName] = useState(imported?.name || profile?.name || '')
   const [llm, setLlm] = useState<GroupDraft>(fromProfile(imported?.llm_provider || profile?.llm_provider || '', imported?.llm_base_url || profile?.llm_base_url || '', imported?.llm_model || profile?.llm_model || ''))
+  const [llmContextTokens, setLlmContextTokens] = useState(imported?.llm_context_tokens ? String(imported.llm_context_tokens) : profile?.llm_context_tokens ? String(profile.llm_context_tokens) : '')
   const [asr, setAsr] = useState<GroupDraft>(fromProfile(imported?.asr_provider || profile?.asr_provider || '', imported?.asr_base_url || profile?.asr_base_url || '', imported?.asr_model || profile?.asr_model || ''))
   const [embedding, setEmbedding] = useState<GroupDraft>(fromProfile(imported?.embedding_provider || profile?.embedding_provider || '', imported?.embedding_endpoint || profile?.embedding_endpoint || '', imported?.embedding_model || profile?.embedding_model || ''))
   const [embeddingDim, setEmbeddingDim] = useState<string>(imported?.embedding_dim ? String(imported.embedding_dim) : profile?.embedding_dim ? String(profile.embedding_dim) : '')
@@ -67,7 +68,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
     ['max_input_tokens', '累计输入 Token'], ['max_output_tokens', '累计输出 Token'], ['max_visual_frames', '最多检查帧数'],
   ] as const
 
-  const currentSnapshot = useMemo(() => JSON.stringify({ name, llm, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft }), [name, llm, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft])
+  const currentSnapshot = useMemo(() => JSON.stringify({ name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft }), [name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft])
   const initialSnapshot = useRef(currentSnapshot)
   const saved = useRef(false)
   const dirty = !!imported || currentSnapshot !== initialSnapshot.current
@@ -91,6 +92,8 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const buildRequest = (): AIProfileRequest | null => {
     if (!name.trim()) { setErr('请填写配置名称'); return null }
     if (!llm.provider.trim() || !llm.base_url.trim() || !llm.model.trim()) { setErr('LLM 配置不完整'); return null }
+    const contextTokens = llmContextTokens.trim() === '' ? 0 : Number(llmContextTokens)
+    if (!Number.isSafeInteger(contextTokens) || (contextTokens !== 0 && (contextTokens < 8192 || contextTokens > 1048576))) { setErr('模型上下文窗口需为 8192–1048576 token，或留空'); return null }
     if (!asr.provider.trim() || !asr.base_url.trim() || !asr.model.trim()) { setErr('ASR 配置不完整'); return null }
     if (!embedding.provider.trim() || !embedding.base_url.trim() || !embedding.model.trim()) { setErr('embedding 配置不完整'); return null }
     for (const [label, url, endpoint, preset] of [['对话', llm.base_url, false, llm.preset], ['语音识别', asr.base_url, false, asr.preset], ['向量', embedding.base_url, true, embedding.preset], ...(visionEnabled ? [['视觉', vision.base_url, false, vision.preset]] : [])] as [string, string, boolean, string][]) {
@@ -113,7 +116,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
     return {
       agent_budget: agentBudget,
       name: name.trim(),
-      llm_provider: llm.provider.trim(), llm_base_url: llm.base_url.trim(), llm_model: llm.model.trim(),
+      llm_provider: llm.provider.trim(), llm_base_url: llm.base_url.trim(), llm_model: llm.model.trim(), llm_context_tokens: contextTokens,
       ...(llm.api_key.trim() ? { llm_api_key: llm.api_key.trim() } : {}),
       asr_provider: asr.provider.trim(), asr_base_url: asr.base_url.trim(), asr_model: asr.model.trim(),
       ...(asr.api_key.trim() ? { asr_api_key: asr.api_key.trim() } : {}),
@@ -211,6 +214,9 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.llm_api_key_masked})` : 'sk-…'}
         required
       />
+      <label className="field-label" htmlFor="llm-context-tokens">模型上下文窗口（token，可选）</label>
+      <input id="llm-context-tokens" className="input mono" type="number" min={8192} max={1048576} step={1} value={llmContextTokens} onChange={e => setLlmContextTokens(e.target.value)} placeholder="留空按 8192 计算" />
+      <small style={{ color: 'var(--tx-3)' }}>按模型服务实际允许的上下文填写。摘要能放入时使用一次请求；超出时自动分段。请预留输出空间，填大于实际上限可能导致请求失败。</small>
       <GroupBlock
         title="语音识别"
         group={asr} setGroup={setGroup(setAsr)}

@@ -116,6 +116,7 @@ func (r *AIProfileRepository) UpdateForUser(userID int64, profile *model.UserAIP
 		existing.LLMBaseURL = profile.LLMBaseURL
 		existing.LLMAPIKeyCiphertext = profile.LLMAPIKeyCiphertext
 		existing.LLMModel = profile.LLMModel
+		existing.LLMContextTokens = profile.LLMContextTokens
 		existing.ASRProvider = profile.ASRProvider
 		existing.ASRBaseURL = profile.ASRBaseURL
 		existing.ASRAPIKeyCiphertext = profile.ASRAPIKeyCiphertext

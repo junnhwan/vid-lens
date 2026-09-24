@@ -13,6 +13,7 @@ type UserAIProfile struct {
 	LLMBaseURL                string  `gorm:"type:varchar(500);not null" json:"llm_base_url"`
 	LLMAPIKeyCiphertext       string  `gorm:"type:text;not null" json:"-"`
 	LLMModel                  string  `gorm:"type:varchar(100);not null" json:"llm_model"`
+	LLMContextTokens          int     `gorm:"default:0" json:"llm_context_tokens"`
 	ASRProvider               string  `gorm:"type:varchar(50);not null" json:"asr_provider"`
 	ASRBaseURL                string  `gorm:"type:varchar(500);not null" json:"asr_base_url"`
 	ASRAPIKeyCiphertext       string  `gorm:"type:text;not null" json:"-"`

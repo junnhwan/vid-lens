@@ -58,6 +58,7 @@ export interface AIProfile {
   llm_base_url: string
   llm_api_key_masked: string // 脱敏，回显用
   llm_model: string
+  llm_context_tokens?: number // 0 表示使用服务端保守默认值
   // ASR 组
   asr_provider: string
   asr_base_url: string
@@ -87,6 +88,7 @@ export interface AIProfileRequest {
   llm_base_url: string
   llm_api_key?: string
   llm_model: string
+  llm_context_tokens?: number
   asr_provider: string
   asr_base_url: string
   asr_api_key?: string

@@ -127,11 +127,40 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	limit, err := summaryInputLimit()
+	profileWindow := 0
+	if c.profiles != nil {
+		profile, profileErr := c.profiles.GetDefaultAIProfile(task.UserID)
+		if profileErr != nil {
+			return profileErr
+		}
+		if profile != nil {
+			profileWindow = profile.LLMContextTokens
+		}
+	}
+	limit, err := summaryInputLimit(profileWindow)
 	if err != nil {
 		return err
 	}
 	limit -= len(ai.SummaryPreference(ctx))
+	if c.repo.SummaryPart != nil {
+		parts, partsErr := c.repo.SummaryPart.List(task.ID)
+		if partsErr != nil {
+			return partsErr
+		}
+		if len(parts) > 0 && parts[0].ModelName == c.llmModelNameForTask(task) {
+			if parts[0].InputLimit > 0 {
+				limit = parts[0].InputLimit
+			} else {
+				// Checkpoints created before the window was stored used the
+				// process default. Keep their plan when a profile is edited.
+				limit, err = summaryInputLimit(0)
+				if err != nil {
+					return err
+				}
+				limit -= len(ai.SummaryPreference(ctx))
+			}
+		}
+	}
 	if limit <= 512 {
 		return fmt.Errorf("摘要偏好占用过多上下文，请缩短后重试")
 	}

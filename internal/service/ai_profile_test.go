@@ -66,6 +66,27 @@ func TestAIProfileServiceCreateEncryptsKeysAndReturnsMaskedProfile(t *testing.T)
 	}
 }
 
+func TestAIProfileContextWindowPersistsAndValidates(t *testing.T) {
+	svc, _, _ := newAIProfileServiceForTest(t)
+	req := validAIProfileRequest()
+	req.LLMContextTokens = 131072
+	created, err := svc.Create(7, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.LLMContextTokens != 131072 {
+		t.Fatalf("created context window = %d", created.LLMContextTokens)
+	}
+	resolved, err := svc.GetDefaultAIProfile(7)
+	if err != nil || resolved.LLMContextTokens != 131072 {
+		t.Fatalf("resolved context window = %v, error = %v", resolved, err)
+	}
+	req.LLMContextTokens = 1
+	if _, err := svc.Update(7, created.ID, req); err == nil {
+		t.Fatal("invalid context window was accepted")
+	}
+}
+
 func TestAIProfileServiceUpdateWithEmptyKeysKeepsExistingCiphertexts(t *testing.T) {
 	svc, repos, codec := newAIProfileServiceForTest(t)
 	created, err := svc.Create(7, validAIProfileRequest())

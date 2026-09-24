@@ -10,7 +10,7 @@ type TransferProfile = Omit<AIProfileRequest, 'llm_api_key' | 'asr_api_key' | 'e
 export function exportProfile(profile: AIProfile): string {
   const value: TransferProfile = {
     name: profile.name,
-    llm_provider: profile.llm_provider, llm_base_url: profile.llm_base_url, llm_model: profile.llm_model,
+    llm_provider: profile.llm_provider, llm_base_url: profile.llm_base_url, llm_model: profile.llm_model, llm_context_tokens: profile.llm_context_tokens || 0,
     asr_provider: profile.asr_provider, asr_base_url: profile.asr_base_url, asr_model: profile.asr_model,
     embedding_provider: profile.embedding_provider, embedding_endpoint: profile.embedding_endpoint,
     embedding_model: profile.embedding_model, embedding_dim: profile.embedding_dim,
@@ -36,6 +36,7 @@ export function parseProfileImport(text: string): { profile: TransferProfile; ig
   }
   for (const key of optionalFields) if (p[key] !== undefined && typeof p[key] !== 'string') throw new Error(`${key} 格式错误`)
   if (!Number.isSafeInteger(p.embedding_dim) || (p.embedding_dim as number) <= 0) throw new Error('embedding_dim 必须是正整数')
+  if (p.llm_context_tokens !== undefined && (!Number.isSafeInteger(p.llm_context_tokens) || ((p.llm_context_tokens as number) !== 0 && ((p.llm_context_tokens as number) < 8192 || (p.llm_context_tokens as number) > 1048576)))) throw new Error('llm_context_tokens 格式错误')
   for (const [key, endpoint] of [['llm_base_url', false], ['asr_base_url', false], ['embedding_endpoint', true], ['vision_base_url', false]] as const) {
     if (key === 'vision_base_url' && !p[key]) continue
     let url: URL
@@ -56,7 +57,7 @@ export function parseProfileImport(text: string): { profile: TransferProfile; ig
     }
   }
   const profile: TransferProfile = {
-    name: String(p.name).trim(), llm_provider: String(p.llm_provider).trim(), llm_base_url: String(p.llm_base_url).trim(), llm_model: String(p.llm_model).trim(),
+    name: String(p.name).trim(), llm_provider: String(p.llm_provider).trim(), llm_base_url: String(p.llm_base_url).trim(), llm_model: String(p.llm_model).trim(), llm_context_tokens: (p.llm_context_tokens as number) || 0,
     asr_provider: String(p.asr_provider).trim(), asr_base_url: String(p.asr_base_url).trim(), asr_model: String(p.asr_model).trim(),
     embedding_provider: String(p.embedding_provider).trim(), embedding_endpoint: String(p.embedding_endpoint).trim(), embedding_model: String(p.embedding_model).trim(),
     embedding_dim: p.embedding_dim as number, vision_provider: vision[0], vision_base_url: vision[1], vision_model: vision[2],

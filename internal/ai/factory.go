@@ -12,6 +12,7 @@ type Profile struct {
 	LLMBaseURL        string
 	LLMAPIKey         string
 	LLMModel          string
+	LLMContextTokens  int
 	ASRProvider       string
 	ASRBaseURL        string
 	ASRAPIKey         string

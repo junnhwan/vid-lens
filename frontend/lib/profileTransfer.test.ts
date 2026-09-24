@@ -4,7 +4,7 @@ import { exportProfile, parseProfileImport } from './profileTransfer.ts'
 import type { AIProfile } from './types.ts'
 
 const profile: AIProfile = {
-  id: 9, name: '示例', llm_provider: 'siliconflow', llm_base_url: 'https://api.siliconflow.cn/v1', llm_model: 'chat', llm_api_key_masked: 'sk-****cret',
+  id: 9, name: '示例', llm_provider: 'siliconflow', llm_base_url: 'https://api.siliconflow.cn/v1', llm_model: 'chat', llm_context_tokens: 131072, llm_api_key_masked: 'sk-****cret',
   asr_provider: 'siliconflow', asr_base_url: 'https://api.siliconflow.cn/v1', asr_model: 'asr', asr_api_key_masked: 'sk-****cret',
   embedding_provider: 'siliconflow', embedding_endpoint: 'https://api.siliconflow.cn/v1/embeddings', embedding_model: 'embed', embedding_dim: 1024, embedding_api_key_masked: 'sk-****cret',
   vision_provider: '', vision_base_url: '', vision_model: '', vision_api_key_masked: '', is_default: true,
@@ -16,6 +16,7 @@ it('exports a round-trippable profile without credentials or default selection',
   assert.equal(text.includes('sk-'), false)
   const imported = parseProfileImport(text)
   assert.equal(imported.profile.embedding_dim, 1024)
+  assert.equal(imported.profile.llm_context_tokens, 131072)
   assert.equal(imported.profile.is_default, false)
   assert.equal(imported.profile.agent_budget?.max_tool_calls, 4)
 })
@@ -44,4 +45,7 @@ it('rejects duplicate paths and malformed budget before preview', () => {
   data.profile.llm_base_url = profile.llm_base_url
   data.profile.agent_budget.max_tool_calls = 'invalid'
   assert.throws(() => parseProfileImport(JSON.stringify(data)), /agent_budget/)
+  data.profile.agent_budget.max_tool_calls = 4
+  data.profile.llm_context_tokens = -1
+  assert.throws(() => parseProfileImport(JSON.stringify(data)), /llm_context_tokens/)
 })

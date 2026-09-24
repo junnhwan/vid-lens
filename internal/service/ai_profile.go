@@ -42,6 +42,7 @@ type AIProfileRequest struct {
 	LLMBaseURL        string                 `json:"llm_base_url" binding:"required"`
 	LLMAPIKey         string                 `json:"llm_api_key"`
 	LLMModel          string                 `json:"llm_model" binding:"required"`
+	LLMContextTokens  int                    `json:"llm_context_tokens"`
 	ASRProvider       string                 `json:"asr_provider" binding:"required"`
 	ASRBaseURL        string                 `json:"asr_base_url" binding:"required"`
 	ASRAPIKey         string                 `json:"asr_api_key"`
@@ -69,6 +70,7 @@ type AIProfileResponse struct {
 	LLMBaseURL            string                      `json:"llm_base_url"`
 	LLMAPIKeyMasked       string                      `json:"llm_api_key_masked"`
 	LLMModel              string                      `json:"llm_model"`
+	LLMContextTokens      int                         `json:"llm_context_tokens"`
 	ASRProvider           string                      `json:"asr_provider"`
 	ASRBaseURL            string                      `json:"asr_base_url"`
 	ASRAPIKeyMasked       string                      `json:"asr_api_key_masked"`
@@ -97,6 +99,7 @@ type DecryptedAIProfile struct {
 	LLMBaseURL        string
 	LLMAPIKey         string
 	LLMModel          string
+	LLMContextTokens  int
 	ASRProvider       string
 	ASRBaseURL        string
 	ASRAPIKey         string
@@ -160,16 +163,17 @@ func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error)
 	for i := range profiles {
 		p := &profiles[i]
 		responses = append(responses, AIProfileResponse{
-			ID:             p.ID,
-			Name:           p.Name,
-			LLMModel:       p.LLMModel,
-			ASRModel:       p.ASRModel,
-			EmbeddingModel: p.EmbeddingModel,
-			EmbeddingDim:   p.EmbeddingDim,
-			VisionModel:    p.VisionModel,
-			IsDefault:      p.IsDefault,
-			Source:         "user",
-			ReadOnly:       true,
+			ID:               p.ID,
+			Name:             p.Name,
+			LLMModel:         p.LLMModel,
+			LLMContextTokens: p.LLMContextTokens,
+			ASRModel:         p.ASRModel,
+			EmbeddingModel:   p.EmbeddingModel,
+			EmbeddingDim:     p.EmbeddingDim,
+			VisionModel:      p.VisionModel,
+			IsDefault:        p.IsDefault,
+			Source:           "user",
+			ReadOnly:         true,
 		})
 	}
 	return responses, nil
@@ -215,6 +219,7 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKey:         strings.TrimSpace(req.LLMAPIKey),
 		LLMModel:          strings.TrimSpace(req.LLMModel),
+		LLMContextTokens:  req.LLMContextTokens,
 		ASRProvider:       normalizeAIProtocol(req.ASRProvider),
 		ASRBaseURL:        strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKey:         strings.TrimSpace(req.ASRAPIKey),
@@ -527,6 +532,7 @@ func providerFromDecrypted(profile *DecryptedAIProfile) *ai.Profile {
 		LLMBaseURL:        profile.LLMBaseURL,
 		LLMAPIKey:         profile.LLMAPIKey,
 		LLMModel:          profile.LLMModel,
+		LLMContextTokens:  profile.LLMContextTokens,
 		ASRProvider:       profile.ASRProvider,
 		ASRBaseURL:        profile.ASRBaseURL,
 		ASRAPIKey:         profile.ASRAPIKey,
@@ -589,6 +595,7 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 		LLMBaseURL:                strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKeyCiphertext:       llmCipher,
 		LLMModel:                  strings.TrimSpace(req.LLMModel),
+		LLMContextTokens:          req.LLMContextTokens,
 		ASRProvider:               normalizeAIProtocol(req.ASRProvider),
 		ASRBaseURL:                strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKeyCiphertext:       asrCipher,
@@ -657,6 +664,7 @@ func (s *AIProfileService) responseFromProfile(profile *model.UserAIProfile) *AI
 		LLMBaseURL:            profile.LLMBaseURL,
 		LLMAPIKeyMasked:       s.maskCiphertext(profile.LLMAPIKeyCiphertext),
 		LLMModel:              profile.LLMModel,
+		LLMContextTokens:      profile.LLMContextTokens,
 		ASRProvider:           profile.ASRProvider,
 		ASRBaseURL:            profile.ASRBaseURL,
 		ASRAPIKeyMasked:       s.maskCiphertext(profile.ASRAPIKeyCiphertext),
@@ -719,6 +727,7 @@ func (s *AIProfileService) decryptProfile(profile *model.UserAIProfile) (*Decryp
 		LLMBaseURL:        profile.LLMBaseURL,
 		LLMAPIKey:         llmKey,
 		LLMModel:          profile.LLMModel,
+		LLMContextTokens:  profile.LLMContextTokens,
 		ASRProvider:       profile.ASRProvider,
 		ASRBaseURL:        profile.ASRBaseURL,
 		ASRAPIKey:         asrKey,
@@ -742,6 +751,9 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 	}
 	if strings.TrimSpace(req.LLMProvider) == "" || strings.TrimSpace(req.LLMBaseURL) == "" || strings.TrimSpace(req.LLMModel) == "" {
 		return fmt.Errorf("LLM 配置不完整")
+	}
+	if req.LLMContextTokens != 0 && (req.LLMContextTokens < 8192 || req.LLMContextTokens > 1048576) {
+		return fmt.Errorf("模型上下文窗口须为 8192–1048576 token，或留空使用默认值")
 	}
 	if strings.TrimSpace(req.ASRProvider) == "" || strings.TrimSpace(req.ASRBaseURL) == "" || strings.TrimSpace(req.ASRModel) == "" {
 		return fmt.Errorf("ASR 配置不完整")

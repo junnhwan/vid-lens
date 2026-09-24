@@ -50,6 +50,95 @@ func TestSummaryLeavesCoverCanonicalTranscriptAtASRBoundaries(t *testing.T) {
 	}
 }
 
+func TestSummaryLeavesFillBudgetAcrossLongASRChunks(t *testing.T) {
+	first, second := strings.Repeat("中文", 15), strings.Repeat("内容", 15)
+	full := first + "\n\n" + second
+	rows := []model.VideoTranscriptionChunk{
+		{ChunkIndex: 0, Status: model.TranscriptionChunkStatusCompleted, Content: first, CoreEndMS: 300000},
+		{ChunkIndex: 1, Status: model.TranscriptionChunkStatusCompleted, Content: second, CoreStartMS: 300000, CoreEndMS: 600000},
+	}
+	leaves := summaryLeaves(full, rows, 75)
+	if len(leaves) != 3 {
+		t.Fatalf("leaves = %d, want 3 packed inputs", len(leaves))
+	}
+	var joined strings.Builder
+	for _, leaf := range leaves {
+		if len(leaf.text) > 75 {
+			t.Fatalf("leaf bytes = %d, budget 75", len(leaf.text))
+		}
+		joined.WriteString(leaf.text)
+	}
+	if joined.String() != full || leaves[0].startMS != 0 || leaves[len(leaves)-1].endMS != 600000 {
+		t.Fatalf("lost coverage or timing: joined=%q leaves=%+v", joined.String(), leaves)
+	}
+}
+
+func TestSummarizeLongAvoidsOneModelCallPerShortASRChunk(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{UserID: 1, FileMD5: "56565656565656565656565656565656", Filename: "many-chunks.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	observations := make([]string, 12)
+	for i := range observations {
+		observations[i] = fmt.Sprintf("segment-%02d-%s", i, strings.Repeat("x", 180))
+		if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, i, "source", observations[i], i*300, (i+1)*300); err != nil {
+			t.Fatal(err)
+		}
+	}
+	strategy := &summaryPipelineAI{}
+	c := &Consumer{repo: repos, ai: strategy}
+	if _, err := c.summarizeLong(context.Background(), task, strings.Join(observations, "\n\n"), strategy, 1200); err != nil {
+		t.Fatal(err)
+	}
+	// Model calls are serialized in this pipeline, so each unnecessary leaf adds
+	// a full provider round trip to the wait before the final report appears.
+	if got := len(strategy.calls); got > 5 {
+		t.Fatalf("serialized model calls = %d, want at most 5 for 12 short ASR chunks", got)
+	}
+}
+
+func TestSummarizeLongKeepsExistingASRBoundaryCheckpoints(t *testing.T) {
+	repos := newConsumerTestRepositories(t)
+	task := &model.VideoTask{UserID: 1, FileMD5: "78787878787878787878787878787878", Filename: "resume.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	first, second := strings.Repeat("甲", 300), strings.Repeat("乙", 300)
+	for i, content := range []string{first, second} {
+		if err := repos.TranscriptionChunk.UpsertCompletedWithRange(task.ID, i, "source", content, i*300, (i+1)*300); err != nil {
+			t.Fatal(err)
+		}
+	}
+	full := first + "\n\n" + second
+	rows, err := repos.TranscriptionChunk.ListByTaskID(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := summaryLeavesLegacy(full, rows, 750)
+	if len(legacy) != 4 || len(summaryLeaves(full, rows, 750)) != 3 {
+		t.Fatal("fixture must distinguish old and packed leaf plans")
+	}
+	oldPrompt := summaryPartPrompt(legacy[0], 0, len(legacy))
+	if err := repos.SummaryPart.Upsert(&model.SummaryPart{
+		TaskID: task.ID, Level: 0, PartIndex: 0, InputHash: summaryHash("\x00", oldPrompt),
+		Status: "completed", Content: "已有首段摘要", StartMS: legacy[0].startMS, EndMS: legacy[0].endMS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	strategy := &summaryPipelineAI{}
+	c := &Consumer{repo: repos, ai: strategy}
+	if _, err := c.summarizeLong(context.Background(), task, full, strategy, 1200); err != nil {
+		t.Fatal(err)
+	}
+	if len(strategy.calls) == 0 {
+		t.Fatal("expected remaining segment calls")
+	}
+	if !strings.Contains(strategy.calls[0], "第 2/4 段") {
+		t.Fatalf("existing completed first segment was not reused; first call = %q", strategy.calls[0])
+	}
+}
+
 func TestSummarizeLongResumesAfterFailedPart(t *testing.T) {
 	repos := newConsumerTestRepositories(t)
 	task := &model.VideoTask{UserID: 1, FileMD5: "12121212121212121212121212121212", Filename: "long.mp4"}

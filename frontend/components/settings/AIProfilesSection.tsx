@@ -162,6 +162,7 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
           {hosted && <span className="chip chip-info">平台内置</span>}
         </div>
         <CapabilityLine label="对话模型" value={profile.llm_model} />
+        <CapabilityLine label="上下文窗口" value={profile.llm_context_tokens ? `${profile.llm_context_tokens.toLocaleString()} token` : '未填写 · 按保守预算'} muted={!profile.llm_context_tokens} />
         <CapabilityLine label="语音识别" value={profile.asr_model} />
         <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维`} />
         <CapabilityLine label="视觉模型" value={profile.vision_model || '未配置'} muted={!profile.vision_model} />
