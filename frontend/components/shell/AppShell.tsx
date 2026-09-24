@@ -142,6 +142,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <Icon name="settings" />
               设置
             </Link>
+            <Link href="/docs" className="nav-item">
+              <Icon name="file" />
+              文档
+            </Link>
             <Link href="/settings" className="rail-user">
               <span className="avatar">{initial}</span>
               <span className="who">

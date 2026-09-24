@@ -92,6 +92,12 @@ export default function LoginPage() {
               演示账号
             </button>
           </div>
+
+          <div className="login-docs-links">
+            <Link href="/intro">产品介绍</Link>
+            <span aria-hidden="true">·</span>
+            <Link href="/docs">使用文档</Link>
+          </div>
         </div>
       </div>
     </div>

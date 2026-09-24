@@ -1361,6 +1361,8 @@ button.switch { padding: 0; cursor: pointer; }
 .login-form { margin-top: 4px; }
 .login-err { font-size: 13px; color: var(--bad); margin-bottom: 10px; }
 .login-divider { height: 1px; background: rgba(237,232,222,.08); margin: 20px 0; }
+.login-docs-links { margin-top: 16px; display: flex; justify-content: center; gap: 10px; font-size: 13px; color: var(--tx-3); }
+.login-docs-links a:hover { color: var(--tx-1); }
 
 @media (max-width: 960px) {
   .login-compose { flex-direction: column; gap: 22px; padding: 84px 20px 28px; }

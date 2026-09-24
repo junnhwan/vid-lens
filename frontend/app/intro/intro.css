@@ -1,0 +1,254 @@
+/* ============================================================
+   映知 · 项目介绍页 (/intro)
+   独立于工作台外壳,自带滚动容器(body 全局 overflow:hidden)。
+   动效: 仅在 JS 确认非 reduced-motion 后加 .anim,内容默认可读。
+   ============================================================ */
+
+.intro-root {
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1200px 500px at 80% -10%, var(--acc-dim), transparent 60%),
+    var(--bg-0);
+}
+
+/* ---------- 顶栏 ---------- */
+.intro-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px clamp(18px, 5vw, 56px);
+  background: color-mix(in srgb, var(--bg-0) 80%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.intro-brand { display: flex; align-items: center; gap: 10px; }
+.intro-brand b { display: block; font-size: 16px; font-weight: 600; }
+.intro-brand i { display: block; font-style: normal; font-size: 10px; letter-spacing: 0.14em; color: var(--tx-3); }
+.intro-topnav { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.intro-topnav > a {
+  padding: 7px 12px;
+  border-radius: var(--r-ctl);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tx-2);
+  transition: background 0.18s var(--ease), color 0.18s var(--ease);
+}
+.intro-topnav > a:hover { background: var(--bg-2); color: var(--tx-1); }
+.intro-topnav .intro-cta-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--acc-dim);
+  color: var(--acc-strong);
+  border: 1px solid var(--acc-line);
+}
+.intro-topnav .intro-cta-sm:hover { background: var(--acc); color: var(--acc-ink); }
+
+/* ---------- 首屏 ---------- */
+.intro-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(24px, 5vw, 64px);
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(48px, 9vh, 96px) clamp(18px, 5vw, 56px) clamp(32px, 6vh, 64px);
+}
+.intro-kicker {
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--acc-strong);
+  margin-bottom: 14px;
+}
+.intro-hero h1 {
+  font-family: var(--font-read);
+  font-size: clamp(28px, 4.2vw, 44px);
+  line-height: 1.28;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.intro-hero h1 em {
+  font-style: normal;
+  color: var(--acc-strong);
+  position: relative;
+  white-space: nowrap;
+}
+.intro-hero h1 em::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 2px;
+  height: 8px;
+  background: var(--acc-dim);
+  border-radius: 4px;
+  z-index: -1;
+}
+.intro-lead {
+  margin-top: 18px;
+  font-size: 15.5px;
+  line-height: 1.85;
+  color: var(--tx-2);
+  max-width: 34em;
+}
+.intro-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+.intro-cta, .intro-cta-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 22px;
+  font-size: 15px;
+  border-radius: var(--r-ctl);
+}
+.intro-cta-ghost {
+  border: 1px solid var(--line-strong);
+  color: var(--tx-1);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.intro-cta-ghost:hover { border-color: var(--acc-line); background: var(--bg-2); }
+.intro-hero-stage { min-width: 0; }
+.intro-hero-stage .px-stage { height: clamp(300px, 44vh, 420px); }
+
+/* ---------- 区块 ---------- */
+.intro-sec {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(28px, 6vh, 56px) clamp(18px, 5vw, 56px);
+}
+.intro-h2 {
+  font-family: var(--font-read);
+  font-size: clamp(21px, 2.6vw, 27px);
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.intro-h2::before {
+  content: '';
+  display: inline-block;
+  width: 22px; height: 3px;
+  border-radius: 2px;
+  background: var(--acc);
+  margin-right: 10px;
+  vertical-align: middle;
+  transform: translateY(-3px);
+}
+.intro-sec-lead { color: var(--tx-2); line-height: 1.9; max-width: 46em; }
+.intro-note { margin-top: 18px; font-size: 13.5px; color: var(--tx-3); }
+.intro-note a { color: var(--acc-strong); }
+.intro-note a:hover { text-decoration: underline; }
+
+/* 使用流程: 横向步骤,窄屏纵向 */
+.intro-flow {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.intro-flow li {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--bg-1);
+  padding: 16px 14px 14px;
+  transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.intro-flow li:hover { border-color: var(--acc-line); transform: translateY(-2px); }
+.intro-flow-no {
+  position: absolute;
+  top: 12px; right: 12px;
+  font-size: 11px;
+  color: var(--tx-4);
+}
+.intro-flow-icon {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--acc-dim);
+  color: var(--acc-strong);
+  margin-bottom: 10px;
+}
+.intro-flow b { display: block; font-size: 14.5px; margin-bottom: 6px; }
+.intro-flow p { font-size: 13px; line-height: 1.75; color: var(--tx-3); }
+
+/* 能力卡片 */
+.intro-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.intro-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--bg-1);
+  padding: 20px 18px;
+  transition: border-color 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.intro-card:hover { border-color: var(--acc-line); transform: translateY(-2px); box-shadow: var(--shadow-1); }
+.intro-card-icon {
+  display: grid;
+  place-items: center;
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--acc-dim);
+  color: var(--acc-strong);
+  margin-bottom: 12px;
+}
+.intro-card h3 { font-size: 15.5px; margin-bottom: 6px; }
+.intro-card p { font-size: 13.5px; line-height: 1.8; color: var(--tx-3); }
+
+.intro-final { text-align: center; padding-bottom: clamp(48px, 9vh, 88px); }
+.intro-final .intro-sec-lead { margin: 0 auto; }
+.intro-final .intro-actions { justify-content: center; }
+
+/* ---------- 页脚 ---------- */
+.intro-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px clamp(18px, 5vw, 56px);
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--tx-3);
+}
+.intro-foot-links { display: flex; gap: 16px; }
+.intro-foot-links a:hover { color: var(--tx-1); }
+
+/* ---------- 揭示动效: 只在 .anim(非 reduced-motion) 下隐藏待揭示 ---------- */
+.anim .rv {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.55s var(--ease),
+    transform 0.55s var(--ease);
+  transition-delay: var(--d, 0s);
+}
+.anim .rv.in { opacity: 1; transform: none; }
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 1020px) {
+  .intro-hero { grid-template-columns: 1fr; padding-top: 40px; }
+  .intro-hero-stage { order: -1; }
+  .intro-hero-stage .px-stage { height: 240px; }
+  .intro-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .intro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .intro-topnav > a:not(.intro-cta-sm) { display: none; }
+  .intro-flow, .intro-grid { grid-template-columns: 1fr; }
+  .intro-hero-stage .px-stage { height: 200px; }
+}
+
+/* 双保险: 即使 JS 误加 .anim,reduced-motion 下也全部可见且无过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .anim .rv { opacity: 1; transform: none; transition: none; }
+  .intro-flow li, .intro-card, .intro-topnav > a, .intro-cta-ghost { transition: none; }
+  .intro-flow li:hover, .intro-card:hover { transform: none; }
+}
