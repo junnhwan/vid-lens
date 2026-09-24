@@ -15,6 +15,8 @@ export interface ChatMsg {
   openCiteIds?: string[]
   streaming?: boolean
   degraded?: boolean
+  degradationReason?: string
+  diagnosticId?: string
   error?: string
   trace?: ChatTraceStep[]
   agentRun?: boolean
@@ -53,6 +55,8 @@ export function parseMessages(
       content: m.content,
       createdAt: Date.parse(m.created_at),
       ...(snapshotTrace?.degraded ? { degraded: true } : {}),
+      ...(snapshotTrace?.degradationReason ? { degradationReason: snapshotTrace.degradationReason } : {}),
+      ...(snapshotTrace?.diagnosticId ? { diagnosticId: snapshotTrace.diagnosticId } : {}),
       openCiteIds: [],
       ...(cites ? { cites } : {}),
       ...(snapshotTrace?.runId ? { agentRunId: snapshotTrace.runId } : {}),

@@ -174,7 +174,13 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, mode ChatMo
 	if errors.Is(ragErr, context.Canceled) || errors.Is(ragErr, context.DeadlineExceeded) {
 		return nil, ragErr
 	}
-	return s.prepareVideoContextChat(session, question, recent, recentLimit)
+	prepared, err = s.prepareVideoContextChat(session, question, recent, recentLimit)
+	if err != nil {
+		return nil, err
+	}
+	prepared.DegradationReason = "retrieval_unavailable"
+	_ = emitProgress(ctx, ConversationProgress{ID: "fallback", Kind: "retrieve", Label: "已改用摘要 / 转写回答，无检索引用", Status: "done"})
+	return prepared, nil
 }
 
 func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, question string, recent []model.ChatMessage, recentLimit int) (*preparedRAGChat, error) {

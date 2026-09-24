@@ -313,6 +313,8 @@ export interface AskResult {
   citations: Citation[]
   model: string
   degraded?: boolean
+  degradation_reason?: string
+  diagnostic_id?: string
 }
 
 export interface AnswerFeedbackInput {
@@ -357,6 +359,8 @@ export interface SSEDone {
   model: string
   answer: string
   degraded?: boolean
+  degradation_reason?: string
+  diagnostic_id?: string
 }
 export interface SSEError {
   message: string

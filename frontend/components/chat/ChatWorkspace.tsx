@@ -561,9 +561,15 @@ function AgentMessageView({
               <Icon name="shield" size="sm" />有限结果
             </span>
           ) : (
-            <span className="chip chip-warn" title="生成阶段异常,回答由片段与摘要直拼,未经过完整模型生成">
-              <Icon name="alert" size="sm" />降级回答
+            <span className="chip chip-warn" title={msg.degradationReason === 'retrieval_unavailable' ? '检索未完成；本轮使用摘要或转写生成回答，没有检索引用' : msg.degradationReason === 'retrieval_and_generation_unavailable' ? '检索与生成均未完成；本轮只提供有限上下文' : '生成阶段异常,回答由片段与摘要直拼,未经过完整模型生成'}>
+              <Icon name="alert" size="sm" />{msg.degradationReason === 'retrieval_unavailable' ? '检索降级 · 无引用' : '降级回答'}
             </span>
+          )}
+          {msg.degradationReason === 'retrieval_unavailable' && (
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--tx-3)' }}>已用摘要或转写生成回答，未找到检索引用。</div>
+          )}
+          {msg.degradationReason?.startsWith('retrieval_') && msg.diagnosticId && (
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--tx-4)' }}>诊断编号：<code>{msg.diagnosticId}</code></div>
           )}
         </div>
       )}

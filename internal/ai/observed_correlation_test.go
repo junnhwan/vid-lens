@@ -37,6 +37,7 @@ func TestObservedFailuresUseControlledErrorCodes(t *testing.T) {
 	}{
 		{"timeout", errorChatClient{context.DeadlineExceeded}, "timeout"},
 		{"rate limited", errorChatClient{errors.New("provider returned HTTP 429 too many requests")}, "rate_limited"},
+		{"local admission", errorChatClient{&AdmissionError{}}, "admission_rejected"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

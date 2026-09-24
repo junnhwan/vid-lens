@@ -148,10 +148,12 @@ type AskResult struct {
 	Citations    []Citation                  `json:"citations"`
 	Model        string                      `json:"model"`
 	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
-	// Degraded 标记档2降级态（docs/architecture/reliability.md 当前实现约束）：LLM 失败回退无 LLM 模式
-	// （检索片段+已有摘要直拼）时为 true，对外告知用户当前降级。档1 rerank 失败回退
-	// 向量基线后 LLM 仍生成完整答案，不标 degraded。
-	Degraded bool `json:"degraded,omitempty"`
+	// Degraded marks either an unavailable retrieval path with video-context
+	// fallback or an LLM failure with a limited answer. Rerank fallback alone
+	// does not degrade the published answer.
+	Degraded          bool   `json:"degraded,omitempty"`
+	DegradationReason string `json:"degradation_reason,omitempty"`
+	DiagnosticID      string `json:"diagnostic_id,omitempty"`
 }
 
 type ChatStreamEvent struct {
@@ -170,7 +172,8 @@ type preparedRAGChat struct {
 	Messages        []ai.ChatMessage
 	// Policy 是本次问答的 ExecutionPolicy（docs/architecture/retrieval.md）。docs/architecture/reliability.md 降级在其之上：
 	// policy.UseLLM=false 的 intent（small_talk）不触发档2（本来就不调 LLM）。
-	Policy ExecutionPolicy
+	Policy            ExecutionPolicy
+	DegradationReason string
 }
 
 func NewChatService(repos *repository.Repositories, retriever RAGRetriever, cfg ChatConfig) *ChatService {

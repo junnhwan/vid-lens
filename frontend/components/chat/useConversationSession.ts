@@ -236,7 +236,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
             update({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
           },
           onDone: done => {
-            update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded } })
+            update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, degradationReason: done.degradation_reason, diagnosticId: done.diagnostic_id } })
           },
           onError: error => update({ type: 'stream_error', message: error.message }),
         }, controller.signal)

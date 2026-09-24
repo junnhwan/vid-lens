@@ -108,6 +108,39 @@ func embedWithAdmissionWait(ctx context.Context, embedding ai.EmbeddingClient, i
 	}
 }
 
+// Interactive retrieval waits for a short local admission window, then lets
+// the video assistant report a bounded fallback while the request is still live.
+func embedQueryWithAdmissionWait(ctx context.Context, embedding ai.EmbeddingClient, input string) ([]float32, error) {
+	const maxWait = 15 * time.Second
+	deadline := time.Now().Add(maxWait)
+	if requestDeadline, ok := ctx.Deadline(); ok && requestDeadline.Before(deadline) {
+		deadline = requestDeadline
+	}
+	for {
+		vector, err := embedding.Embed(ctx, input)
+		if err == nil {
+			return vector, nil
+		}
+		var admissionErr *ai.AdmissionError
+		if !errors.As(err, &admissionErr) || admissionErr.Decision.RetryAfter <= 0 {
+			return nil, err
+		}
+		if time.Until(deadline) < admissionErr.Decision.RetryAfter {
+			return nil, err
+		}
+		if progressErr := emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "等待 Embedding 模型额度", Status: "running"}); progressErr != nil {
+			return nil, progressErr
+		}
+		timer := time.NewTimer(admissionErr.Decision.RetryAfter)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (s *RAGIndexService) SetAIRecorder(recorder ai.CallRecorder) {
 	s.recorder = recorder
 }

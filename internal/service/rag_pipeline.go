@@ -151,7 +151,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	for _, query := range rewrite.Queries {
 		var vectorChunks, keywordChunks []RetrievedChunk
 		if enableVector {
-			queryVector, err := req.Embedding.Embed(ctx, query)
+			queryVector, err := embedQueryWithAdmissionWait(ctx, req.Embedding, query)
 			if err != nil {
 				return RetrievalPipelineResult{}, err
 			}

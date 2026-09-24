@@ -66,6 +66,21 @@ func TestRetrievalPipelineNoRewriterUsesOriginalQueryOnce(t *testing.T) {
 	}
 }
 
+func TestRetrievalPipelineWaitsForLocalEmbeddingAdmission(t *testing.T) {
+	embedding := &admissionThenEmbeddingClient{dim: 3}
+	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{{{ChunkID: 1, ChunkIndex: 1, Content: "检索证据"}}}}
+	pipeline := &RetrievalPipeline{retriever: retriever, rewriter: NoopQueryRewriter{}, CandidateK: 3}
+	result, err := pipeline.Retrieve(context.Background(), RetrievalPipelineRequest{
+		UserID: 7, TaskID: 1, Question: "问题", EmbeddingModel: "embed", Embedding: embedding,
+	})
+	if err != nil {
+		t.Fatalf("Retrieve() error = %v", err)
+	}
+	if embedding.attempts != 2 || len(retriever.requests) != 1 || len(result.Citations) != 1 {
+		t.Fatalf("attempts=%d searches=%d citations=%d, want admitted retry and evidence", embedding.attempts, len(retriever.requests), len(result.Citations))
+	}
+}
+
 func TestRetrievalPipelineTimeScopeDoesNotExpandIndexNeighbors(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
 	if err := repos.VideoChunk.ReplaceTaskChunks(1, "embed", []model.VideoChunk{

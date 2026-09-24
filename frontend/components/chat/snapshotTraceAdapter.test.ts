@@ -36,3 +36,11 @@ test('budget-limited Agent history retains its degraded result', () => {
   assert.equal(parsed?.degraded, true)
   assert.equal(parsed?.runId, 'budget')
 })
+
+test('Chat retrieval fallback survives history reload without becoming an Agent run', () => {
+  const parsed = parseSnapshotTrace(JSON.stringify({ citations: [], degraded: true, degradation_reason: 'retrieval_unavailable', diagnostic_id: 'trace-123' }))
+  assert.equal(parsed?.degraded, true)
+  assert.equal(parsed?.degradationReason, 'retrieval_unavailable')
+  assert.equal(parsed?.diagnosticId, 'trace-123')
+  assert.equal(parsed?.isAgentEnvelope, false)
+})

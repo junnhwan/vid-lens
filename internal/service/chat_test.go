@@ -186,10 +186,18 @@ func TestChatServiceAskRecordsEmbeddingAndLLMCalls(t *testing.T) {
 		t.Fatalf("list ai call logs: %v", err)
 	}
 	kinds := make(map[string]bool)
+	traceID := ""
 	for _, log := range logs {
 		kinds[log.Kind] = true
+		if log.TraceID == "" || (traceID != "" && traceID != log.TraceID) {
+			t.Fatalf("AI call diagnostic correlation = %+v", logs)
+		}
+		traceID = log.TraceID
 		if log.UserID != 7 || log.TaskID != task.ID || log.SessionID != session.ID {
 			t.Fatalf("log scope = %+v", log)
+		}
+		if log.Kind == model.AICallKindEmbedding && (log.JobType != "conversation" || log.Stage != "retrieving") {
+			t.Fatalf("embedding log phase = %+v", log)
 		}
 		if log.InputChars <= 0 {
 			t.Fatalf("log should record input char count: %+v", log)
@@ -525,6 +533,19 @@ func TestChatServiceAskWithModeVideoAssistantFallsBackToTranscriptionWhenRetriev
 	if len(result.Citations) != 0 {
 		t.Fatalf("citations = %+v, want no citations for retrieval error fallback", result.Citations)
 	}
+	if !result.Degraded || result.DegradationReason != "retrieval_unavailable" {
+		t.Fatalf("fallback status = degraded:%v reason:%q", result.Degraded, result.DegradationReason)
+	}
+	if result.DiagnosticID == "" {
+		t.Fatal("retrieval fallback omitted diagnostic ID")
+	}
+	messages, err := repos.Chat.ListMessages(7, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil || !strings.Contains(*messages[1].RetrievalSnapshot, `"degradation_reason":"retrieval_unavailable"`) {
+		t.Fatalf("fallback snapshot = %+v, want persisted retrieval status", messages)
+	}
 	if len(chatClient.messages) != 2 {
 		t.Fatalf("chat calls = %d, want rewrite and fallback answer", len(chatClient.messages))
 	}
@@ -619,6 +640,48 @@ func TestChatServiceAskStreamEmitsCitationsAnswerChunksAndDone(t *testing.T) {
 	policy, ok := done["memory_policy"].(model.EffectiveMemoryPolicy)
 	if !ok || policy.EffectiveEnabled || policy.Reason != model.MemoryPolicyReasonUserDisabled {
 		t.Fatalf("done memory policy = %#v", done["memory_policy"])
+	}
+}
+
+func TestChatServiceAskStreamReportsRetrievalFallback(t *testing.T) {
+	repos := newChatServiceTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4", Filename: "fallback.mp4", FileURL: "videos/stream-fallback.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	session := &model.ChatSession{UserID: 7, TaskID: task.ID, Title: "session"}
+	if err := repos.Chat.CreateSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: task.ID, Content: "转写可用于有限回答。", Words: 11}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewChatService(repos, &failingRetriever{err: errors.New("vector search unavailable")}, ChatConfig{TopK: 5})
+	var events []ChatStreamEvent
+	result, err := svc.AskStream(context.Background(), 7, session.ID, "检索失败后怎样回答？", 0, &fakeEmbeddingClient{dim: 3}, &scriptedChatClient{responses: []string{"not-json", "基于转写的回答"}}, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"}, func(event ChatStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Degraded || result.DegradationReason != "retrieval_unavailable" || len(result.Citations) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.DiagnosticID == "" {
+		t.Fatal("stream fallback omitted diagnostic ID")
+	}
+	last := events[len(events)-1]
+	done, ok := last.Data.(map[string]interface{})
+	if last.Type != "done" || !ok || done["degraded"] != true || done["degradation_reason"] != "retrieval_unavailable" || done["diagnostic_id"] != result.DiagnosticID {
+		t.Fatalf("done event = %+v", last)
+	}
+	messages, err := repos.Chat.ListMessages(7, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil || !strings.Contains(*messages[1].RetrievalSnapshot, `"degradation_reason":"retrieval_unavailable"`) {
+		t.Fatalf("persisted fallback = %+v", messages)
 	}
 }
 

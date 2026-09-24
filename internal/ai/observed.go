@@ -243,6 +243,10 @@ func classifyProviderError(err error) string {
 	if err == nil {
 		return ""
 	}
+	var admissionErr *AdmissionError
+	if errors.As(err, &admissionErr) {
+		return "admission_rejected"
+	}
 	var providerErr *ProviderError
 	if errors.As(err, &providerErr) {
 		return string(providerErr.Class)

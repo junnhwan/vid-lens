@@ -24,6 +24,8 @@ interface AgentSnapshotEnvelopeJSON {
   stop_reason?: string
   budget_notice?: BudgetNotice
   degraded?: boolean
+  degradation_reason?: string
+  diagnostic_id?: string
   version?: number
   run_id?: string
   mode?: string
@@ -42,6 +44,8 @@ interface LegacyVideoAgentStepJSON {
 
 export interface ParsedSnapshotTrace {
   degraded?: boolean
+  degradationReason?: string
+  diagnosticId?: string
   steps: ChatTraceStep[]
   runId?: string
   mode?: string
@@ -73,6 +77,9 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
     if (Array.isArray(obj.citations)) {
       const isAgentEnvelope = Boolean(obj.version === 1 || mode === 'agent' || mode === 'research' || obj.template)
       return {
+        ...(obj.degraded ? { degraded: true } : {}),
+        ...(obj.degradation_reason ? { degradationReason: obj.degradation_reason } : {}),
+        ...(obj.diagnostic_id ? { diagnosticId: obj.diagnostic_id } : {}),
         steps: traceFromCitationCount(obj.citations.length), runId, mode, isAgentEnvelope,
         source: isAgentEnvelope ? 'agent' : 'inferred',
       }
@@ -179,4 +186,3 @@ function agentResultStepToTrace(step: AgentResultStepJSON, id: string, runId?: s
     error,
   }
 }
-

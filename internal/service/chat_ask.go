@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
+	"vid-lens/internal/observability"
 )
 
 // 非流式问答编排、消息持久化和 AI 调用观测包装。
@@ -14,6 +16,7 @@ func (s *ChatService) Ask(ctx context.Context, userID, sessionID int64, question
 }
 
 func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*AskResult, error) {
+	ctx = withChatCorrelation(ctx)
 	embedding, chat = s.observedAIClients(userID, sessionID, 0, embedding, chat, profile)
 	prepared, err := s.prepareChatByMode(ctx, normalizeChatMode(mode), userID, sessionID, question, topK, embedding, chat, profile)
 	if err != nil {
@@ -32,7 +35,11 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 		if shouldTriggerLLMDegradation(prepared.Policy, llmErr) {
 			degradedAnswer := s.applyTier2Degradation(ctx, prepared)
 			finalized := finalizeAnswerCitations(degradedAnswer, prepared.Citations)
-			result, saveErr := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.FrozenMemberIDs)
+			degradationReason := ""
+			if prepared.DegradationReason != "" {
+				degradationReason = "retrieval_and_generation_unavailable"
+			}
+			result, saveErr := s.saveChatExchangeWithStatus(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, degradationReason, prepared.FrozenMemberIDs)
 			if saveErr != nil {
 				return nil, saveErr
 			}
@@ -46,7 +53,7 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	}
 
 	finalized := finalizeChatAnswer(prepared, answer)
-	result, err := s.saveChatExchange(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.FrozenMemberIDs)
+	result, err := s.saveChatExchangeWithStatus(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.DegradationReason, prepared.FrozenMemberIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +67,26 @@ func finalizeChatAnswer(prepared *preparedRAGChat, answer string) finalizedAnswe
 }
 
 func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName string, frozenMembers ...[]int64) (*AskResult, error) {
-	snapshot, err := json.Marshal(citations)
+	return s.saveChatExchangeWithStatus(ctx, userID, sessionID, question, answer, citations, recentLimit, modelName, "", frozenMembers...)
+}
+
+func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, sessionID int64, question, answer string, citations []Citation, recentLimit int, modelName, degradationReason string, frozenMembers ...[]int64) (*AskResult, error) {
+	var snapshot []byte
+	var err error
+	diagnosticID := ""
+	if degradationReason != "" {
+		diagnosticID = observability.CorrelationFromContext(ctx).TraceID
+	}
+	if degradationReason == "" {
+		snapshot, err = json.Marshal(citations)
+	} else {
+		snapshot, err = json.Marshal(struct {
+			Citations         []Citation `json:"citations"`
+			Degraded          bool       `json:"degraded"`
+			DegradationReason string     `json:"degradation_reason"`
+			DiagnosticID      string     `json:"diagnostic_id,omitempty"`
+		}{citations, true, degradationReason, diagnosticID})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +116,14 @@ func (s *ChatService) saveChatExchange(ctx context.Context, userID, sessionID in
 	if recentLimit > 0 {
 		_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	}
-	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName}, nil
+	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID}, nil
+}
+
+func withChatCorrelation(ctx context.Context) context.Context {
+	if observability.CorrelationFromContext(ctx).TraceID != "" {
+		return ctx
+	}
+	return observability.WithCorrelation(ctx, observability.Correlation{TraceID: uuid.NewString()})
 }
 
 func (s *ChatService) observedAIClients(userID, sessionID, taskID int64, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (ai.EmbeddingClient, ai.ChatClient) {
@@ -109,6 +142,8 @@ func (s *ChatService) observedAIClients(userID, sessionID, taskID int64, embeddi
 		SessionID: sessionID,
 		Provider:  profile.EmbeddingProvider,
 		Model:     profile.EmbeddingModel,
+		JobType:   "conversation",
+		Stage:     "retrieving",
 	})
 	chat = ai.NewObservedChatClient(chat, s.recorder, ai.CallContext{
 		UserID:    userID,
