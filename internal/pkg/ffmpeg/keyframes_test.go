@@ -44,6 +44,17 @@ func TestMergeKeyFramesRespectsMaxFrames(t *testing.T) {
 	}
 }
 
+func TestMergeKeyFramesCoversEntireLongVideo(t *testing.T) {
+	var interval []KeyFrame
+	for ms := int64(0); ms <= 5_760_000; ms += 30_000 {
+		interval = append(interval, KeyFrame{TimeMs: ms, Source: "interval"})
+	}
+	got := mergeKeyFrames(nil, interval, 120)
+	if len(got) != 120 || got[0].TimeMs != 0 || got[len(got)-1].TimeMs != 5_760_000 {
+		t.Fatalf("expected 120 frames spanning the video, first=%d last=%d count=%d", got[0].TimeMs, got[len(got)-1].TimeMs, len(got))
+	}
+}
+
 func TestParseShowinfoPTS(t *testing.T) {
 	log := `
 [Parsed_showinfo_1 @ 0x1] n:   0 pts:  123 pts_time:1.230 pos:  456

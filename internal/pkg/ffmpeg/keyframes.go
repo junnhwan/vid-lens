@@ -238,11 +238,43 @@ func mergeKeyFrames(scene, interval []KeyFrame, maxFrames int) []KeyFrame {
 		}
 		out = append(out, f)
 		lastMs = f.TimeMs
-		if maxFrames > 0 && len(out) >= maxFrames {
-			break
+	}
+	if maxFrames > 0 && len(out) > maxFrames {
+		if maxFrames == 1 {
+			return out[:1]
 		}
+		// Allocate the shared scene/interval budget by media time, not by
+		// candidate index. Dense scene cuts near the start must not crowd out
+		// observations from the rest of a long video.
+		selected := make([]KeyFrame, 0, maxFrames)
+		previous := -1
+		first, span := out[0].TimeMs, out[len(out)-1].TimeMs-out[0].TimeMs
+		for i := 0; i < maxFrames; i++ {
+			target := first + span*int64(i)/int64(maxFrames-1)
+			low, high := previous+1, len(out)-(maxFrames-i)
+			best := low
+			for j := low + 1; j <= high; j++ {
+				if out[j].TimeMs > target && out[j].TimeMs-target > absFrameDelta(out[best].TimeMs-target) {
+					break
+				}
+				candidate, current := absFrameDelta(out[j].TimeMs-target), absFrameDelta(out[best].TimeMs-target)
+				if candidate < current || (candidate == current && out[j].Source == "scene" && out[best].Source != "scene") {
+					best = j
+				}
+			}
+			selected = append(selected, out[best])
+			previous = best
+		}
+		return selected
 	}
 	return out
+}
+
+func absFrameDelta(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func runFFmpegCapture(ctx context.Context, ffmpegPath string, args []string) (string, error) {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -224,6 +225,17 @@ func formatFFmpegSeconds(milliseconds int64) string {
 }
 
 func companionFFprobePath(ffmpegPath string) string {
+	// filepath follows the host OS, so a Windows path used by a config file
+	// must be handled explicitly when the config is inspected on macOS/Linux.
+	if strings.Contains(ffmpegPath, "\\") {
+		ext := filepath.Ext(ffmpegPath)
+		name := "ffprobe" + ext
+		separator := strings.LastIndexAny(ffmpegPath, `\\/`)
+		if separator < 0 {
+			return name
+		}
+		return ffmpegPath[:separator+1] + name
+	}
 	dir := filepath.Dir(ffmpegPath)
 	ext := filepath.Ext(ffmpegPath)
 	name := "ffprobe" + ext
