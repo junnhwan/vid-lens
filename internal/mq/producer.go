@@ -211,9 +211,8 @@ func (p *Producer) drainConfirms(ack, nack chan uint64) {
 	}
 }
 
-// EnqueueAnalyze 投递视频分析任务。MessageId = "<jobType>:<taskID>" 作为
-// 消费侧幂等键：同一消息重复投递被 Redis SETNX 挡住，retry 产生新 taskID
-// 时键不同故放行。
+// EnqueueAnalyze 投递视频分析任务。每次 dispatch 使用独立的 MessageId，
+// 使同一任务的手动重试和调度重投不会被上次成功 Ack 的去重键吞掉。
 func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{
 		TaskID:     taskID,
@@ -222,7 +221,7 @@ func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string)
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-	return p.publish(TaskJobAnalyze, taskID, payload)
+	return p.publish(TaskJobAnalyze, taskID, claimTokenFromContext(ctx), payload)
 }
 
 // EnqueueTranscribe 投递文字提取任务。
@@ -234,7 +233,7 @@ func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 stri
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-	return p.publish(TaskJobTranscribe, taskID, payload)
+	return p.publish(TaskJobTranscribe, taskID, claimTokenFromContext(ctx), payload)
 }
 
 func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string) error {
@@ -245,7 +244,7 @@ func (p *Producer) EnqueueDownload(ctx context.Context, taskID int64, key string
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-	return p.publish(TaskJobDownload, taskID, payload)
+	return p.publish(TaskJobDownload, taskID, claimTokenFromContext(ctx), payload)
 }
 
 func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
@@ -259,19 +258,19 @@ func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
 		ClaimToken: claimTokenFromContext(ctx),
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
-	return p.publish(TaskJobRAGIndex, taskID, payload)
+	return p.publish(TaskJobRAGIndex, taskID, claimTokenFromContext(ctx), payload)
 }
 
 // publish 用 PublishWithDeferredConfirm 异步投递。返回 nil 仅表示消息已
 // 写入 socket buffer，publisher confirm 回调前进程崩的消息由 dispatch lease
 // 兜底（见 Producer 选型注释的分工边界）。delivery_mode=2 持久化消息，
 // MessageId 作为消费侧幂等键。
-func (p *Producer) publish(jobType string, taskID int64, body []byte) error {
+func (p *Producer) publish(jobType string, taskID int64, claimToken string, body []byte) error {
 	queue := p.queues[jobType]
 	if queue == "" {
 		return fmt.Errorf("mq queue for job type %q not configured", jobType)
 	}
-	messageID := fmt.Sprintf("%s:%d", jobType, taskID)
+	messageID := dispatchMessageID(jobType, taskID, claimToken)
 	_, err := p.ch.PublishWithDeferredConfirm(
 		"",    // default exchange
 		queue, // routing key = queue name
@@ -289,6 +288,14 @@ func (p *Producer) publish(jobType string, taskID int64, body []byte) error {
 		return fmt.Errorf("publish to queue %s: %w", queue, err)
 	}
 	return nil
+}
+
+func dispatchMessageID(jobType string, taskID int64, claimToken string) string {
+	base := fmt.Sprintf("%s:%d", jobType, taskID)
+	if claimToken == "" {
+		return base // Compatibility for callers without a dispatch lease.
+	}
+	return base + ":" + claimToken
 }
 
 // Close 关闭生产者，停止 confirm/return 监听 goroutine 并释放连接。

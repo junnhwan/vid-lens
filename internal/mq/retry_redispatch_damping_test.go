@@ -10,8 +10,8 @@ import (
 )
 
 // 回归现场（真机验收缺陷 2）：video-transcribe prefetch=1 时排队消息的
-// dispatch lease 反复过期 → RetryScheduler 每个 lease 周期重发一条同 MessageId
-// 的重复消息（队列 3→10 条堆积），且排队任务的 stage 被提前写成 transcribing
+// dispatch lease 反复过期 → RetryScheduler 每个 lease 周期重发一条新 dispatch
+// 消息（队列 3→10 条堆积），且排队任务的 stage 被提前写成 transcribing
 // （started_at 仍为 NULL），前端无法区分排队中/处理中。本组测试锁定：
 // 1) 过期 dispatch lease 的补投被 RedispatchBackoff 阻尼；
 // 2) 调度器补投不再改写 task 的 stage（stage 由 worker claim 时推进）。
