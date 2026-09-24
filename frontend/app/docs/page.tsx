@@ -1,3 +1,5 @@
+import { CodeBlock } from './CodeBlock'
+
 export default function DocsQuickstartPage() {
   return (
     <article className="docs-article">
@@ -18,13 +20,13 @@ export default function DocsQuickstartPage() {
 
       <h2>启动服务</h2>
       <p>在仓库根目录启动基础设施（PostgreSQL + pgvector、Redis、RabbitMQ、MinIO）和后端：</p>
-      <pre><code>{`cp .env.example .env   # 首次配置;已有 .env 时跳过,按环境编辑后继续
+      <CodeBlock lang="bash">{`cp .env.example .env   # 首次配置;已有 .env 时跳过,按环境编辑后继续
 docker compose up -d
-go run ./cmd/server`}</code></pre>
+go run ./cmd/server`}</CodeBlock>
       <p>另开一个终端启动前端：</p>
-      <pre><code>{`cd frontend
+      <CodeBlock lang="bash">{`cd frontend
 npm ci
-npm run dev`}</code></pre>
+npm run dev -- -p 5173`}</CodeBlock>
       <p>
         启动后访问前端地址（开发模式默认为 <code>http://127.0.0.1:5173</code>）；后端健康检查为{' '}
         <code>http://127.0.0.1:8080/healthz</code>。Windows 环境也可以使用 <code>make start</code> /{' '}
@@ -55,6 +57,7 @@ npm run dev`}</code></pre>
       </ol>
 
       <div className="docs-callout">
+        <b>关于用量</b>
         处理的每一步都需要调用你在「设置 → AI 服务」中配置的模型服务，并按服务商规则产生用量与费用。页面上会在相应操作前说明是否消耗额度。
       </div>
 

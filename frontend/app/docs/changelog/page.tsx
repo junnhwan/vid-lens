@@ -9,7 +9,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-24</time>
-          <span>项目介绍与使用文档</span>
+          <h3>项目介绍与使用文档</h3>
         </header>
         <ul>
           <li>新增项目介绍页（/intro）：产品定位、典型使用流程与核心能力说明，可直接进入工作台或阅读文档。</li>
@@ -21,7 +21,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-24</time>
-          <span>处理过程透明度与问答体验</span>
+          <h3>处理过程透明度与问答体验</h3>
         </header>
         <ul>
           <li><a href="/docs/features#transcription">转写</a>：分片进度、时间范围、重试与限流等待原因、已完成分片文字均可见；显示服务端并发上限。</li>
@@ -36,7 +36,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-24</time>
-          <span>问答与个性化</span>
+          <h3>问答与个性化</h3>
         </header>
         <ul>
           <li><a href="/docs/features#qa">问答</a>：侧栏新增独立入口，单视频 / 视频库 / 知识库三种范围独立保存会话并持续显示当前范围。</li>
@@ -53,7 +53,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-24</time>
-          <span>配置体验</span>
+          <h3>配置体验</h3>
         </header>
         <ul>
           <li><a href="/docs/config#base-url">AI 服务</a>：按能力说明地址填写规则并校验常见错误；支持逐能力真实探测（含 Embedding 维度校验）。</li>
@@ -65,7 +65,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-23</time>
-          <span>向量维度兼容</span>
+          <h3>向量维度兼容</h3>
         </header>
         <ul>
           <li>向量列改为未定长并自动迁移旧列；索引与检索按模型和维度匹配，支持不同配置使用不同 Embedding 维度（如 1024）。</li>
@@ -75,7 +75,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-13</time>
-          <span>稳定性</span>
+          <h3>稳定性</h3>
         </header>
         <ul>
           <li>媒体播放统一走同源接口，修复部分环境下的播放鉴权问题。</li>
@@ -86,7 +86,7 @@ export default function DocsChangelogPage() {
       <section className="docs-log">
         <header>
           <time>2026-09-12</time>
-          <span>Agent 工作区与知识库问答</span>
+          <h3>Agent 工作区与知识库问答</h3>
         </header>
         <ul>
           <li>知识库跨视频 Agent 工作区：自主调用工具、流式展示执行过程，支持多轮追问与跨视频比较。</li>
@@ -96,6 +96,7 @@ export default function DocsChangelogPage() {
       </section>
 
       <div className="docs-callout info">
+        <b>记录范围</b>
         本日志面向使用者，记录功能与体验变化；底层重构、内部指标与文档整理等不影响使用的变更不逐一列出。
       </div>
     </article>

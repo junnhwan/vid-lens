@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
 import { DocsNav } from './DocsNav'
+import { DocsToc } from './DocsToc'
 import './docs.css'
 
 export const metadata: Metadata = {
@@ -31,7 +32,12 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
       </header>
       <div className="docs-body">
         <DocsNav />
-        <main className="docs-main">{children}</main>
+        <main className="docs-main">
+          <div className="docs-shell">
+            {children}
+            <DocsToc />
+          </div>
+        </main>
       </div>
     </div>
   )

@@ -1,11 +1,15 @@
-'use client'
-
-import { useEffect, useRef } from 'react'
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
-import { ProjectorStage } from '@/components/login/ProjectorStage'
+import { IntroMotion } from './IntroMotion'
+import { IntroStage } from './IntroStage'
 import './intro.css'
+
+export const metadata: Metadata = {
+  title: '映知 VidLens · 让视频成为可检索、可追问的知识库',
+  description: '自动转写语音、识别画面、建立语义索引；提问后每条引用都能跳回原画面核对。',
+}
 
 const FLOW = [
   { icon: 'upload', title: '上传或导入', desc: '本地文件分片上传、断点续传；也可粘贴视频链接导入。重复文件自动复用已有结果。' },
@@ -25,36 +29,11 @@ const CAPABILITIES = [
 ] as const
 
 export default function IntroPage() {
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-    // 尊重系统"减少动态效果":不启用隐藏-揭示,内容直接可读
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    if (!('IntersectionObserver' in window)) return
-    root.classList.add('anim')
-    const els = Array.from(root.querySelectorAll('.rv'))
-    const io = new IntersectionObserver(
-      entries => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            e.target.classList.add('in')
-            io.unobserve(e.target)
-          }
-        }
-      },
-      { root, threshold: 0.12 },
-    )
-    els.forEach(el => io.observe(el))
-    return () => io.disconnect()
-  }, [])
-
   return (
-    <div className="intro-root" ref={rootRef}>
+    <IntroMotion>
       <header className="intro-top">
         <Link href="/intro" className="intro-brand">
-          <BrandMark size={32} />
+          <BrandMark size={30} />
           <span>
             <b>映知</b>
             <i>VIDLENS</i>
@@ -72,15 +51,14 @@ export default function IntroPage() {
 
       <main>
         <section className="intro-hero">
-          <div className="intro-hero-copy">
+          <div className="intro-hero-copy rv">
             <p className="intro-kicker">观之以映 · 释之以知</p>
             <h1>
               让视频成为可检索、可追问、
               <em>可回放验证</em>的知识库
             </h1>
             <p className="intro-lead">
-              映知 VidLens
-              把你的视频变成可以对话的内容：自动转写语音、识别画面、建立语义索引；随后直接提问，或让
+              映知 VidLens 把你的视频变成可以对话的内容：自动转写语音、识别画面、建立语义索引；随后直接提问，或让
               Agent 跨视频检索比较——每个结论都能沿着引用跳回原画面核对。
             </p>
             <div className="intro-actions">
@@ -93,8 +71,8 @@ export default function IntroPage() {
               </Link>
             </div>
           </div>
-          <div className="intro-hero-stage">
-            <ProjectorStage />
+          <div className="intro-hero-stage rv">
+            <IntroStage />
           </div>
         </section>
 
@@ -109,7 +87,7 @@ export default function IntroPage() {
           <h2 className="intro-h2">典型使用流程</h2>
           <ol className="intro-flow">
             {FLOW.map((s, i) => (
-              <li key={s.title} className="rv" style={{ '--d': `${i * 0.08}s` } as React.CSSProperties}>
+              <li key={s.title} className="rv-item">
                 <span className="intro-flow-no mono">{String(i + 1).padStart(2, '0')}</span>
                 <span className="intro-flow-icon">
                   <Icon name={s.icon} />
@@ -127,8 +105,8 @@ export default function IntroPage() {
         <section className="intro-sec rv">
           <h2 className="intro-h2">核心能力</h2>
           <div className="intro-grid">
-            {CAPABILITIES.map((c, i) => (
-              <article key={c.title} className="intro-card rv" style={{ '--d': `${(i % 3) * 0.07}s` } as React.CSSProperties}>
+            {CAPABILITIES.map(c => (
+              <article key={c.title} className="intro-card rv-item">
                 <span className="intro-card-icon">
                   <Icon name={c.icon} />
                 </span>
@@ -165,6 +143,6 @@ export default function IntroPage() {
           <Link href="/docs/changelog">更新日志</Link>
         </span>
       </footer>
-    </div>
+    </IntroMotion>
   )
 }
