@@ -53,6 +53,10 @@
   --r-card: 14px;
   --r-lg: 18px;
 
+  /* 卡片规格: 独立卡内边距 / 网格单卡最小宽 */
+  --pad-card: 16px;
+  --grid-card: 280px;
+
   --font-ui: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-read: "Noto Serif SC", "Songti SC", "Noto Serif CJK SC", serif;
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas,
@@ -442,13 +446,14 @@ select.input { cursor: pointer; }
 .suggest:hover { border-color: var(--acc-line); color: var(--acc-strong); background: var(--acc-dim); }
 
 /* 视频卡 */
-.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 14px; }
+.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--grid-card), 1fr)); gap: 14px; }
 .vcard {
   border-radius: var(--r-card); overflow: hidden; cursor: pointer;
   background: var(--bg-1); border: 1px solid var(--line);
-  transition: transform 0.22s var(--ease), border-color 0.22s var(--ease), box-shadow 0.22s var(--ease);
+  transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
-.vcard:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: var(--shadow-1); }
+/* hover 语言: 纵向卡=抬升+阴影；横向行=换底色，不位移 */
+.vcard:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--shadow-1); }
 .vthumb { position: relative; aspect-ratio: 16/9; background: var(--bg-3); overflow: hidden; }
 .vthumb img, .vthumb .vthumb-art { width: 100%; height: 100%; object-fit: cover; display: block; }
 .vthumb-art { background: linear-gradient(140deg, #2e2a22, #1c1914 60%, #26211a); }
@@ -460,7 +465,8 @@ select.input { cursor: pointer; }
   color: var(--on-veil); letter-spacing: 0.03em;
 }
 .vthumb .vstate { position: absolute; left: 8px; top: 8px; z-index: 2; }
-.vmeta { padding: 11px 13px 13px; }
+/* 封面下卡体: 嵌套在半密度 */
+.vmeta { padding: calc(var(--pad-card) * 0.75); }
 .vmeta h4 { font-size: 14.5px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .vmeta .vsub { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 12.5px; color: var(--tx-3); }
 .vmeta .vsub .dot { flex: none; }
@@ -926,10 +932,10 @@ select.input { cursor: pointer; }
   display: flex; gap: 12px; padding: 11px 13px;
   border: 1px solid var(--line); border-radius: 12px;
   background: var(--bg-1); cursor: pointer;
-  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), transform 0.18s var(--ease);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
   animation: rise-in 0.4s var(--ease) backwards;
 }
-.cite-card:hover { border-color: var(--acc-line); background: var(--bg-2); transform: translateX(2px); }
+.cite-card:hover { border-color: var(--acc-line); background: var(--bg-2); }
 @keyframes rise-in { from { transform: translateY(8px); } }
 .cite-card .cno {
   width: 24px; height: 24px; border-radius: 7px; flex: none;
@@ -1015,9 +1021,9 @@ select.input { cursor: pointer; }
   border: 1px solid var(--line); border-radius: 12px; background: var(--bg-1);
   font-size: 13px; color: var(--tx-2); cursor: pointer;
   display: flex; align-items: center; gap: 11px;
-  transition: all 0.18s var(--ease);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease), color 0.18s var(--ease);
 }
-.suggest-card:hover { border-color: var(--acc-line); color: var(--tx-1); background: var(--bg-2); transform: translateX(3px); }
+.suggest-card:hover { border-color: var(--acc-line); color: var(--tx-1); background: var(--bg-2); }
 .suggest-card .ic { color: var(--acc-strong); width: 15px; height: 15px; }
 
 /* ============================================================
@@ -1150,13 +1156,14 @@ select.input { cursor: pointer; }
 /* ============================================================
    知识库
    ============================================================ */
-.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.kb-card { border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-1); padding: 17px 18px; cursor: pointer; transition: all 0.2s var(--ease); }
+.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--grid-card), 1fr)); gap: 14px; }
+.kb-card { border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-1); padding: var(--pad-card); cursor: pointer; transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); }
 .kb-card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-1); }
 .kb-card .kb-top { display: flex; align-items: center; gap: 10px; }
+.kb-card .kb-top > div { min-width: 0; }
 .kb-icon { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; flex: none; border: 1px solid var(--line-strong); }
-.kb-card h4 { font-size: 14px; font-weight: 600; }
-.kb-card .kb-sub { font-size: 11.5px; color: var(--tx-3); margin-top: 1px; }
+.kb-card h4 { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-card .kb-sub { font-size: 11.5px; color: var(--tx-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb-card .kb-desc { font-size: 12px; color: var(--tx-2); margin-top: 11px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; }
 .kb-card .kb-foot { display: flex; align-items: center; gap: 7px; margin-top: 13px; }
 
@@ -1166,7 +1173,7 @@ select.input { cursor: pointer; }
 .kb-detail-desc { font-size: 13.5px; color: var(--tx-2); line-height: 1.6; margin: 0 0 6px; }
 .kb-detail-meta { font-size: 12.5px; color: var(--tx-3); margin: 0; }
 
-.kb-member-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; cursor: pointer; transition: background 0.15s; }
+.kb-member-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; cursor: pointer; transition: background 0.18s var(--ease); }
 .kb-member-row:hover { background: var(--bg-2); }
 .kb-member-row .vt { width: 58px; height: 34px; border-radius: 7px; overflow: hidden; flex: none; background: var(--bg-3); }
 .kb-member-row .nm { flex: 1; min-width: 0; }
@@ -1203,7 +1210,7 @@ select.input { cursor: pointer; }
 .settings-nav button:hover { color: var(--tx-1); background: var(--bg-2); }
 .settings-nav button.on { background: var(--acc-dim); color: var(--acc-strong); font-weight: 600; }
 
-.profile-card { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); }
+.profile-card { display: flex; align-items: flex-start; gap: 14px; padding: var(--pad-card); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); }
 .profile-card > .btn { flex: none; margin-top: 2px; }
 .profile-icon { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; border: 1px solid var(--line-strong); background: var(--bg-2); color: var(--tx-2); margin-top: 2px; }
 .profile-card .pc-body { flex: 1; min-width: 0; }
@@ -1240,7 +1247,7 @@ select.input { cursor: pointer; }
 .theme-swatch-dark .theme-swatch-bar, .theme-swatch-dark .theme-swatch-line { background: #e2a84b; }
 .theme-swatch-light .theme-swatch-bar, .theme-swatch-light .theme-swatch-line { background: #c4841f; }
 
-.memory-item { display: flex; gap: 12px; padding: 13px 15px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); align-items: flex-start; }
+.memory-item { display: flex; gap: 12px; padding: var(--pad-card); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); align-items: flex-start; }
 .memory-item + .memory-item { margin-top: 10px; }
 .memory-item .mi-body { flex: 1; min-width: 0; }
 .memory-item .mi-text { font-size: 13px; color: var(--tx-1); line-height: 1.6; }
@@ -1255,7 +1262,7 @@ button.switch { padding: 0; cursor: pointer; }
 .switch.on { background: var(--acc); border-color: var(--acc); }
 .switch.on::after { left: 17.5px; background: var(--acc-ink); }
 
-.pref-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); }
+.pref-row { display: flex; align-items: center; gap: 14px; padding: var(--pad-card); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-1); }
 .pref-row + .pref-row { margin-top: 10px; }
 .pref-row .pr-body { flex: 1; }
 .pref-row .pr-body b { font-size: 13px; font-weight: 600; display: block; }
@@ -1394,4 +1401,6 @@ button.switch { padding: 0; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .content { scroll-behavior: auto; }
+  /* 纵向卡 hover 不位移，只保留描边/阴影反馈 */
+  .vcard:hover, .kb-card:hover { transform: none; }
 }
