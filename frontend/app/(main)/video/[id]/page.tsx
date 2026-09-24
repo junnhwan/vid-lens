@@ -16,6 +16,7 @@ import { formatTime } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
+import { VideoQuestionsPanel } from '@/components/chat/VideoQuestionsPanel'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
@@ -742,6 +743,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               <Icon name="message" size="sm" />进入问答
             </button>
           </div>
+          <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
           {((!task.has_summary && task.has_transcription && processing) || (!task.has_summary && task.summary_progress)) && (
             <div className="ws-action-status">
               {!task.has_summary && task.has_transcription && processing && (

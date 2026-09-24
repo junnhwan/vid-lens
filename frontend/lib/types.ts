@@ -261,7 +261,9 @@ export interface RAGIndexResult {
 }
 
 // ============ Chat ============
-export type ChatScopeType = 'video' | 'knowledge_base'
+export type ChatScopeType = 'video' | 'video_library' | 'knowledge_base'
+export interface VideoQuestion { question: string; source: string; excerpt: string; time_ms?: number }
+export interface VideoQuestionResult { status: 'ready' | 'waiting_transcription' | 'no_evidence'; message: string; questions: VideoQuestion[]; content_version?: string }
 export type ChatMode = 'chat'
 /** 单视频聊天页专用：ChatMode 之外另有 agent SSE 与两个非流式实验模式 */
 export type VideoChatMode = 'chat' | 'agent'

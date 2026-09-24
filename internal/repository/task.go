@@ -63,6 +63,15 @@ func (r *TaskRepository) ListByIDsForUser(userID int64, taskIDs []int64) ([]mode
 	return tasks, err
 }
 
+func (r *TaskRepository) ListIndexedTaskIDsForUser(userID int64, embeddingModel string) ([]int64, error) {
+	var ids []int64
+	err := r.db.Table("video_rag_indexes AS ri").
+		Joins("JOIN video_tasks AS vt ON vt.id = ri.task_id AND vt.user_id = ri.user_id AND vt.deleted_at IS NULL").
+		Where("ri.user_id = ? AND ri.embedding_model = ? AND ri.status = ?", userID, embeddingModel, model.RAGIndexStatusIndexed).
+		Order("ri.task_id").Pluck("ri.task_id", &ids).Error
+	return ids, err
+}
+
 // FindByIDWithDetail 查找任务并预加载关联的转录和总结
 func (r *TaskRepository) FindByIDWithDetail(id int64) (*model.VideoTask, error) {
 	var task model.VideoTask

@@ -140,8 +140,8 @@ export default function DashboardPage() {
       <div className="card" style={{ padding: 8 }}>
         {sessions.length > 0 ? sessions.slice(0, 8).map(s => {
           const isKb = s.knowledge_base_id > 0
-          const where = isKb ? '知识库会话' : taskTitleById(s.task_id) || '单视频会话'
-          const href = isKb ? `/chat/kb/${s.knowledge_base_id}?session=${s.id}` : `/chat/v/${s.task_id}?session=${s.id}`
+          const where = s.scope_type === 'video_library' ? '视频库会话' : isKb ? '知识库会话' : taskTitleById(s.task_id) || '单视频会话'
+          const href = s.scope_type === 'video_library' ? `/chat/library?session=${s.id}` : isKb ? `/chat/kb/${s.knowledge_base_id}?session=${s.id}` : `/chat/v/${s.task_id}?session=${s.id}`
           return (
             <div key={s.id} className="session-row" onClick={() => router.push(href)}>
               <Icon name="message" />

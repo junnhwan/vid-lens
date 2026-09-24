@@ -115,6 +115,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestTranscribe)
 				media.GET("/task/:id/rag-index", handlers.rag.GetTaskIndexStatus)
 				media.POST("/task/:id/rag-index", middleware.RateLimit(rateLimiter), handlers.rag.BuildTaskIndex)
+				media.GET("/task/:id/questions", handlers.media.VideoQuestions)
 				media.GET("/task/:id/timeline", handlers.media.GetTimeline)
 				media.GET("/task/:id/playback", handlers.media.GetPlaybackURL)
 				media.GET("/download-audio/:id", handlers.media.DownloadAudio)

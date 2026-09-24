@@ -24,7 +24,8 @@ import { replayLink } from '@/lib/knowledge'
 import knowledgeStyles from '@/components/knowledge/KnowledgeWorkspace.module.css'
 import type { KnowledgeBase } from '@/lib/types'
 import { fmtRelTime } from '@/lib/format'
-import type { Citation, ChatScopeType, VideoChatMode } from '@/lib/types'
+import { formatDuration } from '@/lib/duration'
+import type { Citation, ChatScopeType, VideoChatMode, VideoQuestionResult } from '@/lib/types'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
 // Agent steps come from live tool events; Chat progress remains inferred.
@@ -57,6 +58,8 @@ interface ChatWorkspaceProps {
   /** 签名 URL 过期时重取(约 5 分钟有效期),返回新 URL 或 null */
   refreshPlaybackUrl?: () => Promise<string | null>
   suggestions: string[]
+  videoQuestions?: VideoQuestionResult | null
+  refreshQuestions?: () => void
 }
 
 // 自定义引用映射:在默认字段之上补 evidence_id / source_mapping_status,供证据抽屉展示。
@@ -91,11 +94,7 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-function formatDuration(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
-}
-
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, refreshQuestions }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const router = useRouter()
   const toast = useToast()
@@ -103,32 +102,32 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const scrollRef = useRef<HTMLDivElement>(null)
   const followOutputRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const startedAtRef = useRef(0)
+  const questionRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const autoAsked = useRef(false)
 
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
   const [railOpen, setRailOpen] = useState(false)
-  const [elapsed, setElapsed] = useState<string | null>(null)
+  const [activeQuestion, setActiveQuestion] = useState(0)
+  const [questionsOpen, setQuestionsOpen] = useState(false)
   const [askTall, setAskTall] = useState(false)
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const historyRef = useRef<HTMLDivElement>(null)
 
   const {
-    session, sessions, messages, ragTrace, agentTrace, streaming, send, stop, newSession, switchSession, loadSessions,
+    session, sessions, messages, ragTrace, agentTrace, streaming, sessionReady, send, stop, newSession, switchSession, loadSessions,
   } = useConversationSession({
     scopeType,
     targetId,
-    basePath: isVideo ? `/chat/v/${targetId}` : `/chat/kb/${targetId}`,
+    basePath: isVideo ? `/chat/v/${targetId}` : scopeType === 'video_library' ? '/chat/library' : `/chat/kb/${targetId}`,
     mode,
     topK: TOP_K,
     mapCitations,
     onBeforeSend: () => {
       followOutputRef.current = true
-      startedAtRef.current = performance.now()
-      setElapsed(null)
       setRailTab('run')
     },
   })
@@ -142,12 +141,23 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (el && followOutputRef.current && messages.length > 0) el.scrollTop = el.scrollHeight
   }, [messages])
 
+  const questions = useMemo(() => messages.map((message, index) => ({ message, index })).filter(item => item.message.role === 'user'), [messages])
   useEffect(() => {
-    if (!streaming && startedAtRef.current > 0) {
-      setElapsed(((performance.now() - startedAtRef.current) / 1000).toFixed(1))
-      startedAtRef.current = 0
+    const root = scrollRef.current
+    if (!root || !questions.length) { setActiveQuestion(0); return }
+    const update = () => {
+      const top = root.getBoundingClientRect().top + 90
+      let current = questions[0].index
+      for (const item of questions) {
+        const node = questionRefs.current[item.index]
+        if (node && node.getBoundingClientRect().top <= top) current = item.index
+      }
+      setActiveQuestion(current)
     }
-  }, [streaming])
+    update()
+    root.addEventListener('scroll', update, { passive: true })
+    return () => root.removeEventListener('scroll', update)
+  }, [questions, session?.id])
 
   const syncAsk = (el: HTMLTextAreaElement | null) => {
     if (!el) return
@@ -191,6 +201,17 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     void send(q)
   }, [input, streaming, send, toast])
 
+  useEffect(() => {
+    if (!sessionReady || autoAsked.current || !isVideo) return
+    const url = new URL(window.location.href)
+    const question = url.searchParams.get('ask')?.trim()
+    if (!question) return
+    autoAsked.current = true
+    url.searchParams.delete('ask')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`)
+    submit(question)
+  }, [sessionReady, isVideo, submit])
+
   const openEvidence = useCallback((cite: CiteRef, cites: CiteRef[]) => {
     setDrawerCite({ cite, cites })
   }, [])
@@ -221,48 +242,18 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     return null
   }, [agentTrace, streaming, lastAssistant])
 
-  const agentBlocked = !streaming && !!lastAssistant?.agentRun && !!lastAssistant.degraded
-
-  const statusLine = (() => {
-    if (streaming) {
-      const generating = lastMessage?.role === 'assistant' && lastMessage.content.length > 0
-
-      return (
-        <>
-          <span className="pulse" />
-          <span>{generating ? '正在生成回答…' : mode === 'agent' ? '正在分析视频…' : '检索中,稍等…'}</span>
-          <button className="meta-link stop" onClick={stop}>停止</button>
-        </>
-      )
-    }
-    if (lastMessage?.role === 'assistant' && lastMessage.error) {
-      return (
-        <span style={{ color: 'var(--bad)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="alert" size="sm" />{lastMessage.error}
-        </span>
-      )
-    }
-    if (agentBlocked) {
-      return (
-        <span style={{ color: 'var(--warn)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="shield" size="sm" />本轮仅提供有限信息
-        </span>
-      )
-    }
-    if (elapsed) {
-      return (
-        <span style={{ color: 'var(--ok)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="check" size="sm" />已完成 · {elapsed}s
-        </span>
-      )
-    }
-    return null
-  })()
-
-
   return (
     <div className="chat-wrap">
+      <nav className={`question-nav${questionsOpen ? ' open' : ''}`} aria-label="历史问题导航">
+        <div className="question-nav-head"><b>本次问题</b><span>{questions.length}</span><button type="button" className="question-nav-close" onClick={() => setQuestionsOpen(false)} aria-label="关闭问题目录">关闭</button></div>
+        {questions.length ? questions.map(({ message, index }, position) => <button key={`${session?.id ?? 'new'}-${message.messageId ?? index}`} type="button" className={activeQuestion === index ? 'active' : ''} aria-current={activeQuestion === index ? 'location' : undefined} onClick={() => {
+          questionRefs.current[index]?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+          setActiveQuestion(index)
+          setQuestionsOpen(false)
+        }}><span>{position + 1}</span><span>{clipText(message.content, 70)}</span></button>) : <p>提问后，这里会列出问题。</p>}
+      </nav>
       <div className="chat-col">
+        <div className="chat-scope-bar"><b>{scopeType === 'video' ? '单视频问答' : scopeType === 'video_library' ? '视频库问答' : '知识库问答'}</b><span>{scopeName}</span><button type="button" onClick={() => setQuestionsOpen(v => !v)} aria-expanded={questionsOpen}>问题目录 · {questions.length}</button></div>
         {knowledgeBase && <KnowledgeSources kb={knowledgeBase} hitIds={new Set([...(lastAssistant?.cites || []).map(c=>c.taskId || 0), ...agentTrace.steps.flatMap(s=>(s.hitRows || []).map(h=>h.task_id || 0))])} />}
         <div className="chat-scroll" ref={scrollRef} onScroll={event => {
           const el = event.currentTarget
@@ -273,14 +264,15 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               <div className="chat-empty">
                 <div className="hello">
                   <BrandMark size={40} />
-                  <h2>{isVideo ? '问这段视频' : `问「${scopeName}」`}</h2>
+                  <h2>{isVideo ? '问这段视频' : scopeType === 'video_library' ? '问整个视频库' : `问「${scopeName}」`}</h2>
                 </div>
-                {!isVideo && <><p className={knowledgeStyles.intro}>把分散的视频连成可追溯的知识。比较观点、追踪主题，让每一个发现都有出处。</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
+                {!isVideo && <><p className={knowledgeStyles.intro}>{scopeType === 'video_library' ? '仅检索你的视频库中已用当前向量模型建好索引的视频。' : '仅检索当前知识库的成员视频。'}</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);if(scopeType !== 'video_library')setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
+                {isVideo && <div className="video-question-intro"><p>{videoQuestions?.message || '正在读取视频内容推荐问题…'} {refreshQuestions && <button type="button" className="question-refresh" onClick={refreshQuestions}>刷新</button>}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${Math.floor(item.time_ms / 60000)}:${String(Math.floor(item.time_ms / 1000) % 60).padStart(2, '0')}` : ''}</small></span></button>)}</div>}
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
                 ? (
-                  <div key={i} className="msg msg-user">
+                  <div key={i} className="msg msg-user" ref={node => { questionRefs.current[i] = node }}>
                     <div className="bubble">{msg.content}</div>
                   </div>
                 )
@@ -293,6 +285,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     onOpenEvidence={openEvidence}
                     canJump={citationJumpable}
                     onJump={jumpToCitation}
+                    onStop={stop}
                   />
                 )
               )
@@ -311,7 +304,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               >
                 <Icon name="bolt" size="sm" />Chat
               </button>
-              <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? 'Agent' : '跨视频研究'}</button>
+              {scopeType !== 'video_library' && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? 'Agent' : '跨视频研究'}</button>}
             </div>
             <div className="composer-tools" ref={historyRef}>
               <button
@@ -371,7 +364,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               </button>
             </div>
             </div>
-            <p className="mode-note">{MODE_NOTE[mode]}</p>
+            <p className="mode-note">{scopeType === 'video_library' ? '范围：整个视频库中已建立索引的视频' : scopeType === 'knowledge_base' ? `范围：知识库「${scopeName}」的成员视频` : MODE_NOTE[mode]}</p>
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
@@ -379,18 +372,15 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
-                placeholder={isVideo ? '问这段视频…' : '向知识库提问…'}
+                placeholder={isVideo ? '问这段视频…' : scopeType === 'video_library' ? '向视频库提问…' : '向知识库提问…'}
               />
               <button className="ask-send" disabled={streaming} onClick={() => submit()} aria-label="发送">
                 <Icon name="send" />
               </button>
             </div>
-            <div className="chat-status">{statusLine}</div>
-            {isVideo && <div className="suggest-row" style={{ marginTop: 2 }}>
-              {suggestions.map(s => (
-                <button key={s} className="suggest" disabled={streaming} onClick={() => submit(s)}>{s}</button>
-              ))}
-            </div>}
+            {isVideo && videoQuestions?.questions.length ? <div className="suggest-row" style={{ marginTop: 2 }}>
+              {videoQuestions.questions.map(item => <button key={item.question} className="suggest" disabled={streaming} onClick={() => submit(item.question)}>{item.question}</button>)}
+            </div> : null}
           </div>
         </div>
       </div>
@@ -502,7 +492,7 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, sessionId, fallbackTitle, onOpenEvidence, canJump, onJump,
+  msg, sessionId, fallbackTitle, onOpenEvidence, canJump, onJump, onStop,
 }: {
   sessionId?: number
   msg: ChatMsg
@@ -510,6 +500,7 @@ function AgentMessageView({
   onOpenEvidence: (cite: CiteRef, cites: CiteRef[]) => void
   canJump: (cite: CiteRef) => boolean
   onJump: (cite: CiteRef) => void
+  onStop: () => void
 }) {
   const toast = useToast()
   const cites = msg.cites || []
@@ -622,6 +613,7 @@ function AgentMessageView({
         </button>
       </div>
       {sessionId && msg.messageId && !msg.streaming && <AnswerFeedback key={`${sessionId}:${msg.messageId}`} sessionId={sessionId} messageId={msg.messageId} />}
+      <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…'}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{msg.processStartedAt && msg.processFinishedAt ? ` · 用时 ${formatDuration(msg.processFinishedAt - msg.processStartedAt)}` : ''}{msg.createdAt ? ` · ${new Date(msg.createdAt).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}</>}</div>
     </div>
   )
 }
@@ -682,7 +674,7 @@ function AgentTraceStepView({ step }: { step: ChatTraceStep }) {
           <div className="tool-card">
             <div className="tool-head">
               <span className="tool-name mono">{step.tool}</span>
-              {durationMs && <span className="tool-ms">{durationMs}ms</span>}
+              {durationMs && <span className="tool-ms">{formatDuration(durationMs)}</span>}
             </div>
             {(step.toolOutput || step.toolInput) && (
               <div className="tool-out">{clipText(step.toolOutput || step.toolInput, 200)}</div>

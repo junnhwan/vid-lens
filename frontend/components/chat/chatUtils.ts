@@ -42,7 +42,7 @@ export function parseMessages(
   msgs: ChatMessage[],
   memberColor?: (taskId: number) => string,
 ): ChatMsg[] {
-  return msgs.map(m => {
+  return msgs.map((m, index) => {
     const cites = m.role === 'assistant' ? citesFromSnapshot(m.retrieval_snapshot, memberColor) : undefined
     const snapshotTrace = m.role === 'assistant' ? parseSnapshotTrace(m.retrieval_snapshot) : undefined
     const trace = m.role === 'assistant'
@@ -54,6 +54,10 @@ export function parseMessages(
       role: m.role as 'user' | 'assistant',
       content: m.content,
       createdAt: Date.parse(m.created_at),
+      ...(m.role === 'assistant' && msgs[index - 1]?.role === 'user' ? {
+        processStartedAt: Date.parse(msgs[index - 1].created_at),
+        processFinishedAt: Date.parse(m.created_at),
+      } : {}),
       ...(snapshotTrace?.degraded ? { degraded: true } : {}),
       ...(snapshotTrace?.degradationReason ? { degradationReason: snapshotTrace.degradationReason } : {}),
       ...(snapshotTrace?.diagnosticId ? { diagnosticId: snapshotTrace.diagnosticId } : {}),

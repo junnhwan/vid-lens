@@ -3,7 +3,7 @@
 
 export type MdBlock =
   | { type: 'p'; text: string }
-  | { type: 'h'; level: 1 | 2 | 3; text: string }
+  | { type: 'h'; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
   | { type: 'ul'; items: string[] }
   | { type: 'ol'; items: string[] }
   | { type: 'pre'; lang: string; code: string }
@@ -18,13 +18,13 @@ export type InlineNode =
 
 const FENCE_OPEN = /^```([\w+-]*)\s*$/
 const FENCE_CLOSE = /^```\s*$/
-const HEADING = /^(#{1,3})\s+(.+)$/
+const HEADING = /^(#{1,6})\s+(.+)$/
 const UL = /^[-*]\s+(.+)$/
 const OL = /^\d+[.)]\s+(.+)$/
 const QUOTE = /^>\s?(.*)$/
-const SPECIAL_START = /^(#{1,3}\s|```|[-*]\s|\d+[.)]\s|>)/
+const SPECIAL_START = /^(#{1,6}\s|```|[-*]\s|\d+[.)]\s|>)/
 const MD_LANG = /^(markdown|md)$/i
-const LOOKS_LIKE_MD = /^(#{1,3}\s|[-*]\s|\d+[.)]\s)/m
+const LOOKS_LIKE_MD = /^(#{1,6}\s|[-*]\s|\d+[.)]\s)/m
 
 /** 模型有时把整篇摘要包进 ```markdown 围栏。整篇只有这一层时拆掉再解析。 */
 export function unwrapMarkdownFence(src: string): string {
@@ -75,7 +75,7 @@ export function parseMarkdown(src: string): MdBlock[] {
     }
     const h = line.match(HEADING)
     if (h) {
-      blocks.push({ type: 'h', level: h[1].length as 1 | 2 | 3, text: h[2] })
+      blocks.push({ type: 'h', level: h[1].length as 1 | 2 | 3 | 4 | 5 | 6, text: h[2] })
       i += 1
       continue
     }

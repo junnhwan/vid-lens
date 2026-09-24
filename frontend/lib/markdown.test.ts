@@ -11,6 +11,12 @@ describe('parseMarkdown', () => {
     assert.equal(blocks[3].type, 'ol')
   })
 
+  it('recognizes deep headings and a wrapping unfinished markdown fence', () => {
+    const blocks = parseMarkdown('```markdown\n#### 重点\n\n正文')
+    assert.equal(blocks[0].type, 'h')
+    if (blocks[0].type === 'h') assert.equal(blocks[0].level, 4)
+  })
+
   it('captures fenced code including unclosed stream', () => {
     const closed = parseMarkdown('前文\n```ts\nconst x = 1\n```\n后')
     assert.equal(closed[1].type, 'pre')

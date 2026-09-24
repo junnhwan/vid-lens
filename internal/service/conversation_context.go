@@ -12,7 +12,7 @@ import (
 // checked together. User messages are kept only with their safe answer so an
 // orphan request cannot smuggle a removed video's discussion into the prompt.
 func (s *ChatService) loadScopeSafeRecentMessages(ctx context.Context, userID int64, session *model.ChatSession, frozenMembers []int64, limit int) ([]model.ChatMessage, error) {
-	if session.ScopeType != model.ChatScopeKnowledgeBase {
+	if session.ScopeType != model.ChatScopeKnowledgeBase && session.ScopeType != model.ChatScopeVideoLibrary {
 		return s.loadRecentMessages(ctx, userID, session.ID, limit)
 	}
 	if limit <= 0 || len(frozenMembers) == 0 {
@@ -22,9 +22,13 @@ func (s *ChatService) loadScopeSafeRecentMessages(ctx context.Context, userID in
 		limit = 6
 	}
 	limit -= limit % 2
-	current, err := s.repos.KnowledgeBase.ListMemberTaskIDsForUser(userID, session.KnowledgeBaseID)
-	if err != nil {
-		return nil, err
+	current := frozenMembers
+	if session.ScopeType == model.ChatScopeKnowledgeBase {
+		var err error
+		current, err = s.repos.KnowledgeBase.ListMemberTaskIDsForUser(userID, session.KnowledgeBaseID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	allowed := map[int64]bool{}
 	for _, taskID := range current {

@@ -26,7 +26,7 @@ func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, user
 		return nil, fmt.Errorf("无权访问此会话")
 	}
 	// KnowledgeBase 会话强制走 RAG（跨视频检索，集合 scope），与 strict_rag 同路径。
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
+	if session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary {
 		return s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 	}
 	return s.prepareVideoAssistantChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
@@ -62,7 +62,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	if err != nil {
 		return nil, err
 	}
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
+	if session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary {
 		recentLimit = 0
 	} // KB never publishes provenance-free Redis history.
 
@@ -112,10 +112,10 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 
 	messages := buildRAGMessages(contexts, recent, question)
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
+	if session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary {
 		messages = append([]ai.ChatMessage{{Role: "system", Content: evidenceCoveragePrompt(taskIDs, retrieval.Citations)}}, messages...)
 	}
-	if session.ScopeType != model.ChatScopeKnowledgeBase {
+	if session.ScopeType != model.ChatScopeKnowledgeBase && session.ScopeType != model.ChatScopeVideoLibrary {
 		contextText, contextErr := s.videoContextText(session.TaskID)
 		if contextErr != nil {
 			return nil, contextErr
@@ -293,6 +293,16 @@ func (s *ChatService) classifyIntent(ctx context.Context, question string, sessi
 }
 
 func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatSession, embeddingModel string) ([]int64, error) {
+	if session.ScopeType == model.ChatScopeVideoLibrary {
+		ids, err := s.repos.Task.ListIndexedTaskIDsForUser(userID, embeddingModel)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, fmt.Errorf("视频库还没有使用当前向量模型建立索引的视频")
+		}
+		return ids, nil
+	}
 	if session.ScopeType != model.ChatScopeKnowledgeBase {
 		if session.TaskID <= 0 {
 			return nil, fmt.Errorf("视频会话缺少 task_id")

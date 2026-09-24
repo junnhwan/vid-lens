@@ -54,6 +54,14 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateModels(db, AllModels()); err != nil {
 		return err
 	}
+	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec("ALTER TABLE chat_sessions DROP CONSTRAINT IF EXISTS chk_chat_sessions_scope").Error; err != nil {
+			return err
+		}
+		if err := db.Exec("ALTER TABLE chat_sessions ADD CONSTRAINT chk_chat_sessions_scope CHECK ((scope_type = 'video' AND task_id > 0 AND knowledge_base_id = 0) OR (scope_type = 'knowledge_base' AND task_id = 0 AND knowledge_base_id > 0) OR (scope_type = 'video_library' AND task_id = 0 AND knowledge_base_id = 0))").Error; err != nil {
+			return err
+		}
+	}
 	if err := normalizeChatSessionScope(db); err != nil {
 		return err
 	}

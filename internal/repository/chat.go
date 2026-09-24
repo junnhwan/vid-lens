@@ -117,6 +117,16 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 		}
 
 		switch observed.ScopeType {
+		case model.ChatScopeVideoLibrary:
+			if len(sourceTaskIDs) > 0 {
+				var tasks []model.VideoTask
+				if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("user_id = ? AND id IN ?", userID, sourceTaskIDs).Order("id ASC").Find(&tasks).Error; err != nil {
+					return err
+				}
+				if len(tasks) != len(sourceTaskIDs) {
+					return gorm.ErrRecordNotFound
+				}
+			}
 		case model.ChatScopeVideo:
 			var task model.VideoTask
 			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
@@ -266,6 +276,18 @@ func sameChatSessionScope(left, right *model.ChatSession) bool {
 
 func validateExchangeSources(db *gorm.DB, userID int64, session *model.ChatSession, sourceTaskIDs []int64) error {
 	switch session.ScopeType {
+	case model.ChatScopeVideoLibrary:
+		if len(sourceTaskIDs) == 0 {
+			return nil
+		}
+		var count int64
+		if err := db.Model(&model.VideoTask{}).Where("user_id = ? AND id IN ?", userID, sourceTaskIDs).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != int64(len(sourceTaskIDs)) {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	case model.ChatScopeVideo:
 		for _, taskID := range sourceTaskIDs {
 			if taskID != session.TaskID {
@@ -331,7 +353,7 @@ func validateMessageSourceForUser(db *gorm.DB, userID int64, source *model.ChatM
 		Joins("JOIN video_tasks AS vt ON vt.id = ? AND vt.deleted_at IS NULL", source.TaskID).
 		Where(
 			"cm.id = ? AND cm.user_id = ? AND cm.session_id = ? AND cs.id = ? AND cs.user_id = ? AND vt.user_id = ? AND "+
-				"((cs.scope_type = ? AND cs.task_id = ?) OR (cs.scope_type = ? AND EXISTS ("+
+				"((cs.scope_type = ? AND cs.task_id = ?) OR cs.scope_type = 'video_library' OR (cs.scope_type = ? AND EXISTS ("+
 				"SELECT 1 FROM knowledge_base_videos AS kbv "+
 				"JOIN knowledge_bases AS kb ON kb.id = kbv.knowledge_base_id "+
 				"WHERE kbv.knowledge_base_id = cs.knowledge_base_id AND kbv.task_id = ? AND kb.user_id = ?"+
@@ -443,7 +465,7 @@ func (r *ChatRepository) DeleteByTaskID(taskID int64) error {
 		if err := tx.Model(&model.ChatSession{}).
 			Distinct("chat_sessions.id").
 			Joins("LEFT JOIN chat_message_sources AS cms ON cms.session_id = chat_sessions.id").
-			Where("chat_sessions.task_id = ? OR (chat_sessions.scope_type = ? AND cms.task_id = ?)", taskID, model.ChatScopeKnowledgeBase, taskID).
+			Where("chat_sessions.task_id = ? OR (chat_sessions.scope_type IN ? AND cms.task_id = ?)", taskID, []string{model.ChatScopeKnowledgeBase, model.ChatScopeVideoLibrary}, taskID).
 			Pluck("chat_sessions.id", &sessionIDs).Error; err != nil {
 			return err
 		}

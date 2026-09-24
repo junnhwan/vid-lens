@@ -98,7 +98,7 @@ func (c *RuleIntentClassifier) scoreByRule(q string, session *model.ChatSession,
 
 	// KB scope 倾向：跨视频会话把 topic_compare/series_locate 提权（KB 下问
 	// 概览也是跨视频召回 = series_locate，不归 overview 关检索，与占位分类器一致）。
-	kbScope := session != nil && session.ScopeType == model.ChatScopeKnowledgeBase
+	kbScope := session != nil && (session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary)
 
 	scores := map[Intent]float64{
 		IntentVideoOverview:  c.videoOverviewScore(lq, sig, kbScope),

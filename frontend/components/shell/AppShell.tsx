@@ -44,8 +44,9 @@ const CrumbSetter = createContext<{ setCrumb: (items: CrumbItem[]) => void }>({ 
 
 const NAV = [
   { href: '/', label: '工作台', icon: 'home', match: (p: string) => p === '/' },
-  { href: '/library', label: '视频库', icon: 'video', match: (p: string) => p.startsWith('/library') || p.startsWith('/video') || p.startsWith('/chat/v') },
-  { href: '/kb', label: '知识库', icon: 'folder', match: (p: string) => p.startsWith('/kb') || p.startsWith('/chat/kb') },
+  { href: '/library', label: '视频库', icon: 'video', match: (p: string) => p.startsWith('/library') || p.startsWith('/video') },
+  { href: '/kb', label: '知识库', icon: 'folder', match: (p: string) => p.startsWith('/kb') },
+  { href: '/chat', label: '问答', icon: 'message', match: (p: string) => p.startsWith('/chat') },
 ] as const
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

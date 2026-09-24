@@ -52,6 +52,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
   const sessionFilter = useCallback(() => (
     scopeType === 'knowledge_base'
       ? { knowledge_base_id: targetId }
+      : scopeType === 'video_library' ? { scope_type: 'video_library' as ChatScopeType }
       : { task_id: targetId }
   ), [scopeType, targetId])
 
@@ -128,6 +129,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
   const createSession = useCallback(async () => {
     const created = await api.createSession(scopeType === 'knowledge_base'
       ? { knowledge_base_id: targetId, scope_type: 'knowledge_base' }
+      : scopeType === 'video_library' ? { scope_type: 'video_library' }
       : { task_id: targetId, scope_type: 'video' })
     setSession(created)
     replaceSessionInURL(created.id)

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { ChatMsg } from './chatUtils'
 import type { ChatTraceStep } from './traceTypes'
 import styles from './ThinkingProcess.module.css'
+import { formatDuration } from '@/lib/duration'
 
 const statusText = { pending: '等待', running: '进行中', done: '完成', error: '失败', cancelled: '已停止' }
 
@@ -22,7 +23,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   const open = expanded ?? live
   const active = steps.findLast(step => step.status === 'running')
   const duration = message.processStartedAt
-    ? Math.max(0, Math.floor(((message.processFinishedAt ?? now) - message.processStartedAt) / 1000))
+    ? Math.max(0, (message.processFinishedAt ?? now) - message.processStartedAt)
     : undefined
   const summary = live ? active?.label ?? '正在连接…' : ['pending', 'running'].includes(message.runStatus ?? '') ? '服务端仍在执行' : message.error ? '本轮未完成' : message.cancelled ? '已停止' : message.degraded ? '已结束 · 有限结果' : `已完成 ${steps.length} 个步骤`
   const attached = new Set(steps.map(step => step.kind === 'answer' ? 'answer' : step.id))
@@ -31,7 +32,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
       <button type="button" className={styles.toggle} aria-expanded={open} onClick={() => setExpanded(!open)}>
         <span className={`${styles.indicator} ${live ? styles.live : ''}`} aria-hidden="true" />
         <span className={styles.title}>思考与执行过程</span>
-        <span className={styles.summary}>{summary}{duration !== undefined ? ` · ${duration}秒` : ''}</span>
+        <span className={styles.summary}>{summary}{duration !== undefined ? ` · ${formatDuration(duration)}` : ''}</span>
         <span aria-hidden="true">{open ? '⌃' : '⌄'}</span>
       </button>
       {open && <div className={styles.body}>
@@ -52,7 +53,7 @@ function ProcessStep({ step, reasoning, now }: { step: ChatTraceStep; reasoning?
   return <li className={`${styles.step} ${styles[step.status]}`}>
     <span className={styles.dot} aria-hidden="true">{step.status === 'done' ? '✓' : step.status === 'error' ? '!' : step.status === 'cancelled' ? '−' : ''}</span>
     <div className={styles.stepContent}>
-      <div className={styles.stepHeading}><strong>{step.label}</strong><span>{statusText[step.status]}{duration !== undefined ? ` · ${(duration / 1000).toFixed(1)}秒` : ''}</span></div>
+      <div className={styles.stepHeading}><strong>{step.label}</strong><span>{statusText[step.status]}{duration !== undefined ? ` · ${formatDuration(duration)}` : ''}</span></div>
       {step.detail && <p className={styles.detail}>{step.detail}</p>}
       {step.replan && <span className={styles.badge}>调整检索策略</span>}
       {!!step.evidenceRefs?.length && <span className={styles.badge}>参考已有 {step.evidenceRefs.length} 条证据</span>}

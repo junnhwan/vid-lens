@@ -169,7 +169,7 @@ func classifyIntentPlaceholder(question string, session *model.ChatSession, mode
 	}
 	// 跨视频集合会话：问对比/系列定位。KB 会话的概览问法（"总结一下"）在 KB 下
 	// 仍应走跨视频检索（集合概览 = 跨视频召回），不归 overview 关检索。
-	if session != nil && session.ScopeType == model.ChatScopeKnowledgeBase {
+	if session != nil && (session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary) {
 		if isVideoOverviewQuestion(question) {
 			return IntentSeriesLocate
 		}
@@ -184,7 +184,7 @@ func classifyIntentPlaceholder(question string, session *model.ChatSession, mode
 
 // scopeOfSession 把 session.ScopeType 映射到 ExecutionPolicy.Scope 档。
 func scopeOfSession(session *model.ChatSession) Scope {
-	if session != nil && session.ScopeType == model.ChatScopeKnowledgeBase {
+	if session != nil && (session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary) {
 		return ScopeCollection
 	}
 	return ScopeVideo

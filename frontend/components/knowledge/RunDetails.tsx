@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { RunDetail, SessionMemoryPolicy } from '@/lib/knowledge'
 import styles from './KnowledgeWorkspace.module.css'
+import { formatDuration } from '@/lib/duration'
 
 const STATUS: Record<string, string> = { pending:'等待中', running:'进行中', completed:'已完成', failed:'失败', cancelled:'已取消', budget_exhausted:'预算已用完' }
 const REASONS: Record<string,string> = { answer_generated:'答案已生成', goal_satisfied:'研究已完成', budget_exhausted:'已达到本次研究预算', scope_changed:'知识库成员发生变化', request_cancelled:'请求已取消', execution_failed:'执行失败' }
@@ -23,13 +24,13 @@ export function RunDetails({ sessionId, runId, live }: { sessionId: number; runI
     {error ? <p className={styles.error}>{error}</p> : !data ? <p className={styles.note}>加载执行记录…</p> : <>
       <div className={styles.stats}>
         <div className={styles.stat}><small>执行状态</small><b style={{fontSize:16}}>{STATUS[data.status] || data.status}</b></div>
-        <div className={styles.stat}><small>累计步骤耗时</small><b>{(data.duration_ms / 1000).toFixed(1)}s</b></div>
+        <div className={styles.stat}><small>累计步骤耗时</small><b>{formatDuration(data.duration_ms)}</b></div>
         <div className={styles.stat}><small>工具调用 / 上限</small><b>{data.tools_used} / {data.tools_limit}</b></div>
         <div className={styles.stat}><small>模型 / 检索调用</small><b>{data.model_calls} / {data.retrieval_calls}</b></div>
       </div>
       <p className={styles.note}>{data.token_source === 'unknown' ? 'Token 用量暂不可用' : `输入 ${data.prompt_tokens.toLocaleString()} · 输出 ${data.completion_tokens.toLocaleString()} tokens（${data.token_source === 'actual' ? '实际用量' : data.token_source === 'mixed' ? '混合统计' : '估算'}）`}</p>
       {data.stop_reason && <p className={styles.note}>{REASONS[data.stop_reason] || data.stop_reason}</p>}
-      {data.steps.map(step=><div className={styles.step} key={step.id}><span>{step.label}</span><span>{step.status==='done' ? `${((step.duration_ms || 0)/1000).toFixed(1)}s` : step.status==='running' ? '进行中' : '未完成'}</span></div>)}
+      {data.steps.map(step=><div className={styles.step} key={step.id}><span>{step.label}</span><span>{step.status==='done' ? step.duration_ms == null ? '—' : formatDuration(step.duration_ms) : step.status==='running' ? '进行中' : '未完成'}</span></div>)}
     </>}
     <button className="btn btn-sm btn-ghost" onClick={()=>setRevision(v=>v+1)}>刷新记录</button>
   </details>

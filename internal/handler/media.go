@@ -20,6 +20,20 @@ type MediaHandler struct {
 	svc *service.MediaService
 }
 
+func (h *MediaHandler) VideoQuestions(c *gin.Context) {
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "视频 ID 错误")
+		return
+	}
+	result, err := h.svc.VideoQuestions(middleware.GetUserID(c), taskID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.OK(c, result)
+}
+
 func NewMediaHandler(svc *service.MediaService) *MediaHandler {
 	return &MediaHandler{svc: svc}
 }

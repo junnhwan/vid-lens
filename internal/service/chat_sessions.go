@@ -60,8 +60,13 @@ func (s *ChatService) CreateScopedSession(userID int64, req CreateChatSessionReq
 		}
 		session.KnowledgeBaseID = kb.ID
 		session.Title = ResolveChatSessionTitle(req.Title, kb.Name, "")
+	case model.ChatScopeVideoLibrary:
+		if req.TaskID != 0 || req.KnowledgeBaseID != 0 {
+			return nil, fmt.Errorf("video_library 会话不能指定视频或知识库")
+		}
+		session.Title = ResolveChatSessionTitle(req.Title, "视频库问答", "")
 	default:
-		return nil, fmt.Errorf("scope_type 必须为 video 或 knowledge_base")
+		return nil, fmt.Errorf("scope_type 必须为 video、video_library 或 knowledge_base")
 	}
 	if err := s.repos.Chat.CreateSession(session); err != nil {
 		return nil, err
@@ -123,6 +128,11 @@ func (s *ChatService) maybeAutoTitleSession(session *model.ChatSession, firstUse
 			return
 		}
 		session.Title = next
+	case model.ChatScopeVideoLibrary:
+		next, ok := AutoTitleChatSessionFromQuestion(session.Title, "视频库问答", "", firstUserQuestion)
+		if ok && s.repos.Chat.UpdateSessionTitle(session.ID, next) == nil {
+			session.Title = next
+		}
 	}
 }
 
@@ -132,8 +142,8 @@ func (s *ChatService) ListSessions(userID, taskID int64) ([]model.ChatSession, e
 
 func (s *ChatService) ListSessionsWithFilter(userID int64, filter ListChatSessionsFilter) ([]model.ChatSession, error) {
 	scopeType := strings.TrimSpace(strings.ToLower(filter.ScopeType))
-	if scopeType != "" && scopeType != model.ChatScopeVideo && scopeType != model.ChatScopeKnowledgeBase {
-		return nil, fmt.Errorf("scope_type 必须为 video 或 knowledge_base")
+	if scopeType != "" && scopeType != model.ChatScopeVideo && scopeType != model.ChatScopeKnowledgeBase && scopeType != model.ChatScopeVideoLibrary {
+		return nil, fmt.Errorf("scope_type 无效")
 	}
 	sessions, err := s.repos.Chat.ListSessionsFiltered(userID, filter.TaskID, filter.KnowledgeBaseID, scopeType)
 	if err != nil {

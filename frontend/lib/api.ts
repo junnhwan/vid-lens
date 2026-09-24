@@ -150,6 +150,7 @@ export const api = {
   analyze: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),
   getRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET'),
+  getVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'GET'),
   triggerRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'POST'),
   downloadAudio: (id: number) =>
     req<{ download_url: string; filename: string }>(`/media/download-audio/${id}`, 'GET'),
