@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/lock"
 	"vid-lens/internal/repository"
+	"vid-lens/internal/studyterms"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -250,9 +252,15 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
+	titleInput := truncateRunes(transcript, 1000)
+	if evidence, evidenceErr := c.titleTermEvidence(task.ID); evidenceErr == nil && (len(evidence.Candidates) > 0 || len(evidence.VisualObservations) > 0) {
+		titleInput = fmt.Sprintf("转写摘录：%s\n画面术语候选及原始来源（仅在明确同一实体且无冲突时采用；相似名称不可擅改）：%s", titleInput, artifact.JSON(evidence))
+	} else if evidenceErr != nil {
+		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title term evidence unavailable", slog.String("error", observability.SafeError(evidenceErr)))
+	}
 	title, chatErr := chatClient.Chat(ctx, []ai.ChatMessage{
-		{Role: "system", Content: ai.TitleSystemPrompt},
-		{Role: "user", Content: truncateRunes(transcript, 1000)},
+		{Role: "system", Content: ai.TitleSystemPrompt + studyterms.TitleGuidance},
+		{Role: "user", Content: titleInput},
 	})
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
@@ -265,8 +273,11 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 	if title == "" {
 		return nil
 	}
+	updated := false
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.Task.UpdateTitle(task.ID, title)
+		var e error
+		updated, e = repos.Task.SetGeneratedTitleIfBlank(task.ID, title)
+		return e
 	}); err != nil {
 		if errors.Is(err, ErrProcessingLeaseLost) {
 			return err
@@ -277,9 +288,48 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	task.Title = title
-	observability.Log(ctx, slog.Default(), slog.LevelInfo, "video title generated")
+	if updated {
+		task.Title = title
+		task.TitleOrigin = "auto"
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "video title generated")
+	}
 	return nil
+}
+
+func (c *Consumer) titleTermEvidence(taskID int64) (studyterms.StudyTermEvidence, error) {
+	var empty studyterms.StudyTermEvidence
+	if c.repo == nil || c.repo.VisualFrame == nil || c.repo.TranscriptionChunk == nil {
+		return empty, nil
+	}
+	chunks, err := c.repo.TranscriptionChunk.ListByTaskID(taskID)
+	if err != nil {
+		return empty, err
+	}
+	frames, err := c.repo.VisualFrame.ListByTaskID(taskID)
+	if err != nil {
+		return empty, err
+	}
+	items := make([]model.SourceSnapshotItem, 0, len(chunks)+len(frames)*2)
+	for _, chunk := range chunks {
+		if chunk.Status != model.TranscriptionChunkStatusCompleted || strings.TrimSpace(chunk.Content) == "" {
+			continue
+		}
+		start, end := chunk.WindowStartMS, chunk.WindowEndMS
+		items = append(items, model.SourceSnapshotItem{ID: fmt.Sprintf("asr:%d", chunk.ID), Modality: model.ChunkModalityTranscript, Content: chunk.Content, StartMS: &start, EndMS: &end})
+	}
+	for _, frame := range frames {
+		if frame.Status != model.VisualFrameStatusCompleted {
+			continue
+		}
+		start, end := frame.TimeMs, frame.TimeMs+1
+		if strings.TrimSpace(frame.OCRText) != "" {
+			items = append(items, model.SourceSnapshotItem{ID: fmt.Sprintf("ocr:%d", frame.ID), Modality: model.ChunkModalityVisualOCR, Content: frame.OCRText, StartMS: &start, EndMS: &end})
+		}
+		if strings.TrimSpace(frame.VisionCaption) != "" {
+			items = append(items, model.SourceSnapshotItem{ID: fmt.Sprintf("vision:%d", frame.ID), Modality: model.ChunkModalityVisualCaption, Content: frame.VisionCaption, StartMS: &start, EndMS: &end})
+		}
+	}
+	return studyterms.FocusEvidence(studyterms.DeriveStudyTermEvidence(items), 16, 12), nil
 }
 
 func truncateRunes(s string, n int) string {

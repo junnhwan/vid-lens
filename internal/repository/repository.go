@@ -18,6 +18,7 @@ type Repositories struct {
 	Transcription      *TranscriptionRepository
 	TranscriptionChunk *TranscriptionChunkRepository
 	VisualFrame        *VideoVisualFrameRepository
+	VisualProgress     *VideoVisualProgressRepository
 	VisualObservation  *VideoVisualObservationRepository
 	Summary            *SummaryRepository
 	SummaryPart        *SummaryPartRepository
@@ -49,6 +50,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Transcription:      NewTranscriptionRepository(db),
 		TranscriptionChunk: NewTranscriptionChunkRepository(db),
 		VisualFrame:        NewVideoVisualFrameRepository(db),
+		VisualProgress:     NewVideoVisualProgressRepository(db),
 		VisualObservation:  NewVideoVisualObservationRepository(db),
 		Summary:            NewSummaryRepository(db),
 		SummaryPart:        NewSummaryPartRepository(db),

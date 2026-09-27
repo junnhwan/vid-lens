@@ -464,6 +464,27 @@ func assertCleanupJobStatus(t *testing.T, repos *repository.Repositories, jobID 
 	}
 }
 
+func TestTaskCleanupRemovesVisualProgress(t *testing.T) {
+	repos, db := newMediaTestRepositoriesAndDB(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "dddddddddddddddddddddddddddddddd", Filename: "delete.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoVisualProgress{
+		TaskID: task.ID, AttemptToken: "old-worker", Status: model.VisualProgressFailed,
+		Phase: "extracting", StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteTaskOwnedRows(repos, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	progress, err := repos.VisualProgress.Find(task.ID)
+	if err != nil || progress != nil {
+		t.Fatalf("visual progress survived task cleanup: %+v, %v", progress, err)
+	}
+}
+
 func newMediaTestRepositoriesAndDB(t *testing.T) (*repository.Repositories, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})

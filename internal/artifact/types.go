@@ -13,7 +13,10 @@ import (
 	"unicode/utf8"
 )
 
-const Recipe = "study-v1"
+const (
+	RecipeV1 = "study-v1"
+	Recipe   = "study-v2"
+)
 
 type Error struct {
 	Code   string
@@ -41,6 +44,9 @@ type Block struct {
 	Content      string  `json:"content"`
 	ClaimOrigin  string  `json:"claim_origin"`
 	EvidenceRefs []Ref   `json:"evidence_refs"`
+	// SourceBlockIDs records the v2 global organization lineage. It is omitted
+	// from user-authored and legacy blocks.
+	SourceBlockIDs []string `json:"source_block_ids,omitempty"`
 }
 type Body struct {
 	SchemaVersion int      `json:"schema_version"`
@@ -102,6 +108,14 @@ func (b Body) Validate(allowed map[string]bool) error {
 	for _, n := range b.Blocks {
 		if n.BlockID == "" || len(n.BlockID) > 100 || depth[n.BlockID] > 0 || utf8.RuneCountInString(n.Title) > 200 || strings.TrimSpace(n.Title) == "" || utf8.RuneCountInString(n.Content) > 8000 || n.EvidenceRefs == nil || len(n.EvidenceRefs) > 100 {
 			return Err("invalid_request", 400)
+		}
+		if len(n.SourceBlockIDs) > 200 {
+			return Err("invalid_request", 400)
+		}
+		for _, id := range n.SourceBlockIDs {
+			if id == "" || len(id) > 100 {
+				return Err("invalid_request", 400)
+			}
 		}
 		if n.Type != "section" && n.Type != "concept" && n.Type != "example" && n.Type != "note" {
 			return Err("invalid_request", 400)

@@ -45,12 +45,14 @@ const (
 //  2. status 字段严格定义任务生命周期
 //  3. (status, created_at) 联合索引供调度器捞取积压任务
 type VideoTask struct {
-	ID              int64          `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID          int64          `gorm:"index;not null" json:"user_id"`
-	AssetID         *int64         `gorm:"index" json:"asset_id"`
-	FileMD5         string         `gorm:"type:char(32);index;not null" json:"file_md5"`
-	Filename        string         `gorm:"type:varchar(255);not null" json:"filename"`
-	Title           string         `gorm:"type:varchar(120);default:''" json:"title,omitempty"`
+	ID       int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID   int64  `gorm:"index;not null" json:"user_id"`
+	AssetID  *int64 `gorm:"index" json:"asset_id"`
+	FileMD5  string `gorm:"type:char(32);index;not null" json:"file_md5"`
+	Filename string `gorm:"type:varchar(255);not null" json:"filename"`
+	Title    string `gorm:"type:varchar(120);default:''" json:"title,omitempty"`
+	// Empty means a legacy title whose provenance is unknown. Never rewrite it automatically.
+	TitleOrigin     string         `gorm:"type:varchar(16);not null;default:''" json:"title_origin,omitempty"`
 	FileURL         string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径
 	FileSize        int64          `gorm:"default:0" json:"file_size"`        // 文件大小（字节）
 	Status          int8           `gorm:"type:smallint;default:0;index:idx_status_time" json:"status"`

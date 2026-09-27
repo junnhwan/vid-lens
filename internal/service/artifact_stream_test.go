@@ -38,7 +38,7 @@ func TestArtifactGenerationUsesStreamAndPersistsActualUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := svc.Run(ctx, 7, run.ID)
-	if err != nil || result.Status != "completed" || result.Usage.TokenSource != "actual" || result.Usage.CompletionTokens != 50 || calls.Load() != 1 {
+	if err != nil || result.Status != "completed" || result.Usage.TokenSource != "actual" || result.Usage.CompletionTokens != 100 || calls.Load() != 2 {
 		t.Fatalf("result=%+v calls=%d err=%v", result, calls.Load(), err)
 	}
 }

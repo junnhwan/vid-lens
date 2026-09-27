@@ -15,6 +15,7 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
+	"vid-lens/internal/pkg/visualprogress"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/transcript"
 
@@ -667,6 +668,19 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 		return func() visualIndexOutcome { return visualIndexOutcome{} }
 	}
 	result := make(chan visualIndexOutcome, 1)
+	owner := processingLeaseOwnerFromContext(ctx)
+	if owner != nil {
+		owned, err := c.repo.BeginVisualProgress(repository.TaskProcessingLeaseRequest{
+			TaskID: task.ID, JobType: TaskJobTranscribe, Token: owner.token, Now: c.currentTime(),
+		})
+		if err != nil || !owned {
+			if err == nil {
+				err = ErrProcessingLeaseLost
+			}
+			return func() visualIndexOutcome { return visualIndexOutcome{err: err} }
+		}
+		ctx = visualprogress.WithAttempt(ctx, owner.token)
+	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index branch started")
 	go func() {
 		// The cap bounds concurrent frame-extraction + vision/OCR fan-out across
@@ -676,11 +690,17 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 			case c.visualSlots <- struct{}{}:
 				defer func() { <-c.visualSlots }()
 			case <-ctx.Done():
+				if owner != nil {
+					c.finishVisualProgress(task.ID, owner.token, ctx.Err())
+				}
 				result <- visualIndexOutcome{err: ctx.Err()}
 				return
 			}
 		}
 		count, err := c.visualIndex(ctx, task)
+		if owner != nil && err != nil {
+			c.finishVisualProgress(task.ID, owner.token, err)
+		}
 		result <- visualIndexOutcome{count: count, err: err}
 	}()
 	var once sync.Once
@@ -702,4 +722,25 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 		})
 		return outcome
 	}
+}
+
+func (c *Consumer) finishVisualProgress(taskID int64, token string, outcomeErr error) {
+	if c == nil || c.repo == nil || c.repo.VisualProgress == nil || outcomeErr == nil {
+		return
+	}
+	current, err := c.repo.VisualProgress.Find(taskID)
+	if err != nil || current == nil || current.AttemptToken != token {
+		return
+	}
+	status, code := model.VisualProgressFailed, "visual_processing_failed"
+	if errors.Is(outcomeErr, context.Canceled) {
+		status, code = model.VisualProgressCanceled, "canceled"
+	}
+	_, _ = c.repo.AdvanceVisualProgress(repository.TaskProcessingLeaseRequest{
+		TaskID: taskID, JobType: TaskJobTranscribe, Token: token, Now: c.currentTime(),
+	}, repository.VisualProgressUpdate{
+		Status: status, Phase: current.Phase, TotalKnown: current.TotalKnown,
+		TotalFrames: current.TotalFrames, Processed: current.Processed, Failed: current.Failed,
+		OCRFailed: current.OCRFailed, VisionFailed: current.VisionFailed, ErrorCode: code,
+	})
 }

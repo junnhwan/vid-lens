@@ -47,6 +47,38 @@ func TestSetVisualDisabledRequiresOwnerAndIdleTask(t *testing.T) {
 	}
 }
 
+func TestVideoTitleOriginGuardsUserAndLegacyTitles(t *testing.T) {
+	repos := newTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, FileMD5: "title-1", Filename: "lesson.mp4"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repos.Task.SetGeneratedTitleIfBlank(task.ID, "自动标题"); err != nil || !ok {
+		t.Fatalf("initial automatic title: %v %v", ok, err)
+	}
+	if err := repos.Task.UpdateTitle(task.ID, "用户标题"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repos.Task.SetGeneratedTitleIfBlank(task.ID, "迟到标题"); err != nil || ok {
+		t.Fatalf("worker replaced edit: %v %v", ok, err)
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil || current.Title != "用户标题" || current.TitleOrigin != "user" {
+		t.Fatalf("user title: %+v %v", current, err)
+	}
+	legacy := &model.VideoTask{UserID: 7, FileMD5: "title-2", Filename: "legacy.mp4", Title: "来源不明旧标题"}
+	if err := repos.Task.Create(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repos.Task.SetGeneratedTitleIfBlank(legacy.ID, "猜测的新标题"); err != nil || ok {
+		t.Fatalf("legacy title overwritten: %v %v", ok, err)
+	}
+	current, err = repos.Task.FindByID(legacy.ID)
+	if err != nil || current.Title != "来源不明旧标题" || current.TitleOrigin != "" {
+		t.Fatalf("legacy title: %+v %v", current, err)
+	}
+}
+
 func TestVideoAssetCanBackMultipleUserTasksWithSameMD5(t *testing.T) {
 	repos := newTestRepositories(t)
 

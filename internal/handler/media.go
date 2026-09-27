@@ -280,6 +280,25 @@ func (h *MediaHandler) GetTranscriptionProgress(c *gin.Context) {
 	response.OK(c, progress)
 }
 
+// GET /api/v1/media/task/:id/visual-progress
+func (h *MediaHandler) GetVisualProgress(c *gin.Context) {
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "视频编号无效")
+		return
+	}
+	progress, err := h.svc.GetVisualProgress(c.Request.Context(), middleware.GetUserID(c), taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskNotFound) {
+			response.Fail(c, http.StatusNotFound, "任务不存在或无权访问")
+		} else {
+			response.Fail(c, http.StatusInternalServerError, "读取视觉进度失败")
+		}
+		return
+	}
+	response.OK(c, progress)
+}
+
 // UpdateTaskTitle 用户编辑视频标题
 // PATCH /api/v1/media/task/:id
 func (h *MediaHandler) UpdateTaskTitle(c *gin.Context) {

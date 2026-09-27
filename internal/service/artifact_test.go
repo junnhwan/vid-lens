@@ -10,6 +10,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -97,6 +98,16 @@ func artifactModelResponse(w http.ResponseWriter, r *http.Request) {
 		Messages []ai.ChatMessage `json:"messages"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	if len(req.Messages) > 0 && req.Messages[0].Content == studyGlobalSystem {
+		var blocks []artifact.Block
+		_ = json.Unmarshal([]byte(req.Messages[1].Content), &blocks)
+		plan := studyGlobalPlan{Groups: make([]studyGlobalGroup, 0, len(blocks))}
+		for _, block := range blocks {
+			plan.Groups = append(plan.Groups, studyGlobalGroup{OldBlockIDs: []string{block.BlockID}, Title: block.Title})
+		}
+		artifactStreamResponse(w, artifact.JSON(plan), "stop")
+		return
+	}
 	var input struct {
 		Evidence []studyEvidence `json:"evidence"`
 	}
@@ -148,11 +159,11 @@ func TestArtifactHTTPModelPersistenceEditingEvidenceAndRetry(t *testing.T) {
 	if err = svc.ExecuteArtifact(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
+	if calls.Load() != 2 {
 		t.Fatalf("duplicate external calls %d", calls.Load())
 	}
 	final, err := svc.Run(ctx, 7, run.ID)
-	if err != nil || final.Status != "completed" || final.Usage.TokenSource != "actual" || final.Usage.PromptTokens != 100 {
+	if err != nil || final.Status != "completed" || final.Usage.TokenSource != "actual" || final.Usage.PromptTokens != 200 {
 		t.Fatalf("run %+v err %v", final, err)
 	}
 	detail, err := svc.Get(ctx, 7, run.ArtifactID)
@@ -210,6 +221,100 @@ func TestArtifactHTTPModelPersistenceEditingEvidenceAndRetry(t *testing.T) {
 		if e.Seq != int64(i+1) {
 			t.Fatal(events)
 		}
+	}
+}
+
+func TestStudyV2InvalidGlobalPlanDoesNotPublishAndV1RunStillResumes(t *testing.T) {
+	svc, db, calls := artifactFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []ai.ChatMessage `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		r.Body = io.NopCloser(strings.NewReader(artifact.JSON(req)))
+		if len(req.Messages) > 0 && req.Messages[0].Content == studyGlobalSystem {
+			artifactStreamResponse(w, `{"groups":[]}`, "stop")
+			return
+		}
+		artifactModelResponse(w, r)
+	})
+	ctx := context.Background()
+	run, err := svc.Submit(ctx, 7, "invalid-global", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ExecuteArtifact(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Run(ctx, 7, run.ID)
+	if err != nil || result.Status != "failed" || result.Result != nil || calls.Load() != 3 {
+		t.Fatalf("partial publish: %+v %v calls=%d", result, err, calls.Load())
+	}
+	var versions int64
+	if err := db.Model(&model.ArtifactVersion{}).Where("artifact_id=?", run.ArtifactID).Count(&versions).Error; err != nil || versions != 0 {
+		t.Fatalf("versions=%d %v", versions, err)
+	}
+
+	legacy, err := svc.Submit(ctx, 7, "legacy", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AgentRun{}).Where("id=?", legacy.ID).Update("recipe_version", artifact.RecipeV1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.GenerationRequest{}).Where("run_id=?", legacy.ID).Update("recipe", artifact.RecipeV1).Error; err != nil {
+		t.Fatal(err)
+	}
+	before := calls.Load()
+	if err := svc.ExecuteArtifact(ctx, legacy.ID); err != nil {
+		t.Fatal(err)
+	}
+	old, err := svc.Run(ctx, 7, legacy.ID)
+	if err != nil || old.Status != "completed" || calls.Load() != before+1 {
+		t.Fatalf("legacy=%+v %v calls=%d", old, err, calls.Load()-before)
+	}
+}
+
+func TestStudyV2CancelDuringGlobalCallDoesNotPublish(t *testing.T) {
+	var cancelRun func()
+	svc, db, _ := artifactFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []ai.ChatMessage `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		r.Body = io.NopCloser(strings.NewReader(artifact.JSON(request)))
+		if len(request.Messages) > 0 && request.Messages[0].Content == studyGlobalSystem {
+			cancelRun()
+			var blocks []artifact.Block
+			_ = json.Unmarshal([]byte(request.Messages[1].Content), &blocks)
+			plan := studyGlobalPlan{Groups: make([]studyGlobalGroup, 0, len(blocks))}
+			for _, b := range blocks {
+				plan.Groups = append(plan.Groups, studyGlobalGroup{OldBlockIDs: []string{b.BlockID}, Title: b.Title})
+			}
+			artifactStreamResponse(w, artifact.JSON(plan), "stop")
+			return
+		}
+		artifactModelResponse(w, r)
+	})
+	ctx := context.Background()
+	run, err := svc.Submit(ctx, 7, "cancel-global", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelRun = func() {
+		if _, e := svc.Cancel(ctx, 7, run.ID); e != nil {
+			t.Error(e)
+		}
+	}
+	if err := svc.ExecuteArtifact(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	final, err := svc.Run(ctx, 7, run.ID)
+	if err != nil || final.Status != "cancelled" || final.Result != nil {
+		t.Fatalf("global cancel: %+v %v", final, err)
+	}
+	var versions int64
+	if err := db.Model(&model.ArtifactVersion{}).Where("run_id=?", run.ID).Count(&versions).Error; err != nil || versions != 0 {
+		t.Fatalf("versions=%d %v", versions, err)
 	}
 }
 
@@ -697,7 +802,7 @@ func TestArtifactPrecisionAndBoundedProviderRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := svc.Run(ctx, 7, run.ID)
-	if err != nil || result.Status != "completed" || calls.Load() != 3 {
+	if err != nil || result.Status != "completed" || calls.Load() != 4 {
 		t.Fatalf("bounded repair %+v calls=%d error=%v", result, calls.Load(), err)
 	}
 }
@@ -772,7 +877,7 @@ func TestArtifactRestartReusesCompletedSegmentCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, err := svc.Run(ctx, 7, run.ID)
-	if err != nil || final.Status != "completed" || calls.Load() != 3 {
+	if err != nil || final.Status != "completed" || calls.Load() != 4 {
 		t.Fatalf("checkpoint replay %+v %v calls=%d", final, err, calls.Load())
 	}
 }

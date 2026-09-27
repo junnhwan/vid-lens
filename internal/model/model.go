@@ -14,6 +14,7 @@ func AllModels() []interface{} {
 		&VideoTranscription{},
 		&VideoTranscriptionChunk{},
 		&VideoVisualFrame{},
+		&VideoVisualProgress{},
 		&VideoVisualObservation{},
 		&AISummary{},
 		&SummaryPart{},

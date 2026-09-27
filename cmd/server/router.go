@@ -130,6 +130,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.GET("/list", handlers.media.ListTasks)
 				media.GET("/task/:id", handlers.media.GetTaskDetail)
 				media.GET("/task/:id/transcription-progress", handlers.media.GetTranscriptionProgress)
+				media.GET("/task/:id/visual-progress", handlers.media.GetVisualProgress)
 				media.PATCH("/task/:id/visual-setting", handlers.media.SetTaskVisualDisabled)
 				media.PATCH("/task/:id", handlers.media.UpdateTaskTitle)
 				media.DELETE("/task/:id", handlers.media.DeleteTask)

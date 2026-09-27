@@ -220,9 +220,17 @@ func (r *TaskRepository) UpdateStatusAndStageIf(id int64, allowedFrom []int8, st
 	return tx.RowsAffected > 0, nil
 }
 
-// UpdateTitle 写回视频标题（自动生成或用户编辑）。
+// UpdateTitle records an explicit user edit, including edits that race a worker.
 func (r *TaskRepository) UpdateTitle(id int64, title string) error {
-	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Update("title", title).Error
+	return r.db.Model(&model.VideoTask{}).Where("id = ?", id).Updates(map[string]any{"title": title, "title_origin": "user"}).Error
+}
+
+// SetGeneratedTitleIfBlank is a database CAS: a late worker cannot replace a
+// user edit or a legacy title whose source is unknown.
+func (r *TaskRepository) SetGeneratedTitleIfBlank(id int64, title string) (bool, error) {
+	result := r.db.Model(&model.VideoTask{}).Where("id = ? AND title = '' AND title_origin = ''", id).
+		Updates(map[string]any{"title": title, "title_origin": "auto"})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *TaskRepository) RecordRetryableFailure(id int64, jobType, stage, errMsg string, retryCount, maxRetries int, nextRetryAt time.Time, errorCode ...string) error {

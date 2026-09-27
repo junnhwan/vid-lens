@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/pkg/ocr"
+	"vid-lens/internal/pkg/visualprogress"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 )
@@ -129,7 +131,28 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	if s.repos == nil || s.repos.VisualFrame == nil {
 		return 0, fmt.Errorf("visual frame repository is unavailable")
 	}
+	attempt := visualprogress.Attempt(ctx)
+	progress := repository.VisualProgressUpdate{Status: model.VisualProgressRunning}
+	report := func(phase string) error {
+		if attempt == "" {
+			return nil
+		}
+		progress.Phase = phase
+		owned, err := s.repos.AdvanceVisualProgress(repository.TaskProcessingLeaseRequest{
+			TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Token: attempt, Now: time.Now(),
+		}, progress)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return fmt.Errorf("visual processing lease lost")
+		}
+		return nil
+	}
 
+	if err := report("provider_check"); err != nil {
+		return 0, err
+	}
 	vision, visionErr := s.loadVisionClient(ctx, task.UserID)
 	visionPrompt := ai.DefaultVisionCaptionPrompt
 	if s.repos.AIProfile != nil {
@@ -146,19 +169,26 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index skipped: no vision profile and ocr unavailable",
 			slog.String("ocr_command", s.cfg.OCRCommand),
 			slog.String("vision_error", errString(visionErr)))
-		return 0, nil
+		progress.Status, progress.ErrorCode = model.VisualProgressSkipped, "no_visual_provider"
+		return 0, report("provider_check")
 	}
 	if vision == nil && visionErr != nil {
 		observability.Log(ctx, slog.Default(), slog.LevelInfo, "vision not used; will try ocr fallback",
 			slog.String("reason", errString(visionErr)))
 	}
 
+	if err := report("downloading"); err != nil {
+		return 0, err
+	}
 	videoPath, err := s.storage.DownloadToTemp(ctx, task.FileURL)
 	if err != nil {
 		return 0, fmt.Errorf("download video for visual index: %w", err)
 	}
 	defer os.Remove(videoPath)
 
+	if err := report("extracting"); err != nil {
+		return 0, err
+	}
 	frames, workDir, err := s.extract(ctx, s.ffmpeg, videoPath, ffmpeg.ExtractKeyFramesOptions{
 		SceneThreshold:  s.cfg.SceneThreshold,
 		IntervalSeconds: s.cfg.IntervalSeconds,
@@ -170,6 +200,10 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	}
 	if workDir != "" {
 		defer os.RemoveAll(workDir)
+	}
+	progress.TotalKnown, progress.TotalFrames = true, len(frames)
+	if err := report("observing_frames"); err != nil {
+		return 0, err
 	}
 
 	rows := make([]model.VideoVisualFrame, 0, len(frames))
@@ -225,7 +259,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 			row.Status = model.VisualFrameStatusSkipped
 		}
 
-		objectKey := visualFrameObjectKey(task.ID, i, frame.TimeMs)
+		objectKey := visualFrameObjectKey(task.ID, i, frame.TimeMs, attempt)
 		if _, upErr := s.storage.UploadFromPath(ctx, frame.Path, objectKey, "image/jpeg"); upErr != nil {
 			if row.ErrorMsg == "" {
 				row.ErrorMsg = truncateVisualErr(upErr.Error())
@@ -234,9 +268,35 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 			row.ObjectKey = objectKey
 		}
 		rows = append(rows, row)
+		progress.Processed++
+		if row.Status == model.VisualFrameStatusFailed || row.ErrorMsg != "" {
+			progress.Failed++
+		}
+		if row.OCRStatus == model.VisualFrameStatusFailed {
+			progress.OCRFailed++
+		}
+		if row.VisionStatus == model.VisualFrameStatusFailed {
+			progress.VisionFailed++
+		}
+		if err := report("observing_frames"); err != nil {
+			return textCount, err
+		}
 	}
 
-	if err := s.repos.VisualFrame.ReplaceTaskFrames(task.ID, rows); err != nil {
+	if attempt != "" {
+		if err := report("publishing"); err != nil {
+			return textCount, err
+		}
+		owned, err := s.repos.PublishVisualFrames(repository.TaskProcessingLeaseRequest{
+			TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Token: attempt, Now: time.Now(),
+		}, rows, progress)
+		if err != nil {
+			return 0, fmt.Errorf("persist visual frames: %w", err)
+		}
+		if !owned {
+			return 0, fmt.Errorf("visual processing lease lost before publish")
+		}
+	} else if err := s.repos.VisualFrame.ReplaceTaskFrames(task.ID, rows); err != nil {
 		return 0, fmt.Errorf("persist visual frames: %w", err)
 	}
 	return textCount, nil
@@ -253,7 +313,12 @@ func (s *VisualIndexService) loadVisionClient(ctx context.Context, userID int64)
 	return client, nil
 }
 
-func visualFrameObjectKey(taskID int64, frameIndex int, timeMs int64) string {
+func visualFrameObjectKey(taskID int64, frameIndex int, timeMs int64, attempt string) string {
+	if attempt != "" {
+		keyHash := sha256.Sum256([]byte(attempt))
+		return filepath.ToSlash(filepath.Join("visual-frames", fmt.Sprintf("task-%d", taskID),
+			fmt.Sprintf("attempt-%x", keyHash[:8]), fmt.Sprintf("frame-%04d-%dms.jpg", frameIndex, timeMs)))
+	}
 	return filepath.ToSlash(filepath.Join(
 		"visual-frames",
 		fmt.Sprintf("task-%d", taskID),

@@ -338,6 +338,9 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 	if repos.VisualObservation != nil {
 		deleteFns = append(deleteFns, repos.VisualObservation.DeleteByTaskID)
 	}
+	if repos.VisualProgress != nil {
+		deleteFns = append(deleteFns, repos.VisualProgress.DeleteByTaskID)
+	}
 	for _, deleteRows := range deleteFns {
 		if err := deleteRows(taskID); err != nil {
 			return err
