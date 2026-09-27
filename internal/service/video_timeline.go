@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 )
 
@@ -99,7 +100,7 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 			}
 		}
 		ref := ChunkSourceRef{
-			SourceType: model.ChunkModalityTranscript, StableID: stableID,
+			SourceType: model.ChunkModalityTranscript, StableID: stableID, ContentHash: artifact.Hash(content),
 			SegmentKey: strings.TrimSpace(row.SegmentKey), SourceRowID: row.ID,
 			StartMS: startMS, EndMS: endMS, TimeRangeStatus: status,
 		}
@@ -122,7 +123,7 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 				return
 			}
 			ref := ChunkSourceRef{
-				SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
+				SourceType: modality, StableID: stableID, ContentHash: artifact.Hash(content), SourceRowID: frame.ID,
 				StartMS: startMS, EndMS: endMS, TimeRangeStatus: status,
 				ObjectKey: frame.ObjectKey, ArtifactKind: model.VisualArtifactKindFrame, CaptionMethod: method,
 			}

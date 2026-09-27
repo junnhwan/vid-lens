@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/transcript"
 )
@@ -82,7 +83,7 @@ func transcriptSourceRef(row model.VideoTranscriptionChunk) ChunkSourceRef {
 		stableID = fmt.Sprintf("transcription-chunk:%d", row.ID)
 	}
 	ref := ChunkSourceRef{
-		SourceType: model.ChunkModalityTranscript, StableID: stableID, SegmentKey: strings.TrimSpace(row.SegmentKey),
+		SourceType: model.ChunkModalityTranscript, StableID: stableID, ContentHash: artifact.Hash(strings.TrimSpace(row.Content)), SegmentKey: strings.TrimSpace(row.SegmentKey),
 		SourceRowID: row.ID, TimeRangeStatus: model.ChunkTimeRangeUnknown,
 	}
 	switch {

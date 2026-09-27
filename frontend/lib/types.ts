@@ -198,6 +198,8 @@ export interface VideoTask {
   jobs?: TaskJob[]
   has_transcription: boolean
   has_summary: boolean
+  has_rag_index: boolean
+  visual_status: string
 }
 
 export interface TranscriptionProgress {
@@ -301,6 +303,21 @@ export interface ChatMessage {
   execution_mode?: string
   profile_id?: number
   created_at: string
+}
+
+export interface VisualProgress {
+  task_id: number
+  attempt_id?: string
+  status: 'not_started' | 'waiting_to_start' | 'queued' | 'running' | 'completed' | 'skipped' | 'failed' | 'canceled' | 'interrupted'
+  phase: string
+  total_frames: number | null
+  processed_frames: number
+  failed_frames: number
+  ocr_failed_frames: number
+  vision_failed_frames: number
+  error_code?: string
+  started_at?: string
+  updated_at?: string
 }
 
 export interface Citation {

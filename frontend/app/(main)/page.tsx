@@ -16,6 +16,10 @@ import { RecentProductWork } from '@/components/artifacts/RecentProductWork'
 import { ProductHero } from '@/components/product/ProductHero'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
+import { VisualProgressPanel } from '@/components/VisualProgressPanel'
+import { artifactApi } from '@/lib/artifacts/api'
+import type { LearningPosition } from '@/lib/artifacts/schema'
+import { formatClock } from '@/lib/format'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -31,6 +35,7 @@ export default function DashboardPage() {
   const [reloadTick, setReloadTick] = useState(0)
 
   const [retrying, setRetrying] = useState<VideoTask | null>(null)
+  const [resume, setResume] = useState<{ position: LearningPosition; task: VideoTask } | null>(null)
 
   useEffect(() => {
     let active = true
@@ -45,6 +50,11 @@ export default function DashboardPage() {
       setSessions(sessionList || [])
       setLoadError(taskPage && sessionList ? '' : '数据加载失败,请检查网络或服务状态后重试')
       setLoading(false)
+      void artifactApi.position().then(async position => {
+        if (!position) { if (active) setResume(null); return }
+        const task=taskPage?.list.find(item=>item.id===position.task_id) ?? await api.getTask(position.task_id)
+        if (active) setResume({ position,task })
+      }).catch(() => { if (active) setResume(null) })
     })()
     return () => { active = false }
   }, [uploadRevision, reloadTick])
@@ -96,7 +106,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <ProductHero onImport={openUpload} current={tasks.find(t => t.status === 3 && t.has_transcription)} loading={loading} />
+      <ProductHero onImport={openUpload} current={resume?.task} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={loading} />
       <div className="product-metrics">
         <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading ? '—' : String(total).padStart(2, '0')}</strong></Link>
         <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{loading ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
@@ -117,8 +127,9 @@ export default function DashboardPage() {
                 <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
                   <div className="proc-left">
                     <h5><Link href={`/video/${t.id}`}>{taskTitle(t)}</Link></h5>
-                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} />
+                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} has_rag_index={t.has_rag_index} visual_status={t.visual_status} />
                     {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
+                    {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <VisualProgressPanel task={t} compact />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
                   </div>
                   {failed

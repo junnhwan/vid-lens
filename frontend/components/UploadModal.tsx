@@ -123,6 +123,7 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
             <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>本地文件</button>
             <button className={tab === 'url' ? 'on' : ''} onClick={() => setTab('url')}>视频链接</button>
           </div>
+          <p className="muted" style={{ fontSize:12,marginBottom:12 }}>本地文件在上传及合并完成前请保持页面打开；服务器返回视频任务后可以离页，后续转写和画面处理由服务器继续。视频链接创建下载任务并获服务器受理后，也可以离页。</p>
 
           {tab === 'file' ? (
             <div>

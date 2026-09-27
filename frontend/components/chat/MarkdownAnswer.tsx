@@ -49,7 +49,7 @@ function Citations({ children, onCite }: { children: React.ReactNode; onCite?: (
 
 function CitationText({ value, onCite }: { value: React.ReactNode; onCite?: (n: number) => void }) {
   if (React.isValidElement<{ children?: React.ReactNode }>(value)) {
-    if (value.type === 'code' || value.type === 'a' || value.type === 'button') return value
+    if (value.type === Citations || value.type === 'code' || value.type === 'a' || value.type === 'button') return value
     return React.cloneElement(value, { children: <Citations onCite={onCite}>{value.props.children}</Citations> })
   }
   if (typeof value !== 'string') return <>{value}</>

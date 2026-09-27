@@ -25,13 +25,15 @@ describe('processBeats', () => {
     const beats = processBeats({ status: 2, stage: 'visual_indexing', has_transcription: true })
     assert.equal(beats[1].state, 'done')
     assert.equal(beats[2].state, 'running')
+    const skipped = processBeats({ status: 2, stage: 'transcribing', has_transcription: true, visual_status: 'skipped' })
+    assert.equal(skipped[2].state, 'skipped')
   })
 
-  it('marks index complete only when the server reports a finished RAG job', () => {
-    const beats = processBeats({ status: 3, stage: 'none', has_transcription: true, last_job_type: 'rag_index' })
+  it('uses published index and visual records for a completed task', () => {
+    const beats = processBeats({ status: 3, stage: 'none', has_transcription: true, has_rag_index: true, visual_status: 'completed' })
     assert.deepEqual(beats.map(b => b.state), ['done', 'done', 'done', 'done'])
-    const withoutIndex = processBeats({ status: 3, stage: 'none', has_transcription: true, last_job_type: 'analyze' })
-    assert.equal(withoutIndex[3].state, 'queued')
+    const dedup = processBeats({ status: 3, stage: 'none', has_transcription: true, has_rag_index: true, visual_status: '' })
+    assert.deepEqual(dedup.map(b => b.state), ['done', 'done', 'skipped', 'done'])
   })
 
   it('does not call summary generation an active index build', () => {

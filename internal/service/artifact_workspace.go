@@ -35,22 +35,13 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 	if task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning {
 		return "", nil, artifact.Err("source_not_ready", 422)
 	}
-	rows, err := repos.TranscriptionChunk.ListByTaskID(id)
+	_, rows, err := taskTranscriptSource(repos, task)
 	if err != nil {
 		return "", nil, err
 	}
 	for _, row := range rows {
 		if row.Status != model.TranscriptionChunkStatusCompleted {
 			return "", nil, artifact.Err("source_not_ready", 422)
-		}
-	}
-	if len(rows) == 0 {
-		t, e := repos.Transcription.FindByTaskID(id)
-		if e != nil {
-			return "", nil, e
-		}
-		if t != nil && strings.TrimSpace(t.Content) != "" {
-			rows = []model.VideoTranscriptionChunk{{ID: t.ID, TaskID: id, SegmentKey: fmt.Sprintf("transcription:%d", t.ID), Status: model.TranscriptionChunkStatusCompleted, Content: t.Content}}
 		}
 	}
 	frames, err := repos.VisualFrame.ListByTaskID(id)
@@ -101,6 +92,25 @@ func (s *ArtifactService) Source(ctx context.Context, owner, id int64) (*Artifac
 }
 func (s *ArtifactService) Evidence(ctx context.Context, owner int64, m, id string) (*model.SourceSnapshotItem, error) {
 	return s.repos.Artifact.Evidence(ctx, owner, m, id)
+}
+func (s *ArtifactService) LearningPosition(ctx context.Context, owner int64) (*repository.LearningPositionView, error) {
+	return s.repos.Artifact.LearningPosition(ctx, owner)
+}
+func (s *ArtifactService) SaveLearningPosition(ctx context.Context, owner, expected, taskID int64, artifactID, versionID, blockID string, timeMS int64) (*repository.LearningPositionView, error) {
+	return s.repos.Artifact.SaveLearningPosition(ctx, owner, expected, taskID, artifactID, versionID, blockID, timeMS)
+}
+func (s *ArtifactService) BlockContext(ctx context.Context, owner int64, artifactID, versionID, blockID string) (*repository.StudyBlockContext, error) {
+	return s.repos.Artifact.BlockContext(ctx, owner, artifactID, versionID, blockID)
+}
+func (s *ArtifactService) PreviewAnswer(ctx context.Context, owner, messageID int64, artifactID, afterBlockID string, expected int64) (*repository.AnswerPreview, error) {
+	return s.repos.Artifact.PreviewAnswer(ctx, owner, messageID, artifactID, afterBlockID, expected)
+}
+func (s *ArtifactService) ImportAnswer(ctx context.Context, owner, messageID int64, artifactID, afterBlockID string, expected int64, key string, personal bool) (*ArtifactDetail, error) {
+	_, err := s.repos.Artifact.ImportAnswer(ctx, owner, messageID, artifactID, afterBlockID, expected, key, personal)
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, owner, artifactID)
 }
 
 type ArtifactVersionView struct {

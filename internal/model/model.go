@@ -38,6 +38,7 @@ func AllModels() []interface{} {
 		&AgentToolCall{},
 		&Artifact{}, &ArtifactVersion{}, &SourceManifest{}, &SourceSnapshotItem{},
 		&ArtifactEvidenceRef{}, &GenerationRequest{}, &GenerationDispatch{}, &RunEvent{},
+		&LearningPosition{}, &AnswerImport{},
 		&AICallLog{},
 		&AIRetryBudget{},
 		&AIRetryAttempt{},
@@ -76,6 +77,13 @@ func Migrate(db *gorm.DB) error {
 }
 
 func migrateModels(db *gorm.DB, models []interface{}) error {
+	// Older schemas made one content hash/model globally unique. Each user's
+	// task needs its own authorized chunk projection, even for identical media.
+	if db.Migrator().HasIndex(&VideoRAGIndex{}, "uk_rag_file_md5_model") {
+		if err := db.Migrator().DropIndex(&VideoRAGIndex{}, "uk_rag_file_md5_model"); err != nil {
+			return err
+		}
+	}
 	if err := db.AutoMigrate(models...); err != nil {
 		return err
 	}

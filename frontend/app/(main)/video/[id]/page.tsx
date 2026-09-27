@@ -27,6 +27,8 @@ import KBModal from '@/components/KBModal'
 import { expandTranscript } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
+import { VisualProgressPanel } from '@/components/VisualProgressPanel'
+import { useStudyPosition } from '@/lib/artifacts/useStudyPosition'
 import { taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
@@ -175,6 +177,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const { user } = useShell()
   const readOnly = user?.role === 'DEMO'
   const playerRef = useRef<VideoPlayerHandle>(null)
+  const study = useStudyPosition()
+  const lastPositionWrite = useRef(0)
+  const wasPlaying = useRef(false)
   const prevTransRef = useRef(false)
 
   const [task, setTask] = useState<VideoTask | null>(null)
@@ -712,7 +717,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             ref={playerRef}
             src={playbackUrl}
             title={title}
-            onPlayhead={ms => setPlayheadMs(ms)}
+            onPlayhead={(ms,playing) => { setPlayheadMs(ms); if (ms>0 && (playing || wasPlaying.current) && Date.now()-lastPositionWrite.current>5000) { lastPositionWrite.current=Date.now(); study.record({task_id:taskId,artifact_id:'',version_id:'',block_id:'',time_ms:Math.round(ms)}) } if (wasPlaying.current && !playing) void study.flush(); wasPlaying.current=playing }}
             onDuration={setVideoDurationMs}
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
@@ -720,10 +725,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           <div className="ws-stage-scroll">
             {processing && (
               <div style={{ marginTop: 12, flex: 'none' }}>
-                <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} />
+                <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
               </div>
             )}
             {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
+            {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && <VisualProgressPanel task={task} />}
+            {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
 
             {relatedArtifacts.error && <div className="artifact-notice danger" role="alert">相关笔记读取失败：{artifactError(relatedArtifacts.error)}<button className="btn btn-sm" onClick={() => void relatedArtifacts.refetch()}>重试</button></div>}
             <div className="ws-actions">

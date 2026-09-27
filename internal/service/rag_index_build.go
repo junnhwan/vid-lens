@@ -109,7 +109,7 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 		return nil, fmt.Errorf("无权访问此任务")
 	}
 
-	transcription, err := s.repos.Transcription.FindByTaskID(task.ID)
+	transcription, transcriptionRows, err := taskTranscriptSource(s.repos, task)
 	if err != nil {
 		return nil, err
 	}
@@ -118,13 +118,6 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 	}
 
 	chunks := make([]TextChunk, 0)
-	var transcriptionRows []model.VideoTranscriptionChunk
-	if transcription != nil && strings.TrimSpace(transcription.Content) != "" && s.repos.TranscriptionChunk != nil {
-		transcriptionRows, err = s.repos.TranscriptionChunk.ListByTaskID(task.ID)
-		if err != nil {
-			return nil, err
-		}
-	}
 	if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
 		chunks = append(chunks, buildTranscriptIndexChunks(transcription.Content, transcriptionRows, s.cfg.ChunkSize, s.cfg.ChunkOverlap)...)
 	}

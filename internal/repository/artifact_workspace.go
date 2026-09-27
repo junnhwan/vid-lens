@@ -236,7 +236,7 @@ func insertRevision(tx *gorm.DB, a *model.Artifact, body artifact.Body, manifest
 	refs := []model.ArtifactEvidenceRef{}
 	for _, b := range body.Blocks {
 		for _, ref := range b.EvidenceRefs {
-			refs = append(refs, model.ArtifactEvidenceRef{VersionID: v.ID, BlockID: b.BlockID, EvidenceID: ref.EvidenceID, Relation: ref.Relation})
+			refs = append(refs, model.ArtifactEvidenceRef{VersionID: v.ID, BlockID: b.BlockID, EvidenceID: ref.EvidenceID, Relation: ref.Relation, CitationID: ref.CitationID})
 		}
 	}
 	if len(refs) > 0 {

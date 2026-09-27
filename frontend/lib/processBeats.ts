@@ -1,5 +1,5 @@
 export type ProcessBeatId = 'ingest' | 'asr' | 'visual' | 'index'
-export type ProcessBeatState = 'queued' | 'running' | 'done' | 'error'
+export type ProcessBeatState = 'queued' | 'running' | 'done' | 'error' | 'skipped'
 
 export interface ProcessBeat {
   id: ProcessBeatId
@@ -29,6 +29,8 @@ export function processBeats(task: {
   stage: string
   has_transcription: boolean
   last_job_type?: string
+  has_rag_index?: boolean
+  visual_status?: string
 }): ProcessBeat[] {
   const ids: ProcessBeatId[] = ['ingest', 'asr', 'visual', 'index']
   if (task.status === 4 || task.status === 5) {
@@ -50,12 +52,16 @@ export function processBeats(task: {
     : running && i === 3
       ? 'running'
       : 'queued'
-  const visual: ProcessBeatState = completed || i >= 5
+  const visual: ProcessBeatState = task.visual_status === 'completed'
     ? 'done'
-    : running && i === 4
-      ? 'running'
-      : 'queued'
-  const index: ProcessBeatState = completed && task.last_job_type === 'rag_index'
+    : task.visual_status === 'failed' || task.visual_status === 'interrupted'
+      ? 'error'
+      : task.visual_status === 'skipped' || (completed && !task.visual_status)
+        ? 'skipped'
+        : running && (i === 4 || task.visual_status === 'running')
+          ? 'running'
+          : 'queued'
+  const index: ProcessBeatState = task.has_rag_index || (task.has_rag_index === undefined && completed && task.last_job_type === 'rag_index')
     ? 'done'
     : running && task.stage === 'indexing'
       ? 'running'

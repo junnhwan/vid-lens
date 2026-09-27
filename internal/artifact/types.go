@@ -35,6 +35,7 @@ func (e *RetryWait) Error() string { return "artifact provider retry is not due"
 type Ref struct {
 	EvidenceID string `json:"evidence_id"`
 	Relation   string `json:"relation"`
+	CitationID string `json:"chat_citation_id,omitempty"`
 }
 type Block struct {
 	BlockID      string  `json:"block_id"`
@@ -138,7 +139,7 @@ func (b Body) Validate(allowed map[string]bool) error {
 			return Err("invalid_evidence", 400)
 		}
 		for _, r := range n.EvidenceRefs {
-			if !allowed[r.EvidenceID] || (r.Relation != "supports" && r.Relation != "context" && r.Relation != "contradicts") {
+			if !allowed[r.EvidenceID] || len(r.CitationID) > 32 || (r.Relation != "supports" && r.Relation != "context" && r.Relation != "contradicts") {
 				return Err("invalid_evidence", 400)
 			}
 		}

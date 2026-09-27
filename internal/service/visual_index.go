@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
@@ -389,7 +390,7 @@ func formatOCRChunksForIndex(frames []model.VideoVisualFrame, chunkSize int) []T
 			sec := startMS / 1000
 			content := fmt.Sprintf("[%s %02d:%02d]\n%s", label, sec/60, sec%60, text)
 			observation := SourceTextObservation{Content: content, Modality: modality, Refs: []ChunkSourceRef{{
-				SourceType: modality, StableID: stableID, SourceRowID: frame.ID,
+				SourceType: modality, StableID: stableID, ContentHash: artifact.Hash(text), SourceRowID: frame.ID,
 				StartMS: startMS, EndMS: endMS, TimeRangeStatus: timeStatus,
 				ObjectKey: frame.ObjectKey, ArtifactKind: model.VisualArtifactKindFrame, CaptionMethod: method,
 			}}}

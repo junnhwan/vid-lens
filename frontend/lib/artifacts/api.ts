@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ApiError, req } from '@/lib/api'
-import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, type StudyBody, type GenerationInput } from './schema'
+import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, positionSchema, blockContextSchema, answerPreviewSchema, type StudyBody, type GenerationInput } from './schema'
 import { errorLabels } from './view'
 
 export class ContractError extends Error { constructor() { super('收到的成果数据格式不受支持，请刷新或稍后重试。') } }
@@ -11,6 +11,11 @@ async function read<T>(schema: z.ZodType<T>, response: Promise<unknown>): Promis
 }
 const pathId = encodeURIComponent
 export const artifactApi = {
+  position: () => read(positionSchema.nullable(), req('/learning-position', 'GET')),
+  savePosition: (input: { expected_revision: number; task_id: number; artifact_id: string; version_id: string; block_id: string; time_ms: number }) => read(positionSchema, req('/learning-position', 'PATCH', input)),
+  blockContext: (id: string, versionId: string, blockId: string) => read(blockContextSchema, req(`/artifacts/${pathId(id)}/blocks/${pathId(blockId)}/context?version_id=${pathId(versionId)}`, 'GET')),
+  answerPreview: (id: string, messageId: number, blockId: string, head: number) => read(answerPreviewSchema, req(`/artifacts/${pathId(id)}/answer-preview`, 'POST', { message_id: messageId, after_block_id: blockId, expected_head_version: head })),
+  importAnswer: (id: string, messageId: number, blockId: string, head: number, key: string, personal: boolean) => read(detailSchema, req(`/artifacts/${pathId(id)}/answer-import`, 'POST', { message_id: messageId, after_block_id: blockId, expected_head_version: head, personal_without_sources: personal }, { 'Idempotency-Key': key })),
   list: (page = 1, sourceId?: number, signal?: AbortSignal) => read(artifactPageSchema, req(`/artifacts?page=${page}&page_size=20${sourceId ? `&source_id=${sourceId}` : ''}`, 'GET', undefined, undefined, signal)),
   get: (id: string, signal?: AbortSignal) => read(detailSchema, req(`/artifacts/${pathId(id)}`, 'GET', undefined, undefined, signal)),
   versions: (id: string, signal?: AbortSignal) => read(z.object({ list: z.array(versionSummarySchema) }), req(`/artifacts/${pathId(id)}/versions`, 'GET', undefined, undefined, signal)),

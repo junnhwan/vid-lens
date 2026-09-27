@@ -191,6 +191,57 @@ func (h *ArtifactHandler) Evidence(c *gin.Context) {
 	v, e := h.svc.Evidence(c.Request.Context(), middleware.GetUserID(c), c.Param("manifest_id"), c.Param("evidence_id"))
 	artifactOK(c, 200, v, e)
 }
+func (h *ArtifactHandler) LearningPosition(c *gin.Context) {
+	v, e := h.svc.LearningPosition(c.Request.Context(), middleware.GetUserID(c))
+	artifactOK(c, 200, v, e)
+}
+func (h *ArtifactHandler) SaveLearningPosition(c *gin.Context) {
+	var req struct {
+		ExpectedRevision int64  `json:"expected_revision"`
+		TaskID           int64  `json:"task_id"`
+		ArtifactID       string `json:"artifact_id"`
+		VersionID        string `json:"version_id"`
+		BlockID          string `json:"block_id"`
+		TimeMS           int64  `json:"time_ms"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.SaveLearningPosition(c.Request.Context(), middleware.GetUserID(c), req.ExpectedRevision, req.TaskID, req.ArtifactID, req.VersionID, req.BlockID, req.TimeMS)
+	artifactOK(c, 200, v, e)
+}
+func (h *ArtifactHandler) BlockContext(c *gin.Context) {
+	v, e := h.svc.BlockContext(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.Query("version_id"), c.Param("block_id"))
+	artifactOK(c, 200, v, e)
+}
+func (h *ArtifactHandler) PreviewAnswer(c *gin.Context) {
+	var req struct {
+		MessageID           int64  `json:"message_id"`
+		AfterBlockID        string `json:"after_block_id"`
+		ExpectedHeadVersion int64  `json:"expected_head_version"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.PreviewAnswer(c.Request.Context(), middleware.GetUserID(c), req.MessageID, c.Param("id"), req.AfterBlockID, req.ExpectedHeadVersion)
+	artifactOK(c, 200, v, e)
+}
+func (h *ArtifactHandler) ImportAnswer(c *gin.Context) {
+	if denyIfDemo(c, "收录回答") {
+		return
+	}
+	var req struct {
+		MessageID           int64  `json:"message_id"`
+		AfterBlockID        string `json:"after_block_id"`
+		ExpectedHeadVersion int64  `json:"expected_head_version"`
+		Personal            bool   `json:"personal_without_sources"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.ImportAnswer(c.Request.Context(), middleware.GetUserID(c), req.MessageID, c.Param("id"), req.AfterBlockID, req.ExpectedHeadVersion, c.GetHeader("Idempotency-Key"), req.Personal)
+	artifactOK(c, 200, v, e)
+}
 func (h *ArtifactHandler) Tasks(c *gin.Context) {
 	page, size, ok := artifactPage(c)
 	if !ok {

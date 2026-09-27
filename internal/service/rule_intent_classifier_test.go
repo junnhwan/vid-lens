@@ -70,6 +70,15 @@ func TestRuleIntentClassifierStrictRAGForcesDirectQA(t *testing.T) {
 	}
 }
 
+func TestRuleIntentClassifierEvidenceCheckRetrievesDespiteOverviewWording(t *testing.T) {
+	c := NewRuleIntentClassifier()
+	session := &model.ChatSession{ScopeType: model.ChatScopeVideo, TaskID: 1}
+	intent, confidence := c.Classify("请核对原视频实际讲了什么，并引用视频证据", session, ChatModeNatural, nil)
+	if intent != IntentDirectQA || confidence < shortCircuitThreshold {
+		t.Fatalf("evidence check = %q %.2f, want retrieval", intent, confidence)
+	}
+}
+
 func TestRuleIntentClassifierKBSeriesLocateForOverview(t *testing.T) {
 	// KB 概览问法 → 跨视频召回 = series_locate，不归 overview 关检索（与占位一致）。
 	c := NewRuleIntentClassifier()

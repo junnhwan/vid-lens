@@ -56,6 +56,29 @@ type ArtifactEvidenceRef struct {
 	BlockID    string
 	EvidenceID string `gorm:"index;not null"`
 	Relation   string
+	CitationID string
+}
+
+// LearningPosition is one durable resume target per user. Revision is a CAS
+// token shared by tabs; stale writes cannot replace a newer target.
+type LearningPosition struct {
+	UserID     int64     `gorm:"primaryKey" json:"-"`
+	Revision   int64     `gorm:"not null" json:"revision"`
+	TaskID     int64     `gorm:"not null" json:"task_id"`
+	ArtifactID string    `gorm:"type:varchar(36)" json:"artifact_id"`
+	VersionID  string    `gorm:"type:varchar(36)" json:"version_id"`
+	BlockID    string    `gorm:"type:varchar(100)" json:"block_id"`
+	TimeMS     int64     `gorm:"not null" json:"time_ms"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type AnswerImport struct {
+	UserID      int64  `gorm:"primaryKey"`
+	Key         string `gorm:"type:varchar(128);primaryKey"`
+	RequestHash string `gorm:"not null"`
+	ArtifactID  string `gorm:"not null"`
+	VersionID   string `gorm:"not null"`
+	CreatedAt   time.Time
 }
 
 // GenerationRequest contains immutable execution inputs, never execution state.

@@ -38,7 +38,7 @@ func (s *MediaService) VideoQuestions(userID, taskID int64) (VideoQuestionResult
 	if err != nil || task.UserID != userID {
 		return VideoQuestionResult{}, fmt.Errorf("视频不存在或无权访问")
 	}
-	transcript, err := s.repo.Transcription.FindByTaskID(taskID)
+	transcript, chunks, err := taskTranscriptSource(s.repo, task)
 	if err != nil {
 		return VideoQuestionResult{}, err
 	}
@@ -49,9 +49,11 @@ func (s *MediaService) VideoQuestions(userID, taskID int64) (VideoQuestionResult
 	if err != nil {
 		return VideoQuestionResult{}, err
 	}
-	chunks, err := s.repo.TranscriptionChunk.ListByTaskID(taskID)
-	if err != nil {
-		return VideoQuestionResult{}, err
+	if summary == nil && task.FileMD5 != "" {
+		summary, err = s.repo.Summary.FindByMD5(task.FileMD5)
+		if err != nil {
+			return VideoQuestionResult{}, err
+		}
 	}
 	frames, err := s.repo.VisualFrame.ListCompletedWithText(taskID)
 	if err != nil {

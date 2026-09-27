@@ -98,10 +98,8 @@ func TestSummaryFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 	}
 }
 
-// TestRAGIndexFileMD5AndModelUniqueAllowsDifferentModelsSameContent 同一 file_md5 +
-// 不同 embedding_model 允许各一行（索引按模型独立去重）；同 file_md5 + 同 model
-// 第二个必须失败。索引重建换模型不被旧索引挡。
-func TestRAGIndexFileMD5AndModelUniqueAllowsDifferentModelsSameContent(t *testing.T) {
+// Identical media in two tasks must get separate, owner-scoped projections.
+func TestRAGIndexAllowsSameContentAcrossTasks(t *testing.T) {
 	db := newDedupTestDB(t)
 	repos := NewRepositories(db)
 
@@ -129,19 +127,19 @@ func TestRAGIndexFileMD5AndModelUniqueAllowsDifferentModelsSameContent(t *testin
 		t.Fatalf("second rag index (model-b, different model) must succeed: %v", err)
 	}
 
-	// 同内容 + model-A 第二行（taskB）：必须失败（同 file_md5 + 同 model 唯一）。
+	// The same content/model can also be indexed under a second task.
 	err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{
 		UserID: 7, TaskID: taskB.ID, FileMD5: dedupRepoMD5,
 		EmbeddingModel: "embed-a", EmbeddingDim: 1536, Status: model.RAGIndexStatusIndexed, ChunkCount: 1,
 	})
-	if err == nil {
-		t.Fatal("rag index with same (file_md5, embedding_model) second row must fail unique constraint")
+	if err != nil {
+		t.Fatalf("same content/model under another task: %v", err)
 	}
 
-	// FindByMD5AndModel 只命中 status=indexed 的成功行；把旧索引改 failed 后不挡重索引。
-	if err := db.Model(&model.VideoRAGIndex{}).Where("task_id = ?", taskA.ID).
+	// The content lookup only returns an indexed projection.
+	if err := db.Model(&model.VideoRAGIndex{}).Where("file_md5 = ? AND embedding_model = ?", dedupRepoMD5, "embed-a").
 		Update("status", model.RAGIndexStatusFailed).Error; err != nil {
-		t.Fatalf("mark old index failed: %v", err)
+		t.Fatalf("mark indexes failed: %v", err)
 	}
 	got, err := repos.RAGIndex.FindByMD5AndModel(dedupRepoMD5, "embed-a")
 	if err != nil {

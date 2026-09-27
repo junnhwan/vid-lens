@@ -226,18 +226,28 @@ func appendUserPromptPreference(messages []ai.ChatMessage, preference string) []
 }
 
 func (s *ChatService) videoContextText(taskID int64) (string, error) {
+	task, err := s.repos.Task.FindByID(taskID)
+	if err != nil {
+		return "", err
+	}
 	sections := make([]string, 0, 2)
 	if s.repos.Summary != nil {
 		summary, err := s.repos.Summary.FindByTaskID(taskID)
 		if err != nil {
 			return "", err
 		}
+		if summary == nil && task.FileMD5 != "" {
+			summary, err = s.repos.Summary.FindByMD5(task.FileMD5)
+			if err != nil {
+				return "", err
+			}
+		}
 		if summary != nil && strings.TrimSpace(summary.Content) != "" {
 			sections = append(sections, "视频摘要：\n"+boundedVideoText(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
 		}
 	}
 	if s.repos.Transcription != nil {
-		transcription, err := s.repos.Transcription.FindByTaskID(taskID)
+		transcription, _, err := taskTranscriptSource(s.repos, task)
 		if err != nil {
 			return "", err
 		}

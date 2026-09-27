@@ -37,7 +37,7 @@ export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evid
     lines.push(`${'#'.repeat(Math.min(depth + 1, 6))} ${safeTitle(block.title)}`, '')
     if (block.content.trim()) lines.push(redactSecrets(block.content.trim()), '')
     if (block.evidence_refs.length) {
-      lines.push(`依据：${block.evidence_refs.map(ref => `[${references.get(ref.evidence_id)}]（${relation[ref.relation] ?? ref.relation}）`).join(' · ')}`, '')
+      lines.push(`依据：${block.evidence_refs.map(ref => `[${references.get(ref.evidence_id)}]（${relation[ref.relation] ?? ref.relation}${ref.chat_citation_id ? `，聊天引用 ${ref.chat_citation_id}` : ''}）`).join(' · ')}`, '')
     }
   }
   lines.push('## 来源', '')

@@ -47,6 +47,11 @@ func (c *RuleIntentClassifier) Classify(question string, session *model.ChatSess
 	if q == "" {
 		return IntentDirectQA, 0
 	}
+	// An explicit request to check the video against evidence needs retrieval,
+	// even when the same question also contains overview wording.
+	if containsAny(strings.ToLower(q), "核对", "查证", "引用视频", "视频证据") {
+		return IntentDirectQA, strictRAGConfidence
+	}
 
 	// strict_rag 按定义必须检索：不产出 overview/small_talk/timeline（关检索或
 	// 关 LLM 的 intent），强制归 direct_qa 语义。这是契约短路，置信度高。

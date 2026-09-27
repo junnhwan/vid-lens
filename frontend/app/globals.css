@@ -442,6 +442,7 @@ select.input { cursor: pointer; }
   animation: proc-pulse 1.2s var(--ease) infinite;
 }
 .proc-beat.error { background: var(--bad); }
+.proc-beat.skipped { background: rgba(154,145,127,.18); outline: 1px solid rgba(154,145,127,.5); outline-offset: -1px; }
 @keyframes proc-pulse {
   0%, 100% { opacity: .45; }
   50% { opacity: 1; }

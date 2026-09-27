@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -120,6 +121,14 @@ func TestContentDedupFullHitDetailJoinsResultsByFileMD5(t *testing.T) {
 	}
 	if !detail.HasTranscription || !detail.HasSummary {
 		t.Fatalf("detail flags = tx=%v sum=%v, want both true", detail.HasTranscription, detail.HasSummary)
+	}
+	listed, _, err := svc.ListTasks(8, 1, 10, "")
+	if err != nil || len(listed) != 1 || !listed[0].HasTranscription || !listed[0].HasSummary {
+		t.Fatalf("list must include reused result flags: %+v %v", listed, err)
+	}
+	contextText, err := (&ChatService{repos: repos}).videoContextText(result.TaskID)
+	if err != nil || !strings.Contains(contextText, "已完成的转写") || !strings.Contains(contextText, "已完成的摘要") {
+		t.Fatalf("chat must read reused video context: %q %v", contextText, err)
 	}
 	// 跨用户复用：结果行属于用户 7 的旧 task，但用户 8 能看到。
 	if detail.Transcription.TaskID == result.TaskID {

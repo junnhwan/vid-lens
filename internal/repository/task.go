@@ -18,6 +18,41 @@ func NewTaskRepository(db *gorm.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
+// ProcessingPresenceByTaskIDs reports published index and visual work for the
+// task cards. A completed upload-dedup task may have no visual attempt of its
+// own while a later manual index build has already finished.
+func (r *TaskRepository) ProcessingPresenceByTaskIDs(taskIDs []int64) (map[int64]bool, map[int64]string, error) {
+	indexed := make(map[int64]bool, len(taskIDs))
+	visual := make(map[int64]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return indexed, visual, nil
+	}
+	var indexIDs []int64
+	if err := r.db.Model(&model.VideoRAGIndex{}).Where("task_id IN ? AND status = ?", taskIDs, model.RAGIndexStatusIndexed).Distinct("task_id").Pluck("task_id", &indexIDs).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, id := range indexIDs {
+		indexed[id] = true
+	}
+	var rows []model.VideoVisualProgress
+	if err := r.db.Where("task_id IN ?", taskIDs).Find(&rows).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, row := range rows {
+		visual[row.TaskID] = row.Status
+	}
+	var frameIDs []int64
+	if err := r.db.Model(&model.VideoVisualFrame{}).Where("task_id IN ? AND status = ?", taskIDs, model.VisualFrameStatusCompleted).Distinct("task_id").Pluck("task_id", &frameIDs).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, id := range frameIDs {
+		if visual[id] == "" {
+			visual[id] = model.VisualProgressCompleted
+		}
+	}
+	return indexed, visual, nil
+}
+
 // Create 创建任务记录
 func (r *TaskRepository) Create(task *model.VideoTask) error {
 	return r.db.Create(task).Error
@@ -97,31 +132,52 @@ func (r *TaskRepository) FindByMD5(md5 string) (*model.VideoTask, error) {
 	return &task, nil
 }
 
-// ResultPresenceByTaskIDs 批量查询任务是否已有转写/总结（不取 content）。
-func (r *TaskRepository) ResultPresenceByTaskIDs(taskIDs []int64) (hasTranscription, hasSummary map[int64]bool, err error) {
+// ResultPresenceByTaskIDs includes published results reused by identical
+// uploads, without loading their bodies into the video list.
+func (r *TaskRepository) ResultPresenceByTaskIDs(tasks []model.VideoTask) (hasTranscription, hasSummary map[int64]bool, err error) {
 	hasTranscription = map[int64]bool{}
 	hasSummary = map[int64]bool{}
-	if len(taskIDs) == 0 {
+	if len(tasks) == 0 {
 		return hasTranscription, hasSummary, nil
 	}
-	var txIDs []int64
+	ids := make([]int64, 0, len(tasks))
+	md5ToIDs := map[string][]int64{}
+	md5s := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		ids = append(ids, task.ID)
+		if task.FileMD5 != "" {
+			if len(md5ToIDs[task.FileMD5]) == 0 {
+				md5s = append(md5s, task.FileMD5)
+			}
+			md5ToIDs[task.FileMD5] = append(md5ToIDs[task.FileMD5], task.ID)
+		}
+	}
+	type resultRow struct {
+		TaskID  int64
+		FileMD5 string
+	}
+	mark := func(rows []resultRow, target map[int64]bool) {
+		for _, row := range rows {
+			target[row.TaskID] = true
+			for _, id := range md5ToIDs[row.FileMD5] {
+				target[id] = true
+			}
+		}
+	}
+	var txRows []resultRow
 	if err = r.db.Model(&model.VideoTranscription{}).
-		Where("task_id IN ?", taskIDs).
-		Pluck("task_id", &txIDs).Error; err != nil {
+		Select("task_id, file_md5").Where("task_id IN ? OR file_md5 IN ?", ids, md5s).
+		Find(&txRows).Error; err != nil {
 		return nil, nil, err
 	}
-	for _, id := range txIDs {
-		hasTranscription[id] = true
-	}
-	var sumIDs []int64
+	mark(txRows, hasTranscription)
+	var sumRows []resultRow
 	if err = r.db.Model(&model.AISummary{}).
-		Where("task_id IN ?", taskIDs).
-		Pluck("task_id", &sumIDs).Error; err != nil {
+		Select("task_id, file_md5").Where("task_id IN ? OR file_md5 IN ?", ids, md5s).
+		Find(&sumRows).Error; err != nil {
 		return nil, nil, err
 	}
-	for _, id := range sumIDs {
-		hasSummary[id] = true
-	}
+	mark(sumRows, hasSummary)
 	return hasTranscription, hasSummary, nil
 }
 

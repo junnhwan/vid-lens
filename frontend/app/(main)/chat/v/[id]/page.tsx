@@ -5,11 +5,13 @@ import { taskTitle } from '@/lib/format'
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
+import { artifactApi, artifactError } from '@/lib/artifacts/api'
+import type { StudyBlock } from '@/lib/artifacts/schema'
 
 // 单视频问答(/chat/v/:id)。本阶段仅快速问答(strict_rag SSE);
 // 播放源签名 URL 供右栏迷你播放器与引用回放使用。
 
-export default function VideoChatPage({ params }: { params: { id: string } }) {
+export default function VideoChatPage({ params, searchParams }: { params: { id: string }; searchParams?: { artifact?: string; version?: string; block?: string } }) {
   const taskId = Number(params.id)
   const [task, setTask] = useState<VideoTask | null>(null)
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
@@ -17,6 +19,20 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
   const [loadError, setLoadError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
   const [questions, setQuestions] = useState<VideoQuestionResult | null>(null)
+  const [studyBlock, setStudyBlock] = useState<StudyBlock | null>(null)
+  const [studyError, setStudyError] = useState('')
+  const returnHref = searchParams?.artifact && searchParams?.block ? `/artifacts/${encodeURIComponent(searchParams.artifact)}?block=${encodeURIComponent(searchParams.block)}` : ''
+
+  useEffect(() => {
+    let live = true
+    if (!searchParams?.artifact || !searchParams.version || !searchParams.block) return
+    void artifactApi.blockContext(searchParams.artifact,searchParams.version,searchParams.block).then(context => {
+      if (!live) return
+      if (context.task_id !== taskId) { setStudyError('段落来源与当前视频不一致'); return }
+      setStudyBlock(context.block)
+    }).catch(error => { if (live) setStudyError(artifactError(error)) })
+    return () => { live = false }
+  }, [taskId,searchParams?.artifact,searchParams?.version,searchParams?.block])
 
   useCrumb([
     { label: '视频库', href: '/library' },
@@ -84,6 +100,9 @@ export default function VideoChatPage({ params }: { params: { id: string } }) {
       suggestions={[]}
       videoQuestions={questions}
       refreshQuestions={() => void api.getVideoQuestions(taskId).then(setQuestions).catch(() => {})}
+      studyBlock={studyBlock}
+      studyError={studyError}
+      returnToStudy={returnHref}
     />
   )
 }

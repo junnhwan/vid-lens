@@ -46,6 +46,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 		{
 			auth.GET("/user/profile", handlers.user.GetProfile)
 			if h := handlers.artifacts; h != nil {
+				auth.GET("/learning-position", h.LearningPosition)
+				auth.PATCH("/learning-position", h.SaveLearningPosition)
 				auth.POST("/artifact-runs", middleware.RateLimit(rateLimiter), h.Submit)
 				auth.GET("/artifact-runs/:id", h.Run)
 				auth.GET("/artifact-runs/:id/events", h.Events)
@@ -55,6 +57,9 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				auth.GET("/artifacts", h.List)
 				auth.POST("/artifacts", h.Create)
 				auth.GET("/artifacts/:id", h.Get)
+				auth.GET("/artifacts/:id/blocks/:block_id/context", h.BlockContext)
+				auth.POST("/artifacts/:id/answer-preview", h.PreviewAnswer)
+				auth.POST("/artifacts/:id/answer-import", h.ImportAnswer)
 				auth.PATCH("/artifacts/:id", h.Save)
 				auth.POST("/artifacts/:id/adopt", h.Adopt)
 				auth.GET("/artifacts/:id/versions", h.Versions)

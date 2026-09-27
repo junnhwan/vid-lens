@@ -5,7 +5,7 @@ import type {
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
-  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress,
+  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress, VisualProgress,
 } from './types'
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
@@ -145,6 +145,7 @@ export const api = {
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
   setTaskVisualDisabled: (id: number, disabled: boolean) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { disabled }),
   getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
+  getVisualProgress: (id: number) => req<VisualProgress>(`/media/task/${id}/visual-progress`, 'GET'),
   updateTaskTitle: (id: number, title: string) =>
     req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
   getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),

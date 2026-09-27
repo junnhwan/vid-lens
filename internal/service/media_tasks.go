@@ -235,6 +235,10 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 			task.SummaryProgress = progress
 		}
 	}
+	if indexed, visual, presenceErr := s.repo.Task.ProcessingPresenceByTaskIDs([]int64{task.ID}); presenceErr == nil {
+		task.HasRAGIndex = indexed[task.ID]
+		task.VisualStatus = visual[task.ID]
+	}
 	return task, nil
 }
 
@@ -248,11 +252,7 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 	if len(tasks) == 0 {
 		return tasks, total, nil
 	}
-	ids := make([]int64, len(tasks))
-	for i := range tasks {
-		ids[i] = tasks[i].ID
-	}
-	txSet, sumSet, flagErr := s.repo.Task.ResultPresenceByTaskIDs(ids)
+	txSet, sumSet, flagErr := s.repo.Task.ResultPresenceByTaskIDs(tasks)
 	if flagErr != nil {
 		// 标记失败不阻断列表；前端仍可点开详情
 		return tasks, total, nil
@@ -260,6 +260,16 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 	for i := range tasks {
 		tasks[i].HasTranscription = txSet[tasks[i].ID]
 		tasks[i].HasSummary = sumSet[tasks[i].ID]
+	}
+	ids := make([]int64, len(tasks))
+	for i := range tasks {
+		ids[i] = tasks[i].ID
+	}
+	if indexed, visual, presenceErr := s.repo.Task.ProcessingPresenceByTaskIDs(ids); presenceErr == nil {
+		for i := range tasks {
+			tasks[i].HasRAGIndex = indexed[tasks[i].ID]
+			tasks[i].VisualStatus = visual[tasks[i].ID]
+		}
 	}
 	return tasks, total, nil
 }
@@ -303,22 +313,9 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 	if task.UserID != userID {
 		return nil, fmt.Errorf("无权访问此任务")
 	}
-	transcriptRows, err := s.repo.TranscriptionChunk.ListByTaskID(taskID)
+	_, transcriptRows, err := taskTranscriptSource(s.repo, task)
 	if err != nil {
 		return nil, fmt.Errorf("读取转写时间线失败: %w", err)
-	}
-	// Older successful tasks may only have the compatibility full-transcript
-	// row. Preserve that source in the timeline without inventing timestamps.
-	if len(transcriptRows) == 0 {
-		if transcription, lookupErr := s.repo.Transcription.FindByTaskID(taskID); lookupErr != nil {
-			return nil, fmt.Errorf("读取转写时间线失败: %w", lookupErr)
-		} else if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
-			transcriptRows = []model.VideoTranscriptionChunk{{
-				ID: transcription.ID, TaskID: taskID, ChunkIndex: 0,
-				SegmentKey: fmt.Sprintf("transcription:%d", transcription.ID),
-				Status:     model.TranscriptionChunkStatusCompleted, Content: transcription.Content,
-			}}
-		}
 	}
 	frames, err := s.repo.VisualFrame.ListByTaskID(taskID)
 	if err != nil {

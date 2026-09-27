@@ -75,7 +75,7 @@ function RetrievalRoute() {
 
 function VideoChatRoute() {
   const { id = '' } = useParams()
-  return <VideoChatPage params={{ id }} />
+  return <VideoChatPage params={{ id }} searchParams={useRouteSearchParams()} />
 }
 
 function KnowledgeChatRoute() {

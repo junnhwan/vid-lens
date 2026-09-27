@@ -7,7 +7,7 @@ export const blockSchema = z.object({
   block_id: id, parent_id: id.nullable(), type: z.enum(['section', 'concept', 'example', 'note']),
   title: z.string().min(1).max(200), content: z.string().max(8000),
   claim_origin: z.enum(['source', 'synthesis', 'user']),
-  evidence_refs: z.array(z.object({ evidence_id: id, relation: z.enum(['supports', 'context', 'contradicts']) })),
+  evidence_refs: z.array(z.object({ evidence_id: id, relation: z.enum(['supports', 'context', 'contradicts']), chat_citation_id: z.string().max(32).optional() })),
   source_block_ids: z.array(z.string().min(1).max(100)).max(200).optional(),
 })
 export const bodySchema = z.object({
@@ -66,4 +66,9 @@ export type StudyBlock = z.infer<typeof blockSchema>
 export type Evidence = z.infer<typeof evidenceSchema>
 export type GenerationRun = z.infer<typeof runSchema>
 export type ProductTask = z.infer<typeof taskSchema>
+export const positionSchema = z.object({ revision: integer, task_id: z.number().int().positive(), artifact_id: z.string(), version_id: z.string(), block_id: z.string(), time_ms: integer, updated_at: z.string(), fallback: z.string().optional() })
+export type LearningPosition = z.infer<typeof positionSchema>
+export const blockContextSchema = z.object({ artifact_id: id, version_id: id, task_id: z.number().int().positive(), block: blockSchema })
+export const answerPreviewSchema = z.object({ message_id: z.number().int().positive(), content: z.string(), after_block_id: id, mapped: z.array(z.object({ evidence_id: id, relation: z.enum(['supports', 'context', 'contradicts']), chat_citation_id: z.string().optional() })), unmapped: z.array(z.string()), version_id: id })
+export type AnswerPreview = z.infer<typeof answerPreviewSchema>
 export interface GenerationInput { kind: 'study'; scope: 'video'; source_ids: number[]; goal: string; artifact_id?: string; base_version?: number }
