@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -62,12 +64,16 @@ type streamingRecordingChatClient struct {
 	recordingChatClient
 	streamed    []string
 	streamCalls int
+	delay       time.Duration
 }
 
 func (c *streamingRecordingChatClient) StreamChat(_ context.Context, messages []ai.ChatMessage, emit func(delta string) error) error {
 	c.streamCalls++
 	c.messages = append([]ai.ChatMessage(nil), messages...)
 	for _, delta := range c.streamed {
+		if c.delay > 0 {
+			time.Sleep(c.delay)
+		}
 		if err := emit(delta); err != nil {
 			return err
 		}
@@ -696,7 +702,7 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 		t.Fatalf("create session: %v", err)
 	}
 
-	chatClient := &streamingRecordingChatClient{streamed: []string{"第一段", "第二段"}}
+	chatClient := &streamingRecordingChatClient{streamed: []string{"第一段", "第二段"}, delay: 40 * time.Millisecond}
 	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "真正 token streaming 片段"},
 	}}, ChatConfig{TopK: 5, MinScore: 0.3})
@@ -720,6 +726,9 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 	}
 	if result.Answer != "第一段第二段" {
 		t.Fatalf("answer = %q, want accumulated streaming answer", result.Answer)
+	}
+	if result.ExecutionDurationMS == nil || *result.ExecutionDurationMS < 70 {
+		t.Fatalf("slow response duration = %v", result.ExecutionDurationMS)
 	}
 	var answerEvents []ChatStreamEvent
 	for _, event := range events {
@@ -747,6 +756,21 @@ func TestChatServiceAskStreamUsesProviderStreamingAndStoresAccumulatedAnswer(t *
 	}
 	if messages[1].Content != "第一段第二段" {
 		t.Fatalf("stored assistant content = %q", messages[1].Content)
+	}
+	var snapshot struct {
+		ExecutionDurationMS *int64              `json:"execution_duration_ms"`
+		Steps               []chatExecutionStep `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ExecutionDurationMS == nil || *snapshot.ExecutionDurationMS != *result.ExecutionDurationMS {
+		t.Fatalf("persisted duration=%v live=%v", snapshot.ExecutionDurationMS, result.ExecutionDurationMS)
+	}
+	for _, step := range snapshot.Steps {
+		if step.Kind == "save" {
+			t.Fatal("transport save feedback became a formal step")
+		}
 	}
 }
 

@@ -53,6 +53,7 @@ func TestAgentStreamsPlannerReasoningAndPersistsPublicDecisions(t *testing.T) {
 	defer provider.Close()
 	svc := NewVideoAgentService(NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{TaskID: task.ID, ChunkID: 1, EvidenceID: "ev-progress", Content: "owner"}}}, ChatConfig{TopK: 1}))
 	planned, reasoning, answers := false, 0, 0
+	var doneDuration *int64
 	result, err := svc.Stream(ctx, VideoAgentStreamRequest{UserID: 7, SessionID: session.ID, Question: "owner"}, &fakeEmbeddingClient{dim: 3}, ai.NewOpenAIChatClient(provider.URL, "", "test"), ai.Profile{EmbeddingModel: "embed"}, func(event AgentStreamEvent) error {
 		if event.Type == "progress" {
 			p := event.Data.(ConversationProgress)
@@ -72,6 +73,9 @@ func TestAgentStreamsPlannerReasoningAndPersistsPublicDecisions(t *testing.T) {
 		if event.Type == "answer" {
 			answers++
 		}
+		if event.Type == AgentEventDone {
+			doneDuration = event.Data.(AgentDoneEvent).ExecutionDurationMS
+		}
 		return nil
 	})
 	if err != nil || reasoning != 2 || answers != 2 || result.Answer != "最终回答" {
@@ -85,6 +89,12 @@ func TestAgentStreamsPlannerReasoningAndPersistsPublicDecisions(t *testing.T) {
 		t.Fatal("missing snapshot")
 	}
 	snapshot := *messages[1].RetrievalSnapshot
+	if result.ExecutionDurationMS == nil || *result.ExecutionDurationMS < 0 || !strings.Contains(snapshot, `"execution_duration_ms":`) {
+		t.Fatalf("Agent duration missing from result or saved snapshot: %v %s", result.ExecutionDurationMS, snapshot)
+	}
+	if doneDuration == nil || *doneDuration != *result.ExecutionDurationMS {
+		t.Fatalf("Agent done duration=%v result=%v", doneDuration, result.ExecutionDurationMS)
+	}
 	if !strings.Contains(snapshot, "先检索原始讲解") || strings.Contains(snapshot, "provider-thought-not-persisted") || strings.Contains(snapshot, "internal reason") {
 		t.Fatalf("public snapshot has wrong content: %s", snapshot)
 	}

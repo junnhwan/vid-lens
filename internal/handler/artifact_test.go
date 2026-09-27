@@ -43,6 +43,7 @@ func TestArtifactHandlerContractRoundTripAndEventReplay(t *testing.T) {
 	r.Use(withTestUser(7))
 	r.GET("/sources/video/:id", h.Source)
 	r.POST("/artifacts", h.Create)
+	r.GET("/artifacts", h.List)
 	r.GET("/artifacts/:id", h.Get)
 	r.GET("/artifacts/:id/versions", h.Versions)
 	r.GET("/artifacts/:id/versions/:version_id", h.Version)
@@ -100,6 +101,31 @@ func TestArtifactHandlerContractRoundTripAndEventReplay(t *testing.T) {
 	}
 	if err = db.Create(&model.GenerationRequest{ID: "fixture-request", RunID: run.ID, UserID: 7, IdempotencyKey: "fixture", RequestHash: artifact.Hash("fixture"), RequestJSON: "{}", ArtifactID: detail.Data.ID, ManifestID: sourceEnvelope.Data.ManifestID, QueueDeadline: time.Now().Add(time.Hour)}).Error; err != nil {
 		t.Fatal(err)
+	}
+	linked := request("GET", path, "")
+	var linkedDetail struct {
+		Data service.ArtifactDetail `json:"data"`
+	}
+	if linked.Code != 200 || json.Unmarshal(linked.Body.Bytes(), &linkedDetail) != nil || linkedDetail.Data.LatestRun == nil || linkedDetail.Data.LatestRun.ID != run.ID || linkedDetail.Data.LatestRun.ArtifactID != detail.Data.ID || linkedDetail.Data.LatestRun.SourceTaskID != 42 {
+		t.Fatalf("artifact detail latest_run contract: %s", linked.Body.String())
+	}
+	listed := request("GET", "/artifacts?source_id=42", "")
+	var listedArtifacts struct {
+		Data struct {
+			List []service.ArtifactListItem `json:"list"`
+		} `json:"data"`
+	}
+	if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &listedArtifacts) != nil || len(listedArtifacts.Data.List) != 1 || listedArtifacts.Data.List[0].LatestRun == nil || listedArtifacts.Data.List[0].LatestRun.ID != run.ID {
+		t.Fatalf("artifact list latest_run contract: %s", listed.Body.String())
+	}
+	tasks := request("GET", "/tasks", "")
+	var taskEnvelope struct {
+		Data struct {
+			List []service.ArtifactTaskView `json:"list"`
+		} `json:"data"`
+	}
+	if tasks.Code != 200 || json.Unmarshal(tasks.Body.Bytes(), &taskEnvelope) != nil || len(taskEnvelope.Data.List) == 0 || taskEnvelope.Data.List[0].ResourceID != run.ID || taskEnvelope.Data.List[0].Run == nil || taskEnvelope.Data.List[0].Run.ArtifactID != detail.Data.ID {
+		t.Fatalf("task resource/run/artifact identity contract: %s", tasks.Body.String())
 	}
 	for i := int64(1); i <= 2; i++ {
 		if err = db.Create(&model.RunEvent{RunID: run.ID, Seq: i, Type: "run.completed", DataJSON: `{"status":"completed"}`}).Error; err != nil {

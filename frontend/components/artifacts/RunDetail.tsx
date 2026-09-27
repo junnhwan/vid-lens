@@ -27,6 +27,8 @@ export function RunDetail({ id, readOnly, onClose, onRun }: { id: string; readOn
       const run = name === 'retry' ? await artifactApi.retry(id, retryKey.current) : name === 'cancel' ? await artifactApi.cancel(id) : await artifactApi.resume(id)
       client.setQueryData(['artifact-run', run.id], run)
       await client.invalidateQueries({ queryKey: ['product-tasks'] })
+      await client.invalidateQueries({ queryKey: ['artifacts'] })
+      await client.invalidateQueries({ queryKey: ['artifact', run.artifact_id] })
       if (run.id !== id) onRun(run.id)
     } catch (error) { setError(artifactError(error)) } finally { setBusy(false) }
   }
@@ -40,6 +42,7 @@ export function RunDetail({ id, readOnly, onClose, onRun }: { id: string; readOn
     {query.isPending ? <LoadingBlock label="正在读取后台状态…" /> : query.error ? <ErrorState message={artifactError(query.error)} onRetry={() => void query.refetch()} /> : <RunProgress run={query.data} />}
     {run?.result?.is_candidate && <p className="product-description">生成期间笔记已有修改，本次结果保留为候选，需要你查看并采用。</p>}
     {error && <p className="form-err" role="alert">{error}</p>}
-    <p className="product-description">任务 ID：<span className="mono" style={{ overflowWrap: 'anywhere' }}>{id}</span></p>
+    {run && <p className="product-description">来源：<Link href={`/video/${run.source_task_id}`}>视频 #{run.source_task_id}</Link> · 成果：<Link href={`/artifacts/${encodeURIComponent(run.artifact_id)}`}>打开成果页</Link></p>}
+    <p className="product-description">运行 ID：<span className="mono" style={{ overflowWrap: 'anywhere' }}>{id}</span></p>
   </Modal>
 }

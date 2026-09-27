@@ -22,7 +22,7 @@ export const bodySchema = z.object({
   }
   if (new TextEncoder().encode(JSON.stringify(body)).length > 512 * 1024) ctx.addIssue({ code: 'custom', message: '正文超过 512 KiB' })
 })
-export const artifactSchema = z.object({
+const artifactMetadataSchema = z.object({
   id, kind: z.literal('study'), title: z.string(), head_version: integer,
   current_version_id: id.nullable(), created_at: z.string(), updated_at: z.string(),
 })
@@ -33,7 +33,6 @@ export const versionSchema = z.object({
   source_status: z.enum(['current', 'outdated']),
   was_candidate: z.boolean(), adopted_from_version_id: id.nullable(),
 })
-export const detailSchema = artifactSchema.extend({ version: versionSchema.nullable() })
 export const versionSummarySchema = versionSchema.omit({ body: true, source_status: true })
 export const evidenceSchema = z.object({
   id, manifest_id: id, source_id: z.number().int().positive(), source_title: z.string(),
@@ -42,12 +41,14 @@ export const evidenceSchema = z.object({
 })
 export const sourceSchema = z.object({ manifest_id: id, source_id: z.number().int().positive(), title: z.string(), evidence: z.array(evidenceSchema) })
 export const runSchema = z.object({
-  id, artifact_id: id, parent_run_id: z.string().nullable(), status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'budget_exhausted']),
+  id, artifact_id: id, source_task_id: z.number().int().positive(), parent_run_id: z.string().nullable(), status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'budget_exhausted']),
   stage: z.string(), cancel_requested: z.boolean(), can_cancel: z.boolean(), can_retry: z.boolean(), can_resume: z.boolean(),
   result: z.object({ artifact_id: id, version_id: id, quality: z.string(), is_candidate: z.boolean() }).nullable(),
   error_code: z.string().nullable(), created_at: z.string(), started_at: z.string().nullable(), finished_at: z.string().nullable(), last_seq: integer,
   usage: z.object({ llm_calls: integer, prompt_tokens: integer, completion_tokens: integer, token_source: z.enum(['unknown', 'estimated', 'actual', 'mixed']) }),
 })
+export const artifactSchema = artifactMetadataSchema.extend({ latest_run: runSchema.nullable() })
+export const detailSchema = artifactSchema.extend({ version: versionSchema.nullable() })
 export const taskSchema = z.object({
   id, type: z.enum(['artifact_generation', 'video_processing']), resource_id: id, title: z.string(),
   status: z.string(), stage: z.string(), can_cancel: z.boolean(), can_retry: z.boolean(), can_resume: z.boolean(),

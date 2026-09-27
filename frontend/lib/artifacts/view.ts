@@ -1,6 +1,12 @@
-import type { StudyBody, StudyBlock, Evidence, GenerationRun } from './schema.ts'
+import type { StudyBody, StudyBlock, Evidence, GenerationRun, Artifact } from './schema.ts'
 
 export const runLabels: Record<GenerationRun['status'], string> = { pending: '排队中', running: '生成中', completed: '已完成 · 待核对', failed: '生成失败', cancelled: '已取消', budget_exhausted: '预算已用尽' }
+export function artifactCardStatus(artifact: Artifact): string {
+  const latest = artifact.latest_run
+  if (!artifact.current_version_id) return latest ? runLabels[latest.status] : '尚无已保存版本'
+  const base = `v${artifact.head_version} · 待核对`
+  return latest && ['failed', 'cancelled', 'budget_exhausted'].includes(latest.status) ? `${base} · 最近一次：${runLabels[latest.status]}` : base
+}
 export const stageLabels: Record<string, string> = { queued: '等待后台处理', collecting: '整理视频来源', generating: '生成学习笔记', validating: '核对结构与引用', completed: '学习笔记已保存', failed: '生成未完成', cancelled: '已停止生成', budget_exhausted: '执行预算不足' }
 export const errorLabels: Record<string, string> = {
   invalid_request: '提交内容不符合要求，请核对后重试。', invalid_evidence: '引用未通过验证，请重新读取来源。', unsupported_recipe: '当前仅支持单视频学习笔记。', internal_error: '服务暂时不可用，请稍后重试。',

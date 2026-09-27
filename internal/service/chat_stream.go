@@ -109,14 +109,15 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 		return nil, err
 	}
 	if err := emit(ChatStreamEvent{Type: "done", Data: map[string]interface{}{
-		"message_id":         result.MessageID,
-		"model":              result.Model,
-		"profile_id":         result.ProfileID,
-		"answer":             result.Answer,
-		"degraded":           degraded,
-		"degradation_reason": degradationReason,
-		"diagnostic_id":      result.DiagnosticID,
-		"memory_policy":      memoryPolicy,
+		"message_id":            result.MessageID,
+		"execution_duration_ms": result.ExecutionDurationMS,
+		"model":                 result.Model,
+		"profile_id":            result.ProfileID,
+		"answer":                result.Answer,
+		"degraded":              degraded,
+		"degradation_reason":    degradationReason,
+		"diagnostic_id":         result.DiagnosticID,
+		"memory_policy":         memoryPolicy,
 	}}); err != nil {
 		return nil, err
 	}

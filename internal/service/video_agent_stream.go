@@ -102,17 +102,18 @@ type AgentRetrieveHitsEvent struct {
 }
 
 type AgentDoneEvent struct {
-	Model        string                      `json:"model,omitempty"`
-	ProfileID    int64                       `json:"profile_id,omitempty"`
-	StopReason   string                      `json:"stop_reason,omitempty"`
-	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
-	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
-	Answer       string                      `json:"answer"`
-	RunID        string                      `json:"run_id"`
-	MessageID    int64                       `json:"message_id"`
-	Degraded     bool                        `json:"degraded"`
-	TraceSummary AgentTraceSummary           `json:"trace_summary"`
-	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
+	ExecutionDurationMS *int64                      `json:"execution_duration_ms,omitempty"`
+	Model               string                      `json:"model,omitempty"`
+	ProfileID           int64                       `json:"profile_id,omitempty"`
+	StopReason          string                      `json:"stop_reason,omitempty"`
+	BudgetNotice        *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget              *frozenAgentBudget          `json:"budget,omitempty"`
+	Answer              string                      `json:"answer"`
+	RunID               string                      `json:"run_id"`
+	MessageID           int64                       `json:"message_id"`
+	Degraded            bool                        `json:"degraded"`
+	TraceSummary        AgentTraceSummary           `json:"trace_summary"`
+	MemoryPolicy        model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 type AgentTraceSummary struct {
@@ -425,7 +426,8 @@ func (s *VideoAgentService) Stream(ctx context.Context, req VideoAgentStreamRequ
 	}
 	if err := streamEmit(AgentStreamEvent{Type: AgentEventDone, Data: AgentDoneEvent{
 		Model: result.Model, ProfileID: result.ProfileID,
-		StopReason: result.StopReason, BudgetNotice: result.BudgetNotice, Budget: result.Budget,
+		ExecutionDurationMS: result.ExecutionDurationMS,
+		StopReason:          result.StopReason, BudgetNotice: result.BudgetNotice, Budget: result.Budget,
 		RunID: result.RunID, MessageID: result.MessageID, Answer: result.Answer, Degraded: result.Degraded,
 		TraceSummary: agentTraceSummary(result.Trace),
 		MemoryPolicy: result.MemoryPolicy,

@@ -22,6 +22,7 @@ export interface AgentSnapshotStepJSON {
 }
 
 interface AgentSnapshotEnvelopeJSON {
+  execution_duration_ms?: number
   stop_reason?: string
   budget_notice?: BudgetNotice
   degraded?: boolean
@@ -44,6 +45,7 @@ interface LegacyVideoAgentStepJSON {
 }
 
 export interface ParsedSnapshotTrace {
+  executionDurationMs?: number
   degraded?: boolean
   degradationReason?: string
   diagnosticId?: string
@@ -64,6 +66,7 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
     if (!parsed || typeof parsed !== 'object') return undefined
 
     const obj = parsed as AgentSnapshotEnvelopeJSON
+    const executionDurationMs = typeof obj.execution_duration_ms === 'number' && Number.isFinite(obj.execution_duration_ms) && obj.execution_duration_ms >= 0 ? obj.execution_duration_ms : undefined
     const runId = obj.run_id?.trim() || undefined
     const mode = obj.mode?.trim() || undefined
     if (Array.isArray(obj.steps)) {
@@ -71,10 +74,10 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
       const budget = budgetProgress(obj.stop_reason, obj.budget_notice)
       if (budget) steps = progressTrace(steps, budget)
       const isAgentEnvelope = mode !== 'chat'
-      return { ...(obj.degraded ? { degraded: true } : {}), ...(obj.degradation_reason ? { degradationReason: obj.degradation_reason } : {}), ...(obj.diagnostic_id ? { diagnosticId: obj.diagnostic_id } : {}), steps, runId, mode, isAgentEnvelope, source: isAgentEnvelope ? 'agent' : 'server' }
+      return { ...(executionDurationMs !== undefined ? { executionDurationMs } : {}), ...(obj.degraded ? { degraded: true } : {}), ...(obj.degradation_reason ? { degradationReason: obj.degradation_reason } : {}), ...(obj.diagnostic_id ? { diagnosticId: obj.diagnostic_id } : {}), steps, runId, mode, isAgentEnvelope, source: isAgentEnvelope ? 'agent' : 'server' }
     }
     if (Array.isArray(obj.trace) && obj.trace.length > 0) {
-      return { steps: obj.trace.map((step, index) => legacyAgentStepToTrace(step, `hist-${index + 1}`, runId)), runId, mode, isAgentEnvelope: true, source: 'legacy' }
+      return { steps: obj.trace.map((step, index) => legacyAgentStepToTrace(step, `hist-${index + 1}`, runId)), runId, mode, isAgentEnvelope: true, source: 'legacy', ...(executionDurationMs !== undefined ? { executionDurationMs } : {}) }
     }
     if (Array.isArray(obj.citations)) {
       const isAgentEnvelope = Boolean(obj.version === 1 || mode === 'agent' || mode === 'research' || obj.template)
@@ -82,7 +85,7 @@ export function parseSnapshotTrace(snapshot?: string): ParsedSnapshotTrace | und
         ...(obj.degraded ? { degraded: true } : {}),
         ...(obj.degradation_reason ? { degradationReason: obj.degradation_reason } : {}),
         ...(obj.diagnostic_id ? { diagnosticId: obj.diagnostic_id } : {}),
-        steps: traceFromCitationCount(obj.citations.length), runId, mode, isAgentEnvelope,
+        steps: traceFromCitationCount(obj.citations.length), runId, mode, isAgentEnvelope, ...(executionDurationMs !== undefined ? { executionDurationMs } : {}),
         source: isAgentEnvelope ? 'agent' : 'inferred',
       }
     }

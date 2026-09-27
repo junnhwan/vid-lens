@@ -373,7 +373,7 @@ func loadAgentRunResult(ctx context.Context, s *VideoAgentService, userID, sessi
 		if decodeErr != nil || snapshot.RunID != runID {
 			continue
 		}
-		return &VideoAgentResult{StopReason: snapshot.StopReason, BudgetNotice: snapshot.BudgetNotice, Budget: snapshot.Budget, Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, ProfileID: message.ProfileID, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
+		return &VideoAgentResult{ExecutionDurationMS: snapshot.ExecutionDurationMS, ExecutionStartedAt: snapshot.ExecutionStartedAt, ExecutionFinishedAt: snapshot.ExecutionFinishedAt, StopReason: snapshot.StopReason, BudgetNotice: snapshot.BudgetNotice, Budget: snapshot.Budget, Degraded: snapshot.Degraded, Answer: message.Content, Template: snapshot.Template, Citations: append([]Citation(nil), snapshot.Citations...), Trace: append([]VideoAgentStep(nil), snapshot.Trace...), Model: message.ModelName, ProfileID: message.ProfileID, MessageID: message.ID, RunID: snapshot.RunID, Mode: snapshot.Mode, Memory: snapshot.Memory, MemoryPolicy: snapshot.MemoryPolicy}, nil
 	}
 	return nil, nil
 }

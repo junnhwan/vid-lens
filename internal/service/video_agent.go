@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -31,22 +32,25 @@ type VideoAgentRequest struct {
 }
 
 type VideoAgentResult struct {
-	StopReason   string                      `json:"stop_reason,omitempty"`
-	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
-	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
-	Progress     []ConversationProgress      `json:"progress,omitempty"`
-	Degraded     bool                        `json:"degraded,omitempty"`
-	MessageID    int64                       `json:"message_id"`
-	Answer       string                      `json:"answer"`
-	Template     string                      `json:"template"`
-	Citations    []Citation                  `json:"citations"`
-	Trace        []VideoAgentStep            `json:"trace"`
-	Model        string                      `json:"model"`
-	ProfileID    int64                       `json:"profile_id,omitempty"`
-	RunID        string                      `json:"run_id,omitempty"`
-	Mode         string                      `json:"mode,omitempty"`
-	Memory       *MemorySnapshotIdentity     `json:"memory,omitempty"`
-	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
+	ExecutionDurationMS *int64                      `json:"execution_duration_ms,omitempty"`
+	ExecutionStartedAt  *string                     `json:"execution_started_at,omitempty"`
+	ExecutionFinishedAt *string                     `json:"execution_finished_at,omitempty"`
+	StopReason          string                      `json:"stop_reason,omitempty"`
+	BudgetNotice        *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget              *frozenAgentBudget          `json:"budget,omitempty"`
+	Progress            []ConversationProgress      `json:"progress,omitempty"`
+	Degraded            bool                        `json:"degraded,omitempty"`
+	MessageID           int64                       `json:"message_id"`
+	Answer              string                      `json:"answer"`
+	Template            string                      `json:"template"`
+	Citations           []Citation                  `json:"citations"`
+	Trace               []VideoAgentStep            `json:"trace"`
+	Model               string                      `json:"model"`
+	ProfileID           int64                       `json:"profile_id,omitempty"`
+	RunID               string                      `json:"run_id,omitempty"`
+	Mode                string                      `json:"mode,omitempty"`
+	Memory              *MemorySnapshotIdentity     `json:"memory,omitempty"`
+	MemoryPolicy        model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 type VideoAgentStep struct {
@@ -127,6 +131,23 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// The durable run creation is the Agent timer start. Stop at the completed
+	// answer, before exchange persistence; transport acknowledgements are excluded.
+	if result.ExecutionDurationMS == nil {
+		run, err := s.executionJournal.GetRun(ctx, userID, result.RunID)
+		if err != nil {
+			return err
+		}
+		if run != nil {
+			finished := time.Now().UTC()
+			duration := finished.Sub(run.CreatedAt).Milliseconds()
+			if duration < 0 {
+				duration = 0
+			}
+			startedText, finishedText := run.CreatedAt.UTC().Format(time.RFC3339Nano), finished.Format(time.RFC3339Nano)
+			result.ExecutionDurationMS, result.ExecutionStartedAt, result.ExecutionFinishedAt = &duration, &startedText, &finishedText
+		}
 	}
 	snapshot, err := MarshalAgentSnapshot(result)
 	if err != nil {

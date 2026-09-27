@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
@@ -87,18 +88,30 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 	mode := "chat"
 	profile := ai.Profile{}
 	steps := []chatExecutionStep{}
+	var executionDurationMS *int64
+	var executionStartedAt, executionFinishedAt *string
 	if record != nil {
 		mode, profile = record.Mode, record.Profile
 		steps = record.completedSteps()
+		finished := time.Now().UTC()
+		duration := finished.Sub(record.StartedAt).Milliseconds()
+		if duration < 0 {
+			duration = 0
+		}
+		startedText, finishedText := record.StartedAt.Format(time.RFC3339Nano), finished.Format(time.RFC3339Nano)
+		executionDurationMS, executionStartedAt, executionFinishedAt = &duration, &startedText, &finishedText
 	}
 	snapshot, err = json.Marshal(struct {
-		Citations         []Citation          `json:"citations"`
-		Steps             []chatExecutionStep `json:"steps"`
-		Mode              string              `json:"mode"`
-		Degraded          bool                `json:"degraded,omitempty"`
-		DegradationReason string              `json:"degradation_reason,omitempty"`
-		DiagnosticID      string              `json:"diagnostic_id,omitempty"`
-	}{citations, steps, mode, degradationReason != "", degradationReason, diagnosticID})
+		Citations           []Citation          `json:"citations"`
+		Steps               []chatExecutionStep `json:"steps"`
+		Mode                string              `json:"mode"`
+		Degraded            bool                `json:"degraded,omitempty"`
+		DegradationReason   string              `json:"degradation_reason,omitempty"`
+		DiagnosticID        string              `json:"diagnostic_id,omitempty"`
+		ExecutionDurationMS *int64              `json:"execution_duration_ms,omitempty"`
+		ExecutionStartedAt  *string             `json:"execution_started_at,omitempty"`
+		ExecutionFinishedAt *string             `json:"execution_finished_at,omitempty"`
+	}{citations, steps, mode, degradationReason != "", degradationReason, diagnosticID, executionDurationMS, executionStartedAt, executionFinishedAt})
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +141,7 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 	if recentLimit > 0 {
 		_ = s.refreshRecentMemory(ctx, userID, sessionID, recentLimit)
 	}
-	return &AskResult{MessageID: assistantMessage.ID, Answer: answer, Citations: citations, Model: modelName, ProfileID: profile.ID, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID}, nil
+	return &AskResult{MessageID: assistantMessage.ID, ExecutionDurationMS: executionDurationMS, Answer: answer, Citations: citations, Model: modelName, ProfileID: profile.ID, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID}, nil
 }
 
 func withChatCorrelation(ctx context.Context) context.Context {

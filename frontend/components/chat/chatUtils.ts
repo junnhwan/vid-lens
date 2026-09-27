@@ -30,6 +30,8 @@ export interface ChatMsg {
   reasoning?: Record<string, string>
   processStartedAt?: number
   processFinishedAt?: number
+  executionDurationMs?: number
+  transientStatus?: string
   cancelled?: boolean
   createdAt?: number
 }
@@ -44,7 +46,7 @@ export function parseMessages(
   msgs: ChatMessage[],
   memberColor?: (taskId: number) => string,
 ): ChatMsg[] {
-  return msgs.map((m, index) => {
+  return msgs.map((m) => {
     const cites = m.role === 'assistant' ? citesFromSnapshot(m.retrieval_snapshot, memberColor) : undefined
     const snapshotTrace = m.role === 'assistant' ? parseSnapshotTrace(m.retrieval_snapshot) : undefined
     const trace = m.role === 'assistant'
@@ -58,10 +60,7 @@ export function parseMessages(
       ...(m.model_name ? { modelName: m.model_name } : {}),
       ...(m.profile_id ? { profileId: m.profile_id } : {}),
       createdAt: Date.parse(m.created_at),
-      ...(m.role === 'assistant' && msgs[index - 1]?.role === 'user' ? {
-        processStartedAt: Date.parse(msgs[index - 1].created_at),
-        processFinishedAt: Date.parse(m.created_at),
-      } : {}),
+      ...(snapshotTrace?.executionDurationMs !== undefined ? { executionDurationMs: snapshotTrace.executionDurationMs } : {}),
       ...(snapshotTrace?.degraded ? { degraded: true } : {}),
       ...(snapshotTrace?.degradationReason ? { degradationReason: snapshotTrace.degradationReason } : {}),
       ...(snapshotTrace?.diagnosticId ? { diagnosticId: snapshotTrace.diagnosticId } : {}),

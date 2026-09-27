@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { bodySchema, detailSchema, evidenceSchema, runSchema } from './schema.ts'
-import { canReplay, evidenceTime, isPointEvidence, mapTree, warningMessage } from './view.ts'
+import { artifactCardStatus, canReplay, evidenceTime, isPointEvidence, mapTree, warningMessage } from './view.ts'
 import { studyFixture, evidenceFixtures, runFixture } from '../../dev/productFixtures.ts'
 
 test('first-delivery specimens validate against the API contract', () => {
@@ -22,6 +22,14 @@ test('point evidence seeks to its frame and generated warnings read as product c
   assert.equal(evidenceTime(point), '01:00 · 画面时间点')
   assert.match(warningMessage('covered_segments:2/3'), /2\/3/)
   assert.match(warningMessage('coverage_is_observations_not_all_video_frames'), /抽样观察/)
+})
+
+test('artifact states use the server latest run and preserve a readable prior version', () => {
+  for (const [status, label] of [['pending', '排队中'], ['running', '生成中'], ['failed', '生成失败'], ['cancelled', '已取消'], ['budget_exhausted', '预算已用尽']] as const) {
+    const empty = { ...studyFixture, current_version_id: null, head_version: 0, latest_run: { ...runFixture, status } }
+    assert.equal(artifactCardStatus(empty), label)
+  }
+  assert.match(artifactCardStatus({ ...studyFixture, latest_run: { ...runFixture, status: 'failed' } }), /v1.*最近一次：生成失败/)
 })
 test('invalid schema, broken parent order, duplicate identities and unsupported claims are rejected', () => {
   const body = structuredClone(studyFixture.version!.body)

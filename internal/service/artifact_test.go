@@ -213,6 +213,125 @@ func TestArtifactHTTPModelPersistenceEditingEvidenceAndRetry(t *testing.T) {
 	}
 }
 
+func TestArtifactLatestRunIsOwnerScopedAndIndependentOfTaskPageOrLateUpdates(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	first, err := svc.Submit(ctx, 7, "first-attempt", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Put the artifact's first task beyond the default task page.
+	for i := 0; i < 22; i++ {
+		req := artifactRequest()
+		req.Goal = fmt.Sprintf("other %d", i)
+		if _, err := svc.Submit(ctx, 7, fmt.Sprintf("other-%d", i), req, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newAttempt := artifactRequest()
+	newAttempt.ArtifactID = &first.ArtifactID
+	newest, err := svc.Submit(ctx, 7, "new-attempt", newAttempt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A late status update on the older run must not make it the latest attempt.
+	if err := db.Model(&model.AgentRun{}).Where("id=?", first.ID).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().Add(time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	detail, err := svc.Get(ctx, 7, first.ArtifactID)
+	if err != nil || detail.LatestRun == nil || detail.LatestRun.ID != newest.ID || detail.LatestRun.SourceTaskID != 42 || detail.Version != nil {
+		t.Fatalf("detail=%+v err=%v", detail, err)
+	}
+	items, _, err := svc.List(ctx, 7, 42, 2, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range items {
+		if item.ID == first.ArtifactID {
+			found = true
+			if item.LatestRun == nil || item.LatestRun.ID != newest.ID {
+				t.Fatalf("list item=%+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("source-filtered artifact missing beyond first task page")
+	}
+	if _, err := svc.Get(ctx, 8, first.ArtifactID); err == nil {
+		t.Fatal("cross-owner detail visible")
+	}
+	other, total, err := svc.List(ctx, 8, 42, 1, 20)
+	if err != nil || total != 0 || len(other) != 0 {
+		t.Fatalf("cross-owner list=%+v total=%d err=%v", other, total, err)
+	}
+}
+
+func TestArtifactSubmitChecksInheritedSourceOwnerAndReadiness(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	_, err := svc.Submit(ctx, 8, "foreign-source", artifactRequest(), nil)
+	requireArtifactCode(t, err, "not_found")
+	if err := db.Model(&model.VideoTask{}).Where("id=?", 42).Update("status", model.TaskStatusQueued).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Submit(ctx, 7, "not-ready-source", artifactRequest(), nil)
+	requireArtifactCode(t, err, "source_not_ready")
+}
+
+func TestArtifactFailedRegenerationPreservesReadableHeadAndLatestFailure(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	first, err := svc.Submit(ctx, 7, "initial-head", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ExecuteArtifact(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	req := artifactRequest()
+	req.ArtifactID = &first.ArtifactID
+	req.BaseVersion = 1
+	failed, err := svc.Submit(ctx, 7, "failed-regeneration", req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AgentRun{}).Where("id=?", failed.ID).Updates(map[string]any{"status": "failed", "stage": "failed", "error_code": "provider_error"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	detail, err := svc.Get(ctx, 7, first.ArtifactID)
+	if err != nil || detail.Version == nil || detail.Version.Body.Title == "" || detail.LatestRun == nil || detail.LatestRun.ID != failed.ID || detail.LatestRun.Status != "failed" {
+		t.Fatalf("head/failure detail=%+v err=%v", detail, err)
+	}
+}
+
+func TestArtifactLatestRunTracksCancelledAttemptThenRetry(t *testing.T) {
+	svc, _, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	run, err := svc.Submit(ctx, 7, "cancel-then-retry", artifactRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Cancel(ctx, 7, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ExecuteArtifact(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	before, err := svc.Get(ctx, 7, run.ArtifactID)
+	if err != nil || before.LatestRun == nil || before.LatestRun.Status != "cancelled" || before.Version != nil {
+		t.Fatalf("cancelled detail=%+v err=%v", before, err)
+	}
+	retry, err := svc.Retry(ctx, 7, run.ID, "cancel-then-retry-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := svc.Get(ctx, 7, run.ArtifactID)
+	if err != nil || after.LatestRun == nil || after.LatestRun.ID != retry.ID || after.LatestRun.Status != "pending" || retry.ParentRunID == nil || *retry.ParentRunID != run.ID {
+		t.Fatalf("retry detail=%+v run=%+v err=%v", after, retry, err)
+	}
+}
+
 func TestArtifactCandidatePreservesConcurrentEdit(t *testing.T) {
 	svc, _, _ := artifactFixture(t, artifactModelResponse)
 	ctx := context.Background()

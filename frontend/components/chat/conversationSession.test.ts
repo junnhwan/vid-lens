@@ -52,7 +52,20 @@ test('reasoning stays separate and final persisted answer replaces deltas includ
   assert.equal(state.messages[1]?.content, '')
   assert.equal(state.messages[1]?.reasoning?.['plan-1'], '检查证据')
   assert.equal(state.messages[1]?.cancelled, undefined)
-  assert.equal(state.messages[1]?.trace?.[0]?.status, 'done')
+  assert.equal(state.messages[1]?.trace?.length, 0)
+  assert.equal(state.messages[1]?.transientStatus, undefined)
+})
+
+test('save feedback stays out of formal Chat steps and server duration wins after completion', () => {
+  let state = conversationSessionReducer(emptyConversationSessionState(), { type: 'rag_start', question: '慢回答' })
+  state = conversationSessionReducer(state, { type: 'progress', event: { id: 'answer', kind: 'answer', label: '生成回答', status: 'running' } })
+  state = conversationSessionReducer(state, { type: 'progress', event: { id: 'save', kind: 'save', label: '保存回答与引用', status: 'running' } })
+  assert.equal(state.messages[1]?.transientStatus, '正在保存回答与引用…')
+  assert.deepEqual(state.messages[1]?.trace?.map(step => step.id), ['answer'])
+  state = conversationSessionReducer(state, { type: 'stream_done', patch: { executionDurationMs: 75_000, content: '完成' } })
+  assert.equal(state.messages[1]?.executionDurationMs, 75_000)
+  assert.equal(state.messages[1]?.transientStatus, undefined)
+  assert.deepEqual(state.messages[1]?.trace?.map(step => step.id), ['answer'])
 })
 
 test('failed planning closes the live timeline before any tool starts', () => {

@@ -420,6 +420,7 @@ export const BLOCKED_ANSWER_PREFIX = '现有证据不足或存在冲突'
 
 // SSE 事件：answer=增量 string / citations=[]Citation / done={message_id,model,answer,degraded} / error={message}
 export interface SSEDone {
+  execution_duration_ms?: number
   message_id: number
   model: string
   profile_id?: number
@@ -490,6 +491,7 @@ export interface AgentRetrieveHitsEvent {
 }
 
 export interface AgentDoneEvent {
+  execution_duration_ms?: number
   stop_reason?: string
   budget_notice?: import('./budgetNotice').BudgetNotice
   answer?: string

@@ -4,6 +4,12 @@ Contract version: 1 (2026-09-27). This file is the frontend/backend integration 
 
 ## Scope and representation
 
+### Product completion extension (2026-09-27)
+
+`GET /artifacts` list items and `GET /artifacts/:id` detail now include required `latest_run: Run|null`. The server selects the newest owner-scoped generation attempt by run `created_at DESC, id DESC`. Task pagination and the time of an older run's late status update do not affect this selection. Existing readable `version` remains available after a later failed, cancelled, or budget-limited attempt. An artifact with no attempt has `latest_run:null`.
+
+`Run` now includes required positive integer `source_task_id`, the source video task ID. `Run.id` is the run ID; `Run.artifact_id` is the artifact ID. The namespaced task `id` remains a task-row identity. For artifact task rows, `resource_id` remains the run ID; for media task rows it remains the video task ID string. Clients navigate using the explicit `run.artifact_id`, `run.source_task_id`, and `run.result`, rather than matching `resource_id` to an artifact ID. Generation submissions still validate owner access and source readiness on the server.
+
 First delivery supports `kind: "study"`, `scope: "video"`, exactly one `source_ids` video. It reads canonical transcript/visual observations without requiring a vector index. Notes and the mind map share the same ordered block tree; a map is a view, not another model call. Other kinds/scopes return `unsupported_recipe`.
 
 Success envelope: `{ "code": 200, "message": "success", "data": ... }` (202 for accepted runs). Error envelope: `{ "code": 409, "message": "...", "data": { "error_code": "version_conflict" } }`. `code` is the HTTP status, not a string error enum. Internal/provider error text is not exposed. Owner mismatches return 404. Demo accounts cannot mutate.

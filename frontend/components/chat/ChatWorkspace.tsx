@@ -502,6 +502,12 @@ function AgentMessageView({
   const isAgentRun = !!msg.agentRun
   const agentMode = (isAgentRun ? (msg.agentMode as AgentUIMode | undefined) ?? 'agent' : undefined)
   const waitingServer = !!msg.streaming && !!agentMode && agentMode !== 'agent' && msg.content.length === 0
+  const [clockNow, setClockNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!msg.streaming) return
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [msg.streaming])
 
   const openCite = (no: number) => {
     const hit = cites.find(c => c.id === `C${no}`)
@@ -610,7 +616,7 @@ function AgentMessageView({
         </button>
       </div>
       {sessionId && msg.messageId && !msg.streaming && <AnswerFeedback key={`${sessionId}:${msg.messageId}`} sessionId={sessionId} messageId={msg.messageId} />}
-      <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…'}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{msg.processStartedAt && msg.processFinishedAt ? ` · 用时 ${formatDuration(msg.processFinishedAt - msg.processStartedAt)}` : ''}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
+      <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.transientStatus || (msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…')}{msg.processStartedAt !== undefined && ` · 已等待 ${formatDuration(Math.max(0, clockNow - msg.processStartedAt))}`}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{!msg.error && !msg.cancelled && ` · ${msg.executionDurationMs !== undefined ? `处理耗时 ${formatDuration(msg.executionDurationMs)}` : '处理耗时未知'}`}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
     </div>
   )
 }

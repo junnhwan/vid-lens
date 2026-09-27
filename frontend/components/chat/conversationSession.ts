@@ -86,6 +86,9 @@ export function conversationSessionReducer(
     case 'reasoning':
       return { ...state, messages: patchLastAssistant(state.messages, current => ({ ...current, reasoning: { ...current.reasoning, [action.event.call_id]: ((current.reasoning?.[action.event.call_id] ?? '') + action.event.delta).slice(0, 64000) } })) }
     case 'progress': {
+      if (action.event.kind === 'save') {
+        return { ...state, messages: patchLastAssistant(state.messages, current => ({ ...current, transientStatus: action.event.status === 'running' ? '正在保存回答与引用…' : undefined })) }
+      }
       const agent = !!state.messages.at(-1)?.agentRun
       const steps = progressTrace(agent ? state.agentTrace.steps : (state.messages.at(-1)?.trace ?? []), action.event)
       return { ...state, ...(agent ? { agentTrace: { ...state.agentTrace, steps } } : { ragTrace: steps }), messages: patchLastAssistant(state.messages, current => ({ ...current, trace: steps, traceSource: agent ? 'agent' : 'server' })) }
@@ -108,7 +111,7 @@ export function conversationSessionReducer(
       return {
         ...state,
         streaming: false,
-        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, error: undefined, cancelled: undefined, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'done'), ...(action.patch || {}) })),
+        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, transientStatus: undefined, error: undefined, cancelled: undefined, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'done'), ...(action.patch || {}) })),
       }
     case 'stream_error': {
       const ragTrace = state.ragTrace.length
@@ -123,12 +126,12 @@ export function conversationSessionReducer(
         streaming: false,
         ragTrace,
         agentTrace: { ...state.agentTrace, finished: true, steps: finishTrace(state.agentTrace.steps, 'error') },
-        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, processFinishedAt: Date.now(), error: action.message, trace: finishTrace(current.trace ?? [], 'error') })),
+        messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, transientStatus: undefined, processFinishedAt: Date.now(), error: action.message, trace: finishTrace(current.trace ?? [], 'error') })),
       }
     }
     case 'stream_cancelled':
       if (!state.streaming) return state
-      return { ...state, streaming: false, ragTrace: finishTrace(state.ragTrace, 'cancelled'), agentTrace: { ...state.agentTrace, finished: true, steps: finishTrace(state.agentTrace.steps, 'cancelled') }, messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, cancelled: true, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'cancelled') })) }
+      return { ...state, streaming: false, ragTrace: finishTrace(state.ragTrace, 'cancelled'), agentTrace: { ...state.agentTrace, finished: true, steps: finishTrace(state.agentTrace.steps, 'cancelled') }, messages: patchLastAssistant(state.messages, current => ({ ...current, streaming: false, transientStatus: undefined, cancelled: true, processFinishedAt: Date.now(), trace: finishTrace(current.trace ?? [], 'cancelled') })) }
     case 'toggle_citation': {
       const message = state.messages[action.messageIndex]
       if (!message) return state

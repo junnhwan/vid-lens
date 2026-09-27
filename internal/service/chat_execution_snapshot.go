@@ -23,16 +23,17 @@ type chatExecutionStep struct {
 }
 
 type chatExecutionRecord struct {
-	Mode    string
-	Profile ai.Profile
-	Steps   []chatExecutionStep
-	starts  map[string]time.Time
+	Mode      string
+	Profile   ai.Profile
+	Steps     []chatExecutionStep
+	starts    map[string]time.Time
+	StartedAt time.Time
 }
 
 type chatExecutionRecordKey struct{}
 
 func withChatExecutionRecord(ctx context.Context, mode ChatMode, profile ai.Profile) context.Context {
-	return context.WithValue(ctx, chatExecutionRecordKey{}, &chatExecutionRecord{Mode: string(normalizeChatMode(mode)), Profile: profile, starts: map[string]time.Time{}})
+	return context.WithValue(ctx, chatExecutionRecordKey{}, &chatExecutionRecord{Mode: string(normalizeChatMode(mode)), Profile: profile, starts: map[string]time.Time{}, StartedAt: time.Now().UTC()})
 }
 
 func chatExecutionFromContext(ctx context.Context) *chatExecutionRecord {

@@ -23,19 +23,22 @@ const (
 // retained as a write-side compatibility alias for clients that still decode
 // the previous Agent envelope.
 type AgentSnapshot struct {
-	StopReason   string                      `json:"stop_reason,omitempty"`
-	BudgetNotice *AgentBudgetNotice          `json:"budget_notice,omitempty"`
-	Budget       *frozenAgentBudget          `json:"budget,omitempty"`
-	Degraded     bool                        `json:"degraded,omitempty"`
-	Version      int                         `json:"version"`
-	RunID        string                      `json:"run_id"`
-	Mode         string                      `json:"mode"`
-	Template     string                      `json:"template,omitempty"`
-	Steps        []AgentSnapshotStep         `json:"steps"`
-	Citations    []Citation                  `json:"citations"`
-	Trace        []VideoAgentStep            `json:"trace,omitempty"`
-	Memory       *MemorySnapshotIdentity     `json:"memory,omitempty"`
-	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
+	ExecutionDurationMS *int64                      `json:"execution_duration_ms,omitempty"`
+	ExecutionStartedAt  *string                     `json:"execution_started_at,omitempty"`
+	ExecutionFinishedAt *string                     `json:"execution_finished_at,omitempty"`
+	StopReason          string                      `json:"stop_reason,omitempty"`
+	BudgetNotice        *AgentBudgetNotice          `json:"budget_notice,omitempty"`
+	Budget              *frozenAgentBudget          `json:"budget,omitempty"`
+	Degraded            bool                        `json:"degraded,omitempty"`
+	Version             int                         `json:"version"`
+	RunID               string                      `json:"run_id"`
+	Mode                string                      `json:"mode"`
+	Template            string                      `json:"template,omitempty"`
+	Steps               []AgentSnapshotStep         `json:"steps"`
+	Citations           []Citation                  `json:"citations"`
+	Trace               []VideoAgentStep            `json:"trace,omitempty"`
+	Memory              *MemorySnapshotIdentity     `json:"memory,omitempty"`
+	MemoryPolicy        model.EffectiveMemoryPolicy `json:"memory_policy"`
 }
 
 // AgentSnapshotStep is deliberately limited to safe execution metadata. It
@@ -190,6 +193,7 @@ func MarshalAgentSnapshot(result *VideoAgentResult) ([]byte, error) {
 		snapshot.Steps = steps
 	}
 	snapshot.Memory = result.Memory
+	snapshot.ExecutionDurationMS, snapshot.ExecutionStartedAt, snapshot.ExecutionFinishedAt = result.ExecutionDurationMS, result.ExecutionStartedAt, result.ExecutionFinishedAt
 	snapshot.Degraded = result.Degraded
 	snapshot.StopReason, snapshot.BudgetNotice, snapshot.Budget = result.StopReason, result.BudgetNotice, result.Budget
 	snapshot.MemoryPolicy = normalizeSnapshotMemoryPolicy(result.MemoryPolicy)

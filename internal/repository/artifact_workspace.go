@@ -143,6 +143,34 @@ func (r *ArtifactRepository) List(ctx context.Context, owner, source int64, page
 	err := q.Order("updated_at DESC, id").Offset((page - 1) * size).Limit(size).Find(&rows).Error
 	return rows, total, err
 }
+
+// LatestRunIDs resolves each artifact's newest submitted attempt from durable
+// generation requests. Task pagination and run update time do not affect order.
+func (r *ArtifactRepository) LatestRunIDs(ctx context.Context, owner int64, artifactIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(artifactIDs))
+	if len(artifactIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ArtifactID string
+		RunID      string
+	}
+	err := r.db.WithContext(ctx).Table("generation_requests AS gr").
+		Select("gr.artifact_id, gr.run_id").
+		Joins("JOIN agent_runs AS ar ON ar.id = gr.run_id AND ar.user_id = gr.user_id AND ar.subject_kind = 'generation_request'").
+		Joins("JOIN artifacts AS a ON a.id = gr.artifact_id AND a.user_id = gr.user_id").
+		Where("gr.user_id = ? AND gr.artifact_id IN ?", owner, artifactIDs).
+		Order("ar.created_at DESC, ar.id DESC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if _, exists := out[row.ArtifactID]; !exists {
+			out[row.ArtifactID] = row.RunID
+		}
+	}
+	return out, nil
+}
 func ownedArtifact(tx *gorm.DB, owner int64, id string, lock bool) (*model.Artifact, error) {
 	var a model.Artifact
 	if lock {

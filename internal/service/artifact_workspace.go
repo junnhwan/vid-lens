@@ -110,7 +110,28 @@ type ArtifactVersionView struct {
 }
 type ArtifactDetail struct {
 	model.Artifact
-	Version *ArtifactVersionView `json:"version"`
+	Version   *ArtifactVersionView `json:"version"`
+	LatestRun *ArtifactRunView     `json:"latest_run"`
+}
+type ArtifactListItem struct {
+	model.Artifact
+	LatestRun *ArtifactRunView `json:"latest_run"`
+}
+
+func (s *ArtifactService) latestRuns(ctx context.Context, owner int64, ids []string) (map[string]*ArtifactRunView, error) {
+	result := make(map[string]*ArtifactRunView, len(ids))
+	runIDs, err := s.repos.Artifact.LatestRunIDs(ctx, owner, ids)
+	if err != nil {
+		return nil, err
+	}
+	for artifactID, runID := range runIDs {
+		run, err := s.Run(ctx, owner, runID)
+		if err != nil {
+			return nil, err
+		}
+		result[artifactID] = run
+	}
+	return result, nil
 }
 
 func (s *ArtifactService) versionView(ctx context.Context, owner int64, v *model.ArtifactVersion) (*ArtifactVersionView, error) {
@@ -138,8 +159,12 @@ func (s *ArtifactService) Get(ctx context.Context, owner int64, id string) (*Art
 	if err != nil {
 		return nil, err
 	}
+	runs, err := s.latestRuns(ctx, owner, []string{id})
+	if err != nil {
+		return nil, err
+	}
 	view, err := s.versionView(ctx, owner, v)
-	return &ArtifactDetail{*a, view}, err
+	return &ArtifactDetail{Artifact: *a, Version: view, LatestRun: runs[id]}, err
 }
 func (s *ArtifactService) Version(ctx context.Context, owner int64, id, vid string) (*ArtifactVersionView, error) {
 	v, err := s.repos.Artifact.Version(ctx, owner, id, vid)
@@ -151,8 +176,24 @@ func (s *ArtifactService) Version(ctx context.Context, owner int64, id, vid stri
 func (s *ArtifactService) Versions(ctx context.Context, owner int64, id string) ([]model.ArtifactVersion, error) {
 	return s.repos.Artifact.Versions(ctx, owner, id)
 }
-func (s *ArtifactService) List(ctx context.Context, owner, source int64, page, size int) ([]model.Artifact, int64, error) {
-	return s.repos.Artifact.List(ctx, owner, source, page, size)
+func (s *ArtifactService) List(ctx context.Context, owner, source int64, page, size int) ([]ArtifactListItem, int64, error) {
+	rows, total, err := s.repos.Artifact.List(ctx, owner, source, page, size)
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	runs, err := s.latestRuns(ctx, owner, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]ArtifactListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, ArtifactListItem{Artifact: row, LatestRun: runs[row.ID]})
+	}
+	return items, total, nil
 }
 func (s *ArtifactService) Create(ctx context.Context, owner int64, ids []int64, body artifact.Body) (*ArtifactDetail, error) {
 	if len(ids) != 1 || ids[0] <= 0 {
@@ -246,6 +287,7 @@ type ArtifactRunUsage struct {
 type ArtifactRunView struct {
 	ID              string             `json:"id"`
 	ArtifactID      string             `json:"artifact_id"`
+	SourceTaskID    int64              `json:"source_task_id"`
 	ParentRunID     *string            `json:"parent_run_id"`
 	Status          string             `json:"status"`
 	Stage           string             `json:"stage"`
@@ -268,7 +310,7 @@ func (s *ArtifactService) Run(ctx context.Context, owner int64, id string) (*Art
 		return nil, err
 	}
 	active := r.Status == "pending" || r.Status == "running"
-	v := &ArtifactRunView{ID: r.ID, ArtifactID: req.ArtifactID, ParentRunID: req.ParentRunID, Status: r.Status, Stage: r.Stage, CancelRequested: r.CancelRequestedAt != nil, CanCancel: active && r.CancelRequestedAt == nil, CanRetry: !active, CanResume: active && r.CancelRequestedAt == nil, CreatedAt: r.CreatedAt, StartedAt: r.ExecutionStartedAt, FinishedAt: r.FinishedAt, LastSeq: r.EventSeq, Usage: ArtifactRunUsage{r.LLMCallsUsed, r.PromptTokensUsed, r.CompletionTokensUsed, r.TokenUsageSource}}
+	v := &ArtifactRunView{ID: r.ID, ArtifactID: req.ArtifactID, SourceTaskID: r.TaskID, ParentRunID: req.ParentRunID, Status: r.Status, Stage: r.Stage, CancelRequested: r.CancelRequestedAt != nil, CanCancel: active && r.CancelRequestedAt == nil, CanRetry: !active, CanResume: active && r.CancelRequestedAt == nil, CreatedAt: r.CreatedAt, StartedAt: r.ExecutionStartedAt, FinishedAt: r.FinishedAt, LastSeq: r.EventSeq, Usage: ArtifactRunUsage{r.LLMCallsUsed, r.PromptTokensUsed, r.CompletionTokensUsed, r.TokenUsageSource}}
 	if r.ErrorCode != "" {
 		v.ErrorCode = &r.ErrorCode
 	}

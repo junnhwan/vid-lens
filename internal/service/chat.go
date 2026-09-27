@@ -143,12 +143,13 @@ type ChatService struct {
 }
 
 type AskResult struct {
-	MessageID    int64                       `json:"message_id"`
-	Answer       string                      `json:"answer"`
-	Citations    []Citation                  `json:"citations"`
-	Model        string                      `json:"model"`
-	ProfileID    int64                       `json:"profile_id,omitempty"`
-	MemoryPolicy model.EffectiveMemoryPolicy `json:"memory_policy"`
+	MessageID           int64                       `json:"message_id"`
+	ExecutionDurationMS *int64                      `json:"execution_duration_ms,omitempty"`
+	Answer              string                      `json:"answer"`
+	Citations           []Citation                  `json:"citations"`
+	Model               string                      `json:"model"`
+	ProfileID           int64                       `json:"profile_id,omitempty"`
+	MemoryPolicy        model.EffectiveMemoryPolicy `json:"memory_policy"`
 	// Degraded marks either an unavailable retrieval path with video-context
 	// fallback or an LLM failure with a limited answer. Rerank fallback alone
 	// does not degrade the published answer.

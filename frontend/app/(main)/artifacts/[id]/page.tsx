@@ -17,7 +17,6 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
   const [adopting, setAdopting] = useState(false)
   const [adoptError, setAdoptError] = useState('')
   const query = useQuery({ queryKey: ['artifact', params.id], queryFn: ({ signal }) => artifactApi.get(params.id, signal), enabled: !!user, refetchInterval: 15_000 })
-  const taskQuery = useQuery({ queryKey: ['product-tasks', 1], queryFn: ({ signal }) => artifactApi.tasks(1, signal), enabled: !!user && !!query.data && !query.data.current_version_id, refetchInterval: 10_000 })
   const versionId = searchParams.version
   const version = useQuery({ queryKey: ['artifact-version', params.id, versionId], queryFn: ({ signal }) => artifactApi.version(params.id, versionId!, signal), enabled: !!user && !!versionId, staleTime: 0 })
   const versions = useQuery({ queryKey: ['artifact-versions', params.id], queryFn: ({ signal }) => artifactApi.versions(params.id, signal), enabled: !!user && versionsOpen })
@@ -29,12 +28,13 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
   if (!query.data || (versionId && !version.data)) return <ProductSkeleton kind="article" />
   const artifact = version.data && versionId ? { ...query.data, version: version.data } : query.data
   if (!artifact.version) {
-    const run = taskQuery.data?.list.find(task => task.resource_id === params.id)?.run
+    const run = artifact.latest_run
     return <div className="page"><div className="empty card"><h1>{artifact.title || '学习笔记'}</h1><p>{run ? `当前任务：${runLabels[run.status]}。` : '当前还没有可阅读的版本。'}可在任务中心查看状态与处理记录。</p><Link className="btn" href={run ? `/tasks?run=${encodeURIComponent(run.id)}` : '/tasks'}>查看任务</Link></div></div>
   }
   const selected = evidenceId ?? artifact.version?.body.blocks.flatMap(block => block.evidence_refs)[0]?.evidence_id
   const candidate = !!versionId && !!version.data?.was_candidate && versionId !== query.data.current_version_id && versionId !== query.data.version?.adopted_from_version_id
   return <>
+    {query.data.latest_run && ['failed', 'cancelled', 'budget_exhausted'].includes(query.data.latest_run.status) && <div className="artifact-notice" role="status">最近一次生成：{runLabels[query.data.latest_run.status]}。原笔记仍可阅读。<Link className="btn btn-sm" href={`/tasks?run=${encodeURIComponent(query.data.latest_run.id)}`}>查看任务</Link></div>}
     {artifact.version?.source_status === 'outdated' && <div className="artifact-notice">视频来源已更新。这份笔记保留旧快照，旧时间不能用于定位新视频，请核对后重新生成。</div>}
     {versionId && <div className="artifact-notice">正在查看{candidate ? '生成候选' : '历史'}版本 v{artifact.version?.version}。<Link className="btn btn-sm" href={`/artifacts/${encodeURIComponent(params.id)}`}>回到当前版本</Link>{candidate && <button className="btn btn-sm btn-primary" disabled={user?.role === 'DEMO' || adopting} onClick={async () => { setAdopting(true); setAdoptError(''); try { const data = await artifactApi.adopt(params.id, query.data.head_version, versionId); client.setQueryData(['artifact', params.id], data); setAdoptError("已采用为新版本，请回到当前版本查看。"); await client.invalidateQueries({ queryKey: ['artifact-versions', params.id] }) } catch (error) { setAdoptError(artifactError(error)) } finally { setAdopting(false) } }}>采用为新版本</button>}{adoptError && <span role="alert">{adoptError}</span>}</div>}
     <ArtifactWorkspace key={`${params.id}-${versionId || 'head'}`} artifact={artifact} readOnly={!user || user.role === 'DEMO' || !!versionId} historical={!!versionId} selectedEvidence={selected} onEvidence={setEvidenceId} evidencePanel={<RemoteEvidencePanel key={artifact.version?.id} outdated={artifact.version?.source_status === 'outdated'} manifestId={artifact.version?.manifest_id} evidenceId={selected} />} onDirtyChange={dirtyChange} onVersions={() => setVersionsOpen(true)} onReload={() => artifactApi.get(params.id)} onSave={async (base, body) => { const data = await artifactApi.save(params.id, base, body); client.setQueryData(['artifact', params.id], data); await client.invalidateQueries({ queryKey: ['artifacts'] }); await client.invalidateQueries({ queryKey: ['artifact-versions', params.id] }); return data }} />
