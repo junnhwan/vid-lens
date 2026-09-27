@@ -19,7 +19,7 @@ The production workspace retains the existing routes and adds `/artifacts`,
 
 ## Where to change the design
 
-- `styles/studio.css`: Studio light canvas, evergreen rail, hero and evidence layout.
+- `styles/studio.css`: Studio layout and interaction polish; it uses the shared theme variables instead of defining colors.
 - `styles/tokens.css`: shared colors, typefaces, spacing, paper, evidence panel,
   map palette, and theme overrides. Change these first for visual adjustments.
 - `styles/product.css`: shell, page headings, dashboard hero and metrics.
