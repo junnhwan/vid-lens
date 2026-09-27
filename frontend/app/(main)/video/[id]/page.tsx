@@ -716,7 +716,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
 
             <div className="ws-actions">
-              <button className="btn" disabled={readOnly || !task.has_transcription} title={!task.has_transcription ? '请先完成视频转写' : readOnly ? '演示账号不可生成成果' : '后台生成学习笔记与导图'} onClick={() => setArtifactCreateOpen(true)}><Icon name="wand" size="sm" />生成学习笔记</button>
+              <button className="btn" disabled={readOnly || processing || !task.has_transcription} title={readOnly ? '演示账号不可生成成果' : processing ? '视频仍在处理，完成后可生成学习笔记' : !task.has_transcription ? '请先完成视频转写' : '后台生成学习笔记与导图'} onClick={() => setArtifactCreateOpen(true)}><Icon name="wand" size="sm" />生成学习笔记</button>
               <Link className="btn btn-ghost" href={`/artifacts?source=${task.id}`}><Icon name="file" size="sm" />相关成果</Link>
               {task.has_summary ? (
                 <button className="btn" onClick={() => setSummaryOpen(true)}>

@@ -102,7 +102,17 @@ func artifactModelResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal([]byte(req.Messages[1].Content), &input)
 	body := artifact.Body{SchemaVersion: 1, Kind: "study", Title: "事务", Blocks: []artifact.Block{{BlockID: "atomic", Type: "concept", Title: "原子性", Content: "提交或回滚。", ClaimOrigin: "source", EvidenceRefs: []artifact.Ref{{EvidenceID: input.Evidence[0].ID, Relation: "supports"}}}}, Warnings: []string{}}
-	_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]any{"content": artifact.JSON(body)}}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50}})
+	artifactStreamResponse(w, artifact.JSON(body), "stop")
+}
+
+func artifactStreamResponse(w http.ResponseWriter, content, finish string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	runes := []rune(content)
+	for _, part := range []string{string(runes[:len(runes)/2]), string(runes[len(runes)/2:])} {
+		fmt.Fprintf(w, "data: %s\n\n", artifact.JSON(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": part}}}}))
+	}
+	fmt.Fprintf(w, "data: %s\n\n", artifact.JSON(map[string]any{"choices": []any{map[string]any{"finish_reason": finish, "delta": map[string]any{}}}, "usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50}}))
+	fmt.Fprint(w, "data: [DONE]\n\n")
 }
 func artifactRequest() artifact.GenerationRequest {
 	return artifact.GenerationRequest{Kind: "study", Scope: "video", SourceIDs: []int64{42}, Goal: "学习事务"}
@@ -534,7 +544,7 @@ func TestArtifactPrecisionAndBoundedProviderRepair(t *testing.T) {
 			w.WriteHeader(503)
 			return
 		case 2:
-			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]any{"content": "{}"}}}})
+			artifactStreamResponse(w, "{}", "stop")
 			return
 		default:
 			artifactModelResponse(w, r)

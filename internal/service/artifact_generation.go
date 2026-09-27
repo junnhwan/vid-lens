@@ -313,7 +313,7 @@ func (s *ArtifactService) callStudyProvider(ctx context.Context, run *model.Agen
 		var usage ai.ChatUsage
 		actual := false
 		callCtx := ai.WithChatBudget(ctx, output, func(u ai.ChatUsage) { usage = u; actual = true })
-		raw, providerErr := client.Chat(callCtx, messages)
+		raw, providerErr := collectStudyResponse(callCtx, client, messages)
 		settlementCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		err = s.repos.Artifact.SettleCall(settlementCtx, call.Call.ID, usage.PromptTokens, usage.CompletionTokens, actual)
 		stop()
@@ -338,4 +338,23 @@ func (s *ArtifactService) callStudyProvider(ctx context.Context, run *model.Agen
 			return "", call, providerErr
 		}
 	}
+}
+
+// Collect the provider stream in the worker so slow generations do not depend
+// on a gateway keeping a non-streaming request open. Nothing is published until
+// the complete response passes the existing schema and evidence validation.
+func collectStudyResponse(ctx context.Context, client ai.ChatClient, messages []ai.ChatMessage) (string, error) {
+	streaming, ok := client.(ai.StreamingChatClient)
+	if !ok {
+		return client.Chat(ctx, messages)
+	}
+	var body strings.Builder
+	err := streaming.StreamChat(ctx, messages, func(delta string) error {
+		if body.Len()+len(delta) > 512*1024 {
+			return artifact.Err("invalid_model_output", 422)
+		}
+		body.WriteString(delta)
+		return nil
+	})
+	return body.String(), err
 }
