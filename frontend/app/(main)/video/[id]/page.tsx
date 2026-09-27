@@ -1,5 +1,7 @@
 import { ArtifactCreateDialog } from '@/components/artifacts/ArtifactCreateDialog'
+import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import Link from '@/lib/router'
+import { useQuery } from '@tanstack/react-query'
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from '@/lib/router'
@@ -166,7 +168,7 @@ function FrameRead({ children }: { children: ReactNode }) {
 }
 
 export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string } }) {
-  const [artifactCreateOpen, setArtifactCreateOpen] = useState(false)
+  const [artifactMode, setArtifactMode] = useState<'new' | 'reorganize' | null>(null)
   const taskId = Number(params.id)
   const router = useRouter()
   const toast = useToast()
@@ -176,6 +178,16 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const prevTransRef = useRef(false)
 
   const [task, setTask] = useState<VideoTask | null>(null)
+  const relatedArtifacts = useQuery({ queryKey: ['video-artifacts', taskId], queryFn: async ({ signal }) => {
+    const first = await artifactApi.list(1, taskId, signal)
+    const list = [...first.list]
+    for (let page = 2; list.length < first.total && !list.some(item => item.current_version_id); page++) {
+      const next = await artifactApi.list(page, taskId, signal)
+      if (!next.list.length) break
+      list.push(...next.list)
+    }
+    return { ...first, list }
+  }, enabled: !!task && !!user, refetchInterval: 15_000 })
   const [timeline, setTimeline] = useState<VideoTimeline | null>(null)
   const [index, setIndex] = useState<RAGIndexResult | null>(null)
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
@@ -257,6 +269,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }, [taskId, subReloadTick])
 
   const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
+  const readableArtifact = relatedArtifacts.data?.list.find(item => !!item.current_version_id)
+  const pendingArtifact = relatedArtifacts.data?.list.find(item => !item.current_version_id && item.latest_run && (item.latest_run.status === 'pending' || item.latest_run.status === 'running'))
   const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
 
   // 处理中或等待摘要自动重试时轮询；重试调度会清除 next_retry_at 并重新入队。
@@ -647,7 +661,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   return (
     <div className="page-fill">
-      {artifactCreateOpen && <ArtifactCreateDialog source={{ id: task.id, title }} onClose={() => setArtifactCreateOpen(false)} />}
+      {artifactMode && <ArtifactCreateDialog source={{ id: task.id, title }} existing={artifactMode === 'reorganize' && readableArtifact ? { id: readableArtifact.id, title: readableArtifact.title, head_version: readableArtifact.head_version } : undefined} onClose={() => { setArtifactMode(null); void relatedArtifacts.refetch() }} />}
       <div className="ws">
         <div className="ws-stage">
           <div className="ws-heading">
@@ -711,8 +725,10 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             )}
             {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
 
+            {relatedArtifacts.error && <div className="artifact-notice danger" role="alert">相关笔记读取失败：{artifactError(relatedArtifacts.error)}<button className="btn btn-sm" onClick={() => void relatedArtifacts.refetch()}>重试</button></div>}
             <div className="ws-actions">
-              <button className="btn" disabled={readOnly || processing || !task.has_transcription} title={readOnly ? '演示账号不可生成成果' : processing ? '视频仍在处理，完成后可生成学习笔记' : !task.has_transcription ? '请先完成视频转写' : '后台生成学习笔记与导图'} onClick={() => setArtifactCreateOpen(true)}><Icon name="wand" size="sm" />生成学习笔记</button>
+              {readableArtifact ? <Link className="btn btn-primary" href={`/artifacts/${encodeURIComponent(readableArtifact.id)}`}><Icon name="file" size="sm" />阅读学习笔记</Link> : processing ? <button className="btn btn-primary" disabled><Icon name="activity" size="sm" />视频处理中</button> : !task.has_transcription && !readOnly ? <button className="btn btn-primary" disabled={busy !== ''} onClick={() => void runAction('transcribe')}><Icon name="activity" size="sm" />先完成转写</button> : pendingArtifact ? <Link className="btn btn-primary" href={`/tasks?run=${encodeURIComponent(pendingArtifact.latest_run!.id)}`}><Icon name="clock" size="sm" />查看笔记进度</Link> : <button className="btn btn-primary" disabled={readOnly || !task.has_transcription || relatedArtifacts.isPending || !!relatedArtifacts.error} onClick={() => setArtifactMode('new')}><Icon name="wand" size="sm" />新建学习笔记</button>}
+              {readableArtifact && <><button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('new')}><Icon name="plus" size="sm" />新建另一份</button><button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('reorganize')}><Icon name="refresh" size="sm" />重新整理这份</button></>}
               <Link className="btn btn-ghost" href={`/artifacts?source=${task.id}`}><Icon name="file" size="sm" />相关成果</Link>
               {task.has_summary ? (
                 <button className="btn" onClick={() => setSummaryOpen(true)}>
@@ -743,11 +759,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 <button className="btn" disabled>
                   <Icon name="activity" size="sm" />等待转写
                 </button>
-              ) : (
-                <button className={`btn${busy === 'transcribe' ? ' is-loading' : ''}`} aria-busy={busy === 'transcribe' || undefined} disabled={busy !== ''} onClick={() => void runAction('transcribe')}>
-                  <Icon name="activity" size="sm" />开始转写
-                </button>
-              )}
+              ) : null}
               <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
                 <Icon name="layers" size="sm" />{indexActionLabel(index)}
               </button>

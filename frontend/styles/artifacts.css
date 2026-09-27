@@ -59,3 +59,20 @@
 @keyframes evidence-sweep { to { left:100%; } }
 .evidence-media-empty .btn { color:var(--evidence-ink); border-color:var(--evidence-line); background:transparent; }
 @media(prefers-reduced-motion:reduce) { .evidence-media-empty.loading::after { animation:none; } }
+.study-structure-top { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:22px 0; font:11px/1.7 var(--font-ui); color:var(--paper-sub); }
+.study-structure-top .btn { color:var(--paper-ink); background:var(--paper-tint); border-color:var(--paper-line); }
+.study-block-actions { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+.study-block-actions button { padding:5px 8px; border:1px solid var(--paper-line); border-radius:5px; background:var(--paper-tint); color:var(--paper-ink); font:11px/1.5 var(--font-ui); }
+.study-block-actions button:hover,.study-block-actions button:focus-visible { border-color:var(--paper-accent); }
+.study-block-actions button.danger { color:#9a4334; }
+.artifact-evidence-stack { min-height:100%; background:var(--evidence-bg); color:var(--evidence-ink); }
+.evidence-choices { padding:20px 20px 0; }
+.evidence-choices > b { display:block; font-size:12px; margin-bottom:10px; }
+.evidence-choices > p { color:var(--evidence-sub); font-size:11px; line-height:1.8; }
+.evidence-choices > button { display:block; width:100%; text-align:left; padding:10px 12px; margin:7px 0; border:1px solid var(--evidence-line); border-radius:7px; color:var(--evidence-ink); background:transparent; }
+.evidence-choices > button.selected,.evidence-choices > button:hover { border-color:var(--acc); background:color-mix(in srgb,var(--evidence-bg) 86%,var(--acc)); }
+.evidence-choice-head { display:flex; gap:8px; justify-content:space-between; align-items:baseline; flex-wrap:wrap; }
+.evidence-choice-head strong { font-size:11px; }
+.evidence-choice-head small { font-size:10px; color:var(--evidence-sub); }
+.evidence-choice-excerpt { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; margin-top:6px; font:11px/1.6 var(--font-read); color:var(--evidence-sub); }
+@media(max-width:600px) { .study-block-actions button { flex:1 1 auto; }.evidence-choices { padding:18px 17px 0; } }

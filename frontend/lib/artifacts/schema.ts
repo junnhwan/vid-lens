@@ -8,6 +8,7 @@ export const blockSchema = z.object({
   title: z.string().min(1).max(200), content: z.string().max(8000),
   claim_origin: z.enum(['source', 'synthesis', 'user']),
   evidence_refs: z.array(z.object({ evidence_id: id, relation: z.enum(['supports', 'context', 'contradicts']) })),
+  source_block_ids: z.array(z.string().min(1).max(100)).max(200).optional(),
 })
 export const bodySchema = z.object({
   schema_version: z.literal(1), kind: z.literal('study'), title: z.string().min(1).max(200),
