@@ -5,11 +5,15 @@ export function ModelCombobox({
   onChange,
   models,
   placeholder,
+  id,
+  label,
 }: {
   value: string
   onChange: (v: string) => void
   models: string[]
   placeholder?: string
+  id: string
+  label: string
 }) {
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
@@ -39,7 +43,14 @@ export function ModelCombobox({
   return (
     <div className="combo" ref={wrapRef}>
       <input
+        id={id}
         className="input"
+        role="combobox"
+        aria-label={label}
+        aria-autocomplete="list"
+        aria-expanded={open && models.length > 0}
+        aria-controls={id + '-options'}
+        aria-activedescendant={open && filtered[highlight] ? id + '-option-' + highlight : undefined}
         value={value}
         placeholder={placeholder || '模型'}
         onChange={e => { onChange(e.target.value); setOpen(true) }}
@@ -64,14 +75,16 @@ export function ModelCombobox({
         }}
       />
       {open && models.length > 0 && (
-        <div className="combo-list" role="listbox">
+        <div id={id + '-options'} className="combo-list" role="listbox" aria-label={label + '列表'}>
           {filtered.length === 0 && (
             <div className="combo-empty">没有匹配「{value}」的模型</div>
           )}
           {filtered.map((m, i) => (
             <button
+              id={id + '-option-' + i}
               key={m}
               type="button"
+              role="option"
               aria-selected={i === highlight}
               className={i === highlight ? 'on' : ''}
               onMouseEnter={() => setHighlight(i)}

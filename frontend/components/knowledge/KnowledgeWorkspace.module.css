@@ -47,8 +47,16 @@
 .empty { padding:55px 24px; text-align:center; border:1px dashed var(--line-strong); border-radius:12px; color:var(--tx-3); font-size:13px; line-height:2; }
 .error { color:var(--bad); font-size:13px; padding:14px 0; }
 .busy { animation:pulse 1.5s ease-in-out infinite; }
+.requestError { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:15px; padding:12px 14px; border:1px solid var(--bad-dim); border-radius:8px; background:var(--bad-dim); color:var(--bad); font-size:12px; }
+.requestError span { flex:1; min-width:180px; }.requestError button { color:var(--tx-1); }
+.requestStatus { display:flex; align-items:center; gap:10px; min-height:45px; color:var(--acc); font-size:12px; }
+.requestSpinner { width:14px; height:14px; border:2px solid var(--line-strong); border-top-color:var(--acc); border-radius:50%; animation:request-spin .75s linear infinite; }
+.resultSkeleton { display:grid; gap:12px; padding:22px 0; border-top:1px solid var(--line); }
+.resultSkeleton .skel { display:block; height:14px; width:72%; }.resultSkeleton .skel:nth-child(2) { height:12px; width:95%; }.resultSkeleton .skel:nth-child(3) { height:12px; width:56%; }
+.coverageSkeleton { display:grid; align-content:start; gap:15px; padding-top:15px; }.coverageSkeleton .skel { display:block; height:17px; }.coverageSkeleton .skel:nth-child(2) { height:64px; }.coverageSkeleton .skel:nth-child(3) { width:75%; }
+@keyframes request-spin { to { transform:rotate(360deg); } }
 @keyframes pulse { 50% { opacity:.5 } }
-@media(prefers-reduced-motion:reduce) { .busy { animation:none } }
+@media(prefers-reduced-motion:reduce) { .busy,.requestSpinner { animation:none } }
 @media(max-width:760px) { .heading { padding:15px; align-items:flex-start; } .heading h1 { font-size:16px; } .shelf { padding:12px 15px; } .lab { padding:20px 16px; } .labHero,.resultGrid { grid-template-columns:1fr; } .pipeline button { padding:10px; } .pipeline strong { font-size:20px; } }
 
 @media(max-width:760px) { .heading .eyebrow { font-size:10px; letter-spacing:.06em; } .heading .actions { flex-shrink:0; flex-direction:column; gap:2px; } .shelf { padding-top:10px; padding-bottom:10px; } }

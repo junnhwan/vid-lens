@@ -1,0 +1,21 @@
+.profile-group-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+.profile-model-card { margin-top:20px; padding:18px; border:1px solid var(--line-strong); border-radius:var(--r-card); background:var(--bg-1); }
+.profile-model-card-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:15px; }
+.profile-model-card-head h3 { font-size:14px; font-weight:600; }.profile-model-card-head h3 span { color:var(--acc); font-size:10px; font-weight:400; }
+.profile-model-card-head small { color:var(--tx-4); font:10px var(--font-mono); letter-spacing:.1em; }
+.profile-input-label { display:grid; align-content:start; gap:6px; min-width:0; color:var(--tx-3); font-size:11px; }
+.profile-input-label .input { width:100%; min-width:0; }.profile-model-pick { display:flex; gap:8px; min-width:0; }
+.profile-url-hint { margin-top:8px; color:var(--tx-4); font-size:10px; line-height:1.7; overflow-wrap:anywhere; }
+.profile-model-row { margin-top:10px; }
+.profile-field-feedback { min-height:30px; display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin-top:8px; padding:8px 10px; border:1px solid var(--line); border-radius:7px; background:var(--bg-2); color:var(--tx-3); font-size:11px; line-height:1.6; }
+.profile-field-feedback.loading { color:var(--acc); border-color:var(--acc-line); background:var(--acc-dim); }
+.profile-field-feedback.success { color:var(--ok); border-color:var(--ok-dim); }
+.profile-field-feedback.error { color:var(--bad); border-color:var(--bad-dim); background:var(--bad-dim); }
+.profile-field-feedback.loading::before { content:''; width:11px; height:11px; flex:none; border:2px solid var(--line-strong); border-top-color:var(--acc); border-radius:50%; animation:profile-spin .7s linear infinite; }
+@keyframes profile-spin { to { transform:rotate(360deg); } }
+.profile-dimension { margin-top:12px; padding:13px; border:1px solid var(--line); border-radius:9px; background:var(--bg-1); }
+.profile-dimension-controls { display:flex; align-items:center; gap:9px; margin-top:7px; }
+.profile-dimension-controls input { width:150px; max-width:100%; }
+.profile-dimension .profile-field-feedback { margin-bottom:0; }
+@media(max-width:620px) { .profile-group-grid { grid-template-columns:1fr; }.profile-model-row > div { min-width:0; } }
+@media(prefers-reduced-motion:reduce) { .profile-field-feedback.loading::before { animation:none; } }

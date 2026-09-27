@@ -46,12 +46,12 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
       </div><button className="btn btn-primary" disabled={busy || !question.trim() || !kb}><Icon name="search" size="sm" />{busy?'检索中…':'运行检索'}</button></div>
     </form>
     <p className={styles.note} style={{marginTop:10}}>使用原始问题测试，不生成最终答案。运行可能产生向量化或模型重排用量；问题不会加入聊天历史。</p>
-    <div role="status" aria-live="polite">{error && <p className={styles.error}>{error}</p>}{busy && <p className={`${styles.note} ${styles.busy}`} style={{marginTop:20}}>正在查询当前授权资料，收集各阶段结果…</p>}</div>
+    {error && <div className={styles.requestError} role="alert"><Icon name="alert" size="sm" /><span>{error}</span><button className="btn btn-sm" onClick={() => void run()}>重试检索</button></div>}
     <nav className={styles.pipeline} aria-label="检索阶段">{STAGES.map(s=>{
       const total=result?.trace.stages?.filter(x=>x.name===s.id).reduce((n,x)=>n+(x.citations?.length||0),0)
-      return <button key={s.id} aria-pressed={stage===s.id} onClick={()=>setStage(s.id)}><span>{s.label}</span><strong>{result?total ?? 0:'—'}</strong><span className={styles.note}>{s.note}</span></button>
+      return <button key={s.id} aria-pressed={stage===s.id} disabled={busy} onClick={()=>setStage(s.id)}><span>{s.label}</span><strong>{!busy && result?total ?? 0:'—'}</strong><span className={styles.note}>{s.note}</span></button>
     })}</nav>
-    {result ? <div className={styles.resultGrid}><section>
+    {busy ? <div className={styles.resultGrid} role="status" aria-label="正在检索授权资料"><section><div className={styles.requestStatus}><span className={styles.requestSpinner} />正在查询授权资料，完成后会一起展示各阶段结果…</div>{[0,1,2].map(index=><div className={styles.resultSkeleton} key={index}><span className="skel" /><span className="skel" /><span className="skel" /></div>)}</section><aside className={styles.coverageSkeleton}><span className="skel" /><span className="skel" /><span className="skel" /></aside></div> : result ? <div className={styles.resultGrid}><section>
       <div className={styles.meta}><span>{STAGES.find(s=>s.id===stage)?.label} · {rows.length} 条</span><span>{result.trace.duration_ms} ms</span><span>{result.mode==='hybrid'?'混合检索':result.mode==='keyword'?'仅关键词':'仅语义'}</span></div>
       {rows.map((cite,i)=><article className={styles.result} key={`${cite.evidence_id}-${i}`}>
         <h3><span><span style={{color:'var(--acc)',fontFamily:'var(--font-mono)',marginRight:12}}>{String(i+1).padStart(2,'0')}</span>{cite.video_title || `视频 ${cite.task_id}`}</span><Link className="btn btn-sm btn-ghost" href={replayLink(cite.task_id,cite.start_ms,cite.time_range_status)}><Icon name="play" size="sm" />{cite.time_range_status==='unknown'?'打开视频':'回放'}</Link></h3>
@@ -65,6 +65,6 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
       <p className={styles.note} style={{marginTop:20}}>覆盖数量表示本次命中的来源，不代表未命中视频没有相关内容。</p>
       {!!result.trace.fallbacks?.length && <p className={styles.error}>发生降级：{result.trace.fallbacks.join('、')}</p>}
       <details className={styles.details}><summary>实际检索问题</summary><p className={styles.note}>{result.trace.original_query}</p></details>
-    </aside></div> : !busy && <div className={styles.empty}><Icon name="search" size="lg" /><p>从一个具体问题开始。</p><p>可以用同一个问题分别运行三种检索方式，对比术语命中与语义覆盖。</p></div>}
+    </aside></div> : !error && <div className={styles.empty}><Icon name="search" size="lg" /><p>从一个具体问题开始。</p><p>可以用同一个问题分别运行三种检索方式，对比术语命中与语义覆盖。</p></div>}
   </div>
 }

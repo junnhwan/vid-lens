@@ -47,4 +47,15 @@
 
 .artifact-columns.without-evidence { grid-template-columns:1fr; }
 .generation-source-picker .input { margin-top:10px; width:100%; }
-.evidence-media-empty { min-height:165px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:color-mix(in srgb,var(--evidence-bg) 85%,black); border:1px solid var(--evidence-line); border-radius:8px; color:var(--evidence-sub); font-size:11px; }.evidence-media-empty span { font-size:10px; opacity:.8; }
+.evidence-media-empty { min-height:165px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; background:color-mix(in srgb,var(--evidence-bg) 93%,var(--evidence-ink)); border:1px solid var(--evidence-line); border-radius:8px; color:var(--evidence-sub); font-size:11px; }.evidence-media-empty span { font-size:10px; opacity:.8; }
+.map-layout-loading { position:absolute; inset:0; display:grid; place-content:center; gap:12px; justify-items:center; pointer-events:none; }
+.map-layout-loading .skel { display:block; height:22px; width:110px; border-radius:6px; background:var(--paper-tint); }
+.map-layout-loading .root { width:145px; height:30px; margin-bottom:10px; }.map-layout-loading .one { margin-left:-135px; }.map-layout-loading .two { margin-left:105px; }.map-layout-loading .three { margin-left:-80px; }
+.map-layout-loading p { margin-top:12px; color:var(--paper-sub); font-size:12px; }
+.map-error { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; text-align:center; background:var(--paper); color:var(--paper-ink); }
+.map-error .ic { color:var(--paper-accent); }.map-error b { font-size:14px; }.map-error p { max-width:290px; color:var(--paper-sub); font-size:11px; line-height:1.8; }
+.map-error .btn { color:var(--paper-ink); background:var(--paper-tint); border-color:var(--paper-line); }
+.evidence-media-empty.loading { position:relative; overflow:hidden; }.evidence-media-empty.loading::after { content:''; position:absolute; top:0; left:-35%; width:35%; height:100%; background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--evidence-ink) 12%,transparent),transparent); animation:evidence-sweep 1.5s ease-in-out infinite; }
+@keyframes evidence-sweep { to { left:100%; } }
+.evidence-media-empty .btn { color:var(--evidence-ink); border-color:var(--evidence-line); background:transparent; }
+@media(prefers-reduced-motion:reduce) { .evidence-media-empty.loading::after { animation:none; } }

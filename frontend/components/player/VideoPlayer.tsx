@@ -60,7 +60,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [durationMs, setDurationMs] = useState(0)
     const [playing, setPlaying] = useState(false)
     const [failed, setFailed] = useState(false)
+    const [refreshing, setRefreshing] = useState(false)
     const [srcOverride, setSrcOverride] = useState<string | null>(null)
+    const [reloadToken, setReloadToken] = useState(0)
+    const autoRefreshAttempted = useRef(false)
     const [cue, setCue] = useState<string | null>(null)
     const [cueOn, setCueOn] = useState(false)
     const cueTimer = useRef(0)
@@ -112,13 +115,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     useEffect(() => {
       setSrcOverride(null)
       setFailed(false)
+      autoRefreshAttempted.current = false
     }, [src])
 
     const handleVideoError = useCallback(() => {
-      if (!onNeedRefreshRef.current) {
+      if (!onNeedRefreshRef.current || autoRefreshAttempted.current) {
         setFailed(true)
         return
       }
+      autoRefreshAttempted.current = true
       void (async () => {
         const video = videoRef.current
         const resume = video ? { ms: video.currentTime * 1000, autoplay: !video.paused } : null
@@ -133,6 +138,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         setFailed(true)
       })()
     }, [])
+
+    const retryPlayback = useCallback(() => {
+      if (!onNeedRefreshRef.current || refreshing) return
+      setRefreshing(true)
+      void onNeedRefreshRef.current().then(fresh => {
+        if (!fresh) return
+        setSrcOverride(fresh)
+        setFailed(false)
+        setReloadToken(token => token + 1)
+      }).catch(() => { setFailed(true) }).finally(() => setRefreshing(false))
+    }, [refreshing])
 
     const seek = useCallback((ms: number, autoplay = false, cueLabel?: string) => {
       const video = videoRef.current
@@ -218,6 +234,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
           {activeSrc && (
             <video
+              key={reloadToken}
               ref={videoRef}
               src={activeSrc}
               playsInline
@@ -253,6 +270,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 <div style={{ marginTop: 8, fontSize: 12.5 }}>
                   {failed ? '播放源加载失败,请稍后重试' : fallbackText || '暂无可用播放源'}
                 </div>
+                {failed && onNeedRefresh && <button className="btn btn-sm" style={{ marginTop: 10, color: '#f2e9d8', borderColor: '#8b7d65' }} disabled={refreshing} onClick={retryPlayback}>{refreshing ? '正在重试…' : '重新读取播放源'}</button>}
               </div>
             </div>
           </div>

@@ -58,3 +58,18 @@ export function CardSkeleton({ count = 4, gridClass = 'video-grid' }: { count?: 
     </div>
   )
 }
+
+/** 保留各页面内容形状的真实请求加载态；不会延长请求或模拟进度。 */
+export function ProductSkeleton({ kind, count = 3 }: { kind: 'rows' | 'artifacts' | 'tasks' | 'article'; count?: number }) {
+  if (kind === 'article') return <div className="product-skeleton-article" role="status" aria-label="正在读取笔记">
+    <div className="product-skeleton-paper"><span className="skel title" /><span className="skel lead" /><span className="skel line" /><span className="skel line" /><span className="skel line short" /><span className="skel heading" /><span className="skel line" /><span className="skel line short" /></div>
+    <div className="product-skeleton-evidence"><span className="skel heading" /><span className="skel media" /><span className="skel line" /><span className="skel line short" /></div>
+  </div>
+  return <div className={'product-skeleton-' + kind} role="status" aria-label="内容加载中">
+    {Array.from({ length: count }, (_, index) => <div className="product-skeleton-item" key={index}>
+      {kind === 'artifacts' && <span className="skel cover" />}
+      {kind === 'tasks' && <span className="skel icon" />}
+      <div className="product-skeleton-lines"><span className="skel heading" /><span className="skel line" /><span className="skel line short" /></div>
+    </div>)}
+  </div>
+}

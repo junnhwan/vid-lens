@@ -40,7 +40,7 @@ export default function SettingsPage() {
           <button className={tab === 'prompts' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('prompts') }}>提示词</button>
         </div>
         <div>
-          {tab === 'ai' ? <AIProfilesSection readOnly={user?.role === 'DEMO'} /> : tab === 'prompts' ? <PromptPreferencesSection readOnly={user?.role === 'DEMO'} /> : <MemorySection user={user} />}
+          {tab === 'ai' ? <AIProfilesSection readOnly={!user || user.role === 'DEMO'} /> : tab === 'prompts' ? <PromptPreferencesSection readOnly={!user || user.role === 'DEMO'} /> : <MemorySection user={user} />}
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { ModelCombobox } from '@/components/settings/ModelCombobox'
 import { PROVIDER_PRESETS, matchPreset } from '@/lib/providerPresets'
 import { useShell } from '@/components/shell/AppShell'
 import { CapabilityProbe, type ProbeTarget } from '@/components/settings/CapabilityProbe'
+import './ProfileForm.css'
 
 interface GroupDraft {
   provider: string
@@ -15,6 +16,9 @@ interface GroupDraft {
   model: string
   preset: string
 }
+
+type ListFeedback = { kind: 'loading' | 'success' | 'error'; message: string }
+const connectionKey = (group: GroupDraft) => [group.provider, group.base_url, group.api_key].join('\u0000')
 
 function fromProfile(provider: string, baseUrl: string, model: string): GroupDraft {
   return {
@@ -47,9 +51,14 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [models, setModels] = useState<Partial<Record<ProfilePurpose, string[]>>>({})
-  const [listStatus, setListStatus] = useState<Partial<Record<ProfilePurpose, string>>>({})
-  useEffect(() => { setListStatus({}) }, [llm, asr, embedding, vision])
+  const [listStatus, setListStatus] = useState<Partial<Record<ProfilePurpose, ListFeedback>>>({})
+  const currentGroups = useRef({ llm, asr, embedding, vision })
+  currentGroups.current = { llm, asr, embedding, vision }
+  const listRequests = useRef<Partial<Record<ProfilePurpose, number>>>({})
   const [probing, setProbing] = useState(false)
+  const dimRequest = useRef(0)
+  const [observedDim, setObservedDim] = useState<number | null>(null)
+  const [dimError, setDimError] = useState('')
   const [budgetOptions, setBudgetOptions] = useState<AgentBudgetOptions | null>(null)
   const [budgetError, setBudgetError] = useState('')
   const [customBudget, setCustomBudget] = useState(!!(imported?.agent_budget || profile?.agent_budget))
@@ -82,8 +91,20 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   }
 
   const profileId = profile?.id ?? 0
-  const setGroup = (setter: (fn: (g: GroupDraft) => GroupDraft) => void) =>
-    (patch: Partial<GroupDraft>) => setter(g => ({ ...g, ...patch }))
+  const setGroup = (purpose: ProfilePurpose, setter: (fn: (g: GroupDraft) => GroupDraft) => void) =>
+    (patch: Partial<GroupDraft>) => {
+      setter(group => ({ ...group, ...patch }))
+      if ('provider' in patch || 'base_url' in patch || 'api_key' in patch || 'preset' in patch) {
+        listRequests.current[purpose] = (listRequests.current[purpose] || 0) + 1
+        setModels(previous => ({ ...previous, [purpose]: [] }))
+        setListStatus(previous => ({ ...previous, [purpose]: undefined }))
+      }
+      if (purpose === 'embedding' && ('provider' in patch || 'base_url' in patch || 'api_key' in patch || 'model' in patch || 'preset' in patch)) {
+        dimRequest.current += 1
+        setObservedDim(null)
+        setDimError('')
+      }
+    }
 
   const buildRequest = (): AIProfileRequest | null => {
     if (!name.trim()) { setErr('请填写配置名称'); return null }
@@ -98,6 +119,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
     }
     const dim = Number(embeddingDim)
     if (!Number.isFinite(dim) || dim <= 0) { setErr('embedding 维度需为正数:先探测,或手动填写'); return null }
+    if (observedDim !== null && dim !== observedDim) { setErr('向量维度与最新探测结果不符，请采用检测值或重新检查模型'); return null }
     let agentBudget: AgentBudgetOverride | null = null
     if (customBudget) {
       if (!budgetOptions) { setErr(budgetError || '正在加载预算选项'); return null }
@@ -150,16 +172,22 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
 
   const pullModels = async (purpose: ProfilePurpose, group: GroupDraft) => {
     if (!group.base_url.trim() || (!group.api_key.trim() && !profileId)) {
-      setListStatus(previous => ({ ...previous, [purpose]: '请先填写地址和 API Key；编辑已保存配置可留空密钥' }))
+      setListStatus(previous => ({ ...previous, [purpose]: { kind: 'error', message: '先填写地址和 API Key；编辑已保存配置可留空密钥。' } }))
       return
     }
-    setListStatus(previous => ({ ...previous, [purpose]: '正在读取模型列表…' }))
+    const request = (listRequests.current[purpose] || 0) + 1
+    listRequests.current[purpose] = request
+    const key = connectionKey(group)
+    setListStatus(previous => ({ ...previous, [purpose]: { kind: 'loading', message: '正在读取此服务的模型列表…' } }))
     try {
       const res = await api.listModels(group.base_url.trim(), group.api_key.trim(), profileId, purpose)
+      if (request !== listRequests.current[purpose] || key !== connectionKey(currentGroups.current[purpose])) return
       setModels(prev => ({ ...prev, [purpose]: res.models || [] }))
-      setListStatus(previous => ({ ...previous, [purpose]: `列表接口返回 ${res.models?.length ?? 0} 个模型；尚未验证所选模型能否调用` }))
+      setListStatus(previous => ({ ...previous, [purpose]: { kind: 'success', message: `找到 ${res.models?.length ?? 0} 个模型。列表可读取不代表模型一定可调用，保存前可运行能力检查。` } }))
     } catch (e) {
-      setListStatus(previous => ({ ...previous, [purpose]: e instanceof ApiError ? e.message : '拉取模型列表失败' }))
+      if (request !== listRequests.current[purpose] || key !== connectionKey(currentGroups.current[purpose])) return
+      setModels(previous => ({ ...previous, [purpose]: [] }))
+      setListStatus(previous => ({ ...previous, [purpose]: { kind: 'error', message: `${e instanceof ApiError ? e.message : '拉取模型列表失败'}。检查地址、密钥和服务商权限后重试；也可手动填写模型 ID。` } }))
     }
   }
 
@@ -177,12 +205,14 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       return
     }
     setProbing(true)
+    setDimError('')
+    const request = ++dimRequest.current
+    const key = connectionKey(embedding) + '\u0000' + embedding.model
     try {
       const res = await api.probeEmbeddingDim(embedding.base_url.trim(), embedding.api_key.trim(), embedding.model.trim(), profileId)
-      setEmbeddingDim(String(res.dimension))
-      toast.success(`向量维度:${res.dimension}`)
+      if (request === dimRequest.current && key === connectionKey(currentGroups.current.embedding) + '\u0000' + currentGroups.current.embedding.model) setObservedDim(res.dimension)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '维度探测失败')
+      if (request === dimRequest.current && key === connectionKey(currentGroups.current.embedding) + '\u0000' + currentGroups.current.embedding.model) setDimError(e instanceof ApiError ? e.message : '维度探测失败，请检查模型与密钥后重试')
     } finally {
       setProbing(false)
     }
@@ -205,7 +235,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
 
       <GroupBlock
         title="对话模型"
-        group={llm} setGroup={setGroup(setLlm)}
+        group={llm} setGroup={setGroup('llm', setLlm)}
         purpose="llm" models={models.llm || []} onPull={pullModels} listStatus={listStatus.llm}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.llm_api_key_masked})` : 'sk-…'}
         required
@@ -215,24 +245,27 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       <small style={{ color: 'var(--tx-3)' }}>按模型服务实际允许的上下文填写。摘要能放入时使用一次请求；超出时自动分段。请预留输出空间，填大于实际上限可能导致请求失败。</small>
       <GroupBlock
         title="语音识别"
-        group={asr} setGroup={setGroup(setAsr)}
+        group={asr} setGroup={setGroup('asr', setAsr)}
         purpose="asr" models={models.asr || []} onPull={pullModels} listStatus={listStatus.asr}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.asr_api_key_masked})` : 'sk-…'}
         required
       />
       <GroupBlock
         title="向量模型"
-        group={embedding} setGroup={setGroup(setEmbedding)}
+        group={embedding} setGroup={setGroup('embedding', setEmbedding)}
         purpose="embedding" models={models.embedding || []} onPull={pullModels} listStatus={listStatus.embedding}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.embedding_api_key_masked})` : 'sk-…'}
         urlPlaceholder="https://…/v1/embeddings"
         required
       />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-        <input className="input mono" style={{ width: 140 }} placeholder="维度" value={embeddingDim} onChange={e => setEmbeddingDim(e.target.value)} />
-        <button type="button" className="btn btn-sm" disabled={probing} onClick={() => void probeDim()}>
-          <Icon name="scan" size="sm" />{probing ? '探测中…' : '探测维度'}
-        </button>
+      <div className="profile-dimension">
+        <label className="field-label" htmlFor="embedding-dim">向量维度</label>
+        <div className="profile-dimension-controls"><input id="embedding-dim" className="input mono" inputMode="numeric" placeholder="维度" value={embeddingDim} onChange={e => setEmbeddingDim(e.target.value)} />
+          <button type="button" className="btn btn-sm" disabled={probing} onClick={() => void probeDim()}><Icon name="scan" size="sm" />{probing ? '检测中…' : '检测维度'}</button></div>
+        <p className={'profile-field-feedback ' + (dimError ? 'error' : observedDim !== null && Number(embeddingDim) !== observedDim ? 'error' : observedDim !== null ? 'success' : '')} role="status">
+          {probing ? '正在用当前向量模型发送小样本请求…' : dimError || (observedDim !== null ? Number(embeddingDim) === observedDim ? `检测得到 ${observedDim} 维，与配置一致。` : `检测得到 ${observedDim} 维，当前填写 ${embeddingDim || '为空'}。` : '检测结果会显示在这里，方便与填写值核对。')}
+          {observedDim !== null && Number(embeddingDim) !== observedDim && <button type="button" className="btn btn-sm" onClick={() => setEmbeddingDim(String(observedDim))}>采用 {observedDim} 维</button>}
+        </p>
       </div>
 
       <div className="pref-row" style={{ marginTop: 22 }}>
@@ -250,7 +283,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       {visionEnabled && (
         <GroupBlock
           title=""
-          group={vision} setGroup={setGroup(setVision)}
+          group={vision} setGroup={setGroup('vision', setVision)}
           purpose="vision" models={models.vision || []} onPull={pullModels} listStatus={listStatus.vision}
           keyPlaceholder={editing ? `留空保留现有密钥(${profile?.vision_api_key_masked})` : 'sk-…'}
         />
@@ -324,16 +357,16 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
   purpose: ProfilePurpose
   models: string[]
   onPull: (purpose: ProfilePurpose, group: GroupDraft) => void
-  listStatus?: string
+  listStatus?: ListFeedback
   keyPlaceholder: string
   urlPlaceholder?: string
   required?: boolean
 }) {
   return (
-    <div style={{ marginTop: 22 }}>
-      {title && <div className="field-label">{title}{required && <span style={{ color: 'var(--acc-strong)' }}> · 必填</span>}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <select
+    <section className="profile-model-card" aria-label={title || '视觉模型'}>
+      <div className="profile-model-card-head"><h3>{title || '视觉模型'}{required && <span> · 必填</span>}</h3><small>{purpose.toUpperCase()}</small></div>
+      <div className="profile-group-grid">
+        <label className="profile-input-label">服务商<select
           className="input"
           value={group.preset}
           onChange={e => setGroup(applyPreset(e.target.value, group))}
@@ -341,27 +374,27 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
           {PROVIDER_PRESETS.map(p => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
-        </select>
-        <input
+        </select></label>
+        <label className="profile-input-label">{purpose === 'embedding' ? '完整请求地址' : '服务 Base URL'}<input
           className="input"
           placeholder={urlPlaceholder || 'Base URL'}
           value={group.base_url}
           onChange={e => setGroup({ base_url: e.target.value })}
-        />
+        /></label>
       </div>
-      <p style={{ fontSize: 12, color: 'var(--tx-3)', marginTop: 6 }}>
+      <p className="profile-url-hint">
         {purpose === 'embedding' ? '填写完整 Embedding 接口地址，例如 https://api.siliconflow.cn/v1/embeddings；请求直接发送到此地址。' : `填写服务商要求的 API 基础地址，例如硅基流动 https://api.siliconflow.cn/v1；系统会追加 ${purpose === 'asr' ? '/audio/transcriptions' : '/chat/completions'}。不要填写完整接口路径。`}
       </p>
       {validateModelURL(group.base_url, purpose === 'embedding', group.preset) && <p role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>{validateModelURL(group.base_url, purpose === 'embedding', group.preset)}</p>}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-        <input className="input" type="password" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <ModelCombobox value={group.model} onChange={model => setGroup({ model })} models={models} />
-          <button type="button" className="btn btn-sm" style={{ flex: 'none' }} onClick={() => onPull(purpose, group)}>拉模型</button>
-        </div>
+      <div className="profile-group-grid profile-model-row">
+        <label className="profile-input-label">API Key<input className="input" type="password" autoComplete="off" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} /></label>
+        <div className="profile-input-label"><label htmlFor={purpose + '-model'}>模型 ID</label><div className="profile-model-pick">
+          <ModelCombobox id={purpose + '-model'} label={(title || '视觉模型') + '模型 ID'} value={group.model} onChange={model => setGroup({ model })} models={models} />
+          <button type="button" className="btn btn-sm" style={{ flex: 'none' }} disabled={listStatus?.kind === 'loading'} onClick={() => onPull(purpose, group)}>{listStatus?.kind === 'loading' ? '读取中…' : '读取模型'}</button>
+        </div></div>
       </div>
-      {listStatus && <p aria-live="polite" style={{ fontSize: 12 }}>{listStatus}</p>}
-    </div>
+      <p className={'profile-field-feedback ' + (listStatus?.kind || '')} role="status">{listStatus?.message || '模型列表尚未读取；也可以手动填写模型 ID。'}</p>
+    </section>
   )
 }
 

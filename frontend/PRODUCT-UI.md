@@ -46,6 +46,15 @@ draft and offers comparison and download. Historical versions are read-only.
 Unknown evidence timestamps never produce a seek; outdated snapshots retain
 their text but disable seeking into a changed source.
 
+## Async UI walkthrough / 异步交互从哪里读
+
+- `components/settings/PromptPreferencesSection.tsx`: 把服务端保存值 (`views`) 与用户尚未保存的输入 (`drafts`) 分开；页面导航守卫只看两者是否不同。一次只保存一项，失败时保留草稿和重试入口。相邻 CSS 文件负责状态与布局。
+- `components/settings/ProfileForm.tsx`: 模型列表和维度检测都调用真实接口。配置改变后，请求序号使旧响应失效；检测出的维度先与输入对比，由用户明确采用。列表成功只说明服务商返回了模型 ID，调用能力仍需单独检测。
+- `components/knowledge/RetrievalWorkbench.tsx`: 请求期间保持检索阶段与结果区域的形状，等接口返回完整 trace 后再显示阶段数据；没有伪造各阶段百分比。
+- `components/ui/AsyncState.tsx`: 页面级骨架仅在真实请求未完成时显示；错误、空数据和有内容分别渲染。成果页的证据文字不会因媒体读取失败而消失，导图失败时保留可操作的文字大纲。
+
+统一的完整产品交互原型在 `prototype/vidlens-studio-product.html`。它用于比较视觉与操作路径，内部数据和故障按钮均为本地模拟；正式组件不能从这个 HTML 读取数据。
+
 ## Development preview
 
 Run `npm run dev`, then open `/dev/product?view=notes`. Other views are `home`,

@@ -11,7 +11,7 @@ import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal } from '@/components/ui/Modal'
-import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
+import { CardSkeleton, EmptyState, ErrorState, ProductSkeleton } from '@/components/ui/AsyncState'
 import { RecentProductWork } from '@/components/artifacts/RecentProductWork'
 import { ProductHero } from '@/components/product/ProductHero'
 import { ProcessStrip } from '@/components/ProcessStrip'
@@ -136,14 +136,14 @@ export default function DashboardPage() {
       )}
 
       {loading && processing.length === 0 && (
-        <LoadingBlock label="正在加载…" variant="card" />
+        <ProductSkeleton kind="rows" count={2} />
       )}
 
       <div className="section-head" style={{ marginTop: processing.length > 0 || loading ? undefined : 0 }}>
         <h2>最近视频</h2>
         <Link className="more" href="/library">视频库 <Icon name="chev-r" size="sm" /></Link>
       </div>
-      {tasks.length > 0 ? (
+      {loading ? <CardSkeleton count={4} /> : tasks.length > 0 ? (
         <div className="video-grid">{tasks.slice(0, 4).map(t => <VideoCard key={t.id} task={t} />)}</div>
       ) : (
         !loading && (
@@ -160,7 +160,7 @@ export default function DashboardPage() {
         {sessions.length > 8 && <Link className="more" href="/chat">全部会话 <Icon name="chev-r" size="sm" /></Link>}
       </div>
       <div className="card" style={{ padding: 8 }}>
-        {sessions.length > 0 ? sessions.slice(0, 8).map(s => {
+        {loading ? <ProductSkeleton kind="rows" count={3} /> : sessions.length > 0 ? sessions.slice(0, 8).map(s => {
           const isKb = s.knowledge_base_id > 0
           const where = s.scope_type === 'video_library' ? '视频库会话' : isKb ? '知识库会话' : taskTitleById(s.task_id) || '单视频会话'
           const href = s.scope_type === 'video_library' ? `/chat/library?session=${s.id}` : isKb ? `/chat/kb/${s.knowledge_base_id}?session=${s.id}` : `/chat/v/${s.task_id}?session=${s.id}`

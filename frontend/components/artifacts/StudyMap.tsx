@@ -10,6 +10,7 @@ export function StudyMap({ body, onSelect }: { body: StudyBody; onSelect: (id: s
   const map = useRef<Markmap | null>(null)
   const [error, setError] = useState(false)
   const [ready, setReady] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const narrow = useMediaQuery('(max-width: 600px)')
   useEffect(() => {
     let disposed = false
@@ -28,17 +29,17 @@ export function StudyMap({ body, onSelect }: { body: StudyBody; onSelect: (id: s
       setReady(true)
       observer = new ResizeObserver(() => { if (!disposed) void instance.fit() })
       observer.observe(svg.current)
-    }).catch(() => { if (!disposed) setError(true) })
+    }).catch(() => { if (!disposed) { map.current?.destroy(); map.current = null; setError(true) } })
     return () => { disposed = true; observer?.disconnect(); map.current?.destroy(); map.current = null }
-  }, [body])
+  }, [body, attempt])
   function outline(nodes: BlockNode[]) {
     return <ul>{nodes.map(({ block, children }) => <li key={block.block_id}><button onClick={() => onSelect(block.block_id)}>{block.title}<span>{block.evidence_refs.length ? `${block.evidence_refs.length} 条引用` : '无引用'}</span></button>{children.length > 0 && outline(children)}</li>)}</ul>
   }
   return <div className="study-map">
     <div className="map-heading"><div><p className="product-eyebrow">CONNECTED UNDERSTANDING</p><h2>把零散知识，连成一张图</h2><p>{body.blocks.length} 个节点 · 与笔记共用内容 · 点击节点查看依据</p></div></div>
     <div className="map-canvas">
-      {error ? <p role="alert">导图暂时无法显示，可以使用下方文字大纲。</p> : <>
-        {!ready && <p className="map-loading" role="status">正在整理导图布局…</p>}
+      {error ? <div className="map-error" role="alert"><Icon name="alert" /><b>导图暂时无法显示</b><p>笔记内容仍可通过下方文字大纲查看，并可选择节点核对引用。</p><button className="btn btn-sm" onClick={() => { setError(false); setAttempt(value => value + 1) }}>重试布局</button></div> : <>
+        {!ready && <div className="map-layout-loading" role="status"><span className="skel root" /><span className="skel branch one" /><span className="skel branch two" /><span className="skel branch three" /><p>正在整理导图布局…</p></div>}
         <svg ref={svg} aria-label="学习笔记概念导图" role="group" onClick={event => { const target = event.target as Element; const id = target.closest('[data-block-id]')?.getAttribute('data-block-id'); if (id) onSelect(id) }} />
         <div className="map-controls"><button aria-label="缩小导图" disabled={!ready} onClick={() => void map.current?.rescale(.8)}>−</button><button aria-label="放大导图" disabled={!ready} onClick={() => void map.current?.rescale(1.25)}>+</button><button aria-label="适应画布" disabled={!ready} onClick={() => void map.current?.fit()}><Icon name="refresh" size="sm" /></button></div>
       </>}

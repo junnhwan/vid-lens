@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { ArtifactWorkspace } from '@/components/artifacts/ArtifactWorkspace'
 import { RemoteEvidencePanel } from '@/components/artifacts/EvidencePanel'
-import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
+import { ErrorState, LoadingBlock, ProductSkeleton } from '@/components/ui/AsyncState'
 import { Modal } from '@/components/ui/Modal'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import { runLabels } from '@/lib/artifacts/view'
@@ -26,7 +26,7 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
   useEffect(() => () => registerLeaveGuard(null), [registerLeaveGuard])
   useEffect(() => { setEvidenceId(undefined) }, [params.id, versionId])
   if (query.error || version.error) return <div className="page"><ErrorState message={artifactError(query.error || version.error)} onRetry={() => { void query.refetch(); if (versionId) void version.refetch() }} /><Link className="btn" href="/artifacts">返回成果库</Link></div>
-  if (!query.data || (versionId && !version.data)) return <div className="page"><LoadingBlock label="正在读取笔记…" /></div>
+  if (!query.data || (versionId && !version.data)) return <ProductSkeleton kind="article" />
   const artifact = version.data && versionId ? { ...query.data, version: version.data } : query.data
   if (!artifact.version) {
     const run = taskQuery.data?.list.find(task => task.resource_id === params.id)?.run
