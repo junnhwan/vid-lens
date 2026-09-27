@@ -1,11 +1,8 @@
-'use client'
-
 import { ArtifactCreateDialog } from '@/components/artifacts/ArtifactCreateDialog'
-import Link from 'next/link'
+import Link from '@/lib/router'
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
-import Image from 'next/image'
+import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import {
   TaskStatusEnum,
@@ -30,7 +27,6 @@ import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
-import { VideoStill } from '@/components/VideoPoster'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
@@ -131,7 +127,7 @@ function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
 function FramePreview({ src, timeMs }: { src: string | null; timeMs: number }) {
   const [failed, setFailed] = useState(false)
   return src && !failed
-    ? <Image src={src} alt={`${formatTime(timeMs)} 的已保存画面帧`} fill sizes="(max-width: 900px) 100vw, 300px" unoptimized onError={() => setFailed(true)} style={{ objectFit: 'cover' }} />
+    ? <img src={src} alt={`${formatTime(timeMs)} 的已保存画面帧`} onError={() => setFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
     : <div className="muted" role="status" style={{ padding: 12, fontSize: 12 }}>帧预览不可用</div>
 }
 

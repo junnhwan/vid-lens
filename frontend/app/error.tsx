@@ -1,6 +1,4 @@
-'use client'
-
-// 路由级错误边界:捕获任何运行时错误,避免甩出 Next 原生错误页。
+// 路由级错误边界：捕获运行时渲染错误并提供重试入口。
 import { useEffect } from 'react'
 
 export default function RouteError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {

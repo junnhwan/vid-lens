@@ -2,11 +2,13 @@ node_modules/
 .next/
 .next-dev/
 .next-stream-test/
+dist/
 out/
 build/
 *.log
 .DS_Store
 .env*.local
+.api-base
 next-env.d.ts
 *.tsbuildinfo
 

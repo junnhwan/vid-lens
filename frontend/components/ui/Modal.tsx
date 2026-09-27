@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useId, useRef } from 'react'
 import { Icon } from '@/components/ui/Icon'
 

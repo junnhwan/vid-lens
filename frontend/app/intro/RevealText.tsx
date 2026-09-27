@@ -1,5 +1,3 @@
-'use client'
-
 import { Children, cloneElement, isValidElement, useEffect, useState } from 'react'
 
 type Props = {

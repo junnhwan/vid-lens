@@ -1,8 +1,6 @@
-'use client'
-
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useRouter } from '@/lib/router'
+import Link from '@/lib/router'
 import { api, setToken, getToken, ApiError } from '@/lib/api'
 import { Icon } from '@/components/ui/Icon'
 import { ProjectorStage } from '@/components/login/ProjectorStage'

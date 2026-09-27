@@ -1,12 +1,11 @@
-'use client'
-
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { usePathname, useRouter } from '@/lib/router'
 import { api, clearToken, getToken } from '@/lib/api'
 import type { User } from '@/lib/types'
 import UploadModal from '@/components/UploadModal'
 import { ShellFrame } from './ShellFrame'
 import { ArtifactQueryProvider } from '@/components/artifacts/ArtifactQueryProvider'
+import { useLeaveGuard } from './useLeaveGuard'
 
 interface ShellCtx {
   user: User | null
@@ -45,59 +44,37 @@ const CrumbSetter = createContext<{ setCrumb: (items: CrumbItem[]) => void }>({ 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
+  const hasToken = Boolean(getToken())
   const [crumb, setCrumb] = useState<CrumbItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadRevision, setUploadRevision] = useState(0)
-  const leaveGuard = useRef<(() => boolean) | null>(null)
-  const restoringHistory = useRef(false)
-  const registerLeaveGuard = useCallback((guard: (() => boolean) | null) => { leaveGuard.current = guard }, [])
-  const confirmLeave = useCallback(() => leaveGuard.current?.() ?? true, [])
+  const { registerLeaveGuard, confirmLeave, clearLeaveGuard } = useLeaveGuard()
 
   useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!leaveGuard.current) return
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    const interceptLink = (event: MouseEvent) => {
-      const target = event.target as Element | null
-      const link = target?.closest('a[href]') as HTMLAnchorElement | null
-      if (!link || !leaveGuard.current || link.target === '_blank' || link.hasAttribute('download') || event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
-      const url = new URL(link.href, location.href)
-      if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return
-      if (!leaveGuard.current()) event.preventDefault()
-    }
-    const onPopState = (event: PopStateEvent) => {
-      if (restoringHistory.current) { restoringHistory.current = false; return }
-      if (leaveGuard.current && !leaveGuard.current()) {
-        event.stopImmediatePropagation()
-        restoringHistory.current = true
-        history.go(1)
-      }
-    }
-    window.addEventListener('beforeunload', beforeUnload)
-    document.addEventListener('click', interceptLink, true)
-    window.addEventListener('popstate', onPopState, true)
-    return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', interceptLink, true); window.removeEventListener('popstate', onPopState, true) }
-  }, [])
-
-  useEffect(() => {
-    if (!getToken()) {
+    if (!hasToken) {
       router.replace('/login')
       return
     }
-    api.profile().then(setUser).catch(() => { /* 401 由 api 层统一跳登录 */ })
-  }, [router])
+    let active = true
+    api.profile().then(profile => {
+      if (active) setUser(profile)
+    }).catch(() => { /* 401 由 api 层统一跳登录 */ })
+    return () => { active = false }
+  }, [hasToken, router])
 
   const openUpload = useCallback(() => setUploadOpen(true), [])
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
   const logout = useCallback(() => {
     if (!confirmLeave()) return
+    clearLeaveGuard()
     clearToken()
     router.replace('/login')
-  }, [router, confirmLeave])
+  }, [router, confirmLeave, clearLeaveGuard])
+
+  // Avoid mounting protected pages (and their API effects) during a redirect.
+  if (!hasToken) return null
 
   return (
     <ShellContext.Provider value={{ user, openUpload, uploadRevision, registerLeaveGuard, confirmLeave }}>

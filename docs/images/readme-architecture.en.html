@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>VidLens · System architecture</title><style>body{margin:0;background:#141210}svg{display:block;width:100%;max-width:1200px;height:auto;margin:auto}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 960" role="img" aria-labelledby="readme-architecture.en-title readme-architecture.en-desc">
 <title id="readme-architecture.en-title">VidLens · System architecture</title>
-<desc id="readme-architecture.en-desc">Next.js connects to Go APIs for asynchronous video processing and Chat / Agent execution, sharing PostgreSQL, MinIO, Redis and AI providers.</desc>
+<desc id="readme-architecture.en-desc">React + Vite connects to Go APIs for asynchronous video processing and Chat / Agent execution, sharing PostgreSQL, MinIO, Redis and AI providers.</desc>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#aea697"/></marker><marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#e2a84b"/></marker><marker id="arrow-link" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#86b4c9"/></marker></defs>
 <style>text{font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;fill:#f4efe6}.title{font-family:"Noto Serif SC","Microsoft YaHei",serif;font-size:32px;font-weight:600}.name{font-size:24px;font-weight:600}.body{font-size:20px;fill:#d2cbbd}.meta{font-size:16px;fill:#aea697}.tag{font-size:16px;fill:#e2a84b;letter-spacing:2px}.edge{fill:none;stroke:#aea697;stroke-width:2;marker-end:url(#arrow)}</style>
 <rect width="1200" height="960" rx="16" fill="#141210"/>
@@ -19,7 +19,7 @@
 <rect x="620" y="668" width="420" height="24" rx="0" fill="#141210" stroke="#141210"/>
 <text x="628" y="684" class="meta">Shared persistence &amp; model access</text>
 <rect x="240" y="128" width="720" height="96" rx="12" fill="#211e1a" stroke="#494237"/>
-<text x="264" y="164" class="name">Next.js workspace</text>
+<text x="264" y="164" class="name">React + Vite workspace</text>
 <text x="264" y="200" class="body">Video library · Knowledge bases · Chat · Source playback</text>
 <rect x="240" y="312" width="720" height="88" rx="12" fill="#211e1a" stroke="#494237"/>
 <text x="264" y="348" class="name">Go / Gin API</text>

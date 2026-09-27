@@ -1,6 +1,4 @@
-'use client'
-
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { useQuery } from '@tanstack/react-query'
 import { artifactApi } from '@/lib/artifacts/api'
 import { runLabels } from '@/lib/artifacts/view'
@@ -16,6 +14,6 @@ export function RecentProductWork() {
   return <>
     {active.length > 0 && <section className="dashboard-generation"><div><Icon name="activity" /><b>学习笔记在后台继续整理</b></div>{active.slice(0, 3).map(task => <Link key={task.id} href={`/tasks?run=${encodeURIComponent(task.run!.id)}`}><span>{task.title}</span><small>{runLabels[task.run!.status]}<Icon name="chev-r" size="sm" /></small></Link>)}</section>}
     <div className="section-head"><h2>最近成果</h2><Link className="more" href="/artifacts">全部成果<Icon name="chev-r" size="sm" /></Link></div>
-    {artifacts.error ? <div className="product-inline-state" role="alert">成果暂时无法读取。<button className="btn btn-sm" onClick={() => void artifacts.refetch()}>重试</button></div> : artifacts.isPending ? <div className="product-inline-state" role="status">正在读取成果…</div> : artifacts.data.list.length ? <div className="artifact-grid">{artifacts.data.list.slice(0, 3).map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} />)}</div> : <div className="product-inline-state"><div><b>把看过的内容，变成自己的理解。</b><p>从一段已转写的视频开始，生成可编辑的笔记和导图。</p></div><Link className="btn" href="/artifacts">创建第一份成果<Icon name="chev-r" size="sm" /></Link></div>}
+    {artifacts.error ? <div className="product-inline-state" role="alert">成果暂时无法读取。<button className="btn btn-sm" onClick={() => void artifacts.refetch()}>重试</button></div> : artifacts.isPending ? <div className="product-inline-state" role="status">正在读取成果…</div> : artifacts.data.list.length ? <div className="artifact-grid">{artifacts.data.list.slice(0, 3).map(artifact => <ArtifactCard key={artifact.id} artifact={artifact} runStatus={tasks.data?.list.find(task => task.resource_id === artifact.id)?.run?.status} />)}</div> : <div className="product-inline-state"><div><b>把看过的内容，变成自己的理解。</b><p>从一段已转写的视频开始，生成可编辑的笔记和导图。</p></div><Link className="btn" href="/artifacts">创建第一份成果<Icon name="chev-r" size="sm" /></Link></div>}
   </>
 }

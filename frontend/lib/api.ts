@@ -1,5 +1,5 @@
 import type {
-  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AgentAskResult, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
   MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
@@ -10,7 +10,7 @@ import type {
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
 // ============ 唯一后端出口 ============
-// 所有后端调用经此模块；dev 时 Next rewrites 把 /api → :8080。
+// 所有后端调用经此模块；Vite 开发代理和生产 Node 服务转发 /api。
 
 const API_BASE = '/api/v1'
 const TOKEN_KEY = 'vidlens-token'

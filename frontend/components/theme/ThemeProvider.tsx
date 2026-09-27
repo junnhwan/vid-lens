@@ -1,5 +1,3 @@
-'use client'
-
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { applyTheme, readStoredTheme, type ThemeMode } from '@/lib/theme'
 
@@ -13,8 +11,8 @@ const Ctx = createContext<ThemeCtx | null>(null)
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    if (typeof document === 'undefined') return 'dark'
-    return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+    if (typeof document === 'undefined') return 'light'
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
   })
 
   useEffect(() => {

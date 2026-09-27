@@ -1,15 +1,13 @@
-'use client'
-
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import dynamic from 'next/dynamic'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
 import { useMediaQuery } from '@/components/ui/useMediaQuery'
 import { bodySchema, type ArtifactDetail, type StudyBody, type StudyBlock } from '@/lib/artifacts/schema'
 import { ApiError } from '@/lib/api'
 import { artifactError } from '@/lib/artifacts/api'
+import { warningMessage } from '@/lib/artifacts/view'
 
-const StudyMap = dynamic(() => import('./StudyMap').then(module => module.StudyMap), { ssr: false, loading: () => <div className="empty" role="status">正在加载导图…</div> })
+const StudyMap = lazy(() => import('./StudyMap').then(module => ({ default: module.StudyMap })))
 
 export function ArtifactWorkspace({ artifact, readOnly = false, historical = false, preview = false, evidencePanel, selectedEvidence, onEvidence, onSave, onReload, onVersions, onDirtyChange }: {
   artifact: ArtifactDetail; readOnly?: boolean; historical?: boolean; preview?: boolean
@@ -44,7 +42,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   useEffect(() => {
     if (!dirtyRef.current && !editing) { setBaseline(artifact); setDraft(artifact.version?.body ?? null) }
   }, [artifact, editing])
-  if (!draft || !baseline.version) return <div className="page"><div className="empty card"><Icon name="clock" size="lg" /><b>学习笔记还在准备中</b><p>生成完成后会出现在这里，可以在任务中心查看进度。</p><a className="btn" href="/tasks">查看任务</a></div></div>
+  if (!draft || !baseline.version) return <div className="page"><div className="empty card"><Icon name="clock" size="lg" /><b>当前没有可阅读的笔记版本</b><p>可以在任务中心查看生成结果、失败原因或取消状态，并从视频重新发起生成。</p><a className="btn" href="/tasks">查看任务</a></div></div>
   const body = draft
   function update(blockId: string, patch: Partial<StudyBlock>) {
     setSaved(false)
@@ -83,12 +81,12 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     {artifact.head_version !== baseline.head_version && <div className="artifact-notice">服务器有更新，当前编辑仍基于 v{baseline.head_version}。保存时会检查版本。</div>}
     <div className={`artifact-columns${!desktopEvidence && !mobile ? " without-evidence" : ""}`}>
       <div className="artifact-reading">
-        {view === 'map' ? <><StudyMap body={body} onSelect={chooseBlock} />{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true) }}>在笔记中编辑</button>}</div>}</> : <article className="study-paper">
+        {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true) }}>在笔记中编辑</button>}</div>}</> : <article className="study-paper">
           <div className="paper-meta"><span>LEARNING NOTES / {String(baseline.version.version).padStart(3, '0')}</span><span>理解，然后应用</span></div>
           {editing && !readOnly ? <label className="artifact-field">笔记标题<input maxLength={200} value={body.title} onChange={e => { setSaved(false); setDraft({ ...body, title: e.target.value }) }} /></label> : <h2>{body.title}</h2>}
           <p className="paper-intro">沿着视频整理概念，保留每一次回到来源的入口。</p>
           <div className="study-concept-index">{body.blocks.filter(block => block.parent_id === null).map((block, i) => <a key={block.block_id} href={`#block-${block.block_id}`}><span className="mono">{String(i + 1).padStart(2, '0')}</span><b>{block.title}</b><Icon name="chev-r" size="sm" /></a>)}</div>
-          {body.warnings.length > 0 && <div className="paper-warning"><Icon name="alert" size="sm" /><span>{body.warnings.map(warning => warning === 'human_edited_unverified' ? '人工修改后的引用关系尚待核对。' : warning).join(' · ')}</span></div>}
+          {body.warnings.length > 0 && <div className="paper-warning"><Icon name="alert" size="sm" /><span>{body.warnings.map(warningMessage).join(' · ')}</span></div>}
           {body.blocks.map((block, i) => <section className={`study-block${block.parent_id ? ' is-child' : ''}${selectedBlock === block.block_id ? ' selected' : ''}`} key={block.block_id} id={`block-${block.block_id}`}>
             <div className="study-block-meta"><span>{block.type === 'section' ? '章节' : block.type === 'concept' ? '概念' : block.type === 'example' ? '示例' : '笔记'} {String(i + 1).padStart(2, '0')}</span><span>{block.claim_origin === 'user' ? '人工编辑 · 引用待核对' : block.claim_origin === 'synthesis' ? '综合理解' : '来源整理'}</span></div>
             {editing && !readOnly ? <><label className="artifact-field">{`第 ${i + 1} 块标题`}<input value={block.title} maxLength={200} onChange={e => update(block.block_id, { title: e.target.value })} /></label><label className="artifact-field">{`第 ${i + 1} 块正文`}<textarea value={block.content} maxLength={8000} rows={Math.max(3, Math.min(10, block.content.split('\n').length + 2))} onChange={e => update(block.block_id, { content: e.target.value })} /></label></> : <><h3>{block.title}</h3><p className="study-block-content">{block.content}</p></>}

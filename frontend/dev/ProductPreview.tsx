@@ -1,6 +1,4 @@
-'use client'
-
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { useEffect, useMemo, useState } from 'react'
 import { ShellFrame } from '@/components/shell/ShellFrame'
 import { ArtifactWorkspace } from '@/components/artifacts/ArtifactWorkspace'

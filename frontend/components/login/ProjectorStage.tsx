@@ -1,5 +1,3 @@
-'use client'
-
 import './stage.css'
 
 const WAVE = [28, 62, 88, 44, 96, 58, 80, 36, 72, 90, 40, 84, 52, 76, 34, 68]

@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Link from '@/lib/router'
 import type { ProductTask } from '@/lib/artifacts/schema'
 import { runLabels, stageLabels } from '@/lib/artifacts/view'
 import { fmtRelTime } from '@/lib/format'

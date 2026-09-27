@@ -3,12 +3,12 @@ export type ThemeMode = 'dark' | 'light'
 export const THEME_STORAGE_KEY = 'vidlens-theme'
 
 export function readStoredTheme(): ThemeMode {
-  if (typeof window === 'undefined') return 'dark'
+  if (typeof window === 'undefined') return 'light'
   try {
     const v = window.localStorage.getItem(THEME_STORAGE_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* private mode */ }
-  return 'dark'
+  return 'light'
 }
 
 export function applyTheme(mode: ThemeMode) {

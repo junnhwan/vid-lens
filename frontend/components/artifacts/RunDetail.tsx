@@ -1,6 +1,4 @@
-'use client'
-
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'

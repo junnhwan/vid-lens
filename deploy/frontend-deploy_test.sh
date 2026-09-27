@@ -43,9 +43,9 @@ new_case() {
   call_log="$case_root/calls.log"
   sha="0123456789abcdef0123456789abcdef01234567"
 
-  mkdir -p "$deploy_dir/frontend/.next" "$artifact_dir/frontend-src" "$stub_dir"
+  mkdir -p "$deploy_dir/frontend/dist" "$artifact_dir/frontend-src" "$stub_dir"
   printf '{"name":"old-frontend"}\n' > "$deploy_dir/frontend/package.json"
-  printf 'old-build\n' > "$deploy_dir/frontend/.next/BUILD_ID"
+  printf 'old-build\n' > "$deploy_dir/frontend/dist/index.html"
 
   printf '{"fake":true}\n' > "$artifact_dir/frontend-src/package.json"
   tar -czf "$artifact_dir/frontend-src.tar.gz" -C "$artifact_dir/frontend-src" .
@@ -80,8 +80,8 @@ if [ "${1:-}" = "run" ] && [ "${2:-}" = "build" ]; then
   if [ "${FAIL_BUILD:-0}" = "1" ]; then
     exit 1
   fi
-  mkdir -p .next
-  printf 'new-build\n' > .next/BUILD_ID
+  mkdir -p dist
+  printf 'new-build\n' > dist/index.html
 fi
 exit 0
 STUB
@@ -107,7 +107,7 @@ test_missing_artifact_is_rejected() {
     fail 'deployment unexpectedly accepted a missing frontend artifact'
   fi
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" old-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
   assert_not_exists "$call_log"
 }
 
@@ -118,7 +118,7 @@ test_failed_build_keeps_old_release() {
     fail 'deployment unexpectedly succeeded with a failing build'
   fi
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" old-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
   assert_exists "$deploy_dir/frontend"
   assert_no_old_release_left
 }
@@ -128,7 +128,8 @@ test_successful_deploy_swaps_and_restarts() {
 
   run_deploy >"$case_root/stdout" 2>"$case_root/stderr"
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" new-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" new-build
+  assert_file_text "$deploy_dir/frontend/.api-base" "http://127.0.0.1:18083"
   grep -q "systemctl restart vidlens-web" "$call_log" || fail 'vidlens-web was not restarted'
   grep -q "curl" "$call_log" || fail 'health check was not performed'
   assert_no_old_release_left
@@ -141,7 +142,7 @@ test_restart_failure_rolls_back() {
     fail 'deployment unexpectedly succeeded with a failing restart'
   fi
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" old-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
   assert_no_old_release_left
 }
 
@@ -152,7 +153,7 @@ test_health_failure_rolls_back() {
     fail 'deployment unexpectedly succeeded with a failing health check'
   fi
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" old-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
   assert_no_old_release_left
 }
 
@@ -170,7 +171,7 @@ test_missing_vidlens_api_base_is_rejected() {
     fail 'deployment unexpectedly succeeded without VIDLENS_API_BASE'
   fi
 
-  assert_file_text "$deploy_dir/frontend/.next/BUILD_ID" old-build
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
 }
 
 test_missing_artifact_is_rejected

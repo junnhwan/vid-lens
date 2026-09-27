@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { AnswerFeedback as Feedback, AnswerFeedbackInput } from '@/lib/types'

@@ -1,6 +1,4 @@
-import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: '功能说明 · 映知文档' }
 
 export default function DocsFeaturesPage() {
   return (

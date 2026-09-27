@@ -1,8 +1,6 @@
-'use client'
-
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import Link from '@/lib/router'
+import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
 import { fmtRelTime } from '@/lib/format'

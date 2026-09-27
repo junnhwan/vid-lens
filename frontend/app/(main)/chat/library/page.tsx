@@ -1,5 +1,3 @@
-'use client'
-
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { useCrumb } from '@/components/shell/AppShell'
 

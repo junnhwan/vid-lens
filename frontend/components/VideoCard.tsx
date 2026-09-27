@@ -1,7 +1,5 @@
-'use client'
-
 import { useState } from 'react'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import type { VideoTask } from '@/lib/types'
 import { fmtRelTime, fmtSize, sourceLabel, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'

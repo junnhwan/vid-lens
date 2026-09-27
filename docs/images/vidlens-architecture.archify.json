@@ -14,7 +14,7 @@
     {
       "id": "workspace",
       "type": "frontend",
-      "label": "Next.js 工作台",
+      "label": "Vite + React 工作台",
       "sublabel": "播放器 · 时间线 · 引用回看",
       "pos": [
         40,

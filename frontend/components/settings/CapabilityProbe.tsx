@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { ProfilePurpose } from '@/lib/types'

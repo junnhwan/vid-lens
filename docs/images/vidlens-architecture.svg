@@ -324,8 +324,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="agent" data-edge-to="media" data-edge-label="按需看画面" data-edge-key="8" data-composition-points="960,357;984,357;984,546;1190,546;1190,570" d="M 960 357 L 976 357 Q 984 357 984 365 L 984 538 Q 984 546 992 546 L 1182 546 Q 1190 546 1190 554 L 1190 570" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 
         <!-- Components -->
-        <g id="node-workspace" data-node-id="workspace" data-node-label="Next.js 工作台" tabindex="0" role="button" aria-label="聚焦Next.js 工作台，播放器 · 时间线 · 引用回看, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="播放器 · 时间线 · 引用回看" data-node-context="架构组件">
-          <title>Next.js 工作台 · 播放器 · 时间线 · 引用回看 · 架构组件</title>
+        <g id="node-workspace" data-node-id="workspace" data-node-label="Vite + React 工作台" tabindex="0" role="button" aria-label="聚焦Vite + React 工作台，播放器 · 时间线 · 引用回看, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="播放器 · 时间线 · 引用回看" data-node-context="架构组件">
+          <title>Vite + React 工作台 · 播放器 · 时间线 · 引用回看 · 架构组件</title>
           <rect x="40" y="310" width="220" height="80" rx="6" class="c-mask"/>
           <rect x="40" y="310" width="220" height="80" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(46 316) scale(0.6875)">
@@ -334,7 +334,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-node-label="" x="150" y="348" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Next.js 工作台</text>
+          <text data-node-label="" x="150" y="348" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Vite + React 工作台</text>
         <text x="150" y="364" class="t-muted" font-size="9" text-anchor="middle">播放器 · 时间线 · 引用回看</text>
         </g>
 

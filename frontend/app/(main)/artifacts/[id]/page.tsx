@@ -1,7 +1,5 @@
-'use client'
-
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { ArtifactWorkspace } from '@/components/artifacts/ArtifactWorkspace'
@@ -9,6 +7,7 @@ import { RemoteEvidencePanel } from '@/components/artifacts/EvidencePanel'
 import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 import { Modal } from '@/components/ui/Modal'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
+import { runLabels } from '@/lib/artifacts/view'
 
 export default function ArtifactPage({ params, searchParams }: { params: { id: string }; searchParams: { version?: string; candidate?: string } }) {
   const { user, registerLeaveGuard } = useShell()
@@ -18,6 +17,7 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
   const [adopting, setAdopting] = useState(false)
   const [adoptError, setAdoptError] = useState('')
   const query = useQuery({ queryKey: ['artifact', params.id], queryFn: ({ signal }) => artifactApi.get(params.id, signal), enabled: !!user, refetchInterval: 15_000 })
+  const taskQuery = useQuery({ queryKey: ['product-tasks', 1], queryFn: ({ signal }) => artifactApi.tasks(1, signal), enabled: !!user && !!query.data && !query.data.current_version_id, refetchInterval: 10_000 })
   const versionId = searchParams.version
   const version = useQuery({ queryKey: ['artifact-version', params.id, versionId], queryFn: ({ signal }) => artifactApi.version(params.id, versionId!, signal), enabled: !!user && !!versionId, staleTime: 0 })
   const versions = useQuery({ queryKey: ['artifact-versions', params.id], queryFn: ({ signal }) => artifactApi.versions(params.id, signal), enabled: !!user && versionsOpen })
@@ -28,6 +28,10 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
   if (query.error || version.error) return <div className="page"><ErrorState message={artifactError(query.error || version.error)} onRetry={() => { void query.refetch(); if (versionId) void version.refetch() }} /><Link className="btn" href="/artifacts">返回成果库</Link></div>
   if (!query.data || (versionId && !version.data)) return <div className="page"><LoadingBlock label="正在读取笔记…" /></div>
   const artifact = version.data && versionId ? { ...query.data, version: version.data } : query.data
+  if (!artifact.version) {
+    const run = taskQuery.data?.list.find(task => task.resource_id === params.id)?.run
+    return <div className="page"><div className="empty card"><h1>{artifact.title || '学习笔记'}</h1><p>{run ? `当前任务：${runLabels[run.status]}。` : '当前还没有可阅读的版本。'}可在任务中心查看状态与处理记录。</p><Link className="btn" href={run ? `/tasks?run=${encodeURIComponent(run.id)}` : '/tasks'}>查看任务</Link></div></div>
+  }
   const selected = evidenceId ?? artifact.version?.body.blocks.flatMap(block => block.evidence_refs)[0]?.evidence_id
   const candidate = !!versionId && !!version.data?.was_candidate && versionId !== query.data.current_version_id && versionId !== query.data.version?.adopted_from_version_id
   return <>

@@ -1,5 +1,3 @@
-'use client'
-
 import type { CiteRef } from '@/components/Citation'
 import { formatTime, formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { fmtScore } from '@/lib/format'

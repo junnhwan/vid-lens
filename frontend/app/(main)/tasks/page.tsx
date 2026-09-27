@@ -1,7 +1,5 @@
-'use client'
-
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter } from '@/lib/router'
 import { useQuery } from '@tanstack/react-query'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { PageHeading } from '@/components/product/PageHeading'

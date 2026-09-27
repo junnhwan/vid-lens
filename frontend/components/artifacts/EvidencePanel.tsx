@@ -1,12 +1,10 @@
-'use client'
-
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import type { Evidence } from '@/lib/artifacts/schema'
-import { canReplay, evidenceTime } from '@/lib/artifacts/view'
+import { canReplay, evidenceTime, isPointEvidence } from '@/lib/artifacts/view'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { Icon } from '@/components/ui/Icon'
 
@@ -25,7 +23,7 @@ export function EvidencePanel({ evidence, loading, error, onRetry, preview = fal
       <p className="evidence-time mono">{evidenceTime(evidence)}</p>
       <blockquote>{evidence.content}</blockquote>
       <p className="evidence-hint">{evidence.time_range_status === 'unknown' ? '来源未提供可靠时间范围，因此不提供定位回放。' : evidence.time_range_status === 'coarse' ? '此处为粗粒度时间范围，回放后请结合上下文核对。' : '时间来自视频证据，可以直接定位回看。'}</p>
-      <button className="btn evidence-replay" disabled={preview || outdated || !playback.data || !canReplay(evidence)} onClick={() => player.current?.seek(evidence.start_ms!, true, evidence.id)}><Icon name="play" size="sm" />{canReplay(evidence) ? '从片段开始回看' : '没有可定位的时间'}</button>
+      <button className="btn evidence-replay" disabled={preview || outdated || !playback.data || !canReplay(evidence)} onClick={() => player.current?.seek(evidence.start_ms!, true, evidence.id)}><Icon name="play" size="sm" />{canReplay(evidence) ? isPointEvidence(evidence) ? '定位到这个画面' : '从片段开始回看' : '没有可定位的时间'}</button>
       {!preview && <Link href={`/video/${evidence.source_id}${canReplay(evidence) && !outdated ? `?t=${evidence.start_ms}` : ''}`} className="btn btn-ghost evidence-source-link">打开视频详情<Icon name="chev-r" size="sm" /></Link>}
       <details className="evidence-identity"><summary>来源标识</summary><dl><dt>证据</dt><dd>{evidence.id}</dd><dt>快照</dt><dd>{evidence.manifest_id}</dd><dt>原始观察</dt><dd>{evidence.source_identity}</dd></dl></details>
     </>}

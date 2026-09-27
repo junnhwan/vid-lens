@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '@/components/ui/Icon'
 
@@ -177,7 +175,6 @@ export function IntroStage() {
       <div className="is-card rv-item">
         <div className="is-frame">
           {FRAMES.map((f, i) => (
-            /* eslint-disable-next-line @next/next/no-img-element */
             <img key={f.src} src={f.src} alt="" className={i === frameIdx ? 'on' : ''} />
           ))}
           <span className="is-sheen" />
@@ -261,7 +258,6 @@ export function IntroStage() {
                   }}
                   title={`跳到画面证据 ${fmtClock(f.t)}`}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={f.src} alt="" loading="lazy" />
                 </button>
               ))}

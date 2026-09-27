@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useState } from 'react'
 import type { ChatMsg } from './chatUtils'
 import type { ChatTraceStep } from './traceTypes'

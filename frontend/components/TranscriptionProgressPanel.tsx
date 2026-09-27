@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { TaskStatusEnum, type TranscriptionProgress, type VideoTask } from '@/lib/types'

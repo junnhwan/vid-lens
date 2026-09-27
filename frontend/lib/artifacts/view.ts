@@ -12,11 +12,21 @@ export const errorLabels: Record<string, string> = {
   version_conflict: '已有新版本，你的编辑仍保留在这里。', idempotency_conflict: '请求内容已变化，请核对任务列表后重新创建。',
 }
 export function isActiveRun(run: GenerationRun) { return run.status === 'pending' || run.status === 'running' }
-export function canReplay(evidence: Evidence) { return evidence.time_range_status !== 'unknown' && evidence.start_ms !== null && evidence.end_ms !== null && evidence.end_ms > evidence.start_ms }
+export function canReplay(evidence: Evidence) { return evidence.time_range_status !== 'unknown' && evidence.start_ms !== null && evidence.end_ms !== null && evidence.end_ms >= evidence.start_ms }
+export function isPointEvidence(evidence: Evidence) { return canReplay(evidence) && (evidence.start_ms === evidence.end_ms || (evidence.modality.startsWith('visual') && evidence.end_ms! - evidence.start_ms! <= 1)) }
 export function evidenceTime(evidence: Evidence) {
   if (!canReplay(evidence)) return '时间未知'
   const clock = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+  if (isPointEvidence(evidence)) return `${evidence.time_range_status === 'coarse' ? '约 ' : ''}${clock(evidence.start_ms!)} · 画面时间点`
   return `${evidence.time_range_status === 'coarse' ? '约 ' : ''}${clock(evidence.start_ms!)} – ${clock(evidence.end_ms!)}`
+}
+export function warningMessage(code: string) {
+  if (code === 'human_edited_unverified') return '人工修改后的引用关系尚待核对。'
+  if (code === 'generated_needs_review') return 'AI 整理的内容需要结合原视频核对。'
+  if (code === 'coverage_is_observations_not_all_video_frames') return '画面证据来自抽样观察，并未覆盖每一帧。'
+  const coverage = /^covered_segments:(\d+)\/(\d+)$/.exec(code)
+  if (coverage) return `已处理 ${coverage[1]}/${coverage[2]} 个视频片段。`
+  return /^[a-z][a-z0-9_:./-]*$/.test(code) ? '生成提示：请结合来源核对这一处内容。' : code
 }
 export interface BlockNode { block: StudyBlock; children: BlockNode[] }
 export function blockTree(body: StudyBody): BlockNode[] {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { bodySchema, detailSchema, evidenceSchema, runSchema } from './schema.ts'
-import { canReplay, evidenceTime, mapTree } from './view.ts'
+import { canReplay, evidenceTime, isPointEvidence, mapTree, warningMessage } from './view.ts'
 import { studyFixture, evidenceFixtures, runFixture } from '../../dev/productFixtures.ts'
 
 test('first-delivery specimens validate against the API contract', () => {
@@ -14,6 +14,14 @@ test('unknown timestamps never become a replay link even with stray numeric coor
   assert.equal(canReplay(evidence), false)
   assert.equal(evidenceTime(evidence), '时间未知')
   assert.match(evidenceTime(evidenceFixtures[1]), /^约 08:42/)
+})
+test('point evidence seeks to its frame and generated warnings read as product copy', () => {
+  const point = { ...evidenceFixtures[0], modality: 'visual_caption', time_range_status: 'precise' as const, start_ms: 60_000, end_ms: 60_001 }
+  assert.equal(canReplay(point), true)
+  assert.equal(isPointEvidence(point), true)
+  assert.equal(evidenceTime(point), '01:00 · 画面时间点')
+  assert.match(warningMessage('covered_segments:2/3'), /2\/3/)
+  assert.match(warningMessage('coverage_is_observations_not_all_video_frames'), /抽样观察/)
 })
 test('invalid schema, broken parent order, duplicate identities and unsupported claims are rejected', () => {
   const body = structuredClone(studyFixture.version!.body)

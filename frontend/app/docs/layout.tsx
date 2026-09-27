@@ -1,15 +1,10 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
 import { DocsNav } from './DocsNav'
 import { DocsToc } from './DocsToc'
 import './docs.css'
 
-export const metadata: Metadata = {
-  title: '映知 VidLens · 使用文档',
-  description: '快速开始、功能说明、配置与常见问题、更新日志',
-}
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (

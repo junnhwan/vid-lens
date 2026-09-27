@@ -7,12 +7,12 @@ Turn videos into a searchable knowledge base you can question, explore, and veri
 [简体中文](README.md) · **English**
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs)](https://nextjs.org)
+[![React + Vite](https://img.shields.io/badge/React%20%2B%20Vite-SPA-315e48?logo=react)](https://vite.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 
 </div>
 
-VidLens is a video knowledge base and agent-powered Q&A platform built with Go and Next.js. Upload a video or import a URL to process speech, visuals, and search indexes asynchronously. Ask questions directly, or let the agent retrieve passages, inspect frames, and compare videos—then follow citations back to the source.
+VidLens is a video knowledge base and agent-powered Q&A platform built with Go and Vite + React. Upload a video or import a URL to process speech, visuals, and search indexes asynchronously. Ask questions directly, or let the agent retrieve passages, inspect frames, and compare videos—then follow citations back to the source.
 
 ## Core Features
 
@@ -87,7 +87,7 @@ VidLens is a video knowledge base and agent-powered Q&A platform built with Go a
 
 ## Stack and Quick Start
 
-**Go · Gin · GORM · PostgreSQL / pgvector · Redis · RabbitMQ · MinIO · FFmpeg / yt-dlp · Next.js**
+**Go · Gin · GORM · PostgreSQL / pgvector · Redis · RabbitMQ · MinIO · FFmpeg / yt-dlp · Vite + React**
 
 Install Go 1.24+, Node.js 20+, Docker Compose, FFmpeg, and yt-dlp. Copy `.env.example` to `.env` and configure your connections and credentials. After signing in, configure models under **Settings → AI Services**.
 

@@ -1,7 +1,5 @@
-'use client'
-
 import { useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { api } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
 import type { RetrievalTestResult } from '@/lib/knowledge'
@@ -25,7 +23,7 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
   const [error,setError]=useState('')
   const requestRef=useRef(0)
   useCrumb([{label:'知识库',href:'/kb'},{label:kb?.name || '知识库',href:`/kb/${kbId}`},{label:'检索测试台'}])
-  useEffect(()=>{let active=true;setKB(null);setResult(null);setLoadError('');api.getKB(kbId).then(v=>{if(active)setKB(v)}).catch(e=>{if(active)setLoadError(e instanceof Error?e.message:'加载失败')});return()=>{active=false;requestRef.current++}},[kbId])
+  useEffect(()=>{let active=true;const requests=requestRef;setKB(null);setResult(null);setLoadError('');api.getKB(kbId).then(v=>{if(active)setKB(v)}).catch(e=>{if(active)setLoadError(e instanceof Error?e.message:'加载失败')});return()=>{active=false;requests.current++}},[kbId])
   const run=async()=>{
     if(!question.trim() || busy)return
     const rid=++requestRef.current;setBusy(true);setError('');setResult(null)

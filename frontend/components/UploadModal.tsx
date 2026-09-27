@@ -1,7 +1,5 @@
-'use client'
-
 import { useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import { MD5 } from '@/lib/md5'
 import { fmtSize } from '@/lib/format'

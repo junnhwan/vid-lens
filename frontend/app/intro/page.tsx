@@ -1,5 +1,4 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
 import { IntroMotion } from './IntroMotion'
@@ -7,10 +6,6 @@ import { IntroStage } from './IntroStage'
 import { RevealText } from './RevealText'
 import './intro.css'
 
-export const metadata: Metadata = {
-  title: '映知 VidLens · 让视频成为可检索、可追问的知识库',
-  description: '自动转写语音、识别画面、建立语义索引；提问后每条引用都能跳回原画面核对。',
-}
 
 const FLOW = [
   { icon: 'upload', title: '上传或导入', desc: '本地文件分片上传、断点续传；也可粘贴视频链接导入。重复文件自动复用已有结果。' },

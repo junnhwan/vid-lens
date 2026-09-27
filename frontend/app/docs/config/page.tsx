@@ -1,6 +1,4 @@
-import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: '配置与常见问题 · 映知文档' }
 
 export default function DocsConfigPage() {
   return (

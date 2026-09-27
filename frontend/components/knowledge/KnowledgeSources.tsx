@@ -1,6 +1,4 @@
-'use client'
-
-import Link from 'next/link'
+import Link from '@/lib/router'
 import type { KnowledgeBase } from '@/lib/types'
 import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange } from '@/components/Citation'

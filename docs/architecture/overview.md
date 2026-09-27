@@ -4,7 +4,7 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 
 ## 运行拓扑
 
-- `frontend/` 是当前唯一的 Next.js Web 前端，独立构建和部署。
+- `frontend/` 是 Vite + React 单页前端，独立构建和部署；Node 静态服务转发 `/api` 并保持 SSE 流式响应。
 - `cmd/server/` 是 Go 后端入口，负责 HTTP API、依赖组装和异步任务消费者的运行时启动。
 - `deploy/frontend-deploy.sh` 和 `deploy/server-deploy.sh` 分别发布前端和后端，两个发布过程相互独立。
 - 后端依赖 PostgreSQL、Redis、MinIO、RabbitMQ 和按能力配置的 AI 服务。
@@ -20,9 +20,9 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 - `internal/vector/`：pgvector 唯一向量后端实现
 - `internal/ai/`：LLM、ASR、Embedding、Rerank、Vision 协议适配及调用治理
 - `internal/observability/`：结构化日志、指标和运行状态观测
-- `frontend/app/`：正式 Next.js 产品路由
+- `frontend/main.tsx`：React 入口；`frontend/app/router.tsx`：正式 React Router 路由；`frontend/app/` 保留各页面组件
 - `frontend/components/chat/`：`ConversationSession`、会话快照适配和聊天展示模块
-- `frontend/prototype/`：独立的开发原型 Next workspace，不进入默认 production build
+- `frontend/prototype/`：独立 HTML 交互原型，不进入正式构建
 
 `frontend/go.mod` 仅是 Go 工具链的模块边界：npm 的可复现依赖 `flatted` 自带 `golang/` 示例源码，若没有该边界，安装前端依赖后从仓库根运行 `go test ./...` 会把第三方示例误当成本项目包。该空模块不包含业务 Go 代码，也不参与前端构建。
 

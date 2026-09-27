@@ -1,8 +1,6 @@
-'use client'
-
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import Link from '@/lib/router'
+import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import type { ChatSession, VideoTask } from '@/lib/types'
 import { fmtRelTime, taskTitle } from '@/lib/format'
@@ -98,7 +96,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <ProductHero onImport={openUpload} />
+      <ProductHero onImport={openUpload} current={tasks.find(t => t.status === 3 && t.has_transcription)} loading={loading} />
       <div className="product-metrics">
         <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading ? '—' : String(total).padStart(2, '0')}</strong></Link>
         <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{loading ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>

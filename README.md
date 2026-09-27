@@ -9,12 +9,12 @@
 **简体中文** · [English](README.en.md)
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs)](https://nextjs.org)
+[![React + Vite](https://img.shields.io/badge/React%20%2B%20Vite-SPA-315e48?logo=react)](https://vite.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 
 </div>
 
-映知是一个基于 Go 与 Next.js 的视频知识库与 Agent 问答平台。上传视频或导入链接后，系统异步处理语音、画面与索引；用户可以直接提问，也可以让 Agent 检索片段、查看画面、跨视频比较，沿着回答中的引用回到原视频。
+映知是一个基于 Go 与 Vite + React 的视频知识库与 Agent 问答平台。上传视频或导入链接后，系统异步处理语音、画面与索引；用户可以直接提问，也可以让 Agent 检索片段、查看画面、跨视频比较，沿着回答中的引用回到原视频。
 
 ## 核心能力
 
@@ -90,7 +90,7 @@
 
 ## 技术栈与启动
 
-**Go · Gin · GORM · PostgreSQL / pgvector · Redis · RabbitMQ · MinIO · FFmpeg / yt-dlp · Next.js**
+**Go · Gin · GORM · PostgreSQL / pgvector · Redis · RabbitMQ · MinIO · FFmpeg / yt-dlp · Vite + React**
 
 准备 Go 1.24+、Node.js 20+、Docker Compose、FFmpeg 和 yt-dlp。复制 `.env.example` 为 `.env`，按环境填写连接信息与密钥；登录后可在「设置 → AI 服务」配置模型。
 

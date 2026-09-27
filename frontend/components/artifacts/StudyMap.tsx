@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useRef, useState } from 'react'
 import type { Markmap } from 'markmap-view'
 import type { StudyBody } from '@/lib/artifacts/schema'

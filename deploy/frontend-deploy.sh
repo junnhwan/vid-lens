@@ -97,17 +97,18 @@ tar -xzf "$tmp_dir/frontend-src.tar.gz" -C "$staging_dir"
 (
   cd "$staging_dir"
   npm ci --no-audit --no-fund
-  VIDLENS_API_BASE="$VIDLENS_API_BASE" npm run build
+  npm run build
 )
-[ -d "$staging_dir/.next" ] || die "frontend build did not produce .next"
+[ -f "$staging_dir/dist/index.html" ] || die "frontend build did not produce dist/index.html"
+printf '%s\n' "$VIDLENS_API_BASE" > "$staging_dir/.api-base"
 
 # Record a lightweight backup of the current release metadata for forensics.
 mkdir -p "$backup_dir"
 if [ -d "$frontend_dir" ]; then
   cp -p "$frontend_dir/package.json" "$backup_dir/" 2>/dev/null || true
   cp -p "$frontend_dir/package-lock.json" "$backup_dir/" 2>/dev/null || true
-  if [ -d "$frontend_dir/.next" ]; then
-    tar -czf "$backup_dir/frontend-build.tar.gz" -C "$frontend_dir" .next 2>/dev/null || true
+  if [ -d "$frontend_dir/dist" ]; then
+    tar -czf "$backup_dir/frontend-build.tar.gz" -C "$frontend_dir" dist 2>/dev/null || true
   fi
 fi
 

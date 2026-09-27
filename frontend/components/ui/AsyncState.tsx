@@ -1,5 +1,3 @@
-'use client'
-
 import { Icon, type IconName } from './Icon'
 
 /** 统一加载态。card 变体带卡片壳；bare 为居中灰字。 */

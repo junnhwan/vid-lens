@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Link from '@/lib/router'
 
 // 全局 404:匹配不到任何路由时显示。
 export default function NotFound() {

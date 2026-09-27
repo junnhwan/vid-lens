@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useEffect } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { VideoTask, KnowledgeBase } from '@/lib/types'

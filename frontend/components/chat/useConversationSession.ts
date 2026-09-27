@@ -1,5 +1,3 @@
-'use client'
-
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import type { CiteRef } from '@/components/Citation'

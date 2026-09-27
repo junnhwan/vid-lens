@@ -1,5 +1,3 @@
-'use client'
-
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { AIProfile, AIProfileRequest, ProfilePurpose, AgentBudgetOverride, AgentBudgetOptions } from '@/lib/types'
@@ -17,8 +15,6 @@ interface GroupDraft {
   model: string
   preset: string
 }
-
-const EMPTY_GROUP: GroupDraft = { provider: 'openai', base_url: '', api_key: '', model: '', preset: 'openai-compat' }
 
 function fromProfile(provider: string, baseUrl: string, model: string): GroupDraft {
   return {

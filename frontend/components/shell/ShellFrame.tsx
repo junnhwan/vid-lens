@@ -1,7 +1,5 @@
-'use client'
-
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { Icon } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { useTheme } from '@/components/theme/ThemeProvider'

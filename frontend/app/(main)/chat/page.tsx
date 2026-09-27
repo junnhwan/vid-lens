@@ -1,7 +1,5 @@
-'use client'
-
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import Link from '@/lib/router'
 import { api } from '@/lib/api'
 import type { ChatSession, KnowledgeBase, VideoTask } from '@/lib/types'
 import { taskTitle } from '@/lib/format'

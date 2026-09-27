@@ -1,8 +1,6 @@
-'use client'
-
 import { useCallback, useEffect, useState } from 'react'
 import { formatClock } from '@/lib/format'
-import { useRouter } from 'next/navigation'
+import { useRouter } from '@/lib/router'
 import { api } from '@/lib/api'
 import type { VideoQuestionResult } from '@/lib/types'
 
