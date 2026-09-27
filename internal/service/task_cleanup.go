@@ -107,6 +107,9 @@ func (s *TaskCleanupService) RequestDelete(ctx context.Context, userID, taskID i
 		if err := txRepos.Task.Delete(task.ID); err != nil {
 			return err
 		}
+		if err := txRepos.Artifact.RevokeSource(task.ID); err != nil {
+			return err
+		}
 		// Derived chat state is removed in the user-visible deletion
 		// transaction. External object/vector cleanup remains asynchronous.
 		if err := deleteTaskDerivedChatRows(txRepos, task.ID); err != nil {

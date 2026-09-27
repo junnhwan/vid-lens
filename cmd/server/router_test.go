@@ -21,6 +21,7 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 		media:          &handler.MediaHandler{},
 		knowledgeBases: &handler.KnowledgeBaseHandler{},
 		memory:         &handler.MemoryHandler{},
+		artifacts:      &handler.ArtifactHandler{},
 	}, nil, nil)
 
 	if router == nil {
@@ -28,10 +29,15 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"GET /healthz":                         "health endpoint",
-		"GET /readyz":                          "readiness endpoint",
-		"POST /api/v1/user/register":           "public registration",
-		"GET /api/v1/chat/feedback/candidates": "owner feedback candidates",
+		"POST /api/v1/artifact-runs":                             "background artifact generation",
+		"GET /api/v1/artifact-runs/:id/events":                   "durable artifact events",
+		"PATCH /api/v1/artifacts/:id":                            "versioned artifact edits",
+		"GET /api/v1/sources/:manifest_id/evidence/:evidence_id": "authorized evidence",
+		"GET /api/v1/tasks":                                      "task projection",
+		"GET /healthz":                                           "health endpoint",
+		"GET /readyz":                                            "readiness endpoint",
+		"POST /api/v1/user/register":                             "public registration",
+		"GET /api/v1/chat/feedback/candidates":                   "owner feedback candidates",
 		"PUT /api/v1/chat/sessions/:session_id/messages/:message_id/feedback":    "save feedback",
 		"GET /api/v1/chat/sessions/:session_id/messages/:message_id/feedback":    "read feedback",
 		"DELETE /api/v1/chat/sessions/:session_id/messages/:message_id/feedback": "clear feedback",

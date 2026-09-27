@@ -23,6 +23,7 @@ type serverHandlers struct {
 	media          *handler.MediaHandler
 	knowledgeBases *handler.KnowledgeBaseHandler
 	memory         *handler.MemoryHandler
+	artifacts      *handler.ArtifactHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -44,6 +45,24 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 		auth.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
 			auth.GET("/user/profile", handlers.user.GetProfile)
+			if h := handlers.artifacts; h != nil {
+				auth.POST("/artifact-runs", middleware.RateLimit(rateLimiter), h.Submit)
+				auth.GET("/artifact-runs/:id", h.Run)
+				auth.GET("/artifact-runs/:id/events", h.Events)
+				auth.POST("/artifact-runs/:id/cancel", h.Cancel)
+				auth.POST("/artifact-runs/:id/resume", h.Resume)
+				auth.POST("/artifact-runs/:id/retry", middleware.RateLimit(rateLimiter), h.Retry)
+				auth.GET("/artifacts", h.List)
+				auth.POST("/artifacts", h.Create)
+				auth.GET("/artifacts/:id", h.Get)
+				auth.PATCH("/artifacts/:id", h.Save)
+				auth.POST("/artifacts/:id/adopt", h.Adopt)
+				auth.GET("/artifacts/:id/versions", h.Versions)
+				auth.GET("/artifacts/:id/versions/:version_id", h.Version)
+				auth.GET("/sources/video/:id", h.Source)
+				auth.GET("/sources/:manifest_id/evidence/:evidence_id", h.Evidence)
+				auth.GET("/tasks", h.Tasks)
+			}
 			aiProfiles := auth.Group("/ai/profiles")
 			{
 				aiProfiles.GET("", handlers.profiles.List)

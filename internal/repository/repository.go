@@ -29,6 +29,7 @@ type Repositories struct {
 	Feedback           *ChatFeedbackRepository
 	Memory             *MemoryRepository
 	AgentExecution     *AgentExecutionRepository
+	Artifact           *ArtifactRepository
 	AICallLog          *AICallLogRepository
 	RetryBudget        *RetryBudgetRepository
 	UsageLedger        *UsageLedgerRepository
@@ -59,6 +60,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Feedback:           NewChatFeedbackRepository(db),
 		Memory:             NewMemoryRepository(db),
 		AgentExecution:     NewAgentExecutionRepository(db),
+		Artifact:           NewArtifactRepository(db),
 		AICallLog:          NewAICallLogRepository(db),
 		RetryBudget:        NewRetryBudgetRepository(db),
 		UsageLedger:        NewUsageLedgerRepository(db),

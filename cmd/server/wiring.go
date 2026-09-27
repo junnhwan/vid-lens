@@ -41,6 +41,7 @@ type serverApplication struct {
 	mq                   config.MQConfig
 	memoryWriter         *service.AsyncMemoryWriter
 	memoryCapture        *service.DurableMemoryCapture
+	artifactWorker       *mq.ArtifactWorker
 }
 
 func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
@@ -304,6 +305,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	videoAgentSvc.SetVisualInvestigator(visualInvestigator)
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
+	artifactSvc := service.NewArtifactService(deps.repos, aiProfileSvc, aiFactory)
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
@@ -314,6 +316,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			media:          handler.NewMediaHandler(mediaSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
+			artifacts:      handler.NewArtifactHandler(artifactSvc),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,
@@ -327,10 +330,14 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		mq:                   deps.cfg.MQ,
 		memoryWriter:         memoryWriter,
 		memoryCapture:        memoryCapture,
+		artifactWorker:       mq.NewArtifactWorker(deps.repos.Artifact, artifactSvc, deps.cfg.MQ.Brokers),
 	}, nil
 }
 
 func (a *serverApplication) Start(ctx context.Context) {
+	if a.artifactWorker != nil {
+		a.artifactWorker.Start(ctx)
+	}
 	a.consumer.StartAnalyzeConsumer(ctx, a.mq.Brokers, a.mq.AnalyzeQueue, a.mq.ConsumerGroup)
 	a.consumer.StartTranscribeConsumer(ctx, a.mq.Brokers, a.mq.TranscribeQueue, a.mq.ConsumerGroup)
 	a.consumer.StartDownloadConsumer(ctx, a.mq.Brokers, a.mq.DownloadQueue, a.mq.ConsumerGroup)
@@ -340,6 +347,9 @@ func (a *serverApplication) Start(ctx context.Context) {
 }
 
 func (a *serverApplication) Wait() {
+	if a.artifactWorker != nil {
+		a.artifactWorker.Wait()
+	}
 	a.consumer.Wait()
 	a.retryScheduler.Wait()
 	a.taskCleanupScheduler.Wait()

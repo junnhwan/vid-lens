@@ -137,6 +137,9 @@ func (r *AgentExecutionRepository) CreateRun(ctx context.Context, run *model.Age
 	if err := validateAgentRun(run); err != nil {
 		return false, err
 	}
+	run.SubjectKind = "chat_session"
+	run.SubjectID = fmt.Sprint(run.SessionID)
+	run.ExecutionKind = "chat"
 	now := run.CreatedAt.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -157,7 +160,7 @@ func (r *AgentExecutionRepository) GetRun(ctx context.Context, userID int64, run
 		return nil, gorm.ErrInvalidData
 	}
 	var run model.AgentRun
-	err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error
+	err := r.db.WithContext(ctx).Where("subject_kind = 'chat_session'").Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -218,7 +221,7 @@ func (r *AgentExecutionRepository) MarkFinalEvidenceRefs(ctx context.Context, us
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error; err != nil {
+		if err := tx.Where("subject_kind = 'chat_session'").Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error; err != nil {
 			return err
 		}
 		var calls []model.AgentToolCall
@@ -258,7 +261,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 	var claim AgentStepClaim
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", req.RunID, req.UserID).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind = 'chat_session'").Where("id = ? AND user_id = ?", req.RunID, req.UserID).First(&run).Error; err != nil {
 			return err
 		}
 		claim.Run = run
@@ -489,7 +492,7 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind = 'chat_session'").Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -546,7 +549,7 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind = 'chat_session'").Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
 			return err
 		}
 		var step model.AgentStep
@@ -602,6 +605,7 @@ func (r *AgentExecutionRepository) MarkRunTerminal(ctx context.Context, req Agen
 		req.Now = time.Now().UTC()
 	}
 	result := r.db.WithContext(ctx).Model(&model.AgentRun{}).
+		Where("subject_kind = ?", "chat_session").
 		Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).
 		Updates(map[string]any{"status": req.Status, "stop_reason": req.StopReason, "error_code": req.ErrorCode, "error_message": req.ErrorMessage, "finished_at": req.Now, "updated_at": req.Now, "version": gorm.Expr("version + 1")})
 	return result.RowsAffected == 1, result.Error

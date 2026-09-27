@@ -619,13 +619,14 @@ func TestPostgresInitialDispatchPersistsTaskJobBudgetAndLeaseAtomically(t *testi
 		t.Fatalf("find retry budget: %v", err)
 	}
 
-	if storedTask.Status != model.TaskStatusQueued || storedTask.Stage != model.TaskStageTranscribing || storedTask.LastJobType != model.TaskJobTypeTranscribe {
+	// Dispatch preserves the task's current stage; processing claim enters the target stage.
+	if storedTask.Status != model.TaskStatusQueued || storedTask.Stage != model.TaskStageUploaded || storedTask.LastJobType != model.TaskJobTypeTranscribe {
 		t.Fatalf("stored task state = status:%d stage:%q job:%q", storedTask.Status, storedTask.Stage, storedTask.LastJobType)
 	}
 	if storedTask.ProcessingToken != prepared.Token || storedTask.LeaseKind != model.TaskLeaseKindDispatch || storedTask.LeaseExpiresAt == nil || !storedTask.LeaseExpiresAt.Equal(leaseUntil) || storedTask.LeaseVersion != 1 {
 		t.Fatalf("stored task lease = token:%q kind:%q expires:%v version:%d", storedTask.ProcessingToken, storedTask.LeaseKind, storedTask.LeaseExpiresAt, storedTask.LeaseVersion)
 	}
-	if job == nil || job.Status != model.TaskStatusQueued || job.ProcessingToken != prepared.Token || job.LeaseKind != model.TaskLeaseKindDispatch || job.LeaseExpiresAt == nil || !job.LeaseExpiresAt.Equal(leaseUntil) || job.LeaseVersion != storedTask.LeaseVersion {
+	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageTranscribing || job.ProcessingToken != prepared.Token || job.LeaseKind != model.TaskLeaseKindDispatch || job.LeaseExpiresAt == nil || !job.LeaseExpiresAt.Equal(leaseUntil) || job.LeaseVersion != storedTask.LeaseVersion {
 		t.Fatalf("stored task job = %+v", job)
 	}
 	if job.RetryBudgetID != prepared.RetryBudgetID || budget.TaskID != task.ID || budget.JobID != job.ID || budget.Operation != model.TaskJobTypeTranscribe || budget.MaxAttempts != 4 {

@@ -42,9 +42,22 @@ const (
 // Agent execution. Snapshot fields contain server-created JSON without API
 // keys or prompt text. PostgreSQL is authoritative for recovery.
 type AgentRun struct {
-	ID                   string     `gorm:"type:varchar(36);primaryKey" json:"id"`
-	UserID               int64      `gorm:"not null;index:idx_agent_run_owner_status,priority:1;index:idx_agent_run_owner_session,priority:1" json:"user_id"`
-	SessionID            int64      `gorm:"not null;index:idx_agent_run_owner_session,priority:2" json:"session_id"`
+	ID     string `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID int64  `gorm:"not null;index:idx_agent_run_owner_status,priority:1;index:idx_agent_run_owner_session,priority:1" json:"user_id"`
+	// NULL in PostgreSQL for generation requests; zero is the legacy Go read representation.
+	SessionID            int64      `gorm:"default:null;index:idx_agent_run_owner_session,priority:2" json:"session_id"`
+	SubjectKind          string     `gorm:"not null;default:'chat_session';index" json:"subject_kind"`
+	SubjectID            string     `gorm:"not null;default:''" json:"subject_id"`
+	ExecutionKind        string     `gorm:"not null;default:'chat'" json:"execution_kind"`
+	RecipeVersion        string     `json:"recipe_version,omitempty"`
+	RunLeaseToken        string     `json:"-"`
+	RunLeaseEpoch        int64      `gorm:"not null;default:0" json:"-"`
+	RunLeaseUntil        *time.Time `gorm:"index" json:"-"`
+	ExecutionStartedAt   *time.Time `json:"execution_started_at,omitempty"`
+	CancelRequestedAt    *time.Time `json:"cancel_requested_at,omitempty"`
+	EventSeq             int64      `gorm:"not null;default:0" json:"-"`
+	Stage                string     `json:"stage,omitempty"`
+	ResultVersionID      *string    `json:"result_version_id,omitempty"`
 	ScopeType            string     `gorm:"type:varchar(30);not null;index" json:"scope_type"`
 	TaskID               int64      `gorm:"not null;default:0;index" json:"task_id,omitempty"`
 	KnowledgeBaseID      int64      `gorm:"not null;default:0;index" json:"knowledge_base_id,omitempty"`
@@ -114,6 +127,7 @@ type AgentStep struct {
 	ErrorCode             string     `gorm:"type:varchar(80);not null;default:''" json:"error_code,omitempty"`
 	ErrorMessage          string     `gorm:"type:text;not null;default:''" json:"error_message,omitempty"`
 	ReplaySafe            bool       `gorm:"not null;default:false" json:"replay_safe"`
+	RetryNotBefore        *time.Time `json:"retry_not_before,omitempty"`
 	LeaseToken            string     `gorm:"type:varchar(64);not null;default:'';index" json:"-"`
 	LeaseExpiresAt        *time.Time `gorm:"index" json:"lease_expires_at,omitempty"`
 	LeaseVersion          int64      `gorm:"not null;default:1" json:"lease_version"`

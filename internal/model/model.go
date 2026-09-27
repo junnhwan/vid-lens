@@ -35,6 +35,8 @@ func AllModels() []interface{} {
 		&AgentRun{},
 		&AgentStep{},
 		&AgentToolCall{},
+		&Artifact{}, &ArtifactVersion{}, &SourceManifest{}, &SourceSnapshotItem{},
+		&ArtifactEvidenceRef{}, &GenerationRequest{}, &GenerationDispatch{}, &RunEvent{},
 		&AICallLog{},
 		&AIRetryBudget{},
 		&AIRetryAttempt{},
@@ -53,6 +55,9 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	if err := migrateModels(db, AllModels()); err != nil {
+		return err
+	}
+	if err := migrateArtifactSubjects(db); err != nil {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {
