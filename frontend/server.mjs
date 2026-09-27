@@ -10,6 +10,7 @@ const mime = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8',
 }
@@ -36,16 +37,34 @@ function proxyApi(request, response, apiBase) {
   request.pipe(outgoing)
 }
 
-function serveFile(response, filePath, headOnly) {
+function serveFile(request, response, filePath) {
   const info = statSync(filePath)
+  const isVideo = extname(filePath) === '.mp4'
   const headers = {
     'Content-Type': mime[extname(filePath)] || 'application/octet-stream',
     'Content-Length': info.size,
     'Cache-Control': filePath.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
     'X-Content-Type-Options': 'nosniff',
   }
+  if (isVideo) headers['Accept-Ranges'] = 'bytes'
+  if (isVideo && request.headers.range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range)
+    const first = match?.[1]
+    const last = match?.[2]
+    const suffix = first === '' && last ? Number(last) : null
+    const start = suffix !== null ? Math.max(0, info.size - suffix) : Number(first)
+    const end = suffix !== null || last === '' ? info.size - 1 : Math.min(Number(last), info.size - 1)
+    if (!match || (!first && !last) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= info.size) {
+      response.writeHead(416, { 'Content-Range': `bytes */${info.size}`, 'Accept-Ranges': 'bytes' }).end()
+      return
+    }
+    response.writeHead(206, { ...headers, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${info.size}` })
+    if (request.method === 'HEAD') response.end()
+    else createReadStream(filePath, { start, end }).pipe(response)
+    return
+  }
   response.writeHead(200, headers)
-  if (headOnly) response.end()
+  if (request.method === 'HEAD') response.end()
   else createReadStream(filePath).pipe(response)
 }
 
@@ -60,9 +79,9 @@ export function createFrontendServer({ apiBase = process.env.VIDLENS_API_BASE ||
     const candidate = resolve(dist, `.${decoded}`)
     if (candidate !== dist && !candidate.startsWith(dist + sep)) { response.writeHead(403).end('Forbidden'); return }
     const file = existsSync(candidate) && statSync(candidate).isFile() ? candidate : null
-    if (file) { serveFile(response, file, request.method === 'HEAD'); return }
+    if (file) { serveFile(request, response, file); return }
     if (extname(candidate) || !(request.headers.accept || '').includes('text/html')) { response.writeHead(404).end('Not found'); return }
-    serveFile(response, resolve(dist, 'index.html'), request.method === 'HEAD')
+    serveFile(request, response, resolve(dist, 'index.html'))
   })
 }
 

@@ -2,7 +2,7 @@ import Link from '@/lib/router'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { Icon } from '@/components/ui/Icon'
 import { IntroMotion } from './IntroMotion'
-import { IntroStage } from './IntroStage'
+import { IntroPromo } from './IntroPromo'
 import { RevealText } from './RevealText'
 import './intro.css'
 
@@ -11,8 +11,8 @@ const FLOW = [
   { icon: 'upload', title: '上传或导入', desc: '本地文件分片上传、断点续传；也可粘贴视频链接导入。重复文件自动复用已有结果。' },
   { icon: 'activity', title: '转写与画面证据', desc: '长音频分片转写，逐片可见进度与文字；可选生成关键帧 OCR 与画面描述。' },
   { icon: 'layers', title: '摘要与索引', desc: '长视频分段生成全片摘要；建立语义索引后，片段才可被检索与问答引用。' },
-  { icon: 'message', title: '提问与追问', desc: '对单视频、整个视频库或知识库提问；Chat 直接作答，Agent 自主检索与跨视频比较。' },
-  { icon: 'play', title: '回放验证', desc: '每条引用都带视频与时间，点击跳回原画面，回答可核对、可复盘。' },
+  { icon: 'message', title: '提问与回放', desc: '对视频或知识库提问，沿回答中的时间引用跳回原画面核对。' },
+  { icon: 'file', title: '笔记与复盘', desc: '把概念和例子整理成可编辑的学习笔记与导图，保留来源以便回看。' },
 ] as const
 
 const CAPABILITIES = [
@@ -21,7 +21,7 @@ const CAPABILITIES = [
   { icon: 'folder', title: '知识库', desc: '把视频编成主题分组，作为独立的检索与问答边界。' },
   { icon: 'cpu', title: '自有模型配置', desc: '对话、语音、向量、视觉四项能力分别接入自己的服务商，密钥加密保存。' },
   { icon: 'shield-check', title: '数据边界', desc: '检索、工具调用与发布均校验用户与成员范围；长期记忆可查看、可撤回。' },
-  { icon: 'wand', title: '提示词偏好', desc: '查看各功能实际使用的指令，按功能保存自己的风格偏好。' },
+  { icon: 'file', title: '学习笔记与导图', desc: '按视频生成章节、概念和例子；编辑笔记时保留来源引用，复习时随时核对。' },
 ] as const
 
 export default function IntroPage() {
@@ -51,12 +51,11 @@ export default function IntroPage() {
             <p className="intro-kicker">观之以映 · 释之以知</p>
             <h1>
               <RevealText delay={120}>
-                让视频成为可检索、可追问、<em>可回放验证</em>的知识库
+                让课程视频成为<em>随时可回看的知识</em>
               </RevealText>
             </h1>
             <p className="intro-lead">
-              映知 VidLens 把你的视频变成可以对话的内容：自动转写语音、识别画面、建立语义索引；随后直接提问，或让
-              Agent 跨视频检索比较——每个结论都能沿着引用跳回原画面核对。
+              映知 VidLens 把课程和讲解视频整理成可检索、可追问的内容。遇到想弄懂的概念，直接提问；沿着回答里的引用回到原画面核对，再把收获沉淀为学习笔记。
             </p>
             <div className="intro-actions">
               <Link href="/" className="btn btn-primary intro-cta">
@@ -69,7 +68,7 @@ export default function IntroPage() {
             </div>
           </div>
           <div className="intro-hero-stage rv">
-            <IntroStage />
+            <IntroPromo />
           </div>
         </section>
 
@@ -77,7 +76,7 @@ export default function IntroPage() {
           <div className="intro-sec-head">
             <h2 className="intro-h2">它解决什么</h2>
             <p className="intro-sec-lead">
-              看过的课程、会议和访谈散落在视频文件里，想找某句话只能凭记忆拖动进度条。映知把「看」变成「问」：内容先被整理成带时间的文字与画面证据，之后用自然语言检索和追问，答案始终指向原片位置。
+              看过的课程和讲解散落在视频文件里，复习时却想不起概念在哪一段。映知把「看过」变成「找得到、问得清、能核对」：语音和画面被整理成带时间的证据，回答可以跳回原片，重要内容还能留在学习笔记里。
             </p>
           </div>
         </section>
