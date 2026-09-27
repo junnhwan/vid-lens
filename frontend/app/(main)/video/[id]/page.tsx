@@ -1,5 +1,8 @@
 'use client'
 
+import { ArtifactCreateDialog } from '@/components/artifacts/ArtifactCreateDialog'
+import Link from 'next/link'
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
@@ -167,6 +170,7 @@ function FrameRead({ children }: { children: ReactNode }) {
 }
 
 export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string } }) {
+  const [artifactCreateOpen, setArtifactCreateOpen] = useState(false)
   const taskId = Number(params.id)
   const router = useRouter()
   const toast = useToast()
@@ -647,6 +651,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   return (
     <div className="page-fill">
+      {artifactCreateOpen && <ArtifactCreateDialog source={{ id: task.id, title }} onClose={() => setArtifactCreateOpen(false)} />}
       <div className="ws">
         <div className="ws-stage">
           <div className="ws-heading">
@@ -711,6 +716,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
 
             <div className="ws-actions">
+              <button className="btn" disabled={readOnly || !task.has_transcription} title={!task.has_transcription ? '请先完成视频转写' : readOnly ? '演示账号不可生成成果' : '后台生成学习笔记与导图'} onClick={() => setArtifactCreateOpen(true)}><Icon name="wand" size="sm" />生成学习笔记</button>
+              <Link className="btn btn-ghost" href={`/artifacts?source=${task.id}`}><Icon name="file" size="sm" />相关成果</Link>
               {task.has_summary ? (
                 <button className="btn" onClick={() => setSummaryOpen(true)}>
                   <Icon name="file" size="sm" />查看摘要

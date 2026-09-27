@@ -57,14 +57,16 @@ function authHeaders(): Record<string, string> {
 // 业务层错误：401 跳登录，其它抛 message
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
 // body 接受任意可序列化对象/字符串/FormData；内部统一处理
-async function req<T>(path: string, method: string, body?: unknown, headersOverride?: Record<string, string>): Promise<T> {
+export async function req<T>(path: string, method: string, body?: unknown, headersOverride?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { ...authHeaders(), ...(headersOverride || {}) }
   let payload: BodyInit | null | undefined
   if (body instanceof FormData) {
@@ -73,7 +75,7 @@ async function req<T>(path: string, method: string, body?: unknown, headersOverr
     headers['Content-Type'] = 'application/json'
     payload = typeof body === 'string' ? body : JSON.stringify(body)
   }
-  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload })
+  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload, signal })
   // 401 跳登录（未授权）
   if (res.status === 401) {
     if (typeof window !== 'undefined') {
@@ -86,8 +88,8 @@ async function req<T>(path: string, method: string, body?: unknown, headersOverr
   const env = await res.json().catch(() => ({ code: res.status, message: res.statusText }))
   // 后端成功 envelope: { code: 200, message: "success", data: ... }
   // 失败: code = HTTP 状态码（400/500 等）。所以判 code === 200 为成功。
-  if (!res.ok || env.code !== 200) {
-    throw new ApiError(res.status, env.message || `请求失败 (${res.status})`)
+  if (!res.ok || (env.code !== 200 && env.code !== 202)) {
+    throw new ApiError(res.status, env.message || `请求失败 (${res.status})`, env.data?.error_code)
   }
   return env.data as T
 }

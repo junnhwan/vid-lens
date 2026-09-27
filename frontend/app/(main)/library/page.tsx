@@ -8,6 +8,7 @@ import { taskTitle } from '@/lib/format'
 import { VideoCard } from '@/components/VideoCard'
 import { CardSkeleton, EmptyState, ErrorState } from '@/components/ui/AsyncState'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
+import { PageHeading } from '@/components/product/PageHeading'
 import { Icon } from '@/components/ui/Icon'
 
 const PAGE_SIZE = 100
@@ -67,17 +68,14 @@ export default function LibraryPage() {
 
   return (
     <div className="page page-wide">
-      <div className="section-head" style={{ marginTop: 0 }}>
-        <h2>视频库</h2>
-        <span style={{ fontSize: 13, color: 'var(--tx-3)' }}>
-          {loading ? '加载中…' : `${tasks.length} 个视频 · ${readyCount} 个可问答`}
-        </span>
-        <span className="more" onClick={openUpload}><Icon name="plus" size="sm" />上传视频</span>
-      </div>
+      <PageHeading eyebrow="A LIBRARY OF UNDERSTANDING" title="每一段视频，都是新的起点。"
+        description={loading ? '正在读取视频资料…' : `${total} 个视频 · 当前已加载 ${tasks.length} 个，其中 ${readyCount} 个可问答`}
+        actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
 
       <div className="lib-toolbar">
         <input
           id="libFilter"
+          aria-label="按标题过滤视频"
           className="input"
           placeholder="按标题过滤…"
           value={keyword}

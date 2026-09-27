@@ -79,13 +79,21 @@ export function Modal({
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     const el = boxRef.current
-    if (el) {
+    const focusInside = () => {
+      if (!el) return
       const first = el.querySelector<HTMLElement>(
-        '.modal-body input:not([disabled]), .modal-body textarea:not([disabled]), .modal-body select:not([disabled]), .modal-body button:not([disabled]), .modal-body [href], .modal-body [tabindex]:not([tabindex="-1"])',
+        '.modal-body input:not([disabled]), .modal-body textarea:not([disabled]), .modal-body select:not([disabled]), .modal-body button:not([disabled]), .modal-body a[href], .modal-body summary, .modal-body [tabindex]:not([tabindex="-1"])',
       )
       ;(first ?? el).focus()
     }
-    return () => { prev?.focus?.() }
+    // Wait until responsive containers have been laid out before moving focus.
+    const frame = requestAnimationFrame(focusInside)
+    const containFocus = (event: FocusEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]')
+      if (el && dialogs[dialogs.length - 1] === el && !el.contains(event.target as Node)) focusInside()
+    }
+    document.addEventListener('focusin', containFocus)
+    return () => { cancelAnimationFrame(frame); document.removeEventListener('focusin', containFocus); prev?.focus?.() }
   }, [])
 
   return (
@@ -96,6 +104,14 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
+        onKeyDown={event => {
+          if (event.key !== 'Tab') return
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex="0"]')).filter(element => element.offsetParent !== null)
+          const first = controls[0], last = controls[controls.length - 1]
+          if (!first) { event.preventDefault(); return }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus() }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+        }}
         className={`modal${className ? ` ${className}` : ''}`}
         style={width ? { width } : undefined}
       >

@@ -9,3 +9,8 @@ build/
 .env*.local
 next-env.d.ts
 *.tsbuildinfo
+
+# Product source folders, not generated work artifacts.
+!components/artifacts/
+!lib/artifacts/
+!app/(main)/artifacts/

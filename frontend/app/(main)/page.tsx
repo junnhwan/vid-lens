@@ -14,15 +14,18 @@ import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal } from '@/components/ui/Modal'
 import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
+import { RecentProductWork } from '@/components/artifacts/RecentProductWork'
+import { ProductHero } from '@/components/product/ProductHero'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 
 export default function DashboardPage() {
   const router = useRouter()
   const toast = useToast()
-  const { uploadRevision } = useShell()
+  const { uploadRevision, openUpload } = useShell()
   useCrumb([{ label: '工作台' }])
 
+  const [total, setTotal] = useState(0)
   const [tasks, setTasks] = useState<VideoTask[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,6 +43,7 @@ export default function DashboardPage() {
       ])
       if (!active) return
       setTasks(taskPage?.list || [])
+      setTotal(taskPage?.total || 0)
       setSessions(sessionList || [])
       setLoadError(taskPage && sessionList ? '' : '数据加载失败,请检查网络或服务状态后重试')
       setLoading(false)
@@ -94,6 +98,12 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
+      <ProductHero onImport={openUpload} />
+      <div className="product-metrics">
+        <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading ? '—' : String(total).padStart(2, '0')}</strong></Link>
+        <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{loading ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
+        <Link href="/library" className="product-metric"><span>近期需处理</span><strong>{loading ? '—' : String(processing.length).padStart(2, '0')}</strong></Link>
+      </div>
       {processing.length > 0 && (
         <>
           <div className="section-head" style={{ marginTop: 0 }}>
@@ -176,6 +186,7 @@ export default function DashboardPage() {
           !loading && <EmptyState variant="bare" title="还没有会话" />
         )}
       </div>
+      <RecentProductWork />
       {retrying && (
         <ConfirmModal
           title="重新提交任务?"

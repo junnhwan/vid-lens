@@ -2,7 +2,10 @@ import type { Metadata } from 'next'
 import { ToastProvider } from '@/components/Toast'
 import { IconSprite } from '@/components/ui/Icon'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
+import '@/styles/tokens.css'
 import './globals.css'
+import '@/styles/product.css'
+import '@/styles/artifacts.css'
 
 const FONT_LINK = 'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap'
 
