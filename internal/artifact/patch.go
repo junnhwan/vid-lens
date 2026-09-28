@@ -12,13 +12,16 @@ const (
 	PatchBasisEvidenceSupported = "evidence_supported"
 	PatchBasisEvidenceConflict  = "evidence_conflict"
 
-	PatchOpUpdateTitle   = "update_title"
-	PatchOpUpdateBlock   = "update_block"
-	PatchOpInsertBlock   = "insert_block"
-	PatchOpDeleteSubtree = "delete_subtree"
-	PatchOpMoveSubtree   = "move_subtree"
-	PatchOpSplitBlock    = "split_block"
-	PatchOpMergeSiblings = "merge_siblings"
+	PatchOpUpdateTitle    = "update_title"
+	PatchOpUpdateBlock    = "update_block"
+	PatchOpInsertBlock    = "insert_block"
+	PatchOpDeleteSubtree  = "delete_subtree"
+	PatchOpMoveSubtree    = "move_subtree"
+	PatchOpSplitBlock     = "split_block"
+	PatchOpMergeSiblings  = "merge_siblings"
+	PatchOpAddRelation    = "add_relation"
+	PatchOpRemoveRelation = "remove_relation"
+	PatchOpGroupSiblings  = "group_siblings"
 )
 
 // Patch is the bounded, declarative edit format accepted from the edit planner.
@@ -49,6 +52,8 @@ type PatchOperation struct {
 	Content        *string     `json:"content,omitempty"`
 	EvidenceRefs   *[]Ref      `json:"evidence_refs,omitempty"`
 	Parts          []SplitPart `json:"parts,omitempty"`
+	Relation       *Relation   `json:"relation,omitempty"`
+	RelationID     string      `json:"relation_id,omitempty"`
 }
 
 type SplitPart struct {
@@ -76,14 +81,17 @@ type PatchCounts struct {
 }
 
 type PatchChange struct {
-	Kind        string  `json:"kind"`
-	BlockID     string  `json:"block_id,omitempty"`
-	Before      *Block  `json:"before,omitempty"`
-	After       *Block  `json:"after,omitempty"`
-	BeforeTitle *string `json:"before_title,omitempty"`
-	AfterTitle  *string `json:"after_title,omitempty"`
-	BeforeIndex *int    `json:"before_index,omitempty"`
-	AfterIndex  *int    `json:"after_index,omitempty"`
+	Kind           string    `json:"kind"`
+	BlockID        string    `json:"block_id,omitempty"`
+	Before         *Block    `json:"before,omitempty"`
+	After          *Block    `json:"after,omitempty"`
+	BeforeTitle    *string   `json:"before_title,omitempty"`
+	AfterTitle     *string   `json:"after_title,omitempty"`
+	BeforeIndex    *int      `json:"before_index,omitempty"`
+	AfterIndex     *int      `json:"after_index,omitempty"`
+	RelationID     string    `json:"relation_id,omitempty"`
+	BeforeRelation *Relation `json:"before_relation,omitempty"`
+	AfterRelation  *Relation `json:"after_relation,omitempty"`
 }
 
 type BlockMapping struct {
@@ -128,6 +136,9 @@ func EditPatch(base Body, patch Patch, auth PatchAuthorization) (PatchResult, er
 	touched := make(map[string]bool)
 	titleTouched := false
 	for opIndex, op := range patch.Operations {
+		if op.Relation != nil && op.Op != PatchOpAddRelation || op.RelationID != "" && op.Op != PatchOpRemoveRelation {
+			return PatchResult{}, Err("invalid_patch", 400)
+		}
 		switch op.Op {
 		case PatchOpUpdateTitle:
 			if titleTouched {
@@ -161,10 +172,70 @@ func EditPatch(base Body, patch Patch, auth PatchAuthorization) (PatchResult, er
 			if err := applyMergeSiblings(&result, op, patch.Basis, authorized, touched); err != nil {
 				return PatchResult{}, err
 			}
+		case PatchOpAddRelation:
+			if op.Relation == nil || op.RelationID != "" || op.BlockID != "" || op.ExpectedHash != "" || op.Key != "" || op.ParentID != nil || op.AfterBlockID != nil || op.Title != nil || op.Content != nil || op.Type != nil || op.EvidenceRefs != nil || len(op.Parts) != 0 || len(op.BlockIDs) != 0 || len(op.ExpectedHashes) != 0 {
+				return PatchResult{}, Err("invalid_patch", 400)
+			}
+			rel := *op.Relation
+			if rel.ID != "" {
+				return PatchResult{}, Err("invalid_patch", 400)
+			}
+			rel.ID = derivedBlockID(auth.OperationID, "relation", strconv.Itoa(opIndex))
+			if !authorized[rel.SourceBlockID] || !authorized[rel.TargetBlockID] {
+				return PatchResult{}, Err("target_scope_mismatch", 409)
+			}
+			if rel.Origin != "user" && (patch.Basis != PatchBasisEvidenceSupported || len(rel.EvidenceRefs) == 0) {
+				return PatchResult{}, Err("invalid_patch", 400)
+			}
+			result.Body.SchemaVersion = 2
+			result.Body.Relations = append(result.Body.Relations, rel)
+			result.Diff.Counts.Added++
+			result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "relation_added", RelationID: rel.ID, AfterRelation: &rel})
+		case PatchOpRemoveRelation:
+			if op.RelationID == "" || op.Relation != nil || op.BlockID != "" || op.ExpectedHash != "" || op.Key != "" || op.ParentID != nil || op.AfterBlockID != nil || op.Title != nil || op.Content != nil || op.Type != nil || op.EvidenceRefs != nil || len(op.Parts) != 0 || len(op.BlockIDs) != 0 || len(op.ExpectedHashes) != 0 {
+				return PatchResult{}, Err("invalid_patch", 400)
+			}
+			found := -1
+			for i, rel := range result.Body.Relations {
+				if rel.ID == op.RelationID {
+					found = i
+					if !authorized[rel.SourceBlockID] || !authorized[rel.TargetBlockID] {
+						return PatchResult{}, Err("target_scope_mismatch", 409)
+					}
+					break
+				}
+			}
+			if found < 0 {
+				return PatchResult{}, Err("invalid_patch", 400)
+			}
+			removed := result.Body.Relations[found]
+			result.Body.Relations = slices.Delete(result.Body.Relations, found, found+1)
+			result.Diff.Counts.Deleted++
+			result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "relation_removed", RelationID: removed.ID, BeforeRelation: &removed})
+		case PatchOpGroupSiblings:
+			if err := applyGroupSiblings(&result, op, auth.OperationID, opIndex, authorized, touched); err != nil {
+				return PatchResult{}, err
+			}
 		default:
 			return PatchResult{}, Err("invalid_patch", 400)
 		}
 	}
+	// Structural operations remove incident semantic edges with the deleted blocks.
+	present := map[string]bool{}
+	for _, block := range result.Body.Blocks {
+		present[block.BlockID] = true
+	}
+	filtered := result.Body.Relations[:0]
+	for _, rel := range result.Body.Relations {
+		if present[rel.SourceBlockID] && present[rel.TargetBlockID] {
+			filtered = append(filtered, rel)
+		} else {
+			removed := rel
+			result.Diff.Counts.Deleted++
+			result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "relation_removed", RelationID: rel.ID, BeforeRelation: &removed})
+		}
+	}
+	result.Body.Relations = filtered
 	if err := result.Body.Validate(auth.AllowedEvidenceIDs); err != nil {
 		if artifactErr, ok := err.(*Error); ok && artifactErr.Code == "invalid_evidence" {
 			return PatchResult{}, err
@@ -172,6 +243,47 @@ func EditPatch(base Body, patch Patch, auth PatchAuthorization) (PatchResult, er
 		return PatchResult{}, Err("invalid_patch", 400)
 	}
 	return result, nil
+}
+
+func applyGroupSiblings(result *PatchResult, op PatchOperation, operationID string, opIndex int, authorized, touched map[string]bool) error {
+	if len(op.BlockIDs) < 2 || len(op.BlockIDs) > 20 || len(op.BlockIDs) != len(op.ExpectedHashes) || op.Title == nil || !nonBlank(*op.Title) || op.BlockID != "" || op.ExpectedHash != "" || op.Key != "" || op.ParentID != nil || op.AfterBlockID != nil || op.Type != nil || op.Content != nil || op.EvidenceRefs != nil || len(op.Parts) != 0 {
+		return Err("invalid_patch", 400)
+	}
+	first := blockIndex(result.Body.Blocks, op.BlockIDs[0])
+	if first < 0 {
+		return Err("invalid_patch", 400)
+	}
+	parent := result.Body.Blocks[first].ParentID
+	for i, id := range op.BlockIDs {
+		idx := blockIndex(result.Body.Blocks, id)
+		if !authorized[id] {
+			return Err("target_scope_mismatch", 409)
+		}
+		if idx != first+i || touched[id] || BlockHash(result.Body.Blocks[idx]) != op.ExpectedHashes[i] || !sameStringPtr(result.Body.Blocks[idx].ParentID, parent) || !blockIsLeaf(result.Body.Blocks, idx) {
+			return Err("invalid_patch", 400)
+		}
+	}
+	id := derivedBlockID(operationID, "group", strconv.Itoa(opIndex))
+	if blockIndex(result.Body.Blocks, id) >= 0 {
+		return Err("invalid_patch", 400)
+	}
+	group := Block{BlockID: id, ParentID: cloneStringPtr(parent), Type: "section", Title: *op.Title, Content: "", ClaimOrigin: "user", EvidenceRefs: []Ref{}}
+	result.Body.Blocks = slices.Insert(result.Body.Blocks, first, group)
+	for _, childID := range op.BlockIDs {
+		idx := blockIndex(result.Body.Blocks, childID)
+		before := cloneBlock(result.Body.Blocks[idx])
+		result.Body.Blocks[idx].ParentID = &id
+		after := cloneBlock(result.Body.Blocks[idx])
+		result.Diff.Counts.Moved++
+		result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "moved", BlockID: childID, Before: &before, After: &after})
+		touched[childID] = true
+	}
+	result.Diff.Counts.Added++
+	result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "added", BlockID: id, After: blockPtr(group)})
+	result.Diff.BlockMappings = append(result.Diff.BlockMappings, BlockMapping{Kind: "group", FromBlockIDs: slices.Clone(op.BlockIDs), ToBlockIDs: []string{id}})
+	touched[id] = true
+	authorized[id] = true
+	return nil
 }
 
 func applyMergeSiblings(result *PatchResult, op PatchOperation, basis string, authorized, touched map[string]bool) error {
@@ -226,6 +338,27 @@ func applyMergeSiblings(result *PatchResult, op PatchOperation, basis string, au
 	}
 	result.Body.Blocks[indices[0]] = merged
 	result.Body.Blocks = removeBlockIndices(result.Body.Blocks, indices[1:])
+	mergedIDs := make(map[string]bool, len(op.BlockIDs)-1)
+	for _, id := range op.BlockIDs[1:] { mergedIDs[id] = true }
+	seenRelations := map[string]bool{}
+	remapped := make([]Relation, 0, len(result.Body.Relations))
+	for _, rel := range result.Body.Relations {
+		before := rel
+		if mergedIDs[rel.SourceBlockID] { rel.SourceBlockID = merged.BlockID }
+		if mergedIDs[rel.TargetBlockID] { rel.TargetBlockID = merged.BlockID }
+		source, target := rel.SourceBlockID, rel.TargetBlockID
+		if rel.Type != "depends_on" && source > target { source, target = target, source }
+		key := rel.Type + ":" + source + ":" + target
+		if source == target || seenRelations[key] {
+			result.Diff.Counts.Deleted++
+			result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "relation_removed", RelationID: before.ID, BeforeRelation: &before})
+			continue
+		}
+		seenRelations[key] = true
+		if JSON(before) != JSON(rel) { updated := rel; result.Diff.Counts.Updated++; result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "relation_updated", RelationID: rel.ID, BeforeRelation: &before, AfterRelation: &updated}) }
+		remapped = append(remapped, rel)
+	}
+	result.Body.Relations = remapped
 	firstBefore, firstAfter := cloneBlock(blocks[0]), cloneBlock(merged)
 	result.Diff.Counts.Updated++
 	result.Diff.Changes = append(result.Diff.Changes, PatchChange{Kind: "updated", BlockID: merged.BlockID, Before: &firstBefore, After: &firstAfter})
@@ -776,6 +909,10 @@ func cloneBlock(block Block) Block {
 func cloneBody(body Body) Body {
 	cloned := body
 	cloned.Blocks = cloneBlocks(body.Blocks)
+	cloned.Relations = slices.Clone(body.Relations)
+	for i := range cloned.Relations {
+		cloned.Relations[i].EvidenceRefs = slices.Clone(body.Relations[i].EvidenceRefs)
+	}
 	cloned.Warnings = slices.Clone(body.Warnings)
 	return cloned
 }

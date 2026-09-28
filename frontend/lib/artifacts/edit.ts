@@ -1,4 +1,4 @@
-import { bodySchema, type StudyBlock, type StudyBody } from './schema.ts'
+import { bodySchema, type StudyBlock, type StudyBody, type StudyRelation } from './schema.ts'
 import { blockTree, type BlockNode } from './view.ts'
 
 type Direction = 'up' | 'down' | 'indent' | 'outdent'
@@ -26,7 +26,8 @@ function finish(body: StudyBody, nodes: BlockNode[]): StudyBody {
     }
   }
   visit(nodes, null)
-  const result = { ...body, blocks }
+  const present = new Set(blocks.map(block => block.block_id))
+  const result = { ...body, blocks, ...(body.relations ? { relations: body.relations.filter(rel => present.has(rel.source_block_id) && present.has(rel.target_block_id)) } : {}) }
   const checked = bodySchema.safeParse(result)
   if (!checked.success) throw new Error(checked.error.issues[0]?.message || '结构不符合保存限制')
   return checked.data
@@ -98,5 +99,20 @@ export function mergeWithNext(body: StudyBody, id: string): StudyBody {
   first.block = { ...first.block, content, evidence_refs: refs, ...(sourceBlockIds.length ? { source_block_ids: sourceBlockIds } : {}), claim_origin: 'user' }
   first.children.push(...second.children)
   place.siblings.splice(place.index + 1, 1)
-  return finish(body, roots)
+  const remaining = second.block.block_id
+  const relations = (body.relations ?? []).map(rel => ({ ...rel, source_block_id: rel.source_block_id === remaining ? id : rel.source_block_id, target_block_id: rel.target_block_id === remaining ? id : rel.target_block_id })).filter(rel => rel.source_block_id !== rel.target_block_id)
+  const seen = new Set<string>()
+  return finish({ ...body, relations: relations.filter(rel => { const [a, b] = rel.type === 'depends_on' ? [rel.source_block_id, rel.target_block_id] : [rel.source_block_id, rel.target_block_id].sort(); const key = `${rel.type}:${a}:${b}`; if (seen.has(key)) return false; seen.add(key); return true }) }, roots)
+}
+
+export function addRelation(body: StudyBody, source: string, target: string, type: StudyRelation['type']): StudyBody {
+  const relation: StudyRelation = { id: crypto.randomUUID(), source_block_id: source, target_block_id: target, type, origin: 'user', evidence_refs: [] }
+  const checked = bodySchema.safeParse({ ...body, schema_version: 2, relations: [...(body.relations ?? []), relation] })
+  if (!checked.success) throw new Error(checked.error.issues[0]?.message || '无法添加关系')
+  return checked.data
+}
+export function removeRelation(body: StudyBody, id: string): StudyBody {
+  const checked = bodySchema.safeParse({ ...body, relations: (body.relations ?? []).filter(relation => relation.id !== id) })
+  if (!checked.success) throw new Error(checked.error.issues[0]?.message || '无法移除关系')
+  return checked.data
 }

@@ -37,6 +37,7 @@ func AllModels() []interface{} {
 		&AgentStep{},
 		&AgentToolCall{},
 		&Artifact{}, &ArtifactVersion{}, &SourceManifest{}, &SourceSnapshotItem{},
+		&ArtifactCanvasLayout{},
 		&ArtifactEvidenceRef{}, &GenerationRequest{}, &GenerationDispatch{}, &ArtifactEditDispatch{}, &RunEvent{},
 		&ArtifactEditRequest{}, &ArtifactEditOperation{}, &ArtifactEditOutcome{},
 		&LearningPosition{}, &AnswerImport{},

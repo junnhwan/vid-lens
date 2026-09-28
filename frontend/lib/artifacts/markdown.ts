@@ -24,6 +24,10 @@ export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evid
     if (!evidence.has(ref.evidence_id)) throw new Error('有引用尚未通过来源权限核对，请重试导出')
     if (!references.has(ref.evidence_id)) references.set(ref.evidence_id, references.size + 1)
   }
+  for (const item of body.relations ?? []) for (const ref of item.evidence_refs) {
+    if (!evidence.has(ref.evidence_id)) throw new Error('关系依据尚未通过来源权限核对，请重试导出')
+    if (!references.has(ref.evidence_id)) references.set(ref.evidence_id, references.size + 1)
+  }
   const versionPath = `/artifacts/${encodeURIComponent(detail.id)}?version=${encodeURIComponent(version.id)}`
   const lines = [
     `# ${safeTitle(body.title)}`, '',
@@ -40,6 +44,17 @@ export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evid
     if (block.evidence_refs.length) {
       lines.push(`依据：${block.evidence_refs.map(ref => `[${references.get(ref.evidence_id)}]（${relation[ref.relation] ?? ref.relation}${ref.chat_citation_id ? `，聊天引用 ${ref.chat_citation_id}` : ''}）`).join(' · ')}`, '')
     }
+  }
+  if (body.relations?.length) {
+    const titles = new Map(body.blocks.map(block => [block.block_id, block.title]))
+    const labels = { related_to: '相关', depends_on: '依赖', contrasts_with: '对比' }
+    lines.push('## 概念关系', '')
+    for (const item of body.relations) {
+      const arrow = item.type === 'depends_on' ? '→' : '↔'
+      const refs = item.evidence_refs.map(ref => `[${references.get(ref.evidence_id)}]`).join('、')
+      lines.push(`- ${safeTitle(titles.get(item.source_block_id) ?? item.source_block_id)} ${arrow} ${safeTitle(titles.get(item.target_block_id) ?? item.target_block_id)}（${labels[item.type]}；${item.origin === 'user' ? '人工整理' : '综合推断'}${refs ? `；依据 ${refs}` : '；未附依据'}）`)
+    }
+    lines.push('')
   }
   lines.push('## 来源', '')
   if (!references.size) lines.push('此版本没有关联来源引用。', '')

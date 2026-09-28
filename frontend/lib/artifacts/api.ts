@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ApiError, req } from '@/lib/api'
-import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, positionSchema, blockContextSchema, answerPreviewSchema, editRunSchema, editOperationSchema, type StudyBody, type GenerationInput, type ArtifactEditMode } from './schema'
+import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, positionSchema, blockContextSchema, answerPreviewSchema, editRunSchema, editOperationSchema, canvasLayoutViewSchema, canvasAIPlanSchema, type CanvasLayout, type StudyBody, type GenerationInput, type ArtifactEditMode } from './schema'
 import { errorLabels } from './view'
 
 export class ContractError extends Error { constructor() { super('收到的成果数据格式不受支持，请刷新或稍后重试。') } }
@@ -11,6 +11,9 @@ async function read<T>(schema: z.ZodType<T>, response: Promise<unknown>): Promis
 }
 const pathId = encodeURIComponent
 export const artifactApi = {
+  canvasLayout: (id: string, versionId: string, revision?: number) => read(canvasLayoutViewSchema, req(`/artifacts/${pathId(id)}/canvas-layout?version_id=${pathId(versionId)}${revision ? `&revision=${revision}` : ''}`, 'GET')),
+  saveCanvasLayout: (id: string, versionId: string, expectedRevision: number, layout: CanvasLayout, key: string) => read(canvasLayoutViewSchema, req(`/artifacts/${pathId(id)}/canvas-layout`, 'PATCH', { content_version_id: versionId, expected_revision: expectedRevision, layout }, { 'Idempotency-Key': key })),
+  suggestCanvasLayout: (id: string, input: { instruction: string; content_version_id: string; expected_head_version: number; expected_layout_revision: number; selected_block_id: string }) => read(canvasAIPlanSchema, req(`/artifacts/${pathId(id)}/canvas-layout/suggest`, 'POST', input)),
   position: () => read(positionSchema.nullable(), req('/learning-position', 'GET')),
   savePosition: (input: { expected_revision: number; task_id: number; artifact_id: string; version_id: string; block_id: string; time_ms: number }) => read(positionSchema, req('/learning-position', 'PATCH', input)),
   blockContext: (id: string, versionId: string, blockId: string) => read(blockContextSchema, req(`/artifacts/${pathId(id)}/blocks/${pathId(blockId)}/context?version_id=${pathId(versionId)}`, 'GET')),

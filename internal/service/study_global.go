@@ -149,6 +149,26 @@ func organizeStudyBlocks(input artifact.Body, plan studyGlobalPlan) (artifact.Bo
 		}
 	}
 	out.Blocks = ordered
+	if len(input.Relations) > 0 {
+		out.Relations = make([]artifact.Relation, 0, len(input.Relations))
+		seenRelations := map[string]bool{}
+		for _, rel := range input.Relations {
+			rel.SourceBlockID, rel.TargetBlockID = groupByOld[rel.SourceBlockID], groupByOld[rel.TargetBlockID]
+			if rel.SourceBlockID == "" || rel.TargetBlockID == "" || rel.SourceBlockID == rel.TargetBlockID {
+				continue
+			}
+			source, target := rel.SourceBlockID, rel.TargetBlockID
+			if rel.Type != "depends_on" && source > target {
+				source, target = target, source
+			}
+			key := rel.Type + ":" + source + ":" + target
+			if seenRelations[key] {
+				continue
+			}
+			seenRelations[key] = true
+			out.Relations = append(out.Relations, rel)
+		}
+	}
 	out.Warnings = append(out.Warnings, "global_organization_preserved_source_blocks")
 	return out, nil
 }

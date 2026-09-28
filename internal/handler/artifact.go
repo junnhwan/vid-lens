@@ -18,6 +18,43 @@ import (
 type ArtifactHandler struct{ svc *service.ArtifactService }
 
 func NewArtifactHandler(svc *service.ArtifactService) *ArtifactHandler { return &ArtifactHandler{svc} }
+func (h *ArtifactHandler) CanvasLayout(c *gin.Context) {
+	revision := int64(0)
+	if text := c.Query("revision"); text != "" {
+		var err error
+		revision, err = strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			artifactError(c, artifact.Err("invalid_request", 400))
+			return
+		}
+	}
+	if c.Query("version_id") == "" {
+		artifactError(c, artifact.Err("invalid_request", 400))
+		return
+	}
+	v, err := h.svc.CanvasLayout(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.Query("version_id"), revision)
+	artifactOK(c, http.StatusOK, v, err)
+}
+func (h *ArtifactHandler) SaveCanvasLayout(c *gin.Context) {
+	var req struct {
+		ContentVersionID string                `json:"content_version_id"`
+		ExpectedRevision int64                 `json:"expected_revision"`
+		Layout           artifact.CanvasLayout `json:"layout"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, err := h.svc.SaveCanvasLayout(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.ContentVersionID, req.ExpectedRevision, c.GetHeader("Idempotency-Key"), req.Layout)
+	artifactOK(c, http.StatusOK, v, err)
+}
+func (h *ArtifactHandler) SuggestCanvasLayout(c *gin.Context) {
+	var req service.CanvasAIRequest
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, err := h.svc.SuggestCanvasLayout(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req)
+	artifactOK(c, http.StatusOK, v, err)
+}
 func artifactError(c *gin.Context, err error) {
 	status, code := 500, "internal_error"
 	var domain *artifact.Error

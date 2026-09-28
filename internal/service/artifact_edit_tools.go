@@ -88,6 +88,7 @@ type ArtifactEditReadResult struct {
 	Title         string                      `json:"title"`
 	TitleHash     string                      `json:"title_hash"`
 	Blocks        []ArtifactEditReadableBlock `json:"blocks"`
+	Relations     []artifact.Relation         `json:"relations"`
 	NextAfter     string                      `json:"next_after,omitempty"`
 }
 
@@ -170,7 +171,7 @@ func artifactEditReadTools() []VideoAgentTool {
 
 func artifactEditProposalTools() []VideoAgentTool {
 	return []VideoAgentTool{
-		newArtifactEditTool(ArtifactEditToolProposePatch, "提交一个受约束结构化 patch 供服务端整体验证；本工具本身不发布版本。", artifactEditToolSchema(ArtifactEditToolProposePatch), executeArtifactEditPropose),
+		newArtifactEditTool(ArtifactEditToolProposePatch, "提交一个受约束结构化 patch 供服务端整体验证；本工具本身不发布版本。选中卡片或段落改名用 update_block.title 和对应 block_id；update_title 只改整份成果标题，选中块范围内不能使用。", artifactEditToolSchema(ArtifactEditToolProposePatch), executeArtifactEditPropose),
 		newArtifactEditTool(ArtifactEditToolNothingToChange, "说明为何无需修改；不会创建空版本。", artifactEditToolSchema(ArtifactEditToolNothingToChange), executeArtifactEditNothing),
 	}
 }
@@ -237,7 +238,10 @@ func artifactEditToolSchema(name string) json.RawMessage {
 								{
 									"type":"object","properties":{"op":{"const":"merge_siblings"},"block_ids":{"type":"array","minItems":2,"maxItems":50,"uniqueItems":true,"items":{"type":"string","minLength":1}},"expected_hashes":{"type":"array","minItems":2,"maxItems":50,"items":{"type":"string","minLength":1}},"title":{"type":"string","minLength":1,"maxLength":200}},
 									"required":["op","block_ids","expected_hashes"],"additionalProperties":false
-								}
+								},
+								{"type":"object","properties":{"op":{"const":"add_relation"},"relation":{"type":"object","properties":{"source_block_id":{"type":"string","minLength":1},"target_block_id":{"type":"string","minLength":1},"type":{"enum":["related_to","depends_on","contrasts_with"]},"origin":{"enum":["user","synthesis"]},"evidence_refs":{"$ref":"#/$defs/evidence_refs"}},"required":["source_block_id","target_block_id","type","origin","evidence_refs"],"additionalProperties":false}},"required":["op","relation"],"additionalProperties":false},
+								{"type":"object","properties":{"op":{"const":"remove_relation"},"relation_id":{"type":"string","minLength":1}},"required":["op","relation_id"],"additionalProperties":false},
+								{"type":"object","properties":{"op":{"const":"group_siblings"},"block_ids":{"type":"array","minItems":2,"maxItems":20,"uniqueItems":true,"items":{"type":"string","minLength":1}},"expected_hashes":{"type":"array","minItems":2,"maxItems":20,"items":{"type":"string","minLength":1}},"title":{"type":"string","minLength":1,"maxLength":200}},"required":["op","block_ids","expected_hashes","title"],"additionalProperties":false}
 							]}
 						}
 					},
@@ -310,7 +314,20 @@ func executeArtifactEditRead(ctx context.Context, request VideoAgentToolRequest)
 		}
 	}
 	end := min(start+limit, len(blocks))
-	result := ArtifactEditReadResult{ArtifactID: runtime.ArtifactID, BaseVersionID: runtime.BaseVersionID, BaseVersion: runtime.BaseVersion, Title: runtime.Body.Title, TitleHash: artifact.Hash(runtime.Body.Title), Blocks: make([]ArtifactEditReadableBlock, 0, end-start)}
+	result := ArtifactEditReadResult{ArtifactID: runtime.ArtifactID, BaseVersionID: runtime.BaseVersionID, BaseVersion: runtime.BaseVersion, Title: runtime.Body.Title, TitleHash: artifact.Hash(runtime.Body.Title), Blocks: make([]ArtifactEditReadableBlock, 0, end-start), Relations: []artifact.Relation{}}
+	if len(runtime.SelectedBlockIDs) == 0 {
+		result.Relations = append(result.Relations, runtime.Body.Relations...)
+	} else {
+		scoped := make(map[string]bool, len(blocks))
+		for _, block := range blocks {
+			scoped[block.BlockID] = true
+		}
+		for _, rel := range runtime.Body.Relations {
+			if scoped[rel.SourceBlockID] && scoped[rel.TargetBlockID] {
+				result.Relations = append(result.Relations, rel)
+			}
+		}
+	}
 	for _, block := range blocks[start:end] {
 		result.Blocks = append(result.Blocks, ArtifactEditReadableBlock{Block: block, Hash: artifact.BlockHash(block)})
 	}

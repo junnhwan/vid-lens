@@ -10,6 +10,7 @@ import { addBlock, deleteBlock, descendantCount, mergeWithNext, moveBlock } from
 import { blockTree } from '@/lib/artifacts/view'
 
 const StudyMap = lazy(() => import('./StudyMap').then(module => ({ default: module.StudyMap })))
+const KnowledgeCanvas = lazy(() => import('./KnowledgeCanvas').then(module => ({ default: module.KnowledgeCanvas })))
 
 export function ArtifactWorkspace({ artifact, readOnly = false, historical = false, preview = false, evidencePanel, selectedEvidence, evidenceOpenRequest, onEvidence, onSave, onReload, onVersions, onExport, onDirtyChange, onAskBlock, onAgentEdit, onStudyBlock, initialBlock }: {
   artifact: ArtifactDetail; readOnly?: boolean; historical?: boolean; preview?: boolean
@@ -28,7 +29,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
 }) {
   const [baseline, setBaseline] = useState(artifact)
   const [draft, setDraft] = useState<StudyBody | null>(artifact.version?.body ?? null)
-  const [view, setView] = useState<'notes' | 'map'>('notes')
+  const [view, setView] = useState<'notes' | 'map' | 'canvas'>('notes')
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -103,6 +104,10 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     const evidence = body.blocks.find(block => block.block_id === id)?.evidence_refs[0]
     if (evidence) { onEvidence(evidence.evidence_id); openEvidence() }
   }
+  function chooseCanvasBlock(id: string) {
+    setSelectedBlock(id)
+    if (!dirty && baseline.version && !historical && baseline.version.body.blocks.some(b => b.block_id === id)) onStudyBlock?.(id, baseline.version.id)
+  }
   function closeEvidence() {
     setShowEvidence(false)
     const position = readingPosition.current
@@ -157,7 +162,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   const roots = blockTree(body)
   return <div className="artifact-workspace">
     <header className="artifact-titlebar"><span className="artifact-kind-icon"><Icon name="file" /></span><div><h1>{body.title}</h1><p>学习笔记 · {historical ? '历史版本，只读' : '笔记与导图共用同一份内容'}{preview ? ' · 开发样例' : ''}</p></div><div className="product-actions">{onAgentEdit && !readOnly && <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => requestAgentEdit(null)}><Icon name="wand" size="sm" />让 Agent 修改全文</button>}{onVersions && <button className="btn btn-sm btn-ghost" onClick={onVersions}><Icon name="clock" size="sm" />版本</button>}{onExport && <button className="btn btn-sm" disabled={exporting || saving} onClick={() => dirty ? setExportPrompt(true) : void exportSaved()}><Icon name="download" size="sm" />{exporting ? '导出中…' : '导出 Markdown'}</button>}<button className="btn btn-sm" onClick={() => mobile ? showEvidence ? closeEvidence() : openEvidence() : setDesktopEvidence(!desktopEvidence)}><Icon name="link" size="sm" />证据</button></div></header>
-    <div className="artifact-toolbar"><div className="seg" aria-label="成果视图"><button className={view === 'notes' ? 'on' : ''} aria-pressed={view === 'notes'} onClick={() => setView('notes')}>学习笔记</button><button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button></div><span className="artifact-save-state" role="status">{saving ? '正在保存…' : dirty ? '有未保存的修改' : saved ? preview ? '样例已保存（仅当前预览）' : '已保存' : `v${baseline.version.version} · 待核对`}</span><div className="product-actions">{editing && !readOnly ? <><button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => { if (dirty && !window.confirm('放弃未保存的修改？')) return; setDraft(baseline.version?.body ?? null); setEditing(false); setDeleteUndo(null); setSaveError('') }}>取消编辑</button><button className="btn btn-sm btn-primary" disabled={!dirty || saving} onClick={() => void save()}>保存修改</button></> : !readOnly && <button className="btn btn-sm" onClick={() => { setEditing(true); setSaved(false) }}><Icon name="file" size="sm" />编辑笔记</button>}</div></div>
+    <div className="artifact-toolbar"><div className="seg" aria-label="成果视图"><button className={view === 'notes' ? 'on' : ''} aria-pressed={view === 'notes'} onClick={() => setView('notes')}>学习笔记</button><button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button><button className={view === 'canvas' ? 'on' : ''} aria-pressed={view === 'canvas'} onClick={() => setView('canvas')}>知识画布</button></div><span className="artifact-save-state" role="status">{saving ? '正在保存…' : dirty ? '有未保存的修改' : saved ? preview ? '样例已保存（仅当前预览）' : '已保存' : `v${baseline.version.version} · 待核对`}</span><div className="product-actions">{editing && !readOnly ? <><button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => { if (dirty && !window.confirm('放弃未保存的修改？')) return; setDraft(baseline.version?.body ?? null); setEditing(false); setDeleteUndo(null); setSaveError('') }}>取消编辑</button><button className="btn btn-sm btn-primary" disabled={!dirty || saving} onClick={() => void save()}>保存修改</button></> : !readOnly && <button className="btn btn-sm" onClick={() => { setEditing(true); setSaved(false) }}><Icon name="file" size="sm" />编辑笔记</button>}</div></div>
     {saveError && <div className="artifact-notice danger" role="alert">{saveError}<div className="product-actions">{conflict && <button className="btn btn-sm" onClick={() => setShowConflict(true)}>比较版本</button>}<button className="btn btn-sm" onClick={downloadDraft}>下载本地草稿</button></div></div>}
     {exportError && <div className="artifact-notice danger" role="alert">{exportError}<button className="btn btn-sm" onClick={() => void exportSaved()}>重试导出</button></div>}
     {exportReady && <div className="artifact-notice" role="status">已核对已保存版本及来源，Markdown 文件已备好。<a className="btn btn-sm" href={exportReady.url} download={exportReady.filename}>下载 Markdown 文件</a></div>}
@@ -165,7 +170,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     {artifact.head_version > baseline.head_version && <div className="artifact-notice">服务器有更新，当前编辑仍基于 v{baseline.head_version}。保存时会检查版本。</div>}
     <div className={`artifact-columns${!desktopEvidence && !mobile ? " without-evidence" : ""}`}>
       <div className="artifact-reading" ref={reading}>
-        {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p><p>{selected.evidence_refs.length} 条关联依据 · 可在证据栏逐条切换</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <div className="product-actions"><button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true) }}>在笔记中编辑</button>{onAgentEdit && <button className="btn btn-sm btn-primary" onClick={() => requestAgentEdit(selected.block_id)}>让 Agent 修改这个节点</button>}</div>}</div>}</> : <article className="study-paper">
+        {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p><p>{selected.evidence_refs.length} 条关联依据 · 可在证据栏逐条切换</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <div className="product-actions"><button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true) }}>在笔记中编辑</button>{onAgentEdit && <button className="btn btn-sm btn-primary" onClick={() => requestAgentEdit(selected.block_id)}>让 Agent 修改这个节点</button>}</div>}</div>}</> : view === 'canvas' ? <Suspense fallback={<div className="empty" role="status">正在加载知识画布…</div>}><KnowledgeCanvas key={baseline.version.id} artifactId={artifact.id} versionId={baseline.version.id} headVersion={baseline.head_version} body={body} readOnly={readOnly || historical || preview || dirty} selectedBlock={selectedBlock} onSelect={chooseCanvasBlock} onBodyChange={next => { setDraft(next); setEditing(true); setSaved(false); setSaveError('') }} onAgentEdit={onAgentEdit ? requestAgentEdit : undefined} onEvidence={id => { onEvidence(id); openEvidence() }} /></Suspense> : <article className="study-paper">
           <div className="paper-meta"><span>LEARNING NOTES / {String(baseline.version.version).padStart(3, '0')}</span><span>理解，然后应用</span></div>
           {editing && !readOnly ? <label className="artifact-field">笔记标题<input maxLength={200} value={body.title} onChange={e => { setSaved(false); setDraft({ ...body, title: e.target.value }) }} /></label> : <h2>{body.title}</h2>}
           <p className="paper-intro">沿着视频整理概念，保留每一次回到来源的入口。</p>

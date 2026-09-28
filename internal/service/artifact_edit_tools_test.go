@@ -96,8 +96,8 @@ func TestArtifactEditProposalSchemaDescribesEveryClosedOperation(t *testing.T) {
 	operations := patchProperties["operations"].(map[string]any)
 	items := operations["items"].(map[string]any)
 	oneOf := items["oneOf"].([]any)
-	if len(oneOf) != 7 {
-		t.Fatalf("operation variants=%d want=7", len(oneOf))
+	if len(oneOf) != 10 {
+		t.Fatalf("operation variants=%d want=10", len(oneOf))
 	}
 	for index, raw := range oneOf {
 		variant := raw.(map[string]any)

@@ -219,3 +219,30 @@ func TestStudyAnswerImportUsesCharacterLimitForChineseContent(t *testing.T) {
 		t.Fatalf("oversized answer changed the saved note: %+v %v", current, err)
 	}
 }
+
+func TestStudyAnswerImportPreservesCanvasRelations(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	body := artifact.Body{SchemaVersion: 2, Kind: "study", Title: "笔记", Blocks: []artifact.Block{
+		{BlockID: "one", Type: "concept", Title: "一", ClaimOrigin: "user", EvidenceRefs: []artifact.Ref{}},
+		{BlockID: "two", Type: "concept", Title: "二", ClaimOrigin: "user", EvidenceRefs: []artifact.Ref{}},
+	}, Relations: []artifact.Relation{{ID: "r1", SourceBlockID: "one", TargetBlockID: "two", Type: "related_to", Origin: "user", EvidenceRefs: []artifact.Ref{}}}, Warnings: []string{}}
+	detail, err := svc.Create(ctx, 7, []int64{42}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ChatSession{ID: 120, UserID: 7, TaskID: 42, ScopeType: model.ChatScopeVideo}).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot := `{"citations":[]}`
+	if err := db.Create(&model.ChatMessage{ID: 121, UserID: 7, SessionID: 120, Role: "assistant", Content: "个人补充", RetrievalSnapshot: &snapshot}).Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.ImportAnswer(ctx, 7, 121, detail.ID, "two", 1, "relation-import", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version.Body.SchemaVersion != 2 || len(result.Version.Body.Relations) != 1 || result.Version.Body.Relations[0].ID != "r1" || len(result.Version.Body.Blocks) != 3 {
+		t.Fatalf("answer import must preserve semantic relation and append one block: %+v", result.Version.Body)
+	}
+}

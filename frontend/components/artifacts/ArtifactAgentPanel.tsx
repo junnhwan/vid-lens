@@ -3,7 +3,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Icon } from '@/components/ui/Icon'
 import { ApiError } from '@/lib/api'
 import { artifactApi, artifactError, ContractError } from '@/lib/artifacts/api'
-import type { ArtifactDetail, ArtifactEditMode, ArtifactEditOperation, ArtifactEditRun, StudyBlock } from '@/lib/artifacts/schema'
+import type { ArtifactDetail, ArtifactEditMode, ArtifactEditOperation, ArtifactEditRun, StudyBlock, StudyRelation } from '@/lib/artifacts/schema'
 
 type Attempt = { signature: string; key: string }
 
@@ -29,6 +29,15 @@ const stageLabels: Record<string, string> = {
 
 const blockTypeLabels: Record<StudyBlock['type'], string> = { section: '章节', concept: '概念', example: '示例', note: '笔记' }
 const relationLabels: Record<StudyBlock['evidence_refs'][number]['relation'], string> = { supports: '支持', context: '背景', contradicts: '相反' }
+const semanticRelationLabels: Record<StudyRelation['type'], string> = { related_to: '相关', depends_on: '依赖', contrasts_with: '对比' }
+
+function semanticRelationText(relation: StudyRelation, blocks: Map<string, StudyBlock>): string {
+  const source = blocks.get(relation.source_block_id)?.title ?? relation.source_block_id
+  const target = blocks.get(relation.target_block_id)?.title ?? relation.target_block_id
+  const arrow = relation.type === 'depends_on' ? '→' : '↔'
+  const origin = relation.origin === 'user' ? '人工整理' : '综合推断'
+  return `${source} ${arrow} ${target} · ${semanticRelationLabels[relation.type]} · ${origin} · ${relation.evidence_refs.length ? `${relation.evidence_refs.length} 条依据` : '未附依据'}`
+}
 
 function retryableRead(cause: unknown): boolean {
   if (cause instanceof ContractError) return false
@@ -237,8 +246,8 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
       <header><div><span className="mono">{operation.status === 'proposed' ? `PROPOSAL · BASE v${operation.base_version}` : operation.undo_version_id ? `UNDONE · ORIGINAL EDIT v${operation.base_version + 1}` : `SAVED VERSION · v${operation.base_version + 1}`}</span><h4>{operation.summary}</h4></div><span className={`artifact-agent-basis ${operation.basis}`}>{basisLabels[operation.basis]}</span></header>
       <div className="artifact-agent-counts"><span>新增 {operation.counts.added}</span><span>修改 {operation.counts.updated}</span><span>删除 {operation.counts.deleted}</span><span>移动 {operation.counts.moved}</span></div>
       <div className="artifact-agent-diff" aria-label="修改差异">{operation.changes.map((change, index) => <div className="artifact-agent-change" key={`${change.kind}-${change.block_id ?? 'title'}-${index}`}>
-        <span className="mono">{change.kind === 'added' ? 'ADDED' : change.kind === 'deleted' ? 'DELETED' : change.kind === 'moved' ? 'MOVED' : 'CHANGED'}</span>
-        {(change.before_title != null || change.after_title != null) ? <div className="artifact-agent-before-after"><div><small>修改前</small><p>{change.before_title}</p></div><div><small>修改后</small><p>{change.after_title}</p></div></div> : <div className="artifact-agent-before-after"><div><small>修改前</small>{blockText(change.before, change.before_index, diffBlocks.before)}</div><div><small>修改后</small>{blockText(change.after, change.after_index, diffBlocks.after)}</div></div>}
+        <span className="mono">{change.kind === 'added' || change.kind === 'relation_added' ? 'ADDED' : change.kind === 'deleted' || change.kind === 'relation_removed' ? 'DELETED' : change.kind === 'moved' ? 'MOVED' : 'CHANGED'}</span>
+        {(change.before_relation || change.after_relation) ? <div className="artifact-agent-before-after"><div><small>修改前</small><p>{change.before_relation ? semanticRelationText(change.before_relation, diffBlocks.before) : '无关系'}</p></div><div><small>修改后</small><p>{change.after_relation ? semanticRelationText(change.after_relation, diffBlocks.after) : '无关系'}</p></div></div> : (change.before_title != null || change.after_title != null) ? <div className="artifact-agent-before-after"><div><small>修改前</small><p>{change.before_title}</p></div><div><small>修改后</small><p>{change.after_title}</p></div></div> : <div className="artifact-agent-before-after"><div><small>修改前</small>{blockText(change.before, change.before_index, diffBlocks.before)}</div><div><small>修改后</small>{blockText(change.after, change.after_index, diffBlocks.after)}</div></div>}
       </div>)}</div>
       <EvidenceLinks ids={operation.evidence_ids} onSelect={onOpenEvidence} />
       <div className="artifact-agent-actions">{operation.can_apply && <button className="btn btn-primary" disabled={busy} onClick={() => void apply()}>应用这份方案</button>}{operation.can_undo && <button className="btn" disabled={busy} onClick={() => void undo()}>撤销这次修改</button>}{operation.undo_version_id && <span>已用新版本安全撤销；历史版本仍保留。</span>}</div>

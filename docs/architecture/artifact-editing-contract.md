@@ -159,4 +159,6 @@ Provider/internal text is not returned. `nothing_to_change` is a successful resu
 
 R1 keeps body schema version 1, the existing Markmap projection, manual save, answer import, generation, learning position, and Markdown export. It adds version origins and operation metadata only; old versions remain readable. No summary rule, editable canvas, new Agent framework, or raw transcript/vector rewrite is part of this contract.
 
+The later R3 schema-2 relation and independent layout extension is documented in [the editable canvas contract](artifact-canvas-contract.md).
+
 Required verification is tracked in `docs-private/agent-editing-canvas-acceptance-2026-09-28.md`. Unit/handler tests cannot substitute for PostgreSQL transaction/recovery tests, a real-model edit tool call, or the production Vite page.

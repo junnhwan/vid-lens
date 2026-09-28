@@ -116,6 +116,12 @@ func TestArtifactEditPlannerFixtureRoutesQuestionToAnswerAndEditToProposal(t *te
 			wantIntent:  ArtifactEditIntentEdit,
 			wantTool:    ArtifactEditToolProposePatch,
 		},
+		{
+			instruction: "把相邻的两个章节分组到一个新章节下面；保留两块原正文与引用。",
+			response:    `{"tool":"propose_artifact_patch","reason":"明确要求分组","public_summary":"准备分组章节","arguments":{"summary":"分组章节","patch":{"schema_version":1,"artifact_id":"a","base_version_id":"v","base_version":1,"basis":"user_instruction","evidence_ids":[],"operations":[]}}}`,
+			wantIntent:  ArtifactEditIntentEdit,
+			wantTool:    ArtifactEditToolProposePatch,
+		},
 	}
 	for _, test := range tests {
 		test := test

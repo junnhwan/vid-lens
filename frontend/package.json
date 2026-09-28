@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
+    "@xyflow/react": "^12.12.0",
+    "elkjs": "^0.12.0",
     "lucide-react": "^0.408.0",
     "markmap-view": "^0.18.12",
     "react": "^18.3.1",

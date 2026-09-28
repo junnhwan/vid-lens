@@ -119,6 +119,57 @@ func SafeUndo(base, result, current Body) (PatchResult, error) {
 		return PatchResult{}, err
 	}
 	undone.Blocks = flattened
+	// Invert only semantic relations changed by this operation. A later edit to
+	// the same relation is a conflict; unrelated later relations survive.
+	baseRelations, resultRelations, currentRelations := map[string]Relation{}, map[string]Relation{}, map[string]Relation{}
+	for _, rel := range base.Relations {
+		baseRelations[rel.ID] = rel
+	}
+	for _, rel := range result.Relations {
+		resultRelations[rel.ID] = rel
+	}
+	for _, rel := range current.Relations {
+		currentRelations[rel.ID] = rel
+	}
+	for id, before := range baseRelations {
+		after, inResult := resultRelations[id]
+		if inResult && JSON(before) == JSON(after) {
+			continue
+		}
+		present, inCurrent := currentRelations[id]
+		if inResult && (!inCurrent || JSON(present) != JSON(after)) || !inResult && inCurrent {
+			return PatchResult{}, Err("undo_conflict", 409)
+		}
+		currentRelations[id] = before
+	}
+	for id, after := range resultRelations {
+		if _, existed := baseRelations[id]; existed {
+			continue
+		}
+		present, inCurrent := currentRelations[id]
+		if !inCurrent || JSON(present) != JSON(after) {
+			return PatchResult{}, Err("undo_conflict", 409)
+		}
+		delete(currentRelations, id)
+	}
+	undone.Relations = make([]Relation, 0, len(currentRelations))
+	seenRelations := map[string]bool{}
+	for _, rel := range current.Relations {
+		if value, ok := currentRelations[rel.ID]; ok {
+			undone.Relations = append(undone.Relations, value)
+			seenRelations[rel.ID] = true
+		}
+	}
+	for _, rel := range base.Relations {
+		if !seenRelations[rel.ID] {
+			if value, ok := currentRelations[rel.ID]; ok {
+				undone.Relations = append(undone.Relations, value)
+			}
+		}
+	}
+	if len(undone.Relations) > 0 {
+		undone.SchemaVersion = 2
+	}
 	if undone.Validate(allowed) != nil {
 		return PatchResult{}, Err("undo_conflict", 409)
 	}
@@ -530,6 +581,11 @@ func collectEvidenceIDs(bodies ...Body) map[string]bool {
 				allowed[ref.EvidenceID] = true
 			}
 		}
+		for _, rel := range body.Relations {
+			for _, ref := range rel.EvidenceRefs {
+				allowed[ref.EvidenceID] = true
+			}
+		}
 	}
 	return allowed
 }
@@ -580,6 +636,27 @@ func diffBodies(before, after Body) PatchDiff {
 		added := cloneBlock(block)
 		diff.Counts.Added++
 		diff.Changes = append(diff.Changes, PatchChange{Kind: "added", BlockID: block.BlockID, After: &added})
+	}
+	beforeRelations, afterRelations := map[string]Relation{}, map[string]Relation{}
+	for _, rel := range before.Relations {
+		beforeRelations[rel.ID] = rel
+	}
+	for _, rel := range after.Relations {
+		afterRelations[rel.ID] = rel
+	}
+	for _, rel := range before.Relations {
+		if next, ok := afterRelations[rel.ID]; !ok || JSON(rel) != JSON(next) {
+			prior := rel
+			diff.Counts.Deleted++
+			diff.Changes = append(diff.Changes, PatchChange{Kind: "relation_removed", RelationID: rel.ID, BeforeRelation: &prior})
+		}
+	}
+	for _, rel := range after.Relations {
+		if prior, ok := beforeRelations[rel.ID]; !ok || JSON(prior) != JSON(rel) {
+			next := rel
+			diff.Counts.Added++
+			diff.Changes = append(diff.Changes, PatchChange{Kind: "relation_added", RelationID: rel.ID, AfterRelation: &next})
+		}
 	}
 	return diff
 }

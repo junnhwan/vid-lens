@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { bodySchema, detailSchema, editOperationSchema, editResultSchema, evidenceSchema, runSchema } from './schema.ts'
 import { artifactCardStatus, canReplay, evidenceTime, isPointEvidence, mapTree, warningMessage } from './view.ts'
+import { savedMarkdown } from './markdown.ts'
 import { studyFixture, evidenceFixtures, runFixture } from '../../dev/productFixtures.ts'
 
 test('first-delivery specimens validate against the API contract', () => {
@@ -47,7 +48,7 @@ test('artifact states use the server latest run and preserve a readable prior ve
 })
 test('invalid schema, broken parent order, duplicate identities and unsupported claims are rejected', () => {
   const body = structuredClone(studyFixture.version!.body)
-  assert.equal(bodySchema.safeParse({ ...body, schema_version: 2 }).success, false)
+  assert.equal(bodySchema.safeParse({ ...body, schema_version: 3 }).success, false)
   assert.equal(bodySchema.safeParse({ ...body, blocks: [...body.blocks].reverse() }).success, false)
   assert.equal(bodySchema.safeParse({ ...body, blocks: [...body.blocks, body.blocks[0]] }).success, false)
   assert.equal(bodySchema.safeParse({ ...body, blocks: [{ ...body.blocks[0], evidence_refs: [] }] }).success, false)
@@ -68,4 +69,17 @@ test('200 Chinese nodes remain one content tree; invalid depth is rejected', () 
   assert.equal(mapTree(body).children[0].children.length, 199)
   body.blocks = body.blocks.slice(0, 9).map((block, i) => ({ ...block, parent_id: i === 0 ? null : `b${i - 1}` }))
   assert.equal(bodySchema.safeParse(body).success, false)
+})
+test('Markdown export keeps the original hierarchy and appends saved semantic relations', () => {
+  const detail = structuredClone(studyFixture)
+  const first = detail.version!.body.blocks[0]
+  const second = detail.version!.body.blocks[1]
+  detail.version!.body.schema_version = 2
+  detail.version!.body.relations = [{ id: 'relation-export', source_block_id: first.block_id, target_block_id: second.block_id, type: 'related_to', origin: 'user', evidence_refs: [] }]
+  const evidence = new Map(evidenceFixtures.map(item => [item.id, item]))
+  const output = savedMarkdown(detail, evidence, 'http://localhost:5376')
+  assert.match(output, new RegExp(`## ${first.title}`))
+  assert.match(output, /## 概念关系/)
+  assert.match(output, /相关；人工整理；未附依据/)
+  assert.ok(output.indexOf('## 概念关系') > output.indexOf(first.content))
 })

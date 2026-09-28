@@ -24,6 +24,12 @@ type ArtifactService struct {
 func NewArtifactService(repos *repository.Repositories, profiles *AIProfileService, factory *ai.Factory) *ArtifactService {
 	return &ArtifactService{repos, profiles, factory}
 }
+func (s *ArtifactService) CanvasLayout(ctx context.Context, owner int64, artifactID, versionID string, revision int64) (*artifact.CanvasLayoutView, error) {
+	return s.repos.Artifact.CanvasLayout(ctx, owner, artifactID, versionID, revision)
+}
+func (s *ArtifactService) SaveCanvasLayout(ctx context.Context, owner int64, artifactID, versionID string, expected int64, key string, layout artifact.CanvasLayout) (*artifact.CanvasLayoutView, error) {
+	return s.repos.Artifact.SaveCanvasLayout(ctx, owner, artifactID, versionID, expected, key, layout)
+}
 func artifactSource(ctx context.Context, repos *repository.Repositories, owner, id int64) (string, []model.SourceSnapshotItem, error) {
 	task, err := repos.Task.FindByID(id)
 	if err != nil {

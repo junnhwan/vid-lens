@@ -11,7 +11,7 @@ func TestBodyRejectsUntrustedGraphAndReferences(t *testing.T) {
 		{"foreign evidence", func(b *Body) { b.Blocks[0].EvidenceRefs = []Ref{{EvidenceID: "other", Relation: "supports"}} }},
 		{"cycle", func(b *Body) { p := "a"; b.Blocks[0].ParentID = &p }},
 		{"duplicate id", func(b *Body) { b.Blocks = append(b.Blocks, b.Blocks[0]) }},
-		{"unsupported schema", func(b *Body) { b.SchemaVersion = 2 }},
+		{"unsupported schema", func(b *Body) { b.SchemaVersion = 3 }},
 		{"uncited source", func(b *Body) { b.Blocks[0].EvidenceRefs = []Ref{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

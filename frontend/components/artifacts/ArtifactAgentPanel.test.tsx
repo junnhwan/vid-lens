@@ -129,6 +129,14 @@ test('operation lookup retries a transient read failure and exposes type, hierar
   expect(screen.getByText('背景 · preview-e3')).toBeTruthy()
 })
 
+test('semantic relation diff names its blocks, direction, source, and evidence state', async () => {
+  const [source, target] = studyFixture.version!.body.blocks
+  const relation = { id: 'relation-1', source_block_id: source.block_id, target_block_id: target.block_id, type: 'related_to' as const, origin: 'user' as const, evidence_refs: [] }
+  vi.spyOn(artifactApi, 'editOperation').mockResolvedValue({ ...operation, counts: { added: 1, updated: 0, deleted: 0, moved: 0 }, changes: [{ kind: 'relation_added', block_id: source.block_id, after_relation: relation }] })
+  render(<ArtifactAgentPanel artifact={studyFixture} initialScope={null} initialRun={run} onClose={() => {}} onArtifactChanged={vi.fn().mockResolvedValue(studyFixture)} onOpenEvidence={() => {}} />)
+  expect(await screen.findByText(`${source.title} ↔ ${target.title} · 相关 · 人工整理 · 未附依据`)).toBeTruthy()
+})
+
 test('read-only result is announced and delegates evidence opening to the workspace bridge', () => {
   const onOpenEvidence = vi.fn()
   const answer = { ...run, result: { kind: 'answer' as const, message: '名称与视频一致。', evidence_ids: ['preview-e1'] } }
