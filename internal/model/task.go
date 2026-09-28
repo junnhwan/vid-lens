@@ -82,10 +82,11 @@ type VideoTask struct {
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 关联（不存储在数据库）
-	Asset         *VideoAsset         `gorm:"foreignKey:AssetID;references:ID" json:"asset,omitempty"`
-	Transcription *VideoTranscription `gorm:"foreignKey:TaskID;references:ID" json:"transcription,omitempty"`
-	Summary       *AISummary          `gorm:"foreignKey:TaskID;references:ID" json:"summary,omitempty"`
-	Jobs          []TaskJob           `gorm:"foreignKey:TaskID;references:ID" json:"jobs,omitempty"`
+	Asset           *VideoAsset           `gorm:"foreignKey:AssetID;references:ID" json:"asset,omitempty"`
+	Transcription   *VideoTranscription   `gorm:"foreignKey:TaskID;references:ID" json:"transcription,omitempty"`
+	Summary         *AISummary            `gorm:"foreignKey:TaskID;references:ID" json:"summary,omitempty"`
+	SummaryRevision *SummaryRevisionState `gorm:"-" json:"summary_revision,omitempty"`
+	Jobs            []TaskJob             `gorm:"foreignKey:TaskID;references:ID" json:"jobs,omitempty"`
 
 	// 列表用轻量标记（非 DB 列）：是否已有转写/总结，避免把大字段 content 塞进 list。
 	// 用值类型 bool（不用 *bool + omitempty），保证 JSON 始终带上 true/false，前端可直接灰显主按钮。

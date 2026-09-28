@@ -44,6 +44,8 @@ type ArtifactEditPlannerState struct {
 	BaseDigest          string                           `json:"base_digest"`
 	ScopeDigest         string                           `json:"scope_digest"`
 	ToolSchemaDigest    string                           `json:"tool_schema_digest"`
+	TermRules           VideoTermRuleSet                 `json:"term_rules,omitempty"`
+	TermSnapshotHash    string                           `json:"term_snapshot_hash,omitempty"`
 	ProposalOperationID string                           `json:"proposal_operation_id,omitempty"`
 	Observations        []ArtifactEditPlannerObservation `json:"observations,omitempty"`
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -53,6 +54,15 @@ func (s *MediaService) VideoQuestions(userID, taskID int64) (VideoQuestionResult
 		summary, err = s.repo.Summary.FindByMD5(task.FileMD5)
 		if err != nil {
 			return VideoQuestionResult{}, err
+		}
+	}
+	if s.repo.SummaryRevision != nil {
+		effective, readErr := s.repo.SummaryRevision.Effective(context.Background(), userID, taskID)
+		if readErr != nil {
+			return VideoQuestionResult{}, readErr
+		}
+		if effective.Revision != nil {
+			summary = &model.AISummary{Content: effective.Content}
 		}
 	}
 	frames, err := s.repo.VisualFrame.ListCompletedWithText(taskID)

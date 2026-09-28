@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -178,6 +179,17 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 	if req.Recipe != run.RecipeVersion || (req.Recipe != artifact.Recipe && req.Recipe != artifact.RecipeV1) {
 		return artifact.Err("unsupported_checkpoint", 409)
 	}
+	var frozen struct {
+		SchemaVersion    int              `json:"schema_version"`
+		TermRules        VideoTermRuleSet `json:"term_rules"`
+		TermSnapshotHash string           `json:"term_snapshot_hash"`
+	}
+	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozen); err != nil {
+		return artifact.Err("unsupported_checkpoint", 409)
+	}
+	if frozen.SchemaVersion >= 2 && frozen.TermSnapshotHash != artifact.Hash(artifact.JSON(frozen.TermRules)) {
+		return artifact.Err("unsupported_checkpoint", 409)
+	}
 	manifest, items, err := s.repos.Artifact.Snapshot(ctx, run.UserID, req.ManifestID)
 	if err != nil {
 		return err
@@ -215,6 +227,9 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 		if req.Recipe == artifact.Recipe {
 			system = studySystemV2
 			input = artifact.JSON(map[string]any{"goal": run.Goal, "segment": i + 1, "segments": len(segments), "evidence": segment, "term_evidence": terms})
+		}
+		if guidance := termRulePrompt(frozen.TermRules); guidance != "" {
+			system += "\n" + guidance
 		}
 		messages := []ai.ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: input}}
 		body, err := s.studyCall(ctx, run, token, fmt.Sprintf("%s.segment.%d", req.Recipe, i), messages, allowed, client)

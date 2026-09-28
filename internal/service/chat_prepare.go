@@ -123,7 +123,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		messages = append([]ai.ChatMessage{{Role: "system", Content: evidenceCoveragePrompt(taskIDs, retrieval.Citations)}}, messages...)
 	}
 	if session.ScopeType != model.ChatScopeKnowledgeBase && session.ScopeType != model.ChatScopeVideoLibrary {
-		contextText, contextErr := s.videoContextText(session.TaskID)
+		contextText, contextErr := s.videoContextText(session.UserID, session.TaskID)
 		if contextErr != nil {
 			return nil, contextErr
 		}
@@ -191,7 +191,7 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, mode ChatMo
 }
 
 func (s *ChatService) prepareVideoContextChat(session *model.ChatSession, question string, recent []model.ChatMessage, recentLimit int) (*preparedRAGChat, error) {
-	contextText, err := s.videoContextText(session.TaskID)
+	contextText, err := s.videoContextText(session.UserID, session.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +225,13 @@ func appendUserPromptPreference(messages []ai.ChatMessage, preference string) []
 	return result
 }
 
-func (s *ChatService) videoContextText(taskID int64) (string, error) {
+func (s *ChatService) videoContextText(owner, taskID int64) (string, error) {
 	task, err := s.repos.Task.FindByID(taskID)
 	if err != nil {
 		return "", err
+	}
+	if task.UserID != owner {
+		return "", fmt.Errorf("无权访问此视频")
 	}
 	sections := make([]string, 0, 2)
 	if s.repos.Summary != nil {
@@ -244,6 +247,18 @@ func (s *ChatService) videoContextText(taskID int64) (string, error) {
 		}
 		if summary != nil && strings.TrimSpace(summary.Content) != "" {
 			sections = append(sections, "视频摘要：\n"+boundedVideoText(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
+		}
+		if s.repos.SummaryRevision != nil {
+			effective, readErr := s.repos.SummaryRevision.Effective(context.Background(), owner, taskID)
+			if readErr != nil {
+				return "", readErr
+			}
+			if effective.Revision != nil {
+				if len(sections) > 0 {
+					sections = sections[:len(sections)-1]
+				}
+				sections = append(sections, "用户修订的视频摘要（非原始证据）：\n"+boundedVideoText(strings.TrimSpace(effective.Content), maxVideoContextRunes/2))
+			}
 		}
 	}
 	if s.repos.Transcription != nil {

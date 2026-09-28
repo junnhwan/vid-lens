@@ -17,7 +17,7 @@ import { fmtRelTime, fmtDateTime, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
-import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
+import { SummaryRevisionPanel } from '@/components/summary/SummaryRevisionPanel'
 import { VideoQuestionsPanel } from '@/components/chat/VideoQuestionsPanel'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
@@ -854,12 +854,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       </div>
       {summaryOpen && task.summary && (
         <Modal title="AI 摘要" className="modal-read" onClose={() => setSummaryOpen(false)}>
-          <p className="summary-modal-meta">
-            {task.summary.model_name} · {fmtRelTime(task.summary.created_at)}
-          </p>
-          <div className="summary-body">
-            <MarkdownAnswer content={task.summary.content} domainTags />
-          </div>
+          <SummaryRevisionPanel taskId={task.id} readOnly={readOnly} onChanged={async () => { setTask(await api.getTask(task.id)) }} />
         </Modal>
       )}
       {kbOpen && (

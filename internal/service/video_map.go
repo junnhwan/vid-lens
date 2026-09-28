@@ -81,6 +81,15 @@ func (s *ChatService) loadVideoMaps(ctx context.Context, userID int64, taskIDs [
 				summary = row.Content
 			}
 		}
+		if s.repos.SummaryRevision != nil {
+			effective, readErr := s.repos.SummaryRevision.Effective(ctx, userID, id)
+			if readErr != nil {
+				return nil, readErr
+			}
+			if effective.Content != "" {
+				summary = effective.Content
+			}
+		}
 		if s.repos.Transcription != nil {
 			row, err := s.repos.Transcription.FindByTaskID(id)
 			if err != nil {

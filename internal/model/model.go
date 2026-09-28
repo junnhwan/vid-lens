@@ -17,6 +17,8 @@ func AllModels() []interface{} {
 		&VideoVisualProgress{},
 		&VideoVisualObservation{},
 		&AISummary{},
+		&SummaryRevisionHead{}, &SummaryRevision{}, &SummaryEditOperation{}, &SummaryEditDispatch{},
+		&VideoTermRuleHead{}, &VideoTermRuleVersion{},
 		&SummaryPart{},
 		&UserAIProfile{},
 		&UserPromptPreference{},

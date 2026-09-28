@@ -24,6 +24,7 @@ type serverHandlers struct {
 	knowledgeBases *handler.KnowledgeBaseHandler
 	memory         *handler.MemoryHandler
 	artifacts      *handler.ArtifactHandler
+	summaries      *handler.SummaryRevisionHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -77,6 +78,19 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				auth.GET("/sources/video/:id", h.Source)
 				auth.GET("/sources/:manifest_id/evidence/:evidence_id", h.Evidence)
 				auth.GET("/tasks", h.Tasks)
+			}
+			if h := handlers.summaries; h != nil {
+				auth.GET("/media/task/:id/summary", h.Get)
+				auth.GET("/media/task/:id/summary/export", h.Export)
+				auth.POST("/media/task/:id/summary/edit-runs", middleware.RateLimit(rateLimiter), h.Edit)
+				auth.GET("/media/task/:id/summary/operations/latest", h.LatestOperation)
+				auth.GET("/media/task/:id/summary/operations/:operation_id", h.Operation)
+				auth.POST("/media/task/:id/summary/operations/:operation_id/apply", h.Apply)
+				auth.POST("/media/task/:id/summary/operations/:operation_id/undo", h.Undo)
+				auth.POST("/media/task/:id/summary/resolve-base", h.ResolveBase)
+				auth.GET("/media/task/:id/term-rules", h.Rules)
+				auth.PUT("/media/task/:id/term-rules", h.SaveRule)
+				auth.POST("/media/task/:id/term-rules/:rule_id/disable", h.DisableRule)
 			}
 			aiProfiles := auth.Group("/ai/profiles")
 			{

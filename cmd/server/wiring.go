@@ -42,6 +42,7 @@ type serverApplication struct {
 	memoryWriter         *service.AsyncMemoryWriter
 	memoryCapture        *service.DurableMemoryCapture
 	artifactWorker       *mq.ArtifactWorker
+	summaryEditWorker    *mq.SummaryEditWorker
 }
 
 func (deps serverDependencies) validate(aiStrategy ai.Strategy) error {
@@ -306,6 +307,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
 	artifactSvc := service.NewArtifactService(deps.repos, aiProfileSvc, aiFactory)
+	summarySvc := service.NewSummaryRevisionService(deps.repos, aiProfileSvc, aiFactory)
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
@@ -317,6 +319,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 			artifacts:      handler.NewArtifactHandler(artifactSvc),
+			summaries:      handler.NewSummaryRevisionHandler(summarySvc, deps.repos),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,
@@ -331,12 +334,16 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		memoryWriter:         memoryWriter,
 		memoryCapture:        memoryCapture,
 		artifactWorker:       mq.NewArtifactWorker(deps.repos.Artifact, artifactSvc, deps.cfg.MQ.Brokers),
+		summaryEditWorker:    mq.NewSummaryEditWorker(deps.repos.SummaryRevision, summarySvc, deps.cfg.MQ.Brokers),
 	}, nil
 }
 
 func (a *serverApplication) Start(ctx context.Context) {
 	if a.artifactWorker != nil {
 		a.artifactWorker.Start(ctx)
+	}
+	if a.summaryEditWorker != nil {
+		a.summaryEditWorker.Start(ctx)
 	}
 	a.consumer.StartAnalyzeConsumer(ctx, a.mq.Brokers, a.mq.AnalyzeQueue, a.mq.ConsumerGroup)
 	a.consumer.StartTranscribeConsumer(ctx, a.mq.Brokers, a.mq.TranscribeQueue, a.mq.ConsumerGroup)
@@ -349,6 +356,9 @@ func (a *serverApplication) Start(ctx context.Context) {
 func (a *serverApplication) Wait() {
 	if a.artifactWorker != nil {
 		a.artifactWorker.Wait()
+	}
+	if a.summaryEditWorker != nil {
+		a.summaryEditWorker.Wait()
 	}
 	a.consumer.Wait()
 	a.retryScheduler.Wait()

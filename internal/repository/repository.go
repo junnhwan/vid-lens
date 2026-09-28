@@ -21,6 +21,8 @@ type Repositories struct {
 	VisualProgress     *VideoVisualProgressRepository
 	VisualObservation  *VideoVisualObservationRepository
 	Summary            *SummaryRepository
+	SummaryRevision    *SummaryRevisionRepository
+	VideoTermRule      *VideoTermRuleRepository
 	SummaryPart        *SummaryPartRepository
 	AIProfile          *AIProfileRepository
 	VideoChunk         *VideoChunkRepository
@@ -53,6 +55,8 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		VisualProgress:     NewVideoVisualProgressRepository(db),
 		VisualObservation:  NewVideoVisualObservationRepository(db),
 		Summary:            NewSummaryRepository(db),
+		SummaryRevision:    NewSummaryRevisionRepository(db),
+		VideoTermRule:      NewVideoTermRuleRepository(db),
 		SummaryPart:        NewSummaryPartRepository(db),
 		AIProfile:          NewAIProfileRepository(db),
 		VideoChunk:         NewVideoChunkRepository(db),

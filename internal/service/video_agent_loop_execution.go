@@ -350,6 +350,9 @@ func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state Vi
 		}
 		messages := buildCitedAnswerMessages(BuildCitedAnswerInput{ScopeTaskIDs: runtime.TaskIDs, Question: args.Question, Intermediate: args.Intermediate, Citations: args.Citations, Recent: runtime.Recent}, runtime.MemorySnapshot)
 		messages = appendUserPromptPreference(messages, runtime.AnswerPreference)
+		if guidance := termRulePrompt(runtime.TermRules); guidance != "" {
+			messages = append([]ai.ChatMessage{{Role: "system", Content: guidance}}, messages...)
+		}
 		usage = estimatedPlannerCallUsage(messages, "")
 		contextChars, estimatedPrompt = usage.ContextChars, usage.PromptTokens
 		run, err := execution.journal.GetRun(ctx, execution.userID, execution.runID)

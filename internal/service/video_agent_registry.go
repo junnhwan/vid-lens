@@ -31,6 +31,7 @@ type VideoAgentToolRuntime struct {
 	// artifact write authority.
 	ArtifactEdit     *ArtifactEditToolRuntime
 	AnswerPreference string
+	TermRules        VideoTermRuleSet
 	VideoMaps        []VideoMap
 	MaxVisualFrames  int
 	MaxOutputTokens  int64

@@ -303,12 +303,17 @@ func (s *ArtifactService) Submit(ctx context.Context, owner int64, key string, i
 		return nil, artifact.Err("profile_required", 422)
 	}
 	budget := resolved.EffectiveAgentBudget.Values
+	rules, err := EffectiveTermRules(ctx, s.repos, owner, input.SourceIDs[0])
+	if err != nil {
+		return nil, err
+	}
+	policy := artifact.JSON(map[string]any{"recipe": artifact.Recipe, "schema_version": 2, "term_rules": rules, "term_snapshot_hash": artifact.Hash(artifact.JSON(rules))})
 	now := time.Now().UTC()
 	goal := strings.TrimSpace(input.Goal)
 	if goal == "" {
 		goal = "生成有来源的中文学习笔记"
 	}
-	run := &model.AgentRun{ID: uuid.NewString(), UserID: owner, SubjectKind: "generation_request", ExecutionKind: "artifact", RecipeVersion: artifact.Recipe, ScopeType: "video", TaskID: input.SourceIDs[0], Goal: goal, Mode: "artifact", Status: "pending", Stage: "queued", ProfileSnapshot: artifact.JSON(map[string]any{"profile_id": p.ID, "model": p.LLMModel, "fingerprint": profileFingerprint(p)}), PolicySnapshot: artifact.JSON(map[string]any{"recipe": artifact.Recipe, "schema_version": 1}), BudgetSnapshot: artifact.JSON(resolved.EffectiveAgentBudget), MaxSteps: budget.MaxToolCalls, MaxLLMCalls: budget.MaxToolCalls, MaxAttemptsPerStep: 2, MaxPromptTokens: int64(budget.MaxInputTokens), MaxCompletionTokens: int64(budget.MaxOutputTokens), MaxDurationMs: int64(budget.MaxDurationSeconds) * 1000, MaxContextChars: int64(p.LLMContextTokens), CreatedAt: now}
+	run := &model.AgentRun{ID: uuid.NewString(), UserID: owner, SubjectKind: "generation_request", ExecutionKind: "artifact", RecipeVersion: artifact.Recipe, ScopeType: "video", TaskID: input.SourceIDs[0], Goal: goal, Mode: "artifact", Status: "pending", Stage: "queued", ProfileSnapshot: artifact.JSON(map[string]any{"profile_id": p.ID, "model": p.LLMModel, "fingerprint": profileFingerprint(p)}), PolicySnapshot: policy, BudgetSnapshot: artifact.JSON(resolved.EffectiveAgentBudget), MaxSteps: budget.MaxToolCalls, MaxLLMCalls: budget.MaxToolCalls, MaxAttemptsPerStep: 2, MaxPromptTokens: int64(budget.MaxInputTokens), MaxCompletionTokens: int64(budget.MaxOutputTokens), MaxDurationMs: int64(budget.MaxDurationSeconds) * 1000, MaxContextChars: int64(p.LLMContextTokens), CreatedAt: now}
 	req := &model.GenerationRequest{ID: uuid.NewString(), RunID: run.ID, UserID: owner, IdempotencyKey: key, RequestHash: hash, RequestJSON: artifact.JSON(input), ManifestID: source.ManifestID, BaseVersion: input.BaseVersion, Recipe: artifact.Recipe, ProfileID: p.ID, ProfileFingerprint: profileFingerprint(p), ParentRunID: parent, QueueDeadline: now.Add(24 * time.Hour)}
 	if input.ArtifactID != nil {
 		req.ArtifactID = *input.ArtifactID

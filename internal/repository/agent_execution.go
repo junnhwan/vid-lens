@@ -175,7 +175,7 @@ func (r *AgentExecutionRepository) getExecutableRun(ctx context.Context, userID 
 		return nil, gorm.ErrInvalidData
 	}
 	var run model.AgentRun
-	err := r.db.WithContext(ctx).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit}).Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error
+	err := r.db.WithContext(ctx).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit, model.AgentRunSubjectSummaryEdit}).Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -236,7 +236,7 @@ func (r *AgentExecutionRepository) MarkFinalEvidenceRefs(ctx context.Context, us
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit}).Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error; err != nil {
+		if err := tx.Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit, model.AgentRunSubjectSummaryEdit}).Where("id = ? AND user_id = ?", strings.TrimSpace(runID), userID).First(&run).Error; err != nil {
 			return err
 		}
 		var calls []model.AgentToolCall
@@ -276,7 +276,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 	var claim AgentStepClaim
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit}).Where("id = ? AND user_id = ?", req.RunID, req.UserID).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit, model.AgentRunSubjectSummaryEdit}).Where("id = ? AND user_id = ?", req.RunID, req.UserID).First(&run).Error; err != nil {
 			return err
 		}
 		claim.Run = run
@@ -346,7 +346,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		}
 		if req.Attempt > run.MaxAttemptsPerStep {
 			claim.Outcome = AgentStepClaimExhausted
-			if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+			if run.SubjectKind == model.AgentRunSubjectArtifactEdit || run.SubjectKind == model.AgentRunSubjectSummaryEdit {
 				return nil
 			}
 			return markAgentRunBudgetExhausted(tx, &claim.Run, req.Now, "attempt_budget_exhausted")
@@ -390,7 +390,7 @@ func (r *AgentExecutionRepository) ClaimStep(ctx context.Context, req AgentStepC
 		}
 		if agentBudgetExceeded(run, req) {
 			claim.Outcome = AgentStepClaimExhausted
-			if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+			if run.SubjectKind == model.AgentRunSubjectArtifactEdit || run.SubjectKind == model.AgentRunSubjectSummaryEdit {
 				return nil
 			}
 			return markAgentRunBudgetExhausted(tx, &claim.Run, req.Now, "budget_exhausted")
@@ -513,7 +513,7 @@ func (r *AgentExecutionRepository) CompleteStep(ctx context.Context, req AgentSt
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit, model.AgentRunSubjectSummaryEdit}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -570,7 +570,7 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 	changed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ?", []string{"chat_session", model.AgentRunSubjectArtifactEdit, model.AgentRunSubjectSummaryEdit}).Where("id = ? AND user_id = ? AND status IN ?", req.RunID, req.UserID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).First(&run).Error; err != nil {
 			return err
 		}
 		var step model.AgentStep
@@ -603,7 +603,7 @@ func (r *AgentExecutionRepository) FailStep(ctx context.Context, req AgentStepFa
 		// terminal event in ArtifactRepository.Finish. The shared journal only
 		// terminalizes chat runs; a worker shutdown must leave an edit run
 		// recoverable after its execution lease expires.
-		if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+		if run.SubjectKind == model.AgentRunSubjectArtifactEdit || run.SubjectKind == model.AgentRunSubjectSummaryEdit {
 			return nil
 		}
 		if req.DurationLimit {

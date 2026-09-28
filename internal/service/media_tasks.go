@@ -194,6 +194,21 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 			task.Summary = existing
 		}
 	}
+	if s.repo.SummaryRevision != nil {
+		effective, readErr := s.repo.SummaryRevision.Effective(ctx, userID, taskID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if effective.Revision != nil {
+			// Copy the shared cache row; never mutate a result reused by another task.
+			row := model.AISummary{TaskID: taskID, FileMD5: task.FileMD5, ModelName: "用户修订", Content: effective.Content, CreatedAt: effective.Revision.CreatedAt}
+			if effective.Generated != nil {
+				row.ID = effective.Generated.ID
+			}
+			task.Summary = &row
+			task.SummaryRevision = &model.SummaryRevisionState{Version: effective.Version, RevisionID: effective.Revision.ID, BaseGeneratedHash: effective.BaseHash, CurrentGeneratedHash: effective.CurrentGeneratedHash, SourceStatus: effective.SourceStatus, Origin: effective.Revision.Origin}
+		}
+	}
 	// 与列表一致：有正文即标记，便于前端合并后立刻灰显，无需再猜
 	if task.Transcription != nil && task.Transcription.Content != "" {
 		task.HasTranscription = true
@@ -264,6 +279,13 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 	ids := make([]int64, len(tasks))
 	for i := range tasks {
 		ids[i] = tasks[i].ID
+	}
+	if s.repo.SummaryRevision != nil {
+		if revised, presenceErr := s.repo.SummaryRevision.Presence(context.Background(), userID, ids); presenceErr == nil {
+			for i := range tasks {
+				tasks[i].HasSummary = tasks[i].HasSummary || revised[tasks[i].ID]
+			}
+		}
 	}
 	if indexed, visual, presenceErr := s.repo.Task.ProcessingPresenceByTaskIDs(ids); presenceErr == nil {
 		for i := range tasks {

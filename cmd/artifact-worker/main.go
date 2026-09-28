@@ -60,8 +60,12 @@ func main() {
 	profiles := service.NewAIProfileService(repos.AIProfile, codec, nil).WithAgentBudgetConfig(cfg.AgentBudget)
 	svc := service.NewArtifactService(repos, profiles, ai.NewFactoryWithAdmission(admission))
 	worker := mq.NewArtifactWorker(repos.Artifact, svc, cfg.MQ.Brokers)
+	summarySvc := service.NewSummaryRevisionService(repos, profiles, ai.NewFactoryWithAdmission(admission))
+	summaryWorker := mq.NewSummaryEditWorker(repos.SummaryRevision, summarySvc, cfg.MQ.Brokers)
 	worker.Start(ctx)
+	summaryWorker.Start(ctx)
 	<-ctx.Done()
 	worker.Wait()
+	summaryWorker.Wait()
 	<-reconciled
 }

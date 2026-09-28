@@ -312,6 +312,9 @@ func TestTaskCleanupKeepsSharedAssetUntilLastActiveTaskIsDeleted(t *testing.T) {
 	asset := createMediaTestAsset(t, repos, "77777777777777777777777777777777", "videos/shared.mp4")
 	firstTask := createMediaTestTask(t, repos, 7, asset, "shared-first.mp4")
 	secondTask := createMediaTestTask(t, repos, 8, asset, "shared-second.mp4")
+	if err := repos.Summary.Create(&model.AISummary{TaskID: firstTask.ID, FileMD5: asset.FileMD5, Content: "共享的生成原稿"}); err != nil {
+		t.Fatal(err)
+	}
 	cleanup := NewTaskCleanupService(repos, storage, nil, TaskCleanupConfig{})
 
 	firstJob, err := cleanup.RequestDelete(context.Background(), firstTask.UserID, firstTask.ID)
@@ -327,6 +330,9 @@ func TestTaskCleanupKeepsSharedAssetUntilLastActiveTaskIsDeleted(t *testing.T) {
 	if found, err := repos.Asset.FindByMD5(asset.FileMD5); err != nil || found == nil {
 		t.Fatalf("shared asset must remain active: %+v, %v", found, err)
 	}
+	if cached, err := repos.Summary.FindByMD5(asset.FileMD5); err != nil || cached == nil || cached.TaskID != secondTask.ID || cached.Content != "共享的生成原稿" {
+		t.Fatalf("shared summary was not rehomed to surviving task: %+v, %v", cached, err)
+	}
 
 	secondJob, err := cleanup.RequestDelete(context.Background(), secondTask.UserID, secondTask.ID)
 	if err != nil {
@@ -337,6 +343,9 @@ func TestTaskCleanupKeepsSharedAssetUntilLastActiveTaskIsDeleted(t *testing.T) {
 	}
 	if len(storage.deleted) != 1 || storage.deleted[0] != asset.ObjectName {
 		t.Fatalf("last task cleanup deleted objects = %v, want [%s]", storage.deleted, asset.ObjectName)
+	}
+	if cached, err := repos.Summary.FindByMD5(asset.FileMD5); err != nil || cached != nil {
+		t.Fatalf("shared summary should be removed after final source deletion: %+v, %v", cached, err)
 	}
 	assertCleanupJobStatus(t, repos, firstJob.ID, model.TaskCleanupStatusCompleted)
 	assertCleanupJobStatus(t, repos, secondJob.ID, model.TaskCleanupStatusCompleted)

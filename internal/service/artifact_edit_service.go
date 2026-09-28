@@ -31,6 +31,8 @@ type artifactEditToolPolicy struct {
 	BaseDigest       string           `json:"base_digest"`
 	ScopeDigest      string           `json:"scope_digest"`
 	ToolSchemaDigest string           `json:"tool_schema_digest"`
+	TermRules        VideoTermRuleSet `json:"term_rules,omitempty"`
+	TermSnapshotHash string           `json:"term_snapshot_hash,omitempty"`
 }
 
 type ArtifactEditRunResult struct {
@@ -165,7 +167,11 @@ func (s *ArtifactService) SubmitEdit(ctx context.Context, owner int64, artifactI
 	for _, definition := range definitions {
 		allowedTools = append(allowedTools, definition.Name)
 	}
-	policy := artifactEditToolPolicy{SchemaVersion: 1, Mode: input.Mode, AllowedTools: allowedTools, BaseDigest: digests.Base, ScopeDigest: digests.Scope, ToolSchemaDigest: schemaDigest}
+	rules, err := EffectiveTermRules(ctx, s.repos, owner, manifest.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	policy := artifactEditToolPolicy{SchemaVersion: 2, Mode: input.Mode, AllowedTools: allowedTools, BaseDigest: digests.Base, ScopeDigest: digests.Scope, ToolSchemaDigest: schemaDigest, TermRules: rules, TermSnapshotHash: artifact.Hash(artifact.JSON(rules))}
 	budget := resolved.EffectiveAgentBudget.Values
 	now := time.Now().UTC()
 	runID := uuid.NewString()
@@ -481,7 +487,10 @@ func (s *ArtifactService) executeClaimedArtifactEdit(ctx context.Context, run *m
 	for _, definition := range definitions {
 		wantedTools = append(wantedTools, definition.Name)
 	}
-	if policy.SchemaVersion != 1 || policy.Mode != mode || !equalStrings(policy.AllowedTools, wantedTools) || policy.ToolSchemaDigest != schemaDigest || policy.BaseDigest != digests.Base || policy.ScopeDigest != digests.Scope {
+	if (policy.SchemaVersion != 1 && policy.SchemaVersion != 2) || policy.Mode != mode || !equalStrings(policy.AllowedTools, wantedTools) || policy.ToolSchemaDigest != schemaDigest || policy.BaseDigest != digests.Base || policy.ScopeDigest != digests.Scope {
+		return artifact.Err("unsupported_checkpoint", 409)
+	}
+	if policy.SchemaVersion == 2 && policy.TermSnapshotHash != artifact.Hash(artifact.JSON(policy.TermRules)) {
 		return artifact.Err("unsupported_checkpoint", 409)
 	}
 	client, err := s.artifactEditClient(run.UserID, request)
@@ -530,6 +539,7 @@ func (s *ArtifactService) executeClaimedArtifactEdit(ctx context.Context, run *m
 		ArtifactID: request.ArtifactID, BaseVersionID: request.BaseVersionID, BaseVersion: request.BaseVersion,
 		SelectedBlockIDs: selected, Instruction: request.Instruction, Mode: mode, Intent: ClassifyArtifactEditIntent(request.Instruction, mode),
 		BaseDigest: digests.Base, ScopeDigest: digests.Scope, ToolSchemaDigest: schemaDigest,
+		TermRules: policy.TermRules, TermSnapshotHash: policy.TermSnapshotHash,
 	}
 	progress := func(progressCtx context.Context, stage string, covered, total int) error {
 		return s.repos.Artifact.Progress(progressCtx, run.ID, token, run.RunLeaseEpoch, stage, covered, total)

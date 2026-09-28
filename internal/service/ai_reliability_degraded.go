@@ -83,6 +83,11 @@ func (s *ChatService) degradedSummary(session *model.ChatSession) string {
 	if s.repos == nil || s.repos.Summary == nil || session == nil {
 		return ""
 	}
+	if session.TaskID > 0 && s.repos.SummaryRevision != nil {
+		if effective, err := s.repos.SummaryRevision.Effective(context.Background(), session.UserID, session.TaskID); err == nil && effective.Revision != nil {
+			return strings.TrimSpace(effective.Content)
+		}
+	}
 	// 优先当前 task 自有摘要。
 	if session.TaskID > 0 {
 		if summary, err := s.repos.Summary.FindByTaskID(session.TaskID); err == nil && summary != nil {

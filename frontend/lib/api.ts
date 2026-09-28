@@ -6,6 +6,7 @@ import type {
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
   UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress, VisualProgress,
+  EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet,
 } from './types'
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
@@ -143,6 +144,16 @@ export const api = {
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  getSummary: (id: number) => req<EffectiveSummaryView>(`/media/task/${id}/summary`, 'GET'),
+  editSummary: (id: number, input: { instruction: string; expected_revision: number; mode: 'preview' | 'apply' }, key: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/edit-runs`, 'POST', input, { 'Idempotency-Key': key }),
+  getSummaryOperation: (id: number, operationId: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}`, 'GET'),
+  getLatestSummaryOperation: (id: number) => req<SummaryEditOperation | null>(`/media/task/${id}/summary/operations/latest`, 'GET'),
+  applySummaryOperation: (id: number, operationId: string, expectedRevision: number) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}/apply`, 'POST', { expected_revision: expectedRevision }),
+  undoSummaryOperation: (id: number, operationId: string, expectedRevision: number) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}/undo`, 'POST', { expected_revision: expectedRevision }),
+  resolveSummaryBase: (id: number, expectedRevision: number, choice: 'keep_revision' | 'use_generated') => req<EffectiveSummaryView>(`/media/task/${id}/summary/resolve-base`, 'POST', { expected_revision: expectedRevision, choice }),
+  getTermRules: (id: number) => req<VideoTermRuleSet>(`/media/task/${id}/term-rules`, 'GET'),
+  saveTermRule: (id: number, input: { expected_version: number; linked_operation_id?: string; from: string; to: string; context: string; exclusions: string[]; transcript_evidence_id?: string; visual_evidence_id?: string }) => req<VideoTermRuleSet>(`/media/task/${id}/term-rules`, 'PUT', input),
+  disableTermRule: (id: number, ruleId: string, expectedVersion: number) => req<VideoTermRuleSet>(`/media/task/${id}/term-rules/${encodeURIComponent(ruleId)}/disable`, 'POST', { expected_version: expectedVersion }),
   setTaskVisualDisabled: (id: number, disabled: boolean) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { disabled }),
   getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
   getVisualProgress: (id: number) => req<VisualProgress>(`/media/task/${id}/visual-progress`, 'GET'),

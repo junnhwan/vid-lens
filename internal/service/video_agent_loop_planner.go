@@ -200,6 +200,7 @@ func renderPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefi
 - done=true 时 tool 必须为空；只有证据足够或已经明确无法继续时才结束。
 - 普通解说问题通常先调用 search_transcript。字幕、图表、幻灯片、颜色、布局、纯演示、无转写或画面/解说是否一致的问题，应调用 search_visual_evidence。
 - video_maps 是有界全片定位摘要，可能省略内容，不是证据。用其中主题与定位点指导按需检索；不能直接把地图当成引用。全片框架问题应核对后半段步骤，已覆盖问题时及时生成回答，不为凑工具次数检查无关画面。
+- term_rules 是本次运行冻结的用户视频术语规则；只在对应上下文适用，排除条件优先。user_asserted 仅为用户指定，pending_review 不得称为画面证实；原话引用保留原貌。
 - 知识库比较须分别取得相关视频证据。scope_task_ids中某方缺证时，继续针对该task检索或明确说明缺失，不把历史答案或另一方证据当作该方事实。
 - 已有带时间的 transcript 或 visual 命中且问题需要核对画面时，调用 inspect_visual_window，只检查命中时间附近的小窗口。
 - 只有在已有观察提供了 seed_windows 后，才调用 investigate_visual；它会从当前视频原始像素取少量帧。required_facts、seed_windows 和 budget 必须来自已观察证据，不能填写 URL、文件路径或其他 task。

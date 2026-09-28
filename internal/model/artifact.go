@@ -32,6 +32,7 @@ type ArtifactVersion struct {
 const (
 	AgentRunSubjectGeneration   = "generation_request"
 	AgentRunSubjectArtifactEdit = "artifact_edit_request"
+	AgentRunSubjectSummaryEdit  = "summary_edit_request"
 )
 
 // ArtifactEditRequest is the immutable, owner-scoped authority for one edit

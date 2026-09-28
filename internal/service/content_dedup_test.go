@@ -126,7 +126,7 @@ func TestContentDedupFullHitDetailJoinsResultsByFileMD5(t *testing.T) {
 	if err != nil || len(listed) != 1 || !listed[0].HasTranscription || !listed[0].HasSummary {
 		t.Fatalf("list must include reused result flags: %+v %v", listed, err)
 	}
-	contextText, err := (&ChatService{repos: repos}).videoContextText(result.TaskID)
+	contextText, err := (&ChatService{repos: repos}).videoContextText(8, result.TaskID)
 	if err != nil || !strings.Contains(contextText, "已完成的转写") || !strings.Contains(contextText, "已完成的摘要") {
 		t.Fatalf("chat must read reused video context: %q %v", contextText, err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 )
 
@@ -81,6 +82,9 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		if err := json.Unmarshal([]byte(existing.PolicySnapshot), &frozenPolicy); err != nil {
 			return nil, fmt.Errorf("decode frozen agent policy: %w", err)
 		}
+		if frozenPolicy.TermSnapshotHash != "" && frozenPolicy.TermSnapshotHash != artifact.Hash(artifact.JSON(frozenPolicy.TermRules)) {
+			return nil, artifact.Err("unsupported_checkpoint", 409)
+		}
 		if err := json.Unmarshal([]byte(existing.BudgetSnapshot), &budget); err != nil {
 			return nil, fmt.Errorf("decode frozen agent budget: %w", err)
 		}
@@ -101,6 +105,13 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		frozenPolicy, budget = loopAgentPolicyWithVisual(req.TopK, policy, s.visualInvestigator != nil)
 		applyResolvedAgentBudget(ctx, &frozenPolicy, &budget, s.visualInvestigator != nil)
 		frozenPolicy.MemberTaskIDs = memberIDs
+		if session.TaskID > 0 {
+			frozenPolicy.TermRules, err = EffectiveTermRules(ctx, s.chatSvc.repos, req.UserID, session.TaskID)
+			if err != nil {
+				return nil, err
+			}
+			frozenPolicy.TermSnapshotHash = artifact.Hash(artifact.JSON(frozenPolicy.TermRules))
+		}
 	}
 	if len(memberIDs) > 0 && !sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) {
 		return nil, errKnowledgeMembershipChanged
@@ -111,6 +122,9 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	}
 	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozenPolicy); err != nil {
 		return nil, fmt.Errorf("decode frozen agent policy: %w", err)
+	}
+	if frozenPolicy.TermSnapshotHash != "" && frozenPolicy.TermSnapshotHash != artifact.Hash(artifact.JSON(frozenPolicy.TermRules)) {
+		return nil, artifact.Err("unsupported_checkpoint", 409)
 	}
 	if err := json.Unmarshal([]byte(run.BudgetSnapshot), &budget); err != nil {
 		return nil, fmt.Errorf("decode frozen agent budget: %w", err)
@@ -188,6 +202,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		tools.Registry().useCollectionSchemas()
 	}
 	tools.SetMemorySnapshot(memorySnapshot)
+	tools.SetTermRules(frozenPolicy.TermRules)
 	tools.SetStepObserver(req.Observer)
 	tools.emitAnswer = req.EmitAnswer
 	var progress []ConversationProgress
@@ -237,6 +252,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	}
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
 		AnswerPreference: answerPreference,
+		TermRules:        frozenPolicy.TermRules,
 		VideoMaps:        videoMaps,
 		MaxVisualFrames:  budget.MaxFrames,
 		UserID:           req.UserID,

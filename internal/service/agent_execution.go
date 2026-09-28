@@ -31,17 +31,19 @@ type frozenAgentProfile struct {
 }
 
 type frozenAgentPolicy struct {
-	MemberTaskIDs         []int64  `json:"member_task_ids,omitempty"`
-	EngineVersion         int      `json:"engine_version,omitempty"`
-	TopK                  int      `json:"top_k"`
-	MaxSteps              int      `json:"max_steps"`
-	MaxReplans            int      `json:"max_replans"`
-	AllowedTools          []string `json:"allowed_tools"`
-	MaxWindowSelections   int      `json:"max_window_selections,omitempty"`
-	WindowRadius          int      `json:"window_radius,omitempty"`
-	MaxVisualCandidates   int      `json:"max_visual_candidates,omitempty"`
-	MaxVisualSelections   int      `json:"max_visual_selections,omitempty"`
-	MaxFinalEvidenceItems int      `json:"max_final_evidence_items,omitempty"`
+	TermRules             VideoTermRuleSet `json:"term_rules,omitempty"`
+	TermSnapshotHash      string           `json:"term_snapshot_hash,omitempty"`
+	MemberTaskIDs         []int64          `json:"member_task_ids,omitempty"`
+	EngineVersion         int              `json:"engine_version,omitempty"`
+	TopK                  int              `json:"top_k"`
+	MaxSteps              int              `json:"max_steps"`
+	MaxReplans            int              `json:"max_replans"`
+	AllowedTools          []string         `json:"allowed_tools"`
+	MaxWindowSelections   int              `json:"max_window_selections,omitempty"`
+	WindowRadius          int              `json:"window_radius,omitempty"`
+	MaxVisualCandidates   int              `json:"max_visual_candidates,omitempty"`
+	MaxVisualSelections   int              `json:"max_visual_selections,omitempty"`
+	MaxFinalEvidenceItems int              `json:"max_final_evidence_items,omitempty"`
 }
 
 type frozenAgentBudget struct {

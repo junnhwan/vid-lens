@@ -6,6 +6,7 @@ import (
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SummaryRepository struct {
@@ -69,4 +70,27 @@ func (r *SummaryRepository) FindByMD5(fileMD5 string) (*model.AISummary, error) 
 
 func (r *SummaryRepository) DeleteByTaskID(taskID int64) error {
 	return r.db.Where("task_id = ?", taskID).Delete(&model.AISummary{}).Error
+}
+
+// RehomeOrDeleteByTaskID preserves a shared generated cache for another
+// still-active task with the same content. It runs in the cleanup transaction
+// after the deleting task has been hidden, and never copies user revisions.
+func (r *SummaryRepository) RehomeOrDeleteByTaskID(taskID int64) error {
+	var summary model.AISummary
+	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("task_id = ?", taskID).First(&summary).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var successor model.VideoTask
+	err = r.db.Where("file_md5 = ? AND id <> ?", summary.FileMD5, taskID).Order("id ASC").First(&successor).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.db.Where("id = ?", summary.ID).Delete(&model.AISummary{}).Error
+	}
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&summary).Update("task_id", successor.ID).Error
 }

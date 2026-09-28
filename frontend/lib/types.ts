@@ -153,6 +153,54 @@ export interface AISummary {
   model_name: string
   created_at: string
 }
+export interface SummaryRevisionState {
+  version: number
+  revision_id: string
+  base_generated_hash: string
+  current_generated_hash: string
+  source_status: 'current' | 'needs_merge' | 'generated_missing'
+  origin: string
+}
+export interface EffectiveSummaryView {
+  task_id: number
+  content: string
+  revision: number
+  revision_id: string
+  base_generated_hash: string
+  current_generated_hash: string
+  source_status: 'current' | 'needs_merge' | 'generated_missing'
+  has_generated: boolean
+  has_revision: boolean
+}
+export interface SummaryEditOperation {
+  id: string
+  run_id: string
+  task_id: number
+  instruction: string
+  status: 'running' | 'proposed' | 'committed' | 'failed'
+  mode: 'preview' | 'apply'
+  base_version: number
+  rule_version: number
+  rule_digest: string
+  edits: { old_text: string; new_text: string }[]
+  result_revision_id?: string
+  undo_revision_id?: string
+  error_code?: string
+}
+export interface VideoTermRule {
+  id: string
+  from: string
+  to: string
+  context: string
+  exclusions: string[]
+  basis: 'user_asserted' | 'evidence_supported' | 'conflicted'
+  transcript_evidence_id?: string
+  visual_evidence_id?: string
+  source_hash?: string
+  enabled: boolean
+  evidence_status: 'not_claimed' | 'current' | 'pending_review'
+}
+export interface VideoTermRuleSet { version: number; digest: string; rules: VideoTermRule[] }
 export interface TaskJob {
   id: number
   task_id: number
@@ -194,6 +242,7 @@ export interface VideoTask {
   asset?: VideoAsset
   transcription?: VideoTranscription
   summary?: AISummary
+  summary_revision?: SummaryRevisionState
   summary_progress?: { phase: 'segments' | 'merging'; completed: number; total: number; current: number; start_ms: number; end_ms: number; failed_part?: number }
   jobs?: TaskJob[]
   has_transcription: boolean

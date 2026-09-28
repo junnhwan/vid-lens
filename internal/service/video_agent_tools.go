@@ -30,6 +30,7 @@ func AgentProductInstructions() string { return agentFinalProductPrompt + "\n" +
 
 type VideoAgentTools struct {
 	answerPreference   string
+	termRules          VideoTermRuleSet
 	emitAnswer         func(string) error
 	repos              *repository.Repositories
 	pipeline           *RetrievalPipeline
@@ -38,6 +39,12 @@ type VideoAgentTools struct {
 	observer           VideoAgentStepObserver
 	memory             *MemorySnapshot
 	visualInvestigator VisualInvestigator
+}
+
+func (t *VideoAgentTools) SetTermRules(rules VideoTermRuleSet) {
+	if t != nil {
+		t.termRules = rules
+	}
 }
 
 func (t *VideoAgentTools) SetAnswerPreference(preference string) {
@@ -416,6 +423,9 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 	messages := buildCitedAnswerMessages(input, t.memory)
 	if t.answerPreference != "" {
 		messages = appendUserPromptPreference(messages, t.answerPreference)
+	}
+	if guidance := termRulePrompt(t.termRules); guidance != "" {
+		messages = append([]ai.ChatMessage{{Role: "system", Content: guidance}}, messages...)
 	}
 	var providerUsage *ai.ChatUsage
 	maxOutput := input.MaxOutputTokens
