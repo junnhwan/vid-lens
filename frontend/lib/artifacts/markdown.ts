@@ -14,6 +14,10 @@ const safeTitle = (value: string) => redactSecrets(value).replace(/[\\`*_{}\[\]<
 const url = (origin: string, path: string) => new URL(path, origin).href
 const versionOrigin = { generated: '后台生成', user: '人工保存', agent: 'Agent 修订', undo: '撤销版本' } as const
 
+export function markdownEvidenceIds(body: StudyBody): string[] {
+  return [...new Set([...body.blocks, ...(body.relations ?? [])].flatMap(item => item.evidence_refs.map(ref => ref.evidence_id)))]
+}
+
 /** Renders one server-confirmed immutable version. Callers must re-read access before download. */
 export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evidence>, origin: string): string {
   const version = detail.version

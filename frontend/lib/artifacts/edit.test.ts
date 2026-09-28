@@ -7,9 +7,23 @@ import remarkGfm from 'remark-gfm'
 import { studyFixture, evidenceFixtures } from '../../dev/productFixtures.ts'
 import { addBlock, deleteBlock, descendantCount, mergeWithNext, moveBlock } from './edit.ts'
 import { bodySchema } from './schema.ts'
-import { savedMarkdown } from './markdown.ts'
+import { markdownEvidenceIds, savedMarkdown } from './markdown.ts'
 
 const source = () => structuredClone(studyFixture.version!.body)
+
+test('Markdown download fetches and validates evidence referenced only by a semantic relation', () => {
+  const body = source()
+  body.schema_version = 2
+  body.blocks = body.blocks.map(block => ({ ...block, evidence_refs: [] }))
+  body.relations = [{ id: 'relation-only', source_block_id: body.blocks[0].block_id, target_block_id: body.blocks[1].block_id, type: 'related_to', origin: 'synthesis', evidence_refs: [{ evidence_id: evidenceFixtures[0].id, relation: 'supports' }] }]
+  const ids = markdownEvidenceIds(body)
+  assert.deepEqual(ids, [evidenceFixtures[0].id])
+  const detail = { ...studyFixture, version: { ...studyFixture.version!, body } }
+  const markdown = savedMarkdown(detail, new Map(evidenceFixtures.filter(item => ids.includes(item.id)).map(item => [item.id, item])), 'https://vidlens.example')
+  assert.match(markdown, /概念关系/)
+  assert.match(markdown, /依据 \[1\]/)
+  assert.match(markdown, /## 来源/)
+})
 
 test('structural edits move subtrees while preserving untouched block IDs and valid parent order', () => {
   const before = source()

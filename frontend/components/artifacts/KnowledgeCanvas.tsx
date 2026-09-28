@@ -45,6 +45,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const versionRef = useRef(versionId); versionRef.current = versionId
   const bodyRef = useRef(body); bodyRef.current = body
   const layoutGeneration = useRef(0)
+  const sessionGeneration = useRef(0)
   const saveQueue = useRef(Promise.resolve())
   const saveBlocked = useRef(false)
   const undoStack = useRef<CanvasLayout[]>([])
@@ -55,7 +56,8 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const setCurrent = useCallback((next: CanvasLayoutView) => { viewRef.current = next; setView(next) }, [])
   useEffect(() => {
     let cancelled = false
-    setView(null); viewRef.current = null; setError(''); saveBlocked.current = false; viewportReady.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1)
+    sessionGeneration.current++
+    setView(null); viewRef.current = null; setError(''); setNotice(''); setBusy(false); saveBlocked.current = false; viewportReady.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1)
     void artifactApi.canvasLayout(artifactId, versionId).then(async loaded => {
       if (cancelled) return
       if (!Object.keys(loaded.layout.nodes).length) {
@@ -64,7 +66,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
       }
       if (!cancelled) setCurrent({ ...loaded, layout: fillCanvasPositions(bodyRef.current, loaded.layout) })
     }).catch(e => { if (!cancelled) setError(artifactError(e)) })
-    return () => { cancelled = true; layoutGeneration.current++; if (viewportTimer.current) clearTimeout(viewportTimer.current) }
+    return () => { cancelled = true; sessionGeneration.current++; layoutGeneration.current++; if (viewportTimer.current) clearTimeout(viewportTimer.current) }
   }, [artifactId, versionId, setCurrent])
 
   const layout = view?.layout ?? emptyCanvasLayout()
@@ -91,28 +93,31 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
     const before = viewRef.current
     if (recordHistory && before && before.layout !== next.layout) { undoStack.current.push(before.layout); if (undoStack.current.length > 50) undoStack.current.shift(); redoStack.current = []; setHistoryTick(tick => tick + 1) }
     setCurrent(next); setNotice('布局待保存…')
+    const session = sessionGeneration.current
     saveQueue.current = saveQueue.current.then(async () => {
-      if (saveBlocked.current || versionRef.current !== next.content_version_id) return
+      if (session !== sessionGeneration.current || saveBlocked.current || versionRef.current !== next.content_version_id) return
       const current = viewRef.current
       if (!current || current.content_version_id !== next.content_version_id) return
       try {
         const saved = await artifactApi.saveCanvasLayout(artifactId, next.content_version_id, current.revision, next.layout, crypto.randomUUID())
-        if (versionRef.current !== next.content_version_id) return
+        if (session !== sessionGeneration.current || versionRef.current !== next.content_version_id) return
         // A later local edit keeps its coordinates; only the revision advances.
         const latest = viewRef.current
         setCurrent(latest && latest.layout !== next.layout ? { ...latest, revision: saved.revision } : saved)
         setNotice('布局已保存')
-      } catch (e) { saveBlocked.current = true; setError(artifactError(e)); setNotice('布局未保存') }
+      } catch (e) { if (session === sessionGeneration.current) { saveBlocked.current = true; setError(artifactError(e)); setNotice('布局未保存') } }
     })
   }, [artifactId, readOnly, setCurrent])
 
   const undoLayout = async () => {
     const current = viewRef.current
     if (!current) return
+    const session = sessionGeneration.current
     let previous = undoStack.current.pop()
     if (!previous && current.revision > 1) {
-      try { previous = (await artifactApi.canvasLayout(artifactId, versionId, current.revision - 1)).layout } catch (e) { setError(artifactError(e)); return }
+      try { previous = (await artifactApi.canvasLayout(artifactId, versionId, current.revision - 1)).layout } catch (e) { if (session === sessionGeneration.current) setError(artifactError(e)); return }
     }
+    if (session !== sessionGeneration.current || viewRef.current !== current) return
     if (!previous) return
     redoStack.current.push(current.layout); setHistoryTick(tick => tick + 1)
     persist({ ...current, layout: previous }, false)
@@ -144,7 +149,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
     setBusy(true); setError('')
     try {
       const result = await computeCanvasLayout(content, current.layout, direction, scope, density)
-      if (token !== layoutGeneration.current || versionRef.current !== current.content_version_id || viewRef.current?.revision !== current.revision || bodyRef.current !== content) return
+      if (token !== layoutGeneration.current || versionRef.current !== current.content_version_id || viewRef.current?.revision !== current.revision || viewRef.current?.layout !== current.layout || bodyRef.current !== content) return
       if (result.collisions.length) { setNotice(`${result.collisions.length} 张卡片无法避开固定卡片；未应用本次排版`); return }
       persist({ ...current, layout: result.layout })
       requestAnimationFrame(() => void flow.fitView({ padding: .18, duration: 300 }))
@@ -154,11 +159,12 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const suggestArrangement = async () => {
     const current = viewRef.current
     if (!current || !aiInstruction.trim()) return
+    const content = bodyRef.current
     const token = ++layoutGeneration.current
     setBusy(true); setError(''); setNotice('Agent 正在选择受限排版方案…')
     try {
       const plan = await artifactApi.suggestCanvasLayout(artifactId, { instruction: aiInstruction.trim(), content_version_id: versionId, expected_head_version: headVersion, expected_layout_revision: current.revision, selected_block_id: selectedBlock ?? '' })
-      if (token !== layoutGeneration.current || versionRef.current !== versionId || viewRef.current?.revision !== current.revision) return
+      if (token !== layoutGeneration.current || versionRef.current !== versionId || viewRef.current?.revision !== current.revision || viewRef.current?.layout !== current.layout || bodyRef.current !== content) return
       setNotice(`Agent 建议：${plan.summary || '调整画布布局'}`)
       const scope = plan.scope === 'selected' && selectedBlock ? canvasDescendants(bodyRef.current, selectedBlock) : undefined
       await arrange(scope, plan.direction, plan.density)
@@ -169,6 +175,17 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const relation = (body.relations ?? []).find(item => item.id === selectedRelation)
   useEffect(() => { setRename(selected?.title ?? '') }, [selected?.block_id, selected?.title])
   const hiddenBlocks = body.blocks.filter(block => layout.nodes[block.block_id]?.hidden)
+  const reloadLayout = async () => {
+    const session = sessionGeneration.current
+    const current = viewRef.current
+    try {
+      const loaded = await artifactApi.canvasLayout(artifactId, versionId)
+      if (session !== sessionGeneration.current || viewRef.current !== current) return
+      // Invalidate work queued against the discarded local layout.
+      sessionGeneration.current++; layoutGeneration.current++; setBusy(false)
+      saveBlocked.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1); setError(''); setNotice('已恢复服务器布局'); setCurrent(loaded)
+    } catch (e) { if (session === sessionGeneration.current) setError(artifactError(e)) }
+  }
   return <div className="knowledge-canvas-shell">
     <div className="knowledge-toolbar">
       <div><span className="knowledge-eyebrow">KNOWLEDGE CANVAS</span><h2>可编辑知识画布</h2><p>正文与图共用块；位置、折叠和隐藏单独保存。</p></div>
@@ -183,7 +200,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
       </div>
     </div>
     {!readOnly && <div className="knowledge-ai"><label htmlFor="canvas-ai-instruction">AI 局部排版</label><input id="canvas-ai-instruction" value={aiInstruction} maxLength={1000} onChange={event => setAiInstruction(event.target.value)} placeholder="例如：把这组排紧凑些，保留固定卡片" /><button className="btn btn-sm" disabled={busy || !view || !aiInstruction.trim()} onClick={() => void suggestArrangement()}>生成并应用排版</button></div>}
-    {error && <div className="knowledge-alert" role="alert">{error} <button onClick={() => void artifactApi.canvasLayout(artifactId, versionId).then(loaded => { saveBlocked.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1); setError(''); setNotice('已恢复服务器布局'); setCurrent(loaded) }).catch(e => setError(artifactError(e)))}>载入服务器布局</button></div>}
+    {error && <div className="knowledge-alert" role="alert">{error} <button onClick={() => void reloadLayout()}>载入服务器布局</button></div>}
     {notice && <div className="knowledge-status" role="status">{notice}</div>}
     <div className="knowledge-main">
       <div className="knowledge-flow" aria-label="知识画布">

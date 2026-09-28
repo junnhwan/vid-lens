@@ -147,8 +147,9 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
       const committed = await api.applySummaryOperation(taskId, operation.id, summary.revision)
       setOperation(committed)
       setTargetResults([`摘要：已保存修订 v${summary.revision + 1}。`])
-      await refresh()
-	  if (noteTarget) {
+      try { await refresh() }
+      catch (error) { setMessage(`摘要已保存，但刷新显示失败：${errorText(error)}；可刷新页面恢复。`) }
+      if (noteTarget) {
         try { await submitNote(noteTarget, instruction.trim()) }
         catch (error) { setNoteFailed(true); setTargetResults(previous => [...previous, `笔记：提交失败，摘要已保存；可只重试笔记。${errorText(error)}`]) }
       }
@@ -218,7 +219,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
       {operation?.status === 'running' && <p role="status">AI 正在准备摘要差异。离开页面或刷新不会取消后台任务。</p>}
       {operation?.status === 'proposed' && <div className="card" style={{ padding: 12 }}><h4>逐处差异</h4>{operation.edits.map((edit, index) => <div key={index} style={{ borderTop: '1px solid var(--bd-1)', padding: '8px 0' }}><p>原文：{edit.old_text}</p><p>修改：{edit.new_text || '删除'}</p></div>)}<button className="btn btn-sm" disabled={busy} onClick={() => void apply()}>确认保存摘要{scope === 'remember' ? '并记住规则' : ''}</button></div>}
       {operation?.status === 'committed' && !operation.undo_revision_id && <button className="btn btn-sm" disabled={busy} onClick={() => void undo()}>撤销这次摘要修改</button>}
-      {operation?.status === 'committed' && scope === 'remember' && ruleSaveFailed && <button className="btn btn-sm" disabled={busy || !from.trim() || !to.trim() || !context.trim()} onClick={() => void saveRememberedRule(operation.id).catch(error => setMessage(errorText(error)))}>只重试保存术语规则</button>}
+      {operation?.status === 'committed' && scope === 'remember' && ruleSaveFailed && <button className="btn btn-sm" disabled={busy || !from.trim() || !to.trim() || !context.trim()} onClick={() => { setBusy(true); void saveRememberedRule(operation.id).catch(error => setMessage(errorText(error))).finally(() => setBusy(false)) }}>只重试保存术语规则</button>}
       {operation?.status === 'committed' && submittedNoteTarget && noteFailed && <button className="btn btn-sm" disabled={busy} onClick={() => { setBusy(true); void submitNote(submittedNoteTarget, noteAttempt.current?.prompt ?? instruction.trim()).catch(error => setMessage(`笔记重试失败：${errorText(error)}`)).finally(() => setBusy(false)) }}>只重试笔记</button>}
     </section>}
     {!!rules?.rules.length && <section><h4>此视频的术语规则</h4>{rules.rules.map(rule => <div key={rule.id} style={{ padding: '8px 0', borderTop: '1px solid var(--bd-1)' }}><p>{rule.from} → {rule.to} · {rule.enabled ? rule.basis === 'evidence_supported' && rule.evidence_status === 'current' ? '视频证据支持' : rule.evidence_status === 'pending_review' ? '证据待核对' : '用户指定' : '已停用'}</p><p className="muted">适用：{rule.context}{rule.exclusions.length ? `；排除：${rule.exclusions.join('、')}` : ''}</p>{rule.enabled && !readOnly && <button className="btn btn-sm" disabled={busy} onClick={() => { setBusy(true); void api.disableTermRule(taskId, rule.id, rules.version).then(setRules).catch(error => setMessage(errorText(error))).finally(() => setBusy(false)) }}>停用规则</button>}</div>)}</section>}

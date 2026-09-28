@@ -32,12 +32,21 @@ func (c *artifactEditFixtureChat) Chat(_ context.Context, messages []ai.ChatMess
 func TestParseArtifactEditPlannerDecisionIsStrict(t *testing.T) {
 	t.Parallel()
 	valid := `{"tool":"read_artifact","reason":"读取范围","public_summary":"正在读取","arguments":{"limit":20}}`
-	decision, err := ParseArtifactEditPlannerDecision(valid)
-	if err != nil || decision.Tool != ArtifactEditToolRead {
-		t.Fatalf("decision=%#v err=%v", decision, err)
+	for _, input := range []string{valid, "```json\n" + valid + "\n```", "```\n" + valid + "\n```", " \n```json\r\n" + valid + "\r\n```\n "} {
+		decision, err := ParseArtifactEditPlannerDecision(input)
+		if err != nil || decision.Tool != ArtifactEditToolRead {
+			t.Fatalf("decision=%#v err=%v input=%s", decision, err, input)
+		}
 	}
 	for _, invalid := range []string{
-		"```json\n" + valid + "\n```",
+		"Here is the decision:\n```json\n" + valid + "\n```",
+		"```json\n" + valid + "\n```\nExplanation",
+		"```javascript\n" + valid + "\n```",
+		"```json\n" + valid + "```",
+		"```json\n" + valid + "\n",
+		"```json\n" + valid + valid + "\n```",
+		"```json\n" + valid + "\n```\n```json\n" + valid + "\n```",
+		"```json\n" + `{"tool":"read_artifact","reason":"x","public_summary":"x","arguments":{},"extra":true}` + "\n```",
 		`{"tool":"read_artifact","reason":"x","public_summary":"x","arguments":{},"extra":true}`,
 		valid + valid,
 		`{"tool":"read_artifact","reason":"x","public_summary":"x","arguments":null}`,

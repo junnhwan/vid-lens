@@ -12,3 +12,13 @@ test('renders nested Markdown lists and citation controls without recursively wr
   expect(screen.getByRole('button', { name: 'C1' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'C2' })).toBeTruthy()
 })
+
+test('summary Markdown keeps hard breaks, images and task checkboxes as void elements', () => {
+  const { container } = render(<MarkdownAnswer domainTags content={'教程名称  \n下一行 [C1]\n\n| 名称 | 操作 |\n| --- | --- |\n| **Pi** | 运行 `pi` |\n\n- [x] 安装完成 [C2]\n\n![步骤图](https://example.com/step.png)'} onCite={() => {}} />)
+  expect(container.querySelector('br')).toBeTruthy()
+  expect(screen.getByRole('table')).toBeTruthy()
+  expect(screen.getByRole('checkbox')).toHaveProperty('checked', true)
+  expect(screen.getByRole('img', { name: '步骤图' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'C1' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'C2' })).toBeTruthy()
+})

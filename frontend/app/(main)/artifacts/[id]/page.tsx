@@ -9,7 +9,7 @@ import { ErrorState, LoadingBlock, ProductSkeleton } from '@/components/ui/Async
 import { Modal } from '@/components/ui/Modal'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import { runLabels } from '@/lib/artifacts/view'
-import { markdownFilename, savedMarkdown } from '@/lib/artifacts/markdown'
+import { markdownEvidenceIds, markdownFilename, savedMarkdown } from '@/lib/artifacts/markdown'
 import type { ArtifactDetail, ArtifactEditOperation, ArtifactEditRun, Evidence, VersionSummary } from '@/lib/artifacts/schema'
 import { useRouter } from '@/lib/router'
 import { useStudyPosition } from '@/lib/artifacts/useStudyPosition'
@@ -72,7 +72,7 @@ export default function ArtifactPage({ params, searchParams }: { params: { id: s
       const fresh = await artifactApi.get(params.id)
       const saved = { ...fresh, version: await artifactApi.version(params.id, savedVersionId) }
       if (!saved.version) throw new Error('当前没有可导出的已保存版本')
-      const ids = [...new Set(saved.version.body.blocks.flatMap(block => block.evidence_refs.map(ref => ref.evidence_id)))]
+      const ids = markdownEvidenceIds(saved.version.body)
       const rows = await Promise.all(ids.map(id => artifactApi.evidence(saved.version!.manifest_id, id)))
       const evidence = new Map<string, Evidence>(rows.map(row => [row.id, row]))
       return { markdown: savedMarkdown(saved, evidence, window.location.origin), filename: markdownFilename(saved.version.body.title, saved.version.version) }

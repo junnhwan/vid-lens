@@ -115,8 +115,8 @@ func TestArtifactEditFixtureModelApplyCommitsVersionAndPersistsToolRecords(t *te
 	}
 	patchJSON, _ := json.Marshal(patch)
 	fixture.responses = []string{
-		`{"tool":"propose_artifact_patch","reason":"明确要求改写","public_summary":"生成安装步骤修改","arguments":{"summary":"拆成安装步骤","patch":` + string(patchJSON) + `}}`,
-		`{"tool":"commit_artifact_patch","reason":"proposal 已验证","public_summary":"正在保存新版本","arguments":{}}`,
+		"```json\n" + `{"tool":"propose_artifact_patch","reason":"明确要求改写","public_summary":"生成安装步骤修改","arguments":{"summary":"拆成安装步骤","patch":` + string(patchJSON) + `}}` + "\n```",
+		"```json\n" + `{"tool":"commit_artifact_patch","reason":"proposal 已验证","public_summary":"正在保存新版本","arguments":{}}` + "\n```",
 	}
 
 	run, err := service.SubmitEdit(ctx, 7, detail.ID, "apply-edit-key", ArtifactEditRequest{

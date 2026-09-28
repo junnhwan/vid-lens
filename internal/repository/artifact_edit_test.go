@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -553,7 +554,15 @@ func TestArtifactEditUndoGatesCrossSourceCurrentManifestAndReplay(t *testing.T) 
 }
 
 func TestArtifactEditSourceRevocationCancelsRunAndClearsPrivateJournal(t *testing.T) {
-	fx := newArtifactEditFixture(t)
+	runArtifactEditSourceRevocationClearsJournal(t, newArtifactEditFixture(t))
+}
+
+func TestPostgresArtifactEditSourceRevocationCancelsRunAndClearsPrivateJournal(t *testing.T) {
+	runArtifactEditSourceRevocationClearsJournal(t, newArtifactEditFixtureOnDB(t, openPostgresRepositoryTestDB(t).db))
+}
+
+func runArtifactEditSourceRevocationClearsJournal(t *testing.T, fx *artifactEditFixture) {
+	t.Helper()
 	ctx := context.Background()
 	req, run := fx.requestAndRun("revoke-request", "revoke-request-hash", "revoke")
 	if _, err := fx.repo.SubmitEdit(ctx, req, run); err != nil {
@@ -585,7 +594,15 @@ func TestArtifactEditSourceRevocationCancelsRunAndClearsPrivateJournal(t *testin
 }
 
 func TestArtifactEditSourceRevocationRejectsLateStepCompletion(t *testing.T) {
-	fx := newArtifactEditFixture(t)
+	runArtifactEditSourceRevocationRejectsLateStep(t, newArtifactEditFixture(t))
+}
+
+func TestPostgresArtifactEditSourceRevocationRejectsLateStepCompletion(t *testing.T) {
+	runArtifactEditSourceRevocationRejectsLateStep(t, newArtifactEditFixtureOnDB(t, openPostgresRepositoryTestDB(t).db))
+}
+
+func runArtifactEditSourceRevocationRejectsLateStep(t *testing.T, fx *artifactEditFixture) {
+	t.Helper()
 	ctx := context.Background()
 	req, run := fx.requestAndRun("late-revoke-request", "late-revoke-request-hash", "late revoke")
 	if _, err := fx.repo.SubmitEdit(ctx, req, run); err != nil {
@@ -618,7 +635,8 @@ func TestArtifactEditSourceRevocationRejectsLateStepCompletion(t *testing.T) {
 	if step.LeaseToken != "" || step.LeaseExpiresAt != nil || step.FinishedAt == nil || call.FinishedAt == nil {
 		t.Fatalf("revoked leases/timestamps = step %+v tool %+v", step, call)
 	}
-	if step.OutputRef != "" || call.OutputRef != "" || step.ResultCheckpoint != "" || call.ResultCheckpoint != "" || step.ResultDigest != "" || call.ResultDigest != "" {
+	// PostgreSQL pads the cleared CHAR(64) digest with spaces.
+	if step.OutputRef != "" || call.OutputRef != "" || step.ResultCheckpoint != "" || call.ResultCheckpoint != "" || strings.TrimSpace(step.ResultDigest) != "" || strings.TrimSpace(call.ResultDigest) != "" {
 		t.Fatalf("late completion restored private journal data: step %+v tool %+v", step, call)
 	}
 }

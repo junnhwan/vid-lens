@@ -85,12 +85,22 @@ func (p *LLMArtifactEditPlanner) NextDecisionWithUsage(ctx context.Context, stat
 	return decision, usage, err
 }
 
-// ParseArtifactEditPlannerDecision deliberately does not accept Markdown
-// fences, trailing values, or unknown fields. Planner recovery depends on a
-// single canonical decision shape.
+// ParseArtifactEditPlannerDecision accepts a complete outer JSON code fence,
+// but still requires one strict decision object without prose or extra fields.
+// Planner recovery depends on a single canonical decision shape.
 func ParseArtifactEditPlannerDecision(raw string) (ArtifactEditPlannerDecision, error) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "```") {
+		firstLine, lastLine := strings.IndexByte(raw, '\n'), strings.LastIndexByte(raw, '\n')
+		if firstLine >= 0 && lastLine > firstLine {
+			opening := strings.TrimSuffix(raw[:firstLine], "\r")
+			if (opening == "```json" || opening == "```") && raw[lastLine+1:] == "```" {
+				raw = strings.TrimSpace(raw[firstLine+1 : lastLine])
+			}
+		}
+	}
 	var decision ArtifactEditPlannerDecision
-	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decision); err != nil {
 		return ArtifactEditPlannerDecision{}, fmt.Errorf("解析 artifact edit planner 输出失败: %w", err)
