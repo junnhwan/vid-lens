@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -126,7 +127,20 @@ func (r *ArtifactRepository) SaveLearningPosition(ctx context.Context, owner, ex
 			return err
 		}
 		if row.Revision != expected {
-			return artifact.Err("position_conflict", 409)
+			// A deleted or inaccessible video is intentionally hidden by
+			// LearningPosition, so a fresh client sees no position and sends 0.
+			// Only replace that unavailable target; keep the revision increasing
+			// so a delayed write from before deletion still cannot win later.
+			if expected != 0 {
+				return artifact.Err("position_conflict", 409)
+			}
+			var available int64
+			if err := tx.Model(&model.VideoTask{}).Where("id=? AND user_id=?", row.TaskID, owner).Count(&available).Error; err != nil {
+				return err
+			}
+			if available != 0 {
+				return artifact.Err("position_conflict", 409)
+			}
 		}
 		return tx.Model(&row).Updates(map[string]any{"revision": row.Revision + 1, "task_id": taskID, "artifact_id": artifactID, "version_id": versionID, "block_id": blockID, "time_ms": timeMS, "updated_at": time.Now().UTC()}).Error
 	})
@@ -348,7 +362,7 @@ func (r *ArtifactRepository) ImportAnswer(ctx context.Context, owner, messageID 
 			refs = []artifact.Ref{}
 		}
 		content := preview.Content
-		if len(content) > 8000 {
+		if utf8.RuneCountInString(content) > 8000 {
 			return artifact.Err("answer_too_long", 422)
 		}
 		block := artifact.Block{BlockID: uuid.NewString(), Type: "note", Title: "问答补充 · 待核对", Content: content, ClaimOrigin: "user", EvidenceRefs: refs}

@@ -174,16 +174,28 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     finally { setImportBusy(false) }
   }
   async function selectImportArtifact(id: string) {
-    setImportBusy(true); setImportError(''); setImportConflict(false); setImportPreview(null); setImportKey(crypto.randomUUID())
+    setImportBusy(true); setImportError(''); setImportConflict(false); setImportPreview(null); setImportPersonal(false); setImportKey(crypto.randomUUID())
     try { const detail=await artifactApi.get(id); setImportDetail(detail); setImportBlock(detail.version?.body.blocks[0]?.block_id ?? '') }
     catch (error) { setImportError(artifactError(error)) }
     finally { setImportBusy(false) }
   }
   async function previewImport() {
     if (!importMessage?.messageId || !importDetail?.version || !importBlock) return
-    setImportBusy(true); setImportError(''); setImportConflict(false); setImportPreview(null)
+    setImportBusy(true); setImportError(''); setImportConflict(false); setImportPreview(null); setImportPersonal(false)
     try { setImportPreview(await artifactApi.answerPreview(importDetail.id,importMessage.messageId,importBlock,importDetail.head_version)) }
-    catch (error) { setImportError(artifactError(error)) }
+    catch (error) { setImportError(artifactError(error)); setImportConflict(error instanceof ApiError && error.status === 409) }
+    finally { setImportBusy(false) }
+  }
+  async function reloadImportTarget() {
+    if (!importDetail || importBusy) return
+    setImportBusy(true)
+    try {
+      const next = await artifactApi.get(importDetail.id)
+      setImportDetail(next)
+      setImportBlock(current => next.version?.body.blocks.some(block => block.block_id === current) ? current : next.version?.body.blocks[0]?.block_id ?? '')
+      setImportPreview(null); setImportPersonal(false); setImportConflict(false); setImportKey(crypto.randomUUID())
+      setImportError('请重新预览新版本的插入位置和引用。')
+    } catch (error) { setImportError(artifactError(error)) }
     finally { setImportBusy(false) }
   }
   async function confirmImport() {
@@ -536,10 +548,10 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
       {importMessage && <Modal title="把回答收进笔记" width={720} onClose={() => setImportMessage(null)} footer={<><button className="btn" onClick={() => setImportMessage(null)}>取消</button>{importPreview && <button className="btn btn-primary" disabled={importBusy || importPreview.version_id!==importDetail?.version?.id || (importPreview.unmapped.length>0 && !importPersonal)} onClick={() => void confirmImport()}>{importBusy ? '保存中…' : '确认生成新版本'}</button>}</>}>
         <p>只收录当前视频已完整保存的回答。新块标记为人工整理、待核对，插在所选段落之后。</p>
         {importBusy && <p role="status">正在核对回答和目标快照…</p>}
-        {importError && <div className="artifact-notice danger" role="alert">{importError}{importPreview && <span> 预览仍保留。</span>}{importConflict && importDetail && <button className="btn btn-sm" onClick={() => { void artifactApi.get(importDetail.id).then(next=>{ setImportDetail(next); setImportError('请重新预览新版本的插入位置和引用。'); setImportConflict(false); setImportKey(crypto.randomUUID()) }).catch(error=>setImportError(artifactError(error))) }}>读取新版本</button>}</div>}
+        {importError && <div className="artifact-notice danger" role="alert">{importError}{importPreview && <span> 预览仍保留。</span>}{importConflict && importDetail && <button className="btn btn-sm" disabled={importBusy} onClick={() => void reloadImportTarget()}>读取新版本</button>}</div>}
         {!importArtifacts.length && !importBusy && <p>当前视频没有可写的笔记版本。请先在视频页生成笔记。</p>}
-        {importArtifacts.length>0 && <label className="artifact-field">目标笔记<select value={importDetail?.id ?? ''} onChange={e => void selectImportArtifact(e.target.value)}>{importArtifacts.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
-        {importDetail?.version && <label className="artifact-field">插在段落之后<select value={importBlock} onChange={e => { setImportBlock(e.target.value); setImportPreview(null); setImportKey(crypto.randomUUID()) }}>{importDetail.version!.body.blocks.map(block=><option key={block.block_id} value={block.block_id}>{block.title}</option>)}</select></label>}
+        {importArtifacts.length>0 && <label className="artifact-field">目标笔记<select disabled={importBusy} value={importDetail?.id ?? ''} onChange={e => void selectImportArtifact(e.target.value)}>{importArtifacts.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
+        {importDetail?.version && <label className="artifact-field">插在段落之后<select disabled={importBusy} value={importBlock} onChange={e => { setImportBlock(e.target.value); setImportPreview(null); setImportPersonal(false); setImportKey(crypto.randomUUID()) }}>{importDetail.version!.body.blocks.map(block=><option key={block.block_id} value={block.block_id}>{block.title}</option>)}</select></label>}
         {importDetail?.version && <button className="btn btn-sm" disabled={importBusy || !importBlock} onClick={() => void previewImport()}>预览正文与引用</button>}
         {importPreview && <><div className="artifact-notice"><b>将收录的正文</b><p style={{ whiteSpace:'pre-wrap', maxHeight:240, overflow:'auto' }}>{importPreview.content}</p></div><p>映射到目标快照：{importPreview.mapped.length} 条依据；无法映射或缺失：{importPreview.unmapped.length ? importPreview.unmapped.join('、') : '无'}。</p>{importPreview.unmapped.length>0 && <label><input type="checkbox" checked={importPersonal} onChange={e=>{setImportPersonal(e.target.checked);setImportKey(crypto.randomUUID())}} /> 我确认把整段作为无来源个人补充保存，已有聊天引用也不作为来源</label>}</>}
       </Modal>}

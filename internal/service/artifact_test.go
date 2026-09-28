@@ -687,6 +687,10 @@ func TestArtifactRabbitMQOutboxDuplicateAndWorkerRestart(t *testing.T) {
 	restart.Start(restartCtx)
 	defer func() { restartStop(); restart.Wait() }()
 	waitArtifact(t, svc, run.ID, "completed")
+	completedCalls := calls.Load()
+	if completedCalls != 3 {
+		t.Fatalf("model calls %d want interrupted segment + recovered segment + global organization", completedCalls)
+	}
 	conn, err := amqp.Dial(broker)
 	if err != nil {
 		t.Fatal(err)
@@ -702,8 +706,8 @@ func TestArtifactRabbitMQOutboxDuplicateAndWorkerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
-	if calls.Load() != 2 {
-		t.Fatalf("model calls %d want interrupted + recovered", calls.Load())
+	if calls.Load() != completedCalls {
+		t.Fatalf("duplicate delivery changed model calls from %d to %d", completedCalls, calls.Load())
 	}
 	var versions int64
 	db.Model(&model.ArtifactVersion{}).Where("run_id=?", run.ID).Count(&versions)

@@ -9,7 +9,7 @@ import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 import { Icon } from '@/components/ui/Icon'
 
 export function RunProgress({ run }: { run: GenerationRun }) {
-  const stages = ['queued', 'collecting', 'generating', 'validating', 'completed']
+  const stages = ['queued', 'collecting', 'generating', 'organizing', 'validating', 'completed']
   const current = stages.indexOf(run.stage)
   return <><span className={`task-state ${run.status}`}>{runLabels[run.status]}</span><ol className="run-timeline">{stages.map((stage, i) => <li key={stage} className={i === current ? 'current' : i < current ? 'done' : ''}><span>{i < current ? <Icon name="check" size="sm" /> : i + 1}</span><div>{stage === 'completed' && run.status !== 'completed' ? '保存学习笔记' : stageLabels[stage]}{i === current && isActiveRun(run) && <small>由后台继续处理，离开页面不会中断。</small>}</div></li>)}</ol>{run.cancel_requested && isActiveRun(run) && <p className="product-description" role="status">取消请求已提交，正在等待后台确认。</p>}{run.error_code && <p className="form-err" role="alert">{errorLabels[run.error_code] || '任务未能完成，请检查来源与模型设置。'}</p>}<p className="product-description">{run.usage.llm_calls} 次模型调用 · {run.usage.token_source === 'unknown' ? 'Token 用量尚未确认' : `${run.usage.prompt_tokens + run.usage.completion_tokens} Token（${run.usage.token_source === 'actual' ? '实际' : run.usage.token_source === 'estimated' ? '估算' : '实际与估算混合'}）`}</p></>
 }

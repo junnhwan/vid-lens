@@ -92,7 +92,7 @@ export function mergeWithNext(body: StudyBody, id: string): StudyBody {
   const content = [first.block.content, added].filter(Boolean).join('\n\n')
   const refs = [...first.block.evidence_refs]
   for (const ref of second.block.evidence_refs) {
-    if (!refs.some(existing => existing.evidence_id === ref.evidence_id && existing.relation === ref.relation)) refs.push(ref)
+    if (!refs.some(existing => existing.evidence_id === ref.evidence_id && existing.relation === ref.relation && existing.chat_citation_id === ref.chat_citation_id)) refs.push(ref)
   }
   const sourceBlockIds = [...new Set([...(first.block.source_block_ids ?? []), ...(second.block.source_block_ids ?? [])])]
   first.block = { ...first.block, content, evidence_refs: refs, ...(sourceBlockIds.length ? { source_block_ids: sourceBlockIds } : {}), claim_origin: 'user' }

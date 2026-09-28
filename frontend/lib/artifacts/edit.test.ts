@@ -76,3 +76,19 @@ test('Markdown uses immutable version and safe first-party links without media c
   assert.match(html, /<h2>来源<\/h2>/)
   assert.match(html, /href="https:\/\/vidlens.example\/video\/42\?t=246000"/)
 })
+
+test('merging answer notes retains every chat citation label for shared evidence', () => {
+  const before = source()
+  const first = before.blocks.find(block => block.block_id === 'image')!
+  const second = before.blocks.find(block => block.block_id === 'stages')!
+  first.evidence_refs = [{ evidence_id: 'preview-e1', relation: 'context', chat_citation_id: 'C1' }]
+  second.evidence_refs = [
+    { evidence_id: 'preview-e1', relation: 'context', chat_citation_id: 'C1' },
+    { evidence_id: 'preview-e1', relation: 'context', chat_citation_id: 'C2' },
+  ]
+  const merged = mergeWithNext(before, 'image')
+  assert.deepEqual(merged.blocks.find(block => block.block_id === 'image')!.evidence_refs.map(ref => ref.chat_citation_id), ['C1', 'C2'])
+  const markdown = savedMarkdown({ ...studyFixture, version: { ...studyFixture.version!, body: merged } }, new Map(evidenceFixtures.map(row => [row.id, row])), 'https://vidlens.example')
+  assert.match(markdown, /聊天引用 C1/)
+  assert.match(markdown, /聊天引用 C2/)
+})

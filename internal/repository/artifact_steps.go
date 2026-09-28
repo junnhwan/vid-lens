@@ -65,12 +65,16 @@ func (r *ArtifactRepository) BeginCall(ctx context.Context, id, token string, ep
 		if err = tx.Create(&call).Error; err != nil {
 			return err
 		}
-		if err = tx.Model(run).Updates(map[string]any{"llm_calls_used": gorm.Expr("llm_calls_used+1"), "prompt_tokens_used": gorm.Expr("prompt_tokens_used+?", prompt), "completion_tokens_used": gorm.Expr("completion_tokens_used+?", output), "token_usage_source": "estimated", "stage": "generating"}).Error; err != nil {
+		stage := "generating"
+		if run.Stage == "organizing" {
+			stage = "organizing"
+		}
+		if err = tx.Model(run).Updates(map[string]any{"llm_calls_used": gorm.Expr("llm_calls_used+1"), "prompt_tokens_used": gorm.Expr("prompt_tokens_used+?", prompt), "completion_tokens_used": gorm.Expr("completion_tokens_used+?", output), "token_usage_source": "estimated", "stage": stage}).Error; err != nil {
 			return err
 		}
 		out.Step = step
 		out.Call = call
-		return appendEvent(tx, run, "run.updated", map[string]any{"status": "running", "stage": "generating", "llm_calls": run.LLMCallsUsed + 1})
+		return appendEvent(tx, run, "run.updated", map[string]any{"status": "running", "stage": stage, "llm_calls": run.LLMCallsUsed + 1})
 	})
 	return out, err
 }

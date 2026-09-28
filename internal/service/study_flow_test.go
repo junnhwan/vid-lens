@@ -155,3 +155,67 @@ func TestArtifactSourceReadsIdenticalMediaDedupTranscript(t *testing.T) {
 		t.Fatal("unowned dedup source readable")
 	}
 }
+
+func TestStudyPositionCanContinueAfterSavedVideoDeletionWithoutResettingRevision(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	for _, id := range []int64{43, 44} {
+		if err := db.Create(&model.VideoTask{ID: id, UserID: 7, FileMD5: "fixture", Filename: "继续学习", Status: model.TaskStatusCompleted}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := svc.SaveLearningPosition(ctx, 7, 0, 42, "", "", "", 1000)
+	if err != nil || first.Revision != 1 {
+		t.Fatalf("first position: %+v %v", first, err)
+	}
+	if err := db.Delete(&model.VideoTask{}, 42).Error; err != nil {
+		t.Fatal(err)
+	}
+	position, err := svc.LearningPosition(ctx, 7)
+	if err != nil || position != nil {
+		t.Fatalf("deleted video must not be offered for resume: %+v %v", position, err)
+	}
+	// This is the revision sent by a refreshed browser after GET returns null.
+	next, err := svc.SaveLearningPosition(ctx, 7, 0, 43, "", "", "", 2000)
+	if err != nil || next.Revision != 2 || next.TaskID != 43 {
+		t.Fatalf("continue after deletion: %+v %v", next, err)
+	}
+	for _, staleRevision := range []int64{0, first.Revision} {
+		_, err = svc.SaveLearningPosition(ctx, 7, staleRevision, 44, "", "", "", 3000)
+		requireArtifactCode(t, err, "position_conflict")
+	}
+	position, err = svc.LearningPosition(ctx, 7)
+	if err != nil || position.Revision != 2 || position.TaskID != 43 || position.TimeMS != 2000 {
+		t.Fatalf("stale write replaced continued position: %+v %v", position, err)
+	}
+}
+
+func TestStudyAnswerImportUsesCharacterLimitForChineseContent(t *testing.T) {
+	svc, db, _ := artifactFixture(t, artifactModelResponse)
+	ctx := context.Background()
+	body := artifact.Body{SchemaVersion: 1, Kind: "study", Title: "笔记", Blocks: []artifact.Block{{BlockID: "one", Type: "note", Title: "一", ClaimOrigin: "user", EvidenceRefs: []artifact.Ref{}}}, Warnings: []string{}}
+	detail, err := svc.Create(ctx, 7, []int64{42}, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ChatSession{ID: 110, UserID: 7, TaskID: 42, ScopeType: model.ChatScopeVideo}).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot := `{"citations":[]}`
+	content := strings.Repeat("学", 8000)
+	for index, text := range []string{content, content + "习"} {
+		if err := db.Create(&model.ChatMessage{ID: 111 + int64(index), UserID: 7, SessionID: 110, Role: "assistant", Content: text, RetrievalSnapshot: &snapshot}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	imported, err := svc.ImportAnswer(ctx, 7, 111, detail.ID, "one", 1, "chinese-limit", true)
+	if err != nil || imported.HeadVersion != 2 || imported.Version.Body.Blocks[1].Content != content {
+		t.Fatalf("8000 Chinese characters should fit the block limit: %v", err)
+	}
+	_, err = svc.ImportAnswer(ctx, 7, 112, detail.ID, "one", 2, "chinese-over-limit", true)
+	requireArtifactCode(t, err, "answer_too_long")
+	current, err := svc.Get(ctx, 7, detail.ID)
+	if err != nil || current.HeadVersion != 2 || len(current.Version.Body.Blocks) != 2 {
+		t.Fatalf("oversized answer changed the saved note: %+v %v", current, err)
+	}
+}

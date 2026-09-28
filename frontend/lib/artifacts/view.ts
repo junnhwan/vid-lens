@@ -7,7 +7,7 @@ export function artifactCardStatus(artifact: Artifact): string {
   const base = `v${artifact.head_version} · 待核对`
   return latest && ['failed', 'cancelled', 'budget_exhausted'].includes(latest.status) ? `${base} · 最近一次：${runLabels[latest.status]}` : base
 }
-export const stageLabels: Record<string, string> = { queued: '等待后台处理', collecting: '整理视频来源', generating: '生成学习笔记', validating: '核对结构与引用', completed: '学习笔记已保存', failed: '生成未完成', cancelled: '已停止生成', budget_exhausted: '执行预算不足' }
+export const stageLabels: Record<string, string> = { queued: '等待后台处理', collecting: '整理视频来源', generating: '生成学习笔记', organizing: '整理笔记结构', validating: '核对结构与引用', completed: '学习笔记已保存', failed: '生成未完成', cancelled: '已停止生成', budget_exhausted: '执行预算不足' }
 export const errorLabels: Record<string, string> = {
   invalid_request: '提交内容不符合要求，请核对后重试。', invalid_evidence: '引用未通过验证，请重新读取来源。', unsupported_recipe: '当前仅支持单视频学习笔记。', internal_error: '服务暂时不可用，请稍后重试。',
   run_not_terminal: '这个任务还在进行，请刷新状态。', run_terminal: '这个任务已经结束，请刷新查看结果。', unsupported_checkpoint: '任务保存的进度暂时无法恢复，请重新生成。',

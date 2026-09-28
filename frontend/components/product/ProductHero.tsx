@@ -3,7 +3,7 @@ import { Icon } from '@/components/ui/Icon'
 import type { VideoTask } from '@/lib/types'
 import { fmtRelTime, taskTitle } from '@/lib/format'
 
-export function ProductHero({ onImport, current, resumeHref, resumeLabel, loading }: { onImport: () => void; current?: VideoTask; resumeHref?: string; resumeLabel?: string; loading?: boolean }) {
+export function ProductHero({ onImport, current, resumeHref, resumeLabel, resumeUpdatedAt, loading }: { onImport: () => void; current?: VideoTask; resumeHref?: string; resumeLabel?: string; resumeUpdatedAt?: string; loading?: boolean }) {
   return <section className="product-hero">
     <div className="product-hero-copy">
       <p className="product-eyebrow">VIDLENS / STUDIO</p>
@@ -13,7 +13,7 @@ export function ProductHero({ onImport, current, resumeHref, resumeLabel, loadin
     </div>
     <div className="product-hero-art">
       <span className="studio-current-label">{current ? 'YOUR LAST STUDY POSITION' : 'YOUR WORKSPACE'}</span>
-      {current ? <div><div className="studio-current-title">{taskTitle(current)}</div><p className="studio-current-copy">{resumeLabel || '已保存学习位置'} · {fmtRelTime(current.updated_at)}更新</p><Link className="studio-current-link" href={resumeHref || `/video/${current.id}`}>回到学习位置 <Icon name="arrow-r" size="sm" /></Link></div> : <div className="studio-current-empty">{loading ? '正在读取学习位置…' : '还没有保存学习位置。打开视频播放或选择笔记段落后，这里会显示你的进度。'}</div>}
+      {current ? <div><div className="studio-current-title">{taskTitle(current)}</div><p className="studio-current-copy">{resumeLabel || '已保存学习位置'} · {fmtRelTime(resumeUpdatedAt || current.updated_at)}更新</p><Link className="studio-current-link" href={resumeHref || `/video/${current.id}`}>回到学习位置 <Icon name="arrow-r" size="sm" /></Link></div> : <div className="studio-current-empty">{loading ? '正在读取学习位置…' : '还没有保存学习位置。打开视频播放或选择笔记段落后，这里会显示你的进度。'}</div>}
     </div>
   </section>
 }

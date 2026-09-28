@@ -44,6 +44,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   const [askPrompt, setAskPrompt] = useState<string | null>(null)
   const mobile = useMediaQuery('(max-width: 1100px)')
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
+  const restoredBlock = useRef<string | undefined>(undefined)
   const reading = useRef<HTMLDivElement>(null)
   const readingPosition = useRef<{ page: number; pane: number; shell: number } | null>(null)
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline.version?.body ?? null)
@@ -56,9 +57,22 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   }, [])
   useEffect(() => () => { if (exportReady) URL.revokeObjectURL(exportReady.url) }, [exportReady])
   useEffect(() => {
-    if (!dirtyRef.current && !editing) { setBaseline(artifact); setDraft(artifact.version?.body ?? null); setExportReady(null) }
-  }, [artifact, editing])
-  useEffect(() => { if (initialBlock) requestAnimationFrame(() => document.getElementById(`block-${CSS.escape(initialBlock)}`)?.scrollIntoView({ block: 'center' })) }, [initialBlock])
+    if (!dirtyRef.current && !editing && artifact.head_version >= baseline.head_version) { setBaseline(artifact); setDraft(artifact.version?.body ?? null); setDeleteUndo(null); setExportReady(null) }
+  }, [artifact, editing, baseline.head_version])
+  useEffect(() => {
+    if (restoredBlock.current === initialBlock) return
+    if (!initialBlock) { restoredBlock.current = undefined; setSelectedBlock(null); return }
+    const block = draft?.blocks.find(item => item.block_id === initialBlock)
+    if (!block) return
+    restoredBlock.current = initialBlock
+    setSelectedBlock(block.block_id)
+    if (block.evidence_refs[0]) onEvidence(block.evidence_refs[0].evidence_id)
+  }, [initialBlock, draft, onEvidence])
+  useEffect(() => {
+    if (!initialBlock) return
+    const frame = requestAnimationFrame(() => document.getElementById(`block-${initialBlock}`)?.scrollIntoView({ block: 'center' }))
+    return () => cancelAnimationFrame(frame)
+  }, [initialBlock])
   if (!draft || !baseline.version) return <div className="page"><div className="empty card"><Icon name="clock" size="lg" /><b>当前没有可阅读的笔记版本</b><p>可以在任务中心查看生成结果、失败原因或取消状态，并从视频重新发起生成。</p><a className="btn" href="/tasks">查看任务</a></div></div>
   const body = draft
   function update(blockId: string, patch: Partial<StudyBlock>) {
@@ -124,12 +138,12 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   const roots = blockTree(body)
   return <div className="artifact-workspace">
     <header className="artifact-titlebar"><span className="artifact-kind-icon"><Icon name="file" /></span><div><h1>{body.title}</h1><p>学习笔记 · {historical ? '历史版本，只读' : '笔记与导图共用同一份内容'}{preview ? ' · 开发样例' : ''}</p></div><div className="product-actions">{onVersions && <button className="btn btn-sm btn-ghost" onClick={onVersions}><Icon name="clock" size="sm" />版本</button>}{onExport && <button className="btn btn-sm" disabled={exporting || saving} onClick={() => dirty ? setExportPrompt(true) : void exportSaved()}><Icon name="download" size="sm" />{exporting ? '导出中…' : '导出 Markdown'}</button>}<button className="btn btn-sm" onClick={() => mobile ? showEvidence ? closeEvidence() : openEvidence() : setDesktopEvidence(!desktopEvidence)}><Icon name="link" size="sm" />证据</button></div></header>
-    <div className="artifact-toolbar"><div className="seg" aria-label="成果视图"><button className={view === 'notes' ? 'on' : ''} aria-pressed={view === 'notes'} onClick={() => setView('notes')}>学习笔记</button><button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button></div><span className="artifact-save-state" role="status">{saving ? '正在保存…' : dirty ? '有未保存的修改' : saved ? preview ? '样例已保存（仅当前预览）' : '已保存' : `v${baseline.version.version} · 待核对`}</span><div className="product-actions">{editing && !readOnly ? <><button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => { if (dirty && !window.confirm('放弃未保存的修改？')) return; setDraft(baseline.version?.body ?? null); setEditing(false); setSaveError('') }}>取消编辑</button><button className="btn btn-sm btn-primary" disabled={!dirty || saving} onClick={() => void save()}>保存修改</button></> : !readOnly && <button className="btn btn-sm" onClick={() => { setEditing(true); setSaved(false) }}><Icon name="file" size="sm" />编辑笔记</button>}</div></div>
+    <div className="artifact-toolbar"><div className="seg" aria-label="成果视图"><button className={view === 'notes' ? 'on' : ''} aria-pressed={view === 'notes'} onClick={() => setView('notes')}>学习笔记</button><button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button></div><span className="artifact-save-state" role="status">{saving ? '正在保存…' : dirty ? '有未保存的修改' : saved ? preview ? '样例已保存（仅当前预览）' : '已保存' : `v${baseline.version.version} · 待核对`}</span><div className="product-actions">{editing && !readOnly ? <><button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => { if (dirty && !window.confirm('放弃未保存的修改？')) return; setDraft(baseline.version?.body ?? null); setEditing(false); setDeleteUndo(null); setSaveError('') }}>取消编辑</button><button className="btn btn-sm btn-primary" disabled={!dirty || saving} onClick={() => void save()}>保存修改</button></> : !readOnly && <button className="btn btn-sm" onClick={() => { setEditing(true); setSaved(false) }}><Icon name="file" size="sm" />编辑笔记</button>}</div></div>
     {saveError && <div className="artifact-notice danger" role="alert">{saveError}<div className="product-actions">{conflict && <button className="btn btn-sm" onClick={() => setShowConflict(true)}>比较版本</button>}<button className="btn btn-sm" onClick={downloadDraft}>下载本地草稿</button></div></div>}
     {exportError && <div className="artifact-notice danger" role="alert">{exportError}<button className="btn btn-sm" onClick={() => void exportSaved()}>重试导出</button></div>}
     {exportReady && <div className="artifact-notice" role="status">已核对已保存版本及来源，Markdown 文件已备好。<a className="btn btn-sm" href={exportReady.url} download={exportReady.filename}>下载 Markdown 文件</a></div>}
     {deleteUndo && <div className="artifact-notice" role="status">已从草稿删除所选块及其子块。<button className="btn btn-sm" onClick={() => { setDraft(deleteUndo); setDeleteUndo(null); setSaved(false) }}>撤销删除</button></div>}
-    {artifact.head_version !== baseline.head_version && <div className="artifact-notice">服务器有更新，当前编辑仍基于 v{baseline.head_version}。保存时会检查版本。</div>}
+    {artifact.head_version > baseline.head_version && <div className="artifact-notice">服务器有更新，当前编辑仍基于 v{baseline.head_version}。保存时会检查版本。</div>}
     <div className={`artifact-columns${!desktopEvidence && !mobile ? " without-evidence" : ""}`}>
       <div className="artifact-reading" ref={reading}>
         {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p><p>{selected.evidence_refs.length} 条关联依据 · 可在证据栏逐条切换</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true) }}>在笔记中编辑</button>}</div>}</> : <article className="study-paper">
@@ -154,6 +168,6 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     {deleteTarget && <Modal title="删除草稿块" onClose={() => setDeleteTarget(null)} width={440} footer={<><button className="btn" onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" onClick={() => { try { const next = deleteBlock(body, deleteTarget); setDeleteUndo(body); setDraft(next); setSaved(false); setSaveError(''); if (selectedBlock === deleteTarget) setSelectedBlock(null) } catch (error) { setSaveError(error instanceof Error ? error.message : '删除失败') } finally { setDeleteTarget(null) } }}>删除并保留撤销</button></>}><p>将从当前草稿删除“{body.blocks.find(item => item.block_id === deleteTarget)?.title}”及其 {descendantCount(body, deleteTarget) - 1} 个子块。保存前可撤销；已保存版本不会因此改变。</p></Modal>}
     {exportPrompt && <Modal title="先保存修改，再导出" onClose={() => setExportPrompt(false)} width={440} footer={<><button className="btn" onClick={() => setExportPrompt(false)}>取消导出</button><button className="btn btn-primary" disabled={saving} onClick={() => { setExportPrompt(false); void (async () => { const result = await save(); if (result?.version) await exportSaved(result.version.id) })() }}>保存并导出</button></>}><p>当前有未保存的修改。Markdown 仅导出服务端已保存版本。</p></Modal>}
     {askPrompt && <Modal title="先保存修改，再提问" onClose={() => setAskPrompt(null)} width={440} footer={<><button className="btn" onClick={() => setAskPrompt(null)}>取消提问</button><button className="btn btn-primary" disabled={saving} onClick={() => { const blockId=askPrompt; void (async () => { const result=await save(); if (result?.version) { setAskPrompt(null); onAskBlock?.(blockId,result.version.id) } })() }}>保存并提问</button></>}><p>当前段落有未保存的修改。保存成功后会把已保存段落带入问答；保存冲突时草稿留在这里。</p></Modal>}
-    {showConflict && conflict && <Modal title="保留你的修改，核对新版本" onClose={() => setShowConflict(false)} width={780} footer={<><button className="btn" onClick={downloadDraft}>下载我的草稿</button><button className="btn" onClick={() => setShowConflict(false)}>继续编辑</button><button className="btn btn-primary" onClick={() => { if (!window.confirm('加载服务器版本会放弃当前修改。请先下载需要保留的草稿。')) return; setBaseline(conflict); setDraft(conflict.version?.body ?? null); setEditing(false); setShowConflict(false); setConflict(null); setSaveError('') }}>加载服务器版本</button></>}><p className="product-description">当前草稿基于 v{baseline.head_version}，服务器已有 v{conflict.head_version}。不会自动覆盖任一版本。</p><div className="version-compare"><div><h4>我的草稿</h4><h3>{body.title}</h3>{body.blocks.map(block => <p key={block.block_id}><b>{block.title}</b><br />{block.content}</p>)}</div><div><h4>服务器版本</h4><h3>{conflict.version?.body.title}</h3>{conflict.version?.body.blocks.map(block => <p key={block.block_id}><b>{block.title}</b><br />{block.content}</p>)}</div></div></Modal>}
+    {showConflict && conflict && <Modal title="保留你的修改，核对新版本" onClose={() => setShowConflict(false)} width={780} footer={<><button className="btn" onClick={downloadDraft}>下载我的草稿</button><button className="btn" onClick={() => setShowConflict(false)}>继续编辑</button><button className="btn btn-primary" onClick={() => { if (!window.confirm('加载服务器版本会放弃当前修改。请先下载需要保留的草稿。')) return; setBaseline(conflict); setDraft(conflict.version?.body ?? null); setEditing(false); setDeleteUndo(null); setShowConflict(false); setConflict(null); setSaveError('') }}>加载服务器版本</button></>}><p className="product-description">当前草稿基于 v{baseline.head_version}，服务器已有 v{conflict.head_version}。不会自动覆盖任一版本。</p><div className="version-compare"><div><h4>我的草稿</h4><h3>{body.title}</h3>{body.blocks.map(block => <p key={block.block_id}><b>{block.title}</b><br />{block.content}</p>)}</div><div><h4>服务器版本</h4><h3>{conflict.version?.body.title}</h3>{conflict.version?.body.blocks.map(block => <p key={block.block_id}><b>{block.title}</b><br />{block.content}</p>)}</div></div></Modal>}
   </div>
 }

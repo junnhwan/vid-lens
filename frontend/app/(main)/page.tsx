@@ -106,7 +106,7 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <ProductHero onImport={openUpload} current={resume?.task} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={loading} />
+      <ProductHero onImport={openUpload} current={resume?.task} resumeUpdatedAt={resume?.position.updated_at} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={loading} />
       <div className="product-metrics">
         <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading ? '—' : String(total).padStart(2, '0')}</strong></Link>
         <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{loading ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
