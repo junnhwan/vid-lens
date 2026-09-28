@@ -19,6 +19,7 @@ type ArtifactVersion struct {
 	BaseVersion          int64     `json:"base_version"`
 	Origin               string    `json:"origin"`
 	RunID                *string   `gorm:"uniqueIndex:idx_artifact_run_output,priority:1" json:"run_id"`
+	EditOperationID      *string   `gorm:"type:varchar(36);uniqueIndex" json:"edit_operation_id"`
 	OutputRole           string    `gorm:"not null;uniqueIndex:idx_artifact_run_output,priority:2" json:"-"`
 	ManifestID           string    `gorm:"index" json:"manifest_id"`
 	BodyJSON             string    `gorm:"type:jsonb;not null" json:"-"`
@@ -26,6 +27,89 @@ type ArtifactVersion struct {
 	WasCandidate         bool      `gorm:"not null;default:false" json:"was_candidate"`
 	AdoptedFromVersionID *string   `gorm:"index" json:"adopted_from_version_id"`
 	CreatedAt            time.Time `json:"created_at"`
+}
+
+const (
+	AgentRunSubjectGeneration   = "generation_request"
+	AgentRunSubjectArtifactEdit = "artifact_edit_request"
+)
+
+// ArtifactEditRequest is the immutable, owner-scoped authority for one edit
+// run. Execution progress belongs to AgentRun; these fields never change.
+type ArtifactEditRequest struct {
+	ID                   string    `gorm:"type:varchar(36);primaryKey"`
+	RunID                string    `gorm:"type:varchar(36);uniqueIndex;not null"`
+	UserID               int64     `gorm:"not null;uniqueIndex:idx_artifact_edit_request_idem,priority:1;index"`
+	IdempotencyKey       string    `gorm:"type:varchar(128);not null;uniqueIndex:idx_artifact_edit_request_idem,priority:2"`
+	RequestHash          string    `gorm:"type:char(64);not null"`
+	RequestJSON          string    `gorm:"type:jsonb;not null"`
+	ArtifactID           string    `gorm:"type:varchar(36);not null;index"`
+	BaseVersionID        string    `gorm:"type:varchar(36);not null;index"`
+	BaseVersion          int64     `gorm:"not null"`
+	ManifestID           string    `gorm:"type:varchar(36);not null;index"`
+	Instruction          string    `gorm:"type:text;not null"`
+	Mode                 string    `gorm:"type:varchar(16);not null"`
+	SelectedBlockIDsJSON string    `gorm:"type:jsonb;not null"`
+	Recipe               string    `gorm:"type:varchar(40);not null"`
+	ProfileID            int64     `gorm:"not null;default:0"`
+	ProfileFingerprint   string    `gorm:"not null"`
+	BudgetJSON           string    `gorm:"type:jsonb;not null;default:'{}'"`
+	ToolPolicyJSON       string    `gorm:"type:jsonb;not null"`
+	QueueDeadline        time.Time `gorm:"not null;index"`
+	CreatedAt            time.Time `gorm:"not null"`
+}
+
+const (
+	ArtifactEditOperationKindEdit = "edit"
+	ArtifactEditOperationKindUndo = "undo"
+
+	ArtifactEditOperationProposed  = "proposed"
+	ArtifactEditOperationCommitted = "committed"
+)
+
+// ArtifactEditOperation is the durable proposal/commit identity. Patch and
+// authorization JSON are canonical server-owned data, never raw model text.
+type ArtifactEditOperation struct {
+	ID                 string     `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID             int64      `gorm:"not null;index" json:"-"`
+	ArtifactID         string     `gorm:"type:varchar(36);not null;index" json:"artifact_id"`
+	RequestID          *string    `gorm:"type:varchar(36);index" json:"-"`
+	RunID              *string    `gorm:"type:varchar(36);uniqueIndex;index" json:"-"`
+	Kind               string     `gorm:"type:varchar(16);not null" json:"-"`
+	ParentOperationID  *string    `gorm:"type:varchar(36);index" json:"-"`
+	BaseVersionID      string     `gorm:"type:varchar(36);not null;index" json:"base_version_id"`
+	BaseVersion        int64      `gorm:"not null" json:"base_version"`
+	ManifestID         string     `gorm:"type:varchar(36);not null;index" json:"-"`
+	CanonicalPatchJSON string     `gorm:"type:jsonb;not null" json:"-"`
+	PatchHash          string     `gorm:"type:char(64);not null" json:"-"`
+	AuthorizationJSON  string     `gorm:"type:jsonb;not null" json:"-"`
+	ScopeJSON          string     `gorm:"type:jsonb;not null" json:"-"`
+	ToolSchemaDigest   string     `gorm:"type:char(64);not null" json:"-"`
+	Basis              string     `gorm:"type:varchar(32);not null" json:"basis"`
+	EvidenceIDsJSON    string     `gorm:"type:jsonb;not null" json:"-"`
+	Status             string     `gorm:"type:varchar(16);not null;index" json:"status"`
+	Summary            string     `gorm:"type:text;not null" json:"summary"`
+	CountsJSON         string     `gorm:"type:jsonb;not null" json:"-"`
+	ChangesJSON        string     `gorm:"type:jsonb;not null" json:"-"`
+	BlockMappingsJSON  string     `gorm:"type:jsonb;not null" json:"-"`
+	ResultVersionID    *string    `gorm:"type:varchar(36);uniqueIndex" json:"result_version_id"`
+	UndoVersionID      *string    `gorm:"type:varchar(36);index" json:"undo_version_id"`
+	RunFinalizedAt     *time.Time `json:"-"`
+	CreatedAt          time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"not null" json:"updated_at"`
+	CommittedAt        *time.Time `json:"committed_at,omitempty"`
+}
+
+// ArtifactEditOutcome gives apply and undo their own owner-scoped idempotency
+// namespace. It is inserted in the same transaction as the immutable version.
+type ArtifactEditOutcome struct {
+	UserID         int64     `gorm:"primaryKey"`
+	IdempotencyKey string    `gorm:"type:varchar(128);primaryKey"`
+	RequestHash    string    `gorm:"type:char(64);not null"`
+	Action         string    `gorm:"type:varchar(16);not null"`
+	OperationID    string    `gorm:"type:varchar(36);not null;index"`
+	VersionID      string    `gorm:"type:varchar(36);not null"`
+	CreatedAt      time.Time `gorm:"not null"`
 }
 type SourceManifest struct {
 	ID          string     `gorm:"type:varchar(36);primaryKey" json:"manifest_id"`
@@ -108,6 +192,21 @@ type GenerationDispatch struct {
 	LeaseUntil    *time.Time `gorm:"index"`
 	CreatedAt     time.Time
 }
+
+// ArtifactEditDispatch is intentionally a separate durable outbox from
+// GenerationDispatch. During a rolling deployment legacy artifact workers can
+// only lease the generation table, so they can never publish an edit run onto
+// the legacy generation queue.
+type ArtifactEditDispatch struct {
+	ID            string    `gorm:"type:varchar(36);primaryKey"`
+	RunID         string    `gorm:"index;not null"`
+	NextAttemptAt time.Time `gorm:"index"`
+	PublishedAt   *time.Time
+	LeaseToken    string
+	LeaseUntil    *time.Time `gorm:"index"`
+	CreatedAt     time.Time
+}
+
 type RunEvent struct {
 	RunID     string    `gorm:"type:varchar(36);primaryKey" json:"run_id"`
 	Seq       int64     `gorm:"primaryKey" json:"seq"`

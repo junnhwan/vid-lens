@@ -221,15 +221,25 @@ func (r *ArtifactRepository) Versions(ctx context.Context, owner int64, id strin
 	return rows, err
 }
 func insertRevision(tx *gorm.DB, a *model.Artifact, body artifact.Body, manifest, origin string, base int64, run *string, adopt bool, adoptedFrom ...*string) (*model.ArtifactVersion, error) {
+	var adopted *string
+	if len(adoptedFrom) > 0 {
+		adopted = adoptedFrom[0]
+	}
+	return insertRevisionRecord(tx, a, body, manifest, origin, base, run, nil, adopt, adopted)
+}
+
+func insertEditRevision(tx *gorm.DB, a *model.Artifact, body artifact.Body, manifest, origin string, base int64, run *string, operationID string) (*model.ArtifactVersion, error) {
+	return insertRevisionRecord(tx, a, body, manifest, origin, base, run, &operationID, true, nil)
+}
+
+func insertRevisionRecord(tx *gorm.DB, a *model.Artifact, body artifact.Body, manifest, origin string, base int64, run, editOperationID *string, adopt bool, adoptedFrom *string) (*model.ArtifactVersion, error) {
 	var n int64
 	if err := tx.Model(&model.ArtifactVersion{}).Where("artifact_id=?", a.ID).Select("COALESCE(MAX(version),0)").Scan(&n).Error; err != nil {
 		return nil, err
 	}
-	v := &model.ArtifactVersion{ID: uuid.NewString(), ArtifactID: a.ID, Version: n + 1, BaseVersion: base, Origin: origin, RunID: run, OutputRole: "study", ManifestID: manifest, BodyJSON: artifact.JSON(body), Quality: "needs_review"}
+	v := &model.ArtifactVersion{ID: uuid.NewString(), ArtifactID: a.ID, Version: n + 1, BaseVersion: base, Origin: origin, RunID: run, EditOperationID: editOperationID, OutputRole: "study", ManifestID: manifest, BodyJSON: artifact.JSON(body), Quality: "needs_review"}
 	v.WasCandidate = origin == "generated" && !adopt
-	if len(adoptedFrom) > 0 {
-		v.AdoptedFromVersionID = adoptedFrom[0]
-	}
+	v.AdoptedFromVersionID = adoptedFrom
 	if err := tx.Create(v).Error; err != nil {
 		return nil, err
 	}
@@ -365,17 +375,49 @@ func (r *ArtifactRepository) RevokeSource(taskID int64) error {
 		return err
 	}
 	var runs []model.AgentRun
-	if err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind='generation_request' AND task_id=?", taskID).Find(&runs).Error; err != nil {
+	if err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("subject_kind IN ? AND execution_kind='artifact' AND task_id=?", []string{"generation_request", model.AgentRunSubjectArtifactEdit}, taskID).Find(&runs).Error; err != nil {
 		return err
 	}
 	for i := range runs {
 		run := &runs[i]
-		if active(run.Status) {
+		_, committed, err := completeCommittedEditTx(r.db, run)
+		if err != nil {
+			return err
+		}
+		if active(run.Status) && !committed {
 			if err := r.db.Model(run).Update("cancel_requested_at", now).Error; err != nil {
 				return err
 			}
 			if err := appendEvent(r.db, run, "run.cancel_requested", map[string]any{"reason": "source_deleted"}); err != nil {
 				return err
+			}
+			if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+				if err := r.db.Model(&model.AgentStep{}).Where("run_id=? AND status=?", run.ID, model.AgentStepStatusRunning).Updates(map[string]any{
+					"status":            model.AgentStepStatusFailed,
+					"error_code":        "source_deleted",
+					"error_message":     "",
+					"output_ref":        "",
+					"result_checkpoint": "",
+					"result_digest":     "",
+					"lease_token":       "",
+					"lease_expires_at":  nil,
+					"finished_at":       now,
+					"updated_at":        now,
+				}).Error; err != nil {
+					return err
+				}
+				if err := r.db.Model(&model.AgentToolCall{}).Where("run_id=? AND status=?", run.ID, model.AgentToolCallStatusRunning).Updates(map[string]any{
+					"status":            model.AgentToolCallStatusFailed,
+					"error_code":        "source_deleted",
+					"error_message":     "",
+					"output_ref":        "",
+					"result_checkpoint": "",
+					"result_digest":     "",
+					"finished_at":       now,
+					"updated_at":        now,
+				}).Error; err != nil {
+					return err
+				}
 			}
 		}
 		if err := r.db.Model(&model.AgentStep{}).Where("run_id=?", run.ID).Update("result_checkpoint", "").Error; err != nil {

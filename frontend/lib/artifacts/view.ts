@@ -16,6 +16,8 @@ export const errorLabels: Record<string, string> = {
   profile_changed: '执行所用的模型配置已变化，请检查设置后重试。', provider_error: '模型服务暂时不可用。', provider_truncated: '模型输出被截断，未发布不完整内容。', provider_refused: '模型未能完成这次生成。',
   invalid_model_output: '生成内容未通过结构或引用校验。', budget_exhausted: '本次任务已达到执行预算。', queue_expired: '排队等待超时，可以重新发起。',
   version_conflict: '已有新版本，你的编辑仍保留在这里。', idempotency_conflict: '请求内容已变化，请核对任务列表后重新创建。',
+  invalid_patch: '修改方案未通过结构校验，没有写入任何内容。', target_scope_mismatch: '修改超出了本次授权范围，请重新选择范围后发起。',
+  undo_conflict: '后续编辑已改动同一内容，无法安全撤销；现有版本保持不变。', preview_expired: '这份修改方案基于旧版本，请刷新后重新生成方案。',
   position_conflict: '另一标签页已更新学习位置，请刷新后继续。', block_removed: '目标段落已删除，请刷新笔记重新选择。',
   answer_incomplete: '这条回答尚未完整保存，不能收进笔记。', answer_scope_mismatch: '回答与目标笔记不属于同一视频。',
   citations_unmapped: '部分聊天引用无法对应目标笔记快照。请核对并选择无来源个人补充，或取消。', answer_too_long: '回答超过单块长度上限，暂时无法直接收录。',

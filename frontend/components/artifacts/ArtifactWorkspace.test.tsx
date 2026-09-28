@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { studyFixture } from '@/dev/productFixtures'
 import { ApiError } from '@/lib/api'
+import type { StudyBlock } from '@/lib/artifacts/schema'
 import { ArtifactWorkspace } from './ArtifactWorkspace'
 
-vi.mock('@/components/ui/useMediaQuery', () => ({ useMediaQuery: () => false }))
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+const mediaQueryState = vi.hoisted(() => ({ mobile: false }))
+vi.mock('@/components/ui/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryState.mobile }))
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); mediaQueryState.mobile = false })
 
 test('discarding an edited and deleted draft also discards its deletion undo snapshot', () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -76,4 +78,72 @@ test('URL block restoration selects its evidence and follows URL changes without
   expect(onEvidence).toHaveBeenCalledTimes(2)
   expect(onStudyBlock).not.toHaveBeenCalled()
   delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+})
+
+test('offers explicit full and block agent edit actions without replacing read-only ask', () => {
+  const onAgentEdit = vi.fn()
+  const onAskBlock = vi.fn()
+  render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={() => {}} onSave={vi.fn()} onReload={vi.fn()} onAgentEdit={onAgentEdit} onAskBlock={onAskBlock} />)
+
+  fireEvent.click(screen.getByRole('button', { name: '让 Agent 修改全文' }))
+  expect(onAgentEdit).toHaveBeenLastCalledWith(null, studyFixture)
+
+  fireEvent.click(screen.getAllByRole('button', { name: '让 Agent 修改这段' })[0])
+  expect(onAgentEdit).toHaveBeenLastCalledWith(studyFixture.version!.body.blocks[0].block_id, studyFixture)
+  expect(onAskBlock).not.toHaveBeenCalled()
+})
+
+test('saves a dirty manual draft before opening a scoped agent edit', async () => {
+  const saved = structuredClone(studyFixture)
+  saved.head_version = 2
+  saved.version!.id = 'preview-version-2'
+  saved.version!.version = 2
+  saved.version!.body.blocks[0].content = '人工先保存的正文'
+  const onSave = vi.fn().mockResolvedValue(saved)
+  const onAgentEdit = vi.fn()
+  render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={() => {}} onSave={onSave} onReload={vi.fn()} onAgentEdit={onAgentEdit} />)
+
+  fireEvent.click(screen.getByRole('button', { name: '编辑笔记' }))
+  fireEvent.change(screen.getByLabelText('第 1 块正文'), { target: { value: '人工先保存的正文' } })
+  fireEvent.click(screen.getAllByRole('button', { name: '让 Agent 修改这段' })[0])
+  expect(screen.getByRole('dialog', { name: '先保存修改，再让 Agent 修改' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '保存并交给 Agent' }))
+
+  await waitFor(() => expect(onAgentEdit).toHaveBeenCalledWith(studyFixture.version!.body.blocks[0].block_id, saved))
+  expect(onSave).toHaveBeenCalledWith(1, expect.objectContaining({ blocks: expect.arrayContaining([expect.objectContaining({ content: '人工先保存的正文' })]) }))
+})
+
+test('keeps a failed dirty-save error visible inside the agent prerequisite modal', async () => {
+  const onAgentEdit = vi.fn()
+  const onSave = vi.fn().mockRejectedValue(new ApiError(500, '保存服务暂时不可用'))
+  render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={() => {}} onSave={onSave} onReload={vi.fn()} onAgentEdit={onAgentEdit} />)
+
+  fireEvent.click(screen.getByRole('button', { name: '编辑笔记' }))
+  fireEvent.change(screen.getByLabelText('第 1 块正文'), { target: { value: '尚未保存的正文' } })
+  fireEvent.click(screen.getAllByRole('button', { name: '让 Agent 修改这段' })[0])
+  const dialog = screen.getByRole('dialog', { name: '先保存修改，再让 Agent 修改' })
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存并交给 Agent' }))
+
+  expect((await within(dialog).findByRole('alert')).textContent).toContain('保存服务暂时不可用')
+  expect(within(dialog).getByText('Agent 尚未启动，本地草稿仍保留在当前页面。')).toBeTruthy()
+  expect(onAgentEdit).not.toHaveBeenCalled()
+})
+
+test('an agent evidence request explicitly opens the narrow evidence drawer and selects its block', async () => {
+  mediaQueryState.mobile = true
+  const onEvidence = vi.fn()
+  const panel = vi.fn((refs: StudyBlock['evidence_refs'], selectedId: string | undefined) => <div data-testid="requested-evidence">{selectedId} · {refs.map(ref => ref.evidence_id).join(',')}</div>)
+  const { rerender } = render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={panel} onEvidence={onEvidence} onSave={vi.fn()} onReload={vi.fn()} evidenceOpenRequest={{ id: 'preview-e3', nonce: 1 }} />)
+
+  const drawer = await screen.findByRole('dialog', { name: '回到原视频' })
+  expect(within(drawer).getByTestId('requested-evidence').textContent).toContain('preview-e3 · preview-e3')
+  expect(document.getElementById('block-config')?.classList.contains('selected')).toBe(true)
+  expect(onEvidence).toHaveBeenCalledTimes(1)
+
+  rerender(<ArtifactWorkspace artifact={studyFixture} evidencePanel={panel} onEvidence={onEvidence} onSave={vi.fn()} onReload={vi.fn()} evidenceOpenRequest={{ id: 'preview-e3', nonce: 2 }} />)
+  await waitFor(() => expect(onEvidence).toHaveBeenCalledTimes(2))
+
+  rerender(<ArtifactWorkspace artifact={studyFixture} selectedEvidence="operation-only-evidence" evidencePanel={panel} onEvidence={onEvidence} onSave={vi.fn()} onReload={vi.fn()} evidenceOpenRequest={{ id: 'operation-only-evidence', nonce: 3 }} />)
+  await waitFor(() => expect(screen.getByTestId('requested-evidence').textContent).toContain('operation-only-evidence'))
+  expect(onEvidence).toHaveBeenCalledTimes(3)
 })

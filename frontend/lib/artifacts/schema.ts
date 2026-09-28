@@ -29,7 +29,7 @@ const artifactMetadataSchema = z.object({
 })
 export const versionSchema = z.object({
   id, artifact_id: id, version: integer, base_version: integer,
-  origin: z.enum(['generated', 'user']), run_id: z.string().nullable(), manifest_id: id,
+  origin: z.enum(['generated', 'user', 'agent', 'undo']), run_id: z.string().nullable(), edit_operation_id: z.string().nullable().optional().default(null), manifest_id: id,
   body: bodySchema, quality: z.string(), created_at: z.string(),
   source_status: z.enum(['current', 'outdated']),
   was_candidate: z.boolean(), adopted_from_version_id: id.nullable(),
@@ -48,7 +48,35 @@ export const runSchema = z.object({
   error_code: z.string().nullable(), created_at: z.string(), started_at: z.string().nullable(), finished_at: z.string().nullable(), last_seq: integer,
   usage: z.object({ llm_calls: integer, prompt_tokens: integer, completion_tokens: integer, token_source: z.enum(['unknown', 'estimated', 'actual', 'mixed']) }),
 })
-export const artifactSchema = artifactMetadataSchema.extend({ latest_run: runSchema.nullable() })
+const usageSchema = z.object({ llm_calls: integer, prompt_tokens: integer, completion_tokens: integer, token_source: z.enum(['unknown', 'estimated', 'actual', 'mixed']) })
+export const editResultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('committed'), operation_id: id, result_version_id: id }),
+  z.object({ kind: z.literal('proposal'), operation_id: id }),
+  z.object({ kind: z.literal('answer'), message: z.string(), evidence_ids: z.array(id).optional().default([]) }),
+  z.object({ kind: z.literal('no_change'), message: z.string(), evidence_ids: z.array(id).optional().default([]) }),
+])
+export const editRunSchema = z.object({
+  id, artifact_id: id, instruction: z.string(), expected_head_version: z.number().int().positive(), base_version_id: id,
+  selected_block_ids: z.array(id), mode: z.enum(['answer', 'apply', 'preview']),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'budget_exhausted']), stage: z.string(),
+  cancel_requested: z.boolean(), can_cancel: z.boolean(), result: editResultSchema.nullable(), error_code: z.string().nullable(),
+  created_at: z.string(), started_at: z.string().nullable(), finished_at: z.string().nullable(), last_seq: integer, usage: usageSchema,
+})
+const patchCountsSchema = z.object({ added: integer, updated: integer, deleted: integer, moved: integer })
+const patchChangeSchema = z.object({
+  kind: z.enum(['title_updated', 'added', 'updated', 'deleted', 'moved']), block_id: z.string().optional(),
+  before: blockSchema.nullable().optional(), after: blockSchema.nullable().optional(),
+  before_title: z.string().nullable().optional(), after_title: z.string().nullable().optional(),
+  before_index: integer.optional(), after_index: integer.optional(),
+})
+const blockMappingSchema = z.object({ kind: z.string(), from_block_ids: z.array(id), to_block_ids: z.array(id) })
+export const editOperationSchema = z.object({
+  id, artifact_id: id, status: z.enum(['proposed', 'committed']), base_version: z.number().int().positive(), base_version_id: id,
+  result_version_id: id.nullable(), undo_version_id: id.nullable(), basis: z.enum(['user_instruction', 'evidence_supported', 'evidence_conflict']),
+  evidence_ids: z.array(id), summary: z.string(), counts: patchCountsSchema, changes: z.array(patchChangeSchema), block_mappings: z.array(blockMappingSchema),
+  can_apply: z.boolean(), can_undo: z.boolean(), created_at: z.string(), updated_at: z.string(), committed_at: z.string().nullable(),
+})
+export const artifactSchema = artifactMetadataSchema.extend({ latest_run: runSchema.nullable(), latest_edit_run: editRunSchema.nullable().optional().default(null) })
 export const detailSchema = artifactSchema.extend({ version: versionSchema.nullable() })
 export const taskSchema = z.object({
   id, type: z.enum(['artifact_generation', 'video_processing']), resource_id: id, title: z.string(),
@@ -65,6 +93,9 @@ export type StudyBody = z.infer<typeof bodySchema>
 export type StudyBlock = z.infer<typeof blockSchema>
 export type Evidence = z.infer<typeof evidenceSchema>
 export type GenerationRun = z.infer<typeof runSchema>
+export type ArtifactEditRun = z.infer<typeof editRunSchema>
+export type ArtifactEditOperation = z.infer<typeof editOperationSchema>
+export type ArtifactEditMode = ArtifactEditRun['mode']
 export type ProductTask = z.infer<typeof taskSchema>
 export const positionSchema = z.object({ revision: integer, task_id: z.number().int().positive(), artifact_id: z.string(), version_id: z.string(), block_id: z.string(), time_ms: integer, updated_at: z.string(), fallback: z.string().optional() })
 export type LearningPosition = z.infer<typeof positionSchema>

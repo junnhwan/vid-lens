@@ -48,6 +48,21 @@ func TestPostgresArtifactSubjectUpgradePreservesChat(t *testing.T) {
 	if err = db.Create(&generation).Error; err == nil {
 		t.Fatal("generation accepted fake chat session")
 	}
+	edit := chat
+	edit.ID = "new-artifact-edit"
+	edit.SessionID = 0
+	edit.SubjectKind = model.AgentRunSubjectArtifactEdit
+	edit.SubjectID = "edit-request-1"
+	edit.ExecutionKind = "artifact"
+	edit.RecipeVersion = "study-edit-v1"
+	if err = db.Create(&edit).Error; err != nil {
+		t.Fatal(err)
+	}
+	edit.ID = "invalid-artifact-edit"
+	edit.SessionID = 9
+	if err = db.Create(&edit).Error; err == nil {
+		t.Fatal("artifact edit accepted fake chat session")
+	}
 	if got, e := NewAgentExecutionRepository(db).GetRun(context.Background(), 7, "new-generation"); e != nil || got != nil {
 		t.Fatalf("chat journal exposed artifact run %+v %v", got, e)
 	}

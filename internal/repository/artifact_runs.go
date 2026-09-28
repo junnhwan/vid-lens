@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -104,8 +105,34 @@ func (r *ArtifactRepository) Run(ctx context.Context, owner int64, id string) (*
 }
 func lockedRun(tx *gorm.DB, id string) (*model.AgentRun, error) {
 	var run model.AgentRun
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND subject_kind='generation_request'", id).First(&run).Error
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND execution_kind='artifact' AND subject_kind IN ?", id, []string{model.AgentRunSubjectGeneration, model.AgentRunSubjectArtifactEdit}).First(&run).Error
 	return &run, hideMissing(err)
+}
+
+func lockedRunForSubject(tx *gorm.DB, id, subject string) (*model.AgentRun, error) {
+	if subject != model.AgentRunSubjectGeneration && subject != model.AgentRunSubjectArtifactEdit {
+		return nil, artifact.Err("invalid_request", 400)
+	}
+	var run model.AgentRun
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id=? AND execution_kind='artifact' AND subject_kind=?", id, subject).
+		First(&run).Error
+	return &run, hideMissing(err)
+}
+
+func artifactQueueDeadline(tx *gorm.DB, run *model.AgentRun) (time.Time, error) {
+	if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+		var req model.ArtifactEditRequest
+		if err := tx.Where("run_id=?", run.ID).First(&req).Error; err != nil {
+			return time.Time{}, err
+		}
+		return req.QueueDeadline, nil
+	}
+	var req model.GenerationRequest
+	if err := tx.Where("run_id=?", run.ID).First(&req).Error; err != nil {
+		return time.Time{}, err
+	}
+	return req.QueueDeadline, nil
 }
 func fence(run *model.AgentRun, token string, epoch int64, now time.Time) error {
 	if run.Status != "running" || run.RunLeaseToken != token || run.RunLeaseEpoch != epoch || run.RunLeaseUntil == nil || !run.RunLeaseUntil.After(now) {
@@ -116,23 +143,27 @@ func fence(run *model.AgentRun, token string, epoch int64, now time.Time) error 
 func (r *ArtifactRepository) Claim(ctx context.Context, id, token string, now time.Time) (*model.AgentRun, error) {
 	now = now.UTC().Truncate(time.Microsecond)
 	var run *model.AgentRun
+	committed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		run, err = lockedRun(tx, id)
 		if err != nil {
 			return err
 		}
+		if _, committed, err = completeCommittedEditTx(tx, run); err != nil || committed {
+			return err
+		}
 		if !active(run.Status) || (run.Status == "running" && run.RunLeaseUntil != nil && run.RunLeaseUntil.After(now)) {
 			return artifact.ErrLease
 		}
-		var req model.GenerationRequest
-		if err = tx.Where("run_id=?", id).First(&req).Error; err != nil {
+		deadline, err := artifactQueueDeadline(tx, run)
+		if err != nil {
 			return err
 		}
 		if run.CancelRequestedAt != nil {
 			return terminal(tx, run, "cancelled", "")
 		}
-		if run.ExecutionStartedAt == nil && now.After(req.QueueDeadline) {
+		if run.ExecutionStartedAt == nil && now.After(deadline) {
 			return terminal(tx, run, "failed", "queue_expired")
 		}
 		if run.ExecutionStartedAt != nil && now.Sub(*run.ExecutionStartedAt).Milliseconds() >= run.MaxDurationMs {
@@ -159,6 +190,9 @@ func (r *ArtifactRepository) Claim(ctx context.Context, id, token string, now ti
 		}
 		return appendEvent(tx, run, "run.updated", map[string]any{"status": "running", "stage": "collecting"})
 	})
+	if err == nil && committed {
+		return run, artifact.ErrLease
+	}
 	return run, err
 }
 func terminal(tx *gorm.DB, run *model.AgentRun, status, code string) error {
@@ -185,6 +219,9 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, token string, ep
 		if err != nil {
 			return err
 		}
+		if _, committed, e := completeCommittedEditTx(tx, run); e != nil || committed {
+			return e
+		}
 		if err = fence(run, token, epoch, time.Now().UTC()); err != nil {
 			return err
 		}
@@ -202,6 +239,9 @@ func (r *ArtifactRepository) Finish(ctx context.Context, id, token string, epoch
 		run, err := lockedRun(tx, id)
 		if err != nil {
 			return err
+		}
+		if _, committed, e := completeCommittedEditTx(tx, run); e != nil || committed {
+			return e
 		}
 		if err = fence(run, token, epoch, time.Now().UTC()); err != nil {
 			return err
@@ -232,14 +272,17 @@ func (r *ArtifactRepository) Progress(ctx context.Context, id, token string, epo
 		return appendEvent(tx, run, "run.updated", map[string]any{"status": "running", "stage": stage, "covered_segments": covered, "total_segments": total})
 	})
 }
-func (r *ArtifactRepository) Cancel(ctx context.Context, owner int64, id string) error {
+func (r *ArtifactRepository) Cancel(ctx context.Context, owner int64, id, expectedSubject string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		run, err := lockedRun(tx, id)
+		run, err := lockedRunForSubject(tx, id, expectedSubject)
 		if err != nil {
 			return err
 		}
 		if run.UserID != owner {
 			return artifact.Err("not_found", 404)
+		}
+		if _, committed, e := completeCommittedEditTx(tx, run); e != nil || committed {
+			return e
 		}
 		if !active(run.Status) || run.CancelRequestedAt != nil {
 			return nil
@@ -257,40 +300,74 @@ func (r *ArtifactRepository) Cancel(ctx context.Context, owner int64, id string)
 		return nil
 	})
 }
-func (r *ArtifactRepository) Resume(ctx context.Context, owner int64, id string) error {
+func (r *ArtifactRepository) Resume(ctx context.Context, owner int64, id, expectedSubject string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		run, err := lockedRun(tx, id)
+		run, err := lockedRunForSubject(tx, id, expectedSubject)
 		if err != nil {
 			return err
 		}
 		if run.UserID != owner {
 			return artifact.Err("not_found", 404)
 		}
+		if _, committed, e := completeCommittedEditTx(tx, run); e != nil || committed {
+			return e
+		}
 		if !active(run.Status) {
 			return artifact.Err("run_terminal", 409)
 		}
-		return queueDispatch(tx, id, time.Now().UTC())
+		return queueDispatch(tx, run, time.Now().UTC())
 	})
 }
-func queueDispatch(tx *gorm.DB, id string, now time.Time) error {
+
+func queueDispatch(tx *gorm.DB, run *model.AgentRun, now time.Time) error {
+	if run.SubjectKind == model.AgentRunSubjectArtifactEdit {
+		var n int64
+		if err := tx.Model(&model.ArtifactEditDispatch{}).Where("run_id=? AND (published_at IS NULL OR created_at>?)", run.ID, now.Add(-30*time.Second)).Count(&n).Error; err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+		return tx.Create(&model.ArtifactEditDispatch{ID: uuid.NewString(), RunID: run.ID, NextAttemptAt: now}).Error
+	}
 	var n int64
-	if err := tx.Model(&model.GenerationDispatch{}).Where("run_id=? AND (published_at IS NULL OR created_at>?)", id, now.Add(-30*time.Second)).Count(&n).Error; err != nil {
+	if err := tx.Model(&model.GenerationDispatch{}).Where("run_id=? AND (published_at IS NULL OR created_at>?)", run.ID, now.Add(-30*time.Second)).Count(&n).Error; err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	return tx.Create(&model.GenerationDispatch{ID: uuid.NewString(), RunID: id, NextAttemptAt: now}).Error
+	return tx.Create(&model.GenerationDispatch{ID: uuid.NewString(), RunID: run.ID, NextAttemptAt: now}).Error
 }
+
+// ArtifactRunSubject returns the persisted execution kind used by a queue
+// consumer to reject messages delivered to the wrong artifact queue.
+func (r *ArtifactRepository) ArtifactRunSubject(ctx context.Context, id string) (string, error) {
+	var run model.AgentRun
+	err := r.db.WithContext(ctx).
+		Select("subject_kind").
+		Where("id=? AND execution_kind='artifact' AND subject_kind IN ?", id, []string{"generation_request", model.AgentRunSubjectArtifactEdit}).
+		First(&run).Error
+	if err != nil {
+		return "", hideMissing(err)
+	}
+	return run.SubjectKind, nil
+}
+
 func (r *ArtifactRepository) Recover(ctx context.Context) error {
 	now := time.Now().UTC()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var rows []model.AgentRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("subject_kind='generation_request' AND (status='pending' OR (status='running' AND (run_lease_until IS NULL OR run_lease_until<=?)))", now).Limit(100).Find(&rows).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("subject_kind IN ? AND (status='pending' OR (status='running' AND (run_lease_until IS NULL OR run_lease_until<=?)))", []string{"generation_request", model.AgentRunSubjectArtifactEdit}, now).Limit(100).Find(&rows).Error; err != nil {
 			return err
 		}
 		for i := range rows {
 			run := &rows[i]
+			if _, committed, err := completeCommittedEditTx(tx, run); err != nil {
+				return err
+			} else if committed {
+				continue
+			}
 			if run.CancelRequestedAt != nil {
 				if err := terminal(tx, run, "cancelled", ""); err != nil {
 					return err
@@ -304,18 +381,18 @@ func (r *ArtifactRepository) Recover(ctx context.Context) error {
 				continue
 			}
 			if run.ExecutionStartedAt == nil {
-				var req model.GenerationRequest
-				if err := tx.Where("run_id=?", run.ID).First(&req).Error; err != nil {
+				deadline, err := artifactQueueDeadline(tx, run)
+				if err != nil {
 					return err
 				}
-				if now.After(req.QueueDeadline) {
+				if now.After(deadline) {
 					if err := terminal(tx, run, "failed", "queue_expired"); err != nil {
 						return err
 					}
 					continue
 				}
 			}
-			if err := queueDispatch(tx, run.ID, now); err != nil {
+			if err := queueDispatch(tx, run, now); err != nil {
 				return err
 			}
 		}
@@ -323,18 +400,68 @@ func (r *ArtifactRepository) Recover(ctx context.Context) error {
 	})
 }
 
-// Terminal checkpoints are private recovery material, not permanent product versions.
+// Terminal checkpoints are private recovery material, not permanent product
+// versions. The completed answer/no-change payload of an artifact edit is the
+// durable public product result, so its final safe tool checkpoint is retained;
+// source revocation still purges it immediately.
 func (r *ArtifactRepository) Prune(ctx context.Context) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		finished := tx.Model(&model.AgentRun{}).Select("id").Where("subject_kind='generation_request' AND status NOT IN ('pending','running') AND finished_at<?", time.Now().UTC().Add(-7*24*time.Hour))
+		cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour)
+		finished := tx.Model(&model.AgentRun{}).Select("id").Where("subject_kind IN ? AND status NOT IN ('pending','running') AND finished_at<?", []string{"generation_request", model.AgentRunSubjectArtifactEdit}, cutoff)
 		if err := tx.Model(&model.AgentStep{}).Where("run_id IN (?) AND result_checkpoint<>''", finished).Update("result_checkpoint", "").Error; err != nil {
 			return err
 		}
-		return tx.Where("run_id IN (?)", finished).Delete(&model.GenerationDispatch{}).Error
+		publicEditResults := tx.Model(&model.AgentRun{}).Select("id").Where("subject_kind=? AND status=? AND finished_at<?", model.AgentRunSubjectArtifactEdit, model.AgentRunStatusCompleted, cutoff)
+		if err := tx.Model(&model.AgentToolCall{}).
+			Where("run_id IN (?) AND result_checkpoint<>''", finished).
+			Where("run_id NOT IN (?) OR tool_name NOT IN ? OR status<>?", publicEditResults, []string{"answer_artifact_question", "nothing_to_change"}, model.AgentToolCallStatusCompleted).
+			Update("result_checkpoint", "").Error; err != nil {
+			return err
+		}
+		if err := tx.Where("run_id IN (?)", finished).Delete(&model.GenerationDispatch{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("run_id IN (?)", finished).Delete(&model.ArtifactEditDispatch{}).Error
 	})
 }
-func (r *ArtifactRepository) Dispatches(ctx context.Context) ([]model.GenerationDispatch, error) {
+
+type GenerationDispatchIntent struct {
+	model.GenerationDispatch
+	SubjectKind string
+}
+
+type ArtifactEditDispatchIntent struct {
+	model.ArtifactEditDispatch
+	SubjectKind string
+}
+
+func artifactDispatchSubjects(tx *gorm.DB, runIDs []string) (map[string]string, error) {
+	type runSubject struct {
+		ID          string
+		SubjectKind string
+	}
+	rows := []runSubject{}
+	if err := tx.Model(&model.AgentRun{}).
+		Select("id", "subject_kind").
+		Where("id IN ? AND execution_kind='artifact' AND subject_kind IN ?", runIDs, []string{"generation_request", model.AgentRunSubjectArtifactEdit}).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	subjects := make(map[string]string, len(rows))
+	for _, row := range rows {
+		subjects[row.ID] = row.SubjectKind
+	}
+	for _, runID := range runIDs {
+		if subjects[runID] == "" {
+			return nil, fmt.Errorf("artifact dispatch run %s has no supported immutable subject", runID)
+		}
+	}
+	return subjects, nil
+}
+
+func (r *ArtifactRepository) Dispatches(ctx context.Context) ([]GenerationDispatchIntent, error) {
 	rows := []model.GenerationDispatch{}
+	intents := []GenerationDispatchIntent{}
 	now := time.Now().UTC()
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("published_at IS NULL AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?)", now, now).Order("created_at").Limit(30).Find(&rows).Error; err != nil {
@@ -348,10 +475,60 @@ func (r *ArtifactRepository) Dispatches(ctx context.Context) ([]model.Generation
 				return err
 			}
 		}
+		runIDs := make([]string, 0, len(rows))
+		for i := range rows {
+			runIDs = append(runIDs, rows[i].RunID)
+		}
+		if len(runIDs) == 0 {
+			return nil
+		}
+		subjects, err := artifactDispatchSubjects(tx, runIDs)
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			intents = append(intents, GenerationDispatchIntent{GenerationDispatch: rows[i], SubjectKind: subjects[rows[i].RunID]})
+		}
 		return nil
 	})
-	return rows, err
+	return intents, err
 }
+
+func (r *ArtifactRepository) EditDispatches(ctx context.Context) ([]ArtifactEditDispatchIntent, error) {
+	rows := []model.ArtifactEditDispatch{}
+	intents := []ArtifactEditDispatchIntent{}
+	now := time.Now().UTC()
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("published_at IS NULL AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?)", now, now).Order("created_at").Limit(30).Find(&rows).Error; err != nil {
+			return err
+		}
+		for i := range rows {
+			rows[i].LeaseToken = uuid.NewString()
+			until := now.Add(30 * time.Second)
+			rows[i].LeaseUntil = &until
+			if err := tx.Model(&rows[i]).Updates(map[string]any{"lease_token": rows[i].LeaseToken, "lease_until": until}).Error; err != nil {
+				return err
+			}
+		}
+		runIDs := make([]string, 0, len(rows))
+		for i := range rows {
+			runIDs = append(runIDs, rows[i].RunID)
+		}
+		if len(runIDs) == 0 {
+			return nil
+		}
+		subjects, err := artifactDispatchSubjects(tx, runIDs)
+		if err != nil {
+			return err
+		}
+		for i := range rows {
+			intents = append(intents, ArtifactEditDispatchIntent{ArtifactEditDispatch: rows[i], SubjectKind: subjects[rows[i].RunID]})
+		}
+		return nil
+	})
+	return intents, err
+}
+
 func (r *ArtifactRepository) DispatchResult(ctx context.Context, d model.GenerationDispatch, ok bool) error {
 	values := map[string]any{"lease_until": nil, "next_attempt_at": time.Now().UTC().Add(5 * time.Second)}
 	if ok {
@@ -359,16 +536,31 @@ func (r *ArtifactRepository) DispatchResult(ctx context.Context, d model.Generat
 	}
 	return r.db.WithContext(ctx).Model(&model.GenerationDispatch{}).Where("id=? AND lease_token=?", d.ID, d.LeaseToken).Updates(values).Error
 }
-func (r *ArtifactRepository) Events(ctx context.Context, owner int64, id string, after int64) ([]model.RunEvent, error) {
-	run, _, err := r.Run(ctx, owner, id)
-	if err != nil {
-		return nil, err
+
+func (r *ArtifactRepository) EditDispatchResult(ctx context.Context, d model.ArtifactEditDispatch, ok bool) error {
+	values := map[string]any{"lease_until": nil, "next_attempt_at": time.Now().UTC().Add(5 * time.Second)}
+	if ok {
+		values["published_at"] = time.Now().UTC()
+	}
+	return r.db.WithContext(ctx).Model(&model.ArtifactEditDispatch{}).Where("id=? AND lease_token=?", d.ID, d.LeaseToken).Updates(values).Error
+}
+func (r *ArtifactRepository) Events(ctx context.Context, owner int64, id, expectedSubject string, after int64) ([]model.RunEvent, error) {
+	if expectedSubject != model.AgentRunSubjectGeneration && expectedSubject != model.AgentRunSubjectArtifactEdit {
+		return nil, artifact.Err("invalid_request", 400)
+	}
+	var run model.AgentRun
+	q := r.db.WithContext(ctx).Where("id=? AND execution_kind='artifact' AND subject_kind=?", id, expectedSubject)
+	if owner > 0 {
+		q = q.Where("user_id=?", owner)
+	}
+	if err := q.First(&run).Error; err != nil {
+		return nil, hideMissing(err)
 	}
 	if after < 0 || after > run.EventSeq {
 		return nil, artifact.Err("invalid_cursor", 400)
 	}
 	rows := []model.RunEvent{}
-	err = r.db.WithContext(ctx).Where("run_id=? AND seq>?", id, after).Order("seq").Limit(100).Find(&rows).Error
+	err := r.db.WithContext(ctx).Where("run_id=? AND seq>?", id, after).Order("seq").Limit(100).Find(&rows).Error
 	return rows, err
 }
 

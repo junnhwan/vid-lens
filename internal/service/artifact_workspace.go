@@ -120,12 +120,14 @@ type ArtifactVersionView struct {
 }
 type ArtifactDetail struct {
 	model.Artifact
-	Version   *ArtifactVersionView `json:"version"`
-	LatestRun *ArtifactRunView     `json:"latest_run"`
+	Version       *ArtifactVersionView `json:"version"`
+	LatestRun     *ArtifactRunView     `json:"latest_run"`
+	LatestEditRun *ArtifactEditRunView `json:"latest_edit_run"`
 }
 type ArtifactListItem struct {
 	model.Artifact
-	LatestRun *ArtifactRunView `json:"latest_run"`
+	LatestRun     *ArtifactRunView     `json:"latest_run"`
+	LatestEditRun *ArtifactEditRunView `json:"latest_edit_run"`
 }
 
 func (s *ArtifactService) latestRuns(ctx context.Context, owner int64, ids []string) (map[string]*ArtifactRunView, error) {
@@ -138,6 +140,28 @@ func (s *ArtifactService) latestRuns(ctx context.Context, owner int64, ids []str
 		run, err := s.Run(ctx, owner, runID)
 		if err != nil {
 			return nil, err
+		}
+		result[artifactID] = run
+	}
+	return result, nil
+}
+
+func (s *ArtifactService) latestEditRuns(ctx context.Context, owner int64, ids []string) (map[string]*ArtifactEditRunView, error) {
+	result := make(map[string]*ArtifactEditRunView, len(ids))
+	runIDs, err := s.repos.Artifact.LatestEditRunIDs(ctx, owner, ids)
+	if err != nil {
+		return nil, err
+	}
+	for artifactID, runID := range runIDs {
+		run, runErr := s.EditRun(ctx, owner, runID)
+		if runErr != nil {
+			// Artifact lists contain only safe metadata. A revoked source gates an
+			// edit result's body/diff, but must not make unrelated list entries
+			// unavailable or expose the source-bound instruction/result.
+			if isArtifactErrorCode(runErr, "source_deleted") {
+				continue
+			}
+			return nil, runErr
 		}
 		result[artifactID] = run
 	}
@@ -173,8 +197,12 @@ func (s *ArtifactService) Get(ctx context.Context, owner int64, id string) (*Art
 	if err != nil {
 		return nil, err
 	}
+	editRuns, err := s.latestEditRuns(ctx, owner, []string{id})
+	if err != nil {
+		return nil, err
+	}
 	view, err := s.versionView(ctx, owner, v)
-	return &ArtifactDetail{Artifact: *a, Version: view, LatestRun: runs[id]}, err
+	return &ArtifactDetail{Artifact: *a, Version: view, LatestRun: runs[id], LatestEditRun: editRuns[id]}, err
 }
 func (s *ArtifactService) Version(ctx context.Context, owner int64, id, vid string) (*ArtifactVersionView, error) {
 	v, err := s.repos.Artifact.Version(ctx, owner, id, vid)
@@ -199,9 +227,13 @@ func (s *ArtifactService) List(ctx context.Context, owner, source int64, page, s
 	if err != nil {
 		return nil, 0, err
 	}
+	editRuns, err := s.latestEditRuns(ctx, owner, ids)
+	if err != nil {
+		return nil, 0, err
+	}
 	items := make([]ArtifactListItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, ArtifactListItem{Artifact: row, LatestRun: runs[row.ID]})
+		items = append(items, ArtifactListItem{Artifact: row, LatestRun: runs[row.ID], LatestEditRun: editRuns[row.ID]})
 	}
 	return items, total, nil
 }
@@ -334,13 +366,13 @@ func (s *ArtifactService) Run(ctx context.Context, owner int64, id string) (*Art
 	return v, nil
 }
 func (s *ArtifactService) Cancel(ctx context.Context, owner int64, id string) (*ArtifactRunView, error) {
-	if err := s.repos.Artifact.Cancel(ctx, owner, id); err != nil {
+	if err := s.repos.Artifact.Cancel(ctx, owner, id, model.AgentRunSubjectGeneration); err != nil {
 		return nil, err
 	}
 	return s.Run(ctx, owner, id)
 }
 func (s *ArtifactService) Resume(ctx context.Context, owner int64, id string) (*ArtifactRunView, error) {
-	if err := s.repos.Artifact.Resume(ctx, owner, id); err != nil {
+	if err := s.repos.Artifact.Resume(ctx, owner, id, model.AgentRunSubjectGeneration); err != nil {
 		return nil, err
 	}
 	return s.Run(ctx, owner, id)
@@ -377,7 +409,7 @@ func (s *ArtifactService) Retry(ctx context.Context, owner int64, id, key string
 	return s.Submit(ctx, owner, key, input, &id)
 }
 func (s *ArtifactService) Events(ctx context.Context, owner int64, id string, after int64) ([]model.RunEvent, error) {
-	return s.repos.Artifact.Events(ctx, owner, id, after)
+	return s.repos.Artifact.Events(ctx, owner, id, model.AgentRunSubjectGeneration, after)
 }
 
 type ArtifactTaskView struct {

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { z } from 'zod'
 import {
   detailSchema, runSchema, sourceSchema, taskPageSchema,
-  versionSchema, versionSummarySchema,
+  versionSchema, versionSummarySchema, editRunSchema, editOperationSchema,
 } from '../lib/artifacts/schema.ts'
 
 const file = process.argv[2]
@@ -15,6 +15,8 @@ const cases = {
   artifact: detailSchema,
   created_artifact: detailSchema,
   run: runSchema,
+  edit_run: editRunSchema,
+  edit_operation: editOperationSchema,
   source: sourceSchema,
   tasks: taskPageSchema,
   version: versionSchema,

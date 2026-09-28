@@ -31,14 +31,16 @@ export function EvidencePanel({ evidence, loading, error, onRetry, preview = fal
 }
 
 export function RemoteEvidencePanel({ manifestId, refs, evidenceId, onSelect, outdated }: { manifestId?: string; refs: StudyBlock['evidence_refs']; evidenceId?: string; onSelect: (id: string) => void; outdated?: boolean }) {
-  const ids = [...new Set(refs.map(ref => ref.evidence_id))]
+  const externalEvidence = evidenceId && !refs.some(ref => ref.evidence_id === evidenceId) ? { evidence_id: evidenceId, relation: null } : null
+  const choices: Array<StudyBlock['evidence_refs'][number] | { evidence_id: string; relation: null }> = externalEvidence ? [...refs, externalEvidence] : refs
+  const ids = [...new Set(choices.map(ref => ref.evidence_id))]
   const queries = useQueries({ queries: ids.map(id => ({ queryKey: ['artifact-evidence', manifestId, id], queryFn: ({ signal }: { signal: AbortSignal }) => artifactApi.evidence(manifestId!, id, signal), enabled: !!manifestId, staleTime: 0, refetchInterval: 15_000 })) })
-  const activeIndex = Math.max(0, refs.findIndex(ref => ref.evidence_id === evidenceId))
-  const query = queries[ids.indexOf(refs[activeIndex]?.evidence_id)]
+  const activeIndex = Math.max(0, choices.findIndex(ref => ref.evidence_id === evidenceId))
+  const query = queries[ids.indexOf(choices[activeIndex]?.evidence_id)]
   // An inaccessible quote never reuses cached content; other references remain selectable.
-  return <div className="artifact-evidence-stack"><div className="evidence-choices" aria-label="此块关联的全部依据"><b>关联依据 · {refs.length}</b>{refs.length ? refs.map((ref, index) => {
+  return <div className="artifact-evidence-stack"><div className="evidence-choices" aria-label="当前相关的全部依据"><b>关联依据 · {choices.length}</b>{choices.length ? choices.map((ref, index) => {
     const result = queries[ids.indexOf(ref.evidence_id)]
     const item = result?.error ? undefined : result?.data
-    return <button key={`${ref.evidence_id}-${index}`} className={index === activeIndex ? 'selected' : ''} aria-pressed={index === activeIndex} onClick={() => onSelect(ref.evidence_id)}><span className="evidence-choice-head"><strong>{index + 1}. {ref.relation === 'contradicts' ? '相反证据' : ref.relation === 'context' ? '背景证据' : '支持依据'}</strong><small>{item ? `${item.modality === 'transcript' ? '转写' : item.modality === 'visual_ocr' ? '画面文字' : item.modality === 'visual_caption' ? '画面观察' : '视频'} · ${evidenceTime(item)}` : result?.error ? '读取失败' : '读取中…'}</small></span><span className="evidence-choice-excerpt">{item ? item.content : result?.error ? artifactError(result.error) : '正在核对来源…'}</span></button>
-  }) : <p>这个块还没有来源引用。</p>}</div><EvidencePanel outdated={outdated} evidence={query?.error ? undefined : query?.data} loading={!!refs.length && !!query?.isPending} error={query?.error ? artifactError(query.error) : undefined} onRetry={() => void query?.refetch()} /></div>
+    return <button key={`${ref.evidence_id}-${index}`} className={index === activeIndex ? 'selected' : ''} aria-pressed={index === activeIndex} onClick={() => onSelect(ref.evidence_id)}><span className="evidence-choice-head"><strong>{index + 1}. {ref.relation === null ? '修订依据' : ref.relation === 'contradicts' ? '相反证据' : ref.relation === 'context' ? '背景证据' : '支持依据'}</strong><small>{item ? `${item.modality === 'transcript' ? '转写' : item.modality === 'visual_ocr' ? '画面文字' : item.modality === 'visual_caption' ? '画面观察' : '视频'} · ${evidenceTime(item)}` : result?.error ? '读取失败' : '读取中…'}</small></span><span className="evidence-choice-excerpt">{item ? item.content : result?.error ? artifactError(result.error) : '正在核对来源…'}</span></button>
+  }) : <p>这个块还没有来源引用。</p>}</div><EvidencePanel outdated={outdated} evidence={query?.error ? undefined : query?.data} loading={!!choices.length && !!query?.isPending} error={query?.error ? artifactError(query.error) : undefined} onRetry={() => void query?.refetch()} /></div>
 }

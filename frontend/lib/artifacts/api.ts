@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ApiError, req } from '@/lib/api'
-import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, positionSchema, blockContextSchema, answerPreviewSchema, type StudyBody, type GenerationInput } from './schema'
+import { artifactPageSchema, detailSchema, evidenceSchema, runSchema, sourceSchema, taskPageSchema, versionSchema, versionSummarySchema, positionSchema, blockContextSchema, answerPreviewSchema, editRunSchema, editOperationSchema, type StudyBody, type GenerationInput, type ArtifactEditMode } from './schema'
 import { errorLabels } from './view'
 
 export class ContractError extends Error { constructor() { super('收到的成果数据格式不受支持，请刷新或稍后重试。') } }
@@ -29,6 +29,12 @@ export const artifactApi = {
   cancel: (id: string) => read(runSchema, req(`/artifact-runs/${pathId(id)}/cancel`, 'POST', {})),
   retry: (id: string, key: string) => read(runSchema, req(`/artifact-runs/${pathId(id)}/retry`, 'POST', {}, { 'Idempotency-Key': key })),
   resume: (id: string) => read(runSchema, req(`/artifact-runs/${pathId(id)}/resume`, 'POST', {})),
+  submitEdit: (id: string, input: { instruction: string; expected_head_version: number; selected_block_ids: string[]; mode: ArtifactEditMode }, key: string) => read(editRunSchema, req(`/artifacts/${pathId(id)}/edit-runs`, 'POST', input, { 'Idempotency-Key': key })),
+  editRun: (id: string, signal?: AbortSignal) => read(editRunSchema, req(`/artifact-edit-runs/${pathId(id)}`, 'GET', undefined, undefined, signal)),
+  cancelEdit: (id: string) => read(editRunSchema, req(`/artifact-edit-runs/${pathId(id)}/cancel`, 'POST', {})),
+  editOperation: (id: string, signal?: AbortSignal) => read(editOperationSchema, req(`/artifact-edit-operations/${pathId(id)}`, 'GET', undefined, undefined, signal)),
+  applyEdit: (id: string, head: number, key: string) => read(editOperationSchema, req(`/artifact-edit-operations/${pathId(id)}/apply`, 'POST', { expected_head_version: head }, { 'Idempotency-Key': key })),
+  undoEdit: (id: string, head: number, key: string) => read(editOperationSchema, req(`/artifact-edit-operations/${pathId(id)}/undo`, 'POST', { expected_head_version: head }, { 'Idempotency-Key': key })),
   tasks: (page = 1, signal?: AbortSignal) => read(taskPageSchema, req(`/tasks?page=${page}&page_size=20`, 'GET', undefined, undefined, signal)),
 }
 export function artifactError(error: unknown): string {

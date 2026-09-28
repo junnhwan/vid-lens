@@ -26,6 +26,10 @@ type VideoAgentToolDefinition struct {
 // serialized into a planner action. Tool arguments remain JSON so a future
 // planner can produce them without knowing concrete Go input types.
 type VideoAgentToolRuntime struct {
+	// ArtifactEdit is present only for the study-edit-v1 recipe. Keeping it
+	// request-scoped prevents the default video chat registry from acquiring
+	// artifact write authority.
+	ArtifactEdit     *ArtifactEditToolRuntime
 	AnswerPreference string
 	VideoMaps        []VideoMap
 	MaxVisualFrames  int

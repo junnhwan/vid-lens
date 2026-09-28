@@ -19,6 +19,9 @@ import (
 
 // ExecuteArtifact runs under the worker's context, never an HTTP request context.
 func (s *ArtifactService) ExecuteArtifact(parent context.Context, id string) error {
+	if edit, err := s.dispatchArtifactRun(parent, id); edit || err != nil {
+		return err
+	}
 	token := uuid.NewString()
 	run, err := s.repos.Artifact.Claim(parent, id, token, time.Now().UTC())
 	if errors.Is(err, artifact.ErrLease) {

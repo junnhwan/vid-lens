@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -95,6 +96,48 @@ func TestMigrateBackfillsChatSessionScopeAndRejectsInvalidCombinations(t *testin
 	}
 	if err := db.Create(&ChatSession{UserID: 1, ScopeType: ChatScopeVideo, TaskID: 42, MemoryPolicy: "sometimes"}).Error; err == nil {
 		t.Fatal("invalid session memory policy was accepted")
+	}
+}
+
+func TestMigrateArtifactEditDispatchesSeparatesLegacyOutboxRows(t *testing.T) {
+	db := newModelSQLiteTestDB(t)
+	if err := db.AutoMigrate(&AgentRun{}, &GenerationDispatch{}, &ArtifactEditDispatch{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runs := []AgentRun{
+		{ID: "generation-run", UserID: 7, SubjectKind: "generation_request", SubjectID: "generation-request", ExecutionKind: "artifact", RecipeVersion: "study-v1", ScopeType: "video", Goal: "generate", Mode: "artifact", ProfileSnapshot: `{}`, PolicySnapshot: `{}`, BudgetSnapshot: `{}`, Status: AgentRunStatusPending, CreatedAt: now, UpdatedAt: now},
+		{ID: "edit-run", UserID: 7, SubjectKind: AgentRunSubjectArtifactEdit, SubjectID: "edit-request", ExecutionKind: "artifact", RecipeVersion: "study-edit-v1", ScopeType: "video", Goal: "edit", Mode: "apply", ProfileSnapshot: `{}`, PolicySnapshot: `{}`, BudgetSnapshot: `{}`, Status: AgentRunStatusPending, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&runs).Error; err != nil {
+		t.Fatal(err)
+	}
+	publishedAt := now
+	legacy := []GenerationDispatch{
+		{ID: "generation-dispatch", RunID: runs[0].ID, NextAttemptAt: now, CreatedAt: now},
+		{ID: "edit-dispatch", RunID: runs[1].ID, NextAttemptAt: now, PublishedAt: &publishedAt, LeaseToken: "legacy-lease", LeaseUntil: &publishedAt, CreatedAt: now},
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrateArtifactEditDispatches(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var generation []GenerationDispatch
+	if err := db.Find(&generation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(generation) != 1 || generation[0].RunID != runs[0].ID {
+		t.Fatalf("generation outbox after migration = %+v", generation)
+	}
+	var edits []ArtifactEditDispatch
+	if err := db.Find(&edits).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 1 || edits[0].RunID != runs[1].ID || edits[0].PublishedAt != nil || edits[0].LeaseToken != "" || edits[0].LeaseUntil != nil {
+		t.Fatalf("edit outbox after migration = %+v", edits)
 	}
 }
 

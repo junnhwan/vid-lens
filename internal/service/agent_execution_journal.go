@@ -264,8 +264,11 @@ func (j *AgentExecutionJournal) Execute(ctx context.Context, spec AgentJournalSt
 	contextChars := firstPositive(result.Usage.ContextChars, spec.ContextChars)
 	metricsJSON := mergeAgentUsageMetrics(result.MetricsJSON, result.Usage, contextChars)
 	if invokeErr != nil {
-		cancelled := errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded)
-		durationLimit := cancelled && errors.Is(context.Cause(ctx), errAgentRunDurationLimit)
+		// Provider adapters may classify a cancelled transport as a safe network
+		// error and no longer wrap context.Canceled. The execution context remains
+		// authoritative for shutdown/cancellation and duration-limit ownership.
+		cancelled := ctx.Err() != nil || errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded)
+		durationLimit := ctx.Err() != nil && errors.Is(context.Cause(ctx), errAgentRunDurationLimit)
 		failureCode := firstNonEmpty(spec.FailureCode, "agent_action_failure")
 		if durationLimit {
 			failureCode = "duration_limit"

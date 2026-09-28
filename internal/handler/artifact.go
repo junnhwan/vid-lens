@@ -242,6 +242,58 @@ func (h *ArtifactHandler) ImportAnswer(c *gin.Context) {
 	v, e := h.svc.ImportAnswer(c.Request.Context(), middleware.GetUserID(c), req.MessageID, c.Param("id"), req.AfterBlockID, req.ExpectedHeadVersion, c.GetHeader("Idempotency-Key"), req.Personal)
 	artifactOK(c, 200, v, e)
 }
+func (h *ArtifactHandler) SubmitEdit(c *gin.Context) {
+	if denyIfDemo(c, "让 Agent 修订成果") {
+		return
+	}
+	var req service.ArtifactEditRequest
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.SubmitEdit(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.GetHeader("Idempotency-Key"), req)
+	artifactOK(c, http.StatusAccepted, v, e)
+}
+func (h *ArtifactHandler) EditRun(c *gin.Context) {
+	v, e := h.svc.EditRun(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	artifactOK(c, http.StatusOK, v, e)
+}
+func (h *ArtifactHandler) CancelEdit(c *gin.Context) {
+	if denyIfDemo(c, "取消 Agent 修订") {
+		return
+	}
+	v, e := h.svc.CancelEdit(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	artifactOK(c, http.StatusOK, v, e)
+}
+func (h *ArtifactHandler) EditOperation(c *gin.Context) {
+	v, e := h.svc.EditOperation(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	artifactOK(c, http.StatusOK, v, e)
+}
+func (h *ArtifactHandler) ApplyEdit(c *gin.Context) {
+	if denyIfDemo(c, "应用 Agent 修订方案") {
+		return
+	}
+	var req struct {
+		ExpectedHeadVersion int64 `json:"expected_head_version"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.ApplyEdit(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.GetHeader("Idempotency-Key"), req.ExpectedHeadVersion)
+	artifactOK(c, http.StatusOK, v, e)
+}
+func (h *ArtifactHandler) UndoEdit(c *gin.Context) {
+	if denyIfDemo(c, "撤销 Agent 修订") {
+		return
+	}
+	var req struct {
+		ExpectedHeadVersion int64 `json:"expected_head_version"`
+	}
+	if !artifactBody(c, &req) {
+		return
+	}
+	v, e := h.svc.UndoEdit(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.GetHeader("Idempotency-Key"), req.ExpectedHeadVersion)
+	artifactOK(c, http.StatusOK, v, e)
+}
 func (h *ArtifactHandler) Tasks(c *gin.Context) {
 	page, size, ok := artifactPage(c)
 	if !ok {
@@ -300,6 +352,66 @@ func (h *ArtifactHandler) Events(c *gin.Context) {
 		case <-ticker.C:
 		}
 		events, err = h.svc.Events(c.Request.Context(), owner, id, after)
+		if err != nil {
+			return
+		}
+		if len(events) == 0 {
+			if _, err = fmt.Fprint(c.Writer, ": heartbeat\n\n"); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (h *ArtifactHandler) EditEvents(c *gin.Context) {
+	cursor := c.GetHeader("Last-Event-ID")
+	if q, ok := c.GetQuery("after_seq"); ok {
+		cursor = q
+	}
+	var after int64
+	var err error
+	if cursor != "" {
+		after, err = strconv.ParseInt(cursor, 10, 64)
+	}
+	if err != nil || after < 0 {
+		artifactError(c, artifact.Err("invalid_cursor", 400))
+		return
+	}
+	owner, id := middleware.GetUserID(c), c.Param("id")
+	events, err := h.svc.EditEvents(c.Request.Context(), owner, id, after)
+	if err != nil {
+		artifactError(c, err)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	c.Writer.Flush()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		for _, e := range events {
+			raw, _ := json.Marshal(gin.H{"schema_version": 1, "run_id": e.RunID, "seq": e.Seq, "type": e.Type, "created_at": e.CreatedAt, "data": json.RawMessage(e.DataJSON)})
+			if _, err = fmt.Fprintf(c.Writer, "id: %d\nevent: %s\ndata: %s\n\n", e.Seq, e.Type, raw); err != nil {
+				return
+			}
+			after = e.Seq
+		}
+		c.Writer.Flush()
+		run, readErr := h.svc.EditRun(c.Request.Context(), owner, id)
+		if readErr != nil {
+			return
+		}
+		if run.Status != "pending" && run.Status != "running" && after >= run.LastSeq {
+			return
+		}
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-ticker.C:
+		}
+		events, err = h.svc.EditEvents(c.Request.Context(), owner, id, after)
 		if err != nil {
 			return
 		}

@@ -2,6 +2,8 @@
 
 Contract version: 1 (2026-09-27). This file is the frontend/backend integration authority. Implementation and verification status are tracked in local CONTEXT.md. All paths below have `/api/v1` prefix and require the existing Bearer JWT. IDs for artifacts, versions, runs, manifests and evidence are opaque strings; video IDs remain positive integers. Existing chat APIs and disconnect semantics are unchanged.
 
+R1 Agent revision is defined by [`artifact-editing-contract.md`](artifact-editing-contract.md). That extension adds edit runs/operations, `origin=agent|undo`, and `edit_operation_id`; where its Agent-edit rules differ from the first-delivery human-save wording below, the R1 extension is authoritative. Manual save, generation, and answer-import behavior in this document remains unchanged.
+
 ## Scope and representation
 
 ### Product completion extension (2026-09-27)

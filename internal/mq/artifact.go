@@ -4,16 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"strings"
 	"sync"
 	"time"
 	"vid-lens/internal/artifact"
+	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 )
 
-const ArtifactQueue = "vidlens.artifact.generate.v1"
+const (
+	ArtifactQueue     = "vidlens.artifact.generate.v1"
+	ArtifactEditQueue = "vidlens.artifact.edit.v1"
+
+	artifactGenerationSubject = "generation_request"
+)
+
+var errArtifactQueueMismatch = errors.New("artifact run delivered to wrong queue")
 
 type ArtifactDispatch struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -32,6 +41,7 @@ type ArtifactWorker struct {
 
 type ArtifactExecutor interface {
 	ExecuteArtifact(context.Context, string) error
+	ExecuteArtifactEdit(context.Context, string) error
 }
 
 func NewArtifactWorker(repo *repository.ArtifactRepository, svc ArtifactExecutor, brokers []string) *ArtifactWorker {
@@ -45,9 +55,11 @@ func NewArtifactWorker(repo *repository.ArtifactRepository, svc ArtifactExecutor
 	return &ArtifactWorker{repo: repo, svc: svc, url: url}
 }
 func (w *ArtifactWorker) Start(ctx context.Context) {
-	w.wg.Add(2)
+	w.wg.Add(4)
 	go func() { defer w.wg.Done(); w.dispatch(ctx) }()
-	go func() { defer w.wg.Done(); w.consume(ctx) }()
+	go func() { defer w.wg.Done(); w.dispatchEdits(ctx) }()
+	go func() { defer w.wg.Done(); w.consume(ctx, ArtifactQueue) }()
+	go func() { defer w.wg.Done(); w.consume(ctx, ArtifactEditQueue) }()
 }
 func (w *ArtifactWorker) Wait() { w.wg.Wait() }
 func (w *ArtifactWorker) dispatch(ctx context.Context) {
@@ -68,9 +80,9 @@ func (w *ArtifactWorker) dispatch(ctx context.Context) {
 		if err == nil {
 			for _, d := range rows {
 				publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-				err = w.publish(publishCtx, ArtifactDispatch{1, d.RunID, d.ID, d.RunID})
+				err = w.publish(publishCtx, ArtifactQueue, d.SubjectKind, ArtifactDispatch{1, d.RunID, d.ID, d.RunID})
 				cancel()
-				if e := w.repo.DispatchResult(ctx, d, err == nil); e != nil && ctx.Err() == nil {
+				if e := w.repo.DispatchResult(ctx, d.GenerationDispatch, err == nil); e != nil && ctx.Err() == nil {
 					log.Print("artifact outbox result temporarily unavailable")
 				}
 			}
@@ -82,7 +94,56 @@ func (w *ArtifactWorker) dispatch(ctx context.Context) {
 		}
 	}
 }
-func (w *ArtifactWorker) publish(ctx context.Context, payload ArtifactDispatch) error {
+
+func (w *ArtifactWorker) dispatchEdits(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		rows, err := w.repo.EditDispatches(ctx)
+		if err == nil {
+			for _, d := range rows {
+				publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				err = w.publish(publishCtx, ArtifactEditQueue, d.SubjectKind, ArtifactDispatch{1, d.RunID, d.ID, d.RunID})
+				cancel()
+				if e := w.repo.EditDispatchResult(ctx, d.ArtifactEditDispatch, err == nil); e != nil && ctx.Err() == nil {
+					log.Print("artifact edit outbox result temporarily unavailable")
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func artifactSubjectForQueue(queue string) (string, error) {
+	switch queue {
+	case ArtifactQueue:
+		return artifactGenerationSubject, nil
+	case ArtifactEditQueue:
+		return model.AgentRunSubjectArtifactEdit, nil
+	default:
+		return "", fmt.Errorf("unsupported artifact queue %q", queue)
+	}
+}
+
+func (w *ArtifactWorker) publish(ctx context.Context, queue, dispatchedSubject string, payload ArtifactDispatch) error {
+	expectedSubject, err := artifactSubjectForQueue(queue)
+	if err != nil {
+		return err
+	}
+	if dispatchedSubject != expectedSubject {
+		return fmt.Errorf("%w: expected=%s dispatched=%s run_id=%s", errArtifactQueueMismatch, expectedSubject, dispatchedSubject, payload.RunID)
+	}
+	actualSubject, err := w.repo.ArtifactRunSubject(ctx, payload.RunID)
+	if err != nil {
+		return err
+	}
+	if actualSubject != dispatchedSubject {
+		return fmt.Errorf("%w: expected=%s actual=%s run_id=%s", errArtifactQueueMismatch, dispatchedSubject, actualSubject, payload.RunID)
+	}
 	conn, err := amqp.DialConfig(w.url, amqp.Config{Dial: amqp.DefaultDial(5 * time.Second)})
 	if err != nil {
 		return err
@@ -93,7 +154,7 @@ func (w *ArtifactWorker) publish(ctx context.Context, payload ArtifactDispatch) 
 		return err
 	}
 	defer ch.Close()
-	if _, err = ch.QueueDeclare(ArtifactQueue, true, false, false, false, nil); err != nil {
+	if _, err = ch.QueueDeclare(queue, true, false, false, false, nil); err != nil {
 		return err
 	}
 	if err = ch.Confirm(false); err != nil {
@@ -105,7 +166,7 @@ func (w *ArtifactWorker) publish(ctx context.Context, payload ArtifactDispatch) 
 	if err != nil {
 		return err
 	}
-	if err = ch.PublishWithContext(ctx, "", ArtifactQueue, true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, MessageId: payload.RunID + ":" + payload.DispatchID, Body: raw, Timestamp: time.Now().UTC()}); err != nil {
+	if err = ch.PublishWithContext(ctx, "", queue, true, false, amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, MessageId: payload.RunID + ":" + payload.DispatchID, Body: raw, Timestamp: time.Now().UTC()}); err != nil {
 		return err
 	}
 	select {
@@ -125,23 +186,22 @@ func (w *ArtifactWorker) publish(ctx context.Context, payload ArtifactDispatch) 
 		}
 	}
 }
-func (w *ArtifactWorker) consume(ctx context.Context) {
+
+func (w *ArtifactWorker) consume(ctx context.Context, queue string) {
+	if _, err := artifactSubjectForQueue(queue); err != nil {
+		return
+	}
+	consumer := "vidlens-artifact-worker"
+	if queue == ArtifactEditQueue {
+		consumer = "vidlens-artifact-edit-worker"
+	}
 	for ctx.Err() == nil {
-		reader := newAmqpReader(w.url, ArtifactQueue, "vidlens-artifact-worker", 1)
+		reader := newAmqpReader(w.url, queue, consumer, 1)
 		if reader.ch != nil {
-			_, _ = reader.ch.QueueDeclare(ArtifactQueue, true, false, false, false, nil)
+			_, _ = reader.ch.QueueDeclare(queue, true, false, false, false, nil)
 		}
 		_ = consumeMessages(ctx, reader, func(ctx context.Context, d amqp.Delivery) error {
-			var p ArtifactDispatch
-			if len(d.Body) > 4096 || json.Unmarshal(d.Body, &p) != nil || p.SchemaVersion != 1 || p.RunID == "" || p.DispatchID == "" {
-				return nil
-			}
-			err := w.svc.ExecuteArtifact(ctx, p.RunID)
-			var domain *artifact.Error
-			if errors.As(err, &domain) && domain.Code == "not_found" {
-				return nil
-			}
-			return err
+			return w.handle(ctx, queue, d)
 		})
 		select {
 		case <-ctx.Done():
@@ -149,4 +209,36 @@ func (w *ArtifactWorker) consume(ctx context.Context) {
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+func (w *ArtifactWorker) handle(ctx context.Context, queue string, d amqp.Delivery) error {
+	expectedSubject, err := artifactSubjectForQueue(queue)
+	if err != nil {
+		return err
+	}
+	var p ArtifactDispatch
+	if len(d.Body) > 4096 || json.Unmarshal(d.Body, &p) != nil || p.SchemaVersion != 1 || p.RunID == "" || p.DispatchID == "" {
+		return nil
+	}
+	subjectKind, err := w.repo.ArtifactRunSubject(ctx, p.RunID)
+	if err != nil {
+		var domain *artifact.Error
+		if errors.As(err, &domain) && domain.Code == "not_found" {
+			return nil
+		}
+		return err
+	}
+	if subjectKind != expectedSubject {
+		return nil
+	}
+	if subjectKind == model.AgentRunSubjectArtifactEdit {
+		err = w.svc.ExecuteArtifactEdit(ctx, p.RunID)
+	} else {
+		err = w.svc.ExecuteArtifact(ctx, p.RunID)
+	}
+	var domain *artifact.Error
+	if errors.As(err, &domain) && domain.Code == "not_found" {
+		return nil
+	}
+	return err
 }

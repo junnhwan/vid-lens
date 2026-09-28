@@ -12,6 +12,7 @@ function redactSecrets(value: string): string {
 }
 const safeTitle = (value: string) => redactSecrets(value).replace(/[\\`*_{}\[\]<>]/g, '\\$&').replace(/\r?\n/g, ' ')
 const url = (origin: string, path: string) => new URL(path, origin).href
+const versionOrigin = { generated: '后台生成', user: '人工保存', agent: 'Agent 修订', undo: '撤销版本' } as const
 
 /** Renders one server-confirmed immutable version. Callers must re-read access before download. */
 export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evidence>, origin: string): string {
@@ -26,7 +27,7 @@ export function savedMarkdown(detail: ArtifactDetail, evidence: Map<string, Evid
   const versionPath = `/artifacts/${encodeURIComponent(detail.id)}?version=${encodeURIComponent(version.id)}`
   const lines = [
     `# ${safeTitle(body.title)}`, '',
-    `> 已保存版本：v${version.version} · ${version.origin === 'user' ? '人工保存' : '后台生成'} · ${new Date(version.created_at).toLocaleString('zh-CN')}`,
+    `> 已保存版本：v${version.version} · ${versionOrigin[version.origin]} · ${new Date(version.created_at).toLocaleString('zh-CN')}`,
     `> [查看此版本](${url(origin, versionPath)}) · ${version.source_status === 'outdated' ? '来源已更新，旧时间不用于定位新视频' : '来源快照当前有效'}`,
     '',
   ]

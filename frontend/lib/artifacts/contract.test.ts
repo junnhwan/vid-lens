@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bodySchema, detailSchema, evidenceSchema, runSchema } from './schema.ts'
+import { bodySchema, detailSchema, editOperationSchema, editResultSchema, evidenceSchema, runSchema } from './schema.ts'
 import { artifactCardStatus, canReplay, evidenceTime, isPointEvidence, mapTree, warningMessage } from './view.ts'
 import { studyFixture, evidenceFixtures, runFixture } from '../../dev/productFixtures.ts'
 
@@ -8,6 +8,20 @@ test('first-delivery specimens validate against the API contract', () => {
   assert.equal(detailSchema.safeParse(studyFixture).success, true)
   assert.equal(runSchema.safeParse(runFixture).success, true)
   for (const evidence of evidenceFixtures) assert.equal(evidenceSchema.safeParse(evidence).success, true)
+})
+test('edit results normalize omitted empty evidence and preserve move indexes', () => {
+  assert.deepEqual(editResultSchema.parse({ kind: 'answer', message: '只回答' }), { kind: 'answer', message: '只回答', evidence_ids: [] })
+  assert.deepEqual(editResultSchema.parse({ kind: 'no_change', message: '无需修改' }), { kind: 'no_change', message: '无需修改', evidence_ids: [] })
+  const block = studyFixture.version!.body.blocks[0]
+  const operation = editOperationSchema.parse({
+    id: 'operation-contract', artifact_id: studyFixture.id, status: 'proposed', base_version: 1, base_version_id: studyFixture.version!.id,
+    result_version_id: null, undo_version_id: null, basis: 'user_instruction', evidence_ids: [], summary: '移动块',
+    counts: { added: 0, updated: 0, deleted: 0, moved: 1 },
+    changes: [{ kind: 'moved', block_id: block.block_id, before: block, after: block, before_index: 0, after_index: 2 }],
+    block_mappings: [], can_apply: true, can_undo: false, created_at: '2026-09-28T02:00:00Z', updated_at: '2026-09-28T02:00:00Z', committed_at: null,
+  })
+  assert.equal(operation.changes[0].before_index, 0)
+  assert.equal(operation.changes[0].after_index, 2)
 })
 test('unknown timestamps never become a replay link even with stray numeric coordinates', () => {
   const evidence = { ...evidenceFixtures[0], time_range_status: 'unknown' as const, start_ms: 0, end_ms: 1000 }
