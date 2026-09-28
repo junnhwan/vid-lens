@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useLocation } from 'react-router'
 
 interface TocItem {
   id: string
@@ -32,9 +33,10 @@ function scan(): TocItem[] {
 
 /**
  * 右侧「本页目录」:从正文 DOM 扫描 h2/h3,页面不必维护两份目录。
- * 路由切换后正文节点会被替换,用 MutationObserver 重扫一次。
+ * 路由切换后重扫静态文档标题，并在正文渲染后恢复章节锚点。
  */
 export function DocsToc() {
+  const { pathname, hash } = useLocation()
   const [items, setItems] = useState<TocItem[]>([])
   const [active, setActive] = useState('')
 
@@ -42,13 +44,8 @@ export function DocsToc() {
     const main = document.querySelector<HTMLElement>('.docs-main')
     if (!main) return
 
-    let list: TocItem[] = []
-    const refresh = () => {
-      list = scan()
-      setItems(list)
-      setActive(current => list.some(item => item.id === current) ? current : list[0]?.id || '')
-    }
-    refresh()
+    const list = scan()
+    setItems(list)
 
     let raf = 0
     const measure = () => {
@@ -66,23 +63,24 @@ export function DocsToc() {
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(measure) }
 
-    // The app layout persists during client navigation, but the article node
-    // itself is replaced. Observe the stable scroll container so the TOC is
-    // rebuilt for each route.
-    const mo = new MutationObserver(() => {
-      refresh()
+    // The initial HTML has no headings for the browser to locate. Wait for
+    // React's article and TOC layout before restoring a cross-page fragment.
+    const restoreFrame = requestAnimationFrame(() => {
+      let id = ''
+      try { id = decodeURIComponent(hash.slice(1)) } catch { /* Invalid URL fragment: open the page at the top. */ }
+      const target = list.some(item => item.id === id) ? document.getElementById(id) : null
+      if (target) target.scrollIntoView({ behavior: 'instant', block: 'start' })
+      else main.scrollTo({ top: 0, behavior: 'instant' })
       measure()
     })
-    mo.observe(main, { childList: true, subtree: true })
 
-    measure()
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => {
-      mo.disconnect()
+      cancelAnimationFrame(restoreFrame)
       main.removeEventListener('scroll', onScroll)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [pathname, hash])
 
   const jump = useCallback((e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
     e.preventDefault()
