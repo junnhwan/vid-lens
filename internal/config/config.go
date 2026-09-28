@@ -173,12 +173,14 @@ type JWTConfig struct {
 }
 
 type SecurityConfig struct {
-	APIKeySecret string `yaml:"api_key_secret"`
+	APIKeySecret    string `yaml:"api_key_secret"`
+	HostedAIOwnerID int64  `yaml:"hosted_ai_owner_id"`
 }
 
 type UploadConfig struct {
-	MaxFileSize int64 `yaml:"max_file_size"`
-	ChunkSize   int64 `yaml:"chunk_size"`
+	DisableURLImport bool  `yaml:"disable_url_import"`
+	MaxFileSize      int64 `yaml:"max_file_size"`
+	ChunkSize        int64 `yaml:"chunk_size"`
 }
 
 type TaskRetryConfig struct {

@@ -25,10 +25,12 @@ type AIProfileTester interface {
 }
 
 type AIProfileService struct {
-	budgetConfig config.AgentBudgetConfig
-	repo         *repository.AIProfileRepository
-	codec        *secret.Codec
-	tester       AIProfileTester
+	hostedOwnerID      int64
+	hostedEmbeddingDim int
+	budgetConfig       config.AgentBudgetConfig
+	repo               *repository.AIProfileRepository
+	codec              *secret.Codec
+	tester             AIProfileTester
 }
 
 func NewAIProfileService(repo *repository.AIProfileRepository, codec *secret.Codec, tester AIProfileTester) *AIProfileService {
@@ -61,6 +63,7 @@ type AIProfileRequest struct {
 }
 
 type AIProfileResponse struct {
+	RerankModel           string                      `json:"rerank_model,omitempty"`
 	AgentBudget           *model.AgentBudgetOverride  `json:"agent_budget"`
 	EffectiveAgentBudget  *config.ResolvedAgentBudget `json:"effective_agent_budget"`
 	AgentBudgetError      string                      `json:"agent_budget_error,omitempty"`
@@ -92,6 +95,10 @@ type AIProfileResponse struct {
 }
 
 type DecryptedAIProfile struct {
+	RerankProvider    string
+	RerankEndpoint    string
+	RerankAPIKey      string
+	RerankModel       string
 	ID                int64
 	UserID            int64
 	Name              string
@@ -146,6 +153,14 @@ func (s *AIProfileService) List(userID int64) ([]AIProfileResponse, error) {
 	}
 	responses := make([]AIProfileResponse, 0, len(profiles))
 	for i := range profiles {
+		if profiles[i].Source == "hosted" {
+			view, err := s.hostedResponse(&profiles[i])
+			if err != nil {
+				return nil, err
+			}
+			responses = append(responses, *view)
+			continue
+		}
 		responses = append(responses, *s.responseFromProfile(&profiles[i]))
 	}
 	return responses, nil
@@ -162,6 +177,14 @@ func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error)
 	responses := make([]AIProfileResponse, 0, len(profiles))
 	for i := range profiles {
 		p := &profiles[i]
+		if p.Source == "hosted" {
+			view, err := s.hostedResponse(p)
+			if err != nil {
+				return nil, err
+			}
+			responses = append(responses, *view)
+			continue
+		}
 		responses = append(responses, AIProfileResponse{
 			ID:               p.ID,
 			Name:             p.Name,
@@ -180,6 +203,9 @@ func (s *AIProfileService) ListMasked(userID int64) ([]AIProfileResponse, error)
 }
 
 func (s *AIProfileService) Update(userID, id int64, req AIProfileRequest) (*AIProfileResponse, error) {
+	if err := s.requireUserOwnedProfile(userID, id); err != nil {
+		return nil, err
+	}
 	if err := validateAIProfileRequest(req, false); err != nil {
 		return nil, err
 	}
@@ -203,6 +229,9 @@ func (s *AIProfileService) Update(userID, id int64, req AIProfileRequest) (*AIPr
 }
 
 func (s *AIProfileService) Delete(userID, id int64) error {
+	if err := s.requireUserOwnedProfile(userID, id); err != nil {
+		return err
+	}
 	return s.repo.DeleteForUser(userID, id)
 }
 
@@ -238,6 +267,9 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 }
 
 func (s *AIProfileService) TestSavedProfile(ctx context.Context, userID, id int64) error {
+	if err := s.requireUserOwnedProfile(userID, id); err != nil {
+		return err
+	}
 	if s.tester == nil {
 		return nil
 	}
@@ -268,6 +300,11 @@ type ListModelsRequest struct {
 
 // ListModels proxies OpenAI-compatible model listing. Does not require tester.
 func (s *AIProfileService) ListModels(ctx context.Context, userID int64, req ListModelsRequest) ([]string, error) {
+	if req.ProfileID > 0 {
+		if err := s.requireUserOwnedProfile(userID, req.ProfileID); err != nil {
+			return nil, err
+		}
+	}
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
 	provider := normalizeProvider(req.Provider)
@@ -355,6 +392,11 @@ type ProbeEmbeddingDimRequest struct {
 
 // ProbeEmbeddingDim embeds a short string and returns the vector length as dimension.
 func (s *AIProfileService) ProbeEmbeddingDim(ctx context.Context, userID int64, req ProbeEmbeddingDimRequest) (int, error) {
+	if req.ProfileID > 0 {
+		if err := s.requireUserOwnedProfile(userID, req.ProfileID); err != nil {
+			return 0, err
+		}
+	}
 	endpoint := strings.TrimSpace(req.Endpoint)
 	apiKey := strings.TrimSpace(req.APIKey)
 	model := strings.TrimSpace(req.Model)
@@ -407,6 +449,11 @@ type ProbeCapabilityRequest struct {
 }
 
 func (s *AIProfileService) ProbeCapability(ctx context.Context, userID int64, req ProbeCapabilityRequest) (int, error) {
+	if req.ProfileID > 0 {
+		if err := s.requireUserOwnedProfile(userID, req.ProfileID); err != nil {
+			return 0, err
+		}
+	}
 	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
 	if purpose != "llm" && purpose != "asr" && purpose != "embedding" && purpose != "vision" {
 		return 0, fmt.Errorf("未知模型能力")
@@ -527,6 +574,7 @@ func (s *AIProfileService) GetDefaultAIProfile(userID int64) (*ai.Profile, error
 
 func providerFromDecrypted(profile *DecryptedAIProfile) *ai.Profile {
 	return &ai.Profile{
+		RerankProvider: profile.RerankProvider, RerankEndpoint: profile.RerankEndpoint, RerankAPIKey: profile.RerankAPIKey, RerankModel: profile.RerankModel,
 		ID:                profile.ID,
 		LLMProvider:       profile.LLMProvider,
 		LLMBaseURL:        profile.LLMBaseURL,
@@ -700,6 +748,9 @@ func (s *AIProfileService) maskCiphertext(ciphertext string) string {
 }
 
 func (s *AIProfileService) decryptProfile(profile *model.UserAIProfile) (*DecryptedAIProfile, error) {
+	if profile.Source == "hosted" {
+		return s.decryptHosted(profile)
+	}
 	llmKey, err := s.codec.Decrypt(profile.LLMAPIKeyCiphertext)
 	if err != nil {
 		return nil, err

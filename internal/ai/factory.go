@@ -26,9 +26,8 @@ type Profile struct {
 	VisionBaseURL     string
 	VisionAPIKey      string
 	VisionModel       string
-	// Rerank is intentionally runtime-only for now: the production profile
-	// schema does not enable model rerank, while the legacy eval path can
-	// provide an explicit endpoint/model and optionally a separate key.
+	// Hosted bundles and evaluation runs can provide an explicit reranker.
+	// Ordinary BYOK profiles continue to use the deployment retrieval policy.
 	RerankProvider string
 	RerankEndpoint string
 	RerankAPIKey   string

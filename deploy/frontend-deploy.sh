@@ -55,6 +55,11 @@ case "$deploy_dir/" in
 esac
 
 frontend_dir="$deploy_dir/frontend"
+# Keep an existing direct upload entry on later releases unless explicitly reset.
+upload_api_base="${VIDLENS_UPLOAD_API_BASE-}"
+if [ "${VIDLENS_UPLOAD_API_BASE+x}" != x ] && [ -f "$frontend_dir/.upload-api-base" ]; then
+  upload_api_base="$(cat "$frontend_dir/.upload-api-base")"
+fi
 staging_dir="$deploy_dir/frontend.new-$stamp"
 old_dir="$deploy_dir/frontend.old-$stamp"
 backup_dir="$deploy_dir/.logs/deploy-backups/$stamp"
@@ -97,10 +102,11 @@ tar -xzf "$tmp_dir/frontend-src.tar.gz" -C "$staging_dir"
 (
   cd "$staging_dir"
   npm ci --no-audit --no-fund
-  npm run build
+  VITE_UPLOAD_API_BASE="$upload_api_base" npm run build
 )
 [ -f "$staging_dir/dist/index.html" ] || die "frontend build did not produce dist/index.html"
 printf '%s\n' "$VIDLENS_API_BASE" > "$staging_dir/.api-base"
+printf '%s\n' "$upload_api_base" > "$staging_dir/.upload-api-base"
 
 # Record a lightweight backup of the current release metadata for forensics.
 mkdir -p "$backup_dir"

@@ -82,6 +82,7 @@ if [ "${1:-}" = "run" ] && [ "${2:-}" = "build" ]; then
   fi
   mkdir -p dist
   printf 'new-build\n' > dist/index.html
+  printf '%s\n' "${VITE_UPLOAD_API_BASE-}" > dist/upload-base.txt
 fi
 exit 0
 STUB
@@ -174,6 +175,19 @@ test_missing_vidlens_api_base_is_rejected() {
   assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
 }
 
+test_upload_entry_is_built_and_preserved() {
+  new_case upload-config
+  VIDLENS_UPLOAD_API_BASE='https://upload.example.com/api/v1' run_deploy >"$case_root/stdout" 2>"$case_root/stderr"
+  assert_file_text "$deploy_dir/frontend/dist/upload-base.txt" 'https://upload.example.com/api/v1'
+  assert_file_text "$deploy_dir/frontend/.upload-api-base" 'https://upload.example.com/api/v1'
+  run_deploy >"$case_root/stdout" 2>"$case_root/stderr"
+  assert_file_text "$deploy_dir/frontend/dist/upload-base.txt" 'https://upload.example.com/api/v1'
+  VIDLENS_UPLOAD_API_BASE='' run_deploy >"$case_root/stdout" 2>"$case_root/stderr"
+  assert_file_text "$deploy_dir/frontend/dist/upload-base.txt" ''
+  assert_file_text "$deploy_dir/frontend/.upload-api-base" ''
+}
+
+test_upload_entry_is_built_and_preserved
 test_missing_artifact_is_rejected
 test_failed_build_keeps_old_release
 test_successful_deploy_swaps_and_restarts

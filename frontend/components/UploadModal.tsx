@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import { MD5 } from '@/lib/md5'
@@ -17,7 +17,7 @@ interface UploadRow {
   id: number
   name: string
   sizeLabel: string
-  phase: 'hashing' | 'uploading' | 'merging' | 'done' | 'error'
+  phase: 'hashing' | 'checking' | 'uploading' | 'merging' | 'done' | 'error'
   pct: number
   error?: string
   taskId?: number
@@ -32,60 +32,89 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
   const [dragOver, setDragOver] = useState(false)
   const [url, setUrl] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
+  const [urlImportEnabled, setURLImportEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    let active = true
+    api.importOptions().then(options => { if (active) setURLImportEnabled(options.url_import_enabled) })
+      .catch(() => { if (active) setURLImportEnabled(false) })
+    return () => { active = false }
+  }, [])
   const fileRef = useRef<HTMLInputElement>(null)
   const seq = useRef(0)
-  const rowsRef = useRef<UploadRow[]>([])
-  rowsRef.current = rows
+  const transfers = useRef(new Set<AbortController>())
+  useEffect(() => {
+    const active = transfers.current
+    return () => { for (const transfer of active) transfer.abort(); active.clear() }
+  }, [])
 
   const patchRow = (id: number, patch: Partial<UploadRow>) => {
     setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)))
   }
 
   async function uploadFile(file: File) {
+    const controller = new AbortController()
+    const { signal } = controller
+    transfers.current.add(controller)
     const id = ++seq.current
     setRows(prev => [...prev, {
-      id, name: file.name, sizeLabel: fmtSize(file.size), phase: 'hashing', pct: 4,
+      id, name: file.name, sizeLabel: fmtSize(file.size), phase: 'hashing', pct: 0,
     }])
     try {
+      if (file.size === 0 || file.size > 2 * 1024 * 1024 * 1024) throw new ApiError(400, '请选择大小在 2 GB 以内的非空视频文件')
       // 1) 计算真实 MD5(后端以其为分片会话键与资产去重键)
       const hasher = new MD5()
       for (let off = 0; off < file.size; off += HASH_SLICE) {
         const buf = await file.slice(off, Math.min(off + HASH_SLICE, file.size)).arrayBuffer()
+        signal.throwIfAborted()
         hasher.update(buf)
-        patchRow(id, { pct: Math.min(4, Math.round((off / file.size) * 4)) })
+        patchRow(id, { pct: Math.round(Math.min(off + HASH_SLICE, file.size) / file.size * 4) })
       }
       const fileMd5 = hasher.digestHex()
 
       // 2) 询问服务端已收到的分片(断点续传;已完成资产则直接合并)
       const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE))
-      const progress = await api.checkUpload(fileMd5, file.size, CHUNK_SIZE, totalChunks)
-      const uploaded = new Set(progress.status === 'completed' ? [] : progress.uploaded)
+      patchRow(id, { phase: 'checking', pct: 4 })
+      const progress = await api.checkUpload(fileMd5, file.size, CHUNK_SIZE, totalChunks, signal)
+      signal.throwIfAborted()
+      const uploaded = new Set(progress.uploaded.filter(n => Number.isInteger(n) && n >= 0 && n < totalChunks))
+      let savedBytes = [...uploaded].reduce((sum, n) => sum + Math.min(CHUNK_SIZE, file.size - n * CHUNK_SIZE), 0)
+      const showProgress = (currentBytes = 0) => patchRow(id, {
+        phase: 'uploading', pct: 4 + Math.round(Math.min(1, (savedBytes + currentBytes) / file.size) * 92),
+      })
 
       // 3) 顺序补传缺失分片
-      for (let i = 0; i < totalChunks; i++) {
+      if (progress.status !== 'completed') showProgress()
+      for (let i = 0; progress.status !== 'completed' && i < totalChunks; i++) {
         if (uploaded.has(i)) continue
+        signal.throwIfAborted()
         const chunk = file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size))
-        await api.uploadChunk(fileMd5, i, chunk)
-        const doneCount = uploaded.size + [...Array(i + 1).keys()].filter(n => !uploaded.has(n)).length
-        patchRow(id, { phase: 'uploading', pct: 4 + Math.round((doneCount / totalChunks) * 92) })
+        await api.uploadChunk(fileMd5, i, chunk, { signal, onProgress: showProgress })
+        signal.throwIfAborted()
+        savedBytes += chunk.size
+        showProgress()
       }
 
       // 4) 合并建任务
       patchRow(id, { phase: 'merging', pct: 97 })
       const result = await api.mergeChunks({
         file_md5: fileMd5, filename: file.name, total_chunks: totalChunks, file_size: file.size, chunk_size: CHUNK_SIZE,
-      })
+      }, signal)
+      signal.throwIfAborted()
       patchRow(id, { phase: 'done', pct: 100, taskId: result.task_id, alreadyProcessed: result.status === 3 })
       toast.success(result.status === 3 ? '文件已上传，已复用现有转写和摘要' : '文件已上传。请打开视频详情，点击“开始转写”才会启动处理')
       onUploaded?.(result.task_id)
     } catch (e) {
+      if (signal.aborted) return
       const msg = e instanceof ApiError ? e.message : '上传失败'
       patchRow(id, { phase: 'error', error: msg })
       toast.error(msg)
+    } finally {
+      transfers.current.delete(controller)
     }
   }
 
   async function uploadUrl() {
+    if (urlImportEnabled !== true) { toast.info('链接导入暂未开放，请上传本地视频文件'); return }
     const u = url.trim()
     if (!u) { toast.info('先粘贴一个视频链接'); return }
     setUrlBusy(true)
@@ -104,14 +133,15 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
   const phaseText = (r: UploadRow) => {
     switch (r.phase) {
       case 'hashing': return '校验文件…'
-      case 'uploading': return '上传中'
+      case 'checking': return '检查续传进度…'
+      case 'uploading': return `上传中 · ${r.pct}%`
       case 'merging': return '合并分片…'
       case 'done': return r.alreadyProcessed ? '文件已上传 · 已复用现有处理结果' : '文件已上传 · 转写尚未开始'
       case 'error': return r.error || '失败'
     }
   }
 
-  const inFlight = urlBusy || rows.some(r => r.phase === 'hashing' || r.phase === 'uploading' || r.phase === 'merging')
+  const inFlight = urlBusy || rows.some(r => r.phase === 'hashing' || r.phase === 'checking' || r.phase === 'uploading' || r.phase === 'merging')
 
   return (
     <Modal
@@ -121,9 +151,9 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
     >
           <div className="seg" style={{ marginBottom: 14 }}>
             <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>本地文件</button>
-            <button className={tab === 'url' ? 'on' : ''} onClick={() => setTab('url')}>视频链接</button>
+            <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放，当前服务不稳定' : undefined} onClick={() => setTab('url')}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
           </div>
-          <p className="muted" style={{ fontSize:12,marginBottom:12 }}>本地文件在上传及合并完成前请保持页面打开；服务器返回视频任务后可以离页，后续转写和画面处理由服务器继续。视频链接创建下载任务并获服务器受理后，也可以离页。</p>
+          <p className="muted" style={{ fontSize:12,marginBottom:12 }}>本地文件在上传及合并完成前请保持页面打开；服务器返回视频任务后可以离页，后续转写和画面处理由服务器继续。{urlImportEnabled === true ? '视频链接创建下载任务并获服务器受理后，也可以离页。' : '链接导入暂未开放（服务不稳定），请使用本地文件上传。'}</p>
 
           {tab === 'file' ? (
             <div>

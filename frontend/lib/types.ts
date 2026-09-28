@@ -75,6 +75,7 @@ export interface AIProfile {
   vision_base_url: string
   vision_api_key_masked: string
   vision_model: string
+  rerank_model?: string
   is_default: boolean
   source?: string // "user" | "hosted"
   read_only?: boolean
@@ -103,6 +104,26 @@ export interface AIProfileRequest {
   vision_api_key?: string
   vision_model?: string
   is_default?: boolean
+}
+export interface HostedAIStatus {
+  enabled: boolean
+  can_manage: boolean
+  notice: string
+  profile?: AIProfile | null
+}
+export interface HostedAIAdmin extends AIProfile {
+  enabled: boolean
+  rerank_provider: string
+  rerank_endpoint: string
+  rerank_api_key_masked: string
+  rerank_model: string
+}
+export interface HostedAIRequest extends AIProfileRequest {
+  enabled: boolean
+  rerank_provider: string
+  rerank_endpoint: string
+  rerank_api_key?: string
+  rerank_model: string
 }
 export type ProfilePurpose = 'llm' | 'asr' | 'embedding' | 'vision'
 export interface PromptPreferenceView {

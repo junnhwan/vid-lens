@@ -73,6 +73,20 @@ The production Node server rejects this route with HTTP 404; Vite excludes the p
 `VIDLENS_API_BASE` sets the backend target, and deployment writes the same
 value to a local `.api-base` file for the systemd service.
 
+For sites behind an upload-constrained proxy, set `VITE_UPLOAD_API_BASE` at build
+time to a trusted HTTPS endpoint ending in `/api/v1`. Only upload checks, chunks
+and merging use this entry; other API requests stay on the website origin.
+The endpoint must resolve in public DNS, present a valid certificate and permit
+CORS preflight with `Authorization` and `Content-Type`. Keep DNS-only routing if
+the purpose is to bypass a tunnel. Never put credentials in this public setting.
+Without it, uploads use the same-origin proxy, including local development.
+
+`deploy/frontend-deploy.sh` accepts `VIDLENS_UPLOAD_API_BASE`, passes it into the
+Vite build and records it in `.upload-api-base`. Later deployments preserve that
+setting when the variable is omitted. Set it explicitly to an empty string to
+restore same-origin uploads. Changing the systemd environment alone does not
+change the URL compiled into an existing browser bundle.
+
 ## Checks
 
 ```powershell

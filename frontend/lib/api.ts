@@ -1,5 +1,5 @@
 import type {
-  AIProfile, AIProfileRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, HostedAIStatus, HostedAIAdmin, HostedAIRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AskResult, AuthResult,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
   MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
@@ -11,9 +11,10 @@ import type {
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
 
 // ============ 唯一后端出口 ============
-// 所有后端调用经此模块；Vite 开发代理和生产 Node 服务转发 /api。
+// 所有后端调用经此模块；上传可配置 HTTPS 直连入口，其余请求由站内代理转发。
 
 const API_BASE = '/api/v1'
+const UPLOAD_API_BASE = (import.meta.env?.VITE_UPLOAD_API_BASE?.trim() || API_BASE).replace(/\/+$/, '')
 const TOKEN_KEY = 'vidlens-token'
 
 type PlaybackSource = { playback_url: string }
@@ -67,7 +68,7 @@ export class ApiError extends Error {
 }
 
 // body 接受任意可序列化对象/字符串/FormData；内部统一处理
-export async function req<T>(path: string, method: string, body?: unknown, headersOverride?: Record<string, string>, signal?: AbortSignal): Promise<T> {
+export async function req<T>(path: string, method: string, body?: unknown, headersOverride?: Record<string, string>, signal?: AbortSignal, base = API_BASE): Promise<T> {
   const headers: Record<string, string> = { ...authHeaders(), ...(headersOverride || {}) }
   let payload: BodyInit | null | undefined
   if (body instanceof FormData) {
@@ -76,7 +77,11 @@ export async function req<T>(path: string, method: string, body?: unknown, heade
     headers['Content-Type'] = 'application/json'
     payload = typeof body === 'string' ? body : JSON.stringify(body)
   }
-  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload, signal })
+  const res = await fetch(`${base}${path}`, { method, headers, body: payload, signal })
+  return readResponse<T>(res)
+}
+
+async function readResponse<T>(res: Pick<Response, 'status' | 'statusText' | 'ok' | 'json'>): Promise<T> {
   // 401 跳登录（未授权）
   if (res.status === 401) {
     if (typeof window !== 'undefined') {
@@ -95,6 +100,44 @@ export async function req<T>(path: string, method: string, body?: unknown, heade
   return env.data as T
 }
 
+export type UploadChunkOptions = { onProgress?: (loadedBytes: number) => void; signal?: AbortSignal }
+
+// Fetch does not expose upload progress. XHR reports bytes sent while still waiting
+// for the server's success envelope before marking a chunk as saved.
+function sendChunk(fileMD5: string, chunkNumber: number, chunk: Blob, options: UploadChunkOptions = {}): Promise<{ chunk_number: number }> {
+  return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) { reject(new DOMException('Upload aborted', 'AbortError')); return }
+    const xhr = new XMLHttpRequest()
+    const abort = () => xhr.abort()
+    const cleanup = () => options.signal?.removeEventListener('abort', abort)
+    xhr.open('POST', `${UPLOAD_API_BASE}/media/upload-chunk`)
+    xhr.timeout = 120_000
+    for (const [name, value] of Object.entries(authHeaders())) xhr.setRequestHeader(name, value)
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && event.total > 0) {
+        options.onProgress?.(Math.min(chunk.size, Math.round(event.loaded / event.total * chunk.size)))
+      }
+    }
+    xhr.onload = () => {
+      cleanup()
+      // Reuse the same envelope and authentication handling as the fetch API.
+      readResponse<{ chunk_number: number }>({
+        status: xhr.status, statusText: xhr.statusText, ok: xhr.status >= 200 && xhr.status < 300,
+        json: async () => JSON.parse(xhr.responseText),
+      }).then(resolve, reject)
+    }
+    xhr.onerror = () => { cleanup(); reject(new ApiError(0, '上传连接失败，请检查网络后重新选择同一文件续传')) }
+    xhr.ontimeout = () => { cleanup(); reject(new ApiError(408, '上传超时，请重新选择同一文件续传')) }
+    xhr.onabort = () => { cleanup(); reject(new DOMException('Upload aborted', 'AbortError')) }
+    options.signal?.addEventListener('abort', abort, { once: true })
+    const data = new FormData()
+    data.append('file_md5', fileMD5)
+    data.append('chunk_number', String(chunkNumber))
+    data.append('chunk', chunk)
+    try { xhr.send(data) } catch (error) { cleanup(); reject(error) }
+  })
+}
+
 // ============ 认证 ============
 export const api = {
   register: (username: string, password: string, nickname?: string) =>
@@ -108,6 +151,10 @@ export const api = {
   promptPreferences: () => req<PromptPreferenceView[]>('/ai/profiles/prompt-preferences', 'GET'),
   setPromptPreference: (functionName: PromptPreferenceView['function'], text: string) => req<{ saved: boolean }>(`/ai/profiles/prompt-preferences/${functionName}`, 'PUT', { text }),
   listProfiles: () => req<AIProfile[]>('/ai/profiles', 'GET'),
+  hostedAI: () => req<HostedAIStatus>('/ai/hosted', 'GET'),
+  activateHostedAI: () => req<AIProfile>('/ai/hosted/activate', 'POST'),
+  hostedAIAdmin: () => req<HostedAIAdmin>('/ai/hosted/admin', 'GET'),
+  updateHostedAI: (p: HostedAIRequest) => req<HostedAIAdmin>('/ai/hosted/admin', 'PUT', p),
   createProfile: (p: AIProfileRequest) => req<AIProfile>('/ai/profiles', 'POST', p),
   updateProfile: (id: number, p: AIProfileRequest) => req<AIProfile>(`/ai/profiles/${id}`, 'PUT', p),
   deleteProfile: (id: number) => req<null>(`/ai/profiles/${id}`, 'DELETE'),
@@ -121,26 +168,21 @@ export const api = {
     req<{ dimension: number }>('/ai/profiles/probe', 'POST', payload),
 
   // ============ 媒体 ============
+  importOptions: () => req<{ url_import_enabled: boolean }>('/media/import-options', 'GET'),
   uploadFile: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
     return req<UploadResult>('/media/upload', 'POST', fd)
   },
   uploadUrl: (url: string) => req<UploadResult>('/media/upload-url', 'POST', { url }),
-  checkUpload: (file_md5: string, file_size: number, chunk_size: number, total_chunks: number) =>
+  checkUpload: (file_md5: string, file_size: number, chunk_size: number, total_chunks: number, signal?: AbortSignal) =>
     req<UploadProgressInfo>(
       `/media/check-upload?file_md5=${file_md5}&file_size=${file_size}&chunk_size=${chunk_size}&total_chunks=${total_chunks}`,
-      'GET',
+      'GET', undefined, undefined, signal, UPLOAD_API_BASE,
     ),
-  uploadChunk: (file_md5: string, chunk_number: number, chunk: Blob) => {
-    const fd = new FormData()
-    fd.append('file_md5', file_md5)
-    fd.append('chunk_number', String(chunk_number))
-    fd.append('chunk', chunk)
-    return req<{ chunk_number: number }>('/media/upload-chunk', 'POST', fd)
-  },
-  mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number }) =>
-    req<UploadResult>('/media/merge-chunks', 'POST', p),
+  uploadChunk: sendChunk,
+  mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number }, signal?: AbortSignal) =>
+    req<UploadResult>('/media/merge-chunks', 'POST', p, undefined, signal, UPLOAD_API_BASE),
   listTasks: (page = 1, page_size = 20, keyword = '') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),

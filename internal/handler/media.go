@@ -17,7 +17,18 @@ import (
 )
 
 type MediaHandler struct {
-	svc *service.MediaService
+	svc               *service.MediaService
+	urlImportDisabled bool
+}
+
+func (h *MediaHandler) WithURLImportDisabled(disabled bool) *MediaHandler {
+	h.urlImportDisabled = disabled
+	return h
+}
+
+func (h *MediaHandler) ImportOptions(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	response.OK(c, gin.H{"url_import_enabled": !h.urlImportDisabled})
 }
 
 func (h *MediaHandler) VideoQuestions(c *gin.Context) {
@@ -65,6 +76,10 @@ func (h *MediaHandler) UploadFile(c *gin.Context) {
 // UploadByURL 通过 URL 下载并上传
 // POST /api/v1/media/upload-url
 func (h *MediaHandler) UploadByURL(c *gin.Context) {
+	if h.urlImportDisabled {
+		response.Forbidden(c, "链接导入暂未开放，当前服务不稳定，请上传本地视频文件")
+		return
+	}
 	if denyIfDemo(c, "通过链接下载视频") {
 		return
 	}

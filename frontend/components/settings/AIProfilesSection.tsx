@@ -7,9 +7,10 @@ import { ProfileForm } from '@/components/settings/ProfileForm'
 import { exportProfile, parseProfileImport } from '@/lib/profileTransfer'
 import { CapabilityProbe, type ProbeTarget } from '@/components/settings/CapabilityProbe'
 import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
+import { HostedAISection } from './HostedAISection'
 
 // BYOK AI 服务配置:profile 列表(一个 profile 覆盖 llm / asr / embedding / vision 四组能力),
-// 外加 rerank 的真实状态(服务端为确定性 rerank,无 profile 配置项,按"未启用"如实呈现)。
+// 作者提供的免费配置独立展示，由服务端维护并解析最新配置。
 // 每张卡支持 测试 / 编辑 / 删除;密钥只回显脱敏值。
 
 export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
@@ -86,6 +87,7 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
   return (
     <>
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>AI 服务</h3>
+      <HostedAISection readOnly={readOnly} active={profiles.some(p => p.source === 'hosted' && p.is_default)} onActivated={load} />
       {!readOnly && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}><button
           className="btn btn-sm btn-primary"
@@ -120,7 +122,7 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
         </div>
       )}
 
-      {profiles.map(p => (
+      {profiles.filter(p => p.source !== 'hosted').map(p => (
         <ProfileCard
           key={p.id}
           profile={p}
@@ -141,7 +143,8 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
   onExport: () => void
   onDelete: () => void
 }) {
-  const hosted = profile.source === 'hosted' || profile.read_only
+  const hosted = profile.source === 'hosted'
+  const locked = readOnly || !!profile.read_only || hosted
   const targets: ProbeTarget[] = [
     { purpose: 'llm', label: '对话', model: profile.llm_model, base_url: profile.llm_base_url, provider: profile.llm_provider, api_key: '', profile_id: profile.id },
     { purpose: 'asr', label: '语音识别', model: profile.asr_model, base_url: profile.asr_base_url, provider: profile.asr_provider, api_key: '', profile_id: profile.id },
@@ -157,20 +160,21 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
           {profile.is_default && (
             <span className="chip chip-acc"><Icon name="check" size="sm" />默认</span>
           )}
-          {hosted && <span className="chip chip-info">平台内置</span>}
+          {hosted && <span className="chip chip-info">作者免费提供</span>}
+          {!hosted && profile.read_only && <span className="chip chip-info">只读配置</span>}
         </div>
         <CapabilityLine label="对话模型" value={profile.llm_model} />
         <CapabilityLine label="上下文窗口" value={profile.llm_context_tokens ? `${profile.llm_context_tokens.toLocaleString()} token` : '未填写 · 按保守预算'} muted={!profile.llm_context_tokens} />
         <CapabilityLine label="语音识别" value={profile.asr_model} />
         <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维`} />
         <CapabilityLine label="视觉模型" value={profile.vision_model || '未配置'} muted={!profile.vision_model} />
-        <CapabilityLine label="重排序" value="未启用 · 确定性 rerank 生效中" muted />
-        {!readOnly && !hosted && <CapabilityProbe targets={targets} />}
+        <CapabilityLine label="重排序" value={profile.rerank_model || '未启用 · 确定性 rerank 生效中'} muted={!profile.rerank_model} />
+        {!locked && <CapabilityProbe targets={targets} />}
       </div>
-      <button className="btn btn-sm" disabled={readOnly || hosted} onClick={onExport} title="不含 API Key">导出</button>
+      {!hosted && <><button className="btn btn-sm" disabled={locked} onClick={onExport} title="不含 API Key">导出</button>
       <button
         className="btn btn-sm btn-ghost"
-        disabled={hosted || readOnly}
+        disabled={locked}
         title={hosted ? '平台内置配置不可修改' : readOnly ? '演示账号不可修改 AI 配置' : undefined}
         onClick={onEdit}
         aria-label={`编辑 ${profile.name}`}
@@ -179,13 +183,14 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
       </button>
       <button
         className="btn btn-sm btn-ghost"
-        disabled={hosted || readOnly}
+        disabled={locked}
         title={hosted ? '平台内置配置不可删除' : readOnly ? '演示账号不可删除 AI 配置' : undefined}
         onClick={onDelete}
         aria-label={`删除 ${profile.name}`}
       >
         <Icon name="trash" size="sm" />
       </button>
+      </>}
     </div>
   )
 }

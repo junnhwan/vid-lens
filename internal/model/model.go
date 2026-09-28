@@ -21,6 +21,7 @@ func AllModels() []interface{} {
 		&VideoTermRuleHead{}, &VideoTermRuleVersion{},
 		&SummaryPart{},
 		&UserAIProfile{},
+		&HostedAIConfig{},
 		&UserPromptPreference{},
 		&VideoChunk{},
 		&VideoRAGIndex{},

@@ -93,6 +93,10 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				auth.POST("/media/task/:id/term-rules/:rule_id/disable", h.DisableRule)
 			}
 			aiProfiles := auth.Group("/ai/profiles")
+			auth.GET("/ai/hosted", handlers.profiles.HostedStatus)
+			auth.POST("/ai/hosted/activate", handlers.profiles.ActivateHosted)
+			auth.GET("/ai/hosted/admin", handlers.profiles.HostedAdmin)
+			auth.PUT("/ai/hosted/admin", handlers.profiles.SaveHostedAdmin)
 			{
 				aiProfiles.GET("", handlers.profiles.List)
 				aiProfiles.GET("/budget-options", handlers.profiles.BudgetOptions)
@@ -153,6 +157,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			{
 				media.POST("/upload", handlers.media.UploadFile)
 				media.POST("/upload-url", handlers.media.UploadByURL)
+				media.GET("/import-options", handlers.media.ImportOptions)
 				media.POST("/upload-chunk", handlers.media.UploadChunk)
 				media.GET("/check-upload", handlers.media.CheckUpload)
 				media.POST("/merge-chunks", handlers.media.MergeChunks)

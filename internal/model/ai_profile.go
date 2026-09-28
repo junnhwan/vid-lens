@@ -7,7 +7,8 @@ import "time"
 type UserAIProfile struct {
 	AgentBudgetJSON           *string `gorm:"type:text" json:"-"`
 	ID                        int64   `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID                    int64   `gorm:"index;not null" json:"user_id"`
+	UserID                    int64   `gorm:"index;not null;uniqueIndex:idx_user_hosted_profile,where:source = 'hosted'" json:"user_id"`
+	Source                    string  `gorm:"type:varchar(20);not null;default:'user'" json:"source"`
 	Name                      string  `gorm:"type:varchar(100);not null" json:"name"`
 	LLMProvider               string  `gorm:"type:varchar(50);not null" json:"llm_provider"`
 	LLMBaseURL                string  `gorm:"type:varchar(500);not null" json:"llm_base_url"`

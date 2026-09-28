@@ -278,6 +278,15 @@ func (s *ChatService) videoContextText(owner, taskID int64) (string, error) {
 
 func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile ai.Profile) *RetrievalPipeline {
 	cfg := s.cfg.Retrieval
+	if strings.TrimSpace(profile.RerankModel) != "" {
+		copy := DefaultRAGRetrievalConfig()
+		if cfg != nil {
+			copy = *cfg
+		}
+		copy.RerankerMode = RerankerModeModel
+		copy.RerankerVersion = profile.RerankModel
+		cfg = &copy
+	}
 	var rewriter QueryRewriter = NewLLMQueryRewriter(chat)
 	var expander *ContextExpander
 	if cfg == nil {

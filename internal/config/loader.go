@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -65,6 +67,23 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.MQ.applyDefaults()
 	cfg.Memory.applyDefaults()
+	if value := strings.TrimSpace(os.Getenv("VIDLENS_DISABLE_URL_IMPORT")); value != "" {
+		disabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("VIDLENS_DISABLE_URL_IMPORT 必须为布尔值")
+		}
+		cfg.Upload.DisableURLImport = disabled
+	}
+	if value := strings.TrimSpace(os.Getenv("VIDLENS_HOSTED_AI_OWNER_ID")); value != "" {
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("VIDLENS_HOSTED_AI_OWNER_ID 必须为正整数")
+		}
+		cfg.Security.HostedAIOwnerID = id
+	}
+	if cfg.Security.HostedAIOwnerID < 0 {
+		return nil, fmt.Errorf("security.hosted_ai_owner_id 不能为负数")
+	}
 
 	if err := applyAIGovernanceEnv(&cfg.AIGovernance); err != nil {
 		return nil, fmt.Errorf("AI 治理配置无效: %w", err)

@@ -131,7 +131,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	aiFactory := ai.NewFactoryWithAdmission(deps.providerAdmission)
 	userSvc := service.NewUserService(deps.repos.User, deps.cfg.JWT)
 	knowledgeBaseSvc := service.NewKnowledgeBaseService(deps.repos)
-	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)}).WithAgentBudgetConfig(deps.cfg.AgentBudget)
+	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)}).WithAgentBudgetConfig(deps.cfg.AgentBudget).
+		WithHostedOwnerID(deps.cfg.Security.HostedAIOwnerID).WithHostedEmbeddingDimension(deps.cfg.RAG.EmbeddingDim)
 	if err := service.EnsureDemoAccount(deps.repos.User, deps.repos.AIProfile, secretCodec, deps.cfg.AI, deps.cfg.RAG); err != nil {
 		log.Printf("⚠️ 演示账号初始化失败: %v", err)
 	}
@@ -315,7 +316,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
 			chat:           chatHandler,
 			feedback:       handler.NewChatFeedbackHandler(deps.repos.Feedback),
-			media:          handler.NewMediaHandler(mediaSvc),
+			media:          handler.NewMediaHandler(mediaSvc).WithURLImportDisabled(deps.cfg.Upload.DisableURLImport),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 			artifacts:      handler.NewArtifactHandler(artifactSvc),
