@@ -205,11 +205,17 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword 
 		case "ready":
 			query = query.Where("status NOT IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning}).Where("EXISTS (SELECT 1 FROM video_transcriptions AS tx WHERE (tx.task_id = video_tasks.id OR (video_tasks.file_md5 <> '' AND tx.file_md5 = video_tasks.file_md5)) AND TRIM(tx.content) <> '') OR EXISTS (SELECT 1 FROM video_visual_frames AS vf WHERE vf.task_id = video_tasks.id AND vf.status = ? AND (TRIM(vf.ocr_text) <> '' OR TRIM(vf.vision_caption) <> ''))", model.VisualFrameStatusCompleted)
 		case "processing":
-			query = query.Where("status IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning})
+			query = query.Where("status IN ? OR (status NOT IN ? AND EXISTS (SELECT 1 FROM task_jobs AS sj WHERE sj.task_id = video_tasks.id AND sj.job_type = ? AND sj.status IN ?))",
+				[]int8{model.TaskStatusQueued, model.TaskStatusRunning},
+				[]int8{model.TaskStatusQueued, model.TaskStatusRunning, model.TaskStatusFailed, model.TaskStatusDead},
+				model.TaskJobTypeSummary, []int8{model.TaskStatusQueued, model.TaskStatusRunning})
 		case "pending":
 			query = query.Where("status = ?", model.TaskStatusPending)
 		case "failed":
-			query = query.Where("status IN ?", []int8{model.TaskStatusFailed, model.TaskStatusDead})
+			query = query.Where("status IN ? OR (status NOT IN ? AND EXISTS (SELECT 1 FROM task_jobs AS sj WHERE sj.task_id = video_tasks.id AND sj.job_type = ? AND sj.status IN ?))",
+				[]int8{model.TaskStatusFailed, model.TaskStatusDead},
+				[]int8{model.TaskStatusQueued, model.TaskStatusRunning, model.TaskStatusFailed, model.TaskStatusDead},
+				model.TaskJobTypeSummary, []int8{model.TaskStatusFailed, model.TaskStatusDead})
 		}
 	}
 	if err := query.Model(&model.VideoTask{}).Count(&total).Error; err != nil {

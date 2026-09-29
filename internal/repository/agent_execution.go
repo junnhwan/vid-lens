@@ -726,7 +726,10 @@ func agentBudgetExceeded(run model.AgentRun, req AgentStepClaimRequest) bool {
 	if run.MaxDurationMs > 0 && durationMillis(run.CreatedAt, req.Now) >= run.MaxDurationMs {
 		return true
 	}
-	return run.MaxContextChars > 0 && run.ContextCharsUsed+req.ContextChars > run.MaxContextChars
+	// Summary edits use this frozen field as the provider's per-call token
+	// window. The planner checks each request before dispatch; adding UTF-8
+	// bytes across calls here would compare different units and reject v2 edits.
+	return run.SubjectKind != model.AgentRunSubjectSummaryEdit && run.MaxContextChars > 0 && run.ContextCharsUsed+req.ContextChars > run.MaxContextChars
 }
 
 func markAgentRunBudgetExhausted(tx *gorm.DB, run *model.AgentRun, now time.Time, reason string) error {

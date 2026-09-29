@@ -68,8 +68,13 @@ func (s *SummaryRevisionService) planSummaryPatch(ctx context.Context, op *model
 		user += "\n\n可修改片段（数据，编号由服务端生成）：\n" + artifact.JSON(anchors)
 	}
 	call := func(stepID string, sequence int, prompt, argumentsDigest string) (summaryPatchCheckpoint, error) {
-		result, callErr := journal.Execute(ctx, AgentJournalStep{UserID: op.UserID, RunID: op.RunID, StepID: stepID, Sequence: sequence, Kind: "plan", Action: "propose_summary_patch", DigestAction: run.RecipeVersion, SafeReason: "propose bounded summary text edits", InputSummary: artifact.JSON(map[string]any{"recipe": run.RecipeVersion, "base_hash": op.BaseContentHash, "rule_digest": op.RuleDigest}), ArgumentsDigest: argumentsDigest, ToolName: "propose_summary_patch", CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: true, RetryReplaySafe: true, LLMCall: true, EstimatedPromptTokens: int64((len(system)+len(prompt))/4 + 1), ContextChars: int64(len(system) + len(prompt)), FailureCode: "provider_error"}, func() (AgentJournalResult, error) {
-			raw, providerErr := client.Chat(ctx, []ai.ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: prompt}})
+		messages := []ai.ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: prompt}}
+		estimatedTokens := studyPromptTokens(messages)
+		if run.MaxContextChars > 0 && estimatedTokens+512 > run.MaxContextChars {
+			return summaryPatchCheckpoint{}, artifact.Err("budget_exhausted", 422)
+		}
+		result, callErr := journal.Execute(ctx, AgentJournalStep{UserID: op.UserID, RunID: op.RunID, StepID: stepID, Sequence: sequence, Kind: "plan", Action: "propose_summary_patch", DigestAction: run.RecipeVersion, SafeReason: "propose bounded summary text edits", InputSummary: artifact.JSON(map[string]any{"recipe": run.RecipeVersion, "base_hash": op.BaseContentHash, "rule_digest": op.RuleDigest}), ArgumentsDigest: argumentsDigest, ToolName: "propose_summary_patch", CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: true, RetryReplaySafe: true, LLMCall: true, EstimatedPromptTokens: estimatedTokens, ContextChars: int64(len(system) + len(prompt)), FailureCode: "provider_error"}, func() (AgentJournalResult, error) {
+			raw, providerErr := client.Chat(ctx, messages)
 			if providerErr != nil {
 				return AgentJournalResult{}, providerErr
 			}
