@@ -63,6 +63,39 @@ func TestSummaryTextPatchPreservesQuotedAndCodeEvidence(t *testing.T) {
 	}
 }
 
+func TestSummaryTextPatchAllowsUnchangedQuotesInUniqueContext(t *testing.T) {
+	base := "Jeff通过“禁创作推理+确定性路由”实现自动化。另一个章节也提到Jeff。"
+	patch := SummaryTextPatch{BaseHash: artifact.Hash(base), Edits: []SummaryTextEdit{{OldText: "Jeff通过“禁创作推理+确定性路由”实现自动化。", NewText: "Jev通过“禁创作推理+确定性路由”实现自动化。"}}}
+	result, err := applySummaryTextPatch(base, patch)
+	if err != nil || result != "Jev通过“禁创作推理+确定性路由”实现自动化。另一个章节也提到Jeff。" {
+		t.Fatalf("unchanged quotation in contextual anchor was blocked: %q, %v", result, err)
+	}
+	for _, next := range []string{
+		"Jev通过“禁推理+确定性路由”实现自动化。",
+		"Jeff通过“禁创作新增推理+确定性路由”实现自动化。",
+	} {
+		patch.Edits[0].NewText = next
+		if _, err := applySummaryTextPatch(base, patch); err == nil {
+			t.Fatalf("quote modification accepted: %q", next)
+		}
+	}
+}
+
+func TestSummaryTextPatchRejectsStaleOrProtectedExplicitPositions(t *testing.T) {
+	base := "Jeff。Jeff。“Jeff”"
+	for _, position := range []int{-1, 1, len(base), len("Jeff。Jeff。“")} {
+		start := position
+		patch := SummaryTextPatch{BaseHash: artifact.Hash(base), Edits: []SummaryTextEdit{{OldText: "Jeff", NewText: "Jev", Start: &start}}}
+		if _, err := applySummaryTextPatch(base, patch); err == nil {
+			t.Fatalf("invalid or protected position %d accepted", position)
+		}
+	}
+	var patch SummaryTextPatch
+	if err := decodeSummaryPatch(`{"base_hash":"x","edits":[{"old_text":"Jeff","new_text":"Jev","start":0}]}`, &patch); err == nil {
+		t.Fatal("model-supplied position accepted outside the server anchor map")
+	}
+}
+
 func TestSummaryPatchDecoderAcceptsOnlyStrictObjectOrWholeJSONFence(t *testing.T) {
 	var patch SummaryTextPatch
 	if err := decodeSummaryPatch("```json\n{\"base_hash\":\"x\",\"edits\":[]}\n```", &patch); err != nil || patch.BaseHash != "x" {

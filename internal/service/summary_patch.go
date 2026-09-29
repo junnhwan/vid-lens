@@ -11,6 +11,9 @@ import (
 type SummaryTextEdit struct {
 	OldText string `json:"old_text"`
 	NewText string `json:"new_text"`
+	// Set by the server when resolving a frozen anchor ID. Legacy patches
+	// without a position continue to require an exact, unique text anchor.
+	Start *int `json:"start,omitempty"`
 }
 
 type SummaryTextPatch struct {
@@ -36,11 +39,19 @@ func applySummaryTextPatch(base string, patch SummaryTextPatch) (string, error) 
 			return "", artifact.Err("invalid_patch", 422)
 		}
 		index := strings.Index(base, edit.OldText)
-		if index < 0 || strings.Count(base, edit.OldText) != 1 {
+		if edit.Start != nil {
+			index = *edit.Start
+			if index < 0 || index > len(base)-len(edit.OldText) || base[index:index+len(edit.OldText)] != edit.OldText {
+				return "", artifact.Err("anchor_ambiguous", 409)
+			}
+		} else if index < 0 || strings.Count(base, edit.OldText) != 1 {
 			return "", artifact.Err("anchor_ambiguous", 409)
 		}
+		// Context may contain an unchanged quote or code span. Protect the
+		// actual change window, not the entire unique locating anchor.
+		changeStart, changeEnd := summaryChangeWindow(edit.OldText, edit.NewText)
 		for _, region := range protected {
-			if index < region.end && index+len(edit.OldText) > region.start {
+			if index+changeStart < region.end && index+changeEnd > region.start {
 				return "", artifact.Err("protected_quote", 422)
 			}
 		}
@@ -63,6 +74,18 @@ func applySummaryTextPatch(base string, patch SummaryTextPatch) (string, error) 
 		return "", artifact.Err("invalid_patch", 422)
 	}
 	return result, nil
+}
+
+func summaryChangeWindow(old, next string) (start, end int) {
+	for start < len(old) && start < len(next) && old[start] == next[start] {
+		start++
+	}
+	end, nextEnd := len(old), len(next)
+	for end > start && nextEnd > start && old[end-1] == next[nextEnd-1] {
+		end--
+		nextEnd--
+	}
+	return start, end
 }
 
 func protectedSummarySpans(base string) []summarySpan {

@@ -4,13 +4,14 @@ import type { EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet } fro
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { Icon } from '@/components/ui/Icon'
 import { artifactApi } from '@/lib/artifacts/api'
+import { summaryRevisionFailure } from '@/lib/summaryRevisionFailure'
 import type { Artifact, ArtifactEditRun } from '@/lib/artifacts/schema'
 import './SummaryRevisionPanel.css'
 
 type Scope = 'once' | 'remember'
 
 function errorText(error: unknown): string {
-  if (error instanceof ApiError) return `${error.message}${error.code ? ` (${error.code})` : ''}`
+  if (error instanceof ApiError) return error.code ? summaryRevisionFailure(error.code, error.message) : error.message
   return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
 
@@ -46,7 +47,11 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
   useEffect(() => {
     let active = true
     void Promise.all([api.getSummary(taskId), api.getTermRules(taskId), api.getLatestSummaryOperation(taskId)]).then(([nextSummary, nextRules, latest]) => {
-      if (active) { setSummary(nextSummary); setRules(nextRules); setOperation(latest); if (latest?.instruction) setInstruction(latest.instruction) }
+      if (active) {
+        setSummary(nextSummary); setRules(nextRules); setOperation(latest)
+        if (latest?.instruction) setInstruction(latest.instruction)
+        if (latest?.status === 'failed') setMessage(summaryRevisionFailure(latest.error_code))
+      }
     }).catch(error => { if (active) setMessage(errorText(error)) })
     return () => { active = false }
   }, [taskId])
@@ -62,7 +67,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
         const next = await api.getSummaryOperation(taskId, operationID)
         if (!active) return
         setOperation(next)
-        if (next.status === 'failed') { setKey(''); setMessage(`摘要修订失败：${next.error_code || '请重试'}`) }
+        if (next.status === 'failed') { setKey(''); setMessage(summaryRevisionFailure(next.error_code)) }
         if (next.status === 'committed') await refresh()
         if (next.status === 'running') timer = window.setTimeout(() => void poll(), 1500)
       } catch (error) {
@@ -136,7 +141,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
     try {
       const next = await api.editSummary(taskId, { instruction: instruction.trim(), expected_revision: summary.revision, mode: 'preview' }, requestKey)
       setOperation(next)
-      if (next.status === 'failed') { setKey(''); setMessage(`摘要修订失败：${next.error_code || '请重试'}`) }
+      if (next.status === 'failed') { setKey(''); setMessage(summaryRevisionFailure(next.error_code)) }
     } catch (error) { setMessage(`${errorText(error)}；可用同一请求重试，避免重复修改。`) }
     finally { setBusy(false) }
   }
