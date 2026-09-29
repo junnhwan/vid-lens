@@ -1,0 +1,98 @@
+name: Build deployment release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Check Go code
+        run: |
+          go test ./...
+          go vet ./...
+          go build ./cmd/server ./cmd/rag-eval ./cmd/rag-reindex ./cmd/rag-audit
+      - name: Check deployment code
+        run: |
+          bash deploy/server-deploy_test.sh
+          bash deploy/frontend-deploy_test.sh
+          python3 -m unittest discover -s deploy -p '*_test.py' -v
+      - name: Check and build frontend
+        working-directory: frontend
+        env:
+          VITE_UPLOAD_API_BASE: ''
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm test
+          npm run test:stream
+          npm run build
+      - name: Package checked release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          RELEASE_OUTPUT: ${{ runner.temp }}/vidlens-release
+        run: bash deploy/package-release.sh "$RELEASE_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: deployment-release
+          path: ${{ runner.temp }}/vidlens-release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: deployment-release
+          path: release
+      - name: Publish complete release for server polling
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="auto-${GITHUB_SHA}"
+          if gh release view "$tag" --json isDraft --jq .isDraft > is-draft.txt 2>/dev/null; then
+            if [ "$(cat is-draft.txt)" = false ]; then
+              echo 'This commit already has a published deployment release.'
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease \
+              --title "Deployment ${GITHUB_SHA:0:12}" \
+              --notes 'Checked Linux amd64 backend and same-origin frontend. Production configuration is not included.'
+          fi
+          gh release upload "$tag" release/server release/frontend-build.tar.gz release/manifest.json --clobber
+          gh release edit "$tag" --draft=false --latest=false
+          echo "Published checked deployment ${GITHUB_SHA:0:12}."

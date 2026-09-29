@@ -1,0 +1,16 @@
+[Unit]
+Description=Pull checked VidLens releases from GitHub
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/vidlens-deploy/pull_deploy.py
+TimeoutStartSec=15min
+TimeoutStopSec=4min
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full

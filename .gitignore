@@ -12,6 +12,7 @@ build/
 *.test
 *.out
 .pytest_cache/
+__pycache__/
 
 # IDE
 .idea/

@@ -64,8 +64,17 @@ staging_dir="$deploy_dir/frontend.new-$stamp"
 old_dir="$deploy_dir/frontend.old-$stamp"
 backup_dir="$deploy_dir/.logs/deploy-backups/$stamp"
 
-[ -f "$tmp_dir/frontend-src.tar.gz" ] || die "missing frontend artifact: $tmp_dir/frontend-src.tar.gz"
-[ -s "$tmp_dir/frontend-src.tar.gz" ] || die "empty frontend artifact: $tmp_dir/frontend-src.tar.gz"
+artifact_mode="${FRONTEND_ARTIFACT_MODE:-source}"
+case "$artifact_mode" in
+  source) artifact="$tmp_dir/frontend-src.tar.gz" ;;
+  prebuilt)
+    artifact="$tmp_dir/frontend-build.tar.gz"
+    [ -z "$upload_api_base" ] || die 'prebuilt frontend requires same-origin uploads'
+    ;;
+  *) die 'FRONTEND_ARTIFACT_MODE must be source or prebuilt' ;;
+esac
+[ -f "$artifact" ] || die "missing frontend artifact: $artifact"
+[ -s "$artifact" ] || die "empty frontend artifact: $artifact"
 
 for path in "$staging_dir" "$old_dir"; do
   [ ! -e "$path" ] || die "deployment path already exists: $path"
@@ -98,15 +107,21 @@ trap 'rollback_on_error $? $LINENO' ERR
 
 # Build in a staging dir so a failed build never touches the live release.
 mkdir -p "$staging_dir"
-tar -xzf "$tmp_dir/frontend-src.tar.gz" -C "$staging_dir"
-(
-  cd "$staging_dir"
-  npm ci --no-audit --no-fund
-  VITE_UPLOAD_API_BASE="$upload_api_base" npm run build
-)
+tar -xzf "$artifact" -C "$staging_dir"
+if [ "$artifact_mode" = source ]; then
+  (
+    cd "$staging_dir"
+    npm ci --no-audit --no-fund
+    VITE_UPLOAD_API_BASE="$upload_api_base" npm run build
+  )
+else
+  [ -s "$staging_dir/server.mjs" ] || die 'prebuilt frontend is missing server.mjs'
+  [ -s "$staging_dir/package.json" ] || die 'prebuilt frontend is missing package.json'
+fi
 [ -f "$staging_dir/dist/index.html" ] || die "frontend build did not produce dist/index.html"
 printf '%s\n' "$VIDLENS_API_BASE" > "$staging_dir/.api-base"
 printf '%s\n' "$upload_api_base" > "$staging_dir/.upload-api-base"
+printf 'base=%s\nworking_tree=clean\nrelease=%s\n' "$GITHUB_SHA" "$stamp" > "$staging_dir/.deploy-release"
 
 # Record a lightweight backup of the current release metadata for forensics.
 mkdir -p "$backup_dir"
@@ -136,4 +151,4 @@ if [ -d "$old_dir" ] && ! rm -rf -- "$old_dir"; then
   warn "Deployment succeeded but previous frontend directory could not be removed: $old_dir"
 fi
 
-log "Deployed frontend $sha (API base $VIDLENS_API_BASE); backup saved to $backup_dir"
+log "Deployed frontend $sha; backup saved to $backup_dir"

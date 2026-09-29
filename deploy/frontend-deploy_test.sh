@@ -187,6 +187,44 @@ test_upload_entry_is_built_and_preserved() {
   assert_file_text "$deploy_dir/frontend/.upload-api-base" ''
 }
 
+prepare_prebuilt() {
+  printf 'built-by-ci\n' > "$artifact_dir/frontend-src/server.mjs"
+  printf '{"name":"vidlens"}\n' > "$artifact_dir/frontend-src/package.json"
+  mkdir -p "$artifact_dir/frontend-src/dist"
+  printf 'ci-build\n' > "$artifact_dir/frontend-src/dist/index.html"
+  tar -czf "$artifact_dir/frontend-build.tar.gz" -C "$artifact_dir/frontend-src" .
+}
+
+test_prebuilt_does_not_install_or_build_on_server() {
+  new_case prebuilt
+  prepare_prebuilt
+  FRONTEND_ARTIFACT_MODE=prebuilt run_deploy >"$case_root/stdout" 2>"$case_root/stderr"
+  assert_file_text "$deploy_dir/frontend/dist/index.html" ci-build
+  assert_file_text "$deploy_dir/frontend/server.mjs" built-by-ci
+  if grep -q '^npm ' "$call_log"; then fail 'prebuilt release ran npm on the server'; fi
+  if grep -q 'http://127.0.0.1:18083' "$case_root/stdout"; then fail 'deployment log exposed API upstream'; fi
+}
+
+test_prebuilt_rejects_custom_upload_entry() {
+  new_case prebuilt-upload
+  prepare_prebuilt
+  if VIDLENS_UPLOAD_API_BASE='https://upload.example.com/api/v1' FRONTEND_ARTIFACT_MODE=prebuilt \
+    run_deploy >"$case_root/stdout" 2>"$case_root/stderr"; then
+    fail 'prebuilt release accepted a custom upload entry it was not built with'
+  fi
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
+  assert_not_exists "$call_log"
+}
+
+test_prebuilt_health_failure_restores_old_frontend() {
+  new_case prebuilt-health
+  prepare_prebuilt
+  if FAIL_HEALTH=1 FRONTEND_ARTIFACT_MODE=prebuilt run_deploy >"$case_root/stdout" 2>"$case_root/stderr"; then
+    fail 'prebuilt release ignored failed health checks'
+  fi
+  assert_file_text "$deploy_dir/frontend/dist/index.html" old-build
+}
+
 test_upload_entry_is_built_and_preserved
 test_missing_artifact_is_rejected
 test_failed_build_keeps_old_release
@@ -194,5 +232,8 @@ test_successful_deploy_swaps_and_restarts
 test_restart_failure_rolls_back
 test_health_failure_rolls_back
 test_missing_vidlens_api_base_is_rejected
+test_prebuilt_does_not_install_or_build_on_server
+test_prebuilt_rejects_custom_upload_entry
+test_prebuilt_health_failure_restores_old_frontend
 
 printf 'frontend-deploy tests passed\n'

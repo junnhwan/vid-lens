@@ -1,0 +1,11 @@
+[Unit]
+Description=Check GitHub for a checked VidLens release every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+RandomizedDelaySec=10s
+Unit=vidlens-deploy.service
+
+[Install]
+WantedBy=timers.target
