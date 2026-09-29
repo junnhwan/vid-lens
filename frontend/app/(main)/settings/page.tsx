@@ -24,7 +24,7 @@ export default function SettingsPage() {
 
   return (
     <div className="page">
-      <PageHeading eyebrow="TUNE THE ENGINE" title="让模型，按你的方式工作。"
+      <PageHeading title="设置"
         description="外观、AI 服务、记忆与提示词偏好，都在这里调整。改动只影响之后的新请求。" />
       <div className="theme-pick-block">
         <div className="section-head" style={{ marginTop: 0 }}>

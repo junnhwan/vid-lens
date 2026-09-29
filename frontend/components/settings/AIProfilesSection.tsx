@@ -65,7 +65,8 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
   useEffect(() => { void load() }, [load])
 
   const removeProfile = async (p: AIProfile) => {
-    if (!window.confirm(`删除配置「${p.name}」?删除后问答会回退到服务端默认策略。`)) return
+    const impact = p.is_default ? '这是当前默认配置。删除后需将另一配置设为默认，或启用免费 AI，才能继续转写、生成和问答。已保存内容仍可阅读。' : '当前默认 AI 配置保持不变。'
+    if (!window.confirm(`删除配置「${p.name}」？${impact}`)) return
     try {
       await api.deleteProfile(p.id)
       toast.success('配置已删除')

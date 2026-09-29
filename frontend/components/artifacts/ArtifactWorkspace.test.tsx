@@ -10,6 +10,20 @@ const mediaQueryState = vi.hoisted(() => ({ mobile: false }))
 vi.mock('@/components/ui/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryState.mobile }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); mediaQueryState.mobile = false })
 
+test('switching the active block preserves both drafts without expanding all editors', async () => {
+  const save=vi.fn().mockResolvedValue(studyFixture)
+  render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={vi.fn()} onSave={save} onReload={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:'编辑笔记'}))
+  expect(screen.queryByLabelText('第 2 块正文')).toBeNull()
+  fireEvent.change(screen.getByLabelText('第 1 块正文'),{target:{value:'第一段草稿'}})
+  fireEvent.click(screen.getByRole('button',{name:`编辑段落 ${studyFixture.version!.body.blocks[1].title}`}))
+  expect(screen.queryByLabelText('第 1 块正文')).toBeNull()
+  expect(screen.getByText('第一段草稿')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('第 2 块正文'),{target:{value:'第二段草稿'}})
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(()=>expect(save).toHaveBeenCalledWith(1,expect.objectContaining({blocks:expect.arrayContaining([expect.objectContaining({content:'第一段草稿'}),expect.objectContaining({content:'第二段草稿'})])})))
+})
+
 test('discarding an edited and deleted draft also discards its deletion undo snapshot', () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={() => {}} onSave={vi.fn()} onReload={vi.fn()} />)

@@ -324,13 +324,22 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 		task.HasRAGIndex = indexed[task.ID]
 		task.VisualStatus = visual[task.ID]
 	}
+	if s.profiles != nil {
+		if profile, profileErr := s.profiles.GetDefaultAIProfile(userID); profileErr == nil && profile != nil {
+			if indexes, indexErr := s.repo.RAGIndex.ListByTaskIDsAndModel(userID, []int64{task.ID}, profile.EmbeddingModel); indexErr == nil {
+				for _, index := range indexes {
+					task.Retrievable = index.Status == model.RAGIndexStatusIndexed
+				}
+			}
+		}
+	}
 	return task, nil
 }
 
 // ListTasks 分页查询，keyword 非空时按文件名/标题搜索。
 // 返回的任务会附带 has_transcription / has_summary，便于前端灰显主操作按钮且不加载正文。
-func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {
-	tasks, total, err := s.repo.Task.ListByUserID(userID, page, pageSize, keyword)
+func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword string, activity ...string) ([]model.VideoTask, int64, error) {
+	tasks, total, err := s.repo.Task.ListByUserID(userID, page, pageSize, keyword, activity...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -374,6 +383,22 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 	for i := range tasks {
 		tasks[i].SummaryJob = byTask[tasks[i].ID]
 		applySummaryAvailability(&tasks[i])
+	}
+	if s.profiles != nil {
+		profile, profileErr := s.profiles.GetDefaultAIProfile(userID)
+		if profileErr == nil && profile != nil {
+			indexes, readErr := s.repo.RAGIndex.ListByTaskIDsAndModel(userID, ids, profile.EmbeddingModel)
+			if readErr != nil {
+				return nil, 0, readErr
+			}
+			ready := make(map[int64]bool, len(indexes))
+			for _, index := range indexes {
+				ready[index.TaskID] = index.Status == model.RAGIndexStatusIndexed
+			}
+			for i := range tasks {
+				tasks[i].Retrievable = ready[tasks[i].ID]
+			}
+		}
 	}
 	return tasks, total, nil
 }
@@ -436,6 +461,8 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 		return nil, fmt.Errorf("读取视觉时间线失败: %w", err)
 	}
 	timeline := BuildVideoTimeline(taskID, transcriptRows, frames)
+	timeline.StudySourceReason = studySourceReason(task, transcriptRows, timeline)
+	timeline.StudySourceReady = timeline.StudySourceReason == ""
 	timeline.VisualCoverage = visualCoverage(frames)
 	timeline.Title = task.Title
 	if strings.TrimSpace(timeline.Title) == "" {

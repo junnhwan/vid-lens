@@ -33,9 +33,10 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
   const [url, setUrl] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlImportEnabled, setURLImportEnabled] = useState<boolean | null>(null)
+  const selectedImport = useRef(false)
   useEffect(() => {
     let active = true
-    api.importOptions().then(options => { if (active) setURLImportEnabled(options.url_import_enabled) })
+    api.importOptions().then(options => { if (active) { setURLImportEnabled(options.url_import_enabled); if (options.url_import_enabled && !selectedImport.current) setTab('url') } })
       .catch(() => { if (active) setURLImportEnabled(false) })
     return () => { active = false }
   }, [])
@@ -145,38 +146,25 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
 
   return (
     <Modal
-      title="上传视频"
+      title="导入视频"
       onClose={onClose}
       confirmOnClose={inFlight || !!url ? '关闭会中断未完成的上传,已填内容也会丢失。确定关闭?' : false}
     >
           <div className="seg" style={{ marginBottom: 14 }}>
-            <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>本地文件</button>
-            <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放' : undefined} onClick={() => setTab('url')}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
+            <button className={tab === 'file' ? 'on' : ''} onClick={() => { selectedImport.current=true; setTab('file') }}>本地文件</button>
+            <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放' : undefined} onClick={() => { selectedImport.current=true; setTab('url') }}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
           </div>
-          <p className="muted upload-helper">{tab === 'file' ? '文件上传及合并完成前，请保持页面打开。上传完成后可在视频详情中开始转写。' : '粘贴 B 站视频链接或 b23.tv 分享链接，服务器会下载视频。任务创建后可以离开页面，下载完成后再开始转写。'}</p>
+          <p className="muted upload-helper">{tab === 'file' ? '上传速度取决于当前网络和服务器；文件合并完成前，请保持页面打开。' : '粘贴 B 站或 b23.tv 链接。任务创建后可以离开，下载完成后选择转写或画面分析。'}</p>
 
           {tab === 'file' ? (
             <div>
-              <aside className="upload-guidance" aria-label="视频导入建议">
-                <div className="upload-guidance-row upload-guidance-online">
-                  <span className="upload-guidance-icon"><Icon name="clock" /></span>
-                  <div className="upload-guidance-copy">
-                    <h4>线上文件上传较慢</h4>
-                    <p>受服务器配置限制，在线文件上传速度很慢，不建议使用。B 站视频建议优先通过链接导入。</p>
-                    {urlImportEnabled === true && <button className="btn btn-sm btn-primary" onClick={() => setTab('url')}><Icon name="link" />使用 B 站链接</button>}
-                  </div>
-                </div>
-                <div className="upload-guidance-row">
-                  <span className="upload-guidance-icon"><Icon name="folder" /></span>
-                  <div className="upload-guidance-copy">
-                    <h4>自己的视频，推荐本地部署</h4>
-                    <p>需要上传电脑里的视频？可以克隆 VidLens 仓库，在自己的电脑部署后使用文件上传，避免受到线上上传速度限制。</p>
-                    <a className="upload-guidance-link" href="https://github.com/junnhwan/vid-lens#技术栈与启动" target="_blank" rel="noopener noreferrer">查看仓库与部署说明<Icon name="chev-r" /></a>
-                  </div>
-                </div>
-              </aside>
+              <details className="upload-deploy-help"><summary>大文件上传与部署帮助</summary><p>较大文件可考虑在自己的电脑部署，减少远程传输。链接导入是否开放以当前服务设置为准。</p><a className="upload-guidance-link" href="https://github.com/junnhwan/vid-lens#技术栈与启动" target="_blank" rel="noopener noreferrer">查看部署说明<Icon name="chev-r" /></a></details>
               <div
                 className={`dropzone${dragOver ? ' over' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-label="选择本地视频"
+                onKeyDown={e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click() } }}
                 onClick={() => fileRef.current?.click()}
                 onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}

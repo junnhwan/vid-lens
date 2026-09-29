@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"vid-lens/internal/ai"
@@ -387,9 +386,9 @@ func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatS
 	if err != nil {
 		return nil, err
 	}
-	visibleTasks := make(map[int64]struct{}, len(tasks))
+	visibleTasks := make(map[int64]model.VideoTask, len(tasks))
 	for _, task := range tasks {
-		visibleTasks[task.ID] = struct{}{}
+		visibleTasks[task.ID] = task
 	}
 	indexes, err := s.repos.RAGIndex.ListByTaskIDsAndModel(userID, ids, embeddingModel)
 	if err != nil {
@@ -412,9 +411,20 @@ func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatS
 	if len(unavailable) > 0 {
 		parts := make([]string, len(unavailable))
 		for i, id := range unavailable {
-			parts[i] = strconv.FormatInt(id, 10)
+			if task, visible := visibleTasks[id]; visible {
+				title := strings.TrimSpace(task.Title)
+				if title == "" {
+					title = task.Filename
+				}
+				if title == "" {
+					title = "未命名资料"
+				}
+				parts[i] = "「" + title + "」"
+			} else {
+				parts[i] = "已删除或无权访问的资料"
+			}
 		}
-		return nil, fmt.Errorf("知识库成员不可用，task_ids=[%s]", strings.Join(parts, ","))
+		return nil, fmt.Errorf("知识库成员不可检索：%s。请完成索引或移出后再问", strings.Join(parts, "、"))
 	}
 	return ids, nil
 }

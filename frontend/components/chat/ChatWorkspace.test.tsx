@@ -9,6 +9,8 @@ import { ChatWorkspace } from './ChatWorkspace'
 
 vi.mock('@/lib/router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }) }))
+vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: {role:'USER'} }) }))
+vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ready:true,reason:''}) }))
 const conversation = vi.hoisted(() => ({
   session: undefined, sessions: [], messages: [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }] as ChatMsg[],
   ragTrace: [], agentTrace: { runId: null, steps: [] }, streaming: false, sessionReady: true,
@@ -42,6 +44,23 @@ test('single-video citation cards omit the repeated video title', () => {
   render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
   expect(screen.queryByText('不应重复出现的标题')).toBeNull()
   expect(screen.getByText('图中展示了容器的端口映射。')).toBeTruthy()
+})
+
+test('citation detail is an independent button and technical fields start folded', () => {
+  conversation.messages = [{ role:'assistant', content:'回答', modelName:'测试模型', cites:[{id:'C1',chunkIndex:0,score:1,content:'来源正文',evidenceId:'internal-evidence'}] }]
+  render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+  fireEvent.click(screen.getByRole('button', {name:'查看证据 C1'}))
+  expect(screen.getByRole('dialog', {name:'证据详情'})).toBeTruthy()
+  expect(screen.getByText('internal-evidence').closest('details')?.open).toBe(false)
+  expect(screen.getByText(/测试模型/).closest('details')?.open).toBe(false)
+})
+
+test('analysis explains only enabled capabilities', () => {
+  render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} videoVisualMode="off" videoRetrievable={false} videoHasTranscript />)
+  fireEvent.click(screen.getByRole('button', {name:'深入分析'}))
+  expect(screen.getByText('按问题检索文本证据，逐步分析后回答')).toBeTruthy()
+  expect(screen.queryByText('按问题调用文本与画面工具，逐步分析后回答')).toBeNull()
+  expect(screen.getByText(/暂不提供检索引用/)).toBeTruthy()
 })
 
 test('preview conflict can reload a new head and choose a surviving block before confirming', async () => {

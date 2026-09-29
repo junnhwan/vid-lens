@@ -17,6 +17,11 @@
   margin-top: 12px;
   padding: 2px 0 8px;
 }
+.workbench-capability { margin:12px 0 0; font-size:13px; line-height:1.7; color:var(--tx-3); }
+.video-workbench .rail-tab { min-height:38px; font-size:13px; padding-inline:12px; }
+.video-workbench .tl-atom { min-height:36px; }
+.video-workbench .frame-more { min-height:28px; min-width:40px; padding:4px 8px; }
+.video-workbench .rail-pane .empty span { max-width:300px; line-height:1.7; }
 
 .workbench-primary {
   display: flex;
@@ -27,7 +32,7 @@
 
 .workbench-primary .btn {
   height: 38px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .workbench-primary .workbench-chat-action {
@@ -50,9 +55,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: 32px;
   padding: 3px 0;
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--tx-3);
   white-space: nowrap;
   border-radius: 4px;

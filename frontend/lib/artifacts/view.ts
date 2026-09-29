@@ -11,7 +11,7 @@ export const stageLabels: Record<string, string> = { queued: '等待后台处理
 export const errorLabels: Record<string, string> = {
   invalid_request: '提交内容不符合要求，请核对后重试。', invalid_evidence: '引用未通过验证，请重新读取来源。', unsupported_recipe: '当前仅支持单视频学习笔记。', internal_error: '服务暂时不可用，请稍后重试。',
   run_not_terminal: '这个任务还在进行，请刷新状态。', run_terminal: '这个任务已经结束，请刷新查看结果。', unsupported_checkpoint: '任务保存的进度暂时无法恢复，请重新生成。',
-  source_not_ready: '视频仍在处理或尚无可用转写，请等待视频处理完成后重试。', source_limit_exceeded: '来源超过首版处理上限，请选择更短的视频。', profile_required: '请先在设置中配置默认 AI 模型。',
+  source_not_ready: '视频仍在处理或尚无可用转写与画面内容，请完成处理后重试。', source_limit_exceeded: '来源超过首版处理上限，请选择更短的视频。', profile_required: '请先在设置中配置默认 AI 模型。',
   source_changed: '视频来源已更新，请重新读取后再生成。', source_deleted: '来源已删除，相关正文和证据无法继续读取。',
   profile_changed: '执行所用的模型配置已变化，请检查设置后重试。', provider_error: '模型服务暂时不可用。', provider_truncated: '模型输出被截断，未发布不完整内容。', provider_refused: '模型未能完成这次生成。',
   invalid_model_output: '生成内容未通过结构或引用校验。', budget_exhausted: '本次任务已达到执行预算。', queue_expired: '排队等待超时，可以重新发起。',

@@ -74,5 +74,7 @@ export function indexStatusText(indexStatus: string, retrievable: boolean): stri
   if (indexStatus === 'pending') return '索引排队中'
   if (indexStatus === 'building') return '索引构建中'
   if (indexStatus === 'failed') return '索引失败'
-  return indexStatus || '未索引'
+  if (indexStatus === 'not_indexed') return '当前模型尚未索引'
+  if (indexStatus === 'indexed') return '索引已存在，当前不可检索'
+  return '检索尚未就绪'
 }

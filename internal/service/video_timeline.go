@@ -24,10 +24,35 @@ type TimelineAtom struct {
 }
 
 type VideoTimeline struct {
-	TaskID         int64           `json:"task_id"`
-	Title          string          `json:"title,omitempty"`
-	Atoms          []TimelineAtom  `json:"atoms"`
-	VisualCoverage *VisualCoverage `json:"visual_coverage,omitempty"`
+	TaskID            int64           `json:"task_id"`
+	Title             string          `json:"title,omitempty"`
+	Atoms             []TimelineAtom  `json:"atoms"`
+	VisualCoverage    *VisualCoverage `json:"visual_coverage,omitempty"`
+	StudySourceReady  bool            `json:"study_source_ready"`
+	StudySourceReason string          `json:"study_source_reason,omitempty"`
+}
+
+// Shared by the read-only capability projection and generation admission.
+func studySourceReason(task *model.VideoTask, rows []model.VideoTranscriptionChunk, timeline VideoTimeline) string {
+	if task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning {
+		return "processing"
+	}
+	for _, row := range rows {
+		if row.Status != model.TranscriptionChunkStatusCompleted {
+			return "incomplete_transcript"
+		}
+	}
+	if len(timeline.Atoms) == 0 {
+		return "no_content"
+	}
+	size := 0
+	for _, atom := range timeline.Atoms {
+		size += len(atom.Content)
+	}
+	if len(timeline.Atoms) > 1000 || size > 2*1024*1024 {
+		return "source_limit_exceeded"
+	}
+	return ""
 }
 
 // VisualCoverage reports persisted extraction results, including frames with

@@ -24,6 +24,7 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
   const [manageOpen, setManageOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
@@ -112,6 +113,8 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
   }
 
   const videos = kb.videos || []
+  const retrievable = videos.filter(video => video.retrievable).length
+  const unavailable = videos.filter(video => !video.retrievable)
 
   return (
     <div className="page">
@@ -134,27 +137,21 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
           </div>
           {kb.description && <p className="kb-detail-desc">{kb.description}</p>}
           <p className="kb-detail-meta">
-            {kb.member_count} 个视频
-            {kb.embedding_model ? ` · ${kb.embedding_model}` : ''}
+            {kb.member_count} 个视频 · {retrievable} 个可检索
             {` · ${fmtRelTime(kb.updated_at)}更新`}
           </p>
         </div>
       </div>
 
-      <div className="ws-actions" style={{ marginTop: 16 }}>
+      {!!unavailable.length && <div className="artifact-notice" role="status"><div><b>{unavailable.length} 个资料需要处理</b><p>当前规则要求所有成员可检索，整库问答暂不可用。打开资料完成索引，或将其移出知识库。</p><div>{unavailable.map(video => <Link key={video.task_id} className="btn btn-sm" href={`/video/${video.task_id}`}>{video.title || '查看不可用资料'}</Link>)}</div></div></div>}
+
+      {readOnly && <p className="kb-readonly">演示模式可阅读资料与已有会话，不能修改知识库。</p>}
+      <div className="kb-actions">
+        <button className="btn btn-primary" disabled={!videos.length || !!unavailable.length} title={unavailable.length ? '先处理不可检索的成员视频' : !videos.length ? '请先加入视频' : undefined} onClick={() => router.push(`/chat/kb/${kb.id}`)}><Icon name="message" size="sm" />进入问答</button>
         <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setManageOpen(true)}>
           <Icon name="plus" size="sm" />加入视频
         </button>
-        {!readOnly && (
-          <button className="btn btn-ghost" onClick={() => setDeleteOpen(true)}>
-            <Icon name="trash" size="sm" />删除知识库
-          </button>
-        )}
-        <span style={{ flex: 1 }} />
-        <button className="btn btn-ghost" onClick={() => router.push(`/kb/${kb.id}/retrieval`)}><Icon name="search" size="sm" />检索测试台</button>
-        <button className="btn btn-primary" onClick={() => router.push(`/chat/kb/${kb.id}`)}>
-          <Icon name="message" size="sm" />进入研究工作区
-        </button>
+        <button className="btn btn-ghost" onClick={() => setMoreOpen(true)}><Icon name="settings" size="sm" />更多操作</button>
       </div>
 
       <div className="section-head">
@@ -205,6 +202,7 @@ export default function KBDetailPage({ params }: { params: { id: string } }) {
           onChanged={() => { void reload() }}
         />
       )}
+      {moreOpen && <Modal title="知识库操作" onClose={() => setMoreOpen(false)} width={460}><p className="product-description">当前向量模型：{kb.embedding_model || '未记录'}</p><button className="kb-more-operation" onClick={() => router.push(`/kb/${kb.id}/retrieval`)}><Icon name="search" /><span><strong>检索测试台</strong><small>检查成员检索结果与排序</small></span></button>{!readOnly && <button className="kb-more-operation" onClick={() => {setMoreOpen(false);setDeleteOpen(true)}}><Icon name="trash" /><span><strong>删除知识库</strong><small>视频保留，库内会话会删除</small></span></button>}</Modal>}
 
       {editOpen && (
         <Modal

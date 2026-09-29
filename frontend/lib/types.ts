@@ -285,6 +285,7 @@ export interface VideoTask {
   summary_job?: SummaryJob
   has_summary: boolean
   has_rag_index: boolean
+  retrievable?: boolean // indexed with the current default embedding model
   visual_status: string
 }
 
@@ -460,6 +461,8 @@ export interface TimelineAtom {
 }
 
 export interface VideoTimeline {
+  study_source_ready?: boolean
+  study_source_reason?: string
   task_id: number
   title?: string
   atoms: TimelineAtom[]

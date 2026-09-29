@@ -102,6 +102,9 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       scopeType="video"
       targetId={taskId}
       scopeName={taskTitle(task)}
+      videoVisualMode={task.visual_mode}
+      videoRetrievable={task.retrievable}
+      videoHasTranscript={task.has_transcription}
       playbackUrl={playbackUrl}
       refreshPlaybackUrl={refreshPlaybackUrl}
       suggestions={[]}

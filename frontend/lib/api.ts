@@ -183,8 +183,8 @@ export const api = {
   uploadChunk: sendChunk,
   mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number }, signal?: AbortSignal) =>
     req<UploadResult>('/media/merge-chunks', 'POST', p, undefined, signal, UPLOAD_API_BASE),
-  listTasks: (page = 1, page_size = 20, keyword = '') =>
-    req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}`, 'GET'),
+  listTasks: (page = 1, page_size = 20, keyword = '', activity = 'all') =>
+    req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}&activity=${encodeURIComponent(activity)}`, 'GET'),
   getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
   getSummary: (id: number) => req<EffectiveSummaryView>(`/media/task/${id}/summary`, 'GET'),
   editSummary: (id: number, input: { instruction: string; expected_revision: number; mode: 'preview' | 'apply' }, key: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/edit-runs`, 'POST', input, { 'Idempotency-Key': key }),

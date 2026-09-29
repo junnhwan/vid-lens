@@ -45,26 +45,20 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 	if err != nil {
 		return "", nil, err
 	}
-	for _, row := range rows {
-		if row.Status != model.TranscriptionChunkStatusCompleted {
-			return "", nil, artifact.Err("source_not_ready", 422)
-		}
-	}
 	frames, err := repos.VisualFrame.ListByTaskID(id)
 	if err != nil {
 		return "", nil, err
 	}
 	timeline := BuildVideoTimeline(id, rows, frames)
-	if len(timeline.Atoms) == 0 {
-		return "", nil, artifact.Err("source_not_ready", 422)
-	}
-	if len(timeline.Atoms) > 1000 {
-		return "", nil, artifact.Err("source_limit_exceeded", 422)
+	if reason := studySourceReason(task, rows, timeline); reason != "" {
+		code := "source_not_ready"
+		if reason == "source_limit_exceeded" {
+			code = reason
+		}
+		return "", nil, artifact.Err(code, 422)
 	}
 	items := make([]model.SourceSnapshotItem, 0, len(timeline.Atoms))
-	size := 0
 	for _, a := range timeline.Atoms {
-		size += len(a.Content)
 		item := model.SourceSnapshotItem{SourceIdentity: a.ID, Modality: a.Modality, Content: a.Content, ContentHash: artifact.Hash(a.Content), TimeRangeStatus: a.TimeRangeStatus}
 		if item.TimeRangeStatus == model.ChunkTimeRangeExact {
 			item.TimeRangeStatus = "precise"
@@ -75,9 +69,6 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 			item.EndMS = &end
 		}
 		items = append(items, item)
-	}
-	if size > 2*1024*1024 {
-		return "", nil, artifact.Err("source_limit_exceeded", 422)
 	}
 	return artifact.Hash(artifact.JSON(items)), items, nil
 }
@@ -377,7 +368,8 @@ func (s *ArtifactService) Run(ctx context.Context, owner int64, id string) (*Art
 		return nil, err
 	}
 	active := r.Status == "pending" || r.Status == "running"
-	v := &ArtifactRunView{ID: r.ID, ArtifactID: req.ArtifactID, SourceTaskID: r.TaskID, ParentRunID: req.ParentRunID, Status: r.Status, Stage: r.Stage, CancelRequested: r.CancelRequestedAt != nil, CanCancel: active && r.CancelRequestedAt == nil, CanRetry: !active, CanResume: active && r.CancelRequestedAt == nil, CreatedAt: r.CreatedAt, StartedAt: r.ExecutionStartedAt, FinishedAt: r.FinishedAt, LastSeq: r.EventSeq, Usage: ArtifactRunUsage{r.LLMCallsUsed, r.PromptTokensUsed, r.CompletionTokensUsed, r.TokenUsageSource}}
+	needsResume := r.Status == "running" && (r.RunLeaseUntil == nil || !r.RunLeaseUntil.After(time.Now()))
+	v := &ArtifactRunView{ID: r.ID, ArtifactID: req.ArtifactID, SourceTaskID: r.TaskID, ParentRunID: req.ParentRunID, Status: r.Status, Stage: r.Stage, CancelRequested: r.CancelRequestedAt != nil, CanCancel: active && r.CancelRequestedAt == nil, CanRetry: !active, CanResume: needsResume && r.CancelRequestedAt == nil, CreatedAt: r.CreatedAt, StartedAt: r.ExecutionStartedAt, FinishedAt: r.FinishedAt, LastSeq: r.EventSeq, Usage: ArtifactRunUsage{r.LLMCallsUsed, r.PromptTokensUsed, r.CompletionTokensUsed, r.TokenUsageSource}}
 	if r.ErrorCode != "" {
 		v.ErrorCode = &r.ErrorCode
 	}

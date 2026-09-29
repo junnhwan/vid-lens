@@ -61,13 +61,17 @@
   --pad-card: 16px;
   --grid-card: 280px;
 
-  --font-ui: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-read: "Noto Serif SC", "Songti SC", "Noto Serif CJK SC", serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas,
+  --font-ui: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-read: "Songti SC", "SimSun", "Noto Serif CJK SC", serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas,
     monospace;
 
   --rail-w: 224px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-press: 120ms;
+  --motion-feedback: 160ms;
+  --motion-panel: 220ms;
+  --focus-ring: #f0bc68;
 
   /* 压在视频画面上的深色浮层及其文字, 浅色主题翻转为浅底深字 */
   --veil: rgba(10, 9, 7, 0.76);
@@ -91,6 +95,7 @@
   --acc-dim: rgba(196, 132, 31, 0.12);
   --acc-line: rgba(196, 132, 31, 0.38);
   --acc-ink: #fff8ea;
+  --focus-ring: #8d590b;
   --ok: #2f7a45;
   --ok-dim: rgba(47, 122, 69, 0.12);
   --warn: #9a6f12;

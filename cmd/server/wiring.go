@@ -210,7 +210,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
 	})
 
-	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools, deps.cfg.JWT)
+	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools, deps.cfg.JWT).WithAIProfiles(aiProfileSvc)
 	mediaSvc.SetTranscriptionConfig(deps.cfg.MQ)
 	var vectorCleaner service.TaskVectorCleaner
 	if deps.ragStore != nil {

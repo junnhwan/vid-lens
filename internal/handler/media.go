@@ -391,6 +391,11 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	keyword := c.Query("keyword")
+	activity := c.Query("activity")
+	if activity != "" && activity != "all" && activity != "ready" && activity != "processing" && activity != "pending" && activity != "failed" {
+		response.BadRequest(c, "无效的视频状态筛选")
+		return
+	}
 
 	if page < 1 {
 		page = 1
@@ -399,7 +404,7 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 		pageSize = 20
 	}
 
-	tasks, total, err := h.svc.ListTasks(userID, page, pageSize, keyword)
+	tasks, total, err := h.svc.ListTasks(userID, page, pageSize, keyword, activity)
 	if err != nil {
 		response.InternalError(c, "查询失败")
 		return

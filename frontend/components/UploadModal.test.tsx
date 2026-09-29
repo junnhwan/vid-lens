@@ -18,6 +18,20 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
+test('enabled link import is preferred unless a user already selected files',async()=>{
+  vi.mocked(api.importOptions).mockResolvedValue({url_import_enabled:true})
+  const view=render(<UploadModal onClose={vi.fn()} />)
+  expect(await screen.findByPlaceholderText(/https:\/\/www.bilibili/)).toBeTruthy()
+  view.unmount()
+  let resolve!:(value:{url_import_enabled:boolean})=>void
+  vi.mocked(api.importOptions).mockImplementation(()=>new Promise(done=>{resolve=done}))
+  render(<UploadModal onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:'本地文件'}))
+  await act(async()=>resolve({url_import_enabled:true}))
+  expect(screen.getByRole('button',{name:'选择本地视频'})).toBeTruthy()
+  expect(screen.queryByPlaceholderText(/https:\/\/www.bilibili/)).toBeNull()
+})
+
 function selectFile(size = 16) {
   const source = new Uint8Array(size)
   const file = {

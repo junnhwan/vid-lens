@@ -19,3 +19,6 @@
 .profile-dimension .profile-field-feedback { margin-bottom:0; }
 @media(max-width:620px) { .profile-group-grid { grid-template-columns:1fr; }.profile-model-row > div { min-width:0; } }
 @media(prefers-reduced-motion:reduce) { .profile-field-feedback.loading::before { animation:none; } }
+.profile-connection-choice { margin-bottom:14px; }
+.profile-connection-choice p { margin-top:9px; font-size:12px; line-height:1.7; color:var(--tx-3); }
+.profile-connection-choice button:disabled { opacity:.5; cursor:not-allowed; }

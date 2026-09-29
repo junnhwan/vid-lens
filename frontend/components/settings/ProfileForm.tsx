@@ -48,6 +48,8 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const [vision, setVision] = useState<GroupDraft>(fromProfile(imported?.vision_provider || profile?.vision_provider || '', imported?.vision_base_url || profile?.vision_base_url || '', imported?.vision_model || profile?.vision_model || ''))
   const [visionEnabled, setVisionEnabled] = useState(!!(imported?.vision_model || profile?.vision_model))
   const [isDefault, setIsDefault] = useState(imported?.is_default || profile?.is_default || false)
+  const [reuseASR, setReuseASR] = useState(false)
+  const [reuseEmbedding, setReuseEmbedding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [models, setModels] = useState<Partial<Record<ProfilePurpose, string[]>>>({})
@@ -106,7 +108,16 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       }
     }
 
+  const reusableConnection = !!llm.api_key.trim() && !validateModelURL(llm.base_url, false, llm.preset) && !!llm.base_url.trim()
+  useEffect(() => {
+    if (reuseASR) setGroup('asr', setAsr)({ provider:llm.provider, base_url:llm.base_url.replace(/\/+$/, ''), api_key:llm.api_key, preset:llm.preset })
+    if (reuseEmbedding) setGroup('embedding', setEmbedding)({ provider:llm.provider, base_url:llm.base_url.replace(/\/+$/, '') + '/embeddings', api_key:llm.api_key, preset:llm.preset })
+  // Reuse follows connection edits; the capability model stays independently selected.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reuseASR, reuseEmbedding, llm.provider, llm.base_url, llm.api_key, llm.preset])
+
   const buildRequest = (): AIProfileRequest | null => {
+    if ((reuseASR || reuseEmbedding) && !reusableConnection) { setErr('复用连接需要有效的对话地址与实际 API Key；也可切换为单独配置'); return null }
     if (!name.trim()) { setErr('请填写配置名称'); return null }
     if (!llm.provider.trim() || !llm.base_url.trim() || !llm.model.trim()) { setErr('LLM 配置不完整'); return null }
     const contextTokens = llmContextTokens.trim() === '' ? 0 : Number(llmContextTokens)
@@ -200,6 +211,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
 
   const probeDim = async () => {
     if (probing) return
+    if (reuseEmbedding && !reusableConnection) { setDimError('请先补齐复用的对话地址与实际密钥'); return }
     if (!embedding.base_url.trim() || !embedding.model.trim() || (!embedding.api_key.trim() && !profileId)) {
       toast.info('先填 endpoint、模型与 API Key(编辑时留空 Key 用已存密钥)')
       return
@@ -257,6 +269,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         purpose="asr" models={models.asr || []} onPull={pullModels} listStatus={listStatus.asr}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.asr_api_key_masked})` : 'sk-…'}
         required
+        reuse={reuseASR} onReuse={setReuseASR} reuseAvailable={reusableConnection}
       />
       <GroupBlock
         title="向量模型"
@@ -265,6 +278,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.embedding_api_key_masked})` : 'sk-…'}
         urlPlaceholder="https://…/v1/embeddings"
         required
+        reuse={reuseEmbedding} onReuse={setReuseEmbedding} reuseAvailable={reusableConnection}
       />
       <div className="profile-dimension">
         <label className="field-label" htmlFor="embedding-dim">向量维度</label>
@@ -297,7 +311,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         />
       )}
 
-      <CapabilityProbe targets={probeTargets} disabled={busy} />
+      <CapabilityProbe targets={probeTargets} disabled={busy || ((reuseASR || reuseEmbedding) && !reusableConnection)} />
 
       {!profile?.read_only && profile?.source !== 'hosted' && (
         <details className="disclosure" style={{ marginTop: 22 }}>
@@ -360,7 +374,7 @@ function applyPreset(presetId: string, group: GroupDraft): Partial<GroupDraft> {
   }
 }
 
-function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatus, keyPlaceholder, urlPlaceholder, required }: {
+function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatus, keyPlaceholder, urlPlaceholder, required, reuse, onReuse, reuseAvailable }: {
   title: string
   group: GroupDraft
   setGroup: (patch: Partial<GroupDraft>) => void
@@ -371,11 +385,15 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
   keyPlaceholder: string
   urlPlaceholder?: string
   required?: boolean
+  reuse?: boolean
+  onReuse?: (reuse:boolean) => void
+  reuseAvailable?: boolean
 }) {
   return (
     <section className="profile-model-card" aria-label={title || '视觉模型'}>
       <div className="profile-model-card-head"><h3>{title || '视觉模型'}{required && <span> · 必填</span>}</h3><small>{purpose.toUpperCase()}</small></div>
-      <div className="profile-group-grid">
+      {onReuse && <div className="profile-connection-choice"><div className="seg"><button type="button" aria-pressed={!!reuse} className={reuse ? 'on' : ''} disabled={!reuseAvailable && !reuse} onClick={() => onReuse(true)}>复用对话连接</button><button type="button" aria-pressed={!reuse} className={!reuse ? 'on' : ''} onClick={() => onReuse(false)}>单独配置</button></div><p>{reuse ? '连接跟随对话设置；请单独选择此能力的模型，并检查服务是否支持。' : !reuseAvailable ? '填写有效对话地址与实际密钥后可复用。已保存的脱敏密钥无法复制。' : '可复用对话地址与密钥；模型仍单独选择。'}</p></div>}
+      {!reuse && <div className="profile-group-grid">
         <label className="profile-input-label">服务商<select
           className="input"
           value={group.preset}
@@ -391,16 +409,16 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
           value={group.base_url}
           onChange={e => setGroup({ base_url: e.target.value })}
         /></label>
-      </div>
-      <p className="profile-url-hint">
+      </div>}
+      {!reuse && <p className="profile-url-hint">
         {purpose === 'embedding' ? '填写完整 Embedding 接口地址，例如 https://api.siliconflow.cn/v1/embeddings；请求直接发送到此地址。' : `填写服务商要求的 API 基础地址，例如硅基流动 https://api.siliconflow.cn/v1；系统会追加 ${purpose === 'asr' ? '/audio/transcriptions' : '/chat/completions'}。不要填写完整接口路径。`}
-      </p>
+      </p>}
       {validateModelURL(group.base_url, purpose === 'embedding', group.preset) && <p role="alert" style={{ fontSize: 12, color: 'var(--bad)' }}>{validateModelURL(group.base_url, purpose === 'embedding', group.preset)}</p>}
       <div className="profile-group-grid profile-model-row">
-        <label className="profile-input-label">API Key<input className="input" type="password" autoComplete="off" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} /></label>
+        {!reuse && <label className="profile-input-label">API Key<input className="input" type="password" autoComplete="off" placeholder={keyPlaceholder} value={group.api_key} onChange={e => setGroup({ api_key: e.target.value })} /></label>}
         <div className="profile-input-label"><label htmlFor={purpose + '-model'}>模型 ID</label><div className="profile-model-pick">
           <ModelCombobox id={purpose + '-model'} label={(title || '视觉模型') + '模型 ID'} value={group.model} onChange={model => setGroup({ model })} models={models} />
-          <button type="button" className="btn btn-sm" style={{ flex: 'none' }} disabled={listStatus?.kind === 'loading'} onClick={() => onPull(purpose, group)}>{listStatus?.kind === 'loading' ? '读取中…' : '读取模型'}</button>
+          <button type="button" className="btn btn-sm" style={{ flex: 'none' }} disabled={listStatus?.kind === 'loading' || (!!reuse && !reuseAvailable)} onClick={() => onPull(purpose, group)}>{listStatus?.kind === 'loading' ? '读取中…' : '读取模型'}</button>
         </div></div>
       </div>
       <p className={'profile-field-feedback ' + (listStatus?.kind || '')} role="status">{listStatus?.message || '模型列表尚未读取；也可以手动填写模型 ID。'}</p>

@@ -76,12 +76,8 @@ export function EvidenceDrawer({ cite, fallbackTitle, canJump, jumpDisabledHint,
           <div className="ev-meta-grid">
             <div className="ev-meta-cell"><div className="k">证据模态</div><div className="v"><ModalityTag modality={cite.modality} /></div></div>
             <div className="ev-meta-cell"><div className="k">时间状态</div><div className="v">{timeStatusText(cite.timeRangeStatus)}</div></div>
-            <div className="ev-meta-cell"><div className="k">证据 ID</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.evidenceId || cite.id}</div></div>
-            <div className="ev-meta-cell"><div className="k">召回通道</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.source || '—'}</div></div>
-            <div className="ev-meta-cell"><div className="k">相关度</div><div className="v mono" style={{ fontWeight: 500 }}>{fmtScore(cite.score)}</div></div>
-            <div className="ev-meta-cell"><div className="k">来源映射</div><div className="v">{cite.sourceMappingStatus || '—'}</div></div>
           </div>
-          <div className="field-label">展示上下文</div>
+          <div className="field-label">来源上下文</div>
           <p style={{ fontSize: 12, color: 'var(--tx-2)', lineHeight: 1.7 }}>
             {cite.displayContext || cite.content}
             {cite.displayContextTruncated ? '…' : ''}
@@ -105,6 +101,12 @@ export function EvidenceDrawer({ cite, fallbackTitle, canJump, jumpDisabledHint,
               {modalityView(cite.modality).text}类证据来自关键帧观察,跳转后可对照画面核对。
             </p>
           ) : null}
+          <details className="evidence-technical"><summary>技术详情</summary><div className="ev-meta-grid">
+            <div className="ev-meta-cell"><div className="k">证据 ID</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.evidenceId || cite.id}</div></div>
+            <div className="ev-meta-cell"><div className="k">召回通道</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.source || '—'}</div></div>
+            <div className="ev-meta-cell"><div className="k">相关度</div><div className="v mono" style={{ fontWeight: 500 }}>{fmtScore(cite.score)}</div></div>
+            <div className="ev-meta-cell"><div className="k">来源映射</div><div className="v">{cite.sourceMappingStatus || '—'}</div></div>
+          </div></details>
         </div>
       </div>
     </>

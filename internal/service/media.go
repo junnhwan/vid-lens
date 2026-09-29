@@ -47,6 +47,7 @@ type TaskVectorCleaner interface {
 }
 
 type MediaService struct {
+	profiles          ConversationProfileProvider
 	repo              *repository.Repositories
 	storage           mediaObjectStore
 	taskCleanup       *TaskCleanupService
@@ -60,6 +61,11 @@ type MediaService struct {
 	// URLs. Browser media elements cannot send an Authorization header, so the
 	// credential has to travel in the URL itself.
 	playbackSecret string
+}
+
+func (s *MediaService) WithAIProfiles(profiles ConversationProfileProvider) *MediaService {
+	s.profiles = profiles
+	return s
 }
 
 func NewMediaService(

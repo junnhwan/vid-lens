@@ -2,7 +2,6 @@ package service
 
 import (
 	"reflect"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,8 +64,8 @@ func TestKnowledgeBaseReadinessReportsMissingUnindexedAndModelSwitch(t *testing.
 		t.Fatal(err)
 	}
 	tasks := make([]*model.VideoTask, 0, 3)
-	for _, md5 := range []string{"44444444444444444444444444444444", "55555555555555555555555555555555", "66666666666666666666666666666666"} {
-		task := &model.VideoTask{UserID: 7, FileMD5: md5, Filename: "state.mp4", FileURL: "videos/state"}
+	for i, md5 := range []string{"44444444444444444444444444444444", "55555555555555555555555555555555", "66666666666666666666666666666666"} {
+		task := &model.VideoTask{UserID: 7, FileMD5: md5, Filename: "state.mp4", Title: string(rune('A' + i)), FileURL: "videos/state"}
 		if err := repos.Task.Create(task); err != nil {
 			t.Fatal(err)
 		}
@@ -88,23 +87,22 @@ func TestKnowledgeBaseReadinessReportsMissingUnindexedAndModelSwitch(t *testing.
 	svc := NewChatService(repos, nil, ChatConfig{})
 
 	_, err := svc.sessionRetrievalTaskIDs(7, session, "embed-v1")
-	assertUnavailableTaskIDs(t, err, []int64{tasks[1].ID, tasks[2].ID})
+	assertUnavailableTitles(t, err, []string{"已删除或无权访问的资料", "「C」"})
 	_, err = svc.sessionRetrievalTaskIDs(7, session, "embed-v2")
-	assertUnavailableTaskIDs(t, err, []int64{tasks[0].ID, tasks[1].ID, tasks[2].ID})
+	assertUnavailableTitles(t, err, []string{"「A」", "已删除或无权访问的资料", "「C」"})
 }
 
-func assertUnavailableTaskIDs(t *testing.T, err error, ids []int64) {
+func assertUnavailableTitles(t *testing.T, err error, titles []string) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("expected unavailable task IDs")
 	}
-	for _, id := range ids {
-		if !containsInt64Text(err.Error(), id) {
-			t.Fatalf("err=%q missing task id %d", err, id)
+	if strings.Contains(err.Error(), "task_ids") {
+		t.Fatal("internal IDs leaked in user error")
+	}
+	for _, title := range titles {
+		if !strings.Contains(err.Error(), title) {
+			t.Fatalf("err=%q missing title %s", err, title)
 		}
 	}
-}
-
-func containsInt64Text(text string, id int64) bool {
-	return strings.Contains(text, strconv.FormatInt(id, 10))
 }

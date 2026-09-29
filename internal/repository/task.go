@@ -191,21 +191,35 @@ func (r *TaskRepository) ResultPresenceByTaskIDs(tasks []model.VideoTask) (hasTr
 
 // ListByUserID 分页查询用户的视频任务列表，keyword 非空时按文件名/标题模糊搜索
 // The (user_id, created_at) index supports stable chronological pagination.
-func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string) ([]model.VideoTask, int64, error) {
+func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string, activity ...string) ([]model.VideoTask, int64, error) {
 	var tasks []model.VideoTask
 	var total int64
 
 	query := r.db.Where("user_id = ?", userID)
 	if kw := strings.TrimSpace(keyword); kw != "" {
-		like := "%" + kw + "%"
-		query = query.Where("filename LIKE ? OR title LIKE ?", like, like)
+		like := "%" + strings.ToLower(kw) + "%"
+		query = query.Where("LOWER(filename) LIKE ? OR LOWER(title) LIKE ?", like, like)
 	}
-	query.Model(&model.VideoTask{}).Count(&total)
+	if len(activity) > 0 {
+		switch activity[0] {
+		case "ready":
+			query = query.Where("status NOT IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning}).Where("EXISTS (SELECT 1 FROM video_transcriptions AS tx WHERE (tx.task_id = video_tasks.id OR (video_tasks.file_md5 <> '' AND tx.file_md5 = video_tasks.file_md5)) AND TRIM(tx.content) <> '') OR EXISTS (SELECT 1 FROM video_visual_frames AS vf WHERE vf.task_id = video_tasks.id AND vf.status = ? AND (TRIM(vf.ocr_text) <> '' OR TRIM(vf.vision_caption) <> ''))", model.VisualFrameStatusCompleted)
+		case "processing":
+			query = query.Where("status IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning})
+		case "pending":
+			query = query.Where("status = ?", model.TaskStatusPending)
+		case "failed":
+			query = query.Where("status IN ?", []int8{model.TaskStatusFailed, model.TaskStatusDead})
+		}
+	}
+	if err := query.Model(&model.VideoTask{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
 
 	offset := (page - 1) * pageSize
 	err := query.
 		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, visual_mode, visual_disabled, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(pageSize).
 		Find(&tasks).Error

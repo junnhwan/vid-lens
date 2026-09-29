@@ -116,8 +116,8 @@ func TestKnowledgeBaseChatForcesStrictRAGAndRejectsUnavailableMembers(t *testing
 
 	svc := NewChatService(repos, &fakeRetriever{}, ChatConfig{TopK: 5})
 	_, err := svc.AskWithMode(context.Background(), ChatModeVideoAssistant, 7, session.ID, "总结一下", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{EmbeddingModel: "embed-new", LLMModel: "chat"})
-	if err == nil || !strings.Contains(err.Error(), "不可用") || !strings.Contains(err.Error(), string(rune('0'+task.ID))) {
-		t.Fatalf("err = %v, want unavailable member ids", err)
+	if err == nil || !strings.Contains(err.Error(), "不可检索") || !strings.Contains(err.Error(), "a.mp4") || strings.Contains(err.Error(), "task_ids") {
+		t.Fatalf("err = %v, want readable unavailable member title", err)
 	}
 }
 

@@ -98,7 +98,7 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 	}
 
 	_, err = svc.Ask(context.Background(), 7, session.ID, "模型切换后继续问", 0, &fakeEmbeddingClient{dim: 3}, &recordingChatClient{}, ai.Profile{EmbeddingModel: "embed-v2", LLMModel: "chat"})
-	if err == nil || !strings.Contains(err.Error(), "task_ids=[") {
+	if err == nil || !strings.Contains(err.Error(), "视频 A") || !strings.Contains(err.Error(), "b.mp4") || strings.Contains(err.Error(), "task_ids") {
 		t.Fatalf("model switch err=%v", err)
 	}
 }

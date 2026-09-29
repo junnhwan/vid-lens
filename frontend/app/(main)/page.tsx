@@ -1,24 +1,21 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback } from 'react'
 import Link from '@/lib/router'
 import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
-import type { ChatSession, VideoTask } from '@/lib/types'
+import type { ChatSession } from '@/lib/types'
 import { fmtRelTime, taskTitle } from '@/lib/format'
-import { taskCategory, taskStateView } from '@/lib/taskStatus'
+import { taskCategory } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoCard } from '@/components/VideoCard'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
-import { ConfirmModal } from '@/components/ui/Modal'
 import { CardSkeleton, EmptyState, ErrorState, ProductSkeleton } from '@/components/ui/AsyncState'
 import { RecentProductWork } from '@/components/artifacts/RecentProductWork'
 import { ProductHero } from '@/components/product/ProductHero'
 import { ProcessStrip } from '@/components/ProcessStrip'
-import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
-import { VisualProgressPanel } from '@/components/VisualProgressPanel'
 import { artifactApi } from '@/lib/artifacts/api'
-import type { LearningPosition } from '@/lib/artifacts/schema'
 import { formatClock } from '@/lib/format'
 
 export default function DashboardPage() {
@@ -27,48 +24,17 @@ export default function DashboardPage() {
   const { uploadRevision, openUpload } = useShell()
   useCrumb([{ label: '工作台' }])
 
-  const [total, setTotal] = useState(0)
-  const [tasks, setTasks] = useState<VideoTask[]>([])
-  const [sessions, setSessions] = useState<ChatSession[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [reloadTick, setReloadTick] = useState(0)
-
-  const [retrying, setRetrying] = useState<VideoTask | null>(null)
-  const [resume, setResume] = useState<{ position: LearningPosition; task: VideoTask } | null>(null)
-
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const [taskPage, sessionList] = await Promise.all([
-        api.listTasks(1, 50).catch(() => null),
-        api.listSessions().catch(() => null),
-      ])
-      if (!active) return
-      setTasks(taskPage?.list || [])
-      setTotal(taskPage?.total || 0)
-      setSessions(sessionList || [])
-      setLoadError(taskPage && sessionList ? '' : '数据加载失败,请检查网络或服务状态后重试')
-      setLoading(false)
-      void artifactApi.position().then(async position => {
-        if (!position) { if (active) setResume(null); return }
-        const task=taskPage?.list.find(item=>item.id===position.task_id) ?? await api.getTask(position.task_id)
-        if (active) setResume({ position,task })
-      }).catch(() => { if (active) setResume(null) })
-    })()
-    return () => { active = false }
-  }, [uploadRevision, reloadTick])
-
-  const hasActiveTasks = tasks.some(t => t.status === 1 || t.status === 2 || summaryFailureView(t)?.scheduled)
-  useEffect(() => {
-    if (!hasActiveTasks) return
-    const iv = setInterval(() => {
-      void api.listTasks(1, 50).then(page => setTasks(page.list)).catch(() => {})
-    }, 5000)
-    return () => clearInterval(iv)
-  }, [hasActiveTasks])
-
-  const processing = tasks.filter(t => taskCategory(t) !== 'ready')
+  const queryClient = useQueryClient()
+  const taskQuery = useQuery({ queryKey:['home-videos',uploadRevision], queryFn:() => api.listTasks(1,50), refetchInterval:query => query.state.data?.list.some(t => t.status === 1 || t.status === 2 || summaryFailureView(t)?.scheduled) ? 5000 : false })
+  const sessionQuery = useQuery({ queryKey:['home-sessions'], queryFn:() => api.listSessions() })
+  const positionQuery = useQuery({ queryKey:['home-learning-position'], queryFn:async () => { const position=await artifactApi.position(); return position ? {position,task:await api.getTask(position.task_id)} : null } })
+  const tasks=taskQuery.data?.list || []
+  const total=taskQuery.data?.total || 0
+  const sessions=sessionQuery.data || []
+  const loading=taskQuery.isPending
+  const resume=positionQuery.data
+  const processing=tasks.filter(t => t.status !== 1 && t.status !== 2 && taskCategory(t) !== 'ready')
+  const activeCount=tasks.filter(t => t.status === 1 || t.status === 2).length
   const taskTitleById = useCallback((id: number) => {
     const t = tasks.find(x => x.id === id)
     return t ? taskTitle(t) : null
@@ -78,67 +44,41 @@ export default function DashboardPage() {
     if (!window.confirm('删除这个会话?删除后聊天记录不可恢复。')) return
     try {
       await api.deleteSession(s.id)
-      setSessions(list => list.filter(item => item.id !== s.id))
+      queryClient.setQueryData<ChatSession[]>(['home-sessions'], list => list?.filter(item => item.id !== s.id))
       toast.success('会话已删除')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : '删除失败')
     }
   }
 
-  const retry = async (t: VideoTask) => {
-    setRetrying(null)
-    try {
-      if (t.last_job_type === 'analyze') await api.analyze(t.id)
-      else await api.transcribe(t.id)
-      toast.success('已重新入队')
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '重试失败')
-    }
-  }
-
-  if (!loading && loadError) {
-    return (
-      <div className="page">
-        <ErrorState message={loadError} onRetry={() => { setLoading(true); setReloadTick(t => t + 1) }} />
-      </div>
-    )
-  }
-
   return (
     <div className="page">
-      <ProductHero onImport={openUpload} current={resume?.task} resumeUpdatedAt={resume?.position.updated_at} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={loading} />
+      <ProductHero onImport={openUpload} current={resume?.task} resumeUpdatedAt={resume?.position.updated_at} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={positionQuery.isPending} />
+      {positionQuery.error && <div className="artifact-notice" role="alert">学习位置读取失败<button className="btn btn-sm" onClick={() => void positionQuery.refetch()}>重试</button></div>}
+      {activeCount > 0 && <p className="home-background-status">近期有 {activeCount} 个后台任务正在处理。<Link href="/tasks">查看任务</Link></p>}
       <div className="product-metrics">
-        <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading ? '—' : String(total).padStart(2, '0')}</strong></Link>
-        <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{loading ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
-        <Link href="/library" className="product-metric"><span>近期需处理</span><strong>{loading ? '—' : String(processing.length).padStart(2, '0')}</strong></Link>
+        <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading || !taskQuery.data ? '—' : String(total).padStart(2, '0')}</strong></Link>
+        <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{sessionQuery.isPending || sessionQuery.error ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
+        <Link href="/library" className="product-metric"><span>近期需处理</span><strong>{loading || !taskQuery.data ? '—' : String(processing.length).padStart(2, '0')}</strong></Link>
       </div>
       {processing.length > 0 && (
         <>
           <div className="section-head" style={{ marginTop: 0 }}>
-            <h2>继续处理</h2>
+            <h2>需要处理</h2>
             <Link className="more" href="/library">全部视频 <Icon name="chev-r" size="sm" /></Link>
           </div>
           <div style={{ display: 'grid', gap: 10 }}>
-            {processing.map(t => {
+            {processing.slice(0, 3).map(t => {
               const failed = t.status === 4 || t.status === 5
-              const noRetry = failed && t.last_job_type === 'download'
               const summaryFailure = summaryFailureView(t)
               return (
-                <div key={t.id} className="proc-row" style={{ cursor: 'pointer' }} onClick={() => router.push(`/video/${t.id}`)}>
+                <div key={t.id} className="proc-row">
                   <div className="proc-left">
                     <h5><Link href={`/video/${t.id}`}>{taskTitle(t)}</Link></h5>
                     <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} has_rag_index={t.has_rag_index} visual_status={t.visual_status} />
-                    {(t.stage === 'transcribing' || t.stage === 'visual_indexing') && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
-                    {(t.stage === 'transcribing' || t.stage === 'visual_indexing') && (t.status === 1 || t.status === 2) && <VisualProgressPanel task={t} compact />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
                   </div>
-                  {failed
-                    ? noRetry
-                      ? <span className="chip chip-mute">请删除后重新添加</span>
-                      : summaryFailure?.scheduled
-                        ? <span className="chip chip-mute">等待自动重试</span>
-                        : <button className="btn btn-sm" onClick={e => { e.stopPropagation(); setRetrying(t) }}>重试</button>
-                    : <span className={`chip ${taskStateView(t).chip}`}>{taskStateView(t).text}</span>}
+                  <Link className="btn btn-sm" href={`/video/${t.id}`}>{failed ? '查看原因' : '选择处理方式'}</Link>
                 </div>
               )
             })}
@@ -154,10 +94,11 @@ export default function DashboardPage() {
         <h2>最近视频</h2>
         <Link className="more" href="/library">视频库 <Icon name="chev-r" size="sm" /></Link>
       </div>
-      {loading ? <CardSkeleton count={4} /> : tasks.length > 0 ? (
-        <div className="video-grid">{tasks.slice(0, 4).map(t => <VideoCard key={t.id} task={t} />)}</div>
+      {taskQuery.error && <ErrorState message="视频资料加载失败" onRetry={() => void taskQuery.refetch()} />}
+      {loading ? <CardSkeleton count={3} /> : tasks.length > 0 ? (
+        <div className="video-grid">{tasks.slice(0, 3).map(t => <VideoCard key={t.id} task={t} />)}</div>
       ) : (
-        !loading && (
+        !loading && !taskQuery.error && (
           <EmptyState
             icon="video"
             title="还没有视频"
@@ -168,10 +109,11 @@ export default function DashboardPage() {
 
       <div className="section-head">
         <h2>最近会话</h2>
-        {sessions.length > 8 && <Link className="more" href="/chat">全部会话 <Icon name="chev-r" size="sm" /></Link>}
+        {sessions.length > 4 && <Link className="more" href="/chat">全部会话 <Icon name="chev-r" size="sm" /></Link>}
       </div>
       <div className="card" style={{ padding: 8 }}>
-        {loading ? <ProductSkeleton kind="rows" count={3} /> : sessions.length > 0 ? sessions.slice(0, 8).map(s => {
+        {sessionQuery.error && <ErrorState message="会话加载失败" onRetry={() => void sessionQuery.refetch()} />}
+        {sessionQuery.isPending ? <ProductSkeleton kind="rows" count={3} /> : sessions.length > 0 ? sessions.slice(0, 4).map(s => {
           const isKb = s.knowledge_base_id > 0
           const where = s.scope_type === 'video_library' ? '视频库会话' : isKb ? '知识库会话' : taskTitleById(s.task_id) || '单视频会话'
           const href = s.scope_type === 'video_library' ? `/chat/library?session=${s.id}` : isKb ? `/chat/kb/${s.knowledge_base_id}?session=${s.id}` : `/chat/v/${s.task_id}?session=${s.id}`
@@ -192,20 +134,11 @@ export default function DashboardPage() {
             </div>
           )
         }) : (
-          !loading && <EmptyState variant="bare" title="还没有会话" />
+          !sessionQuery.isPending && !sessionQuery.error && <EmptyState variant="bare" title="还没有会话" />
         )}
       </div>
       <RecentProductWork />
-      {retrying && (
-        <ConfirmModal
-          title="重新提交任务?"
-          confirmLabel="重试"
-          onClose={() => setRetrying(null)}
-          onConfirm={() => void retry(retrying)}
-        >
-          「{taskTitle(retrying)}」的失败步骤会重新入队,可能再次消耗模型额度。
-        </ConfirmModal>
-      )}
+
     </div>
   )
 }

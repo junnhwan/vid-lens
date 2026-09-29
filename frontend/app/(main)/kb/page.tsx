@@ -52,7 +52,7 @@ export default function KBListPage() {
 
   return (
     <div className="page page-wide">
-      <PageHeading eyebrow="COLLECT, THEN GO DEEPER" title="把相关的，放在一起。"
+      <PageHeading title="知识库"
         description="知识库限定问答与检索的范围。成员视频越聚焦，回答越准确。"
         actions={<button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Icon name="plus" />新建知识库</button>} />
 

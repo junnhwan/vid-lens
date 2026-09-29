@@ -94,6 +94,7 @@ type VideoTask struct {
 	HasTranscription bool             `gorm:"-" json:"has_transcription"`
 	HasSummary       bool             `gorm:"-" json:"has_summary"`
 	HasRAGIndex      bool             `gorm:"-" json:"has_rag_index"`
+	Retrievable      bool             `gorm:"-" json:"retrievable"`
 	VisualStatus     string           `gorm:"-" json:"visual_status"`
 	SummaryProgress  *SummaryProgress `gorm:"-" json:"summary_progress,omitempty"`
 	SummaryJob       *TaskJob         `gorm:"-" json:"summary_job,omitempty"`

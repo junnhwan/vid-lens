@@ -4,13 +4,12 @@ import {
   type VideoTask,
 } from './types'
 
-// 任务状态 → 原型语义(全部/可问答/处理中/失败)。
-// 「可问答」= 转写完成(检索索引由 RAG 投影单独维护,此处不做假判断)。
+// 任务生命周期与已保存内容；当前模型的检索能力由 retrievable 单独表达。
 export type TaskCategory = 'ready' | 'processing' | 'failed'
 
-export function taskCategory(t: Pick<VideoTask, 'status' | 'has_transcription'>): TaskCategory {
+export function taskCategory(t: Pick<VideoTask, 'status' | 'has_transcription' | 'visual_status'>): TaskCategory {
   if (t.status === TaskStatusEnum.Failed || t.status === TaskStatusEnum.Dead) return 'failed'
-  if (t.status === TaskStatusEnum.Completed && t.has_transcription) return 'ready'
+  if (t.status === TaskStatusEnum.Completed && (t.has_transcription || t.visual_status === 'completed')) return 'ready'
   return 'processing'
 }
 
@@ -26,8 +25,8 @@ export function taskStateView(t: VideoTask): TaskStateView {
   }
   if (t.status === TaskStatusEnum.Completed) {
     return t.has_transcription
-      ? { chip: 'chip-ok', text: '可问答' }
-      : { chip: 'chip-mute', text: '已完成' }
+      ? { chip: 'chip-ok', text: '转写已完成' }
+      : { chip: 'chip-mute', text: t.visual_status === 'completed' ? '画面已完成' : '已完成' }
   }
   if (t.status === TaskStatusEnum.Queued) return { chip: 'chip-mute', text: `排队中 · ${queuedStageLabel(t.stage)}` }
   if (t.status === TaskStatusEnum.Running) return { chip: 'chip-acc', text: stageLabel(t.stage), live: true }

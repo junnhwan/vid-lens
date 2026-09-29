@@ -30,6 +30,8 @@ import type { StudyBlock, Artifact, ArtifactDetail, AnswerPreview } from '@/lib/
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import { FollowUpQuestions } from './FollowUpQuestions'
 import './ChatWorkspace.css'
+import { useShell } from '@/components/shell/AppShell'
+import { useAIAvailability } from '@/components/settings/useAIAvailability'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
 // Agent steps come from live tool events; new Chat answers retain server-safe progress.
@@ -40,14 +42,14 @@ type ChatUIMode = VideoChatMode
 type AgentUIMode = 'agent' | 'research' | 'evidence_funnel'
 
 const MODE_LABEL: Record<AgentUIMode, string> = {
-  agent: 'Agent',
+  agent: '深入分析',
   research: '深入研究',
   evidence_funnel: '证据漏斗',
 }
 
 const MODE_NOTE: Record<ChatUIMode, string> = {
   chat: '结合视频内容自然问答、解释与总结',
-  agent: '按问题调用文本和视觉工具,逐步分析后回答',
+  agent: '按问题检索文本证据，逐步分析后回答',
 }
 
 
@@ -67,6 +69,9 @@ interface ChatWorkspaceProps {
   studyBlock?: StudyBlock | null
   studyError?: string
   returnToStudy?: string
+  videoVisualMode?: string
+  videoRetrievable?: boolean
+  videoHasTranscript?: boolean
 }
 
 // 自定义引用映射:在默认字段之上补 evidence_id / source_mapping_status,供证据抽屉展示。
@@ -91,7 +96,7 @@ function mapCitations(citations: Citation[]): CiteRef[] {
     videoTitle: citation.video_title,
     finalRank: citation.final_rank,
     evidenceId: citation.evidence_id,
-    sourceMappingURL: citation.source_mapping_status,
+    sourceMappingStatus: citation.source_mapping_status,
   }))
 }
 
@@ -101,16 +106,30 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const router = useRouter()
   const toast = useToast()
+  const { user } = useShell()
+  const readOnly = user?.role === 'DEMO'
+  const ai = useAIAvailability(readOnly)
   const playerRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const followOutputRef = useRef(true)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const questionRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const autoAsked = useRef(false)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const [workspaceWidth, setWorkspaceWidth] = useState(Infinity)
+  const railOverlay = workspaceWidth < 1140
+  const questionsOverlay = workspaceWidth < 820
+  useEffect(() => {
+    const element = workspaceRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(entries => setWorkspaceWidth(entries[0]?.contentRect.width || element.clientWidth))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   const [input, setInput] = useState('')
   const [mode, setMode] = useState<ChatUIMode>('chat')
@@ -145,6 +164,8 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     basePath: isVideo ? `/chat/v/${targetId}` : scopeType === 'video_library' ? '/chat/library' : `/chat/kb/${targetId}`,
     mode,
     topK: TOP_K,
+    canSend: !readOnly && ai.ready,
+    onBlocked: () => toast.info(readOnly ? '演示模式可查看已有会话' : ai.reason),
     mapCitations,
     onBeforeSend: () => {
       followOutputRef.current = true
@@ -154,7 +175,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
 
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
   const lastAssistant = lastMessage && lastMessage.role === 'assistant' ? lastMessage : null
-  const toggleRail = (event: { detail: number }) => { setPanelsInstant(event.detail === 0); setRailOpen(open => {
+  const toggleRail = (event: { detail: number }) => { setPanelsInstant(event.detail === 0); if (railOverlay) setQuestionsOpen(false); setRailOpen(open => {
     try { localStorage.setItem('vidlens-chat-rail', open ? 'closed' : 'open') } catch { /* Private browsing can deny storage. */ }
     return !open
   }) }
@@ -283,12 +304,13 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (!q) { toast.info('先输入一个问题'); return }
     if (Array.from(q).length > 1000) { toast.error('问题超过 1000 字，请缩小段落范围后再提问。'); return }
     if (streaming) return
+    if (readOnly || !ai.ready) { toast.info(readOnly ? '演示模式可查看已有会话' : ai.reason); return }
     setInput('')
     void send(q)
-  }, [input, streaming, send, toast])
+  }, [input, streaming, send, toast, readOnly, ai.ready, ai.reason])
 
   useEffect(() => {
-    if (!sessionReady || autoAsked.current || !isVideo) return
+    if (!sessionReady || !ai.ready || readOnly || autoAsked.current || !isVideo) return
     const url = new URL(window.location.href)
     const question = url.searchParams.get('ask')?.trim()
     if (!question) return
@@ -296,7 +318,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     url.searchParams.delete('ask')
     window.history.replaceState(null, '', `${url.pathname}${url.search}`)
     submit(question)
-  }, [sessionReady, isVideo, submit])
+  }, [sessionReady, isVideo, submit, ai.ready, readOnly])
 
   const openEvidence = useCallback((cite: CiteRef, cites: CiteRef[]) => {
     setDrawerCite({ cite, cites })
@@ -306,11 +328,12 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (isVideo) {
       playerRef.current?.seek(cite.startMS || 0, true, cite.id)
       setRailOpen(true)
+      if (railOverlay) setQuestionsOpen(false)
     } else if (cite.taskId) {
       // 知识库范围没有统一的迷你播放器:跳到该片段所属视频的工作台
       router.push(replayLink(cite.taskId, cite.startMS, cite.timeRangeStatus))
     }
-  }, [isVideo, router])
+  }, [isVideo, router, railOverlay])
 
   const citationJumpable = useCallback((cite: CiteRef) =>
     (isVideo ? !!playbackUrl : !!cite.taskId) && hasReplayRange(cite)
@@ -329,18 +352,18 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   }, [agentTrace, streaming, lastAssistant])
 
   return (
-    <div className={`chat-wrap${questionsOpen ? ' questions-expanded' : ''}${railOpen ? ' rail-expanded' : ''}${panelsInstant ? ' panels-instant' : ''}`}>
+    <div ref={workspaceRef} className={`chat-wrap${questionsOpen ? ' questions-expanded' : ''}${railOpen ? ' rail-expanded' : ''}${railOverlay ? ' context-overlay' : ''}${questionsOverlay ? ' questions-overlay' : ''}${panelsInstant ? ' panels-instant' : ''}`}>
       <nav id="chat-question-nav" className={`question-nav${questionsOpen ? ' open' : ''}`} aria-label="历史问题导航">
         <div className="question-nav-head"><b>本次问题</b><span>{questions.length}</span><button type="button" className="question-nav-close" onClick={() => setQuestionsOpen(false)} aria-label="收起问题目录"><Icon name="chev-l" size="sm" /></button></div>
         {questions.length ? questions.map(({ message, index }, position) => <button key={`${session?.id ?? 'new'}-${message.messageId ?? index}`} type="button" className={activeQuestion === index ? 'active' : ''} aria-current={activeQuestion === index ? 'location' : undefined} onClick={() => {
           questionRefs.current[index]?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
           setActiveQuestion(index)
-          if (window.matchMedia?.('(max-width: 1080px)').matches) setQuestionsOpen(false)
+          if (questionsOverlay) setQuestionsOpen(false)
         }}><span>{position + 1}</span><span>{clipText(message.content, 70)}</span></button>) : <p>提问后，这里会列出问题。</p>}
       </nav>
       <div className="chat-col">
         <div className="chat-scope-bar">
-          <button type="button" className={`chat-panel-button${questionsOpen ? ' selected' : ''}`} onClick={event => { setPanelsInstant(event.detail === 0); setQuestionsOpen(v => !v) }} aria-expanded={questionsOpen} aria-controls="chat-question-nav" aria-label="问题目录"><Icon name="list" size="sm" /><span>问题</span><small>{questions.length}</small></button>
+          <button type="button" className={`chat-panel-button${questionsOpen ? ' selected' : ''}`} onClick={event => { setPanelsInstant(event.detail === 0); if (questionsOverlay) setRailOpen(false); setQuestionsOpen(v => !v) }} aria-expanded={questionsOpen} aria-controls="chat-question-nav" aria-label="问题目录"><Icon name="list" size="sm" /><span>问题</span><small>{questions.length}</small></button>
           <div className="chat-scope-name"><b>{scopeType === 'video' ? '单视频问答' : scopeType === 'video_library' ? '视频库问答' : '知识库问答'}</b><span>{scopeName}</span></div>
           <button type="button" className={`chat-panel-button${railOpen ? ' selected' : ''}`} onClick={toggleRail} aria-expanded={railOpen} aria-controls="chat-context-rail" aria-label="视频与执行过程"><Icon name={isVideo ? 'video' : 'target'} size="sm" /><span>{isVideo ? '视频与过程' : '执行过程'}</span><Icon name={railOpen ? 'chev-r' : 'chev-l'} size="sm" /></button>
         </div>
@@ -397,9 +420,9 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 disabled={streaming}
                 onClick={() => setMode('chat')}
               >
-                <Icon name="bolt" size="sm" />Chat
+                <Icon name="bolt" size="sm" />快速问答
               </button>
-              {scopeType !== 'video_library' && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? 'Agent' : '跨视频研究'}</button>}
+              {scopeType !== 'video_library' && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? '深入分析' : '跨视频研究'}</button>}
             </div>
             <div className="composer-tools" ref={historyRef}>
               <button
@@ -424,10 +447,11 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     <div
                       key={item.id}
                       className={`session-pop-row${session?.id === item.id ? ' on' : ''}`}
-                      onClick={() => { void switchSession(item.id); setHistoryOpen(false) }}
                     >
+                      <button type="button" className="session-select" onClick={() => { void switchSession(item.id); setHistoryOpen(false) }}>
                       <span className="q">{item.title || '未命名会话'}</span>
                       <span className="when">{fmtRelTime(item.updated_at)}</span>
+                      </button>
                       <button
                         className="session-del"
                         title="删除会话"
@@ -452,18 +476,21 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               </button>
             </div>
             </div>
-            <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：已建立索引的视频库' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : MODE_NOTE[mode]}</p>
+            <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：当前向量模型可检索的视频' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : mode === 'agent' && videoVisualMode && videoVisualMode !== 'off' ? '按问题调用文本与画面工具，逐步分析后回答' : MODE_NOTE[mode]}</p>
+            {isVideo && videoRetrievable === false && <p className="mode-note">{videoHasTranscript ? '检索未就绪；快速问答可使用摘要或转写，暂不提供检索引用。' : '尚无当前模型可检索的内容，请先在视频详情处理内容并建立索引。'}</p>}
+            {!readOnly && !ai.ready && <div className="chat-ai-notice" role="status"><span>{ai.reason}</span><button type="button" className="btn btn-sm" onClick={() => ai.error ? void ai.refetch() : router.push('/settings')}>{ai.error ? '重试' : '配置 AI'}</button></div>}
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
                 rows={1}
                 value={input}
                 maxLength={1000}
+                aria-label="输入问题"
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
                 placeholder={isVideo ? '问这段视频…' : scopeType === 'video_library' ? '向视频库提问…' : '向知识库提问…'}
               />
-              <button className="ask-send" disabled={streaming} onClick={() => submit()} aria-label="发送">
+              <button className="ask-send" disabled={streaming || readOnly || !ai.ready} onClick={() => submit()} aria-label="发送">
                 <Icon name="send" />
               </button>
             </div>
@@ -471,7 +498,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
         </div>
       </div>
 
-      {(railOpen || questionsOpen) && <div className="chat-rail-veil"><DrawerVeil onClose={() => { setRailOpen(false); setQuestionsOpen(false) }} /></div>}
+      {((railOpen && railOverlay) || (questionsOpen && questionsOverlay)) && <div className="chat-rail-veil"><DrawerVeil onClose={() => { setRailOpen(false); setQuestionsOpen(false) }} /></div>}
 
       <aside id="chat-context-rail" className={`rail-panel${railOpen ? ' open' : ''}`} aria-label="视频与执行过程">
         <div className="rail-mobile-head"><b>{isVideo ? '视频与执行过程' : '执行过程'}</b>
@@ -632,10 +659,9 @@ function AgentMessageView({
           <Icon name={agentMode === 'research' ? 'zoom-scan' : agentMode === 'evidence_funnel' ? 'filter' : isAgentRun ? 'target' : 'bolt'} />
         </span>
         映知
-        <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : 'Chat'}</span>
+        <span style={{ color: 'var(--tx-4)' }}>{agentMode ? MODE_LABEL[agentMode] : '快速问答'}</span>
       </div>
       <ThinkingProcess message={msg} />
-      {sessionId && msg.agentRunId && !msg.streaming && <RunDetails sessionId={sessionId} runId={msg.agentRunId} live={false} />}
       <div className="answer">
         <MarkdownAnswer content={msg.content} onCite={openCite} />
         {waitingServer && (
@@ -675,7 +701,8 @@ function AgentMessageView({
       {cites.length > 0 && (
         <div className="cite-list">
           {cites.map((cite, i) => (
-            <div key={`${cite.id}-${i}`} className="cite-card" style={{ animationDelay: `${Math.min(i * 60, 300)}ms` }} onClick={() => onOpenEvidence(cite, cites)}>
+            <div key={`${cite.id}-${i}`} className="cite-card">
+              <button type="button" className="cite-card-open" aria-label={`查看证据 ${cite.id}`} onClick={() => onOpenEvidence(cite, cites)}>
               <span className="cno">{cite.id}</span>
               <div className="cbody">
                 <div className="chead">
@@ -688,6 +715,7 @@ function AgentMessageView({
                 </div>
                 <div className="cquote">{clipText(cite.modality === 'visual_caption' || cite.modality === 'visual_ocr' ? cite.displayContext || cite.content : cite.anchorQuote || cite.content, 220)}</div>
               </div>
+              </button>
               <button
                 className="btn btn-sm cjump"
                 onClick={e => {
@@ -703,21 +731,12 @@ function AgentMessageView({
         </div>
       )}
       <div className="answer-meta">
-        {isAgentRun ? (
-          <>
-
-            <span className="chip chip-mute mono">{agentMode || 'agent'}</span>
-          </>
-        ) : (
-          <span className="chip chip-mute mono">chat</span>
-        )}
-        <span className="chip chip-mute">{msg.modelName ? `${msg.degraded ? '尝试模型' : '模型'}：${msg.modelName}` : '模型未记录'}</span>
-        <span className="chip chip-mute">{msg.profileId ? `配置 #${msg.profileId}` : '配置未记录'}</span>
         <button className="meta-link" onClick={copyAnswer}>
           <Icon name="file" size="sm" />复制回答
         </button>
         {onImport && msg.messageId && !msg.streaming && !msg.error && !msg.cancelled && !!msg.content && <button className="meta-link" onClick={onImport}><Icon name="plus" size="sm" />收进笔记</button>}
       </div>
+      <details className="answer-technical"><summary>技术详情</summary><p>{agentMode ? MODE_LABEL[agentMode] : '快速问答'} · {msg.modelName ? `模型：${msg.modelName}` : '模型未记录'} · {msg.profileId ? `配置 #${msg.profileId}` : '配置未记录'}</p>{sessionId && msg.agentRunId && !msg.streaming && <RunDetails sessionId={sessionId} runId={msg.agentRunId} live={false} />}</details>
       <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.transientStatus || (msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…')}{msg.processStartedAt !== undefined && ` · 已等待 ${formatDuration(Math.max(0, clockNow - msg.processStartedAt))}`}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{!msg.error && !msg.cancelled && ` · ${msg.executionDurationMs !== undefined ? `处理耗时 ${formatDuration(msg.executionDurationMs)}` : '处理耗时未知'}`}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
       {followUpSessionId && msg.messageId && !!msg.content && !msg.error && !msg.cancelled && !msg.streaming && <FollowUpQuestions sessionId={followUpSessionId} messageId={msg.messageId} onAsk={onFollowUp} />}
     </div>

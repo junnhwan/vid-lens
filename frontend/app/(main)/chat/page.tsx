@@ -44,8 +44,8 @@ export default function ChatEntryPage() {
     return () => { active = false; window.clearTimeout(timer) }
   }, [query])
   return <div className="page page-wide chat-entry">
-    <PageHeading eyebrow="ASK, WITH EVIDENCE" title="每个问题，都有出处。"
-      description="先选择证据范围，再开始问答。每个范围的会话独立保存，回答都会带上可回看的来源。" />
+    <PageHeading title="问答"
+      description="选择单视频、视频库或知识库开始问答。检索就绪的内容可提供来源引用；单视频也可使用摘要或转写回答。" />
     <div className="chat-entry-scopes">
       <Link href="/chat/library" className="scope-card">
         <span className="scope-head">
@@ -62,7 +62,7 @@ export default function ChatEntryPage() {
           <span className="scope-icon" aria-hidden="true"><Icon name="folder" /></span>
           <span className="scope-copy">
             <b>知识库问答</b>
-            <span>只检索所选知识库的成员视频，范围越聚焦，回答越准。</span>
+            <span>只检索所选知识库的成员视频，所有成员需在当前模型下可检索。</span>
           </span>
         </span>
         <span className="scope-cta">选择知识库{!kbLoading && !kbError && kbs.length > 0 ? ` · ${kbs.length} 个` : ''} <Icon name="arrow-r" size="sm" /></span>
@@ -88,7 +88,7 @@ export default function ChatEntryPage() {
         </> : <p className="kb-pick-empty">{kbs.length ? '没有匹配的知识库，试试其他关键词。' : <>还没有知识库。<Link href="/kb">先创建一个</Link>，把相关视频收进去再问。</>}</p>}
     </Modal>}
     <section className="chat-entry-videos"><h2>单视频问答</h2><p>只使用所选视频的内容与证据。</p><input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索视频标题或文件名" aria-label="搜索问答视频" />
-      {loading ? <LoadingBlock /> : error ? <p role="alert">{error}</p> : tasks.length ? <div className="chat-entry-video-list">{tasks.map(task => <Link key={task.id} href={`/chat/v/${task.id}`}><span>{taskTitle(task)}</span><small>{task.has_transcription ? '转写已就绪' : '等待转写'} · 仅此视频</small></Link>)}</div> : <p>没有匹配的视频。</p>}
+      {loading ? <LoadingBlock /> : error ? <p role="alert">{error}</p> : tasks.length ? <div className="chat-entry-video-list">{tasks.map(task => <Link key={task.id} href={`/chat/v/${task.id}`}><span>{taskTitle(task)}</span><small>{task.retrievable ? '可检索问答' : task.has_transcription ? '转写可回答 · 暂无检索引用' : '检索未就绪'} · 仅此视频</small></Link>)}</div> : <p>没有匹配的视频。</p>}
     </section>
     {!!sessions.length && <section className="chat-entry-history"><h2>最近会话</h2>{sessions.slice(0, 8).map(item => <Link key={item.id} href={item.scope_type === 'video_library' ? `/chat/library?session=${item.id}` : item.scope_type === 'knowledge_base' ? `/chat/kb/${item.knowledge_base_id}?session=${item.id}` : `/chat/v/${item.task_id}?session=${item.id}`}><b>{item.title || '未命名会话'}</b><small>{item.scope_type === 'video_library' ? '视频库' : item.scope_type === 'knowledge_base' ? '知识库' : '单视频'}</small></Link>)}</section>}
   </div>

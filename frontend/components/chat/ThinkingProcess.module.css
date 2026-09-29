@@ -7,7 +7,7 @@
 .chev { margin-left: 2px; color: var(--tx-4); transition: transform 0.22s var(--ease); }
 .chevOpen { transform: rotate(90deg); }
 .indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--acc-strong); flex-shrink: 0; }
-.live { animation: breathe 1.6s ease-in-out infinite; }
+.live { background: var(--acc-strong); }
 .body { padding: 0 16px 14px; border-top: 1px solid var(--line); opacity: 1; transform: none; transition: opacity 160ms var(--ease), transform 200ms var(--ease), display 160ms allow-discrete; }
 .body[hidden] { display: none; opacity: 0; transform: translateY(-4px); }
 @starting-style { .body:not([hidden]) { opacity: 0; transform: translateY(-4px); } }

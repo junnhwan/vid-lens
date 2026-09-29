@@ -19,22 +19,29 @@ export function VideoCard({ task }: { task: VideoTask }) {
   const [durationMs, setDurationMs] = useState(0)
 
   return (
-    <Link className="vcard" href={`/video/${task.id}`}>
+    <article className="vcard">
+    <Link className="vcard-open" href={`/video/${task.id}`}>
       <div className="vthumb">
         <VideoStill
           taskId={failed ? undefined : task.id}
           seed={task.file_md5 || task.filename}
           onDuration={setDurationMs}
+          fallbackTitle={taskTitle(task)}
         />
         {!ready && <span className={`vstate chip ${state.chip}`}>{state.text}</span>}
-        <span className="vlen">{durationMs > 0 ? formatTime(durationMs) : fmtSize(task.file_size)}</span>
+        {durationMs > 0 && <span className="vlen">{formatTime(durationMs)}</span>}
       </div>
       <div className="vmeta">
         <h4>{taskTitle(task)}</h4>
         <div className="vsub">
           <span>{sourceLabel(task)}</span>
+          <span>{fmtSize(task.file_size)}</span>
           <span style={{ marginLeft: 'auto' }}>{fmtRelTime(task.updated_at)}</span>
         </div>
+        <div className="vsub"><span>{task.retrievable ? '可检索问答' : task.has_transcription ? '转写可阅读' : task.visual_status === 'completed' ? '画面已分析' : '等待内容处理'}</span></div>
+      </div>
+    </Link>
+      <div className="vcard-status">
         {cat === 'processing' && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
         )}
@@ -46,6 +53,6 @@ export function VideoCard({ task }: { task: VideoTask }) {
           </div>
         )}
       </div>
-    </Link>
+    </article>
   )
 }

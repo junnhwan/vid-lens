@@ -41,6 +41,7 @@ export function VideoStill({
   seed,
   onDuration,
   className,
+  fallbackTitle,
 }: {
   src?: string | null
   taskId?: number
@@ -48,10 +49,12 @@ export function VideoStill({
   seed?: string
   onDuration?: (ms: number) => void
   className?: string
+  fallbackTitle?: string
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [url, setUrl] = useState<string | null>(src ?? null)
   const [shown, setShown] = useState(false)
+  const [frameReady, setFrameReady] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -91,6 +94,7 @@ export function VideoStill({
   return (
     <div ref={hostRef} className={className} style={{ position: 'relative', overflow: 'hidden', width: '100%', height: '100%' }}>
       <PosterArt seed={seed || String(taskId || '')} />
+      {fallbackTitle && !frameReady && <div className="poster-fallback"><span>视频资料</span><strong>{fallbackTitle}</strong></div>}
       {shown && url && (
         <video
           ref={videoRef}
@@ -98,7 +102,9 @@ export function VideoStill({
           muted
           playsInline
           preload="metadata"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          onSeeked={() => setFrameReady(true)}
+          onError={() => setFrameReady(false)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: frameReady ? 1 : 0 }}
         />
       )}
     </div>
