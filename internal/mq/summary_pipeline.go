@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -230,6 +231,18 @@ func packSummaryMerge(parts []summaryInput, limit, level int) ([][]summaryInput,
 	return groups, nil
 }
 
+func summaryIntermediateByteLimit(inputLimit int) (int, error) {
+	// Every intermediate result must fit beside another one, including the
+	// largest possible timestamp and layer labels in the merge prompt.
+	part := summaryInput{startMS: math.MinInt64, endMS: math.MaxInt64}
+	overhead := len(summaryMergePrompt([]summaryInput{part, part}, math.MaxInt))
+	limit := (inputLimit - overhead) / 2
+	if limit < 64 {
+		return 0, fmt.Errorf("摘要输入预算不足以容纳两段中间摘要")
+	}
+	return limit, nil
+}
+
 func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, full string, strategy ai.Strategy, limit int) (string, error) {
 	if !utf8.ValidString(full) {
 		return "", fmt.Errorf("转写文本包含无效 UTF-8，无法保证摘要完整覆盖")
@@ -346,27 +359,60 @@ func (c *Consumer) ensureSummaryPart(ctx context.Context, part *model.SummaryPar
 }
 
 func (c *Consumer) completeSummaryPart(ctx context.Context, strategy ai.Strategy, part *model.SummaryPart, prompt string, outputTokens int64) (string, error) {
+	outputByteLimit := 0
+	if outputTokens == summaryIntermediateOutputTokens {
+		var err error
+		outputByteLimit, err = summaryIntermediateByteLimit(part.InputLimit)
+		if err != nil {
+			return "", err
+		}
+	}
 	existing, err := c.repo.SummaryPart.Find(part.TaskID, part.Level, part.PartIndex)
 	if err != nil {
 		return "", err
 	}
-	if existing != nil && existing.InputHash == part.InputHash && existing.Status == "completed" && strings.TrimSpace(existing.Content) != "" {
+	completed := existing != nil && existing.InputHash == part.InputHash && existing.Status == "completed" && strings.TrimSpace(existing.Content) != ""
+	if completed && (outputByteLimit == 0 || len(existing.Content) <= outputByteLimit) {
 		return existing.Content, nil
 	}
 	part.Status = "running"
-	if err := c.runLeasedSideEffect(ctx, func(r *repository.Repositories) error { return r.SummaryPart.Upsert(part) }); err != nil {
-		return "", err
+	// Keep a previously completed result until a valid replacement is saved.
+	// Oversized checkpoints are regenerated from their complete original input.
+	if !completed {
+		if err := c.runLeasedSideEffect(ctx, func(r *repository.Repositories) error { return r.SummaryPart.Upsert(part) }); err != nil {
+			return "", err
+		}
 	}
-	answer, callErr := strategy.Summarize(ai.WithChatBudget(ctx, outputTokens, nil), prompt)
-	if err := requireProcessingLease(ctx); err != nil {
-		return "", err
+	var answer string
+	var callErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		callCtx := ai.WithChatBudget(ctx, outputTokens, nil)
+		if outputByteLimit > 0 {
+			// Four bytes cover every UTF-8 rune; the token cap alone does not
+			// bound the byte size of a successful Chinese response.
+			callCtx = ai.WithSummaryIntermediateLimit(callCtx, outputByteLimit/(4*(attempt+1)))
+		}
+		answer, callErr = strategy.Summarize(callCtx, prompt)
+		if err := requireProcessingLease(ctx); err != nil {
+			return "", err
+		}
+		if callErr != nil {
+			break
+		}
+		answer = strings.TrimSpace(answer)
+		if outputByteLimit == 0 || len(answer) <= outputByteLimit {
+			break
+		}
+		callErr = fmt.Errorf("中间摘要超过合并容量（%d/%d 字节），压缩后仍未满足长度要求，未生成不完整结果", len(answer), outputByteLimit)
 	}
 	if callErr != nil || strings.TrimSpace(answer) == "" {
 		if callErr == nil {
 			callErr = fmt.Errorf("模型返回空摘要")
 		}
 		part.Status, part.ErrorMsg = "failed", truncateError(callErr)
-		_ = c.runLeasedSideEffect(ctx, func(r *repository.Repositories) error { return r.SummaryPart.Upsert(part) })
+		if !completed {
+			_ = c.runLeasedSideEffect(ctx, func(r *repository.Repositories) error { return r.SummaryPart.Upsert(part) })
+		}
 		return "", callErr
 	}
 	part.Status, part.Content, part.ErrorMsg = "completed", strings.TrimSpace(answer), ""
