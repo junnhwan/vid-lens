@@ -100,6 +100,25 @@ class PullDeployTests(unittest.TestCase):
         self.assertEqual(proxy_handler.call_args_list[0].args, ({'https': 'http://local-proxy.invalid'},))
         self.assertEqual(proxy_handler.call_args_list[1].args, ({},))
 
+    def test_rate_limited_proxy_retries_direct_connection(self):
+        for status, remaining in ((403, '0'), (429, None)):
+            with self.subTest(status=status):
+                response = MagicMock()
+                error = urllib.error.HTTPError('https://api.github.com/example', status, 'limited',
+                                               {'X-RateLimit-Remaining': remaining}, None)
+                opener = MagicMock()
+                opener.open.side_effect = [error, response]
+                with patch.object(deploy.urllib.request, 'build_opener', return_value=opener):
+                    self.assertIs(deploy.open_public('https://api.github.com/example', proxy='http://local-proxy.invalid'), response)
+                self.assertEqual(opener.open.call_count, 2)
+
+    def test_other_http_errors_do_not_retry_direct(self):
+        opener = MagicMock()
+        opener.open.side_effect = urllib.error.HTTPError('https://github.com/example', 404, 'missing', {}, None)
+        with patch.object(deploy.urllib.request, 'build_opener', return_value=opener), self.assertRaises(urllib.error.HTTPError):
+            deploy.open_public('https://github.com/example', proxy='http://local-proxy.invalid')
+        self.assertEqual(opener.open.call_count, 1)
+
     def test_public_ref_rejects_a_different_branch(self):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({

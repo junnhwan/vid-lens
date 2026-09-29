@@ -98,8 +98,10 @@ def open_public(url, proxy=None, route=None):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler(route))
         try:
             return opener.open(request, timeout=45)
-        except urllib.error.HTTPError:
-            raise
+        except urllib.error.HTTPError as error:
+            limited = error.code == 429 or (error.code == 403 and error.headers.get('X-RateLimit-Remaining') == '0')
+            if not limited or index == len(routes) - 1:
+                raise
         except (urllib.error.URLError, TimeoutError, OSError):
             if index == len(routes) - 1:
                 raise NetworkError('GitHub HTTPS request failed; retrying on the next check') from None
