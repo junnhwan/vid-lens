@@ -36,9 +36,9 @@
 
 取消上下文贯穿 Planner、检索、视觉下载/抽帧/VLM 和生成；取消后不启动下一步。前端保留已收到的部分文本并标识终态。
 
-Handler 是响应的唯一写入者，使用有背压的事件传递并在首事件之后每 10 秒发注释心跳。响应包含 Cache-Control: no-cache, no-transform 和 X-Accel-Buffering: no。Next 必须保留 compress: false：其默认压缩会缓冲 rewrite 转发的小块 SSE。上游缺完成标记、前端 EOF 缺 done/error 都按中断处理。
+Handler 是响应的唯一写入者，使用有背压的事件传递并在首事件之后每 10 秒发注释心跳。响应包含 Cache-Control: no-cache, no-transform 和 X-Accel-Buffering: no。生产前端由 `frontend/server.mjs` 转发 API，使用 Node 响应流直接传递上游数据，并向上游请求 identity 编码。上游缺完成标记、前端 EOF 缺 done/error 都按中断处理。
 
-执行 `cd frontend; npm run test:stream` 验证真实 Next rewrite：上游只有在客户端收到第一段后才能发送剩余内容。它使用独立 .next-stream-test 输出目录；测试失败意味着分段传输被缓冲。
+先在 `frontend` 执行 `npm run build`，再执行 `npm run test:stream` 验证实际 Node 代理：上游只有在客户端收到第一段后才能发送剩余内容。测试还会检查 API Range、构建后静态视频的 Range、SPA 深链接与缺失资源/开发预览的 404，因此必须先生成 `dist`。GitHub 自动部署在打包前执行这些成品检查。
 
 ## 运行状态、快照与重连
 
