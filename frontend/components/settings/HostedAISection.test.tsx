@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks() })
 const profile: AIProfile = { id: 1, name: '免费服务', is_default: false, llm_model: 'chat-free', asr_model: 'asr-free', embedding_model: 'embed-free', embedding_dim: 1024, vision_model: 'vision-free', rerank_model: 'rank-free', llm_provider: '', llm_base_url: 'https://private.example/v1', llm_api_key_masked: 'private-secret', asr_provider: '', asr_base_url: '', asr_api_key_masked: '', embedding_provider: '', embedding_endpoint: '', embedding_api_key_masked: '', vision_provider: '', vision_base_url: '', vision_api_key_masked: '' }
 
 test('ordinary users see only models and activate once without credential payload', async () => {
-  vi.mocked(api.hostedAI).mockResolvedValue({ enabled: true, can_manage: false, notice: '作者为爱发电，不保证渠道可用性', profile })
+  vi.mocked(api.hostedAI).mockResolvedValue({ enabled: true, can_manage: false, notice: '当前站点提供免费的 AI 服务', profile })
   vi.mocked(api.activateHostedAI).mockResolvedValue(profile)
   const refreshed = vi.fn().mockResolvedValue(undefined)
   const { container } = render(<HostedAISection readOnly={false} active={false} onActivated={refreshed} />)

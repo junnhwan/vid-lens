@@ -16,7 +16,7 @@ var (
 	ErrHostedAIUnavailable = errors.New("免费 AI 服务暂不可用，请稍后重试或使用自己的配置")
 )
 
-const hostedNotice = "作者为爱发电，免费提供 AI 服务，不保证渠道可用性，可能限流、调整或暂停。请合理使用；也可随时改用自己的 AI 配置。"
+const hostedNotice = "当前站点提供免费的 AI 服务。服务可能因额度或维护而限流、调整或暂停；你可以随时改用自己的 AI 配置。"
 
 type HostedAIAdminRequest struct {
 	AIProfileRequest

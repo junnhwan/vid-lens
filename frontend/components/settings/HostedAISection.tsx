@@ -6,7 +6,7 @@ import { useToast } from '@/components/Toast'
 import { HostedAIAdminForm } from './HostedAIAdminForm'
 import './HostedAISection.css'
 
-const DEFAULT_NOTICE = '作者为爱发电提供免费 AI 服务，不保证渠道可用性，可能限流或暂停。你可以随时改用自备配置。'
+const DEFAULT_NOTICE = '当前站点提供免费的 AI 服务。服务可能因额度或维护而限流、调整或暂停；你可以随时改用自己的 AI 配置。'
 
 export function HostedAISection({ readOnly, active, onActivated }: {
   readOnly: boolean
