@@ -85,6 +85,18 @@ func Migrate(db *gorm.DB) error {
 }
 
 func migrateModels(db *gorm.DB, models []interface{}) error {
+	if db.Migrator().HasIndex(&VideoTranscription{}, "uk_video_transcriptions_file_md5") {
+		if err := db.Migrator().DropIndex(&VideoTranscription{}, "uk_video_transcriptions_file_md5"); err != nil {
+			return err
+		}
+	}
+	// A forced summary on a deduplicated task needs its own row. Keep the
+	// file hash indexed for reuse, while task_id remains unique.
+	if db.Migrator().HasIndex(&AISummary{}, "uk_ai_summaries_file_md5") {
+		if err := db.Migrator().DropIndex(&AISummary{}, "uk_ai_summaries_file_md5"); err != nil {
+			return err
+		}
+	}
 	// Older schemas made one content hash/model globally unique. Each user's
 	// task needs its own authorized chunk projection, even for identical media.
 	if db.Migrator().HasIndex(&VideoRAGIndex{}, "uk_rag_file_md5_model") {

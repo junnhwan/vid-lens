@@ -21,6 +21,35 @@ func TestAllModelsIncludesTaskCleanupJob(t *testing.T) {
 	t.Fatalf("AllModels() does not include %v", want)
 }
 
+func TestMigrateReplacesLegacyGlobalContentIndexes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&VideoTask{}, &VideoTranscription{}, &AISummary{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"CREATE UNIQUE INDEX uk_video_transcriptions_file_md5 ON video_transcriptions(file_md5)",
+		"CREATE UNIQUE INDEX uk_ai_summaries_file_md5 ON ai_summaries(file_md5)",
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrateModels(db, []interface{}{&VideoTranscription{}, &AISummary{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, taskID := range []int64{1, 2} {
+		if err := db.Create(&VideoTranscription{TaskID: taskID, FileMD5: "same", Content: "transcript"}).Error; err != nil {
+			t.Fatalf("transcript task %d: %v", taskID, err)
+		}
+		if err := db.Create(&AISummary{TaskID: taskID, FileMD5: "same", Content: "summary"}).Error; err != nil {
+			t.Fatalf("summary task %d: %v", taskID, err)
+		}
+	}
+}
+
 func TestVideoRAGIndexManifestUsesVariableLengthHashColumn(t *testing.T) {
 	parsed, err := schema.Parse(&VideoRAGIndex{}, &sync.Map{}, schema.NamingStrategy{})
 	if err != nil {

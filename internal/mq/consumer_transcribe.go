@@ -99,7 +99,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	}
 	persistStartedAt := time.Now()
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.Transcription.Upsert(&model.VideoTranscription{
+		return repos.SaveTranscriptionAndInvalidateIndex(&model.VideoTranscription{
 			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
@@ -236,7 +236,7 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	}
 	persistStartedAt := time.Now()
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.Transcription.Upsert(&model.VideoTranscription{
+		return repos.SaveTranscriptionAndInvalidateIndex(&model.VideoTranscription{
 			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {

@@ -28,10 +28,9 @@ func newDedupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow 同 file_md5 的转写行
-// 唯一约束：第二次插入（即使属不同 task）必须失败。这保证同内容重复 ASR
-// 只能有一个成功结果行，DB 兜底 Redis 失效后的去重语义（见 docs/architecture/data-model.md）。
-func TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
+// A forced transcription can differ from a previously reused result. Keep
+// both task-owned versions while using the oldest row for future dedup hits.
+func TestTranscriptionFileMD5ReusesCanonicalButAllowsTaskSpecificRegeneration(t *testing.T) {
 	db := newDedupTestDB(t)
 	repos := NewRepositories(db)
 
@@ -51,15 +50,15 @@ func TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 		t.Fatalf("first transcription insert: %v", err)
 	}
 
-	// 第二个 task 用同一 file_md5 插入：必须被唯一约束拒绝。
+	// 第二个 task 强制重新转写同一个文件，可保存自己的结果。
 	err := repos.Transcription.Create(&model.VideoTranscription{
 		TaskID: taskB.ID, FileMD5: dedupRepoMD5, Content: "转写B", Words: 3,
 	})
-	if err == nil {
-		t.Fatal("second transcription insert with same file_md5 must fail unique constraint, got nil")
+	if err != nil {
+		t.Fatalf("task-specific transcription insert: %v", err)
 	}
 
-	// FindByMD5 只回那个唯一成功行（跨 task/跨用户复用）。
+	// FindByMD5 稳定复用最早的结果；task B 保留自己的新结果。
 	got, err := repos.Transcription.FindByMD5(dedupRepoMD5)
 	if err != nil || got == nil {
 		t.Fatalf("FindByMD5: got=%v err=%v, want the single existing row", got, err)
@@ -67,10 +66,14 @@ func TestTranscriptionFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 	if got.TaskID != taskA.ID || got.Content != "转写A" {
 		t.Fatalf("FindByMD5 returned %+v, want taskA's row", got)
 	}
+	owned, err := repos.Transcription.FindByTaskID(taskB.ID)
+	if err != nil || owned == nil || owned.Content != "转写B" {
+		t.Fatalf("task B transcript=%+v err=%v", owned, err)
+	}
 }
 
 // TestSummaryFileMD5UniqueAllowsOnlyOneCompletedRow 摘要表同 file_md5 唯一约束。
-func TestSummaryFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
+func TestSummaryFileMD5ReusesCanonicalButAllowsTaskSpecificRegeneration(t *testing.T) {
 	db := newDedupTestDB(t)
 	repos := NewRepositories(db)
 
@@ -86,15 +89,18 @@ func TestSummaryFileMD5UniqueAllowsOnlyOneCompletedRow(t *testing.T) {
 		t.Fatalf("first summary insert: %v", err)
 	}
 	err := repos.Summary.Create(&model.AISummary{TaskID: taskB.ID, FileMD5: dedupRepoMD5, Content: "摘要B", ModelName: "mimo"})
-	if err == nil {
-		t.Fatal("second summary insert with same file_md5 must fail unique constraint, got nil")
+	if err != nil {
+		t.Fatalf("task-specific summary insert: %v", err)
 	}
 	got, err := repos.Summary.FindByMD5(dedupRepoMD5)
 	if err != nil || got == nil {
-		t.Fatalf("FindByMD5: got=%v err=%v, want the single existing row", got, err)
+		t.Fatalf("FindByMD5: got=%v err=%v, want reusable canonical row", got, err)
 	}
 	if got.TaskID != taskA.ID {
 		t.Fatalf("FindByMD5 returned task %d, want taskA %d", got.TaskID, taskA.ID)
+	}
+	if own, err := repos.Summary.FindByTaskID(taskB.ID); err != nil || own == nil || own.Content != "摘要B" {
+		t.Fatalf("task-specific summary=%+v err=%v", own, err)
 	}
 }
 

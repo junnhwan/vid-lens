@@ -17,6 +17,8 @@ lease 到期的只读检索 step 可以由另一个 worker 用 CAS 接管。LLM/
 
 `video_transcription_chunks` 保存每次 ASR observation 的稳定 `segment_key`、segmenter version、实际送入 provider 的 `window_start_ms/window_end_ms`，以及互不重叠的 `core_start_ms/core_end_ms`。`overlap_windows_v1` 使用相邻重叠音频帮助恢复跨硬边界语句；`start_second/end_second` 作为现有证据路径的秒级时间投影，覆盖产生该行原始文本的完整 window，而不是更窄的 core。缺少 provenance 的分片不参与文本去重拼接。
 
+转写和摘要以 `task_id` 唯一保存任务自己的结果，以非唯一 `file_md5` 索引查找可复用的最早结果。用户强制重新处理同一文件时，新任务可保存自己的转写或摘要，不会改写其他任务的内容。新转写在处理租约事务中使该任务的 RAG 索引进入重建状态，并移除旧的关系 chunk；实际 ASR 完成后会重新投递索引任务。
+
 Agent 直接通过 CreateAgentRunExchange 事务保存最终消息与快照，按 run 去重；成功后才刷新近期消息和触发偏好提取。完成 run 重放复用原 message_id。
 
 ## 检索数据

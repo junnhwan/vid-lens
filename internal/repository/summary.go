@@ -36,8 +36,7 @@ func (r *SummaryRepository) FindByTaskID(taskID int64) (*model.AISummary, error)
 }
 
 // Upsert 创建或更新总结记录
-// 写入时带 file_md5，使 (file_md5) 唯一约束成为内容+目标级去重的持久兜底
-// （docs/architecture/data-model.md）：同内容重复摘要写入会撞唯一约束，调用方据此识别已有结果。
+// task_id 标识生成结果所属视频；file_md5 用于未强制生成的视频复用已有结果。
 func (r *SummaryRepository) Upsert(s *model.AISummary) error {
 	var existing model.AISummary
 	err := r.db.Where("task_id = ?", s.TaskID).First(&existing).Error
@@ -54,11 +53,11 @@ func (r *SummaryRepository) Upsert(s *model.AISummary) error {
 	}).Error
 }
 
-// FindByMD5 按内容指纹查找已完成的摘要结果（跨 task、跨用户）。
-// 行存在即摘要已成功完成（摘要表无 status 列），用于内容+目标级去重命中判定（docs/architecture/data-model.md）。
+// FindByMD5 按内容指纹查找可复用的已完成摘要。多个任务强制生成后，
+// 优先选择最早保存的结果，避免随机挑选其他任务的个性化重跑版本。
 func (r *SummaryRepository) FindByMD5(fileMD5 string) (*model.AISummary, error) {
 	var s model.AISummary
-	err := r.db.Where("file_md5 = ?", fileMD5).First(&s).Error
+	err := r.db.Where("file_md5 = ?", fileMD5).Order("id ASC").First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -85,7 +84,7 @@ func (r *SummaryRepository) RehomeOrDeleteByTaskID(taskID int64) error {
 		return err
 	}
 	var successor model.VideoTask
-	err = r.db.Where("file_md5 = ? AND id <> ?", summary.FileMD5, taskID).Order("id ASC").First(&successor).Error
+	err = r.db.Where("file_md5 = ? AND id <> ? AND id NOT IN (SELECT task_id FROM ai_summaries)", summary.FileMD5, taskID).Order("id ASC").First(&successor).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.db.Where("id = ?", summary.ID).Delete(&model.AISummary{}).Error
 	}

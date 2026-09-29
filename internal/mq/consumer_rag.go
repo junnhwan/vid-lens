@@ -89,26 +89,13 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) e
 }
 
 // indexAfterTranscription enqueues the rag-index job after ASR material is
-// persisted. It reports whether a rag run will actually follow: a content+model
-// dedup hit or a missing producer means no rag message was published, so the
-// caller must finish the task itself instead of handing final completion to a
-// rag job that will never exist.
+// persisted. Every actual transcription refreshes its task's retrieval
+// projection: a matching file hash cannot prove that the ASR text is unchanged.
+// A missing producer means no rag message was published, so the caller must
+// finish the task instead of handing completion to a job that will never exist.
 func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) (bool, error) {
 	if c.ragProducer == nil {
 		return false, nil
-	}
-	// 内容+目标级索引去重（docs/$1）：同 (file_md5, embedding_model)
-	// 已有成功索引 → 不重跑 embed，复用旧索引。索引重建（分块/embedding 模型
-	// 变更）后旧索引 status 被改写为非 indexed，本判定不命中 → 照常重索引，
-	// 旧索引不挡。三层幂等分工见 service/content_dedup.go 注释。
-	if c.repo != nil && c.repo.RAGIndex != nil && c.profiles != nil && task.FileMD5 != "" {
-		if profile, profileErr := c.profiles.GetDefaultAIProfile(task.UserID); profileErr == nil && profile != nil && profile.EmbeddingModel != "" {
-			if existing, findErr := c.repo.RAGIndex.FindReusableByMD5AndModel(task.FileMD5, profile.EmbeddingModel, model.CurrentRAGChunkerVersion, model.CurrentRAGSourceMappingVersion, model.CurrentRAGIndexBuildVersion); findErr == nil && existing != nil {
-				observability.Log(ctx, slog.Default(), slog.LevelInfo, "skip rag index: content+model already indexed",
-					slog.String("file_md5", task.FileMD5), slog.String("embedding_model", profile.EmbeddingModel))
-				return false, nil
-			}
-		}
 	}
 	if err := requireProcessingLease(ctx); err != nil {
 		return false, err
