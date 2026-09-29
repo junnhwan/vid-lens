@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from '@/lib/router'
-import { Icon } from '@/components/ui/Icon'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { useTheme } from '@/components/theme/ThemeProvider'
 import { useMediaQuery } from '@/components/ui/useMediaQuery'
@@ -15,7 +15,7 @@ export function ShellFrame({ children, pathname, crumb, user, onImport, onLogout
   products?: boolean
   preview?: boolean
 }) {
-  const { theme, toggle } = useTheme()
+  const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
   const rail = useRef<HTMLElement>(null)
   const menu = useRef<HTMLButtonElement>(null)
@@ -43,23 +43,38 @@ export function ShellFrame({ children, pathname, crumb, user, onImport, onLogout
   }, [open])
   const nav = [
     { href: '/', label: '工作台', icon: 'home' as const, active: pathname === '/' },
+  ]
+  const materialNav = [
     { href: '/library', label: '视频库', icon: 'video' as const, active: /^\/(library|video)/.test(pathname) },
     { href: '/kb', label: '知识库', icon: 'folder' as const, active: pathname.startsWith('/kb') },
+  ]
+  const workNav = [
     { href: '/chat', label: '问答', icon: 'message' as const, active: pathname.startsWith('/chat') },
+    ...(products ? [
+      { href: '/artifacts', label: '成果', icon: 'layers' as const, active: pathname.startsWith('/artifacts') },
+      { href: '/tasks', label: '任务', icon: 'activity' as const, active: pathname.startsWith('/tasks') },
+    ] : []),
   ]
-  const productNav = [
-    { href: '/artifacts', label: '成果', icon: 'layers' as const },
-    { href: '/tasks', label: '任务', icon: 'activity' as const },
-  ]
+  const renderNav = (items: { href: string; label: string; icon: IconName; active: boolean }[]) => items.map(item => (
+    <Link key={item.href} href={href(item.href)} className={`nav-item${item.active ? ' active' : ''}`} aria-current={item.active ? 'page' : undefined}>
+      <Icon name={item.icon} />{item.label}
+    </Link>
+  ))
   const href = (path: string) => preview && (path === '/' || path === '/artifacts' || path === '/tasks') ? `/dev/product?view=${path === '/' ? 'home' : path.slice(1)}` : path
   return <div className="app">
     {open && <div className="rail-veil" onClick={() => { setOpen(false); menu.current?.focus() }} />}
     <aside ref={rail} id="rail" className={`rail${open ? ' open' : ''}`} aria-label="主导航">
       <Link href={href('/')} className="brand"><BrandMark /><div><div className="brand-name">映知</div><div className="brand-sub">VIDLENS</div></div></Link>
-      {nav.map(item => <Link key={item.href} href={href(item.href)} className={`nav-item${item.active ? ' active' : ''}`} aria-current={item.active ? 'page' : undefined}><Icon name={item.icon} />{item.label}</Link>)}
-      {products && <div className="product-nav-group">{productNav.map(item => <Link key={item.href} href={href(item.href)} className={`nav-item${pathname.startsWith(item.href) ? ' active' : ''}`} aria-current={pathname.startsWith(item.href) ? 'page' : undefined}><Icon name={item.icon} />{item.label}</Link>)}</div>}
+      {renderNav(nav)}
+      <span className="rail-caption" aria-hidden="true">资料</span>
+      {renderNav(materialNav)}
+      <span className="rail-caption" aria-hidden="true">学习与产出</span>
+      {renderNav(workNav)}
       <div className="rail-spacer" />
-      <button className="nav-item" onClick={toggle} aria-label={theme === 'dark' ? '切换到浅色' : '切换到深色'}><Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? '浅色' : '深色'}</button>
+      <div className="theme-seg" role="group" aria-label="外观主题">
+        <button type="button" className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')} aria-label="深色主题" title="深色 · 放映厅"><Icon name="moon" /></button>
+        <button type="button" className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')} aria-label="浅色主题" title="浅色 · 阅读"><Icon name="sun" /></button>
+      </div>
       <Link href="/settings" className={`nav-item${pathname.startsWith('/settings') ? ' active' : ''}`}><Icon name="settings" />设置</Link>
       <Link href="/docs" className="nav-item"><Icon name="file" />文档</Link>
       <Link href="/settings" className="rail-user"><span className="avatar">{user.name.trim().charAt(0).toUpperCase() || '·'}</span><span className="who"><b>{user.name}</b><span>{user.detail}</span></span></Link>

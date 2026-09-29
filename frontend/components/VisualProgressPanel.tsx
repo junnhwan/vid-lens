@@ -9,7 +9,7 @@ export function VisualProgressPanel({ task, compact=false }: { task: VideoTask; 
   const [progress,setProgress] = useState<VisualProgress|null>(null)
   const [error,setError] = useState(false)
   const generation = useRef(0)
-  const active = task.stage === 'transcribing' && (task.status===1 || task.status===2)
+  const active = (task.stage === 'transcribing' || task.stage === 'visual_indexing') && (task.status===1 || task.status===2)
   useEffect(() => {
     let live=true
     const load=async () => {

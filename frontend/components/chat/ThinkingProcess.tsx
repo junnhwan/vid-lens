@@ -3,6 +3,7 @@ import type { ChatMsg } from './chatUtils'
 import type { ChatTraceStep } from './traceTypes'
 import styles from './ThinkingProcess.module.css'
 import { formatDuration } from '@/lib/duration'
+import { Icon } from '@/components/ui/Icon'
 
 const statusText = { pending: '等待', running: '进行中', done: '完成', error: '失败', cancelled: '已停止' }
 
@@ -31,7 +32,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
         <span className={`${styles.indicator} ${live ? styles.live : ''}`} aria-hidden="true" />
         <span className={styles.title}>思考与执行过程</span>
         <span className={styles.summary}>{summary}{duration !== undefined ? ` · ${formatDuration(duration)}` : ''}</span>
-        <span aria-hidden="true">{open ? '⌃' : '⌄'}</span>
+        <Icon name="chev-r" size="sm" className={`${styles.chev}${open ? ` ${styles.chevOpen}` : ''}`} />
       </button>
       {open && <div className={styles.body}>
         {!steps.length && <p className={styles.waiting}>请求已发送，等待服务端开始处理。</p>}

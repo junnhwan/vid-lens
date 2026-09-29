@@ -231,6 +231,19 @@ export interface TaskJob {
   [k: string]: unknown
 }
 
+export interface SummaryJob {
+  id: number
+  job_type: 'summary'
+  status: TaskStatus
+  stage: TaskStage
+  retry_count: number
+  max_retries: number
+  next_retry_at?: string
+  last_error_code: string
+  last_error_msg: string
+  trace_id: string
+}
+
 // VideoTask 详情/列表项（主键是 id，不是 task_id）
 export interface VideoTask {
   id: number
@@ -267,6 +280,8 @@ export interface VideoTask {
   summary_progress?: { phase: 'segments' | 'merging'; completed: number; total: number; current: number; start_ms: number; end_ms: number; failed_part?: number }
   jobs?: TaskJob[]
   has_transcription: boolean
+  can_summarize?: boolean
+  summary_job?: SummaryJob
   has_summary: boolean
   has_rag_index: boolean
   visual_status: string

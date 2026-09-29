@@ -16,7 +16,7 @@ function waitLabel(reason?: string) {
 }
 
 export function TranscriptionProgressPanel({ task, compact = false }: { task: VideoTask; compact?: boolean }) {
-  const relevant = task.last_job_type === 'transcribe' || task.stage === 'transcribing'
+  const relevant = task.last_job_type === 'transcribe' || task.stage === 'transcribing' || task.stage === 'visual_indexing'
   const active = task.stage === 'transcribing' && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null)
   const [error, setError] = useState(false)
@@ -45,7 +45,8 @@ export function TranscriptionProgressPanel({ task, compact = false }: { task: Vi
 
   const current = progress.chunks.filter(c => c.status === 'running' || c.status === 'retry_wait')
   const completed = progress.chunks.filter(c => c.status === 'completed')
-  const stale = active && task.status === TaskStatusEnum.Running && Date.now() - new Date(progress.updated_at).getTime() > 120000
+  const chunksComplete = progress.total > 0 && progress.completed === progress.total
+  const stale = active && !chunksComplete && task.status === TaskStatusEnum.Running && Date.now() - new Date(progress.updated_at).getTime() > 120000
   return (
     <div className="card card-pad" style={{ marginTop: 8, fontSize: 12 }} role="status">
       <b>转写进度</b>
@@ -55,8 +56,9 @@ export function TranscriptionProgressPanel({ task, compact = false }: { task: Vi
       </div>
       <div className="muted" style={{ marginTop: 4 }}>
         服务配置：每进程最多 {progress.video_concurrency} 个转写视频，每视频最多 {progress.chunk_concurrency} 个 ASR 分片并发
-        {active ? ` · 已等待/运行 ${elapsed(progress.started_at || task.created_at)}` : ''}
+        {active && !chunksComplete ? ` · 已等待/运行 ${elapsed(progress.started_at || task.created_at)}` : ''}
       </div>
+      {chunksComplete && <div className="muted">转写分片已完成，后续处理进度见处理阶段。</div>}
       {progress.job_next_retry_at && <div className="muted">任务自动重试 {progress.job_retry_count}/{progress.job_max_retries} · 下次 {fmtDateTime(progress.job_next_retry_at)}</div>}
       {stale && <div style={{ color: 'var(--warn)' }}>最近状态超过 2 分钟未更新，可能停滞，请稍后刷新核对。</div>}
       {current.map(c => <div key={c.index} style={{ marginTop: 5 }}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { PromptPreferenceView } from '@/lib/types'
 import { useShell } from '@/components/shell/AppShell'
+import { Icon } from '@/components/ui/Icon'
 import { ErrorState } from '@/components/ui/AsyncState'
 import './PromptPreferencesSection.css'
 
@@ -91,9 +92,9 @@ export function PromptPreferencesSection({ readOnly }: { readOnly: boolean }) {
         <span>{String(editable.length).padStart(2, '0')} EDITABLE / {String(fixed.length).padStart(2, '0')} FIXED</span>
       </header>
       <div className="prompt-principles">
-        <span>✓ 按当前用户保存</span>
-        <span>✓ 跨配置档与视频生效</span>
-        <span>✓ 已完成内容不会重算</span>
+        <span><Icon name="check" size="sm" />按当前用户保存</span>
+        <span><Icon name="check" size="sm" />跨配置档与视频生效</span>
+        <span><Icon name="check" size="sm" />已完成内容不会重算</span>
       </div>
       <div className="prompt-layout">
         <nav className="prompt-rail" aria-label="提示词功能">
@@ -103,7 +104,7 @@ export function PromptPreferencesSection({ readOnly }: { readOnly: boolean }) {
               className={item.function === row.function ? 'active' : ''}
               aria-current={item.function === row.function ? 'true' : undefined}
               onClick={() => setSelected(item.function)}>
-              {item.label}
+              <span className="prompt-rail-label">{item.label}</span>
               {(drafts[item.function] ?? '') !== item.user_instruction && <i aria-label="未保存">●</i>}
             </button>
           ))}
@@ -113,7 +114,7 @@ export function PromptPreferencesSection({ readOnly }: { readOnly: boolean }) {
               className={item.function === row.function ? 'active' : ''}
               aria-current={item.function === row.function ? 'true' : undefined}
               onClick={() => setSelected(item.function)}>
-              {item.label}
+              <span className="prompt-rail-label">{item.label}</span>
             </button>
           ))}
         </nav>
@@ -125,14 +126,15 @@ export function PromptPreferencesSection({ readOnly }: { readOnly: boolean }) {
           {row.editable ? (
             <div className="prompt-columns">
               <div className="prompt-editor">
-                <label htmlFor={'prompt-' + row.function}>我的表达偏好 <small>可选 · 不覆盖产品规则</small></label>
+                <div className="prompt-editor-head">
+                  <label htmlFor={'prompt-' + row.function}>我的表达偏好 <small>可选 · 不覆盖产品规则</small></label>
+                  <span className="mono">{draft.length} / {limit}</span>
+                </div>
                 <textarea id={'prompt-' + row.function} value={draft} maxLength={limit}
                   disabled={readOnly || savingAny}
                   placeholder="例如：用简洁中文回答，并优先标出关键时间点"
                   onChange={event => updateDraft(event.target.value)} />
-                <div className="prompt-editor-meta">
-                  <span>留空并保存即可恢复默认。</span><span className="mono">{draft.length} / {limit}</span>
-                </div>
+                <span className="prompt-editor-foot">留空并保存即可恢复默认。</span>
                 <div className="prompt-actions">
                   <button className="btn btn-sm btn-primary" disabled={readOnly || savingAny || !changed}
                     onClick={() => void save(row)}>
@@ -146,17 +148,17 @@ export function PromptPreferencesSection({ readOnly }: { readOnly: boolean }) {
                 <p className={'prompt-status ' + statusTone} role="status">{status}</p>
               </div>
               <aside className="prompt-preview">
-                <h4>生效配置预览</h4>
+                <h4><Icon name="eye" size="sm" />生效配置预览</h4>
                 <p>帮助理解指令的组成；实际请求由服务端构造。</p>
-                <div className="prompt-layer"><b>01 · 产品规则（固定）</b><p>{row.product_instruction}</p></div>
-                <div className="prompt-layer user"><b>02 · 我的表达偏好</b><p>{draft.trim() || '未添加个人偏好，使用产品默认规则。'}</p></div>
-                <div className="prompt-layer runtime"><b>03 · 请求时动态加入</b><p>当前问题、可用证据与授权范围会随每次请求加入。</p></div>
+                <div className="prompt-layer"><b><i>01</i>产品规则（固定）</b><p>{row.product_instruction}</p></div>
+                <div className="prompt-layer user"><b><i>02</i>我的表达偏好</b><p>{draft.trim() || '未添加个人偏好，使用产品默认规则。'}</p></div>
+                <div className="prompt-layer runtime"><b><i>03</i>请求时动态加入</b><p>当前问题、可用证据与授权范围会随每次请求加入。</p></div>
               </aside>
             </div>
           ) : (
             <div className="prompt-fixed-detail">
               <p>这项由产品维护，仅供查看。{row.scope}</p>
-              <div className="prompt-layer"><b>产品规则</b><p>{row.product_instruction}</p></div>
+              <div className="prompt-layer"><b><i>固定</i>产品规则</b><p>{row.product_instruction}</p></div>
             </div>
           )}
           <p className="prompt-footnote">预览展示产品规则与当前草稿的组成方式，不会发起模型请求；请保存后再用于新请求。</p>

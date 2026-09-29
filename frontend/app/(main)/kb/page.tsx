@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import type { KnowledgeBase } from '@/lib/types'
 import { fmtRelTime } from '@/lib/format'
 import { useCrumb } from '@/components/shell/AppShell'
+import { PageHeading } from '@/components/product/PageHeading'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
@@ -51,10 +52,9 @@ export default function KBListPage() {
 
   return (
     <div className="page page-wide">
-      <div className="section-head" style={{ marginTop: 0 }}>
-        <h2>知识库</h2>
-        <button className="more" onClick={() => setCreateOpen(true)}><Icon name="plus" size="sm" />新建知识库</button>
-      </div>
+      <PageHeading eyebrow="COLLECT, THEN GO DEEPER" title="把相关的，放在一起。"
+        description="知识库限定问答与检索的范围。成员视频越聚焦，回答越准确。"
+        actions={<button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Icon name="plus" />新建知识库</button>} />
 
       {loading ? (
         <LoadingBlock variant="card" />

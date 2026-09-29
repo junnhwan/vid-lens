@@ -227,10 +227,18 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
 
       <label className="field-label">配置名称</label>
       <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="例如:硅基流动" />
-      <details style={{ marginTop: 12, fontSize: 13 }}>
-        <summary>服务地址填写示例与拼接规则</summary>
-        <p>本项目使用 OpenAI 兼容协议。对话、语音识别、视觉填 API 基础地址；例如硅基流动 <code>https://api.siliconflow.cn/v1</code>、OpenAI <code>https://api.openai.com/v1</code>、DeepSeek 对话 <code>https://api.deepseek.com/v1</code>。系统分别追加 <code>/chat/completions</code>、<code>/audio/transcriptions</code>、<code>/chat/completions</code>。</p>
-        <p>向量模型填完整接口，例如 <code>https://api.siliconflow.cn/v1/embeddings</code>，系统不会再追加路径。各服务商支持的能力与模型不同，先核对其文档。硅基流动和 OpenAI 只填主域名会漏掉 <code>/v1</code>；DeepSeek 对话可按其接口使用主域名或 <code>/v1</code>。将完整接口填进基础地址会重复路径。</p>
+      <details className="disclosure" style={{ marginTop: 12 }}>
+        <summary><Icon name="info" size="sm" />服务地址填写示例与拼接规则</summary>
+        <div className="disclosure-body">
+          <p>本项目使用 OpenAI 兼容协议。对话、语音识别、视觉填写 API 基础地址，系统按用途追加路径；向量模型填写完整接口（以 <code>/embeddings</code> 结尾），系统不再追加。</p>
+          <ul className="disclosure-list">
+            <li><b>硅基流动</b><code>https://api.siliconflow.cn/v1</code></li>
+            <li><b>OpenAI</b><code>https://api.openai.com/v1</code></li>
+            <li><b>DeepSeek 对话</b><code>https://api.deepseek.com/v1</code><span>主域名或 /v1 均可</span></li>
+            <li><b>向量示例</b><code>https://api.siliconflow.cn/v1/embeddings</code></li>
+          </ul>
+          <p>硅基流动和 OpenAI 只填主域名会漏掉 <code>/v1</code>；将完整接口填进基础地址会重复路径。各服务商支持的能力与模型不同，先核对其文档，保存前可运行能力检查。</p>
+        </div>
       </details>
 
       <GroupBlock
@@ -292,27 +300,29 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       <CapabilityProbe targets={probeTargets} disabled={busy} />
 
       {!profile?.read_only && profile?.source !== 'hosted' && (
-        <details style={{ marginTop: 22 }}>
-          <summary className="field-label" style={{ cursor: 'pointer' }}>Agent 执行预算</summary>
-          <p style={{ color: 'var(--tx-3)', fontSize: 13 }}>仅用于此配置下新开始的 Agent 运行，不影响普通 Chat；Token 用量可能为估算，不代表模型思考强度。</p>
-          {profile?.agent_budget_error && <p role="alert">{profile.agent_budget_error}；可恢复默认或重新填写预算修复。</p>}
-          {budgetError && <p role="alert">{budgetError}</p>}
-          <div style={{ display: 'flex', gap: 18, margin: '12px 0' }}>
-            <label><input type="radio" name="budget-mode" checked={!customBudget} onChange={() => setCustomBudget(false)} /> 跟随服务端默认值</label>
-            <label><input type="radio" name="budget-mode" checked={customBudget} onChange={() => setCustomBudget(true)} disabled={!budgetOptions} /> 自定义</label>
+        <details className="disclosure" style={{ marginTop: 22 }}>
+          <summary><Icon name="bolt" size="sm" />Agent 执行预算</summary>
+          <div className="disclosure-body plain">
+            <p>仅用于此配置下新开始的 Agent 运行，不影响普通 Chat；Token 用量可能为估算，不代表模型思考强度。</p>
+            {profile?.agent_budget_error && <p role="alert">{profile.agent_budget_error}；可恢复默认或重新填写预算修复。</p>}
+            {budgetError && <p role="alert">{budgetError}</p>}
+            <div style={{ display: 'flex', gap: 18, margin: '2px 0' }}>
+              <label><input type="radio" name="budget-mode" checked={!customBudget} onChange={() => setCustomBudget(false)} /> 跟随服务端默认值</label>
+              <label><input type="radio" name="budget-mode" checked={customBudget} onChange={() => setCustomBudget(true)} disabled={!budgetOptions} /> 自定义</label>
+            </div>
+            {budgetOptions && budgetFields.map(([key, label]) => {
+              if (key === 'max_visual_frames' && !budgetOptions.visual_available) return null
+              const range = budgetOptions.limits[key]
+              return <label key={key} style={{ display: 'block', marginTop: 10 }}>
+                <span className="field-label">{label} {key === 'max_visual_frames' && !visionEnabled ? '（未启用视觉模型，设置保留但当前不生效）' : ''}</span>
+                <input className="input mono" type="number" step={1} min={range.min} max={range.max} disabled={!customBudget} value={customBudget ? budgetDraft[key] ?? budgetOptions.defaults[key] : budgetOptions.defaults[key]} onChange={e => setBudgetDraft(draft => ({ ...draft, [key]: e.target.value }))} />
+                <small style={{ color: 'var(--tx-3)' }}>允许范围 {range.min}–{range.max}</small>
+              </label>
+            })}
+            {profile?.effective_agent_budget?.adjustments?.map(note => <p key={note}>{note}</p>)}
+            <div><button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => { setCustomBudget(false); setBudgetDraft({}) }}>恢复默认</button></div>
+            <p>保存后新运行生效，进行中的运行保持原预算。修改预算无需重新输入 API Key。</p>
           </div>
-          {budgetOptions && budgetFields.map(([key, label]) => {
-            if (key === 'max_visual_frames' && !budgetOptions.visual_available) return null
-            const range = budgetOptions.limits[key]
-            return <label key={key} style={{ display: 'block', marginTop: 10 }}>
-              <span className="field-label">{label} {key === 'max_visual_frames' && !visionEnabled ? '（未启用视觉模型，设置保留但当前不生效）' : ''}</span>
-              <input className="input mono" type="number" step={1} min={range.min} max={range.max} disabled={!customBudget} value={customBudget ? budgetDraft[key] ?? budgetOptions.defaults[key] : budgetOptions.defaults[key]} onChange={e => setBudgetDraft(draft => ({ ...draft, [key]: e.target.value }))} />
-              <small style={{ color: 'var(--tx-3)' }}>允许范围 {range.min}–{range.max}</small>
-            </label>
-          })}
-          {profile?.effective_agent_budget?.adjustments?.map(note => <p key={note}>{note}</p>)}
-          <button type="button" className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => { setCustomBudget(false); setBudgetDraft({}) }}>恢复默认</button>
-          <p style={{ fontSize: 13, color: 'var(--tx-3)' }}>保存后新运行生效，进行中的运行保持原预算。修改预算无需重新输入 API Key。</p>
         </details>
       )}
 

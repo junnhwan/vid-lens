@@ -18,7 +18,6 @@
 .product-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:0 0 30px; border:1px solid var(--line); border-radius:var(--r-card); background:var(--bg-1); }
 .product-metric { padding:18px 22px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-right:1px solid var(--line); }
 .product-metric:last-child { border:0; }.product-metric span { color:var(--tx-3); font-size:12px; }.product-metric strong { font:500 24px var(--font-mono); }
-.product-nav-group { border-top:1px solid var(--line); margin-top:16px; padding-top:16px; }
 .product-topbar-actions { margin-left:auto; display:flex; align-items:center; gap:12px; flex:none; }
 .product-preview-label { color:var(--warn); font-size:11px; }
 .product-preview-banner { padding:10px var(--page-gutter); border-bottom:1px solid var(--acc-line); background:var(--acc-dim); color:var(--acc-strong); font-size:12px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }

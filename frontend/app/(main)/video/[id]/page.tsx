@@ -29,8 +29,8 @@ import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { VisualProgressPanel } from '@/components/VisualProgressPanel'
 import { useStudyPosition } from '@/lib/artifacts/useStudyPosition'
-import { taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
+import { canGenerateSummary, summaryRunning, summaryStatusText } from '@/lib/summaryState'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
@@ -135,7 +135,7 @@ function FramePreview({ src, timeMs }: { src: string | null; timeMs: number }) {
     : <div className="muted" role="status" style={{ padding: 12, fontSize: 12 }}>帧预览不可用</div>
 }
 
-function FrameRead({ children }: { children: ReactNode }) {
+function ClampRead({ children, className }: { children: ReactNode; className: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [canToggle, setCanToggle] = useState(false)
@@ -154,8 +154,8 @@ function FrameRead({ children }: { children: ReactNode }) {
   }, [children, open])
 
   return (
-    <div>
-      <div ref={ref} className={`frame-read${open ? ' open' : ''}`}>{children}</div>
+    <div className="clamp-read">
+      <div ref={ref} className={`${className}${open ? ' open' : ''}`}>{children}</div>
       {canToggle && (
         <button
           type="button"
@@ -167,6 +167,10 @@ function FrameRead({ children }: { children: ReactNode }) {
       )}
     </div>
   )
+}
+
+function FrameRead({ children }: { children: ReactNode }) {
+  return <ClampRead className="frame-read">{children}</ClampRead>
 }
 
 export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string } }) {
@@ -274,13 +278,14 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }, [taskId, subReloadTick])
 
   const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
+  const generatingSummary = !!task && summaryRunning(task)
   const readableArtifact = relatedArtifacts.data?.list.find(item => !!item.current_version_id)
   const pendingArtifact = relatedArtifacts.data?.list.find(item => !item.current_version_id && item.latest_run && (item.latest_run.status === 'pending' || item.latest_run.status === 'running'))
   const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
 
   // 处理中或等待摘要自动重试时轮询；重试调度会清除 next_retry_at 并重新入队。
   useEffect(() => {
-    if (!processing && !awaitingSummaryRetry) return
+    if (!processing && !generatingSummary && !awaitingSummaryRetry) return
     const iv = setInterval(() => {
       void (async () => {
         try {
@@ -302,7 +307,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       })()
     }, 5000)
     return () => clearInterval(iv)
-  }, [processing, awaitingSummaryRetry, taskId])
+  }, [processing, generatingSummary, awaitingSummaryRetry, taskId])
 
   useEffect(() => {
     if (!processing && busy !== 'index' && index?.status !== 'indexing' && index?.status !== 'queued') return
@@ -558,7 +563,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 onClick={() => seek(a.start_ms)}
               >
                 <span className="ts">{formatTime(a.start_ms)}</span>
-                <span className="tx">{a.content}</span>
+                <ClampRead className="tx">{a.content}</ClampRead>
               </div>
             ))}
           </div>
@@ -728,64 +733,79 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
               </div>
             )}
-            {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
-            {(task.stage === 'transcribing' || task.last_job_type === 'transcribe') && <VisualProgressPanel task={task} />}
+            {(task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
+            {(task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe') && <VisualProgressPanel task={task} />}
+            {processing && canGenerateSummary(task) && <p className="muted" role="status">转写已保存，可以生成摘要；画面分析和检索索引会继续处理。</p>}
             {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
 
             {relatedArtifacts.error && <div className="artifact-notice danger" role="alert">相关笔记读取失败：{artifactError(relatedArtifacts.error)}<button className="btn btn-sm" onClick={() => void relatedArtifacts.refetch()}>重试</button></div>}
             <div className="ws-actions">
-              {readableArtifact ? <Link className="btn btn-primary" href={`/artifacts/${encodeURIComponent(readableArtifact.id)}`}><Icon name="file" size="sm" />阅读学习笔记</Link> : processing ? <button className="btn btn-primary" disabled><Icon name="activity" size="sm" />视频处理中</button> : !task.has_transcription && !readOnly ? <button className="btn btn-primary" disabled={busy !== ''} onClick={() => void runAction('transcribe')}><Icon name="activity" size="sm" />先完成转写</button> : pendingArtifact ? <Link className="btn btn-primary" href={`/tasks?run=${encodeURIComponent(pendingArtifact.latest_run!.id)}`}><Icon name="clock" size="sm" />查看笔记进度</Link> : <button className="btn btn-primary" disabled={readOnly || !task.has_transcription || relatedArtifacts.isPending || !!relatedArtifacts.error} onClick={() => setArtifactMode('new')}><Icon name="wand" size="sm" />新建学习笔记</button>}
-              {readableArtifact && <><button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('new')}><Icon name="plus" size="sm" />新建另一份</button><button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('reorganize')}><Icon name="refresh" size="sm" />重新整理这份</button></>}
-              <Link className="btn btn-ghost" href={`/artifacts?source=${task.id}`}><Icon name="file" size="sm" />相关成果</Link>
-              {task.has_summary ? (
-                <button className="btn" onClick={() => setSummaryOpen(true)}>
-                  <Icon name="file" size="sm" />查看摘要
+              <div className="ws-actions-primary">
+                {readableArtifact ? <Link className="btn btn-primary" href={`/artifacts/${encodeURIComponent(readableArtifact.id)}`}><Icon name="file" size="sm" />阅读学习笔记</Link> : processing ? <button className="btn btn-primary" disabled><Icon name="activity" size="sm" />视频处理中</button> : !task.has_transcription && !readOnly ? <button className="btn btn-primary" disabled={busy !== ''} onClick={() => void runAction('transcribe')}><Icon name="activity" size="sm" />先完成转写</button> : pendingArtifact ? <Link className="btn btn-primary" href={`/tasks?run=${encodeURIComponent(pendingArtifact.latest_run!.id)}`}><Icon name="clock" size="sm" />查看笔记进度</Link> : <button className="btn btn-primary" disabled={readOnly || !task.has_transcription || relatedArtifacts.isPending || !!relatedArtifacts.error} onClick={() => setArtifactMode('new')}><Icon name="wand" size="sm" />新建学习笔记</button>}
+                <span className="ws-actions-spacer" />
+                <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
+                  <Icon name="message" size="sm" />进入问答
                 </button>
-              ) : (
-                <button
-                  className={`btn${busy === 'analyze' ? ' is-loading' : ''}`}
-                  aria-busy={busy === 'analyze' || undefined}
-                  disabled={busy !== '' || processing || !task.has_transcription}
-                  title={!task.has_transcription ? '转写完成后才能生成摘要' : processing ? `当前${taskStateView(task).text}；等待该任务结束后可生成摘要` : undefined}
-                  onClick={() => void runAction('analyze')}
-                >
-                  <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : '生成摘要'}
-                </button>
-              )}
-              {task.has_transcription ? (
-                <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
-                  kind: 'transcribe',
-                  force: true,
-                  title: '重新转写?',
-                  body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
-                  confirmLabel: '重新转写',
-                })}>
-                  <Icon name="refresh" size="sm" />重新转写
-                </button>
-              ) : processing ? (
-                <button className="btn" disabled>
-                  <Icon name="activity" size="sm" />等待转写
-                </button>
-              ) : null}
-              <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
-                <Icon name="layers" size="sm" />{indexActionLabel(index)}
-              </button>
-              <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
-                <Icon name="download" size="sm" />下载音频
-              </button>
-              <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
-                <Icon name="folder" size="sm" />加入知识库
-              </button>
-              <span style={{ flex: 1 }} />
-              <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
-                <Icon name="message" size="sm" />进入问答
-              </button>
+              </div>
+              <div className="ws-actions-tools">
+                <div className="ws-tool-group" role="group" aria-label="学习笔记">
+                  <span className="ws-tool-label">笔记</span>
+                  {readableArtifact && <button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('new')}><Icon name="plus" size="sm" />新建另一份</button>}
+                  {readableArtifact && <button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('reorganize')}><Icon name="sort" size="sm" />重新整理这份</button>}
+                  <Link className="btn" href={`/artifacts?source=${task.id}`}><Icon name="list" size="sm" />相关成果</Link>
+                </div>
+                <div className="ws-tool-group" role="group" aria-label="内容处理">
+                  <span className="ws-tool-label">处理</span>
+                  {task.has_summary ? (
+                    <button className="btn" onClick={() => setSummaryOpen(true)}>
+                      <Icon name="eye" size="sm" />查看摘要
+                    </button>
+                  ) : (
+                    <button
+                      className={`btn${busy === 'analyze' ? ' is-loading' : ''}`}
+                      aria-busy={busy === 'analyze' || undefined}
+                      disabled={busy !== '' || !canGenerateSummary(task)}
+                      title={!task.has_transcription ? '转写完成后才能生成摘要' : generatingSummary ? '摘要正在生成，请勿重复提交' : !canGenerateSummary(task) ? '等待本次转写完成或摘要重试结束' : undefined}
+                      onClick={() => void runAction('analyze')}
+                    >
+                      <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : generatingSummary ? summaryStatusText(task) : '生成摘要'}
+                    </button>
+                  )}
+                  {task.has_transcription ? (
+                    <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
+                      kind: 'transcribe',
+                      force: true,
+                      title: '重新转写?',
+                      body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
+                      confirmLabel: '重新转写',
+                    })}>
+                      <Icon name="refresh" size="sm" />重新转写
+                    </button>
+                  ) : processing ? (
+                    <button className="btn" disabled>
+                      <Icon name="activity" size="sm" />等待转写
+                    </button>
+                  ) : null}
+                  <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
+                    <Icon name="layers" size="sm" />{indexActionLabel(index)}
+                  </button>
+                </div>
+                <div className="ws-tool-group" role="group" aria-label="导出与连接">
+                  <span className="ws-tool-label">导出</span>
+                  <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
+                    <Icon name="download" size="sm" />下载音频
+                  </button>
+                  <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
+                    <Icon name="folder" size="sm" />加入知识库
+                  </button>
+                </div>
+              </div>
             </div>
             <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
-            {((!task.has_summary && task.has_transcription && processing) || (!task.has_summary && task.summary_progress)) && (
+            {((!task.has_summary && generatingSummary) || (!task.has_summary && task.summary_progress)) && (
               <div className="ws-action-status">
-                {!task.has_summary && task.has_transcription && processing && (
-                  <span className="muted" style={{ fontSize: 12 }} role="status">当前{taskStateView(task).text}，任务结束后可生成摘要</span>
+                {!task.has_summary && generatingSummary && (
+                  <span className="muted" style={{ fontSize: 12 }} role="status">{summaryStatusText(task)}，完成后会显示在这里</span>
                 )}
                 {!task.has_summary && task.summary_progress && (
                   <span className="muted" style={{ fontSize: 12 }} role="status">
@@ -797,7 +817,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               </div>
             )}
 
-            {failed && (
+            {(failed || summaryFailure) && (
               <div className="card card-pad" style={{ marginTop: 14, flex: 'none', borderColor: 'color-mix(in srgb, var(--bad) 35%, transparent)' }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                   <span style={{ color: 'var(--bad)' }}><Icon name="alert" /></span>
@@ -813,7 +833,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                       {task.error_msg || task.last_error_msg || '处理过程中出现错误'}
                       {task.max_retries > 0 ? ` · 重试 ${task.retry_count}/${task.max_retries}` : ''}
                     </p>}
-                    {urlJob ? (
+                    {urlJob && !summaryFailure ? (
                       <span className="chip chip-mute" style={{ marginTop: 10 }}>URL 任务,请删除后重新添加</span>
                     ) : !summaryFailure?.scheduled && (
                       <button
@@ -821,7 +841,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                         style={{ marginTop: 10 }}
                         disabled={busy !== ''}
                         onClick={() => setPendingAction({
-                          kind: task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
+                          kind: summaryFailure || task.last_job_type === 'analyze' ? 'analyze' : 'transcribe',
                           title: '重新提交任务?',
                           body: summaryFailure ? `${summaryFailure.advice} 重新提交可能再次消耗模型额度。` : '失败步骤会重新入队,可能再次消耗模型额度。',
                           confirmLabel: '重试',

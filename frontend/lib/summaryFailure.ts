@@ -1,6 +1,6 @@
 import { TaskStatusEnum, type VideoTask } from './types.ts'
 
-type SummaryTask = Pick<VideoTask, 'status' | 'stage' | 'last_job_type' | 'last_error_code' | 'last_error_msg' | 'error_msg' | 'retry_count' | 'max_retries' | 'next_retry_at' | 'trace_id' | 'id'>
+type SummaryTask = Pick<VideoTask, 'status' | 'stage' | 'last_job_type' | 'last_error_code' | 'last_error_msg' | 'error_msg' | 'retry_count' | 'max_retries' | 'next_retry_at' | 'trace_id' | 'id' | 'summary_job'>
 
 export interface SummaryFailureView {
   category: string
@@ -11,6 +11,10 @@ export interface SummaryFailureView {
 }
 
 export function summaryFailureView(task: SummaryTask): SummaryFailureView | null {
+  if (task.summary_job) {
+    const job = task.summary_job
+    task = { ...task, ...job, id: task.id, last_job_type: 'analyze', error_msg: job.last_error_msg }
+  }
   if (task.last_job_type !== 'analyze' || task.stage !== 'summarizing' ||
       (task.status !== TaskStatusEnum.Failed && task.status !== TaskStatusEnum.Dead)) return null
 

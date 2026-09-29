@@ -38,8 +38,8 @@ export function VideoCard({ task }: { task: VideoTask }) {
         {cat === 'processing' && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
         )}
-        {(task.stage === 'transcribing' && (task.status === 1 || task.status === 2)) && <TranscriptionProgressPanel task={task} compact />}
-        {(task.stage === 'transcribing' && (task.status === 1 || task.status === 2)) && <VisualProgressPanel task={task} compact />}
+        {((task.stage === 'transcribing' || task.stage === 'visual_indexing') && (task.status === 1 || task.status === 2)) && <TranscriptionProgressPanel task={task} compact />}
+        {((task.stage === 'transcribing' || task.stage === 'visual_indexing') && (task.status === 1 || task.status === 2)) && <VisualProgressPanel task={task} compact />}
         {failed && (summaryFailure || task.error_msg) && (
           <div className="mini-prog">
             <div className="row"><b style={{ color: 'var(--bad)' }}>{summaryFailure ? `${summaryFailure.category} · ${summaryFailure.retry}` : task.error_msg}</b></div>

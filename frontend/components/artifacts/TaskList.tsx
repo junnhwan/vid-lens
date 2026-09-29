@@ -15,7 +15,7 @@ function MediaTaskProgress({ id }: { id: string }) {
   if (query.error) return <p role="status">详细进度暂不可用。<button className="btn btn-sm" onClick={() => void query.refetch()}>重试</button></p>
   if (!query.data) return null
   const task=query.data
-  return <div><ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />{task.stage==='transcribing' && <><TranscriptionProgressPanel task={task} compact /><VisualProgressPanel task={task} compact /></>}</div>
+  return <div><ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />{(task.stage==='transcribing' || task.stage==='visual_indexing') && <><TranscriptionProgressPanel task={task} compact /><VisualProgressPanel task={task} compact /></>}</div>
 }
 
 const mediaLabels: Record<string, string> = { '0': '待处理', '1': '排队中', '2': '处理中', '3': '处理完成', '4': '处理失败', '5': '重试已耗尽' }

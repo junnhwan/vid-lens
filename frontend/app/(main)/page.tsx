@@ -128,8 +128,8 @@ export default function DashboardPage() {
                   <div className="proc-left">
                     <h5><Link href={`/video/${t.id}`}>{taskTitle(t)}</Link></h5>
                     <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} has_rag_index={t.has_rag_index} visual_status={t.visual_status} />
-                    {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
-                    {t.stage === 'transcribing' && (t.status === 1 || t.status === 2) && <VisualProgressPanel task={t} compact />}
+                    {(t.stage === 'transcribing' || t.stage === 'visual_indexing') && (t.status === 1 || t.status === 2) && <TranscriptionProgressPanel task={t} compact />}
+                    {(t.stage === 'transcribing' || t.stage === 'visual_indexing') && (t.status === 1 || t.status === 2) && <VisualProgressPanel task={t} compact />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
                   </div>
                   {failed

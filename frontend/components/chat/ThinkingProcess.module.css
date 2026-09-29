@@ -1,8 +1,11 @@
 .process { margin: 14px 0 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); overflow: hidden; }
-.toggle { width: 100%; display: flex; align-items: center; gap: 10px; padding: 13px 15px; border: 0; background: none; color: var(--tx-2); text-align: left; cursor: pointer; font: inherit; font-size: 12px; }
+.toggle { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 15px; border: 0; background: none; color: var(--tx-2); text-align: left; cursor: pointer; font: inherit; font-size: 12px; transition: background 0.16s var(--ease); }
+.toggle:hover { background: var(--bg-3); }
 .toggle:focus-visible { outline: 2px solid var(--acc-strong); outline-offset: -3px; }
-.title { font-weight: 600; flex-shrink: 0; }
+.title { font-weight: 600; flex-shrink: 0; font-size: 12.5px; color: var(--tx-1); }
 .summary { margin-left: auto; color: var(--tx-3); font-size: 11px; }
+.chev { margin-left: 2px; color: var(--tx-4); transition: transform 0.22s var(--ease); }
+.chevOpen { transform: rotate(90deg); }
 .indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--acc-strong); flex-shrink: 0; }
 .live { animation: breathe 1.6s ease-in-out infinite; }
 .body { padding: 0 16px 14px; border-top: 1px solid var(--line); }
@@ -20,12 +23,14 @@
 .stepHeading span { flex-shrink: 0; font-size: 10px; color: var(--tx-3); font-variant-numeric: tabular-nums; }
 .detail, .waiting { margin: 7px 0 0; color: var(--tx-3); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .badge { display: inline-block; font-size: 10px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--tx-3); margin: 7px 6px 0 0; }
-.reasoning { margin-top: 9px; font-size: 12px; color: var(--tx-3); }
-.reasoning summary, .tool summary { cursor: pointer; font-size: 11px; user-select: none; }
-.reasoning div { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; padding: 10px 12px; margin-top: 7px; border-left: 2px solid var(--line); line-height: 1.8; }
-.tool { margin-top: 8px; color: var(--tx-3); font-size: 11px; }
+.reasoning, .tool { margin-top: 9px; padding: 8px 11px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-1); font-size: 12px; color: var(--tx-3); }
+.reasoning summary, .tool summary { cursor: pointer; font-size: 11px; user-select: none; font-weight: 600; color: var(--tx-2); }
+.reasoning div { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; padding: 10px 12px; margin-top: 7px; border-left: 2px solid var(--acc-line); border-radius: 0 8px 8px 0; background: var(--bg-2); font-family: var(--font-read); font-size: 12.5px; line-height: 1.9; color: var(--tx-2); }
+.reasoning small { display: block; margin-top: 6px; color: var(--tx-4); font-size: 10px; }
+.tool { margin-top: 8px; }
+.tool p { margin-top: 6px; line-height: 1.7; overflow-wrap: anywhere; }
 .tool pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.tool code { display: block; margin-top: 6px; }
+.tool code { display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--info); }
 p.error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 @keyframes breathe { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .live, .running .dot::after { animation: none; } }
