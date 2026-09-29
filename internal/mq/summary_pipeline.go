@@ -25,7 +25,7 @@ const summaryDefaultContextTokens = 8192
 const summaryOutputTokens = 2048
 const summaryIntermediateOutputTokens = 1536
 const summaryReservedTokens = 2048
-const summaryPromptVersion = "summary_tree_v1"
+const summaryPromptVersion = "summary_tree_v2"
 
 type summaryInput struct {
 	text           string
@@ -196,12 +196,12 @@ func summaryRowsOverlap(rows []model.VideoTranscriptionChunk) bool {
 }
 
 func summaryPartPrompt(input summaryInput, index, total int) string {
-	return fmt.Sprintf("这是视频完整转写的第 %d/%d 段，时间范围 %d–%d 毫秒。请仅根据本段整理要点，保留关键事实和时间线；按现有报告的四个栏目输出，供后续全片合并。\n\n%s", index+1, total, input.startMS, input.endMS, input.text)
+	return fmt.Sprintf("这是视频完整转写的第 %d/%d 段，时间范围 %d–%d 毫秒。请仅根据本段整理要点，保留关键事实和时间线；保留比较对象与各自的方法、耗时和结果，区分演示观察值、个案费用与模型保证；按现有报告的四个栏目输出，供后续全片合并。\n\n%s", index+1, total, input.startMS, input.endMS, input.text)
 }
 
 func summaryMergePrompt(parts []summaryInput, level int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "以下是覆盖视频连续时间段的摘要（合并层级 %d）。请逐段吸收所有内容，按现有报告的四个栏目合并为一份客观专业的 Markdown 报告，保留各段独有的重要信息与时间线，不得只挑相关片段。\n", level)
+	fmt.Fprintf(&b, "以下是覆盖视频连续时间段的摘要（合并层级 %d）。请逐段吸收所有内容，按现有报告的四个栏目合并为一份客观专业的 Markdown 报告，保留各段独有的重要信息与时间线，不得只挑相关片段。保留比较对象及各自的事实；观察值不能升格为内置阈值，个案费用不能升格为成本保证。\n", level)
 	for i, part := range parts {
 		fmt.Fprintf(&b, "\n第 %d 段（%d–%d 毫秒）：\n%s\n", i+1, part.startMS, part.endMS, part.text)
 	}

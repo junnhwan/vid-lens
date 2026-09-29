@@ -48,11 +48,17 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 		return videoQuestionEvidence{}, err
 	}
 	evidence := videoQuestionEvidence{title: task.Title, result: VideoQuestionResult{Questions: []VideoQuestion{}}}
-	if transcript == nil || strings.TrimSpace(transcript.Content) == "" {
+	frames, err := s.repo.VisualFrame.ListCompletedWithText(taskID)
+	if err != nil {
+		return evidence, err
+	}
+	if (transcript == nil || strings.TrimSpace(transcript.Content) == "") && len(frames) == 0 {
 		evidence.result.Status, evidence.result.Message = "waiting_transcription", "转写完成后，会根据视频内容推荐问题。"
 		return evidence, nil
 	}
-	evidence.transcript = transcript.Content
+	if transcript != nil {
+		evidence.transcript = transcript.Content
+	}
 	summary, err := s.repo.Summary.FindByTaskID(taskID)
 	if err != nil {
 		return evidence, err
@@ -72,12 +78,8 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 			summary = &model.AISummary{Content: effective.Content}
 		}
 	}
-	frames, err := s.repo.VisualFrame.ListCompletedWithText(taskID)
-	if err != nil {
-		return evidence, err
-	}
 	h := sha256.New()
-	h.Write([]byte("questions-v3\x00" + task.Title + "\x00" + transcript.Content))
+	h.Write([]byte("questions-v3\x00" + task.Title + "\x00" + evidence.transcript))
 	if summary != nil {
 		evidence.summary = summary.Content
 		h.Write([]byte("\x00" + summary.Content))
@@ -105,18 +107,15 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 		question := naturalQuestion(topic, len(evidence.result.Questions))
 		evidence.result.Questions = append(evidence.result.Questions, VideoQuestion{Question: question, Source: source, Excerpt: sampleQuestionText(raw, 160), TimeMS: at})
 	}
-	if summary != nil {
-		for _, line := range strings.Split(summary.Content, "\n") {
-			add(line, "摘要", nil)
-		}
-	}
 	for _, chunk := range chunks {
 		if chunk.Status == model.TranscriptionChunkStatusCompleted {
 			at := chunk.CoreStartMS
 			add(chunk.Content, "转写", &at)
 		}
 	}
-	add(transcript.Content, "转写", nil)
+	if evidence.transcript != "" {
+		add(evidence.transcript, "转写", nil)
+	}
 	for _, frame := range frames {
 		at := frame.TimeMs
 		if frame.OCRText != "" {
@@ -126,7 +125,11 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 		}
 	}
 	if len(evidence.result.Questions) == 0 {
-		evidence.result.Questions = []VideoQuestion{{Question: "这段视频最值得记住的是什么？", Source: "转写", Excerpt: ""}}
+		source := "转写"
+		if evidence.transcript == "" {
+			source = "画面"
+		}
+		evidence.result.Questions = []VideoQuestion{{Question: "这段视频最值得记住的是什么？", Source: source, Excerpt: ""}}
 	}
 	return evidence, nil
 }

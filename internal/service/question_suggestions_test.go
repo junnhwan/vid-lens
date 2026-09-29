@@ -80,6 +80,56 @@ func TestSuggestedVideoQuestionsGenerationIsExplicitCachedAndContentVersioned(t 
 	}
 }
 
+func TestVisualOnlyVideoQuestionsReadAndGenerateWithoutTranscription(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, Filename: "slides.mp4", Title: "队列架构", FileMD5: "visual-only-questions"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.VisualFrame.ReplaceTaskFrames(task.ID, []model.VideoVisualFrame{{TaskID: task.ID, FrameIndex: 0, TimeMs: 12000, OCRText: "架构图展示队列到索引的数据流", Status: model.VisualFrameStatusCompleted}}); err != nil {
+		t.Fatal(err)
+	}
+	client := &questionTestClient{response: `{"questions":["队列到索引的数据流是什么？","架构图中队列负责什么？"]}`}
+	svc := NewQuestionSuggestionService(repos, stubConversationProfileProvider{}, questionTestFactory{client})
+	read, err := svc.VideoQuestions(context.Background(), 7, task.ID, false)
+	if err != nil || read.Status != "ready" || len(read.Questions) == 0 || read.Questions[0].Source != "画面文字" || client.calls != 0 {
+		t.Fatalf("GET %+v calls=%d err=%v", read, client.calls, err)
+	}
+	generated, err := svc.VideoQuestions(context.Background(), 7, task.ID, true)
+	if err != nil || generated.Status != "ready" || client.calls != 1 || len(generated.Questions) < 2 {
+		t.Fatalf("POST %+v calls=%d err=%v", generated, client.calls, err)
+	}
+	if !strings.Contains(client.messages[len(client.messages)-1].Content, "架构图展示队列到索引") {
+		t.Fatalf("visual evidence omitted from model input: %+v", client.messages)
+	}
+}
+
+func TestSuggestedQuestionsPreferRawTranscriptOverInaccurateSummary(t *testing.T) {
+	repos := newMediaTestRepositories(t)
+	task := &model.VideoTask{UserID: 7, Filename: "comparison.mp4", Title: "游戏演示", FileMD5: "source-over-summary"}
+	if err := repos.Task.Create(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Transcription.Create(&model.VideoTranscription{TaskID: task.ID, FileMD5: task.FileMD5, Content: "PPO策略训练一周才通关；而Jev三十分钟打通了。"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.Summary.Create(&model.AISummary{TaskID: task.ID, FileMD5: task.FileMD5, Content: "Jev结合PPO三十分钟通关。"}); err != nil {
+		t.Fatal(err)
+	}
+	client := &questionTestClient{err: errors.New("model unavailable")}
+	svc := NewQuestionSuggestionService(repos, stubConversationProfileProvider{}, questionTestFactory{client})
+	result, err := svc.VideoQuestions(context.Background(), 7, task.ID, true)
+	if err != nil || len(result.Questions) == 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if strings.Contains(result.Questions[0].Excerpt, "Jev结合PPO") {
+		t.Fatalf("incorrect summary dominated fallback: %+v", result.Questions)
+	}
+	if strings.Contains(client.messages[len(client.messages)-1].Content, "Jev结合PPO") {
+		t.Fatalf("inaccurate summary entered model evidence: %+v", client.messages)
+	}
+}
+
 func TestSuggestedQuestionParserKeepsNaturalShortQuestionsAndRejectsTemplates(t *testing.T) {
 	output := `{"questions":["**向量检索怎么工作？**","向量检索怎么工作?","视频中关于向量检索有哪些具体说明？","` + strings.Repeat("长", 33) + `？","` + strings.Repeat("x", 61) + `?","OCR和画面描述怎么选"]}`
 	questions, err := parseSuggestedQuestions(output, false, "")

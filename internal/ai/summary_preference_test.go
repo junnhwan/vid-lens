@@ -27,3 +27,13 @@ func TestSummaryIntermediateLimitUsesCompactNotesOnlyForIntermediateCalls(t *tes
 		t.Fatalf("intermediate limit leaked into final report: %+v", final)
 	}
 }
+
+func TestSummaryPromptsPreserveComparisonAndObservationScope(t *testing.T) {
+	for _, prompt := range []string{defaultSummarySystemPrompt(), summaryMessages(WithSummaryIntermediateLimit(context.Background(), 450), "source")[0].Content} {
+		for _, required := range []string{"比较对象", "观察值", "保证"} {
+			if !strings.Contains(prompt, required) {
+				t.Fatalf("prompt lacks %q: %s", required, prompt)
+			}
+		}
+	}
+}
