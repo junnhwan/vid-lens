@@ -60,11 +60,38 @@ type KnowledgeBaseVideoResponse struct {
 }
 
 type KnowledgeBaseService struct {
-	repos *repository.Repositories
+	repos    *repository.Repositories
+	profiles ConversationProfileProvider
 }
 
 func NewKnowledgeBaseService(repos *repository.Repositories) *KnowledgeBaseService {
 	return &KnowledgeBaseService{repos: repos}
+}
+
+func (s *KnowledgeBaseService) WithAIProfiles(profiles ConversationProfileProvider) *KnowledgeBaseService {
+	s.profiles = profiles
+	return s
+}
+
+func (s *KnowledgeBaseService) embeddingModel(userID int64) (string, error) {
+	if s.profiles != nil {
+		profile, err := s.profiles.GetDefaultAIProfile(userID)
+		if err != nil {
+			return "", err
+		}
+		if profile == nil {
+			return "", ErrAIProfileRequired
+		}
+		return strings.TrimSpace(profile.EmbeddingModel), nil
+	}
+	profile, err := s.repos.AIProfile.FindDefaultByUserID(userID)
+	if err != nil {
+		return "", err
+	}
+	if profile == nil {
+		return "", ErrAIProfileRequired
+	}
+	return strings.TrimSpace(profile.EmbeddingModel), nil
 }
 
 func (s *KnowledgeBaseService) Create(_ context.Context, userID int64, req CreateKnowledgeBaseRequest) (*KnowledgeBaseResponse, error) {
@@ -104,13 +131,9 @@ func (s *KnowledgeBaseService) Get(ctx context.Context, userID, knowledgeBaseID 
 		return nil, ErrKnowledgeBaseNotFound
 	}
 
-	profile, err := s.repos.AIProfile.FindDefaultByUserID(userID)
-	if err != nil {
+	embeddingModel, err := s.embeddingModel(userID)
+	if err != nil && !errors.Is(err, ErrAIProfileRequired) && !errors.Is(err, ErrHostedAIUnavailable) {
 		return nil, err
-	}
-	embeddingModel := ""
-	if profile != nil {
-		embeddingModel = profile.EmbeddingModel
 	}
 	memberTaskIDs, err := s.repos.KnowledgeBase.ListMemberTaskIDsForUser(userID, knowledgeBaseID)
 	if err != nil {
@@ -206,11 +229,11 @@ func (s *KnowledgeBaseService) AddVideo(ctx context.Context, userID, knowledgeBa
 	if kb == nil {
 		return ErrKnowledgeBaseNotFound
 	}
-	profile, err := s.repos.AIProfile.FindDefaultByUserID(userID)
+	embeddingModel, err := s.embeddingModel(userID)
 	if err != nil {
 		return err
 	}
-	if profile == nil || strings.TrimSpace(profile.EmbeddingModel) == "" {
+	if embeddingModel == "" {
 		return ErrKnowledgeBaseDefaultProfileRequired
 	}
 	task, err := s.repos.Task.FindByID(taskID)
@@ -223,7 +246,7 @@ func (s *KnowledgeBaseService) AddVideo(ctx context.Context, userID, knowledgeBa
 	if task.UserID != userID || task.DeletedAt.Valid {
 		return ErrKnowledgeBaseTaskNotFound
 	}
-	index, err := s.repos.RAGIndex.FindByTaskAndModel(userID, taskID, profile.EmbeddingModel)
+	index, err := s.repos.RAGIndex.FindByTaskAndModel(userID, taskID, embeddingModel)
 	if err != nil {
 		return err
 	}

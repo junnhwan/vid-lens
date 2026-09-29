@@ -12,6 +12,7 @@ import {
   type TimelineAtom,
   type VideoTask,
   type VideoTimeline,
+  type VisualMode,
 } from '@/lib/types'
 import { fmtRelTime, fmtDateTime, taskTitle } from '@/lib/format'
 import { formatTime } from '@/components/Citation'
@@ -32,6 +33,7 @@ import { useStudyPosition } from '@/lib/artifacts/useStudyPosition'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { canGenerateSummary, summaryRunning, summaryStatusText } from '@/lib/summaryState'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
+import './VideoWorkbench.css'
 
 // 视频工作台:播放器钉住 + 右栏时间轴/画面/索引。摘要走阅读弹窗。
 // 对应原型 #/video/:id。播放源用 /playback 签名 URL;时间轴/画面证据来自
@@ -46,6 +48,21 @@ type ConfirmAction = {
   title: string
   body: string
   confirmLabel: string
+}
+
+const visualChoices: { mode: VisualMode; title: string; description: string; icon: 'video' | 'scan' | 'photo' | 'layers' }[] = [
+  { mode: 'off', title: '关闭', description: '演讲、访谈或画面变化很少时，转写通常已经足够。', icon: 'video' },
+  { mode: 'ocr', title: '文字识别 OCR', description: '适合文字课件、笔记和清晰的板书，提取画面中的文字。', icon: 'scan' },
+  { mode: 'caption', title: '画面描述', description: '适合图表、流程图、示意图，调用视觉模型理解画面。', icon: 'photo' },
+  { mode: 'both', title: 'OCR + 画面描述', description: '适合文字与图表混合的课程，会增加处理量与模型调用。', icon: 'layers' },
+]
+
+function taskVisualMode(task: VideoTask): VisualMode {
+  return task.visual_mode || (task.visual_disabled ? 'off' : 'both')
+}
+
+function visualModeLabel(mode: VisualMode): string {
+  return visualChoices.find(choice => choice.mode === mode)?.title || '关闭'
 }
 
 function indexActionLabel(index: RAGIndexResult | null): string {
@@ -202,6 +219,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
   const [videoDurationMs, setVideoDurationMs] = useState(0)
   const [visualSettingBusy, setVisualSettingBusy] = useState(false)
+  const [visualBuildBusy, setVisualBuildBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
@@ -217,6 +235,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [busy, setBusy] = useState<ActionKind | ''>('')
   const [headSnap, setHeadSnap] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
+  const [questionsOpen, setQuestionsOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [visualSettingsOpen, setVisualSettingsOpen] = useState(false)
+  const [visualDraft, setVisualDraft] = useState<VisualMode>('off')
+  const [dialogInstant, setDialogInstant] = useState(false)
   const [railTip, setRailTip] = useState<{ left: number; text: string; timeMs: number } | null>(null)
   const liveRowRef = useRef<HTMLDivElement>(null)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -279,23 +302,25 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
   const generatingSummary = !!task && summaryRunning(task)
+  const visualProcessing = !!task && ['queued', 'running'].includes(task.visual_status)
   const readableArtifact = relatedArtifacts.data?.list.find(item => !!item.current_version_id)
   const pendingArtifact = relatedArtifacts.data?.list.find(item => !item.current_version_id && item.latest_run && (item.latest_run.status === 'pending' || item.latest_run.status === 'running'))
   const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
 
   // 处理中或等待摘要自动重试时轮询；重试调度会清除 next_retry_at 并重新入队。
   useEffect(() => {
-    if (!processing && !generatingSummary && !awaitingSummaryRetry) return
+    if (!processing && !generatingSummary && !awaitingSummaryRetry && !visualProcessing) return
     const iv = setInterval(() => {
       void (async () => {
         try {
           const fresh = await api.getTask(taskId)
+          const visualJustDone = ['queued', 'running'].includes(task?.visual_status || '') && !['queued', 'running'].includes(fresh.visual_status)
           const prev = prevTransRef.current
           prevTransRef.current = fresh.has_transcription
           setTask(fresh)
           const transJustDone = !prev && fresh.has_transcription
           const justCompleted = fresh.status === TaskStatusEnum.Completed
-          if (transJustDone || justCompleted) {
+          if (transJustDone || justCompleted || visualJustDone) {
             const [tl, idx] = await Promise.all([
               api.getTimeline(taskId).catch(() => null),
               api.getRagIndex(taskId).catch(() => null),
@@ -307,7 +332,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       })()
     }, 5000)
     return () => clearInterval(iv)
-  }, [processing, generatingSummary, awaitingSummaryRetry, taskId])
+  }, [processing, generatingSummary, awaitingSummaryRetry, visualProcessing, taskId, task?.visual_status])
 
   useEffect(() => {
     if (!processing && busy !== 'index' && index?.status !== 'indexing' && index?.status !== 'queued') return
@@ -436,12 +461,33 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     await runAction(kind, force)
   }
 
-  const setVisualDisabled = async (disabled: boolean) => {
+  const openVisualSettings = (event?: { detail: number }) => {
+    if (!task) return
+    setDialogInstant(event?.detail === 0)
+    setVisualDraft(taskVisualMode(task))
+    setVisualSettingsOpen(true)
+  }
+
+  const saveVisualMode = async (build = false) => {
     if (!task || visualSettingBusy) return
     setVisualSettingBusy(true)
     try {
-      setTask(await api.setTaskVisualDisabled(task.id, disabled))
-      toast.success(disabled ? '已关闭此视频后续画面证据生成' : '已开启此视频后续画面证据生成')
+      const fresh = await api.setVisualMode(task.id, visualDraft)
+      setTask(fresh)
+      if (build) {
+        setVisualBuildBusy(true)
+        try {
+          await api.buildVisual(task.id)
+          const next = await api.getTask(task.id).catch(() => null)
+          setTask(next ? { ...next, visual_status: ['queued', 'running'].includes(next.visual_status) ? next.visual_status : 'queued' } : { ...fresh, visual_status: 'queued' })
+          toast.success('画面证据已加入处理队列')
+        } finally {
+          setVisualBuildBusy(false)
+        }
+      } else {
+        toast.success(visualDraft === 'off' ? '已关闭后续画面分析' : `已保存：${visualModeLabel(visualDraft)}`)
+      }
+      setVisualSettingsOpen(false)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : '画面证据设置保存失败')
     } finally {
@@ -580,13 +626,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       coverage.evidence_last_ms + Math.max(60_000, coverage.largest_gap_ms * 1.5) < videoDurationMs
     return (
       <>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
-          <input type="checkbox" checked={!task.visual_disabled} disabled={readOnly || processing || visualSettingBusy} onChange={e => void setVisualDisabled(!e.target.checked)} />
-          后续生成画面证据
-        </label>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-          关闭后，下次转写会跳过抽帧、OCR 和画面描述，后续问答也不会按需抽帧；转写与摘要照常进行。已有画面证据和检索索引保留，重建索引仍会纳入已有画面文字。开启后需再次转写才会重新生成，不会立即补做；成功生成的新帧会替换旧视觉记录，索引会提示重建。{processing ? '当前任务结束后可修改。' : ''}
-        </p>
+        <div className="workbench-visual-summary">
+          <div><span className="workbench-eyebrow">画面分析</span><strong>{visualModeLabel(taskVisualMode(task))}</strong></div>
+          <button className="btn btn-sm" onClick={openVisualSettings}><Icon name="settings" size="sm" />设置</button>
+        </div>
+        <p className="workbench-visual-hint">按内容选择 OCR 或画面描述。演讲、访谈通常无需启用；已有画面证据会保留。</p>
         {coverage ? <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 10 }} role="status">
           已保存采样帧 {coverage.sampled_frames} 张，其中 {coverage.evidence_frames} 张生成了 OCR 或描述、{coverage.preview_frames} 张有预览。
           采样时间 {formatTime(coverage.first_ms)}–{formatTime(coverage.last_ms)}{videoDurationMs > 0 ? ` / 视频总长 ${formatTime(videoDurationMs)}` : '；视频总长待加载'}。
@@ -670,7 +714,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   return (
-    <div className="page-fill">
+    <div className="page-fill video-workbench">
       {artifactMode && <ArtifactCreateDialog source={{ id: task.id, title }} existing={artifactMode === 'reorganize' && readableArtifact ? { id: readableArtifact.id, title: readableArtifact.title, head_version: readableArtifact.head_version } : undefined} onClose={() => { setArtifactMode(null); void relatedArtifacts.refetch() }} />}
       <div className="ws">
         <div className="ws-stage">
@@ -727,6 +771,28 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
+          <section className="workbench-commands" aria-label="视频学习操作">
+            <div className="workbench-primary">
+              <button className="btn btn-primary workbench-chat-action" onClick={() => router.push(`/chat/v/${task.id}`)}><Icon name="message" size="sm" />进入问答<Icon name="chev-r" size="sm" /></button>
+              {readableArtifact ? <Link className="btn" href={`/artifacts/${encodeURIComponent(readableArtifact.id)}`}><Icon name="file" size="sm" />阅读学习笔记</Link> : !task.has_transcription && !readOnly ? <button className="btn" disabled={busy !== '' || processing} onClick={() => void runAction('transcribe')}><Icon name="activity" size="sm" />{processing ? '转写处理中' : '开始转写'}</button> : pendingArtifact ? <Link className="btn" href={`/tasks?run=${encodeURIComponent(pendingArtifact.latest_run!.id)}`}><Icon name="clock" size="sm" />查看笔记进度</Link> : <button className="btn" disabled={readOnly || !task.has_transcription || relatedArtifacts.isPending || !!relatedArtifacts.error} onClick={() => setArtifactMode('new')}><Icon name="wand" size="sm" />新建学习笔记</button>}
+              {task.has_summary ? (
+                <button className="btn" onClick={() => setSummaryOpen(true)}><Icon name="eye" size="sm" />查看摘要</button>
+              ) : (
+                <button
+                  className={`btn${busy === 'analyze' ? ' is-loading' : ''}`}
+                  aria-busy={busy === 'analyze' || undefined}
+                  disabled={busy !== '' || !canGenerateSummary(task)}
+                  title={!task.has_transcription ? '转写完成后才能生成摘要' : generatingSummary ? '摘要正在生成，请勿重复提交' : !canGenerateSummary(task) ? '等待本次转写完成或摘要重试结束' : undefined}
+                  onClick={() => void runAction('analyze')}
+                ><Icon name="file" size="sm" />{busy === 'analyze' ? '提交中…' : generatingSummary ? summaryStatusText(task) : '生成摘要'}</button>
+              )}
+            </div>
+            <div className="workbench-secondary">
+              <button type="button" onClick={event => { setDialogInstant(event.detail === 0); setQuestionsOpen(true) }}><Icon name="bulb" size="sm" />推荐问题</button>
+              <button type="button" onClick={openVisualSettings}><Icon name="photo" size="sm" />画面分析<span className="workbench-mode">{visualModeLabel(taskVisualMode(task))}</span></button>
+              <button type="button" className="workbench-more" onClick={event => { setDialogInstant(event.detail === 0); setMoreOpen(true) }}><Icon name="settings" size="sm" />更多操作<Icon name="chev-r" size="sm" /></button>
+            </div>
+          </section>
           <div className="ws-stage-scroll">
             {processing && (
               <div style={{ marginTop: 12, flex: 'none' }}>
@@ -734,74 +800,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               </div>
             )}
             {(task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
-            {(task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe') && <VisualProgressPanel task={task} />}
+            {(visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel task={task} />}
             {processing && canGenerateSummary(task) && <p className="muted" role="status">转写已保存，可以生成摘要；画面分析和检索索引会继续处理。</p>}
             {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
 
             {relatedArtifacts.error && <div className="artifact-notice danger" role="alert">相关笔记读取失败：{artifactError(relatedArtifacts.error)}<button className="btn btn-sm" onClick={() => void relatedArtifacts.refetch()}>重试</button></div>}
-            <div className="ws-actions">
-              <div className="ws-actions-primary">
-                {readableArtifact ? <Link className="btn btn-primary" href={`/artifacts/${encodeURIComponent(readableArtifact.id)}`}><Icon name="file" size="sm" />阅读学习笔记</Link> : processing ? <button className="btn btn-primary" disabled><Icon name="activity" size="sm" />视频处理中</button> : !task.has_transcription && !readOnly ? <button className="btn btn-primary" disabled={busy !== ''} onClick={() => void runAction('transcribe')}><Icon name="activity" size="sm" />先完成转写</button> : pendingArtifact ? <Link className="btn btn-primary" href={`/tasks?run=${encodeURIComponent(pendingArtifact.latest_run!.id)}`}><Icon name="clock" size="sm" />查看笔记进度</Link> : <button className="btn btn-primary" disabled={readOnly || !task.has_transcription || relatedArtifacts.isPending || !!relatedArtifacts.error} onClick={() => setArtifactMode('new')}><Icon name="wand" size="sm" />新建学习笔记</button>}
-                <span className="ws-actions-spacer" />
-                <button className="btn btn-primary" onClick={() => router.push(`/chat/v/${task.id}`)}>
-                  <Icon name="message" size="sm" />进入问答
-                </button>
-              </div>
-              <div className="ws-actions-tools">
-                <div className="ws-tool-group" role="group" aria-label="学习笔记">
-                  <span className="ws-tool-label">笔记</span>
-                  {readableArtifact && <button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('new')}><Icon name="plus" size="sm" />新建另一份</button>}
-                  {readableArtifact && <button className="btn" disabled={readOnly || processing || !task.has_transcription} onClick={() => setArtifactMode('reorganize')}><Icon name="sort" size="sm" />重新整理这份</button>}
-                  <Link className="btn" href={`/artifacts?source=${task.id}`}><Icon name="list" size="sm" />相关成果</Link>
-                </div>
-                <div className="ws-tool-group" role="group" aria-label="内容处理">
-                  <span className="ws-tool-label">处理</span>
-                  {task.has_summary ? (
-                    <button className="btn" onClick={() => setSummaryOpen(true)}>
-                      <Icon name="eye" size="sm" />查看摘要
-                    </button>
-                  ) : (
-                    <button
-                      className={`btn${busy === 'analyze' ? ' is-loading' : ''}`}
-                      aria-busy={busy === 'analyze' || undefined}
-                      disabled={busy !== '' || !canGenerateSummary(task)}
-                      title={!task.has_transcription ? '转写完成后才能生成摘要' : generatingSummary ? '摘要正在生成，请勿重复提交' : !canGenerateSummary(task) ? '等待本次转写完成或摘要重试结束' : undefined}
-                      onClick={() => void runAction('analyze')}
-                    >
-                      <Icon name="wand" size="sm" />{busy === 'analyze' ? '已加入队列…' : generatingSummary ? summaryStatusText(task) : '生成摘要'}
-                    </button>
-                  )}
-                  {task.has_transcription ? (
-                    <button className="btn" disabled={busy !== ''} onClick={() => setPendingAction({
-                      kind: 'transcribe',
-                      force: true,
-                      title: '重新转写?',
-                      body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。',
-                      confirmLabel: '重新转写',
-                    })}>
-                      <Icon name="refresh" size="sm" />重新转写
-                    </button>
-                  ) : processing ? (
-                    <button className="btn" disabled>
-                      <Icon name="activity" size="sm" />等待转写
-                    </button>
-                  ) : null}
-                  <button className="btn" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => index && setPendingAction(indexConfirm(index))}>
-                    <Icon name="layers" size="sm" />{indexActionLabel(index)}
-                  </button>
-                </div>
-                <div className="ws-tool-group" role="group" aria-label="导出与连接">
-                  <span className="ws-tool-label">导出</span>
-                  <button className="btn" disabled={busy !== ''} onClick={() => void downloadAudio()}>
-                    <Icon name="download" size="sm" />下载音频
-                  </button>
-                  <button className="btn" disabled={readOnly} title={readOnly ? '演示账号不可修改知识库' : undefined} onClick={() => setKbOpen(true)}>
-                    <Icon name="folder" size="sm" />加入知识库
-                  </button>
-                </div>
-              </div>
-            </div>
-            <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
             {((!task.has_summary && generatingSummary) || (!task.has_summary && task.summary_progress)) && (
               <div className="ws-action-status">
                 {!task.has_summary && generatingSummary && (
@@ -872,6 +875,64 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           </div>
         </div>
       </div>
+      {questionsOpen && (
+        <Modal title="从这些问题开始" className={`workbench-dialog workbench-questions-dialog${dialogInstant ? ' workbench-instant' : ''}`} width={640} onClose={() => setQuestionsOpen(false)}>
+          <VideoQuestionsPanel taskId={task.id} revision={task.updated_at} />
+        </Modal>
+      )}
+      {visualSettingsOpen && (
+        <Modal
+          title="选择画面分析方式"
+          className={`workbench-dialog workbench-visual-dialog${dialogInstant ? ' workbench-instant' : ''}`}
+          width={580}
+          onClose={() => { if (!visualSettingBusy) setVisualSettingsOpen(false) }}
+          footer={(
+            <>
+              <button className="btn" disabled={readOnly || processing || visualProcessing || visualSettingBusy} onClick={() => void saveVisualMode()}>{visualSettingBusy && !visualBuildBusy ? '保存中…' : '保存设置'}</button>
+              {visualDraft !== 'off' && task.has_transcription && <button className="btn btn-primary" disabled={readOnly || processing || visualProcessing || visualSettingBusy} onClick={() => void saveVisualMode(true)}><Icon name="photo" size="sm" />{visualSettingBusy ? '提交中…' : frames.length ? '保存并重建画面' : '保存并生成画面'}</button>}
+            </>
+          )}
+        >
+          <p className="workbench-dialog-intro">补充视频声音之外的信息。按画面内容选择，转写和摘要始终可以单独使用。</p>
+          <fieldset className="workbench-visual-choices" disabled={readOnly || processing || visualProcessing || visualSettingBusy}>
+            <legend className="workbench-sr-only">画面分析方式</legend>
+            {visualChoices.map(choice => (
+              <label key={choice.mode} className={`workbench-visual-choice${visualDraft === choice.mode ? ' selected' : ''}`}>
+                <input type="radio" name="visual-mode" value={choice.mode} checked={visualDraft === choice.mode} onChange={() => setVisualDraft(choice.mode)} />
+                <span className="workbench-choice-icon"><Icon name={choice.icon} /></span>
+                <span className="workbench-choice-copy"><strong>{choice.title}{choice.mode === 'off' && <small>默认</small>}</strong><span>{choice.description}</span></span>
+                <span className="workbench-choice-check" aria-hidden="true"><Icon name="check" size="sm" /></span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="workbench-visual-note">
+            <Icon name="bulb" size="sm" />
+            <p>{processing || visualProcessing ? '当前视频正在处理，完成后可修改画面设置。' : readOnly ? '演示账号可以查看设置，无法修改。' : '保存设置会用于下次转写及问答。已有证据会保留；生成或重建画面会单独处理视频并更新索引，无需再次转写。'}{!processing && !visualProcessing && visualDraft !== 'off' && !task.has_transcription ? '请先完成转写，再生成画面证据。' : ''}</p>
+          </div>
+        </Modal>
+      )}
+      {moreOpen && (
+        <Modal title="更多视频操作" className={`workbench-dialog${dialogInstant ? ' workbench-instant' : ''}`} width={520} onClose={() => setMoreOpen(false)}>
+          <section className="workbench-more-group" aria-label="学习笔记与成果">
+            <h4>学习笔记与成果</h4>
+            {readableArtifact && <button className="workbench-operation" disabled={readOnly || processing || !task.has_transcription} onClick={() => { setMoreOpen(false); setArtifactMode('new') }}><Icon name="plus" /><span><strong>新建另一份学习笔记</strong><small>为这段视频整理不同主题的笔记</small></span><Icon name="chev-r" size="sm" /></button>}
+            {readableArtifact && <button className="workbench-operation" disabled={readOnly || processing || !task.has_transcription} onClick={() => { setMoreOpen(false); setArtifactMode('reorganize') }}><Icon name="sort" /><span><strong>重新整理这份笔记</strong><small>保留已有版本，生成新的整理结果</small></span><Icon name="chev-r" size="sm" /></button>}
+            <Link className="workbench-operation" href={`/artifacts?source=${task.id}`}><Icon name="list" /><span><strong>相关成果</strong><small>查看来自这段视频的笔记与产出</small></span><Icon name="chev-r" size="sm" /></Link>
+          </section>
+          <section className="workbench-more-group" aria-label="内容处理">
+            <h4>内容处理</h4>
+            {task.has_transcription ? (
+              <button className="workbench-operation" disabled={busy !== '' || processing} onClick={() => { setMoreOpen(false); setPendingAction({ kind: 'transcribe', force: true, title: '重新转写？', body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。', confirmLabel: '重新转写' }) }}><Icon name="refresh" /><span><strong>重新转写</strong><small>重新识别视频音频，更新转写内容</small></span><Icon name="chev-r" size="sm" /></button>
+            ) : <button className="workbench-operation" disabled={readOnly || busy !== '' || processing} onClick={() => { setMoreOpen(false); void runAction('transcribe') }}><Icon name="activity" /><span><strong>{processing ? '转写处理中' : '开始转写'}</strong><small>将视频声音转换为可检索的文字</small></span><Icon name="chev-r" size="sm" /></button>}
+            <button className="workbench-operation" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => { if (index) { setMoreOpen(false); setPendingAction(indexConfirm(index)) } }}><Icon name="layers" /><span><strong>{indexActionLabel(index)}</strong><small>更新视频问答使用的内容检索索引</small></span><Icon name="chev-r" size="sm" /></button>
+          </section>
+          <section className="workbench-more-group" aria-label="导出与知识库">
+            <h4>导出与知识库</h4>
+            <button className="workbench-operation" disabled={busy !== ''} onClick={() => { setMoreOpen(false); void downloadAudio() }}><Icon name="download" /><span><strong>下载音频</strong><small>保存视频提取的音频文件</small></span><Icon name="chev-r" size="sm" /></button>
+            <button className="workbench-operation" disabled={readOnly} onClick={() => { setMoreOpen(false); setKbOpen(true) }}><Icon name="folder" /><span><strong>加入知识库</strong><small>和其他视频一起检索与问答</small></span><Icon name="chev-r" size="sm" /></button>
+          </section>
+        </Modal>
+      )}
       {summaryOpen && task.summary && (
         <Modal title="AI 摘要" className="modal-read" onClose={() => setSummaryOpen(false)}>
           <SummaryRevisionPanel taskId={task.id} readOnly={readOnly} onChanged={async () => { setTask(await api.getTask(task.id)) }} />

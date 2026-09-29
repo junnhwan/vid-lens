@@ -7,6 +7,18 @@ const optionalFields = ['vision_provider', 'vision_base_url', 'vision_model'] as
 
 type TransferProfile = Omit<AIProfileRequest, 'llm_api_key' | 'asr_api_key' | 'embedding_api_key' | 'vision_api_key'>
 
+export const PROFILE_IMPORT_TEMPLATE = JSON.stringify({
+  format: PROFILE_EXPORT_FORMAT,
+  version: 1,
+  profile: {
+    name: '我的 AI 配置',
+    llm_provider: 'openai', llm_base_url: 'https://ai.example.com/v1', llm_model: 'your-chat-model', llm_context_tokens: 0,
+    asr_provider: 'openai', asr_base_url: 'https://ai.example.com/v1', asr_model: 'your-asr-model',
+    embedding_provider: 'openai', embedding_endpoint: 'https://ai.example.com/v1/embeddings', embedding_model: 'your-embedding-model', embedding_dim: 1024,
+    is_default: false,
+  } satisfies TransferProfile,
+}, null, 2) + '\n'
+
 export function exportProfile(profile: AIProfile): string {
   const value: TransferProfile = {
     name: profile.name,
@@ -63,6 +75,6 @@ export function parseProfileImport(text: string): { profile: TransferProfile; ig
     embedding_dim: p.embedding_dim as number, vision_provider: vision[0], vision_base_url: vision[1], vision_model: vision[2],
     agent_budget: p.agent_budget as TransferProfile['agent_budget'] || null, is_default: false,
   }
-  const ignoredSecrets = Object.keys(p).some(key => /(?:api_key|secret|token|password)/i.test(key))
+  const ignoredSecrets = Object.keys(p).some(key => key !== 'llm_context_tokens' && /(?:api_key|secret|token|password)/i.test(key))
   return { profile, ignoredSecrets }
 }

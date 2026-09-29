@@ -151,12 +151,30 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
     >
           <div className="seg" style={{ marginBottom: 14 }}>
             <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>本地文件</button>
-            <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放，当前服务不稳定' : undefined} onClick={() => setTab('url')}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
+            <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放' : undefined} onClick={() => setTab('url')}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
           </div>
-          <p className="muted" style={{ fontSize:12,marginBottom:12 }}>本地文件在上传及合并完成前请保持页面打开；服务器返回视频任务后可以离页，后续转写和画面处理由服务器继续。{urlImportEnabled === true ? '视频链接创建下载任务并获服务器受理后，也可以离页。' : '链接导入暂未开放（服务不稳定），请使用本地文件上传。'}</p>
+          <p className="muted upload-helper">{tab === 'file' ? '文件上传及合并完成前，请保持页面打开。上传完成后可在视频详情中开始转写。' : '粘贴 B 站视频链接或 b23.tv 分享链接，服务器会下载视频。任务创建后可以离开页面，下载完成后再开始转写。'}</p>
 
           {tab === 'file' ? (
             <div>
+              <aside className="upload-guidance" aria-label="视频导入建议">
+                <div className="upload-guidance-row upload-guidance-online">
+                  <span className="upload-guidance-icon"><Icon name="clock" /></span>
+                  <div className="upload-guidance-copy">
+                    <h4>线上文件上传较慢</h4>
+                    <p>受服务器配置限制，在线文件上传速度很慢，不建议使用。B 站视频建议优先通过链接导入。</p>
+                    {urlImportEnabled === true && <button className="btn btn-sm btn-primary" onClick={() => setTab('url')}><Icon name="link" />使用 B 站链接</button>}
+                  </div>
+                </div>
+                <div className="upload-guidance-row">
+                  <span className="upload-guidance-icon"><Icon name="folder" /></span>
+                  <div className="upload-guidance-copy">
+                    <h4>自己的视频，推荐本地部署</h4>
+                    <p>需要上传电脑里的视频？可以克隆 VidLens 仓库，在自己的电脑部署后使用文件上传，避免受到线上上传速度限制。</p>
+                    <a className="upload-guidance-link" href="https://github.com/junnhwan/vid-lens#技术栈与启动" target="_blank" rel="noopener noreferrer">查看仓库与部署说明<Icon name="chev-r" /></a>
+                  </div>
+                </div>
+              </aside>
               <div
                 className={`dropzone${dragOver ? ' over' : ''}`}
                 onClick={() => fileRef.current?.click()}
@@ -197,13 +215,13 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
             </div>
           ) : (
             <div>
-              <label className="field-label">视频页面链接</label>
+              <label className="field-label">B 站视频链接</label>
               <input
                 className="input"
                 value={url}
                 onChange={e => setUrl(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !urlBusy) void uploadUrl() }}
-                placeholder="https://www.bilibili.com/video/… 或可下载地址"
+                placeholder="https://www.bilibili.com/video/… 或 https://b23.tv/…"
                 autoFocus
               />
               <button className={`btn btn-primary${urlBusy ? ' is-loading' : ''}`} aria-busy={urlBusy || undefined} style={{ marginTop: 12 }} disabled={urlBusy} onClick={() => void uploadUrl()}>

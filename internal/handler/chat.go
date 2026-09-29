@@ -15,6 +15,37 @@ import (
 type ChatHandler struct {
 	chatSvc   *service.ChatService
 	execution conversationExecutor
+	questions *service.QuestionSuggestionService
+}
+
+func (h *ChatHandler) WithQuestionSuggestions(questions *service.QuestionSuggestionService) *ChatHandler {
+	h.questions = questions
+	return h
+}
+
+func (h *ChatHandler) FollowUpQuestions(c *gin.Context) {
+	sessionID, err := strconv.ParseInt(c.Param("session_id"), 10, 64)
+	if err != nil || sessionID <= 0 {
+		response.BadRequest(c, "会话 ID 错误")
+		return
+	}
+	var req struct {
+		MessageID int64 `json:"message_id" binding:"required,gt=0"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请指定已保存的回答")
+		return
+	}
+	if h.questions == nil {
+		response.OK(c, service.VideoQuestionResult{Status: "no_answer", Questions: []service.VideoQuestion{}, MessageID: req.MessageID})
+		return
+	}
+	result, err := h.questions.FollowUpQuestions(c.Request.Context(), middleware.GetUserID(c), sessionID, req.MessageID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.OK(c, result)
 }
 
 type conversationExecutor interface {

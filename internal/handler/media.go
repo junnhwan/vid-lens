@@ -18,7 +18,13 @@ import (
 
 type MediaHandler struct {
 	svc               *service.MediaService
+	questions         *service.QuestionSuggestionService
 	urlImportDisabled bool
+}
+
+func (h *MediaHandler) WithQuestionSuggestions(questions *service.QuestionSuggestionService) *MediaHandler {
+	h.questions = questions
+	return h
 }
 
 func (h *MediaHandler) WithURLImportDisabled(disabled bool) *MediaHandler {
@@ -37,7 +43,12 @@ func (h *MediaHandler) VideoQuestions(c *gin.Context) {
 		response.BadRequest(c, "视频 ID 错误")
 		return
 	}
-	result, err := h.svc.VideoQuestions(middleware.GetUserID(c), taskID)
+	var result service.VideoQuestionResult
+	if h.questions != nil {
+		result, err = h.questions.VideoQuestions(c.Request.Context(), middleware.GetUserID(c), taskID, c.Request.Method == http.MethodPost)
+	} else {
+		result, err = h.svc.VideoQuestions(middleware.GetUserID(c), taskID)
+	}
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -265,18 +276,42 @@ func (h *MediaHandler) SetTaskVisualDisabled(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Disabled *bool `json:"disabled" binding:"required"`
+		Disabled *bool  `json:"disabled"`
+		Mode     string `json:"mode"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Disabled == nil {
-		response.BadRequest(c, "请提供 disabled 布尔值")
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Disabled == nil && req.Mode == "") {
+		response.BadRequest(c, "请选择画面模式")
 		return
 	}
-	task, err := h.svc.SetTaskVisualDisabled(c.Request.Context(), middleware.GetUserID(c), taskID, *req.Disabled)
+	mode := req.Mode
+	if mode == "" {
+		mode = model.VisualModeBoth
+		if *req.Disabled {
+			mode = model.VisualModeOff
+		}
+	}
+	task, err := h.svc.SetTaskVisualMode(c.Request.Context(), middleware.GetUserID(c), taskID, mode)
 	if err != nil {
 		response.Fail(c, http.StatusConflict, err.Error())
 		return
 	}
 	response.OK(c, task)
+}
+
+func (h *MediaHandler) RequestVisualBuild(c *gin.Context) {
+	if denyIfDemo(c, "构建画面证据") {
+		return
+	}
+	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.BadRequest(c, "视频编号无效")
+		return
+	}
+	if err := h.svc.RequestVisualBuild(c.Request.Context(), middleware.GetUserID(c), taskID); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OKWithMsg(c, "画面证据构建已排队", gin.H{"task_id": taskID})
 }
 
 // GET /api/v1/media/task/:id/transcription-progress

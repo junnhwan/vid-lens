@@ -8,11 +8,13 @@
 .chevOpen { transform: rotate(90deg); }
 .indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--acc-strong); flex-shrink: 0; }
 .live { animation: breathe 1.6s ease-in-out infinite; }
-.body { padding: 0 16px 14px; border-top: 1px solid var(--line); }
+.body { padding: 0 16px 14px; border-top: 1px solid var(--line); opacity: 1; transform: none; transition: opacity 160ms var(--ease), transform 200ms var(--ease), display 160ms allow-discrete; }
+.body[hidden] { display: none; opacity: 0; transform: translateY(-4px); }
+@starting-style { .body:not([hidden]) { opacity: 0; transform: translateY(-4px); } }
 .timeline { list-style: none; margin: 16px 0 0; padding: 0; }
-.step { position: relative; display: flex; gap: 12px; padding-bottom: 18px; }
+.step { position: relative; display: flex; gap: 12px; padding-bottom: 18px; animation: process-step-in 180ms var(--ease) both; }
 .step:not(:last-child)::before { content: ''; position: absolute; left: 8px; top: 18px; bottom: 0; border-left: 1px solid var(--line); }
-.dot { position: relative; margin-top: 1px; width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 10px; color: var(--tx-3); }
+.dot { position: relative; margin-top: 1px; width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 10px; color: var(--tx-3); transition: background 160ms var(--ease), border-color 160ms var(--ease), color 160ms var(--ease); }
 .running .dot { border-color: var(--acc-strong); background: var(--acc-dim); }
 .running .dot::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--acc-strong); animation: breathe 1.6s ease-in-out infinite; }
 .error .dot { color: var(--bad); border-color: var(--bad); }
@@ -33,5 +35,6 @@
 .tool code { display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--info); }
 p.error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 @keyframes breathe { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .live, .running .dot::after { animation: none; } }
+@keyframes process-step-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .live, .running .dot::after, .step { animation: none; } .body { transition: none; transform: none; } }
 @media (max-width: 640px) { .toggle { flex-wrap: wrap; } .summary { flex-basis: 65%; margin-left: 17px; order: 3; } .stepHeading { flex-wrap: wrap; gap: 4px; } }

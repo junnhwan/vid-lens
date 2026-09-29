@@ -197,6 +197,8 @@ export const api = {
   saveTermRule: (id: number, input: { expected_version: number; linked_operation_id?: string; from: string; to: string; context: string; exclusions: string[]; transcript_evidence_id?: string; visual_evidence_id?: string }) => req<VideoTermRuleSet>(`/media/task/${id}/term-rules`, 'PUT', input),
   disableTermRule: (id: number, ruleId: string, expectedVersion: number) => req<VideoTermRuleSet>(`/media/task/${id}/term-rules/${encodeURIComponent(ruleId)}/disable`, 'POST', { expected_version: expectedVersion }),
   setTaskVisualDisabled: (id: number, disabled: boolean) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { disabled }),
+  setVisualMode: (id: number, mode: import('./types').VisualMode) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { mode }),
+  buildVisual: (id: number) => req<{ task_id: number }>(`/media/task/${id}/visual-build`, 'POST'),
   getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
   getVisualProgress: (id: number) => req<VisualProgress>(`/media/task/${id}/visual-progress`, 'GET'),
   updateTaskTitle: (id: number, title: string) =>
@@ -211,6 +213,8 @@ export const api = {
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),
   getRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET'),
   getVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'GET'),
+  generateVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'POST'),
+  getFollowUpQuestions: (sessionId: number, messageId: number) => req<import('./types').VideoQuestionResult>(`/chat/sessions/${sessionId}/follow-up-questions`, 'POST', { message_id: messageId }),
   triggerRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'POST'),
   downloadAudio: (id: number) =>
     req<{ download_url: string; filename: string }>(`/media/download-audio/${id}`, 'GET'),

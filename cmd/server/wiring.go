@@ -133,6 +133,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	knowledgeBaseSvc := service.NewKnowledgeBaseService(deps.repos)
 	aiProfileSvc := service.NewAIProfileService(deps.repos.AIProfile, secretCodec, &aiProfileTesterAdapter{tester: ai.NewProfileTester(aiFactory)}).WithAgentBudgetConfig(deps.cfg.AgentBudget).
 		WithHostedOwnerID(deps.cfg.Security.HostedAIOwnerID).WithHostedEmbeddingDimension(deps.cfg.RAG.EmbeddingDim)
+	knowledgeBaseSvc.WithAIProfiles(aiProfileSvc)
 	if err := service.EnsureDemoAccount(deps.repos.User, deps.repos.AIProfile, secretCodec, deps.cfg.AI, deps.cfg.RAG); err != nil {
 		log.Printf("⚠️ 演示账号初始化失败: %v", err)
 	}
@@ -142,6 +143,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		EmbeddingDim: deps.cfg.RAG.EmbeddingDim,
 	})
 	aiObserver := service.NewAIObserver(deps.repos)
+	questionSuggestionsSvc := service.NewQuestionSuggestionService(deps.repos, aiProfileSvc, aiFactory).WithAIRecorder(aiObserver)
 	ragIndexSvc.SetAIRecorder(aiObserver)
 
 	retrievalCfg := productionRetrievalConfig(deps.cfg.RAG)
@@ -277,7 +279,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	if lang := strings.TrimSpace(deps.cfg.Tools.OCRLang); lang != "" {
 		visualCfg.OCRLang = lang
 	}
-	// Visual index stays enabled: Vision BYOK and/or local OCR decide what runs.
+	// The service is available; each video explicitly opts into selected providers.
 	visualIndexSvc := service.NewVisualIndexService(deps.repos, deps.minioStorage, deps.cfg.Tools.FFmpegPath, visualCfg)
 	visionResolver := func(ctx context.Context, userID int64) (ai.VisionClient, error) {
 		profile, err := aiProfileSvc.GetDefaultAIProfile(userID)
@@ -306,7 +308,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	})
 	videoAgentSvc.SetVisualInvestigator(visualInvestigator)
 	conversationExecution := service.NewConversationExecution(chatSvc, videoAgentSvc, aiProfileSvc, aiFactory)
-	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution)
+	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution).WithQuestionSuggestions(questionSuggestionsSvc)
 	artifactSvc := service.NewArtifactService(deps.repos, aiProfileSvc, aiFactory)
 	summarySvc := service.NewSummaryRevisionService(deps.repos, aiProfileSvc, aiFactory)
 	return &serverApplication{
@@ -316,7 +318,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
 			chat:           chatHandler,
 			feedback:       handler.NewChatFeedbackHandler(deps.repos.Feedback),
-			media:          handler.NewMediaHandler(mediaSvc).WithURLImportDisabled(deps.cfg.Upload.DisableURLImport),
+			media:          handler.NewMediaHandler(mediaSvc).WithURLImportDisabled(deps.cfg.Upload.DisableURLImport).WithQuestionSuggestions(questionSuggestionsSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 			artifacts:      handler.NewArtifactHandler(artifactSvc),

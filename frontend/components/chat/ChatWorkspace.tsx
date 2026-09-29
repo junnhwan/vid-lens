@@ -3,7 +3,6 @@ import { useRouter } from '@/lib/router'
 import type { CiteRef } from '@/components/Citation'
 import { formatTimeRange, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
-import { AnswerFeedback } from '@/components/chat/AnswerFeedback'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -13,6 +12,7 @@ import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
+import { QuestionSuggestionsLoading } from '@/components/chat/QuestionSuggestionsLoading'
 import { EmptyState } from '@/components/ui/AsyncState'
 import { BrandMark } from '@/components/ui/BrandMark'
 import { DrawerVeil } from '@/components/ui/Modal'
@@ -28,6 +28,8 @@ import { formatDuration } from '@/lib/duration'
 import type { Citation, ChatScopeType, VideoChatMode, VideoQuestionResult } from '@/lib/types'
 import type { StudyBlock, Artifact, ArtifactDetail, AnswerPreview } from '@/lib/artifacts/schema'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
+import { FollowUpQuestions } from './FollowUpQuestions'
+import './ChatWorkspace.css'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
 // Agent steps come from live tool events; new Chat answers retain server-safe progress.
@@ -61,7 +63,7 @@ interface ChatWorkspaceProps {
   refreshPlaybackUrl?: () => Promise<string | null>
   suggestions: string[]
   videoQuestions?: VideoQuestionResult | null
-  refreshQuestions?: () => void
+  questionsLoading?: boolean
   studyBlock?: StudyBlock | null
   studyError?: string
   returnToStudy?: string
@@ -99,7 +101,7 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, refreshQuestions, studyBlock, studyError, returnToStudy }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const router = useRouter()
   const toast = useToast()
@@ -114,7 +116,10 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
-  const [railOpen, setRailOpen] = useState(false)
+  const [panelsInstant, setPanelsInstant] = useState(false)
+  const [railOpen, setRailOpen] = useState(() => {
+    try { if (!window.matchMedia?.('(min-width: 1301px)').matches) return false; const saved = localStorage.getItem('vidlens-chat-rail'); return saved == null || saved === 'open' } catch { return false }
+  })
   const [activeQuestion, setActiveQuestion] = useState(0)
   const [questionsOpen, setQuestionsOpen] = useState(false)
   const [askTall, setAskTall] = useState(false)
@@ -149,6 +154,10 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
 
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
   const lastAssistant = lastMessage && lastMessage.role === 'assistant' ? lastMessage : null
+  const toggleRail = (event: { detail: number }) => { setPanelsInstant(event.detail === 0); setRailOpen(open => {
+    try { localStorage.setItem('vidlens-chat-rail', open ? 'closed' : 'open') } catch { /* Private browsing can deny storage. */ }
+    return !open
+  }) }
   const contextKey = useRef('')
   useEffect(() => {
     if (!studyBlock || !returnToStudy || contextKey.current === returnToStudy) return
@@ -296,7 +305,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const jumpToCitation = useCallback((cite: CiteRef) => {
     if (isVideo) {
       playerRef.current?.seek(cite.startMS || 0, true, cite.id)
-      if (window.matchMedia('(max-width: 1080px)').matches) setRailOpen(true)
+      setRailOpen(true)
     } else if (cite.taskId) {
       // 知识库范围没有统一的迷你播放器:跳到该片段所属视频的工作台
       router.push(replayLink(cite.taskId, cite.startMS, cite.timeRangeStatus))
@@ -320,17 +329,21 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   }, [agentTrace, streaming, lastAssistant])
 
   return (
-    <div className="chat-wrap">
-      <nav className={`question-nav${questionsOpen ? ' open' : ''}`} aria-label="历史问题导航">
-        <div className="question-nav-head"><b>本次问题</b><span>{questions.length}</span><button type="button" className="question-nav-close" onClick={() => setQuestionsOpen(false)} aria-label="关闭问题目录">关闭</button></div>
+    <div className={`chat-wrap${questionsOpen ? ' questions-expanded' : ''}${railOpen ? ' rail-expanded' : ''}${panelsInstant ? ' panels-instant' : ''}`}>
+      <nav id="chat-question-nav" className={`question-nav${questionsOpen ? ' open' : ''}`} aria-label="历史问题导航">
+        <div className="question-nav-head"><b>本次问题</b><span>{questions.length}</span><button type="button" className="question-nav-close" onClick={() => setQuestionsOpen(false)} aria-label="收起问题目录"><Icon name="chev-l" size="sm" /></button></div>
         {questions.length ? questions.map(({ message, index }, position) => <button key={`${session?.id ?? 'new'}-${message.messageId ?? index}`} type="button" className={activeQuestion === index ? 'active' : ''} aria-current={activeQuestion === index ? 'location' : undefined} onClick={() => {
           questionRefs.current[index]?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
           setActiveQuestion(index)
-          setQuestionsOpen(false)
+          if (window.matchMedia?.('(max-width: 1080px)').matches) setQuestionsOpen(false)
         }}><span>{position + 1}</span><span>{clipText(message.content, 70)}</span></button>) : <p>提问后，这里会列出问题。</p>}
       </nav>
       <div className="chat-col">
-        <div className="chat-scope-bar"><b>{scopeType === 'video' ? '单视频问答' : scopeType === 'video_library' ? '视频库问答' : '知识库问答'}</b><span>{scopeName}</span><button type="button" onClick={() => setQuestionsOpen(v => !v)} aria-expanded={questionsOpen}>问题目录 · {questions.length}</button></div>
+        <div className="chat-scope-bar">
+          <button type="button" className={`chat-panel-button${questionsOpen ? ' selected' : ''}`} onClick={event => { setPanelsInstant(event.detail === 0); setQuestionsOpen(v => !v) }} aria-expanded={questionsOpen} aria-controls="chat-question-nav" aria-label="问题目录"><Icon name="list" size="sm" /><span>问题</span><small>{questions.length}</small></button>
+          <div className="chat-scope-name"><b>{scopeType === 'video' ? '单视频问答' : scopeType === 'video_library' ? '视频库问答' : '知识库问答'}</b><span>{scopeName}</span></div>
+          <button type="button" className={`chat-panel-button${railOpen ? ' selected' : ''}`} onClick={toggleRail} aria-expanded={railOpen} aria-controls="chat-context-rail" aria-label="视频与执行过程"><Icon name={isVideo ? 'video' : 'target'} size="sm" /><span>{isVideo ? '视频与过程' : '执行过程'}</span><Icon name={railOpen ? 'chev-r' : 'chev-l'} size="sm" /></button>
+        </div>
         {returnToStudy && <div className="artifact-notice">{studyError ? `笔记段落读取失败：${studyError}` : studyBlock ? `正在讨论已保存段落「${studyBlock.title}」；人工笔记需依据原视频核对。` : '正在读取已保存段落…'}<button className="btn btn-sm" onClick={() => router.push(returnToStudy)}>返回笔记位置</button></div>}
         {knowledgeBase && <KnowledgeSources kb={knowledgeBase} hitIds={new Set([...(lastAssistant?.cites || []).map(c=>c.taskId || 0), ...agentTrace.steps.flatMap(s=>(s.hitRows || []).map(h=>h.task_id || 0))])} />}
         <div className="chat-scroll" ref={scrollRef} onScroll={event => {
@@ -345,7 +358,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                   <h2>{isVideo ? '问这段视频' : scopeType === 'video_library' ? '问整个视频库' : `问「${scopeName}」`}</h2>
                 </div>
                 {!isVideo && <><p className={knowledgeStyles.intro}>{scopeType === 'video_library' ? '仅检索你的视频库中已用当前向量模型建好索引的视频。' : '仅检索当前知识库的成员视频。'}</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);if(scopeType !== 'video_library')setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
-                {isVideo && <div className="video-question-intro"><p>{videoQuestions?.message || '正在读取视频内容推荐问题…'} {refreshQuestions && <button type="button" className="question-refresh" onClick={refreshQuestions}>刷新</button>}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</div>}
+                {isVideo && <div className="video-question-intro" aria-busy={questionsLoading}>{questionsLoading ? <QuestionSuggestionsLoading /> : <><p>{videoQuestions?.message || '从视频内容开始，试着问一个问题。'}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</>}</div>}
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
@@ -360,6 +373,9 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     msg={msg}
                     sessionId={session?.id}
                     fallbackTitle={scopeName}
+                    showVideoTitle={!isVideo}
+                    followUpSessionId={msg === lastAssistant && !streaming ? session?.id : undefined}
+                    onFollowUp={submit}
                     onOpenEvidence={openEvidence}
                     canJump={citationJumpable}
                     onJump={jumpToCitation}
@@ -434,16 +450,9 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               >
                 <Icon name="plus" />
               </button>
-              <button
-                type="button"
-                className="meta-link chat-rail-toggle"
-                onClick={() => setRailOpen(true)}
-              >
-                <Icon name="list" size="sm" />过程
-              </button>
             </div>
             </div>
-            <p className="mode-note">{scopeType === 'video_library' ? '范围：整个视频库中已建立索引的视频' : scopeType === 'knowledge_base' ? `范围：知识库「${scopeName}」的成员视频` : MODE_NOTE[mode]} · 模式和当前默认 AI 配置从发送的下一轮起生效；历史回答保留当轮实际模型与配置。</p>
+            <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：已建立索引的视频库' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : MODE_NOTE[mode]}</p>
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
@@ -458,19 +467,16 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 <Icon name="send" />
               </button>
             </div>
-            {isVideo && videoQuestions?.questions.length ? <div className="suggest-row" style={{ marginTop: 2 }}>
-              {videoQuestions.questions.map(item => <button key={item.question} className="suggest" disabled={streaming} onClick={() => submit(item.question)}>{item.question}</button>)}
-            </div> : null}
           </div>
         </div>
       </div>
 
-      {railOpen && <div className="chat-rail-veil"><DrawerVeil onClose={() => setRailOpen(false)} /></div>}
+      {(railOpen || questionsOpen) && <div className="chat-rail-veil"><DrawerVeil onClose={() => { setRailOpen(false); setQuestionsOpen(false) }} /></div>}
 
-      <aside className={`rail-panel${railOpen ? ' open' : ''}`}>
-        <div className="rail-mobile-head">
-          <button type="button" className="btn btn-ic btn-ghost" onClick={() => setRailOpen(false)} aria-label="关闭">
-            <Icon name="x" />
+      <aside id="chat-context-rail" className={`rail-panel${railOpen ? ' open' : ''}`} aria-label="视频与执行过程">
+        <div className="rail-mobile-head"><b>{isVideo ? '视频与执行过程' : '执行过程'}</b>
+          <button type="button" className="btn btn-ic btn-ghost" onClick={event => { setPanelsInstant(event.detail === 0); setRailOpen(false) }} aria-label="收起视频与执行过程">
+            <Icon name="chev-r" />
           </button>
         </div>
         {isVideo && playbackUrl && (
@@ -579,11 +585,14 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, sessionId, fallbackTitle, onOpenEvidence, canJump, onJump, onStop, onImport,
+  msg, sessionId, fallbackTitle, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
 }: {
   sessionId?: number
   msg: ChatMsg
   fallbackTitle: string
+  showVideoTitle: boolean
+  followUpSessionId?: number
+  onFollowUp: (question: string) => void
   onOpenEvidence: (cite: CiteRef, cites: CiteRef[]) => void
   canJump: (cite: CiteRef) => boolean
   onJump: (cite: CiteRef) => void
@@ -670,14 +679,14 @@ function AgentMessageView({
               <span className="cno">{cite.id}</span>
               <div className="cbody">
                 <div className="chead">
-                  <span className="cvideo">{cite.videoTitle || (cite.taskId ? `视频 ${cite.taskId}` : fallbackTitle)}</span>
+                  {showVideoTitle && <span className="cvideo">{cite.videoTitle || (cite.taskId ? `视频 ${cite.taskId}` : fallbackTitle)}</span>}
                   {hasReplayRange(cite) && <span className="ctime mono">{formatTimeRange(cite.startMS, cite.endMS)}</span>}
                   <ModalityTag modality={cite.modality} />
                   {cite.timeRangeStatus && cite.timeRangeStatus !== 'exact' && (
                     <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>{cite.timeRangeStatus === 'unknown' ? '时间未知' : '粗粒度时间'}</span>
                   )}
                 </div>
-                <div className="cquote">{clipText(cite.anchorQuote || cite.content, 320)}</div>
+                <div className="cquote">{clipText(cite.modality === 'visual_caption' || cite.modality === 'visual_ocr' ? cite.displayContext || cite.content : cite.anchorQuote || cite.content, 220)}</div>
               </div>
               <button
                 className="btn btn-sm cjump"
@@ -709,8 +718,8 @@ function AgentMessageView({
         </button>
         {onImport && msg.messageId && !msg.streaming && !msg.error && !msg.cancelled && !!msg.content && <button className="meta-link" onClick={onImport}><Icon name="plus" size="sm" />收进笔记</button>}
       </div>
-      {sessionId && msg.messageId && !msg.streaming && <AnswerFeedback key={`${sessionId}:${msg.messageId}`} sessionId={sessionId} messageId={msg.messageId} />}
       <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.transientStatus || (msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…')}{msg.processStartedAt !== undefined && ` · 已等待 ${formatDuration(Math.max(0, clockNow - msg.processStartedAt))}`}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{!msg.error && !msg.cancelled && ` · ${msg.executionDurationMs !== undefined ? `处理耗时 ${formatDuration(msg.executionDurationMs)}` : '处理耗时未知'}`}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
+      {followUpSessionId && msg.messageId && !!msg.content && !msg.error && !msg.cancelled && !msg.streaming && <FollowUpQuestions sessionId={followUpSessionId} messageId={msg.messageId} onAsk={onFollowUp} />}
     </div>
   )
 }

@@ -259,7 +259,8 @@ export interface VideoTask {
   trace_id: string
   source_type: 'upload' | 'chunked' | 'url'
   source_url?: string
-	visual_disabled: boolean
+  visual_disabled: boolean
+  visual_mode?: VisualMode
   retry_count: number
   max_retries: number
   next_retry_at?: string
@@ -360,8 +361,9 @@ export interface RAGIndexResult {
 
 // ============ Chat ============
 export type ChatScopeType = 'video' | 'video_library' | 'knowledge_base'
+export type VisualMode = 'off' | 'ocr' | 'caption' | 'both'
 export interface VideoQuestion { question: string; source: string; excerpt: string; time_ms?: number }
-export interface VideoQuestionResult { status: 'ready' | 'waiting_transcription' | 'no_evidence'; message: string; questions: VideoQuestion[]; content_version?: string }
+export interface VideoQuestionResult { status: 'ready' | 'waiting_transcription' | 'no_evidence' | 'no_answer'; message: string; questions: VideoQuestion[]; content_version?: string; message_id?: number }
 export type ChatMode = 'chat'
 /** 单视频聊天页专用：ChatMode 之外另有 agent SSE 与两个非流式实验模式 */
 export type VideoChatMode = 'chat' | 'agent'

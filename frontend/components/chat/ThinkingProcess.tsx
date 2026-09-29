@@ -34,7 +34,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
         <span className={styles.summary}>{summary}{duration !== undefined ? ` · ${formatDuration(duration)}` : ''}</span>
         <Icon name="chev-r" size="sm" className={`${styles.chev}${open ? ` ${styles.chevOpen}` : ''}`} />
       </button>
-      {open && <div className={styles.body}>
+      <div className={styles.body} hidden={!open}>
         {!steps.length && <p className={styles.waiting}>请求已发送，等待服务端开始处理。</p>}
         <ol className={styles.timeline}>
           {steps.map(step => <ProcessStep key={step.id} step={step} reasoning={message.reasoning?.[step.kind === 'answer' ? 'answer' : step.id]} now={now} />)}
@@ -42,7 +42,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
         {Object.entries(message.reasoning ?? {}).filter(([id]) => !attached.has(id)).map(([id, text]) => <Reasoning key={id} text={text} />)}
         {message.error && <p className={styles.error}>{message.error}</p>}
         {message.cancelled && <p className={styles.waiting}>已保留收到的部分内容，本轮未确认保存。</p>}
-      </div>}
+      </div>
     </section>
   )
 }
@@ -64,7 +64,7 @@ function ProcessStep({ step, reasoning, now }: { step: ChatTraceStep; reasoning?
 }
 
 function Reasoning({ text }: { text: string }) {
-  return <details className={styles.reasoning} open>
+  return <details className={styles.reasoning}>
     <summary>模型思考 · 由模型接口提供</summary>
     <div>{text}</div>
     {text.length >= 64000 && <small>思考内容较长，仅展示前 64,000 个字符。</small>}

@@ -8,6 +8,7 @@ import { exportProfile, parseProfileImport } from '@/lib/profileTransfer'
 import { CapabilityProbe, type ProbeTarget } from '@/components/settings/CapabilityProbe'
 import { ErrorState, LoadingBlock } from '@/components/ui/AsyncState'
 import { HostedAISection } from './HostedAISection'
+import { ProfileImportHelp } from './ProfileImportHelp'
 
 // BYOK AI 服务配置:profile 列表(一个 profile 覆盖 llm / asr / embedding / vision 四组能力),
 // 作者提供的免费配置独立展示，由服务端维护并解析最新配置。
@@ -22,6 +23,7 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
   const [editing, setEditing] = useState<AIProfile | undefined>(undefined)
   const [importDraft, setImportDraft] = useState<AIProfileRequest | null>(null)
   const [importWarning, setImportWarning] = useState(false)
+  const [importHelpOpen, setImportHelpOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const chooseImport = async (file?: File) => {
@@ -89,14 +91,15 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
       <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>AI 服务</h3>
       <HostedAISection readOnly={readOnly} active={profiles.some(p => p.source === 'hosted' && p.is_default)} onActivated={load} />
       {!readOnly && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}><button
+        <div className="profile-config-actions"><button
           className="btn btn-sm btn-primary"
           onClick={() => { setEditing(undefined); setImportDraft(null); setEditorOpen(true) }}
         >
           <Icon name="plus" size="sm" />新建配置
-        </button><button className="btn btn-sm" onClick={() => fileInput.current?.click()}>导入 JSON</button>
+        </button><span className="profile-import-actions"><button className="btn btn-sm" onClick={() => fileInput.current?.click()}>导入 JSON</button><button type="button" className="profile-import-help" aria-label="JSON 导入格式说明" title="JSON 导入格式说明" aria-haspopup="dialog" onClick={() => setImportHelpOpen(true)}>?</button></span>
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={e => void chooseImport(e.target.files?.[0])} /></div>
       )}
+      {importHelpOpen && <ProfileImportHelp onClose={() => setImportHelpOpen(false)} />}
 
       {importDraft && !editorOpen && <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <b>导入预览 · {importDraft.name}</b>

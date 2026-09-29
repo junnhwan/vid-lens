@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { exportProfile, parseProfileImport } from './profileTransfer.ts'
+import { exportProfile, parseProfileImport, PROFILE_IMPORT_TEMPLATE } from './profileTransfer.ts'
 import type { AIProfile } from './types.ts'
 
 const profile: AIProfile = {
@@ -11,10 +11,18 @@ const profile: AIProfile = {
   agent_budget: { version: 1, max_tool_calls: 4, max_duration_seconds: 60, max_input_tokens: 2000, max_output_tokens: 1000 },
 }
 
+it('the downloadable help template is accepted by the real import parser', () => {
+  const parsed = parseProfileImport(PROFILE_IMPORT_TEMPLATE)
+  assert.equal(parsed.profile.name, '我的 AI 配置')
+  assert.equal(parsed.profile.embedding_dim, 1024)
+  assert.equal(parsed.ignoredSecrets, false)
+})
+
 it('exports a round-trippable profile without credentials or default selection', () => {
   const text = exportProfile(profile)
   assert.equal(text.includes('sk-'), false)
   const imported = parseProfileImport(text)
+  assert.equal(imported.ignoredSecrets, false)
   assert.equal(imported.profile.embedding_dim, 1024)
   assert.equal(imported.profile.llm_context_tokens, 131072)
   assert.equal(imported.profile.is_default, false)

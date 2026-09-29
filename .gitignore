@@ -60,6 +60,7 @@ resume.md
 # Local work artifacts (not tracked)
 .playwright-mcp/
 .superpowers/
+.workbuddy/
 .worktrees/
 /*.png
 artifacts/

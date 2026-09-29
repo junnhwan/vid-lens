@@ -19,6 +19,7 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
   const [loadError, setLoadError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
   const [questions, setQuestions] = useState<VideoQuestionResult | null>(null)
+  const [questionsLoading, setQuestionsLoading] = useState(true)
   const [studyBlock, setStudyBlock] = useState<StudyBlock | null>(null)
   const [studyError, setStudyError] = useState('')
   const returnHref = searchParams?.artifact && searchParams?.block ? `/artifacts/${encodeURIComponent(searchParams.artifact)}?block=${encodeURIComponent(searchParams.block)}` : ''
@@ -46,6 +47,8 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
     setLoadError('')
     setTask(null)
     setPlaybackUrl(null)
+    setQuestions(null)
+    setQuestionsLoading(true)
     void (async () => {
       let detail: VideoTask
       try {
@@ -59,7 +62,11 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       if (!active) return
       setTask(detail)
       setLoading(false)
-      void api.getVideoQuestions(taskId).then(result => { if (active) setQuestions(result) }).catch(() => { if (active) setQuestions({ status: 'no_evidence', message: '推荐问题暂时不可用，可以直接提问。', questions: [] }) })
+      void (async () => {
+        try { const result = await api.generateVideoQuestions(taskId); if (active) setQuestions(result) }
+        catch { if (active) setQuestions({ status: 'no_evidence', message: '推荐问题暂时不可用，可以直接提问。', questions: [] }) }
+        finally { if (active) setQuestionsLoading(false) }
+      })()
       const playback = await api.playbackSrc(taskId).catch(() => null)
       if (active && playback) setPlaybackUrl(playback)
     })()
@@ -99,7 +106,7 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       refreshPlaybackUrl={refreshPlaybackUrl}
       suggestions={[]}
       videoQuestions={questions}
-      refreshQuestions={() => void api.getVideoQuestions(taskId).then(setQuestions).catch(() => {})}
+      questionsLoading={questionsLoading}
       studyBlock={studyBlock}
       studyError={studyError}
       returnToStudy={returnHref}
