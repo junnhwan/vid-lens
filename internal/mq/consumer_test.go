@@ -1803,3 +1803,7 @@ func (s *stageCapturingStrategy) Summarize(ctx context.Context, _ string) (strin
 	s.summarize = observability.CorrelationFromContext(ctx)
 	return "summary", nil
 }
+
+func (p *recordingRetryProducer) EnqueueSummary(ctx context.Context, taskID int64, md5 string) error {
+	return p.EnqueueAnalyze(ctx, taskID, md5)
+}

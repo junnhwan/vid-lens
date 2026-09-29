@@ -8,6 +8,9 @@ import (
 
 // 消费者获取 processing lease：父任务和子任务通过 CAS 一起推进。
 func (r *Repositories) ClaimTaskProcessing(req TaskProcessingClaimRequest) (TaskLeaseClaim, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.claimSummaryProcessing(req)
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return TaskLeaseClaim{}, fmt.Errorf("任务仓储未初始化")
 	}

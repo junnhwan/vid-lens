@@ -21,11 +21,13 @@ const (
 )
 
 type initialDispatchSpec struct {
-	createTask      bool
-	allowedStatuses []int8
-	jobType         string
-	stage           string
-	enqueue         func(context.Context, model.VideoTask) error
+	summaryForce       bool
+	resetTranscription bool
+	createTask         bool
+	allowedStatuses    []int8
+	jobType            string
+	stage              string
+	enqueue            func(context.Context, model.VideoTask) error
 }
 
 // enqueueInitialTask is the only service-level path for a first RabbitMQ
@@ -56,7 +58,9 @@ func (s *MediaService) enqueueInitialTask(ctx context.Context, task *model.Video
 	}
 	now := time.Now()
 	prepared, err := s.repo.PrepareInitialTaskDispatch(repository.InitialTaskDispatchRequest{
-		Task: task, CreateTask: spec.createTask, AllowedStatuses: spec.allowedStatuses,
+		SummaryForce:       spec.summaryForce,
+		ResetTranscription: spec.resetTranscription,
+		Task:               task, CreateTask: spec.createTask, AllowedStatuses: spec.allowedStatuses,
 		JobType: spec.jobType, Stage: spec.stage,
 		Now: now, LeaseUntil: now.Add(initialDispatchLease), Token: uuid.NewString(),
 	})

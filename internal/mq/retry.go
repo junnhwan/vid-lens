@@ -117,7 +117,7 @@ func isRetryableError(err error) bool {
 // Keep the provider category for summary calls while status/next_retry_at
 // continue to describe scheduling and exhaustion independently.
 func summaryFailureCode(jobType, stage string, failure error, fallback string) string {
-	if jobType != TaskJobAnalyze || stage != model.TaskStageSummarizing {
+	if (jobType != TaskJobAnalyze && jobType != model.TaskJobTypeSummary) || stage != model.TaskStageSummarizing {
 		return fallback
 	}
 	var providerErr *ai.ProviderError
@@ -278,6 +278,7 @@ func (c *Consumer) recordLeasedTaskFailure(taskID int64, jobType, stage string, 
 }
 
 type retryProducer interface {
+	EnqueueSummary(ctx context.Context, taskID int64, md5 string) error
 	EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error
 	EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error
 	EnqueueDownload(ctx context.Context, taskID int64, key string) error
@@ -373,6 +374,11 @@ func (s *RetryScheduler) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	summaryTasks, err := s.repos.TaskJob.DueSummaryTasks(now, s.config.BatchSize)
+	if err != nil {
+		return err
+	}
+	tasks = append(tasks, summaryTasks...)
 
 	for _, task := range tasks {
 		_, stage := retryDispatchState(task.LastJobType, task.Stage)
@@ -448,6 +454,8 @@ func wrapRetryRestoreError(message string, err error) error {
 
 func retryDispatchState(jobType, currentStage string) (int8, string) {
 	switch jobType {
+	case model.TaskJobTypeSummary:
+		return model.TaskStatusQueued, model.TaskStageSummarizing
 	case TaskJobDownload:
 		return model.TaskStatusRunning, model.TaskStageDownloading
 	case TaskJobTranscribe:
@@ -466,6 +474,8 @@ func retryDispatchState(jobType, currentStage string) (int8, string) {
 
 func (s *RetryScheduler) enqueueRetry(ctx context.Context, task model.VideoTask) error {
 	switch task.LastJobType {
+	case model.TaskJobTypeSummary:
+		return s.producer.EnqueueSummary(ctx, task.ID, task.FileMD5)
 	case TaskJobDownload:
 		return s.producer.EnqueueDownload(ctx, task.ID, task.FileMD5)
 	case TaskJobTranscribe:

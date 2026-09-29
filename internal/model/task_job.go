@@ -4,6 +4,7 @@ import "time"
 
 const (
 	TaskJobTypeAnalyze    = "analyze"
+	TaskJobTypeSummary    = "summary" // transcript-only summary; owns its own lease
 	TaskJobTypeTranscribe = "transcribe"
 	TaskJobTypeDownload   = "download"
 	TaskJobTypeRAGIndex   = "rag_index"
@@ -13,6 +14,8 @@ const (
 // video_tasks remains the compatibility status source; task_jobs separates
 // download/transcribe/analyze/rag_index progress for backend observability.
 type TaskJob struct {
+	InputText             string     `gorm:"type:text" json:"-"`
+	InputChunksJSON       string     `gorm:"type:text" json:"-"`
 	ID                    int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	TaskID                int64      `gorm:"not null;uniqueIndex:uk_task_jobs_task_type;index" json:"task_id"`
 	UserID                int64      `gorm:"not null;index" json:"user_id"`

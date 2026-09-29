@@ -303,7 +303,7 @@ func TestRequestTranscribeEnqueueFailureRemainsRetryable(t *testing.T) {
 	assertInitialDispatchFailureIsRetryable(t, repos, task.ID, model.TaskJobTypeTranscribe, model.TaskStageTranscribing)
 }
 
-func TestRequestAnalysisEnqueueFailureRemainsRetryable(t *testing.T) {
+func TestRequestAnalysisEnqueueFailureKeepsSummaryJobRetryable(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	producer := &recordingMediaProducer{analyzeErr: errors.New("kafka unavailable")}
 	task := &model.VideoTask{
@@ -314,12 +314,44 @@ func TestRequestAnalysisEnqueueFailureRemainsRetryable(t *testing.T) {
 	if err := repos.Task.Create(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	seedMediaTestTranscription(t, repos, task)
 
 	svc := &MediaService{repo: repos, mq: producer}
 	err := svc.RequestAnalysis(context.Background(), 7, task.ID, false)
 	assertStableInitialDispatchError(t, err)
 
-	assertInitialDispatchFailureIsRetryable(t, repos, task.ID, model.TaskJobTypeAnalyze, model.TaskStageSummarizing)
+	// The summary job owns its own retry state; the failed publish must not
+	// leave a dispatch lease on it and must not touch the parent video task.
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeSummary)
+	if err != nil {
+		t.Fatalf("find summary job: %v", err)
+	}
+	if job == nil || job.Status != model.TaskStatusFailed || job.Stage != model.TaskStageSummarizing || job.NextRetryAt == nil {
+		t.Fatalf("retryable summary job = %+v", job)
+	}
+	if job.ProcessingToken != "" || job.LeaseKind != "" || job.LeaseExpiresAt != nil {
+		t.Fatalf("failed summary dispatch retained lease: token=%q kind=%q expires=%v", job.ProcessingToken, job.LeaseKind, job.LeaseExpiresAt)
+	}
+	if job.RetryBudgetID == "" {
+		t.Fatal("retryable summary job has no retry budget")
+	}
+	current, err := repos.Task.FindByID(task.ID)
+	if err != nil {
+		t.Fatalf("find task: %v", err)
+	}
+	if current.Status != model.TaskStatusPending || current.Stage != model.TaskStageUploaded || current.ProcessingToken != "" || current.LeaseKind != "" {
+		t.Fatalf("summary publish failure rewrote the video task: status=%d stage=%q token=%q kind=%q", current.Status, current.Stage, current.ProcessingToken, current.LeaseKind)
+	}
+	due, err := repos.TaskJob.DueSummaryTasks(job.NextRetryAt.Add(time.Millisecond), 10)
+	if err != nil {
+		t.Fatalf("find due summary jobs: %v", err)
+	}
+	for _, candidate := range due {
+		if candidate.ID == task.ID {
+			return
+		}
+	}
+	t.Fatalf("summary job for task %d is not visible to the retry scheduler", task.ID)
 }
 
 func TestUploadByURLEnqueueFailureRemainsRetryable(t *testing.T) {
@@ -392,7 +424,7 @@ func assertInitialDispatchFailureIsRetryable(t *testing.T, repos *repository.Rep
 	t.Fatalf("task %d is not visible to retry scheduler", taskID)
 }
 
-func TestRequestAnalysisQueuesTaskKeepingStageUntilWorkerClaim(t *testing.T) {
+func TestRequestAnalysisQueuesSummaryJobKeepingVideoTaskUntouched(t *testing.T) {
 	repos := newMediaTestRepositories(t)
 	producer := &recordingMediaProducer{}
 	task := &model.VideoTask{
@@ -407,43 +439,104 @@ func TestRequestAnalysisQueuesTaskKeepingStageUntilWorkerClaim(t *testing.T) {
 	if err := repos.Task.Create(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	seedMediaTestTranscription(t, repos, task)
 
 	svc := &MediaService{repo: repos, mq: producer}
 	if err := svc.RequestAnalysis(context.Background(), 7, task.ID, false); err != nil {
 		t.Fatalf("RequestAnalysis: %v", err)
 	}
 
+	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeSummary)
+	if err != nil {
+		t.Fatalf("find summary job: %v", err)
+	}
+	if job == nil {
+		t.Fatal("summary job was not created")
+	}
+	if job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageSummarizing || job.TraceID != "trace-analyze" {
+		t.Fatalf("summary job state = status:%d stage:%q trace:%q", job.Status, job.Stage, job.TraceID)
+	}
+	// The summary owns its dispatch lease; the stage only advances when a
+	// worker claims the message, not when the job is queued.
+	if job.ProcessingToken == "" || job.LeaseKind != model.TaskLeaseKindDispatch || job.LeaseExpiresAt == nil {
+		t.Fatalf("summary dispatch lease = token:%q kind:%q expires:%v", job.ProcessingToken, job.LeaseKind, job.LeaseExpiresAt)
+	}
+	if job.InputText != "已完成的完整转写" {
+		t.Fatalf("summary input snapshot = %q, want the transcript it will summarize", job.InputText)
+	}
+
 	current, err := repos.Task.FindByID(task.ID)
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if current.Status != model.TaskStatusQueued || current.Stage != model.TaskStageUploaded {
-		t.Fatalf("status/stage = %d/%q, want queued/uploaded (stage advances at worker claim, not dispatch)", current.Status, current.Stage)
+	if current.Status != model.TaskStatusPending || current.Stage != model.TaskStageUploaded {
+		t.Fatalf("status/stage = %d/%q, want the video task left at pending/uploaded", current.Status, current.Stage)
 	}
-	if current.ProcessingToken == "" || current.LeaseKind != model.TaskLeaseKindDispatch || current.LeaseExpiresAt == nil {
-		t.Fatalf("analyze dispatch lease = token:%q kind:%q expires:%v", current.ProcessingToken, current.LeaseKind, current.LeaseExpiresAt)
+	if current.ProcessingToken != "" || current.LeaseKind != "" || current.LeaseExpiresAt != nil {
+		t.Fatalf("summary dispatch took over the video task lease: token:%q kind:%q expires:%v", current.ProcessingToken, current.LeaseKind, current.LeaseExpiresAt)
 	}
 	if len(producer.analyzes) != 1 || producer.analyzes[0] != task.ID {
-		t.Fatalf("analyze enqueue calls = %#v, want task id", producer.analyzes)
+		t.Fatalf("summary enqueue calls = %#v, want task id", producer.analyzes)
 	}
 	if len(producer.analyzeTraceIDs) != 1 || producer.analyzeTraceIDs[0] != "trace-analyze" {
-		t.Fatalf("analyze trace ids = %#v, want trace-analyze", producer.analyzeTraceIDs)
+		t.Fatalf("summary trace ids = %#v, want trace-analyze", producer.analyzeTraceIDs)
 	}
-	if len(producer.analyzeClaimTokens) != 1 || producer.analyzeClaimTokens[0] != current.ProcessingToken {
-		t.Fatalf("analyze claim tokens = %#v, want %q", producer.analyzeClaimTokens, current.ProcessingToken)
-	}
-	job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeAnalyze)
-	if err != nil {
-		t.Fatalf("find analyze job: %v", err)
-	}
-	if job == nil || job.Status != model.TaskStatusQueued || job.Stage != model.TaskStageSummarizing || job.TraceID != "trace-analyze" || job.ProcessingToken != current.ProcessingToken {
-		t.Fatalf("analyze task_job = %+v", job)
+	if len(producer.analyzeClaimTokens) != 1 || producer.analyzeClaimTokens[0] != job.ProcessingToken {
+		t.Fatalf("summary claim tokens = %#v, want %q", producer.analyzeClaimTokens, job.ProcessingToken)
 	}
 	if job.RetryBudgetID == "" || len(producer.analyzeBudgetIDs) != 1 || producer.analyzeBudgetIDs[0] != job.RetryBudgetID {
-		t.Fatalf("analyze retry budget job/context = %q/%#v", job.RetryBudgetID, producer.analyzeBudgetIDs)
+		t.Fatalf("summary retry budget job/context = %q/%#v", job.RetryBudgetID, producer.analyzeBudgetIDs)
 	}
 	if _, err := repos.RetryBudget.Get(job.RetryBudgetID); err != nil {
-		t.Fatalf("load analyze retry budget: %v", err)
+		t.Fatalf("load summary retry budget: %v", err)
+	}
+}
+
+// 摘要作业只读转写快照。没有转写时 RequestAnalysis 必须直接拒绝：回退到 analyze
+// 合并作业会重新用整条任务租约串行跑 ASR、画面与索引，正是摘要解耦要消除的耦合。
+func TestRequestAnalysisWithoutTranscriptionRejectsWithoutDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		force bool
+		md5   string
+	}{{"reuse", false, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"}, {"force", true, "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			repos := newMediaTestRepositories(t)
+			producer := &recordingMediaProducer{}
+			task := &model.VideoTask{
+				UserID: 7, FileMD5: tc.md5, Filename: "video.mp4", FileURL: "videos/video.mp4",
+				Status: model.TaskStatusPending, Stage: model.TaskStageUploaded, TraceID: "trace-no-transcript",
+			}
+			if err := repos.Task.Create(task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := &MediaService{repo: repos, mq: producer}
+			err := svc.RequestAnalysis(context.Background(), 7, task.ID, tc.force)
+			if err == nil {
+				t.Fatal("RequestAnalysis without a transcript should reject")
+			}
+			if got, want := err.Error(), "请先完成文字提取，再生成摘要"; got != want {
+				t.Fatalf("rejection = %q, want %q", got, want)
+			}
+			if len(producer.analyzes) != 0 || len(producer.transcribes) != 0 {
+				t.Fatalf("rejected request enqueued work: summary=%v transcribe=%v", producer.analyzes, producer.transcribes)
+			}
+			job, err := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeSummary)
+			if err != nil {
+				t.Fatalf("find summary job: %v", err)
+			}
+			if job != nil {
+				t.Fatalf("rejected request created a summary job: %+v", job)
+			}
+			current, err := repos.Task.FindByID(task.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if current.Status != model.TaskStatusPending || current.Stage != model.TaskStageUploaded || current.ProcessingToken != "" {
+				t.Fatalf("rejected request changed the video task: status=%d stage=%q token=%q", current.Status, current.Stage, current.ProcessingToken)
+			}
+		})
 	}
 }
 
@@ -771,6 +864,15 @@ func newMediaTestServiceWithCleanup(repos *repository.Repositories, storage obje
 	return service
 }
 
+func seedMediaTestTranscription(t *testing.T, repos *repository.Repositories, task *model.VideoTask) {
+	t.Helper()
+	if err := repos.Transcription.Upsert(&model.VideoTranscription{
+		TaskID: task.ID, FileMD5: task.FileMD5, Content: "已完成的完整转写", Words: len([]rune("已完成的完整转写")),
+	}); err != nil {
+		t.Fatalf("seed transcription: %v", err)
+	}
+}
+
 func newMediaTestRepositories(t *testing.T) *repository.Repositories {
 	t.Helper()
 
@@ -798,4 +900,8 @@ func newMediaTestRepositoriesWithForeignKeys(t *testing.T) *repository.Repositor
 		t.Fatalf("migrate test db: %v", err)
 	}
 	return repository.NewRepositories(db)
+}
+
+func (p *recordingMediaProducer) EnqueueSummary(ctx context.Context, taskID int64, md5 string) error {
+	return p.EnqueueAnalyze(ctx, taskID, md5)
 }

@@ -21,6 +21,9 @@ func ownsProcessingLease(task *model.VideoTask, job *model.TaskJob, token string
 // OwnsTaskProcessing checks both the parent compatibility row and the stage row.
 // Expired leases are rejected even if no replacement worker has claimed them yet.
 func (r *Repositories) OwnsTaskProcessing(req TaskProcessingLeaseRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.runWithSummaryLease(req, func(*Repositories, *model.TaskJob) error { return nil })
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}
@@ -42,6 +45,11 @@ func (r *Repositories) OwnsTaskProcessing(req TaskProcessingLeaseRequest) (bool,
 // RenewTaskProcessing extends task and TaskJob leases in one transaction. A
 // partial renewal is rolled back so the worker fails closed on inconsistent rows.
 func (r *Repositories) RenewTaskProcessing(req TaskProcessingLeaseRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.runWithSummaryLease(req, func(tx *Repositories, job *model.TaskJob) error {
+			return tx.db.Model(job).Update("lease_expires_at", req.LeaseUntil).Error
+		})
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}
@@ -81,6 +89,9 @@ func (r *Repositories) RenewTaskProcessing(req TaskProcessingLeaseRequest) (bool
 // does not make remote provider/object-storage calls exactly-once; those remain
 // at-least-once and must use their own idempotency keys or persisted results.
 func (r *Repositories) RunWithTaskProcessingLease(req TaskProcessingLeaseRequest, fn func(*Repositories) error) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.runWithSummaryLease(req, func(tx *Repositories, _ *model.TaskJob) error { return fn(tx) })
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}

@@ -28,6 +28,9 @@ func (c *Consumer) handleAnalyze(ctx context.Context, delivery amqp.Delivery) er
 	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return fmt.Errorf("解析消息失败: %w", err)
 	}
+	if payload.JobType == model.TaskJobTypeSummary {
+		return c.handleTranscriptSummary(ctx, payload)
+	}
 
 	observability.Log(ContextWithTraceID(ctx, payload.TraceID), slog.Default(), slog.LevelInfo, "analyze message received", slog.Int64("task_id", payload.TaskID))
 
@@ -103,6 +106,13 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 		return err
 	}
 	transcription, err := c.repo.Transcription.FindByTaskID(task.ID)
+	if owner := processingLeaseOwnerFromContext(ctx); owner != nil && owner.jobType == model.TaskJobTypeSummary {
+		job, snapshotErr := c.repo.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeSummary)
+		err = snapshotErr
+		if job != nil {
+			transcription = &model.VideoTranscription{TaskID: task.ID, Content: job.InputText}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("查询转录失败: %w", err)
 	}

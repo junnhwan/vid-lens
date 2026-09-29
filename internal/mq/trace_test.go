@@ -89,3 +89,7 @@ func TestContextForTaskJobUsesExplicitAttemptSnapshot(t *testing.T) {
 		t.Fatalf("attempt=%d want=2", got.Attempt)
 	}
 }
+
+func (p *correlationRetryProducer) EnqueueSummary(ctx context.Context, taskID int64, md5 string) error {
+	return p.EnqueueAnalyze(ctx, taskID, md5)
+}

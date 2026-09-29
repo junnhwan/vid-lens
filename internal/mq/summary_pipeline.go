@@ -247,7 +247,7 @@ func (c *Consumer) summarizeLong(ctx context.Context, task *model.VideoTask, ful
 	if !utf8.ValidString(full) {
 		return "", fmt.Errorf("转写文本包含无效 UTF-8，无法保证摘要完整覆盖")
 	}
-	rows, err := c.repo.TranscriptionChunk.ListByTaskID(task.ID)
+	rows, err := c.summarySourceChunks(ctx, task.ID)
 	if err != nil {
 		return "", err
 	}

@@ -37,14 +37,16 @@ type TaskProcessingClaimRequest struct {
 // HTTP-triggered first Kafka publish. CreateTask is used by URL download tasks;
 // existing uploaded tasks use AllowedStatuses as their compare-and-swap guard.
 type InitialTaskDispatchRequest struct {
-	Task            *model.VideoTask
-	CreateTask      bool
-	AllowedStatuses []int8
-	JobType         string
-	Stage           string
-	Now             time.Time
-	LeaseUntil      time.Time
-	Token           string
+	SummaryForce       bool
+	ResetTranscription bool
+	Task               *model.VideoTask
+	CreateTask         bool
+	AllowedStatuses    []int8
+	JobType            string
+	Stage              string
+	Now                time.Time
+	LeaseUntil         time.Time
+	Token              string
 }
 
 // InitialTaskDispatch is the complete correlation state that must be copied to

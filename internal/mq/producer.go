@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"vid-lens/internal/model"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // AnalyzePayload 任务消息载荷
 type AnalyzePayload struct {
+	JobType    string `json:"job_type,omitempty"`
 	TaskID     int64  `json:"task_id"`
 	MD5        string `json:"md5"`
 	TraceID    string `json:"trace_id"`
@@ -222,6 +224,15 @@ func (p *Producer) EnqueueAnalyze(ctx context.Context, taskID int64, md5 string)
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 	return p.publish(TaskJobAnalyze, taskID, claimTokenFromContext(ctx), payload)
+}
+
+// EnqueueSummary shares the analysis queue but carries an independent job type.
+func (p *Producer) EnqueueSummary(ctx context.Context, taskID int64, md5 string) error {
+	payload, err := json.Marshal(AnalyzePayload{TaskID: taskID, MD5: md5, JobType: model.TaskJobTypeSummary, TraceID: TraceIDFromContext(ctx), ClaimToken: ClaimTokenFromContext(ctx), BudgetID: RetryBudgetIDFromContext(ctx)})
+	if err != nil {
+		return err
+	}
+	return p.publish(TaskJobAnalyze, taskID, ClaimTokenFromContext(ctx), payload)
 }
 
 // EnqueueTranscribe 投递文字提取任务。

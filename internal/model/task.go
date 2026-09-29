@@ -95,6 +95,8 @@ type VideoTask struct {
 	HasRAGIndex      bool             `gorm:"-" json:"has_rag_index"`
 	VisualStatus     string           `gorm:"-" json:"visual_status"`
 	SummaryProgress  *SummaryProgress `gorm:"-" json:"summary_progress,omitempty"`
+	SummaryJob       *TaskJob         `gorm:"-" json:"summary_job,omitempty"`
+	CanSummarize     bool             `gorm:"-" json:"can_summarize"`
 }
 
 func (VideoTask) TableName() string {

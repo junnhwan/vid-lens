@@ -92,6 +92,13 @@ func (s *TaskCleanupService) RequestDelete(ctx context.Context, userID, taskID i
 		if task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning {
 			return ErrTaskActive
 		}
+		summaryJob, err := txRepos.TaskJob.FindByTaskAndType(taskID, model.TaskJobTypeSummary)
+		if err != nil {
+			return err
+		}
+		if repository.SummaryJobActive(summaryJob) {
+			return ErrTaskActive
+		}
 
 		job := &model.TaskCleanupJob{
 			TaskID:     task.ID,

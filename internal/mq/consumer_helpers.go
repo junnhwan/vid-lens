@@ -111,6 +111,12 @@ func (c *Consumer) analyzeInitialStage(task *model.VideoTask) string {
 }
 
 func (c *Consumer) transitionTaskStage(ctx context.Context, taskID int64, nextStage string) error {
+	if owner := processingLeaseOwnerFromContext(ctx); owner != nil && owner.jobType == model.TaskJobTypeSummary {
+		if nextStage != model.TaskStageSummarizing {
+			return fmt.Errorf("摘要任务不能修改视频处理阶段")
+		}
+		return requireProcessingLease(ctx)
+	}
 	if c == nil || c.repo == nil || c.repo.Task == nil {
 		return fmt.Errorf("任务仓储未初始化")
 	}

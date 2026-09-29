@@ -110,7 +110,9 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	_ = waitVisual()
+	if err := c.waitForVisualAfterASR(ctx, task, waitVisual); err != nil {
+		return err
+	}
 	ragEnqueued, err := c.indexAfterTranscription(ctx, task)
 	if err != nil {
 		return err
@@ -245,7 +247,9 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	_ = waitVisual()
+	if err := c.waitForVisualAfterASR(ctx, task, waitVisual); err != nil {
+		return err
+	}
 	if _, err := c.indexAfterTranscription(ctx, task); err != nil {
 		return err
 	}
@@ -636,6 +640,21 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 		LLMProvider: profile.LLMProvider,
 		LLMModel:    profile.LLMModel,
 	}), nil
+}
+
+func (c *Consumer) waitForVisualAfterASR(ctx context.Context, task *model.VideoTask, waitVisual func() visualIndexOutcome) error {
+	// The transcript has been persisted; any remaining wait belongs to the
+	// visual branch, not ASR. Keep the lease until the whole job finishes.
+	if err := requireProcessingLease(ctx); err != nil {
+		return err
+	}
+	if c.visualIndex != nil && !task.VisualDisabled {
+		if err := c.transitionTaskStage(ctx, task.ID, model.TaskStageVisual); err != nil {
+			return err
+		}
+	}
+	_ = waitVisual()
+	return requireProcessingLease(ctx)
 }
 
 type visualIndexOutcome struct {

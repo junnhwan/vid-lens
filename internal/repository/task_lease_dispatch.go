@@ -9,6 +9,9 @@ import (
 
 // RetryScheduler 获取和恢复 dispatch lease；Kafka 投递失败时必须可恢复。
 func (r *Repositories) ClaimRetryDispatch(req TaskDispatchClaimRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.claimSummaryRetry(req)
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}
@@ -138,6 +141,9 @@ func (r *Repositories) findOrCreateRetryDispatchJob(task *model.VideoTask, req T
 }
 
 func (r *Repositories) RestoreRetryDispatch(req TaskDispatchRestoreRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.restoreSummaryDispatch(req, false)
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}
@@ -216,6 +222,9 @@ func (r *Repositories) RestoreRetryDispatch(req TaskDispatchRestoreRequest) (boo
 // ExhaustRetryDispatch closes a claimed retry when its shared retry budget can
 // no longer issue another attempt. The dispatch token fences older schedulers.
 func (r *Repositories) ExhaustRetryDispatch(taskID int64, jobType, stage, token string, now time.Time) (bool, error) {
+	if jobType == model.TaskJobTypeSummary {
+		return r.restoreSummaryDispatch(TaskDispatchRestoreRequest{TaskID: taskID, Token: token, ErrorMessage: "AI 重试额度已耗尽，请手动重试"}, true)
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}

@@ -9,6 +9,11 @@ import (
 
 // processing 任务的完成与失败状态落库。
 func (r *Repositories) CompleteTaskProcessing(req TaskProcessingCompleteRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.runWithSummaryLease(TaskProcessingLeaseRequest{TaskID: req.TaskID, Token: req.Token, Now: req.Now}, func(tx *Repositories, job *model.TaskJob) error {
+			return tx.db.Model(job).Updates(map[string]interface{}{"status": model.TaskStatusCompleted, "next_retry_at": nil, "last_error_code": "", "last_error_msg": "", "processing_token": "", "lease_kind": "", "lease_expires_at": nil, "lease_version": job.LeaseVersion + 1, "finished_at": req.Now}).Error
+		})
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}
@@ -84,6 +89,9 @@ func (r *Repositories) CompleteTaskProcessing(req TaskProcessingCompleteRequest)
 }
 
 func (r *Repositories) FailTaskProcessing(req TaskProcessingFailureRequest) (bool, error) {
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.finishSummaryProcessing(req)
+	}
 	if r == nil || r.Task == nil || r.TaskJob == nil {
 		return false, fmt.Errorf("任务仓储未初始化")
 	}

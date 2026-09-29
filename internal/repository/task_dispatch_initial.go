@@ -16,6 +16,9 @@ func (r *Repositories) PrepareInitialTaskDispatch(req InitialTaskDispatchRequest
 	if err := validateInitialTaskDispatchRequest(req); err != nil {
 		return InitialTaskDispatch{}, err
 	}
+	if req.JobType == model.TaskJobTypeSummary {
+		return r.prepareSummaryDispatch(req)
+	}
 
 	var prepared InitialTaskDispatch
 	err := r.Transaction(func(repos *Repositories) error {
@@ -74,12 +77,21 @@ func (r *Repositories) prepareInitialDispatchTask(req InitialTaskDispatchRequest
 		return &task, nil
 	}
 
-	current, err := r.Task.FindByID(req.Task.ID)
+	current, err := r.Task.FindByIDForUpdate(req.Task.ID)
 	if err != nil {
 		return nil, err
 	}
 	if req.Task.UserID > 0 && current.UserID != req.Task.UserID {
 		return nil, ErrInitialTaskDispatchConflict
+	}
+	if req.JobType == model.TaskJobTypeTranscribe || req.JobType == model.TaskJobTypeAnalyze {
+		job, err := r.TaskJob.FindByTaskAndType(current.ID, model.TaskJobTypeSummary)
+		if err != nil {
+			return nil, err
+		}
+		if SummaryJobActive(job) {
+			return nil, fmt.Errorf("摘要正在生成或等待重试，请稍后重新转写")
+		}
 	}
 	newVersion := current.LeaseVersion + 1
 	result := r.db.Model(&model.VideoTask{}).
@@ -92,6 +104,11 @@ func (r *Repositories) prepareInitialDispatchTask(req InitialTaskDispatchRequest
 		return nil, ErrInitialTaskDispatchConflict
 	}
 	applyInitialDispatchState(current, req, newVersion)
+	if req.JobType == model.TaskJobTypeTranscribe && req.ResetTranscription && r.TranscriptionChunk != nil {
+		if err := r.TranscriptionChunk.DeleteByTaskID(current.ID); err != nil {
+			return nil, err
+		}
+	}
 	return current, nil
 }
 

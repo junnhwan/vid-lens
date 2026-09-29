@@ -31,11 +31,45 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if task.UserID != userID {
 		return fmt.Errorf("无权操作此任务")
 	}
+	transcription, err := s.repo.Transcription.FindByTaskID(task.ID)
+	if err != nil {
+		return err
+	}
+	if transcription == nil && task.FileMD5 != "" {
+		transcription, err = s.repo.Transcription.FindByMD5(task.FileMD5)
+	}
+	if err != nil {
+		return err
+	}
+	if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
+		existing, err := s.repo.Summary.FindByMD5(task.FileMD5)
+		if err != nil {
+			return err
+		}
+		if force || existing == nil {
+			prepared, dispatchErr := s.enqueueInitialTask(ctx, task, initialDispatchSpec{
+				allowedStatuses: []int8{model.TaskStatusPending, model.TaskStatusCompleted, model.TaskStatusFailed, model.TaskStatusDead},
+				jobType:         model.TaskJobTypeSummary, stage: model.TaskStageSummarizing, summaryForce: force,
+				enqueue: func(ctx context.Context, prepared model.VideoTask) error {
+					return s.mq.EnqueueSummary(ctx, prepared.ID, prepared.FileMD5)
+				},
+			})
+			if dispatchErr != nil && prepared.Token != "" {
+				return publicInitialDispatchError(ctx, *task, model.TaskJobTypeSummary, model.TaskStageSummarizing, dispatchErr)
+			}
+			return dispatchErr
+		}
+	}
 	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusQueued {
 		if task.Stage == model.TaskStageIndexing {
 			return fmt.Errorf("当前正在排队或构建检索索引，任务结束后可生成摘要")
 		}
 		return fmt.Errorf("任务正在处理中，请勿重复提交")
+	}
+	// 摘要作业只读转写快照，没有转写就没有可独立生成的输入。此处不再回退到
+	// analyze 合并作业：那会让摘要重新占用整条任务租约，被画面与索引串行阻塞。
+	if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
+		return fmt.Errorf("请先完成文字提取，再生成摘要")
 	}
 	summary, err := s.repo.Summary.FindByTaskID(task.ID)
 	if err != nil {
@@ -79,21 +113,9 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 		}
 	}
 
-	_, err = s.enqueueInitialTask(ctx, task, initialDispatchSpec{
-		allowedStatuses: []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
-		jobType:         model.TaskJobTypeAnalyze,
-		stage:           model.TaskStageSummarizing,
-		enqueue: func(enqueueCtx context.Context, prepared model.VideoTask) error {
-			return s.mq.EnqueueAnalyze(enqueueCtx, prepared.ID, prepared.FileMD5)
-		},
-	})
-	if errors.Is(err, repository.ErrInitialTaskDispatchConflict) {
-		return fmt.Errorf("任务状态已变化，请刷新后重试")
-	}
-	if err != nil {
-		return publicInitialDispatchError(ctx, *task, model.TaskJobTypeAnalyze, model.TaskStageSummarizing, err)
-	}
-	return nil
+	// 到这里只可能是同内容摘要在上面两次检查之间被并发删除：摘要作业已没有
+	// 可复用的既有结果，也不再回退到 analyze 合并作业（那会重新串行占用整条任务租约）。
+	return fmt.Errorf("任务状态已变化，请刷新后重试")
 }
 
 // RequestTranscribe 提交文字提取。force=true 时清除分片缓存并允许覆盖已有转写。
@@ -136,17 +158,12 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 			return fmt.Errorf("文字提取已完成，可直接查看结果")
 		}
 	}
-	if force && s.repo.TranscriptionChunk != nil {
-		// 清掉 ASR 分片完成标记，避免 re-run 复用旧片段
-		if err := s.repo.TranscriptionChunk.DeleteByTaskID(task.ID); err != nil {
-			return fmt.Errorf("清理旧转写分片失败: %w", err)
-		}
-	}
 
 	_, err = s.enqueueInitialTask(ctx, task, initialDispatchSpec{
-		allowedStatuses: []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
-		jobType:         model.TaskJobTypeTranscribe,
-		stage:           model.TaskStageTranscribing,
+		allowedStatuses:    []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
+		jobType:            model.TaskJobTypeTranscribe,
+		resetTranscription: force,
+		stage:              model.TaskStageTranscribing,
 		enqueue: func(enqueueCtx context.Context, prepared model.VideoTask) error {
 			return s.mq.EnqueueTranscribe(enqueueCtx, prepared.ID, prepared.FileMD5)
 		},
@@ -216,6 +233,13 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 	if task.Summary != nil && task.Summary.Content != "" {
 		task.HasSummary = true
 	}
+	for i := range task.Jobs {
+		if task.Jobs[i].JobType == model.TaskJobTypeSummary {
+			task.SummaryJob = &task.Jobs[i]
+			break
+		}
+	}
+	applySummaryAvailability(task)
 	if !task.HasSummary && s.repo.SummaryPart != nil {
 		parts, progressErr := s.repo.SummaryPart.List(task.ID)
 		if progressErr != nil {
@@ -293,7 +317,29 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 			tasks[i].VisualStatus = visual[tasks[i].ID]
 		}
 	}
+	jobs, err := s.repo.TaskJob.SummariesByTaskIDs(ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	byTask := make(map[int64]*model.TaskJob, len(jobs))
+	for i := range jobs {
+		byTask[jobs[i].TaskID] = &jobs[i]
+	}
+	for i := range tasks {
+		tasks[i].SummaryJob = byTask[tasks[i].ID]
+		applySummaryAvailability(&tasks[i])
+	}
 	return tasks, total, nil
+}
+
+func applySummaryAvailability(task *model.VideoTask) {
+	task.CanSummarize = task.HasTranscription && repository.SummarySourceReady(task) && !repository.SummaryJobActive(task.SummaryJob)
+	// During a forced generation, a shared cache from an earlier task is not
+	// the new job's result. Publish it only after this job has completed.
+	if task.SummaryJob != nil && task.SummaryJob.Status != model.TaskStatusCompleted {
+		task.Summary = nil
+		task.HasSummary = false
+	}
 }
 
 // DeleteTask 删除

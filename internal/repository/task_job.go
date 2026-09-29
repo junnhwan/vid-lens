@@ -102,6 +102,15 @@ func (r *TaskJobRepository) ListByTaskID(userID, taskID int64) ([]model.TaskJob,
 	return jobs, err
 }
 
+func (r *TaskJobRepository) SummariesByTaskIDs(taskIDs []int64) ([]model.TaskJob, error) {
+	var jobs []model.TaskJob
+	if len(taskIDs) == 0 {
+		return jobs, nil
+	}
+	err := r.db.Omit("InputText", "InputChunksJSON").Where("task_id IN ? AND job_type = ?", taskIDs, model.TaskJobTypeSummary).Find(&jobs).Error
+	return jobs, err
+}
+
 func (r *TaskJobRepository) MarkRunning(taskID int64, jobType, stage string) error {
 	now := time.Now()
 	return r.db.Model(&model.TaskJob{}).

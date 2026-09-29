@@ -400,3 +400,7 @@ func mustJSON(t *testing.T, value interface{}) []byte {
 	}
 	return data
 }
+
+func (p *leaseCapturingRetryProducer) EnqueueSummary(ctx context.Context, taskID int64, md5 string) error {
+	return p.EnqueueAnalyze(ctx, taskID, md5)
+}

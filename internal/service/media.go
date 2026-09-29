@@ -19,7 +19,7 @@ import (
 // MediaService，不要为了文件边界
 // 重复创建 service 或绕过这里的仓储、对象存储和消息队列依赖。
 type mediaProducer interface {
-	EnqueueAnalyze(ctx context.Context, taskID int64, md5 string) error
+	EnqueueSummary(ctx context.Context, taskID int64, md5 string) error
 	EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error
 	EnqueueDownload(ctx context.Context, taskID int64, key string) error
 }
