@@ -48,8 +48,8 @@ jobs:
           npm ci --no-audit --no-fund
           npm run typecheck
           npm test
-          npm run test:stream
           npm run build
+          npm run test:stream
       - name: Package checked release
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
