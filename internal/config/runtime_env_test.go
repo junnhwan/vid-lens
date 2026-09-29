@@ -67,6 +67,16 @@ func TestValidateServerRejectsUnderscorePlaceholderSecret(t *testing.T) {
 	}
 }
 
+func TestValidateServerRejectsChangeThisPlaceholderSecret(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Server.Mode = "release"
+	cfg.JWT.Secret = "vidlens-server-jwt-change-this-secret"
+	cfg.Security.APIKeySecret = strings.Repeat("b", 64)
+	if err := cfg.ValidateServer(); err == nil {
+		t.Fatal("change-this production placeholder accepted")
+	}
+}
+
 func TestLoadRejectsInvalidRuntimeEnvironmentWithoutEchoingValues(t *testing.T) {
 	for _, name := range []string{"VIDLENS_DATABASE_PORT", "VIDLENS_MINIO_USE_SSL", "VIDLENS_MQ_BROKERS", "VIDLENS_ALLOWED_VIDEO_HOSTS"} {
 		t.Run(name, func(t *testing.T) {
