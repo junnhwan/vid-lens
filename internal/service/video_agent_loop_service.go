@@ -94,7 +94,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			}
 			return nil, errors.New("旧执行模式不能继续运行，请重新提问")
 		}
-		policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+		policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans, ConvergenceVersion: frozenPolicy.ConvergenceVersion}
 	} else {
 		if policy == (VideoAgentLoopPolicy{}) {
 			policy = DefaultVideoAgentLoopPolicy()
@@ -134,7 +134,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		return nil, fmt.Errorf("decode frozen agent profile: %w", err)
 	}
 	req.TopK = frozenPolicy.TopK
-	policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans}
+	policy = VideoAgentLoopPolicy{MaxSteps: frozenPolicy.MaxSteps, MaxReplans: frozenPolicy.MaxReplans, ConvergenceVersion: frozenPolicy.ConvergenceVersion}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("frozen research policy is invalid: %w", err)
 	}
@@ -368,7 +368,7 @@ func (s *VideoAgentService) ResumeAgent(ctx context.Context, userID int64, runID
 	}
 	return s.RunAgent(ctx, VideoAgentLoopRequest{
 		UserID: userID, SessionID: run.SessionID, Goal: run.Goal, TopK: policy.TopK,
-		Policy: VideoAgentLoopPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans}, RunID: run.ID,
+		Policy: VideoAgentLoopPolicy{MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans, ConvergenceVersion: policy.ConvergenceVersion}, RunID: run.ID,
 	}, embedding, chat, profile)
 }
 

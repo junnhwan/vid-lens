@@ -20,7 +20,7 @@ func plannerInputView(state VideoAgentLoopState) VideoAgentLoopState {
 		start = 0
 	}
 	for _, step := range state.Steps[start:] {
-		step.Action.Arguments = nil
+		step.Action.Arguments = compactResearchArguments(step.Action.Tool, step.Action.Arguments)
 		step.Action.Reason = ""
 		step.Action.PublicSummary = trimRunes(step.Action.PublicSummary, 120)
 		step.Trace.Input = nil

@@ -39,6 +39,7 @@ type frozenAgentPolicy struct {
 	TopK                  int              `json:"top_k"`
 	MaxSteps              int              `json:"max_steps"`
 	MaxReplans            int              `json:"max_replans"`
+	ConvergenceVersion    int              `json:"convergence_version,omitempty"`
 	AllowedTools          []string         `json:"allowed_tools"`
 	MaxWindowSelections   int              `json:"max_window_selections,omitempty"`
 	WindowRadius          int              `json:"window_radius,omitempty"`
@@ -105,7 +106,7 @@ func loopAgentPolicyWithVisual(topK int, policy VideoAgentLoopPolicy, visualEnab
 		// owns its smaller per-call VLM/frame budget and reports its usage.
 		maxVisionCalls, maxVisualCalls, maxFrames = 1, 1, 8
 	}
-	return frozenAgentPolicy{EngineVersion: 2, TopK: topK, MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans, AllowedTools: allowed}, frozenAgentBudget{
+	return frozenAgentPolicy{EngineVersion: 2, TopK: topK, MaxSteps: policy.MaxSteps, MaxReplans: policy.MaxReplans, ConvergenceVersion: policy.ConvergenceVersion, AllowedTools: allowed}, frozenAgentBudget{
 		// Each research iteration has one planner checkpoint plus one tool step.
 		MaxSteps: policy.MaxSteps*2 + 1, MaxToolCalls: policy.MaxSteps,
 		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: maxVisionCalls, MaxAttemptsPerStep: 1,

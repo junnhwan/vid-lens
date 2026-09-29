@@ -31,13 +31,18 @@ const (
 type VideoAgentLoopPolicy struct {
 	MaxSteps   int `json:"max_steps"`
 	MaxReplans int `json:"max_replans"`
+	// Zero preserves historical runs' checkpoint and merge behavior.
+	ConvergenceVersion int `json:"convergence_version,omitempty"`
 }
 
 func DefaultVideoAgentLoopPolicy() VideoAgentLoopPolicy {
-	return VideoAgentLoopPolicy{MaxSteps: config.DefaultAgentBudgetConfig().Defaults.MaxToolCalls, MaxReplans: 8}
+	return VideoAgentLoopPolicy{MaxSteps: config.DefaultAgentBudgetConfig().Defaults.MaxToolCalls, MaxReplans: 8, ConvergenceVersion: 1}
 }
 
 func (p VideoAgentLoopPolicy) Validate() error {
+	if p.ConvergenceVersion < 0 || p.ConvergenceVersion > 1 {
+		return errors.New("unsupported research convergence version")
+	}
 	if p.MaxSteps <= 0 {
 		return errors.New("video research max_steps 必须大于 0")
 	}
@@ -197,7 +202,7 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		}
 		if result.State.Answer != "" {
 			result.State.Status = VideoAgentLoopStatusCompleted
-			result.State.StopReason = "answer_generated"
+			result.State.StopReason = researchAnswerStopReason(result.State)
 			if result.State.BudgetNotice != nil {
 				result.State.StopReason = "budget_finalized"
 			}
@@ -290,7 +295,7 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		step.Observation = &observation
 		result.State.Steps = append(result.State.Steps, step)
 		result.State.Observations = append(result.State.Observations, observation)
-		result.State.Evidence = mergeVideoAgentLoopEvidence(result.State.Evidence, observation.NewEvidence)
+		result.State.Evidence = mergeResearchProgressEvidence(result.State.Evidence, observation.NewEvidence, r.policy.ConvergenceVersion)
 		result.State.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
 		if observation.Answer != "" {
 			result.State.Answer = observation.Answer

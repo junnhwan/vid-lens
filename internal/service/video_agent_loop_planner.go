@@ -51,6 +51,7 @@ func (p *LLMVideoAgentLoopPlanner) NextDecisionWithUsage(ctx context.Context, st
 	}
 	var providerUsage *ai.ChatUsage
 	ctx = ai.WithChatBudget(ctx, 1024, func(u ai.ChatUsage) { providerUsage = &u })
+	ctx = ai.WithStructuredJSON(ctx)
 	var response string
 	if observer := progressContext(ctx); observer.reasoning != nil {
 		err = ai.StreamResponse(ctx, p.chat, messages, func(delta ai.StreamDelta) error {
@@ -207,6 +208,9 @@ func renderPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefi
 - investigate_visual 返回的是带来源和时间的 query-time observation，不是独立语义核验；不要把 unverified observation 写成已证明的事实。
 - transcript 与视觉证据冲突时保留双方，继续补齐另一模态或生成明确标注不确定性的带引用回答，不得选择一方覆盖另一方。
 - 如果当前证据不足，需要调整检索策略时，将 replan=true；不要无理由重复同一个动作。
+- 每次继续取证都须针对一个具体缺口。局部事实或用法问题通常先检索，再按需扩展一次相关上下文；已有证据覆盖问题时立即调用 build_cited_answer。
+- 已完成步骤的 arguments 表示已读过的范围；不要再次读取相同或被已有窗口覆盖的转写范围，也不要只换措辞反复搜索同一个缺口。
+- 连续取证未得到新信息时，用 build_cited_answer 回答能确认的部分并说明缺口。视频未提供的 API 语法、阈值或实现细节不必搜到齐全；缺失信息也是可报告的结果，不能自行补造。
 - arguments 必须遵守所选工具的 input_schema：只填写列出的字段并满足 required，不能自行猜测字段名。
 - 检索词放在 question 字段，例如 search_transcript 的 arguments 为 {"question":"四步框架", "top_k":4}。
 - build_cited_answer 的 citations 只选择当前 evidence 中的 evidence_id 或 task_id/chunk_id，不生成证据正文或新的标识。

@@ -3,9 +3,45 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"vid-lens/internal/ai"
 )
+
+func TestVideoAgentPlannerUsesBoundedJSONWithoutChangingWriter(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests++
+		if requests == 1 {
+			if body["enable_thinking"] != false || body["max_tokens"] != float64(1024) || body["response_format"] == nil {
+				t.Error("planner did not use bounded JSON mode")
+			}
+		} else if body["enable_thinking"] != nil || body["response_format"] != nil {
+			t.Error("planner JSON settings leaked into the final writer")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"tool\":\"search_transcript\",\"reason\":\"定位\",\"arguments\":{\"question\":\"选择和评分\"}}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	client := ai.NewOpenAIChatClient(server.URL, "test-key", "qwen3.6-flash")
+	if _, err := NewLLMVideoAgentLoopPlanner(client).NextDecision(context.Background(), VideoAgentLoopState{Goal: "选择和评分"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Chat(context.Background(), []ai.ChatMessage{{Role: "user", Content: "生成回答"}}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests=%d", requests)
+	}
+}
 
 func TestLLMVideoAgentLoopPlannerReceivesToolArgumentSchemas(t *testing.T) {
 	chat := &scriptedChatClient{responses: []string{`{"done":false,"tool":"search_transcript","reason":"locate evidence","arguments":{"question":"four steps"}}`}}

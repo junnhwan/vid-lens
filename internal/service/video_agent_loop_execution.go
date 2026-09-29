@@ -128,13 +128,13 @@ func (r *VideoAgentLoopRunner) recoverResearchState(ctx context.Context, state *
 		if err := runtime.checkScope(ctx, checkpoint.Observation.NewEvidence); err != nil {
 			return false, err
 		}
-		applyRecoveredResearchStep(state, number, decision, checkpoint)
+		applyRecoveredResearchStep(state, number, decision, checkpoint, r.policy.ConvergenceVersion)
 		if state.ArgumentCorrections > 1 {
 			return false, errors.New("工具参数纠正次数已用尽")
 		}
 		if state.Answer != "" {
 			state.Status = VideoAgentLoopStatusCompleted
-			state.StopReason = "answer_generated"
+			state.StopReason = researchAnswerStopReason(*state)
 			if state.BudgetNotice != nil {
 				state.StopReason = "budget_finalized"
 			}
@@ -194,7 +194,7 @@ func hasCompletedResearchSequenceAfter(steps []model.AgentStep, sequence int) bo
 	return false
 }
 
-func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision VideoAgentLoopDecision, checkpoint durableResearchToolCheckpoint) {
+func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision VideoAgentLoopDecision, checkpoint durableResearchToolCheckpoint, convergenceVersion int) {
 	observation := checkpoint.Observation
 	state.CurrentStep++
 	step := VideoAgentLoopStep{
@@ -207,7 +207,7 @@ func applyRecoveredResearchStep(state *VideoAgentLoopState, number int, decision
 	}
 	state.Steps = append(state.Steps, step)
 	state.Observations = append(state.Observations, observation)
-	state.Evidence = mergeVideoAgentLoopEvidence(state.Evidence, observation.NewEvidence)
+	state.Evidence = mergeResearchProgressEvidence(state.Evidence, observation.NewEvidence, convergenceVersion)
 	state.PendingQuestions = append([]string(nil), observation.UnresolvedQuestions...)
 	if observation.ErrorClass == "invalid_arguments" {
 		state.ArgumentCorrections++
@@ -243,7 +243,8 @@ func (r *VideoAgentLoopRunner) nextResearchDecisionCheckpoint(ctx context.Contex
 		return VideoAgentLoopDecision{}, false, buildErr
 	}
 	plannerUsage := estimatedPlannerCallUsage(plannerMessages, "")
-	forcedFinal := state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1
+	_, finalToolErr := r.registry.Lookup(VideoAgentToolBuildCitedAnswer)
+	forcedFinal := state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1 || (finalToolErr == nil && r.researchStalled(state))
 	if forcedFinal {
 		plannerUsage = VideoAgentLoopPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}
 	}
@@ -573,7 +574,8 @@ func (r *VideoAgentLoopRunner) chooseDecisionWithUsage(ctx context.Context, stat
 	var u VideoAgentLoopPlannerCallUsage
 	var err error
 	_, finalToolErr := r.registry.Lookup(VideoAgentToolBuildCitedAnswer)
-	if finalToolErr != nil || (state.BudgetNotice == nil && state.CurrentStep < state.MaxSteps-1) {
+	stalled := r.researchStalled(state)
+	if finalToolErr != nil || (state.BudgetNotice == nil && state.CurrentStep < state.MaxSteps-1 && !stalled) {
 		planCtx := ctx
 		cancel := func() {}
 		var run *model.AgentRun
@@ -614,12 +616,17 @@ func (r *VideoAgentLoopRunner) chooseDecisionWithUsage(ctx context.Context, stat
 			state.BudgetNotice, err = notice, nil
 		}
 	}
-	if finalToolErr == nil && err == nil && (state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1 || d.Done || (d.Replan && state.ReplanCount >= state.MaxReplans)) {
+	repeated := r.policy.ConvergenceVersion > 0 && repeatedResearchAction(state, d)
+	if finalToolErr == nil && err == nil && (state.BudgetNotice != nil || state.CurrentStep >= state.MaxSteps-1 || stalled || repeated || d.Done || (d.Replan && state.ReplanCount >= state.MaxReplans)) {
 		args, encodeErr := json.Marshal(buildCitedAnswerToolArguments{Question: state.Goal, Intermediate: "基于已有证据回答；明确说明未确认的信息与视觉限制。", Citations: state.Evidence})
 		if encodeErr != nil {
 			return d, u, encodeErr
 		}
 		d = VideoAgentLoopDecision{BudgetNotice: state.BudgetNotice, Tool: VideoAgentToolBuildCitedAnswer, Reason: "deliver available evidence and gaps", Arguments: args}
+		if stalled || repeated {
+			d.StopReason = "evidence_stalled"
+			d.PublicSummary = "继续取证没有增加信息，正在整理已有证据并说明尚未确认的部分。"
+		}
 	}
 	return d, u, err
 }
