@@ -129,6 +129,7 @@ class PullDeployTests(unittest.TestCase):
 
     def test_download_retries_alternate_route_after_a_midstream_timeout(self):
         interrupted, complete = MagicMock(), MagicMock()
+        interrupted.__enter__.return_value.status = complete.__enter__.return_value.status = 200
         interrupted.__enter__.return_value.read.side_effect = [b'partial', TimeoutError('read stalled')]
         complete.__enter__.return_value.read.side_effect = [b'complete', b'']
         path = self.root / 'downloaded'
@@ -137,6 +138,51 @@ class PullDeployTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), b'complete')
         self.assertEqual(request.call_args_list[0].kwargs['route'], {'https': 'http://local-proxy.invalid'})
         self.assertEqual(request.call_args_list[1].kwargs['route'], {})
+
+    def test_download_resumes_partial_bytes_on_alternate_route(self):
+        interrupted, resumed = MagicMock(), MagicMock()
+        interrupted.__enter__.return_value.status = 200
+        interrupted.__enter__.return_value.read.side_effect = [b'part', TimeoutError('read stalled')]
+        resumed.__enter__.return_value.status = 206
+        resumed.__enter__.return_value.headers = {'Content-Range': 'bytes 4-7/8'}
+        resumed.__enter__.return_value.read.side_effect = [b'ial!', b'']
+        path = self.root / 'downloaded'
+        with patch.object(deploy, 'open_public', side_effect=[interrupted, resumed]) as request:
+            self.assertTrue(deploy.download('https://github.com/asset', path, 8, proxy='http://local-proxy.invalid'))
+        self.assertEqual(path.read_bytes(), b'partial!')
+        self.assertEqual(request.call_args_list[1].kwargs['range_start'], 4)
+        deploy.verify_file(path, {'size': 8, 'sha256': hashlib.sha256(b'partial!').hexdigest()})
+
+    def test_download_rejects_incorrect_resume_range(self):
+        interrupted, resumed = MagicMock(), MagicMock()
+        interrupted.__enter__.return_value.status = 200
+        interrupted.__enter__.return_value.read.side_effect = [b'part', TimeoutError('read stalled')]
+        resumed.__enter__.return_value.status = 206
+        path = self.root / 'downloaded'
+        for header in ('bytes 3-7/8', 'bytes 4-8/9', 'bytes 4-5/8', ''):
+            with self.subTest(header=header):
+                interrupted.__enter__.return_value.read.side_effect = [b'part', TimeoutError('read stalled')]
+                resumed.__enter__.return_value.headers = {'Content-Range': header}
+                with patch.object(deploy, 'open_public', side_effect=[interrupted, resumed]), self.assertRaises(deploy.DeployError):
+                    deploy.download('https://github.com/asset', path, 8, proxy='http://local-proxy.invalid')
+                self.assertEqual(path.read_bytes(), b'part')
+
+    def test_download_rejects_incomplete_resume_body(self):
+        interrupted, resumed = MagicMock(), MagicMock()
+        interrupted.__enter__.return_value.status = 200
+        interrupted.__enter__.return_value.read.side_effect = [b'part', TimeoutError('read stalled')]
+        resumed.__enter__.return_value.status = 206
+        resumed.__enter__.return_value.headers = {'Content-Range': 'bytes 4-7/8'}
+        resumed.__enter__.return_value.read.side_effect = [b'ia', b'']
+        with patch.object(deploy, 'open_public', side_effect=[interrupted, resumed]), self.assertRaises(deploy.NetworkError):
+            deploy.download('https://github.com/asset', self.root / 'downloaded', 8, proxy='http://local-proxy.invalid')
+
+    def test_public_resume_requests_only_the_missing_range(self):
+        response = MagicMock()
+        with patch.object(deploy.urllib.request, 'build_opener') as build:
+            build.return_value.open.return_value = response
+            deploy.open_public('https://github.com/asset', route={}, range_start=4)
+        self.assertEqual(build.return_value.open.call_args.args[0].get_header('Range'), 'bytes=4-')
 
     def test_frontend_rejects_path_traversal_links_private_and_duplicate_files(self):
         for members in [ [('dist/../../escape', b'x')], [('dist/link', None)],

@@ -91,8 +91,11 @@ def connection_routes(proxy):
     return [{'https': proxy}, {}] if proxy else [{}]
 
 
-def open_public(url, proxy=None, route=None):
-    request = urllib.request.Request(url, headers={'User-Agent': 'VidLens-Pull-Deploy/1'})
+def open_public(url, proxy=None, route=None, range_start=0):
+    headers = {'User-Agent': 'VidLens-Pull-Deploy/1'}
+    if range_start:
+        headers['Range'] = 'bytes=%d-' % range_start
+    request = urllib.request.Request(url, headers=headers)
     routes = connection_routes(proxy) if route is None else [route]
     for index, route in enumerate(routes):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler(route))
@@ -126,17 +129,32 @@ def main_sha(config):
 def download(url, path, limit, missing_ok=False, proxy=None):
     routes = connection_routes(proxy)
     for index, route in enumerate(routes):
+        resume_start = path.stat().st_size if index and path.exists() else 0
         try:
-            with open_public(url, route=route) as response, path.open('wb') as output:
+            with open_public(url, route=route, range_start=resume_start) as response:
+                mode, expected_end = 'wb', None
                 size = 0
-                while True:
-                    block = response.read(64 * 1024)
-                    if not block:
-                        break
-                    size += len(block)
-                    if size > limit:
-                        raise DeployError('Release asset exceeds the size limit')
-                    output.write(block)
+                if response.status == 206:
+                    matched = re.fullmatch(r'bytes (\d+)-(\d+)/(\d+)', response.headers.get('Content-Range', ''))
+                    if not matched:
+                        raise DeployError('Release resume range is invalid')
+                    start, end, total = map(int, matched.groups())
+                    if start != resume_start or not start <= end < total <= limit or end + 1 != total:
+                        raise DeployError('Release resume range does not match the partial asset')
+                    mode, size, expected_end = ('ab' if resume_start else 'wb'), resume_start, total
+                elif response.status != 200:
+                    raise DeployError('Unexpected release download status')
+                with path.open(mode) as output:
+                    while True:
+                        block = response.read(64 * 1024)
+                        if not block:
+                            break
+                        size += len(block)
+                        if size > limit:
+                            raise DeployError('Release asset exceeds the size limit')
+                        output.write(block)
+                if expected_end is not None and size != expected_end:
+                    raise NetworkError('Release resume body is incomplete')
             return True
         except urllib.error.HTTPError as error:
             if missing_ok and error.code == 404:
