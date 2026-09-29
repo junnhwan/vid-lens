@@ -106,12 +106,13 @@ func TestAIProfileBudgetReducedServerLimitShowsEffectiveValue(t *testing.T) {
 	}
 	cfg := config.DefaultAgentBudgetConfig()
 	cfg.Limits.MaxToolCalls.Max = 10
+	cfg.Defaults.MaxToolCalls = 10
 	svc.WithAgentBudgetConfig(cfg)
 	rows, err := svc.List(7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows[0].AgentBudget.MaxToolCalls != 20 || rows[0].EffectiveAgentBudget.Values.MaxToolCalls != 10 || len(rows[0].EffectiveAgentBudget.Adjustments) != 1 {
+	if rows[0].EffectiveAgentBudget == nil || rows[0].AgentBudget.MaxToolCalls != 20 || rows[0].EffectiveAgentBudget.Values.MaxToolCalls != 10 || len(rows[0].EffectiveAgentBudget.Adjustments) != 1 {
 		t.Fatalf("old stored value should remain visible alongside tightened value: %+v", rows[0])
 	}
 }

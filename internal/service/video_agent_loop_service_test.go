@@ -94,7 +94,7 @@ func TestVideoAgentRunAgentRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 		execution.Run.CostUsageSource != model.AgentCallUsageUnknown || execution.Run.ContextUsageSource != model.AgentCallUsageEstimated {
 		t.Fatalf("research budget usage = %+v", execution.Run)
 	}
-	if execution.Run.MaxRetrievalCalls != 8 || execution.Run.MaxVisualCalls != 0 || execution.Run.MaxFrames != 0 || execution.Run.MaxPromptTokens <= 0 ||
+	if execution.Run.MaxRetrievalCalls != DefaultVideoAgentLoopPolicy().MaxSteps || execution.Run.MaxVisualCalls != 0 || execution.Run.MaxFrames != 0 || execution.Run.MaxPromptTokens <= 0 ||
 		execution.Run.MaxCompletionTokens <= 0 || execution.Run.MaxCostMicros <= 0 || execution.Run.MaxDurationMs <= 0 || execution.Run.MaxContextChars <= 0 {
 		t.Fatalf("research budget limits = %+v", execution.Run)
 	}

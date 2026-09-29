@@ -303,7 +303,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         <details className="disclosure" style={{ marginTop: 22 }}>
           <summary><Icon name="bolt" size="sm" />Agent 执行预算</summary>
           <div className="disclosure-body plain">
-            <p>仅用于此配置下新开始的 Agent 运行，不影响普通 Chat；Token 用量可能为估算，不代表模型思考强度。</p>
+            <p>用于此配置下新开始的 Agent 问答和学习笔记任务。输入、输出 Token 是整次任务中多次调用的累计额度；模型上下文窗口是单次请求容量，单独设置。Token 用量可能为估算。</p>
             {profile?.agent_budget_error && <p role="alert">{profile.agent_budget_error}；可恢复默认或重新填写预算修复。</p>}
             {budgetError && <p role="alert">{budgetError}</p>}
             <div style={{ display: 'flex', gap: 18, margin: '2px 0' }}>

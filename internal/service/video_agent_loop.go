@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"vid-lens/internal/config"
 	"vid-lens/internal/model"
 )
 
@@ -33,7 +34,7 @@ type VideoAgentLoopPolicy struct {
 }
 
 func DefaultVideoAgentLoopPolicy() VideoAgentLoopPolicy {
-	return VideoAgentLoopPolicy{MaxSteps: 8, MaxReplans: 2}
+	return VideoAgentLoopPolicy{MaxSteps: config.DefaultAgentBudgetConfig().Defaults.MaxToolCalls, MaxReplans: 8}
 }
 
 func (p VideoAgentLoopPolicy) Validate() error {

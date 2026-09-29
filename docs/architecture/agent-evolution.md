@@ -8,7 +8,9 @@
 
 `ConversationExecution` 解析模式、准备当前用户 AI profile/client，并传递取消上下文。Chat 使用摘要、近期对话和一轮检索管线自然回答；Agent 的同步接口和 SSE 接口均调用 `VideoAgentService.RunAgent`。
 
-`video_agent_loop.go` 实现有界 Planner / Tool / Observe。默认最多 8 个工具步骤、2 次重规划，最后一个工具位置预留给最终回答。模型预算先耗尽时，不再调用模型，事务保存已有证据摘录和缺口说明，并保留 budget_exhausted 终态。最终回答成功后立即结束，不再调用 Planner。总超时与模型、工具、检索、视觉预算冻结在 run 中，journal 对每个持久动作执行预算和 lease/CAS 校验。
+`video_agent_loop.go` 实现有界 Planner / Tool / Observe。默认最多 32 个工具步骤、8 次重规划，最后一个工具位置预留给最终回答。对话最多 65 次模型调用（包含 Planner 和最终回答），学习笔记最多 32 次模型调用。默认总时长 1200 秒、累计输入 262144 token、累计输出 65536 token；视觉帧默认仍为 8。自定义上限为 64 个工具步骤、1800 秒、累计输入 1048576 token、累计输出 131072 token。服务端配置或 Profile 可以覆盖预算，现有运行使用冻结值。
+
+模型上下文窗口限制单次请求容量，任务 Token 预算限制所有调用的累计用量，两者独立；增加上下文容量不会自动增加任务预算。最终回答的调用、Token 和时间预留计入总额。模型预算先耗尽时，不再调用模型，事务保存已有证据摘录和缺口说明，并保留 budget_exhausted 终态。最终回答成功后立即结束，不再调用 Planner。总超时与模型、工具、检索、视觉预算冻结在 run 中，journal 对每个持久动作执行预算和 lease/CAS 校验。
 
 ## 工具
 

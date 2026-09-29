@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/config"
 	"vid-lens/internal/model"
 )
 
@@ -94,6 +95,7 @@ func loopAgentPolicy(topK int, policy VideoAgentLoopPolicy) (frozenAgentPolicy, 
 }
 
 func loopAgentPolicyWithVisual(topK int, policy VideoAgentLoopPolicy, visualEnabled bool) (frozenAgentPolicy, frozenAgentBudget) {
+	defaults := config.DefaultAgentBudgetConfig().Defaults
 	allowed := defaultAgentToolNames()
 	maxVisionCalls, maxVisualCalls, maxFrames := 0, 0, 0
 	if visualEnabled {
@@ -107,8 +109,8 @@ func loopAgentPolicyWithVisual(topK int, policy VideoAgentLoopPolicy, visualEnab
 		// Each research iteration has one planner checkpoint plus one tool step.
 		MaxSteps: policy.MaxSteps*2 + 1, MaxToolCalls: policy.MaxSteps,
 		MaxLLMCalls: policy.MaxSteps*2 + 1, MaxVisionCalls: maxVisionCalls, MaxAttemptsPerStep: 1,
-		MaxRetrievalCalls: policy.MaxSteps, MaxVisualCalls: maxVisualCalls, MaxFrames: maxFrames, MaxPromptTokens: 32000,
-		MaxCompletionTokens: 8000, MaxCostMicros: 1000000, MaxDurationMs: 300000, MaxContextChars: 100000,
+		MaxRetrievalCalls: policy.MaxSteps, MaxVisualCalls: maxVisualCalls, MaxFrames: maxFrames, MaxPromptTokens: int64(defaults.MaxInputTokens),
+		MaxCompletionTokens: int64(defaults.MaxOutputTokens), MaxCostMicros: 1000000, MaxDurationMs: int64(defaults.MaxDurationSeconds) * 1000, MaxContextChars: int64(defaults.MaxInputTokens) * 4,
 	}
 }
 

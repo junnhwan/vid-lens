@@ -40,8 +40,10 @@ type ResolvedAgentBudget struct {
 func DefaultAgentBudgetConfig() AgentBudgetConfig {
 	frames := 8
 	return AgentBudgetConfig{
-		Defaults:           model.AgentBudgetOverride{Version: 1, MaxToolCalls: 8, MaxDurationSeconds: 480, MaxInputTokens: 65536, MaxOutputTokens: 24576, MaxVisualFrames: &frames},
-		Limits:             AgentBudgetLimits{AgentBudgetRange{2, 32, "calls"}, AgentBudgetRange{90, 900, "seconds"}, AgentBudgetRange{8192, 262144, "tokens"}, AgentBudgetRange{2048, 32768, "tokens"}, AgentBudgetRange{1, 32, "frames"}},
+		// Token limits are cumulative across a run, independent of a model's
+		// per-request context window. Leave room for segmentation and repair.
+		Defaults:           model.AgentBudgetOverride{Version: 1, MaxToolCalls: 32, MaxDurationSeconds: 1200, MaxInputTokens: 262144, MaxOutputTokens: 65536, MaxVisualFrames: &frames},
+		Limits:             AgentBudgetLimits{AgentBudgetRange{2, 64, "calls"}, AgentBudgetRange{90, 1800, "seconds"}, AgentBudgetRange{8192, 1048576, "tokens"}, AgentBudgetRange{2048, 131072, "tokens"}, AgentBudgetRange{1, 32, "frames"}},
 		FinalAnswerReserve: AgentFinalAnswerReserve{1, 1, 4096, 2048, 240},
 	}
 }
