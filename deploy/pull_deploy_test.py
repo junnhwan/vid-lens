@@ -91,14 +91,14 @@ class PullDeployTests(unittest.TestCase):
              patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 45)):
             self.assertEqual(deploy.main_sha(self.config), SHA)
 
-    def test_https_uses_private_proxy_only_after_direct_connection_fails(self):
+    def test_https_uses_configured_proxy_and_falls_back_without_exposing_values(self):
         response = MagicMock()
         with patch.object(deploy.urllib.request, 'build_opener') as build, \
              patch.object(deploy.urllib.request, 'ProxyHandler') as proxy_handler:
             build.return_value.open.side_effect = [urllib.error.URLError('unreachable'), response]
             self.assertIs(deploy.open_public('https://github.com/example', proxy='http://local-proxy.invalid'), response)
-        self.assertEqual(proxy_handler.call_args_list[0].args, ({},))
-        self.assertEqual(proxy_handler.call_args_list[1].args, ({'https': 'http://local-proxy.invalid'},))
+        self.assertEqual(proxy_handler.call_args_list[0].args, ({'https': 'http://local-proxy.invalid'},))
+        self.assertEqual(proxy_handler.call_args_list[1].args, ({},))
 
     def test_public_ref_rejects_a_different_branch(self):
         response = MagicMock()
@@ -107,6 +107,17 @@ class PullDeployTests(unittest.TestCase):
         }).encode()
         with patch.object(deploy, 'open_public', return_value=response), self.assertRaises(deploy.DeployError):
             deploy.main_sha(self.config)
+
+    def test_download_retries_alternate_route_after_a_midstream_timeout(self):
+        interrupted, complete = MagicMock(), MagicMock()
+        interrupted.__enter__.return_value.read.side_effect = [b'partial', TimeoutError('read stalled')]
+        complete.__enter__.return_value.read.side_effect = [b'complete', b'']
+        path = self.root / 'downloaded'
+        with patch.object(deploy, 'open_public', side_effect=[interrupted, complete]) as request:
+            self.assertTrue(deploy.download('https://github.com/asset', path, 32, proxy='http://local-proxy.invalid'))
+        self.assertEqual(path.read_bytes(), b'complete')
+        self.assertEqual(request.call_args_list[0].kwargs['route'], {'https': 'http://local-proxy.invalid'})
+        self.assertEqual(request.call_args_list[1].kwargs['route'], {})
 
     def test_frontend_rejects_path_traversal_links_private_and_duplicate_files(self):
         for members in [ [('dist/../../escape', b'x')], [('dist/link', None)],

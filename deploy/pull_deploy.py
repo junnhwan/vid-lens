@@ -31,6 +31,10 @@ class ActivationError(DeployError):
     pass
 
 
+class NetworkError(DeployError):
+    pass
+
+
 def log(message):
     print(message, flush=True)
 
@@ -83,9 +87,13 @@ def load_config(path):
     return config
 
 
-def open_public(url, proxy=None):
+def connection_routes(proxy):
+    return [{'https': proxy}, {}] if proxy else [{}]
+
+
+def open_public(url, proxy=None, route=None):
     request = urllib.request.Request(url, headers={'User-Agent': 'VidLens-Pull-Deploy/1'})
-    routes = [{}] + ([{'https': proxy}] if proxy else [])
+    routes = connection_routes(proxy) if route is None else [route]
     for index, route in enumerate(routes):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler(route))
         try:
@@ -94,7 +102,7 @@ def open_public(url, proxy=None):
             raise
         except (urllib.error.URLError, TimeoutError, OSError):
             if index == len(routes) - 1:
-                raise DeployError('GitHub HTTPS request failed; retrying on the next check') from None
+                raise NetworkError('GitHub HTTPS request failed; retrying on the next check') from None
 
 
 def main_sha(config):
@@ -114,22 +122,28 @@ def main_sha(config):
 
 
 def download(url, path, limit, missing_ok=False, proxy=None):
-    try:
-        with open_public(url, proxy=proxy) as response, path.open('wb') as output:
-            size = 0
-            while True:
-                block = response.read(1024 * 1024)
-                if not block:
-                    break
-                size += len(block)
-                if size > limit:
-                    raise DeployError('Release asset exceeds the size limit')
-                output.write(block)
-    except urllib.error.HTTPError as error:
-        if missing_ok and error.code == 404:
-            return False
-        raise DeployError('GitHub asset download failed (HTTP %s)' % error.code) from None
-    return True
+    routes = connection_routes(proxy)
+    for index, route in enumerate(routes):
+        try:
+            with open_public(url, route=route) as response, path.open('wb') as output:
+                size = 0
+                while True:
+                    block = response.read(64 * 1024)
+                    if not block:
+                        break
+                    size += len(block)
+                    if size > limit:
+                        raise DeployError('Release asset exceeds the size limit')
+                    output.write(block)
+            return True
+        except urllib.error.HTTPError as error:
+            if missing_ok and error.code == 404:
+                return False
+            raise DeployError('GitHub asset download failed (HTTP %s)' % error.code) from None
+        except (NetworkError, urllib.error.URLError, TimeoutError, OSError):
+            if index == len(routes) - 1:
+                raise NetworkError('GitHub asset transfer failed; retrying on the next check') from None
+            log('Asset transfer interrupted; retrying over the alternate server connection')
 
 
 def validate_manifest(manifest, sha, generation):

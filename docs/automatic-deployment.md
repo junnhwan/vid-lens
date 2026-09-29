@@ -44,8 +44,10 @@ examples; use the local deployment's actual values. Do not commit this file.
 ```
 
 For servers with an egress proxy, optionally set `https_proxy` in this local JSON
-file. The updater first attempts direct HTTPS, then uses that proxy if connecting
-fails. Keep the actual proxy setting server-local; it is never logged or published.
+file. The updater uses that proxy when configured and can retry a failed connection
+or interrupted asset transfer directly. Without a configured proxy, it uses direct
+HTTPS. Partial transfers are replaced and the complete file is checked again. Keep
+the actual proxy setting server-local; it is never logged or published.
 
 Validate the next release without activating it, then enable polling:
 
