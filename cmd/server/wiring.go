@@ -318,7 +318,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			rag:            handler.NewRAGHandler(ragIndexSvc, aiProfileSvc, aiFactory),
 			chat:           chatHandler,
 			feedback:       handler.NewChatFeedbackHandler(deps.repos.Feedback),
-			media:          handler.NewMediaHandler(mediaSvc).WithURLImportDisabled(deps.cfg.Upload.DisableURLImport).WithQuestionSuggestions(questionSuggestionsSvc),
+			media:          handler.NewMediaHandler(mediaSvc).WithURLImportDisabled(deps.cfg.Upload.DisableURLImport).WithSlowUploadNotice(deps.cfg.Upload.SlowUploadNotice).WithQuestionSuggestions(questionSuggestionsSvc),
 			knowledgeBases: handler.NewKnowledgeBaseHandler(knowledgeBaseSvc),
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 			artifacts:      handler.NewArtifactHandler(artifactSvc),

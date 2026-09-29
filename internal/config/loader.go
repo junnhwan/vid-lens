@@ -78,6 +78,13 @@ func Load(path string) (*Config, error) {
 		}
 		cfg.Upload.DisableURLImport = disabled
 	}
+	if value := strings.TrimSpace(os.Getenv("VIDLENS_UPLOAD_SLOW_NOTICE")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("VIDLENS_UPLOAD_SLOW_NOTICE 必须为布尔值")
+		}
+		cfg.Upload.SlowUploadNotice = enabled
+	}
 	if value := strings.TrimSpace(os.Getenv("VIDLENS_HOSTED_AI_OWNER_ID")); value != "" {
 		id, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || id <= 0 {

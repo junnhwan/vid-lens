@@ -8,7 +8,7 @@ import (
 )
 
 func TestDisabledURLImportRejectsBeforeCallingService(t *testing.T) {
-	h := NewMediaHandler(nil).WithURLImportDisabled(true)
+	h := NewMediaHandler(nil).WithURLImportDisabled(true).WithSlowUploadNotice(true)
 	r := gin.New()
 	r.POST("/upload-url", h.UploadByURL)
 	r.GET("/options", h.ImportOptions)
@@ -19,13 +19,13 @@ func TestDisabledURLImportRejectsBeforeCallingService(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/options", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"url_import_enabled":false`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"url_import_enabled":false`) || !strings.Contains(w.Body.String(), `"slow_upload_notice":true`) {
 		t.Fatal(w.Body.String())
 	}
-	h.WithURLImportDisabled(false)
+	h.WithURLImportDisabled(false).WithSlowUploadNotice(false)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/options", nil))
-	if !strings.Contains(w.Body.String(), `"url_import_enabled":true`) {
+	if !strings.Contains(w.Body.String(), `"url_import_enabled":true`) || !strings.Contains(w.Body.String(), `"slow_upload_notice":false`) {
 		t.Fatal(w.Body.String())
 	}
 }

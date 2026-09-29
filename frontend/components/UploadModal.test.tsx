@@ -12,24 +12,44 @@ vi.mock('@/lib/api', async importOriginal => {
 })
 
 beforeEach(() => {
-  vi.mocked(api.importOptions).mockResolvedValue({ url_import_enabled: false })
+  vi.mocked(api.importOptions).mockResolvedValue({ url_import_enabled: false, slow_upload_notice: false })
   vi.mocked(api.checkUpload).mockResolvedValue({ status: 'uploading', uploaded: [] })
   vi.mocked(api.mergeChunks).mockResolvedValue({ task_id: 42, status: 0 } as never)
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 test('enabled link import is preferred unless a user already selected files',async()=>{
-  vi.mocked(api.importOptions).mockResolvedValue({url_import_enabled:true})
+  vi.mocked(api.importOptions).mockResolvedValue({url_import_enabled:true,slow_upload_notice:false})
   const view=render(<UploadModal onClose={vi.fn()} />)
   expect(await screen.findByPlaceholderText(/https:\/\/www.bilibili/)).toBeTruthy()
   view.unmount()
-  let resolve!:(value:{url_import_enabled:boolean})=>void
+  let resolve!:(value:{url_import_enabled:boolean;slow_upload_notice:boolean})=>void
   vi.mocked(api.importOptions).mockImplementation(()=>new Promise(done=>{resolve=done}))
   render(<UploadModal onClose={vi.fn()} />)
   fireEvent.click(screen.getByRole('button',{name:'本地文件'}))
-  await act(async()=>resolve({url_import_enabled:true}))
+  await act(async()=>resolve({url_import_enabled:true,slow_upload_notice:false}))
   expect(screen.getByRole('button',{name:'选择本地视频'})).toBeTruthy()
   expect(screen.queryByPlaceholderText(/https:\/\/www.bilibili/)).toBeNull()
+})
+
+test('online notice keeps file upload visible and links to Bilibili import', async () => {
+  vi.mocked(api.importOptions).mockResolvedValue({ url_import_enabled: true, slow_upload_notice: true })
+  render(<UploadModal onClose={vi.fn()} />)
+  expect(await screen.findByText('线上文件上传较慢')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '选择本地视频' })).toBeTruthy()
+  expect(screen.getByText(/B 站视频建议优先通过链接导入/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '使用 B 站链接' }))
+  expect(screen.getByPlaceholderText(/https:\/\/www.bilibili/)).toBeTruthy()
+  expect(screen.queryByText('线上文件上传较慢')).toBeNull()
+})
+
+test('online notice does not recommend an unavailable link import', async () => {
+  vi.mocked(api.importOptions).mockResolvedValue({ url_import_enabled: false, slow_upload_notice: true })
+  render(<UploadModal onClose={vi.fn()} />)
+  expect(await screen.findByText('线上文件上传较慢')).toBeTruthy()
+  expect(screen.queryByText(/B 站视频建议/)).toBeNull()
+  expect(screen.queryByRole('button', { name: '使用 B 站链接' })).toBeNull()
+  expect(screen.getByRole('button', { name: '选择本地视频' })).toBeTruthy()
 })
 
 function selectFile(size = 16) {

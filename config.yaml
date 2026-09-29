@@ -111,6 +111,7 @@ security:
 upload:
   max_file_size: 2147483648  # 2GB
   chunk_size: 5242880        # 5MB
+  slow_upload_notice: false  # Opt in per deployment when remote file uploads are slow.
 
 task_retry:
   max_retries: 3

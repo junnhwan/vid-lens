@@ -33,10 +33,16 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
   const [url, setUrl] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlImportEnabled, setURLImportEnabled] = useState<boolean | null>(null)
+  const [slowUploadNotice, setSlowUploadNotice] = useState(false)
   const selectedImport = useRef(false)
   useEffect(() => {
     let active = true
-    api.importOptions().then(options => { if (active) { setURLImportEnabled(options.url_import_enabled); if (options.url_import_enabled && !selectedImport.current) setTab('url') } })
+    api.importOptions().then(options => {
+      if (!active) return
+      setURLImportEnabled(options.url_import_enabled)
+      setSlowUploadNotice(options.slow_upload_notice)
+      if (options.url_import_enabled && !options.slow_upload_notice && !selectedImport.current) setTab('url')
+    })
       .catch(() => { if (active) setURLImportEnabled(false) })
     return () => { active = false }
   }, [])
@@ -154,10 +160,20 @@ export default function UploadModal({ onClose, onUploaded }: { onClose: () => vo
             <button className={tab === 'file' ? 'on' : ''} onClick={() => { selectedImport.current=true; setTab('file') }}>本地文件</button>
             <button className={tab === 'url' ? 'on' : ''} disabled={urlImportEnabled !== true} style={urlImportEnabled !== true ? { opacity: 0.45, cursor: 'not-allowed' } : undefined} title={urlImportEnabled === false ? '链接导入暂未开放' : undefined} onClick={() => { selectedImport.current=true; setTab('url') }}>视频链接{urlImportEnabled === false ? ' · 暂未开放' : urlImportEnabled === null ? ' · 读取状态中' : ''}</button>
           </div>
-          <p className="muted upload-helper">{tab === 'file' ? '上传速度取决于当前网络和服务器；文件合并完成前，请保持页面打开。' : '粘贴 B 站或 b23.tv 链接。任务创建后可以离开，下载完成后选择转写或画面分析。'}</p>
+          {(!slowUploadNotice || tab === 'url') && <p className="muted upload-helper">{tab === 'file' ? '上传速度取决于当前网络和服务器；文件合并完成前，请保持页面打开。' : '粘贴 B 站或 b23.tv 链接。任务创建后可以离开，下载完成后选择转写或画面分析。'}</p>}
 
           {tab === 'file' ? (
             <div>
+              {slowUploadNotice && <div className="upload-guidance upload-guidance-online" role="note">
+                <div className="upload-guidance-row">
+                  <span className="upload-guidance-icon"><Icon name="clock" /></span>
+                  <div className="upload-guidance-copy">
+                    <h4>线上文件上传较慢</h4>
+                    <p>当前线上实例上传大文件耗时较长。{urlImportEnabled === true && 'B 站视频建议优先通过链接导入。'}本地文件仍可上传，请保持页面打开直到合并完成。</p>
+                    {urlImportEnabled === true && <button type="button" className="btn btn-primary btn-sm upload-guidance-cta" onClick={() => { selectedImport.current = true; setTab('url') }}><Icon name="link" />使用 B 站链接</button>}
+                  </div>
+                </div>
+              </div>}
               <details className="upload-deploy-help"><summary>大文件上传与部署帮助</summary><p>较大文件可考虑在自己的电脑部署，减少远程传输。链接导入是否开放以当前服务设置为准。</p><a className="upload-guidance-link" href="https://github.com/junnhwan/vid-lens#技术栈与启动" target="_blank" rel="noopener noreferrer">查看部署说明<Icon name="chev-r" /></a></details>
               <div
                 className={`dropzone${dragOver ? ' over' : ''}`}

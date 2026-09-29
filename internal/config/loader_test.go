@@ -159,3 +159,16 @@ rag:
 		t.Fatalf("rag.rewrite_queries = %d", cfg.RAG.RewriteQueries)
 	}
 }
+
+func TestLoadSlowUploadNoticeEnvironmentOverride(t *testing.T) {
+	path := writeLoaderTestConfig(t, "upload:\n  slow_upload_notice: false\n")
+	t.Setenv("VIDLENS_UPLOAD_SLOW_NOTICE", "true")
+	cfg, err := Load(path)
+	if err != nil || !cfg.Upload.SlowUploadNotice {
+		t.Fatalf("Load() slow upload notice = %v, error = %v", cfg, err)
+	}
+	t.Setenv("VIDLENS_UPLOAD_SLOW_NOTICE", "invalid")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "VIDLENS_UPLOAD_SLOW_NOTICE") {
+		t.Fatalf("Load() invalid environment error = %v", err)
+	}
+}

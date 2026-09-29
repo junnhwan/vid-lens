@@ -168,7 +168,7 @@ export const api = {
     req<{ dimension: number }>('/ai/profiles/probe', 'POST', payload),
 
   // ============ 媒体 ============
-  importOptions: () => req<{ url_import_enabled: boolean }>('/media/import-options', 'GET'),
+  importOptions: () => req<{ url_import_enabled: boolean; slow_upload_notice: boolean }>('/media/import-options', 'GET'),
   uploadFile: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)

@@ -21,6 +21,7 @@ type MediaHandler struct {
 	svc               *service.MediaService
 	questions         *service.QuestionSuggestionService
 	urlImportDisabled bool
+	slowUploadNotice  bool
 }
 
 func (h *MediaHandler) WithQuestionSuggestions(questions *service.QuestionSuggestionService) *MediaHandler {
@@ -33,9 +34,14 @@ func (h *MediaHandler) WithURLImportDisabled(disabled bool) *MediaHandler {
 	return h
 }
 
+func (h *MediaHandler) WithSlowUploadNotice(enabled bool) *MediaHandler {
+	h.slowUploadNotice = enabled
+	return h
+}
+
 func (h *MediaHandler) ImportOptions(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	response.OK(c, gin.H{"url_import_enabled": !h.urlImportDisabled})
+	response.OK(c, gin.H{"url_import_enabled": !h.urlImportDisabled, "slow_upload_notice": h.slowUploadNotice})
 }
 
 func (h *MediaHandler) VideoQuestions(c *gin.Context) {

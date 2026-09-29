@@ -1286,6 +1286,8 @@ button.switch { padding: 0; cursor: pointer; }
 .upload-guidance-copy { min-width: 0; }
 .upload-guidance-copy h4 { margin: 0; color: var(--tx-1); font-size: 13px; font-weight: 600; line-height: 1.6; }
 .upload-guidance-copy p { margin: 5px 0 11px; color: var(--tx-2); font-size: 12px; line-height: 1.85; text-wrap: pretty; }
+.upload-guidance-cta { display: inline-flex; align-items: center; gap: 7px; }
+.upload-guidance-cta .ic { width: 15px; height: 15px; }
 .upload-guidance-link { display: inline-flex; align-items: center; gap: 3px; color: var(--acc-strong); font-size: 12px; font-weight: 500; border-radius: 4px; }
 .upload-guidance-link .ic { width: 14px; height: 14px; }
 .upload-guidance-link:focus-visible { outline: 2px solid var(--acc-strong); outline-offset: 4px; }

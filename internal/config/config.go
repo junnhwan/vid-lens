@@ -179,6 +179,7 @@ type SecurityConfig struct {
 
 type UploadConfig struct {
 	DisableURLImport bool  `yaml:"disable_url_import"`
+	SlowUploadNotice bool  `yaml:"slow_upload_notice"`
 	MaxFileSize      int64 `yaml:"max_file_size"`
 	ChunkSize        int64 `yaml:"chunk_size"`
 }
