@@ -1,6 +1,6 @@
 # Study generation recipe v2
 
-New generation requests save `study-v2` in both the request and run. Recovery reads those saved values: a `study-v1` run continues its original segment checkpoints and sequential assembly. A recipe mismatch fails as `unsupported_checkpoint`.
+This document describes persisted `study-v2` runs. New generation requests use `study-v3` (see `study-generation-v3-contract.md`). Recovery reads the saved recipe: a `study-v1` run continues its original segment checkpoints and sequential assembly, and a `study-v2` run retains the contract below. A recipe mismatch fails as `unsupported_checkpoint`.
 
 The source manifest freezes raw transcript, OCR, and Vision observations and their evidence IDs. V2 derives a bounded term evidence aid with visual spellings, source IDs, nearby ASR mentions, and possible conflicts. At most 16 candidates and 12 visual excerpts enter each prompt; omitted counts are explicit. It does not mutate the observations or authorize a global string replacement. Segment and automatic title prompts use the same derivation and instruct the model to distinguish uncertain or competing names. Automatic video title writing uses a blank-title database condition and records `title_origin=auto`; user edits record `title_origin=user`. Nonempty legacy titles have unknown origin and are left alone.
 

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -234,7 +235,7 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, token string, ep
 		return tx.Model(run).Update("run_lease_until", time.Now().UTC().Add(30*time.Second)).Error
 	})
 }
-func (r *ArtifactRepository) Finish(ctx context.Context, id, token string, epoch int64, status, code string) error {
+func (r *ArtifactRepository) Finish(ctx context.Context, id, token string, epoch int64, status, code string, reason ...string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		run, err := lockedRun(tx, id)
 		if err != nil {
@@ -250,8 +251,41 @@ func (r *ArtifactRepository) Finish(ctx context.Context, id, token string, epoch
 			status = "cancelled"
 			code = ""
 		}
+		if status == "budget_exhausted" && len(reason) > 0 {
+			if err = tx.Model(run).Update("stop_reason", reason[0]).Error; err != nil {
+				return err
+			}
+		}
 		return terminal(tx, run, status, code)
 	})
+}
+
+// GenerationProgress reads bounded, server-owned events after Run has checked
+// the owner. Terminal status does not erase the last stage or covered count.
+func (r *ArtifactRepository) GenerationProgress(ctx context.Context, id string) (string, int, int, error) {
+	var events []model.RunEvent
+	if err := r.db.WithContext(ctx).Where("run_id=? AND type='run.updated'", id).Order("seq DESC").Limit(64).Find(&events).Error; err != nil {
+		return "", 0, 0, err
+	}
+	stage, covered, total := "queued", 0, 0
+	for i, event := range events {
+		var data struct {
+			Stage   string `json:"stage"`
+			Covered int    `json:"covered_segments"`
+			Total   int    `json:"total_segments"`
+		}
+		if err := json.Unmarshal([]byte(event.DataJSON), &data); err != nil {
+			return "", 0, 0, err
+		}
+		if i == 0 && data.Stage != "" {
+			stage = data.Stage
+		}
+		if data.Total > 0 {
+			covered, total = data.Covered, data.Total
+			break
+		}
+	}
+	return stage, covered, total, nil
 }
 
 func (r *ArtifactRepository) Progress(ctx context.Context, id, token string, epoch int64, stage string, covered, total int) error {

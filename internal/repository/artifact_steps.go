@@ -13,9 +13,10 @@ import (
 )
 
 type ArtifactCall struct {
-	Step   model.AgentStep
-	Call   model.AgentToolCall
-	Cached string
+	Step           model.AgentStep
+	Call           model.AgentToolCall
+	Cached         string
+	ValidationCode string
 }
 
 // BeginCall reserves cumulative budget before the provider is invoked. One registered call = one attempt.
@@ -48,13 +49,22 @@ func (r *ArtifactRepository) BeginCall(ctx context.Context, id, token string, ep
 			return artifact.Err("format_repair_required", 422)
 		}
 		if previous.Attempt >= run.MaxAttemptsPerStep {
-			return artifact.Err("budget_exhausted", 422)
+			return artifact.Exhausted("attempts")
 		}
 		if previous.RetryNotBefore != nil && previous.RetryNotBefore.After(time.Now().UTC()) {
 			return &artifact.RetryWait{Until: *previous.RetryNotBefore}
 		}
-		if run.ExecutionStartedAt == nil || time.Since(*run.ExecutionStartedAt).Milliseconds() >= run.MaxDurationMs || run.LLMCallsUsed >= run.MaxLLMCalls || run.PromptTokensUsed+prompt > run.MaxPromptTokens || run.CompletionTokensUsed+output > run.MaxCompletionTokens {
-			return artifact.Err("budget_exhausted", 422)
+		if run.ExecutionStartedAt == nil || time.Since(*run.ExecutionStartedAt).Milliseconds() >= run.MaxDurationMs {
+			return artifact.Exhausted("duration")
+		}
+		if run.LLMCallsUsed >= run.MaxLLMCalls {
+			return artifact.Exhausted("llm_calls")
+		}
+		if run.PromptTokensUsed+prompt > run.MaxPromptTokens {
+			return artifact.Exhausted("input_tokens")
+		}
+		if run.CompletionTokensUsed+output > run.MaxCompletionTokens {
+			return artifact.Exhausted("output_tokens")
 		}
 		now := time.Now().UTC()
 		step := model.AgentStep{ID: uuid.NewString(), RunID: id, StepID: stepID, Attempt: previous.Attempt + 1, Sequence: run.LLMCallsUsed + 1, Kind: "artifact", Action: "generate_study", Status: "running", InputSummary: digest, LeaseToken: uuid.NewString(), LeaseExpiresAt: run.RunLeaseUntil, StartedAt: now, EstimatedPromptTokens: prompt}
@@ -93,16 +103,17 @@ func (r *ArtifactRepository) FailCall(ctx context.Context, id, token string, epo
 		if len(retryAt) > 0 {
 			next = retryAt[0]
 		}
-		if err = tx.Model(&model.AgentStep{}).Where("id=? AND lease_token=? AND status='running'", call.Step.ID, call.Step.LeaseToken).Updates(map[string]any{"status": "failed", "error_code": code, "finished_at": now, "retry_not_before": next}).Error; err != nil {
+		duration := now.Sub(call.Step.StartedAt).Milliseconds()
+		if err = tx.Model(&model.AgentStep{}).Where("id=? AND lease_token=? AND status='running'", call.Step.ID, call.Step.LeaseToken).Updates(map[string]any{"status": "failed", "error_code": code, "error_message": call.ValidationCode, "duration_ms": duration, "finished_at": now, "retry_not_before": next}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&model.AgentToolCall{}).Where("id=?", call.Call.ID).Updates(map[string]any{"status": "failed", "error_code": code, "finished_at": now}).Error
+		return tx.Model(&model.AgentToolCall{}).Where("id=?", call.Call.ID).Updates(map[string]any{"status": "failed", "error_code": code, "error_message": call.ValidationCode, "duration_ms": duration, "finished_at": now}).Error
 	})
 }
 
 // SettleCall may run after cancellation/lease loss. It only adjusts a registered call's usage,
 // never result content or terminal state. Repeated provider_call_id settlement is a no-op.
-func (r *ArtifactRepository) SettleCall(ctx context.Context, callID string, prompt, completion int64, actual bool) error {
+func (r *ArtifactRepository) SettleCall(ctx context.Context, callID string, prompt, completion int64, actual bool, reasoning ...int64) error {
 	var lookup model.AgentToolCall
 	if err := r.db.WithContext(ctx).Where("id=?", callID).First(&lookup).Error; err != nil {
 		return err
@@ -127,7 +138,11 @@ func (r *ArtifactRepository) SettleCall(ctx context.Context, callID string, prom
 			return gorm.ErrInvalidData
 		}
 		promptDelta, completionDelta := prompt-call.PromptTokens, completion-call.CompletionTokens
-		if err = tx.Model(&call).Updates(map[string]any{"prompt_tokens": prompt, "completion_tokens": completion, "usage_source": "actual", "token_estimated": false, "metrics_json": "{\"settled\":true}"}).Error; err != nil {
+		metricsJSON := map[string]any{"settled": true}
+		if len(reasoning) > 0 && reasoning[0] >= 0 && reasoning[0] <= completion {
+			metricsJSON["reasoning_tokens"] = reasoning[0]
+		}
+		if err = tx.Model(&call).Updates(map[string]any{"prompt_tokens": prompt, "completion_tokens": completion, "usage_source": "actual", "token_estimated": false, "metrics_json": artifact.JSON(metricsJSON)}).Error; err != nil {
 			return err
 		}
 		var estimates int64
@@ -154,14 +169,15 @@ func (r *ArtifactRepository) Checkpoint(ctx context.Context, id, token string, e
 			return artifact.ErrLease
 		}
 		now := time.Now().UTC()
-		res := tx.Model(&model.AgentStep{}).Where("id=? AND lease_token=? AND status='running'", call.Step.ID, call.Step.LeaseToken).Updates(map[string]any{"status": "completed", "result_checkpoint": result, "result_digest": artifact.Hash(result), "finished_at": now})
+		duration := now.Sub(call.Step.StartedAt).Milliseconds()
+		res := tx.Model(&model.AgentStep{}).Where("id=? AND lease_token=? AND status='running'", call.Step.ID, call.Step.LeaseToken).Updates(map[string]any{"status": "completed", "result_checkpoint": result, "result_digest": artifact.Hash(result), "duration_ms": duration, "finished_at": now})
 		if res.Error != nil {
 			return res.Error
 		}
 		if res.RowsAffected != 1 {
 			return artifact.ErrLease
 		}
-		return tx.Model(&model.AgentToolCall{}).Where("id=?", call.Call.ID).Updates(map[string]any{"status": "completed", "finished_at": now}).Error
+		return tx.Model(&model.AgentToolCall{}).Where("id=?", call.Call.ID).Updates(map[string]any{"status": "completed", "duration_ms": duration, "finished_at": now}).Error
 	})
 }
 func (r *ArtifactRepository) TaskRows(ctx context.Context, owner int64, page, size int) ([]model.AgentRun, []model.VideoTask, int64, error) {

@@ -307,8 +307,8 @@ func (s *ArtifactService) Submit(ctx context.Context, owner int64, key string, i
 	if err != nil {
 		return nil, err
 	}
-	policy := artifact.JSON(map[string]any{"recipe": artifact.Recipe, "schema_version": 2, "term_rules": rules, "term_snapshot_hash": artifact.Hash(artifact.JSON(rules))})
 	now := time.Now().UTC()
+	policy := artifact.JSON(map[string]any{"recipe": artifact.Recipe, "schema_version": 2, "term_rules": rules, "term_snapshot_hash": artifact.Hash(artifact.JSON(rules)), "reference_date": now.Format("2006-01-02"), "source_context_revision": 2})
 	goal := strings.TrimSpace(input.Goal)
 	if goal == "" {
 		goal = "生成有来源的中文学习笔记"
@@ -338,23 +338,37 @@ type ArtifactRunUsage struct {
 	TokenSource      string `json:"token_source"`
 }
 type ArtifactRunView struct {
-	ID              string             `json:"id"`
-	ArtifactID      string             `json:"artifact_id"`
-	SourceTaskID    int64              `json:"source_task_id"`
-	ParentRunID     *string            `json:"parent_run_id"`
-	Status          string             `json:"status"`
-	Stage           string             `json:"stage"`
-	CancelRequested bool               `json:"cancel_requested"`
-	CanCancel       bool               `json:"can_cancel"`
-	CanRetry        bool               `json:"can_retry"`
-	CanResume       bool               `json:"can_resume"`
-	Result          *ArtifactRunResult `json:"result"`
-	ErrorCode       *string            `json:"error_code"`
-	CreatedAt       time.Time          `json:"created_at"`
-	StartedAt       *time.Time         `json:"started_at"`
-	FinishedAt      *time.Time         `json:"finished_at"`
-	LastSeq         int64              `json:"last_seq"`
-	Usage           ArtifactRunUsage   `json:"usage"`
+	ID              string              `json:"id"`
+	ArtifactID      string              `json:"artifact_id"`
+	SourceTaskID    int64               `json:"source_task_id"`
+	ParentRunID     *string             `json:"parent_run_id"`
+	Status          string              `json:"status"`
+	Stage           string              `json:"stage"`
+	CancelRequested bool                `json:"cancel_requested"`
+	CanCancel       bool                `json:"can_cancel"`
+	CanRetry        bool                `json:"can_retry"`
+	CanResume       bool                `json:"can_resume"`
+	Result          *ArtifactRunResult  `json:"result"`
+	ErrorCode       *string             `json:"error_code"`
+	CreatedAt       time.Time           `json:"created_at"`
+	StartedAt       *time.Time          `json:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at"`
+	LastSeq         int64               `json:"last_seq"`
+	Usage           ArtifactRunUsage    `json:"usage"`
+	Progress        ArtifactRunProgress `json:"progress"`
+	Budget          ArtifactRunBudget   `json:"budget"`
+}
+
+type ArtifactRunProgress struct {
+	Stage           string `json:"stage"`
+	CoveredSegments int    `json:"covered_segments"`
+	TotalSegments   int    `json:"total_segments"`
+}
+type ArtifactRunBudget struct {
+	StopReason      string `json:"stop_reason"`
+	MaxLLMCalls     int    `json:"max_llm_calls"`
+	MaxInputTokens  int64  `json:"max_input_tokens"`
+	MaxOutputTokens int64  `json:"max_output_tokens"`
 }
 
 func (s *ArtifactService) Run(ctx context.Context, owner int64, id string) (*ArtifactRunView, error) {
@@ -367,6 +381,12 @@ func (s *ArtifactService) Run(ctx context.Context, owner int64, id string) (*Art
 	if r.ErrorCode != "" {
 		v.ErrorCode = &r.ErrorCode
 	}
+	stage, covered, total, progressErr := s.repos.Artifact.GenerationProgress(ctx, id)
+	if progressErr != nil {
+		return nil, progressErr
+	}
+	v.Progress = ArtifactRunProgress{stage, covered, total}
+	v.Budget = ArtifactRunBudget{r.StopReason, r.MaxLLMCalls, r.MaxPromptTokens, r.MaxCompletionTokens}
 	if r.ResultVersionID != nil {
 		candidate, e := s.repos.Artifact.ResultCandidate(ctx, *r.ResultVersionID)
 		if e != nil {

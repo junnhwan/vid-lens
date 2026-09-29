@@ -32,6 +32,7 @@ export function evidenceTime(evidence: Evidence) {
   return `${evidence.time_range_status === 'coarse' ? '约 ' : ''}${clock(evidence.start_ms!)} – ${clock(evidence.end_ms!)}`
 }
 export function warningMessage(code: string) {
+  if (code === 'organization_kept_segment_structure') return '材料已完整整理；主题合并未完成，保留按片段整理的笔记结构。'
   if (code === 'human_edited_unverified') return '人工修改后的引用关系尚待核对。'
   if (code === 'generated_needs_review') return 'AI 整理的内容需要结合原视频核对。'
   if (code === 'coverage_is_observations_not_all_video_frames') return '画面证据来自抽样观察，并未覆盖每一帧。'

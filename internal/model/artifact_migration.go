@@ -20,6 +20,11 @@ func migrateArtifactSubjects(db *gorm.DB) error {
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(current_schema() || ':agent_run_subject'))").Error; err != nil {
 			return err
 		}
+		// AutoMigrate runs before this migration on every startup. Repair column
+		// nullability even when the subject constraint already has a current marker.
+		if err := tx.Exec("ALTER TABLE agent_runs ALTER COLUMN session_id DROP NOT NULL").Error; err != nil {
+			return err
+		}
 		const version = 2
 		const prefix = "vidlens:agent-run-subject:"
 		var marker string
@@ -34,7 +39,6 @@ func migrateArtifactSubjects(db *gorm.DB) error {
 			}
 		}
 		for _, sql := range []string{
-			"ALTER TABLE agent_runs ALTER COLUMN session_id DROP NOT NULL",
 			"UPDATE agent_runs SET subject_kind='chat_session', subject_id=session_id::text, execution_kind='chat' WHERE subject_kind='chat_session' AND subject_id=''",
 			"ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS chk_agent_run_subject",
 			"ALTER TABLE agent_runs ADD CONSTRAINT chk_agent_run_subject CHECK ((subject_kind='chat_session' AND session_id IS NOT NULL AND session_id>0 AND execution_kind='chat') OR (subject_kind IN ('generation_request','artifact_edit_request','summary_edit_request') AND session_id IS NULL AND subject_id<>'' AND execution_kind='artifact' AND recipe_version IS NOT NULL AND recipe_version<>''))",

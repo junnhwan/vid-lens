@@ -98,6 +98,19 @@ func artifactModelResponse(w http.ResponseWriter, r *http.Request) {
 		Messages []ai.ChatMessage `json:"messages"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
+	if len(req.Messages) > 0 && req.Messages[0].Content == studyIndexSystem {
+		var rows []struct {
+			Index int    `json:"index"`
+			Title string `json:"title"`
+		}
+		_ = json.Unmarshal([]byte(req.Messages[1].Content), &rows)
+		plan := studyIndexPlan{Groups: []studyIndexGroup{}}
+		for _, row := range rows {
+			plan.Groups = append(plan.Groups, studyIndexGroup{BlockIndices: []int{row.Index}, TitleFrom: row.Index})
+		}
+		artifactStreamResponse(w, artifact.JSON(plan), "stop")
+		return
+	}
 	if len(req.Messages) > 0 && req.Messages[0].Content == studyGlobalSystem {
 		var blocks []artifact.Block
 		_ = json.Unmarshal([]byte(req.Messages[1].Content), &blocks)
@@ -242,6 +255,12 @@ func TestStudyV2InvalidGlobalPlanDoesNotPublishAndV1RunStillResumes(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&model.AgentRun{}).Where("id=?", run.ID).Update("recipe_version", artifact.RecipeV2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.GenerationRequest{}).Where("run_id=?", run.ID).Update("recipe", artifact.RecipeV2).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.ExecuteArtifact(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -282,15 +301,9 @@ func TestStudyV2CancelDuringGlobalCallDoesNotPublish(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		r.Body = io.NopCloser(strings.NewReader(artifact.JSON(request)))
-		if len(request.Messages) > 0 && request.Messages[0].Content == studyGlobalSystem {
+		if len(request.Messages) > 0 && isStudyOrganizationPrompt(request.Messages[0].Content) {
 			cancelRun()
-			var blocks []artifact.Block
-			_ = json.Unmarshal([]byte(request.Messages[1].Content), &blocks)
-			plan := studyGlobalPlan{Groups: make([]studyGlobalGroup, 0, len(blocks))}
-			for _, b := range blocks {
-				plan.Groups = append(plan.Groups, studyGlobalGroup{OldBlockIDs: []string{b.BlockID}, Title: b.Title})
-			}
-			artifactStreamResponse(w, artifact.JSON(plan), "stop")
+			artifactModelResponse(w, r)
 			return
 		}
 		artifactModelResponse(w, r)

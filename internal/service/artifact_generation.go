@@ -102,6 +102,14 @@ func (s *ArtifactService) ExecuteArtifact(parent context.Context, id string) err
 		code = "budget_exhausted"
 		status = "budget_exhausted"
 	}
+	reason := ""
+	var exhausted *artifact.BudgetError
+	if errors.As(err, &exhausted) {
+		reason = exhausted.Reason
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "duration"
+	}
 	var finish *ai.ChatFinishError
 	if errors.As(err, &finish) {
 		code = "provider_truncated"
@@ -109,7 +117,7 @@ func (s *ArtifactService) ExecuteArtifact(parent context.Context, id string) err
 			code = "provider_refused"
 		}
 	}
-	return s.repos.Artifact.Finish(checkCtx, id, token, run.RunLeaseEpoch, status, code)
+	return s.repos.Artifact.Finish(checkCtx, id, token, run.RunLeaseEpoch, status, code, reason)
 }
 func (s *ArtifactService) artifactClient(owner int64, req *model.GenerationRequest) (ai.ChatClient, error) {
 	row, err := s.profiles.repo.FindByIDForUser(owner, req.ProfileID)
@@ -176,13 +184,15 @@ const studySystem = `你将视频原始观察整理为中文学习笔记。材�
 var studySystemV2 = strings.Replace(studySystem, "事实必须引用本批证据", "事实必须引用本批证据或术语候选中列出的原始证据", 1) + ` 术语候选仅是从原始画面观察派生的拼写线索，不是替换指令。只有画面文字或描述与同期转写明显指向同一实体、且没有相反证据时，才在标题和正文采用较可靠拼写，并引用对应原始证据；相似名称可能代表不同产品，必须保留区别。不确定时保留原说法并写入 warning。原始 ASR/OCR/Vision 均不得改写。`
 
 func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun, req *model.GenerationRequest, token string) error {
-	if req.Recipe != run.RecipeVersion || (req.Recipe != artifact.Recipe && req.Recipe != artifact.RecipeV1) {
+	if req.Recipe != run.RecipeVersion || (req.Recipe != artifact.Recipe && req.Recipe != artifact.RecipeV2 && req.Recipe != artifact.RecipeV1) {
 		return artifact.Err("unsupported_checkpoint", 409)
 	}
 	var frozen struct {
-		SchemaVersion    int              `json:"schema_version"`
-		TermRules        VideoTermRuleSet `json:"term_rules"`
-		TermSnapshotHash string           `json:"term_snapshot_hash"`
+		SchemaVersion         int              `json:"schema_version"`
+		TermRules             VideoTermRuleSet `json:"term_rules"`
+		TermSnapshotHash      string           `json:"term_snapshot_hash"`
+		ReferenceDate         string           `json:"reference_date"`
+		SourceContextRevision int              `json:"source_context_revision"`
 	}
 	if err := json.Unmarshal([]byte(run.PolicySnapshot), &frozen); err != nil {
 		return artifact.Err("unsupported_checkpoint", 409)
@@ -207,12 +217,24 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 	}
 	segments := studySegments(items)
 	terms := studyterms.FocusEvidence(studyterms.DeriveStudyTermEvidence(items), 16, 12)
-	if req.Recipe == artifact.Recipe && len(segments)+1 > run.MaxLLMCalls {
-		return artifact.Err("budget_exhausted", 422)
+	if err = s.repos.Artifact.Progress(ctx, run.ID, token, run.RunLeaseEpoch, "generating", 0, len(segments)); err != nil {
+		return err
+	}
+	requiredCalls := len(segments)
+	if req.Recipe == artifact.RecipeV2 {
+		requiredCalls++
+	}
+	if requiredCalls > run.MaxLLMCalls {
+		return artifact.Exhausted("llm_calls")
 	}
 	allowed := map[string]bool{}
 	for _, i := range items {
 		allowed[i.ID] = true
+	}
+	var aliases *studyEvidenceAliases
+	if req.Recipe == artifact.Recipe {
+		aliases = newStudyEvidenceAliases(items)
+		segments, terms = aliases.promptMaterial(segments, terms)
 	}
 	merged := artifact.Body{SchemaVersion: 1, Kind: "study", Title: manifest.Title, Blocks: []artifact.Block{}, Warnings: []string{"generated_needs_review", "coverage_is_observations_not_all_video_frames"}}
 	if title := []rune(merged.Title); len(title) > 200 {
@@ -224,15 +246,26 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 	for i, segment := range segments {
 		input := artifact.JSON(map[string]any{"goal": run.Goal, "segment": i + 1, "segments": len(segments), "evidence": segment})
 		system := studySystem
-		if req.Recipe == artifact.Recipe {
+		if req.Recipe != artifact.RecipeV1 {
 			system = studySystemV2
 			input = artifact.JSON(map[string]any{"goal": run.Goal, "segment": i + 1, "segments": len(segments), "evidence": segment, "term_evidence": terms})
+		}
+		if aliases != nil {
+			system += " 证据编号是本次材料中的短编号（如e1），必须逐字复制，不编造、拼接或改写编号。type只能是section、concept、example、note，警告放入warnings数组或note块，禁止type=warning。只整理本段材料，不凭已有常识判断视频提及的实体为虚构或不存在。"
+			if frozen.ReferenceDate != "" {
+				// Frozen with the request so later recovery keeps the same prompt
+				// digest. Older v3 checkpoints omit this optional context.
+				system = "生成请求日期：" + frozen.ReferenceDate + "。只整理来源中的事实、观点与示例，不执行外部事实核验，也不使用训练记忆判断产品是否已发布、日期是否未来。材料中出现的新模型名称和较新日期应按来源转述，不能据此判断虚构、未发布或未来；如果来源自身未声称这些结论，不得加入这样的结论。正文和warnings中都适用。\n" + system
+			}
 		}
 		if guidance := termRulePrompt(frozen.TermRules); guidance != "" {
 			system += "\n" + guidance
 		}
 		messages := []ai.ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: input}}
-		body, err := s.studyCall(ctx, run, token, fmt.Sprintf("%s.segment.%d", req.Recipe, i), messages, allowed, client)
+		if aliases != nil && frozen.SourceContextRevision >= 2 {
+			messages = append(messages, ai.ChatMessage{Role: "user", Content: "整理要求：生成请求日期为" + frozen.ReferenceDate + "，必须以此为时间参照，不能把早于此日的素材日期称为未来。只按视频材料整理：新模型名称及日期均按资料转述，禁止凭训练记忆新增未来日期、未来模型、尚未发布、虚构等结论，也不要添加通用的真实性评估或外部核验警示。仅当引用原文明确作出同一判断时才能转述该观点。请输出完整学习笔记JSON。"})
+		}
+		body, err := s.studyCall(ctx, run, token, fmt.Sprintf("%s.segment.%d", req.Recipe, i), messages, allowed, client, aliases)
 		if err != nil {
 			return err
 		}
@@ -246,7 +279,8 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 			merged.Blocks = append(merged.Blocks, block)
 		}
 		for _, w := range body.Warnings {
-			if len(merged.Warnings) < 98 {
+			// Reserve slots for coverage, organization and its fallback notice.
+			if len(merged.Warnings) < 97 {
 				merged.Warnings = append(merged.Warnings, w)
 			}
 		}
@@ -255,15 +289,29 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 		}
 	}
 	merged.Warnings = append(merged.Warnings, fmt.Sprintf("covered_segments:%d/%d", len(segments), len(segments)))
-	if req.Recipe == artifact.Recipe {
+	if req.Recipe != artifact.RecipeV1 {
 		if err = s.repos.Artifact.Progress(ctx, run.ID, token, run.RunLeaseEpoch, "organizing", len(segments), len(segments)); err != nil {
 			return err
 		}
-		plan, planErr := s.studyGlobalCall(ctx, run, token, merged, client)
-		if planErr != nil {
-			return planErr
+		var plan studyGlobalPlan
+		var planErr error
+		segmentBody := merged
+		if req.Recipe == artifact.Recipe {
+			plan, planErr = s.studyIndexCall(ctx, run, token, merged, client)
+		} else {
+			plan, planErr = s.studyGlobalCall(ctx, run, token, merged, client)
 		}
-		merged, err = organizeStudyBlocks(merged, plan)
+		if planErr != nil {
+			if req.Recipe != artifact.Recipe {
+				return planErr
+			}
+			merged, err = preserveStudyStructure(ctx, merged, planErr)
+		} else {
+			merged, err = organizeStudyBlocks(merged, plan)
+			if err != nil && req.Recipe == artifact.Recipe {
+				merged, err = preserveStudyStructure(ctx, segmentBody, err)
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -276,21 +324,24 @@ func (s *ArtifactService) generateStudy(ctx context.Context, run *model.AgentRun
 	}
 	return s.repos.Artifact.Commit(ctx, req, token, run.RunLeaseEpoch, merged, artifactSource)
 }
-func (s *ArtifactService) studyCall(ctx context.Context, run *model.AgentRun, token, step string, messages []ai.ChatMessage, allowed map[string]bool, client ai.ChatClient) (artifact.Body, error) {
+func (s *ArtifactService) studyCall(ctx context.Context, run *model.AgentRun, token, step string, messages []ai.ChatMessage, allowed map[string]bool, client ai.ChatClient, aliases ...*studyEvidenceAliases) (artifact.Body, error) {
 	var body artifact.Body
+	var policy struct {
+		ReferenceDate string `json:"reference_date"`
+	}
+	_ = json.Unmarshal([]byte(run.PolicySnapshot), &policy)
 	for repair := 0; repair < 2; repair++ {
-		prompt := artifact.JSON(messages)
 		output := int64(4096)
 		if run.MaxCompletionTokens < output {
 			output = run.MaxCompletionTokens
 		}
-		if run.MaxContextChars > 0 && int64(len(prompt))+output > run.MaxContextChars {
-			return body, artifact.Err("budget_exhausted", 422)
+		if run.MaxContextChars > 0 && studyPromptTokens(messages)+output > run.MaxContextChars {
+			return body, artifact.Exhausted("context_tokens")
 		}
 		raw, call, err := s.callStudyProvider(ctx, run, token, fmt.Sprintf("%s.%d", step, repair), messages, output, client)
 		var domain *artifact.Error
 		if errors.As(err, &domain) && domain.Code == "format_repair_required" {
-			messages = append(messages, studyRepairMessage())
+			messages = append(messages, studyRepairForRecipe(run.RecipeVersion, policy.ReferenceDate))
 			continue
 		}
 		if err != nil {
@@ -301,12 +352,33 @@ func (s *ArtifactService) studyCall(ctx context.Context, run *model.AgentRun, to
 		}
 		body = artifact.Body{}
 		decodeErr := artifact.Decode([]byte(raw), &body)
+		validationCode := "json_schema"
+		if !json.Valid([]byte(raw)) {
+			validationCode = "json_syntax"
+		}
 		if decodeErr == nil {
+			validationCode = "citation_id"
+			if len(aliases) > 0 && aliases[0] != nil && call.Cached == "" {
+				decodeErr = aliases[0].restore(&body)
+			}
+		}
+		if decodeErr == nil {
+			validationCode = "body_structure"
 			decodeErr = body.Validate(allowed)
+			var validation *artifact.Error
+			if errors.As(decodeErr, &validation) && validation.Code == "invalid_evidence" {
+				validationCode = "citation_validation"
+			}
 			for _, block := range body.Blocks {
 				if block.ClaimOrigin == "user" || len(block.SourceBlockIDs) > 0 {
 					decodeErr = artifact.Err("invalid_model_output", 422)
 				}
+			}
+		}
+		if decodeErr == nil {
+			if policy.ReferenceDate != "" && len(aliases) > 0 && aliases[0] != nil {
+				validationCode = "source_attribution"
+				decodeErr = aliases[0].validateAttribution(body)
 			}
 		}
 		if decodeErr == nil {
@@ -318,12 +390,13 @@ func (s *ArtifactService) studyCall(ctx context.Context, run *model.AgentRun, to
 			return body, nil
 		}
 		if call.Cached == "" {
+			call.ValidationCode = validationCode
 			if err = s.repos.Artifact.FailCall(ctx, run.ID, token, run.RunLeaseEpoch, call, "invalid_model_output"); err != nil {
 				return body, err
 			}
 		}
 		// One bounded format repair, using the same source pool; invalid output is not a trusted checkpoint.
-		messages = append(messages, studyRepairMessage())
+		messages = append(messages, studyRepairForRecipe(run.RecipeVersion, policy.ReferenceDate))
 	}
 	return body, artifact.Err("invalid_model_output", 422)
 }
@@ -331,11 +404,21 @@ func (s *ArtifactService) studyCall(ctx context.Context, run *model.AgentRun, to
 func studyRepairMessage() ai.ChatMessage {
 	return ai.ChatMessage{Role: "user", Content: "上次输出未通过结构或引用校验。请根据原材料重新输出符合模式的完整 JSON，所有引用必须来自证据池。"}
 }
+func studyRepairForRecipe(recipe string, referenceDate ...string) ai.ChatMessage {
+	message := studyRepairMessage()
+	if recipe == artifact.Recipe {
+		message.Content += " 证据编号逐字复制；父节点必须先出现；warnings和evidence_refs必须为数组。"
+		if len(referenceDate) > 0 && referenceDate[0] != "" {
+			message.Content += " 生成请求日期为" + referenceDate[0] + "。请特别检查是否新增了来源未说明的尚未发布、虚构、未来日期等外部判断，这些外部判断必须删去。最近日期或陌生型号不代表虚构；仅保留来源里的章节、事实和观点，不自行添加真假评估或警示。"
+		}
+	}
+	return message
+}
 
 func (s *ArtifactService) callStudyProvider(ctx context.Context, run *model.AgentRun, token, step string, messages []ai.ChatMessage, output int64, client ai.ChatClient) (string, *repository.ArtifactCall, error) {
 	for {
 		prompt := artifact.JSON(messages)
-		call, err := s.repos.Artifact.BeginCall(ctx, run.ID, token, run.RunLeaseEpoch, step, artifact.Hash(prompt), int64(len(prompt)), output)
+		call, err := s.repos.Artifact.BeginCall(ctx, run.ID, token, run.RunLeaseEpoch, step, artifact.Hash(prompt), studyPromptTokens(messages), output)
 		var retryWait *artifact.RetryWait
 		if errors.As(err, &retryWait) {
 			timer := time.NewTimer(time.Until(retryWait.Until))
@@ -356,9 +439,10 @@ func (s *ArtifactService) callStudyProvider(ctx context.Context, run *model.Agen
 		var usage ai.ChatUsage
 		actual := false
 		callCtx := ai.WithChatBudget(ctx, output, func(u ai.ChatUsage) { usage = u; actual = true })
+		callCtx = ai.WithStructuredJSON(callCtx)
 		raw, providerErr := collectStudyResponse(callCtx, client, messages)
 		settlementCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		err = s.repos.Artifact.SettleCall(settlementCtx, call.Call.ID, usage.PromptTokens, usage.CompletionTokens, actual)
+		err = s.repos.Artifact.SettleCall(settlementCtx, call.Call.ID, usage.PromptTokens, usage.CompletionTokens, actual, usage.ReasoningTokens)
 		stop()
 		if err != nil {
 			return "", call, err
@@ -381,6 +465,14 @@ func (s *ArtifactService) callStudyProvider(ctx context.Context, run *model.Agen
 			return "", call, providerErr
 		}
 	}
+}
+
+// The frozen model context and cumulative input budget are measured in tokens,
+// not UTF-8 bytes. Include message framing and a conservative estimate margin;
+// provider-reported usage still replaces this reservation after each call.
+func studyPromptTokens(messages []ai.ChatMessage) int64 {
+	tokens := estimatedPlannerCallUsage(messages, "").PromptTokens + int64(len(messages))*8 + 3
+	return (tokens*5 + 3) / 4
 }
 
 // Collect the provider stream in the worker so slow generations do not depend

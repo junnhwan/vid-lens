@@ -64,6 +64,8 @@ export const sourceSchema = z.object({ manifest_id: id, source_id: z.number().in
 export const runSchema = z.object({
   id, artifact_id: id, source_task_id: z.number().int().positive(), parent_run_id: z.string().nullable(), status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'budget_exhausted']),
   stage: z.string(), cancel_requested: z.boolean(), can_cancel: z.boolean(), can_retry: z.boolean(), can_resume: z.boolean(),
+  progress: z.object({ stage: z.string(), covered_segments: integer, total_segments: integer }).optional(),
+  budget: z.object({ stop_reason: z.string(), max_llm_calls: integer, max_input_tokens: integer, max_output_tokens: integer }).optional(),
   result: z.object({ artifact_id: id, version_id: id, quality: z.string(), is_candidate: z.boolean() }).nullable(),
   error_code: z.string().nullable(), created_at: z.string(), started_at: z.string().nullable(), finished_at: z.string().nullable(), last_seq: integer,
   usage: z.object({ llm_calls: integer, prompt_tokens: integer, completion_tokens: integer, token_source: z.enum(['unknown', 'estimated', 'actual', 'mixed']) }),

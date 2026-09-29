@@ -15,7 +15,8 @@ import (
 
 const (
 	RecipeV1 = "study-v1"
-	Recipe   = "study-v2"
+	RecipeV2 = "study-v2"
+	Recipe   = "study-v3"
 )
 
 type Error struct {
@@ -25,6 +26,12 @@ type Error struct {
 
 func (e *Error) Error() string          { return e.Code }
 func Err(code string, status int) error { return &Error{code, status} }
+
+type BudgetError struct{ Reason string }
+
+func (e *BudgetError) Error() string { return "budget_exhausted: " + e.Reason }
+func (e *BudgetError) Unwrap() error { return Err("budget_exhausted", 422) }
+func Exhausted(reason string) error  { return &BudgetError{Reason: reason} }
 
 var ErrLease = errors.New("artifact run lease lost")
 

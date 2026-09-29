@@ -180,15 +180,18 @@ func (s *ArtifactService) studyGlobalCall(ctx context.Context, run *model.AgentR
 	}
 	messages := []ai.ChatMessage{{Role: "system", Content: studyGlobalSystem}, {Role: "user", Content: artifact.JSON(input.Blocks)}}
 	for repair := 0; repair < 2; repair++ {
-		prompt := artifact.JSON(messages)
 		output := int64(4096)
 		if run.MaxCompletionTokens < output {
 			output = run.MaxCompletionTokens
 		}
-		if run.MaxContextChars > 0 && int64(len(prompt))+output > run.MaxContextChars {
+		if run.MaxContextChars > 0 && studyPromptTokens(messages)+output > run.MaxContextChars {
 			return plan, artifact.Err("source_limit_exceeded", 422)
 		}
-		raw, call, err := s.callStudyProvider(ctx, run, token, fmt.Sprintf("study-v2.global.%d", repair), messages, output, client)
+		recipe := run.RecipeVersion
+		if recipe == "" {
+			recipe = artifact.RecipeV2
+		}
+		raw, call, err := s.callStudyProvider(ctx, run, token, fmt.Sprintf("%s.global.%d", recipe, repair), messages, output, client)
 		var domain *artifact.Error
 		if errors.As(err, &domain) && domain.Code == "format_repair_required" {
 			messages = append(messages, ai.ChatMessage{Role: "user", Content: "上次分组不完整或无效。请输出全部原块 ID，每个恰好一次。"})
@@ -211,6 +214,7 @@ func (s *ArtifactService) studyGlobalCall(ctx context.Context, run *model.AgentR
 			return plan, nil
 		}
 		if call.Cached == "" {
+			call.ValidationCode = "organization_plan"
 			if err = s.repos.Artifact.FailCall(ctx, run.ID, token, run.RunLeaseEpoch, call, "invalid_model_output"); err != nil {
 				return plan, err
 			}

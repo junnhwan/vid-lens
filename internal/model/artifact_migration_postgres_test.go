@@ -2,6 +2,43 @@ package model
 
 import "testing"
 
+func TestPostgresArtifactMigrationRepairsSessionNullabilityOnRestart(t *testing.T) {
+	db, _ := openPostgresModelTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	chat := AgentRun{ID: "preserved-chat", UserID: 1, SessionID: 42, SubjectKind: "chat_session", SubjectID: "42", ExecutionKind: "chat", Status: AgentRunStatusCompleted}
+	if err := db.Create(&chat).Error; err != nil {
+		t.Fatal(err)
+	}
+	// The installed subject marker must not hide a historical column constraint.
+	if err := db.Exec("ALTER TABLE agent_runs ALTER COLUMN session_id SET NOT NULL").Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := Migrate(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var nullable string
+	if err := db.Raw("SELECT is_nullable FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='agent_runs' AND column_name='session_id'").Scan(&nullable).Error; err != nil {
+		t.Fatal(err)
+	}
+	if nullable != "YES" {
+		t.Fatalf("artifact submissions still blocked: session_id nullable=%s", nullable)
+	}
+	for _, subject := range []string{AgentRunSubjectGeneration, AgentRunSubjectArtifactEdit, AgentRunSubjectSummaryEdit} {
+		run := AgentRun{ID: subject, UserID: 1, SubjectKind: subject, SubjectID: "request", ExecutionKind: "artifact", RecipeVersion: "study-v1", Status: AgentRunStatusPending}
+		if err := db.Create(&run).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	var saved AgentRun
+	if err := db.First(&saved, "id=?", chat.ID).Error; err != nil || saved.SessionID != 42 {
+		t.Fatalf("chat identity changed: %+v %v", saved, err)
+	}
+}
+
 func TestPostgresArtifactSubjectMigrationIsMonotonic(t *testing.T) {
 	db, _ := openPostgresModelTestDB(t)
 	if err := Migrate(db); err != nil {

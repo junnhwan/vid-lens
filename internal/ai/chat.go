@@ -36,13 +36,20 @@ func chatFinishError(reason, partial string) error {
 }
 
 type chatProviderUsage struct {
-	PromptTokens     *int64 `json:"prompt_tokens"`
-	CompletionTokens *int64 `json:"completion_tokens"`
+	PromptTokens      *int64 `json:"prompt_tokens"`
+	CompletionTokens  *int64 `json:"completion_tokens"`
+	CompletionDetails struct {
+		ReasoningTokens int64 `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
 }
 
 func (u *chatProviderUsage) report(ctx context.Context) {
 	if u != nil && u.PromptTokens != nil && u.CompletionTokens != nil && *u.PromptTokens >= 0 && *u.CompletionTokens >= 0 {
-		reportChatUsage(ctx, *u.PromptTokens, *u.CompletionTokens)
+		reasoning := u.CompletionDetails.ReasoningTokens
+		if reasoning < 0 || reasoning > *u.CompletionTokens {
+			reasoning = 0
+		}
+		reportChatUsage(ctx, *u.PromptTokens, *u.CompletionTokens, reasoning)
 	}
 }
 
