@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { Modal } from '@/components/ui/Modal'
 import { useMediaQuery } from '@/components/ui/useMediaQuery'
@@ -29,6 +29,8 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
 }) {
   const [baseline, setBaseline] = useState(artifact)
   const [draft, setDraft] = useState<StudyBody | null>(artifact.version?.body ?? null)
+  const draftRevision = useRef(0)
+  const editDraft = (next: SetStateAction<StudyBody | null>) => { ++draftRevision.current; setDraft(next) }
   const [view, setView] = useState<'notes' | 'map' | 'canvas'>('notes')
   const [editing, setEditing] = useState(false)
   const [activeEditor, setActiveEditor] = useState<string | null>(null)
@@ -97,7 +99,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
   function update(blockId: string, patch: Partial<StudyBlock>) {
     setSaved(false)
     setDeleteUndo(null)
-    setDraft(current => current ? { ...current, blocks: current.blocks.map(block => block.block_id === blockId ? { ...block, ...patch, claim_origin: 'user' } : block) } : current)
+    editDraft(current => current ? { ...current, blocks: current.blocks.map(block => block.block_id === blockId ? { ...block, ...patch, claim_origin: 'user' } : block) } : current)
   }
   function chooseBlock(id: string) {
     setSelectedBlock(id)
@@ -115,18 +117,23 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     if (position) requestAnimationFrame(() => { window.scrollTo(0, position.page); if (reading.current) { reading.current.scrollTop = position.pane; const shell = reading.current.closest('.content'); if (shell) shell.scrollTop = position.shell } })
   }
   function structure(action: (current: StudyBody) => StudyBody) {
-    try { setDraft(action(body)); setSaveError(''); setSaved(false); setDeleteUndo(null) }
+    try { editDraft(action(body)); setSaveError(''); setSaved(false); setDeleteUndo(null) }
     catch (error) { setSaveError(error instanceof Error ? error.message : '结构调整失败') }
   }
   async function save(): Promise<ArtifactDetail | null> {
     if (readOnly) return null
     const parsed = bodySchema.safeParse(body)
     if (!parsed.success) { setSaveError(parsed.error.issues[0]?.message || '请检查正文'); return null }
+    const submittedRevision = draftRevision.current
     setSaving(true); setSaveError(''); setSaved(false)
     try {
       const next = await onSave(baseline.head_version, parsed.data)
-      setBaseline(next); setDraft(next.version?.body ?? null); setEditing(false); setActiveEditor(null); setConflict(null); setSaved(true); setDeleteUndo(null); setExportReady(null)
-      return next
+      const editedSinceSubmit = draftRevision.current !== submittedRevision
+      setBaseline(next)
+      if (!editedSinceSubmit) { setDraft(next.version?.body ?? null); setEditing(false); setActiveEditor(null); setSaved(true); setDeleteUndo(null) }
+      else setSaved(false)
+      setConflict(null); setExportReady(null)
+      return editedSinceSubmit ? null : next
     } catch (error) {
       setSaveError(artifactError(error))
       if (error instanceof ApiError && error.status === 409) {
@@ -167,13 +174,13 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
     {saveError && <div className="artifact-notice danger" role="alert">{saveError}<div className="product-actions">{conflict && <button className="btn btn-sm" onClick={() => setShowConflict(true)}>比较版本</button>}<button className="btn btn-sm" onClick={downloadDraft}>下载本地草稿</button></div></div>}
     {exportError && <div className="artifact-notice danger" role="alert">{exportError}<button className="btn btn-sm" onClick={() => void exportSaved()}>重试导出</button></div>}
     {exportReady && <div className="artifact-notice" role="status">已核对已保存版本及来源，Markdown 文件已备好。<a className="btn btn-sm" href={exportReady.url} download={exportReady.filename}>下载 Markdown 文件</a></div>}
-    {deleteUndo && <div className="artifact-notice" role="status">已从草稿删除所选块及其子块。<button className="btn btn-sm" onClick={() => { setDraft(deleteUndo); setDeleteUndo(null); setSaved(false) }}>撤销删除</button></div>}
+    {deleteUndo && <div className="artifact-notice" role="status">已从草稿删除所选块及其子块。<button className="btn btn-sm" onClick={() => { editDraft(deleteUndo); setDeleteUndo(null); setSaved(false) }}>撤销删除</button></div>}
     {artifact.head_version > baseline.head_version && <div className="artifact-notice">服务器有更新，当前编辑仍基于 v{baseline.head_version}。保存时会检查版本。</div>}
     <div className={`artifact-columns${!desktopEvidence && !mobile ? " without-evidence" : ""}`}>
       <div className="artifact-reading" ref={reading}>
-        {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p><p>{selected.evidence_refs.length} 条关联依据 · 可在证据栏逐条切换</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <div className="product-actions"><button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true); setActiveEditor(selected?.block_id || body.blocks[0]?.block_id || null) }}>在笔记中编辑</button>{onAgentEdit && <button className="btn btn-sm btn-primary" onClick={() => requestAgentEdit(selected.block_id)}>让 Agent 修改这个节点</button>}</div>}</div>}</> : view === 'canvas' ? <Suspense fallback={<div className="empty" role="status">正在加载知识画布…</div>}><KnowledgeCanvas key={baseline.version.id} artifactId={artifact.id} versionId={baseline.version.id} headVersion={baseline.head_version} body={body} readOnly={readOnly || historical || preview || dirty} selectedBlock={selectedBlock} onSelect={chooseCanvasBlock} onBodyChange={next => { setDraft(next); setEditing(true); setSaved(false); setSaveError('') }} onAgentEdit={onAgentEdit ? requestAgentEdit : undefined} onEvidence={id => { onEvidence(id); openEvidence() }} /></Suspense> : <article className="study-paper">
+        {view === 'map' ? <><Suspense fallback={<div className="empty" role="status">正在加载导图…</div>}><StudyMap body={body} onSelect={chooseBlock} /></Suspense>{selected && <div className="selected-concept"><p className="product-eyebrow">SELECTED CONCEPT</p><h3>{selected.title}</h3><p>{selected.content}</p><p>{selected.evidence_refs.length} 条关联依据 · 可在证据栏逐条切换</p>{!selected.evidence_refs.length && <p className="muted">这个节点没有来源引用。</p>}{!readOnly && <div className="product-actions"><button className="btn btn-sm" onClick={() => { setView('notes'); setEditing(true); setActiveEditor(selected?.block_id || body.blocks[0]?.block_id || null) }}>在笔记中编辑</button>{onAgentEdit && <button className="btn btn-sm btn-primary" onClick={() => requestAgentEdit(selected.block_id)}>让 Agent 修改这个节点</button>}</div>}</div>}</> : view === 'canvas' ? <Suspense fallback={<div className="empty" role="status">正在加载知识画布…</div>}><KnowledgeCanvas key={baseline.version.id} artifactId={artifact.id} versionId={baseline.version.id} headVersion={baseline.head_version} body={body} readOnly={readOnly || historical || preview || dirty} selectedBlock={selectedBlock} onSelect={chooseCanvasBlock} onBodyChange={next => { editDraft(next); setEditing(true); setSaved(false); setSaveError('') }} onAgentEdit={onAgentEdit ? requestAgentEdit : undefined} onEvidence={id => { onEvidence(id); openEvidence() }} /></Suspense> : <article className="study-paper">
           <div className="paper-meta"><span>LEARNING NOTES / {String(baseline.version.version).padStart(3, '0')}</span><span>理解，然后应用</span></div>
-          {editing && !readOnly ? <label className="artifact-field">笔记标题<input maxLength={200} value={body.title} onChange={e => { setSaved(false); setDraft({ ...body, title: e.target.value }) }} /></label> : <h2>{body.title}</h2>}
+          {editing && !readOnly ? <label className="artifact-field">笔记标题<input maxLength={200} value={body.title} onChange={e => { setSaved(false); editDraft({ ...body, title: e.target.value }) }} /></label> : <h2>{body.title}</h2>}
           <p className="paper-intro">沿着视频整理概念，保留每一次回到来源的入口。</p>
           <div className="study-concept-index">{body.blocks.filter(block => block.parent_id === null).map((block, i) => <a key={block.block_id} href={`#block-${block.block_id}`}><span className="mono">{String(i + 1).padStart(2, '0')}</span><b>{block.title}</b><Icon name="chev-r" size="sm" /></a>)}</div>
           {body.warnings.length > 0 && <div className="paper-warning"><Icon name="alert" size="sm" /><span>{body.warnings.map(warningMessage).join(' · ')}</span></div>}
@@ -191,7 +198,7 @@ export function ArtifactWorkspace({ artifact, readOnly = false, historical = fal
       {!mobile && desktopEvidence && <aside className="artifact-evidence-desktop" aria-label="视频证据">{panel}</aside>}
     </div>
     {mobile && showEvidence && <div className="artifact-evidence-mobile"><Modal title="回到原视频" onClose={closeEvidence} width={440}>{panel}</Modal></div>}
-    {deleteTarget && <Modal title="删除草稿块" onClose={() => setDeleteTarget(null)} width={440} footer={<><button className="btn" onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" onClick={() => { try { const next = deleteBlock(body, deleteTarget); setDeleteUndo(body); setDraft(next); setSaved(false); setSaveError(''); if (selectedBlock === deleteTarget) setSelectedBlock(null) } catch (error) { setSaveError(error instanceof Error ? error.message : '删除失败') } finally { setDeleteTarget(null) } }}>删除并保留撤销</button></>}><p>将从当前草稿删除“{body.blocks.find(item => item.block_id === deleteTarget)?.title}”及其 {descendantCount(body, deleteTarget) - 1} 个子块。保存前可撤销；已保存版本不会因此改变。</p></Modal>}
+    {deleteTarget && <Modal title="删除草稿块" onClose={() => setDeleteTarget(null)} width={440} footer={<><button className="btn" onClick={() => setDeleteTarget(null)}>取消</button><button className="btn btn-danger" onClick={() => { try { const next = deleteBlock(body, deleteTarget); setDeleteUndo(body); editDraft(next); setSaved(false); setSaveError(''); if (selectedBlock === deleteTarget) setSelectedBlock(null) } catch (error) { setSaveError(error instanceof Error ? error.message : '删除失败') } finally { setDeleteTarget(null) } }}>删除并保留撤销</button></>}><p>将从当前草稿删除“{body.blocks.find(item => item.block_id === deleteTarget)?.title}”及其 {descendantCount(body, deleteTarget) - 1} 个子块。保存前可撤销；已保存版本不会因此改变。</p></Modal>}
     {exportPrompt && <Modal title="先保存修改，再导出" onClose={() => setExportPrompt(false)} width={440} footer={<><button className="btn" onClick={() => setExportPrompt(false)}>取消导出</button><button className="btn btn-primary" disabled={saving} onClick={() => { setExportPrompt(false); void (async () => { const result = await save(); if (result?.version) await exportSaved(result.version.id) })() }}>保存并导出</button></>}><p>当前有未保存的修改。Markdown 仅导出服务端已保存版本。</p></Modal>}
     {askPrompt && <Modal title="先保存修改，再提问" onClose={() => setAskPrompt(null)} width={440} footer={<><button className="btn" onClick={() => setAskPrompt(null)}>取消提问</button><button className="btn btn-primary" disabled={saving} onClick={() => { const blockId=askPrompt; void (async () => { const result=await save(); if (result?.version) { setAskPrompt(null); onAskBlock?.(blockId,result.version.id) } })() }}>保存并提问</button></>}><p>当前段落有未保存的修改。保存成功后会把已保存段落带入问答；保存冲突时草稿留在这里。</p></Modal>}
     {agentPrompt !== false && <Modal title="先保存修改，再让 Agent 修改" onClose={() => setAgentPrompt(false)} width={440} footer={<><button className="btn" onClick={() => setAgentPrompt(false)}>继续人工编辑</button><button className="btn btn-primary" disabled={saving} onClick={() => { const blockId = agentPrompt; void (async () => { const result = await save(); if (result?.version) { setAgentPrompt(false); onAgentEdit?.(blockId, result) } })() }}>{saving ? '正在保存…' : '保存并交给 Agent'}</button></>}><p>Agent 必须以服务端已保存版本为基线。保存冲突时不会启动 Agent，本地草稿也会保留。</p>{saveError && <div className="artifact-agent-error" role="alert">{saveError}<p>Agent 尚未启动，本地草稿仍保留在当前页面。</p></div>}</Modal>}

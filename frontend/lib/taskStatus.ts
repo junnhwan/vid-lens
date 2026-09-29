@@ -2,15 +2,24 @@ import {
   TaskStatusEnum,
   type TaskStage,
   type VideoTask,
-} from './types'
+} from './types.ts'
 
 // 任务生命周期与已保存内容；当前模型的检索能力由 retrievable 单独表达。
 export type TaskCategory = 'ready' | 'processing' | 'failed'
 
-export function taskCategory(t: Pick<VideoTask, 'status' | 'has_transcription' | 'visual_status'>): TaskCategory {
+export function taskCategory(t: Pick<VideoTask, 'status' | 'has_transcription' | 'visual_status' | 'summary_job'>): TaskCategory {
   if (t.status === TaskStatusEnum.Failed || t.status === TaskStatusEnum.Dead) return 'failed'
+  if (t.status === TaskStatusEnum.Queued || t.status === TaskStatusEnum.Running) return 'processing'
+  if (t.summary_job?.status === TaskStatusEnum.Queued || t.summary_job?.status === TaskStatusEnum.Running) return 'processing'
+  if (t.summary_job?.status === TaskStatusEnum.Failed || t.summary_job?.status === TaskStatusEnum.Dead) return 'failed'
   if (t.status === TaskStatusEnum.Completed && (t.has_transcription || t.visual_status === 'completed')) return 'ready'
   return 'processing'
+}
+
+export function taskNeedsPolling(t: Pick<VideoTask, 'status' | 'summary_job'>): boolean {
+  return t.status === TaskStatusEnum.Queued || t.status === TaskStatusEnum.Running ||
+    t.summary_job?.status === TaskStatusEnum.Queued || t.summary_job?.status === TaskStatusEnum.Running ||
+    (t.summary_job?.status === TaskStatusEnum.Failed && !!t.summary_job.next_retry_at)
 }
 
 export interface TaskStateView {
@@ -22,6 +31,12 @@ export interface TaskStateView {
 export function taskStateView(t: VideoTask): TaskStateView {
   if (t.status === TaskStatusEnum.Failed || t.status === TaskStatusEnum.Dead) {
     return { chip: 'chip-bad', text: t.status === TaskStatusEnum.Dead ? '已废弃' : '失败' }
+  }
+  if (t.status !== TaskStatusEnum.Queued && t.status !== TaskStatusEnum.Running && t.summary_job) {
+    const child = t.summary_job
+    if (child.status === TaskStatusEnum.Queued) return { chip: 'chip-mute', text: '摘要排队中' }
+    if (child.status === TaskStatusEnum.Running) return { chip: 'chip-acc', text: '摘要生成中', live: true }
+    if (child.status === TaskStatusEnum.Failed || child.status === TaskStatusEnum.Dead) return { chip: 'chip-bad', text: '摘要生成失败' }
   }
   if (t.status === TaskStatusEnum.Completed) {
     return t.has_transcription

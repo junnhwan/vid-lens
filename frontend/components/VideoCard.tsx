@@ -12,10 +12,10 @@ import { VisualProgressPanel } from '@/components/VisualProgressPanel'
 
 export function VideoCard({ task }: { task: VideoTask }) {
   const state = taskStateView(task)
-  const ready = task.status === 3 && task.has_transcription
-  const failed = task.status === 4 || task.status === 5
-  const summaryFailure = summaryFailureView(task)
   const cat = taskCategory(task)
+  const ready = cat === 'ready' && task.has_transcription
+  const failed = cat === 'failed'
+  const summaryFailure = summaryFailureView(task)
   const [durationMs, setDurationMs] = useState(0)
 
   return (
@@ -23,7 +23,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
     <Link className="vcard-open" href={`/video/${task.id}`}>
       <div className="vthumb">
         <VideoStill
-          taskId={failed ? undefined : task.id}
+          taskId={task.id}
           seed={task.file_md5 || task.filename}
           onDuration={setDurationMs}
           fallbackTitle={taskTitle(task)}
@@ -42,9 +42,10 @@ export function VideoCard({ task }: { task: VideoTask }) {
       </div>
     </Link>
       <div className="vcard-status">
-        {cat === 'processing' && (
+        {cat === 'processing' && (task.status === 1 || task.status === 2) && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
         )}
+        {cat === 'processing' && task.summary_job && task.status !== 1 && task.status !== 2 && <div className="mini-prog"><div className="row"><b>{state.text}</b></div></div>}
         {((task.stage === 'transcribing' || task.stage === 'visual_indexing') && (task.status === 1 || task.status === 2)) && <TranscriptionProgressPanel task={task} compact />}
         {((task.stage === 'transcribing' || task.stage === 'visual_indexing') && (task.status === 1 || task.status === 2)) && <VisualProgressPanel task={task} compact />}
         {failed && (summaryFailure || task.error_msg) && (

@@ -14,7 +14,19 @@ export function useStudyPosition() {
   const busy = useRef(false)
   const timer = useRef<number | undefined>(undefined)
   const alive = useRef(true)
+  const reading = useRef<Promise<void> | null>(null)
+  const readRevision = useCallback(() => {
+    if (reading.current) return reading.current
+    const request = artifactApi.position().then(value => {
+      revision.current = value?.revision ?? 0
+      if (alive.current) { setPosition(value); setError('') }
+    }).catch(() => { if (alive.current) setError('学习位置暂时无法同步') })
+    reading.current = request.finally(() => { reading.current = null })
+    return reading.current
+  }, [])
   const flush = useCallback(async () => {
+    if (busy.current || !pending.current) return
+    if (revision.current === null) await readRevision()
     if (busy.current || revision.current === null || !pending.current) return
     busy.current = true
     const value = pending.current
@@ -31,7 +43,7 @@ export function useStudyPosition() {
       busy.current = false
       if (pending.current) void flush()
     }
-  }, [])
+  }, [readRevision])
   const record = useCallback((value: Target) => {
     pending.current = value
     if (timer.current) window.clearTimeout(timer.current)
@@ -39,9 +51,9 @@ export function useStudyPosition() {
   }, [flush])
   useEffect(() => {
     alive.current = true
-    void artifactApi.position().then(value => { if (alive.current) { revision.current = value?.revision ?? 0; setPosition(value); void flush() } }).catch(() => { if (alive.current) setError('学习位置暂时无法同步') })
+    void readRevision().then(() => { if (alive.current) void flush() })
     return () => { if (timer.current) window.clearTimeout(timer.current); void flush(); alive.current = false }
-  }, [flush])
+  }, [flush, readRevision])
   useEffect(() => {
     const onHide = () => { if (document.visibilityState==='hidden') { if (timer.current) window.clearTimeout(timer.current); void flush() } }
     document.addEventListener('visibilitychange', onHide)

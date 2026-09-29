@@ -40,3 +40,17 @@ test('a refresh error keeps the last loaded video and session visible',async()=>
   expect(screen.getByRole('link',{name:'上次读到的会话'})).toBeTruthy()
   client.clear()
 })
+
+test('dashboard names an independent summary job in the action list', async () => {
+  const task = { id: 91, title: '摘要中的视频', status: 3, stage: 'none', has_transcription: true,
+    summary_job: { id: 92, job_type: 'summary', status: 1, stage: 'summarizing' } } as VideoTask
+  vi.spyOn(api, 'listTasks').mockResolvedValue({ list: [task], total: 1, page: 1, page_size: 50 })
+  vi.spyOn(api, 'listSessions').mockResolvedValue([])
+  vi.spyOn(artifactApi, 'position').mockResolvedValue(null)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><DashboardPage /></QueryClientProvider>)
+  expect(await screen.findByText('摘要排队中')).toBeTruthy()
+  expect(screen.getByText(/近期有 1 个后台任务正在处理/)).toBeTruthy()
+  expect(screen.getByRole('link', { name: '查看摘要进度' })).toBeTruthy()
+  client.clear()
+})

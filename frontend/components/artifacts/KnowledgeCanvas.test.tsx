@@ -27,6 +27,24 @@ const body = studyFixture.version!.body
 const initial: CanvasLayoutView = { content_version_id: 'v1', view_id: 'knowledge', revision: 1, layout: canvas.fillCanvasPositions(body, canvas.emptyCanvasLayout()) }
 const props = { artifactId: studyFixture.id, versionId: 'v1', headVersion: 1, body, readOnly: false, selectedBlock: body.blocks[0].block_id, onSelect: vi.fn(), onBodyChange: vi.fn(), onEvidence: vi.fn() }
 
+test('queued layout edits finish saving after leaving the canvas view', async () => {
+  vi.spyOn(artifactApi, 'canvasLayout').mockResolvedValue(initial)
+  const first = deferred<CanvasLayoutView>()
+  const save = vi.spyOn(artifactApi, 'saveCanvasLayout')
+    .mockReturnValueOnce(first.promise)
+    .mockImplementation(async (_id, _version, revision, layout) => ({ ...initial, revision: revision + 1, layout }))
+  const { unmount } = render(<KnowledgeCanvas {...props} />)
+  await waitFor(() => expect((screen.getByRole('button', { name: '横向排版' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '固定位置' }))
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: '取消固定' }))
+  unmount()
+  await act(async () => { first.resolve({ ...initial, revision: 2, layout: save.mock.calls[0][3] }); await first.promise })
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+  expect(save.mock.calls[1][2]).toBe(2)
+  expect(save.mock.calls[1][3].nodes[body.blocks[0].block_id].pinned).toBe(false)
+})
+
 test('late automatic layout cannot overwrite a manual layout whose save has not returned', async () => {
   vi.spyOn(artifactApi, 'canvasLayout').mockResolvedValue(initial)
   const pendingSave = deferred<CanvasLayoutView>()

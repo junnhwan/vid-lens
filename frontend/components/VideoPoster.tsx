@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 
-const urlCache = new Map<number, Promise<string | null>>()
+const POSTER_URL_TTL_MS = 5 * 60 * 60 * 1000 // Media credentials expire after six hours.
+const urlCache = new Map<number, { value: Promise<string | null>; expires: number }>()
 
 function playbackFor(taskId: number): Promise<string | null> {
-  let hit = urlCache.get(taskId)
-  if (!hit) {
-    hit = api.playbackSrc(taskId).catch(() => null)
-    urlCache.set(taskId, hit)
-  }
+  const cached = urlCache.get(taskId)
+  if (cached && cached.expires > Date.now()) return cached.value
+  const hit = api.playbackSrc(taskId).catch(() => null).then(url => {
+    if (!url && urlCache.get(taskId)?.value === hit) urlCache.delete(taskId)
+    return url
+  })
+  urlCache.set(taskId, { value: hit, expires: Date.now() + POSTER_URL_TTL_MS })
   return hit
 }
 
@@ -103,7 +106,10 @@ export function VideoStill({
           playsInline
           preload="metadata"
           onSeeked={() => setFrameReady(true)}
-          onError={() => setFrameReady(false)}
+          onError={() => {
+            if (taskId) urlCache.delete(taskId)
+            setFrameReady(false)
+          }}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: frameReady ? 1 : 0 }}
         />
       )}

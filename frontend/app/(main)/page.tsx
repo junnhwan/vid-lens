@@ -5,7 +5,7 @@ import { useRouter } from '@/lib/router'
 import { api, ApiError } from '@/lib/api'
 import type { ChatSession } from '@/lib/types'
 import { fmtRelTime, taskTitle } from '@/lib/format'
-import { taskCategory } from '@/lib/taskStatus'
+import { taskCategory, taskNeedsPolling, taskStateView } from '@/lib/taskStatus'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { VideoCard } from '@/components/VideoCard'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
@@ -25,7 +25,7 @@ export default function DashboardPage() {
   useCrumb([{ label: '工作台' }])
 
   const queryClient = useQueryClient()
-  const taskQuery = useQuery({ queryKey:['home-videos',uploadRevision], queryFn:() => api.listTasks(1,50), refetchInterval:query => query.state.data?.list.some(t => t.status === 1 || t.status === 2 || summaryFailureView(t)?.scheduled) ? 5000 : false })
+  const taskQuery = useQuery({ queryKey:['home-videos',uploadRevision], queryFn:() => api.listTasks(1,50), refetchInterval:query => query.state.data?.list.some(t => taskNeedsPolling(t) || summaryFailureView(t)?.scheduled) ? 5000 : false })
   const sessionQuery = useQuery({ queryKey:['home-sessions'], queryFn:() => api.listSessions() })
   const positionQuery = useQuery({ queryKey:['home-learning-position'], queryFn:async () => { const position=await artifactApi.position(); return position ? {position,task:await api.getTask(position.task_id)} : null } })
   const tasks=taskQuery.data?.list || []
@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const loading=taskQuery.isPending
   const resume=positionQuery.data
   const processing=tasks.filter(t => t.status !== 1 && t.status !== 2 && taskCategory(t) !== 'ready')
-  const activeCount=tasks.filter(t => t.status === 1 || t.status === 2).length
+  const activeCount=tasks.filter(t => t.status === 1 || t.status === 2 || t.summary_job?.status === 1 || t.summary_job?.status === 2).length
   const taskTitleById = useCallback((id: number) => {
     const t = tasks.find(x => x.id === id)
     return t ? taskTitle(t) : null
@@ -69,16 +69,18 @@ export default function DashboardPage() {
           </div>
           <div style={{ display: 'grid', gap: 10 }}>
             {processing.slice(0, 3).map(t => {
-              const failed = t.status === 4 || t.status === 5
+              const failed = taskCategory(t) === 'failed'
               const summaryFailure = summaryFailureView(t)
               return (
                 <div key={t.id} className="proc-row">
                   <div className="proc-left">
                     <h5><Link href={`/video/${t.id}`}>{taskTitle(t)}</Link></h5>
-                    <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} has_rag_index={t.has_rag_index} visual_status={t.visual_status} />
+                    {t.summary_job && [1, 2, 4, 5].includes(t.summary_job.status)
+                      ? <span className={`chip ${taskStateView(t).chip}`}>{taskStateView(t).text}</span>
+                      : <ProcessStrip status={t.status} stage={t.stage} has_transcription={t.has_transcription} last_job_type={t.last_job_type} has_rag_index={t.has_rag_index} visual_status={t.visual_status} />}
                     {summaryFailure && <span style={{ fontSize: 12, color: 'var(--tx-3)' }}>{summaryFailure.category} · {summaryFailure.retry}</span>}
                   </div>
-                  <Link className="btn btn-sm" href={`/video/${t.id}`}>{failed ? '查看原因' : '选择处理方式'}</Link>
+                  <Link className="btn btn-sm" href={`/video/${t.id}`}>{failed ? '查看原因' : t.summary_job && (t.summary_job.status === 1 || t.summary_job.status === 2) ? '查看摘要进度' : '选择处理方式'}</Link>
                 </div>
               )
             })}

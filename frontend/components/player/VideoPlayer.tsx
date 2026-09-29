@@ -270,7 +270,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 <div style={{ marginTop: 8, fontSize: 12.5 }}>
                   {failed ? '播放源加载失败,请稍后重试' : fallbackText || '暂无可用播放源'}
                 </div>
-                {failed && onNeedRefresh && <button className="btn btn-sm" style={{ marginTop: 10, color: '#f2e9d8', borderColor: '#8b7d65' }} disabled={refreshing} onClick={retryPlayback}>{refreshing ? '正在重试…' : '重新读取播放源'}</button>}
+                {(failed || !activeSrc) && onNeedRefresh && <button className="btn btn-sm" style={{ marginTop: 10, color: '#f2e9d8', borderColor: '#8b7d65' }} disabled={refreshing} onClick={retryPlayback}>{refreshing ? '正在重试…' : '重新读取播放源'}</button>}
               </div>
             </div>
           </div>

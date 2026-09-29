@@ -46,6 +46,8 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const bodyRef = useRef(body); bodyRef.current = body
   const layoutGeneration = useRef(0)
   const sessionGeneration = useRef(0)
+  const saveGeneration = useRef(0)
+  const mounted = useRef(false)
   const saveQueue = useRef(Promise.resolve())
   const saveBlocked = useRef(false)
   const undoStack = useRef<CanvasLayout[]>([])
@@ -56,6 +58,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const setCurrent = useCallback((next: CanvasLayoutView) => { viewRef.current = next; setView(next) }, [])
   useEffect(() => {
     let cancelled = false
+    mounted.current = true
     sessionGeneration.current++
     setView(null); viewRef.current = null; setError(''); setNotice(''); setBusy(false); saveBlocked.current = false; viewportReady.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1)
     void artifactApi.canvasLayout(artifactId, versionId).then(async loaded => {
@@ -66,7 +69,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
       }
       if (!cancelled) setCurrent({ ...loaded, layout: fillCanvasPositions(bodyRef.current, loaded.layout) })
     }).catch(e => { if (!cancelled) setError(artifactError(e)) })
-    return () => { cancelled = true; sessionGeneration.current++; layoutGeneration.current++; if (viewportTimer.current) clearTimeout(viewportTimer.current) }
+    return () => { cancelled = true; mounted.current = false; sessionGeneration.current++; layoutGeneration.current++; if (viewportTimer.current) clearTimeout(viewportTimer.current) }
   }, [artifactId, versionId, setCurrent])
 
   const layout = view?.layout ?? emptyCanvasLayout()
@@ -93,19 +96,20 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
     const before = viewRef.current
     if (recordHistory && before && before.layout !== next.layout) { undoStack.current.push(before.layout); if (undoStack.current.length > 50) undoStack.current.shift(); redoStack.current = []; setHistoryTick(tick => tick + 1) }
     setCurrent(next); setNotice('布局待保存…')
-    const session = sessionGeneration.current
+    const generation = saveGeneration.current
     saveQueue.current = saveQueue.current.then(async () => {
-      if (session !== sessionGeneration.current || saveBlocked.current || versionRef.current !== next.content_version_id) return
+      if (generation !== saveGeneration.current || saveBlocked.current || versionRef.current !== next.content_version_id) return
       const current = viewRef.current
       if (!current || current.content_version_id !== next.content_version_id) return
       try {
         const saved = await artifactApi.saveCanvasLayout(artifactId, next.content_version_id, current.revision, next.layout, crypto.randomUUID())
-        if (session !== sessionGeneration.current || versionRef.current !== next.content_version_id) return
+        if (generation !== saveGeneration.current || versionRef.current !== next.content_version_id) return
         // A later local edit keeps its coordinates; only the revision advances.
         const latest = viewRef.current
-        setCurrent(latest && latest.layout !== next.layout ? { ...latest, revision: saved.revision } : saved)
-        setNotice('布局已保存')
-      } catch (e) { if (session === sessionGeneration.current) { saveBlocked.current = true; setError(artifactError(e)); setNotice('布局未保存') } }
+        const reconciled = latest && latest.layout !== next.layout ? { ...latest, revision: saved.revision } : saved
+        viewRef.current = reconciled
+        if (mounted.current) { setView(reconciled); setNotice('布局已保存') }
+      } catch (e) { if (generation === saveGeneration.current && versionRef.current === next.content_version_id) { saveBlocked.current = true; if (mounted.current) { setError(artifactError(e)); setNotice('布局未保存') } } }
     })
   }, [artifactId, readOnly, setCurrent])
 
@@ -182,7 +186,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
       const loaded = await artifactApi.canvasLayout(artifactId, versionId)
       if (session !== sessionGeneration.current || viewRef.current !== current) return
       // Invalidate work queued against the discarded local layout.
-      sessionGeneration.current++; layoutGeneration.current++; setBusy(false)
+      sessionGeneration.current++; saveGeneration.current++; layoutGeneration.current++; setBusy(false)
       saveBlocked.current = false; undoStack.current = []; redoStack.current = []; setHistoryTick(tick => tick + 1); setError(''); setNotice('已恢复服务器布局'); setCurrent(loaded)
     } catch (e) { if (session === sessionGeneration.current) setError(artifactError(e)) }
   }

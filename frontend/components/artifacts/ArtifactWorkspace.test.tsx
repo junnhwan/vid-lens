@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { studyFixture } from '@/dev/productFixtures'
 import { ApiError } from '@/lib/api'
@@ -9,6 +9,27 @@ import { ArtifactWorkspace } from './ArtifactWorkspace'
 const mediaQueryState = vi.hoisted(() => ({ mobile: false }))
 vi.mock('@/components/ui/useMediaQuery', () => ({ useMediaQuery: () => mediaQueryState.mobile }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); mediaQueryState.mobile = false })
+
+test('keeps edits made while a save is in flight as an unsaved draft', async () => {
+  let resolve!: (value: typeof studyFixture) => void
+  const pending = new Promise<typeof studyFixture>(yes => { resolve = yes })
+  const save = vi.fn().mockReturnValue(pending)
+  render(<ArtifactWorkspace artifact={studyFixture} evidencePanel={() => null} onEvidence={vi.fn()} onSave={save} onReload={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: '编辑笔记' }))
+  fireEvent.change(screen.getByLabelText('第 1 块正文'), { target: { value: '提交时的正文' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+  fireEvent.change(screen.getByLabelText('第 1 块正文'), { target: { value: '等待期间的新正文' } })
+  const response = structuredClone(studyFixture)
+  response.head_version = 2
+  response.version!.version = 2
+  response.version!.body.blocks[0].content = '提交时的正文'
+  await act(async () => { resolve(response); await pending })
+  expect((screen.getByLabelText('第 1 块正文') as HTMLTextAreaElement).value).toBe('等待期间的新正文')
+  expect(screen.getByText('有未保存的修改')).toBeTruthy()
+  expect(save.mock.calls[0][1].blocks[0].content).toBe('提交时的正文')
+  fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith(2, expect.objectContaining({ blocks: expect.arrayContaining([expect.objectContaining({ content: '等待期间的新正文' })]) })))
+})
 
 test('switching the active block preserves both drafts without expanding all editors', async () => {
   const save=vi.fn().mockResolvedValue(studyFixture)

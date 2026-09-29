@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '@/lib/api'
 import { artifactApi } from '@/lib/artifacts/api'
 import { studyFixture } from '@/dev/productFixtures'
+import type { ArtifactEditRun } from '@/lib/artifacts/schema'
 import type { EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet } from '@/lib/types'
 import { SummaryRevisionPanel } from './SummaryRevisionPanel'
 
@@ -13,6 +14,53 @@ const generated: EffectiveSummaryView = { task_id: 42, content: '安装章节：
 const revised: EffectiveSummaryView = { ...generated, content: '安装章节：新名。', revision: 1, revision_id: 'revision-1', has_revision: true }
 const proposal: SummaryEditOperation = { id: 'summary-op', run_id: 'summary-run', task_id: 42, instruction: '改正安装章节名称', status: 'proposed', mode: 'preview', base_version: 0, rule_version: 0, rule_digest: 'empty', edits: [{ old_text: '旧名', new_text: '新名' }] }
 const emptyRules: VideoTermRuleSet = { version: 0, digest: 'empty', rules: [] }
+
+test('transient note status read failure retries until the linked edit completes', async () => {
+  vi.spyOn(api, 'getSummary').mockResolvedValueOnce(generated).mockResolvedValue(revised)
+  vi.spyOn(api, 'getTermRules').mockResolvedValue(emptyRules)
+  vi.spyOn(api, 'getLatestSummaryOperation').mockResolvedValue(null)
+  vi.spyOn(api, 'editSummary').mockResolvedValue(proposal)
+  vi.spyOn(api, 'applySummaryOperation').mockResolvedValue({ ...proposal, status: 'committed', result_revision_id: 'revision-1' })
+  vi.spyOn(artifactApi, 'list').mockResolvedValue({ list: [studyFixture], total: 1, page: 1, page_size: 20 })
+  vi.spyOn(artifactApi, 'get').mockResolvedValue(studyFixture)
+  const running: ArtifactEditRun = {
+    id: 'linked-note-run', artifact_id: studyFixture.id, instruction: proposal.instruction,
+    expected_head_version: 1, base_version_id: studyFixture.version!.id, selected_block_ids: [], mode: 'apply',
+    status: 'running', stage: 'running', cancel_requested: false, can_cancel: false, result: null, error_code: null,
+    created_at: '2026-09-29T00:00:00Z', started_at: null, finished_at: null, last_seq: 1,
+    usage: { llm_calls: 1, prompt_tokens: 1, completion_tokens: 1, token_source: 'actual' },
+  }
+  vi.spyOn(artifactApi, 'submitEdit').mockResolvedValue(running)
+  const observe = vi.spyOn(artifactApi, 'editRun').mockRejectedValueOnce(new Error('temporary network failure'))
+    .mockResolvedValue({ ...running, status: 'completed', result: { kind: 'committed', operation_id: 'note-op', result_version_id: 'note-v2' } })
+  render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={() => {}} />)
+  fireEvent.change(await screen.findByLabelText('让 AI 修改这份摘要'), { target: { value: proposal.instruction } })
+  fireEvent.change(screen.getByLabelText(/同时修改一份笔记/), { target: { value: studyFixture.id } })
+  fireEvent.click(screen.getByRole('button', { name: '预览 AI 修改' }))
+  fireEvent.click(await screen.findByRole('button', { name: '确认保存摘要' }))
+  expect(await screen.findByText(/读取笔记执行状态失败/, {}, { timeout: 3500 })).toBeTruthy()
+  expect(await screen.findByText(/笔记：已保存新版本/, {}, { timeout: 7500 })).toBeTruthy()
+  expect(observe).toHaveBeenCalledTimes(2)
+}, 8000)
+
+test('late preview cannot restore a proposal after its instruction was changed', async () => {
+  vi.spyOn(api, 'getSummary').mockResolvedValue(generated)
+  vi.spyOn(api, 'getTermRules').mockResolvedValue(emptyRules)
+  vi.spyOn(api, 'getLatestSummaryOperation').mockResolvedValue(null)
+  vi.spyOn(artifactApi, 'list').mockResolvedValue({ list: [], total: 0, page: 1, page_size: 20 })
+  let resolve!: (value: SummaryEditOperation) => void
+  const pending = new Promise<SummaryEditOperation>(yes => { resolve = yes })
+  vi.spyOn(api, 'editSummary').mockReturnValue(pending)
+  const apply = vi.spyOn(api, 'applySummaryOperation')
+  render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={() => {}} />)
+  fireEvent.change(await screen.findByLabelText('让 AI 修改这份摘要'), { target: { value: proposal.instruction } })
+  fireEvent.click(screen.getByRole('button', { name: '预览 AI 修改' }))
+  fireEvent.change(screen.getByLabelText('让 AI 修改这份摘要'), { target: { value: '另一条指令' } })
+  await act(async () => { resolve(proposal); await pending })
+  expect(screen.queryByText('逐处差异')).toBeNull()
+  expect(screen.queryByRole('button', { name: '确认保存摘要' })).toBeNull()
+  expect(apply).not.toHaveBeenCalled()
+})
 
 test('only this time commits the summary without creating a remembered term rule', async () => {
   vi.spyOn(api, 'getSummary').mockResolvedValueOnce(generated).mockResolvedValue(revised)
@@ -110,7 +158,7 @@ test('restores a failed term correction with readable guidance and permits a fre
   vi.spyOn(api, 'getSummary').mockResolvedValue(generated)
   vi.spyOn(api, 'getTermRules').mockResolvedValue(emptyRules)
   vi.spyOn(api, 'getLatestSummaryOperation').mockResolvedValue({ ...proposal, instruction: 'jeff是Jev', status: 'failed', error_code: 'anchor_ambiguous', edits: [] })
-  const submit = vi.spyOn(api, 'editSummary').mockResolvedValue(proposal)
+  const submit = vi.spyOn(api, 'editSummary').mockResolvedValue({ ...proposal, instruction: 'jeff是Jev' })
   vi.spyOn(artifactApi, 'list').mockResolvedValue({ list: [], total: 0, page: 1, page_size: 20 })
   render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={() => {}} />)
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('AI 未能准确定位'))
@@ -126,7 +174,7 @@ test('a failed preview gives readable guidance and the next attempt uses a new r
   vi.spyOn(api, 'getSummary').mockResolvedValue(generated)
   vi.spyOn(api, 'getTermRules').mockResolvedValue(emptyRules)
   vi.spyOn(api, 'getLatestSummaryOperation').mockResolvedValue(null)
-  const submit = vi.spyOn(api, 'editSummary').mockResolvedValueOnce({ ...proposal, status: 'failed', error_code: 'anchor_ambiguous', edits: [] }).mockResolvedValue(proposal)
+  const submit = vi.spyOn(api, 'editSummary').mockResolvedValueOnce({ ...proposal, instruction: 'jeff是Jev', status: 'failed', error_code: 'anchor_ambiguous', edits: [] }).mockResolvedValue({ ...proposal, instruction: 'jeff是Jev' })
   vi.spyOn(artifactApi, 'list').mockResolvedValue({ list: [], total: 0, page: 1, page_size: 20 })
   render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={() => {}} />)
   fireEvent.change(await screen.findByLabelText('让 AI 修改这份摘要'), { target: { value: 'jeff是Jev' } })

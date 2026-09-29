@@ -38,9 +38,15 @@ export function useConversationSession(options: ConversationSessionOptions) {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [sessionReady, setSessionReady] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [sending, setSending] = useState(false)
   const [state, dispatch] = useReducer(conversationSessionReducer, undefined, emptyConversationSessionState)
   const abortRef = useRef<AbortController | null>(null)
   const loadVersion = useRef(0)
+  const requestVersion = useRef(0)
+  const historyLoadingRef = useRef(false)
+  const sendingRef = useRef(false)
   const flushRef = useRef<(() => void) | null>(null)
   const loadHistory = useCallback(async (sid: number) => {
     const [messages, runs] = await Promise.all([api.getMessages(sid), api.getRunHistory(sid).catch(() => [])])
@@ -67,10 +73,16 @@ export function useConversationSession(options: ConversationSessionOptions) {
   useEffect(() => {
     let active = true
     const version = ++loadVersion.current
+    ++requestVersion.current
     abortRef.current?.abort()
     abortRef.current = null
     setSession(null)
     setSessionReady(false)
+    setHistoryError('')
+    setHistoryLoading(false)
+    historyLoadingRef.current = false
+    sendingRef.current = false
+    setSending(false)
     dispatch({ type: 'reset' })
     const init = async () => {
       const list = await loadSessions()
@@ -80,10 +92,16 @@ export function useConversationSession(options: ConversationSessionOptions) {
       const selected = sid > 0 ? list.find(item => item.id === sid) || null : null
       setSession(selected)
       if (selected) {
+        historyLoadingRef.current = true
+        setHistoryLoading(true)
         try {
           const messages = await loadHistory(selected.id)
           if (active && version === loadVersion.current) dispatch({ type: 'load_messages', messages })
-        } catch { /* keep an empty, usable session */ }
+        } catch {
+          if (active && version === loadVersion.current) setHistoryError('历史消息读取失败，请重试')
+        } finally {
+          if (active && version === loadVersion.current) { historyLoadingRef.current = false; setHistoryLoading(false) }
+        }
       }
       if (active) setSessionReady(true)
     }
@@ -103,8 +121,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
     const selected = sessions.find(item => item.id === sessionId)
     if (!selected || selected.id === session?.id) return
     const version = ++loadVersion.current
+    ++requestVersion.current
     abortRef.current?.abort()
     abortRef.current = null
+    sendingRef.current = false
+    setSending(false)
+    historyLoadingRef.current = true
+    setHistoryLoading(true)
+    setHistoryError('')
     dispatch({ type: 'reset' })
     setSession(selected)
     dispatch({ type: 'load_messages', messages: [] })
@@ -112,23 +136,50 @@ export function useConversationSession(options: ConversationSessionOptions) {
     try {
       const messages = await loadHistory(sessionId)
       if (version === loadVersion.current) dispatch({ type: 'load_messages', messages })
-    } catch { /* keep selected session usable */ }
+    } catch {
+      if (version === loadVersion.current) setHistoryError('历史消息读取失败，请重试')
+    } finally {
+      if (version === loadVersion.current) { historyLoadingRef.current = false; setHistoryLoading(false) }
+    }
   }, [sessions, session?.id, replaceSessionInURL, loadHistory])
+
+  const retryHistory = useCallback(async () => {
+    if (!session || historyLoadingRef.current) return
+    const version = ++loadVersion.current
+    historyLoadingRef.current = true
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const messages = await loadHistory(session.id)
+      if (version === loadVersion.current) dispatch({ type: 'load_messages', messages })
+    } catch {
+      if (version === loadVersion.current) setHistoryError('历史消息读取失败，请重试')
+    } finally {
+      if (version === loadVersion.current) { historyLoadingRef.current = false; setHistoryLoading(false) }
+    }
+  }, [session, loadHistory])
 
   const newSession = useCallback(() => {
     ++loadVersion.current
+    ++requestVersion.current
     abortRef.current?.abort()
     abortRef.current = null
+    sendingRef.current = false
+    setSending(false)
+    historyLoadingRef.current = false
+    setHistoryLoading(false)
+    setHistoryError('')
     setSession(null)
     dispatch({ type: 'reset' })
     replaceSessionInURL()
   }, [replaceSessionInURL])
 
-  const createSession = useCallback(async () => {
+  const createSession = useCallback(async (version: number) => {
     const created = await api.createSession(scopeType === 'knowledge_base'
       ? { knowledge_base_id: targetId, scope_type: 'knowledge_base' }
       : scopeType === 'video_library' ? { scope_type: 'video_library' }
       : { task_id: targetId, scope_type: 'video' })
+    if (version !== requestVersion.current) return null
     setSession(created)
     replaceSessionInURL(created.id)
     void loadSessions()
@@ -136,17 +187,22 @@ export function useConversationSession(options: ConversationSessionOptions) {
   }, [scopeType, targetId, replaceSessionInURL, loadSessions])
 
   const send = useCallback(async (question: string) => {
-    if (state.streaming) return
+    if (!sessionReady || historyLoadingRef.current || historyError || sendingRef.current || state.streaming) return
     if (!canSend) {
       onBlocked?.()
       return
     }
     onBeforeSend?.()
+    const version = requestVersion.current
+    sendingRef.current = true
+    setSending(true)
     let sessionId = session?.id
     if (!sessionId) {
       try {
-        sessionId = await createSession()
+        sessionId = await createSession(version) ?? undefined
+        if (!sessionId) return
       } catch (error) {
+        if (version !== requestVersion.current) return
         dispatch({
           type: 'append_messages',
           messages: [
@@ -154,9 +210,13 @@ export function useConversationSession(options: ConversationSessionOptions) {
             { role: 'assistant', content: '', error: error instanceof ApiError ? error.message : '创建会话失败' },
           ],
         })
+        sendingRef.current = false
+        setSending(false)
         return
       }
     }
+
+    if (version !== requestVersion.current) return
 
     const controller = new AbortController()
     let runId: string | undefined
@@ -265,10 +325,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
         abortRef.current = null
         flushRef.current = null
       }
+      if (version === requestVersion.current) { sendingRef.current = false; setSending(false) }
     }
-  }, [state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations, parseHistory])
+  }, [sessionReady, historyError, state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations, parseHistory])
 
   const stop = useCallback(() => {
+    ++requestVersion.current
+    sendingRef.current = false
+    setSending(false)
     flushRef.current?.()
     flushRef.current = null
     abortRef.current?.abort()
@@ -284,6 +348,10 @@ export function useConversationSession(options: ConversationSessionOptions) {
     session,
     sessions,
     sessionReady,
+    historyLoading,
+    historyError,
+    retryHistory,
+    sending,
     messages: state.messages,
     ragTrace: state.ragTrace,
     agentTrace: state.agentTrace,

@@ -157,7 +157,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const historyRef = useRef<HTMLDivElement>(null)
 
   const {
-    session, sessions, messages, ragTrace, agentTrace, streaming, sessionReady, send, stop, newSession, switchSession, loadSessions,
+    session, sessions, messages, ragTrace, agentTrace, streaming, sending, sessionReady, historyLoading, historyError, retryHistory, send, stop, newSession, switchSession, loadSessions,
   } = useConversationSession({
     scopeType,
     targetId,
@@ -303,11 +303,11 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     const q = (text ?? input).trim()
     if (!q) { toast.info('先输入一个问题'); return }
     if (Array.from(q).length > 1000) { toast.error('问题超过 1000 字，请缩小段落范围后再提问。'); return }
-    if (streaming) return
+    if (sending || streaming || historyLoading || historyError || !sessionReady) return
     if (readOnly || !ai.ready) { toast.info(readOnly ? '演示模式可查看已有会话' : ai.reason); return }
     setInput('')
     void send(q)
-  }, [input, streaming, send, toast, readOnly, ai.ready, ai.reason])
+  }, [input, sending, streaming, historyLoading, historyError, sessionReady, send, toast, readOnly, ai.ready, ai.reason])
 
   useEffect(() => {
     if (!sessionReady || !ai.ready || readOnly || autoAsked.current || !isVideo) return
@@ -369,6 +369,8 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
         </div>
         {returnToStudy && <div className="artifact-notice">{studyError ? `笔记段落读取失败：${studyError}` : studyBlock ? `正在讨论已保存段落「${studyBlock.title}」；人工笔记需依据原视频核对。` : '正在读取已保存段落…'}<button className="btn btn-sm" onClick={() => router.push(returnToStudy)}>返回笔记位置</button></div>}
         {knowledgeBase && <KnowledgeSources kb={knowledgeBase} hitIds={new Set([...(lastAssistant?.cites || []).map(c=>c.taskId || 0), ...agentTrace.steps.flatMap(s=>(s.hitRows || []).map(h=>h.task_id || 0))])} />}
+        {historyLoading && <div className="artifact-notice" role="status">正在读取历史消息…</div>}
+        {historyError && <div className="artifact-notice danger" role="alert">{historyError}<button type="button" className="btn btn-sm" onClick={() => void retryHistory()}>重试读取</button></div>}
         <div className="chat-scroll" ref={scrollRef} onScroll={event => {
           const el = event.currentTarget
           followOutputRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
@@ -381,7 +383,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                   <h2>{isVideo ? '问这段视频' : scopeType === 'video_library' ? '问整个视频库' : `问「${scopeName}」`}</h2>
                 </div>
                 {!isVideo && <><p className={knowledgeStyles.intro}>{scopeType === 'video_library' ? '仅检索你的视频库中已用当前向量模型建好索引的视频。' : '仅检索当前知识库的成员视频。'}</p><div className={knowledgeStyles.prompts}>{suggestions.map(text=><button className={knowledgeStyles.prompt} key={text} onClick={()=>{setInput(text);if(scopeType !== 'video_library')setMode('agent');inputRef.current?.focus()}}>{text}<span>↗</span></button>)}</div></>}
-                {isVideo && <div className="video-question-intro" aria-busy={questionsLoading}>{questionsLoading ? <QuestionSuggestionsLoading /> : <><p>{videoQuestions?.message || '从视频内容开始，试着问一个问题。'}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={streaming}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</>}</div>}
+                {isVideo && <div className="video-question-intro" aria-busy={questionsLoading}>{questionsLoading ? <QuestionSuggestionsLoading /> : <><p>{videoQuestions?.message || '从视频内容开始，试着问一个问题。'}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={sending || streaming || historyLoading || !!historyError || !sessionReady}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</>}</div>}
               </div>
             ) : (
               messages.map((msg, i) => msg.role === 'user'
@@ -490,7 +492,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
                 placeholder={isVideo ? '问这段视频…' : scopeType === 'video_library' ? '向视频库提问…' : '向知识库提问…'}
               />
-              <button className="ask-send" disabled={streaming || readOnly || !ai.ready} onClick={() => submit()} aria-label="发送">
+              <button className="ask-send" disabled={sending || streaming || historyLoading || !!historyError || !sessionReady || readOnly || !ai.ready} onClick={() => submit()} aria-label="发送">
                 <Icon name="send" />
               </button>
             </div>

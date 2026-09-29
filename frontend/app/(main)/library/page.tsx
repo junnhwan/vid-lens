@@ -9,7 +9,7 @@ import { PageHeading } from '@/components/product/PageHeading'
 import { Icon } from '@/components/ui/Icon'
 import Link from '@/lib/router'
 import { fmtRelTime, fmtSize, taskTitle, sourceLabel } from '@/lib/format'
-import { taskStateView } from '@/lib/taskStatus'
+import { taskNeedsPolling, taskStateView } from '@/lib/taskStatus'
 
 const PAGE_SIZE = 24
 const filters = [{ key: 'all', label: '全部' }, { key: 'ready', label: '已有内容' }, { key: 'pending', label: '待处理' }, { key: 'processing', label: '处理中' }, { key: 'failed', label: '失败' }]
@@ -32,7 +32,7 @@ export default function LibraryPage() {
     }, 250)
     return () => window.clearTimeout(timer)
   }, [draft, keyword, setParams])
-  const query = useQuery({ queryKey: ['library-videos', page, keyword, filter, uploadRevision], queryFn: () => api.listTasks(page, PAGE_SIZE, keyword, filter), refetchInterval: query => query.state.data?.list.some(t => t.status === 1 || t.status === 2) ? 5000 : false })
+  const query = useQuery({ queryKey: ['library-videos', page, keyword, filter, uploadRevision], queryFn: () => api.listTasks(page, PAGE_SIZE, keyword, filter), refetchInterval: query => query.state.data?.list.some(taskNeedsPolling) ? 5000 : false })
   const tasks = query.data?.list || []
   const total = query.data?.total || 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))

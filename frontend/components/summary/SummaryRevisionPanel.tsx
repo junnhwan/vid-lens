@@ -36,6 +36,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
   const [noteFailed, setNoteFailed] = useState(false)
   const [submittedNoteTarget, setSubmittedNoteTarget] = useState('')
   const noteAttempt = useRef<{ id: string; prompt: string; head: number; key: string } | null>(null)
+  const previewGeneration = useRef(0)
 
   const refresh = useCallback(async () => {
     const [nextSummary, nextRules] = await Promise.all([api.getSummary(taskId), api.getTermRules(taskId)])
@@ -88,8 +89,13 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
 
   useEffect(() => {
     if (!noteRun || (noteRun.status !== 'pending' && noteRun.status !== 'running')) return
-    const timer = window.setTimeout(() => {
-      void artifactApi.editRun(noteRun.id).then(next => {
+    let active = true
+    let timer: number | undefined
+    const poll = async () => {
+      try {
+        const next = await artifactApi.editRun(noteRun.id)
+        if (!active) return
+        setMessage(previous => previous.startsWith('读取笔记执行状态失败：') ? '' : previous)
         setNoteRun(next)
         if (next.status === 'completed') {
           setTargetResults(previous => [...previous, next.result?.kind === 'committed' ? `笔记：已保存新版本（操作 ${next.result.operation_id}）。` : `笔记：未写入（${next.result?.kind === 'no_change' ? '无需修改' : '返回了非修订结果'}）。`])
@@ -97,9 +103,14 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
           setNoteFailed(true)
           setTargetResults(previous => [...previous, `笔记：修改失败（${next.error_code || next.status}）；摘要已独立保存。`])
         }
-      }).catch(error => setMessage(`读取笔记执行状态失败：${errorText(error)}；可在笔记页继续查看。`))
-    }, 1500)
-    return () => window.clearTimeout(timer)
+      } catch (error) {
+        if (!active) return
+        setMessage(`读取笔记执行状态失败：${errorText(error)}；正在重试。`)
+        timer = window.setTimeout(() => void poll(), 2000)
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 1500)
+    return () => { active = false; if (timer != null) window.clearTimeout(timer) }
   }, [noteRun])
 
   const submitNote = async (id: string, prompt: string) => {
@@ -134,33 +145,39 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
 
   const preview = async () => {
     if (!summary || !instruction.trim() || busy) return
+    const generation = previewGeneration.current
+    const requestedInstruction = instruction.trim()
     setBusy(true); setMessage(''); setTargetResults([])
     setNoteRun(null); setNoteFailed(false)
     const requestKey = key || crypto.randomUUID()
     setKey(requestKey)
     try {
-      const next = await api.editSummary(taskId, { instruction: instruction.trim(), expected_revision: summary.revision, mode: 'preview' }, requestKey)
+      const next = await api.editSummary(taskId, { instruction: requestedInstruction, expected_revision: summary.revision, mode: 'preview' }, requestKey)
+      if (generation !== previewGeneration.current || next.instruction !== requestedInstruction) return
       setOperation(next)
       if (next.status === 'failed') { setKey(''); setMessage(summaryRevisionFailure(next.error_code)) }
-    } catch (error) { setMessage(`${errorText(error)}；可用同一请求重试，避免重复修改。`) }
+    } catch (error) { if (generation === previewGeneration.current) setMessage(`${errorText(error)}；可用同一请求重试，避免重复修改。`) }
     finally { setBusy(false) }
   }
 
   const apply = async () => {
-    if (!summary || !operation || busy) return
+    if (!summary || !operation || busy || operation.instruction !== instruction.trim()) return
+    const appliedOperation = operation
+    const linkedNoteTarget = noteTarget
+    const linkedScope = scope
     setBusy(true); setMessage(''); setTargetResults([])
     setRuleSaveFailed(false)
     try {
-      const committed = await api.applySummaryOperation(taskId, operation.id, summary.revision)
+      const committed = await api.applySummaryOperation(taskId, appliedOperation.id, summary.revision)
       setOperation(committed)
       setTargetResults([`摘要：已保存修订 v${summary.revision + 1}。`])
       try { await refresh() }
       catch (error) { setMessage(`摘要已保存，但刷新显示失败：${errorText(error)}；可刷新页面恢复。`) }
-      if (noteTarget) {
-        try { await submitNote(noteTarget, instruction.trim()) }
+      if (linkedNoteTarget) {
+        try { await submitNote(linkedNoteTarget, appliedOperation.instruction) }
         catch (error) { setNoteFailed(true); setTargetResults(previous => [...previous, `笔记：提交失败，摘要已保存；可只重试笔记。${errorText(error)}`]) }
       }
-      if (scope === 'remember') {
+      if (linkedScope === 'remember') {
         try { await saveRememberedRule(committed.id) }
         catch (error) { setRuleSaveFailed(true); setTargetResults(previous => [...previous, `术语规则：保存失败，摘要已保存；可单独重试。${errorText(error)}`]) }
       }
@@ -219,7 +236,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
         id="sumrev-instruction"
         className="sumrev-instruction"
         value={instruction}
-        onChange={event => { setInstruction(event.target.value); setKey(''); setOperation(null) }}
+        onChange={event => { ++previewGeneration.current; setInstruction(event.target.value); setKey(''); setOperation(null) }}
         maxLength={2000}
         rows={3}
         placeholder="例如：只把安装章节中的错误名称改正，保留原话引用"

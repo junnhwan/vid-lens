@@ -427,7 +427,6 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   const downloadMedia = async () => {
     if (!task || busy) return
-    if (!ai.ready) { toast.info(ai.reason); return }
     setBusy('download')
     try {
       const r = await api.downloadMedia(task.id)
