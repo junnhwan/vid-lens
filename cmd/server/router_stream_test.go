@@ -25,25 +25,27 @@ func TestStreamRouteAuthenticatesWithoutSessionToken(t *testing.T) {
 		nil,
 	)
 
-	// An invalid token still reaches the handler and is rejected by the
-	// credential check, not by the JWT middleware.
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/media/task/31/stream?token=invalid", nil)
-	router.ServeHTTP(rec, req)
-	if rec.Code == http.StatusUnauthorized {
-		t.Fatalf("stream route is inside the JWT group: got 401, want the credential check to decide")
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for an invalid credential", rec.Code)
-	}
+	for _, action := range []string{"stream", "download"} {
+		// An invalid token still reaches the handler and is rejected by the
+		// credential check, not by the JWT middleware.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/media/task/31/"+action+"?token=invalid", nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code == http.StatusUnauthorized {
+			t.Fatalf("stream route is inside the JWT group: got 401, want the credential check to decide")
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 for an invalid credential", rec.Code)
+		}
 
-	// The same request with a stale session header must behave identically.
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/media/task/31/stream?token=invalid", nil)
-	req.Header.Set("Authorization", "Bearer stale-session-token")
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status with stale session header = %d, want 404", rec.Code)
+		// The same request with a stale session header must behave identically.
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/media/task/31/"+action+"?token=invalid", nil)
+		req.Header.Set("Authorization", "Bearer stale-session-token")
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status with stale session header = %d, want 404", rec.Code)
+		}
 	}
 }
 

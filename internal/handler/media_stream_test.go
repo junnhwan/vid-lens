@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,10 +80,11 @@ func newStreamTestRouter(t *testing.T) (*gin.Engine, *model.VideoTask, string) {
 	repos := repository.NewRepositories(db)
 
 	task := &model.VideoTask{
-		UserID:  12,
-		Title:   "stream",
-		FileURL: "videos/stream-fixture.mp4",
-		Status:  model.TaskStatusCompleted,
+		UserID:   12,
+		Title:    "stream",
+		Filename: "中文视频.mp4",
+		FileURL:  "videos/stream-fixture.mp4",
+		Status:   model.TaskStatusCompleted,
 	}
 	if err := repos.Task.Create(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -98,6 +101,8 @@ func newStreamTestRouter(t *testing.T) (*gin.Engine, *model.VideoTask, string) {
 
 	router := gin.New()
 	router.GET("/api/v1/media/task/:id/stream", media.StreamTaskMedia)
+	router.GET("/api/v1/media/task/:id/download", media.DownloadTaskMedia)
+	router.HEAD("/api/v1/media/task/:id/download", media.DownloadTaskMedia)
 
 	token, err := jwt.GenerateMediaToken(12, task.ID, streamTestSecret, time.Hour)
 	if err != nil {
@@ -157,4 +162,44 @@ func TestStreamTaskMediaRejectsInvalidCredential(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
+}
+
+func TestDownloadTaskMediaAttachmentRangeAndHEAD(t *testing.T) {
+	router, task, token := newStreamTestRouter(t)
+	url := "/api/v1/media/task/" + strconv.FormatInt(task.ID, 10) + "/download?token=" + token
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, url, nil)
+		req.Header.Set("Authorization", "Bearer stale-session-token")
+		if method == http.MethodGet {
+			req.Header.Set("Range", "bytes=8-11")
+		}
+		router.ServeHTTP(rec, req)
+		kind, params, err := mime.ParseMediaType(rec.Header().Get("Content-Disposition"))
+		if err != nil || kind != "attachment" || params["filename"] != task.Filename {
+			t.Fatalf("download filename: %s (%v)", rec.Header().Get("Content-Disposition"), err)
+		}
+		if method == http.MethodGet && (rec.Code != 206 || rec.Body.String() != "4455" || rec.Header().Get("Content-Range") != "bytes 8-11/16") {
+			t.Fatalf("download range: %d %s", rec.Code, rec.Body.String())
+		}
+		if method == http.MethodHead && (rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "16") {
+			t.Fatalf("download HEAD: %d, %v", rec.Code, rec.Header())
+		}
+	}
+	for _, credential := range []string{"", "not-a-token", tokenForAnotherTask(t, task.ID)} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, strings.Split(url, "?")[0]+"?token="+credential, nil))
+		if rec.Code != 404 {
+			t.Fatalf("invalid download credential: status %d", rec.Code)
+		}
+	}
+}
+
+func tokenForAnotherTask(t *testing.T, taskID int64) string {
+	t.Helper()
+	token, err := jwt.GenerateMediaToken(12, taskID+1, streamTestSecret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }

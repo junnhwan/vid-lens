@@ -103,6 +103,16 @@ func (c *Config) ValidateServer() error {
 	}
 
 	problems.require("jwt.secret", c.JWT.Secret)
+	if c.JWT.Secret == "vidlens-jwt-secret-change-in-production" {
+		problems.add("jwt.secret", "不能使用仓库旧版默认值，请设置 VIDLENS_JWT_SECRET")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Server.Mode), "release") {
+		validateProductionSecret(&problems, "jwt.secret", c.JWT.Secret)
+		validateProductionSecret(&problems, "security.api_key_secret", c.Security.APIKeySecret)
+		if c.Security.APIKeySecret != "" && c.Security.APIKeySecret == c.JWT.Secret {
+			problems.add("security.api_key_secret", "生产模式必须使用独立于 jwt.secret 的稳定密钥")
+		}
+	}
 	if c.JWT.ExpireHours <= 0 {
 		problems.add("jwt.expire_hours", "必须为正数")
 	}
@@ -185,6 +195,13 @@ func (c *Config) ValidateServer() error {
 		problems.merge(c.ValidateRAG())
 	}
 	return problems.err()
+}
+
+func validateProductionSecret(problems *validationErrors, field, value string) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if len(value) < 32 || strings.Contains(normalized, "change-me") || strings.Contains(normalized, "change-in-production") || strings.Contains(normalized, "your-secret") {
+		problems.add(field, "生产模式必须配置至少 32 字节的随机密钥，不能使用示例值")
+	}
 }
 
 // ValidatePostgres checks the PostgreSQL fields required by the long-running

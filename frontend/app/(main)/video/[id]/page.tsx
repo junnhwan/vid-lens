@@ -419,11 +419,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     }
   }
 
-  const downloadAudio = async () => {
+  const downloadMedia = async () => {
     if (!task || busy) return
     setBusy('download')
     try {
-      const r = await api.downloadAudio(task.id)
+      const r = await api.downloadMedia(task.id)
       const a = document.createElement('a')
       a.href = r.download_url
       a.download = r.filename || ''
@@ -928,7 +928,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           </section>
           <section className="workbench-more-group" aria-label="导出与知识库">
             <h4>导出与知识库</h4>
-            <button className="workbench-operation" disabled={busy !== ''} onClick={() => { setMoreOpen(false); void downloadAudio() }}><Icon name="download" /><span><strong>下载音频</strong><small>保存视频提取的音频文件</small></span><Icon name="chev-r" size="sm" /></button>
+            <button className="workbench-operation" disabled={busy !== ''} onClick={() => { setMoreOpen(false); void downloadMedia() }}><Icon name="download" /><span><strong>下载视频</strong><small>保存原始视频文件</small></span><Icon name="chev-r" size="sm" /></button>
             <button className="workbench-operation" disabled={readOnly} onClick={() => { setMoreOpen(false); setKbOpen(true) }}><Icon name="folder" /><span><strong>加入知识库</strong><small>和其他视频一起检索与问答</small></span><Icon name="chev-r" size="sm" /></button>
           </section>
         </Modal>

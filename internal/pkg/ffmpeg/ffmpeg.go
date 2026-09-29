@@ -43,6 +43,7 @@ type audioSegmentWindow struct {
 // ExtractAudio 从视频中提取音频
 // Audio extraction is CPU-intensive and is therefore handled by the async pipeline.
 func ExtractAudio(ctx context.Context, ffmpegPath, inputPath string) (string, error) {
+	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("vidlens_%d.mp3", time.Now().UnixNano()))
 
 	cmd := exec.CommandContext(ctx, ffmpegPath, buildExtractAudioArgs(inputPath, outputPath)...)
@@ -77,6 +78,7 @@ func buildExtractAudioArgs(inputPath, outputPath string) []string {
 
 // SplitAudio 按固定时长把音频切成多个片段，避免 ASR 单次请求体过大。
 func SplitAudio(ctx context.Context, ffmpegPath, inputPath string, segmentSeconds int) ([]string, error) {
+	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 	if segmentSeconds <= 0 {
 		segmentSeconds = DefaultAudioSegmentSeconds
 	}
@@ -136,9 +138,7 @@ func SplitAudioWindows(ctx context.Context, ffmpegPath, inputPath string, segmen
 	if overlapSeconds*2 >= segmentSeconds {
 		return nil, "", fmt.Errorf("ASR overlap 必须小于分片时长的一半")
 	}
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 
 	durationMS, err := ProbeDurationMs(ctx, companionFFprobePath(ffmpegPath), inputPath)
 	if err != nil {
@@ -225,6 +225,7 @@ func formatFFmpegSeconds(milliseconds int64) string {
 }
 
 func companionFFprobePath(ffmpegPath string) string {
+	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 	// filepath follows the host OS, so a Windows path used by a config file
 	// must be handled explicitly when the config is inspected on macOS/Linux.
 	if strings.Contains(ffmpegPath, "\\") {
@@ -243,4 +244,11 @@ func companionFFprobePath(ffmpegPath string) string {
 		return name
 	}
 	return filepath.Join(dir, name)
+}
+
+func defaultFFmpegPath(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "ffmpeg"
 }

@@ -65,6 +65,10 @@ func Load(path string) (*Config, error) {
 	if err := cfg.AgentBudget.Validate(); err != nil {
 		return nil, err
 	}
+	if err := applyRuntimeEnvironment(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.Tools.applyDefaults()
 	cfg.MQ.applyDefaults()
 	cfg.Memory.applyDefaults()
 	if value := strings.TrimSpace(os.Getenv("VIDLENS_DISABLE_URL_IMPORT")); value != "" {

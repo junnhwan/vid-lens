@@ -45,6 +45,33 @@ func TestBuildArgsDoesNotDisableCertificateChecks(t *testing.T) {
 	}
 }
 
+func TestBuildArgsScopesBilibiliOptionsToHost(t *testing.T) {
+	for _, target := range []string{"https://www.youtube.com/watch?v=test", "https://youtu.be/test", "https://bilibili.com.evil.test/video", "https://example.test/video?next=bilibili.com"} {
+		args := strings.Join(buildArgs("ffmpeg", "/bilibili-cookies.txt", "", target), " ")
+		if strings.Contains(args, "https://www.bilibili.com/") || strings.Contains(args, "--cookies") {
+			t.Errorf("Bilibili options applied to %s: %s", target, args)
+		}
+	}
+	for _, target := range []string{"https://www.bilibili.com/video/BV1xx", "https://b23.tv/abc", "https://WWW.BILIBILI.COM./video/BV1xx"} {
+		args := strings.Join(buildArgs("ffmpeg", "/bilibili-cookies.txt", "", target), " ")
+		if !strings.Contains(args, "--referer https://www.bilibili.com/") || !strings.Contains(args, "--cookies /bilibili-cookies.txt") {
+			t.Errorf("missing Bilibili options: %s", args)
+		}
+	}
+}
+
+func TestBuildArgsLetsYtdlpFindDefaultFFmpegOnPATH(t *testing.T) {
+	for _, binary := range []string{"", "ffmpeg", "ffmpeg.exe", " ffmpeg "} {
+		args := strings.Join(buildArgs(binary, "", "", "https://youtu.be/test"), " ")
+		if strings.Contains(args, "--ffmpeg-location") {
+			t.Errorf("bare command must use PATH discovery: %s", args)
+		}
+		if !strings.Contains(args, "--ignore-config") {
+			t.Errorf("host yt-dlp config can override application settings: %s", args)
+		}
+	}
+}
+
 func TestDownloadErrorExplainsBilibili412(t *testing.T) {
 	err := formatDownloadError(errors.New("exit status 1"), "ERROR: [BiliBili] Unable to download webpage: HTTP Error 412: Precondition Failed")
 

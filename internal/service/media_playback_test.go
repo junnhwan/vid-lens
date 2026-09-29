@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -144,6 +145,25 @@ func TestGetPlaybackURLRejectsOtherOwner(t *testing.T) {
 
 	if _, err := svc.GetPlaybackURL(context.Background(), 99, task.ID); err == nil {
 		t.Fatal("expected another user to be rejected")
+	}
+}
+
+func TestGetDownloadURLReturnsSameOriginTaskCredential(t *testing.T) {
+	svc, _, task := newPlaybackTestService(t)
+	got, err := svc.GetDownloadURL(context.Background(), task.UserID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/media/task/" + fmt.Sprint(task.ID) + "/download?token="
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("download must use same-origin path %q, got %q", want, got)
+	}
+	claims, err := jwt.ParseMediaToken(strings.TrimPrefix(got, want), mediaTestSecret)
+	if err != nil || claims.UserID != task.UserID || claims.TaskID != task.ID {
+		t.Fatalf("invalid download scope: %#v, %v", claims, err)
+	}
+	if _, err := svc.GetDownloadURL(context.Background(), 99, task.ID); err == nil {
+		t.Fatal("another owner must not obtain a download credential")
 	}
 }
 

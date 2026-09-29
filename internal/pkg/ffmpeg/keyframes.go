@@ -57,9 +57,7 @@ func (o ExtractKeyFramesOptions) normalized() ExtractKeyFramesOptions {
 // Callers own cleanup of returned paths' parent directory (os.RemoveAll).
 func ExtractKeyFrames(ctx context.Context, ffmpegPath, inputPath string, opts ExtractKeyFramesOptions) ([]KeyFrame, string, error) {
 	opts = opts.normalized()
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 	outputDir, err := os.MkdirTemp("", "vidlens_keyframes_*")
 	if err != nil {
 		return nil, "", err

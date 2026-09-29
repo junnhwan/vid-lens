@@ -94,7 +94,7 @@ Install Go 1.24+, Node.js 20+, Docker Compose, FFmpeg, and yt-dlp. Copy `.env.ex
 ```bash
 # From the repository root: start dependencies and the backend
 cp .env.example .env   # First-time setup only; skip if .env already exists
-# Edit .env before continuing
+# Set independent stable VIDLENS_JWT_SECRET / VIDLENS_API_KEY_SECRET in .env
 docker compose up -d
 go run ./cmd/server
 ```

@@ -97,7 +97,7 @@
 ```bash
 # 仓库根目录：启动依赖与后端
 cp .env.example .env   # 首次配置；已有 .env 时跳过
-# 编辑 .env 后继续
+# 编辑 .env，配置独立稳定的 VIDLENS_JWT_SECRET / VIDLENS_API_KEY_SECRET 后继续
 docker compose up -d
 go run ./cmd/server
 ```

@@ -187,6 +187,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 		// Registering outside the JWT group keeps a stale session token in the
 		// request headers from overriding that credential.
 		api.GET("/media/task/:id/stream", handlers.media.StreamTaskMedia)
+		api.GET("/media/task/:id/download", handlers.media.DownloadTaskMedia)
+		api.HEAD("/media/task/:id/download", handlers.media.DownloadTaskMedia)
 		api.GET("/media/task/:id/visual-frame/:frame_id", handlers.media.StreamTaskVisualFrame)
 	}
 

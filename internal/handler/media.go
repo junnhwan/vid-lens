@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"path"
 	"strconv"
@@ -442,8 +443,8 @@ func deleteTaskHTTPStatus(err error) int {
 	}
 }
 
-// DownloadAudio 获取音频下载链接
-// GET /api/v1/media/download-audio/:id
+// DownloadAudio preserves the legacy route name; it returns the original
+// stored media, not an extracted audio track.
 func (h *MediaHandler) DownloadAudio(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -454,8 +455,6 @@ func (h *MediaHandler) DownloadAudio(c *gin.Context) {
 		return
 	}
 
-	// Downloads need a direct storage link: proxying the whole file through the
-	// API only buys a filename the client cannot honour cross-origin anyway.
 	url, err := h.svc.GetDownloadURL(c.Request.Context(), userID, taskID)
 	if err != nil {
 		response.InternalError(c, "获取下载链接失败")
@@ -511,6 +510,15 @@ func (h *MediaHandler) GetPlaybackURL(c *gin.Context) {
 // JWT group so a stale session token in the browser's request headers cannot
 // override the task-scoped credential.
 func (h *MediaHandler) StreamTaskMedia(c *gin.Context) {
+	h.serveTaskMedia(c, false)
+}
+
+// DownloadTaskMedia serves an attachment through the same-origin API proxy.
+func (h *MediaHandler) DownloadTaskMedia(c *gin.Context) {
+	h.serveTaskMedia(c, true)
+}
+
+func (h *MediaHandler) serveTaskMedia(c *gin.Context, attachment bool) {
 	taskID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || taskID <= 0 {
 		c.Status(http.StatusBadRequest)
@@ -532,6 +540,13 @@ func (h *MediaHandler) StreamTaskMedia(c *gin.Context) {
 
 	if contentType != "" {
 		c.Header("Content-Type", contentType)
+	}
+	if attachment {
+		filename := path.Base(strings.ReplaceAll(strings.TrimSpace(task.Filename), "\\", "/"))
+		if filename == "" || filename == "." || filename == "/" {
+			filename = objectNameFor(task)
+		}
+		c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	}
 	// Private keeps the task-scoped URL out of shared caches; the credential is
 	// valid for hours, so no-store would re-fetch the whole file each visit.

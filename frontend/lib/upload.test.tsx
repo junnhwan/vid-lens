@@ -32,6 +32,14 @@ beforeEach(() => {
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear() })
 
+test('media downloads use the same-origin API prefix even with a separate upload host', async () => {
+  const { api } = await import('./api')
+  vi.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ code: 200, data: { download_url: '/media/task/31/download?token=task-credential', filename: '视频.mp4' } }) } as Response)
+  const result = await api.downloadMedia(31)
+  expect(fetch).toHaveBeenCalledWith('/api/v1/media/download-audio/31', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-session' }) }))
+  expect(result).toEqual({ download_url: '/api/v1/media/task/31/download?token=task-credential', filename: '视频.mp4' })
+})
+
 test('only chunk-upload routes use the configured origin and keep session authentication', async () => {
   const { api } = await import('./api')
   await api.checkUpload('md5', 10, 10, 1)

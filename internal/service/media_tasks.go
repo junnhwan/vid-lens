@@ -453,6 +453,10 @@ const playbackPathPrefix = "/media/task/"
 // credential. A signed MinIO URL cannot be used here: its host is the storage
 // endpoint (loopback on the server), which no browser can reach.
 func (s *MediaService) GetPlaybackURL(ctx context.Context, userID, taskID int64) (string, error) {
+	return s.taskMediaURL(ctx, userID, taskID, "stream")
+}
+
+func (s *MediaService) taskMediaURL(ctx context.Context, userID, taskID int64, action string) (string, error) {
 	task, err := s.repo.Task.FindByID(taskID)
 	if err != nil {
 		return "", err
@@ -468,7 +472,7 @@ func (s *MediaService) GetPlaybackURL(ctx context.Context, userID, taskID int64)
 	if err != nil {
 		return "", fmt.Errorf("生成播放凭证失败: %w", err)
 	}
-	return fmt.Sprintf("%s%d/stream?token=%s", playbackPathPrefix, taskID, url.QueryEscape(token)), nil
+	return fmt.Sprintf("%s%d/%s?token=%s", playbackPathPrefix, taskID, action, url.QueryEscape(token)), nil
 }
 
 // OpenTaskMedia validates a playback credential and resolves it to the task's
@@ -518,21 +522,10 @@ func (s *MediaService) OpenTaskVisualFrame(ctx context.Context, taskID, frameID 
 	return s.storage.OpenObject(ctx, frame.ObjectKey)
 }
 
-// GetDownloadURL returns a direct storage link for the task media. Callers use
-// this for file downloads, where a same-origin API stream would have to proxy
-// every byte.
+// GetDownloadURL keeps storage endpoints private and uses the same task-scoped
+// authorization as playback. The download handler sets an attachment filename.
 func (s *MediaService) GetDownloadURL(ctx context.Context, userID, taskID int64) (string, error) {
-	task, err := s.repo.Task.FindByID(taskID)
-	if err != nil {
-		return "", err
-	}
-	if task.UserID != userID {
-		return "", fmt.Errorf("无权访问此任务")
-	}
-	if strings.TrimSpace(task.FileURL) == "" {
-		return "", fmt.Errorf("视频对象不存在")
-	}
-	return s.storage.GetPresignedURL(ctx, task.FileURL)
+	return s.taskMediaURL(ctx, userID, taskID, "download")
 }
 
 // UpdateTaskTitle 由用户改写展示标题。不重建索引；已有标题不会被后续自动生成覆盖

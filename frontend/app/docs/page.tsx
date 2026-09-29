@@ -22,7 +22,7 @@ export default function DocsQuickstartPage() {
       <h2>启动服务</h2>
       <p>
         首次使用时，将仓库根目录的 <code>.env.example</code> 复制为 <code>.env</code>；已有配置则保留原文件。
-        按实际服务填写模型地址、密钥与维度，设置稳定的 <code>VIDLENS_API_KEY_SECRET</code>，并核对仓库中的{' '}
+        按实际服务填写模型地址、密钥与维度，设置独立且稳定的 <code>VIDLENS_JWT_SECRET</code> 和 <code>VIDLENS_API_KEY_SECRET</code>，并核对仓库中的{' '}
         <code>config.yaml</code> 与本机依赖地址。示例模型地址不能直接调用。
       </p>
       <p>在仓库根目录启动基础设施（PostgreSQL + pgvector、Redis、RabbitMQ、MinIO），待它们就绪后启动后端：</p>

@@ -216,8 +216,10 @@ export const api = {
   generateVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'POST'),
   getFollowUpQuestions: (sessionId: number, messageId: number) => req<import('./types').VideoQuestionResult>(`/chat/sessions/${sessionId}/follow-up-questions`, 'POST', { message_id: messageId }),
   triggerRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'POST'),
-  downloadAudio: (id: number) =>
-    req<{ download_url: string; filename: string }>(`/media/download-audio/${id}`, 'GET'),
+  downloadMedia: async (id: number) => {
+    const result = await req<{ download_url: string; filename: string }>(`/media/download-audio/${id}`, 'GET')
+    return { ...result, download_url: absolutePlaybackUrl(result.download_url) }
+  },
 
   // ============ Chat ============
   createSession: (params: { task_id?: number; scope_type?: ChatScopeType; knowledge_base_id?: number; title?: string; mode?: ChatMode }) =>

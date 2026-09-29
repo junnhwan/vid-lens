@@ -21,6 +21,7 @@ func TestLoadServerConfigRejectsInvalidConfigurationBeforeStartup(t *testing.T) 
 }
 
 func TestProjectServerConfigLoadsAndValidates(t *testing.T) {
+	t.Setenv("VIDLENS_JWT_SECRET", "test-only-signing-key-never-used-in-production")
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller() could not locate test file")

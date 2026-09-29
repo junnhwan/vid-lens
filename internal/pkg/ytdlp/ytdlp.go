@@ -3,18 +3,24 @@ package ytdlp
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
+	"vid-lens/internal/pkg/remoteurl"
 )
 
 // DownloadVideo 通过 yt-dlp 下载视频
 // yt-dlp supports common video platforms so users can submit a URL directly.
 // 用户无需手动下载视频再上传，直接粘贴链接即可
 func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, cookiesPath, proxyURL, videoURL string) (string, error) {
+	ytDlpPath = strings.TrimSpace(ytDlpPath)
+	if ytDlpPath == "" {
+		ytDlpPath = "yt-dlp"
+	}
 	outputPath := filepath.Join(os.TempDir(), uuid.New().String()+".mp4")
 
 	args := buildArgs(ffmpegPath, cookiesPath, proxyURL, videoURL)
@@ -43,15 +49,28 @@ func DownloadVideo(ctx context.Context, ytDlpPath, ffmpegPath, cookiesPath, prox
 
 func buildArgs(ffmpegPath, cookiesPath, proxyURL, videoURL string) []string {
 	args := []string{
+		"--ignore-config",
 		"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		"--referer", "https://www.bilibili.com/",
 		"--format", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/bv*[height<=720]+ba/best[height<=720]/best",
 		"--recode-video", "mp4",
-		"--ffmpeg-location", ffmpegPath,
 		"--no-playlist",
 	}
-	if strings.TrimSpace(cookiesPath) != "" {
-		args = append(args, "--cookies", strings.TrimSpace(cookiesPath))
+	// Bare default commands are discovered on PATH by yt-dlp. Its location
+	// option expects an existing file/directory, not a command name.
+	ffmpegPath = strings.TrimSpace(ffmpegPath)
+	if ffmpegPath != "" && ffmpegPath != "ffmpeg" && ffmpegPath != "ffmpeg.exe" {
+		args = append(args, "--ffmpeg-location", ffmpegPath)
+	}
+	parsed, err := url.Parse(videoURL)
+	if err == nil && remoteurl.HostAllowed(parsed.Hostname(), []string{"bilibili.com", "b23.tv"}) {
+		args = append(args, "--referer", "https://www.bilibili.com/")
+		// tools.cookies_path is the Bilibili cookie jar. yt-dlp still applies
+		// domain matching to individual cookies when following redirects.
+		if strings.TrimSpace(cookiesPath) != "" {
+			args = append(args, "--cookies", strings.TrimSpace(cookiesPath))
+		}
+	} else if err == nil && remoteurl.HostAllowed(parsed.Hostname(), []string{"youtube.com", "youtu.be"}) {
+		args = append(args, "--referer", "https://www.youtube.com/")
 	}
 	if strings.TrimSpace(proxyURL) != "" {
 		args = append(args, "--proxy", strings.TrimSpace(proxyURL))
