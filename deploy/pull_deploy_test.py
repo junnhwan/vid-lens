@@ -2,10 +2,13 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pull_deploy as deploy
 
@@ -60,7 +63,7 @@ class PullDeployTests(unittest.TestCase):
                     archive.addfile(member, io.BytesIO(data))
         return buffer.getvalue()
 
-    def download(self, url, path, limit, missing_ok=False):
+    def download(self, url, path, limit, missing_ok=False, proxy=None):
         name = url.rsplit('/', 1)[-1]
         path.write_bytes(json.dumps(self.manifest).encode() if name == 'manifest.json' else self.assets[name])
         return True
@@ -78,6 +81,32 @@ class PullDeployTests(unittest.TestCase):
         binary.write_bytes(b'tampered')
         with self.assertRaises(deploy.DeployError):
             deploy.verify_file(binary, self.manifest['files']['server'])
+
+    def test_public_ref_remains_readable_when_git_transport_times_out(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            'ref': 'refs/heads/main', 'object': {'type': 'commit', 'sha': SHA},
+        }).encode()
+        with patch.object(deploy, 'open_public', return_value=response, create=True), \
+             patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 45)):
+            self.assertEqual(deploy.main_sha(self.config), SHA)
+
+    def test_https_uses_private_proxy_only_after_direct_connection_fails(self):
+        response = MagicMock()
+        with patch.object(deploy.urllib.request, 'build_opener') as build, \
+             patch.object(deploy.urllib.request, 'ProxyHandler') as proxy_handler:
+            build.return_value.open.side_effect = [urllib.error.URLError('unreachable'), response]
+            self.assertIs(deploy.open_public('https://github.com/example', proxy='http://local-proxy.invalid'), response)
+        self.assertEqual(proxy_handler.call_args_list[0].args, ({},))
+        self.assertEqual(proxy_handler.call_args_list[1].args, ({'https': 'http://local-proxy.invalid'},))
+
+    def test_public_ref_rejects_a_different_branch(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            'ref': 'refs/heads/other', 'object': {'type': 'commit', 'sha': SHA},
+        }).encode()
+        with patch.object(deploy, 'open_public', return_value=response), self.assertRaises(deploy.DeployError):
+            deploy.main_sha(self.config)
 
     def test_frontend_rejects_path_traversal_links_private_and_duplicate_files(self):
         for members in [ [('dist/../../escape', b'x')], [('dist/link', None)],

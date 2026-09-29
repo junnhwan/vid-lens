@@ -15,7 +15,7 @@ GitHub-hosted machines; no Actions runner or GitHub token is installed on produc
 ## Server installation
 
 Prerequisites: an existing healthy systemd deployment of `vidlens` and `vidlens-web`,
-Linux amd64, Python 3.9+, Bash, git, curl, tar, Node.js, and outbound HTTPS access to
+Linux amd64, Python 3.9+, Bash, curl, tar, Node.js, and outbound HTTPS access to
 GitHub and its release asset hosts. The repository and deployment releases must be
 public. This mode requires same-origin uploads; a custom upload origin must be
 handled separately before enabling prebuilt deployment.
@@ -43,6 +43,10 @@ examples; use the local deployment's actual values. Do not commit this file.
 }
 ```
 
+For servers with an egress proxy, optionally set `https_proxy` in this local JSON
+file. The updater first attempts direct HTTPS, then uses that proxy if connecting
+fails. Keep the actual proxy setting server-local; it is never logged or published.
+
 Validate the next release without activating it, then enable polling:
 
 ```sh
@@ -59,6 +63,11 @@ only after all assets are uploaded. If the release is not available, the running
 version remains unchanged. The server checks SHA, runtime generation, asset sizes,
 SHA256 hashes, and archive paths/types before calling either deployment script. It
 checks `main` again after downloading to avoid activating a superseded release.
+The main SHA is read from GitHub's public reference API, without invoking Git.
+Idle polling uses about 30 API requests/hour, with one extra check per candidate
+release; GitHub's unauthenticated allowance is 60/hour per source IP. If requests
+are unavailable or limited, deployment waits for a later check and retains the
+current version.
 
 A local file lock prevents simultaneous automatic deployments. Before activating,
 the updater checks both live services and saves a server-local copy of both program

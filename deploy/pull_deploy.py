@@ -75,25 +75,47 @@ def load_config(path):
             raise DeployError('Runtime and health URLs must use loopback HTTP')
     if not re.fullmatch(r'[A-Za-z0-9_.@-]+', config.get('backend_service', 'vidlens.service')):
         raise DeployError('Invalid backend service name')
+    proxy = config.get('https_proxy', '')
+    if proxy:
+        parsed = urlparse(proxy)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise DeployError('Invalid server-local HTTPS proxy setting')
     return config
 
 
-def main_sha(config):
-    environment = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL='/dev/null')
-    result = subprocess.run(
-        ['git', 'ls-remote', 'https://github.com/' + config['repository'] + '.git', 'refs/heads/main'],
-        env=environment, capture_output=True, text=True, timeout=45, check=True,
-    )
-    parts = result.stdout.strip().split()
-    if len(parts) != 2 or not SHA.fullmatch(parts[0]) or parts[1] != 'refs/heads/main':
-        raise DeployError('Could not identify the main commit')
-    return parts[0]
-
-
-def download(url, path, limit, missing_ok=False):
+def open_public(url, proxy=None):
     request = urllib.request.Request(url, headers={'User-Agent': 'VidLens-Pull-Deploy/1'})
+    routes = [{}] + ([{'https': proxy}] if proxy else [])
+    for index, route in enumerate(routes):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler(route))
+        try:
+            return opener.open(request, timeout=45)
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if index == len(routes) - 1:
+                raise DeployError('GitHub HTTPS request failed; retrying on the next check') from None
+
+
+def main_sha(config):
+    # Public REST avoids the Git smart-HTTP transport that intermittently hung
+    # in the production timer. At two-minute intervals, idle polling is 30/h.
+    url = 'https://api.github.com/repos/' + config['repository'] + '/git/ref/heads/main'
+    with open_public(url, proxy=config.get('https_proxy')) as response:
+        body = response.read(16385)
+    if len(body) > 16384:
+        raise DeployError('GitHub reference response exceeds the size limit')
+    reference = json.loads(body)
+    obj = reference.get('object', {}) if isinstance(reference, dict) else {}
+    sha = obj.get('sha', '') if isinstance(obj, dict) else ''
+    if reference.get('ref') != 'refs/heads/main' or obj.get('type') != 'commit' or not SHA.fullmatch(sha):
+        raise DeployError('Could not identify the main commit')
+    return sha
+
+
+def download(url, path, limit, missing_ok=False, proxy=None):
     try:
-        with urllib.request.urlopen(request, timeout=45) as response, path.open('wb') as output:
+        with open_public(url, proxy=proxy) as response, path.open('wb') as output:
             size = 0
             while True:
                 block = response.read(1024 * 1024)
@@ -278,13 +300,15 @@ def poll(config, state_path, retry=False, check=False):
     with tempfile.TemporaryDirectory(prefix='release-', dir=config['state_dir']) as temporary:
         work = Path(temporary)
         base = 'https://github.com/' + config['repository'] + '/releases/download/auto-' + sha + '/'
-        if not download(base + 'manifest.json', work / 'manifest.json', 16384, missing_ok=True):
+        if not download(base + 'manifest.json', work / 'manifest.json', 16384, missing_ok=True,
+                        proxy=config.get('https_proxy')):
             log('Main ' + sha[:12] + ' has no checked release yet; keeping the current version')
             return
         manifest = read_json(work / 'manifest.json')
         validate_manifest(manifest, sha, config['runtime_generation'])
+        log('Downloading checked release ' + sha[:12])
         for name, metadata in manifest['files'].items():
-            download(base + name, work / name, metadata['size'])
+            download(base + name, work / name, metadata['size'], proxy=config.get('https_proxy'))
             verify_file(work / name, metadata)
         validate_frontend(work / 'frontend-build.tar.gz')
         if main_sha(config) != sha:
