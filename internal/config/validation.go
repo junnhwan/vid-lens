@@ -199,6 +199,7 @@ func (c *Config) ValidateServer() error {
 
 func validateProductionSecret(problems *validationErrors, field, value string) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.NewReplacer("_", "-", " ", "-").Replace(normalized)
 	if len(value) < 32 || strings.Contains(normalized, "change-me") || strings.Contains(normalized, "change-in-production") || strings.Contains(normalized, "your-secret") {
 		problems.add(field, "生产模式必须配置至少 32 字节的随机密钥，不能使用示例值")
 	}

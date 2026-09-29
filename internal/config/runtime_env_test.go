@@ -57,6 +57,16 @@ func TestValidateServerRequiresIndependentStableProductionSecrets(t *testing.T) 
 	}
 }
 
+func TestValidateServerRejectsUnderscorePlaceholderSecret(t *testing.T) {
+	cfg := validServerConfig()
+	cfg.Server.Mode = "release"
+	cfg.JWT.Secret = "VIDLENS_JWT_SECRET_CHANGE_ME_IN_PRODUCTION"
+	cfg.Security.APIKeySecret = strings.Repeat("b", 64)
+	if err := cfg.ValidateServer(); err == nil {
+		t.Fatal("underscore variant of production example secret accepted")
+	}
+}
+
 func TestLoadRejectsInvalidRuntimeEnvironmentWithoutEchoingValues(t *testing.T) {
 	for _, name := range []string{"VIDLENS_DATABASE_PORT", "VIDLENS_MINIO_USE_SSL", "VIDLENS_MQ_BROKERS", "VIDLENS_ALLOWED_VIDEO_HOSTS"} {
 		t.Run(name, func(t *testing.T) {
