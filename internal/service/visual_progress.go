@@ -40,7 +40,7 @@ func (s *MediaService) GetVisualProgress(_ context.Context, userID, taskID int64
 		return nil, ErrTaskNotFound
 	}
 	result := &VisualProgress{TaskID: taskID, Status: "not_started", Phase: "not_started"}
-	if task.VisualDisabled {
+	if task.EffectiveVisualMode() == model.VisualModeOff {
 		result.Status, result.Phase, result.ErrorCode = model.VisualProgressSkipped, "disabled", "visual_disabled"
 		return result, nil
 	}
@@ -56,7 +56,7 @@ func (s *MediaService) GetVisualProgress(_ context.Context, userID, taskID int64
 	}
 	// A new dispatch or replacement worker must never inherit the old attempt's
 	// counts. The new branch will create its own row after acquiring the lease.
-	if task.LastJobType == model.TaskJobTypeTranscribe &&
+	if (task.LastJobType == model.TaskJobTypeTranscribe || task.LastJobType == model.TaskJobTypeVisual) &&
 		(task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning) &&
 		task.ProcessingToken != row.AttemptToken {
 		result.Status, result.Phase = "waiting_to_start", "waiting_for_worker"

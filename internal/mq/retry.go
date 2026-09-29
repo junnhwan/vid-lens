@@ -454,6 +454,11 @@ func wrapRetryRestoreError(message string, err error) error {
 
 func retryDispatchState(jobType, currentStage string) (int8, string) {
 	switch jobType {
+	case model.TaskJobTypeVisual:
+		if currentStage == model.TaskStageIndexing {
+			return model.TaskStatusQueued, model.TaskStageIndexing
+		}
+		return model.TaskStatusQueued, model.TaskStageVisual
 	case model.TaskJobTypeSummary:
 		return model.TaskStatusQueued, model.TaskStageSummarizing
 	case TaskJobDownload:
@@ -474,6 +479,13 @@ func retryDispatchState(jobType, currentStage string) (int8, string) {
 
 func (s *RetryScheduler) enqueueRetry(ctx context.Context, task model.VideoTask) error {
 	switch task.LastJobType {
+	case model.TaskJobTypeVisual:
+		if producer, ok := s.producer.(interface {
+			EnqueueVisual(context.Context, int64) error
+		}); ok {
+			return producer.EnqueueVisual(ctx, task.ID)
+		}
+		return fmt.Errorf("画面构建队列不可用")
 	case model.TaskJobTypeSummary:
 		return s.producer.EnqueueSummary(ctx, task.ID, task.FileMD5)
 	case TaskJobDownload:

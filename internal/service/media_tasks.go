@@ -180,7 +180,18 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 // SetTaskVisualDisabled controls whether future transcribe runs extract frames.
 // Existing frame rows, object images, and RAG projections are preserved.
 func (s *MediaService) SetTaskVisualDisabled(ctx context.Context, userID, taskID int64, disabled bool) (*model.VideoTask, error) {
-	updated, err := s.repo.Task.SetVisualDisabled(userID, taskID, disabled)
+	mode := model.VisualModeBoth
+	if disabled {
+		mode = model.VisualModeOff
+	}
+	return s.SetTaskVisualMode(ctx, userID, taskID, mode)
+}
+
+func (s *MediaService) SetTaskVisualMode(ctx context.Context, userID, taskID int64, mode string) (*model.VideoTask, error) {
+	if !model.ValidVisualMode(mode) {
+		return nil, fmt.Errorf("画面模式必须为 off、ocr、caption 或 both")
+	}
+	updated, err := s.repo.Task.SetVisualMode(userID, taskID, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +199,41 @@ func (s *MediaService) SetTaskVisualDisabled(ctx context.Context, userID, taskID
 		return nil, fmt.Errorf("视频不存在或正在处理，请等待任务结束后再修改画面证据设置")
 	}
 	return s.GetTaskDetail(ctx, userID, taskID)
+}
+
+// RequestVisualBuild extracts only selected visual observations, then updates retrieval.
+// The durable dispatch lease and retry scheduler are shared with other media jobs.
+func (s *MediaService) RequestVisualBuild(ctx context.Context, userID, taskID int64) error {
+	task, err := s.repo.Task.FindByID(taskID)
+	if err != nil || task.UserID != userID {
+		return fmt.Errorf("视频不存在或无权访问")
+	}
+	if task.EffectiveVisualMode() == model.VisualModeOff {
+		return fmt.Errorf("请先选择 OCR、画面描述或混合模式")
+	}
+	if strings.TrimSpace(task.FileURL) == "" {
+		return fmt.Errorf("视频尚未完成导入")
+	}
+	producer, ok := s.mq.(interface {
+		EnqueueVisual(context.Context, int64) error
+	})
+	if !ok {
+		return fmt.Errorf("画面构建队列不可用")
+	}
+	_, err = s.enqueueInitialTask(ctx, task, initialDispatchSpec{
+		allowedStatuses: []int8{model.TaskStatusPending, model.TaskStatusCompleted, model.TaskStatusFailed, model.TaskStatusDead},
+		jobType:         model.TaskJobTypeVisual, stage: model.TaskStageVisual,
+		enqueue: func(enqueueCtx context.Context, prepared model.VideoTask) error {
+			return producer.EnqueueVisual(enqueueCtx, prepared.ID)
+		},
+	})
+	if errors.Is(err, repository.ErrInitialTaskDispatchConflict) {
+		return fmt.Errorf("视频正在处理，请等待当前任务结束")
+	}
+	if err != nil {
+		return publicInitialDispatchError(ctx, *task, model.TaskJobTypeVisual, model.TaskStageVisual, err)
+	}
+	return nil
 }
 
 // GetTaskDetail 获取任务详情

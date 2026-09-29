@@ -21,6 +21,7 @@ func (s *MediaService) UploadByURL(ctx context.Context, userID int64, videoURL s
 
 	key := md5HexString(checkedURL.Sanitized)
 	task := &model.VideoTask{
+		VisualMode: model.VisualModeOff, VisualDisabled: true,
 		UserID:     userID,
 		FileMD5:    key,
 		Filename:   filenameForURLTask(checkedURL.Sanitized),

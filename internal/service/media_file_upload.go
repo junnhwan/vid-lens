@@ -73,6 +73,7 @@ func (s *MediaService) createTaskFromAsset(userID int64, filename string, asset 
 			stage = model.TaskStageNone
 		}
 		task = &model.VideoTask{
+			VisualMode: model.VisualModeOff, VisualDisabled: true,
 			UserID:   userID,
 			AssetID:  &lockedAsset.ID,
 			FileMD5:  lockedAsset.FileMD5,

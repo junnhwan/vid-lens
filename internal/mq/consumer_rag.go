@@ -21,6 +21,9 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) e
 	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
 		return fmt.Errorf("解析 RAG 索引消息失败: %w", err)
 	}
+	if payload.JobType == model.TaskJobTypeVisual {
+		return c.handleVisualBuild(ctx, payload)
+	}
 
 	task, err := c.repo.Task.FindByID(payload.TaskID)
 	if err != nil {

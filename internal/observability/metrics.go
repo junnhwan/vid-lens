@@ -293,7 +293,7 @@ func normalizeMemoryStatus(value string) string {
 	return normalize(value, set("accepted", "dropped", "rejected", "failed", "success"))
 }
 func normalizeJobType(value string) string {
-	return normalize(value, set("download", "transcribe", "analyze", "rag_index"))
+	return normalize(value, set("download", "transcribe", "analyze", "summary", "visual", "rag_index"))
 }
 func normalizeErrorCode(value string) string {
 	return normalize(value, set("timeout", "rate_limited", "network_error", "auth_error", "provider_unavailable", "provider_error", "retryable_error", "retry_exhausted", "non_retryable_error", "enqueue_failed"))

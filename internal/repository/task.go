@@ -71,9 +71,17 @@ func (r *TaskRepository) FindByID(id int64) (*model.VideoTask, error) {
 // SetVisualDisabled changes future processing only while the task is idle.
 // The status predicate prevents a setting change from racing a visual branch.
 func (r *TaskRepository) SetVisualDisabled(userID, taskID int64, disabled bool) (bool, error) {
+	mode := model.VisualModeBoth
+	if disabled {
+		mode = model.VisualModeOff
+	}
+	return r.SetVisualMode(userID, taskID, mode)
+}
+
+func (r *TaskRepository) SetVisualMode(userID, taskID int64, mode string) (bool, error) {
 	result := r.db.Model(&model.VideoTask{}).
 		Where("id = ? AND user_id = ? AND status NOT IN ?", taskID, userID, []int8{model.TaskStatusQueued, model.TaskStatusRunning}).
-		Updates(map[string]interface{}{"visual_disabled": disabled, "updated_at": time.Now()})
+		Updates(map[string]interface{}{"visual_mode": mode, "visual_disabled": mode == model.VisualModeOff, "updated_at": time.Now()})
 	return result.RowsAffected > 0, result.Error
 }
 
@@ -196,7 +204,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword 
 
 	offset := (page - 1) * pageSize
 	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
+		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, visual_mode, visual_disabled, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).

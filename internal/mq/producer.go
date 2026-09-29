@@ -32,6 +32,7 @@ type DownloadPayload struct {
 }
 
 type RAGIndexPayload struct {
+	JobType    string `json:"job_type,omitempty"`
 	TaskID     int64  `json:"task_id"`
 	TraceID    string `json:"trace_id"`
 	ClaimToken string `json:"claim_token,omitempty"`
@@ -270,6 +271,18 @@ func (p *Producer) EnqueueRAGIndex(ctx context.Context, taskID int64) error {
 		BudgetID:   retryBudgetIDFromContext(ctx),
 	})
 	return p.publish(TaskJobRAGIndex, taskID, claimTokenFromContext(ctx), payload)
+}
+
+// Visual jobs share the media indexing queue while owning a distinct durable lease.
+func (p *Producer) EnqueueVisual(ctx context.Context, taskID int64) error {
+	payload, err := json.Marshal(RAGIndexPayload{
+		TaskID: taskID, JobType: model.TaskJobTypeVisual, TraceID: TraceIDFromContext(ctx),
+		ClaimToken: ClaimTokenFromContext(ctx), BudgetID: RetryBudgetIDFromContext(ctx),
+	})
+	if err != nil {
+		return err
+	}
+	return p.publish(TaskJobRAGIndex, taskID, ClaimTokenFromContext(ctx), payload)
 }
 
 // publish 用 PublishWithDeferredConfirm 异步投递。返回 nil 仅表示消息已

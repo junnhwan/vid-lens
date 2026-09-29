@@ -648,7 +648,7 @@ func (c *Consumer) waitForVisualAfterASR(ctx context.Context, task *model.VideoT
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
 	}
-	if c.visualIndex != nil && !task.VisualDisabled {
+	if c.visualIndex != nil && task.EffectiveVisualMode() != model.VisualModeOff {
 		if err := c.transitionTaskStage(ctx, task.ID, model.TaskStageVisual); err != nil {
 			return err
 		}
@@ -683,14 +683,14 @@ func (c *Consumer) completeTranscribeWithVisualOnly(ctx context.Context, task *m
 }
 
 func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.VideoTask) func() visualIndexOutcome {
-	if c == nil || c.visualIndex == nil || task == nil || task.VisualDisabled {
+	if c == nil || c.visualIndex == nil || task == nil || task.EffectiveVisualMode() == model.VisualModeOff {
 		return func() visualIndexOutcome { return visualIndexOutcome{} }
 	}
 	result := make(chan visualIndexOutcome, 1)
 	owner := processingLeaseOwnerFromContext(ctx)
 	if owner != nil {
 		owned, err := c.repo.BeginVisualProgress(repository.TaskProcessingLeaseRequest{
-			TaskID: task.ID, JobType: TaskJobTranscribe, Token: owner.token, Now: c.currentTime(),
+			TaskID: task.ID, JobType: owner.jobType, Token: owner.token, Now: c.currentTime(),
 		})
 		if err != nil || !owned {
 			if err == nil {
@@ -698,7 +698,7 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 			}
 			return func() visualIndexOutcome { return visualIndexOutcome{err: err} }
 		}
-		ctx = visualprogress.WithAttempt(ctx, owner.token)
+		ctx = visualprogress.WithJobAttempt(ctx, owner.token, owner.jobType)
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "visual index branch started")
 	go func() {
@@ -710,7 +710,7 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 				defer func() { <-c.visualSlots }()
 			case <-ctx.Done():
 				if owner != nil {
-					c.finishVisualProgress(task.ID, owner.token, ctx.Err())
+					c.finishVisualProgressForJob(task.ID, owner.jobType, owner.token, ctx.Err())
 				}
 				result <- visualIndexOutcome{err: ctx.Err()}
 				return
@@ -718,7 +718,7 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 		}
 		count, err := c.visualIndex(ctx, task)
 		if owner != nil && err != nil {
-			c.finishVisualProgress(task.ID, owner.token, err)
+			c.finishVisualProgressForJob(task.ID, owner.jobType, owner.token, err)
 		}
 		result <- visualIndexOutcome{count: count, err: err}
 	}()
@@ -744,6 +744,10 @@ func (c *Consumer) startVisualIndexBranch(ctx context.Context, task *model.Video
 }
 
 func (c *Consumer) finishVisualProgress(taskID int64, token string, outcomeErr error) {
+	c.finishVisualProgressForJob(taskID, TaskJobTranscribe, token, outcomeErr)
+}
+
+func (c *Consumer) finishVisualProgressForJob(taskID int64, jobType, token string, outcomeErr error) {
 	if c == nil || c.repo == nil || c.repo.VisualProgress == nil || outcomeErr == nil {
 		return
 	}
@@ -756,7 +760,7 @@ func (c *Consumer) finishVisualProgress(taskID int64, token string, outcomeErr e
 		status, code = model.VisualProgressCanceled, "canceled"
 	}
 	_, _ = c.repo.AdvanceVisualProgress(repository.TaskProcessingLeaseRequest{
-		TaskID: taskID, JobType: TaskJobTranscribe, Token: token, Now: c.currentTime(),
+		TaskID: taskID, JobType: jobType, Token: token, Now: c.currentTime(),
 	}, repository.VisualProgressUpdate{
 		Status: status, Phase: current.Phase, TotalKnown: current.TotalKnown,
 		TotalFrames: current.TotalFrames, Processed: current.Processed, Failed: current.Failed,

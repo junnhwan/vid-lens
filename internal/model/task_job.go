@@ -8,6 +8,7 @@ const (
 	TaskJobTypeTranscribe = "transcribe"
 	TaskJobTypeDownload   = "download"
 	TaskJobTypeRAGIndex   = "rag_index"
+	TaskJobTypeVisual     = "visual" // explicitly requested frame extraction; never runs ASR
 )
 
 // TaskJob records the state of one processing action under a video task.

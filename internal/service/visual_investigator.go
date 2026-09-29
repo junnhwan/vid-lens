@@ -229,8 +229,11 @@ func (s *QueryVisualInvestigator) Inspect(ctx context.Context, req InspectReques
 	if task.UserID != req.UserID {
 		return Investigation{}, errors.New("visual investigator task scope mismatch")
 	}
-	if task.VisualDisabled {
+	if task.EffectiveVisualMode() == model.VisualModeOff {
 		return Investigation{}, errors.New("此视频已关闭画面证据生成")
+	}
+	if !task.VisualCaptionAllowed() {
+		return Investigation{}, errors.New("此视频仅启用 OCR；如需模型理解图表，请选择画面描述或混合模式")
 	}
 	if strings.TrimSpace(task.FileURL) == "" {
 		return Investigation{}, errors.New("visual investigator source video is unavailable")

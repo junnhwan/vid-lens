@@ -51,10 +51,15 @@ func DefaultVisualIndexConfig() VisualIndexConfig {
 }
 
 // VisualIndexService builds task-owned visual evidence (keyframes + caption/OCR text).
-// Caption order: multimodal Vision API (if user configured) → local Tesseract OCR fallback.
+// OCR and captions run independently according to the task's selected mode.
+type visualIndexObjectStore interface {
+	DownloadToTemp(context.Context, string) (string, error)
+	UploadFromPath(context.Context, string, string, string) (int64, error)
+}
+
 type VisualIndexService struct {
 	repos   *repository.Repositories
-	storage *storage.MinIOStorage
+	storage visualIndexObjectStore
 	ffmpeg  string
 	cfg     VisualIndexConfig
 	ocr     *ocr.Recognizer
@@ -62,6 +67,7 @@ type VisualIndexService struct {
 	resolveVision func(ctx context.Context, userID int64) (ai.VisionClient, error)
 	extract       func(ctx context.Context, ffmpegPath, inputPath string, opts ffmpeg.ExtractKeyFramesOptions) ([]ffmpeg.KeyFrame, string, error)
 	recognizeOCR  func(ctx context.Context, imagePath string) (string, error)
+	ocrAvailable  func(context.Context) bool
 }
 
 func NewVisualIndexService(
@@ -102,6 +108,7 @@ func NewVisualIndexService(
 		extract: ffmpeg.ExtractKeyFrames,
 	}
 	svc.recognizeOCR = recognizer.Recognize
+	svc.ocrAvailable = recognizer.Available
 	return svc
 }
 
@@ -123,7 +130,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	if task == nil {
 		return 0, fmt.Errorf("task is nil")
 	}
-	if task.VisualDisabled {
+	if task.EffectiveVisualMode() == model.VisualModeOff {
 		return 0, nil
 	}
 	if s.storage == nil {
@@ -140,7 +147,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 		}
 		progress.Phase = phase
 		owned, err := s.repos.AdvanceVisualProgress(repository.TaskProcessingLeaseRequest{
-			TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Token: attempt, Now: time.Now(),
+			TaskID: task.ID, JobType: visualprogress.JobType(ctx), Token: attempt, Now: time.Now(),
 		}, progress)
 		if err != nil {
 			return err
@@ -154,9 +161,13 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 	if err := report("provider_check"); err != nil {
 		return 0, err
 	}
-	vision, visionErr := s.loadVisionClient(ctx, task.UserID)
+	var vision ai.VisionClient
+	var visionErr error
+	if task.VisualCaptionAllowed() {
+		vision, visionErr = s.loadVisionClient(ctx, task.UserID)
+	}
 	visionPrompt := ai.DefaultVisionCaptionPrompt
-	if s.repos.AIProfile != nil {
+	if vision != nil && s.repos.AIProfile != nil {
 		preference, err := s.repos.AIProfile.PromptPreference(task.UserID, "vision")
 		if err != nil {
 			return 0, err
@@ -165,7 +176,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 			visionPrompt += "\n用户画面描述偏好（不得编造不可见内容）：\n" + preference + "\n如有冲突，遵守前面的事实与格式要求。"
 		}
 	}
-	ocrOK := s.ocr != nil && s.ocr.Available(ctx)
+	ocrOK := task.VisualOCRAllowed() && s.ocrAvailable != nil && s.ocrAvailable(ctx)
 	if vision == nil && !ocrOK {
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "visual index skipped: no vision profile and ocr unavailable",
 			slog.String("ocr_command", s.cfg.OCRCommand),
@@ -222,8 +233,7 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 		}
 
 		// OCR and Vision are separate observations of the same sampled frame.
-		// Running both prevents a caption from erasing slide/subtitle text and
-		// preserves disagreements for retrieval and answer-time uncertainty.
+		// Only requested providers run; mixed mode retains both observations.
 		if ocrOK && s.recognizeOCR != nil {
 			ocrText, ocrErr := s.recognizeOCR(ctx, frame.Path)
 			if ocrErr != nil {
@@ -284,12 +294,16 @@ func (s *VisualIndexService) BuildTaskVisualIndex(ctx context.Context, task *mod
 		}
 	}
 
+	// A rebuild with no usable observation must not replace a working evidence batch.
+	if textCount == 0 {
+		return 0, fmt.Errorf("所选画面模式未生成可用证据，请检查 OCR/视觉模型配置及视频内容")
+	}
 	if attempt != "" {
 		if err := report("publishing"); err != nil {
 			return textCount, err
 		}
 		owned, err := s.repos.PublishVisualFrames(repository.TaskProcessingLeaseRequest{
-			TaskID: task.ID, JobType: model.TaskJobTypeTranscribe, Token: attempt, Now: time.Now(),
+			TaskID: task.ID, JobType: visualprogress.JobType(ctx), Token: attempt, Now: time.Now(),
 		}, rows, progress)
 		if err != nil {
 			return 0, fmt.Errorf("persist visual frames: %w", err)

@@ -183,6 +183,9 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 	if task.SourceType != model.TaskSourceTypeURL {
 		t.Fatalf("task source_type = %q, want url", task.SourceType)
 	}
+	if task.VisualMode != model.VisualModeOff || !task.VisualDisabled {
+		t.Fatalf("new URL import automatically enables visuals: %+v", task)
+	}
 	if task.SourceURL != sanitizedURL {
 		t.Fatalf("task source_url = %q, want sanitized URL %q", task.SourceURL, sanitizedURL)
 	}
