@@ -5,6 +5,7 @@ import type { User } from '@/lib/types'
 import UploadModal from '@/components/UploadModal'
 import { ShellFrame } from './ShellFrame'
 import { ArtifactQueryProvider } from '@/components/artifacts/ArtifactQueryProvider'
+import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 import { useLeaveGuard } from './useLeaveGuard'
 
 interface ShellCtx {
@@ -49,6 +50,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadRevision, setUploadRevision] = useState(0)
+  const uploadPreflight = useVideoAIPreflight()
   const { registerLeaveGuard, confirmLeave, clearLeaveGuard } = useLeaveGuard()
 
   useEffect(() => {
@@ -63,7 +65,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => { active = false }
   }, [hasToken, router])
 
-  const openUpload = useCallback(() => setUploadOpen(true), [])
+  const openUpload = useCallback(() => {
+    uploadPreflight.request('导入视频', () => setUploadOpen(true))
+  }, [uploadPreflight.request])
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
   const logout = useCallback(() => {
@@ -82,9 +86,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <ShellFrame pathname={pathname} crumb={crumb}
           user={{ name: user?.nickname || user?.username || '…', detail: user?.role === 'DEMO' ? '演示账号 · 只读' : '个人工作区' }}
           onImport={openUpload} onLogout={logout} products>
-          <ArtifactQueryProvider key={user?.id ?? "anonymous"}>{children}</ArtifactQueryProvider>
+          <ArtifactQueryProvider key={user?.id ?? "anonymous"}>
+            {children}
+            {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onUploaded={() => setUploadRevision(n => n + 1)} />}
+            {uploadPreflight.dialog}
+          </ArtifactQueryProvider>
         </ShellFrame>
-        {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onUploaded={() => setUploadRevision(n => n + 1)} />}
       </CrumbSetter.Provider>
     </ShellContext.Provider>
   )

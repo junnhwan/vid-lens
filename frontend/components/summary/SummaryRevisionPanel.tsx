@@ -5,6 +5,7 @@ import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { Icon } from '@/components/ui/Icon'
 import { artifactApi } from '@/lib/artifacts/api'
 import { summaryRevisionFailure } from '@/lib/summaryRevisionFailure'
+import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 import type { Artifact, ArtifactEditRun } from '@/lib/artifacts/schema'
 import './SummaryRevisionPanel.css'
 
@@ -16,6 +17,8 @@ function errorText(error: unknown): string {
 }
 
 export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void }) {
+  const videoPreflight = useVideoAIPreflight()
+  const [preflightAccepted, setPreflightAccepted] = useState(false)
   const [summary, setSummary] = useState<EffectiveSummaryView | null>(null)
   const [rules, setRules] = useState<VideoTermRuleSet | null>(null)
   const [operation, setOperation] = useState<SummaryEditOperation | null>(null)
@@ -143,7 +146,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
     setTargetResults(previous => [...previous, `术语规则：已保存 v${nextRules.version}；只影响后续新运行。`])
   }
 
-  const preview = async () => {
+  const performPreview = async () => {
     if (!summary || !instruction.trim() || busy) return
     const generation = previewGeneration.current
     const requestedInstruction = instruction.trim()
@@ -158,6 +161,15 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
       if (next.status === 'failed') { setKey(''); setMessage(summaryRevisionFailure(next.error_code)) }
     } catch (error) { if (generation === previewGeneration.current) setMessage(`${errorText(error)}；可用同一请求重试，避免重复修改。`) }
     finally { setBusy(false) }
+  }
+
+  const preview = () => {
+    if (!summary || !instruction.trim() || busy) return
+    if (preflightAccepted) { void performPreview(); return }
+    videoPreflight.request('AI 摘要修订预览', () => {
+      setPreflightAccepted(true)
+      void performPreview()
+    })
   }
 
   const apply = async () => {
@@ -286,5 +298,6 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
     </section>}
     {!!targetResults.length && <ul className="sumrev-results">{targetResults.map((result, index) => <li key={index} role="status"><Icon name="check" size="sm" />{result}</li>)}</ul>}
     {message && <p role="alert" className="sumrev-alert bad">{message}</p>}
+    {videoPreflight.dialog}
   </div>
 }

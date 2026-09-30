@@ -6,6 +6,8 @@ import { artifactApi } from '@/lib/artifacts/api'
 import type { ArtifactEditOperation } from '@/lib/artifacts/schema'
 import { ArtifactAgentPanel } from './ArtifactAgentPanel'
 
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
+
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers() })
 
 const timestamp = '2026-09-28T02:00:00Z'

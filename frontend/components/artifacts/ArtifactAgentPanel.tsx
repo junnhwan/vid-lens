@@ -3,6 +3,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Icon } from '@/components/ui/Icon'
 import { ApiError } from '@/lib/api'
 import { artifactApi, artifactError, ContractError } from '@/lib/artifacts/api'
+import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 import type { ArtifactDetail, ArtifactEditMode, ArtifactEditOperation, ArtifactEditRun, StudyBlock, StudyRelation } from '@/lib/artifacts/schema'
 
 type Attempt = { signature: string; key: string }
@@ -87,6 +88,8 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
   onOperationChanged?: (operation: ArtifactEditOperation) => void
   onOpenEvidence: (id: string) => void
 }) {
+  const videoPreflight = useVideoAIPreflight()
+  const [preflightAccepted, setPreflightAccepted] = useState(false)
   const scope = initialRun?.selected_block_ids[0] ?? initialScope
   const scopedBlock = scope ? artifact.version?.body.blocks.find(block => block.block_id === scope) : undefined
   const [instruction, setInstruction] = useState(initialRun?.instruction ?? '')
@@ -160,7 +163,7 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
 
   const statusText = useMemo(() => run ? stageLabels[run.stage] ?? (activeStatuses.has(run.status) ? 'Agent 正在处理' : run.status === 'completed' ? '已完成' : '未完成') : '', [run])
 
-  async function submit(mode: ArtifactEditMode) {
+  async function performSubmit(mode: ArtifactEditMode) {
     const normalized = instruction.trim()
     if (!normalized) { setError('请先填写修改要求。'); return }
     const input = { instruction: normalized, expected_head_version: currentHead, selected_block_ids: scope ? [scope] : [], mode }
@@ -170,6 +173,15 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
       setRun(await artifactApi.submitEdit(artifact.id, input, requestKey(submitAttempt, signature)))
     } catch (cause) { setError(artifactError(cause)) }
     finally { setBusy(false) }
+  }
+
+  function submit(mode: ArtifactEditMode) {
+    if (!instruction.trim()) { setError('请先填写修改要求。'); return }
+    if (preflightAccepted) { void performSubmit(mode); return }
+    videoPreflight.request('AI 学习笔记修订', () => {
+      setPreflightAccepted(true)
+      void performSubmit(mode)
+    })
   }
 
   async function apply() {
@@ -254,6 +266,7 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
     </div>}
 
     {error && <div className="artifact-agent-error" role="alert">{error}{error.includes('版本') || error.includes('冲突') ? <p>请刷新当前成果后重新发起；不会覆盖服务器上的新版本。</p> : null}</div>}
+    {videoPreflight.dialog}
   </Modal>
 }
 

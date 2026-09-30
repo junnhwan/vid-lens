@@ -46,7 +46,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const [embedding, setEmbedding] = useState<GroupDraft>(fromProfile(imported?.embedding_provider || profile?.embedding_provider || '', imported?.embedding_endpoint || profile?.embedding_endpoint || '', imported?.embedding_model || profile?.embedding_model || ''))
   const [embeddingDim, setEmbeddingDim] = useState<string>(imported?.embedding_dim ? String(imported.embedding_dim) : profile?.embedding_dim ? String(profile.embedding_dim) : '')
   const [vision, setVision] = useState<GroupDraft>(fromProfile(imported?.vision_provider || profile?.vision_provider || '', imported?.vision_base_url || profile?.vision_base_url || '', imported?.vision_model || profile?.vision_model || ''))
-  const [visionEnabled, setVisionEnabled] = useState(!!(imported?.vision_model || profile?.vision_model))
+  const [visionEnabled, setVisionEnabled] = useState(true)
   const [isDefault, setIsDefault] = useState(imported?.is_default || profile?.is_default || false)
   const [reuseASR, setReuseASR] = useState(false)
   const [reuseEmbedding, setReuseEmbedding] = useState(false)
@@ -293,7 +293,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       <div className="pref-row" style={{ marginTop: 22 }}>
         <div className="pr-body">
           <b>视觉模型</b>
-          <span>可选。关键帧 OCR 与画面描述会用到它</span>
+          <span>视频处理必需。关键帧 OCR 与画面理解会用到它</span>
         </div>
         <button
           type="button"
@@ -308,6 +308,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
           group={vision} setGroup={setGroup('vision', setVision)}
           purpose="vision" models={models.vision || []} onPull={pullModels} listStatus={listStatus.vision}
           keyPlaceholder={editing ? `留空保留现有密钥(${profile?.vision_api_key_masked})` : 'sk-…'}
+          required
         />
       )}
 

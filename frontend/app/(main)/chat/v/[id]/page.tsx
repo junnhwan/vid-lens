@@ -7,11 +7,12 @@ import { useCrumb } from '@/components/shell/AppShell'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
 import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import type { StudyBlock } from '@/lib/artifacts/schema'
+import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 
 // 单视频问答(/chat/v/:id)。本阶段仅快速问答(strict_rag SSE);
 // 播放源签名 URL 供右栏迷你播放器与引用回放使用。
 
-export default function VideoChatPage({ params, searchParams }: { params: { id: string }; searchParams?: { artifact?: string; version?: string; block?: string } }) {
+export default function VideoChatPage({ params, searchParams }: { params: { id: string }; searchParams?: { artifact?: string; version?: string; block?: string; ask?: string } }) {
   const taskId = Number(params.id)
   const [task, setTask] = useState<VideoTask | null>(null)
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
@@ -22,6 +23,8 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
   const [questionsLoading, setQuestionsLoading] = useState(true)
   const [studyBlock, setStudyBlock] = useState<StudyBlock | null>(null)
   const [studyError, setStudyError] = useState('')
+  const [preflightAccepted, setPreflightAccepted] = useState(false)
+  const videoPreflight = useVideoAIPreflight()
   const returnHref = searchParams?.artifact && searchParams?.block ? `/artifacts/${encodeURIComponent(searchParams.artifact)}?block=${encodeURIComponent(searchParams.block)}` : ''
 
   useEffect(() => {
@@ -48,7 +51,8 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
     setTask(null)
     setPlaybackUrl(null)
     setQuestions(null)
-    setQuestionsLoading(true)
+    setQuestionsLoading(false)
+    setPreflightAccepted(false)
     void (async () => {
       let detail: VideoTask
       try {
@@ -62,16 +66,22 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       if (!active) return
       setTask(detail)
       setLoading(false)
-      void (async () => {
-        try { const result = await api.generateVideoQuestions(taskId); if (active) setQuestions(result) }
-        catch { if (active) setQuestions({ status: 'no_evidence', message: '推荐问题暂时不可用，可以直接提问。', questions: [] }) }
-        finally { if (active) setQuestionsLoading(false) }
-      })()
+      videoPreflight.request('单视频问答', () => {
+        if (!active) return
+        setPreflightAccepted(true)
+        if (searchParams?.ask) return
+        setQuestionsLoading(true)
+        void (async () => {
+          try { const result = await api.generateVideoQuestions(taskId); if (active) setQuestions(result) }
+          catch { if (active) setQuestions({ status: 'no_evidence', message: '推荐问题暂时不可用，可以直接提问。', questions: [] }) }
+          finally { if (active) setQuestionsLoading(false) }
+        })()
+      })
       const playback = await api.playbackSrc(taskId).catch(() => null)
       if (active && playback) setPlaybackUrl(playback)
     })()
     return () => { active = false }
-  }, [taskId, reloadKey])
+  }, [taskId, reloadKey, videoPreflight.request, searchParams?.ask])
 
   // 播放地址为站内路径 + 任务级凭证,不再有 5 分钟签名到期问题;
   // 加载失败时重取一次,覆盖凭证过期或对象临时不可用。
@@ -97,7 +107,7 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
     )
   }
 
-  return (
+  return <>
     <ChatWorkspace
       scopeType="video"
       targetId={taskId}
@@ -105,6 +115,7 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       videoVisualMode={task.visual_mode}
       videoRetrievable={task.retrievable}
       videoHasTranscript={task.has_transcription}
+      aiPreflightAccepted={preflightAccepted}
       playbackUrl={playbackUrl}
       refreshPlaybackUrl={refreshPlaybackUrl}
       suggestions={[]}
@@ -114,5 +125,6 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
       studyError={studyError}
       returnToStudy={returnHref}
     />
-  )
+    {videoPreflight.dialog}
+  </>
 }

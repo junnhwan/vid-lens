@@ -13,6 +13,7 @@ vi.mock('@/lib/router', () => ({ default: ({ href, children }: { href: string; c
 vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: { role: 'USER' } }), useCrumb: () => {} }))
 vi.mock('@/components/Toast', () => ({ useToast: () => mock.toast }))
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ ready: false, reason: 'AI 暂不可用' }) }))
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
 vi.mock('@/lib/artifacts/useStudyPosition', () => ({ useStudyPosition: () => ({ error: '', record: vi.fn(), flush: vi.fn() }) }))
 vi.mock('@/lib/artifacts/api', () => ({ artifactApi: { list: vi.fn().mockResolvedValue({ list: [], total: 0 }) }, artifactError: () => 'error' }))
 vi.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: { list: [], total: 0 }, error: null, refetch: vi.fn() }) }))

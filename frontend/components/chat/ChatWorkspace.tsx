@@ -32,6 +32,7 @@ import { FollowUpQuestions } from './FollowUpQuestions'
 import './ChatWorkspace.css'
 import { useShell } from '@/components/shell/AppShell'
 import { useAIAvailability } from '@/components/settings/useAIAvailability'
+import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
 // Agent steps come from live tool events; new Chat answers retain server-safe progress.
@@ -72,6 +73,7 @@ interface ChatWorkspaceProps {
   videoVisualMode?: string
   videoRetrievable?: boolean
   videoHasTranscript?: boolean
+  aiPreflightAccepted?: boolean
 }
 
 // 自定义引用映射:在默认字段之上补 evidence_id / source_mapping_status,供证据抽屉展示。
@@ -106,13 +108,16 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript, aiPreflightAccepted = false }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
+  const videoRelated = isVideo || scopeType === 'video_library'
   const router = useRouter()
   const toast = useToast()
   const { user } = useShell()
   const readOnly = user?.role === 'DEMO'
   const ai = useAIAvailability(readOnly)
+  const videoPreflight = useVideoAIPreflight()
+  const [preflightAccepted, setPreflightAccepted] = useState(aiPreflightAccepted)
   const playerRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const followOutputRef = useRef(true)
@@ -132,6 +137,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   }, [])
 
   const [input, setInput] = useState('')
+  useEffect(() => { if (aiPreflightAccepted) setPreflightAccepted(true) }, [aiPreflightAccepted])
   const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
@@ -304,10 +310,19 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (!q) { toast.info('先输入一个问题'); return }
     if (Array.from(q).length > 1000) { toast.error('问题超过 1000 字，请缩小段落范围后再提问。'); return }
     if (sending || streaming || historyLoading || historyError || !sessionReady) return
-    if (readOnly || !ai.ready) { toast.info(readOnly ? '演示模式可查看已有会话' : ai.reason); return }
+    if (readOnly) { toast.info('演示模式可查看已有会话'); return }
+    if (videoRelated && (!preflightAccepted || !ai.ready)) {
+      videoPreflight.request(isVideo ? '单视频问答' : '视频库问答', () => {
+        setPreflightAccepted(true)
+        setInput('')
+        void send(q)
+      })
+      return
+    }
+    if (!ai.ready) { toast.info(ai.reason); return }
     setInput('')
     void send(q)
-  }, [input, sending, streaming, historyLoading, historyError, sessionReady, send, toast, readOnly, ai.ready, ai.reason])
+  }, [input, sending, streaming, historyLoading, historyError, sessionReady, send, toast, readOnly, ai.ready, ai.reason, videoRelated, preflightAccepted, videoPreflight.request, isVideo])
 
   useEffect(() => {
     if (!sessionReady || !ai.ready || readOnly || autoAsked.current || !isVideo) return
@@ -480,7 +495,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
             </div>
             <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：当前向量模型可检索的视频' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : mode === 'agent' && videoVisualMode && videoVisualMode !== 'off' ? '按问题调用文本与画面工具，逐步分析后回答' : MODE_NOTE[mode]}</p>
             {isVideo && videoRetrievable === false && <p className="mode-note">{videoHasTranscript ? '检索未就绪；快速问答可使用摘要或转写，暂不提供检索引用。' : '尚无当前模型可检索的内容，请先在视频详情处理内容并建立索引。'}</p>}
-            {!readOnly && !ai.ready && <div className="chat-ai-notice" role="status"><span>{ai.reason}</span><button type="button" className="btn btn-sm" onClick={() => ai.error ? void ai.refetch() : router.push('/settings')}>{ai.error ? '重试' : '配置 AI'}</button></div>}
+            {!readOnly && !ai.ready && <div className="chat-ai-notice" role="status"><span>{ai.reason}</span>{ai.error ? <button type="button" className="btn btn-sm" onClick={() => void ai.refetch()}>重试</button> : <a className="btn btn-sm" href="/settings" target="_blank" rel="noopener noreferrer">配置 AI</a>}</div>}
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
@@ -492,7 +507,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
                 placeholder={isVideo ? '问这段视频…' : scopeType === 'video_library' ? '向视频库提问…' : '向知识库提问…'}
               />
-              <button className="ask-send" disabled={sending || streaming || historyLoading || !!historyError || !sessionReady || readOnly || !ai.ready} onClick={() => submit()} aria-label="发送">
+              <button className="ask-send" disabled={sending || streaming || historyLoading || !!historyError || !sessionReady || readOnly} onClick={() => submit()} aria-label="发送">
                 <Icon name="send" />
               </button>
             </div>
@@ -590,7 +605,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
         {importDetail?.version && <button className="btn btn-sm" disabled={importBusy || !importBlock} onClick={() => void previewImport()}>预览正文与引用</button>}
         {importPreview && <><div className="artifact-notice"><b>将收录的正文</b><p style={{ whiteSpace:'pre-wrap', maxHeight:240, overflow:'auto' }}>{importPreview.content}</p></div><p>映射到目标快照：{importPreview.mapped.length} 条依据；无法映射或缺失：{importPreview.unmapped.length ? importPreview.unmapped.join('、') : '无'}。</p>{importPreview.unmapped.length>0 && <label><input type="checkbox" checked={importPersonal} onChange={e=>{setImportPersonal(e.target.checked);setImportKey(crypto.randomUUID())}} /> 我确认把整段作为无来源个人补充保存，已有聊天引用也不作为来源</label>}</>}
       </Modal>}
-
+      {videoPreflight.dialog}
 
     </div>
   )

@@ -9,6 +9,7 @@ import { ArtifactCreateDialog } from './ArtifactCreateDialog'
 
 vi.mock('@/lib/router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ ready: true }) }))
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 function show(task: Partial<VideoTask>, timeline: Partial<VideoTimeline>) {
   vi.spyOn(api, 'getTask').mockResolvedValue({ id: 42, status: 3, has_transcription: false, ...task } as VideoTask)

@@ -8,6 +8,8 @@ import type { ArtifactEditRun } from '@/lib/artifacts/schema'
 import type { EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet } from '@/lib/types'
 import { SummaryRevisionPanel } from './SummaryRevisionPanel'
 
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
+
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const generated: EffectiveSummaryView = { task_id: 42, content: '安装章节：旧名。', revision: 0, revision_id: '', base_generated_hash: 'base', current_generated_hash: 'base', source_status: 'current', has_generated: true, has_revision: false }

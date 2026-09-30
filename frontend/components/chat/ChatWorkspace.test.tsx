@@ -11,6 +11,7 @@ vi.mock('@/lib/router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }) }))
 vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: {role:'USER'} }) }))
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ready:true,reason:''}) }))
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
 const conversation = vi.hoisted(() => ({
   session: undefined, sessions: [], messages: [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }] as ChatMsg[],
   ragTrace: [], agentTrace: { runId: null, steps: [] }, streaming: false, sessionReady: true,
