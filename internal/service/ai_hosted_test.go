@@ -81,6 +81,9 @@ func TestHostedAISelectionSyncPrivacyAndPause(t *testing.T) {
 	}
 	list, _ := s.List(3)
 	status, _ := s.GetHostedStatus(3)
+	if a.Name != "Free API" || status.Profile == nil || status.Profile.Name != "Free API" {
+		t.Fatalf("user-facing hosted profile name should be Free API: profile=%#v status=%#v", a.Name, status.Profile)
+	}
 	if status.CanManage {
 		t.Fatal("visitor is manager")
 	}

@@ -40,9 +40,17 @@ interface VideoPlayerProps {
 
 const PLAYHEAD_NOTIFY_MS = 250
 
+type FullscreenElementWithWebkit = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }
+type FullscreenDocumentWithWebkit = Document & {
+  webkitFullscreenElement?: Element | null
+  webkitExitFullscreen?: () => Promise<void> | void
+}
+type VideoElementWithWebkitFullscreen = HTMLVideoElement & { webkitEnterFullscreen?: () => void }
+
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
   function VideoPlayer({ initialTimeMs, src, title, compact, fallbackText, onPlayhead, onDuration, onNeedRefresh, className }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null)
+    const cardRef = useRef<HTMLDivElement | null>(null)
     const initialSeekApplied = useRef(false)
     const fillRef = useRef<HTMLDivElement | null>(null)
     const curRef = useRef<HTMLDivElement | null>(null)
@@ -59,6 +67,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
 
     const [durationMs, setDurationMs] = useState(0)
     const [playing, setPlaying] = useState(false)
+    const [volume, setVolume] = useState(1)
+    const [muted, setMuted] = useState(false)
+    const [fullscreen, setFullscreen] = useState(false)
     const [failed, setFailed] = useState(false)
     const [refreshing, setRefreshing] = useState(false)
     const [srcOverride, setSrcOverride] = useState<string | null>(null)
@@ -73,6 +84,28 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const resumeRef = useRef<{ ms: number; autoplay: boolean } | null>(null)
     const onNeedRefreshRef = useRef(onNeedRefresh)
     onNeedRefreshRef.current = onNeedRefresh
+
+    useEffect(() => {
+      const video = videoRef.current
+      if (!video) return
+      video.volume = volume
+      video.muted = muted
+    }, [activeSrc, muted, reloadToken, volume])
+
+    useEffect(() => {
+      const doc = document as FullscreenDocumentWithWebkit
+      const syncFullscreen = () => {
+        const player = cardRef.current
+        setFullscreen(!!player && (doc.fullscreenElement === player || doc.webkitFullscreenElement === player))
+      }
+      document.addEventListener('fullscreenchange', syncFullscreen)
+      document.addEventListener('webkitfullscreenchange', syncFullscreen)
+      syncFullscreen()
+      return () => {
+        document.removeEventListener('fullscreenchange', syncFullscreen)
+        document.removeEventListener('webkitfullscreenchange', syncFullscreen)
+      }
+    }, [])
 
     const paint = useCallback(() => {
       const video = videoRef.current
@@ -189,6 +222,46 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       else video.pause()
     }, [playable])
 
+    const adjustVolume = useCallback((value: string) => {
+      const next = Math.max(0, Math.min(1, Number(value)))
+      if (!Number.isFinite(next)) return
+      setVolume(next)
+      setMuted(next === 0)
+    }, [])
+
+    const toggleMute = useCallback(() => {
+      const nextMuted = !muted
+      const nextVolume = !nextMuted && volume === 0 ? 0.5 : volume
+      setVolume(nextVolume)
+      setMuted(nextMuted)
+      const video = videoRef.current
+      if (video) {
+        video.volume = nextVolume
+        video.muted = nextMuted
+      }
+    }, [muted, volume])
+
+    const toggleFullscreen = useCallback(() => {
+      const doc = document as FullscreenDocumentWithWebkit
+      const player = cardRef.current as FullscreenElementWithWebkit | null
+      if (!player) return
+      const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement
+      if (fullscreenElement === player) {
+        const exit = doc.exitFullscreen?.bind(doc) || doc.webkitExitFullscreen?.bind(doc)
+        if (exit) void Promise.resolve(exit()).catch(() => {})
+        return
+      }
+
+      const enter = player.requestFullscreen?.bind(player) || player.webkitRequestFullscreen?.bind(player)
+      if (enter) {
+        void Promise.resolve(enter()).catch(() => {
+          (videoRef.current as VideoElementWithWebkitFullscreen | null)?.webkitEnterFullscreen?.()
+        })
+        return
+      }
+      (videoRef.current as VideoElementWithWebkitFullscreen | null)?.webkitEnterFullscreen?.()
+    }, [])
+
     const seekFromPointer = useCallback((clientX: number, target: HTMLElement) => {
       const rect = target.getBoundingClientRect()
       const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
@@ -230,7 +303,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     }
 
     return (
-      <div className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
+      <div ref={cardRef} className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
           {activeSrc && (
             <video
@@ -303,6 +376,42 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             <b ref={node => { timeRef.current = node }}>00:00</b>
             <span> / {durationMs > 0 ? formatTime(durationMs) : '--:--'}</span>
           </div>
+          <div className="player-volume">
+            <button
+              type="button"
+              className="player-icon-btn"
+              disabled={!playable}
+              onClick={toggleMute}
+              aria-label={muted ? '取消静音' : '静音'}
+              aria-pressed={muted}
+              title={muted ? '取消静音' : '静音'}
+            >
+              <Icon name={muted || volume === 0 ? 'volume-off' : 'volume'} size="sm" />
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              disabled={!playable}
+              onChange={event => adjustVolume(event.currentTarget.value)}
+              aria-label="音量"
+              aria-valuetext={`${Math.round(volume * 100)}%`}
+              title={`音量 ${Math.round(volume * 100)}%`}
+            />
+          </div>
+          <button
+            type="button"
+            className="player-icon-btn"
+            disabled={!playable}
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? '退出全屏' : '全屏'}
+            aria-pressed={fullscreen}
+            title={fullscreen ? '退出全屏' : '全屏'}
+          >
+            <Icon name={fullscreen ? 'minimize' : 'maximize'} size="sm" />
+          </button>
         </div>
       </div>
     )

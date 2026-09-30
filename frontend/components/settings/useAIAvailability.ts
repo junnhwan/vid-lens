@@ -57,7 +57,7 @@ export function useAIAvailability(readOnly = false) {
     : query.isPending && !readOnly
       ? '正在检查默认 AI 配置'
       : query.data?.hostedPaused
-        ? '免费 AI 暂停服务，可在设置中选择自备服务'
+        ? 'Free API 暂停，可在设置中选择自己的 API 配置'
         : !readOnly && !query.data?.ready
           ? query.data?.name
             ? `默认配置「${query.data.name}」还未配齐：${missing.join('、') || '请启用 AI 服务'}`

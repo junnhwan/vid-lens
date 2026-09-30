@@ -42,6 +42,21 @@ const PATHS = {
       <rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" />
     </>
   ),
+  volume: (
+    <>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      <path d="M16 9a5 5 0 0 1 0 6" />
+      <path d="M18.5 6.5a9 9 0 0 1 0 11" />
+    </>
+  ),
+  'volume-off': (
+    <>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      <path d="M17 9l5 6m0-6l-5 6" />
+    </>
+  ),
+  maximize: <path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3" />,
+  minimize: <path d="M8 3v5H3m18 0h-5V3M3 16h5v5m8 0v-5h5" />,
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />

@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	ErrHostedAIForbidden   = errors.New("仅作者可管理免费 AI 服务")
-	ErrHostedAIReadOnly    = errors.New("免费 AI 配置由作者统一管理")
-	ErrHostedAIUnavailable = errors.New("免费 AI 服务暂不可用，请稍后重试或使用自己的配置")
+	ErrHostedAIForbidden   = errors.New("仅作者可管理 Free API")
+	ErrHostedAIReadOnly    = errors.New("Free API 配置由作者统一管理")
+	ErrHostedAIUnavailable = errors.New("Free API 暂不可用，请稍后重试或使用自己的 API 配置")
 )
 
-const hostedNotice = "当前站点提供免费的 AI 服务。服务可能因额度或维护而限流、调整或暂停；你可以随时改用自己的 AI 配置。"
+const hostedNotice = "Free API 是站点提供的 AI API 接入，不代表本站自行部署了底层模型。服务可能因调用额度或维护而限流、调整或暂停；你也可以切换到自己的 API 配置。"
 
 type HostedAIAdminRequest struct {
 	AIProfileRequest
@@ -61,11 +61,11 @@ func (s *AIProfileService) hostedConfig() (*HostedAIAdminRequest, error) {
 	}
 	plain, err := s.codec.Decrypt(row.Ciphertext)
 	if err != nil {
-		return nil, errors.New("无法读取免费 AI 配置")
+		return nil, errors.New("无法读取 Free API 配置")
 	}
 	var req HostedAIAdminRequest
 	if err := json.Unmarshal([]byte(plain), &req); err != nil {
-		return nil, errors.New("免费 AI 配置格式无效")
+		return nil, errors.New("Free API 配置格式无效")
 	}
 	req.Enabled = row.Enabled
 	return &req, nil
@@ -77,6 +77,12 @@ func hostedPublic(req *HostedAIAdminRequest) *AIProfileResponse {
 		Source: "hosted", ReadOnly: true}
 }
 
+func hostedUserProfile(req *HostedAIAdminRequest) *AIProfileResponse {
+	profile := hostedPublic(req)
+	profile.Name = "Free API"
+	return profile
+}
+
 func (s *AIProfileService) GetHostedStatus(userID int64) (*HostedAIStatus, error) {
 	req, err := s.hostedConfig()
 	if err != nil {
@@ -85,7 +91,7 @@ func (s *AIProfileService) GetHostedStatus(userID int64) (*HostedAIStatus, error
 	status := &HostedAIStatus{CanManage: s.CanManageHosted(userID), Notice: hostedNotice}
 	if req != nil {
 		status.Enabled = req.Enabled
-		status.Profile = hostedPublic(req)
+		status.Profile = hostedUserProfile(req)
 	}
 	return status, nil
 }
@@ -99,7 +105,7 @@ func (s *AIProfileService) GetHostedAdmin(userID int64) (*HostedAIAdminResponse,
 		return nil, err
 	}
 	if req == nil {
-		req = &HostedAIAdminRequest{AIProfileRequest: AIProfileRequest{Name: "作者免费 AI", EmbeddingDim: s.hostedEmbeddingDim}}
+		req = &HostedAIAdminRequest{AIProfileRequest: AIProfileRequest{Name: "Free API", EmbeddingDim: s.hostedEmbeddingDim}}
 	}
 	view := &HostedAIAdminResponse{AIProfileResponse: *hostedPublic(req), Enabled: req.Enabled, RerankProvider: req.RerankProvider, RerankEndpoint: req.RerankEndpoint}
 	view.LLMProvider, view.LLMBaseURL = req.LLMProvider, req.LLMBaseURL
@@ -150,14 +156,14 @@ func (s *AIProfileService) SaveHostedAdmin(userID int64, req HostedAIAdminReques
 		return nil, err
 	}
 	if req.VisionModel == "" || req.VisionAPIKey == "" || req.RerankModel == "" || req.RerankAPIKey == "" || req.RerankProvider == "" {
-		return nil, fmt.Errorf("免费服务需完整配置五项模型")
+		return nil, fmt.Errorf("Free API 需完整配置五项 API")
 	}
 	if s.hostedEmbeddingDim > 0 && req.EmbeddingDim != s.hostedEmbeddingDim {
 		return nil, fmt.Errorf("向量维度必须与服务器一致")
 	}
 	for _, raw := range []string{req.LLMBaseURL, req.ASRBaseURL, req.EmbeddingEndpoint, req.VisionBaseURL, req.RerankEndpoint} {
 		if !strings.HasPrefix(raw, "https://") || ai.ValidateProbeURL(raw) != nil {
-			return nil, errors.New("免费服务必须使用公共 HTTPS 接口")
+			return nil, errors.New("Free API 必须使用公共 HTTPS 接口")
 		}
 	}
 	if !strings.HasSuffix(strings.TrimRight(req.RerankEndpoint, "/"), "/rerank") {
@@ -190,7 +196,7 @@ func (s *AIProfileService) ActivateHosted(userID int64) (*AIProfileResponse, err
 	if err != nil {
 		return nil, err
 	}
-	view := hostedPublic(req)
+	view := hostedUserProfile(req)
 	view.ID = row.ID
 	view.IsDefault = true
 	return view, nil
@@ -202,9 +208,9 @@ func (s *AIProfileService) hostedResponse(row *model.UserAIProfile) (*AIProfileR
 		return nil, err
 	}
 	if req == nil {
-		return &AIProfileResponse{ID: row.ID, Name: "作者免费 AI（暂不可用）", Source: "hosted", ReadOnly: true, IsDefault: row.IsDefault}, nil
+		return &AIProfileResponse{ID: row.ID, Name: "Free API（暂不可用）", Source: "hosted", ReadOnly: true, IsDefault: row.IsDefault}, nil
 	}
-	view := hostedPublic(req)
+	view := hostedUserProfile(req)
 	view.ID = row.ID
 	view.IsDefault = row.IsDefault
 	return view, nil

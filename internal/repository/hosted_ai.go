@@ -36,7 +36,7 @@ func (r *AIProfileRepository) ActivateHosted(userID int64) (*model.UserAIProfile
 		if user.Role == model.RoleDemo {
 			return errors.New("演示账号不可修改 AI 配置")
 		}
-		profile = model.UserAIProfile{UserID: userID, Source: "hosted", Name: "作者免费 AI"}
+		profile = model.UserAIProfile{UserID: userID, Source: "hosted", Name: "Free API"}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&profile).Error; err != nil {
 			return err
 		}

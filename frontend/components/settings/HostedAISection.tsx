@@ -6,7 +6,7 @@ import { useToast } from '@/components/Toast'
 import { HostedAIAdminForm } from './HostedAIAdminForm'
 import './HostedAISection.css'
 
-const DEFAULT_NOTICE = '当前站点提供免费的 AI 服务。服务可能因额度或维护而限流、调整或暂停；你可以随时改用自己的 AI 配置。'
+const DEFAULT_NOTICE = 'Free API 是站点提供的 AI API 接入，不代表本站自行部署了底层模型。服务可能因调用额度或维护而限流、调整或暂停；你也可以切换到自己的 API 配置。'
 
 export function HostedAISection({ readOnly, active, onActivated }: {
   readOnly: boolean
@@ -23,7 +23,7 @@ export function HostedAISection({ readOnly, active, onActivated }: {
     setLoading(true)
     setError('')
     try { setStatus(await api.hostedAI()) }
-    catch { setError('免费服务状态暂时无法加载，请重试。') }
+    catch { setError('Free API 状态暂时无法加载，请重试。') }
     finally { setLoading(false) }
   }, [])
 
@@ -36,9 +36,9 @@ export function HostedAISection({ readOnly, active, onActivated }: {
     try {
       await api.activateHostedAI()
       await onActivated()
-      toast.success('已使用免费 AI 配置，后续请求将自动同步作者的最新配置')
+      toast.success('已启用 Free API，后续请求将自动同步最新 API 配置')
     } catch {
-      setError('免费配置暂时无法启用，请稍后重试或使用自备配置。')
+      setError('Free API 暂时无法启用，请稍后重试或使用自备配置。')
     } finally { setBusy(false) }
   }
 
@@ -52,9 +52,9 @@ export function HostedAISection({ readOnly, active, onActivated }: {
   return (
     <section className="hosted-ai" aria-labelledby="hosted-ai-title">
       <div className="hosted-ai-heading">
-        <div className="hosted-ai-title"><Icon name="bolt" /><h3 id="hosted-ai-title">作者的免费 AI</h3></div>
+        <div className="hosted-ai-title"><Icon name="bolt" /><h3 id="hosted-ai-title">Free API</h3></div>
         <span className={'chip ' + (status?.enabled ? 'chip-acc' : '')}>
-          {loading ? '读取状态中' : status ? status.enabled ? '免费开放' : '暂时停用' : '状态未知'}
+          {loading ? '读取状态中' : status ? status.enabled ? '可用' : '暂时停用' : '状态未知'}
         </span>
         {active && <span className="chip chip-acc"><Icon name="check" size="sm" />当前默认</span>}
       </div>
@@ -66,12 +66,12 @@ export function HostedAISection({ readOnly, active, onActivated }: {
       <div className="hosted-ai-actions">
         <button className="btn btn-sm btn-primary" disabled={loading || busy || readOnly || !status?.enabled || active} onClick={() => void activate()}>
           <Icon name={active ? 'check' : 'bolt'} size="sm" />
-          {busy ? '正在启用…' : active ? '已使用免费配置' : '一键使用免费 AI 配置'}
+          {busy ? '正在启用…' : active ? '正在使用 Free API' : '一键启用 Free API'}
         </button>
         {readOnly && <span className="hosted-ai-sync">注册并登录自己的账号后即可启用。</span>}
-        {!loading && status && !status.enabled && <span className="hosted-ai-sync">服务暂停期间请使用自备配置。</span>}
+        {!loading && status && !status.enabled && <span className="hosted-ai-sync">Free API 暂停期间请使用自备配置。</span>}
         {status?.can_manage && !readOnly && <button className="btn btn-sm btn-ghost" onClick={() => setAdminOpen(true)} disabled={adminOpen}>
-          <Icon name="settings" size="sm" />管理免费服务
+          <Icon name="settings" size="sm" />管理 Free API
         </button>}
       </div>
       {error && <div className="hosted-ai-error" role="alert">{error}<button className="btn btn-sm btn-ghost" disabled={loading} onClick={() => void load()}>重新加载状态</button></div>}

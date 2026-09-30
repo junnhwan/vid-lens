@@ -16,7 +16,7 @@ const GROUPS = [
 
 function toDraft(profile: HostedAIAdmin): HostedAIRequest {
   return {
-    enabled: profile.enabled, name: profile.name || '作者免费 AI',
+    enabled: profile.enabled, name: 'Free API',
     llm_provider: profile.llm_provider || 'openai', llm_base_url: profile.llm_base_url || '', llm_model: profile.llm_model || '',
     llm_context_tokens: profile.llm_context_tokens || 0,
     asr_provider: profile.asr_provider || 'openai', asr_base_url: profile.asr_base_url || '', asr_model: profile.asr_model || '',
@@ -47,17 +47,17 @@ export function HostedAIAdminForm({ onClose, onSaved }: { onClose: () => void; o
       initial.current = JSON.stringify(nextDraft)
       setProfile(next)
       setDraft(nextDraft)
-    } catch { setLoadError('免费服务管理配置加载失败，请确认当前账号具有管理权限后重试。') }
+    } catch { setLoadError('Free API 管理配置加载失败，请确认当前账号具有管理权限后重试。') }
     finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    registerLeaveGuard(dirty ? () => window.confirm('免费服务配置有未保存修改，放弃修改并离开吗？') : null)
+    registerLeaveGuard(dirty ? () => window.confirm('Free API 配置有未保存修改，放弃修改并离开吗？') : null)
     return () => registerLeaveGuard(null)
   }, [dirty, registerLeaveGuard])
 
   const close = () => {
-    if (dirty && !window.confirm('免费服务配置有未保存修改，放弃修改并关闭吗？')) return
+    if (dirty && !window.confirm('Free API 配置有未保存修改，放弃修改并关闭吗？')) return
     registerLeaveGuard(null)
     onClose()
   }
@@ -83,19 +83,19 @@ export function HostedAIAdminForm({ onClose, onSaved }: { onClose: () => void; o
       setDraft(nextDraft)
       registerLeaveGuard(null)
       await onSaved()
-      toast.success('免费服务已更新，后续请求将使用最新配置')
+      toast.success('Free API 已更新，后续请求将使用最新 API 配置')
     } catch (e) { setError(e instanceof ApiError ? e.message : '保存失败，请重试。') }
     finally { setBusy(false) }
   }
 
   return (
     <div className="hosted-admin">
-      <div className="hosted-ai-heading"><h4>免费服务管理</h4><button className="btn btn-sm btn-ghost" disabled={busy} onClick={close}>关闭管理</button></div>
-      <p className="hosted-ai-sync">仅作者账号可管理。保存后自动应用到所有已启用免费配置的账号；进行中的任务可能继续使用原配置。</p>
+      <div className="hosted-ai-heading"><h4>Free API 管理</h4><button className="btn btn-sm btn-ghost" disabled={busy} onClick={close}>关闭管理</button></div>
+      <p className="hosted-ai-sync">仅作者账号可管理这组 API 配置。保存后自动应用到所有已启用 Free API 的账号；进行中的任务可能继续使用原配置。</p>
       {loading ? <LoadingBlock label="正在加载管理配置…" variant="card" /> : loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : draft && profile && (
         <form onSubmit={event => void save(event)}>
           <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-            <label className="hosted-admin-state"><input type="checkbox" checked={draft.enabled} onChange={e => change('enabled', e.target.checked)} />开放免费服务<span className="hosted-ai-sync">取消勾选并保存即可暂停。</span></label>
+            <label className="hosted-admin-state"><input type="checkbox" checked={draft.enabled} onChange={e => change('enabled', e.target.checked)} />开放 Free API<span className="hosted-ai-sync">取消勾选并保存即可暂停。</span></label>
             <div className="hosted-admin-settings">
               <label className="profile-input-label">配置名称<input className="input" value={draft.name} required onChange={e => change('name', e.target.value)} /></label>
               <label className="profile-input-label">向量维度<input className="input" type="number" min={1} step={1} value={draft.embedding_dim} required onChange={e => change('embedding_dim', Number(e.target.value))} /></label>
@@ -112,7 +112,7 @@ export function HostedAIAdminForm({ onClose, onSaved }: { onClose: () => void; o
             </fieldset>)}
             <p className="profile-url-hint">普通用户只会看到模型名称，不会获得接口地址或密钥。更新向量模型或维度可能需要重建已有视频索引。</p>
             {error && <p className="hosted-ai-error" role="alert">{error}</p>}
-            <div className="hosted-ai-actions"><button className="btn btn-sm btn-primary" type="submit" disabled={busy}>{busy ? '正在保存…' : '保存免费服务配置'}</button><span className="hosted-ai-sync">密钥输入留空会保留已保存的密钥。</span></div>
+            <div className="hosted-ai-actions"><button className="btn btn-sm btn-primary" type="submit" disabled={busy}>{busy ? '正在保存…' : '保存 Free API 配置'}</button><span className="hosted-ai-sync">密钥输入留空会保留已保存的密钥。</span></div>
           </fieldset>
         </form>
       )}

@@ -11,7 +11,7 @@ import { HostedAISection } from './HostedAISection'
 import { ProfileImportHelp } from './ProfileImportHelp'
 
 // BYOK AI 服务配置:profile 列表(一个 profile 覆盖 llm / asr / embedding / vision 四组能力),
-// 作者提供的免费配置独立展示，由服务端维护并解析最新配置。
+// Free API 接入配置独立展示，由服务端维护并解析最新配置。
 // 每张卡支持 测试 / 编辑 / 删除;密钥只回显脱敏值。
 
 export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
@@ -65,7 +65,7 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
   useEffect(() => { void load() }, [load])
 
   const removeProfile = async (p: AIProfile) => {
-    const impact = p.is_default ? '这是当前默认配置。删除后需将另一配置设为默认，或启用免费 AI，才能继续转写、生成和问答。已保存内容仍可阅读。' : '当前默认 AI 配置保持不变。'
+    const impact = p.is_default ? '这是当前默认配置。删除后需将另一配置设为默认，或启用 Free API，才能继续转写、生成和问答。已保存内容仍可阅读。' : '当前默认 AI 配置保持不变。'
     if (!window.confirm(`删除配置「${p.name}」？${impact}`)) return
     try {
       await api.deleteProfile(p.id)
@@ -164,7 +164,7 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
           {profile.is_default && (
             <span className="chip chip-acc"><Icon name="check" size="sm" />默认</span>
           )}
-          {hosted && <span className="chip chip-info">作者免费提供</span>}
+          {hosted && <span className="chip chip-info">Free API</span>}
           {!hosted && profile.read_only && <span className="chip chip-info">只读配置</span>}
         </div>
         <CapabilityLine label="对话模型" value={profile.llm_model} />
