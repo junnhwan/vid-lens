@@ -557,16 +557,30 @@ details > summary:hover { color: var(--acc-strong); }
 .player-card { border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line-strong); background: #0d0c0a; box-shadow: var(--shadow-1); }
 .player-stage { position: relative; aspect-ratio: 16/9; background: #0b0a08; }
 .player-stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
-.player-card:fullscreen, .player-card:-webkit-full-screen {
-  display: flex; flex-direction: column; width: 100vw; height: 100vh; max-width: none; max-height: none;
-  border: 0; border-radius: 0; background: #090807;
+.player-card:fullscreen,
+.player-card:-webkit-full-screen,
+.player-card.is-fullscreen {
+  position: fixed !important; inset: 0 !important; z-index: 2147483647;
+  display: grid !important; grid-template-rows: minmax(0, 1fr) auto; align-content: stretch;
+  box-sizing: border-box; width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+  min-width: 0; max-width: none !important; min-height: 0; max-height: none !important;
+  margin: 0 !important; padding: 0 !important; border: 0; border-radius: 0; overflow: hidden;
+  background: #090807;
 }
-.player-card:fullscreen .player-stage, .player-card:-webkit-full-screen .player-stage {
-  flex: 1; min-height: 0; aspect-ratio: auto; max-height: none;
+.player-card:fullscreen .player-stage,
+.player-card:-webkit-full-screen .player-stage,
+.player-card.is-fullscreen .player-stage {
+  grid-row: 1; width: 100% !important; height: 100% !important; flex: none !important;
+  min-width: 0; min-height: 0 !important; max-height: none !important; aspect-ratio: auto !important;
 }
-.player-card:fullscreen .player-stage video, .player-card:-webkit-full-screen .player-stage video { object-fit: contain; }
-.player-card:fullscreen .player-controls, .player-card:-webkit-full-screen .player-controls {
-  flex: none; padding-bottom: max(12px, env(safe-area-inset-bottom));
+.player-card:fullscreen .player-stage video,
+.player-card:-webkit-full-screen .player-stage video,
+.player-card.is-fullscreen .player-stage video { width: 100%; height: 100%; object-fit: contain; object-position: center; }
+.player-card:fullscreen .player-controls,
+.player-card:-webkit-full-screen .player-controls,
+.player-card.is-fullscreen .player-controls {
+  grid-row: 2; width: 100%; box-sizing: border-box; flex: none;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 .player-fallback {
   position: absolute; inset: 0; display: none;

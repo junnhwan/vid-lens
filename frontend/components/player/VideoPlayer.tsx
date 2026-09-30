@@ -303,7 +303,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     }
 
     return (
-      <div ref={cardRef} className={`player-card${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
+      <div ref={cardRef} className={`player-card${fullscreen ? ' is-fullscreen' : ''}${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
           {activeSrc && (
             <video

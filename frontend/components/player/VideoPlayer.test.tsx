@@ -26,4 +26,8 @@ test('requests fullscreen for the whole player', () => {
 
   fireEvent.click(screen.getByRole('button', { name: '全屏' }))
   expect(requestFullscreen).toHaveBeenCalledOnce()
+
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: player })
+  fireEvent(document, new Event('fullscreenchange'))
+  expect(player.classList.contains('is-fullscreen')).toBe(true)
 })
