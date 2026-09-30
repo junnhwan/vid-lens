@@ -222,6 +222,34 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       else video.pause()
     }, [playable])
 
+    useEffect(() => {
+      const handleSpace = (event: KeyboardEvent) => {
+        if ((event.code !== 'Space' && event.key !== ' ') || event.defaultPrevented || event.isComposing
+          || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+        const player = cardRef.current
+        if (!player || !playable) return
+        const target = event.target instanceof Element ? event.target : null
+        if (target?.closest('input:not([type="range"]), textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return
+
+        const doc = document as FullscreenDocumentWithWebkit
+        const fullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement
+        const ownsFullscreen = !!fullscreenElement && (fullscreenElement === player || player.contains(fullscreenElement))
+        if (fullscreenElement && !ownsFullscreen) return
+        if (!target || !player.contains(target)) {
+          if (!ownsFullscreen) {
+            if (target?.closest('button, a, input, [role="button"], [role="link"], [role="slider"], [role="checkbox"], [role="switch"]')) return
+            // A page with one playable video can use Space without first clicking it.
+            if (document.querySelectorAll('.player-card .player-stage:not(.novideo) video').length !== 1) return
+          }
+        }
+
+        event.preventDefault()
+        if (!event.repeat) toggle()
+      }
+      document.addEventListener('keydown', handleSpace)
+      return () => document.removeEventListener('keydown', handleSpace)
+    }, [playable, toggle])
+
     const adjustVolume = useCallback((value: string) => {
       const next = Math.max(0, Math.min(1, Number(value)))
       if (!Number.isFinite(next)) return
@@ -303,7 +331,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     }
 
     return (
-      <div ref={cardRef} className={`player-card${fullscreen ? ' is-fullscreen' : ''}${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}>
+      <div
+        ref={cardRef}
+        className={`player-card${fullscreen ? ' is-fullscreen' : ''}${compact ? ' compact' : ''}${className ? ` ${className}` : ''}${cueOn ? ' cue-on' : ''}`}
+        tabIndex={playable ? 0 : -1}
+        role="group"
+        aria-label="视频播放器"
+        aria-keyshortcuts="Space"
+        onPointerDownCapture={event => {
+          const target = event.target as Element
+          if (playable && !target.closest('button, input, [role="slider"]')) event.currentTarget.focus({ preventScroll: true })
+        }}
+      >
         <div className={`player-stage${playable ? '' : ' novideo'}`}>
           {activeSrc && (
             <video
@@ -351,7 +390,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           {cue && <span className={`player-cue mono${cueOn ? ' on' : ''}`}>{cue}</span>}
         </div>
         <div className="player-controls">
-          <button className="pp-btn" disabled={!playable} onClick={toggle} aria-label={playing ? '暂停' : '播放'}>
+          <button className="pp-btn" disabled={!playable} onClick={toggle} aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停（空格）' : '播放（空格）'} aria-keyshortcuts="Space">
             <Icon name={playing ? 'pause' : 'play'} />
           </button>
           <div
