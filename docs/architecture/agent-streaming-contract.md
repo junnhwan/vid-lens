@@ -10,19 +10,21 @@
 
 ## SSE 事件
 
-| 事件 | 语义 |
-| --- | --- |
-| `run_start` | run_id、scope、有效记忆策略 |
-| `progress` | 真实规划、上下文准备、检索和保存阶段；包含 id、kind、status、detail、ts；Agent 规划包含 plan_id、简要决策说明及已有 evidence_refs |
-| `reasoning` | 模型接口提供的 reasoning 增量；按 call_id（plan-N 或 answer）与 run_id 归属，独立于正文 |
-| `step_start` / `tool_call` | 实际工具开始执行 |
-| `tool_result` / `retrieve_hits` | 工具结果摘要与检索命中 |
-| `step_done` / `step_error` | 步骤终态 |
-| `answer` | provider 生成增量；不支持流式时完成后一次发送 |
-| `answer_reset` | 已生成部分正文后发生降级，清空暂存正文再接收替代答案 |
-| `citations` | 最终允许显示的引用集 |
-| `done` | 保存成功，含 message_id、run_id、answer、memory_policy 和步骤统计 |
-| `error` | 失败或无法完成；不能视为成功保存 |
+| 事件 | 范围 | 语义 |
+| --- | --- | --- |
+| `run_start` | 仅 Agent | run_id、mode、scope_type（附 task_id 或 kb_id）、有效记忆策略 |
+| `progress` | Chat 与 Agent | 上下文准备、检索、规划与保存阶段；包含 id、kind、label、status、ts，`detail`/`duration_ms` 在对应阶段有值时出现；Chat 另带执行快照的 input_summary/output_summary；run_id、plan_id、简要决策说明、所选 tool、replan 标记与已有 evidence_refs 仅 Agent |
+| `reasoning` | Chat 与 Agent | 模型接口提供的 reasoning 增量；按 call_id 归属（Agent 为 plan-N 或 answer，Chat 固定 answer），独立于正文；run_id 仅 Agent 填充 |
+| `step_start` / `tool_call` | 仅 Agent | 实际工具开始执行 |
+| `tool_result` / `retrieve_hits` | 仅 Agent | 工具结果摘要与检索命中 |
+| `step_done` / `step_error` | 仅 Agent | 步骤终态 |
+| `answer` | Chat 与 Agent | provider 生成增量；不支持流式时完成后一次发送 |
+| `answer_reset` | 仅 Chat | 已生成部分正文后发生降级，清空暂存正文再接收替代答案 |
+| `citations` | Chat 与 Agent | 最终允许显示的引用集 |
+| `done` | Chat 与 Agent，字段集不同 | 保存成功。Chat 载荷：message_id、answer、model、profile_id、execution_duration_ms、degraded、degradation_reason、diagnostic_id、memory_policy——没有 run_id，也没有步骤统计。Agent 载荷：message_id、run_id、answer、memory_policy、model、profile_id、execution_duration_ms、degraded、stop_reason、budget_notice、budget 与 trace_summary（steps/tools/retrievals）——没有 degradation_reason 或 diagnostic_id |
+| `error` | Chat 与 Agent，字段集不同 | 失败或无法完成；不能视为成功保存。Chat 载荷只有 message；Agent 载荷为 run_id、message、step_id |
+
+`run_start`、`step_*`、`tool_*`、`retrieve_hits` 只来自 Agent 的工具 observer 与 run 身份；Chat 端点没有 run 身份，也就没有这些事件。反之 `answer_reset` 只在 Chat 的档2降级路径发出，Agent 降级通过 `done.degraded` 与 `stop_reason` 表达。
 
 步骤事件只有工具 observer 一个发布位置。Journal 管持久化，不重复发步骤。恢复完成 checkpoint 不重新调用工具。
 

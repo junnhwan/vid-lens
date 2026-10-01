@@ -17,7 +17,7 @@ VidLens 面向单视频和授权知识库提供长视频理解、时间定位、
 ```text
 上传或接入视频
   → PostgreSQL 创建任务、处理作业、重试预算与 dispatch lease
-  → RabbitMQ 投递下载 / 转写 / RAG index 作业
+  → RabbitMQ 投递下载 / 转写 / 分析 / RAG index 作业
   → 下载源视频并并行启动 ASR 与视觉处理
   → 保存带时间范围的转写 observation 与视觉 observation
   → 构建带模态、时间和 source refs 的 RAG chunk
@@ -70,7 +70,7 @@ Agent 由 `VideoAgentService` 负责单一有界执行循环，当前工具包�
 
 Run 创建时冻结 owner、会话、视频/知识库范围、目标、AI profile、工具白名单和执行预算。Run、Step、ToolCall、checkpoint 与最终消息均由 PostgreSQL 持久化；lease token、version CAS、幂等事务和有限重试用于故障恢复。
 
-当前策略限制工具数量、模型调用次数、检索次数、视觉调用次数、抽帧数量、token、费用和总时长。工具参数经过服务端 schema、owner、视频成员范围和证据引用校验；模型不能通过参数自行扩大知识库范围或注入 memory context。
+当前策略限制工具数量、模型调用次数、检索次数、视觉调用次数、抽帧数量、token 和总时长。预算里还有一个费用上限：问答链路把它冻结为 1000000 微元（`internal/service/agent_execution.go:114`），笔记生成与编辑链路显式置 0，表示"金额未知"而不是伪造预算（`internal/service/conversation_profile_budget.go:56`）。两种取值都不会生效——系统没有模型价格表，`cost_micros_used` 在实现中只有读取方（`internal/repository/agent_execution.go:723`）而没有写入方，因此费用始终为 0，费用约束当前不起作用。工具参数经过服务端 schema、owner、视频成员范围和证据引用校验；模型不能通过参数自行扩大知识库范围或注入 memory context。
 
 Agent 支持同步和 SSE 流式请求。流式接口发送运行状态、公开规划摘要、工具步骤、回答和 citations；运行状态与消息接口支持断流后的只读查询，成功回答按 run 幂等保存。
 
@@ -83,12 +83,12 @@ Agent 支持同步和 SSE 流式请求。流式接口发送运行状态、公开
 3. 配置了 Vision provider 时，对受预算约束的帧调用 VLM；未满足调用条件时保留确定性的帧与时间事实。
 4. 结果以 `video_visual_observations` 追加保存，包含视频 revision、帧哈希、FFmpeg 参数、对象 key、模型、prompt/capture 版本、结构化事实、信息缺口、原始响应哈希和状态。
 
-相同视频 revision、查询和窗口可复用缓存。调查结果可以是 `sufficient`、`uncertain` 或 `budget_exhausted`，其作用是补充已定位窗口的观察，不代表对整部视频完成无界视觉搜索，也不把模型判断自动升级为事实。
+查询时视觉观察按缓存键复用：该键由用户、任务、视频 revision、帧时间点、帧哈希、调查目标、所需事实、模型和 prompt 版本一起哈希得到，命中即复用已保存的观察结果并计入 `FramesReused`，跳过后续上传与模型调用。调查结果可以是 `sufficient`、`uncertain` 或 `budget_exhausted`，其作用是补充已定位窗口的观察，不代表对整部视频完成无界视觉搜索，也不把模型判断自动升级为事实。
 
 ## 存储与可靠性
 
-- RabbitMQ 使用持久消息、Publisher Confirm、手动 ack、worker pool、prefetch、每队列 DLX/DLQ 和错误重投递。
-- Redis 使用 `SETNX` 消息去重门、上传分片状态与 TTL、合并锁、MD5 去重、AI token 多桶 Lua 限流和用量缓存。
+- RabbitMQ 使用持久消息、Publisher Confirm、手动 ack、worker pool 与 prefetch。下载、转写、分析和 RAG index 四个作业队列以持久队列声明，并各自附带 DLX/DLQ；但失败一律以 `requeue=true` nack 交 RabbitMQ 重投、重试耗尽的任务改由数据库记录后 ack，因此这些 DLX/DLQ 实际不接收消息。artifact 与 summary edit 队列不带 `x-dead-letter-exchange`。
+- Redis 使用 `SETNX` 消息去重门、上传分片状态与 TTL、合并锁、MD5 去重、AI 多桶令牌桶限流和用量缓存。AI 限流由单个原子 Lua 脚本同时检查 user、operation、provider、model 四个桶，每次调用固定扣 1，约束的是请求速率而非 token 或费用。
 - PostgreSQL 保存任务、作业、处理 lease、ASR/视觉 observation、RAG chunk、Agent 执行记录和 AI usage ledger。
 - processing lease 通过 token、版本、心跳和到期时间围住外部调用与副作用；系统保证幂等和故障隔离，不承诺第三方调用的绝对 exactly-once。
 - AI 用量以 PostgreSQL ledger 为权威，Redis 缓存用于快速限制和补偿；实际 provider usage 与估算值分开记录。

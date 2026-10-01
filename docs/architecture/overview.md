@@ -5,15 +5,17 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 ## 运行拓扑
 
 - `frontend/` 是 Vite + React 单页前端，独立构建和部署；Node 静态服务转发 `/api` 并保持 SSE 流式响应。
-- `cmd/server/` 是 Go 后端入口，负责 HTTP API、依赖组装和异步任务消费者的运行时启动。
+- `cmd/server/` 是 Go 后端入口，负责 HTTP API、依赖组装和异步任务消费者的运行时启动。视频阶段消费者、笔记（artifact）生成/编辑消费者和摘要修订消费者都在该进程内启动，单个后端进程即可跑通全部链路。
+- `cmd/artifact-worker/` 是可选的独立消费者进程，只做笔记投递、恢复与生成以及摘要修订执行；它不是必需的第二个进程——发布包只构建 `cmd/server`，CI 也不构建它。两条路径共用同一套 outbox 表与 Run 租约（`SELECT ... FOR UPDATE` + lease token/到期时间），因此同时运行时同一个活跃 Run 不会被重复领取。
 - `deploy/frontend-deploy.sh` 和 `deploy/server-deploy.sh` 分别发布前端和后端，两个发布过程相互独立。
 - 后端依赖 PostgreSQL、Redis、MinIO、RabbitMQ 和按能力配置的 AI 服务。
 
 ## 主要组件
 
 - `cmd/server/`：HTTP 服务入口、路由、依赖组装和运行时启动
-- `internal/handler/`：HTTP 接口层；聊天 handler 只负责协议解析、状态码和 SSE 写出
-- `internal/service/`：任务、媒体、聊天、RAG 和 AI 调用编排；`ConversationExecution` 统一普通/Agent 会话执行，`AgentExecutionJournal` 统一可恢复 Run/Step 持久语义
+- `cmd/artifact-worker/`：可选的笔记生成/编辑与摘要修订独立消费者入口
+- `internal/handler/`：HTTP 接口层；聊天 handler 只负责协议解析、状态码和 SSE 写出；`artifact.go`、`summary_revision.go` 承载笔记与摘要修订接口
+- `internal/service/`：任务、媒体、聊天、RAG 和 AI 调用编排，以及学习笔记生成/组织/编辑（`artifact_*`、`study_*`）与摘要修订（`summary_*`）；`ConversationExecution` 统一普通/Agent 会话执行，`AgentExecutionJournal` 统一可恢复 Run/Step 持久语义
 - `internal/mq/`：RabbitMQ 投递、消费、重试、手动确认和处理租约
 - `internal/repository/`：关系数据访问和持久化边界
 - `internal/storage/`：MinIO 对象存储适配器
@@ -22,6 +24,7 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 - `internal/observability/`：结构化日志、指标和运行状态观测
 - `frontend/main.tsx`：React 入口；`frontend/app/router.tsx`：正式 React Router 路由；`frontend/app/` 保留各页面组件
 - `frontend/components/chat/`：`ConversationSession`、会话快照适配和聊天展示模块
+- `frontend/components/artifacts/`：笔记工作区、运行详情、Agent 编辑面板和知识画布；`frontend/app/(main)/artifacts/` 是笔记列表与笔记详情路由
 - `frontend/prototype/`：独立 HTML 交互原型，不进入正式构建
 
 `frontend/go.mod` 仅是 Go 工具链的模块边界：npm 的可复现依赖 `flatted` 自带 `golang/` 示例源码，若没有该边界，安装前端依赖后从仓库根运行 `go test ./...` 会把第三方示例误当成本项目包。该空模块不包含业务 Go 代码，也不参与前端构建。
@@ -31,24 +34,30 @@ VidLens 是面向视频的 AI 知识库与问答平台。系统把视频处理�
 当前链路的 ASR 边界、时间轴证据和多模态索引见[视频理解管线](media-understanding-pipeline.md)。系统以 PostgreSQL 中的转写与视觉观察作为视频事实源，不另建第二套视频事实源。
 
 1. 前端上传视频或提交远程视频地址。
-2. API 在 PostgreSQL 创建任务和阶段记录，再把下载、转写、摘要和索引阶段投递到 RabbitMQ。
+2. API 在 PostgreSQL 创建任务和阶段记录，再把下载、转写、画面观察、摘要和索引阶段投递到 RabbitMQ。
 3. 消费者使用 FFmpeg 提取音频、生成带边界上下文的长音频时间窗，并按转写分片调用 ASR；相邻输出只在窗口元数据证明重叠时做确定性拼接。
 4. 转写内容切块后写入 PostgreSQL，并生成 pgvector 检索所需的向量投影。
 5. 处理失败时由阶段级状态、处理租约、幂等键和重试调度共同恢复，已完成的阶段不需要重复执行。
 
 ## 问答链路
 
-标准问答和显式 Agent 请求都先进入 `ConversationExecution`：它统一 profile/client 准备、模式选择和取消传播，之后分别调用标准聊天或受限 Agent。标准问答由意图路由选择执行策略，再进入检索、排序、回答生成与基础引用清洗。具体阶段见[检索与回答链路](retrieval.md)。
+标准问答和显式 Agent 请求都先进入 `ConversationExecution`：它统一 profile/client 准备、模式选择和取消传播，之后分别调用标准聊天或受限 Agent。标准问答由规则意图分类选择执行策略，再进入检索、排序、回答生成与基础引用清洗。具体阶段见[检索与回答链路](retrieval.md)。
 
-产品只提供 Chat 与自主 Agent。Agent 同步/SSE 接口使用同一 Planner/Tool/Observe 循环，执行范围受工具白名单、预算、视觉工具和长期记忆策略约束；发布通过 run 幂等事务保存，具体见 [Agent 执行](agent-evolution.md)。
+问答链路只提供 Chat 与自主 Agent 两种执行模式；这个边界只约束问答本身，不排除下面学习笔记链路复用同一套 Run/Step 执行表。Agent 同步/SSE 接口使用同一 Planner/Tool/Observe 循环，执行范围受工具白名单、预算、视觉工具和长期记忆策略约束；发布通过 run 幂等事务保存，具体见 [Agent 执行](agent-evolution.md)。
 
 前端的正式视频聊天与知识库聊天通过 `useConversationSession` 共用会话加载、发送、取消、消息 patch 和终态处理；SSE chunk 边界由独立 decoder 处理。会话快照用于展示，执行恢复由 Run/Step/ToolCall 提供。字段与执行权威边界见[在线协议与执行边界](compatibility.md)。
+
+## 学习笔记链路
+
+视频处理完成后，同一批转写与视觉观察还能加工成结构化学习笔记（artifact）。后端为该子系统注册了独立的 API 面：生成运行（提交、查询、SSE 事件、取消、恢复、重试）、笔记与不可变版本、Agent 编辑运行与编辑操作（proposal、apply、undo）、可编辑画布布局、答案导入与预览、学习位置和按证据 ID 读取来源。提交时先冻结来源清单和逐条证据 ID，产出候选或当前版本；人工保存和 Agent 编辑都用 `head_version` CAS 拒绝基于过期版本的写入。
+
+摘要修订是同一子系统的另一条链路：修订头、按版本号唯一的修订行、编辑操作与术语规则版本各自成表，编辑请求写入独立的持久 outbox 和自己的队列，并复用相同的租约、预算与 Run 记账。字段、错误码与状态语义见 [Artifact API](artifact-api-contract.md)、[Artifact 编辑](artifact-editing-contract.md)、[知识画布](artifact-canvas-contract.md) 与 [学习生成配方 v3](study-generation-v3-contract.md)。
 
 ## Repository seam 决策
 
 本轮只新增 `AgentExecutionStore`：`AgentExecutionJournal` 已拥有稳定的八操作持久接口，生产 adapter 是现有 PostgreSQL/GORM `AgentExecutionRepository`，行为测试使用确定性的 scripted adapter。该接口比 `Repositories` 聚合小，并能在不暴露仓储内部状态的情况下验证 lease、CAS、checkpoint 和 replay，因此是真实变异点。
 
-没有继续为 Conversation、Memory 或 RAG 批量包装 repository。`ConversationExecution` 的变异点是 profile/client/chat/agent module，而不是一组数据表；Memory 已有针对召回、写入和 embedding 的用途型 seam；RAG 与清理路径仍需要现有事务和多表协作，当前没有第二个 production adapter 或独立事务策略。出现这些真实条件前，保留 `*repository.Repositories` 比转发约 23 个仓储方法更清晰。
+没有继续为 Conversation、Memory 或 RAG 批量包装 repository。`ConversationExecution` 的变异点是 profile/client/chat/agent module，而不是一组数据表；Memory 已有针对召回、写入和 embedding 的用途型 seam；RAG 与清理路径仍需要现有事务和多表协作，当前没有第二个 production adapter 或独立事务策略。出现这些真实条件前，保留 `*repository.Repositories` 比逐个转发它聚合的 28 个仓储更清晰。
 
 ## 设计边界
 

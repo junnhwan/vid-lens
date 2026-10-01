@@ -4,7 +4,9 @@ Contract version: 1 (2026-09-28). This document is the frontend/backend authorit
 
 ## Product authority and interfaces
 
-An edit run is the only Agent execution authority. PostgreSQL stores its immutable request, frozen base version and scope, model/profile/budget snapshot, durable run state, tool records, and result. SSE or polling only observes that state; closing the page never cancels work.
+An artifact edit run is the only Agent execution authority for artifact bodies. PostgreSQL stores its immutable request, frozen base version and scope, model/profile/budget snapshot, durable run state, tool records, and result. SSE or polling only observes that state; closing the page never cancels work.
+
+Summary text is a separate Agent subsystem outside this contract. Its recipe `summary-edit-v2` submits `{instruction,expected_revision,mode=preview|apply}` for one video's persisted summary, executes on its own `vidlens.summary.edit.v1` queue and `summary_edit_dispatches` outbox with its own lease, and returns anchor-scoped `edits` (`anchor_id`/`new_text`, at most 20) rather than an artifact block patch. It reuses the durable run record and owner scoping but not the artifact patch format, block scope, `expected_head_version`, or the operation identity below. Its routes are listed in [the artifact API contract](artifact-api-contract.md); it has no SSE stream, so clients read `GET /media/task/:id/summary/operations/latest`.
 
 Edit runs reuse the artifact worker's lease, budget, journal, recovery, and terminal-state machinery, but use their own durable `artifact_edit_dispatches` outbox and `vidlens.artifact.edit.v1` queue. Generation remains on `generation_dispatches` and `vidlens.artifact.generate.v1`. Publishers and consumers verify the persisted run subject before delivery/execution. This separation is part of the compatibility contract: an older generation-only worker in a rolling deployment cannot acknowledge and discard an edit message it does not understand.
 
@@ -37,7 +39,7 @@ Manual `PATCH /artifacts/:id` remains human editing and keeps `origin=user`. Age
 - The server freezes artifact ID, base version ID/number, manifest ID, scope, instruction, mode, profile fingerprint, budget, recipe, and allowed tool set. Model output cannot change owner, target, source, head, or scope.
 - The request key is scoped to owner and edit-run submission. Same key plus the canonical payload returns the original run; same key with another payload returns `idempotency_conflict`.
 
-Accepted runs return HTTP 202. `GET /artifact-edit-runs/:run_id` returns the owner-scoped run. `POST /artifact-edit-runs/:run_id/cancel` records cancellation intent and returns the current winner. `GET /artifact-edit-runs/:run_id/events` uses the existing durable cursor/SSE rules.
+Accepted runs return HTTP 202. `GET /artifact-edit-runs/:id` returns the owner-scoped run. `POST /artifact-edit-runs/:id/cancel` records cancellation intent and returns the current winner. `GET /artifact-edit-runs/:id/events` uses the existing durable cursor/SSE rules.
 
 Artifact detail adds `latest_edit_run: EditRun|null`; it is separate from generation-only `latest_run`, so leaving and reopening the artifact does not lose a persisted edit.
 
@@ -81,17 +83,20 @@ The planner never supplies JSON Patch, SQL, paths, HTML/JS, or executable layout
 
 `basis=user_instruction|evidence_supported|evidence_conflict`. User-directed corrections may be saved without pretending the video proved them. `evidence_conflict` preserves and exposes the conflict. Evidence IDs must be accessible items in the frozen manifest.
 
-Allowed operations:
+Allowed operations — a closed set of ten. The planner schema and the patch validator accept exactly these names; any other operation is `invalid_patch`. The last three are the R3 extensions described in [the editable canvas contract](artifact-canvas-contract.md). They are not a separate canvas Agent or registry: they run through the same `study-edit-v1` tools, frozen target, selected-block scope, head CAS, evidence checks, and undo rules as the first seven.
 
 - `update_title`: `{op,expected_hash,title}`. Full-artifact scope only.
-- `update_block`: `{op,block_id,expected_hash,title?,content?,type?,evidence_refs?}`. Omitted fields and omitted references are byte-for-byte preserved.
+- `update_block`: `{op,block_id,expected_hash,title?,content?,type?,evidence_refs?}`. Omitted fields and omitted references are byte-for-byte preserved, and at least one of the four must be present.
 - `insert_block`: `{op,key,parent_id,after_block_id,type,title,content,evidence_refs}`. `key` is a patch-local identity; the server derives the stable block ID from the durable operation ID and key.
 - `delete_subtree`: `{op,block_id,expected_hash}`. Deleting the last root/body is invalid.
 - `move_subtree`: `{op,block_id,expected_hash,parent_id,after_block_id}`. Cycles, orphan parents, and destinations outside a selected scope are invalid.
 - `split_block`: `{op,block_id,expected_hash,parts:[...]}`. The target must be a leaf; 2–50 parts are allowed, the first part retains its block ID, and later part IDs are server-derived. References are explicit and validated.
 - `merge_siblings`: `{op,block_ids,expected_hashes,title?}`. Between 2 and 50 adjacent leaf siblings are required. The first ID survives; content is concatenated with exact duplicate paragraphs removed, references are unioned, and no unique source text is discarded by a model rewrite.
+- `group_siblings`: `{op,block_ids,expected_hashes,title}`. Between 2 and 20 adjacent leaf siblings that share a parent, and a title are required. A new empty `section` block with a server-derived ID is inserted above them and stamped `user`; the members keep their IDs, text, evidence, and order.
+- `add_relation`: `{op,relation:{source_block_id,target_block_id,type,origin,evidence_refs}}`. This is the only way a body becomes `schema_version: 2`. The server derives the relation ID from the operation ID and the operation index, so a supplied `id` is rejected. Both endpoints must be authorized blocks; an origin other than `user` requires `basis=evidence_supported` and at least one frozen-manifest reference.
+- `remove_relation`: `{op,relation_id}`. The relation must exist, and both of its endpoints must be authorized blocks.
 
-Existing block preconditions use `sha256(canonical block JSON)`. Title uses the hash of its current string. One patch may contain at most 50 operations and may touch an existing block only once. Operations apply in order to an in-memory copy; the complete result must pass the existing 200-block, depth-8, content/body-size, parent-order, origin, and evidence validation before anything is written. Any invalid operation rejects the entire patch with `invalid_patch` or `target_scope_mismatch`.
+Preconditions on existing content use `sha256(canonical block JSON)`: `expected_hash` is required on `update_block`, `delete_subtree`, `move_subtree`, and `split_block`, and `merge_siblings` and `group_siblings` carry the parallel position-matched `expected_hashes` array. `update_title` hashes the current title string instead. `insert_block`, `add_relation`, and `remove_relation` carry no hash; they are keyed by `key`, the relation object, and `relation_id`. Setting a field belonging to another operation rejects the patch. One patch may contain 1 to 50 operations and may touch an existing block only once. Operations apply in order to an in-memory copy; the complete result must pass the existing 200-block, depth-8, content/body-size, parent-order, origin, and evidence validation before anything is written. Any invalid operation rejects the entire patch with `invalid_patch` or `target_scope_mismatch`.
 
 Unchanged, out-of-scope blocks retain their exact JSON and relative order. Schema v1 requires parents to occur before descendants but does not require each subtree to be a contiguous DFS slice; leaf, subtree, sibling-anchor, move/delete, and undo logic therefore use parent identities rather than array adjacency. Existing references are preserved unless an authorized operation explicitly supplies a validated replacement. Existing `claim_origin=user` is never upgraded to a video-supported claim. A user-instruction edit is stamped `user`; an evidence-backed Agent rewrite is stamped `synthesis`. Original evidence text and historical versions are immutable.
 
@@ -99,7 +104,7 @@ Unchanged, out-of-scope blocks retain their exact JSON and relative order. Schem
 
 A durable operation stores owner, target, request/run, base version, manifest, canonical patch/hash, authorization scope, basis/evidence IDs, status, result version, undo result, idempotency records, and timestamps. Its ID is deterministically derived from the run and one fixed proposal slot, so preview, later apply, direct commit, and recovery refer to the same identity. New block IDs are deterministically derived from operation ID plus patch-local key.
 
-`GET /artifact-edit-operations/:operation_id` follows target ownership and returns safe data:
+`GET /artifact-edit-operations/:id` follows target ownership and returns safe data:
 
 ```json
 {
@@ -157,8 +162,8 @@ Provider/internal text is not returned. `nothing_to_change` is a successful resu
 
 ## Compatibility and verification
 
-R1 keeps body schema version 1, the existing Markmap projection, manual save, answer import, generation, learning position, and Markdown export. It adds version origins and operation metadata only; old versions remain readable. No summary rule, editable canvas, new Agent framework, or raw transcript/vector rewrite is part of this contract.
+R1 keeps generated bodies at schema version 1, and keeps the existing Markmap projection, manual save, answer import, generation, learning position, and Markdown export. It adds version origins and operation metadata only; old versions remain readable. No layout editing, new Agent framework, or raw transcript/vector rewrite is part of this contract.
 
-The later R3 schema-2 relation and independent layout extension is documented in [the editable canvas contract](artifact-canvas-contract.md).
+The later R3 schema-2 relation and independent layout extension is documented in [the editable canvas contract](artifact-canvas-contract.md); its `add_relation`, `remove_relation`, and `group_siblings` operations share this contract's patch format, tool registry, scope rules, and undo rules.
 
-Required verification is tracked in `docs-private/agent-editing-canvas-acceptance-2026-09-28.md`. Unit/handler tests cannot substitute for PostgreSQL transaction/recovery tests, a real-model edit tool call, or the production Vite page.
+Verified in-repo: `internal/artifact/patch_test.go` for the R1 operations and safe undo, `internal/artifact/canvas_test.go` for the three R3 operations, `internal/service/artifact_edit_tools_test.go` for the mode allow-lists and the closed proposal schema, `internal/repository/artifact_edit_postgres_test.go` and `internal/repository/artifact_edit_crash_postgres_test.go` for PostgreSQL transaction and hard-kill recovery (these PostgreSQL suites are skipped unless `VIDLENS_POSTGRES_INTEGRATION_DSN` is set), `internal/service/artifact_edit_integration_test.go` for fixture-model answer/preview/apply/cancel runs, `internal/handler/artifact_test.go` for routes, owner checks and response unions, and `npm run test:ui` in `frontend` for the artifact workspace and Agent panel. Those checks still do not substitute for a real-model edit tool call and the production Vite page; `internal/service/artifact_real_replay_test.go` is the opt-in real-model replay.

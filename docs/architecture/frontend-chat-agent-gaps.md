@@ -1,6 +1,6 @@
 # 聊天前端与后端边界
 
-`frontend/components/chat/ChatWorkspace.tsx` 是正式 Chat / Agent 工作区。视频与知识库都提供 Chat 和 Agent；`useConversationSession` 统一会话加载、发送、取消、消息更新和终态处理。
+`frontend/components/chat/ChatWorkspace.tsx` 是正式 Chat / Agent 工作区。单视频与知识库都提供 Chat 和 Agent；视频库范围（`scope_type=video_library`）只有标准 Chat，前端在该范围下不渲染 Agent 模式入口，服务端的成员集合解析也只覆盖 `knowledge_base` 会话。`useConversationSession` 统一会话加载、发送、取消、消息更新和终态处理。
 
 ## 当前执行路径
 
@@ -24,9 +24,12 @@
 - Agent 运行轨迹：展示规划摘要、工具开始/结果、步骤终态、回答和 citations。
 - 运行诊断：展示分视频证据、工具预算、运行状态和会话记忆策略。
 - 检索测试台：支持 hybrid、vector、keyword 模式和阶段结果。
+- 视频库问答：`/chat/library` 以 `scope_type=video_library` 创建会话，只检索当前用户已用当前向量模型建好索引的视频。
+- 笔记与问答桥接：从笔记的某个块进入单视频问答时，ChatWorkspace 读取该已保存段落（`studyBlock`/`studyError`/`returnToStudy`），预填“依据原视频核对这段人工笔记”的提问，显示人工笔记未视为视频事实的提示条和返回笔记位置的入口；段落与当前视频不一致或读取失败时展示真实错误。
 
 ## 当前产品边界
 
+- 笔记生成、版本管理和 Agent 编辑在 `frontend/components/artifacts/` 的笔记工作区完成；ChatWorkspace 只承载已保存段落与视频问答之间的核对桥接，不承载生成流程。
 - `investigate_visual` 必须使用服务端确认的 seed windows；前端不能提交无范围约束的全片视觉调查。
 - Agent 由 HTTP 同步或 SSE 请求驱动；服务端执行状态通过 Run 查询接口读取。
 - 前端展示的检索过程以真实 SSE 事件和服务端保存的步骤为准；未由后端发送的过程信息只能作为 UI 状态提示。

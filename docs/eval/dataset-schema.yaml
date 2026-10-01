@@ -144,6 +144,13 @@ $defs:
           type: string
           minLength: 1
 
+  # `case` 只描述严格数据集里的 case 对象，additionalProperties 保持 false。
+  # live/legacy 案例列表（顶层序列，字段为 task_id、task_hint、category、question、
+  # expected_chunk_keywords、expected_answer_points）由 cmd/rag-eval 非 --strict 路径的
+  # loadCases 读取，不在本 schema 的校验范围内，格式示例见 rag-cases.example.md。
+  # Go loader 解析 YAML 时不会拒绝未声明字段，因此本 schema 比 loader 更严格：严格
+  # 数据集只应使用下面列出的字段；未声明字段一旦被写入，也会被算进 split 内容摘要，
+  # 导致同一份数据在重新导出时哈希漂移。
   case:
     type: object
     additionalProperties: false

@@ -4,9 +4,39 @@
 
 ## 内容说明
 
-- `dataset-schema.yaml`：数据集和 split 的结构定义
-- `ablation-configs/`：检索消融配置
-- `rag-cases.example.md`：评测案例格式示例
+- `dataset-schema.yaml`：严格（strict）数据集与 split 的 JSON Schema 结构定义，只描述 `--strict` 输入
+- `annotation-guide.md`：严格数据集的 split 隔离、标注口径、证据定位与预注册规则
+- `rag-cases.example.md`：live/legacy 案例列表格式示例，即非 `--strict` 模式下 `--cases` 读取的格式
+- `ablation-configs/`：检索消融配置，六档变体 `vector_only`、`bm25_hybrid`、`rrf_fusion`、`model_rerank`、`rrf_rerank`、`rrf_model_rerank`。其中 `vector_only`、`bm25_hybrid`、`rrf_fusion`、`model_rerank` 由 `cmd/rag-eval/ablation_configs_test.go` 加载校验，并强制四档冻结同一组 k/chunker 参数；`model_rerank` 与 `rrf_rerank` 都是 deterministic 代理档，不代表真实模型重排收益
+- `product-feedback.md`：回答反馈导出与产品回归候选流程
+
+## 运行评测
+
+命令在仓库根目录执行，且需要本地已按 `config.yaml` 配好 PostgreSQL/pgvector、案例中的 `task_id` 在本地库中真实存在。只校验案例与检索投影、不做 embedding 或 LLM 调用：
+
+```powershell
+go run ./cmd/rag-eval --config config.yaml --cases cmd/rag-eval/testdata/legacy-cases.yaml --output artifacts/eval/rag-results.md --preflight-only
+```
+
+去掉 `--preflight-only` 会执行完整评测：四种检索模式（Vector only、Vector + BM25 + RRF、Rewrite + MultiQuery + RRF、Rewrite + MultiQuery + RRF + Window + Rerank）以及普通 RAG 与 Agent 回答对比，会产生 embedding 与 LLM 调用。
+
+live/legacy 模式的必填与默认项：
+
+- `--cases`：必须显式给出。默认值指向本地私有评测目录，公开检出中不存在该文件。
+- `--config`：默认 `config.yaml`，从仓库根目录运行可直接使用；`rag.enabled` 必须为 `true`，否则命令以 `RAG is disabled in config` 失败。
+- `--output`：默认 `artifacts/eval/rag-results.md`，父目录由命令自动创建，`artifacts/` 已被 Git 忽略。
+- 可选：`--top-k`、`--candidate-k`、`--timeout`、`--environment`、`--commit`、`--progress`（进度写 stderr）。
+- `--rerank-model` 与 `--rerank-endpoint` 只属于 live/legacy 实验：只有显式给出 `--rerank-model` 才会追加模型重排档；`--rerank-endpoint` 可以省略而由 embedding 端点推导，但给了 endpoint 就必须给 model。两者都不能与 `--strict` 同时使用。
+
+严格模式（`--strict`）另有必填项：
+
+- `--dataset-version` 必填。`--manifest` 可选：给出时指向 split manifest，`--cases` 必须指向所选的那个物理 split 文件；省略 `--manifest` 时 `--cases` 必须是 combined dataset，且这种输入不能用于 `test`。
+- `--experiment-registry` 默认值同样指向本地私有登记文件，公开检出必须显式覆盖。
+- 执行实验要求 `--experiment-id`、`--variant-id`、三个冻结证据哈希 `--corpus-hash`、`--chunk-manifest-hash`、`--vector-artifact-hash`，以及 `--retrieval-config` 与 `--baseline-retrieval-config`；`--commit` 和 `--config-hash` 必须与预登记值一致，否则登记绑定失败。
+- `--split` 取 `train`、`dev`、`test`；`--validate-only` 只校验数据集与实验登记，不执行检索。
+- `--snapshot-only` 必须与 `--strict`、`--retrieval-config` 一起使用；`--preflight-only` 不能与 `--strict` 一起使用。
+- 该命令不执行 sealed test：`--split test` 必须提供 `--manifest` 与正确的 `--sealed-test-token`，只能配合 `--validate-only` 做校验，正式 test 执行走单独审计的最终运行流程。
+- `--sealed-access-registry` 默认 `artifacts/eval/sealed-access-registry.jsonl`。加载 test 会向它追加访问事件，train/dev 运行前会检查同一登记：已经访问过 test 的 `dataset_version` 不允许继续调参。
 
 ## 当前评测约束
 
