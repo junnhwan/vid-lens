@@ -32,11 +32,13 @@ export function useAIAvailability(readOnly = false) {
       const profile = profiles.find(candidate => candidate.is_default)
       if (!profile) return { ready: false, name: '', hostedPaused: false, capabilities: emptyCapabilities }
 
+      // Free API and demo rows mask the endpoint fields, so the model name is the only
+      // client-side evidence; the server already rejects saving an incomplete group.
       const capabilities: AICapabilityStatus[] = [
-        { key: 'llm', label: capabilityLabels.llm, model: profile.llm_model || '', ready: !!profile.llm_model?.trim() && !!profile.llm_base_url?.trim() },
-        { key: 'asr', label: capabilityLabels.asr, model: profile.asr_model || '', ready: !!profile.asr_model?.trim() && !!profile.asr_base_url?.trim() },
-        { key: 'embedding', label: capabilityLabels.embedding, model: profile.embedding_model || '', ready: !!profile.embedding_model?.trim() && !!profile.embedding_endpoint?.trim() && profile.embedding_dim > 0 },
-        { key: 'vision', label: capabilityLabels.vision, model: profile.vision_model || '', ready: !!profile.vision_model?.trim() && !!profile.vision_base_url?.trim() },
+        { key: 'llm', label: capabilityLabels.llm, model: profile.llm_model || '', ready: !!profile.llm_model?.trim() },
+        { key: 'asr', label: capabilityLabels.asr, model: profile.asr_model || '', ready: !!profile.asr_model?.trim() },
+        { key: 'embedding', label: capabilityLabels.embedding, model: profile.embedding_model || '', ready: !!profile.embedding_model?.trim() && profile.embedding_dim > 0 },
+        { key: 'vision', label: capabilityLabels.vision, model: profile.vision_model || '', ready: !!profile.vision_model?.trim() },
       ]
       const missing = capabilities.some(capability => !capability.ready)
       if (profile.source !== 'hosted') {
