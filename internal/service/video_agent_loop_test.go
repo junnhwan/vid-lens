@@ -218,7 +218,7 @@ func TestDefaultVideoAgentLoopObserverExtractsFinalAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Observe() error = %v", err)
 	}
-	if observation.Answer != "最终答案" || len(observation.Citations) != 1 || observation.Citations[0].CitationID != "C1" {
+	if observation.Answer != "最终答案 [C1]" || len(observation.Citations) != 1 || observation.Citations[0].CitationID != "C1" {
 		t.Fatalf("observation = %+v", observation)
 	}
 	if observation.Citations[0].TaskID != canonical.TaskID || observation.Citations[0].ChunkID != canonical.ChunkID || observation.Citations[0].Content != canonical.Content || observation.Citations[0].Source != canonical.Source {

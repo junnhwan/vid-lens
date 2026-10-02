@@ -1,10 +1,149 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"vid-lens/internal/model"
 )
+
+func TestSentenceCitationsKeepDistantSourceTimesSeparate(t *testing.T) {
+	first, second := "应用层缓存只会重复存储同一份数据。", "绕开JVM对象开销可以降低垃圾回收停顿。"
+	chunk := RetrievedChunk{TaskID: 65, EvidenceID: "broad", ChunkID: 9, ChunkIndex: 3,
+		Content:       "扩展邻居不属于引用。\n" + first + "\n" + second,
+		AnchorContent: first + "\n" + second, Modality: model.ChunkModalityTranscript,
+		StartMS: 0, EndMS: 305000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped,
+		SourceRefs: []ChunkSourceRef{
+			{SourceType: model.ChunkModalityTranscript, StableID: "sentence-a", Content: first, StartMS: 50000, EndMS: 57000, TimeRangeStatus: model.ChunkTimeRangeExact},
+			{SourceType: model.ChunkModalityTranscript, StableID: "sentence-b", Content: second, StartMS: 250000, EndMS: 258000, TimeRangeStatus: model.ChunkTimeRangeExact},
+		}}
+	contexts, candidates := buildCitationSet("为什么不缓存？", []RetrievedChunk{chunk})
+	if len(contexts) != 1 || contexts[0].Content != chunk.Content || len(candidates) != 2 {
+		t.Fatalf("contexts/candidates = %+v / %+v", contexts, candidates)
+	}
+	finalized := finalizeAnswerCitations("避免重复缓存 [C1]，也减少GC停顿 [C2]。", candidates)
+	if len(finalized.Citations) != 2 || finalized.Citations[0].Content != first || finalized.Citations[1].Content != second {
+		t.Fatalf("separate source sentences lost: %+v", finalized)
+	}
+	for i, want := range []struct{ start, end int64 }{{50000, 57000}, {250000, 258000}} {
+		citation := finalized.Citations[i]
+		if citation.StartMS != want.start || citation.EndMS != want.end || citation.TimeRangeStatus != model.ChunkTimeRangeExact || len(citation.SourceRefs) != 1 {
+			t.Fatalf("sentence %d inherited union time: %+v", i, citation)
+		}
+		if citation.SourceRefs[0].Content != "" || citation.DisplayContext != citation.Content {
+			t.Fatalf("public citation exposes unbounded source: %+v", citation)
+		}
+	}
+	prompt := formatCitationCandidates(candidates)
+	if !strings.Contains(prompt, "[C1]") || !strings.Contains(prompt, "time=[250000,258000)") || strings.Contains(prompt, "扩展邻居") {
+		t.Fatalf("writer candidates are not the public source sentences: %s", prompt)
+	}
+}
+
+func TestRepeatedSentenceCitationsBindEachNativeOccurrence(t *testing.T) {
+	phrase, middle := "可以重启。", "另一观点。"
+	anchor := phrase + middle + phrase
+	firstEnd := utf8.RuneCountInString(phrase)
+	secondStart := firstEnd + utf8.RuneCountInString(middle)
+	chunk := RetrievedChunk{TaskID: 65, ChunkID: 9, Content: anchor, Modality: model.ChunkModalityTranscript,
+		StartMS: 1000, EndMS: 122000, TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped,
+		SourceRefs: []ChunkSourceRef{
+			{StableID: "first", SourceType: model.ChunkModalityTranscript, Content: phrase, TextStart: 0, TextEnd: firstEnd, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeExact},
+			{StableID: "middle", SourceType: model.ChunkModalityTranscript, Content: middle, TextStart: firstEnd, TextEnd: secondStart, StartMS: 4000, EndMS: 5000, TimeRangeStatus: model.ChunkTimeRangeExact},
+			{StableID: "second", SourceType: model.ChunkModalityTranscript, Content: phrase, TextStart: secondStart, TextEnd: utf8.RuneCountInString(anchor), StartMS: 120000, EndMS: 122000, TimeRangeStatus: model.ChunkTimeRangeExact},
+		}}
+	candidates := buildCitations("是否能重启？", []RetrievedChunk{chunk})
+	if len(candidates) != 3 {
+		t.Fatalf("repeated native occurrences merged: %+v", candidates)
+	}
+	first, last := candidates[0], candidates[2]
+	if first.Content != phrase || last.Content != phrase || first.CitationID == last.CitationID || first.StartMS != 1000 || first.EndMS != 2000 || last.StartMS != 120000 || last.EndMS != 122000 {
+		t.Fatalf("identical words lost occurrence times: first=%+v last=%+v", first, last)
+	}
+	for _, candidate := range []Citation{first, last} {
+		if candidate.TimeRangeStatus != model.ChunkTimeRangeExact || len(candidate.SourceRefs) != 1 || candidate.SourceRefs[0].TextStart != 0 || candidate.SourceRefs[0].TextEnd != 0 {
+			t.Fatalf("invalid source precision or leaked text offsets: %+v", candidate)
+		}
+	}
+	// Leading whitespace normalization must not move a source into a different
+	// sentence. Offsets are persisted against the untrimmed original anchor.
+	chunk.Content = "  \n" + anchor
+	for i := range chunk.SourceRefs {
+		chunk.SourceRefs[i].TextStart += 3
+		chunk.SourceRefs[i].TextEnd += 3
+	}
+	shifted := buildCitations("重启", []RetrievedChunk{chunk})
+	if len(shifted) != 3 || shifted[2].StartMS != 120000 || shifted[0].StartMS != 1000 {
+		t.Fatalf("trimmed anchor offset drift: %+v", shifted)
+	}
+	// Historical source refs without offsets remain readable but cannot claim
+	// that a union of two distant appearances is one precise occurrence.
+	chunk.Content = anchor
+	for i := range chunk.SourceRefs {
+		chunk.SourceRefs[i].TextStart, chunk.SourceRefs[i].TextEnd = 0, 0
+	}
+	legacy := buildCitations("重启", []RetrievedChunk{chunk})
+	if legacy[0].TimeRangeStatus != model.ChunkTimeRangeCoarse || legacy[0].StartMS != 1000 || legacy[0].EndMS != 122000 {
+		t.Fatalf("ambiguous legacy union mislabeled exact: %+v", legacy)
+	}
+}
+
+func TestPackedNativeRepeatedSentenceCitationsStayIndependent(t *testing.T) {
+	observations := []SourceTextObservation{
+		{Content: "可以重启。", Modality: model.ChunkModalityTranscript, Refs: []ChunkSourceRef{{StableID: "first", SourceType: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeExact}}},
+		{Content: "另一观点。", Modality: model.ChunkModalityTranscript, Refs: []ChunkSourceRef{{StableID: "middle", SourceType: model.ChunkModalityTranscript, StartMS: 4000, EndMS: 5000, TimeRangeStatus: model.ChunkTimeRangeExact}}},
+		{Content: "可以重启。", Modality: model.ChunkModalityTranscript, Refs: []ChunkSourceRef{{StableID: "second", SourceType: model.ChunkModalityTranscript, StartMS: 120000, EndMS: 122000, TimeRangeStatus: model.ChunkTimeRangeExact}}},
+	}
+	packed := SplitObservationsIntoChunks(observations, 800, 0)
+	if len(packed) != 1 {
+		t.Fatalf("fixture should contain one broad retrieval chunk: %+v", packed)
+	}
+	chunk := packed[0]
+	candidates := buildCitations("重启", []RetrievedChunk{{Content: chunk.Content, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
+		TimeRangeStatus: chunk.TimeRangeStatus, SourceMappingStatus: chunk.SourceMappingStatus, Modality: chunk.Modality, SourceRefs: chunk.SourceRefs}})
+	if len(candidates) != 3 || candidates[0].StartMS != 1000 || candidates[0].EndMS != 2000 || candidates[2].StartMS != 120000 || candidates[2].EndMS != 122000 {
+		t.Fatalf("packing discarded source occurrence boundaries: chunk=%+v candidates=%+v", chunk, candidates)
+	}
+}
+
+func TestSentenceCitationsKeepAmbiguousAndLegacyTimingCoarse(t *testing.T) {
+	quote := "这一句话出现在多个来源。"
+	for _, refs := range [][]ChunkSourceRef{
+		nil,
+		{{StableID: "a", Content: quote, StartMS: 50000, EndMS: 60000, TimeRangeStatus: model.ChunkTimeRangeExact}, {StableID: "b", Content: quote, StartMS: 250000, EndMS: 260000, TimeRangeStatus: model.ChunkTimeRangeExact}},
+		{{StableID: "a", Content: quote, StartMS: 50000, EndMS: 60000, TimeRangeStatus: model.ChunkTimeRangeExact}, {StableID: "unknown", Content: quote, TimeRangeStatus: model.ChunkTimeRangeUnknown}},
+	} {
+		candidates := buildCitations("某句", []RetrievedChunk{{Content: quote, StartMS: 0, EndMS: 305000,
+			TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped, SourceRefs: refs}})
+		if len(candidates) != 1 || candidates[0].StartMS != 0 || candidates[0].EndMS != 305000 || candidates[0].TimeRangeStatus != model.ChunkTimeRangeCoarse {
+			t.Fatalf("ambiguous or legacy source gained unsupported precision: %+v", candidates)
+		}
+	}
+}
+
+func TestSentenceCitationBoundIncludesTailAndBoundsHumanContext(t *testing.T) {
+	var text strings.Builder
+	for i := 0; i < 90; i++ {
+		fmt.Fprintf(&text, "第%d句独立背景信息。", i)
+	}
+	tail := "最后一句说明进程可以随意重启。"
+	text.WriteString(tail)
+	anchor := text.String()
+	candidates := buildCitations("重启", []RetrievedChunk{{Content: anchor}})
+	if len(candidates) != maxCitationSentencesPerChunk || candidates[len(candidates)-1].Content != tail {
+		t.Fatalf("tail missing from bounded candidate set: count=%d tail=%+v", len(candidates), candidates[len(candidates)-1])
+	}
+	for _, candidate := range candidates {
+		if utf8.RuneCountInString(candidate.Content) > defaultCitationEvidenceRunes || utf8.RuneCountInString(candidate.DisplayContext) > maxCitationContextRunes || !candidate.DisplayContextTruncated {
+			t.Fatalf("candidate/context exceeds bound: %+v", candidate)
+		}
+		if !strings.Contains(anchor, candidate.Content) || !strings.Contains(candidate.DisplayContext, candidate.Content) {
+			t.Fatalf("quote lost verbatim source or display context: %+v", candidate)
+		}
+	}
+}
 
 func TestExtractEvidencePrefersRelevantVerbatimSentence(t *testing.T) {
 	anchor := strings.Repeat("这一句只是在介绍背景信息。", 10) +
@@ -55,12 +194,12 @@ func TestBuildCitationsUsesAnchorInsteadOfExpandedContext(t *testing.T) {
 		MatchedQuery:    "工具结果反馈",
 		WindowTruncated: true,
 	}})
-	if len(citations) != 1 {
-		t.Fatalf("citations = %#v, want one", citations)
+	if len(citations) != 3 {
+		t.Fatalf("citations = %#v, want three independently citeable sentences", citations)
 	}
-	got := citations[0]
-	if got.CitationID != "C1" {
-		t.Fatalf("citation id = %q, want C1", got.CitationID)
+	got := citations[1]
+	if got.CitationID != "C2" {
+		t.Fatalf("citation id = %q, want C2", got.CitationID)
 	}
 	if !strings.Contains(got.Content, "工具结果会反馈给模型") {
 		t.Fatalf("citation content = %q, want relevant evidence", got.Content)
@@ -106,7 +245,7 @@ func TestSelectAnswerCitationsKeepsOnlyReferencedIDs(t *testing.T) {
 	}
 }
 
-func TestSelectAnswerCitationsFallsBackToTopOne(t *testing.T) {
+func TestSelectAnswerCitationsDoesNotInventReference(t *testing.T) {
 	candidates := []Citation{
 		{CitationID: "C1", Content: "evidence one"},
 		{CitationID: "C2", Content: "evidence two"},
@@ -115,8 +254,8 @@ func TestSelectAnswerCitationsFallsBackToTopOne(t *testing.T) {
 
 	for _, answer := range []string{"模型没有输出引用编号", "模型输出了不存在的编号 [C9]"} {
 		got := selectAnswerCitations(answer, candidates)
-		if len(got) != 1 || got[0].CitationID != "C1" {
-			t.Fatalf("selectAnswerCitations(%q) = %#v, want top one", answer, got)
+		if len(got) != 0 {
+			t.Fatalf("selectAnswerCitations(%q) = %#v, want no unsupported fallback", answer, got)
 		}
 	}
 }
@@ -127,17 +266,19 @@ func TestBuildCitationsKeepsDisplayedEvidenceWithin160Runes(t *testing.T) {
 	got := buildCitations("工具调用结果怎样反馈给模型？", []RetrievedChunk{{
 		ChunkID: 271, ChunkIndex: 9, Content: anchor, MatchedQuery: "工具调用结果反馈模型",
 	}})
-	if len(got) != 1 {
-		t.Fatalf("citations = %#v, want one", got)
+	if len(got) != 3 {
+		t.Fatalf("citations = %#v, want three source sentences", got)
 	}
-	if !strings.Contains(got[0].Content, "把工具调用结果告诉大模型") {
-		t.Fatalf("evidence = %q, want the relevant verbatim statement", got[0].Content)
+	if !strings.Contains(got[1].Content, "把工具调用结果告诉大模型") {
+		t.Fatalf("evidence = %q, want the relevant verbatim statement", got[1].Content)
 	}
-	if runes := utf8.RuneCountInString(got[0].Content); runes > 160 {
-		t.Fatalf("evidence runes = %d, want <= 160: %q", runes, got[0].Content)
-	}
-	if !strings.Contains(anchor, got[0].Content) {
-		t.Fatalf("evidence must be a verbatim substring of anchor: %q", got[0].Content)
+	for _, citation := range got {
+		if runes := utf8.RuneCountInString(citation.Content); runes > 160 {
+			t.Fatalf("evidence runes = %d, want <= 160: %q", runes, citation.Content)
+		}
+		if !strings.Contains(anchor, citation.Content) {
+			t.Fatalf("evidence must be a verbatim substring of anchor: %q", citation.Content)
+		}
 	}
 }
 
@@ -159,8 +300,8 @@ func TestSelectAnswerCitationsRecognizesSupportedTokenForms(t *testing.T) {
 		{name: "enumeration comma", answer: "结论 [C1、C2]。", wantIDs: []string{"C1", "C2"}},
 		{name: "lowercase and Chinese comma", answer: "结论 [c1， c3]。", wantIDs: []string{"C1", "C3"}},
 		{name: "candidate order dedup and invalid exclusion", answer: "先引用 [C3, C9]，再引用 [C1][C3]。", wantIDs: []string{"C1", "C3"}},
-		{name: "invalid only falls back", answer: "不存在 [C9]。", wantIDs: []string{"C1"}},
-		{name: "no reference falls back", answer: "没有引用。", wantIDs: []string{"C1"}},
+		{name: "invalid only remains empty", answer: "不存在 [C9]。"},
+		{name: "no reference remains empty", answer: "没有引用。"},
 	}
 
 	for _, tt := range tests {
@@ -178,15 +319,15 @@ func TestSelectAnswerCitationsRecognizesSupportedTokenForms(t *testing.T) {
 	}
 }
 
-func TestSelectAnswerCitationsFallbackIsAtMostTopOne(t *testing.T) {
+func TestSelectAnswerCitationsRequiresValidReferenceForAnyCandidateCount(t *testing.T) {
 	tests := []struct {
 		name       string
 		candidates []Citation
 		wantIDs    []string
 	}{
 		{name: "none", candidates: nil, wantIDs: nil},
-		{name: "one", candidates: []Citation{{CitationID: "C1"}}, wantIDs: []string{"C1"}},
-		{name: "three", candidates: []Citation{{CitationID: "C1"}, {CitationID: "C2"}, {CitationID: "C3"}}, wantIDs: []string{"C1"}},
+		{name: "one", candidates: []Citation{{CitationID: "C1"}}},
+		{name: "three", candidates: []Citation{{CitationID: "C1"}, {CitationID: "C2"}, {CitationID: "C3"}}},
 	}
 
 	for _, tt := range tests {
@@ -204,7 +345,7 @@ func TestSelectAnswerCitationsFallbackIsAtMostTopOne(t *testing.T) {
 	}
 }
 
-func TestFinalizeAnswerCitationsRecognizesAndRemovesSupportedTokens(t *testing.T) {
+func TestFinalizeAnswerCitationsCanonicalizesSupportedInlineTokens(t *testing.T) {
 	candidates := []Citation{
 		{CitationID: "C1", Content: "evidence one"},
 		{CitationID: "C2", Content: "evidence two"},
@@ -226,8 +367,13 @@ func TestFinalizeAnswerCitationsRecognizesAndRemovesSupportedTokens(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := finalizeAnswerCitations("结论 "+tt.token+"。", candidates)
-			if got.Answer != "结论。" {
-				t.Fatalf("clean answer = %q, want %q", got.Answer, "结论。")
+			want := "结论 "
+			for _, id := range tt.wantIDs {
+				want += "[" + id + "]"
+			}
+			want += "。"
+			if got.Answer != want {
+				t.Fatalf("canonical answer = %q, want %q", got.Answer, want)
 			}
 			if len(got.Citations) != len(tt.wantIDs) {
 				t.Fatalf("citations = %#v, want IDs %v", got.Citations, tt.wantIDs)
@@ -249,7 +395,7 @@ func TestFinalizeAnswerCitationsKeepsCandidateOrderAndDeduplicates(t *testing.T)
 	}
 
 	got := finalizeAnswerCitations("先说第三条 [C3, C9]，再说第一条 [C1][C3]。", candidates)
-	if got.Answer != "先说第三条，再说第一条。" {
+	if got.Answer != "先说第三条 [C3]，再说第一条 [C1][C3]。" {
 		t.Fatalf("clean answer = %q", got.Answer)
 	}
 	if len(got.Citations) != 2 || got.Citations[0].CitationID != "C1" || got.Citations[1].CitationID != "C3" {
@@ -262,7 +408,7 @@ func TestFinalizeAnswerCitationsCleansAnswerWithoutRewritingOtherBrackets(t *tes
 	raw := "第一句 [C1, C3, C4]。\n第二句 [C1、C2]。\n\n\n\n框架 [Gin] 和 [链接](https://example.com) [C0] [C1 / C2] !"
 
 	got := finalizeAnswerCitations(raw, candidates)
-	want := "第一句。\n第二句。\n\n框架 [Gin] 和 [链接](https://example.com) [C0] [C1 / C2]!"
+	want := "第一句 [C1][C3][C4]。\n第二句 [C1][C2]。\n\n框架 [Gin] 和 [链接](https://example.com) [C0] [C1 / C2]!"
 	if got.Answer != want {
 		t.Fatalf("clean answer = %q, want %q", got.Answer, want)
 	}
@@ -271,15 +417,15 @@ func TestFinalizeAnswerCitationsCleansAnswerWithoutRewritingOtherBrackets(t *tes
 	}
 }
 
-func TestFinalizeAnswerCitationsFallsBackWhenNoValidCandidateReferenced(t *testing.T) {
+func TestFinalizeAnswerCitationsDropsUnknownReferenceWithoutFallback(t *testing.T) {
 	candidates := []Citation{{CitationID: "C1"}, {CitationID: "C2"}, {CitationID: "C3"}}
 
 	got := finalizeAnswerCitations("答案引用了不存在的证据 [C9]。", candidates)
 	if got.Answer != "答案引用了不存在的证据。" {
 		t.Fatalf("clean answer = %q", got.Answer)
 	}
-	if len(got.Citations) != 1 || got.Citations[0].CitationID != "C1" {
-		t.Fatalf("citations = %#v, want C1-only fallback", got.Citations)
+	if len(got.Citations) != 0 {
+		t.Fatalf("citations = %#v, want no unsupported fallback", got.Citations)
 	}
 }
 
@@ -314,7 +460,7 @@ func TestExtractEvidenceDoesNotTrimBeforeRelevantPhrase(t *testing.T) {
 	}
 }
 
-func TestSelectAnswerCitationsFallbackSkipsInvalidAndDuplicateCandidates(t *testing.T) {
+func TestSelectAnswerCitationsSkipsInvalidAndDuplicateCandidates(t *testing.T) {
 	candidates := []Citation{
 		{CitationID: "", Content: "blank"},
 		{CitationID: "C0", Content: "zero"},
@@ -326,7 +472,7 @@ func TestSelectAnswerCitationsFallbackSkipsInvalidAndDuplicateCandidates(t *test
 		{CitationID: "C4", Content: "beyond fallback limit"},
 	}
 
-	got := selectAnswerCitations("没有引用", candidates)
+	got := selectAnswerCitations("引用 [C2]", candidates)
 	if len(got) != 1 {
 		t.Fatalf("fallback citations = %#v, want first valid unique candidate", got)
 	}
@@ -344,7 +490,7 @@ func TestFinalizeAnswerCitationsPreservesNestedBracketsAndMarkdownLinks(t *testi
 	raw := "嵌套 [[C1]]；说明 [说明 [C1]]；链接 [C3](https://example.com)；普通 [Gin]；文档 [说明](doc.md)；有效 [C2]。"
 
 	got := finalizeAnswerCitations(raw, candidates)
-	want := "嵌套 [[C1]]；说明 [说明 [C1]]；链接 [C3](https://example.com)；普通 [Gin]；文档 [说明](doc.md)；有效。"
+	want := "嵌套 [[C1]]；说明 [说明 [C1]]；链接 [C3](https://example.com)；普通 [Gin]；文档 [说明](doc.md)；有效 [C2]。"
 	if got.Answer != want {
 		t.Fatalf("clean answer = %q, want %q", got.Answer, want)
 	}
@@ -370,8 +516,8 @@ func TestFinalizeAnswerCitationsRecoversAfterHalfOpenTimeMetadata(t *testing.T) 
 			t.Fatal("unreferenced evidence was selected")
 		}
 	}
-	if strings.Contains(got.Answer, "[C") || !strings.Contains(got.Answer, "time=[300000,300001)") {
-		t.Fatalf("did not clean only internal citations: %q", got.Answer)
+	if !strings.Contains(got.Answer, "[C1][C2][C3][C4]") || !strings.Contains(got.Answer, "time=[300000,300001)") {
+		t.Fatalf("lost supported inline citations or time metadata: %q", got.Answer)
 	}
 	if ids := parseReferencedCitationIDs(raw); len(ids) != 4 {
 		t.Fatalf("shared extraction did not recover citations: %+v", ids)
@@ -391,8 +537,8 @@ func TestUnclosedProseBracketsKeepCodeEscapesAndNestedGroupsProtected(t *testing
 			t.Fatalf("literal %q was rewritten: %q", literal, got.Answer)
 		}
 	}
-	if strings.Contains(got.Answer, "[C5]") || strings.Contains(got.Answer, "[C99]") {
-		t.Fatalf("internal markers remain: %q", got.Answer)
+	if !strings.Contains(got.Answer, "[C5]") || strings.Contains(got.Answer, "[C99]") {
+		t.Fatalf("supported marker lost or unsupported marker remains: %q", got.Answer)
 	}
 }
 
@@ -428,8 +574,8 @@ func TestFinalCitationsRetainFourStepsAndComparisonPartner(t *testing.T) {
 			if comparison && got.Citations[3].TaskID != 22 {
 				t.Fatal("comparison partner discarded")
 			}
-			if strings.Contains(got.Answer, "[C") {
-				t.Fatalf("markers remain: %q", got.Answer)
+			if strings.Contains(got.Answer, "[C99]") || !strings.Contains(got.Answer, "四[C4]") {
+				t.Fatalf("inline provenance is invalid: %q", got.Answer)
 			}
 		})
 	}
@@ -439,7 +585,7 @@ func TestFinalizeAnswerCitationsPreservesEscapedMarkdownBrackets(t *testing.T) {
 	candidates := []Citation{{CitationID: "C1"}, {CitationID: "C2"}}
 
 	got := finalizeAnswerCitations(`字面量 \[C1]，有效 [C2]。`, candidates)
-	if got.Answer != `字面量 \[C1]，有效。` {
+	if got.Answer != `字面量 \[C1]，有效 [C2]。` {
 		t.Fatalf("clean answer = %q", got.Answer)
 	}
 	if len(got.Citations) != 1 || got.Citations[0].CitationID != "C2" {
@@ -465,7 +611,7 @@ func TestFinalizeAnswerCitationsPreservesMarkdownCitationBoundaries(t *testing.T
 		`[C1]: https://example.com`,
 		`引用目标 [来源][C1]。`,
 		`普通链接 [C1](https://example.com)。`,
-		`真正内部标记和。`,
+		`真正内部标记[C1][C2]和[C1][C2]。`,
 	}, "\n")
 	if got.Answer != want {
 		t.Fatalf("clean answer = %q, want %q", got.Answer, want)
@@ -520,7 +666,7 @@ func TestFinalizeAnswerCitationsPreservesMarkdownCodeRegionsExactly(t *testing.T
 	want := "普通 [Gin] 与 [链接](doc.md)\n\n代码：" + inline +
 		"\n多反引号：" + multiBacktick +
 		"\n围栏：\n" + fenced +
-		"外部结论。"
+		"外部结论 [C3]。"
 
 	got := finalizeAnswerCitations(raw, candidates)
 	if got.Answer != want {
@@ -580,8 +726,8 @@ func TestFinalizeAnswerCitationsPreservesAdditionalMarkdownBlockCode(t *testing.
 			if !strings.Contains(got.Answer, tt.code) {
 				t.Fatalf("Markdown code was not preserved byte-for-byte:\n got %q\nwant code %q", got.Answer, tt.code)
 			}
-			if strings.Contains(got.Answer, "外部结论 [C3]") {
-				t.Fatalf("outside citation token was not removed: %q", got.Answer)
+			if !strings.Contains(got.Answer, "外部结论 [C3]") {
+				t.Fatalf("outside citation token was not retained: %q", got.Answer)
 			}
 			if !strings.Contains(got.Answer, "普通 [Gin] 与 [链接](doc.md)") {
 				t.Fatalf("ordinary Markdown was changed: %q", got.Answer)
@@ -599,8 +745,8 @@ func TestFinalizeAnswerCitationsDoesNotTreatIndentedParagraphContinuationAsCode(
 
 	got := finalizeAnswerCitations(raw, candidates)
 
-	if strings.Contains(got.Answer, "[C1]") {
-		t.Fatalf("indented paragraph continuation was incorrectly protected: %q", got.Answer)
+	if strings.Contains(got.Answer, "[C1]  ,") || !strings.Contains(got.Answer, "[C1],") {
+		t.Fatalf("indented paragraph continuation was incorrectly treated as code: %q", got.Answer)
 	}
 	if len(got.Citations) != 2 || got.Citations[0].CitationID != "C1" || got.Citations[1].CitationID != "C2" {
 		t.Fatalf("citations = %#v, want paragraph citations C1 and C2", got.Citations)
@@ -648,8 +794,8 @@ func TestFinalizeAnswerCitationsInlineBackticksDoNotCrossBlockCode(t *testing.T)
 	if !strings.Contains(got.Answer, fenced) {
 		t.Fatalf("fenced code was skipped by inline matching: %q", got.Answer)
 	}
-	if strings.Contains(got.Answer, "[C3]") {
-		t.Fatalf("outside citation was incorrectly protected by cross-block inline range: %q", got.Answer)
+	if strings.Contains(got.Answer, "[C3]  !") || !strings.Contains(got.Answer, "[C3]!") {
+		t.Fatalf("outside citation was incorrectly treated as inline code: %q", got.Answer)
 	}
 	if len(got.Citations) != 1 || got.Citations[0].CitationID != "C3" {
 		t.Fatalf("citations = %#v, want only outside C3", got.Citations)

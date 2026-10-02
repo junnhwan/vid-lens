@@ -227,6 +227,11 @@ func RetryStrategy(base Strategy, policy ProviderRetryPolicy) Strategy {
 }
 
 func (r *retryingStrategy) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	result, err := r.TranscribeDetailed(ctx, audioPath)
+	return result.Text, err
+}
+
+func (r *retryingStrategy) TranscribeDetailed(ctx context.Context, audioPath string) (TranscriptionResult, error) {
 	operationKey := r.policy.operationKey(ctx)
 	for retry := 0; ; retry++ {
 		if r.policy.BeginAttempt != nil {
@@ -238,7 +243,7 @@ func (r *retryingStrategy) Transcribe(ctx context.Context, audioPath string) (st
 		attemptCtx := withProviderAttemptTiming(providerRetryContext(ctx, operationKey, retry), func(duration time.Duration) {
 			measuredDuration, measured = duration, true
 		})
-		text, err := r.base.Transcribe(attemptCtx, audioPath)
+		result, err := TranscribeDetailed(attemptCtx, r.base, audioPath)
 		duration := time.Since(startedAt)
 		if measured {
 			duration = measuredDuration
@@ -253,7 +258,7 @@ func (r *retryingStrategy) Transcribe(ctx context.Context, audioPath string) (st
 			r.policy.ObserveAttempt(observation)
 		}
 		if !willRetry {
-			return text, err
+			return result, err
 		}
 		sleepStartedAt := time.Now()
 		if err := r.policy.sleep(ctx, delay); err != nil {
@@ -263,7 +268,7 @@ func (r *retryingStrategy) Transcribe(ctx context.Context, audioPath string) (st
 				observation.SleepDuration = time.Since(sleepStartedAt)
 				r.policy.ObserveAttempt(observation)
 			}
-			return "", err
+			return TranscriptionResult{}, err
 		}
 		if r.policy.ObserveAttempt != nil {
 			observation.Phase = "retry_wait"

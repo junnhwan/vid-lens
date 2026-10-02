@@ -23,7 +23,7 @@ func TestChatSeparatesLLMContextFromPublicCitation(t *testing.T) {
 
 	anchor := strings.Repeat("背景介绍。", 40) + "工具调用结果会作为新消息反馈给模型。" + strings.Repeat("其他介绍。", 40)
 	expanded := "前邻居上下文只给模型。\n" + anchor + "\n后邻居上下文也只给模型。"
-	chatClient := &recordingChatClient{}
+	chatClient := &scriptedChatClient{responses: []string{"not-json", "工具结果会反馈给模型 [C2]。"}}
 	svc := NewChatService(repos, &fakeRetriever{results: []RetrievedChunk{{
 		EvidenceID: "ev-1", ChunkID: 12, ChunkIndex: 4,
 		Content: expanded, AnchorContent: anchor, MatchedQuery: "工具调用结果反馈模型",
@@ -38,9 +38,11 @@ func TestChatSeparatesLLMContextFromPublicCitation(t *testing.T) {
 	}
 
 	var prompt strings.Builder
-	for _, message := range chatClient.messages {
-		prompt.WriteString(message.Content)
-		prompt.WriteByte('\n')
+	for _, call := range chatClient.messages {
+		for _, message := range call {
+			prompt.WriteString(message.Content)
+			prompt.WriteByte('\n')
+		}
 	}
 	if !strings.Contains(prompt.String(), "前邻居上下文只给模型") || !strings.Contains(prompt.String(), "后邻居上下文也只给模型") {
 		t.Fatalf("LLM prompt lost expanded context: %s", prompt.String())
@@ -127,8 +129,8 @@ func TestChatPublishesOnlyAnswerReferencedCitations(t *testing.T) {
 			t.Fatalf("answer prompt lost retrieval candidate %q: %+v", content, chatClient.messages[1])
 		}
 	}
-	if result.Answer != "工具调用结果会以新消息形式反馈给模型。" {
-		t.Fatalf("result answer = %q, want clean answer", result.Answer)
+	if result.Answer != "工具调用结果会以新消息形式反馈给模型 [C1][C3]。" {
+		t.Fatalf("result answer = %q, want canonical inline citations", result.Answer)
 	}
 	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C1" || result.Citations[1].CitationID != "C3" {
 		t.Fatalf("result citations = %+v, want C1 and C3", result.Citations)
@@ -141,7 +143,7 @@ func TestChatPublishesOnlyAnswerReferencedCitations(t *testing.T) {
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
-	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+	if messages[1].Content != result.Answer || !strings.Contains(messages[1].Content, "[C1][C3]") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
 	decoded, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
@@ -222,8 +224,8 @@ func TestChatStreamEmitsFinalAnswerReferencedCitations(t *testing.T) {
 	if rawDeltas.String() != "第一条和第三条 [C3, C1]" {
 		t.Fatalf("raw answer deltas = %q", rawDeltas.String())
 	}
-	if result.Answer != "第一条和第三条" {
-		t.Fatalf("result answer = %q, want clean answer", result.Answer)
+	if result.Answer != "第一条和第三条 [C3][C1]" {
+		t.Fatalf("result answer = %q, want canonical inline citations", result.Answer)
 	}
 	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C1" || result.Citations[1].CitationID != "C3" {
 		t.Fatalf("result citations = %+v, want stable candidate order C1, C3", result.Citations)
@@ -239,7 +241,7 @@ func TestChatStreamEmitsFinalAnswerReferencedCitations(t *testing.T) {
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
-	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+	if messages[1].Content != result.Answer || !strings.Contains(messages[1].Content, "[C3][C1]") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
 	decoded, err := DecodeAgentSnapshot(*messages[1].RetrievalSnapshot)
@@ -255,7 +257,7 @@ func TestChatStreamEmitsFinalAnswerReferencedCitations(t *testing.T) {
 	}
 }
 
-func TestRAGPromptTreatsCitationIDsAsInternalIndependentTokens(t *testing.T) {
+func TestRAGPromptMapsIndependentTokensToExactSourceSentences(t *testing.T) {
 	contexts := []RetrievedChunk{
 		{ChunkID: 11, ChunkIndex: 3, Content: "第一条唯一证据内容"},
 		{ChunkID: 22, ChunkIndex: 8, Content: "第二条唯一证据内容"},
@@ -264,13 +266,13 @@ func TestRAGPromptTreatsCitationIDsAsInternalIndependentTokens(t *testing.T) {
 	if len(messages) < 2 {
 		t.Fatalf("buildRAGMessages() returned %d messages, want instruction and evidence context", len(messages))
 	}
-	for _, want := range []string{"内部标记", "最小充分证据", "[C1][C2]", "不要写成 [C1, C2]", "展示前隐藏"} {
+	for _, want := range []string{"行内引用链接", "最小充分证据", "[C1][C2]", "不要写成 [C1, C2]", "一句原文"} {
 		if !strings.Contains(messages[0].Content, want) {
 			t.Fatalf("RAG instruction prompt = %q, missing %q", messages[0].Content, want)
 		}
 	}
 	for index, context := range contexts {
-		wantMapping := fmt.Sprintf("[C%d]\n%s\n%s", index+1, describeRetrievedChunk(context), context.Content)
+		wantMapping := fmt.Sprintf("[C%d] (task_id=0, chunk %d, modality=unknown, time=[0,0), time_status=unknown) %s", index+1, context.ChunkIndex, context.Content)
 		if !strings.Contains(messages[1].Content, wantMapping) {
 			t.Fatalf("RAG evidence prompt = %q, missing concrete mapping %q", messages[1].Content, wantMapping)
 		}

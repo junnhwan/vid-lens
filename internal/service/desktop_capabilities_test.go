@@ -61,7 +61,7 @@ func TestStudyCapabilityRejectsIncompleteChunksAndOversizedSource(t *testing.T) 
 	if got := studySourceReason(task, nil, timeline); got != "source_limit_exceeded" {
 		t.Fatal(got)
 	}
-	timeline.Atoms = make([]TimelineAtom, 1001)
+	timeline.Atoms = make([]TimelineAtom, 10001)
 	if got := studySourceReason(task, nil, timeline); got != "source_limit_exceeded" {
 		t.Fatal(got)
 	}

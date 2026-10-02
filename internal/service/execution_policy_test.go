@@ -69,7 +69,7 @@ func TestExecutionPolicyDirectQARunsRetrieval(t *testing.T) {
 		{TaskID: 1, ChunkID: 9, ChunkIndex: 0, Score: 0.8, Content: "owner 校验释放锁"},
 	}}
 	embedding := &fakeEmbeddingClient{dim: 3}
-	chat := &scriptedChatClient{responses: []string{"direct_qa 需要 owner。[C1]"}}
+	chat := &scriptedChatClient{responses: []string{"not-json", "direct_qa 需要 owner。[C1]"}}
 	svc, session, _ := newPolicyChatFixture(t, retriever)
 
 	result, err := svc.AskWithMode(context.Background(), ChatModeStrictRAG, 7, session.ID, "谁要校验 owner", 0, embedding, chat, ai.Profile{EmbeddingModel: "embed", LLMModel: "chat"})

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import type { CiteRef } from '@/components/Citation'
+import { citeFromAPI } from '@/components/Citation'
 import { parseMessages, type ChatMsg } from '@/components/chat/chatUtils'
 import { mergeRunHistory } from './conversationHistory'
 import { recoverConversationRun } from '@/lib/conversationRecovery'
@@ -366,24 +367,5 @@ export function useConversationSession(options: ConversationSessionOptions) {
 }
 
 function defaultCitationMapper(citations: Citation[]): CiteRef[] {
-  return citations.map((citation, index) => ({
-    id: `C${index + 1}`,
-    taskId: citation.task_id,
-    chunkIndex: citation.chunk_index,
-    score: citation.score,
-    content: citation.content,
-    anchorQuote: citation.anchor_quote || citation.content,
-    displayContext: citation.display_context || citation.content,
-    modality: citation.modality,
-    startMS: citation.start_ms,
-    endMS: citation.end_ms,
-    timeRangeStatus: citation.time_range_status,
-    contextStartMS: citation.context_start_ms,
-    contextEndMS: citation.context_end_ms,
-    displayContextTruncated: citation.display_context_truncated,
-    sourceRefs: citation.source_refs,
-    source: citation.source,
-    videoTitle: citation.video_title,
-    finalRank: citation.final_rank,
-  }))
+  return citations.map(citeFromAPI)
 }

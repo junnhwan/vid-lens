@@ -1,7 +1,9 @@
 package service
 
 import (
+	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -10,7 +12,11 @@ import (
 	"vid-lens/internal/model"
 )
 
-const defaultCitationEvidenceRunes = 160
+const (
+	defaultCitationEvidenceRunes = 160
+	maxCitationContextRunes      = 360
+	maxCitationSentencesPerChunk = 48
+)
 
 var (
 	spaceBeforePunctuation = regexp.MustCompile(`[ \t]+([，。！？；：、,.!?;:])`)
@@ -33,16 +39,21 @@ type markdownCodeRange struct {
 	end   int
 }
 
-// finalizeAnswerCitations is the boundary between model-internal citation
-// tokens and the user-visible answer. It uses supported tokens for evidence
-// selection before removing those tokens from the answer.
+// finalizeAnswerCitations selects only cited sentence candidates and leaves
+// canonical markers in the answer for inline source links. Unsupported IDs are
+// removed; Markdown code and links remain literal.
 func finalizeAnswerCitations(rawAnswer string, candidates []Citation) finalizedAnswer {
 	protected := extractMarkdownCodeRanges(rawAnswer)
 	tokens := extractCitationTokenRanges(rawAnswer, protected)
 	referenced := collectReferencedCitationIDs(tokens)
+	selected := selectReferencedCitations(referenced, candidates)
+	validIDs := make(map[string]struct{}, len(selected))
+	for _, candidate := range selected {
+		validIDs[candidate.CitationID] = struct{}{}
+	}
 	return finalizedAnswer{
-		Answer:    cleanVisibleAnswer(rawAnswer, tokens, protected),
-		Citations: selectReferencedCitations(referenced, candidates),
+		Answer:    cleanVisibleAnswer(rawAnswer, tokens, protected, validIDs),
+		Citations: selected,
 	}
 }
 
@@ -438,34 +449,10 @@ func selectReferencedCitations(referenced map[string]struct{}, candidates []Cita
 		selected = append(selected, candidate)
 		selectedIDs[normalizedID] = struct{}{}
 	}
-	if len(selected) > 0 {
-		return selected
-	}
-	return fallbackCitations(candidates, 1)
+	return selected
 }
 
-func fallbackCitations(candidates []Citation, limit int) []Citation {
-	fallback := make([]Citation, 0, limit)
-	seen := make(map[string]struct{})
-	for _, candidate := range candidates {
-		normalizedID, ok := normalizeCitationID(strings.TrimSpace(candidate.CitationID))
-		if !ok {
-			continue
-		}
-		if _, duplicate := seen[normalizedID]; duplicate {
-			continue
-		}
-		candidate.CitationID = normalizedID
-		fallback = append(fallback, candidate)
-		seen[normalizedID] = struct{}{}
-		if len(fallback) == limit {
-			break
-		}
-	}
-	return fallback
-}
-
-func cleanVisibleAnswer(answer string, tokens []citationTokenRange, protected []markdownCodeRange) string {
+func cleanVisibleAnswer(answer string, tokens []citationTokenRange, protected []markdownCodeRange, validIDs map[string]struct{}) string {
 	var visible strings.Builder
 	visible.Grow(len(answer))
 	tokenIndex := 0
@@ -480,6 +467,17 @@ func cleanVisibleAnswer(answer string, tokens []citationTokenRange, protected []
 		for tokenIndex < len(tokens) && tokens[tokenIndex].start < end {
 			token := tokens[tokenIndex]
 			outside.WriteString(answer[cursor:token.start])
+			seen := make(map[string]struct{}, len(token.ids))
+			for _, id := range token.ids {
+				if _, valid := validIDs[id]; !valid {
+					continue
+				}
+				if _, duplicate := seen[id]; duplicate {
+					continue
+				}
+				outside.WriteString("[" + id + "]")
+				seen[id] = struct{}{}
+			}
 			cursor = token.end
 			tokenIndex++
 		}
@@ -508,11 +506,10 @@ func cleanVisibleAnswer(answer string, tokens []citationTokenRange, protected []
 	return cleaned
 }
 
-// buildCitationSet separates internal retrieval contexts from public evidence.
-// The returned Citation content is always a verbatim excerpt of the anchor
-// chunk (or Content when no expansion happened); expanded neighbor context is
-// never copied into the public DTO.
-func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedChunk, []Citation) {
+// buildCitationSet keeps generation context at chunk granularity, but assigns
+// each source sentence its own citation ID. Enumeration does not depend on the
+// question: writer prompts and answer finalization must see the same ID table.
+func buildCitationSet(_ string, contexts []RetrievedChunk) ([]RetrievedChunk, []Citation) {
 	filteredContexts := make([]RetrievedChunk, 0, len(contexts))
 	citations := make([]Citation, 0, len(contexts))
 	for _, chunk := range contexts {
@@ -523,50 +520,247 @@ func buildCitationSet(question string, contexts []RetrievedChunk) ([]RetrievedCh
 			chunk.TimeRangeStatus = model.ChunkTimeRangeUnknown
 			chunk.StartMS, chunk.EndMS = 0, 0
 		}
-		anchor := strings.TrimSpace(chunk.AnchorContent)
-		if anchor == "" {
-			anchor = strings.TrimSpace(chunk.Content)
+		rawAnchor := chunk.AnchorContent
+		if strings.TrimSpace(rawAnchor) == "" {
+			rawAnchor = chunk.Content
 		}
-		evidence := extractEvidence(question, chunk.MatchedQuery, anchor, defaultCitationEvidenceRunes)
-		if evidence == "" {
+		anchor := strings.TrimSpace(rawAnchor)
+		if anchor == "" {
 			continue
 		}
+		anchorRefs := citationAnchorRefs(rawAnchor, chunk.SourceRefs)
 
 		filteredContexts = append(filteredContexts, chunk)
-		citationID := "C" + strconv.Itoa(len(citations)+1)
-		citations = append(citations, Citation{
-			TaskID:         chunk.TaskID,
-			VideoTitle:     chunk.VideoTitle,
-			CitationID:     citationID,
-			EvidenceID:     chunk.EvidenceID,
-			ChunkID:        chunk.ChunkID,
-			ChunkIndex:     chunk.ChunkIndex,
-			Score:          chunk.Score,
-			Content:        evidence,
-			AnchorQuote:    evidence,
-			DisplayContext: anchor,
-			Source:         chunk.Source,
-			VectorRank:     chunk.VectorRank,
-			KeywordRank:    chunk.KeywordRank,
-			RRFScore:       chunk.RRFScore,
-			RerankScore:    chunk.RerankScore,
-			FinalRank:      chunk.FinalRank,
-			Modality:       chunk.Modality, StartMS: chunk.StartMS, EndMS: chunk.EndMS,
-			TimeRangeStatus: chunk.TimeRangeStatus,
-			ContextStartMS:  chunk.StartMS, ContextEndMS: chunk.EndMS,
-			ContextTimeStatus:       chunk.TimeRangeStatus,
-			DisplayContextTruncated: false,
-			SourceMappingStatus:     chunk.SourceMappingStatus,
-			SourceRefs:              append([]ChunkSourceRef(nil), chunk.SourceRefs...),
-			ModalityRank:            chunk.ModalityRank, ModalityScore: chunk.ModalityScore, ModalityIntent: chunk.ModalityIntent,
-		})
+		seen := make(map[string]struct{})
+		chunkCitations := make([]Citation, 0)
+		for _, sentence := range citationSentenceQuotes(anchor, anchorRefs) {
+			evidence := sentence.Content
+			startMS, endMS, timeStatus := chunk.StartMS, chunk.EndMS, chunk.TimeRangeStatus
+			sourceRefs := append([]ChunkSourceRef(nil), chunk.SourceRefs...)
+			displaySource := anchor
+			sourceIdentity := ""
+			// A sentence can inherit a narrower source interval only when one
+			// source observation contains it verbatim. Never interpolate time.
+			if ref, ok := citationSourceRef(sentence, anchor, anchorRefs); ok && chunk.SourceMappingStatus == model.ChunkSourceMapped {
+				startMS, endMS, timeStatus = ref.StartMS, ref.EndMS, ref.TimeRangeStatus
+				sourceRefs = []ChunkSourceRef{ref}
+				displaySource = strings.TrimSpace(ref.Content)
+				sourceIdentity = ref.SourceType + ":" + ref.StableID
+			} else if timeStatus == model.ChunkTimeRangeExact && len(sourceRefs) > 1 {
+				// The bounding interval of several observations is only coarse
+				// when the quoted occurrence cannot be assigned to one of them.
+				timeStatus = model.ChunkTimeRangeCoarse
+			}
+			for i := range sourceRefs {
+				sourceRefs[i].Content = ""
+				sourceRefs[i].TextStart, sourceRefs[i].TextEnd = 0, 0
+			}
+			key := fmt.Sprintf("%d:%d:%s:%s:%s", startMS, endMS, timeStatus, sourceIdentity, evidence)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			displayContext, truncated := boundedCitationContext(displaySource, evidence)
+			chunkCitations = append(chunkCitations, Citation{
+				TaskID:         chunk.TaskID,
+				VideoTitle:     chunk.VideoTitle,
+				EvidenceID:     chunk.EvidenceID,
+				ChunkID:        chunk.ChunkID,
+				ChunkIndex:     chunk.ChunkIndex,
+				Score:          chunk.Score,
+				Content:        evidence,
+				AnchorQuote:    evidence,
+				DisplayContext: displayContext,
+				Source:         chunk.Source,
+				VectorRank:     chunk.VectorRank,
+				KeywordRank:    chunk.KeywordRank,
+				RRFScore:       chunk.RRFScore,
+				RerankScore:    chunk.RerankScore,
+				FinalRank:      chunk.FinalRank,
+				Modality:       chunk.Modality, StartMS: startMS, EndMS: endMS,
+				TimeRangeStatus: timeStatus,
+				ContextStartMS:  startMS, ContextEndMS: endMS,
+				ContextTimeStatus:       timeStatus,
+				DisplayContextTruncated: truncated,
+				SourceMappingStatus:     chunk.SourceMappingStatus,
+				SourceRefs:              sourceRefs,
+				ModalityRank:            chunk.ModalityRank, ModalityScore: chunk.ModalityScore, ModalityIntent: chunk.ModalityIntent,
+			})
+		}
+		for _, citation := range boundedSentenceCandidates(chunkCitations) {
+			citation.CitationID = "C" + strconv.Itoa(len(citations)+1)
+			citations = append(citations, citation)
+		}
 	}
 	return filteredContexts, citations
+}
+
+// Split at known source-observation boundaries as well as sentence endings so
+// a sentence straddling two ASR observations does not inherit their union.
+type citationSentenceQuote struct {
+	Content    string
+	Start, End int // rune offsets in the trimmed retrieval anchor
+}
+
+func citationAnchorRefs(rawAnchor string, refs []ChunkSourceRef) []ChunkSourceRef {
+	leadingRunes := utf8.RuneCountInString(rawAnchor) - utf8.RuneCountInString(strings.TrimLeftFunc(rawAnchor, unicode.IsSpace))
+	adjusted := append([]ChunkSourceRef(nil), refs...)
+	for i := range adjusted {
+		if adjusted[i].TextEnd > adjusted[i].TextStart {
+			adjusted[i].TextStart -= leadingRunes
+			adjusted[i].TextEnd -= leadingRunes
+		}
+	}
+	return adjusted
+}
+
+func citationRefTextRange(anchor []rune, ref ChunkSourceRef) (int, int, bool) {
+	if ref.Content == "" || ref.TextStart < 0 || ref.TextEnd <= ref.TextStart || ref.TextEnd > len(anchor) {
+		return 0, 0, false
+	}
+	if string(anchor[ref.TextStart:ref.TextEnd]) != ref.Content {
+		return 0, 0, false
+	}
+	return ref.TextStart, ref.TextEnd, true
+}
+
+func citationSentenceQuotes(anchor string, refs []ChunkSourceRef) []citationSentenceQuote {
+	anchorRunes := []rune(anchor)
+	boundaries := []int{0, len(anchorRunes)}
+	for _, ref := range refs {
+		if start, end, ok := citationRefTextRange(anchorRunes, ref); ok {
+			boundaries = append(boundaries, start, end)
+			continue
+		}
+		if ref.TextStart != 0 || ref.TextEnd != 0 {
+			continue // malformed persisted offsets cannot be inferred from text
+		}
+		content := strings.TrimSpace(ref.Content)
+		if content == "" || strings.Count(anchor, content) != 1 {
+			continue
+		}
+		start := utf8.RuneCountInString(anchor[:strings.Index(anchor, content)])
+		boundaries = append(boundaries, start, start+utf8.RuneCountInString(content))
+	}
+	sort.Ints(boundaries)
+	quotes := make([]citationSentenceQuote, 0)
+	for i := 1; i < len(boundaries); i++ {
+		if boundaries[i] == boundaries[i-1] {
+			continue
+		}
+		text := anchorRunes[boundaries[i-1]:boundaries[i]]
+		for start := 0; start < len(text); {
+			end, lastClause := start, -1
+			for end < len(text) && end-start < defaultCitationEvidenceRunes {
+				r := text[end]
+				end++
+				if r == ',' || r == '，' || r == '、' {
+					lastClause = end
+				}
+				terminator := isUsefulEvidenceTerminator(r) || r == '\n' || r == '；' || r == ';'
+				if r == '.' && (end == len(text) || unicode.IsSpace(text[end])) {
+					terminator = true
+				}
+				if terminator {
+					for end < len(text) && end-start < defaultCitationEvidenceRunes && isClosingPunctuation(text[end]) {
+						end++
+					}
+					break
+				}
+			}
+			if end < len(text) && end-start == defaultCitationEvidenceRunes && lastClause-start >= defaultCitationEvidenceRunes/2 {
+				end = lastClause
+			}
+			fragment := string(text[start:end])
+			if quote := strings.TrimSpace(fragment); strings.IndexFunc(quote, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) >= 0 {
+				leading := utf8.RuneCountInString(fragment) - utf8.RuneCountInString(strings.TrimLeftFunc(fragment, unicode.IsSpace))
+				quoteStart := boundaries[i-1] + start + leading
+				quotes = append(quotes, citationSentenceQuote{Content: quote, Start: quoteStart, End: quoteStart + utf8.RuneCountInString(quote)})
+			}
+			start = end
+		}
+	}
+	return quotes
+}
+
+func citationSourceRef(quote citationSentenceQuote, anchor string, refs []ChunkSourceRef) (ChunkSourceRef, bool) {
+	var matched ChunkSourceRef
+	count := 0
+	anchorRunes := []rune(anchor)
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.Content) == "" || !strings.Contains(ref.Content, quote.Content) {
+			continue
+		}
+		if start, end, ok := citationRefTextRange(anchorRunes, ref); ok {
+			if start > quote.Start || end < quote.End {
+				continue
+			}
+		} else if ref.TextStart != 0 || ref.TextEnd != 0 || strings.Count(anchor, quote.Content) != 1 {
+			// Invalid offsets and repeated legacy text cannot choose a native
+			// occurrence reliably, even if one source has a precise time.
+			return ChunkSourceRef{}, false
+		}
+		ref.TimeRangeStatus = normalizedTimeRangeStatus(ref.TimeRangeStatus, ref.StartMS, ref.EndMS)
+		matched = ref
+		count++
+	}
+	return matched, count == 1 && matched.TimeRangeStatus != model.ChunkTimeRangeUnknown
+}
+
+func boundedSentenceCandidates(candidates []Citation) []Citation {
+	if len(candidates) <= maxCitationSentencesPerChunk {
+		return candidates
+	}
+	// Include both ends and distribute the remaining slots across the anchor;
+	// a long observation must not silently make its final facts unciteable.
+	result := make([]Citation, 0, maxCitationSentencesPerChunk)
+	for i := 0; i < maxCitationSentencesPerChunk; i++ {
+		index := i * (len(candidates) - 1) / (maxCitationSentencesPerChunk - 1)
+		result = append(result, candidates[index])
+	}
+	return result
+}
+
+func boundedCitationContext(source, quote string) (string, bool) {
+	text := []rune(strings.TrimSpace(source))
+	if len(text) <= maxCitationContextRunes {
+		return string(text), false
+	}
+	byteStart := strings.Index(string(text), quote)
+	quoteStart := 0
+	if byteStart >= 0 {
+		quoteStart = utf8.RuneCountInString(string(text)[:byteStart])
+	}
+	start := quoteStart - (maxCitationContextRunes-utf8.RuneCountInString(quote))/2
+	if start < 0 {
+		start = 0
+	}
+	if start+maxCitationContextRunes > len(text) {
+		start = len(text) - maxCitationContextRunes
+	}
+	return strings.TrimSpace(string(text[start : start+maxCitationContextRunes])), true
 }
 
 func buildCitations(question string, contexts []RetrievedChunk) []Citation {
 	_, citations := buildCitationSet(question, contexts)
 	return citations
+}
+
+func formatCitationCandidates(citations []Citation) string {
+	lines := make([]string, 0, len(citations))
+	for _, citation := range citations {
+		lines = append(lines, fmt.Sprintf("[%s] (task_id=%d, chunk %d, modality=%s, time=[%d,%d), time_status=%s) %s", citation.CitationID,
+			citation.TaskID, citation.ChunkIndex, citation.Modality, citation.StartMS, citation.EndMS, citation.TimeRangeStatus, citation.AnchorQuote))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatCitationGenerationContext(contexts []RetrievedChunk) string {
+	lines := make([]string, 0, len(contexts))
+	for _, chunk := range contexts {
+		lines = append(lines, fmt.Sprintf("%s\n%s", describeRetrievedChunk(chunk), chunk.Content))
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 // extractEvidence selects the most query-relevant bounded window while keeping

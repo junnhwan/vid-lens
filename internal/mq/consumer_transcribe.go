@@ -257,15 +257,16 @@ func (c *Consumer) processVideo(ctx context.Context, task *model.VideoTask) erro
 	return c.summarizeTask(ctx, task)
 }
 
-// transcribeAudio splits long audio into 300s segments and persists each
+// transcribeAudio splits audio into bounded speech windows and persists each
 // segment's state independently (TranscriptionChunk), so an ASR failure
 // mid-video only re-runs the missing segment and reuses already-completed
 // results. This is the 片级 (segment-level) half of the failure-reuse story:
 // the same durable-retry idea that the job-level dispatch lease provides at MQ
 // granularity is applied here at ASR-segment granularity, forming the
-// "投递-处理-片级" three-layer failure-reuse chain. The real driver is the
-// ASR model's single-call ≤10MB limit, which makes 300s chunking a hard
-// requirement, not an optimisation.
+// "投递-处理-片级" three-layer failure-reuse chain.
+// Short windows also bound citation uncertainty when an ASR provider returns
+// text only. This increases request count in exchange for usable playback
+// ranges; provider-native segment times are retained whenever available.
 func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
 	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageTranscribing})
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunking started",
@@ -299,7 +300,7 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		if err := requireProcessingLease(ctx); err != nil {
 			return "", err
 		}
-		if completed := c.completedTranscriptionChunk(taskID, i, segment.SegmentKey); completed != "" {
+		if completed, found := c.completedTranscriptionChunk(taskID, i, segment.SegmentKey); found {
 			if metrics := observability.DefaultMetrics(); metrics != nil {
 				metrics.IncASRChunkReuse()
 			}
@@ -319,7 +320,7 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 
 	type asrResult struct {
 		work     asrWork
-		text     string
+		output   ai.TranscriptionResult
 		err      error
 		duration time.Duration
 	}
@@ -353,8 +354,8 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 						}
 						chunkStrategy := c.retryingASRStrategy(ctx, taskID, work.index, strategy)
 						chunkCtx := withASROperationKey(ctx, taskID, work.index)
-						text, err := chunkStrategy.Transcribe(chunkCtx, work.segment.Path)
-						results <- asrResult{work: work, text: text, err: err, duration: time.Since(startedAt)}
+						output, err := ai.TranscribeDetailed(chunkCtx, chunkStrategy, work.segment.Path)
+						results <- asrResult{work: work, output: output, err: err, duration: time.Since(startedAt)}
 					}
 				}
 			}()
@@ -386,18 +387,20 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 				continue
 			}
 
-			text := strings.TrimSpace(result.text)
+			text := strings.TrimSpace(result.output.Text)
 			parts[result.work.index] = text
 			observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunk completed",
 				slog.Int64("task_id", taskID), slog.Int("chunk_index", result.work.index+1),
 				slog.Int("chunk_count", len(segments)), slog.Int("output_chars", len([]rune(text))))
+			persistStartedAt := time.Now()
+			var timed []model.TranscriptionSegment
 			if text != "" {
-				persistStartedAt := time.Now()
-				persistErr := c.markTranscriptionChunkCompleted(ctx, taskID, result.work.index, result.work.segment, text)
-				c.recordASRStage(ctx, taskID, "persistence", stageStatus(persistErr), time.Since(persistStartedAt))
-				if persistErr != nil {
-					failures[result.work.index] = persistErr
-				}
+				timed = absoluteTranscriptionSegments(result.output.Segments, result.work.segment)
+			}
+			persistErr := c.markTranscriptionChunkCompleted(ctx, taskID, result.work.index, result.work.segment, text, timed)
+			c.recordASRStage(ctx, taskID, "persistence", stageStatus(persistErr), time.Since(persistStartedAt))
+			if persistErr != nil {
+				failures[result.work.index] = persistErr
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -413,9 +416,11 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 		return "", err
 	}
 	compactParts := make([]string, 0, len(parts))
-	for _, part := range parts {
+	speechWindows := make([]ffmpeg.AudioSegment, 0, len(parts))
+	for i, part := range parts {
 		if strings.TrimSpace(part) != "" {
 			compactParts = append(compactParts, part)
+			speechWindows = append(speechWindows, segments[i])
 		}
 	}
 	if len(compactParts) == 0 {
@@ -424,10 +429,11 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 
 	stitchStartedAt := time.Now()
 	stitched := transcript.Stitch(compactParts)
-	if !hasOverlappingAudioWindows(segments) {
+	if !hasOverlappingAudioWindows(speechWindows) {
 		// Compatibility adapters and historical tests provide path-only chunks.
 		// Without proof that the audio inputs overlap, deduplicating equal text
 		// could destroy legitimately repeated speech.
+		// A silent window can also separate identical, independently spoken text.
 		stitched = transcript.StitchResult{Content: strings.Join(compactParts, "\n\n")}
 	}
 	c.recordASRStage(ctx, taskID, "stitch", "success", time.Since(stitchStartedAt))
@@ -549,21 +555,21 @@ func (c *Consumer) prepareAudioSegments(ctx context.Context, audioPath string) (
 	return split(ctx, c.ffmpegPath, audioPath, ffmpeg.DefaultAudioSegmentSeconds, ffmpeg.DefaultAudioSegmentOverlapSeconds)
 }
 
-func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int, segmentKey string) string {
+func (c *Consumer) completedTranscriptionChunk(taskID int64, chunkIndex int, segmentKey string) (string, bool) {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
-		return ""
+		return "", false
 	}
 	chunk, err := c.repo.TranscriptionChunk.FindByTaskAndIndex(taskID, chunkIndex)
 	if err != nil || chunk == nil {
-		return ""
+		return "", false
 	}
 	if segmentKey != "" && chunk.SegmentKey != segmentKey {
-		return ""
+		return "", false
 	}
-	if chunk.Status == model.TranscriptionChunkStatusCompleted && strings.TrimSpace(chunk.Content) != "" {
-		return strings.TrimSpace(chunk.Content)
+	if chunk.Status == model.TranscriptionChunkStatusCompleted {
+		return strings.TrimSpace(chunk.Content), true
 	}
-	return ""
+	return "", false
 }
 
 func (c *Consumer) markTranscriptionChunkRunning(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment) error {
@@ -584,13 +590,36 @@ func (c *Consumer) markTranscriptionChunkPending(ctx context.Context, taskID int
 	})
 }
 
-func (c *Consumer) markTranscriptionChunkCompleted(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment, content string) error {
+func (c *Consumer) markTranscriptionChunkCompleted(ctx context.Context, taskID int64, chunkIndex int, segment ffmpeg.AudioSegment, content string, timed []model.TranscriptionSegment) error {
 	if c.repo == nil || c.repo.TranscriptionChunk == nil {
 		return nil
 	}
 	return c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
-		return repos.TranscriptionChunk.UpsertCompletedWithTimeline(taskID, chunkIndex, segment.Path, content, transcriptionChunkTimeline(segment))
+		return repos.TranscriptionChunk.UpsertCompletedWithTimedSegments(taskID, chunkIndex, segment.Path, content, transcriptionChunkTimeline(segment), timed)
 	})
+}
+
+// Invalid provider timing cannot become precise evidence. Keep valid observed
+// spans in provider order; the unmatched text still has the coarse audio range.
+func absoluteTranscriptionSegments(segments []model.TranscriptionSegment, window ffmpeg.AudioSegment) []model.TranscriptionSegment {
+	if window.WindowStartMS < 0 || window.WindowEndMS <= window.WindowStartMS {
+		return nil
+	}
+	durationMS := window.WindowEndMS - window.WindowStartMS
+	var previousStart int64
+	out := make([]model.TranscriptionSegment, 0, len(segments))
+	for _, segment := range segments {
+		segment.Text = strings.TrimSpace(segment.Text)
+		if segment.Text == "" || segment.StartMS < 0 || segment.EndMS <= segment.StartMS ||
+			segment.EndMS > durationMS || (len(out) > 0 && segment.StartMS < previousStart) {
+			continue
+		}
+		previousStart = segment.StartMS
+		segment.StartMS += window.WindowStartMS
+		segment.EndMS += window.WindowStartMS
+		out = append(out, segment)
+	}
+	return out
 }
 
 func transcriptionChunkTimeline(segment ffmpeg.AudioSegment) repository.TranscriptionChunkTimeline {

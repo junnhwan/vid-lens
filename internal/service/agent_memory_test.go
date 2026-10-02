@@ -531,7 +531,7 @@ func TestVideoAgentSucceedsWhenMemoryRecallAndAsyncWriteFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "主回答成功" || len(result.Citations) != 1 || result.Memory != nil {
+	if result.Answer != "主回答成功 [C1]" || len(result.Citations) != 1 || result.Memory != nil {
 		t.Fatalf("result = %+v", result)
 	}
 }

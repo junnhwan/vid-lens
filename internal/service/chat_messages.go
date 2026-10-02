@@ -1,14 +1,14 @@
 package service
 
 import (
-	"fmt"
 	"strings"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
 
-const ragProductPrompt = "你是 VidLens 的视频内容问答助手。结合视频片段和会话上下文自然回答。一般知识可以解释，但应与视频事实区分。如果片段没有依据，明确无法从视频确认，不要编造视频事实或引用。每条证据都标有 modality 和半开时间范围；回答具体事实时必须引用这些带模态和时间的证据。若 transcript、visual_ocr、visual_caption 互相冲突，不得把它们合并成单一确定事实，必须分别说明各模态观察并明确不确定性。证据编号是内部标记。只引用支撑回答所必需的最小充分证据，不要为了增加引用数量而标注重复或无关片段。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"
+const sentenceCitationProductPrompt = "每个 [Cn] 仅指向编号后的一句原文，不代表整段上下文。选择直接支撑该具体观点的原文句子；同一回答涉及不同句子或不同时间点时，分别引用对应编号。扩展上下文帮助理解，不能借某句编号引用上下文中的其他事实；没有对应句子依据时明确未能确认。只使用本轮候选编号，不沿用历史回答中的编号。"
+const ragProductPrompt = "你是 VidLens 的视频内容问答助手。结合视频片段和会话上下文自然回答。一般知识可以解释，但应与视频事实区分。如果片段没有依据，明确无法从视频确认，不要编造视频事实或引用。每条证据都标有 modality 和半开时间范围；回答具体事实时必须引用这些带模态和时间的证据。若 transcript、visual_ocr、visual_caption 互相冲突，不得把它们合并成单一确定事实，必须分别说明各模态观察并明确不确定性。证据编号用于行内引用链接。只引用支撑回答所必需的最小充分证据，不要为了增加引用数量而标注重复或无关片段。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。" + sentenceCitationProductPrompt
 const videoAssistantProductPrompt = "你是 VidLens 的视频助手。优先基于提供的视频摘要和转写回答。可以做整体概括、解释和延伸，但不能把未提供的信息说成来自视频。如果用户问题明显和视频无关，可以正常回答，并明确说明这部分不基于当前视频内容。"
 
 func ChatProductInstructions() string {
@@ -23,10 +23,7 @@ func BuildRAGAnswerMessages(citations []RetrievedChunk, question string) []ai.Ch
 
 // RAG/视频助手 prompt 消息构造和轻量文本判断。
 func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, question string) []ai.ChatMessage {
-	contextLines := make([]string, 0, len(contexts))
-	for index, chunk := range contexts {
-		contextLines = append(contextLines, fmt.Sprintf("[C%d]\n%s\n%s", index+1, describeRetrievedChunk(chunk), chunk.Content))
-	}
+	contexts, citations := buildCitationSet(question, contexts)
 
 	messages := []ai.ChatMessage{
 		{
@@ -35,7 +32,7 @@ func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, que
 		},
 		{
 			Role:    "system",
-			Content: "检索到的视频片段：\n" + strings.Join(contextLines, "\n\n"),
+			Content: "可引用的原文句子：\n" + formatCitationCandidates(citations) + "\n\n扩展上下文（仅供理解，无独立引用编号）：\n" + formatCitationGenerationContext(contexts),
 		},
 	}
 	for _, msg := range boundedConversationContext(recent) {

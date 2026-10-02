@@ -49,7 +49,9 @@ func studySourceReason(task *model.VideoTask, rows []model.VideoTranscriptionChu
 	for _, atom := range timeline.Atoms {
 		size += len(atom.Content)
 	}
-	if len(timeline.Atoms) > 1000 || size > 2*1024*1024 {
+	// Native speech spans are far smaller than the old multi-minute windows.
+	// The content cap and generation budgets still bound actual source size.
+	if len(timeline.Atoms) > 10000 || size > 2*1024*1024 {
 		return "source_limit_exceeded"
 	}
 	return ""
@@ -110,9 +112,30 @@ func visualCoverage(frames []model.VideoVisualFrame) *VisualCoverage {
 // the provider did not persist them.
 func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionChunk, frames []model.VideoVisualFrame) VideoTimeline {
 	atoms := make([]TimelineAtom, 0, len(transcriptRows)+len(frames)*2)
+	textOrder := make(map[string]int64)
 	for _, row := range transcriptRows {
 		content := strings.TrimSpace(row.Content)
 		if row.Status != model.TranscriptionChunkStatusCompleted || content == "" {
+			continue
+		}
+		if observations, timed := transcriptObservations(row, content); timed {
+			order := row.WindowStartMS
+			for _, observation := range observations {
+				if strings.TrimSpace(observation.Content) == "" {
+					continue
+				}
+				ref := observation.Refs[0]
+				id := "transcript:" + ref.StableID
+				// Unknown gaps retain the audio window for playback. Sort them in
+				// source-text order without inventing a new public timestamp.
+				order = max(order, ref.StartMS)
+				textOrder[id] = order
+				atoms = append(atoms, TimelineAtom{
+					ID: id, Modality: model.ChunkModalityTranscript,
+					Content: observation.Content, StartMS: ref.StartMS, EndMS: ref.EndMS,
+					TimeRangeStatus: ref.TimeRangeStatus, Source: "asr", SourceRefs: observation.Refs,
+				})
+			}
 			continue
 		}
 		startMS, endMS, status := transcriptTimelineRange(row)
@@ -163,8 +186,15 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 	}
 
 	sort.SliceStable(atoms, func(i, j int) bool {
-		if atoms[i].StartMS != atoms[j].StartMS {
-			return atoms[i].StartMS < atoms[j].StartMS
+		left, right := atoms[i].StartMS, atoms[j].StartMS
+		if order, ok := textOrder[atoms[i].ID]; ok {
+			left = order
+		}
+		if order, ok := textOrder[atoms[j].ID]; ok {
+			right = order
+		}
+		if left != right {
+			return left < right
 		}
 		if atoms[i].Modality != atoms[j].Modality {
 			return timelineModalityRank(atoms[i].Modality) < timelineModalityRank(atoms[j].Modality)
@@ -177,6 +207,9 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 			// Group unknowns separately from known zero-time atoms to keep the
 			// comparator transitive while SliceStable preserves their input order.
 			return unknownI && !unknownJ
+		}
+		if atoms[i].Modality == model.ChunkModalityTranscript {
+			return false
 		}
 		return atoms[i].ID < atoms[j].ID
 	})

@@ -162,12 +162,16 @@ func AdmitStrategy(b Strategy, a Admission, p, am, lm string) Strategy {
 	return &admittedStrategy{b, a, p, am, lm}
 }
 func (x *admittedStrategy) Transcribe(c context.Context, s string) (text string, err error) {
+	result, err := x.TranscribeDetailed(c, s)
+	return result.Text, err
+}
+func (x *admittedStrategy) TranscribeDetailed(c context.Context, s string) (result TranscriptionResult, err error) {
 	finish, err := beginAdmission(c, x.a, Call{Operation: "asr", Provider: x.p, Model: x.am})
 	if err != nil {
-		return "", err
+		return TranscriptionResult{}, err
 	}
 	defer func() { finish(err) }()
-	return x.base.Transcribe(c, s)
+	return TranscribeDetailed(c, x.base, s)
 }
 func (x *admittedStrategy) TranscribeChunks(c context.Context, paths []string) (string, error) {
 	parts := make([]string, 0, len(paths))

@@ -54,10 +54,8 @@ func buildTranscriptIndexChunks(content string, rows []model.VideoTranscriptionC
 			continue
 		}
 		row := completed[contribution.PartIndex]
-		ref := transcriptSourceRef(row)
-		observations = append(observations, SourceTextObservation{
-			Content: contribution.Content, Modality: model.ChunkModalityTranscript, Refs: []ChunkSourceRef{ref},
-		})
+		spans, _ := transcriptObservations(row, contribution.Content)
+		observations = append(observations, spans...)
 	}
 	return SplitObservationsIntoChunks(observations, chunkSize, overlap)
 }
@@ -81,6 +79,9 @@ func transcriptSourceRef(row model.VideoTranscriptionChunk) ChunkSourceRef {
 	stableID := strings.TrimSpace(row.SegmentKey)
 	if stableID == "" && row.ID > 0 {
 		stableID = fmt.Sprintf("transcription-chunk:%d", row.ID)
+	}
+	if stableID == "" {
+		stableID = fmt.Sprintf("transcription-chunk:%d", row.ChunkIndex)
 	}
 	ref := ChunkSourceRef{
 		SourceType: model.ChunkModalityTranscript, StableID: stableID, ContentHash: artifact.Hash(strings.TrimSpace(row.Content)), SegmentKey: strings.TrimSpace(row.SegmentKey),

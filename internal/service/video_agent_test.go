@@ -60,7 +60,7 @@ func TestVideoAgentAskDirectQAExecutesSearchAndBuildCitedAnswer(t *testing.T) {
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
-	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+	if messages[1].Content != result.Answer || !strings.Contains(messages[1].Content, "[C1]") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
 	if !strings.Contains(*messages[1].RetrievalSnapshot, "build_cited_answer") {
@@ -73,7 +73,7 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	anchor := strings.Repeat("背景内容。", 40) + "工具调用结果会作为新消息反馈给模型。" + strings.Repeat("其他内容。", 40)
 	expanded := "前邻居上下文只给模型。\n" + anchor + "\n后邻居上下文也只给模型。"
 	chatClient := &scriptedChatClient{responses: []string{
-		testSearchDecision, testAnswerDecision("ev-agent-1", 1, 9, "ev-agent-2"), "工具结果会反馈给模型，另一条说明最终文件列表 [C2, C1]",
+		testSearchDecision, testAnswerDecision("ev-agent-1", 1, 9, "ev-agent-2"), "工具结果会反馈给模型 [C2]，另一条说明最终文件列表 [C4]",
 	}}
 	retriever := &fakeRetriever{results: []RetrievedChunk{
 		{
@@ -103,11 +103,11 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	if !messagesContain(chatClient.messages[2], "[C1]") || !messagesContain(chatClient.messages[2], "[C2]") || !messagesContain(chatClient.messages[2], "完全无关的第二条唯一文本") {
 		t.Fatalf("final answer prompt lost candidate citations: %+v", chatClient.messages[2])
 	}
-	if result.Answer == "" || strings.Contains(result.Answer, "[C") {
-		t.Fatalf("result answer = %q, want clean answer", result.Answer)
+	if result.Answer == "" || !strings.Contains(result.Answer, "[C2]") || !strings.Contains(result.Answer, "[C4]") {
+		t.Fatalf("result answer = %q, want inline sentence references", result.Answer)
 	}
-	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C1" || result.Citations[1].CitationID != "C2" {
-		t.Fatalf("citations = %+v, want stable candidate order C1, C2", result.Citations)
+	if len(result.Citations) != 2 || result.Citations[0].CitationID != "C2" || result.Citations[1].CitationID != "C4" {
+		t.Fatalf("citations = %+v, want stable sentence candidate order C2, C4", result.Citations)
 	}
 	firstCitation := result.Citations[0]
 	if strings.Contains(firstCitation.Content, "邻居上下文") || !strings.Contains(firstCitation.Content, "工具调用结果会作为新消息反馈给模型") {
@@ -127,7 +127,7 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	if len(messages) != 2 || messages[1].RetrievalSnapshot == nil {
 		t.Fatalf("messages = %+v", messages)
 	}
-	if messages[1].Content != result.Answer || strings.Contains(messages[1].Content, "[C") {
+	if messages[1].Content != result.Answer || !strings.Contains(messages[1].Content, "[C2]") || !strings.Contains(messages[1].Content, "[C4]") {
 		t.Fatalf("stored assistant content = %q, want clean answer", messages[1].Content)
 	}
 	var snapshot struct {
@@ -136,8 +136,8 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	if err := json.Unmarshal([]byte(*messages[1].RetrievalSnapshot), &snapshot); err != nil {
 		t.Fatalf("unmarshal snapshot: %v", err)
 	}
-	if len(snapshot.Citations) != 2 || snapshot.Citations[0].CitationID != "C1" || snapshot.Citations[1].CitationID != "C2" {
-		t.Fatalf("snapshot citations = %+v, want stable candidate order C1, C2", snapshot.Citations)
+	if len(snapshot.Citations) != 2 || snapshot.Citations[0].CitationID != "C2" || snapshot.Citations[1].CitationID != "C4" {
+		t.Fatalf("snapshot citations = %+v, want stable sentence candidate order C2, C4", snapshot.Citations)
 	}
 	if snapshot.Citations[0].Content != result.Citations[0].Content || snapshot.Citations[1].Content != result.Citations[1].Content {
 		t.Fatalf("snapshot citations = %+v, result citations = %+v", snapshot.Citations, result.Citations)

@@ -18,7 +18,7 @@ import {
   type VisualMode,
 } from '@/lib/types'
 import { fmtRelTime, fmtDateTime, taskTitle } from '@/lib/format'
-import { formatTime } from '@/components/Citation'
+import { formatTime, formatTimeRange, needsCitationUpgrade } from '@/components/Citation'
 import { ModalityTag } from '@/components/ui/ModalityTag'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { SummaryRevisionPanel } from '@/components/summary/SummaryRevisionPanel'
@@ -193,7 +193,7 @@ function FrameRead({ children }: { children: ReactNode }) {
   return <ClampRead className="frame-read">{children}</ClampRead>
 }
 
-export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string } }) {
+export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string; citations?: string } }) {
   const [artifactMode, setArtifactMode] = useState<'new' | 'reorganize' | null>(null)
   const taskId = Number(params.id)
   const router = useRouter()
@@ -350,6 +350,13 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     [timeline],
   )
   const transcriptRows = useMemo(() => expandTranscript(transcriptAtoms), [transcriptAtoms])
+  const citationUpgradeAvailable = transcriptAtoms.some(atom => needsCitationUpgrade({ modality: atom.modality, startMS: atom.start_ms, endMS: atom.end_ms, timeRangeStatus: atom.time_range_status }))
+  useEffect(() => {
+    if (searchParams?.citations !== 'upgrade' || !timeline) return
+    setTab('tl')
+    const section = document.getElementById('transcript')
+    section?.scrollIntoView?.({ block: 'nearest' })
+  }, [searchParams?.citations, timeline])
   const visualAtoms = useMemo(
     () => (timeline?.atoms || []).filter(a => a.modality === 'visual_ocr' || a.modality === 'visual_caption'),
     [timeline],
@@ -382,9 +389,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     return null
   }, [taskId, setPlaybackUrl])
 
-  const liveIndex = transcriptRows.findIndex(
-    a => playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1),
-  )
+  const rowAtPlayhead = (a: TimelineAtom) => a.time_range_status !== 'unknown' && Number.isFinite(a.start_ms) && Number.isFinite(a.end_ms) && playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1)
+  const exactLiveIndex = transcriptRows.findIndex(a => a.time_range_status === 'exact' && rowAtPlayhead(a))
+  const liveIndex = exactLiveIndex >= 0 ? exactLiveIndex : transcriptRows.findIndex(rowAtPlayhead)
 
   useEffect(() => {
     const el = liveRowRef.current
@@ -618,15 +625,21 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           </>
         )}
         {transcriptRows.length > 0 && (
-          <div className="transcript-list">
+          <div id="transcript" className="transcript-list">
+            {citationUpgradeAvailable && <div className="transcript-upgrade">
+              <b>旧转写的引用定位可以补齐</b>
+              <p>当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。</p>
+              <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'transcribe', force: true, title: '补齐引用定位？', body: '会重新识别这段视频的音频，并更新转写与检索索引，可能产生新的 ASR 和 Embedding 费用。完成后，新回答会使用更短的来源时间；历史回答和引用快照会保留。语音服务不返回句子时间时，将使用短音频片段时间。', confirmLabel: '补齐引用定位' })}><Icon name="refresh" size="sm" />补齐引用定位</button>
+              {readOnly && <small>演示账号无法重新识别视频。</small>}
+            </div>}
             {transcriptRows.map((a, i) => (
               <div
                 key={a.id}
                 ref={i === liveIndex ? liveRowRef : undefined}
-                className={`t-row${i === liveIndex ? ' live' : ''}`}
-                onClick={() => seek(a.start_ms)}
+                className={`t-row${a.time_range_status !== 'exact' ? ' coarse' : ''}${i === liveIndex ? ' live' : ''}`}
+                onClick={() => { if (a.time_range_status !== 'unknown') seek(a.start_ms) }}
               >
-                <span className="ts">{formatTime(a.start_ms)}</span>
+                <span className="ts">{a.time_range_status === 'unknown' ? '时间未知' : a.time_range_status === 'exact' ? formatTime(a.start_ms) : <>{formatTimeRange(a.start_ms, a.end_ms)}<small>原片段</small></>}</span>
                 <ClampRead className="tx">{a.content}</ClampRead>
               </div>
             ))}

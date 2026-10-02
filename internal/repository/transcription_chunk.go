@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -133,19 +135,40 @@ func (r *TranscriptionChunkRepository) UpsertCompletedWithRange(taskID int64, ch
 		}).Error
 	}
 	return r.db.Model(existing).Updates(map[string]interface{}{
-		"audio_object": audioObject,
-		"start_second": startSecond,
-		"end_second":   endSecond,
-		"status":       model.TranscriptionChunkStatusCompleted,
-		"content":      content,
-		"chars":        chars,
-		"error_msg":    "",
+		"audio_object":   audioObject,
+		"start_second":   startSecond,
+		"end_second":     endSecond,
+		"status":         model.TranscriptionChunkStatusCompleted,
+		"content":        content,
+		"timed_segments": "",
+		"chars":          chars,
+		"error_msg":      "",
 	}).Error
 }
 
 func (r *TranscriptionChunkRepository) UpsertCompletedWithTimeline(taskID int64, chunkIndex int, audioObject, content string, timeline TranscriptionChunkTimeline) error {
+	return r.UpsertCompletedWithTimedSegments(taskID, chunkIndex, audioObject, content, timeline, nil)
+}
+
+func (r *TranscriptionChunkRepository) UpsertCompletedWithTimedSegments(taskID int64, chunkIndex int, audioObject, content string, timeline TranscriptionChunkTimeline, segments []model.TranscriptionSegment) error {
 	if err := validateTranscriptionTimeline(timeline); err != nil {
 		return err
+	}
+	var previousStart int64
+	for i, segment := range segments {
+		if strings.TrimSpace(segment.Text) == "" || segment.StartMS < timeline.WindowStartMS || segment.EndMS <= segment.StartMS ||
+			timeline.WindowEndMS <= timeline.WindowStartMS || segment.EndMS > timeline.WindowEndMS || (i > 0 && segment.StartMS < previousStart) {
+			return gorm.ErrInvalidData
+		}
+		previousStart = segment.StartMS
+	}
+	timedJSON := ""
+	if len(segments) > 0 {
+		encoded, err := json.Marshal(segments)
+		if err != nil {
+			return err
+		}
+		timedJSON = string(encoded)
 	}
 	// Content is the raw ASR observation for the full overlap window. The
 	// compatibility second range must therefore cover the window; core range is
@@ -165,7 +188,8 @@ func (r *TranscriptionChunkRepository) UpsertCompletedWithTimeline(taskID int64,
 		"core_start_ms": timeline.CoreStartMS, "core_end_ms": timeline.CoreEndMS,
 		"start_second": startSecond, "end_second": endSecond,
 		"status": model.TranscriptionChunkStatusCompleted, "content": content,
-		"chars": len([]rune(content)), "error_msg": "", "wait_reason": "", "next_retry_at": nil,
+		"timed_segments": timedJSON,
+		"chars":          len([]rune(content)), "error_msg": "", "wait_reason": "", "next_retry_at": nil,
 	}
 	if existing == nil {
 		return r.db.Create(&model.VideoTranscriptionChunk{
@@ -174,7 +198,7 @@ func (r *TranscriptionChunkRepository) UpsertCompletedWithTimeline(taskID int64,
 			WindowStartMS: timeline.WindowStartMS, WindowEndMS: timeline.WindowEndMS,
 			CoreStartMS: timeline.CoreStartMS, CoreEndMS: timeline.CoreEndMS,
 			StartSecond: startSecond, EndSecond: endSecond,
-			Status: model.TranscriptionChunkStatusCompleted, Content: content, Chars: len([]rune(content)),
+			Status: model.TranscriptionChunkStatusCompleted, Content: content, TimedSegments: timedJSON, Chars: len([]rune(content)),
 		}).Error
 	}
 	return r.db.Model(existing).Updates(values).Error

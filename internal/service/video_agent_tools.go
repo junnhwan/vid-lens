@@ -23,7 +23,7 @@ const (
 	VideoAgentToolInvestigateVisual    = "investigate_visual"
 )
 
-const agentFinalProductPrompt = "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号是内部标记。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。系统会在展示前隐藏这些标记。"
+const agentFinalProductPrompt = "你是 VidLens 的视频内容回答生成工具。只能基于中间结论和引用片段回答，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号用于行内引用链接。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。"
 const agentFinalStylePrompt = "面向用户用自然语言解释结论与缺口。定位需要时用分钟:秒描述；task_id、modality、time_status 等字段名与原始毫秒区间属于来源元数据，由引用卡呈现，不要逐项抄入正文。不要扩展与用户问题无关的背景。"
 
 func AgentProductInstructions() string { return agentFinalProductPrompt + "\n" + agentFinalStylePrompt }
@@ -554,18 +554,14 @@ func joinTranscriptSegments(segments []TranscriptSegment) string {
 }
 
 func formatRetrievedChunks(chunks []RetrievedChunk) string {
-	lines := make([]string, 0, len(chunks))
-	for index, chunk := range chunks {
-		lines = append(lines, fmt.Sprintf("[C%d] (task_id=%d, chunk %d, modality=%s, time=[%d,%d), time_status=%s) %s", index+1, chunk.TaskID, chunk.ChunkIndex,
-			chunk.Modality, chunk.StartMS, chunk.EndMS, chunk.TimeRangeStatus, strings.TrimSpace(chunk.Content)))
-	}
-	return strings.Join(lines, "\n")
+	contexts, citations := buildCitationSet("", chunks)
+	return "可引用的原文句子：\n" + formatCitationCandidates(citations) + "\n\n扩展上下文（仅供理解，无独立引用编号）：\n" + formatCitationGenerationContext(contexts)
 }
 
 func buildCitedAnswerMessages(input BuildCitedAnswerInput, memory *MemorySnapshot) []ai.ChatMessage {
 	input.Citations = boundedFinalEvidence(input.Citations)
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: agentFinalProductPrompt},
+		{Role: "system", Content: agentFinalProductPrompt + sentenceCitationProductPrompt},
 	}
 	if memoryContext := trustedMemoryPromptContext(memory); memoryContext != "" {
 		messages = append(messages, ai.ChatMessage{Role: "system", Content: memoryContext + "\n禁止把上述记忆作为 Claim 或引用证据；若它与当前视频片段冲突，以当前视频片段为准并说明不确定性。"})

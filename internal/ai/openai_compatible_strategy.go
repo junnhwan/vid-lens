@@ -22,6 +22,10 @@ func (s *OpenAICompatibleStrategy) Transcribe(ctx context.Context, audioPath str
 	return s.asr.Transcribe(ctx, audioPath)
 }
 
+func (s *OpenAICompatibleStrategy) TranscribeDetailed(ctx context.Context, audioPath string) (TranscriptionResult, error) {
+	return TranscribeDetailed(ctx, s.asr, audioPath)
+}
+
 func (s *OpenAICompatibleStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
 	return transcribeChunks(ctx, s.asr, audioPaths)
 }

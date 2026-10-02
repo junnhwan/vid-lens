@@ -23,7 +23,7 @@ func (c *removeHistoryMemberChatClient) Chat(ctx context.Context, messages []ai.
 		if strings.Contains(message.Content, "HISTORY_FROM_B") {
 			c.sawHistory = true
 		}
-		if strings.Contains(message.Content, "检索到的视频片段") {
+		if strings.Contains(message.Content, "可引用的原文句子") {
 			answerCall = true
 		}
 	}

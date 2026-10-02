@@ -78,7 +78,7 @@ func TestAgentStreamsPlannerReasoningAndPersistsPublicDecisions(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil || reasoning != 2 || answers != 2 || result.Answer != "最终回答" {
+	if err != nil || reasoning != 2 || answers != 2 || result.Answer != "最终回答 [C1]" {
 		t.Fatalf("result=%+v reasoning=%d answers=%d err=%v", result, reasoning, answers, err)
 	}
 	messages, err := repos.Chat.ListMessages(7, session.ID)

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 	"vid-lens/internal/model"
 )
@@ -83,8 +84,10 @@ func boundedFinalEvidence(evidence []RetrievedChunk) []RetrievedChunk {
 		if len(result) >= 12 {
 			break
 		}
+		if strings.TrimSpace(chunk.AnchorContent) == "" {
+			chunk.AnchorContent = chunk.Content
+		}
 		chunk.Content = trimRunes(chunk.Content, 600)
-		chunk.AnchorContent = ""
 		result = append(result, chunk)
 	}
 	return result

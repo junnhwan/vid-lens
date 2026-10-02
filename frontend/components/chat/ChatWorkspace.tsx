@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from '@/lib/router'
 import type { CiteRef } from '@/components/Citation'
-import { formatTimeRange, hasReplayRange } from '@/components/Citation'
+import { citeFromAPI, citationTimeLabel, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
@@ -78,28 +78,7 @@ interface ChatWorkspaceProps {
 
 // 自定义引用映射:在默认字段之上补 evidence_id / source_mapping_status,供证据抽屉展示。
 function mapCitations(citations: Citation[]): CiteRef[] {
-  return citations.map((citation, index) => ({
-    id: citation.citation_id || `C${index + 1}`,
-    taskId: citation.task_id,
-    chunkIndex: citation.chunk_index,
-    score: citation.score,
-    content: citation.content,
-    anchorQuote: citation.anchor_quote || citation.content,
-    displayContext: citation.display_context || citation.content,
-    modality: citation.modality,
-    startMS: citation.start_ms,
-    endMS: citation.end_ms,
-    timeRangeStatus: citation.time_range_status,
-    contextStartMS: citation.context_start_ms,
-    contextEndMS: citation.context_end_ms,
-    displayContextTruncated: citation.display_context_truncated,
-    sourceRefs: citation.source_refs,
-    source: citation.source,
-    videoTitle: citation.video_title,
-    finalRank: citation.final_rank,
-    evidenceId: citation.evidence_id,
-    sourceMappingStatus: citation.source_mapping_status,
-  }))
+  return citations.map(citeFromAPI)
 }
 
 function clipText(text: string | undefined, max: number): string {
@@ -341,7 +320,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
 
   const jumpToCitation = useCallback((cite: CiteRef) => {
     if (isVideo) {
-      playerRef.current?.seek(cite.startMS || 0, true, cite.id)
+      playerRef.current?.seek(cite.startMS ?? 0, true, cite.id)
       setRailOpen(true)
       if (railOverlay) setQuestionsOpen(false)
     } else if (cite.taskId) {
@@ -587,6 +566,9 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
       {drawerCite && (
         <EvidenceDrawer
           cite={drawerCite.cite}
+          cites={drawerCite.cites}
+          onSelect={cite => setDrawerCite(current => current ? { ...current, cite } : null)}
+          fallbackTaskId={isVideo ? targetId : undefined}
           fallbackTitle={scopeName}
           canJump={citationJumpable(drawerCite.cite)}
           jumpDisabledHint={isVideo && !playbackUrl ? '当前视频没有可用播放源' : undefined}
@@ -724,10 +706,10 @@ function AgentMessageView({
               <div className="cbody">
                 <div className="chead">
                   {showVideoTitle && <span className="cvideo">{cite.videoTitle || (cite.taskId ? `视频 ${cite.taskId}` : fallbackTitle)}</span>}
-                  {hasReplayRange(cite) && <span className="ctime mono">{formatTimeRange(cite.startMS, cite.endMS)}</span>}
+                  {hasReplayRange(cite) && <span className="ctime mono">{citationTimeLabel(cite)}</span>}
                   <ModalityTag modality={cite.modality} />
                   {cite.timeRangeStatus && cite.timeRangeStatus !== 'exact' && (
-                    <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>{cite.timeRangeStatus === 'unknown' ? '时间未知' : '粗粒度时间'}</span>
+                     <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>{cite.timeRangeStatus === 'unknown' ? '时间未知' : '句子时间未提供'}</span>
                   )}
                 </div>
                 <div className="cquote">{clipText(cite.modality === 'visual_caption' || cite.modality === 'visual_ocr' ? cite.displayContext || cite.content : cite.anchorQuote || cite.content, 220)}</div>

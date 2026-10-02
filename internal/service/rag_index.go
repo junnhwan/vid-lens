@@ -211,7 +211,7 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 			}
 			visualChanged = latest != nil && latest.After(builtAt)
 		}
-		if index.Status == model.RAGIndexStatusIndexed && (visualChanged || index.BuildVersion != model.CurrentRAGIndexBuildVersion || index.ChunkerVersion != s.cfg.ChunkerVersion || index.SourceMappingVersion != model.CurrentRAGSourceMappingVersion) {
+		if index.Status == model.RAGIndexStatusIndexed && (visualChanged || !s.compatibleIndexContract(index)) {
 			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true, ProgressAt: &index.UpdatedAt}, nil
 		}
 		return &RAGIndexResult{
@@ -240,6 +240,17 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 		Chunks:         len(chunks),
 		EmbeddingModel: modelName,
 	}, nil
+}
+
+// Sentence source text and native ASR spans are additive to the v3 projection.
+// Its coarse citations remain usable until the owner requests re-transcription;
+// releasing finer citations must not make every existing video unavailable.
+func (s *RAGIndexService) compatibleIndexContract(index *model.VideoRAGIndex) bool {
+	if index.BuildVersion == model.CurrentRAGIndexBuildVersion && index.ChunkerVersion == s.cfg.ChunkerVersion && index.SourceMappingVersion == model.CurrentRAGSourceMappingVersion {
+		return true
+	}
+	return s.cfg.ChunkerVersion == model.CurrentRAGChunkerVersion && index.BuildVersion == 3 &&
+		index.ChunkerVersion == "recursive-sentence-source-v2" && index.SourceMappingVersion == "source-map-v2"
 }
 
 func checkRAGBuildContext(ctx context.Context) error {

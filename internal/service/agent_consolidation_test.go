@@ -20,7 +20,7 @@ func TestChatDoesNotReretrieveAfterAnswerAndKeepsOnlyAvailableCitations(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(retriever.requests) != 1 || len(client.messages) != 2 || len(result.Citations) != 1 || result.Citations[0].EvidenceID != "ev-chat" || strings.Contains(result.Answer, "[C") {
+	if len(retriever.requests) != 1 || len(client.messages) != 2 || len(result.Citations) != 1 || result.Citations[0].EvidenceID != "ev-chat" || !strings.Contains(result.Answer, "[C1]") || strings.Contains(result.Answer, "[C99]") {
 		t.Fatalf("unexpected second retrieval or citation: %+v calls=%d", result, len(retriever.requests))
 	}
 }
@@ -85,7 +85,7 @@ func TestAgentStreamsProviderDeltasAndOnlyFinishesAfterPersistence(t *testing.T)
 					dones++
 					done := event.Data.(AgentDoneEvent)
 					messages, err := repos.Chat.ListMessages(7, session.ID)
-					if err != nil || len(messages) != 2 || messages[1].ID != done.MessageID || done.Answer != "最终回答" {
+					if err != nil || len(messages) != 2 || messages[1].ID != done.MessageID || done.Answer != "最终回答 [C1]" {
 						t.Fatalf("done before authoritative persistence: %+v %v", done, err)
 					}
 				}
@@ -98,7 +98,7 @@ func TestAgentStreamsProviderDeltasAndOnlyFinishesAfterPersistence(t *testing.T)
 				if err == nil || dones != 0 {
 					t.Fatalf("failed save emitted success: %v %d", err, dones)
 				}
-			} else if err != nil || dones != 1 || result.Answer != "最终回答" {
+			} else if err != nil || dones != 1 || result.Answer != "最终回答 [C1]" {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
 		})

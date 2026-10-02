@@ -16,7 +16,7 @@ describe('splitForReading', () => {
 })
 
 describe('expandTranscript', () => {
-  it('interpolates timestamps across split chunks', () => {
+  it('keeps the observed window for every reading row instead of inventing sentence timestamps', () => {
     const content = Array.from({ length: 8 }, (_, i) => `第${i + 1}段说明一个完整的意思,并且足够长所以会被切开。`).join('')
     const rows = expandTranscript([{
       id: 'a',
@@ -25,7 +25,15 @@ describe('expandTranscript', () => {
       content,
     }])
     assert.ok(rows.length >= 2)
-    assert.equal(rows[0].start_ms, 0)
-    assert.ok(rows[rows.length - 1].end_ms >= 9000)
+    assert.ok(rows.every(row => row.start_ms === 0 && row.end_ms === 10000))
+    assert.ok(rows.every(row => row.time_range_status === 'coarse'))
+  })
+
+  it('retains distinct native source timestamps and their exact status', () => {
+    const rows = expandTranscript([
+      { id: 's1', start_ms: 0, end_ms: 2800, content: '第一句话。', time_range_status: 'exact' },
+      { id: 's2', start_ms: 12000, end_ms: 16800, content: '后面的第二句话。', time_range_status: 'exact' },
+    ])
+    assert.deepEqual(rows.map(row => [row.start_ms, row.end_ms, row.time_range_status]), [[0, 2800, 'exact'], [12000, 16800, 'exact']])
   })
 })

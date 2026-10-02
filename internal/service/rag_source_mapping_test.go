@@ -90,3 +90,16 @@ func TestRAGIndexStatusMarksLegacySourceMappingForRebuild(t *testing.T) {
 		t.Fatalf("status=%+v", status)
 	}
 }
+
+func TestRAGIndexStatusKeepsExistingCoarseCitationsAvailable(t *testing.T) {
+	repos := newRAGIndexTestRepositories(t)
+	if err := repos.RAGIndex.Upsert(&model.VideoRAGIndex{UserID: 7, TaskID: 9, FileMD5: "cccccccccccccccccccccccccccccccc", EmbeddingModel: "embed", EmbeddingDim: 3,
+		Status: model.RAGIndexStatusIndexed, ChunkCount: 2, ChunkerVersion: "recursive-sentence-source-v2", SourceMappingVersion: "source-map-v2", BuildVersion: 3}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewRAGIndexService(repos, &fakeVectorStore{}, RAGIndexConfig{EmbeddingDim: 3})
+	status, err := svc.GetTaskIndexStatus(context.Background(), 7, 9, ai.Profile{EmbeddingModel: "embed"})
+	if err != nil || !status.Indexed || status.NeedsRebuild {
+		t.Fatalf("existing projection unavailable: status=%+v err=%v", status, err)
+	}
+}

@@ -25,6 +25,7 @@ type VideoTranscriptionChunk struct {
 	EndSecond        int        `gorm:"default:0" json:"end_second"`
 	Status           string     `gorm:"type:varchar(30);index;not null" json:"status"`
 	Content          string     `gorm:"type:text" json:"content"`
+	TimedSegments    string     `gorm:"type:text" json:"-"`
 	Chars            int        `gorm:"default:0" json:"chars"`
 	ErrorMsg         string     `gorm:"type:varchar(500)" json:"error_msg"`
 	RetryCount       int        `gorm:"default:0" json:"retry_count"`
@@ -32,6 +33,15 @@ type VideoTranscriptionChunk struct {
 	NextRetryAt      *time.Time `json:"next_retry_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+// TranscriptionSegment preserves provider-observed speech timing. Persisted
+// segments use absolute video milliseconds; ASR adapters use local audio time
+// until the consumer validates and offsets them by the audio window start.
+type TranscriptionSegment struct {
+	Text    string `json:"text"`
+	StartMS int64  `json:"start_ms"`
+	EndMS   int64  `json:"end_ms"`
 }
 
 func (VideoTranscriptionChunk) TableName() string {

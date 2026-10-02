@@ -36,11 +36,15 @@ func (r *failingRetriever) Search(context.Context, []float32, RetrievalRequest) 
 type recordingChatClient struct {
 	messages  []ai.ChatMessage
 	chatCalls int
+	response  string
 }
 
 func (c *recordingChatClient) Chat(_ context.Context, messages []ai.ChatMessage) (string, error) {
 	c.chatCalls++
 	c.messages = append([]ai.ChatMessage(nil), messages...)
+	if c.response != "" {
+		return c.response, nil
+	}
 	return "这是基于视频片段的回答", nil
 }
 
@@ -111,7 +115,7 @@ func TestChatServiceAskRetrievesChunksAndStoresMessages(t *testing.T) {
 	}
 
 	embedding := &fakeEmbeddingClient{dim: 3}
-	chatClient := &recordingChatClient{}
+	chatClient := &recordingChatClient{response: "这是基于视频片段的回答 [C1]"}
 	retriever := &fakeRetriever{results: []RetrievedChunk{
 		{ChunkID: 1, ChunkIndex: 2, Score: 0.82, Content: "分布式锁释放时要校验 owner"},
 	}}
@@ -126,7 +130,7 @@ func TestChatServiceAskRetrievesChunksAndStoresMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if result.Answer != "这是基于视频片段的回答" {
+	if result.Answer != "这是基于视频片段的回答 [C1]" {
 		t.Fatalf("Answer = %q", result.Answer)
 	}
 	if len(result.Citations) != 1 {
@@ -304,8 +308,8 @@ func TestChatServiceAskMergesKeywordChunksWithVectorResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask() error = %v", err)
 	}
-	if len(result.Citations) != 1 {
-		t.Fatalf("citations = %+v, want C1-only fallback when model emits no citation", result.Citations)
+	if len(result.Citations) != 0 {
+		t.Fatalf("citations = %+v, want no unsupported fallback when model emits no citation", result.Citations)
 	}
 
 	joinedPrompt := ""

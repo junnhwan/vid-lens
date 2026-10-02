@@ -1,5 +1,5 @@
 // 把过长的 ASR 段按句切开,方便阅读。已按句返回的短段保持原样。
-// 没有更细时间码时,在原片段的起止时间内按字符比例插值,点击仍能落到大致位置。
+// 阅读拆分不推算句子时间；每行保留其来源片段的真实起止时间。
 
 const SENTENCE = /[^。！？!?；;\n]+[。！？!?；;\n]?/g
 const MAX_CHUNK = 140
@@ -34,29 +34,23 @@ export interface TimedText {
   start_ms: number
   end_ms: number
   content: string
+  time_range_status?: string
 }
 
-export function expandTranscript<T extends TimedText>(atoms: T[]): T[] {
-  const out: T[] = []
+export function expandTranscript<T extends TimedText>(atoms: T[]): (T & Pick<TimedText, 'time_range_status'>)[] {
+  const out: (T & Pick<TimedText, 'time_range_status'>)[] = []
   for (const atom of atoms) {
     const parts = splitForReading(atom.content)
     if (parts.length <= 1) {
-      out.push(atom)
+      out.push({ ...atom, time_range_status: atom.time_range_status || 'coarse' })
       continue
     }
-    const span = Math.max(atom.end_ms - atom.start_ms, parts.length * 800)
-    const total = Math.max(1, parts.reduce((n, p) => n + p.length, 0))
-    let offset = 0
     parts.forEach((text, i) => {
-      const startRatio = offset / total
-      offset += text.length
-      const endRatio = offset / total
       out.push({
         ...atom,
         id: `${atom.id}:${i}`,
         content: text,
-        start_ms: Math.round(atom.start_ms + span * startRatio),
-        end_ms: Math.round(atom.start_ms + span * endRatio),
+        time_range_status: atom.time_range_status || 'coarse',
       })
     })
   }

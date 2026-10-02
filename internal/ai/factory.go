@@ -115,6 +115,10 @@ func (s *CompositeStrategy) Transcribe(ctx context.Context, audioPath string) (s
 	return s.asr.Transcribe(ctx, audioPath)
 }
 
+func (s *CompositeStrategy) TranscribeDetailed(ctx context.Context, audioPath string) (TranscriptionResult, error) {
+	return TranscribeDetailed(ctx, s.asr, audioPath)
+}
+
 func (s *CompositeStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
 	return s.asr.TranscribeChunks(ctx, audioPaths)
 }

@@ -145,11 +145,15 @@ func NewObservedStrategy(base Strategy, recorder CallRecorder, callCtx CallConte
 	return &observedStrategy{base: base, recorder: recorder, callCtx: callCtx}
 }
 func (s *observedStrategy) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	result, err := s.TranscribeDetailed(ctx, audioPath)
+	return result.Text, err
+}
+func (s *observedStrategy) TranscribeDetailed(ctx context.Context, audioPath string) (TranscriptionResult, error) {
 	startedAt := time.Now()
-	text, err := s.base.Transcribe(ctx, audioPath)
+	result, err := TranscribeDetailed(ctx, s.base, audioPath)
 	observeProviderAttemptTiming(ctx, time.Since(startedAt))
-	recordCall(ctx, s.recorder, baseRecord(ctx, asrCallContext(s.callCtx), startedAt, 0, utf8.RuneCountInString(text), err))
-	return text, err
+	recordCall(ctx, s.recorder, baseRecord(ctx, asrCallContext(s.callCtx), startedAt, 0, utf8.RuneCountInString(result.Text), err))
+	return result, err
 }
 func (s *observedStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
 	startedAt := time.Now()

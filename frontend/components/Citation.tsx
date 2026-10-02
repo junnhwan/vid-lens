@@ -1,6 +1,4 @@
-// 引用数据契约与工具:后端 Citation → 前端 CiteRef。
-// 表现层(行内 C# chip、证据抽屉、回放)按 docs/prototype 在聊天阶段实现;
-// 本文件只保留已验证的快照解析,供 useConversationSession / chatUtils 使用。
+// 后端 Citation → 前端 CiteRef，流式回答与历史快照共用同一映射和时间规则。
 
 import type { Citation } from '@/lib/types'
 import { formatClock } from '@/lib/format'
@@ -38,8 +36,18 @@ export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: numb
     const cs: Citation[] = Array.isArray(parsed)
       ? parsed
       : Array.isArray(parsed.citations) ? parsed.citations : []
-    return cs.map((c) => ({
-      id: c.citation_id || `C${c.chunk_index}`,
+    return cs.map((c, index) => ({
+      ...citeFromAPI(c, index),
+      color: c.task_id && memberColor ? memberColor(c.task_id) : undefined,
+    }))
+  } catch {
+    return []
+  }
+}
+
+export function citeFromAPI(c: Citation, index: number): CiteRef {
+  return {
+      id: c.citation_id || `C${index + 1}`,
       taskId: c.task_id,
       chunkIndex: c.chunk_index,
       score: c.score,
@@ -59,15 +67,23 @@ export function citesFromSnapshot(snapshot?: string, memberColor?: (taskId: numb
       finalRank: c.final_rank,
       evidenceId: c.evidence_id,
       sourceMappingStatus: c.source_mapping_status,
-      color: c.task_id && memberColor ? memberColor(c.task_id) : undefined,
-    }))
-  } catch {
-    return []
   }
 }
 
-export function hasReplayRange(cite: Pick<CiteRef, 'startMS' | 'endMS'>): boolean {
-  return Number.isFinite(cite.startMS) && Number.isFinite(cite.endMS) && (cite.endMS || 0) > (cite.startMS || 0)
+export function hasReplayRange(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRangeStatus' | 'modality'>): boolean {
+  if (cite.timeRangeStatus === 'unknown' || !Number.isFinite(cite.startMS) || !Number.isFinite(cite.endMS) || cite.startMS! < 0) return false
+  if (cite.endMS! > cite.startMS!) return true
+  return cite.endMS === cite.startMS && cite.timeRangeStatus === 'exact' && (cite.modality === 'visual_ocr' || cite.modality === 'visual_caption')
+}
+
+export function citationTimeLabel(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRangeStatus' | 'modality'>): string {
+  if (!hasReplayRange(cite)) return '时间未知'
+  const time = cite.startMS === cite.endMS ? formatTime(cite.startMS) : formatTimeRange(cite.startMS, cite.endMS)
+  return cite.timeRangeStatus === 'coarse' ? `原片段 ${time}` : time
+}
+
+export function needsCitationUpgrade(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRangeStatus' | 'modality'>): boolean {
+  return (!cite.modality || cite.modality === 'transcript') && cite.timeRangeStatus === 'coarse' && hasReplayRange(cite) && cite.endMS! - cite.startMS! > 30_000
 }
 
 export function formatTime(ms?: number): string {

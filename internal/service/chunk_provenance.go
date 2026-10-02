@@ -4,13 +4,20 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"unicode"
 
 	"vid-lens/internal/model"
 )
 
 type ChunkSourceRef struct {
-	SourceType      string `json:"source_type"`
-	StableID        string `json:"stable_id"`
+	SourceType string `json:"source_type"`
+	StableID   string `json:"stable_id"`
+	// Content is the verbatim part of this observation present in the chunk.
+	// It lets a citation select a source span instead of the chunk's union time.
+	Content string `json:"content,omitempty"`
+	// Rune offsets locate this particular occurrence within the retrieval chunk.
+	TextStart       int    `json:"text_start,omitempty"`
+	TextEnd         int    `json:"text_end,omitempty"`
 	ContentHash     string `json:"content_hash,omitempty"`
 	ArtifactKind    string `json:"artifact_kind,omitempty"`
 	SegmentKey      string `json:"segment_key,omitempty"`
@@ -84,7 +91,12 @@ func SplitObservationsIntoChunks(observations []SourceTextObservation, chunkSize
 	if strings.TrimSpace(fullText) == "" {
 		return nil
 	}
-	units := splitSemanticUnits(fullText, chunkSize, 0)
+	// Always retain sentence boundaries, even when the complete observation fits
+	// in one retrieval chunk. Citation spans must survive later packing.
+	var units []string
+	for _, sentence := range splitAtBoundaryLevel(fullText, primaryBoundaryLevel) {
+		units = append(units, splitSemanticUnits(sentence, chunkSize, 0)...)
+	}
 	annotated := make([]annotatedUnit, 0, len(units))
 	unitStart := 0
 	for _, content := range units {
@@ -101,7 +113,17 @@ func SplitObservationsIntoChunks(observations []SourceTextObservation, chunkSize
 			if len(span.observation.Refs) == 0 {
 				mapped = false
 			}
-			refs = append(refs, span.observation.Refs...)
+			for _, sourceRef := range span.observation.Refs {
+				if len(span.observation.Refs) == 1 {
+					visible := []rune(span.observation.Content)
+					from := max(unitStart, span.start) - span.start
+					to := min(unitEnd, span.end) - span.start
+					sourceRef.Content = string(visible[from:to])
+					sourceRef.TextStart = max(unitStart, span.start) - unitStart
+					sourceRef.TextEnd = sourceRef.TextStart + to - from
+				}
+				refs = append(refs, sourceRef)
+			}
 			if modality := strings.TrimSpace(span.observation.Modality); modality != "" {
 				modalities[modality] = struct{}{}
 			}
@@ -134,9 +156,17 @@ func packAnnotatedUnits(units []annotatedUnit, chunkSize, overlap int) []TextChu
 		refs := make([]ChunkSourceRef, 0)
 		modalities := make(map[string]struct{})
 		mappedUnits := 0
+		textOffset := 0
 		for _, unit := range units[start:end] {
 			contentParts = append(contentParts, unit.content)
-			refs = append(refs, unit.refs...)
+			for _, ref := range unit.refs {
+				if ref.TextEnd > ref.TextStart {
+					ref.TextStart += textOffset
+					ref.TextEnd += textOffset
+				}
+				refs = append(refs, ref)
+			}
+			textOffset += runeCount(unit.content)
 			if unit.modality != "" {
 				modalities[unit.modality] = struct{}{}
 			}
@@ -144,9 +174,18 @@ func packAnnotatedUnits(units []annotatedUnit, chunkSize, overlap int) []TextChu
 				mappedUnits++
 			}
 		}
-		content := strings.TrimSpace(strings.Join(contentParts, ""))
+		joined := strings.Join(contentParts, "")
+		content := strings.TrimSpace(joined)
 		if content != "" {
 			refs = dedupeSourceRefs(refs)
+			leading := runeCount(joined) - runeCount(strings.TrimLeftFunc(joined, unicode.IsSpace))
+			for i := range refs {
+				if refs[i].TextEnd > refs[i].TextStart {
+					refs[i].TextStart = min(runeCount(content), max(0, refs[i].TextStart-leading))
+					refs[i].TextEnd = max(refs[i].TextStart, min(runeCount(content), refs[i].TextEnd-leading))
+					refs[i].Content = string([]rune(content)[refs[i].TextStart:refs[i].TextEnd])
+				}
+			}
 			mappingStatus := model.ChunkSourceUnmapped
 			switch {
 			case mappedUnits == end-start && len(refs) > 0:
@@ -181,17 +220,21 @@ func packAnnotatedUnits(units []annotatedUnit, chunkSize, overlap int) []TextChu
 }
 
 func dedupeSourceRefs(refs []ChunkSourceRef) []ChunkSourceRef {
-	seen := make(map[string]struct{}, len(refs))
+	seen := make(map[string]int, len(refs))
 	out := make([]ChunkSourceRef, 0, len(refs))
 	for _, ref := range refs {
 		key := ref.SourceType + "\x00" + ref.StableID
 		if strings.TrimSpace(ref.StableID) == "" {
 			continue
 		}
-		if _, ok := seen[key]; ok {
+		if index, ok := seen[key]; ok {
+			// Units are visited in text order. Combining their visible source
+			// slices reconstructs this observation's contribution to the chunk.
+			out[index].Content += ref.Content
+			out[index].TextEnd = max(out[index].TextEnd, ref.TextEnd)
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[key] = len(out)
 		out = append(out, ref)
 	}
 	sort.SliceStable(out, func(i, j int) bool {

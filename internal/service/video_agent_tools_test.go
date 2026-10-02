@@ -2,12 +2,42 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 )
+
+func TestVideoAgentWriterAndObserverUseSameTailSentenceCandidate(t *testing.T) {
+	var source strings.Builder
+	for i := 0; i < 90; i++ {
+		fmt.Fprintf(&source, "第%d句独立背景材料。", i)
+	}
+	tail := "末尾明确说明应用层缓存可以取消。"
+	source.WriteString(tail)
+	canonical := RetrievedChunk{TaskID: 65, EvidenceID: "tail-evidence", ChunkID: 9,
+		Content: source.String(), Modality: model.ChunkModalityTranscript,
+		StartMS: 0, EndMS: 305000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped,
+		SourceRefs: []ChunkSourceRef{{StableID: "tail-atom", Content: tail, StartMS: 250000, EndMS: 260000, TimeRangeStatus: model.ChunkTimeRangeExact}}}
+	candidates := buildCitations("应用层缓存", []RetrievedChunk{canonical})
+	tailCandidate := candidates[len(candidates)-1]
+	client := &scriptedChatClient{responses: []string{"可以取消应用层缓存 [" + tailCandidate.CitationID + "]。"}}
+	result, _, err := NewVideoAgentTools(nil, nil, client).BuildCitedAnswer(context.Background(), BuildCitedAnswerInput{Question: "应用层缓存？", Citations: []RetrievedChunk{canonical}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !messagesContain(client.messages[0], "["+tailCandidate.CitationID+"] (task_id=65") || !messagesContain(client.messages[0], tail) {
+		t.Fatalf("writer lost tail after contextual 600-rune bound: %+v", client.messages)
+	}
+	raw, _ := json.Marshal(result)
+	observed, err := (DefaultVideoAgentLoopObserver{}).Observe(VideoAgentLoopState{Goal: "应用层缓存？", Evidence: []RetrievedChunk{canonical}}, VideoAgentToolResult{Step: VideoAgentStep{Tool: VideoAgentToolBuildCitedAnswer}, Output: raw})
+	if err != nil || len(observed.Citations) != 1 || observed.Citations[0].CitationID != tailCandidate.CitationID || observed.Citations[0].Content != tail || observed.Citations[0].StartMS != 250000 || observed.Citations[0].EndMS != 260000 {
+		t.Fatalf("writer/public evidence drift: %+v %v", observed, err)
+	}
+}
 
 func TestVideoAgentToolSearchTranscriptCallsRetrievalPipeline(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
@@ -72,8 +102,8 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	chatClient := &scriptedChatClient{responses: []string{"最终回答"}}
 	tools := NewVideoAgentTools(nil, nil, chatClient)
 	citations := []RetrievedChunk{
-		{ChunkID: 10, ChunkIndex: 3, Content: "第一条唯一引用片段", Modality: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeCoarse},
-		{ChunkID: 20, ChunkIndex: 7, Content: "第二条唯一引用片段", Modality: model.ChunkModalityVisualOCR, StartMS: 3000, EndMS: 3001, TimeRangeStatus: model.ChunkTimeRangeExact},
+		{ChunkID: 10, ChunkIndex: 3, Content: "第一条唯一引用片段", Modality: model.ChunkModalityTranscript, StartMS: 1000, EndMS: 2000, TimeRangeStatus: model.ChunkTimeRangeCoarse, SourceMappingStatus: model.ChunkSourceMapped},
+		{ChunkID: 20, ChunkIndex: 7, Content: "第二条唯一引用片段", Modality: model.ChunkModalityVisualOCR, StartMS: 3000, EndMS: 3001, TimeRangeStatus: model.ChunkTimeRangeExact, SourceMappingStatus: model.ChunkSourceMapped},
 	}
 
 	result, step, err := tools.BuildCitedAnswer(context.Background(), BuildCitedAnswerInput{
@@ -93,7 +123,7 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	if len(chatClient.messages) != 1 || len(chatClient.messages[0]) < 2 {
 		t.Fatalf("chat messages = %+v", chatClient.messages)
 	}
-	for _, want := range []string{"内部标记", "[C1][C2]", "不要写成 [C1, C2]", "展示前隐藏"} {
+	for _, want := range []string{"行内引用链接", "[C1][C2]", "不要写成 [C1, C2]", "一句原文"} {
 		if !strings.Contains(chatClient.messages[0][0].Content, want) {
 			t.Fatalf("agent instruction prompt = %q, missing %q", chatClient.messages[0][0].Content, want)
 		}

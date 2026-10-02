@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	DefaultAudioSegmentSeconds        = 300
-	DefaultAudioSegmentOverlapSeconds = 5
-	AudioSegmenterVersion             = "overlap_windows_v1"
+	DefaultAudioSegmentSeconds        = 20
+	DefaultAudioSegmentOverlapSeconds = 2
+	AudioSegmenterVersion             = "bounded_windows_v2"
 )
 
 // AudioSegment describes both the actual audio window sent to ASR and the

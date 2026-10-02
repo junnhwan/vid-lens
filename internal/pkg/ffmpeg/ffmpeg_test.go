@@ -54,6 +54,21 @@ func TestPlanAudioSegmentWindowsRejectsUnsafeOverlap(t *testing.T) {
 	}
 }
 
+func TestDefaultAudioWindowsBoundTextOnlyCitationUncertainty(t *testing.T) {
+	windows := planAudioSegmentWindows(65000, int64(DefaultAudioSegmentSeconds)*1000, int64(DefaultAudioSegmentOverlapSeconds)*1000)
+	if len(windows) != 4 || AudioSegmenterVersion == "overlap_windows_v1" {
+		t.Fatalf("windows=%+v version=%s", windows, AudioSegmenterVersion)
+	}
+	for i, window := range windows {
+		if window.WindowEndMS-window.WindowStartMS > 24000 {
+			t.Fatalf("unbounded citation window=%+v", window)
+		}
+		if i > 0 && windows[i-1].CoreEndMS != window.CoreStartMS {
+			t.Fatalf("core gap=%+v", windows)
+		}
+	}
+}
+
 func TestBuildExtractAudioWindowArgsReencodesSpeechAudio(t *testing.T) {
 	args := buildExtractAudioWindowArgs("input.mp3", "output.mp3", 295_000, 605_000)
 	want := []string{

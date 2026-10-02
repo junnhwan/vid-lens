@@ -63,8 +63,8 @@ func TestVideoAgentRunAgentRunsPlannerToolAndPersistsAnswer(t *testing.T) {
 	if len(snapshot.Citations) != 1 || snapshot.Citations[0].TaskID != task.ID || snapshot.Citations[0].ChunkID != 1 || snapshot.Citations[0].Content != "owner 校验证据" || snapshot.Citations[0].Source == "planner-forged" {
 		t.Fatalf("snapshot citations are not canonical: %+v", snapshot.Citations)
 	}
-	if strings.Contains(messages[1].Content, "[C") {
-		t.Fatalf("stored answer leaked citation markers: %q", messages[1].Content)
+	if !strings.Contains(messages[1].Content, "[C1]") {
+		t.Fatalf("stored answer lost inline citation marker: %q", messages[1].Content)
 	}
 	execution, err := repos.AgentExecution.GetExecution(context.Background(), 7, result.RunID)
 	if err != nil || execution == nil || execution.Run.Status != "completed" || len(execution.Steps) != 4 || len(execution.ToolCalls) != 4 {
