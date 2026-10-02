@@ -9,6 +9,7 @@
 - [架构总览](architecture/overview.md)
 - [数据模型与存储边界](architecture/data-model.md)
 - [检索与回答链路](architecture/retrieval.md)
+- [问答事实与时间边界](architecture/qa-grounding.md)
 - [视频理解管线](architecture/media-understanding-pipeline.md)
 - [知识库工作区](architecture/knowledge-workspace.md)
 - [在线协议与执行边界](architecture/compatibility.md)

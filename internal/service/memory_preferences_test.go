@@ -74,9 +74,9 @@ func TestChatMemoryOutboxMultiDimensionSupersedeAdoptionAndSourceDeletion(t *tes
 	if err != nil || len(items) != 2 {
 		t.Fatalf("multi %v %v", items, err)
 	}
-	prepared := &preparedRAGChat{Session: session, Question: "继续", Messages: []ai.ChatMessage{{Role: "user", Content: "继续"}}}
+	prepared := &preparedRAGChat{Session: session, Question: "继续", Messages: buildVideoAssistantMessages("", nil, "继续")}
 	chatSvc.injectChatPreferences(ctx, prepared, chatSvc.effectiveMemoryPolicyForRequest(ctx, session))
-	if !strings.Contains(prepared.Messages[0].Content, "回答语言：中文") || !strings.Contains(prepared.Messages[0].Content, "回答风格：简洁") {
+	if prepared.Messages[0].Role != "system" || !strings.Contains(prepared.Messages[0].Content, qaGroundingPolicy) || prepared.Messages[1].Role != "user" || !strings.Contains(prepared.Messages[1].Content, "回答语言：中文") || !strings.Contains(prepared.Messages[1].Content, "回答风格：简洁") {
 		t.Fatalf("Chat adoption %+v", prepared.Messages)
 	}
 	shared, err := provider.Snapshot(ctx, MemorySnapshotRequest{UserID: 7, Scopes: []MemoryScope{{Type: model.MemoryScopeUser, ID: "7"}}})

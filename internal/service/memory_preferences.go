@@ -53,12 +53,12 @@ func extractStructuredPreferences(request MemoryExtractionRequest) []MemoryCandi
 }
 
 func (s *ChatService) injectChatPreferences(ctx context.Context, prepared *preparedRAGChat, policy model.EffectiveMemoryPolicy) {
-	if !policy.EffectiveEnabled || s.longTermMemory == nil {
+	if !policy.EffectiveEnabled || s.longTermMemory == nil || len(prepared.Messages) == 0 {
 		return
 	}
 	snapshot, err := s.longTermMemory.Snapshot(ctx, MemorySnapshotRequest{UserID: prepared.Session.UserID, Query: prepared.Question, Scopes: []MemoryScope{{Type: model.MemoryScopeUser, ID: strconv.FormatInt(prepared.Session.UserID, 10)}}})
 	if err != nil || len(snapshot.Items) == 0 {
 		return
 	}
-	prepared.Messages = append([]ai.ChatMessage{{Role: "system", Content: snapshot.PromptContext()}}, prepared.Messages...)
+	prepared.Messages = append([]ai.ChatMessage{prepared.Messages[0], {Role: "user", Content: snapshot.PromptContext()}}, prepared.Messages[1:]...)
 }

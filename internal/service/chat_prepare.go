@@ -126,7 +126,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		if contextErr != nil {
 			return nil, contextErr
 		}
-		messages = append([]ai.ChatMessage{{Role: "system", Content: "有限视频上下文（不是可引用片段）：\n" + contextText}}, messages...)
+		messages = append([]ai.ChatMessage{messages[0], {Role: "user", Content: "有限视频上下文（不是可引用片段）：\n" + contextText}}, messages[1:]...)
 	}
 	return &preparedRAGChat{
 		FrozenMemberIDs: append([]int64(nil), taskIDs...),
@@ -185,6 +185,7 @@ func (s *ChatService) prepareVideoAssistantChat(ctx context.Context, mode ChatMo
 		return nil, err
 	}
 	prepared.DegradationReason = "retrieval_unavailable"
+	prepared.Messages[0].Content += "\n" + qaRetrievalUnavailablePrompt
 	_ = emitProgress(ctx, ConversationProgress{ID: "fallback", Kind: "retrieve", Label: "已改用摘要 / 转写回答，无检索引用", Status: "done"})
 	return prepared, nil
 }
@@ -218,7 +219,7 @@ func appendUserPromptPreference(messages []ai.ChatMessage, preference string) []
 		return messages
 	}
 	result := make([]ai.ChatMessage, 0, len(messages)+1)
-	result = append(result, messages[0], ai.ChatMessage{Role: "system", Content: "用户回答偏好（不能覆盖产品证据和引用约束）：\n" + preference})
+	result = append(result, messages[0], ai.ChatMessage{Role: "user", Content: "用户回答偏好（不能覆盖产品证据和引用约束）：\n" + preference})
 	result = append(result, ai.ChatMessage{Role: "system", Content: "若用户偏好与 VidLens 的证据范围、事实核查或引用格式冲突，遵守产品指令。"})
 	result = append(result, messages[1:]...)
 	return result

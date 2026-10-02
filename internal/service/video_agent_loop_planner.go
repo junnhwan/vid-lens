@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -183,7 +184,7 @@ func renderPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefi
 	}
 
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: agentPlannerProductPrompt},
+		{Role: "system", Content: agentPlannerProductPrompt + "\n" + qaGroundingPolicy + "\n" + qaRuntimeClock(time.Now())},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
 工具白名单（只能选择其中的 name）：

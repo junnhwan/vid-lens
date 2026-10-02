@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"time"
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
@@ -12,7 +13,7 @@ const ragProductPrompt = "你是 VidLens 的视频内容问答助手。结合视
 const videoAssistantProductPrompt = "你是 VidLens 的视频助手。优先基于提供的视频摘要和转写回答。可以做整体概括、解释和延伸，但不能把未提供的信息说成来自视频。如果用户问题明显和视频无关，可以正常回答，并明确说明这部分不基于当前视频内容。"
 
 func ChatProductInstructions() string {
-	return "检索问答：\n" + ragProductPrompt + "\n\n视频概览：\n" + videoAssistantProductPrompt
+	return qaGroundingPolicy + "\n\n检索问答：\n" + ragProductPrompt + "\n\n视频概览：\n" + videoAssistantProductPrompt
 }
 
 // BuildRAGAnswerMessages builds the ordinary RAG answer prompt without chat memory.
@@ -28,10 +29,10 @@ func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, que
 	messages := []ai.ChatMessage{
 		{
 			Role:    "system",
-			Content: ragProductPrompt,
+			Content: ragProductPrompt + "\n" + qaGroundingPolicy + "\n" + qaRuntimeClock(time.Now()),
 		},
 		{
-			Role:    "system",
+			Role:    "user",
 			Content: "可引用的原文句子：\n" + formatCitationCandidates(citations) + "\n\n扩展上下文（仅供理解，无独立引用编号）：\n" + formatCitationGenerationContext(contexts),
 		},
 	}
@@ -48,10 +49,10 @@ func buildVideoAssistantMessages(videoContext string, recent []model.ChatMessage
 	messages := []ai.ChatMessage{
 		{
 			Role:    "system",
-			Content: videoAssistantProductPrompt,
+			Content: videoAssistantProductPrompt + "\n" + qaGroundingPolicy + "\n" + qaRuntimeClock(time.Now()) + "\n当前上下文没有可引用编号，不得生成 [Cn]；摘要属于衍生内容，有转写时优先核对转写，只有摘要时说明依据为摘要。",
 		},
 		{
-			Role:    "system",
+			Role:    "user",
 			Content: "可用的视频上下文：\n" + videoContext,
 		},
 	}

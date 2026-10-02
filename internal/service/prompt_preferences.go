@@ -43,8 +43,8 @@ func (s *AIProfileService) PromptPreferences(userID int64) ([]PromptPreferenceVi
 	}
 	views = append(views,
 		PromptPreferenceView{Function: "title", Label: "自动标题", Scope: "转写后生成视频标题；内部结构固定，只取转写前 1000 字符。已生成标题不重算", ProductInstruction: ai.TitleSystemPrompt, EffectivePreview: ai.TitleSystemPrompt},
-		PromptPreferenceView{Function: "planner", Label: "Agent 规划器", Scope: "Agent 新运行的工具选择；工具白名单、JSON 输出与预算由产品控制", ProductInstruction: agentPlannerProductPrompt, EffectivePreview: agentPlannerProductPrompt},
-		PromptPreferenceView{Function: "retrieval", Label: "检索辅助", Scope: "查询改写和意图分类；每次输入会追加当前问题与有限上下文", ProductInstruction: "查询改写：你是 VidLens 视频转写检索查询改写器。\n意图分类：你是 VidLens 视频 RAG 的意图分类器。只输出 JSON。", EffectivePreview: "查询改写：你是 VidLens 视频转写检索查询改写器。\n意图分类：你是 VidLens 视频 RAG 的意图分类器。只输出 JSON。"},
+		PromptPreferenceView{Function: "planner", Label: "Agent 规划器", Scope: "Agent 新运行的工具选择；工具白名单、JSON 输出与预算由产品控制；运行时追加服务端当前时间", ProductInstruction: agentPlannerProductPrompt + "\n" + qaGroundingPolicy, EffectivePreview: agentPlannerProductPrompt + "\n" + qaGroundingPolicy},
+		PromptPreferenceView{Function: "retrieval", Label: "检索辅助", Scope: "查询改写和意图分类；每次输入会追加当前问题与有限上下文；查询改写追加服务端当前时间", ProductInstruction: "查询改写：" + qaRewriteProductPrompt + "\n意图分类：你是 VidLens 视频 RAG 的意图分类器。只输出 JSON。", EffectivePreview: "查询改写：" + qaRewriteProductPrompt + "\n意图分类：你是 VidLens 视频 RAG 的意图分类器。只输出 JSON。"},
 		PromptPreferenceView{Function: "visual_query", Label: "按需视觉调查", Scope: "Agent 按问题临时检查画面；提示词由问题与所需事实动态生成，不改写已保存证据", ProductInstruction: QueryVisualPromptTemplate, EffectivePreview: strings.ReplaceAll(strings.ReplaceAll(QueryVisualPromptTemplate, "%s", "[当前问题 / 所需事实]"), "%%", "%")},
 	)
 	return views, nil
