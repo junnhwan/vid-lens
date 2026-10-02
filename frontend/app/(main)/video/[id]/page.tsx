@@ -13,6 +13,7 @@ import {
   TaskStatusEnum,
   type RAGIndexResult,
   type TimelineAtom,
+  type TranscriptionProgress,
   type VideoTask,
   type VideoTimeline,
   type VisualMode,
@@ -209,6 +210,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const prevTransRef = useRef(false)
 
   const [task, setTask] = useState<VideoTask | null>(null)
+  const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgress | null>(null)
   const relatedArtifacts = useQuery({ queryKey: ['video-artifacts', taskId], queryFn: async ({ signal }) => {
     const first = await artifactApi.list(1, taskId, signal)
     const list = [...first.list]
@@ -263,6 +265,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     setLoading(true)
     setLoadError('')
     setTask(null)
+    setTranscriptionProgress(null)
     setTimeline(null)
     setIndex(null)
     setPlaybackUrl(null)
@@ -532,6 +535,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   const failed = task.status === TaskStatusEnum.Failed || task.status === TaskStatusEnum.Dead
+  const transcriptionRelevant = task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe'
+  const transcriptionIncomplete = transcriptionRelevant && (!!transcriptionProgress && transcriptionProgress.completed < transcriptionProgress.total || failed && task.last_job_type === 'transcribe')
+  const resumeTranscription = !processing && transcriptionIncomplete
+  const checkingTranscription = transcriptionRelevant && !transcriptionProgress
+  const citationUpgradeLabel = resumeTranscription ? '重试补齐引用定位' : '补齐引用定位'
+  const resumeTranscriptionBody = '会保留已完成的转写分片，继续处理未完成部分，再更新转写与检索索引，可能产生 ASR 和 Embedding 费用。全部完成前仍使用之前保存的内容与引用。'
   const summaryFailure = summaryFailureView(task)
   const urlJob = failed && task.last_job_type === 'download'
   const title = taskTitle(task)
@@ -626,10 +635,10 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
         )}
         {transcriptRows.length > 0 && (
           <div id="transcript" className="transcript-list">
-            {citationUpgradeAvailable && <div className="transcript-upgrade">
-              <b>旧转写的引用定位可以补齐</b>
-              <p>当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。</p>
-              <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'transcribe', force: true, title: '补齐引用定位？', body: '会重新识别这段视频的音频，并更新转写与检索索引，可能产生新的 ASR 和 Embedding 费用。完成后，新回答会使用更短的来源时间；历史回答和引用快照会保留。语音服务不返回句子时间时，将使用短音频片段时间。', confirmLabel: '补齐引用定位' })}><Icon name="refresh" size="sm" />补齐引用定位</button>
+            {(citationUpgradeAvailable || resumeTranscription) && <div className="transcript-upgrade">
+              <b>{resumeTranscription ? '本次引用定位补齐尚未完成' : '旧转写的引用定位可以补齐'}</b>
+              <p>{resumeTranscription ? '仍在使用之前保存的转写与引用时间。重试会继续处理未完成部分，保留已完成分片。' : '当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。'}</p>
+              <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: `${citationUpgradeLabel}？`, body: resumeTranscription ? resumeTranscriptionBody : '会重新识别这段视频的音频，并更新转写与检索索引，可能产生新的 ASR 和 Embedding 费用。完成后，新回答会使用更短的来源时间；历史回答和引用快照会保留。语音服务不返回句子时间时，将使用短音频片段时间。', confirmLabel: citationUpgradeLabel })}><Icon name="refresh" size="sm" />{citationUpgradeLabel}</button>
               {readOnly && <small>演示账号无法重新识别视频。</small>}
             </div>}
             {transcriptRows.map((a, i) => (
@@ -802,7 +811,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
-          <p className="workbench-capability" role="status">{task.has_transcription ? index?.indexed ? '转写与检索已就绪，可提问并核对引用。' : '转写可阅读；快速问答可使用摘要或转写，检索引用尚未就绪。' : studyCapability.ready ? '画面内容可整理笔记；画面问答需建立检索索引。' : visualCapability.ready ? '视频已导入：讲解视频可开始转写，无声演示可直接分析画面。' : visualCapability.reason}</p>
+          <p className="workbench-capability" role="status">{task.has_transcription ? processing && transcriptionRelevant ? '正在更新转写与引用定位，完成前仍使用之前保存的内容。' : transcriptionIncomplete ? '本次转写尚未完成，当前仍使用之前保存的转写与引用定位。' : checkingTranscription ? '正在核对本次转写进度，已保存的内容仍可查看。' : index?.indexed ? '转写与检索已就绪，可提问并核对引用。' : '转写可阅读；快速问答可使用摘要或转写，检索引用尚未就绪。' : studyCapability.ready ? '画面内容可整理笔记；画面问答需建立检索索引。' : visualCapability.ready ? '视频已导入：讲解视频可开始转写，无声演示可直接分析画面。' : visualCapability.reason}</p>
           {!readOnly && !ai.ready && <div className="artifact-notice" role="status"><span>{ai.reason}</span>{ai.error ? <button className="btn btn-sm" onClick={() => void ai.refetch()}>重试</button> : <a className="btn btn-sm" href="/settings" target="_blank" rel="noopener noreferrer">配置 AI</a>}</div>}
           <section className="workbench-commands" aria-label="视频学习操作">
             <div className="workbench-primary">
@@ -832,7 +841,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
               </div>
             )}
-            {(task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe') && !task.has_transcription && <TranscriptionProgressPanel task={task} />}
+            {transcriptionRelevant && <TranscriptionProgressPanel task={task} onProgress={setTranscriptionProgress} />}
             {(visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel task={task} />}
             {processing && canGenerateSummary(task) && <p className="muted" role="status">转写已保存，可以生成摘要；画面分析和检索索引会继续处理。</p>}
             {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
@@ -955,7 +964,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           <section className="workbench-more-group" aria-label="内容处理">
             <h4>内容处理</h4>
             {task.has_transcription ? (
-              <button className="workbench-operation" disabled={readOnly || busy !== '' || processing} onClick={() => { setMoreOpen(false); setPendingAction({ kind: 'transcribe', force: true, title: '重新转写？', body: '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。', confirmLabel: '重新转写' }) }}><Icon name="refresh" /><span><strong>重新转写</strong><small>重新识别视频音频，更新转写内容</small></span><Icon name="chev-r" size="sm" /></button>
+              <button className="workbench-operation" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => { setMoreOpen(false); setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: resumeTranscription ? '继续转写？' : '重新转写？', body: resumeTranscription ? resumeTranscriptionBody : '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。', confirmLabel: resumeTranscription ? '继续转写' : '重新转写' }) }}><Icon name="refresh" /><span><strong>{resumeTranscription ? '继续转写' : '重新转写'}</strong><small>{resumeTranscription ? '保留已完成分片，继续处理未完成部分' : '重新识别视频音频，更新转写内容'}</small></span><Icon name="chev-r" size="sm" /></button>
             ) : <button className="workbench-operation" disabled={readOnly || busy !== '' || processing} onClick={() => { setMoreOpen(false); void runAction('transcribe') }}><Icon name="activity" /><span><strong>{processing ? '转写处理中' : '开始转写'}</strong><small>将视频声音转换为可检索的文字</small></span><Icon name="chev-r" size="sm" /></button>}
             <button className="workbench-operation" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => { if (index) { setMoreOpen(false); setPendingAction(indexConfirm(index)) } }}><Icon name="layers" /><span><strong>{indexActionLabel(index)}</strong><small>更新视频问答使用的内容检索索引</small></span><Icon name="chev-r" size="sm" /></button>
           </section>

@@ -134,7 +134,24 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	if err != nil {
 		return err
 	}
-	if transcription != nil && !force {
+	// A failed refresh retains the last published transcript until its
+	// replacement is complete. Resume missing windows without discarding the
+	// successfully paid ASR work, including tasks older code marked completed.
+	resumeIncomplete := task.LastJobType == model.TaskJobTypeTranscribe &&
+		(task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusDead)
+	if !force && s.repo.TranscriptionChunk != nil {
+		chunks, err := s.repo.TranscriptionChunk.ListByTaskID(task.ID)
+		if err != nil {
+			return err
+		}
+		for _, chunk := range chunks {
+			if chunk.Status != model.TranscriptionChunkStatusCompleted {
+				resumeIncomplete = true
+				break
+			}
+		}
+	}
+	if transcription != nil && !force && !resumeIncomplete {
 		return fmt.Errorf("文字提取已完成，可直接查看结果")
 	}
 
@@ -143,7 +160,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	// 成功转写"。命中 → 复用，不重跑 ASR，返回"文字提取已完成，可直接查看结果"
 	// （与原单 task 短路语义一致）。分析目标级独立：转写命中不替 task 做整体
 	// 完成判定（摘要可能仍缺，用户可继续 RequestAnalysis）。
-	if !force && transcription == nil {
+	if !force && transcription == nil && !resumeIncomplete {
 		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeTranscribe, func(md5 string) (bool, error) {
 			existing, err := s.repo.Transcription.FindByMD5(md5)
 			if err != nil {

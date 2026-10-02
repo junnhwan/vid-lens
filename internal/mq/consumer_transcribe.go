@@ -695,6 +695,34 @@ func (c *Consumer) completeTranscribeWithVisualOnly(ctx context.Context, task *m
 	if waitVisual == nil || task == nil {
 		return false, nil
 	}
+	// Visual evidence can serve silent media, but cannot satisfy a failed
+	// transcript refresh or discard partially recognized speech. Leave these
+	// failures to the caller so the job records its error and can resume ASR.
+	// In particular, an old published transcript/index is not refresh success.
+	if c.repo != nil {
+		previous, err := c.repo.Transcription.FindByTaskID(task.ID)
+		if err != nil {
+			return true, err
+		}
+		if previous == nil && task.FileMD5 != "" {
+			previous, err = c.repo.Transcription.FindByMD5(task.FileMD5)
+			if err != nil {
+				return true, err
+			}
+		}
+		if previous != nil && strings.TrimSpace(previous.Content) != "" {
+			return false, nil
+		}
+		chunks, err := c.repo.TranscriptionChunk.ListByTaskID(task.ID)
+		if err != nil {
+			return true, err
+		}
+		for _, chunk := range chunks {
+			if chunk.Status != model.TranscriptionChunkStatusCompleted || strings.TrimSpace(chunk.Content) != "" {
+				return false, nil
+			}
+		}
+	}
 	visual := waitVisual()
 	if visual.err != nil || visual.count <= 0 {
 		return false, nil

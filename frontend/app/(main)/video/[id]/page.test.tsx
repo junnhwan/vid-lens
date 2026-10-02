@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import type { VideoTask } from '@/lib/types'
+import type { TranscriptionProgress, VideoTask } from '@/lib/types'
 import VideoWorkbenchPage from './page'
 
 const mock = vi.hoisted(() => ({
   getTask: vi.fn(), getTimeline: vi.fn(), getRagIndex: vi.fn(), playbackSrc: vi.fn(), downloadMedia: vi.fn(),
-  transcribe: vi.fn(), seek: vi.fn(), aiReady: false,
+  transcribe: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), aiReady: false,
   onPlayhead: undefined as ((ms: number, playing: boolean) => void) | undefined,
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
 }))
@@ -26,6 +26,13 @@ const task: VideoTask = {
   status: 3, stage: 'none', trace_id: 'test', source_type: 'upload', visual_disabled: true, retry_count: 0, max_retries: 3,
   last_error_code: '', last_error_msg: '', last_job_type: '', error_msg: '', created_at: '2026-09-29T00:00:00Z', updated_at: '2026-09-29T00:00:00Z',
   has_transcription: false, has_summary: false, has_rag_index: false, visual_status: '',
+}
+const unfinishedProgress: TranscriptionProgress = {
+  task_id: 42, status: 3, stage: 'none', job_status: 3, job_retry_count: 0, job_max_retries: 3,
+  updated_at: task.updated_at, video_concurrency: 5, chunk_concurrency: 3,
+  total: 18, completed: 17, pending: 0, running: 0, retry_waiting: 0, failed: 1,
+  chunks: Array.from({ length: 18 }, (_, i) => ({ index: i + 1, status: i === 14 ? 'failed' : 'completed',
+    start_ms: i * 20000, end_ms: (i + 1) * 20000, retry_count: 0, updated_at: task.updated_at })),
 }
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -63,6 +70,92 @@ test('legacy citation upgrade requires a cost confirmation and requests a forced
   expect(mock.transcribe).not.toHaveBeenCalled()
   fireEvent.click(screen.getAllByRole('button', { name: '补齐引用定位' })[1])
   await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, true))
+})
+
+test('retained transcript does not hide running replacement transcription progress', async () => {
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, status: 2, stage: 'transcribing', last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [{ id: 'old', modality: 'transcript', content: '旧转写。', start_ms: 0, end_ms: 305000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockResolvedValue({ ...unfinishedProgress, status: 2, stage: 'transcribing', job_status: 2, failed: 0, running: 1,
+    chunks: unfinishedProgress.chunks.map(c => c.status === 'failed' ? { ...c, status: 'running' } : c) })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  expect(await screen.findByText(/已完成 17\/18 个分片/)).toBeTruthy()
+  expect(screen.queryByText('转写与检索已就绪，可提问并核对引用。')).toBeNull()
+  expect(screen.getByText(/完成前仍使用之前保存的内容/)).toBeTruthy()
+})
+
+test.each([3, 4] as const)('failed replacement remains visible with old transcript and task status %s, and citation retry retains completed chunks', async status => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, status, last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [{ id: 'old', modality: 'transcript', content: '旧转写。', start_ms: 0, end_ms: 305000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockResolvedValue({ ...unfinishedProgress, status, job_status: status })
+  mock.transcribe.mockResolvedValue({ task_id: 42 })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  expect(await screen.findByText(/已完成 17\/18 个分片/)).toBeTruthy()
+  expect(screen.getByText(/失败 1/)).toBeTruthy()
+  expect(screen.getByText(/当前仍使用之前保存的转写与引用定位/)).toBeTruthy()
+  expect(screen.queryByText('转写与检索已就绪，可提问并核对引用。')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '重试补齐引用定位' }))
+  expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
+  fireEvent.click(screen.getAllByRole('button', { name: '重试补齐引用定位' })[1])
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
+  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true)
+})
+
+test('more operations resumes unfinished transcription without deleting successful chunks', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [{ id: 'old', modality: 'transcript', content: '旧转写。', start_ms: 0, end_ms: 305000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockResolvedValue(unfinishedProgress)
+  mock.transcribe.mockResolvedValue({ task_id: 42 })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  await screen.findByText(/已完成 17\/18 个分片/)
+  fireEvent.click(screen.getByRole('button', { name: /更多操作/ }))
+  fireEvent.click(screen.getByRole('button', { name: /继续转写/ }))
+  expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '继续转写' }))
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
+  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true)
+})
+
+test('citation recovery remains available when partial short chunks replaced the timeline but the transcript and index are still old', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: unfinishedProgress.chunks.filter(c => c.status === 'completed').map(c => ({
+    id: `short-${c.index}`, modality: 'transcript', content: `新短窗 ${c.index}`, start_ms: c.start_ms, end_ms: c.end_ms, time_range_status: 'coarse',
+  })) })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockResolvedValue(unfinishedProgress)
+  mock.transcribe.mockResolvedValue({ task_id: 42 })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  await screen.findByText(/已完成 17\/18 个分片/)
+  expect(screen.queryByText('旧转写的引用定位可以补齐')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '重试补齐引用定位' }))
+  expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
+  fireEvent.click(screen.getAllByRole('button', { name: '重试补齐引用定位' })[1])
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
+})
+
+test('unavailable progress prevents a destructive upgrade until the saved chunks can be checked again', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [{ id: 'old', modality: 'transcript', content: '旧转写。', start_ms: 0, end_ms: 305000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(unfinishedProgress)
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  await screen.findByText(/转写进度暂不可用/)
+  expect((screen.getByRole('button', { name: '补齐引用定位' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(mock.transcribe).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '重新读取转写进度' }))
+  const resume = await screen.findByRole('button', { name: '重试补齐引用定位' })
+  expect((resume as HTMLButtonElement).disabled).toBe(false)
 })
 
 test('native transcript rows use their source timestamps while legacy reading rows share the original window', async () => {

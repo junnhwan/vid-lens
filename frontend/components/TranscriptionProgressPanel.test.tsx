@@ -45,6 +45,31 @@ test('unfinished ASR still reports stale progress even when an older transcript 
   expect(await screen.findByText(/可能停滞/)).toBeTruthy()
 })
 
+test('failed chunks remain visible even when an older transcript made the task appear completed', async () => {
+  vi.mocked(api.getTranscriptionProgress).mockResolvedValue({ ...progress, completed: 2, failed: 1,
+    chunks: progress.chunks.map((chunk, i) => i === 2 ? { ...chunk, status: 'failed', content: undefined } : chunk) })
+  render(<TranscriptionProgressPanel task={{ ...task, status: 3, stage: 'none' }} compact />)
+  expect(await screen.findByText(/失败 1/)).toBeTruthy()
+  expect(screen.getByText(/第 3\/3 段.*转写失败/)).toBeTruthy()
+  expect(screen.getByText(/本次转写未完成/)).toBeTruthy()
+  expect(screen.queryByText(/转写分片已完成/)).toBeNull()
+})
+
+test('queued transcription remains active before the worker sets a stage', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.getTranscriptionProgress).mockResolvedValue({ ...progress, completed: 2, pending: 1,
+    chunks: progress.chunks.map((chunk, i) => i === 2 ? { ...chunk, status: 'pending', content: undefined } : chunk) })
+  const { unmount } = render(<TranscriptionProgressPanel task={{ ...task, status: 1, stage: 'none' }} compact />)
+  await act(async () => {})
+  expect(screen.getByText(/等待任务启动或转写并发名额/)).toBeTruthy()
+  expect(screen.queryByText(/本次转写未完成/)).toBeNull()
+  const requests = vi.mocked(api.getTranscriptionProgress).mock.calls.length
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(vi.mocked(api.getTranscriptionProgress).mock.calls.length).toBeGreaterThan(requests)
+  unmount()
+  expect(vi.getTimerCount()).toBe(0)
+})
+
 test('video card keeps visual progress visible and polling after leaving the ASR stage', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-09-29T00:07:00Z'))
