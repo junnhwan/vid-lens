@@ -217,11 +217,14 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 }
 
 func transcriptTimelineRange(row model.VideoTranscriptionChunk) (int64, int64, string) {
-	if row.CoreEndMS > row.CoreStartMS && row.CoreStartMS >= 0 {
-		return row.CoreStartMS, row.CoreEndMS, model.ChunkTimeRangeCoarse
-	}
+	// Untimed text can include speech from either overlap margin. The core
+	// identifies processing ownership, not the bounds of every retained word.
+	// Use the same measured audio window as citation source references.
 	if row.WindowEndMS > row.WindowStartMS && row.WindowStartMS >= 0 {
 		return row.WindowStartMS, row.WindowEndMS, model.ChunkTimeRangeCoarse
+	}
+	if row.CoreEndMS > row.CoreStartMS && row.CoreStartMS >= 0 {
+		return row.CoreStartMS, row.CoreEndMS, model.ChunkTimeRangeCoarse
 	}
 	if row.EndSecond > row.StartSecond && row.StartSecond >= 0 {
 		return int64(row.StartSecond) * 1000, int64(row.EndSecond) * 1000, model.ChunkTimeRangeCoarse

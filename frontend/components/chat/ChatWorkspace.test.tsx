@@ -72,6 +72,26 @@ test('sentence evidence highlights its source words and switches between distant
   expect(drawer.getByText('03:41 – 03:44')).toBeTruthy()
 })
 
+test('seven quotes from one coarse source have one replay entry and independently selected highlights', () => {
+  const quotes = Array.from({ length: 7 }, (_, i) => `这是第${i + 1}句原文。`)
+  conversation.messages = [{ role: 'assistant', content: '回答 [C1]', cites: quotes.map((quote, i) => ({
+    id: `C${i + 1}`, taskId: 42, chunkIndex: i, score: 1, content: quote, anchorQuote: quote,
+    displayContext: quotes.join(''), modality: 'transcript', startMS: 595000, endMS: 905000, timeRangeStatus: 'coarse',
+  })) }]
+  const { container } = render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl="/playback" suggestions={[]} />)
+  expect(screen.getByText('1 个来源片段 · 7 句引用')).toBeTruthy()
+  expect(container.querySelectorAll('.cite-source-card')).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: '回放' })).toHaveLength(1)
+  for (let i = 1; i <= 7; i++) expect(screen.getByRole('button', { name: `查看证据 C${i}` })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '查看证据 C1' }))
+  const drawer = within(screen.getByRole('dialog', { name: '证据详情' }))
+  expect(drawer.getAllByRole('region', { name: '来源片段 原片段 09:55 – 15:05' })).toHaveLength(1)
+  expect(drawer.getAllByText('原片段 09:55 – 15:05')).toHaveLength(1)
+  fireEvent.click(drawer.getByRole('button', { name: '切换到引用 C7' }))
+  expect(container.querySelector('.evidence-source-context mark')?.textContent).toBe(quotes[6])
+  expect(container.querySelectorAll('.evidence-source-group')).toHaveLength(1)
+})
+
 test('old coarse citation snapshots retain observed time and offer an explicit upgrade link', () => {
   const citation: Citation = { task_id: 42, citation_id: 'C7', evidence_id: 'saved', chunk_id: 7, chunk_index: 7, score: 1, content: '历史原文', anchor_quote: '应用层缓存没有收益。', display_context: '开头。应用层缓存没有收益。结尾。', start_ms: 0, end_ms: 305000, time_range_status: 'coarse', modality: 'transcript' }
   const [saved] = citesFromSnapshot(JSON.stringify({ citations: [citation] }))
@@ -79,10 +99,57 @@ test('old coarse citation snapshots retain observed time and offer an explicit u
   conversation.messages = [{ role: 'assistant', content: '历史回答 [C7]', cites: [saved] }]
   render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
   expect(screen.getByText('原片段 00:00 – 05:05')).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: 'C7' }))
+  fireEvent.click(screen.getByRole('button', { name: 'C1' }))
   const drawer = within(screen.getByRole('dialog', { name: '证据详情' }))
   expect(drawer.getByRole('link', { name: '补齐引用定位' }).getAttribute('href')).toBe('/video/42?citations=upgrade#transcript')
   expect(drawer.getByText(/历史回答保留原有引用/)).toBeTruthy()
+  expect(saved.id).toBe('C7')
+})
+
+test('sparse saved citations use first-appearance labels in prose, cards, drawer and copied answer', () => {
+  const raw = '高成本[C14]。低成本[C3][C4]。再提高成本[C14]。'
+  conversation.messages = [{ messageId: 58, role: 'assistant', content: raw, cites: [
+    { id: 'C3', taskId: 42, chunkIndex: 3, score: 1, content: '低成本句子。', displayContext: '前文。低成本句子。后文。', startMS: 818000, endMS: 842000, timeRangeStatus: 'coarse' },
+    { id: 'C4', taskId: 42, chunkIndex: 4, score: 1, content: '直接做产品。', startMS: 818000, endMS: 842000, timeRangeStatus: 'coarse' },
+    { id: 'C14', taskId: 42, chunkIndex: 14, score: 1, content: '高成本先做Demo。', displayContext: '前文。高成本先做Demo。后文。', startMS: 798000, endMS: 822000, timeRangeStatus: 'coarse', supportStatus: 'unsupported' },
+  ] }]
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  try {
+    const { container } = render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+    expect(Array.from(container.querySelectorAll('.answer .cite')).map(c=>c.textContent)).toEqual(['C1','C2','C3','C1'])
+    expect(Array.from(container.querySelectorAll('.cite-source-card .cite-card-open')).map(c=>c.getAttribute('aria-label'))).toEqual(['查看证据 C1','查看证据 C2','查看证据 C3'])
+    fireEvent.click(screen.getByRole('button', { name: '复制回答' }))
+    expect(writeText).toHaveBeenCalledWith('高成本[C1]。低成本[C2][C3]。再提高成本[C1]。')
+    fireEvent.click(screen.getAllByRole('button', { name: 'C1' })[0])
+    const drawer = within(screen.getByRole('dialog', { name: '证据详情' }))
+    expect(container.querySelector('.evidence-source-context mark')?.textContent).toBe('高成本先做Demo。')
+    expect(drawer.getByText('C14').closest('details')?.open).toBe(false)
+    fireEvent.click(drawer.getByRole('button', { name: '切换到引用 C2' }))
+    expect(container.querySelector('.evidence-source-context mark')?.textContent).toBe('低成本句子。')
+    expect(drawer.getByText('约定位 13:38 – 14:02')).toBeTruthy()
+    expect(conversation.messages[0].content).toBe(raw)
+    expect(conversation.messages[0].cites?.map(c=>c.id)).toEqual(['C3','C4','C14'])
+  } finally {
+    if (previous) Object.defineProperty(navigator, 'clipboard', previous)
+    else Reflect.deleteProperty(navigator, 'clipboard')
+  }
+})
+
+test.each(['video_library','knowledge_base'] as const)('the %s source rail uses the same numbering as the answer', (scopeType) => {
+  conversation.messages = [{ role: 'assistant', content: '来源[C14]，另一来源[C3]', cites: [
+    { id: 'C3', taskId: 42, chunkIndex: 3, score: 1, content: '较早候选。', displayContext: '较早候选。' },
+    { id: 'C14', taskId: 42, chunkIndex: 14, score: 1, content: '先引用的候选。', displayContext: '先引用的候选。' },
+  ] }]
+  const { container } = render(<ChatWorkspace scopeType={scopeType} targetId={1} scopeName="来源范围" playbackUrl={null} suggestions={[]} />)
+  fireEvent.click(screen.getByRole('button', { name: '视频与执行过程' }))
+  fireEvent.click(screen.getByRole('button', { name: '来源证据 · 2' }))
+  const rail = container.querySelector('.rail-body')!
+  const evidenceButtons = Array.from(rail.querySelectorAll('button')).filter(button=>button.textContent?.includes('查看原文'))
+  expect(evidenceButtons.map(button=>button.querySelector('span')?.textContent)).toEqual(['C1','C2'])
+  fireEvent.click(evidenceButtons[0])
+  expect(container.querySelector('.evidence-source-context mark')?.textContent).toBe('先引用的候选。')
 })
 
 test('citation replay seeks the observed timestamp including zero and exact visual points', () => {

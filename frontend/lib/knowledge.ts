@@ -4,7 +4,7 @@ export interface RetrievalTestResult {
   task_ids: number[]
   mode: string
   citations: Citation[]
-  trace: { duration_ms: number; original_query?: string; rewritten_queries?: string[]; fallbacks?: string[]; stages?: { name: string; query?: string; citations: Citation[] }[] }
+  trace: { duration_ms: number; top_k?:number; candidate_k?:number; vector_enabled?:boolean; keyword_enabled?:boolean; original_query?: string; rewritten_queries?: string[]; fallbacks?: string[]; stages?: { name: string; query?: string; citations: Citation[] }[] }
 }
 
 export interface RunDetail {

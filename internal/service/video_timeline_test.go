@@ -51,18 +51,22 @@ func TestBuildVideoTimelineKeepsModalitiesTimesAndSourceRefs(t *testing.T) {
 	if len(timeline.Atoms) != 3 {
 		t.Fatalf("atoms = %#v, want transcript + OCR + caption", timeline.Atoms)
 	}
-	if timeline.Atoms[0].Modality != model.ChunkModalityVisualOCR || timeline.Atoms[0].StartMS != 1000 {
-		t.Fatalf("first atom = %#v, want earliest visual OCR", timeline.Atoms[0])
+	if timeline.Atoms[1].Modality != model.ChunkModalityVisualOCR || timeline.Atoms[1].StartMS != 1000 {
+		t.Fatalf("visual atom = %#v, want earliest visual OCR", timeline.Atoms[1])
 	}
-	transcript := timeline.Atoms[2]
-	if transcript.Modality != model.ChunkModalityTranscript || transcript.StartMS != 2000 || transcript.EndMS != 5000 {
-		t.Fatalf("transcript atom = %#v, want core-owned coarse range", transcript)
+	transcript := timeline.Atoms[0]
+	if transcript.Modality != model.ChunkModalityTranscript || transcript.StartMS != 0 || transcript.EndMS != 7000 {
+		t.Fatalf("transcript atom = %#v, want full measured audio window", transcript)
+	}
+	source := transcriptSourceRef(model.VideoTranscriptionChunk{WindowStartMS: 0, WindowEndMS: 7000})
+	if transcript.StartMS != source.StartMS || transcript.EndMS != source.EndMS {
+		t.Fatalf("timeline and citation source ranges differ: %#v vs %#v", transcript, source)
 	}
 	if transcript.SourceRefs[0].StableID != "seg-1" || transcript.SourceRefs[0].TimeRangeStatus != model.ChunkTimeRangeCoarse {
 		t.Fatalf("transcript source ref = %#v", transcript.SourceRefs)
 	}
-	if timeline.Atoms[1].SourceRefs[0].ObjectKey != "visual-frames/task-42/frame.jpg" {
-		t.Fatalf("visual source ref lost object key: %#v", timeline.Atoms[1].SourceRefs)
+	if timeline.Atoms[2].SourceRefs[0].ObjectKey != "visual-frames/task-42/frame.jpg" {
+		t.Fatalf("visual source ref lost object key: %#v", timeline.Atoms[2].SourceRefs)
 	}
 }
 

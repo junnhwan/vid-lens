@@ -19,6 +19,7 @@
     "elkjs": "^0.12.0",
     "lucide-react": "^0.408.0",
     "markmap-view": "^0.18.12",
+    "mdast-util-from-markdown": "^2.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",

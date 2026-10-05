@@ -5,10 +5,17 @@ import { formatClock } from '@/lib/format'
 
 export interface CiteRef {
   id: string          // "C1"
+  candidateId?: string // original candidate label; display numbering is per answer
   taskId?: number
   chunkIndex: number
   score: number
   content: string
+  claimTexts?: string[]
+  claimEndRunes?: number[]
+  quoteTruncated?: boolean
+  quoteOmitted?: boolean
+  supportStatus?: string
+  contextTimeStatus?: string
   anchorQuote?: string
   displayContext?: string
   modality?: string
@@ -53,6 +60,7 @@ export function citeFromAPI(c: Citation, index: number): CiteRef {
       score: c.score,
       content: c.content,
       anchorQuote: c.anchor_quote || c.content,
+      claimTexts: c.claim_texts, claimEndRunes:c.claim_end_runes, quoteTruncated:c.quote_truncated, quoteOmitted:c.quote_omitted, supportStatus:c.support_status, contextTimeStatus:c.context_time_range_status,
       displayContext: c.display_context || c.content,
       modality: c.modality,
       startMS: c.start_ms,
@@ -79,7 +87,7 @@ export function hasReplayRange(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRa
 export function citationTimeLabel(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRangeStatus' | 'modality'>): string {
   if (!hasReplayRange(cite)) return '时间未知'
   const time = cite.startMS === cite.endMS ? formatTime(cite.startMS) : formatTimeRange(cite.startMS, cite.endMS)
-  return cite.timeRangeStatus === 'coarse' ? `原片段 ${time}` : time
+  return cite.timeRangeStatus === 'coarse' ? `${cite.endMS! - cite.startMS! <= 30_000 ? '约定位' : '原片段'} ${time}` : time
 }
 
 export function needsCitationUpgrade(cite: Pick<CiteRef, 'startMS' | 'endMS' | 'timeRangeStatus' | 'modality'>): boolean {

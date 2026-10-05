@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
+import { groupCitationSources } from '@/lib/citationGroups'
 import type { CiteRef } from '@/components/Citation'
-import { citationTimeLabel, formatTime, hasReplayRange, needsCitationUpgrade } from '@/components/Citation'
+import { citationTimeLabel, formatTime, formatTimeRange, hasReplayRange, needsCitationUpgrade } from '@/components/Citation'
 import { fmtScore } from '@/lib/format'
 import { ModalityTag, modalityView } from '@/components/ui/ModalityTag'
 import { useToast } from '@/components/Toast'
@@ -33,6 +35,9 @@ function timeStatusText(status?: string): string {
 
 export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallbackTitle, canJump, jumpDisabledHint, onJump, onClose }: EvidenceDrawerProps) {
   const toast = useToast()
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => setExpanded(false), [cite.id])
+  const sources = groupCitationSources(cites || [cite], fallbackTaskId)
 
   const title = cite.videoTitle || fallbackTitle
   const quote = cite.anchorQuote || cite.content
@@ -40,8 +45,8 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
   const taskId = cite.taskId || fallbackTaskId
   const context = cite.displayContext || cite.content
   const quoteOffset = quote ? context.indexOf(quote) : -1
-  const contextStart = quoteOffset < 0 ? 0 : Math.max(0, quoteOffset - Math.min(160, Math.max(0, 600 - quote.length)))
-  const excerpt = context.slice(contextStart, contextStart + 600)
+  const contextStart = expanded || quoteOffset < 0 ? 0 : Math.max(0, quoteOffset - Math.min(160, Math.max(0, 600 - quote.length)))
+  const excerpt = context.slice(contextStart, expanded ? context.length : contextStart + 600)
   const highlightStart = quoteOffset < 0 ? -1 : quoteOffset - contextStart
   const highlightEnd = Math.min(excerpt.length, highlightStart + quote.length)
 
@@ -76,18 +81,22 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
         </div>
         <div className="drawer-body">
           {cites && cites.length > 1 && onSelect && <div className="evidence-source-choices" aria-label="本回答的引用">
-            <span className="field-label">本回答的引用</span>
-            <div>{cites.map(source => <button key={source.id} type="button" className={`chip ${source.id === cite.id ? 'chip-acc' : 'chip-mute'}`} aria-pressed={source.id === cite.id} aria-label={`切换到引用 ${source.id}`} title={`${citationTimeLabel(source)} · ${source.anchorQuote || source.content}`} onClick={() => onSelect(source)}>{source.id} · {citationTimeLabel(source)}</button>)}</div>
+            <span className="field-label">{sources.length} 个来源片段 · {cites.length} 句引用</span>
+            {sources.map(group => <section key={group.key} className="evidence-source-group" aria-label={`来源片段 ${citationTimeLabel(group.citations[0])}`}>
+              <div className="evidence-source-heading"><b>{group.citations[0].videoTitle || fallbackTitle}</b><span className="mono">{citationTimeLabel(group.citations[0])}</span></div>
+              <div className="evidence-sentence-choices">{group.citations.map(source => <button key={source.id} type="button" className={`evidence-sentence-choice${source.id === cite.id ? ' selected' : ''}`} aria-pressed={source.id === cite.id} aria-label={`切换到引用 ${source.id}`} onClick={() => onSelect(source)}><span className="mono">{source.id}</span><span>{source.anchorQuote || source.content}</span></button>)}</div>
+            </section>)}
           </div>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{title}</span>
-            {hasRange && (
+            {hasRange && !(cites && cites.length > 1 && onSelect) && (
               <span className="mono" style={{ fontSize: 11.5, color: 'var(--acc-strong)' }}>
                 {citationTimeLabel(cite)}
               </span>
             )}
           </div>
-          <div className="ev-quote">{quote}</div>
+          <div className="ev-quote">{quote}{cite.quoteTruncated && <small>…（原文达到长度上限，请展开上下文）</small>}{cite.quoteOmitted && <small>（其他句段省略）</small>}</div>
+          {cite.claimTexts?.length ? <p>关联结论：{cite.claimTexts.join("；")}<small> · {cite.supportStatus === "supported" ? "模型复核支持，仍可回放核对" : cite.supportStatus === "unsupported" ? "原文未充分支持此结论" : "尚未完成语义复核"}</small></p> : null}
           {cite.timeRangeStatus === 'coarse' && <p className="evidence-time-hint">这句话的独立时间尚未记录；回放会从原片段开始，请结合下方原文核对。</p>}
           <div className="ev-meta-grid">
             <div className="ev-meta-cell"><div className="k">证据模态</div><div className="v"><ModalityTag modality={cite.modality} /></div></div>
@@ -99,6 +108,8 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
             {highlightStart >= 0 ? <>{excerpt.slice(0, highlightStart)}<mark>{excerpt.slice(highlightStart, highlightEnd)}</mark>{excerpt.slice(highlightEnd)}</> : excerpt}
             {cite.displayContextTruncated || contextStart + excerpt.length < context.length ? '…' : ''}
           </p>
+          {context.length>600 && <button className="btn btn-sm" onClick={() => setExpanded(!expanded)}>{expanded ? '收起前后文' : '展开前后文'}</button>}
+          <p>上下文范围：{cite.contextTimeStatus === 'unknown' ? '时间未知' : formatTimeRange(cite.contextStartMS ?? cite.startMS, cite.contextEndMS ?? cite.endMS)}</p>
           <div style={{ display: 'flex', gap: 9, marginTop: 18 }}>
             <button
               className="btn btn-primary"
@@ -123,6 +134,7 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
             </p>
           ) : null}
           <details className="evidence-technical"><summary>技术详情</summary><div className="ev-meta-grid">
+            {cite.candidateId && <div className="ev-meta-cell"><div className="k">原候选编号</div><div className="v mono">{cite.candidateId}</div></div>}
             <div className="ev-meta-cell"><div className="k">证据 ID</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.evidenceId || cite.id}</div></div>
             <div className="ev-meta-cell"><div className="k">召回通道</div><div className="v mono" style={{ fontWeight: 500 }}>{cite.source || '—'}</div></div>
             <div className="ev-meta-cell"><div className="k">相关度</div><div className="v mono" style={{ fontWeight: 500 }}>{fmtScore(cite.score)}</div></div>

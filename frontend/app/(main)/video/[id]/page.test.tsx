@@ -158,7 +158,7 @@ test('unavailable progress prevents a destructive upgrade until the saved chunks
   expect((resume as HTMLButtonElement).disabled).toBe(false)
 })
 
-test('native transcript rows use their source timestamps while legacy reading rows share the original window', async () => {
+test('legacy paragraphs share one time and one replay button, while native intervals stay distinct', async () => {
   const longText = Array.from({ length: 8 }, (_, i) => `这是第${i + 1}段旧转写，其中没有独立句子时间，只能保留真实来源片段。`).join('')
   mock.getTask.mockResolvedValue({ ...task, has_transcription: true })
   mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [
@@ -170,15 +170,16 @@ test('native transcript rows use their source timestamps while legacy reading ro
   const { container } = render(<VideoWorkbenchPage params={{ id: '42' }} />)
   await screen.findByText('有时间戳的短句。')
   const rows = [...container.querySelectorAll('.t-row')]
-  expect(rows[0].querySelector('.ts')?.textContent).toBe('00:12')
-  fireEvent.click(rows[0])
+  expect(rows[0].querySelector('.ts')?.textContent).toBe('00:12 – 00:15')
+  fireEvent.click(rows[0].querySelector('button')!)
   expect(mock.seek).toHaveBeenLastCalledWith(12000, true, undefined)
-  expect(rows.length).toBeGreaterThan(2)
-  for (const row of rows.slice(1)) {
-    expect(row.querySelector('.ts')?.textContent).toBe('00:30 – 05:35原片段')
-    fireEvent.click(row)
-    expect(mock.seek).toHaveBeenLastCalledWith(30000, true, undefined)
-  }
+  expect(rows).toHaveLength(2)
+  expect(rows[1].querySelector('.ts')?.textContent).toBe('00:30 – 05:35原片段')
+  expect(rows[1].querySelectorAll('.transcript-paragraphs p').length).toBeGreaterThan(1)
+  expect(rows[1].querySelector('.transcript-paragraphs')?.textContent).toBe(longText)
+  expect(rows[1].querySelectorAll('.transcript-time')).toHaveLength(1)
+  fireEvent.click(rows[1].querySelector('button')!)
+  expect(mock.seek).toHaveBeenLastCalledWith(30000, true, undefined)
 })
 
 test('native sentence takes live highlight precedence over an overlapping coarse window and unknown rows stay inactive', async () => {

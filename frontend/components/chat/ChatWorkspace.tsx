@@ -1,8 +1,10 @@
+import { presentAnswerCitations } from '@/lib/citationPresentation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from '@/lib/router'
 import type { CiteRef } from '@/components/Citation'
 import { citeFromAPI, citationTimeLabel, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
+import { groupCitationSources } from '@/lib/citationGroups'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -158,7 +160,10 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     },
   })
 
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+  const displayMessages = useMemo(() => messages.map(msg => msg.role === 'assistant'
+    ? { ...msg, ...presentAnswerCitations(msg.content, msg.cites || []) }
+    : msg), [messages])
+  const lastMessage = displayMessages.length > 0 ? displayMessages[displayMessages.length - 1] : null
   const lastAssistant = lastMessage && lastMessage.role === 'assistant' ? lastMessage : null
   const toggleRail = (event: { detail: number }) => { setPanelsInstant(event.detail === 0); if (railOverlay) setQuestionsOpen(false); setRailOpen(open => {
     try { localStorage.setItem('vidlens-chat-rail', open ? 'closed' : 'open') } catch { /* Private browsing can deny storage. */ }
@@ -380,7 +385,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 {isVideo && <div className="video-question-intro" aria-busy={questionsLoading}>{questionsLoading ? <QuestionSuggestionsLoading /> : <><p>{videoQuestions?.message || '从视频内容开始，试着问一个问题。'}</p>{videoQuestions?.questions.map(item => <button key={item.question} className="suggest-card" type="button" onClick={() => submit(item.question)} disabled={sending || streaming || historyLoading || !!historyError || !sessionReady}><Icon name="message" size="sm" /><span>{item.question}<small>{item.source}{item.time_ms != null ? ` · ${formatClock(item.time_ms)}` : ''}</small></span></button>)}</>}</div>}
               </div>
             ) : (
-              messages.map((msg, i) => msg.role === 'user'
+              displayMessages.map((msg, i) => msg.role === 'user'
                 ? (
                   <div key={`${session?.id ?? 'new'}-${msg.messageId ?? i}`} className="msg msg-user" ref={node => { questionRefs.current[i] = node }}>
                     <div className="bubble">{msg.content}</div>
@@ -392,6 +397,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     msg={msg}
                     sessionId={session?.id}
                     fallbackTitle={scopeName}
+                    fallbackTaskId={isVideo ? targetId : undefined}
                     showVideoTitle={!isVideo}
                     followUpSessionId={msg === lastAssistant && !streaming ? session?.id : undefined}
                     onFollowUp={submit}
@@ -418,7 +424,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               >
                 <Icon name="bolt" size="sm" />快速问答
               </button>
-              {scopeType !== 'video_library' && <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? '深入分析' : '跨视频研究'}</button>}
+              <button className={`mode-pill${mode === 'agent' ? ' on' : ''}`} disabled={streaming} onClick={() => setMode('agent')}><Icon name="target" size="sm" />{isVideo ? '深入分析' : '跨视频研究'}</button>
             </div>
             <div className="composer-tools" ref={historyRef}>
               <button
@@ -611,11 +617,12 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, sessionId, fallbackTitle, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
+  msg, sessionId, fallbackTitle, fallbackTaskId, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
 }: {
   sessionId?: number
   msg: ChatMsg
   fallbackTitle: string
+  fallbackTaskId?: number
   showVideoTitle: boolean
   followUpSessionId?: number
   onFollowUp: (question: string) => void
@@ -627,6 +634,7 @@ function AgentMessageView({
 }) {
   const toast = useToast()
   const cites = msg.cites || []
+  const citationSources = groupCitationSources(cites, fallbackTaskId)
   const isAgentRun = !!msg.agentRun
   const agentMode = (isAgentRun ? (msg.agentMode as AgentUIMode | undefined) ?? 'agent' : undefined)
   const waitingServer = !!msg.streaming && !!agentMode && agentMode !== 'agent' && msg.content.length === 0
@@ -697,36 +705,29 @@ function AgentMessageView({
           <Icon name="alert" size="sm" /><span>{msg.error}</span>
         </div>
       )}
+      {!msg.streaming && msg.content && !msg.error && cites.length === 0 && <p style={{ fontSize: 12, color: 'var(--tx-3)' }}>本轮回答没有有效原文引用，视频事实仍需核对。</p>}
       {cites.length > 0 && (
         <div className="cite-list">
-          {cites.map((cite, i) => (
-            <div key={`${cite.id}-${i}`} className="cite-card">
-              <button type="button" className="cite-card-open" aria-label={`查看证据 ${cite.id}`} onClick={() => onOpenEvidence(cite, cites)}>
-              <span className="cno">{cite.id}</span>
-              <div className="cbody">
-                <div className="chead">
-                  {showVideoTitle && <span className="cvideo">{cite.videoTitle || (cite.taskId ? `视频 ${cite.taskId}` : fallbackTitle)}</span>}
-                  {hasReplayRange(cite) && <span className="ctime mono">{citationTimeLabel(cite)}</span>}
-                  <ModalityTag modality={cite.modality} />
-                  {cite.timeRangeStatus && cite.timeRangeStatus !== 'exact' && (
-                     <span className="chip chip-mute" style={{ height: 20, fontSize: 10, padding: '0 6px' }}>{cite.timeRangeStatus === 'unknown' ? '时间未知' : '句子时间未提供'}</span>
-                  )}
-                </div>
-                <div className="cquote">{clipText(cite.modality === 'visual_caption' || cite.modality === 'visual_ocr' ? cite.displayContext || cite.content : cite.anchorQuote || cite.content, 220)}</div>
+          <p className="cite-source-count">{citationSources.length} 个来源片段 · {cites.length} 句引用</p>
+          {citationSources.map(group => {
+            const source = group.citations[0]
+            return <div key={group.key} className="cite-card cite-source-card" role="group" aria-label={`来源片段 ${citationTimeLabel(source)}`}>
+              <div className="cite-source-head chead">
+                {showVideoTitle && <span className="cvideo">{source.videoTitle || fallbackTitle}</span>}
+                <span className="ctime mono">{citationTimeLabel(source)}</span>
+                <ModalityTag modality={source.modality} />
+                {source.timeRangeStatus === 'coarse' && <span className="chip chip-mute">句子时间未提供</span>}
+                <button className="btn btn-sm cjump" onClick={() => canJump(source) ? onJump(source) : onOpenEvidence(source, cites)}><Icon name="play" size="sm" />{canJump(source) ? '回放' : '查看'}</button>
               </div>
-              </button>
-              <button
-                className="btn btn-sm cjump"
-                onClick={e => {
-                  e.stopPropagation()
-                  if (canJump(cite)) onJump(cite)
-                  else onOpenEvidence(cite, cites)
-                }}
-              >
-                <Icon name="play" size="sm" />{canJump(cite) ? '回放' : '查看'}
-              </button>
+              <div className="cite-source-quotes">{group.citations.map(cite => <button key={cite.id} type="button" className="cite-card-open" aria-label={`查看证据 ${cite.id}`} onClick={() => onOpenEvidence(cite, cites)}>
+                <span className="cno">{cite.id}</span><div className="cbody">
+                  {cite.supportStatus === 'unsupported' && <span className="chip chip-warn">结论支持不足</span>}
+                  {(cite.supportStatus === 'review_invalid' || cite.supportStatus === 'review_unavailable') && <span className="chip chip-mute">语义复核未完成</span>}
+                  <div className="cquote">{clipText(cite.modality === 'visual_caption' || cite.modality === 'visual_ocr' ? cite.displayContext || cite.content : cite.anchorQuote || cite.content, 220)}</div>
+                </div>
+              </button>)}</div>
             </div>
-          ))}
+          })}
         </div>
       )}
       <div className="answer-meta">

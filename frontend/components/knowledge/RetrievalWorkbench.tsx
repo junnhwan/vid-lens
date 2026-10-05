@@ -41,7 +41,7 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
       <label htmlFor="retrieval-question" className={styles.eyebrow}>Test query</label>
       <textarea id="retrieval-question" value={question} maxLength={1000} disabled={busy} onChange={e=>setQuestion(e.target.value)} placeholder="输入需要定位的术语、观点或问题…" />
       <div className={styles.queryBottom}><div className={styles.modes}>
-        {[['hybrid','混合检索'],['vector','仅语义'],['keyword','仅关键词']].map(([value,label])=><button key={value} type="button" aria-pressed={mode===value} disabled={busy} onClick={()=>setMode(value)}>{label}</button>)}
+        {[['hybrid','混合检索'],['vector','仅语义'],['keyword','仅关键词'],['answer','Chat 实际策略'],['agent','Agent 检索策略']].map(([value,label])=><button key={value} type="button" aria-pressed={mode===value} disabled={busy} onClick={()=>setMode(value)}>{label}</button>)}
         <label className={styles.note}>返回 <select aria-label="返回证据数量" value={topK} disabled={busy} onChange={e=>setTopK(Number(e.target.value))} style={{background:'var(--bg-2)',padding:5}}>{[3,5,10].map(n=><option key={n} value={n}>{n}</option>)}</select> 条</label>
       </div><button className="btn btn-primary" disabled={busy || !question.trim() || !kb}><Icon name="search" size="sm" />{busy?'检索中…':'运行检索'}</button></div>
     </form>
@@ -52,7 +52,7 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
       return <button key={s.id} aria-pressed={stage===s.id} disabled={busy} onClick={()=>setStage(s.id)}><span>{s.label}</span><strong>{!busy && result?total ?? 0:'—'}</strong><span className={styles.note}>{s.note}</span></button>
     })}</nav>
     {busy ? <div className={styles.resultGrid} role="status" aria-label="正在检索授权资料"><section><div className={styles.requestStatus}><span className={styles.requestSpinner} />正在查询授权资料，完成后会一起展示各阶段结果…</div>{[0,1,2].map(index=><div className={styles.resultSkeleton} key={index}><span className="skel" /><span className="skel" /><span className="skel" /></div>)}</section><aside className={styles.coverageSkeleton}><span className="skel" /><span className="skel" /><span className="skel" /></aside></div> : result ? <div className={styles.resultGrid}><section>
-      <div className={styles.meta}><span>{STAGES.find(s=>s.id===stage)?.label} · {rows.length} 条</span><span>{result.trace.duration_ms} ms</span><span>{result.mode==='hybrid'?'混合检索':result.mode==='keyword'?'仅关键词':'仅语义'}</span></div>
+      <div className={styles.meta}><span>{STAGES.find(s=>s.id===stage)?.label} · {rows.length} 条</span><span>{result.trace.duration_ms} ms</span><span>{result.mode==='answer'?'Chat 实际策略':result.mode==='agent'?'Agent 检索策略':result.mode==='hybrid'?'混合检索':result.mode==='keyword'?'仅关键词':'仅语义'}</span></div>
       {rows.map((cite,i)=><article className={styles.result} key={`${cite.evidence_id}-${i}`}>
         <h3><span><span style={{color:'var(--acc)',fontFamily:'var(--font-mono)',marginRight:12}}>{String(i+1).padStart(2,'0')}</span>{cite.video_title || `视频 ${cite.task_id}`}</span><Link className="btn btn-sm btn-ghost" href={replayLink(cite.task_id,cite.start_ms,cite.time_range_status)}><Icon name="play" size="sm" />{cite.time_range_status==='unknown'?'打开视频':'回放'}</Link></h3>
         <div className={styles.meta}><span>{cite.time_range_status === 'unknown' ? '时间未知' : formatTimeRange(cite.start_ms,cite.end_ms)}</span><span>{cite.modality==='transcript'?'转写':cite.modality==='visual_ocr'?'画面文字':cite.modality==='visual_caption'?'画面描述':'来源模态未知'}</span></div>
@@ -64,7 +64,7 @@ export function RetrievalWorkbench({ kbId }: { kbId:number }) {
       {(kb?.videos || []).map(v=><div className={styles.step} key={v.task_id}><span>{v.title || `视频 ${v.task_id}`}</span><span style={{color:counts.has(v.task_id)?'var(--acc)':'var(--tx-4)',whiteSpace:'nowrap'}}>{counts.get(v.task_id)||0} 条</span></div>)}
       <p className={styles.note} style={{marginTop:20}}>覆盖数量表示本次命中的来源，不代表未命中视频没有相关内容。</p>
       {!!result.trace.fallbacks?.length && <p className={styles.error}>发生降级：{result.trace.fallbacks.join('、')}</p>}
-      <details className={styles.details}><summary>实际检索问题</summary><p className={styles.note}>{result.trace.original_query}</p></details>
-    </aside></div> : !error && <div className={styles.empty}><Icon name="search" size="lg" /><p>从一个具体问题开始。</p><p>可以用同一个问题分别运行三种检索方式，对比术语命中与语义覆盖。</p></div>}
+      <details className={styles.details}><summary>实际检索问题与参数</summary><p>TopK={result.trace.top_k} · CandidateK={result.trace.candidate_k} · 向量={String(result.trace.vector_enabled)} · 关键词={String(result.trace.keyword_enabled)}</p><p className={styles.note}>{result.trace.original_query}</p></details>
+    </aside></div> : !busy && !error && <div className={styles.empty}><Icon name="search" size="lg" /><p>从一个具体问题开始。</p><p>可以用同一个问题分别运行三种检索方式，对比术语命中与语义覆盖。</p></div>}
   </div>
 }

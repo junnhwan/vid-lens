@@ -29,7 +29,7 @@ import { useToast } from '@/components/Toast'
 import { Icon } from '@/components/ui/Icon'
 import { ConfirmModal, Modal } from '@/components/ui/Modal'
 import KBModal from '@/components/KBModal'
-import { expandTranscript } from '@/lib/transcript'
+import { groupTranscriptSources } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { VisualProgressPanel } from '@/components/VisualProgressPanel'
@@ -352,7 +352,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     () => (timeline?.atoms || []).filter(a => a.modality === 'transcript'),
     [timeline],
   )
-  const transcriptRows = useMemo(() => expandTranscript(transcriptAtoms), [transcriptAtoms])
+  const transcriptRows = useMemo(() => groupTranscriptSources(transcriptAtoms), [transcriptAtoms])
   const citationUpgradeAvailable = transcriptAtoms.some(atom => needsCitationUpgrade({ modality: atom.modality, startMS: atom.start_ms, endMS: atom.end_ms, timeRangeStatus: atom.time_range_status }))
   useEffect(() => {
     if (searchParams?.citations !== 'upgrade' || !timeline) return
@@ -646,10 +646,12 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 key={a.id}
                 ref={i === liveIndex ? liveRowRef : undefined}
                 className={`t-row${a.time_range_status !== 'exact' ? ' coarse' : ''}${i === liveIndex ? ' live' : ''}`}
-                onClick={() => { if (a.time_range_status !== 'unknown') seek(a.start_ms) }}
               >
-                <span className="ts">{a.time_range_status === 'unknown' ? '时间未知' : a.time_range_status === 'exact' ? formatTime(a.start_ms) : <>{formatTimeRange(a.start_ms, a.end_ms)}<small>原片段</small></>}</span>
-                <ClampRead className="tx">{a.content}</ClampRead>
+                <button type="button" className="transcript-time" disabled={a.time_range_status === 'unknown'} aria-label={a.time_range_status === 'unknown' ? '来源时间未知' : `回放 ${formatTime(a.start_ms)}`} onClick={() => seek(a.start_ms)}>
+                  <span className="ts">{a.time_range_status === 'unknown' ? '时间未知' : a.time_range_status === 'exact' ? formatTimeRange(a.start_ms, a.end_ms) : <>{formatTimeRange(a.start_ms, a.end_ms)}<small>{a.end_ms - a.start_ms <= 30000 ? '约定位' : '原片段'}</small></>}</span>
+                  {a.time_range_status !== 'unknown' && <Icon name="play" size="sm" />}
+                </button>
+                <ClampRead className="tx transcript-paragraphs">{a.paragraphs.map((text, paragraph) => <p key={paragraph}>{text}</p>)}</ClampRead>
               </div>
             ))}
           </div>

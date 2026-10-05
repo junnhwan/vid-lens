@@ -417,6 +417,11 @@ export interface Citation {
   chunk_index: number // 显示"片段 #N"
   score: number
   content: string
+  claim_texts?: string[]
+  claim_end_runes?: number[]
+  quote_truncated?: boolean
+  quote_omitted?: boolean
+  support_status?: string
   anchor_quote?: string
   display_context?: string
   start_ms: number

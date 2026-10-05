@@ -37,6 +37,23 @@ export interface TimedText {
   time_range_status?: string
 }
 
+// Reading paragraphs belong inside a single observed source window. Merge
+// adjacent projections with that same window; never invent per-paragraph time.
+export function groupTranscriptSources<T extends TimedText>(atoms: T[]): (T & { paragraphs: string[] })[] {
+  const groups: (T & { paragraphs: string[] })[] = []
+  for (const atom of atoms) {
+    const paragraphs = splitForReading(atom.content)
+    if (!paragraphs.length) continue
+    const status = atom.time_range_status || 'coarse'
+    const previous = groups[groups.length - 1]
+    const timed = status !== 'unknown' && Number.isFinite(atom.start_ms) && Number.isFinite(atom.end_ms) && atom.start_ms >= 0 && atom.end_ms > atom.start_ms
+    if (timed && previous && previous.time_range_status === status && previous.start_ms === atom.start_ms && previous.end_ms === atom.end_ms) {
+      previous.paragraphs.push(...paragraphs)
+    } else groups.push({ ...atom, time_range_status: status, paragraphs })
+  }
+  return groups
+}
+
 export function expandTranscript<T extends TimedText>(atoms: T[]): (T & Pick<TimedText, 'time_range_status'>)[] {
   const out: (T & Pick<TimedText, 'time_range_status'>)[] = []
   for (const atom of atoms) {

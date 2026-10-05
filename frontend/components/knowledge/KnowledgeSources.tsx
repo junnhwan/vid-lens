@@ -1,7 +1,8 @@
 import Link from '@/lib/router'
 import type { KnowledgeBase } from '@/lib/types'
 import type { CiteRef } from '@/components/Citation'
-import { formatTimeRange } from '@/components/Citation'
+import { citationTimeLabel } from '@/components/Citation'
+import { groupCitationSources } from '@/lib/citationGroups'
 import { Icon } from '@/components/ui/Icon'
 import styles from './KnowledgeWorkspace.module.css'
 
@@ -26,11 +27,13 @@ export function KnowledgeEvidence({ cites, onOpen }: { cites: CiteRef[]; onOpen:
   for (const cite of cites) { const id = cite.taskId || 0; groups.set(id, [...(groups.get(id) || []), cite]) }
   return <div className={styles.groups}>
     {Array.from(groups, ([id, items]) => <section key={id}>
-      <h3 className={styles.groupTitle}><Icon name="video" size="sm" />{items[0].videoTitle || `视频 ${id}`} · {items.length} 条</h3>
-      {items.map(cite => <button key={cite.id} className={styles.evidence} onClick={() => onOpen(cite, cites)}>
-        <span className={styles.meta}>{cite.id} · {cite.timeRangeStatus === 'unknown' ? '时间未知' : formatTimeRange(cite.startMS, cite.endMS)} · {cite.modality === 'transcript' ? '转写' : cite.modality === 'visual_ocr' ? '画面文字' : '画面描述'}</span>
-        <p>{(cite.anchorQuote || cite.content || '').slice(0, 180)}</p><span className={styles.note}>查看证据与回放 →</span>
-      </button>)}
+      <h3 className={styles.groupTitle}><Icon name="video" size="sm" />{items[0].videoTitle || '来源视频'} · {groupCitationSources(items).length} 个片段 · {items.length} 句引用</h3>
+      {groupCitationSources(items).map(group => <div key={group.key} className="knowledge-evidence-source" role="group" aria-label={`来源片段 ${citationTimeLabel(group.citations[0])}`}>
+        <div className={styles.meta}>{citationTimeLabel(group.citations[0])} · {group.citations[0].modality === 'transcript' ? '转写' : group.citations[0].modality === 'visual_ocr' ? '画面文字' : '画面描述'}</div>
+        {group.citations.map(cite => <button key={cite.id} className={styles.evidence} onClick={() => onOpen(cite, cites)}>
+          <span className={styles.meta}>{cite.id}</span><p>{(cite.anchorQuote || cite.content || '').slice(0, 180)}{(cite.anchorQuote || cite.content || '').length>180 ? '…（预览省略，点击展开）' : ''}</p><span className={styles.note}>查看原文 →</span>
+        </button>)}
+      </div>)}
     </section>)}
     {cites.length === 0 && <p className={styles.note}>研究完成后，引用会按来源视频分组显示，方便逐条核对。</p>}
   </div>

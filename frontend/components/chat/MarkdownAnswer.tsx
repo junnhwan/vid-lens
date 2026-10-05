@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { peelDomainTags, parseMarkdown, unwrapMarkdownFence } from '@/lib/markdown'
 
-const citePattern = /\[C(\d+)\]/g
+import { renderCitationNodes } from '@/lib/citationNodes'
 
 export function MarkdownAnswer({ content, onCite, domainTags = false }: {
   content: string
@@ -44,17 +44,5 @@ export function MarkdownAnswer({ content, onCite, domainTags = false }: {
 }
 
 function Citations({ children, onCite }: { children: React.ReactNode; onCite?: (n: number) => void }) {
-  return <>{React.Children.map(children, (child, i) => <CitationText key={i} value={child} onCite={onCite} />)}</>
-}
-
-function CitationText({ value, onCite }: { value: React.ReactNode; onCite?: (n: number) => void }) {
-  if (React.isValidElement<{ children?: React.ReactNode }>(value)) {
-    // Markdown line breaks, images and task checkboxes are void elements.
-    // Adding even an empty citation wrapper as children makes React reject them.
-    if (value.props.children == null || value.type === Citations || value.type === 'code' || value.type === 'a' || value.type === 'button') return value
-    return React.cloneElement(value, { children: <Citations onCite={onCite}>{value.props.children}</Citations> })
-  }
-  if (typeof value !== 'string') return <>{value}</>
-  const parts = value.split(citePattern)
-  return <>{parts.map((part, i) => i % 2 ? onCite ? <button type="button" className="cite" key={i} onClick={() => onCite(Number(part))} title="查看证据详情">C{part}</button> : <span className="cite" key={i}>C{part}</span> : part)}</>
+  return <>{renderCitationNodes(children, onCite)}</>
 }

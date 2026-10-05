@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { expandTranscript, splitForReading } from './transcript.ts'
+import { expandTranscript, groupTranscriptSources, splitForReading } from './transcript.ts'
 
 describe('splitForReading', () => {
   it('keeps short text intact', () => {
@@ -12,6 +12,27 @@ describe('splitForReading', () => {
     const parts = splitForReading(blob)
     assert.ok(parts.length >= 2)
     assert.equal(parts.join(''), blob.replace(/\s+/g, ' ').trim())
+  })
+})
+
+describe('groupTranscriptSources', () => {
+  it('keeps all reading paragraphs under one observed window', () => {
+    const text = '完整的前文与后文都应该保留。'.repeat(30)
+    const [group] = groupTranscriptSources([{ id: 'a', start_ms: 0, end_ms: 300000, content: text }, { id: 'b', start_ms: 0, end_ms: 300000, content: '后面的原句。' }])
+    assert.ok(group.paragraphs.length > 1)
+    assert.equal(group.paragraphs.join(''), text + '后面的原句。')
+    assert.equal(group.start_ms, 0)
+    assert.equal(group.end_ms, 300000)
+  })
+
+  it('does not combine different native times or unknown source positions', () => {
+    const rows = groupTranscriptSources([
+      { id: 'a', start_ms: 0, end_ms: 2000, content: '第一句。', time_range_status: 'exact' },
+      { id: 'b', start_ms: 2000, end_ms: 4000, content: '第二句。', time_range_status: 'exact' },
+      { id: 'c', start_ms: 0, end_ms: 0, content: '无时间的甲。', time_range_status: 'unknown' },
+      { id: 'd', start_ms: 0, end_ms: 0, content: '无时间的乙。', time_range_status: 'unknown' },
+    ])
+    assert.equal(rows.length, 4)
   })
 })
 
