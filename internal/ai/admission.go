@@ -57,7 +57,11 @@ func checkAdmission(ctx context.Context, a Admission, c Call) error {
 }
 
 func beginAdmission(ctx context.Context, a Admission, call Call) (func(error), error) {
-	if err := checkAdmission(ctx, a, call); err != nil {
+	check := checkAdmission
+	if call.Operation == "asr" {
+		check = waitASRAdmission
+	}
+	if err := check(ctx, a, call); err != nil {
 		return nil, err
 	}
 	q, ok := a.(*QuotaAdmission)
@@ -82,6 +86,34 @@ func beginAdmission(ctx context.Context, a Admission, call Call) (func(error), e
 				slog.String("operation", call.Operation), slog.String("error", observability.SafeError(err)))
 		}
 	}, nil
+}
+
+// ASR is queued background work. Waiting for a local quota slot does not issue
+// another provider call and must not consume the shared provider retry budget.
+// Bound the wait and honor cancellation; provider errors retain normal retries.
+func waitASRAdmission(ctx context.Context, a Admission, call Call) error {
+	waitCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := checkAdmission(waitCtx, a, call)
+		var rejected *AdmissionError
+		if !errors.As(err, &rejected) || rejected.Decision.RetryAfter <= 0 {
+			return err
+		}
+		timer := time.NewTimer(rejected.Decision.RetryAfter)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-waitCtx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+	}
 }
 
 type admittedChat struct {
@@ -213,30 +245,12 @@ func (q *QuotaAdmission) Admit(ctx context.Context, c Call) (quota.Decision, err
 	if c.Subject == "" {
 		c.Subject = metadata.Subject
 	}
-	// The shared budget limits extra retry work, not the normal first call of
-	// each logical operation. A retry decorator sets AttemptKey only when it is
-	// about to issue an additional provider request. This prevents a long ASR
-	// task's legitimate chunks from exhausting a task-level retry allowance.
-	if q.Attempts != nil && metadata.RetryBudgetID != "" && metadata.AttemptKey != "" {
-		now := time.Now()
-		if q.Now != nil {
-			now = q.Now()
-		}
-		attemptKey := metadata.AttemptKey
-		decision, err := q.Attempts.Consume(metadata.RetryBudgetID, attemptKey, model.RetryAttemptLayerProvider, now)
-		if err != nil {
-			return quota.Decision{}, err
-		}
-		if !decision.Allowed {
-			return quota.Decision{}, &RetryBudgetError{Decision: decision}
-		}
-	}
 	subject := c.Subject
 	if subject == "" {
 		subject = "system"
 	}
 	if q.Limiter == nil {
-		return quota.Decision{Allowed: true}, nil
+		return quota.Decision{Allowed: true}, q.consumeRetryAttempt(ctx)
 	}
 	b := []quota.Bucket{}
 	add := func(scope, key string, r BucketRule) {
@@ -253,8 +267,33 @@ func (q *QuotaAdmission) Admit(ctx context.Context, c Call) (quota.Decision, err
 	add("provider", c.Provider, q.Provider)
 	add("model", c.Provider+":"+c.Model, q.Model)
 	d, err := q.Limiter.AcquireForOperation(ctx, c.Operation, b)
-	if err != nil && d.Allowed {
+	if d.Allowed {
+		if budgetErr := q.consumeRetryAttempt(ctx); budgetErr != nil {
+			return quota.Decision{}, budgetErr
+		}
+		// Preserve the limiter's configured fail-open behavior.
 		return d, nil
 	}
 	return d, err
+}
+
+func (q *QuotaAdmission) consumeRetryAttempt(ctx context.Context) error {
+	metadata := GovernanceContextFromContext(ctx)
+	// Only an admitted additional provider request consumes a retry permit.
+	// Local quota denials and every operation's first call consume none.
+	if q.Attempts == nil || metadata.RetryBudgetID == "" || metadata.AttemptKey == "" {
+		return nil
+	}
+	now := time.Now()
+	if q.Now != nil {
+		now = q.Now()
+	}
+	decision, err := q.Attempts.Consume(metadata.RetryBudgetID, metadata.AttemptKey, model.RetryAttemptLayerProvider, now)
+	if err != nil {
+		return err
+	}
+	if !decision.Allowed {
+		return &RetryBudgetError{Decision: decision}
+	}
+	return nil
 }
