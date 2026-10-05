@@ -29,22 +29,23 @@ type VideoAgentToolRuntime struct {
 	// ArtifactEdit is present only for the study-edit-v1 recipe. Keeping it
 	// request-scoped prevents the default video chat registry from acquiring
 	// artifact write authority.
-	ArtifactEdit     *ArtifactEditToolRuntime
-	AnswerPreference string
-	TermRules        VideoTermRuleSet
-	VideoMaps        []VideoMap
-	MaxVisualFrames  int
-	MaxOutputTokens  int64
-	ReportUsage      func(VideoAgentLoopPlannerCallUsage)
-	TaskIDs          []int64
-	ValidateScope    func(context.Context) error
-	UserID           int64
-	TaskID           int64
-	Recent           []model.ChatMessage
-	TopK             int
-	EmbeddingModel   string
-	Embedding        ai.EmbeddingClient
-	MemorySnapshot   *MemorySnapshot
+	ArtifactEdit      *ArtifactEditToolRuntime
+	AnswerPreference  string
+	TermRules         VideoTermRuleSet
+	VideoMaps         []VideoMap
+	MaxVisualFrames   int
+	MaxOutputTokens   int64
+	ReportUsage       func(VideoAgentLoopPlannerCallUsage)
+	TaskIDs           []int64
+	ValidateScope     func(context.Context) error
+	UserID            int64
+	TaskID            int64
+	Recent            []model.ChatMessage
+	TopK              int
+	EmbeddingModel    string
+	Embedding         ai.EmbeddingClient
+	MemorySnapshot    *MemorySnapshot
+	CollectionContext string
 }
 
 // VideoAgentToolRequest is the only input surface exposed by the registry.

@@ -23,6 +23,8 @@ type chatExecutionStep struct {
 }
 
 type chatExecutionRecord struct {
+	Scope     *retrievalScope
+	Retrieval *RetrievalTrace
 	Mode      string
 	Profile   ai.Profile
 	Steps     []chatExecutionStep

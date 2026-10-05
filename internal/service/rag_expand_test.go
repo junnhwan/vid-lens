@@ -11,7 +11,7 @@ import (
 
 func TestContextExpanderExpandsHitWithNeighborWindow(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+	seedTimedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
 		"chunk-0", "chunk-1", "chunk-2", "chunk-3", "chunk-4", "chunk-5", "chunk-6",
 	})
 	expander := &ContextExpander{repos: repos, Radius: 1, MaxCharsPerCitation: 200}
@@ -41,7 +41,7 @@ func TestContextExpanderExpandsHitWithNeighborWindow(t *testing.T) {
 
 func TestContextExpanderDedupesDuplicateHits(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{"chunk-0", "chunk-1", "chunk-2"})
+	seedTimedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{"chunk-0", "chunk-1", "chunk-2"})
 	expander := &ContextExpander{repos: repos, Radius: 1, MaxCharsPerCitation: 200}
 
 	expanded, err := expander.Expand(context.Background(), 7, 1, "text-embedding-3-small", []RetrievedChunk{
@@ -58,7 +58,7 @@ func TestContextExpanderDedupesDuplicateHits(t *testing.T) {
 
 func TestContextExpanderRespectsMaxCharsPerCitation(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+	seedTimedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
 		"aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc",
 	})
 	expander := &ContextExpander{repos: repos, Radius: 1, MaxCharsPerCitation: 18}
@@ -124,7 +124,7 @@ func containsFallback(fallbacks []string, want string) bool {
 
 func TestContextExpanderTruncationAlwaysKeepsFullAnchor(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+	seedTimedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
 		"left-neighbor-is-long", "ANCHOR-EVIDENCE", "right-neighbor-is-long",
 	})
 	expander := &ContextExpander{repos: repos, Radius: 1, MaxCharsPerCitation: 12}
@@ -149,5 +149,24 @@ func TestContextExpanderTruncationAlwaysKeepsFullAnchor(t *testing.T) {
 	}
 	if !expanded[0].WindowTruncated {
 		t.Fatal("WindowTruncated = false, want true when neighbors are omitted")
+	}
+}
+
+func seedTimedVideoChunks(t *testing.T, repos *repository.Repositories, userID, taskID int64, embeddingModel string, contents []string) {
+	t.Helper()
+	seedVideoChunks(t, repos, userID, taskID, embeddingModel, contents)
+	rows, err := repos.VideoChunk.ListByTaskID(userID, taskID, embeddingModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		rows[i].Modality = model.ChunkModalityTranscript
+		rows[i].SourceMappingStatus = model.ChunkSourceMapped
+		rows[i].TimeRangeStatus = model.ChunkTimeRangeExact
+		rows[i].StartMS = int64(i) * 1000
+		rows[i].EndMS = int64(i+1) * 1000
+	}
+	if err := repos.VideoChunk.ReplaceTaskChunks(taskID, embeddingModel, rows); err != nil {
+		t.Fatal(err)
 	}
 }

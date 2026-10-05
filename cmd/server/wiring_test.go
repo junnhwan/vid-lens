@@ -119,7 +119,7 @@ func TestProductionRetrievalConfigUsesOriginalQueryWithoutExpansion(t *testing.T
 	if cfg.TopK != 5 || cfg.CandidateK != 17 {
 		t.Fatalf("retrieval sizes = topK:%d candidateK:%d", cfg.TopK, cfg.CandidateK)
 	}
-	if cfg.NeighborRadius != 0 {
+	if cfg.NeighborRadius != 1 {
 		t.Fatalf("post retrieval config = neighbor:%d, want 0 (no expansion)", cfg.NeighborRadius)
 	}
 }

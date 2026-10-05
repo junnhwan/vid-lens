@@ -144,6 +144,7 @@ func buildPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefin
 			return messages, nil
 		}
 		view.Steps = nil
+		view.CollectionContext = boundedVideoText(view.CollectionContext, 1200)
 		view.VideoMaps = append([]VideoMap(nil), view.VideoMaps...)
 		for i := range view.VideoMaps {
 			view.VideoMaps[i].Summary = boundedVideoText(view.VideoMaps[i].Summary, 200)

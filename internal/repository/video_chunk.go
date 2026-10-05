@@ -140,9 +140,67 @@ func (r *VideoChunkRepository) SearchTasksByBM25(ctx context.Context, userID int
 	if userID <= 0 || len(taskIDs) == 0 {
 		return nil, nil
 	}
-	terms = normalizeSearchTerms(terms)
-	if len(terms) == 0 {
+	corpus, err := r.LoadBM25Corpus(ctx, userID, taskIDs, embeddingModel)
+	if err != nil {
+		return nil, err
+	}
+	return corpus.Search(ctx, terms, taskIDs, limit)
+}
+
+// BM25Corpus is immutable and request-scoped; target searches retain collection statistics.
+type BM25Corpus struct {
+	chunks    []model.VideoChunk
+	freqs     []map[string]int
+	lengths   []float64
+	docFreq   map[string]int
+	avgLength float64
+}
+
+func (r *VideoChunkRepository) LoadBM25Corpus(ctx context.Context, userID int64, taskIDs []int64, embeddingModel string) (*BM25Corpus, error) {
+	var chunks []model.VideoChunk
+	if userID > 0 && len(taskIDs) > 0 {
+		if err := r.db.WithContext(ctx).Where("user_id = ? AND task_id IN ? AND embedding_model = ?", userID, taskIDs, embeddingModel).Order("task_id ASC, chunk_index ASC, id ASC").Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+	}
+	return NewBM25Corpus(ctx, chunks)
+}
+
+func NewBM25Corpus(ctx context.Context, chunks []model.VideoChunk) (*BM25Corpus, error) {
+	c := &BM25Corpus{chunks: chunks, docFreq: map[string]int{}}
+	total := 0.0
+	for _, chunk := range chunks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		tokens := tokenizeBM25Text(chunk.Content)
+		freq := map[string]int{}
+		for _, token := range tokens {
+			freq[token]++
+		}
+		for term := range freq {
+			c.docFreq[term]++
+		}
+		c.freqs = append(c.freqs, freq)
+		length := float64(max(1, len(tokens)))
+		c.lengths = append(c.lengths, length)
+		total += length
+	}
+	c.avgLength = 1
+	if len(chunks) > 0 {
+		c.avgLength = total / float64(len(chunks))
+	}
+	return c, nil
+}
+
+func (c *BM25Corpus) Search(ctx context.Context, terms []string, taskIDs []int64, limit int) ([]VideoChunkSearchResult, error) {
+	if c == nil {
 		return nil, nil
+	}
+	terms = normalizeSearchTerms(terms)
+	allowed := map[int64]bool{}
+	for _, id := range taskIDs {
+		allowed[id] = true
 	}
 	if limit <= 0 {
 		limit = 20
@@ -150,78 +208,31 @@ func (r *VideoChunkRepository) SearchTasksByBM25(ctx context.Context, userID int
 	if limit > 50 {
 		limit = 50
 	}
-
-	var chunks []model.VideoChunk
-	err := r.db.WithContext(ctx).Where("user_id = ? AND task_id IN ? AND embedding_model = ?", userID, taskIDs, embeddingModel).
-		Order("task_id ASC, chunk_index ASC, id ASC").Find(&chunks).Error
-	if err != nil {
-		return nil, err
-	}
-	if len(chunks) == 0 {
-		return nil, nil
-	}
-
-	docLengths := make([]float64, len(chunks))
-	termFreqs := make([]map[string]int, len(chunks))
-	docFreq := make(map[string]int, len(terms))
-	totalLength := 0.0
-	for i, chunk := range chunks {
+	const k1, b = 1.5, 0.75
+	results := make([]VideoChunkSearchResult, 0)
+	n := float64(len(c.chunks))
+	for i, chunk := range c.chunks {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		tokens := tokenizeBM25Text(chunk.Content)
-		length := float64(len(tokens))
-		if length <= 0 {
-			length = 1
+		if !allowed[chunk.TaskID] {
+			continue
 		}
-		docLengths[i] = length
-		totalLength += length
-		allFreqs := make(map[string]int, len(tokens))
-		for _, token := range tokens {
-			allFreqs[token]++
-		}
-		freqs := make(map[string]int, len(terms))
-		for _, term := range terms {
-			count := allFreqs[term]
-			if count > 0 {
-				freqs[term] = count
-				docFreq[term]++
-			}
-		}
-		termFreqs[i] = freqs
-	}
-	avgDocLength := totalLength / float64(len(chunks))
-	if avgDocLength <= 0 {
-		avgDocLength = 1
-	}
-
-	const k1 = 1.5
-	const b = 0.75
-	results := make([]VideoChunkSearchResult, 0, len(chunks))
-	n := float64(len(chunks))
-	for i, chunk := range chunks {
 		score := 0.0
 		for _, term := range terms {
-			tf := float64(termFreqs[i][term])
+			tf := float64(c.freqs[i][term])
 			if tf == 0 {
 				continue
 			}
-			df := float64(docFreq[term])
+			df := float64(c.docFreq[term])
 			idf := math.Log(1 + (n-df+0.5)/(df+0.5))
-			denom := tf + k1*(1-b+b*(docLengths[i]/avgDocLength))
-			score += idf * ((tf * (k1 + 1)) / denom)
+			score += idf * (tf * (k1 + 1)) / (tf + k1*(1-b+b*c.lengths[i]/c.avgLength))
 		}
 		if score > 0 {
 			results = append(results, VideoChunkSearchResult{Chunk: chunk, Score: score})
 		}
 	}
-
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
-		}
-		return results[i].Chunk.ChunkIndex < results[j].Chunk.ChunkIndex
-	})
+	sort.SliceStable(results, func(i, j int) bool { return results[i].Score > results[j].Score })
 	if len(results) > limit {
 		results = results[:limit]
 	}

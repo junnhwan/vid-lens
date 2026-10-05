@@ -95,6 +95,12 @@ func (s *ChatService) AskStreamWithMode(ctx context.Context, mode ChatMode, user
 
 	// The done event replaces provider deltas with the persisted, citation-cleaned answer.
 	constrained := finalizeChatAnswer(prepared, answer)
+	if s.cfg.ReviewCitationSupport {
+		constrained.Citations, _, err = reviewCitationSupport(ctx, chat, constrained.Answer, constrained.Citations)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
 	result, err := s.saveChatExchangeWithStatus(ctx, userID, sessionID, prepared.Question, constrained.Answer, constrained.Citations, prepared.RecentLimit, profile.LLMModel, degradationReason, prepared.FrozenMemberIDs)
 	if err != nil {
 		return nil, err

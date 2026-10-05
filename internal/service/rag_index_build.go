@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,13 +21,14 @@ const (
 var ErrRAGIndexAlreadyBuilding = errors.New("索引正在构建中，请等待现有任务完成")
 
 type ragIndexBuild struct {
-	service     *RAGIndexService
-	userID      int64
-	taskID      int64
-	fileMD5     string
-	modelName   string
-	expectedDim int
-	startedAt   time.Time
+	indexContext string
+	service      *RAGIndexService
+	userID       int64
+	taskID       int64
+	fileMD5      string
+	modelName    string
+	expectedDim  int
+	startedAt    time.Time
 }
 
 func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int64, embedding ai.EmbeddingClient, profile ai.Profile) (*RAGIndexResult, error) {
@@ -41,6 +44,11 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	}
 
 	build := s.newRAGIndexBuild(userID, taskID, task.FileMD5, profile)
+	build.indexContext, err = s.taskIndexContext(task)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := build.start(); err != nil {
 		return nil, err
 	}
@@ -227,7 +235,7 @@ func (b *ragIndexBuild) complete(chunkCount int, manifest string) error {
 		"status": model.RAGIndexStatusIndexed, "chunk_count": chunkCount,
 		"completed_chunks": chunkCount, "total_chunks": chunkCount,
 		"build_phase": "completed", "wait_reason": "", "next_retry_at": nil,
-		"chunk_manifest_sha256": manifest, "finished_at": finishedAt,
+		"chunk_manifest_sha256": manifest, "index_context_sha256": indexContextHash(b.indexContext), "finished_at": finishedAt,
 		"chunker_strategy": b.service.cfg.ChunkerStrategy, "chunker_version": b.service.cfg.ChunkerVersion,
 		"chunk_size": b.service.cfg.ChunkSize, "chunk_overlap": b.service.cfg.ChunkOverlap,
 		"source_mapping_version": model.CurrentRAGSourceMappingVersion,
@@ -273,7 +281,7 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 		if err := b.progress("embedding", len(dbChunks), "", nil); err != nil {
 			return nil, nil, err
 		}
-		vector, err := embedWithAdmissionProgress(ctx, embedding, chunk.Content, func(reason string, retryAt time.Time) error {
+		vector, err := embedWithAdmissionProgress(ctx, embedding, (model.VideoChunk{IndexContext: b.indexContext, Content: chunk.Content}).EmbeddingText(), func(reason string, retryAt time.Time) error {
 			return b.progress("waiting", len(dbChunks), reason, &retryAt)
 		})
 		if err != nil {
@@ -297,6 +305,7 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 			TaskID:         b.taskID,
 			ChunkIndex:     chunk.Index,
 			Content:        chunk.Content,
+			IndexContext:   b.indexContext,
 			ContentHash:    hash,
 			TokenCount:     chunk.TokenCount,
 			EmbeddingModel: b.modelName,
@@ -346,4 +355,34 @@ func (b *ragIndexBuild) persistChunkSource(ctx context.Context, dbChunks []model
 		return "", err
 	}
 	return manifest, nil
+}
+
+func indexContextHash(text string) string {
+	h := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(h[:])
+}
+func (s *RAGIndexService) taskIndexContext(task *model.VideoTask) (string, error) {
+	title := task.Title
+	if title == "" {
+		title = task.Filename
+	}
+	text := "视频：" + boundedVideoText(title, 200)
+	if s.repos.SummaryRevision != nil {
+		effective, err := s.repos.SummaryRevision.Effective(context.Background(), task.UserID, task.ID)
+		if err != nil {
+			return "", err
+		}
+		if effective.Content != "" {
+			text += "\n概要导航（非原文）：" + boundedVideoText(effective.Content, 600)
+		}
+	} else if s.repos.Summary != nil {
+		summary, err := s.repos.Summary.FindByTaskID(task.ID)
+		if err != nil {
+			return "", err
+		}
+		if summary != nil {
+			text += "\n概要导航（非原文）：" + boundedVideoText(summary.Content, 600)
+		}
+	}
+	return text, nil
 }

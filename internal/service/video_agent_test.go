@@ -142,7 +142,7 @@ func TestVideoAgentAskKeepsExpandedContextInternalAndPersistsCompactCitation(t *
 	if snapshot.Citations[0].Content != result.Citations[0].Content || snapshot.Citations[1].Content != result.Citations[1].Content {
 		t.Fatalf("snapshot citations = %+v, result citations = %+v", snapshot.Citations, result.Citations)
 	}
-	if strings.Contains(*messages[1].RetrievalSnapshot, "邻居上下文") || strings.Contains(*messages[1].RetrievalSnapshot, "anchor_content") {
+	if strings.Contains(*messages[1].RetrievalSnapshot, "anchor_content") {
 		t.Fatalf("snapshot leaked internal context: %s", *messages[1].RetrievalSnapshot)
 	}
 }

@@ -54,6 +54,13 @@ func TestContextExpanderUsesEachCitationTaskID(t *testing.T) {
 		{UserID: 7, TaskID: 2, ChunkIndex: 0, Content: "video-2 neighbor", EmbeddingModel: "embed", VectorID: "2-0", ContentHash: "h20"},
 		{UserID: 7, TaskID: 2, ChunkIndex: 1, Content: "video-2 anchor", EmbeddingModel: "embed", VectorID: "2-1", ContentHash: "h21"},
 	}
+	for i := range chunks {
+		chunks[i].Modality = model.ChunkModalityTranscript
+		chunks[i].SourceMappingStatus = model.ChunkSourceMapped
+		chunks[i].TimeRangeStatus = model.ChunkTimeRangeExact
+		chunks[i].StartMS = int64(chunks[i].ChunkIndex) * 1000
+		chunks[i].EndMS = chunks[i].StartMS + 1000
+	}
 	if err := repos.VideoChunk.ReplaceTaskChunks(1, "embed", chunks[:2]); err != nil {
 		t.Fatal(err)
 	}

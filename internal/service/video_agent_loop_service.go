@@ -50,8 +50,10 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		return nil, errors.New("无权访问此会话")
 	}
 	var memberIDs []int64
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
-		memberIDs, err = s.chatSvc.sessionRetrievalTaskIDs(req.UserID, session, profile.EmbeddingModel)
+	var scope retrievalScope
+	if scopeOfSession(session) == ScopeCollection {
+		scope, err = s.chatSvc.sessionRetrievalScope(req.UserID, session, profile.EmbeddingModel)
+		memberIDs = scope.Ready
 		if err != nil {
 			return nil, err
 		}
@@ -112,8 +114,9 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			}
 			frozenPolicy.TermSnapshotHash = artifact.Hash(artifact.JSON(frozenPolicy.TermRules))
 		}
+		frozenPolicy.AuthorizedMemberTaskIDs = scope.Members
 	}
-	if len(memberIDs) > 0 && !sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) {
+	if len(memberIDs) > 0 && (!sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) || (len(frozenPolicy.AuthorizedMemberTaskIDs) > 0 && !sameTaskIDs(scope.Members, frozenPolicy.AuthorizedMemberTaskIDs))) {
 		return nil, errKnowledgeMembershipChanged
 	}
 	run, err := s.ensureAgentRun(ctx, runID, req.UserID, session, req.Goal, string(VideoAgentLoopTemplate), "default", profile, frozenPolicy, budget)
@@ -179,13 +182,14 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if err != nil {
 		return nil, err
 	}
-	if session.ScopeType == model.ChatScopeKnowledgeBase {
+	if scopeOfSession(session) == ScopeCollection {
 		recentLimit = 0
 	}
 	memorySnapshot := s.loadSessionAgentMemorySnapshot(ctx, req.UserID, session, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
 	pipeline := s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile)
 	// The Planner supplies the search query; do not hide another LLM call inside a tool.
+	pipeline.applyPolicy(PolicyFor(IntentDirectQA, scopeOfSession(session)))
 	pipeline.rewriter = NoopQueryRewriter{}
 	tools := NewVideoAgentTools(s.chatSvc.repos, pipeline, chat)
 	answerPreference := ""
@@ -232,11 +236,11 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			if err := checkCtx.Err(); err != nil {
 				return err
 			}
-			current, checkErr := s.chatSvc.sessionRetrievalTaskIDs(req.UserID, session, profile.EmbeddingModel)
+			current, checkErr := s.chatSvc.sessionRetrievalScope(req.UserID, session, profile.EmbeddingModel)
 			if checkErr != nil {
 				return checkErr
 			}
-			if !sameTaskIDs(memberIDs, current) {
+			if !sameTaskIDs(memberIDs, current.Ready) || !sameTaskIDs(scope.Members, current.Members) {
 				return errKnowledgeMembershipChanged
 			}
 			return nil
@@ -246,24 +250,32 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if len(mapTaskIDs) == 0 {
 		mapTaskIDs = []int64{session.TaskID}
 	}
-	videoMaps, err := s.chatSvc.loadVideoMaps(ctx, req.UserID, mapTaskIDs)
+	navigationChat := &journaledResearchChat{chat: chat, journal: journal, userID: req.UserID, runID: runID, purpose: "summary_navigation"}
+	route, err := s.chatSvc.routeCollection(ctx, req.UserID, mapTaskIDs, req.Goal, navigationChat)
+	videoMaps := route.Maps
+	if len(memberIDs) == 0 {
+		videoMaps, err = s.chatSvc.loadVideoMaps(ctx, req.UserID, mapTaskIDs)
+	}
 	if err != nil {
 		return nil, err
 	}
+	pipeline.CollectionTargets, pipeline.RoutedTargets, pipeline.RequiredDimensions = route.Required, route.routedIDs(), route.Dimensions
+	tools.SetCollectionContext(scope.coveragePrompt() + "\n" + collectionRoutePrompt(route))
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
-		AnswerPreference: answerPreference,
-		TermRules:        frozenPolicy.TermRules,
-		VideoMaps:        videoMaps,
-		MaxVisualFrames:  budget.MaxFrames,
-		UserID:           req.UserID,
-		TaskID:           session.TaskID,
-		TaskIDs:          memberIDs,
-		ValidateScope:    validateScope,
-		Recent:           recent,
-		TopK:             req.TopK,
-		EmbeddingModel:   profile.EmbeddingModel,
-		Embedding:        embedding,
-		MemorySnapshot:   memorySnapshot,
+		AnswerPreference:  answerPreference,
+		TermRules:         frozenPolicy.TermRules,
+		VideoMaps:         videoMaps,
+		MaxVisualFrames:   budget.MaxFrames,
+		UserID:            req.UserID,
+		TaskID:            session.TaskID,
+		TaskIDs:           memberIDs,
+		ValidateScope:     validateScope,
+		Recent:            recent,
+		TopK:              req.TopK,
+		EmbeddingModel:    profile.EmbeddingModel,
+		Embedding:         embedding,
+		MemorySnapshot:    memorySnapshot,
+		CollectionContext: scope.coveragePrompt() + "\n" + collectionRoutePrompt(route),
 	})
 	if err == nil && validateScope != nil {
 		err = validateScope(ctx)
@@ -313,6 +325,21 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 		Memory:       memorySnapshot.Identity(),
 		MemoryPolicy: memoryPolicy,
 	}
+	if s.chatSvc.cfg.ReviewCitationSupport {
+		checker := &journaledResearchChat{chat: chat, journal: journal, userID: req.UserID, runID: runID, purpose: "citation_support_review"}
+		result.Citations, _, err = reviewCitationSupport(ctx, checker, result.Answer, result.Citations)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil {
+			result.Degraded = true
+		}
+	}
+	if validateScope != nil {
+		if err := validateScope(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if result.ProfileID == 0 {
 		result.ProfileID = budget.ProfileID
 	}
@@ -349,8 +376,8 @@ func (s *VideoAgentService) ResumeAgent(ctx context.Context, userID int64, runID
 	if run == nil {
 		return nil, errors.New("agent run not found")
 	}
-	if run.Mode != string(VideoAgentLoopTemplate) || run.ScopeType != model.ChatScopeVideo {
-		return nil, errors.New("agent run is not a resumable single-video research run")
+	if run.Mode != string(VideoAgentLoopTemplate) || (run.ScopeType != model.ChatScopeVideo && run.ScopeType != model.ChatScopeKnowledgeBase && run.ScopeType != model.ChatScopeVideoLibrary) {
+		return nil, errors.New("agent run is not a resumable research run")
 	}
 	var policy frozenAgentPolicy
 	if err := json.Unmarshal([]byte(run.PolicySnapshot), &policy); err != nil {

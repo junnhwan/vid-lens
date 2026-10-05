@@ -390,3 +390,9 @@ func (r *TaskRepository) CountActiveByAssetID(assetID int64) (int64, error) {
 func (r *TaskRepository) Delete(id int64) error {
 	return r.db.Delete(&model.VideoTask{}, id).Error
 }
+
+func (r *TaskRepository) ListOwnedTaskIDs(userID int64) ([]int64, error) {
+	var ids []int64
+	err := r.db.Model(&model.VideoTask{}).Where("user_id = ?", userID).Order("id ASC").Pluck("id", &ids).Error
+	return ids, err
+}

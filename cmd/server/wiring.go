@@ -99,8 +99,8 @@ func productionRetrievalConfig(cfg config.RAGConfig) service.RAGRetrievalConfig 
 	// BM25 hybrid 非单变量未评测（见上方 HONEST），保守关闭。
 	retrieval.EnableBM25 = false
 	retrieval.RRFK = 60
-	retrieval.NeighborRadius = 0
-	retrieval.MaxContextChars = 0
+	retrieval.NeighborRadius = 1
+	retrieval.MaxContextChars = 4000
 	retrieval.MinVectorScore = cfg.MinScore
 	// docs/architecture/retrieval.md B段：rerank 默认 deterministic on（experiment rerank-vs-none-dev
 	// dev 消融 +0.102 CI [0,+0.204]，deterministic 代理）。cfg.RerankModel 非空时
@@ -156,12 +156,13 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		return service.NewModelReranker(client)
 	}
 	chatConfig := service.ChatConfig{
-		TopK:                 deps.cfg.RAG.TopK,
-		CandidateK:           deps.cfg.RAG.CandidateK,
-		MinScore:             deps.cfg.RAG.MinScore,
-		RecentTurns:          deps.cfg.RAG.RecentTurns,
-		Retrieval:            &retrievalCfg,
-		ModelRerankerFactory: modelRerankerFactory,
+		ReviewCitationSupport: true,
+		TopK:                  deps.cfg.RAG.TopK,
+		CandidateK:            deps.cfg.RAG.CandidateK,
+		MinScore:              deps.cfg.RAG.MinScore,
+		RecentTurns:           deps.cfg.RAG.RecentTurns,
+		Retrieval:             &retrievalCfg,
+		ModelRerankerFactory:  modelRerankerFactory,
 	}
 	memoryAuthorizer := service.NewRepositoryMemoryAuthorizer(deps.repos)
 	memoryGovernanceSvc := service.NewMemoryGovernanceService(deps.repos.Memory, memoryAuthorizer)

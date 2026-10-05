@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"vid-lens/internal/ai"
@@ -63,7 +64,7 @@ func TestKnowledgeChatRejectsChangedHistoryScopeEvenWhenFinalCitationsRemainVali
 			} else {
 				_, err = svc.AskWithMode(ctx, ChatModeNatural, 7, session.ID, "owner 的第二步是什么？", 5, &fakeEmbeddingClient{dim: 3}, client, ai.Profile{EmbeddingModel: "embed", LLMModel: "fixture"})
 			}
-			if err == nil || !strings.Contains(err.Error(), "成员已变更") {
+			if err == nil || !errors.Is(err, errKnowledgeMembershipChanged) {
 				t.Fatalf("changed history scope accepted: %v", err)
 			}
 			if !client.sawHistory {
@@ -105,7 +106,7 @@ func TestKnowledgeHistoryRequiresCompleteProvenanceAndKeepsWholePairs(t *testing
 func TestKnowledgeChatAgentFollowupsUseOnlyCurrentSafePGPairs(t *testing.T) {
 	repos, session, ids := knowledgeAgentFixture(t)
 	ctx := context.Background()
-	retriever := &fakeRetriever{results: []RetrievedChunk{{TaskID: ids[0], ChunkID: 1, ChunkIndex: 0, Content: "owner 课程 1 的证据"}, {TaskID: ids[1], ChunkID: 2, ChunkIndex: 0, Content: "owner 课程 2 的证据"}}}
+	retriever := &scopedFixtureRetriever{results: []RetrievedChunk{{TaskID: ids[0], ChunkID: 1, ChunkIndex: 0, Content: "owner 课程 1 的证据"}, {TaskID: ids[1], ChunkID: 2, ChunkIndex: 0, Content: "owner 课程 2 的证据"}}}
 	svc := NewChatService(repos, retriever, ChatConfig{TopK: 5, RecentTurns: 3})
 	agent := NewVideoAgentService(svc)
 	profile := ai.Profile{EmbeddingModel: "embed", LLMModel: "fixture"}

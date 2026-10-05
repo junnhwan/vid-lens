@@ -77,6 +77,7 @@ func (r *RAGIndexRepository) Upsert(index *model.VideoRAGIndex) error {
 		"chunk_size":             index.ChunkSize,
 		"chunk_overlap":          index.ChunkOverlap,
 		"chunk_manifest_sha256":  index.ChunkManifestSHA256,
+		"index_context_sha256":   index.IndexContextSHA256,
 		"source_mapping_version": index.SourceMappingVersion,
 		"last_error":             index.LastError,
 		"build_version":          index.BuildVersion,

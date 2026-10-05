@@ -14,8 +14,9 @@ import (
 
 const (
 	defaultCitationEvidenceRunes = 160
-	maxCitationContextRunes      = 360
+	maxCitationContextRunes      = 4000
 	maxCitationSentencesPerChunk = 48
+	maxCitationEvidenceRunes     = 2000
 )
 
 var (
@@ -47,6 +48,22 @@ func finalizeAnswerCitations(rawAnswer string, candidates []Citation) finalizedA
 	tokens := extractCitationTokenRanges(rawAnswer, protected)
 	referenced := collectReferencedCitationIDs(tokens)
 	selected := selectReferencedCitations(referenced, candidates)
+	for i := range selected {
+		selected[i].SupportStatus = "not_checked"
+		for _, token := range tokens {
+			for _, id := range token.ids {
+				if id != selected[i].CitationID {
+					continue
+				}
+				start := strings.LastIndex(rawAnswer[:token.start], "\n") + 1
+				claim := rawAnswer[start:token.start]
+				claim = cleanVisibleAnswer(claim, extractCitationTokenRanges(claim, nil), nil, nil)
+				if claim != "" {
+					selected[i].ClaimTexts = append(selected[i].ClaimTexts, claim)
+				}
+			}
+		}
+	}
 	validIDs := make(map[string]struct{}, len(selected))
 	for _, candidate := range selected {
 		validIDs[candidate.CitationID] = struct{}{}
@@ -530,6 +547,9 @@ func buildCitationSet(_ string, contexts []RetrievedChunk) ([]RetrievedChunk, []
 		}
 		anchorRefs := citationAnchorRefs(rawAnchor, chunk.SourceRefs)
 
+		if chunk.ContextTimeStatus == "" {
+			chunk.ContextStartMS, chunk.ContextEndMS, chunk.ContextTimeStatus = chunk.StartMS, chunk.EndMS, chunk.TimeRangeStatus
+		}
 		filteredContexts = append(filteredContexts, chunk)
 		seen := make(map[string]struct{})
 		chunkCitations := make([]Citation, 0)
@@ -537,14 +557,12 @@ func buildCitationSet(_ string, contexts []RetrievedChunk) ([]RetrievedChunk, []
 			evidence := sentence.Content
 			startMS, endMS, timeStatus := chunk.StartMS, chunk.EndMS, chunk.TimeRangeStatus
 			sourceRefs := append([]ChunkSourceRef(nil), chunk.SourceRefs...)
-			displaySource := anchor
 			sourceIdentity := ""
 			// A sentence can inherit a narrower source interval only when one
 			// source observation contains it verbatim. Never interpolate time.
 			if ref, ok := citationSourceRef(sentence, anchor, anchorRefs); ok && chunk.SourceMappingStatus == model.ChunkSourceMapped {
 				startMS, endMS, timeStatus = ref.StartMS, ref.EndMS, ref.TimeRangeStatus
 				sourceRefs = []ChunkSourceRef{ref}
-				displaySource = strings.TrimSpace(ref.Content)
 				sourceIdentity = ref.SourceType + ":" + ref.StableID
 			} else if timeStatus == model.ChunkTimeRangeExact && len(sourceRefs) > 1 {
 				// The bounding interval of several observations is only coarse
@@ -560,7 +578,7 @@ func buildCitationSet(_ string, contexts []RetrievedChunk) ([]RetrievedChunk, []
 				continue
 			}
 			seen[key] = struct{}{}
-			displayContext, truncated := boundedCitationContext(displaySource, evidence)
+			displayContext, truncated := boundedCitationContext(chunk.Content, evidence)
 			chunkCitations = append(chunkCitations, Citation{
 				TaskID:         chunk.TaskID,
 				VideoTitle:     chunk.VideoTitle,
@@ -579,9 +597,11 @@ func buildCitationSet(_ string, contexts []RetrievedChunk) ([]RetrievedChunk, []
 				FinalRank:      chunk.FinalRank,
 				Modality:       chunk.Modality, StartMS: startMS, EndMS: endMS,
 				TimeRangeStatus: timeStatus,
-				ContextStartMS:  startMS, ContextEndMS: endMS,
-				ContextTimeStatus:       timeStatus,
-				DisplayContextTruncated: truncated,
+				ContextStartMS:  chunk.ContextStartMS, ContextEndMS: chunk.ContextEndMS,
+				ContextTimeStatus:       chunk.ContextTimeStatus,
+				ContextSourceRefs:       append([]ChunkSourceRef(nil), chunk.ContextSourceRefs...),
+				DisplayContextTruncated: truncated || chunk.WindowTruncated,
+				QuoteTruncated:          utf8.RuneCountInString(evidence) == maxCitationEvidenceRunes,
 				SourceMappingStatus:     chunk.SourceMappingStatus,
 				SourceRefs:              sourceRefs,
 				ModalityRank:            chunk.ModalityRank, ModalityScore: chunk.ModalityScore, ModalityIntent: chunk.ModalityIntent,
@@ -650,26 +670,20 @@ func citationSentenceQuotes(anchor string, refs []ChunkSourceRef) []citationSent
 		}
 		text := anchorRunes[boundaries[i-1]:boundaries[i]]
 		for start := 0; start < len(text); {
-			end, lastClause := start, -1
-			for end < len(text) && end-start < defaultCitationEvidenceRunes {
+			end := start
+			for end < len(text) && end-start < maxCitationEvidenceRunes {
 				r := text[end]
 				end++
-				if r == ',' || r == '，' || r == '、' {
-					lastClause = end
-				}
 				terminator := isUsefulEvidenceTerminator(r) || r == '\n' || r == '；' || r == ';'
 				if r == '.' && (end == len(text) || unicode.IsSpace(text[end])) {
 					terminator = true
 				}
 				if terminator {
-					for end < len(text) && end-start < defaultCitationEvidenceRunes && isClosingPunctuation(text[end]) {
+					for end < len(text) && end-start < maxCitationEvidenceRunes && isClosingPunctuation(text[end]) {
 						end++
 					}
 					break
 				}
-			}
-			if end < len(text) && end-start == defaultCitationEvidenceRunes && lastClause-start >= defaultCitationEvidenceRunes/2 {
-				end = lastClause
 			}
 			fragment := string(text[start:end])
 			if quote := strings.TrimSpace(fragment); strings.IndexFunc(quote, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) >= 0 {
@@ -774,28 +788,45 @@ func extractEvidence(question, matchedQuery, anchor string, maxRunes int) string
 	if maxRunes <= 0 {
 		maxRunes = defaultCitationEvidenceRunes
 	}
+	// Soft budget prefers complete sentences. A hard cut is reported in the DTO.
 	terms := ExtractQueryTerms(strings.TrimSpace(question + " " + matchedQuery))
-	if utf8.RuneCountInString(anchor) <= maxRunes {
+	runes := []rune(anchor)
+	if len(runes) <= maxRunes {
 		return endEvidenceAfterRelevantPhrase(anchor, terms, maxRunes)
 	}
-
-	windowCandidates := relevantEvidenceWindows(anchor, terms, maxRunes)
-	for _, candidate := range SplitTextIntoChunks(anchor, maxRunes, 0) {
-		windowCandidates = append(windowCandidates, candidate.Content)
-	}
-	if len(windowCandidates) == 0 {
-		return ""
-	}
-	bestIndex := 0
-	bestScore := evidenceTermScore(windowCandidates[0], terms)
-	for i := 1; i < len(windowCandidates); i++ {
-		score := evidenceTermScore(windowCandidates[i], terms)
-		if score > bestScore {
-			bestIndex = i
-			bestScore = score
+	type sentence struct{ start, end int }
+	var sentences []sentence
+	start := 0
+	for i, r := range runes {
+		if isUsefulEvidenceTerminator(r) || r == '\n' || (r == '.' && (i+1 == len(runes) || unicode.IsSpace(runes[i+1]))) {
+			sentences = append(sentences, sentence{start, i + 1})
+			start = i + 1
 		}
 	}
-	return endEvidenceAfterRelevantPhrase(windowCandidates[bestIndex], terms, maxRunes)
+	if start < len(runes) {
+		sentences = append(sentences, sentence{start, len(runes)})
+	}
+	best, score := 0, -1
+	for i, part := range sentences {
+		v := evidenceTermScore(string(runes[part.start:part.end]), terms)
+		if v > score {
+			best, score = i, v
+		}
+	}
+	part := sentences[best]
+	// Carry the preceding sentence for conditions, negation and cross-sentence references.
+	if best > 0 && part.end-sentences[best-1].start <= maxRunes*2 {
+		part.start = sentences[best-1].start
+	}
+	for best+1 < len(sentences) && sentences[best+1].end-part.start <= maxRunes {
+		best++
+		part.end = sentences[best].end
+	}
+	const hardBudget = 2000
+	if part.end-part.start > hardBudget {
+		part.end = part.start + hardBudget
+	}
+	return strings.TrimSpace(string(runes[part.start:part.end]))
 }
 
 func relevantEvidenceWindows(anchor string, terms []string, maxRunes int) []string {

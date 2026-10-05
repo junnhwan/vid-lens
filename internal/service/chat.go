@@ -27,12 +27,13 @@ var (
 )
 
 type ChatConfig struct {
-	TopK                 int
-	CandidateK           int
-	MinScore             float32
-	RecentTurns          int
-	Retrieval            *RAGRetrievalConfig
-	ModelRerankerFactory func(ai.Profile) Reranker
+	ReviewCitationSupport bool
+	TopK                  int
+	CandidateK            int
+	MinScore              float32
+	RecentTurns           int
+	Retrieval             *RAGRetrievalConfig
+	ModelRerankerFactory  func(ai.Profile) Reranker
 }
 
 type RetrievalRequest struct {
@@ -57,6 +58,10 @@ type RetrievedChunk struct {
 	Content string `json:"content"`
 	// AnchorContent is the compact retrieval unit and source-backed text used
 	// to derive the public evidence quote.
+	ContextStartMS         int64            `json:"context_start_ms,omitempty"`
+	ContextEndMS           int64            `json:"context_end_ms,omitempty"`
+	ContextTimeStatus      string           `json:"context_time_range_status,omitempty"`
+	ContextSourceRefs      []ChunkSourceRef `json:"context_source_refs,omitempty"`
 	AnchorContent          string           `json:"anchor_content,omitempty"`
 	Source                 string           `json:"source,omitempty"`
 	VectorRank             int              `json:"vector_rank,omitempty"`
@@ -82,9 +87,8 @@ type RetrievedChunk struct {
 	ModalityIntent         string           `json:"modality_intent,omitempty"`
 }
 
-// Citation is the public, persisted evidence view. It intentionally excludes
-// expanded LLM context and anchor internals so API/SSE/snapshots cannot expose
-// the large retrieval window by accident.
+// Citation persists the verbatim anchor and a bounded, source-backed display
+// context separately, with claim offsets and truthful replay metadata.
 type Citation struct {
 	TaskID     int64   `json:"task_id"`
 	VideoTitle string  `json:"video_title,omitempty"`
@@ -96,9 +100,15 @@ type Citation struct {
 	Content    string  `json:"content"`
 	// AnchorQuote is the smallest verbatim source excerpt selected for the claim.
 	// Content remains as a compatibility alias for older clients.
-	AnchorQuote string `json:"anchor_quote,omitempty"`
+	AnchorQuote    string   `json:"anchor_quote,omitempty"`
+	ClaimEndRunes  []int    `json:"claim_end_runes,omitempty"`
+	ClaimTexts     []string `json:"claim_texts,omitempty"`
+	SupportStatus  string   `json:"support_status,omitempty"`
+	QuoteTruncated bool     `json:"quote_truncated,omitempty"`
+	QuoteOmitted   bool     `json:"quote_omitted,omitempty"`
 	// DisplayContext is source observation context for humans, separate from the
 	// expanded retrieval context sent to the model.
+	ContextSourceRefs       []ChunkSourceRef `json:"context_source_refs,omitempty"`
 	DisplayContext          string           `json:"display_context,omitempty"`
 	Source                  string           `json:"source,omitempty"`
 	VectorRank              int              `json:"vector_rank,omitempty"`

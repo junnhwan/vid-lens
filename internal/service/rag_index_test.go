@@ -599,6 +599,11 @@ func TestRAGIndexStatusNeedsRebuildAfterVisualFramesChange(t *testing.T) {
 	}
 	finished = time.Now().Add(time.Minute)
 	index.FinishedAt = &finished
+	currentContext, err := svc.taskIndexContext(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index.IndexContextSHA256 = indexContextHash(currentContext)
 	if err := repos.RAGIndex.Upsert(index); err != nil {
 		t.Fatal(err)
 	}

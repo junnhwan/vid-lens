@@ -21,10 +21,14 @@ type RetrievalPipeline struct {
 	expander  *ContextExpander
 	reranker  Reranker
 
-	CandidateK int
-	MinScore   float32
-	RRFK       float64
-	Config     *RAGRetrievalConfig
+	CandidateK         int
+	MinScore           float32
+	RRFK               float64
+	Config             *RAGRetrievalConfig
+	CollectionTargets  []int64
+	RoutedTargets      []int64
+	RequiredDimensions []string
+	RequestCache       *retrievalRequestCache
 }
 
 func NewRetrievalPipeline(repos *repository.Repositories, retriever RAGRetriever, rewriter QueryRewriter, expander *ContextExpander, reranker Reranker, candidateK int, minScore float32) *RetrievalPipeline {
@@ -64,17 +68,20 @@ func NewConfiguredRetrievalPipeline(repos *repository.Repositories, retriever RA
 }
 
 type RetrievalPipelineRequest struct {
-	Debug          bool
-	UserID         int64
-	TaskID         int64 // deprecated compatibility; new callers use TaskIDs
-	TaskIDs        []int64
-	Question       string
-	Recent         []model.ChatMessage
-	TopK           int
-	EmbeddingModel string
-	Embedding      ai.EmbeddingClient
-	TimeRanges     []TimestampRange
-	Modalities     []string
+	Debug           bool
+	UserID          int64
+	TaskID          int64 // deprecated compatibility; new callers use TaskIDs
+	TaskIDs         []int64
+	Question        string
+	Recent          []model.ChatMessage
+	TopK            int
+	EmbeddingModel  string
+	Embedding       ai.EmbeddingClient
+	RoutedTaskIDs   []int64
+	RequiredTaskIDs []int64
+	Dimensions      []string
+	TimeRanges      []TimestampRange
+	Modalities      []string
 }
 
 type RetrievalPipelineResult struct {
@@ -84,6 +91,10 @@ type RetrievalPipelineResult struct {
 }
 
 type RetrievalTrace struct {
+	TopK             int              `json:"top_k"`
+	CandidateK       int              `json:"candidate_k"`
+	VectorEnabled    bool             `json:"vector_enabled"`
+	KeywordEnabled   bool             `json:"keyword_enabled"`
 	Stages           []RetrievalStage `json:"stages,omitempty"`
 	DurationMS       int64            `json:"duration_ms"`
 	OriginalQuery    string           `json:"original_query,omitempty"`
@@ -116,12 +127,6 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		}
 		enableVector, enableBM25 = p.Config.EnableVector, p.Config.EnableBM25
 	}
-	if enableVector && p.retriever == nil {
-		return RetrievalPipelineResult{}, fmt.Errorf("当前视频尚未构建 RAG 索引")
-	}
-	if enableVector && req.Embedding == nil {
-		return RetrievalPipelineResult{}, fmt.Errorf("embedding client 不能为空")
-	}
 	topK := req.TopK
 	if topK <= 0 {
 		topK = 5
@@ -129,7 +134,10 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 	candidateK := p.CandidateK
 	minScore, rrfK := p.MinScore, p.RRFK
 	if p.Config != nil {
-		topK, candidateK, minScore, rrfK = p.Config.TopK, p.Config.CandidateK, p.Config.MinVectorScore, p.Config.RRFK
+		candidateK, minScore, rrfK = p.Config.CandidateK, p.Config.MinVectorScore, p.Config.RRFK
+		if req.TopK <= 0 {
+			topK = p.Config.TopK
+		}
 	}
 	if candidateK <= 0 {
 		candidateK = topK
@@ -140,6 +148,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 
 	rewrite, rewriteErr := p.rewrite(ctx, req)
 	trace := RetrievalTrace{
+		TopK: topK, CandidateK: candidateK, VectorEnabled: enableVector, KeywordEnabled: enableBM25,
 		OriginalQuery:    rewrite.Original,
 		RewrittenQueries: append([]string(nil), rewrite.Queries...),
 	}
@@ -147,40 +156,76 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		trace.Fallbacks = appendFallback(trace.Fallbacks, "rewrite_failed")
 	}
 
-	perQuery := make([][]RetrievedChunk, 0, len(rewrite.Queries))
-	for _, query := range rewrite.Queries {
-		var vectorChunks, keywordChunks []RetrievedChunk
-		if enableVector {
-			queryVector, err := embedQueryWithAdmissionWait(ctx, req.Embedding, query)
-			if err != nil {
-				return RetrievalPipelineResult{}, err
-			}
-			searchK := candidateK
-			if len(req.TimeRanges) > 0 && searchK < 50 {
-				searchK = 50
-			}
-			retrievalReq := RetrievalRequest{UserID: req.UserID, TaskIDs: append([]int64(nil), taskIDs...), EmbeddingModel: req.EmbeddingModel, TopK: searchK, MinScore: minScore, TimeRanges: append([]TimestampRange(nil), req.TimeRanges...), Modalities: append([]string(nil), req.Modalities...)}
-			if len(taskIDs) == 1 {
-				retrievalReq.TaskID = taskIDs[0]
-			}
-			vectorChunks, err = p.retriever.Search(ctx, queryVector, retrievalReq)
-			if err != nil {
-				return RetrievalPipelineResult{}, err
-			}
-			if len(taskIDs) == 1 {
-				for i := range vectorChunks {
-					if vectorChunks[i].TaskID == 0 {
-						vectorChunks[i].TaskID = taskIDs[0]
-					}
-				}
+	if len(req.RequiredTaskIDs) == 0 {
+		for _, id := range p.CollectionTargets {
+			if containsTaskID(taskIDs, id) {
+				req.RequiredTaskIDs = append(req.RequiredTaskIDs, id)
 			}
 		}
-		if enableBM25 {
-			var err error
-			keywordChunks, err = p.collectionKeywordChunks(ctx, req.UserID, taskIDs, req.EmbeddingModel, query, candidateK)
-			if err != nil {
-				return RetrievalPipelineResult{}, err
+	}
+	if len(req.RoutedTaskIDs) == 0 {
+		for _, id := range p.RoutedTargets {
+			if containsTaskID(taskIDs, id) {
+				req.RoutedTaskIDs = append(req.RoutedTaskIDs, id)
 			}
+		}
+	}
+	if len(req.Dimensions) == 0 {
+		req.Dimensions = p.RequiredDimensions
+	}
+	required := normalizeTaskIDs(req.RequiredTaskIDs)
+	if len(required) == 0 && isComparisonQuestion(req.Question) {
+		var err error
+		required, err = p.comparisonTargets(req.UserID, taskIDs, req.Question)
+		if err != nil {
+			return RetrievalPipelineResult{}, err
+		}
+	}
+	for _, id := range required {
+		if !containsTaskID(taskIDs, id) {
+			return RetrievalPipelineResult{}, errRetrievalScope
+		}
+	}
+	recallTargets := normalizeTaskIDs(append(append([]int64(nil), required...), req.RoutedTaskIDs...))
+	for _, id := range recallTargets {
+		if !containsTaskID(taskIDs, id) {
+			return RetrievalPipelineResult{}, errRetrievalScope
+		}
+	}
+	if len(recallTargets) > 8 {
+		recallTargets = recallTargets[:8]
+		trace.Fallbacks = appendFallback(trace.Fallbacks, "route_budget_incomplete")
+	}
+	if len(required) > topK {
+		trace.Fallbacks = appendFallback(trace.Fallbacks, "target_budget_incomplete")
+	}
+	var corpus *repository.BM25Corpus
+	var corpusErr error
+	if enableBM25 && p.repos != nil && p.repos.VideoChunk != nil {
+		corpus, corpusErr = p.loadRequestCorpus(ctx, req.UserID, taskIDs, req.EmbeddingModel)
+	}
+	if err := ctx.Err(); err != nil {
+		return RetrievalPipelineResult{}, err
+	}
+	queries := append([]string(nil), rewrite.Queries...)
+	for _, dimension := range req.Dimensions {
+		if len(queries) < 6 {
+			queries = append(queries, req.Question+" "+dimension)
+		}
+	}
+	perQuery := make([][]RetrievedChunk, 0, len(queries))
+	seenQueries := map[string]bool{}
+	for _, query := range queries {
+		if seenQueries[query] {
+			continue
+		}
+		seenQueries[query] = true
+		vectorChunks, keywordChunks, fallbacks, searchErr := p.retrieveChannels(ctx, req, taskIDs, recallTargets, query, candidateK, minScore, enableVector, enableBM25, corpus, corpusErr)
+		if searchErr != nil {
+			return RetrievalPipelineResult{}, searchErr
+		}
+		for _, reason := range fallbacks {
+			trace.Fallbacks = appendFallback(trace.Fallbacks, reason)
 		}
 		allowed := make(map[int64]bool, len(taskIDs))
 		for _, id := range taskIDs {
@@ -188,7 +233,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		}
 		for _, chunk := range vectorChunks {
 			if !allowed[chunk.TaskID] {
-				return RetrievalPipelineResult{}, fmt.Errorf("retriever returned evidence outside the authorized scope")
+				return RetrievalPipelineResult{}, errRetrievalScope
 			}
 		}
 		if err := p.hydrateChunkProvenance(req.UserID, taskIDs, req.EmbeddingModel, vectorChunks); err != nil {
@@ -201,7 +246,7 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		keywordChunks = filterChunksByTimeRanges(keywordChunks, req.TimeRanges)
 		vectorChunks = filterChunksByModalities(vectorChunks, req.Modalities)
 		keywordChunks = filterChunksByModalities(keywordChunks, req.Modalities)
-		fused := FuseRetrievedChunks(vectorChunks, keywordChunks, candidateK, rrfK)
+		fused := FuseRetrievedChunks(vectorChunks, keywordChunks, candidateK+len(recallTargets)*topK, rrfK)
 		if req.Debug {
 			for _, stage := range []struct {
 				name   string
@@ -219,19 +264,13 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		perQuery = append(perQuery, fused)
 	}
 
-	citations := fuseCrossQueryChunks(perQuery, candidateK, rrfK)
+	citations := fuseCrossQueryChunks(perQuery, candidateK+len(recallTargets)*topK, rrfK)
 	var err error
-	// A time-scoped request must not silently widen the LLM context with
-	// index-adjacent chunks outside the requested interval. Public provenance
-	// belongs to the anchor, and temporal expansion needs a separate contract.
-	if p.expander != nil && len(req.TimeRanges) == 0 {
-		citations, err = p.expander.Expand(ctx, req.UserID, 0, req.EmbeddingModel, citations)
-		if err != nil {
-			return RetrievalPipelineResult{}, err
-		}
+	if err := p.hydrateVideoTitles(req.UserID, citations); err != nil {
+		return RetrievalPipelineResult{}, err
 	}
 	if p.reranker != nil {
-		citations = p.reranker.Rerank(ctx, req.Question, citations, candidateK)
+		citations = p.reranker.Rerank(ctx, req.Question, citations, candidateK+len(recallTargets)*topK)
 		// docs/architecture/reliability.md 档1：rerank 失败 → 向量基线。ModelReranker 在 client 失败时已用
 		// fallbackRerankOrder 回退原序（= 无 rerank 的向量基线，docs/architecture/retrieval.md 消融 vector_only
 		// 档），并在 chunk 上标 model_rerank_failed/model_rerank_unavailable。此处把该
@@ -242,7 +281,18 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 			recordDegradationTier1()
 		}
 	}
-	citations = rankRetrievedModalities(req.Question, citations, topK)
+	citations = rankRetrievedModalities(req.Question, citations, len(citations))
+	citations = selectEvidenceDimensions(citations, topK, required, req.Dimensions)
+	// A time-scoped request must not silently widen the LLM context with
+	// index-adjacent chunks outside the requested interval. Public provenance
+	// belongs to the anchor, and temporal expansion needs a separate contract.
+	if p.expander != nil && len(req.TimeRanges) == 0 {
+		citations, err = p.expander.Expand(ctx, req.UserID, 0, req.EmbeddingModel, citations)
+		if err != nil {
+			return RetrievalPipelineResult{}, err
+		}
+	}
+
 	if err := p.hydrateVideoTitles(req.UserID, citations); err != nil {
 		return RetrievalPipelineResult{}, err
 	}
@@ -300,7 +350,7 @@ func filterChunksByTimeRanges(chunks []RetrievedChunk, ranges []TimestampRange) 
 //
 // 映射（消掉散落 if）：
 //   - Scope==collection → 强制 EnableVector=true / EnableBM25=true
-//     （BM25 在多 task 下不支持，见 Retrieve 内 len(taskIDs)!=1 报错；KB 跨视频必纯向量）。
+//     集合 BM25 使用统一语料统计。
 //   - Rerank==false → RerankerMode=none / reranker 置 nil（关 rerank）。
 //   - Rerank==true → 保留 pipeline 已配置的 reranker（deterministic / model）。
 //   - Rewrite>0 → RewriteQueries（policy.Rewrite 字段写进 Config，避免该字段成为死字段）。
@@ -415,6 +465,7 @@ func (p *RetrievalPipeline) hydrateChunkProvenance(userID int64, taskIDs []int64
 	}
 	for i := range chunks {
 		if storedChunk, ok := byID[chunks[i].ChunkID]; ok && (chunks[i].EvidenceID == "" || storedChunk.VectorID == chunks[i].EvidenceID) {
+			chunks[i].Content = storedChunk.Content
 			applyChunkProvenance(&chunks[i], storedChunk)
 		} else {
 			chunks[i].Modality, chunks[i].TimeRangeStatus, chunks[i].SourceMappingStatus = model.ChunkModalityUnknown, model.ChunkTimeRangeUnknown, model.ChunkSourceUnmapped

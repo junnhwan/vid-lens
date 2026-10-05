@@ -4,6 +4,7 @@ package service
 // remains complete for citation canonicalization and recovery.
 func plannerInputView(state VideoAgentLoopState) VideoAgentLoopState {
 	view := state
+	view.CollectionContext = boundedVideoText(state.CollectionContext, 2400)
 	view.Evidence = nil
 	for _, chunk := range balancedEvidence(state.Evidence, 12) {
 		if len(view.Evidence) >= 12 {
@@ -11,6 +12,8 @@ func plannerInputView(state VideoAgentLoopState) VideoAgentLoopState {
 		}
 		chunk.Content = trimRunes(chunk.Content, 600)
 		chunk.AnchorContent = ""
+		chunk.SourceRefs = nil
+		chunk.ContextSourceRefs = nil
 		view.Evidence = append(view.Evidence, chunk)
 	}
 	view.Observations = nil

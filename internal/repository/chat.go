@@ -154,8 +154,31 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 		if !sameChatSessionScope(&observed, &session) {
 			return gorm.ErrRecordNotFound
 		}
-		if session.ScopeType == model.ChatScopeKnowledgeBase && frozenMembers != nil {
-			current, err := NewKnowledgeBaseRepository(tx).ListMemberTaskIDsForUser(userID, session.KnowledgeBaseID)
+		if runID != "" && frozenMembers == nil && (session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary) {
+			var frozenRun model.AgentRun
+			if err := tx.Where("id = ? AND user_id = ? AND session_id = ?", runID, userID, session.ID).First(&frozenRun).Error; err != nil {
+				return err
+			}
+			var policy struct {
+				Members    []int64 `json:"member_task_ids"`
+				Authorized []int64 `json:"authorized_member_task_ids"`
+			}
+			if err := json.Unmarshal([]byte(frozenRun.PolicySnapshot), &policy); err != nil {
+				return err
+			}
+			frozenMembers = policy.Authorized
+			if len(frozenMembers) == 0 {
+				frozenMembers = policy.Members
+			}
+		}
+		if (session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary) && frozenMembers != nil {
+			var current []int64
+			var err error
+			if session.ScopeType == model.ChatScopeVideoLibrary {
+				current, err = NewTaskRepository(tx).ListOwnedTaskIDs(userID)
+			} else {
+				current, err = NewKnowledgeBaseRepository(tx).ListMemberTaskIDsForUser(userID, session.KnowledgeBaseID)
+			}
 			if err != nil {
 				return err
 			}

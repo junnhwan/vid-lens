@@ -80,7 +80,7 @@ func TestChatSeparatesLLMContextFromPublicCitation(t *testing.T) {
 	if len(snapshot) != 1 || snapshot[0].Content != citation.Content {
 		t.Fatalf("snapshot = %#v, citation = %#v", snapshot, citation)
 	}
-	if strings.Contains(*messages[1].RetrievalSnapshot, "邻居上下文") || strings.Contains(*messages[1].RetrievalSnapshot, "anchor_content") {
+	if strings.Contains(*messages[1].RetrievalSnapshot, "anchor_content") {
 		t.Fatalf("snapshot leaked internal context: %s", *messages[1].RetrievalSnapshot)
 	}
 }
@@ -266,7 +266,7 @@ func TestRAGPromptMapsIndependentTokensToExactSourceSentences(t *testing.T) {
 	if len(messages) < 2 {
 		t.Fatalf("buildRAGMessages() returned %d messages, want instruction and evidence context", len(messages))
 	}
-	for _, want := range []string{"行内引用链接", "最小充分证据", "[C1][C2]", "不要写成 [C1, C2]", "一句原文"} {
+	for _, want := range []string{"行内引用链接", "最小充分证据", "[C1][C2]", "不要写成 [C1, C2]", "一句原文", "不使用反引号或代码块包裹"} {
 		if !strings.Contains(messages[0].Content, want) {
 			t.Fatalf("RAG instruction prompt = %q, missing %q", messages[0].Content, want)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"vid-lens/internal/ai"
@@ -11,11 +12,14 @@ import (
 )
 
 type pipelineTestRetriever struct {
+	mu       sync.Mutex
 	results  [][]RetrievedChunk
 	requests []RetrievalRequest
 }
 
 func (r *pipelineTestRetriever) Search(_ context.Context, _ []float32, req RetrievalRequest) ([]RetrievedChunk, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.requests = append(r.requests, req)
 	if len(r.results) == 0 {
 		return nil, nil
@@ -215,7 +219,7 @@ func TestRetrievalPipelineRewriteFailureFallsBackToOriginalQuery(t *testing.T) {
 
 func TestRetrievalPipelineInvokesExpanderAndRerankerWhenConfigured(t *testing.T) {
 	repos := newChatServiceTestRepositories(t)
-	seedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
+	seedTimedVideoChunks(t, repos, 7, 1, "text-embedding-3-small", []string{
 		"chunk-0 Redis", "chunk-1 Redis owner", "chunk-2 Redis",
 	})
 	embedding := &fakeEmbeddingClient{dim: 3}

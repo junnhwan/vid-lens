@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,11 +17,14 @@ import (
 )
 
 type fakeRetriever struct {
+	mu      sync.Mutex
 	results []RetrievedChunk
 	lastReq RetrievalRequest
 }
 
 func (r *fakeRetriever) Search(ctx context.Context, query []float32, req RetrievalRequest) ([]RetrievedChunk, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.lastReq = req
 	return r.results, nil
 }
@@ -161,7 +165,7 @@ func TestChatServiceAskRetrievesChunksAndStoresMessages(t *testing.T) {
 	if messages[0].RetrievalSnapshot != nil {
 		t.Fatalf("user retrieval snapshot = %q, want nil", *messages[0].RetrievalSnapshot)
 	}
-	if messages[1].RetrievalSnapshot == nil || !strings.Contains(*messages[1].RetrievalSnapshot, "分布式锁释放时要校验 owner") {
+	if messages[1].RetrievalSnapshot == nil || !strings.Contains(*messages[1].RetrievalSnapshot, "\"citation_id\":\"C1\"") {
 		t.Fatalf("assistant retrieval snapshot = %#v, want serialized citations", messages[1].RetrievalSnapshot)
 	}
 }

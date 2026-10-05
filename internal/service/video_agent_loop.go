@@ -88,6 +88,7 @@ type VideoAgentLoopStep struct {
 
 type VideoAgentLoopState struct {
 	TermRules           VideoTermRuleSet             `json:"term_rules,omitempty"`
+	CollectionContext   string                       `json:"collection_context,omitempty"`
 	VideoMaps           []VideoMap                   `json:"video_maps,omitempty"`
 	MaxVisualFrames     int                          `json:"max_visual_frames,omitempty"`
 	ArgumentCorrections int                          `json:"argument_corrections,omitempty"`
@@ -174,6 +175,7 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 		return nil, err
 	}
 	state.Memory = runtime.MemorySnapshot
+	state.CollectionContext = runtime.CollectionContext
 	state.VideoMaps = append([]VideoMap(nil), runtime.VideoMaps...)
 	state.TermRules = runtime.TermRules
 	state.MaxVisualFrames = runtime.MaxVisualFrames

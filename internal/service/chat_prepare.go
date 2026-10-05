@@ -50,7 +50,8 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	if s.retriever == nil {
 		return nil, errRAGIndexUnavailable
 	}
-	taskIDs, err := s.sessionRetrievalTaskIDs(userID, session, profile.EmbeddingModel)
+	scope, err := s.sessionRetrievalScope(userID, session, profile.EmbeddingModel)
+	taskIDs := scope.Ready
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +80,13 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		topK = s.cfg.TopK
 	}
 
+	var route collectionRoute
+	if scopeOfSession(session) == ScopeCollection {
+		route, err = s.routeCollection(ctx, userID, taskIDs, question, chat)
+		if err != nil {
+			return nil, err
+		}
+	}
 	pipeline := s.newRetrievalPipeline(topK, chat, profile)
 	// 知识库混合检索（EnableVector=true/EnableBM25=true）由
 	// policy.Scope==collection 统一表达；rerank 开关由 policy.Rerank 映射。
@@ -92,18 +100,23 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		return nil, err
 	}
 	retrieval, err := pipeline.Retrieve(ctx, RetrievalPipelineRequest{
-		UserID:         userID,
-		TaskIDs:        taskIDs,
-		Question:       question,
-		Recent:         recent,
-		TopK:           topK,
-		EmbeddingModel: profile.EmbeddingModel,
-		Embedding:      embedding,
-		TimeRanges:     timeRanges,
+		UserID:          userID,
+		TaskIDs:         taskIDs,
+		Question:        question,
+		Recent:          recent,
+		TopK:            topK,
+		EmbeddingModel:  profile.EmbeddingModel,
+		Embedding:       embedding,
+		TimeRanges:      timeRanges,
+		RequiredTaskIDs: route.Required, RoutedTaskIDs: route.routedIDs(), Dimensions: route.Dimensions,
 	})
 	if err != nil {
 		_ = emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索未完成", Status: "error", Detail: "检索未完成"})
 		return nil, err
+	}
+	if record := chatExecutionFromContext(ctx); record != nil {
+		record.Retrieval = &retrieval.Trace
+		record.Scope = &scope
 	}
 	contexts, citations := buildCitationSet(question, retrieval.Citations)
 	if err := emitProgress(ctx, ConversationProgress{ID: "retrieve", Kind: "retrieve", Label: "检索完成", Status: "done", Detail: fmt.Sprintf("找到 %d 条候选引用", len(citations))}); err != nil {
@@ -111,6 +124,9 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 	}
 
 	messages := buildRAGMessages(contexts, recent, question)
+	if scopeOfSession(session) == ScopeCollection {
+		messages = append([]ai.ChatMessage{{Role: "system", Content: scope.coveragePrompt() + "\n" + collectionRoutePrompt(route)}}, messages...)
+	}
 	if s.repos.AIProfile != nil {
 		preference, err := s.repos.AIProfile.PromptPreference(userID, "chat")
 		if err != nil {
@@ -129,7 +145,7 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		messages = append([]ai.ChatMessage{messages[0], {Role: "user", Content: "有限视频上下文（不是可引用片段）：\n" + contextText}}, messages[1:]...)
 	}
 	return &preparedRAGChat{
-		FrozenMemberIDs: append([]int64(nil), taskIDs...),
+		FrozenMemberIDs: append([]int64(nil), scope.Members...),
 		Session:         session,
 		Question:        question,
 		TopK:            topK,
@@ -312,7 +328,7 @@ func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile
 		reranker = s.cfg.ModelRerankerFactory(profile)
 	}
 	return &RetrievalPipeline{repos: s.repos, retriever: s.retriever, rewriter: rewriter, expander: expander,
-		reranker: reranker, CandidateK: s.candidateK(topK), MinScore: s.cfg.MinScore, Config: cfg}
+		RequestCache: newRetrievalRequestCache(), reranker: reranker, CandidateK: s.candidateK(topK), MinScore: s.cfg.MinScore, Config: cfg}
 }
 
 func (s *ChatService) candidateK(topK int) int {
@@ -351,83 +367,95 @@ func (s *ChatService) classifyIntent(ctx context.Context, question string, sessi
 	return intent
 }
 
+type retrievalScope struct {
+	Members     []int64 `json:"members"`
+	Ready       []int64 `json:"ready"`
+	Unavailable []int64 `json:"unavailable"`
+}
+
 func (s *ChatService) sessionRetrievalTaskIDs(userID int64, session *model.ChatSession, embeddingModel string) ([]int64, error) {
-	if session.ScopeType == model.ChatScopeVideoLibrary {
-		ids, err := s.repos.Task.ListIndexedTaskIDsForUser(userID, embeddingModel)
-		if err != nil {
-			return nil, err
-		}
-		if len(ids) == 0 {
-			return nil, fmt.Errorf("视频库还没有使用当前向量模型建立索引的视频")
-		}
-		return ids, nil
+	scope, err := s.sessionRetrievalScope(userID, session, embeddingModel)
+	if err != nil {
+		return nil, err
 	}
-	if session.ScopeType != model.ChatScopeKnowledgeBase {
+	if len(scope.Unavailable) > 0 {
+		return nil, s.unavailableScopeError(userID, scope.Unavailable)
+	}
+	return scope.Ready, nil
+}
+
+// Ownership and membership are distinct from current-model index availability.
+// Unready members produce explicit partial coverage, never a widened scope.
+func (s *ChatService) sessionRetrievalScope(userID int64, session *model.ChatSession, embeddingModel string) (retrievalScope, error) {
+	var scope retrievalScope
+	if scopeOfSession(session) != ScopeCollection {
 		if session.TaskID <= 0 {
-			return nil, fmt.Errorf("视频会话缺少 task_id")
+			return scope, fmt.Errorf("视频会话缺少 task_id")
 		}
-		return []int64{session.TaskID}, nil
+		scope.Members = []int64{session.TaskID}
+		scope.Ready = scope.Members
+		return scope, nil
 	}
-	kb, err := s.repos.KnowledgeBase.FindByIDForUser(userID, session.KnowledgeBaseID)
+	var ids []int64
+	var err error
+	if session.ScopeType == model.ChatScopeVideoLibrary {
+		ids, err = s.repos.Task.ListOwnedTaskIDs(userID)
+	} else {
+		kb, err := s.repos.KnowledgeBase.FindByIDForUser(userID, session.KnowledgeBaseID)
+		if err != nil {
+			return scope, err
+		}
+		if kb == nil {
+			return scope, fmt.Errorf("知识库不存在或无权限")
+		}
+		ids, err = s.repos.KnowledgeBase.ListMembershipTaskIDsForUser(userID, session.KnowledgeBaseID)
+	}
 	if err != nil {
-		return nil, err
-	}
-	if kb == nil {
-		return nil, fmt.Errorf("知识库不存在或无权限")
-	}
-	ids, err := s.repos.KnowledgeBase.ListMembershipTaskIDsForUser(userID, session.KnowledgeBaseID)
-	if err != nil {
-		return nil, err
+		return scope, err
 	}
 	ids = normalizeTaskIDs(ids)
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("知识库没有可检索视频")
+		return scope, fmt.Errorf("集合没有可检索视频")
 	}
 	tasks, err := s.repos.Task.ListByIDsForUser(userID, ids)
 	if err != nil {
-		return nil, err
+		return scope, err
 	}
 	visibleTasks := make(map[int64]model.VideoTask, len(tasks))
 	for _, task := range tasks {
 		visibleTasks[task.ID] = task
+		scope.Members = append(scope.Members, task.ID)
 	}
 	indexes, err := s.repos.RAGIndex.ListByTaskIDsAndModel(userID, ids, embeddingModel)
 	if err != nil {
-		return nil, err
+		return scope, err
 	}
-	indexedTasks := make(map[int64]struct{}, len(indexes))
+	ready := map[int64]bool{}
 	for _, index := range indexes {
 		if index.Status == model.RAGIndexStatusIndexed {
-			indexedTasks[index.TaskID] = struct{}{}
+			ready[index.TaskID] = true
 		}
 	}
-	unavailable := make([]int64, 0)
-	for _, taskID := range ids {
-		_, visible := visibleTasks[taskID]
-		_, indexed := indexedTasks[taskID]
-		if !visible || !indexed {
-			unavailable = append(unavailable, taskID)
+	for _, id := range ids {
+		if _, visible := visibleTasks[id]; visible && ready[id] {
+			scope.Ready = append(scope.Ready, id)
+		} else {
+			scope.Unavailable = append(scope.Unavailable, id)
 		}
 	}
-	if len(unavailable) > 0 {
-		parts := make([]string, len(unavailable))
-		for i, id := range unavailable {
-			if task, visible := visibleTasks[id]; visible {
-				title := strings.TrimSpace(task.Title)
-				if title == "" {
-					title = task.Filename
-				}
-				if title == "" {
-					title = "未命名资料"
-				}
-				parts[i] = "「" + title + "」"
-			} else {
-				parts[i] = "已删除或无权访问的资料"
-			}
-		}
-		return nil, fmt.Errorf("知识库成员不可检索：%s。请完成索引或移出后再问", strings.Join(parts, "、"))
+	if len(scope.Ready) == 0 {
+		return scope, s.unavailableScopeError(userID, scope.Unavailable)
 	}
-	return ids, nil
+	return scope, nil
+}
+
+func (scope retrievalScope) coveragePrompt() string {
+	return fmt.Sprintf("集合总成员=%d；当前模型可检索=%d；未就绪或不可用成员=%d。实际回答范围只能覆盖本次可检索成员；未就绪成员未被搜索，不能说其未讨论某主题。%s", len(scope.Members), len(scope.Ready), len(scope.Unavailable), func() string {
+		if len(scope.Unavailable) > 0 {
+			return "本次是部分结果，请在回答中明确限制；不能称完整全库概览或完整比较。"
+		}
+		return ""
+	}())
 }
 
 func normalizeTaskIDs(taskIDs []int64) []int64 {
@@ -445,4 +473,31 @@ func normalizeTaskIDs(taskIDs []int64) []int64 {
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i] < normalized[j] })
 	return normalized
+}
+
+func (s *ChatService) unavailableScopeError(userID int64, ids []int64) error {
+	tasks, err := s.repos.Task.ListByIDsForUser(userID, ids)
+	if err != nil {
+		return err
+	}
+	visible := map[int64]model.VideoTask{}
+	for _, task := range tasks {
+		visible[task.ID] = task
+	}
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		title := "已删除或无权访问的资料"
+		if task, ok := visible[id]; ok {
+			title = strings.TrimSpace(task.Title)
+			if title == "" {
+				title = task.Filename
+			}
+			if title == "" {
+				title = "未命名资料"
+			}
+			title = "「" + title + "」"
+		}
+		parts = append(parts, title)
+	}
+	return fmt.Errorf("集合成员不可检索：%s。请完成索引或移出后再问", strings.Join(parts, "、"))
 }

@@ -211,7 +211,18 @@ func (s *RAGIndexService) GetTaskIndexStatus(ctx context.Context, userID, taskID
 			}
 			visualChanged = latest != nil && latest.After(builtAt)
 		}
-		if index.Status == model.RAGIndexStatusIndexed && (visualChanged || !s.compatibleIndexContract(index)) {
+		contextChanged := index.IndexContextSHA256 == ""
+		if index.Status == model.RAGIndexStatusIndexed && index.IndexContextSHA256 != "" {
+			if taskErr != nil {
+				return nil, taskErr
+			}
+			currentContext, err := s.taskIndexContext(task)
+			if err != nil {
+				return nil, err
+			}
+			contextChanged = index.IndexContextSHA256 != indexContextHash(currentContext)
+		}
+		if index.Status == model.RAGIndexStatusIndexed && (visualChanged || contextChanged || !s.compatibleIndexContract(index)) {
 			return &RAGIndexResult{TaskID: taskID, Status: model.RAGIndexStatusNeedsRebuild, Indexed: false, Chunks: index.ChunkCount, EmbeddingModel: index.EmbeddingModel, NeedsRebuild: true, ProgressAt: &index.UpdatedAt}, nil
 		}
 		return &RAGIndexResult{

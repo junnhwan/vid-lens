@@ -187,7 +187,7 @@ func completedResearchRecord(records *repository.AgentExecutionRecords, stepID s
 
 func hasCompletedResearchSequenceAfter(steps []model.AgentStep, sequence int) bool {
 	for _, step := range steps {
-		if step.Status == model.AgentStepStatusCompleted && step.Sequence > sequence {
+		if step.Kind != "support_context" && step.Status == model.AgentStepStatusCompleted && step.Sequence > sequence {
 			return true
 		}
 	}
@@ -350,6 +350,9 @@ func (r *VideoAgentLoopRunner) executeResearchTool(ctx context.Context, state Vi
 			return VideoAgentToolResult{}, VideoAgentLoopObservation{}, false, err
 		}
 		messages := buildCitedAnswerMessages(BuildCitedAnswerInput{ScopeTaskIDs: runtime.TaskIDs, Question: args.Question, Intermediate: args.Intermediate, Citations: args.Citations, Recent: runtime.Recent}, runtime.MemorySnapshot)
+		if runtime.CollectionContext != "" {
+			messages = append([]ai.ChatMessage{{Role: "system", Content: runtime.CollectionContext}}, messages...)
+		}
 		messages = appendUserPromptPreference(messages, runtime.AnswerPreference)
 		if guidance := termRulePrompt(runtime.TermRules); guidance != "" {
 			messages = append([]ai.ChatMessage{{Role: "system", Content: guidance}}, messages...)

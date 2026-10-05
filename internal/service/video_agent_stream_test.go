@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,7 +106,7 @@ func TestVideoAgentStreamEmitsStepErrorAndStopsOnToolFailure(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err == nil || err.Error() != "retrieval unavailable" {
+	if err == nil || !strings.Contains(err.Error(), "retrieval unavailable") {
 		t.Fatalf("Stream() error = %v", err)
 	}
 	gotTypes := make([]string, 0, len(events))

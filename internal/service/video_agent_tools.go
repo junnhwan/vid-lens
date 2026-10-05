@@ -24,7 +24,7 @@ const (
 	VideoAgentToolInvestigateVisual    = "investigate_visual"
 )
 
-const agentFinalProductPrompt = "你是 VidLens 的视频内容回答生成工具。只能基于引用原文回答，中间结论必须用原文复核，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号用于行内引用链接。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。"
+const agentFinalProductPrompt = "你是 VidLens 的视频内容回答生成工具。只能基于引用原文回答，中间结论必须用原文复核，不能使用外部知识。引用片段包含证据模态和半开时间范围；回答具体事实必须绑定这些信息。若 transcript、visual_ocr、visual_caption 冲突，分别陈述并明确不确定性，不得擅自选择一方覆盖另一方。证据编号用于行内引用链接。回答涉及具体事实时，请在对应事实后使用独立格式 [C1][C2] 标注证据，不要写成 [C1, C2]。引用标记直接写在正文中，不使用反引号或代码块包裹。来源用视频标题识别，不输出 task_id 或原始毫秒区间。概要只作导航，不能宣称完整覆盖；无原文支持的条件、共识或矛盾明确缺证。控制回答在800字以内。"
 const agentFinalStylePrompt = "面向用户用自然语言解释结论与缺口。定位需要时用分钟:秒描述；task_id、modality、time_status 等字段名与原始毫秒区间属于来源元数据，由引用卡呈现，不要逐项抄入正文。不要扩展与用户问题无关的背景。"
 
 func AgentProductInstructions() string {
@@ -32,6 +32,7 @@ func AgentProductInstructions() string {
 }
 
 type VideoAgentTools struct {
+	collectionContext  string
 	answerPreference   string
 	termRules          VideoTermRuleSet
 	emitAnswer         func(string) error
@@ -49,6 +50,7 @@ func (t *VideoAgentTools) SetTermRules(rules VideoTermRuleSet) {
 		t.termRules = rules
 	}
 }
+func (t *VideoAgentTools) SetCollectionContext(context string) { t.collectionContext = context }
 
 func (t *VideoAgentTools) SetAnswerPreference(preference string) {
 	if t != nil {
@@ -424,6 +426,9 @@ func (t *VideoAgentTools) BuildCitedAnswer(ctx context.Context, input BuildCited
 		return BuildCitedAnswerResult{}, step, err
 	}
 	messages := buildCitedAnswerMessages(input, t.memory)
+	if t.collectionContext != "" {
+		messages = append([]ai.ChatMessage{{Role: "system", Content: t.collectionContext}}, messages...)
+	}
 	if t.answerPreference != "" {
 		messages = appendUserPromptPreference(messages, t.answerPreference)
 	}

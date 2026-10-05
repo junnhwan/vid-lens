@@ -59,6 +59,12 @@ func (s *ChatService) AskWithMode(ctx context.Context, mode ChatMode, userID, se
 	}
 
 	finalized := finalizeChatAnswer(prepared, answer)
+	if s.cfg.ReviewCitationSupport {
+		finalized.Citations, _, err = reviewCitationSupport(ctx, chat, finalized.Answer, finalized.Citations)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
 	_ = emitProgress(ctx, ConversationProgress{ID: "answer", Kind: "answer", Status: "done"})
 	result, err := s.saveChatExchangeWithStatus(ctx, userID, sessionID, prepared.Question, finalized.Answer, finalized.Citations, prepared.RecentLimit, profile.LLMModel, prepared.DegradationReason, prepared.FrozenMemberIDs)
 	if err != nil {
@@ -88,9 +94,12 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 	mode := "chat"
 	profile := ai.Profile{}
 	steps := []chatExecutionStep{}
+	var scope *retrievalScope
+	var retrieval *RetrievalTrace
 	var executionDurationMS *int64
 	var executionStartedAt, executionFinishedAt *string
 	if record != nil {
+		scope, retrieval = record.Scope, record.Retrieval
 		mode, profile = record.Mode, record.Profile
 		steps = record.completedSteps()
 		finished := time.Now().UTC()
@@ -102,6 +111,8 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 		executionDurationMS, executionStartedAt, executionFinishedAt = &duration, &startedText, &finishedText
 	}
 	snapshot, err = json.Marshal(struct {
+		Scope               *retrievalScope     `json:"scope,omitempty"`
+		Retrieval           *RetrievalTrace     `json:"retrieval,omitempty"`
 		Citations           []Citation          `json:"citations"`
 		Steps               []chatExecutionStep `json:"steps"`
 		Mode                string              `json:"mode"`
@@ -111,9 +122,25 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 		ExecutionDurationMS *int64              `json:"execution_duration_ms,omitempty"`
 		ExecutionStartedAt  *string             `json:"execution_started_at,omitempty"`
 		ExecutionFinishedAt *string             `json:"execution_finished_at,omitempty"`
-	}{citations, steps, mode, degradationReason != "", degradationReason, diagnosticID, executionDurationMS, executionStartedAt, executionFinishedAt})
+	}{Scope: scope, Retrieval: retrieval, Citations: citations, Steps: steps, Mode: mode, Degraded: degradationReason != "", DegradationReason: degradationReason, DiagnosticID: diagnosticID, ExecutionDurationMS: executionDurationMS, ExecutionStartedAt: executionStartedAt, ExecutionFinishedAt: executionFinishedAt})
 	if err != nil {
 		return nil, err
+	}
+	if record != nil && record.Scope != nil && len(record.Scope.Ready) > 0 {
+		session, err := s.repos.Chat.FindSessionForUser(userID, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if session == nil {
+			return nil, errKnowledgeMembershipChanged
+		}
+		current, err := s.sessionRetrievalScope(userID, session, profile.EmbeddingModel)
+		if err != nil {
+			return nil, err
+		}
+		if !sameTaskIDs(current.Members, record.Scope.Members) || !sameTaskIDs(current.Ready, record.Scope.Ready) {
+			return nil, errKnowledgeMembershipChanged
+		}
 	}
 	snapshotText := string(snapshot)
 	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}

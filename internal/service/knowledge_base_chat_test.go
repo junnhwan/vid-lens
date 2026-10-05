@@ -48,10 +48,9 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 		t.Fatal(err)
 	}
 
-	retriever := &pipelineTestRetriever{results: [][]RetrievedChunk{
-		{{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, ChunkIndex: 1, Content: "A 介绍 owner 校验"}, {TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, ChunkIndex: 2, Content: "B 介绍租约恢复"}},
-		{{TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, ChunkIndex: 2, Content: "B 介绍租约恢复"}},
-		{{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, ChunkIndex: 1, Content: "A 介绍 owner 校验"}},
+	retriever := &scopedFixtureRetriever{results: []RetrievedChunk{
+		{TaskID: taskA.ID, EvidenceID: "a-1", ChunkID: 11, ChunkIndex: 1, Content: "A 介绍 owner 校验"},
+		{TaskID: taskB.ID, EvidenceID: "b-1", ChunkID: 21, ChunkIndex: 2, Content: "B 介绍租约恢复"},
 	}}
 	chat := &scriptedChatClient{responses: []string{`{"queries":["owner 校验","租约恢复"]}`, "A 需要校验 owner。[C1] B 通过租约恢复。[C2]"}}
 	cfg := DefaultRAGRetrievalConfig()
@@ -73,12 +72,12 @@ func TestKnowledgeBaseChatRetrievesAcrossMembersWithPureVectorAndSources(t *test
 			}
 		}
 	}
-	if len(retriever.requests) != 3 {
+	if len(retriever.requests) != 8 {
 		t.Fatalf("requests=%+v", retriever.requests)
 	}
 	wantIDs := []int64{taskA.ID, taskB.ID}
 	for _, req := range retriever.requests {
-		if !reflect.DeepEqual(req.TaskIDs, wantIDs) {
+		if !reflect.DeepEqual(req.TaskIDs, wantIDs) && !(len(req.TaskIDs) == 1 && containsTaskID(wantIDs, req.TaskIDs[0])) {
 			t.Fatalf("task ids=%v want=%v", req.TaskIDs, wantIDs)
 		}
 	}

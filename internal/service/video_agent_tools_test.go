@@ -123,7 +123,7 @@ func TestVideoAgentToolBuildCitedAnswerPreservesCitations(t *testing.T) {
 	if len(chatClient.messages) != 1 || len(chatClient.messages[0]) < 2 {
 		t.Fatalf("chat messages = %+v", chatClient.messages)
 	}
-	for _, want := range []string{"行内引用链接", "[C1][C2]", "不要写成 [C1, C2]", "一句原文"} {
+	for _, want := range []string{"行内引用链接", "[C1][C2]", "不要写成 [C1, C2]", "一句原文", "不使用反引号或代码块包裹"} {
 		if !strings.Contains(chatClient.messages[0][0].Content, want) {
 			t.Fatalf("agent instruction prompt = %q, missing %q", chatClient.messages[0][0].Content, want)
 		}

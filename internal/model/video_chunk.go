@@ -7,6 +7,7 @@ type VideoChunk struct {
 	UserID              int64     `gorm:"index;not null" json:"user_id"`
 	TaskID              int64     `gorm:"index;uniqueIndex:idx_task_chunk_model;not null" json:"task_id"`
 	ChunkIndex          int       `gorm:"uniqueIndex:idx_task_chunk_model;not null" json:"chunk_index"`
+	IndexContext        string    `gorm:"type:text;not null;default:''" json:"index_context,omitempty"`
 	Content             string    `gorm:"type:text;not null" json:"content"`
 	ContentHash         string    `gorm:"type:char(32);not null;index" json:"content_hash"`
 	TokenCount          int       `gorm:"default:0" json:"token_count"`
@@ -42,4 +43,12 @@ const (
 
 func (VideoChunk) TableName() string {
 	return "video_chunks"
+}
+
+// EmbeddingText keeps navigation metadata separate from verbatim source text.
+func (c VideoChunk) EmbeddingText() string {
+	if c.IndexContext == "" {
+		return c.Content
+	}
+	return c.IndexContext + "\n原文：\n" + c.Content
 }

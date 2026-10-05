@@ -31,7 +31,7 @@ func (r *ModelReranker) Rerank(ctx context.Context, question string, chunks []Re
 	}
 	documents := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		documents = append(documents, chunk.Content)
+		documents = append(documents, "视频："+chunk.VideoTitle+"\n模态："+chunk.Modality+"\n原文：\n"+chunk.Content)
 	}
 	results, err := r.client.Rerank(ctx, question, documents, len(chunks))
 	if err != nil || len(results) == 0 {

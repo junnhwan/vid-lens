@@ -29,7 +29,7 @@ func (e *ConversationExecution) TestKnowledgeRetrieval(ctx context.Context, user
 	if req.Mode == "" {
 		req.Mode = "hybrid"
 	}
-	if req.Mode != "hybrid" && req.Mode != "vector" && req.Mode != "keyword" {
+	if req.Mode != "hybrid" && req.Mode != "vector" && req.Mode != "keyword" && req.Mode != "answer" && req.Mode != "agent" {
 		return nil, errors.New("检索模式无效")
 	}
 	s, ok := e.chat.(*ChatService)
@@ -49,7 +49,8 @@ func (e *ConversationExecution) TestKnowledgeRetrieval(ctx context.Context, user
 		return nil, err
 	}
 	session := &model.ChatSession{UserID: userID, ScopeType: model.ChatScopeKnowledgeBase, KnowledgeBaseID: kbID}
-	ids, err := s.sessionRetrievalTaskIDs(userID, session, profile.EmbeddingModel)
+	scope, err := s.sessionRetrievalScope(userID, session, profile.EmbeddingModel)
+	ids := scope.Ready
 	if err != nil {
 		return nil, err
 	}
@@ -66,15 +67,27 @@ func (e *ConversationExecution) TestKnowledgeRetrieval(ctx context.Context, user
 	cfg.EnableVector, cfg.EnableBM25 = req.Mode != "keyword", req.Mode != "vector"
 	cfg.QueryMode, cfg.RewriteQueries = QueryModeOriginal, 1
 	p.Config, p.rewriter = &cfg, NoopQueryRewriter{}
-	result, err := p.Retrieve(ctx, RetrievalPipelineRequest{UserID: userID, TaskIDs: ids, Question: req.Question, TopK: req.TopK, EmbeddingModel: profile.EmbeddingModel, Embedding: embedding, Debug: true})
+	var route collectionRoute
+	if req.Mode == "answer" || req.Mode == "agent" {
+		p = s.newRetrievalPipeline(req.TopK, chat, profile)
+		p.applyPolicy(PolicyFor(s.classifyIntent(ctx, req.Question, session, ChatModeNatural, nil, chat), ScopeCollection))
+		if req.Mode == "agent" {
+			p.rewriter = NoopQueryRewriter{}
+		}
+		route, err = s.routeCollection(ctx, userID, ids, req.Question, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result, err := p.Retrieve(ctx, RetrievalPipelineRequest{UserID: userID, TaskIDs: ids, Question: req.Question, TopK: req.TopK, EmbeddingModel: profile.EmbeddingModel, Embedding: embedding, Debug: true, RequiredTaskIDs: route.Required, RoutedTaskIDs: route.routedIDs(), Dimensions: route.Dimensions})
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.sessionRetrievalTaskIDs(userID, session, profile.EmbeddingModel)
+	current, err := s.sessionRetrievalScope(userID, session, profile.EmbeddingModel)
 	if err != nil {
 		return nil, err
 	}
-	if !sameTaskIDs(ids, current) {
+	if !sameTaskIDs(ids, current.Ready) || !sameTaskIDs(scope.Members, current.Members) {
 		return nil, errKnowledgeMembershipChanged
 	}
 	return &KnowledgeRetrievalResult{TaskIDs: ids, Mode: req.Mode, Trace: result.Trace, Citations: buildCitations(req.Question, result.Citations)}, nil

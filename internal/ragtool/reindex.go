@@ -133,7 +133,7 @@ func (r *RAGReindexer) Run(ctx context.Context, opts RAGReindexOptions) (RAGRein
 				clients[reindexClientKey(chunk)] = client
 			}
 
-			embedding, err := embedForReindex(ctx, client, chunk.Content, opts.MaxRetries, opts.RetryBaseDelay)
+			embedding, err := embedForReindex(ctx, client, chunk.EmbeddingText(), opts.MaxRetries, opts.RetryBaseDelay)
 			if err != nil {
 				return result, fmt.Errorf("embed chunk id %d: %w", chunk.ID, err)
 			}

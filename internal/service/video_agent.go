@@ -116,8 +116,8 @@ func (s *VideoAgentService) findVideoAgentSession(userID, sessionID int64) (*mod
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
-	if session.ScopeType != "" && session.ScopeType != model.ChatScopeVideo && session.ScopeType != model.ChatScopeKnowledgeBase {
-		return nil, fmt.Errorf("Agent 仅支持单视频会话")
+	if session.ScopeType != "" && session.ScopeType != model.ChatScopeVideo && session.ScopeType != model.ChatScopeKnowledgeBase && session.ScopeType != model.ChatScopeVideoLibrary {
+		return nil, fmt.Errorf("Agent 不支持此会话范围")
 	}
 	return session, nil
 }
@@ -202,14 +202,14 @@ func (s *VideoAgentService) loadSessionAgentMemorySnapshot(ctx context.Context, 
 	if session.ScopeType == model.ChatScopeKnowledgeBase {
 		scope = MemoryScope{Type: model.MemoryScopeKnowledgeBase, ID: fmt.Sprintf("%d", session.KnowledgeBaseID)}
 	}
+	scopes := []MemoryScope{{Type: model.MemoryScopeUser, ID: fmt.Sprintf("%d", userID)}, {Type: model.MemoryScopeRun, ID: runID}}
+	if session.ScopeType != model.ChatScopeVideoLibrary {
+		scopes = append(scopes, scope)
+	}
 	snapshot, err := s.chatSvc.longTermMemory.Snapshot(ctx, MemorySnapshotRequest{
 		UserID: userID,
 		Query:  query,
-		Scopes: []MemoryScope{
-			{Type: model.MemoryScopeUser, ID: fmt.Sprintf("%d", userID)},
-			scope,
-			{Type: model.MemoryScopeRun, ID: runID},
-		},
+		Scopes: scopes,
 	})
 	if err != nil {
 		return nil

@@ -56,13 +56,10 @@ func (s *ChatService) loadVideoMaps(ctx context.Context, userID int64, taskIDs [
 	if s.repos == nil || s.repos.Task == nil {
 		return nil, nil
 	}
-	maps := make([]VideoMap, 0, min(len(taskIDs), 8))
+	maps := make([]VideoMap, 0, len(taskIDs))
 	for _, id := range taskIDs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if len(maps) == 8 {
-			break
 		}
 		task, err := s.repos.Task.FindByID(id)
 		if err != nil {
@@ -120,7 +117,7 @@ func (s *ChatService) loadVideoMaps(ctx context.Context, userID int64, taskIDs [
 		if title == "" {
 			title = task.Filename
 		}
-		maps = append(maps, buildVideoMap(id, title, summary, BuildVideoTimeline(id, rows, frames), max(280, 3200/min(len(taskIDs), 8))))
+		maps = append(maps, buildVideoMap(id, title, summary, BuildVideoTimeline(id, rows, frames), max(280, 3200/max(1, len(taskIDs)))))
 	}
 	return maps, nil
 }

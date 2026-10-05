@@ -9,7 +9,7 @@ const (
 	RAGIndexStatusFailed       = "failed"
 	RAGIndexStatusNeedsRebuild = "needs_rebuild"
 
-	CurrentRAGIndexBuildVersion    = 4
+	CurrentRAGIndexBuildVersion    = 5
 	CurrentRAGSourceMappingVersion = "source-map-v3-timed-spans"
 	CurrentRAGChunkerVersion       = "recursive-sentence-source-v3"
 )
@@ -32,6 +32,7 @@ type VideoRAGIndex struct {
 	ChunkerVersion       string     `gorm:"type:varchar(50)" json:"chunker_version"`
 	ChunkSize            int        `gorm:"default:0" json:"chunk_size"`
 	ChunkOverlap         int        `gorm:"default:0" json:"chunk_overlap"`
+	IndexContextSHA256   string     `gorm:"type:varchar(64)" json:"index_context_sha256,omitempty"`
 	ChunkManifestSHA256  string     `gorm:"type:varchar(64)" json:"chunk_manifest_sha256"`
 	SourceMappingVersion string     `gorm:"type:varchar(50);not null;default:''" json:"source_mapping_version"`
 	LastError            string     `gorm:"type:varchar(500)" json:"last_error"`
