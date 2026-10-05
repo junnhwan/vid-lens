@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"sort"
 	"time"
 
 	"vid-lens/internal/eval"
@@ -15,6 +16,7 @@ import (
 
 func runProductCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("rag-eval product", flag.ContinueOnError)
+	localConfig := flags.String("local-config", "", "optional local config; use saved owner profiles and conversation service instead of HTTP")
 	dataset := flags.String("dataset", "", "private JSON array of versioned product cases; uses existing evaluation sessions")
 	output := flags.String("output", "", "private result path (must not exist)")
 	base := flags.String("base-url", "http://127.0.0.1:8080", "running product server")
@@ -27,7 +29,7 @@ func runProductCommand(ctx context.Context, args []string) error {
 		return errors.New("dataset, output and identity are required")
 	}
 	token := os.Getenv(*tokenEnv)
-	if token == "" {
+	if token == "" && *localConfig == "" {
 		return errors.New("evaluation token environment variable is empty")
 	}
 	data, err := os.ReadFile(*dataset)
@@ -53,19 +55,43 @@ func runProductCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	defer file.Close()
-	results, err := eval.RunProductCases(ctx, cases, (eval.HTTPProductExecutor{BaseURL: *base, Token: token}).Execute)
+	execute := (eval.HTTPProductExecutor{BaseURL: *base, Token: token}).Execute
+	if *localConfig != "" {
+		var closeAll func()
+		execute, closeAll, err = localProductExecutor(ctx, *localConfig)
+		if err != nil {
+			return err
+		}
+		defer closeAll()
+	}
+	results, err := eval.RunProductCases(ctx, cases, execute)
 	if err != nil {
 		return err
 	}
 	hash := sha256.Sum256(data)
+	var latencies []float64
+	for _, result := range results {
+		for _, turn := range result.Turns {
+			latencies = append(latencies, turn.DurationMS)
+		}
+	}
+	sort.Float64s(latencies)
+	percentile := func(p float64) float64 {
+		if len(latencies) == 0 {
+			return 0
+		}
+		return latencies[min(len(latencies)-1, int(float64(len(latencies))*p))]
+	}
 	report := struct {
+		P50MS         float64              `json:"p50_ms"`
+		P95MS         float64              `json:"p95_ms"`
 		Version       string               `json:"version"`
 		CreatedAt     time.Time            `json:"created_at"`
 		DatasetSHA256 string               `json:"dataset_sha256"`
 		Identity      json.RawMessage      `json:"identity"`
 		Distribution  map[string]int       `json:"distribution"`
 		Results       []eval.ProductResult `json:"results"`
-	}{eval.ProductSchemaVersion, time.Now().UTC(), hex.EncodeToString(hash[:]), identityData, eval.ProductDistribution(results), results}
+	}{percentile(.50), percentile(.95), eval.ProductSchemaVersion, time.Now().UTC(), hex.EncodeToString(hash[:]), identityData, eval.ProductDistribution(results), results}
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
