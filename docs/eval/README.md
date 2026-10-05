@@ -48,3 +48,9 @@ live/legacy 模式的必填与默认项：
 真实评测数据集和实验登记可能包含本地视频内容或运行环境信息，统一放在被忽略的 `docs-private/eval/`。需要执行受保护评测时，使用当前本地数据集及本地访问登记文件。
 
 评测运行产生的报告、日志和快照放入被忽略的 `artifacts/`，不要回写到 `docs/`。
+
+## 使用本地已有资料执行集合产品评测
+
+`rag-eval product`仍默认通过授权HTTP入口执行。显式传`--local-config config.yaml`时可读取本地数据库中指定用户已保存的AI配置，复用ConversationExecution、预算、journal及持久消息路径；不创建凭据，不重置会话。使用私有dev数据集、独立评测会话和包含代码/未提交源码指纹、资产、模型、索引版本及配置指纹的identity文件，结果文件不得已存在。
+
+本地执行器不包含完整HTTP server wiring的provider admission、长期记忆和query-time视觉investigator。它可以验证真实模型/数据库对话，不能替代认证、流式代理或浏览器回放验收。结果同时保留失败与有限回答，`semantic_success`在独立源证据审核前保持null。P50/P95包含所有计划用例耗时；小样本探索结果不能证明提升或大集合SLO。普通Chat token缺少完整计量时保留unknown，不能当作零成本。

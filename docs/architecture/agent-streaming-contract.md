@@ -3,10 +3,10 @@
 ## 请求
 
 - Chat：`POST /api/v1/chat/sessions/:session_id/messages/stream`，请求 `{ "question": "...", "top_k": 4, "mode": "chat" }`。
-- Agent：`POST /api/v1/chat/sessions/:session_id/messages/agent/stream`，请求 `{ "question": "...", "top_k": 4, "mode": "agent" }`，支持单视频和已授权知识库成员集合。
+- Agent：`POST /api/v1/chat/sessions/:session_id/messages/agent/stream`，请求 `{ "question": "...", "top_k": 4, "mode": "agent" }`，支持单视频、已授权知识库成员集合和当前用户视频库。
 - 同步 Agent：`POST /api/v1/chat/sessions/:session_id/messages/agent`，使用相同循环，额外接受 `run_id` 进行 owner/session/goal 匹配的重放。
 
-省略 mode 使用对应端点默认值。Chat 与 Agent 均支持单视频和已授权知识库成员集合，服务端在每个执行边界校验作用域。
+省略 mode 使用对应端点默认值。Chat 与 Agent 均支持单视频、已授权知识库成员集合和当前用户视频库，服务端在每个执行边界校验作用域。
 
 ## SSE 事件
 
@@ -55,3 +55,7 @@ GET /api/v1/chat/sessions/:session_id/runs 返回最近运行的公开元数据�
 预算从同次读取的默认 AI Profile 解析并冻结到 run。探索准入保留最终回答的调用、输入、输出与时间额度，预留仍计入总预算；受限收尾经过原 journal。`budget_notice` 与 `stop_reason` 同时用于实时、快照和运行查询。provider 实测 usage 与估算值分别标记，不能将 completion tokens 解释为精确内部推理预算。
 
 工具参数在调用前校验失败可纠正一次，失败尝试仍写 journal 并计入预算；权限与证据完整性错误不能靠重试绕过。持久化收尾使用独立短超时，写失败不发送 done。
+
+引用最终快照增加`claim_texts`、`claim_end_runes`、`support_status`、`quote_truncated/quote_omitted`、`context_source_refs`，并分别保存锚点与上下文时间。`done`持久答案保留有效的 `[Cn]` 行内链接，移除非法编号；新快照使用 `claim_texts` 关联结论。`claim_end_runes` 仅用于恢复拉取更新前本地生成的旧快照，不再用于新答案重建引用。语义复核状态不替代原始来源授权与时间映射；无有效引用不回退附首条候选。
+
+研究运行的概要聚合与引用复核使用现有journal记录受预算约束的内部模型调用。Planner只接收有界输入视图，完整关系来源映射保留在持久状态用于canonicalization与恢复，不重复塞入规划上下文。
