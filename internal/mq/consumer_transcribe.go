@@ -455,23 +455,8 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 			}
 		}
 	}
-	if c.transcriptAligner != nil {
-		needsAlignment := false
-		for _, row := range rows {
-			var words []model.TranscriptionSegment
-			if json.Unmarshal([]byte(row.TimedSegments), &words) != nil || transcript.ValidateAlignedWords(row, words) != nil {
-				needsAlignment = true
-				break
-			}
-		}
-		if needsAlignment {
-			content, err := c.alignTranscriptRows(ctx, taskID, audioPath, rows)
-			if err != nil {
-				return "", fmt.Errorf("逐句时间对齐失败（已完成的 ASR 可复用）: %w", err)
-			}
-			return content, nil
-		}
-	}
+	// An installed aligner is a capability, not authorization to run a local
+	// model. Only an explicit, durable alignment-only job may invoke it.
 	stitchStartedAt := time.Now()
 	stitched := transcript.Assemble(rows)
 	if strings.TrimSpace(stitched.Content) == "" {

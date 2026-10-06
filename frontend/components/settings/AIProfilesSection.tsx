@@ -14,7 +14,7 @@ import { ProfileImportHelp } from './ProfileImportHelp'
 // Free API 接入配置独立展示，由服务端维护并解析最新配置。
 // 每张卡支持 测试 / 编辑 / 删除;密钥只回显脱敏值。
 
-export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
+export function AIProfilesSection({ readOnly, onChanged }: { readOnly: boolean; onChanged?: () => void }) {
   const toast = useToast()
   const [profiles, setProfiles] = useState<AIProfile[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,12 +55,13 @@ export function AIProfilesSection({ readOnly }: { readOnly: boolean }) {
     setLoadError('')
     try {
       setProfiles(await api.listProfiles())
+      onChanged?.()
     } catch (e) {
       setLoadError(e instanceof ApiError ? e.message : 'AI 配置加载失败')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [onChanged])
 
   useEffect(() => { void load() }, [load])
 
@@ -172,7 +173,7 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
         <CapabilityLine label="语音识别" value={profile.asr_model} />
         <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维`} />
         <CapabilityLine label="视觉模型" value={profile.vision_model || '未配置'} muted={!profile.vision_model} />
-        <CapabilityLine label="重排序" value={profile.rerank_model || '未启用 · 确定性 rerank 生效中'} muted={!profile.rerank_model} />
+        <CapabilityLine label="检索重排" value="在上方“可选增强能力”中按需开启" muted />
         {!locked && <CapabilityProbe targets={targets} />}
       </div>
       {!hosted && <><button className="btn btn-sm" disabled={locked} onClick={onExport} title="不含 API Key">导出</button>

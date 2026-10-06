@@ -18,8 +18,9 @@ var (
 )
 
 type UserService struct {
-	repo   *repository.UserRepository
-	jwtCfg config.JWTConfig
+	repo                 *repository.UserRepository
+	jwtCfg               config.JWTConfig
+	optionalCapabilities *userOptionalCapabilities
 }
 
 func NewUserService(repo *repository.UserRepository, jwtCfg config.JWTConfig) *UserService {

@@ -642,8 +642,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           <div id="transcript" className="transcript-list">
             {timeline?.alignment_available && transcriptAtoms.some(atom => atom.time_range_status !== 'exact') && (
               <div className="transcript-upgrade">
-                <b>可以补齐句子回放时间</b>
-                <p>将已有文字与视频音频逐句对齐，改善回放定位与跨片段连续性。</p>
+                <b>精确回放定位 · 按需开启</b>
+                <p>当前可以从片段回放。需要逐句定位时，可将已有文字与视频音频对齐；此操作会运行服务端配置的本地模型，普通转写不会自动执行。</p>
                 <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'align', title: '对齐句子时间？', body: '会复用已有识别文字，在本地对齐音频时间并更新检索索引。对齐不会再次调用语音识别；重建索引可能产生 Embedding 费用。历史回答和引用快照保留。', confirmLabel: '开始对齐' })}>对齐句子时间</button>
               </div>
             )}

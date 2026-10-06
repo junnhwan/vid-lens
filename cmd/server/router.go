@@ -46,6 +46,8 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 		auth.Use(middleware.JWTAuth(cfg.JWT.Secret))
 		{
 			auth.GET("/user/profile", handlers.user.GetProfile)
+			auth.GET("/user/optional-capabilities", handlers.user.GetOptionalCapabilities)
+			auth.PATCH("/user/optional-capabilities", handlers.user.SetOptionalCapabilities)
 			if h := handlers.artifacts; h != nil {
 				auth.GET("/learning-position", h.LearningPosition)
 				auth.PATCH("/learning-position", h.SaveLearningPosition)

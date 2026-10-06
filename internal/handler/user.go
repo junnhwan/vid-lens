@@ -1,11 +1,46 @@
 package handler
 
 import (
+	"errors"
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/middleware"
+	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
 	"vid-lens/internal/service"
 )
+
+func (h *UserHandler) GetOptionalCapabilities(c *gin.Context) {
+	view, err := h.svc.OptionalCapabilities(c.Request.Context(), middleware.GetUserID(c))
+	if err != nil {
+		response.InternalError(c, "读取可选能力失败")
+		return
+	}
+	response.OK(c, view)
+}
+
+func (h *UserHandler) SetOptionalCapabilities(c *gin.Context) {
+	if middleware.GetRole(c) == model.RoleDemo {
+		response.Forbidden(c, "演示账号无法修改可选能力")
+		return
+	}
+	var req struct {
+		RerankEnabled *bool `json:"rerank_enabled" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.RerankEnabled == nil {
+		response.BadRequest(c, "rerank_enabled 必须为布尔值")
+		return
+	}
+	view, err := h.svc.SetRerankPreference(c.Request.Context(), middleware.GetUserID(c), *req.RerankEnabled)
+	if errors.Is(err, service.ErrRerankUnavailable) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "保存可选能力失败")
+		return
+	}
+	response.OK(c, view)
+}
 
 type UserHandler struct {
 	svc *service.UserService

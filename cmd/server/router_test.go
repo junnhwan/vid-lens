@@ -29,6 +29,8 @@ func TestNewServerRouterRegistersCoreRoutes(t *testing.T) {
 	}
 
 	want := map[string]string{
+		"GET /api/v1/user/optional-capabilities":                                 "read optional capabilities",
+		"PATCH /api/v1/user/optional-capabilities":                               "set optional capabilities",
 		"POST /api/v1/artifact-runs":                                             "background artifact generation",
 		"GET /api/v1/artifact-runs/:id/events":                                   "durable artifact events",
 		"POST /api/v1/artifacts/:id/edit-runs":                                   "bounded artifact agent edit",

@@ -23,6 +23,15 @@ export interface AuthResult {
   user: User
 }
 
+export interface OptionalCapabilities {
+  rerank_enabled: boolean
+  rerank_available: boolean
+  rerank_mode: 'none' | 'deterministic' | 'model'
+  rerank_model?: string
+  rerank_reason?: string
+  alignment_configured: boolean
+}
+
 // ============ AI Profile（BYOK）============
 // 注意：没有 type 字段。一个 profile 同时含 llm/asr/embedding/vision 四组配置。
 // is_default 是单个 bool（snake_case），设新默认时后端把同类其它置 false——

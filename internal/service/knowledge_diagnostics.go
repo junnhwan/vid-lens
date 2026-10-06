@@ -58,7 +58,10 @@ func (e *ConversationExecution) TestKnowledgeRetrieval(ctx context.Context, user
 		req.TopK = 5
 	}
 	embedding, chat = s.observedAIClients(userID, 0, 0, embedding, chat, profile)
-	p := s.newRetrievalPipeline(req.TopK, chat, profile)
+	p, err := s.newUserRetrievalPipeline(ctx, userID, req.TopK, chat, profile)
+	if err != nil {
+		return nil, err
+	}
 	cfg := DefaultRAGRetrievalConfig()
 	if p.Config != nil {
 		cfg = *p.Config
@@ -69,7 +72,10 @@ func (e *ConversationExecution) TestKnowledgeRetrieval(ctx context.Context, user
 	p.Config, p.rewriter = &cfg, NoopQueryRewriter{}
 	var route collectionRoute
 	if req.Mode == "answer" || req.Mode == "agent" {
-		p = s.newRetrievalPipeline(req.TopK, chat, profile)
+		p, err = s.newUserRetrievalPipeline(ctx, userID, req.TopK, chat, profile)
+		if err != nil {
+			return nil, err
+		}
 		p.applyPolicy(PolicyFor(s.classifyIntent(ctx, req.Question, session, ChatModeNatural, nil, chat), ScopeCollection))
 		if req.Mode == "agent" {
 			p.rewriter = NoopQueryRewriter{}

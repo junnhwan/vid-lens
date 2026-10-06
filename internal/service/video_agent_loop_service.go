@@ -187,7 +187,10 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	}
 	memorySnapshot := s.loadSessionAgentMemorySnapshot(ctx, req.UserID, session, runID, req.Goal, memoryPolicy)
 	embedding, chat = s.chatSvc.observedAIClients(req.UserID, req.SessionID, session.TaskID, embedding, chat, profile)
-	pipeline := s.chatSvc.newRetrievalPipeline(req.TopK, chat, profile)
+	pipeline, err := s.chatSvc.newUserRetrievalPipeline(ctx, req.UserID, req.TopK, chat, profile)
+	if err != nil {
+		return nil, err
+	}
 	// The Planner supplies the search query; do not hide another LLM call inside a tool.
 	pipeline.applyPolicy(PolicyFor(IntentDirectQA, scopeOfSession(session)))
 	pipeline.rewriter = NoopQueryRewriter{}

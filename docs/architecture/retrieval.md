@@ -7,7 +7,9 @@
 1. 根据会话绑定的视频、视频库范围或知识库确定检索作用域。
 2. 规则层提取时间、实体和句式信号并给出 intent；生产入口 `ChatService.classifyIntent` 只调用 `RuleIntentClassifier`，因此每轮问答不会调用 LLM 分类。这是当前的接线状态，不是设计上的禁用：`IntentRouter` 的规则/LLM 级联和 `LLMIntentClassifier` 仍在代码中，只有 `ParseRecentIntents` 被生产路径使用，级联的 `Classify` 没有接进来。查询改写仍由检索配置决定。
 3. `ExecutionPolicy` 把意图映射为检索预算和策略，包括是否改写、作用域、候选数量、是否使用关键词检索、融合、相邻片段回填和 rerank。
-4. `RetrievalPipeline` 执行查询改写、关键词/向量召回、跨查询 RRF 融合、原文回填、重排、多样性选择和连续上下文扩展，输出带稳定 evidence ID 的候选片段。
+4. `RetrievalPipeline` 执行查询改写、关键词/向量召回、跨查询 RRF 融合、原文回填、可选重排、多样性选择和连续上下文扩展，输出带稳定 evidence ID 的候选片段。
+
+用户在设置页“可选增强能力”中选择是否启用检索重排；默认关闭，偏好持久化于 `users.rerank_enabled`。`GET/PATCH /api/v1/user/optional-capabilities` 只读取或修改当前认证用户的选择，演示账号不可修改。普通问答、Agent 与检索测试在构建管线前读取偏好；关闭时覆盖部署或 Free API 的重排模式为 `none`，不会创建重排器或发送重排请求，也不会扩大原有检索候选数量。开启后仍遵守意图策略，采用当前 AI 服务与部署提供的模型或规则排序；配置可用性不等同于真实调用验证。
 5. LLM 结合视频上下文自然回答；视频事实有依据才引用，一般知识与视频内容区分。
 
 ## 事实源和作用域

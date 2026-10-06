@@ -48,6 +48,7 @@ jobs:
           npm ci --no-audit --no-fund
           npm run typecheck
           npm test
+          npx vitest run components/settings/OptionalCapabilitiesSection.test.tsx
           npm run build
           npm run test:stream
       - name: Package checked release

@@ -87,7 +87,11 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 			return nil, err
 		}
 	}
-	pipeline := s.newRetrievalPipeline(topK, chat, profile)
+	pipeline, err := s.newUserRetrievalPipeline(ctx, userID, topK, chat, profile)
+	if err != nil {
+		return nil, err
+	}
+	policy.Rerank = policy.Rerank && pipeline.reranker != nil
 	// 知识库混合检索（EnableVector=true/EnableBM25=true）由
 	// policy.Scope==collection 统一表达；rerank 开关由 policy.Rerank 映射。
 	pipeline.applyPolicy(policy)
@@ -292,7 +296,19 @@ func (s *ChatService) videoContextText(owner, taskID int64) (string, error) {
 	return strings.Join(sections, "\n\n"), nil
 }
 
-func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile ai.Profile) *RetrievalPipeline {
+func (s *ChatService) newUserRetrievalPipeline(ctx context.Context, userID int64, topK int, chat ai.ChatClient, profile ai.Profile) (*RetrievalPipeline, error) {
+	enabled := false
+	if s.repos != nil && s.repos.User != nil {
+		var err error
+		enabled, err = s.repos.User.RerankEnabled(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("读取检索重排偏好失败: %w", err)
+		}
+	}
+	return s.newRetrievalPipeline(topK, chat, profile, enabled), nil
+}
+
+func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile ai.Profile, authorization ...bool) *RetrievalPipeline {
 	cfg := s.cfg.Retrieval
 	if strings.TrimSpace(profile.RerankModel) != "" {
 		copy := DefaultRAGRetrievalConfig()
@@ -301,6 +317,21 @@ func (s *ChatService) newRetrievalPipeline(topK int, chat ai.ChatClient, profile
 		}
 		copy.RerankerMode = RerankerModeModel
 		copy.RerankerVersion = profile.RerankModel
+		cfg = &copy
+	}
+	if len(authorization) > 0 && !authorization[0] {
+		copy := DefaultRAGRetrievalConfig()
+		if cfg != nil {
+			copy = *cfg
+		} else {
+			// Materializing the legacy nil-config path must preserve its request
+			// limits; disabling rerank must not expand the candidate pool.
+			if topK <= 0 {
+				topK = 5
+			}
+			copy.TopK, copy.CandidateK, copy.MinVectorScore = topK, s.candidateK(topK), s.cfg.MinScore
+		}
+		copy.RerankerMode, copy.RerankerVersion = RerankerModeNone, ""
 		cfg = &copy
 	}
 	var rewriter QueryRewriter = NewLLMQueryRewriter(chat)

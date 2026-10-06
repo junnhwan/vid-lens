@@ -148,6 +148,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	ragIndexSvc.SetAIRecorder(aiObserver)
 
 	retrievalCfg := productionRetrievalConfig(deps.cfg.RAG)
+	userSvc.WithOptionalCapabilities(aiProfileSvc, deps.cfg.RAG.Enabled, retrievalCfg, len(deps.cfg.Tools.TranscriptAlignerCommand) > 0)
 	modelRerankerFactory := func(profile ai.Profile) service.Reranker {
 		client, err := aiFactory.NewRerankClient(profile)
 		if err != nil {

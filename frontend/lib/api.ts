@@ -1,5 +1,5 @@
 import type {
-  AIProfile, AIProfileRequest, HostedAIStatus, HostedAIAdmin, HostedAIRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AskResult, AuthResult,
+  AIProfile, AIProfileRequest, HostedAIStatus, HostedAIAdmin, HostedAIRequest, AgentBudgetOptions, ProfilePurpose, PromptPreferenceView, AskResult, AuthResult, OptionalCapabilities,
   ChatMessage, ChatMode, ChatScopeType, ChatSession, Citation, KnowledgeBase,
   MemoryItem, MemoryPreferenceView,
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
@@ -145,6 +145,8 @@ export const api = {
   login: (username: string, password: string) =>
     req<AuthResult>('/user/login', 'POST', { username, password }),
   profile: () => req<User>('/user/profile', 'GET'),
+  optionalCapabilities: () => req<OptionalCapabilities>('/user/optional-capabilities', 'GET'),
+  setRerankEnabled: (enabled: boolean) => req<OptionalCapabilities>('/user/optional-capabilities', 'PATCH', { rerank_enabled: enabled }),
 
   // ============ AI Profile ============
   budgetOptions: () => req<AgentBudgetOptions>('/ai/profiles/budget-options', 'GET'),

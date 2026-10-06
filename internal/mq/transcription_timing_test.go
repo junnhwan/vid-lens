@@ -78,6 +78,10 @@ func TestTranscribeAudioKeepsCoarseRangeForTextOnlyProvider(t *testing.T) {
 	consumer := &Consumer{repo: repos, splitAudioWindows: func(context.Context, string, string, int, int) ([]ffmpeg.AudioSegment, string, error) {
 		return []ffmpeg.AudioSegment{{Path: "plain.mp3", WindowEndMS: 22000, CoreEndMS: 20000, SegmentKey: "plain-window", Version: ffmpeg.AudioSegmenterVersion}}, "", nil
 	}}
+	consumer.transcriptAligner = testTranscriptAligner(func(context.Context, string, []model.VideoTranscriptionChunk) ([]model.VideoTranscriptionChunk, error) {
+		t.Fatal("ordinary transcription must not invoke an installed local model")
+		return nil, nil
+	})
 	if _, err := consumer.transcribeAudio(context.Background(), 910, "audio.mp3", strategy); err != nil {
 		t.Fatal(err)
 	}

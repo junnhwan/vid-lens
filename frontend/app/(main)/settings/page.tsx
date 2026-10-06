@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import type { User } from '@/lib/types'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { PageHeading } from '@/components/product/PageHeading'
 import { AIProfilesSection } from '@/components/settings/AIProfilesSection'
+import { OptionalCapabilitiesSection } from '@/components/settings/OptionalCapabilitiesSection'
 import { MemorySection } from '@/components/settings/MemorySection'
 import { PromptPreferencesSection } from '@/components/settings/PromptPreferencesSection'
 import { useTheme } from '@/components/theme/ThemeProvider'
@@ -13,6 +14,8 @@ export default function SettingsPage() {
   useCrumb([{ label: '设置' }])
   const [tab, setTab] = useState<'ai' | 'mem' | 'prompts'>('ai')
   const [user, setUser] = useState<User | null>(null)
+  const [capabilityRevision, setCapabilityRevision] = useState(0)
+  const refreshCapabilities = useCallback(() => setCapabilityRevision(value => value + 1), [])
   const { theme, setTheme } = useTheme()
   const { confirmLeave } = useShell()
 
@@ -42,7 +45,7 @@ export default function SettingsPage() {
           <button className={tab === 'prompts' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('prompts') }}>提示词</button>
         </div>
         <div>
-          {tab === 'ai' ? <AIProfilesSection readOnly={!user || user.role === 'DEMO'} /> : tab === 'prompts' ? <PromptPreferencesSection readOnly={!user || user.role === 'DEMO'} /> : <MemorySection user={user} />}
+          {tab === 'ai' ? <><OptionalCapabilitiesSection readOnly={!user || user.role === 'DEMO'} refreshKey={capabilityRevision} /><AIProfilesSection readOnly={!user || user.role === 'DEMO'} onChanged={refreshCapabilities} /></> : tab === 'prompts' ? <PromptPreferencesSection readOnly={!user || user.role === 'DEMO'} /> : <MemorySection user={user} />}
         </div>
       </div>
     </div>

@@ -54,6 +54,9 @@ func newReliabilityTestService(t *testing.T, repos *repository.Repositories, ret
 	cfg.RerankerVersion = "fake-reranker"
 	chatCfg := ChatConfig{TopK: 5, MinScore: 0.3, RecentTurns: 8, Retrieval: &cfg}
 	if rerankerFactory != nil {
+		if err := repos.User.Create(&model.User{ID: 7, Username: "rerank-opt-in", PasswordHash: "unused", RerankEnabled: true}); err != nil {
+			t.Fatal(err)
+		}
 		chatCfg.ModelRerankerFactory = rerankerFactory
 	}
 	return NewChatService(repos, retriever, chatCfg)
