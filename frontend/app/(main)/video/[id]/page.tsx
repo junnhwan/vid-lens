@@ -1,27 +1,23 @@
-import { useAIAvailability } from '@/components/settings/useAIAvailability'
-import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
+import { TranscriptPanel } from '@/components/video/TranscriptPanel'
+import { VisualEvidencePanel, groupVisualAtoms } from '@/components/video/VisualEvidencePanel'
+import { RetrievalIndexPanel } from '@/components/video/RetrievalIndexPanel'
+import { artifactError } from '@/lib/artifacts/api'
+import { useVideoActions } from '@/components/video/useVideoActions'
+import { taskVisualMode, visualModeLabel, visualChoices, indexActionLabel, indexConfirm } from '@/components/video/videoView'
+import { useVideoWorkbenchData } from '@/components/video/useVideoWorkbenchData'
+import { useVideoPlayback } from '@/components/video/useVideoPlayback'
 import { studyAvailability, visualAvailability } from '@/lib/taskCapabilities'
 import { ArtifactCreateDialog } from '@/components/artifacts/ArtifactCreateDialog'
-import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import Link from '@/lib/router'
-import { useQuery } from '@tanstack/react-query'
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from '@/lib/router'
-import { api, ApiError } from '@/lib/api'
 import {
   TaskStatusEnum,
-  type RAGIndexResult,
-  type TimelineAtom,
-  type TranscriptionProgress,
-  type VideoTask,
-  type VideoTimeline,
-  type VisualMode,
 } from '@/lib/types'
-import { fmtRelTime, fmtDateTime, taskTitle } from '@/lib/format'
-import { formatTime, formatTimeRange, needsCitationUpgrade } from '@/components/Citation'
-import { ModalityTag } from '@/components/ui/ModalityTag'
-import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
+import { taskTitle } from '@/lib/format'
+import { needsCitationUpgrade } from '@/components/Citation'
+import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { SummaryRevisionPanel } from '@/components/summary/SummaryRevisionPanel'
 import { VideoQuestionsPanel } from '@/components/chat/VideoQuestionsPanel'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
@@ -33,7 +29,6 @@ import { groupTranscriptSources } from '@/lib/transcript'
 import { ProcessStrip } from '@/components/ProcessStrip'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { VisualProgressPanel } from '@/components/VisualProgressPanel'
-import { useStudyPosition } from '@/lib/artifacts/useStudyPosition'
 import { summaryFailureView } from '@/lib/summaryFailure'
 import { canGenerateSummary, summaryRunning, summaryStatusText } from '@/lib/summaryState'
 import { LoadingBlock, ErrorState } from '@/components/ui/AsyncState'
@@ -45,314 +40,39 @@ import './VideoWorkbench.css'
 // 点击卡片仍按该帧时间跳转播放器。
 
 type TabKey = 'tl' | 'vf' | 'idx'
-type ActionKind = 'transcribe' | 'align' | 'analyze' | 'index' | 'download'
-type ConfirmAction = {
-  kind: Exclude<ActionKind, 'download'>
-  force?: boolean
-  title: string
-  body: string
-  confirmLabel: string
-}
-
-const visualChoices: { mode: VisualMode; title: string; description: string; icon: 'video' | 'scan' | 'photo' | 'layers' }[] = [
-  { mode: 'off', title: '关闭', description: '演讲、访谈或画面变化很少时，转写通常已经足够。', icon: 'video' },
-  { mode: 'ocr', title: '文字识别 OCR', description: '适合文字课件、笔记和清晰的板书，提取画面中的文字。', icon: 'scan' },
-  { mode: 'caption', title: '画面描述', description: '适合图表、流程图、示意图，调用视觉模型理解画面。', icon: 'photo' },
-  { mode: 'both', title: 'OCR + 画面描述', description: '适合文字与图表混合的课程，会增加处理量与模型调用。', icon: 'layers' },
-]
-
-function taskVisualMode(task: VideoTask): VisualMode {
-  return task.visual_mode || (task.visual_disabled ? 'off' : 'both')
-}
-
-function visualModeLabel(mode: VisualMode): string {
-  return visualChoices.find(choice => choice.mode === mode)?.title || '关闭'
-}
-
-function indexActionLabel(index: RAGIndexResult | null): string {
-  if (!index) return '索引状态不可用'
-  if (index.status === 'queued') return '索引排队中…'
-  if (index.status === 'indexing') return '索引构建中…'
-  if (index.status === 'failed') return '索引失败，重试'
-  if (index.status === 'needs_rebuild' || index.needs_rebuild) return '需要重建索引'
-  return index.indexed ? '重建索引' : '建立索引'
-}
-
-function indexConfirm(index: RAGIndexResult): ConfirmAction {
-  const label = indexActionLabel(index)
-  const replacing = index.indexed || index.needs_rebuild || index.status === 'needs_rebuild'
-  return {
-    kind: 'index', title: `${label}？`, confirmLabel: label,
-    body: `建立后，视频问答可按内容含义找到相关片段并定位视频位置；只播放视频、查看转写或摘要无需建立索引。系统会将已有转写文字及已生成的画面文字、画面描述（如有）发送给当前配置的向量模型，调用 Embedding 并消耗额度；不会重新转写，也不会修改原视频或这些文字。${replacing ? '现有检索索引将被替换。' : ''}`,
-  }
-}
-
-function indexPhase(index: RAGIndexResult): string {
-  if (index.status === 'queued') return '等待索引任务启动'
-  if (index.status === 'failed') return '索引失败'
-  if (index.status === 'indexed') return '已完成'
-  if (index.status === 'needs_rebuild') return '等待重建'
-  if (index.status === 'not_indexed') return '尚未建立'
-  const phases: Record<string, string> = {
-    preparing: '准备文本块', embedding: '调用 Embedding 模型',
-    waiting: index.wait_reason === 'local_admission' ? '等待本地模型额度' : index.wait_reason === 'provider_rate_limit' ? '等待第三方模型限流重试' : '等待重试',
-    writing: '写入向量', completed: '已完成',
-  }
-  return phases[index.build_phase] || '等待进度更新'
-}
-
-interface VisualFrameView {
-  key: string
-  frameId?: number
-  timeMs: number
-  endMs: number
-  ocr?: string
-  caption?: string
-  hasOcr: boolean
-  hasCaption: boolean
-}
-
-function visualTipSections(text: string): { label: string; body: string }[] {
-  const raw = text.trim()
-  if (!raw) return []
-  const chunks = raw.split(/(?=\d+\)\s*)/).map(s => s.trim()).filter(Boolean)
-  if (chunks.length > 1) {
-    return chunks.map(chunk => {
-      const m = chunk.match(/^\d+\)\s*([^:：\n]+)[:：]?\s*([\s\S]*)$/)
-      if (m) return { label: m[1].trim(), body: m[2].trim() }
-      return { label: '', body: chunk }
-    })
-  }
-  return [{ label: '', body: raw }]
-}
-
-function groupVisualAtoms(atoms: TimelineAtom[]): VisualFrameView[] {
-  const map = new Map<string, VisualFrameView>()
-  for (const atom of atoms) {
-    if (atom.modality !== 'visual_ocr' && atom.modality !== 'visual_caption') continue
-    const key = atom.source_refs?.[0]?.stable_id || atom.id
-    let view = map.get(key)
-    if (!view) {
-      view = { key, frameId: atom.source_refs?.[0]?.source_row_id, timeMs: atom.start_ms, endMs: atom.end_ms, hasOcr: false, hasCaption: false }
-      map.set(key, view)
-    }
-    view.timeMs = Math.min(view.timeMs, atom.start_ms)
-    view.endMs = Math.max(view.endMs, atom.end_ms)
-    if (atom.modality === 'visual_ocr') {
-      view.ocr = atom.content
-      view.hasOcr = true
-    } else {
-      view.caption = atom.content
-      view.hasCaption = true
-    }
-  }
-  return [...map.values()].sort((a, b) => a.timeMs - b.timeMs)
-}
-
-function FramePreview({ src, timeMs }: { src: string | null; timeMs: number }) {
-  const [failed, setFailed] = useState(false)
-  return src && !failed
-    ? <img src={src} alt={`${formatTime(timeMs)} 的已保存画面帧`} onError={() => setFailed(true)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-    : <div className="muted" role="status" style={{ padding: 12, fontSize: 12 }}>帧预览不可用</div>
-}
-
-function ClampRead({ children, className }: { children: ReactNode; className: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
-  const [canToggle, setCanToggle] = useState(false)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = () => {
-      if (open) return
-      setCanToggle(el.scrollHeight > el.clientHeight + 2)
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [children, open])
-
-  return (
-    <div className="clamp-read">
-      <div ref={ref} className={`${className}${open ? ' open' : ''}`}>{children}</div>
-      {canToggle && (
-        <button
-          type="button"
-          className="frame-more"
-          onClick={e => { e.stopPropagation(); setOpen(v => !v) }}
-        >
-          {open ? '收起' : '展开'}
-        </button>
-      )}
-    </div>
-  )
-}
-
-function FrameRead({ children }: { children: ReactNode }) {
-  return <ClampRead className="frame-read">{children}</ClampRead>
-}
-
-export default function VideoWorkbenchPage({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string; citations?: string } }) {
+function VideoWorkbench({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string; citations?: string } }) {
   const [artifactMode, setArtifactMode] = useState<'new' | 'reorganize' | null>(null)
   const taskId = Number(params.id)
   const router = useRouter()
   const toast = useToast()
   const { user } = useShell()
   const readOnly = user?.role === 'DEMO'
-  const ai = useAIAvailability(readOnly, 'summary')
-  const videoPreflight = useVideoAIPreflight()
-  const asrAI = useAIAvailability(readOnly, 'transcribe')
-  const alignAI = useAIAvailability(readOnly, 'align')
-  const indexAI = useAIAvailability(readOnly, 'index')
-  const playerRef = useRef<VideoPlayerHandle>(null)
-  const study = useStudyPosition()
-  const lastPositionWrite = useRef(0)
-  const wasPlaying = useRef(false)
-  const prevTransRef = useRef(false)
-
-  const [task, setTask] = useState<VideoTask | null>(null)
-  const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgress | null>(null)
-  const relatedArtifacts = useQuery({ queryKey: ['video-artifacts', taskId], queryFn: async ({ signal }) => {
-    const first = await artifactApi.list(1, taskId, signal)
-    const list = [...first.list]
-    for (let page = 2; list.length < first.total && !list.some(item => item.current_version_id); page++) {
-      const next = await artifactApi.list(page, taskId, signal)
-      if (!next.list.length) break
-      list.push(...next.list)
-    }
-    return { ...first, list }
-  }, enabled: !!task && !!user, refetchInterval: 15_000 })
-  const [timeline, setTimeline] = useState<VideoTimeline | null>(null)
-  const [index, setIndex] = useState<RAGIndexResult | null>(null)
-  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
-  const [videoDurationMs, setVideoDurationMs] = useState(0)
-  const [visualSettingBusy, setVisualSettingBusy] = useState(false)
-  const [visualBuildBusy, setVisualBuildBusy] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-  const [subError, setSubError] = useState('')
-  const [subReloadTick, setSubReloadTick] = useState(0)
+  const data = useVideoWorkbenchData(taskId, !!user)
+  const { task, timeline, index, playbackUrl, transcriptionProgress, relatedArtifacts, loading, loadError, subError, refreshPlaybackUrl } = data
+  const { playerRef, playheadMs, videoDurationMs, setVideoDurationMs, headSnap, seek, onPlayhead, rowAtPlayhead, studyError } = useVideoPlayback(taskId)
+  const { ai, videoPreflight, busy, titleBusy,titleDraft,setTitleDraft,editingTitle,setEditingTitle,visualSettingBusy,visualBuildBusy,visualDraft,setVisualDraft,visualSettingsOpen,setVisualSettingsOpen,pendingAction,setPendingAction,runAction,downloadMedia,saveTitle,saveVisualMode,confirmAndRun } = useVideoActions(data, readOnly)
   const [tab, setTab] = useState<TabKey>('tl')
   const [seen, setSeen] = useState<Record<TabKey, boolean>>({ tl: true, vf: false, idx: false })
   const openTab = (key: TabKey) => {
     setTab(key)
     setSeen(s => (s[key] ? s : { ...s, [key]: true }))
   }
-  const [playheadMs, setPlayheadMs] = useState(0)
-  const [busy, setBusy] = useState<ActionKind | ''>('')
-  const [headSnap, setHeadSnap] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [questionsOpen, setQuestionsOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
-  const [visualSettingsOpen, setVisualSettingsOpen] = useState(false)
-  const [visualDraft, setVisualDraft] = useState<VisualMode>('off')
-  const visualAI = useAIAvailability(readOnly, visualDraft === 'ocr' ? 'ocr' : 'caption')
-  const ocrAI = useAIAvailability(readOnly, 'ocr')
   const [dialogInstant, setDialogInstant] = useState(false)
-  const [railTip, setRailTip] = useState<{ left: number; text: string; timeMs: number } | null>(null)
-  const liveRowRef = useRef<HTMLDivElement>(null)
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
-  const [titleBusy, setTitleBusy] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
-  const [pendingAction, setPendingAction] = useState<ConfirmAction | null>(null)
 
   useCrumb([
     { label: '视频库', href: '/library' },
     { label: task ? taskTitle(task) : `视频 #${taskId}` },
   ])
 
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setLoadError('')
-    setTask(null)
-    setTranscriptionProgress(null)
-    setTimeline(null)
-    setIndex(null)
-    setPlaybackUrl(null)
-    setVideoDurationMs(0)
-    setPlayheadMs(0)
-    void (async () => {
-      let detail: VideoTask
-      try {
-        detail = await api.getTask(taskId)
-      } catch (e) {
-        if (!active) return
-        setLoadError(e instanceof ApiError ? e.message : '视频详情加载失败')
-        setLoading(false)
-        return
-      }
-      if (!active) return
-      setTask(detail)
-      prevTransRef.current = detail.has_transcription
-      setLoading(false)
-    })()
-    return () => { active = false }
-  }, [taskId, reloadKey])
-
-  // 时间轴/索引失败不再静默成空面板，给出错误态+重试；播放源失败由播放器 fallback 文案提示。
-  useEffect(() => {
-    let active = true
-    setSubError('')
-    void (async () => {
-      const [tl, idx, playback] = await Promise.all([
-        api.getTimeline(taskId).catch(() => null),
-        api.getRagIndex(taskId).catch(() => null),
-        api.playbackSrc(taskId).catch(() => null),
-      ])
-      if (!active) return
-      setTimeline(tl)
-      setIndex(idx)
-      setPlaybackUrl(playback)
-      if (!tl || !idx) setSubError('时间轴或索引数据加载失败')
-    })()
-    return () => { active = false }
-  }, [taskId, subReloadTick])
-
-  const processing = !!task && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
+  const processing = task?.status === TaskStatusEnum.Queued || task?.status === TaskStatusEnum.Running
   const generatingSummary = !!task && summaryRunning(task)
   const visualProcessing = !!task && ['queued', 'running'].includes(task.visual_status)
   const readableArtifact = relatedArtifacts.data?.list.find(item => !!item.current_version_id)
-  const pendingArtifact = relatedArtifacts.data?.list.find(item => !item.current_version_id && item.latest_run && (item.latest_run.status === 'pending' || item.latest_run.status === 'running'))
-  const awaitingSummaryRetry = !!task && !!summaryFailureView(task)?.scheduled
-
-  // 处理中或等待摘要自动重试时轮询；重试调度会清除 next_retry_at 并重新入队。
-  useEffect(() => {
-    if (!processing && !generatingSummary && !awaitingSummaryRetry && !visualProcessing) return
-    const iv = setInterval(() => {
-      void (async () => {
-        try {
-          const fresh = await api.getTask(taskId)
-          const visualJustDone = ['queued', 'running'].includes(task?.visual_status || '') && !['queued', 'running'].includes(fresh.visual_status)
-          const prev = prevTransRef.current
-          prevTransRef.current = fresh.has_transcription
-          setTask(fresh)
-          const transJustDone = !prev && fresh.has_transcription
-          const justCompleted = fresh.status === TaskStatusEnum.Completed
-          if (transJustDone || justCompleted || visualJustDone) {
-            const [tl, idx] = await Promise.all([
-              api.getTimeline(taskId).catch(() => null),
-              api.getRagIndex(taskId).catch(() => null),
-            ])
-            setTimeline(tl)
-            setIndex(idx)
-          }
-        } catch { /* 下个周期重试 */ }
-      })()
-    }, 5000)
-    return () => clearInterval(iv)
-  }, [processing, generatingSummary, awaitingSummaryRetry, visualProcessing, taskId, task?.visual_status])
-
-  useEffect(() => {
-    if (!processing && busy !== 'index' && index?.status !== 'indexing' && index?.status !== 'queued') return
-    const iv = setInterval(() => { void api.getRagIndex(taskId).then(setIndex).catch(() => {}) }, 5000)
-    return () => clearInterval(iv)
-  }, [processing, busy, index?.status, taskId])
-
+  const pendingArtifact = relatedArtifacts.data?.list.find(item => !!item.latest_run && ['queued', 'running'].includes(item.latest_run.status))
   const transcriptAtoms = useMemo(
     () => (timeline?.atoms || []).filter(a => a.modality === 'transcript'),
     [timeline],
@@ -377,126 +97,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     [timeline],
   )
 
-  const seek = useCallback((ms: number, autoplay = true, cue?: string) => {
-    playerRef.current?.seek(ms, autoplay, cue)
-    setPlayheadMs(ms)
-    setHeadSnap(true)
-    window.setTimeout(() => setHeadSnap(false), 280)
-  }, [])
-
-  // 播放地址现在是站内路径 + 任务级凭证,不再因 5 分钟签名到期而失效;
-  // 这里仅在加载失败时重取一次,用于凭证过期或对象稍后才可用的情形。
-  const refreshPlaybackUrl = useCallback(async () => {
-    try {
-      const src = await api.playbackSrc(taskId)
-      if (src) {
-        setPlaybackUrl(src)
-        return src
-      }
-    } catch { /* 保持失败态 */ }
-    return null
-  }, [taskId, setPlaybackUrl])
-
-  const rowAtPlayhead = (a: TimelineAtom) => a.time_range_status !== 'unknown' && Number.isFinite(a.start_ms) && Number.isFinite(a.end_ms) && playheadMs >= a.start_ms && playheadMs < Math.max(a.end_ms, a.start_ms + 1)
   const exactLiveIndex = transcriptRows.findIndex(a => a.time_range_status === 'exact' && rowAtPlayhead(a))
   const liveIndex = exactLiveIndex >= 0 ? exactLiveIndex : transcriptRows.findIndex(rowAtPlayhead)
-
-  useEffect(() => {
-    const el = liveRowRef.current
-    if (!el) return
-    const root = el.closest('.rail-pane')
-    if (!(root instanceof HTMLElement)) return
-    const rootBox = root.getBoundingClientRect()
-    const box = el.getBoundingClientRect()
-    if (box.top < rootBox.top + 12 || box.bottom > rootBox.bottom - 12) {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    }
-  }, [liveIndex])
-
-  const performAction = async (kind: Exclude<ActionKind, 'download'>, force = false) => {
-    if (!task || busy) return
-    const admission = kind === 'transcribe' ? asrAI : kind === 'align' ? alignAI : kind === 'index' ? indexAI : ai
-    if (!admission.ready) { toast.info(admission.reason); return }
-    setBusy(kind)
-    try {
-      if (kind === 'transcribe') {
-        await api.transcribe(task.id, force)
-        toast.success(force ? '重新转写已排队，将再次调用语音识别' : '转写任务已排队，等待并发名额')
-      } else if (kind === 'align') {
-        await api.alignTranscript(task.id)
-        toast.success('逐句对齐已排队，将复用已有转写')
-      } else if (kind === 'analyze') {
-        await api.analyze(task.id, force)
-        toast.success('摘要任务已加入队列,完成后会出现在这里')
-      } else {
-        const r = await api.triggerRagIndex(task.id)
-        setIndex(r)
-        if (r.status === 'indexed') toast.success('索引构建完成')
-        else toast.info(r.status === 'queued' ? '索引任务正在排队' : '索引正在构建中')
-      }
-      const fresh = await api.getTask(task.id).catch(() => null)
-      if (fresh) {
-        prevTransRef.current = fresh.has_transcription
-        setTask(fresh)
-      }
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '操作失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const runAction = (kind: Exclude<ActionKind, 'download'>, force = false) => {
-    const labels: Record<Exclude<ActionKind, 'download'>, string> = {
-      transcribe: force ? '重新转写视频' : '转写视频',
-      align: '对齐句子时间',
-      analyze: '生成视频摘要',
-      index: '建立视频检索索引',
-    }
-    videoPreflight.request(labels[kind], () => { void performAction(kind, force) }, kind === 'analyze' ? 'summary' : kind)
-  }
-
-  const downloadMedia = async () => {
-    if (!task || busy) return
-    setBusy('download')
-    try {
-      const r = await api.downloadMedia(task.id)
-      const a = document.createElement('a')
-      a.href = r.download_url
-      a.download = r.filename || ''
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '获取下载链接失败')
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const saveTitle = async () => {
-    if (!task || titleBusy) return
-    const next = titleDraft.trim()
-    if (!next) { toast.info('标题不能为空'); return }
-    setTitleBusy(true)
-    try {
-      const fresh = await api.updateTaskTitle(task.id, next)
-      setTask(fresh)
-      setEditingTitle(false)
-      toast.success('标题已更新')
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '保存标题失败')
-    } finally {
-      setTitleBusy(false)
-    }
-  }
-
-  const confirmAndRun = async () => {
-    if (!pendingAction || busy) return
-    const { kind, force } = pendingAction
-    setPendingAction(null)
-    await runAction(kind, force)
-  }
 
   const openVisualSettings = (event?: { detail: number }) => {
     if (!task) return
@@ -505,41 +107,13 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
     setVisualSettingsOpen(true)
   }
 
-  const saveVisualMode = async (build = false) => {
-    if (!task || visualSettingBusy) return
-    if (readOnly || (build && (!visualAI.ready || visualDraft === 'both' && !ocrAI.ready || !visualCapability.ready))) { toast.info(readOnly ? '演示模式不可处理视频' : !visualAI.ready ? visualAI.reason : visualDraft === 'both' && !ocrAI.ready ? ocrAI.reason : visualCapability.reason); return }
-    setVisualSettingBusy(true)
-    try {
-      const fresh = await api.setVisualMode(task.id, visualDraft)
-      setTask(fresh)
-      if (build) {
-        setVisualBuildBusy(true)
-        try {
-          await api.buildVisual(task.id)
-          const next = await api.getTask(task.id).catch(() => null)
-          setTask(next ? { ...next, visual_status: ['queued', 'running'].includes(next.visual_status) ? next.visual_status : 'queued' } : { ...fresh, visual_status: 'queued' })
-          toast.success('画面证据已加入处理队列')
-        } finally {
-          setVisualBuildBusy(false)
-        }
-      } else {
-        toast.success(visualDraft === 'off' ? '已关闭后续画面分析' : `已保存：${visualModeLabel(visualDraft)}`)
-      }
-      setVisualSettingsOpen(false)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : '画面证据设置保存失败')
-    } finally {
-      setVisualSettingBusy(false)
-    }
-  }
-
   if (loading) {
     return <div className="page"><LoadingBlock label="正在加载…" variant="card" /></div>
   }
   if (loadError || !task) {
     return (
       <div className="page">
-        <ErrorState message={loadError || '视频加载失败'} onRetry={() => setReloadKey(k => k + 1)} />
+        <ErrorState message={loadError || '视频加载失败'} onRetry={() => void data.refreshTask()} />
       </div>
     )
   }
@@ -556,222 +130,6 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const urlJob = failed && task.last_job_type === 'download'
   const title = taskTitle(task)
 
-  const durPct = timelineMs > 0 ? timelineMs : 1
-  const hasRail = timelineMs > 0
-
-  const renderTL = () => {
-    if (!task.has_transcription) {
-      return (
-        <div className="empty">
-          <Icon name="activity" size="lg" />
-          <b>{task.visual_status === 'completed' ? '这段视频已有画面内容' : '还没有声音转写'}</b><span>{task.visual_status === 'completed' ? '在「画面证据」中查看关键帧与文字。需要声音文字时再开始转写。' : '讲解视频可开始转写；无声演示可直接分析画面。'}</span>
-        </div>
-      )
-    }
-    if (transcriptAtoms.length === 0 && visualAtoms.length === 0) {
-      return (
-        <div className="empty">
-          <Icon name="activity" size="lg" />
-          <b>时间轴暂无数据</b>
-        </div>
-      )
-    }
-    return (
-      <>
-        {hasRail && (
-          <>
-            <div className="tl-rail-wrap">
-            <div
-              className="tl-rail"
-              onPointerDown={e => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                seek(ratio * timelineMs)
-              }}
-              onPointerMove={e => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                const ms = ratio * timelineMs
-                const hits = visualAtoms.filter(a => ms >= a.start_ms && ms <= Math.max(a.end_ms, a.start_ms + 1))
-                const atom = hits.length > 0 ? hits[hits.length - 1] : null
-                if (!atom?.content) { setRailTip(null); return }
-                setRailTip({
-                  left: Math.max(16, Math.min(rect.width - 16, e.clientX - rect.left)),
-                  text: atom.content,
-                  timeMs: atom.start_ms,
-                })
-              }}
-              onPointerLeave={() => setRailTip(null)}
-            >
-              {transcriptRows.map(a => (
-                <div
-                  key={`tt-${a.id}`}
-                  className="tl-seg t-transcript"
-                  style={{ left: `${(a.start_ms / durPct) * 100}%`, width: `${Math.max(0.3, ((a.end_ms - a.start_ms) / durPct) * 100)}%` }}
-                />
-              ))}
-              {visualAtoms.map(a => (
-                <div
-                  key={`tv-${a.id}`}
-                  className={`tl-seg ${a.modality === 'visual_ocr' ? 't-ocr' : 't-caption'}`}
-                  style={{ left: `${(a.start_ms / durPct) * 100}%`, width: `max(6px, ${((a.end_ms - a.start_ms) / durPct) * 100}%)` }}
-                />
-              ))}
-              <div className={`tl-head${headSnap ? ' snap' : ''}`} style={{ left: `${(playheadMs / durPct) * 100}%` }} />
-            </div>
-            {railTip && (
-              <div className="tl-tip" style={{ ['--tip-x' as string]: `${railTip.left}px` }} role="tooltip">
-                <span className="tl-tip-time">{formatTime(railTip.timeMs)}</span>
-                {visualTipSections(railTip.text).map((sec, i) => (
-                  <div key={i} className="tl-tip-sec">
-                    {sec.label && <div className="tl-tip-k">{sec.label}</div>}
-                    <div className="tl-tip-v">{sec.body}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            </div>
-            <div className="tl-scale mono">
-              {Array.from({ length: 6 }, (_, i) => (
-                <span key={i}>{formatTime((timelineMs * i) / 5)}</span>
-              ))}
-            </div>
-            <div className="tl-legend">
-              <span><i style={{ background: 'color-mix(in srgb, var(--mute) 50%, transparent)' }} />解说转写</span>
-              <span><i style={{ background: 'color-mix(in srgb, var(--acc) 60%, transparent)' }} />画面 OCR</span>
-              <span><i style={{ background: 'color-mix(in srgb, var(--info) 55%, transparent)' }} />画面描述</span>
-              <span style={{ marginLeft: 'auto', color: 'var(--tx-4)' }}>悬停色块看画面 · 点击跳转</span>
-            </div>
-          </>
-        )}
-        {transcriptRows.length > 0 && (
-          <div id="transcript" className="transcript-list">
-            {timeline?.alignment_available && transcriptAtoms.some(atom => atom.time_range_status !== 'exact') && (
-              <div className="transcript-upgrade">
-                <b>精确回放定位 · 按需开启</b>
-                <p>当前可以从片段回放。需要逐句定位时，可将已有文字与视频音频对齐；此操作会运行服务端配置的本地模型，普通转写不会自动执行。</p>
-                <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'align', title: '对齐句子时间？', body: '会复用已有识别文字，在本地对齐音频时间并更新检索索引。对齐不会再次调用语音识别；重建索引可能产生 Embedding 费用。历史回答和引用快照保留。', confirmLabel: '开始对齐' })}>对齐句子时间</button>
-              </div>
-            )}
-            {(citationUpgradeAvailable || resumeTranscription) && <div className="transcript-upgrade">
-              <b>{resumeTranscription ? '本次引用定位补齐尚未完成' : '旧转写的引用定位可以补齐'}</b>
-              <p>{resumeTranscription ? '仍在使用之前保存的转写与引用时间。重试会继续处理未完成部分，保留已完成分片。' : '当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。'}</p>
-              <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: `${citationUpgradeLabel}？`, body: resumeTranscription ? resumeTranscriptionBody : '会重新识别这段视频的音频，并更新转写与检索索引，可能产生新的 ASR 和 Embedding 费用。完成后，新回答会使用更短的来源时间；历史回答和引用快照会保留。语音服务不返回句子时间时，将使用短音频片段时间。', confirmLabel: citationUpgradeLabel })}><Icon name="refresh" size="sm" />{citationUpgradeLabel}</button>
-              {readOnly && <small>演示账号无法重新识别视频。</small>}
-            </div>}
-            {transcriptRows.map((a, i) => (
-              <div
-                key={a.id}
-                ref={i === liveIndex ? liveRowRef : undefined}
-                className={`t-row${a.time_range_status !== 'exact' ? ' coarse' : ''}${i === liveIndex ? ' live' : ''}`}
-              >
-                <button type="button" className="transcript-time" disabled={a.time_range_status === 'unknown'} aria-label={a.time_range_status === 'unknown' ? '来源时间未知' : `回放 ${formatTime(a.start_ms)}`} onClick={() => seek(a.start_ms)}>
-                  <span className="ts">{a.time_range_status === 'unknown' ? '时间未知' : a.time_range_status === 'exact' ? formatTimeRange(a.start_ms, a.end_ms) : <>{formatTimeRange(a.start_ms, a.end_ms)}<small>{a.end_ms - a.start_ms <= 30000 ? '约定位' : '原片段'}</small></>}</span>
-                  {a.time_range_status !== 'unknown' && <Icon name="play" size="sm" />}
-                </button>
-                <ClampRead className="tx transcript-paragraphs">{a.paragraphs.map((text, paragraph) => <p key={paragraph}>{text}</p>)}</ClampRead>
-              </div>
-            ))}
-          </div>
-        )}
-      </>
-    )
-  }
-
-  const renderVF = () => {
-    const coverage = timeline?.visual_coverage
-    const tailUncovered = !!coverage && videoDurationMs > 0 &&
-      coverage.last_ms + Math.max(60_000, coverage.largest_gap_ms * 1.5) < videoDurationMs
-    const evidenceTailUncovered = !!coverage && coverage.evidence_last_ms !== undefined && videoDurationMs > 0 &&
-      coverage.evidence_last_ms + Math.max(60_000, coverage.largest_gap_ms * 1.5) < videoDurationMs
-    return (
-      <>
-        <div className="workbench-visual-summary">
-          <div><span className="workbench-eyebrow">画面分析</span><strong>{visualModeLabel(taskVisualMode(task))}</strong></div>
-          <button className="btn btn-sm" onClick={openVisualSettings}><Icon name="settings" size="sm" />设置</button>
-        </div>
-        <p className="workbench-visual-hint">按内容选择 OCR 或画面描述。演讲、访谈通常无需启用；已有画面证据会保留。</p>
-        {coverage ? <p style={{ fontSize: 13, color: 'var(--tx-3)', marginBottom: 10 }} role="status">
-          已保存采样帧 {coverage.sampled_frames} 张，其中 {coverage.evidence_frames} 张生成了 OCR 或描述、{coverage.preview_frames} 张有预览。
-          采样时间 {formatTime(coverage.first_ms)}–{formatTime(coverage.last_ms)}{videoDurationMs > 0 ? ` / 视频总长 ${formatTime(videoDurationMs)}` : '；视频总长待加载'}。
-          {coverage.evidence_first_ms !== undefined && coverage.evidence_last_ms !== undefined ? ` 有文字证据的时间范围 ${formatTime(coverage.evidence_first_ms)}–${formatTime(coverage.evidence_last_ms)}。` : ' 尚无可用的 OCR 或描述文字。'}
-          {tailUncovered ? ` 后段尚无采样帧，采样仅到 ${formatTime(coverage.last_ms)}。` : evidenceTailUncovered ? ' 后段采样帧尚未产出文字证据。' : ''}
-        </p> : <p className="muted" style={{ fontSize: 13, marginBottom: 10 }}>尚无已保存的画面采样帧。</p>}
-        {frames.length === 0 && <div className="empty"><Icon name="eye" size="lg" /><b>没有画面文字证据</b></div>}
-        <div className="frames-list">
-          {frames.map(f => (
-            <button type="button" className="frame-row" key={f.key} onClick={() => seek(f.timeMs)}>
-              <div className="frame-still">
-                <FramePreview key={`${f.frameId}-${playbackUrl || ''}`} src={f.frameId ? api.visualFrameSrc(taskId, f.frameId, playbackUrl) : null} timeMs={f.timeMs} />
-              </div>
-              <div className="frame-copy">
-                <div className="frame-meta">
-                  <span className="frame-time">{formatTime(f.timeMs)}</span>
-                  <span style={{ display: 'inline-flex', gap: 4 }}>
-                    {f.hasOcr && <ModalityTag modality="visual_ocr" />}
-                    {f.hasCaption && <ModalityTag modality="visual_caption" />}
-                  </span>
-                </div>
-                <FrameRead>
-                  {f.caption && <div className="frame-caption">{f.caption}</div>}
-                  {f.ocr && <div className="frame-ocr">{f.ocr}</div>}
-                </FrameRead>
-              </div>
-            </button>
-          ))}
-        </div>
-      </>
-    )
-  }
-
-  const renderIdx = () => {
-    if (!index) {
-      return (
-        <div className="empty">
-          <Icon name="layers" size="lg" />
-          <b>索引状态不可用</b>
-        </div>
-      )
-    }
-    const stateView = index.indexed
-      ? { chip: 'chip-ok', text: '已建立' }
-      : index.status === 'indexing'
-        ? { chip: 'chip-acc', text: '构建中' }
-        : index.status === 'queued'
-          ? { chip: 'chip-mute', text: '排队中' }
-          : index.status === 'failed'
-            ? { chip: 'chip-bad', text: '失败' }
-      : index.needs_rebuild
-        ? { chip: 'chip-warn', text: '需要重建' }
-        : { chip: 'chip-mute', text: '未建立' }
-    return (
-      <>
-        <div className="idx-list">
-          <div className="idx-row"><span className="k">状态</span><span className="v"><span className={`chip ${stateView.chip}`}>{stateView.text}</span></span></div>
-          <div className="idx-row"><span className="k">阶段</span><span className="v">{indexPhase(index)}</span></div>
-          <div className="idx-row"><span className="k">证据块</span><span className="v mono">{index.status === 'indexing' && index.total_chunks > 0 ? `${index.completed_chunks} / ${index.total_chunks} 块已完成 Embedding` : `${index.chunks} 块`}</span></div>
-          <div className="idx-row"><span className="k">向量模型</span><span className="v mono">{index.embedding_model || '—'}</span></div>
-          {index.next_retry_at && <div className="idx-row"><span className="k">下次重试</span><span className="v">{fmtDateTime(index.next_retry_at)}</span></div>}
-          {index.progress_at && <div className="idx-row"><span className="k">最近进度</span><span className="v">{fmtRelTime(index.progress_at)}</span></div>}
-          {index.last_error && (
-            <div className="idx-row"><span className="k">最近错误</span><span className="v" style={{ color: 'var(--bad)', fontSize: 12 }}>{index.last_error}</span></div>
-          )}
-        </div>
-        {index.needs_rebuild && (
-          <p style={{ fontSize: 13, color: 'var(--tx-4)', marginTop: 12 }}>索引已过期,需要重建</p>
-        )}
-        <button
-          className="btn btn-sm"
-          style={{ marginTop: 14 }}
-          disabled={busy !== '' || index.status === 'indexing' || index.status === 'queued'}
-          onClick={() => setPendingAction(indexConfirm(index))}
-        >
-          <Icon name="layers" size="sm" />
-          {indexActionLabel(index)}
-        </button>
-      </>
-    )
-  }
 
   return (
     <div className="page-fill video-workbench">
@@ -815,7 +173,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             <div className="card card-pad" style={{ marginTop: 10, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ color: 'var(--bad)', display: 'flex' }}><Icon name="alert" /></span>
               <b style={{ flex: 1, fontSize: 13 }}>{subError}</b>
-              <button className="btn btn-sm" onClick={() => setSubReloadTick(t => t + 1)}>
+              <button className="btn btn-sm" onClick={() => void data.refreshEvidence()}>
                 <Icon name="refresh" size="sm" />重试
               </button>
             </div>
@@ -826,7 +184,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             ref={playerRef}
             src={playbackUrl}
             title={title}
-            onPlayhead={(ms,playing) => { setPlayheadMs(ms); if (ms>0 && (playing || wasPlaying.current) && Date.now()-lastPositionWrite.current>5000) { lastPositionWrite.current=Date.now(); study.record({task_id:taskId,artifact_id:'',version_id:'',block_id:'',time_ms:Math.round(ms)}) } if (wasPlaying.current && !playing) void study.flush(); wasPlaying.current=playing }}
+            onPlayhead={onPlayhead}
             onDuration={setVideoDurationMs}
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
@@ -861,10 +219,10 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                 <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
               </div>
             )}
-            {transcriptionRelevant && <TranscriptionProgressPanel task={task} onProgress={setTranscriptionProgress} />}
-            {!transcriptionProgress?.alignment_only && (visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel task={task} />}
+            {transcriptionRelevant && <TranscriptionProgressPanel task={task} resource={data.progressQuery} />}
+            {!transcriptionProgress?.alignment_only && (visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel resource={data.visualQuery} task={task} />}
             {processing && canGenerateSummary(task) && <p className="muted" role="status">转写已保存，可以生成摘要；画面分析和检索索引会继续处理。</p>}
-            {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
+            {studyError && <div className="artifact-notice" role="status">{studyError}</div>}
 
             {relatedArtifacts.error && <div className="artifact-notice danger" role="alert">相关笔记读取失败：{artifactError(relatedArtifacts.error)}<button className="btn btn-sm" onClick={() => void relatedArtifacts.refetch()}>重试</button></div>}
             {((!task.has_summary && generatingSummary) || (!task.has_summary && task.summary_progress)) && (
@@ -931,9 +289,24 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             ))}
           </div>
           <div className="rail-body">
-            <div className={`rail-pane${tab === 'tl' ? ' on' : ''}`}>{seen.tl ? renderTL() : null}</div>
-            <div className={`rail-pane${tab === 'vf' ? ' on' : ''}`}>{seen.vf ? renderVF() : null}</div>
-            <div className={`rail-pane${tab === 'idx' ? ' on' : ''}`}>{seen.idx ? renderIdx() : null}</div>
+            <div className={`rail-pane${tab === 'tl' ? ' on' : ''}`}>{seen.tl ? <TranscriptPanel task={task} transcriptAtoms={transcriptAtoms} transcriptRows={transcriptRows} visualAtoms={visualAtoms} timelineMs={timelineMs} playheadMs={playheadMs} headSnap={headSnap} liveIndex={liveIndex} seek={seek}>
+            {timeline?.alignment_available && transcriptAtoms.some(atom => atom.time_range_status !== 'exact') && (
+              <div className="transcript-upgrade">
+                <b>精确回放定位 · 按需开启</b>
+                <p>当前可以从片段回放。需要逐句定位时，可将已有文字与视频音频对齐；此操作会运行服务端配置的本地模型，普通转写不会自动执行。</p>
+                <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'align', title: '对齐句子时间？', body: '会复用已有识别文字，在本地对齐音频时间并更新检索索引。对齐不会再次调用语音识别；重建索引可能产生 Embedding 费用。历史回答和引用快照保留。', confirmLabel: '开始对齐' })}>对齐句子时间</button>
+              </div>
+            )}
+            {(citationUpgradeAvailable || resumeTranscription) && <div className="transcript-upgrade">
+              <b>{resumeTranscription ? '本次引用定位补齐尚未完成' : '旧转写的引用定位可以补齐'}</b>
+              <p>{resumeTranscription ? '仍在使用之前保存的转写与引用时间。重试会继续处理未完成部分，保留已完成分片。' : '当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。'}</p>
+              <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: `${citationUpgradeLabel}？`, body: resumeTranscription ? resumeTranscriptionBody : '会重新识别这段视频的音频，并更新转写与检索索引，可能产生新的 ASR 和 Embedding 费用。完成后，新回答会使用更短的来源时间；历史回答和引用快照会保留。语音服务不返回句子时间时，将使用短音频片段时间。', confirmLabel: citationUpgradeLabel })}><Icon name="refresh" size="sm" />{citationUpgradeLabel}</button>
+              {readOnly && <small>演示账号无法重新识别视频。</small>}
+            </div>}
+
+</TranscriptPanel> : null}</div>
+            <div className={`rail-pane${tab === 'vf' ? ' on' : ''}`}>{seen.vf ? <VisualEvidencePanel task={task} frames={frames} timeline={timeline} videoDurationMs={videoDurationMs} playbackUrl={playbackUrl} openVisualSettings={openVisualSettings} seek={seek} /> : null}</div>
+            <div className={`rail-pane${tab === 'idx' ? ' on' : ''}`}>{seen.idx ? <RetrievalIndexPanel index={index} busy={busy} onBuild={value=>setPendingAction(indexConfirm(value))} /> : null}</div>
           </div>
         </div>
       </div>
@@ -997,7 +370,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       )}
       {summaryOpen && task.summary && (
         <Modal title="AI 摘要" className="modal-read" onClose={() => setSummaryOpen(false)}>
-          <SummaryRevisionPanel taskId={task.id} readOnly={readOnly} onChanged={async () => { setTask(await api.getTask(task.id)) }} />
+          <SummaryRevisionPanel taskId={task.id} readOnly={readOnly} onChanged={async () => { await data.refreshTask() }} />
         </Modal>
       )}
       {kbOpen && (
@@ -1023,4 +396,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       {videoPreflight.dialog}
     </div>
   )
+}
+
+export default function VideoWorkbenchPage(props: { params: { id: string }; searchParams?: { t?: string; citations?: string } }) {
+ const { user } = useShell()
+ return <VideoWorkbench key={`${user?.id ?? ''}:${props.params.id}`} {...props} />
 }

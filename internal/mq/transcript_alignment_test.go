@@ -46,7 +46,7 @@ func TestAlignExistingTranscriptPublishesVerbatimTimingAndCorpusWithoutASR(t *te
 	seedAlignmentRows(t, repos, task.ID)
 	c.transcriptAligner = testTranscriptAligner(fakeCompleteAlignment)
 	// No AI strategy exists: an alignment-only retry must never invoke ASR.
-	text, err := c.alignExistingTranscript(context.Background(), task.ID, "audio")
+	text, err := c.transcription().alignExistingTranscript(context.Background(), task.ID, "audio")
 	if err != nil || text != "第一句。\n\n第二句。" {
 		t.Fatalf("text=%q err=%v", text, err)
 	}
@@ -71,7 +71,7 @@ func TestAlignmentPublicationRollbackKeepsPreviouslyPublishedEvidence(t *testing
 		t.Fatal(err)
 	}
 	c := &Consumer{repo: repos, transcriptAligner: testTranscriptAligner(fakeCompleteAlignment)}
-	if _, err := c.alignExistingTranscript(context.Background(), task.ID, "audio"); err == nil {
+	if _, err := c.transcription().alignExistingTranscript(context.Background(), task.ID, "audio"); err == nil {
 		t.Fatal("fault did not reach publication")
 	}
 	current, _ := repos.Transcription.FindByTaskID(task.ID)
@@ -105,7 +105,7 @@ func TestAlignmentFailureAndInvalidResultPreserveCompletedASR(t *testing.T) {
 				}
 				return aligned, err
 			})
-			if _, err := c.alignExistingTranscript(ctx, task.ID, "audio"); err == nil {
+			if _, err := c.transcription().alignExistingTranscript(ctx, task.ID, "audio"); err == nil {
 				t.Fatal("invalid alignment accepted")
 			}
 			current, _ := repos.Transcription.FindByTaskID(task.ID)

@@ -15,7 +15,7 @@ function waitLabel(reason?: string) {
   return '模型调用失败后等待重试'
 }
 
-export function TranscriptionProgressPanel({ task, compact = false, onProgress }: { task: VideoTask; compact?: boolean; onProgress?: (progress: TranscriptionProgress | null) => void }) {
+function StandaloneTranscriptionProgressPanel({ task, compact = false, onProgress }: { task: VideoTask; compact?: boolean; onProgress?: (progress: TranscriptionProgress | null) => void }) {
   const relevant = task.last_job_type === 'transcribe' || task.stage === 'transcribing' || task.stage === 'aligning' || task.stage === 'visual_indexing'
   const active = (task.stage === 'transcribing' || task.stage === 'aligning' || task.status === TaskStatusEnum.Queued && task.last_job_type === 'transcribe') && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null)
@@ -41,8 +41,19 @@ export function TranscriptionProgressPanel({ task, compact = false, onProgress }
     }
   }, [task.id, task.status, relevant, active, reload, onProgress])
 
+  return <TranscriptionProgressView task={task} compact={compact} progress={progress} error={error} retry={() => setReload(n => n + 1)} />
+}
+type ProgressResource = { data?: TranscriptionProgress; error: unknown; refetch: () => unknown }
+export function TranscriptionProgressPanel(props: { task: VideoTask; compact?: boolean; onProgress?: (progress: TranscriptionProgress | null) => void; resource?: ProgressResource }) {
+ return props.resource ? <TranscriptionProgressView task={props.task} compact={props.compact} progress={props.resource.data ?? null} error={!!props.resource.error} retry={() => { void props.resource!.refetch() }} /> : <StandaloneTranscriptionProgressPanel {...props} />
+}
+function TranscriptionProgressView({task,compact=false,progress,error,retry}: {task: VideoTask; compact?: boolean; progress: TranscriptionProgress | null; error: boolean; retry: () => void}) {
+ const relevant = task.last_job_type === 'transcribe' || ['transcribing','aligning','visual_indexing'].includes(task.stage)
+ const active = ['transcribing','aligning'].includes(task.stage) && [1,2].includes(task.status) || task.status === 1 && task.last_job_type === 'transcribe'
+ const [,tick] = useState(0)
+ useEffect(() => { if (!active) return; const timer=setInterval(() => tick(n=>n+1),1000); return () => clearInterval(timer) },[active])
   if (!relevant) return null
-  if (error) return <div className="muted" role="status" style={{ fontSize: 12 }}>转写进度暂不可用 <button className="btn btn-sm" onClick={() => setReload(n => n + 1)}>重新读取转写进度</button></div>
+  if (error) return <div className="muted" role="status" style={{ fontSize: 12 }}>转写进度暂不可用 <button className="btn btn-sm" onClick={retry}>重新读取转写进度</button></div>
   if (!progress) return <div className="muted" style={{ fontSize: 12 }}>正在读取转写进度…</div>
   if (!active && !progress.total) return null
 

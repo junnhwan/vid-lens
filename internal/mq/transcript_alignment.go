@@ -13,7 +13,7 @@ import (
 	"vid-lens/internal/transcript"
 )
 
-func (c *Consumer) alignExistingTranscript(ctx context.Context, taskID int64, audioPath string) (string, error) {
+func (c *transcriptionWorkflow) alignExistingTranscript(ctx context.Context, taskID int64, audioPath string) (string, error) {
 	if c.transcriptAligner == nil {
 		return "", fmt.Errorf("音文对齐服务未配置；保留已有转写")
 	}
@@ -35,7 +35,7 @@ func (c *Consumer) alignExistingTranscript(ctx context.Context, taskID int64, au
 	return c.alignTranscriptRows(ctx, taskID, audioPath, rows)
 }
 
-func (c *Consumer) alignTranscriptRows(ctx context.Context, taskID int64, audioPath string, rows []model.VideoTranscriptionChunk) (string, error) {
+func (c *transcriptionWorkflow) alignTranscriptRows(ctx context.Context, taskID int64, audioPath string, rows []model.VideoTranscriptionChunk) (string, error) {
 	if c.repo != nil && c.repo.Task != nil {
 		if err := c.transitionTaskStage(ctx, taskID, model.TaskStageAligning); err != nil {
 			return "", err

@@ -36,7 +36,7 @@ func TestTranscriptionRefreshFailureCannotCompleteThroughVisualFallback(t *testi
 				}, "", nil
 			}
 			strategy := &recordingAI{transcripts: map[string]string{"first.mp3": "保留已识别的句子。"}, transcribeErrors: map[string]error{"failed.mp3": ai.ErrRetryBudgetExhausted}}
-			_, asrErr := consumer.transcribeAudio(context.Background(), task.ID, "audio.mp3", strategy)
+			_, asrErr := consumer.transcription().transcribeAudio(context.Background(), task.ID, "audio.mp3", strategy)
 			if !errors.Is(asrErr, ai.ErrRetryBudgetExhausted) {
 				t.Fatalf("expected failed short window: %v", asrErr)
 			}
@@ -59,7 +59,7 @@ func TestTranscriptionRefreshFailureCannotCompleteThroughVisualFallback(t *testi
 			strategy.transcribeErrors = nil
 			strategy.transcripts["failed.mp3"] = "补齐失败的句子。"
 			strategy.transcribeInput = nil
-			if _, err := consumer.transcribeAudio(context.Background(), task.ID, "audio.mp3", strategy); err != nil {
+			if _, err := consumer.transcription().transcribeAudio(context.Background(), task.ID, "audio.mp3", strategy); err != nil {
 				t.Fatal(err)
 			}
 			if len(strategy.transcribeInput) != 1 || strategy.transcribeInput[0] != "failed.mp3" {

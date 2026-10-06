@@ -261,8 +261,8 @@ func TestConsumeMessagesAcksAfterBusinessFailureIsHandedToRetryScheduler(t *test
 		ragIndex: func(context.Context, *model.VideoTask) error {
 			return fmt.Errorf("network timeout")
 		},
-		retryPolicy:  TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return now }},
-		idempotency:  noOpIdempotencyChecker{},
+		retryPolicy: TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return now }},
+		idempotency: noOpIdempotencyChecker{},
 	}
 	reader := &scriptedAmqpReader{}
 	reader.fetches = []amqp.Delivery{reader.stubDelivery(1, ragIndexMessage(task.ID, "trace-transfer").Body)}

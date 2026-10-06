@@ -41,7 +41,7 @@ func TestTranscribeAudioPersistsValidatedAbsoluteTimingAndReusesIt(t *testing.T)
 			return []ffmpeg.AudioSegment{{Path: "timed.mp3", WindowStartMS: 18000, WindowEndMS: 42000, CoreStartMS: 20000, CoreEndMS: 40000, SegmentKey: "timed-window", Version: ffmpeg.AudioSegmenterVersion}}, "", nil
 		},
 	}
-	result, err := consumer.transcribeAudio(context.Background(), 909, "audio.mp3", strategy)
+	result, err := consumer.transcription().transcribeAudio(context.Background(), 909, "audio.mp3", strategy)
 	if err != nil || result != "第一句。第二句。" {
 		t.Fatalf("result=%q err=%v", result, err)
 	}
@@ -60,7 +60,7 @@ func TestTranscribeAudioPersistsValidatedAbsoluteTimingAndReusesIt(t *testing.T)
 	if stored.WindowStartMS != 18000 || stored.WindowEndMS != 42000 {
 		t.Fatalf("coarse range lost=%+v", stored)
 	}
-	if _, err := consumer.transcribeAudio(context.Background(), 909, "audio.mp3", strategy); err != nil {
+	if _, err := consumer.transcription().transcribeAudio(context.Background(), 909, "audio.mp3", strategy); err != nil {
 		t.Fatal(err)
 	}
 	if len(strategy.transcribeInput) != 1 {
@@ -82,7 +82,7 @@ func TestTranscribeAudioKeepsCoarseRangeForTextOnlyProvider(t *testing.T) {
 		t.Fatal("ordinary transcription must not invoke an installed local model")
 		return nil, nil
 	})
-	if _, err := consumer.transcribeAudio(context.Background(), 910, "audio.mp3", strategy); err != nil {
+	if _, err := consumer.transcription().transcribeAudio(context.Background(), 910, "audio.mp3", strategy); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := repos.TranscriptionChunk.FindByTaskAndIndex(910, 0)
@@ -107,7 +107,7 @@ func TestTranscribeAudioCompletesAndReusesSilentWindowBetweenSpeech(t *testing.T
 	}}
 	want := "重复的完整句子。\n\n重复的完整句子。"
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := consumer.transcribeAudio(context.Background(), 911, "audio.mp3", strategy)
+		result, err := consumer.transcription().transcribeAudio(context.Background(), 911, "audio.mp3", strategy)
 		if err != nil || result != want {
 			t.Fatalf("attempt=%d result=%q err=%v", attempt, result, err)
 		}
@@ -130,7 +130,7 @@ func TestTranscribeAudioRejectsWholeSilentVideoAfterCompletingWindow(t *testing.
 	consumer := &Consumer{repo: repos, splitAudioWindows: func(context.Context, string, string, int, int) ([]ffmpeg.AudioSegment, string, error) {
 		return []ffmpeg.AudioSegment{{Path: "silent.mp3", WindowEndMS: 10000, CoreEndMS: 10000, SegmentKey: "all-silent", Version: ffmpeg.AudioSegmenterVersion}}, "", nil
 	}}
-	if _, err := consumer.transcribeAudio(context.Background(), 912, "audio.mp3", strategy); err == nil {
+	if _, err := consumer.transcription().transcribeAudio(context.Background(), 912, "audio.mp3", strategy); err == nil {
 		t.Fatal("whole silent video accepted as transcript")
 	}
 	row, err := repos.TranscriptionChunk.FindByTaskAndIndex(912, 0)

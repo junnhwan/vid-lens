@@ -1,24 +1,25 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, cleanup, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { TranscriptionProgress, VideoTask } from '@/lib/types'
 import VideoWorkbenchPage from './page'
 
 const mock = vi.hoisted(() => ({
-  getTask: vi.fn(), getTimeline: vi.fn(), getRagIndex: vi.fn(), playbackSrc: vi.fn(), downloadMedia: vi.fn(),
+  artifactList: vi.fn(), getVisualProgress: vi.fn(), getToken: () => 'fixture-token', getTask: vi.fn(), getTimeline: vi.fn(), getRagIndex: vi.fn(), playbackSrc: vi.fn(), downloadMedia: vi.fn(),
   transcribe: vi.fn(), alignTranscript: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), preflight: vi.fn(), aiReady: false,
   onPlayhead: undefined as ((ms: number, playing: boolean) => void) | undefined,
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
 }))
-vi.mock('@/lib/api', () => ({ api: mock, ApiError: class ApiError extends Error {} }))
+vi.mock('@/lib/api', () => ({ api: mock, getToken: mock.getToken, ApiError: class ApiError extends Error {} }))
 vi.mock('@/lib/router', () => ({ default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>, useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: { role: 'USER' } }), useCrumb: () => {} }))
 vi.mock('@/components/Toast', () => ({ useToast: () => mock.toast }))
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ ready: mock.aiReady, reason: 'AI 暂不可用' }) }))
 vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (label: string, run: () => void, action: string) => { mock.preflight(label, action); run() }, dialog: null }) }))
 vi.mock('@/lib/artifacts/useStudyPosition', () => ({ useStudyPosition: () => ({ error: '', record: vi.fn(), flush: vi.fn() }) }))
-vi.mock('@/lib/artifacts/api', () => ({ artifactApi: { list: vi.fn().mockResolvedValue({ list: [], total: 0 }) }, artifactError: () => 'error' }))
-vi.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: { list: [], total: 0 }, error: null, refetch: vi.fn() }) }))
+vi.mock('@/lib/artifacts/api', () => ({ artifactApi: { list: mock.artifactList }, artifactError: () => 'error' }))
+
 vi.mock('@/components/player/VideoPlayer', async () => { const { forwardRef, useImperativeHandle } = await import('react'); return { VideoPlayer: forwardRef((props: { onPlayhead?: (ms: number, playing: boolean) => void }, ref) => { mock.onPlayhead = props.onPlayhead; useImperativeHandle(ref, () => ({ seek: mock.seek })); return <div>player</div> }) } })
 
 const task: VideoTask = {
@@ -34,7 +35,13 @@ const unfinishedProgress: TranscriptionProgress = {
   chunks: Array.from({ length: 18 }, (_, i) => ({ index: i + 1, status: i === 14 ? 'failed' : 'completed',
     start_ms: i * 20000, end_ms: (i + 1) * 20000, retry_count: 0, updated_at: task.updated_at })),
 }
+function render(ui: React.ReactNode) {
+ const client = new QueryClient({ defaultOptions: { queries: { retry:false, gcTime:0 } } })
+ return testingRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 beforeEach(() => {
+ mock.artifactList.mockResolvedValue({list:[],total:0})
+ mock.getVisualProgress.mockResolvedValue(null)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   HTMLElement.prototype.scrollIntoView = vi.fn()
 })
@@ -263,4 +270,38 @@ test('OCR build preflight checks the local OCR action instead of chat models', a
   fireEvent.click(screen.getByRole('radio', { name: /文字识别 OCR/ }))
   fireEvent.click(screen.getByRole('button', { name: '保存并生成画面' }))
   expect(mock.preflight).toHaveBeenCalledWith('生成画面证据', 'ocr')
+})
+
+
+test('switching videos aborts old reads and rejects late data', async () => {
+ let finishOld!: (task:VideoTask)=>void
+ mock.getTask.mockImplementation((id:number) => id===42 ? new Promise(resolve=>{finishOld=resolve}) : Promise.resolve({...task,id:43,filename:'new-video.mp4'}))
+ mock.getTimeline.mockResolvedValue({task_id:43,atoms:[]})
+ mock.getRagIndex.mockResolvedValue({status:'not_indexed',indexed:false,chunks:0})
+ mock.playbackSrc.mockResolvedValue('/new-playback')
+ const view=render(<VideoWorkbenchPage params={{id:'42'}} />)
+ await waitFor(()=>expect(mock.getTask).toHaveBeenCalledTimes(1))
+ const oldSignal=mock.getTask.mock.calls[0][1] as AbortSignal
+ view.rerender(<VideoWorkbenchPage params={{id:'43'}} />)
+ expect(await screen.findByText('new-video.mp4')).toBeTruthy()
+ expect(oldSignal.aborted).toBe(true)
+ await act(async()=>finishOld({...task,filename:'late-old-video.mp4'}))
+ expect(screen.queryByText('late-old-video.mp4')).toBeNull()
+ expect(screen.getByText('new-video.mp4')).toBeTruthy()
+ view.unmount()
+})
+
+test('repeated transcription clicks submit one job while the request is pending', async () => {
+ mock.aiReady=true
+ mock.getTask.mockResolvedValue(task)
+ mock.getTimeline.mockResolvedValue({task_id:42,atoms:[]})
+ mock.getRagIndex.mockResolvedValue({status:'not_indexed',indexed:false,chunks:0})
+ mock.playbackSrc.mockResolvedValue('/playback')
+ let finish!: (v:{task_id:number})=>void
+ mock.transcribe.mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+ render(<VideoWorkbenchPage params={{id:'42'}} />)
+ const button=await screen.findByRole('button',{name:'开始转写'})
+ fireEvent.click(button);fireEvent.click(button)
+ expect(mock.transcribe).toHaveBeenCalledTimes(1)
+ await act(async()=>finish({task_id:42}))
 })

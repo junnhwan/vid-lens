@@ -27,8 +27,8 @@ function absolutePlaybackUrl(path: string): string {
 }
 
 // playbackSrc 取可直接播放的地址;后端不可用时返回 null,由播放器走兜底文案。
-export async function playbackSrc(taskId: number): Promise<string | null> {
-  const r = await getTaskPlaybackUrl(taskId)
+export async function playbackSrc(taskId: number, signal?: AbortSignal): Promise<string | null> {
+  const r = await getTaskPlaybackUrl(taskId, signal)
   return r?.playback_url ? absolutePlaybackUrl(r.playback_url) : null
 }
 
@@ -40,8 +40,8 @@ export function visualFrameSrc(taskId: number, frameId: number, playbackUrl: str
   return token ? `${API_BASE}/media/task/${taskId}/visual-frame/${frameId}?token=${encodeURIComponent(token)}` : null
 }
 
-function getTaskPlaybackUrl(id: number): Promise<PlaybackSource> {
-  return req<PlaybackSource>(`/media/task/${id}/playback`, 'GET')
+function getTaskPlaybackUrl(id: number, signal?: AbortSignal): Promise<PlaybackSource> {
+  return req<PlaybackSource>(`/media/task/${id}/playback`, 'GET', undefined, undefined, signal)
 }
 
 export function getToken(): string | null {
@@ -187,7 +187,7 @@ export const api = {
     req<UploadResult>('/media/merge-chunks', 'POST', p, undefined, signal, UPLOAD_API_BASE),
   listTasks: (page = 1, page_size = 20, keyword = '', activity = 'all') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}&activity=${encodeURIComponent(activity)}`, 'GET'),
-  getTask: (id: number) => req<VideoTask>(`/media/task/${id}`, 'GET'),
+  getTask: (id: number, signal?: AbortSignal) => req<VideoTask>(`/media/task/${id}`, 'GET', undefined, undefined, signal),
   getSummary: (id: number) => req<EffectiveSummaryView>(`/media/task/${id}/summary`, 'GET'),
   editSummary: (id: number, input: { instruction: string; expected_revision: number; mode: 'preview' | 'apply' }, key: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/edit-runs`, 'POST', input, { 'Idempotency-Key': key }),
   getSummaryOperation: (id: number, operationId: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}`, 'GET'),
@@ -201,11 +201,11 @@ export const api = {
   setTaskVisualDisabled: (id: number, disabled: boolean) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { disabled }),
   setVisualMode: (id: number, mode: import('./types').VisualMode) => req<VideoTask>(`/media/task/${id}/visual-setting`, 'PATCH', { mode }),
   buildVisual: (id: number) => req<{ task_id: number }>(`/media/task/${id}/visual-build`, 'POST'),
-  getTranscriptionProgress: (id: number) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET'),
-  getVisualProgress: (id: number) => req<VisualProgress>(`/media/task/${id}/visual-progress`, 'GET'),
+  getTranscriptionProgress: (id: number, signal?: AbortSignal) => req<TranscriptionProgress>(`/media/task/${id}/transcription-progress`, 'GET', undefined, undefined, signal),
+  getVisualProgress: (id: number, signal?: AbortSignal) => req<VisualProgress>(`/media/task/${id}/visual-progress`, 'GET', undefined, undefined, signal),
   updateTaskTitle: (id: number, title: string) =>
     req<VideoTask>(`/media/task/${id}`, 'PATCH', { title }),
-  getTimeline: (id: number) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET'),
+  getTimeline: (id: number, signal?: AbortSignal) => req<VideoTimeline>(`/media/task/${id}/timeline`, 'GET', undefined, undefined, signal),
   playbackSrc,
   visualFrameSrc,
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
@@ -214,7 +214,7 @@ export const api = {
   alignTranscript: (id: number) => req<{ task_id: number }>(`/media/transcribe/${id}?align=1`, 'POST'),
   analyze: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),
-  getRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET'),
+  getRagIndex: (id: number, signal?: AbortSignal) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET', undefined, undefined, signal),
   getVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'GET'),
   generateVideoQuestions: (id: number) => req<import('./types').VideoQuestionResult>(`/media/task/${id}/questions`, 'POST'),
   getFollowUpQuestions: (sessionId: number, messageId: number) => req<import('./types').VideoQuestionResult>(`/chat/sessions/${sessionId}/follow-up-questions`, 'POST', { message_id: messageId }),

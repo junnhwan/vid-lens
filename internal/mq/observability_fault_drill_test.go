@@ -34,7 +34,7 @@ func TestASRTimeoutFaultDrillCorrelatesTaskJobAuditAndRetry(t *testing.T) {
 	consumer := &Consumer{repo: repos, ffmpegPath: "ffmpeg", splitAudio: func(context.Context, string, string, int) ([]string, error) {
 		return []string{"chunk-timeout.mp3"}, nil
 	}, retryPolicy: TaskRetryPolicy{MaxRetries: 3, BackoffSeconds: []int{60}, Now: func() time.Time { return failedAt }}, now: func() time.Time { return failedAt }}
-	_, callErr := consumer.transcribeAudio(ctx, task.ID, "audio.mp3", strategy)
+	_, callErr := consumer.transcription().transcribeAudio(ctx, task.ID, "audio.mp3", strategy)
 	if !errors.Is(callErr, context.DeadlineExceeded) {
 		t.Fatalf("call error=%v", callErr)
 	}

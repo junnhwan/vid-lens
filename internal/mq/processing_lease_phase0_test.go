@@ -49,7 +49,7 @@ func TestLostProcessingLeaseStopsBeforeNextAIChunk(t *testing.T) {
 		repos: repos, taskID: task.ID, jobType: model.TaskJobTypeTranscribe, token: "old-worker", now: time.Now,
 	})
 	strategy := &countingTranscriber{}
-	_, err := consumer.transcribeAudio(ctx, task.ID, "audio.wav", strategy)
+	_, err := consumer.transcription().transcribeAudio(ctx, task.ID, "audio.wav", strategy)
 	if !errors.Is(err, ErrProcessingLeaseLost) {
 		t.Fatalf("error = %v, want ErrProcessingLeaseLost", err)
 	}
@@ -171,7 +171,7 @@ func TestLostLeaseAfterSuccessfulASRDoesNotOverwriteNewChunkResult(t *testing.T)
 	}}
 	consumer := &Consumer{repo: repos, splitAudio: func(context.Context, string, string, int) ([]string, error) { return []string{"chunk-1.wav"}, nil }}
 
-	_, err := consumer.transcribeAudio(ctx, task.ID, "audio.wav", strategy)
+	_, err := consumer.transcription().transcribeAudio(ctx, task.ID, "audio.wav", strategy)
 	if !errors.Is(err, ErrProcessingLeaseLost) {
 		t.Fatalf("error = %v, want ErrProcessingLeaseLost", err)
 	}
@@ -211,7 +211,7 @@ func TestLostLeaseAfterFailedASRDoesNotReplaceNewChunkWithFailure(t *testing.T) 
 	}}
 	consumer := &Consumer{repo: repos, splitAudio: func(context.Context, string, string, int) ([]string, error) { return []string{"chunk-1.wav"}, nil }}
 
-	_, err := consumer.transcribeAudio(ctx, task.ID, "audio.wav", strategy)
+	_, err := consumer.transcription().transcribeAudio(ctx, task.ID, "audio.wav", strategy)
 	if !errors.Is(err, ErrProcessingLeaseLost) {
 		t.Fatalf("error = %v, want ErrProcessingLeaseLost", err)
 	}

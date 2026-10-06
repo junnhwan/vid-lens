@@ -411,7 +411,7 @@ func TestTranscribeAudioAlwaysSplitsAudioBeforeASR(t *testing.T) {
 		},
 	}
 
-	transcript, err := consumer.transcribeAudio(context.Background(), 0, audioPath, ai)
+	transcript, err := consumer.transcription().transcribeAudio(context.Background(), 0, audioPath, ai)
 	if err != nil {
 		t.Fatalf("transcribe audio: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestTranscribeAudioLogsChunkMetrics(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(originalOutput)
 
-	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
+	transcript, err := consumer.transcription().transcribeAudio(context.Background(), 42, audioPath, ai)
 	if err != nil {
 		t.Fatalf("transcribe audio: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestTranscribeAudioReturnsErrorWhenSplitCreatesNoChunks(t *testing.T) {
 		},
 	}
 
-	_, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
+	_, err := consumer.transcription().transcribeAudio(context.Background(), 42, audioPath, ai)
 	if err == nil {
 		t.Fatalf("expected error when split creates no chunks")
 	}
@@ -549,7 +549,7 @@ func TestTranscribeAudioPersistsChunksAndSkipsCompletedOnRetry(t *testing.T) {
 		},
 	}
 
-	transcript, err := consumer.transcribeAudio(context.Background(), 42, audioPath, ai)
+	transcript, err := consumer.transcription().transcribeAudio(context.Background(), 42, audioPath, ai)
 	if err != nil {
 		t.Fatalf("transcribeAudio: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestTranscribeAudioPersistsFailedChunk(t *testing.T) {
 		},
 	}
 
-	_, err := consumer.transcribeAudio(context.Background(), 43, audioPath, ai)
+	_, err := consumer.transcription().transcribeAudio(context.Background(), 43, audioPath, ai)
 	if err == nil {
 		t.Fatal("transcribeAudio succeeded, want ASR error")
 	}
@@ -640,7 +640,7 @@ func TestTranscribeAudioUsesStableSegmentIdentityAndStitchesOverlap(t *testing.T
 			return segments, "", nil
 		},
 	}
-	result, err := consumer.transcribeAudio(context.Background(), 77, "audio.mp3", ai)
+	result, err := consumer.transcription().transcribeAudio(context.Background(), 77, "audio.mp3", ai)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -668,7 +668,7 @@ func TestTranscribeAudioDoesNotReuseCompletedChunkFromDifferentSegmentStrategy(t
 			return []ffmpeg.AudioSegment{{Index: 0, Path: "new.mp3", SegmentKey: "new-key", Version: ffmpeg.AudioSegmenterVersion}}, "", nil
 		},
 	}
-	result, err := consumer.transcribeAudio(context.Background(), 88, "audio.mp3", ai)
+	result, err := consumer.transcription().transcribeAudio(context.Background(), 88, "audio.mp3", ai)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func TestTranscribeAudioControlledConcurrencyReducesProviderLatencyAndKeepsOrder
 	var transcribeErr error
 	go func() {
 		defer close(done)
-		transcript, transcribeErr = consumer.transcribeAudio(context.Background(), 501, "audio.mp3", strategy)
+		transcript, transcribeErr = consumer.transcription().transcribeAudio(context.Background(), 501, "audio.mp3", strategy)
 	}()
 	for i := 0; i < 2; i++ {
 		select {
@@ -747,7 +747,7 @@ func TestTranscribeAudioCancellationStopsBoundedWorkers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := consumer.transcribeAudio(ctx, 502, "audio.mp3", strategy)
+		_, err := consumer.transcription().transcribeAudio(ctx, 502, "audio.mp3", strategy)
 		done <- err
 	}()
 	for i := 0; i < 2; i++ {
@@ -787,7 +787,7 @@ func TestTranscribeAudioPartialFailurePersistsSuccessesAndRetryReusesThem(t *tes
 		},
 	}
 
-	if _, err := consumer.transcribeAudio(context.Background(), 503, "audio.mp3", strategy); err == nil || !strings.Contains(err.Error(), "第 2 段") {
+	if _, err := consumer.transcription().transcribeAudio(context.Background(), 503, "audio.mp3", strategy); err == nil || !strings.Contains(err.Error(), "第 2 段") {
 		t.Fatalf("first transcription error=%v", err)
 	}
 	rows, err := repos.TranscriptionChunk.ListByTaskID(503)
@@ -800,7 +800,7 @@ func TestTranscribeAudioPartialFailurePersistsSuccessesAndRetryReusesThem(t *tes
 
 	strategy.setError(chunks[1], nil)
 	strategy.resetCalls()
-	transcript, err := consumer.transcribeAudio(context.Background(), 503, "audio.mp3", strategy)
+	transcript, err := consumer.transcription().transcribeAudio(context.Background(), 503, "audio.mp3", strategy)
 	if err != nil || transcript != "zero\n\none\n\ntwo" {
 		t.Fatalf("retry transcript=%q err=%v", transcript, err)
 	}
@@ -1761,7 +1761,7 @@ func TestTranscribeAudioOverridesAnalyzeContextWithActualStage(t *testing.T) {
 	strategy := &stageCapturingStrategy{}
 	consumer := &Consumer{ffmpegPath: "ffmpeg", splitAudio: func(context.Context, string, string, int) ([]string, error) { return []string{"chunk-1.mp3"}, nil }}
 	ctx := observability.WithCorrelation(context.Background(), observability.Correlation{Stage: model.TaskStageSummarizing, Attempt: 2})
-	if _, err := consumer.transcribeAudio(ctx, 42, "audio.mp3", strategy); err != nil {
+	if _, err := consumer.transcription().transcribeAudio(ctx, 42, "audio.mp3", strategy); err != nil {
 		t.Fatal(err)
 	}
 	if strategy.transcribe.Stage != model.TaskStageTranscribing || strategy.transcribe.Attempt != 2 {
