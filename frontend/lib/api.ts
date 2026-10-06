@@ -236,7 +236,7 @@ export const api = {
     return req<ChatSession[]>(`/chat/sessions${qs ? `?${qs}` : ''}`, 'GET')
   },
   getMessages: (sid: number) => req<ChatMessage[]>(`/chat/sessions/${sid}/messages`, 'GET'),
-  getAnswerFeedback: (sid: number, mid: number) => req<import('./types').AnswerFeedback | null>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'GET'),
+  getAnswerFeedback: (sid: number, mid: number, signal?: AbortSignal) => req<import('./types').AnswerFeedback | null>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'GET', undefined, undefined, signal),
   saveAnswerFeedback: (sid: number, mid: number, feedback: import('./types').AnswerFeedbackInput) => req<import('./types').AnswerFeedback>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'PUT', feedback),
   clearAnswerFeedback: (sid: number, mid: number) => req<unknown>(`/chat/sessions/${sid}/messages/${mid}/feedback`, 'DELETE'),
   getRunHistory: (sid: number) => req<import('../components/chat/conversationHistory').RunHistory[]>(`/chat/sessions/${sid}/runs`, 'GET'),

@@ -2,7 +2,7 @@
 
 Feedback is an owner-scoped assessment, not a correctness label. Only persisted assistant messages accept feedback. The server resolves a run from the message snapshot and verifies its owner/session; client-supplied run/model/budget facts are rejected.
 
-Current wiring: the backend endpoints and the CLI below are implemented, but the answer-feedback UI is not wired — `frontend/components/chat/AnswerFeedback.tsx` is imported by no page, so feedback is only written through the HTTP API.
+Current wiring: `ChatWorkspace` renders `AnswerFeedback` for persisted assistant messages in both Chat and Agent history, including persisted limited/cancelled/failed answers. Streaming or unpersisted messages have no write entry. DEMO hides the write entry and retains server-side write protection. Expand “评价回答” to load the current assessment; reads are cached by account/session/message, can be retried, and saved assessments survive refresh. Changing identity resets local edit state.
 
 Authenticated endpoints (under `/api/v1`):
 

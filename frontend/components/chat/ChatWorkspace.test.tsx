@@ -15,13 +15,14 @@ vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: {role:'
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ready:true,reason:''}) }))
 vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
 const conversation = vi.hoisted(() => ({
-  session: undefined, sessions: [], messages: [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }] as ChatMsg[],
+  session: undefined as { id: number } | undefined, sessions: [], messages: [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }] as ChatMsg[],
   ragTrace: [], agentTrace: { runId: null, steps: [] }, streaming: false, sessionReady: true,
   send: vi.fn(), stop: vi.fn(), newSession: vi.fn(), switchSession: vi.fn(), loadSessions: vi.fn(),
 }))
+vi.mock('@/components/chat/AnswerFeedback', () => ({ AnswerFeedback: ({sessionId, messageId}: {sessionId:number;messageId:number}) => <div data-testid="feedback">{sessionId}/{messageId}</div> }))
 vi.mock('@/components/chat/useConversationSession', () => ({ useConversationSession: () => conversation }))
 vi.mock('@/components/knowledge/RunDetails', () => ({ RunDetails: () => null, SessionMemoryControl: () => null }))
-afterEach(() => { cleanup(); vi.restoreAllMocks(); conversation.messages = [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }]; conversation.send.mockClear() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); conversation.messages = [{ messageId: 108, role: 'assistant', content: '已持久化回答 [C1]' }]; conversation.send.mockClear(); conversation.session = undefined })
 
 test('initial recommendations appear once in the conversation and both context panes can collapse', () => {
   conversation.messages = []
@@ -197,4 +198,17 @@ test('preview conflict can reload a new head and choose a surviving block before
   fireEvent.click(screen.getByRole('button', { name: '预览正文与引用' }))
   await waitFor(() => expect(preview).toHaveBeenLastCalledWith(studyFixture.id, 108, 'config', 2))
   expect(await screen.findByRole('button', { name: '确认生成新版本' })).toBeTruthy()
+})
+
+
+test('persisted Chat and limited Agent answers expose feedback; streaming and unpersisted messages do not', () => {
+  conversation.session = { id: 9 }
+  conversation.messages = [
+    { role: 'assistant', messageId: 101, content: '普通回答' },
+    { role: 'assistant', messageId: 102, content: '有限结果', agentRun: true, degraded: true, error: 'failed' },
+    { role: 'assistant', messageId: 103, content: '正在输出', streaming: true },
+    { role: 'assistant', content: '尚未持久化' },
+  ]
+  render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+  expect(screen.getAllByTestId('feedback').map(node => node.textContent)).toEqual(['9/101', '9/102'])
 })

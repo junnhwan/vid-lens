@@ -5,6 +5,7 @@ import type { CiteRef } from '@/components/Citation'
 import { citeFromAPI, citationTimeLabel, hasReplayRange } from '@/components/Citation'
 import { EvidenceDrawer } from '@/components/chat/EvidenceDrawer'
 import { groupCitationSources } from '@/lib/citationGroups'
+import { AnswerFeedback } from '@/components/chat/AnswerFeedback'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
 import { useConversationSession } from '@/components/chat/useConversationSession'
 import type { ChatTraceStep } from '@/components/chat/traceTypes'
@@ -98,6 +99,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const readOnly = user?.role === 'DEMO'
   const ai = useAIAvailability(readOnly)
   const videoPreflight = useVideoAIPreflight()
+  const requestVideoAI = videoPreflight.request
   const [preflightAccepted, setPreflightAccepted] = useState(aiPreflightAccepted)
   const playerRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -296,7 +298,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (sending || streaming || historyLoading || historyError || !sessionReady) return
     if (readOnly) { toast.info('演示模式可查看已有会话'); return }
     if (videoRelated && (!preflightAccepted || !ai.ready)) {
-      videoPreflight.request(isVideo ? '单视频问答' : '视频库问答', () => {
+      requestVideoAI(isVideo ? '单视频问答' : '视频库问答', () => {
         setPreflightAccepted(true)
         setInput('')
         void send(q)
@@ -306,7 +308,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     if (!ai.ready) { toast.info(ai.reason); return }
     setInput('')
     void send(q)
-  }, [input, sending, streaming, historyLoading, historyError, sessionReady, send, toast, readOnly, ai.ready, ai.reason, videoRelated, preflightAccepted, videoPreflight.request, isVideo])
+  }, [input, sending, streaming, historyLoading, historyError, sessionReady, send, toast, readOnly, ai.ready, ai.reason, videoRelated, preflightAccepted, requestVideoAI, isVideo])
 
   useEffect(() => {
     if (!sessionReady || !ai.ready || readOnly || autoAsked.current || !isVideo) return
@@ -395,6 +397,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                   <AgentMessageView
                     key={`${session?.id ?? 'new'}-${msg.messageId ?? i}`}
                     msg={msg}
+                    feedbackReadOnly={readOnly}
                     sessionId={session?.id}
                     fallbackTitle={scopeName}
                     fallbackTaskId={isVideo ? targetId : undefined}
@@ -617,9 +620,10 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, sessionId, fallbackTitle, fallbackTaskId, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
+  msg, sessionId, feedbackReadOnly, fallbackTitle, fallbackTaskId, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
 }: {
   sessionId?: number
+  feedbackReadOnly: boolean
   msg: ChatMsg
   fallbackTitle: string
   fallbackTaskId?: number
@@ -738,6 +742,7 @@ function AgentMessageView({
       </div>
       <details className="answer-technical"><summary>技术详情</summary><p>{agentMode ? MODE_LABEL[agentMode] : '快速问答'} · {msg.modelName ? `模型：${msg.modelName}` : '模型未记录'} · {msg.profileId ? `配置 #${msg.profileId}` : '配置未记录'}</p>{sessionId && msg.agentRunId && !msg.streaming && <RunDetails sessionId={sessionId} runId={msg.agentRunId} live={false} />}</details>
       <div className="answer-completion" aria-live="polite">{msg.streaming ? <><span className="answer-live-dot" />{msg.transientStatus || (msg.content ? '正在生成回答…' : isAgentRun ? '正在分析视频…' : '正在检索…')}{msg.processStartedAt !== undefined && ` · 已等待 ${formatDuration(Math.max(0, clockNow - msg.processStartedAt))}`}<button type="button" onClick={onStop}>停止</button></> : <>{msg.error ? '本轮未完成' : msg.cancelled ? '已停止' : '已完成'}{!msg.error && !msg.cancelled && ` · ${msg.executionDurationMs !== undefined ? `处理耗时 ${formatDuration(msg.executionDurationMs)}` : '处理耗时未知'}`}{msg.createdAt ? ` · ${fmtTimeOfDay(msg.createdAt)}` : ''}</>}</div>
+      {!feedbackReadOnly && sessionId && msg.messageId && msg.messageId > 0 && !msg.streaming && <AnswerFeedback sessionId={sessionId} messageId={msg.messageId} />}
       {followUpSessionId && msg.messageId && !!msg.content && !msg.error && !msg.cancelled && !msg.streaming && <FollowUpQuestions sessionId={followUpSessionId} messageId={msg.messageId} onAsk={onFollowUp} />}
     </div>
   )
