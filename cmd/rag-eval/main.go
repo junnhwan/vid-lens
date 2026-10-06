@@ -24,6 +24,13 @@ func validateEvalConfig(cfg *config.Config) error {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "transcript" {
+		if err := runTranscriptCommand(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "transcript eval: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "product-candidates" {
 		if err := runProductCandidatesCommand(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "product candidate operation failed: %v\n", err)

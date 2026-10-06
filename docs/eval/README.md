@@ -9,6 +9,7 @@
 - `rag-cases.example.md`：live/legacy 案例列表格式示例，即非 `--strict` 模式下 `--cases` 读取的格式
 - `ablation-configs/`：检索消融配置，六档变体 `vector_only`、`bm25_hybrid`、`rrf_fusion`、`model_rerank`、`rrf_rerank`、`rrf_model_rerank`。其中 `vector_only`、`bm25_hybrid`、`rrf_fusion`、`model_rerank` 由 `cmd/rag-eval/ablation_configs_test.go` 加载校验，并强制四档冻结同一组 k/chunker 参数；`model_rerank` 与 `rrf_rerank` 都是 deterministic 代理档，不代表真实模型重排收益
 - `product-feedback.md`：回答反馈导出与产品回归候选流程
+- `transcript.md`、`transcript-cases.dev.json`：离线转写接缝回归、独立人工时间标注与不可覆盖基线报告；结构通过不表示时间精度通过
 
 ## 运行评测
 

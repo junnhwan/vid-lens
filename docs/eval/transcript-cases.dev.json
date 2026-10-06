@@ -1,0 +1,1955 @@
+{
+  "schema_version": 1,
+  "split": "dev",
+  "cases": [
+    {
+      "id": "adjacent-overlap",
+      "kind": "synthetic",
+      "tags": [
+        "overlap",
+        "cross-sentence"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "开始。共同边界"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "共同边界。继续。"
+        }
+      ],
+      "expected_text": "开始。共同边界。继续。"
+    },
+    {
+      "id": "missing-window",
+      "kind": "synthetic",
+      "tags": [
+        "missing-window",
+        "legal-repeat"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "开始。共同边界"
+        },
+        {
+          "chunk_index": 2,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "共同边界。继续。"
+        }
+      ],
+      "expected_text": "开始。共同边界\n\n共同边界。继续。"
+    },
+    {
+      "id": "no-overlap",
+      "kind": "synthetic",
+      "tags": [
+        "no-overlap"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "开始。共同边界"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 22000,
+          "window_end_ms": 42000,
+          "core_start_ms": 22000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "共同边界。继续。"
+        }
+      ],
+      "expected_text": "开始。共同边界\n\n共同边界。继续。"
+    },
+    {
+      "id": "silence-break",
+      "kind": "synthetic",
+      "tags": [
+        "silence",
+        "empty-window"
+      ],
+      "duration_ms": 62000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "开始。共同边界"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": ""
+        },
+        {
+          "chunk_index": 2,
+          "segment_key": "fixture-2",
+          "segmenter_version": "v2",
+          "window_start_ms": 38000,
+          "window_end_ms": 62000,
+          "core_start_ms": 40000,
+          "core_end_ms": 60000,
+          "status": "completed",
+          "content": "共同边界。继续。"
+        }
+      ],
+      "expected_text": "开始。共同边界\n\n共同边界。继续。"
+    },
+    {
+      "id": "version-break",
+      "kind": "synthetic",
+      "tags": [
+        "version-change"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "开始。共同边界"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v3",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "共同边界。继续。"
+        }
+      ],
+      "expected_text": "开始。共同边界\n\n共同边界。继续。"
+    },
+    {
+      "id": "english-spacing",
+      "kind": "synthetic",
+      "tags": [
+        "english",
+        "spacing"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "We now explain Retrieval-Augmented Generation"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "retrieval augmented generation, starting with embeddings."
+        }
+      ],
+      "expected_text": "We now explain Retrieval-Augmented Generation, starting with embeddings."
+    },
+    {
+      "id": "acoustic-legal-repeat",
+      "kind": "synthetic",
+      "tags": [
+        "legal-repeat",
+        "aligned"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "甲甲",
+          "words": [
+            {
+              "text": "甲",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 1000,
+              "end_ms": 2000,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "甲",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 19000,
+              "end_ms": 19500,
+              "method": "forced_alignment"
+            }
+          ]
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "甲甲乙",
+          "words": [
+            {
+              "text": "甲",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 19000,
+              "end_ms": 19500,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "甲",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 21000,
+              "end_ms": 21500,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "乙",
+              "text_start": 2,
+              "text_end": 3,
+              "start_ms": 30000,
+              "end_ms": 31000,
+              "method": "forced_alignment"
+            }
+          ]
+        }
+      ],
+      "expected_text": "甲甲甲乙"
+    },
+    {
+      "id": "quantized-gang",
+      "kind": "synthetic",
+      "tags": [
+        "quantized-seam",
+        "cross-sentence"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "我们把刚才",
+          "words": [
+            {
+              "text": "我",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 19120,
+              "end_ms": 19360,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "们",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 19360,
+              "end_ms": 19600,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "把",
+              "text_start": 2,
+              "text_end": 3,
+              "start_ms": 19600,
+              "end_ms": 19840,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "刚",
+              "text_start": 3,
+              "text_end": 4,
+              "start_ms": 19920,
+              "end_ms": 20080,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "才",
+              "text_start": 4,
+              "text_end": 5,
+              "start_ms": 20080,
+              "end_ms": 20400,
+              "method": "forced_alignment"
+            }
+          ]
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "我们把刚才创建",
+          "words": [
+            {
+              "text": "我",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 19200,
+              "end_ms": 19360,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "们",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 19360,
+              "end_ms": 19600,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "把",
+              "text_start": 2,
+              "text_end": 3,
+              "start_ms": 19600,
+              "end_ms": 19840,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "刚",
+              "text_start": 3,
+              "text_end": 4,
+              "start_ms": 19840,
+              "end_ms": 20080,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "才",
+              "text_start": 4,
+              "text_end": 5,
+              "start_ms": 20080,
+              "end_ms": 20400,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "创",
+              "text_start": 5,
+              "text_end": 6,
+              "start_ms": 20400,
+              "end_ms": 20640,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "建",
+              "text_start": 6,
+              "text_end": 7,
+              "start_ms": 20640,
+              "end_ms": 20720,
+              "method": "forced_alignment"
+            }
+          ]
+        }
+      ],
+      "expected_text": "我们把刚才创建"
+    },
+    {
+      "id": "missing-word",
+      "kind": "synthetic",
+      "tags": [
+        "alignment-rejection",
+        "missing-word"
+      ],
+      "duration_ms": 22000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "甲乙",
+          "words": [
+            {
+              "text": "甲",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 1000,
+              "end_ms": 2000,
+              "method": "forced_alignment"
+            }
+          ],
+          "expect_alignment_rejected": true
+        }
+      ],
+      "expected_text": "甲乙"
+    },
+    {
+      "id": "time-outside-window",
+      "kind": "synthetic",
+      "tags": [
+        "alignment-rejection",
+        "time-outside-window"
+      ],
+      "duration_ms": 22000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "甲乙",
+          "words": [
+            {
+              "text": "甲",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 1000,
+              "end_ms": 999999,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "乙",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 3000,
+              "end_ms": 4000,
+              "method": "forced_alignment"
+            }
+          ],
+          "expect_alignment_rejected": true
+        }
+      ],
+      "expected_text": "甲乙"
+    },
+    {
+      "id": "text-edited",
+      "kind": "synthetic",
+      "tags": [
+        "alignment-rejection",
+        "text-edited"
+      ],
+      "duration_ms": 22000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "甲乙",
+          "words": [
+            {
+              "text": "改",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 1000,
+              "end_ms": 2000,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "乙",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 3000,
+              "end_ms": 4000,
+              "method": "forced_alignment"
+            }
+          ],
+          "expect_alignment_rejected": true
+        }
+      ],
+      "expected_text": "甲乙"
+    },
+    {
+      "id": "time-reversed",
+      "kind": "synthetic",
+      "tags": [
+        "alignment-rejection",
+        "time-reversed"
+      ],
+      "duration_ms": 22000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "甲乙",
+          "words": [
+            {
+              "text": "甲",
+              "text_start": 0,
+              "text_end": 1,
+              "start_ms": 1000,
+              "end_ms": 2000,
+              "method": "forced_alignment"
+            },
+            {
+              "text": "乙",
+              "text_start": 1,
+              "text_end": 2,
+              "start_ms": 0,
+              "end_ms": 100,
+              "method": "forced_alignment"
+            }
+          ],
+          "expect_alignment_rejected": true
+        }
+      ],
+      "expected_text": "甲乙"
+    },
+    {
+      "id": "long-40min",
+      "kind": "synthetic",
+      "tags": [
+        "long-video"
+      ],
+      "duration_ms": 2400000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 20000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 20000,
+          "window_end_ms": 40000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 2,
+          "segment_key": "fixture-2",
+          "segmenter_version": "v2",
+          "window_start_ms": 40000,
+          "window_end_ms": 60000,
+          "core_start_ms": 40000,
+          "core_end_ms": 60000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 3,
+          "segment_key": "fixture-3",
+          "segmenter_version": "v2",
+          "window_start_ms": 60000,
+          "window_end_ms": 80000,
+          "core_start_ms": 60000,
+          "core_end_ms": 80000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 4,
+          "segment_key": "fixture-4",
+          "segmenter_version": "v2",
+          "window_start_ms": 80000,
+          "window_end_ms": 100000,
+          "core_start_ms": 80000,
+          "core_end_ms": 100000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 5,
+          "segment_key": "fixture-5",
+          "segmenter_version": "v2",
+          "window_start_ms": 100000,
+          "window_end_ms": 120000,
+          "core_start_ms": 100000,
+          "core_end_ms": 120000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 6,
+          "segment_key": "fixture-6",
+          "segmenter_version": "v2",
+          "window_start_ms": 120000,
+          "window_end_ms": 140000,
+          "core_start_ms": 120000,
+          "core_end_ms": 140000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 7,
+          "segment_key": "fixture-7",
+          "segmenter_version": "v2",
+          "window_start_ms": 140000,
+          "window_end_ms": 160000,
+          "core_start_ms": 140000,
+          "core_end_ms": 160000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 8,
+          "segment_key": "fixture-8",
+          "segmenter_version": "v2",
+          "window_start_ms": 160000,
+          "window_end_ms": 180000,
+          "core_start_ms": 160000,
+          "core_end_ms": 180000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 9,
+          "segment_key": "fixture-9",
+          "segmenter_version": "v2",
+          "window_start_ms": 180000,
+          "window_end_ms": 200000,
+          "core_start_ms": 180000,
+          "core_end_ms": 200000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 10,
+          "segment_key": "fixture-10",
+          "segmenter_version": "v2",
+          "window_start_ms": 200000,
+          "window_end_ms": 220000,
+          "core_start_ms": 200000,
+          "core_end_ms": 220000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 11,
+          "segment_key": "fixture-11",
+          "segmenter_version": "v2",
+          "window_start_ms": 220000,
+          "window_end_ms": 240000,
+          "core_start_ms": 220000,
+          "core_end_ms": 240000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 12,
+          "segment_key": "fixture-12",
+          "segmenter_version": "v2",
+          "window_start_ms": 240000,
+          "window_end_ms": 260000,
+          "core_start_ms": 240000,
+          "core_end_ms": 260000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 13,
+          "segment_key": "fixture-13",
+          "segmenter_version": "v2",
+          "window_start_ms": 260000,
+          "window_end_ms": 280000,
+          "core_start_ms": 260000,
+          "core_end_ms": 280000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 14,
+          "segment_key": "fixture-14",
+          "segmenter_version": "v2",
+          "window_start_ms": 280000,
+          "window_end_ms": 300000,
+          "core_start_ms": 280000,
+          "core_end_ms": 300000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 15,
+          "segment_key": "fixture-15",
+          "segmenter_version": "v2",
+          "window_start_ms": 300000,
+          "window_end_ms": 320000,
+          "core_start_ms": 300000,
+          "core_end_ms": 320000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 16,
+          "segment_key": "fixture-16",
+          "segmenter_version": "v2",
+          "window_start_ms": 320000,
+          "window_end_ms": 340000,
+          "core_start_ms": 320000,
+          "core_end_ms": 340000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 17,
+          "segment_key": "fixture-17",
+          "segmenter_version": "v2",
+          "window_start_ms": 340000,
+          "window_end_ms": 360000,
+          "core_start_ms": 340000,
+          "core_end_ms": 360000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 18,
+          "segment_key": "fixture-18",
+          "segmenter_version": "v2",
+          "window_start_ms": 360000,
+          "window_end_ms": 380000,
+          "core_start_ms": 360000,
+          "core_end_ms": 380000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 19,
+          "segment_key": "fixture-19",
+          "segmenter_version": "v2",
+          "window_start_ms": 380000,
+          "window_end_ms": 400000,
+          "core_start_ms": 380000,
+          "core_end_ms": 400000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 20,
+          "segment_key": "fixture-20",
+          "segmenter_version": "v2",
+          "window_start_ms": 400000,
+          "window_end_ms": 420000,
+          "core_start_ms": 400000,
+          "core_end_ms": 420000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 21,
+          "segment_key": "fixture-21",
+          "segmenter_version": "v2",
+          "window_start_ms": 420000,
+          "window_end_ms": 440000,
+          "core_start_ms": 420000,
+          "core_end_ms": 440000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 22,
+          "segment_key": "fixture-22",
+          "segmenter_version": "v2",
+          "window_start_ms": 440000,
+          "window_end_ms": 460000,
+          "core_start_ms": 440000,
+          "core_end_ms": 460000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 23,
+          "segment_key": "fixture-23",
+          "segmenter_version": "v2",
+          "window_start_ms": 460000,
+          "window_end_ms": 480000,
+          "core_start_ms": 460000,
+          "core_end_ms": 480000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 24,
+          "segment_key": "fixture-24",
+          "segmenter_version": "v2",
+          "window_start_ms": 480000,
+          "window_end_ms": 500000,
+          "core_start_ms": 480000,
+          "core_end_ms": 500000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 25,
+          "segment_key": "fixture-25",
+          "segmenter_version": "v2",
+          "window_start_ms": 500000,
+          "window_end_ms": 520000,
+          "core_start_ms": 500000,
+          "core_end_ms": 520000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 26,
+          "segment_key": "fixture-26",
+          "segmenter_version": "v2",
+          "window_start_ms": 520000,
+          "window_end_ms": 540000,
+          "core_start_ms": 520000,
+          "core_end_ms": 540000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 27,
+          "segment_key": "fixture-27",
+          "segmenter_version": "v2",
+          "window_start_ms": 540000,
+          "window_end_ms": 560000,
+          "core_start_ms": 540000,
+          "core_end_ms": 560000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 28,
+          "segment_key": "fixture-28",
+          "segmenter_version": "v2",
+          "window_start_ms": 560000,
+          "window_end_ms": 580000,
+          "core_start_ms": 560000,
+          "core_end_ms": 580000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 29,
+          "segment_key": "fixture-29",
+          "segmenter_version": "v2",
+          "window_start_ms": 580000,
+          "window_end_ms": 600000,
+          "core_start_ms": 580000,
+          "core_end_ms": 600000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 30,
+          "segment_key": "fixture-30",
+          "segmenter_version": "v2",
+          "window_start_ms": 600000,
+          "window_end_ms": 620000,
+          "core_start_ms": 600000,
+          "core_end_ms": 620000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 31,
+          "segment_key": "fixture-31",
+          "segmenter_version": "v2",
+          "window_start_ms": 620000,
+          "window_end_ms": 640000,
+          "core_start_ms": 620000,
+          "core_end_ms": 640000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 32,
+          "segment_key": "fixture-32",
+          "segmenter_version": "v2",
+          "window_start_ms": 640000,
+          "window_end_ms": 660000,
+          "core_start_ms": 640000,
+          "core_end_ms": 660000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 33,
+          "segment_key": "fixture-33",
+          "segmenter_version": "v2",
+          "window_start_ms": 660000,
+          "window_end_ms": 680000,
+          "core_start_ms": 660000,
+          "core_end_ms": 680000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 34,
+          "segment_key": "fixture-34",
+          "segmenter_version": "v2",
+          "window_start_ms": 680000,
+          "window_end_ms": 700000,
+          "core_start_ms": 680000,
+          "core_end_ms": 700000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 35,
+          "segment_key": "fixture-35",
+          "segmenter_version": "v2",
+          "window_start_ms": 700000,
+          "window_end_ms": 720000,
+          "core_start_ms": 700000,
+          "core_end_ms": 720000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 36,
+          "segment_key": "fixture-36",
+          "segmenter_version": "v2",
+          "window_start_ms": 720000,
+          "window_end_ms": 740000,
+          "core_start_ms": 720000,
+          "core_end_ms": 740000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 37,
+          "segment_key": "fixture-37",
+          "segmenter_version": "v2",
+          "window_start_ms": 740000,
+          "window_end_ms": 760000,
+          "core_start_ms": 740000,
+          "core_end_ms": 760000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 38,
+          "segment_key": "fixture-38",
+          "segmenter_version": "v2",
+          "window_start_ms": 760000,
+          "window_end_ms": 780000,
+          "core_start_ms": 760000,
+          "core_end_ms": 780000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 39,
+          "segment_key": "fixture-39",
+          "segmenter_version": "v2",
+          "window_start_ms": 780000,
+          "window_end_ms": 800000,
+          "core_start_ms": 780000,
+          "core_end_ms": 800000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 40,
+          "segment_key": "fixture-40",
+          "segmenter_version": "v2",
+          "window_start_ms": 800000,
+          "window_end_ms": 820000,
+          "core_start_ms": 800000,
+          "core_end_ms": 820000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 41,
+          "segment_key": "fixture-41",
+          "segmenter_version": "v2",
+          "window_start_ms": 820000,
+          "window_end_ms": 840000,
+          "core_start_ms": 820000,
+          "core_end_ms": 840000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 42,
+          "segment_key": "fixture-42",
+          "segmenter_version": "v2",
+          "window_start_ms": 840000,
+          "window_end_ms": 860000,
+          "core_start_ms": 840000,
+          "core_end_ms": 860000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 43,
+          "segment_key": "fixture-43",
+          "segmenter_version": "v2",
+          "window_start_ms": 860000,
+          "window_end_ms": 880000,
+          "core_start_ms": 860000,
+          "core_end_ms": 880000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 44,
+          "segment_key": "fixture-44",
+          "segmenter_version": "v2",
+          "window_start_ms": 880000,
+          "window_end_ms": 900000,
+          "core_start_ms": 880000,
+          "core_end_ms": 900000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 45,
+          "segment_key": "fixture-45",
+          "segmenter_version": "v2",
+          "window_start_ms": 900000,
+          "window_end_ms": 920000,
+          "core_start_ms": 900000,
+          "core_end_ms": 920000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 46,
+          "segment_key": "fixture-46",
+          "segmenter_version": "v2",
+          "window_start_ms": 920000,
+          "window_end_ms": 940000,
+          "core_start_ms": 920000,
+          "core_end_ms": 940000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 47,
+          "segment_key": "fixture-47",
+          "segmenter_version": "v2",
+          "window_start_ms": 940000,
+          "window_end_ms": 960000,
+          "core_start_ms": 940000,
+          "core_end_ms": 960000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 48,
+          "segment_key": "fixture-48",
+          "segmenter_version": "v2",
+          "window_start_ms": 960000,
+          "window_end_ms": 980000,
+          "core_start_ms": 960000,
+          "core_end_ms": 980000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 49,
+          "segment_key": "fixture-49",
+          "segmenter_version": "v2",
+          "window_start_ms": 980000,
+          "window_end_ms": 1000000,
+          "core_start_ms": 980000,
+          "core_end_ms": 1000000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 50,
+          "segment_key": "fixture-50",
+          "segmenter_version": "v2",
+          "window_start_ms": 1000000,
+          "window_end_ms": 1020000,
+          "core_start_ms": 1000000,
+          "core_end_ms": 1020000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 51,
+          "segment_key": "fixture-51",
+          "segmenter_version": "v2",
+          "window_start_ms": 1020000,
+          "window_end_ms": 1040000,
+          "core_start_ms": 1020000,
+          "core_end_ms": 1040000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 52,
+          "segment_key": "fixture-52",
+          "segmenter_version": "v2",
+          "window_start_ms": 1040000,
+          "window_end_ms": 1060000,
+          "core_start_ms": 1040000,
+          "core_end_ms": 1060000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 53,
+          "segment_key": "fixture-53",
+          "segmenter_version": "v2",
+          "window_start_ms": 1060000,
+          "window_end_ms": 1080000,
+          "core_start_ms": 1060000,
+          "core_end_ms": 1080000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 54,
+          "segment_key": "fixture-54",
+          "segmenter_version": "v2",
+          "window_start_ms": 1080000,
+          "window_end_ms": 1100000,
+          "core_start_ms": 1080000,
+          "core_end_ms": 1100000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 55,
+          "segment_key": "fixture-55",
+          "segmenter_version": "v2",
+          "window_start_ms": 1100000,
+          "window_end_ms": 1120000,
+          "core_start_ms": 1100000,
+          "core_end_ms": 1120000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 56,
+          "segment_key": "fixture-56",
+          "segmenter_version": "v2",
+          "window_start_ms": 1120000,
+          "window_end_ms": 1140000,
+          "core_start_ms": 1120000,
+          "core_end_ms": 1140000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 57,
+          "segment_key": "fixture-57",
+          "segmenter_version": "v2",
+          "window_start_ms": 1140000,
+          "window_end_ms": 1160000,
+          "core_start_ms": 1140000,
+          "core_end_ms": 1160000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 58,
+          "segment_key": "fixture-58",
+          "segmenter_version": "v2",
+          "window_start_ms": 1160000,
+          "window_end_ms": 1180000,
+          "core_start_ms": 1160000,
+          "core_end_ms": 1180000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 59,
+          "segment_key": "fixture-59",
+          "segmenter_version": "v2",
+          "window_start_ms": 1180000,
+          "window_end_ms": 1200000,
+          "core_start_ms": 1180000,
+          "core_end_ms": 1200000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 60,
+          "segment_key": "fixture-60",
+          "segmenter_version": "v2",
+          "window_start_ms": 1200000,
+          "window_end_ms": 1220000,
+          "core_start_ms": 1200000,
+          "core_end_ms": 1220000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 61,
+          "segment_key": "fixture-61",
+          "segmenter_version": "v2",
+          "window_start_ms": 1220000,
+          "window_end_ms": 1240000,
+          "core_start_ms": 1220000,
+          "core_end_ms": 1240000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 62,
+          "segment_key": "fixture-62",
+          "segmenter_version": "v2",
+          "window_start_ms": 1240000,
+          "window_end_ms": 1260000,
+          "core_start_ms": 1240000,
+          "core_end_ms": 1260000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 63,
+          "segment_key": "fixture-63",
+          "segmenter_version": "v2",
+          "window_start_ms": 1260000,
+          "window_end_ms": 1280000,
+          "core_start_ms": 1260000,
+          "core_end_ms": 1280000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 64,
+          "segment_key": "fixture-64",
+          "segmenter_version": "v2",
+          "window_start_ms": 1280000,
+          "window_end_ms": 1300000,
+          "core_start_ms": 1280000,
+          "core_end_ms": 1300000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 65,
+          "segment_key": "fixture-65",
+          "segmenter_version": "v2",
+          "window_start_ms": 1300000,
+          "window_end_ms": 1320000,
+          "core_start_ms": 1300000,
+          "core_end_ms": 1320000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 66,
+          "segment_key": "fixture-66",
+          "segmenter_version": "v2",
+          "window_start_ms": 1320000,
+          "window_end_ms": 1340000,
+          "core_start_ms": 1320000,
+          "core_end_ms": 1340000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 67,
+          "segment_key": "fixture-67",
+          "segmenter_version": "v2",
+          "window_start_ms": 1340000,
+          "window_end_ms": 1360000,
+          "core_start_ms": 1340000,
+          "core_end_ms": 1360000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 68,
+          "segment_key": "fixture-68",
+          "segmenter_version": "v2",
+          "window_start_ms": 1360000,
+          "window_end_ms": 1380000,
+          "core_start_ms": 1360000,
+          "core_end_ms": 1380000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 69,
+          "segment_key": "fixture-69",
+          "segmenter_version": "v2",
+          "window_start_ms": 1380000,
+          "window_end_ms": 1400000,
+          "core_start_ms": 1380000,
+          "core_end_ms": 1400000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 70,
+          "segment_key": "fixture-70",
+          "segmenter_version": "v2",
+          "window_start_ms": 1400000,
+          "window_end_ms": 1420000,
+          "core_start_ms": 1400000,
+          "core_end_ms": 1420000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 71,
+          "segment_key": "fixture-71",
+          "segmenter_version": "v2",
+          "window_start_ms": 1420000,
+          "window_end_ms": 1440000,
+          "core_start_ms": 1420000,
+          "core_end_ms": 1440000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 72,
+          "segment_key": "fixture-72",
+          "segmenter_version": "v2",
+          "window_start_ms": 1440000,
+          "window_end_ms": 1460000,
+          "core_start_ms": 1440000,
+          "core_end_ms": 1460000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 73,
+          "segment_key": "fixture-73",
+          "segmenter_version": "v2",
+          "window_start_ms": 1460000,
+          "window_end_ms": 1480000,
+          "core_start_ms": 1460000,
+          "core_end_ms": 1480000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 74,
+          "segment_key": "fixture-74",
+          "segmenter_version": "v2",
+          "window_start_ms": 1480000,
+          "window_end_ms": 1500000,
+          "core_start_ms": 1480000,
+          "core_end_ms": 1500000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 75,
+          "segment_key": "fixture-75",
+          "segmenter_version": "v2",
+          "window_start_ms": 1500000,
+          "window_end_ms": 1520000,
+          "core_start_ms": 1500000,
+          "core_end_ms": 1520000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 76,
+          "segment_key": "fixture-76",
+          "segmenter_version": "v2",
+          "window_start_ms": 1520000,
+          "window_end_ms": 1540000,
+          "core_start_ms": 1520000,
+          "core_end_ms": 1540000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 77,
+          "segment_key": "fixture-77",
+          "segmenter_version": "v2",
+          "window_start_ms": 1540000,
+          "window_end_ms": 1560000,
+          "core_start_ms": 1540000,
+          "core_end_ms": 1560000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 78,
+          "segment_key": "fixture-78",
+          "segmenter_version": "v2",
+          "window_start_ms": 1560000,
+          "window_end_ms": 1580000,
+          "core_start_ms": 1560000,
+          "core_end_ms": 1580000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 79,
+          "segment_key": "fixture-79",
+          "segmenter_version": "v2",
+          "window_start_ms": 1580000,
+          "window_end_ms": 1600000,
+          "core_start_ms": 1580000,
+          "core_end_ms": 1600000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 80,
+          "segment_key": "fixture-80",
+          "segmenter_version": "v2",
+          "window_start_ms": 1600000,
+          "window_end_ms": 1620000,
+          "core_start_ms": 1600000,
+          "core_end_ms": 1620000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 81,
+          "segment_key": "fixture-81",
+          "segmenter_version": "v2",
+          "window_start_ms": 1620000,
+          "window_end_ms": 1640000,
+          "core_start_ms": 1620000,
+          "core_end_ms": 1640000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 82,
+          "segment_key": "fixture-82",
+          "segmenter_version": "v2",
+          "window_start_ms": 1640000,
+          "window_end_ms": 1660000,
+          "core_start_ms": 1640000,
+          "core_end_ms": 1660000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 83,
+          "segment_key": "fixture-83",
+          "segmenter_version": "v2",
+          "window_start_ms": 1660000,
+          "window_end_ms": 1680000,
+          "core_start_ms": 1660000,
+          "core_end_ms": 1680000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 84,
+          "segment_key": "fixture-84",
+          "segmenter_version": "v2",
+          "window_start_ms": 1680000,
+          "window_end_ms": 1700000,
+          "core_start_ms": 1680000,
+          "core_end_ms": 1700000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 85,
+          "segment_key": "fixture-85",
+          "segmenter_version": "v2",
+          "window_start_ms": 1700000,
+          "window_end_ms": 1720000,
+          "core_start_ms": 1700000,
+          "core_end_ms": 1720000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 86,
+          "segment_key": "fixture-86",
+          "segmenter_version": "v2",
+          "window_start_ms": 1720000,
+          "window_end_ms": 1740000,
+          "core_start_ms": 1720000,
+          "core_end_ms": 1740000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 87,
+          "segment_key": "fixture-87",
+          "segmenter_version": "v2",
+          "window_start_ms": 1740000,
+          "window_end_ms": 1760000,
+          "core_start_ms": 1740000,
+          "core_end_ms": 1760000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 88,
+          "segment_key": "fixture-88",
+          "segmenter_version": "v2",
+          "window_start_ms": 1760000,
+          "window_end_ms": 1780000,
+          "core_start_ms": 1760000,
+          "core_end_ms": 1780000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 89,
+          "segment_key": "fixture-89",
+          "segmenter_version": "v2",
+          "window_start_ms": 1780000,
+          "window_end_ms": 1800000,
+          "core_start_ms": 1780000,
+          "core_end_ms": 1800000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 90,
+          "segment_key": "fixture-90",
+          "segmenter_version": "v2",
+          "window_start_ms": 1800000,
+          "window_end_ms": 1820000,
+          "core_start_ms": 1800000,
+          "core_end_ms": 1820000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 91,
+          "segment_key": "fixture-91",
+          "segmenter_version": "v2",
+          "window_start_ms": 1820000,
+          "window_end_ms": 1840000,
+          "core_start_ms": 1820000,
+          "core_end_ms": 1840000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 92,
+          "segment_key": "fixture-92",
+          "segmenter_version": "v2",
+          "window_start_ms": 1840000,
+          "window_end_ms": 1860000,
+          "core_start_ms": 1840000,
+          "core_end_ms": 1860000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 93,
+          "segment_key": "fixture-93",
+          "segmenter_version": "v2",
+          "window_start_ms": 1860000,
+          "window_end_ms": 1880000,
+          "core_start_ms": 1860000,
+          "core_end_ms": 1880000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 94,
+          "segment_key": "fixture-94",
+          "segmenter_version": "v2",
+          "window_start_ms": 1880000,
+          "window_end_ms": 1900000,
+          "core_start_ms": 1880000,
+          "core_end_ms": 1900000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 95,
+          "segment_key": "fixture-95",
+          "segmenter_version": "v2",
+          "window_start_ms": 1900000,
+          "window_end_ms": 1920000,
+          "core_start_ms": 1900000,
+          "core_end_ms": 1920000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 96,
+          "segment_key": "fixture-96",
+          "segmenter_version": "v2",
+          "window_start_ms": 1920000,
+          "window_end_ms": 1940000,
+          "core_start_ms": 1920000,
+          "core_end_ms": 1940000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 97,
+          "segment_key": "fixture-97",
+          "segmenter_version": "v2",
+          "window_start_ms": 1940000,
+          "window_end_ms": 1960000,
+          "core_start_ms": 1940000,
+          "core_end_ms": 1960000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 98,
+          "segment_key": "fixture-98",
+          "segmenter_version": "v2",
+          "window_start_ms": 1960000,
+          "window_end_ms": 1980000,
+          "core_start_ms": 1960000,
+          "core_end_ms": 1980000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 99,
+          "segment_key": "fixture-99",
+          "segmenter_version": "v2",
+          "window_start_ms": 1980000,
+          "window_end_ms": 2000000,
+          "core_start_ms": 1980000,
+          "core_end_ms": 2000000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 100,
+          "segment_key": "fixture-100",
+          "segmenter_version": "v2",
+          "window_start_ms": 2000000,
+          "window_end_ms": 2020000,
+          "core_start_ms": 2000000,
+          "core_end_ms": 2020000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 101,
+          "segment_key": "fixture-101",
+          "segmenter_version": "v2",
+          "window_start_ms": 2020000,
+          "window_end_ms": 2040000,
+          "core_start_ms": 2020000,
+          "core_end_ms": 2040000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 102,
+          "segment_key": "fixture-102",
+          "segmenter_version": "v2",
+          "window_start_ms": 2040000,
+          "window_end_ms": 2060000,
+          "core_start_ms": 2040000,
+          "core_end_ms": 2060000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 103,
+          "segment_key": "fixture-103",
+          "segmenter_version": "v2",
+          "window_start_ms": 2060000,
+          "window_end_ms": 2080000,
+          "core_start_ms": 2060000,
+          "core_end_ms": 2080000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 104,
+          "segment_key": "fixture-104",
+          "segmenter_version": "v2",
+          "window_start_ms": 2080000,
+          "window_end_ms": 2100000,
+          "core_start_ms": 2080000,
+          "core_end_ms": 2100000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 105,
+          "segment_key": "fixture-105",
+          "segmenter_version": "v2",
+          "window_start_ms": 2100000,
+          "window_end_ms": 2120000,
+          "core_start_ms": 2100000,
+          "core_end_ms": 2120000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 106,
+          "segment_key": "fixture-106",
+          "segmenter_version": "v2",
+          "window_start_ms": 2120000,
+          "window_end_ms": 2140000,
+          "core_start_ms": 2120000,
+          "core_end_ms": 2140000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 107,
+          "segment_key": "fixture-107",
+          "segmenter_version": "v2",
+          "window_start_ms": 2140000,
+          "window_end_ms": 2160000,
+          "core_start_ms": 2140000,
+          "core_end_ms": 2160000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 108,
+          "segment_key": "fixture-108",
+          "segmenter_version": "v2",
+          "window_start_ms": 2160000,
+          "window_end_ms": 2180000,
+          "core_start_ms": 2160000,
+          "core_end_ms": 2180000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 109,
+          "segment_key": "fixture-109",
+          "segmenter_version": "v2",
+          "window_start_ms": 2180000,
+          "window_end_ms": 2200000,
+          "core_start_ms": 2180000,
+          "core_end_ms": 2200000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 110,
+          "segment_key": "fixture-110",
+          "segmenter_version": "v2",
+          "window_start_ms": 2200000,
+          "window_end_ms": 2220000,
+          "core_start_ms": 2200000,
+          "core_end_ms": 2220000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 111,
+          "segment_key": "fixture-111",
+          "segmenter_version": "v2",
+          "window_start_ms": 2220000,
+          "window_end_ms": 2240000,
+          "core_start_ms": 2220000,
+          "core_end_ms": 2240000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 112,
+          "segment_key": "fixture-112",
+          "segmenter_version": "v2",
+          "window_start_ms": 2240000,
+          "window_end_ms": 2260000,
+          "core_start_ms": 2240000,
+          "core_end_ms": 2260000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 113,
+          "segment_key": "fixture-113",
+          "segmenter_version": "v2",
+          "window_start_ms": 2260000,
+          "window_end_ms": 2280000,
+          "core_start_ms": 2260000,
+          "core_end_ms": 2280000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 114,
+          "segment_key": "fixture-114",
+          "segmenter_version": "v2",
+          "window_start_ms": 2280000,
+          "window_end_ms": 2300000,
+          "core_start_ms": 2280000,
+          "core_end_ms": 2300000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 115,
+          "segment_key": "fixture-115",
+          "segmenter_version": "v2",
+          "window_start_ms": 2300000,
+          "window_end_ms": 2320000,
+          "core_start_ms": 2300000,
+          "core_end_ms": 2320000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 116,
+          "segment_key": "fixture-116",
+          "segmenter_version": "v2",
+          "window_start_ms": 2320000,
+          "window_end_ms": 2340000,
+          "core_start_ms": 2320000,
+          "core_end_ms": 2340000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 117,
+          "segment_key": "fixture-117",
+          "segmenter_version": "v2",
+          "window_start_ms": 2340000,
+          "window_end_ms": 2360000,
+          "core_start_ms": 2340000,
+          "core_end_ms": 2360000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 118,
+          "segment_key": "fixture-118",
+          "segmenter_version": "v2",
+          "window_start_ms": 2360000,
+          "window_end_ms": 2380000,
+          "core_start_ms": 2360000,
+          "core_end_ms": 2380000,
+          "status": "completed",
+          "content": "长视频句子。"
+        },
+        {
+          "chunk_index": 119,
+          "segment_key": "fixture-119",
+          "segmenter_version": "v2",
+          "window_start_ms": 2380000,
+          "window_end_ms": 2400000,
+          "core_start_ms": 2380000,
+          "core_end_ms": 2400000,
+          "status": "completed",
+          "content": "长视频句子。"
+        }
+      ],
+      "expected_text": "长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。\n\n长视频句子。"
+    },
+    {
+      "id": "failed-alignment-preserved",
+      "kind": "synthetic",
+      "tags": [
+        "failed-window"
+      ],
+      "duration_ms": 42000,
+      "windows": [
+        {
+          "chunk_index": 0,
+          "segment_key": "fixture-0",
+          "segmenter_version": "v2",
+          "window_start_ms": 0,
+          "window_end_ms": 22000,
+          "core_start_ms": 0,
+          "core_end_ms": 20000,
+          "status": "completed",
+          "content": "旧发布来源。"
+        },
+        {
+          "chunk_index": 1,
+          "segment_key": "fixture-1",
+          "segmenter_version": "v2",
+          "window_start_ms": 18000,
+          "window_end_ms": 42000,
+          "core_start_ms": 20000,
+          "core_end_ms": 40000,
+          "status": "failed",
+          "content": ""
+        }
+      ],
+      "expected_text": "旧发布来源。"
+    }
+  ]
+}
