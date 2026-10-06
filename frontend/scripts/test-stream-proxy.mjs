@@ -48,6 +48,7 @@ try {
   const invalidPromoRange = await fetch(`${base}/intro-promo.mp4`, { headers: { Range: 'bytes=999999999-' } })
   assert.equal(invalidPromoRange.status, 416)
   assert.equal((await fetch(`${base}/dev/product`, { headers: { Accept: 'text/html' } })).status, 404)
+  assert.equal((await fetch(`${base}/dev/motion`, { headers: { Accept: 'text/html' } })).status, 404)
   assert.equal((await fetch(`${base}/assets/missing.js`, { headers: { Accept: 'text/html' } })).status, 404)
   const deep = await fetch(`${base}/artifacts/example`, { headers: { Accept: 'text/html' } })
   assert.equal(deep.status, 200)

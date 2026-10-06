@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChatMsg } from './chatUtils'
 import type { ChatTraceStep } from './traceTypes'
 import styles from './ThinkingProcess.module.css'
@@ -12,6 +12,10 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   const [now, setNow] = useState(Date.now())
   const steps = message.trace ?? []
   const live = !!message.streaming
+  const awaitingServer = ['pending', 'running'].includes(message.runStatus ?? '')
+  const completed = !live && !awaitingServer && !message.error && !message.cancelled && !message.degraded
+  const wasLive = useRef(live)
+  useEffect(() => { if (live) wasLive.current = true }, [live])
   useEffect(() => {
     if (!live) return
     setNow(Date.now())
@@ -19,7 +23,8 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
     return () => clearInterval(timer)
   }, [live])
   if (!live && !steps.length && !Object.keys(message.reasoning ?? {}).length) return null
-  const open = expanded ?? live
+  // Completing an answer changes its status, not the reader's scroll position.
+  const open = expanded ?? (live || wasLive.current)
   const active = steps.findLast(step => step.status === 'running')
   const duration = message.processStartedAt
     ? Math.max(0, (message.processFinishedAt ?? now) - message.processStartedAt)
@@ -27,9 +32,9 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   const summary = live ? active?.label ?? '正在连接…' : ['pending', 'running'].includes(message.runStatus ?? '') ? '服务端仍在执行' : message.error ? '本轮未完成' : message.cancelled ? '已停止' : message.degraded ? '已结束 · 有限结果' : `已完成 ${steps.length} 个步骤`
   const attached = new Set(steps.map(step => step.kind === 'answer' ? 'answer' : step.id))
   return (
-    <section className={styles.process} aria-label="思考与执行过程">
+    <section className={styles.process} data-state={live || awaitingServer ? 'running' : completed ? 'completed' : 'limited'} aria-label="思考与执行过程">
       <button type="button" className={styles.toggle} aria-expanded={open} onClick={() => setExpanded(!open)}>
-        <span className={`${styles.indicator} ${live ? styles.live : ''}`} aria-hidden="true" />
+        <span className={`${styles.indicator} ${live ? styles.live : ''}`} aria-hidden="true">{completed ? '✓' : ''}</span>
         <span className={styles.title}>思考与执行过程</span>
         <span className={styles.summary}>{summary}{duration !== undefined ? ` · ${formatDuration(duration)}` : ''}</span>
         <Icon name="chev-r" size="sm" className={`${styles.chev}${open ? ` ${styles.chevOpen}` : ''}`} />

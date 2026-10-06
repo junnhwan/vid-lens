@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { groupCitationSources } from '@/lib/citationGroups'
 import type { CiteRef } from '@/components/Citation'
 import { citationTimeLabel, formatTime, formatTimeRange, hasReplayRange, needsCitationUpgrade } from '@/components/Citation'
@@ -14,6 +14,8 @@ import Link from '@/lib/router'
 // 迷你播放器,跨视频/知识库范围跳到对应视频工作台),本组件只声明可用性。
 
 interface EvidenceDrawerProps {
+  open?: boolean
+  onExited?: () => void
   cite: CiteRef
   cites?: CiteRef[]
   onSelect?: (cite: CiteRef) => void
@@ -33,10 +35,37 @@ function timeStatusText(status?: string): string {
   return status || '—'
 }
 
-export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallbackTitle, canJump, jumpDisabledHint, onJump, onClose }: EvidenceDrawerProps) {
+export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallbackTitle, canJump, jumpDisabledHint, onJump, onClose, open = true, onExited }: EvidenceDrawerProps) {
   const toast = useToast()
   const [expanded, setExpanded] = useState(false)
-  useEffect(() => setExpanded(false), [cite.id])
+  const boxRef = useRef<HTMLDivElement>(null)
+  const contextRef = useRef<HTMLParagraphElement>(null)
+  const exitRef = useRef(onExited); exitRef.current = onExited
+  useEffect(() => {
+    if (open) return
+    // The timeout also completes an exit if no transition event fires.
+    const duration = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 220
+    const timer = window.setTimeout(() => exitRef.current?.(), duration)
+    return () => window.clearTimeout(timer)
+  }, [open])
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    boxRef.current?.focus({ preventScroll: true })
+    const contain = (event: FocusEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]')
+      const el = boxRef.current
+      if (el && dialogs[dialogs.length - 1] === el && !el.contains(event.target as Node)) el.focus({ preventScroll: true })
+    }
+    document.addEventListener('focusin', contain)
+    return () => { document.removeEventListener('focusin', contain); if (previous?.isConnected) previous.focus({ preventScroll: true }) }
+  }, [])
+  useEffect(() => {
+    const context = contextRef.current
+    const pane = boxRef.current?.querySelector<HTMLElement>('.drawer-body')
+    if (!context || !pane) return
+    const box = context.getBoundingClientRect(), root = pane.getBoundingClientRect()
+    if (box.top < root.top || box.bottom > root.bottom) pane.scrollTo?.({ top: pane.scrollTop + box.top - root.top - 80, behavior: 'auto' })
+  }, [cite.id])
   const sources = groupCitationSources(cites || [cite], fallbackTaskId)
 
   const title = cite.videoTitle || fallbackTitle
@@ -61,9 +90,16 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
   }
 
   return (
-    <>
+    <div className="evidence-drawer-presence" data-open={open}>
       <DrawerVeil onClose={onClose} />
-      <div className="drawer" role="dialog" aria-label="证据详情">
+      <div ref={boxRef} className="drawer" role="dialog" aria-modal="true" tabIndex={-1} aria-label="证据详情" onKeyDown={event => {
+        if (event.key !== 'Tab') return
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],summary,[tabindex="0"]')).filter(element => element.getClientRects().length > 0)
+        const first = controls[0], last = controls[controls.length - 1]
+        if (!first) { event.preventDefault(); return }
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }}>
         <div className="drawer-head">
           <span
             className="mono"
@@ -103,7 +139,7 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
             <div className="ev-meta-cell"><div className="k">时间状态</div><div className="v">{timeStatusText(cite.timeRangeStatus)}</div></div>
           </div>
           <div className="field-label">来源上下文</div>
-          <p className="evidence-source-context" style={{ fontSize: 12, color: 'var(--tx-2)', lineHeight: 1.7 }}>
+          <p ref={contextRef} key={cite.id} className="evidence-source-context" style={{ fontSize: 12, color: 'var(--tx-2)', lineHeight: 1.7 }}>
             {contextStart > 0 ? '…' : ''}
             {highlightStart >= 0 ? <>{excerpt.slice(0, highlightStart)}<mark>{excerpt.slice(highlightStart, highlightEnd)}</mark>{excerpt.slice(highlightEnd)}</> : excerpt}
             {cite.displayContextTruncated || contextStart + excerpt.length < context.length ? '…' : ''}
@@ -142,6 +178,6 @@ export function EvidenceDrawer({ cite, cites, onSelect, fallbackTaskId, fallback
           </div></details>
         </div>
       </div>
-    </>
+    </div>
   )
 }

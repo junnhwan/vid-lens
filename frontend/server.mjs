@@ -72,7 +72,7 @@ export function createFrontendServer({ apiBase = process.env.VIDLENS_API_BASE ||
   return createHttpServer((request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname
     if (path === '/api' || path.startsWith('/api/')) { proxyApi(request, response, apiBase); return }
-    if (path === '/dev/product' || path.startsWith('/dev/product/')) { response.writeHead(404).end('Not found'); return }
+    if (['/dev/product', '/dev/motion'].some(route => path === route || path.startsWith(`${route}/`))) { response.writeHead(404).end('Not found'); return }
     if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405).end('Method not allowed'); return }
     let decoded
     try { decoded = decodeURIComponent(path) } catch { response.writeHead(400).end('Bad path'); return }

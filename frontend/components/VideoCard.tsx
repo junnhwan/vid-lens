@@ -9,6 +9,7 @@ import { ProcessStrip } from '@/components/ProcessStrip'
 import { VideoStill } from '@/components/VideoPoster'
 import { TranscriptionProgressPanel } from '@/components/TranscriptionProgressPanel'
 import { VisualProgressPanel } from '@/components/VisualProgressPanel'
+import { Icon } from '@/components/ui/Icon'
 
 export function VideoCard({ task }: { task: VideoTask }) {
   const state = taskStateView(task)
@@ -28,6 +29,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
           onDuration={setDurationMs}
           fallbackTitle={taskTitle(task)}
         />
+        <span className="vcard-play" aria-hidden="true"><Icon name="play" /></span>
         {!ready && <span className={`vstate chip ${state.chip}`}>{state.text}</span>}
         {durationMs > 0 && <span className="vlen">{formatTime(durationMs)}</span>}
       </div>
@@ -38,7 +40,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
           <span>{fmtSize(task.file_size)}</span>
           <span style={{ marginLeft: 'auto' }}>{fmtRelTime(task.updated_at)}</span>
         </div>
-        <div className="vsub"><span>{task.retrievable ? '可检索问答' : task.has_transcription ? '转写可阅读' : task.visual_status === 'completed' ? '画面已分析' : '等待内容处理'}</span></div>
+        <div className="vcard-capability"><Icon name={task.retrievable ? 'message' : task.has_transcription ? 'file' : 'video'} size="sm" /><span>{task.retrievable ? '可结合原文提问' : task.has_transcription ? '转写可阅读' : task.visual_status === 'completed' ? '画面已分析' : '等待内容处理'}</span></div>
       </div>
     </Link>
       <div className="vcard-status">

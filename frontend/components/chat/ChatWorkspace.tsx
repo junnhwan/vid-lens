@@ -123,6 +123,8 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   useEffect(() => { if (aiPreflightAccepted) setPreflightAccepted(true) }, [aiPreflightAccepted])
   const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [activeEvidence, setActiveEvidence] = useState<{ cite: CiteRef; messageKey: string } | null>(null)
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
   const [panelsInstant, setPanelsInstant] = useState(false)
   const [railOpen, setRailOpen] = useState(() => {
@@ -323,7 +325,10 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
 
   const openEvidence = useCallback((cite: CiteRef, cites: CiteRef[]) => {
     setDrawerCite({ cite, cites })
-  }, [])
+    const index = displayMessages.findIndex(message => message.cites === cites)
+    setActiveEvidence(index < 0 ? null : { cite, messageKey: `${session?.id ?? 'new'}-${displayMessages[index].messageId ?? index}` })
+    setDrawerOpen(true)
+  }, [displayMessages, session?.id])
 
   const jumpToCitation = useCallback((cite: CiteRef) => {
     if (isVideo) {
@@ -405,6 +410,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                     followUpSessionId={msg === lastAssistant && !streaming ? session?.id : undefined}
                     onFollowUp={submit}
                     onOpenEvidence={openEvidence}
+                    activeCitationId={activeEvidence && activeEvidence.messageKey === `${session?.id ?? 'new'}-${msg.messageId ?? i}` ? activeEvidence.cite.id : undefined}
                     canJump={citationJumpable}
                     onJump={jumpToCitation}
                     onStop={stop}
@@ -574,15 +580,17 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
 
       {drawerCite && (
         <EvidenceDrawer
+          open={drawerOpen}
+          onExited={() => setDrawerCite(null)}
           cite={drawerCite.cite}
           cites={drawerCite.cites}
-          onSelect={cite => setDrawerCite(current => current ? { ...current, cite } : null)}
+          onSelect={cite => { setDrawerCite(current => current ? { ...current, cite } : null); setActiveEvidence(current => current ? { ...current, cite } : null) }}
           fallbackTaskId={isVideo ? targetId : undefined}
           fallbackTitle={scopeName}
           canJump={citationJumpable(drawerCite.cite)}
           jumpDisabledHint={isVideo && !playbackUrl ? '当前视频没有可用播放源' : undefined}
-          onJump={cite => { jumpToCitation(cite); setDrawerCite(null) }}
-          onClose={() => setDrawerCite(null)}
+          onJump={cite => { jumpToCitation(cite); setDrawerOpen(false) }}
+          onClose={() => setDrawerOpen(false)}
         />
       )}
 
@@ -620,7 +628,7 @@ function RunHeader({ mode, runId }: { mode: AgentUIMode; runId: string | null })
 }
 
 function AgentMessageView({
-  msg, sessionId, feedbackReadOnly, fallbackTitle, fallbackTaskId, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport,
+  msg, sessionId, feedbackReadOnly, fallbackTitle, fallbackTaskId, showVideoTitle, followUpSessionId, onFollowUp, onOpenEvidence, canJump, onJump, onStop, onImport, activeCitationId,
 }: {
   sessionId?: number
   feedbackReadOnly: boolean
@@ -635,6 +643,7 @@ function AgentMessageView({
   onJump: (cite: CiteRef) => void
   onStop: () => void
   onImport?: () => void
+  activeCitationId?: string
 }) {
   const toast = useToast()
   const cites = msg.cites || []
@@ -674,7 +683,7 @@ function AgentMessageView({
       </div>
       <ThinkingProcess message={msg} />
       <div className="answer">
-        <MarkdownAnswer content={msg.content} onCite={openCite} />
+        <MarkdownAnswer content={msg.content} onCite={openCite} activeCite={activeCitationId ? Number(activeCitationId.slice(1)) : undefined} />
         {waitingServer && (
           <span className="chip chip-mute">服务端执行中…</span>
         )}
@@ -723,7 +732,7 @@ function AgentMessageView({
                 {source.timeRangeStatus === 'coarse' && <span className="chip chip-mute">句子时间未提供</span>}
                 <button className="btn btn-sm cjump" onClick={() => canJump(source) ? onJump(source) : onOpenEvidence(source, cites)}><Icon name="play" size="sm" />{canJump(source) ? '回放' : '查看'}</button>
               </div>
-              <div className="cite-source-quotes">{group.citations.map(cite => <button key={cite.id} type="button" className="cite-card-open" aria-label={`查看证据 ${cite.id}`} onClick={() => onOpenEvidence(cite, cites)}>
+              <div className="cite-source-quotes">{group.citations.map(cite => <button key={cite.id} type="button" className={`cite-card-open${activeCitationId === cite.id ? ' selected' : ''}`} aria-pressed={activeCitationId === cite.id} aria-label={`查看证据 ${cite.id}`} onClick={() => onOpenEvidence(cite, cites)}>
                 <span className="cno">{cite.id}</span><div className="cbody">
                   {cite.supportStatus === 'unsupported' && <span className="chip chip-warn">结论支持不足</span>}
                   {(cite.supportStatus === 'review_invalid' || cite.supportStatus === 'review_unavailable') && <span className="chip chip-mute">语义复核未完成</span>}

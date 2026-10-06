@@ -3,6 +3,7 @@ import { api } from '@/lib/api'
 import type { User } from '@/lib/types'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { PageHeading } from '@/components/product/PageHeading'
+import { Icon } from '@/components/ui/Icon'
 import { AIProfilesSection } from '@/components/settings/AIProfilesSection'
 import { OptionalCapabilitiesSection } from '@/components/settings/OptionalCapabilitiesSection'
 import { MemorySection } from '@/components/settings/MemorySection'
@@ -45,7 +46,7 @@ export default function SettingsPage() {
           <button className={tab === 'prompts' ? 'on' : ''} onClick={() => { if (confirmLeave()) setTab('prompts') }}>提示词</button>
         </div>
         <div>
-          {tab === 'ai' ? <><OptionalCapabilitiesSection readOnly={!user || user.role === 'DEMO'} refreshKey={capabilityRevision} /><AIProfilesSection readOnly={!user || user.role === 'DEMO'} onChanged={refreshCapabilities} /></> : tab === 'prompts' ? <PromptPreferencesSection readOnly={!user || user.role === 'DEMO'} /> : <MemorySection user={user} />}
+          {tab === 'ai' ? <><AIProfilesSection readOnly={!user || user.role === 'DEMO'} onChanged={refreshCapabilities} /><details className="settings-enhancements"><summary><Icon name="settings" size="sm" /><span>增强能力与运行状态<small>检索重排、精确回放定位</small></span><Icon name="chev-r" size="sm" /></summary><div><OptionalCapabilitiesSection readOnly={!user || user.role === 'DEMO'} refreshKey={capabilityRevision} /></div></details></> : tab === 'prompts' ? <PromptPreferencesSection readOnly={!user || user.role === 'DEMO'} /> : <MemorySection user={user} />}
         </div>
       </div>
     </div>

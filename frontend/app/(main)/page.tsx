@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const sessions=sessionQuery.data || []
   const loading=taskQuery.isPending
   const resume=positionQuery.data
+  const firstRun = !loading && !taskQuery.error && total === 0 && !sessionQuery.isPending && !sessionQuery.error && sessions.length === 0 && !positionQuery.isPending && !positionQuery.error && !resume
   const processing=tasks.filter(t => t.status !== 1 && t.status !== 2 && taskCategory(t) !== 'ready')
   const activeCount=tasks.filter(t => t.status === 1 || t.status === 2 || t.summary_job?.status === 1 || t.summary_job?.status === 2).length
   const taskTitleById = useCallback((id: number) => {
@@ -53,14 +54,14 @@ export default function DashboardPage() {
 
   return (
     <div className="page">
-      <ProductHero onImport={openUpload} current={resume?.task} resumeUpdatedAt={resume?.position.updated_at} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={positionQuery.isPending} />
+      <ProductHero onImport={openUpload} firstRun={firstRun} current={resume?.task} resumeUpdatedAt={resume?.position.updated_at} resumeHref={resume ? resume.position.artifact_id && resume.position.block_id ? `/artifacts/${encodeURIComponent(resume.position.artifact_id)}?block=${encodeURIComponent(resume.position.block_id)}` : `/video/${resume.position.task_id}?t=${resume.position.time_ms}` : undefined} resumeLabel={resume ? resume.position.artifact_id ? resume.position.fallback ? '原段落或版本已变化，已回退到可读位置' : '已保存笔记段落' : `视频 ${formatClock(resume.position.time_ms)}` : undefined} loading={positionQuery.isPending} />
       {positionQuery.error && <div className="artifact-notice" role="alert">学习位置读取失败<button className="btn btn-sm" onClick={() => void positionQuery.refetch()}>重试</button></div>}
       {activeCount > 0 && <p className="home-background-status">近期有 {activeCount} 个后台任务正在处理。<Link href="/tasks">查看任务</Link></p>}
-      <div className="product-metrics">
+      {!firstRun && <div className="product-metrics">
         <Link href="/library" className="product-metric"><span>视频资料</span><strong>{loading || !taskQuery.data ? '—' : String(total).padStart(2, '0')}</strong></Link>
         <Link href="/chat" className="product-metric"><span>保存的会话</span><strong>{sessionQuery.isPending || sessionQuery.error ? '—' : String(sessions.length).padStart(2, '0')}</strong></Link>
         <Link href="/library" className="product-metric"><span>近期需处理</span><strong>{loading || !taskQuery.data ? '—' : String(processing.length).padStart(2, '0')}</strong></Link>
-      </div>
+      </div>}
       {processing.length > 0 && (
         <>
           <div className="section-head" style={{ marginTop: 0 }}>
@@ -92,6 +93,7 @@ export default function DashboardPage() {
         <ProductSkeleton kind="rows" count={2} />
       )}
 
+      {!firstRun && <>
       <div className="section-head" style={{ marginTop: processing.length > 0 || loading ? undefined : 0 }}>
         <h2>最近视频</h2>
         <Link className="more" href="/library">视频库 <Icon name="chev-r" size="sm" /></Link>
@@ -139,7 +141,8 @@ export default function DashboardPage() {
           !sessionQuery.isPending && !sessionQuery.error && <EmptyState variant="bare" title="还没有会话" />
         )}
       </div>
-      <RecentProductWork />
+      </>}
+      <RecentProductWork hideEmpty={firstRun} />
 
     </div>
   )

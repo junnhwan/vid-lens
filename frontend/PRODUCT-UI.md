@@ -66,6 +66,12 @@ preview uses tab-scoped session storage only. Preview components are shared with
 production, but the sample data is never a production API response or fallback.
 The production Node server rejects this route with HTTP 404; Vite excludes the preview route from production.
 
+`/dev/motion` uses the production transcript, thinking-process, Markdown citation
+and evidence-drawer components with explicit synthetic local state. It exercises
+manual reading and resume, answer completion, citation switching and drawer exit;
+it does not play media or call a model, task or save API. Vite excludes this route
+from production, just like `/dev/product`.
+
 ## Runtime
 
 `npm run dev` starts Vite with an `/api` proxy. `npm run build` writes `dist/`;

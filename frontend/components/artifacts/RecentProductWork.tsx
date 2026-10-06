@@ -6,11 +6,12 @@ import { useShell } from '@/components/shell/AppShell'
 import { Icon } from '@/components/ui/Icon'
 import { ArtifactCard } from './ArtifactCard'
 
-export function RecentProductWork() {
+export function RecentProductWork({ hideEmpty = false }: { hideEmpty?: boolean }) {
   const { user } = useShell()
   const artifacts = useQuery({ queryKey: ['artifacts', undefined, 1], queryFn: ({ signal }) => artifactApi.list(1, undefined, signal), enabled: !!user, refetchInterval: 10_000 })
   const tasks = useQuery({ queryKey: ['product-tasks', 1], queryFn: ({ signal }) => artifactApi.tasks(1, signal), enabled: !!user, refetchInterval: 10_000 })
   const active = tasks.data?.list.filter(task => task.run && ['pending', 'running'].includes(task.run.status)) ?? []
+  if (hideEmpty && !artifacts.error && !artifacts.data?.list.length && !active.length) return null
   return <>
     {active.length > 0 && <section className="dashboard-generation"><div><Icon name="activity" /><b>学习笔记在后台继续整理</b></div>{active.slice(0, 3).map(task => <Link key={task.id} href={`/tasks?run=${encodeURIComponent(task.run!.id)}`}><span>{task.title}</span><small>{runLabels[task.run!.status]}<Icon name="chev-r" size="sm" /></small></Link>)}</section>}
     <div className="section-head"><h2>最近成果</h2><Link className="more" href="/artifacts">全部成果<Icon name="chev-r" size="sm" /></Link></div>

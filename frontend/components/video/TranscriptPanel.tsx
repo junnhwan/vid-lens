@@ -1,4 +1,4 @@
-import { useEffect,useRef,useState,type ReactNode } from 'react'
+import { useCallback,useEffect,useRef,useState,type ReactNode } from 'react'
 import type { TimelineAtom,VideoTask } from '@/lib/types'
 import { formatTime,formatTimeRange } from '@/components/Citation'
 import { Icon } from '@/components/ui/Icon'
@@ -23,19 +23,43 @@ export function TranscriptPanel({task,transcriptAtoms,transcriptRows,visualAtoms
 }) {
  const [railTip,setRailTip]=useState<{left:number;text:string;timeMs:number}|null>(null)
  const liveRowRef=useRef<HTMLDivElement>(null)
+ const listRef=useRef<HTMLDivElement>(null)
+ const [following, setFollowing] = useState(true)
  const durPct=timelineMs>0?timelineMs:1
  const hasRail=timelineMs>0
-  useEffect(() => {
+  const scrollToCurrent = useCallback((force = false) => {
     const el = liveRowRef.current
     if (!el) return
     const root = el.closest('.rail-pane')
     if (!(root instanceof HTMLElement)) return
     const rootBox = root.getBoundingClientRect()
     const box = el.getBoundingClientRect()
-    if (box.top < rootBox.top + 12 || box.bottom > rootBox.bottom - 12) {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (rootBox.height === 0) return
+    if (force || box.top < rootBox.top + 48 || box.bottom > rootBox.bottom - 12) {
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      // Scroll only this reading pane, never the whole page around the player.
+      const top = root.scrollTop + box.top - rootBox.top - (rootBox.height - box.height) / 2
+      if (root.scrollTo) root.scrollTo({ top, behavior })
+      else root.scrollTop = top
     }
-  }, [liveIndex])
+  }, [])
+  useEffect(() => { if (following) scrollToCurrent() }, [liveIndex, following, scrollToCurrent])
+  useEffect(() => {
+    const root = listRef.current?.closest('.rail-pane')
+    if (!(root instanceof HTMLElement)) return
+    const pause = () => setFollowing(false)
+    const pointer = (event: PointerEvent) => { if (event.target === root) pause() }
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('button,input,textarea,select,a,summary,[contenteditable="true"]')) return
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) pause()
+    }
+    root.addEventListener('wheel', pause, { passive: true })
+    root.addEventListener('touchmove', pause, { passive: true })
+    root.addEventListener('pointerdown', pointer)
+    root.addEventListener('keydown', keyboard)
+    return () => { root.removeEventListener('wheel', pause); root.removeEventListener('touchmove', pause); root.removeEventListener('pointerdown', pointer); root.removeEventListener('keydown', keyboard) }
+  }, [task.id, task.has_transcription, transcriptRows.length])
+  useEffect(() => { setFollowing(true) }, [task.id])
 
 
     if (!task.has_transcription) {
@@ -123,7 +147,13 @@ export function TranscriptPanel({task,transcriptAtoms,transcriptRows,visualAtoms
           </>
         )}
         {transcriptRows.length > 0 && (
-          <div id="transcript" className="transcript-list">
+          <div ref={listRef} id="transcript" className="transcript-list" tabIndex={0} aria-label="视频转写">
+            <div className="transcript-follow-bar">
+              <span><i className={following ? 'following' : ''} />{following ? '跟随播放位置' : '自由阅读中'}</span>
+              <button type="button" className="btn btn-sm btn-ghost" aria-pressed={following} onClick={() => { if (following) setFollowing(false); else { setFollowing(true); scrollToCurrent(true) } }}>
+                <Icon name={following ? 'pause' : 'target'} size="sm" />{following ? '暂停跟随' : '回到当前句'}
+              </button>
+            </div>
             {children}
             {transcriptRows.map((a, i) => (
               <div

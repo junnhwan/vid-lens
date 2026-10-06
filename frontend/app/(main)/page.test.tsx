@@ -54,3 +54,16 @@ test('dashboard names an independent summary job in the action list', async () =
   expect(screen.getByRole('link', { name: '查看摘要进度' })).toBeTruthy()
   client.clear()
 })
+
+test('a new workspace has one starting point while read failures still remain visible', async () => {
+  vi.spyOn(api, 'listTasks').mockResolvedValue({ list: [], total: 0, page: 1, page_size: 50 })
+  vi.spyOn(api, 'listSessions').mockResolvedValue([])
+  vi.spyOn(artifactApi, 'position').mockResolvedValue(null)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><DashboardPage /></QueryClientProvider>)
+  expect(await screen.findByText('你的第一段学习旅程')).toBeTruthy()
+  expect(screen.getAllByRole('button', { name: '导入视频' })).toHaveLength(1)
+  expect(screen.queryByRole('heading', { name: '最近视频' })).toBeNull()
+  expect(screen.queryByText('00')).toBeNull()
+  client.clear()
+})

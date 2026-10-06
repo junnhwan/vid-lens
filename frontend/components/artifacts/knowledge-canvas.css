@@ -15,3 +15,9 @@
 @media(max-width:850px) { .knowledge-toolbar { align-items:flex-start; flex-direction:column; padding:18px; }.knowledge-toolbar-actions { justify-content:flex-start; }.knowledge-ai { flex-wrap:wrap; padding:11px 18px; }.knowledge-ai input { flex-basis:100%; order:2; }.knowledge-main { display:flex; flex-direction:column; }.knowledge-flow { height:480px; }.knowledge-inspector { max-height:none; border-left:0; border-top:1px solid var(--line); }.knowledge-outline { padding:14px 18px; } }
 @media(max-width:430px) { .knowledge-flow { height:420px; }.knowledge-toolbar-actions .btn { flex:1 1 auto; }.knowledge-inspector { padding:18px; }.knowledge-card { width:254px; } }
 @media(prefers-reduced-motion:reduce) { .knowledge-card { transition:none; } }
+.knowledge-flow .react-flow__node,.knowledge-flow .react-flow__edge { transition:opacity var(--motion-feedback) var(--ease); }
+.knowledge-flow .knowledge-muted { opacity:.32; }
+.knowledge-flow .knowledge-related path { opacity:1; stroke-width:2.5; }
+.knowledge-flow .knowledge-card.selected { background:var(--acc-dim); }
+.knowledge-toolbar-actions button[aria-pressed=true] { background:var(--acc-dim); color:var(--acc-strong); border-color:var(--acc-line); }
+@starting-style { .knowledge-flow .react-flow__node { opacity:0; } }

@@ -212,3 +212,35 @@ test('persisted Chat and limited Agent answers expose feedback; streaming and un
   render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
   expect(screen.getAllByTestId('feedback').map(node => node.textContent)).toEqual(['9/101', '9/102'])
 })
+
+test('closing evidence retains it for the exit and then restores focus to its trigger', async () => {
+  conversation.messages = [{ role: 'assistant', content: '回答 [C1]', cites: [{ id: 'C1', chunkIndex: 0, score: 1, content: '来源正文' }] }]
+  const { container } = render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+  const trigger = screen.getByRole('button', { name: 'C1' })
+  trigger.focus()
+  fireEvent.click(trigger)
+  const drawer = screen.getByRole('dialog', { name: '证据详情' })
+  expect(document.activeElement).toBe(drawer)
+  expect(trigger.getAttribute('aria-pressed')).toBe('true')
+  fireEvent.keyDown(window, { key: 'Escape' })
+  expect(container.querySelector('.evidence-drawer-presence')?.getAttribute('data-open')).toBe('false')
+  expect(screen.getByRole('dialog', { name: '证据详情' })).toBe(drawer)
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '证据详情' })).toBeNull())
+  expect(document.activeElement).toBe(trigger)
+})
+
+test('switching citations keeps the reading preference and selected chip across message refreshes', () => {
+  conversation.messages = [{ role: 'assistant', content: '两处依据 [C1] [C2]', cites: [1, 2].map(i => ({ id: `C${i}`, chunkIndex: i, score: 1, content: `第${i}句原文。`, displayContext: `第${i}句原文。${'前后文。'.repeat(200)}` })) }]
+  const { container, rerender } = render(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'C1' }))
+  const drawer = within(screen.getByRole('dialog', { name: '证据详情' }))
+  fireEvent.click(drawer.getByRole('button', { name: '展开前后文' }))
+  fireEvent.click(drawer.getByRole('button', { name: '切换到引用 C2' }))
+  expect(drawer.getByRole('button', { name: '收起前后文' })).toBeTruthy()
+  expect(container.querySelector('.evidence-source-context')?.textContent?.length).toBeGreaterThan(600)
+  expect(screen.getByRole('button', { name: 'C2' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('button', { name: 'C1' }).getAttribute('aria-pressed')).toBe('false')
+  conversation.messages = conversation.messages.map(message => ({ ...message }))
+  rerender(<ChatWorkspace scopeType="video" targetId={42} scopeName="教程" playbackUrl={null} suggestions={[]} />)
+  expect(screen.getByRole('button', { name: 'C2' }).getAttribute('aria-pressed')).toBe('true')
+})

@@ -33,6 +33,7 @@ const SettingsPage = lazy(() => import('@/app/(main)/settings/page'))
 const ProductPreview = import.meta.env.DEV
   ? lazy(() => import('@/dev/ProductPreview').then(module => ({ default: module.ProductPreview })))
   : null
+const MotionPreview = import.meta.env.DEV ? lazy(() => import('@/dev/MotionPreview')) : null
 
 function useRouteSearchParams() {
   return Object.fromEntries(new URLSearchParams(useLocation().search))
@@ -177,6 +178,7 @@ const routes = createRoutesFromElements(
       <Route path="changelog" element={<DocsChangelogPage />} />
     </Route>
     {import.meta.env.DEV && <Route path="dev/product" element={<PreviewRoute />} />}
+    {MotionPreview && <Route path="dev/motion" element={<Suspense fallback={<LoadingBlock label="正在打开交互预览…" />}><MotionPreview /></Suspense>} />}
     <Route path="*" element={<NotFound />} />
   </Route>,
 )

@@ -7,6 +7,7 @@ import { CardSkeleton, EmptyState, ErrorState } from '@/components/ui/AsyncState
 import { useCrumb, useShell } from '@/components/shell/AppShell'
 import { PageHeading } from '@/components/product/PageHeading'
 import { Icon } from '@/components/ui/Icon'
+import { LearningPath } from '@/components/product/LearningPath'
 import Link from '@/lib/router'
 import { fmtRelTime, fmtSize, taskTitle, sourceLabel } from '@/lib/format'
 import { taskNeedsPolling, taskStateView } from '@/lib/taskStatus'
@@ -41,7 +42,7 @@ export default function LibraryPage() {
   }, [query.data, page, pages, setParams])
   function setPage(nextPage: number) { setParams(previous => { const next = new URLSearchParams(previous); next.set('page', String(nextPage)); return next }) }
   return <div className="page page-wide">
-    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' ? '符合当前条件' : ''} · 已有内容可阅读，检索能力按当前 AI 配置确认`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
+    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' ? '符合当前条件' : ''} · 阅读、提问，整理成自己的笔记`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
     <div className="lib-toolbar">
       <input aria-label="搜索视频" className="input" placeholder="搜索全部视频的标题或文件名…" value={draft} onChange={e => setDraft(e.target.value)} />
       <div className="seg">{filters.map(f => <button key={f.key} aria-pressed={filter === f.key} className={filter === f.key ? 'on' : ''} onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('activity', f.key); next.delete('page'); return next })}>{f.label}</button>)}</div>
@@ -50,7 +51,8 @@ export default function LibraryPage() {
     {query.error && <ErrorState message="视频列表加载失败" onRetry={() => void query.refetch()} />}
     {query.isPending && <CardSkeleton count={8} />}
     {!!tasks.length && (view === 'grid' ? <div className="video-grid">{tasks.map(task => <VideoCard key={task.id} task={task} />)}</div> : <div className="library-list">{tasks.map(task => { const state=taskStateView(task); return <Link className="library-row" key={task.id} href={`/video/${task.id}`}><div><strong>{taskTitle(task)}</strong><span>{sourceLabel(task)} · {fmtSize(task.file_size)}</span></div><span className={`chip ${state.chip}`}>{state.text}</span><span className="library-capability">{task.retrievable ? '可检索问答' : task.has_transcription ? '转写可阅读' : '检索未就绪'}</span><span className="library-updated">{fmtRelTime(task.updated_at)}</span><Icon name="chev-r" size="sm" /></Link> })}</div>)}
-    {!query.isPending && !query.error && !tasks.length && <EmptyState icon={keyword || filter !== 'all' ? 'search' : 'video'} title={keyword || filter !== 'all' ? '没有匹配的视频' : '还没有视频'} action={!keyword && filter === 'all' ? <button className="btn btn-primary" onClick={openUpload}>导入视频</button> : undefined} />}
+    {!query.isPending && !query.error && !tasks.length && <EmptyState icon={keyword || filter !== 'all' ? 'search' : 'video'} title={keyword || filter !== 'all' ? '没有匹配的视频' : '还没有视频'} desc={keyword || filter !== 'all' ? '换个关键词或筛选条件试试。' : '点击上方「导入视频」，开始你的第一段学习旅程。'} />}
+    {!query.isPending && !query.error && !tasks.length && !keyword && filter === 'all' && <LearningPath compact />}
     {total > 0 && <nav className="product-pagination" aria-label="视频库分页"><button className="btn btn-sm" disabled={page <= 1 || query.isFetching} onClick={() => setPage(page - 1)}>上一页</button><span>{page} / {pages} · 共 {total} 个</span><button className="btn btn-sm" disabled={page >= pages || query.isFetching} onClick={() => setPage(page + 1)}>下一页</button></nav>}
   </div>
 }

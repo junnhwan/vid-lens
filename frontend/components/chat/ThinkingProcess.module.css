@@ -38,3 +38,8 @@ p.error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 @keyframes process-step-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .live, .running .dot::after, .step { animation: none; } .body { transition: none; transform: none; } }
 @media (max-width: 640px) { .toggle { flex-wrap: wrap; } .summary { flex-basis: 65%; margin-left: 17px; order: 3; } .stepHeading { flex-wrap: wrap; gap: 4px; } }
+.indicator { display:grid; place-items:center; width:16px; height:16px; border-radius:50%; background:var(--acc-dim); color:var(--acc-strong); font-size:10px; transition:background var(--motion-feedback) var(--ease),color var(--motion-feedback) var(--ease); }
+.live::after { content:''; width:5px; height:5px; border-radius:50%; background:var(--acc-strong); animation:breathe 1.6s ease-in-out infinite; }
+.process[data-state=completed] .indicator { background:var(--ok-dim); color:var(--ok); }
+.process[data-state=completed] .summary { color:var(--tx-2); }
+@media(prefers-reduced-motion:reduce) { .live::after { animation:none; } }

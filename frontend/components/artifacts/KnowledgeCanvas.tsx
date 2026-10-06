@@ -5,6 +5,7 @@ import { artifactApi, artifactError } from '@/lib/artifacts/api'
 import { addRelation, removeRelation } from '@/lib/artifacts/edit'
 import { canvasDescendants, canvasKind, computeCanvasLayout, defaultCanvasNode, emptyCanvasLayout, fillCanvasPositions, visibleCanvasIds } from '@/lib/artifacts/canvas'
 import type { CanvasLayout, CanvasLayoutView, StudyBlock, StudyBody, StudyRelation } from '@/lib/artifacts/schema'
+import { useMediaQuery } from '@/components/ui/useMediaQuery'
 import './knowledge-canvas.css'
 
 type CardData = { block: StudyBlock; kind: string; direction: CanvasLayout['direction']; collapsed: boolean; pinned: boolean; select: () => void }
@@ -31,6 +32,8 @@ export function KnowledgeCanvas(props: { artifactId: string; versionId: string; 
 
 function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selectedBlock, onSelect, onBodyChange, onAgentEdit, onEvidence }: Parameters<typeof KnowledgeCanvas>[0]) {
   const flow = useReactFlow<CardNode, Edge>()
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const [focusEnabled, setFocusEnabled] = useState(false)
   const [view, setView] = useState<CanvasLayoutView | null>(null)
   const [nodes, setNodes] = useState<CardNode[]>([])
   const [error, setError] = useState('')
@@ -75,21 +78,32 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   const layout = view?.layout ?? emptyCanvasLayout()
   const visible = useMemo(() => visibleCanvasIds(body, layout), [body, layout])
   const shownBlocks = useMemo(() => body.blocks.filter(block => visible.has(block.block_id)), [body, visible])
+  const focusedIds = useMemo(() => {
+    if (!focusEnabled || !selectedBlock) return null
+    const ids = canvasDescendants(body, selectedBlock)
+    let parent = body.blocks.find(block => block.block_id === selectedBlock)?.parent_id
+    while (parent && !ids.has(parent)) { ids.add(parent); parent = body.blocks.find(block => block.block_id === parent)?.parent_id }
+    for (const relation of body.relations ?? []) {
+      if (relation.source_block_id === selectedBlock) ids.add(relation.target_block_id)
+      if (relation.target_block_id === selectedBlock) ids.add(relation.source_block_id)
+    }
+    return ids
+  }, [body, selectedBlock, focusEnabled])
   useEffect(() => {
     if (!view) return
     setNodes(previous => shownBlocks.map((block, index) => {
       const saved = layout.nodes[block.block_id] ?? defaultCanvasNode(index, layout.direction)
       const transient = previous.find(node => node.id === block.block_id)
       const kind = saved.style === 'auto' ? canvasKind(block.type, block.content) : saved.style
-      return { id: block.block_id, type: 'knowledge', position: transient?.dragging ? transient.position : saved.position, width: saved.width, height: saved.height, draggable: !readOnly, selected: block.block_id === selectedBlock, data: { block, kind, direction: layout.direction, collapsed: saved.collapsed, pinned: saved.pinned, select: () => { setSelectedRelation(null); onSelect(block.block_id) } } }
+      return { id: block.block_id, type: 'knowledge', className: focusedIds && !focusedIds.has(block.block_id) ? 'knowledge-muted' : '', position: transient?.dragging ? transient.position : saved.position, width: saved.width, height: saved.height, draggable: !readOnly, selected: block.block_id === selectedBlock, data: { block, kind, direction: layout.direction, collapsed: saved.collapsed, pinned: saved.pinned, select: () => { setSelectedRelation(null); setFocusEnabled(true); onSelect(block.block_id) } } }
     }))
-  }, [view, body, shownBlocks, layout, readOnly, selectedBlock])
+  }, [view, body, shownBlocks, layout, readOnly, selectedBlock, focusedIds, onSelect])
 
   const edges = useMemo<Edge[]>(() => {
     const tree = body.blocks.filter(block => block.parent_id && visible.has(block.block_id) && visible.has(block.parent_id)).map(block => ({ id: `tree-${block.block_id}`, source: block.parent_id!, target: block.block_id, sourceHandle: 'out', targetHandle: 'in', type: 'smoothstep', className: 'knowledge-tree-edge', selectable: false }))
     const semantic = (body.relations ?? []).filter(rel => visible.has(rel.source_block_id) && visible.has(rel.target_block_id)).map(rel => ({ id: rel.id, source: rel.source_block_id, target: rel.target_block_id, sourceHandle: 'out', targetHandle: 'in', type: 'smoothstep', label: relationNames[rel.type], className: `knowledge-relation-edge ${rel.type}`, animated: false, markerEnd: rel.type === 'depends_on' ? { type: MarkerType.ArrowClosed } : undefined }))
-    return [...tree, ...semantic]
-  }, [body, visible])
+    return [...tree, ...semantic].map(edge => ({ ...edge, className: `${edge.className}${focusedIds ? focusedIds.has(edge.source) && focusedIds.has(edge.target) ? ' knowledge-related' : ' knowledge-muted' : ''}` }))
+  }, [body, visible, focusedIds])
 
   const persist = useCallback((next: CanvasLayoutView, recordHistory = true) => {
     if (readOnly || saveBlocked.current) return
@@ -156,7 +170,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
       if (token !== layoutGeneration.current || versionRef.current !== current.content_version_id || viewRef.current?.revision !== current.revision || viewRef.current?.layout !== current.layout || bodyRef.current !== content) return
       if (result.collisions.length) { setNotice(`${result.collisions.length} 张卡片无法避开固定卡片；未应用本次排版`); return }
       persist({ ...current, layout: result.layout })
-      requestAnimationFrame(() => void flow.fitView({ padding: .18, duration: 300 }))
+      requestAnimationFrame(() => void flow.fitView({ padding: .18, duration: reduceMotion ? 0 : 220 }))
     } catch { setError('排版失败。可以继续用文字大纲浏览，或重试排版。') }
     finally { if (token === layoutGeneration.current) setBusy(false) }
   }
@@ -193,11 +207,11 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
   return <div className="knowledge-canvas-shell">
     <div className="knowledge-toolbar">
       <div><span className="knowledge-eyebrow">KNOWLEDGE CANVAS</span><h2>可编辑知识画布</h2><p>正文与图共用块；位置、折叠和隐藏单独保存。</p></div>
-      <div className="knowledge-toolbar-actions">
+      <div className="knowledge-toolbar-actions"><button className="btn btn-sm" disabled={!selectedBlock} aria-pressed={focusEnabled} onClick={() => setFocusEnabled(value => !value)}>{focusEnabled ? '显示全部关系' : '突出关联'}</button>
         <button className="btn btn-sm" disabled={busy || !view || readOnly} onClick={() => void arrange(undefined, 'RIGHT')}>横向排版</button>
         <button className="btn btn-sm" disabled={busy || !view || readOnly} onClick={() => void arrange(undefined, 'DOWN')}>纵向排版</button>
         <button className="btn btn-sm" disabled={busy || !selected || readOnly} onClick={() => selected && void arrange(canvasDescendants(body, selected.block_id))}>排版选中分支</button>
-        <button className="btn btn-sm" disabled={!view} onClick={() => void flow.fitView({ padding: .2, duration: 250 })}>适应画布</button>
+        <button className="btn btn-sm" disabled={!view} onClick={() => void flow.fitView({ padding: .2, duration: reduceMotion ? 0 : 220 })}>适应画布</button>
         <button className="btn btn-sm" disabled={readOnly || !view || !undoStack.current.length && view.revision < 2} onClick={() => void undoLayout()}>撤销布局</button>
         <button className="btn btn-sm" disabled={readOnly || !redoStack.current.length} onClick={redoLayout}>重做布局</button>
         {onAgentEdit && !readOnly && <button className="btn btn-sm btn-primary" onClick={() => onAgentEdit(null)}>让 Agent 修改图内容</button>}
@@ -208,7 +222,7 @@ function CanvasInner({ artifactId, versionId, headVersion, body, readOnly, selec
     {notice && <div className="knowledge-status" role="status">{notice}</div>}
     <div className="knowledge-main">
       <div className="knowledge-flow" aria-label="知识画布">
-        {view ? <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeClick={(_, node) => { setSelectedRelation(null); onSelect(node.id) }} onNodeDragStop={(_, node) => updateNode(node.id, { position: node.position, pinned: true })} onEdgeClick={(_, edge) => { if (!edge.id.startsWith('tree-')) setSelectedRelation(edge.id) }} onConnect={onConnect} onMoveEnd={(_, viewport) => { if (!viewportReady.current) { viewportReady.current = true; if (viewRef.current?.revision === 0 && bodyRef.current.blocks.length <= 30) return } if (readOnly || !viewRef.current) return; if (viewportTimer.current) clearTimeout(viewportTimer.current); viewportTimer.current = setTimeout(() => { const current = viewRef.current; if (current && JSON.stringify(current.layout.viewport) !== JSON.stringify(viewport)) persist({ ...current, layout: { ...current.layout, viewport } }) }, 450) }} nodesConnectable={!readOnly} elementsSelectable minZoom={.1} maxZoom={3} defaultViewport={layout.viewport} deleteKeyCode={null} colorMode="system" fitView={view.revision === 0 && body.blocks.length <= 30} proOptions={{ hideAttribution: false }}>
+        {view ? <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeClick={(_, node) => { setSelectedRelation(null); setFocusEnabled(true); onSelect(node.id) }} onNodeDragStop={(_, node) => updateNode(node.id, { position: node.position, pinned: true })} onEdgeClick={(_, edge) => { if (!edge.id.startsWith('tree-')) setSelectedRelation(edge.id) }} onConnect={onConnect} onMoveEnd={(_, viewport) => { if (!viewportReady.current) { viewportReady.current = true; if (viewRef.current?.revision === 0 && bodyRef.current.blocks.length <= 30) return } if (readOnly || !viewRef.current) return; if (viewportTimer.current) clearTimeout(viewportTimer.current); viewportTimer.current = setTimeout(() => { const current = viewRef.current; if (current && JSON.stringify(current.layout.viewport) !== JSON.stringify(viewport)) persist({ ...current, layout: { ...current.layout, viewport } }) }, 450) }} nodesConnectable={!readOnly} elementsSelectable minZoom={.1} maxZoom={3} defaultViewport={layout.viewport} deleteKeyCode={null} colorMode="system" fitView={view.revision === 0 && body.blocks.length <= 30} proOptions={{ hideAttribution: false }}>
           <Background gap={24} size={1} /><Controls showInteractive={false} />
         </ReactFlow> : <div className="knowledge-loading" role="status">正在读取画布布局…</div>}
       </div>

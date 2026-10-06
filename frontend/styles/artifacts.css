@@ -79,8 +79,8 @@
 .map-error { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; text-align:center; background:var(--paper); color:var(--paper-ink); }
 .map-error .ic { color:var(--paper-accent); }.map-error b { font-size:14px; }.map-error p { max-width:290px; color:var(--paper-sub); font-size:11px; line-height:1.8; }
 .map-error .btn { color:var(--paper-ink); background:var(--paper-tint); border-color:var(--paper-line); }
-.evidence-media-empty.loading { position:relative; overflow:hidden; }.evidence-media-empty.loading::after { content:''; position:absolute; top:0; left:-35%; width:35%; height:100%; background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--evidence-ink) 12%,transparent),transparent); animation:evidence-sweep 1.5s ease-in-out infinite; }
-@keyframes evidence-sweep { to { left:100%; } }
+.evidence-media-empty.loading { position:relative; overflow:hidden; }.evidence-media-empty.loading::after { content:''; position:absolute; top:0; left:-35%; width:35%; height:100%; background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--evidence-ink) 12%,transparent),transparent); animation:evidence-sweep 1.5s linear infinite; }
+@keyframes evidence-sweep { to { transform:translateX(386%); } }
 .evidence-media-empty .btn { color:var(--evidence-ink); border-color:var(--evidence-line); background:transparent; }
 @media(prefers-reduced-motion:reduce) { .evidence-media-empty.loading::after { animation:none; } }
 .study-structure-top { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:22px 0; font:11px/1.7 var(--font-ui); color:var(--paper-sub); }
@@ -111,3 +111,10 @@
 .study-edit-block { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; margin:6px 0 10px; min-height:28px; border:1px solid var(--paper-line); border-radius:6px; font-size:12px; color:var(--paper-sub); }
 .study-edit-block:hover { background:var(--paper-tint); color:var(--paper-ink); }
 .study-block-actions button { min-height:28px; }
+/* Emphasize the selected branch without moving the reader's graph. */
+.study-map .markmap-node,.study-map .markmap-link { transition:opacity var(--motion-feedback) var(--ease); }
+.study-map .markmap-node.map-muted,.study-map .markmap-link.map-muted { opacity:.3; }
+.study-map .markmap-node.map-selected button { background:var(--paper-tint); color:var(--paper-accent); outline:1px solid var(--paper-accent); outline-offset:4px; border-radius:3px; }
+.study-map .markmap-link.map-related { stroke-width:2.5px; }
+.map-outline button[aria-pressed=true] { color:var(--paper-accent); }
+@starting-style { .study-map .markmap-node { opacity:0; } }

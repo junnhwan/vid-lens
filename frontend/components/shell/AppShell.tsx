@@ -86,7 +86,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <CrumbSetter.Provider value={{ setCrumb: setCrumbStable }}>
         <ShellFrame pathname={pathname} crumb={crumb}
           user={{ name: user?.nickname || user?.username || '…', detail: user?.role === 'DEMO' ? '演示账号 · 只读' : '个人工作区' }}
-          onImport={openUpload} onLogout={logout} products>
+          onImport={pathname === '/' || pathname === '/library' ? undefined : openUpload} onLogout={logout} products>
           <ArtifactQueryProvider key={user?.id ?? "anonymous"}>
             {children}
             {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onUploaded={() => setUploadRevision(n => n + 1)} />}
