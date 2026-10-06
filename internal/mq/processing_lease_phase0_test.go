@@ -294,7 +294,7 @@ func TestLostLeaseAfterTitleCallDoesNotOverwriteNewTitle(t *testing.T) {
 	ctx := withProcessingLeaseOwner(context.Background(), &processingLeaseOwner{repos: repos, taskID: task.ID, jobType: model.TaskJobTypeAnalyze, token: "old-worker", now: func() time.Time { return time.Unix(0, clock.Load()) }})
 	consumer := &Consumer{
 		repo: repos, aiFactory: ai.NewFactory(),
-		profiles: staticProfileResolver{profile: &ai.Profile{LLMProvider: "openai_compatible", LLMBaseURL: server.URL, LLMModel: "test-model"}},
+		profiles: staticProfileResolver{profile: &ai.Profile{LLMProvider: "openai_compatible", LLMBaseURL: server.URL, LLMAPIKey: "fixture-key", LLMModel: "test-model"}},
 	}
 
 	consumer.generateTitle(ctx, task, "transcript")

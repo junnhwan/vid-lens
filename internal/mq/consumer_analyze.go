@@ -132,7 +132,7 @@ func (c *Consumer) summarizeTask(ctx context.Context, task *model.VideoTask) err
 	}
 
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "ai summary started")
-	taskAI, err := c.strategyForTask(task)
+	taskAI, err := c.strategyForTask(task, "summary")
 	if err != nil {
 		return err
 	}
@@ -244,6 +244,9 @@ func (c *Consumer) generateTitle(ctx context.Context, task *model.VideoTask, tra
 	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
 	if err != nil || profile == nil {
 		observability.Log(ctx, slog.Default(), slog.LevelWarn, "video title skipped: ai profile unavailable", slog.String("error", observability.SafeError(err)))
+		return nil
+	}
+	if !ai.ModelConfigured(*profile, "llm") {
 		return nil
 	}
 	chatClient, err := c.aiFactory.NewChatClient(*profile)

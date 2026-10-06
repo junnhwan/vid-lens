@@ -5,13 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, expect, test, vi } from 'vitest'
 import { useVideoAIPreflight } from './VideoAIPreflight'
 
-const api = vi.hoisted(() => ({ listProfiles: vi.fn(), hostedAI: vi.fn() }))
-vi.mock('@/lib/api', () => ({ api }))
+const api = vi.hoisted(() => ({ optionalCapabilities: vi.fn() }))
+vi.mock('@/lib/api', () => ({ api, getToken: () => 'current-user' }))
 
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 function Harness({ onRun }: { onRun: () => void }) {
-  const preflight = useVideoAIPreflight()
+  const preflight = useVideoAIPreflight('transcribe')
   return <><button onClick={() => preflight.request('转写视频', onRun)}>开始</button>{preflight.dialog}</>
 }
 
@@ -21,38 +21,24 @@ function show(onRun = vi.fn()) {
   return { ...render(<Harness onRun={onRun} />, { wrapper }), onRun, client }
 }
 
-test('missing visual model blocks the video action and offers the AI settings in a new tab', async () => {
-  api.listProfiles.mockResolvedValue([{
-    id: 9, source: 'user', is_default: true, name: 'Partial AI',
-    llm_model: 'chat-model', llm_base_url: 'https://chat.example/v1',
-    asr_model: 'asr-model', asr_base_url: 'https://asr.example/v1',
-    embedding_model: 'embed-model', embedding_endpoint: 'https://embed.example/v1/embeddings', embedding_dim: 1024,
-    vision_model: '', vision_base_url: '',
-  }])
-  const view = show()
-  fireEvent.click(screen.getByText('开始'))
-  expect(await screen.findByText('先确认 AI 能力，再开始处理')).toBeTruthy()
-  expect(await screen.findByText('chat-model')).toBeTruthy()
-  expect(screen.getByText('视觉理解')).toBeTruthy()
-  expect(screen.getByText('待配置')).toBeTruthy()
-  expect((screen.getByRole('link', { name: '配置 AI' }) as HTMLAnchorElement).target).toBe('_blank')
-  expect(view.onRun).not.toHaveBeenCalled()
-  view.client.clear()
-})
-
-test('a complete default profile enables the explicit continue action', async () => {
-  api.listProfiles.mockResolvedValue([{
-    id: 8, source: 'user', is_default: true, name: 'Ready AI',
-    llm_model: 'chat-model', llm_base_url: 'https://chat.example/v1',
-    asr_model: 'asr-model', asr_base_url: 'https://asr.example/v1',
-    embedding_model: 'embed-model', embedding_endpoint: 'https://embed.example/v1/embeddings', embedding_dim: 1024,
-    vision_model: 'vision-model', vision_base_url: 'https://vision.example/v1',
-  }])
+test('transcription proceeds without Vision and only displays its required capability', async () => {
+  api.optionalCapabilities.mockResolvedValue({ capabilities: [{ key: 'asr', model: 'speech', effective_enabled: true }], actions: { transcribe: { allowed: true, required_capabilities: ['asr'] } } })
   const view = show()
   fireEvent.click(screen.getByText('开始'))
   const proceed = await screen.findByRole('button', { name: '继续转写视频' })
   await waitFor(() => expect((proceed as HTMLButtonElement).disabled).toBe(false))
+  expect(screen.queryByText('视觉理解')).toBeNull()
   fireEvent.click(proceed)
   expect(view.onRun).toHaveBeenCalledOnce()
+  view.client.clear()
+})
+
+test('a missing required ASR blocks continuing even when LLM is configured', async () => {
+  api.optionalCapabilities.mockResolvedValue({ capabilities: [{ key: 'llm', model: 'chat', effective_enabled: true }, { key: 'asr', effective_enabled: false }], actions: { transcribe: { allowed: false, reason_code: 'missing_configuration', required_capabilities: ['asr'] } } })
+  const view = show()
+  fireEvent.click(screen.getByText('开始'))
+  await screen.findByText(/请补齐本次操作所需/)
+  expect(screen.queryByRole('button', { name: '继续转写视频' })).toBeNull()
+  expect(view.onRun).not.toHaveBeenCalled()
   view.client.clear()
 })

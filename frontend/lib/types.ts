@@ -24,12 +24,34 @@ export interface AuthResult {
 }
 
 export interface OptionalCapabilities {
+  capabilities?: CapabilityState[]
+  actions?: Record<string, CapabilityAction>
   rerank_enabled: boolean
   rerank_available: boolean
   rerank_mode: 'none' | 'deterministic' | 'model'
   rerank_model?: string
   rerank_reason?: string
   alignment_configured: boolean
+}
+
+export type CapabilityActionKey = 'upload' | 'transcribe' | 'align' | 'summary' | 'study' | 'revise' | 'ocr' | 'caption' | 'index' | 'chat' | 'agent'
+export interface CapabilityState {
+  key: string
+  activation: string
+  configured: boolean
+  deployment_enabled: boolean
+  user_enabled: boolean | null
+  available: boolean
+  effective_enabled: boolean
+  health: 'unchecked' | 'checked_ok' | 'failed'
+  reason_code?: string
+  model?: string
+}
+export interface CapabilityAction {
+  action: string
+  allowed: boolean
+  required_capabilities: string[]
+  reason_code?: string
 }
 
 // ============ AI Profile（BYOK）============
@@ -92,6 +114,7 @@ export interface AIProfile {
 
 // 创建/更新请求。api_key 明文（创建必填，更新可空保留旧值）；masked 字段不回传。
 export interface AIProfileRequest {
+  clear_groups?: ProfilePurpose[]
   agent_budget?: AgentBudgetOverride | null
   name: string
   llm_provider: string

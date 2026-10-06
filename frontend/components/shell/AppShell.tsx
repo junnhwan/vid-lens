@@ -50,7 +50,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadRevision, setUploadRevision] = useState(0)
-  const uploadPreflight = useVideoAIPreflight()
+  const uploadPreflight = useVideoAIPreflight('upload')
+  const requestUploadAI = uploadPreflight.request
   const { registerLeaveGuard, confirmLeave, clearLeaveGuard } = useLeaveGuard()
 
   useEffect(() => {
@@ -66,8 +67,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [hasToken, router])
 
   const openUpload = useCallback(() => {
-    uploadPreflight.request('导入视频', () => setUploadOpen(true))
-  }, [uploadPreflight.request])
+    requestUploadAI('导入视频', () => setUploadOpen(true))
+  }, [requestUploadAI])
   const setCrumbStable = useCallback((items: CrumbItem[]) => setCrumb(items), [])
 
   const logout = useCallback(() => {

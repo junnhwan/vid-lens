@@ -13,8 +13,8 @@ import { Modal } from '@/components/ui/Modal'
 
 export function ArtifactCreateDialog({ source, existing, onClose }: { source?: { id: number; title: string }; existing?: { id: string; title: string; head_version: number }; onClose: () => void }) {
   const router = useRouter()
-  const ai = useAIAvailability()
-  const videoPreflight = useVideoAIPreflight()
+  const ai = useAIAvailability(false, 'study')
+  const videoPreflight = useVideoAIPreflight('study')
   const client = useQueryClient()
   const [selected, setSelected] = useState(source?.id ?? 0)
   const [goal, setGoal] = useState('梳理核心概念、关键例子与容易混淆的地方，整理成带来源的中文学习笔记。')

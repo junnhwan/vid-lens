@@ -665,7 +665,7 @@ func (c *Consumer) markTranscriptionChunkFailed(ctx context.Context, taskID int6
 	})
 }
 
-func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
+func (c *Consumer) strategyForTask(task *model.VideoTask, actions ...string) (ai.Strategy, error) {
 	if c.profiles == nil || c.aiFactory == nil {
 		if c.ai == nil {
 			return nil, fmt.Errorf("请先配置 AI 服务")
@@ -682,6 +682,13 @@ func (c *Consumer) strategyForTask(task *model.VideoTask) (ai.Strategy, error) {
 	}
 	if profile == nil {
 		return nil, fmt.Errorf("请先配置 AI 服务")
+	}
+	action := "transcribe"
+	if len(actions) > 0 {
+		action = actions[0]
+	}
+	if err := ai.RequireAction(*profile, action); err != nil {
+		return nil, err
 	}
 	strategy, err := c.aiFactory.NewAnalysisStrategy(*profile)
 	if err != nil {

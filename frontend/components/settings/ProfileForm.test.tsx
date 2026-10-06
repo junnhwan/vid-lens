@@ -24,3 +24,23 @@ test('reused connections follow dialogue edits while capability models remain in
   fireEvent.click(screen.getByRole('button',{name:'创建配置'}))
   await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({asr_base_url:'https://next.example.com/v1',asr_api_key:'specimen-key',asr_model:'speech',embedding_endpoint:'https://next.example.com/v1/embeddings',embedding_api_key:'specimen-key',embedding_model:'vectors'})))
 })
+
+
+test('LLM-only form saves absent groups as empty and incomplete new groups are rejected', async () => {
+  vi.spyOn(api, 'budgetOptions').mockRejectedValue(new Error('unused'))
+  const save = vi.spyOn(api, 'createProfile').mockResolvedValue({} as never)
+  render(<ProfileForm onClose={vi.fn()} onSaved={vi.fn()} />)
+  fireEvent.change(screen.getByPlaceholderText('例如:硅基流动'), { target: { value: 'Only dialogue' } })
+  const dialogue = within(screen.getByRole('region', { name: '对话模型' }))
+  fireEvent.change(dialogue.getByLabelText('服务 Base URL'), { target: { value: 'https://example.com/v1' } })
+  fireEvent.change(dialogue.getByLabelText('API Key'), { target: { value: 'test-only-key' } })
+  fireEvent.change(dialogue.getByRole('combobox', { name: '对话模型模型 ID' }), { target: { value: 'dialogue' } })
+  const speech = within(screen.getByRole('region', { name: '语音识别' }))
+  fireEvent.change(speech.getByRole('combobox', { name: '语音识别模型 ID' }), { target: { value: 'partial-speech' } })
+  fireEvent.click(screen.getByRole('button', { name: '创建配置' }))
+  expect(await screen.findByText('语音识别配置不完整，请填写整组或全部留空')).toBeTruthy()
+  expect(save).not.toHaveBeenCalled()
+  fireEvent.click(speech.getByRole('button', { name: '清除整组' }))
+  fireEvent.click(screen.getByRole('button', { name: '创建配置' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ llm_model: 'dialogue', asr_provider: '', embedding_provider: '', embedding_dim: 0, clear_groups: [] })))
+})

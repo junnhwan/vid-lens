@@ -11,6 +11,47 @@ import (
 	"vid-lens/internal/repository"
 )
 
+func TestPartialProfilesPersistReloadAndPreserveOrClearGroups(t *testing.T) {
+	svc, _, _ := newAIProfileServiceForTest(t)
+	llmOnly := AIProfileRequest{Name: "LLM only", LLMProvider: "openai", LLMBaseURL: "https://example.com/v1", LLMAPIKey: "test-key", LLMModel: "chat"}
+	created, err := svc.Create(7, llmOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ASRProvider != "" || created.ASRAPIKeyMasked != "" || created.EmbeddingDim != 0 {
+		t.Fatalf("empty group fabricated: %+v", created)
+	}
+	profile, err := svc.GetDefaultAIProfile(7)
+	if err != nil || profile.ASRAPIKey != "" || profile.LLMAPIKey != "test-key" {
+		t.Fatalf("reload=%+v err=%v", profile, err)
+	}
+	// Omitted groups survive updates, while a newly supplied group needs a key.
+	update := AIProfileRequest{Name: "add speech", ASRProvider: "openai", ASRBaseURL: "https://example.com/v1", ASRModel: "speech", IsDefault: true}
+	if _, err := svc.Update(7, created.ID, update); err == nil {
+		t.Fatal("new group accepted without key")
+	}
+	update.ASRAPIKey = "speech-key"
+	if _, err := svc.Update(7, created.ID, update); err != nil {
+		t.Fatal(err)
+	}
+	profile, err = svc.GetDefaultAIProfile(7)
+	if err != nil || profile.LLMModel != "chat" || profile.ASRAPIKey != "speech-key" {
+		t.Fatalf("preserve=%+v err=%v", profile, err)
+	}
+	if _, err := svc.Update(7, created.ID, AIProfileRequest{Name: "speech only", ClearGroups: []string{"llm"}, IsDefault: true}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err = svc.GetDefaultAIProfile(7)
+	if err != nil || profile.LLMAPIKey != "" || profile.LLMProvider != "" || profile.ASRModel != "speech" {
+		t.Fatalf("clear=%+v err=%v", profile, err)
+	}
+	for _, clear := range [][]string{{"asr"}, {"bogus"}, {"asr", "asr"}} {
+		if _, err := svc.Update(7, created.ID, AIProfileRequest{Name: "invalid", ClearGroups: clear}); err == nil {
+			t.Fatalf("invalid clear accepted %v", clear)
+		}
+	}
+}
+
 type recordingAIProfileTester struct {
 	profile *DecryptedAIProfile
 	calls   int

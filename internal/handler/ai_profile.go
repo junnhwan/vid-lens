@@ -279,19 +279,10 @@ func safeProbeError(err error) string {
 }
 
 func validateAIProfileRequestBinding(req service.AIProfileRequest) error {
-	if req.Name == "" {
+	if strings.TrimSpace(req.Name) == "" {
 		return errors.New("配置名称不能为空")
 	}
-	if req.LLMProvider == "" || req.LLMBaseURL == "" || req.LLMModel == "" {
-		return errors.New("LLM 配置不完整")
-	}
-	if req.ASRProvider == "" || req.ASRBaseURL == "" || req.ASRModel == "" {
-		return errors.New("ASR 配置不完整")
-	}
-	if req.EmbeddingProvider == "" || req.EmbeddingEndpoint == "" || req.EmbeddingModel == "" || req.EmbeddingDim <= 0 {
-		return errors.New("embedding 配置不完整")
-	}
-	return nil
+	return nil // Model groups are validated centrally by AIProfileService.
 }
 
 func (h *AIProfileHandler) BudgetOptions(c *gin.Context) {

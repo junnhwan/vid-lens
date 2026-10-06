@@ -6,7 +6,7 @@ import VideoWorkbenchPage from './page'
 
 const mock = vi.hoisted(() => ({
   getTask: vi.fn(), getTimeline: vi.fn(), getRagIndex: vi.fn(), playbackSrc: vi.fn(), downloadMedia: vi.fn(),
-  transcribe: vi.fn(), alignTranscript: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), aiReady: false,
+  transcribe: vi.fn(), alignTranscript: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), preflight: vi.fn(), aiReady: false,
   onPlayhead: undefined as ((ms: number, playing: boolean) => void) | undefined,
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
 }))
@@ -15,7 +15,7 @@ vi.mock('@/lib/router', () => ({ default: ({ href, children }: { href: string; c
 vi.mock('@/components/shell/AppShell', () => ({ useShell: () => ({ user: { role: 'USER' } }), useCrumb: () => {} }))
 vi.mock('@/components/Toast', () => ({ useToast: () => mock.toast }))
 vi.mock('@/components/settings/useAIAvailability', () => ({ useAIAvailability: () => ({ ready: mock.aiReady, reason: 'AI 暂不可用' }) }))
-vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (_label: string, run: () => void) => run(), dialog: null }) }))
+vi.mock('@/components/settings/VideoAIPreflight', () => ({ useVideoAIPreflight: () => ({ request: (label: string, run: () => void, action: string) => { mock.preflight(label, action); run() }, dialog: null }) }))
 vi.mock('@/lib/artifacts/useStudyPosition', () => ({ useStudyPosition: () => ({ error: '', record: vi.fn(), flush: vi.fn() }) }))
 vi.mock('@/lib/artifacts/api', () => ({ artifactApi: { list: vi.fn().mockResolvedValue({ list: [], total: 0 }) }, artifactError: () => 'error' }))
 vi.mock('@tanstack/react-query', () => ({ useQuery: () => ({ data: { list: [], total: 0 }, error: null, refetch: vi.fn() }) }))
@@ -249,4 +249,18 @@ test('native sentence takes live highlight precedence over an overlapping coarse
   expect(container.querySelector('.t-row.live')?.textContent).toContain('这部分文字只有原片段时间。')
   act(() => mock.onPlayhead?.(30000, false))
   expect(container.querySelector('.t-row.live')).toBeNull()
+})
+
+
+test('OCR build preflight checks the local OCR action instead of chat models', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [], visual_build_available: true })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'not_indexed', indexed: false, chunks: 0 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: /画面分析 关闭/ }))
+  fireEvent.click(screen.getByRole('radio', { name: /文字识别 OCR/ }))
+  fireEvent.click(screen.getByRole('button', { name: '保存并生成画面' }))
+  expect(mock.preflight).toHaveBeenCalledWith('生成画面证据', 'ocr')
 })

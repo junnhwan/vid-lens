@@ -38,22 +38,23 @@ func NewAIProfileService(repo *repository.AIProfileRepository, codec *secret.Cod
 }
 
 type AIProfileRequest struct {
+	ClearGroups       []string               `json:"clear_groups"`
 	AgentBudget       model.AgentBudgetField `json:"agent_budget"`
 	Name              string                 `json:"name" binding:"required"`
-	LLMProvider       string                 `json:"llm_provider" binding:"required"`
-	LLMBaseURL        string                 `json:"llm_base_url" binding:"required"`
+	LLMProvider       string                 `json:"llm_provider"`
+	LLMBaseURL        string                 `json:"llm_base_url"`
 	LLMAPIKey         string                 `json:"llm_api_key"`
-	LLMModel          string                 `json:"llm_model" binding:"required"`
+	LLMModel          string                 `json:"llm_model"`
 	LLMContextTokens  int                    `json:"llm_context_tokens"`
-	ASRProvider       string                 `json:"asr_provider" binding:"required"`
-	ASRBaseURL        string                 `json:"asr_base_url" binding:"required"`
+	ASRProvider       string                 `json:"asr_provider"`
+	ASRBaseURL        string                 `json:"asr_base_url"`
 	ASRAPIKey         string                 `json:"asr_api_key"`
-	ASRModel          string                 `json:"asr_model" binding:"required"`
-	EmbeddingProvider string                 `json:"embedding_provider" binding:"required"`
-	EmbeddingEndpoint string                 `json:"embedding_endpoint" binding:"required"`
+	ASRModel          string                 `json:"asr_model"`
+	EmbeddingProvider string                 `json:"embedding_provider"`
+	EmbeddingEndpoint string                 `json:"embedding_endpoint"`
 	EmbeddingAPIKey   string                 `json:"embedding_api_key"`
-	EmbeddingModel    string                 `json:"embedding_model" binding:"required"`
-	EmbeddingDim      int                    `json:"embedding_dim" binding:"required"`
+	EmbeddingModel    string                 `json:"embedding_model"`
+	EmbeddingDim      int                    `json:"embedding_dim"`
 	// Vision is optional multimodal caption config, separate from text LLM.
 	VisionProvider string `json:"vision_provider"`
 	VisionBaseURL  string `json:"vision_base_url"`
@@ -206,9 +207,6 @@ func (s *AIProfileService) Update(userID, id int64, req AIProfileRequest) (*AIPr
 	if err := s.requireUserOwnedProfile(userID, id); err != nil {
 		return nil, err
 	}
-	if err := validateAIProfileRequest(req, false); err != nil {
-		return nil, err
-	}
 	existing, err := s.repo.FindByIDForUser(userID, id)
 	if err != nil {
 		return nil, err
@@ -244,16 +242,16 @@ func (s *AIProfileService) Test(ctx context.Context, req AIProfileRequest) error
 	}
 	profile := &DecryptedAIProfile{
 		Name:              strings.TrimSpace(req.Name),
-		LLMProvider:       normalizeAIProtocol(req.LLMProvider),
+		LLMProvider:       normalizeOptionalAIProtocol(req.LLMProvider),
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKey:         strings.TrimSpace(req.LLMAPIKey),
 		LLMModel:          strings.TrimSpace(req.LLMModel),
 		LLMContextTokens:  req.LLMContextTokens,
-		ASRProvider:       normalizeAIProtocol(req.ASRProvider),
+		ASRProvider:       normalizeOptionalAIProtocol(req.ASRProvider),
 		ASRBaseURL:        strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKey:         strings.TrimSpace(req.ASRAPIKey),
 		ASRModel:          strings.TrimSpace(req.ASRModel),
-		EmbeddingProvider: normalizeAIProtocol(req.EmbeddingProvider),
+		EmbeddingProvider: normalizeOptionalAIProtocol(req.EmbeddingProvider),
 		EmbeddingEndpoint: strings.TrimSpace(req.EmbeddingEndpoint),
 		EmbeddingAPIKey:   strings.TrimSpace(req.EmbeddingAPIKey),
 		EmbeddingModel:    strings.TrimSpace(req.EmbeddingModel),
@@ -598,6 +596,14 @@ func providerFromDecrypted(profile *DecryptedAIProfile) *ai.Profile {
 }
 
 func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest, existing *model.UserAIProfile) (*model.UserAIProfile, error) {
+	var err error
+	req, err = mergeProfileGroups(req, existing)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAIProfileRequest(req, existing == nil); err != nil {
+		return nil, err
+	}
 	if req.AgentBudget.Present {
 		if err := s.budgetConfig.ValidateOverride(req.AgentBudget.Value); err != nil {
 			return nil, err
@@ -618,19 +624,19 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 			budgetJSON = &value
 		}
 	}
-	llmCipher, err := s.encryptOrKeep(strings.TrimSpace(req.LLMAPIKey), existing, "llm")
+	llmCipher, err := s.encryptProfileGroupKey(strings.TrimSpace(req.LLMAPIKey), existing, "llm", strings.TrimSpace(req.LLMModel) != "")
 	if err != nil {
 		return nil, err
 	}
-	asrCipher, err := s.encryptOrKeep(strings.TrimSpace(req.ASRAPIKey), existing, "asr")
+	asrCipher, err := s.encryptProfileGroupKey(strings.TrimSpace(req.ASRAPIKey), existing, "asr", strings.TrimSpace(req.ASRModel) != "")
 	if err != nil {
 		return nil, err
 	}
-	embeddingCipher, err := s.encryptOrKeep(strings.TrimSpace(req.EmbeddingAPIKey), existing, "embedding")
+	embeddingCipher, err := s.encryptProfileGroupKey(strings.TrimSpace(req.EmbeddingAPIKey), existing, "embedding", strings.TrimSpace(req.EmbeddingModel) != "")
 	if err != nil {
 		return nil, err
 	}
-	visionCipher, err := s.encryptOrKeepOptional(strings.TrimSpace(req.VisionAPIKey), existing, "vision")
+	visionCipher, err := s.encryptProfileGroupKey(strings.TrimSpace(req.VisionAPIKey), existing, "vision", strings.TrimSpace(req.VisionModel) != "")
 	if err != nil {
 		return nil, err
 	}
@@ -639,16 +645,16 @@ func (s *AIProfileService) profileFromRequest(userID int64, req AIProfileRequest
 		AgentBudgetJSON:           budgetJSON,
 		UserID:                    userID,
 		Name:                      strings.TrimSpace(req.Name),
-		LLMProvider:               normalizeAIProtocol(req.LLMProvider),
+		LLMProvider:               normalizeOptionalAIProtocol(req.LLMProvider),
 		LLMBaseURL:                strings.TrimRight(strings.TrimSpace(req.LLMBaseURL), "/"),
 		LLMAPIKeyCiphertext:       llmCipher,
 		LLMModel:                  strings.TrimSpace(req.LLMModel),
 		LLMContextTokens:          req.LLMContextTokens,
-		ASRProvider:               normalizeAIProtocol(req.ASRProvider),
+		ASRProvider:               normalizeOptionalAIProtocol(req.ASRProvider),
 		ASRBaseURL:                strings.TrimRight(strings.TrimSpace(req.ASRBaseURL), "/"),
 		ASRAPIKeyCiphertext:       asrCipher,
 		ASRModel:                  strings.TrimSpace(req.ASRModel),
-		EmbeddingProvider:         normalizeAIProtocol(req.EmbeddingProvider),
+		EmbeddingProvider:         normalizeOptionalAIProtocol(req.EmbeddingProvider),
 		EmbeddingEndpoint:         strings.TrimSpace(req.EmbeddingEndpoint),
 		EmbeddingAPIKeyCiphertext: embeddingCipher,
 		EmbeddingModel:            strings.TrimSpace(req.EmbeddingModel),
@@ -710,16 +716,16 @@ func (s *AIProfileService) responseFromProfile(profile *model.UserAIProfile) *AI
 		Name:                  profile.Name,
 		LLMProvider:           profile.LLMProvider,
 		LLMBaseURL:            profile.LLMBaseURL,
-		LLMAPIKeyMasked:       s.maskCiphertext(profile.LLMAPIKeyCiphertext),
+		LLMAPIKeyMasked:       s.maskOptionalCiphertext(profile.LLMAPIKeyCiphertext),
 		LLMModel:              profile.LLMModel,
 		LLMContextTokens:      profile.LLMContextTokens,
 		ASRProvider:           profile.ASRProvider,
 		ASRBaseURL:            profile.ASRBaseURL,
-		ASRAPIKeyMasked:       s.maskCiphertext(profile.ASRAPIKeyCiphertext),
+		ASRAPIKeyMasked:       s.maskOptionalCiphertext(profile.ASRAPIKeyCiphertext),
 		ASRModel:              profile.ASRModel,
 		EmbeddingProvider:     profile.EmbeddingProvider,
 		EmbeddingEndpoint:     profile.EmbeddingEndpoint,
-		EmbeddingAPIKeyMasked: s.maskCiphertext(profile.EmbeddingAPIKeyCiphertext),
+		EmbeddingAPIKeyMasked: s.maskOptionalCiphertext(profile.EmbeddingAPIKeyCiphertext),
 		EmbeddingModel:        profile.EmbeddingModel,
 		EmbeddingDim:          profile.EmbeddingDim,
 		VisionProvider:        profile.VisionProvider,
@@ -751,15 +757,15 @@ func (s *AIProfileService) decryptProfile(profile *model.UserAIProfile) (*Decryp
 	if profile.Source == "hosted" {
 		return s.decryptHosted(profile)
 	}
-	llmKey, err := s.codec.Decrypt(profile.LLMAPIKeyCiphertext)
+	llmKey, err := s.decryptOptionalKey(profile.LLMAPIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}
-	asrKey, err := s.codec.Decrypt(profile.ASRAPIKeyCiphertext)
+	asrKey, err := s.decryptOptionalKey(profile.ASRAPIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}
-	embeddingKey, err := s.codec.Decrypt(profile.EmbeddingAPIKeyCiphertext)
+	embeddingKey, err := s.decryptOptionalKey(profile.EmbeddingAPIKeyCiphertext)
 	if err != nil {
 		return nil, err
 	}
@@ -800,49 +806,31 @@ func validateAIProfileRequest(req AIProfileRequest, requireKeys bool) error {
 	if strings.TrimSpace(req.Name) == "" {
 		return fmt.Errorf("配置名称不能为空")
 	}
-	if strings.TrimSpace(req.LLMProvider) == "" || strings.TrimSpace(req.LLMBaseURL) == "" || strings.TrimSpace(req.LLMModel) == "" {
-		return fmt.Errorf("LLM 配置不完整")
-	}
 	if req.LLMContextTokens != 0 && (req.LLMContextTokens < 8192 || req.LLMContextTokens > 1048576) {
 		return fmt.Errorf("模型上下文窗口须为 8192–1048576 token，或留空使用默认值")
 	}
-	if strings.TrimSpace(req.ASRProvider) == "" || strings.TrimSpace(req.ASRBaseURL) == "" || strings.TrimSpace(req.ASRModel) == "" {
-		return fmt.Errorf("ASR 配置不完整")
-	}
-	if strings.TrimSpace(req.EmbeddingProvider) == "" || strings.TrimSpace(req.EmbeddingEndpoint) == "" || strings.TrimSpace(req.EmbeddingModel) == "" {
-		return fmt.Errorf("embedding 配置不完整")
-	}
-	if req.EmbeddingDim <= 0 {
-		return fmt.Errorf("embedding 维度必须大于 0")
-	}
-	for _, item := range []struct {
-		label, value string
-		full         bool
-	}{
-		{"LLM", req.LLMBaseURL, false}, {"ASR", req.ASRBaseURL, false}, {"Embedding", req.EmbeddingEndpoint, true},
-	} {
-		if err := validateProfileURL(item.value, item.full); err != nil {
-			return fmt.Errorf("%s 地址: %w", item.label, err)
+	groups := profileRequestGroups(&req)
+	count := 0
+	for _, group := range groups {
+		if !group.present() {
+			continue
+		}
+		count++
+		if strings.TrimSpace(*group.provider) == "" || strings.TrimSpace(*group.url) == "" || strings.TrimSpace(*group.model) == "" {
+			return fmt.Errorf("%s 配置不完整", group.name)
+		}
+		if group.name == "embedding" && req.EmbeddingDim <= 0 {
+			return fmt.Errorf("embedding 维度必须大于 0")
+		}
+		if requireKeys && strings.TrimSpace(*group.key) == "" {
+			return fmt.Errorf("%s API Key 不能为空", group.name)
+		}
+		if err := validateProfileURL(*group.url, group.name == "embedding"); err != nil {
+			return fmt.Errorf("%s 地址: %w", group.name, err)
 		}
 	}
-	if requireKeys && (strings.TrimSpace(req.LLMAPIKey) == "" || strings.TrimSpace(req.ASRAPIKey) == "" || strings.TrimSpace(req.EmbeddingAPIKey) == "") {
-		return fmt.Errorf("API Key 不能为空")
-	}
-	// Vision is optional; if any field is set, provider/url/model must all be present.
-	vp := strings.TrimSpace(req.VisionProvider)
-	vb := strings.TrimSpace(req.VisionBaseURL)
-	vm := strings.TrimSpace(req.VisionModel)
-	vk := strings.TrimSpace(req.VisionAPIKey)
-	if vp != "" || vb != "" || vm != "" || vk != "" {
-		if vp == "" || vb == "" || vm == "" {
-			return fmt.Errorf("Vision 配置不完整（需 provider、base_url、model；也可全部留空表示不用多模态）")
-		}
-		if requireKeys && vk == "" {
-			return fmt.Errorf("Vision API Key 不能为空")
-		}
-		if err := validateProfileURL(vb, false); err != nil {
-			return fmt.Errorf("Vision 地址: %w", err)
-		}
+	if count == 0 {
+		return fmt.Errorf("请至少配置一个完整模型组")
 	}
 	return nil
 }

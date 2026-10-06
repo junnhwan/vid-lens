@@ -1,78 +1,24 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, getToken } from '@/lib/api'
+import type { CapabilityActionKey } from '@/lib/types'
 
-export type AICapabilityKey = 'llm' | 'asr' | 'embedding' | 'vision'
-
-export interface AICapabilityStatus {
-  key: AICapabilityKey
-  label: string
-  model: string
-  ready: boolean
+const labels: Record<string, string> = { llm: '对话模型', asr: '语音识别', embedding: '向量模型', vision: '视觉理解', ocr: '本地 OCR', alignment: '句子对齐', rerank: '检索重排' }
+const reasons: Record<string, string> = {
+  missing_configuration: '请补齐本次操作所需的默认 AI 配置', hosted_paused: 'Free API 暂停，可在设置中选择自己的 API 配置',
+  deployment_disabled: '服务端尚未开启本次操作所需能力', dependency_missing: '本次操作的本地依赖尚未安装', user_disabled: '此能力已关闭',
 }
 
-const capabilityLabels: Record<AICapabilityKey, string> = {
-  llm: '对话模型',
-  asr: '语音识别',
-  embedding: '向量模型',
-  vision: '视觉理解',
-}
-
-const emptyCapabilities: AICapabilityStatus[] = (Object.keys(capabilityLabels) as AICapabilityKey[]).map(key => ({
-  key,
-  label: capabilityLabels[key],
-  model: '',
-  ready: false,
-}))
-
-export function useAIAvailability(readOnly = false) {
-  const query = useQuery({
-    queryKey: ['ai-action-availability'],
-    queryFn: async () => {
-      const profiles = await api.listProfiles()
-      const profile = profiles.find(candidate => candidate.is_default)
-      if (!profile) return { ready: false, name: '', hostedPaused: false, capabilities: emptyCapabilities }
-
-      // Free API and demo rows mask the endpoint fields, so the model name is the only
-      // client-side evidence; the server already rejects saving an incomplete group.
-      const capabilities: AICapabilityStatus[] = [
-        { key: 'llm', label: capabilityLabels.llm, model: profile.llm_model || '', ready: !!profile.llm_model?.trim() },
-        { key: 'asr', label: capabilityLabels.asr, model: profile.asr_model || '', ready: !!profile.asr_model?.trim() },
-        { key: 'embedding', label: capabilityLabels.embedding, model: profile.embedding_model || '', ready: !!profile.embedding_model?.trim() && profile.embedding_dim > 0 },
-        { key: 'vision', label: capabilityLabels.vision, model: profile.vision_model || '', ready: !!profile.vision_model?.trim() },
-      ]
-      const missing = capabilities.some(capability => !capability.ready)
-      if (profile.source !== 'hosted') {
-        return { ready: !missing, name: profile.name || '', hostedPaused: false, capabilities }
-      }
-      const hosted = await api.hostedAI()
-      return { ready: !missing && hosted.enabled, name: profile.name || '', hostedPaused: !hosted.enabled, capabilities }
-    },
-    enabled: !readOnly,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
+// This projection checks model/tool admission; submission still checks resources.
+export function useAIAvailability(readOnly = false, action: CapabilityActionKey = 'chat') {
+  const query = useQuery({ queryKey: ['ai-action-availability', getToken()], queryFn: () => api.optionalCapabilities(), enabled: !readOnly && action !== 'upload', staleTime: 0, refetchOnWindowFocus: true })
+  const admission = query.data?.actions?.[action]
+  const required = admission?.required_capabilities || []
+  const capabilities = required.map(key => {
+    const state = query.data?.capabilities?.find(candidate => candidate.key === key)
+    return { key, label: labels[key] || key, model: state?.model || '', ready: !!state?.effective_enabled }
   })
-
-  const capabilities = query.data?.capabilities || emptyCapabilities
   const missing = capabilities.filter(capability => !capability.ready).map(capability => capability.label)
-  const reason = query.error
-    ? 'AI 配置状态读取失败，请重试'
-    : query.isPending && !readOnly
-      ? '正在检查默认 AI 配置'
-      : query.data?.hostedPaused
-        ? 'Free API 暂停，可在设置中选择自己的 API 配置'
-        : !readOnly && !query.data?.ready
-          ? query.data?.name
-            ? `默认配置「${query.data.name}」还未配齐：${missing.join('、') || '请启用 AI 服务'}`
-            : `请先配置默认 AI 服务：${missing.join('、')}`
-          : ''
-
-  return {
-    ...query,
-    ready: readOnly || (!query.error && !!query.data?.ready),
-    reason,
-    capabilities,
-    missing,
-    profileName: query.data?.name || '',
-    hostedPaused: !!query.data?.hostedPaused,
-  }
+  const ready = readOnly || action === 'upload' || (!query.error && !!admission?.allowed)
+  const reason = ready ? '' : query.error ? '能力状态读取失败，请重试' : query.isPending ? '正在检查本次操作所需能力' : `${reasons[admission?.reason_code || ''] || '能力状态尚未确认，请刷新后重试'}${missing.length ? `：${missing.join('、')}` : ''}`
+  return { ...query, ready, reason, capabilities, missing, profileName: '', hostedPaused: admission?.reason_code === 'hosted_paused' }
 }

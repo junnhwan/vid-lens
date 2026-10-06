@@ -17,7 +17,7 @@ function errorText(error: unknown): string {
 }
 
 export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void }) {
-  const videoPreflight = useVideoAIPreflight()
+  const videoPreflight = useVideoAIPreflight('revise')
   const [preflightAccepted, setPreflightAccepted] = useState(false)
   const [summary, setSummary] = useState<EffectiveSummaryView | null>(null)
   const [rules, setRules] = useState<VideoTermRuleSet | null>(null)

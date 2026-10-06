@@ -88,7 +88,7 @@ export function ArtifactAgentPanel({ artifact, initialScope, initialRun = null, 
   onOperationChanged?: (operation: ArtifactEditOperation) => void
   onOpenEvidence: (id: string) => void
 }) {
-  const videoPreflight = useVideoAIPreflight()
+  const videoPreflight = useVideoAIPreflight('revise')
   const [preflightAccepted, setPreflightAccepted] = useState(false)
   const scope = initialRun?.selected_block_ids[0] ?? initialScope
   const scopedBlock = scope ? artifact.version?.body.blocks.find(block => block.block_id === scope) : undefined

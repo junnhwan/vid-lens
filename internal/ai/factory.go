@@ -40,17 +40,26 @@ func NewFactory() *Factory                                 { return &Factory{} }
 func NewFactoryWithAdmission(admission Admission) *Factory { return &Factory{admission: admission} }
 
 func (f *Factory) NewASRStrategy(profile Profile) (Strategy, error) {
+	if err := RequireAction(profile, "transcribe"); err != nil {
+		return nil, err
+	}
 	provider := profileProvider(profile.ASRProvider)
 	asr := &transcriptionStrategy{client: NewOpenAIAudioTranscriptionClient(profile.ASRBaseURL, profile.ASRAPIKey, profile.ASRModel)}
 	return AdmitStrategy(asr, f.admission, provider, profile.ASRModel, profile.ASRModel), nil
 }
 
 func (f *Factory) NewChatClient(profile Profile) (ChatClient, error) {
+	if err := RequireAction(profile, "summary"); err != nil {
+		return nil, err
+	}
 	provider := profileProvider(profile.LLMProvider)
 	return AdmitChat(NewOpenAIChatClient(profile.LLMBaseURL, profile.LLMAPIKey, profile.LLMModel), f.admission, provider, profile.LLMModel), nil
 }
 
 func (f *Factory) NewEmbeddingClient(profile Profile) (EmbeddingClient, error) {
+	if err := RequireAction(profile, "index"); err != nil {
+		return nil, err
+	}
 	provider := profileProvider(profile.EmbeddingProvider)
 	return AdmitEmbedding(NewOpenAIEmbeddingClient(profile.EmbeddingEndpoint, profile.EmbeddingAPIKey, profile.EmbeddingModel), f.admission, provider, profile.EmbeddingModel), nil
 }
@@ -95,13 +104,20 @@ func VisionConfigured(profile Profile) bool {
 }
 
 func (f *Factory) NewAnalysisStrategy(profile Profile) (Strategy, error) {
-	asr, err := f.NewASRStrategy(profile)
-	if err != nil {
-		return nil, err
+	var asr Strategy
+	var chat ChatClient
+	var err error
+	if ModelConfigured(profile, "asr") {
+		asr, err = f.NewASRStrategy(profile)
+		if err != nil {
+			return nil, err
+		}
 	}
-	chat, err := f.NewChatClient(profile)
-	if err != nil {
-		return nil, err
+	if ModelConfigured(profile, "llm") {
+		chat, err = f.NewChatClient(profile)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &CompositeStrategy{asr: asr, chat: chat}, nil
 }
@@ -112,18 +128,30 @@ type CompositeStrategy struct {
 }
 
 func (s *CompositeStrategy) Transcribe(ctx context.Context, audioPath string) (string, error) {
+	if s.asr == nil {
+		return "", fmt.Errorf("asr 配置不完整")
+	}
 	return s.asr.Transcribe(ctx, audioPath)
 }
 
 func (s *CompositeStrategy) TranscribeDetailed(ctx context.Context, audioPath string) (TranscriptionResult, error) {
+	if s.asr == nil {
+		return TranscriptionResult{}, fmt.Errorf("asr 配置不完整")
+	}
 	return TranscribeDetailed(ctx, s.asr, audioPath)
 }
 
 func (s *CompositeStrategy) TranscribeChunks(ctx context.Context, audioPaths []string) (string, error) {
+	if s.asr == nil {
+		return "", fmt.Errorf("asr 配置不完整")
+	}
 	return s.asr.TranscribeChunks(ctx, audioPaths)
 }
 
 func (s *CompositeStrategy) Summarize(ctx context.Context, text string) (string, error) {
+	if s.chat == nil {
+		return "", fmt.Errorf("llm 配置不完整")
+	}
 	return summarizeWithChat(ctx, s.chat, text)
 }
 
@@ -136,27 +164,34 @@ func NewProfileTester(factory *Factory) *ProfileTester {
 }
 
 func (t *ProfileTester) TestProfile(ctx context.Context, profile Profile) error {
-	chatClient, err := t.factory.NewChatClient(profile)
-	if err != nil {
-		return err
+	if !ModelConfigured(profile, "llm") && !ModelConfigured(profile, "embedding") {
+		return fmt.Errorf("此检查只支持已配置的对话或向量模型；语音与视觉请使用对应能力检查")
 	}
-	if _, err := chatClient.Chat(ctx, []ChatMessage{
-		{Role: "system", Content: "Return a short health check response."},
-		{Role: "user", Content: "ping"},
-	}); err != nil {
-		return err
+	if ModelConfigured(profile, "llm") {
+		chatClient, err := t.factory.NewChatClient(profile)
+		if err != nil {
+			return err
+		}
+		if _, err := chatClient.Chat(ctx, []ChatMessage{
+			{Role: "system", Content: "Return a short health check response."},
+			{Role: "user", Content: "ping"},
+		}); err != nil {
+			return err
+		}
 	}
 
-	embeddingClient, err := t.factory.NewEmbeddingClient(profile)
-	if err != nil {
-		return err
-	}
-	vector, err := embeddingClient.Embed(ctx, "VidLens embedding health check")
-	if err != nil {
-		return err
-	}
-	if profile.EmbeddingDim > 0 && len(vector) != profile.EmbeddingDim {
-		return fmt.Errorf("embedding 维度不匹配: 返回 %d，配置 %d", len(vector), profile.EmbeddingDim)
+	if ModelConfigured(profile, "embedding") {
+		embeddingClient, err := t.factory.NewEmbeddingClient(profile)
+		if err != nil {
+			return err
+		}
+		vector, err := embeddingClient.Embed(ctx, "VidLens embedding health check")
+		if err != nil {
+			return err
+		}
+		if profile.EmbeddingDim > 0 && len(vector) != profile.EmbeddingDim {
+			return fmt.Errorf("embedding 维度不匹配: 返回 %d，配置 %d", len(vector), profile.EmbeddingDim)
+		}
 	}
 	return nil
 }

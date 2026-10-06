@@ -893,7 +893,7 @@ func TestIndexAfterTranscriptionRecordsRAGIndexFailureWhenEnqueueFails(t *testin
 		t.Fatalf("create task: %v", err)
 	}
 
-	profile := &ai.Profile{EmbeddingModel: "text-embedding-3-small", EmbeddingDim: 1536}
+	profile := &ai.Profile{EmbeddingProvider: "openai", EmbeddingEndpoint: "https://example.com/v1/embeddings", EmbeddingAPIKey: "fixture-key", EmbeddingDim: 1536, EmbeddingModel: "text-embedding-3-small"}
 	consumer := &Consumer{
 		repo:     repos,
 		profiles: staticProfileResolver{profile: profile},

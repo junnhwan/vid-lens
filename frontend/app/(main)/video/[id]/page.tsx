@@ -201,8 +201,11 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const toast = useToast()
   const { user } = useShell()
   const readOnly = user?.role === 'DEMO'
-  const ai = useAIAvailability(readOnly)
+  const ai = useAIAvailability(readOnly, 'summary')
   const videoPreflight = useVideoAIPreflight()
+  const asrAI = useAIAvailability(readOnly, 'transcribe')
+  const alignAI = useAIAvailability(readOnly, 'align')
+  const indexAI = useAIAvailability(readOnly, 'index')
   const playerRef = useRef<VideoPlayerHandle>(null)
   const study = useStudyPosition()
   const lastPositionWrite = useRef(0)
@@ -246,6 +249,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const [moreOpen, setMoreOpen] = useState(false)
   const [visualSettingsOpen, setVisualSettingsOpen] = useState(false)
   const [visualDraft, setVisualDraft] = useState<VisualMode>('off')
+  const visualAI = useAIAvailability(readOnly, visualDraft === 'ocr' ? 'ocr' : 'caption')
+  const ocrAI = useAIAvailability(readOnly, 'ocr')
   const [dialogInstant, setDialogInstant] = useState(false)
   const [railTip, setRailTip] = useState<{ left: number; text: string; timeMs: number } | null>(null)
   const liveRowRef = useRef<HTMLDivElement>(null)
@@ -410,7 +415,8 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   const performAction = async (kind: Exclude<ActionKind, 'download'>, force = false) => {
     if (!task || busy) return
-    if (!ai.ready) { toast.info(ai.reason); return }
+    const admission = kind === 'transcribe' ? asrAI : kind === 'align' ? alignAI : kind === 'index' ? indexAI : ai
+    if (!admission.ready) { toast.info(admission.reason); return }
     setBusy(kind)
     try {
       if (kind === 'transcribe') {
@@ -447,7 +453,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       analyze: '生成视频摘要',
       index: '建立视频检索索引',
     }
-    videoPreflight.request(labels[kind], () => { void performAction(kind, force) })
+    videoPreflight.request(labels[kind], () => { void performAction(kind, force) }, kind === 'analyze' ? 'summary' : kind)
   }
 
   const downloadMedia = async () => {
@@ -501,7 +507,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
 
   const saveVisualMode = async (build = false) => {
     if (!task || visualSettingBusy) return
-    if (readOnly || (build && (!ai.ready || !visualCapability.ready))) { toast.info(readOnly ? '演示模式不可处理视频' : !ai.ready ? ai.reason : visualCapability.reason); return }
+    if (readOnly || (build && (!visualAI.ready || visualDraft === 'both' && !ocrAI.ready || !visualCapability.ready))) { toast.info(readOnly ? '演示模式不可处理视频' : !visualAI.ready ? visualAI.reason : visualDraft === 'both' && !ocrAI.ready ? ocrAI.reason : visualCapability.reason); return }
     setVisualSettingBusy(true)
     try {
       const fresh = await api.setVisualMode(task.id, visualDraft)
@@ -844,7 +850,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               )}
             </div>
             <div className="workbench-secondary">
-              <button type="button" onClick={event => { setDialogInstant(event.detail === 0); videoPreflight.request('生成视频推荐问题', () => setQuestionsOpen(true)) }}><Icon name="bulb" size="sm" />推荐问题</button>
+              <button type="button" onClick={event => { setDialogInstant(event.detail === 0); videoPreflight.request('生成视频推荐问题', () => setQuestionsOpen(true), 'summary') }}><Icon name="bulb" size="sm" />推荐问题</button>
               <button type="button" onClick={openVisualSettings}><Icon name="photo" size="sm" />画面分析<span className="workbench-mode">{visualModeLabel(taskVisualMode(task))}</span></button>
               <button type="button" className="workbench-more" onClick={event => { setDialogInstant(event.detail === 0); setMoreOpen(true) }}><Icon name="settings" size="sm" />更多操作<Icon name="chev-r" size="sm" /></button>
             </div>
@@ -945,7 +951,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
           footer={(
             <>
               <button className="btn" disabled={readOnly || processing || visualProcessing || visualSettingBusy} onClick={() => void saveVisualMode()}>{visualSettingBusy && !visualBuildBusy ? '保存中…' : '保存设置'}</button>
-              {visualDraft !== 'off' && <button className="btn btn-primary" disabled={readOnly || !visualCapability.ready || visualSettingBusy} onClick={() => videoPreflight.request('生成画面证据', () => { void saveVisualMode(true) })}><Icon name="photo" size="sm" />{visualSettingBusy ? '提交中…' : frames.length ? '保存并重建画面' : '保存并生成画面'}</button>}
+              {visualDraft !== 'off' && <button className="btn btn-primary" disabled={readOnly || !visualCapability.ready || visualSettingBusy} onClick={() => videoPreflight.request('生成画面证据', () => { void saveVisualMode(true) }, visualDraft === 'ocr' ? 'ocr' : 'caption')}><Icon name="photo" size="sm" />{visualSettingBusy ? '提交中…' : frames.length ? '保存并重建画面' : '保存并生成画面'}</button>}
             </>
           )}
         >

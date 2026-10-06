@@ -24,13 +24,15 @@ class UploadXHR {
 
 beforeEach(() => {
   vi.resetModules()
+  const storage = new Map<string, string>()
+  vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key), clear: () => storage.clear() })
   UploadXHR.requests = []
   vi.stubGlobal('XMLHttpRequest', UploadXHR)
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ code: 200, data: {} }) }))
   vi.stubEnv('VITE_UPLOAD_API_BASE', 'https://upload.example.com/api/v1/')
   localStorage.setItem('vidlens-token', 'test-session')
 })
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear() })
+afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
 test('media downloads use the same-origin API prefix even with a separate upload host', async () => {
   const { api } = await import('./api')

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"vid-lens/internal/ai"
 
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
@@ -95,6 +96,10 @@ func (c *Consumer) handleRAGIndex(ctx context.Context, delivery amqp.Delivery) e
 // finish the task instead of handing completion to a job that will never exist.
 func (c *Consumer) indexAfterTranscription(ctx context.Context, task *model.VideoTask) (bool, error) {
 	if c.ragProducer == nil {
+		return false, nil
+	}
+	if !c.automaticIndexAvailable(task) {
+		observability.Log(ctx, slog.Default(), slog.LevelInfo, "automatic index skipped: embedding unavailable")
 		return false, nil
 	}
 	if err := requireProcessingLease(ctx); err != nil {
@@ -188,4 +193,14 @@ func (c *Consumer) recordRAGIndexEnqueueFailure(task *model.VideoTask, err error
 		StartedAt:            &now,
 		FinishedAt:           &now,
 	})
+}
+
+// Local work is complete without a retrieval projection when no Embedding group
+// is selected. Explicit index submissions still validate and report errors.
+func (c *Consumer) automaticIndexAvailable(task *model.VideoTask) bool {
+	if c.profiles == nil {
+		return true
+	}
+	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
+	return err == nil && profile != nil && ai.ModelConfigured(*profile, "embedding")
 }

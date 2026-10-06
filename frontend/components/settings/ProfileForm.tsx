@@ -46,7 +46,8 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const [embedding, setEmbedding] = useState<GroupDraft>(fromProfile(imported?.embedding_provider || profile?.embedding_provider || '', imported?.embedding_endpoint || profile?.embedding_endpoint || '', imported?.embedding_model || profile?.embedding_model || ''))
   const [embeddingDim, setEmbeddingDim] = useState<string>(imported?.embedding_dim ? String(imported.embedding_dim) : profile?.embedding_dim ? String(profile.embedding_dim) : '')
   const [vision, setVision] = useState<GroupDraft>(fromProfile(imported?.vision_provider || profile?.vision_provider || '', imported?.vision_base_url || profile?.vision_base_url || '', imported?.vision_model || profile?.vision_model || ''))
-  const [visionEnabled, setVisionEnabled] = useState(true)
+  const [visionEnabled, setVisionEnabled] = useState(!!(imported?.vision_model || profile?.vision_model))
+  const [clearGroups, setClearGroups] = useState<ProfilePurpose[]>([])
   const [isDefault, setIsDefault] = useState(imported?.is_default || profile?.is_default || false)
   const [reuseASR, setReuseASR] = useState(false)
   const [reuseEmbedding, setReuseEmbedding] = useState(false)
@@ -75,7 +76,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
     ['max_input_tokens', '累计输入 Token'], ['max_output_tokens', '累计输出 Token'], ['max_visual_frames', '最多检查帧数'],
   ] as const
 
-  const currentSnapshot = useMemo(() => JSON.stringify({ name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft }), [name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft])
+  const currentSnapshot = useMemo(() => JSON.stringify({ clearGroups, name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft }), [clearGroups, name, llm, llmContextTokens, asr, embedding, embeddingDim, vision, visionEnabled, isDefault, customBudget, budgetDraft])
   const initialSnapshot = useRef(currentSnapshot)
   const saved = useRef(false)
   const dirty = !!imported || currentSnapshot !== initialSnapshot.current
@@ -119,18 +120,21 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
   const buildRequest = (): AIProfileRequest | null => {
     if ((reuseASR || reuseEmbedding) && !reusableConnection) { setErr('复用连接需要有效的对话地址与实际 API Key；也可切换为单独配置'); return null }
     if (!name.trim()) { setErr('请填写配置名称'); return null }
-    if (!llm.provider.trim() || !llm.base_url.trim() || !llm.model.trim()) { setErr('LLM 配置不完整'); return null }
     const contextTokens = llmContextTokens.trim() === '' ? 0 : Number(llmContextTokens)
     if (!Number.isSafeInteger(contextTokens) || (contextTokens !== 0 && (contextTokens < 8192 || contextTokens > 1048576))) { setErr('模型上下文窗口需为 8192–1048576 token，或留空'); return null }
-    if (!asr.provider.trim() || !asr.base_url.trim() || !asr.model.trim()) { setErr('ASR 配置不完整'); return null }
-    if (!embedding.provider.trim() || !embedding.base_url.trim() || !embedding.model.trim()) { setErr('embedding 配置不完整'); return null }
-    for (const [label, url, endpoint, preset] of [['对话', llm.base_url, false, llm.preset], ['语音识别', asr.base_url, false, asr.preset], ['向量', embedding.base_url, true, embedding.preset], ...(visionEnabled ? [['视觉', vision.base_url, false, vision.preset]] : [])] as [string, string, boolean, string][]) {
-      const problem = validateModelURL(url, endpoint, preset)
+    const present = (g: GroupDraft) => !!(g.base_url.trim() || g.model.trim() || g.api_key.trim())
+    const enabled = { llm: present(llm) || contextTokens !== 0, asr: present(asr), embedding: present(embedding) || embeddingDim.trim() !== '', vision: visionEnabled }
+    const dim = enabled.embedding ? Number(embeddingDim) : 0
+    if (!Object.values(enabled).some(Boolean)) { setErr('请至少配置一个完整模型组'); return null }
+    for (const [purpose, label, group] of [['llm', '对话', llm], ['asr', '语音识别', asr], ['embedding', '向量', embedding], ['vision', '视觉', vision]] as const) {
+      if (!enabled[purpose]) continue
+      if (!group.provider.trim() || !group.base_url.trim() || !group.model.trim()) { setErr(`${label}配置不完整，请填写整组或全部留空`); return null }
+      if (!group.api_key.trim() && !profile?.[`${purpose}_api_key_masked`]) { setErr(`${label} API Key 不能为空`); return null }
+      const problem = validateModelURL(group.base_url, purpose === 'embedding', group.preset)
       if (problem) { setErr(`${label}地址：${problem}`); return null }
     }
-    const dim = Number(embeddingDim)
-    if (!Number.isFinite(dim) || dim <= 0) { setErr('embedding 维度需为正数:先探测,或手动填写'); return null }
-    if (observedDim !== null && dim !== observedDim) { setErr('向量维度与最新探测结果不符，请采用检测值或重新检查模型'); return null }
+    if (enabled.embedding && (!Number.isSafeInteger(dim) || dim <= 0)) { setErr('embedding 维度需为正整数:先探测,或手动填写'); return null }
+    if (enabled.embedding && observedDim !== null && dim !== observedDim) { setErr('向量维度与最新探测结果不符，请采用检测值或重新检查模型'); return null }
     let agentBudget: AgentBudgetOverride | null = null
     if (customBudget) {
       if (!budgetOptions) { setErr(budgetError || '正在加载预算选项'); return null }
@@ -144,12 +148,13 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
     }
     return {
       agent_budget: agentBudget,
+      clear_groups: editing ? clearGroups.filter(group => !enabled[group]) : [],
       name: name.trim(),
-      llm_provider: llm.provider.trim(), llm_base_url: llm.base_url.trim(), llm_model: llm.model.trim(), llm_context_tokens: contextTokens,
+      llm_provider: enabled.llm ? llm.provider.trim() : '', llm_base_url: llm.base_url.trim(), llm_model: llm.model.trim(), llm_context_tokens: contextTokens,
       ...(llm.api_key.trim() ? { llm_api_key: llm.api_key.trim() } : {}),
-      asr_provider: asr.provider.trim(), asr_base_url: asr.base_url.trim(), asr_model: asr.model.trim(),
+      asr_provider: enabled.asr ? asr.provider.trim() : '', asr_base_url: asr.base_url.trim(), asr_model: asr.model.trim(),
       ...(asr.api_key.trim() ? { asr_api_key: asr.api_key.trim() } : {}),
-      embedding_provider: embedding.provider.trim(), embedding_endpoint: embedding.base_url.trim(), embedding_model: embedding.model.trim(),
+      embedding_provider: enabled.embedding ? embedding.provider.trim() : '', embedding_endpoint: embedding.base_url.trim(), embedding_model: embedding.model.trim(),
       ...(embedding.api_key.trim() ? { embedding_api_key: embedding.api_key.trim() } : {}),
       embedding_dim: Math.round(dim),
       ...(visionEnabled ? {
@@ -237,7 +242,7 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
         <h2>{editing ? `编辑 · ${profile?.name}` : '新建 AI 配置'}</h2>
       </div>
 
-      <label className="field-label">配置名称</label>
+      <p className="muted">至少填写一个完整模型组。无需使用的组可全部留空；清除已保存的组请点击“清除整组”。</p><label className="field-label">配置名称</label>
       <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="例如:硅基流动" />
       <details className="disclosure" style={{ marginTop: 12 }}>
         <summary><Icon name="info" size="sm" />服务地址填写示例与拼接规则</summary>
@@ -254,30 +259,30 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       </details>
 
       <GroupBlock
+        onClear={() => { setLlm(fromProfile('', '', '')); setLlmContextTokens(''); setClearGroups(g => [...new Set([...g, 'llm' as const])]) }}
         title="对话模型"
         group={llm} setGroup={setGroup('llm', setLlm)}
         purpose="llm" models={models.llm || []} onPull={pullModels} listStatus={listStatus.llm}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.llm_api_key_masked})` : 'sk-…'}
-        required
       />
       <label className="field-label" htmlFor="llm-context-tokens">模型上下文窗口（token，可选）</label>
       <input id="llm-context-tokens" className="input mono" type="number" min={8192} max={1048576} step={1} value={llmContextTokens} onChange={e => setLlmContextTokens(e.target.value)} placeholder="留空按 8192 计算" />
       <small style={{ color: 'var(--tx-3)' }}>按模型服务实际允许的上下文填写。摘要能放入时使用一次请求；超出时自动分段。请预留输出空间，填大于实际上限可能导致请求失败。</small>
       <GroupBlock
+        onClear={() => { setAsr(fromProfile('', '', '')); setReuseASR(false); setClearGroups(g => [...new Set([...g, 'asr' as const])]) }}
         title="语音识别"
         group={asr} setGroup={setGroup('asr', setAsr)}
         purpose="asr" models={models.asr || []} onPull={pullModels} listStatus={listStatus.asr}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.asr_api_key_masked})` : 'sk-…'}
-        required
         reuse={reuseASR} onReuse={setReuseASR} reuseAvailable={reusableConnection}
       />
       <GroupBlock
+        onClear={() => { setEmbedding(fromProfile('', '', '')); setEmbeddingDim(''); setReuseEmbedding(false); setObservedDim(null); setClearGroups(g => [...new Set([...g, 'embedding' as const])]) }}
         title="向量模型"
         group={embedding} setGroup={setGroup('embedding', setEmbedding)}
         purpose="embedding" models={models.embedding || []} onPull={pullModels} listStatus={listStatus.embedding}
         keyPlaceholder={editing ? `留空保留现有密钥(${profile?.embedding_api_key_masked})` : 'sk-…'}
         urlPlaceholder="https://…/v1/embeddings"
-        required
         reuse={reuseEmbedding} onReuse={setReuseEmbedding} reuseAvailable={reusableConnection}
       />
       <div className="profile-dimension">
@@ -293,12 +298,12 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
       <div className="pref-row" style={{ marginTop: 22 }}>
         <div className="pr-body">
           <b>视觉模型</b>
-          <span>视频处理必需。关键帧 OCR 与画面理解会用到它</span>
+          <span>可选。画面描述使用视觉模型，OCR 使用本地工具</span>
         </div>
         <button
           type="button"
           className={`switch${visionEnabled ? ' on' : ''}`}
-          onClick={() => setVisionEnabled(v => !v)}
+          onClick={() => { if (visionEnabled) { setVision(fromProfile('', '', '')); setClearGroups(g => [...new Set([...g, 'vision' as const])]) }; setVisionEnabled(v => !v) }}
           aria-label="启用视觉模型"
         />
       </div>
@@ -308,11 +313,10 @@ export function ProfileForm({ profile, imported, onClose, onSaved }: {
           group={vision} setGroup={setGroup('vision', setVision)}
           purpose="vision" models={models.vision || []} onPull={pullModels} listStatus={listStatus.vision}
           keyPlaceholder={editing ? `留空保留现有密钥(${profile?.vision_api_key_masked})` : 'sk-…'}
-          required
-        />
+          />
       )}
 
-      <CapabilityProbe targets={probeTargets} disabled={busy || ((reuseASR || reuseEmbedding) && !reusableConnection)} />
+      <CapabilityProbe targets={probeTargets.filter(target => !!target.model.trim())} disabled={busy || ((reuseASR || reuseEmbedding) && !reusableConnection)} />
 
       {!profile?.read_only && profile?.source !== 'hosted' && (
         <details className="disclosure" style={{ marginTop: 22 }}>
@@ -375,7 +379,7 @@ function applyPreset(presetId: string, group: GroupDraft): Partial<GroupDraft> {
   }
 }
 
-function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatus, keyPlaceholder, urlPlaceholder, required, reuse, onReuse, reuseAvailable }: {
+function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatus, keyPlaceholder, urlPlaceholder, onClear, required, reuse, onReuse, reuseAvailable }: {
   title: string
   group: GroupDraft
   setGroup: (patch: Partial<GroupDraft>) => void
@@ -385,6 +389,7 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
   listStatus?: ListFeedback
   keyPlaceholder: string
   urlPlaceholder?: string
+  onClear?: () => void
   required?: boolean
   reuse?: boolean
   onReuse?: (reuse:boolean) => void
@@ -392,7 +397,7 @@ function GroupBlock({ title, group, setGroup, purpose, models, onPull, listStatu
 }) {
   return (
     <section className="profile-model-card" aria-label={title || '视觉模型'}>
-      <div className="profile-model-card-head"><h3>{title || '视觉模型'}{required && <span> · 必填</span>}</h3><small>{purpose.toUpperCase()}</small></div>
+      <div className="profile-model-card-head"><h3>{title || '视觉模型'}{required && <span> · 必填</span>}</h3><small>{purpose.toUpperCase()}</small>{onClear && <button type="button" className="meta-link" onClick={onClear}>清除整组</button>}</div>
       {onReuse && <div className="profile-connection-choice"><div className="seg"><button type="button" aria-pressed={!!reuse} className={reuse ? 'on' : ''} disabled={!reuseAvailable && !reuse} onClick={() => onReuse(true)}>复用对话连接</button><button type="button" aria-pressed={!reuse} className={!reuse ? 'on' : ''} onClick={() => onReuse(false)}>单独配置</button></div><p>{reuse ? '连接跟随对话设置；请单独选择此能力的模型，并检查服务是否支持。' : !reuseAvailable ? '填写有效对话地址与实际密钥后可复用。已保存的脱敏密钥无法复制。' : '可复用对话地址与密钥；模型仍单独选择。'}</p></div>}
       {!reuse && <div className="profile-group-grid">
         <label className="profile-input-label">服务商<select

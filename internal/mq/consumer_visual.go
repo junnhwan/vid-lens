@@ -66,7 +66,7 @@ func (c *Consumer) handleVisualBuild(ctx context.Context, payload RAGIndexPayloa
 			return fail(fmt.Errorf("未生成可用画面证据，请确认所选 OCR 或视觉模型已配置且视频有可识别内容"))
 		}
 	}
-	if c.ragIndex != nil {
+	if c.ragIndex != nil && c.automaticIndexAvailable(task) {
 		if err := c.transitionTaskStage(ctx, task.ID, model.TaskStageIndexing); err != nil {
 			return err
 		}

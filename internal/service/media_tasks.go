@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"vid-lens/internal/ai"
 
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/jwt"
@@ -30,6 +31,9 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	}
 	if task.UserID != userID {
 		return fmt.Errorf("无权操作此任务")
+	}
+	if err := s.requireModelAction(userID, "summary"); err != nil {
+		return err
 	}
 	transcription, err := s.repo.Transcription.FindByTaskID(task.ID)
 	if err != nil {
@@ -130,6 +134,11 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	}
 	if task.UserID != userID {
 		return fmt.Errorf("无权操作此任务")
+	}
+	if !alignOnly {
+		if err := s.requireModelAction(userID, "transcribe"); err != nil {
+			return err
+		}
 	}
 	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusQueued {
 		return fmt.Errorf("任务正在处理中")
@@ -246,6 +255,11 @@ func (s *MediaService) RequestVisualBuild(ctx context.Context, userID, taskID in
 	if strings.TrimSpace(task.FileURL) == "" {
 		return fmt.Errorf("视频尚未完成导入")
 	}
+	if task.VisualCaptionAllowed() {
+		if err := s.requireModelAction(userID, "caption"); err != nil {
+			return err
+		}
+	}
 	producer, ok := s.mq.(interface {
 		EnqueueVisual(context.Context, int64) error
 	})
@@ -266,6 +280,22 @@ func (s *MediaService) RequestVisualBuild(ctx context.Context, userID, taskID in
 		return publicInitialDispatchError(ctx, *task, model.TaskJobTypeVisual, model.TaskStageVisual, err)
 	}
 	return nil
+}
+
+func (s *MediaService) requireModelAction(userID int64, action string) error {
+	// Legacy services inject their strategy directly. Production always wires
+	// the profile resolver; resolve again at submission, never trust the UI.
+	if s.profiles == nil {
+		return nil
+	}
+	profile, err := s.profiles.GetDefaultAIProfile(userID)
+	if err != nil {
+		return err
+	}
+	if profile == nil {
+		return ErrAIProfileRequired
+	}
+	return ai.RequireAction(*profile, action)
 }
 
 // GetTaskDetail 获取任务详情

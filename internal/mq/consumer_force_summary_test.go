@@ -84,7 +84,7 @@ func TestRetranscriptionRequeuesIndexInsteadOfReusingStaleChunks(t *testing.T) {
 	}
 	ctx := withProcessingLeaseOwner(context.Background(), &processingLeaseOwner{repos: repos, taskID: task.ID, jobType: model.TaskJobTypeTranscribe, token: claim.Token})
 	producer := &recordingRAGIndexProducer{}
-	consumer := &Consumer{repo: repos, ragProducer: producer, profiles: staticProfileResolver{profile: &ai.Profile{EmbeddingModel: "embed-a"}}}
+	consumer := &Consumer{repo: repos, ragProducer: producer, profiles: staticProfileResolver{profile: &ai.Profile{EmbeddingProvider: "openai", EmbeddingEndpoint: "https://example.com/v1/embeddings", EmbeddingAPIKey: "fixture-key", EmbeddingDim: 1536, EmbeddingModel: "embed-a"}}}
 	if err := consumer.runLeasedSideEffect(ctx, func(r *repository.Repositories) error {
 		return r.SaveTranscriptionAndInvalidateIndex(&model.VideoTranscription{TaskID: task.ID, FileMD5: md5, Content: "correct new source"})
 	}); err != nil {

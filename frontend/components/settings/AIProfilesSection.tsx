@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { AIProfile, AIProfileRequest } from '@/lib/types'
@@ -16,6 +17,7 @@ import { ProfileImportHelp } from './ProfileImportHelp'
 
 export function AIProfilesSection({ readOnly, onChanged }: { readOnly: boolean; onChanged?: () => void }) {
   const toast = useToast()
+  const queryClient = useQueryClient()
   const [profiles, setProfiles] = useState<AIProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -51,6 +53,7 @@ export function AIProfilesSection({ readOnly, onChanged }: { readOnly: boolean; 
   }
 
   const load = useCallback(async () => {
+    void queryClient.invalidateQueries({ queryKey: ['ai-action-availability'] })
     setLoading(true)
     setLoadError('')
     try {
@@ -61,7 +64,7 @@ export function AIProfilesSection({ readOnly, onChanged }: { readOnly: boolean; 
     } finally {
       setLoading(false)
     }
-  }, [onChanged])
+  }, [onChanged, queryClient])
 
   useEffect(() => { void load() }, [load])
 
@@ -150,12 +153,12 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
 }) {
   const hosted = profile.source === 'hosted'
   const locked = readOnly || !!profile.read_only || hosted
-  const targets: ProbeTarget[] = [
+  const targets = ([
     { purpose: 'llm', label: '对话', model: profile.llm_model, base_url: profile.llm_base_url, provider: profile.llm_provider, api_key: '', profile_id: profile.id },
     { purpose: 'asr', label: '语音识别', model: profile.asr_model, base_url: profile.asr_base_url, provider: profile.asr_provider, api_key: '', profile_id: profile.id },
     { purpose: 'embedding', label: '向量', model: profile.embedding_model, base_url: profile.embedding_endpoint, provider: profile.embedding_provider, api_key: '', profile_id: profile.id, embedding_dim: profile.embedding_dim },
     ...(profile.vision_model ? [{ purpose: 'vision' as const, label: '视觉', model: profile.vision_model, base_url: profile.vision_base_url, provider: profile.vision_provider, api_key: '', profile_id: profile.id }] : []),
-  ]
+  ] satisfies ProbeTarget[]).filter(target => !!target.model && !!target.base_url)
   return (
     <div className="profile-card">
       <div className="profile-icon"><Icon name="cpu" /></div>
@@ -168,10 +171,10 @@ function ProfileCard({ profile, readOnly, onEdit, onExport, onDelete }: {
           {hosted && <span className="chip chip-info">Free API</span>}
           {!hosted && profile.read_only && <span className="chip chip-info">只读配置</span>}
         </div>
-        <CapabilityLine label="对话模型" value={profile.llm_model} />
+        <CapabilityLine label="对话模型" value={profile.llm_model || '未配置'} muted={!profile.llm_model} />
         <CapabilityLine label="上下文窗口" value={profile.llm_context_tokens ? `${profile.llm_context_tokens.toLocaleString()} token` : '未填写 · 按保守预算'} muted={!profile.llm_context_tokens} />
-        <CapabilityLine label="语音识别" value={profile.asr_model} />
-        <CapabilityLine label="向量模型" value={`${profile.embedding_model} · ${profile.embedding_dim} 维`} />
+        <CapabilityLine label="语音识别" value={profile.asr_model || '未配置'} muted={!profile.asr_model} />
+        <CapabilityLine label="向量模型" value={profile.embedding_model ? `${profile.embedding_model} · ${profile.embedding_dim} 维` : '未配置'} muted={!profile.embedding_model} />
         <CapabilityLine label="视觉模型" value={profile.vision_model || '未配置'} muted={!profile.vision_model} />
         <CapabilityLine label="检索重排" value="在上方“可选增强能力”中按需开启" muted />
         {!locked && <CapabilityProbe targets={targets} />}
