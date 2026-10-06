@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
 import { useEffect, useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { transferableAbortController } from 'node:util'
+
+// React Router uses Node's native Request; its signal must come from the same
+// realm rather than JSDOM's AbortController. Browser behavior stays unchanged.
+beforeEach(() => vi.stubGlobal('AbortController', transferableAbortController))
 import { createMemoryRouter, Link, Outlet, RouterProvider, useLocation, useNavigate } from 'react-router'
 import { useLeaveGuard } from './useLeaveGuard'
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function GuardedLayout() {
