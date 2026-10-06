@@ -33,6 +33,8 @@ type StitchResult struct {
 type Contribution struct {
 	PartIndex int
 	Content   string
+	StartRune int
+	EndRune   int
 }
 
 // Stitch removes normalized suffix/prefix duplication created by overlapping

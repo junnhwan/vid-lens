@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,16 @@ import (
 // Environment overrides also work with an existing literal production YAML.
 // Apply secrets after YAML decoding so quotes, backslashes and '#' are data.
 func applyRuntimeEnvironment(c *Config) error {
+	if raw, exists := os.LookupEnv("VIDLENS_TRANSCRIPT_ALIGNER_COMMAND"); exists {
+		if err := json.Unmarshal([]byte(raw), &c.Tools.TranscriptAlignerCommand); err != nil {
+			return fmt.Errorf("VIDLENS_TRANSCRIPT_ALIGNER_COMMAND 必须为 JSON 参数数组")
+		}
+		for _, argument := range c.Tools.TranscriptAlignerCommand {
+			if strings.TrimSpace(argument) == "" {
+				return fmt.Errorf("音文对齐命令参数不能为空")
+			}
+		}
+	}
 	stringsByName := map[string]*string{
 		"VIDLENS_SERVER_HOST": &c.Server.Host, "VIDLENS_SERVER_MODE": &c.Server.Mode,
 		"VIDLENS_DATABASE_HOST": &c.Database.Host, "VIDLENS_DATABASE_USERNAME": &c.Database.Username,

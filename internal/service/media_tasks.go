@@ -119,7 +119,11 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 }
 
 // RequestTranscribe 提交文字提取。force=true 时清除分片缓存并允许覆盖已有转写。
-func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int64, force bool) error {
+func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int64, force bool, alignment ...bool) error {
+	alignOnly := len(alignment) > 0 && alignment[0]
+	if alignOnly && (force || len(s.tools.TranscriptAlignerCommand) == 0) {
+		return fmt.Errorf("逐句对齐需要已配置的音文对齐服务，且不能同时重新识别")
+	}
 	task, err := s.repo.Task.FindByID(taskID)
 	if err != nil {
 		return fmt.Errorf("任务不存在")
@@ -144,6 +148,16 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 		if err != nil {
 			return err
 		}
+		if alignOnly {
+			if len(chunks) == 0 {
+				return fmt.Errorf("旧转写缺少原始音频窗口，请先重新转写")
+			}
+			for _, chunk := range chunks {
+				if chunk.Status != model.TranscriptionChunkStatusCompleted || chunk.WindowEndMS <= chunk.WindowStartMS {
+					return fmt.Errorf("请先完成全部转写窗口，再对齐句子时间")
+				}
+			}
+		}
 		for _, chunk := range chunks {
 			if chunk.Status != model.TranscriptionChunkStatusCompleted {
 				resumeIncomplete = true
@@ -151,7 +165,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 			}
 		}
 	}
-	if transcription != nil && !force && !resumeIncomplete {
+	if transcription != nil && !force && !resumeIncomplete && !alignOnly {
 		return fmt.Errorf("文字提取已完成，可直接查看结果")
 	}
 
@@ -160,7 +174,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	// 成功转写"。命中 → 复用，不重跑 ASR，返回"文字提取已完成，可直接查看结果"
 	// （与原单 task 短路语义一致）。分析目标级独立：转写命中不替 task 做整体
 	// 完成判定（摘要可能仍缺，用户可继续 RequestAnalysis）。
-	if !force && transcription == nil && !resumeIncomplete {
+	if !force && transcription == nil && !resumeIncomplete && !alignOnly {
 		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeTranscribe, func(md5 string) (bool, error) {
 			existing, err := s.repo.Transcription.FindByMD5(md5)
 			if err != nil {
@@ -177,10 +191,11 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	}
 
 	_, err = s.enqueueInitialTask(ctx, task, initialDispatchSpec{
-		allowedStatuses:    []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
-		jobType:            model.TaskJobTypeTranscribe,
-		resetTranscription: force,
-		stage:              model.TaskStageTranscribing,
+		transcriptAlignmentOnly: alignOnly,
+		allowedStatuses:         []int8{model.TaskStatusPending, model.TaskStatusFailed, model.TaskStatusCompleted, model.TaskStatusDead},
+		jobType:                 model.TaskJobTypeTranscribe,
+		resetTranscription:      force,
+		stage:                   model.TaskStageTranscribing,
 		enqueue: func(enqueueCtx context.Context, prepared model.VideoTask) error {
 			return s.mq.EnqueueTranscribe(enqueueCtx, prepared.ID, prepared.FileMD5)
 		},
@@ -478,6 +493,13 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 		return nil, fmt.Errorf("读取视觉时间线失败: %w", err)
 	}
 	timeline := BuildVideoTimeline(taskID, transcriptRows, frames)
+	timeline.AlignmentAvailable = len(s.tools.TranscriptAlignerCommand) > 0 && len(transcriptRows) > 0
+	for _, row := range transcriptRows {
+		if row.Status != model.TranscriptionChunkStatusCompleted || row.WindowStartMS < 0 || row.WindowEndMS <= row.WindowStartMS {
+			timeline.AlignmentAvailable = false
+			break
+		}
+	}
 	timeline.StudySourceReason = studySourceReason(task, transcriptRows, timeline)
 	timeline.StudySourceReady = timeline.StudySourceReason == ""
 	timeline.VisualCoverage = visualCoverage(frames)

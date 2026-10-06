@@ -12,6 +12,7 @@ import (
 // TranscriptionProgress only exposes chunks after checking task ownership.
 // A chunk's audio object and provider error are intentionally omitted.
 type TranscriptionProgress struct {
+	AlignmentOnly    bool                         `json:"alignment_only"`
 	TaskID           int64                        `json:"task_id"`
 	Status           int8                         `json:"status"`
 	Stage            string                       `json:"stage"`
@@ -71,6 +72,7 @@ func (s *MediaService) GetTranscriptionProgress(_ context.Context, userID, taskI
 			return nil, err
 		}
 		if job != nil {
+			result.AlignmentOnly = job.TranscriptAlignmentOnly
 			result.JobStatus, result.JobRetryCount, result.JobMaxRetries = job.Status, job.RetryCount, job.MaxRetries
 			result.JobNextRetryAt = job.NextRetryAt
 			result.StartedAt = job.StartedAt

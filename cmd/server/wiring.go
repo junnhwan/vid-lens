@@ -18,6 +18,7 @@ import (
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 	"vid-lens/internal/storage"
+	"vid-lens/internal/transcript"
 )
 
 type serverDependencies struct {
@@ -239,6 +240,9 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	}
 
 	consumer := mq.NewConsumer(deps.repos, deps.minioStorage, aiStrategy, deps.rdb, deps.cfg.Tools.FFmpegPath)
+	if len(deps.cfg.Tools.TranscriptAlignerCommand) > 0 {
+		consumer.SetTranscriptAligner(&transcript.CommandAligner{Command: deps.cfg.Tools.TranscriptAlignerCommand, FFmpeg: deps.cfg.Tools.FFmpegPath})
+	}
 	consumer.SetMQConfig(deps.cfg.MQ.Brokers, deps.cfg.MQ.Prefetch)
 	consumer.SetQueuePrefetch(deps.cfg.MQ.TranscribeQueue, deps.cfg.MQ.TranscribePrefetch)
 	consumer.SetVisualConcurrency(deps.cfg.MQ.VisualConcurrency)

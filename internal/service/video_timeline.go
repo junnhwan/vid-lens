@@ -24,12 +24,13 @@ type TimelineAtom struct {
 }
 
 type VideoTimeline struct {
-	TaskID            int64           `json:"task_id"`
-	Title             string          `json:"title,omitempty"`
-	Atoms             []TimelineAtom  `json:"atoms"`
-	VisualCoverage    *VisualCoverage `json:"visual_coverage,omitempty"`
-	StudySourceReady  bool            `json:"study_source_ready"`
-	StudySourceReason string          `json:"study_source_reason,omitempty"`
+	AlignmentAvailable bool            `json:"alignment_available"`
+	TaskID             int64           `json:"task_id"`
+	Title              string          `json:"title,omitempty"`
+	Atoms              []TimelineAtom  `json:"atoms"`
+	VisualCoverage     *VisualCoverage `json:"visual_coverage,omitempty"`
+	StudySourceReady   bool            `json:"study_source_ready"`
+	StudySourceReason  string          `json:"study_source_reason,omitempty"`
 }
 
 // Shared by the read-only capability projection and generation admission.
@@ -113,49 +114,23 @@ func visualCoverage(frames []model.VideoVisualFrame) *VisualCoverage {
 func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionChunk, frames []model.VideoVisualFrame) VideoTimeline {
 	atoms := make([]TimelineAtom, 0, len(transcriptRows)+len(frames)*2)
 	textOrder := make(map[string]int64)
-	for _, row := range transcriptRows {
-		content := strings.TrimSpace(row.Content)
-		if row.Status != model.TranscriptionChunkStatusCompleted || content == "" {
+	order := int64(0)
+	for _, observation := range assembledTranscriptObservations(transcriptRows) {
+		if strings.TrimSpace(observation.Content) == "" || len(observation.Refs) == 0 {
 			continue
 		}
-		if observations, timed := transcriptObservations(row, content); timed {
-			order := row.WindowStartMS
-			for _, observation := range observations {
-				if strings.TrimSpace(observation.Content) == "" {
-					continue
-				}
-				ref := observation.Refs[0]
-				id := "transcript:" + ref.StableID
-				// Unknown gaps retain the audio window for playback. Sort them in
-				// source-text order without inventing a new public timestamp.
-				order = max(order, ref.StartMS)
-				textOrder[id] = order
-				atoms = append(atoms, TimelineAtom{
-					ID: id, Modality: model.ChunkModalityTranscript,
-					Content: observation.Content, StartMS: ref.StartMS, EndMS: ref.EndMS,
-					TimeRangeStatus: ref.TimeRangeStatus, Source: "asr", SourceRefs: observation.Refs,
-				})
-			}
-			continue
-		}
-		startMS, endMS, status := transcriptTimelineRange(row)
-		stableID := strings.TrimSpace(row.SegmentKey)
-		if stableID == "" {
-			if row.ID > 0 {
-				stableID = fmt.Sprintf("transcription-chunk:%d", row.ID)
-			} else {
-				stableID = fmt.Sprintf("transcription-chunk:%d", row.ChunkIndex)
-			}
-		}
-		ref := ChunkSourceRef{
-			SourceType: model.ChunkModalityTranscript, StableID: stableID, ContentHash: artifact.Hash(content),
-			SegmentKey: strings.TrimSpace(row.SegmentKey), SourceRowID: row.ID,
-			StartMS: startMS, EndMS: endMS, TimeRangeStatus: status,
-		}
+		ref := observation.Refs[0]
+		// Independent untimed observations are separate paragraphs. The
+		// assembler's separator is structural, not part of their source wording.
+		content := strings.TrimPrefix(observation.Content, "\n\n")
+		ref.Content = content
+		id := "transcript:" + ref.StableID
+		order = max(order, ref.StartMS)
+		textOrder[id] = order
 		atoms = append(atoms, TimelineAtom{
-			ID: "transcript:" + stableID, Modality: model.ChunkModalityTranscript,
-			Content: content, StartMS: startMS, EndMS: endMS,
-			TimeRangeStatus: status, Source: "asr", SourceRefs: []ChunkSourceRef{ref},
+			ID: id, Modality: model.ChunkModalityTranscript,
+			Content: content, StartMS: ref.StartMS, EndMS: ref.EndMS,
+			TimeRangeStatus: ref.TimeRangeStatus, Source: "asr", SourceRefs: []ChunkSourceRef{ref},
 		})
 	}
 

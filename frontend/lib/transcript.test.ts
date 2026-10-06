@@ -3,6 +3,10 @@ import { describe, it } from 'node:test'
 import { expandTranscript, groupTranscriptSources, splitForReading } from './transcript.ts'
 
 describe('splitForReading', () => {
+  it('never cuts a sentence or English word to satisfy a character limit', () => {
+    const text = 'thelongestwordwithoutanysentenceboundary'.repeat(8)
+    assert.deepEqual(splitForReading(text), [text])
+  })
   it('keeps short text intact', () => {
     assert.deepEqual(splitForReading('很短的一句。'), ['很短的一句。'])
   })
@@ -16,6 +20,28 @@ describe('splitForReading', () => {
 })
 
 describe('groupTranscriptSources', () => {
+  it('assembles a complete sentence across aligned windows and keeps all source identities', () => {
+    const rows = groupTranscriptSources([
+      { id: 'a', start_ms: 19000, end_ms: 19500, content: '这是', time_range_status: 'exact' },
+      { id: 'b', start_ms: 19700, end_ms: 20200, content: '一句', time_range_status: 'exact' },
+      { id: 'c', start_ms: 20300, end_ms: 21000, content: '完整的话。', time_range_status: 'exact' },
+      { id: 'd', start_ms: 21300, end_ms: 22000, content: '下一句。', time_range_status: 'exact' },
+    ])
+    assert.equal(rows.length, 2)
+    assert.deepEqual(rows[0].paragraphs, ['这是一句完整的话。'])
+    assert.deepEqual(rows[0].source_ids, ['a', 'b', 'c'])
+    assert.equal(rows[0].start_ms, 19000)
+    assert.equal(rows[0].end_ms, 21000)
+  })
+
+  it('does not join exact speech across a long silence or to uncertain text', () => {
+    const rows = groupTranscriptSources([
+      { id: 'a', start_ms: 1000, end_ms: 2000, content: '前文', time_range_status: 'exact' },
+      { id: 'b', start_ms: 10000, end_ms: 11000, content: '后文', time_range_status: 'exact' },
+      { id: 'c', start_ms: 10000, end_ms: 20000, content: '只有窗口时间。', time_range_status: 'coarse' },
+    ])
+    assert.equal(rows.length, 3)
+  })
   it('keeps all reading paragraphs under one observed window', () => {
     const text = '完整的前文与后文都应该保留。'.repeat(30)
     const [group] = groupTranscriptSources([{ id: 'a', start_ms: 0, end_ms: 300000, content: text }, { id: 'b', start_ms: 0, end_ms: 300000, content: '后面的原句。' }])

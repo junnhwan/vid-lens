@@ -42,6 +42,12 @@ type TranscriptionSegment struct {
 	Text    string `json:"text"`
 	StartMS int64  `json:"start_ms"`
 	EndMS   int64  `json:"end_ms"`
+	// Rune offsets are validated against the immutable ASR window text. They
+	// distinguish repeated words and allow time ownership without estimating
+	// timing from character positions. Legacy provider spans omit them.
+	TextStart int    `json:"text_start,omitempty"`
+	TextEnd   int    `json:"text_end,omitempty"`
+	Method    string `json:"method,omitempty"`
 }
 
 func (VideoTranscriptionChunk) TableName() string {

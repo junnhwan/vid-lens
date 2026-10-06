@@ -6,10 +6,39 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode"
 
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 )
+
+func TestForcedAlignmentProjectsCompleteSentenceSources(t *testing.T) {
+	text := "第一句话。第二句话。"
+	var words []model.TranscriptionSegment
+	for i, r := range []rune(text) {
+		if unicode.IsLetter(r) {
+			words = append(words, model.TranscriptionSegment{Text: string(r), TextStart: i, TextEnd: i + 1, StartMS: int64(i) * 100, EndMS: int64(i+1) * 100, Method: "forced_alignment"})
+		}
+	}
+	row := timedSourceRow(t, text, words)
+	observations, timed := transcriptObservations(row, text)
+	if !timed || len(observations) != 2 || observations[0].Content != "第一句话。" || observations[1].Content != "第二句话。" {
+		t.Fatalf("character fragments escaped into canonical sources: count=%d", len(observations))
+	}
+	for _, o := range observations {
+		if len(o.Refs) != 1 || o.Refs[0].ContentHash != artifact.Hash(o.Content) {
+			t.Fatal("sentence source cannot freeze or map citations")
+		}
+	}
+	if observations[0].Refs[0].StartMS != 0 || observations[0].Refs[0].EndMS != 400 || observations[1].Refs[0].StartMS != 500 {
+		t.Fatal("sentence time did not retain observed word union")
+	}
+	retained := string([]rune(text)[2:])
+	clipped, _ := transcriptObservations(row, retained, 2, len([]rune(text)))
+	if clipped[0].Refs[0].StartMS != 200 || clipped[0].Refs[0].ContentHash != artifact.Hash(clipped[0].Content) || clipped[0].Refs[0].StableID == observations[0].Refs[0].StableID {
+		t.Fatal("trimmed sentence lost its precise visible provenance")
+	}
+}
 
 func timedSourceRow(t *testing.T, content string, segments []model.TranscriptionSegment) model.VideoTranscriptionChunk {
 	t.Helper()
@@ -191,5 +220,56 @@ func TestFineTimelineDoesNotRejectOrdinaryLengthStudySource(t *testing.T) {
 	source, err := svc.Source(context.Background(), 7, 42)
 	if err != nil || len(source.Evidence) != 1050 {
 		t.Fatalf("fine sources could not freeze: count=%v err=%v", source, err)
+	}
+}
+
+func TestForcedAlignmentLongVideoFreezesSentenceSourcesAndMapsRetrieval(t *testing.T) {
+	// A character-based aligner produces over 10,000 acoustic tokens on an
+	// ordinary lesson. Evidence must remain readable sentences, and retrieval
+	// excerpts must still identify exactly those frozen sentence sources.
+	text := strings.Repeat("这是一个包含完整语音时间并可以回放的句子。", 600)
+	var words []model.TranscriptionSegment
+	for i, r := range []rune(text) {
+		if unicode.IsLetter(r) {
+			words = append(words, model.TranscriptionSegment{Text: string(r), TextStart: i, TextEnd: i + 1,
+				StartMS: int64(i) * 100, EndMS: int64(i+1) * 100, Method: "forced_alignment"})
+		}
+	}
+	if len(words) <= 10000 {
+		t.Fatal("fixture no longer exercises a long word-level alignment")
+	}
+	row := timedSourceRow(t, text, words)
+	row.WindowEndMS = int64(len([]rune(text))) * 100
+	row.CoreEndMS = row.WindowEndMS
+	svc, db, calls := artifactFixture(t, artifactModelResponse)
+	row.ID, row.TaskID = 0, 42
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.VideoTranscription{}).Where("task_id = ?", 42).Update("content", row.Content).Error; err != nil {
+		t.Fatal(err)
+	}
+	source, err := svc.Source(context.Background(), 7, 42)
+	if err != nil || source == nil || len(source.Evidence) != 600 {
+		t.Fatalf("word alignment fragmented or rejected a normal lesson: source=%v err=%v", source, err)
+	}
+	frozen := make(map[string]model.SourceSnapshotItem, len(source.Evidence))
+	for _, evidence := range source.Evidence {
+		frozen[evidence.SourceIdentity] = evidence
+	}
+	chunks := buildTranscriptIndexChunks(text, []model.VideoTranscriptionChunk{row}, 100, 20)
+	for _, chunk := range chunks {
+		if chunk.SourceMappingStatus != model.ChunkSourceMapped || len(chunk.SourceRefs) == 0 {
+			t.Fatal("sentence evidence lost retrieval provenance")
+		}
+		for _, ref := range chunk.SourceRefs {
+			evidence, ok := frozen[ref.SourceType+":"+ref.StableID]
+			if !ok || evidence.ContentHash != ref.ContentHash || evidence.StartMS == nil || *evidence.StartMS != ref.StartMS || *evidence.EndMS != ref.EndMS {
+				t.Fatalf("retrieval cannot resolve frozen sentence: %+v", ref)
+			}
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("source freezing unexpectedly rewrote transcript through AI")
 	}
 }

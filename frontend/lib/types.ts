@@ -146,7 +146,7 @@ export const TaskStatusEnum = {
 // 三阶段子状态 stage 取值
 export type TaskStage =
   | 'none' | 'downloading' | 'uploaded'
-  | 'transcribing' | 'visual_indexing' | 'summarizing' | 'indexing'
+  | 'transcribing' | 'aligning' | 'visual_indexing' | 'summarizing' | 'indexing'
 
 export interface VideoAsset {
   id: number
@@ -290,6 +290,7 @@ export interface VideoTask {
 }
 
 export interface TranscriptionProgress {
+  alignment_only?: boolean
   task_id: number
   status: TaskStatus
   stage: TaskStage
@@ -466,6 +467,7 @@ export interface TimelineAtom {
 }
 
 export interface VideoTimeline {
+  alignment_available?: boolean
   study_source_ready?: boolean
   study_source_reason?: string
   task_id: number

@@ -27,37 +27,28 @@ func buildTranscriptIndexChunks(content string, rows []model.VideoTranscriptionC
 		return SplitObservationsIntoChunks([]SourceTextObservation{{Content: content, Modality: model.ChunkModalityTranscript}}, chunkSize, overlap)
 	}
 
-	var rebuilt string
-	contributions := make([]transcript.Contribution, 0, len(parts))
+	assembled := transcript.Assemble(rows)
+	// Published legacy text can be upgraded deterministically from its raw
+	// observations. Arbitrary edits still cannot acquire invented provenance.
+	legacy := strings.Join(parts, "\n\n")
 	if transcriptionRowsOverlap(completed) {
-		stitched := transcript.Stitch(parts)
-		rebuilt, contributions = stitched.Content, stitched.Contributions
-	} else {
-		var builder strings.Builder
-		for i, part := range parts {
-			retained := part
-			if i > 0 {
-				retained = "\n\n" + retained
-			}
-			builder.WriteString(retained)
-			contributions = append(contributions, transcript.Contribution{PartIndex: i, Content: retained})
-		}
-		rebuilt = builder.String()
+		legacy = transcript.Stitch(parts).Content
 	}
-	if strings.TrimSpace(rebuilt) != content {
+	if strings.TrimSpace(assembled.Content) != content && strings.TrimSpace(legacy) != content {
 		return SplitObservationsIntoChunks([]SourceTextObservation{{Content: content, Modality: model.ChunkModalityTranscript}}, chunkSize, overlap)
 	}
+	return SplitObservationsIntoChunks(assembledTranscriptObservations(rows), chunkSize, overlap)
+}
 
-	observations := make([]SourceTextObservation, 0, len(contributions))
-	for _, contribution := range contributions {
-		if contribution.PartIndex < 0 || contribution.PartIndex >= len(completed) || contribution.Content == "" {
-			continue
-		}
-		row := completed[contribution.PartIndex]
-		spans, _ := transcriptObservations(row, contribution.Content)
+func assembledTranscriptObservations(rows []model.VideoTranscriptionChunk) []SourceTextObservation {
+	assembled := transcript.Assemble(rows)
+	observations := make([]SourceTextObservation, 0, len(assembled.Contributions))
+	for _, contribution := range assembled.Contributions {
+		row := rows[contribution.PartIndex]
+		spans, _ := transcriptObservations(row, contribution.Content, contribution.StartRune, contribution.EndRune)
 		observations = append(observations, spans...)
 	}
-	return SplitObservationsIntoChunks(observations, chunkSize, overlap)
+	return observations
 }
 
 func transcriptionRowsOverlap(rows []model.VideoTranscriptionChunk) bool {
@@ -66,9 +57,7 @@ func transcriptionRowsOverlap(rows []model.VideoTranscriptionChunk) bool {
 	}
 	for i := 1; i < len(rows); i++ {
 		previous, current := rows[i-1], rows[i]
-		if strings.TrimSpace(previous.SegmentKey) == "" || strings.TrimSpace(current.SegmentKey) == "" ||
-			strings.TrimSpace(previous.SegmenterVersion) == "" || strings.TrimSpace(current.SegmenterVersion) == "" ||
-			previous.WindowEndMS <= current.WindowStartMS {
+		if !transcript.AdjacentOverlap(previous, current) {
 			return false
 		}
 	}
@@ -90,6 +79,8 @@ func transcriptSourceRef(row model.VideoTranscriptionChunk) ChunkSourceRef {
 	switch {
 	case row.WindowEndMS > row.WindowStartMS && row.WindowStartMS >= 0:
 		ref.StartMS, ref.EndMS, ref.TimeRangeStatus = row.WindowStartMS, row.WindowEndMS, model.ChunkTimeRangeCoarse
+	case row.CoreEndMS > row.CoreStartMS && row.CoreStartMS >= 0:
+		ref.StartMS, ref.EndMS, ref.TimeRangeStatus = row.CoreStartMS, row.CoreEndMS, model.ChunkTimeRangeCoarse
 	case row.EndSecond > row.StartSecond && row.StartSecond >= 0:
 		ref.StartMS, ref.EndMS, ref.TimeRangeStatus = int64(row.StartSecond)*1000, int64(row.EndSecond)*1000, model.ChunkTimeRangeCoarse
 	}

@@ -16,8 +16,8 @@ function waitLabel(reason?: string) {
 }
 
 export function TranscriptionProgressPanel({ task, compact = false, onProgress }: { task: VideoTask; compact?: boolean; onProgress?: (progress: TranscriptionProgress | null) => void }) {
-  const relevant = task.last_job_type === 'transcribe' || task.stage === 'transcribing' || task.stage === 'visual_indexing'
-  const active = (task.stage === 'transcribing' || task.status === TaskStatusEnum.Queued && task.last_job_type === 'transcribe') && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
+  const relevant = task.last_job_type === 'transcribe' || task.stage === 'transcribing' || task.stage === 'aligning' || task.stage === 'visual_indexing'
+  const active = (task.stage === 'transcribing' || task.stage === 'aligning' || task.status === TaskStatusEnum.Queued && task.last_job_type === 'transcribe') && (task.status === TaskStatusEnum.Queued || task.status === TaskStatusEnum.Running)
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null)
   const [error, setError] = useState(false)
   const [reload, setReload] = useState(0)
@@ -45,6 +45,15 @@ export function TranscriptionProgressPanel({ task, compact = false, onProgress }
   if (error) return <div className="muted" role="status" style={{ fontSize: 12 }}>转写进度暂不可用 <button className="btn btn-sm" onClick={() => setReload(n => n + 1)}>重新读取转写进度</button></div>
   if (!progress) return <div className="muted" style={{ fontSize: 12 }}>正在读取转写进度…</div>
   if (!active && !progress.total) return null
+
+  if (progress.alignment_only || task.stage === 'aligning') return (
+    <div className="card card-pad" style={{ marginTop: 8, fontSize: 12 }} role="status">
+      <b>句子时间对齐</b>
+      <div className="muted" style={{ marginTop: 4 }}>{task.status === TaskStatusEnum.Queued ? '等待对齐任务启动' : active ? '正在将已识别的文字与音频对齐，完成后更新逐句回放时间。' : progress.job_status === TaskStatusEnum.Completed ? '句子时间对齐已完成。' : '句子时间对齐未完成，保留之前保存的转写与定位。'}</div>
+      {active && <div className="muted" style={{ marginTop: 4 }}>已完成的转写文字会复用 · 已等待/运行 {elapsed(progress.started_at || task.created_at)}</div>}
+      {progress.job_next_retry_at && <div className="muted">任务自动重试 {progress.job_retry_count}/{progress.job_max_retries} · 下次 {fmtDateTime(progress.job_next_retry_at)}</div>}
+    </div>
+  )
 
   const current = progress.chunks.filter(c => c.status === 'running' || c.status === 'retry_wait')
   const completed = progress.chunks.filter(c => c.status === 'completed')

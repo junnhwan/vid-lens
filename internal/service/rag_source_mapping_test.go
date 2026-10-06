@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"vid-lens/internal/ai"
@@ -43,7 +44,7 @@ func TestRAGIndexBuildPersistsASRSourceMappingAcrossSemanticChunk(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chunk.Modality != model.ChunkModalityTranscript || chunk.SourceMappingStatus != model.ChunkSourceMapped || chunk.TimeRangeStatus != model.ChunkTimeRangeCoarse || chunk.StartMS != 0 || chunk.EndMS != 605000 || len(refs) != 2 || refs[0].StableID != "segment-a" || refs[1].StableID != "segment-b" {
+	if chunk.Modality != model.ChunkModalityTranscript || chunk.SourceMappingStatus != model.ChunkSourceMapped || chunk.TimeRangeStatus != model.ChunkTimeRangeCoarse || chunk.StartMS != 0 || chunk.EndMS != 605000 || len(refs) != 2 || refs[0].StableID != "segment-a" || !strings.HasPrefix(refs[1].StableID, "segment-b:retained:") {
 		t.Fatalf("mapped chunk = %+v refs=%+v", chunk, refs)
 	}
 	index, _ := repos.RAGIndex.FindByTaskAndModel(7, task.ID, "embed")

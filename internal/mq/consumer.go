@@ -12,6 +12,7 @@ import (
 	"vid-lens/internal/pkg/remoteurl"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
+	"vid-lens/internal/transcript"
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -72,6 +73,7 @@ type Consumer struct {
 	splitAudioWindows      splitAudioWindowsFunc
 	asrConcurrency         int
 	asrRetryPolicy         ai.ProviderRetryPolicy
+	transcriptAligner      transcript.Aligner
 	ragIndex               ragIndexFunc
 	visualIndex            visualIndexFunc
 	ragProducer            ragIndexProducer
@@ -98,6 +100,10 @@ type Consumer struct {
 	uploadLocalFile uploadLocalFileFunc
 
 	wg sync.WaitGroup
+}
+
+func (c *Consumer) SetTranscriptAligner(aligner transcript.Aligner) {
+	c.transcriptAligner = aligner
 }
 
 type profileResolver interface {

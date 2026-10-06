@@ -45,7 +45,7 @@ import './VideoWorkbench.css'
 // 点击卡片仍按该帧时间跳转播放器。
 
 type TabKey = 'tl' | 'vf' | 'idx'
-type ActionKind = 'transcribe' | 'analyze' | 'index' | 'download'
+type ActionKind = 'transcribe' | 'align' | 'analyze' | 'index' | 'download'
 type ConfirmAction = {
   kind: Exclude<ActionKind, 'download'>
   force?: boolean
@@ -416,6 +416,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
       if (kind === 'transcribe') {
         await api.transcribe(task.id, force)
         toast.success(force ? '重新转写已排队，将再次调用语音识别' : '转写任务已排队，等待并发名额')
+      } else if (kind === 'align') {
+        await api.alignTranscript(task.id)
+        toast.success('逐句对齐已排队，将复用已有转写')
       } else if (kind === 'analyze') {
         await api.analyze(task.id, force)
         toast.success('摘要任务已加入队列,完成后会出现在这里')
@@ -440,6 +443,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   const runAction = (kind: Exclude<ActionKind, 'download'>, force = false) => {
     const labels: Record<Exclude<ActionKind, 'download'>, string> = {
       transcribe: force ? '重新转写视频' : '转写视频',
+      align: '对齐句子时间',
       analyze: '生成视频摘要',
       index: '建立视频检索索引',
     }
@@ -535,8 +539,9 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
   }
 
   const failed = task.status === TaskStatusEnum.Failed || task.status === TaskStatusEnum.Dead
-  const transcriptionRelevant = task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe'
-  const transcriptionIncomplete = transcriptionRelevant && (!!transcriptionProgress && transcriptionProgress.completed < transcriptionProgress.total || failed && task.last_job_type === 'transcribe')
+  const transcriptionRelevant = task.stage === 'transcribing' || task.stage === 'aligning' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe'
+  const alignmentIncomplete = !!transcriptionProgress?.alignment_only && failed && task.last_job_type === 'transcribe'
+  const transcriptionIncomplete = !transcriptionProgress?.alignment_only && transcriptionRelevant && (!!transcriptionProgress && transcriptionProgress.completed < transcriptionProgress.total || failed && task.last_job_type === 'transcribe')
   const resumeTranscription = !processing && transcriptionIncomplete
   const checkingTranscription = transcriptionRelevant && !transcriptionProgress
   const citationUpgradeLabel = resumeTranscription ? '重试补齐引用定位' : '补齐引用定位'
@@ -592,7 +597,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               }}
               onPointerLeave={() => setRailTip(null)}
             >
-              {transcriptAtoms.map(a => (
+              {transcriptRows.map(a => (
                 <div
                   key={`tt-${a.id}`}
                   className="tl-seg t-transcript"
@@ -635,6 +640,13 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
         )}
         {transcriptRows.length > 0 && (
           <div id="transcript" className="transcript-list">
+            {timeline?.alignment_available && transcriptAtoms.some(atom => atom.time_range_status !== 'exact') && (
+              <div className="transcript-upgrade">
+                <b>可以补齐句子回放时间</b>
+                <p>将已有文字与视频音频逐句对齐，改善回放定位与跨片段连续性。</p>
+                <button className="btn btn-sm" disabled={readOnly || busy !== '' || processing} onClick={() => setPendingAction({ kind: 'align', title: '对齐句子时间？', body: '会复用已有识别文字，在本地对齐音频时间并更新检索索引。对齐不会再次调用语音识别；重建索引可能产生 Embedding 费用。历史回答和引用快照保留。', confirmLabel: '开始对齐' })}>对齐句子时间</button>
+              </div>
+            )}
             {(citationUpgradeAvailable || resumeTranscription) && <div className="transcript-upgrade">
               <b>{resumeTranscription ? '本次引用定位补齐尚未完成' : '旧转写的引用定位可以补齐'}</b>
               <p>{resumeTranscription ? '仍在使用之前保存的转写与引用时间。重试会继续处理未完成部分，保留已完成分片。' : '当前转写只有较长的原片段时间。重新识别音频后，新回答会使用更短的语音片段定位；历史回答保留原有引用。'}</p>
@@ -813,7 +825,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
             onNeedRefresh={refreshPlaybackUrl}
             fallbackText={failed ? '任务处理失败,暂无可用播放源' : '播放源暂不可用,文件可能仍在处理'}
           />
-          <p className="workbench-capability" role="status">{task.has_transcription ? processing && transcriptionRelevant ? '正在更新转写与引用定位，完成前仍使用之前保存的内容。' : transcriptionIncomplete ? '本次转写尚未完成，当前仍使用之前保存的转写与引用定位。' : checkingTranscription ? '正在核对本次转写进度，已保存的内容仍可查看。' : index?.indexed ? '转写与检索已就绪，可提问并核对引用。' : '转写可阅读；快速问答可使用摘要或转写，检索引用尚未就绪。' : studyCapability.ready ? '画面内容可整理笔记；画面问答需建立检索索引。' : visualCapability.ready ? '视频已导入：讲解视频可开始转写，无声演示可直接分析画面。' : visualCapability.reason}</p>
+          <p className="workbench-capability" role="status">{task.has_transcription ? processing && transcriptionRelevant ? '正在更新转写与引用定位，完成前仍使用之前保存的内容。' : alignmentIncomplete ? '句子时间对齐未完成，之前保存的转写仍可查看。' : transcriptionIncomplete ? '本次转写尚未完成，当前仍使用之前保存的转写与引用定位。' : checkingTranscription ? '正在核对本次转写进度，已保存的内容仍可查看。' : index?.indexed ? '转写与检索已就绪，可提问并核对引用。' : '转写可阅读；快速问答可使用摘要或转写，检索引用尚未就绪。' : studyCapability.ready ? '画面内容可整理笔记；画面问答需建立检索索引。' : visualCapability.ready ? '视频已导入：讲解视频可开始转写，无声演示可直接分析画面。' : visualCapability.reason}</p>
           {!readOnly && !ai.ready && <div className="artifact-notice" role="status"><span>{ai.reason}</span>{ai.error ? <button className="btn btn-sm" onClick={() => void ai.refetch()}>重试</button> : <a className="btn btn-sm" href="/settings" target="_blank" rel="noopener noreferrer">配置 AI</a>}</div>}
           <section className="workbench-commands" aria-label="视频学习操作">
             <div className="workbench-primary">
@@ -844,7 +856,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
               </div>
             )}
             {transcriptionRelevant && <TranscriptionProgressPanel task={task} onProgress={setTranscriptionProgress} />}
-            {(visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel task={task} />}
+            {!transcriptionProgress?.alignment_only && (visualProcessing || taskVisualMode(task) !== 'off' && (task.stage === 'transcribing' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe')) && <VisualProgressPanel task={task} />}
             {processing && canGenerateSummary(task) && <p className="muted" role="status">转写已保存，可以生成摘要；画面分析和检索索引会继续处理。</p>}
             {study.error && <div className="artifact-notice" role="status">{study.error}</div>}
 
@@ -888,7 +900,7 @@ export default function VideoWorkbenchPage({ params, searchParams }: { params: {
                         style={{ marginTop: 10 }}
                         disabled={busy !== '' || readOnly}
                         onClick={() => task.last_job_type === 'visual' ? openVisualSettings() : setPendingAction({
-                          kind: summaryFailure || task.last_job_type === 'analyze' ? 'analyze' : task.last_job_type === 'index' ? 'index' : 'transcribe',
+                          kind: summaryFailure || task.last_job_type === 'analyze' ? 'analyze' : task.last_job_type === 'index' ? 'index' : transcriptionProgress?.alignment_only ? 'align' : 'transcribe',
                           title: '重新提交任务?',
                           body: summaryFailure ? `${summaryFailure.advice} 重新提交可能再次消耗模型额度。` : '失败步骤会重新入队,可能再次消耗模型额度。',
                           confirmLabel: '重试',

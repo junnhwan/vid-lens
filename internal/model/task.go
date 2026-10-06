@@ -34,6 +34,7 @@ const (
 	TaskStageDownloading  = "downloading"
 	TaskStageUploaded     = "uploaded"
 	TaskStageTranscribing = "transcribing"
+	TaskStageAligning     = "aligning"
 	TaskStageVisual       = "visual_indexing" // keyframe OCR; best-effort after ASR
 	TaskStageSummarizing  = "summarizing"
 	TaskStageIndexing     = "indexing"

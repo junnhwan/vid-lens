@@ -53,6 +53,7 @@ const STAGE_LABELS: Record<TaskStage, string> = {
   downloading: '下载中',
   uploaded: '已上传',
   transcribing: 'ASR 转写中',
+  aligning: '对齐句子时间中',
   visual_indexing: '画面分析中',
   summarizing: '生成摘要中',
   indexing: '构建检索索引中',
@@ -64,7 +65,7 @@ export function stageLabel(stage: TaskStage): string {
 
 function queuedStageLabel(stage: TaskStage): string {
   const names: Partial<Record<TaskStage, string>> = {
-    downloading: '等待下载', transcribing: '等待转写启动或并发名额', visual_indexing: '等待画面分析',
+    downloading: '等待下载', transcribing: '等待转写启动或并发名额', aligning: '等待对齐句子时间', visual_indexing: '等待画面分析',
     summarizing: '等待生成摘要', indexing: '等待检索索引',
   }
   return names[stage] || '等待任务启动'

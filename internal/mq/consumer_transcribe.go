@@ -52,10 +52,26 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	defer stopLease()
 	task.TraceID = traceIDForTask(payload.TraceID, task)
 	ctx = c.contextForTaskJob(ctx, task, TaskJobTranscribe, payload.BudgetID)
+	job, err := c.repo.TaskJob.FindByTaskAndType(task.ID, TaskJobTranscribe)
+	if err != nil {
+		return err
+	}
+	alignmentOnly := job != nil && job.TranscriptAlignmentOnly
+	recordFailure := func(failure error) error {
+		stage := model.TaskStageTranscribing
+		current, _ := c.repo.Task.FindByID(task.ID)
+		if alignmentOnly || current != nil && current.Stage == model.TaskStageAligning {
+			stage = model.TaskStageAligning
+		}
+		return c.recordTaskFailure(task.ID, TaskJobTranscribe, stage, failure, claim.Token)
+	}
 	// The visual branch starts from the video task, not from an ASR success.
 	// Its independent download is intentional until the storage adapter exposes
 	// a safe shared local-asset lease.
-	waitVisual := c.startVisualIndexBranch(ctx, task)
+	waitVisual := func() visualIndexOutcome { return visualIndexOutcome{} }
+	if !alignmentOnly {
+		waitVisual = c.startVisualIndexBranch(ctx, task)
+	}
 	defer waitVisual()
 
 	videoPath, err := c.storage.DownloadToTemp(ctx, task.FileURL)
@@ -63,7 +79,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
 			return degradeErr
 		}
-		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+		return recordFailure(err)
 	}
 	defer os.Remove(videoPath)
 
@@ -74,24 +90,25 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
 			return degradeErr
 		}
-		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+		return recordFailure(err)
 	}
 	defer os.Remove(audioPath)
 
-	taskAI, err := c.strategyForTask(task)
-	if err != nil {
-		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
-			return degradeErr
+	var transcript string
+	if alignmentOnly {
+		transcript, err = c.alignExistingTranscript(ctx, task.ID, audioPath)
+	} else {
+		taskAI, strategyErr := c.strategyForTask(task)
+		if strategyErr != nil {
+			return recordFailure(strategyErr)
 		}
-		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+		transcript, err = c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	}
-
-	transcript, err := c.transcribeAudio(ctx, task.ID, audioPath, taskAI)
 	if err != nil {
 		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
 			return degradeErr
 		}
-		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+		return recordFailure(err)
 	}
 
 	if err := requireProcessingLease(ctx); err != nil {
@@ -99,12 +116,18 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	}
 	persistStartedAt := time.Now()
 	if err := c.runLeasedSideEffect(ctx, func(repos *repository.Repositories) error {
+		// Alignment-only publishes source timing and the corpus atomically.
+		// A new ASR run must invalidate even if it recognized identical text:
+		// its source identities and native timing can still have changed.
+		if alignmentOnly {
+			return nil
+		}
 		return repos.SaveTranscriptionAndInvalidateIndex(&model.VideoTranscription{
 			TaskID: task.ID, FileMD5: task.FileMD5, Content: transcript, Words: len([]rune(transcript)),
 		})
 	}); err != nil {
 		c.recordASRStage(ctx, task.ID, "persistence", "failed", time.Since(persistStartedAt))
-		return c.recordTaskFailure(payload.TaskID, TaskJobTranscribe, model.TaskStageTranscribing, err, claim.Token)
+		return recordFailure(err)
 	}
 	c.recordASRStage(ctx, task.ID, "persistence", "success", time.Since(persistStartedAt))
 	if err := requireProcessingLease(ctx); err != nil {
@@ -117,8 +140,10 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	if err != nil {
 		return err
 	}
-	if err := c.generateTitle(ctx, task, transcript); err != nil {
-		return err
+	if !alignmentOnly {
+		if err := c.generateTitle(ctx, task, transcript); err != nil {
+			return err
+		}
 	}
 	return c.completeTranscribeAfterIndex(ctx, task, claim.Token, ragEnqueued)
 }
@@ -415,26 +440,42 @@ func (c *Consumer) transcribeAudio(ctx context.Context, taskID int64, audioPath 
 	if err := requireProcessingLease(ctx); err != nil {
 		return "", err
 	}
-	compactParts := make([]string, 0, len(parts))
-	speechWindows := make([]ffmpeg.AudioSegment, 0, len(parts))
-	for i, part := range parts {
-		if strings.TrimSpace(part) != "" {
-			compactParts = append(compactParts, part)
-			speechWindows = append(speechWindows, segments[i])
+	rows := make([]model.VideoTranscriptionChunk, len(segments))
+	for i, segment := range segments {
+		rows[i] = model.VideoTranscriptionChunk{TaskID: taskID, ChunkIndex: i, Content: parts[i], Status: model.TranscriptionChunkStatusCompleted,
+			SegmentKey: segment.SegmentKey, SegmenterVersion: segment.Version,
+			WindowStartMS: segment.WindowStartMS, WindowEndMS: segment.WindowEndMS, CoreStartMS: segment.CoreStartMS, CoreEndMS: segment.CoreEndMS}
+		if c.repo != nil && c.repo.TranscriptionChunk != nil {
+			stored, err := c.repo.TranscriptionChunk.FindByTaskAndIndex(taskID, i)
+			if err != nil {
+				return "", err
+			}
+			if stored != nil && stored.SegmentKey == segment.SegmentKey {
+				rows[i] = *stored
+			}
 		}
 	}
-	if len(compactParts) == 0 {
-		return "", fmt.Errorf("ASR 返回空结果")
+	if c.transcriptAligner != nil {
+		needsAlignment := false
+		for _, row := range rows {
+			var words []model.TranscriptionSegment
+			if json.Unmarshal([]byte(row.TimedSegments), &words) != nil || transcript.ValidateAlignedWords(row, words) != nil {
+				needsAlignment = true
+				break
+			}
+		}
+		if needsAlignment {
+			content, err := c.alignTranscriptRows(ctx, taskID, audioPath, rows)
+			if err != nil {
+				return "", fmt.Errorf("逐句时间对齐失败（已完成的 ASR 可复用）: %w", err)
+			}
+			return content, nil
+		}
 	}
-
 	stitchStartedAt := time.Now()
-	stitched := transcript.Stitch(compactParts)
-	if !hasOverlappingAudioWindows(speechWindows) {
-		// Compatibility adapters and historical tests provide path-only chunks.
-		// Without proof that the audio inputs overlap, deduplicating equal text
-		// could destroy legitimately repeated speech.
-		// A silent window can also separate identical, independently spoken text.
-		stitched = transcript.StitchResult{Content: strings.Join(compactParts, "\n\n")}
+	stitched := transcript.Assemble(rows)
+	if strings.TrimSpace(stitched.Content) == "" {
+		return "", fmt.Errorf("ASR 返回空结果")
 	}
 	c.recordASRStage(ctx, taskID, "stitch", "success", time.Since(stitchStartedAt))
 	matchedBoundaries := 0

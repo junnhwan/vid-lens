@@ -6,7 +6,7 @@ import VideoWorkbenchPage from './page'
 
 const mock = vi.hoisted(() => ({
   getTask: vi.fn(), getTimeline: vi.fn(), getRagIndex: vi.fn(), playbackSrc: vi.fn(), downloadMedia: vi.fn(),
-  transcribe: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), aiReady: false,
+  transcribe: vi.fn(), alignTranscript: vi.fn(), getTranscriptionProgress: vi.fn(), seek: vi.fn(), aiReady: false,
   onPlayhead: undefined as ((ms: number, playing: boolean) => void) | undefined,
   toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() },
 }))
@@ -39,6 +39,55 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn()
 })
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); mock.aiReady = false; mock.onPlayhead = undefined })
+
+test('sentence alignment confirms reuse and invokes alignment without forced ASR', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, alignment_available: true, atoms: [{ id: 'window', modality: 'transcript', content: '已有的转写文字。', start_ms: 0, end_ms: 22000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.alignTranscript.mockResolvedValue({ task_id: 42 })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: '对齐句子时间' }))
+  expect(screen.getByText(/对齐不会再次调用语音识别/)).toBeTruthy()
+  expect(mock.alignTranscript).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '开始对齐' }))
+  await waitFor(() => expect(mock.alignTranscript).toHaveBeenCalledWith(42))
+  expect(mock.transcribe).not.toHaveBeenCalled()
+})
+
+test('aligned words across a window form one reading sentence and seek its observed start', async () => {
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [
+    { id: 'first', modality: 'transcript', content: '这是', start_ms: 19040, end_ms: 19760, time_range_status: 'exact' },
+    { id: 'second', modality: 'transcript', content: '完整的一句话。', start_ms: 19840, end_ms: 22160, time_range_status: 'exact' },
+  ] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  expect(await screen.findByText('这是完整的一句话。')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '回放 00:19' }))
+  expect(mock.seek).toHaveBeenCalledWith(19040, true, undefined)
+  expect(screen.queryByText('约定位')).toBeNull()
+})
+
+test('failed alignment retry stays alignment-only and retains previous text', async () => {
+  mock.aiReady = true
+  mock.getTask.mockResolvedValue({ ...task, has_transcription: true, status: 4, stage: 'aligning', last_job_type: 'transcribe' })
+  mock.getTimeline.mockResolvedValue({ task_id: 42, atoms: [{ id: 'window', modality: 'transcript', content: '原先保存的转写。', start_ms: 0, end_ms: 22000, time_range_status: 'coarse' }] })
+  mock.getRagIndex.mockResolvedValue({ task_id: 42, status: 'indexed', indexed: true, chunks: 1 })
+  mock.playbackSrc.mockResolvedValue('/playback')
+  mock.getTranscriptionProgress.mockResolvedValue({ ...unfinishedProgress, alignment_only: true, job_status: 4 })
+  mock.alignTranscript.mockResolvedValue({ task_id: 42 })
+  render(<VideoWorkbenchPage params={{ id: '42' }} />)
+  expect(await screen.findByText('句子时间对齐未完成，保留之前保存的转写与定位。')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '重试补齐引用定位' })).toBeNull()
+  expect(screen.getByText('原先保存的转写。')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /^重试$/ }))
+  fireEvent.click(screen.getAllByRole('button', { name: /^重试$/ })[1])
+  await waitFor(() => expect(mock.alignTranscript).toHaveBeenCalledWith(42))
+  expect(mock.transcribe).not.toHaveBeenCalled()
+})
 
 test('download of an existing video works when AI is unavailable', async () => {
   mock.getTask.mockResolvedValue(task)

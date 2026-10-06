@@ -158,13 +158,16 @@ type AIConfig struct {
 }
 
 type ToolsConfig struct {
-	FFmpegPath        string   `yaml:"ffmpeg_path"`
-	YtDlpPath         string   `yaml:"ytdlp_path"`
-	OCRPath           string   `yaml:"ocr_path"`
-	OCRLang           string   `yaml:"ocr_lang"`
-	CookiesPath       string   `yaml:"cookies_path"`
-	ProxyURL          string   `yaml:"proxy_url"`
-	AllowedVideoHosts []string `yaml:"allowed_video_hosts"`
+	// An argv array, never a shell command. Empty leaves native ASR timing
+	// available and reports text-only providers honestly as coarse.
+	TranscriptAlignerCommand []string `yaml:"transcript_aligner_command"`
+	FFmpegPath               string   `yaml:"ffmpeg_path"`
+	YtDlpPath                string   `yaml:"ytdlp_path"`
+	OCRPath                  string   `yaml:"ocr_path"`
+	OCRLang                  string   `yaml:"ocr_lang"`
+	CookiesPath              string   `yaml:"cookies_path"`
+	ProxyURL                 string   `yaml:"proxy_url"`
+	AllowedVideoHosts        []string `yaml:"allowed_video_hosts"`
 }
 
 type JWTConfig struct {

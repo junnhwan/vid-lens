@@ -209,6 +209,7 @@ export const api = {
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
   transcribe: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST'),
+  alignTranscript: (id: number) => req<{ task_id: number }>(`/media/transcribe/${id}?align=1`, 'POST'),
   analyze: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),
   getRagIndex: (id: number) => req<RAGIndexResult>(`/media/task/${id}/rag-index`, 'GET'),

@@ -10,9 +10,9 @@ export function splitForReading(content: string): string[] {
   if (trimmed.length <= MAX_CHUNK) return [trimmed]
   const parts = trimmed.match(SENTENCE)
   if (!parts || parts.length <= 1) {
-    const hard: string[] = []
-    for (let i = 0; i < trimmed.length; i += MAX_CHUNK) hard.push(trimmed.slice(i, i + MAX_CHUNK))
-    return hard
+    // Wrapping and expansion handle long utterances. A character-count cut
+    // can split an English word or a Chinese sentence without a speech break.
+    return [trimmed]
   }
   const chunks: string[] = []
   let buf = ''
@@ -37,19 +37,30 @@ export interface TimedText {
   time_range_status?: string
 }
 
-// Reading paragraphs belong inside a single observed source window. Merge
-// adjacent projections with that same window; never invent per-paragraph time.
-export function groupTranscriptSources<T extends TimedText>(atoms: T[]): (T & { paragraphs: string[] })[] {
-  const groups: (T & { paragraphs: string[] })[] = []
+// Acoustic words form sentence reading rows across windows. Coarse legacy
+// projections remain grouped by their measured window; no times are invented.
+export function groupTranscriptSources<T extends TimedText>(atoms: T[]): (T & { paragraphs: string[]; source_ids: string[] })[] {
+  const groups: (T & { paragraphs: string[]; source_ids: string[] })[] = []
   for (const atom of atoms) {
     const paragraphs = splitForReading(atom.content)
     if (!paragraphs.length) continue
     const status = atom.time_range_status || 'coarse'
     const previous = groups[groups.length - 1]
     const timed = status !== 'unknown' && Number.isFinite(atom.start_ms) && Number.isFinite(atom.end_ms) && atom.start_ms >= 0 && atom.end_ms > atom.start_ms
-    if (timed && previous && previous.time_range_status === status && previous.start_ms === atom.start_ms && previous.end_ms === atom.end_ms) {
+    const continuousSpeech = timed && status === 'exact' && previous?.time_range_status === 'exact'
+      && atom.start_ms >= previous.start_ms && atom.start_ms - previous.end_ms <= 2000
+      && !/[。！？!?；;.]\s*[”’"）)]?\s*$/.test(previous.content)
+    if (continuousSpeech && previous) {
+      // Acoustic word positions supply time, sentence punctuation supplies
+      // reading boundaries. Crossing an ASR window does not create a new row.
+      previous.content += atom.content
+      previous.end_ms = Math.max(previous.end_ms, atom.end_ms)
+      previous.paragraphs = splitForReading(previous.content)
+      previous.source_ids.push(atom.id)
+    } else if (timed && status !== 'exact' && previous && previous.time_range_status === status && previous.start_ms === atom.start_ms && previous.end_ms === atom.end_ms) {
       previous.paragraphs.push(...paragraphs)
-    } else groups.push({ ...atom, time_range_status: status, paragraphs })
+      previous.source_ids.push(atom.id)
+    } else groups.push({ ...atom, time_range_status: status, paragraphs, source_ids: [atom.id] })
   }
   return groups
 }

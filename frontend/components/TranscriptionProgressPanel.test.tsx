@@ -27,6 +27,22 @@ const progress: TranscriptionProgress = {
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers() })
 
+test('completed ASR windows do not make a running sentence alignment look finished', async () => {
+  vi.mocked(api.getTranscriptionProgress).mockResolvedValue({ ...progress, alignment_only: true, stage: 'aligning' })
+  render(<TranscriptionProgressPanel task={{ ...task, stage: 'aligning' }} compact />)
+  expect(await screen.findByText(/正在将已识别的文字与音频对齐/)).toBeTruthy()
+  expect(screen.queryByText(/转写分片已完成/)).toBeNull()
+  expect(screen.queryByText(/句子时间对齐已完成/)).toBeNull()
+})
+
+test('failed sentence alignment preserves completed ASR and reports the actual failed step', async () => {
+  vi.mocked(api.getTranscriptionProgress).mockResolvedValue({ ...progress, alignment_only: true, stage: 'aligning', job_status: 4 })
+  render(<TranscriptionProgressPanel task={{ ...task, status: 4, stage: 'aligning' }} compact />)
+  expect(await screen.findByText(/句子时间对齐未完成，保留之前保存的转写与定位/)).toBeTruthy()
+  expect(screen.queryByText(/转写分片已完成/)).toBeNull()
+  expect(screen.queryByText(/转写失败/)).toBeNull()
+})
+
 test('completed ASR chunks are not reported as stalled while visual processing continues', async () => {
   vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-29T00:07:00Z'))
   vi.mocked(api.getTranscriptionProgress).mockResolvedValue(progress)

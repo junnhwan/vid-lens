@@ -1,0 +1,2 @@
+mlx-audio==0.5.7; sys_platform == "darwin" and platform_machine == "arm64"
+qwen-asr==0.0.6; sys_platform != "darwin" or platform_machine != "arm64"

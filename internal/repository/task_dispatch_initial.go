@@ -29,6 +29,12 @@ func (r *Repositories) PrepareInitialTaskDispatch(req InitialTaskDispatchRequest
 		if err := repos.TaskJob.UpsertQueued(task, req.JobType, req.Stage, task.MaxRetries); err != nil {
 			return fmt.Errorf("prepare initial task job: %w", err)
 		}
+		if req.JobType == model.TaskJobTypeTranscribe {
+			if err := repos.db.Model(&model.TaskJob{}).Where("task_id = ? AND job_type = ?", task.ID, req.JobType).
+				Update("transcript_alignment_only", req.TranscriptAlignmentOnly).Error; err != nil {
+				return err
+			}
+		}
 		budgetID, err := repos.ensureTaskJobRetryBudget(task.ID, req.JobType, req.Now)
 		if err != nil {
 			return fmt.Errorf("prepare initial retry budget: %w", err)

@@ -9,9 +9,9 @@ const (
 	RAGIndexStatusFailed       = "failed"
 	RAGIndexStatusNeedsRebuild = "needs_rebuild"
 
-	CurrentRAGIndexBuildVersion    = 5
-	CurrentRAGSourceMappingVersion = "source-map-v3-timed-spans"
-	CurrentRAGChunkerVersion       = "recursive-sentence-source-v3"
+	CurrentRAGIndexBuildVersion    = 7
+	CurrentRAGSourceMappingVersion = "source-map-v5-aligned-sentences"
+	CurrentRAGChunkerVersion       = "recursive-sentence-source-v4"
 )
 
 type VideoRAGIndex struct {

@@ -11,6 +11,7 @@ const STAGE_ORDER = [
 ] as const
 
 function stageIndex(stage: string): number {
+  if (stage === 'aligning') return 3
   const i = (STAGE_ORDER as readonly string[]).indexOf(stage)
   return i < 0 ? 0 : i
 }
@@ -47,7 +48,9 @@ export function processBeats(task: {
   const completed = task.status === 3
 
   const ingest: ProcessBeatState = i >= 2 || completed ? 'done' : running && i <= 1 ? 'running' : 'queued'
-  const asr: ProcessBeatState = task.has_transcription
+  const asr: ProcessBeatState = running && task.stage === 'aligning'
+    ? 'running'
+    : task.has_transcription
     ? 'done'
     : running && i === 3
       ? 'running'

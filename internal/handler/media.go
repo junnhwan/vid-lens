@@ -236,7 +236,8 @@ func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
 	taskID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	force := parseForceFlag(c)
 
-	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID, force); err != nil {
+	alignOnly := c.Query("align") == "1"
+	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID, force, alignOnly); err != nil {
 		response.Fail(c, 400, err.Error())
 		return
 	}

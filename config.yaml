@@ -86,6 +86,9 @@ ai:
 tools:
   # Prefer local .env overrides; fall back to binaries available on PATH.
   ffmpeg_path: "ffmpeg"
+  # Optional JSON argv override: VIDLENS_TRANSCRIPT_ALIGNER_COMMAND.
+  # See docs/architecture/transcript-continuity.md for local model setup.
+  transcript_aligner_command: []
   # 重叠 ASR 时间窗还会使用同目录、同扩展名的 ffprobe 可执行文件。
   # Optional. Missing binary => visual OCR stage skipped (ASR-only).
   ocr_path: "tesseract"
