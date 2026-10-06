@@ -226,7 +226,7 @@ func (h *AIProfileHandler) ProbeCapability(c *gin.Context) {
 		response.BadRequest(c, "探测参数格式错误")
 		return
 	}
-	dim, err := h.svc.ProbeCapability(c.Request.Context(), middleware.GetUserID(c), req)
+	result, err := h.svc.ProbeCapabilityReport(c.Request.Context(), middleware.GetUserID(c), req)
 	if err != nil {
 		if errors.Is(err, service.ErrAIProfileNotFound) {
 			response.Fail(c, 404, "配置不存在")
@@ -235,7 +235,7 @@ func (h *AIProfileHandler) ProbeCapability(c *gin.Context) {
 		response.BadRequest(c, safeProbeError(err))
 		return
 	}
-	response.OK(c, gin.H{"dimension": dim})
+	response.OK(c, result)
 }
 
 // Provider bodies and transport errors may contain credentials or request URLs.

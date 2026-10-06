@@ -7,6 +7,7 @@ import (
 
 	"vid-lens/internal/ai"
 	"vid-lens/internal/config"
+	"vid-lens/internal/runtimecheck"
 )
 
 var ErrRerankUnavailable = errors.New("当前 AI 服务未配置可用的检索重排，请先检查 AI 配置")
@@ -21,6 +22,7 @@ type userOptionalCapabilities struct {
 	retrieval           RAGRetrievalConfig
 	alignmentConfigured bool
 	tools               config.ToolsConfig
+	inspector           *runtimecheck.Inspector
 }
 
 type OptionalCapabilitiesView struct {
@@ -37,6 +39,7 @@ type OptionalCapabilitiesView struct {
 func (s *UserService) WithCapabilityTools(tools config.ToolsConfig) *UserService {
 	if s.optionalCapabilities != nil {
 		s.optionalCapabilities.tools = tools
+		s.optionalCapabilities.inspector = runtimecheck.New(tools)
 	}
 	return s
 }
@@ -52,7 +55,7 @@ func (s *UserService) OptionalCapabilities(ctx context.Context, userID int64) (*
 		return nil, err
 	}
 	view := &OptionalCapabilitiesView{RerankEnabled: enabled, RerankMode: RerankerModeNone}
-	defer func() { s.projectCapabilities(view) }()
+	defer func() { s.projectCapabilities(ctx, view) }()
 	cfg := s.optionalCapabilities
 	if cfg == nil {
 		view.RerankReason = "rerank_not_configured"
@@ -75,6 +78,20 @@ func (s *UserService) OptionalCapabilities(ctx context.Context, userID int64) (*
 		return nil, err
 	}
 	view.Capabilities = modelCapabilityStates(*profile)
+	if health, ok := cfg.profiles.(interface {
+		CapabilityProbeHealth(int64) (map[string]CapabilityProbeResult, error)
+	}); ok {
+		observations, err := health.CapabilityProbeHealth(userID)
+		if err == nil {
+			for n := range view.Capabilities {
+				state := &view.Capabilities[n]
+				if result, found := observations[state.Key]; found && state.Model == result.Model {
+					state.Health = result.Health
+					state.CheckedAt = &result.TestedAt
+				}
+			}
+		}
+	}
 	if !cfg.ragEnabled {
 		view.RerankReason = "rag_disabled"
 		return view, nil
@@ -115,6 +132,6 @@ func (s *UserService) SetRerankPreference(ctx context.Context, userID int64, ena
 		return nil, err
 	}
 	view.RerankEnabled = enabled
-	s.projectCapabilities(view)
+	s.projectCapabilities(ctx, view)
 	return view, nil
 }

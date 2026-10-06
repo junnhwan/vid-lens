@@ -43,7 +43,10 @@ export interface CapabilityState {
   user_enabled: boolean | null
   available: boolean
   effective_enabled: boolean
-  health: 'unchecked' | 'checked_ok' | 'failed'
+  health: 'unchecked' | 'checked_ok' | 'selfcheck_ok' | 'failed'
+  checked_at?: string
+  version?: string
+  install_url?: string
   reason_code?: string
   model?: string
 }

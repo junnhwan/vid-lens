@@ -447,34 +447,42 @@ type ProbeCapabilityRequest struct {
 }
 
 func (s *AIProfileService) ProbeCapability(ctx context.Context, userID int64, req ProbeCapabilityRequest) (int, error) {
+	result, err := s.ProbeCapabilityReport(ctx, userID, req)
+	return result.Dimension, err
+}
+
+func (s *AIProfileService) ProbeCapabilityReport(ctx context.Context, userID int64, req ProbeCapabilityRequest) (CapabilityProbeResult, error) {
 	if req.ProfileID > 0 {
 		if err := s.requireUserOwnedProfile(userID, req.ProfileID); err != nil {
-			return 0, err
+			return CapabilityProbeResult{}, err
 		}
 	}
 	purpose := strings.ToLower(strings.TrimSpace(req.Purpose))
 	if purpose != "llm" && purpose != "asr" && purpose != "embedding" && purpose != "vision" {
-		return 0, fmt.Errorf("未知模型能力")
+		return CapabilityProbeResult{}, fmt.Errorf("未知模型能力")
 	}
 	prober, ok := s.tester.(interface {
 		ProbeCapability(context.Context, *DecryptedAIProfile, string) (int, error)
 	})
 	if !ok {
-		return 0, fmt.Errorf("模型探测暂不可用")
+		return CapabilityProbeResult{}, fmt.Errorf("模型探测暂不可用")
 	}
 	base, key, modelName := strings.TrimSpace(req.BaseURL), strings.TrimSpace(req.APIKey), strings.TrimSpace(req.Model)
 	provider := strings.TrimSpace(req.Provider)
 	if req.ProfileID > 0 {
 		stored, err := s.repo.FindByIDForUser(userID, req.ProfileID)
 		if err != nil {
-			return 0, err
+			return CapabilityProbeResult{}, err
 		}
 		if stored == nil {
-			return 0, ErrAIProfileNotFound
+			return CapabilityProbeResult{}, ErrAIProfileNotFound
 		}
 		p, err := s.decryptProfile(stored)
 		if err != nil {
-			return 0, err
+			return CapabilityProbeResult{}, err
+		}
+		if req.EmbeddingDim == 0 {
+			req.EmbeddingDim = p.EmbeddingDim
 		}
 		switch purpose {
 		case "llm":
@@ -532,10 +540,10 @@ func (s *AIProfileService) ProbeCapability(ctx context.Context, userID int64, re
 		}
 	}
 	if base == "" || key == "" || modelName == "" {
-		return 0, fmt.Errorf("请先填写该能力的地址、模型和 API Key")
+		return CapabilityProbeResult{}, fmt.Errorf("请先填写该能力的地址、模型和 API Key")
 	}
 	if err := ai.ValidateProbeURL(base); err != nil {
-		return 0, err
+		return CapabilityProbeResult{}, err
 	}
 	p := &DecryptedAIProfile{}
 	switch purpose {
@@ -548,7 +556,8 @@ func (s *AIProfileService) ProbeCapability(ctx context.Context, userID int64, re
 	case "vision":
 		p.VisionBaseURL, p.VisionAPIKey, p.VisionModel, p.VisionProvider = base, key, modelName, provider
 	}
-	return prober.ProbeCapability(ctx, p, purpose)
+	dim, err := prober.ProbeCapability(ctx, p, purpose)
+	return s.rememberProbe(userID, req.ProfileID, purpose, p, dim, err), err
 }
 
 func (s *AIProfileService) GetDefaultDecrypted(userID int64) (*DecryptedAIProfile, error) {

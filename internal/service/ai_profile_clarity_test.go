@@ -90,3 +90,49 @@ func TestAnswerPreferenceDoesNotReplaceEvidenceInstruction(t *testing.T) {
 		t.Fatalf("answer preference order = %+v", messages)
 	}
 }
+
+func TestCapabilityProbeMetadataIsBoundToSavedConfigAndOwnership(t *testing.T) {
+	svc, _, _ := newAIProfileServiceForTest(t)
+	created, err := svc.Create(7, validAIProfileRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.tester = &recordingCapabilityProber{}
+	result, err := svc.ProbeCapabilityReport(context.Background(), 7, ProbeCapabilityRequest{Purpose: "llm", ProfileID: created.ID})
+	if err != nil || result.Model != created.LLMModel || result.TestedAt.IsZero() {
+		t.Fatalf("%+v %v", result, err)
+	}
+	health, err := svc.CapabilityProbeHealth(7)
+	if err != nil || health["llm"].Health != "checked_ok" {
+		t.Fatalf("%+v %v", health, err)
+	}
+	other, _ := svc.CapabilityProbeHealth(8)
+	if len(other) != 0 {
+		t.Fatal("cross-user health leak")
+	}
+	_, err = svc.ProbeCapabilityReport(context.Background(), 7, ProbeCapabilityRequest{Purpose: "llm", ProfileID: created.ID, Model: "unsaved-draft"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	health, _ = svc.CapabilityProbeHealth(7)
+	if health["llm"].Model == "unsaved-draft" {
+		t.Fatal("draft certified stored config")
+	}
+	update := validAIProfileRequest()
+	update.LLMModel = "changed-model"
+	if _, err = svc.Update(7, created.ID, update); err != nil {
+		t.Fatal(err)
+	}
+	health, _ = svc.CapabilityProbeHealth(7)
+	if _, ok := health["llm"]; ok {
+		t.Fatal("stale probe survived configuration change")
+	}
+	update.LLMModel = created.LLMModel
+	if _, err = svc.Update(7, created.ID, update); err != nil {
+		t.Fatal(err)
+	}
+	health, _ = svc.CapabilityProbeHealth(7)
+	if _, ok := health["llm"]; ok {
+		t.Fatal("reverting config resurrected old health")
+	}
+}

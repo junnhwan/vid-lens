@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { api, getToken } from '@/lib/api'
 import type { CapabilityActionKey } from '@/lib/types'
 
-const labels: Record<string, string> = { llm: '对话模型', asr: '语音识别', embedding: '向量模型', vision: '视觉理解', ocr: '本地 OCR', alignment: '句子对齐', rerank: '检索重排' }
+const labels: Record<string, string> = { llm: '对话模型', asr: '语音识别', embedding: '向量模型', vision: '视觉理解', ocr: '本地 OCR', alignment: '句子对齐', rerank: '检索重排', ffmpeg: '媒体处理' }
 const reasons: Record<string, string> = {
+  ocr_language_missing: 'OCR 语言包缺失，请查看设置中的安装说明', model_manifest_stale: '模型权重已变化，请更新对齐版本清单', model_manifest_missing: '对齐模型尚未生成版本清单', model_missing: '本地对齐模型尚未安装', dependencies_missing: 'Python 推理依赖尚未安装', runtime_version_mismatch: '推理依赖版本不匹配', ffprobe_missing: 'FFprobe 未安装或路径不匹配', selfcheck_failed: '本地依赖自检失败或超时，请查看安装说明',
   missing_configuration: '请补齐本次操作所需的默认 AI 配置', hosted_paused: 'Free API 暂停，可在设置中选择自己的 API 配置',
   deployment_disabled: '服务端尚未开启本次操作所需能力', dependency_missing: '本次操作的本地依赖尚未安装', user_disabled: '此能力已关闭',
 }

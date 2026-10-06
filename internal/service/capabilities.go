@@ -1,21 +1,26 @@
 package service
 
 import (
+	"context"
 	"os/exec"
+	"time"
 	"vid-lens/internal/ai"
 )
 
 type CapabilityState struct {
-	Key               string `json:"key"`
-	Activation        string `json:"activation"`
-	Configured        bool   `json:"configured"`
-	DeploymentEnabled bool   `json:"deployment_enabled"`
-	UserEnabled       *bool  `json:"user_enabled"`
-	Available         bool   `json:"available"`
-	EffectiveEnabled  bool   `json:"effective_enabled"`
-	Health            string `json:"health"`
-	ReasonCode        string `json:"reason_code,omitempty"`
-	Model             string `json:"model,omitempty"`
+	Key               string     `json:"key"`
+	Activation        string     `json:"activation"`
+	Configured        bool       `json:"configured"`
+	DeploymentEnabled bool       `json:"deployment_enabled"`
+	UserEnabled       *bool      `json:"user_enabled"`
+	Available         bool       `json:"available"`
+	EffectiveEnabled  bool       `json:"effective_enabled"`
+	Health            string     `json:"health"`
+	ReasonCode        string     `json:"reason_code,omitempty"`
+	Model             string     `json:"model,omitempty"`
+	CheckedAt         *time.Time `json:"checked_at,omitempty"`
+	Version           string     `json:"version,omitempty"`
+	InstallURL        string     `json:"install_url,omitempty"`
 }
 
 // This is model/tool admission only; it is never a resource authorization token.
@@ -39,7 +44,7 @@ func modelCapabilityStates(p ai.Profile) []CapabilityState {
 	return states
 }
 
-func (s *UserService) projectCapabilities(view *OptionalCapabilitiesView) {
+func (s *UserService) projectCapabilities(ctx context.Context, view *OptionalCapabilitiesView) {
 	if view == nil {
 		return
 	}
@@ -72,6 +77,26 @@ func (s *UserService) projectCapabilities(view *OptionalCapabilitiesView) {
 	}
 	// Alignment configuration is not proof that weights or Python modules work.
 	view.Capabilities = append(view.Capabilities, local("ocr", ocrConfigured, ocrAvailable, "video"), local("alignment", view.AlignmentConfigured, view.AlignmentConfigured, "manual"))
+	if cfg != nil && cfg.inspector != nil {
+		checks := cfg.inspector.Snapshot(ctx)
+		for _, key := range []string{"ffmpeg", "ocr", "alignment", "url_import"} {
+			check := checks[key]
+			state := local(key, key == "ffmpeg" || key == "alignment" && view.AlignmentConfigured || key == "ocr" && cfg.tools.OCRPath != "" || key == "url_import" && cfg.tools.YtDlpPath != "", check.Available, "manual")
+			state.Health, state.ReasonCode, state.CheckedAt, state.Version = check.Health, check.ReasonCode, &check.CheckedAt, check.Version
+			state.InstallURL = "/docs/config#local-dependencies"
+			replaced := false
+			for n := range view.Capabilities {
+				if view.Capabilities[n].Key == key {
+					view.Capabilities[n] = state
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				view.Capabilities = append(view.Capabilities, state)
+			}
+		}
+	}
 	rerank := local("rerank", view.RerankAvailable, view.RerankAvailable, "user")
 	rerank.UserEnabled = &view.RerankEnabled
 	rerank.EffectiveEnabled = view.RerankAvailable && view.RerankEnabled
@@ -92,6 +117,9 @@ func (s *UserService) projectCapabilities(view *OptionalCapabilitiesView) {
 		}
 		if action == "ocr" {
 			keys = []string{"ocr"}
+		}
+		if cfg != nil && cfg.inspector != nil && (action == "transcribe" || action == "align" || action == "ocr" || action == "caption") {
+			keys = append(keys, "ffmpeg")
 		}
 		entry := ActionState{Action: action, Allowed: true, RequiredCapabilities: keys}
 		for _, key := range keys {

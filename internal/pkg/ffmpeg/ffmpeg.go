@@ -140,7 +140,7 @@ func SplitAudioWindows(ctx context.Context, ffmpegPath, inputPath string, segmen
 	}
 	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 
-	durationMS, err := ProbeDurationMs(ctx, companionFFprobePath(ffmpegPath), inputPath)
+	durationMS, err := ProbeDurationMs(ctx, CompanionFFprobePath(ffmpegPath), inputPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("探测 ASR 音频时长失败: %w", err)
 	}
@@ -224,7 +224,7 @@ func formatFFmpegSeconds(milliseconds int64) string {
 	return strconv.FormatFloat(float64(milliseconds)/1000, 'f', 3, 64)
 }
 
-func companionFFprobePath(ffmpegPath string) string {
+func CompanionFFprobePath(ffmpegPath string) string {
 	ffmpegPath = defaultFFmpegPath(ffmpegPath)
 	// filepath follows the host OS, so a Windows path used by a config file
 	// must be handled explicitly when the config is inspected on macOS/Linux.

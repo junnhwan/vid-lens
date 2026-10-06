@@ -40,6 +40,7 @@ jobs:
           bash deploy/server-deploy_test.sh
           bash deploy/frontend-deploy_test.sh
           python3 -m unittest discover -s deploy -p '*_test.py' -v
+          python3 tools/transcript_align_test.py
       - name: Check and build frontend
         working-directory: frontend
         env:

@@ -38,6 +38,17 @@ export default function DocsConfigPage() {
         向量检查会核对实际输出维度；语音检查使用静音样本，部分服务商会拒绝它，仍应使用真实语音片段复核。小样本通过只说明本次调用成功，不保证长视频质量或后续额度充足。
       </p>
 
+      <h3 id="local-dependencies">可选依赖与本地自检</h3>
+      <p>生产运行使用编译后的服务和前端静态文件；Go、Node.js 是构建工具。基础数据服务仍使用 PostgreSQL、Redis、RabbitMQ 和 MinIO。媒体处理需要 FFmpeg 与同目录的 FFprobe。未安装 OCR、精确对齐、URL 导入或监控组件时，可保留文件上传和已有内容阅读。</p>
+      <ul>
+        <li>OCR：安装 Tesseract 与配置语言包（默认 chi_sim、eng）。设置页检查命令版本与语言包，不执行图片识别。</li>
+        <li>精确对齐：单独创建 Python 环境，按 tools/requirements-alignment.txt 安装推理依赖。macOS arm64 使用 MLX；Linux / Windows 使用 PyTorch CPU 路径。后两者的真实推理验收结果以平台记录为准。</li>
+        <li>模型权重由管理员显式安装到本地目录，并固定上游 commit revision。运行 tools/transcript_align.py 的 --prepare-model-manifest 命令生成权重指纹；替换权重后需重新生成。--check 只校验本地安装与模块导入，不执行推理。普通读取和对齐任务不会自动下载权重。</li>
+        <li>URL 导入：安装 yt-dlp；特殊来源可单独配置 cookies / proxy。未安装时可关闭 URL 导入，继续文件上传。</li>
+        <li>监控：Prometheus / Grafana 为独立选项，应用自身仍提供日志和指标。浏览器自动化工具只用于开发验收。</li>
+      </ul>
+      <p>自检状态缓存最多一分钟，并显示检查时间。模型调用检查需手动触发，可能收费；保存配置中的模型、地址或密钥发生变化后，旧探测结果不再作为当前健康状态。自检通过、小样本成功和真实语音推理通过是三种不同证据。</p>
+
       <h3 id="default-profile-budget">默认配置与执行预算</h3>
       <p>
         编辑配置时可将其设为默认，第一份自建配置会自动成为默认。问答从发送的下一轮起使用当前默认配置；学习笔记生成、笔记修订和摘要修订使用提交时的默认配置与预算。历史回答保留当轮模型信息，进行中的任务不会因修改设置而自动切换。

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
+import { QueryClient,QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, expect, test, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
 import { OptionalCapabilitiesSection } from './OptionalCapabilitiesSection'
 import { api } from '@/lib/api'
 
-vi.mock('@/lib/api', () => ({ api: { optionalCapabilities: vi.fn(), setRerankEnabled: vi.fn() }, ApiError: class extends Error {} }))
+vi.mock('@/lib/api', () => ({ getToken:()=> 'fixture-token', api: { optionalCapabilities: vi.fn(), setRerankEnabled: vi.fn() }, ApiError: class extends Error {} }))
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 const base = { rerank_enabled: false, rerank_available: true, rerank_mode: 'model' as const, rerank_model: 'configured-ranker', alignment_configured: true }
@@ -43,3 +44,8 @@ test('unconfigured capabilities and demo accounts cannot enable rerank', async (
   expect(screen.getByText('演示账号仅可查看这些设置。')).toBeTruthy()
   expect(api.setRerankEnabled).not.toHaveBeenCalled()
 })
+
+function render(ui:React.ReactNode) {
+ const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})
+ return testingRender(ui,{wrapper:({children})=><QueryClientProvider client={client}>{children}</QueryClientProvider>})
+}

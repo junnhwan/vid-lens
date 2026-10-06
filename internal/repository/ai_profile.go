@@ -110,6 +110,7 @@ func (r *AIProfileRepository) UpdateForUser(userID int64, profile *model.UserAIP
 			}
 		}
 
+		invalidateChangedProbes(&existing, profile)
 		existing.AgentBudgetJSON = profile.AgentBudgetJSON
 		existing.Name = profile.Name
 		existing.LLMProvider = profile.LLMProvider

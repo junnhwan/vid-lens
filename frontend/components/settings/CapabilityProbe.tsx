@@ -16,7 +16,7 @@ export type ProbeTarget = {
 }
 
 type ProbeStatus = 'queued' | 'running' | 'success' | 'failed'
-type ProbeResult = { status: ProbeStatus; detail: string; ms?: number }
+type ProbeResult = { status: ProbeStatus; detail: string; ms?: number; model?: string; testedAt?: string }
 
 const statusLabels: Record<ProbeStatus | 'idle', string> = {
   idle: '未探测', queued: '等待中', running: '探测中', success: '可用', failed: '需要处理',
@@ -68,14 +68,14 @@ export function CapabilityProbe({ targets, disabled = false }: { targets: ProbeT
             : target.purpose === 'asr'
               ? '静音样本请求已接受；仍需用真实语音验收转写质量'
               : '测试请求成功'
-          setResults(previous => ({ ...previous, [target.purpose]: { status: 'success', detail, ms: Math.round(performance.now() - start) } }))
+          setResults(previous => ({ ...previous, [target.purpose]: { status: 'success', detail, model: response.model || target.model, testedAt: response.tested_at || new Date().toISOString(), ms: Math.round(performance.now() - start) } }))
         } catch (error) {
           if (runGeneration !== generation.current) return
           const message = error instanceof ApiError ? error.message : '网络或探测请求失败'
           const detail = target.purpose === 'asr'
             ? `${message}；静音样本可能被服务商拒绝，请用真实语音复核`
             : message
-          setResults(previous => ({ ...previous, [target.purpose]: { status: 'failed', detail, ms: Math.round(performance.now() - start) } }))
+          setResults(previous => ({ ...previous, [target.purpose]: { status: 'failed', detail, model: target.model, testedAt: new Date().toISOString(), ms: Math.round(performance.now() - start) } }))
         }
       }
       if (runGeneration === generation.current) setHasRun(true)
@@ -122,7 +122,7 @@ export function CapabilityProbe({ targets, disabled = false }: { targets: ProbeT
             {status === 'success' ? <Icon name="check" size="sm" /> : status === 'failed' ? <Icon name="alert" size="sm" /> : status === 'running' ? <span className="capability-probe__pulse" /> : String(index + 1).padStart(2, '0')}
           </span>
           <span className="capability-probe__model"><b>{target.label}</b><small>{target.model || '未填写模型'}</small></span>
-          <span className="capability-probe__detail">{result?.detail || '尚未发送样本请求'}</span>
+          <span className="capability-probe__detail">{result?.detail || '尚未发送样本请求'}{result?.testedAt && <small style={{ display:'block' }}>探测模型：{result.model} · {new Date(result.testedAt).toLocaleString()}</small>}</span>
           <span className="capability-probe__result"><b>{statusLabels[status]}</b>{result?.ms !== undefined && <small>{result.ms} ms</small>}</span>
         </li>
       })}

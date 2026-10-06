@@ -23,6 +23,7 @@ type Aligner interface {
 type CommandAligner struct {
 	Command []string
 	FFmpeg  string
+	Timeout time.Duration
 	once    sync.Once
 	slots   chan struct{}
 }
@@ -39,7 +40,11 @@ func (a *CommandAligner) Align(ctx context.Context, audioPath string, rows []mod
 	case a.slots <- struct{}{}:
 	}
 	defer func() { <-a.slots }()
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	timeout := a.Timeout
+	if timeout <= 0 {
+		timeout = 20 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	request, err := json.Marshal(struct {
 		AudioPath string                          `json:"audio_path"`
@@ -66,6 +71,13 @@ func (a *CommandAligner) Align(ctx context.Context, audioPath string, rows []mod
 		if failure.Code == "dependencies_missing" {
 			return nil, fmt.Errorf("音文对齐依赖未安装，请检查配置的 Python 环境")
 		}
+		switch failure.Code {
+		case "model_missing", "model_manifest_missing", "model_manifest_stale", "model_revision_required":
+			return nil, fmt.Errorf("音文对齐模型未安装或版本清单已失效，请按安装说明更新；保留已有转写")
+		case "runtime_version_mismatch":
+			return nil, fmt.Errorf("音文对齐推理依赖版本不匹配；保留已有转写")
+		}
+
 		return nil, fmt.Errorf("音文对齐进程失败: %w", err)
 	}
 	var response struct {

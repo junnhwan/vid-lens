@@ -5,6 +5,7 @@ import "time"
 // UserAIProfile stores user-owned AI provider credentials.
 // API keys are encrypted before persistence; never store plaintext keys here.
 type UserAIProfile struct {
+	ProbeResultsJSON          string  `gorm:"type:text" json:"-"`
 	AgentBudgetJSON           *string `gorm:"type:text" json:"-"`
 	ID                        int64   `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID                    int64   `gorm:"index;not null;uniqueIndex:idx_user_hosted_profile,where:source = 'hosted'" json:"user_id"`
@@ -37,4 +38,14 @@ type UserAIProfile struct {
 
 func (UserAIProfile) TableName() string {
 	return "user_ai_profiles"
+}
+
+// AIProbeRecord is private configuration-bound metadata, never credentials or
+// provider bodies. Fingerprint is deliberately absent from public projections.
+type AIProbeRecord struct {
+	Fingerprint string    `json:"fingerprint"`
+	Dimension   int       `json:"dimension"`
+	Model       string    `json:"model"`
+	TestedAt    time.Time `json:"tested_at"`
+	Health      string    `json:"health"`
 }

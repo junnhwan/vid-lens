@@ -53,7 +53,7 @@ export function AIProfilesSection({ readOnly, onChanged }: { readOnly: boolean; 
   }
 
   const load = useCallback(async () => {
-    void queryClient.invalidateQueries({ queryKey: ['ai-action-availability'] })
+    void queryClient.resetQueries({ queryKey: ['ai-action-availability'] })
     setLoading(true)
     setLoadError('')
     try {

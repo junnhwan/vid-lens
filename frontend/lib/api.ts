@@ -167,7 +167,7 @@ export const api = {
   probeEmbeddingDim: (endpoint: string, api_key: string, model: string, profile_id: number) =>
     req<{ dimension: number }>('/ai/profiles/embedding-dim', 'POST', { endpoint, api_key, model, profile_id }),
   probeCapability: (payload: { purpose: ProfilePurpose; base_url: string; api_key: string; model: string; provider: string; profile_id: number; embedding_dim?: number }) =>
-    req<{ dimension: number }>('/ai/profiles/probe', 'POST', payload),
+    req<{ dimension: number; model?: string; tested_at?: string; health?: string }>('/ai/profiles/probe', 'POST', payload),
 
   // ============ 媒体 ============
   importOptions: () => req<{ url_import_enabled: boolean; slow_upload_notice: boolean }>('/media/import-options', 'GET'),

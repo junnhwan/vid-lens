@@ -81,11 +81,11 @@ func TestBuildExtractAudioWindowArgsReencodesSpeechAudio(t *testing.T) {
 }
 
 func TestCompanionFFprobePathUsesFFmpegDirectoryAndExtension(t *testing.T) {
-	if got := companionFFprobePath(`D:\tools\ffmpeg\bin\ffmpeg.exe`); got != `D:\tools\ffmpeg\bin\ffprobe.exe` {
-		t.Fatalf("companionFFprobePath() = %q", got)
+	if got := CompanionFFprobePath(`D:\tools\ffmpeg\bin\ffmpeg.exe`); got != `D:\tools\ffmpeg\bin\ffprobe.exe` {
+		t.Fatalf("CompanionFFprobePath() = %q", got)
 	}
-	if got := companionFFprobePath("ffmpeg"); got != "ffprobe" {
-		t.Fatalf("companionFFprobePath(ffmpeg) = %q", got)
+	if got := CompanionFFprobePath("ffmpeg"); got != "ffprobe" {
+		t.Fatalf("CompanionFFprobePath(ffmpeg) = %q", got)
 	}
 }
 

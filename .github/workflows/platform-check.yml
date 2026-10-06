@@ -1,0 +1,32 @@
+name: Optional runtime compatibility
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Check command paths, cancellation and protocol
+        run: go test ./internal/pkg/ffmpeg ./internal/transcript ./internal/runtimecheck
+      - name: Check offline source mapping and model identity
+        run: python tools/transcript_align_test.py
+      - name: Build base application without inference dependencies
+        run: go build ./cmd/server
+      # This job intentionally supplies no weights or inference packages.
+      # A green result is compatibility evidence, not real CPU alignment UAT.

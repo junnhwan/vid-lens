@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
 
 spec = importlib.util.spec_from_file_location("align", Path(__file__).with_name("transcript_align.py"))
 align = importlib.util.module_from_spec(spec)
@@ -27,6 +29,28 @@ class AlignmentSourceTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 align.source_words("原文", items, 0, 2000)
 
+
+class ModelIdentityTest(unittest.TestCase):
+    def test_same_path_replacement_and_runtime_changes_isolate_cache(self):
+        import tempfile
+        from alignment_model import prepare, validate, ModelIdentityError
+        with tempfile.TemporaryDirectory(prefix='model with spaces ') as directory:
+            root = Path(directory)
+            (root/'config.json').write_text('{}')
+            (root/'model.safetensors').write_bytes(b'original')
+            first = prepare(root, 'a'*40, 'qwen')
+            self.assertEqual(validate(root, 'qwen')['identity'], first['identity'])
+            key = align.cache_identity(first,'qwen','Chinese',{'torch':'1'},'audio',0,1000,'原文')
+            (root/'model.safetensors').write_bytes(b'replaced')
+            with self.assertRaises(ModelIdentityError): validate(root,'qwen')
+            second = prepare(root, 'a'*40, 'qwen')
+            self.assertNotEqual(key, align.cache_identity(second,'qwen','Chinese',{'torch':'1'},'audio',0,1000,'原文'))
+            self.assertNotEqual(key, align.cache_identity(first,'qwen','Chinese',{'torch':'2'},'audio',0,1000,'原文'))
+            with self.assertRaises(ModelIdentityError): validate(root,'mlx')
+
+    def test_unprepared_remote_name_cannot_download(self):
+        from alignment_model import validate, ModelIdentityError
+        with self.assertRaises(ModelIdentityError): validate('Qwen/absent-local-model','qwen')
 
 if __name__ == "__main__":
     unittest.main()
