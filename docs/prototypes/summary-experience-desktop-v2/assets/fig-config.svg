@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="SF Mono, Menlo, Consolas, monospace">
+  <rect width="1280" height="720" fill="#1e1f24"/>
+  <rect width="1280" height="44" fill="#16171b"/>
+  <circle cx="26" cy="22" r="7" fill="#ff5f57"/><circle cx="50" cy="22" r="7" fill="#febc2e"/><circle cx="74" cy="22" r="7" fill="#28c840"/>
+  <rect x="110" y="8" width="210" height="36" rx="6" fill="#1e1f24"/>
+  <text x="130" y="31" font-size="15" fill="#d7dae0">pgbouncer.ini</text>
+  <text x="346" y="31" font-size="15" fill="#6b7280">userlist.txt</text>
+  <rect y="44" width="56" height="676" fill="#1a1b20"/>
+  <g font-size="21" fill="#4b5263" text-anchor="end">
+    <text x="40" y="104">1</text><text x="40" y="140">2</text><text x="40" y="176">3</text><text x="40" y="212">4</text><text x="40" y="248">5</text><text x="40" y="284">6</text><text x="40" y="320">7</text><text x="40" y="356">8</text><text x="40" y="392">9</text><text x="40" y="428">10</text><text x="40" y="464">11</text><text x="40" y="500">12</text><text x="40" y="536">13</text><text x="40" y="572">14</text>
+  </g>
+  <rect x="56" y="370" width="1224" height="72" fill="#e2a84b" fill-opacity=".13"/>
+  <rect x="56" y="370" width="4" height="72" fill="#e2a84b"/>
+  <g font-size="22" fill="#d7dae0">
+    <text x="76" y="104" fill="#e5c07b">[databases]</text>
+    <text x="76" y="140"><tspan fill="#61afef">appdb</tspan> = host=10.0.1.12 port=5432 dbname=appdb</text>
+    <text x="76" y="212" fill="#e5c07b">[pgbouncer]</text>
+    <text x="76" y="248"><tspan fill="#61afef">listen_addr</tspan> = 0.0.0.0</text>
+    <text x="76" y="284"><tspan fill="#61afef">listen_port</tspan> = <tspan fill="#d19a66">6432</tspan></text>
+    <text x="76" y="320"><tspan fill="#61afef">auth_type</tspan> = scram-sha-256</text>
+    <text x="76" y="356"><tspan fill="#61afef">pool_mode</tspan> = <tspan fill="#98c379">transaction</tspan></text>
+    <text x="76" y="392"><tspan fill="#61afef">default_pool_size</tspan> = <tspan fill="#d19a66">20</tspan></text>
+    <text x="76" y="428"><tspan fill="#61afef">max_client_conn</tspan> = <tspan fill="#d19a66">500</tspan></text>
+    <text x="76" y="464"><tspan fill="#61afef">reserve_pool_size</tspan> = <tspan fill="#d19a66">5</tspan></text>
+    <text x="76" y="536" fill="#7f848e">; 1.21+ 支持 transaction 模式下的预处理语句</text>
+    <text x="76" y="572"><tspan fill="#61afef">max_prepared_statements</tspan> = <tspan fill="#d19a66">100</tspan></text>
+  </g>
+  <g font-family="PingFang SC, Hiragino Sans GB, sans-serif">
+    <rect x="760" y="374" width="300" height="64" rx="10" fill="#2a2418" stroke="#e2a84b" stroke-opacity=".6"/>
+    <text x="780" y="401" font-size="17" fill="#f3d28c">池大小与客户端上限</text>
+    <text x="780" y="427" font-size="15" fill="#c7b38a">先按 CPU 核数估算，再压测</text>
+  </g>
+  <rect y="690" width="1280" height="30" fill="#e2a84b"/>
+  <text x="16" y="711" font-size="14" fill="#1a1308">INI  UTF-8  Ln 9</text>
+  <rect x="1046" y="646" width="210" height="30" rx="15" fill="#000000" fill-opacity=".6"/>
+  <text x="1151" y="667" text-anchor="middle" font-size="14" font-family="PingFang SC, sans-serif" fill="#ffffff">演示画面，非真实截图</text>
+</svg>

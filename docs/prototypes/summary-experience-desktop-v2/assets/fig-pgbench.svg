@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+  <rect width="1280" height="720" fill="#f7f5f0"/>
+  <text x="72" y="90" font-size="36" font-weight="700" fill="#1f2937">pgbench 压测：池越大不一定越快</text>
+  <text x="72" y="130" font-size="20" fill="#6b7280">8 核数据库，200 个并发客户端，只读与读写混合</text>
+  <g stroke="#e5e7eb" stroke-width="2"><path d="M160 180H1180"/><path d="M160 256H1180"/><path d="M160 332H1180"/><path d="M160 408H1180"/><path d="M160 484H1180"/></g>
+  <path d="M160 560H1180M160 180V560" stroke="#9ca3af" stroke-width="2.5"/>
+  <g font-size="18" fill="#6b7280" text-anchor="end">
+    <text x="146" y="186">5000</text><text x="146" y="262">4000</text><text x="146" y="338">3000</text><text x="146" y="414">2000</text><text x="146" y="490">1000</text><text x="146" y="566">0</text>
+  </g>
+  <g font-size="18" fill="#6b7280" text-anchor="middle">
+    <text x="220" y="594">5</text><text x="380" y="594">10</text><text x="540" y="594">20</text><text x="700" y="594">40</text><text x="860" y="594">60</text><text x="1020" y="594">80</text>
+  </g>
+  <text x="670" y="632" text-anchor="middle" font-size="19" fill="#374151">default_pool_size</text>
+  <text x="80" y="380" font-size="19" fill="#374151" transform="rotate(-90 80 380)" text-anchor="middle">TPS</text>
+  <path d="M220 400L380 309L540 248L700 279L860 309L1020 332" fill="none" stroke="#336791" stroke-width="5" stroke-linejoin="round"/>
+  <g fill="#ffffff" stroke="#336791" stroke-width="4">
+    <circle cx="220" cy="400" r="8"/><circle cx="380" cy="309" r="8"/><circle cx="700" cy="279" r="8"/><circle cx="860" cy="309" r="8"/><circle cx="1020" cy="332" r="8"/>
+  </g>
+  <circle cx="540" cy="248" r="12" fill="#e2a84b" stroke="#92400e" stroke-width="3"/>
+  <rect x="566" y="190" width="240" height="46" rx="10" fill="#fff7e6" stroke="#e2a84b" stroke-width="2"/>
+  <text x="686" y="221" text-anchor="middle" font-size="20" font-weight="700" fill="#92400e">峰值约 4,100 TPS（20）</text>
+  <text x="860" y="352" text-anchor="middle" font-size="17" fill="#b91c1c">60 时约 3,300：锁竞争、上下文切换增加</text>
+  <rect x="1046" y="676" width="210" height="30" rx="15" fill="#111827" fill-opacity=".72"/>
+  <text x="1151" y="697" text-anchor="middle" font-size="14" fill="#ffffff">演示画面，非真实截图</text>
+</svg>

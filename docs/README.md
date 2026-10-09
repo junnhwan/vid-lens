@@ -1,6 +1,6 @@
 # VidLens 工程文档
 
-本目录只保留当前项目的公开工程资料，不放简历、面试准备、个人信息、临时交接文档或本地工作记录。
+本目录保留项目的公开工程资料、产品规划与评审原型，不放简历、面试准备、个人信息或本地工作记录。规划和静态原型会明确区分已有实现与待接入能力。
 
 ## 文档导航
 
@@ -51,6 +51,13 @@
 - [架构图](images/readme-architecture.svg) · [English](images/readme-architecture.en.svg)
 - [架构图 HTML 源文件](images/readme-architecture.html) · [English](images/readme-architecture.en.html)
 - [产品 UI 高保真原型](prototype/README.md)
+- [视频摘要桌面原型：动态 Agent 活动](prototypes/summary-experience-desktop-v2/README.md)
+
+### 视频摘要体验改造（规划）
+
+- [产品规划](planning/2026-10-09-summary-product-plan.md)
+- [实现与验收指南](planning/2026-10-09-summary-implementation-guide.md)
+- [桌面原型设计与交互要求](design/2026-10-09-frontend-prototype-brief.md)
 
 ## 目录约定
 
@@ -58,6 +65,9 @@
 - `eval/`：可复现的评测规范、配置和示例数据
 - `operations/`：部署、压测和故障处理资料
 - `prototype/`：仅用于评审前端 UI 形态的高保真静态原型，不参与生产构建
+- `prototypes/`：独立交互评审原型；使用本地模拟数据，不代表业务能力已实现
+- `planning/`：待实施的产品方案、工作包与验收条件
+- `design/`：前端设计、交互要求与后续实现参考
 - `images/`：README 和架构文档使用的图片资源
 - 根目录下的 `automatic-deployment.md`、`hosted-ai.md` 是单篇运维与功能说明
 

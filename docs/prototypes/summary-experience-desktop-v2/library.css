@@ -1,0 +1,26 @@
+/* 标签数量增长时保持桌面视频库的筛选区紧凑。 */
+#lib-tagbar { align-items: flex-start; gap: 12px; padding-top: 10px; padding-bottom: 16px; }
+#lib-tagbar .tagbar-label { height: 28px; }
+#lib-tagbar .tagbar-list { gap: 7px; }
+#lib-tagbar .tagbar-list .tag { height: 28px; }
+#lib-tagbar .lib-all-tags { color: var(--tx-3); background: transparent; border-style: dashed; }
+#lib-tagbar .lib-all-tags:hover { color: var(--tx-1); border-color: var(--acc-line); background: var(--acc-dim); }
+#lib-tagbar .tagbar-tools { min-height: 28px; }
+.lib-tag-picker .dlg-head { padding-bottom: 18px; }
+.lib-picker-body { padding-top: 0; padding-bottom: 18px; }
+.lib-picker-search { width: 100%; max-width: none; }
+.lib-picker-search .input { padding-left: 40px; height: 42px; }
+.lib-picker-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 9px; color: var(--tx-3); font-size: 12.5px; }
+.lib-picker-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: min(400px, 48dvh); overflow-y: auto; padding: 2px; margin: 0 -2px; }
+.lib-picker-row { display: flex; align-items: center; gap: 10px; min-height: 55px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--bg-0); transition: border-color .16s var(--ease), background .16s var(--ease); }
+.lib-picker-row:hover { background: var(--bg-2); border-color: var(--line-strong); }
+.lib-picker-row.selected { border-color: var(--acc-line); background: var(--acc-dim); }
+.lib-picker-row input { width: 15px; height: 15px; margin: 0; flex: none; accent-color: var(--acc); cursor: pointer; }
+.lib-picker-row:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lib-picker-name { min-width: 0; font-size: 13px; font-weight: 600; color: var(--tx-1); overflow-wrap: anywhere; }
+.lib-picker-name small { display: block; color: var(--tx-4); font-weight: 400; font-size: 11px; margin-top: 2px; }
+.lib-picker-total { flex: none; margin-left: auto; font-size: 11px; color: var(--tx-4); }
+.lib-picker-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 16px; color: var(--tx-3); text-align: center; }
+.lib-picker-empty .ic { color: var(--tx-4); margin-bottom: 5px; }
+.lib-picker-empty b { color: var(--tx-2); font-size: 14px; }
+.lib-picker-empty span { font-size: 12px; }

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+  <rect width="1280" height="720" fill="#f7f5f0"/>
+  <text x="72" y="92" font-size="38" font-weight="700" fill="#1f2937">三种 pool_mode 怎么选</text>
+  <text x="72" y="134" font-size="21" fill="#6b7280">连接在什么时候还回池里，决定了哪些特性还能用</text>
+  <rect x="610" y="168" width="300" height="490" rx="14" fill="#fff7e6" stroke="#e2a84b" stroke-width="3"/>
+  <g font-size="23">
+    <text x="96" y="214" font-weight="700" fill="#6b7280">特性</text>
+    <text x="460" y="214" text-anchor="middle" font-weight="700" fill="#1f2937">session</text>
+    <text x="760" y="214" text-anchor="middle" font-weight="800" fill="#92400e">transaction</text>
+    <text x="1060" y="214" text-anchor="middle" font-weight="700" fill="#1f2937">statement</text>
+  </g>
+  <g stroke="#e5e7eb" stroke-width="2"><path d="M80 238H1200"/><path d="M80 314H1200"/><path d="M80 390H1200"/><path d="M80 466H1200"/><path d="M80 542H1200"/></g>
+  <g font-size="22" fill="#374151">
+    <text x="96" y="286">连接复用率</text>
+    <text x="96" y="362">SET 与会话变量</text>
+    <text x="96" y="438">LISTEN / NOTIFY</text>
+    <text x="96" y="514">预处理语句</text>
+    <text x="96" y="590">多语句事务</text>
+  </g>
+  <g font-size="22" text-anchor="middle">
+    <text x="460" y="286" fill="#b91c1c">低</text><text x="760" y="286" fill="#15803d" font-weight="700">高</text><text x="1060" y="286" fill="#15803d">最高</text>
+    <text x="460" y="362" fill="#15803d">可用</text><text x="760" y="362" fill="#b91c1c" font-weight="700">不可用，会串到别的请求</text><text x="1060" y="362" fill="#b91c1c">不可用</text>
+    <text x="460" y="438" fill="#15803d">可用</text><text x="760" y="438" fill="#b91c1c" font-weight="700">不可用</text><text x="1060" y="438" fill="#b91c1c">不可用</text>
+    <text x="460" y="514" fill="#15803d">可用</text><text x="760" y="514" fill="#b45309" font-weight="700">1.21+ 可用</text><text x="1060" y="514" fill="#b91c1c">不可用</text>
+    <text x="460" y="590" fill="#15803d">可用</text><text x="760" y="590" fill="#15803d" font-weight="700">可用</text><text x="1060" y="590" fill="#b91c1c">不可用</text>
+  </g>
+  <text x="760" y="640" text-anchor="middle" font-size="19" fill="#92400e">Web 服务推荐</text>
+  <rect x="1046" y="676" width="210" height="30" rx="15" fill="#111827" fill-opacity=".72"/>
+  <text x="1151" y="697" text-anchor="middle" font-size="14" fill="#ffffff">演示画面，非真实截图</text>
+</svg>

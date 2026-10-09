@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="SF Mono, Menlo, Consolas, monospace">
+  <rect width="1280" height="720" fill="#0f1115"/>
+  <rect width="1280" height="44" fill="#1b1e24"/>
+  <circle cx="26" cy="22" r="7" fill="#ff5f57"/><circle cx="50" cy="22" r="7" fill="#febc2e"/><circle cx="74" cy="22" r="7" fill="#28c840"/>
+  <text x="640" y="29" text-anchor="middle" font-size="16" fill="#9aa0ab">app@web-02: tail -f /var/log/app/api.log</text>
+  <g font-size="19" fill="#9aa0ab">
+    <text x="32" y="96">$ tail -f /var/log/app/api.log</text>
+    <text x="32" y="140">14:02:11 INFO  deploy v2.31.0 finished, 3 replicas ready</text>
+    <text x="32" y="176">14:03:40 INFO  GET /api/orders 200 38ms</text>
+    <text x="32" y="212">14:04:52 INFO  GET /api/orders 200 41ms</text>
+    <text x="32" y="248">14:05:07 WARN  db pool: waiting for connection (1.8s)</text>
+  </g>
+  <rect x="20" y="268" width="1240" height="122" rx="6" fill="#f87171" fill-opacity=".12" stroke="#f87171" stroke-opacity=".55"/>
+  <g font-size="19">
+    <text x="32" y="300" fill="#fca5a5">14:05:09 ERROR FATAL: no more connections allowed (max_client_conn)</text>
+    <text x="32" y="336" fill="#fca5a5">14:05:09 ERROR GET /api/orders 500: connection refused by pgbouncer:6432</text>
+    <text x="32" y="372" fill="#fca5a5">14:05:10 ERROR FATAL: no more connections allowed (max_client_conn)</text>
+  </g>
+  <g font-size="19" fill="#9aa0ab">
+    <text x="32" y="430">14:05:10 WARN  retrying in 500ms (attempt 2/3)</text>
+    <text x="32" y="466">14:05:11 ERROR GET /api/cart 500: connection refused by pgbouncer:6432</text>
+  </g>
+  <g font-family="PingFang SC, Hiragino Sans GB, sans-serif">
+    <rect x="760" y="510" width="470" height="110" rx="12" fill="#1f2937" stroke="#e2a84b" stroke-opacity=".7"/>
+    <text x="784" y="550" font-size="20" font-weight="700" fill="#f3d28c">发布后 3 分钟，客户端连接到达 500</text>
+    <text x="784" y="588" font-size="17" fill="#cbd5e1">3 个副本，每个副本连接池 200，合计 600，超过 500</text>
+  </g>
+  <rect x="1046" y="676" width="210" height="30" rx="15" fill="#000000" fill-opacity=".6"/>
+  <text x="1151" y="697" text-anchor="middle" font-size="14" font-family="PingFang SC, sans-serif" fill="#ffffff">演示画面，非真实截图</text>
+</svg>

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#64748b"/></marker>
+  </defs>
+  <rect width="1280" height="720" fill="#f7f5f0"/>
+  <text x="72" y="96" font-size="40" font-weight="700" fill="#1f2937">为什么需要连接池</text>
+  <text x="72" y="140" font-size="22" fill="#6b7280">600 个客户端连接，经过连接池后只占 20 个数据库连接</text>
+  <g font-size="22" font-weight="600">
+    <g transform="translate(96 230)">
+      <rect width="230" height="88" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="2"/>
+      <text x="115" y="40" text-anchor="middle" fill="#1f2937">App 服务器 1</text>
+      <text x="115" y="70" text-anchor="middle" font-size="17" font-weight="400" fill="#6b7280">200 连接</text>
+    </g>
+    <g transform="translate(96 346)">
+      <rect width="230" height="88" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="2"/>
+      <text x="115" y="40" text-anchor="middle" fill="#1f2937">App 服务器 2</text>
+      <text x="115" y="70" text-anchor="middle" font-size="17" font-weight="400" fill="#6b7280">200 连接</text>
+    </g>
+    <g transform="translate(96 462)">
+      <rect width="230" height="88" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="2"/>
+      <text x="115" y="40" text-anchor="middle" fill="#1f2937">App 服务器 3</text>
+      <text x="115" y="70" text-anchor="middle" font-size="17" font-weight="400" fill="#6b7280">200 连接</text>
+    </g>
+    <g transform="translate(520 320)">
+      <rect width="250" height="140" rx="18" fill="#fff7e6" stroke="#e2a84b" stroke-width="3"/>
+      <text x="125" y="62" text-anchor="middle" font-size="28" font-weight="800" fill="#92400e">PgBouncer</text>
+      <text x="125" y="100" text-anchor="middle" font-size="18" font-weight="400" fill="#b45309">transaction 模式</text>
+    </g>
+    <g transform="translate(940 320)">
+      <rect width="250" height="140" rx="18" fill="#eef4fb" stroke="#336791" stroke-width="3"/>
+      <text x="125" y="62" text-anchor="middle" font-size="28" font-weight="800" fill="#1e3a5f">PostgreSQL</text>
+      <text x="125" y="100" text-anchor="middle" font-size="18" font-weight="400" fill="#336791">max_connections 100</text>
+    </g>
+  </g>
+  <g stroke="#64748b" stroke-width="3" fill="none" marker-end="url(#a)">
+    <path d="M326 274C430 274 440 360 516 370"/>
+    <path d="M326 390H516"/>
+    <path d="M326 506C430 506 440 420 516 410"/>
+    <path d="M770 390H936"/>
+  </g>
+  <rect x="360" y="182" width="140" height="40" rx="20" fill="#fee2e2"/>
+  <text x="430" y="209" text-anchor="middle" font-size="19" font-weight="700" fill="#b91c1c">600 连接</text>
+  <rect x="784" y="330" width="138" height="40" rx="20" fill="#dcfce7"/>
+  <text x="853" y="357" text-anchor="middle" font-size="19" font-weight="700" fill="#15803d">20 连接</text>
+  <text x="72" y="640" font-size="18" fill="#9ca3af">每个 PostgreSQL 连接约占 5 到 10 MB 内存，并对应一个后端进程</text>
+  <rect x="1046" y="676" width="210" height="30" rx="15" fill="#111827" fill-opacity=".72"/>
+  <text x="1151" y="697" text-anchor="middle" font-size="14" fill="#ffffff">演示画面，非真实截图</text>
+</svg>

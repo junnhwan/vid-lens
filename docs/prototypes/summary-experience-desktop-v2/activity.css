@@ -1,0 +1,47 @@
+/* 摘要、问答和修订共用活动列表。只让当前执行标记呼吸。 */
+.activity-view {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-1);
+  color: var(--tx-2);
+  padding: 13px 15px;
+  margin: 0 0 16px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.activity-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.activity-heading strong { color: var(--tx-2); font-size: 13px; font-weight: 550; }
+.activity-demo { color: var(--tx-4); font-size: 10px; white-space: nowrap; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.activity-toggle { flex: none; width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: var(--tx-3); }
+.activity-toggle:hover { background: var(--bg-3); color: var(--tx-1); }
+.activity-toggle[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.activity-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; color: var(--tx-4); font-size: 11px; }
+.activity-summary span + span::before { content: '·'; padding-right: 8px; }
+.activity-list { list-style: none; display: flex; flex-direction: column; gap: 12px; margin: 14px 0 2px; padding: 0; }
+.activity-step { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.activity-mark { display: grid; place-items: center; flex: 0 0 17px; width: 17px; height: 20px; color: var(--tx-4); margin-top: 1px; }
+.activity-mark i { width: 10px; height: 10px; border: 1.5px solid var(--tx-4); border-radius: 50%; }
+.activity-step-done .activity-mark { color: var(--ok); }
+.activity-step-running .activity-mark { color: var(--acc); }
+.activity-step-running .activity-mark i { border-color: var(--acc); }
+.activity-step-current .activity-mark i { background: var(--acc); border: 0; animation: activity-breath 1.8s ease-in-out infinite; }
+.activity-step-copy { min-width: 0; flex: 1; }
+.activity-step-title { color: var(--tx-3); overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.activity-step-current .activity-step-title { color: var(--tx-1); }
+.activity-step-error .activity-step-title, .activity-step-cancelled .activity-step-title { color: var(--tx-4); }
+.activity-step-detail { color: var(--tx-4); font-size: 11.5px; line-height: 1.65; margin: 2px 0 0; overflow-wrap: anywhere; }
+.activity-step-meta { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; color: var(--tx-4); font-size: 10.5px; margin-top: 3px; }
+.activity-older { display: inline-flex; align-items: center; gap: 5px; margin: 11px 0 0 27px; font-size: 11px; color: var(--tx-4); }
+.activity-older:hover { color: var(--tx-2); }
+.activity-view-compact { padding: 10px 12px; margin-bottom: 12px; }
+.activity-view-compact .activity-list { gap: 10px; margin-top: 11px; }
+.activity-view-compact .activity-step { gap: 8px; }
+.activity-run-done:not(:has(.activity-list)), .activity-run-cancelled:not(:has(.activity-list)) { background: transparent; }
+@keyframes activity-breath {
+  0%, 100% { opacity: .52; box-shadow: 0 0 0 0 var(--acc-dim); }
+  50% { opacity: 1; box-shadow: 0 0 0 4px var(--acc-dim); }
+}
+@media (prefers-reduced-motion: reduce) { .activity-step-current .activity-mark i { animation: none; opacity: 1; } }

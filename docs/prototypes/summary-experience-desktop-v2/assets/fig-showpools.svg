@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="SF Mono, Menlo, Consolas, monospace">
+  <rect width="1280" height="720" fill="#0f1115"/>
+  <rect width="1280" height="44" fill="#1b1e24"/>
+  <circle cx="26" cy="22" r="7" fill="#ff5f57"/><circle cx="50" cy="22" r="7" fill="#febc2e"/><circle cx="74" cy="22" r="7" fill="#28c840"/>
+  <text x="640" y="29" text-anchor="middle" font-size="16" fill="#9aa0ab">psql -p 6432 -U admin pgbouncer</text>
+  <text x="40" y="104" font-size="22" fill="#86efac">pgbouncer=# SHOW POOLS;</text>
+  <g font-size="21">
+    <g fill="#9ca3af">
+      <text x="40" y="168">database</text><text x="210" y="168">user</text><text x="330" y="168">cl_active</text><text x="500" y="168">cl_waiting</text><text x="680" y="168">sv_active</text><text x="850" y="168">sv_idle</text><text x="1000" y="168">maxwait</text>
+    </g>
+    <path d="M36 184H1110" stroke="#374151" stroke-width="2"/>
+    <g fill="#e5e7eb">
+      <text x="40" y="222">appdb</text><text x="210" y="222">app</text><text x="330" y="222">180</text><text x="500" y="222" fill="#fca5a5" font-weight="700">37</text><text x="680" y="222" fill="#fcd34d" font-weight="700">20</text><text x="850" y="222">0</text><text x="1000" y="222">4</text>
+    </g>
+    <g fill="#9ca3af">
+      <text x="40" y="260">pgbouncer</text><text x="210" y="260">admin</text><text x="330" y="260">1</text><text x="500" y="260">0</text><text x="680" y="260">0</text><text x="850" y="260">0</text><text x="1000" y="260">0</text>
+    </g>
+    <text x="40" y="306" fill="#6b7280">(2 rows)</text>
+    <text x="40" y="360" fill="#86efac">pgbouncer=#</text>
+  </g>
+  <rect x="488" y="196" width="150" height="36" rx="6" fill="none" stroke="#f87171" stroke-width="3"/>
+  <rect x="668" y="196" width="140" height="36" rx="6" fill="none" stroke="#e2a84b" stroke-width="3"/>
+  <path d="M563 232V430" stroke="#f87171" stroke-width="2" stroke-dasharray="6 6"/>
+  <g font-family="PingFang SC, Hiragino Sans GB, sans-serif">
+    <rect x="420" y="430" width="470" height="132" rx="12" fill="#1f2937" stroke="#f87171" stroke-opacity=".6"/>
+    <text x="444" y="470" font-size="20" font-weight="700" fill="#fca5a5">cl_waiting = 37：请求在排队</text>
+    <text x="444" y="504" font-size="17" fill="#cbd5e1">sv_active = 20：服务端连接已全部占满</text>
+    <text x="444" y="536" font-size="17" fill="#cbd5e1">先查慢查询和长事务，再考虑加大池</text>
+  </g>
+  <rect x="1046" y="676" width="210" height="30" rx="15" fill="#000000" fill-opacity=".6"/>
+  <text x="1151" y="697" text-anchor="middle" font-size="14" font-family="PingFang SC, sans-serif" fill="#ffffff">演示画面，非真实截图</text>
+</svg>
