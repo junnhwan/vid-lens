@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -26,9 +27,11 @@ type summaryVisualFixture struct {
 	foreignSelection        bool
 	afterInspect            func()
 	selectedID              string
+	selectedBlockID         string
 	visualError             error
 	planResponses           []string
 	planInput               string
+	planSystem              string
 	transformDocument       func(*summarydoc.Document)
 }
 
@@ -44,9 +47,10 @@ func (v *summaryVisualFixture) NewVisionClient(ai.Profile) (ai.VisionClient, err
 }
 func (v *summaryVisualFixture) Chat(ctx context.Context, messages []ai.ChatMessage) (string, error) {
 	system := messages[0].Content
-	if strings.Contains(system, "最多三个目标") {
+	if strings.Contains(system, "max_targets=") {
 		v.chatCalls++
 		v.planInput = messages[len(messages)-1].Content
+		v.planSystem = system
 		if len(v.planResponses) > 0 {
 			raw := v.planResponses[0]
 			v.planResponses = v.planResponses[1:]
@@ -60,7 +64,7 @@ func (v *summaryVisualFixture) Chat(ctx context.Context, messages []ai.ChatMessa
 		if v.foreignSelection {
 			id = "foreign-observation"
 		}
-		return artifact.JSON(map[string]any{"public_title": "选择参数截图", "presentation_mode": "image_text", "reason": "配置截图解释对应段落", "figures": []map[string]any{{"block_id": "block-cue-a", "observation_id": id, "caption": "画面显示最大连接数配置。", "alt": "连接池参数配置画面", "supports": "说明该章节的参数设置"}}}), nil
+		return artifact.JSON(map[string]any{"public_title": "选择参数截图", "presentation_mode": "image_text", "reason": "配置截图解释对应段落", "figures": []map[string]any{{"block_id": firstNonEmpty(v.selectedBlockID, "block-cue-a"), "observation_id": id, "caption": "画面显示最大连接数配置。", "alt": "连接池参数配置画面", "supports": "说明该章节的参数设置"}}}), nil
 	}
 	raw, err := v.f.chat.Chat(ctx, messages)
 	if err == nil && v.transformDocument != nil {
@@ -85,6 +89,16 @@ func (v *summaryVisualFixture) Inspect(ctx context.Context, req InspectRequest) 
 		return Investigation{}, errors.New("missing frozen source/profile")
 	}
 	row := model.VideoVisualObservation{ID: "summary-real-observation", UserID: req.UserID, TaskID: req.TaskID, VideoRevision: v.f.task.FileMD5, ObjectKey: "visual-investigations/owner-private.jpg", StartMS: 1000, EndMS: 1001, Status: model.VisualObservationStatusObserved, RawResponseHash: "actual-observation-hash", FrameRef: "query-frame:actual-content", CacheKey: "summary-visual-fixture-cache", Observation: "连接池配置显示最大连接数。"}
+	if v.inspectCalls > 1 {
+		row.ID = fmt.Sprintf("summary-real-observation-%d", v.inspectCalls)
+		row.FrameRef = fmt.Sprintf("query-frame:actual-content-%d", v.inspectCalls)
+		row.CacheKey = fmt.Sprintf("summary-visual-fixture-cache-%d", v.inspectCalls)
+	}
+	if len(req.SeedWindows) > 0 {
+		window := req.SeedWindows[0]
+		row.StartMS = window.StartMS + min(int64(1000), (window.EndMS-window.StartMS)/2)
+		row.EndMS = row.StartMS + 1
+	}
 	if err := v.f.db.Create(&row).Error; err != nil {
 		return Investigation{}, err
 	}
