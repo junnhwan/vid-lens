@@ -25,6 +25,8 @@ type serverHandlers struct {
 	memory         *handler.MemoryHandler
 	artifacts      *handler.ArtifactHandler
 	summaries      *handler.SummaryRevisionHandler
+	generations    *handler.SummaryGenerationHandler
+	tags           *handler.UserTagHandler
 }
 
 // newServerRouter owns HTTP route registration and static SPA fallback. It
@@ -84,6 +86,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 			if h := handlers.summaries; h != nil {
 				auth.GET("/media/task/:id/summary", h.Get)
 				auth.GET("/media/task/:id/summary/export", h.Export)
+				auth.GET("/media/task/:id/summary/blocks/:block_id/context", h.BlockContext)
 				auth.POST("/media/task/:id/summary/edit-runs", middleware.RateLimit(rateLimiter), h.Edit)
 				auth.GET("/media/task/:id/summary/operations/latest", h.LatestOperation)
 				auth.GET("/media/task/:id/summary/operations/:operation_id", h.Operation)
@@ -93,6 +96,20 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				auth.GET("/media/task/:id/term-rules", h.Rules)
 				auth.PUT("/media/task/:id/term-rules", h.SaveRule)
 				auth.POST("/media/task/:id/term-rules/:rule_id/disable", h.DisableRule)
+			}
+			if h := handlers.generations; h != nil {
+				auth.GET("/media/task/:id/summary/generation", h.Latest)
+				auth.GET("/media/task/:id/summary/generation/:generation_id/events", h.Events)
+			}
+			if h := handlers.tags; h != nil {
+				auth.GET("/tags", h.List)
+				auth.POST("/tags", h.Create)
+				auth.PATCH("/tags/:tag_id", h.Rename)
+				auth.PUT("/tags/:tag_id/aliases", h.Aliases)
+				auth.POST("/tags/:tag_id/merge", h.Merge)
+				auth.GET("/media/task/:id/tags", h.Task)
+				auth.PATCH("/media/task/:id/tags", h.Patch)
+				auth.POST("/media/task/:id/tag-suggestions/:suggestion_id/decision", h.Decide)
 			}
 			aiProfiles := auth.Group("/ai/profiles")
 			auth.GET("/ai/hosted", handlers.profiles.HostedStatus)
@@ -173,6 +190,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.PATCH("/task/:id", handlers.media.UpdateTaskTitle)
 				media.DELETE("/task/:id", handlers.media.DeleteTask)
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
+				media.POST("/task/:id/summary", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestTranscribe)
 				media.GET("/task/:id/rag-index", handlers.rag.GetTaskIndexStatus)
 				media.POST("/task/:id/rag-index", middleware.RateLimit(rateLimiter), handlers.rag.BuildTaskIndex)
@@ -180,6 +198,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.POST("/task/:id/questions", middleware.RateLimit(rateLimiter), handlers.media.VideoQuestions)
 				media.GET("/task/:id/timeline", handlers.media.GetTimeline)
 				media.GET("/task/:id/playback", handlers.media.GetPlaybackURL)
+				media.GET("/task/:id/summary/screenshots/:ref", handlers.media.SummaryScreenshot)
 				media.GET("/download-audio/:id", handlers.media.DownloadAudio)
 			}
 		}

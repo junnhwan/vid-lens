@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/middleware"
+	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 )
@@ -45,7 +46,19 @@ func (h *SummaryRevisionHandler) Get(c *gin.Context) {
 	if row.Revision != nil {
 		revisionID = row.Revision.ID
 	}
-	artifactOK(c, http.StatusOK, gin.H{"task_id": id, "content": row.Content, "revision": row.Version, "revision_id": revisionID, "base_generated_hash": row.BaseHash, "current_generated_hash": row.CurrentGeneratedHash, "source_status": row.SourceStatus, "has_generated": row.Generated != nil, "has_revision": row.Revision != nil}, nil)
+	versionRef := model.SummaryVersionRef{RevisionID: revisionID}
+	if revisionID == "" {
+		generatedVersion := int64(0)
+		if row.Generated != nil {
+			generatedVersion = row.Generated.GeneratedVersion
+		}
+		versionRef.GeneratedVersion = &generatedVersion
+	}
+	format := "legacy"
+	if row.Document != nil {
+		format = "summary-v2"
+	}
+	artifactOK(c, http.StatusOK, gin.H{"task_id": id, "version_ref": versionRef, "content": row.Content, "document": row.Document, "format": format, "content_digest": row.ContentDigest, "content_hash_kind": row.ContentHashKind, "base_generated_hash_kind": row.BaseHashKind, "current_generated_hash_kind": row.CurrentGeneratedHashKind, "revision": row.Version, "revision_id": revisionID, "base_generated_hash": row.BaseHash, "current_generated_hash": row.CurrentGeneratedHash, "source_status": row.SourceStatus, "has_generated": row.Generated != nil, "has_revision": row.Revision != nil}, nil)
 }
 
 func (h *SummaryRevisionHandler) Export(c *gin.Context) {
@@ -144,7 +157,7 @@ func (h *SummaryRevisionHandler) ResolveBase(c *gin.Context) {
 		artifactError(c, err)
 		return
 	}
-	artifactOK(c, http.StatusOK, gin.H{"task_id": id, "content": row.Content, "revision": row.Version, "source_status": row.SourceStatus}, nil)
+	artifactOK(c, http.StatusOK, gin.H{"task_id": id, "content": row.Content, "document": row.Document, "content_digest": row.ContentDigest, "content_hash_kind": row.ContentHashKind, "base_generated_hash_kind": row.BaseHashKind, "current_generated_hash_kind": row.CurrentGeneratedHashKind, "revision": row.Version, "source_status": row.SourceStatus}, nil)
 }
 
 func (h *SummaryRevisionHandler) Rules(c *gin.Context) {

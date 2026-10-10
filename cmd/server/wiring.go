@@ -317,6 +317,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution).WithQuestionSuggestions(questionSuggestionsSvc)
 	artifactSvc := service.NewArtifactService(deps.repos, aiProfileSvc, aiFactory)
 	summarySvc := service.NewSummaryRevisionService(deps.repos, aiProfileSvc, aiFactory)
+	consumer.SetSummaryGenerator(service.NewSummaryGenerationService(deps.repos, aiProfileSvc, aiFactory).WithVisualEnricher(service.NewSummaryVisualService(deps.repos, aiFactory, visualInvestigator)))
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
@@ -329,6 +330,8 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 			memory:         handler.NewMemoryHandler(memoryGovernanceSvc, memoryPolicySvc),
 			artifacts:      handler.NewArtifactHandler(artifactSvc),
 			summaries:      handler.NewSummaryRevisionHandler(summarySvc, deps.repos),
+			generations:    handler.NewSummaryGenerationHandler(service.NewSummaryGenerationReadService(deps.repos)),
+			tags:           handler.NewUserTagHandler(service.NewUserTagService(deps.repos.UserTag)),
 		},
 		rateLimiter: rateLimiter,
 		consumer:    consumer,

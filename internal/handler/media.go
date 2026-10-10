@@ -11,9 +11,12 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/middleware"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
+	"vid-lens/internal/processing"
+	"vid-lens/internal/repository"
 	"vid-lens/internal/service"
 )
 
@@ -105,15 +108,19 @@ func (h *MediaHandler) UploadByURL(c *gin.Context) {
 
 	var req struct {
 		URL string `json:"url" binding:"required"`
+		processing.Options
+		AutoTagsEnabled *bool `json:"auto_tags_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "请提供视频链接")
 		return
 	}
 
-	result, err := h.svc.UploadByURL(c.Request.Context(), userID, req.URL)
+	options := service.ImportOptions{Options: req.Options, IdempotencyKey: c.GetHeader("Idempotency-Key")}
+	options.AutoTagsEnabled = req.AutoTagsEnabled == nil || *req.AutoTagsEnabled
+	result, err := h.svc.UploadByURLWithOptions(c.Request.Context(), userID, req.URL, options)
 	if err != nil {
-		response.InternalError(c, "下载失败: "+err.Error())
+		respondImportError(c, "下载失败: ", err)
 		return
 	}
 
@@ -194,18 +201,35 @@ func (h *MediaHandler) MergeChunks(c *gin.Context) {
 		TotalChunks int    `json:"total_chunks" binding:"required"`
 		FileSize    int64  `json:"file_size" binding:"required"`
 		ChunkSize   int64  `json:"chunk_size" binding:"required"`
+		processing.Options
+		AutoTagsEnabled *bool `json:"auto_tags_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
 
-	result, err := h.svc.MergeChunks(c.Request.Context(), userID, req.FileMD5, req.Filename, req.TotalChunks, req.FileSize, req.ChunkSize)
+	options := service.ImportOptions{Options: req.Options, IdempotencyKey: c.GetHeader("Idempotency-Key")}
+	options.AutoTagsEnabled = req.AutoTagsEnabled == nil || *req.AutoTagsEnabled
+	result, err := h.svc.MergeChunksWithOptions(c.Request.Context(), userID, req.FileMD5, req.Filename, req.TotalChunks, req.FileSize, req.ChunkSize, options)
 	if err != nil {
-		response.InternalError(c, "合并失败: "+err.Error())
+		respondImportError(c, "合并失败: ", err)
 		return
 	}
 	response.OK(c, result)
+}
+
+func respondImportError(c *gin.Context, prefix string, err error) {
+	var typed *artifact.Error
+	if errors.As(err, &typed) {
+		response.Fail(c, typed.Status, typed.Code)
+		return
+	}
+	if errors.Is(err, service.ErrTaskDispatchUnavailable) {
+		response.Fail(c, 503, err.Error())
+		return
+	}
+	response.InternalError(c, prefix+err.Error())
 }
 
 // RequestAnalysis 提交 AI 分析
@@ -219,6 +243,15 @@ func (h *MediaHandler) RequestAnalysis(c *gin.Context) {
 	force := parseForceFlag(c)
 
 	if err := h.svc.RequestAnalysis(c.Request.Context(), userID, taskID, force); err != nil {
+		var typed *artifact.Error
+		if errors.As(err, &typed) {
+			response.Fail(c, typed.Status, typed.Code)
+			return
+		}
+		if errors.Is(err, service.ErrTaskDispatchUnavailable) {
+			response.Fail(c, 503, err.Error())
+			return
+		}
 		response.Fail(c, 400, err.Error())
 		return
 	}
@@ -411,9 +444,14 @@ func (h *MediaHandler) ListTasks(c *gin.Context) {
 		pageSize = 20
 	}
 
-	tasks, total, err := h.svc.ListTasks(userID, page, pageSize, keyword, activity)
+	tagIDs, tagMatch, err := parseTagFilter(c)
 	if err != nil {
-		response.InternalError(c, "查询失败")
+		artifactError(c, err)
+		return
+	}
+	tasks, total, err := h.svc.ListTasksWithTags(userID, page, pageSize, keyword, repository.TagFilter{IDs: tagIDs, Match: tagMatch}, activity)
+	if err != nil {
+		artifactError(c, err)
 		return
 	}
 

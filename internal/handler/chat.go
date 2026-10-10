@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vid-lens/internal/middleware"
+	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/response"
 	"vid-lens/internal/service"
 )
@@ -128,9 +129,10 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	}
 
 	var req struct {
-		Question string `json:"question" binding:"required"`
-		TopK     int    `json:"top_k"`
-		Mode     string `json:"mode"`
+		ContextRefs []model.SummaryContextRef `json:"context_refs"`
+		Question    string                    `json:"question" binding:"required"`
+		TopK        int                       `json:"top_k"`
+		Mode        string                    `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -143,10 +145,14 @@ func (h *ChatHandler) Ask(c *gin.Context) {
 	}
 	result, err := h.execution.Execute(c.Request.Context(), service.ConversationRequest{
 		Kind: service.ConversationKindChat, UserID: userID, SessionID: sessionID,
-		Question: req.Question, TopK: req.TopK, Mode: req.Mode,
+		ContextRefs: req.ContextRefs, Question: req.Question, TopK: req.TopK, Mode: req.Mode,
 	})
 	if err != nil {
-		response.BadRequest(c, err.Error())
+		if len(req.ContextRefs) > 0 {
+			artifactError(c, err)
+		} else {
+			response.BadRequest(c, err.Error())
+		}
 		return
 	}
 	response.OK(c, result.Payload())
@@ -162,10 +168,11 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 	}
 
 	var req struct {
-		Question string `json:"question" binding:"required"`
-		TopK     int    `json:"top_k"`
-		Mode     string `json:"mode"`
-		RunID    string `json:"run_id"`
+		ContextRefs []model.SummaryContextRef `json:"context_refs"`
+		Question    string                    `json:"question" binding:"required"`
+		TopK        int                       `json:"top_k"`
+		Mode        string                    `json:"mode"`
+		RunID       string                    `json:"run_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -177,10 +184,14 @@ func (h *ChatHandler) AskAgent(c *gin.Context) {
 	}
 	result, err := h.execution.Execute(c.Request.Context(), service.ConversationRequest{
 		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID,
-		Question: req.Question, TopK: req.TopK, Mode: req.Mode, RunID: req.RunID,
+		ContextRefs: req.ContextRefs, Question: req.Question, TopK: req.TopK, Mode: req.Mode, RunID: req.RunID,
 	})
 	if err != nil {
-		response.BadRequest(c, err.Error())
+		if len(req.ContextRefs) > 0 {
+			artifactError(c, err)
+		} else {
+			response.BadRequest(c, err.Error())
+		}
 		return
 	}
 	response.OK(c, result.Payload())
@@ -195,9 +206,10 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	}
 
 	var req struct {
-		Question string `json:"question" binding:"required"`
-		TopK     int    `json:"top_k"`
-		Mode     string `json:"mode"`
+		ContextRefs []model.SummaryContextRef `json:"context_refs"`
+		Question    string                    `json:"question" binding:"required"`
+		TopK        int                       `json:"top_k"`
+		Mode        string                    `json:"mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -211,7 +223,7 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	started := false
 	_, err = h.streamConversation(c, service.ConversationRequest{
 		Kind: service.ConversationKindChat, UserID: userID, SessionID: sessionID,
-		Question: req.Question, TopK: req.TopK, Mode: req.Mode,
+		ContextRefs: req.ContextRefs, Question: req.Question, TopK: req.TopK, Mode: req.Mode,
 	}, func(event service.ConversationStreamEvent) error {
 		startConversationSSE(c)
 		started = true
@@ -222,7 +234,11 @@ func (h *ChatHandler) AskStream(c *gin.Context) {
 	if err != nil {
 		var preparation *service.ConversationPreparationError
 		if !started && errors.As(err, &preparation) {
-			response.BadRequest(c, err.Error())
+			if len(req.ContextRefs) > 0 {
+				artifactError(c, err)
+			} else {
+				response.BadRequest(c, err.Error())
+			}
 			return
 		}
 		log.Printf("chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
@@ -242,10 +258,11 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 	}
 
 	var req struct {
-		Question     string `json:"question" binding:"required"`
-		TopK         int    `json:"top_k"`
-		Mode         string `json:"mode"`
-		AgentProfile string `json:"agent_profile"`
+		ContextRefs  []model.SummaryContextRef `json:"context_refs"`
+		Question     string                    `json:"question" binding:"required"`
+		TopK         int                       `json:"top_k"`
+		Mode         string                    `json:"mode"`
+		AgentProfile string                    `json:"agent_profile"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "参数错误: "+err.Error())
@@ -275,13 +292,17 @@ func (h *ChatHandler) AskAgentStream(c *gin.Context) {
 	}
 
 	_, err = h.streamConversation(c, service.ConversationRequest{
-		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID, Question: req.Question,
+		Kind: service.ConversationKindAgent, UserID: userID, SessionID: sessionID, ContextRefs: req.ContextRefs, Question: req.Question,
 		TopK: req.TopK, Mode: req.Mode, AgentProfile: req.AgentProfile,
 	}, emit)
 	if err != nil {
 		var preparation *service.ConversationPreparationError
 		if !started && errors.As(err, &preparation) {
-			response.BadRequest(c, err.Error())
+			if len(req.ContextRefs) > 0 {
+				artifactError(c, err)
+			} else {
+				response.BadRequest(c, err.Error())
+			}
 			return
 		}
 		log.Printf("agent chat stream failed: user_id=%d session_id=%d mode=%q err=%v", userID, sessionID, req.Mode, err)
