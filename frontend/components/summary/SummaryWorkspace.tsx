@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPlayer'
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { SummaryRevisionPanel } from './SummaryRevisionPanel'
@@ -7,7 +7,7 @@ import { SummaryActivityList } from './SummaryActivityList'
 import { SummaryVisualRetry } from './SummaryVisualRetry'
 import { useSummaryGeneration } from './useSummaryGeneration'
 import { taskTitle } from '@/lib/format'
-import type { SummaryContextRef } from '@/lib/summaryExperience'
+import { summaryReferenceMatches, type SummaryContextRef } from '@/lib/summaryExperience'
 import type { EffectiveSummaryView,VideoTask } from '@/lib/types'
 import './SummaryWorkspace.css'
 import { useShell } from '@/components/shell/AppShell'
@@ -29,6 +29,17 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
   }
   const [editExpectation,setEditExpectation]=useState<Pick<EffectiveSummaryView,'content_digest'|'version_ref'>|undefined>()
   const reader=useRef<HTMLElement>(null),position=useRef(0)
+  const committedSummary=useRef<{summary:EffectiveSummaryView;taskID:number;ownerID:number|undefined}|null>(null)
+  const onSummaryCommitted=useCallback((summary:EffectiveSummaryView|null,taskID:number)=>{committedSummary.current=summary?{summary,taskID,ownerID:user?.id}:null},[user?.id])
+  const returnToReference=(index:number)=>{
+    const ref=contexts[index]
+    if(!ref)return
+    const matches=()=>{const current=committedSummary.current;return !!current&&current.taskID===task.id&&current.ownerID===user?.id&&summaryReferenceMatches(ref,task.id,current.summary)}
+    const stale=()=>setMessage('这段引用来自较早的摘要版本；已保留原引用快照，请从当前正文重新选段。')
+    if(!matches()){stale();return}
+    toggleFocus(null)
+    requestAnimationFrame(()=>{if(!matches()){stale();return}reader.current?.querySelector<HTMLElement>(`[id="summary-block-${encodeURIComponent(ref.block_id)}"]`)?.scrollIntoView({block:'center'})})
+  }
   useEffect(() => { setLocalContexts([]); setEditBlocks([]); setMessage(''); setPane('playback'); setChatSeen(false); position.current = 0 }, [user?.id, task.id])
   const [visualAttempt,setVisualAttempt]=useState(0)
   const {generation,error}=useSummaryGeneration(task.id,`${task.updated_at}:${task.status}:${visualAttempt}`)
@@ -54,12 +65,12 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
         <SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} />
         {message&&<p className="summary-notice" role="status">{message}<button className="btn btn-sm" aria-label="关闭提示" onClick={()=>setMessage('')}>×</button></p>}
         {!ready&&<section className="summary-empty"><h2>{running?'正在整理视频摘要':['failed','dead'].includes(generation?.status||'')?'摘要尚未生成':'开始阅读这段视频'}</h2><p>{running?'处理会在后台继续。文字就绪后会先开放阅读。':'导入的视频已保存，可生成摘要后继续提问。'}</p>{!readOnly&&!running&&<button className="btn btn-primary" disabled={busy} onClick={onGenerate}>生成摘要</button>}</section>}
-        {ready&&<><SummaryRevisionPanel compactEditing taskId={task.id} readOnly={readOnly} onChanged={onChanged} publishedDigest={generation?.content_digest} selectedBlockIDs={editBlocks} selectedExpectation={editExpectation} onClearSelection={()=>{setEditBlocks([]);setEditExpectation(undefined)}} renderContent={summary=><SummaryReadView readerRef={reader} taskId={task.id} summary={summary} mindmapEnabled={generation?.mindmap_enabled!==false} readOnly={readOnly} mediaRevision={task.file_md5} playbackReady={!!playbackUrl} onSeek={seek} onReference={addContext} onMessage={setMessage} onEditBlock={readOnly?undefined:id=>{setEditExpectation({content_digest:summary.content_digest,version_ref:summary.version_ref});editBlock(id)}} />} />{!readOnly&&<button className="btn btn-sm" disabled={busy||running} onClick={onGenerate}>重新生成原稿</button>}</>}
+        {ready&&<><SummaryRevisionPanel compactEditing taskId={task.id} readOnly={readOnly} onChanged={onChanged} publishedDigest={generation?.content_digest} selectedBlockIDs={editBlocks} selectedExpectation={editExpectation} onClearSelection={()=>{setEditBlocks([]);setEditExpectation(undefined)}} renderContent={summary=><SummaryReadView readerRef={reader} onSummaryCommitted={onSummaryCommitted} taskId={task.id} summary={summary} mindmapEnabled={generation?.mindmap_enabled!==false} readOnly={readOnly} mediaRevision={task.file_md5} playbackReady={!!playbackUrl} onSeek={seek} onReference={addContext} onMessage={setMessage} onEditBlock={readOnly?undefined:id=>{setEditExpectation({content_digest:summary.content_digest,version_ref:summary.version_ref});editBlock(id)}} />} />{!readOnly&&<button className="btn btn-sm" disabled={busy||running} onClick={onGenerate}>重新生成原稿</button>}</>}
       </article>
       <aside className="summary-side" aria-label="回放与问答">
         <div className="summary-side-tabs" role="tablist" aria-label="辅助视图"><button role="tab" aria-selected={pane==='playback'} onClick={()=>setPane('playback')}>回放</button><button role="tab" aria-selected={pane==='chat'} onClick={openChat}>问答{contexts.length?` · ${contexts.length} 段引用`:''}</button></div>
         <div className="summary-playback" hidden={pane!=='playback'}><VideoPlayer ref={playerRef} src={playbackUrl} title={title} initialTimeMs={initialTimeMS} onPlayhead={onPlayhead} onDuration={onDuration} onNeedRefresh={refreshPlaybackUrl} fallbackText="媒体暂未就绪；摘要正文与图注仍可阅读" /><p className="muted">点击章节或图片的回放按钮，回到对应画面。</p><details><summary>来源信息</summary><p>{task.source_type==='url'?'链接导入':'本地上传'}</p>{task.source_url&&<a href={task.source_url} target="_blank" rel="noopener noreferrer">打开原视频来源</a>}<p>{task.filename}</p></details></div>
-        <div className="summary-chat" hidden={pane!=='chat'}>{chatSeen&&<ChatWorkspace embedded sharedSummaryState scopeType="video" targetId={task.id} scopeName={title} playbackUrl={null} refreshPlaybackUrl={refreshPlaybackUrl} suggestions={[]} videoHasTranscript={task.has_transcription||!!task.active_text_source_id||task.has_summary} videoRetrievable={indexed} videoVisualMode={task.visual_mode} summaryContextRefs={contexts} onReturnSummaryContext={index=>{const ref=contexts[index];if(!ref)return;toggleFocus(null);requestAnimationFrame(()=>document.getElementById(`summary-block-${encodeURIComponent(ref.block_id)}`)?.scrollIntoView({block:"center"}))}} onRemoveSummaryContext={index=>setContexts(previous=>previous.filter((_,i)=>i!==index))} onContextSent={()=>setContexts([])} />}</div>
+        <div className="summary-chat" hidden={pane!=='chat'}>{chatSeen&&<ChatWorkspace embedded sharedSummaryState scopeType="video" targetId={task.id} scopeName={title} playbackUrl={null} refreshPlaybackUrl={refreshPlaybackUrl} suggestions={[]} videoHasTranscript={task.has_transcription||!!task.active_text_source_id||task.has_summary} videoRetrievable={indexed} videoVisualMode={task.visual_mode} summaryContextRefs={contexts} onReturnSummaryContext={returnToReference} onRemoveSummaryContext={index=>setContexts(previous=>previous.filter((_,i)=>i!==index))} onContextSent={()=>setContexts([])} />}</div>
       </aside>
     </div>
   </div>

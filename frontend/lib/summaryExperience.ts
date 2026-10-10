@@ -14,6 +14,16 @@ export interface SummaryVisualRetryReceipt { task_id: number; generation_id: str
 export interface SummaryGenerationEvent { seq: number; type: string; data: Record<string, unknown>; created_at: string }
 export interface SummaryGenerationEvents { generation_id: string; events: SummaryGenerationEvent[]; high_watermark: number; next_after_seq: number; has_more: boolean; cursor_gap: boolean }
 
+// Equal text after undo is still a different revision. Returning to a quoted
+// block requires the exact frozen version as well as its document digest.
+export function summaryReferenceMatches(ref: SummaryContextRef, taskID: number, summary: { content_digest?: string; version_ref?: SummaryVersionRef }): boolean {
+  const current = summary.version_ref
+  if (ref.task_id !== taskID || !current || !summary.content_digest || ref.document_digest !== summary.content_digest) return false
+  return 'revision_id' in ref.version_ref
+    ? 'revision_id' in current && ref.version_ref.revision_id === current.revision_id
+    : 'generated_version' in current && ref.version_ref.generated_version === current.generated_version
+}
+
 export const summaryExperienceApi = {
   generation: (id: number, signal?: AbortSignal) => req<SummaryGeneration>(`/media/task/${id}/summary/generation`, 'GET', undefined, undefined, signal),
   visualRetry: (id: number, body: SummaryVisualRetryRequest, key: string, signal?: AbortSignal) => req<SummaryVisualRetryReceipt>(`/media/task/${id}/summary/visual-retry`, 'POST', body, { 'Idempotency-Key': key }, signal),

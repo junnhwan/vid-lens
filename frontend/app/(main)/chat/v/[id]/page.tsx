@@ -10,7 +10,7 @@ import type { StudyBlock } from '@/lib/artifacts/schema'
 import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 import { SummaryReadView } from '@/components/summary/SummaryReadView'
 import { useSummarySessionView, useSummaryTaskView } from '@/components/summary/useSummaryViewState'
-import type { SummaryContextRef } from '@/lib/summaryExperience'
+import { summaryReferenceMatches, type SummaryContextRef } from '@/lib/summaryExperience'
 import '@/components/summary/VideoChatSummary.css'
 import Link from '@/lib/router'
 
@@ -63,17 +63,17 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
   }, [user?.id, taskId, task?.id, view.summaryOpen, summaryReload])
   useEffect(() => {
     if (!view.summaryOpen || !summary || !returnReference) return
-    if (returnReference.document_digest !== summary.content_digest) {
-      setReferenceNotice('这段引用来自较早的摘要版本，当前正文已变化；提问仍会保留原引用快照。')
+    if (!summaryReferenceMatches(returnReference, taskId, summary)) {
+      setReferenceNotice('这段引用来自较早的摘要版本，当前有效版本已变化；提问仍会保留原引用快照。')
       setReturnReference(null)
     } else {
       const frame = requestAnimationFrame(() => {
-        document.getElementById(`summary-block-${encodeURIComponent(returnReference.block_id)}`)?.scrollIntoView({ block: 'center' })
+        readerRef.current?.querySelector<HTMLElement>(`[id="summary-block-${encodeURIComponent(returnReference.block_id)}"]`)?.scrollIntoView({ block: 'center' })
         setReturnReference(null)
       })
       return () => cancelAnimationFrame(frame)
     }
-  }, [view.summaryOpen, summary, returnReference])
+  }, [view.summaryOpen, taskId, summary, returnReference])
   const addReference = (ref: SummaryContextRef) => {
     if (sessionView.contexts.some(item => JSON.stringify(item) === JSON.stringify(ref))) return
     const next = [...sessionView.contexts, ref]
