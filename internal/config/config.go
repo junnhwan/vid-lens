@@ -4,23 +4,24 @@ import "fmt"
 
 // Config 全局配置结构体
 type Config struct {
-	AgentBudget  AgentBudgetConfig  `yaml:"agent_budget"`
-	Server       ServerConfig       `yaml:"server"`
-	Database     DatabaseConfig     `yaml:"database"`
-	Redis        RedisConfig        `yaml:"redis"`
-	MinIO        MinIOConfig        `yaml:"minio"`
-	MQ           MQConfig           `yaml:"mq"`
-	AI           AIConfig           `yaml:"ai"`
-	Tools        ToolsConfig        `yaml:"tools"`
-	JWT          JWTConfig          `yaml:"jwt"`
-	Security     SecurityConfig     `yaml:"security"`
-	Upload       UploadConfig       `yaml:"upload"`
-	TaskRetry    TaskRetryConfig    `yaml:"task_retry"`
-	Cleanup      CleanupConfig      `yaml:"cleanup"`
-	RateLimit    RateLimitConfig    `yaml:"ratelimit"`
-	RAG          RAGConfig          `yaml:"rag"`
-	Memory       MemoryConfig       `yaml:"memory"`
-	AIGovernance AIGovernanceConfig `yaml:"-"`
+	SummaryExperience SummaryExperienceConfig `yaml:"summary_experience"`
+	AgentBudget       AgentBudgetConfig       `yaml:"agent_budget"`
+	Server            ServerConfig            `yaml:"server"`
+	Database          DatabaseConfig          `yaml:"database"`
+	Redis             RedisConfig             `yaml:"redis"`
+	MinIO             MinIOConfig             `yaml:"minio"`
+	MQ                MQConfig                `yaml:"mq"`
+	AI                AIConfig                `yaml:"ai"`
+	Tools             ToolsConfig             `yaml:"tools"`
+	JWT               JWTConfig               `yaml:"jwt"`
+	Security          SecurityConfig          `yaml:"security"`
+	Upload            UploadConfig            `yaml:"upload"`
+	TaskRetry         TaskRetryConfig         `yaml:"task_retry"`
+	Cleanup           CleanupConfig           `yaml:"cleanup"`
+	RateLimit         RateLimitConfig         `yaml:"ratelimit"`
+	RAG               RAGConfig               `yaml:"rag"`
+	Memory            MemoryConfig            `yaml:"memory"`
+	AIGovernance      AIGovernanceConfig      `yaml:"-"`
 }
 
 type ServerConfig struct {
@@ -181,10 +182,12 @@ type SecurityConfig struct {
 }
 
 type UploadConfig struct {
-	DisableURLImport bool  `yaml:"disable_url_import"`
-	SlowUploadNotice bool  `yaml:"slow_upload_notice"`
-	MaxFileSize      int64 `yaml:"max_file_size"`
-	ChunkSize        int64 `yaml:"chunk_size"`
+	// Injected process policy; YAML has one authority at summary_experience.
+	SummaryExperience SummaryExperienceConfig `yaml:"-"`
+	DisableURLImport  bool                    `yaml:"disable_url_import"`
+	SlowUploadNotice  bool                    `yaml:"slow_upload_notice"`
+	MaxFileSize       int64                   `yaml:"max_file_size"`
+	ChunkSize         int64                   `yaml:"chunk_size"`
 }
 
 type TaskRetryConfig struct {

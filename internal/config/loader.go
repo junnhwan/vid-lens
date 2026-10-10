@@ -68,6 +68,9 @@ func Load(path string) (*Config, error) {
 	if err := applyRuntimeEnvironment(&cfg); err != nil {
 		return nil, err
 	}
+	if err := cfg.SummaryExperience.applyEnvironment(); err != nil {
+		return nil, err
+	}
 	cfg.Tools.applyDefaults()
 	cfg.MQ.applyDefaults()
 	cfg.Memory.applyDefaults()

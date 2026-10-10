@@ -51,6 +51,9 @@ func (s *MediaService) lookupImport(ctx context.Context, owner int64, action str
 		result.GenerationID, err = s.repo.ImportRequest.ReadAcceptedGeneration(ctx, owner, action, options.IdempotencyKey)
 		return nil, result, err
 	}
+	if err := s.requireV2GenerationAdmission(); err != nil {
+		return nil, nil, err
+	}
 	return &preparedImport{options: normalized, key: options.IdempotencyKey, action: action, hash: hash}, nil, nil
 }
 

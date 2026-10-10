@@ -15,6 +15,9 @@ import (
 )
 
 func (s *MediaService) requestSourceSummary(ctx context.Context, task *model.VideoTask, force bool) error {
+	if err := s.requireV2GenerationAdmission(); err != nil {
+		return err
+	}
 	if task.ActiveTextSourceID == "" {
 		return artifact.Err("source_not_ready", 422)
 	}

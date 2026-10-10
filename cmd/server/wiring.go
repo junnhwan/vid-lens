@@ -213,7 +213,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 		IntentRouter: service.NewIntentRouter(service.NewRuleIntentClassifier()),
 	})
 
-	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools, deps.cfg.JWT).WithAIProfiles(aiProfileSvc)
+	mediaSvc := service.NewMediaService(deps.repos, deps.minioStorage, deps.producer, deps.rdb, deps.cfg.Upload, deps.cfg.Tools, deps.cfg.JWT).WithAIProfiles(aiProfileSvc).WithSummaryExperience(deps.cfg.SummaryExperience)
 	mediaSvc.SetTranscriptionConfig(deps.cfg.MQ)
 	var vectorCleaner service.TaskVectorCleaner
 	if deps.ragStore != nil {
@@ -317,7 +317,7 @@ func wireServerApplication(deps serverDependencies, aiStrategy ai.Strategy) (*se
 	chatHandler := handler.NewChatHandler(chatSvc, conversationExecution).WithQuestionSuggestions(questionSuggestionsSvc)
 	artifactSvc := service.NewArtifactService(deps.repos, aiProfileSvc, aiFactory)
 	summarySvc := service.NewSummaryRevisionService(deps.repos, aiProfileSvc, aiFactory)
-	consumer.SetSummaryGenerator(service.NewSummaryGenerationService(deps.repos, aiProfileSvc, aiFactory).WithVisualEnricher(service.NewSummaryVisualService(deps.repos, aiFactory, visualInvestigator)))
+	consumer.SetSummaryGenerator(service.NewSummaryGenerationService(deps.repos, aiProfileSvc, aiFactory).WithVisualEnricher(service.WithSummaryVisualPolicy(service.NewSummaryVisualService(deps.repos, aiFactory, visualInvestigator), deps.cfg.SummaryExperience)))
 	return &serverApplication{
 		handlers: serverHandlers{
 			user:           handler.NewUserHandler(userSvc),
