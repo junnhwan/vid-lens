@@ -61,7 +61,7 @@ export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = 
       if (disposed || !svg.current) return
       const colors = getComputedStyle(svg.current)
       const palette = [1, 2, 3].map(i => colors.getPropertyValue(`--map-branch-${i}`).trim())
-      const instance = Markmap.create(svg.current, { duration: 0, maxWidth: compact ? 150 : 190, spacingHorizontal: compact ? 30 : 55, spacingVertical: compact ? 10 : 16, paddingX: compact ? 8 : 12, initialExpandLevel: nodes.length > 50 ? 2 : 3, color: node => palette[(node.state.depth || 0) % palette.length] })
+      const instance = Markmap.create(svg.current, { duration: 0, zoom: !compact, pan: !compact, maxWidth: compact ? 150 : 190, spacingHorizontal: compact ? 30 : 55, spacingVertical: compact ? 10 : 16, paddingX: compact ? 8 : 12, initialExpandLevel: nodes.length > 50 ? 2 : 3, color: node => palette[(node.state.depth || 0) % palette.length] })
       map.current = instance
       await instance.setData(hierarchyMap(title, nodes))
       if (disposed) return
