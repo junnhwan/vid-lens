@@ -35,7 +35,7 @@ func summaryGenerationOutputDemand(input string) int64 {
 			}
 		}
 	}
-	return max(768, int64(1024+min(refs, 96)*8+chars/2))
+	return max(768, int64(512+min(refs, 96)*16+chars/2))
 }
 
 func (e *summaryGenerationExecution) plannedOutput(input string) int64 {
