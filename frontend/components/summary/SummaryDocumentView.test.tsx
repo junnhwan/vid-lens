@@ -31,29 +31,39 @@ test('screenshot references use server visible caption, Unicode offsets and exac
  current.unmount();expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:actual-authorized-image')
 })
 test('media mismatch disables every timestamp while keeping text and images readable',()=>{
- const current=view('replaced-media')
+ const current=view('replaced-media');fireEvent.click(screen.getByLabelText('章节操作：健康检查'))
  expect((screen.getByRole('button',{name:'回放此处'}) as HTMLButtonElement).disabled).toBe(true)
  expect((screen.getByRole('button',{name:'回放 0:19'}) as HTMLButtonElement).disabled).toBe(true)
  expect(screen.getByText(/先检查健康状态/)).toBeTruthy();expect(current.seek).not.toHaveBeenCalled()
 })
 test('a stale block response never becomes a question reference',async()=>{
  vi.mocked(summaryExperienceApi.block).mockResolvedValue({...context,document_digest:'new-generation'})
- const current=view();fireEvent.click(screen.getByRole('button',{name:'引用本章前 700 字'}))
+ const current=view();fireEvent.click(screen.getByLabelText('章节操作：健康检查'));fireEvent.click(screen.getByRole('button',{name:'引用本章前 700 字'}))
  await waitFor(()=>expect(current.notice).toHaveBeenCalledWith('摘要版本已变化，请刷新后重新选段。'))
  expect(current.refs).not.toHaveBeenCalled()
 })
 test('leaving a task aborts pending quote reads and suppresses late notices',async()=>{
  let finish!:(value:SummaryBlockContext)=>void
  vi.mocked(summaryExperienceApi.block).mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
- const current=view();fireEvent.click(screen.getByRole('button',{name:'引用本章前 700 字'}))
+ const current=view();fireEvent.click(screen.getByLabelText('章节操作：健康检查'));fireEvent.click(screen.getByRole('button',{name:'引用本章前 700 字'}))
  const signal=vi.mocked(summaryExperienceApi.block).mock.calls[0][3];current.unmount()
  expect(signal?.aborted).toBe(true)
  await act(async()=>finish(context));expect(current.refs).not.toHaveBeenCalled();expect(current.notice).not.toHaveBeenCalled()
 })
 test('overview quotes resolve the reserved block against the same generated version',async()=>{
  vi.mocked(summaryExperienceApi.block).mockResolvedValue({...context,canonical_text:'先检查健康状态',figures:[]})
- const current=view();fireEvent.click(screen.getByRole('button',{name:'引用概览'}))
+ const current=view();fireEvent.click(screen.getByLabelText('概览操作'));fireEvent.click(screen.getByRole('button',{name:'引用概览'}))
  await waitFor(()=>expect(current.refs).toHaveBeenCalledTimes(1))
  expect(summaryExperienceApi.block).toHaveBeenCalledWith(42,'summary-overview',{generated_version:2},expect.any(AbortSignal))
  expect(current.refs.mock.calls[0][0]).toMatchObject({kind:'summary_selection',block_id:'summary-overview',text_start:0,text_end:7,quote:'先检查健康状态'})
+})
+
+test('mindmap is visible by default and chapter management stays behind its menu',()=>{
+ const current=view()
+ expect(screen.getByRole('region',{name:'摘要导图预览'})).toBeTruthy()
+ expect(screen.getByRole('button',{name:'展开导图'})).toBeTruthy()
+ expect((screen.getByLabelText('章节操作：健康检查').parentElement as HTMLDetailsElement).open).toBe(false)
+ fireEvent.click(screen.getByLabelText('章节操作：健康检查'))
+ fireEvent.click(screen.getByRole('button',{name:'回放此处'}))
+ expect(current.seek).toHaveBeenCalledWith(19040)
 })

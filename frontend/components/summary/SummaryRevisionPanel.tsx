@@ -19,9 +19,10 @@ function errorText(error: unknown): string {
 function previewText(value:unknown):string { if(value==null)return '';if(typeof value==='string')return value;if(typeof value==='object'){const row=value as Record<string,unknown>;for(const key of ['body_markdown','caption','title','overview'])if(typeof row[key]==='string')return row[key] as string}return JSON.stringify(value,null,2) }
 const changeLabels:Record<string,string>={update_document_title:'修改标题',update_overview:'修改概览',update_block:'修改章节',insert_block:'新增章节',delete_block:'删除章节',move_block:'移动章节',update_figure_caption:'修改图注'}
 
-export function SummaryRevisionPanel({ taskId, readOnly, onChanged,renderContent,publishedDigest, selectedBlockIDs,onClearSelection,compactEditing = false,selectedExpectation }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void; renderContent?: (summary:EffectiveSummaryView)=>ReactNode; publishedDigest?: string; selectedBlockIDs?: string[]; onClearSelection?:()=>void; compactEditing?:boolean; selectedExpectation?:Pick<EffectiveSummaryView,'content_digest'|'version_ref'> }) {
+export function SummaryRevisionPanel({ taskId, readOnly, onChanged,renderContent,publishedDigest, selectedBlockIDs,onClearSelection,compactEditing = false,selectedExpectation,editingRequest = 0 }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void; renderContent?: (summary:EffectiveSummaryView)=>ReactNode; publishedDigest?: string; selectedBlockIDs?: string[]; onClearSelection?:()=>void; compactEditing?:boolean; editingRequest?:number; selectedExpectation?:Pick<EffectiveSummaryView,'content_digest'|'version_ref'> }) {
   const videoPreflight = useVideoAIPreflight('revise')
   const [editingOpen, setEditingOpen] = useState(!compactEditing)
+  useEffect(() => { if (editingRequest) setEditingOpen(true) }, [editingRequest])
   const selectionKey = JSON.stringify([...(selectedBlockIDs || [])].sort())
   const previousSelection = useRef(selectionKey)
   const [preflightAccepted, setPreflightAccepted] = useState(false)
@@ -260,7 +261,6 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged,renderContent
 
   if (!summary) return <p role="status">{message || '正在读取摘要…'}</p>
   return <div className="sumrev">
-    <p className="sumrev-meta muted">{summary.has_revision ? `你的修订 v${summary.revision}` : summary.document ? '生成原稿' : '生成摘要'} · 此视频的修订仅属于当前账号</p>
     {summary.source_status === 'needs_merge' && <div role="alert" className="sumrev-alert warn">
       <p>生成原稿已更新。当前仍显示你的修订，请选择如何处理。</p>
       {!readOnly && <div className="sumrev-actions"><button className="btn btn-sm" disabled={busy} onClick={() => void resolveBase('keep_revision')}>保留我的修订</button><button className="btn btn-sm" disabled={busy} onClick={() => void resolveBase('use_generated')}>改用新原稿</button></div>}
@@ -268,6 +268,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged,renderContent
     {summary.source_status === 'source_changed' && <p role="status" className="sumrev-alert">文字来源已更新，这份已保存摘要仍可阅读；重新生成后可核对变化。</p>}
     {summary.source_status === 'generated_missing' && <p role="status" className="sumrev-alert">生成原稿暂不可用；你的修订仍保留。来源恢复后可核对差异。</p>}
     {renderContent ? renderContent(summary) : <div className="summary-body"><MarkdownAnswer content={summary.content} domainTags /></div>}
+    <p className="sumrev-meta muted">{summary.has_revision ? `你的修订 v${summary.revision}` : summary.document ? '生成原稿' : '生成摘要'} · 此视频的修订仅属于当前账号</p>
     <button className="btn sumrev-download" onClick={download}><Icon name="download" size="sm" />下载当前摘要 Markdown</button>
     {!readOnly && <details className="sumrev-editing" open={!compactEditing || editingOpen}>{compactEditing && <summary onClick={event => { event.preventDefault(); setEditingOpen(open => !open) }}>{editingOpen ? '收起摘要修改' : '修改这份摘要'}</summary>}<section className="sumrev-compose" aria-label="AI 修改摘要">
       {!!selectedBlockIDs?.length && <p role="status">本次仅修改已选 {selectedBlockIDs.length} 个章节的正文或图注。<button className="btn btn-sm" onClick={onClearSelection}>改为整份摘要</button></p>}

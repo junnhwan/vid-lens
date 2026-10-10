@@ -18,7 +18,7 @@ function hierarchyMap(title: string, nodes: HierarchyNode[]) {
  const visit = (row: TreeNode): MapTreeNode => ({ content: `<button type="button" data-block-id="${escapeMapText(row.block.id)}">${escapeMapText(row.block.title)}</button>`, children: row.children.map(visit) })
  return {content: escapeMapText(title), children: hierarchy(nodes).map(visit)}
 }
-export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = '把零散知识，连成一张图', label = '学习笔记概念导图' }: { title: string; nodes: HierarchyNode[]; onSelect: (id: string) => void; selectedBlock?: string | null; heading?: string; label?: string }) {
+export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = '把零散知识，连成一张图', label = '学习笔记概念导图', compact = false }: { title: string; nodes: HierarchyNode[]; onSelect: (id: string) => void; selectedBlock?: string | null; heading?: string; label?: string; compact?: boolean }) {
   const svg = useRef<SVGSVGElement>(null)
   const map = useRef<Markmap | null>(null)
   const [error, setError] = useState(false)
@@ -76,16 +76,16 @@ export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = 
   function outline(nodes: TreeNode[]) {
     return <ul>{nodes.map(({ block, children }) => <li key={block.id}><button aria-pressed={focused && selectedBlock === block.id} onClick={() => select(block.id)}>{block.title}<span>{(block.references || 0) ? `${block.references || 0} 条引用` : '无引用'}</span></button>{children.length > 0 && outline(children)}</li>)}</ul>
   }
-  return <div className="study-map">
-    <div className="map-heading"><div><p className="product-eyebrow">CONNECTED UNDERSTANDING</p><h2>{heading}</h2><p>{nodes.length} 个节点 · 与正文共用内容 · 点击节点查看依据</p></div></div>
+  return <div className={`study-map${compact ? ' compact' : ''}`}>
+    {!compact && <div className="map-heading"><div><p className="product-eyebrow">CONNECTED UNDERSTANDING</p><h2>{heading}</h2><p>{nodes.length} 个节点 · 与正文共用内容 · 点击节点查看依据</p></div></div>}
     <div className="map-canvas">
       {error ? <div className="map-error" role="alert"><Icon name="alert" /><b>导图暂时无法显示</b><p>笔记内容仍可通过下方文字大纲查看，并可选择节点核对引用。</p><button className="btn btn-sm" onClick={() => { setError(false); setAttempt(value => value + 1) }}>重试布局</button></div> : <>
         {!ready && <div className="map-layout-loading" role="status"><span className="skel root" /><span className="skel branch one" /><span className="skel branch two" /><span className="skel branch three" /><p>正在整理导图布局…</p></div>}
         <svg ref={svg} aria-label={label} role="group" onClick={event => { const target = event.target as Element; const id = target.closest('[data-block-id]')?.getAttribute('data-block-id'); if (id) select(id) }} />
-        <div className="map-controls">{focused && <button aria-label="显示完整导图" onClick={() => setFocused(false)}><Icon name="layers" size="sm" /></button>}<button aria-label="缩小导图" disabled={!ready} onClick={() => void map.current?.rescale(.8)}>−</button><button aria-label="放大导图" disabled={!ready} onClick={() => void map.current?.rescale(1.25)}>+</button><button aria-label="适应画布" disabled={!ready} onClick={() => void map.current?.fit()}><Icon name="refresh" size="sm" /></button></div>
+        {!compact && <div className="map-controls">{focused && <button aria-label="显示完整导图" onClick={() => setFocused(false)}><Icon name="layers" size="sm" /></button>}<button aria-label="缩小导图" disabled={!ready} onClick={() => void map.current?.rescale(.8)}>−</button><button aria-label="放大导图" disabled={!ready} onClick={() => void map.current?.rescale(1.25)}>+</button><button aria-label="适应画布" disabled={!ready} onClick={() => void map.current?.fit()}><Icon name="refresh" size="sm" /></button></div>}
       </>}
     </div>
-    <p className="map-caption">{nodes.length > 50 ? '大图默认收起章节，点击连接点展开；也可在文字大纲中选择任意节点。' : '结构来自当前正文。引用只说明来源关联，内容与关系仍需回到视频核对。'}</p>
-    <details className="map-outline" open={error || narrow}><summary>文字大纲 · 键盘也可选择节点</summary>{outline(hierarchy(nodes))}</details>
+    {!compact && <p className="map-caption">{nodes.length > 50 ? '大图默认收起章节，点击连接点展开；也可在文字大纲中选择任意节点。' : '结构来自当前正文。引用只说明来源关联，内容与关系仍需回到视频核对。'}</p>}
+    {(!compact || error) && <details className="map-outline" open={error || narrow}><summary>文字大纲 · 键盘也可选择节点</summary>{outline(hierarchy(nodes))}</details>}
   </div>
 }

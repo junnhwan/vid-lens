@@ -1,6 +1,7 @@
 import type { SummaryGeneration } from '@/lib/summaryExperience'
 
-const fallbackReasons: Record<string, string> = { auto_summary_disabled: '本次仅刷新文字，未请求生成新摘要。', source_unchanged: '文字来源未变化，沿用已保存摘要。', classification_not_reprocessed: '标签没有重新分类，保留当前选择。', no_useful_visual: '画面未提供额外帮助，采用文字摘要。', visual_enricher_unavailable: '画面处理暂不可用，已保留文字摘要。', invalid_summary_document: '输出未通过来源与结构校验，请检查执行记录后重试。', vision_unavailable: '当前未配置画面理解，已保留文字摘要。', visual_disabled: '画面理解已关闭。', visual_location_missing: '来源没有可定位的真实时间，暂未补图。', visual_not_beneficial: '画面没有提供额外帮助，采用文字摘要。', visual_budget_exhausted: '本次画面检查预算已用尽，保留已完成内容。', requested_visual_mode_unavailable: '无法完成所选画面形式，已保留文字摘要。', visual_enrichment_failed: '补图未完成，文字摘要仍可阅读。' }
+const fallbackReasons: Record<string, string> = { auto_summary_disabled: '本次仅刷新文字，未请求生成新摘要。', source_unchanged: '文字来源未变化，沿用已保存摘要。', classification_not_reprocessed: '标签没有重新分类，保留当前选择。', no_useful_visual: '画面未提供额外帮助，采用文字摘要。', visual_enricher_unavailable: '画面处理暂不可用，已保留文字摘要。', invalid_summary_document: '输出未通过来源与结构校验，请检查执行记录后重试。', vision_unavailable: '当前未配置画面理解，已保留文字摘要。', visual_disabled: '画面理解已关闭。', visual_source_refs_missing: '摘要缺少可用于定位画面的来源关联，暂未补图。',
+  visual_location_missing: '未找到可核对的画面位置，暂未补图。', visual_not_beneficial: '画面没有提供额外帮助，采用文字摘要。', visual_budget_exhausted: '本次画面检查预算已用尽，保留已完成内容。', requested_visual_mode_unavailable: '无法完成所选画面形式，已保留文字摘要。', visual_enrichment_failed: '补图未完成，文字摘要仍可阅读。' }
 export function SummaryActivityList({ generation, error }: { generation: SummaryGeneration | null; error: string }) {
   if (!generation) return error ? <p role="status" className="muted">执行记录暂不可用；已保存摘要仍可阅读。</p> : null
   const rows = generation.activities || [], running = rows.filter(row => row.state === 'running'), recent = rows.slice(-3)

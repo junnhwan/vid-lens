@@ -23,7 +23,7 @@ test('focus and side tabs preserve drafts, references, playback and reader scrol
  fireEvent.click(screen.getByRole('button',{name:'播放位置 19'}))
  fireEvent.click(screen.getByRole('button',{name:'选段提问'}))
  fireEvent.change(screen.getByRole('textbox',{name:'问题草稿'}),{target:{value:'这段有什么前提？'}})
- fireEvent.click(screen.getByRole('button',{name:'放大问答'}))
+ fireEvent.click(screen.getByText('更多'));fireEvent.click(screen.getByRole('button',{name:'放大问答'}))
  expect(container.querySelector('.summary-workspace')?.classList.contains('focus-chat')).toBe(true)
  fireEvent.click(screen.getByRole('button',{name:'恢复布局'}))
  expect(reader.scrollTop).toBe(143)
@@ -50,7 +50,7 @@ test('narrow desktop starts with the auxiliary area collapsed; opening reference
  fireEvent.click(screen.getByRole('button',{name:'收起侧栏'}))
  view.rerender(<SummaryWorkspace {...props}/>)
  expect(view.container.querySelector('.summary-workspace')?.classList.contains('side-collapsed')).toBe(true)
- fireEvent.click(screen.getByRole('button',{name:'放大问答'}))
+ fireEvent.click(screen.getByText('更多'));fireEvent.click(screen.getByRole('button',{name:'放大问答'}))
  expect(view.container.querySelector('.summary-workspace')?.classList.contains('side-collapsed')).toBe(false)
  expect(reader.scrollTop).toBe(260)
  expect((screen.getByRole('textbox',{name:'问题草稿'}) as HTMLInputElement).value).toBe('窄屏草稿')
@@ -76,4 +76,18 @@ test.each([
  expect(screen.getByRole('status').textContent).toContain('较早的摘要版本')
  expect((screen.getByRole('textbox',{name:'问题草稿'}) as HTMLInputElement).value).toBe('保留问题')
  expect(screen.getByText('选段')).toBeTruthy()
+})
+
+test('reading starts with content; completed processing and secondary actions stay in closed menus',()=>{
+ const task={id:42,filename:'lesson.mp4',has_summary:true,file_md5:'media',source_type:'upload'} as VideoTask
+ const view=render(<SummaryWorkspace task={task} readOnly playbackUrl="/actual-media" playerRef={createRef<VideoPlayerHandle>()} onPlayhead={vi.fn()} onDuration={vi.fn()} onSeek={vi.fn()} refreshPlaybackUrl={vi.fn()} onChanged={vi.fn()} onGenerate={vi.fn()} onTechnical={vi.fn()} busy={false} indexed />)
+ const details=view.container.querySelector('.summary-generation-details') as HTMLDetailsElement
+ expect(details.open).toBe(false)
+ expect(view.container.querySelector('.summary-reader .summary-activities')).toBeNull()
+ expect(view.container.querySelector('.summary-reader .summary-visual-retry')).toBeNull()
+ expect((view.container.querySelector('.summary-more') as HTMLDetailsElement).open).toBe(false)
+ fireEvent.click(screen.getByText('更多'))
+ fireEvent.click(screen.getByRole('button',{name:'视频与来源'}))
+ expect((view.container.querySelector('.summary-more') as HTMLDetailsElement).open).toBe(false)
+ expect(screen.getByText('真实摘要入口')).toBeTruthy()
 })

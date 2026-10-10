@@ -59,3 +59,16 @@ test('removing an autoaccepted tag exposes the durable rejection and explicit re
   expect(screen.getByText('尚未添加标签')).toBeTruthy()
   expect(screen.queryByText('Go · 自动')).toBeNull()
 })
+
+test('compact classification keeps suggestions and mutations in explicit management',async()=>{
+ mocks.decide.mockResolvedValue({...initial,version:5,suggestions:[{...initial.suggestions[0],status:'rejected'}]})
+ render(<SummaryTags taskId={1} compact />)
+ expect(await screen.findByText('Go')).toBeTruthy()
+ expect(screen.queryByRole('button',{name:'保留'})).toBeNull()
+ expect(screen.queryByText('个人意图待确认')).toBeNull()
+ fireEvent.click(screen.getByRole('button',{name:'管理分类 · 1 个建议'}))
+ expect(screen.getByRole('dialog')).toBeTruthy()
+ expect(screen.getByText('个人意图待确认')).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'拒绝'}))
+ await waitFor(()=>expect(mocks.decide).toHaveBeenCalledWith(1,'suggestion','reject',4))
+})
