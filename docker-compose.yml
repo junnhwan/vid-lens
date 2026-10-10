@@ -8,12 +8,9 @@ services:
     image: redis:latest
     container_name: vidlens-redis
     ports:
-      # Bind loopback only and allow overriding the host port when 6379 is
-      # already taken by another project (VIDLENS_REDIS_PORT).
       - "127.0.0.1:${VIDLENS_REDIS_PORT:-6379}:6379"
     command: redis-server --appendonly yes
     volumes:
-      # Override VIDLENS_DATA_ROOT locally to reuse an existing data root.
       - ${VIDLENS_DATA_ROOT:-./data}/redis:/data
     networks:
       - vidlens-net
@@ -52,8 +49,9 @@ services:
       POSTGRES_DB: vidlens
       TZ: Asia/Shanghai
     volumes:
-      # Override VIDLENS_DATA_ROOT locally to reuse an existing data root.
-      - ${VIDLENS_DATA_ROOT:-./data}/postgres:/var/lib/postgresql/data
+      # Docker-managed storage avoids PostgreSQL ownership failures on macOS
+      # bind mounts. This named volume reuses the local volume created earlier.
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -72,14 +70,18 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management
     container_name: vidlens-rabbitmq
-    ports:
-      - "127.0.0.1:5672:5672"    # AMQP
-      - "127.0.0.1:15672:15672"  # 管理面（DLQ 重投在此操作）
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "127.0.0.1:5672:5672"    # AMQP
+      - "127.0.0.1:15672:15672"  # 管理面（DLQ 重投在此操作）
     networks:
       - vidlens-net
+
+volumes:
+  postgres-data:
+    name: vid-lens_postgres-data
 
 networks:
   vidlens-net:

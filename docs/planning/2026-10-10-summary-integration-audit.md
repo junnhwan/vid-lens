@@ -1,6 +1,6 @@
 # Summary source integration audit
 
-Date: 2026-10-10. Source inspection; platform and model calls were not executed during this audit.
+Date: 2026-10-10. Pre-implementation source inspection at baseline `881a13c`; the findings below describe that baseline, not the current implementation. Platform and model calls were not executed during this initial audit. For implemented changes and later live validation, see [delivery progress](2026-10-10-summary-delivery-progress.md).
 
 ## Durable handoff
 

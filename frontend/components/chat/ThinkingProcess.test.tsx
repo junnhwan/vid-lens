@@ -6,8 +6,10 @@ import { ThinkingProcess } from './ThinkingProcess'
 
 afterEach(cleanup)
 const message: ChatMsg = { role: 'assistant', content: '', streaming: true, trace: [{ id: 'retrieve', kind: 'retrieve', label: '查找来源', status: 'done', detail: '两条来源仍可查看' }] }
-test('completion keeps a live process open at the same reading position', () => {
+test('a live process starts compact and preserves explicitly opened details on completion', () => {
   const { rerender } = render(<ThinkingProcess message={message} />)
+  expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(screen.getByRole('button'))
   rerender(<ThinkingProcess message={{ ...message, streaming: false }} />)
   expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('true')
   expect(screen.getByText('两条来源仍可查看').closest('[hidden]')).toBeNull()
@@ -15,6 +17,7 @@ test('completion keeps a live process open at the same reading position', () => 
 })
 test('an explicit fold is preserved when the answer completes', () => {
   const { rerender } = render(<ThinkingProcess message={message} />)
+  fireEvent.click(screen.getByRole('button'))
   fireEvent.click(screen.getByRole('button'))
   rerender(<ThinkingProcess message={{ ...message, streaming: false }} />)
   expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')

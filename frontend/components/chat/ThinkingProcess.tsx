@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChatMsg } from './chatUtils'
 import type { ChatTraceStep } from './traceTypes'
 import styles from './ThinkingProcess.module.css'
@@ -14,8 +14,6 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   const live = !!message.streaming
   const awaitingServer = ['pending', 'running'].includes(message.runStatus ?? '')
   const completed = !live && !awaitingServer && !message.error && !message.cancelled && !message.degraded
-  const wasLive = useRef(live)
-  useEffect(() => { if (live) wasLive.current = true }, [live])
   useEffect(() => {
     if (!live) return
     setNow(Date.now())
@@ -24,7 +22,7 @@ export function ThinkingProcess({ message }: { message: ChatMsg }) {
   }, [live])
   if (!live && !steps.length && !Object.keys(message.reasoning ?? {}).length) return null
   // Completing an answer changes its status, not the reader's scroll position.
-  const open = expanded ?? (live || wasLive.current)
+  const open = expanded ?? false
   const active = steps.findLast(step => step.status === 'running')
   const duration = message.processStartedAt
     ? Math.max(0, (message.processFinishedAt ?? now) - message.processStartedAt)

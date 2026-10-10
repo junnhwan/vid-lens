@@ -27,7 +27,6 @@ export function VideoCard({ task }: { task: VideoTask }) {
           taskId={task.id}
           seed={task.file_md5 || task.filename}
           onDuration={setDurationMs}
-          fallbackTitle={taskTitle(task)}
         />
         <span className="vcard-play" aria-hidden="true"><Icon name="play" /></span>
         {!ready && <span className={`vstate chip ${state.chip}`}>{state.text}</span>}
@@ -40,10 +39,10 @@ export function VideoCard({ task }: { task: VideoTask }) {
           <span>{fmtSize(task.file_size)}</span>
           <span style={{ marginLeft: 'auto' }}>{fmtRelTime(task.updated_at)}</span>
         </div>
-        <div className="vcard-capability"><Icon name={task.retrievable ? 'message' : task.has_transcription ? 'file' : 'video'} size="sm" /><span>{task.retrievable ? '可结合原文提问' : task.has_transcription ? '转写可阅读' : task.visual_status === 'completed' ? '画面已分析' : '等待内容处理'}</span></div>
+        <div className="vcard-capability"><Icon name={task.has_summary ? 'file' : task.retrievable ? 'message' : 'video'} size="sm" /><span>{task.has_summary ? '摘要可阅读' : task.retrievable ? '可结合原文提问' : task.has_transcription ? '转写可阅读' : task.visual_status === 'completed' ? '画面已分析' : '等待内容处理'}</span></div>
       </div>
     </Link>
-      <div className="vcard-status">
+      {(cat === 'processing' || failed) && <div className="vcard-status"><details className="vcard-processing-details"><summary>处理详情<Icon name="chev-r" size="sm" /></summary>
         {cat === 'processing' && (task.status === 1 || task.status === 2) && (
           <ProcessStrip status={task.status} stage={task.stage} has_transcription={task.has_transcription} last_job_type={task.last_job_type} has_rag_index={task.has_rag_index} visual_status={task.visual_status} />
         )}
@@ -55,7 +54,7 @@ export function VideoCard({ task }: { task: VideoTask }) {
             <div className="row"><b style={{ color: 'var(--bad)' }}>{summaryFailure ? `${summaryFailure.category} · ${summaryFailure.retry}` : task.error_msg}</b></div>
           </div>
         )}
-      </div>
+      </details></div>}
     </article>
   )
 }

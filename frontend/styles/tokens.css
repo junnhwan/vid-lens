@@ -2,17 +2,17 @@
 :root {
   color-scheme: dark;
   /* 底色: 暖炭, 不用纯黑 */
-  --bg-0: #141210;
-  --bg-1: #1a1815;
-  --bg-2: #211e1a;
-  --bg-3: #2a2620;
-  --bg-4: #322d26;
+  --bg-0: #181817;
+  --bg-1: #1e1e1c;
+  --bg-2: #262623;
+  --bg-3: #2e2e2a;
+  --bg-4: #373732;
 
   /* 文字:比初版提高一级对比度 */
-  --tx-1: #f4efe6;
-  --tx-2: #d2cbbd;
-  --tx-3: #aea697;
-  --tx-4: #8f8778;
+  --tx-1: #efeee9;
+  --tx-2: #d1d0c9;
+  --tx-3: #a5a49b;
+  --tx-4: #88877e;
 
   /* 主 accent: 放映机光束的琥珀色 */
   --acc: #e2a84b;
@@ -62,7 +62,7 @@
   --grid-card: 280px;
 
   --font-ui: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
-  --font-read: "Songti SC", "SimSun", "Noto Serif CJK SC", serif;
+  --font-read: var(--font-ui);
   --font-mono: ui-monospace, "Cascadia Code", Consolas,
     monospace;
 
@@ -81,11 +81,11 @@
 
 [data-theme="light"] {
   color-scheme: light;
-  --bg-0: #f3efe6;
-  --bg-1: #fbf8f1;
-  --bg-2: #efe9dc;
-  --bg-3: #e6ddcf;
-  --bg-4: #d9d0c0;
+  --bg-0: #faf9f6;
+  --bg-1: #f4f3ef;
+  --bg-2: #ecebe5;
+  --bg-3: #e4e3db;
+  --bg-4: #d9d8ce;
   --tx-1: #1c1812;
   --tx-2: #3f3a32;
   --tx-3: #5e574c;

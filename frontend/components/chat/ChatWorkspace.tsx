@@ -157,7 +157,8 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const [railTab, setRailTab] = useState<'run' | 'ev'>('run')
   const [panelsInstant, setPanelsInstant] = useState(false)
   const [railOpen, setRailOpen] = useState(() => {
-    try { if (!window.matchMedia?.('(min-width: 1301px)').matches) return false; const saved = localStorage.getItem('vidlens-chat-rail'); return saved == null || saved === 'open' } catch { return false }
+    if (embedded) return false
+    try { if (!window.matchMedia?.('(min-width: 1301px)').matches) return false; return localStorage.getItem('vidlens-chat-rail') === 'open' } catch { return false }
   })
   const [activeQuestion, setActiveQuestion] = useState(0)
   const [questionsOpen, setQuestionsOpen] = useState(false)
@@ -212,7 +213,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   const lastMessage = displayMessages.length > 0 ? displayMessages[displayMessages.length - 1] : null
   const lastAssistant = lastMessage && lastMessage.role === 'assistant' ? lastMessage : null
   const toggleRail = (event: { detail: number }) => { setPanelsInstant(event.detail === 0); if (railOverlay) setQuestionsOpen(false); setRailOpen(open => {
-    try { localStorage.setItem('vidlens-chat-rail', open ? 'closed' : 'open') } catch { /* Private browsing can deny storage. */ }
+    try { if (!embedded) localStorage.setItem('vidlens-chat-rail', open ? 'closed' : 'open') } catch { /* Private browsing can deny storage. */ }
     return !open
   }) }
   const contextKey = useRef('')

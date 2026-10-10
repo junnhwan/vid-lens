@@ -1,10 +1,27 @@
 /* Studio keeps the product layout; theme colors live in tokens.css. */
-.app { --rail-w: 224px; }
+.app { --rail-w: 196px; }
 .rail { padding-top: 27px; gap: 5px; }
-.rail .brand { padding-bottom: 28px; }
+.rail .brand { padding-bottom: 32px; }
 .rail .brand-name { font-size: 19px; letter-spacing: .03em; }
 .rail .nav-item { border-radius: 8px; }
-.topbar { background: var(--bg-1); min-height: 62px; }
+.topbar { background: var(--bg-0); min-height: 52px; height:52px; border-bottom:0; }
+.topbar .crumb { font-size:12px; }
+.topbar .crumb b { color:var(--tx-3); font-weight:400; }
+.rail .nav-item { font-size:13px; font-weight:400; padding-block:10px; }
+.rail .nav-item.active { background:var(--bg-3); color:var(--tx-1); }
+.rail-secondary { padding-block:12px; border-bottom:1px solid var(--line); margin-bottom:10px; }
+.rail-secondary .nav-item { color:var(--tx-3); font-size:12px; }
+.rail .rail-user { border:0; background:transparent; margin-top:8px; }
+.rail .theme-seg { background:transparent; margin-top:6px; }
+.vcard-processing-details>summary { display:flex; justify-content:space-between; gap:10px; font-size:11px; color:var(--tx-3); }
+.vcard-processing-details>summary::before { display:none; }
+.vcard-processing-details>summary>span { color:var(--tx-4); }
+.vcard-processing-details[open]>summary { margin-bottom:12px; }
+.vcard .vcard-capability { border:0; margin-top:10px; padding-top:0; }
+.vcard .vcard-status { padding:0 16px 14px; }
+.summary-chat .answer-technical:not([open]), .summary-chat details[aria-label="回答反馈"]:not([open]) { padding:0; border:0; background:transparent; }
+.summary-chat .answer-technical:not([open])>summary, .summary-chat details[aria-label="回答反馈"]:not([open])>summary { font-size:11px; color:var(--tx-4); padding-block:3px; }
+.summary-chat .answer-followups>button { border:0; background:transparent; padding:7px 0; }
 .content { background: var(--bg-0); }
 .page { max-width: 1510px; padding-top: clamp(24px, 3vw, 42px); }
 .product-eyebrow { color: var(--acc-strong); }

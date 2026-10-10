@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>映知 · 摘要阅读设计原型</title><link rel="stylesheet" href="studio.css"></head>
+<body>
+<a class="skip" href="#main" data-action="skip-main">跳到主要内容</a>
+<div class="app" id="app">
+  <aside class="rail" aria-label="主导航">
+    <a class="brand" href="#/library"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3 35 12v17L20 37 5 29V12Z M20 10l9 5v10l-9 5-9-5V15Z"/><circle cx="20" cy="20" r="3"/></svg><span><b>映知</b><small>VIDLENS</small></span></a>
+    <nav id="nav"></nav>
+    <div class="rail-foot"><a class="nav-link muted-link" href="#/notes" title="学习笔记"><span data-icon="note"></span><span class="nav-label">学习笔记<small>独立内容与历史</small></span></a><button class="nav-link" data-action="settings" title="设置"><span data-icon="settings"></span><span class="nav-label">设置</span></button><button class="nav-link" data-action="theme" title="切换浅色或深色主题"><span data-icon="sun"></span><span class="nav-label" id="theme-label">浅色外观</span></button><div class="user"><span class="avatar">J</span><span class="nav-label">个人工作区<small>本地设计演示</small></span></div></div>
+  </aside>
+  <div class="shell">
+    <header class="topbar"><nav id="crumb" aria-label="当前位置"></nav><div class="top-actions"><button class="prototype" data-action="about">设计原型 · 模拟数据</button><button class="activity-trigger" data-action="activity"><span class="status-dot"></span><span>处理动态</span><span class="count" id="active-count">1</span></button></div></header>
+    <main id="main" tabindex="-1"></main>
+  </div>
+</div>
+<dialog id="modal" aria-labelledby="modal-title"><header class="dialog-head"><h2 id="modal-title"></h2><button class="icon-button" data-action="close-dialog" aria-label="关闭弹窗"><span data-icon="close"></span></button></header><div id="modal-body" class="dialog-body"></div><footer id="modal-foot" class="dialog-foot"></footer></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="studio.js"></script>
+</body></html>

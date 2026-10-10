@@ -41,18 +41,16 @@ export function ShellFrame({ children, pathname, crumb, user, onImport, onLogout
     window.addEventListener('keydown', handle)
     return () => window.removeEventListener('keydown', handle)
   }, [open])
-  const nav = [
-    { href: '/', label: '工作台', icon: 'home' as const, active: pathname === '/' },
-  ]
   const materialNav = [
     { href: '/library', label: '视频库', icon: 'video' as const, active: /^\/(library|video)/.test(pathname) },
+    { href: '/chat', label: '问答', icon: 'message' as const, active: pathname.startsWith('/chat') },
     { href: '/kb', label: '知识库', icon: 'folder' as const, active: pathname.startsWith('/kb') },
   ]
   const workNav = [
-    { href: '/chat', label: '问答', icon: 'message' as const, active: pathname.startsWith('/chat') },
+    { href: '/', label: '工作台', icon: 'home' as const, active: pathname === '/' },
     ...(products ? [
-      { href: '/artifacts', label: '成果', icon: 'layers' as const, active: pathname.startsWith('/artifacts') },
-      { href: '/tasks', label: '任务', icon: 'activity' as const, active: pathname.startsWith('/tasks') },
+      { href: '/artifacts', label: '学习笔记', icon: 'layers' as const, active: pathname.startsWith('/artifacts') },
+      { href: '/tasks', label: '处理记录', icon: 'activity' as const, active: pathname.startsWith('/tasks') },
     ] : []),
   ]
   const renderNav = (items: { href: string; label: string; icon: IconName; active: boolean }[]) => items.map(item => (
@@ -65,12 +63,9 @@ export function ShellFrame({ children, pathname, crumb, user, onImport, onLogout
     {open && <div className="rail-veil" onClick={() => { setOpen(false); menu.current?.focus() }} />}
     <aside ref={rail} id="rail" className={`rail${open ? ' open' : ''}`} aria-label="主导航">
       <Link href={href('/')} className="brand"><BrandMark /><div><div className="brand-name">映知</div><div className="brand-sub">VIDLENS</div></div></Link>
-      {renderNav(nav)}
-      <span className="rail-caption" aria-hidden="true">资料</span>
       {renderNav(materialNav)}
-      <span className="rail-caption" aria-hidden="true">学习与产出</span>
-      {renderNav(workNav)}
       <div className="rail-spacer" />
+      <div className="rail-secondary">{renderNav(workNav)}</div>
       <div className="theme-seg" role="group" aria-label="外观主题">
         <button type="button" className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')} aria-label="深色主题" title="深色 · 放映厅"><Icon name="moon" /></button>
         <button type="button" className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')} aria-label="浅色主题" title="浅色 · 阅读"><Icon name="sun" /></button>

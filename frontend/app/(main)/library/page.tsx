@@ -47,7 +47,7 @@ export default function LibraryPage() {
   }, [query.data, page, pages, setParams])
   function setPage(nextPage: number) { setParams(previous => { const next = new URLSearchParams(previous); next.set('page', String(nextPage)); return next }) }
   return <div className="page page-wide">
-    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' || hasTagFilter ? '符合当前条件' : ''} · 阅读、提问，整理成自己的笔记`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
+    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' || hasTagFilter ? '符合当前条件' : ''} · 导入视频，阅读摘要，按需提问`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
     <div className="lib-toolbar">
       <input aria-label="搜索视频" className="input" placeholder="搜索全部视频的标题或文件名…" value={draft} onChange={e => setDraft(e.target.value)} />
       <div className="seg">{filters.map(f => <button key={f.key} aria-pressed={filter === f.key} className={filter === f.key ? 'on' : ''} onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('activity', f.key); next.delete('page'); return next })}>{f.label}</button>)}</div>

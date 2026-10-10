@@ -43,3 +43,13 @@ p.error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 .process[data-state=completed] .indicator { background:var(--ok-dim); color:var(--ok); }
 .process[data-state=completed] .summary { color:var(--tx-2); }
 @media(prefers-reduced-motion:reduce) { .live::after { animation:none; } }
+
+/* Execution stays a short status line until the user opens its details. */
+.process { border:1px solid transparent; background:transparent; border-radius:8px; margin:8px 0 16px; }
+.process:has(.toggle[aria-expanded=true]) { border-color:var(--line); background:var(--bg-1); }
+.toggle { padding:8px 0; gap:8px; }
+.toggle:hover { background:transparent; color:var(--tx-1); }
+.title { font-weight:400; color:var(--tx-3); font-size:12px; }
+.summary { margin-left:4px; font-size:11px; }
+.chev { margin-left:auto; }
+.process:has(.toggle[aria-expanded=true]) .toggle { padding-inline:12px; }
