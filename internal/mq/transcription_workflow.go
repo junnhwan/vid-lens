@@ -65,7 +65,10 @@ func (c *transcriptionWorkflow) publish(ctx context.Context, task *model.VideoTa
 // Short windows also bound citation uncertainty when an ASR provider returns
 // text only. This increases request count in exchange for usable playback
 // ranges; provider-native segment times are retained whenever available.
-func (c *transcriptionWorkflow) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy) (string, error) {
+// retainedRows optionally receives the exact ordered observations assembled on
+// success. Source publication must use these rather than unrelated stale rows
+// from an earlier segmentation recipe still present in the task's chunk table.
+func (c *transcriptionWorkflow) transcribeAudio(ctx context.Context, taskID int64, audioPath string, strategy ai.Strategy, retainedRows ...*[]model.VideoTranscriptionChunk) (string, error) {
 	ctx = observability.WithCorrelation(ctx, observability.Correlation{Stage: model.TaskStageTranscribing})
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunking started",
 		slog.Int64("task_id", taskID),
@@ -246,6 +249,11 @@ func (c *transcriptionWorkflow) transcribeAudio(ctx context.Context, taskID int6
 		slog.Int64("task_id", taskID), slog.Int("chunk_count", len(segments)),
 		slog.Int("boundary_count", len(stitched.Boundaries)), slog.Int("matched_boundaries", matchedBoundaries),
 		slog.Int("output_chars", len([]rune(stitched.Content))))
+	for _, destination := range retainedRows {
+		if destination != nil {
+			*destination = append([]model.VideoTranscriptionChunk(nil), rows...)
+		}
+	}
 	return stitched.Content, nil
 }
 

@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/lock"
 )
@@ -159,6 +161,41 @@ func (s *MediaService) UploadChunk(ctx context.Context, fileMD5 string, chunkNum
 }
 
 func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, filename string, totalChunks int, expectedFileSize, chunkSize int64) (*UploadResult, error) {
+	return s.mergeChunks(ctx, userID, fileMD5, filename, totalChunks, expectedFileSize, chunkSize, nil)
+}
+
+func (s *MediaService) MergeChunksWithOptions(ctx context.Context, userID int64, fileMD5, filename string, totalChunks int, expectedFileSize, chunkSize int64, options ImportOptions) (*UploadResult, error) {
+	if !options.AutoSummary {
+		return s.MergeChunks(ctx, userID, fileMD5, filename, totalChunks, expectedFileSize, chunkSize)
+	}
+	input := struct {
+		FileMD5, Filename   string
+		TotalChunks         int
+		FileSize, ChunkSize int64
+	}{fileMD5, filename, totalChunks, expectedFileSize, chunkSize}
+	request, replay, err := s.lookupImport(ctx, userID, "merge_chunks", input, options, true)
+	if err != nil || replay != nil {
+		return replay, err
+	}
+	if err = validateFileMD5(fileMD5); err != nil {
+		return nil, artifact.Err("invalid_upload_spec", 400)
+	}
+	if totalChunks <= 0 || expectedFileSize <= 0 || chunkSize <= 0 || int64(totalChunks) != (expectedFileSize+chunkSize-1)/chunkSize {
+		return nil, artifact.Err("invalid_upload_spec", 400)
+	}
+	if err = s.validateUploadSize(expectedFileSize); err != nil {
+		return nil, artifact.Err("upload_size_exceeded", 400)
+	}
+	if strings.TrimSpace(filename) == "" || len(filename) > 255 || (s.cfg.ChunkSize > 0 && chunkSize > s.cfg.ChunkSize) {
+		return nil, artifact.Err("invalid_upload_spec", 400)
+	}
+	if err = s.freezeImport(userID, request); err != nil {
+		return nil, err
+	}
+	return s.mergeChunks(ctx, userID, fileMD5, filename, totalChunks, expectedFileSize, chunkSize, request)
+}
+
+func (s *MediaService) mergeChunks(ctx context.Context, userID int64, fileMD5, filename string, totalChunks int, expectedFileSize, chunkSize int64, request *preparedImport) (*UploadResult, error) {
 	if s.rdb == nil || s.storage == nil {
 		return nil, fmt.Errorf("分片上传依赖未配置")
 	}
@@ -177,7 +214,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 		if existingAsset.FileSize != expectedFileSize {
 			return nil, fmt.Errorf("同一文件指纹的已存资产大小异常: 实际 %d 字节，期望 %d 字节，请删除异常资产后重试", existingAsset.FileSize, expectedFileSize)
 		}
-		return s.createTaskFromAsset(userID, filename, existingAsset, model.TaskStatusPending)
+		return s.createTaskFromAssetWithImport(ctx, userID, filename, existingAsset, request)
 	}
 
 	mergeLock := lock.NewRedisLock(s.rdb, fmt.Sprintf("vidlens:merge:%s", fileMD5))
@@ -186,7 +223,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 		// 另一个请求可能已在首次查询后完成合并；复查资产可让并发请求复用结果。
 		existingAsset, findErr := s.repo.Asset.FindByMD5(fileMD5)
 		if findErr == nil && existingAsset != nil && existingAsset.FileSize == expectedFileSize {
-			return s.createTaskFromAsset(userID, filename, existingAsset, model.TaskStatusPending)
+			return s.createTaskFromAssetWithImport(ctx, userID, filename, existingAsset, request)
 		}
 		return nil, fmt.Errorf("合并操作正在进行中，请稍后")
 	}
@@ -230,7 +267,7 @@ func (s *MediaService) MergeChunks(ctx context.Context, userID int64, fileMD5, f
 		log.Printf("[media] 保存上传完成状态失败（可忽略）: md5=%s err=%v", fileMD5, err)
 	}
 	s.cleanupMergedChunks(ctx, fileMD5, totalChunks)
-	return s.createTaskFromAsset(userID, filename, asset, model.TaskStatusPending)
+	return s.createTaskFromAssetWithImport(ctx, userID, filename, asset, request)
 }
 
 func (s *MediaService) cleanupMergedChunks(ctx context.Context, fileMD5 string, totalChunks int) {

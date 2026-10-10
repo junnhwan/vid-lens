@@ -8,6 +8,10 @@ import (
 	"vid-lens/internal/repository"
 )
 
+func (c *Consumer) SetSummaryGenerator(generator interface {
+	Generate(context.Context, *model.VideoTask, *model.TaskJob, string) error
+}) { c.summaryGenerator = generator }
+
 func (c *Consumer) handleTranscriptSummary(ctx context.Context, payload AnalyzePayload) error {
 	claim, err := c.claimTaskForMessage(payload.TaskID, model.TaskJobTypeSummary, model.TaskStageSummarizing, payload.ClaimToken)
 	if err != nil {
@@ -26,7 +30,18 @@ func (c *Consumer) handleTranscriptSummary(ctx context.Context, payload AnalyzeP
 		return err
 	}
 	ctx = c.contextForTaskJob(ctx, task, model.TaskJobTypeSummary, payload.BudgetID)
-	if err := c.summarizeTask(ctx, task); err != nil {
+	job, err := c.repo.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeSummary)
+	if err != nil {
+		return err
+	}
+	if job != nil && job.GenerationID != "" {
+		if c.summaryGenerator == nil {
+			return c.recordTaskFailure(task.ID, model.TaskJobTypeSummary, model.TaskStageSummarizing, fmt.Errorf("结构化摘要生成服务未配置"), claim.Token)
+		}
+		if err = c.summaryGenerator.Generate(ctx, task, job, claim.Token); err != nil {
+			return c.recordTaskFailure(task.ID, model.TaskJobTypeSummary, model.TaskStageSummarizing, err, claim.Token)
+		}
+	} else if err = c.summarizeTask(ctx, task); err != nil {
 		return c.recordTaskFailure(task.ID, model.TaskJobTypeSummary, model.TaskStageSummarizing, err, claim.Token)
 	}
 	_, err = c.completeTaskProcessing(repository.TaskProcessingCompleteRequest{TaskID: task.ID, JobType: model.TaskJobTypeSummary, JobStage: model.TaskStageSummarizing, Token: claim.Token, TaskStatus: model.TaskStatusCompleted, TaskStage: model.TaskStageNone, Now: c.currentTime()})

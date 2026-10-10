@@ -31,6 +31,12 @@ func (c *Consumer) handleAnalyze(ctx context.Context, delivery amqp.Delivery) er
 	if payload.JobType == model.TaskJobTypeSummary {
 		return c.handleTranscriptSummary(ctx, payload)
 	}
+	if payload.JobType == model.TaskJobTypeTextSource {
+		return c.handleTextSource(ctx, payload)
+	}
+	if payload.JobType != "" && payload.JobType != model.TaskJobTypeAnalyze {
+		return fmt.Errorf("unknown analysis queue job type: %s", payload.JobType)
+	}
 
 	observability.Log(ContextWithTraceID(ctx, payload.TraceID), slog.Default(), slog.LevelInfo, "analyze message received", slog.Int64("task_id", payload.TaskID))
 

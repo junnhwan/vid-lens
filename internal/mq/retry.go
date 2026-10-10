@@ -21,6 +21,7 @@ const (
 	TaskJobTranscribe = model.TaskJobTypeTranscribe
 	TaskJobDownload   = model.TaskJobTypeDownload
 	TaskJobRAGIndex   = model.TaskJobTypeRAGIndex
+	TaskJobTextSource = model.TaskJobTypeTextSource
 )
 
 type TaskRetryPolicy struct {
@@ -454,6 +455,8 @@ func wrapRetryRestoreError(message string, err error) error {
 
 func retryDispatchState(jobType, currentStage string) (int8, string) {
 	switch jobType {
+	case TaskJobTextSource:
+		return model.TaskStatusQueued, model.TaskStageTextSource
 	case model.TaskJobTypeVisual:
 		if currentStage == model.TaskStageIndexing {
 			return model.TaskStatusQueued, model.TaskStageIndexing
@@ -479,6 +482,13 @@ func retryDispatchState(jobType, currentStage string) (int8, string) {
 
 func (s *RetryScheduler) enqueueRetry(ctx context.Context, task model.VideoTask) error {
 	switch task.LastJobType {
+	case TaskJobTextSource:
+		if producer, ok := s.producer.(interface {
+			EnqueueTextSource(context.Context, int64, string) error
+		}); ok {
+			return producer.EnqueueTextSource(ctx, task.ID, task.FileMD5)
+		}
+		return fmt.Errorf("文字来源队列不可用")
 	case model.TaskJobTypeVisual:
 		if producer, ok := s.producer.(interface {
 			EnqueueVisual(context.Context, int64) error

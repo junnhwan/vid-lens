@@ -10,6 +10,7 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/pkg/remoteurl"
+	"vid-lens/internal/pkg/ytdlp"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/storage"
 	"vid-lens/internal/transcript"
@@ -96,8 +97,15 @@ type Consumer struct {
 	visualConcurrency int
 	visualSlots       chan struct{}
 
-	downloadVideo   downloadVideoFunc
-	uploadLocalFile uploadLocalFileFunc
+	downloadVideo     downloadVideoFunc
+	downloadIdentity  func(context.Context, ytdlp.BilibiliIdentity) (ytdlp.DownloadedVideo, error)
+	uploadLocalFile   uploadLocalFileFunc
+	textSourceAdapter textSourceSubtitleAdapter
+	sourceProducer    textSourceDispatchProducer
+	summaryGenerator  interface {
+		Generate(context.Context, *model.VideoTask, *model.TaskJob, string) error
+	}
+	deleteRawSubtitle func(context.Context, string) error
 
 	wg sync.WaitGroup
 }
@@ -206,6 +214,9 @@ func (c *Consumer) SetVisualIndexer(indexer visualIndexFunc) {
 
 func (c *Consumer) SetRAGIndexProducer(producer ragIndexProducer) {
 	c.ragProducer = producer
+	if next, ok := producer.(textSourceDispatchProducer); ok {
+		c.sourceProducer = next
+	}
 }
 
 // SetMQConfig wires the RabbitMQ connection URL and prefetch from config. The

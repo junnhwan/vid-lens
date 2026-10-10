@@ -97,12 +97,13 @@ func (s *MediaService) SetTranscriptionConfig(cfg config.MQConfig) {
 }
 
 type UploadResult struct {
-	TaskID   int64  `json:"task_id"`
-	FileMD5  string `json:"file_md5"`
-	Filename string `json:"filename"`
-	FileURL  string `json:"file_url"`
-	FileSize int64  `json:"file_size"`
-	Status   int8   `json:"status"`
-	Stage    string `json:"stage"`
-	TraceID  string `json:"trace_id"`
+	GenerationID string `json:"generation_id,omitempty"`
+	TaskID       int64  `json:"task_id"`
+	FileMD5      string `json:"file_md5"`
+	Filename     string `json:"filename"`
+	FileURL      string `json:"file_url"`
+	FileSize     int64  `json:"file_size"`
+	Status       int8   `json:"status"`
+	Stage        string `json:"stage"`
+	TraceID      string `json:"trace_id"`
 }

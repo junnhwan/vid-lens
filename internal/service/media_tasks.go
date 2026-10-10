@@ -32,6 +32,9 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if task.UserID != userID {
 		return fmt.Errorf("无权操作此任务")
 	}
+	if task.ActiveTextSourceID != "" || task.ProcessingIntentJSON != "" {
+		return s.requestSourceSummary(ctx, task, force)
+	}
 	if err := s.requireModelAction(userID, "summary"); err != nil {
 		return err
 	}
@@ -39,14 +42,17 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	if err != nil {
 		return err
 	}
-	if transcription == nil && task.FileMD5 != "" {
+	if transcription == nil && repository.LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
 		transcription, err = s.repo.Transcription.FindByMD5(task.FileMD5)
 	}
 	if err != nil {
 		return err
 	}
 	if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
-		existing, err := s.repo.Summary.FindByMD5(task.FileMD5)
+		existing, err := s.repo.Summary.FindByTaskID(task.ID)
+		if err == nil && existing == nil && repository.LegacyResultReuseAllowed(task) {
+			existing, err = s.repo.Summary.FindByMD5(task.FileMD5)
+		}
 		if err != nil {
 			return err
 		}
@@ -101,7 +107,7 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	// （与原单 task 短路语义一致）。单 job 命中不替 task 做整体完成判定
 	// （分析目标级独立）；全命中秒传到 Completed 走上传链路。
 	// 仅复用成功结果：摘要表行存在即成功（无 status 列，失败不落行）。
-	if !force && summary == nil {
+	if !force && summary == nil && repository.LegacyResultReuseAllowed(task) {
 		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeAnalyze, func(md5 string) (bool, error) {
 			existing, err := s.repo.Summary.FindByMD5(md5)
 			if err != nil {
@@ -183,7 +189,7 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	// 成功转写"。命中 → 复用，不重跑 ASR，返回"文字提取已完成，可直接查看结果"
 	// （与原单 task 短路语义一致）。分析目标级独立：转写命中不替 task 做整体
 	// 完成判定（摘要可能仍缺，用户可继续 RequestAnalysis）。
-	if !force && transcription == nil && !resumeIncomplete && !alignOnly {
+	if !force && transcription == nil && !resumeIncomplete && !alignOnly && repository.LegacyResultReuseAllowed(task) {
 		hit, lookupErr := s.reuseResultByFileMD5(ctx, task, model.TaskJobTypeTranscribe, func(md5 string) (bool, error) {
 			existing, err := s.repo.Transcription.FindByMD5(md5)
 			if err != nil {
@@ -309,12 +315,12 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 	}
 	// 内容去重秒传场景（docs/$1）：新 task 自己没有 transcription/summary
 	// 行（不复制行），按 file_md5 关联任意 task/任意用户的已有成功结果行展示。
-	if task.Transcription == nil && task.FileMD5 != "" {
+	if task.Transcription == nil && repository.LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
 		if existing, lookupErr := s.repo.Transcription.FindByMD5(task.FileMD5); lookupErr == nil && existing != nil {
 			task.Transcription = existing
 		}
 	}
-	if task.Summary == nil && task.FileMD5 != "" {
+	if task.Summary == nil && repository.LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
 		if existing, lookupErr := s.repo.Summary.FindByMD5(task.FileMD5); lookupErr == nil && existing != nil {
 			task.Summary = existing
 		}
@@ -401,7 +407,11 @@ func (s *MediaService) GetTaskDetail(ctx context.Context, userID, taskID int64) 
 // ListTasks 分页查询，keyword 非空时按文件名/标题搜索。
 // 返回的任务会附带 has_transcription / has_summary，便于前端灰显主操作按钮且不加载正文。
 func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword string, activity ...string) ([]model.VideoTask, int64, error) {
-	tasks, total, err := s.repo.Task.ListByUserID(userID, page, pageSize, keyword, activity...)
+	return s.ListTasksWithTags(userID, page, pageSize, keyword, repository.TagFilter{}, activity...)
+}
+
+func (s *MediaService) ListTasksWithTags(userID int64, page, pageSize int, keyword string, tags repository.TagFilter, activity ...string) ([]model.VideoTask, int64, error) {
+	tasks, total, err := s.repo.Task.ListByUserIDFiltered(userID, page, pageSize, keyword, tags, activity...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -466,10 +476,12 @@ func (s *MediaService) ListTasks(userID int64, page, pageSize int, keyword strin
 }
 
 func applySummaryAvailability(task *model.VideoTask) {
-	task.CanSummarize = task.HasTranscription && repository.SummarySourceReady(task) && !repository.SummaryJobActive(task.SummaryJob)
+	hasSource := task.HasTranscription || task.ActiveTextSourceID != ""
+	task.CanSummarize = hasSource && repository.SummarySourceReady(task) && !repository.SummaryJobActive(task.SummaryJob)
 	// During a forced generation, a shared cache from an earlier task is not
-	// the new job's result. Publish it only after this job has completed.
-	if task.SummaryJob != nil && task.SummaryJob.Status != model.TaskStatusCompleted {
+	// the new job's result. Task-owned source generations retain their previous
+	// published body while the replacement is queued or running.
+	if repository.LegacyResultReuseAllowed(task) && task.SummaryJob != nil && task.SummaryJob.Status != model.TaskStatusCompleted {
 		task.Summary = nil
 		task.HasSummary = false
 	}

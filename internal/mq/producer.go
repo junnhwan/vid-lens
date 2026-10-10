@@ -236,6 +236,16 @@ func (p *Producer) EnqueueSummary(ctx context.Context, taskID int64, md5 string)
 	return p.publish(TaskJobAnalyze, taskID, ClaimTokenFromContext(ctx), payload)
 }
 
+// EnqueueTextSource shares the analysis queue with explicit job identity. Its
+// parent dispatch lease makes a crash or publish failure scheduler-recoverable.
+func (p *Producer) EnqueueTextSource(ctx context.Context, taskID int64, md5 string) error {
+	payload, err := json.Marshal(AnalyzePayload{TaskID: taskID, MD5: md5, JobType: model.TaskJobTypeTextSource, TraceID: TraceIDFromContext(ctx), ClaimToken: ClaimTokenFromContext(ctx), BudgetID: RetryBudgetIDFromContext(ctx)})
+	if err != nil {
+		return err
+	}
+	return p.publish(TaskJobAnalyze, taskID, ClaimTokenFromContext(ctx), payload)
+}
+
 // EnqueueTranscribe 投递文字提取任务。
 func (p *Producer) EnqueueTranscribe(ctx context.Context, taskID int64, md5 string) error {
 	payload, _ := json.Marshal(AnalyzePayload{

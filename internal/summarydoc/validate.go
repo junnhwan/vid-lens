@@ -18,6 +18,21 @@ var embeddedURL = regexp.MustCompile(`(?i)https?://[^\s<>]+`)
 
 func validUTF8(data []byte) bool { return utf8.Valid(data) }
 func validID(id string) bool     { return identifier.MatchString(id) }
+
+// Source cues are opaque source-owned keys, including ASR window:rune:rune
+// provenance. Keep their byte limit aligned with textsource; authorization is
+// exact membership in the caller's frozen cue registry, not this syntax check.
+func validCueID(id string) bool {
+	if id == "" || len(id) > 128 || !utf8.ValidString(id) {
+		return false
+	}
+	for _, r := range id {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 func reservedID(id string) bool {
 	return id == "title" || id == "overview" || id == "summary-title" || id == "summary-overview"
 }
@@ -88,7 +103,7 @@ func validateStructure(doc Document) error {
 			}
 			seen := map[string]bool{}
 			for _, id := range ref.CueIDs {
-				if !validID(id) || seen[id] {
+				if !validCueID(id) || seen[id] {
 					return fmt.Errorf("invalid/duplicate cue %q", id)
 				}
 				seen[id] = true

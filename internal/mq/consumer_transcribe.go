@@ -16,6 +16,7 @@ import (
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
 	"vid-lens/internal/pkg/visualprogress"
+	"vid-lens/internal/processing"
 	"vid-lens/internal/repository"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -64,11 +65,19 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 		}
 		return c.recordTaskFailure(task.ID, TaskJobTranscribe, stage, failure, claim.Token)
 	}
+	var intent processing.Intent
+	automaticSource := !alignmentOnly && task.ProcessingIntentJSON != ""
+	if automaticSource {
+		intent, err = processing.Decode(task.ProcessingIntentJSON)
+		if err != nil {
+			return recordFailure(err)
+		}
+	}
 	// The visual branch starts from the video task, not from an ASR success.
 	// Its independent download is intentional until the storage adapter exposes
 	// a safe shared local-asset lease.
 	waitVisual := func() visualIndexOutcome { return visualIndexOutcome{} }
-	if !alignmentOnly {
+	if !alignmentOnly && !automaticSource {
 		waitVisual = c.startVisualIndexBranch(ctx, task)
 	}
 	defer waitVisual()
@@ -94,6 +103,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	defer os.Remove(audioPath)
 
 	var transcript string
+	var sourceRows []model.VideoTranscriptionChunk
 	if alignmentOnly {
 		transcript, err = c.transcription().alignExistingTranscript(ctx, task.ID, audioPath)
 	} else {
@@ -101,7 +111,7 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 		if strategyErr != nil {
 			return recordFailure(strategyErr)
 		}
-		transcript, err = c.transcription().transcribeAudio(ctx, task.ID, audioPath, taskAI)
+		transcript, err = c.transcription().transcribeAudio(ctx, task.ID, audioPath, taskAI, &sourceRows)
 	}
 	if err != nil {
 		if handled, degradeErr := c.completeTranscribeWithVisualOnly(ctx, task, claim.Token, err, waitVisual); handled {
@@ -112,6 +122,12 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 
 	if err := requireProcessingLease(ctx); err != nil {
 		return err
+	}
+	if automaticSource {
+		if err := c.publishAutomaticASRSource(ctx, task, intent, claim.Token, transcript, sourceRows); err != nil {
+			return recordFailure(err)
+		}
+		return nil
 	}
 	if !alignmentOnly {
 		if err := c.transcription().publish(ctx, task, transcript); err != nil {
@@ -290,7 +306,7 @@ func (c *Consumer) strategyForTask(task *model.VideoTask, actions ...string) (ai
 		}), nil
 	}
 
-	profile, err := c.profiles.GetDefaultAIProfile(task.UserID)
+	profile, err := c.processingProfile(task)
 	if err != nil {
 		return nil, err
 	}

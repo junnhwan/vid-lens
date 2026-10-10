@@ -7,7 +7,10 @@ import (
 	neturl "net/url"
 	"strings"
 
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
+	"vid-lens/internal/pkg/remoteurl"
+	"vid-lens/internal/repository"
 
 	"github.com/google/uuid"
 )
@@ -68,4 +71,37 @@ func filenameForURLTask(videoURL string) string {
 	}
 	host := strings.ReplaceAll(parsed.Hostname(), ":", "_")
 	return "WEB_" + host + ".mp4"
+}
+
+// UploadByURLWithOptions accepts the summary-first import contract.
+func (s *MediaService) UploadByURLWithOptions(ctx context.Context, userID int64, videoURL string, options ImportOptions) (*UploadResult, error) {
+	if !options.AutoSummary {
+		return s.UploadByURL(ctx, userID, videoURL)
+	}
+	parsed, err := neturl.Parse(strings.TrimSpace(videoURL))
+	if err != nil || parsed.User != nil {
+		return nil, artifact.Err("unsupported_import_url", 400)
+	}
+	sanitized, err := remoteurl.SanitizeChecked(*parsed)
+	if err != nil {
+		return nil, artifact.Err("invalid_import_url", 400)
+	}
+	request, replay, err := s.lookupImport(ctx, userID, "upload_url", sanitized, options, false)
+	if err != nil || replay != nil {
+		return replay, err
+	}
+	if !remoteurl.HostAllowed(parsed.Hostname(), []string{"bilibili.com", "b23.tv"}) {
+		return nil, artifact.Err("unsupported_import_url", 400)
+	}
+	checked, err := newRemoteVideoURLValidator(s.tools, s.remoteURLResolver).validate(ctx, videoURL)
+	if err != nil {
+		return nil, artifact.Err("invalid_import_url", 400)
+	}
+	if err = s.freezeImport(userID, request); err != nil {
+		return nil, err
+	}
+	key := md5HexString(checked.Sanitized)
+	return s.acceptImport(ctx, userID, request, model.TaskJobTypeDownload, model.TaskStageDownloading, func(*repository.Repositories) (*model.VideoTask, error) {
+		return &model.VideoTask{UserID: userID, FileMD5: key, Filename: filenameForURLTask(checked.Sanitized), Status: model.TaskStatusRunning, Stage: model.TaskStageDownloading, TraceID: uuid.NewString(), SourceType: model.TaskSourceTypeURL, SourceURL: checked.Sanitized, MaxRetries: 3}, nil
+	}, func(ctx context.Context, task model.VideoTask) error { return s.mq.EnqueueDownload(ctx, task.ID, key) })
 }
