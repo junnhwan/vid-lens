@@ -44,3 +44,18 @@ test('post-publication pending tags are read again until the real classification
   expect(screen.queryByText('正文已就绪，正在处理标签…')).toBeNull()
   expect(mocks.task).toHaveBeenCalledTimes(2)
 })
+
+test('removing an autoaccepted tag exposes the durable rejection and explicit restore without attaching it', async () => {
+  const accepted = {...initial.suggestions[0],display_name:'Go',status:'accepted',effective_status:'accepted'}
+  mocks.task.mockResolvedValue({...initial,suggestions:[accepted]})
+  mocks.patch.mockResolvedValue({...initial,version:5,assignments:[],suggestions:[{...accepted,effective_status:'rejected'}]})
+  mocks.decide.mockResolvedValue({...initial,version:6,assignments:[],suggestions:[{...accepted,status:'pending',effective_status:'pending'}]})
+  render(<SummaryTags taskId={1} />)
+  fireEvent.click(await screen.findByRole('button',{name:'移除标签 Go'}))
+  await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith(1,{expected_version:4,remove_ids:['tag-1']}))
+  fireEvent.click(await screen.findByRole('button',{name:'恢复建议'}))
+  await waitFor(() => expect(mocks.decide).toHaveBeenCalledWith(1,'suggestion','restore',5))
+  expect(await screen.findByRole('button',{name:'接受'})).toBeTruthy()
+  expect(screen.getByText('尚未添加标签')).toBeTruthy()
+  expect(screen.queryByText('Go · 自动')).toBeNull()
+})

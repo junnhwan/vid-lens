@@ -2,7 +2,7 @@ import { ApiError, req } from './api'
 import type { PaginatedTasks } from './types'
 
 export interface UserTag { id: string; display_name: string; aliases: string[]; version: number; creation_origin: string; protected_by_user: boolean; video_count: number }
-export interface TagSuggestion { id: string; display_name: string; reason: string; status: 'pending' | 'accepted' | 'rejected' | 'stale' }
+export interface TagSuggestion { id: string; display_name: string; reason: string; status: 'pending' | 'accepted' | 'rejected' | 'stale'; effective_status?: 'pending' | 'accepted' | 'rejected' | 'stale' }
 export interface TaskTagState { classification?:{status:'pending'|'completed'|'failed'|'cancelled';enabled:boolean;error_code?:string;generated_version:number}; task_id: number; version: number; assignments: { tag_id: string; origin: 'manual' | 'auto'; tag: UserTag }[]; suggestions: TagSuggestion[] }
 export interface TagPage { list: UserTag[]; total: number; page: number; page_size: number }
 export interface TagPatch { expected_version: number; add_ids?: string[]; remove_ids?: string[]; keep_auto_ids?: string[] }

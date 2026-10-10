@@ -53,21 +53,24 @@ type VideoTagDecision struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 type VideoTagSuggestion struct {
-	UserDecision        string    `gorm:"type:varchar(16);not null;default:''" json:"-"`
-	DecisionBaseVersion int64     `gorm:"not null;default:0" json:"-"`
-	ID                  string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	UserID              int64     `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:1" json:"-"`
-	TaskID              int64     `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:2" json:"task_id"`
-	GenerationID        string    `gorm:"type:varchar(36);not null;uniqueIndex:idx_tag_suggestion_identity,priority:3" json:"generation_id"`
-	GeneratedVersion    int64     `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:4" json:"generated_version"`
-	NormalizedKey       string    `gorm:"type:varchar(320);not null;uniqueIndex:idx_tag_suggestion_identity,priority:5" json:"-"`
-	DisplayName         string    `gorm:"type:varchar(320);not null" json:"display_name"`
-	TagID               string    `gorm:"type:varchar(36)" json:"tag_id,omitempty"`
-	SourceDigest        string    `gorm:"type:char(64);not null" json:"source_digest"`
-	Reason              string    `gorm:"type:text;not null" json:"reason"`
-	Status              string    `gorm:"type:varchar(16);not null" json:"status"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	UserDecision        string `gorm:"type:varchar(16);not null;default:''" json:"-"`
+	DecisionBaseVersion int64  `gorm:"not null;default:0" json:"-"`
+	ID                  string `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID              int64  `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:1" json:"-"`
+	TaskID              int64  `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:2" json:"task_id"`
+	GenerationID        string `gorm:"type:varchar(36);not null;uniqueIndex:idx_tag_suggestion_identity,priority:3" json:"generation_id"`
+	GeneratedVersion    int64  `gorm:"not null;uniqueIndex:idx_tag_suggestion_identity,priority:4" json:"generated_version"`
+	NormalizedKey       string `gorm:"type:varchar(320);not null;uniqueIndex:idx_tag_suggestion_identity,priority:5" json:"-"`
+	DisplayName         string `gorm:"type:varchar(320);not null" json:"display_name"`
+	TagID               string `gorm:"type:varchar(36)" json:"tag_id,omitempty"`
+	SourceDigest        string `gorm:"type:char(64);not null" json:"source_digest"`
+	Reason              string `gorm:"type:text;not null" json:"reason"`
+	Status              string `gorm:"type:varchar(16);not null" json:"status"`
+	// EffectiveStatus projects the current task decision without rewriting the
+	// historical generation candidate or its recorded acceptance status.
+	EffectiveStatus string    `gorm:"-" json:"effective_status,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 type UserTagMergeRecord struct {
 	UserID      int64  `gorm:"primaryKey"`

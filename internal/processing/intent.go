@@ -29,16 +29,18 @@ type Options struct {
 // Intent freezes resolved settings at first acceptance. A changed profile must
 // fail fingerprint validation rather than switch to the new default silently.
 type Intent struct {
-	ID                 string  `json:"id"`
-	Version            int     `json:"version"`
-	Options            Options `json:"options"`
-	GenerationID       string  `json:"generation_id"`
-	ProfileID          int64   `json:"profile_id"`
-	ProfileFingerprint string  `json:"profile_fingerprint"`
-	SummaryPreference  string  `json:"summary_preference"`
-	PolicyJSON         string  `json:"policy_json"`
-	BudgetJSON         string  `json:"budget_json"`
-	RecipeVersion      string  `json:"recipe_version"`
+	ID                 string                 `json:"id"`
+	Version            int                    `json:"version"`
+	Options            Options                `json:"options"`
+	GenerationID       string                 `json:"generation_id"`
+	ProfileID          int64                  `json:"profile_id"`
+	ProfileFingerprint string                 `json:"profile_fingerprint"`
+	SummaryPreference  string                 `json:"summary_preference"`
+	PolicyJSON         string                 `json:"policy_json"`
+	BudgetJSON         string                 `json:"budget_json"`
+	RecipeVersion      string                 `json:"recipe_version"`
+	TagVocabulary      *TagVocabularySnapshot `json:"tag_vocabulary,omitempty"`
+	ExpectedTagVersion *int64                 `json:"expected_tag_version,omitempty"`
 }
 
 type GenerationSnapshot struct {

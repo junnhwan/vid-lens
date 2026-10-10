@@ -25,9 +25,10 @@ type ImportOptions struct {
 }
 
 type preparedImport struct {
-	options           processing.Options
-	key, action, hash string
-	intent            processing.Intent
+	options             processing.Options
+	key, action, hash   string
+	intent              processing.Intent
+	tagVocabularyBudget int
 }
 
 func (s *MediaService) lookupImport(ctx context.Context, owner int64, action string, input any, options ImportOptions, local bool) (*preparedImport, *UploadResult, error) {
@@ -103,7 +104,26 @@ func (s *MediaService) freezeImport(owner int64, request *preparedImport) error 
 		Recipe  string             `json:"recipe"`
 		Options processing.Options `json:"options"`
 	}{processing.Recipe, request.options}), BudgetJSON: artifact.JSON(resolved.EffectiveAgentBudget)}
+	if request.options.AutoTagsEnabled && s.repo.UserTag != nil {
+		initialTagVersion := int64(0)
+		request.intent.ExpectedTagVersion = &initialTagVersion
+		request.tagVocabularyBudget = tagVocabularyByteBudget(resolved)
+		request.intent.TagVocabulary, err = s.repo.UserTag.FreezeVocabulary(context.Background(), owner, request.options.SummaryInstruction+"\n"+preference, request.tagVocabularyBudget)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// Limit vocabulary to at most a quarter of the effective input/context token
+// budget using the conservative one-byte-per-token admission estimate.
+func tagVocabularyByteBudget(resolved *ResolvedConversationProfile) int {
+	window := resolved.Profile.LLMContextTokens
+	if window <= 0 {
+		window = 8192
+	}
+	return max(128, min(processing.MaxTagVocabularyBytes, window/4, resolved.EffectiveAgentBudget.Values.MaxInputTokens/4))
 }
 
 func applyImportIntent(task *model.VideoTask, request *preparedImport) error {

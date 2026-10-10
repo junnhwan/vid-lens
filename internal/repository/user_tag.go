@@ -434,6 +434,43 @@ func (r *UserTagRepository) taskState(tx *gorm.DB, owner, taskID int64) (TaskTag
 	if err = tx.Where("user_id = ? AND task_id = ?", owner, taskID).Order("decision_key").Find(&out.Decisions).Error; err != nil {
 		return out, err
 	}
+	rejectedIDs, rejectedKeys := map[string]bool{}, map[string]bool{}
+	acceptedIDs, acceptedKeys := map[string]bool{}, map[string]bool{}
+	for _, decision := range out.Decisions {
+		if decision.Decision == "rejected" {
+			if decision.TagID != "" {
+				rejectedIDs[decision.TagID] = true
+			}
+			if decision.NormalizedKey != "" {
+				rejectedKeys[decision.NormalizedKey] = true
+			}
+		}
+		if decision.Decision == "accepted" {
+			if decision.TagID != "" {
+				acceptedIDs[decision.TagID] = true
+			}
+			if decision.NormalizedKey != "" {
+				acceptedKeys[decision.NormalizedKey] = true
+			}
+		}
+	}
+	for i := range out.Suggestions {
+		suggestion := &out.Suggestions[i]
+		suggestion.EffectiveStatus = suggestion.Status
+		tagID := suggestion.TagID
+		if tagID != "" {
+			resolved, resolveErr := resolveTag(tx, owner, tagID)
+			if resolveErr != nil {
+				return out, resolveErr
+			}
+			tagID = resolved.ID
+		}
+		if rejectedIDs[tagID] || rejectedKeys[suggestion.NormalizedKey] {
+			suggestion.EffectiveStatus = "rejected"
+		} else if acceptedIDs[tagID] || acceptedKeys[suggestion.NormalizedKey] {
+			suggestion.EffectiveStatus = "accepted"
+		}
+	}
 	return out, nil
 }
 func (r *UserTagRepository) TaskState(ctx context.Context, owner, taskID int64) (TaskTagState, error) {

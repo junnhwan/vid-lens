@@ -64,6 +64,17 @@ func (s *MediaService) requestSourceSummary(ctx context.Context, task *model.Vid
 	if err = s.freezeImport(task.UserID, request); err != nil {
 		return err
 	}
+	if options.AutoTagsEnabled && s.repo.UserTag != nil {
+		state, stateErr := s.repo.UserTag.TaskState(ctx, task.UserID, task.ID)
+		if stateErr != nil {
+			return stateErr
+		}
+		request.intent.ExpectedTagVersion = &state.Version
+		request.intent.TagVocabulary, err = s.repo.UserTag.FreezeVocabulary(ctx, task.UserID, source.CanonicalText+"\n"+options.SummaryInstruction+"\n"+request.intent.SummaryPreference, request.tagVocabularyBudget)
+		if err != nil {
+			return err
+		}
+	}
 	now := time.Now()
 	prepared, err := s.repo.PrepareManualSummaryGeneration(ctx, repository.ManualSummaryGenerationRequest{UserID: task.UserID, TaskID: task.ID, SourceID: source.ID, SourceDigest: source.SourceDigest, MediaFingerprint: task.FileMD5, ExpectedIntentJSON: task.ProcessingIntentJSON, Intent: request.intent, Force: force, Token: uuid.NewString(), Now: now, LeaseUntil: now.Add(initialDispatchLease)})
 	if errors.Is(err, repository.ErrSummaryAvailable) {
