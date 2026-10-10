@@ -34,3 +34,5 @@
 .summary-chapter-actions>summary::before{display:none}
 
 .summary-workspace .summary-map-preview.detailed .study-map.compact .map-canvas{height:clamp(280px,36vh,360px)}
+
+.summary-figure-title{margin:0 0 8px;font-weight:500}.summary-figure-details{margin:0 0 12px;color:var(--tx-2)}.summary-figure-details>summary{cursor:pointer;color:var(--tx-3);font-size:12px}.summary-figure-details[open]>summary{margin-bottom:10px}
