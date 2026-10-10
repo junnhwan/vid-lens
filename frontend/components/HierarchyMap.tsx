@@ -61,7 +61,7 @@ export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = 
       if (disposed || !svg.current) return
       const colors = getComputedStyle(svg.current)
       const palette = [1, 2, 3].map(i => colors.getPropertyValue(`--map-branch-${i}`).trim())
-      const instance = Markmap.create(svg.current, { duration: 0, maxWidth: 190, spacingHorizontal: 55, spacingVertical: 16, paddingX: 12, initialExpandLevel: nodes.length > 50 ? 2 : 3, color: node => palette[(node.state.depth || 0) % palette.length] })
+      const instance = Markmap.create(svg.current, { duration: 0, maxWidth: compact ? 150 : 190, spacingHorizontal: compact ? 30 : 55, spacingVertical: compact ? 10 : 16, paddingX: compact ? 8 : 12, initialExpandLevel: nodes.length > 50 ? 2 : 3, color: node => palette[(node.state.depth || 0) % palette.length] })
       map.current = instance
       await instance.setData(hierarchyMap(title, nodes))
       if (disposed) return
@@ -72,7 +72,7 @@ export function HierarchyMap({ title, nodes, onSelect, selectedBlock, heading = 
       observer.observe(svg.current)
     }).catch(() => { if (!disposed) { map.current?.destroy(); map.current = null; setError(true) } })
     return () => { disposed = true; observer?.disconnect(); map.current?.destroy(); map.current = null }
-  }, [title, nodes, attempt])
+  }, [title, nodes, attempt, compact])
   function outline(nodes: TreeNode[]) {
     return <ul>{nodes.map(({ block, children }) => <li key={block.id}><button aria-pressed={focused && selectedBlock === block.id} onClick={() => select(block.id)}>{block.title}<span>{(block.references || 0) ? `${block.references || 0} 条引用` : '无引用'}</span></button>{children.length > 0 && outline(children)}</li>)}</ul>
   }

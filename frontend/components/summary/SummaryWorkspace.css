@@ -32,3 +32,5 @@
 .summary-reader .sumrev-meta{font-size:11px;margin:14px 0 0}.summary-reader .sumrev-download{width:auto;justify-self:start;background:transparent;font-size:12px}.summary-reader .sumrev-editing>summary{font-size:12px;color:var(--tx-3);padding:4px 0}
 @media(max-width:1150px){.summary-workspace-heading{flex-wrap:wrap}.summary-heading-title{flex-basis:100%}.summary-workspace-tools{justify-content:flex-start;max-width:none}.summary-workspace-grid{grid-template-columns:minmax(380px,1fr) minmax(310px,34%)}.summary-reader{padding:18px 24px}}
 .summary-chapter-actions>summary::before{display:none}
+
+.summary-workspace .summary-map-preview.detailed .study-map.compact .map-canvas{height:clamp(280px,36vh,360px)}
