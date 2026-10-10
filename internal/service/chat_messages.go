@@ -38,7 +38,12 @@ func buildRAGMessages(contexts []RetrievedChunk, recent []model.ChatMessage, que
 	}
 	for _, msg := range boundedConversationContext(recent) {
 		if msg.Role == "user" || msg.Role == "assistant" {
-			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content})
+			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content + func() string {
+				if len(msg.ContextAnnotations) == 0 {
+					return ""
+				}
+				return "\n" + summaryAnnotationInstructions + "\n" + annotationPrompt(msg.ContextAnnotations)
+			}()})
 		}
 	}
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: question})
@@ -58,7 +63,12 @@ func buildVideoAssistantMessages(videoContext string, recent []model.ChatMessage
 	}
 	for _, msg := range boundedConversationContext(recent) {
 		if msg.Role == "user" || msg.Role == "assistant" {
-			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content})
+			messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content + func() string {
+				if len(msg.ContextAnnotations) == 0 {
+					return ""
+				}
+				return "\n" + summaryAnnotationInstructions + "\n" + annotationPrompt(msg.ContextAnnotations)
+			}()})
 		}
 	}
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: question})

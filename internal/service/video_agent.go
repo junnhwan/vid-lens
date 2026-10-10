@@ -154,7 +154,7 @@ func (s *VideoAgentService) saveAgentRunExchange(ctx context.Context, userID, se
 		return err
 	}
 	snapshotText := string(snapshot)
-	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
+	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question, ContextAnnotationsJSON: annotationJSON(ctx)}
 	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: result.Answer, RetrievalSnapshot: &snapshotText, ModelName: result.Model, ExecutionMode: "agent", ProfileID: result.ProfileID}
 	sourceIDs := make([]int64, 0, len(result.Citations))
 	for _, c := range result.Citations {

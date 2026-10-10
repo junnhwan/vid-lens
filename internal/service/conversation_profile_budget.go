@@ -9,6 +9,15 @@ import (
 type resolvedBudgetContextKey struct{}
 
 func (e *ConversationExecution) prepareRequest(ctx context.Context, req ConversationRequest) (context.Context, ai.EmbeddingClient, ai.ChatClient, ai.Profile, error) {
+	if concrete, ok := e.chat.(*ChatService); ok {
+		var err error
+		ctx, err = concrete.PrepareContextRefs(ctx, req)
+		if err != nil {
+			return ctx, nil, nil, ai.Profile{}, err
+		}
+	} else if len(req.ContextRefs) > 0 {
+		return ctx, nil, nil, ai.Profile{}, errors.New("summary context unavailable")
+	}
 	if req.Kind == ConversationKindAgent && e != nil && e.clients != nil {
 		if provider, ok := e.profiles.(interface {
 			GetDefaultConversationProfile(int64) (*ResolvedConversationProfile, error)

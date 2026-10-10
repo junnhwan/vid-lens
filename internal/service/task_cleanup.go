@@ -176,6 +176,20 @@ func (s *TaskCleanupService) failClaim(jobID int64, token string, cause error) e
 }
 
 func (s *TaskCleanupService) executeClaimed(ctx context.Context, job *model.TaskCleanupJob, token string) error {
+	if s.repo.TextSource != nil {
+		keys, err := s.repo.TextSource.RawObjects(job.TaskID)
+		if err != nil {
+			return fmt.Errorf("collect text source objects: %w", err)
+		}
+		for _, key := range keys {
+			if s.objectDeleter == nil {
+				return fmt.Errorf("text source object deleter unavailable")
+			}
+			if err := s.objectDeleter.DeleteObject(ctx, key); err != nil {
+				return fmt.Errorf("delete text source object: %w", err)
+			}
+		}
+	}
 	if err := s.deleteVisualFrameObjects(ctx, job.TaskID); err != nil {
 		return err
 	}
@@ -352,6 +366,9 @@ func deleteTaskOwnedRows(repos *repository.Repositories, taskID int64) error {
 	}
 	if repos.VisualProgress != nil {
 		deleteFns = append(deleteFns, repos.VisualProgress.DeleteByTaskID)
+	}
+	if repos.TextSource != nil {
+		deleteFns = append(deleteFns, repos.TextSource.DeleteTaskSources)
 	}
 	for _, deleteRows := range deleteFns {
 		if err := deleteRows(taskID); err != nil {

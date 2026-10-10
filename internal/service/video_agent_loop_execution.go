@@ -28,6 +28,7 @@ type durableResearchExecution struct {
 
 type durableResearchDecision struct {
 	BudgetNotice  *AgentBudgetNotice `json:"budget_notice,omitempty"`
+	PublicTitle   string             `json:"public_title,omitempty"`
 	PublicSummary string             `json:"public_summary,omitempty"`
 	Done          bool               `json:"done"`
 	Tool          string             `json:"tool,omitempty"`
@@ -439,7 +440,8 @@ func (r *VideoAgentLoopRunner) validatedResearchDecision(state VideoAgentLoopSta
 		fields["budget"], _ = json.Marshal(budget)
 		decision.Arguments, _ = json.Marshal(fields)
 	}
-	decision.PublicSummary = trimRunes(strings.TrimSpace(decision.PublicSummary), 240)
+	decision.PublicTitle = safeConversationTitle(decision.PublicTitle)
+	decision.PublicSummary = trimRunes(strings.TrimSpace(decision.PublicSummary), 120)
 	return decision, nil
 }
 
@@ -455,7 +457,7 @@ func (r *VideoAgentLoopRunner) observeResearchTool(state VideoAgentLoopState, ta
 }
 
 func durableResearchDecisionFrom(decision VideoAgentLoopDecision) durableResearchDecision {
-	return durableResearchDecision{BudgetNotice: decision.BudgetNotice, PublicSummary: decision.PublicSummary, Done: decision.Done, Tool: decision.Tool, Arguments: append(json.RawMessage(nil), decision.Arguments...), Replan: decision.Replan, StopReason: decision.StopReason}
+	return durableResearchDecision{BudgetNotice: decision.BudgetNotice, PublicTitle: decision.PublicTitle, PublicSummary: decision.PublicSummary, Done: decision.Done, Tool: decision.Tool, Arguments: append(json.RawMessage(nil), decision.Arguments...), Replan: decision.Replan, StopReason: decision.StopReason}
 }
 
 func (d durableResearchDecision) toDecision() VideoAgentLoopDecision {
@@ -463,7 +465,7 @@ func (d durableResearchDecision) toDecision() VideoAgentLoopDecision {
 	if d.Done {
 		reason = ""
 	}
-	return VideoAgentLoopDecision{BudgetNotice: d.BudgetNotice, PublicSummary: d.PublicSummary, Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
+	return VideoAgentLoopDecision{BudgetNotice: d.BudgetNotice, PublicTitle: d.PublicTitle, PublicSummary: d.PublicSummary, Done: d.Done, Tool: d.Tool, Reason: reason, Arguments: append(json.RawMessage(nil), d.Arguments...), Replan: d.Replan, StopReason: d.StopReason}
 }
 
 func safeResearchArgumentsSummary(tool string, arguments json.RawMessage) string {

@@ -115,7 +115,17 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			frozenPolicy.TermSnapshotHash = artifact.Hash(artifact.JSON(frozenPolicy.TermRules))
 		}
 		frozenPolicy.AuthorizedMemberTaskIDs = scope.Members
+		frozenPolicy.ContextAnnotations = annotationsFromContext(ctx)
 	}
+	if len(memberIDs) > 0 {
+		if err = s.chatSvc.validateAnnotationReadyScope(withAnnotations(ctx, req.UserID, req.SessionID, frozenPolicy.ContextAnnotations), memberIDs); err != nil {
+			return nil, err
+		}
+	}
+	if err = s.chatSvc.repos.AuthorizeFrozenAnnotations(ctx, req.UserID, req.SessionID, frozenPolicy.ContextAnnotations); err != nil {
+		return nil, err
+	}
+	ctx = withAnnotations(ctx, req.UserID, req.SessionID, frozenPolicy.ContextAnnotations)
 	if len(memberIDs) > 0 && (!sameTaskIDs(memberIDs, frozenPolicy.MemberTaskIDs) || (len(frozenPolicy.AuthorizedMemberTaskIDs) > 0 && !sameTaskIDs(scope.Members, frozenPolicy.AuthorizedMemberTaskIDs))) {
 		return nil, errKnowledgeMembershipChanged
 	}
@@ -233,9 +243,14 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	if err := runner.SetDurableExecution(journal, req.UserID, runID); err != nil {
 		return nil, err
 	}
-	var validateScope func(context.Context) error
+	validateScope := func(checkCtx context.Context) error {
+		return s.chatSvc.repos.AuthorizeFrozenAnnotations(checkCtx, req.UserID, req.SessionID, frozenPolicy.ContextAnnotations)
+	}
 	if len(memberIDs) > 0 {
 		validateScope = func(checkCtx context.Context) error {
+			if err := s.chatSvc.repos.AuthorizeFrozenAnnotations(checkCtx, req.UserID, req.SessionID, frozenPolicy.ContextAnnotations); err != nil {
+				return err
+			}
 			if err := checkCtx.Err(); err != nil {
 				return err
 			}
@@ -265,20 +280,21 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 	pipeline.CollectionTargets, pipeline.RoutedTargets, pipeline.RequiredDimensions = route.Required, route.routedIDs(), route.Dimensions
 	tools.SetCollectionContext(scope.coveragePrompt() + "\n" + collectionRoutePrompt(route))
 	runResult, err := runner.Run(ctx, req.Goal, VideoAgentToolRuntime{
-		AnswerPreference:  answerPreference,
-		TermRules:         frozenPolicy.TermRules,
-		VideoMaps:         videoMaps,
-		MaxVisualFrames:   budget.MaxFrames,
-		UserID:            req.UserID,
-		TaskID:            session.TaskID,
-		TaskIDs:           memberIDs,
-		ValidateScope:     validateScope,
-		Recent:            recent,
-		TopK:              req.TopK,
-		EmbeddingModel:    profile.EmbeddingModel,
-		Embedding:         embedding,
-		MemorySnapshot:    memorySnapshot,
-		CollectionContext: scope.coveragePrompt() + "\n" + collectionRoutePrompt(route),
+		ContextAnnotations: frozenPolicy.ContextAnnotations,
+		AnswerPreference:   answerPreference,
+		TermRules:          frozenPolicy.TermRules,
+		VideoMaps:          videoMaps,
+		MaxVisualFrames:    budget.MaxFrames,
+		UserID:             req.UserID,
+		TaskID:             session.TaskID,
+		TaskIDs:            memberIDs,
+		ValidateScope:      validateScope,
+		Recent:             recent,
+		TopK:               req.TopK,
+		EmbeddingModel:     profile.EmbeddingModel,
+		Embedding:          embedding,
+		MemorySnapshot:     memorySnapshot,
+		CollectionContext:  scope.coveragePrompt() + "\n" + collectionRoutePrompt(route),
 	})
 	if err == nil && validateScope != nil {
 		err = validateScope(ctx)
@@ -299,7 +315,7 @@ func (s *VideoAgentService) RunAgent(ctx context.Context, req VideoAgentLoopRequ
 			}
 		}
 		if !found {
-			progress = append(progress, ConversationProgress{ID: id, PlanID: id, RunID: runID, Kind: "plan", Label: "规划下一步", Status: "done", Detail: publicDecisionSummary(step.Action, 0)})
+			progress = append(progress, ConversationProgress{ID: id, PlanID: id, RunID: runID, Kind: "plan", Label: publicDecisionTitle(step.Action), Status: "done", Detail: publicDecisionSummary(step.Action, 0)})
 		}
 	}
 	degraded := runResult.State.StopReason == "budget_exhausted" || runResult.State.StopReason == "budget_finalized"

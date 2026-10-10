@@ -37,7 +37,19 @@ func (s *AIProfileService) resolveStoredBudget(profile *model.UserAIProfile) (*m
 
 // GetDefaultConversationProfile freezes provider identity and budget from one database read.
 func (s *AIProfileService) GetDefaultConversationProfile(userID int64) (*ResolvedConversationProfile, error) {
-	profile, err := s.repo.FindDefaultByUserID(userID)
+	return s.GetConversationProfile(userID, 0)
+}
+
+// GetConversationProfile resolves an explicit owner-scoped profile without
+// consulting the current default when resuming a frozen import.
+func (s *AIProfileService) GetConversationProfile(userID, profileID int64) (*ResolvedConversationProfile, error) {
+	var profile *model.UserAIProfile
+	var err error
+	if profileID == 0 {
+		profile, err = s.repo.FindDefaultByUserID(userID)
+	} else {
+		profile, err = s.repo.FindByIDForUser(userID, profileID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -53,4 +65,12 @@ func (s *AIProfileService) GetDefaultConversationProfile(userID int64) (*Resolve
 		return nil, err
 	}
 	return &ResolvedConversationProfile{Profile: providerFromDecrypted(decrypted), ProfileID: profile.ID, AgentBudget: override, EffectiveAgentBudget: *effective}, nil
+}
+
+func (s *AIProfileService) GetAIProfileByID(userID, profileID int64) (*ai.Profile, error) {
+	resolved, err := s.GetConversationProfile(userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Profile, nil
 }

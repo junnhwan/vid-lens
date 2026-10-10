@@ -132,6 +132,9 @@ type Citation struct {
 }
 
 type RAGRetriever interface {
+	// Search selects current authorized relational chunk IDs/vector identities
+	// before ranking and TopK. Retired physical generations must not consume
+	// the candidate budget; post-retrieval hydration alone is insufficient.
 	Search(ctx context.Context, query []float32, req RetrievalRequest) ([]RetrievedChunk, error)
 }
 

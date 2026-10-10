@@ -112,10 +112,15 @@ func visualCoverage(frames []model.VideoVisualFrame) *VisualCoverage {
 // into one ordered timeline. It does not manufacture precise timestamps when
 // the provider did not persist them.
 func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionChunk, frames []model.VideoVisualFrame) VideoTimeline {
-	atoms := make([]TimelineAtom, 0, len(transcriptRows)+len(frames)*2)
+	return BuildVideoTimelineFromObservations(taskID, legacySourceObservations(transcriptRows), frames)
+}
+
+// BuildVideoTimelineFromObservations projects the frozen source directly.
+func BuildVideoTimelineFromObservations(taskID int64, observations []SourceTextObservation, frames []model.VideoVisualFrame) VideoTimeline {
+	atoms := make([]TimelineAtom, 0, len(observations)+len(frames)*2)
 	textOrder := make(map[string]int64)
 	order := int64(0)
-	for _, observation := range assembledTranscriptObservations(transcriptRows) {
+	for _, observation := range observations {
 		if strings.TrimSpace(observation.Content) == "" || len(observation.Refs) == 0 {
 			continue
 		}
@@ -130,7 +135,7 @@ func BuildVideoTimeline(taskID int64, transcriptRows []model.VideoTranscriptionC
 		atoms = append(atoms, TimelineAtom{
 			ID: id, Modality: model.ChunkModalityTranscript,
 			Content: content, StartMS: ref.StartMS, EndMS: ref.EndMS,
-			TimeRangeStatus: ref.TimeRangeStatus, Source: "asr", SourceRefs: []ChunkSourceRef{ref},
+			TimeRangeStatus: ref.TimeRangeStatus, Source: ref.SourceKind, SourceRefs: []ChunkSourceRef{ref},
 		})
 	}
 

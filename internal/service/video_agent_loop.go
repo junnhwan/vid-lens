@@ -60,6 +60,7 @@ type VideoAgentLoopDecision struct {
 	Done          bool               `json:"done"`
 	Tool          string             `json:"tool,omitempty"`
 	Reason        string             `json:"reason,omitempty"`
+	PublicTitle   string             `json:"public_title,omitempty"`
 	PublicSummary string             `json:"public_summary,omitempty"`
 	Arguments     json.RawMessage    `json:"arguments,omitempty"`
 	Replan        bool               `json:"replan,omitempty"`
@@ -93,6 +94,7 @@ type VideoAgentLoopState struct {
 	MaxVisualFrames     int                          `json:"max_visual_frames,omitempty"`
 	ArgumentCorrections int                          `json:"argument_corrections,omitempty"`
 	BudgetNotice        *AgentBudgetNotice           `json:"budget_notice,omitempty"`
+	ContextAnnotations  []model.ContextAnnotation    `json:"context_annotations,omitempty"`
 	Conversation        []ConversationContextMessage `json:"conversation,omitempty"`
 	ScopeTaskIDs        []int64                      `json:"scope_task_ids,omitempty"`
 	Goal                string                       `json:"goal"`
@@ -180,6 +182,7 @@ func (r *VideoAgentLoopRunner) Run(ctx context.Context, goal string, runtime Vid
 	state.TermRules = runtime.TermRules
 	state.MaxVisualFrames = runtime.MaxVisualFrames
 	state.Conversation = boundedConversationContext(runtime.Recent)
+	state.ContextAnnotations = runtime.ContextAnnotations
 	state.ScopeTaskIDs = append([]int64(nil), runtime.TaskIDs...)
 	if err := runtime.checkScope(ctx, nil); err != nil {
 		return nil, err

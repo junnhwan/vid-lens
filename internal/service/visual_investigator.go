@@ -87,6 +87,12 @@ type InspectRequest struct {
 	SeedWindows   []VisualTimeRange `json:"seed_windows"`
 	Budget        VisualBudget      `json:"budget"`
 	TraceRef      string            `json:"-"`
+	// Summary callers provide frozen, server-authorized source and profile.
+	SourceID            string          `json:"-"`
+	SourceDigest        string          `json:"-"`
+	VisionClient        ai.VisionClient `json:"-"`
+	VisionModel         string          `json:"-"`
+	RequireImageQuality bool            `json:"-"`
 }
 
 type VisualBudgetUsage struct {
@@ -240,7 +246,25 @@ func (s *QueryVisualInvestigator) Inspect(ctx context.Context, req InspectReques
 	}
 
 	budget := req.Budget.normalized()
-	windows, budgetExhausted, err := s.selectSeedWindows(req.TaskID, req.SeedWindows, budget)
+	var sourceWindows []VisualTimeRange
+	if req.SourceID != "" {
+		source, sourceErr := s.repos.TextSource.Read(ctx, req.UserID, req.TaskID, req.SourceID)
+		if sourceErr != nil {
+			return Investigation{}, sourceErr
+		}
+		if source.SourceDigest != req.SourceDigest || task.ActiveTextSourceID != source.ID || task.FileMD5 != source.Identity.MediaFingerprint {
+			return Investigation{}, errors.New("visual investigation source changed")
+		}
+		for _, cue := range source.Cues {
+			if cue.StartMS != nil && cue.EndMS != nil {
+				sourceWindows = append(sourceWindows, VisualTimeRange{StartMS: *cue.StartMS, EndMS: *cue.EndMS})
+			}
+		}
+		if len(sourceWindows) == 0 {
+			return Investigation{}, errors.New("visual investigation source has no real time")
+		}
+	}
+	windows, budgetExhausted, err := s.selectSeedWindows(req.TaskID, req.SeedWindows, budget, sourceWindows)
 	if err != nil {
 		return Investigation{}, err
 	}
@@ -279,8 +303,12 @@ func (s *QueryVisualInvestigator) Inspect(ctx context.Context, req InspectReques
 	}
 	defer os.Remove(videoPath)
 
-	vision, visionErr := s.resolveVisionClient(ctx, req.UserID)
-	modelName := s.resolveVisionModel(ctx, req.UserID)
+	vision, modelName := req.VisionClient, req.VisionModel
+	var visionErr error
+	if req.SourceID == "" {
+		vision, visionErr = s.resolveVisionClient(ctx, req.UserID)
+		modelName = s.resolveVisionModel(ctx, req.UserID)
+	}
 	if vision == nil {
 		result.UnresolvedGaps = append(result.UnresolvedGaps, EvidenceGap{Kind: "vision_unavailable", Detail: errString(visionErr)})
 	}
@@ -341,9 +369,10 @@ func (s *QueryVisualInvestigator) Inspect(ctx context.Context, req InspectReques
 	return result, nil
 }
 
-func (s *QueryVisualInvestigator) selectSeedWindows(taskID int64, requested []VisualTimeRange, budget VisualBudget) ([]VisualTimeRange, bool, error) {
+func (s *QueryVisualInvestigator) selectSeedWindows(taskID int64, requested []VisualTimeRange, budget VisualBudget, frozen ...[]VisualTimeRange) ([]VisualTimeRange, bool, error) {
 	transcriptRows := []model.VideoTranscriptionChunk{}
-	if s.repos.TranscriptionChunk != nil {
+	useFrozen := len(frozen) > 0 && len(frozen[0]) > 0
+	if !useFrozen && s.repos.TranscriptionChunk != nil {
 		rows, err := s.repos.TranscriptionChunk.ListByTaskID(taskID)
 		if err != nil {
 			return nil, false, err
@@ -351,7 +380,7 @@ func (s *QueryVisualInvestigator) selectSeedWindows(taskID int64, requested []Vi
 		transcriptRows = rows
 	}
 	frames := []model.VideoVisualFrame{}
-	if s.repos.VisualFrame != nil {
+	if !useFrozen && s.repos.VisualFrame != nil {
 		rows, err := s.repos.VisualFrame.ListByTaskID(taskID)
 		if err != nil {
 			return nil, false, err
@@ -367,7 +396,16 @@ func (s *QueryVisualInvestigator) selectSeedWindows(taskID int64, requested []Vi
 		if window.EndMS-window.StartMS > budget.MaxWindowMS {
 			return nil, false, fmt.Errorf("seed window exceeds %dms visual budget", budget.MaxWindowMS)
 		}
-		if !hasTimelineEvidenceInRange(window, transcriptRows, frames) {
+		covered := hasTimelineEvidenceInRange(window, transcriptRows, frames)
+		if useFrozen {
+			for _, span := range frozen[0] {
+				if window.StartMS >= span.StartMS && window.EndMS <= span.EndMS {
+					covered = true
+					break
+				}
+			}
+		}
+		if !covered {
 			return nil, false, fmt.Errorf("seed window [%d,%d) is not covered by existing video evidence", window.StartMS, window.EndMS)
 		}
 		valid = append(valid, window)
@@ -504,6 +542,11 @@ func (s *QueryVisualInvestigator) inspectFrame(ctx context.Context, req InspectR
 	data, err := os.ReadFile(frame.Path)
 	if err != nil {
 		return VisualObservation{}, false, 0, fmt.Errorf("read query frame %dms: %w", frame.TimeMs, err)
+	}
+	if req.RequireImageQuality {
+		if err := validateSummaryFrameQuality(data); err != nil {
+			return VisualObservation{}, false, 0, err
+		}
 	}
 	frameHash := sha256.Sum256(data)
 	frameHashHex := hex.EncodeToString(frameHash[:])

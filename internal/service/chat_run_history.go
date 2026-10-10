@@ -66,6 +66,7 @@ func (s *ChatService) ListUnfinishedRunHistory(ctx context.Context, userID, sess
 				var decision durableResearchDecision
 				if json.Unmarshal([]byte(step.ResultCheckpoint), &decision) == nil {
 					p.Detail = decision.PublicSummary
+					p.Label = publicDecisionTitle(decision.toDecision())
 				}
 			} else if step.Sequence > 0 {
 				p.ID = fmt.Sprintf("s%d", step.Sequence/2)

@@ -167,7 +167,7 @@ func buildPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefin
 		if pass > 1 && len(view.Evidence) > 4 {
 			view.Evidence = view.Evidence[1:]
 		}
-		if pass > 3 && len(view.Conversation) > 2 {
+		if pass > 3 && len(view.Conversation) > 2 && len(view.Conversation[0].ContextAnnotations) == 0 {
 			view.Conversation = view.Conversation[1:]
 		}
 	}
@@ -185,7 +185,7 @@ func renderPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefi
 	}
 
 	messages := []ai.ChatMessage{
-		{Role: "system", Content: agentPlannerProductPrompt + "\n" + qaGroundingPolicy + "\n" + qaRuntimeClock(time.Now())},
+		{Role: "system", Content: agentPlannerProductPrompt + "\n" + summaryAnnotationInstructions + "\n" + qaGroundingPolicy + "\n" + qaRuntimeClock(time.Now())},
 		{Role: "user", Content: fmt.Sprintf(`围绕当前研究目标选择下一步动作。
 
 工具白名单（只能选择其中的 name）：
@@ -195,10 +195,11 @@ func renderPlannerMessages(state VideoAgentLoopState, tools []VideoAgentToolDefi
 %s
 
 输出格式：
-{"done":false,"tool":"工具名称","reason":"为什么现在需要这个工具","public_summary":"向用户简要说明已有证据的不足及下一步目的","arguments":{},"replan":false}
+{"done":false,"tool":"工具名称","reason":"为什么现在需要这个工具","public_title":"当前实际动作的短标题","public_summary":"向用户简要说明已有证据的不足及下一步目的","arguments":{},"replan":false}
 
 规则：
 - done=false 时必须填写 tool、reason 和 arguments。
+- public_title 最多40字，只概括本次实际选择的动作，不能暴露私密上下文、密钥、URL或思考草稿。
 - public_summary 是展示给用户的简要决策说明，最多 120 字，只描述已有证据、局限和下一步目的；不要输出私密上下文或内部思考草稿。
 - done=true 时 tool 必须为空；只有证据足够或已经明确无法继续时才结束。
 - 普通解说问题通常先调用 search_transcript。字幕、图表、幻灯片、颜色、布局、纯演示、无转写或画面/解说是否一致的问题，应调用 search_visual_evidence。

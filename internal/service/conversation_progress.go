@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Progress is public execution metadata, separate from provider reasoning.
@@ -72,7 +74,7 @@ func emitReasoning(ctx context.Context, callID, delta string) error {
 
 func publicDecisionSummary(d VideoAgentLoopDecision, evidence int) string {
 	if text := strings.TrimSpace(d.PublicSummary); text != "" {
-		return trimRunes(text, 240)
+		return trimRunes(text, 120)
 	}
 	action := agentSnapshotStepLabel(VideoAgentStep{Tool: d.Tool})
 	if d.Replan {
@@ -102,6 +104,7 @@ func (r *VideoAgentLoopRunner) nextResearchDecision(ctx context.Context, state V
 		progress.Detail = "已达到执行预算，停止规划"
 	} else {
 		progress.Status = "done"
+		progress.Label = publicDecisionTitle(decision)
 		progress.Tool = decision.Tool
 		progress.Replan = decision.Replan
 		progress.Detail = publicDecisionSummary(decision, len(state.Evidence))
@@ -115,4 +118,61 @@ func (r *VideoAgentLoopRunner) nextResearchDecision(ctx context.Context, state V
 		err = emitErr
 	}
 	return
+}
+
+func safeConversationTitle(value string) string {
+	value = strings.TrimSpace(value)
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > 40 {
+		return ""
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	lower := strings.ToLower(value)
+	for _, unsafe := range []string{"http:", "https:", "token", "secret", "password", "authorization", "api_key", "object_key", "signed", "<", ">", "```"} {
+		if strings.Contains(lower, unsafe) {
+			return ""
+		}
+	}
+	return value
+}
+func publicDecisionTitle(decision VideoAgentLoopDecision) string {
+	if title := safeConversationTitle(decision.PublicTitle); title != "" && titleMatchesDecision(title, decision) {
+		return title
+	}
+	if decision.Done {
+		return "完成回答"
+	}
+	if decision.Tool != "" {
+		return agentSnapshotStepLabel(VideoAgentStep{Tool: decision.Tool})
+	}
+	return "规划下一步"
+}
+
+// A public title describes the actual allowed action. Unsupported wording
+// falls back to the tool label rather than inventing download/write activity.
+func titleMatchesDecision(title string, decision VideoAgentLoopDecision) bool {
+	if decision.Done {
+		return false
+	}
+	var verbs []string
+	switch decision.Tool {
+	case VideoAgentToolSearchTranscript, VideoAgentToolSearchVisualEvidence:
+		verbs = []string{"检索", "搜索", "查找", "定位", "search", "find", "locate"}
+	case VideoAgentToolGetTranscriptWindow, VideoAgentToolInspectVisualWindow:
+		verbs = []string{"阅读", "查看", "读取", "核对", "检查", "摘录", "read", "inspect", "check", "review"}
+	case VideoAgentToolBuildCitedAnswer:
+		verbs = []string{"整理", "回答", "撰写", "生成回答", "组织", "汇总", "核对回答", "compose", "answer", "write", "build"}
+	default:
+		return false
+	}
+	lower := strings.ToLower(title)
+	for _, verb := range verbs {
+		if strings.HasPrefix(lower, verb) {
+			return true
+		}
+	}
+	return false
 }

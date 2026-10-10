@@ -41,7 +41,7 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 	if task.Status == model.TaskStatusQueued || task.Status == model.TaskStatusRunning {
 		return "", nil, artifact.Err("source_not_ready", 422)
 	}
-	_, rows, err := taskTranscriptSource(repos, task)
+	source, err := taskTextSource(ctx, repos, task)
 	if err != nil {
 		return "", nil, err
 	}
@@ -49,7 +49,8 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 	if err != nil {
 		return "", nil, err
 	}
-	timeline := BuildVideoTimeline(id, rows, frames)
+	rows := source.LegacyChunks
+	timeline := BuildVideoTimelineFromObservations(id, source.Observations, frames)
 	if reason := studySourceReason(task, rows, timeline); reason != "" {
 		code := "source_not_ready"
 		if reason == "source_limit_exceeded" {
@@ -60,6 +61,12 @@ func artifactSource(ctx context.Context, repos *repository.Repositories, owner, 
 	items := make([]model.SourceSnapshotItem, 0, len(timeline.Atoms))
 	for _, a := range timeline.Atoms {
 		item := model.SourceSnapshotItem{SourceIdentity: a.ID, Modality: a.Modality, Content: a.Content, ContentHash: artifact.Hash(a.Content), TimeRangeStatus: a.TimeRangeStatus}
+		if len(a.SourceRefs) > 0 && a.SourceRefs[0].SourceID != "" {
+			ref := a.SourceRefs[0]
+			item.TextSourceID, item.TextSourceDigest = ref.SourceID, ref.SourceDigest
+			item.CueIDs = append([]string(nil), ref.CueIDs...)
+			item.TimingMethod, item.SourceKind, item.MediaFingerprint = ref.TimingMethod, ref.SourceKind, ref.MediaFingerprint
+		}
 		if item.TimeRangeStatus == model.ChunkTimeRangeExact {
 			item.TimeRangeStatus = "precise"
 		}

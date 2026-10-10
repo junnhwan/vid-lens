@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"vid-lens/internal/ai"
+	"vid-lens/internal/model"
 )
 
 type ConversationKind string
@@ -15,6 +16,7 @@ const (
 )
 
 type ConversationRequest struct {
+	ContextRefs  []model.SummaryContextRef
 	Kind         ConversationKind
 	UserID       int64
 	SessionID    int64

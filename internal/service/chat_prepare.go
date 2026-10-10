@@ -24,11 +24,17 @@ func (s *ChatService) prepareChatByMode(ctx context.Context, mode ChatMode, user
 	if session == nil {
 		return nil, fmt.Errorf("无权访问此会话")
 	}
-	// KnowledgeBase 会话强制走 RAG（跨视频检索，集合 scope），与 strict_rag 同路径。
+	var prepared *preparedRAGChat
 	if session.ScopeType == model.ChatScopeKnowledgeBase || session.ScopeType == model.ChatScopeVideoLibrary {
-		return s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
+		prepared, err = s.prepareRAGChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
+	} else {
+		prepared, err = s.prepareVideoAssistantChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
 	}
-	return s.prepareVideoAssistantChat(ctx, mode, userID, sessionID, question, topK, embedding, chat, profile)
+	if err != nil {
+		return nil, err
+	}
+	prepared.Messages = appendAnnotationMessages(prepared.Messages, annotationsFromContext(ctx))
+	return prepared, nil
 }
 
 func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID, sessionID int64, question string, topK int, embedding ai.EmbeddingClient, chat ai.ChatClient, profile ai.Profile) (*preparedRAGChat, error) {
@@ -56,6 +62,9 @@ func (s *ChatService) prepareRAGChat(ctx context.Context, mode ChatMode, userID,
 		return nil, err
 	}
 
+	if err = s.validateAnnotationReadyScope(ctx, taskIDs); err != nil {
+		return nil, err
+	}
 	// Share authorized recent history across Chat and Agent before retrieval.
 	recentLimit := s.cfg.RecentTurns * 2
 	recent, err := s.loadScopeSafeRecentMessages(ctx, userID, session, taskIDs, recentLimit)
@@ -254,31 +263,13 @@ func (s *ChatService) videoContextText(owner, taskID int64) (string, error) {
 		return "", fmt.Errorf("无权访问此视频")
 	}
 	sections := make([]string, 0, 2)
-	if s.repos.Summary != nil {
-		summary, err := s.repos.Summary.FindByTaskID(taskID)
-		if err != nil {
-			return "", err
+	if s.repos.SummaryRevision != nil {
+		effective, readErr := s.repos.SummaryRevision.Effective(context.Background(), owner, taskID)
+		if readErr != nil {
+			return "", readErr
 		}
-		if summary == nil && task.FileMD5 != "" {
-			summary, err = s.repos.Summary.FindByMD5(task.FileMD5)
-			if err != nil {
-				return "", err
-			}
-		}
-		if summary != nil && strings.TrimSpace(summary.Content) != "" {
-			sections = append(sections, "视频摘要：\n"+boundedVideoText(strings.TrimSpace(summary.Content), maxVideoContextRunes/2))
-		}
-		if s.repos.SummaryRevision != nil {
-			effective, readErr := s.repos.SummaryRevision.Effective(context.Background(), owner, taskID)
-			if readErr != nil {
-				return "", readErr
-			}
-			if effective.Revision != nil {
-				if len(sections) > 0 {
-					sections = sections[:len(sections)-1]
-				}
-				sections = append(sections, "用户修订的视频摘要（非原始证据）：\n"+boundedVideoText(strings.TrimSpace(effective.Content), maxVideoContextRunes/2))
-			}
+		if strings.TrimSpace(effective.Content) != "" {
+			sections = append(sections, "视频摘要（衍生内容，非原始证据）：\n"+boundedVideoText(strings.TrimSpace(effective.Content), maxVideoContextRunes/2))
 		}
 	}
 	if s.repos.Transcription != nil {

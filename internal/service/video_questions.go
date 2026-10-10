@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"vid-lens/internal/model"
+	"vid-lens/internal/repository"
+	"vid-lens/internal/textsource"
 )
 
 type VideoQuestion struct {
@@ -43,10 +45,11 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 	if err != nil || task == nil || task.UserID != userID {
 		return videoQuestionEvidence{}, fmt.Errorf("视频不存在或无权访问")
 	}
-	transcript, chunks, err := taskTranscriptSource(s.repo, task)
+	source, err := taskTextSource(context.Background(), s.repo, task)
 	if err != nil {
 		return videoQuestionEvidence{}, err
 	}
+	transcript, chunks := source.Transcription, source.LegacyChunks
 	evidence := videoQuestionEvidence{title: task.Title, result: VideoQuestionResult{Questions: []VideoQuestion{}}}
 	frames, err := s.repo.VisualFrame.ListCompletedWithText(taskID)
 	if err != nil {
@@ -63,7 +66,7 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 	if err != nil {
 		return evidence, err
 	}
-	if summary == nil && task.FileMD5 != "" {
+	if summary == nil && repository.LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
 		summary, err = s.repo.Summary.FindByMD5(task.FileMD5)
 		if err != nil {
 			return evidence, err
@@ -83,6 +86,9 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 	if summary != nil {
 		evidence.summary = summary.Content
 		h.Write([]byte("\x00" + summary.Content))
+	}
+	if source.Snapshot != nil {
+		h.Write([]byte("\x00" + source.Snapshot.SourceDigest))
 	}
 	for _, chunk := range chunks {
 		h.Write([]byte(fmt.Sprintf("\x00%d:%s:%s", chunk.CoreStartMS, chunk.Status, chunk.Content)))
@@ -107,6 +113,20 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 		question := naturalQuestion(topic, len(evidence.result.Questions))
 		evidence.result.Questions = append(evidence.result.Questions, VideoQuestion{Question: question, Source: source, Excerpt: sampleQuestionText(raw, 160), TimeMS: at})
 	}
+	textLabel := "转写"
+	if source.Snapshot != nil && source.Snapshot.Kind == textsource.KindSubtitle {
+		textLabel = "字幕"
+	}
+	if source.Snapshot != nil {
+		for _, observation := range source.Observations {
+			var at *int64
+			if len(observation.Refs) > 0 && observation.Refs[0].TimeRangeStatus != model.ChunkTimeRangeUnknown {
+				value := observation.Refs[0].StartMS
+				at = &value
+			}
+			add(observation.Content, textLabel, at)
+		}
+	}
 	for _, chunk := range chunks {
 		if chunk.Status == model.TranscriptionChunkStatusCompleted {
 			at := chunk.CoreStartMS
@@ -114,7 +134,7 @@ func (s *MediaService) videoQuestionEvidence(userID, taskID int64) (videoQuestio
 		}
 	}
 	if evidence.transcript != "" {
-		add(evidence.transcript, "转写", nil)
+		add(evidence.transcript, textLabel, nil)
 	}
 	for _, frame := range frames {
 		at := frame.TimeMs

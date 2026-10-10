@@ -10,8 +10,14 @@ import (
 )
 
 type ChunkSourceRef struct {
-	SourceType string `json:"source_type"`
-	StableID   string `json:"stable_id"`
+	SourceID         string   `json:"source_id,omitempty"`
+	SourceDigest     string   `json:"source_digest,omitempty"`
+	SourceKind       string   `json:"source_kind,omitempty"`
+	MediaFingerprint string   `json:"media_fingerprint,omitempty"`
+	CueIDs           []string `json:"cue_ids,omitempty"`
+	TimingMethod     string   `json:"timing_method,omitempty"`
+	SourceType       string   `json:"source_type"`
+	StableID         string   `json:"stable_id"`
 	// Content is the verbatim part of this observation present in the chunk.
 	// It lets a citation select a source span instead of the chunk's union time.
 	Content string `json:"content,omitempty"`

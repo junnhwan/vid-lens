@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,11 +9,21 @@ import (
 	"vid-lens/internal/repository"
 )
 
-// The upload dedup path creates a new owner-scoped task for identical media
-// without copying ASR rows. Read the already published transcript by the
-// shared content fingerprint, as task detail already does. Its source identity
-// and content remain stable across timeline, retrieval and artifact snapshots.
+// taskTranscriptSource preserves the legacy full-text projection. Active
+// snapshots supply text directly and deliberately return no synthetic ASR
+// chunks; provenance-aware callers use taskTextSource instead. Only legacy
+// tasks may reuse the eligible shared ASR cache by media fingerprint.
 func taskTranscriptSource(repos *repository.Repositories, task *model.VideoTask) (*model.VideoTranscription, []model.VideoTranscriptionChunk, error) {
+	if task.ActiveTextSourceID != "" {
+		source, err := taskTextSource(context.Background(), repos, task)
+		if err != nil {
+			return nil, nil, err
+		}
+		return source.Transcription, nil, nil
+	}
+	if !repository.LegacyResultReuseAllowed(task) {
+		return nil, nil, nil
+	}
 	rows, err := repos.TranscriptionChunk.ListByTaskID(task.ID)
 	if err != nil {
 		return nil, nil, err
@@ -21,7 +32,7 @@ func taskTranscriptSource(repos *repository.Repositories, task *model.VideoTask)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(rows) == 0 && t == nil && task.FileMD5 != "" {
+	if len(rows) == 0 && t == nil && repository.LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
 		t, err = repos.Transcription.FindByMD5(task.FileMD5)
 		if err != nil {
 			return nil, nil, err

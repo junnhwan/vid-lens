@@ -143,7 +143,7 @@ func (s *ChatService) saveChatExchangeWithStatus(ctx context.Context, userID, se
 		}
 	}
 	snapshotText := string(snapshot)
-	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question}
+	userMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "user", Content: question, ContextAnnotationsJSON: annotationJSON(ctx)}
 	assistantMessage := &model.ChatMessage{SessionID: sessionID, UserID: userID, Role: "assistant", Content: answer, RetrievalSnapshot: &snapshotText, ModelName: modelName, ExecutionMode: mode, ProfileID: profile.ID}
 	sourceTaskIDs := make([]int64, 0, len(citations))
 	seenTasks := make(map[int64]struct{}, len(citations))

@@ -4,42 +4,56 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+	"vid-lens/internal/summaryselection"
 
 	"github.com/google/uuid"
 	"vid-lens/internal/ai"
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/repository"
+	"vid-lens/internal/summarydoc"
 )
 
 const (
-	summaryEditRecipeV1 = "summary-edit-v1"
-	summaryEditRecipe   = "summary-edit-v2"
+	summaryEditRecipeV1       = "summary-edit-v1"
+	summaryEditRecipe         = "summary-edit-v2"
+	summaryDocumentEditRecipe = "summary-document-edit-v2"
 )
 
 type SummaryEditInput struct {
-	Instruction      string `json:"instruction"`
-	ExpectedRevision int64  `json:"expected_revision"`
-	Mode             string `json:"mode"`
+	ExpectedContentDigest string                   `json:"expected_content_digest,omitempty"`
+	ExpectedVersionRef    *model.SummaryVersionRef `json:"expected_version_ref,omitempty"`
+	SelectedBlockIDs      []string                 `json:"selected_block_ids,omitempty"`
+	Instruction           string                   `json:"instruction"`
+	ExpectedRevision      int64                    `json:"expected_revision"`
+	Mode                  string                   `json:"mode"`
 }
 
 type SummaryEditView struct {
-	ID               string            `json:"id"`
-	RunID            string            `json:"run_id"`
-	TaskID           int64             `json:"task_id"`
-	Instruction      string            `json:"instruction"`
-	Status           string            `json:"status"`
-	Mode             string            `json:"mode"`
-	BaseVersion      int64             `json:"base_version"`
-	RuleVersion      int64             `json:"rule_version"`
-	RuleDigest       string            `json:"rule_digest"`
-	Edits            []SummaryTextEdit `json:"edits"`
-	ResultRevisionID *string           `json:"result_revision_id,omitempty"`
-	UndoRevisionID   *string           `json:"undo_revision_id,omitempty"`
-	ErrorCode        string            `json:"error_code,omitempty"`
+	Activities            []SummaryEditActivity  `json:"activities"`
+	SelectedBlockIDs      []string               `json:"selected_block_ids,omitempty"`
+	Operations            []summarydoc.Operation `json:"operations,omitempty"`
+	Preview               *summarydoc.Preview    `json:"preview,omitempty"`
+	Document              *summarydoc.Document   `json:"document,omitempty"`
+	BaseContentHashKind   string                 `json:"base_content_hash_kind"`
+	BaseGeneratedHashKind string                 `json:"base_generated_hash_kind"`
+	ID                    string                 `json:"id"`
+	RunID                 string                 `json:"run_id"`
+	TaskID                int64                  `json:"task_id"`
+	Instruction           string                 `json:"instruction"`
+	Status                string                 `json:"status"`
+	Mode                  string                 `json:"mode"`
+	BaseVersion           int64                  `json:"base_version"`
+	RuleVersion           int64                  `json:"rule_version"`
+	RuleDigest            string                 `json:"rule_digest"`
+	Edits                 []SummaryTextEdit      `json:"edits"`
+	ResultRevisionID      *string                `json:"result_revision_id,omitempty"`
+	UndoRevisionID        *string                `json:"undo_revision_id,omitempty"`
+	ErrorCode             string                 `json:"error_code,omitempty"`
 }
 
 type SummaryRevisionService struct {
@@ -62,7 +76,7 @@ func (s *SummaryRevisionService) Operation(ctx context.Context, owner, taskID in
 	if err != nil {
 		return nil, err
 	}
-	return summaryEditView(op)
+	return s.editView(ctx, op)
 }
 
 func (s *SummaryRevisionService) LatestOperation(ctx context.Context, owner, taskID int64) (*SummaryEditView, error) {
@@ -70,12 +84,31 @@ func (s *SummaryRevisionService) LatestOperation(ctx context.Context, owner, tas
 	if err != nil || op == nil {
 		return nil, err
 	}
-	return summaryEditView(op)
+	return s.editView(ctx, op)
 }
 
 func summaryEditView(op *model.SummaryEditOperation) (*SummaryEditView, error) {
 	view := &SummaryEditView{ID: op.ID, RunID: op.RunID, TaskID: op.TaskID, Instruction: op.Instruction, Status: op.Status, Mode: op.Mode, BaseVersion: op.BaseVersion, RuleVersion: op.RuleVersion, RuleDigest: op.RuleDigest, ResultRevisionID: op.ResultRevisionID, UndoRevisionID: op.UndoRevisionID, ErrorCode: op.ErrorCode, Edits: []SummaryTextEdit{}}
+	view.BaseContentHashKind = op.BaseContentHashKind
+	if op.SelectedBlockIDsJSON != "" {
+		_ = json.Unmarshal([]byte(op.SelectedBlockIDsJSON), &view.SelectedBlockIDs)
+	}
+	if view.BaseContentHashKind == "" {
+		view.BaseContentHashKind = model.SummaryHashMarkdown
+	}
+	view.BaseGeneratedHashKind = op.BaseGeneratedHashKind
+	if view.BaseGeneratedHashKind == "" {
+		view.BaseGeneratedHashKind = model.SummaryHashMarkdown
+	}
 	if op.PatchJSON != "" && op.PatchJSON != "{}" {
+		if op.BaseDocumentJSON != "" {
+			patch, err := summarydoc.ParsePatch([]byte(op.PatchJSON))
+			if err != nil {
+				return nil, err
+			}
+			view.Operations = patch.Operations
+			return view, nil
+		}
 		var patch SummaryTextPatch
 		if err := json.Unmarshal([]byte(op.PatchJSON), &patch); err != nil {
 			return nil, err
@@ -91,7 +124,7 @@ func (s *SummaryRevisionService) Edit(ctx context.Context, owner, taskID int64, 
 		return nil, err
 	}
 	if op.Status != "running" {
-		return summaryEditView(op)
+		return s.editView(ctx, op)
 	}
 	return s.execute(ctx, op)
 }
@@ -103,11 +136,20 @@ func (s *SummaryRevisionService) Submit(ctx context.Context, owner, taskID int64
 	if err != nil {
 		return nil, err
 	}
-	return summaryEditView(op)
+	return s.editView(ctx, op)
 }
 
 func (s *SummaryRevisionService) begin(ctx context.Context, owner, taskID int64, key string, input SummaryEditInput) (*model.SummaryEditOperation, error) {
 	input.Instruction = strings.TrimSpace(input.Instruction)
+	if len(input.SelectedBlockIDs) > 50 {
+		return nil, artifact.Err("invalid_edit_scope", 400)
+	}
+	sort.Strings(input.SelectedBlockIDs)
+	for i, id := range input.SelectedBlockIDs {
+		if id == "" || (i > 0 && id == input.SelectedBlockIDs[i-1]) {
+			return nil, artifact.Err("invalid_edit_scope", 400)
+		}
+	}
 	if owner <= 0 || taskID <= 0 || input.ExpectedRevision < 0 || input.Instruction == "" || utf8.RuneCountInString(input.Instruction) > 2000 || (input.Mode != "preview" && input.Mode != "apply") {
 		return nil, artifact.Err("invalid_request", 400)
 	}
@@ -132,13 +174,33 @@ func (s *SummaryRevisionService) begin(ctx context.Context, owner, taskID int64,
 	if err != nil {
 		return nil, err
 	}
+	if len(input.SelectedBlockIDs) > 0 {
+		if effective.Document != nil {
+			known := map[string]bool{"summary-title": true, "summary-overview": true}
+			for _, b := range effective.Document.Blocks {
+				known[b.ID] = true
+			}
+			for _, id := range input.SelectedBlockIDs {
+				if !known[id] {
+					return nil, artifact.Err("invalid_edit_scope", 400)
+				}
+			}
+		} else {
+			if _, err := summaryselection.LegacyRanges(effective.Content, input.SelectedBlockIDs); err != nil {
+				return nil, artifact.Err("invalid_edit_scope", 400)
+			}
+		}
+	}
+	if err := repository.ValidateSummaryExpectation(effective, repository.SummaryEditExpectation{ContentDigest: input.ExpectedContentDigest, VersionRef: input.ExpectedVersionRef}); err != nil {
+		return nil, err
+	}
 	if effective.Content == "" {
 		return nil, artifact.Err("source_not_ready", 422)
 	}
 	if effective.Version != input.ExpectedRevision {
 		return nil, artifact.Err("version_conflict", 409)
 	}
-	if utf8.RuneCountInString(effective.Content) > 48000 {
+	if effective.Document == nil && utf8.RuneCountInString(effective.Content) > 48000 {
 		return nil, artifact.Err("source_limit_exceeded", 422)
 	}
 	rules, err := EffectiveTermRules(ctx, s.repos, owner, taskID)
@@ -153,9 +215,25 @@ func (s *SummaryRevisionService) begin(ctx context.Context, owner, taskID int64,
 	profile := resolved.Profile
 	now, runID, opID := time.Now().UTC(), uuid.NewString(), uuid.NewString()
 	budget := resolved.EffectiveAgentBudget.Values
+	recipe := summaryEditRecipe
+	if effective.Document != nil {
+		recipe = summaryDocumentEditRecipe
+	}
 	run := &model.AgentRun{ID: runID, UserID: owner, SubjectKind: model.AgentRunSubjectSummaryEdit, SubjectID: opID, ExecutionKind: "artifact", RecipeVersion: summaryEditRecipe, ScopeType: "video", TaskID: taskID, Goal: input.Instruction, Mode: input.Mode, AgentProfile: "default", ProfileSnapshot: artifact.JSON(map[string]any{"profile_id": profile.ID, "model": profile.LLMModel, "fingerprint": profileFingerprint(profile)}), PolicySnapshot: artifact.JSON(map[string]any{"recipe": summaryEditRecipe, "base_hash": artifact.Hash(effective.Content), "rule_version": rules.Version, "rule_digest": rules.Digest}), BudgetSnapshot: artifact.JSON(resolved.EffectiveAgentBudget), Status: model.AgentRunStatusPending, Stage: "queued", Version: 1, MaxSteps: 2, MaxLLMCalls: 2, MaxAttemptsPerStep: 2, MaxPromptTokens: int64(budget.MaxInputTokens), MaxCompletionTokens: int64(budget.MaxOutputTokens), MaxDurationMs: int64(budget.MaxDurationSeconds) * 1000, MaxContextChars: int64(profile.LLMContextTokens), CreatedAt: now, UpdatedAt: now}
 	op := &model.SummaryEditOperation{ID: opID, UserID: owner, TaskID: taskID, Key: key, RequestHash: hash, RunID: runID, Mode: input.Mode, Status: "running", Instruction: input.Instruction, BaseVersion: effective.Version, BaseContentHash: artifact.Hash(effective.Content), BaseContent: effective.Content, BaseGeneratedHash: effective.BaseHash, RuleVersion: rules.Version, RuleDigest: rules.Digest, RuleSnapshotJSON: rulesJSON, ProfileID: profile.ID, ProfileFingerprint: profileFingerprint(profile), PatchJSON: "{}", CreatedAt: now, UpdatedAt: now}
-	op, err = s.repos.SummaryRevision.Begin(ctx, op, run)
+	op.SelectedBlockIDsJSON = artifact.JSON(input.SelectedBlockIDs)
+	op.BaseContentHash = effective.ContentDigest
+	op.BaseContentHashKind = effective.ContentHashKind
+	op.BaseGeneratedHashKind = effective.BaseHashKind
+	op.BaseDocumentJSON = effective.DocumentJSON
+	op.BaseGenerationID = effective.GenerationID
+	if effective.Document != nil {
+		op.BaseSourceID = effective.Document.SourceID
+		op.BaseSourceDigest = effective.Document.SourceDigest
+	}
+	run.RecipeVersion = recipe
+	run.PolicySnapshot = artifact.JSON(map[string]any{"recipe": recipe, "base_hash": op.BaseContentHash, "base_hash_kind": op.BaseContentHashKind, "selected_block_ids": input.SelectedBlockIDs, "rule_version": rules.Version, "rule_digest": rules.Digest})
+	op, err = s.repos.SummaryRevision.Begin(ctx, op, run, repository.SummaryEditExpectation{ContentDigest: input.ExpectedContentDigest, VersionRef: input.ExpectedVersionRef})
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +249,7 @@ func (s *SummaryRevisionService) execute(ctx context.Context, op *model.SummaryE
 	if err != nil {
 		return nil, err
 	}
-	if current.Version != op.BaseVersion || artifact.Hash(current.Content) != op.BaseContentHash {
+	if current.Version != op.BaseVersion || current.ContentDigest != op.BaseContentHash || current.ContentHashKind != normalizedSummaryHashKind(op.BaseContentHashKind) {
 		return nil, artifact.Err("version_conflict", 409)
 	}
 	var rules VideoTermRuleSet
@@ -196,6 +274,9 @@ func (s *SummaryRevisionService) execute(ctx context.Context, op *model.SummaryE
 		if err != nil {
 			return nil, err
 		}
+	}
+	if op.BaseDocumentJSON != "" {
+		return s.executeDocumentEdit(ctx, op, rules, client, token)
 	}
 	patch, err := s.planSummaryPatch(ctx, op, rules, client)
 	if err != nil {
@@ -305,10 +386,13 @@ func (s *SummaryRevisionService) Apply(ctx context.Context, owner, taskID int64,
 		return nil, err
 	}
 	if op.Status == "committed" {
-		return summaryEditView(op)
+		return s.editView(ctx, op)
 	}
 	if op.Status != "proposed" || op.BaseVersion != expected {
 		return nil, artifact.Err("version_conflict", 409)
+	}
+	if op.BaseDocumentJSON != "" {
+		return s.applyDocumentEdit(ctx, op)
 	}
 	var patch SummaryTextPatch
 	if err = json.Unmarshal([]byte(op.PatchJSON), &patch); err != nil {
@@ -330,10 +414,26 @@ func (s *SummaryRevisionService) Undo(ctx context.Context, owner, taskID int64, 
 		return nil, err
 	}
 	if op.UndoRevisionID != nil {
-		return summaryEditView(op)
+		return s.editView(ctx, op)
 	}
 	if op.ResultRevisionID == nil {
 		return nil, artifact.Err("undo_conflict", 409)
+	}
+	if op.BaseDocumentJSON != "" {
+		current, err := s.Effective(ctx, owner, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if current.Version != expected {
+			return nil, artifact.Err("version_conflict", 409)
+		}
+		if current.Revision == nil || current.Revision.ID != *op.ResultRevisionID {
+			return nil, artifact.Err("undo_conflict", 409)
+		}
+		if _, err = s.repos.SummaryRevision.Undo(ctx, owner, taskID, id, expected, current.ContentDigest, op.BaseContent); err != nil {
+			return nil, err
+		}
+		return s.Operation(ctx, owner, taskID, id)
 	}
 	var patch SummaryTextPatch
 	if err = json.Unmarshal([]byte(op.PatchJSON), &patch); err != nil {

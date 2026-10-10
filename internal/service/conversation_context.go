@@ -55,7 +55,7 @@ func (s *ChatService) loadScopeSafeRecentMessages(ctx context.Context, userID in
 	if err != nil {
 		return nil, err
 	}
-	return safeKnowledgeHistoryPairs(messages, sources, allowed, limit), nil
+	return s.authorizeAnnotationHistory(ctx, userID, session.ID, safeKnowledgeHistoryPairs(messages, sources, allowed, limit))
 }
 
 func safeKnowledgeHistoryPairs(messages []model.ChatMessage, sources []model.ChatMessageSource, allowed map[int64]bool, limit int) []model.ChatMessage {
@@ -125,8 +125,9 @@ func safeKnowledgeHistoryPairs(messages []model.ChatMessage, sources []model.Cha
 // ConversationContextMessage carries only visible conversation text. Tool
 // checkpoints and provider reasoning never become conversation history.
 type ConversationContextMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role               string                    `json:"role"`
+	Content            string                    `json:"content"`
+	ContextAnnotations []model.ContextAnnotation `json:"context_annotations,omitempty"`
 }
 
 func boundedConversationContext(recent []model.ChatMessage) []ConversationContextMessage {
@@ -141,7 +142,14 @@ func boundedConversationContext(recent []model.ChatMessage) []ConversationContex
 		}
 		content := trimRunes(strings.TrimSpace(message.Content), 1000)
 		if content != "" {
-			result = append(result, ConversationContextMessage{Role: message.Role, Content: content})
+			var annotations []model.ContextAnnotation
+			if message.ContextAnnotationsJSON != nil {
+				_ = json.Unmarshal([]byte(*message.ContextAnnotationsJSON), &annotations)
+				for i := range annotations {
+					annotations[i].SourceRefs = nil
+				}
+			}
+			result = append(result, ConversationContextMessage{Role: message.Role, Content: content, ContextAnnotations: annotations})
 		}
 	}
 	return result
@@ -149,5 +157,5 @@ func boundedConversationContext(recent []model.ChatMessage) []ConversationContex
 
 func conversationContextPrompt(messages []ConversationContextMessage) string {
 	encoded, _ := json.Marshal(messages)
-	return "近期对话仅用于解析指代和讨论对象，不是视频事实或可引用证据；历史助手说法必须由当前授权视频证据核对：\n" + string(encoded)
+	return summaryAnnotationInstructions + "\n近期对话仅用于解析指代和讨论对象，不是视频事实或可引用证据；历史助手说法必须由当前授权视频证据核对：\n" + string(encoded)
 }

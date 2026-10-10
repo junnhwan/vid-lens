@@ -204,13 +204,14 @@ type TranscriptSegment struct {
 }
 
 type BuildCitedAnswerInput struct {
-	ScopeTaskIDs    []int64
-	MaxOutputTokens int64
-	ReportUsage     func(VideoAgentLoopPlannerCallUsage)
-	Recent          []model.ChatMessage
-	Question        string
-	Intermediate    string
-	Citations       []RetrievedChunk
+	ContextAnnotations []model.ContextAnnotation
+	ScopeTaskIDs       []int64
+	MaxOutputTokens    int64
+	ReportUsage        func(VideoAgentLoopPlannerCallUsage)
+	Recent             []model.ChatMessage
+	Question           string
+	Intermediate       string
+	Citations          []RetrievedChunk
 }
 
 type BuildCitedAnswerResult struct {
@@ -582,5 +583,5 @@ func buildCitedAnswerMessages(input BuildCitedAnswerInput, memory *MemorySnapsho
 	}
 	messages[0].Content += "\n" + agentFinalStylePrompt
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: fmt.Sprintf("用户问题：%s\n\n中间结论：\n%s\n\n引用片段：\n%s\n\n请生成最终回答。", input.Question, input.Intermediate, formatRetrievedChunks(input.Citations))})
-	return messages
+	return appendAnnotationMessages(messages, input.ContextAnnotations)
 }
