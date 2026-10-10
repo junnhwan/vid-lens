@@ -58,7 +58,7 @@ func (r *SummaryRepository) Upsert(s *model.AISummary) error {
 // 优先选择最早保存的结果，避免随机挑选其他任务的个性化重跑版本。
 func (r *SummaryRepository) FindByMD5(fileMD5 string) (*model.AISummary, error) {
 	var s model.AISummary
-	err := r.db.Where("file_md5 = ?", fileMD5).Order("id ASC").First(&s).Error
+	err := r.db.Where("file_md5 = ?", fileMD5).Where(legacySummaryCacheSQL("")).Order("id ASC").First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -84,8 +84,11 @@ func (r *SummaryRepository) RehomeOrDeleteByTaskID(taskID int64) error {
 	if err != nil {
 		return err
 	}
+	if !legacySummaryCacheEligible(summary) {
+		return r.db.Where("id = ?", summary.ID).Delete(&model.AISummary{}).Error
+	}
 	var successor model.VideoTask
-	err = r.db.Where("file_md5 = ? AND id <> ? AND id NOT IN (SELECT task_id FROM ai_summaries)", summary.FileMD5, taskID).Order("id ASC").First(&successor).Error
+	err = r.db.Where("file_md5 = ? AND id <> ? AND id NOT IN (SELECT task_id FROM ai_summaries)", summary.FileMD5, taskID).Where(legacyTaskCacheSQL("")).Order("id ASC").First(&successor).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return r.db.Where("id = ?", summary.ID).Delete(&model.AISummary{}).Error
 	}
@@ -117,18 +120,20 @@ func (r *SummaryRepository) ListNavigationSummaries(ctx context.Context, userID 
 		return nil, err
 	}
 	var hashes []string
+	authorizedIDs := make([]int64, 0, len(tasks))
 	for _, task := range tasks {
-		if task.FileMD5 != "" {
+		authorizedIDs = append(authorizedIDs, task.ID)
+		if LegacyResultReuseAllowed(&task) && task.FileMD5 != "" {
 			hashes = append(hashes, task.FileMD5)
 		}
 	}
 	var generated []model.AISummary
-	if err := r.db.WithContext(ctx).Where("task_id IN ? OR file_md5 IN ?", ids, hashes).Order("id ASC").Find(&generated).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("task_id IN ? OR (file_md5 IN ? AND ("+legacySummaryCacheSQL("")+"))", authorizedIDs, hashes).Order("id ASC").Find(&generated).Error; err != nil {
 		return nil, err
 	}
 	for _, task := range tasks {
 		for _, row := range generated {
-			if row.FileMD5 != "" && row.FileMD5 == task.FileMD5 {
+			if LegacyResultReuseAllowed(&task) && legacySummaryCacheEligible(row) && row.FileMD5 != "" && row.FileMD5 == task.FileMD5 {
 				result[task.ID] = row.Content
 				break
 			}
@@ -149,4 +154,12 @@ func (r *SummaryRepository) ListNavigationSummaries(ctx context.Context, userID 
 		result[row.TaskID] = row.Content
 	}
 	return result, nil
+}
+
+func legacySummaryCacheSQL(prefix string) string {
+	return "COALESCE(" + prefix + "source_id, '') = '' AND COALESCE(" + prefix + "source_digest, '') = '' AND COALESCE(" + prefix + "document_json, '') = '' AND COALESCE(" + prefix + "schema_version, '') = '' AND COALESCE(" + prefix + "generation_id, '') = '' AND COALESCE(" + prefix + "content_hash_kind, 'markdown-v1') IN ('', 'markdown-v1')"
+}
+
+func legacySummaryCacheEligible(row model.AISummary) bool {
+	return row.SourceID == "" && row.SourceDigest == "" && row.DocumentJSON == "" && row.SchemaVersion == "" && row.GenerationID == "" && (row.ContentHashKind == "" || row.ContentHashKind == "markdown-v1")
 }

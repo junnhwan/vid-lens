@@ -10,16 +10,24 @@ import (
 	"gorm.io/gorm/clause"
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
+	"vid-lens/internal/summarydoc"
 )
 
 type EffectiveSummary struct {
-	Generated            *model.AISummary
-	Revision             *model.SummaryRevision
-	Version              int64
-	Content              string
-	BaseHash             string
-	CurrentGeneratedHash string
-	SourceStatus         string
+	Document                 *summarydoc.Document
+	DocumentJSON             string
+	ContentDigest            string
+	ContentHashKind          string
+	BaseHashKind             string
+	CurrentGeneratedHashKind string
+	GenerationID             string
+	Generated                *model.AISummary
+	Revision                 *model.SummaryRevision
+	Version                  int64
+	Content                  string
+	BaseHash                 string
+	CurrentGeneratedHash     string
+	SourceStatus             string
 }
 
 type SummaryRevisionRepository struct{ db *gorm.DB }
@@ -45,8 +53,8 @@ func summaryTask(tx *gorm.DB, owner, taskID int64, lock bool) (*model.VideoTask,
 func generatedSummary(tx *gorm.DB, task *model.VideoTask) (*model.AISummary, error) {
 	var row model.AISummary
 	err := tx.Where("task_id = ?", task.ID).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) && task.FileMD5 != "" {
-		err = tx.Where("file_md5 = ?", task.FileMD5).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) && LegacyResultReuseAllowed(task) && task.FileMD5 != "" {
+		err = tx.Where("file_md5 = ? AND source_id = '' AND document_json = '' AND (content_hash_kind = ? OR content_hash_kind = '')", task.FileMD5, model.SummaryHashMarkdown).First(&row).Error
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -62,11 +70,30 @@ func effectiveSummary(tx *gorm.DB, task *model.VideoTask) (*EffectiveSummary, er
 	if err != nil {
 		return nil, err
 	}
-	out := &EffectiveSummary{Generated: generated, SourceStatus: "current"}
+	out := &EffectiveSummary{Generated: generated, SourceStatus: "current", ContentHashKind: model.SummaryHashMarkdown, BaseHashKind: model.SummaryHashMarkdown, CurrentGeneratedHashKind: model.SummaryHashMarkdown}
+	defer func() {
+		// A typed effective revision carries its own frozen source. Otherwise
+		// the generated row supplies provenance; legacy-only rows stay coarse.
+		sourceID := ""
+		if generated != nil && generated.DocumentJSON != "" {
+			sourceID = generated.SourceID
+		}
+		if out.Document != nil {
+			sourceID = out.Document.SourceID
+		}
+		if sourceID != "" && sourceID != task.ActiveTextSourceID {
+			out.SourceStatus = "source_changed"
+		}
+	}()
 	if generated != nil {
-		out.Content = generated.Content
-		out.CurrentGeneratedHash = artifact.Hash(generated.Content)
+		if err = loadEffectiveContent(out, generated.Content, generated.DocumentJSON, generated.ContentHashKind, generated.ContentDigest); err != nil {
+			return nil, err
+		}
+		out.GenerationID = generated.GenerationID
+		out.CurrentGeneratedHash = out.ContentDigest
+		out.CurrentGeneratedHashKind = out.ContentHashKind
 		out.BaseHash = out.CurrentGeneratedHash
+		out.BaseHashKind = out.CurrentGeneratedHashKind
 	}
 	var head model.SummaryRevisionHead
 	err = tx.Where("user_id = ? AND task_id = ?", task.UserID, task.ID).First(&head).Error
@@ -80,13 +107,93 @@ func effectiveSummary(tx *gorm.DB, task *model.VideoTask) (*EffectiveSummary, er
 	if err = tx.Where("id = ? AND user_id = ? AND task_id = ?", head.CurrentRevisionID, task.UserID, task.ID).First(&revision).Error; err != nil {
 		return nil, err
 	}
-	out.Revision, out.Version, out.Content, out.BaseHash = &revision, head.Version, revision.Content, revision.BaseGeneratedHash
+	out.Revision, out.Version, out.BaseHash = &revision, head.Version, revision.BaseGeneratedHash
+	if err = loadEffectiveContent(out, revision.Content, revision.DocumentJSON, revision.ContentHashKind, revision.ContentDigest); err != nil {
+		return nil, err
+	}
+	out.BaseHashKind = summaryHashKind(revision.BaseGeneratedHashKind)
+	out.GenerationID = revision.GenerationID
 	if generated == nil {
 		out.SourceStatus = "generated_missing"
-	} else if out.BaseHash != out.CurrentGeneratedHash {
+	} else if out.BaseHash != out.CurrentGeneratedHash || out.BaseHashKind != out.CurrentGeneratedHashKind {
 		out.SourceStatus = "needs_merge"
 	}
 	return out, nil
+}
+
+func summaryHashKind(kind string) string {
+	if kind == "" {
+		return model.SummaryHashMarkdown
+	}
+	return kind
+}
+
+func loadEffectiveContent(out *EffectiveSummary, content, documentJSON, kind, digest string) error {
+	out.Document = nil
+	out.DocumentJSON = documentJSON
+	out.ContentHashKind = summaryHashKind(kind)
+	if documentJSON == "" {
+		if out.ContentHashKind != model.SummaryHashMarkdown {
+			return artifact.Err("invalid_document", 422)
+		}
+		out.Content = content
+		out.ContentDigest = artifact.Hash(content)
+		return nil
+	}
+	if out.ContentHashKind != summarydoc.HashKind {
+		return artifact.Err("invalid_document", 422)
+	}
+	doc, err := summarydoc.Parse([]byte(documentJSON))
+	if err != nil {
+		return artifact.Err("invalid_document", 422)
+	}
+	hash, err := summarydoc.Digest(doc)
+	if err != nil || (digest != "" && digest != hash) {
+		return artifact.Err("invalid_document", 422)
+	}
+	projection, err := summarydoc.Markdown(doc)
+	if err != nil {
+		return artifact.Err("invalid_document", 422)
+	}
+	canonical, _ := summarydoc.CanonicalJSON(doc)
+	out.Document = &doc
+	out.DocumentJSON = string(canonical)
+	out.Content = projection
+	out.ContentDigest = hash
+	return nil
+}
+
+func summaryBaseMatches(current *EffectiveSummary, op *model.SummaryEditOperation) bool {
+	return current.Version == op.BaseVersion && current.ContentDigest == op.BaseContentHash && current.ContentHashKind == summaryHashKind(op.BaseContentHashKind)
+}
+
+// DocumentContext authorizes the frozen historical source and permits only
+// figure references already present in the durable base document. New visual
+// resources must be registered by the separate visual generation path.
+func (r *SummaryRevisionRepository) DocumentContext(ctx context.Context, owner, taskID int64, documentJSON, generationID string) (summarydoc.ValidationContext, error) {
+	doc, err := summarydoc.Parse([]byte(documentJSON))
+	if err != nil {
+		return summarydoc.ValidationContext{}, artifact.Err("invalid_document", 422)
+	}
+	validation, err := NewRepositories(r.db).SummaryValidationContext(ctx, owner, taskID, doc.SourceID, doc.SourceDigest, generationID)
+	if err != nil {
+		return validation, err
+	}
+	allowed := map[string]bool{}
+	for _, block := range doc.Blocks {
+		for _, figure := range block.Figures {
+			allowed[figure.ScreenshotRef] = true
+		}
+	}
+	for ref := range validation.Figures {
+		if !allowed[ref] {
+			delete(validation.Figures, ref)
+		}
+	}
+	if err = summarydoc.Validate(doc, validation); err != nil {
+		return validation, artifact.Err("invalid_document", 422)
+	}
+	return validation, nil
 }
 
 func (r *SummaryRevisionRepository) Effective(ctx context.Context, owner, taskID int64) (*EffectiveSummary, error) {
@@ -166,7 +273,7 @@ func (r *SummaryRevisionRepository) OperationByKey(ctx context.Context, owner in
 
 // Begin records the frozen target before the provider call. A retry with the
 // same key reads this row; a conflicting key cannot borrow its run identity.
-func (r *SummaryRevisionRepository) Begin(ctx context.Context, op *model.SummaryEditOperation, run *model.AgentRun) (*model.SummaryEditOperation, error) {
+func (r *SummaryRevisionRepository) Begin(ctx context.Context, op *model.SummaryEditOperation, run *model.AgentRun, expectations ...SummaryEditExpectation) (*model.SummaryEditOperation, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		task, err := summaryTask(tx, op.UserID, op.TaskID, true)
 		if err != nil {
@@ -188,10 +295,18 @@ func (r *SummaryRevisionRepository) Begin(ctx context.Context, op *model.Summary
 		if err != nil {
 			return err
 		}
+		for _, expectation := range expectations {
+			if err := ValidateSummaryExpectation(current, expectation); err != nil {
+				return err
+			}
+		}
 		if current.Content == "" {
 			return artifact.Err("source_not_ready", 422)
 		}
-		if current.Version != op.BaseVersion || artifact.Hash(current.Content) != op.BaseContentHash {
+		if !summaryBaseMatches(current, op) || current.BaseHash != op.BaseGeneratedHash || current.BaseHashKind != summaryHashKind(op.BaseGeneratedHashKind) || current.DocumentJSON != op.BaseDocumentJSON {
+			return artifact.Err("version_conflict", 409)
+		}
+		if current.Document != nil && (op.BaseGenerationID != current.GenerationID || op.BaseSourceID != current.Document.SourceID || op.BaseSourceDigest != current.Document.SourceDigest) {
 			return artifact.Err("version_conflict", 409)
 		}
 		if err = tx.Create(run).Error; err != nil {
@@ -209,6 +324,14 @@ func (r *SummaryRevisionRepository) Begin(ctx context.Context, op *model.Summary
 // Commit checks the latest effective text and writes the immutable revision,
 // head, operation, and run outcome in one database transaction.
 func (r *SummaryRevisionRepository) Commit(ctx context.Context, opID string, content, patchJSON string, leaseToken ...string) (*model.SummaryRevision, error) {
+	return r.commit(ctx, opID, content, "", patchJSON, leaseToken...)
+}
+
+func (r *SummaryRevisionRepository) CommitDocument(ctx context.Context, opID, documentJSON, patchJSON string, leaseToken ...string) (*model.SummaryRevision, error) {
+	return r.commit(ctx, opID, "", documentJSON, patchJSON, leaseToken...)
+}
+
+func (r *SummaryRevisionRepository) commit(ctx context.Context, opID, content, documentJSON, patchJSON string, leaseToken ...string) (*model.SummaryRevision, error) {
 	var result *model.SummaryRevision
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var op model.SummaryEditOperation
@@ -242,10 +365,45 @@ func (r *SummaryRevisionRepository) Commit(ctx context.Context, opID string, con
 		if err != nil {
 			return err
 		}
-		if current.Version != op.BaseVersion || artifact.Hash(current.Content) != op.BaseContentHash {
+		if !summaryBaseMatches(current, &op) {
 			return artifact.Err("version_conflict", 409)
 		}
-		if content == current.Content {
+		if op.BaseDocumentJSON != "" && current.GenerationID != op.BaseGenerationID {
+			return artifact.Err("version_conflict", 409)
+		}
+		if err := ValidateSummaryEditScope(&op, patchJSON); err != nil {
+			return err
+		}
+		var document *summarydoc.Document
+		contentDigest := artifact.Hash(content)
+		if summaryHashKind(op.BaseContentHashKind) == summarydoc.HashKind {
+			validation, err := NewSummaryRevisionRepository(tx).DocumentContext(ctx, op.UserID, op.TaskID, op.BaseDocumentJSON, op.BaseGenerationID)
+			if err != nil {
+				return err
+			}
+			base, err := summarydoc.Parse([]byte(op.BaseDocumentJSON))
+			if err != nil {
+				return artifact.Err("invalid_document", 422)
+			}
+			patch, err := summarydoc.ParsePatch([]byte(patchJSON))
+			if err != nil {
+				return artifact.Err("invalid_patch", 422)
+			}
+			next, _, err := summarydoc.ApplyPatch(base, patch, validation)
+			if err != nil {
+				return artifact.Err("invalid_patch", 422)
+			}
+			canonical, _ := summarydoc.CanonicalJSON(next)
+			if string(canonical) != documentJSON {
+				return artifact.Err("invalid_patch", 422)
+			}
+			document = &next
+			content, _ = summarydoc.Markdown(next)
+			contentDigest, _ = summarydoc.Digest(next)
+		} else if documentJSON != "" {
+			return artifact.Err("invalid_patch", 422)
+		}
+		if contentDigest == current.ContentDigest {
 			return artifact.Err("nothing_to_change", 422)
 		}
 		var head model.SummaryRevisionHead
@@ -263,7 +421,13 @@ func (r *SummaryRevisionRepository) Commit(ctx context.Context, opID string, con
 			parent = &current.Revision.ID
 		}
 		now := time.Now().UTC()
-		revision := &model.SummaryRevision{ID: uuid.NewString(), UserID: op.UserID, TaskID: op.TaskID, Version: head.Version + 1, Content: content, BaseGeneratedHash: op.BaseGeneratedHash, Origin: "agent", OperationID: &op.ID, ParentRevisionID: parent, CreatedAt: now}
+		revision := &model.SummaryRevision{ID: uuid.NewString(), UserID: op.UserID, TaskID: op.TaskID, Version: head.Version + 1, Content: content, ContentDigest: contentDigest, ContentHashKind: summaryHashKind(op.BaseContentHashKind), BaseGeneratedHashKind: summaryHashKind(op.BaseGeneratedHashKind), BaseGeneratedHash: op.BaseGeneratedHash, GenerationID: op.BaseGenerationID, Origin: "agent", OperationID: &op.ID, ParentRevisionID: parent, CreatedAt: now}
+		if document != nil {
+			revision.DocumentJSON = documentJSON
+			revision.SchemaVersion = document.SchemaVersion
+			revision.SourceID = document.SourceID
+			revision.SourceDigest = document.SourceDigest
+		}
 		if err = tx.Create(revision).Error; err != nil {
 			return err
 		}
@@ -316,8 +480,28 @@ func (r *SummaryRevisionRepository) Propose(ctx context.Context, opID, patchJSON
 		if err != nil {
 			return err
 		}
-		if current.Version != op.BaseVersion || artifact.Hash(current.Content) != op.BaseContentHash {
+		if !summaryBaseMatches(current, &op) {
 			return artifact.Err("version_conflict", 409)
+		}
+		if err := ValidateSummaryEditScope(&op, patchJSON); err != nil {
+			return err
+		}
+		if op.BaseDocumentJSON != "" {
+			validation, err := NewSummaryRevisionRepository(tx).DocumentContext(ctx, op.UserID, op.TaskID, op.BaseDocumentJSON, op.BaseGenerationID)
+			if err != nil {
+				return err
+			}
+			base, err := summarydoc.Parse([]byte(op.BaseDocumentJSON))
+			if err != nil {
+				return artifact.Err("invalid_document", 422)
+			}
+			patch, err := summarydoc.ParsePatch([]byte(patchJSON))
+			if err != nil {
+				return artifact.Err("invalid_patch", 422)
+			}
+			if _, _, err = summarydoc.ApplyPatch(base, patch, validation); err != nil {
+				return artifact.Err("invalid_patch", 422)
+			}
 		}
 		now := time.Now().UTC()
 		if err = tx.Model(&op).Updates(map[string]any{"status": "proposed", "patch_json": patchJSON, "updated_at": now}).Error; err != nil {
@@ -345,10 +529,31 @@ func (r *SummaryRevisionRepository) Undo(ctx context.Context, owner, taskID int6
 		if err != nil {
 			return err
 		}
-		if current.Version != expected || artifact.Hash(current.Content) != currentHash {
+		if current.Version != expected || current.ContentDigest != currentHash {
 			return artifact.Err("version_conflict", 409)
 		}
-		if current.Content == content {
+		var restored *summarydoc.Document
+		if summaryHashKind(op.BaseContentHashKind) == summarydoc.HashKind {
+			if current.ContentHashKind != summarydoc.HashKind || current.Revision == nil || current.Revision.ID != *op.ResultRevisionID {
+				return artifact.Err("undo_conflict", 409)
+			}
+			validation, err := NewSummaryRevisionRepository(tx).DocumentContext(ctx, owner, taskID, op.BaseDocumentJSON, op.BaseGenerationID)
+			if err != nil {
+				return err
+			}
+			doc, err := summarydoc.Parse([]byte(op.BaseDocumentJSON))
+			if err != nil {
+				return artifact.Err("invalid_document", 422)
+			}
+			if err = summarydoc.Validate(doc, validation); err != nil {
+				return artifact.Err("invalid_document", 422)
+			}
+			restored = &doc
+			content, _ = summarydoc.Markdown(doc)
+		} else if current.ContentHashKind != model.SummaryHashMarkdown {
+			return artifact.Err("undo_conflict", 409)
+		}
+		if current.Content == content && restored == nil {
 			return artifact.Err("nothing_to_change", 422)
 		}
 		var head model.SummaryRevisionHead
@@ -359,7 +564,16 @@ func (r *SummaryRevisionRepository) Undo(ctx context.Context, owner, taskID int6
 			return artifact.Err("version_conflict", 409)
 		}
 		now := time.Now().UTC()
-		result = &model.SummaryRevision{ID: uuid.NewString(), UserID: owner, TaskID: taskID, Version: expected + 1, Content: content, BaseGeneratedHash: current.BaseHash, Origin: "undo", ParentRevisionID: &head.CurrentRevisionID, CreatedAt: now}
+		result = &model.SummaryRevision{ID: uuid.NewString(), UserID: owner, TaskID: taskID, Version: expected + 1, Content: content, ContentDigest: artifact.Hash(content), ContentHashKind: model.SummaryHashMarkdown, BaseGeneratedHashKind: current.BaseHashKind, BaseGeneratedHash: current.BaseHash, Origin: "undo", ParentRevisionID: &head.CurrentRevisionID, CreatedAt: now}
+		if restored != nil {
+			result.DocumentJSON = op.BaseDocumentJSON
+			result.SchemaVersion = restored.SchemaVersion
+			result.SourceID = restored.SourceID
+			result.SourceDigest = restored.SourceDigest
+			result.ContentHashKind = summarydoc.HashKind
+			result.ContentDigest, _ = summarydoc.Digest(*restored)
+			result.GenerationID = op.BaseGenerationID
+		}
 		if err = tx.Create(result).Error; err != nil {
 			return err
 		}
@@ -388,9 +602,16 @@ func (r *SummaryRevisionRepository) ResolveBase(ctx context.Context, owner, task
 		if current.SourceStatus != "needs_merge" {
 			return artifact.Err("nothing_to_change", 422)
 		}
-		content := current.Content
+		payload := &EffectiveSummary{}
+		if err = loadEffectiveContent(payload, current.Content, current.DocumentJSON, current.ContentHashKind, current.ContentDigest); err != nil {
+			return err
+		}
+		generationID := current.GenerationID
 		if choice == "use_generated" {
-			content = current.Generated.Content
+			if err = loadEffectiveContent(payload, current.Generated.Content, current.Generated.DocumentJSON, current.Generated.ContentHashKind, current.Generated.ContentDigest); err != nil {
+				return err
+			}
+			generationID = current.Generated.GenerationID
 		} else if choice != "keep_revision" {
 			return artifact.Err("invalid_request", 400)
 		}
@@ -401,7 +622,12 @@ func (r *SummaryRevisionRepository) ResolveBase(ctx context.Context, owner, task
 		if head.Version != expected {
 			return artifact.Err("version_conflict", 409)
 		}
-		result = &model.SummaryRevision{ID: uuid.NewString(), UserID: owner, TaskID: taskID, Version: expected + 1, Content: content, BaseGeneratedHash: current.CurrentGeneratedHash, Origin: choice, ParentRevisionID: &head.CurrentRevisionID, CreatedAt: time.Now().UTC()}
+		result = &model.SummaryRevision{ID: uuid.NewString(), UserID: owner, TaskID: taskID, Version: expected + 1, Content: payload.Content, DocumentJSON: payload.DocumentJSON, ContentDigest: payload.ContentDigest, ContentHashKind: payload.ContentHashKind, GenerationID: generationID, BaseGeneratedHashKind: current.CurrentGeneratedHashKind, BaseGeneratedHash: current.CurrentGeneratedHash, Origin: choice, ParentRevisionID: &head.CurrentRevisionID, CreatedAt: time.Now().UTC()}
+		if payload.Document != nil {
+			result.SchemaVersion = payload.Document.SchemaVersion
+			result.SourceID = payload.Document.SourceID
+			result.SourceDigest = payload.Document.SourceDigest
+		}
 		if err = tx.Create(result).Error; err != nil {
 			return err
 		}
@@ -465,10 +691,10 @@ func (r *SummaryRevisionRepository) RevokeSource(taskID int64) error {
 	if err := r.db.Model(&model.AgentRun{}).Where("subject_kind = ? AND task_id = ? AND status IN ?", model.AgentRunSubjectSummaryEdit, taskID, []string{model.AgentRunStatusPending, model.AgentRunStatusRunning}).Updates(map[string]any{"status": model.AgentRunStatusCancelled, "stage": "source_deleted", "run_lease_token": "", "run_lease_until": nil, "finished_at": now, "updated_at": now}).Error; err != nil {
 		return err
 	}
-	if err := r.db.Model(&model.SummaryEditOperation{}).Where("task_id = ?", taskID).Updates(map[string]any{"instruction": "", "base_content": "", "patch_json": "{}", "rule_snapshot_json": "{}", "error_code": "source_deleted", "updated_at": now}).Error; err != nil {
+	if err := r.db.Model(&model.SummaryEditOperation{}).Where("task_id = ?", taskID).Updates(map[string]any{"instruction": "", "base_content": "", "base_document_json": "", "patch_json": "{}", "rule_snapshot_json": "{}", "error_code": "source_deleted", "updated_at": now}).Error; err != nil {
 		return err
 	}
-	if err := r.db.Model(&model.SummaryRevision{}).Where("task_id = ?", taskID).Update("content", "").Error; err != nil {
+	if err := r.db.Model(&model.SummaryRevision{}).Where("task_id = ?", taskID).Updates(map[string]any{"content": "", "document_json": ""}).Error; err != nil {
 		return err
 	}
 	if err := r.db.Model(&model.VideoTermRuleVersion{}).Where("task_id = ?", taskID).Update("rules_json", "[]").Error; err != nil {

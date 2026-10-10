@@ -196,6 +196,9 @@ func (r *ChatRepository) createExchange(userID int64, runID string, userMessage,
 				}
 			}
 		}
+		if err := validateMessageAnnotations(tx, userID, &session, userMessage); err != nil {
+			return err
+		}
 		if err := validateExchangeSources(tx, userID, &session, sourceTaskIDs); err != nil {
 			return err
 		}

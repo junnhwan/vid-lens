@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"context"
 	"strings"
 	"time"
 
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 
 	"gorm.io/gorm"
@@ -143,17 +145,18 @@ func (r *TaskRepository) FindByMD5(md5 string) (*model.VideoTask, error) {
 // ResultPresenceByTaskIDs includes published results reused by identical
 // uploads, without loading their bodies into the video list.
 func (r *TaskRepository) ResultPresenceByTaskIDs(tasks []model.VideoTask) (hasTranscription, hasSummary map[int64]bool, err error) {
-	hasTranscription = map[int64]bool{}
-	hasSummary = map[int64]bool{}
+	hasTranscription, hasSummary = map[int64]bool{}, map[int64]bool{}
 	if len(tasks) == 0 {
 		return hasTranscription, hasSummary, nil
 	}
 	ids := make([]int64, 0, len(tasks))
+	ownedIDs := map[int64]bool{}
 	md5ToIDs := map[string][]int64{}
 	md5s := make([]string, 0, len(tasks))
 	for _, task := range tasks {
 		ids = append(ids, task.ID)
-		if task.FileMD5 != "" {
+		ownedIDs[task.ID] = true
+		if LegacyResultReuseAllowed(&task) && task.FileMD5 != "" {
 			if len(md5ToIDs[task.FileMD5]) == 0 {
 				md5s = append(md5s, task.FileMD5)
 			}
@@ -166,22 +169,28 @@ func (r *TaskRepository) ResultPresenceByTaskIDs(tasks []model.VideoTask) (hasTr
 	}
 	mark := func(rows []resultRow, target map[int64]bool) {
 		for _, row := range rows {
-			target[row.TaskID] = true
+			if ownedIDs[row.TaskID] {
+				target[row.TaskID] = true
+			}
 			for _, id := range md5ToIDs[row.FileMD5] {
 				target[id] = true
 			}
 		}
 	}
 	var txRows []resultRow
+	// Return the fingerprint only for cache-eligible rows. Direct owner records
+	// remain visible while private source results cannot mark other tasks ready.
 	if err = r.db.Model(&model.VideoTranscription{}).
-		Select("task_id, file_md5").Where("task_id IN ? OR file_md5 IN ?", ids, md5s).
+		Select("task_id, CASE WHEN "+legacyTranscriptionCacheSQL("")+" THEN file_md5 ELSE '' END AS file_md5").
+		Where("task_id IN ? OR (file_md5 IN ? AND ("+legacyTranscriptionCacheSQL("")+"))", ids, md5s).
 		Find(&txRows).Error; err != nil {
 		return nil, nil, err
 	}
 	mark(txRows, hasTranscription)
 	var sumRows []resultRow
 	if err = r.db.Model(&model.AISummary{}).
-		Select("task_id, file_md5").Where("task_id IN ? OR file_md5 IN ?", ids, md5s).
+		Select("task_id, CASE WHEN "+legacySummaryCacheSQL("")+" THEN file_md5 ELSE '' END AS file_md5").
+		Where("task_id IN ? OR (file_md5 IN ? AND ("+legacySummaryCacheSQL("")+"))", ids, md5s).
 		Find(&sumRows).Error; err != nil {
 		return nil, nil, err
 	}
@@ -189,9 +198,23 @@ func (r *TaskRepository) ResultPresenceByTaskIDs(tasks []model.VideoTask) (hasTr
 	return hasTranscription, hasSummary, nil
 }
 
+// LegacyResultReuseAllowed distinguishes old file-cache tasks from imports with
+// frozen processing intent, including tasks whose first source is not ready yet.
+func LegacyResultReuseAllowed(task *model.VideoTask) bool {
+	return task != nil && task.ActiveTextSourceID == "" && task.ProcessingIntentJSON == ""
+}
+
+func legacyTaskCacheSQL(prefix string) string {
+	return "COALESCE(" + prefix + "active_text_source_id, '') = '' AND COALESCE(" + prefix + "processing_intent_json, '') = ''"
+}
+
 // ListByUserID 分页查询用户的视频任务列表，keyword 非空时按文件名/标题模糊搜索
 // The (user_id, created_at) index supports stable chronological pagination.
 func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword string, activity ...string) ([]model.VideoTask, int64, error) {
+	return r.ListByUserIDFiltered(userID, page, pageSize, keyword, TagFilter{}, activity...)
+}
+
+func (r *TaskRepository) ListByUserIDFiltered(userID int64, page, pageSize int, keyword string, tags TagFilter, activity ...string) ([]model.VideoTask, int64, error) {
 	var tasks []model.VideoTask
 	var total int64
 
@@ -203,7 +226,7 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword 
 	if len(activity) > 0 {
 		switch activity[0] {
 		case "ready":
-			query = query.Where("status NOT IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning}).Where("EXISTS (SELECT 1 FROM video_transcriptions AS tx WHERE (tx.task_id = video_tasks.id OR (video_tasks.file_md5 <> '' AND tx.file_md5 = video_tasks.file_md5)) AND TRIM(tx.content) <> '') OR EXISTS (SELECT 1 FROM video_visual_frames AS vf WHERE vf.task_id = video_tasks.id AND vf.status = ? AND (TRIM(vf.ocr_text) <> '' OR TRIM(vf.vision_caption) <> ''))", model.VisualFrameStatusCompleted)
+			query = query.Where("status NOT IN ?", []int8{model.TaskStatusQueued, model.TaskStatusRunning}).Where("EXISTS (SELECT 1 FROM video_transcriptions AS tx WHERE (tx.task_id = video_tasks.id OR (video_tasks.file_md5 <> '' AND tx.file_md5 = video_tasks.file_md5 AND ("+legacyTaskCacheSQL("video_tasks.")+") AND ("+legacyTranscriptionCacheSQL("tx.")+"))) AND TRIM(tx.content) <> '') OR EXISTS (SELECT 1 FROM video_visual_frames AS vf WHERE vf.task_id = video_tasks.id AND vf.status = ? AND (TRIM(vf.ocr_text) <> '' OR TRIM(vf.vision_caption) <> ''))", model.VisualFrameStatusCompleted)
 		case "processing":
 			query = query.Where("status IN ? OR (status NOT IN ? AND EXISTS (SELECT 1 FROM task_jobs AS sj WHERE sj.task_id = video_tasks.id AND sj.job_type = ? AND sj.status IN ?))",
 				[]int8{model.TaskStatusQueued, model.TaskStatusRunning},
@@ -218,19 +241,48 @@ func (r *TaskRepository) ListByUserID(userID int64, page, pageSize int, keyword 
 				model.TaskJobTypeSummary, []int8{model.TaskStatusFailed, model.TaskStatusDead})
 		}
 	}
+	var err error
+	query, err = applyTagFilter(query, r.db, userID, tags)
+	if err != nil {
+		return nil, 0, err
+	}
 	if err := query.Model(&model.VideoTask{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * pageSize
-	err := query.
-		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, visual_mode, visual_disabled, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
+	err = query.
+		Select("id, user_id, asset_id, file_md5, filename, title, file_url, file_size, status, stage, trace_id, source_type, active_text_source_id, processing_intent_json, visual_mode, visual_disabled, retry_count, max_retries, next_retry_at, last_error_code, last_error_msg, last_job_type, stage_started_at, stage_finished_at, started_at, finished_at, error_msg, created_at, updated_at").
 		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(pageSize).
 		Find(&tasks).Error
 
 	return tasks, total, err
+}
+
+func applyTagFilter(query, db *gorm.DB, owner int64, filter TagFilter) (*gorm.DB, error) {
+	match := filter.Match
+	if match == "" {
+		match = "all"
+	}
+	if match != "all" && match != "any" {
+		return nil, artifact.Err("invalid_tag_match", 400)
+	}
+	if len(filter.IDs) == 0 {
+		return query, nil
+	}
+	ids, err := NewUserTagRepository(db).ResolveIDs(context.Background(), owner, filter.IDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return query.Where("1 = 0"), nil
+	}
+	if match == "any" {
+		return query.Where("EXISTS (SELECT 1 FROM video_tag_assignments AS a WHERE a.user_id = video_tasks.user_id AND a.task_id = video_tasks.id AND a.tag_id IN ?)", ids), nil
+	}
+	return query.Where("(SELECT COUNT(DISTINCT a.tag_id) FROM video_tag_assignments AS a WHERE a.user_id = video_tasks.user_id AND a.task_id = video_tasks.id AND a.tag_id IN ?) = ?", ids, len(ids)), nil
 }
 
 // UpdateStatus 更新任务状态

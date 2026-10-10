@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -166,4 +167,80 @@ func (r *RAGIndexRepository) ListEmbeddingModelsByTask(userID, taskID int64) ([]
 
 func (r *RAGIndexRepository) DeleteByTaskID(taskID int64) error {
 	return r.db.Where("task_id = ?", taskID).Delete(&model.VideoRAGIndex{}).Error
+}
+
+// RAGBuildSourceFence binds a build to the media/source frozen before embedding.
+// Empty source ID is the legacy path; it still rejects a switch to a new source.
+type RAGBuildSourceFence struct {
+	UserID           int64
+	TaskID           int64
+	EmbeddingModel   string
+	StartedAt        time.Time
+	MediaFingerprint string
+	SourceID         string
+	SourceDigest     string
+}
+
+var ErrRAGSourceChanged = errors.New("文字来源已更新，请重新构建索引")
+var ErrRAGBuildLeaseLost = errors.New("索引构建占用已失效")
+
+// RunWithRAGBuildSource serializes publication with source refresh/deletion and
+// with a replacement build. Keep remote vector-store operations outside this
+// transaction; an index is only made searchable by the fenced completion.
+func (r *Repositories) RunWithRAGBuildSource(ctx context.Context, req RAGBuildSourceFence, fn func(*Repositories) error) error {
+	var stale bool
+	err := r.TransactionContext(ctx, func(tx *Repositories) error {
+		task, err := tx.Task.FindByIDForUpdate(req.TaskID)
+		if err != nil {
+			return err
+		}
+		if task.UserID != req.UserID {
+			return gorm.ErrRecordNotFound
+		}
+		var index model.VideoRAGIndex
+		if err = tx.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND task_id = ? AND embedding_model = ?", req.UserID, req.TaskID, req.EmbeddingModel).First(&index).Error; err != nil {
+			return err
+		}
+		sameSource := task.ActiveTextSourceID == req.SourceID && task.FileMD5 == req.MediaFingerprint
+		if sameSource && req.SourceID != "" {
+			var count int64
+			if err = tx.db.Model(&model.VideoTextSource{}).Where("id = ? AND user_id = ? AND task_id = ? AND source_digest = ? AND media_fingerprint = ?", req.SourceID, req.UserID, req.TaskID, req.SourceDigest, req.MediaFingerprint).Count(&count).Error; err != nil {
+				return err
+			}
+			sameSource = count == 1
+		}
+		var ownedCount int64
+		if err = tx.db.Model(&model.VideoRAGIndex{}).Where("id = ? AND status = ? AND started_at = ?", index.ID, model.RAGIndexStatusIndexing, req.StartedAt).Count(&ownedCount).Error; err != nil {
+			return err
+		}
+		ownsBuild := ownedCount == 1
+		if !sameSource {
+			stale = true
+			// Source publication usually already did this. This branch also protects
+			// against media replacement; never invalidate a newer worker's build.
+			if ownsBuild {
+				if err = tx.db.Model(&index).Updates(map[string]any{"status": model.RAGIndexStatusNeedsRebuild, "chunk_count": 0, "completed_chunks": 0, "total_chunks": 0, "build_phase": "stale", "last_error": ErrRAGSourceChanged.Error(), "finished_at": nil}).Error; err != nil {
+					return err
+				}
+				if err = tx.VideoChunk.ReplaceTaskChunks(req.TaskID, req.EmbeddingModel, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if !ownsBuild {
+			return ErrRAGBuildLeaseLost
+		}
+		if fn != nil {
+			return fn(tx)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if stale {
+		return ErrRAGSourceChanged
+	}
+	return nil
 }

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,7 +56,7 @@ func (r *Repositories) prepareSummaryDispatch(req InitialTaskDispatchRequest) (I
 		if err != nil {
 			return err
 		}
-		if transcription == nil && task.FileMD5 != "" {
+		if transcription == nil && task.FileMD5 != "" && LegacyResultReuseAllowed(task) {
 			transcription, err = tx.Transcription.FindByMD5(task.FileMD5)
 		}
 		if err != nil {
@@ -64,14 +65,26 @@ func (r *Repositories) prepareSummaryDispatch(req InitialTaskDispatchRequest) (I
 		if transcription == nil || strings.TrimSpace(transcription.Content) == "" {
 			return fmt.Errorf("请先完成转写")
 		}
-		summary, err := tx.Summary.FindByMD5(task.FileMD5)
+		if !LegacyResultReuseAllowed(task) {
+			source, readErr := tx.TextSource.Active(context.Background(), task.UserID, task.ID)
+			if readErr != nil {
+				return readErr
+			}
+			if source == nil || source.ID != transcription.SourceID || source.SourceDigest != transcription.SourceDigest {
+				return fmt.Errorf("完整文字来源尚未发布")
+			}
+		}
+		summary, err := tx.Summary.FindByTaskID(task.ID)
+		if err == nil && summary == nil && LegacyResultReuseAllowed(task) {
+			summary, err = tx.Summary.FindByMD5(task.FileMD5)
+		}
 		if err != nil {
 			return err
 		}
 		if summary != nil && !req.SummaryForce {
 			return ErrSummaryAvailable
 		}
-		if req.SummaryForce {
+		if req.SummaryForce && LegacyResultReuseAllowed(task) {
 			if err := tx.Summary.DeleteByTaskID(task.ID); err != nil {
 				return err
 			}
@@ -81,7 +94,10 @@ func (r *Repositories) prepareSummaryDispatch(req InitialTaskDispatchRequest) (I
 				return err
 			}
 		}
-		chunks, err := tx.TranscriptionChunk.ListByTaskID(transcription.TaskID)
+		var chunks []model.VideoTranscriptionChunk
+		if task.ActiveTextSourceID == "" {
+			chunks, err = tx.TranscriptionChunk.ListByTaskID(transcription.TaskID)
+		}
 		if err != nil {
 			return err
 		}
@@ -105,6 +121,7 @@ func (r *Repositories) prepareSummaryDispatch(req InitialTaskDispatchRequest) (I
 			"next_retry_at": nil, "last_error_code": "", "last_error_msg": "", "started_at": nil, "finished_at": nil,
 			"processing_token": req.Token, "lease_kind": model.TaskLeaseKindDispatch, "lease_expires_at": req.LeaseUntil,
 			"lease_version": job.LeaseVersion + 1, "input_text": transcription.Content, "input_chunks_json": string(chunkJSON),
+			"generation_id": "", "input_source_id": "", "input_snapshot_json": "",
 		}
 		if err := tx.db.Model(job).Updates(updates).Error; err != nil {
 			return err
@@ -188,6 +205,9 @@ func (r *Repositories) runWithSummaryLease(req TaskProcessingLeaseRequest, fn fu
 
 func (r *Repositories) finishSummaryProcessing(req TaskProcessingFailureRequest) (bool, error) {
 	return r.runWithSummaryLease(TaskProcessingLeaseRequest{TaskID: req.TaskID, Token: req.Token, Now: req.Now}, func(tx *Repositories, job *model.TaskJob) error {
+		if err := tx.recordSummaryGenerationQueueFailure(job, req); err != nil {
+			return err
+		}
 		return tx.db.Model(job).Updates(map[string]interface{}{"status": req.Status, "stage": model.TaskStageSummarizing, "retry_count": req.RetryCount, "max_retries": req.MaxRetries, "next_retry_at": req.NextRetryAt, "last_error_code": req.ErrorCode, "last_error_msg": req.ErrorMessage, "processing_token": "", "lease_kind": "", "lease_expires_at": nil, "lease_version": job.LeaseVersion + 1, "finished_at": req.Now}).Error
 	})
 }
@@ -225,6 +245,9 @@ func (r *Repositories) restoreSummaryDispatch(req TaskDispatchRestoreRequest, de
 		var next *time.Time = &req.NextRetryAt
 		if dead {
 			status, code, next = model.TaskStatusDead, "retry_budget_exhausted", nil
+			if err := tx.recordSummaryGenerationQueueFailure(job, TaskProcessingFailureRequest{Status: status, Now: time.Now()}); err != nil {
+				return err
+			}
 		}
 		err := tx.db.Model(job).Updates(map[string]interface{}{"status": status, "next_retry_at": next, "last_error_code": code, "last_error_msg": req.ErrorMessage, "processing_token": "", "lease_kind": "", "lease_expires_at": nil, "lease_version": job.LeaseVersion + 1, "finished_at": time.Now()}).Error
 		restored = err == nil

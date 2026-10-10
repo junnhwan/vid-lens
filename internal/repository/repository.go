@@ -16,6 +16,8 @@ type Repositories struct {
 	TaskCleanup        *TaskCleanupJobRepository
 	TaskMessageFailure *TaskMessageFailureRepository
 	Transcription      *TranscriptionRepository
+	TextSource         *TextSourceRepository
+	ImportRequest      *ImportRequestRepository
 	TranscriptionChunk *TranscriptionChunkRepository
 	VisualFrame        *VideoVisualFrameRepository
 	VisualProgress     *VideoVisualProgressRepository
@@ -23,6 +25,7 @@ type Repositories struct {
 	Summary            *SummaryRepository
 	SummaryRevision    *SummaryRevisionRepository
 	VideoTermRule      *VideoTermRuleRepository
+	UserTag            *UserTagRepository
 	SummaryPart        *SummaryPartRepository
 	AIProfile          *AIProfileRepository
 	VideoChunk         *VideoChunkRepository
@@ -50,6 +53,8 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		TaskCleanup:        NewTaskCleanupJobRepository(db),
 		TaskMessageFailure: NewTaskMessageFailureRepository(db),
 		Transcription:      NewTranscriptionRepository(db),
+		TextSource:         NewTextSourceRepository(db),
+		ImportRequest:      &ImportRequestRepository{db: db},
 		TranscriptionChunk: NewTranscriptionChunkRepository(db),
 		VisualFrame:        NewVideoVisualFrameRepository(db),
 		VisualProgress:     NewVideoVisualProgressRepository(db),
@@ -57,6 +62,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Summary:            NewSummaryRepository(db),
 		SummaryRevision:    NewSummaryRevisionRepository(db),
 		VideoTermRule:      NewVideoTermRuleRepository(db),
+		UserTag:            NewUserTagRepository(db),
 		SummaryPart:        NewSummaryPartRepository(db),
 		AIProfile:          NewAIProfileRepository(db),
 		VideoChunk:         NewVideoChunkRepository(db),

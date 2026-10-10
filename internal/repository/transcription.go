@@ -53,11 +53,11 @@ func (r *TranscriptionRepository) Upsert(t *model.VideoTranscription) error {
 	}).Error
 }
 
-// FindByMD5 按内容指纹查找已完成的转写结果（跨 task、跨用户）。
+// FindByMD5 reuses only legacy ASR rows; owner-scoped text sources are private.
 // 行存在即转写已成功完成（转写表无 status 列），用于内容+目标级去重命中判定（docs/architecture/data-model.md）。
 func (r *TranscriptionRepository) FindByMD5(fileMD5 string) (*model.VideoTranscription, error) {
 	var t model.VideoTranscription
-	err := r.db.Where("file_md5 = ?", fileMD5).Order("id ASC").First(&t).Error
+	err := r.db.Where("file_md5 = ?", fileMD5).Where(legacyTranscriptionCacheSQL("")).Order("id ASC").First(&t).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -69,4 +69,9 @@ func (r *TranscriptionRepository) FindByMD5(fileMD5 string) (*model.VideoTranscr
 
 func (r *TranscriptionRepository) DeleteByTaskID(taskID int64) error {
 	return r.db.Where("task_id = ?", taskID).Delete(&model.VideoTranscription{}).Error
+}
+
+// A source-scoped compatibility projection must never become the shared legacy cache.
+func legacyTranscriptionCacheSQL(prefix string) string {
+	return "COALESCE(" + prefix + "source_id, '') = '' AND COALESCE(" + prefix + "source_kind, '') = '' AND COALESCE(" + prefix + "source_digest, '') = ''"
 }
