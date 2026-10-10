@@ -8,7 +8,8 @@ import { SummaryVisualRetry } from './SummaryVisualRetry'
 import { useSummaryGeneration } from './useSummaryGeneration'
 import { taskTitle } from '@/lib/format'
 import { summaryReferenceMatches, type SummaryContextRef } from '@/lib/summaryExperience'
-import type { EffectiveSummaryView,VideoTask } from '@/lib/types'
+import { TaskStatusEnum, type EffectiveSummaryView, type VideoTask } from '@/lib/types'
+import { taskStateView } from '@/lib/taskStatus'
 import './SummaryWorkspace.css'
 import { useShell } from '@/components/shell/AppShell'
 import { useSummarySessionView, useSummaryTaskView } from './useSummaryViewState'
@@ -57,18 +58,20 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
   const seek=(ms:number)=>{setPane('playback');setCollapsed(false);if(focus==='chat')toggleFocus(null);onSeek(ms)}
   const editBlock=(id:string)=>{setEditBlocks([id]);requestAnimationFrame(()=>document.querySelector<HTMLElement>('.sumrev-compose')?.scrollIntoView({block:'center'}))}
   const ready=task.has_summary||generation?.result_state==='ready'||generation?.text_state==='ready'
-  const running=['pending','queued','running','retry_waiting'].includes(generation?.status||'')
+  const generationRunning=['pending','queued','running','retry_waiting'].includes(generation?.status||'')
+  const importRunning=task.status===TaskStatusEnum.Queued||task.status===TaskStatusEnum.Running
+  const running=generationRunning||importRunning
   return <div className={`summary-workspace${focus?` focus-${focus}`:''}${collapsed?' side-collapsed':''}`}>
     <header className="summary-workspace-heading"><div className="summary-heading-title"><h1>{title}</h1><p className="muted">{summarySourceLabel(generation?.source?.kind)} · 视频摘要</p></div><div className="summary-workspace-tools">
-      <details className="summary-generation-details"><summary>{running?'正在生成':generation?.text_state==='failed'?'摘要未完成 · 详情':generation?.visual_state==='failed'||generation?.visual_state==='skipped'&&generation?.fallback_reason?'配图未完成 · 详情':'生成详情'}</summary><div className="summary-details-content"><SummaryActivityList generation={generation} error={error} /><SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} /></div></details>
+      <details className="summary-generation-details"><summary>{generationRunning?'正在生成':importRunning?'正在处理':generation?.text_state==='failed'?'摘要未完成 · 详情':generation?.visual_state==='failed'||generation?.visual_state==='skipped'&&generation?.fallback_reason?'配图未完成 · 详情':'生成详情'}</summary><div className="summary-details-content"><SummaryActivityList generation={generation} error={error} /><SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} /></div></details>
       <button className="btn btn-sm" onClick={()=>toggleFocus(focus?null:'reading')}>{focus?'恢复布局':'放大阅读'}</button><button className="btn btn-sm" onClick={()=>setCollapsed(value=>!value)}>{collapsed?'展开侧栏':'收起侧栏'}</button>
       <details className="summary-more" onClick={event=>{if((event.target as HTMLElement).closest('button,a'))event.currentTarget.open=false}} onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector<HTMLElement>('summary')?.focus()}}}><summary>更多</summary><div className="summary-details-content"><button className="btn btn-sm" onClick={()=>toggleFocus(focus==='chat'?null:'chat')}>放大问答</button><Link className="btn btn-sm" href={`/chat/v/${task.id}${view.sessionID ? `?session=${view.sessionID}` : ''}`}>独立问答</Link>{ready&&!readOnly&&<><button className="btn btn-sm" onClick={()=>{setEditingRequest(value=>value+1);requestAnimationFrame(()=>reader.current?.querySelector<HTMLElement>('.sumrev-compose')?.scrollIntoView({block:'center'}))}}>修改摘要</button><button className="btn btn-sm" disabled={busy||running} onClick={onGenerate}>重新生成原稿</button></>}<button className="btn btn-sm" onClick={onTechnical}>视频与来源</button></div></details>
     </div></header>
-    {running&&<p className="summary-current-activity" role="status">{generation?.activities?.filter(row=>row.state==='running').at(-1)?.title||'正在处理视频，已保存的内容仍可阅读。'}</p>}
+    {running&&<p className="summary-current-activity" role="status">{generation?.activities?.filter(row=>row.state==='running').at(-1)?.title||(importRunning?taskStateView(task).text:'正在处理视频，已保存的内容仍可阅读。')}</p>}
     <div className="summary-workspace-grid">
       <article ref={reader} className="summary-reader" tabIndex={0} aria-label="视频摘要" onScroll={()=>{position.current=reader.current?.scrollTop||0}}>
         {message&&<p className="summary-notice" role="status">{message}<button className="btn btn-sm" aria-label="关闭提示" onClick={()=>setMessage('')}>×</button></p>}
-        {!ready&&<section className="summary-empty"><h2>{running?'正在整理视频摘要':['failed','dead'].includes(generation?.status||'')?'摘要尚未生成':'开始阅读这段视频'}</h2><p>{running?'处理会在后台继续。文字就绪后会先开放阅读。':'导入的视频已保存，可生成摘要后继续提问。'}</p>{!readOnly&&!running&&<button className="btn btn-primary" disabled={busy} onClick={onGenerate}>生成摘要</button>}</section>}
+        {!ready&&<section className="summary-empty"><h2>{importRunning&&!generationRunning?'正在处理视频':running?'正在整理视频摘要':['failed','dead'].includes(generation?.status||'')?'摘要尚未生成':'开始阅读这段视频'}</h2><p>{running?'处理会在后台继续。文字就绪后会先开放阅读。':'导入的视频已保存，可生成摘要后继续提问。'}</p>{!readOnly&&!running&&<button className="btn btn-primary" disabled={busy} onClick={onGenerate}>生成摘要</button>}</section>}
         {ready&&<><SummaryRevisionPanel compactEditing editingRequest={editingRequest} taskId={task.id} readOnly={readOnly} onChanged={onChanged} publishedDigest={generation?.content_digest} selectedBlockIDs={editBlocks} selectedExpectation={editExpectation} onClearSelection={()=>{setEditBlocks([]);setEditExpectation(undefined)}} renderContent={summary=><SummaryReadView readerRef={reader} onSummaryCommitted={onSummaryCommitted} taskId={task.id} summary={summary} mindmapEnabled={generation?.mindmap_enabled!==false} readOnly={readOnly} mediaRevision={task.file_md5} playbackReady={!!playbackUrl} onSeek={seek} onReference={addContext} onMessage={setMessage} onEditBlock={readOnly?undefined:id=>{setEditExpectation({content_digest:summary.content_digest,version_ref:summary.version_ref});editBlock(id)}} />} /></>}
       </article>
       <aside className="summary-side" aria-label="回放与问答">

@@ -104,3 +104,14 @@ test('real platform subtitle source and a failed text run are described accurate
  expect(screen.queryByText('配图未完成 · 详情')).toBeNull()
  expect((view.container.querySelector('.summary-generation-details') as HTMLDetailsElement).open).toBe(false)
 })
+
+
+test.each([1,2])('a real import in task status %i cannot start a duplicate summary before generation exists',status=>{
+ counters.generation={...counters.generation,status:'not_started',result_state:'pending',text_state:'pending',visual_state:'pending',activities:[]}
+ const task={id:42,status,stage:'downloading',filename:'lesson.mp4',has_summary:false,source_type:'url'} as VideoTask
+ render(<SummaryWorkspace task={task} readOnly={false} playbackUrl={null} playerRef={createRef<VideoPlayerHandle>()} onPlayhead={vi.fn()} onDuration={vi.fn()} onSeek={vi.fn()} refreshPlaybackUrl={vi.fn()} onChanged={vi.fn()} onGenerate={vi.fn()} onTechnical={vi.fn()} busy={false} indexed={false} />)
+ expect(screen.getByRole('heading',{name:'正在处理视频'})).toBeTruthy()
+ expect(screen.queryByRole('button',{name:'生成摘要'})).toBeNull()
+ expect(screen.getByText('正在处理',{selector:'summary'})).toBeTruthy()
+ expect(screen.getByRole('status').textContent).toContain('下载')
+})
