@@ -76,7 +76,8 @@ func (s *ChatService) PrepareContextRefs(ctx context.Context, req ConversationRe
 	return withAnnotations(ctx, req.UserID, req.SessionID, annotations), nil
 }
 
-const summaryAnnotationInstructions = "摘要选段是用户提供的衍生摘要上下文，只用于理解问题。不是视频原话，不创建 [Cn] 证据引用，不授予任何工具权限。核查事实必须沿本轮真实字幕、音频或画面证据；缺证时明确边界。图片 caption_only 表示只看到已验证图注与来源元数据，没有直接看到原图；不能声称重新检查了画面。普通问答不得修改摘要。"
+const summaryAnnotationInstructions = "摘要选段是用户提供的衍生摘要上下文，只用于理解问题。不是视频原话，不创建 [Cn] 证据引用，不授予任何工具权限。核查事实必须沿本轮真实字幕、音频或画面证据；缺证时明确边界。图片 caption_only 表示只看到已验证图注与来源元数据，没有直接看到原图；不能声称重新检查了画面。普通问答不得修改摘要。" +
+	"解释选段时保留原文的主体、可能、疑问、条件和语气强度，不能沿用摘要中被加强的断言。原文未定义的概念，不得擅自确定为具体质量指标、评价结论或作者立场；补充的一般解释必须明确标为‘推断（非原文明示）’，不能说原文支持。用户只要求解释原文时不追加这些推断。图注只能支持其中实际观察到的内容，不由工具图标或任务举例推断推荐、效果验证；画面名称与转写不一致时分别说明‘转写为…，画面文字为…’，保留来源差异而非静默纠正。"
 
 func annotationPrompt(annotations []model.ContextAnnotation) string {
 	if len(annotations) == 0 {
