@@ -65,6 +65,11 @@ func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt
 			},
 		},
 	}
+	// Only inherit the explicit output limit. Vision inspection retains its
+	// existing multimodal response contract, including for hybrid models.
+	if budget, ok := ctx.Value(chatBudgetKey{}).(chatCallBudget); ok && budget.output > 0 {
+		reqBody["max_tokens"] = budget.output
+	}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
@@ -80,8 +85,10 @@ func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt
 		return "", err
 	}
 	var result struct {
+		Usage   *chatProviderUsage `json:"usage"`
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -89,10 +96,12 @@ func (c *OpenAIVisionClient) CaptionImage(ctx context.Context, imagePath, prompt
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("解析 vision 响应失败: %w", err)
 	}
+	result.Usage.report(ctx)
 	if len(result.Choices) == 0 {
 		return "", fmt.Errorf("vision 返回空结果")
 	}
-	return strings.TrimSpace(stripThinkTags(result.Choices[0].Message.Content)), nil
+	answer := strings.TrimSpace(stripThinkTags(result.Choices[0].Message.Content))
+	return answer, chatFinishError(result.Choices[0].FinishReason, answer)
 }
 
 func imageFileToDataURL(path string) (string, error) {
