@@ -153,7 +153,11 @@ func (r *Repositories) StartSummaryGeneration(ctx context.Context, req SummaryGe
 			return artifact.Err("generation_checkpoint_changed", 409)
 		}
 		if insert.RowsAffected == 1 {
-			if err = appendEvent(tx.db, prior, "run.started", map[string]any{"status": "running", "stage": "text_summary", "title": "开始整理视频摘要"}); err != nil {
+			title := "开始整理视频摘要"
+			if run.Stage == "visual_retry" {
+				title = "开始补充摘要画面"
+			}
+			if err = appendEvent(tx.db, prior, "run.started", map[string]any{"status": "running", "stage": run.Stage, "title": title}); err != nil {
 				return err
 			}
 		}

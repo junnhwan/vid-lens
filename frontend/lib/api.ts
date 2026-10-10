@@ -95,7 +95,12 @@ async function readResponse<T>(res: Pick<Response, 'status' | 'statusText' | 'ok
   // 后端成功 envelope: { code: 200, message: "success", data: ... }
   // 失败: code = HTTP 状态码（400/500 等）。所以判 code === 200 为成功。
   if (!res.ok || (env.code !== 200 && env.code !== 202)) {
-    throw new ApiError(res.status, env.message || `请求失败 (${res.status})`, env.data?.error_code)
+    const code = env.data?.error_code
+    const summaryMessages: Record<string, string> = {
+      summary_generation_disabled: '暂时无法启动新的摘要处理，已保存内容仍可阅读。',
+      visual_disabled: '画面处理已关闭，已保存的文字仍可阅读。',
+    }
+    throw new ApiError(res.status, summaryMessages[code] || env.message || `请求失败 (${res.status})`, code)
   }
   return env.data as T
 }

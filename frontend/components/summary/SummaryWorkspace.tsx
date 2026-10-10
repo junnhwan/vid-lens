@@ -4,6 +4,7 @@ import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { SummaryRevisionPanel } from './SummaryRevisionPanel'
 import { SummaryReadView } from './SummaryReadView'
 import { SummaryActivityList } from './SummaryActivityList'
+import { SummaryVisualRetry } from './SummaryVisualRetry'
 import { useSummaryGeneration } from './useSummaryGeneration'
 import { taskTitle } from '@/lib/format'
 import type { SummaryContextRef } from '@/lib/summaryExperience'
@@ -29,7 +30,8 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
   const [editExpectation,setEditExpectation]=useState<Pick<EffectiveSummaryView,'content_digest'|'version_ref'>|undefined>()
   const reader=useRef<HTMLElement>(null),position=useRef(0)
   useEffect(() => { setLocalContexts([]); setEditBlocks([]); setMessage(''); setPane('playback'); setChatSeen(false); position.current = 0 }, [user?.id, task.id])
-  const {generation,error}=useSummaryGeneration(task.id,`${task.updated_at}:${task.status}`)
+  const [visualAttempt,setVisualAttempt]=useState(0)
+  const {generation,error}=useSummaryGeneration(task.id,`${task.updated_at}:${task.status}:${visualAttempt}`)
   const title=taskTitle(task)
   const openChat=()=>{setChatSeen(true);setPane('chat');setCollapsed(false)}
   const toggleFocus=(next:'reading'|'chat'|null)=>{position.current=reader.current?.scrollTop||position.current;setFocus(next);if(next==='chat')openChat();requestAnimationFrame(()=>{if(reader.current)reader.current.scrollTop=position.current})}
@@ -47,8 +49,9 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
   return <div className={`summary-workspace${focus?` focus-${focus}`:''}${collapsed?' side-collapsed':''}`}>
     <header className="summary-workspace-heading"><div><p className="product-eyebrow">VIDEO NOTES</p><h1>{title}</h1><p className="muted">{generation?.source?.kind==='subtitle'?'平台字幕':'视频内容'} · 摘要、画面与问题</p></div><div className="summary-workspace-tools"><button className="btn btn-sm" onClick={()=>toggleFocus(focus?null:'reading')}>{focus?'恢复布局':'放大阅读'}</button><button className="btn btn-sm" onClick={()=>toggleFocus(focus==='chat'?null:'chat')}>放大问答</button><button className="btn btn-sm" onClick={()=>setCollapsed(value=>!value)}>{collapsed?'展开侧栏':'收起侧栏'}</button><Link className="btn btn-sm" href={`/chat/v/${task.id}${view.sessionID ? `?session=${view.sessionID}` : ''}`}>独立问答</Link><button className="btn btn-sm" onClick={onTechnical}>视频与来源</button></div></header>
     <div className="summary-workspace-grid">
-      <article ref={reader} className="summary-reader" aria-label="视频摘要" onScroll={()=>{position.current=reader.current?.scrollTop||0}}>
+      <article ref={reader} className="summary-reader" tabIndex={0} aria-label="视频摘要" onScroll={()=>{position.current=reader.current?.scrollTop||0}}>
         <SummaryActivityList generation={generation} error={error} />
+        <SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} />
         {message&&<p className="summary-notice" role="status">{message}<button className="btn btn-sm" aria-label="关闭提示" onClick={()=>setMessage('')}>×</button></p>}
         {!ready&&<section className="summary-empty"><h2>{running?'正在整理视频摘要':['failed','dead'].includes(generation?.status||'')?'摘要尚未生成':'开始阅读这段视频'}</h2><p>{running?'处理会在后台继续。文字就绪后会先开放阅读。':'导入的视频已保存，可生成摘要后继续提问。'}</p>{!readOnly&&!running&&<button className="btn btn-primary" disabled={busy} onClick={onGenerate}>生成摘要</button>}</section>}
         {ready&&<><SummaryRevisionPanel compactEditing taskId={task.id} readOnly={readOnly} onChanged={onChanged} publishedDigest={generation?.content_digest} selectedBlockIDs={editBlocks} selectedExpectation={editExpectation} onClearSelection={()=>{setEditBlocks([]);setEditExpectation(undefined)}} renderContent={summary=><SummaryReadView readerRef={reader} taskId={task.id} summary={summary} mindmapEnabled={generation?.mindmap_enabled!==false} readOnly={readOnly} mediaRevision={task.file_md5} playbackReady={!!playbackUrl} onSeek={seek} onReference={addContext} onMessage={setMessage} onEditBlock={readOnly?undefined:id=>{setEditExpectation({content_digest:summary.content_digest,version_ref:summary.version_ref});editBlock(id)}} />} />{!readOnly&&<button className="btn btn-sm" disabled={busy||running} onClick={onGenerate}>重新生成原稿</button>}</>}

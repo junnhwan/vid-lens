@@ -21,13 +21,13 @@ VIDLENS_SUMMARY_VISUAL_ENRICHMENT_ENABLED=false
 
 ## 停止新生成
 
-关闭 `v2_generation_enabled` 后，新自动 URL 导入、本地自动合并导入以及 active-source 手动生成/重新生成返回 HTTP 503 `summary_generation_disabled`，不冻结新 profile、不创建任务/generation、不发布队列消息。已经受理的相同 Idempotency-Key 重放仍返回原始受理回执；请求内容变化仍返回 409。
+关闭 `v2_generation_enabled` 后，新自动 URL 导入、本地自动合并导入以及 active-source 手动生成/重新生成、单独补图重试返回 HTTP 503 `summary_generation_disabled`，不冻结新 profile、不创建任务/generation、不发布队列消息。已经受理的相同 Idempotency-Key 重放仍返回原始受理回执；请求内容变化仍返回 409。
 
 已经受理的冻结 generation 可继续下载/来源/ASR/摘要和重试直至完成；开关不取消它们或换 profile。若需要停止某个在途任务，应使用原有明确取消/删除流程和 lease/source 围栏，不能把部署开关当作取消指令。旧手动上传、旧 summary API 路径与旧/新已发布结果、用户版本、来源、截图、标签和历史仍可读取；不将旧入口自动转换成付费 v2 生成。
 
 ## 停止补图
 
-关闭 `visual_enrichment_enabled` 后，已受理的文字生成仍完成。即使其冻结选项请求了视觉，视觉 hook 也不调用底层抽帧/VLM 服务，终态明确 `visual_state=skipped`、`fallback_reason=visual_disabled`，已发布文字保留，resolved mode 为 text。未请求视觉的任务继续是 not_requested。这个开关不隐藏已登记的历史图片。
+关闭 `visual_enrichment_enabled` 后，新的单独补图重试返回 422 `visual_disabled`，不接受新预算、不创建 attempt、不入队。相同已受理 Idempotency-Key 的回执重放仍允许。已受理的文字生成仍完成。即使其冻结选项请求了视觉，视觉 hook 也不调用底层抽帧/VLM 服务，终态明确 `visual_state=skipped`、`fallback_reason=visual_disabled`，已发布文字保留，resolved mode 为 text。未请求视觉的任务继续是 not_requested。已受理的 visual-only retry 同样诚实结束为 skipped/visual_disabled，并逐字保留原 generated 行和用户版本；它不重跑文字、ASR、下载或标签。这个开关不隐藏已登记的历史图片。
 
 进程重启前已经开始的外部视觉调用无法由另一个进程的配置撤销；应先让旧进程完成或按正常取消/优雅停机处理，在新的进程中恢复并遵守原有检查点/预算。开关不重置预算、不批量重跑，不删除表或用户内容。
 
@@ -50,3 +50,5 @@ docs/operations/summary-rollout.md
 ```
 
 验证覆盖默认/YAML/env/错误配置、新受理拒绝、已受理重放、旧入口、旧正文与历史、已受理文字继续完成/视觉零调用，以及 consumer 同一 generation 完成与重投不重复。实际部署切换、混合版本消费者和回退实操仍需环境验收。
+
+单独补图的 `authorize_new_visual_budget=true` 只随用户明确点击的新请求提交。部署开关、重新连接、队列重投与进程恢复均不生成新 attempt，也不清空计数或延长原接受时的执行截止时间。切换 v2 admission 后，已经接受的 visual-only attempt 可继续完成；切换 visual gate 后，它保留原文并跳过视觉调用。完整请求/读取约定见 [summary generation contract](../architecture/summary-generation-contract.md#visual-only-retry)。

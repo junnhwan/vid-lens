@@ -115,6 +115,20 @@ type summaryVisualExecution struct {
 }
 
 func (s *SummaryVisualService) Enrich(ctx context.Context, task *model.VideoTask, job *model.TaskJob, frozen processing.GenerationSnapshot, profile ai.Profile, source *textsource.Snapshot, base *model.AISummary, token string) error {
+	if frozen.Operation == processing.OperationVisualRetry {
+		return s.EnrichFrozenBase(ctx, task, job, frozen, profile, source, base, token)
+	}
+	return s.enrich(ctx, task, job, frozen, profile, source, base, token)
+}
+
+func (s *SummaryVisualService) EnrichFrozenBase(ctx context.Context, task *model.VideoTask, job *model.TaskJob, frozen processing.GenerationSnapshot, profile ai.Profile, source *textsource.Snapshot, base *model.AISummary, token string) error {
+	if frozen.Operation != processing.OperationVisualRetry || frozen.VisualRetry == nil {
+		return artifact.Err("invalid_generation_snapshot", 409)
+	}
+	return s.enrich(ctx, task, job, frozen, profile, source, base, token)
+}
+
+func (s *SummaryVisualService) enrich(ctx context.Context, task *model.VideoTask, job *model.TaskJob, frozen processing.GenerationSnapshot, profile ai.Profile, source *textsource.Snapshot, base *model.AISummary, token string) error {
 	if s == nil || s.repos == nil || s.clients == nil || s.investigator == nil || task == nil || job == nil || source == nil || base == nil {
 		return artifact.Err("visual_capability_unavailable", 422)
 	}
@@ -131,9 +145,32 @@ func (s *SummaryVisualService) Enrich(ctx context.Context, task *model.VideoTask
 	if err != nil {
 		return err
 	}
+	if frozen.Operation == processing.OperationVisualRetry {
+		if frozen.VisualRetry == nil || base.DocumentJSON != frozen.VisualRetry.BaseDocumentJSON || base.ContentDigest != frozen.ExpectedGeneratedHash || base.GeneratedVersion != frozen.ExpectedGeneratedVersion {
+			return artifact.Err("invalid_generation_checkpoint", 409)
+		}
+		doc.DocumentID = job.GenerationID
+	}
 	lease := repository.SummaryGenerationLease{UserID: task.UserID, TaskID: task.ID, GenerationID: job.GenerationID, SourceID: source.ID, SourceDigest: source.SourceDigest, LeaseToken: token}
 	if err = s.repos.WithSummaryGenerationLease(ctx, lease, func(*repository.Repositories) error { return nil }); err != nil {
 		return err
+	}
+	if frozen.Operation == processing.OperationVisualRetry {
+		latest, readErr := s.repos.Summary.FindByTaskID(task.ID)
+		if readErr != nil {
+			return readErr
+		}
+		if latest != nil && latest.GenerationID == job.GenerationID {
+			published, parseErr := summarydoc.Parse([]byte(latest.DocumentJSON))
+			if parseErr != nil {
+				return parseErr
+			}
+			validation, validationErr := s.repos.SummaryValidationContext(ctx, task.UserID, task.ID, source.ID, source.SourceDigest, job.GenerationID)
+			if validationErr != nil {
+				return validationErr
+			}
+			return summarydoc.Validate(published, validation)
+		}
 	}
 	// The image CAS may have committed before worker acknowledgement. Its
 	// immutable document is the durable completion receipt for safe redelivery.
@@ -164,6 +201,9 @@ func (s *SummaryVisualService) Enrich(ctx context.Context, task *model.VideoTask
 		return artifact.Err("visual_budget_exhausted", 422)
 	}
 	e := &summaryVisualExecution{service: s, task: task, snapshot: frozen, source: source, lease: lease, journal: NewAgentExecutionJournal(repository.NewSummaryGenerationExecutionStore(s.repos, task.UserID, task.ID, job.GenerationID)), client: client, profile: profile, output: min(int64(2048), int64(budget.Values.MaxOutputTokens))}
+	if frozen.Operation == processing.OperationVisualRetry {
+		e.journal = NewAgentExecutionJournal(repository.NewSummaryVisualCheckpointStore(s.repos, lease, firstNonEmpty(frozen.VisualRetry.CheckpointGenerationID, frozen.VisualRetry.ParentGenerationID)))
+	}
 	// Limit the planner context to actual eligible block/cue associations. Unknown
 	// times are omitted, and the model can choose only these opaque identities.
 	type eligible struct {
@@ -255,20 +295,34 @@ func (s *SummaryVisualService) Enrich(ctx context.Context, task *model.VideoTask
 			return err
 		}
 		for _, candidate := range saved {
+			if frozen.Operation == processing.OperationVisualRetry && result.Step.RunID != job.GenerationID {
+				observation, readErr := s.repos.VisualObservation.FindByID(ctx, task.UserID, task.ID, candidate.ObservationID)
+				if readErr != nil {
+					return readErr
+				}
+				if observation == nil || observation.Status != model.VisualObservationStatusObserved || observation.VideoRevision != source.Identity.MediaFingerprint || observation.StartMS != candidate.CaptureMS || observation.FrameRef != candidate.FrameRef || observation.Observation != candidate.Observation || observation.ObjectKey == "" || observation.RawResponseHash != artifact.Hash(observation.Observation) || candidate.BlockID != target.BlockID || candidate.CueID != target.CueID || candidate.CaptureMS < window.StartMS || candidate.CaptureMS >= window.EndMS {
+					return artifact.Err("invalid_visual_checkpoint", 409)
+				}
+				// Reparse immutable raw evidence with the current parser; old caches
+				// may contain the entire fenced JSON in their Facts projection.
+				candidate.Facts, candidate.Gaps = parseQueryVisualResponse(observation.Observation)
+			}
 			if candidate.FrameRef != "" && !seenFrames[candidate.FrameRef] {
 				candidates = append(candidates, candidate)
 				seenFrames[candidate.FrameRef] = true
 			}
 		}
-		if err = e.activity(ctx, id, "activity.finished", "done", "已检查对应画面"); err != nil {
-			return err
+		if result.Step.RunID == job.GenerationID {
+			if err = e.activity(ctx, id, "activity.finished", "done", "已检查对应画面"); err != nil {
+				return err
+			}
 		}
 	}
 	if len(candidates) == 0 {
 		return artifact.Err("visual_no_usable_frames", 422)
 	}
 	var selection summaryVisualSelection
-	err = e.chatStep(ctx, "visual-select", 1010, "选择能解释摘要的画面", `你正在整理已实际看图的观察结果。返回 JSON {"public_title":"短标题","presentation_mode":"text/image_text/keyframes","reason":"形式与选择依据","figures":[{"block_id":"候选所属块","observation_id":"给定候选ID","caption":"只描述该图可见信息及用途","alt":"图片替代文字","supports":"该图具体解释什么"}]}。仅引用给定候选，不编造看不清的事实。最多五图，冗余无关图不选。text没有figures；关键帧必须有实际图。`, artifact.JSON(map[string]any{"requested_mode": frozen.Intent.Options.OutputMode, "candidates": candidates}), &selection)
+	err = e.chatStep(ctx, "visual-select", 1010, "选择能解释摘要的画面", `你正在整理已实际看图的观察结果。返回 JSON {"public_title":"短标题","presentation_mode":"text/image_text/keyframes","reason":"形式与选择依据","figures":[{"block_id":"候选所属块","observation_id":"给定候选ID","caption":"只描述该图可见信息及用途","alt":"图片替代文字","supports":"该图具体解释什么"}]}。caption只描述可见内容；supports只解释对相邻正文的具体帮助，除非冻结cue明确表示，不得推断作者推荐、认可或验证工具效果。仅引用给定候选，不编造看不清的事实。最多五图，冗余无关图不选。text没有figures；关键帧必须有实际图。`, artifact.JSON(map[string]any{"requested_mode": frozen.Intent.Options.OutputMode, "candidates": candidates, "adjacent_blocks": visualSelectionBlocks(doc, candidates), "frozen_cues": visualSelectionCues(source, candidates)}), &selection)
 	if err != nil {
 		return err
 	}
@@ -452,4 +506,33 @@ func (e *summaryVisualExecution) chatStep(ctx context.Context, id string, sequen
 		return artifact.Err("invalid_visual_response", 422)
 	}
 	return nil
+}
+
+// Selection gets only the bounded neighboring text/cues of inspected targets.
+// It cannot infer endorsement from a screenshot without those frozen words.
+func visualSelectionBlocks(doc summarydoc.Document, candidates []summaryVisualCandidate) []summarydoc.Block {
+	out := []summarydoc.Block{}
+	wanted := map[string]bool{}
+	for _, c := range candidates {
+		wanted[c.BlockID] = true
+	}
+	for _, block := range doc.Blocks {
+		if wanted[block.ID] {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+func visualSelectionCues(source *textsource.Snapshot, candidates []summaryVisualCandidate) []textsource.Cue {
+	out := []textsource.Cue{}
+	wanted := map[string]bool{}
+	for _, c := range candidates {
+		wanted[c.CueID] = true
+	}
+	for _, cue := range source.Cues {
+		if wanted[cue.ID] {
+			out = append(out, cue)
+		}
+	}
+	return out
 }

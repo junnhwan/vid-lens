@@ -42,12 +42,14 @@ type Intent struct {
 }
 
 type GenerationSnapshot struct {
-	Intent                    Intent `json:"intent"`
-	SourceID                  string `json:"source_id"`
-	SourceDigest              string `json:"source_digest"`
-	ExpectedGeneratedVersion  int64  `json:"expected_generated_version"`
-	ExpectedGeneratedHash     string `json:"expected_generated_hash"`
-	ExpectedGeneratedHashKind string `json:"expected_generated_hash_kind"`
+	Operation                 string               `json:"operation,omitempty"`
+	VisualRetry               *VisualRetrySnapshot `json:"visual_retry,omitempty"`
+	Intent                    Intent               `json:"intent"`
+	SourceID                  string               `json:"source_id"`
+	SourceDigest              string               `json:"source_digest"`
+	ExpectedGeneratedVersion  int64                `json:"expected_generated_version"`
+	ExpectedGeneratedHash     string               `json:"expected_generated_hash"`
+	ExpectedGeneratedHashKind string               `json:"expected_generated_hash_kind"`
 }
 
 func Normalize(options Options, local bool) (Options, error) {

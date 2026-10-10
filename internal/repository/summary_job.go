@@ -89,7 +89,7 @@ func (r *Repositories) prepareSummaryDispatch(req InitialTaskDispatchRequest) (I
 				return err
 			}
 		}
-		if tx.SummaryPart != nil {
+		if tx.SummaryPart != nil && !req.PreserveSummaryCheckpoints {
 			if err := tx.SummaryPart.DeleteByTaskID(task.ID); err != nil {
 				return err
 			}

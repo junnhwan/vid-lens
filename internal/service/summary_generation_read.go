@@ -10,6 +10,7 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/processing"
 	"vid-lens/internal/repository"
+	"vid-lens/internal/summarydoc"
 )
 
 type SummaryGenerationReadService struct{ repos *repository.Repositories }
@@ -37,27 +38,33 @@ type SummaryGenerationActivity struct {
 	DurationMS int64      `json:"duration_ms"`
 }
 type SummaryGenerationView struct {
-	MindmapEnabled     *bool                        `json:"mindmap_enabled,omitempty"`
-	TaskID             int64                        `json:"task_id"`
-	GenerationID       string                       `json:"generation_id"`
-	ResultGenerationID string                       `json:"result_generation_id"`
-	Legacy             bool                         `json:"legacy"`
-	RequestedMode      string                       `json:"requested_mode"`
-	ResolvedMode       string                       `json:"resolved_mode"`
-	TextState          string                       `json:"text_state"`
-	VisualState        string                       `json:"visual_state"`
-	ResultState        string                       `json:"result_state"`
-	Stage              string                       `json:"stage"`
-	Status             string                       `json:"status"`
-	StopReason         string                       `json:"stop_reason,omitempty"`
-	FallbackReason     string                       `json:"fallback_reason,omitempty"`
-	SourceStatus       string                       `json:"source_status"`
-	Source             *SummaryGenerationSourceView `json:"source,omitempty"`
-	GeneratedVersion   int64                        `json:"generated_version"`
-	ContentDigest      string                       `json:"content_digest"`
-	ContentHashKind    string                       `json:"content_hash_kind"`
-	Activities         []SummaryGenerationActivity  `json:"activities"`
-	EventHighWatermark int64                        `json:"event_high_watermark"`
+	GeneratedContentDigest string                       `json:"generated_content_digest,omitempty"`
+	GeneratedSourceID      string                       `json:"generated_source_id,omitempty"`
+	GeneratedSourceDigest  string                       `json:"generated_source_digest,omitempty"`
+	VisualRetryAvailable   bool                         `json:"visual_retry_available"`
+	Operation              string                       `json:"operation,omitempty"`
+	ParentGenerationID     string                       `json:"parent_generation_id,omitempty"`
+	MindmapEnabled         *bool                        `json:"mindmap_enabled,omitempty"`
+	TaskID                 int64                        `json:"task_id"`
+	GenerationID           string                       `json:"generation_id"`
+	ResultGenerationID     string                       `json:"result_generation_id"`
+	Legacy                 bool                         `json:"legacy"`
+	RequestedMode          string                       `json:"requested_mode"`
+	ResolvedMode           string                       `json:"resolved_mode"`
+	TextState              string                       `json:"text_state"`
+	VisualState            string                       `json:"visual_state"`
+	ResultState            string                       `json:"result_state"`
+	Stage                  string                       `json:"stage"`
+	Status                 string                       `json:"status"`
+	StopReason             string                       `json:"stop_reason,omitempty"`
+	FallbackReason         string                       `json:"fallback_reason,omitempty"`
+	SourceStatus           string                       `json:"source_status"`
+	Source                 *SummaryGenerationSourceView `json:"source,omitempty"`
+	GeneratedVersion       int64                        `json:"generated_version"`
+	ContentDigest          string                       `json:"content_digest"`
+	ContentHashKind        string                       `json:"content_hash_kind"`
+	Activities             []SummaryGenerationActivity  `json:"activities"`
+	EventHighWatermark     int64                        `json:"event_high_watermark"`
 }
 type SummaryGenerationEvent struct {
 	Seq       int64          `json:"seq"`
@@ -88,6 +95,11 @@ func (s *SummaryGenerationReadService) Latest(ctx context.Context, owner, taskID
 	if read.Job != nil && read.Job.GenerationID == read.GenerationID && read.Job.InputSnapshotJSON != "" {
 		var snapshot processing.GenerationSnapshot
 		if json.Unmarshal([]byte(read.Job.InputSnapshotJSON), &snapshot) == nil && snapshot.Intent.GenerationID == read.GenerationID {
+			if snapshot.Operation == processing.OperationVisualRetry && snapshot.VisualRetry != nil {
+				view.Operation = snapshot.Operation
+				view.ParentGenerationID = snapshot.VisualRetry.ParentGenerationID
+				view.TextState = "ready"
+			}
 			if intent, err := processing.Decode(artifact.JSON(snapshot.Intent)); err == nil {
 				options := intent.Options
 				frozenOptions = &options
@@ -124,6 +136,12 @@ func (s *SummaryGenerationReadService) Latest(ctx context.Context, owner, taskID
 			}
 		}
 		if effective.Generated != nil {
+			view.GeneratedContentDigest = effective.Generated.ContentDigest
+			view.GeneratedSourceID = effective.Generated.SourceID
+			view.GeneratedSourceDigest = effective.Generated.SourceDigest
+			if generatedDoc, parseErr := summarydoc.Parse([]byte(effective.Generated.DocumentJSON)); parseErr == nil && generatedDoc.PresentationMode == "text" && read.Task.ActiveTextSourceID == effective.Generated.SourceID && !repository.SummaryJobActive(read.Job) && read.Task.VisualCaptionAllowed() && read.Task.EffectiveVisualMode() != model.VisualModeOff {
+				view.VisualRetryAvailable = true
+			}
 			view.GeneratedVersion = effective.Generated.GeneratedVersion
 			view.ResultGenerationID = effective.Generated.GenerationID
 			if read.GenerationID == "" || effective.Generated.GenerationID == read.GenerationID {
@@ -154,7 +172,7 @@ func (s *SummaryGenerationReadService) Latest(ctx context.Context, owner, taskID
 		}
 		for _, event := range read.Events {
 			data := publicSummaryGenerationEventData(event.DataJSON)
-			if event.Type == "run.text_ready" {
+			if event.Type == "run.text_ready" || event.Type == "run.text_reused" {
 				view.TextState = "ready"
 			}
 			if event.Type == "run.retry_waiting" && run.Status == "running" {
@@ -289,7 +307,7 @@ func publicSummaryGenerationEventData(raw string) map[string]any {
 	var data map[string]any
 	_ = json.Unmarshal([]byte(raw), &data)
 	out := map[string]any{}
-	for _, key := range []string{"activity_id", "attempt", "kind", "state", "status", "stage", "text_state", "visual_state", "result_state", "generated_version", "content_digest", "requested_mode", "resolved_mode", "fallback_reason", "stop_reason", "started_at", "finished_at", "duration_ms", "next_retry_at"} {
+	for _, key := range []string{"activity_id", "attempt", "kind", "state", "status", "stage", "text_state", "visual_state", "result_state", "generated_version", "content_digest", "requested_mode", "resolved_mode", "fallback_reason", "stop_reason", "started_at", "finished_at", "duration_ms", "next_retry_at", "operation", "parent_generation_id", "result_generation_id"} {
 		if value, ok := data[key]; ok {
 			out[key] = value
 		}

@@ -153,7 +153,7 @@ export default function VideoChatPage({ params, searchParams }: { params: { id: 
   return <div className={`video-chat-with-summary${view.summaryOpen ? ' summary-open' : ''}`}>
     <header className="video-chat-summary-toggle"><button className="btn btn-sm" aria-expanded={view.summaryOpen} aria-controls="video-chat-summary-reader" onClick={() => patchView({ summaryOpen: !view.summaryOpen })}>{view.summaryOpen ? '收起摘要' : '展开当前有效摘要'}</button><Link className="btn btn-sm" href={`/video/${taskId}${view.sessionID ? `?session=${view.sessionID}` : ''}`}>返回摘要详情</Link><span className="muted">从摘要选段提问，正文与引用分别发送</span></header>
     <div className="video-chat-summary-layout">
-    <article id="video-chat-summary-reader" ref={readerRef} className="video-chat-summary-reader" aria-label="当前有效摘要" hidden={!view.summaryOpen}>
+    <article id="video-chat-summary-reader" ref={readerRef} className="video-chat-summary-reader" tabIndex={0} aria-label="当前有效摘要" hidden={!view.summaryOpen}>
       {summaryLoading && !summary && <LoadingBlock />}
       {summaryError && <ErrorState message={summaryError} onRetry={() => setSummaryReload(key => key + 1)} />}
       {referenceNotice && <p role="status">{referenceNotice}</p>}

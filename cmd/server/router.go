@@ -191,6 +191,7 @@ func newServerRouter(cfg config.Config, handlers serverHandlers, rateLimiter *mi
 				media.DELETE("/task/:id", handlers.media.DeleteTask)
 				media.POST("/analyze/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
 				media.POST("/task/:id/summary", middleware.RateLimit(rateLimiter), handlers.media.RequestAnalysis)
+				media.POST("/task/:id/summary/visual-retry", middleware.RateLimit(rateLimiter), handlers.media.RequestSummaryVisualRetry)
 				media.POST("/transcribe/:id", middleware.RateLimit(rateLimiter), handlers.media.RequestTranscribe)
 				media.GET("/task/:id/rag-index", handlers.rag.GetTaskIndexStatus)
 				media.POST("/task/:id/rag-index", middleware.RateLimit(rateLimiter), handlers.rag.BuildTaskIndex)

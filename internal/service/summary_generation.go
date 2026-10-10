@@ -71,6 +71,12 @@ func (s *SummaryGenerationService) Generate(ctx context.Context, task *model.Vid
 	if err := artifact.Decode([]byte(job.InputSnapshotJSON), &frozen); err != nil {
 		return artifact.Err("invalid_generation_snapshot", 409)
 	}
+	if frozen.Operation == processing.OperationVisualRetry {
+		return s.generateVisualRetry(ctx, task, job, frozen, leaseToken)
+	}
+	if frozen.Operation != "" {
+		return artifact.Err("invalid_generation_snapshot", 409)
+	}
 	intent, err := processing.Decode(artifact.JSON(frozen.Intent))
 	if err != nil {
 		return artifact.Err("invalid_generation_snapshot", 409)
@@ -481,7 +487,7 @@ func summaryVisualFailure(err error) (state, reason string) {
 		switch failure.Code {
 		case "visual_capability_unavailable", "visual_disabled", "vision_unavailable", "visual_location_missing", "visual_not_beneficial", "visual_budget_exhausted", "requested_visual_mode_unavailable":
 			return "skipped", failure.Code
-		case "invalid_visual_plan", "invalid_visual_selection", "invalid_visual_response", "visual_no_usable_frames":
+		case "invalid_visual_plan", "invalid_visual_selection", "invalid_visual_response", "invalid_visual_checkpoint", "visual_no_usable_frames":
 			return "failed", failure.Code
 		}
 	}
