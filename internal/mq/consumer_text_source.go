@@ -74,6 +74,9 @@ func (c *Consumer) handleTextSource(ctx context.Context, payload AnalyzePayload)
 	ctx = c.contextForTaskJob(ctx, task, model.TaskJobTypeTextSource, payload.BudgetID)
 	intent, err := processing.Decode(task.ProcessingIntentJSON)
 	if err == nil {
+		_, err = sourceRefreshSnapshot(task, job)
+	}
+	if err == nil {
 		err = c.processTextSource(ctx, task, intent, claim.Token)
 	}
 	if err != nil {
@@ -168,6 +171,13 @@ func (c *Consumer) processTextSource(ctx context.Context, task *model.VideoTask,
 		if err := tx.TaskJob.RecordTextSourceOutcome(task.ID, "platform_subtitle", "selected platform subtitle published"); err != nil {
 			return err
 		}
+		unchanged, err := c.unchangedSourceRefresh(ctx, tx, task, intent, source, model.TaskJobTypeTextSource)
+		if err != nil {
+			return err
+		}
+		if unchanged {
+			return tx.RecordUnchangedSourceRefresh(ctx, task.ID, model.TaskJobTypeTextSource, intent.GenerationID)
+		}
 		if intent.Options.AutoSummary {
 			dispatch, err := c.prepareAutomaticSummary(tx, task, intent, source)
 			if err != nil {
@@ -251,7 +261,21 @@ func (c *Consumer) delegateTextSourceASR(ctx context.Context, task *model.VideoT
 			return err
 		}
 		prepared, err = tx.PrepareInitialTaskDispatch(repository.InitialTaskDispatchRequest{Task: task, AllowedStatuses: []int8{model.TaskStatusPending}, JobType: model.TaskJobTypeTranscribe, Stage: model.TaskStageTranscribing, Token: uuid.NewString(), Now: c.currentTime(), LeaseUntil: c.currentTime().Add(2 * time.Minute)})
-		return err
+		if err != nil {
+			return err
+		}
+		sourceJob, err := tx.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTextSource)
+		if err != nil {
+			return err
+		}
+		frozen, err := sourceRefreshSnapshot(task, sourceJob)
+		if err != nil {
+			return err
+		}
+		if frozen != nil {
+			return tx.FreezeSourceRefreshJob(ctx, task.ID, model.TaskJobTypeTranscribe, *frozen)
+		}
+		return nil
 	})
 	if err != nil {
 		return err

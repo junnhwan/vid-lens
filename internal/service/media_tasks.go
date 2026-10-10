@@ -128,7 +128,8 @@ func (s *MediaService) RequestAnalysis(ctx context.Context, userID, taskID int64
 	return fmt.Errorf("任务状态已变化，请刷新后重试")
 }
 
-// RequestTranscribe 提交文字提取。force=true 时清除分片缓存并允许覆盖已有转写。
+// RequestTranscribe submits transcription. V2 force accepts a new frozen source
+// attempt while retaining published text; legacy force retains its reset behavior.
 func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int64, force bool, alignment ...bool) error {
 	alignOnly := len(alignment) > 0 && alignment[0]
 	if alignOnly && (force || len(s.tools.TranscriptAlignerCommand) == 0) {
@@ -140,6 +141,14 @@ func (s *MediaService) RequestTranscribe(ctx context.Context, userID, taskID int
 	}
 	if task.UserID != userID {
 		return fmt.Errorf("无权操作此任务")
+	}
+	if !alignOnly && task.ProcessingIntentJSON != "" {
+		if replay, replayErr := s.replayV2ASRRefresh(ctx, task, force); replay || replayErr != nil {
+			return replayErr
+		}
+	}
+	if !alignOnly && task.ProcessingIntentJSON != "" && (force || (task.LastJobType == model.TaskJobTypeTranscribe && (task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusDead))) {
+		return s.requestV2ASRRefresh(ctx, task, force)
 	}
 	if !alignOnly {
 		if err := s.requireModelAction(userID, "transcribe"); err != nil {

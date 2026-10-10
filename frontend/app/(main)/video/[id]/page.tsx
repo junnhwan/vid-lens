@@ -18,6 +18,7 @@ import {
 import { taskTitle } from '@/lib/format'
 import { needsCitationUpgrade } from '@/components/Citation'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
+import { TextSourceRefreshDialog } from '@/components/video/TextSourceRefreshDialog'
 import { SummaryWorkspace } from '@/components/summary/SummaryWorkspace'
 import { SummaryRevisionPanel } from '@/components/summary/SummaryRevisionPanel'
 import { VideoQuestionsPanel } from '@/components/chat/VideoQuestionsPanel'
@@ -62,6 +63,7 @@ function VideoWorkbench({ params, searchParams }: { params: { id: string }; sear
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [questionsOpen, setQuestionsOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [sourceRefreshOpen,setSourceRefreshOpen]=useState(false)
   const [dialogInstant, setDialogInstant] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
 
@@ -360,8 +362,9 @@ function VideoWorkbench({ params, searchParams }: { params: { id: string }; sear
           </section>
           <section className="workbench-more-group" aria-label="内容处理">
             <h4>内容处理</h4>
+            <button className="workbench-operation" disabled={readOnly || busy!=='' || processing} onClick={()=>{setMoreOpen(false);setSourceRefreshOpen(true)}}><Icon name="refresh"/><span><strong>刷新文字来源</strong><small>重新检查字幕或转写，并使用更新后的配置继续处理</small></span><Icon name="chev-r"/></button>
             {task.has_transcription ? (
-              <button className="workbench-operation" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => { setMoreOpen(false); setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: resumeTranscription ? '继续转写？' : '重新转写？', body: resumeTranscription ? resumeTranscriptionBody : '会清除旧分片并再次调用语音识别，可能产生新的 ASR 费用。', confirmLabel: resumeTranscription ? '继续转写' : '重新转写' }) }}><Icon name="refresh" /><span><strong>{resumeTranscription ? '继续转写' : '重新转写'}</strong><small>{resumeTranscription ? '保留已完成分片，继续处理未完成部分' : '重新识别视频音频，更新转写内容'}</small></span><Icon name="chev-r" size="sm" /></button>
+              <button className="workbench-operation" disabled={readOnly || busy !== '' || processing || checkingTranscription} onClick={() => { setMoreOpen(false); setPendingAction({ kind: 'transcribe', force: !resumeTranscription, title: resumeTranscription ? '继续转写？' : '重新转写？', body: resumeTranscription ? resumeTranscriptionBody : '会再次调用语音识别，可能产生新的 ASR 费用。', confirmLabel: resumeTranscription ? '继续转写' : '重新转写' }) }}><Icon name="refresh" /><span><strong>{resumeTranscription ? '继续转写' : '重新转写'}</strong><small>{resumeTranscription ? '保留已完成分片，继续处理未完成部分' : '重新识别视频音频，更新转写内容'}</small></span><Icon name="chev-r" size="sm" /></button>
             ) : <button className="workbench-operation" disabled={readOnly || busy !== '' || processing} onClick={() => { setMoreOpen(false); void runAction('transcribe') }}><Icon name="activity" /><span><strong>{processing ? '转写处理中' : '开始转写'}</strong><small>将视频声音转换为可检索的文字</small></span><Icon name="chev-r" size="sm" /></button>}
             <button className="workbench-operation" disabled={busy !== '' || !index || index.status === 'indexing' || index.status === 'queued'} onClick={() => { if (index) { setMoreOpen(false); setPendingAction(indexConfirm(index)) } }}><Icon name="layers" /><span><strong>{indexActionLabel(index)}</strong><small>更新视频问答使用的内容检索索引</small></span><Icon name="chev-r" size="sm" /></button>
           </section>
@@ -386,6 +389,7 @@ function VideoWorkbench({ params, searchParams }: { params: { id: string }; sear
           onChanged={() => toast.success('知识库成员已更新')}
         />
       )}
+      {sourceRefreshOpen&&<TextSourceRefreshDialog key={task.id} task={task} readOnly={readOnly} onClose={()=>setSourceRefreshOpen(false)} onAccepted={()=>{toast.success('文字来源刷新已受理，已有内容会保留至新来源就绪');setSourceRefreshOpen(false);void data.refreshAfterAction()}}/>}
       {pendingAction && (
         <ConfirmModal
           title={pendingAction.title}

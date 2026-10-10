@@ -43,6 +43,7 @@ type SummaryGenerationView struct {
 	GeneratedSourceDigest  string                       `json:"generated_source_digest,omitempty"`
 	VisualRetryAvailable   bool                         `json:"visual_retry_available"`
 	Operation              string                       `json:"operation,omitempty"`
+	ClassificationState    string                       `json:"classification_state,omitempty"`
 	ParentGenerationID     string                       `json:"parent_generation_id,omitempty"`
 	MindmapEnabled         *bool                        `json:"mindmap_enabled,omitempty"`
 	TaskID                 int64                        `json:"task_id"`
@@ -88,11 +89,22 @@ func (s *SummaryGenerationReadService) Latest(ctx context.Context, owner, taskID
 	}
 	view := &SummaryGenerationView{TaskID: taskID, GenerationID: read.GenerationID, Legacy: read.GenerationID == "", RequestedMode: "auto", TextState: "pending", VisualState: "not_requested", ResultState: "pending", Stage: read.Task.Stage, Status: generationTaskStatus(read.Task.Status), Activities: []SummaryGenerationActivity{}}
 	var frozenOptions *processing.Options
+	var sourceRefresh *processing.SourceRefreshSnapshot
 	if read.Intent != nil && read.Intent.GenerationID == read.GenerationID {
 		options := read.Intent.Options
 		frozenOptions = &options
 	}
 	if read.Job != nil && read.Job.GenerationID == read.GenerationID && read.Job.InputSnapshotJSON != "" {
+		var refresh processing.SourceRefreshSnapshot
+		if json.Unmarshal([]byte(read.Job.InputSnapshotJSON), &refresh) == nil && refresh.Operation == processing.OperationSourceRefresh {
+			sourceRefresh = &refresh
+			view.Operation = refresh.Operation
+			if read.Job.Status == model.TaskStatusCompleted && read.Job.LastErrorCode == "source_unchanged" {
+				view.TextState = "ready"
+				view.VisualState = "not_requested"
+				view.FallbackReason = "source_unchanged"
+			}
+		}
 		var snapshot processing.GenerationSnapshot
 		if json.Unmarshal([]byte(read.Job.InputSnapshotJSON), &snapshot) == nil && snapshot.Intent.GenerationID == read.GenerationID {
 			if snapshot.Operation == processing.OperationVisualRetry && snapshot.VisualRetry != nil {
@@ -264,6 +276,24 @@ func (s *SummaryGenerationReadService) Latest(ctx context.Context, owner, taskID
 				view.VisualState = "failed"
 			}
 		}
+	}
+	if view.Operation == processing.OperationSourceRefresh && read.Run == nil && read.Job != nil && read.Job.Status == model.TaskStatusCompleted && read.Job.LastErrorCode == "source_unchanged" {
+		view.TextState = "ready"
+		view.VisualState = "not_requested"
+		if view.ResolvedMode == "image_text" || view.ResolvedMode == "keyframes" {
+			view.VisualState = "complete"
+		}
+		view.FallbackReason = "source_unchanged"
+		view.ClassificationState = "retained"
+		if sourceRefresh != nil && sourceRefresh.ClassificationChanged {
+			view.ClassificationState = "not_reprocessed"
+		}
+	}
+	if sourceRefresh != nil && read.Run == nil && read.Job.Status == model.TaskStatusCompleted && !sourceRefresh.Intent.Options.AutoSummary && read.Job.LastErrorCode != "source_unchanged" {
+		view.TextState = "not_requested"
+		view.VisualState = "not_requested"
+		view.StopReason = "auto_summary_disabled"
+		view.ClassificationState = "not_reprocessed"
 	}
 	return view, nil
 }

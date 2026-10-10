@@ -13,6 +13,7 @@ import (
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
 	"vid-lens/internal/pkg/ffmpeg"
+	"vid-lens/internal/processing"
 	"vid-lens/internal/repository"
 	"vid-lens/internal/transcript"
 )
@@ -91,6 +92,15 @@ func (c *transcriptionWorkflow) transcribeAudio(ctx context.Context, taskID int6
 	}
 	observability.Log(ctx, slog.Default(), slog.LevelInfo, "asr chunks prepared", slog.Int64("task_id", taskID), slog.Int("chunk_count", len(segments)))
 
+	attempt, err := c.sourceASRAttempt(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if attempt != "" {
+		for i := range segments {
+			segments[i].SegmentKey = processing.Fingerprint([]string{segments[i].SegmentKey, attempt})
+		}
+	}
 	parts := make([]string, len(segments))
 	type asrWork struct {
 		index   int

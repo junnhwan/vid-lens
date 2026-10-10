@@ -46,6 +46,13 @@ func (c *Consumer) publishAutomaticASRSource(ctx context.Context, task *model.Vi
 		if !completed {
 			return ErrProcessingLeaseLost
 		}
+		unchanged, err := c.unchangedSourceRefresh(ctx, tx, task, intent, source, model.TaskJobTypeTranscribe)
+		if err != nil {
+			return err
+		}
+		if unchanged {
+			return tx.RecordUnchangedSourceRefresh(ctx, task.ID, model.TaskJobTypeTranscribe, intent.GenerationID)
+		}
 		if intent.Options.AutoSummary {
 			dispatch, err := c.prepareAutomaticSummary(tx, task, intent, source)
 			if err != nil {

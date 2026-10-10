@@ -50,6 +50,19 @@ func (r *Repositories) ReadSummaryGeneration(ctx context.Context, owner, taskID 
 			}
 			out.Intent = &intent
 		}
+		if out.Intent != nil && (job == nil || job.GenerationID != out.Intent.GenerationID) && (task.LastJobType == model.TaskJobTypeTextSource || task.LastJobType == model.TaskJobTypeTranscribe) {
+			sourceJob, readErr := tx.TaskJob.FindByTaskAndType(taskID, task.LastJobType)
+			if readErr != nil {
+				return readErr
+			}
+			if sourceJob != nil && sourceJob.GenerationID == out.Intent.GenerationID {
+				var frozen processing.SourceRefreshSnapshot
+				if json.Unmarshal([]byte(sourceJob.InputSnapshotJSON), &frozen) == nil && frozen.Operation == processing.OperationSourceRefresh {
+					job = sourceJob
+					out.Job = sourceJob
+				}
+			}
+		}
 		selected := ""
 		if job != nil && job.GenerationID != "" {
 			selected = job.GenerationID
@@ -87,7 +100,7 @@ func (r *Repositories) ReadSummaryGeneration(ctx context.Context, owner, taskID 
 				return artifact.Err("invalid_generation_checkpoint", 409)
 			}
 			sourceID = policy.SourceID
-		} else if job != nil && job.GenerationID == selected && job.InputSourceID != "" {
+		} else if job != nil && job.GenerationID == selected && job.InputSourceID != "" && !(job.JobType != model.TaskJobTypeSummary && job.Status == model.TaskStatusCompleted) {
 			sourceID = job.InputSourceID
 		}
 		if sourceID != "" {

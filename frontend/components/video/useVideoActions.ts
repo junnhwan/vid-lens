@@ -19,6 +19,7 @@ export function useVideoActions(data: ReturnType<typeof useVideoWorkbenchData>, 
  const indexAI = useAIAvailability(readOnly, 'index')
  const [busy, setBusy] = useState<ActionKind | ''>('')
  const inFlight = useRef(false)
+ const transcriptionIntent = useRef<{ basis:string; key:string }>()
  const [titleBusy,setTitleBusy] = useState(false)
  const [titleDraft,setTitleDraft] = useState('')
  const [editingTitle,setEditingTitle] = useState(false)
@@ -38,7 +39,10 @@ export function useVideoActions(data: ReturnType<typeof useVideoWorkbenchData>, 
     setBusy(kind)
     try {
       if (kind === 'transcribe') {
-        await api.transcribe(task.id, force)
+        const basis=JSON.stringify([task.id,force])
+        if(transcriptionIntent.current?.basis!==basis)transcriptionIntent.current={basis,key:`transcribe-${crypto.randomUUID()}`}
+        await api.transcribe(task.id, force, transcriptionIntent.current.key)
+        transcriptionIntent.current=undefined
         toast.success(force ? '重新转写已排队，将再次调用语音识别' : '转写任务已排队，等待并发名额')
       } else if (kind === 'align') {
         await api.alignTranscript(task.id)

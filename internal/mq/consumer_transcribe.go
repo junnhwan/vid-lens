@@ -69,6 +69,9 @@ func (c *Consumer) handleTranscribe(ctx context.Context, delivery amqp.Delivery)
 	automaticSource := !alignmentOnly && task.ProcessingIntentJSON != ""
 	if automaticSource {
 		intent, err = processing.Decode(task.ProcessingIntentJSON)
+		if err == nil {
+			_, err = sourceRefreshSnapshot(task, job)
+		}
 		if err != nil {
 			return recordFailure(err)
 		}

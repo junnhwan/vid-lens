@@ -214,8 +214,8 @@ export const api = {
   playbackSrc,
   visualFrameSrc,
   deleteTask: (id: number) => req<null>(`/media/task/${id}`, 'DELETE'),
-  transcribe: (id: number, force = false) =>
-    req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST'),
+  transcribe: (id: number, force = false, key?: string) =>
+    req<{ task_id: number }>(`/media/transcribe/${id}${force ? '?force=1' : ''}`, 'POST', undefined, key ? { 'Idempotency-Key': key } : undefined),
   alignTranscript: (id: number) => req<{ task_id: number }>(`/media/transcribe/${id}?align=1`, 'POST'),
   analyze: (id: number, force = false) =>
     req<{ task_id: number }>(`/media/analyze/${id}${force ? '?force=1' : ''}`, 'POST'),

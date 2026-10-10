@@ -154,3 +154,91 @@ Only exact private source/profile/recipe/argument matches can reuse successful p
 The latest snapshot adds `operation`, `parent_generation_id`, `generated_content_digest`, `generated_source_id`, `generated_source_digest` and `visual_retry_available`. The availability flag requires a current typed text result, inactive summary job and permitted task visual mode; acceptance still checks ownership, capabilities, switches and all expected fields. During a queued/running visual retry, `generation_id` identifies the new attempt while `result_generation_id` identifies the old readable original. `text_state` and `result_state` are ready because this complete text is frozen and reused. The actual `run.text_reused` event and reuse activity record that fact; no fake text-publication action or future activities appear. The run enters `visual_retry`, then actual visual enrichment stages.
 
 If visual work fails or is skipped, the old `AISummary` row remains byte-for-byte unchanged and the new run records the specific visual reason with text/result still ready. On success, screenshot registration and a same-source/media/generated-base CAS publish one new generated version in the same transaction. A failed CAS rolls screenshot registration back. The prior user revision/head remain byte-for-byte unchanged and the existing effective reader reports `needs_merge` where appropriate. Source changes, cancellation, deletion, stale leases and accepted-profile changes close execution/publication rights. Historical generations and results remain readable under their original owner/task permissions.
+
+## Refresh or continue the text source
+
+An existing v2 task can explicitly refresh its source after platform subtitles or
+an owned profile configuration change. This accepts a new operation identity;
+automatic queue retries keep that accepted identity. Legacy/manual tasks without
+a processing intent return 422 `source_refresh_requires_processing_intent` and
+are not silently upgraded to paid generation.
+
+```http
+POST /api/v1/media/task/123/text-source/refresh
+Authorization: Bearer <session-token>
+Idempotency-Key: <fresh-key-for-this-user-action>
+Content-Type: application/json
+```
+
+```json
+{
+  "expected_source_id": "current-active-source-uuid",
+  "text_source_policy": "prefer_platform",
+  "profile_id": 12,
+  "preferred_language": "zh",
+  "auto_summary": true
+}
+```
+
+`expected_source_id` is required; explicitly submit `""` when no complete source
+has been published. The other fields are optional and inherit the prior accepted
+options. `text_source_policy` supports `prefer_platform` and `force_asr`. The
+previous explicitly resolved profile ID is used unless `profile_id` selects
+another owned profile. This new action freezes that profile's current
+configuration, summary preference, policy, budget, current tag vocabulary and
+existing task tag version. It does not alter the old run or remove its fences.
+Platform subtitle probing requires a configured summary profile but does not
+require ASR. Forced ASR requires a usable current ASR capability at acceptance;
+a platform fallback can instead report the missing capability as its real
+asynchronous failure. No replacement default profile is chosen by a worker.
+
+Acceptance returns HTTP 202 with
+`{ "task_id": 123, "generation_id": "new-accepted-uuid", "operation": "source_refresh", "accepted": true }`.
+Receipt, current intent, existing source/transcribe job and dispatch lease commit
+in one transaction. Identical key/body replay returns the original generation
+without another dispatch, including after completion or a configuration/switch
+change. Same-key changed body returns 409. Missing/duplicate keys, malformed
+JSON/options or omitted expected identity return 400; ownership/deletion returns
+404; a changed source/media/intent or active task/summary job returns 409;
+missing required capability returns 422. The usual new-generation admission
+gate returns 503. Queue publication failure preserves the accepted snapshot in
+recoverable backoff rather than accepting another identity automatically.
+
+The old active source, full transcript projection, generated original and user
+revision/head remain readable until a complete candidate is published. Failed
+probing, ASR windows or candidate publication cannot erase these results.
+Candidate source publication, source-job completion and any new summary-input
+freeze happen atomically under the current lease and owned media/source fence.
+A different source or changed content-generating options/profile accepts a new
+summary generation when `auto_summary` is enabled. User revisions remain
+readable and can report `source_changed`/`needs_merge` through the existing
+summary contract.
+
+When the immutable source and accepted body-generating input are unchanged, the
+existing private typed summary is retained without a text-model call or fake
+publication. Tag vocabulary/version, the auto-tag switch and mindmap reading
+preference do not invalidate this prose cache. Existing classification is
+retained; changed classification settings expose
+`classification_state: "not_reprocessed"`, not a claim that classification ran.
+New vocabulary is still frozen for a genuinely new summary recipe. The current
+snapshot has `operation: "source_refresh"`, the new `generation_id`, the old
+`result_generation_id`, no invented activities, and `fallback_reason:
+"source_unchanged"`. A completed source-only operation (`auto_summary: false`)
+returns `text_state: "not_requested"`, `visual_state: "not_requested"` and
+`stop_reason: "auto_summary_disabled"`; the existing readable result remains
+separately identified. If no summary run exists, that current generation's
+events endpoint returns HTTP 200 with an empty page, high-watermark/cursor zero
+and `has_more: false`. No polling error loop or invented event stream is needed.
+
+The existing authenticated `POST /media/transcribe/:id?force=1` also accepts a
+new frozen v2 ASR source operation and requires one Idempotency-Key. For a failed
+v2 transcribe task, a request without `force` explicitly continues ASR. Its
+compatibility receipt hashes the task and force/continue action, so an identical
+retry remains stable after the active source changes. It does not hash mutable
+runtime source state. Forced attempts use new generation-scoped ASR window
+keys. An explicit continue (or `resume_asr: true` on the refresh endpoint with
+`force_asr`) can reuse completed windows only with the same frozen profile and
+media; if the profile changed, it uses a fresh ASR attempt. Repeated continues
+preserve the original compatible ASR checkpoint namespace. Queue redelivery
+uses the same attempt and spends nothing on its already-completed windows.
+Alignment-only and legacy transcription retain their original behavior.

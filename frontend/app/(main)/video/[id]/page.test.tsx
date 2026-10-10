@@ -129,7 +129,7 @@ test('legacy citation upgrade requires a cost confirmation and requests a forced
   expect(screen.getByText(/可能产生新的 ASR 和 Embedding 费用/)).toBeTruthy()
   expect(mock.transcribe).not.toHaveBeenCalled()
   fireEvent.click(screen.getAllByRole('button', { name: '补齐引用定位' })[1])
-  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, true))
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, true, expect.any(String)))
 })
 
 test('retained transcript does not hide running replacement transcription progress', async () => {
@@ -163,8 +163,8 @@ test.each([3, 4] as const)('failed replacement remains visible with old transcri
   fireEvent.click(screen.getByRole('button', { name: '重试补齐引用定位' }))
   expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
   fireEvent.click(screen.getAllByRole('button', { name: '重试补齐引用定位' })[1])
-  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
-  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true)
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false, expect.any(String)))
+  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true, expect.any(String))
 })
 
 test('more operations resumes unfinished transcription without deleting successful chunks', async () => {
@@ -182,8 +182,8 @@ test('more operations resumes unfinished transcription without deleting successf
   fireEvent.click(screen.getByRole('button', { name: /继续转写/ }))
   expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '继续转写' }))
-  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
-  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true)
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false, expect.any(String)))
+  expect(mock.transcribe).not.toHaveBeenCalledWith(42, true, expect.any(String))
 })
 
 test('citation recovery remains available when partial short chunks replaced the timeline but the transcript and index are still old', async () => {
@@ -203,7 +203,7 @@ test('citation recovery remains available when partial short chunks replaced the
   fireEvent.click(screen.getByRole('button', { name: '重试补齐引用定位' }))
   expect(screen.getByText(/保留已完成的转写分片/)).toBeTruthy()
   fireEvent.click(screen.getAllByRole('button', { name: '重试补齐引用定位' })[1])
-  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false))
+  await waitFor(() => expect(mock.transcribe).toHaveBeenCalledWith(42, false, expect.any(String)))
 })
 
 test('unavailable progress prevents a destructive upgrade until the saved chunks can be checked again', async () => {
@@ -318,4 +318,23 @@ test('repeated transcription clicks submit one job while the request is pending'
  fireEvent.click(button);fireEvent.click(button)
  expect(mock.transcribe).toHaveBeenCalledTimes(1)
  await act(async()=>finish({task_id:42}))
+})
+
+test('an unconfirmed transcription request reuses its action key when the user retries', async () => {
+ mock.aiReady=true
+ mock.getTask.mockResolvedValue({...task,has_transcription:true})
+ mock.getTimeline.mockResolvedValue({task_id:42,atoms:[{id:'old',modality:'transcript',content:'旧文字',start_ms:0,end_ms:305000,time_range_status:'coarse'}]})
+ mock.getRagIndex.mockResolvedValue({task_id:42,status:'indexed',indexed:true,chunks:1})
+ mock.playbackSrc.mockResolvedValue('/playback')
+ mock.transcribe.mockRejectedValueOnce(new Error('connection interrupted')).mockResolvedValueOnce({task_id:42})
+ render(<VideoWorkbenchPage params={{id:'42'}} searchParams={{citations:'upgrade'}}/>)
+ fireEvent.click(await screen.findByRole('button',{name:'补齐引用定位'}))
+ fireEvent.click(screen.getAllByRole('button',{name:'补齐引用定位'}).at(-1)!)
+ await waitFor(()=>expect(mock.toast.error).toHaveBeenCalledOnce())
+ const first=mock.transcribe.mock.calls[0]
+ expect(first.slice(0,2)).toEqual([42,true]);expect(first[2]).toEqual(expect.any(String))
+ fireEvent.click(screen.getByRole('button',{name:'补齐引用定位'}))
+ fireEvent.click(screen.getAllByRole('button',{name:'补齐引用定位'}).at(-1)!)
+ await waitFor(()=>expect(mock.transcribe).toHaveBeenCalledTimes(2))
+ expect(mock.transcribe.mock.calls[1]).toEqual(first)
 })

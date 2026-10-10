@@ -270,7 +270,17 @@ func (h *MediaHandler) RequestTranscribe(c *gin.Context) {
 	force := parseForceFlag(c)
 
 	alignOnly := c.Query("align") == "1"
-	if err := h.svc.RequestTranscribe(c.Request.Context(), userID, taskID, force, alignOnly); err != nil {
+	if len(c.Request.Header.Values("Idempotency-Key")) > 1 {
+		artifactError(c, artifact.Err("invalid_idempotency_key", 400))
+		return
+	}
+	ctx := service.WithSourceRefreshIdempotencyKey(c.Request.Context(), c.GetHeader("Idempotency-Key"))
+	if err := h.svc.RequestTranscribe(ctx, userID, taskID, force, alignOnly); err != nil {
+		var domain *artifact.Error
+		if errors.As(err, &domain) {
+			artifactError(c, err)
+			return
+		}
 		response.Fail(c, 400, err.Error())
 		return
 	}
