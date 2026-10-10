@@ -133,7 +133,23 @@ func (s *SummaryRevisionService) applyDocumentEdit(ctx context.Context, op *mode
 	return s.Operation(ctx, op.UserID, op.TaskID, op.ID)
 }
 
-func (s *SummaryRevisionService) executeDocumentEdit(ctx context.Context, op *model.SummaryEditOperation, rules VideoTermRuleSet, client ai.ChatClient, token string) (*SummaryEditView, error) {
+func (s *SummaryRevisionService) executeDocumentEdit(ctx context.Context, op *model.SummaryEditOperation, rules VideoTermRuleSet, client ai.ChatClient, token string) (view *SummaryEditView, err error) {
+	ctx, cancel, err := s.summaryEditBudgetContext(ctx, op)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer func() {
+		if err != nil && errors.Is(context.Cause(ctx), errAgentRunDurationLimit) {
+			err = artifact.Err("budget_exhausted", 422)
+			finalCtx, stop := agentFinalizationContext(ctx)
+			defer stop()
+			_ = s.repos.SummaryRevision.Fail(finalCtx, op.ID, "budget_exhausted", token)
+		}
+	}()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	base, validation, err := s.documentBase(ctx, op)
 	var patch summarydoc.Patch
 	if err == nil {
@@ -215,9 +231,41 @@ func (s *SummaryRevisionService) planDocumentPatch(ctx context.Context, op *mode
 			return summaryDocumentCheckpoint{}, artifact.Err("budget_exhausted", 422)
 		}
 		result, err := journal.Execute(ctx, AgentJournalStep{UserID: op.UserID, RunID: op.RunID, StepID: stepID, Sequence: sequence, Kind: "plan", Action: "propose_summary_document_patch", DigestAction: run.RecipeVersion, SafeReason: "propose typed edits to the frozen summary document", InputSummary: artifact.JSON(map[string]any{"recipe": run.RecipeVersion, "base_hash": op.BaseContentHash, "rule_digest": op.RuleDigest}), ArgumentsDigest: argsDigest, ToolName: "propose_summary_document_patch", CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: true, RetryReplaySafe: true, LLMCall: true, EstimatedPromptTokens: estimated, ContextChars: int64(len(system) + len(prompt)), FailureCode: "provider_error"}, func() (AgentJournalResult, error) {
-			raw, err := client.Chat(ctx, messages)
+			currentRecords, err := s.repos.AgentExecution.GetExecution(ctx, op.UserID, op.RunID)
 			if err != nil {
 				return AgentJournalResult{}, err
+			}
+			if currentRecords == nil {
+				return AgentJournalResult{}, artifact.Err("unsupported_checkpoint", 409)
+			}
+			current := currentRecords.Run
+			output := current.MaxCompletionTokens
+			if output > 0 {
+				output -= current.CompletionTokensUsed
+				if output <= 0 {
+					return AgentJournalResult{}, artifact.Err("budget_exhausted", 422)
+				}
+			}
+			if current.MaxContextChars > 0 {
+				headroom := current.MaxContextChars - estimated - 256
+				if output <= 0 || output > headroom {
+					output = headroom
+				}
+			}
+			var providerUsage *ai.ChatUsage
+			callCtx := ai.WithStructuredJSON(ai.WithChatBudget(ctx, output, func(u ai.ChatUsage) { providerUsage = &u }))
+			raw, err := client.Chat(callCtx, messages)
+			var incomplete *ai.ChatFinishError
+			if raw == "" && errors.As(err, &incomplete) {
+				raw = incomplete.PartialContent
+			}
+			usage := estimatedPlannerCallUsage(messages, raw)
+			if providerUsage != nil {
+				usage.PromptTokens, usage.CompletionTokens = providerUsage.PromptTokens, providerUsage.CompletionTokens
+				usage.UsageSource, usage.TokenEstimated = model.AgentCallUsageActual, false
+			}
+			if err != nil {
+				return AgentJournalResult{Usage: usage}, err
 			}
 			checkpoint := validateDocumentPatchResponse(base, validation, raw)
 			if checkpoint.ValidationCode == "" {
@@ -225,7 +273,7 @@ func (s *SummaryRevisionService) planDocumentPatch(ctx context.Context, op *mode
 					checkpoint = summaryDocumentCheckpoint{ValidationCode: "edit_scope_violation", Feedback: "仅修改冻结 selected_block_ids 内的已有正文或图注；不可增删/移动结构。"}
 				}
 			}
-			return AgentJournalResult{Checkpoint: checkpoint, OutputRef: "summary_document_patch:" + artifact.Hash(raw)}, nil
+			return AgentJournalResult{Checkpoint: checkpoint, OutputRef: "summary_document_patch:" + artifact.Hash(raw), Usage: usage}, nil
 		})
 		if err != nil {
 			return summaryDocumentCheckpoint{}, err

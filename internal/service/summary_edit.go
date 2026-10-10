@@ -316,7 +316,7 @@ func (s *SummaryRevisionService) ExecuteSummaryEdit(parent context.Context, runI
 	if err != nil || !claimed {
 		return err
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel, budgetErr := s.summaryEditBudgetContext(parent, op)
 	done := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -328,7 +328,13 @@ func (s *SummaryRevisionService) ExecuteSummaryEdit(parent context.Context, runI
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				alive, renewErr := s.repos.SummaryRevision.RenewRun(ctx, runID, token, 2*time.Minute)
+				duration := 2 * time.Minute
+				if op.BaseDocumentJSON != "" {
+					if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < duration {
+						duration = time.Until(deadline)
+					}
+				}
+				alive, renewErr := s.repos.SummaryRevision.RenewRun(ctx, runID, token, duration)
 				if renewErr != nil || !alive {
 					cancel()
 					return
@@ -336,8 +342,16 @@ func (s *SummaryRevisionService) ExecuteSummaryEdit(parent context.Context, runI
 			}
 		}
 	}()
-	_, err = s.execute(ctx, op, token)
-	interrupted := ctx.Err() != nil
+	if budgetErr != nil {
+		err = budgetErr
+	} else {
+		_, err = s.execute(ctx, op, token)
+	}
+	durationLimit := errors.Is(context.Cause(ctx), errAgentRunDurationLimit)
+	if durationLimit {
+		err = artifact.Err("budget_exhausted", 422)
+	}
+	interrupted := ctx.Err() != nil && !durationLimit
 	close(done)
 	cancel()
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
