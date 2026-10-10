@@ -236,3 +236,27 @@ func TestASRExactObservationMappingJoinAndNativeProvenance(t *testing.T) {
 		t.Fatal("observation limits ignored")
 	}
 }
+
+func TestSubtitleProviderLanguageAliasesValidateWithoutRewritingProvenance(t *testing.T) {
+	for _, test := range []struct {
+		actual, wanted string
+		valid          bool
+	}{
+		{"ai-zh", "zh-CN", true}, {"auto-zh-Hans", "zh-CN", true}, {"ai-en", "en-US", true},
+		{"ai-en", "zh-CN", false}, {"ai-unknown", "zh-CN", false}, {"auto-und", "zh-CN", false}, {"ai-zh", "", true},
+	} {
+		o := options()
+		o.Language = test.actual
+		o.TrackKey = test.actual + ":1"
+		o.ExpectedLanguage = test.wanted
+		o.SubtitleKind = "unknown"
+		o.KindBasis = "provider has no confirmed type"
+		s, err := ParseSRT(context.Background(), []byte("1\n00:00:01,000 --> 00:00:02,000\n真实字幕内容。\n"), o)
+		if (err == nil) != test.valid {
+			t.Fatalf("%s against %s: %v", test.actual, test.wanted, err)
+		}
+		if test.valid && (s.Language != test.actual || s.TrackKey != o.TrackKey || s.SubtitleKind != "unknown" || s.Quality != QualityUsable) {
+			t.Fatal("language matching rewrote declared provenance")
+		}
+	}
+}

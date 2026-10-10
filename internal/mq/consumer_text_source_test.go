@@ -12,6 +12,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
 	"vid-lens/internal/pkg/ytdlp"
 	"vid-lens/internal/processing"
@@ -311,5 +312,31 @@ func TestTextSourceCancellationDoesNotDelegatePaidASR(t *testing.T) {
 	job, _ := repos.TaskJob.FindByTaskAndType(task.ID, model.TaskJobTypeTranscribe)
 	if current.LastJobType != model.TaskJobTypeTextSource || current.LeaseKind != model.TaskLeaseKindProcessing || job != nil || *uploads != 0 || producer.asrCalls != 0 {
 		t.Fatal("cancelled source worker started another paid job")
+	}
+}
+
+func TestTextSourceProviderLanguageAliasPublishesWithoutASRFallback(t *testing.T) {
+	for _, preferred := range []string{"", "zh-CN"} {
+		t.Run(map[string]string{"": "default", "zh-CN": "explicit-Chinese"}[preferred], func(t *testing.T) {
+			c, repos, db, task, payload, adapter, producer, _ := sourceWorkerFixture(t, true, "prefer_platform")
+			intent, err := processing.Decode(task.ProcessingIntentJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent.Options.PreferredLanguage = preferred
+			if err = db.Model(&model.VideoTask{}).Where("id=?", task.ID).Update("processing_intent_json", artifact.JSON(intent)).Error; err != nil {
+				t.Fatal(err)
+			}
+			adapter.tracks[0].Language = "ai-zh"
+			adapter.tracks[0].TrackKey = "ai-zh:1"
+			adapter.tracks[0].SubtitleKind = "unknown"
+			if err = c.handleTextSource(context.Background(), payload); err != nil {
+				t.Fatal(err)
+			}
+			source, err := repos.TextSource.Active(context.Background(), task.UserID, task.ID)
+			if err != nil || source == nil || source.Language != "ai-zh" || source.TrackKey != "ai-zh:1" || source.SubtitleKind != "unknown" || producer.summaryCalls != 1 || producer.asrCalls != 0 {
+				t.Fatalf("source=%+v producer=%+v err=%v", source, producer, err)
+			}
+		})
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"vid-lens/internal/pkg/remoteurl"
+	"vid-lens/internal/pkg/subtitlelang"
 )
 
 const maxMetadataBytes = 16 << 20
@@ -398,10 +399,7 @@ func SelectSubtitleTrack(tracks []SubtitleTrack, explicitKey, preferredLanguage 
 }
 
 func languageMatches(actual, wanted string) bool {
-	base := func(s string) string {
-		return strings.SplitN(strings.ToLower(strings.ReplaceAll(s, "_", "-")), "-", 2)[0]
-	}
-	return base(actual) == base(wanted)
+	return subtitlelang.Matches(actual, wanted)
 }
 
 // FetchSelectedSubtitle accepts only a track bound to the frozen media identity.

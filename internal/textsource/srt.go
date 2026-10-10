@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"vid-lens/internal/pkg/subtitlelang"
 )
 
 // ParseOptions freezes selected track metadata separately from subtitle text.
@@ -195,11 +197,7 @@ func sameLanguage(actual, wanted string) bool {
 	if actual == "" || wanted == "" {
 		return true
 	}
-	base := func(s string) string {
-		s = strings.ToLower(strings.ReplaceAll(s, "_", "-"))
-		return strings.SplitN(s, "-", 2)[0]
-	}
-	return base(actual) == base(wanted)
+	return subtitlelang.Matches(actual, wanted)
 }
 
 func mergeRolling(cues []Cue) []Cue {

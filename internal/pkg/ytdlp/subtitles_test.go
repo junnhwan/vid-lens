@@ -263,3 +263,40 @@ func TestDownloadIdentityMetadataCIDMappingAndCleanup(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderLanguageAliasesKeepTrackIdentityKindAndSelectionOrder(t *testing.T) {
+	id := fixtureIdentity(t)
+	raw := `{"id":"BV1xx411c7mD_p2","extractor_key":"BiliBili","duration":40,"subtitles":{"ai-zh":[{"ext":"srt","data":"字幕","ai_status":1}],"ai-en":[{"ext":"srt","data":"English"}],"auto-zh":[{"ext":"srt","data":"另一轨"}]}}`
+	tracks, err := parseSubtitleTracks([]byte(raw), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := SelectSubtitleTrack(tracks, "", "zh-CN")
+	if err != nil || selected.TrackKey != "ai-zh:1" || selected.Language != "ai-zh" || selected.SubtitleKind != "unknown" {
+		t.Fatalf("selected=%+v %v", selected, err)
+	}
+	for _, track := range tracks {
+		if track.SubtitleKind != "unknown" {
+			t.Fatal("language prefix inferred subtitle type")
+		}
+	}
+	if _, err := SelectSubtitleTrack([]SubtitleTrack{{TrackKey: "ai-en:1", Language: "ai-en", SubtitleKind: "unknown"}}, "", "zh-CN"); err == nil {
+		t.Fatal("English AI track silently substituted for Chinese")
+	}
+	if _, err := SelectSubtitleTrack([]SubtitleTrack{{TrackKey: "ai-unknown:1", Language: "ai-unknown"}}, "", "zh-CN"); err == nil {
+		t.Fatal("unknown AI track became Chinese")
+	}
+	selected, err = SelectSubtitleTrack(tracks, "ai-en:1", "zh-CN")
+	if err != nil || selected.Language != "ai-en" {
+		t.Fatal("explicit track key semantics changed")
+	}
+	tracks = append(tracks, SubtitleTrack{TrackKey: "zh-Hans:1", Language: "zh-Hans", SubtitleKind: "manual"})
+	selected, err = SelectSubtitleTrack(tracks, "", "zh-CN")
+	if err != nil || selected.TrackKey != "zh-Hans:1" {
+		t.Fatal("manual/automatic/unknown ranking changed")
+	}
+	selected, err = SelectSubtitleTrack([]SubtitleTrack{{TrackKey: "ai-zh:1", Language: "ai-zh", SubtitleKind: "unknown"}}, "", "")
+	if err != nil || selected.TrackKey != "ai-zh:1" {
+		t.Fatal("default unspecified language rejected the only track")
+	}
+}
