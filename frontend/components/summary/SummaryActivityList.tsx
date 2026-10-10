@@ -1,5 +1,11 @@
 import type { SummaryGeneration } from '@/lib/summaryExperience'
 
+export function summarySourceLabel(kind?: string) {
+  if (kind === 'platform_subtitle' || kind === 'subtitle') return '平台字幕'
+  if (kind === 'asr') return '音频转写'
+  return '视频内容'
+}
+
 const fallbackReasons: Record<string, string> = { auto_summary_disabled: '本次仅刷新文字，未请求生成新摘要。', source_unchanged: '文字来源未变化，沿用已保存摘要。', classification_not_reprocessed: '标签没有重新分类，保留当前选择。', no_useful_visual: '画面未提供额外帮助，采用文字摘要。', visual_enricher_unavailable: '画面处理暂不可用，已保留文字摘要。', invalid_summary_document: '输出未通过来源与结构校验，请检查执行记录后重试。', vision_unavailable: '当前未配置画面理解，已保留文字摘要。', visual_disabled: '画面理解已关闭。', visual_source_refs_missing: '摘要缺少可用于定位画面的来源关联，暂未补图。',
   visual_location_missing: '未找到可核对的画面位置，暂未补图。', visual_not_beneficial: '画面没有提供额外帮助，采用文字摘要。', visual_budget_exhausted: '本次画面检查预算已用尽，保留已完成内容。', requested_visual_mode_unavailable: '无法完成所选画面形式，已保留文字摘要。', visual_enrichment_failed: '补图未完成，文字摘要仍可阅读。' }
 export function SummaryActivityList({ generation, error }: { generation: SummaryGeneration | null; error: string }) {
@@ -13,6 +19,6 @@ export function SummaryActivityList({ generation, error }: { generation: Summary
     {generation.operation==='source_refresh'&&generation.status==='completed'&&generation.source_status==='source_changed'&&<p role="status">文字来源已更新；已保留原摘要，可为新来源生成摘要。</p>}
     {generation.classification_state==='not_reprocessed'&&<p className="muted">标签未重新分类，保留当前选择；可手动调整。</p>}
     {reason && <p role="status">{fallbackReasons[reason] || (generation.result_state==='ready'?'本次处理已停止，已保存摘要仍可阅读。':'本次生成未完成，可检查运行记录后重试。')}</p>}
-    {generation.source && <p className="summary-source muted">{generation.source.kind === 'subtitle' ? '平台字幕' : '音频转写'}{generation.source.language ? ` · ${generation.source.language}` : ''}{generation.visual_state === 'running' ? ' · 文字已可读，正在核对画面' : ''}</p>}
+    {generation.source && <p className="summary-source muted">{summarySourceLabel(generation.source.kind)}{generation.source.language ? ` · ${generation.source.language}` : ''}{generation.visual_state === 'running' ? ' · 文字已可读，正在核对画面' : ''}</p>}
   </section>
 }

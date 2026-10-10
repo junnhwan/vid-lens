@@ -3,7 +3,7 @@ import { VideoPlayer, type VideoPlayerHandle } from '@/components/player/VideoPl
 import { ChatWorkspace } from '@/components/chat/ChatWorkspace'
 import { SummaryRevisionPanel } from './SummaryRevisionPanel'
 import { SummaryReadView } from './SummaryReadView'
-import { SummaryActivityList } from './SummaryActivityList'
+import { SummaryActivityList, summarySourceLabel } from './SummaryActivityList'
 import { SummaryVisualRetry } from './SummaryVisualRetry'
 import { useSummaryGeneration } from './useSummaryGeneration'
 import { taskTitle } from '@/lib/format'
@@ -59,8 +59,8 @@ export function SummaryWorkspace({ task,readOnly,playbackUrl,playerRef,onPlayhea
   const ready=task.has_summary||generation?.result_state==='ready'||generation?.text_state==='ready'
   const running=['pending','queued','running','retry_waiting'].includes(generation?.status||'')
   return <div className={`summary-workspace${focus?` focus-${focus}`:''}${collapsed?' side-collapsed':''}`}>
-    <header className="summary-workspace-heading"><div className="summary-heading-title"><h1>{title}</h1><p className="muted">{generation?.source?.kind==='subtitle'?'平台字幕':'音频转写'} · 视频摘要</p></div><div className="summary-workspace-tools">
-      <details className="summary-generation-details"><summary>{running?'正在生成':generation?.visual_state==='failed'||generation?.visual_state==='skipped'&&generation?.fallback_reason?'配图未完成 · 详情':'生成详情'}</summary><div className="summary-details-content"><SummaryActivityList generation={generation} error={error} /><SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} /></div></details>
+    <header className="summary-workspace-heading"><div className="summary-heading-title"><h1>{title}</h1><p className="muted">{summarySourceLabel(generation?.source?.kind)} · 视频摘要</p></div><div className="summary-workspace-tools">
+      <details className="summary-generation-details"><summary>{running?'正在生成':generation?.text_state==='failed'?'摘要未完成 · 详情':generation?.visual_state==='failed'||generation?.visual_state==='skipped'&&generation?.fallback_reason?'配图未完成 · 详情':'生成详情'}</summary><div className="summary-details-content"><SummaryActivityList generation={generation} error={error} /><SummaryVisualRetry taskId={task.id} generation={generation} readOnly={readOnly} onAccepted={()=>{setVisualAttempt(value=>value+1);void onChanged()}} /></div></details>
       <button className="btn btn-sm" onClick={()=>toggleFocus(focus?null:'reading')}>{focus?'恢复布局':'放大阅读'}</button><button className="btn btn-sm" onClick={()=>setCollapsed(value=>!value)}>{collapsed?'展开侧栏':'收起侧栏'}</button>
       <details className="summary-more" onClick={event=>{if((event.target as HTMLElement).closest('button,a'))event.currentTarget.open=false}} onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector<HTMLElement>('summary')?.focus()}}}><summary>更多</summary><div className="summary-details-content"><button className="btn btn-sm" onClick={()=>toggleFocus(focus==='chat'?null:'chat')}>放大问答</button><Link className="btn btn-sm" href={`/chat/v/${task.id}${view.sessionID ? `?session=${view.sessionID}` : ''}`}>独立问答</Link>{ready&&!readOnly&&<><button className="btn btn-sm" onClick={()=>{setEditingRequest(value=>value+1);requestAnimationFrame(()=>reader.current?.querySelector<HTMLElement>('.sumrev-compose')?.scrollIntoView({block:'center'}))}}>修改摘要</button><button className="btn btn-sm" disabled={busy||running} onClick={onGenerate}>重新生成原稿</button></>}<button className="btn btn-sm" onClick={onTechnical}>视频与来源</button></div></details>
     </div></header>

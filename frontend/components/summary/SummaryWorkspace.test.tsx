@@ -5,16 +5,17 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { SummaryWorkspace } from './SummaryWorkspace'
 import type { VideoTask } from '@/lib/types'
 import type { VideoPlayerHandle } from '@/components/player/VideoPlayer'
+import type { SummaryGeneration } from '@/lib/summaryExperience'
 
-const counters=vi.hoisted(()=>({playerMounts:0,chatMounts:0,summary:{version_ref:{generated_version:2} as {generated_version:number}|{revision_id:string},content_digest:'digest'}}))
+const counters=vi.hoisted(()=>({generation:{task_id:42,generation_id:'generation',legacy:false,requested_mode:'auto',resolved_mode:'text',visual_state:'skipped',stage:'completed',generated_version:2,content_digest:'digest',content_hash_kind:'document-v1',event_high_watermark:0,status:'completed',result_state:'ready',text_state:'ready',mindmap_enabled:true,activities:[]} as SummaryGeneration,playerMounts:0,chatMounts:0,summary:{version_ref:{generated_version:2} as {generated_version:number}|{revision_id:string},content_digest:'digest'}}))
 vi.mock('@/components/shell/AppShell',()=>({useShell:()=>({user:{role:'USER'}})}))
 vi.mock('@/lib/router',()=>({default:({href,children}:{href:string;children:React.ReactNode})=><a href={href}>{children}</a>}))
-vi.mock('./useSummaryGeneration',()=>({useSummaryGeneration:()=>({generation:{status:'completed',result_state:'ready',text_state:'ready',mindmap_enabled:true,activities:[]},error:''})}))
+vi.mock('./useSummaryGeneration',()=>({useSummaryGeneration:()=>({generation:counters.generation,error:''})}))
 vi.mock('./SummaryRevisionPanel',()=>({SummaryRevisionPanel:({renderContent}:{renderContent:(value:unknown)=>React.ReactNode})=><div>{renderContent(counters.summary)}</div>}))
 vi.mock('./SummaryDocumentView',()=>({SummaryDocumentView:({onReference}:{onReference:(value:unknown)=>void})=><div><p id="summary-block-block">真实摘要入口</p><button onClick={()=>onReference({kind:'summary_selection',task_id:42,version_ref:{generated_version:2},document_digest:'digest',block_id:'block',block_digest:'block-digest',text_start:0,text_end:2,quote:'选段'})}>选段提问</button></div>}))
 vi.mock('@/components/player/VideoPlayer',async()=>{const {forwardRef,useEffect,useState}=await import('react');return{VideoPlayer:forwardRef((_props,ref)=>{const [position,setPosition]=useState(19);useEffect(()=>{counters.playerMounts++},[]);return <button ref={ref as never} onClick={()=>setPosition(27)}>播放位置 {position}</button>})}})
 vi.mock('@/components/chat/ChatWorkspace',async()=>{const {useEffect,useState}=await import('react');return{ChatWorkspace:({summaryContextRefs,onReturnSummaryContext}:{summaryContextRefs:{quote:string}[];onReturnSummaryContext:(index:number)=>void})=>{const[draft,setDraft]=useState('');useEffect(()=>{counters.chatMounts++},[]);return <div><label>问题草稿<input value={draft} onChange={event=>setDraft(event.target.value)}/></label>{summaryContextRefs.map((ref,index)=><p key={index}>{ref.quote}<button onClick={()=>onReturnSummaryContext(index)}>返回原段</button></p>)}</div>}}})
-beforeEach(()=>{counters.playerMounts=0;counters.chatMounts=0;counters.summary={version_ref:{generated_version:2},content_digest:'digest'};vi.stubGlobal('requestAnimationFrame',(run:()=>void)=>{run();return 1})})
+beforeEach(()=>{counters.generation={task_id:42,generation_id:'generation',legacy:false,requested_mode:'auto',resolved_mode:'text',visual_state:'skipped',stage:'completed',generated_version:2,content_digest:'digest',content_hash_kind:'document-v1',event_high_watermark:0,status:'completed',result_state:'ready',text_state:'ready',mindmap_enabled:true,activities:[]} as SummaryGeneration;counters.playerMounts=0;counters.chatMounts=0;counters.summary={version_ref:{generated_version:2},content_digest:'digest'};vi.stubGlobal('requestAnimationFrame',(run:()=>void)=>{run();return 1})})
 afterEach(()=>{cleanup();vi.unstubAllGlobals()})
 test('focus and side tabs preserve drafts, references, playback and reader scroll',()=>{
  const task={id:42,filename:'lesson.mp4',has_summary:true,file_md5:'media',source_type:'upload'} as VideoTask
@@ -90,4 +91,16 @@ test('reading starts with content; completed processing and secondary actions st
  fireEvent.click(screen.getByRole('button',{name:'视频与来源'}))
  expect((view.container.querySelector('.summary-more') as HTMLDetailsElement).open).toBe(false)
  expect(screen.getByText('真实摘要入口')).toBeTruthy()
+})
+
+
+test('real platform subtitle source and a failed text run are described accurately',()=>{
+ counters.generation={...counters.generation,status:'failed',result_state:'pending',text_state:'failed',visual_state:'failed',source:{id:'source',kind:'platform_subtitle',digest:'digest',language:'ai-zh',quality:'usable'}}
+ const task={id:42,filename:'lesson.mp4',has_summary:false,source_type:'url'} as VideoTask
+ const view=render(<SummaryWorkspace task={task} readOnly playbackUrl={null} playerRef={createRef<VideoPlayerHandle>()} onPlayhead={vi.fn()} onDuration={vi.fn()} onSeek={vi.fn()} refreshPlaybackUrl={vi.fn()} onChanged={vi.fn()} onGenerate={vi.fn()} onTechnical={vi.fn()} busy={false} indexed={false} />)
+ expect(screen.getByText('平台字幕 · 视频摘要')).toBeTruthy()
+ expect(screen.getByText('平台字幕 · ai-zh')).toBeTruthy()
+ expect(screen.getByText('摘要未完成 · 详情')).toBeTruthy()
+ expect(screen.queryByText('配图未完成 · 详情')).toBeNull()
+ expect((view.container.querySelector('.summary-generation-details') as HTMLDetailsElement).open).toBe(false)
 })
