@@ -5,17 +5,14 @@ import (
 	"unicode/utf8"
 
 	"vid-lens/internal/ai"
-	"vid-lens/internal/summarydoc"
 )
 
-// Account for the fixed envelope, independent chapter IDs and exact cue refs,
-// in addition to compressed text. Dense subtitle tracks therefore receive
-// more JSON headroom than equally short sources with only a few cues. This is
-// a scheduling estimate, not a claim about provider token usage.
+// Estimate space for semantic content, hierarchy and a bounded selection of
+// cue IDs. Identity and timing are assembled by the server rather than repeated
+// by the model. Actual provider usage remains the authoritative budget record.
 func summaryGenerationOutputDemand(input string) int64 {
 	data := summaryGenerationInputData(input)
 	chars, refs := 0, 0
-	reducing := false
 	if len(data) > 0 {
 		if cues, ok := decodeSummaryGenerationCues(input); ok {
 			refs = len(cues)
@@ -23,17 +20,14 @@ func summaryGenerationOutputDemand(input string) int64 {
 				chars += utf8.RuneCountInString(cue.Text)
 			}
 		} else {
-			reducing = true
-			var docs []summarydoc.Document
+			var docs []summaryGenerationWireDocument
 			if json.Unmarshal([]byte(data), &docs) == nil {
 				seen := map[string]bool{}
 				for _, doc := range docs {
 					for _, block := range doc.Blocks {
 						chars += utf8.RuneCountInString(block.Title) + utf8.RuneCountInString(block.BodyMarkdown)
-						for _, ref := range block.SourceRefs {
-							for _, id := range ref.CueIDs {
-								seen[id] = true
-							}
+						for _, id := range block.CueIDs {
+							seen[id] = true
 						}
 					}
 				}
@@ -41,10 +35,7 @@ func summaryGenerationOutputDemand(input string) int64 {
 			}
 		}
 	}
-	if reducing {
-		return max(768, int64(384+refs*48+chars/2))
-	}
-	return max(768, int64(512+refs*96+chars/2))
+	return max(768, int64(1024+min(refs, 96)*8+chars/2))
 }
 
 func (e *summaryGenerationExecution) plannedOutput(input string) int64 {

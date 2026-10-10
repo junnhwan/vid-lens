@@ -324,11 +324,13 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 				t.Fatalf("unneeded segmentation or visual omitted: %d", calls.Load())
 			}
 			first := <-requests
-			if string(first["max_tokens"]) != "6144" {
-				t.Fatalf("insufficient JSON headroom or consumed reserve: %s", first["max_tokens"])
-			}
 			var messages []ai.ChatMessage
 			_ = json.Unmarshal(first["messages"], &messages)
+			var firstCap int64
+			_ = json.Unmarshal(first["max_tokens"], &firstCap)
+			if want := min(int64(6144), summaryGenerationOutputDemand(messages[1].Content)); firstCap != want || firstCap < 2048 {
+				t.Fatalf("semantic JSON allowance did not follow demand and frozen reserve: %d want %d", firstCap, want)
+			}
 			if !strings.Contains(messages[1].Content, "cue-000328") || studyPromptTokens(messages)*2+256 >= 24000 {
 				t.Fatal("full short-cue track omitted or frozen input budget exceeded")
 			}
@@ -339,11 +341,16 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 			}
 			if mode != "normal" {
 				second := <-requests
-				wantCap := "5192"
-				if mode == "text_first" {
-					wantCap = "3019"
+				wantCap := min(firstCap, int64(5192))
+				if mode == "truncated" {
+					wantCap = min(firstCap*2, int64(5192))
 				}
-				if string(second["max_tokens"]) != wantCap {
+				if mode == "text_first" {
+					wantCap = min(firstCap, int64(3019))
+				}
+				var secondCap int64
+				_ = json.Unmarshal(second["max_tokens"], &secondCap)
+				if secondCap != wantCap {
 					t.Fatalf("repair did not shrink against actual usage plus reserve: %s", second["max_tokens"])
 				}
 			}

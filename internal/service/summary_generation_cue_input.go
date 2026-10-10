@@ -53,11 +53,23 @@ func decodeSummaryGenerationCues(input string) ([]summaryGenerationCue, bool) {
 		TimingMethods []string            `json:"timing_methods"`
 		Rows          [][]json.RawMessage `json:"rows"`
 	}
-	if json.Unmarshal(data, &table) != nil || strings.Join(table.Fields, ",") != "cue_id,text,start_ms,end_ms,timing_method_index" || len(table.Rows) == 0 {
+	if json.Unmarshal(data, &table) != nil || len(table.Rows) == 0 {
+		return nil, false
+	}
+	semantic := strings.Join(table.Fields, ",") == "cue_id,text"
+	if !semantic && strings.Join(table.Fields, ",") != "cue_id,text,start_ms,end_ms,timing_method_index" {
 		return nil, false
 	}
 	cues := make([]summaryGenerationCue, 0, len(table.Rows))
 	for _, row := range table.Rows {
+		if semantic {
+			var cue summaryGenerationCue
+			if len(row) != 2 || json.Unmarshal(row[0], &cue.ID) != nil || cue.ID == "" || json.Unmarshal(row[1], &cue.Text) != nil {
+				return nil, false
+			}
+			cues = append(cues, cue)
+			continue
+		}
 		if len(row) != 5 {
 			return nil, false
 		}
@@ -70,4 +82,15 @@ func decodeSummaryGenerationCues(input string) ([]summaryGenerationCue, bool) {
 		cues = append(cues, cue)
 	}
 	return cues, true
+}
+
+func summaryGenerationSemanticCueInput(cues []summaryGenerationCue) string {
+	rows := make([][]string, 0, len(cues))
+	for _, cue := range cues {
+		rows = append(rows, []string{cue.ID, cue.Text})
+	}
+	return summaryCueInputPrefix + artifact.JSON(struct {
+		Fields []string   `json:"fields"`
+		Rows   [][]string `json:"rows"`
+	}{[]string{"cue_id", "text"}, rows})
 }

@@ -31,7 +31,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		return summarydoc.Document{}, artifact.Err("empty_text_source", 422)
 	}
 	cueInput := func(rows []summaryGenerationCue) string {
-		return summaryGenerationCueInput(rows)
+		return summaryGenerationSemanticCueInput(rows)
 	}
 	if e.fits(cueInput(cues)) {
 		doc, _, err := e.call(ctx, "summary-complete", "整理视频的要点与结构", cueInput(cues))
@@ -98,14 +98,28 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		// Keep every block and exact cue reference, without repeating the same
 		// long identity strings in each completed leaf envelope.
 		type part struct {
-			Title    string             `json:"title"`
-			Overview string             `json:"overview"`
-			Blocks   []summarydoc.Block `json:"blocks"`
+			Title    string                       `json:"title"`
+			Overview string                       `json:"overview"`
+			Blocks   []summaryGenerationWireBlock `json:"blocks"`
 		}
 		parts := make([]part, 0, len(rows))
 		seen := map[string]bool{}
 		for _, row := range rows {
-			value := part{row.Title, row.Overview, row.Blocks}
+			blocks := make([]summaryGenerationWireBlock, 0, len(row.Blocks))
+			for _, block := range row.Blocks {
+				ids := []string{}
+				seenIDs := map[string]bool{}
+				for _, ref := range block.SourceRefs {
+					for _, id := range ref.CueIDs {
+						if !seenIDs[id] {
+							ids = append(ids, id)
+							seenIDs[id] = true
+						}
+					}
+				}
+				blocks = append(blocks, summaryGenerationWireBlock{block.ID, block.ParentID, block.Order, block.Title, block.BodyMarkdown, ids})
+			}
+			value := part{row.Title, row.Overview, blocks}
 			key := artifact.JSON(value)
 			if !seen[key] {
 				parts = append(parts, value)
