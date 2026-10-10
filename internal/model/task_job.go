@@ -7,6 +7,7 @@ const (
 	TaskJobTypeSummary    = "summary" // transcript-only summary; owns its own lease
 	TaskJobTypeTranscribe = "transcribe"
 	TaskJobTypeDownload   = "download"
+	TaskJobTypeTextSource = "text_source" // platform subtitle selection or durable ASR delegation
 	TaskJobTypeRAGIndex   = "rag_index"
 	TaskJobTypeVisual     = "visual" // explicitly requested frame extraction; never runs ASR
 )
@@ -19,6 +20,9 @@ type TaskJob struct {
 	TranscriptAlignmentOnly bool       `gorm:"default:false" json:"-"`
 	InputText               string     `gorm:"type:text" json:"-"`
 	InputChunksJSON         string     `gorm:"type:text" json:"-"`
+	GenerationID            string     `gorm:"type:varchar(36);not null;default:'';index" json:"generation_id,omitempty"`
+	InputSourceID           string     `gorm:"type:varchar(36);not null;default:''" json:"-"`
+	InputSnapshotJSON       string     `gorm:"type:text;not null;default:''" json:"-"`
 	ID                      int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	TaskID                  int64      `gorm:"not null;uniqueIndex:uk_task_jobs_task_type;index" json:"task_id"`
 	UserID                  int64      `gorm:"not null;index" json:"user_id"`

@@ -202,3 +202,37 @@ func TestASRUnknownTimesRemainNullAndSnapshotIndependent(t *testing.T) {
 		t.Fatal("snapshot aliases original timings")
 	}
 }
+
+func TestASRExactObservationMappingJoinAndNativeProvenance(t *testing.T) {
+	first, second, space := 0, 3, " "
+	end := 5
+	original := Snapshot{Kind: KindASR, Identity: Identity{Platform: "local"}, ParserVersion: "test", Cues: []Cue{
+		{ID: "a", RawText: "甲乙", Text: "甲乙", StartMS: intTime(1000), EndMS: intTime(2000), TimingMethod: "asr_native", RawRefs: []RawCueRef{{ID: "a", Order: 1, ObservationID: "window", ObservationOrder: 1, RawText: "甲乙 丙丁", StartMS: intTime(0), EndMS: intTime(10000), TimingMethod: "asr_window", TextStart: &first, TextEnd: &second, NativeTimings: []NativeTiming{{SegmentIndex: 0, TextStart: 0, TextEnd: 2, StartMS: 1000, EndMS: 2000, Method: "asr_native"}}}}},
+		{ID: "b", RawText: "丙丁", Text: "丙丁", StartMS: intTime(3000), EndMS: intTime(4000), TimingMethod: "asr_native", JoinBefore: &space, RawRefs: []RawCueRef{{ID: "b", Order: 2, ObservationID: "window", ObservationOrder: 1, StartMS: intTime(0), EndMS: intTime(10000), TimingMethod: "asr_window", TextStart: &second, TextEnd: &end}}},
+	}}
+	s, err := Canonicalize(original, Limits{})
+	if err != nil || s.CanonicalText != "甲乙 丙丁" {
+		t.Fatalf("join mapping lost: %+v %v", s, err)
+	}
+	*original.Cues[1].JoinBefore = ""
+	original.Cues[0].RawRefs[0].NativeTimings[0].StartMS = 1200
+	original.Cues[0].StartMS = intTime(1200)
+	if *s.Cues[1].JoinBefore != " " || s.Cues[0].RawRefs[0].NativeTimings[0].StartMS != 1000 {
+		t.Fatal("canonical snapshot aliases input")
+	}
+	changed, err := Canonicalize(original, Limits{})
+	if err != nil || changed.SourceDigest == s.SourceDigest {
+		t.Fatal("joins/native provenance omitted from digest")
+	}
+	bad := s
+	bad.Cues = append([]Cue(nil), s.Cues...)
+	bad.Cues[1].RawRefs = append([]RawCueRef(nil), s.Cues[1].RawRefs...)
+	v := 1
+	bad.Cues[1].RawRefs[0].TextStart = &v
+	if Validate(bad, Limits{}) == nil {
+		t.Fatal("false original offsets accepted")
+	}
+	if _, err := Canonicalize(s, Limits{MaxCues: 1}); err == nil {
+		t.Fatal("observation limits ignored")
+	}
+}

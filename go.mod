@@ -14,6 +14,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.90
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rabbitmq/amqp091-go v1.13.0
+	github.com/yuin/goldmark v1.7.13
 	github.com/redis/go-redis/v9 v9.8.0
 	golang.org/x/crypto v0.46.0
 	gopkg.in/yaml.v3 v3.0.1

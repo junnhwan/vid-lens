@@ -27,7 +27,7 @@ func TestPostgresArtifactMigrationRepairsSessionNullabilityOnRestart(t *testing.
 	if nullable != "YES" {
 		t.Fatalf("artifact submissions still blocked: session_id nullable=%s", nullable)
 	}
-	for _, subject := range []string{AgentRunSubjectGeneration, AgentRunSubjectArtifactEdit, AgentRunSubjectSummaryEdit} {
+	for _, subject := range []string{AgentRunSubjectGeneration, AgentRunSubjectArtifactEdit, AgentRunSubjectSummaryEdit, AgentRunSubjectSummaryGeneration} {
 		run := AgentRun{ID: subject, UserID: 1, SubjectKind: subject, SubjectID: "request", ExecutionKind: "artifact", RecipeVersion: "study-v1", Status: AgentRunStatusPending}
 		if err := db.Create(&run).Error; err != nil {
 			t.Fatal(err)
@@ -72,7 +72,7 @@ func TestPostgresArtifactSubjectMigrationIsMonotonic(t *testing.T) {
 	if err := db.Model(&valid).Update("recipe_version", nil).Error; err == nil {
 		t.Fatal("constraint accepted NULL recipe version")
 	}
-	for _, marker := range []string{"vidlens:agent-run-subject:2", "vidlens:agent-run-subject:3"} {
+	for _, marker := range []string{"vidlens:agent-run-subject:3", "vidlens:agent-run-subject:4"} {
 		if err := db.Exec("COMMENT ON CONSTRAINT chk_agent_run_subject ON agent_runs IS '" + marker + "'").Error; err != nil {
 			t.Fatal(err)
 		}

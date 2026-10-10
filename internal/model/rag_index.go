@@ -9,7 +9,10 @@ const (
 	RAGIndexStatusFailed       = "failed"
 	RAGIndexStatusNeedsRebuild = "needs_rebuild"
 
-	CurrentRAGIndexBuildVersion    = 7
+	// v8 isolates remote projections by build generation and selects published
+	// relational chunk identities before vector TopK. v7 needs rebuilding even
+	// if its old full-scope writer left a misleading indexed status behind.
+	CurrentRAGIndexBuildVersion    = 8
 	CurrentRAGSourceMappingVersion = "source-map-v5-aligned-sentences"
 	CurrentRAGChunkerVersion       = "recursive-sentence-source-v4"
 )

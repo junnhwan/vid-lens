@@ -12,16 +12,24 @@ type SummaryRevisionHead struct {
 }
 
 type SummaryRevision struct {
-	ID                string    `gorm:"type:varchar(36);primaryKey" json:"id"`
-	UserID            int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:1" json:"-"`
-	TaskID            int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:2" json:"task_id"`
-	Version           int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:3" json:"version"`
-	Content           string    `gorm:"type:text;not null" json:"content"`
-	BaseGeneratedHash string    `gorm:"type:char(64);not null" json:"base_generated_hash"`
-	Origin            string    `gorm:"type:varchar(24);not null" json:"origin"`
-	OperationID       *string   `gorm:"type:varchar(36);uniqueIndex" json:"operation_id,omitempty"`
-	ParentRevisionID  *string   `gorm:"type:varchar(36)" json:"parent_revision_id,omitempty"`
-	CreatedAt         time.Time `gorm:"not null" json:"created_at"`
+	GenerationID          string    `gorm:"type:varchar(36);not null;default:''" json:"generation_id,omitempty"`
+	DocumentJSON          string    `gorm:"type:text;not null;default:''" json:"-"`
+	SchemaVersion         string    `gorm:"type:varchar(32);not null;default:''" json:"schema_version,omitempty"`
+	SourceID              string    `gorm:"type:varchar(36);not null;default:''" json:"source_id,omitempty"`
+	SourceDigest          string    `gorm:"type:char(64);not null;default:''" json:"source_digest,omitempty"`
+	ContentDigest         string    `gorm:"type:char(64);not null;default:''" json:"content_digest,omitempty"`
+	ContentHashKind       string    `gorm:"type:varchar(32);not null;default:'markdown-v1'" json:"content_hash_kind"`
+	BaseGeneratedHashKind string    `gorm:"type:varchar(32);not null;default:'markdown-v1'" json:"base_generated_hash_kind"`
+	ID                    string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID                int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:1" json:"-"`
+	TaskID                int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:2" json:"task_id"`
+	Version               int64     `gorm:"not null;uniqueIndex:idx_summary_revision_scope,priority:3" json:"version"`
+	Content               string    `gorm:"type:text;not null" json:"content"`
+	BaseGeneratedHash     string    `gorm:"type:char(64);not null" json:"base_generated_hash"`
+	Origin                string    `gorm:"type:varchar(24);not null" json:"origin"`
+	OperationID           *string   `gorm:"type:varchar(36);uniqueIndex" json:"operation_id,omitempty"`
+	ParentRevisionID      *string   `gorm:"type:varchar(36)" json:"parent_revision_id,omitempty"`
+	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
 }
 
 type SummaryRevisionState struct {
@@ -36,31 +44,38 @@ type SummaryRevisionState struct {
 // SummaryEditOperation is both the idempotency record and the durable diff.
 // Public reads must first check that the owning VideoTask is still readable.
 type SummaryEditOperation struct {
-	ID                 string     `gorm:"type:varchar(36);primaryKey" json:"id"`
-	UserID             int64      `gorm:"not null;uniqueIndex:idx_summary_edit_key,priority:1" json:"-"`
-	TaskID             int64      `gorm:"not null;index" json:"task_id"`
-	Key                string     `gorm:"type:varchar(128);not null;uniqueIndex:idx_summary_edit_key,priority:2" json:"-"`
-	RequestHash        string     `gorm:"type:char(64);not null" json:"-"`
-	RunID              string     `gorm:"type:varchar(36);not null;uniqueIndex" json:"run_id"`
-	Mode               string     `gorm:"type:varchar(16);not null" json:"mode"`
-	Status             string     `gorm:"type:varchar(20);not null" json:"status"`
-	Instruction        string     `gorm:"type:text;not null" json:"instruction"`
-	BaseVersion        int64      `gorm:"not null" json:"base_version"`
-	BaseContentHash    string     `gorm:"type:char(64);not null" json:"base_content_hash"`
-	BaseContent        string     `gorm:"type:text;not null" json:"-"`
-	BaseGeneratedHash  string     `gorm:"type:char(64);not null" json:"base_generated_hash"`
-	RuleVersion        int64      `gorm:"not null;default:0" json:"rule_version"`
-	RuleDigest         string     `gorm:"type:char(64);not null" json:"rule_digest"`
-	RuleSnapshotJSON   string     `gorm:"type:jsonb;not null;default:'[]'" json:"-"`
-	ProfileID          int64      `gorm:"not null" json:"-"`
-	ProfileFingerprint string     `gorm:"not null" json:"-"`
-	PatchJSON          string     `gorm:"type:jsonb;not null;default:'{}'" json:"-"`
-	ResultRevisionID   *string    `gorm:"type:varchar(36)" json:"result_revision_id,omitempty"`
-	UndoRevisionID     *string    `gorm:"type:varchar(36)" json:"undo_revision_id,omitempty"`
-	ErrorCode          string     `gorm:"type:varchar(80);not null;default:''" json:"error_code,omitempty"`
-	CreatedAt          time.Time  `gorm:"not null" json:"created_at"`
-	UpdatedAt          time.Time  `gorm:"not null" json:"updated_at"`
-	CommittedAt        *time.Time `json:"committed_at,omitempty"`
+	SelectedBlockIDsJSON  string     `gorm:"type:jsonb;not null;default:'[]'" json:"-"`
+	BaseGenerationID      string     `gorm:"type:varchar(36);not null;default:''" json:"-"`
+	BaseSourceID          string     `gorm:"type:varchar(36);not null;default:''" json:"-"`
+	BaseSourceDigest      string     `gorm:"type:char(64);not null;default:''" json:"-"`
+	BaseDocumentJSON      string     `gorm:"type:text;not null;default:''" json:"-"`
+	BaseContentHashKind   string     `gorm:"type:varchar(32);not null;default:'markdown-v1'" json:"base_content_hash_kind"`
+	BaseGeneratedHashKind string     `gorm:"type:varchar(32);not null;default:'markdown-v1'" json:"base_generated_hash_kind"`
+	ID                    string     `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID                int64      `gorm:"not null;uniqueIndex:idx_summary_edit_key,priority:1" json:"-"`
+	TaskID                int64      `gorm:"not null;index" json:"task_id"`
+	Key                   string     `gorm:"type:varchar(128);not null;uniqueIndex:idx_summary_edit_key,priority:2" json:"-"`
+	RequestHash           string     `gorm:"type:char(64);not null" json:"-"`
+	RunID                 string     `gorm:"type:varchar(36);not null;uniqueIndex" json:"run_id"`
+	Mode                  string     `gorm:"type:varchar(16);not null" json:"mode"`
+	Status                string     `gorm:"type:varchar(20);not null" json:"status"`
+	Instruction           string     `gorm:"type:text;not null" json:"instruction"`
+	BaseVersion           int64      `gorm:"not null" json:"base_version"`
+	BaseContentHash       string     `gorm:"type:char(64);not null" json:"base_content_hash"`
+	BaseContent           string     `gorm:"type:text;not null" json:"-"`
+	BaseGeneratedHash     string     `gorm:"type:char(64);not null" json:"base_generated_hash"`
+	RuleVersion           int64      `gorm:"not null;default:0" json:"rule_version"`
+	RuleDigest            string     `gorm:"type:char(64);not null" json:"rule_digest"`
+	RuleSnapshotJSON      string     `gorm:"type:jsonb;not null;default:'[]'" json:"-"`
+	ProfileID             int64      `gorm:"not null" json:"-"`
+	ProfileFingerprint    string     `gorm:"not null" json:"-"`
+	PatchJSON             string     `gorm:"type:jsonb;not null;default:'{}'" json:"-"`
+	ResultRevisionID      *string    `gorm:"type:varchar(36)" json:"result_revision_id,omitempty"`
+	UndoRevisionID        *string    `gorm:"type:varchar(36)" json:"undo_revision_id,omitempty"`
+	ErrorCode             string     `gorm:"type:varchar(80);not null;default:''" json:"error_code,omitempty"`
+	CreatedAt             time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt             time.Time  `gorm:"not null" json:"updated_at"`
+	CommittedAt           *time.Time `json:"committed_at,omitempty"`
 }
 
 // SummaryEditDispatch is a separate outbox/queue identity. Legacy artifact

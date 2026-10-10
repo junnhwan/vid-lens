@@ -25,7 +25,7 @@ func migrateArtifactSubjects(db *gorm.DB) error {
 		if err := tx.Exec("ALTER TABLE agent_runs ALTER COLUMN session_id DROP NOT NULL").Error; err != nil {
 			return err
 		}
-		const version = 2
+		const version = 3
 		const prefix = "vidlens:agent-run-subject:"
 		var marker string
 		if err := tx.Raw(`SELECT COALESCE(obj_description(oid, 'pg_constraint'), '') FROM pg_constraint
@@ -41,7 +41,7 @@ func migrateArtifactSubjects(db *gorm.DB) error {
 		for _, sql := range []string{
 			"UPDATE agent_runs SET subject_kind='chat_session', subject_id=session_id::text, execution_kind='chat' WHERE subject_kind='chat_session' AND subject_id=''",
 			"ALTER TABLE agent_runs DROP CONSTRAINT IF EXISTS chk_agent_run_subject",
-			"ALTER TABLE agent_runs ADD CONSTRAINT chk_agent_run_subject CHECK ((subject_kind='chat_session' AND session_id IS NOT NULL AND session_id>0 AND execution_kind='chat') OR (subject_kind IN ('generation_request','artifact_edit_request','summary_edit_request') AND session_id IS NULL AND subject_id<>'' AND execution_kind='artifact' AND recipe_version IS NOT NULL AND recipe_version<>''))",
+			"ALTER TABLE agent_runs ADD CONSTRAINT chk_agent_run_subject CHECK ((subject_kind='chat_session' AND session_id IS NOT NULL AND session_id>0 AND execution_kind='chat') OR (subject_kind IN ('generation_request','artifact_edit_request','summary_edit_request','summary_generation') AND session_id IS NULL AND subject_id<>'' AND execution_kind='artifact' AND recipe_version IS NOT NULL AND recipe_version<>''))",
 			"COMMENT ON CONSTRAINT chk_agent_run_subject ON agent_runs IS '" + prefix + strconv.Itoa(version) + "'",
 		} {
 			if err := tx.Exec(sql).Error; err != nil {

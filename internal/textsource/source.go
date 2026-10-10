@@ -36,11 +36,28 @@ type Identity struct {
 // RawCueRef preserves the exact original wording and declared timing when a
 // rolling caption is merged. Times remain nullable, including for legacy ASR.
 type RawCueRef struct {
-	ID      string `json:"id"`
-	Order   int    `json:"order"`
-	RawText string `json:"raw_text"`
-	StartMS *int64 `json:"start_ms"`
-	EndMS   *int64 `json:"end_ms"`
+	ID               string         `json:"id"`
+	Order            int            `json:"order"`
+	RawText          string         `json:"raw_text"`
+	StartMS          *int64         `json:"start_ms"`
+	EndMS            *int64         `json:"end_ms"`
+	ObservationID    string         `json:"observation_id,omitempty"`
+	ObservationOrder int            `json:"observation_order,omitempty"`
+	TextStart        *int           `json:"text_start,omitempty"`
+	TextEnd          *int           `json:"text_end,omitempty"`
+	TimingMethod     string         `json:"timing_method,omitempty"`
+	NativeTimings    []NativeTiming `json:"native_timings,omitempty"`
+}
+
+// NativeTiming retains the original provider/alignment interval and exact rune
+// offsets even when several observed words form one displayed sentence cue.
+type NativeTiming struct {
+	SegmentIndex int    `json:"segment_index"`
+	TextStart    int    `json:"text_start"`
+	TextEnd      int    `json:"text_end"`
+	StartMS      int64  `json:"start_ms"`
+	EndMS        int64  `json:"end_ms"`
+	Method       string `json:"method"`
 }
 
 type Cue struct {
@@ -52,6 +69,10 @@ type Cue struct {
 	EndMS        *int64      `json:"end_ms"`
 	TimingMethod string      `json:"timing_method"`
 	RawRefs      []RawCueRef `json:"raw_refs"`
+	// Nil joins subtitle cues with a newline. ASR adapters set the actually
+	// retained separator explicitly, including an empty string for contiguous
+	// spans, so word-level timing does not alter canonical wording.
+	JoinBefore *string `json:"join_before,omitempty"`
 }
 
 // Snapshot is a transport value. Once published it must be immutable. ID,
@@ -180,8 +201,9 @@ func Validate(s Snapshot, limits Limits) error {
 		return fmt.Errorf("canonical text is empty, invalid UTF-8 or too large")
 	}
 	ids, rawIDs := map[string]bool{}, map[string]bool{}
+	observations := map[string]string{}
 	texts := make([]string, 0, len(s.Cues))
-	totalRaw, totalText, totalCueRaw, previousRawOrder := 0, 0, 0, 0
+	totalRaw, totalText, totalCueRaw, previousRawOrder, totalNative := 0, 0, 0, 0, 0
 	for i, cue := range s.Cues {
 		if cue.ID == "" || len(cue.ID) > 128 || ids[cue.ID] {
 			return fmt.Errorf("cue %d has missing, duplicate or oversized ID", i+1)
@@ -206,6 +228,9 @@ func Validate(s Snapshot, limits Limits) error {
 		if len(cue.RawRefs) == 0 {
 			return fmt.Errorf("cue %s lacks original mapping", cue.ID)
 		}
+		if cue.JoinBefore != nil && (len(*cue.JoinBefore) > 128 || strings.TrimSpace(*cue.JoinBefore) != "") {
+			return fmt.Errorf("invalid cue separator")
+		}
 		for _, ref := range cue.RawRefs {
 			if ref.ID == "" || len(ref.ID) > 128 || ref.Order <= previousRawOrder || rawIDs[ref.ID] {
 				return fmt.Errorf("invalid or repeated raw cue mapping")
@@ -215,11 +240,71 @@ func Validate(s Snapshot, limits Limits) error {
 			if !utf8.ValidString(ref.RawText) {
 				return fmt.Errorf("invalid original text encoding")
 			}
-			if err := validateTimes(ref.StartMS, ref.EndMS, cue.TimingMethod); err != nil {
+			method := ref.TimingMethod
+			if method == "" {
+				method = cue.TimingMethod
+			}
+			if err := validateTimes(ref.StartMS, ref.EndMS, method); err != nil {
 				return fmt.Errorf("raw cue %s: %w", ref.ID, err)
 			}
-			if cue.StartMS != nil && (*ref.StartMS < *cue.StartMS || *ref.EndMS > *cue.EndMS) {
-				return fmt.Errorf("raw cue lies outside merged time range")
+			if cue.StartMS != nil {
+				if ref.StartMS == nil {
+					return fmt.Errorf("timed cue has untimed original mapping")
+				}
+				if s.Kind == KindSubtitle && (*ref.StartMS < *cue.StartMS || *ref.EndMS > *cue.EndMS) {
+					return fmt.Errorf("raw cue lies outside merged time range")
+				}
+				if s.Kind == KindASR && (*cue.StartMS < *ref.StartMS || *cue.EndMS > *ref.EndMS) {
+					return fmt.Errorf("ASR cue lies outside original window")
+				}
+			}
+			if (ref.TextStart == nil) != (ref.TextEnd == nil) {
+				return fmt.Errorf("partial original text mapping")
+			}
+			if ref.ObservationID != "" {
+				if len(ref.ObservationID) > 128 || ref.ObservationOrder < 1 {
+					return fmt.Errorf("invalid original observation identity")
+				}
+				if ref.RawText != "" {
+					if prior, ok := observations[ref.ObservationID]; ok && prior != ref.RawText {
+						return fmt.Errorf("original observation wording changed")
+					}
+					observations[ref.ObservationID] = ref.RawText
+				}
+			}
+			if ref.TextStart != nil {
+				original := ref.RawText
+				if ref.ObservationID != "" {
+					original = observations[ref.ObservationID]
+				}
+				runes := []rune(original)
+				if *ref.TextStart < 0 || *ref.TextEnd <= *ref.TextStart || *ref.TextEnd > len(runes) {
+					return fmt.Errorf("original text offsets outside observation")
+				}
+				if s.Kind == KindASR && normalizeText(string(runes[*ref.TextStart:*ref.TextEnd])) != cue.Text {
+					return fmt.Errorf("ASR text mapping disagrees with retained observation")
+				}
+				previousSegment, previousOffset := -1, 0
+				var observedStart, observedEnd int64
+				for _, native := range ref.NativeTimings {
+					totalNative++
+					if totalNative > l.MaxCues || native.SegmentIndex <= previousSegment || native.TextStart < previousOffset || native.TextEnd <= native.TextStart || native.TextEnd > len(runes) || native.EndMS <= native.StartMS || native.Method == "" || native.Method != cue.TimingMethod || native.Method == TimingUnknown || ref.StartMS == nil || native.StartMS < *ref.StartMS || native.EndMS > *ref.EndMS {
+						return fmt.Errorf("invalid native timing provenance")
+					}
+					if previousSegment < 0 {
+						observedStart, observedEnd = native.StartMS, native.EndMS
+					} else {
+						observedStart, observedEnd = min(observedStart, native.StartMS), max(observedEnd, native.EndMS)
+					}
+					previousSegment = native.SegmentIndex
+					previousOffset = native.TextEnd
+				}
+				if len(ref.NativeTimings) > 0 && (cue.StartMS == nil || observedStart != *cue.StartMS || observedEnd != *cue.EndMS) {
+					return fmt.Errorf("cue timing disagrees with native observations")
+				}
+			}
+			if ref.TextStart == nil && len(ref.NativeTimings) > 0 {
+				return fmt.Errorf("native timings need original offsets")
 			}
 			totalRaw += len(ref.RawText)
 		}
@@ -229,7 +314,7 @@ func Validate(s Snapshot, limits Limits) error {
 		}
 		texts = append(texts, cue.Text)
 	}
-	if strings.Join(texts, "\n") != s.CanonicalText {
+	if joinCueTexts(s.Cues, texts) != s.CanonicalText {
 		return fmt.Errorf("canonical text disagrees with ordered cues")
 	}
 	return nil
@@ -245,12 +330,15 @@ func Canonicalize(s Snapshot, limits Limits) (Snapshot, error) {
 		return s, fmt.Errorf("cue count outside limits")
 	}
 	// Check aggregate bounds before copying or normalizing caller-owned data.
-	totalBytes, totalRunes, totalRefs := 0, 0, 0
+	totalBytes, totalRunes, totalRefs, totalNative := 0, 0, 0, 0
 	for _, cue := range s.Cues {
 		totalBytes += len(cue.RawText)
 		totalRunes += utf8.RuneCountInString(cue.Text)
 		totalRefs += len(cue.RawRefs)
-		if totalBytes > l.MaxBytes || totalRunes > l.MaxTextRunes || totalRefs > l.MaxCues || utf8.RuneCountInString(cue.Text) > l.MaxCueRunes {
+		for _, ref := range cue.RawRefs {
+			totalNative += len(ref.NativeTimings)
+		}
+		if totalBytes > l.MaxBytes || totalRunes > l.MaxTextRunes || totalRefs > l.MaxCues || totalNative > l.MaxCues || utf8.RuneCountInString(cue.Text) > l.MaxCueRunes {
 			s.Quality = QualityUnusable
 			return s, fmt.Errorf("source exceeds size limits")
 		}
@@ -269,17 +357,30 @@ func Canonicalize(s Snapshot, limits Limits) (Snapshot, error) {
 			c.TimingMethod = TimingUnknown
 		}
 		c.StartMS, c.EndMS = copyTime(c.StartMS), copyTime(c.EndMS)
+		if c.JoinBefore != nil {
+			join := *c.JoinBefore
+			c.JoinBefore = &join
+		}
 		c.RawRefs = append([]RawCueRef(nil), c.RawRefs...)
 		if len(c.RawRefs) == 0 {
 			c.RawRefs = []RawCueRef{{ID: c.ID, Order: c.Order, RawText: c.RawText, StartMS: copyTime(c.StartMS), EndMS: copyTime(c.EndMS)}}
 		}
 		for j := range c.RawRefs {
+			c.RawRefs[j].NativeTimings = append([]NativeTiming(nil), c.RawRefs[j].NativeTimings...)
 			c.RawRefs[j].StartMS = copyTime(c.RawRefs[j].StartMS)
 			c.RawRefs[j].EndMS = copyTime(c.RawRefs[j].EndMS)
+			if c.RawRefs[j].TextStart != nil {
+				v := *c.RawRefs[j].TextStart
+				c.RawRefs[j].TextStart = &v
+			}
+			if c.RawRefs[j].TextEnd != nil {
+				v := *c.RawRefs[j].TextEnd
+				c.RawRefs[j].TextEnd = &v
+			}
 		}
 		texts = append(texts, c.Text)
 	}
-	s.CanonicalText = strings.Join(texts, "\n")
+	s.CanonicalText = joinCueTexts(s.Cues, texts)
 	if err := Validate(s, limits); err != nil {
 		s.Quality = QualityUnusable
 		return s, err
@@ -292,6 +393,21 @@ func Canonicalize(s Snapshot, limits Limits) (Snapshot, error) {
 	s.SourceDigest = digest
 	s.Quality = QualityUsable
 	return s, nil
+}
+
+func joinCueTexts(cues []Cue, texts []string) string {
+	var joined strings.Builder
+	for i, text := range texts {
+		if i > 0 {
+			separator := "\n"
+			if cues[i].JoinBefore != nil {
+				separator = *cues[i].JoinBefore
+			}
+			joined.WriteString(separator)
+		}
+		joined.WriteString(text)
+	}
+	return joined.String()
 }
 
 func copyTime(t *int64) *int64 {

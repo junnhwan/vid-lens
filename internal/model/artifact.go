@@ -30,9 +30,10 @@ type ArtifactVersion struct {
 }
 
 const (
-	AgentRunSubjectGeneration   = "generation_request"
-	AgentRunSubjectArtifactEdit = "artifact_edit_request"
-	AgentRunSubjectSummaryEdit  = "summary_edit_request"
+	AgentRunSubjectGeneration        = "generation_request"
+	AgentRunSubjectArtifactEdit      = "artifact_edit_request"
+	AgentRunSubjectSummaryEdit       = "summary_edit_request"
+	AgentRunSubjectSummaryGeneration = "summary_generation"
 )
 
 // ArtifactEditRequest is the immutable, owner-scoped authority for one edit
@@ -122,18 +123,24 @@ type SourceManifest struct {
 	CreatedAt   time.Time  `json:"-"`
 }
 type SourceSnapshotItem struct {
-	ID              string `gorm:"type:varchar(36);primaryKey" json:"id"`
-	ManifestID      string `gorm:"not null;index" json:"manifest_id"`
-	SourceID        int64  `gorm:"not null;index" json:"source_id"`
-	SourceTitle     string `json:"source_title"`
-	SourceIdentity  string `json:"source_identity"`
-	Modality        string `json:"modality"`
-	Content         string `gorm:"type:text" json:"content"`
-	ContentHash     string `json:"content_hash"`
-	StartMS         *int64 `json:"start_ms"`
-	EndMS           *int64 `json:"end_ms"`
-	TimeRangeStatus string `json:"time_range_status"`
-	Position        int    `json:"-"`
+	TextSourceID     string   `gorm:"type:varchar(36);not null;default:''" json:"text_source_id,omitempty"`
+	TextSourceDigest string   `gorm:"type:char(64);not null;default:''" json:"text_source_digest,omitempty"`
+	CueIDs           []string `gorm:"type:text;serializer:json" json:"cue_ids,omitempty"`
+	TimingMethod     string   `gorm:"type:varchar(32);not null;default:''" json:"timing_method,omitempty"`
+	SourceKind       string   `gorm:"type:varchar(32);not null;default:''" json:"source_kind,omitempty"`
+	MediaFingerprint string   `gorm:"type:varchar(128);not null;default:''" json:"media_fingerprint,omitempty"`
+	ID               string   `gorm:"type:varchar(36);primaryKey" json:"id"`
+	ManifestID       string   `gorm:"not null;index" json:"manifest_id"`
+	SourceID         int64    `gorm:"not null;index" json:"source_id"`
+	SourceTitle      string   `json:"source_title"`
+	SourceIdentity   string   `json:"source_identity"`
+	Modality         string   `json:"modality"`
+	Content          string   `gorm:"type:text" json:"content"`
+	ContentHash      string   `json:"content_hash"`
+	StartMS          *int64   `json:"start_ms"`
+	EndMS            *int64   `json:"end_ms"`
+	TimeRangeStatus  string   `json:"time_range_status"`
+	Position         int      `json:"-"`
 }
 type ArtifactEvidenceRef struct {
 	ID         uint64 `gorm:"primaryKey"`

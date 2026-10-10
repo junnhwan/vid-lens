@@ -33,6 +33,7 @@ const (
 	TaskStageNone         = "none"
 	TaskStageDownloading  = "downloading"
 	TaskStageUploaded     = "uploaded"
+	TaskStageTextSource   = "text_source"
 	TaskStageTranscribing = "transcribing"
 	TaskStageAligning     = "aligning"
 	TaskStageVisual       = "visual_indexing" // keyframe OCR; best-effort after ASR
@@ -53,35 +54,38 @@ type VideoTask struct {
 	Filename string `gorm:"type:varchar(255);not null" json:"filename"`
 	Title    string `gorm:"type:varchar(120);default:''" json:"title,omitempty"`
 	// Empty means a legacy title whose provenance is unknown. Never rewrite it automatically.
-	TitleOrigin     string         `gorm:"type:varchar(16);not null;default:''" json:"title_origin,omitempty"`
-	FileURL         string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径
-	FileSize        int64          `gorm:"default:0" json:"file_size"`        // 文件大小（字节）
-	Status          int8           `gorm:"type:smallint;default:0;index:idx_status_time" json:"status"`
-	Stage           string         `gorm:"type:varchar(50);default:'none';index" json:"stage"`
-	TraceID         string         `gorm:"type:varchar(64);index" json:"trace_id"`
-	SourceType      string         `gorm:"type:varchar(20);index" json:"source_type"`
-	SourceURL       string         `gorm:"type:varchar(1000)" json:"source_url,omitempty"`
-	DemoVisible     bool           `gorm:"default:false;index" json:"demo_visible"`                 // 演示账号可见的精选视频
-	VisualDisabled  bool           `gorm:"not null;default:false" json:"visual_disabled"`           // 按视频控制后续自动画面分析；不删除既有证据
-	VisualMode      string         `gorm:"type:varchar(16);not null;default:''" json:"visual_mode"` // empty preserves historical mixed processing
-	RetryCount      int            `gorm:"default:0" json:"retry_count"`
-	MaxRetries      int            `gorm:"default:3" json:"max_retries"`
-	NextRetryAt     *time.Time     `json:"next_retry_at,omitempty"`
-	LastErrorCode   string         `gorm:"type:varchar(100)" json:"last_error_code"`
-	LastErrorMsg    string         `gorm:"type:varchar(500)" json:"last_error_msg"`
-	LastJobType     string         `gorm:"type:varchar(30);index" json:"last_job_type"`
-	ProcessingToken string         `gorm:"type:varchar(64);index" json:"-"`
-	LeaseKind       string         `gorm:"type:varchar(20);index" json:"-"`
-	LeaseExpiresAt  *time.Time     `gorm:"index" json:"-"`
-	LeaseVersion    int64          `gorm:"default:0" json:"-"`
-	StageStartedAt  *time.Time     `json:"stage_started_at,omitempty"`
-	StageFinishedAt *time.Time     `json:"stage_finished_at,omitempty"`
-	StartedAt       *time.Time     `json:"started_at,omitempty"`
-	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
-	ErrorMsg        string         `gorm:"type:varchar(500)" json:"error_msg"` // 失败原因
-	CreatedAt       time.Time      `gorm:"index:idx_status_time" json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	TitleOrigin          string         `gorm:"type:varchar(16);not null;default:''" json:"title_origin,omitempty"`
+	FileURL              string         `gorm:"type:varchar(500)" json:"file_url"` // MinIO 存储路径
+	FileSize             int64          `gorm:"default:0" json:"file_size"`        // 文件大小（字节）
+	Status               int8           `gorm:"type:smallint;default:0;index:idx_status_time" json:"status"`
+	Stage                string         `gorm:"type:varchar(50);default:'none';index" json:"stage"`
+	TraceID              string         `gorm:"type:varchar(64);index" json:"trace_id"`
+	SourceType           string         `gorm:"type:varchar(20);index" json:"source_type"`
+	SourceURL            string         `gorm:"type:varchar(1000)" json:"source_url,omitempty"`
+	ActiveTextSourceID   string         `gorm:"type:varchar(36);not null;default:'';index" json:"active_text_source_id,omitempty"`
+	ProcessingIntentJSON string         `gorm:"type:text;not null;default:''" json:"-"`
+	MediaIdentityJSON    string         `gorm:"type:text;not null;default:''" json:"-"`
+	DemoVisible          bool           `gorm:"default:false;index" json:"demo_visible"`                 // 演示账号可见的精选视频
+	VisualDisabled       bool           `gorm:"not null;default:false" json:"visual_disabled"`           // 按视频控制后续自动画面分析；不删除既有证据
+	VisualMode           string         `gorm:"type:varchar(16);not null;default:''" json:"visual_mode"` // empty preserves historical mixed processing
+	RetryCount           int            `gorm:"default:0" json:"retry_count"`
+	MaxRetries           int            `gorm:"default:3" json:"max_retries"`
+	NextRetryAt          *time.Time     `json:"next_retry_at,omitempty"`
+	LastErrorCode        string         `gorm:"type:varchar(100)" json:"last_error_code"`
+	LastErrorMsg         string         `gorm:"type:varchar(500)" json:"last_error_msg"`
+	LastJobType          string         `gorm:"type:varchar(30);index" json:"last_job_type"`
+	ProcessingToken      string         `gorm:"type:varchar(64);index" json:"-"`
+	LeaseKind            string         `gorm:"type:varchar(20);index" json:"-"`
+	LeaseExpiresAt       *time.Time     `gorm:"index" json:"-"`
+	LeaseVersion         int64          `gorm:"default:0" json:"-"`
+	StageStartedAt       *time.Time     `json:"stage_started_at,omitempty"`
+	StageFinishedAt      *time.Time     `json:"stage_finished_at,omitempty"`
+	StartedAt            *time.Time     `json:"started_at,omitempty"`
+	FinishedAt           *time.Time     `json:"finished_at,omitempty"`
+	ErrorMsg             string         `gorm:"type:varchar(500)" json:"error_msg"` // 失败原因
+	CreatedAt            time.Time      `gorm:"index:idx_status_time" json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	DeletedAt            gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 关联（不存储在数据库）
 	Asset           *VideoAsset           `gorm:"foreignKey:AssetID;references:ID" json:"asset,omitempty"`
