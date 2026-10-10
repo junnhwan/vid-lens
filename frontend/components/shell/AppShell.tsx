@@ -7,6 +7,7 @@ import { ShellFrame } from './ShellFrame'
 import { ArtifactQueryProvider } from '@/components/artifacts/ArtifactQueryProvider'
 import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
 import { useLeaveGuard } from './useLeaveGuard'
+import { clearSummaryViewState, setSummaryViewOwner } from '@/lib/summaryViewState'
 
 interface ShellCtx {
   user: User | null
@@ -53,6 +54,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const uploadPreflight = useVideoAIPreflight('upload')
   const requestUploadAI = uploadPreflight.request
   const { registerLeaveGuard, confirmLeave, clearLeaveGuard } = useLeaveGuard()
+  useEffect(() => { setSummaryViewOwner(user?.id ?? null) }, [user?.id])
 
   useEffect(() => {
     if (!hasToken) {
@@ -74,6 +76,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     if (!confirmLeave()) return
     clearLeaveGuard()
+    clearSummaryViewState()
     clearToken()
     router.replace('/login')
   }, [router, confirmLeave, clearLeaveGuard])

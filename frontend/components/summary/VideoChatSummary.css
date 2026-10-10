@@ -1,0 +1,9 @@
+.video-chat-with-summary{height:100%;min-height:0;display:flex;flex-direction:column}
+.video-chat-summary-toggle{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line)}
+.video-chat-summary-toggle .muted{font-size:12px}
+.video-chat-summary-layout{flex:1;min-height:0;display:flex}
+.video-chat-summary-reader{flex:0 0 44%;min-width:0;overflow:auto;padding:24px;border-right:1px solid var(--line);scroll-padding-top:24px}
+.video-chat-summary-reader[hidden]{display:none}
+.video-chat-summary-conversation{flex:1;min-width:0;min-height:0}
+.video-chat-summary-conversation .chat-wrap{height:100%}
+@media(max-width:900px){.summary-open .video-chat-summary-layout{flex-direction:column}.video-chat-summary-reader{flex:0 0 42%;border-right:0;border-bottom:1px solid var(--line)}.video-chat-summary-toggle .muted{display:none}}

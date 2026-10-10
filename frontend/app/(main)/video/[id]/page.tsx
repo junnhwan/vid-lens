@@ -18,6 +18,7 @@ import {
 import { taskTitle } from '@/lib/format'
 import { needsCitationUpgrade } from '@/components/Citation'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
+import { SummaryWorkspace } from '@/components/summary/SummaryWorkspace'
 import { SummaryRevisionPanel } from '@/components/summary/SummaryRevisionPanel'
 import { VideoQuestionsPanel } from '@/components/chat/VideoQuestionsPanel'
 import { useCrumb, useShell } from '@/components/shell/AppShell'
@@ -41,6 +42,7 @@ import './VideoWorkbench.css'
 
 type TabKey = 'tl' | 'vf' | 'idx'
 function VideoWorkbench({ params, searchParams }: { params: { id: string }; searchParams?: { t?: string; citations?: string } }) {
+  const [summaryMode,setSummaryMode]=useState(searchParams?.citations !== 'upgrade')
   const [artifactMode, setArtifactMode] = useState<'new' | 'reorganize' | null>(null)
   const taskId = Number(params.id)
   const router = useRouter()
@@ -118,6 +120,8 @@ function VideoWorkbench({ params, searchParams }: { params: { id: string }; sear
     )
   }
 
+  if(summaryMode) return <><SummaryWorkspace key={task.id} task={task} readOnly={readOnly} playbackUrl={playbackUrl} playerRef={playerRef} onPlayhead={onPlayhead} onDuration={setVideoDurationMs} onSeek={seek} refreshPlaybackUrl={refreshPlaybackUrl} onChanged={data.refreshAfterAction} onGenerate={()=>runAction('analyze',task.has_summary)} onTechnical={()=>setSummaryMode(false)} busy={busy!==''} indexed={!!index?.indexed} initialTimeMS={searchParams?.t?Number(searchParams.t):undefined} />{videoPreflight.dialog}</>
+
   const failed = task.status === TaskStatusEnum.Failed || task.status === TaskStatusEnum.Dead
   const transcriptionRelevant = task.stage === 'transcribing' || task.stage === 'aligning' || task.stage === 'visual_indexing' || task.last_job_type === 'transcribe'
   const alignmentIncomplete = !!transcriptionProgress?.alignment_only && failed && task.last_job_type === 'transcribe'
@@ -136,7 +140,7 @@ function VideoWorkbench({ params, searchParams }: { params: { id: string }; sear
       {artifactMode && <ArtifactCreateDialog source={{ id: task.id, title }} existing={artifactMode === 'reorganize' && readableArtifact ? { id: readableArtifact.id, title: readableArtifact.title, head_version: readableArtifact.head_version } : undefined} onClose={() => { setArtifactMode(null); void relatedArtifacts.refetch() }} />}
       <div className="ws">
         <div className="ws-stage">
-          <div className="ws-heading">
+          <div className="ws-heading"><button className="btn btn-sm" onClick={()=>setSummaryMode(true)}>返回摘要</button>
             {editingTitle ? (
               <form
                 className="ws-title-form"

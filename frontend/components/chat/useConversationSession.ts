@@ -28,6 +28,9 @@ interface ConversationSessionOptions {
   onBeforeSend?: () => void
   contextRefs?: SummaryContextRef[]
   onContextSent?: () => void
+  ownerID?: number
+  preferredSessionID?: number | null
+  onSessionCreated?: (id: number) => void
 }
 
 export function useConversationSession(options: ConversationSessionOptions) {
@@ -37,10 +40,16 @@ export function useConversationSession(options: ConversationSessionOptions) {
     mapCitations = defaultCitationMapper,
     canSend = true,
     onBlocked,
-    onBeforeSend, contextRefs, onContextSent,
+    onBeforeSend, contextRefs, onContextSent, ownerID, preferredSessionID, onSessionCreated,
   } = options
+  const preferredSession = useRef(preferredSessionID)
+  preferredSession.current = preferredSessionID
+  const sessionCreated = useRef(onSessionCreated)
+  sessionCreated.current = onSessionCreated
   const currentContextRefs = useRef(contextRefs)
   currentContextRefs.current = contextRefs
+  const contextSentCallback = useRef(onContextSent)
+  contextSentCallback.current = onContextSent
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [sessionReady, setSessionReady] = useState(false)
@@ -64,12 +73,13 @@ export function useConversationSession(options: ConversationSessionOptions) {
       ? { knowledge_base_id: targetId }
       : scopeType === 'video_library' ? { scope_type: 'video_library' as ChatScopeType }
       : { task_id: targetId }
-  ), [scopeType, targetId])
+  ), [scopeType, targetId, ownerID])
 
   const loadSessions = useCallback(async () => {
+    const version = loadVersion.current
     try {
       const list = await api.listSessions(sessionFilter())
-      setSessions(list)
+      if (version === loadVersion.current) setSessions(list)
       return list
     } catch {
       return []
@@ -83,6 +93,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
     abortRef.current?.abort()
     abortRef.current = null
     setSession(null)
+    setSessions([])
     setSessionReady(false)
     setHistoryError('')
     setHistoryLoading(false)
@@ -94,9 +105,14 @@ export function useConversationSession(options: ConversationSessionOptions) {
       const list = await loadSessions()
       if (!active) return
       const sidParam = new URLSearchParams(location.search).get('session')
-      const sid = sidParam ? Number(sidParam) : 0
+      const sid = sidParam ? Number(sidParam) : preferredSession.current || 0
       const selected = sid > 0 ? list.find(item => item.id === sid) || null : null
       setSession(selected)
+      if (!sidParam && selected) {
+        const params = new URLSearchParams(location.search)
+        params.set('session', String(selected.id))
+        history.replaceState(null, '', `${basePath}?${params}`)
+      }
       if (selected) {
         historyLoadingRef.current = true
         setHistoryLoading(true)
@@ -112,7 +128,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       if (active) setSessionReady(true)
     }
     void init()
-    return () => { active = false; abortRef.current?.abort(); abortRef.current = null }
+    return () => { active = false; ++loadVersion.current; ++requestVersion.current; abortRef.current?.abort(); abortRef.current = null }
   }, [loadSessions, loadHistory])
 
   const replaceSessionInURL = useCallback((sessionId?: number) => {
@@ -186,6 +202,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       : scopeType === 'video_library' ? { scope_type: 'video_library' }
       : { task_id: targetId, scope_type: 'video' })
     if (version !== requestVersion.current) return null
+    sessionCreated.current?.(created.id)
     setSession(created)
     replaceSessionInURL(created.id)
     void loadSessions()
@@ -230,7 +247,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
     let streamFailed = false
     let contextSent = false
     const acknowledgeContext = () => {
-      if (requestContextRefs?.length && JSON.stringify(currentContextRefs.current) === JSON.stringify(requestContextRefs) && !contextSent && abortRef.current === controller && !controller.signal.aborted && version === requestVersion.current) { contextSent = true; onContextSent?.() }
+      if (requestContextRefs?.length && JSON.stringify(currentContextRefs.current) === JSON.stringify(requestContextRefs) && !contextSent && abortRef.current === controller && !controller.signal.aborted && version === requestVersion.current) { contextSent = true; contextSentCallback.current?.() }
     }
     abortRef.current = controller
     const deliver = (action: ConversationSessionAction) => {

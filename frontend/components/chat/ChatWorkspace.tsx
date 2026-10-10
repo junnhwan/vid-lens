@@ -38,6 +38,8 @@ import './ChatWorkspace.css'
 import { useShell } from '@/components/shell/AppShell'
 import { useAIAvailability } from '@/components/settings/useAIAvailability'
 import { useVideoAIPreflight } from '@/components/settings/VideoAIPreflight'
+import { useSummarySessionView, useSummaryTaskView } from '@/components/summary/useSummaryViewState'
+import { getSummaryTaskView, patchSummarySessionView, promoteSummarySessionView } from '@/lib/summaryViewState'
 
 // Shared Chat / Agent workspace. Historical mode labels are display-only.
 // Agent steps come from live tool events; new Chat answers retain server-safe progress.
@@ -67,6 +69,7 @@ interface ChatWorkspaceProps {
   onContextSent?: () => void
   onSummaryContextSent?: () => void
   embedded?: boolean
+  sharedSummaryState?: boolean
   knowledgeBase?: KnowledgeBase
   scopeType: ChatScopeType
   targetId: number
@@ -98,7 +101,7 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript, aiPreflightAccepted = false, summaryContextRefs, onRemoveSummaryContext, onReturnSummaryContext, onContextSent, onSummaryContextSent, embedded = false }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript, aiPreflightAccepted = false, summaryContextRefs, onRemoveSummaryContext, onReturnSummaryContext, onContextSent, onSummaryContextSent, embedded = false, sharedSummaryState = false }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const videoRelated = isVideo || scopeType === 'video_library'
   const router = useRouter()
@@ -127,7 +130,25 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
     return () => observer.disconnect()
   }, [])
 
-  const [input, setInput] = useState('')
+  const [localInput, setLocalInput] = useState('')
+  const sharedView = sharedSummaryState && isVideo && !!user?.id
+  const [taskView, patchTaskView] = useSummaryTaskView(sharedView ? user?.id : undefined, targetId)
+  const [viewScope, setViewScope] = useState({ ownerID: user?.id, taskID: targetId, sessionID: taskView.sessionID })
+  const viewSessionID = viewScope.ownerID === user?.id && viewScope.taskID === targetId ? viewScope.sessionID : taskView.sessionID
+  const setViewSessionID = useCallback((id: number | null) => setViewScope({ ownerID: user?.id, taskID: targetId, sessionID: id }), [user?.id, targetId])
+  const [sessionView, patchSessionView] = useSummarySessionView(sharedView ? user?.id : undefined, targetId, viewSessionID)
+  const input = sharedView ? sessionView.draft : localInput
+  const setInput = useCallback((value: string) => { if (sharedView) patchSessionView({ draft: value }); else setLocalInput(value) }, [sharedView, patchSessionView])
+  const effectiveContexts = sharedView ? sessionView.contexts : summaryContextRefs
+  const acknowledgeContexts = () => {
+    if (sharedView) {
+      // A fast saved response may arrive before React renders the newly
+      // created session. Promotion updates the in-memory scope synchronously.
+      patchSummarySessionView(user!.id, targetId, getSummaryTaskView(user!.id, targetId).sessionID, { contexts: [] })
+    }
+    const acknowledge = onSummaryContextSent || onContextSent
+    acknowledge?.()
+  }
   useEffect(() => { if (aiPreflightAccepted) setPreflightAccepted(true) }, [aiPreflightAccepted])
   const [mode, setMode] = useState<ChatUIMode>('chat')
   const [drawerCite, setDrawerCite] = useState<{ cite: CiteRef; cites: CiteRef[] } | null>(null)
@@ -160,8 +181,11 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   } = useConversationSession({
     scopeType,
     targetId,
-    contextRefs: summaryContextRefs,
-    onContextSent: onSummaryContextSent || onContextSent,
+    contextRefs: effectiveContexts,
+    onContextSent: acknowledgeContexts,
+    ownerID: user?.id,
+    preferredSessionID: sharedView ? taskView.sessionID : undefined,
+    onSessionCreated: sharedView ? id => { promoteSummarySessionView(user!.id, targetId, id); setViewSessionID(id) } : undefined,
     basePath: embedded ? window.location.pathname : isVideo ? `/chat/v/${targetId}` : scopeType === 'video_library' ? '/chat/library' : `/chat/kb/${targetId}`,
     mode,
     topK: TOP_K,
@@ -173,6 +197,14 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
       setRailTab('run')
     },
   })
+  useEffect(() => {
+    if (!sharedView || !sessionReady) return
+    const id = session?.id ?? null
+    setViewSessionID(id)
+    patchTaskView({ sessionID: id })
+  }, [sharedView, sessionReady, session?.id, patchTaskView, setViewSessionID])
+  useEffect(() => { setLocalInput(''); autoAsked.current = false }, [user?.id, targetId, scopeType])
+  useEffect(() => { setViewSessionID(getSummaryTaskView(user?.id || 0, targetId).sessionID) }, [user?.id, targetId, setViewSessionID])
 
   const displayMessages = useMemo(() => messages.map(msg => msg.role === 'assistant'
     ? { ...msg, ...presentAnswerCitations(msg.content, msg.cites || []) }
@@ -246,10 +278,26 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   }
 
 
+  const anchorScope = `${user?.id || 0}/${targetId}/${viewSessionID ?? 'new'}`
+  const restoredAnchor = useRef('')
   useEffect(() => {
     const el = scrollRef.current
+    if (sharedView && restoredAnchor.current !== anchorScope && sessionView.messageAnchor) return
     if (el && followOutputRef.current && messages.length > 0) el.scrollTop = el.scrollHeight
-  }, [messages])
+  }, [messages, sharedView, anchorScope, sessionView.messageAnchor])
+  useEffect(() => {
+    if (!sharedView || !sessionReady || historyLoading || restoredAnchor.current === anchorScope) return
+    const el = scrollRef.current
+    if (!el) return
+    const anchor = sessionView.messageAnchor
+    if (anchor) {
+      const index = messages.findIndex(message => message.messageId === anchor.messageID && message.role === 'user')
+      const node = index >= 0 ? questionRefs.current[index] : null
+      el.scrollTop = node ? el.scrollTop + node.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.offset : anchor.scrollTop
+      followOutputRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+    }
+    restoredAnchor.current = anchorScope
+  }, [sharedView, sessionReady, historyLoading, anchorScope, messages, sessionView.messageAnchor])
 
   const questions = useMemo(() => messages.map((message, index) => ({ message, index })).filter(item => item.message.role === 'user'), [messages])
   useEffect(() => {
@@ -390,6 +438,12 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
         <div className="chat-scroll" ref={scrollRef} onScroll={event => {
           const el = event.currentTarget
           followOutputRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+          if (sharedView && sessionReady && !historyLoading) {
+            const candidates = messages.map((message, index) => ({ message, node: questionRefs.current[index] })).filter(item => item.message.role === 'user' && item.node)
+            const top = el.getBoundingClientRect().top
+            const nearest = candidates.findLast(item => item.node!.getBoundingClientRect().top <= top + 90) || candidates[0]
+            patchSessionView({ messageAnchor: { scrollTop: el.scrollTop, messageID: nearest?.message.messageId, offset: nearest ? nearest.node!.getBoundingClientRect().top - top : 0 } })
+          }
         }}>
           <div className="chat-inner">
             {messages.length === 0 ? (
@@ -501,7 +555,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
             <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：当前向量模型可检索的视频' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : mode === 'agent' && videoVisualMode && videoVisualMode !== 'off' ? '按问题调用文本与画面工具，逐步分析后回答' : MODE_NOTE[mode]}</p>
             {isVideo && videoRetrievable === false && <p className="mode-note">{videoHasTranscript ? '检索未就绪；快速问答可使用摘要或转写，暂不提供检索引用。' : '尚无当前模型可检索的内容，请先在视频详情处理内容并建立索引。'}</p>}
             {!readOnly && !ai.ready && <div className="chat-ai-notice" role="status"><span>{ai.reason}</span>{ai.error ? <button type="button" className="btn btn-sm" onClick={() => void ai.refetch()}>重试</button> : <a className="btn btn-sm" href="/settings" target="_blank" rel="noopener noreferrer">配置 AI</a>}</div>}
-            <SummaryContextCards refs={summaryContextRefs} fallbackTitle={scopeName} onReturn={onReturnSummaryContext} onRemove={sending || streaming ? undefined : onRemoveSummaryContext} />
+            <SummaryContextCards refs={effectiveContexts} fallbackTitle={scopeName} onReturn={onReturnSummaryContext} onRemove={sending || streaming ? undefined : sharedView ? index => patchSessionView({ contexts: sessionView.contexts.filter((_, i) => i !== index) }) : onRemoveSummaryContext} />
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}
@@ -509,6 +563,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
                 value={input}
                 maxLength={1000}
                 aria-label="输入问题"
+                disabled={sharedView && !sessionReady}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
                 placeholder={isVideo ? '问这段视频…' : scopeType === 'video_library' ? '向视频库提问…' : '向知识库提问…'}

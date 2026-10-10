@@ -8,7 +8,7 @@ vi.mock('@/lib/router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/components/Toast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
 vi.mock('@/lib/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/lib/api')>()
-  return { ...original, api: { importOptions: vi.fn(), checkUpload: vi.fn(), uploadChunk: vi.fn(), mergeChunks: vi.fn() } }
+  return { ...original, api: { importOptions: vi.fn(), checkUpload: vi.fn(), uploadChunk: vi.fn(), mergeChunks: vi.fn(),uploadUrl:vi.fn() } }
 })
 
 beforeEach(() => {
@@ -106,4 +106,46 @@ test('closing cancels an active upload and never starts merge', async () => {
   view.unmount()
   expect(signal?.aborted).toBe(true)
   expect(api.mergeChunks).not.toHaveBeenCalled()
+})
+
+
+test('URL import explicitly freezes automatic summary options and reuses its receipt after a lost response',async()=>{
+ vi.mocked(api.importOptions).mockResolvedValue({url_import_enabled:true,slow_upload_notice:false})
+ vi.mocked(api.uploadUrl).mockRejectedValueOnce(new Error('connection lost')).mockResolvedValue({task_id:42} as never)
+ render(<UploadModal onClose={vi.fn()} />)
+ const input=await screen.findByPlaceholderText(/https:\/\/www.bilibili/)
+ fireEvent.change(input,{target:{value:'https://www.bilibili.com/video/BV1234567890?p=2'}})
+ fireEvent.change(screen.getByPlaceholderText(/例如：关注核心结论/),{target:{value:'关注部署与回滚'}})
+ fireEvent.click(screen.getByRole('button',{name:'导入并生成摘要'}))
+ await waitFor(()=>expect(api.uploadUrl).toHaveBeenCalledTimes(1))
+ await waitFor(()=>expect((screen.getByRole('button',{name:'导入并生成摘要'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByRole('button',{name:'导入并生成摘要'}))
+ await waitFor(()=>expect(api.uploadUrl).toHaveBeenCalledTimes(2))
+ const [first,second]=vi.mocked(api.uploadUrl).mock.calls
+ expect(first[1]).toMatchObject({auto_summary:true,text_source_policy:'prefer_platform',auto_tags_enabled:true,summary_instruction:'关注部署与回滚'})
+ expect(first[2]).toBeTruthy();expect(second[2]).toBe(first[2]);expect(second[1]).toEqual(first[1])
+})
+
+test('changing intent after a rejected request creates a new receipt and supports import only',async()=>{
+ vi.mocked(api.importOptions).mockResolvedValue({url_import_enabled:true,slow_upload_notice:false})
+ vi.mocked(api.uploadUrl).mockRejectedValue(new Error('unavailable'))
+ render(<UploadModal onClose={vi.fn()} />)
+ fireEvent.change(await screen.findByPlaceholderText(/https:\/\/www.bilibili/),{target:{value:'https://www.bilibili.com/video/BV1234567890'}})
+ fireEvent.click(screen.getByRole('button',{name:'导入并生成摘要'}))
+ await waitFor(()=>expect(api.uploadUrl).toHaveBeenCalledTimes(1))
+ await waitFor(()=>expect((screen.getByRole('button',{name:'导入并生成摘要'}) as HTMLButtonElement).disabled).toBe(false))
+ fireEvent.click(screen.getByText('高级处理选项'))
+ fireEvent.click(screen.getByLabelText('导入后自动生成摘要'))
+ fireEvent.click(screen.getByRole('button',{name:'仅导入视频'}))
+ await waitFor(()=>expect(api.uploadUrl).toHaveBeenCalledTimes(2))
+ const [first,second]=vi.mocked(api.uploadUrl).mock.calls
+ expect(second[1]?.auto_summary).toBe(false);expect(second[2]).not.toBe(first[2])
+})
+
+test('local upload submits the same automatic flow with an ASR source policy',async()=>{
+ vi.mocked(api.checkUpload).mockResolvedValue({status:'completed',uploaded:[]})
+ selectFile()
+ await waitFor(()=>expect(api.mergeChunks).toHaveBeenCalledTimes(1))
+ expect(vi.mocked(api.mergeChunks).mock.calls[0][0]).toMatchObject({auto_summary:true,text_source_policy:'force_asr',auto_tags_enabled:true})
+ expect(vi.mocked(api.mergeChunks).mock.calls[0][2]).toBeTruthy()
 })
