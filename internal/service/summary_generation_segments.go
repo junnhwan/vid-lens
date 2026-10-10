@@ -124,7 +124,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		if !needsReview {
 			return e.fits(input)
 		}
-		return studyPromptTokens(e.messages(summaryReductionReviewPrefix+input))+e.plannedOutput(input)+min(384, e.plannedOutput(input))+256 <= e.window
+		return studyPromptTokens(e.messages(summaryReductionReviewPrefix+input))+2*e.plannedOutput(input)+64+256 <= e.window
 	}
 	for level := 1; len(docs) > 1; level++ {
 		groups := [][]summarydoc.Document{}
