@@ -1,3 +1,4 @@
+import type { SummaryContextRef } from '@/lib/summaryExperience'
 import type { ChatMsg } from './chatUtils.ts'
 import {
   agentTraceReducer,
@@ -31,8 +32,8 @@ export type ConversationSessionAction =
   | { type: 'load_messages'; messages: ChatMsg[] }
   | { type: 'append_messages'; messages: ChatMsg[] }
   | { type: 'reset' }
-  | { type: 'rag_start'; question: string }
-  | { type: 'agent_start'; question: string; mode?: 'agent' }
+  | { type: 'rag_start'; question: string; contextRefs?: SummaryContextRef[] }
+  | { type: 'agent_start'; question: string; contextRefs?: SummaryContextRef[]; mode?: 'agent' }
   | { type: 'answer_delta'; delta: string }
   | { type: 'progress'; event: import('../../lib/conversationStream.ts').ProgressEvent }
   | { type: 'reasoning'; event: import('../../lib/conversationStream.ts').ReasoningEvent }
@@ -63,7 +64,7 @@ export function conversationSessionReducer(
         ragTrace: trace,
         agentTrace: emptyAgentTraceState(),
         messages: [...state.messages,
-          { role: 'user', content: action.question },
+          { role: 'user', content: action.question, summaryContextRefs: action.contextRefs },
           { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: [], processStartedAt: Date.now() },
         ],
       }
@@ -76,7 +77,7 @@ export function conversationSessionReducer(
         ragTrace: [],
         agentTrace: { ...emptyAgentTraceState(), mode },
         messages: [...state.messages,
-          { role: 'user', content: action.question },
+          { role: 'user', content: action.question, summaryContextRefs: action.contextRefs },
           { role: 'assistant', content: '', cites: [], openCiteIds: [], streaming: true, trace: [], agentRun: true, agentMode: mode, processStartedAt: Date.now() },
         ],
       }

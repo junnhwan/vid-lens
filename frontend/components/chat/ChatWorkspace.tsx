@@ -1,3 +1,5 @@
+import type { SummaryContextRef } from '@/lib/summaryExperience'
+import { SummaryContextCards } from './SummaryContextCards'
 import { presentAnswerCitations } from '@/lib/citationPresentation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from '@/lib/router'
@@ -59,6 +61,12 @@ const MODE_NOTE: Record<ChatUIMode, string> = {
 
 
 interface ChatWorkspaceProps {
+  summaryContextRefs?: SummaryContextRef[]
+  onRemoveSummaryContext?: (index: number) => void
+  onReturnSummaryContext?: (index: number) => void
+  onContextSent?: () => void
+  onSummaryContextSent?: () => void
+  embedded?: boolean
   knowledgeBase?: KnowledgeBase
   scopeType: ChatScopeType
   targetId: number
@@ -90,7 +98,7 @@ function clipText(text: string | undefined, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
-export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript, aiPreflightAccepted = false }: ChatWorkspaceProps) {
+export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, playbackUrl, refreshPlaybackUrl, suggestions, videoQuestions, questionsLoading, studyBlock, studyError, returnToStudy, videoVisualMode, videoRetrievable, videoHasTranscript, aiPreflightAccepted = false, summaryContextRefs, onRemoveSummaryContext, onReturnSummaryContext, onContextSent, onSummaryContextSent, embedded = false }: ChatWorkspaceProps) {
   const isVideo = scopeType === 'video'
   const videoRelated = isVideo || scopeType === 'video_library'
   const router = useRouter()
@@ -152,7 +160,9 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   } = useConversationSession({
     scopeType,
     targetId,
-    basePath: isVideo ? `/chat/v/${targetId}` : scopeType === 'video_library' ? '/chat/library' : `/chat/kb/${targetId}`,
+    contextRefs: summaryContextRefs,
+    onContextSent: onSummaryContextSent || onContextSent,
+    basePath: embedded ? window.location.pathname : isVideo ? `/chat/v/${targetId}` : scopeType === 'video_library' ? '/chat/library' : `/chat/kb/${targetId}`,
     mode,
     topK: TOP_K,
     canSend: !readOnly && ai.ready,
@@ -358,7 +368,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
   }, [agentTrace, streaming, lastAssistant])
 
   return (
-    <div ref={workspaceRef} className={`chat-wrap${questionsOpen ? ' questions-expanded' : ''}${railOpen ? ' rail-expanded' : ''}${railOverlay ? ' context-overlay' : ''}${questionsOverlay ? ' questions-overlay' : ''}${panelsInstant ? ' panels-instant' : ''}`}>
+    <div ref={workspaceRef} className={`chat-wrap${embedded ? ' chat-embedded' : ''}${questionsOpen ? ' questions-expanded' : ''}${railOpen ? ' rail-expanded' : ''}${railOverlay ? ' context-overlay' : ''}${questionsOverlay ? ' questions-overlay' : ''}${panelsInstant ? ' panels-instant' : ''}`}>
       <nav id="chat-question-nav" className={`question-nav${questionsOpen ? ' open' : ''}`} aria-label="历史问题导航">
         <div className="question-nav-head"><b>本次问题</b><span>{questions.length}</span><button type="button" className="question-nav-close" onClick={() => setQuestionsOpen(false)} aria-label="收起问题目录"><Icon name="chev-l" size="sm" /></button></div>
         {questions.length ? questions.map(({ message, index }, position) => <button key={`${session?.id ?? 'new'}-${message.messageId ?? index}`} type="button" className={activeQuestion === index ? 'active' : ''} aria-current={activeQuestion === index ? 'location' : undefined} onClick={() => {
@@ -395,6 +405,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
               displayMessages.map((msg, i) => msg.role === 'user'
                 ? (
                   <div key={`${session?.id ?? 'new'}-${msg.messageId ?? i}`} className="msg msg-user" ref={node => { questionRefs.current[i] = node }}>
+                    <SummaryContextCards refs={msg.summaryAnnotations?.length ? msg.summaryAnnotations : msg.summaryContextRefs} saved={!!msg.summaryAnnotations?.length} fallbackTitle={scopeName} />
                     <div className="bubble">{msg.content}</div>
                   </div>
                 )
@@ -490,6 +501,7 @@ export function ChatWorkspace({ knowledgeBase, scopeType, targetId, scopeName, p
             <p className="mode-note" title="模式和默认 AI 配置从下一轮起生效，历史回答保留当轮配置。">{scopeType === 'video_library' ? '范围：当前向量模型可检索的视频' : scopeType === 'knowledge_base' ? `范围：${scopeName}` : mode === 'agent' && videoVisualMode && videoVisualMode !== 'off' ? '按问题调用文本与画面工具，逐步分析后回答' : MODE_NOTE[mode]}</p>
             {isVideo && videoRetrievable === false && <p className="mode-note">{videoHasTranscript ? '检索未就绪；快速问答可使用摘要或转写，暂不提供检索引用。' : '尚无当前模型可检索的内容，请先在视频详情处理内容并建立索引。'}</p>}
             {!readOnly && !ai.ready && <div className="chat-ai-notice" role="status"><span>{ai.reason}</span>{ai.error ? <button type="button" className="btn btn-sm" onClick={() => void ai.refetch()}>重试</button> : <a className="btn btn-sm" href="/settings" target="_blank" rel="noopener noreferrer">配置 AI</a>}</div>}
+            <SummaryContextCards refs={summaryContextRefs} fallbackTitle={scopeName} onReturn={onReturnSummaryContext} onRemove={sending || streaming ? undefined : onRemoveSummaryContext} />
             <div className={`ask-bar${askTall ? ' tall' : ''}`} style={{ marginTop: 0 }}>
               <textarea
                 ref={el => { inputRef.current = el }}

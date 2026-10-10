@@ -2,6 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { useConversationSession } from './useConversationSession'
+import type { SummaryContextRef } from '@/lib/summaryExperience'
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(), getMessages: vi.fn(), getRunHistory: vi.fn(), createSession: vi.fn(),
@@ -96,4 +97,53 @@ test('failed history read shows error, blocks send, and can retry', async () => 
   await act(async () => { await hook.result.current.retryHistory() })
   expect(hook.result.current.historyError).toBe('')
   expect(hook.result.current.messages.map(message => message.content)).toEqual(['Old question', 'Old answer'])
+})
+
+const selectedRef: SummaryContextRef = { kind:'summary_selection', task_id:63, version_ref:{generated_version:1}, document_digest:'body', block_id:'chapter', block_digest:'block', text_start:0, text_end:3, quote:'旧摘要' }
+
+test('context selection is frozen across session creation and cleared only after saved done', async () => {
+  const creation = deferred<{id:number;task_id:number;scope_type:string}>()
+  mocks.createSession.mockReturnValue(creation.promise)
+  const onContextSent = vi.fn()
+  let handlers: {onDone:(done:{message_id:number})=>void} | undefined
+  mocks.streamAsk.mockImplementation((_sid, _question, _topK, _mode, h) => { handlers = h; return Promise.resolve() })
+  const hook = renderHook(({refs}) => useConversationSession({...options, basePath:'/video/63', contextRefs:refs, onContextSent}), {initialProps:{refs:[selectedRef]}})
+  await waitFor(() => expect(hook.result.current.sessionReady).toBe(true))
+  act(() => { void hook.result.current.send('解释这一段') })
+  hook.rerender({refs:[{...selectedRef, quote:'刚改选段'}]})
+  await act(async () => { creation.resolve({id:41,task_id:63,scope_type:'video'}); await creation.promise })
+  await waitFor(() => expect(mocks.streamAsk).toHaveBeenCalled())
+  expect(mocks.streamAsk.mock.calls[0][6]).toEqual([selectedRef])
+  expect(window.location.pathname).toBe('/video/63')
+  expect(onContextSent).not.toHaveBeenCalled()
+  // A stale callback after the stream has closed must not clear newer refs.
+  act(() => handlers?.onDone({message_id:99}))
+  expect(onContextSent).not.toHaveBeenCalled()
+})
+
+test('selection remains after failed stream; successful persisted done acknowledges once', async () => {
+  const onContextSent = vi.fn()
+  mocks.streamAsk.mockImplementation(async (_sid,_question,_topK,_mode, handlers) => { handlers.onError({message:'选段版本已变化'}) })
+  const hook = renderHook(() => useConversationSession({...options,contextRefs:[selectedRef],onContextSent}))
+  await waitFor(() => expect(hook.result.current.sessionReady).toBe(true))
+  await act(async () => { await hook.result.current.send('解释') })
+  expect(onContextSent).not.toHaveBeenCalled()
+  expect(hook.result.current.messages.at(-1)?.error).toBe('选段版本已变化')
+  mocks.streamAsk.mockImplementation(async (_sid,_question,_topK,_mode, handlers) => { handlers.onDone({message_id:9,answer:'解释完成'}); handlers.onDone({message_id:9,answer:'解释完成'}) })
+  await act(async () => { await hook.result.current.send('重试解释') })
+  expect(onContextSent).toHaveBeenCalledTimes(1)
+})
+
+test('a new selection added during a running answer survives the previous done', async () => {
+  const onContextSent = vi.fn()
+  const stream = deferred<void>()
+  let done!: (event:{message_id:number})=>void
+  mocks.streamAsk.mockImplementation((_sid,_question,_topK,_mode,handlers) => { done=handlers.onDone; return stream.promise })
+  const hook=renderHook(({refs})=>useConversationSession({...options,contextRefs:refs,onContextSent}),{initialProps:{refs:[selectedRef]}})
+  await waitFor(() => expect(hook.result.current.sessionReady).toBe(true))
+  act(() => { void hook.result.current.send('旧选段解释') })
+  await waitFor(() => expect(mocks.streamAsk).toHaveBeenCalled())
+  hook.rerender({refs:[{...selectedRef,quote:'新选段'}]})
+  await act(async () => { done({message_id:100}); stream.resolve(); await stream.promise })
+  expect(onContextSent).not.toHaveBeenCalled()
 })

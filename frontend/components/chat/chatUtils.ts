@@ -1,3 +1,5 @@
+import { parseSummaryAnnotations, type SummaryAnnotation } from '@/lib/summaryAnnotations'
+import type { SummaryContextRef } from '@/lib/summaryExperience'
 import type { ChatMessage } from '@/lib/types'
 import { BLOCKED_ANSWER_PREFIX } from '@/lib/types'
 import { citesFromSnapshot } from '@/components/Citation'
@@ -7,6 +9,8 @@ import { traceFromCitationCount } from '@/components/chat/traceTypes'
 import { parseSnapshotTrace } from '@/components/chat/snapshotTraceAdapter'
 
 export interface ChatMsg {
+  summaryAnnotations?: SummaryAnnotation[]
+  summaryContextRefs?: SummaryContextRef[]
   messageId?: number
   modelName?: string
   profileId?: number
@@ -57,6 +61,7 @@ export function parseMessages(
       messageId: m.id,
       role: m.role as 'user' | 'assistant',
       content: m.content,
+      summaryAnnotations: parseSummaryAnnotations((m as ChatMessage & {context_annotations_json?: string | null}).context_annotations_json),
       ...(m.model_name ? { modelName: m.model_name } : {}),
       ...(m.profile_id ? { profileId: m.profile_id } : {}),
       createdAt: Date.parse(m.created_at),

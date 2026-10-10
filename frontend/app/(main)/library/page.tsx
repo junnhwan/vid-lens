@@ -1,3 +1,5 @@
+import { LibraryTagFilter } from '@/components/tags/LibraryTagFilter'
+import { summaryTagsApi, type TagMatch } from '@/lib/summaryTags'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -16,7 +18,7 @@ const PAGE_SIZE = 24
 const filters = [{ key: 'all', label: '全部' }, { key: 'ready', label: '已有内容' }, { key: 'pending', label: '待处理' }, { key: 'processing', label: '处理中' }, { key: 'failed', label: '失败' }]
 
 export default function LibraryPage() {
-  const { openUpload, uploadRevision } = useShell()
+  const { openUpload, uploadRevision, user } = useShell()
   useCrumb([{ label: '视频库' }])
   const [params, setParams] = useSearchParams()
   const pageNumber = Number(params.get('page'))
@@ -24,6 +26,9 @@ export default function LibraryPage() {
   const view = params.get('view') === 'list' ? 'list' : 'grid'
   const filter = filters.some(f => f.key === params.get('activity')) ? params.get('activity')! : 'all'
   const keyword = params.get('q') || ''
+  const tagIDs = params.has('tag_ids') ? (params.get('tag_ids') || '').split(',') : []
+  const tagMatch: TagMatch = params.get('tag_match') === 'any' ? 'any' : 'all'
+  const hasTagFilter = params.has('tag_ids')
   const [draft, setDraft] = useState(keyword)
   useEffect(() => { setDraft(keyword) }, [keyword])
   useEffect(() => {
@@ -33,7 +38,7 @@ export default function LibraryPage() {
     }, 250)
     return () => window.clearTimeout(timer)
   }, [draft, keyword, setParams])
-  const query = useQuery({ queryKey: ['library-videos', page, keyword, filter, uploadRevision], queryFn: () => api.listTasks(page, PAGE_SIZE, keyword, filter), refetchInterval: query => query.state.data?.list.some(taskNeedsPolling) ? 5000 : false })
+  const query = useQuery({ queryKey: ['library-videos', page, keyword, filter, uploadRevision, tagIDs.join(','), tagMatch], queryFn: ({ signal }) => hasTagFilter ? summaryTagsApi.listTasks(page, PAGE_SIZE, keyword, filter, tagIDs, tagMatch, signal) : api.listTasks(page, PAGE_SIZE, keyword, filter), refetchInterval: query => query.state.data?.list.some(taskNeedsPolling) ? 5000 : false })
   const tasks = query.data?.list || []
   const total = query.data?.total || 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -42,17 +47,18 @@ export default function LibraryPage() {
   }, [query.data, page, pages, setParams])
   function setPage(nextPage: number) { setParams(previous => { const next = new URLSearchParams(previous); next.set('page', String(nextPage)); return next }) }
   return <div className="page page-wide">
-    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' ? '符合当前条件' : ''} · 阅读、提问，整理成自己的笔记`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
+    <PageHeading title="视频库" description={query.error && !query.data ? '视频资料读取失败，重试后可查看数量' : query.isPending ? '正在读取视频资料…' : `${total} 个视频${keyword || filter !== 'all' || hasTagFilter ? '符合当前条件' : ''} · 阅读、提问，整理成自己的笔记`} actions={<button className="btn btn-primary" onClick={openUpload}><Icon name="plus" />导入视频</button>} />
     <div className="lib-toolbar">
       <input aria-label="搜索视频" className="input" placeholder="搜索全部视频的标题或文件名…" value={draft} onChange={e => setDraft(e.target.value)} />
       <div className="seg">{filters.map(f => <button key={f.key} aria-pressed={filter === f.key} className={filter === f.key ? 'on' : ''} onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('activity', f.key); next.delete('page'); return next })}>{f.label}</button>)}</div>
       <div className="seg lib-view" aria-label="视频库视图">{([{key:'grid',label:'卡片'}, {key:'list',label:'列表'}] as const).map(item => <button key={item.key} aria-pressed={view === item.key} className={view === item.key ? 'on' : ''} onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.set('view', item.key); return next }, {replace:true})}>{item.label}</button>)}</div>
     </div>
+    <LibraryTagFilter ids={tagIDs} match={tagMatch} readOnly={user?.role === 'DEMO'} onChange={(ids, match) => setParams(previous => { const next = new URLSearchParams(previous); if (ids.length) { next.set('tag_ids', [...ids].sort().join(',')); next.set('tag_match', match) } else { next.delete('tag_ids'); next.delete('tag_match') }; next.delete('page'); return next })} />
     {query.error && <ErrorState message="视频列表加载失败" onRetry={() => void query.refetch()} />}
     {query.isPending && <CardSkeleton count={8} />}
     {!!tasks.length && (view === 'grid' ? <div className="video-grid">{tasks.map(task => <VideoCard key={task.id} task={task} />)}</div> : <div className="library-list">{tasks.map(task => { const state=taskStateView(task); return <Link className="library-row" key={task.id} href={`/video/${task.id}`}><div><strong>{taskTitle(task)}</strong><span>{sourceLabel(task)} · {fmtSize(task.file_size)}</span></div><span className={`chip ${state.chip}`}>{state.text}</span><span className="library-capability">{task.retrievable ? '可检索问答' : task.has_transcription ? '转写可阅读' : '检索未就绪'}</span><span className="library-updated">{fmtRelTime(task.updated_at)}</span><Icon name="chev-r" size="sm" /></Link> })}</div>)}
-    {!query.isPending && !query.error && !tasks.length && <EmptyState icon={keyword || filter !== 'all' ? 'search' : 'video'} title={keyword || filter !== 'all' ? '没有匹配的视频' : '还没有视频'} desc={keyword || filter !== 'all' ? '换个关键词或筛选条件试试。' : '点击上方「导入视频」，开始你的第一段学习旅程。'} />}
-    {!query.isPending && !query.error && !tasks.length && !keyword && filter === 'all' && <LearningPath compact />}
+    {!query.isPending && !query.error && !tasks.length && <EmptyState icon={keyword || filter !== 'all' || hasTagFilter ? 'search' : 'video'} title={keyword || filter !== 'all' || hasTagFilter ? '没有匹配的视频' : '还没有视频'} desc={keyword || filter !== 'all' || hasTagFilter ? '换个关键词或筛选条件试试。' : '点击上方「导入视频」，开始你的第一段学习旅程。'} />}
+    {!query.isPending && !query.error && !tasks.length && !keyword && filter === 'all' && !hasTagFilter && <LearningPath compact />}
     {total > 0 && <nav className="product-pagination" aria-label="视频库分页"><button className="btn btn-sm" disabled={page <= 1 || query.isFetching} onClick={() => setPage(page - 1)}>上一页</button><span>{page} / {pages} · 共 {total} 个</span><button className="btn btn-sm" disabled={page >= pages || query.isFetching} onClick={() => setPage(page + 1)}>下一页</button></nav>}
   </div>
 }

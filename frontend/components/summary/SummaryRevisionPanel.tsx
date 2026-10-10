@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { SummaryRevisionActivities } from './SummaryRevisionActivities'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet } from '@/lib/types'
 import { MarkdownAnswer } from '@/components/chat/MarkdownAnswer'
@@ -15,9 +16,14 @@ function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.code ? summaryRevisionFailure(error.code, error.message) : error.message
   return error instanceof Error ? error.message : '操作失败，请稍后重试'
 }
+function previewText(value:unknown):string { if(value==null)return '';if(typeof value==='string')return value;if(typeof value==='object'){const row=value as Record<string,unknown>;for(const key of ['body_markdown','caption','title','overview'])if(typeof row[key]==='string')return row[key] as string}return JSON.stringify(value,null,2) }
+const changeLabels:Record<string,string>={update_document_title:'修改标题',update_overview:'修改概览',update_block:'修改章节',insert_block:'新增章节',delete_block:'删除章节',move_block:'移动章节',update_figure_caption:'修改图注'}
 
-export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void }) {
+export function SummaryRevisionPanel({ taskId, readOnly, onChanged,renderContent,publishedDigest, selectedBlockIDs,onClearSelection,compactEditing = false,selectedExpectation }: { taskId: number; readOnly: boolean; onChanged: () => Promise<void> | void; renderContent?: (summary:EffectiveSummaryView)=>ReactNode; publishedDigest?: string; selectedBlockIDs?: string[]; onClearSelection?:()=>void; compactEditing?:boolean; selectedExpectation?:Pick<EffectiveSummaryView,'content_digest'|'version_ref'> }) {
   const videoPreflight = useVideoAIPreflight('revise')
+  const [editingOpen, setEditingOpen] = useState(!compactEditing)
+  const selectionKey = JSON.stringify([...(selectedBlockIDs || [])].sort())
+  const previousSelection = useRef(selectionKey)
   const [preflightAccepted, setPreflightAccepted] = useState(false)
   const [summary, setSummary] = useState<EffectiveSummaryView | null>(null)
   const [rules, setRules] = useState<VideoTermRuleSet | null>(null)
@@ -40,6 +46,22 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
   const [submittedNoteTarget, setSubmittedNoteTarget] = useState('')
   const noteAttempt = useRef<{ id: string; prompt: string; head: number; key: string } | null>(null)
   const previewGeneration = useRef(0)
+  const frozenSelection = useRef<Pick<EffectiveSummaryView,'content_digest'|'version_ref'> | null>(null)
+
+
+  useEffect(() => {
+    if (previousSelection.current === selectionKey) return
+    previousSelection.current = selectionKey
+    ++previewGeneration.current
+    frozenSelection.current = null
+    setKey(''); setOperation(null); setMessage(''); setTargetResults([]); setBusy(false)
+    if (selectedBlockIDs?.length) setEditingOpen(true)
+  }, [selectionKey, selectedBlockIDs?.length])
+
+  useEffect(() => {
+    if (!selectedBlockIDs?.length) { frozenSelection.current = null; return }
+    if (!frozenSelection.current && summary) frozenSelection.current = {content_digest:summary.content_digest,version_ref:summary.version_ref}
+  }, [selectionKey, selectedBlockIDs?.length, summary])
 
   const refresh = useCallback(async () => {
     const [nextSummary, nextRules] = await Promise.all([api.getSummary(taskId), api.getTermRules(taskId)])
@@ -50,9 +72,11 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
 
   useEffect(() => {
     let active = true
+    const generation = previewGeneration.current
     void Promise.all([api.getSummary(taskId), api.getTermRules(taskId), api.getLatestSummaryOperation(taskId)]).then(([nextSummary, nextRules, latest]) => {
       if (active) {
-        setSummary(nextSummary); setRules(nextRules); setOperation(latest)
+        setSummary(nextSummary); setRules(nextRules);
+        if (generation === previewGeneration.current) setOperation(JSON.stringify([...(latest?.selected_block_ids || [])].sort()) === selectionKey ? latest : null)
         if (latest?.instruction) setInstruction(latest.instruction)
         if (latest?.status === 'failed') setMessage(summaryRevisionFailure(latest.error_code))
       }
@@ -61,6 +85,12 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
   }, [taskId])
 
   const operationID = operation?.id
+  useEffect(()=>{
+    if(!publishedDigest)return
+    let active=true
+    void api.getSummary(taskId).then(value=>{if(active)setSummary(value)}).catch(error=>{if(active)setMessage(errorText(error))})
+    return()=>{active=false}
+  },[taskId,publishedDigest])
   const operationStatus = operation?.status
   useEffect(() => {
     if (!operationID || operationStatus !== 'running') return
@@ -150,17 +180,18 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
     if (!summary || !instruction.trim() || busy) return
     const generation = previewGeneration.current
     const requestedInstruction = instruction.trim()
+    const expectation = selectedBlockIDs?.length ? (selectedExpectation || frozenSelection.current || summary) : summary
     setBusy(true); setMessage(''); setTargetResults([])
     setNoteRun(null); setNoteFailed(false)
     const requestKey = key || crypto.randomUUID()
     setKey(requestKey)
     try {
-      const next = await api.editSummary(taskId, { instruction: requestedInstruction, expected_revision: summary.revision, mode: 'preview' }, requestKey)
+      const next = await api.editSummary(taskId, { instruction: requestedInstruction, expected_revision: summary.revision, mode: 'preview', selected_block_ids:selectedBlockIDs, expected_content_digest:expectation.content_digest,expected_version_ref:expectation.version_ref }, requestKey)
       if (generation !== previewGeneration.current || next.instruction !== requestedInstruction) return
       setOperation(next)
       if (next.status === 'failed') { setKey(''); setMessage(summaryRevisionFailure(next.error_code)) }
     } catch (error) { if (generation === previewGeneration.current) setMessage(`${errorText(error)}；可用同一请求重试，避免重复修改。`) }
-    finally { setBusy(false) }
+    finally { if (generation === previewGeneration.current) setBusy(false) }
   }
 
   const preview = () => {
@@ -229,26 +260,28 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
 
   if (!summary) return <p role="status">{message || '正在读取摘要…'}</p>
   return <div className="sumrev">
-    <p className="sumrev-meta muted">{summary.has_revision ? `你的修订 v${summary.revision}` : '共享生成原稿'} · 此视频的修订仅属于当前账号</p>
+    <p className="sumrev-meta muted">{summary.has_revision ? `你的修订 v${summary.revision}` : summary.document ? '生成原稿' : '生成摘要'} · 此视频的修订仅属于当前账号</p>
     {summary.source_status === 'needs_merge' && <div role="alert" className="sumrev-alert warn">
       <p>生成原稿已更新。当前仍显示你的修订，请选择如何处理。</p>
       {!readOnly && <div className="sumrev-actions"><button className="btn btn-sm" disabled={busy} onClick={() => void resolveBase('keep_revision')}>保留我的修订</button><button className="btn btn-sm" disabled={busy} onClick={() => void resolveBase('use_generated')}>改用新原稿</button></div>}
     </div>}
+    {summary.source_status === 'source_changed' && <p role="status" className="sumrev-alert">文字来源已更新，这份已保存摘要仍可阅读；重新生成后可核对变化。</p>}
     {summary.source_status === 'generated_missing' && <p role="status" className="sumrev-alert">生成原稿暂不可用；你的修订仍保留。来源恢复后可核对差异。</p>}
-    <div className="summary-body"><MarkdownAnswer content={summary.content} domainTags /></div>
+    {renderContent ? renderContent(summary) : <div className="summary-body"><MarkdownAnswer content={summary.content} domainTags /></div>}
     <button className="btn sumrev-download" onClick={download}><Icon name="download" size="sm" />下载当前摘要 Markdown</button>
-    {!readOnly && <section className="sumrev-compose" aria-label="AI 修改摘要">
+    {!readOnly && <details className="sumrev-editing" open={!compactEditing || editingOpen}>{compactEditing && <summary onClick={event => { event.preventDefault(); setEditingOpen(open => !open) }}>{editingOpen ? '收起摘要修改' : '修改这份摘要'}</summary>}<section className="sumrev-compose" aria-label="AI 修改摘要">
+      {!!selectedBlockIDs?.length && <p role="status">本次仅修改已选 {selectedBlockIDs.length} 个章节的正文或图注。<button className="btn btn-sm" onClick={onClearSelection}>改为整份摘要</button></p>}
       <div className="sumrev-compose-head">
         <span className="sumrev-ico" aria-hidden="true"><Icon name="wand" size="sm" /></span>
         <label className="sumrev-title" htmlFor="sumrev-instruction">让 AI 修改这份摘要</label>
-        <span className="sumrev-count mono">{instruction.length} / 2000</span>
+        <span className="sumrev-count mono">{Array.from(instruction).length} / 2000</span>
       </div>
       <p className="sumrev-hint">描述要修正的内容；预览会先给出逐处差异，确认后才保存新版本。</p>
       <textarea
         id="sumrev-instruction"
         className="sumrev-instruction"
         value={instruction}
-        onChange={event => { ++previewGeneration.current; setInstruction(event.target.value); setKey(''); setOperation(null) }}
+        onChange={event => { ++previewGeneration.current; setInstruction(event.target.value); setKey(''); setOperation(null); setBusy(false) }}
         maxLength={2000}
         rows={3}
         placeholder="例如：只把安装章节中的错误名称改正，保留原话引用"
@@ -271,8 +304,11 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
         <button className="btn btn-sm btn-primary" disabled={busy || operation?.status === 'running' || !instruction.trim() || (scope === 'remember' && (!from.trim() || !to.trim() || !context.trim()))} onClick={() => void preview()}>{busy ? '提交中…' : operation?.status === 'proposed' ? '重新预览' : '预览 AI 修改'}</button>
         {operation?.status === 'running' && <span role="status" className="sumrev-status">AI 正在准备摘要差异。离开页面或刷新不会取消后台任务。</span>}
       </div>
+      {operation && <SummaryRevisionActivities operation={operation} />}
       {operation?.status === 'proposed' && <div className="sumrev-diff">
-        <div className="sumrev-diff-head"><h4>逐处差异</h4><span className="vq-count">{operation.edits.length}</span></div>
+        <div className="sumrev-diff-head"><h4>逐处差异</h4><span className="vq-count">{operation.preview?.changes.length??operation.edits.length}</span></div>
+        {!!operation.selected_block_ids?.length && <p>此预览仅作用于已冻结的 {operation.selected_block_ids.length} 个章节。</p>}
+        {operation.preview?.changes.map((change,index)=><div key={index} className="sumrev-diff-row"><b>{changeLabels[change.kind]||'摘要调整'}</b><div className="sumrev-before"><MarkdownAnswer content={previewText(change.before)} /></div><div className="sumrev-after"><MarkdownAnswer content={previewText(change.after)} /></div></div>)}
         {operation.edits.map((edit, index) => <div key={index} className="sumrev-diff-row">
           <p className="old"><i aria-hidden="true">−</i>{edit.old_text}</p>
           <p className="new"><i aria-hidden="true">+</i>{edit.new_text || '删除'}</p>
@@ -282,7 +318,7 @@ export function SummaryRevisionPanel({ taskId, readOnly, onChanged }: { taskId: 
       {operation?.status === 'committed' && !operation.undo_revision_id && <div className="sumrev-actions"><button className="btn btn-sm" disabled={busy} onClick={() => void undo()}>撤销这次摘要修改</button></div>}
       {operation?.status === 'committed' && scope === 'remember' && ruleSaveFailed && <div className="sumrev-actions"><button className="btn btn-sm" disabled={busy || !from.trim() || !to.trim() || !context.trim()} onClick={() => { setBusy(true); void saveRememberedRule(operation.id).catch(error => setMessage(errorText(error))).finally(() => setBusy(false)) }}>只重试保存术语规则</button></div>}
       {operation?.status === 'committed' && submittedNoteTarget && noteFailed && <div className="sumrev-actions"><button className="btn btn-sm" disabled={busy} onClick={() => { setBusy(true); void submitNote(submittedNoteTarget, noteAttempt.current?.prompt ?? instruction.trim()).catch(error => setMessage(`笔记重试失败：${errorText(error)}`)).finally(() => setBusy(false)) }}>只重试笔记</button></div>}
-    </section>}
+    </section></details>}
     {!!rules?.rules.length && <section className="sumrev-rules">
       <div className="sumrev-diff-head"><h4>此视频的术语规则</h4><span className="vq-count">v{rules.version}</span></div>
       {rules.rules.map(rule => <div key={rule.id} className="sumrev-rule-row">

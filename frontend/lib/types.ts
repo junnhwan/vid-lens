@@ -181,7 +181,7 @@ export const TaskStatusEnum = {
 // 三阶段子状态 stage 取值
 export type TaskStage =
   | 'none' | 'downloading' | 'uploaded'
-  | 'transcribing' | 'aligning' | 'visual_indexing' | 'summarizing' | 'indexing'
+  | 'text_source' | 'transcribing' | 'aligning' | 'visual_indexing' | 'summarizing' | 'indexing'
 
 export interface VideoAsset {
   id: number
@@ -214,7 +214,7 @@ export interface SummaryRevisionState {
   revision_id: string
   base_generated_hash: string
   current_generated_hash: string
-  source_status: 'current' | 'needs_merge' | 'generated_missing'
+  source_status: 'current' | 'needs_merge' | 'generated_missing' | 'source_changed'
   origin: string
 }
 export interface EffectiveSummaryView {
@@ -224,9 +224,14 @@ export interface EffectiveSummaryView {
   revision_id: string
   base_generated_hash: string
   current_generated_hash: string
-  source_status: 'current' | 'needs_merge' | 'generated_missing'
+  source_status: 'current' | 'needs_merge' | 'generated_missing' | 'source_changed'
   has_generated: boolean
   has_revision: boolean
+	format?: 'summary-v2' | 'legacy'
+	document?: import('./summaryExperience').SummaryDocument | null
+	version_ref?: import('./summaryExperience').SummaryVersionRef
+	content_digest?: string
+	content_hash_kind?: string
 }
 export interface SummaryEditOperation {
   id: string
@@ -242,6 +247,10 @@ export interface SummaryEditOperation {
   result_revision_id?: string
   undo_revision_id?: string
   error_code?: string
+	selected_block_ids?: string[]
+	activities?: { id: string; title: string; status: 'running' | 'done' | 'error'; duration_ms: number; started_at: string; finished_at?: string }[]
+	operations?: unknown[]
+	preview?: { changes: { kind: string; block_id?: string; figure_id?: string; before?: unknown; after?: unknown }[]; markdown: string; content_digest: string; content_hash_kind: string }
 }
 export interface VideoTermRule {
   id: string
@@ -294,6 +303,7 @@ export interface VideoTask {
   trace_id: string
   source_type: 'upload' | 'chunked' | 'url'
   source_url?: string
+  active_text_source_id?: string
   visual_disabled: boolean
   visual_mode?: VisualMode
   retry_count: number
@@ -356,7 +366,21 @@ export interface TranscriptionProgress {
   }>
 }
 
+export interface SummaryProcessingOptions {
+  auto_summary: boolean
+  text_source_policy: 'prefer_platform' | 'force_asr'
+  preferred_language: string
+  summary_visual_enabled: boolean
+  output_mode: 'auto' | 'text' | 'image_text' | 'keyframes'
+  mindmap_enabled: boolean
+  summary_instruction: string
+  auto_tags_enabled: boolean
+  profile_id?: number
+}
+
 export interface UploadResult {
+  intent_id?: string
+  generation_id?: string
   task_id: number
   file_md5: string
   filename: string
@@ -656,6 +680,7 @@ export interface AgentStreamOptions {
   top_k?: number
   mode?: 'agent'
   agent_profile?: string
+	context_refs?: import('./summaryExperience').SummaryContextRef[]
 }
 
 export interface AgentSSEHandlers {

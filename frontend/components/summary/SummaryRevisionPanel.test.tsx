@@ -17,6 +17,45 @@ const revised: EffectiveSummaryView = { ...generated, content: '安装章节：�
 const proposal: SummaryEditOperation = { id: 'summary-op', run_id: 'summary-run', task_id: 42, instruction: '改正安装章节名称', status: 'proposed', mode: 'preview', base_version: 0, rule_version: 0, rule_digest: 'empty', edits: [{ old_text: '旧名', new_text: '新名' }] }
 const emptyRules: VideoTermRuleSet = { version: 0, digest: 'empty', rules: [] }
 
+test('changing selected chapters invalidates an in-flight preview and uses a new request key', async () => {
+  const summary={...generated,content_digest:'selected-body',version_ref:{generated_version:1}}
+  vi.spyOn(api,'getSummary').mockResolvedValue(summary)
+  vi.spyOn(api,'getTermRules').mockResolvedValue(emptyRules)
+  vi.spyOn(api,'getLatestSummaryOperation').mockResolvedValue(null)
+  vi.spyOn(artifactApi,'list').mockResolvedValue({list:[],total:0,page:1,page_size:20})
+  let resolve!: (value:SummaryEditOperation)=>void
+  const pending=new Promise<SummaryEditOperation>(done=>{resolve=done})
+  const submit=vi.spyOn(api,'editSummary').mockReturnValueOnce(pending).mockResolvedValue({...proposal,selected_block_ids:['second']})
+  const view=render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={()=>{}} selectedBlockIDs={['first']} />)
+  fireEvent.change(await screen.findByLabelText('让 AI 修改这份摘要'),{target:{value:proposal.instruction}})
+  fireEvent.click(screen.getByRole('button',{name:'预览 AI 修改'}))
+  view.rerender(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={()=>{}} selectedBlockIDs={['second']} />)
+  await act(async()=>{resolve({...proposal,selected_block_ids:['first']});await pending})
+  expect(screen.queryByRole('button',{name:'确认保存摘要'})).toBeNull()
+  fireEvent.click(screen.getByRole('button',{name:'预览 AI 修改'}))
+  await screen.findByRole('button',{name:'确认保存摘要'})
+  expect(submit.mock.calls[0][2]).not.toBe(submit.mock.calls[1][2])
+  expect(submit.mock.calls[1][1]).toMatchObject({selected_block_ids:['second'],expected_content_digest:'selected-body',expected_version_ref:{generated_version:1}})
+})
+
+test('selected version stays frozen after generated publication and activities show only actual rows', async () => {
+  const summary={...generated,content_digest:'original-body',version_ref:{generated_version:1}}
+  vi.spyOn(api,'getSummary').mockResolvedValueOnce(summary).mockResolvedValueOnce(summary).mockResolvedValue({...summary,content_digest:'new-body',version_ref:{generated_version:2}})
+  vi.spyOn(api,'getTermRules').mockResolvedValue(emptyRules)
+  vi.spyOn(api,'getLatestSummaryOperation').mockResolvedValue(null)
+  vi.spyOn(artifactApi,'list').mockResolvedValue({list:[],total:0,page:1,page_size:20})
+  const submit=vi.spyOn(api,'editSummary').mockResolvedValue({...proposal,selected_block_ids:['first'],activities:[{id:'actual',title:'规划并校验摘要修订',status:'done',duration_ms:2500,started_at:'2026-10-10T01:00:00Z'}]})
+  const view=render(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={()=>{}} selectedBlockIDs={['first']} publishedDigest="original-body" />)
+  fireEvent.change(await screen.findByLabelText('让 AI 修改这份摘要'),{target:{value:proposal.instruction}})
+  view.rerender(<SummaryRevisionPanel taskId={42} readOnly={false} onChanged={()=>{}} selectedBlockIDs={['first']} publishedDigest="new-body" />)
+  await waitFor(()=>expect(api.getSummary).toHaveBeenCalledTimes(3))
+  fireEvent.click(screen.getByRole('button',{name:'预览 AI 修改'}))
+  expect(await screen.findByText('规划并校验摘要修订')).toBeTruthy()
+  expect(screen.getByText('预览已就绪，等待你确认应用。')).toBeTruthy()
+  expect(screen.queryByText(/正在准备摘要差异/)).toBeNull()
+  expect(submit.mock.calls[0][1]).toMatchObject({expected_content_digest:'original-body',expected_version_ref:{generated_version:1}})
+})
+
 test('transient note status read failure retries until the linked edit completes', async () => {
   vi.spyOn(api, 'getSummary').mockResolvedValueOnce(generated).mockResolvedValue(revised)
   vi.spyOn(api, 'getTermRules').mockResolvedValue(emptyRules)

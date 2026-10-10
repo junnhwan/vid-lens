@@ -12,6 +12,7 @@ import {
   type ConversationSessionAction,
 } from '@/components/chat/conversationSession'
 import { api, ApiError, streamAgent, streamAsk } from '@/lib/api'
+import type { SummaryContextRef } from '@/lib/summaryExperience'
 import type { ChatMessage, ChatScopeType, ChatSession, Citation, VideoChatMode } from '@/lib/types'
 
 interface ConversationSessionOptions {
@@ -25,6 +26,8 @@ interface ConversationSessionOptions {
   canSend?: boolean
   onBlocked?: () => void
   onBeforeSend?: () => void
+  contextRefs?: SummaryContextRef[]
+  onContextSent?: () => void
 }
 
 export function useConversationSession(options: ConversationSessionOptions) {
@@ -34,8 +37,10 @@ export function useConversationSession(options: ConversationSessionOptions) {
     mapCitations = defaultCitationMapper,
     canSend = true,
     onBlocked,
-    onBeforeSend,
+    onBeforeSend, contextRefs, onContextSent,
   } = options
+  const currentContextRefs = useRef(contextRefs)
+  currentContextRefs.current = contextRefs
   const [session, setSession] = useState<ChatSession | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [sessionReady, setSessionReady] = useState(false)
@@ -193,6 +198,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       onBlocked?.()
       return
     }
+    const requestContextRefs = contextRefs?.map(ref => ({ ...ref, version_ref: { ...ref.version_ref } }))
     onBeforeSend?.()
     const version = requestVersion.current
     sendingRef.current = true
@@ -222,6 +228,10 @@ export function useConversationSession(options: ConversationSessionOptions) {
     const controller = new AbortController()
     let runId: string | undefined
     let streamFailed = false
+    let contextSent = false
+    const acknowledgeContext = () => {
+      if (requestContextRefs?.length && JSON.stringify(currentContextRefs.current) === JSON.stringify(requestContextRefs) && !contextSent && abortRef.current === controller && !controller.signal.aborted && version === requestVersion.current) { contextSent = true; onContextSent?.() }
+    }
     abortRef.current = controller
     const deliver = (action: ConversationSessionAction) => {
       if (abortRef.current === controller && !controller.signal.aborted) dispatch(action)
@@ -253,13 +263,13 @@ export function useConversationSession(options: ConversationSessionOptions) {
     }
     dispatch(
       mode === 'chat'
-        ? { type: 'rag_start', question }
-        : { type: 'agent_start', question, mode },
+        ? { type: 'rag_start', question, contextRefs: requestContextRefs }
+        : { type: 'agent_start', question, mode, contextRefs: requestContextRefs },
     )
 
     try {
       if (mode === 'agent') {
-        await streamAgent(sessionId, question, { top_k: topK, mode: 'agent' }, {
+        await streamAgent(sessionId, question, { top_k: topK, mode: 'agent', context_refs: requestContextRefs }, {
           ...processHandlers,
           onRunStart: data => { runId = data.run_id; update({ type: 'agent_event', event: { type: 'run_start', data } }) },
           onStepStart: data => update({ type: 'agent_event', event: { type: 'step_start', data } }),
@@ -271,6 +281,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
           onAnswer: delta => update({ type: 'answer_delta', delta }),
           onCitations: citations => update({ type: 'patch_last', patch: { cites: mapCitations(citations) } }),
           onDone: done => {
+            acknowledgeContext()
             const budget = budgetProgress(done.stop_reason, done.budget_notice)
             if (budget) update({ type: 'progress', event: budget })
             update({ type: 'agent_event', event: { type: 'done' } })
@@ -297,10 +308,11 @@ export function useConversationSession(options: ConversationSessionOptions) {
             update({ type: 'patch_last', patch: { cites: mapCitations(citations) } })
           },
           onDone: done => {
+            acknowledgeContext()
             update({ type: 'stream_done', patch: { messageId: done.message_id, ...(done.answer !== undefined ? { content: done.answer } : {}), degraded: done.degraded, degradationReason: done.degradation_reason, diagnosticId: done.diagnostic_id, modelName: done.model, profileId: done.profile_id, ...(done.execution_duration_ms !== undefined ? { executionDurationMs: done.execution_duration_ms } : {}) } })
           },
-          onError: error => update({ type: 'stream_error', message: error.message }),
-        }, controller.signal)
+          onError: error => { streamFailed = true; update({ type: 'stream_error', message: error.message }) },
+        }, controller.signal, requestContextRefs)
       }
     } catch (error) {
       streamFailed = true
@@ -318,7 +330,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
           messages: async () => parseHistory(await api.getMessages(sessionId)),
           runId: message => message.agentRunId,
         }, controller.signal)
-        if (recovered.message) update({ type: 'stream_done', patch: recovered.message })
+        if (recovered.message) { update({ type: 'stream_done', patch: recovered.message }); acknowledgeContext() }
         else update({ type: 'stream_error', message: recovered.notice || '运行状态待确认' })
       }
       if (abortRef.current === controller) {
@@ -328,7 +340,7 @@ export function useConversationSession(options: ConversationSessionOptions) {
       }
       if (version === requestVersion.current) { sendingRef.current = false; setSending(false) }
     }
-  }, [sessionReady, historyError, state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations, parseHistory])
+  }, [sessionReady, historyError, state.streaming, canSend, onBlocked, onBeforeSend, session?.id, createSession, mode, topK, mapCitations, parseHistory, contextRefs, onContextSent])
 
   const stop = useCallback(() => {
     ++requestVersion.current

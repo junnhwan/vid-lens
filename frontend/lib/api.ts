@@ -5,7 +5,7 @@ import type {
   PaginatedTasks, RAGIndexResult, SSEDone, SSEError,
   AgentDoneEvent, AgentRetrieveHitsEvent, AgentRunStartEvent, AgentStepEvent,
   AgentToolCallEvent, AgentToolResultEvent, AgentSSEHandlers, AgentStreamOptions,
-  UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress, VisualProgress,
+  SummaryProcessingOptions, UploadResult, UploadProgressInfo, User, VideoTask, VideoTimeline, TranscriptionProgress, VisualProgress,
   EffectiveSummaryView, SummaryEditOperation, VideoTermRuleSet,
 } from './types'
 import { readConversationStream, type ProcessHandlers, type ProgressEvent, type ReasoningEvent } from './conversationStream'
@@ -176,20 +176,20 @@ export const api = {
     fd.append('file', file)
     return req<UploadResult>('/media/upload', 'POST', fd)
   },
-  uploadUrl: (url: string) => req<UploadResult>('/media/upload-url', 'POST', { url }),
+  uploadUrl: (url: string, options?: SummaryProcessingOptions, key?: string, signal?: AbortSignal) => req<UploadResult>('/media/upload-url', 'POST', { url,...options },key?{'Idempotency-Key':key}:undefined,signal),
   checkUpload: (file_md5: string, file_size: number, chunk_size: number, total_chunks: number, signal?: AbortSignal) =>
     req<UploadProgressInfo>(
       `/media/check-upload?file_md5=${file_md5}&file_size=${file_size}&chunk_size=${chunk_size}&total_chunks=${total_chunks}`,
       'GET', undefined, undefined, signal, UPLOAD_API_BASE,
     ),
   uploadChunk: sendChunk,
-  mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number }, signal?: AbortSignal) =>
-    req<UploadResult>('/media/merge-chunks', 'POST', p, undefined, signal, UPLOAD_API_BASE),
+  mergeChunks: (p: { file_md5: string; filename: string; total_chunks: number; file_size: number; chunk_size: number } & Partial<SummaryProcessingOptions>, signal?: AbortSignal, key?: string) =>
+    req<UploadResult>('/media/merge-chunks', 'POST', p, key?{'Idempotency-Key':key}:undefined, signal, UPLOAD_API_BASE),
   listTasks: (page = 1, page_size = 20, keyword = '', activity = 'all') =>
     req<PaginatedTasks>(`/media/list?page=${page}&page_size=${page_size}&keyword=${encodeURIComponent(keyword)}&activity=${encodeURIComponent(activity)}`, 'GET'),
   getTask: (id: number, signal?: AbortSignal) => req<VideoTask>(`/media/task/${id}`, 'GET', undefined, undefined, signal),
   getSummary: (id: number) => req<EffectiveSummaryView>(`/media/task/${id}/summary`, 'GET'),
-  editSummary: (id: number, input: { instruction: string; expected_revision: number; mode: 'preview' | 'apply' }, key: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/edit-runs`, 'POST', input, { 'Idempotency-Key': key }),
+  editSummary: (id: number, input: { instruction: string; expected_revision: number; mode: 'preview' | 'apply'; selected_block_ids?: string[]; expected_content_digest?: string; expected_version_ref?: import('./summaryExperience').SummaryVersionRef }, key: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/edit-runs`, 'POST', input, { 'Idempotency-Key': key }),
   getSummaryOperation: (id: number, operationId: string) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}`, 'GET'),
   getLatestSummaryOperation: (id: number) => req<SummaryEditOperation | null>(`/media/task/${id}/summary/operations/latest`, 'GET'),
   applySummaryOperation: (id: number, operationId: string, expectedRevision: number) => req<SummaryEditOperation>(`/media/task/${id}/summary/operations/${encodeURIComponent(operationId)}/apply`, 'POST', { expected_revision: expectedRevision }),
@@ -320,10 +320,11 @@ export async function streamAsk(
   mode: ChatMode,
   h: SSEHandlers,
   signal?: AbortSignal,
+	contextRefs?: import('./summaryExperience').SummaryContextRef[],
 ): Promise<void> {
   await consumeSSE(
     `/chat/sessions/${sid}/messages/stream`,
-    { question, top_k, mode },
+    { question, top_k, mode, ...(contextRefs?.length ? { context_refs: contextRefs } : {}) },
     (event, data) => {
       switch (event) {
         case 'progress': h.onProgress?.(data as ProgressEvent); break
@@ -362,6 +363,7 @@ export async function streamAgent(
     top_k: opts.top_k ?? 4,
     mode: opts.mode ?? 'agent',
     ...(opts.agent_profile ? { agent_profile: opts.agent_profile } : {}),
+	...(opts.context_refs?.length ? { context_refs: opts.context_refs } : {}),
   }
   await consumeSSE(
     `/chat/sessions/${sid}/messages/agent/stream`,
