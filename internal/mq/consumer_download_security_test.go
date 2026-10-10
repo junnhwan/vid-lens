@@ -15,7 +15,7 @@ func (r downloadURLTestResolver) LookupIP(context.Context, string) ([]net.IP, er
 
 func TestConsumerValidatesDownloadURLBeforeExternalDownloader(t *testing.T) {
 	consumer := &Consumer{}
-	consumer.SetDownloadURLPolicy(nil, downloadURLTestResolver{"www.youtube.com": {net.ParseIP("203.0.113.10")}})
+	consumer.SetDownloadURLPolicy(nil, downloadURLTestResolver{"www.youtube.com": {net.ParseIP("8.8.8.8")}})
 	sanitized, err := consumer.validateDownloadURL(context.Background(), "https://www.youtube.com/watch?v=video&token=secret")
 	if err != nil {
 		t.Fatalf("validateDownloadURL() error = %v", err)

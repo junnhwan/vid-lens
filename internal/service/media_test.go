@@ -24,7 +24,7 @@ func TestRemoteVideoURLValidatorRejectsUnsafeTargets(t *testing.T) {
 		allowedHosts: []string{"bilibili.com", "youtube.com", "youtu.be"},
 		resolver: fakeRemoteURLResolver{
 			"internal.bilibili.com": {net.ParseIP("10.0.0.8")},
-			"www.bilibili.com":      {net.ParseIP("203.0.113.10")},
+			"www.bilibili.com":      {net.ParseIP("8.8.8.8")},
 		},
 	}
 	cases := []string{
@@ -82,7 +82,7 @@ func TestRemoteVideoURLValidatorAllowsWhitelistedPublicHostsAndSanitizes(t *test
 	validator := remoteVideoURLValidator{
 		allowedHosts: []string{"bilibili.com", "youtube.com", "youtu.be"},
 		resolver: fakeRemoteURLResolver{
-			"www.bilibili.com": {net.ParseIP("203.0.113.10")},
+			"www.bilibili.com": {net.ParseIP("8.8.8.8")},
 		},
 	}
 
@@ -90,7 +90,7 @@ func TestRemoteVideoURLValidatorAllowsWhitelistedPublicHostsAndSanitizes(t *test
 	if err != nil {
 		t.Fatalf("expected URL to be allowed, got %v", err)
 	}
-	if checked.Sanitized != "https://www.bilibili.com/video/BV1xx411c7mD" {
+	if checked.Sanitized != "https://www.bilibili.com/video/BV1xx411c7mD?p=1" {
 		t.Fatalf("sanitized URL = %q", checked.Sanitized)
 	}
 }
@@ -99,7 +99,7 @@ func TestRemoteVideoURLValidatorKeepsYouTubeVideoIDWhileSanitizing(t *testing.T)
 	validator := remoteVideoURLValidator{
 		allowedHosts: []string{"youtube.com", "youtu.be"},
 		resolver: fakeRemoteURLResolver{
-			"www.youtube.com": {net.ParseIP("203.0.113.10")},
+			"www.youtube.com": {net.ParseIP("8.8.8.8")},
 		},
 	}
 
@@ -125,12 +125,12 @@ func TestUploadByURLCreatesDownloadingTaskAndEnqueuesDownload(t *testing.T) {
 			AllowedVideoHosts: []string{"bilibili.com"},
 		},
 		remoteURLResolver: fakeRemoteURLResolver{
-			"www.bilibili.com": {net.ParseIP("203.0.113.10")},
+			"www.bilibili.com": {net.ParseIP("8.8.8.8")},
 		},
 	}
 
 	rawURL := "https://www.bilibili.com/video/BV1xx411c7mD?p=1&token=secret#frag"
-	sanitizedURL := "https://www.bilibili.com/video/BV1xx411c7mD"
+	sanitizedURL := "https://www.bilibili.com/video/BV1xx411c7mD?p=1"
 	result, err := svc.UploadByURL(context.Background(), 7, rawURL)
 	if err != nil {
 		t.Fatalf("UploadByURL() error = %v", err)
@@ -215,7 +215,7 @@ func TestUploadByURLCreatesTaskWithoutAssetBeforeDownloadWhenForeignKeysAreEnfor
 			AllowedVideoHosts: []string{"youtube.com"},
 		},
 		remoteURLResolver: fakeRemoteURLResolver{
-			"www.youtube.com": {net.ParseIP("203.0.113.10")},
+			"www.youtube.com": {net.ParseIP("8.8.8.8")},
 		},
 	}
 
@@ -365,7 +365,7 @@ func TestUploadByURLEnqueueFailureRemainsRetryable(t *testing.T) {
 		mq:    producer,
 		tools: config.ToolsConfig{AllowedVideoHosts: []string{"bilibili.com"}},
 		remoteURLResolver: fakeRemoteURLResolver{
-			"www.bilibili.com": {net.ParseIP("203.0.113.10")},
+			"www.bilibili.com": {net.ParseIP("8.8.8.8")},
 		},
 	}
 
@@ -696,7 +696,7 @@ func (r fakeRemoteURLResolver) LookupIP(ctx context.Context, host string) ([]net
 	_ = ctx
 	ips := r[strings.ToLower(host)]
 	if ips == nil {
-		return []net.IP{net.ParseIP("203.0.113.20")}, nil
+		return []net.IP{net.ParseIP("8.8.8.8")}, nil
 	}
 	return ips, nil
 }

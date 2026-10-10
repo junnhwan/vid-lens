@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	neturl "net/url"
+	"strconv"
 	"strings"
 )
 
@@ -95,7 +96,10 @@ func (p Policy) Validate(ctx context.Context, rawURL string) (CheckedURL, error)
 		}
 	}
 
-	sanitized := Sanitize(*parsed)
+	sanitized, err := SanitizeChecked(*parsed)
+	if err != nil {
+		return CheckedURL{}, err
+	}
 	return CheckedURL{Raw: rawURL, Sanitized: sanitized, Host: host}, nil
 }
 
@@ -118,18 +122,87 @@ func HostAllowed(host string, allowedHosts []string) bool {
 }
 
 func UnsafeIP(ip net.IP) bool {
-	return ip == nil ||
+	if ip == nil || !ip.IsGlobalUnicast() ||
 		ip.IsLoopback() ||
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||
-		ip.IsMulticast()
+		ip.IsMulticast() {
+		return true
+	}
+	for _, block := range nonPublicRanges {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
+// IsPrivate alone omits shared carrier ranges (including cloud metadata IPs),
+// benchmark/documentation networks and reserved addressing. Treat them as
+// non-public too; allowlisted hostnames must not turn into those destinations.
+var nonPublicRanges = func() []*net.IPNet {
+	var blocks []*net.IPNet
+	for _, raw := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "100::/64", "2001:db8::/32"} {
+		_, block, _ := net.ParseCIDR(raw)
+		blocks = append(blocks, block)
+	}
+	return blocks
+}()
+
 func Sanitize(parsed neturl.URL) string {
+	clean, _ := SanitizeChecked(parsed)
+	return clean
+}
+
+// BilibiliPart rejects invalid or conflicting p values before tracking query
+// parameters are removed. Missing p selects the first part; equal duplicate
+// numeric values are harmless and canonicalized to a single parameter.
+func BilibiliPart(parsed neturl.URL) (int, error) {
+	query, err := neturl.ParseQuery(parsed.RawQuery)
+	if err != nil {
+		return 0, fmt.Errorf("视频链接查询参数格式错误")
+	}
+	values, present := query["p"]
+	if !present {
+		return 1, nil
+	}
+	part := 0
+	for _, value := range values {
+		if value == "" {
+			return 0, fmt.Errorf("B 站分 P 必须为正整数")
+		}
+		for _, r := range value {
+			if r < '0' || r > '9' {
+				return 0, fmt.Errorf("B 站分 P 必须为正整数")
+			}
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("B 站分 P 超出有效范围")
+		}
+		if part != 0 && n != part {
+			return 0, fmt.Errorf("B 站分 P 参数冲突")
+		}
+		part = n
+	}
+	return part, nil
+}
+
+// SanitizeChecked keeps the selected Bilibili part and YouTube watch ID while
+// removing tracking values. Admission paths must use this error-returning API.
+func SanitizeChecked(parsed neturl.URL) (string, error) {
 	parsed.User = nil
 	query := parsed.Query()
+	var part int
+	if HostAllowed(parsed.Hostname(), []string{"bilibili.com", "b23.tv"}) {
+		var err error
+		part, err = BilibiliPart(parsed)
+		if err != nil {
+			return "", err
+		}
+	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	if isYouTubeWatchURL(parsed) {
@@ -140,7 +213,14 @@ func Sanitize(parsed neturl.URL) string {
 			parsed.RawQuery = values.Encode()
 		}
 	}
-	return parsed.String()
+	if part > 0 {
+		if _, present := query["p"]; present {
+			values := neturl.Values{}
+			values.Set("p", strconv.Itoa(part))
+			parsed.RawQuery = values.Encode()
+		}
+	}
+	return parsed.String(), nil
 }
 
 func isYouTubeWatchURL(parsed neturl.URL) bool {
