@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/summarydoc"
@@ -30,18 +31,37 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 	if len(cues) == 0 {
 		return summarydoc.Document{}, artifact.Err("empty_text_source", 422)
 	}
+	reviewRequired := 0
+	for _, cue := range cues {
+		reviewRequired += utf8.RuneCountInString(cue.Text)
+	}
+	needsReview := reviewRequired >= 1500
+	sourceFits := func(input string) bool {
+		if !e.fits(input) {
+			return false
+		}
+		if !needsReview {
+			return true
+		}
+		// Leave room for the semantic draft as well as the second response. The
+		// actual review input is checked again before any provider call.
+		return studyPromptTokens(e.messages(summaryGroundingReviewPrefix+input))+e.plannedOutput(input)+min(384, e.plannedOutput(input))+256 <= e.window
+	}
 	cueInput := func(rows []summaryGenerationCue) string {
 		return summaryGenerationSemanticCueInput(rows)
 	}
-	if e.fits(cueInput(cues)) {
+	if sourceFits(cueInput(cues)) {
 		doc, _, err := e.call(ctx, "summary-complete", "整理视频的要点与结构", cueInput(cues))
-		return doc, err
+		if err != nil || !needsReview {
+			return doc, err
+		}
+		return e.reviewDocument(ctx, "summary-grounding-review", doc, cues)
 	}
 	// A single large cue is split without dropping any rune or inventing time.
 	// Every span retains the same source cue identity.
 	var bounded []summaryGenerationCue
 	for _, cue := range cues {
-		if e.fits(cueInput([]summaryGenerationCue{cue})) {
+		if sourceFits(cueInput([]summaryGenerationCue{cue})) {
 			bounded = append(bounded, cue)
 			continue
 		}
@@ -52,7 +72,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 				mid := (lo + hi + 1) / 2
 				part := cue
 				part.Text = string(remaining[:mid])
-				if e.fits(cueInput([]summaryGenerationCue{part})) {
+				if sourceFits(cueInput([]summaryGenerationCue{part})) {
 					lo = mid
 				} else {
 					hi = mid - 1
@@ -75,7 +95,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		}
 		last := len(groups) - 1
 		candidate := append(append([]summaryGenerationCue(nil), groups[last]...), cue)
-		if e.fits(cueInput(candidate)) {
+		if sourceFits(cueInput(candidate)) {
 			groups[last] = candidate
 		} else {
 			groups = append(groups, []summaryGenerationCue{cue})
@@ -88,50 +108,28 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		if err != nil {
 			return summarydoc.Document{}, err
 		}
+		if needsReview {
+			doc, err = e.reviewDocument(ctx, fmt.Sprintf("summary-grounding-review-leaf-%d", index+1), doc, group)
+			if err != nil {
+				return summarydoc.Document{}, err
+			}
+		}
 		docs = append(docs, doc)
 		publicTitle = firstNonEmpty(title, publicTitle)
 	}
 	// Reduce every completed leaf. No top-k truncation or head/tail omission is
 	// allowed; if the remaining budget cannot cover the tree, nothing publishes.
-	reduceInput := func(rows []summarydoc.Document) string {
-		// Source/document identity is supplied once in the frozen metadata.
-		// Keep every block and exact cue reference, without repeating the same
-		// long identity strings in each completed leaf envelope.
-		type part struct {
-			Title    string                       `json:"title"`
-			Overview string                       `json:"overview"`
-			Blocks   []summaryGenerationWireBlock `json:"blocks"`
+	reduceInput := summaryGenerationVerifiedPartsInput
+	reduceFits := func(input string) bool {
+		if !needsReview {
+			return e.fits(input)
 		}
-		parts := make([]part, 0, len(rows))
-		seen := map[string]bool{}
-		for _, row := range rows {
-			blocks := make([]summaryGenerationWireBlock, 0, len(row.Blocks))
-			for _, block := range row.Blocks {
-				ids := []string{}
-				seenIDs := map[string]bool{}
-				for _, ref := range block.SourceRefs {
-					for _, id := range ref.CueIDs {
-						if !seenIDs[id] {
-							ids = append(ids, id)
-							seenIDs[id] = true
-						}
-					}
-				}
-				blocks = append(blocks, summaryGenerationWireBlock{block.ID, block.ParentID, block.Order, block.Title, block.BodyMarkdown, ids})
-			}
-			value := part{row.Title, row.Overview, blocks}
-			key := artifact.JSON(value)
-			if !seen[key] {
-				parts = append(parts, value)
-				seen[key] = true
-			}
-		}
-		return "把以下全部已验证来源摘要合并成一篇完整摘要（数据）。保留所有分段的主要结论、约束和合法cue引用，合并重复观点，正文保持简洁；不要仅处理第一段：\n" + artifact.JSON(parts)
+		return studyPromptTokens(e.messages(summaryReductionReviewPrefix+input))+e.plannedOutput(input)+min(384, e.plannedOutput(input))+256 <= e.window
 	}
 	for level := 1; len(docs) > 1; level++ {
 		groups := [][]summarydoc.Document{}
 		for _, doc := range docs {
-			if !e.fits(reduceInput([]summarydoc.Document{doc})) {
+			if !reduceFits(reduceInput([]summarydoc.Document{doc})) {
 				return summarydoc.Document{}, artifact.Err("context_budget_exhausted", 422)
 			}
 			if len(groups) == 0 {
@@ -140,7 +138,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 			}
 			last := len(groups) - 1
 			candidate := append(append([]summarydoc.Document(nil), groups[last]...), doc)
-			if e.fits(reduceInput(candidate)) {
+			if reduceFits(reduceInput(candidate)) {
 				groups[last] = candidate
 			} else {
 				groups = append(groups, []summarydoc.Document{doc})
@@ -158,6 +156,12 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 			doc, _, err := e.call(ctx, fmt.Sprintf("summary-reduce-%d-%d", level, index+1), "合并分段结论并保留来源依据", reduceInput(group))
 			if err != nil {
 				return summarydoc.Document{}, err
+			}
+			if needsReview {
+				doc, err = e.reviewVerifiedMerge(ctx, fmt.Sprintf("summary-reduce-review-%d-%d", level, index+1), doc, group)
+				if err != nil {
+					return summarydoc.Document{}, err
+				}
 			}
 			next = append(next, doc)
 		}

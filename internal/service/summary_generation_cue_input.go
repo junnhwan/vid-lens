@@ -33,6 +33,8 @@ func summaryGenerationCueInput(cues []summaryGenerationCue) string {
 func summaryGenerationInputData(input string) string {
 	if index := strings.Index(input, summaryCueInputPrefix); index >= 0 {
 		input = input[index+len(summaryCueInputPrefix):]
+	} else if index := strings.Index(input, summaryVerifiedPartsPrefix); index >= 0 {
+		input = input[index+len(summaryVerifiedPartsPrefix):]
 	} else if index := strings.Index(input, "["); index >= 0 {
 		input = input[index:]
 	}
