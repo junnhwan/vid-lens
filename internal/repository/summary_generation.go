@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 	"vid-lens/internal/processing"
 
@@ -408,6 +409,14 @@ func (r *Repositories) recordSummaryGenerationQueueFailure(job *model.TaskJob, r
 	}
 	state := "error"
 	code := "summary_generation_failed"
+	// Queue wrappers may classify this as non_retryable_error. Preserve only
+	// exact known causes, never copy free-form provider errors into public events.
+	for _, cause := range []string{"budget_exhausted", "context_budget_exhausted", "duration_limit", "invalid_summary_document"} {
+		if req.ErrorCode == cause || req.ErrorMessage == cause || (cause == "budget_exhausted" && strings.HasPrefix(req.ErrorMessage, "budget_exhausted: ")) {
+			code = cause
+			break
+		}
+	}
 	if run.CancelRequestedAt != nil {
 		state = "cancelled"
 		code = "generation_cancelled"

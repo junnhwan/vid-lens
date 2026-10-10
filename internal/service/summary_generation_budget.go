@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"strings"
 	"unicode/utf8"
 
 	"vid-lens/internal/ai"
@@ -14,16 +13,11 @@ import (
 // more JSON headroom than equally short sources with only a few cues. This is
 // a scheduling estimate, not a claim about provider token usage.
 func summaryGenerationOutputDemand(input string) int64 {
-	index := strings.Index(input, "[")
+	data := summaryGenerationInputData(input)
 	chars, refs := 0, 0
 	reducing := false
-	if index >= 0 {
-		data := input[index:]
-		if end := strings.Index(data, "\n校验反馈"); end >= 0 {
-			data = data[:end]
-		}
-		var cues []summaryGenerationCue
-		if json.Unmarshal([]byte(data), &cues) == nil && len(cues) > 0 && cues[0].ID != "" {
+	if len(data) > 0 {
+		if cues, ok := decodeSummaryGenerationCues(input); ok {
 			refs = len(cues)
 			for _, cue := range cues {
 				chars += utf8.RuneCountInString(cue.Text)

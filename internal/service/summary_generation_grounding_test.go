@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -179,9 +180,10 @@ func TestSummaryGenerationTimedWindowsGetsBoundedJSONOutputHeadroom(t *testing.T
 }
 
 type remainingVisualBudgetProbe struct {
-	f       *generationFixture
-	called  bool
-	failure error
+	f         *generationFixture
+	called    bool
+	failure   error
+	textFirst bool
 }
 
 func (p *remainingVisualBudgetProbe) Enrich(ctx context.Context, _ *model.VideoTask, _ *model.TaskJob, _ processing.GenerationSnapshot, _ ai.Profile, _ *textsource.Snapshot, _ *model.AISummary, _ string) error {
@@ -192,7 +194,7 @@ func (p *remainingVisualBudgetProbe) Enrich(ctx context.Context, _ *model.VideoT
 		p.failure = err
 		return err
 	}
-	if run.MaxCompletionTokens != 8192 || run.MaxPromptTokens != 24000 || run.MaxDurationMs != 90000 || run.MaxFrames != 2 || run.MaxCompletionTokens-run.CompletionTokensUsed < 2048 {
+	if run.MaxCompletionTokens != 8192 || run.MaxPromptTokens != 24000 || run.MaxDurationMs != 90000 || run.MaxFrames != 2 || (!p.textFirst && run.MaxCompletionTokens-run.CompletionTokensUsed < 2048) {
 		p.failure = errors.New("frozen budget expanded or visual reserve consumed")
 		return p.failure
 	}
@@ -201,20 +203,36 @@ func (p *remainingVisualBudgetProbe) Enrich(ctx context.Context, _ *model.VideoT
 		p.failure = errors.New("absolute frozen duration expanded")
 		return p.failure
 	}
+	if p.textFirst {
+		return artifact.Err("budget_exhausted", 422)
+	}
 	return artifact.Err("visual_not_beneficial", 422)
 }
 
 func subtitleGenerationBudgetFixture(t *testing.T) (*generationFixture, string) {
 	t.Helper()
 	f := newGenerationFixture(t, false)
+	// Real failing track's opaque IDs, timing and per-cue lengths; source words
+	// are deliberately replaced. No private transcript is checked into tests.
+	data, err := os.ReadFile("testdata/summary_generation_328_cue_layout.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var layout []struct {
+		ID     string `json:"cue_id"`
+		Start  int64  `json:"start_ms"`
+		End    int64  `json:"end_ms"`
+		Method string `json:"timing_method"`
+		Runes  int    `json:"text_runes"`
+	}
+	if err = json.Unmarshal(data, &layout); err != nil || len(layout) != 328 {
+		t.Fatalf("invalid real layout: %v", err)
+	}
 	var cues []textsource.Cue
-	for i := 0; i < 328; i++ {
-		words := "配置与执行分离后核对条件"
-		if i < 43 {
-			words += "。"
-		}
-		start, end := int64(i*1000), int64((i+1)*1000)
-		cues = append(cues, textsource.Cue{ID: fmt.Sprintf("subtitle-cue-%d", i+1), Order: i + 1, Text: words, RawText: words, StartMS: &start, EndMS: &end, TimingMethod: "subtitle_cue"})
+	for i, row := range layout {
+		words := strings.Repeat("文", row.Runes)
+		start, end := row.Start, row.End
+		cues = append(cues, textsource.Cue{ID: row.ID, Order: i + 1, Text: words, RawText: words, StartMS: &start, EndMS: &end, TimingMethod: row.Method})
 	}
 	canonical, err := textsource.Canonicalize(textsource.Snapshot{Kind: textsource.KindSubtitle, Identity: f.source.Identity, ParserVersion: "fixture-srt", Language: "zh", TrackKey: "zh", SubtitleKind: "manual", KindBasis: "fixture", Cues: cues}, textsource.DefaultLimits())
 	if err != nil {
@@ -263,22 +281,26 @@ func subtitleGenerationBudgetFixture(t *testing.T) (*generationFixture, string) 
 }
 
 func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReserve(t *testing.T) {
-	for _, mode := range []string{"normal", "repair", "truncated", "exhausted"} {
+	for _, mode := range []string{"normal", "repair", "truncated", "exhausted", "text_first"} {
 		t.Run(mode, func(t *testing.T) {
 			f, raw := subtitleGenerationBudgetFixture(t)
 			responses := []summaryBudgetResponse{{content: raw, usage: &ai.ChatUsage{PromptTokens: 6000, CompletionTokens: 2500}}}
-			if mode == "repair" || mode == "truncated" || mode == "exhausted" {
+			if mode != "normal" {
 				first := summaryBudgetResponse{content: `{}`, usage: &ai.ChatUsage{PromptTokens: 6000, CompletionTokens: 3000}}
 				if mode == "truncated" {
 					first.finish = "length"
 				}
 				if mode == "exhausted" {
-					first.usage.CompletionTokens = 6144
+					first.usage.CompletionTokens = 8192
+				}
+				if mode == "text_first" {
+					first.usage.CompletionTokens = 5173
+					responses[0].usage.CompletionTokens = 2000
 				}
 				responses = append([]summaryBudgetResponse{first}, responses...)
 			}
 			client, requests, calls := summaryBudgetProvider(t, responses...)
-			probe := &remainingVisualBudgetProbe{f: f}
+			probe := &remainingVisualBudgetProbe{f: f, textFirst: mode == "text_first"}
 			f.svc = NewSummaryGenerationService(f.repos, f.profiles, summaryQualityFactory{chat: nonStreamingGenerationClient{client}}).WithVisualEnricher(probe)
 			err := f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken)
 			if mode == "exhausted" {
@@ -307,7 +329,7 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 			}
 			var messages []ai.ChatMessage
 			_ = json.Unmarshal(first["messages"], &messages)
-			if !strings.Contains(messages[1].Content, "subtitle-cue-328") || studyPromptTokens(messages) >= 24000 {
+			if !strings.Contains(messages[1].Content, "cue-000328") || studyPromptTokens(messages)*2+256 >= 24000 {
 				t.Fatal("full short-cue track omitted or frozen input budget exceeded")
 			}
 			for _, constraint := range []string{"具体机制", "案例及其适用条件", "parent_id必须指向本次返回的父块", "过于宽泛的上位领域标签", "不能擅自写成自动更新或效果保证"} {
@@ -317,7 +339,11 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 			}
 			if mode != "normal" {
 				second := <-requests
-				if string(second["max_tokens"]) != "3144" {
+				wantCap := "5192"
+				if mode == "text_first" {
+					wantCap = "3019"
+				}
+				if string(second["max_tokens"]) != wantCap {
 					t.Fatalf("repair did not shrink against actual usage plus reserve: %s", second["max_tokens"])
 				}
 			}

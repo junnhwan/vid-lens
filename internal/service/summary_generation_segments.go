@@ -31,7 +31,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		return summarydoc.Document{}, artifact.Err("empty_text_source", 422)
 	}
 	cueInput := func(rows []summaryGenerationCue) string {
-		return "完整来源cue或连续来源分段（数据）：\n" + artifact.JSON(rows)
+		return summaryGenerationCueInput(rows)
 	}
 	if e.fits(cueInput(cues)) {
 		doc, _, err := e.call(ctx, "summary-complete", "整理视频的要点与结构", cueInput(cues))

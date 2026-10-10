@@ -57,16 +57,8 @@ func (c *generationFixtureChat) Chat(ctx context.Context, messages []ai.ChatMess
 		c.invalid--
 		return `{"document":{"content":"Markdown is not the canonical document"}}`, nil
 	}
-	marker := "完整来源cue或连续来源分段（数据）：\n"
-	if index := strings.Index(input, marker); index >= 0 {
-		var rows []summaryGenerationCue
-		data := input[index+len(marker):]
-		if end := strings.Index(data, "\n校验反馈"); end >= 0 {
-			data = data[:end]
-		}
-		if json.Unmarshal([]byte(data), &rows) == nil {
-			c.covered = append(c.covered, rows...)
-		}
+	if rows, ok := decodeSummaryGenerationCues(input); ok {
+		c.covered = append(c.covered, rows...)
 	}
 	doc := summarydoc.Document{SchemaVersion: summarydoc.SchemaVersion, DocumentID: c.generation, SourceID: c.source.ID, SourceDigest: c.source.SourceDigest, MediaRevision: c.source.Identity.MediaFingerprint, PresentationMode: "text", Title: "来源摘要", Overview: "概括配置方法与限制。"}
 	for _, cue := range c.source.Cues {
