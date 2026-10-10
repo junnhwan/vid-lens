@@ -30,6 +30,11 @@ type PGVectorConfig struct {
 	Database  string
 	SSLMode   string
 	TableName string
+	// SourceChunksTableName is the authoritative relational publication in the
+	// same database/schema. Server wiring uses its VideoChunk table; tests can
+	// provide an isolated table. Missing authority is an error, never a fallback
+	// to searching orphan generations.
+	SourceChunksTableName string
 	// Dim remains the configured default for callers that need a fallback.
 	// The storage column itself is unbounded so profiles can use their own dimensions.
 	Dim             int
@@ -64,8 +69,9 @@ func (c PGVectorConfig) DSN() (string, error) {
 }
 
 type PGVectorStore struct {
-	db    *sql.DB
-	table string
+	db                *sql.DB
+	table             string
+	sourceChunksTable string
 }
 
 func NewPGVectorStore(ctx context.Context, cfg PGVectorConfig) (*PGVectorStore, error) {
@@ -118,7 +124,7 @@ func NewPGVectorStoreWithDB(db *sql.DB, cfg PGVectorConfig) (*PGVectorStore, err
 }
 
 func newPGVectorStore(db *sql.DB, cfg PGVectorConfig) *PGVectorStore {
-	return &PGVectorStore{db: db, table: quotePGVectorIdentifier(cfg.TableName)}
+	return &PGVectorStore{db: db, table: quotePGVectorIdentifier(cfg.TableName), sourceChunksTable: quotePGVectorIdentifier(cfg.SourceChunksTableName)}
 }
 
 func (c *PGVectorConfig) normalize() error {
@@ -134,6 +140,13 @@ func (c *PGVectorConfig) normalize() error {
 	}
 	if len(c.TableName) > 63 {
 		return fmt.Errorf("postgres vector table name is too long: %d", len(c.TableName))
+	}
+	c.SourceChunksTableName = strings.TrimSpace(c.SourceChunksTableName)
+	if c.SourceChunksTableName == "" {
+		c.SourceChunksTableName = "video_chunks"
+	}
+	if !pgVectorIdentifierPattern.MatchString(c.SourceChunksTableName) || len(c.SourceChunksTableName) > 63 {
+		return fmt.Errorf("invalid authoritative chunk table name")
 	}
 	if c.Dim <= 0 {
 		return fmt.Errorf("postgres vector dimension must be positive, got %d", c.Dim)
@@ -232,10 +245,9 @@ func (s *PGVectorStore) UpsertChunks(ctx context.Context, vectors []service.RAGV
 	return nil
 }
 
-// ReplaceTaskChunks atomically replaces one task/model projection inside
-// PostgreSQL. It does not make the preceding relational chunk transaction atomic
-// with this transaction; a failed build remains recoverable by reindexing the
-// PostgreSQL relational source of truth.
+// ReplaceTaskChunks is a maintenance-only full-scope replacement inside
+// PostgreSQL. Concurrent index builds must use generation-scoped UpsertChunks;
+// this operation does not participate in their relational publication fence.
 func (s *PGVectorStore) ReplaceTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string, vectors []service.RAGVector) error {
 	if s == nil || s.db == nil {
 		return errors.New("postgres vector store is not initialized")
@@ -360,10 +372,14 @@ func (s *PGVectorStore) Search(ctx context.Context, query []float32, req service
 	sqlText := fmt.Sprintf(`
 SELECT vector_id, task_id, chunk_id, chunk_index, content,
        1 - (embedding <=> $1::vector) AS score
-FROM %s
+FROM %s AS projection
 WHERE user_id = $2 AND task_id IN (%s) AND embedding_model = $%d AND embedding_dim = $%d
+  AND EXISTS (SELECT 1 FROM %s AS current_chunk
+    WHERE current_chunk.id = projection.chunk_id AND current_chunk.vector_id = projection.vector_id
+      AND current_chunk.user_id = projection.user_id AND current_chunk.task_id = projection.task_id
+      AND current_chunk.embedding_model = projection.embedding_model)
 ORDER BY embedding <=> $1::vector
-LIMIT $%d`, s.table, strings.Join(placeholders, ","), modelPos, modelPos+1, limitPos+1)
+LIMIT $%d`, s.table, strings.Join(placeholders, ","), modelPos, modelPos+1, s.sourceChunksTable, limitPos+1)
 	rows, err := s.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
@@ -457,13 +473,18 @@ func formatPGVector(vector []float32) string {
 
 // ListTaskVectorManifest returns the stable metadata needed by strict RAG
 // evaluation. It deliberately does not read embeddings, so snapshots remain
-// backend-neutral and cheap to build.
+// backend-neutral and cheap to build. Its scope matches Search: orphan build
+// generations are physical storage rows, not part of the current manifest.
 func (s *PGVectorStore) ListTaskVectorManifest(ctx context.Context, userID, taskID int64, embeddingModel string) ([]service.RAGVectorManifestEntry, error) {
 	return s.listVectorManifest(ctx, fmt.Sprintf(`
 SELECT vector_id, user_id, task_id, chunk_id, chunk_index, content_hash, embedding_model
-FROM %s
+FROM %s AS projection
 WHERE user_id = $1 AND task_id = $2 AND embedding_model = $3
-ORDER BY chunk_index ASC, vector_id ASC`, s.table), userID, taskID, embeddingModel)
+  AND EXISTS (SELECT 1 FROM %s AS current_chunk
+    WHERE current_chunk.id = projection.chunk_id AND current_chunk.vector_id = projection.vector_id
+      AND current_chunk.user_id = projection.user_id AND current_chunk.task_id = projection.task_id
+      AND current_chunk.embedding_model = projection.embedding_model)
+ORDER BY chunk_index ASC, vector_id ASC`, s.table, s.sourceChunksTable), userID, taskID, embeddingModel)
 }
 
 // ListAllVectorManifest returns every pgvector projection row without reading

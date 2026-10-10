@@ -30,6 +30,9 @@ func TestBackendConfigFromApplicationConfig(t *testing.T) {
 	if got.PGVector.Host != "postgres" || got.PGVector.Database != "pdb" || got.PGVector.TableName != "vectors" || got.PGVector.Dim != 1536 {
 		t.Fatalf("pgvector mapping = %+v", got.PGVector)
 	}
+	if got.PGVector.SourceChunksTableName != "video_chunks" || got.PGVector.Host != app.Database.Host || got.PGVector.Port != app.Database.Port || got.PGVector.Database != app.Database.DBName || got.PGVector.Username != app.Database.Username || got.PGVector.SSLMode != app.Database.SSLMode {
+		t.Fatal("vector retrieval authority must use the same application DB/schema")
+	}
 	if got.PGVector.MaxOpenConns != 8 || got.PGVector.MaxIdleConns != 4 {
 		t.Fatalf("pgvector pool defaults = %d/%d, want 8/4", got.PGVector.MaxOpenConns, got.PGVector.MaxIdleConns)
 	}

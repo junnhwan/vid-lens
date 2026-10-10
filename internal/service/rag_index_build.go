@@ -9,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"vid-lens/internal/ai"
 	"vid-lens/internal/model"
 	"vid-lens/internal/observability"
+	"vid-lens/internal/repository"
 )
 
 const (
@@ -21,6 +24,9 @@ const (
 var ErrRAGIndexAlreadyBuilding = errors.New("索引正在构建中，请等待现有任务完成")
 
 type ragIndexBuild struct {
+	projectionID string
+	sourceID     string
+	sourceDigest string
 	indexContext string
 	service      *RAGIndexService
 	userID       int64
@@ -44,6 +50,14 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	}
 
 	build := s.newRAGIndexBuild(userID, taskID, task.FileMD5, profile)
+	build.sourceID = task.ActiveTextSourceID
+	if build.sourceID != "" {
+		source, sourceErr := s.repos.TextSource.Read(ctx, userID, taskID, build.sourceID)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+		build.sourceDigest = source.SourceDigest
+	}
 	build.indexContext, err = s.taskIndexContext(task)
 	if err != nil {
 		return nil, err
@@ -83,7 +97,7 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return nil, err
 	}
-	if err := build.complete(len(chunks), manifest); err != nil {
+	if err := build.complete(ctx, len(chunks), manifest); err != nil {
 		return nil, err
 	}
 
@@ -97,15 +111,13 @@ func (s *RAGIndexService) BuildTaskIndex(ctx context.Context, userID, taskID int
 }
 
 func (s *RAGIndexService) replaceVectorProjection(ctx context.Context, build *ragIndexBuild, vectors []RAGVector) error {
-	if replacer, ok := s.store.(RAGVectorReplacer); ok {
-		return replacer.ReplaceTaskChunks(ctx, build.userID, build.taskID, build.modelName, vectors)
-	}
-
-	// Fallback path for stores that do not implement the atomic
-	// delete-and-replace operation. Keep the weaker behavior explicit.
-	if err := s.store.DeleteTaskChunks(ctx, build.userID, build.taskID, build.modelName); err != nil {
+	if err := build.withSourceFence(ctx, nil); err != nil {
 		return err
 	}
+	// Each build owns an immutable vector namespace. A remote write can finish
+	// after this preflight and after a newer source completes; deleting the whole
+	// task/model scope would erase that newer projection despite the final CAS.
+	// Relational ChunkIDs select the published projection before retrieval TopK.
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return err
 	}
@@ -117,7 +129,7 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 		return nil, fmt.Errorf("无权访问此任务")
 	}
 
-	transcription, transcriptionRows, err := taskTranscriptSource(s.repos, task)
+	source, err := taskTextSource(context.Background(), s.repos, task)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +138,13 @@ func (s *RAGIndexService) loadTaskIndexChunks(userID int64, task *model.VideoTas
 	}
 
 	chunks := make([]TextChunk, 0)
-	if transcription != nil && strings.TrimSpace(transcription.Content) != "" {
-		chunks = append(chunks, buildTranscriptIndexChunks(transcription.Content, transcriptionRows, s.cfg.ChunkSize, s.cfg.ChunkOverlap)...)
+	if source.Snapshot != nil {
+		chunks = append(chunks, SplitObservationsIntoChunks(source.Observations, s.cfg.ChunkSize, s.cfg.ChunkOverlap)...)
+	} else if source.Transcription != nil && strings.TrimSpace(source.Transcription.Content) != "" {
+		chunks = append(chunks, buildTranscriptIndexChunks(source.Transcription.Content, source.LegacyChunks, s.cfg.ChunkSize, s.cfg.ChunkOverlap)...)
+	}
+	if source.Snapshot == nil {
+		retainLegacyTiming(chunks, source.Observations)
 	}
 	var visualLoadErr error
 	if s.repos.VisualFrame != nil {
@@ -173,13 +190,14 @@ func (s *RAGIndexService) newRAGIndexBuild(userID, taskID int64, fileMD5 string,
 		expectedDim = s.cfg.EmbeddingDim
 	}
 	return &ragIndexBuild{
-		service:     s,
-		userID:      userID,
-		taskID:      taskID,
-		fileMD5:     fileMD5,
-		modelName:   profile.EmbeddingModel,
-		expectedDim: expectedDim,
-		startedAt:   time.Now(),
+		projectionID: uuid.NewString(),
+		service:      s,
+		userID:       userID,
+		taskID:       taskID,
+		fileMD5:      fileMD5,
+		modelName:    profile.EmbeddingModel,
+		expectedDim:  expectedDim,
+		startedAt:    time.Now(),
 	}
 }
 
@@ -217,6 +235,9 @@ func (b *ragIndexBuild) fail(ctx context.Context, cause error) (*RAGIndexResult,
 	if guardErr := checkRAGBuildContext(ctx); guardErr != nil {
 		return nil, guardErr
 	}
+	if sourceErr := b.withSourceFence(ctx, nil); errors.Is(sourceErr, repository.ErrRAGSourceChanged) {
+		return nil, sourceErr
+	}
 	finishedAt := time.Now()
 	errMsg := cause.Error()
 	if len(errMsg) > maxRAGIndexErrorLen {
@@ -229,25 +250,27 @@ func (b *ragIndexBuild) fail(ctx context.Context, cause error) (*RAGIndexResult,
 	return nil, cause
 }
 
-func (b *ragIndexBuild) complete(chunkCount int, manifest string) error {
-	finishedAt := time.Now()
-	ok, err := b.service.repos.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
-		"status": model.RAGIndexStatusIndexed, "chunk_count": chunkCount,
-		"completed_chunks": chunkCount, "total_chunks": chunkCount,
-		"build_phase": "completed", "wait_reason": "", "next_retry_at": nil,
-		"chunk_manifest_sha256": manifest, "index_context_sha256": indexContextHash(b.indexContext), "finished_at": finishedAt,
-		"chunker_strategy": b.service.cfg.ChunkerStrategy, "chunker_version": b.service.cfg.ChunkerVersion,
-		"chunk_size": b.service.cfg.ChunkSize, "chunk_overlap": b.service.cfg.ChunkOverlap,
-		"source_mapping_version": model.CurrentRAGSourceMappingVersion,
-		"build_version":          model.CurrentRAGIndexBuildVersion,
+func (b *ragIndexBuild) complete(ctx context.Context, chunkCount int, manifest string) error {
+	return b.withSourceFence(ctx, func(tx *repository.Repositories) error {
+		finishedAt := time.Now()
+		ok, err := tx.RAGIndex.UpdateBuild(b.userID, b.taskID, b.modelName, b.startedAt, map[string]interface{}{
+			"status": model.RAGIndexStatusIndexed, "chunk_count": chunkCount,
+			"completed_chunks": chunkCount, "total_chunks": chunkCount,
+			"build_phase": "completed", "wait_reason": "", "next_retry_at": nil,
+			"chunk_manifest_sha256": manifest, "index_context_sha256": indexContextHash(b.indexContext), "finished_at": finishedAt,
+			"chunker_strategy": b.service.cfg.ChunkerStrategy, "chunker_version": b.service.cfg.ChunkerVersion,
+			"chunk_size": b.service.cfg.ChunkSize, "chunk_overlap": b.service.cfg.ChunkOverlap,
+			"source_mapping_version": model.CurrentRAGSourceMappingVersion,
+			"build_version":          model.CurrentRAGIndexBuildVersion,
+		})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("索引构建占用已失效")
+		}
+		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("索引构建占用已失效")
-	}
-	return nil
 }
 
 func (b *ragIndexBuild) progress(phase string, completed int, waitReason string, retryAt *time.Time) error {
@@ -295,7 +318,7 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 		}
 
 		hash := md5Hex(chunk.Content)
-		vectorID := ChunkEvidenceID(b.taskID, chunk.Index, hash)
+		vectorID := b.vectorID(chunk.Index, hash)
 		sourceRefs, err := MarshalChunkSourceRefs(chunk.SourceRefs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("encode chunk source refs: %w", err)
@@ -332,29 +355,41 @@ func (b *ragIndexBuild) embedChunks(ctx context.Context, embedding ai.EmbeddingC
 	return dbChunks, vectors, nil
 }
 
+func (b *ragIndexBuild) vectorID(index int, contentHash string) string {
+	// The nonce isolates concurrent/stale builds even for identical wording.
+	// Source/model metadata additionally makes the namespace evidence-bound.
+	envelope := fmt.Sprintf("rag-projection-v1:%d:%d:%s:%s:%s:%s:%d:%s", b.userID, b.taskID, b.modelName, b.projectionID, b.sourceID, b.sourceDigest, index, contentHash)
+	sum := sha256.Sum256([]byte(envelope))
+	return "projection_" + hex.EncodeToString(sum[:])
+}
+
+func (b *ragIndexBuild) withSourceFence(ctx context.Context, fn func(*repository.Repositories) error) error {
+	return b.service.repos.RunWithRAGBuildSource(ctx, repository.RAGBuildSourceFence{UserID: b.userID, TaskID: b.taskID, EmbeddingModel: b.modelName, StartedAt: b.startedAt, MediaFingerprint: b.fileMD5, SourceID: b.sourceID, SourceDigest: b.sourceDigest}, fn)
+}
+
 func (b *ragIndexBuild) persistChunkSource(ctx context.Context, dbChunks []model.VideoChunk, vectors []RAGVector) (string, error) {
 	if err := checkRAGBuildContext(ctx); err != nil {
 		return "", err
 	}
-	if err := b.service.repos.VideoChunk.ReplaceTaskChunks(b.taskID, b.modelName, dbChunks); err != nil {
-		return "", err
-	}
-	if err := checkRAGBuildContext(ctx); err != nil {
-		return "", err
-	}
-
-	stored, err := b.service.repos.VideoChunk.ListByTaskID(b.userID, b.taskID, b.modelName)
-	if err != nil {
-		return "", err
-	}
-	manifest, err := ComputeChunkManifestSHA256(stored)
-	if err != nil {
-		return "", err
-	}
-	if err := attachStoredChunkIDs(vectors, stored); err != nil {
-		return "", err
-	}
-	return manifest, nil
+	var manifest string
+	err := b.withSourceFence(ctx, func(tx *repository.Repositories) error {
+		if err := tx.VideoChunk.ReplaceTaskChunks(b.taskID, b.modelName, dbChunks); err != nil {
+			return err
+		}
+		if err := checkRAGBuildContext(ctx); err != nil {
+			return err
+		}
+		stored, err := tx.VideoChunk.ListByTaskID(b.userID, b.taskID, b.modelName)
+		if err != nil {
+			return err
+		}
+		manifest, err = ComputeChunkManifestSHA256(stored)
+		if err != nil {
+			return err
+		}
+		return attachStoredChunkIDs(vectors, stored)
+	})
+	return manifest, err
 }
 
 func indexContextHash(text string) string {

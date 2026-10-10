@@ -36,6 +36,7 @@ func (s *cancelAfterDeleteStore) DeleteTaskChunks(_ context.Context, _, _ int64,
 
 func (s *cancelAfterDeleteStore) UpsertChunks(_ context.Context, _ []RAGVector) error {
 	s.upsertCalls++
+	s.cancel()
 	return nil
 }
 
@@ -77,7 +78,7 @@ func TestRAGIndexServiceStopsAfterContextCancellationDuringEmbedding(t *testing.
 	}
 }
 
-func TestRAGIndexServiceStopsAfterContextCancellationDuringVectorDelete(t *testing.T) {
+func TestRAGIndexServiceStopsAfterContextCancellationDuringVectorWrite(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Filename: "video.mp4", FileURL: "videos/guard-delete.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -96,14 +97,14 @@ func TestRAGIndexServiceStopsAfterContextCancellationDuringVectorDelete(t *testi
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("BuildTaskIndex() error = %v, want context.Canceled", err)
 	}
-	if store.deleteCalls != 1 {
-		t.Fatalf("delete calls = %d, want 1", store.deleteCalls)
+	if store.deleteCalls != 0 {
+		t.Fatalf("delete calls = %d, want 0 for immutable projection", store.deleteCalls)
 	}
 	if len(embedding.inputs) != 1 {
 		t.Fatalf("embedding calls = %d, want 1 before fallback cancellation", len(embedding.inputs))
 	}
-	if store.upsertCalls != 0 {
-		t.Fatalf("upsert calls = %d, want 0", store.upsertCalls)
+	if store.upsertCalls != 1 {
+		t.Fatalf("upsert calls = %d, want 1", store.upsertCalls)
 	}
 }
 

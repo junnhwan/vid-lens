@@ -245,7 +245,7 @@ func TestRAGIndexServiceRecordsEmbeddingCalls(t *testing.T) {
 	}
 }
 
-func TestRAGIndexServiceDeletesOldVectorsBeforeReplacingChunks(t *testing.T) {
+func TestRAGIndexServiceWritesGenerationWithoutDeletingOtherVectors(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "56565656565656565656565656565656", Filename: "video.mp4", FileURL: "videos/rebuild.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -269,10 +269,10 @@ func TestRAGIndexServiceDeletesOldVectorsBeforeReplacingChunks(t *testing.T) {
 		t.Fatalf("BuildTaskIndex() error = %v", err)
 	}
 
-	if len(store.events) < 2 || store.events[0] != "delete" || store.events[1] != "upsert" {
-		t.Fatalf("vector store events = %#v, want delete before upsert", store.events)
+	if len(store.events) != 1 || store.events[0] != "upsert" {
+		t.Fatalf("vector store events = %#v, want only own generation upsert", store.events)
 	}
-	if len(store.deleteCalls) != 1 || store.deleteCalls[0].userID != 7 || store.deleteCalls[0].taskID != task.ID || store.deleteCalls[0].model != "text-embedding-3-small" {
+	if len(store.deleteCalls) != 0 {
 		t.Fatalf("delete calls = %+v", store.deleteCalls)
 	}
 	chunks, err := repos.VideoChunk.ListByTaskID(7, task.ID, "text-embedding-3-small")
@@ -284,7 +284,7 @@ func TestRAGIndexServiceDeletesOldVectorsBeforeReplacingChunks(t *testing.T) {
 	}
 }
 
-func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFails(t *testing.T) {
+func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenProjectionWriteFails(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "57575757575757575757575757575757", Filename: "video.mp4", FileURL: "videos/rebuild-fail.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -299,7 +299,7 @@ func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFa
 		t.Fatalf("seed old chunks: %v", err)
 	}
 
-	store := &fakeVectorStore{deleteErr: fmt.Errorf("pgvector delete failed")}
+	store := &fakeVectorStore{err: fmt.Errorf("pgvector write failed")}
 	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 12, EmbeddingDim: 3})
 	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
@@ -308,8 +308,8 @@ func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFa
 	if err == nil {
 		t.Fatal("BuildTaskIndex() succeeded, want delete failure")
 	}
-	if len(store.events) != 1 || store.events[0] != "delete" {
-		t.Fatalf("events = %#v, want only delete", store.events)
+	if len(store.events) != 1 || store.events[0] != "upsert" || len(store.deleteCalls) != 0 {
+		t.Fatalf("events = %#v, want own generation write only", store.events)
 	}
 	chunks, listErr := repos.VideoChunk.ListByTaskID(7, task.ID, "text-embedding-3-small")
 	if listErr != nil {
@@ -327,7 +327,7 @@ func TestRAGIndexServiceRecordsFailureAfterSourceReplacementWhenFallbackDeleteFa
 	}
 }
 
-func TestRAGIndexServiceUsesAtomicVectorReplacerWhenAvailable(t *testing.T) {
+func TestRAGIndexServiceNeverUsesFullScopeReplacerDuringBuild(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "54545454545454545454545454545454", Filename: "video.mp4", FileURL: "videos/atomic-replace.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -346,21 +346,18 @@ func TestRAGIndexServiceUsesAtomicVectorReplacerWhenAvailable(t *testing.T) {
 		t.Fatalf("BuildTaskIndex() error = %v", err)
 	}
 
-	if len(store.events) != 1 || store.events[0] != "replace" {
-		t.Fatalf("events = %#v, want only atomic replace", store.events)
+	if len(store.events) != 1 || store.events[0] != "upsert" {
+		t.Fatalf("events = %#v, want only own generation write", store.events)
 	}
-	if len(store.deleteCalls) != 0 || len(store.upserts) != 0 {
-		t.Fatalf("fallback path was called: deletes=%+v upserts=%+v", store.deleteCalls, store.upserts)
+	if len(store.deleteCalls) != 0 || len(store.replaceCalls) != 0 {
+		t.Fatalf("full-scope delete or replacement was called: deletes=%+v replaces=%+v", store.deleteCalls, store.replaceCalls)
 	}
-	if len(store.replaceCalls) != 1 || store.replaceCalls[0].userID != 7 || store.replaceCalls[0].taskID != task.ID || store.replaceCalls[0].model != "text-embedding-3-small" {
-		t.Fatalf("replace calls = %+v", store.replaceCalls)
-	}
-	if len(store.replacements) != 1 || store.replacements[0].ChunkID <= 0 {
-		t.Fatalf("replacement vectors must reference persisted relational chunks: %+v", store.replacements)
+	if len(store.upserts) != 1 || store.upserts[0].ChunkID <= 0 {
+		t.Fatalf("generation vectors must reference persisted relational chunks: %+v", store.upserts)
 	}
 }
 
-func TestRAGIndexServiceRecordsAtomicReplacementFailure(t *testing.T) {
+func TestRAGIndexServiceRecordsProjectionWriteFailureEvenWithReplacerAvailable(t *testing.T) {
 	repos := newRAGIndexTestRepositories(t)
 	task := &model.VideoTask{UserID: 7, FileMD5: "53535353535353535353535353535353", Filename: "video.mp4", FileURL: "videos/atomic-replace-fail.mp4"}
 	if err := repos.Task.Create(task); err != nil {
@@ -370,7 +367,7 @@ func TestRAGIndexServiceRecordsAtomicReplacementFailure(t *testing.T) {
 		t.Fatalf("upsert transcription: %v", err)
 	}
 
-	store := &fakeReplacingVectorStore{fakeVectorStore: &fakeVectorStore{}, replaceErr: fmt.Errorf("pgvector replace failed")}
+	store := &fakeReplacingVectorStore{fakeVectorStore: &fakeVectorStore{err: fmt.Errorf("pgvector write failed")}, replaceErr: fmt.Errorf("unsafe replacement called")}
 	svc := NewRAGIndexService(repos, store, RAGIndexConfig{ChunkSize: 100, EmbeddingDim: 3})
 	_, err := svc.BuildTaskIndex(context.Background(), 7, task.ID, &fakeEmbeddingClient{dim: 3}, ai.Profile{
 		EmbeddingModel: "text-embedding-3-small",
@@ -379,8 +376,8 @@ func TestRAGIndexServiceRecordsAtomicReplacementFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("BuildTaskIndex() succeeded, want replacement failure")
 	}
-	if len(store.events) != 1 || store.events[0] != "replace" {
-		t.Fatalf("events = %#v, want only atomic replace", store.events)
+	if len(store.events) != 1 || store.events[0] != "upsert" {
+		t.Fatalf("events = %#v, want only generation write", store.events)
 	}
 
 	index, findErr := repos.RAGIndex.FindByTaskAndModel(7, task.ID, "text-embedding-3-small")

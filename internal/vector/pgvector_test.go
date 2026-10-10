@@ -52,6 +52,12 @@ func TestPGVectorConfigRejectsUnsafeTableAndInvalidDimension(t *testing.T) {
 	}
 
 	cfg = testPGConfig()
+	cfg.SourceChunksTableName = `chunks; DROP TABLE video_chunks;`
+	if _, err := NewPGVectorStoreWithDB(&sql.DB{}, cfg); err == nil {
+		t.Fatal("expected unsafe authority table name error")
+	}
+
+	cfg = testPGConfig()
 	cfg.Dim = 0
 	if _, err := NewPGVectorStoreWithDB(&sql.DB{}, cfg); err == nil {
 		t.Fatal("expected invalid dimension error")
@@ -199,6 +205,19 @@ func TestPGVectorStoreSearchConvertsDistanceToSimilarity(t *testing.T) {
 	}
 }
 
+func TestPGVectorStoreMissingAuthorityNeverFallsBackToAllGenerations(t *testing.T) {
+	store, mock, cleanup := newMockPGStore(t, testPGConfig())
+	defer cleanup()
+	mock.ExpectQuery(`(?s)EXISTS.*"video_chunks".*ORDER BY.*LIMIT`).WithArgs("[1,0,0]", int64(7), int64(8), "embed-model", 3, 1).WillReturnError(errors.New("relation video_chunks does not exist"))
+	hits, err := store.Search(context.Background(), []float32{1, 0, 0}, service.RetrievalRequest{UserID: 7, TaskID: 8, EmbeddingModel: "embed-model", TopK: 1})
+	if err == nil || len(hits) > 0 {
+		t.Fatalf("missing authority exposed orphan vectors: %+v %v", hits, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateEmbeddingRejectsNonFiniteAndWrongDimension(t *testing.T) {
 	if err := validateEmbedding([]float32{1, 2}, 3); err == nil {
 		t.Fatal("expected dimension error")
@@ -225,7 +244,7 @@ func TestPGVectorStoreDeleteTaskChunksScopesByTenantAndModel(t *testing.T) {
 func TestPGVectorStoreListTaskVectorManifestScopesAndOrdersRows(t *testing.T) {
 	store, mock, cleanup := newMockPGStore(t, testPGConfig())
 	defer cleanup()
-	mock.ExpectQuery(`SELECT vector_id, user_id, task_id, chunk_id, chunk_index, content_hash, embedding_model`).
+	mock.ExpectQuery(`(?s)SELECT vector_id, user_id, task_id, chunk_id, chunk_index, content_hash, embedding_model.*EXISTS.*current_chunk.id = projection.chunk_id.*current_chunk.vector_id = projection.vector_id.*current_chunk.user_id = projection.user_id.*current_chunk.task_id = projection.task_id.*current_chunk.embedding_model = projection.embedding_model.*ORDER BY`).
 		WithArgs(int64(7), int64(8), "embed-model").
 		WillReturnRows(sqlmock.NewRows([]string{"vector_id", "user_id", "task_id", "chunk_id", "chunk_index", "content_hash", "embedding_model"}).
 			AddRow("v-1", int64(7), int64(8), int64(9), 0, "hash-1", "embed-model").

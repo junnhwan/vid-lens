@@ -242,6 +242,14 @@ func (p *RetrievalPipeline) Retrieve(ctx context.Context, req RetrievalPipelineR
 		if err := p.hydrateChunkProvenance(req.UserID, taskIDs, req.EmbeddingModel, keywordChunks); err != nil {
 			return RetrievalPipelineResult{}, err
 		}
+		vectorChunks, searchErr = p.filterCurrentSourceProjection(ctx, req.UserID, taskIDs, req.EmbeddingModel, vectorChunks)
+		if searchErr != nil {
+			return RetrievalPipelineResult{}, searchErr
+		}
+		keywordChunks, searchErr = p.filterCurrentSourceProjection(ctx, req.UserID, taskIDs, req.EmbeddingModel, keywordChunks)
+		if searchErr != nil {
+			return RetrievalPipelineResult{}, searchErr
+		}
 		vectorChunks = filterChunksByTimeRanges(vectorChunks, req.TimeRanges)
 		keywordChunks = filterChunksByTimeRanges(keywordChunks, req.TimeRanges)
 		vectorChunks = filterChunksByModalities(vectorChunks, req.Modalities)

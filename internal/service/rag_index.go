@@ -42,15 +42,20 @@ type RAGVector struct {
 }
 
 type RAGVectorStore interface {
+	// UpsertChunks writes only these globally unique projection IDs. It must not
+	// delete other generations in the task/model scope as a side effect.
 	UpsertChunks(ctx context.Context, vectors []RAGVector) error
+	// Full-scope deletion is for explicit task cleanup, never build publication.
 	DeleteTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string) error
 }
 
-// RAGVectorReplacer is an optional stronger write path for stores that can
+// RAGVectorReplacer is a maintenance-only path for stores that can
 // atomically replace one task/model projection inside their own database.
 // The relational chunk source and vector projection still use separate
 // transactions, even when pgvector shares the same PostgreSQL database. This
 // interface only narrows the failure window within the vector projection.
+// Concurrent source builds never call it: late full-scope replacements could
+// erase a newer generation after that generation has already been published.
 type RAGVectorReplacer interface {
 	ReplaceTaskChunks(ctx context.Context, userID, taskID int64, embeddingModel string, vectors []RAGVector) error
 }

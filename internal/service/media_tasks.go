@@ -514,7 +514,7 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 	if task.UserID != userID {
 		return nil, fmt.Errorf("无权访问此任务")
 	}
-	_, transcriptRows, err := taskTranscriptSource(s.repo, task)
+	source, err := taskTextSource(ctx, s.repo, task)
 	if err != nil {
 		return nil, fmt.Errorf("读取转写时间线失败: %w", err)
 	}
@@ -522,7 +522,8 @@ func (s *MediaService) GetVideoTimeline(ctx context.Context, userID, taskID int6
 	if err != nil {
 		return nil, fmt.Errorf("读取视觉时间线失败: %w", err)
 	}
-	timeline := BuildVideoTimeline(taskID, transcriptRows, frames)
+	transcriptRows := source.LegacyChunks
+	timeline := BuildVideoTimelineFromObservations(taskID, source.Observations, frames)
 	timeline.AlignmentAvailable = len(s.tools.TranscriptAlignerCommand) > 0 && len(transcriptRows) > 0
 	for _, row := range transcriptRows {
 		if row.Status != model.TranscriptionChunkStatusCompleted || row.WindowStartMS < 0 || row.WindowEndMS <= row.WindowStartMS {

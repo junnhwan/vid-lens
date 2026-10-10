@@ -31,7 +31,7 @@ func TestPGVectorStoreIntegration(t *testing.T) {
 		Host: envOrDefault("VIDLENS_PGVECTOR_HOST", "127.0.0.1"), Port: port,
 		Username: envOrDefault("VIDLENS_PGVECTOR_USER", "vidlens"), Password: envOrDefault("VIDLENS_PGVECTOR_PASSWORD", "vidlens"),
 		Database: envOrDefault("VIDLENS_PGVECTOR_DATABASE", "vidlens"), SSLMode: envOrDefault("VIDLENS_PGVECTOR_SSLMODE", "disable"),
-		TableName: table, Dim: 3,
+		TableName: table, SourceChunksTableName: table + "_chunks", Dim: 3,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -43,15 +43,24 @@ func TestPGVectorStoreIntegration(t *testing.T) {
 	cleanup := func(s *PGVectorStore) {
 		if s != nil && s.db != nil {
 			_, _ = s.db.ExecContext(context.Background(), fmt.Sprintf(`DROP TABLE IF EXISTS %s`, quotePGVectorIdentifier(table)))
+			_, _ = s.db.ExecContext(context.Background(), fmt.Sprintf(`DROP TABLE IF EXISTS %s`, quotePGVectorIdentifier(cfg.SourceChunksTableName)))
 			_ = s.Close()
 		}
 	}
 	defer func() { cleanup(store) }()
+	if _, err := store.db.ExecContext(ctx, fmt.Sprintf(`CREATE TABLE %s (id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL, task_id BIGINT NOT NULL, vector_id TEXT NOT NULL, embedding_model TEXT NOT NULL)`, quotePGVectorIdentifier(cfg.SourceChunksTableName))); err != nil {
+		t.Fatal(err)
+	}
 
 	vectors := []service.RAGVector{
-		{VectorID: "v-1", UserID: 7, TaskID: 8, ChunkID: 9, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "embed", Content: "first", Vector: []float32{1, 0, 0}},
+		{VectorID: "v-1", UserID: 7, TaskID: 8, ChunkID: 9, ChunkIndex: 0, ContentHash: "h1", EmbeddingModel: "embed", Content: "first", Vector: []float32{0.9, 0.1, 0}},
 		{VectorID: "v-2", UserID: 7, TaskID: 8, ChunkID: 10, ChunkIndex: 1, ContentHash: "h2", EmbeddingModel: "embed", Content: "second", Vector: []float32{0, 1, 0}},
 		{VectorID: "other-user", UserID: 99, TaskID: 8, ChunkID: 11, ChunkIndex: 2, ContentHash: "h3", EmbeddingModel: "embed", Content: "isolated", Vector: []float32{1, 0, 0}},
+	}
+	for _, vector := range vectors {
+		if _, err := store.db.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s (id,user_id,task_id,vector_id,embedding_model) VALUES ($1,$2,$3,$4,$5)`, quotePGVectorIdentifier(cfg.SourceChunksTableName)), vector.ChunkID, vector.UserID, vector.TaskID, vector.VectorID, vector.EmbeddingModel); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := store.UpsertChunks(ctx, vectors); err != nil {
 		t.Fatalf("UpsertChunks() error = %v", err)
@@ -64,6 +73,16 @@ func TestPGVectorStoreIntegration(t *testing.T) {
 	store, err = NewPGVectorStore(ctx, cfg)
 	if err != nil {
 		t.Fatalf("reopen pgvector store: %v", err)
+	}
+	// A stale write arrives after current relational publication. Its higher
+	// similarity must be excluded BEFORE TopK=1, not discarded after retrieval.
+	late := service.RAGVector{VectorID: "late-old-generation", UserID: 7, TaskID: 8, ChunkID: 9001, ChunkIndex: 0, ContentHash: "old", EmbeddingModel: "embed", Content: "stale text", Vector: []float32{1, 0, 0}}
+	if err := store.UpsertChunks(ctx, []service.RAGVector{late}); err != nil {
+		t.Fatal(err)
+	}
+	currentHits, err := store.Search(ctx, []float32{1, 0, 0}, service.RetrievalRequest{UserID: 7, TaskID: 8, EmbeddingModel: "embed", TopK: 1})
+	if err != nil || len(currentHits) != 1 || currentHits[0].EvidenceID != "v-1" {
+		t.Fatalf("late old vector displaced current TopK: %+v %v", currentHits, err)
 	}
 	results, err := store.Search(ctx, []float32{1, 0, 0}, service.RetrievalRequest{UserID: 7, TaskID: 8, EmbeddingModel: "embed", TopK: 5, MinScore: 0.5})
 	if err != nil {
@@ -80,12 +99,20 @@ func TestPGVectorStoreIntegration(t *testing.T) {
 	if err != nil || len(manifest) != 2 || manifest[0].EvidenceID != "v-1" {
 		t.Fatalf("manifest = %+v, err=%v", manifest, err)
 	}
+	physical, err := store.ListAllVectorManifest(ctx)
+	if err != nil || len(physical) != 4 {
+		t.Fatalf("physical manifest must retain isolated late generation: %+v, err=%v", physical, err)
+	}
 	if err := store.DeleteTaskChunks(ctx, 7, 8, "embed"); err != nil {
 		t.Fatalf("DeleteTaskChunks() error = %v", err)
 	}
 	remaining, err := store.Search(ctx, []float32{1, 0, 0}, service.RetrievalRequest{UserID: 7, TaskID: 8, EmbeddingModel: "embed", TopK: 5})
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("Search() after delete = %+v, err=%v", remaining, err)
+	}
+	physical, err = store.ListAllVectorManifest(ctx)
+	if err != nil || len(physical) != 1 || physical[0].EvidenceID != "other-user" {
+		t.Fatalf("task cleanup must delete its orphan generations and preserve other tenant: %+v, err=%v", physical, err)
 	}
 }
 
