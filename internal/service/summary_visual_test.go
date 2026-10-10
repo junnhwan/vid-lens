@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
@@ -27,6 +28,8 @@ type summaryVisualFixture struct {
 	selectedID              string
 	visualError             error
 	planResponses           []string
+	planInput               string
+	transformDocument       func(*summarydoc.Document)
 }
 
 func (v *summaryVisualFixture) Enrich(ctx context.Context, task *model.VideoTask, job *model.TaskJob, snapshot processing.GenerationSnapshot, profile ai.Profile, source *textsource.Snapshot, base *model.AISummary, token string) error {
@@ -43,6 +46,7 @@ func (v *summaryVisualFixture) Chat(ctx context.Context, messages []ai.ChatMessa
 	system := messages[0].Content
 	if strings.Contains(system, "最多三个目标") {
 		v.chatCalls++
+		v.planInput = messages[len(messages)-1].Content
 		if len(v.planResponses) > 0 {
 			raw := v.planResponses[0]
 			v.planResponses = v.planResponses[1:]
@@ -58,7 +62,21 @@ func (v *summaryVisualFixture) Chat(ctx context.Context, messages []ai.ChatMessa
 		}
 		return artifact.JSON(map[string]any{"public_title": "选择参数截图", "presentation_mode": "image_text", "reason": "配置截图解释对应段落", "figures": []map[string]any{{"block_id": "block-cue-a", "observation_id": id, "caption": "画面显示最大连接数配置。", "alt": "连接池参数配置画面", "supports": "说明该章节的参数设置"}}}), nil
 	}
-	return v.f.chat.Chat(ctx, messages)
+	raw, err := v.f.chat.Chat(ctx, messages)
+	if err == nil && v.transformDocument != nil {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+			return "", err
+		}
+		doc, err := summarydoc.Parse(envelope["document"])
+		if err != nil {
+			return "", err
+		}
+		v.transformDocument(&doc)
+		envelope["document"] = json.RawMessage(artifact.JSON(doc))
+		raw = artifact.JSON(envelope)
+	}
+	return raw, err
 }
 func (v *summaryVisualFixture) Inspect(ctx context.Context, req InspectRequest) (Investigation, error) {
 	v.inspectCalls++
@@ -145,6 +163,54 @@ func TestSummaryVisualPublishesInspectedFramesAndRedeliverySpendsNothing(t *test
 	}
 	if v.inspectCalls != 1 || v.chatCalls != 2 || len(f.chat.calls) != 1 {
 		t.Fatal("redelivery repeated completed model/vision calls")
+	}
+}
+
+func TestSummaryVisualDenseReferencesKeepEveryCueWithoutRepeatingBlockText(t *testing.T) {
+	f := newGenerationFixture(t, false)
+	v := enableGenerationVisualFixture(t, f)
+	body := strings.Repeat("配置态支撑运行态的具体说明。", 35)
+	v.transformDocument = func(doc *summarydoc.Document) {
+		doc.Blocks[0].BodyMarkdown = body
+		doc.Blocks[0].SourceRefs = append(doc.Blocks[0].SourceRefs, doc.Blocks[1].SourceRefs...)
+		doc.Blocks = doc.Blocks[:1]
+	}
+	if err := f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken); err != nil {
+		t.Fatal(err)
+	}
+	if v.visualError != nil {
+		t.Fatal(v.visualError)
+	}
+	if strings.Count(v.planInput, trimRunes(body, 500)) != 1 {
+		t.Fatal("visual planning repeated the same block body")
+	}
+	// Decode the exact wire field names rather than the Go names.
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(v.planInput[strings.Index(v.planInput, "{"):]), &wire); err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		BlockID string `json:"block_id"`
+		CueID   string `json:"cue_id"`
+		StartMS int64  `json:"start_ms"`
+		EndMS   int64  `json:"end_ms"`
+	}
+	if err := json.Unmarshal(wire["eligible"], &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(f.source.Cues) {
+		t.Fatal("eligible source cues were omitted")
+	}
+	for _, cue := range f.source.Cues {
+		found := false
+		for _, row := range rows {
+			if row.BlockID == "block-cue-a" && row.CueID == cue.ID && row.StartMS == *cue.StartMS && row.EndMS == *cue.EndMS {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("visual planning lost an exact cue association")
+		}
 	}
 }
 func TestSummaryVisualRejectsForeignObservationAndKeepsTextReady(t *testing.T) {

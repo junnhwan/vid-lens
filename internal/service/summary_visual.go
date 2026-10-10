@@ -208,8 +208,8 @@ func (s *SummaryVisualService) enrich(ctx context.Context, task *model.VideoTask
 	// times are omitted, and the model can choose only these opaque identities.
 	type eligible struct {
 		BlockID string `json:"block_id"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
+		Title   string `json:"title,omitempty"`
+		Body    string `json:"body,omitempty"`
 		CueID   string `json:"cue_id"`
 		StartMS int64  `json:"start_ms"`
 		EndMS   int64  `json:"end_ms"`
@@ -224,8 +224,18 @@ func (s *SummaryVisualService) enrich(ctx context.Context, task *model.VideoTask
 						if allowed[block.ID] == nil {
 							allowed[block.ID] = map[string]textsource.Cue{}
 						}
+						if _, exists := allowed[block.ID][id]; exists {
+							continue
+						}
+						// A dense subtitle track can associate many cues with one
+						// block. Send its text once, keeping every eligible cue/time
+						// association instead of spending input on repeated bodies.
+						title, body := "", ""
+						if len(allowed[block.ID]) == 0 {
+							title, body = block.Title, trimRunes(block.BodyMarkdown, 500)
+						}
 						allowed[block.ID][id] = cue
-						rows = append(rows, eligible{block.ID, block.Title, trimRunes(block.BodyMarkdown, 500), id, *cue.StartMS, *cue.EndMS})
+						rows = append(rows, eligible{block.ID, title, body, id, *cue.StartMS, *cue.EndMS})
 					}
 				}
 			}
