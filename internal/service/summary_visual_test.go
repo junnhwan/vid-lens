@@ -26,6 +26,7 @@ type summaryVisualFixture struct {
 	afterInspect            func()
 	selectedID              string
 	visualError             error
+	planResponses           []string
 }
 
 func (v *summaryVisualFixture) Enrich(ctx context.Context, task *model.VideoTask, job *model.TaskJob, snapshot processing.GenerationSnapshot, profile ai.Profile, source *textsource.Snapshot, base *model.AISummary, token string) error {
@@ -42,6 +43,11 @@ func (v *summaryVisualFixture) Chat(ctx context.Context, messages []ai.ChatMessa
 	system := messages[0].Content
 	if strings.Contains(system, "最多三个目标") {
 		v.chatCalls++
+		if len(v.planResponses) > 0 {
+			raw := v.planResponses[0]
+			v.planResponses = v.planResponses[1:]
+			return raw, nil
+		}
 		return `{"public_title":"定位配置画面","reason":"参数配置需要截图","targets":[{"block_id":"block-cue-a","cue_id":"cue-a","goal":"连接池配置","required_facts":[{"name":"最大连接数"}]}]}`, nil
 	}
 	if strings.Contains(system, "已实际看图") {
