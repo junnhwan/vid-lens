@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,12 @@ func runSummaryGenerationAtomic(t *testing.T, db *gorm.DB) {
 	start, end := int64(0), int64(3000)
 	document := summarydoc.Document{SchemaVersion: summarydoc.SchemaVersion, DocumentID: generation, SourceID: source.ID, SourceDigest: source.SourceDigest, MediaRevision: task.FileMD5, PresentationMode: "text", Title: "配置摘要", Overview: "核对配置条件。", Blocks: []summarydoc.Block{{ID: "configuration", Order: 1, Title: "条件", BodyMarkdown: "检查配置与适用条件。", SourceRefs: []summarydoc.SourceRef{{SourceID: source.ID, CueIDs: []string{"cue-1"}, StartMS: &start, EndMS: &end, TimingMethod: "subtitle_cue"}}}}}
 	req := PublishSummaryDocumentRequest{UserID: task.UserID, TaskID: task.ID, GenerationID: generation, SourceID: source.ID, SourceDigest: source.SourceDigest, LeaseToken: job.ProcessingToken, ExpectedGeneratedHashKind: model.SummaryHashMarkdown, Document: document, ModelName: "fixture"}
+	ungrounded := req
+	ungrounded.Document.Blocks = append([]summarydoc.Block(nil), document.Blocks...)
+	ungrounded.Document.Blocks[0].SourceRefs = nil
+	if _, err = repos.PublishTextSummaryGeneration(ctx, ungrounded); err == nil {
+		t.Fatal("generation publisher accepted body without frozen source references")
+	}
 	tags := PrepareTagIntentRequest{UserID: task.UserID, TaskID: task.ID, SourceDigest: source.SourceDigest, GenerationID: generation, Enabled: true}
 	for index := 0; index < 6; index++ {
 		tags.Candidates = append(tags.Candidates, TagCandidate{Name: "配置", Reason: "来源主题"})
@@ -53,6 +60,10 @@ func runSummaryGenerationAtomic(t *testing.T, db *gorm.DB) {
 	if row, _ := repos.Summary.FindByTaskID(task.ID); row != nil {
 		t.Fatal("canonical summary escaped rollback")
 	}
+	rolledBackTask, _ := repos.Task.FindByID(task.ID)
+	if rolledBackTask.Title != "" || rolledBackTask.TitleOrigin != "" {
+		t.Fatal("generated title escaped summary transaction rollback")
+	}
 	store := NewSummaryGenerationExecutionStore(repos, task.UserID, task.ID, generation)
 	saved, _ := store.GetRun(ctx, task.UserID, generation)
 	if saved.Stage != "text_summary" || saved.EventSeq != 1 {
@@ -62,6 +73,10 @@ func runSummaryGenerationAtomic(t *testing.T, db *gorm.DB) {
 	summary, err := repos.PublishTextSummaryGeneration(ctx, req, tags)
 	if err != nil {
 		t.Fatal(err)
+	}
+	publishedTask, _ := repos.Task.FindByID(task.ID)
+	if publishedTask.Title != document.Title || publishedTask.TitleOrigin != "auto" {
+		t.Fatal("generated title was not published atomically with text")
 	}
 	saved, _ = store.GetRun(ctx, task.UserID, generation)
 	if saved.Status != "running" || saved.Stage != "text_ready" {
@@ -74,6 +89,50 @@ func runSummaryGenerationAtomic(t *testing.T, db *gorm.DB) {
 	saved, _ = store.GetRun(ctx, task.UserID, generation)
 	if saved.EventSeq != high {
 		t.Fatal("publication replay invented lifecycle events")
+	}
+	if db.Dialector.Name() == "postgres" {
+		// Race an explicit user edit against the actual leased publication path,
+		// with a blank title so both CAS outcomes are possible under row locking.
+		if err = db.Model(task).Updates(map[string]any{"title": "", "title_origin": ""}).Error; err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, e := repos.PublishTextSummaryGeneration(ctx, req, tags)
+			results <- e
+		}()
+		go func() { defer wg.Done(); <-start; results <- repos.Task.UpdateTitle(task.ID, "用户标题") }()
+		close(start)
+		wg.Wait()
+		for i := 0; i < 2; i++ {
+			if e := <-results; e != nil {
+				t.Fatal(e)
+			}
+		}
+	} else if err = repos.Task.UpdateTitle(task.ID, "用户标题"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repos.PublishTextSummaryGeneration(ctx, req, tags); err != nil {
+		t.Fatal(err)
+	}
+	userTask, _ := repos.Task.FindByID(task.ID)
+	if userTask.Title != "用户标题" || userTask.TitleOrigin != "user" {
+		t.Fatal("publication replaced an explicit user title")
+	}
+	if err = repos.Task.UpdateTitle(task.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repos.PublishTextSummaryGeneration(ctx, req, tags); err != nil {
+		t.Fatal(err)
+	}
+	userTask, _ = repos.Task.FindByID(task.ID)
+	if userTask.Title != "" || userTask.TitleOrigin != "user" {
+		t.Fatal("publication filled an explicitly cleared user title")
 	}
 	completed, err := repos.CompleteSummaryGeneration(ctx, lease, "skipped", "visual_not_beneficial", &tags, "invalid_tag_candidates")
 	if err != nil {

@@ -117,6 +117,7 @@ func (s *SummaryGenerationService) generateVisualRetry(ctx context.Context, task
 			return err
 		}
 		if visualErr != nil {
+			visualErr = summaryGenerationVisualReferenceFailure(visualErr, source, &frozenBase)
 			state, reason = summaryVisualFailure(visualErr)
 		} else {
 			latest, findErr := s.repos.Summary.FindByTaskID(task.ID)

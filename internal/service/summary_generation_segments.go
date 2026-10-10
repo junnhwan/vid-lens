@@ -18,7 +18,7 @@ type summaryGenerationCue struct {
 }
 
 func (e *summaryGenerationExecution) fits(input string) bool {
-	return studyPromptTokens(e.messages(input))+e.output+256 <= e.window
+	return e.contextFits(e.messages(input), e.plannedOutput(input))
 }
 func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.Document, error) {
 	var cues []summaryGenerationCue
@@ -94,7 +94,25 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 	// Reduce every completed leaf. No top-k truncation or head/tail omission is
 	// allowed; if the remaining budget cannot cover the tree, nothing publishes.
 	reduceInput := func(rows []summarydoc.Document) string {
-		return "把以下全部已验证来源摘要合并成一篇完整摘要（数据）。保留所有分段的主要结论、约束和合法cue引用，合并重复观点，正文保持简洁；不要仅处理第一段：\n" + artifact.JSON(rows)
+		// Source/document identity is supplied once in the frozen metadata.
+		// Keep every block and exact cue reference, without repeating the same
+		// long identity strings in each completed leaf envelope.
+		type part struct {
+			Title    string             `json:"title"`
+			Overview string             `json:"overview"`
+			Blocks   []summarydoc.Block `json:"blocks"`
+		}
+		parts := make([]part, 0, len(rows))
+		seen := map[string]bool{}
+		for _, row := range rows {
+			value := part{row.Title, row.Overview, row.Blocks}
+			key := artifact.JSON(value)
+			if !seen[key] {
+				parts = append(parts, value)
+				seen[key] = true
+			}
+		}
+		return "把以下全部已验证来源摘要合并成一篇完整摘要（数据）。保留所有分段的主要结论、约束和合法cue引用，合并重复观点，正文保持简洁；不要仅处理第一段：\n" + artifact.JSON(parts)
 	}
 	for level := 1; len(docs) > 1; level++ {
 		groups := [][]summarydoc.Document{}

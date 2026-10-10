@@ -261,17 +261,29 @@ func (s *SummaryVisualService) enrich(ctx context.Context, task *model.VideoTask
 			Source string
 			Target summaryVisualTarget
 			Window VisualTimeRange
-		}{source.SourceDigest, target, window}), ToolName: "inspect_summary_frame", CallKind: model.AgentCallKindTool, ReplaySafe: true, RetryReplaySafe: true, VisualCall: true, VisionCall: true, FrameCount: 1, FailureCode: "visual_inspection_failed"}
+		}{source.SourceDigest, target, window}), ToolName: "inspect_summary_frame", CallKind: model.AgentCallKindTool, ReplaySafe: true, RetryReplaySafe: true, VisualCall: true, VisionCall: true, FrameCount: 1, EstimatedPromptTokens: summaryVisionPromptEstimate + studyPromptTokens([]ai.ChatMessage{{Role: "user", Content: buildQueryVisualPrompt(target.Goal, target.RequiredFacts)}}), FailureCode: "visual_inspection_failed"}
 		result, callErr := e.journal.Execute(ctx, spec, func() (AgentJournalResult, error) {
+			run, err := e.journal.GetRun(ctx, task.UserID, job.GenerationID)
+			if err != nil {
+				return AgentJournalResult{}, err
+			}
+			if run == nil {
+				return AgentJournalResult{}, artifact.Err("generation_stale", 409)
+			}
+			cap := min(e.output, run.MaxCompletionTokens-run.CompletionTokensUsed)
+			if cap < 128 {
+				return AgentJournalResult{}, artifact.Err("visual_budget_exhausted", 422)
+			}
+			budgetVision := &summaryGenerationBudgetVision{client: vision, cap: cap}
 			if err := s.repos.WithSummaryGenerationLease(ctx, lease, func(*repository.Repositories) error { return nil }); err != nil {
 				return AgentJournalResult{}, err
 			}
 			if err := e.activity(ctx, id, "activity.started", "running", "查看“"+trimRunes(target.Goal, 25)+"”的画面"); err != nil {
 				return AgentJournalResult{}, err
 			}
-			investigation, err := s.investigator.Inspect(ctx, InspectRequest{UserID: task.UserID, TaskID: task.ID, Goal: target.Goal, RequiredFacts: target.RequiredFacts, SeedWindows: []VisualTimeRange{window}, Budget: VisualBudget{MaxWindows: 1, MaxFrames: 1, MaxVLMCalls: 1, MaxWindowMS: 120000, MaxTotalMS: 120000}, TraceRef: job.GenerationID, SourceID: source.ID, SourceDigest: source.SourceDigest, VisionClient: vision, VisionModel: profile.VisionModel, RequireImageQuality: true})
+			investigation, err := s.investigator.Inspect(ctx, InspectRequest{UserID: task.UserID, TaskID: task.ID, Goal: target.Goal, RequiredFacts: target.RequiredFacts, SeedWindows: []VisualTimeRange{window}, Budget: VisualBudget{MaxWindows: 1, MaxFrames: 1, MaxVLMCalls: 1, MaxWindowMS: 120000, MaxTotalMS: 120000}, TraceRef: job.GenerationID, SourceID: source.ID, SourceDigest: source.SourceDigest, VisionClient: budgetVision, VisionModel: profile.VisionModel, RequireImageQuality: true})
 			if err != nil {
-				return AgentJournalResult{}, err
+				return AgentJournalResult{Usage: budgetVision.measuredUsage(investigation.Budget.VLMCalls)}, err
 			}
 			var safe []summaryVisualCandidate
 			for _, obs := range investigation.Observations {
@@ -279,7 +291,7 @@ func (s *SummaryVisualService) enrich(ctx context.Context, task *model.VideoTask
 					safe = append(safe, summaryVisualCandidate{target.BlockID, target.CueID, obs.ID, obs.StartMS, obs.Observation, obs.StructuredFacts, obs.Gaps, obs.FrameRef})
 				}
 			}
-			return AgentJournalResult{Checkpoint: safe, Usage: VideoAgentLoopPlannerCallUsage{UsageSource: model.AgentCallUsageUnknown}, MetricsJSON: artifact.JSON(map[string]any{"frames": investigation.Budget.FramesCaptured, "reused": investigation.Budget.FramesReused, "vision_calls": investigation.Budget.VLMCalls, "cost_source": "unknown"})}, nil
+			return AgentJournalResult{Checkpoint: safe, Usage: budgetVision.measuredUsage(investigation.Budget.VLMCalls), MetricsJSON: artifact.JSON(map[string]any{"frames": investigation.Budget.FramesCaptured, "reused": investigation.Budget.FramesReused, "vision_calls": investigation.Budget.VLMCalls, "cost_source": "unknown"})}, nil
 		})
 		if callErr != nil {
 			finishCtx, cancel := agentFinalizationContext(ctx)
@@ -429,10 +441,22 @@ func (e *summaryVisualExecution) chatStep(ctx context.Context, id string, sequen
 		if window <= 0 {
 			window = 8192
 		}
-		if studyPromptTokens(messages)+e.output+256 > window {
+		output := min(e.output, window-studyPromptTokens(messages)-256)
+		if output < 128 {
 			return nil, artifact.Err("context_budget_exhausted", 422)
 		}
 		result, err := e.journal.Execute(ctx, AgentJournalStep{UserID: e.task.UserID, RunID: e.lease.GenerationID, StepID: stepID, Sequence: sequence, Kind: "plan", Action: stepID, DigestAction: processing.Recipe, SafeReason: activityTitle, InputSummary: artifact.JSON(map[string]any{"source_digest": e.source.SourceDigest}), ArgumentsDigest: processing.Fingerprint(messages), ToolName: stepID, CallKind: model.AgentCallKindPlannerLLM, InternalCall: true, ReplaySafe: true, RetryReplaySafe: true, LLMCall: true, EstimatedPromptTokens: studyPromptTokens(messages), ContextChars: int64(len(instructions) + len(input)), FailureCode: "visual_planner_failed"}, func() (AgentJournalResult, error) {
+			run, err := e.journal.GetRun(ctx, e.task.UserID, e.lease.GenerationID)
+			if err != nil {
+				return AgentJournalResult{}, err
+			}
+			if run == nil {
+				return AgentJournalResult{}, artifact.Err("generation_stale", 409)
+			}
+			cap := min(output, run.MaxCompletionTokens-run.CompletionTokensUsed)
+			if cap < 128 {
+				return AgentJournalResult{}, artifact.Err("visual_budget_exhausted", 422)
+			}
 			if err := e.service.repos.WithSummaryGenerationLease(ctx, e.lease, func(*repository.Repositories) error { return nil }); err != nil {
 				return AgentJournalResult{}, err
 			}
@@ -440,7 +464,7 @@ func (e *summaryVisualExecution) chatStep(ctx context.Context, id string, sequen
 				return AgentJournalResult{}, err
 			}
 			var usage *ai.ChatUsage
-			callCtx := ai.WithStructuredJSON(ai.WithChatBudget(ctx, e.output, func(u ai.ChatUsage) { usage = &u }))
+			callCtx := ai.WithStructuredJSON(ai.WithChatBudget(ctx, cap, func(u ai.ChatUsage) { usage = &u }))
 			raw, err := collectStudyResponse(callCtx, e.client, messages)
 			measured := estimatedPlannerCallUsage(messages, raw)
 			if usage != nil {

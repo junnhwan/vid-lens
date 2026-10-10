@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 	"vid-lens/internal/artifact"
 	"vid-lens/internal/model"
+	"vid-lens/internal/summarydoc"
 )
 
 // SummaryGenerationExecutionStore keeps the journal's chat API unchanged and
@@ -206,11 +207,21 @@ func (r *Repositories) publishSummaryGeneration(ctx context.Context, req Publish
 	lease := SummaryGenerationLease{req.UserID, req.TaskID, req.GenerationID, req.SourceID, req.SourceDigest, req.LeaseToken}
 	var summary *model.AISummary
 	err := r.WithSummaryGenerationLease(ctx, lease, func(tx *Repositories) error {
+		validation, err := tx.SummaryValidationContext(ctx, req.UserID, req.TaskID, req.SourceID, req.SourceDigest, req.GenerationID)
+		if err != nil {
+			return err
+		}
+		if err = summarydoc.ValidateGeneratedContent(req.Document, validation); err != nil {
+			return artifact.Err("invalid_summary_document", 422)
+		}
 		row, err := tx.PublishSummaryDocument(ctx, req)
 		if err != nil {
 			return err
 		}
 		summary = row
+		if _, err = tx.Task.SetGeneratedTitleIfBlank(req.TaskID, req.Document.Title); err != nil {
+			return err
+		}
 		if len(tagRequests) > 0 && tx.UserTag != nil {
 			tags := tagRequests[0]
 			tags.GeneratedVersion = row.GeneratedVersion
