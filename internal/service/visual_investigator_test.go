@@ -49,7 +49,7 @@ func TestVisualInvestigatorCapturesReplayableEvidenceWithinBudget(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	vision := &investigatorVisionClient{response: `{"facts":["图表显示同比增长 20%"],"gaps":[]}`}
+	vision := &investigatorVisionClient{response: "```json\n" + `{"facts":["图表显示同比增长 20%"],"gaps":["未展示季度明细"]}` + "\n```"}
 	uploadedKeys := make([]string, 0)
 	inv := NewVisualInvestigator(repos, nil, "ffmpeg")
 	inv.SetVideoDownloader(func(_ context.Context, _ string) (string, error) {
@@ -113,6 +113,9 @@ func TestVisualInvestigatorCapturesReplayableEvidenceWithinBudget(t *testing.T) 
 	provenanceFound := false
 	for _, row := range rows {
 		if row.CapturePolicyVersion == queryVisualCapturePolicyVersion && row.PromptVersion == queryVisualPromptVersion && row.RawResponseHash != "" && row.FFmpegArgs != "" {
+			if row.StructuredFacts != `["图表显示同比增长 20%"]` || row.StructuredGaps != `["未展示季度明细"]` || row.Observation != vision.response {
+				t.Fatalf("fenced response lost facts, gaps or raw audit: facts=%s gaps=%s", row.StructuredFacts, row.StructuredGaps)
+			}
 			provenanceFound = true
 			break
 		}

@@ -669,20 +669,6 @@ const QueryVisualPromptTemplate = `你是 VidLens 的查询时视觉取证器。
 请只输出 JSON：{"facts":["可直接从画面观察到的事实"],"gaps":["仍缺少的信息"]}。
 如果文字或细节看不清，请明确写入 gaps；不要输出置信度，不要声称已经看过其他帧。`
 
-func parseQueryVisualResponse(raw string) ([]string, []string) {
-	var parsed struct {
-		Facts []string `json:"facts"`
-		Gaps  []string `json:"gaps"`
-	}
-	if json.Unmarshal([]byte(raw), &parsed) == nil {
-		return compactStrings(parsed.Facts), compactStrings(parsed.Gaps)
-	}
-	if strings.TrimSpace(raw) == "" {
-		return nil, nil
-	}
-	return []string{strings.TrimSpace(raw)}, nil
-}
-
 func bindObservedFacts(required []RequiredFact, observations []VisualObservation) []ClaimEvidenceBinding {
 	bindings := make([]ClaimEvidenceBinding, 0, len(required))
 	for _, requiredFact := range required {
@@ -722,7 +708,7 @@ func visualObservationFromModel(row model.VideoVisualObservation) VisualObservat
 
 func queryVisualCacheKey(userID, taskID int64, videoRevision string, timeMS int64, frameHash string, goal string, facts []RequiredFact, modelName string) string {
 	encoded, _ := json.Marshal(facts)
-	return sha256Text(strings.Join([]string{fmt.Sprint(userID), fmt.Sprint(taskID), videoRevision, fmt.Sprint(timeMS), frameHash, goal, string(encoded), modelName, queryVisualPromptVersion}, "\x00"))
+	return sha256Text(strings.Join([]string{fmt.Sprint(userID), fmt.Sprint(taskID), videoRevision, fmt.Sprint(timeMS), frameHash, goal, string(encoded), modelName, queryVisualPromptVersion, queryVisualResponseParserVersion}, "\x00"))
 }
 
 func sha256Text(value string) string {
