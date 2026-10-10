@@ -45,7 +45,7 @@ func (e *summaryGenerationExecution) document(ctx context.Context) (summarydoc.D
 		}
 		// Leave room for the semantic draft as well as the second response. The
 		// actual review input is checked again before any provider call.
-		return studyPromptTokens(e.messages(summaryGroundingReviewPrefix+input))+e.plannedOutput(input)+min(384, e.plannedOutput(input))+256 <= e.window
+		return studyPromptTokens(e.messages(summaryGroundingReviewPrefix+input))+2*e.plannedOutput(input)+64+256 <= e.window
 	}
 	cueInput := func(rows []summaryGenerationCue) string {
 		return summaryGenerationSemanticCueInput(rows)

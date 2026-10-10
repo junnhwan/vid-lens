@@ -384,6 +384,11 @@ func (e *summaryGenerationExecution) call(ctx context.Context, stepID, title, in
 		if err = json.Unmarshal(result.Checkpoint, &checkpoint); err != nil {
 			return checkpoint, artifact.Err("invalid_generation_checkpoint", 409)
 		}
+		if checkpoint.Document != nil && !checkpoint.Invalid {
+			if scope := summaryGenerationInputScope(*checkpoint.Document, input); scope.Invalid {
+				checkpoint = scope
+			}
+		}
 		// Replays already have their actual lifecycle events; do not invent a new attempt.
 		if !result.Replayed {
 			data := map[string]any{"activity_id": id, "attempt": result.Step.Attempt, "kind": "plan", "state": "done", "title": firstNonEmpty(checkpoint.PublicTitle, title), "detail": checkpoint.PublicSummary}
