@@ -189,13 +189,13 @@ func TestSummaryGenerationMinimalWireActualBudgetOverrunNeverPublishes(t *testin
 
 func TestSummaryGenerationMinimalWireProviderInputAndDurablePublication(t *testing.T) {
 	f, _, envelope := minimalWireFixture(t)
-	client, requests, calls := summaryBudgetProvider(t, summaryBudgetResponse{content: artifact.JSON(envelope), usage: &ai.ChatUsage{PromptTokens: 8000, CompletionTokens: 2000}})
+	client, requests, calls := summaryBudgetProvider(t, summaryBudgetResponse{content: artifact.JSON(envelope), usage: &ai.ChatUsage{PromptTokens: 8000, CompletionTokens: 2000}}, summaryBudgetResponse{content: artifact.JSON(envelope), usage: &ai.ChatUsage{PromptTokens: 8000, CompletionTokens: 2000}})
 	f.svc = NewSummaryGenerationService(f.repos, f.profiles, summaryQualityFactory{chat: nonStreamingGenerationClient{client}})
 	if err := f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
-		t.Fatal("full 328 cue track introduced unnecessary model calls")
+	if calls.Load() != 2 {
+		t.Fatal("full 328 cue track did not run exactly composition plus independent review")
 	}
 	request := <-requests
 	var messages []ai.ChatMessage
@@ -231,7 +231,7 @@ func TestSummaryGenerationMinimalWireProviderInputAndDurablePublication(t *testi
 	}
 	store := repository.NewSummaryGenerationExecutionStore(f.repos, f.task.UserID, f.task.ID, f.job.GenerationID)
 	run, _ := store.GetRun(context.Background(), f.task.UserID, f.job.GenerationID)
-	if run.PromptTokensUsed != 8000 || run.CompletionTokensUsed != 2000 || run.MaxPromptTokens != 24000 || run.MaxCompletionTokens != 8192 {
+	if run.PromptTokensUsed != 16000 || run.CompletionTokensUsed != 4000 || run.MaxPromptTokens != 24000 || run.MaxCompletionTokens != 8192 {
 		t.Fatal("actual usage or frozen cap changed")
 	}
 }

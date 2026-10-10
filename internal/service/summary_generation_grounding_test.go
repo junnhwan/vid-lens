@@ -147,7 +147,10 @@ func TestSummaryGenerationTimedWindowsGetsBoundedJSONOutputHeadroom(t *testing.T
 		t.Fatal(err)
 	}
 	f.chat.calls = nil
-	client, requests, calls := summaryBudgetProvider(t, summaryBudgetResponse{content: raw, usage: &ai.ChatUsage{PromptTokens: 4807, CompletionTokens: 3000}})
+	client, requests, calls := summaryBudgetProvider(t,
+		summaryBudgetResponse{content: raw, usage: &ai.ChatUsage{PromptTokens: 4807, CompletionTokens: 3000}},
+		summaryBudgetResponse{content: raw, usage: &ai.ChatUsage{PromptTokens: 4807, CompletionTokens: 3000}},
+	)
 	f.svc = NewSummaryGenerationService(f.repos, f.profiles, summaryQualityFactory{chat: nonStreamingGenerationClient{client}})
 	if err = f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken); err != nil {
 		t.Fatal(err)
@@ -160,12 +163,12 @@ func TestSummaryGenerationTimedWindowsGetsBoundedJSONOutputHeadroom(t *testing.T
 	}
 	var messages []ai.ChatMessage
 	_ = json.Unmarshal(request["messages"], &messages)
-	if cap+studyPromptTokens(messages)+256 > int64(f.profiles.profile.LLMContextTokens) || calls.Load() != 1 {
+	if cap+studyPromptTokens(messages)+256 > int64(f.profiles.profile.LLMContextTokens) || calls.Load() != 2 {
 		t.Fatal("output cap violated context or unbounded repair")
 	}
 	store := repository.NewSummaryGenerationExecutionStore(f.repos, f.task.UserID, f.task.ID, f.job.GenerationID)
 	saved, _ := store.GetRun(context.Background(), f.task.UserID, f.job.GenerationID)
-	if saved.CompletionTokensUsed != 3000 || saved.MaxCompletionTokens != 24576 {
+	if saved.CompletionTokensUsed != 6000 || saved.MaxCompletionTokens != 24576 {
 		t.Fatal("actual usage or frozen total changed")
 	}
 	row, _ := f.repos.Summary.FindByTaskID(f.task.ID)
@@ -297,16 +300,31 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 					first.usage.CompletionTokens = 5173
 					responses[0].usage.CompletionTokens = 2000
 				}
+				if mode == "repair" || mode == "truncated" {
+					responses[0].usage.CompletionTokens = 1000
+				}
 				responses = append([]summaryBudgetResponse{first}, responses...)
+			}
+			if mode != "exhausted" && mode != "text_first" {
+				responses = append(responses, summaryBudgetResponse{content: raw, usage: &ai.ChatUsage{PromptTokens: 3000, CompletionTokens: 1000}})
 			}
 			client, requests, calls := summaryBudgetProvider(t, responses...)
 			probe := &remainingVisualBudgetProbe{f: f, textFirst: mode == "text_first"}
 			f.svc = NewSummaryGenerationService(f.repos, f.profiles, summaryQualityFactory{chat: nonStreamingGenerationClient{client}}).WithVisualEnricher(probe)
 			err := f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken)
-			if mode == "exhausted" {
+			if mode == "exhausted" || mode == "text_first" {
 				var domain *artifact.Error
-				if !errors.As(err, &domain) || domain.Code != "budget_exhausted" || calls.Load() != 1 || probe.called {
+				wantCalls := int32(1)
+				if mode == "text_first" {
+					wantCalls = 2
+				}
+				if !errors.As(err, &domain) || domain.Code != "budget_exhausted" || calls.Load() != wantCalls || probe.called {
 					t.Fatalf("repair consumed the reserve or called again: %v, %d", err, calls.Load())
+				}
+				row, _ := f.repos.Summary.FindByTaskID(f.task.ID)
+				task, _ := f.repos.Task.FindByID(f.task.ID)
+				if row != nil || task.Title != "" {
+					t.Fatal("budget could not review but draft or title was published")
 				}
 				return
 			}
@@ -316,9 +334,9 @@ func TestSummaryGeneration328SubtitleCuesFitsFrozenBudgetAndPreservesVisualReser
 			if probe.failure != nil {
 				t.Fatal(probe.failure)
 			}
-			wantCalls := int32(1)
+			wantCalls := int32(2)
 			if mode != "normal" {
-				wantCalls = 2
+				wantCalls = 3
 			}
 			if calls.Load() != wantCalls || !probe.called {
 				t.Fatalf("unneeded segmentation or visual omitted: %d", calls.Load())

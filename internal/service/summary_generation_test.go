@@ -57,7 +57,7 @@ func (c *generationFixtureChat) Chat(ctx context.Context, messages []ai.ChatMess
 		c.invalid--
 		return `{"document":{"content":"Markdown is not the canonical document"}}`, nil
 	}
-	if rows, ok := decodeSummaryGenerationCues(input); ok {
+	if rows, ok := decodeSummaryGenerationCues(input); ok && !strings.Contains(input, summaryGroundingReviewPrefix) {
 		c.covered = append(c.covered, rows...)
 	}
 	doc := summarydoc.Document{SchemaVersion: summarydoc.SchemaVersion, DocumentID: c.generation, SourceID: c.source.ID, SourceDigest: c.source.SourceDigest, MediaRevision: c.source.Identity.MediaFingerprint, PresentationMode: "text", Title: "来源摘要", Overview: "概括配置方法与限制。"}
@@ -217,6 +217,9 @@ func TestSummaryGenerationLongCoverageAndRecoverableCheckpoints(t *testing.T) {
 		t.Fatal("partial leaf published as complete")
 	}
 	if err := f.svc.Generate(context.Background(), f.task, f.job, f.job.ProcessingToken); err != nil {
+		if records, readErr := f.repos.AgentExecution.GetExecution(context.Background(), f.task.UserID, f.job.GenerationID); readErr == nil {
+			t.Logf("calls=%d steps=%d tokens=%d/%d output=%d/%d llm=%d/%d stop=%s", len(f.chat.calls), len(records.Steps), records.Run.PromptTokensUsed, records.Run.MaxPromptTokens, records.Run.CompletionTokensUsed, records.Run.MaxCompletionTokens, records.Run.LLMCallsUsed, records.Run.MaxLLMCalls, records.Run.StopReason)
+		}
 		t.Fatal(err)
 	}
 	var covered strings.Builder
