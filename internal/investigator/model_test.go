@@ -1,7 +1,9 @@
 package investigator
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -57,5 +59,81 @@ func TestMindMapRejectsDisconnectedCycles(t *testing.T) {
 	m := &domain.MindMap{RootID: "root", Nodes: []domain.MapNode{{ID: "root", Label: "article"}, {ID: "a", ParentID: &parent, Label: "a"}, {ID: "b", ParentID: &other, Label: "b"}}}
 	if e := validateMap(m, map[string]bool{}); e == nil {
 		t.Fatal("disconnected cycle accepted")
+	}
+}
+
+func TestCandidateRepairReportsIndependentBlockProblemsTogether(t *testing.T) {
+	s := &session{}
+	err := s.validateBlocks(context.Background(), []domain.Block{
+		{ID: "dialogue-quote", Type: "quote", Origin: "video", Content: []domain.Inline{{Type: "text", Text: "a quote"}}},
+		{ID: "credits-quote", Type: "quote", Origin: "video", Content: []domain.Inline{{Type: "text", Text: "another quote"}}},
+		{ID: "unsafe-link", Type: "paragraph", Origin: "background_explanation", Content: []domain.Inline{{Type: "link", URL: "javascript:alert(1)", Text: "link"}}},
+	}, map[string]domain.Citation{}, true)
+	if err == nil {
+		t.Fatal("invalid candidate accepted")
+	}
+	for _, id := range []string{"dialogue-quote", "credits-quote", "unsafe-link"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Fatalf("single repair cannot fix all problems; missing %s in %v", id, err)
+		}
+	}
+}
+
+func TestMalformedCandidateUsesCandidateRepairInsteadOfInternalFailure(t *testing.T) {
+	s := &session{}
+	if _, err := s.makeTools(); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{`{"title":"candidate","citations":{"c":{}}`, `{"title":"candidate","citations":{"limitations":[]}}`} {
+		_, err := s.tools["submit_article"].InvokableRun(context.Background(), &schema.ToolArgument{Text: raw})
+		var candidate *candidateError
+		if !errors.As(err, &candidate) {
+			t.Fatalf("malformed candidate bypassed bounded repair: %v", err)
+		}
+	}
+}
+
+func TestObservationTypoReportsCurrentInspectionIDsWithoutAcceptingIt(t *testing.T) {
+	actual := "59686da4632c84510717dab33fc394f8"
+	typo := "59686da4632c84510717dab3fc394f8"
+	s := &session{cp: checkpoint{Inspections: map[string][]string{"overview": {actual}}}}
+	if _, err := s.makeTools(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.tools["record_observation"].InvokableRun(context.Background(), &schema.ToolArgument{Text: string(domain.JSON(observation{InspectionID: "overview", FrameIDs: []string{typo}, VisibleFacts: []string{"test"}, Status: "supported"}))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(domain.JSON(result))
+	if !strings.Contains(wire, actual) || !strings.Contains(wire, typo) || strings.Contains(wire, `"saved":true`) {
+		t.Fatalf("unactionable or unsafe ID correction: %s", wire)
+	}
+}
+
+func TestInvalidEvidenceToolArgumentsReturnCorrectableFeedback(t *testing.T) {
+	s := &session{}
+	if _, err := s.makeTools(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.tools["record_observation"].InvokableRun(context.Background(), &schema.ToolArgument{Text: `{"inspection_id":"question-context","unresolved":"a string instead of an array","status":"completed"}`})
+	if err != nil {
+		t.Fatalf("provider argument mistake became an internal failure: %v", err)
+	}
+	wire := string(domain.JSON(result))
+	if !strings.Contains(wire, "correct_arguments_and_try_again") || !strings.Contains(wire, "unresolved") {
+		t.Fatalf("missing field-level correction: %s", wire)
+	}
+}
+
+func TestParaphrasedCitationGetsExplicitNullQuoteCorrection(t *testing.T) {
+	s := &session{snapshot: domain.Snapshot{ID: "snapshot", DurationMS: 1000}, transcript: []domain.Segment{{ID: "segment", Ordinal: 0, StartMS: 0, EndMS: 1000, Text: "It handles difficult decisions for me.", Origin: "asr"}}}
+	c := domain.Citation{ID: "source", Kind: "video_text", Label: "原文", SnapshotID: "snapshot", Range: &domain.Range{StartMS: 0, EndMS: 1000}, SegmentIDs: []string{"segment"}, TextOrigin: "asr", Quote: domain.Ptr("It helps me make choices.")}
+	err := s.validateCitation(context.Background(), c, true)
+	if err == nil || !strings.Contains(err.Error(), "quote=null") {
+		t.Fatalf("paraphrase needs actionable exact-quote correction: %v", err)
+	}
+	c.Quote = nil
+	if err = s.validateCitation(context.Background(), c, true); err != nil {
+		t.Fatalf("source-backed paraphrase with no verbatim quote rejected: %v", err)
 	}
 }

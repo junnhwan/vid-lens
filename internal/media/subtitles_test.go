@@ -44,6 +44,11 @@ func TestSubtitleChoicePrefersManualThenAuto(t *testing.T) {
 	if lang != "zh" || !auto {
 		t.Fatalf("%s %v", lang, auto)
 	}
+	m.Subtitles = map[string][]subformat{"ja": {{Ext: "vtt"}}}
+	lang, auto = chooseSubtitle(m)
+	if lang != "ja" || auto {
+		t.Fatalf("usable platform subtitles unnecessarily sent to ASR: %s %v", lang, auto)
+	}
 }
 func TestASRStreamingMultipartHasKnownLength(t *testing.T) {
 	audio := bytes.Repeat([]byte{1, 2, 3}, 10000)

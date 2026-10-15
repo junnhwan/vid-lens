@@ -20,11 +20,20 @@ func invalid(msg string) error {
 	return domain.Err(422, "EVIDENCE_INSUFFICIENT", "结果校验未通过："+msg)
 }
 func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
-	if strings.TrimSpace(a.Title) == "" || len(a.Sections) == 0 || len(a.Sections) > 40 {
-		return invalid("缺少文章标题或章节")
+	if len(a.Sections) > 40 {
+		return invalid("章节数量超限")
 	}
-	if len(s.unobserved(ctx)) > 0 {
-		return invalid("还有图片观察未记录")
+	var problems []error
+	add := func(err error) {
+		if err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if strings.TrimSpace(a.Title) == "" || len(a.Sections) == 0 {
+		add(invalid("缺少文章标题或章节"))
+	}
+	if ids := s.unobserved(ctx); len(ids) > 0 {
+		add(invalid("还有图片观察未记录：" + strings.Join(ids, ",")))
 	}
 	obs, e := s.observations(ctx)
 	if e != nil {
@@ -40,15 +49,21 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	}
 	for _, id := range s.cp.OverviewIDs {
 		if !observed[id] {
-			return invalid("全片概览尚有未记录的画面")
+			add(invalid("全片概览尚有未记录的画面：" + id))
 		}
 	}
-	for _, o := range latest {
+	questionIDs := make([]string, 0, len(latest))
+	for id := range latest {
+		questionIDs = append(questionIDs, id)
+	}
+	slices.Sort(questionIDs)
+	for _, id := range questionIDs {
+		o := latest[id]
 		if o.Critical && o.Status != "supported" {
-			return invalid("关键取证问题尚未解决")
+			add(invalid("关键取证问题尚未解决：" + id))
 		}
 		if (o.Status == "unresolved" || len(o.Unresolved) > 0 || len(o.Conflicts) > 0) && len(a.Limitations) == 0 {
-			return invalid("未确认问题或冲突必须进入结果限制说明")
+			add(invalid("未确认问题或冲突必须进入结果限制说明：" + id))
 		}
 	}
 	questions, e := s.engine.Store.Questions(ctx, s.claim.Run.ID)
@@ -57,30 +72,29 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	}
 	for _, raw := range questions {
 		var q struct {
+			ID       string
 			Critical bool
 			Status   string
 		}
 		if json.Unmarshal(raw, &q) != nil {
-			return invalid("问题状态无效")
+			add(invalid("问题状态无效"))
+			continue
 		}
 		if q.Critical && q.Status != "supported" {
-			return invalid("关键取证问题尚未得到支持")
+			add(invalid("关键取证问题尚未得到支持：" + q.ID))
 		}
 	}
 	sectionIDs := map[string]bool{}
 	blocks := []domain.Block{}
 	for _, sec := range a.Sections {
 		if sec.ID == "" || sectionIDs[sec.ID] || sec.Title == "" || len(sec.Blocks) == 0 {
-			return invalid("章节结构无效")
+			add(invalid("章节结构无效：" + sec.ID))
 		}
 		sectionIDs[sec.ID] = true
 		blocks = append(blocks, sec.Blocks...)
 	}
-	if e = s.validateBlocks(ctx, blocks, a.Citations, true); e != nil {
-		return e
-	}
-	figures := 0
-	prose := 0
+	add(s.validateBlocks(ctx, blocks, a.Citations, true))
+	figures, prose := 0, 0
 	for _, b := range blocks {
 		if b.Type == "figure" {
 			figures++
@@ -90,11 +104,9 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 		}
 	}
 	if figures == 0 || prose < 40 {
-		return invalid("缺少可阅读正文或真实配图")
+		add(invalid("缺少可阅读正文或真实配图"))
 	}
-	if e = validateLimitations(a.Limitations, sectionIDs, a.Citations); e != nil {
-		return e
-	}
+	add(validateLimitations(a.Limitations, sectionIDs, a.Citations))
 	prov := a.Source.TextProvenance
 	if prov == nil || prov.Coverage != "complete" {
 		has := false
@@ -102,15 +114,13 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 			has = has || l.Code == "partial_text"
 		}
 		if !has {
-			return invalid("不完整的文字来源必须声明 partial_text")
+			add(invalid("不完整的文字来源必须声明 partial_text"))
 		}
 	}
 	if a.MindMap != nil {
-		if e = validateMap(a.MindMap, sectionIDs); e != nil {
-			return e
-		}
+		add(validateMap(a.MindMap, sectionIDs))
 	}
-	return nil
+	return errors.Join(problems...)
 }
 func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
 	if a.Kind != "grounded" && a.Kind != "insufficient_evidence" && a.Kind != "out_of_scope" {
@@ -160,195 +170,214 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 	if len(blocks) > 400 {
 		return invalid("正文块数量超限")
 	}
+	var problems []error
 	seen := map[string]bool{}
 	for _, b := range blocks {
 		if b.ID == "" || seen[b.ID] {
-			return invalid("正文块 ID 重复或为空")
+			problems = append(problems, invalid("正文块 ID 重复或为空"))
 		}
 		seen[b.ID] = true
-		if b.Origin != "video" && b.Origin != "background_explanation" {
-			return invalid("正文来源标识无效")
-		}
-		ids := append([]string{}, b.CitationIDs...)
-		checkInline := func(content []domain.Inline) error {
-			if len(content) == 0 {
-				return invalid("空行内内容")
-			}
-			for _, x := range content {
-				switch x.Type {
-				case "text":
-					for _, m := range x.Marks {
-						if m != "bold" && m != "emphasis" && m != "code" {
-							return invalid("文本样式无效")
-						}
-					}
-				case "citation":
-					ids = append(ids, x.CitationID)
-				case "link":
-					u, e := url.Parse(x.URL)
-					if e != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" || u.User != nil {
-						return invalid("外部链接无效")
-					}
-				default:
-					return invalid("行内内容类型无效")
-				}
-			}
-			return nil
-		}
-		switch b.Type {
-		case "paragraph", "quote":
-			if e := checkInline(b.Content); e != nil {
-				return e
-			}
-			if b.Type == "quote" && b.Origin == "video" && len(ids) == 0 {
-				return invalid("视频引述缺少来源")
-			}
-		case "list":
-			if b.Ordered == nil || len(b.Items) == 0 {
-				return invalid("列表结构无效")
-			}
-			itemIDs := map[string]bool{}
-			for _, x := range b.Items {
-				if x.ID == "" || itemIDs[x.ID] {
-					return invalid("列表项身份无效")
-				}
-				itemIDs[x.ID] = true
-				if e := checkInline(x.Content); e != nil {
-					return e
-				}
-			}
-		case "code":
-			if b.Text == "" {
-				return invalid("空代码块")
-			}
-		case "table":
-			if len(b.Columns) == 0 || len(b.Rows) == 0 {
-				return invalid("空表格")
-			}
-			for _, r := range b.Rows {
-				if len(r.Cells) != len(b.Columns) {
-					return invalid("表格列数不一致")
-				}
-				ids = append(ids, r.CitationIDs...)
-			}
-		case "figure":
-			if b.Origin != "video" || b.Caption == "" || b.Layout != "single" && b.Layout != "sequence" || b.Layout == "single" && len(b.FrameIDs) != 1 || b.Layout == "sequence" && len(b.FrameIDs) < 2 {
-				return invalid("配图结构无效")
-			}
-			framesSeen := map[string]bool{}
-			last := int64(-1)
-			for _, id := range b.FrameIDs {
-				if framesSeen[id] {
-					return invalid("配图重复")
-				}
-				framesSeen[id] = true
-				a, e := s.engine.Store.InternalFrame(ctx, s.claim, id)
-				if e != nil || a.TimeMS == nil || a.State != "ready" {
-					return invalid("配图不是可访问的实际帧")
-				}
-				if *a.TimeMS < last {
-					return invalid("连续帧顺序错误")
-				}
-				last = *a.TimeMS
-				_, _, e = s.engine.Media.ReadImage(ctx, s.claim, id)
-				if e != nil {
-					return invalid("配图文件不可用")
-				}
-			}
-		default:
-			return invalid("正文块类型无效")
-		}
-		for _, id := range ids {
-			if _, ok := citations[id]; !ok {
-				return invalid("引用不存在：" + id)
-			}
+		if err := s.validateBlock(ctx, b, citations); err != nil {
+			problems = append(problems, fmt.Errorf("block %s: %w", b.ID, err))
 		}
 	}
-	for id, c := range citations {
+	keys := make([]string, 0, len(citations))
+	for id := range citations {
+		keys = append(keys, id)
+	}
+	slices.Sort(keys)
+	for _, id := range keys {
+		c := citations[id]
 		if id != c.ID || id == "" || c.Label == "" {
-			return invalid("引用身份无效")
+			problems = append(problems, invalid("引用身份无效："+id))
 		}
-		switch c.Kind {
-		case "video_text":
-			if c.SnapshotID != s.snapshot.ID || c.Range == nil || len(c.SegmentIDs) == 0 || c.Range.StartMS < 0 || c.Range.StartMS >= c.Range.EndMS || c.Range.EndMS > s.snapshot.DurationMS {
-				return invalid("字幕引用范围无效")
-			}
-			selected := []domain.Segment{}
-			for _, id := range c.SegmentIDs {
-				found := false
-				for _, t := range s.transcript {
-					if t.ID == id {
-						selected = append(selected, t)
-						found = true
-						break
+		if err := s.validateCitation(ctx, c, article); err != nil {
+			problems = append(problems, fmt.Errorf("citation %s: %w", id, err))
+		}
+	}
+	return errors.Join(problems...)
+}
+func (s *session) validateBlock(ctx context.Context, b domain.Block, citations map[string]domain.Citation) error {
+	if b.Origin != "video" && b.Origin != "background_explanation" {
+		return invalid("正文来源标识无效")
+	}
+	ids := append([]string{}, b.CitationIDs...)
+	checkInline := func(content []domain.Inline) error {
+		if len(content) == 0 {
+			return invalid("空行内内容")
+		}
+		for _, x := range content {
+			switch x.Type {
+			case "text":
+				for _, m := range x.Marks {
+					if m != "bold" && m != "emphasis" && m != "code" {
+						return invalid("文本样式无效")
 					}
 				}
-				if !found {
-					return invalid("字幕片段不存在")
+			case "citation":
+				ids = append(ids, x.CitationID)
+			case "link":
+				u, e := url.Parse(x.URL)
+				if e != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" || u.User != nil {
+					return invalid("外部链接无效")
+				}
+			default:
+				return invalid("行内内容类型无效")
+			}
+		}
+		return nil
+	}
+	switch b.Type {
+	case "paragraph", "quote":
+		if e := checkInline(b.Content); e != nil {
+			return e
+		}
+		if b.Type == "quote" && b.Origin == "video" && len(ids) == 0 {
+			return invalid("视频引述缺少来源")
+		}
+	case "list":
+		if b.Ordered == nil || len(b.Items) == 0 {
+			return invalid("列表结构无效")
+		}
+		itemIDs := map[string]bool{}
+		for _, x := range b.Items {
+			if x.ID == "" || itemIDs[x.ID] {
+				return invalid("列表项身份无效")
+			}
+			itemIDs[x.ID] = true
+			if e := checkInline(x.Content); e != nil {
+				return e
+			}
+		}
+	case "code":
+		if b.Text == "" {
+			return invalid("空代码块")
+		}
+	case "table":
+		if len(b.Columns) == 0 || len(b.Rows) == 0 {
+			return invalid("空表格")
+		}
+		for _, r := range b.Rows {
+			if len(r.Cells) != len(b.Columns) {
+				return invalid("表格列数不一致")
+			}
+			ids = append(ids, r.CitationIDs...)
+		}
+	case "figure":
+		if b.Origin != "video" || b.Caption == "" || b.Layout != "single" && b.Layout != "sequence" || b.Layout == "single" && len(b.FrameIDs) != 1 || b.Layout == "sequence" && len(b.FrameIDs) < 2 {
+			return invalid("配图结构无效")
+		}
+		framesSeen := map[string]bool{}
+		last := int64(-1)
+		for _, id := range b.FrameIDs {
+			if framesSeen[id] {
+				return invalid("配图重复")
+			}
+			framesSeen[id] = true
+			a, e := s.engine.Store.InternalFrame(ctx, s.claim, id)
+			if e != nil || a.TimeMS == nil || a.State != "ready" {
+				return invalid("配图不是可访问的实际帧")
+			}
+			if *a.TimeMS < last {
+				return invalid("连续帧顺序错误")
+			}
+			last = *a.TimeMS
+			_, _, e = s.engine.Media.ReadImage(ctx, s.claim, id)
+			if e != nil {
+				return invalid("配图文件不可用")
+			}
+		}
+	default:
+		return invalid("正文块类型无效")
+	}
+	for _, id := range ids {
+		if _, ok := citations[id]; !ok {
+			return invalid("引用不存在：" + id)
+		}
+	}
+	return nil
+}
+func (s *session) validateCitation(ctx context.Context, c domain.Citation, article bool) error {
+	switch c.Kind {
+	case "video_text":
+		if c.SnapshotID != s.snapshot.ID || c.Range == nil || len(c.SegmentIDs) == 0 || c.Range.StartMS < 0 || c.Range.StartMS >= c.Range.EndMS || c.Range.EndMS > s.snapshot.DurationMS {
+			return invalid("字幕引用范围无效")
+		}
+		selected := []domain.Segment{}
+		for _, id := range c.SegmentIDs {
+			found := false
+			for _, t := range s.transcript {
+				if t.ID == id {
+					selected = append(selected, t)
+					found = true
+					break
 				}
 			}
-			for i := 1; i < len(selected); i++ {
-				if selected[i].Ordinal != selected[i-1].Ordinal+1 {
-					return invalid("字幕片段不连续")
-				}
+			if !found {
+				return invalid("字幕片段不存在")
 			}
-			if c.Range.StartMS < selected[0].StartMS || c.Range.EndMS > selected[len(selected)-1].EndMS {
-				return invalid("引用超出字幕实际窗口")
+		}
+		for i := 1; i < len(selected); i++ {
+			if selected[i].Ordinal != selected[i-1].Ordinal+1 {
+				return invalid("字幕片段不连续")
 			}
-			origin := selected[0].Origin
+		}
+		if c.Range.StartMS < selected[0].StartMS || c.Range.EndMS > selected[len(selected)-1].EndMS {
+			return invalid("引用超出字幕实际窗口")
+		}
+		origin := selected[0].Origin
+		for _, t := range selected {
+			if t.Origin != origin {
+				origin = "mixed"
+			}
+		}
+		if c.TextOrigin != origin {
+			return invalid("字幕来源标签不匹配")
+		}
+		if c.Quote != nil {
+			parts := []string{}
 			for _, t := range selected {
-				if t.Origin != origin {
-					origin = "mixed"
-				}
+				parts = append(parts, t.Text)
 			}
-			if c.TextOrigin != origin {
-				return invalid("字幕来源标签不匹配")
+			if !strings.Contains(domain.NormalizeQuote(strings.Join(parts, "\n")), domain.NormalizeQuote(*c.Quote)) {
+				return invalid("引用原文不匹配；quote 只允许逐字连续原文，概括或意译应设 quote=null，保留 segment_ids、range 和正文的来源引用。不得用省略号拼接原文。")
 			}
-			if c.Quote != nil {
-				parts := []string{}
-				for _, t := range selected {
-					parts = append(parts, t.Text)
-				}
-				if !strings.Contains(domain.NormalizeQuote(strings.Join(parts, "\n")), domain.NormalizeQuote(*c.Quote)) {
-					return invalid("引用原文不匹配")
-				}
-			}
-		case "video_frame":
-			a, e := s.engine.Store.InternalFrame(ctx, s.claim, c.FrameID)
-			if e != nil || a.TimeMS == nil || c.TimeMS == nil || c.SnapshotID != s.snapshot.ID || *a.TimeMS != *c.TimeMS {
-				return invalid("画面来源或真实时间不匹配")
-			}
-			if article {
-				obs, e := s.observations(ctx)
-				if e != nil {
-					return e
-				}
-				seen := false
-				for _, o := range obs {
-					seen = seen || slices.Contains(o.FrameIDs, c.FrameID)
-				}
-				if !seen {
-					return invalid("配图没有已保存观察")
-				}
-			}
-		case "article_passage":
-			if article || s.article == nil || c.ArticleID != s.article.ID || c.Quote == nil {
-				return invalid("文章引用无效")
-			}
-			valid := false
-			for _, sec := range s.article.Sections {
-				for _, b := range sec.Blocks {
-					if sec.ID == c.SectionID && b.ID == c.BlockID && strings.Contains(domain.NormalizeQuote(domain.BlockText(b)), domain.NormalizeQuote(*c.Quote)) {
-						valid = true
-					}
-				}
-			}
-			if !valid {
-				return invalid("文章选段不匹配")
-			}
-		default:
-			return invalid("引用类型无效")
 		}
+	case "video_frame":
+		a, e := s.engine.Store.InternalFrame(ctx, s.claim, c.FrameID)
+		if e != nil || a.TimeMS == nil || c.TimeMS == nil || c.SnapshotID != s.snapshot.ID || *a.TimeMS != *c.TimeMS {
+			return invalid("画面来源或真实时间不匹配")
+		}
+		if article {
+			obs, e := s.observations(ctx)
+			if e != nil {
+				return e
+			}
+			seen := false
+			for _, o := range obs {
+				seen = seen || slices.Contains(o.FrameIDs, c.FrameID)
+			}
+			if !seen {
+				return invalid("配图没有已保存观察")
+			}
+		}
+	case "article_passage":
+		if article || s.article == nil || c.ArticleID != s.article.ID || c.Quote == nil {
+			return invalid("文章引用无效")
+		}
+		valid := false
+		for _, sec := range s.article.Sections {
+			for _, b := range sec.Blocks {
+				if sec.ID == c.SectionID && b.ID == c.BlockID && strings.Contains(domain.NormalizeQuote(domain.BlockText(b)), domain.NormalizeQuote(*c.Quote)) {
+					valid = true
+				}
+			}
+		}
+		if !valid {
+			return invalid("文章选段不匹配")
+		}
+	default:
+		return invalid("引用类型无效")
 	}
 	return nil
 }
@@ -416,7 +445,7 @@ func validateMap(m *domain.MindMap, sections map[string]bool) error {
 }
 func (s *session) repair(ctx context.Context, cause error) error {
 	if s.cp.Repairs >= 1 {
-		return invalid("修复一次后仍不符合结果格式")
+		return fmt.Errorf("修复一次后仍不符合结果格式: %w", cause)
 	}
 	s.cp.Repairs++
 	last := -1

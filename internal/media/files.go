@@ -39,6 +39,19 @@ func newHash() hash.Hash                       { return sha256.New() }
 func hashString(h hash.Hash) string            { return hex.EncodeToString(h.Sum(nil)) }
 func stringInt(i int) string                   { return strconv.Itoa(i) }
 func fmtSscan(s string, a ...any) (int, error) { return fmt.Sscan(s, a...) }
+
+func fingerprintFile(ctx context.Context, path string) (string, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return "", e
+	}
+	defer f.Close()
+	h := newHash()
+	if _, e = io.Copy(h, &contextReader{ctx: ctx, r: f}); e != nil {
+		return "", e
+	}
+	return hashString(h), nil
+}
 func (s *Service) Path(key string) (string, error) {
 	p := filepath.Join(s.Config.DataDir, filepath.Clean(key))
 	if !strings.HasPrefix(p, s.Config.DataDir+string(os.PathSeparator)) {

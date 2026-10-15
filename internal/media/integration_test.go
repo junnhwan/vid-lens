@@ -3,9 +3,13 @@ package media
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,5 +105,97 @@ func TestRealFrameTimesCropReloadAndCleanup(t *testing.T) {
 	a, e = s.Asset(ctx, fresh.ID)
 	if e != nil || a.State != "deleted" {
 		t.Fatalf("cleanup: %+v %v", a, e)
+	}
+}
+
+func TestVerifiedASRReuseRequiresExactBytesAndProviderConfiguration(t *testing.T) {
+	for _, change := range []string{"video_bytes", "asr_model"} {
+		t.Run(change, func(t *testing.T) {
+			s, r, cfg := testsupport.Services(t)
+			if _, err := exec.LookPath("ffmpeg"); err != nil {
+				t.Skip("ffmpeg required")
+			}
+			var calls atomic.Int32
+			asr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"text":"The same verified test video."}`)
+			}))
+			defer asr.Close()
+			cfg.Profile.ASRBaseURL, cfg.Profile.ASRModel = asr.URL+"/audio/transcriptions", "asr-a"
+			ctx := context.Background()
+			if _, err := s.SaveConfig(ctx, cfg.Profile, "", "asr-test-key"); err != nil {
+				t.Fatal(err)
+			}
+			_, storedProfile, err := s.CurrentConfig(ctx)
+			cfg.Profile = storedProfile
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(cfg.DevMediaDir, "sample.mp4")
+			cmd := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=160x90:rate=10", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "1", "-filter_threads", "1", "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p", "-c:a", "aac", file)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v %s", err, b)
+			}
+			owner, err := s.NewSession(ctx, domain.ID(), time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ms, err := New(s, r, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepare := func() string {
+				t.Helper()
+				accepted, err := s.CreateRequest(ctx, owner.ID, domain.ID(), "local://sample.mp4", "", true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req, err := s.Request(ctx, owner.ID, accepted.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				claim, err := s.Claim(ctx, *req.ActiveRunID, 1, "test")
+				if err != nil || claim == nil {
+					t.Fatalf("claim %v", err)
+				}
+				if err = ms.Prepare(ctx, *claim, cfg.Profile); err != nil {
+					t.Fatal(err)
+				}
+				req, err = s.Request(ctx, owner.ID, accepted.ID)
+				if err != nil || req.SnapshotID == nil {
+					t.Fatalf("prepared %v", err)
+				}
+				return *req.SnapshotID
+			}
+			first, second := prepare(), prepare()
+			if calls.Load() != 1 || first != second {
+				t.Fatalf("verified source retranscribed: submissions=%d same_snapshot=%v", calls.Load(), first == second)
+			}
+			if change == "video_bytes" {
+				f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = f.Write([]byte{0, 0, 0, 0})
+				f.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				cfg.Profile.ASRModel = "asr-b"
+				if _, err = s.SaveConfig(ctx, cfg.Profile, "", ""); err != nil {
+					t.Fatal(err)
+				}
+				_, cfg.Profile, err = s.CurrentConfig(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			prepare()
+			if calls.Load() != 2 {
+				t.Fatalf("changed identity reused old ASR: submissions=%d", calls.Load())
+			}
+		})
 	}
 }

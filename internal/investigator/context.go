@@ -36,7 +36,7 @@ type observation struct {
 	Inferences          []string `json:"inferences"`
 	Conflicts           []string `json:"conflicts"`
 	Unresolved          []string `json:"unresolved"`
-	Status              string   `json:"status"`
+	Status              string   `json:"status" jsonschema:"enum=supported,enum=unresolved,description=Use supported for recorded facts and unresolved for an unconfirmed observation. Never use completed."`
 	Critical            bool     `json:"critical"`
 	RetainForComparison bool     `json:"retain_for_comparison"`
 	NextAction          string   `json:"next_action"`

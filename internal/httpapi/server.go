@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"io"
 	"log/slog"
 	"net/http"
@@ -96,7 +97,11 @@ func (a *Server) auth(w http.ResponseWriter, r *http.Request) (store.Session, bo
 		v, e = a.Store.Session(r.Context(), hashToken(c.Value))
 	}
 	if e != nil {
-		a.problem(w, r, domain.Err(401, "SESSION_REQUIRED", "匿名会话已失效，请重新开始。"))
+		if errors.Is(e, http.ErrNoCookie) || errors.Is(e, pgx.ErrNoRows) {
+			a.problem(w, r, domain.Err(401, "SESSION_REQUIRED", "匿名会话已失效，请重新开始。"))
+		} else {
+			a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "会话服务暂不可用，请稍后重试。"))
+		}
 		return v, false
 	}
 	if r.Method != "GET" {
@@ -122,6 +127,10 @@ func (a *Server) session(w http.ResponseWriter, r *http.Request) {
 	if e == nil {
 		token = c.Value
 		v, e = a.Store.Session(r.Context(), hashToken(token))
+		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+			a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "会话服务暂不可用，请稍后重试。"))
+			return
+		}
 	}
 	if e != nil || v.ID == "" {
 		code = 201
@@ -133,14 +142,14 @@ func (a *Server) session(w http.ResponseWriter, r *http.Request) {
 		token = base64.RawURLEncoding.EncodeToString(b)
 		v, e = a.Store.NewSession(r.Context(), hashToken(token), a.Config.SessionTTL)
 		if e != nil {
-			a.problem(w, r, e)
+			a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "会话服务暂不可用，请稍后重试。"))
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, Secure: a.Config.SecureCookie, SameSite: http.SameSiteLaxMode, Expires: v.ExpiresAt, MaxAge: int(a.Config.SessionTTL.Seconds())})
 	}
 	_, p, e := a.Store.CurrentConfig(r.Context())
 	if e != nil {
-		a.problem(w, r, e)
+		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "服务配置暂不可读取，请稍后重试。"))
 		return
 	}
 	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": p.Validate() == nil, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds}})
@@ -523,7 +532,12 @@ func (a *Server) adminConfig(w http.ResponseWriter, r *http.Request) {
 			a.problem(w, r, e)
 			return
 		}
-		a.json(w, 200, map[string]any{"schema_version": 1, "config_revision_id": id, "profile": in.Profile})
+		stored, e := a.Store.Profile(r.Context(), id)
+		if e != nil {
+			a.problem(w, r, e)
+			return
+		}
+		a.json(w, 200, map[string]any{"schema_version": 1, "config_revision_id": id, "profile": stored})
 		return
 	}
 	id, p, e := a.Store.CurrentConfig(r.Context())

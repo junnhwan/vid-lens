@@ -165,12 +165,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.compositionReady {
 			limits.Total = 300 * time.Second
 		}
-		sub, cancel := context.WithTimeout(actx, limits.Total)
-		sub = context.WithValue(sub, remoteSubmitKey{}, func() error { _, e := s.engine.Store.BeginOperation(sub, s.claim, key, "model", args, true); return e })
+		sub := context.WithValue(actx, remoteSubmitKey{}, func() error { _, e := s.engine.Store.BeginOperation(actx, s.claim, key, "model", args, true); return e })
 		result, e := receiveModelResponse(sub, m.base, NormalizeToolImages(in), limits, opts...)
-		cancel()
 		release()
 		if e != nil {
+			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
+				return nil, e
+			}
 			var work *domain.WorkError
 			if errors.As(e, &work) {
 				if work.Transient && local == 0 && op.Submissions < 3 && work.RetryAfter <= time.Second {
@@ -183,15 +184,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				}
 				return nil, work
 			}
-			secret, _ := s.engine.Store.Credential(ctx, s.profile.ModelKeyRef)
-			safe := e.Error()
-			if secret != "" {
-				safe = strings.ReplaceAll(safe, secret, "[redacted]")
-			}
-			if len(safe) > 1500 {
-				safe = safe[:1500]
-			}
-			slog.Warn("model invocation rejected", "diagnostic", safe)
+			slog.Warn("model invocation rejected", "class", "incompatible_response")
 			return nil, &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型请求格式不兼容。", Transient: false}
 		}
 		result.ReasoningContent = ""

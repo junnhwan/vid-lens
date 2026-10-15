@@ -125,6 +125,53 @@ func TestSharedCancelFreezesHistoryAndIdempotency(t *testing.T) {
 		t.Fatalf("retry replay %+v %v", re, e)
 	}
 }
+
+func TestCredentialRotationPreservesFrozenRevisionAndUsesOwnedReferences(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	oldID, old, err := s.CurrentConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := old
+	updated.ModelName = "next-model"
+	updated.ModelKeyRef = "caller-supplied-ref"
+	updated.ASRKeyRef = "caller-supplied-asr-ref"
+	newID, err := s.SaveConfig(ctx, updated, "next-model-key", "next-asr-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Profile(ctx, newID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAgain, err := s.Profile(ctx, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldKey, err := s.Credential(ctx, oldAgain.ModelKeyRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextKey, err := s.Credential(ctx, next.ModelKeyRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldKey != "secret" || nextKey != "next-model-key" || next.ModelKeyRef == old.ModelKeyRef || next.ModelKeyRef == updated.ModelKeyRef {
+		t.Fatal("credential rotation changed old work or honored an unowned reference")
+	}
+	id, err := s.SaveConfig(ctx, updated, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := s.Profile(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.ModelKeyRef != next.ModelKeyRef || preserved.ASRKeyRef != next.ASRKeyRef || oldAgain.ModelName != "test" {
+		t.Fatal("empty credential update or profile rewrite changed frozen authentication")
+	}
+}
 func TestClaimFencingAndConcurrentAdmission(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

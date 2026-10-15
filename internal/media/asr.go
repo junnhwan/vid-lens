@@ -19,6 +19,8 @@ import (
 	"vidlens/internal/domain"
 )
 
+const asrPipelineVersion = "60s-mp3-48k16k-v1"
+
 func (s *Service) Transcribe(ctx context.Context, c domain.Claim, p config.Profile, input string, duration int64, work string) ([]domain.Segment, error) {
 	if p.ASRBaseURL == "" || p.ASRModel == "" {
 		return nil, domain.Err(422, "PROVIDER_UNAVAILABLE", "没有可用字幕，请先配置 ASR 服务。")

@@ -215,16 +215,30 @@ func (s *Store) SaveConfig(ctx context.Context, p config.Profile, modelKey, asrK
 	}
 	id := domain.ID()
 	e := s.Tx(ctx, func(tx pgx.Tx) error {
-		if e := s.putCredential(ctx, tx, "model", modelKey); e != nil {
+		current, e := one[config.Profile](ctx, tx, "SELECT c.profile FROM runtime_settings s JOIN runtime_config_revisions c ON c.id=s.config_id")
+		if e != nil {
 			return e
 		}
-		if e := s.putCredential(ctx, tx, "asr", asrKey); e != nil {
+		// Credential references belong to the server. Replacements receive new
+		// identities so already accepted work retains its original authentication.
+		p.ModelKeyRef = current.ModelKeyRef
+		p.ASRKeyRef = current.ASRKeyRef
+		if modelKey != "" {
+			p.ModelKeyRef = "model:" + id
+		}
+		if asrKey != "" {
+			p.ASRKeyRef = "asr:" + id
+		}
+		if e := s.putCredential(ctx, tx, p.ModelKeyRef, modelKey); e != nil {
+			return e
+		}
+		if e := s.putCredential(ctx, tx, p.ASRKeyRef, asrKey); e != nil {
 			return e
 		}
 		if _, e := tx.Exec(ctx, "INSERT INTO runtime_config_revisions(id,profile) VALUES($1,$2)", id, domain.JSON(p)); e != nil {
 			return e
 		}
-		_, e := tx.Exec(ctx, "UPDATE runtime_settings SET config_id=$1", id)
+		_, e = tx.Exec(ctx, "UPDATE runtime_settings SET config_id=$1", id)
 		return e
 	})
 	return id, e

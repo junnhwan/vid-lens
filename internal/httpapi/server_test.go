@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -124,5 +125,68 @@ func TestSessionCSRFAndPrivateResources(t *testing.T) {
 	b, _ = io.ReadAll(admin.Body)
 	if strings.Contains(string(b), "private-model-key") {
 		t.Fatal("credential leaked")
+	}
+}
+
+func TestOwnerCredentialUpdateReturnsStoredReferencesWithoutSecrets(t *testing.T) {
+	server, a := apiTest(t)
+	_, p, err := a.Store.CurrentConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRef := p.ModelKeyRef
+	p.ModelKeyRef = "caller-supplied-reference"
+	req, err := http.NewRequest("PUT", server.URL+"/api/v1/admin/config", bytes.NewReader(domain.JSON(map[string]any{"profile": p, "model_api_key": "rotated-private-key"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+a.Config.AdminToken)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	wire, err := io.ReadAll(res.Body)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("status=%d error=%v", res.StatusCode, err)
+	}
+	var saved struct {
+		Profile config.Profile `json:"profile"`
+	}
+	if err = json.Unmarshal(wire, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "rotated-private-key") || saved.Profile.ModelKeyRef == p.ModelKeyRef || saved.Profile.ModelKeyRef == oldRef {
+		t.Fatal("owner response exposed a key or did not return server-owned references")
+	}
+	old, err := a.Store.Credential(context.Background(), oldRef)
+	if err != nil || old != "private-model-key" {
+		t.Fatal("rotation broke an existing configuration revision")
+	}
+}
+
+func TestSessionStoreOutageDoesNotClaimCookieExpiredOrReplaceIt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool, err := pgxpool.New(ctx, "postgres://unused@127.0.0.1:1/unused?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	a := New(ctx, &store.Store{Pool: pool}, config.Config{Origin: "https://vidlens.test"})
+	for _, path := range []string{"/api/v1/requests/request-id", "/api/v1/session"} {
+		method := "GET"
+		if path == "/api/v1/session" {
+			method = "POST"
+		}
+		req := httptest.NewRequest(method, path, strings.NewReader("{}"))
+		req.Header.Set("Origin", "https://vidlens.test")
+		req.AddCookie(&http.Cookie{Name: cookieName, Value: "existing-session-cookie"})
+		res := httptest.NewRecorder()
+		a.Handler().ServeHTTP(res, req)
+		if res.Code != 503 || res.Header().Get("Set-Cookie") != "" || strings.Contains(res.Body.String(), "SESSION_REQUIRED") {
+			t.Fatalf("%s lost session on a dependency error: %d %s", path, res.Code, res.Body.String())
+		}
 	}
 }

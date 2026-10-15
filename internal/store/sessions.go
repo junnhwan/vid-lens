@@ -17,6 +17,8 @@ func (s *Store) NewSession(ctx context.Context, hash string, ttl time.Duration) 
 	return v, e
 }
 func (s *Store) Session(ctx context.Context, hash string) (Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	var v Session
 	e := s.Pool.QueryRow(ctx, "SELECT id,expires_at FROM anonymous_sessions WHERE token_hash=$1 AND expires_at>now()", hash).Scan(&v.ID, &v.ExpiresAt)
 	return v, e

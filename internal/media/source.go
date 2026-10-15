@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -195,10 +196,41 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	}
 	usable, cov := TranscriptCoverage(segs, duration)
 	coverage = cov
-	if !restore && !usable && (ident.Platform != "local" || probe.HasAudio) {
+	asrReused := false
+	var reusedSnapshot string
+	// This fingerprint can justify ASR reuse only when it includes the audio
+	// actually transcribed. Separate remote audio tracks must still be acquired.
+	if !restore && !usable && probe.HasAudio {
+		hash, e := fingerprintFile(ctx, video)
+		if e != nil {
+			return e
+		}
+		prior, found, e := s.Store.ReusableASR(ctx, c.Run.SourceID, hash, asrPipelineVersion, duration, p)
+		if e != nil {
+			return e
+		}
+		if found {
+			segs, e = s.Store.Transcript(ctx, prior.ID)
+			if e != nil {
+				return e
+			}
+			if len(segs) > 0 {
+				asrReused = true
+				reusedSnapshot = prior.ID
+				origin = "asr"
+				_, coverage = TranscriptCoverage(segs, duration)
+				language = prior.Source.TextProvenance.Language
+				step.Title = "正在复用已完整校验视频的转写"
+				if step, e = s.Store.Step(ctx, c, step); e != nil {
+					return e
+				}
+			}
+		}
+	}
+	if !restore && !usable && !asrReused && (ident.Platform != "local" || probe.HasAudio) {
 		origin = "asr"
 		audioInput := video
-		if ident.Platform != "local" {
+		if ident.Platform != "local" && !probe.HasAudio {
 			dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
 			if e != nil {
 				return e
@@ -251,7 +283,14 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		segs[i].Ordinal = i
 		stable = append(stable, map[string]any{"start_ms": segs[i].StartMS, "end_ms": segs[i].EndMS, "text": segs[i].Text, "origin": segs[i].Origin})
 	}
-	snap := domain.Snapshot{ID: domain.ID(), SourceID: c.Run.SourceID, VideoHash: a.SHA256, TextHash: store.Hash(stable), DurationMS: duration, Source: source, Metadata: domain.JSON(map[string]any{"schema_version": 1, "extractor": "yt-dlp", "video": probe, "content_verification": "sha256_full_media", "subtitle_kind": "platform_unspecified"})}
+	metadata := map[string]any{"schema_version": 1, "extractor": "yt-dlp", "video": probe, "content_verification": "sha256_full_media", "subtitle_kind": "platform_unspecified"}
+	if origin == "asr" {
+		metadata["asr_pipeline_version"] = asrPipelineVersion
+	}
+	if reusedSnapshot != "" {
+		metadata["reused_asr_snapshot_id"] = reusedSnapshot
+	}
+	snap := domain.Snapshot{ID: domain.ID(), SourceID: c.Run.SourceID, VideoHash: a.SHA256, TextHash: store.Hash(stable), DurationMS: duration, Source: source, Metadata: domain.JSON(metadata)}
 	if restore {
 		old, e := s.Store.Snapshot(ctx, *c.Run.SnapshotID)
 		if e != nil {
@@ -295,17 +334,22 @@ func chooseSubtitle(m metadata) (string, bool) {
 				return want, entry.Auto
 			}
 		}
-	}
-	for _, v := range []struct {
-		Map  map[string][]subformat
-		Auto bool
-	}{{m.Subtitles, false}, {m.Auto, true}} {
-		for _, want := range []string{"zh", "en"} {
-			for lang := range v.Map {
-				if strings.HasPrefix(lang, want) {
-					return lang, v.Auto
+		langs := []string{}
+		for lang, formats := range entry.Tracks {
+			if len(formats) > 0 {
+				langs = append(langs, lang)
+			}
+		}
+		slices.Sort(langs)
+		for _, prefix := range []string{"zh", "en"} {
+			for _, lang := range langs {
+				if strings.HasPrefix(lang, prefix) {
+					return lang, entry.Auto
 				}
 			}
+		}
+		if len(langs) > 0 {
+			return langs[0], entry.Auto
 		}
 	}
 	return "", false

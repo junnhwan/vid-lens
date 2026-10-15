@@ -2,6 +2,7 @@ package investigator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -32,7 +33,7 @@ type readInput struct {
 type inspectInput struct {
 	ActivityTitle string        `json:"activity_title"`
 	QuestionID    string        `json:"question_id"`
-	Critical      *bool         `json:"critical,omitempty"`
+	Critical      *bool         `json:"critical,omitempty" jsonschema:"description=Whether this question must be supported before article publication. Use false for optional details or deliberately unanswered story questions."`
 	Question      string        `json:"question"`
 	Window        *media.Window `json:"window,omitempty"`
 	FrameIDs      []string      `json:"frame_ids,omitempty"`
@@ -50,6 +51,42 @@ type answerInput struct {
 	Blocks      []domain.Block             `json:"blocks"`
 	Citations   map[string]domain.Citation `json:"citations"`
 	Limitations []domain.Limitation        `json:"limitations"`
+}
+
+type argumentCheckedTool struct {
+	tool.EnhancedInvokableTool
+	name string
+}
+
+func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+	var target any
+	switch t.name {
+	case "submit_article":
+		target = &articleInput{}
+	case "submit_answer":
+		target = &answerInput{}
+	case "record_observation":
+		target = &observation{}
+	case "inspect_video_window":
+		target = &inspectInput{}
+	case "find_evidence":
+		target = &findInput{}
+	case "read_source":
+		target = &readInput{}
+	}
+	var err error
+	if args == nil {
+		err = errors.New("工具参数为空")
+	} else if target != nil {
+		err = json.Unmarshal([]byte(args.Text), target)
+	}
+	if err != nil {
+		if t.name == "submit_article" || t.name == "submit_answer" {
+			return nil, &candidateError{err: invalid("候选必须是符合工具结构的完整 JSON：" + err.Error() + "。limitations 与 citations 同级；每个视频引用都要复制 snapshot_id，并填写该类型的全部来源字段。")}
+		}
+		return toolError("工具参数不符合字段类型，请按 schema 修正：" + err.Error() + "。观察的 conflicts、unresolved、inferences 等字段必须是字符串数组，status 只能是 supported 或 unresolved。")
+	}
+	return t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
 }
 
 func textResult(v any) *schema.ToolResult {
@@ -112,6 +149,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		if e != nil {
 			return e
 		}
+		t = &argumentCheckedTool{EnhancedInvokableTool: t, name: info.Name}
 		s.tools[info.Name] = t
 		out = append(out, t)
 		return nil
@@ -138,7 +176,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 					}
 				}
 			}
-			return map[string]any{"candidates": found, "note": "candidate positions only; use read_source and inspect real pixels when needed"}, nil, nil
+			return map[string]any{"snapshot_id": s.snapshot.ID, "candidates": found, "note": "candidate positions only; use read_source and inspect real pixels when needed"}, nil, nil
 		})
 	})); e != nil {
 		return nil, e
@@ -171,7 +209,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 				found = append(found, t)
 				n += len(t.Text)
 			}
-			return map[string]any{"segments": found, "has_more": more, "note": "exact source text; coarse ASR ranges are audio windows"}, nil, nil
+			return map[string]any{"snapshot_id": s.snapshot.ID, "segments": found, "has_more": more, "note": "exact source text; coarse ASR ranges are audio windows"}, nil, nil
 		})
 	})); e != nil {
 		return nil, e
@@ -244,15 +282,24 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 	if e := add(utils.InferEnhancedTool("record_observation", "Durably record what the main agent saw in images. Preserve literal numbers/units/conditions, distinguish inferences, conflicts and unresolved gaps. One inspection per record.", func(ctx context.Context, in observation) (*schema.ToolResult, error) {
 		known, ok := s.cp.Inspections[in.InspectionID]
 		if !ok {
-			return toolError("inspection_id 不存在或不属于这次执行。")
+			ids := make([]string, 0, len(s.cp.Inspections))
+			for id := range s.cp.Inspections {
+				ids = append(ids, id)
+			}
+			slices.Sort(ids)
+			return toolError("inspection_id 不存在或不属于这次执行；可用 inspection_id=" + string(domain.JSON(ids)))
 		}
 		if len(in.FrameIDs) == 0 {
-			return toolError("观察必须引用实际图片。")
+			return toolError("观察必须引用实际图片；此组可用 frame_ids=" + string(domain.JSON(known)))
 		}
+		invalidIDs := []string{}
 		for _, id := range in.FrameIDs {
 			if !slices.Contains(known, id) {
-				return toolError("图片未由这次 inspection 交付。")
+				invalidIDs = append(invalidIDs, id)
 			}
+		}
+		if len(invalidIDs) > 0 {
+			return toolError("以下 frame_ids 未由此 inspection 交付：" + string(domain.JSON(invalidIDs)) + "；此组真实可用 frame_ids=" + string(domain.JSON(known)) + "。请逐字复制正确 ID，先记录已收到图片的观察；无需重新加载图片。")
 		}
 		if in.Status != "supported" && in.Status != "unresolved" {
 			return toolError("status 必须为 supported 或 unresolved。")

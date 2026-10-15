@@ -264,7 +264,7 @@ type Citation struct {
 	SnapshotID string   `json:"snapshot_id,omitempty"`
 	Range      *Range   `json:"range,omitempty"`
 	SegmentIDs []string `json:"segment_ids,omitempty"`
-	Quote      *string  `json:"quote"`
+	Quote      *string  `json:"quote" jsonschema:"description=For video_text use null for paraphrases; a string must be a verbatim contiguous source quote. For article_passage use the exact article quote."`
 	TextOrigin string   `json:"text_origin,omitempty"`
 	FrameID    string   `json:"frame_id,omitempty"`
 	TimeMS     *int64   `json:"time_ms,omitempty"`

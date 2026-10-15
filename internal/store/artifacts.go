@@ -20,6 +20,24 @@ func (s *Store) SourceIdentity(ctx context.Context, id string) (domain.SourceIde
 func (s *Store) Transcript(ctx context.Context, snapshot string) ([]domain.Segment, error) {
 	return many[domain.Segment](ctx, s.Pool, "SELECT to_jsonb(t) FROM transcript_segments t WHERE snapshot_id=$1 ORDER BY ordinal", snapshot)
 }
+
+// The caller must verify that the fingerprint includes the ASR audio input.
+// Reuse only completed ASR for the same source, fully reverified media bytes,
+// duration and frozen provider configuration. Titles/durations alone are insufficient.
+func (s *Store) ReusableASR(ctx context.Context, source, videoHash, pipeline string, duration int64, p config.Profile) (domain.Snapshot, bool, error) {
+	v, e := one[domain.Snapshot](ctx, s.Pool, `SELECT to_jsonb(s) FROM source_snapshots s
+ WHERE s.source_id=$1 AND s.video_hash=$2 AND s.duration_ms=$3
+ AND s.source->'text_provenance'->>'origin'='asr'
+ AND COALESCE(s.metadata->>'asr_pipeline_version','60s-mp3-48k16k-v1')=$4
+ AND EXISTS(SELECT 1 FROM job_runs r JOIN runtime_config_revisions c ON c.id=r.config_id
+   WHERE r.kind='source.prepare' AND r.status='succeeded' AND r.result_id=s.id
+   AND c.profile->>'asr_base_url'=$5 AND c.profile->>'asr_model'=$6)
+ ORDER BY s.created_at DESC LIMIT 1`, source, videoHash, duration, pipeline, p.ASRBaseURL, p.ASRModel)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return v, false, nil
+	}
+	return v, e == nil, e
+}
 func (s *Store) Asset(ctx context.Context, id string) (domain.Asset, error) {
 	return one[domain.Asset](ctx, s.Pool, "SELECT to_jsonb(a) FROM media_assets a WHERE id=$1", id)
 }
