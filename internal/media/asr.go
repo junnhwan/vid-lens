@@ -21,7 +21,7 @@ import (
 
 const asrPipelineVersion = "60s-mp3-48k16k-v1"
 
-func (s *Service) Transcribe(ctx context.Context, c domain.Claim, p config.Profile, input string, duration int64, work string) ([]domain.Segment, error) {
+func (s *Service) Transcribe(ctx context.Context, c domain.Claim, p config.Profile, input string, duration int64, work string, progress func(int64) error) ([]domain.Segment, error) {
 	if p.ASRBaseURL == "" || p.ASRModel == "" {
 		return nil, domain.Err(422, "PROVIDER_UNAVAILABLE", "没有可用字幕，请先配置 ASR 服务。")
 	}
@@ -42,6 +42,11 @@ func (s *Service) Transcribe(ctx context.Context, c domain.Claim, p config.Profi
 				return nil, fmt.Errorf("invalid ASR checkpoint")
 			}
 			segments = append(segments, saved...)
+			if progress != nil {
+				if e := progress(end); e != nil {
+					return nil, e
+				}
+			}
 			continue
 		}
 		file := filepath.Join(work, fmt.Sprintf("asr-%d.mp3", start))
@@ -121,6 +126,11 @@ func (s *Service) Transcribe(ctx context.Context, c domain.Claim, p config.Profi
 			break
 		}
 		segments = append(segments, result...)
+		if progress != nil {
+			if e := progress(end); e != nil {
+				return nil, e
+			}
+		}
 	}
 	for i := range segments {
 		segments[i].Ordinal = i

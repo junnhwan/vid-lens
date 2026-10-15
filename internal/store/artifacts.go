@@ -409,8 +409,21 @@ func (s *Store) FinishOperation(ctx context.Context, c domain.Claim, key string,
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
-		_, e := tx.Exec(ctx, "UPDATE run_operations SET status='completed',result=$3,provider_request_id=NULLIF($4,''),usage=$5,updated_at=now() WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key, domain.JSON(result), provider, nullableJSON(usage))
-		return e
+		changed, e := tx.Exec(ctx, "UPDATE run_operations SET status='completed',result=$3,provider_request_id=NULLIF($4,''),usage=$5,updated_at=now() WHERE run_id=$1 AND operation_key=$2 AND status<>'completed'", c.Run.ID, key, domain.JSON(result), provider, nullableJSON(usage))
+		if e != nil || changed.RowsAffected() == 0 {
+			return e
+		}
+		// Persisted operation output is business progress, even when a long
+		// source-preparation phase has not yet produced its final checkpoint.
+		// Replaying an already completed operation must not refresh this clock.
+		changed, e = tx.Exec(ctx, "UPDATE job_runs SET updated_at=now() WHERE id=$1 AND status='running' AND execution_epoch=$2 AND lease_owner=$3", c.Run.ID, c.Epoch, c.Owner)
+		if e != nil {
+			return e
+		}
+		if changed.RowsAffected() != 1 {
+			return domain.ErrFenced
+		}
+		return nil
 	})
 }
 func (s *Store) Observations(ctx context.Context, run string) ([]json.RawMessage, error) {

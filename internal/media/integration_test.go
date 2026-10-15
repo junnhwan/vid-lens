@@ -199,3 +199,101 @@ func TestVerifiedASRReuseRequiresExactBytesAndProviderConfiguration(t *testing.T
 		})
 	}
 }
+
+func TestASRWindowProgressSurvivesReconciliation(t *testing.T) {
+	s, r, cfg := testsupport.Services(t)
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg required")
+	}
+	ctx := context.Background()
+	var runID atomic.Value
+	var calls atomic.Int32
+	handlerErrors := make(chan error, 2)
+	asr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if calls.Add(1) > 1 {
+			id := runID.Load().(string)
+			err := s.Repair(ctx, id, 1, "active", nil)
+			if err == nil {
+				var status string
+				err = s.Pool.QueryRow(ctx, "SELECT status FROM job_runs WHERE id=$1", id).Scan(&status)
+				if err == nil && status != "running" {
+					err = fmt.Errorf("reconciliation stopped productive transcription: %s", status)
+				}
+			}
+			if err != nil {
+				handlerErrors <- err
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		// Compress a long transcription into a fast deterministic test: each
+		// completed window arrives after five minutes of unchanged phase title.
+		if _, err := s.Pool.Exec(ctx, "UPDATE job_runs SET updated_at=now()-interval '6 minutes' WHERE id=$1", runID.Load().(string)); err != nil {
+			handlerErrors <- err
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"text":"A completed audio window."}`)
+	}))
+	defer asr.Close()
+	cfg.Profile.ASRBaseURL, cfg.Profile.ASRModel = asr.URL, "asr-test"
+	if _, err := s.SaveConfig(ctx, cfg.Profile, "", "asr-test-key"); err != nil {
+		t.Fatal(err)
+	}
+	_, p, err := s.CurrentConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(cfg.DevMediaDir, "progress.mp4")
+	cmd := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=160x90:rate=1", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "61", "-filter_threads", "1", "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p", "-c:a", "aac", file)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, b)
+	}
+	owner, err := s.NewSession(ctx, domain.ID(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := s.CreateRequest(ctx, owner.ID, "progress", "local://progress.mp4", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := s.Request(ctx, owner.ID, accepted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := s.Claim(ctx, *req.ActiveRunID, 1, "transcriber")
+	if err != nil || claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	runID.Store(claim.Run.ID)
+	ms, err := New(s, r, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ms.Prepare(ctx, *claim, p); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-handlerErrors:
+		t.Fatal(err)
+	default:
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected two actual audio windows, got %d", calls.Load())
+	}
+	if err = s.Repair(ctx, claim.Run.ID, 1, "active", nil); err != nil {
+		t.Fatal(err)
+	}
+	req, err = s.Request(ctx, owner.ID, accepted.ID)
+	if err != nil || req.Status != "generating" {
+		t.Fatalf("transcription was not allowed to finish: %+v %v", req, err)
+	}
+	var updates, stepIDs int
+	if err = s.Pool.QueryRow(ctx, `SELECT count(*),count(DISTINCT step_id) FROM run_events WHERE run_id=$1 AND step->>'status'='running' AND step->>'title' LIKE '正在转写音频（% / %）'`, claim.Run.ID).Scan(&updates, &stepIDs); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 2 || stepIDs != 1 {
+		t.Fatalf("transcription did not update one persisted activity step per completed window: updates=%d step_ids=%d", updates, stepIDs)
+	}
+}

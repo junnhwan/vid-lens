@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -250,7 +251,12 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if step, e = s.Store.Step(ctx, c, step); e != nil {
 			return e
 		}
-		segs, e = s.Transcribe(ctx, c, p, audioInput, duration, work)
+		segs, e = s.Transcribe(ctx, c, p, audioInput, duration, work, func(completed int64) error {
+			step.Title = fmt.Sprintf("正在转写音频（%s / %s）", mediaClock(completed), mediaClock(duration))
+			var err error
+			step, err = s.Store.Step(ctx, c, step)
+			return err
+		})
 		if e != nil {
 			return e
 		}
@@ -307,6 +313,12 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	_, e = s.Store.FinishSource(ctx, c, snap, segs, a.ID)
 	return e
 }
+
+func mediaClock(ms int64) string {
+	seconds := (ms + 999) / 1000
+	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
+}
+
 func (s *Service) localFile(name string) (string, error) {
 	if s.Config.DevMediaDir == "" || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return "", domain.Err(422, "UNSUPPORTED_SOURCE", "本地样本入口未启用。")
