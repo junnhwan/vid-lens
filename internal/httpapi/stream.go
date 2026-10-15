@@ -73,8 +73,7 @@ func (h *Hub) subscribe(session, typ, id, conversation string) (chan update, fun
 			if gg := h.groups[key]; gg != nil {
 				if _, ok := gg.channels[ch]; ok {
 					delete(gg.channels, ch)
-					h.count--
-					h.sessions[session]--
+					h.releaseSession(session)
 					if len(gg.channels) == 0 {
 						delete(h.groups, key)
 					}
@@ -103,29 +102,44 @@ func (h *Hub) poll(ctx context.Context) {
 		if u.Err == nil {
 			sig = h.server.Store.Cursor(u.Position)
 		}
-		h.mu.Lock()
-		if g.last != sig || u.Err != nil {
-			g.last = sig
-			for ch, queued := range g.channels {
-				if queued+u.Bytes > 1<<20 {
-					close(ch)
-					delete(g.channels, ch)
-					h.count--
-					h.sessions[g.session]--
-					continue
-				}
+		h.publish(g, sig, u)
+	}
+}
+
+// Called only with mu held; zero-count sessions must not accumulate indefinitely.
+func (h *Hub) releaseSession(session string) {
+	h.count--
+	h.sessions[session]--
+	if h.sessions[session] == 0 {
+		delete(h.sessions, session)
+	}
+}
+
+func (h *Hub) publish(g *group, sig string, u update) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := g.session + ":" + g.typ + ":" + g.id
+	if h.groups[key] != g {
+		return
+	}
+	if g.last != sig || u.Err != nil {
+		g.last = sig
+		for ch, queued := range g.channels {
+			if queued+u.Bytes <= 1<<20 {
 				select {
 				case ch <- u:
 					g.channels[ch] += u.Bytes
+					continue
 				default:
-					close(ch)
-					delete(g.channels, ch)
-					h.count--
-					h.sessions[g.session]--
 				}
 			}
+			close(ch)
+			delete(g.channels, ch)
+			h.releaseSession(g.session)
 		}
-		h.mu.Unlock()
+	}
+	if len(g.channels) == 0 {
+		delete(h.groups, key)
 	}
 }
 func (a *Server) events(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +226,9 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if _, e := fmt.Fprint(w, "retry: 3000\n\n"); e != nil {
+		return
+	}
+	if controller.Flush() != nil {
 		return
 	}
 	if reset {

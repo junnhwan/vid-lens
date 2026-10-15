@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,86 @@ func TestSessionStoreOutageDoesNotClaimCookieExpiredOrReplaceIt(t *testing.T) {
 		if res.Code != 503 || res.Header().Get("Set-Cookie") != "" || strings.Contains(res.Body.String(), "SESSION_REQUIRED") {
 			t.Fatalf("%s lost session on a dependency error: %d %s", path, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestMissingImageUpdatesAvailabilityWithoutStartingWork(t *testing.T) {
+	server, a := apiTest(t)
+	ctx := context.Background()
+	token := "owned-cookie"
+	owner, err := a.Store.NewSession(ctx, hashToken(token), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := a.Store.CreateRequest(ctx, owner.ID, "image-loss", "https://youtube.com/watch?v=abcdefghijk", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := a.Store.Request(ctx, owner.ID, accepted.ID)
+	c, err := a.Store.Claim(ctx, *r.ActiveRunID, 1, "fixture")
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	video := domain.Asset{ID: domain.ID(), SourceID: c.Run.SourceID, RunID: c.Run.ID, Kind: "video", StorageKey: "video", SHA256: "video", MIME: "video/mp4", Bytes: 1, ExpiresAt: domain.Ptr(time.Now().Add(time.Hour))}
+	if err = a.Store.AddAsset(ctx, *c, video); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := domain.Snapshot{ID: domain.ID(), SourceID: c.Run.SourceID, VideoHash: "video", TextHash: "text", DurationMS: 1000, Source: domain.Source{SourceID: c.Run.SourceID}, Metadata: []byte(`{}`)}
+	if _, err = a.Store.FinishSource(ctx, *c, snapshot, nil, video.ID); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = a.Store.Request(ctx, owner.ID, r.ID)
+	c, err = a.Store.Claim(ctx, *r.ActiveRunID, 1, "fixture")
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	frame := domain.Asset{ID: domain.ID(), SourceID: c.Run.SourceID, SnapshotID: r.SnapshotID, RunID: c.Run.ID, Kind: "frame", StorageKey: "assets/image.jpg", SHA256: "frame", MIME: "image/jpeg", Bytes: 1, TimeMS: domain.Ptr(int64(100)), RequestedTimeMS: domain.Ptr(int64(100)), ExpiresAt: domain.Ptr(time.Now().Add(time.Hour))}
+	if err = a.Store.AddAsset(ctx, *c, frame); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(a.Config.DataDir, "assets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(a.Config.DataDir, frame.StorageKey)
+	if err = os.WriteFile(file, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	article := domain.Article{SchemaVersion: 1, SnapshotID: *r.SnapshotID, Title: "fixture", Sections: []domain.Section{{ID: "s", Title: "section", Blocks: []domain.Block{{ID: "figure", Type: "figure", FrameIDs: []string{frame.ID}}}}}, Citations: map[string]domain.Citation{}, Limitations: []domain.Limitation{}}
+	if err = a.Store.Publish(ctx, *c, article); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest("GET", server.URL+path, nil)
+		req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+		res, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	base := "/api/v1/requests/" + r.ID + "/frames/" + frame.ID
+	content := get(base + "/content")
+	content.Body.Close()
+	if content.StatusCode != 503 {
+		t.Fatal(content.StatusCode)
+	}
+	metadata := get(base)
+	defer metadata.Body.Close()
+	var view struct {
+		Frame domain.Frame `json:"frame"`
+	}
+	if err = json.NewDecoder(metadata.Body).Decode(&view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Frame.Availability != "unavailable" || view.Frame.URLs["full"] != nil {
+		t.Fatalf("known missing file stayed ready: %+v", view.Frame)
+	}
+	var restores int
+	if err = a.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM job_runs WHERE kind='source.restore'").Scan(&restores); err != nil || restores != 0 {
+		t.Fatalf("image viewing started restoration: %d %v", restores, err)
 	}
 }

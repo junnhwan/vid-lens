@@ -1,0 +1,2 @@
+# Netscape HTTP Cookie File
+# No credentials. Set VIDLENS_COOKIE_FILE to an ignored Netscape cookie file when needed.

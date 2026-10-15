@@ -482,6 +482,15 @@ func (s *Store) InternalFrame(ctx context.Context, c domain.Claim, id string) (d
 func (s *Store) PublicFrames(ctx context.Context, request string, ids []string) ([]domain.Frame, error) {
 	return frames(ctx, s.Pool, request, ids)
 }
+
+// A missing owned file changes availability, never the immutable article or its
+// frame identity. This observation cannot resurrect deleting/deleted assets.
+func (s *Store) MarkMissingFrame(ctx context.Context, id string) error {
+	return s.Tx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE media_assets SET state='unavailable' WHERE id=$1 AND kind='frame' AND state='ready'", id)
+		return err
+	})
+}
 func (s *Store) HasProtection(ctx context.Context, id string) (bool, error) {
 	var ok bool
 	e := s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=$1 AND (expires_at IS NULL OR expires_at>now()))", id).Scan(&ok)

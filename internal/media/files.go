@@ -111,6 +111,9 @@ func (s *Service) ReadImage(ctx context.Context, c domain.Claim, id string) (dom
 	}
 	f, e := os.Open(p)
 	if e != nil {
+		if errors.Is(e, os.ErrNotExist) {
+			_ = s.Store.MarkMissingFrame(ctx, id)
+		}
 		return a, nil, ErrMediaMissing
 	}
 	defer f.Close()

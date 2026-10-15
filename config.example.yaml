@@ -1,0 +1,23 @@
+# Copy to .local/backend.yaml, keep mode 0600. YAML values initialize a new database.
+listen: 127.0.0.1:8086
+public_origin: http://127.0.0.1:8086
+database_url: postgres://vidlens:vidlens-local@127.0.0.1:5544/vidlens_rebuild?sslmode=disable
+redis_url: redis://127.0.0.1:6391/0
+# Must be an absolute path outside this repository.
+data_dir: /var/lib/vidlens-rebuild
+admin_token: REPLACE_WITH_A_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS
+secret_key: REPLACE_WITH_ANOTHER_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS
+model_base_url: https://your-model-service.example/v1
+model_name: your-vision-and-tool-capable-model
+model_api_key: ""
+# Optional provider-specific enable_thinking=false; keep false for generic endpoints.
+model_disable_thinking: false
+asr_base_url: https://your-asr-service.example/v1/audio/transcriptions
+asr_model: your-asr-model
+asr_api_key: ""
+proxy_url: ""
+# Native execution: absolute path to a mode-0600 Netscape cookie file.
+# Compose: set VIDLENS_COOKIE_FILE to mount it; the entrypoint supplies the container path.
+platform_cookie_file: ""
+# Local-only development extension; leave empty when serving visitors.
+dev_media_dir: ""

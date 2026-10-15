@@ -1,0 +1,18 @@
+FROM golang:1.26.5-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -o /vidlens ./cmd/vidlens
+
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates util-linux \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir yt-dlp==2026.8.19
+COPY --from=build /vidlens /usr/local/bin/vidlens
+COPY --chmod=755 scripts/backend_entrypoint.sh /usr/local/bin/vidlens-entrypoint
+RUN useradd --system --uid 10001 --create-home vidlens && mkdir -p /var/lib/vidlens && chown vidlens:vidlens /var/lib/vidlens
+ENV GOMEMLIMIT=768MiB GOGC=100 GOMAXPROCS=2
+EXPOSE 8080
+ENTRYPOINT ["vidlens-entrypoint"]

@@ -1,0 +1,10 @@
+*
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!Dockerfile.backend
+!scripts/
+!scripts/backend_entrypoint.sh

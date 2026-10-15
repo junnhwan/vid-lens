@@ -334,6 +334,9 @@ func (a *Server) frameContent(w http.ResponseWriter, r *http.Request) {
 	}
 	file, e := os.Open(path)
 	if e != nil {
+		if errors.Is(e, os.ErrNotExist) {
+			_ = a.Store.MarkMissingFrame(r.Context(), asset.ID)
+		}
 		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "图片暂不可读。"))
 		return
 	}

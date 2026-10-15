@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vidlens
+      POSTGRES_PASSWORD: ${VIDLENS_DB_PASSWORD:-vidlens-local}
+      POSTGRES_DB: vidlens_rebuild
+    ports: ["127.0.0.1:5544:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    mem_limit: 768m
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "work_mem=4MB", "-c", "maintenance_work_mem=64MB", "-c", "autovacuum_work_mem=64MB", "-c", "max_connections=20", "-c", "max_parallel_workers_per_gather=0"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vidlens -d vidlens_rebuild"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7
+    ports: ["127.0.0.1:6391:6379"]
+    volumes: ["redis-data:/data"]
+    mem_limit: 384m
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  backend:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      VIDLENS_DATABASE_URL: postgres://vidlens:${VIDLENS_DB_PASSWORD:-vidlens-local}@postgres:5432/vidlens_rebuild?sslmode=disable
+      VIDLENS_REDIS_URL: redis://redis:6379/0
+      VIDLENS_DATA_DIR: /var/lib/vidlens
+      VIDLENS_LISTEN: 0.0.0.0:8080
+      VIDLENS_PUBLIC_ORIGIN: ${VIDLENS_PUBLIC_ORIGIN:-http://127.0.0.1:8086}
+      VIDLENS_DEV_MEDIA_DIR: ""
+      VIDLENS_PLATFORM_COOKIE_FILE: /run/vidlens/platform-cookies.txt
+    ports: ["127.0.0.1:8086:8080"]
+    volumes:
+      - ./.local/backend.yaml:/etc/vidlens/backend.yaml:ro
+      - ${VIDLENS_COOKIE_FILE:-./config-examples/empty-cookies.txt}:/etc/vidlens/platform-cookies.txt:ro
+      - media-data:/var/lib/vidlens
+    mem_limit: 1536m
+    stop_grace_period: 45s
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+volumes:
+  postgres-data:
+  redis-data:
+  media-data:
