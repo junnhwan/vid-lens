@@ -1,0 +1,125 @@
+.shot-host > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #141716;
+}
+
+.source-still .shot-host {
+  width: 240px;
+}
+
+.source-still .shot-host > img {
+  width: 240px;
+  height: 135px;
+}
+
+.frame-missing {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  padding: 12px;
+  background: #141716;
+  color: #d7ebe6;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.shot-row {
+  display: grid;
+  gap: 10px;
+}
+
+.shot-row[data-layout="sequence"] {
+  grid-template-columns: 1fr 1fr;
+}
+
+.atlas .branch.is-current { stroke: var(--teal); stroke-width: 1.75; }
+.atlas .branch-dot.is-current { fill: var(--teal); transform: scale(1.4); }
+.atlas .branch.is-hot { stroke: var(--teal); }
+.atlas .branch-dot.is-hot { fill: var(--teal); }
+
+.limits {
+  margin-top: 1.8rem;
+  font-family: var(--sans);
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.limits h2 {
+  margin: 0 0 8px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.limits li { margin: 0 0 6px; }
+
+.prose pre {
+  margin: 0 0 1rem;
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #f7f3ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.prose table {
+  width: 100%;
+  margin: 0 0 1rem;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.prose th,
+.prose td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose blockquote {
+  margin: 0 0 1rem;
+  padding-left: 14px;
+  border-left: 2px solid var(--line-strong);
+}
+
+.compat {
+  margin: 0 0 1rem;
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.answer-kicker {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--amber-ink);
+}
+
+.history-note {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.lb-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 220px);
+  object-fit: contain;
+  background: #141716;
+}

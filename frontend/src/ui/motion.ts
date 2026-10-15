@@ -1,0 +1,113 @@
+export const EASE = "cubic-bezier(0.23, 1, 0.32, 1)"
+
+const generations = new WeakMap<HTMLElement, number>()
+
+export function prefersReduced(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
+function bump(el: HTMLElement): number {
+  const next = (generations.get(el) ?? 0) + 1
+  generations.set(el, next)
+  return next
+}
+
+function clearPosition(el: HTMLElement) {
+  el.style.position = ""
+  el.style.left = ""
+  el.style.right = ""
+  el.style.top = ""
+  el.style.zIndex = ""
+  el.style.pointerEvents = ""
+}
+
+export function showView(el: HTMLElement) {
+  const generation = bump(el)
+  window.scrollTo(0, 0)
+  clearPosition(el)
+  el.hidden = false
+  for (const anim of el.getAnimations()) anim.cancel()
+  if (prefersReduced()) return
+  const anim = el.animate(
+    [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }],
+    { duration: 340, easing: EASE, fill: "both" },
+  )
+  anim.onfinish = () => {
+    if (generations.get(el) === generation) anim.cancel()
+  }
+}
+
+export function hideView(el: HTMLElement) {
+  if (el.hidden) return
+  const generation = bump(el)
+  window.scrollTo(0, 0)
+  for (const anim of el.getAnimations()) anim.cancel()
+  if (prefersReduced()) {
+    el.hidden = true
+    clearPosition(el)
+    return
+  }
+  el.style.position = "absolute"
+  el.style.left = "0"
+  el.style.right = "0"
+  el.style.top = "0"
+  el.style.zIndex = "2"
+  el.style.pointerEvents = "none"
+  const anim = el.animate(
+    [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-8px)" }],
+    { duration: 180, easing: EASE, fill: "forwards" },
+  )
+  anim.onfinish = () => {
+    if (generations.get(el) !== generation) return
+    el.hidden = true
+    clearPosition(el)
+    anim.cancel()
+  }
+}
+
+export function animateTitle(el: HTMLElement, title: string) {
+  if (el.dataset.value === title) return
+  el.dataset.value = title
+  for (const anim of el.getAnimations()) anim.cancel()
+  if (!prefersReduced() && el.textContent) {
+    const outgoing = el.animate(
+      [
+        { opacity: 1, filter: "blur(0px)", transform: "translateY(0)" },
+        { opacity: 0.4, filter: "blur(1.5px)", transform: "translateY(-4px)" },
+      ],
+      { duration: 120, easing: EASE, fill: "forwards" },
+    )
+    outgoing.onfinish = () => {
+      if (el.dataset.value !== title) return
+      el.textContent = title
+      const incoming = el.animate(
+        [
+          { opacity: 0.4, filter: "blur(1.5px)", transform: "translateY(6px)" },
+          { opacity: 1, filter: "blur(0px)", transform: "translateY(0)" },
+        ],
+        { duration: 200, easing: EASE, fill: "forwards" },
+      )
+      incoming.onfinish = () => {
+        if (el.dataset.value === title) incoming.cancel()
+      }
+    }
+    return
+  }
+  el.textContent = title
+}
+
+export function flyStage(stage: HTMLElement, origin: HTMLElement | null, closing: boolean): Animation | null {
+  if (prefersReduced() || !origin || !origin.isConnected) return null
+  const first = origin.getBoundingClientRect()
+  const last = stage.getBoundingClientRect()
+  if (!last.width || !last.height || !first.width) return null
+  const dx = first.left - last.left
+  const dy = first.top - last.top
+  const sx = first.width / last.width
+  const sy = first.height / last.height
+  const from = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
+  return stage.animate(
+    closing ? [{ transform: "none" }, { transform: from }] : [{ transform: from }, { transform: "none" }],
+    { duration: closing ? 220 : 280, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
+  )
+}
