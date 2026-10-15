@@ -1,0 +1,48 @@
+# Execution and recovery
+
+`internal/store` owns short PostgreSQL control transactions; `internal/jobs` bridges them to Asynq. `internal/media` prepares versioned sources and owned image files. `internal/investigator` runs a single Eino ChatModelAgent with sequential Enhanced Tools. Runtime defaults and their validation live in `internal/config`; they are defaults, not benchmarks.
+
+## Durable boundaries
+
+- A visitor request and its Outbox entry commit before acceptance. Deterministic Asynq IDs identify a run/delivery generation. An uncertain enqueue is acknowledged only after matching the existing task's type/payload.
+- Each claim increments an execution epoch and creates an attempt. Database time, lease ownership, status, deadline and epoch guard all checkpoints, observations and publication. Network calls/FFmpeg run outside control transactions.
+- Source identity includes platform/video/P. A snapshot freezes complete-media SHA-256, text identity, real duration, text provenance and acquisition metadata. A subsequent request verifies content before article reuse. The key also contains the frozen configuration revision.
+- After acquiring usable current platform subtitles first, an ASR fallback may reuse a completed transcription only for the same source, fully verified audio/video bytes, duration, ASR endpoint/model and transcription pipeline. This is enabled for media containing the actual ASR audio input; video-only remote tracks still require fresh separate-audio acquisition/transcription. A same-title/same-duration match is insufficient; changing bytes or provider configuration forces a new transcription. The initial rebuild's unversioned ASR metadata denotes its original `60s-mp3-48k16k-v1` pipeline.
+- Article files are ready before publication. Article, image pins, run success, eligible request results and the final public event commit together. Canceled requests do not receive later shared results.
+- A question has its own run, checkpoint and private observations. Conversation tail/active-turn transitions and request idempotency share transaction ordering.
+
+The current store serializes short control mutations with one PostgreSQL advisory transaction lock. This intentionally keeps join/cancel/publish/pin ordering simple for the bounded single-host workload. It is not a claim of high write throughput. Read projections use repeatable-read snapshots. Public events retain step versions, so cancellation reads the version at its frozen watermark.
+
+## Eino evidence loop
+
+The main model receives the complete usable text plus sparse frames distributed across the whole duration. Overview sampling never takes only the first part of the video. Text beyond the configured input bound produces an explicit resource result rather than silently dropping the latter portion; arbitrary-length transcript summarization is not implemented.
+
+`find_evidence` locates candidate original segments. `read_source` expands exact text and neighbors. `inspect_video_window` extracts bounded real frames/crops or reloads original references. It returns persisted metadata and actual image parts. An adapter bridge keeps tool calls/results intact and moves tool images into a following multimodal user message for compatible providers. This bridge is covered by transport tests and a real model capability check.
+
+`record_observation` persists visible facts, literal details/units, inferences, conflicts, gaps and question status. New images cannot be evicted before that succeeds. Current comparison groups can remain protected; other recorded images become reference-only messages. Original observation records rebuild evidence capsules. Checkpoints store frame references, complete tool associations and protocol version, never Base64 or private model reasoning. Interrupted pending calls replay through stable operation identities; saved results are reused.
+
+`submit_article`/`submit_answer` create a candidate, not publication by themselves. The server validates block/map structure, IDs, snapshot ownership, contiguous exact-text citations, actual frame times, observation coverage, image files and stated limitations. There is one bounded candidate repair, including malformed JSON; independent article/block/citation errors are reported together. Critical unresolved questions block publication. These are mechanical checks; they do not prove the model's interpretation is correct.
+
+For ASR services returning only text, a segment is labeled by its actual audio window. The backend does not fabricate sentence timestamps. Remote submissions and available request IDs/usage are persisted separately from active messages. Unknown external outcomes may be charged twice; no exactly-once provider promise is made.
+
+The first durable completion of each operation also advances the run's business-progress time in the same fenced transaction. Heartbeats, submissions and replaying completed outputs do not advance that clock. ASR updates one persisted activity step after each completed or restored audio window, with processed duration and total duration. Long, productive transcription therefore remains distinguishable from a stalled phase without extending any call or task budget.
+
+Model responses are streamed **inside the worker**, concatenated into complete tool calls/results, then persisted. Public SSE still has no token deltas. A first meaningful response must arrive within 90 seconds; role-only chunks do not satisfy this. Content/tool/reasoning progress has a 60-second idle bound, and the whole call has a 180-second bound. Once the current images have recorded observations and critical questions are supported, an article call can use the 300-second writing allowance. Provider reasoning is discarded before persistence. An interrupted stream or missing finish marker cannot become a completed operation. This avoids confusing a long non-stream generation with a response-header timeout.
+
+## Retries, interruption and restore
+
+Asynq schedules ordinary retries. PostgreSQL retains cumulative failure, operation-submission and active-time budgets plus absolute deadlines. Reconciliation does not create a parallel everyday scheduler: it inspects the current broker task and business lease, repairs a confirmed missing delivery, wakes a completed dependency, or converges an exhausted/archived/deadline state. Unknown Redis state does not mean task absence.
+
+Graceful shutdown stops work cooperatively and preserves the latest checkpoint without granting a fresh budget. An expired old attempt cannot publish after a new claim. Child processes use process groups, bounded waits and cancellation. Each selected model/ASR invocation stays within the worker's bounded call; asynchronous provider jobs and polling are not implemented.
+
+A valid visual question can depend on one shared `source.restore`. It releases the Q&A pool slot, retains its own answer identity and receives projected restoration steps. The downloaded bytes must match the frozen original-video fingerprint. Restoration reuses old text and never regenerates the article. A changed source fails honestly. Replacement frames get new IDs; image viewing alone never triggers restoration.
+
+## Resource and asset lifecycle
+
+Separate generation, interactive and maintenance pools preserve a Q&A slot. Download, FFmpeg and ordinary/interactive AI lanes use Redis owner leases with PostgreSQL leases as the final fence. Cache entries are small, collision-checked, expiring indices in a fixed slot set; bytes/media/conversations are not cached in Redis. Capacity is reserved in PostgreSQL before expensive work and checked against real disk availability.
+
+Cleanup marks an unpinned expired asset `deleting` under the same transaction order used for new pins. Physical deletion occurs outside the transaction and can resume from `deleting`. Run/checkpoint pins outlive an attempt; published image pins have article lifetime. Answer/history/diagnostic retention is separate. Orphan cleanup only visits the backend's own `work`/`assets` roots and preserves active runs.
+
+The Go runtime applies a soft heap limit; FFmpeg threads and child RSS are bounded/observed. The Compose file supplies process-group memory limits for a containerized deployment. Resource defaults do not constitute a server capacity or quality benchmark.
+
+Vector retrieval is not enabled. Current-video evidence gathering uses exact temporal/keyword text access alongside full-source coverage. PostgreSQL remains the source of truth; any future vector projection must use pgvector and must not replace the whole-video overview.

@@ -1,0 +1,19 @@
+# Local state and private material are excluded by default.
+.env
+.env.*
+!.env.example
+.local/
+node_modules/
+dist/
+build/
+*.log
+__pycache__/
+/vidlens
+/coverage.out
+.DS_Store
+
+# Agent guidance, session context and private records travel in private handoff
+# packages. Public docs contain only implementation and usage documentation.
+AGENTS.md
+CONTEXT.md
+docs-private/
