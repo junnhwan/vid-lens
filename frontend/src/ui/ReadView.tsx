@@ -1,4 +1,4 @@
-import { useEffect, useState, type Ref } from "react"
+import { useEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, ArticleResponse, Citation, Frame, RequestView, TurnView } from "../contract/types"
 import { formatDuration, platformLabel } from "../contract/text"
 import { prefersReduced } from "./motion"
@@ -24,6 +24,7 @@ export function ReadView(props: {
   qaError: string
   expanded: Record<string, boolean | undefined>
   focusToken: number
+  active: boolean
   viewRef?: Ref<HTMLElement>
   onToggleQa: () => void
   onRetryArticle: () => void
@@ -44,8 +45,20 @@ export function ReadView(props: {
   const [genOpen, setGenOpen] = useState(false)
   const [current, setCurrent] = useState("article-top")
   const [locked, setLocked] = useState<string | null>(null)
+  const [arrive, setArrive] = useState(false)
+  const seenArticle = useRef<string | null>(null)
   const article = props.article?.article
+  const firstFigure = article?.sections.flatMap((section) => section.blocks).find((block) => block.type === "figure")?.id
   const meta = [platformLabel(article?.source.platform), formatDuration(article?.source.duration_ms), article?.source.part?.label].filter(Boolean).join(" · ")
+
+  useEffect(() => {
+    if (!props.active || !article || prefersReduced()) return
+    if (seenArticle.current === article.id) return
+    seenArticle.current = article.id
+    setArrive(true)
+    const timer = window.setTimeout(() => setArrive(false), 720)
+    return () => window.clearTimeout(timer)
+  }, [props.active, article?.id])
 
   useEffect(() => {
     if (!article) return
@@ -97,7 +110,7 @@ export function ReadView(props: {
               </div>
             </div>
             {article?.mind_map ? <MindMap map={article.mind_map} current={current} onJump={jump} /> : null}
-            <div className="prose" id="prose">
+            <div className="prose" id="prose" data-arrive={arrive ? "true" : undefined}>
               {props.article && !props.article.media.can_inspect_now ? (
                 <p className="history-note">
                   {props.article.media.can_restore_for_question
@@ -106,14 +119,15 @@ export function ReadView(props: {
                 </p>
               ) : null}
               {props.articleError ? <p className="form-error">{props.articleError} <button type="button" className="btn quiet" onClick={props.onRetryArticle}>重新读取</button></p> : null}
-              {article?.sections.map((section) => (
-                <section key={section.id}>
+              {article?.sections.map((section, index) => (
+                <section key={section.id} style={arrive ? { animationDelay: `${Math.min(index, 5) * 48}ms` } : undefined}>
                   <h2 id={section.id} tabIndex={-1}>{section.title}</h2>
                   {section.blocks.map((block) => (
                     <BlockView
                       key={block.id}
                       block={block}
                       sectionId={section.id}
+                      carry={block.id === firstFigure}
                       citations={article.citations ?? {}}
                       frames={props.frames}
                       onOpenFrame={props.onOpenFrame}

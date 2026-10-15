@@ -63,6 +63,7 @@ export function BlockView({
   onAskFrame,
   onCite,
   onBroken,
+  carry,
 }: {
   block: Block
   sectionId: string
@@ -72,6 +73,7 @@ export function BlockView({
   onAskFrame: (frame: Frame) => void
   onCite: (citation: Citation) => void
   onBroken: (frame: Frame) => void
+  carry?: boolean
 }) {
   const attrs = { "data-block-id": block.id, "data-section-id": sectionId }
   if (block.type === "paragraph") {
@@ -119,7 +121,7 @@ export function BlockView({
               onClick={(event) => onOpenFrame(shown, index, event.currentTarget.querySelector(".shot-host") || event.currentTarget)}
             >
               <span className="sr-only">放大 {formatClock(frame.time_ms)} 的画面</span>
-              <span className="shot-host"><FrameThumb frame={frame} onBroken={onBroken} /></span>
+              <span className="shot-host" data-carry-to={carry && index === 0 ? "true" : undefined}><FrameThumb frame={frame} onBroken={onBroken} /></span>
             </button>
           ))}
           {!shown.length ? <span className="frame-missing">这张画面现在不能显示</span> : null}

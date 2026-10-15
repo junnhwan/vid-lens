@@ -5,7 +5,7 @@ import { createMockRuntime } from "./mock"
 async function finishArticle() {
   const runtime = createMockRuntime({ auto: false })
   const created = await runtime.api.createRequest("https://www.bilibili.com/video/BV1mockvideo?p=1", "key-article")
-  for (let i = 0; i < 4; i += 1) runtime.advance()
+  for (let i = 0; i < 5; i += 1) runtime.advance()
   const view = await runtime.api.getRequest(created.body.request.id)
   return { runtime, view }
 }
@@ -25,6 +25,10 @@ describe("mock visitor api", () => {
     const runtime = createMockRuntime({ auto: false })
     const created = await runtime.api.createRequest("https://www.bilibili.com/video/BV1mockvideo?p=1", "once")
     await expect(runtime.api.article(created.body.request.id)).rejects.toBeInstanceOf(ApiError)
+    runtime.advance()
+    const transcribing = await runtime.api.getRequest(created.body.request.id)
+    expect(transcribing.request.status).toBe("waiting_source")
+    expect(transcribing.activity.recent_steps[0]?.title).toBe("正在转写音频（18:00 / 35:42）")
     runtime.advance()
     expect((await runtime.api.getRequest(created.body.request.id)).request.status).toBe("generating")
     runtime.advance()

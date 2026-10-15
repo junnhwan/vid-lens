@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { choosePassage } from "../contract/text"
 import { useVisitor } from "./useVisitor"
-import { hideView, showView } from "../ui/motion"
+import { carryStill, hideView, showView } from "../ui/motion"
 import { hitsInSelection } from "../ui/selection"
 import { EntryView } from "../ui/EntryView"
 import { Lightbox } from "../ui/Lightbox"
@@ -57,6 +57,9 @@ export function App() {
     const run = runRef.current
     const read = readRef.current
     const next = visitor.phase === "input" ? input : visitor.phase === "reading" ? read : run
+    const previous = shown.current
+    const origin = previous?.querySelector<HTMLElement>("[data-carry-from]")
+    const start = origin?.getBoundingClientRect()
     for (const el of [input, run, read]) {
       if (!el || el === next) continue
       if (shown.current === el) hideView(el)
@@ -65,6 +68,10 @@ export function App() {
     if (next && shown.current !== next) {
       showView(next)
       shown.current = next
+    }
+    if (previous === run && next === read && start && next) {
+      const dest = next.querySelector<HTMLElement>("[data-carry-to]")
+      if (dest) carryStill(start, dest)
     }
     document.body.dataset.phase = visitor.phase === "run" ? "generating" : visitor.phase
   }, [visitor.phase])
@@ -231,6 +238,7 @@ export function App() {
               qaError={visitor.qaError}
               expanded={visitor.expanded}
               focusToken={visitor.focusToken}
+              active={visitor.phase === "reading"}
               onToggleQa={visitor.toggleQa}
               onRetryArticle={visitor.retryArticle}
               onOpenFrame={visitor.openFrames}

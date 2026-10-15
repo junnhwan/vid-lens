@@ -387,7 +387,7 @@ class MockWorld {
       phase: "prepare_source",
       wait: null,
       seq: 1,
-      steps: [step({ id: `${id}-source`, title: "正在确认视频来源", purpose: "先核对链接和可用来源。", status: "running", first_seq: 1, last_seq: 1, segment_no: 1, run_id: `${id}-prepare`, phase: "prepare_source" })],
+      steps: [step({ id: `${id}-source`, title: "正在转写音频（4:00 / 35:42）", purpose: "平台没有可用字幕，按音频长度转写。", status: "running", first_seq: 1, last_seq: 1, segment_no: 1, run_id: `${id}-prepare`, phase: "prepare_source" })],
       failure: null,
       stage: 0,
       createdAt: now(),
@@ -405,6 +405,12 @@ class MockWorld {
     job.updatedAt = now()
     job.stage += 1
     if (job.stage === 1) {
+      job.seq += 1
+      job.steps[0] = { ...job.steps[0], title: "正在转写音频（18:00 / 35:42）", last_seq: job.seq }
+      this.publish(job, "activity.upsert")
+      return
+    }
+    if (job.stage === 2) {
       job.steps[0] = { ...job.steps[0], status: "completed", finished_at: now(), outcome: { message: "已确认来源。", evidence_status: "not_applicable" }, last_seq: job.seq }
       job.status = "generating"
       job.reuse = "none"
@@ -419,7 +425,7 @@ class MockWorld {
       this.publish(job, "view.snapshot")
       return
     }
-    if (job.stage === 2) {
+    if (job.stage === 3) {
       this.completeCurrent(job, "主线是把重复操作存成流程。")
       job.seq += 1
       job.phase = "investigate"
@@ -438,7 +444,7 @@ class MockWorld {
       this.publish(job, "view.snapshot")
       return
     }
-    if (job.stage === 3) {
+    if (job.stage === 4) {
       const current = job.steps[job.steps.length - 1]
       job.seq += 1
       job.steps[job.steps.length - 1] = {

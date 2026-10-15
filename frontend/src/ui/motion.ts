@@ -96,6 +96,43 @@ export function animateTitle(el: HTMLElement, title: string) {
   el.textContent = title
 }
 
+const EASE_MOVE = "cubic-bezier(0.77, 0, 0.175, 1)"
+
+export function carryStill(start: DOMRect, to: HTMLElement) {
+  if (prefersReduced() || start.width < 8) return
+  const end = to.getBoundingClientRect()
+  if (end.width < 8 || end.height < 8) return
+  const clone = to.cloneNode(true) as HTMLElement
+  clone.setAttribute("aria-hidden", "true")
+  clone.style.position = "fixed"
+  clone.style.left = `${start.left}px`
+  clone.style.top = `${start.top}px`
+  clone.style.width = `${start.width}px`
+  clone.style.height = `${start.height}px`
+  clone.style.margin = "0"
+  clone.style.zIndex = "30"
+  clone.style.pointerEvents = "none"
+  clone.style.overflow = "hidden"
+  clone.style.borderRadius = "10px"
+  clone.style.transformOrigin = "top left"
+  document.body.appendChild(clone)
+  to.style.opacity = "0"
+  const dx = end.left - start.left
+  const dy = end.top - start.top
+  const sx = end.width / start.width
+  const sy = end.height / start.height
+  const anim = clone.animate(
+    [{ transform: "none" }, { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }],
+    { duration: 280, easing: EASE_MOVE, fill: "forwards" },
+  )
+  const finish = () => {
+    clone.remove()
+    to.style.opacity = ""
+  }
+  anim.onfinish = finish
+  anim.oncancel = finish
+}
+
 export function flyStage(stage: HTMLElement, origin: HTMLElement | null, closing: boolean): Animation | null {
   if (prefersReduced() || !origin || !origin.isConnected) return null
   const first = origin.getBoundingClientRect()

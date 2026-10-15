@@ -1,6 +1,7 @@
 import type { ActivityStep, ExecutionView, RequestView, TurnView } from "../contract/types"
 import { formatRange } from "../contract/text"
 import { isTerminalStatus } from "../contract/stream"
+import { displayStepTitle } from "./progress"
 
 const phaseTitle: Record<string, string> = {
   prepare_source: "正在准备视频",
@@ -44,7 +45,7 @@ export function describeRequest(view: RequestView | null, current: ActivityStep 
     return { kicker, title: "已停止理解", purpose: "停在已经取得的内容，文章还没有生成。", range: "", busy: false }
   }
   if (current) {
-    return { kicker, title: current.title, purpose: current.purpose || "", range: formatRange(current.source_range), busy: true }
+    return { kicker, title: displayStepTitle(current.title), purpose: current.purpose || "", range: formatRange(current.source_range), busy: true }
   }
   return { kicker, title: fallbackTitle(execution), purpose: fallbackPurpose(execution), range: "", busy: !isTerminalStatus(status) }
 }
@@ -82,6 +83,9 @@ export function stepPresentation(step: ActivityStep, resourceStatus: string): { 
   const unfinished = step.status === "running" || step.status === "queued"
   if (resourceStatus === "canceled" && unfinished) {
     return { status: "stopped", outcome: step.outcome?.message || "取消时尚未完成" }
+  }
+  if (resourceStatus === "failed" && unfinished) {
+    return { status: "stopped", outcome: step.outcome?.message || "处理失败时尚未完成" }
   }
   if (step.status === "completed") return { status: "done", outcome: step.outcome?.message || "" }
   if (step.status === "failed" || step.status === "canceled") return { status: "stopped", outcome: step.outcome?.message || "" }
