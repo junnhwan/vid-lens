@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VidLens</title>
+  <link rel="stylesheet" href="./styles.css">
+  <!--
+    原型问题：同一桌面页里，链接、透明的生成过程、只读文章和侧边问答，这样串起来是否顺手？
+    只做一套方案。模拟数据。不访问链接，不调用模型，刷新即重置。
+    直接打开本文件即可。
+  -->
+</head>
+<body data-phase="input">
+  <a class="skip" href="#main">跳到内容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="wordmark">VidLens</span>
+      <div class="proto-dock" role="group" aria-label="原型跳转，不是产品界面">
+        <span class="proto-name">原型</span>
+        <button type="button" data-jump="input" aria-pressed="true">链接</button>
+        <button type="button" data-jump="run">生成</button>
+        <button type="button" data-jump="read">阅读</button>
+        <span id="proto-now" class="proto-now">等待链接</span>
+      </div>
+      <button type="button" class="btn primary" id="new-video">新视频</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="view-input" class="view-input">
+      <p class="kicker">访客可以直接开始</p>
+      <h1>贴上视频链接</h1>
+      <p class="lede">不用注册。理解过程会留下可展开的步骤和实际画面；文章生成后只读，可以就画面继续问。</p>
+      <form id="link-form" class="link-form">
+        <label class="sr-only" for="link">视频链接</label>
+        <input id="link" name="link" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.bilibili.com/video/…">
+        <button type="submit" class="btn primary">开始理解</button>
+      </form>
+      <p id="link-error" class="form-error" hidden>先贴上链接。</p>
+      <div class="input-side">
+        <button type="button" class="btn quiet" id="use-sample">使用示例视频</button>
+        <p class="fine">原型不会打开或下载这个链接，过程使用内置示例。</p>
+      </div>
+    </section>
+
+    <section id="view-run" class="view-run" hidden>
+      <div class="source">
+        <div class="source-still" aria-hidden="true">
+          <span class="still-nav"></span>
+          <span class="still-line"></span>
+          <span class="still-line short"></span>
+          <span class="still-time">35:42</span>
+        </div>
+        <div>
+          <p class="source-title">把重复操作变成可复用流程</p>
+          <p class="source-meta">B站 · 35:42 · 示例视频</p>
+          <p class="source-note">原型没有打开链接，下面是内置示例。</p>
+        </div>
+      </div>
+
+      <div class="activity" aria-busy="true">
+        <p class="kicker"><span class="pulse" id="pulse" aria-hidden="true"></span><span id="run-kicker">正在理解视频</span></p>
+        <h1 id="activity-title" class="activity-title"></h1>
+        <p id="activity-purpose" class="purpose"></p>
+        <div class="run-actions">
+          <p id="activity-range" class="range" hidden></p>
+          <button type="button" class="btn stop" id="stop-run">停止</button>
+          <button type="button" class="btn primary" id="retry-run" hidden>重新理解</button>
+        </div>
+        <div id="ready-banner" class="ready-banner" hidden>
+          <p>文章已就绪</p>
+          <button type="button" class="btn primary" id="start-reading">开始阅读</button>
+        </div>
+      </div>
+
+      <div id="run-frames" class="frames"></div>
+
+      <div class="history">
+        <div id="run-steps" class="steps" role="list"></div>
+        <div class="history-bar">
+          <button type="button" class="disclosure" id="toggle-history" aria-expanded="false">查看全部过程</button>
+          <button type="button" class="jump-latest" id="jump-latest" hidden>回到最新</button>
+        </div>
+      </div>
+      <p class="leave-note">已看到的步骤和画面会留在这一页。刷新后原型会回到开始。</p>
+    </section>
+
+    <section id="view-read" class="view-read" hidden>
+      <div id="workspace" class="workspace" data-qa="closed">
+        <div class="article-col">
+          <article class="sheet" id="article" aria-readonly="true">
+            <header class="article-head">
+              <h1 id="article-top" tabindex="-1">把重复操作变成可复用流程</h1>
+              <div class="article-tools">
+                <p class="meta">B站 · 35:42 · 示例视频</p>
+                <button type="button" class="disclosure" id="toggle-gen" aria-expanded="false">查看生成过程</button>
+                <button type="button" class="btn toggle" id="toggle-qa" aria-pressed="false">问这条视频</button>
+              </div>
+            </header>
+
+            <div id="gen-panel" class="disclose" data-open="false">
+              <div class="disclose-inner">
+                <div id="gen-steps" class="steps gen-steps" role="list"></div>
+              </div>
+            </div>
+
+            <section class="map" aria-labelledby="map-label">
+              <div class="map-head">
+                <h2 id="map-label">内容导图</h2>
+                <button type="button" id="map-toggle" aria-expanded="true" aria-controls="map-panel">收起</button>
+              </div>
+              <div id="map-panel" class="disclose" data-open="true">
+                <div class="disclose-inner">
+                  <div class="atlas" data-current="article-top">
+                    <button type="button" class="atlas-root node" data-target="article-top">
+                      <strong>可复用流程</strong>
+                      <em>这篇的主线</em>
+                    </button>
+                    <div class="atlas-spine" aria-hidden="true">
+                      <span class="atlas-seed"></span>
+                      <svg class="atlas-svg" viewBox="0 0 72 172" width="72" height="172">
+                        <path class="trunk" d="M8 86H20"/>
+                        <path class="branch" data-branch="scene" d="M20 86C34 84 42 32 70 26"/>
+                        <path class="branch" data-branch="steps" d="M20 86H70"/>
+                        <path class="branch" data-branch="cautions" d="M20 86C34 88 42 140 70 146"/>
+                        <circle class="branch-dot" data-branch="scene" cx="70" cy="26" r="2.4"/>
+                        <circle class="branch-dot" data-branch="steps" cx="70" cy="86" r="2.4"/>
+                        <circle class="branch-dot" data-branch="cautions" cx="70" cy="146" r="2.4"/>
+                      </svg>
+                    </div>
+                    <div class="atlas-leaves">
+                      <button type="button" class="atlas-leaf node" data-target="scene">
+                        <span class="atlas-index" aria-hidden="true">01</span>
+                        <span class="atlas-leaf-text">
+                          <strong>适用场景</strong>
+                          <em>重复操作值得保存</em>
+                        </span>
+                      </button>
+                      <button type="button" class="atlas-leaf node" data-target="steps">
+                        <span class="atlas-index" aria-hidden="true">02</span>
+                        <span class="atlas-leaf-text">
+                          <strong>配置步骤</strong>
+                          <em>先保存，再运行</em>
+                        </span>
+                      </button>
+                      <button type="button" class="atlas-leaf node" data-target="cautions">
+                        <span class="atlas-index" aria-hidden="true">03</span>
+                        <span class="atlas-leaf-text">
+                          <strong>注意事项</strong>
+                          <em>没有看到运行结果</em>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div class="prose" id="prose">
+              <h2 id="scene" tabindex="-1">适用场景</h2>
+              <p>日常里有些操作会反复出现：整理表格、发出同一类通知、把文件按规则归类。视频把这件事收成一条主线：与其每次重做，不如把步骤存成一套可以再次运行的流程。</p>
+              <p>说话人演示的是一个叫「自动化流程」的界面。左侧是流程中心，中间是当前流程。这一段没有比较不同产品，只说明重复操作为什么值得被保存。</p>
+
+              <h2 id="steps" tabindex="-1">配置步骤</h2>
+              <p>配置从菜单开始。<button type="button" class="time" data-frame="0512">05:12</button> 时界面还停在编辑状态，主按钮是「添加步骤」。到 <button type="button" class="time" data-frame="0524">05:24</button>，菜单展开，能看到「添加步骤」「保存流程」和「运行」。</p>
+
+              <figure class="figure">
+                <button type="button" class="shot-btn" data-frame="0524">
+                  <span class="sr-only">放大 05:24 的画面</span>
+                  <span class="shot-host" id="article-shot"></span>
+                </button>
+                <figcaption>
+                  <span>展开菜单，查看可添加的步骤。</span>
+                  <span class="caption-actions">
+                    <button type="button" class="time" data-frame="0524">05:24</button>
+                    <button type="button" class="ask" data-ask="0524">问这张图</button>
+                  </span>
+                </figcaption>
+              </figure>
+
+              <p>保存之后，这套步骤可以再被运行。视频里的顺序是先打开菜单，再选择保存流程，然后才运行。</p>
+
+              <aside class="supplement">
+                <span class="supplement-kicker">补充解释</span>
+                <p>先保存，是为了让当前步骤成为一份可复用的配置。如果跳过保存直接运行，流程还没有被记录，下次仍要重做。原视频没有单独演示失败画面，这段只补充理解顺序所需要的原因。</p>
+              </aside>
+
+              <h2 id="cautions" tabindex="-1">注意事项</h2>
+              <p>菜单里的名称以画面为准：「保存流程」不等于已经运行。05:12 和 05:24 只覆盖菜单展开前后，没有看到运行完成后的结果页。文章因此不描述运行之后的界面。</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="qa-slot">
+          <section id="qa" class="qa" aria-labelledby="qa-title">
+            <header class="qa-head">
+              <div>
+                <h2 id="qa-title">问这条视频</h2>
+                <p>只解释这条视频和文章，不会改写正文。</p>
+              </div>
+              <button type="button" class="icon-btn" id="qa-close" aria-label="收起问答">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </button>
+            </header>
+            <div id="qa-log" class="qa-log">
+              <div id="qa-empty" class="qa-empty">
+                <p>可以问文章里的步骤，也可以从某张图问起。</p>
+                <button type="button" class="suggest" id="suggest">为什么这里要先保存，再运行？</button>
+              </div>
+            </div>
+            <form id="composer-form" class="composer">
+              <div id="chips" class="chips"></div>
+              <div class="composer-field">
+                <label class="sr-only" for="composer">问题</label>
+                <textarea id="composer" rows="2" placeholder="就这条视频提问"></textarea>
+                <button type="submit" class="send" id="send" aria-label="发送" disabled>
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.5M4.5 6.5L8 3l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button type="button" class="send stop-send" id="stop-answer" hidden>停止</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="lightbox" aria-label="画面">
+    <div class="lb">
+      <div class="lb-stage" id="lb-stage"></div>
+      <div class="lb-meta">
+        <p id="lb-caption"></p>
+        <p id="lb-count" class="lb-count"></p>
+      </div>
+      <div class="lb-toolbar">
+        <div class="lb-nav">
+          <button type="button" class="btn stop" id="lb-prev">上一张</button>
+          <button type="button" class="btn stop" id="lb-next">下一张</button>
+        </div>
+        <div class="lb-actions">
+          <p id="lb-ask-note" class="lb-note" hidden>文章完成后再问</p>
+          <button type="button" class="btn primary" id="lb-ask" disabled>问这张图</button>
+          <button type="button" class="btn stop" id="lb-close">关闭</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <button type="button" id="ask-passage" class="passage-pop" hidden>问这段</button>
+  <div id="live" class="sr-only" aria-live="polite"></div>
+
+  <template id="tpl-shot-closed">
+    <div class="shot-ui" aria-hidden="true">
+      <div class="shot-chrome">
+        <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>流程工具</span>
+        <span class="shot-time">05:12</span>
+      </div>
+      <div class="shot-body">
+        <div class="shot-nav">
+          <span>首页</span>
+          <span class="is-on">流程中心</span>
+          <span>数据统计</span>
+          <span>设置</span>
+        </div>
+        <div class="shot-main">
+          <strong>自动化流程</strong>
+          <em>保存后可再次运行。</em>
+          <div class="shot-actions">
+            <span class="shot-primary">添加步骤</span>
+            <span>保存流程</span>
+            <span>运行</span>
+          </div>
+          <ul>
+            <li class="is-on">获取数据</li>
+            <li>流程审批</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-shot-open">
+    <div class="shot-ui" aria-hidden="true">
+      <div class="shot-chrome">
+        <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>流程工具</span>
+        <span class="shot-time">05:24</span>
+      </div>
+      <div class="shot-body">
+        <div class="shot-nav">
+          <span>首页</span>
+          <span class="is-on">流程中心</span>
+          <span>数据统计</span>
+          <span>设置</span>
+        </div>
+        <div class="shot-main">
+          <strong>自动化流程</strong>
+          <em>保存后可再次运行。</em>
+          <div class="shot-actions">
+            <span class="shot-primary">添加步骤</span>
+            <span>保存流程</span>
+            <span>运行</span>
+            <div class="shot-menu">
+              <span>添加步骤</span>
+              <span class="is-hover">保存流程<i class="cursor" aria-hidden="true"></i></span>
+              <span>运行</span>
+            </div>
+          </div>
+          <ul>
+            <li>获取数据</li>
+            <li>流程审批</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
