@@ -3,6 +3,8 @@
 
 const EASE = "cubic-bezier(0.23, 1, 0.32, 1)";
 const SAMPLE = "https://www.bilibili.com/video/BV1example";
+const VISITORS = 1286;
+const LIKES = 86;
 
 const FRAMES = [
   { id: "0512", time: "05:12", menu: "closed", short: "展开前", caption: "查看展开前的编辑界面" },
@@ -69,6 +71,9 @@ const state = {
   lightbox: { open: false, index: 0, origin: null },
   mapLock: null,
   seq: 0,
+  likeCount: LIKES,
+  likeTaps: 0,
+  censusPlayed: false,
 };
 
 const pending = new Set();
@@ -298,16 +303,264 @@ function scheduleBeats() {
   }
 }
 
+function viewFor(phase) {
+  if (phase === "reading") return $("view-read");
+  if (phase === "input") return $("view-input");
+  return $("view-run");
+}
+
+const viewGen = new WeakMap();
+
+function bumpView(el) {
+  const n = (viewGen.get(el) || 0) + 1;
+  viewGen.set(el, n);
+  return n;
+}
+
+function clearViewStyle(el) {
+  el.style.position = "";
+  el.style.left = "";
+  el.style.right = "";
+  el.style.top = "";
+  el.style.zIndex = "";
+  el.style.pointerEvents = "";
+}
+
+function showView(el) {
+  const gen = bumpView(el);
+  window.scrollTo(0, 0);
+  clearViewStyle(el);
+  el.hidden = false;
+  for (const anim of el.getAnimations()) anim.cancel();
+  if (prefersReduced()) return;
+  const anim = el.animate(
+    [
+      { opacity: 0, transform: "translateY(12px)" },
+      { opacity: 1, transform: "none" },
+    ],
+    { duration: 340, easing: EASE, fill: "both" },
+  );
+  anim.onfinish = () => {
+    if (viewGen.get(el) === gen) anim.cancel();
+  };
+}
+
+function hideView(el) {
+  if (el.hidden) return;
+  const gen = bumpView(el);
+  window.scrollTo(0, 0);
+  for (const anim of el.getAnimations()) anim.cancel();
+  if (prefersReduced()) {
+    el.hidden = true;
+    clearViewStyle(el);
+    return;
+  }
+  el.style.position = "absolute";
+  el.style.left = "0";
+  el.style.right = "0";
+  el.style.top = "0";
+  el.style.zIndex = "2";
+  el.style.pointerEvents = "none";
+  const anim = el.animate(
+    [
+      { opacity: 1, transform: "none" },
+      { opacity: 0, transform: "translateY(-8px)" },
+    ],
+    { duration: 180, easing: EASE, fill: "forwards" },
+  );
+  anim.onfinish = () => {
+    if (viewGen.get(el) !== gen) return;
+    el.hidden = true;
+    clearViewStyle(el);
+    anim.cancel();
+  };
+}
+
+function formatCount(n) {
+  return n.toLocaleString("zh-Hans");
+}
+
+function countTo(el, target) {
+  const from = Math.max(0, target - 120);
+  const duration = 880;
+  const start = performance.now();
+  el.textContent = formatCount(from);
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - (1 - t) ** 3;
+    el.textContent = formatCount(Math.round(from + (target - from) * eased));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function mountFilm(parent, id) {
+  const host = document.createElement("span");
+  host.className = "shot-host";
+  host.append(createShot(id));
+  parent.replaceChildren(host);
+}
+
+function playEntry() {
+  const stage = $("entry-stage");
+  stage.classList.remove("is-live");
+  void stage.offsetWidth;
+  stage.classList.add("is-live");
+  if (state.censusPlayed || prefersReduced()) {
+    state.censusPlayed = true;
+    $("census-count").textContent = formatCount(VISITORS);
+    return;
+  }
+  state.censusPlayed = true;
+  countTo($("census-count"), VISITORS);
+}
+
+let likeAnnounce = 0;
+let likeBloom = 0;
+
+function rollCount(value) {
+  const el = $("like-count");
+  const text = formatCount(value);
+  const next = document.createElement("span");
+  next.className = "like-num is-fresh";
+  next.textContent = text;
+  const previous = [...el.querySelectorAll(".like-num")];
+  el.append(next);
+  for (const node of previous) {
+    node.classList.remove("is-fresh");
+    for (const anim of node.getAnimations()) anim.cancel();
+    if (prefersReduced()) {
+      node.remove();
+      continue;
+    }
+    node.animate(
+      [{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-120%)", opacity: 0 }],
+      { duration: 180, easing: EASE, fill: "forwards" },
+    ).onfinish = () => node.remove();
+  }
+  if (prefersReduced()) return;
+  next.animate(
+    [{ transform: "translateY(70%)", opacity: 0.2 }, { transform: "translateY(0)", opacity: 1 }],
+    { duration: 180, easing: EASE },
+  );
+}
+
+function stampLike(n) {
+  const button = $("like");
+  const seal = button.querySelector(".like-seal");
+  const prints = button.querySelector(".like-prints");
+  const tilt = ((n % 5) - 2) * 11;
+  const angle = ((n * 52) - 90) * Math.PI / 180;
+  const bloom = n % 5 === 0;
+  for (const anim of seal.getAnimations()) anim.cancel();
+  seal.animate(
+    [
+      { transform: "translateY(0) rotate(0deg) scale(1)" },
+      { transform: `translateY(3px) rotate(${tilt}deg) scale(0.88)`, offset: 0.28 },
+      { transform: `translateY(0) rotate(${tilt * 0.35}deg) scale(1.05)`, offset: 0.62 },
+      { transform: "translateY(0) rotate(0deg) scale(1)" },
+    ],
+    { duration: 420, easing: EASE },
+  );
+
+  const ghost = document.createElement("span");
+  ghost.className = "like-ghost";
+  ghost.append(button.querySelector(".like-thumb").cloneNode(true));
+  const dist = 26 + (n % 4) * 8;
+  const dx = Math.cos(angle) * dist;
+  const dy = Math.sin(angle) * dist;
+  prints.append(ghost);
+  while (prints.childElementCount > 6) prints.firstElementChild.remove();
+  ghost.animate(
+    [
+      { opacity: 0.9, transform: "translate(-50%, -50%) rotate(0deg) scale(1)" },
+      { opacity: 0, transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${tilt + (n % 2 ? 16 : -12)}deg) scale(0.7)` },
+    ],
+    { duration: 780, easing: EASE },
+  ).onfinish = () => ghost.remove();
+
+  const dent = document.createElement("span");
+  dent.className = "like-dent";
+  seal.append(dent);
+  dent.animate(
+    [
+      { opacity: 0.85, transform: `rotate(${tilt}deg) scale(1, 0.55)` },
+      { opacity: 0, transform: `rotate(${tilt}deg) scale(2.6, 1.4)` },
+    ],
+    { duration: 520, easing: EASE },
+  ).onfinish = () => dent.remove();
+
+  const spray = document.createElement("span");
+  spray.className = "like-spray";
+  const drops = bloom ? 9 : 6;
+  for (let i = 0; i < drops; i += 1) {
+    const blot = document.createElement("i");
+    const spread = angle + (i - (drops - 1) / 2) * 0.42;
+    const reach = 18 + (i % 3) * 9 + (bloom ? 10 : 0);
+    blot.style.setProperty("--dx", `${Math.cos(spread) * reach}px`);
+    blot.style.setProperty("--dy", `${Math.sin(spread) * reach}px`);
+    blot.style.setProperty("--spin", `${((i * 37 + n * 13) % 70) - 35}deg`);
+    if (i % 3 === 0) blot.dataset.warm = "true";
+    if (bloom && i === drops - 1) blot.dataset.hot = "true";
+    spray.append(blot);
+  }
+  seal.append(spray);
+  while (seal.querySelectorAll(".like-spray").length > 3) seal.querySelector(".like-spray").remove();
+  spray.addEventListener("animationend", (event) => {
+    if (event.target === spray.lastElementChild) spray.remove();
+  });
+
+  const plus = document.createElement("span");
+  plus.className = "like-plus";
+  plus.textContent = "+1";
+  plus.style.setProperty("--drift", `${Math.round(Math.cos(angle) * 12)}px`);
+  seal.append(plus);
+  while (seal.querySelectorAll(".like-plus").length > 3) seal.querySelector(".like-plus").remove();
+  plus.animate(
+    [
+      { opacity: 0, transform: "translate(-50%, 6px)" },
+      { opacity: 1, offset: 0.22, transform: "translate(calc(-50% + var(--drift)), -6px)" },
+      { opacity: 0, transform: "translate(calc(-50% + var(--drift)), -30px)" },
+    ],
+    { duration: 680, easing: EASE },
+  ).onfinish = () => plus.remove();
+
+  if (bloom) {
+    button.dataset.bloom = "true";
+    clearTimeout(likeBloom);
+    likeBloom = setTimeout(() => { delete button.dataset.bloom; }, 520);
+  }
+}
+
+function addLike() {
+  state.likeTaps += 1;
+  state.likeCount += 1;
+  const button = $("like");
+  button.dataset.inked = "true";
+  button.setAttribute("aria-label", `觉得有用，再点一次。目前 ${formatCount(state.likeCount)} 个赞`);
+  rollCount(state.likeCount);
+  if (!prefersReduced()) stampLike(state.likeTaps);
+  clearTimeout(likeAnnounce);
+  likeAnnounce = setTimeout(() => {
+    $("live").textContent = `已加上赞，现在 ${formatCount(state.likeCount)} 个`;
+  }, 280);
+}
+
 function setPhase(phase) {
+  const prev = state.phase;
   state.phase = phase;
-  $("view-input").hidden = phase !== "input";
-  $("view-run").hidden = phase !== "generating" && phase !== "holding";
-  $("view-read").hidden = phase !== "reading";
+  const next = viewFor(phase);
+  const current = viewFor(prev);
+  if (current !== next) {
+    showView(next);
+    hideView(current);
+  }
   document.body.dataset.phase = phase;
   const busy = phase === "generating";
   $("view-run").querySelector(".activity").setAttribute("aria-busy", String(busy));
   if (phase === "input") document.title = "VidLens";
   if (phase === "reading") document.title = "把重复操作变成可复用流程 · VidLens";
+  if (phase === "input" && prev !== "input") playEntry();
   updateAskEnabled();
   renderDock();
 }
@@ -396,16 +649,6 @@ function beginReading() {
   setQa(false);
   window.scrollTo(0, 0);
   setMapCurrent("article-top");
-  if (!prefersReduced()) {
-    const anim = $("view-read").animate(
-      [
-        { opacity: 0, transform: "translateY(8px)" },
-        { opacity: 1, transform: "none" },
-      ],
-      { duration: 280, easing: EASE, fill: "forwards" },
-    );
-    anim.onfinish = () => anim.cancel();
-  }
 }
 
 function newVideo() {
@@ -931,6 +1174,7 @@ function bind() {
     startRun();
   });
   $("new-video").addEventListener("click", newVideo);
+  $("like").addEventListener("click", addLike);
   $("stop-run").addEventListener("click", stopRun);
   $("retry-run").addEventListener("click", startRun);
   $("start-reading").addEventListener("click", beginReading);
@@ -1109,10 +1353,12 @@ function bind() {
 function init() {
   state.frameChip = null;
   state.passageChip = null;
+  mountFilm($("source-still"), "0512");
   $("article-shot").append(createShot("0524"));
   $("qa").inert = true;
   setPhase("input");
   bind();
+  playEntry();
   $("link").focus();
 }
 

@@ -29,29 +29,133 @@
 
   <main id="main">
     <section id="view-input" class="view-input">
-      <p class="kicker">访客可以直接开始</p>
-      <h1>贴上视频链接</h1>
-      <p class="lede">不用注册。理解过程会留下可展开的步骤和实际画面；文章生成后只读，可以就画面继续问。</p>
-      <form id="link-form" class="link-form">
-        <label class="sr-only" for="link">视频链接</label>
-        <input id="link" name="link" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.bilibili.com/video/…">
-        <button type="submit" class="btn primary">开始理解</button>
-      </form>
-      <p id="link-error" class="form-error" hidden>先贴上链接。</p>
-      <div class="input-side">
-        <button type="button" class="btn quiet" id="use-sample">使用示例视频</button>
-        <p class="fine">原型不会打开或下载这个链接，过程使用内置示例。</p>
+      <div class="entry">
+        <div class="entry-copy">
+          <h1>贴上视频链接</h1>
+          <form id="link-form" class="link-form">
+            <label class="sr-only" for="link">视频链接</label>
+            <input id="link" name="link" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://www.bilibili.com/video/…">
+            <button type="submit" class="btn primary">开始理解</button>
+          </form>
+          <p id="link-error" class="form-error" hidden>先贴上链接。</p>
+          <div class="input-side">
+            <button type="button" class="btn quiet" id="use-sample">使用示例视频</button>
+            <p class="fine">原型不会打开或下载这个链接，过程使用内置示例。</p>
+          </div>
+          <div class="proof">
+            <p class="census">已经有 <strong id="census-count">1,286</strong> 人用它看完一条长视频</p>
+            <div class="thanks">
+              <button type="button" class="like" id="like" aria-label="觉得有用，可以多次点赞。目前 86 个赞">
+                <span class="like-well" aria-hidden="true">
+                  <span class="like-prints"></span>
+                  <span class="like-seal">
+                    <svg class="like-thumb" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8.2 10.4 11 4.2c.4-.8 1.5-.9 2.1-.2.4.5.5 1.2.3 1.8L12.4 9h5.1c1.2 0 2.1 1.1 1.9 2.3l-1.1 6.2A2.2 2.2 0 0 1 16.1 19H8.2V10.4z"/>
+                      <path d="M3.6 10.2h3.2c.4 0 .7.3.7.7v7.4c0 .4-.3.7-.7.7H3.6c-.6 0-1.1-.5-1.1-1.1v-6.6c0-.6.5-1.1 1.1-1.1z"/>
+                    </svg>
+                  </span>
+                </span>
+                <span class="like-label" id="like-label">觉得有用</span>
+                <span class="like-count" id="like-count"><span class="like-num">86</span></span>
+              </button>
+              <a class="star-link" href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.4l1.7 3.5 3.9.6-2.8 2.7.7 3.8L8 10.2 4.5 12l.7-3.8L2.4 5.5l3.9-.6z"/></svg>
+                <span>在 GitHub 上 Star</span>
+              </a>
+            </div>
+          </div>
+        </div>
+        <aside class="entry-stage" id="entry-stage">
+          <div class="lens" aria-hidden="true">
+            <svg class="lens-svg" viewBox="0 0 480 480">
+              <defs>
+                <radialGradient id="lens-wash" cx="50%" cy="46%" r="48%">
+                  <stop offset="0%" stop-color="#1a7a70" stop-opacity="0.28"/>
+                  <stop offset="62%" stop-color="#14645c" stop-opacity="0.06"/>
+                  <stop offset="100%" stop-color="#14645c" stop-opacity="0"/>
+                </radialGradient>
+                <radialGradient id="lens-glass" cx="34%" cy="30%" r="72%">
+                  <stop offset="0%" stop-color="#ffffff"/>
+                  <stop offset="26%" stop-color="#f7f3ea"/>
+                  <stop offset="68%" stop-color="#d5ebe7"/>
+                  <stop offset="100%" stop-color="#7eaea6"/>
+                </radialGradient>
+                <filter id="lens-shadow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#1c1916" flood-opacity="0.1"/>
+                </filter>
+                <filter id="shot-blur" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="10"/>
+                </filter>
+                <clipPath id="disc-clip">
+                  <circle cx="240" cy="240" r="136"/>
+                </clipPath>
+                <clipPath id="gate">
+                  <rect x="140" y="178" width="200" height="112" rx="5"/>
+                </clipPath>
+                <clipPath id="sprocket-top">
+                  <rect x="118" y="152" width="244" height="20"/>
+                </clipPath>
+                <clipPath id="sprocket-bottom">
+                  <rect x="118" y="308" width="244" height="20"/>
+                </clipPath>
+              </defs>
+              <ellipse class="lens-wash" cx="240" cy="252" rx="200" ry="168" fill="url(#lens-wash)"/>
+              <circle class="lens-disc" cx="240" cy="240" r="146" fill="url(#lens-glass)" filter="url(#lens-shadow)"/>
+              <ellipse class="lens-catch" cx="176" cy="128" rx="46" ry="16" fill="#fffdf8" opacity="0.72" transform="rotate(-24 176 128)"/>
+              <g clip-path="url(#disc-clip)">
+                <rect class="film-strip" x="86" y="142" width="308" height="204" rx="8"/>
+                <g clip-path="url(#sprocket-top)">
+                  <g class="sprocket-run">
+                    <rect x="108" y="158" width="528" height="1" fill="#000" opacity="0"/>
+                    <g class="sprocket-holes" fill="#d7ebe6">
+                      <circle cx="108" cy="162" r="3.3"/><circle cx="130" cy="162" r="3.3"/><circle cx="152" cy="162" r="3.3"/><circle cx="174" cy="162" r="3.3"/><circle cx="196" cy="162" r="3.3"/><circle cx="218" cy="162" r="3.3"/><circle cx="240" cy="162" r="3.3"/><circle cx="262" cy="162" r="3.3"/><circle cx="284" cy="162" r="3.3"/><circle cx="306" cy="162" r="3.3"/><circle cx="328" cy="162" r="3.3"/><circle cx="350" cy="162" r="3.3"/>
+                      <circle cx="372" cy="162" r="3.3"/><circle cx="394" cy="162" r="3.3"/><circle cx="416" cy="162" r="3.3"/><circle cx="438" cy="162" r="3.3"/><circle cx="460" cy="162" r="3.3"/><circle cx="482" cy="162" r="3.3"/><circle cx="504" cy="162" r="3.3"/><circle cx="526" cy="162" r="3.3"/><circle cx="548" cy="162" r="3.3"/><circle cx="570" cy="162" r="3.3"/><circle cx="592" cy="162" r="3.3"/><circle cx="614" cy="162" r="3.3"/>
+                    </g>
+                  </g>
+                </g>
+                <g clip-path="url(#sprocket-bottom)">
+                  <g class="sprocket-run">
+                    <rect x="108" y="314" width="528" height="1" fill="#000" opacity="0"/>
+                    <g class="sprocket-holes" fill="#d7ebe6">
+                      <circle cx="108" cy="318" r="3.3"/><circle cx="130" cy="318" r="3.3"/><circle cx="152" cy="318" r="3.3"/><circle cx="174" cy="318" r="3.3"/><circle cx="196" cy="318" r="3.3"/><circle cx="218" cy="318" r="3.3"/><circle cx="240" cy="318" r="3.3"/><circle cx="262" cy="318" r="3.3"/><circle cx="284" cy="318" r="3.3"/><circle cx="306" cy="318" r="3.3"/><circle cx="328" cy="318" r="3.3"/><circle cx="350" cy="318" r="3.3"/>
+                      <circle cx="372" cy="318" r="3.3"/><circle cx="394" cy="318" r="3.3"/><circle cx="416" cy="318" r="3.3"/><circle cx="438" cy="318" r="3.3"/><circle cx="460" cy="318" r="3.3"/><circle cx="482" cy="318" r="3.3"/><circle cx="504" cy="318" r="3.3"/><circle cx="526" cy="318" r="3.3"/><circle cx="548" cy="318" r="3.3"/><circle cx="570" cy="318" r="3.3"/><circle cx="592" cy="318" r="3.3"/><circle cx="614" cy="318" r="3.3"/>
+                    </g>
+                  </g>
+                </g>
+                <g clip-path="url(#gate)">
+                  <rect x="140" y="178" width="200" height="112" fill="#102826"/>
+                  <g class="footage" filter="url(#shot-blur)">
+                    <ellipse cx="176" cy="268" rx="130" ry="78" fill="#1f7a70"/>
+                    <ellipse cx="310" cy="188" rx="110" ry="70" fill="#f0d7a4"/>
+                    <ellipse cx="250" cy="230" rx="70" ry="46" fill="#fffaf0" opacity="0.55"/>
+                  </g>
+                  <g class="playhead">
+                    <rect x="148" y="178" width="184" height="112" fill="#fff" opacity="0"/>
+                    <line class="playhead-line" x1="148" y1="178" x2="148" y2="290"/>
+                  </g>
+                </g>
+                <line class="timeline" x1="148" y1="304" x2="332" y2="304"/>
+                <g class="ticks" aria-hidden="true">
+                  <line x1="148" y1="300" x2="148" y2="308"/><line x1="171" y1="301" x2="171" y2="307"/><line x1="194" y1="301" x2="194" y2="307"/><line x1="217" y1="301" x2="217" y2="307"/><line x1="240" y1="300" x2="240" y2="308"/><line x1="263" y1="301" x2="263" y2="307"/><line x1="286" y1="301" x2="286" y2="307"/><line x1="309" y1="301" x2="309" y2="307"/><line x1="332" y1="300" x2="332" y2="308"/>
+                </g>
+                <g class="playhead">
+                  <rect x="148" y="298" width="184" height="14" fill="#fff" opacity="0"/>
+                  <circle class="playhead-dot" cx="148" cy="304" r="3.6"/>
+                </g>
+              </g>
+              <circle class="lens-bezel" cx="240" cy="240" r="146"/>
+              <g class="orbit orbit-teal">
+                <circle class="crescent crescent-teal" cx="240" cy="240" r="146"/>
+              </g>
+            </svg>
+          </div>
+        </aside>
       </div>
     </section>
 
     <section id="view-run" class="view-run" hidden>
       <div class="source">
-        <div class="source-still" aria-hidden="true">
-          <span class="still-nav"></span>
-          <span class="still-line"></span>
-          <span class="still-line short"></span>
-          <span class="still-time">35:42</span>
-        </div>
+        <div class="source-still" id="source-still" aria-hidden="true"></div>
         <div>
           <p class="source-title">把重复操作变成可复用流程</p>
           <p class="source-meta">B站 · 35:42 · 示例视频</p>
@@ -278,6 +382,10 @@
           </ul>
         </div>
       </div>
+      <div class="shot-player" aria-hidden="true">
+        <span class="shot-scrub"><i></i></span>
+        <span class="shot-clock">05:12</span>
+      </div>
     </div>
   </template>
 
@@ -313,6 +421,10 @@
             <li>流程审批</li>
           </ul>
         </div>
+      </div>
+      <div class="shot-player" aria-hidden="true">
+        <span class="shot-scrub"><i></i></span>
+        <span class="shot-clock">05:24</span>
       </div>
     </div>
   </template>
