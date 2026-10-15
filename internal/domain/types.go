@@ -40,6 +40,15 @@ func Err(status int, code, msg string) error {
 
 var ErrFenced = errors.New("execution ownership lost")
 
+type WorkError struct {
+	Code       string
+	Message    string
+	Transient  bool
+	RetryAfter time.Duration
+}
+
+func (e *WorkError) Error() string { return e.Code + ": " + e.Message }
+
 type Failure struct {
 	Code     string     `json:"code"`
 	Message  string     `json:"message"`

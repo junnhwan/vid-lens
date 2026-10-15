@@ -83,19 +83,27 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
-	var exists bool
-	if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=1)").Scan(&exists); e != nil {
-		return e
-	}
-	if !exists {
-		b, _ := migrations.ReadFile("migrations/001_init.sql")
-		if _, e = tx.Exec(ctx, string(b)); e != nil {
+
+	for version, name := range []string{"migrations/001_init.sql", "migrations/002_evidence_order.sql", "migrations/003_strip_provider_thoughts.sql"} {
+		n := version + 1
+		var exists bool
+		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", n).Scan(&exists); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES(1)"); e != nil {
-			return e
+		if !exists {
+			b, err := migrations.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			if _, e = tx.Exec(ctx, string(b)); e != nil {
+				return e
+			}
+			if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES($1)", n); e != nil {
+				return e
+			}
 		}
 	}
+
 	return tx.Commit(ctx)
 }
 

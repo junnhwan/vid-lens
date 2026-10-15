@@ -396,7 +396,7 @@ func (s *Store) FinishOperation(ctx context.Context, c domain.Claim, key string,
 	})
 }
 func (s *Store) Observations(ctx context.Context, run string) ([]json.RawMessage, error) {
-	return many[json.RawMessage](ctx, s.Pool, "SELECT data FROM observations WHERE run_id=$1 ORDER BY id", run)
+	return many[json.RawMessage](ctx, s.Pool, "SELECT data FROM observations WHERE run_id=$1 ORDER BY created_at,id", run)
 }
 func (s *Store) RecordObservation(ctx context.Context, c domain.Claim, key, inspection string, data any) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error {
@@ -432,6 +432,13 @@ func (s *Store) InternalFrame(ctx context.Context, c domain.Claim, id string) (d
 	if a.RunID == c.Run.ID {
 		return a, nil
 	}
+	var pinned bool
+	if err := s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=$1 AND owner_type='run' AND owner_id=$2 AND expires_at>now())", id, c.Run.ID).Scan(&pinned); err != nil {
+		return a, err
+	}
+	if pinned {
+		return a, nil
+	}
 	var ok bool
 	e = s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM asset_refs ar JOIN articles a ON ar.owner_type='article' AND ar.owner_id=a.id WHERE ar.asset_id=$1 AND a.snapshot_id=$2)", id, c.Run.SnapshotID).Scan(&ok)
 	if e != nil {
@@ -456,4 +463,22 @@ func (s *Store) InternalFrame(ctx context.Context, c domain.Claim, id string) (d
 }
 func (s *Store) PublicFrames(ctx context.Context, request string, ids []string) ([]domain.Frame, error) {
 	return frames(ctx, s.Pool, request, ids)
+}
+func (s *Store) MarkReplacement(ctx context.Context, c domain.Claim, fresh, old string) error {
+	return s.Tx(ctx, func(tx pgx.Tx) error {
+		if e := fence(ctx, tx, c); e != nil {
+			return e
+		}
+		if fresh == old {
+			return nil
+		}
+		tag, e := tx.Exec(ctx, "UPDATE media_assets SET replaces_frame_id=$3 WHERE id=$1 AND snapshot_id=$2 AND state='ready'", fresh, c.Run.SnapshotID, old)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("replacement not available")
+		}
+		return nil
+	})
 }
