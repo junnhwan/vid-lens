@@ -22,9 +22,12 @@ import (
 )
 
 type Manager struct {
-	Store  *store.Store
-	Redis  *redis.Client
-	Config config.Config
+	Store        *store.Store
+	Redis        *redis.Client
+	Config       config.Config
+	memoryMu     sync.Mutex
+	paused       map[string]bool
+	recoverSince map[string]time.Time
 }
 
 func New(s *store.Store, c config.Config) (*Manager, error) {
@@ -41,7 +44,7 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 	if e := m.Redis.Ping(ctx).Err(); e != nil {
 		return nil, nil, domain.Err(503, "SERVICE_UNAVAILABLE", "资源调度暂不可用。")
 	}
-	if e := memoryCheck(name); e != nil {
+	if e := m.waitMemory(ctx, name); e != nil {
 		return nil, nil, e
 	}
 	if name == "ai" {
@@ -112,6 +115,68 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 		})
 	}
 	return child, release, nil
+}
+func (m *Manager) waitMemory(ctx context.Context, name string) error {
+	lane := "ai"
+	threshold := int64(256 * 1024)
+	if name == "ffmpeg" || name == "download" {
+		lane = "media"
+		threshold = 512 * 1024
+	}
+	for {
+		kb := availableMemory()
+		if kb == 0 {
+			return nil
+		}
+		m.memoryMu.Lock()
+		if m.paused == nil {
+			m.paused = map[string]bool{}
+			m.recoverSince = map[string]time.Time{}
+		}
+		if kb < threshold {
+			m.paused[lane] = true
+			m.recoverSince[lane] = time.Time{}
+		}
+		ready := !m.paused[lane]
+		if !ready {
+			if kb >= 768*1024 {
+				if m.recoverSince[lane].IsZero() {
+					m.recoverSince[lane] = time.Now()
+				}
+				if time.Since(m.recoverSince[lane]) >= 60*time.Second {
+					delete(m.paused, lane)
+					ready = true
+				}
+			} else {
+				m.recoverSince[lane] = time.Time{}
+			}
+		}
+		m.memoryMu.Unlock()
+		if ready {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+func availableMemory() int64 {
+	b, e := os.ReadFile("/proc/meminfo")
+	if e != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "MemAvailable:") {
+			fields := strings.Fields(line)
+			if len(fields) > 1 {
+				n, _ := strconv.ParseInt(fields[1], 10, 64)
+				return n
+			}
+		}
+	}
+	return 0
 }
 func memoryCheck(resource string) error {
 	b, e := os.ReadFile("/proc/meminfo")

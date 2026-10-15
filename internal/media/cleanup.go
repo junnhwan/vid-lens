@@ -25,6 +25,7 @@ func (s *Service) Cleanup(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	deleteFailed := false
 	for _, a := range assets {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -35,6 +36,9 @@ func (s *Service) Cleanup(ctx context.Context) error {
 		}
 		e = os.Remove(path)
 		success := e == nil || errors.Is(e, os.ErrNotExist)
+		if !success {
+			deleteFailed = true
+		}
 		if e = s.Store.Deleted(ctx, a.ID, success); e != nil {
 			return e
 		}
@@ -93,6 +97,9 @@ func (s *Service) Cleanup(ctx context.Context) error {
 		if e != nil {
 			return e
 		}
+	}
+	if deleteFailed {
+		return errors.New("asset deletion will retry")
 	}
 	return nil
 }

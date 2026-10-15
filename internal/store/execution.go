@@ -138,6 +138,11 @@ func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *d
 	if _, e := tx.Exec(ctx, "DELETE FROM storage_reservations WHERE run_id=$1", r.ID); e != nil {
 		return e
 	}
+	if r.DependencyRunID != nil {
+		if e := cancelUnused(ctx, tx, *r.DependencyRunID); e != nil {
+			return e
+		}
+	}
 	return event(ctx, tx, r.ID, nil)
 }
 func nullableJSON(v any) any {
@@ -208,6 +213,39 @@ func (s *Store) Checkpoint(ctx context.Context, c domain.Claim, data any) error 
 		}
 		_, e := tx.Exec(ctx, "UPDATE job_runs SET checkpoint=$2,updated_at=now() WHERE id=$1", c.Run.ID, b)
 		return e
+	})
+}
+func (s *Store) Suspend(ctx context.Context, c domain.Claim) error {
+	return s.Tx(ctx, func(tx pgx.Tx) error {
+		r, e := loadRun(ctx, tx, c.Run.ID)
+		if e != nil {
+			return e
+		}
+		if r.ExecutionEpoch != c.Epoch {
+			return domain.ErrFenced
+		}
+		if r.Status == "cancel_requested" {
+			return terminate(ctx, tx, r, "canceled", nil)
+		}
+		if domain.Terminal(r.Status) {
+			return nil
+		}
+		if e = fence(ctx, tx, c); e != nil {
+			return e
+		}
+		if e = charge(ctx, tx, r.ID); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, "UPDATE job_runs SET status='retry_wait',retry_not_before=now()+interval '5 seconds',lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1", r.ID); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, "UPDATE job_attempts SET ended_at=now(),outcome='interrupted' WHERE id=$1", c.AttemptID); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, "UPDATE qa_turns SET status='retry_wait',updated_at=now() WHERE run_id=$1", r.ID); e != nil {
+			return e
+		}
+		return event(ctx, tx, r.ID, nil)
 	})
 }
 func (s *Store) Step(ctx context.Context, c domain.Claim, step domain.Step) (domain.Step, error) {
@@ -294,6 +332,31 @@ func (s *Store) Repair(ctx context.Context, id string, generation int64, broker 
 		if !r.DeadlineAt.After(now) {
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "TASK_DEADLINE_EXCEEDED", Message: "处理已达到总时限。", CanRetry: true})
 		}
+		p, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", r.ConfigID)
+		if e != nil {
+			return e
+		}
+		waitLimit := p.QueueSeconds
+		if r.Kind == "qa.answer" {
+			waitLimit = p.AnswerQueueSeconds
+		}
+		waitFrom := r.QueuedAt
+		if r.RetryNotBefore != nil && r.RetryNotBefore.After(waitFrom) {
+			waitFrom = *r.RetryNotBefore
+		}
+		if (r.Status == "queued" || r.Status == "retry_wait") && now.Sub(waitFrom) > time.Duration(waitLimit)*time.Second {
+			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "QUEUE_WAIT_TIMEOUT", Message: "等待处理已超时。", CanRetry: true})
+		}
+		if r.Status == "running" && now.Sub(r.UpdatedAt) > 5*time.Minute {
+			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "INTERNAL_FAILURE", Message: "处理长时间没有业务进展。", CanRetry: true})
+		}
+		var oldest *time.Time
+		if e = tx.QueryRow(ctx, "SELECT min(created_at) FROM task_outbox WHERE run_id=$1 AND dispatch_generation=$2 AND delivered_at IS NULL", id, generation).Scan(&oldest); e != nil {
+			return e
+		}
+		if oldest != nil && now.Sub(*oldest) > 10*time.Minute {
+			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "QUEUE_WAIT_TIMEOUT", Message: "暂时无法调度处理任务。", CanRetry: true})
+		}
 		if r.Status == "waiting_dependency" {
 			return wakeDependency(ctx, tx, r)
 		}
@@ -354,6 +417,32 @@ func wakeDependency(ctx context.Context, tx pgx.Tx, r domain.Run) error {
 	d, e := loadRun(ctx, tx, *r.DependencyRunID)
 	if e != nil {
 		return e
+	}
+	var through int64
+	if e = tx.QueryRow(ctx, "SELECT dependency_seq FROM job_runs WHERE id=$1", r.ID).Scan(&through); e != nil {
+		return e
+	}
+	if d.LastEventSeq > through {
+		steps, e := many[domain.Step](ctx, tx, "SELECT step FROM (SELECT DISTINCT ON(step_id) step,seq FROM run_events WHERE run_id=$1 AND step_id IS NOT NULL AND seq>$2 ORDER BY step_id,seq DESC) x ORDER BY seq", d.ID, through)
+		if e != nil {
+			return e
+		}
+		for _, step := range steps {
+			step.ID = "restore_" + r.ID + "_" + step.ID
+			step.RunID = r.ID
+			step.FirstSeq = 0
+			step.LastSeq = 0
+			step.Phase = "prepare_source"
+			if e = event(ctx, tx, r.ID, &step); e != nil {
+				return e
+			}
+			if _, e = tx.Exec(ctx, "UPDATE job_runs SET had_activity=true WHERE id=$1", r.ID); e != nil {
+				return e
+			}
+		}
+		if _, e = tx.Exec(ctx, "UPDATE job_runs SET dependency_seq=$2 WHERE id=$1", r.ID, d.LastEventSeq); e != nil {
+			return e
+		}
 	}
 	if d.Status == "failed" || d.Status == "canceled" {
 		return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "MEDIA_UNAVAILABLE", Message: "无法恢复原视频画面。", CanRetry: d.Failure != nil && d.Failure.CanRetry})

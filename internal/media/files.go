@@ -80,6 +80,15 @@ func (s *Service) ReadImage(ctx context.Context, c domain.Claim, id string) (dom
 	if a.State != "ready" {
 		return a, nil, ErrMediaMissing
 	}
+	if a.ExpiresAt != nil && !a.ExpiresAt.After(time.Now()) {
+		pinned, e := s.Store.HasProtection(ctx, a.ID)
+		if e != nil {
+			return a, nil, e
+		}
+		if !pinned {
+			return a, nil, ErrMediaMissing
+		}
+	}
 	if e = s.Store.Pin(ctx, c, id); e != nil {
 		return a, nil, e
 	}

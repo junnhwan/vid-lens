@@ -64,7 +64,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	if ident.Platform == "local" {
 		src, e := s.localFile(ident.CanonicalID)
 		if e != nil {
-			return e
+			return domain.Err(422, "SOURCE_UNAVAILABLE", "开发样本不存在或无法读取。")
 		}
 		st, e := os.Stat(src)
 		if e != nil {
@@ -73,7 +73,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if st.Size() > p.MaxDownloadBytes {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频超过大小限制。")
 		}
-		if e = s.Resources.Reserve(ctx, c, min(p.WorkspaceBytes, st.Size()+64<<20), 0); e != nil {
+		if e = s.Resources.Reserve(ctx, c, min(p.WorkspaceBytes, st.Size()+64<<20), 20<<20); e != nil {
 			return e
 		}
 		dst := filepath.Join(work, "video.mp4")
@@ -104,7 +104,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			}
 		}
 	} else {
-		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 0); e != nil {
+		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 20<<20); e != nil {
 			return e
 		}
 		mctx, release, e := s.Resources.Acquire(ctx, c, "download")
@@ -223,6 +223,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			return e
 		}
 		_, coverage = TranscriptCoverage(segs, duration)
+		if audioInput != video {
+			_ = os.Remove(audioInput)
+		}
 		if len(segs) == 0 {
 			origin = "unavailable"
 			coverage = "unknown"

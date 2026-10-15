@@ -13,6 +13,7 @@ import (
 
 // Profile is frozen for each accepted run. Host admission can impose lower current limits.
 type Profile struct {
+	ModelDisableThinking bool     `json:"model_disable_thinking"`
 	ModelBaseURL         string   `json:"model_base_url"`
 	ModelName            string   `json:"model_name"`
 	ModelKeyRef          string   `json:"model_key_ref"`
@@ -119,6 +120,7 @@ func LoadFile(path string) (Config, error) {
 	p := DefaultProfile()
 	p.ModelBaseURL = get("VIDLENS_MODEL_BASE_URL")
 	p.ModelName = get("VIDLENS_MODEL_NAME")
+	p.ModelDisableThinking = get("VIDLENS_MODEL_DISABLE_THINKING") == "true"
 	p.ASRBaseURL = get("VIDLENS_ASR_BASE_URL")
 	p.ASRModel = get("VIDLENS_ASR_MODEL")
 	c := Config{DatabaseURL: get("VIDLENS_DATABASE_URL"), RedisURL: env("VIDLENS_REDIS_URL", "redis://127.0.0.1:6379/0"), DataDir: get("VIDLENS_DATA_DIR"), Listen: env("VIDLENS_LISTEN", "127.0.0.1:8080"), Origin: env("VIDLENS_PUBLIC_ORIGIN", "http://127.0.0.1:8080"), AdminToken: get("VIDLENS_ADMIN_TOKEN"), SecretKey: get("VIDLENS_SECRET_KEY"), DevMediaDir: get("VIDLENS_DEV_MEDIA_DIR"), CookieFile: get("VIDLENS_PLATFORM_COOKIE_FILE"), ProxyURL: get("VIDLENS_PROXY_URL"), Profile: p, ModelKey: get("VIDLENS_MODEL_API_KEY"), ASRKey: get("VIDLENS_ASR_API_KEY"), DiskStopPercent: 85, DiskReserveBytes: 5 << 30, SessionTTL: 30 * 24 * time.Hour}
@@ -130,7 +132,7 @@ func LoadFile(path string) (Config, error) {
 		}
 		c.DiskStopPercent = v
 	}
-	if c.DatabaseURL == "" || c.DataDir == "" || len(c.AdminToken) < 32 || len(c.SecretKey) < 32 {
+	if c.DatabaseURL == "" || c.DataDir == "" || len(c.AdminToken) < 32 || len(c.SecretKey) < 32 || strings.HasPrefix(c.AdminToken, "REPLACE_") || strings.HasPrefix(c.SecretKey, "REPLACE_") {
 		return c, errors.New("database URL, external data directory, admin token and secret key (each at least 32 characters) are required")
 	}
 	abs, e := filepath.Abs(c.DataDir)

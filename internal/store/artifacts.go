@@ -464,6 +464,11 @@ func (s *Store) InternalFrame(ctx context.Context, c domain.Claim, id string) (d
 func (s *Store) PublicFrames(ctx context.Context, request string, ids []string) ([]domain.Frame, error) {
 	return frames(ctx, s.Pool, request, ids)
 }
+func (s *Store) HasProtection(ctx context.Context, id string) (bool, error) {
+	var ok bool
+	e := s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=$1 AND (expires_at IS NULL OR expires_at>now()))", id).Scan(&ok)
+	return ok, e
+}
 func (s *Store) MarkReplacement(ctx context.Context, c domain.Claim, fresh, old string) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {

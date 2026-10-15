@@ -16,10 +16,11 @@ type update struct {
 	View     map[string]any
 	Position store.Position
 	Err      error
+	Bytes    int
 }
 type group struct {
 	session, typ, id, conversation string
-	channels                       map[chan update]struct{}
+	channels                       map[chan update]int
 	last                           string
 }
 
@@ -57,11 +58,11 @@ func (h *Hub) subscribe(session, typ, id, conversation string) (chan update, fun
 	key := session + ":" + typ + ":" + id
 	g := h.groups[key]
 	if g == nil {
-		g = &group{session: session, typ: typ, id: id, conversation: conversation, channels: map[chan update]struct{}{}}
+		g = &group{session: session, typ: typ, id: id, conversation: conversation, channels: map[chan update]int{}}
 		h.groups[key] = g
 	}
 	ch := make(chan update, 32)
-	g.channels[ch] = struct{}{}
+	g.channels[ch] = 0
 	h.count++
 	h.sessions[session]++
 	var once sync.Once
@@ -96,6 +97,8 @@ func (h *Hub) poll(ctx context.Context) {
 		} else {
 			u.View, u.Position, u.Err = h.server.Store.TurnView(ctx, g.session, g.conversation, g.id)
 		}
+		b, _ := json.Marshal(u.View)
+		u.Bytes = len(b)
 		sig := "error"
 		if u.Err == nil {
 			sig = h.server.Store.Cursor(u.Position)
@@ -103,9 +106,17 @@ func (h *Hub) poll(ctx context.Context) {
 		h.mu.Lock()
 		if g.last != sig || u.Err != nil {
 			g.last = sig
-			for ch := range g.channels {
+			for ch, queued := range g.channels {
+				if queued+u.Bytes > 1<<20 {
+					close(ch)
+					delete(g.channels, ch)
+					h.count--
+					h.sessions[g.session]--
+					continue
+				}
 				select {
 				case ch <- u:
+					g.channels[ch] += u.Bytes
 				default:
 					close(ch)
 					delete(g.channels, ch)
@@ -219,6 +230,19 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 		if same && previous.Seq == u.Position.Seq && !terminal(u.View) {
 			return true
 		}
+		if same && previous.Seq+1 == u.Position.Seq && !terminal(u.View) {
+			act := u.View["activity"].(map[string]any)
+			for _, step := range act["recent_steps"].([]domain.Step) {
+				if step.LastSeq == u.Position.Seq && u.Position.RunID != nil && step.RunID == *u.Position.RunID {
+					if !write("activity.upsert", map[string]any{"step": step, "current_step_id": act["current_step_id"]}, &u.Position) {
+						return false
+					}
+					p := u.Position
+					previous = &p
+					return true
+				}
+			}
+		}
 		if !write("view.snapshot", u.View, &u.Position) {
 			return false
 		}
@@ -239,6 +263,7 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
+			a.hub.drained(ses.ID+":"+typ+":"+id, ch, u.Bytes)
 			if !send(u) {
 				return
 			}
@@ -258,3 +283,13 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func equalRun(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+
+func (h *Hub) drained(key string, ch chan update, n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if g := h.groups[key]; g != nil {
+		if queued, ok := g.channels[ch]; ok {
+			g.channels[ch] = max(0, queued-n)
+		}
+	}
+}

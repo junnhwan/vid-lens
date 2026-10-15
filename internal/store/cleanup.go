@@ -24,7 +24,7 @@ func (s *Store) Deleted(ctx context.Context, id string, success bool) error {
 		_, e := s.Pool.Exec(ctx, "UPDATE media_assets SET state='deleted',delete_not_before=NULL WHERE id=$1 AND state='deleting'", id)
 		return e
 	}
-	_, e := s.Pool.Exec(ctx, "UPDATE media_assets SET delete_failures=delete_failures+1,delete_not_before=now()+interval '1 hour' WHERE id=$1 AND state='deleting'", id)
+	_, e := s.Pool.Exec(ctx, "UPDATE media_assets SET delete_failures=delete_failures+1,delete_not_before=now()+CASE delete_failures WHEN 0 THEN interval '1 minute' WHEN 1 THEN interval '5 minutes' WHEN 2 THEN interval '30 minutes' ELSE interval '1 hour' END WHERE id=$1 AND state='deleting'", id)
 	return e
 }
 func (s *Store) CleanupMetadata(ctx context.Context) error {

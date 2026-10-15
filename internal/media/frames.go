@@ -84,7 +84,11 @@ func (s *Service) Inspect(ctx context.Context, c domain.Claim, key, question str
 	if w.Crop == nil && (w.StartMS < 0 || w.EndMS <= w.StartMS || w.EndMS > snap.DurationMS || w.EndMS-w.StartMS > 60000) {
 		return result, domain.Err(422, "INVALID_ARGUMENT", "窗口必须位于当前视频内且不超过六十秒。")
 	}
-	if e = s.Resources.Reserve(ctx, c, 0, 20<<20); e != nil {
+	imageBudget := int64(20 << 20)
+	if c.Run.Kind == "qa.answer" {
+		imageBudget = 8 << 20
+	}
+	if e = s.Resources.Reserve(ctx, c, 0, imageBudget); e != nil {
 		return result, e
 	}
 	work, e := s.work(c)

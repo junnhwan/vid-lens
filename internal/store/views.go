@@ -238,8 +238,14 @@ func visibleFrame(ctx context.Context, q Querier, session, request, frame string
 		}
 	}
 	var own bool
-	e = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM qa_turns t JOIN qa_conversations c ON c.id=t.conversation_id JOIN asset_refs ar ON ar.owner_id=t.run_id AND ar.owner_type='run' WHERE c.session_id=$1 AND c.request_id=$2 AND ar.asset_id=$3 AND (t.expires_at IS NULL OR t.expires_at>now()))", session, request, frame).Scan(&own)
+	e = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM qa_turns t JOIN qa_conversations c ON c.id=t.conversation_id JOIN asset_refs ar ON (ar.owner_id=t.run_id AND ar.owner_type='run') OR (ar.owner_id=t.id AND ar.owner_type='answer') WHERE c.session_id=$1 AND c.request_id=$2 AND ar.asset_id=$3 AND (t.expires_at IS NULL OR t.expires_at>now()))", session, request, frame).Scan(&own)
 	if e != nil {
+		return e
+	}
+	if own {
+		return nil
+	}
+	if e = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM qa_turns t JOIN qa_conversations c ON c.id=t.conversation_id JOIN run_events e ON e.run_id=t.run_id WHERE c.session_id=$1 AND c.request_id=$2 AND e.step->'frame_ids' ? $3 AND (t.expires_at IS NULL OR t.expires_at>now()))", session, request, frame).Scan(&own); e != nil {
 		return e
 	}
 	if own {
