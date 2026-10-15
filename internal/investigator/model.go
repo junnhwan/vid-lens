@@ -69,6 +69,10 @@ func NewModel(ctx context.Context, p config.Profile, key, proxy string) (model.T
 		tr.Proxy = http.ProxyURL(u)
 	}
 	client := &http.Client{Transport: safeTransport{tr}, Timeout: 300 * time.Second}
+	return newModelWithClient(ctx, p, key, client)
+}
+
+func newModelWithClient(ctx context.Context, p config.Profile, key string, client *http.Client) (model.ToolCallingChatModel, error) {
 	extra := map[string]any{}
 	if p.ModelDisableThinking {
 		extra["enable_thinking"] = false
@@ -157,9 +161,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if e != nil {
 			return nil, e
 		}
-		sub, cancel := context.WithTimeout(actx, 300*time.Second)
+		limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
+		if s.compositionReady {
+			limits.Total = 300 * time.Second
+		}
+		sub, cancel := context.WithTimeout(actx, limits.Total)
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error { _, e := s.engine.Store.BeginOperation(sub, s.claim, key, "model", args, true); return e })
-		result, e := m.base.Generate(sub, NormalizeToolImages(in), opts...)
+		result, e := receiveModelResponse(sub, m.base, NormalizeToolImages(in), limits, opts...)
 		cancel()
 		release()
 		if e != nil {
@@ -198,6 +206,105 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		return result, nil
 	}
 	return nil, errors.New("model retry exhausted")
+}
+
+func completeModelResponse(ctx context.Context, base model.ToolCallingChatModel, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return receiveModelResponse(ctx, base, in, modelResponseLimits{Total: 300 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}, opts...)
+}
+
+type modelResponseLimits struct{ Total, First, Idle time.Duration }
+
+// Consume provider streaming internally. Public events still contain only durable
+// activities and finalized results; a long completion must not wait for its entire
+// body before satisfying the response-header deadline.
+func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, in []*schema.Message, limits modelResponseLimits, opts ...model.Option) (*schema.Message, error) {
+	deadline, stop := context.WithTimeout(ctx, limits.Total)
+	defer stop()
+	call, cancel := context.WithCancelCause(deadline)
+	defer cancel(nil)
+	timeout := func(message string) error {
+		return &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: message, Transient: true}
+	}
+	first := time.AfterFunc(limits.First, func() { cancel(timeout("模型未在期限内返回有效响应。")) })
+	defer first.Stop()
+	var idle *time.Timer
+	defer func() {
+		if idle != nil {
+			idle.Stop()
+		}
+	}()
+	failed := func(err error) error {
+		if cause := context.Cause(call); cause != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if errors.Is(cause, context.DeadlineExceeded) {
+				return timeout("模型单次调用超过期限。")
+			}
+			return cause
+		}
+		return err
+	}
+	stream, err := base.Stream(call, in, opts...)
+	if err != nil {
+		return nil, failed(err)
+	}
+	defer stream.Close()
+	chunks := []*schema.Message{}
+	complete := false
+	bytes := 0
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, failed(timeout("模型响应流意外中断。"))
+		}
+		if chunk == nil {
+			continue
+		}
+		meaningful := chunk.Content != "" || chunk.ReasoningContent != "" || len(chunk.ToolCalls) > 0
+		if v, ok := chunk.Extra["reasoning-content"].(string); ok && v != "" {
+			meaningful = true
+		}
+		if meaningful {
+			first.Stop()
+			if idle == nil {
+				idle = time.AfterFunc(limits.Idle, func() { cancel(timeout("模型响应流长时间没有新内容。")) })
+			} else {
+				idle.Reset(limits.Idle)
+			}
+		}
+		if chunk.ResponseMeta != nil && chunk.ResponseMeta.FinishReason != "" {
+			complete = true
+		}
+		bytes += len(chunk.Content) + len(chunk.ReasoningContent)
+		for _, tc := range chunk.ToolCalls {
+			bytes += len(tc.Function.Arguments)
+		}
+		if bytes > 8<<20 || len(chunks) >= 100000 {
+			return nil, timeout("模型响应超过接收上限。")
+		}
+		clean := *chunk
+		clean.ReasoningContent = ""
+		clean.Extra = cleanExtra(chunk.Extra)
+		chunks = append(chunks, &clean)
+	}
+	if err := context.Cause(call); err != nil {
+		return nil, failed(err)
+	}
+	if !complete {
+		return nil, timeout("模型响应未完整结束，尚未保存为结果。")
+	}
+	result, err := schema.ConcatMessages(chunks)
+	if err != nil {
+		return nil, timeout("模型响应片段无法组合。")
+	}
+	if result.ResponseMeta.FinishReason == "length" {
+		return nil, &domain.WorkError{Code: "EVIDENCE_INSUFFICIENT", Message: "模型输出达到长度上限，未产生完整结果。"}
+	}
+	return result, nil
 }
 func (m *meteredModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	v, e := m.Generate(ctx, in, opts...)

@@ -47,6 +47,9 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 		if o.Critical && o.Status != "supported" {
 			return invalid("关键取证问题尚未解决")
 		}
+		if (o.Status == "unresolved" || len(o.Unresolved) > 0 || len(o.Conflicts) > 0) && len(a.Limitations) == 0 {
+			return invalid("未确认问题或冲突必须进入结果限制说明")
+		}
 	}
 	questions, e := s.engine.Store.Questions(ctx, s.claim.Run.ID)
 	if e != nil {

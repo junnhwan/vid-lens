@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -29,15 +30,16 @@ type Engine struct {
 	Config    config.Config
 }
 type session struct {
-	engine     *Engine
-	claim      domain.Claim
-	profile    config.Profile
-	cp         checkpoint
-	snapshot   domain.Snapshot
-	transcript []domain.Segment
-	article    *domain.Article
-	turn       *domain.Turn
-	tools      map[string]tool.EnhancedInvokableTool
+	engine           *Engine
+	claim            domain.Claim
+	profile          config.Profile
+	cp               checkpoint
+	snapshot         domain.Snapshot
+	transcript       []domain.Segment
+	article          *domain.Article
+	turn             *domain.Turn
+	tools            map[string]tool.EnhancedInvokableTool
+	compositionReady bool
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
@@ -141,7 +143,7 @@ func (s *session) initial(ctx context.Context) error {
 		text["goal"] = "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."
 	}
 	raw := domain.JSON(text)
-	if len(raw) > s.profile.MaxInputChars*3 {
+	if utf8.RuneCount(raw) > s.profile.MaxInputChars {
 		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整文字超过当前模型输入限制，不能截断后冒充全片概览。")
 	}
 	msgs = append(msgs, schema.UserMessage(string(raw)))

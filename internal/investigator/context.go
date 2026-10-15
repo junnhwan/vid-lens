@@ -94,6 +94,25 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	if e != nil {
 		return ctx, nil, e
 	}
+	// A call may use the long-writing allowance only after the current visual
+	// observations and critical questions are accounted for. Reconstruct this on resume.
+	s.compositionReady = s.turn == nil && len(observations) > 0
+	for _, ids := range s.cp.Inspections {
+		for _, id := range ids {
+			if !seen[id] {
+				s.compositionReady = false
+			}
+		}
+	}
+	for _, raw := range questions {
+		var q struct {
+			Critical bool
+			Status   string
+		}
+		if json.Unmarshal(raw, &q) != nil || q.Critical && q.Status != "supported" {
+			s.compositionReady = false
+		}
+	}
 	capsule := "持久观察记录（不是重新看图）：" + string(domain.JSON(observations)) + "\n当前取证问题：" + string(domain.JSON(questions))
 	const capsuleName = "vidlens_evidence_capsule"
 	filtered := []*schema.Message{}

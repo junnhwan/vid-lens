@@ -87,7 +87,7 @@ func (m *imageBridge) WithTools(ts []*schema.ToolInfo) (model.ToolCallingChatMod
 	return &imageBridge{base: b}, e
 }
 func (m *imageBridge) Generate(ctx context.Context, msgs []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	return m.base.Generate(ctx, NormalizeToolImages(msgs), opts...)
+	return receiveModelResponse(ctx, m.base, NormalizeToolImages(msgs), modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}, opts...)
 }
 func (m *imageBridge) Stream(ctx context.Context, msgs []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	v, e := m.Generate(ctx, msgs, opts...)
