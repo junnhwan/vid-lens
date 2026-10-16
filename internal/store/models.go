@@ -364,9 +364,14 @@ func loadCatalog(ctx context.Context, q Querier) (catalogState, error) {
 	var preferred *string
 	var raw json.RawMessage
 	// Read settings and models in one snapshot, including during first enablement.
-	err := q.QueryRow(ctx, `SELECT `+catalogEnabledSQL+`,s.default_model_id,s.revision,
-COALESCE((SELECT jsonb_agg(item ORDER BY item->>'display_name',item->>'id') FROM (`+modelSelect+`) catalog(item)), '[]'::jsonb)
-FROM model_settings s`).Scan(&c.enabled, &preferred, &c.revision, &raw)
+	// Materialize the singleton once. A second unbounded settings scan in the
+	// model projection inflated row estimates enough to trigger expensive JIT
+	// compilation inside short request-control transactions on fresh databases.
+	projection := strings.Replace(modelSelect, "CROSS JOIN model_settings s", "CROSS JOIN settings s", 1)
+	err := q.QueryRow(ctx, `WITH settings AS MATERIALIZED (SELECT * FROM model_settings LIMIT 1)
+SELECT `+catalogEnabledSQL+`,s.default_model_id,s.revision,
+COALESCE((SELECT jsonb_agg(item ORDER BY item->>'display_name',item->>'id') FROM (`+projection+`) catalog(item)), '[]'::jsonb)
+FROM settings s`).Scan(&c.enabled, &preferred, &c.revision, &raw)
 	if err != nil {
 		return c, err
 	}
@@ -374,14 +379,7 @@ FROM model_settings s`).Scan(&c.enabled, &preferred, &c.revision, &raw)
 	if err = json.Unmarshal(raw, &models); err != nil {
 		return c, err
 	}
-	for _, m := range models {
-		if m.Enabled && m.ProviderEnabled && m.Verified {
-			c.models = append(c.models, domain.GenerationModel{ID: m.ID, RevisionID: m.RevisionID, DisplayName: m.DisplayName, BrandID: m.BrandID, Description: m.Description})
-			if preferred != nil && *preferred == m.ID {
-				c.defaultID = preferred
-			}
-		}
-	}
+	c.models, c.defaultID = publicModels(models, preferred)
 	return c, nil
 }
 
@@ -462,6 +460,10 @@ func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.Reque
 	return spec, e
 }
 func checkAvailable(ctx context.Context, q Querier, cid string) error {
+	_, err := modelRoutes(ctx, q, cid)
+	return err
+}
+func checkLegacyAvailable(ctx context.Context, q Querier, cid string) error {
 	var found, bound, enabled, directory bool
 	e := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_revisions WHERE config_id=$1),EXISTS(SELECT 1 FROM legacy_model_bindings WHERE config_id=$1),COALESCE((SELECT m.enabled AND p.enabled FROM catalog_models m JOIN model_providers p ON p.id=m.provider_id WHERE m.id=COALESCE((SELECT model_id FROM model_revisions WHERE config_id=$1 LIMIT 1),(SELECT model_id FROM legacy_model_bindings WHERE config_id=$1))),true),(SELECT `+catalogEnabledSQL+` FROM model_settings s)`, cid).Scan(&found, &bound, &enabled, &directory)
 	if e != nil {

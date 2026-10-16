@@ -17,6 +17,51 @@ import (
 	"vidlens/internal/domain"
 )
 
+func TestReasoningGPTStreamsWithCompatibleParameters(t *testing.T) {
+	for _, name := range []string{"gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "openai/gpt-5.5", "deepseek/deepseek-v4.1-flash"} {
+		t.Run(name, func(t *testing.T) {
+			gpt := !strings.HasPrefix(name, "deepseek/")
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				if string(body["stream"]) != "true" || len(body["tools"]) == 0 {
+					t.Error("streaming or tools missing from actual request")
+				}
+				if gpt {
+					if string(body["max_completion_tokens"]) != "128000" || len(body["max_tokens"]) != 0 || len(body["temperature"]) != 0 {
+						t.Error("reasoning GPT request has incompatible generation parameters")
+					}
+				} else if string(body["max_tokens"]) != "128000" || string(body["temperature"]) != "0.2" || len(body["max_completion_tokens"]) != 0 {
+					t.Error("non-GPT provider generation parameters changed")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			}))
+			defer server.Close()
+			p := config.DefaultProfile()
+			p.ModelBaseURL, p.ModelName, p.MaxOutputTokens = server.URL, name, 128000
+			base, err := newModelWithClient(context.Background(), p, "synthetic-test-key", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, err = base.WithTools([]*schema.ToolInfo{{Name: "inspect_test_pattern", Desc: "Inspect synthetic pixels."}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := []*schema.Message{schema.SystemMessage("Follow the synthetic check instruction."), schema.UserMessage("Reply OK.")}
+			result, err := completeModelResponse(context.Background(), base, messages)
+			if err != nil || result == nil || result.Content != "OK" || calls.Load() != 1 {
+				t.Fatalf("streaming failed before or after provider submission: result=%v err=%v calls=%d", result, err, calls.Load())
+			}
+		})
+	}
+}
+
 // Exercise the real Eino HTTP adapter: a relay may withhold non-stream headers
 // for the entire generation, while streaming sends headers and useful chunks promptly.
 func TestModelGenerationOutlivesHeaderTimeoutWithoutResubmission(t *testing.T) {

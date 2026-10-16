@@ -93,18 +93,6 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 			return err
 		}
 	}
-	p.CacheHintsVerified = false
-	if p.CachePolicy == "qwen_explicit" {
-		p.CacheHintsVerified, err = e.Store.CacheHintsVerified(ctx, c.Run.ConfigID)
-		if err != nil {
-			return err
-		}
-	}
-	s.profile = p
-	base, err := e.baseModel(ctx, p)
-	if err != nil {
-		return err
-	}
 	tools, err := s.makeTools()
 	if err != nil {
 		return err
@@ -115,7 +103,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	if op, err := e.Store.Operation(ctx, c.Run.ID, "candidate"); err == nil && op.Status == "completed" {
 		return s.publish(ctx, op.Result)
 	}
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "vidlens", Description: "Investigate the current video's real evidence and produce a grounded result", Model: &meteredModel{session: s, base: base}, MaxIterations: p.MaxIterations - s.cp.Calls, GenModelInput: func(_ context.Context, _ string, in *adk.AgentInput) ([]*schema.Message, error) {
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "vidlens", Description: "Investigate the current video's real evidence and produce a grounded result", Model: &meteredModel{session: s}, MaxIterations: p.MaxIterations - s.cp.Calls, GenModelInput: func(_ context.Context, _ string, in *adk.AgentInput) ([]*schema.Message, error) {
 		return in.Messages, nil
 	}, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}, ReturnDirectly: map[string]bool{"submit_article": true, "submit_answer": true}}, Handlers: []adk.ChatModelAgentMiddleware{&middleware{BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{}, s: s}}})
 	if err != nil {

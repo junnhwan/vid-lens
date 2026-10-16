@@ -25,7 +25,7 @@ import (
 // The model service is a fixture; PostgreSQL, Redis, FFmpeg, the Eino HTTP
 // adapter, candidate repair and immutable publication all use their real paths.
 func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
-	for _, fault := range []string{"malformed_json", "independent_errors", "observation_arguments", "caller_cancels", "normal_stop", "repeated_stop"} {
+	for _, fault := range []string{"malformed_json", "independent_errors", "observation_arguments", "caller_cancels", "normal_stop", "repeated_stop", "provider_failover"} {
 		t.Run(fault, func(t *testing.T) {
 			s, resources, cfg := testsupport.Services(t)
 			if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -56,7 +56,11 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 					return
 				}
 				if qaMode.Load() {
-					if input.Model != cfg.Profile.ModelName || r.Header.Get("Authorization") != "Bearer fixture-key" {
+					wantModel, wantAuth := cfg.Profile.ModelName, "Bearer fixture-key"
+					if fault == "provider_failover" {
+						wantModel, wantAuth = "z-ai/glm-5.3-flash", "Bearer fixture-backup"
+					}
+					if input.Model != wantModel || r.Header.Get("Authorization") != wantAuth {
 						t.Error("Q&A changed the frozen model or credential")
 					}
 					n := qaCalls.Add(1)
@@ -131,7 +135,7 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 						t.Error("repair did not receive both block failures")
 					}
 					args = string(domain.JSON(candidate))
-					if n == 1 && fault == "malformed_json" {
+					if n == 1 && (fault == "malformed_json" || fault == "provider_failover") {
 						args = args[:len(args)-1]
 					}
 					if n > 2 {
@@ -146,6 +150,9 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			}))
 			defer server.Close()
 			cfg.Profile.ModelBaseURL = server.URL
+			if fault == "provider_failover" {
+				cfg.Profile.ModelName = "glm-5.3-flash"
+			}
 			ctx := context.Background()
 			if _, err := s.SaveConfig(ctx, cfg.Profile, "fixture-key", ""); err != nil {
 				t.Fatal(err)
@@ -167,7 +174,20 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			accepted, err := s.CreateRequest(ctx, owner.ID, domain.ID(), "local://blue.mp4", "", true)
+			var failedCalls atomic.Int32
+			frozenEndpoint := server.URL
+			input := domain.RequestInput{VideoURL: "local://blue.mp4"}
+			if fault == "provider_failover" {
+				failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					failedCalls.Add(1)
+					w.WriteHeader(503)
+				}))
+				defer failed.Close()
+				primary := verifiedFixtureRoute(t, s, "primary", failed.URL, "glm-5.3-flash")
+				verifiedFixtureRoute(t, s, "backup", server.URL, "z-ai/glm-5.3-flash")
+				frozenEndpoint, input.ModelID, input.ModelRevisionID = failed.URL, primary.ID, primary.RevisionID
+			}
+			accepted, err := s.CreateRequestWithInput(ctx, owner.ID, domain.ID(), input, "", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -234,7 +254,7 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			if err = s.Pool.QueryRow(ctx, "SELECT count(*) FROM articles WHERE generation_run_id=$1", claim.Run.ID).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("published %d times: %v", published, err)
 			}
-			if fault == "normal_stop" {
+			if fault == "normal_stop" || fault == "provider_failover" {
 				qaMode.Store(true)
 				var otherCalls atomic.Int32
 				other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { otherCalls.Add(1); w.WriteHeader(500) }))
@@ -264,7 +284,7 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if frozen.ModelBaseURL != server.URL {
+				if frozen.ModelBaseURL != frozenEndpoint {
 					t.Fatal("Q&A config loaded the current default")
 				}
 				if err = engine.Run(ctx, *qa, frozen); err != nil {
@@ -273,6 +293,9 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 				turn, err = s.Turn(ctx, owner.ID, con.ID, turn.ID)
 				if err != nil || turn.Status != "completed" || turn.Answer == nil || qaCalls.Load() != 2 || otherCalls.Load() != 0 {
 					t.Fatalf("Q&A finalization/frozen endpoint failed: %+v %v, original=%d other=%d", turn, err, qaCalls.Load(), otherCalls.Load())
+				}
+				if fault == "provider_failover" && failedCalls.Load() != 2 {
+					t.Fatalf("article/Q&A repeatedly called the failed supplier: %d", failedCalls.Load())
 				}
 			}
 		})

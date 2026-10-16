@@ -1334,6 +1334,7 @@ function Diagnostics({
     submission?: number
     created_at: string
     display_name: string
+    provider_name?: string | null
     reporting: {
       input: Metric
       output: Metric
@@ -1413,8 +1414,11 @@ function Diagnostics({
                         <td>
                           <time dateTime={row.created_at}>{stamp(row.created_at)}</time>
                         </td>
-                        <td className="usage-model" title={row.display_name}>
-                          {row.display_name}
+                        <td className="usage-model" title={[row.display_name, row.provider_name].filter(Boolean).join(" · ")}>
+                          <span className="usage-span">
+                            <span>{row.display_name}</span>
+                            <small>{row.provider_name || "历史线路未知"}</small>
+                          </span>
                         </td>
                         <td className="num">
                           <span className="usage-span">

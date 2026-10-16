@@ -2,7 +2,6 @@ package investigator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
@@ -98,7 +96,21 @@ func newModelWithClient(ctx context.Context, p config.Profile, key string, clien
 	if p.ModelDisableThinking {
 		extra["enable_thinking"] = false
 	}
-	return openai.NewChatModel(ctx, &openai.ChatModelConfig{ExtraFields: extra, BaseURL: strings.TrimRight(p.ModelBaseURL, "/"), Model: p.ModelName, APIKey: key, HTTPClient: client, MaxTokens: domain.Ptr(p.MaxOutputTokens), Temperature: domain.Ptr(float32(0.2))})
+	cfg := &openai.ChatModelConfig{ExtraFields: extra, BaseURL: strings.TrimRight(p.ModelBaseURL, "/"), Model: p.ModelName, APIKey: key, HTTPClient: client, MaxTokens: domain.Ptr(p.MaxOutputTokens), Temperature: domain.Ptr(float32(0.2))}
+	if reasoningGPT(p.ModelName) {
+		// Reasoning GPTs use a completion budget that includes reasoning tokens.
+		// Omit sampling settings rather than forcing a value rejected by the SDK
+		// or by upstream reasoning modes.
+		cfg.MaxTokens = nil
+		cfg.MaxCompletionTokens = domain.Ptr(p.MaxOutputTokens)
+		cfg.Temperature = nil
+	}
+	return openai.NewChatModel(ctx, cfg)
+}
+
+func reasoningGPT(name string) bool {
+	name = strings.TrimPrefix(name, "openai/")
+	return name == "gpt-5" || strings.HasPrefix(name, "gpt-5.") || strings.HasPrefix(name, "gpt-5-") || name == "gpt-6" || strings.HasPrefix(name, "gpt-6.") || strings.HasPrefix(name, "gpt-6-")
 }
 
 // Some Chat Completions providers accept images only in user messages. Keep the
@@ -148,125 +160,6 @@ func NormalizeToolImages(input []*schema.Message) []*schema.Message {
 	}
 	flush()
 	return out
-}
-
-type meteredModel struct {
-	session    *session
-	base       model.ToolCallingChatModel
-	toolsChars int
-}
-
-func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
-	chars := 0
-	for _, info := range t {
-		var parameters any
-		if info.ParamsOneOf != nil {
-			p, err := info.ParamsOneOf.ToJSONSchema()
-			if err != nil {
-				return nil, err
-			}
-			parameters = p
-		}
-		chars += utf8.RuneCount(domain.JSON(map[string]any{"type": "function", "function": map[string]any{"name": info.Name, "description": info.Desc, "parameters": parameters}}))
-	}
-	b, e := m.base.WithTools(t)
-	if e != nil {
-		return nil, e
-	}
-	return &meteredModel{session: m.session, base: b, toolsChars: chars}, nil
-}
-func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	s := m.session
-	key := "model:" + strconv.Itoa(s.cp.Calls)
-	args := stripPixels(in)
-	if utf8.RuneCount(domain.JSON(args))+m.toolsChars+s.profile.MaxOutputTokens*4 > s.profile.MaxInputChars {
-		return nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整上下文与输出预留超过模型限制；已保留来源，不会截断全片后继续生成。")
-	}
-	for local := 0; local < 2; local++ {
-		op, e := s.engine.Store.BeginOperation(ctx, s.claim, key, "model", args, false)
-		if e != nil {
-			return nil, e
-		}
-		if op.Status == "completed" {
-			var saved schema.Message
-			if e = json.Unmarshal(op.Result, &saved); e != nil {
-				return nil, e
-			}
-			return &saved, nil
-		}
-		phase := "investigate"
-		if s.turn != nil {
-			phase = "answer"
-		} else if s.compositionReady {
-			phase = "compose"
-		}
-		step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", Title: "正在等待模型处理", Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
-		step, e = s.engine.Store.Step(ctx, s.claim, step)
-		if e != nil {
-			return nil, e
-		}
-		actx, release, e := s.engine.Resources.Acquire(ctx, s.claim, "ai")
-		if e != nil {
-			return nil, e
-		}
-		limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
-		if s.compositionReady {
-			limits.Total = 300 * time.Second
-		}
-		submission := 0
-		observer := newUsageObserver(s.cp.LayoutVersion, s.profile.CachePolicy, func(report usageReport) {
-			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			if err := s.engine.Store.RecordSubmission(cctx, s.claim, key, submission, report); err != nil {
-				slog.Warn("model usage observation unavailable")
-			}
-		})
-		sub := context.WithValue(actx, usageKey{}, observer)
-		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
-			op, e := s.engine.Store.BeginOperation(actx, s.claim, key, "model", args, true)
-			submission = op.Submissions
-			return e
-		})
-		options := append(cacheOptions(s.profile), opts...)
-		result, e := receiveModelResponse(sub, m.base, NormalizeToolImages(in), limits, options...)
-		release()
-		if e != nil {
-			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
-				return nil, e
-			}
-			var work *domain.WorkError
-			if errors.As(e, &work) {
-				if work.Transient && local == 0 && op.Submissions < 3 && work.RetryAfter <= time.Second {
-					select {
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					case <-time.After(time.Second):
-					}
-					continue
-				}
-				return nil, work
-			}
-			slog.Warn("model invocation rejected", "class", "incompatible_response")
-			return nil, &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型请求格式不兼容。", Transient: false}
-		}
-		result.ReasoningContent = ""
-		result.Extra = cleanExtra(result.Extra)
-		var usage any
-		if result.ResponseMeta != nil {
-			usage = result.ResponseMeta.Usage
-		}
-		if e = s.engine.Store.FinishOperation(ctx, s.claim, key, result, providerID(result), usage); e != nil {
-			return nil, e
-		}
-		step.Status = "completed"
-		step.FinishedAt = domain.Ptr(time.Now().UTC())
-		step.Outcome = &domain.Outcome{Message: "已收到完整模型响应，继续核对或正式提交。", EvidenceStatus: "not_assessed"}
-		if _, e = s.engine.Store.Step(ctx, s.claim, step); e != nil {
-			return nil, e
-		}
-		return result, nil
-	}
-	return nil, errors.New("model retry exhausted")
 }
 
 func completeModelResponse(ctx context.Context, base model.ToolCallingChatModel, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {

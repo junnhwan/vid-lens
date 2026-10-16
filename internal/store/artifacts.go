@@ -392,6 +392,14 @@ func (s *Store) Operation(ctx context.Context, run, key string) (Operation, erro
 	return one[Operation](ctx, s.Pool, "SELECT to_jsonb(o) FROM run_operations o WHERE run_id=$1 AND operation_key=$2", run, key)
 }
 func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind string, args any, submit bool) (Operation, error) {
+	return s.beginOperation(ctx, c, key, kind, args, submit, "")
+}
+
+func (s *Store) BeginModelSubmission(ctx context.Context, c domain.Claim, key string, args any, routeConfigID string) (Operation, error) {
+	return s.beginOperation(ctx, c, key, "model", args, true, routeConfigID)
+}
+
+func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind string, args any, submit bool, routeConfigID string) (Operation, error) {
 	var op Operation
 	e := s.Tx(ctx, func(tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
@@ -402,7 +410,7 @@ func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind st
 		if e != nil {
 			return e
 		}
-		op, e = one[Operation](ctx, tx, "SELECT to_jsonb(o) FROM run_operations o WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key)
+		op, e = one[Operation](ctx, tx, "SELECT to_jsonb(o) FROM run_operations o WHERE run_id=$1 AND operation_key=$2 FOR UPDATE", c.Run.ID, key)
 		if e != nil {
 			return e
 		}
@@ -425,12 +433,32 @@ func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind st
 					return domain.Err(429, "REFERENCE_LIMIT_EXCEEDED", "本轮最多读取三个网页。")
 				}
 			}
+			limit := 3
+			reporting := map[string]any{"schema": "unobserved", "stream_status": "incomplete"}
 			if kind == "model" {
-				if e = checkAvailable(ctx, tx, c.Run.ConfigID); e != nil {
-					return e
+				routes, err := modelRoutes(ctx, tx, c.Run.ConfigID)
+				if err != nil {
+					return err
 				}
+				if routeConfigID == "" {
+					routeConfigID = c.Run.ConfigID
+				}
+				found := false
+				for _, route := range routes {
+					if route.ConfigID == routeConfigID {
+						found = true
+						reporting["route_config_id"] = route.ConfigID
+						reporting["model_revision_id"] = route.RevisionID
+						reporting["provider_id"] = route.ProviderID
+						reporting["provider_revision_id"] = route.ProviderRevisionID
+					}
+				}
+				if !found {
+					return domain.Err(503, "MODEL_UNAVAILABLE", "这条模型线路已不可用。")
+				}
+				limit = max(limit, len(routes))
 			}
-			if op.Submissions >= 3 {
+			if op.Submissions >= limit {
 				return domain.Err(422, "PROVIDER_UNAVAILABLE", "同一远端操作已达到提交上限。")
 			}
 			if _, e = tx.Exec(ctx, "UPDATE run_operations SET submissions=submissions+1,updated_at=now() WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key); e != nil {
@@ -438,7 +466,7 @@ func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind st
 			}
 			op.Submissions++
 			if kind == "model" {
-				if _, e = tx.Exec(ctx, "INSERT INTO model_submissions(run_id,operation_key,submission,attempt_id) VALUES($1,$2,$3,$4)", c.Run.ID, key, op.Submissions, c.AttemptID); e != nil {
+				if _, e = tx.Exec(ctx, "INSERT INTO model_submissions(run_id,operation_key,submission,attempt_id,reporting) VALUES($1,$2,$3,$4,$5)", c.Run.ID, key, op.Submissions, c.AttemptID, domain.JSON(reporting)); e != nil {
 					return e
 				}
 			}
