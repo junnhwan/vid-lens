@@ -137,8 +137,19 @@ export function EntryView({
               </button>
             </div>
             <p className="model-help">
-              模型由站长提供，可能临时不可用。
-              <span>提交后，此视频的解读与问答固定使用同一模型。</span>
+              模型来自其他非官方渠道，可能临时不可用。
+              <span className="model-note">
+                <button type="button" className="model-note-mark" aria-describedby="model-source-note">
+                  <span aria-hidden="true">?</span>
+                  <span className="sr-only">关于这些模型</span>
+                </button>
+                <span className="model-note-card" id="model-source-note" role="tooltip">
+                  名称对应模型系列。
+                  <br />
+                  线路可能中断，回答质量也会起伏。
+                </span>
+              </span>
+              <span className="model-help-rule">提交后，此视频的解读与问答固定使用同一模型。</span>
             </p>
             <div className="fold" data-open={expanded ? "true" : "false"}>
               <div className="fold-clip">

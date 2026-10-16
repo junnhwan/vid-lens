@@ -6,6 +6,7 @@ import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 import { ModelIcon } from "../ui/ModelIdentity"
 import { ChoiceMenu, type ChoiceOption } from "../ui/ChoiceMenu"
 import { useRise } from "../ui/countUp"
+import { isOpenProbe, liveStatusText, modelActivity, openProbe, probeTiming } from "./probeStatus"
 
 interface Provider {
   id: string
@@ -42,6 +43,7 @@ interface Probe {
   mode: string
   submissions: number
   created_at: string
+  updated_at?: string
   failure_code?: string
   result?: {
     cache_hit_observed?: boolean
@@ -193,8 +195,8 @@ function sameRevision(draft: ModelDraft, model: Model) {
     draft.cache_policy === model.cache_policy
   )
 }
-function catalogLine(model: Model, checking: boolean): { text: string; tone: "ready" | "held" | "wait" | "dim" } {
-  if (checking) return { text: "正在检查", tone: "wait" }
+function catalogLine(model: Model, active: Probe | undefined, now: number): { text: string; tone: "ready" | "held" | "wait" | "dim" | "live" } {
+  if (active) return { text: liveStatusText(active, now), tone: "live" }
   if (!model.provider_enabled) return { text: "供应商已停用", tone: "dim" }
   if (model.enabled && model.verified && model.is_default) return { text: "可选用 · 默认", tone: "ready" }
   if (model.enabled && model.verified) return { text: "可选用", tone: "ready" }
@@ -212,9 +214,10 @@ function nextStep(model: Model): "" | "probe" | "enable" | "default" {
   if (!model.is_default) return "default"
   return ""
 }
-function actionNote(model: Model, unsaved: boolean) {
+function actionNote(model: Model, unsaved: boolean, checking: boolean) {
   if (unsaved) return "先保存或撤销参数，再检查、启用或设为默认。"
   if (!model.provider_enabled) return "供应商已停用。先打开它，才能检查或选用这个模型。"
+  if (checking) return "这次检查还在进行，切换到其他模型也不会中断。"
   if (!model.verified) return "先做一次图片与工具检查。通过之后才能启用。检查会真实调用模型。"
   if (!model.enabled) return "检查已经通过。启用后，这个模型会出现在访客面前。"
   return ""
@@ -267,8 +270,8 @@ export function Manage() {
     [composing, setComposing] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [ready, setReady] = useState(false)
-  const [probes, setProbes] = useState<Probe[]>([]),
-    [probeModel, setProbeModel] = useState(""),
+  const [probeByModel, setProbeByModel] = useState<Record<string, Probe[]>>({}),
+    [now, setNow] = useState(() => Date.now()),
     [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null),
     [usageOffset, setUsageOffset] = useState(0)
   const storage = useRef(
@@ -318,8 +321,23 @@ export function Manage() {
   useEffect(() => {
     if (auth) void load().catch((e) => setError(message(e)))
   }, [auth])
+  const watched = [
+    ...new Set(
+      [composing ? "" : md.id, ...Object.keys(probeByModel).filter((id) => modelActivity(probeByModel[id]))].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  ].sort()
+  const watchKey = watched.join(",")
+  const ticking = watched.some((id) => Boolean(modelActivity(probeByModel[id])))
   useEffect(() => {
-    if (!auth || !probeModel) return
+    if (!ticking) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [ticking])
+  useEffect(() => {
+    if (!auth || !watchKey) return
+    const ids = watchKey.split(",")
     let stop = false,
       timer: ReturnType<typeof setTimeout> | undefined
     async function poll() {
@@ -327,27 +345,39 @@ export function Manage() {
         timer = setTimeout(poll, 2000)
         return
       }
-      try {
-        const r = await api.current.request<{ items: Probe[] }>("GET", `/api/v1/admin/models/${probeModel}/probes`)
-        if (stop) return
-        setProbes(r.body.items)
-        if (r.body.items.some((p) => ["queued", "running"].includes(p.status))) timer = setTimeout(poll, 2000)
-        else void load().catch(() => {})
-      } catch (e) {
-        if (!stop) setError(message(e))
-      }
+      let failure: unknown
+      const pages = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const r = await api.current.request<{ items: Probe[] }>("GET", `/api/v1/admin/models/${id}/probes`)
+            return { id, items: r.body.items, failed: false }
+          } catch (e) {
+            failure = failure ?? e
+            return { id, items: [] as Probe[], failed: true }
+          }
+        }),
+      )
+      if (stop) return
+      setProbeByModel((prev) => {
+        const next = { ...prev }
+        for (const page of pages) if (!page.failed) next[page.id] = page.items
+        return next
+      })
+      const still = pages.some((page) => (page.failed ? Boolean(modelActivity(probeByModel[page.id])) : page.items.some(isOpenProbe)))
+      if (failure) setError(message(failure))
+      if (still) timer = setTimeout(poll, 2000)
+      else if (!failure) void load().catch(() => {})
     }
     void poll()
     return () => {
       stop = true
       if (timer) clearTimeout(timer)
     }
-  }, [auth, probeModel, busy])
+  }, [auth, watchKey, busy])
   useEffect(() => {
     if (!auth || composing || md.id || !models.length) return
     const preferred = models.find((m) => m.is_default) || models.find((m) => m.enabled && m.verified && m.provider_enabled) || models[0]
     setMd(modelDraft(preferred))
-    setProbeModel(preferred.id)
   }, [auth, composing, md.id, models])
   async function action(name: string, fn: () => Promise<void>) {
     if (busy) return
@@ -391,14 +421,10 @@ export function Manage() {
     if (!m) {
       setComposing(true)
       setMd({ ...emptyModel, provider_id: providers[0]?.id || "" })
-      setProbeModel("")
-      setProbes([])
       return
     }
     setComposing(false)
     setMd(modelDraft(m))
-    setProbeModel(m.id)
-    setProbes([])
   }
   function cancelCompose() {
     if (dirty) {
@@ -410,14 +436,10 @@ export function Manage() {
     setError("")
     if (!models.length) {
       setMd(emptyModel)
-      setProbeModel("")
-      setProbes([])
       return
     }
     const preferred = models.find((m) => m.is_default) || models[0]
     setMd(modelDraft(preferred))
-    setProbeModel(preferred.id)
-    setProbes([])
   }
   function openSection(id: string) {
     if (dirty) {
@@ -475,7 +497,6 @@ export function Manage() {
       setDirty(false)
       setComposing(false)
       setAdvanced(false)
-      setProbeModel(r.body.id)
       setNotice(
         !id
           ? "已保存为停用模型。通过图片与工具检查后再启用。"
@@ -534,7 +555,9 @@ export function Manage() {
       })
       await api.current.request("POST", path, body, key)
       forgetWrite(storage.current, slot)
-      setProbeModel(m.id)
+      const listed = await api.current.request<{ items: Probe[] }>("GET", `/api/v1/admin/models/${m.id}/probes`)
+      setProbeByModel((prev) => ({ ...prev, [m.id]: listed.body.items }))
+      setNow(Date.now())
       setNotice("已接受检查。浏览器超时后会读取原任务，结果未知不会自动重复扣费调用。")
     })
   }
@@ -571,8 +594,11 @@ export function Manage() {
     ),
   )
   const tab = String(Math.max(0, sections.findIndex(([id]) => id === section)))
-  const checking = Boolean(selected && probeModel === selected.id && probes.some((p) => p.mode === "capabilities" && (p.status === "queued" || p.status === "running")))
-  const cacheChecking = Boolean(selected && probeModel === selected.id && probes.some((p) => p.mode === "cache" && (p.status === "queued" || p.status === "running")))
+  const selectedProbes = selected ? (probeByModel[selected.id] ?? []) : []
+  const capabilityProbe = openProbe(selectedProbes, "capabilities")
+  const cacheProbe = openProbe(selectedProbes, "cache")
+  const checking = Boolean(capabilityProbe)
+  const cacheChecking = Boolean(cacheProbe)
   function providerName(id: string) {
     return providers.find((p) => p.id === id)?.name || "未关联供应商"
   }
@@ -947,7 +973,7 @@ export function Manage() {
                         {filtered.length ? (
                           <ul className="ledger-list">
                             {filtered.map((m) => {
-                              const line = catalogLine(m, Boolean(checking && m.id === selected?.id))
+                              const line = catalogLine(m, modelActivity(probeByModel[m.id]), now)
                               return (
                                 <li key={m.id} data-current={!composing && md.id === m.id ? "true" : "false"}>
                                   <button
@@ -999,8 +1025,8 @@ export function Manage() {
                           <p>{composing ? "先保存为停用。检查通过后才能启用。" : selected ? modelMeta(selected) : ""}</p>
                         </div>
                         {!composing && selected ? (
-                          <span className={`desk-seal ${catalogLine(selected, checking).tone}`}>
-                            {catalogLine(selected, checking).text}
+                          <span className={`desk-seal ${catalogLine(selected, modelActivity(selectedProbes), now).tone}`}>
+                            {catalogLine(selected, modelActivity(selectedProbes), now).text}
                           </span>
                         ) : null}
                       </header>
@@ -1012,7 +1038,16 @@ export function Manage() {
                             disabled={!!busy || dirty || checking || !selected.provider_enabled}
                             onClick={() => void probe(selected, "capabilities")}
                           >
-                            {checking ? "正在检查" : "检查图片与工具"}
+                            {checking && capabilityProbe ? (
+                              <>
+                                <span className="desk-spin" aria-hidden="true">
+                                  ↻
+                                </span>
+                                {liveStatusText(capabilityProbe, now)}
+                              </>
+                            ) : (
+                              "检查图片与工具"
+                            )}
                           </button>
                           <button
                             type="button"
@@ -1032,9 +1067,9 @@ export function Manage() {
                           </button>
                         </div>
                       ) : null}
-                      {!composing && selected && actionNote(selected, dirty) ? (
+                      {!composing && selected && actionNote(selected, dirty, Boolean(modelActivity(selectedProbes))) ? (
                         <p className="sheet-reason" id="model-action-note">
-                          {actionNote(selected, dirty)}
+                          {actionNote(selected, dirty, Boolean(modelActivity(selectedProbes)))}
                           {!selected.provider_enabled ? (
                             <button type="button" className="text-action" onClick={() => openProviders(providers.find((p) => p.id === selected.provider_id))}>
                               打开这个供应商
@@ -1176,7 +1211,16 @@ export function Manage() {
                                     disabled={!!busy || dirty || cacheChecking || !selected.provider_enabled}
                                     onClick={() => void probe(selected, "cache")}
                                   >
-                                    {cacheChecking ? "正在检查缓存" : "串行检查缓存"}
+                                    {cacheChecking && cacheProbe ? (
+                                      <>
+                                        <span className="desk-spin" aria-hidden="true">
+                                          ↻
+                                        </span>
+                                        {cacheProbe.status === "queued" ? "排队中" : "正在检查缓存"} · {probeTiming(cacheProbe, now)}
+                                      </>
+                                    ) : (
+                                      "串行检查缓存"
+                                    )}
                                   </button>
                                   <p className="fine">
                                     缓存检查单独串行，不批量探测。显式提示要等端点报告实际创建或命中。一次小样本通过，不代表长视频质量。
@@ -1209,16 +1253,22 @@ export function Manage() {
                       {!composing && selected ? (
                         <section className="probe-history">
                           <h3>最近检查</h3>
-                          {probes.length ? (
+                          {selectedProbes.length ? (
                             <ol className="probe-rail">
-                              {probes.map((p) => (
+                              {selectedProbes.map((p) => {
+                                const timing = probeTiming(p, now)
+                                return (
                                 <li key={p.id} data-status={p.status}>
                                   <i aria-hidden="true" />
                                   <div>
-                                    <strong>{labels[p.status] || p.status}</strong>
+                                    <strong>
+                                      {labels[p.status] || p.status}
+                                      {isOpenProbe(p) && timing ? ` · ${timing}` : ""}
+                                    </strong>
                                     <span>
                                       {p.mode === "cache" ? "缓存样本" : "图片与工具"} · {p.submissions} 次物理提交
                                     </span>
+                                    {!isOpenProbe(p) && timing ? <small>用时 {timing}</small> : null}
                                     {p.failure_code ? <code>{p.failure_code}</code> : null}
                                     {p.mode === "cache" && p.status === "succeeded" ? (
                                       <small>
@@ -1229,7 +1279,8 @@ export function Manage() {
                                   </div>
                                   <time dateTime={p.created_at}>{new Date(p.created_at).toLocaleString("zh-Hans")}</time>
                                 </li>
-                              ))}
+                                )
+                              })}
                             </ol>
                           ) : (
                             <p className="fine">尚无检查记录。</p>

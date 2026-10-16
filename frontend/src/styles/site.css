@@ -608,10 +608,90 @@ html:active-view-transition select {
   color: var(--ink-soft);
   font: 400 13.5px/1.7 var(--serif);
 }
-.model-help span {
+.model-help-rule {
   display: block;
   margin-top: 2px;
   color: color-mix(in srgb, var(--ink) 78%, var(--ink-soft));
+}
+.model-note {
+  position: relative;
+  display: inline-block;
+  margin-left: 5px;
+  vertical-align: 1px;
+  line-height: 1;
+}
+.model-note::after {
+  content: "";
+  position: absolute;
+  z-index: 39;
+  top: 100%;
+  left: -10px;
+  width: 36px;
+  height: 14px;
+}
+.model-note-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--ink-soft) 42%, var(--line));
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font: 500 10px/1 var(--serif);
+  cursor: help;
+}
+.model-note-mark:hover,
+.model-note:focus-within .model-note-mark {
+  color: var(--teal-ink);
+  border-color: color-mix(in srgb, var(--teal) 72%, var(--line-strong));
+}
+.model-note-card {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  left: 26px;
+  width: 248px;
+  padding: 12px 14px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 13px/1.65 var(--serif);
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--ink) 16%, transparent);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transform-origin: 16px 0;
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 180ms;
+}
+.model-note-card::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: -5px;
+  width: 9px;
+  height: 9px;
+  background: var(--surface);
+  border-left: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
+  transform: rotate(45deg);
+}
+.model-note:hover .model-note-card,
+.model-note:focus-within .model-note-card {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 80ms, 80ms, 0s;
 }
 .fold-clip {
   min-height: 0;
@@ -2981,6 +3061,11 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .probe-rail li[data-status="failed"] strong {
   color: var(--amber-ink);
 }
+.probe-rail li[data-status="running"] strong,
+.probe-rail li[data-status="queued"] strong {
+  color: var(--teal-ink);
+  font-variant-numeric: tabular-nums;
+}
 .probe-rail span,
 .probe-rail small,
 .probe-rail time {
@@ -3234,6 +3319,25 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .ledger-copy em[data-tone="wait"] {
   color: var(--amber-ink);
 }
+.ledger-copy em[data-tone="live"] {
+  color: var(--teal-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-copy em[data-tone="live"]::before,
+.desk-seal.live::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 45%, transparent);
+  animation: desk-pulse 1.4s ease-out infinite;
+}
+.ledger-copy em[data-tone="live"]::before {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
 .ledger-foot {
   padding: 8px 16px 12px;
   border-top: 1px solid var(--line);
@@ -3285,11 +3389,20 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   background: var(--amber-bg);
   color: var(--amber-ink);
 }
+.desk-seal.live {
+  border-color: color-mix(in srgb, var(--teal) 42%, var(--line));
+  background: color-mix(in srgb, var(--teal-soft) 70%, var(--canvas));
+  color: var(--teal-ink);
+  font-variant-numeric: tabular-nums;
+}
 .sheet-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 18px;
+}
+.sheet-actions .desk-pill {
+  font-variant-numeric: tabular-nums;
 }
 .sheet-reason {
   display: flex;
@@ -3500,6 +3613,8 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   .desk-pill .desk-spin,
   .probe-rail li[data-status="running"] i,
   .probe-rail li[data-status="queued"] i,
+  .ledger-copy em[data-tone="live"]::before,
+  .desk-seal.live::before,
   .model-sheet,
   .tune-body {
     animation: none;
