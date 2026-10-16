@@ -2,8 +2,10 @@ import { useEffect, useState, type Ref } from "react"
 import type { ModelCatalog } from "../contract/types"
 import { HttpApi } from "../api/http"
 import { LikeButton } from "./LikeButton"
-import { ModelIcon } from "./ModelIdentity"
+import { ChoiceMenu } from "./ChoiceMenu"
 import { Lens } from "./Lens"
+import { RepoPeek } from "./RepoPeek"
+import { useRise } from "./countUp"
 
 export function EntryView({
   link,
@@ -59,6 +61,7 @@ export function EntryView({
     }
   }, [])
   const model = catalog?.models.find((m) => m.id === selected)
+  const readings = useRise(stats?.completed_readings, active)
   return (
     <section className="view-input" ref={viewRef}>
       <div className="entry editorial-entry">
@@ -71,11 +74,7 @@ export function EntryView({
             <br />
             读成一篇<span>图文。</span>
           </h1>
-          <p className="entry-intro">
-            循着原视频的文字与画面整理重点，
-            <br />
-            留下可回看的出处，也留一点继续追问的空间。
-          </p>
+          <p className="entry-deck">循着原视频的文字与画面整理重点，留下可回看的出处，也留一点继续追问的空间。</p>
           <form
             className="generation-form"
             onSubmit={(e) => {
@@ -101,35 +100,27 @@ export function EntryView({
               />
               <button type="submit" className="btn primary" disabled={busy || !ready || !model}>
                 {busy ? "正在提交" : "开始解读"}
-                <span aria-hidden="true"> ↗</span>
+                <span aria-hidden="true" className="nudge">
+                  {" "}
+                  ↗
+                </span>
               </button>
             </div>
             <div className="form-options">
-              <label className="model-select">
-                <ModelIcon brand={model?.brand_id} />
-                <span className="sr-only">本次使用的模型</span>
-                <select
-                  aria-label="本次使用的模型"
-                  value={selected}
-                  disabled={busy || !catalog?.models.length}
-                  onChange={(e) => onSelect(e.target.value)}
-                >
-                  {selected && !model ? (
-                    <option value={selected} disabled>
-                      原模型已不可用，请重新选择
-                    </option>
-                  ) : null}
-                  {catalog?.models.length ? (
-                    catalog.models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.display_name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">{catalog ? "暂无可用模型" : "正在读取模型"}</option>
-                  )}
-                </select>
-              </label>
+              <ChoiceMenu
+                label="本次使用的模型"
+                value={selected}
+                disabled={busy || !catalog?.models.length}
+                placeholder={catalog ? "暂无可用模型" : "正在读取模型"}
+                unavailable={selected && !model ? "原模型已不可用，请重新选择" : undefined}
+                options={(catalog?.models ?? []).map((item) => ({
+                  id: item.id,
+                  label: item.display_name,
+                  hint: item.description,
+                  brand: item.brand_id,
+                }))}
+                onChange={onSelect}
+              />
               <button
                 type="button"
                 className="purpose-toggle"
@@ -137,28 +128,42 @@ export function EntryView({
                 aria-controls="purpose-field"
                 onClick={() => setExpanded((v) => !v)}
               >
-                {expanded ? "− 收起关注点" : "+ 添加关注点"}
+                <span className="purpose-mark" aria-hidden="true" />
+                <span className="purpose-copy">
+                  <span aria-hidden={expanded ? true : undefined}>添加关注点</span>
+                  <span aria-hidden={expanded ? undefined : true}>收起关注点</span>
+                </span>
                 <small>可选</small>
               </button>
             </div>
-            <div className="purpose-field" id="purpose-field" hidden={!expanded}>
-              <label htmlFor="purpose">这次想重点了解什么？</label>
-              <textarea
-                id="purpose"
-                value={purpose}
-                rows={3}
-                placeholder="比如：重点整理操作步骤、适用条件和容易忽略的细节。"
-                onChange={(e) => onPurpose(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    onSubmit()
-                  }
-                }}
-              />
-              <div>
-                <span>留空也可以直接解读。</span>
-                <span data-over={Array.from(purpose).length > 500}>{Array.from(purpose).length} / 500</span>
+            <p className="model-help">
+              模型由站长提供，可能临时不可用。
+              <span>提交后，此视频的解读与问答固定使用同一模型。</span>
+            </p>
+            <div className="fold" data-open={expanded ? "true" : "false"}>
+              <div className="fold-clip">
+                <div className="purpose-field" id="purpose-field">
+                  <label htmlFor="purpose">这次想重点了解什么？</label>
+                  <textarea
+                    id="purpose"
+                    value={purpose}
+                    rows={3}
+                    tabIndex={expanded ? 0 : -1}
+                    aria-hidden={expanded ? undefined : true}
+                    placeholder="比如：重点整理操作步骤、适用条件和容易忽略的细节。"
+                    onChange={(e) => onPurpose(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault()
+                        onSubmit()
+                      }
+                    }}
+                  />
+                  <div>
+                    <span>留空也可以直接解读。</span>
+                    <span data-over={Array.from(purpose).length > 500}>{Array.from(purpose).length} / 500</span>
+                  </div>
+                </div>
               </div>
             </div>
             {error ? (
@@ -174,29 +179,34 @@ export function EntryView({
                 </button>
               </p>
             ) : null}
-            <p className="model-help">模型由站长提供，可能临时不可用。提交后，此视频的解读与问答固定使用同一模型。</p>
           </form>
-          <div className="entry-bottom">
-            <p>支持单个分 P 或单条视频。较长视频可能需要几分钟。</p>
+          <div className="entry-foot">
             <a className="sample-link" href="/example">
-              先看一篇真实示例 <span aria-hidden="true">→</span>
+              先看一篇真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
             </a>
+            <p className="entry-note">单条或单个分 P，较长视频要几分钟。</p>
           </div>
           <div className="proof">
             <p className="census">
-              {stats ? (
+              {readings !== undefined ? (
                 <>
-                  已完成 <strong>{stats.completed_readings.toLocaleString("zh-Hans")}</strong> 次解读
+                  <strong>{readings.toLocaleString("zh-Hans")}</strong>
+                  <span>次解读</span>
                 </>
               ) : (
-                "从一条视频，开始另一种阅读。"
+                <span>从一条视频开始</span>
               )}
             </p>
             <div className="thanks">
-              <LikeButton count={stats?.likes} ready={ready} csrf={csrf} />
-              <a className="star-link" href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
-                GitHub Star ↗
-              </a>
+              <LikeButton count={stats?.likes} ready={ready} csrf={csrf} active={active} />
+              <RepoPeek>
+                <a className="star-link" href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 1.35l1.62 3.28 3.62.53-2.62 2.55.62 3.6L8 9.62 4.76 11.3l.62-3.6L2.76 5.16l3.62-.53L8 1.35z" />
+                  </svg>
+                  GitHub Star
+                </a>
+              </RepoPeek>
             </div>
           </div>
         </div>
@@ -205,29 +215,27 @@ export function EntryView({
           id="entry-stage"
           aria-label="流动的抽象镜片与视频切片"
         >
-          <span className="lens-coordinate lens-coordinate-top">FRAME / TEXT / CONTEXT</span>
-          <Lens />
-          <div className="art-paper lens-paper-note">
-            <span className="art-paper-label">从画面，到阅读</span>
-            <h2>
-              让值得留下的内容，
-              <br />
-              有迹可循。
-            </h2>
-            <div className="paper-lines">
-              <i />
-              <i />
-              <i />
+          <div className="stage-stack">
+            <p className="lens-kicker">FRAME / TEXT / CONTEXT</p>
+            <Lens />
+            <div className="art-paper lens-paper-note">
+              <span className="art-paper-label">从画面，到阅读</span>
+              <h2>
+                让值得留下的内容，
+                <br />
+                有迹可循。
+              </h2>
+              <div className="paper-lines">
+                <i />
+                <i />
+                <i />
+              </div>
+              <p>阅读重点 · 回看出处 · 继续提问</p>
             </div>
-            <p>阅读重点 · 回看出处 · 继续提问</p>
-          </div>
-          <div className="lens-annotation">
-            <span className="lens-annotation-line" />
-            <span>循着画面，找到理解的焦点。</span>
-          </div>
-          <div className="lens-coordinate lens-coordinate-bottom">
-            <span>VIDLENS / A CLOSER LOOK</span>
-            <span>01 — ∞</span>
+            <div className="stage-caption">
+              <span>循着画面，找到理解的焦点。</span>
+              <span>01 — ∞</span>
+            </div>
           </div>
         </aside>
       </div>

@@ -150,7 +150,7 @@ export function Docs() {
           <div className="doc-next">
             <span>还有想了解的？</span>
             <a href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
-              在 GitHub 查看源码 ↗
+              在 GitHub 查看源码 <span className="nudge" aria-hidden="true">↗</span>
             </a>
           </div>
         </main>

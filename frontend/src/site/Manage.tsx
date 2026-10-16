@@ -624,7 +624,7 @@ export function Manage() {
                           <tr key={m.id}>
                             <td>
                               <button type="button" className="model-name" onClick={() => editModel(m)}>
-                                <ModelIcon brand={m.brand_id} />
+                                <ModelIcon brand={m.brand_id} name={m.display_name} />
                                 <span>
                                   {m.display_name}
                                   <code>{m.upstream_id}</code>
@@ -733,9 +733,21 @@ export function Manage() {
                             setDirty(true)
                           }}
                         >
-                          {["generic", "openai", "qwen", "deepseek", "gemini", "claude"].map((b) => (
+                          {[
+                            ["generic", "通用"],
+                            ["openai", "OpenAI"],
+                            ["claude", "Claude"],
+                            ["gemini", "Gemini"],
+                            ["qwen", "Qwen"],
+                            ["deepseek", "DeepSeek"],
+                            ["kimi", "Kimi"],
+                            ["glm", "GLM"],
+                            ["mimo", "MiMo"],
+                            ["doubao", "豆包"],
+                            ["hunyuan", "混元"],
+                          ].map(([b, label]) => (
                             <option key={b} value={b}>
-                              {b === "generic" ? "通用" : b}
+                              {label}
                             </option>
                           ))}
                         </select>

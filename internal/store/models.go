@@ -216,7 +216,7 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 		return CatalogModel{}, domain.Err(422, "INVALID_ARGUMENT", "请填写有效的模型名称、上游 ID 和简短说明。")
 	}
 	switch in.BrandID {
-	case "openai", "qwen", "deepseek", "gemini", "claude", "generic":
+	case "openai", "qwen", "deepseek", "gemini", "claude", "kimi", "glm", "mimo", "doubao", "hunyuan", "generic":
 	default:
 		in.BrandID = "generic"
 	}

@@ -1169,7 +1169,7 @@ h1, h2 { scroll-margin-top: 76px; }
 
 .atlas {
   display: grid;
-  grid-template-columns: max-content 72px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 12.5rem) 64px minmax(0, 1fr);
   align-items: center;
   column-gap: 6px;
   margin: 6px 0 12px;
@@ -1191,6 +1191,8 @@ h1, h2 { scroll-margin-top: 76px; }
 .atlas-leaf:active { transform: scale(0.98); }
 
 .atlas-root {
+  width: 100%;
+  min-width: 0;
   padding: 8px 2px;
 }
 
@@ -1200,7 +1202,8 @@ h1, h2 { scroll-margin-top: 76px; }
   font-family: var(--serif);
   font-weight: 600;
   letter-spacing: -0.02em;
-  line-height: 1.25;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .atlas-root strong { font-size: 1.2rem; }
@@ -1220,8 +1223,8 @@ h1, h2 { scroll-margin-top: 76px; }
 
 .atlas-spine {
   position: relative;
-  width: 72px;
-  height: 172px;
+  width: 64px;
+  align-self: center;
 }
 
 .atlas-seed {
@@ -1285,17 +1288,23 @@ h1, h2 { scroll-margin-top: 76px; }
 .atlas-leaves {
   display: grid;
   gap: 8px;
-  height: 172px;
+  min-width: 0;
 }
 
 .atlas-leaf {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  width: max-content;
-  max-width: 100%;
-  height: 52px;
-  padding: 0 14px 0 8px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 48px;
+  padding: 10px 12px 10px 8px;
+}
+
+.atlas-leaf-text {
+  min-width: 0;
+  flex: 1;
 }
 
 .atlas-leaf:hover { background: rgba(28, 25, 22, 0.035); }
@@ -1303,6 +1312,7 @@ h1, h2 { scroll-margin-top: 76px; }
 .atlas-index {
   width: 22px;
   flex: none;
+  margin-top: 0.28em;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
   letter-spacing: 0.04em;

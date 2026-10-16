@@ -54,7 +54,7 @@ func setPassword(path string) error {
 	if e = s.Migrate(context.Background()); e != nil {
 		return e
 	}
-	fmt.Fprint(os.Stderr, "New owner password (at least 12 bytes): ")
+	fmt.Fprintf(os.Stderr, "New owner password (at least %d bytes): ", store.OwnerPasswordMinBytes)
 	first, e := term.ReadPassword(int(os.Stdin.Fd()))
 	if e != nil {
 		return e

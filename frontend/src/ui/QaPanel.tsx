@@ -39,6 +39,10 @@ export function QaPanel({
   onExternal,
   onReferenceLinks,
   modelUnavailable,
+  staged = false,
+  onStage,
+  onPair,
+  onOpenArticle,
 }: {
   open: boolean
   turns: TurnView[]
@@ -71,6 +75,10 @@ export function QaPanel({
   onExternal: (v: boolean) => void
   onReferenceLinks: (v: string) => void
   modelUnavailable: boolean
+  staged?: boolean
+  onStage?: () => void
+  onPair?: () => void
+  onOpenArticle?: () => void
 }) {
   const sectionRef = useRef<HTMLElement>(null)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
@@ -133,11 +141,24 @@ export function QaPanel({
           <h2 id="qa-title">问这条视频</h2>
           <p>只解释这条视频和文章，不会改写正文。</p>
         </div>
-        <button type="button" className="icon-btn" aria-label="收起问答" onClick={onClose}>
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
+        <div className="qa-actions">
+          {onStage && onPair ? (
+            <div className="qa-view" role="group" aria-label="阅读布局">
+              <button type="button" aria-pressed={!staged} onClick={onPair}>并排</button>
+              <button type="button" aria-pressed={!!staged} onClick={onStage}>问答为主</button>
+            </div>
+          ) : null}
+          {staged ? (
+            <button type="button" id="qa-open-article" className="qa-paper" onClick={onOpenArticle}>
+              图文
+            </button>
+          ) : null}
+          <button type="button" className="icon-btn" aria-label="收起问答" onClick={onClose}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </header>
       <div
         className="qa-log"
@@ -328,23 +349,33 @@ export function QaPanel({
         {error ? <p className="form-error">{error}</p> : null}
         {modelUnavailable ? <p className="doc-note">本次解读的原模型暂不可用。文章和下载仍可使用，问题草稿已保留。</p> : null}
         <div className="external-option">
-          <label>
+          <label className="ink-check">
             <input
               type="checkbox"
               checked={externalAllowed}
               disabled={!externalAvailable || busy || !!active || modelUnavailable}
               onChange={(e) => onExternal(e.target.checked)}
             />
+            <span aria-hidden="true" />
             补充网络资料
           </label>
           <span>{externalAvailable ? (searchAvailable ? "已知网页优先 · 免费额度内搜索" : "可读取已知公开网页") : "站长尚未启用"}</span>
         </div>
-        {externalAllowed ? (
-          <label className="reference-input">
-            提供网页链接（可选，每行一条，最多 3 条）
-            <textarea rows={2} value={referenceLinks} onChange={(e) => onReferenceLinks(e.target.value)} placeholder="https://…" />
-          </label>
-        ) : null}
+        <div className="fold" data-open={externalAllowed ? "true" : "false"}>
+          <div className="fold-clip">
+            <label className="reference-input">
+              提供网页链接（可选，每行一条，最多 3 条）
+              <textarea
+                rows={2}
+                value={referenceLinks}
+                tabIndex={externalAllowed ? 0 : -1}
+                aria-hidden={externalAllowed ? undefined : true}
+                onChange={(e) => onReferenceLinks(e.target.value)}
+                placeholder="https://…"
+              />
+            </label>
+          </div>
+        </div>
         <div className="composer-field">
           <label className="sr-only" htmlFor="composer">
             问题

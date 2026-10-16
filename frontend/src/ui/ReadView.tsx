@@ -56,13 +56,19 @@ export function ReadView(props: {
   const [current, setCurrent] = useState("article-top")
   const [locked, setLocked] = useState<string | null>(null)
   const [arrive, setArrive] = useState(false)
+  const [stage, setStage] = useState(false)
+  const [paperOpen, setPaperOpen] = useState(false)
   const seenArticle = useRef<string | null>(null)
   const colRef = useRef<HTMLDivElement>(null)
+  const closePaperRef = useRef<HTMLButtonElement>(null)
+  const wasPaper = useRef(false)
   const lastLeft = useRef<number | null>(null)
   const panelMotion = useRef<Animation | null>(null)
+  const layout = !props.qaOpen ? "closed" : stage ? "stage" : "open"
   useLayoutEffect(() => {
     const el = colRef.current
-    if (!el || !props.active) {
+    if (!el || !props.active || stage) {
+      panelMotion.current?.cancel()
       lastLeft.current = null
       return
     }
@@ -80,8 +86,52 @@ export function ReadView(props: {
       panelMotion.current = motion
       motion.onfinish = () => motion.cancel()
     }
-  }, [props.qaOpen, props.active])
+  }, [props.qaOpen, props.active, stage])
   useEffect(() => () => panelMotion.current?.cancel(), [])
+  useEffect(() => {
+    if (!props.qaOpen) {
+      setStage(false)
+      setPaperOpen(false)
+    }
+  }, [props.qaOpen])
+  useEffect(() => {
+    const col = colRef.current
+    if (col) col.inert = stage && !paperOpen
+  }, [stage, paperOpen])
+  useEffect(() => {
+    if (paperOpen) closePaperRef.current?.focus()
+    else if (wasPaper.current) document.getElementById("qa-open-article")?.focus()
+    wasPaper.current = paperOpen
+  }, [paperOpen])
+  useEffect(() => {
+    if (!stage || !paperOpen) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (document.querySelector(".choice-menu")) return
+        event.preventDefault()
+        setPaperOpen(false)
+        return
+      }
+      if (event.key !== "Tab") return
+      const col = colRef.current
+      if (!col) return
+      const nodes = [...col.querySelectorAll<HTMLElement>("a[href], button, input, textarea, select, [tabindex]")].filter(
+        (node) => !node.hasAttribute("disabled") && node.tabIndex >= 0 && node.getClientRects().length > 0,
+      )
+      if (!nodes.length) return
+      const first = nodes[0]
+      const last = nodes[nodes.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [stage, paperOpen])
   const article = props.article?.article
   const firstFigure = article?.sections.flatMap((section) => section.blocks).find((block) => block.type === "figure")?.id
   const meta = [platformLabel(article?.source.platform), formatDuration(article?.source.duration_ms), article?.source.part?.label]
@@ -127,9 +177,34 @@ export function ReadView(props: {
 
   return (
     <section className="view-read" ref={props.viewRef}>
-      <div className="workspace" data-qa={props.qaOpen ? "open" : "closed"}>
-        <div className="article-col" ref={colRef}>
-          <article className="sheet" aria-readonly="true">
+      <div className="workspace" data-qa={layout} data-paper={paperOpen ? "open" : "closed"}>
+        {stage && !paperOpen ? (
+          <button type="button" className="paper-tab" onClick={() => setPaperOpen(true)}>
+            图文
+          </button>
+        ) : null}
+        <div
+          className="article-col"
+          ref={colRef}
+          onClick={() => {
+            if (stage && paperOpen) setPaperOpen(false)
+          }}
+        >
+          <article
+            className="sheet"
+            aria-readonly="true"
+            role={stage && paperOpen ? "dialog" : undefined}
+            aria-modal={stage && paperOpen ? true : undefined}
+            aria-label={stage && paperOpen ? article?.title || "图文" : undefined}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {stage ? (
+              <div className="paper-bar">
+                <button type="button" className="paper-close" ref={closePaperRef} onClick={() => setPaperOpen(false)}>
+                  关闭图文
+                </button>
+              </div>
+            ) : null}
             <header className="article-head">
               <h1 id="article-top" tabIndex={-1}>
                 {article?.title || "正在读取文章"}
@@ -262,6 +337,16 @@ export function ReadView(props: {
             onExternal={props.onExternal}
             onReferenceLinks={props.onReferenceLinks}
             modelUnavailable={props.article?.qa_available === false}
+            staged={stage}
+            onStage={() => {
+              setPaperOpen(false)
+              setStage(true)
+            }}
+            onPair={() => {
+              setPaperOpen(false)
+              setStage(false)
+            }}
+            onOpenArticle={() => setPaperOpen(true)}
           />
         </div>
       </div>

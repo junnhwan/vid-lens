@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { HttpApi } from "../api/http"
-import { canReplay, newIdempotencyKey, pendingWrite, rememberWrite, forgetWrite, memoryStore } from "../api/writes"
+import { canReplay, forgetWrite, memoryStore, newIdempotencyKey, pendingWrite, rememberWrite } from "../api/writes"
+import { ChoiceMenu } from "./ChoiceMenu"
 
 interface ExportView {
   export: {
@@ -98,13 +99,17 @@ export function ExportControl({ requestId, csrf }: { requestId?: string; csrf: s
   const pending = !!current?.export && ["queued", "running", "retry_wait"].includes(current.export.status)
   return (
     <div className="export-control">
-      <label>
-        <span className="sr-only">导出格式</span>
-        <select aria-label="导出格式" value={format} onChange={(e) => setFormat(e.target.value)}>
-          <option value="markdown_zip">完整图文 ZIP</option>
-          <option value="markdown">Markdown 正文</option>
-        </select>
-      </label>
+      <ChoiceMenu
+        label="导出格式"
+        align="end"
+        value={format}
+        placeholder="选择格式"
+        options={[
+          { id: "markdown_zip", label: "完整图文 ZIP" },
+          { id: "markdown", label: "Markdown 正文" },
+        ]}
+        onChange={setFormat}
+      />
       {current?.export?.status === "ready" && current.export.download_url ? (
         <a className="btn quiet" href={current.export.download_url} download>
           下载 ↓

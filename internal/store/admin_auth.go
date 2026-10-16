@@ -14,6 +14,8 @@ import (
 	"vidlens/internal/domain"
 )
 
+const OwnerPasswordMinBytes = 8
+
 func hashPassword(password string) string {
 	salt := make([]byte, 16)
 	if _, e := rand.Read(salt); e != nil {
@@ -38,8 +40,8 @@ func checkPassword(password, encoded string) bool {
 	return subtle.ConstantTimeCompare(h, argon2.IDKey([]byte(password), s, 2, 19*1024, 1, 32)) == 1
 }
 func (s *Store) SetOwnerPassword(ctx context.Context, password string) error {
-	if len(password) < 12 || len(password) > 512 {
-		return fmt.Errorf("owner password must contain 12-512 bytes")
+	if len(password) < OwnerPasswordMinBytes || len(password) > 512 {
+		return fmt.Errorf("owner password must contain %d-512 bytes", OwnerPasswordMinBytes)
 	}
 	h := hashPassword(password)
 	return s.Tx(ctx, func(tx pgx.Tx) error {

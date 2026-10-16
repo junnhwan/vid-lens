@@ -55,7 +55,7 @@ export function Example() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            打开原视频 ↗
+            打开原视频 <span className="nudge" aria-hidden="true">↗</span>
           </a>
         </header>
         {error ? <p role="alert">{error}</p> : null}
@@ -99,7 +99,7 @@ export function Example() {
             <footer className="example-end">
               <p>带着自己的问题，再读一条视频。</p>
               <a href="/" className="btn primary">
-                开始自己的解读 ↗
+                开始自己的解读 <span className="nudge" aria-hidden="true">↗</span>
               </a>
             </footer>
           </article>
