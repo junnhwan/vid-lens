@@ -35,7 +35,7 @@ type inspectInput struct {
 	QuestionID    string        `json:"question_id"`
 	Critical      *bool         `json:"critical,omitempty" jsonschema:"description=Whether this question must be supported before article publication. Use false for optional details or deliberately unanswered story questions."`
 	Question      string        `json:"question"`
-	Window        *media.Window `json:"window,omitempty"`
+	Window        *media.Window `json:"window,omitempty" jsonschema:"description=For new frames put start_ms, end_ms, count, mode and optional crop inside this window object. Omit window when reloading frame_ids."`
 	FrameIDs      []string      `json:"frame_ids,omitempty"`
 }
 type articleInput struct {
@@ -85,6 +85,14 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return nil, &candidateError{err: invalid("候选必须是符合工具结构的完整 JSON：" + err.Error() + "。limitations 与 citations 同级；每个视频引用都要复制 snapshot_id，并填写该类型的全部来源字段。")}
 		}
 		return toolError("工具参数不符合字段类型，请按 schema 修正：" + err.Error() + "。观察的 conflicts、unresolved、inferences 等字段必须是字符串数组，status 只能是 supported 或 unresolved。")
+	}
+	if in, ok := target.(*inspectInput); ok {
+		if in.Window == nil && len(in.FrameIDs) == 0 {
+			return toolError(`缺少取帧选择：新画面必须提供 window 对象，start_ms、end_ms、count、mode、crop 放在 window 内，不能放在顶层。例如 "window":{"start_ms":0,"end_ms":1000,"count":1,"mode":"detail"}；请改用所需的实际视频时间。重新加载已交付图片时只提供 frame_ids。`)
+		}
+		if in.Window != nil && len(in.FrameIDs) > 0 {
+			return toolError("window 与 frame_ids 只能选择一种：新画面使用 window 对象，重新加载已有图片使用 frame_ids。")
+		}
 	}
 	return t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
 }
@@ -241,6 +249,23 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		}
 		if in.QuestionID == "" {
 			return toolError("必须提供稳定的 question_id。")
+		}
+		room, err := s.inspectionHeadroom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		requested := w.Count
+		if requested == 0 {
+			requested = 4
+		}
+		if w.Crop != nil {
+			requested = 1
+		}
+		if len(in.FrameIDs) > 0 {
+			requested = len(in.FrameIDs)
+		}
+		if requested > room {
+			return toolError(fmt.Sprintf("当前图片上下文最多还能接收 %d 帧，本次请求 %d 帧。请减少 window.count；或先用 record_observation 为不再需要同时比较的旧图片记录 retain_for_comparison=false，释放容量后再取帧。已保存的观察事实和图片引用仍然保留。", room, requested))
 		}
 		if err := s.engine.Store.Question(ctx, s.claim, in.QuestionID, map[string]any{"id": in.QuestionID, "question": in.Question, "critical": critical, "status": "open", "window": in.Window}); err != nil {
 			return nil, err

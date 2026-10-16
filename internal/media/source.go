@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,10 +33,22 @@ type subformat struct {
 	Ext string `json:"ext"`
 }
 
-func (s *Service) ytdlpArgs() []string {
+func youtubeSource(source string) bool {
+	u, err := url.Parse(source)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "youtube.com" || strings.HasSuffix(host, ".youtube.com") || host == "youtu.be"
+}
+
+func (s *Service) ytdlpArgs(source string) []string {
 	a := []string{"--ignore-config", "--no-cache-dir", "--no-playlist", "--no-warnings", "--no-progress", "--socket-timeout", "10", "--retries", "1", "--fragment-retries", "1", "--concurrent-fragments", "1", "--fixup", "never"}
-	if s.Config.CookieFile != "" {
-		a = append(a, "--cookies", s.Config.CookieFile)
+	a = append(a, "--no-cookies", "--no-cookies-from-browser")
+	if youtubeSource(source) {
+		// Public YouTube work must never borrow the owner's account, even when
+		// the shared platform file also contains YouTube login cookies.
+		a = append(a, "--js-runtimes", "node")
 	}
 	if s.Config.ProxyURL != "" {
 		a = append(a, "--proxy", s.Config.ProxyURL)
@@ -54,6 +67,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	var meta metadata
 	var video string
 	var segs []domain.Segment
+	var bili *bilibiliSource
+	var biliReader *bilibiliClient
+	subtitleStatus := "platform_unspecified"
 	origin := "platform_subtitles"
 	coverage := "unknown"
 	var language *string
@@ -105,6 +121,49 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 				}
 			}
 		}
+	} else if ident.Platform == "bilibili" {
+		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 20<<20); e != nil {
+			return e
+		}
+		mctx, release, err := s.Resources.Acquire(ctx, c, "download")
+		if err != nil {
+			return err
+		}
+		biliReader = s.bilibiliReader()
+		defer biliReader.http.CloseIdleConnections()
+		subctx, cancel := context.WithTimeout(mctx, 30*time.Second)
+		info, err := biliReader.source(subctx, ident)
+		cancel()
+		release()
+		if err != nil {
+			return err
+		}
+		bili, meta = &info, info.Meta
+		if meta.Duration*1000 > float64(p.MaxVideoMS) {
+			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频超过时长限制。")
+		}
+		if !restore {
+			dctx, rel, err := s.Resources.Acquire(ctx, c, "download")
+			if err != nil {
+				return err
+			}
+			subctx, cancel := context.WithTimeout(dctx, 30*time.Second)
+			segs, language, subtitleStatus = biliReader.subtitles(subctx, info)
+			cancel()
+			rel()
+		}
+		dctx, rel, err := s.Resources.Acquire(ctx, c, "download")
+		if err != nil {
+			return err
+		}
+		subctx, cancel = context.WithTimeout(dctx, 20*time.Minute)
+		video = filepath.Join(work, "video.input")
+		err = biliReader.download(subctx, info.Video, video, p.MaxDownloadBytes)
+		cancel()
+		rel()
+		if err != nil {
+			return err
+		}
 	} else {
 		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 20<<20); e != nil {
 			return e
@@ -114,7 +173,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			return e
 		}
 		subctx, cancel := context.WithTimeout(mctx, 30*time.Second)
-		a := append(s.ytdlpArgs(), "--dump-single-json", "--skip-download", ident.URL)
+		a := append(s.ytdlpArgs(ident.URL), "--dump-single-json", "--skip-download", ident.URL)
 		raw, e := command(subctx, "yt-dlp", a, "", 0, 0)
 		cancel()
 		release()
@@ -145,7 +204,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 					return e
 				}
 				subctx, cancel := context.WithTimeout(dctx, 60*time.Second)
-				a := append(s.ytdlpArgs(), "--skip-download", "--sub-langs", lang, "--sub-format", "json3/vtt/best", "-o", filepath.Join(work, "sub.%(ext)s"))
+				a := append(s.ytdlpArgs(ident.URL), "--skip-download", "--sub-langs", lang, "--sub-format", "json3/vtt/best", "-o", filepath.Join(work, "sub.%(ext)s"))
 				if auto {
 					a = append(a, "--write-auto-subs")
 				} else {
@@ -189,6 +248,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		return e
 	}
 	duration := probe.DurationMS
+	if bili != nil && (float64(duration)+2000 < meta.Duration*1000 || probe.Width != bili.Video.Width || probe.Height != bili.Video.Height) {
+		return domain.Err(422, "SOURCE_UNAVAILABLE", "B 站下载结果与完整视频或选定清晰度不一致。")
+	}
 	if duration <= 0 || duration > p.MaxVideoMS {
 		return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频时长无效或超过限制。")
 	}
@@ -240,7 +302,11 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			audioInput = filepath.Join(work, "source-audio.input")
 			st, _ := os.Stat(video)
 			left := p.MaxDownloadBytes - st.Size()
-			e = s.downloadStream(subctx, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", audioInput, left)
+			if bili != nil {
+				e = biliReader.download(subctx, bili.Audio, audioInput, left)
+			} else {
+				e = s.downloadStream(subctx, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", audioInput, left)
+			}
 			cancel()
 			rel()
 			if e != nil {
@@ -290,6 +356,15 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		stable = append(stable, map[string]any{"start_ms": segs[i].StartMS, "end_ms": segs[i].EndMS, "text": segs[i].Text, "origin": segs[i].Origin})
 	}
 	metadata := map[string]any{"schema_version": 1, "extractor": "yt-dlp", "video": probe, "content_verification": "sha256_full_media", "subtitle_kind": "platform_unspecified"}
+	if ident.Platform == "youtube" || ident.Platform == "bilibili" {
+		metadata["access_policy"] = "anonymous"
+	}
+	if bili != nil {
+		metadata["extractor"] = "bilibili_public_api_v1"
+		metadata["subtitle_kind"] = subtitleStatus
+		metadata["available_video_heights"] = bili.Heights
+		metadata["selected_quality"] = map[string]any{"width": bili.Video.Width, "height": bili.Video.Height, "quality_id": bili.Video.ID, "frame_rate": bili.Video.FrameRate, "bandwidth": bili.Video.Bandwidth}
+	}
 	if origin == "asr" {
 		metadata["asr_pipeline_version"] = asrPipelineVersion
 	}

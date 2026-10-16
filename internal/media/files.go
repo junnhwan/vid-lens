@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,9 +22,10 @@ import (
 )
 
 type Service struct {
-	Store     *store.Store
-	Resources *resource.Manager
-	Config    config.Config
+	Store        *store.Store
+	Resources    *resource.Manager
+	Config       config.Config
+	bilibiliHTTP *http.Client
 }
 
 func New(s *store.Store, r *resource.Manager, c config.Config) (*Service, error) {

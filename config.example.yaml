@@ -16,8 +16,8 @@ asr_base_url: https://your-asr-service.example/v1/audio/transcriptions
 asr_model: your-asr-model
 asr_api_key: ""
 proxy_url: ""
-# Native execution: absolute path to a mode-0600 Netscape cookie file.
-# Compose: set VIDLENS_COOKIE_FILE to mount it; the entrypoint supplies the container path.
+# Compatibility setting only; Bilibili and YouTube ignore account Cookie files.
+# No Cookie export or account login is needed for native or Docker execution.
 platform_cookie_file: ""
 # Local-only development extension; leave empty when serving visitors.
 dev_media_dir: ""

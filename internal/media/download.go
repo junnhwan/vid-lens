@@ -29,7 +29,7 @@ func (s *Service) downloadStream(ctx context.Context, source, format, dst string
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	args := append(s.ytdlpArgs(), "--format", format, "--output", "-", source)
+	args := append(s.ytdlpArgs(source), "--format", format, "--output", "-", source)
 	cmd := exec.CommandContext(ctx, "yt-dlp", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
@@ -39,7 +39,8 @@ func (s *Service) downloadStream(ctx context.Context, source, format, dst string
 		return nil
 	}
 	cmd.WaitDelay = 5 * time.Second
-	cmd.Stderr = &boundedBuffer{max: 4096}
+	stderr := &boundedBuffer{max: 4096}
+	cmd.Stderr = stderr
 	pipe, e := cmd.StdoutPipe()
 	if e != nil {
 		return e
@@ -71,7 +72,7 @@ func (s *Service) downloadStream(ctx context.Context, source, format, dst string
 				return ctx.Err()
 			}
 			if wait != nil {
-				return domain.Err(422, "SOURCE_UNAVAILABLE", "未能下载这个视频来源。")
+				return mediaCommandFailure("yt-dlp", stderr.Bytes(), "未能下载这个视频来源。")
 			}
 			return nil
 		case <-ticker.C:

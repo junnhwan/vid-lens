@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,6 +106,48 @@ func TestRealFrameTimesCropReloadAndCleanup(t *testing.T) {
 	a, e = s.Asset(ctx, fresh.ID)
 	if e != nil || a.State != "deleted" {
 		t.Fatalf("cleanup: %+v %v", a, e)
+	}
+}
+
+func TestYouTubeMetadataPreparationNeverLoadsOwnerCookies(t *testing.T) {
+	s, r, cfg := testsupport.Services(t)
+	argsFile := filepath.Join(t.TempDir(), "arguments")
+	t.Setenv("EXTRACTOR_ARGUMENTS", argsFile)
+	fakeExtractor(t, "printf '%s\\n' \"$@\" > \"$EXTRACTOR_ARGUMENTS\"\nprintf '%s\\n' \"ERROR: [youtube] anonfixture: Sign in to confirm you are not a bot\" >&2\nexit 1\n")
+	cfg.CookieFile = "/private/owner-cookies.txt"
+	ctx := context.Background()
+	owner, err := s.NewSession(ctx, domain.ID(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := s.CreateRequest(ctx, owner.ID, domain.ID(), "https://www.youtube.com/watch?v=anonfixture", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := s.Request(ctx, owner.ID, accepted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, err := s.Claim(ctx, *req.ActiveRunID, 1, "test")
+	if err != nil || claim == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	ms, err := New(s, r, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ms.Prepare(ctx, *claim, cfg.Profile)
+	var problem *domain.Problem
+	if !errors.As(err, &problem) || problem.Code != "SOURCE_ACCESS_RESTRICTED" {
+		t.Fatalf("metadata failure: %v", err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := "\n" + string(args)
+	if !strings.Contains(text, "\n--dump-single-json\n") || !strings.Contains(text, "\n--no-cookies\n") || !strings.Contains(text, "\n--no-cookies-from-browser\n") || strings.Contains(text, cfg.CookieFile) {
+		t.Fatal("metadata preparation did not enforce anonymous acquisition")
 	}
 }
 

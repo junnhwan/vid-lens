@@ -16,7 +16,7 @@ The root `go.mod` defines one backend module. Agent instructions, session contex
 
 ## Start
 
-Requires Go 1.26+, PostgreSQL 17, Redis 7, FFmpeg/ffprobe and yt-dlp 2026.08.19. The model must support images and streaming tool calls. ASR uses a synchronous OpenAI-compatible multipart transcription endpoint. The backend currently uses Unix system calls; use Linux/Docker on Windows.
+Requires Go 1.26+, PostgreSQL 17, Redis 7, FFmpeg/ffprobe and `yt-dlp[default]==2026.8.19` (including its matching EJS scripts). YouTube also needs Deno 2.3+ or Node 22+; the backend enables Node alongside yt-dlp's default Deno runtime. The Docker image includes Deno. Bilibili and YouTube sources are acquired anonymously and never use the owner's platform Cookie file or browser login. Bilibili uses the public web API over a direct connection and selects the highest resolution actually returned, within the configured resource limits; authenticated-only qualities are unavailable. The model must support images and streaming tool calls. ASR uses a synchronous OpenAI-compatible multipart transcription endpoint. The backend currently uses Unix system calls; use Linux/Docker on Windows.
 
 ```sh
 docker compose -p vidlens-dev -f compose.backend.yaml up -d postgres redis

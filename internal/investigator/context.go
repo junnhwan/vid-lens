@@ -40,10 +40,48 @@ type observation struct {
 	Unresolved          []string `json:"unresolved"`
 	Status              string   `json:"status" jsonschema:"enum=supported,enum=unresolved,description=Use supported for recorded facts and unresolved for an unconfirmed observation. Never use completed."`
 	Critical            bool     `json:"critical"`
-	RetainForComparison bool     `json:"retain_for_comparison"`
+	RetainForComparison bool     `json:"retain_for_comparison" jsonschema:"description=Keep these observed pixels for an ongoing comparison. At most 12 retained plus new images fit in context. Record a new observation with false when comparison is finished to free image capacity; durable facts remain available."`
 	NextAction          string   `json:"next_action"`
 }
 type callIDKey struct{}
+
+// Inspect admission must precede question/frame creation. A model can release
+// finished comparisons through another durable observation rather than fail
+// the entire video when the next model context is hydrated.
+func (s *session) inspectionHeadroom(ctx context.Context) (int, error) {
+	observations, err := s.observations(ctx)
+	if err != nil {
+		return 0, err
+	}
+	keep := map[string]bool{}
+	for _, o := range observations {
+		if o.Status != "supported" && o.Status != "unresolved" {
+			continue
+		}
+		for _, id := range o.FrameIDs {
+			keep[id] = o.RetainForComparison
+		}
+	}
+	if s.turn != nil && s.turn.Context.FrameID != nil {
+		keep[*s.turn.Context.FrameID] = true
+	}
+	count := 0
+	var bytes int64
+	for id, retained := range keep {
+		if !retained {
+			continue
+		}
+		asset, err := s.engine.Store.Asset(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		count++
+		bytes += asset.Bytes
+	}
+	// Each delivered JPEG is bounded to 2 MiB. Account conservatively for
+	// upcoming pixels before they exist, without increasing the 16 MiB cap.
+	return max(0, min(6, 12-count, int(((16<<20)-bytes)/(2<<20)))), nil
+}
 
 func callID(ctx context.Context) string { v, _ := ctx.Value(callIDKey{}).(string); return v }
 

@@ -125,7 +125,13 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		if e != nil {
 			return e
 		}
-		work := source + ":prepare-v2:" + Hash(map[string]any{"asr_endpoint": p.ASRBaseURL, "asr_model": p.ASRModel, "asr_key_ref": p.ASRKeyRef, "max_video_ms": p.MaxVideoMS, "max_download_bytes": p.MaxDownloadBytes, "pipeline": "source-60s-mp3-48k16k-v1"})
+		pipeline := "source-60s-mp3-48k16k-v1"
+		if identity.Platform == "bilibili" {
+			// Never bind a new anonymous request to a source prepared with an
+			// owner's account or to the previous extractor's capped quality.
+			pipeline += ":bilibili-public-api-anonymous-max-v1"
+		}
+		work := source + ":prepare-v2:" + Hash(map[string]any{"asr_endpoint": p.ASRBaseURL, "asr_model": p.ASRModel, "asr_key_ref": p.ASRKeyRef, "max_video_ms": p.MaxVideoMS, "max_download_bytes": p.MaxDownloadBytes, "pipeline": pipeline})
 		var runID, status string
 		e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.prepare' AND work_key=$1 AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')", work).Scan(&runID, &status)
 		if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
