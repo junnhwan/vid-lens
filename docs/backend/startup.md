@@ -34,13 +34,15 @@ Send `Authorization: Bearer <admin_token>` to these routes. They do not use the 
 | --- | --- |
 | `GET /api/v1/admin/config` | Frozen profile, current revision ID, booleans indicating stored keys |
 | `PUT /api/v1/admin/config` | `{profile,model_api_key,asr_api_key}`; creates a new immutable profile revision and separately rotates supplied credentials |
-| `POST /api/v1/admin/config/test` | `{}`; real model tool/image capability check; makes model calls |
+| `POST /api/v1/admin/config/test` | `{}` plus `Idempotency-Key`; HTTP 202 durable image/tool probe, returns status URL |
 | `GET /api/v1/admin/status` | Run counts and persisted media/frame byte totals |
 | `GET /healthz` | Database readiness only; not a model/platform health guarantee |
 
 To edit a profile, read it first, change only desired fields and PUT the complete `profile`. Empty/omitted key strings preserve existing keys. Credential references are server-owned: replacing a key creates a fresh encrypted reference, preserving credentials needed by already accepted revisions. The response returns the stored profile and never a key. Accepted tasks freeze the profile; host admission may apply lower current input limits. Saving configuration does not regenerate articles or extend task deadlines.
 
 Use the model capability check before accepting real traffic. It asks an Eino agent to call an Enhanced Tool and identify actual test pixels. It is a transport/capability check, not a video-quality evaluation.
+
+The hidden `/manage` page uses an independently configured owner password and CSRF-protected owner session. See [model administration and outputs](product-features.md) for interactive setup, catalog activation and optional references. The legacy configuration-test route now queues the same bounded durable probe as the model manager; it no longer makes an untracked synchronous request.
 
 The worker requires streaming Chat Completions with tool-call deltas, in addition to image support. It assembles the complete response internally. Do not disable internal streaming just because the visitor interface displays only finalized answers. The optional Qwen `model_disable_thinking` setting is provider-specific; it does not replace the call deadlines or guarantee a particular latency.
 

@@ -1,0 +1,23 @@
+# Same-origin desktop SPA and backend. Adapt TLS/server_name and paths locally.
+server {
+    listen 8080;
+    server_name localhost;
+    root /srv/vidlens/frontend/dist;
+    index index.html;
+
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:8086;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+    }
+    location ~* \.(js|css|svg|png|jpe?g|webp|ico|json|woff2?)$ {
+        try_files $uri =404;
+    }
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

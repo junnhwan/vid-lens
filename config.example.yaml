@@ -21,3 +21,11 @@ proxy_url: ""
 platform_cookie_file: ""
 # Local-only development extension; leave empty when serving visitors.
 dev_media_dir: ""
+# Optional credential-free public HTML reading; each Q&A turn still opts in.
+reference_read_enabled: "false"
+# Use a dedicated free-plan key with provider-side paid overage disabled.
+search_enabled: "false"
+tavily_api_key: ""
+search_monthly_limit: "1000"
+# Explicit server allowlist for self-hosted model endpoints (host:port), never pages.
+model_allowed_hosts: ""

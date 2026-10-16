@@ -12,7 +12,9 @@ Serve the frontend and API through the same browser origin. The Vite development
 4. Once `request.status=completed`, close SSE and GET `/requests/{id}/article`. Render typed blocks, citations and returned Frame URLs. The article is immutable. A held-open image/history view is local frontend state.
 5. Ensure `/requests/{id}/conversation` when opening Q&A. Read turn history and use the accepted tail ID for `expected_last_turn_id`. Each new question/retry gets its own action key.
 
-All mutating visitor requests require Origin and CSRF. All reads require the anonymous cookie. A failed resource is still HTTP GET 200 with `failure`; Problems describe rejected HTTP operations. On 401, stop subscriptions and show session loss. Do not automatically create a new session and replay uncertain writes.
+All mutating visitor requests require Origin and CSRF. Private resource reads require the anonymous cookie; public model catalogs and site statistics do not. A failed resource is still HTTP GET 200 with `failure`; Problems describe rejected HTTP operations. On 401, stop subscriptions and show session loss. Do not automatically create a new session and replay uncertain writes.
+
+The optional generation spec, model catalog, export and external-reference additions are documented in [product features](product-features.md). Current clients send `X-VidLens-Contract: 2`; preserve `contract=2` in SSE URLs. `CLIENT_UPDATE_REQUIRED` ends automatic reconnects and requires a page upgrade before external citations can be consumed.
 
 A dependency error while checking a cookie is 503, not evidence that the cookie expired. Keep the session and resource identity, then retry reads with bounded backoff. A known missing image returns unavailable metadata/null URLs after the failed content read; reading it does not start model or restoration work.
 
