@@ -1244,6 +1244,123 @@ html:active-view-transition select {
   letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
 }
+.disk-meter {
+  width: min(360px, 92%);
+  margin-top: 26px;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  padding: 14px 16px 14px 8px;
+  overflow: visible;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    radial-gradient(120px 90px at 16% 50%, color-mix(in srgb, var(--teal) 14%, transparent), transparent 70%),
+    var(--surface);
+  box-shadow: 0 16px 34px color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.disk-meter[data-level="tight"],
+.disk-meter[data-level="closed"] {
+  background:
+    radial-gradient(120px 90px at 16% 50%, color-mix(in srgb, var(--amber-ink) 16%, transparent), transparent 70%),
+    var(--surface);
+}
+.disk-ring {
+  width: 92px;
+  height: 92px;
+  overflow: visible;
+}
+.disk-track,
+.disk-arc {
+  fill: none;
+  stroke-width: 6;
+}
+.disk-track {
+  stroke: var(--line-strong);
+}
+.disk-arc {
+  stroke: var(--teal);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 46px 46px;
+  transition: stroke-dashoffset 980ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.disk-meter[data-level="tight"] .disk-arc,
+.disk-meter[data-level="closed"] .disk-arc,
+.disk-meter[data-level="tight"] .disk-scale > span,
+.disk-meter[data-level="closed"] .disk-scale > span {
+  stroke: var(--amber-ink);
+  background: var(--amber-ink);
+}
+.disk-stop {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.disk-percent {
+  fill: var(--ink);
+  font: 500 18px/1 var(--serif);
+  text-anchor: middle;
+  dominant-baseline: middle;
+  font-variant-numeric: tabular-nums;
+}
+.disk-percent-unit {
+  font: 500 9px/1 var(--sans);
+  fill: var(--ink-soft);
+}
+.disk-copy {
+  min-width: 0;
+}
+.disk-kicker {
+  margin: 0;
+  color: var(--ink-soft);
+  font: 10px/1.4 var(--sans);
+  letter-spacing: 0.16em;
+}
+.disk-status {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font: 500 16px/1.45 var(--serif);
+}
+.disk-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font: 12px/1.4 var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+.disk-scale {
+  position: relative;
+  height: 4px;
+  margin-top: 9px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: visible;
+}
+.disk-scale > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+  transition: width 980ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.disk-scale > i {
+  position: absolute;
+  top: -3px;
+  width: 1.5px;
+  height: 10px;
+  margin-left: -1px;
+  border-radius: 99px;
+  background: var(--ink);
+}
+.disk-note {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font: 11px/1.55 var(--sans);
+}
 .lens-coordinate {
   font: 9px/1.5 var(--sans);
   color: var(--ink-soft);
@@ -1525,6 +1642,10 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
   .abstract-stage.is-live .lens-paper-note::after,
   .abstract-stage.is-live .paper-lines i {
     animation: none;
+  }
+  .disk-arc,
+  .disk-scale > span {
+    transition: none;
   }
   ::view-transition-old(root),
   ::view-transition-new(root) {

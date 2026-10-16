@@ -54,6 +54,7 @@ func (a *Server) Handler() http.Handler {
 	})
 	m.HandleFunc("POST /api/v1/session", a.session)
 	m.HandleFunc("GET /api/v1/site/stats", a.stats)
+	m.HandleFunc("GET /api/v1/site/capacity", a.capacity)
 	m.HandleFunc("GET /api/v1/site/like", a.like)
 	m.HandleFunc("PUT /api/v1/site/like", a.like)
 	m.HandleFunc("GET /api/v1/models", a.publicModels)

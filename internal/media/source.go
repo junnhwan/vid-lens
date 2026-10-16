@@ -91,7 +91,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if st.Size() > p.MaxDownloadBytes {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频超过大小限制。")
 		}
-		if e = s.Resources.Reserve(ctx, c, min(p.WorkspaceBytes, st.Size()+64<<20), 20<<20); e != nil {
+		if e = s.Resources.Reserve(ctx, c, min(p.WorkspaceBytes, st.Size()+64<<20), store.IncomingFrameBytes); e != nil {
 			return e
 		}
 		dst := filepath.Join(work, "video.mp4")
@@ -122,7 +122,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			}
 		}
 	} else if ident.Platform == "bilibili" {
-		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 20<<20); e != nil {
+		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, store.IncomingFrameBytes); e != nil {
 			return e
 		}
 		mctx, release, err := s.Resources.Acquire(ctx, c, "download")
@@ -165,7 +165,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			return err
 		}
 	} else {
-		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, 20<<20); e != nil {
+		if e = s.Resources.Reserve(ctx, c, p.WorkspaceBytes, store.IncomingFrameBytes); e != nil {
 			return e
 		}
 		mctx, release, e := s.Resources.Acquire(ctx, c, "download")

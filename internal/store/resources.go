@@ -69,13 +69,8 @@ func (s *Store) ReserveStorage(ctx context.Context, c domain.Claim, temp, images
 		if e := tx.QueryRow(ctx, "SELECT COALESCE(sum(bytes) FILTER(WHERE storage_key IS NOT NULL),0),COALESCE(sum(67108864) FILTER(WHERE status IN ('queued','running','retry_wait')),0) FROM article_exports WHERE NOT file_deleted").Scan(&exports, &exportPending); e != nil {
 			return e
 		}
-		extra := max(int64(0), temp-ownTemp) + max(int64(0), images-ownImages) + resTemp + resImages + exportPending
-		reserve := max(int64(5<<30), total*15/100)
-		if stop > 85 {
-			reserve = 5 << 30
-		}
-		if usedTemp+exports+exportPending+resTemp+max(int64(0), temp-ownTemp) > 10<<30 || usedImages+resImages+max(int64(0), images-ownImages) > 5<<30 || available-extra < reserve || (total-available+extra)*100 > total*int64(stop) {
-			return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "磁盘可用容量不足，暂不能准备新素材。")
+		if e := admitStorage(storageLoad{usedTemp: usedTemp, usedImages: usedImages, resTemp: resTemp, resImages: resImages, exports: exports, exportPending: exportPending, ownTemp: ownTemp, ownImages: ownImages, temp: temp, images: images, available: available, total: total, stop: stop}); e != nil {
+			return e
 		}
 		_, e := tx.Exec(ctx, "INSERT INTO storage_reservations(run_id,temp_bytes,image_bytes,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(run_id) DO UPDATE SET temp_bytes=GREATEST(storage_reservations.temp_bytes,EXCLUDED.temp_bytes),image_bytes=GREATEST(storage_reservations.image_bytes,EXCLUDED.image_bytes)", c.Run.ID, temp, images, c.Run.DeadlineAt.Add(5*time.Minute))
 		return e

@@ -1,3 +1,4 @@
+import type { SiteCapacity } from "../contract/capacity"
 import type {
   GenerationInput,
   ModelCatalog,
@@ -109,6 +110,9 @@ export class HttpApi {
   }
   stats() {
     return this.request<{ completed_readings: number; likes: number }>("GET", "/api/v1/site/stats").then((r) => r.body)
+  }
+  capacity() {
+    return this.request<SiteCapacity>("GET", "/api/v1/site/capacity").then((r) => r.body)
   }
   like(set = false) {
     return this.request<{ liked: boolean; count: number }>(set ? "PUT" : "GET", "/api/v1/site/like", set ? {} : undefined).then(

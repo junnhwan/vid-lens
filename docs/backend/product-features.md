@@ -29,7 +29,7 @@ Probes use a separate durable queue identity and the generation AI lane, with at
 
 Read the public `GET /api/v1/models` catalog before starting. `POST /api/v1/requests` accepts optional `model_id`, `model_revision_id` and `purpose`. Purpose normalizes CRLF and surrounding whitespace, with a 500 Unicode-code-point limit. Custom purposes are isolated by anonymous session. Preparation can share compatible source/ASR work; interpretation reuse includes the frozen model and purpose. Retries, conversations and subsequent turns retain the original spec.
 
-Request/article views include a safe `generation_model` and purpose alongside immutable article content. Historical records have `legacy: true` when early Q&A provenance cannot be guaranteed. Public `GET /api/v1/site/stats` counts distinct `(anonymous session, article)` completed-reading receipts, not visits or model calls. `PUT /api/v1/site/like` is session-authenticated, CSRF-protected and idempotent; receipts survive session expiry.
+Request/article views include a safe `generation_model` and purpose alongside immutable article content. Historical records have `legacy: true` when early Q&A provenance cannot be guaranteed. Public `GET /api/v1/site/stats` counts distinct `(anonymous session, article)` completed-reading receipts, not visits or model calls. Public `GET /api/v1/site/capacity` reports the serving host's data-volume bytes and whether a new download would pass the same disk admission check used before source preparation. It does not include paths, credentials or another machine's disk. `PUT /api/v1/site/like` is session-authenticated, CSRF-protected and idempotent; receipts survive session expiry.
 
 ## Article exports
 

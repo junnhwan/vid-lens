@@ -1,6 +1,8 @@
 import { useEffect, useState, type Ref } from "react"
+import type { SiteCapacity } from "../contract/capacity"
 import type { ModelCatalog } from "../contract/types"
 import { HttpApi } from "../api/http"
+import { DiskMeter } from "./DiskMeter"
 import { LikeButton } from "./LikeButton"
 import { ChoiceMenu } from "./ChoiceMenu"
 import { Lens } from "./Lens"
@@ -48,16 +50,34 @@ export function EntryView({
     completed_readings: number
     likes: number
   } | null>(null)
+  const [capacity, setCapacity] = useState<SiteCapacity | null>(null)
+  const [capacityState, setCapacityState] = useState<"loading" | "ready" | "error">("loading")
   useEffect(() => {
-    let active = true
+    let live = true
     void new HttpApi()
       .stats()
       .then((v) => {
-        if (active) setStats(v)
+        if (live) setStats(v)
       })
       .catch(() => {})
+    const loadCapacity = () => {
+      void new HttpApi()
+        .capacity()
+        .then((v) => {
+          if (!live) return
+          setCapacity(v)
+          setCapacityState("ready")
+        })
+        .catch(() => {
+          if (!live) return
+          setCapacityState((current) => (current === "ready" ? "ready" : "error"))
+        })
+    }
+    loadCapacity()
+    const timer = window.setInterval(loadCapacity, 20000)
     return () => {
-      active = false
+      live = false
+      window.clearInterval(timer)
     }
   }, [])
   const model = catalog?.models.find((m) => m.id === selected)
@@ -247,6 +267,7 @@ export function EntryView({
               <span>循着画面，找到理解的焦点。</span>
               <span>01 — ∞</span>
             </div>
+            <DiskMeter capacity={capacity} state={capacityState} active={active} />
           </div>
         </aside>
       </div>
