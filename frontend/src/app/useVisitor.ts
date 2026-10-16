@@ -32,6 +32,10 @@ import type { GenerationInput, ModelCatalog } from "../contract/types"
 
 export type Phase = "input" | "run" | "holding" | "reading"
 
+export function phaseOnArrival(requestId: string | undefined): Phase {
+  return requestId ? "run" : "input"
+}
+
 const sampleUrl = "https://www.bilibili.com/video/BV1mockvideo?p=1"
 
 function browserStore(): KeyValue {
@@ -77,7 +81,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [notice, setNotice] = useState("")
   const [mockMode, setMockMode] = useState(false)
   const [session, setSession] = useState<SessionResponse | null>(null)
-  const [phase, setPhase] = useState<Phase>("input")
+  const [phase, setPhase] = useState<Phase>(() => phaseOnArrival(requestId))
   const [link, setLink] = useState("")
   const [purpose, setPurpose] = useState("")
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null)
@@ -128,7 +132,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const conversationRef = useRef<Conversation | null>(null)
   const turnsRef = useRef<TurnView[]>([])
   const stepsRef = useRef<ActivityStep[]>([])
-  const phaseRef = useRef<Phase>("input")
+  const phaseRef = useRef<Phase>(phaseOnArrival(requestId))
   const historyRef = useRef(false)
   const lightboxRef = useRef(false)
   const engagedRef = useRef(false)
