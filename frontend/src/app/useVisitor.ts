@@ -7,6 +7,7 @@ import {
   newIdempotencyKey,
   pendingWrite,
   rememberWrite,
+  restoreGenerationInput,
   type KeyValue,
 } from "../api/writes"
 import { ApiError, NetworkError, isApiError, replayable, sessionLost } from "../api/error"
@@ -28,7 +29,7 @@ import type {
 } from "../contract/types"
 import { prefersReduced } from "../ui/motion"
 import { HttpApi } from "../api/http"
-import type { GenerationInput, ModelCatalog } from "../contract/types"
+import type { DetailLevel, GenerationInput, ModelCatalog } from "../contract/types"
 
 export type Phase = "input" | "run" | "holding" | "reading"
 
@@ -84,6 +85,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [phase, setPhase] = useState<Phase>(() => phaseOnArrival(requestId))
   const [link, setLink] = useState("")
   const [purpose, setPurpose] = useState("")
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>("standard")
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null)
   const [selectedModel, setSelectedModel] = useState("")
   const [catalogError, setCatalogError] = useState("")
@@ -459,6 +461,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       return
     }
     const options: GenerationInput = {
+      detail_level: detailLevel,
       ...(purpose.trim() ? { purpose: purpose.replace(/\r\n?/g, "\n").trim() } : {}),
       ...(chosen && !mockMode ? { model_id: chosen.id, model_revision_id: chosen.revision_id } : {}),
     }
@@ -514,15 +517,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
         video_url?: string
       }
       videoUrl = String(saved.video_url || "")
-      options = {
-        ...(saved.purpose !== undefined ? { purpose: saved.purpose } : {}),
-        ...(saved.model_id
-          ? {
-              model_id: saved.model_id,
-              model_revision_id: saved.model_revision_id,
-            }
-          : {}),
-      }
+      options = restoreGenerationInput(saved)
     } catch {
       forgetWrite(store(), "request:create")
       return
@@ -734,6 +729,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     link,
     purpose,
     setPurpose,
+    detailLevel,
+    setDetailLevel,
     catalog,
     selectedModel,
     setSelectedModel,

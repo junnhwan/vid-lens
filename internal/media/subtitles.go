@@ -111,6 +111,18 @@ func TranscriptCoverage(segs []domain.Segment, duration int64) (bool, string) {
 	if len(segs) == 0 || duration <= 0 {
 		return false, "unknown"
 	}
+	covered := subtitleCoveredMS(segs, duration)
+	ratio := float64(covered) / float64(duration)
+	if ratio >= 0.85 {
+		return true, "complete"
+	}
+	if ratio >= 0.5 {
+		return true, "partial"
+	}
+	return false, "partial"
+}
+
+func subtitleCoveredMS(segs []domain.Segment, duration int64) int64 {
 	var covered, end int64
 	for _, x := range segs {
 		if x.StartMS >= duration || x.EndMS > duration+1000 || strings.TrimSpace(x.Text) == "" {
@@ -123,12 +135,5 @@ func TranscriptCoverage(segs []domain.Segment, duration int64) (bool, string) {
 		}
 		end = max(end, stop)
 	}
-	ratio := float64(covered) / float64(duration)
-	if ratio >= 0.85 {
-		return true, "complete"
-	}
-	if ratio >= 0.5 {
-		return true, "partial"
-	}
-	return false, "partial"
+	return covered
 }

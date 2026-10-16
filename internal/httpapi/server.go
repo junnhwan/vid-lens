@@ -73,6 +73,7 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/models/{model}/probes", a.probes)
 	m.HandleFunc("GET /api/v1/admin/models/{model}/probes", a.probes)
 	m.HandleFunc("GET /api/v1/admin/diagnostics", a.diagnostics)
+	m.HandleFunc("GET /api/v1/admin/runs/{run}/diagnostics", a.runDiagnostics)
 	m.HandleFunc("GET /api/v1/admin/network-settings", a.networkSettings)
 	m.HandleFunc("PUT /api/v1/admin/network-settings", a.networkSettings)
 	m.HandleFunc("GET /api/v1/admin/config", a.adminConfig)
@@ -102,6 +103,8 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/conversations/{conversation}/turns/{turn}/events", a.events)
 	m.HandleFunc("GET /api/v1/conversations/{conversation}/turns/{turn}/activity", a.activity)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(domain.WithTrace(r.Context(), domain.ID()))
+		w.Header().Set("X-Request-ID", domain.TraceID(r.Context()))
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		defer func() {
@@ -196,7 +199,7 @@ func (a *Server) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	models, _ := catalog["models"].([]domain.GenerationModel)
-	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": len(models) > 0, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds, "purpose_input": true, "max_purpose_chars": domain.PurposeCharsMax, "model_selection": true, "article_export": map[string]any{"formats": []string{"markdown", "markdown_zip"}}, "external_sources": map[string]bool{"enabled": network.ReferenceReadEnabled, "search_enabled": network.ReferenceReadEnabled && network.SearchEnabled && network.KeyConfigured}}})
+	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": len(models) > 0, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds, "detail_levels": []string{"concise", "standard", "detailed"}, "default_detail_level": "standard", "purpose_input": true, "max_purpose_chars": domain.PurposeCharsMax, "model_selection": true, "article_export": map[string]any{"formats": []string{"markdown", "markdown_zip"}}, "external_sources": map[string]bool{"enabled": network.ReferenceReadEnabled, "search_enabled": network.ReferenceReadEnabled && network.SearchEnabled && network.KeyConfigured}}})
 }
 func (a *Server) body(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -231,11 +234,11 @@ func (a *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.As(err, &given) {
 		p = given
 	} else {
-		slog.Error("request failed", "path", r.URL.Path, "class", "internal")
+		slog.Error("request failed", "path", r.URL.Path, "class", "internal", "http_trace_id", domain.TraceID(r.Context()))
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(p.Status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"schema_version": 1, "type": "about:blank", "title": http.StatusText(p.Status), "status": p.Status, "code": p.Code, "detail": p.Detail, "instance": r.URL.Path, "trace_id": domain.ID(), "meta": p.Meta})
+	_ = json.NewEncoder(w).Encode(map[string]any{"schema_version": 1, "type": "about:blank", "title": http.StatusText(p.Status), "status": p.Status, "code": p.Code, "detail": p.Detail, "instance": r.URL.Path, "trace_id": domain.TraceID(r.Context()), "meta": p.Meta})
 }
 func (a *Server) accepted(w http.ResponseWriter, r *http.Request, x store.Accepted, v any, location string) {
 	status := 201

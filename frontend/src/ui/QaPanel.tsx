@@ -297,6 +297,7 @@ export function QaPanel({
               {turn.turn.status === "failed" ? (
                 <div className="turn-answer">
                   <p className="turn-stopped">{turn.failure?.message || "没能完成回答。"}</p>
+                  {turn.failure?.diagnostic_id ? <small className="meta">错误编号：{turn.failure.diagnostic_id}</small> : null}
                 </div>
               ) : null}
               {turn.actions.can_retry ? (

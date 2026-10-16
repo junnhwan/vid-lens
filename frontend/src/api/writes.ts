@@ -1,3 +1,14 @@
+import type { GenerationInput } from "../contract/types"
+
+export function restoreGenerationInput(saved: GenerationInput): GenerationInput {
+  return {
+    ...(saved.purpose !== undefined ? { purpose: saved.purpose } : {}),
+    ...(saved.model_id !== undefined ? { model_id: saved.model_id } : {}),
+    ...(saved.model_revision_id !== undefined ? { model_revision_id: saved.model_revision_id } : {}),
+    ...(saved.detail_level !== undefined ? { detail_level: saved.detail_level } : {}),
+  }
+}
+
 export interface PendingWrite {
   slot: string
   key: string

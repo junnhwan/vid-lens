@@ -18,6 +18,10 @@ type candidateError struct{ err error }
 
 func (e *candidateError) Error() string { return e.err.Error() }
 func invalid(msg string) error {
+	return domain.Err(422, "MODEL_RESULT_INVALID", "结果校验未通过："+msg)
+}
+
+func missingEvidence(msg string) error {
 	return domain.Err(422, "EVIDENCE_INSUFFICIENT", "结果校验未通过："+msg)
 }
 func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
@@ -34,7 +38,7 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 		add(invalid("缺少文章标题或章节"))
 	}
 	if ids := s.unobserved(ctx); len(ids) > 0 {
-		add(invalid("还有图片观察未记录：" + strings.Join(ids, ",")))
+		add(missingEvidence("还有图片观察未记录：" + strings.Join(ids, ",")))
 	}
 	obs, e := s.observations(ctx)
 	if e != nil {
@@ -50,7 +54,7 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	}
 	for _, id := range s.cp.OverviewIDs {
 		if !observed[id] {
-			add(invalid("全片概览尚有未记录的画面：" + id))
+			add(missingEvidence("全片概览尚有未记录的画面：" + id))
 		}
 	}
 	questionIDs := make([]string, 0, len(latest))
@@ -61,7 +65,7 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	for _, id := range questionIDs {
 		o := latest[id]
 		if o.Critical && o.Status != "supported" {
-			add(invalid("关键取证问题尚未解决：" + id))
+			add(missingEvidence("关键取证问题尚未解决：" + id))
 		}
 		if (o.Status == "unresolved" || len(o.Unresolved) > 0 || len(o.Conflicts) > 0) && len(a.Limitations) == 0 {
 			add(invalid("未确认问题或冲突必须进入结果限制说明：" + id))
@@ -82,7 +86,7 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 			continue
 		}
 		if q.Critical && q.Status != "supported" {
-			add(invalid("关键取证问题尚未得到支持：" + q.ID))
+			add(missingEvidence("关键取证问题尚未得到支持：" + q.ID))
 		}
 	}
 	sectionIDs := map[string]bool{}
@@ -121,6 +125,9 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	if a.MindMap != nil {
 		add(validateMap(a.MindMap, sectionIDs))
 	}
+	if s.cp.HarnessRevision >= 2 {
+		add(validateDistinctProse(a.Sections))
+	}
 	return errors.Join(problems...)
 }
 func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
@@ -131,7 +138,7 @@ func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
 		return invalid("缺少答案")
 	}
 	if len(s.unobserved(ctx)) > 0 {
-		return invalid("答案引用的图片尚未完成观察")
+		return missingEvidence("答案引用的图片尚未完成观察")
 	}
 	if e := s.validateBlocks(ctx, a.Blocks, a.Citations, false); e != nil {
 		return e
@@ -173,13 +180,18 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 	}
 	var problems []error
 	seen := map[string]bool{}
-	for _, b := range blocks {
+	for i, b := range blocks {
 		if b.ID == "" || seen[b.ID] {
 			problems = append(problems, invalid("正文块 ID 重复或为空"))
 		}
 		seen[b.ID] = true
 		if err := s.validateBlock(ctx, b, citations); err != nil {
-			problems = append(problems, fmt.Errorf("block %s: %w", b.ID, err))
+			var p *domain.Problem
+			if errors.As(err, &p) {
+				problems = append(problems, &domain.Problem{Status: p.Status, Code: p.Code, Detail: fmt.Sprintf("block %s: %s", b.ID, p.Detail), Meta: map[string]any{"path": fmt.Sprintf("/blocks/%d", i), "block_id": b.ID}})
+			} else {
+				problems = append(problems, err)
+			}
 		}
 	}
 	keys := make([]string, 0, len(citations))
@@ -193,7 +205,7 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 			problems = append(problems, invalid("引用身份无效："+id))
 		}
 		if err := s.validateCitation(ctx, c, article); err != nil {
-			problems = append(problems, fmt.Errorf("citation %s: %w", id, err))
+			problems = append(problems, &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: err.Error(), Meta: map[string]any{"path": "/citations/" + strings.ReplaceAll(strings.ReplaceAll(id, "~", "~0"), "/", "~1"), "citation_id": id, "expected": "owned source identity and exact range"}})
 		}
 	}
 	return errors.Join(problems...)
@@ -472,7 +484,7 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		return err
 	}
 	if s.cp.Calls >= s.profile.MaxIterations || !s.claim.Run.DeadlineAt.After(time.Now()) {
-		return domain.Err(422, "EVIDENCE_INSUFFICIENT", "剩余预算不足以纠正并正式提交结果。")
+		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "剩余预算不足以纠正并正式提交结果。")
 	}
 	var problem *domain.Problem
 	if errors.As(cause, &problem) {
@@ -480,7 +492,7 @@ func (s *session) repair(ctx context.Context, cause error) error {
 	} else {
 		s.cp.FinalizationFailure = &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "候选内容未通过校验。"}
 	}
-	if s.cp.Repairs >= 1 {
+	if s.cp.Repairs >= s.repairLimit() {
 		s.cp.FinalizationFailed = true
 		if err := s.persist(ctx, s.cp.Messages); err != nil {
 			return err
@@ -517,7 +529,7 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		if done {
 			continue
 		}
-		s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolName: call.Function.Name, ToolCallID: call.ID, Content: fmt.Sprintf("候选校验失败，允许修复一次：%v。修正字段/引用后重新提交。", cause)})
+		s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolName: call.Function.Name, ToolCallID: call.ID, Content: fmt.Sprintf("候选校验失败（已使用%d/%d次纠正）：%v。候选身份与结构问题：%s。仅修正相关字段/引用后重新提交。", s.cp.Repairs, s.repairLimit(), cause, domain.JSON(s.cp.LastCandidate))})
 	}
 	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次收尾纠正：%v。必须调用正式提交工具，不得用自由文本收尾。分批草稿已保存的章节保持，使用当前version仅修正相关章节后再提交；原证据、调用数与时限继续适用。", cause)))
 	return s.persist(ctx, s.cp.Messages)

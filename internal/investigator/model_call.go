@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/jackc/pgx/v5"
 	"vidlens/internal/domain"
 )
 
@@ -40,7 +41,7 @@ func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatMod
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
 	key := "model:" + strconv.Itoa(s.cp.Calls)
-	args := stripPixels(in)
+	var args any = stripPixels(in)
 	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools
 	if s.forceDraftSubmit {
 		subset := []*schema.ToolInfo{}
@@ -56,7 +57,56 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		return nil, err
 	}
 	inputChars := utf8.RuneCount(domain.JSON(args)) + bound.(*meteredModel).toolsChars
-	if inputChars+s.profile.MaxOutputTokens*4 > s.profile.MaxInputChars {
+	var budget callBudget
+	outputTokens := s.profile.MaxOutputTokens
+	if s.cp.HarnessRevision > 0 {
+		var frozen frozenModelInput
+		saved, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, "input:"+key)
+		if e == nil && saved.Status == "completed" {
+			e = json.Unmarshal(saved.Result, &frozen)
+		} else if e == nil || errors.Is(e, pgx.ErrNoRows) {
+			budget, e = s.budget(ctx, in, bound.(*meteredModel).toolsChars)
+			if e == nil {
+				args = map[string]any{"messages": stripPixels(in), "budget": budget, "tools_hash": digest(domain.JSON(activeTools)), "policy_revision": s.spec.DetailPolicyRevision}
+				frozen, e = s.freezeModelInput(ctx, key, in, args, budget, activeTools)
+			}
+		}
+		if e != nil {
+			return nil, e
+		}
+		// PostgreSQL jsonb reorders object keys. Decode back to a canonical map
+		// before hashing; hashing RawMessage bytes would conflict on takeover.
+		if e = json.Unmarshal(frozen.Args, &args); e != nil {
+			return nil, e
+		}
+		budget = frozen.Budget
+		outputTokens = budget.OutputTokens
+		in, e = s.hydrate(ctx, frozen.Messages)
+		if e != nil {
+			return nil, e
+		}
+		selected := []*schema.ToolInfo{}
+		for _, name := range frozen.ToolNames {
+			t := s.tools[name]
+			if t == nil {
+				return nil, domain.Err(422, "INTERNAL_FAILURE", "冻结调用的工具协议不兼容。")
+			}
+			info, e := t.Info(ctx)
+			if e != nil {
+				return nil, e
+			}
+			selected = append(selected, info)
+		}
+		activeTools = selected
+		if frozen.ToolSchemaJSON != "" {
+			if e = json.Unmarshal([]byte(frozen.ToolSchemaJSON), &activeTools); e != nil {
+				return nil, e
+			}
+		} else if expected, ok := args.(map[string]any); ok && expected["tools_hash"] != digest(domain.JSON(activeTools)) {
+			return nil, domain.Err(422, "MODEL_RESULT_INVALID", "冻结调用的工具协议已改变，原调用不会重新发送；已保存草稿可通过显式重新尝试接续。")
+		}
+		s.modelMessages = stripPixels(in)
+	} else if inputChars+s.profile.MaxOutputTokens*4 > s.profile.MaxInputChars {
 		return nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整上下文与输出预留超过模型限制；已保留来源，不会截断全片后继续生成。")
 	}
 	op, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "model", args, false)
@@ -121,13 +171,17 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		p := route.Profile
 		// Failover may not silently reduce the accepted output budget or truncate
 		// context to fit a supplier with lower configured limits.
-		if p.MaxOutputTokens < s.profile.MaxOutputTokens || inputChars+s.profile.MaxOutputTokens*4 > p.MaxInputChars {
+		fits := inputChars+s.profile.MaxOutputTokens*4 <= p.MaxInputChars
+		if s.cp.HarnessRevision > 0 {
+			fits = budget.check(p) == nil
+		}
+		if p.MaxOutputTokens < outputTokens || !fits {
 			if last == nil {
 				last = domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "可用模型线路无法容纳本次完整上下文与输出额度。")
 			}
 			continue
 		}
-		p.MaxOutputTokens = s.profile.MaxOutputTokens
+		p.MaxOutputTokens = outputTokens
 		p.CacheHintsVerified = false
 		if p.CachePolicy == "qwen_explicit" {
 			p.CacheHintsVerified, err = s.engine.Store.CacheHintsVerified(ctx, route.ConfigID)
@@ -172,6 +226,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
 			reserved, err := s.engine.Store.BeginModelSubmission(actx, s.claim, key, args, route.ConfigID)
 			submission, submitErr = reserved.Submissions, err
+			if err == nil && s.cp.HarnessRevision > 0 {
+				err = s.engine.Store.RecordSubmission(actx, s.claim, key, submission, map[string]any{"budget": budget})
+				submitErr = err
+			}
 			return err
 		})
 		reportedActivity := ""
@@ -186,6 +244,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return err
 		})
 		options := append(cacheOptions(p), opts...)
+		if s.cp.HarnessRevision > 0 {
+			options = append(options, model.WithTools(activeTools))
+		}
 		if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
 		}
@@ -220,6 +281,14 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		result.ReasoningContent = ""
 		result.Extra = cleanExtra(result.Extra)
+		if s.cp.HarnessRevision > 0 {
+			// Some compatible suppliers reuse IDs across separate responses.
+			// Eino caches tool results by ID, so scope them to this logical call
+			// before persistence/dispatch. A worker replay keeps the saved IDs.
+			for j := range result.ToolCalls {
+				result.ToolCalls[j].ID = "vl_" + digest(domain.JSON(map[string]any{"operation": key, "provider_call_id": result.ToolCalls[j].ID, "index": j}))[:40]
+			}
+		}
 		var usage any
 		if result.ResponseMeta != nil {
 			usage = result.ResponseMeta.Usage

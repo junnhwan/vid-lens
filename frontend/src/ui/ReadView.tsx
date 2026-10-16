@@ -226,6 +226,7 @@ export function ReadView(props: {
               <ModelIdentity
                 model={props.article?.generation_model || props.view?.request.generation_model}
                 purpose={props.article?.purpose || props.view?.request.purpose}
+                detailLevel={props.article?.detail_level || props.view?.request.detail_level}
               />
             </header>
             <div className="disclose" data-open={genOpen ? "true" : "false"}>

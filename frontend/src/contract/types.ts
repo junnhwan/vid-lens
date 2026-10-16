@@ -32,6 +32,8 @@ export interface Problem {
 }
 
 export interface Capabilities {
+  detail_levels?: DetailLevel[]
+  default_detail_level?: DetailLevel
   max_purpose_chars?: number
   purpose_input?: boolean
   model_selection?: boolean
@@ -79,6 +81,7 @@ export interface SourceSummary {
 }
 
 export interface Failure {
+  diagnostic_id?: string
   code: string
   message: string
   can_retry: boolean
@@ -170,6 +173,8 @@ export interface RequestActions {
 }
 
 export interface RequestBody {
+  detail_level?: DetailLevel | ""
+  detail_policy_revision?: string
   purpose?: string
   generation_model?: GenerationModel
   id: string
@@ -199,6 +204,7 @@ export interface ModelCatalog {
   models: GenerationModel[]
 }
 export interface GenerationInput {
+  detail_level?: DetailLevel
   purpose?: string
   model_id?: string
   model_revision_id?: string
@@ -317,6 +323,8 @@ export interface MediaCapability {
 }
 
 export interface ArticleResponse {
+  detail_level?: DetailLevel | ""
+  detail_policy_revision?: string
   generation_model?: GenerationModel
   purpose?: string
   qa_available?: boolean
@@ -325,6 +333,8 @@ export interface ArticleResponse {
   frames: Frame[]
   media: MediaCapability
 }
+
+export type DetailLevel = "concise" | "standard" | "detailed"
 
 export interface Answer {
   kind: string

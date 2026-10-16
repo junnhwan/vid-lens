@@ -1,6 +1,7 @@
 package investigator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,7 +60,51 @@ type argumentCheckedTool struct {
 	session *session
 }
 
-func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (result *schema.ToolResult, runErr error) {
+	if s := t.session; s != nil && s.cp.HarnessRevision > 0 && s.engine != nil {
+		before, err := s.progressFingerprint(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if isCandidateTool(t.name) && args != nil {
+				if message := toolRejection(result, runErr); message != "" && message != "operation_failed" {
+					issue := map[string]any{"code": "candidate_schema", "detail": message, "repairable": true}
+					var structured map[string]any
+					if json.Unmarshal([]byte(message), &structured) == nil && structured["code"] != nil {
+						issue = structured
+					}
+					if err := s.engine.Store.RecordCandidate(ctx, s.claim, callID(ctx), t.name, args.Text, "invalid", issue); err != nil {
+						result, runErr = nil, err
+						return
+					}
+					s.cp.LastCandidate = map[string]any{"candidate_id": callID(ctx), "expected_hash": store.Hash(args.Text), "tool": t.name, "issue": issue}
+				}
+			}
+			if err := s.toolFeedback(ctx, t.name, rawToolArguments(args), before, result, runErr); err != nil {
+				result, runErr = nil, err
+				return
+			}
+			if result != nil && runErr == nil {
+				ready, err := s.readiness(ctx)
+				if err != nil {
+					result, runErr = nil, err
+					return
+				}
+				// Keep existing result fields at the top level for replay/projection.
+				if len(result.Parts) > 0 && result.Parts[0].Type == schema.ToolPartTypeText {
+					var body map[string]any
+					if json.Unmarshal([]byte(result.Parts[0].Text), &body) == nil && body != nil {
+						body["readiness"] = ready
+						result.Parts[0].Text = string(domain.JSON(body))
+					}
+				}
+			}
+		}()
+		if t.name == "inspect_video_window" && s.cp.InspectBatchRejected[callID(ctx)] {
+			return toolError("本轮多个inspect已整组拒绝，没有创建图片或问题。每轮只提交一个inspect；先观察已交付图片。")
+		}
+	}
 	var target any
 	switch t.name {
 	case "begin_article":
@@ -85,6 +130,10 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &findInput{}
 	case "read_source":
 		target = &readInput{}
+	case "patch_article_draft":
+		target = &draftPatchInput{}
+	case "repair_candidate":
+		target = &candidatePatchInput{}
 	}
 	var err error
 	if args != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
@@ -96,11 +145,19 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		err = errors.New("工具参数为空")
 	} else if target != nil {
 		err = json.Unmarshal([]byte(args.Text), target)
+		if err == nil && t.session != nil && t.session.cp.HarnessRevision > 0 {
+			d := json.NewDecoder(bytes.NewBufferString(args.Text))
+			d.DisallowUnknownFields()
+			err = d.Decode(target)
+		}
 	}
 	if err != nil {
 		if isCandidateTool(t.name) {
 			issue := candidateIssue(err)
 			if t.session != nil && t.session.engine != nil {
+				if t.session.cp.HarnessRevision > 0 {
+					t.session.cp.LastCandidate = map[string]any{"candidate_id": callID(ctx), "expected_hash": store.Hash(rawToolArguments(args)), "tool": t.name, "issue": issue}
+				}
 				if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, rawToolArguments(args), "invalid", issue); e != nil {
 					return nil, e
 				}
@@ -121,12 +178,15 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return toolError("window 与 frame_ids 只能选择一种：新画面使用 window 对象，重新加载已有图片使用 frame_ids。")
 		}
 	}
-	result, err := t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
+	result, err = t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
 	if err != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
 		var candidate *candidateError
 		if errors.As(err, &candidate) {
-			if saveErr := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", map[string]any{"code": "validation", "detail": candidate.err.Error()}); saveErr != nil {
+			if saveErr := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", candidateIssue(candidate.err)); saveErr != nil {
 				return nil, saveErr
+			}
+			if t.session.cp.HarnessRevision > 0 {
+				t.session.cp.LastCandidate = map[string]any{"candidate_id": callID(ctx), "expected_hash": store.Hash(args.Text), "tool": t.name, "issue": candidateIssue(candidate.err)}
 			}
 		}
 	}
@@ -289,6 +349,12 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		if in.Critical != nil {
 			critical = *in.Critical
 		}
+		if s.cp.HarnessRevision > 0 && !critical && s.turn == nil && s.spec.DetailPolicy != nil {
+			p := s.spec.DetailPolicy
+			if s.cp.Progress.OptionalInspections >= p.OptionalInspections || s.profile.MaxIterations-s.cp.Calls <= p.FinalCallsReserved {
+				return toolError("可选调查额度已用完；保留必要证据，将非关键未知写入limitations，开始成文并正式提交。")
+			}
+		}
 		if in.QuestionID == "" {
 			return toolError("必须提供稳定的 question_id。")
 		}
@@ -335,6 +401,9 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return st, nil
 		}
 		s.cp.Inspections[key] = result.FrameIDs
+		if s.cp.HarnessRevision > 0 && !critical && s.turn == nil {
+			s.cp.Progress.OptionalInspections++
+		}
 		for _, id := range result.FrameIDs {
 			if !slices.Contains(s.cp.CitationFrames, id) {
 				s.cp.CitationFrames = append(s.cp.CitationFrames, id)
@@ -445,6 +514,9 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		})); e != nil {
 			return nil, e
 		}
+	}
+	if e := s.patchTools(add); e != nil {
+		return nil, e
 	}
 	return out, nil
 }

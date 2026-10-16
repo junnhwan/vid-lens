@@ -43,6 +43,8 @@ type Profile struct {
 	OverviewBins         int      `json:"overview_bins"`
 	MaxOutputTokens      int      `json:"max_output_tokens"`
 	MaxInputChars        int      `json:"max_input_chars"`
+	InputCharsLimit      int      `json:"input_chars_limit,omitempty"`
+	ContextTokens        int      `json:"context_tokens,omitempty"`
 	Platforms            []string `json:"platforms"`
 }
 
@@ -68,6 +70,9 @@ func (p Profile) MaxRetries(kind string) int {
 	return 2
 }
 func (p Profile) Validate() error {
+	if p.InputCharsLimit < 0 || p.InputCharsLimit > 8000000 || p.ContextTokens < 0 || p.ContextTokens > 4000000 {
+		return errors.New("invalid separate input/context limits")
+	}
 	u, e := url.Parse(p.ModelBaseURL)
 	if e != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || strings.TrimSpace(p.ModelName) == "" {
 		return errors.New("model endpoint and model name are required")

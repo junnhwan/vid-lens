@@ -202,6 +202,7 @@ func Markdown(a domain.Article, model domain.GenerationModel, purpose string, im
 	}
 	var out strings.Builder
 	out.WriteString("# " + escape(a.Title) + "\n\n")
+	out.WriteString("解读详细程度：" + domain.DetailLabel(a.DetailLevel) + "\n\n")
 	url, e := safeURL(a.Source.CanonicalURL)
 	if e != nil {
 		return nil, e

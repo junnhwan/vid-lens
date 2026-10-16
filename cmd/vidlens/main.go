@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,7 +29,15 @@ func main() {
 	path := flag.String("config", "", "YAML configuration file; credentials must remain outside Git")
 	migrate := flag.Bool("migrate-only", false, "apply PostgreSQL migrations and exit")
 	password := flag.Bool("set-owner-password", false, "set/reset the owner password interactively and revoke owner sessions")
+	diagnose := flag.String("diagnose-run", "", "print a read-only, credential-free run diagnostic summary and exit")
 	flag.Parse()
+	if *diagnose != "" {
+		if err := diagnoseRun(*path, *diagnose); err != nil {
+			slog.Error("diagnostic unavailable", "reason", err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 	if *password {
 		if e := setPassword(*path); e != nil {
 			slog.Error("password reset failed", "reason", e.Error())
@@ -40,6 +49,26 @@ func main() {
 		slog.Error("backend stopped", "reason", e.Error())
 		os.Exit(1)
 	}
+}
+func diagnoseRun(path, id string) error {
+	c, err := config.LoadFile(path)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	s, err := store.Open(ctx, c.DatabaseURL, c.SecretKey)
+	if err != nil {
+		return err
+	}
+	defer s.Pool.Close()
+	v, err := s.RunDiagnostics(ctx, id)
+	if err != nil {
+		return err
+	}
+	e := json.NewEncoder(os.Stdout)
+	e.SetIndent("", "  ")
+	return e.Encode(v)
 }
 func setPassword(path string) error {
 	c, e := config.LoadFile(path)

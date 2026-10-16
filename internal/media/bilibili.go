@@ -219,6 +219,12 @@ func frameRate(raw string) float64 {
 }
 
 func (b *bilibiliClient) subtitles(ctx context.Context, source bilibiliSource) ([]domain.Segment, *string, string) {
+	segs, lang, status, _ := b.subtitleDecision(ctx, source)
+	return segs, lang, status
+}
+
+func (b *bilibiliClient) subtitleDecision(ctx context.Context, source bilibiliSource) ([]domain.Segment, *string, string, subtitleDecision) {
+	d := subtitleDecision{Revision: "subtitle-adoption-v2", Candidates: []subtitleChoice{}, Attempts: []subtitleAttempt{}, FallbackReason: "metadata_failed"}
 	var info struct {
 		NeedLogin bool `json:"need_login_subtitle"`
 		Subtitle  struct {
@@ -230,10 +236,11 @@ func (b *bilibiliClient) subtitles(ctx context.Context, source bilibiliSource) (
 	}
 	query := url.Values{"bvid": {source.BVID}, "cid": {strconv.FormatInt(source.CID, 10)}}
 	if b.api(ctx, "/x/player/v2", query, &info) != nil {
-		return nil, nil, "unavailable"
+		return nil, nil, "unavailable", d
 	}
 	if info.NeedLogin {
-		return nil, nil, "login_required"
+		d.FallbackReason = "login_required"
+		return nil, nil, "login_required", d
 	}
 	m := metadata{Subtitles: map[string][]subformat{}}
 	for _, track := range info.Subtitle.Tracks {
@@ -241,21 +248,46 @@ func (b *bilibiliClient) subtitles(ctx context.Context, source bilibiliSource) (
 			m.Subtitles[track.Language] = []subformat{{Ext: "json"}}
 		}
 	}
-	lang, _ := chooseSubtitle(m)
-	for _, track := range info.Subtitle.Tracks {
-		if track.Language != lang || lang == "" {
-			continue
-		}
-		data, err := b.read(ctx, track.URL, 16<<20)
-		if err != nil {
-			continue
-		}
-		segments, err := ParseSubtitles(data, ".json")
-		if err == nil && len(segments) > 0 {
-			return segments, &lang, "available"
+	d.Candidates = subtitleChoices(m)
+	for i := range d.Candidates {
+		d.Candidates[i].Kind = "platform_unspecified"
+	}
+	d.FallbackReason = "no_supported_track"
+	for _, choice := range d.Candidates[:min(3, len(d.Candidates))] {
+		choice.Kind = "platform_unspecified"
+		for _, track := range info.Subtitle.Tracks {
+			if track.Language != choice.Language {
+				continue
+			}
+			attempt := subtitleAttempt{Choice: choice, Download: "failed", Parse: "not_attempted", Coverage: "unknown"}
+			data, err := b.read(ctx, track.URL, 16<<20)
+			var segments []domain.Segment
+			if err == nil {
+				attempt.Download = "received"
+				attempt.Parse = "invalid"
+				segments, err = ParseSubtitles(data, ".json")
+				if err == nil && len(segments) > 0 {
+					attempt.Parse = "parsed"
+				}
+			}
+			attempt.Segments = len(segments)
+			attempt.Usable, attempt.Coverage = TranscriptCoverage(segments, int64(source.Meta.Duration*1000))
+			d.Attempts = append(d.Attempts, attempt)
+			if err == nil && len(segments) > 0 && (attempt.Usable || source.Meta.Duration <= 0) {
+				d.Selected = &choice
+				d.FallbackReason = ""
+				return segments, &choice.Language, "available", d
+			}
+			d.FallbackReason = "parse_failed"
+			if attempt.Parse == "parsed" {
+				d.FallbackReason = "coverage_below_threshold"
+			}
+			if attempt.Download != "received" {
+				d.FallbackReason = "download_failed"
+			}
 		}
 	}
-	return nil, nil, "unavailable"
+	return nil, nil, "unavailable", d
 }
 
 func (b *bilibiliClient) download(ctx context.Context, track bilibiliTrack, dst string, limit int64) error {

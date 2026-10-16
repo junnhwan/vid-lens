@@ -1,8 +1,8 @@
-import type { GenerationModel } from "../contract/types"
+import type { DetailLevel, GenerationModel } from "../contract/types"
 import { ModelIcon } from "./brandMarks"
 
 export { ModelIcon }
-export function ModelIdentity({ model, purpose, showHistoryNote = true }: { model?: GenerationModel; purpose?: string; showHistoryNote?: boolean }) {
+export function ModelIdentity({ model, purpose, detailLevel, showHistoryNote = true }: { model?: GenerationModel; purpose?: string; detailLevel?: DetailLevel | ""; showHistoryNote?: boolean }) {
   if (!model) return null
   return (
     <div className="generation-identity">
@@ -10,6 +10,7 @@ export function ModelIdentity({ model, purpose, showHistoryNote = true }: { mode
         <ModelIcon brand={model.brand_id} name={model.display_name} />
         <span>{model.display_name}</span>
         <span className="identity-locked">{model.legacy ? "历史记录" : "本次固定"}</span>
+        <span className="identity-locked">{detailLevel ? {concise:"精简", standard:"标准", detailed:"详细"}[detailLevel] : "原版解读"}</span>
       </span>
       {purpose ? (
         <p>

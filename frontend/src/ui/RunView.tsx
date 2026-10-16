@@ -146,7 +146,7 @@ export function RunView({
           <p className="source-title">{source?.title || (stopped ? "视频处理未完成" : "正在确认视频")}</p>
           <p className="source-meta">{meta || view?.request.input_url || ""}</p>
           {note ? <p className="source-note">{note}</p> : null}
-          <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} />
+          <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} detailLevel={view?.request.detail_level} />
         </div>
       </div>
       <div className="activity" aria-busy={copy.busy}>
@@ -161,6 +161,7 @@ export function RunView({
         </p>
         <h1 className="activity-title" ref={titleRef} />
         <p className="purpose">{copy.purpose}</p>
+        {view?.failure?.diagnostic_id ? <p className="meta">错误编号：{view.failure.diagnostic_id}</p> : null}
         {transcribed ? <TranscriptionMeter done={transcribed.done} total={transcribed.total} ratio={transcribed.ratio} /> : null}
         {quiet ? <p className="quiet-note">{quiet}</p> : null}
         <PhaseSpine marks={marks} />

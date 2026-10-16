@@ -71,7 +71,7 @@ func (s *Store) RecordCandidate(ctx context.Context, c domain.Claim, key, name, 
 	if len(raw) > 512<<10 {
 		return domain.Err(422, "MODEL_RESULT_INVALID", "模型提交的候选超过接收上限。")
 	}
-	args := map[string]any{"tool": name, "arguments": raw, "status": status, "issue": issue}
+	args := map[string]any{"candidate_id": key, "arguments_hash": Hash(raw), "tool": name, "arguments": raw, "status": status, "issue": issue}
 	operation := "candidate-attempt:" + key + ":" + status
 	if _, err := s.BeginOperation(ctx, c, operation, "candidate_attempt", map[string]string{"tool": name, "arguments": raw, "status": status}, false); err != nil {
 		return err
@@ -124,6 +124,9 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	cp["calls"] = 0
 	cp["repeated"] = map[string]int{}
 	cp["repairs"] = 0
+	delete(cp, "progress")
+	delete(cp, "last_candidate")
+	delete(cp, "inspect_batch_rejected")
 	cp["draft_correction"] = false
 	cp["draft_repair_version"] = 0
 	cp["finalization_failed"] = false

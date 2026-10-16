@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +72,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	origin := "platform_subtitles"
 	coverage := "unknown"
 	var language *string
+	decision := subtitleDecision{Revision: "subtitle-adoption-v2", Candidates: []subtitleChoice{}, Attempts: []subtitleAttempt{}, FallbackReason: "not_listed"}
 	restore := c.Run.Kind == "source.restore"
 	step := domain.Step{ID: domain.ID(), Phase: "prepare_source", Title: "正在准备视频和文字来源", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
 	step, e = s.Store.Step(ctx, c, step)
@@ -139,6 +139,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			return err
 		}
 		bili, meta = &info, info.Meta
+		if e = s.sourceMetadata(ctx, c, meta); e != nil {
+			return e
+		}
 		if meta.Duration*1000 > float64(p.MaxVideoMS) {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频超过时长限制。")
 		}
@@ -148,9 +151,12 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 				return err
 			}
 			subctx, cancel := context.WithTimeout(dctx, 30*time.Second)
-			segs, language, subtitleStatus = biliReader.subtitles(subctx, info)
+			segs, language, subtitleStatus, decision = biliReader.subtitleDecision(subctx, info)
 			cancel()
 			rel()
+			if e = s.Store.SourceDiagnostic(ctx, c, "subtitle-selection", decision); e != nil {
+				return e
+			}
 		}
 		dctx, rel, err := s.Resources.Acquire(ctx, c, "download")
 		if err != nil {
@@ -195,38 +201,19 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if meta.Duration*1000 > float64(p.MaxVideoMS) {
 			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频超过时长限制。")
 		}
+		if e = s.sourceMetadata(ctx, c, meta); e != nil {
+			return e
+		}
 		s.Resources.Cache(ctx, "metadata:"+ident.URL, map[string]any{"title": meta.Title, "duration": meta.Duration})
 		if !restore {
-			lang, auto := chooseSubtitle(meta)
-			if lang != "" {
-				dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
-				if e != nil {
-					return e
-				}
-				subctx, cancel := context.WithTimeout(dctx, 60*time.Second)
-				a := append(s.ytdlpArgs(ident.URL), "--skip-download", "--sub-langs", lang, "--sub-format", "json3/vtt/best", "-o", filepath.Join(work, "sub.%(ext)s"))
-				if auto {
-					a = append(a, "--write-auto-subs")
-				} else {
-					a = append(a, "--write-subs")
-				}
-				a = append(a, ident.URL)
-				_, suberr := command(subctx, "yt-dlp", a, work, 16<<20, 0)
-				cancel()
-				rel()
-				if suberr == nil {
-					matches, _ := filepath.Glob(filepath.Join(work, "sub.*"))
-					for _, file := range matches {
-						b, e := os.ReadFile(file)
-						if e == nil && len(b) <= 16<<20 {
-							segs, _ = ParseSubtitles(b, filepath.Ext(file))
-							if len(segs) > 0 {
-								language = &lang
-								break
-							}
-						}
-					}
-				}
+			infoFile := filepath.Join(work, "subtitle-info.json")
+			if e = os.WriteFile(infoFile, raw, 0600); e != nil {
+				return e
+			}
+			segs, language, decision, e = s.extractorSubtitles(ctx, c, meta, infoFile, work)
+			_ = os.Remove(infoFile)
+			if e != nil {
+				return e
 			}
 		}
 		dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
@@ -258,6 +245,24 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		meta.Title = ident.CanonicalID
 	}
 	usable, cov := TranscriptCoverage(segs, duration)
+	decision.Usable = usable
+	decision.Coverage = cov
+	decision.Segments = len(segs)
+	decision.DurationMS = duration
+	decision.CoveredMS = subtitleCoveredMS(segs, duration)
+	decision.CoverageRule = "cue-duration union: >=50% usable, >=85% complete; speech/silence not inferred"
+	if !usable && len(segs) > 0 {
+		decision.FallbackReason = "coverage_below_threshold"
+	}
+	if usable {
+		decision.FallbackReason = ""
+	}
+	if restore {
+		decision.FallbackReason = "restore_preserves_original_text"
+	}
+	if e = s.Store.SourceDiagnostic(ctx, c, "subtitle-coverage", decision); e != nil {
+		return e
+	}
 	coverage = cov
 	asrReused := false
 	var reusedSnapshot string
@@ -292,6 +297,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	}
 	if !restore && !usable && !asrReused && (ident.Platform != "local" || probe.HasAudio) {
 		origin = "asr"
+		language = nil // Rejected subtitle language is not an ASR detection result.
 		audioInput := video
 		if ident.Platform != "local" && !probe.HasAudio {
 			dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
@@ -339,6 +345,10 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		coverage = "unknown"
 		origin = "unavailable"
 	} // Silent/visual clips can still be investigated; publication must declare absent text.
+	decision.AdoptedOrigin = origin
+	if e = s.Store.SourceDiagnostic(ctx, c, "text-adopted", decision); e != nil {
+		return e
+	}
 	a, e := s.own(ctx, c, video, "video", "application/octet-stream", c.Run.SnapshotID, 24*time.Hour)
 	if e != nil {
 		return e
@@ -356,12 +366,16 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		stable = append(stable, map[string]any{"start_ms": segs[i].StartMS, "end_ms": segs[i].EndMS, "text": segs[i].Text, "origin": segs[i].Origin})
 	}
 	metadata := map[string]any{"schema_version": 1, "extractor": "yt-dlp", "video": probe, "content_verification": "sha256_full_media", "subtitle_kind": "platform_unspecified"}
+	metadata["subtitle_decision"] = decision
+	if decision.Selected != nil {
+		metadata["subtitle_kind"] = decision.Selected.Kind
+	}
 	if ident.Platform == "youtube" || ident.Platform == "bilibili" {
 		metadata["access_policy"] = "anonymous"
 	}
 	if bili != nil {
 		metadata["extractor"] = "bilibili_public_api_v1"
-		metadata["subtitle_kind"] = subtitleStatus
+		metadata["subtitle_availability"] = subtitleStatus
 		metadata["available_video_heights"] = bili.Heights
 		metadata["selected_quality"] = map[string]any{"width": bili.Video.Width, "height": bili.Video.Height, "quality_id": bili.Video.ID, "frame_rate": bili.Video.FrameRate, "bandwidth": bili.Video.Bandwidth}
 	}
@@ -412,34 +426,20 @@ func (s *Service) localFile(name string) (string, error) {
 	return p, nil
 }
 func chooseSubtitle(m metadata) (string, bool) {
-	for _, entry := range []struct {
-		Tracks map[string][]subformat
-		Auto   bool
-	}{{m.Subtitles, false}, {m.Auto, true}} {
-		for _, want := range []string{"zh-Hans", "zh-CN", "zh", "en", "en-US"} {
-			if len(entry.Tracks[want]) > 0 {
-				return want, entry.Auto
-			}
-		}
-		langs := []string{}
-		for lang, formats := range entry.Tracks {
-			if len(formats) > 0 {
-				langs = append(langs, lang)
-			}
-		}
-		slices.Sort(langs)
-		for _, prefix := range []string{"zh", "en"} {
-			for _, lang := range langs {
-				if strings.HasPrefix(lang, prefix) {
-					return lang, entry.Auto
-				}
-			}
-		}
-		if len(langs) > 0 {
-			return langs[0], entry.Auto
-		}
+	if choices := subtitleChoices(m); len(choices) > 0 {
+		return choices[0].Language, choices[0].Kind == "automatic"
 	}
 	return "", false
+}
+
+func (s *Service) sourceMetadata(ctx context.Context, c domain.Claim, m metadata) error {
+	if _, err := s.Store.BeginOperation(ctx, c, "source-metadata", "source_metadata", map[string]any{"source_id": c.Run.SourceID}, false); err != nil {
+		return err
+	}
+	if err := s.Store.FinishOperation(ctx, c, "source-metadata", map[string]any{"title": m.Title, "duration_ms": int64(m.Duration * 1000)}, "", nil); err != nil {
+		return err
+	}
+	return s.Store.NotifySourceMetadata(ctx, c)
 }
 
 type Probe struct {

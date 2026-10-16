@@ -85,6 +85,18 @@ func source(ctx context.Context, q Querier, r domain.Request) (*domain.Source, e
 		return nil, e
 	}
 	src := &domain.Source{SourceID: v.ID, Platform: v.Platform, CanonicalURL: v.URL}
+	var info struct {
+		Title      string `json:"title"`
+		DurationMS int64  `json:"duration_ms"`
+	}
+	err := q.QueryRow(ctx, `SELECT result->>'title',(result->>'duration_ms')::bigint FROM run_operations WHERE operation_key='source-metadata' AND status='completed' AND run_id IN (SELECT e->>'run_id' FROM jsonb_array_elements($1::jsonb) e) ORDER BY updated_at DESC LIMIT 1`, domain.JSON(r.Segments)).Scan(&info.Title, &info.DurationMS)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		src.Title = &info.Title
+		src.DurationMS = &info.DurationMS
+	}
 	if v.Platform == "bilibili" {
 		src.Part = &domain.Part{Key: v.Part, Label: "第 " + v.Part + " P"}
 	}
@@ -151,7 +163,10 @@ func (s *Store) Article(ctx context.Context, session, requestID string) (map[str
 		out["generation_model"] = m
 		out["purpose"] = ""
 		if r.GenerationSpec != nil {
+			out["generation_model"] = r.GenerationSpec.Model
 			out["purpose"] = r.GenerationSpec.Purpose
+			out["detail_level"] = r.GenerationSpec.DetailLevel
+			out["detail_policy_revision"] = r.GenerationSpec.DetailPolicyRevision
 		}
 		out["qa_available"] = checkAvailable(ctx, tx, r.ConfigID) == nil
 		return nil
@@ -396,6 +411,8 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 		v := view["request"].(map[string]any)
 		v["purpose"] = r.GenerationSpec.Purpose
 		v["generation_model"] = r.GenerationSpec.Model
+		v["detail_level"] = r.GenerationSpec.DetailLevel
+		v["detail_policy_revision"] = r.GenerationSpec.DetailPolicyRevision
 	}
 	return view, pos, nil
 }

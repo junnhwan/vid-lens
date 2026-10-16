@@ -331,7 +331,7 @@ func classify(e error) (domain.Failure, bool, time.Duration) {
 	if errors.As(e, &p) {
 		f.Code = p.Code
 		f.Message = p.Detail
-		f.CanRetry = p.Status == 503 || p.Code == "MODEL_RESULT_INVALID" || p.Code == "MODEL_RESULT_NOT_SUBMITTED" || p.Code == "MODEL_OUTPUT_TRUNCATED"
+		f.CanRetry = p.Status == 503 || p.Code == "MODEL_RESULT_INVALID" || p.Code == "MODEL_RESULT_NOT_SUBMITTED" || p.Code == "MODEL_OUTPUT_TRUNCATED" || p.Code == "AGENT_NO_PROGRESS" || p.Code == "RESOURCE_LIMIT_EXCEEDED"
 		return f, p.Status == 503, 0
 	}
 	if errors.Is(e, context.DeadlineExceeded) {

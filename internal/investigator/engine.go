@@ -42,6 +42,8 @@ type session struct {
 	tools            map[string]tool.EnhancedInvokableTool
 	compositionReady bool
 	forceDraftSubmit bool
+	spec             domain.GenerationSpec
+	modelMessages    []*schema.Message
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
@@ -71,6 +73,10 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 		s.article = &a
 	}
 	_ = json.Unmarshal(c.Run.Checkpoint, &s.cp)
+	s.spec, err = e.Store.GenerationForRun(ctx, c.Run.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	if op, err := e.Store.Operation(ctx, c.Run.ID, "candidate"); err == nil && op.Status == "completed" {
 		return s.publish(ctx, op.Result)
 	}
@@ -88,6 +94,9 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	}
 	if s.cp.Repeated == nil {
 		s.cp.Repeated = map[string]int{}
+	}
+	if s.cp.Progress.Seen == nil {
+		s.cp.Progress.Seen = map[string]int{}
 	}
 	if s.cp.DraftResume {
 		if err = s.resumeDraft(ctx); err != nil {
@@ -111,7 +120,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "vidlens", Description: "Investigate the current video's real evidence and produce a grounded result", Model: &meteredModel{session: s}, MaxIterations: p.MaxIterations - s.cp.Calls, GenModelInput: func(_ context.Context, _ string, in *adk.AgentInput) ([]*schema.Message, error) {
 		return in.Messages, nil
-	}, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}, ReturnDirectly: map[string]bool{"submit_article": true, "submit_answer": true, "submit_article_draft": true}}, Handlers: []adk.ChatModelAgentMiddleware{&middleware{BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{}, s: s}}})
+	}, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true, UnknownToolsHandler: s.unknownTool}, ReturnDirectly: map[string]bool{"submit_article": true, "submit_answer": true, "submit_article_draft": true, "repair_candidate": true}}, Handlers: []adk.ChatModelAgentMiddleware{&middleware{BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{}, s: s}}})
 	if err != nil {
 		return err
 	}
@@ -133,7 +142,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 		}
 	}
 	if err != nil || op.Status != "completed" {
-		if s.cp.Repairs >= 1 {
+		if s.cp.Repairs >= s.repairLimit() {
 			s.cp.FinalizationFailed = true
 			if err = s.persist(ctx, s.cp.Messages); err != nil {
 				return err
@@ -150,6 +159,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	return s.publish(ctx, op.Result)
 }
 func (s *session) initial(ctx context.Context) error {
+	newLayout := s.cp.LayoutVersion == ""
 	if s.cp.LayoutVersion == "" {
 		s.cp.LayoutVersion = "source-context-v2"
 		if s.turn == nil {
@@ -160,11 +170,29 @@ func (s *session) initial(ctx context.Context) error {
 	if s.cp.LayoutVersion == draftLayout {
 		instruction += draftInstructions
 	}
+	if newLayout && s.spec.Version >= 2 && s.spec.DetailPolicy != nil {
+		s.cp.HarnessRevision = 1
+		instruction += harnessInstructions
+		if s.turn == nil {
+			instruction += "\n" + s.spec.DetailPolicy.Instruction
+			if s.spec.DetailPolicy.ContentPlan {
+				s.cp.HarnessRevision = 2
+				instruction += contentPlanInstructions
+			}
+		} else {
+			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
+		}
+	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "text_time_precision": "platform timestamps, or actual coarse ASR audio windows; no invented sentence timing", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}
 	if spec, e := s.engine.Store.GenerationForRun(ctx, s.claim.Run.ID); e == nil {
 		fixed["purpose"] = spec.Purpose
+		if s.cp.HarnessRevision > 0 {
+			fixed["detail_level"] = spec.DetailLevel
+			fixed["detail_policy_revision"] = spec.DetailPolicyRevision
+			fixed["detail_rule"] = "All levels cover the whole video. Chapters follow topics and information gain, never a fixed minute/word/image quota. Optional investigation is bounded; necessary evidence and honest limitations are shared."
+		}
 		fixed["purpose_rule"] = "Cover the whole video first; use the optional purpose to prioritize investigation, not to invent facts or skip the rest. It does not restrict later video questions."
 	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return e
@@ -302,7 +330,15 @@ func (s *session) resumePending(ctx context.Context) error {
 		}
 		t := s.tools[call.Function.Name]
 		if t == nil {
-			return errors.New("unknown checkpoint tool")
+			body, err := s.unknownTool(context.WithValue(ctx, callIDKey{}, call.ID), call.Function.Name, call.Function.Arguments)
+			if err != nil {
+				return err
+			}
+			s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolCallID: call.ID, ToolName: call.Function.Name, Content: body})
+			if err = s.persist(ctx, s.cp.Messages); err != nil {
+				return err
+			}
+			continue
 		}
 		result, e := t.InvokableRun(context.WithValue(ctx, callIDKey{}, call.ID), &schema.ToolArgument{Text: call.Function.Arguments})
 		if e != nil {
@@ -324,6 +360,10 @@ func (s *session) publish(ctx context.Context, raw json.RawMessage) error {
 		var a domain.Article
 		if e := json.Unmarshal(raw, &a); e != nil {
 			return e
+		}
+		if s.spec.Version >= 2 {
+			a.DetailLevel = s.spec.DetailLevel
+			a.DetailPolicyRevision = s.spec.DetailPolicyRevision
 		}
 		if e := s.validateArticle(ctx, a); e != nil {
 			return e

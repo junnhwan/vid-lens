@@ -103,11 +103,11 @@ func TestBilibiliPreparationUsesOnlyAnonymousAPIAndSeparatesOldCache(t *testing.
 			if err != nil || req.Status != "generating" || req.SnapshotID == nil {
 				t.Fatalf("prepare: %+v %v", req, err)
 			}
-			var policy, extractor, kind string
-			if err = s.Pool.QueryRow(ctx, "SELECT metadata->>'access_policy',metadata->>'extractor',metadata->>'subtitle_kind' FROM source_snapshots WHERE id=$1", *req.SnapshotID).Scan(&policy, &extractor, &kind); err != nil {
+			var policy, extractor, kind, availability string
+			if err = s.Pool.QueryRow(ctx, "SELECT metadata->>'access_policy',metadata->>'extractor',metadata->>'subtitle_kind',metadata->>'subtitle_availability' FROM source_snapshots WHERE id=$1", *req.SnapshotID).Scan(&policy, &extractor, &kind, &availability); err != nil {
 				t.Fatal(err)
 			}
-			if policy != "anonymous" || extractor != "bilibili_public_api_v1" || (subtitles && kind != "available") || (!subtitles && kind != "login_required") {
+			if policy != "anonymous" || extractor != "bilibili_public_api_v1" || kind != "platform_unspecified" || (subtitles && availability != "available") || (!subtitles && availability != "login_required") {
 				t.Fatal("anonymous provenance lost")
 			}
 			if (subtitles && asrCalls.Load() != 0) || (!subtitles && asrCalls.Load() != 1) {

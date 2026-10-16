@@ -230,6 +230,8 @@ export function App() {
               onSample={visitor.sample}
               purpose={visitor.purpose}
               onPurpose={visitor.setPurpose}
+              detailLevel={visitor.detailLevel}
+              onDetailLevel={visitor.setDetailLevel}
               catalog={visitor.catalog}
               selected={visitor.selectedModel}
               onSelect={visitor.setSelectedModel}

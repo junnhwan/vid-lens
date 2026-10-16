@@ -108,6 +108,9 @@ func (s *Store) Check(ctx context.Context, c domain.Claim) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error { return fence(ctx, tx, c) })
 }
 func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *domain.Failure) error {
+	if f != nil && f.DiagnosticID == "" {
+		f.DiagnosticID = "vl_" + r.ID
+	}
 	if domain.Terminal(r.Status) {
 		return nil
 	}

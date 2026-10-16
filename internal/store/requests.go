@@ -61,6 +61,25 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		}
 		if retryID != "" {
 			h = Hash(map[string]any{})
+		} else {
+			level := "standard"
+			if in.DetailLevel != nil {
+				level = *in.DetailLevel
+			}
+			if _, ok := domain.InterpretationPolicy(level); !ok {
+				return &domain.Problem{Status: 422, Code: "INVALID_ARGUMENT", Detail: "解读详细程度无效。", Meta: map[string]any{"field_errors": []map[string]string{{"field": "detail_level", "message": "请选择精简、标准或详细。"}}}}
+			}
+			canonical := Hash(map[string]any{"version": 3, "video_url": input, "purpose": in.Purpose, "model_id": in.ModelID, "model_revision_id": in.ModelRevisionID, "detail_level": level})
+			// Honor accepted pre-detail keys only for the historical default.
+			// Their immutable spec and published result must remain historical.
+			if level == "standard" {
+				var found bool
+				var err error
+				if a, found, err = replay(ctx, tx, scope, key, h); found && err == nil {
+					return nil
+				}
+			}
+			h = canonical
 		}
 		var found bool
 		var e error
@@ -126,6 +145,9 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			return e
 		}
 		pipeline := "source-60s-mp3-48k16k-v1"
+		if spec.SourcePipelineRevision != "" {
+			pipeline += ":" + spec.SourcePipelineRevision
+		}
 		if identity.Platform == "bilibili" {
 			// Never bind a new anonymous request to a source prepared with an
 			// owner's account or to the previous extractor's capped quality.
@@ -167,6 +189,8 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			return e
 		}
 		if status == "succeeded" {
+			// The immutable HTTP creation identity is diagnostic data, not part of
+			// the coalesced source/article work identity.
 			var snapshot string
 			if e = tx.QueryRow(ctx, "SELECT result_id FROM job_runs WHERE id=$1", runID).Scan(&snapshot); e != nil {
 				return e
@@ -174,6 +198,9 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			if e = bindPrepared(ctx, tx, runID, snapshot); e != nil {
 				return e
 			}
+		}
+		if _, e = tx.Exec(ctx, "UPDATE generation_requests SET http_trace_id=$2 WHERE id=$1", id, domain.TraceID(ctx)); e != nil {
+			return e
 		}
 		a, e = remember(ctx, tx, scope, key, h, id, p.IdempotencySeconds)
 		return e
@@ -377,7 +404,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if urls == nil {
 			urls = []string{}
 		}
-		_, e = tx.Exec(ctx, "INSERT INTO qa_turns(id,conversation_id,request_id,article_id,snapshot_id,run_id,turn_no,status,question,context,retry_of_id,allow_external_sources,reference_urls) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12)", id, c.ID, c.RequestID, c.ArticleID, c.SnapshotID, run, c.NextTurnNo, in.Question, domain.JSON(in.Context), retryPtr, in.AllowExternalSources, domain.JSON(urls))
+		_, e = tx.Exec(ctx, "INSERT INTO qa_turns(id,conversation_id,request_id,article_id,snapshot_id,run_id,turn_no,status,question,context,retry_of_id,allow_external_sources,reference_urls,http_trace_id) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12,$13)", id, c.ID, c.RequestID, c.ArticleID, c.SnapshotID, run, c.NextTurnNo, in.Question, domain.JSON(in.Context), retryPtr, in.AllowExternalSources, domain.JSON(urls), domain.TraceID(ctx))
 		if e != nil {
 			return e
 		}

@@ -49,6 +49,18 @@ func TestSubtitleChoicePrefersManualThenAuto(t *testing.T) {
 	if lang != "ja" || auto {
 		t.Fatalf("usable platform subtitles unnecessarily sent to ASR: %s %v", lang, auto)
 	}
+	m.Subtitles = map[string][]subformat{"ar": {{Ext: "vtt"}}, "zh-Hant": {{Ext: "vtt"}}}
+	if lang, auto = chooseSubtitle(m); lang != "zh-Hant" || auto {
+		t.Fatalf("language prefix preference changed: %s %v", lang, auto)
+	}
+}
+
+func TestSubtitleChoiceSkipsUnparseableTrackBeforeASR(t *testing.T) {
+	m := metadata{Subtitles: map[string][]subformat{"zh": {{Ext: "ttml"}}}, Auto: map[string][]subformat{"en": {{Ext: "json3"}}}}
+	lang, auto := chooseSubtitle(m)
+	if lang != "en" || !auto {
+		t.Fatalf("usable automatic JSON3 was skipped for unsupported manual track; would fall back to whole-video ASR: %s auto=%v", lang, auto)
+	}
 }
 func TestASRStreamingMultipartHasKnownLength(t *testing.T) {
 	audio := bytes.Repeat([]byte{1, 2, 3}, 10000)

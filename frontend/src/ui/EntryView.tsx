@@ -1,6 +1,6 @@
 import { useEffect, useState, type Ref } from "react"
 import type { SiteCapacity } from "../contract/capacity"
-import type { ModelCatalog } from "../contract/types"
+import type { DetailLevel, ModelCatalog } from "../contract/types"
 import { HttpApi } from "../api/http"
 import { DiskMeter } from "./DiskMeter"
 import { LikeButton } from "./LikeButton"
@@ -20,6 +20,8 @@ export function EntryView({
   onSubmit,
   purpose,
   onPurpose,
+  detailLevel,
+  onDetailLevel,
   catalog,
   selected,
   onSelect,
@@ -39,6 +41,8 @@ export function EntryView({
   onSample: () => void
   purpose: string
   onPurpose: (v: string) => void
+  detailLevel: DetailLevel
+  onDetailLevel: (v: DetailLevel) => void
   catalog: ModelCatalog | null
   selected: string
   onSelect: (v: string) => void
@@ -141,6 +145,18 @@ export function EntryView({
                 }))}
                 onChange={onSelect}
               />
+              <ChoiceMenu
+                label="解读详细程度"
+                placeholder="标准"
+                value={detailLevel}
+                disabled={busy}
+                options={[
+                  { id: "concise", label: "精简", hint: "掌握全片主线，合并重复解释" },
+                  { id: "standard", label: "标准", hint: "理解主要内容、原因和关键步骤" },
+                  { id: "detailed", label: "详细", hint: "保留更多有依据的参数、例子和过程" },
+                ]}
+                onChange={(value) => onDetailLevel(value as DetailLevel)}
+              />
               <button
                 type="button"
                 className="purpose-toggle"
@@ -157,6 +173,7 @@ export function EntryView({
               </button>
             </div>
             <p className="model-help">
+              <span className="model-help-rule">三档都覆盖全片主要内容，详细档通常需要更多处理。</span>
               模型来自其他非官方渠道，可能临时不可用。
               <span className="model-note">
                 <button type="button" className="model-note-mark" aria-describedby="model-source-note">

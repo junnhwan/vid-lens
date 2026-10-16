@@ -32,6 +32,8 @@ type ProviderInput struct {
 	ExpectedRevision int64  `json:"expected_revision"`
 }
 type CatalogModel struct {
+	InputCharsLimit    int    `json:"input_chars_limit"`
+	ContextTokens      int    `json:"context_tokens"`
 	ID                 string `json:"id"`
 	RevisionID         string `json:"revision_id"`
 	Revision           int64  `json:"revision"`
@@ -53,6 +55,8 @@ type CatalogModel struct {
 	CacheHintsVerified bool   `json:"cache_hints_verified"`
 }
 type ModelInput struct {
+	InputCharsLimit  *int   `json:"input_chars_limit,omitempty"`
+	ContextTokens    *int   `json:"context_tokens,omitempty"`
 	ProviderID       string `json:"provider_id"`
 	DisplayName      string `json:"display_name"`
 	BrandID          string `json:"brand_id"`
@@ -67,7 +71,7 @@ type ModelInput struct {
 }
 
 const providerSelect = `SELECT jsonb_build_object('id',p.id,'revision_id',r.id,'revision',p.revision,'name',r.name,'base_url',r.base_url,'proxy_policy',r.proxy_policy,'key_configured',r.key_ref<>'','enabled',p.enabled) FROM model_providers p JOIN provider_revisions r ON r.id=p.current_revision_id`
-const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
+const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','input_chars_limit',COALESCE((c.profile->>'input_chars_limit')::int,0),'context_tokens',COALESCE((c.profile->>'context_tokens')::int,0),'disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
 
 // Older databases may already have enabled models without a catalog default.
 // Once enabled, the catalog stays active even if all its models are stopped.
@@ -254,7 +258,13 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 		if !create && old.ProviderID != in.ProviderID {
 			return domain.Err(422, "INVALID_ARGUMENT", "请为另一供应商新增模型。")
 		}
-		same := !create && old.ProviderRevisionID == provider.RevisionID && old.DisplayName == in.DisplayName && old.BrandID == in.BrandID && old.Description == in.Description && old.UpstreamID == in.UpstreamID && old.MaxOutputTokens == in.MaxOutputTokens && old.MaxInputChars == in.MaxInputChars && old.DisableThinking == in.DisableThinking && old.CachePolicy == in.CachePolicy
+		if in.InputCharsLimit == nil {
+			in.InputCharsLimit = domain.Ptr(old.InputCharsLimit)
+		}
+		if in.ContextTokens == nil {
+			in.ContextTokens = domain.Ptr(old.ContextTokens)
+		}
+		same := !create && old.ProviderRevisionID == provider.RevisionID && old.DisplayName == in.DisplayName && old.BrandID == in.BrandID && old.Description == in.Description && old.UpstreamID == in.UpstreamID && old.MaxOutputTokens == in.MaxOutputTokens && old.MaxInputChars == in.MaxInputChars && old.DisableThinking == in.DisableThinking && old.CachePolicy == in.CachePolicy && old.InputCharsLimit == *in.InputCharsLimit && old.ContextTokens == *in.ContextTokens
 		if same {
 			if in.Enabled && (!old.Verified || !provider.Enabled) {
 				return domain.Err(409, "MODEL_NOT_VERIFIED", "启用前请先通过当前修订的图片与工具检查，并启用供应商。")
@@ -276,6 +286,8 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 			p.ModelDisableThinking = in.DisableThinking
 			p.CachePolicy = in.CachePolicy
 			p.CacheHintsVerified = false
+			p.InputCharsLimit = *in.InputCharsLimit
+			p.ContextTokens = *in.ContextTokens
 			p.ModelKeyRef, e = providerKey(ctx, tx, provider.RevisionID)
 			if e != nil {
 				return e
@@ -420,7 +432,18 @@ func (s *Store) ModelCatalog(ctx context.Context) (map[string]any, error) {
 }
 func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.RequestInput) (domain.GenerationSpec, error) {
 	var spec domain.GenerationSpec
-	spec.Version = 1
+	spec.Version = 2
+	spec.SourcePipelineRevision = "subtitle-adoption-v2"
+	spec.DetailLevel = "standard"
+	if in.DetailLevel != nil {
+		spec.DetailLevel = *in.DetailLevel
+	}
+	policy, valid := domain.InterpretationPolicy(spec.DetailLevel)
+	if !valid {
+		return spec, &domain.Problem{Status: 422, Code: "INVALID_ARGUMENT", Detail: "请选择精简、标准或详细。", Meta: map[string]any{"field_errors": []map[string]string{{"field": "detail_level", "message": "仅允许 concise、standard、detailed。"}}}}
+	}
+	spec.DetailPolicy = &policy
+	spec.DetailPolicyRevision = policy.Revision + ":" + Hash(policy)
 	spec.Purpose = domain.NormalizePurpose(in.Purpose)
 	spec.Scope = "public"
 	if spec.Purpose != "" {

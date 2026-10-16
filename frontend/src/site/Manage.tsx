@@ -35,6 +35,8 @@ interface Model {
   is_default: boolean
   max_output_tokens: number
   max_input_chars: number
+  input_chars_limit: number
+  context_tokens: number
   disable_thinking: boolean
   cache_policy: string
 }
@@ -72,6 +74,8 @@ interface ModelDraft {
   expected_revision: number
   max_output_tokens: number
   max_input_chars: number
+  input_chars_limit: number
+  context_tokens: number
   disable_thinking: boolean
   cache_policy: string
 }
@@ -93,6 +97,8 @@ const emptyModel: ModelDraft = {
   expected_revision: 0,
   max_output_tokens: 10000,
   max_input_chars: 180000,
+  input_chars_limit: 140000,
+  context_tokens: 0,
   disable_thinking: false,
   cache_policy: "provider_default",
 }
@@ -193,6 +199,8 @@ function sameRevision(draft: ModelDraft, model: Model) {
     draft.upstream_id === model.upstream_id &&
     draft.max_output_tokens === model.max_output_tokens &&
     draft.max_input_chars === model.max_input_chars &&
+    draft.input_chars_limit === (model.input_chars_limit || 0) &&
+    draft.context_tokens === (model.context_tokens || 0) &&
     draft.disable_thinking === model.disable_thinking &&
     draft.cache_policy === model.cache_policy
   )
@@ -247,6 +255,8 @@ function modelDraft(m: Model): ModelDraft {
     expected_revision: m.revision,
     max_output_tokens: m.max_output_tokens,
     max_input_chars: m.max_input_chars,
+    input_chars_limit: m.input_chars_limit || 0,
+    context_tokens: m.context_tokens || 0,
     disable_thinking: m.disable_thinking,
     cache_policy: m.cache_policy,
   }
@@ -1180,13 +1190,21 @@ export function Manage() {
                                   />
                                 </label>
                                 <label className="desk-field">
-                                  <span>输入字符保护上限</span>
+                                  <span>兼容旧版字符额度</span>
                                   <input
                                     type="number"
                                     min={10000}
                                     value={md.max_input_chars}
                                     onChange={(e) => patchModel({ max_input_chars: Number(e.target.value) })}
                                   />
+                                </label>
+                                <label className="desk-field">
+                                  <span>实际输入字符上限（0 沿用旧配置）</span>
+                                  <input type="number" min={0} max={8000000} value={md.input_chars_limit} onChange={(e) => patchModel({ input_chars_limit: Number(e.target.value) })} />
+                                </label>
+                                <label className="desk-field">
+                                  <span>共享上下文 tokens（0 表示未知）</span>
+                                  <input type="number" min={0} max={4000000} value={md.context_tokens} onChange={(e) => patchModel({ context_tokens: Number(e.target.value) })} />
                                 </label>
                                 <DeskSelect
                                   label="缓存策略"

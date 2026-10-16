@@ -21,14 +21,28 @@ import (
 const draftLayout = "source-context-v3"
 
 type sectionPlan struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	StartMS     int64    `json:"start_ms"`
+	EndMS       int64    `json:"end_ms"`
+	KeyPoints   []string `json:"key_points,omitempty" jsonschema:"description=Distinct supported points to retain in this chapter, 1-12 items. Keep necessary steps/conditions at all levels. Do not repeat other chapter points."`
+	EvidenceIDs []string `json:"evidence_ids,omitempty" jsonschema:"description=1-24 existing tN/fN citation aliases supporting these points, intersecting this chapter source range."`
+}
+
+type legacySectionPlan struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	StartMS int64  `json:"start_ms"`
 	EndMS   int64  `json:"end_ms"`
 }
+type legacyBeginArticleInput struct {
+	Title       string              `json:"title"`
+	Sections    []legacySectionPlan `json:"sections" jsonschema:"description=Ordered outline covering the whole video. Usually 4-8 chapters; use exact video range boundaries, first start_ms=0, final end_ms=video duration. No body text yet."`
+	Limitations []domain.Limitation `json:"limitations"`
+}
 type beginArticleInput struct {
 	Title       string              `json:"title"`
-	Sections    []sectionPlan       `json:"sections" jsonschema:"description=Ordered outline covering the whole video. Usually 4-8 chapters; use exact video range boundaries, first start_ms=0, final end_ms=video duration. No body text yet."`
+	Sections    []sectionPlan       `json:"sections" jsonschema:"description=Full-video topic plan with distinct key_points and supporting evidence_ids. Use 1-40 chapters according to actual topics, never a fixed time/word quota. No body text yet."`
 	Limitations []domain.Limitation `json:"limitations"`
 }
 type saveSectionsInput struct {
@@ -47,7 +61,7 @@ type articleDraft struct {
 }
 
 func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) error {
-	if err := add(utils.InferEnhancedTool("begin_article", "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version.", func(ctx context.Context, in beginArticleInput) (*schema.ToolResult, error) {
+	begin := func(ctx context.Context, in beginArticleInput) (*schema.ToolResult, error) {
 		if result, err := s.replayedDraft(ctx, in); result != nil || err != nil {
 			return result, err
 		}
@@ -64,22 +78,22 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if !s.compositionReady {
 			return s.draftFeedback(ctx, "请先保存所有新图片的观察并解决关键取证问题，再开始成文。")
 		}
-		ids := map[string]bool{}
-		var end int64
-		for _, p := range in.Sections {
-			if p.ID == "" || len(p.ID) > 80 || ids[p.ID] || strings.TrimSpace(p.Title) == "" || p.StartMS != end || p.EndMS <= p.StartMS || p.EndMS > s.snapshot.DurationMS {
-				return s.draftFeedback(ctx, "章节ID需唯一，时间范围连续有序且位于视频内：从0开始，到视频实际duration_ms结束。")
-			}
-			ids[p.ID] = true
-			end = p.EndMS
+		if err = validateSectionPlan(in.Sections, s.snapshot.DurationMS, s.cp.HarnessRevision > 0); err != nil {
+			return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
 		}
-		if end != s.snapshot.DurationMS {
-			return s.draftFeedback(ctx, "章节计划没有覆盖到视频结尾。")
+		ids := map[string]bool{}
+		for _, p := range in.Sections {
+			ids[p.ID] = true
 		}
 		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations}
 		catalog, err := s.citationCatalog(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
+			if err = validatePlanFacts(in.Sections, catalog); err != nil {
+				return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
+			}
 		}
 		if err = resolveDraftCitations(&draft, catalog); err != nil {
 			return s.draftFeedback(ctx, err.Error())
@@ -88,8 +102,22 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			return s.draftFeedback(ctx, err.Error())
 		}
 		return s.writeDraft(ctx, in, 0, draft, "正在保存文章结构")
-	})); err != nil {
-		return err
+	}
+	const beginDescription = "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
+	if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
+		if err := add(utils.InferEnhancedTool("begin_article", beginDescription, begin)); err != nil {
+			return err
+		}
+	} else {
+		if err := add(utils.InferEnhancedTool("begin_article", beginDescription, func(ctx context.Context, in legacyBeginArticleInput) (*schema.ToolResult, error) {
+			var next beginArticleInput
+			if err := json.Unmarshal(domain.JSON(in), &next); err != nil {
+				return nil, err
+			}
+			return begin(ctx, next)
+		})); err != nil {
+			return err
+		}
 	}
 	if err := add(utils.InferEnhancedTool("save_article_sections", "Save or replace 1-3 planned chapters. Accepted chapters survive malformed later calls. Citation aliases are resolved by the server. Use one call per response and latest version; final publication always revalidates the entire article.", func(ctx context.Context, in saveSectionsInput) (*schema.ToolResult, error) {
 		if result, err := s.replayedDraft(ctx, in); result != nil || err != nil {
@@ -195,7 +223,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			return nil, err
 		}
 		if err = resolveDraftCitations(&draft, catalog); err != nil {
-			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", err.Error())}
+			return nil, &candidateError{err: err}
 		}
 		article, err := s.assembleArticle(draft)
 		if err != nil {
@@ -228,6 +256,30 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		}
 		return textResult(map[string]any{"accepted_for_publication": true, "version": version}), nil
 	}))
+}
+
+func validateSectionPlan(plan []sectionPlan, duration int64, allowOverlap bool) error {
+	ids := map[string]bool{}
+	end, lastStart := int64(0), int64(0)
+	if len(plan) < 1 || len(plan) > 40 {
+		return domain.Err(422, "MODEL_RESULT_INVALID", "需要1–40个覆盖全片的主题章节。")
+	}
+	for i, p := range plan {
+		validStart := p.StartMS == end
+		if allowOverlap {
+			validStart = p.StartMS >= lastStart && p.StartMS <= end
+		}
+		if p.ID == "" || len(p.ID) > 80 || ids[p.ID] || strings.TrimSpace(p.Title) == "" || !validStart || p.StartMS < 0 || p.EndMS <= p.StartMS || p.EndMS > duration {
+			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "章节ID需唯一，来源范围按开始时间有序且联合覆盖全片；同一片段可解释不同主题，但不能有时间缺口或越界。", Meta: map[string]any{"path": fmt.Sprintf("/sections/%d", i), "expected": fmt.Sprintf("start_ms within %d..%d; end_ms <= %d", lastStart, end, duration), "actual": p}}
+		}
+		ids[p.ID] = true
+		lastStart = p.StartMS
+		end = max(end, p.EndMS)
+	}
+	if end != duration {
+		return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "章节计划没有联合覆盖到视频结尾。", Meta: map[string]any{"path": "/sections", "expected": duration, "actual": end}}
+	}
+	return nil
 }
 
 func (s *session) loadDraft(ctx context.Context) (int, articleDraft, error) {
@@ -465,7 +517,28 @@ func isCandidateTool(name string) bool {
 	return name == "submit_article" || name == "submit_answer" || name == "submit_article_draft" || name == "begin_article" || name == "save_article_sections" || name == "update_article_limitations"
 }
 func candidateIssue(err error) map[string]any {
-	issue := map[string]any{"code": "json_schema", "detail": err.Error()}
+	issue := map[string]any{"code": "candidate_schema", "detail": err.Error(), "repairable": true}
+	var p *domain.Problem
+	if errors.As(err, &p) {
+		if p.Code == "EVIDENCE_INSUFFICIENT" {
+			issue["code"] = "evidence_missing"
+		}
+		for _, key := range []string{"path", "block_id", "citation_id", "expected", "actual"} {
+			if v, ok := p.Meta[key]; ok {
+				issue[key] = v
+			}
+		}
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		issues := []map[string]any{}
+		for _, child := range joined.Unwrap() {
+			if len(issues) >= 16 {
+				break
+			}
+			issues = append(issues, candidateIssue(child))
+		}
+		issue["issues"] = issues
+	}
 	var syntax *json.SyntaxError
 	if errors.As(err, &syntax) {
 		issue["code"] = "json_syntax"
@@ -495,6 +568,13 @@ func (s *session) resumeDraft(ctx context.Context) error {
 		return err
 	}
 	msgs[2].Content += "\n关注点：" + spec.Purpose
+	if s.cp.HarnessRevision > 0 && spec.DetailPolicy != nil {
+		msgs[0].Content += harnessInstructions + "\n" + spec.DetailPolicy.Instruction
+		if spec.DetailPolicy.ContentPlan {
+			msgs[0].Content += contentPlanInstructions
+		}
+		msgs[2].Content += "\n解读详细程度：" + spec.DetailLevel
+	}
 	if ids := s.unobserved(ctx); len(ids) > 0 {
 		parts, err := s.imageInput(ctx, ids, "resumed-unobserved")
 		if err != nil {

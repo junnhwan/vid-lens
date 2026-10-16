@@ -32,7 +32,7 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 		return v
 	}
 	visitor := do("POST", "/api/v1/session", "{}", "", nil).Cookies()[0]
-	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics", "/api/v1/admin/network-settings"} {
+	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics", "/api/v1/admin/network-settings", "/api/v1/admin/runs/unknown/diagnostics"} {
 		if v := do("GET", path, "", "", visitor); v.StatusCode != 401 {
 			t.Fatalf("visitor accessed %s: %d", path, v.StatusCode)
 		}

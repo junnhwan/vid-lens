@@ -16,23 +16,27 @@ import (
 )
 
 type checkpoint struct {
-	SchemaVersion       int                 `json:"schema_version"`
-	Protocol            string              `json:"protocol"`
-	LayoutVersion       string              `json:"layout_version,omitempty"`
-	Messages            []*schema.Message   `json:"messages"`
-	Calls               int                 `json:"calls"`
-	Inspections         map[string][]string `json:"inspections"`
-	OverviewIDs         []string            `json:"overview_ids"`
-	Repeated            map[string]int      `json:"repeated"`
-	Ready               bool                `json:"ready"`
-	Repairs             int                 `json:"repairs"`
-	DraftRepairVersion  int                 `json:"draft_repair_version,omitempty"`
-	DraftCorrection     bool                `json:"draft_correction,omitempty"`
-	Composing           bool                `json:"composing,omitempty"`
-	CitationFrames      []string            `json:"citation_frames,omitempty"`
-	DraftResume         bool                `json:"draft_resume,omitempty"`
-	FinalizationFailure *domain.Problem     `json:"finalization_failure,omitempty"`
-	FinalizationFailed  bool                `json:"finalization_failed,omitempty"`
+	HarnessRevision      int                 `json:"harness_revision,omitempty"`
+	Progress             progressState       `json:"progress,omitempty"`
+	InspectBatchRejected map[string]bool     `json:"inspect_batch_rejected,omitempty"`
+	LastCandidate        map[string]any      `json:"last_candidate,omitempty"`
+	SchemaVersion        int                 `json:"schema_version"`
+	Protocol             string              `json:"protocol"`
+	LayoutVersion        string              `json:"layout_version,omitempty"`
+	Messages             []*schema.Message   `json:"messages"`
+	Calls                int                 `json:"calls"`
+	Inspections          map[string][]string `json:"inspections"`
+	OverviewIDs          []string            `json:"overview_ids"`
+	Repeated             map[string]int      `json:"repeated"`
+	Ready                bool                `json:"ready"`
+	Repairs              int                 `json:"repairs"`
+	DraftRepairVersion   int                 `json:"draft_repair_version,omitempty"`
+	DraftCorrection      bool                `json:"draft_correction,omitempty"`
+	Composing            bool                `json:"composing,omitempty"`
+	CitationFrames       []string            `json:"citation_frames,omitempty"`
+	DraftResume          bool                `json:"draft_resume,omitempty"`
+	FinalizationFailure  *domain.Problem     `json:"finalization_failure,omitempty"`
+	FinalizationFailed   bool                `json:"finalization_failed,omitempty"`
 }
 type observation struct {
 	InspectionID        string   `json:"inspection_id"`
@@ -103,8 +107,14 @@ func (m *middleware) WrapEnhancedInvokableToolCall(ctx context.Context, next adk
 }
 func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	s := m.s
+	if s.cp.HarnessRevision > 0 && s.cp.Progress.Total >= 4*s.profile.MaxIterations {
+		return ctx, nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "工具调用达到本次任务的累计上限；来源和草稿保留。")
+	}
+	if s.cp.HarnessRevision > 0 && s.spec.DetailPolicy != nil && s.cp.Progress.Stalled >= s.spec.DetailPolicy.NoProgressLimit {
+		return ctx, nil, domain.Err(422, "AGENT_NO_PROGRESS", "连续工具调用未增加可用证据或有效草稿；来源和已保存章节保留，可以重新尝试。")
+	}
 	if s.cp.Calls >= s.profile.MaxIterations {
-		return ctx, nil, domain.Err(422, "EVIDENCE_INSUFFICIENT", "取证达到运行上限，尚不能发布。")
+		return ctx, nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "模型调用达到运行上限，尚不能发布；来源和草稿保留。")
 	}
 	observations, e := s.observations(ctx)
 	if e != nil {
@@ -168,7 +178,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	var draftContext *schema.Message
 	freshMessages := []*schema.Message{}
 	for _, x := range state.Messages {
-		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" {
+		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" {
 			freshMessages = append(freshMessages, x)
 		}
 	}
@@ -188,7 +198,11 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			return ctx, nil, err
 		}
 		state.Messages = projectDraftHistory(state.Messages)
-		draftContext = &schema.Message{Role: schema.User, Name: "vidlens_draft_state", Content: string(domain.JSON(map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}))}
+		data := map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}
+		if s.cp.HarnessRevision > 0 {
+			data["saved_section_previews"] = draftPreviews(draft)
+		}
+		draftContext = &schema.Message{Role: schema.User, Name: "vidlens_draft_state", Content: string(domain.JSON(data))}
 	}
 	capsule := "持久观察记录（不是重新看图）：" + string(domain.JSON(observations)) + "\n当前取证问题：" + string(domain.JSON(questions))
 	const capsuleName = "vidlens_evidence_capsule"
@@ -202,11 +216,21 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		filtered = projectToolHistory(filtered, s.cp.LayoutVersion == draftLayout)
 		filtered = s.projectSourceReads(filtered)
 	}
+	if s.cp.HarnessRevision > 0 {
+		filtered = projectRejectedCandidates(filtered)
+	}
 	if draftContext != nil {
 		filtered = append(filtered, draftContext)
 	}
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})
+	}
+	if s.cp.HarnessRevision > 0 {
+		ready, err := s.readiness(ctx)
+		if err != nil {
+			return ctx, nil, err
+		}
+		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_readiness", Content: string(domain.JSON(ready))})
 	}
 	filtered, e = s.projectReferences(ctx, filtered)
 	if e != nil {
@@ -227,7 +251,29 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	return ctx, state, nil
 }
 func (m *middleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+	if m.s.modelMessages != nil && len(state.Messages) > 0 {
+		last := state.Messages[len(state.Messages)-1]
+		if last.Role == schema.Assistant {
+			state.Messages = append(m.s.modelMessages, last)
+		}
+		m.s.modelMessages = nil
+	}
 	m.s.cp.Calls++
+	if m.s.cp.HarnessRevision > 0 {
+		m.s.cp.InspectBatchRejected = map[string]bool{}
+		// Reject a multi-inspection response as a whole before any frame/question
+		// side effect. Eino still emits a paired result for every original call.
+		if len(state.Messages) > 0 {
+			last := state.Messages[len(state.Messages)-1]
+			if last.Role == schema.Assistant && rejectInspectionBatch(last.ToolCalls) {
+				for _, c := range last.ToolCalls {
+					if c.Function.Name == "inspect_video_window" {
+						m.s.cp.InspectBatchRejected[c.ID] = true
+					}
+				}
+			}
+		}
+	}
 	for _, x := range state.Messages {
 		x.ReasoningContent = ""
 		x.Extra = cleanExtra(x.Extra)

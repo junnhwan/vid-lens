@@ -50,10 +50,11 @@ type WorkError struct {
 func (e *WorkError) Error() string { return e.Code + ": " + e.Message }
 
 type Failure struct {
-	Code     string     `json:"code"`
-	Message  string     `json:"message"`
-	CanRetry bool       `json:"can_retry"`
-	RetryAt  *time.Time `json:"retry_at"`
+	DiagnosticID string     `json:"diagnostic_id,omitempty"`
+	Code         string     `json:"code"`
+	Message      string     `json:"message"`
+	CanRetry     bool       `json:"can_retry"`
+	RetryAt      *time.Time `json:"retry_at"`
 }
 type Range struct {
 	StartMS int64 `json:"start_ms"`
@@ -296,17 +297,19 @@ type MindMap struct {
 	Nodes  []MapNode `json:"nodes"`
 }
 type Article struct {
-	SchemaVersion int                 `json:"schema_version"`
-	ID            string              `json:"id"`
-	SnapshotID    string              `json:"snapshot_id"`
-	Source        Source              `json:"source"`
-	Title         string              `json:"title"`
-	PublishedAt   time.Time           `json:"published_at"`
-	Sections      []Section           `json:"sections"`
-	MindMap       *MindMap            `json:"mind_map"`
-	Citations     map[string]Citation `json:"citations"`
-	Limitations   []Limitation        `json:"limitations"`
-	Quality       string              `json:"quality"`
+	DetailLevel          string              `json:"detail_level,omitempty"`
+	DetailPolicyRevision string              `json:"detail_policy_revision,omitempty"`
+	SchemaVersion        int                 `json:"schema_version"`
+	ID                   string              `json:"id"`
+	SnapshotID           string              `json:"snapshot_id"`
+	Source               Source              `json:"source"`
+	Title                string              `json:"title"`
+	PublishedAt          time.Time           `json:"published_at"`
+	Sections             []Section           `json:"sections"`
+	MindMap              *MindMap            `json:"mind_map"`
+	Citations            map[string]Citation `json:"citations"`
+	Limitations          []Limitation        `json:"limitations"`
+	Quality              string              `json:"quality"`
 }
 type Passage struct {
 	SectionID string `json:"section_id"`

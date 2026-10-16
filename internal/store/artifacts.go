@@ -174,6 +174,9 @@ func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) erro
 		work := snapshot + ":" + r.ConfigID
 		if r.GenerationSpec != nil {
 			work = "article-v2:" + snapshot + ":" + Hash(r.GenerationSpec)
+			if r.GenerationSpec.Version >= 2 {
+				work = "article-v3:" + snapshot + ":" + Hash(r.GenerationSpec)
+			}
 		}
 		var aid string
 		e = tx.QueryRow(ctx, "SELECT id FROM articles a WHERE reuse_key=$1 AND NOT EXISTS(SELECT 1 FROM asset_refs ar JOIN media_assets m ON m.id=ar.asset_id WHERE ar.owner_type='article' AND ar.owner_id=a.id AND m.state<>'ready') ORDER BY published_at DESC LIMIT 1", work).Scan(&aid)
@@ -283,6 +286,12 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		model, e := modelIdentity(ctx, tx, c.Run.ConfigID)
 		if e != nil {
 			return e
+		}
+		frozen, err := one[domain.GenerationSpec](ctx, tx, `SELECT generation_spec FROM generation_requests WHERE active_run_id=$1 AND generation_spec IS NOT NULL ORDER BY created_at LIMIT 1`, c.Run.ID)
+		if err == nil && frozen.ConfigID == c.Run.ConfigID && frozen.Model.ID != "" {
+			model = frozen.Model
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
 		}
 		if _, e := tx.Exec(ctx, "INSERT INTO articles(id,generation_run_id,snapshot_id,config_id,reuse_key,content,generation_model) VALUES($1,$2,$3,$4,$5,$6,$7)", a.ID, c.Run.ID, a.SnapshotID, c.Run.ConfigID, c.Run.WorkKey, domain.JSON(a), domain.JSON(model)); e != nil {
 			return e
@@ -492,7 +501,7 @@ func (s *Store) FinishOperation(ctx context.Context, c domain.Claim, key string,
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
-		changed, e := tx.Exec(ctx, "UPDATE run_operations SET status='completed',result=$3,provider_request_id=NULLIF($4,''),usage=$5,updated_at=now() WHERE run_id=$1 AND operation_key=$2 AND status<>'completed'", c.Run.ID, key, domain.JSON(result), provider, nullableJSON(usage))
+		changed, e := tx.Exec(ctx, "UPDATE run_operations SET status='completed',result=$3,provider_request_id=NULLIF($4,''),usage=$5,updated_at=now(),completed_at=now() WHERE run_id=$1 AND operation_key=$2 AND status<>'completed'", c.Run.ID, key, domain.JSON(result), provider, nullableJSON(usage))
 		if e != nil || changed.RowsAffected() == 0 {
 			return e
 		}

@@ -23,7 +23,7 @@ import (
 // Real PG/Redis, FFmpeg and Eino. The provider emits the incident's exact
 // structural defect in a bounded chapter; previously saved chapters survive.
 func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
-	for _, fault := range []string{"malformed_batch", "worker_recovery", "final_validation"} {
+	for _, fault := range []string{"malformed_batch", "worker_recovery", "final_validation", "long_detailed", "provider_reused_call_id", "duplicate_candidate", "multi_inspect_batch"} {
 		t.Run(fault, func(t *testing.T) {
 			db, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
@@ -31,9 +31,17 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			var failed atomic.Int32
 			var firstWrites atomic.Int32
 			var frames []string
+			duration := int64(2000)
+			if fault == "long_detailed" {
+				duration = 2100000
+			}
 			re := regexp.MustCompile(`frame_id=([a-f0-9]+)`)
 			prose := func(id, text string) domain.Section {
-				return domain.Section{ID: id, Blocks: []domain.Block{{Type: "paragraph", Origin: "video", Content: []domain.Inline{{Type: "text", Text: text}, {Type: "citation", CitationID: "t1"}}}}}
+				citation := "t1"
+				if fault == "long_detailed" && id == "two" {
+					citation = "t2"
+				}
+				return domain.Section{ID: id, Blocks: []domain.Block{{Type: "paragraph", Origin: "video", Content: []domain.Inline{{Type: "text", Text: text}, {Type: "citation", CitationID: citation}}}}}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input struct {
@@ -51,6 +59,24 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					return
 				}
 				n := phase.Add(1) - 1
+				if fault == "multi_inspect_batch" {
+					if n == 1 {
+						calls := []any{}
+						for i := 0; i < 2; i++ {
+							calls = append(calls, map[string]any{"index": i, "id": fmt.Sprint("batch-", i), "type": "function", "function": map[string]any{"name": "inspect_video_window", "arguments": string(domain.JSON(map[string]any{"question_id": fmt.Sprint("batch-", i), "question": "多看一帧", "window": map[string]any{"start_ms": 0, "end_ms": 1000, "count": 1}}))}})
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprintf(w, "data: %s\n\n", domain.JSON(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "tool_calls": calls}}}}))
+						fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+						return
+					}
+					if n > 1 {
+						n--
+					}
+				}
+				if fault == "duplicate_candidate" && n >= 2 {
+					n = 1
+				}
 				complete := n == 4 && fault != "malformed_batch" || n == 5 && fault == "malformed_batch" || n == 6
 				if complete && (!strings.Contains(string(input.Tools), "submit_article_draft") || strings.Contains(string(input.Tools), "update_article_limitations") || len(input.Choice) == 0) {
 					t.Errorf("complete draft did not restrict tools and force final submission at phase %d", n)
@@ -60,6 +86,9 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				var args any
 				switch n {
 				case 0:
+					if fault == "long_detailed" && (!strings.Contains(string(input.Messages), "这是视频结尾的真实字幕") || !strings.Contains(string(input.Messages), "detailed")) {
+						t.Error("long run truncated final transcript or lost detail policy")
+					}
 					seen := map[string]bool{}
 					for _, m := range re.FindAllStringSubmatch(string(input.Messages), -1) {
 						if !seen[m[1]] {
@@ -74,7 +103,11 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					}
 				case 1:
 					name = "begin_article"
-					args = beginArticleInput{Title: "蓝色视频说明", Sections: []sectionPlan{{ID: "one", Title: "前半段", StartMS: 0, EndMS: 1000}, {ID: "two", Title: "后半段", StartMS: 1000, EndMS: 2000}}}
+					lastEvidence := "t1"
+					if fault == "long_detailed" {
+						lastEvidence = "t2"
+					}
+					args = beginArticleInput{Title: "蓝色视频说明", Sections: []sectionPlan{{ID: "one", Title: "前半段", StartMS: 0, EndMS: duration / 2, KeyPoints: []string{"前半段呈现蓝色"}, EvidenceIDs: []string{"t1"}}, {ID: "two", Title: "后半段", StartMS: duration / 2, EndMS: duration, KeyPoints: []string{"后半段继续为蓝色，不能推断画外物体"}, EvidenceIDs: []string{lastEvidence}}}}
 				case 2:
 					firstWrites.Add(1)
 					name = "save_article_sections"
@@ -118,11 +151,15 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				// Stream tool arguments in multiple deltas, preserving Unicode and call identity.
 				runes := []rune(raw)
+				providerCallID := fmt.Sprint("draft-", n)
+				if fault == "provider_reused_call_id" {
+					providerCallID = "call_0_same_provider_id"
+				}
 				for i := 0; i < len(runes); i += 31 {
 					delta := map[string]any{"tool_calls": []any{map[string]any{"index": 0, "function": map[string]any{"arguments": string(runes[i:min(i+31, len(runes))])}}}}
 					if i == 0 {
 						delta["role"] = "assistant"
-						delta["tool_calls"] = []any{map[string]any{"index": 0, "id": fmt.Sprint("draft-", n), "type": "function", "function": map[string]any{"name": name, "arguments": string(runes[i:min(i+31, len(runes))])}}}
+						delta["tool_calls"] = []any{map[string]any{"index": 0, "id": providerCallID, "type": "function", "function": map[string]any{"name": name, "arguments": string(runes[i:min(i+31, len(runes))])}}}
 					}
 					fmt.Fprintf(w, "data: %s\n\n", domain.JSON(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": delta}}}))
 				}
@@ -135,18 +172,30 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			}
 			_, cfg.Profile, _ = db.CurrentConfig(ctx)
 			file := filepath.Join(cfg.DevMediaDir, "draft.mp4")
-			command := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=160x90:rate=25", "-t", "2", "-filter_threads", "1", "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p", file)
+			rate := "25"
+			if fault == "long_detailed" {
+				rate = "2"
+			}
+			command := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=160x90:rate="+rate, "-t", fmt.Sprint(duration/1000), "-filter_threads", "1", "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p", file)
 			if b, err := command.CombinedOutput(); err != nil {
 				t.Fatalf("%v %s", err, b)
 			}
-			if err := os.WriteFile(filepath.Join(cfg.DevMediaDir, "draft.vtt"), []byte("WEBVTT\n\n00:00.000 --> 00:02.000\n画面持续为蓝色。\n"), 0600); err != nil {
+			vtt := "WEBVTT\n\n00:00.000 --> 00:02.000\n画面持续为蓝色。\n"
+			if fault == "long_detailed" {
+				vtt = "WEBVTT\n\n00:00.000 --> 17:30.000\n画面持续为蓝色。\n\n17:30.000 --> 35:00.000\n这是视频结尾的真实字幕，后半段继续为蓝色。\n"
+			}
+			if err := os.WriteFile(filepath.Join(cfg.DevMediaDir, "draft.vtt"), []byte(vtt), 0600); err != nil {
 				t.Fatal(err)
 			}
 			owner, err := db.NewSession(ctx, domain.ID(), time.Hour)
 			if err != nil {
 				t.Fatal(err)
 			}
-			accepted, err := db.CreateRequest(ctx, owner.ID, domain.ID(), "local://draft.mp4", "", true)
+			level := "standard"
+			if fault == "long_detailed" {
+				level = "detailed"
+			}
+			accepted, err := db.CreateRequestWithInput(ctx, owner.ID, domain.ID(), domain.RequestInput{VideoURL: "local://draft.mp4", DetailLevel: &level}, "", true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,6 +218,16 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			}
 			engine := &Engine{Store: db, Media: ms, Resources: resources, Config: cfg}
 			err = engine.Run(ctx, *claim, cfg.Profile)
+			if fault == "duplicate_candidate" {
+				if err == nil || !strings.Contains(err.Error(), "MODEL_RESULT_INVALID") || phase.Load() != 5 {
+					t.Fatalf("duplicate candidate bypassed stall guard: calls=%d err=%v", phase.Load(), err)
+				}
+				draft, e := db.ArticleDraft(ctx, claim.Run.ID)
+				if e != nil || draft.Version != 1 {
+					t.Fatal("duplicate candidate changed saved draft", e)
+				}
+				return
+			}
 			if fault == "worker_recovery" {
 				if err == nil {
 					t.Fatal("provider outage did not interrupt writer")
@@ -192,6 +251,12 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if fault == "multi_inspect_batch" {
+				var executed int
+				if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='inspect' AND operation_key NOT LIKE 'overview:%'`, claim.Run.ID).Scan(&executed); e != nil || executed != 0 {
+					t.Fatalf("multiple inspect response partially executed: %d %v", executed, e)
+				}
 			}
 			req, err = db.Request(ctx, owner.ID, accepted.ID)
 			if err != nil || req.ArticleID == nil || req.Status != "completed" {
