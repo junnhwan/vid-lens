@@ -16,17 +16,21 @@ import (
 )
 
 type checkpoint struct {
-	SchemaVersion      int                 `json:"schema_version"`
-	Protocol           string              `json:"protocol"`
-	LayoutVersion      string              `json:"layout_version,omitempty"`
-	Messages           []*schema.Message   `json:"messages"`
-	Calls              int                 `json:"calls"`
-	Inspections        map[string][]string `json:"inspections"`
-	OverviewIDs        []string            `json:"overview_ids"`
-	Repeated           map[string]int      `json:"repeated"`
-	Ready              bool                `json:"ready"`
-	Repairs            int                 `json:"repairs"`
-	FinalizationFailed bool                `json:"finalization_failed,omitempty"`
+	SchemaVersion       int                 `json:"schema_version"`
+	Protocol            string              `json:"protocol"`
+	LayoutVersion       string              `json:"layout_version,omitempty"`
+	Messages            []*schema.Message   `json:"messages"`
+	Calls               int                 `json:"calls"`
+	Inspections         map[string][]string `json:"inspections"`
+	OverviewIDs         []string            `json:"overview_ids"`
+	Repeated            map[string]int      `json:"repeated"`
+	Ready               bool                `json:"ready"`
+	Repairs             int                 `json:"repairs"`
+	Composing           bool                `json:"composing,omitempty"`
+	CitationFrames      []string            `json:"citation_frames,omitempty"`
+	DraftResume         bool                `json:"draft_resume,omitempty"`
+	FinalizationFailure *domain.Problem     `json:"finalization_failure,omitempty"`
+	FinalizationFailed  bool                `json:"finalization_failed,omitempty"`
 }
 type observation struct {
 	InspectionID        string   `json:"inspection_id"`
@@ -159,6 +163,27 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			s.compositionReady = false
 		}
 	}
+	var draftContext *schema.Message
+	freshMessages := []*schema.Message{}
+	for _, x := range state.Messages {
+		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" {
+			freshMessages = append(freshMessages, x)
+		}
+	}
+	state.Messages = freshMessages
+	if s.cp.LayoutVersion == draftLayout {
+		saved, draft, err := s.loadDraft(ctx)
+		if err != nil {
+			return ctx, nil, err
+		}
+		s.cp.Composing = saved > 0
+		catalog, err := s.citationCatalog(ctx)
+		if err != nil {
+			return ctx, nil, err
+		}
+		state.Messages = projectDraftHistory(state.Messages)
+		draftContext = &schema.Message{Role: schema.User, Name: "vidlens_draft_state", Content: string(domain.JSON(map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}))}
+	}
 	capsule := "持久观察记录（不是重新看图）：" + string(domain.JSON(observations)) + "\n当前取证问题：" + string(domain.JSON(questions))
 	const capsuleName = "vidlens_evidence_capsule"
 	filtered := []*schema.Message{}
@@ -167,9 +192,12 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			filtered = append(filtered, x)
 		}
 	}
-	if s.cp.LayoutVersion == "source-context-v2" {
-		filtered = projectToolHistory(filtered)
+	if s.cp.LayoutVersion == "source-context-v2" || s.cp.LayoutVersion == draftLayout {
+		filtered = projectToolHistory(filtered, s.cp.LayoutVersion == draftLayout)
 		filtered = s.projectSourceReads(filtered)
+	}
+	if draftContext != nil {
+		filtered = append(filtered, draftContext)
 	}
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})
@@ -353,7 +381,7 @@ func cleanExtra(in map[string]any) map[string]any {
 
 // A completed observation exchange is represented once by the canonical
 // evidence capsule. Mixed, pending and failed groups retain the full protocol.
-func projectToolHistory(messages []*schema.Message) []*schema.Message {
+func projectToolHistory(messages []*schema.Message, dropLast ...bool) []*schema.Message {
 	out := make([]*schema.Message, 0, len(messages))
 	for i := 0; i < len(messages); i++ {
 		m := messages[i]
@@ -386,7 +414,7 @@ func projectToolHistory(messages []*schema.Message) []*schema.Message {
 			delete(ids, messages[j].ToolCallID)
 			j++
 		}
-		if drop && len(ids) == 0 && j < len(messages) {
+		if drop && len(ids) == 0 && (j < len(messages) || len(dropLast) > 0 && dropLast[0]) {
 			i = j - 1
 			continue
 		}

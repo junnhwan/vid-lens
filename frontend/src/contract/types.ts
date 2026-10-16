@@ -205,6 +205,7 @@ export interface GenerationInput {
 }
 
 export interface RequestView {
+  server_now?: string
   schema_version: number
   request: RequestBody
   source: SourceSummary | null
@@ -352,6 +353,7 @@ export interface TurnBody {
 }
 
 export interface TurnView {
+  server_now?: string
   schema_version: number
   turn: TurnBody
   execution: ExecutionView | null

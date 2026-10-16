@@ -88,3 +88,18 @@ func TestTransportObservesUsageOnlyWithoutChangingAdapter(t *testing.T) {
 		t.Fatal("telemetry contains private text")
 	}
 }
+
+func TestFirstContentIgnoresRoleHeartbeatAndPrivateThinking(t *testing.T) {
+	var got usageReport
+	o := newUsageObserver(draftLayout, "provider_default", func(r usageReport) { got = r })
+	o.consume([]byte("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"))
+	o.consume([]byte("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"private\"}}]}\n\n"))
+	if o.report.FirstMeaningfulMS != nil {
+		t.Fatal("role/private thinking counted as first content")
+	}
+	o.consume([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"begin_article\"}}]}}]}\n\ndata: [DONE]\n\n"))
+	o.finish(true)
+	if got.FirstByteMS == nil || got.FirstMeaningfulMS == nil || *got.FirstMeaningfulMS < *got.FirstByteMS {
+		t.Fatalf("timing missing or inverted: %+v", got)
+	}
+}

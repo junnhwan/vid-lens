@@ -366,3 +366,11 @@ type Turn struct {
 }
 
 func Ptr[T any](v T) *T { return &v }
+
+// Old runs keep their original failure evidence. This one legacy catch-all
+// can be explicitly retried under the corrected submission protocol.
+func RetryableFailure(f *Failure) bool {
+	return f != nil && (f.CanRetry || f.Code == "EVIDENCE_INSUFFICIENT" && f.Message == "纠正一次后仍没有合格的正式提交。")
+}
+
+const ArticleDraftProtocol = "vidlens-article-draft-v1"

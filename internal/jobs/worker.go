@@ -324,14 +324,14 @@ func classify(e error) (domain.Failure, bool, time.Duration) {
 	if errors.As(e, &work) {
 		f.Code = work.Code
 		f.Message = work.Message
-		f.CanRetry = work.Transient
+		f.CanRetry = work.Transient || work.Code == "MODEL_OUTPUT_TRUNCATED" || work.Code == "MODEL_RESULT_INVALID"
 		return f, work.Transient, work.RetryAfter
 	}
 	var p *domain.Problem
 	if errors.As(e, &p) {
 		f.Code = p.Code
 		f.Message = p.Detail
-		f.CanRetry = p.Status == 503
+		f.CanRetry = p.Status == 503 || p.Code == "MODEL_RESULT_INVALID" || p.Code == "MODEL_RESULT_NOT_SUBMITTED" || p.Code == "MODEL_OUTPUT_TRUNCATED"
 		return f, p.Status == 503, 0
 	}
 	if errors.Is(e, context.DeadlineExceeded) {

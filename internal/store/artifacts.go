@@ -202,6 +202,18 @@ func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) erro
 			} else {
 				reuse = "active_work"
 			}
+			if reuse == "none" && r.RetryOfID != nil {
+				old, err := loadRequest(ctx, tx, *r.RetryOfID)
+				if err != nil {
+					return err
+				}
+				if old.SessionID != r.SessionID {
+					return domain.ErrFenced
+				}
+				if err = reuseArticleDraft(ctx, tx, old, rid, snapshot); err != nil {
+					return err
+				}
+			}
 			active = &rid
 			var seq int64
 			if e = tx.QueryRow(ctx, "SELECT last_event_seq FROM job_runs WHERE id=$1", prepare).Scan(&seq); e != nil {

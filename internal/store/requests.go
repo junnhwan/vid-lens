@@ -76,7 +76,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			if old.Status != "failed" && old.Status != "canceled" {
 				return domain.Err(409, "RETRY_NOT_ALLOWED", "当前请求不能重新发起。")
 			}
-			if old.Failure != nil && !old.Failure.CanRetry {
+			if old.Failure != nil && !domain.RetryableFailure(old.Failure) {
 				return domain.Err(409, "RETRY_NOT_ALLOWED", "请先修正来源或配置。")
 			}
 			input = old.InputURL
@@ -289,7 +289,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 			if c.LastTurnID == nil || *c.LastTurnID != retry {
 				return domain.Err(409, "TURN_HISTORY_CHANGED", "只能重新回答最后一轮。")
 			}
-			if old.Status != "failed" && old.Status != "canceled" || old.Failure != nil && !old.Failure.CanRetry {
+			if old.Status != "failed" && old.Status != "canceled" || old.Failure != nil && !domain.RetryableFailure(old.Failure) {
 				return domain.Err(409, "RETRY_NOT_ALLOWED", "当前回答不能重试。")
 			}
 			in.Question = old.Question

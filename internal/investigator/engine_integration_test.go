@@ -208,6 +208,11 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			if err != nil || claim == nil {
 				t.Fatal(err)
 			}
+			// Preserve coverage of checkpoints created before the bounded draft protocol.
+			claim.Run.Checkpoint = domain.JSON(checkpoint{SchemaVersion: 1, LayoutVersion: "source-context-v2"})
+			if err = s.Checkpoint(ctx, *claim, json.RawMessage(claim.Run.Checkpoint)); err != nil {
+				t.Fatal(err)
+			}
 			engine := &Engine{Store: s, Media: ms, Resources: resources, Config: cfg}
 			err = engine.Run(runCtx, *claim, cfg.Profile)
 			if fault == "repeated_stop" {

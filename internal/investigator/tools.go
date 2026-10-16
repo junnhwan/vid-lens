@@ -55,12 +55,24 @@ type answerInput struct {
 
 type argumentCheckedTool struct {
 	tool.EnhancedInvokableTool
-	name string
+	name    string
+	session *session
 }
 
 func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
 	var target any
 	switch t.name {
+	case "begin_article":
+		target = &beginArticleInput{}
+	case "save_article_sections":
+		target = &saveSectionsInput{}
+	case "update_article_limitations":
+		target = &struct {
+			Version     int                 `json:"version"`
+			Limitations []domain.Limitation `json:"limitations"`
+		}{}
+	case "submit_article_draft":
+		target = &submitDraftInput{}
 	case "submit_article":
 		target = &articleInput{}
 	case "submit_answer":
@@ -75,17 +87,32 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &readInput{}
 	}
 	var err error
+	if args != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
+		if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "received", nil); e != nil {
+			return nil, e
+		}
+	}
 	if args == nil {
 		err = errors.New("工具参数为空")
 	} else if target != nil {
 		err = json.Unmarshal([]byte(args.Text), target)
 	}
 	if err != nil {
-		if t.name == "submit_article" || t.name == "submit_answer" {
-			return nil, &candidateError{err: invalid("候选必须是符合工具结构的完整 JSON：" + err.Error() + "。limitations 与 citations 同级；每个视频引用都要复制 snapshot_id，并填写该类型的全部来源字段。")}
+		if isCandidateTool(t.name) {
+			issue := candidateIssue(err)
+			if t.session != nil && t.session.engine != nil {
+				if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", issue); e != nil {
+					return nil, e
+				}
+				if t.name == "begin_article" || t.name == "save_article_sections" {
+					return t.session.draftFeedback(ctx, string(domain.JSON(issue)))
+				}
+			}
+			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "文章/回答提交的JSON结构无效："+string(domain.JSON(issue)))}
 		}
 		return toolError("工具参数不符合字段类型，请按 schema 修正：" + err.Error() + "。观察的 conflicts、unresolved、inferences 等字段必须是字符串数组，status 只能是 supported 或 unresolved。")
 	}
+
 	if in, ok := target.(*inspectInput); ok {
 		if in.Window == nil && len(in.FrameIDs) == 0 {
 			return toolError(`缺少取帧选择：新画面必须提供 window 对象，start_ms、end_ms、count、mode、crop 放在 window 内，不能放在顶层。例如 "window":{"start_ms":0,"end_ms":1000,"count":1,"mode":"detail"}；请改用所需的实际视频时间。重新加载已交付图片时只提供 frame_ids。`)
@@ -94,7 +121,16 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return toolError("window 与 frame_ids 只能选择一种：新画面使用 window 对象，重新加载已有图片使用 frame_ids。")
 		}
 	}
-	return t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
+	result, err := t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
+	if err != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
+		var candidate *candidateError
+		if errors.As(err, &candidate) {
+			if saveErr := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", map[string]any{"code": "validation", "detail": candidate.err.Error()}); saveErr != nil {
+				return nil, saveErr
+			}
+		}
+	}
+	return result, err
 }
 
 func textResult(v any) *schema.ToolResult {
@@ -141,6 +177,9 @@ func (s *session) step(ctx context.Context, title, phase string, r *domain.Range
 	}
 	st.FinishedAt = domain.Ptr(time.Now().UTC())
 	st.Outcome = &domain.Outcome{Message: "已取得所需来源，等待内容判断。", EvidenceStatus: "not_assessed"}
+	if phase == "compose" {
+		st.Outcome = &domain.Outcome{Message: "草稿已保存，全部章节核对通过后才会发布。", EvidenceStatus: "not_applicable"}
+	}
 	if _, e = s.engine.Store.Step(ctx, s.claim, st); e != nil {
 		return nil, e
 	}
@@ -148,6 +187,9 @@ func (s *session) step(ctx context.Context, title, phase string, r *domain.Range
 }
 func (s *session) makeTools() ([]tool.BaseTool, error) {
 	s.tools = map[string]tool.EnhancedInvokableTool{}
+	if s.cp.Repeated == nil {
+		s.cp.Repeated = map[string]int{}
+	}
 	out := []tool.BaseTool{}
 	add := func(t tool.EnhancedInvokableTool, e error) error {
 		if e != nil {
@@ -157,7 +199,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		if e != nil {
 			return e
 		}
-		t = &argumentCheckedTool{EnhancedInvokableTool: t, name: info.Name}
+		t = &argumentCheckedTool{EnhancedInvokableTool: t, name: info.Name, session: s}
 		s.tools[info.Name] = t
 		out = append(out, t)
 		return nil
@@ -293,6 +335,11 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return st, nil
 		}
 		s.cp.Inspections[key] = result.FrameIDs
+		for _, id := range result.FrameIDs {
+			if !slices.Contains(s.cp.CitationFrames, id) {
+				s.cp.CitationFrames = append(s.cp.CitationFrames, id)
+			}
+		}
 		parts, e := s.imageInput(ctx, result.FrameIDs, key)
 		if e != nil {
 			return nil, e
@@ -353,7 +400,11 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 	})); e != nil {
 		return nil, e
 	}
-	if s.turn == nil {
+	if s.turn == nil && s.cp.LayoutVersion == draftLayout {
+		if e := s.draftTools(add); e != nil {
+			return nil, e
+		}
+	} else if s.turn == nil {
 		if e := add(utils.InferEnhancedTool("submit_article", "Submit a complete illustrated article candidate. The server validates references and images before immutable publication.", func(ctx context.Context, in articleInput) (*schema.ToolResult, error) {
 			a := domain.Article{SchemaVersion: 1, SnapshotID: s.snapshot.ID, Source: s.snapshot.Source, Title: in.Title, Sections: in.Sections, MindMap: in.MindMap, Citations: in.Citations, Limitations: in.Limitations, Quality: "standard"}
 			if a.Limitations == nil {

@@ -16,7 +16,7 @@ func (s *Store) ModelReporting(ctx context.Context, limit, offset int) (map[stri
 	if e != nil {
 		return nil, e
 	}
-	recent, e := many[map[string]any](ctx, s.Pool, `SELECT jsonb_build_object('submission',o.submission,'created_at',o.created_at,'model_revision_id',m.id,'display_name',COALESCE(m.display_name,c.profile->>'model_name'),'provider_id',p.id,'provider_name',pr.name,'reporting',o.reporting) FROM model_submissions o JOIN job_runs r ON r.id=o.run_id JOIN runtime_config_revisions c ON c.id=COALESCE(o.reporting->>'route_config_id',r.config_id) LEFT JOIN model_revisions m ON m.config_id=c.id LEFT JOIN catalog_models cm ON cm.id=m.model_id LEFT JOIN model_providers p ON p.id=cm.provider_id LEFT JOIN provider_revisions pr ON pr.id=m.provider_revision_id ORDER BY o.created_at DESC, o.run_id, o.operation_key, o.submission DESC LIMIT $1 OFFSET $2`, limit, offset)
+	recent, e := many[map[string]any](ctx, s.Pool, `SELECT jsonb_build_object('run_id',o.run_id,'operation_key',o.operation_key,'attempt_id',o.attempt_id,'submission',o.submission,'created_at',o.created_at,'model_revision_id',m.id,'display_name',COALESCE(m.display_name,c.profile->>'model_name'),'provider_id',p.id,'provider_name',pr.name,'reporting',o.reporting) FROM model_submissions o JOIN job_runs r ON r.id=o.run_id JOIN runtime_config_revisions c ON c.id=COALESCE(o.reporting->>'route_config_id',r.config_id) LEFT JOIN model_revisions m ON m.config_id=c.id LEFT JOIN catalog_models cm ON cm.id=m.model_id LEFT JOIN model_providers p ON p.id=cm.provider_id LEFT JOIN provider_revisions pr ON pr.id=m.provider_revision_id ORDER BY o.created_at DESC, o.run_id, o.operation_key, o.submission DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if e != nil {
 		return nil, e
 	}

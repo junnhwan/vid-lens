@@ -474,8 +474,18 @@ func (s *session) repair(ctx context.Context, cause error) error {
 	if s.cp.Calls >= s.profile.MaxIterations || !s.claim.Run.DeadlineAt.After(time.Now()) {
 		return domain.Err(422, "EVIDENCE_INSUFFICIENT", "剩余预算不足以纠正并正式提交结果。")
 	}
+	var problem *domain.Problem
+	if errors.As(cause, &problem) {
+		s.cp.FinalizationFailure = problem
+	} else {
+		s.cp.FinalizationFailure = &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "候选内容未通过校验。"}
+	}
 	if s.cp.Repairs >= 1 {
-		return domain.Err(422, "EVIDENCE_INSUFFICIENT", "纠正一次后仍没有合格的正式提交。")
+		s.cp.FinalizationFailed = true
+		if err := s.persist(ctx, s.cp.Messages); err != nil {
+			return err
+		}
+		return s.finalizationError()
 	}
 	s.cp.Repairs++
 	last := -1
@@ -501,6 +511,6 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		}
 		s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolName: call.Function.Name, ToolCallID: call.ID, Content: fmt.Sprintf("候选校验失败，允许修复一次：%v。修正字段/引用后重新提交。", cause)})
 	}
-	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次唯一一次纠正：%v。必须调用正式提交工具，不得用自由文本收尾；原证据、调用数与时限继续适用。", cause)))
+	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次收尾纠正：%v。必须调用正式提交工具，不得用自由文本收尾。分批草稿已保存的章节保持，使用当前version仅修正相关章节后再提交；原证据、调用数与时限继续适用。", cause)))
 	return s.persist(ctx, s.cp.Messages)
 }

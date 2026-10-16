@@ -82,13 +82,8 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		// Preserve the small existing retry for a single transiently failing route.
 		routes = append(routes, routes[0])
 	}
-	phase := "investigate"
-	if s.turn != nil {
-		phase = "answer"
-	} else if s.compositionReady {
-		phase = "compose"
-	}
-	step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", Title: "正在等待模型处理", Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+	title, phase := s.modelActivity()
+	step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", Title: "正在等待模型可用名额", Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
 	step, err = s.engine.Store.Step(ctx, s.claim, step)
 	if err != nil {
 		return nil, err
@@ -141,6 +136,11 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if err != nil {
 			return nil, err
 		}
+		step.Title = title
+		if _, err = s.engine.Store.Step(ctx, s.claim, step); err != nil {
+			release()
+			return nil, err
+		}
 		limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
 		if s.compositionReady {
 			limits.Total = 300 * time.Second
@@ -158,6 +158,17 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
 			reserved, err := s.engine.Store.BeginModelSubmission(actx, s.claim, key, args, route.ConfigID)
 			submission, submitErr = reserved.Submissions, err
+			return err
+		})
+		reportedActivity := ""
+		sub = context.WithValue(sub, modelActivityKey{}, func(name string) error {
+			title := streamActivity(name)
+			if title == "" || reportedActivity == title {
+				return nil
+			}
+			reportedActivity = title
+			step.Title = title
+			_, err := s.engine.Store.Step(ctx, s.claim, step)
 			return err
 		})
 		options := append(cacheOptions(p), opts...)
@@ -201,10 +212,12 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		step.Status = "completed"
 		step.FinishedAt = domain.Ptr(time.Now().UTC())
-		step.Outcome = &domain.Outcome{Message: "已收到完整模型响应，继续核对或正式提交。", EvidenceStatus: "not_assessed"}
+		step.Title, title = responseActivity(result)
+		step.Outcome = &domain.Outcome{Message: title, EvidenceStatus: "not_assessed"}
 		if _, err = s.engine.Store.Step(ctx, s.claim, step); err != nil {
 			return nil, err
 		}
+		slog.Info("model response completed", "run_id", s.claim.Run.ID, "attempt_id", s.claim.AttemptID, "operation_key", key, "submission", submission, "tool_calls", len(result.ToolCalls))
 		return result, nil
 	}
 	return nil, last

@@ -1348,8 +1348,7 @@ function duration(ms: number | null | undefined) {
 function stamp(iso: string) {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  return date.toLocaleString("sv-SE", { timeZone: "Asia/Shanghai", hour12: false })
 }
 function pageWindow(current: number, total: number) {
   const wanted = [1, total, current - 1, current, current + 1].filter((n, i, all) => n >= 1 && n <= total && all.indexOf(n) === i).sort((a, b) => a - b)
@@ -1397,6 +1396,8 @@ function Diagnostics({
       cache_write: Metric
       stream_status: string
       first_response_ms: number | null
+      first_meaningful_delta_ms?: number | null
+      response_finished_at?: string | null
       total_ms: number
       hints_sent: boolean
       cache_policy: string
@@ -1420,7 +1421,7 @@ function Diagnostics({
       <header>
         <div>
           <h2>缓存与实际用量</h2>
-          <p className="fine">未知样本不进入命中比例的分母；字段报告、实际命中与账单折扣分别展示。</p>
+          <p className="fine">未知样本不进入命中比例的分母；字段报告、实际命中与账单折扣分别展示。时间为提交开始；响应用时不含工具执行和文章校验，供应商后台可能按完成时刻记账。</p>
         </div>
         <button type="button" className="btn quiet desk-pill" disabled={busy} onClick={() => onPage(offset)}>
           <span className={spinning ? "desk-spin" : "desk-reload"} aria-hidden="true">
@@ -1451,9 +1452,9 @@ function Diagnostics({
                 <caption className="sr-only">模型调用记录</caption>
                 <thead>
                   <tr>
-                    <th>时间</th>
+                    <th>提交开始（北京时间）</th>
                     <th>模型</th>
-                    <th className="num">用时 / 首字</th>
+                    <th className="num">响应用时 / 首个内容</th>
                     <th className="num">输入</th>
                     <th className="num">输出</th>
                     <th className="num">缓存读 / 写</th>
@@ -1467,7 +1468,7 @@ function Diagnostics({
                     return (
                       <tr key={`${row.created_at}-${row.submission ?? i}`}>
                         <td>
-                          <time dateTime={row.created_at}>{stamp(row.created_at)}</time>
+                          <span className="usage-span"><time dateTime={row.created_at}>{stamp(row.created_at)}</time>{report?.response_finished_at ? <small>完成 {stamp(report.response_finished_at)}</small> : null}</span>
                         </td>
                         <td className="usage-model" title={[row.display_name, row.provider_name].filter(Boolean).join(" · ")}>
                           <span className="usage-span">
@@ -1478,7 +1479,7 @@ function Diagnostics({
                         <td className="num">
                           <span className="usage-span">
                             <span>{duration(report?.total_ms)}</span>
-                            <small>{duration(report?.first_response_ms)}</small>
+                            <small title="首个非空正文或工具调用增量；历史首字节记录不混作首个内容">{duration(report?.first_meaningful_delta_ms)}</small>
                           </span>
                         </td>
                         <td className={metricKnown(report?.input) ? "num" : "num muted"}>{metric(report?.input)}</td>

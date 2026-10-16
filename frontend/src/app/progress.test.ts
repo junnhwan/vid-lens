@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { displayStepTitle, parseTranscription, phaseMarks, quietNote, stepSpent, waitClock } from "./progress"
+import { displayStepTitle, parseTranscription, phaseMarks, quietNote, stepSpent, waitClock, anchoredElapsed, serverElapsed } from "./progress"
 
 describe("transcription progress", () => {
   it("reads the clock embedded in the activity title", () => {
@@ -23,8 +23,17 @@ describe("wait presentation", () => {
 
   it("formats elapsed time from the request clock and a finished step", () => {
     expect(waitClock("2026-10-15T04:00:00.000Z", Date.parse("2026-10-15T04:03:05.000Z"))).toBe("03:05")
-    expect(stepSpent({ started_at: "2026-10-15T04:00:00.000Z", finished_at: "2026-10-15T04:00:00.400Z" })).toBeNull()
+    expect(stepSpent({ started_at: "2026-10-15T04:00:00.000Z", finished_at: "2026-10-15T04:00:00.400Z" })).toBe("<1秒")
     expect(stepSpent({ started_at: "2026-10-15T04:00:00.000Z", finished_at: "2026-10-15T04:01:12.000Z" })).toBe("01:12")
     expect(stepSpent({ started_at: null, finished_at: null })).toBeNull()
   })
+})
+
+it("keeps running time on a server anchor and a monotonic clock", () => {
+  const elapsed = serverElapsed("2026-10-16T09:38:20Z", "2026-10-16T09:40:20Z")!
+  expect(elapsed).toBe(120_000)
+  // The wall clock may be five minutes ahead or behind; it is never an input.
+  expect(anchoredElapsed({ elapsedMs: elapsed, monotonicMs: 10_000 }, 12_000)).toBe(122_000)
+  expect(anchoredElapsed({ elapsedMs: elapsed, monotonicMs: 10_000 }, 9_000)).toBe(120_000)
+  expect(serverElapsed("invalid", "invalid")).toBeNull()
 })

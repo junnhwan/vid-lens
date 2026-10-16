@@ -390,8 +390,8 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 	if e != nil {
 		return nil, pos, e
 	}
-	canRetry := r.Status == "canceled" || r.Status == "failed" && r.Failure != nil && r.Failure.CanRetry
-	view := map[string]any{"schema_version": 1, "request": map[string]any{"id": r.ID, "revision": r.Revision, "input_url": r.InputURL, "status": r.Status, "reuse": r.Reuse, "retry_of_id": r.RetryOfID, "article_id": r.ArticleID, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}, "source": src, "execution": execution(run), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(r.Status)), "failure": r.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(r.Status), "can_retry": canRetry, "can_read_article": r.ArticleID != nil}, "stream": s.stream(pos, base)}
+	canRetry := r.Status == "canceled" || r.Status == "failed" && domain.RetryableFailure(r.Failure)
+	view := map[string]any{"server_now": time.Now().UTC(), "schema_version": 1, "request": map[string]any{"id": r.ID, "revision": r.Revision, "input_url": r.InputURL, "status": r.Status, "reuse": r.Reuse, "retry_of_id": r.RetryOfID, "article_id": r.ArticleID, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}, "source": src, "execution": execution(run), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(r.Status)), "failure": r.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(r.Status), "can_retry": canRetry, "can_read_article": r.ArticleID != nil}, "stream": s.stream(pos, base)}
 	if r.GenerationSpec != nil {
 		v := view["request"].(map[string]any)
 		v["purpose"] = r.GenerationSpec.Purpose
@@ -449,7 +449,7 @@ func (s *Store) turnView(ctx context.Context, q Querier, session, conversation, 
 	delete(turn, "expires_at")
 	latest := c.LastTurnID != nil && *c.LastTurnID == id
 	canRetry := latest && (t.Status == "canceled" || t.Status == "failed" && t.Failure != nil && t.Failure.CanRetry)
-	v := map[string]any{"schema_version": 1, "turn": turn, "execution": execution(&r), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(t.Status)), "failure": t.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(t.Status) && t.Status != "cancel_requested", "can_retry": canRetry, "can_submit_next": latest && domain.Terminal(t.Status)}, "stream": s.stream(pos, base)}
+	v := map[string]any{"server_now": time.Now().UTC(), "schema_version": 1, "turn": turn, "execution": execution(&r), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(t.Status)), "failure": t.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(t.Status) && t.Status != "cancel_requested", "can_retry": canRetry, "can_submit_next": latest && domain.Terminal(t.Status)}, "stream": s.stream(pos, base)}
 	return v, pos, nil
 }
 func (s *Store) TurnView(ctx context.Context, session, conversation, id string) (map[string]any, Position, error) {

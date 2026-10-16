@@ -21,6 +21,8 @@ type tokenMetric struct {
 	Path   string `json:"source_path,omitempty"`
 }
 type usageReport struct {
+	StartedAt         time.Time   `json:"response_started_at"`
+	FinishedAt        *time.Time  `json:"response_finished_at"`
 	Schema            string      `json:"schema"`
 	Input             tokenMetric `json:"input"`
 	Output            tokenMetric `json:"output"`
@@ -32,6 +34,8 @@ type usageReport struct {
 	ResponseID        string      `json:"response_id,omitempty"`
 	ObservationStatus string      `json:"observation_status"`
 	FinishReason      string      `json:"finish_reason,omitempty"`
+	FirstMeaningfulMS *int64      `json:"first_meaningful_delta_ms"`
+	FirstByteMS       *int64      `json:"first_byte_ms"`
 	FirstResponseMS   *int64      `json:"first_response_ms"`
 	TotalMS           int64       `json:"total_ms"`
 	Layout            string      `json:"layout_version"`
@@ -59,7 +63,7 @@ func newUsageObserver(layout, policy string, flush func(usageReport)) *usageObse
 		policy = "provider_default"
 	}
 	u := tokenMetric{Status: "unknown"}
-	return &usageObserver{start: time.Now(), report: usageReport{Schema: "openai_compatible", Input: u, Output: u, Total: u, CacheRead: u, CacheWrite: u, StreamStatus: "incomplete", Layout: layout, CachePolicy: policy, CostReporting: "unknown", ObservationStatus: "observed"}, flush: flush}
+	return &usageObserver{start: time.Now(), report: usageReport{StartedAt: time.Now().UTC(), Schema: "openai_compatible", Input: u, Output: u, Total: u, CacheRead: u, CacheWrite: u, StreamStatus: "incomplete", Layout: layout, CachePolicy: policy, CostReporting: "unknown", ObservationStatus: "observed"}, flush: flush}
 }
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func (o *usageObserver) wire(req *http.Request) {
@@ -85,7 +89,7 @@ func (o *usageObserver) wire(req *http.Request) {
 	o.report.ToolsHash = digest(body.Tools)
 	// Layout v2 has exactly three frozen messages. Legacy checkpoints are
 	// explicitly identified and do not claim a stable source prefix.
-	if o.report.Layout == "source-context-v2" && len(body.Messages) >= 3 {
+	if (o.report.Layout == "source-context-v2" || o.report.Layout == draftLayout) && len(body.Messages) >= 3 {
 		prefix, _ := json.Marshal(body.Messages[:3])
 		o.report.StablePrefixHash = digest(prefix)
 	}
@@ -152,6 +156,15 @@ func (o *usageObserver) parse(b []byte) {
 		Usage   map[string]json.RawMessage `json:"usage"`
 		Choices []struct {
 			Finish string `json:"finish_reason"`
+			Delta  struct {
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
+			} `json:"delta"`
 		} `json:"choices"`
 	}
 	if bytes.Equal(bytes.TrimSpace(b), []byte("[DONE]")) {
@@ -165,6 +178,14 @@ func (o *usageObserver) parse(b []byte) {
 		o.report.ResponseID = id
 	}
 	for _, c := range frame.Choices {
+		meaningful := c.Delta.Content != ""
+		for _, tc := range c.Delta.ToolCalls {
+			meaningful = meaningful || tc.Function.Name != "" || tc.Function.Arguments != ""
+		}
+		if meaningful && o.report.FirstMeaningfulMS == nil {
+			n := time.Since(o.start).Milliseconds()
+			o.report.FirstMeaningfulMS = &n
+		}
 		if v := bounded(c.Finish); v != "" {
 			o.report.FinishReason = v
 		}
@@ -197,6 +218,7 @@ func (o *usageObserver) consume(b []byte) {
 	if len(b) > 0 && o.report.FirstResponseMS == nil {
 		n := time.Since(o.start).Milliseconds()
 		o.report.FirstResponseMS = &n
+		o.report.FirstByteMS = &n
 	}
 	if o.jsonBody {
 		if len(o.event)+len(b) <= 64<<10 {
@@ -251,6 +273,8 @@ func (o *usageObserver) finish(eof bool) {
 		o.parse(o.event)
 	}
 	o.report.TotalMS = time.Since(o.start).Milliseconds()
+	finished := time.Now().UTC()
+	o.report.FinishedAt = &finished
 	report := o.report
 	o.line = nil
 	o.event = nil

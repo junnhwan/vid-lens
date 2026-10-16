@@ -102,3 +102,12 @@ func TestWorkerCommitsAcceptedFailureAndAcknowledgesQueue(t *testing.T) {
 	}
 	t.Fatal("accepted failure did not become a durable terminal state")
 }
+
+func TestMalformedResultAllowsExplicitRetryWithoutAutomaticResubmission(t *testing.T) {
+	for _, code := range []string{"MODEL_RESULT_INVALID", "MODEL_RESULT_NOT_SUBMITTED", "MODEL_OUTPUT_TRUNCATED"} {
+		failure, automatic, _ := classify(domain.Err(422, code, "invalid structured result"))
+		if !failure.CanRetry || automatic {
+			t.Fatalf("wrong retry semantics for %s: %+v auto=%v", code, failure, automatic)
+		}
+	}
+}

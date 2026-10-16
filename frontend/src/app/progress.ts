@@ -79,6 +79,18 @@ export function waitClock(createdAt: string, endMs: number): string | null {
 export function stepSpent(step: Pick<ActivityStep, "started_at" | "finished_at">): string | null {
   if (!step.started_at || !step.finished_at) return null
   const ms = Date.parse(step.finished_at) - Date.parse(step.started_at)
-  if (Number.isNaN(ms) || ms < 1000) return null
+  if (Number.isNaN(ms) || ms < 0) return null
+  if (ms < 1000) return "<1秒"
   return formatClock(ms)
+}
+
+export interface ElapsedAnchor { elapsedMs: number; monotonicMs: number }
+
+// Browser wall clocks can differ from the server or jump during a run.
+export function anchoredElapsed(anchor: ElapsedAnchor, monotonicNow: number): number {
+  return Math.max(0, anchor.elapsedMs + Math.max(0, monotonicNow - anchor.monotonicMs))
+}
+export function serverElapsed(createdAt: string, serverNow: string): number | null {
+  const elapsed = Date.parse(serverNow) - Date.parse(createdAt)
+  return Number.isFinite(elapsed) ? Math.max(0, elapsed) : null
 }

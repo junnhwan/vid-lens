@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, Frame, Range, RequestView } from "../contract/types"
 import { formatClock, formatDuration, platformLabel, provenanceNote } from "../contract/text"
 import { describeRequest } from "../app/labels"
-import { PHASES, QUIET_AFTER_MS, parseTranscription, phaseMarks, quietNote, waitClock, type PhaseMark } from "../app/progress"
+import { PHASES, QUIET_AFTER_MS, parseTranscription, phaseMarks, quietNote, waitClock, anchoredElapsed, serverElapsed, type PhaseMark } from "../app/progress"
 import { EASE, animateTitle, prefersReduced } from "./motion"
 import { ActivityList } from "./ActivityList"
 import { FrameThumb } from "./FrameThumb"
@@ -65,7 +65,7 @@ export function RunView({
   const transcribed = current && copy.title === "正在转写音频" ? parseTranscription(current.title) : null
   const phaseId = view?.execution?.phase || current?.phase || (stopped ? steps.at(-1)?.phase : null) || null
   const marks = phaseMarks(phaseId, holding || view?.request.status === "completed" ? "done" : stopped ? "stopped" : "running")
-  const clock = useWaitClock(view?.request.created_at, view?.request.updated_at, active && copy.busy)
+  const clock = useWaitClock(view?.request.created_at, view?.request.updated_at, active && copy.busy, view?.server_now)
   const quiet = quietOn ? quietNote(phaseId, view?.execution?.status) : ""
   const signature = `${current?.id ?? ""}|${current?.title ?? ""}|${view?.execution?.status ?? ""}|${view?.execution?.phase ?? ""}`
   const meta = [platformLabel(source?.platform), formatDuration(source?.duration_ms), source?.part?.label].filter(Boolean).join(" · ")
@@ -257,15 +257,23 @@ export function RunView({
   )
 }
 
-function useWaitClock(createdAt: string | undefined, updatedAt: string | undefined, live: boolean): string | null {
-  const [now, setNow] = useState(() => Date.now())
+function useWaitClock(createdAt: string | undefined, updatedAt: string | undefined, live: boolean, serverNow: string | undefined): string | null {
+  const [now, setNow] = useState(() => performance.now())
+  const anchor = useRef({ createdAt: undefined as string | undefined, serverNow: undefined as string | undefined, elapsedMs: 0, monotonicMs: performance.now() })
+  const current = performance.now()
+  if (createdAt && (anchor.current.createdAt !== createdAt || anchor.current.serverNow !== serverNow)) {
+    const elapsed = serverNow ? serverElapsed(createdAt, serverNow) : null
+    const previous = anchor.current.createdAt === createdAt ? anchoredElapsed(anchor.current, current) : 0
+    anchor.current = { createdAt, serverNow, elapsedMs: Math.max(previous, elapsed ?? Math.max(0, Date.now() - Date.parse(createdAt))), monotonicMs: current }
+  }
   useEffect(() => {
     if (!live) return
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    setNow(performance.now())
+    const timer = window.setInterval(() => setNow(performance.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [live])
+  }, [live, createdAt])
   if (!createdAt) return null
-  if (live) return waitClock(createdAt, now)
+  if (live) return formatClock(anchoredElapsed(anchor.current, Math.max(now, current)))
   const end = updatedAt ? Date.parse(updatedAt) : Number.NaN
   return Number.isNaN(end) ? null : waitClock(createdAt, end)
 }

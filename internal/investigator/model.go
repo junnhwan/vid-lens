@@ -20,6 +20,7 @@ import (
 )
 
 type remoteSubmitKey struct{}
+type modelActivityKey struct{}
 type safeTransport struct{ base http.RoundTripper }
 
 func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -218,6 +219,14 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 		if chunk == nil {
 			continue
 		}
+
+		if activity, ok := call.Value(modelActivityKey{}).(func(string) error); ok {
+			for _, tc := range chunk.ToolCalls {
+				if err := activity(tc.Function.Name); err != nil {
+					return nil, err
+				}
+			}
+		}
 		meaningful := chunk.Content != "" || chunk.ReasoningContent != "" || len(chunk.ToolCalls) > 0
 		if v, ok := chunk.Extra["reasoning-content"].(string); ok && v != "" {
 			meaningful = true
@@ -256,7 +265,7 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 		return nil, timeout("模型响应片段无法组合。")
 	}
 	if result.ResponseMeta.FinishReason == "length" {
-		return nil, &domain.WorkError{Code: "EVIDENCE_INSUFFICIENT", Message: "模型输出达到长度上限，未产生完整结果。"}
+		return nil, &domain.WorkError{Code: "MODEL_OUTPUT_TRUNCATED", Message: "模型输出达到长度上限，未产生完整结果。"}
 	}
 	return result, nil
 }
