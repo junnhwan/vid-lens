@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
+	"golang.org/x/term"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,11 +27,52 @@ import (
 func main() {
 	path := flag.String("config", "", "YAML configuration file; credentials must remain outside Git")
 	migrate := flag.Bool("migrate-only", false, "apply PostgreSQL migrations and exit")
+	password := flag.Bool("set-owner-password", false, "set/reset the owner password interactively and revoke owner sessions")
 	flag.Parse()
+	if *password {
+		if e := setPassword(*path); e != nil {
+			slog.Error("password reset failed", "reason", e.Error())
+			os.Exit(1)
+		}
+		return
+	}
 	if e := run(*path, *migrate); e != nil {
 		slog.Error("backend stopped", "reason", e.Error())
 		os.Exit(1)
 	}
+}
+func setPassword(path string) error {
+	c, e := config.LoadFile(path)
+	if e != nil {
+		return e
+	}
+	s, e := store.Open(context.Background(), c.DatabaseURL, c.SecretKey)
+	if e != nil {
+		return e
+	}
+	defer s.Pool.Close()
+	if e = s.Migrate(context.Background()); e != nil {
+		return e
+	}
+	fmt.Fprint(os.Stderr, "New owner password (at least 12 bytes): ")
+	first, e := term.ReadPassword(int(os.Stdin.Fd()))
+	if e != nil {
+		return e
+	}
+	fmt.Fprint(os.Stderr, "\nRepeat password: ")
+	second, e := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if e != nil {
+		return e
+	}
+	if string(first) != string(second) {
+		return errors.New("passwords do not match")
+	}
+	if e = s.SetOwnerPassword(context.Background(), string(first)); e != nil {
+		return e
+	}
+	fmt.Fprintln(os.Stderr, "Owner password saved; previous management sessions revoked.")
+	return nil
 }
 func run(path string, migrate bool) error {
 	runtime.GOMAXPROCS(2)

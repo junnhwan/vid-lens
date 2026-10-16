@@ -102,23 +102,24 @@ type ExecutionSegment struct {
 	ThroughSeq *int64 `json:"visible_through_seq"`
 }
 type Request struct {
-	ID          string             `json:"id"`
-	SessionID   string             `json:"session_id"`
-	InputURL    string             `json:"input_url"`
-	SourceID    string             `json:"source_id"`
-	SnapshotID  *string            `json:"snapshot_id"`
-	ActiveRunID *string            `json:"active_run_id"`
-	ArticleID   *string            `json:"article_id"`
-	Revision    int64              `json:"revision"`
-	Status      string             `json:"status"`
-	Reuse       string             `json:"reuse"`
-	RetryOfID   *string            `json:"retry_of_id"`
-	ConfigID    string             `json:"config_id"`
-	Segments    []ExecutionSegment `json:"segments"`
-	Failure     *Failure           `json:"failure"`
-	DeadlineAt  time.Time          `json:"deadline_at"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	GenerationSpec *GenerationSpec    `json:"generation_spec"`
+	ID             string             `json:"id"`
+	SessionID      string             `json:"session_id"`
+	InputURL       string             `json:"input_url"`
+	SourceID       string             `json:"source_id"`
+	SnapshotID     *string            `json:"snapshot_id"`
+	ActiveRunID    *string            `json:"active_run_id"`
+	ArticleID      *string            `json:"article_id"`
+	Revision       int64              `json:"revision"`
+	Status         string             `json:"status"`
+	Reuse          string             `json:"reuse"`
+	RetryOfID      *string            `json:"retry_of_id"`
+	ConfigID       string             `json:"config_id"`
+	Segments       []ExecutionSegment `json:"segments"`
+	Failure        *Failure           `json:"failure"`
+	DeadlineAt     time.Time          `json:"deadline_at"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 type Run struct {
 	ID                 string          `json:"id"`
@@ -204,6 +205,7 @@ type Outcome struct {
 	EvidenceStatus string `json:"evidence_status"`
 }
 type Step struct {
+	Kind          string     `json:"kind,omitempty"`
 	ID            string     `json:"id"`
 	RunID         string     `json:"run_id"`
 	SegmentNo     int        `json:"segment_no"`
@@ -258,19 +260,24 @@ type Section struct {
 	Blocks []Block `json:"blocks"`
 }
 type Citation struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Label      string   `json:"label"`
-	SnapshotID string   `json:"snapshot_id,omitempty"`
-	Range      *Range   `json:"range,omitempty"`
-	SegmentIDs []string `json:"segment_ids,omitempty"`
-	Quote      *string  `json:"quote" jsonschema:"description=For video_text use null for paraphrases; a string must be a verbatim contiguous source quote. For article_passage use the exact article quote."`
-	TextOrigin string   `json:"text_origin,omitempty"`
-	FrameID    string   `json:"frame_id,omitempty"`
-	TimeMS     *int64   `json:"time_ms,omitempty"`
-	ArticleID  string   `json:"article_id,omitempty"`
-	SectionID  string   `json:"section_id,omitempty"`
-	BlockID    string   `json:"block_id,omitempty"`
+	ReferenceID   string     `json:"reference_id,omitempty"`
+	ContentSHA256 string     `json:"content_sha256,omitempty"`
+	URL           string     `json:"url,omitempty"`
+	Title         string     `json:"title,omitempty"`
+	ReadAt        *time.Time `json:"read_at,omitempty"`
+	ID            string     `json:"id"`
+	Kind          string     `json:"kind"`
+	Label         string     `json:"label"`
+	SnapshotID    string     `json:"snapshot_id,omitempty"`
+	Range         *Range     `json:"range,omitempty"`
+	SegmentIDs    []string   `json:"segment_ids,omitempty"`
+	Quote         *string    `json:"quote" jsonschema:"description=For video_text use null for paraphrases; a string must be a verbatim contiguous source quote. For article_passage use the exact article quote."`
+	TextOrigin    string     `json:"text_origin,omitempty"`
+	FrameID       string     `json:"frame_id,omitempty"`
+	TimeMS        *int64     `json:"time_ms,omitempty"`
+	ArticleID     string     `json:"article_id,omitempty"`
+	SectionID     string     `json:"section_id,omitempty"`
+	BlockID       string     `json:"block_id,omitempty"`
 }
 type Limitation struct {
 	Code        string   `json:"code"`
@@ -311,9 +318,11 @@ type QuestionContext struct {
 	Passage *Passage `json:"passage"`
 }
 type QuestionInput struct {
-	Question           string          `json:"question"`
-	Context            QuestionContext `json:"context"`
-	ExpectedLastTurnID *string         `json:"expected_last_turn_id"`
+	AllowExternalSources bool            `json:"allow_external_sources,omitempty"`
+	ReferenceURLs        []string        `json:"reference_urls,omitempty"`
+	Question             string          `json:"question"`
+	Context              QuestionContext `json:"context"`
+	ExpectedLastTurnID   *string         `json:"expected_last_turn_id"`
 }
 type Answer struct {
 	Kind        string              `json:"kind"`
@@ -335,23 +344,25 @@ type Conversation struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 type Turn struct {
-	ID             string          `json:"id"`
-	ConversationID string          `json:"conversation_id"`
-	RequestID      string          `json:"request_id"`
-	ArticleID      string          `json:"article_id"`
-	SnapshotID     string          `json:"snapshot_id"`
-	RunID          string          `json:"run_id"`
-	TurnNo         int64           `json:"turn_no"`
-	Revision       int64           `json:"revision"`
-	Status         string          `json:"status"`
-	Question       string          `json:"question"`
-	Context        QuestionContext `json:"context"`
-	RetryOfID      *string         `json:"retry_of_id"`
-	Answer         *Answer         `json:"answer"`
-	Failure        *Failure        `json:"failure"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	ExpiresAt      *time.Time      `json:"expires_at"`
+	AllowExternalSources bool            `json:"allow_external_sources"`
+	ReferenceURLs        []string        `json:"reference_urls"`
+	ID                   string          `json:"id"`
+	ConversationID       string          `json:"conversation_id"`
+	RequestID            string          `json:"request_id"`
+	ArticleID            string          `json:"article_id"`
+	SnapshotID           string          `json:"snapshot_id"`
+	RunID                string          `json:"run_id"`
+	TurnNo               int64           `json:"turn_no"`
+	Revision             int64           `json:"revision"`
+	Status               string          `json:"status"`
+	Question             string          `json:"question"`
+	Context              QuestionContext `json:"context"`
+	RetryOfID            *string         `json:"retry_of_id"`
+	Answer               *Answer         `json:"answer"`
+	Failure              *Failure        `json:"failure"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	ExpiresAt            *time.Time      `json:"expires_at"`
 }
 
 func Ptr[T any](v T) *T { return &v }

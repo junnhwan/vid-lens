@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
+	"vidlens/internal/outbound"
 )
 
 type Accepted struct {
@@ -43,14 +44,21 @@ func remember(ctx context.Context, tx pgx.Tx, scope, key, hash, id string, secon
 	return a, e
 }
 func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID string, local bool) (Accepted, error) {
+	return s.CreateRequestWithInput(ctx, session, key, domain.RequestInput{VideoURL: input}, retryID, local)
+}
+func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string, in domain.RequestInput, retryID string, local bool) (Accepted, error) {
 	var a Accepted
 	e := s.Tx(ctx, func(tx pgx.Tx) error {
-		input = strings.TrimSpace(input)
+		input := strings.TrimSpace(in.VideoURL)
+		in.Purpose = domain.NormalizePurpose(in.Purpose)
 		scope := "request:" + session
 		if retryID != "" {
 			scope += "/retry/" + retryID
 		}
 		h := Hash(map[string]any{"video_url": input})
+		if in.Purpose != "" || in.ModelID != "" || in.ModelRevisionID != "" {
+			h = Hash(map[string]any{"version": 2, "video_url": input, "purpose": in.Purpose, "model_id": in.ModelID, "model_revision_id": in.ModelRevisionID})
+		}
 		if retryID != "" {
 			h = Hash(map[string]any{})
 		}
@@ -59,6 +67,7 @@ func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID 
 		if a, found, e = replay(ctx, tx, scope, key, h); e != nil || found {
 			return e
 		}
+		var frozen *domain.GenerationSpec
 		if retryID != "" {
 			old, e := loadRequest(ctx, tx, retryID)
 			if e != nil || old.SessionID != session {
@@ -71,13 +80,30 @@ func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID 
 				return domain.Err(409, "RETRY_NOT_ALLOWED", "请先修正来源或配置。")
 			}
 			input = old.InputURL
+			frozen = old.GenerationSpec
+			if frozen == nil {
+				m, e := modelIdentity(ctx, tx, old.ConfigID)
+				if e != nil {
+					return e
+				}
+				frozen = &domain.GenerationSpec{Version: 1, ConfigID: old.ConfigID, Model: m, Scope: "public"}
+			}
 		}
 		identity, e := domain.ParseSource(input, local)
 		if e != nil {
 			return e
 		}
-		var cid string
-		if e = tx.QueryRow(ctx, "SELECT config_id FROM runtime_settings").Scan(&cid); e != nil {
+		spec := domain.GenerationSpec{}
+		if frozen != nil {
+			spec = *frozen
+		} else {
+			spec, e = resolveSpec(ctx, tx, session, in)
+			if e != nil {
+				return e
+			}
+		}
+		cid := spec.ConfigID
+		if e = checkAvailable(ctx, tx, cid); e != nil {
 			return e
 		}
 		p, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", cid)
@@ -99,9 +125,12 @@ func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID 
 		if e != nil {
 			return e
 		}
-		work := source + ":" + cid
+		work := source + ":prepare-v2:" + Hash(map[string]any{"asr_endpoint": p.ASRBaseURL, "asr_model": p.ASRModel, "asr_key_ref": p.ASRKeyRef, "max_video_ms": p.MaxVideoMS, "max_download_bytes": p.MaxDownloadBytes, "pipeline": "source-60s-mp3-48k16k-v1"})
 		var runID, status string
 		e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.prepare' AND work_key=$1 AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')", work).Scan(&runID, &status)
+		if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
+			e = tx.QueryRow(ctx, `SELECT r.id,r.status FROM job_runs r WHERE r.kind='source.prepare' AND r.work_key=$1 AND r.status='succeeded' AND EXISTS(SELECT 1 FROM media_assets a WHERE a.snapshot_id=r.result_id AND a.kind='video' AND a.state='ready' AND (a.expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs ar WHERE ar.asset_id=a.id AND (ar.expires_at IS NULL OR ar.expires_at>now())))) ORDER BY r.updated_at DESC LIMIT 1`, work).Scan(&runID, &status)
+		}
 		reuse := "pending"
 		deadline := time.Now().Add(time.Duration(p.GenerationSeconds) * time.Second)
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -127,9 +156,18 @@ func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID 
 			retry = &retryID
 		}
 		segs := []domain.ExecutionSegment{{RunID: runID, SegmentNo: 0}}
-		_, e = tx.Exec(ctx, "INSERT INTO generation_requests(id,session_id,input_url,source_id,active_run_id,config_id,status,reuse,retry_of_id,segments,deadline_at) VALUES($1,$2,$3,$4,$5,$6,'waiting_source',$7,$8,$9,$10)", id, session, input, source, runID, cid, reuse, retry, domain.JSON(segs), deadline)
+		_, e = tx.Exec(ctx, "INSERT INTO generation_requests(id,session_id,input_url,source_id,active_run_id,config_id,status,reuse,retry_of_id,segments,deadline_at,generation_spec) VALUES($1,$2,$3,$4,$5,$6,'waiting_source',$7,$8,$9,$10,$11)", id, session, input, source, runID, cid, reuse, retry, domain.JSON(segs), deadline, domain.JSON(spec))
 		if e != nil {
 			return e
+		}
+		if status == "succeeded" {
+			var snapshot string
+			if e = tx.QueryRow(ctx, "SELECT result_id FROM job_runs WHERE id=$1", runID).Scan(&snapshot); e != nil {
+				return e
+			}
+			if e = bindPrepared(ctx, tx, runID, snapshot); e != nil {
+				return e
+			}
 		}
 		a, e = remember(ctx, tx, scope, key, h, id, p.IdempotencySeconds)
 		return e
@@ -213,6 +251,9 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 			return NotFound(e)
 		}
 		in.Question = strings.TrimSpace(in.Question)
+		for i, url := range in.ReferenceURLs {
+			in.ReferenceURLs[i] = strings.TrimSpace(url)
+		}
 		if in.Context.Passage != nil {
 			in.Context.Passage.Quote = domain.NormalizeQuote(in.Context.Passage.Quote)
 		}
@@ -247,9 +288,25 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 			}
 			in.Question = old.Question
 			in.Context = old.Context
+			in.AllowExternalSources = old.AllowExternalSources
+			in.ReferenceURLs = old.ReferenceURLs
+		}
+		if len(in.ReferenceURLs) > 3 {
+			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "本轮最多指定三个网页。")
+		}
+		if len(in.ReferenceURLs) > 0 && !in.AllowExternalSources {
+			return domain.Err(422, "EXTERNAL_SOURCES_DISABLED", "提供网页时请明确开启网络补充。")
+		}
+		for _, url := range in.ReferenceURLs {
+			if _, e := outbound.Validate(url, nil, false); e != nil {
+				return domain.Err(422, "INVALID_ARGUMENT", "请提供有效的公开网页链接。")
+			}
 		}
 		var configID string
-		if e = tx.QueryRow(ctx, "SELECT config_id FROM runtime_settings").Scan(&configID); e != nil {
+		if e = tx.QueryRow(ctx, "SELECT config_id FROM generation_requests WHERE id=$1", c.RequestID).Scan(&configID); e != nil {
+			return e
+		}
+		if e = checkAvailable(ctx, tx, configID); e != nil {
 			return e
 		}
 		p, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", configID)
@@ -310,7 +367,11 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if retry != "" {
 			retryPtr = &retry
 		}
-		_, e = tx.Exec(ctx, "INSERT INTO qa_turns(id,conversation_id,request_id,article_id,snapshot_id,run_id,turn_no,status,question,context,retry_of_id) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10)", id, c.ID, c.RequestID, c.ArticleID, c.SnapshotID, run, c.NextTurnNo, in.Question, domain.JSON(in.Context), retryPtr)
+		urls := in.ReferenceURLs
+		if urls == nil {
+			urls = []string{}
+		}
+		_, e = tx.Exec(ctx, "INSERT INTO qa_turns(id,conversation_id,request_id,article_id,snapshot_id,run_id,turn_no,status,question,context,retry_of_id,allow_external_sources,reference_urls) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12)", id, c.ID, c.RequestID, c.ArticleID, c.SnapshotID, run, c.NextTurnNo, in.Question, domain.JSON(in.Context), retryPtr, in.AllowExternalSources, domain.JSON(urls))
 		if e != nil {
 			return e
 		}

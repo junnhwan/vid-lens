@@ -13,6 +13,7 @@ import (
 	"github.com/hibiken/asynq"
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
+	"vidlens/internal/exporting"
 	"vidlens/internal/investigator"
 	"vidlens/internal/media"
 	"vidlens/internal/store"
@@ -49,7 +50,11 @@ func New(s *store.Store, m *media.Service, a *investigator.Engine, c config.Conf
 	}
 	w := &Worker{Store: s, Media: m, Agent: a, Config: c, client: asynq.NewClient(opt), inspector: asynq.NewInspector(opt), owner: domain.ID()}
 	for _, queue := range []string{"generation", "interactive", "maintenance"} {
-		srv := asynq.NewServer(opt, asynq.Config{Concurrency: 1, Queues: map[string]int{queue: 1}, ShutdownTimeout: 30 * time.Second, RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
+		queues := map[string]int{queue: 1}
+		if queue == "maintenance" {
+			queues["cleanup"] = 2
+		}
+		srv := asynq.NewServer(opt, asynq.Config{Concurrency: 1, Queues: queues, StrictPriority: queue == "maintenance", ShutdownTimeout: 30 * time.Second, RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
 			var re *retryError
 			if errors.As(e, &re) {
 				return re.delay
@@ -72,7 +77,58 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.ctx = ctx
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("vidlens.run", w.handle)
-	mux.HandleFunc("asset.cleanup", func(ctx context.Context, t *asynq.Task) error { return w.Media.Cleanup(ctx) })
+	mux.HandleFunc("model.probe", func(ctx context.Context, t *asynq.Task) error {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(t.Payload(), &body) != nil {
+			return asynq.SkipRetry
+		}
+		p, e := w.Store.ClaimProbe(ctx, body.ID)
+		if e != nil {
+			return e
+		}
+		if p == nil {
+			var pending bool
+			if e = w.Store.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM model_probes WHERE id=$1 AND status IN ('queued','running') AND deadline_at>now())", body.ID).Scan(&pending); e != nil {
+				return e
+			}
+			if !pending {
+				return nil
+			}
+			return errBusy
+		}
+		return w.Agent.RunProbe(ctx, *p)
+	})
+	mux.HandleFunc("article.export", func(ctx context.Context, t *asynq.Task) error {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(t.Payload(), &body) != nil {
+			return asynq.SkipRetry
+		}
+		v, e := w.Store.ClaimExport(ctx, body.ID)
+		if e != nil {
+			return e
+		}
+		if v == nil {
+			var pending bool
+			if e = w.Store.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM article_exports WHERE id=$1 AND status IN ('queued','running','retry_wait') AND deadline_at>now())", body.ID).Scan(&pending); e != nil {
+				return e
+			}
+			if !pending {
+				return nil
+			}
+			return errBusy
+		}
+		return (&exporting.Service{Store: w.Store, Config: w.Config}).Run(ctx, *v)
+	})
+	mux.HandleFunc("asset.cleanup", func(ctx context.Context, t *asynq.Task) error {
+		if e := w.Media.Cleanup(ctx); e != nil {
+			return e
+		}
+		return (&exporting.Service{Store: w.Store, Config: w.Config}).Cleanup(ctx)
+	})
 	for _, srv := range w.servers {
 		if e := srv.Start(mux); e != nil {
 			return e
@@ -118,6 +174,16 @@ func (w *Worker) Shutdown() {
 }
 func taskID(id string, generation int64) string { return fmt.Sprintf("vl:%s:%d", id, generation) }
 func (w *Worker) dispatch(ctx context.Context) {
+	if exports, e := w.Store.PendingExports(ctx); e == nil {
+		for _, v := range exports {
+			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("article.export", domain.JSON(map[string]string{"id": v.ID})), asynq.TaskID(fmt.Sprintf("export:%s:%d", v.ID, v.Attempts)), asynq.Queue("maintenance"), asynq.MaxRetry(3), asynq.Timeout(2*time.Minute+5*time.Second), asynq.Deadline(v.DeadlineAt), asynq.Retention(24*time.Hour))
+		}
+	}
+	if probes, e := w.Store.PendingProbes(ctx); e == nil {
+		for _, p := range probes {
+			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("model.probe", domain.JSON(map[string]string{"id": p.ID})), asynq.TaskID("probe:"+p.ID), asynq.Queue("maintenance"), asynq.MaxRetry(18), asynq.Timeout(180*time.Second), asynq.Deadline(p.DeadlineAt), asynq.Retention(24*time.Hour))
+		}
+	}
 	out, e := w.Store.Outbox(ctx)
 	if e != nil {
 		return
@@ -308,7 +374,7 @@ func (w *Worker) reconcile(ctx context.Context) {
 }
 func (w *Worker) enqueueCleanup(ctx context.Context) {
 	id := fmt.Sprintf("cleanup:%d", time.Now().Unix()/300)
-	_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("asset.cleanup", domain.JSON(map[string]int{"schema_version": 1})), asynq.TaskID(id), asynq.Queue("maintenance"), asynq.MaxRetry(3), asynq.Timeout(2*time.Minute), asynq.Retention(24*time.Hour))
+	_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("asset.cleanup", domain.JSON(map[string]int{"schema_version": 1})), asynq.TaskID(id), asynq.Queue("cleanup"), asynq.MaxRetry(3), asynq.Timeout(2*time.Minute), asynq.Retention(24*time.Hour))
 }
 func minTime(a, b time.Time) time.Time {
 	if a.Before(b) {

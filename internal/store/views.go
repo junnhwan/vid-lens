@@ -144,6 +144,16 @@ func (s *Store) Article(ctx context.Context, session, requestID string) (map[str
 			status = "restoring"
 		}
 		out = map[string]any{"schema_version": 1, "article": a, "frames": frames, "media": map[string]any{"status": status, "can_inspect_now": ready, "can_restore_for_question": true}}
+		m, e := one[domain.GenerationModel](ctx, tx, "SELECT generation_model FROM articles WHERE id=$1", a.ID)
+		if e != nil {
+			return e
+		}
+		out["generation_model"] = m
+		out["purpose"] = ""
+		if r.GenerationSpec != nil {
+			out["purpose"] = r.GenerationSpec.Purpose
+		}
+		out["qa_available"] = checkAvailable(ctx, tx, r.ConfigID) == nil
 		return nil
 	})
 	return out, e
@@ -159,7 +169,13 @@ func ContentFrameIDs(sections []domain.Section, citations map[string]domain.Cita
 			}
 		}
 	}
-	for _, c := range citations {
+	keys := make([]string, 0, len(citations))
+	for id := range citations {
+		keys = append(keys, id)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		c := citations[key]
 		if c.FrameID != "" && !slices.Contains(ids, c.FrameID) {
 			ids = append(ids, c.FrameID)
 		}
@@ -376,6 +392,11 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 	}
 	canRetry := r.Status == "canceled" || r.Status == "failed" && r.Failure != nil && r.Failure.CanRetry
 	view := map[string]any{"schema_version": 1, "request": map[string]any{"id": r.ID, "revision": r.Revision, "input_url": r.InputURL, "status": r.Status, "reuse": r.Reuse, "retry_of_id": r.RetryOfID, "article_id": r.ArticleID, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}, "source": src, "execution": execution(run), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(r.Status)), "failure": r.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(r.Status), "can_retry": canRetry, "can_read_article": r.ArticleID != nil}, "stream": s.stream(pos, base)}
+	if r.GenerationSpec != nil {
+		v := view["request"].(map[string]any)
+		v["purpose"] = r.GenerationSpec.Purpose
+		v["generation_model"] = r.GenerationSpec.Model
+	}
 	return view, pos, nil
 }
 func (s *Store) stream(p Position, base string) map[string]any {

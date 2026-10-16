@@ -29,6 +29,17 @@ func (s *Store) Deleted(ctx context.Context, id string, success bool) error {
 }
 func (s *Store) CleanupMetadata(ctx context.Context) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error {
+		// Private page bodies must not survive in either snapshots or tool
+		// replay payloads after the reference's 24-hour retention window.
+		if _, e := tx.Exec(ctx, "UPDATE run_operations o SET result='{}' WHERE kind IN ('web.read','web.search') AND (EXISTS(SELECT 1 FROM external_references r WHERE r.run_id=o.run_id AND r.expires_at<now()) OR EXISTS(SELECT 1 FROM qa_turns t WHERE t.run_id=o.run_id AND t.expires_at<now())) AND result<>'{}'::jsonb"); e != nil {
+			return e
+		}
+		if _, e := tx.Exec(ctx, "UPDATE job_runs j SET checkpoint='{\"schema_version\":1}' WHERE kind='qa.answer' AND status IN ('succeeded','failed','canceled') AND EXISTS(SELECT 1 FROM external_references r WHERE r.run_id=j.id AND r.expires_at<now()) AND checkpoint<>'{\"schema_version\":1}'::jsonb"); e != nil {
+			return e
+		}
+		if _, e := tx.Exec(ctx, "UPDATE external_references SET body=NULL WHERE expires_at<now() AND body IS NOT NULL"); e != nil {
+			return e
+		}
 		queries := []string{"UPDATE job_runs r SET checkpoint='{\"schema_version\":1}' FROM qa_turns t WHERE t.run_id=r.id AND t.expires_at<now() AND r.checkpoint<>'{\"schema_version\":1}'::jsonb", "DELETE FROM evidence_questions q USING qa_turns t WHERE q.run_id=t.run_id AND t.expires_at<now()", "DELETE FROM run_events e USING job_runs r WHERE e.run_id=r.id AND r.status IN ('succeeded','failed','canceled') AND r.updated_at<now()-interval '7 days'", "UPDATE qa_turns SET answer=NULL,question='',context='{\"frame_id\":null,\"passage\":null}' WHERE expires_at<now() AND question<>''", "DELETE FROM observations o USING qa_turns t WHERE o.run_id=t.run_id AND t.expires_at<now()", "DELETE FROM run_operations o USING job_runs r WHERE o.run_id=r.id AND r.status IN ('succeeded','failed','canceled') AND r.updated_at<now()-interval '30 days'", "DELETE FROM task_outbox o USING job_runs r WHERE o.run_id=r.id AND o.delivered_at IS NOT NULL AND r.status IN ('succeeded','failed','canceled') AND r.updated_at<now()-interval '30 days'", "DELETE FROM job_attempts a USING job_runs r WHERE a.run_id=r.id AND r.status IN ('succeeded','failed','canceled') AND r.updated_at<now()-interval '30 days'", "DELETE FROM idempotency WHERE created_at<now()-interval '30 days'", "DELETE FROM storage_reservations WHERE expires_at<now()"}
 		for _, q := range queries {
 			if _, e := tx.Exec(ctx, q); e != nil {

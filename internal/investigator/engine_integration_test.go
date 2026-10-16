@@ -25,19 +25,22 @@ import (
 // The model service is a fixture; PostgreSQL, Redis, FFmpeg, the Eino HTTP
 // adapter, candidate repair and immutable publication all use their real paths.
 func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
-	for _, fault := range []string{"malformed_json", "independent_errors", "observation_arguments", "caller_cancels"} {
+	for _, fault := range []string{"malformed_json", "independent_errors", "observation_arguments", "caller_cancels", "normal_stop", "repeated_stop"} {
 		t.Run(fault, func(t *testing.T) {
 			s, resources, cfg := testsupport.Services(t)
 			if _, err := exec.LookPath("ffmpeg"); err != nil {
 				t.Skip("ffmpeg required")
 			}
 			var calls atomic.Int32
+			var qaMode atomic.Bool
+			var qaCalls atomic.Int32
 			runCtx, cancelRun := context.WithCancel(context.Background())
 			defer cancelRun()
 			meta := regexp.MustCompile(`snapshot_id=([a-f0-9]+) inspection_id=\S+ frame_id=([a-f0-9]+) actual_time_ms=([0-9]+)`)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input struct {
-					Stream   bool `json:"stream"`
+					Model    string `json:"model"`
+					Stream   bool   `json:"stream"`
 					Messages []struct {
 						Content json.RawMessage `json:"content"`
 					} `json:"messages"`
@@ -50,6 +53,27 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 				if !input.Stream {
 					t.Error("model invocation did not stream")
 					w.WriteHeader(400)
+					return
+				}
+				if qaMode.Load() {
+					if input.Model != cfg.Profile.ModelName || r.Header.Get("Authorization") != "Bearer fixture-key" {
+						t.Error("Q&A changed the frozen model or credential")
+					}
+					n := qaCalls.Add(1)
+					w.Header().Set("Content-Type", "text/event-stream")
+					if n == 1 {
+						fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"尚无额外证据。\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+						return
+					}
+					if n != 2 {
+						t.Error("Q&A correction exceeded one call")
+					}
+					if !strings.Contains(string(domain.JSON(input.Messages)), "必须调用") {
+						t.Error("Q&A did not receive the formal-submit correction")
+					}
+					args := domain.JSON(answerInput{Kind: "insufficient_evidence", Summary: "当前视频不足以核实额外细节。", Blocks: []domain.Block{{ID: "answer", Type: "paragraph", Origin: "background_explanation", Content: []domain.Inline{{Type: "text", Text: "当前来源没有提供这项细节，因此不能给出确定结论。"}}}}, Citations: map[string]domain.Citation{}, Limitations: []domain.Limitation{}})
+					chunk := map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "qa-final", "type": "function", "function": map[string]any{"name": "submit_answer", "arguments": string(args)}}}}, "finish_reason": "tool_calls"}}}
+					fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", domain.JSON(chunk))
 					return
 				}
 				frames := []string{}
@@ -72,6 +96,14 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 					return
 				}
 				n := calls.Add(1) - 1
+				if n == 1 && (fault == "normal_stop" || fault == "repeated_stop") || n == 2 && fault == "repeated_stop" {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"材料已经足够。\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					return
+				}
+				if n == 2 && fault == "normal_stop" && !strings.Contains(string(wire), "必须调用") {
+					t.Error("normal stop repair lacks an explicit submission instruction")
+				}
 				if fault == "caller_cancels" {
 					cancelRun()
 					<-r.Context().Done()
@@ -158,6 +190,22 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			}
 			engine := &Engine{Store: s, Media: ms, Resources: resources, Config: cfg}
 			err = engine.Run(runCtx, *claim, cfg.Profile)
+			if fault == "repeated_stop" {
+				if err == nil || calls.Load() != 3 {
+					t.Fatalf("unbounded/missing normal-stop correction: calls=%d error=%v", calls.Load(), err)
+				}
+				run, _ := s.Run(ctx, claim.Run.ID)
+				var cp checkpoint
+				_ = json.Unmarshal(run.Checkpoint, &cp)
+				if cp.Repairs != 1 || cp.Calls != 3 {
+					t.Fatalf("correction budget lost: %+v", cp)
+				}
+				claim.Run = run
+				if again := engine.Run(ctx, *claim, cfg.Profile); again == nil || calls.Load() != 3 {
+					t.Fatalf("resume reset correction: calls=%d error=%v", calls.Load(), again)
+				}
+				return
+			}
 			if fault == "caller_cancels" {
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("interrupted ownership became an incompatible-provider failure: %v", err)
@@ -185,6 +233,47 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			var published int
 			if err = s.Pool.QueryRow(ctx, "SELECT count(*) FROM articles WHERE generation_run_id=$1", claim.Run.ID).Scan(&published); err != nil || published != 1 {
 				t.Fatalf("published %d times: %v", published, err)
+			}
+			if fault == "normal_stop" {
+				qaMode.Store(true)
+				var otherCalls atomic.Int32
+				other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { otherCalls.Add(1); w.WriteHeader(500) }))
+				defer other.Close()
+				changed := cfg.Profile
+				changed.ModelBaseURL, changed.ModelName = other.URL, "other-model"
+				if _, err = s.SaveConfig(ctx, changed, "other-key", ""); err != nil {
+					t.Fatal(err)
+				}
+				con, _, err := s.EnsureConversation(ctx, owner.ID, req.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				accepted, err := s.CreateTurn(ctx, owner.ID, con.ID, domain.ID(), domain.QuestionInput{Question: "视频未交代的额外细节是什么？"}, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				turn, err := s.Turn(ctx, owner.ID, con.ID, accepted.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				qa, err := s.Claim(ctx, turn.RunID, 1, "qa-fixture")
+				if err != nil || qa == nil {
+					t.Fatal(err)
+				}
+				frozen, err := s.Profile(ctx, qa.Run.ConfigID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if frozen.ModelBaseURL != server.URL {
+					t.Fatal("Q&A config loaded the current default")
+				}
+				if err = engine.Run(ctx, *qa, frozen); err != nil {
+					t.Fatal(err)
+				}
+				turn, err = s.Turn(ctx, owner.ID, con.ID, turn.ID)
+				if err != nil || turn.Status != "completed" || turn.Answer == nil || qaCalls.Load() != 2 || otherCalls.Load() != 0 {
+					t.Fatalf("Q&A finalization/frozen endpoint failed: %+v %v, original=%d other=%d", turn, err, qaCalls.Load(), otherCalls.Load())
+				}
 			}
 		})
 	}

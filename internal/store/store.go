@@ -84,7 +84,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return e
 	}
 
-	for version, name := range []string{"migrations/001_init.sql", "migrations/002_evidence_order.sql", "migrations/003_strip_provider_thoughts.sql"} {
+	for version, name := range []string{"migrations/001_init.sql", "migrations/002_evidence_order.sql", "migrations/003_strip_provider_thoughts.sql", "migrations/004_model_reporting.sql", "migrations/005_model_catalog.sql", "migrations/006_site_metrics.sql", "migrations/007_article_exports.sql", "migrations/008_external_references.sql", "migrations/009_provider_policies.sql", "migrations/010_reference_snapshots.sql"} {
 		n := version + 1
 		var exists bool
 		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", n).Scan(&exists); e != nil {

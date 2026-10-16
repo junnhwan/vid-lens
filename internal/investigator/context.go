@@ -16,15 +16,17 @@ import (
 )
 
 type checkpoint struct {
-	SchemaVersion int                 `json:"schema_version"`
-	Protocol      string              `json:"protocol"`
-	Messages      []*schema.Message   `json:"messages"`
-	Calls         int                 `json:"calls"`
-	Inspections   map[string][]string `json:"inspections"`
-	OverviewIDs   []string            `json:"overview_ids"`
-	Repeated      map[string]int      `json:"repeated"`
-	Ready         bool                `json:"ready"`
-	Repairs       int                 `json:"repairs"`
+	SchemaVersion      int                 `json:"schema_version"`
+	Protocol           string              `json:"protocol"`
+	LayoutVersion      string              `json:"layout_version,omitempty"`
+	Messages           []*schema.Message   `json:"messages"`
+	Calls              int                 `json:"calls"`
+	Inspections        map[string][]string `json:"inspections"`
+	OverviewIDs        []string            `json:"overview_ids"`
+	Repeated           map[string]int      `json:"repeated"`
+	Ready              bool                `json:"ready"`
+	Repairs            int                 `json:"repairs"`
+	FinalizationFailed bool                `json:"finalization_failed,omitempty"`
 }
 type observation struct {
 	InspectionID        string   `json:"inspection_id"`
@@ -67,10 +69,16 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	seen := map[string]bool{}
 	keep := map[string]bool{}
 	for _, o := range observations {
+		if o.Status != "supported" && o.Status != "unresolved" {
+			continue
+		}
 		for _, id := range o.FrameIDs {
 			seen[id] = true
 			keep[id] = o.RetainForComparison
 		}
+	}
+	if s.turn != nil && s.turn.Context.FrameID != nil {
+		keep[*s.turn.Context.FrameID] = true
 	}
 	for _, msg := range state.Messages {
 		parts := []schema.MessageInputPart{}
@@ -121,8 +129,16 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			filtered = append(filtered, x)
 		}
 	}
+	if s.cp.LayoutVersion == "source-context-v2" {
+		filtered = projectToolHistory(filtered)
+		filtered = s.projectSourceReads(filtered)
+	}
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})
+	}
+	filtered, e = s.projectReferences(ctx, filtered)
+	if e != nil {
+		return ctx, nil, e
 	}
 	state.Messages = filtered
 	if e = s.persist(ctx, state.Messages); e != nil {
@@ -293,6 +309,91 @@ func cleanExtra(in map[string]any) map[string]any {
 			continue
 		}
 		out[k] = v
+	}
+	return out
+}
+
+// A completed observation exchange is represented once by the canonical
+// evidence capsule. Mixed, pending and failed groups retain the full protocol.
+func projectToolHistory(messages []*schema.Message) []*schema.Message {
+	out := make([]*schema.Message, 0, len(messages))
+	for i := 0; i < len(messages); i++ {
+		m := messages[i]
+		if m.Role != schema.Assistant || len(m.ToolCalls) == 0 {
+			out = append(out, m)
+			continue
+		}
+		drop := true
+		ids := map[string]bool{}
+		for _, c := range m.ToolCalls {
+			if c.Function.Name != "record_observation" {
+				drop = false
+			}
+			ids[c.ID] = true
+		}
+		j := i + 1
+		for j < len(messages) && messages[j].Role == schema.Tool {
+			body := messages[j].Content
+			for _, part := range messages[j].UserInputMultiContent {
+				if part.Type == schema.ChatMessagePartTypeText {
+					body += part.Text
+				}
+			}
+			var result struct {
+				Saved bool `json:"saved"`
+			}
+			if !ids[messages[j].ToolCallID] || json.Unmarshal([]byte(body), &result) != nil || !result.Saved {
+				drop = false
+			}
+			delete(ids, messages[j].ToolCallID)
+			j++
+		}
+		if drop && len(ids) == 0 && j < len(messages) {
+			i = j - 1
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+func (s *session) projectSourceReads(messages []*schema.Message) []*schema.Message {
+	known := map[string]bool{}
+	for _, seg := range s.transcript {
+		known[seg.ID] = true
+	}
+	out := make([]*schema.Message, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == schema.Tool && m.ToolName == "read_source" {
+			body := m.Content
+			for _, p := range m.UserInputMultiContent {
+				if p.Type == schema.ChatMessagePartTypeText {
+					body += p.Text
+				}
+			}
+			var result struct {
+				SnapshotID string           `json:"snapshot_id"`
+				Segments   []domain.Segment `json:"segments"`
+				HasMore    bool             `json:"has_more"`
+			}
+			if json.Unmarshal([]byte(body), &result) == nil && result.SnapshotID == s.snapshot.ID && len(result.Segments) > 0 {
+				refs := []map[string]any{}
+				valid := true
+				for _, seg := range result.Segments {
+					if !known[seg.ID] {
+						valid = false
+					}
+					refs = append(refs, map[string]any{"id": seg.ID, "start_ms": seg.StartMS, "end_ms": seg.EndMS, "origin": seg.Origin})
+				}
+				if valid {
+					copy := *m
+					copy.UserInputMultiContent = nil
+					copy.Content = string(domain.JSON(map[string]any{"snapshot_id": result.SnapshotID, "segments": refs, "has_more": result.HasMore, "text_location": "exact full text is already present in the frozen source message; IDs and actual windows retained"}))
+					out = append(out, &copy)
+					continue
+				}
+			}
+		}
+		out = append(out, m)
 	}
 	return out
 }

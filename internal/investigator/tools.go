@@ -154,6 +154,15 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		out = append(out, t)
 		return nil
 	}
+	refs, e := s.referenceTools()
+	if e != nil {
+		return nil, e
+	}
+	for _, t := range refs {
+		if e = add(t, nil); e != nil {
+			return nil, e
+		}
+	}
 	if e := add(utils.InferEnhancedTool("find_evidence", "Find candidate transcript positions by words and/or time range in this video. Candidates are not confirmed evidence.", func(ctx context.Context, in findInput) (*schema.ToolResult, error) {
 		return s.step(ctx, publicTitle(in.ActivityTitle, "正在定位视频原文"), s.phase(), nil, func() (any, []string, error) {
 			terms := strings.Fields(strings.ToLower(in.Query))

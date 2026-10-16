@@ -172,6 +172,9 @@ func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) erro
 	}
 	for _, r := range rs {
 		work := snapshot + ":" + r.ConfigID
+		if r.GenerationSpec != nil {
+			work = "article-v2:" + snapshot + ":" + Hash(r.GenerationSpec)
+		}
 		var aid string
 		e = tx.QueryRow(ctx, "SELECT id FROM articles a WHERE reuse_key=$1 AND NOT EXISTS(SELECT 1 FROM asset_refs ar JOIN media_assets m ON m.id=ar.asset_id WHERE ar.owner_type='article' AND ar.owner_id=a.id AND m.state<>'ready') ORDER BY published_at DESC LIMIT 1", work).Scan(&aid)
 		var active *string
@@ -218,6 +221,11 @@ func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) erro
 		if _, e = tx.Exec(ctx, "UPDATE generation_requests SET snapshot_id=$2,active_run_id=$3,article_id=$4,status=$5,reuse=$6,segments=$7,revision=revision+1,updated_at=now() WHERE id=$1", r.ID, snapshot, active, articleID, status, reuse, domain.JSON(r.Segments)); e != nil {
 			return e
 		}
+		if articleID != nil {
+			if e = receipt(ctx, tx, r.SessionID, *articleID); e != nil {
+				return e
+			}
+		}
 	}
 	return nil
 }
@@ -260,7 +268,11 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		a.ID = domain.ID()
 		a.SchemaVersion = 1
 		a.PublishedAt = time.Now().UTC()
-		if _, e := tx.Exec(ctx, "INSERT INTO articles(id,generation_run_id,snapshot_id,config_id,reuse_key,content) VALUES($1,$2,$3,$4,$5,$6)", a.ID, c.Run.ID, a.SnapshotID, c.Run.ConfigID, c.Run.WorkKey, domain.JSON(a)); e != nil {
+		model, e := modelIdentity(ctx, tx, c.Run.ConfigID)
+		if e != nil {
+			return e
+		}
+		if _, e := tx.Exec(ctx, "INSERT INTO articles(id,generation_run_id,snapshot_id,config_id,reuse_key,content,generation_model) VALUES($1,$2,$3,$4,$5,$6,$7)", a.ID, c.Run.ID, a.SnapshotID, c.Run.ConfigID, c.Run.WorkKey, domain.JSON(a), domain.JSON(model)); e != nil {
 			return e
 		}
 		for _, id := range ids {
@@ -270,6 +282,15 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		}
 		if _, e := tx.Exec(ctx, "UPDATE generation_requests SET status='completed',article_id=$2,revision=revision+1,updated_at=now() WHERE active_run_id=$1 AND status='generating'", c.Run.ID, a.ID); e != nil {
 			return e
+		}
+		rs, e := many[domain.Request](ctx, tx, "SELECT to_jsonb(r) FROM generation_requests r WHERE active_run_id=$1 AND article_id=$2 AND status='completed'", c.Run.ID, a.ID)
+		if e != nil {
+			return e
+		}
+		for _, r := range rs {
+			if e = receipt(ctx, tx, r.SessionID, a.ID); e != nil {
+				return e
+			}
 		}
 		return finishRun(ctx, tx, c, a.ID)
 	})
@@ -392,6 +413,23 @@ func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind st
 			return nil
 		}
 		if submit {
+			if kind == "web.read" {
+				if op.Submissions > 0 {
+					return domain.Err(409, "PROVIDER_OUTCOME_UNKNOWN", "原网页读取结果未知，不重复发送。")
+				}
+				var reads int
+				if e = tx.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='web.read' AND submissions>0", c.Run.ID).Scan(&reads); e != nil {
+					return e
+				}
+				if reads >= 3 {
+					return domain.Err(429, "REFERENCE_LIMIT_EXCEEDED", "本轮最多读取三个网页。")
+				}
+			}
+			if kind == "model" {
+				if e = checkAvailable(ctx, tx, c.Run.ConfigID); e != nil {
+					return e
+				}
+			}
 			if op.Submissions >= 3 {
 				return domain.Err(422, "PROVIDER_UNAVAILABLE", "同一远端操作已达到提交上限。")
 			}
@@ -399,6 +437,11 @@ func (s *Store) BeginOperation(ctx context.Context, c domain.Claim, key, kind st
 				return e
 			}
 			op.Submissions++
+			if kind == "model" {
+				if _, e = tx.Exec(ctx, "INSERT INTO model_submissions(run_id,operation_key,submission,attempt_id) VALUES($1,$2,$3,$4)", c.Run.ID, key, op.Submissions, c.AttemptID); e != nil {
+					return e
+				}
+			}
 		}
 		return nil
 	})

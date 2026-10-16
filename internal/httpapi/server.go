@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -22,20 +21,23 @@ import (
 
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
+	"vidlens/internal/outbound"
 	"vidlens/internal/store"
 )
 
 const cookieName = "vidlens_session"
 
 type Server struct {
-	Store      *store.Store
-	Config     config.Config
-	hub        *Hub
-	CheckModel func(context.Context, config.Profile) (any, error)
+	Store        *store.Store
+	Config       config.Config
+	hub          *Hub
+	CheckModel   func(context.Context, config.Profile) (any, error)
+	loginWorkers chan struct{}
+	loginQueue   chan struct{}
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config) *Server {
-	a := &Server{Store: s, Config: c}
+	a := &Server{Store: s, Config: c, loginWorkers: make(chan struct{}, 2), loginQueue: make(chan struct{}, 6)}
 	a.hub = NewHub(ctx, a)
 	return a
 }
@@ -51,6 +53,25 @@ func (a *Server) Handler() http.Handler {
 		a.json(w, 200, map[string]any{"schema_version": 1, "status": "ok"})
 	})
 	m.HandleFunc("POST /api/v1/session", a.session)
+	m.HandleFunc("GET /api/v1/site/stats", a.stats)
+	m.HandleFunc("GET /api/v1/site/like", a.like)
+	m.HandleFunc("PUT /api/v1/site/like", a.like)
+	m.HandleFunc("GET /api/v1/models", a.publicModels)
+	m.HandleFunc("POST /api/v1/admin/login", a.ownerLogin)
+	m.HandleFunc("GET /api/v1/admin/session", a.ownerSession)
+	m.HandleFunc("DELETE /api/v1/admin/session", a.ownerSession)
+	m.HandleFunc("GET /api/v1/admin/providers", a.providers)
+	m.HandleFunc("POST /api/v1/admin/providers", a.providers)
+	m.HandleFunc("PUT /api/v1/admin/providers/{provider}", a.providers)
+	m.HandleFunc("POST /api/v1/admin/providers/{provider}/discover", a.discoverModels)
+	m.HandleFunc("GET /api/v1/admin/models", a.catalogModels)
+	m.HandleFunc("POST /api/v1/admin/models", a.catalogModels)
+	m.HandleFunc("POST /api/v1/admin/models/import-current", a.importCurrent)
+	m.HandleFunc("PUT /api/v1/admin/models/{model}", a.catalogModels)
+	m.HandleFunc("PUT /api/v1/admin/model-settings", a.modelSettings)
+	m.HandleFunc("POST /api/v1/admin/models/{model}/probes", a.probes)
+	m.HandleFunc("GET /api/v1/admin/models/{model}/probes", a.probes)
+	m.HandleFunc("GET /api/v1/admin/diagnostics", a.diagnostics)
 	m.HandleFunc("GET /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("PUT /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("POST /api/v1/admin/config/test", a.adminTest)
@@ -60,10 +81,15 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/requests/{request}/cancel", a.cancelRequest)
 	m.HandleFunc("POST /api/v1/requests/{request}/retry", a.retryRequest)
 	m.HandleFunc("GET /api/v1/requests/{request}/article", a.article)
+	m.HandleFunc("POST /api/v1/requests/{request}/exports", a.exports)
+	m.HandleFunc("GET /api/v1/requests/{request}/exports/latest", a.exports)
+	m.HandleFunc("GET /api/v1/requests/{request}/exports/{export}", a.exports)
+	m.HandleFunc("GET /api/v1/requests/{request}/exports/{export}/content", a.exportContent)
 	m.HandleFunc("GET /api/v1/requests/{request}/activity", a.activity)
 	m.HandleFunc("GET /api/v1/requests/{request}/events", a.events)
 	m.HandleFunc("GET /api/v1/requests/{request}/frames/{frame}", a.frame)
 	m.HandleFunc("GET /api/v1/requests/{request}/frames/{frame}/content", a.frameContent)
+	m.HandleFunc("GET /api/v1/requests/{request}/references/{reference}", a.reference)
 	m.HandleFunc("POST /api/v1/requests/{request}/conversation", a.conversation)
 	m.HandleFunc("GET /api/v1/conversations/{conversation}/turns", a.turns)
 	m.HandleFunc("POST /api/v1/conversations/{conversation}/turns", a.createTurn)
@@ -81,7 +107,11 @@ func (a *Server) Handler() http.Handler {
 				a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "服务暂不可用。"))
 			}
 		}()
-		m.ServeHTTP(w, r)
+		if strings.HasPrefix(r.URL.Path, "/api/v1/admin/") {
+			ownerAudit(m).ServeHTTP(w, r)
+		} else {
+			m.ServeHTTP(w, r)
+		}
 	})
 }
 func hashToken(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
@@ -152,7 +182,13 @@ func (a *Server) session(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "服务配置暂不可读取，请稍后重试。"))
 		return
 	}
-	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": p.Validate() == nil, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds}})
+	catalog, e := a.Store.ModelCatalog(r.Context())
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	models, _ := catalog["models"].([]domain.GenerationModel)
+	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": len(models) > 0, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds, "purpose_input": true, "max_purpose_chars": domain.PurposeCharsMax, "model_selection": true, "article_export": map[string]any{"formats": []string{"markdown", "markdown_zip"}}, "external_sources": map[string]bool{"enabled": a.Config.ReferenceReadEnabled, "search_enabled": a.Config.ReferenceReadEnabled && a.Config.SearchEnabled && a.Config.TavilyAPIKey != ""}}})
 }
 func (a *Server) body(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -212,13 +248,11 @@ func (a *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var in struct {
-		VideoURL string `json:"video_url"`
-	}
+	var in domain.RequestInput
 	if !a.body(w, r, &in) {
 		return
 	}
-	x, e := a.Store.CreateRequest(r.Context(), ses.ID, key, in.VideoURL, "", a.Config.DevMediaDir != "")
+	x, e := a.Store.CreateRequestWithInput(r.Context(), ses.ID, key, in, "", a.Config.DevMediaDir != "")
 	if e != nil {
 		a.problem(w, r, e)
 		return
@@ -383,6 +417,14 @@ func (a *Server) createTurn(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &in) {
 		return
 	}
+	if in.AllowExternalSources && contractVersion(r) < 2 {
+		a.problem(w, r, domain.Err(409, "CLIENT_UPDATE_REQUIRED", "网络补充需要新版页面。"))
+		return
+	}
+	if in.AllowExternalSources && !a.Config.ReferenceReadEnabled {
+		a.problem(w, r, domain.Err(503, "EXTERNAL_SOURCES_DISABLED", "站长尚未启用网络补充；可继续围绕视频提问。"))
+		return
+	}
 	x, e := a.Store.CreateTurn(r.Context(), ses.ID, r.PathValue("conversation"), key, in, "")
 	if e != nil {
 		a.problem(w, r, e)
@@ -393,7 +435,7 @@ func (a *Server) createTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
-	a.accepted(w, r, x, v, "/api/v1/conversations/"+r.PathValue("conversation")+"/turns/"+x.ID)
+	a.accepted(w, r, x, withContract(r, v), "/api/v1/conversations/"+r.PathValue("conversation")+"/turns/"+x.ID)
 }
 func (a *Server) getTurn(w http.ResponseWriter, r *http.Request) {
 	ses, ok := a.auth(w, r)
@@ -405,7 +447,10 @@ func (a *Server) getTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
-	a.json(w, 200, v)
+	if !a.checkContract(w, r, v) {
+		return
+	}
+	a.json(w, 200, withContract(r, v))
 }
 func (a *Server) cancelTurn(w http.ResponseWriter, r *http.Request) {
 	ses, ok := a.auth(w, r)
@@ -436,6 +481,15 @@ func (a *Server) retryTurn(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &in) {
 		return
 	}
+	old, e := a.Store.Turn(r.Context(), ses.ID, r.PathValue("conversation"), r.PathValue("turn"))
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	if old.AllowExternalSources && contractVersion(r) < 2 {
+		a.problem(w, r, domain.Err(409, "CLIENT_UPDATE_REQUIRED", "本轮网络补充重试需要新版页面。"))
+		return
+	}
 	x, e := a.Store.CreateTurn(r.Context(), ses.ID, r.PathValue("conversation"), key, domain.QuestionInput{ExpectedLastTurnID: in.Last}, r.PathValue("turn"))
 	if e != nil {
 		a.problem(w, r, e)
@@ -446,7 +500,7 @@ func (a *Server) retryTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
-	a.accepted(w, r, x, v, "/api/v1/conversations/"+r.PathValue("conversation")+"/turns/"+x.ID)
+	a.accepted(w, r, x, withContract(r, v), "/api/v1/conversations/"+r.PathValue("conversation")+"/turns/"+x.ID)
 }
 func page(r *http.Request) (int, error) {
 	v := r.URL.Query().Get("limit")
@@ -482,6 +536,9 @@ func (a *Server) turns(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
+	if !a.checkContract(w, r, v) {
+		return
+	}
 	a.json(w, 200, v)
 }
 func (a *Server) activity(w http.ResponseWriter, r *http.Request) {
@@ -506,12 +563,7 @@ func (a *Server) activity(w http.ResponseWriter, r *http.Request) {
 	a.json(w, 200, v)
 }
 func (a *Server) admin(w http.ResponseWriter, r *http.Request) bool {
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if subtle.ConstantTimeCompare([]byte(token), []byte(a.Config.AdminToken)) != 1 {
-		a.problem(w, r, domain.Err(401, "SESSION_REQUIRED", "需要管理员凭证。"))
-		return false
-	}
-	return true
+	return a.adminAuthenticated(w, r)
 }
 func (a *Server) adminConfig(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
@@ -528,6 +580,10 @@ func (a *Server) adminConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if e := in.Profile.Validate(); e != nil {
 			a.problem(w, r, domain.Err(422, "INVALID_ARGUMENT", e.Error()))
+			return
+		}
+		if _, e := outbound.Validate(in.Profile.ModelBaseURL, a.Config.ModelAllowedHosts, true); e != nil {
+			a.problem(w, r, domain.Err(422, "INVALID_ARGUMENT", "模型端点不符合服务器出站策略。"))
 			return
 		}
 		id, e := a.Store.SaveConfig(r.Context(), in.Profile, in.ModelKey, in.ASRKey)
@@ -567,21 +623,22 @@ func (a *Server) adminTest(w http.ResponseWriter, r *http.Request) {
 	if !a.body(w, r, &struct{}{}) {
 		return
 	}
-	if a.CheckModel == nil {
-		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "模型检查不可用。"))
+	key, ok := a.key(w, r)
+	if !ok {
 		return
 	}
-	_, p, e := a.Store.CurrentConfig(r.Context())
+	m, e := a.Store.ImportCurrentModel(r.Context())
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	v, e := a.CheckModel(r.Context(), p)
+	v, e := a.Store.CreateProbe(r.Context(), m.ID, m.RevisionID, "capabilities", key)
 	if e != nil {
-		a.problem(w, r, domain.Err(422, "PROVIDER_UNAVAILABLE", "模型能力检查失败，请检查服务配置。"))
+		a.problem(w, r, e)
 		return
 	}
-	a.json(w, 200, map[string]any{"schema_version": 1, "result": v})
+	w.Header().Set("Idempotency-Replayed", fmtBool(v.Replayed))
+	a.json(w, 202, map[string]any{"schema_version": 1, "id": v.ID, "status_url": "/api/v1/admin/models/" + m.ID + "/probes"})
 }
 func (a *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {

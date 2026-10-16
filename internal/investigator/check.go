@@ -40,7 +40,7 @@ func (e *Engine) CheckModel(ctx context.Context, p config.Profile) (any, error) 
 	}
 	var encoded bytes.Buffer
 	_ = png.Encode(&encoded, img)
-	used := false
+	used, submitted := false, false
 	t, err := utils.InferEnhancedTool("inspect_test_pattern", "Get the test image pixels.", func(ctx context.Context, in struct{}) (*schema.ToolResult, error) {
 		used = true
 		return &schema.ToolResult{Parts: []schema.ToolOutputPart{{Type: schema.ToolPartTypeText, Text: "请读取图片左右两个区域的颜色。"}, {Type: schema.ToolPartTypeImage, Image: &schema.ToolOutputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: domain.Ptr(base64.StdEncoding.EncodeToString(encoded.Bytes())), MIMEType: "image/png"}}}}}, nil
@@ -48,7 +48,21 @@ func (e *Engine) CheckModel(ctx context.Context, p config.Profile) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "capability_check", Model: &imageBridge{base: model}, Instruction: "先调用 inspect_test_pattern 获取真实图片。收到图片后说出左半部分和右半部分各自的主要颜色，不要猜测。", MaxIterations: 3, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{t}, ExecuteSequentially: true}}})
+	final, err := utils.InferEnhancedTool("submit_probe", "Submit the two observed colors as a structured result.", func(ctx context.Context, in struct {
+		Left  string `json:"left"`
+		Right string `json:"right"`
+	}) (*schema.ToolResult, error) {
+		left, right := strings.ToLower(in.Left), strings.ToLower(in.Right)
+		if !used || !(strings.Contains(left, "green") || strings.Contains(left, "绿")) || !(strings.Contains(right, "purple") || strings.Contains(right, "紫")) {
+			return nil, errors.New("observed colors did not match actual pixels")
+		}
+		submitted = true
+		return textResult(map[string]bool{"validated_submission": true}), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "capability_check", Model: &imageBridge{base: model}, Instruction: "先调用 inspect_test_pattern 获取真实图片。收到图片后调用 submit_probe，提交左右两半的主要颜色；不得猜测或自由文本收尾。", MaxIterations: 3, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{t, final}, ExecuteSequentially: true}, ReturnDirectly: map[string]bool{"submit_probe": true}}})
 	if err != nil {
 		return nil, err
 	}
@@ -73,11 +87,12 @@ func (e *Engine) CheckModel(ctx context.Context, p config.Profile) (any, error) 
 		}
 	}
 	lower := strings.ToLower(result)
-	pass := used && (strings.Contains(lower, "green") || strings.Contains(lower, "绿")) && (strings.Contains(lower, "purple") || strings.Contains(lower, "紫"))
+	_ = lower
+	pass := used && submitted
 	if !pass {
 		return nil, errors.New("tool image capability check did not match actual pixels")
 	}
-	return map[string]any{"tool_call": true, "actual_image_input": true, "observation_matches_test_pixels": true, "description": result}, nil
+	return map[string]any{"tool_call": true, "actual_image_input": true, "observation_matches_test_pixels": true, "validated_submission": true}, nil
 }
 
 type imageBridge struct{ base model.ToolCallingChatModel }

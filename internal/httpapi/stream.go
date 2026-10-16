@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -161,6 +162,9 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, current.Err)
 		return
 	}
+	if !a.checkContract(w, r, current.View) {
+		return
+	}
 	raw := r.Header.Get("Last-Event-ID")
 	if raw == "" {
 		raw = r.URL.Query().Get("after")
@@ -202,6 +206,15 @@ func (a *Server) events(w http.ResponseWriter, r *http.Request) {
 	scope := map[string]string{"type": typ, "id": id}
 	snapshotURL := r.URL.Path[:len(r.URL.Path)-len("/events")]
 	write := func(event string, payload any, p *store.Position) bool {
+		if v, ok := payload.(map[string]any); ok && event == "view.snapshot" {
+			if contractVersion(r) < 2 && bytes.Contains(domain.JSON(v), []byte(`"kind":"external_reference"`)) {
+				event = "stream.reset"
+				payload = map[string]string{"code": "CLIENT_UPDATE_REQUIRED", "snapshot_url": snapshotURL}
+				p = nil
+			} else {
+				payload = withContract(r, v)
+			}
+		}
 		var obj map[string]any
 		obj = map[string]any{"schema_version": 1, "scope": scope, "payload": payload}
 		cursor := ""

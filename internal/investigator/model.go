@@ -6,18 +6,19 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
+	"vidlens/internal/outbound"
 )
 
 type remoteSubmitKey struct{}
@@ -29,11 +30,24 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, e
 		}
 	}
+	observer, _ := req.Context().Value(usageKey{}).(*usageObserver)
+	if get, ok := req.Context().Value(probeObserverKey{}).(func() *usageObserver); ok {
+		observer = get()
+	}
+	if observer != nil {
+		observer.wire(req)
+	}
 	r, e := t.base.RoundTrip(req)
 	if e != nil {
+		if observer != nil {
+			observer.finish(false)
+		}
 		return nil, &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型连接暂不可用。", Transient: true}
 	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		if observer != nil {
+			observer.finish(false)
+		}
 		slog.Warn("model service HTTP failure", "http_status", r.StatusCode)
 		_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 4096))
 		r.Body.Close()
@@ -50,6 +64,11 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return nil, &domain.WorkError{Code: code, Message: "模型服务未能完成请求。", Transient: retry, RetryAfter: max(time.Duration(0), delay)}
 	}
+	if observer != nil {
+		observer.report.RequestID = bounded(r.Header.Get("X-Request-ID"))
+		observer.jsonBody = !strings.Contains(r.Header.Get("Content-Type"), "text/event-stream")
+		r.Body = &observedBody{ReadCloser: r.Body, o: observer}
+	}
 	return r, nil
 }
 func (e *Engine) baseModel(ctx context.Context, p config.Profile) (model.ToolCallingChatModel, error) {
@@ -57,18 +76,20 @@ func (e *Engine) baseModel(ctx context.Context, p config.Profile) (model.ToolCal
 	if err != nil {
 		return nil, err
 	}
-	return NewModel(ctx, p, key, e.Config.ProxyURL)
-}
-func NewModel(ctx context.Context, p config.Profile, key, proxy string) (model.ToolCallingChatModel, error) {
-	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext, ResponseHeaderTimeout: 90 * time.Second, MaxIdleConnsPerHost: 2}
-	if proxy != "" {
-		u, e := url.Parse(proxy)
-		if e != nil {
-			return nil, e
+	allow := append([]string{}, e.Config.ModelAllowedHosts...)
+	if e.Config.DevMediaDir != "" {
+		if u, err := url.Parse(p.ModelBaseURL); err == nil {
+			allow = append(allow, u.Host)
 		}
-		tr.Proxy = http.ProxyURL(u)
 	}
-	client := &http.Client{Transport: safeTransport{tr}, Timeout: 300 * time.Second}
+	return NewModel(ctx, p, key, e.Config.ProxyURL, allow...)
+}
+func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed ...string) (model.ToolCallingChatModel, error) {
+	client, err := outbound.CredentialClient(ctx, p.ModelBaseURL, proxy, p.ModelProxyPolicy, allowed, 300*time.Second)
+	if err != nil {
+		return nil, domain.Err(503, "MODEL_UNAVAILABLE", "模型端点或代理不符合服务器出站策略。")
+	}
+	client.Transport = safeTransport{client.Transport}
 	return newModelWithClient(ctx, p, key, client)
 }
 
@@ -130,21 +151,37 @@ func NormalizeToolImages(input []*schema.Message) []*schema.Message {
 }
 
 type meteredModel struct {
-	session *session
-	base    model.ToolCallingChatModel
+	session    *session
+	base       model.ToolCallingChatModel
+	toolsChars int
 }
 
 func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	chars := 0
+	for _, info := range t {
+		var parameters any
+		if info.ParamsOneOf != nil {
+			p, err := info.ParamsOneOf.ToJSONSchema()
+			if err != nil {
+				return nil, err
+			}
+			parameters = p
+		}
+		chars += utf8.RuneCount(domain.JSON(map[string]any{"type": "function", "function": map[string]any{"name": info.Name, "description": info.Desc, "parameters": parameters}}))
+	}
 	b, e := m.base.WithTools(t)
 	if e != nil {
 		return nil, e
 	}
-	return &meteredModel{session: m.session, base: b}, nil
+	return &meteredModel{session: m.session, base: b, toolsChars: chars}, nil
 }
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	args := stripPixels(in)
+	if utf8.RuneCount(domain.JSON(args))+m.toolsChars+s.profile.MaxOutputTokens*4 > s.profile.MaxInputChars {
+		return nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整上下文与输出预留超过模型限制；已保留来源，不会截断全片后继续生成。")
+	}
 	for local := 0; local < 2; local++ {
 		op, e := s.engine.Store.BeginOperation(ctx, s.claim, key, "model", args, false)
 		if e != nil {
@@ -157,6 +194,17 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			}
 			return &saved, nil
 		}
+		phase := "investigate"
+		if s.turn != nil {
+			phase = "answer"
+		} else if s.compositionReady {
+			phase = "compose"
+		}
+		step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", Title: "正在等待模型处理", Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+		step, e = s.engine.Store.Step(ctx, s.claim, step)
+		if e != nil {
+			return nil, e
+		}
 		actx, release, e := s.engine.Resources.Acquire(ctx, s.claim, "ai")
 		if e != nil {
 			return nil, e
@@ -165,8 +213,22 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.compositionReady {
 			limits.Total = 300 * time.Second
 		}
-		sub := context.WithValue(actx, remoteSubmitKey{}, func() error { _, e := s.engine.Store.BeginOperation(actx, s.claim, key, "model", args, true); return e })
-		result, e := receiveModelResponse(sub, m.base, NormalizeToolImages(in), limits, opts...)
+		submission := 0
+		observer := newUsageObserver(s.cp.LayoutVersion, s.profile.CachePolicy, func(report usageReport) {
+			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := s.engine.Store.RecordSubmission(cctx, s.claim, key, submission, report); err != nil {
+				slog.Warn("model usage observation unavailable")
+			}
+		})
+		sub := context.WithValue(actx, usageKey{}, observer)
+		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
+			op, e := s.engine.Store.BeginOperation(actx, s.claim, key, "model", args, true)
+			submission = op.Submissions
+			return e
+		})
+		options := append(cacheOptions(s.profile), opts...)
+		result, e := receiveModelResponse(sub, m.base, NormalizeToolImages(in), limits, options...)
 		release()
 		if e != nil {
 			if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
@@ -194,6 +256,12 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			usage = result.ResponseMeta.Usage
 		}
 		if e = s.engine.Store.FinishOperation(ctx, s.claim, key, result, providerID(result), usage); e != nil {
+			return nil, e
+		}
+		step.Status = "completed"
+		step.FinishedAt = domain.Ptr(time.Now().UTC())
+		step.Outcome = &domain.Outcome{Message: "已收到完整模型响应，继续核对或正式提交。", EvidenceStatus: "not_assessed"}
+		if _, e = s.engine.Store.Step(ctx, s.claim, step); e != nil {
 			return nil, e
 		}
 		return result, nil

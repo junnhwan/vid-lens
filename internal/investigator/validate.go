@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/domain"
@@ -198,7 +199,7 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 	return errors.Join(problems...)
 }
 func (s *session) validateBlock(ctx context.Context, b domain.Block, citations map[string]domain.Citation) error {
-	if b.Origin != "video" && b.Origin != "background_explanation" {
+	if b.Origin != "video" && b.Origin != "background_explanation" && !(b.Origin == "external_reference" && s.turn != nil && s.turn.AllowExternalSources) {
 		return invalid("正文来源标识无效")
 	}
 	ids := append([]string{}, b.CitationIDs...)
@@ -295,10 +296,30 @@ func (s *session) validateBlock(ctx context.Context, b domain.Block, citations m
 			return invalid("引用不存在：" + id)
 		}
 	}
+	if b.Origin == "external_reference" {
+		has := false
+		for _, id := range ids {
+			has = has || citations[id].Kind == "external_reference"
+		}
+		if !has {
+			return invalid("网络补充块必须引用实际读取的网页原文")
+		}
+	}
 	return nil
 }
 func (s *session) validateCitation(ctx context.Context, c domain.Citation, article bool) error {
 	switch c.Kind {
+	case "external_reference":
+		if article || s.turn == nil || !s.turn.AllowExternalSources {
+			return invalid("本轮未授权外部引用")
+		}
+		r, e := s.engine.Store.ReferenceForRun(ctx, s.claim.Run.ID, c.ReferenceID)
+		if e != nil || r.Status != "read" || r.Body == nil || r.ContentSHA256 == nil || c.ContentSHA256 != *r.ContentSHA256 || c.URL != r.EvidenceURL() || c.Title != r.Title || c.ReadAt == nil || r.ReadAt == nil || !c.ReadAt.Equal(*r.ReadAt) {
+			return invalid("外部引用必须来自本轮实际读取的原文快照")
+		}
+		if c.Quote == nil || strings.TrimSpace(*c.Quote) == "" || !strings.Contains(domain.NormalizeQuote(*r.Body), domain.NormalizeQuote(*c.Quote)) {
+			return invalid("外部引用必须包含连续的实际原文摘录，不能引用搜索摘要")
+		}
 	case "video_text":
 		if c.SnapshotID != s.snapshot.ID || c.Range == nil || len(c.SegmentIDs) == 0 || c.Range.StartMS < 0 || c.Range.StartMS >= c.Range.EndMS || c.Range.EndMS > s.snapshot.DurationMS {
 			return invalid("字幕引用范围无效")
@@ -444,8 +465,17 @@ func validateMap(m *domain.MindMap, sections map[string]bool) error {
 	return nil
 }
 func (s *session) repair(ctx context.Context, cause error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.engine.Store.Check(ctx, s.claim); err != nil {
+		return err
+	}
+	if s.cp.Calls >= s.profile.MaxIterations || !s.claim.Run.DeadlineAt.After(time.Now()) {
+		return domain.Err(422, "EVIDENCE_INSUFFICIENT", "剩余预算不足以纠正并正式提交结果。")
+	}
 	if s.cp.Repairs >= 1 {
-		return fmt.Errorf("修复一次后仍不符合结果格式: %w", cause)
+		return domain.Err(422, "EVIDENCE_INSUFFICIENT", "纠正一次后仍没有合格的正式提交。")
 	}
 	s.cp.Repairs++
 	last := -1
@@ -459,7 +489,18 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		return errors.New("missing candidate call")
 	}
 	for _, call := range s.cp.Messages[last].ToolCalls {
+		done := false
+		for _, msg := range s.cp.Messages[last+1:] {
+			if msg.Role == schema.Tool && msg.ToolCallID == call.ID {
+				done = true
+				break
+			}
+		}
+		if done {
+			continue
+		}
 		s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolName: call.Function.Name, ToolCallID: call.ID, Content: fmt.Sprintf("候选校验失败，允许修复一次：%v。修正字段/引用后重新提交。", cause)})
 	}
+	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次唯一一次纠正：%v。必须调用正式提交工具，不得用自由文本收尾；原证据、调用数与时限继续适用。", cause)))
 	return s.persist(ctx, s.cp.Messages)
 }

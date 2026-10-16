@@ -13,6 +13,9 @@ import (
 
 // Profile is frozen for each accepted run. Host admission can impose lower current limits.
 type Profile struct {
+	ModelProxyPolicy     string   `json:"model_proxy_policy,omitempty"`
+	CachePolicy          string   `json:"cache_policy,omitempty"`
+	CacheHintsVerified   bool     `json:"cache_hints_verified,omitempty"`
 	ModelDisableThinking bool     `json:"model_disable_thinking"`
 	ModelBaseURL         string   `json:"model_base_url"`
 	ModelName            string   `json:"model_name"`
@@ -91,6 +94,11 @@ type Config struct {
 	SessionTTL                                                                                               time.Duration
 	Profile                                                                                                  Profile
 	ModelKey, ASRKey                                                                                         string
+	ModelAllowedHosts                                                                                        []string
+	ReferenceReadEnabled                                                                                     bool
+	SearchEnabled                                                                                            bool
+	TavilyAPIKey                                                                                             string
+	SearchMonthlyLimit                                                                                       int
 }
 
 func Load() (Config, error) { return LoadFile("") }
@@ -125,6 +133,20 @@ func LoadFile(path string) (Config, error) {
 	p.ASRModel = get("VIDLENS_ASR_MODEL")
 	c := Config{DatabaseURL: get("VIDLENS_DATABASE_URL"), RedisURL: env("VIDLENS_REDIS_URL", "redis://127.0.0.1:6379/0"), DataDir: get("VIDLENS_DATA_DIR"), Listen: env("VIDLENS_LISTEN", "127.0.0.1:8080"), Origin: env("VIDLENS_PUBLIC_ORIGIN", "http://127.0.0.1:8080"), AdminToken: get("VIDLENS_ADMIN_TOKEN"), SecretKey: get("VIDLENS_SECRET_KEY"), DevMediaDir: get("VIDLENS_DEV_MEDIA_DIR"), CookieFile: get("VIDLENS_PLATFORM_COOKIE_FILE"), ProxyURL: get("VIDLENS_PROXY_URL"), Profile: p, ModelKey: get("VIDLENS_MODEL_API_KEY"), ASRKey: get("VIDLENS_ASR_API_KEY"), DiskStopPercent: 85, DiskReserveBytes: 5 << 30, SessionTTL: 30 * 24 * time.Hour}
 	c.SecureCookie = strings.HasPrefix(c.Origin, "https://")
+	if v := get("VIDLENS_MODEL_ALLOWED_HOSTS"); v != "" {
+		c.ModelAllowedHosts = strings.Split(v, ",")
+	}
+	c.ReferenceReadEnabled = get("VIDLENS_REFERENCE_READ_ENABLED") == "true"
+	c.SearchEnabled = get("VIDLENS_SEARCH_ENABLED") == "true"
+	c.TavilyAPIKey = get("VIDLENS_TAVILY_API_KEY")
+	c.SearchMonthlyLimit = 1000
+	if v := get("VIDLENS_SEARCH_MONTHLY_LIMIT"); v != "" {
+		n, e := strconv.Atoi(v)
+		if e != nil || n < 0 || n > 1000 {
+			return c, errors.New("search monthly limit must be 0-1000")
+		}
+		c.SearchMonthlyLimit = n
+	}
 	if s := get("VIDLENS_DISK_STOP_PERCENT"); s != "" {
 		v, e := strconv.Atoi(s)
 		if e != nil || v < 50 || v > 99 {
