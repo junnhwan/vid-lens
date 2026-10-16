@@ -4,11 +4,14 @@ import { resolveBrand } from "./brandMarks"
 describe("resolveBrand", () => {
   it("keeps an explicit brand", () => {
     expect(resolveBrand("claude", "qwen3.6-plus")).toBe("claude")
+    expect(resolveBrand("grok", "custom model")).toBe("grok")
   })
 
   it("reads the family from a generic display name", () => {
     expect(resolveBrand("generic", "qwen3.6-plus")).toBe("qwen")
     expect(resolveBrand("generic", "deepseek-v3")).toBe("deepseek")
+    expect(resolveBrand("generic", "grok-4.7")).toBe("grok")
+    expect(resolveBrand("generic", "xAI Grok 4")).toBe("grok")
     expect(resolveBrand("generic", "gpt-4o")).toBe("openai")
     expect(resolveBrand("generic", "kimi-k2")).toBe("kimi")
     expect(resolveBrand("generic", "glm-4.5")).toBe("glm")
