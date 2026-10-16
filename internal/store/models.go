@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -68,6 +69,10 @@ type ModelInput struct {
 const providerSelect = `SELECT jsonb_build_object('id',p.id,'revision_id',r.id,'revision',p.revision,'name',r.name,'base_url',r.base_url,'proxy_policy',r.proxy_policy,'key_configured',r.key_ref<>'','enabled',p.enabled) FROM model_providers p JOIN provider_revisions r ON r.id=p.current_revision_id`
 const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
 
+// Older databases may already have enabled models without a catalog default.
+// Once enabled, the catalog stays active even if all its models are stopped.
+const catalogEnabledSQL = `(s.selection_enabled OR EXISTS(SELECT 1 FROM catalog_models WHERE enabled))`
+
 func (s *Store) Providers(ctx context.Context) ([]Provider, error) {
 	return many[Provider](ctx, s.Pool, providerSelect+" ORDER BY r.name,p.id")
 }
@@ -123,6 +128,10 @@ func (s *Store) SaveProvider(ctx context.Context, id string, in ProviderInput) (
 		id = "prv_" + domain.ID()
 	}
 	err := s.Tx(ctx, func(tx pgx.Tx) error {
+		var catalogEnabled bool
+		if e := tx.QueryRow(ctx, "SELECT "+catalogEnabledSQL+" FROM model_settings s").Scan(&catalogEnabled); e != nil {
+			return e
+		}
 		old, e := providerRevision(ctx, tx, id)
 		create := errors.Is(e, pgx.ErrNoRows)
 		if e != nil && !create {
@@ -192,7 +201,7 @@ func (s *Store) SaveProvider(ctx context.Context, id string, in ProviderInput) (
 				}
 			}
 		}
-		_, e = tx.Exec(ctx, "UPDATE model_settings SET revision=revision+1")
+		_, e = tx.Exec(ctx, "UPDATE model_settings SET selection_enabled=selection_enabled OR $1,revision=revision+1", catalogEnabled)
 		return e
 	})
 	if err != nil {
@@ -297,7 +306,7 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 				return e
 			}
 		}
-		_, e = tx.Exec(ctx, "UPDATE model_settings SET revision=revision+1")
+		_, e = tx.Exec(ctx, "UPDATE model_settings SET selection_enabled=selection_enabled OR $1,revision=revision+1", in.Enabled || old.Enabled)
 		return e
 	})
 	if err != nil {
@@ -336,30 +345,62 @@ func (s *Store) SetDefaultModel(ctx context.Context, id string, expected int64) 
 		if _, _, e := selectable(ctx, tx, id, ""); e != nil {
 			return e
 		}
-		_, e := tx.Exec(ctx, "UPDATE model_settings SET default_model_id=$1,selection_enabled=true,revision=revision+1", id)
+		_, e := tx.Exec(ctx, "UPDATE model_settings SET default_model_id=$1,revision=revision+1", id)
 		return e
 	})
 }
+
+type catalogState struct {
+	enabled   bool
+	defaultID *string
+	revision  int64
+	models    []domain.GenerationModel
+}
+
+// Visibility and implicit request selection use the same current eligibility.
+// A stopped default is retained in owner settings, but cannot preselect a model.
+func loadCatalog(ctx context.Context, q Querier) (catalogState, error) {
+	c := catalogState{models: []domain.GenerationModel{}}
+	var preferred *string
+	var raw json.RawMessage
+	// Read settings and models in one snapshot, including during first enablement.
+	err := q.QueryRow(ctx, `SELECT `+catalogEnabledSQL+`,s.default_model_id,s.revision,
+COALESCE((SELECT jsonb_agg(item ORDER BY item->>'display_name',item->>'id') FROM (`+modelSelect+`) catalog(item)), '[]'::jsonb)
+FROM model_settings s`).Scan(&c.enabled, &preferred, &c.revision, &raw)
+	if err != nil {
+		return c, err
+	}
+	var models []CatalogModel
+	if err = json.Unmarshal(raw, &models); err != nil {
+		return c, err
+	}
+	for _, m := range models {
+		if m.Enabled && m.ProviderEnabled && m.Verified {
+			c.models = append(c.models, domain.GenerationModel{ID: m.ID, RevisionID: m.RevisionID, DisplayName: m.DisplayName, BrandID: m.BrandID, Description: m.Description})
+			if preferred != nil && *preferred == m.ID {
+				c.defaultID = preferred
+			}
+		}
+	}
+	return c, nil
+}
+
+func (c catalogState) preselectedID() string {
+	if c.defaultID != nil {
+		return *c.defaultID
+	}
+	if len(c.models) > 0 {
+		return c.models[0].ID
+	}
+	return ""
+}
+
 func (s *Store) ModelCatalog(ctx context.Context) (map[string]any, error) {
-	var enabled bool
-	var def *string
-	var revision int64
-	e := s.Pool.QueryRow(ctx, "SELECT selection_enabled,default_model_id,revision FROM model_settings").Scan(&enabled, &def, &revision)
+	c, e := loadCatalog(ctx, s.Pool)
 	if e != nil {
 		return nil, e
 	}
-	public := []domain.GenerationModel{}
-	if enabled {
-		models, e := s.Models(ctx)
-		if e != nil {
-			return nil, e
-		}
-		for _, m := range models {
-			if m.Enabled && m.ProviderEnabled && m.Verified {
-				public = append(public, domain.GenerationModel{ID: m.ID, RevisionID: m.RevisionID, DisplayName: m.DisplayName, BrandID: m.BrandID, Description: m.Description})
-			}
-		}
-	} else {
+	if !c.enabled {
 		cid, p, e := s.CurrentConfig(ctx)
 		if e != nil {
 			return nil, e
@@ -373,11 +414,11 @@ func (s *Store) ModelCatalog(ctx context.Context) (map[string]any, error) {
 			m.RevisionID = cid
 			m.Legacy = true
 			m.SelectionLocked = false
-			public = append(public, m)
-			def = domain.Ptr("legacy")
+			c.models = append(c.models, m)
+			c.defaultID = domain.Ptr("legacy")
 		}
 	}
-	return map[string]any{"schema_version": 1, "revision": revision, "default_model_id": def, "selection_enabled": enabled, "models": public}, nil
+	return map[string]any{"schema_version": 1, "revision": c.revision, "default_model_id": c.defaultID, "selection_enabled": c.enabled, "models": c.models}, nil
 }
 func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.RequestInput) (domain.GenerationSpec, error) {
 	var spec domain.GenerationSpec
@@ -390,15 +431,14 @@ func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.Reque
 	if utf8.RuneCountInString(spec.Purpose) > domain.PurposeCharsMax {
 		return spec, &domain.Problem{Status: 422, Code: "INPUT_LIMIT_EXCEEDED", Detail: "关注点最多 500 字。", Meta: map[string]any{"field_errors": []map[string]string{{"field": "purpose", "message": "关注点最多 500 字。"}}}}
 	}
-	var enabled bool
-	var def *string
-	if e := tx.QueryRow(ctx, "SELECT selection_enabled,default_model_id FROM model_settings").Scan(&enabled, &def); e != nil {
+	catalog, e := loadCatalog(ctx, tx)
+	if e != nil {
 		return spec, e
 	}
-	if enabled || in.ModelID != "" && in.ModelID != "legacy" {
+	if catalog.enabled || in.ModelID != "" && in.ModelID != "legacy" {
 		id := in.ModelID
-		if id == "" && def != nil {
-			id = *def
+		if id == "" {
+			id = catalog.preselectedID()
 		}
 		if id == "" {
 			return spec, domain.Err(503, "MODEL_UNAVAILABLE", "暂时没有可用模型。")
@@ -414,7 +454,6 @@ func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.Reque
 	if in.ModelRevisionID != "" && in.ModelRevisionID != spec.ConfigID {
 		return spec, domain.Err(409, "MODEL_SELECTION_STALE", "现有模型配置已更新，请重新读取目录。")
 	}
-	var e error
 	spec.Model, e = modelIdentity(ctx, tx, spec.ConfigID)
 	// New requests freeze even the compatibility single-model profile. Only
 	// pre-migration records retain the historical-Q&A provenance caveat.
@@ -424,7 +463,7 @@ func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.Reque
 }
 func checkAvailable(ctx context.Context, q Querier, cid string) error {
 	var found, bound, enabled, directory bool
-	e := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_revisions WHERE config_id=$1),EXISTS(SELECT 1 FROM legacy_model_bindings WHERE config_id=$1),COALESCE((SELECT m.enabled AND p.enabled FROM catalog_models m JOIN model_providers p ON p.id=m.provider_id WHERE m.id=COALESCE((SELECT model_id FROM model_revisions WHERE config_id=$1 LIMIT 1),(SELECT model_id FROM legacy_model_bindings WHERE config_id=$1))),true),(SELECT selection_enabled FROM model_settings)`, cid).Scan(&found, &bound, &enabled, &directory)
+	e := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_revisions WHERE config_id=$1),EXISTS(SELECT 1 FROM legacy_model_bindings WHERE config_id=$1),COALESCE((SELECT m.enabled AND p.enabled FROM catalog_models m JOIN model_providers p ON p.id=m.provider_id WHERE m.id=COALESCE((SELECT model_id FROM model_revisions WHERE config_id=$1 LIMIT 1),(SELECT model_id FROM legacy_model_bindings WHERE config_id=$1))),true),(SELECT `+catalogEnabledSQL+` FROM model_settings s)`, cid).Scan(&found, &bound, &enabled, &directory)
 	if e != nil {
 		return e
 	}
