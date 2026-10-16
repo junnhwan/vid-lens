@@ -81,3 +81,21 @@ func TestCandidateSyntaxErrorKeepsOffsetAndCategory(t *testing.T) {
 		t.Fatal(final)
 	}
 }
+
+func TestLimitationOnlyCitationIsResolvedWithoutInventingSources(t *testing.T) {
+	d := articleDraft{Sections: map[string]domain.Section{}, Limitations: []domain.Limitation{{Code: "visual_unclear", Message: "图中文字不清晰", CitationIDs: []string{"f2"}, SectionIDs: []string{}}}}
+	catalog := map[string]domain.Citation{"f2": {ID: "f2", Kind: "video_frame", SnapshotID: "owned", FrameID: "frame-not-in-body", TimeMS: domain.Ptr(int64(200))}}
+	if err := resolveDraftCitations(&d, catalog); err != nil {
+		t.Fatal(err)
+	}
+	if d.Citations["f2"].FrameID != "frame-not-in-body" {
+		t.Fatal("limitation source dropped")
+	}
+	if err := validateLimitations(d.Limitations, map[string]bool{}, d.Citations); err != nil {
+		t.Fatal(err)
+	}
+	d.Limitations[0].CitationIDs = []string{"invented"}
+	if err := resolveDraftCitations(&d, catalog); err == nil {
+		t.Fatal("unknown limitation source accepted")
+	}
+}

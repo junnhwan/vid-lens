@@ -26,6 +26,8 @@ type checkpoint struct {
 	Repeated            map[string]int      `json:"repeated"`
 	Ready               bool                `json:"ready"`
 	Repairs             int                 `json:"repairs"`
+	DraftRepairVersion  int                 `json:"draft_repair_version,omitempty"`
+	DraftCorrection     bool                `json:"draft_correction,omitempty"`
 	Composing           bool                `json:"composing,omitempty"`
 	CitationFrames      []string            `json:"citation_frames,omitempty"`
 	DraftResume         bool                `json:"draft_resume,omitempty"`
@@ -177,6 +179,10 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			return ctx, nil, err
 		}
 		s.cp.Composing = saved > 0
+		if s.cp.DraftCorrection && saved > s.cp.DraftRepairVersion {
+			s.cp.DraftCorrection = false
+		}
+		s.forceDraftSubmit = saved > 0 && len(draft.Sections) == len(draft.Plan) && len(draft.Plan) > 0 && !s.cp.DraftCorrection
 		catalog, err := s.citationCatalog(ctx)
 		if err != nil {
 			return ctx, nil, err

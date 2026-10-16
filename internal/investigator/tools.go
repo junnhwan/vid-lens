@@ -101,7 +101,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		if isCandidateTool(t.name) {
 			issue := candidateIssue(err)
 			if t.session != nil && t.session.engine != nil {
-				if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", issue); e != nil {
+				if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, rawToolArguments(args), "invalid", issue); e != nil {
 					return nil, e
 				}
 				if t.name == "begin_article" || t.name == "save_article_sections" {

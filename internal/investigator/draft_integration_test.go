@@ -38,6 +38,8 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input struct {
 					Messages json.RawMessage `json:"messages"`
+					Tools    json.RawMessage `json:"tools"`
+					Choice   json.RawMessage `json:"tool_choice"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 					t.Error(err)
@@ -49,6 +51,11 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					return
 				}
 				n := phase.Add(1) - 1
+				complete := n == 4 && fault != "malformed_batch" || n == 5 && fault == "malformed_batch" || n == 6
+				if complete && (!strings.Contains(string(input.Tools), "submit_article_draft") || strings.Contains(string(input.Tools), "update_article_limitations") || len(input.Choice) == 0) {
+					t.Errorf("complete draft did not restrict tools and force final submission at phase %d", n)
+				}
+
 				name := ""
 				var args any
 				switch n {
@@ -205,5 +212,48 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIdenticalDraftWriteStopsWithoutCreatingAnotherRevision(t *testing.T) {
+	db, _, cfg := testsupport.Services(t)
+	ctx := context.Background()
+	owner, err := db.NewSession(ctx, domain.ID(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := db.CreateRequest(ctx, owner.ID, domain.ID(), "https://youtube.com/watch?v=abcdefghijk", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := db.Request(ctx, owner.ID, a.ID)
+	c, err := db.Claim(ctx, *req.ActiveRunID, 1, "source")
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	video := domain.Asset{ID: domain.ID(), SourceID: c.Run.SourceID, RunID: c.Run.ID, Kind: "video", StorageKey: domain.ID() + ".mp4", SHA256: "hash", MIME: "video/mp4", Bytes: 42, ExpiresAt: domain.Ptr(time.Now().Add(time.Hour))}
+	if err = db.AddAsset(ctx, *c, video); err != nil {
+		t.Fatal(err)
+	}
+	snap := domain.Snapshot{ID: domain.ID(), SourceID: c.Run.SourceID, DurationMS: 1000, VideoHash: "hash", TextHash: "text", Metadata: []byte(`{}`)}
+	if _, err = db.FinishSource(ctx, *c, snap, []domain.Segment{}, video.ID); err != nil {
+		t.Fatal(err)
+	}
+	req, _ = db.Request(ctx, owner.ID, a.ID)
+	c, err = db.Claim(ctx, *req.ActiveRunID, 1, "writer")
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	s := &session{engine: &Engine{Store: db}, claim: *c, profile: cfg.Profile}
+	draft := articleDraft{Title: "saved", Plan: []sectionPlan{{ID: "one", Title: "one", StartMS: 0, EndMS: 1000}}, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}}
+	if _, err = s.writeDraft(context.WithValue(ctx, callIDKey{}, "first"), map[string]int{"version": 0}, 0, draft, "save"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.writeDraft(context.WithValue(ctx, callIDKey{}, "same"), map[string]int{"version": 1}, 1, draft, "save"); err == nil {
+		t.Fatal("identical revision allowed unproductive loop")
+	}
+	saved, err := db.ArticleDraft(ctx, c.Run.ID)
+	if err != nil || saved.Version != 1 {
+		t.Fatalf("no-op changed saved revision: %+v %v", saved, err)
 	}
 }

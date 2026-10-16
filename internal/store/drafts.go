@@ -100,7 +100,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 		return nil
 	}
 	var cp map[string]any
-	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp["layout_version"] != "source-context-v3" || cp["protocol"] != domain.ArticleDraftProtocol {
+	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp["layout_version"] != "source-context-v3" || (cp["protocol"] != domain.ArticleDraftProtocol && cp["protocol"] != "eino-0.9.21/openai-0.1.13/vidlens-1") {
 		return nil
 	}
 	draft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, previous.ID)
@@ -114,7 +114,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	// inspected frame is gone, start fresh rather than fabricate an observation.
 	var missing bool
 	// terminate releases run refs, so inspect every original observation frame too.
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM observations o CROSS JOIN LATERAL jsonb_array_elements_text(o.data->'frame_ids') f LEFT JOIN media_assets a ON a.id=f WHERE o.run_id=$1 AND (a.id IS NULL OR a.state<>'ready'))`, previous.ID).Scan(&missing); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jsonb_each($1::jsonb->'inspections') e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id) LEFT JOIN media_assets a ON a.id=f.frame_id WHERE a.id IS NULL OR a.state<>'ready' OR a.snapshot_id<>$2)`, previous.Checkpoint, snapshot).Scan(&missing); err != nil {
 		return err
 	}
 	if missing {
@@ -122,7 +122,10 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	}
 	cp["messages"] = []any{}
 	cp["calls"] = 0
+	cp["repeated"] = map[string]int{}
 	cp["repairs"] = 0
+	cp["draft_correction"] = false
+	cp["draft_repair_version"] = 0
 	cp["finalization_failed"] = false
 	delete(cp, "finalization_failure")
 	cp["draft_resume"] = true
@@ -141,6 +144,6 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO asset_refs(asset_id,owner_type,owner_id,expires_at) SELECT DISTINCT a.id,'run',$2,now()+interval '3 hours' FROM observations o CROSS JOIN LATERAL jsonb_array_elements_text(o.data->'frame_ids') f JOIN media_assets a ON a.id=f WHERE o.run_id=$1 ON CONFLICT DO NOTHING`, previous.ID, run)
+	_, err = tx.Exec(ctx, `INSERT INTO asset_refs(asset_id,owner_type,owner_id,expires_at) SELECT DISTINCT a.id,'run',$2,(SELECT deadline_at+interval '5 minutes' FROM job_runs WHERE id=$2) FROM jsonb_each($1::jsonb->'inspections') e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id) JOIN media_assets a ON a.id=f.frame_id WHERE a.kind='frame' ON CONFLICT DO NOTHING`, previous.Checkpoint, run)
 	return err
 }

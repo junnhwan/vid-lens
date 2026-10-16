@@ -488,6 +488,14 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		return s.finalizationError()
 	}
 	s.cp.Repairs++
+	if s.cp.LayoutVersion == draftLayout {
+		s.cp.DraftCorrection = true
+		saved, err := s.engine.Store.ArticleDraft(ctx, s.claim.Run.ID)
+		if err != nil {
+			return err
+		}
+		s.cp.DraftRepairVersion = saved.Version
+	}
 	last := -1
 	for i := len(s.cp.Messages) - 1; i >= 0; i-- {
 		if s.cp.Messages[i].Role == "assistant" {

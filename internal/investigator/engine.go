@@ -41,6 +41,7 @@ type session struct {
 	turn             *domain.Turn
 	tools            map[string]tool.EnhancedInvokableTool
 	compositionReady bool
+	forceDraftSubmit bool
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {

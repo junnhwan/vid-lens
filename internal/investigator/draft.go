@@ -77,6 +77,16 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			return s.draftFeedback(ctx, "章节计划没有覆盖到视频结尾。")
 		}
 		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations}
+		catalog, err := s.citationCatalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err = resolveDraftCitations(&draft, catalog); err != nil {
+			return s.draftFeedback(ctx, err.Error())
+		}
+		if err = validateLimitations(draft.Limitations, ids, draft.Citations); err != nil {
+			return s.draftFeedback(ctx, err.Error())
+		}
 		return s.writeDraft(ctx, in, 0, draft, "正在保存文章结构")
 	})); err != nil {
 		return err
@@ -86,6 +96,9 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			return result, err
 		}
 		version, draft, err := s.loadDraft(ctx)
+		if s.forceDraftSubmit {
+			return s.draftFeedback(ctx, "全部计划章节已保存。现在只允许submit_article_draft正式提交；校验指出问题后才开放修订。")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -127,7 +140,24 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if version == 0 || version != in.Version {
 			return s.draftFeedback(ctx, "限制说明的version不匹配。")
 		}
+		if s.forceDraftSubmit {
+			return s.draftFeedback(ctx, "全部计划章节已保存。现在只允许submit_article_draft正式提交；校验指出问题后才开放修订。")
+		}
 		draft.Limitations = in.Limitations
+		catalog, err := s.citationCatalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err = resolveDraftCitations(&draft, catalog); err != nil {
+			return s.draftFeedback(ctx, err.Error())
+		}
+		ids := map[string]bool{}
+		for _, p := range draft.Plan {
+			ids[p.ID] = true
+		}
+		if err = validateLimitations(draft.Limitations, ids, draft.Citations); err != nil {
+			return s.draftFeedback(ctx, err.Error())
+		}
 		return s.writeDraft(ctx, in, version, draft, "正在保存文章限制说明")
 	})); err != nil {
 		return err
@@ -159,6 +189,13 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		}
 		if version == 0 || version != in.Version {
 			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "草稿版本不匹配，请使用当前保存版本提交。")}
+		}
+		catalog, err := s.citationCatalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err = resolveDraftCitations(&draft, catalog); err != nil {
+			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", err.Error())}
 		}
 		article, err := s.assembleArticle(draft)
 		if err != nil {
@@ -224,6 +261,15 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 }
 func (s *session) writeDraft(ctx context.Context, args any, version int, draft articleDraft, title string) (*schema.ToolResult, error) {
 	return s.step(ctx, title, "compose", nil, func() (any, []string, error) {
+		if version > 0 {
+			currentVersion, current, err := s.loadDraft(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			if currentVersion == version && store.Hash(current) == store.Hash(draft) {
+				return nil, nil, domain.Err(422, "MODEL_RESULT_INVALID", "本次修订没有改变草稿；请按校验问题修正后提交，不能重复相同修订。")
+			}
+		}
 		saved, err := s.engine.Store.SaveArticleDraft(ctx, s.claim, callID(ctx), args, version, draft)
 		if err != nil {
 			return nil, nil, err
@@ -233,6 +279,7 @@ func (s *session) writeDraft(ctx context.Context, args any, version int, draft a
 			return nil, nil, err
 		}
 		s.cp.Composing = true
+		s.cp.DraftCorrection = false
 		return draftSummary(saved.Version, draft), nil, nil
 	})
 }
@@ -246,7 +293,11 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 			pending = append(pending, p.ID)
 		}
 	}
-	return map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "pending_sections": pending, "limitations": draft.Limitations, "next_action": "Use save_article_sections with latest version to write/replace planned chapters; submit_article_draft only after all are saved. Draft text is private and not published."}
+	next := "Use save_article_sections with latest version for pending chapters; keep accepted chapters unchanged."
+	if len(pending) == 0 && len(draft.Plan) > 0 {
+		next = "All planned chapters are saved. Call submit_article_draft NOW with this version. Do not rewrite chapters or limitations before receiving a validation issue."
+	}
+	return map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
 }
 func (s *session) draftFeedback(ctx context.Context, message string) (*schema.ToolResult, error) {
 	version, draft, err := s.loadDraft(ctx)
@@ -512,4 +563,32 @@ func rawToolArguments(a *schema.ToolArgument) string {
 		return ""
 	}
 	return a.Text
+}
+
+// Limitation references are evidence too: they may cite a frame that does not
+// appear in body blocks. Resolve every used alias before validation/publication.
+func resolveDraftCitations(draft *articleDraft, catalog map[string]domain.Citation) error {
+	used := map[string]bool{}
+	for _, sec := range draft.Sections {
+		for _, b := range sec.Blocks {
+			for _, id := range blockCitationIDs(b) {
+				used[id] = true
+			}
+		}
+	}
+	for _, l := range draft.Limitations {
+		for _, id := range l.CitationIDs {
+			used[id] = true
+		}
+	}
+	citations := map[string]domain.Citation{}
+	for id := range used {
+		c, ok := catalog[id]
+		if !ok {
+			return fmt.Errorf("引用%s不存在：正文和limitations.citation_ids只能使用citation_catalog中的tN/fN短编号，不能填写frame_id或猜测来源", id)
+		}
+		citations[id] = c
+	}
+	draft.Citations = citations
+	return nil
 }

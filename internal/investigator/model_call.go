@@ -41,7 +41,21 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	s := m.session
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	args := stripPixels(in)
-	inputChars := utf8.RuneCount(domain.JSON(args)) + m.toolsChars
+	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools
+	if s.forceDraftSubmit {
+		subset := []*schema.ToolInfo{}
+		for _, t := range activeTools {
+			if t.Name == "submit_article_draft" {
+				subset = append(subset, t)
+			}
+		}
+		activeTools = subset
+	}
+	bound, err := m.WithTools(activeTools)
+	if err != nil {
+		return nil, err
+	}
+	inputChars := utf8.RuneCount(domain.JSON(args)) + bound.(*meteredModel).toolsChars
 	if inputChars+s.profile.MaxOutputTokens*4 > s.profile.MaxInputChars {
 		return nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整上下文与输出预留超过模型限制；已保留来源，不会截断全片后继续生成。")
 	}
@@ -122,8 +136,8 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			}
 		}
 		base, err := s.engine.baseModel(ctx, p)
-		if err == nil && m.tools != nil {
-			base, err = base.WithTools(m.tools)
+		if err == nil && activeTools != nil {
+			base, err = base.WithTools(activeTools)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -172,6 +186,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return err
 		})
 		options := append(cacheOptions(p), opts...)
+		if s.forceDraftSubmit {
+			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
+		}
 		result, err := receiveModelResponse(sub, base, NormalizeToolImages(in), limits, options...)
 		release()
 		if err != nil {

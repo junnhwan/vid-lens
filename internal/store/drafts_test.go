@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"vidlens/internal/domain"
 )
@@ -58,7 +59,11 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	ctx := context.Background()
 	owner := session(t, s)
 	req, c := prepared(t, s, owner)
-	cp := map[string]any{"schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "ready": true, "inspections": map[string][]string{}, "calls": 8, "repairs": 1}
+	frame := domain.Asset{ID: domain.ID(), SnapshotID: req.SnapshotID, SourceID: c.Run.SourceID, RunID: c.Run.ID, Kind: "frame", StorageKey: domain.ID() + ".jpg", SHA256: "frame", MIME: "image/jpeg", Bytes: 42, TimeMS: domain.Ptr(int64(200)), ExpiresAt: domain.Ptr(time.Now().Add(time.Hour))}
+	if err := s.AddAsset(ctx, c, frame); err != nil {
+		t.Fatal(err)
+	}
+	cp := map[string]any{"schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "ready": true, "inspections": map[string][]string{"unobserved": {frame.ID}}, "calls": 8, "repairs": 1}
 	if err := s.Checkpoint(ctx, c, cp); err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +110,13 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	}
 	if restored["draft_resume"] != true || restored["calls"] != float64(0) {
 		t.Fatalf("explicit retry identity not reset: %s", run.Checkpoint)
+	}
+	claim, err := s.Claim(ctx, *next.ActiveRunID, 1, "resumed")
+	if err != nil || claim == nil {
+		t.Fatal(err)
+	}
+	if _, err = s.InternalFrame(ctx, *claim, frame.ID); err != nil {
+		t.Fatalf("unobserved frame was not pinned for resume: %v", err)
 	}
 	old, err := s.Run(ctx, c.Run.ID)
 	if err != nil || old.Status != "failed" {
