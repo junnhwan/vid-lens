@@ -61,6 +61,13 @@ func (c Citation) MarshalJSON() ([]byte, error) {
 		m["section_id"] = c.SectionID
 		m["block_id"] = c.BlockID
 		m["quote"] = c.Quote
+	case "external_reference":
+		m["reference_id"] = c.ReferenceID
+		m["content_sha256"] = c.ContentSHA256
+		m["url"] = c.URL
+		m["title"] = c.Title
+		m["read_at"] = c.ReadAt
+		m["quote"] = c.Quote
 	}
 	return json.Marshal(m)
 }

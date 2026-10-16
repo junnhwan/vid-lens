@@ -2,6 +2,7 @@ package investigator
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"vidlens/internal/domain"
 	"vidlens/internal/testsupport"
@@ -30,6 +31,26 @@ func TestExternalCitationRequiresActualTurnSnapshotAndExactQuote(t *testing.T) {
 	cite.URL, cite.Title, cite.ReadAt = r.EvidenceURL(), r.Title, r.ReadAt
 	if e = s.validateCitation(ctx, cite, false); e != nil {
 		t.Fatal(e)
+	}
+	// Tool submission validates before persistence; publication validates the
+	// persisted candidate again. Exercise that boundary, not only the Go value.
+	answer := domain.Answer{Kind: "grounded", Summary: "A web-supported answer", Citations: map[string]domain.Citation{cite.ID: cite}}
+	if _, e = store.BeginOperation(ctx, c, "candidate", "answer_candidate", answer, false); e != nil {
+		t.Fatal(e)
+	}
+	if e = store.FinishOperation(ctx, c, "candidate", answer, "", nil); e != nil {
+		t.Fatal(e)
+	}
+	op, e := store.Operation(ctx, c.Run.ID, "candidate")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var restored domain.Answer
+	if e = json.Unmarshal(op.Result, &restored); e != nil {
+		t.Fatal(e)
+	}
+	if e = s.validateCitation(ctx, restored.Citations[cite.ID], false); e != nil {
+		t.Fatalf("valid web citation failed after candidate persistence: %v", e)
 	}
 	for _, change := range []func(*domain.Citation){func(x *domain.Citation) { x.ContentSHA256 = "different" }, func(x *domain.Citation) { x.URL = "https://example.com/start" }, func(x *domain.Citation) { x.Quote = domain.Ptr("search snippet that never appeared") }, func(x *domain.Citation) { x.ReferenceID = domain.ID() }} {
 		bad := cite
