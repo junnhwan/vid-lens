@@ -6,6 +6,7 @@ import { PHASES, QUIET_AFTER_MS, parseTranscription, phaseMarks, quietNote, wait
 import { EASE, animateTitle, prefersReduced } from "./motion"
 import { ActivityList } from "./ActivityList"
 import { FrameThumb } from "./FrameThumb"
+import { ModelIdentity } from "./ModelIdentity"
 
 export function RunView({
   view,
@@ -84,6 +85,10 @@ export function RunView({
   }, [active, copy.title])
 
   useEffect(() => {
+    if (seen.current.size === 0) {
+      for (const step of steps) seen.current.add(step.id)
+      return
+    }
     const newest = steps.at(-1)
     if (!newest || seen.current.has(newest.id)) return
     seen.current.add(newest.id)
@@ -100,33 +105,26 @@ export function RunView({
   }, [active, copy.busy, signature])
 
   function toggleHistory() {
-    const list = listBox.current
-    const from = list?.getBoundingClientRect().height ?? 0
     onToggleHistory()
-    if (!list || prefersReduced()) return
-    requestAnimationFrame(() => {
-      const to = list.getBoundingClientRect().height
-      const anim = list.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: 240, easing: EASE })
-      anim.onfinish = () => anim.cancel()
-    })
   }
 
   function toggleFrames() {
     const el = frameBox.current
-    const from = el?.getBoundingClientRect().height ?? 0
     const opening = !framesOpen
     if (opening) acknowledged.current = shown.length
     setFramesOpen(opening)
     if (!el || prefersReduced()) return
-    el.style.overflow = "hidden"
-    requestAnimationFrame(() => {
-      const to = el.getBoundingClientRect().height
-      const anim = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: 240, easing: EASE, fill: "both" })
-      anim.onfinish = () => {
-        anim.cancel()
-        el.style.overflow = ""
-      }
-    })
+    for (const a of el.getAnimations()) a.cancel()
+    if (opening) {
+      const anim = el.animate(
+        [
+          { opacity: 0, transform: "translateY(8px)" },
+          { opacity: 1, transform: "none" },
+        ],
+        { duration: 200, easing: EASE },
+      )
+      anim.onfinish = () => anim.cancel()
+    }
   }
 
   function openAt(frame: Frame, origin: HTMLElement) {
@@ -138,19 +136,28 @@ export function RunView({
     <section className="view-run" ref={viewRef}>
       <div className="source">
         <div className="source-still" aria-hidden="true">
-          {poster ? <span className="shot-host"><FrameThumb frame={poster} variant="thumbnail" onBroken={onBroken} /></span> : null}
+          {poster ? (
+            <span className="shot-host">
+              <FrameThumb frame={poster} variant="thumbnail" onBroken={onBroken} />
+            </span>
+          ) : null}
         </div>
         <div>
           <p className="source-title">{source?.title || (stopped ? "视频处理未完成" : "正在确认视频")}</p>
           <p className="source-meta">{meta || view?.request.input_url || ""}</p>
           {note ? <p className="source-note">{note}</p> : null}
+          <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} />
         </div>
       </div>
       <div className="activity" aria-busy={copy.busy}>
         <p className="kicker">
           <span className="pulse" hidden={!copy.busy} aria-hidden="true" />
           <span>{copy.kicker}</span>
-          {clock ? <span className="elapsed">{copy.busy ? "已进行" : "用时"} {clock}</span> : null}
+          {clock ? (
+            <span className="elapsed">
+              {copy.busy ? "已进行" : "用时"} {clock}
+            </span>
+          ) : null}
         </p>
         <h1 className="activity-title" ref={titleRef} />
         <p className="purpose">{copy.purpose}</p>
@@ -158,15 +165,34 @@ export function RunView({
         {quiet ? <p className="quiet-note">{quiet}</p> : null}
         <PhaseSpine marks={marks} />
         <div className="run-actions">
-          <p className="range" hidden={!copy.range}>{copy.range}</p>
-          {view?.actions.can_cancel ? <button type="button" className="btn stop" onClick={onStop}>停止</button> : null}
-          {view?.actions.can_retry ? <button type="button" className="btn primary" onClick={onRetry}>重新理解</button> : null}
+          <p className="range" hidden={!copy.range}>
+            {copy.range}
+          </p>
+          {view?.actions.can_cancel ? (
+            <button type="button" className="btn stop" onClick={onStop}>
+              停止
+            </button>
+          ) : null}
+          {view?.actions.can_retry ? (
+            <button type="button" className="btn primary" onClick={onRetry}>
+              重新理解
+            </button>
+          ) : null}
         </div>
         <div className="ready-banner" hidden={!holding}>
           <p>文章已就绪</p>
-          <button type="button" className="btn primary" onClick={onRead}>开始阅读</button>
+          <button type="button" className="btn primary" onClick={onRead}>
+            开始阅读
+          </button>
         </div>
-        {articleError ? <p className="form-error">{articleError} <button type="button" className="btn quiet" onClick={onRetryArticle}>重新读取</button></p> : null}
+        {articleError ? (
+          <p className="form-error">
+            {articleError}{" "}
+            <button type="button" className="btn quiet" onClick={onRetryArticle}>
+              重新读取
+            </button>
+          </p>
+        ) : null}
       </div>
       {shown.length ? (
         <div className="frame-panel">
@@ -174,7 +200,14 @@ export function RunView({
           <div ref={frameBox}>
             <div className="frames frame-drawer" data-open={framesOpen ? "true" : "false"}>
               {framesOpen && latest ? (
-                <FrameButton frame={latest} hero carry fresh={isFresh(latest, steps, freshId)} onOpen={(origin) => openAt(latest, origin)} onBroken={onBroken} />
+                <FrameButton
+                  frame={latest}
+                  hero
+                  carry
+                  fresh={isFresh(latest, steps, freshId)}
+                  onOpen={(origin) => openAt(latest, origin)}
+                  onBroken={onBroken}
+                />
               ) : null}
               {strip.length ? (
                 <div className="filmstrip">
@@ -210,12 +243,16 @@ export function RunView({
           />
         </div>
         <div className="history-bar">
-          <button type="button" className="disclosure" aria-expanded={historyOpen} onClick={toggleHistory}>{historyOpen ? "收起过程" : "查看全部过程"}</button>
+          <button type="button" className="disclosure" aria-expanded={historyOpen} onClick={toggleHistory}>
+            {historyOpen ? "收起过程" : "查看全部过程"}
+          </button>
         </div>
         {view?.activity.history_status === "expired" ? <p className="history-note">更早的过程已经过期。</p> : null}
         {view?.activity.history_status === "partial" ? <p className="history-note">一部分过程记录已经清理。</p> : null}
       </div>
-      <p className="leave-note">{stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "离开或刷新不会停止后台工作。已看到的步骤会在刷新后恢复。"}</p>
+      <p className="leave-note">
+        {stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "离开或刷新不会停止后台工作。已看到的步骤会在刷新后恢复。"}
+      </p>
     </section>
   )
 }
@@ -263,7 +300,9 @@ function FrameButton({
       <span className="shot-host" data-carry-from={carry ? "true" : undefined}>
         <FrameThumb frame={frame} variant="thumbnail" onBroken={onBroken} />
       </span>
-      <span className="frame-cap">{formatClock(frame.time_ms)}  {frame.caption}</span>
+      <span className="frame-cap">
+        {formatClock(frame.time_ms)} {frame.caption}
+      </span>
     </button>
   )
 }
@@ -271,11 +310,21 @@ function FrameButton({
 function TranscriptionMeter({ done, total, ratio }: { done: string; total: string; ratio: number }) {
   const percent = Math.round(ratio * 100)
   return (
-    <div className="transcribe" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={`已转写 ${done}，共 ${total}`}>
+    <div
+      className="transcribe"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+      aria-valuetext={`已转写 ${done}，共 ${total}`}
+    >
       <div className="transcribe-track">
         <div className="transcribe-fill" style={{ transform: `scaleX(${ratio})` }} />
       </div>
-      <p className="transcribe-meta"><span>{done}</span><span>{total}</span></p>
+      <p className="transcribe-meta">
+        <span>{done}</span>
+        <span>{total}</span>
+      </p>
     </div>
   )
 }
@@ -301,7 +350,13 @@ function Coverage({ duration, ranges }: { duration: number | null | undefined; r
         {ranges.map((range, index) => {
           const left = Math.max(0, Math.min(100, (range.start_ms / duration) * 100))
           const width = Math.max(0.8, Math.min(100 - left, ((range.end_ms - range.start_ms) / duration) * 100))
-          return <span className="coverage-mark" key={`${range.start_ms}-${range.end_ms}-${index}`} style={{ left: `${left}%`, width: `${width}%` }} />
+          return (
+            <span
+              className="coverage-mark"
+              key={`${range.start_ms}-${range.end_ms}-${index}`}
+              style={{ left: `${left}%`, width: `${width}%` }}
+            />
+          )
         })}
       </div>
     </div>

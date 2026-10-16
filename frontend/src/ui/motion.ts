@@ -20,18 +20,30 @@ function clearPosition(el: HTMLElement) {
   el.style.zIndex = ""
   el.style.pointerEvents = ""
 }
+function duration(name: string, fallback: number) {
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name))
+  return Number.isFinite(value) ? value : fallback
+}
 
 export function showView(el: HTMLElement) {
   const generation = bump(el)
-  window.scrollTo(0, 0)
+  const wasHidden = el.hidden
+  const style = getComputedStyle(el),
+    from = {
+      opacity: wasHidden ? "0" : style.opacity,
+      transform: wasHidden ? "translateY(8px)" : style.transform,
+    }
+  for (const anim of el.getAnimations()) anim.cancel()
   clearPosition(el)
   el.hidden = false
-  for (const anim of el.getAnimations()) anim.cancel()
+  el.inert = false
+  el.removeAttribute("aria-hidden")
   if (prefersReduced()) return
-  const anim = el.animate(
-    [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }],
-    { duration: 340, easing: EASE, fill: "both" },
-  )
+  const anim = el.animate([from, { opacity: 1, transform: "none" }], {
+    duration: duration("--motion-enter", 240),
+    easing: EASE,
+    fill: "both",
+  })
   anim.onfinish = () => {
     if (generations.get(el) === generation) anim.cancel()
   }
@@ -40,7 +52,10 @@ export function showView(el: HTMLElement) {
 export function hideView(el: HTMLElement) {
   if (el.hidden) return
   const generation = bump(el)
-  window.scrollTo(0, 0)
+  const style = getComputedStyle(el),
+    from = { opacity: style.opacity, transform: style.transform }
+  el.inert = true
+  el.setAttribute("aria-hidden", "true")
   for (const anim of el.getAnimations()) anim.cancel()
   if (prefersReduced()) {
     el.hidden = true
@@ -53,10 +68,11 @@ export function hideView(el: HTMLElement) {
   el.style.top = "0"
   el.style.zIndex = "2"
   el.style.pointerEvents = "none"
-  const anim = el.animate(
-    [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-8px)" }],
-    { duration: 180, easing: EASE, fill: "forwards" },
-  )
+  const anim = el.animate([from, { opacity: 0, transform: "translateY(-4px)" }], {
+    duration: duration("--motion-exit", 160),
+    easing: EASE,
+    fill: "forwards",
+  })
   anim.onfinish = () => {
     if (generations.get(el) !== generation) return
     el.hidden = true
@@ -69,28 +85,16 @@ export function animateTitle(el: HTMLElement, title: string) {
   if (el.dataset.value === title) return
   el.dataset.value = title
   for (const anim of el.getAnimations()) anim.cancel()
-  if (!prefersReduced() && el.textContent) {
+  el.textContent = title
+  if (!prefersReduced()) {
     const outgoing = el.animate(
       [
-        { opacity: 1, filter: "blur(0px)", transform: "translateY(0)" },
-        { opacity: 0.4, filter: "blur(1.5px)", transform: "translateY(-4px)" },
+        { opacity: 0.5, transform: "translateY(4px)" },
+        { opacity: 1, transform: "none" },
       ],
-      { duration: 120, easing: EASE, fill: "forwards" },
+      { duration: 200, easing: EASE },
     )
-    outgoing.onfinish = () => {
-      if (el.dataset.value !== title) return
-      el.textContent = title
-      const incoming = el.animate(
-        [
-          { opacity: 0.4, filter: "blur(1.5px)", transform: "translateY(6px)" },
-          { opacity: 1, filter: "blur(0px)", transform: "translateY(0)" },
-        ],
-        { duration: 200, easing: EASE, fill: "forwards" },
-      )
-      incoming.onfinish = () => {
-        if (el.dataset.value === title) incoming.cancel()
-      }
-    }
+    outgoing.onfinish = () => outgoing.cancel()
     return
   }
   el.textContent = title
@@ -103,6 +107,9 @@ export function carryStill(start: DOMRect, to: HTMLElement) {
   const end = to.getBoundingClientRect()
   if (end.width < 8 || end.height < 8) return
   const clone = to.cloneNode(true) as HTMLElement
+  clone.removeAttribute("id")
+  clone.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"))
+  clone.inert = true
   clone.setAttribute("aria-hidden", "true")
   clone.style.position = "fixed"
   clone.style.left = `${start.left}px`
@@ -121,10 +128,11 @@ export function carryStill(start: DOMRect, to: HTMLElement) {
   const dy = end.top - start.top
   const sx = end.width / start.width
   const sy = end.height / start.height
-  const anim = clone.animate(
-    [{ transform: "none" }, { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }],
-    { duration: 280, easing: EASE_MOVE, fill: "forwards" },
-  )
+  const anim = clone.animate([{ transform: "none" }, { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }], {
+    duration: 280,
+    easing: EASE_MOVE,
+    fill: "forwards",
+  })
   const finish = () => {
     clone.remove()
     to.style.opacity = ""
@@ -135,6 +143,8 @@ export function carryStill(start: DOMRect, to: HTMLElement) {
 
 export function flyStage(stage: HTMLElement, origin: HTMLElement | null, closing: boolean): Animation | null {
   if (prefersReduced() || !origin || !origin.isConnected) return null
+  const current = getComputedStyle(stage).transform
+  for (const animation of stage.getAnimations()) animation.cancel()
   const first = origin.getBoundingClientRect()
   const last = stage.getBoundingClientRect()
   if (!last.width || !last.height || !first.width) return null
@@ -143,8 +153,9 @@ export function flyStage(stage: HTMLElement, origin: HTMLElement | null, closing
   const sx = first.width / last.width
   const sy = first.height / last.height
   const from = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
-  return stage.animate(
-    closing ? [{ transform: "none" }, { transform: from }] : [{ transform: from }, { transform: "none" }],
-    { duration: closing ? 220 : 280, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
-  )
+  return stage.animate(closing ? [{ transform: current }, { transform: from }] : [{ transform: from }, { transform: "none" }], {
+    duration: closing ? 220 : 280,
+    easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+    fill: "forwards",
+  })
 }

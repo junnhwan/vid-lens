@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Ref } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, ArticleResponse, Citation, Frame, RequestView, TurnView } from "../contract/types"
 import { formatDuration, platformLabel } from "../contract/text"
 import { prefersReduced } from "./motion"
@@ -6,6 +6,8 @@ import { ActivityList } from "./ActivityList"
 import { BlockView } from "./Blocks"
 import { MindMap } from "./MindMap"
 import { QaPanel } from "./QaPanel"
+import { ExportControl } from "./ExportControl"
+import { ModelIdentity } from "./ModelIdentity"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -25,6 +27,8 @@ export function ReadView(props: {
   expanded: Record<string, boolean | undefined>
   focusToken: number
   active: boolean
+  preview?: boolean
+  csrf: string
   viewRef?: Ref<HTMLElement>
   onToggleQa: () => void
   onRetryArticle: () => void
@@ -41,33 +45,69 @@ export function ReadView(props: {
   onSuggest: () => void
   onRemoveFrame: () => void
   onRemovePassage: () => void
+  externalAllowed: boolean
+  externalAvailable: boolean
+  searchAvailable: boolean
+  referenceLinks: string
+  onExternal: (v: boolean) => void
+  onReferenceLinks: (v: string) => void
 }) {
   const [genOpen, setGenOpen] = useState(false)
   const [current, setCurrent] = useState("article-top")
   const [locked, setLocked] = useState<string | null>(null)
   const [arrive, setArrive] = useState(false)
   const seenArticle = useRef<string | null>(null)
+  const colRef = useRef<HTMLDivElement>(null)
+  const lastLeft = useRef<number | null>(null)
+  const panelMotion = useRef<Animation | null>(null)
+  useLayoutEffect(() => {
+    const el = colRef.current
+    if (!el || !props.active) {
+      lastLeft.current = null
+      return
+    }
+    const transform = getComputedStyle(el).transform
+    const offset = transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41
+    const baseLeft = el.getBoundingClientRect().left - offset
+    const previous = lastLeft.current
+    lastLeft.current = baseLeft
+    panelMotion.current?.cancel()
+    if (previous !== null && !prefersReduced() && Math.abs(previous - baseLeft + offset) > 1) {
+      const motion = el.animate([{ transform: `translateX(${previous - baseLeft + offset}px)` }, { transform: "none" }], {
+        duration: 280,
+        easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+      })
+      panelMotion.current = motion
+      motion.onfinish = () => motion.cancel()
+    }
+  }, [props.qaOpen, props.active])
+  useEffect(() => () => panelMotion.current?.cancel(), [])
   const article = props.article?.article
   const firstFigure = article?.sections.flatMap((section) => section.blocks).find((block) => block.type === "figure")?.id
-  const meta = [platformLabel(article?.source.platform), formatDuration(article?.source.duration_ms), article?.source.part?.label].filter(Boolean).join(" · ")
+  const meta = [platformLabel(article?.source.platform), formatDuration(article?.source.duration_ms), article?.source.part?.label]
+    .filter(Boolean)
+    .join(" · ")
 
   useEffect(() => {
     if (!props.active || !article || prefersReduced()) return
     if (seenArticle.current === article.id) return
     seenArticle.current = article.id
     setArrive(true)
-    const timer = window.setTimeout(() => setArrive(false), 720)
+    const timer = window.setTimeout(() => setArrive(false), 280)
     return () => window.clearTimeout(timer)
   }, [props.active, article?.id])
 
   useEffect(() => {
     if (!article) return
     const nodes = article.sections.map((section) => document.getElementById(section.id)).filter((node): node is HTMLElement => !!node)
-    const observer = new IntersectionObserver((entries) => {
-      if (locked) return
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
-      if (visible) setCurrent(visible.target.id)
-    }, { rootMargin: "-12% 0px -55% 0px", threshold: [0.15, 0.4, 0.7] })
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (locked) return
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (visible) setCurrent(visible.target.id)
+      },
+      { rootMargin: "-12% 0px -55% 0px", threshold: [0.15, 0.4, 0.7] },
+    )
     for (const node of nodes) observer.observe(node)
     return () => observer.disconnect()
   }, [article, locked])
@@ -77,7 +117,10 @@ export function ReadView(props: {
     if (!target) return
     setLocked(id)
     setCurrent(id)
-    target.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" })
+    target.scrollIntoView({
+      behavior: prefersReduced() ? "auto" : "smooth",
+      block: "start",
+    })
     if (target instanceof HTMLElement) target.focus({ preventScroll: true })
     window.setTimeout(() => setLocked((value) => (value === id ? null : value)), 900)
   }
@@ -85,15 +128,30 @@ export function ReadView(props: {
   return (
     <section className="view-read" ref={props.viewRef}>
       <div className="workspace" data-qa={props.qaOpen ? "open" : "closed"}>
-        <div className="article-col">
+        <div className="article-col" ref={colRef}>
           <article className="sheet" aria-readonly="true">
             <header className="article-head">
-              <h1 id="article-top" tabIndex={-1}>{article?.title || "正在读取文章"}</h1>
+              <h1 id="article-top" tabIndex={-1}>
+                {article?.title || "正在读取文章"}
+              </h1>
               <div className="article-tools">
                 <p className="meta">{meta}</p>
-                <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => setGenOpen((value) => !value)}>{genOpen ? "收起生成过程" : "查看生成过程"}</button>
-                <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={props.qaOpen} onClick={props.onToggleQa}>问这条视频</button>
+                {props.preview ? (
+                  <small className="meta">开发预览不生成导出</small>
+                ) : (
+                  <ExportControl requestId={props.view?.request.id} csrf={props.csrf} />
+                )}
+                <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => setGenOpen((value) => !value)}>
+                  {genOpen ? "收起生成过程" : "查看生成过程"}
+                </button>
+                <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={props.qaOpen} onClick={props.onToggleQa}>
+                  问这条视频
+                </button>
               </div>
+              <ModelIdentity
+                model={props.article?.generation_model || props.view?.request.generation_model}
+                purpose={props.article?.purpose || props.view?.request.purpose}
+              />
             </header>
             <div className="disclose" data-open={genOpen ? "true" : "false"}>
               <div className="disclose-inner">
@@ -105,8 +163,12 @@ export function ReadView(props: {
                   onOpenFrame={props.onOpenFrame}
                   onBroken={props.onBroken}
                 />
-                {props.view?.activity.history_status === "expired" ? <p className="history-note">更早的过程已经过期，文章仍然可以读。</p> : null}
-                {props.view?.activity.history_status === "none" && props.view.request.reuse === "published_article" ? <p className="history-note">这次直接打开了已有文章，没有新的生成过程。</p> : null}
+                {props.view?.activity.history_status === "expired" ? (
+                  <p className="history-note">更早的过程已经过期，文章仍然可以读。</p>
+                ) : null}
+                {props.view?.activity.history_status === "none" && props.view.request.reuse === "published_article" ? (
+                  <p className="history-note">这次直接打开了已有文章，没有新的生成过程。</p>
+                ) : null}
               </div>
             </div>
             {article?.mind_map ? <MindMap map={article.mind_map} current={current} onJump={jump} /> : null}
@@ -118,10 +180,19 @@ export function ReadView(props: {
                     : "现在不能查看新的画面。已有文章仍然可以读。"}
                 </p>
               ) : null}
-              {props.articleError ? <p className="form-error">{props.articleError} <button type="button" className="btn quiet" onClick={props.onRetryArticle}>重新读取</button></p> : null}
+              {props.articleError ? (
+                <p className="form-error">
+                  {props.articleError}{" "}
+                  <button type="button" className="btn quiet" onClick={props.onRetryArticle}>
+                    重新读取
+                  </button>
+                </p>
+              ) : null}
               {article?.sections.map((section, index) => (
                 <section key={section.id} style={arrive ? { animationDelay: `${Math.min(index, 5) * 48}ms` } : undefined}>
-                  <h2 id={section.id} tabIndex={-1}>{section.title}</h2>
+                  <h2 id={section.id} tabIndex={-1}>
+                    {section.title}
+                  </h2>
                   {section.blocks.map((block) => (
                     <BlockView
                       key={block.id}
@@ -146,7 +217,9 @@ export function ReadView(props: {
                       <li key={`${item.code}-${item.message}`}>
                         {item.message}
                         {(item.section_ids ?? []).map((id) => (
-                          <button type="button" className="time" key={id} onClick={() => jump(id)}>定位</button>
+                          <button type="button" className="time" key={id} onClick={() => jump(id)}>
+                            定位
+                          </button>
                         ))}
                       </li>
                     ))}
@@ -182,6 +255,13 @@ export function ReadView(props: {
             onOpenFrame={props.onOpenFrame}
             onCite={props.onCite}
             onBroken={props.onBroken}
+            externalAllowed={props.externalAllowed}
+            externalAvailable={props.externalAvailable}
+            searchAvailable={props.searchAvailable}
+            referenceLinks={props.referenceLinks}
+            onExternal={props.onExternal}
+            onReferenceLinks={props.onReferenceLinks}
+            modelUnavailable={props.article?.qa_available === false}
           />
         </div>
       </div>

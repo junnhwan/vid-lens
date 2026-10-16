@@ -32,6 +32,11 @@ export interface Problem {
 }
 
 export interface Capabilities {
+  max_purpose_chars?: number
+  purpose_input?: boolean
+  model_selection?: boolean
+  article_export?: { formats: string[] }
+  external_sources?: { enabled: boolean; search_enabled: boolean }
   supported_platforms: string[]
   accepting_requests: boolean
   question_chars_max: number
@@ -103,7 +108,13 @@ export interface Frame {
   height: number
   mime_type: string
   caption: string
-  crop: { parent_frame_id: string; x: number; y: number; width: number; height: number } | null
+  crop: {
+    parent_frame_id: string
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null
   replaces_frame_id: string | null
   availability: "ready" | "expired" | "unavailable" | string
   unavailable_reason: string | null
@@ -159,6 +170,8 @@ export interface RequestActions {
 }
 
 export interface RequestBody {
+  purpose?: string
+  generation_model?: GenerationModel
   id: string
   revision: number
   input_url: string
@@ -168,6 +181,27 @@ export interface RequestBody {
   article_id: string | null
   created_at: string
   updated_at: string
+}
+
+export interface GenerationModel {
+  id: string
+  revision_id: string
+  display_name: string
+  brand_id: string
+  description?: string
+  selection_locked?: boolean
+  legacy?: boolean
+}
+export interface ModelCatalog {
+  revision: number
+  default_model_id: string | null
+  selection_enabled: boolean
+  models: GenerationModel[]
+}
+export interface GenerationInput {
+  purpose?: string
+  model_id?: string
+  model_revision_id?: string
 }
 
 export interface RequestView {
@@ -224,6 +258,11 @@ export interface Block {
 }
 
 export interface Citation {
+  reference_id?: string
+  content_sha256?: string
+  url?: string
+  title?: string
+  read_at?: string
   id: string
   kind: string
   label: string
@@ -248,7 +287,12 @@ export interface Limitation {
 
 export interface MindMap {
   root_id: string
-  nodes: { id: string; parent_id: string | null; label: string; section_id: string | null }[]
+  nodes: {
+    id: string
+    parent_id: string | null
+    label: string
+    section_id: string | null
+  }[]
 }
 
 export interface Article {
@@ -272,6 +316,9 @@ export interface MediaCapability {
 }
 
 export interface ArticleResponse {
+  generation_model?: GenerationModel
+  purpose?: string
+  qa_available?: boolean
   schema_version: number
   article: Article
   frames: Frame[]
@@ -362,6 +409,11 @@ export interface StreamScope {
 export interface StreamEnvelope {
   schema_version: number
   scope: StreamScope
-  position?: { cursor: string; revision: number; run_id: string | null; seq: number }
+  position?: {
+    cursor: string
+    revision: number
+    run_id: string | null
+    seq: number
+  }
   payload: Record<string, unknown>
 }

@@ -42,8 +42,17 @@ function frame(id: string, time: number, caption: string, file: string): Frame {
 const frameClosed = frame("frm_closed", 312_000, "展开前的编辑界面", closed)
 const frameOpen = frame("frm_open", 324_000, "展开后的菜单", opened)
 const frames = [frameClosed, frameOpen]
+const developmentModel = {
+  id: "development",
+  revision_id: "development",
+  display_name: "开发演示模型",
+  brand_id: "generic",
+  selection_locked: true,
+}
 
-function step(partial: Partial<ActivityStep> & Pick<ActivityStep, "id" | "title" | "status" | "first_seq" | "last_seq" | "segment_no" | "run_id">): ActivityStep {
+function step(
+  partial: Partial<ActivityStep> & Pick<ActivityStep, "id" | "title" | "status" | "first_seq" | "last_seq" | "segment_no" | "run_id">,
+): ActivityStep {
   return {
     phase: "investigate",
     purpose: null,
@@ -70,7 +79,11 @@ const article: Article = {
     title: "把重复操作变成可复用流程",
     duration_ms: 2_142_000,
     part: { key: "1", label: "第 1 P" },
-    text_provenance: { origin: "platform_subtitles", coverage: "complete", language: "zh" },
+    text_provenance: {
+      origin: "platform_subtitles",
+      coverage: "complete",
+      language: "zh",
+    },
   },
   title: "把重复操作变成可复用流程",
   published_at: now(),
@@ -83,7 +96,13 @@ const article: Article = {
           id: "blk_scene",
           type: "paragraph",
           origin: "video",
-          content: [{ type: "text", text: "日常里有些操作会反复出现。视频把这件事收成一条主线：与其每次重做，不如把步骤存成一套可以再次运行的流程。", marks: [] }],
+          content: [
+            {
+              type: "text",
+              text: "日常里有些操作会反复出现。视频把这件事收成一条主线：与其每次重做，不如把步骤存成一套可以再次运行的流程。",
+              marks: [],
+            },
+          ],
         },
       ],
     },
@@ -100,7 +119,11 @@ const article: Article = {
             { type: "citation", citation_id: "cite_closed" },
             { type: "text", text: " 时界面还停在编辑状态。到 ", marks: [] },
             { type: "citation", citation_id: "cite_open" },
-            { type: "text", text: "，菜单展开，能看到添加步骤、保存流程和运行。", marks: [] },
+            {
+              type: "text",
+              text: "，菜单展开，能看到添加步骤、保存流程和运行。",
+              marks: [],
+            },
           ],
         },
         {
@@ -116,7 +139,13 @@ const article: Article = {
           id: "blk_why",
           type: "paragraph",
           origin: "background_explanation",
-          content: [{ type: "text", text: "先保存，是为了让当前步骤成为一份可复用的配置。原视频没有单独演示失败画面，这段只补充理解顺序所需要的原因。", marks: [] }],
+          content: [
+            {
+              type: "text",
+              text: "先保存，是为了让当前步骤成为一份可复用的配置。原视频没有单独演示失败画面，这段只补充理解顺序所需要的原因。",
+              marks: [],
+            },
+          ],
         },
       ],
     },
@@ -128,7 +157,13 @@ const article: Article = {
           id: "blk_caution",
           type: "paragraph",
           origin: "video",
-          content: [{ type: "text", text: "菜单里的名称以画面为准：保存流程不等于已经运行。已查看的画面没有看到运行完成后的结果页。", marks: [] }],
+          content: [
+            {
+              type: "text",
+              text: "菜单里的名称以画面为准：保存流程不等于已经运行。已查看的画面没有看到运行完成后的结果页。",
+              marks: [],
+            },
+          ],
         },
       ],
     },
@@ -136,17 +171,58 @@ const article: Article = {
   mind_map: {
     root_id: "map_root",
     nodes: [
-      { id: "map_root", parent_id: null, label: "可复用流程", section_id: null },
-      { id: "map_scene", parent_id: "map_root", label: "适用场景", section_id: "scene" },
-      { id: "map_steps", parent_id: "map_root", label: "配置步骤", section_id: "steps" },
-      { id: "map_cautions", parent_id: "map_root", label: "注意事项", section_id: "cautions" },
+      {
+        id: "map_root",
+        parent_id: null,
+        label: "可复用流程",
+        section_id: null,
+      },
+      {
+        id: "map_scene",
+        parent_id: "map_root",
+        label: "适用场景",
+        section_id: "scene",
+      },
+      {
+        id: "map_steps",
+        parent_id: "map_root",
+        label: "配置步骤",
+        section_id: "steps",
+      },
+      {
+        id: "map_cautions",
+        parent_id: "map_root",
+        label: "注意事项",
+        section_id: "cautions",
+      },
     ],
   },
   citations: {
-    cite_closed: { id: "cite_closed", kind: "video_frame", label: "05:12 画面", snapshot_id: "snap_mock", frame_id: "frm_closed", time_ms: 312_000 },
-    cite_open: { id: "cite_open", kind: "video_frame", label: "05:24 画面", snapshot_id: "snap_mock", frame_id: "frm_open", time_ms: 324_000 },
+    cite_closed: {
+      id: "cite_closed",
+      kind: "video_frame",
+      label: "05:12 画面",
+      snapshot_id: "snap_mock",
+      frame_id: "frm_closed",
+      time_ms: 312_000,
+    },
+    cite_open: {
+      id: "cite_open",
+      kind: "video_frame",
+      label: "05:24 画面",
+      snapshot_id: "snap_mock",
+      frame_id: "frm_open",
+      time_ms: 324_000,
+    },
   },
-  limitations: [{ code: "not_observed", message: "已查看的画面未覆盖运行完成后的结果页。", section_ids: ["cautions"], citation_ids: ["cite_open"] }],
+  limitations: [
+    {
+      code: "not_observed",
+      message: "已查看的画面未覆盖运行完成后的结果页。",
+      section_ids: ["cautions"],
+      citation_ids: ["cite_open"],
+    },
+  ],
   quality: "with_limitations",
 }
 
@@ -207,7 +283,10 @@ class MockSocket implements LiveSocket {
   onerror: ((this: LiveSocket, ev: Event) => void) | null = null
   private listeners = new Map<string, ((event: MessageEvent) => void)[]>()
 
-  constructor(readonly url: string, private world: MockWorld) {
+  constructor(
+    readonly url: string,
+    private world: MockWorld,
+  ) {
     queueMicrotask(() => {
       if (this.readyState === 2) return
       this.readyState = 1
@@ -223,7 +302,10 @@ class MockSocket implements LiveSocket {
 
   emit(type: string, data: unknown) {
     if (this.readyState !== 1) return
-    const event = { data: JSON.stringify(data), lastEventId: "" } as MessageEvent
+    const event = {
+      data: JSON.stringify(data),
+      lastEventId: "",
+    } as MessageEvent
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 
@@ -247,7 +329,11 @@ function sourceFor(url: string): SourceSummary {
     title: "把重复操作变成可复用流程",
     duration_ms: 2_142_000,
     part: platform === "bilibili" ? { key: "1", label: "第 1 P" } : null,
-    text_provenance: { origin: "platform_subtitles", coverage: "complete", language: "zh" },
+    text_provenance: {
+      origin: "platform_subtitles",
+      coverage: "complete",
+      language: "zh",
+    },
   }
 }
 
@@ -275,7 +361,10 @@ class MockWorld {
   private sockets = new Set<MockSocket>()
   private seq = 0
 
-  constructor(private auto: boolean, private intervalMs: number) {}
+  constructor(
+    private auto: boolean,
+    private intervalMs: number,
+  ) {}
 
   open(url: string) {
     return new MockSocket(url, this)
@@ -333,7 +422,12 @@ class MockWorld {
       article: async (id) => this.article(this.mustJob(id)),
       frame: async (_requestId, frameId) => {
         const found = frames.find((item) => item.id === frameId)
-        if (!found) throw new ApiError({ status: 404, code: "RESOURCE_NOT_FOUND", detail: "资源不存在。" })
+        if (!found)
+          throw new ApiError({
+            status: 404,
+            code: "RESOURCE_NOT_FOUND",
+            detail: "资源不存在。",
+          })
         return found
       },
       activity: async (url) => {
@@ -352,11 +446,23 @@ class MockWorld {
       conversation: async (requestId) => this.conversation(this.mustJob(requestId)),
       turns: async (conversationId) => ({
         schema_version: 1,
-        items: [...this.turns.values()].filter((item) => item.conversationId === conversationId).sort((a, b) => a.turnNo - b.turnNo).map((item) => this.turnView(item)),
+        items: [...this.turns.values()]
+          .filter((item) => item.conversationId === conversationId)
+          .sort((a, b) => a.turnNo - b.turnNo)
+          .map((item) => this.turnView(item)),
         next_before_turn_no: null,
         has_more: false,
       }),
-      createTurn: async (conversationId, key, body) => this.createTurn(conversationId, key, body as { question: string; expected_last_turn_id: string | null; context: QuestionContext }),
+      createTurn: async (conversationId, key, body) =>
+        this.createTurn(
+          conversationId,
+          key,
+          body as {
+            question: string
+            expected_last_turn_id: string | null
+            context: QuestionContext
+          },
+        ),
       getTurn: async (_conversationId, turnId) => this.turnView(this.mustTurn(turnId)),
       cancelTurn: async (_conversationId, turnId) => this.cancelTurn(this.mustTurn(turnId)),
       retryTurn: async (conversationId, turnId, key, expected) => this.retryTurn(conversationId, this.mustTurn(turnId), key, expected),
@@ -367,10 +473,23 @@ class MockWorld {
     const body = JSON.stringify({ video_url: videoUrl.trim() })
     const seen = this.requestKeys.get(key)
     if (seen) {
-      if (seen.body !== body) throw new ApiError({ status: 409, code: "IDEMPOTENCY_CONFLICT", detail: "同一次提交的内容不一致。" })
+      if (seen.body !== body)
+        throw new ApiError({
+          status: 409,
+          code: "IDEMPOTENCY_CONFLICT",
+          detail: "同一次提交的内容不一致。",
+        })
       return this.accepted(this.requestView(this.mustJob(seen.id)), true)
     }
-    if (!videoUrl.trim()) throw new ApiError({ status: 400, code: "INVALID_ARGUMENT", detail: "先贴上链接。", meta: { field_errors: [{ field: "video_url", message: "先贴上链接。" }] } })
+    if (!videoUrl.trim())
+      throw new ApiError({
+        status: 400,
+        code: "INVALID_ARGUMENT",
+        detail: "先贴上链接。",
+        meta: {
+          field_errors: [{ field: "video_url", message: "先贴上链接。" }],
+        },
+      })
     const id = `req_${++this.seq}`
     const job: Job = {
       id,
@@ -387,7 +506,19 @@ class MockWorld {
       phase: "prepare_source",
       wait: null,
       seq: 1,
-      steps: [step({ id: `${id}-source`, title: "正在转写音频（4:00 / 35:42）", purpose: "平台没有可用字幕，按音频长度转写。", status: "running", first_seq: 1, last_seq: 1, segment_no: 1, run_id: `${id}-prepare`, phase: "prepare_source" })],
+      steps: [
+        step({
+          id: `${id}-source`,
+          title: "正在转写音频（4:00 / 35:42）",
+          purpose: "平台没有可用字幕，按音频长度转写。",
+          status: "running",
+          first_seq: 1,
+          last_seq: 1,
+          segment_no: 1,
+          run_id: `${id}-prepare`,
+          phase: "prepare_source",
+        }),
+      ],
       failure: null,
       stage: 0,
       createdAt: now(),
@@ -406,12 +537,22 @@ class MockWorld {
     job.stage += 1
     if (job.stage === 1) {
       job.seq += 1
-      job.steps[0] = { ...job.steps[0], title: "正在转写音频（18:00 / 35:42）", last_seq: job.seq }
+      job.steps[0] = {
+        ...job.steps[0],
+        title: "正在转写音频（18:00 / 35:42）",
+        last_seq: job.seq,
+      }
       this.publish(job, "activity.upsert")
       return
     }
     if (job.stage === 2) {
-      job.steps[0] = { ...job.steps[0], status: "completed", finished_at: now(), outcome: { message: "已确认来源。", evidence_status: "not_applicable" }, last_seq: job.seq }
+      job.steps[0] = {
+        ...job.steps[0],
+        status: "completed",
+        finished_at: now(),
+        outcome: { message: "已确认来源。", evidence_status: "not_applicable" },
+        last_seq: job.seq,
+      }
       job.status = "generating"
       job.reuse = "none"
       job.revision = 2
@@ -421,7 +562,19 @@ class MockWorld {
       job.runStatus = "running"
       job.phase = "overview"
       job.seq = 1
-      job.steps.push(step({ id: `${job.id}-spine`, title: "正在梳理视频主线", purpose: "找出适合写成步骤的段落。", status: "running", first_seq: 1, last_seq: 1, segment_no: 2, run_id: job.runId, phase: "overview" }))
+      job.steps.push(
+        step({
+          id: `${job.id}-spine`,
+          title: "正在梳理视频主线",
+          purpose: "找出适合写成步骤的段落。",
+          status: "running",
+          first_seq: 1,
+          last_seq: 1,
+          segment_no: 2,
+          run_id: job.runId,
+          phase: "overview",
+        }),
+      )
       this.publish(job, "view.snapshot")
       return
     }
@@ -429,18 +582,20 @@ class MockWorld {
       this.completeCurrent(job, "主线是把重复操作存成流程。")
       job.seq += 1
       job.phase = "investigate"
-      job.steps.push(step({
-        id: `${job.id}-menu`,
-        title: "正在查看菜单展开后的画面",
-        purpose: "确认选项名称。",
-        status: "running",
-        first_seq: job.seq,
-        last_seq: job.seq,
-        segment_no: 2,
-        run_id: job.runId!,
-        phase: "investigate",
-        source_range: { start_ms: 310_000, end_ms: 330_000 },
-      }))
+      job.steps.push(
+        step({
+          id: `${job.id}-menu`,
+          title: "正在查看菜单展开后的画面",
+          purpose: "确认选项名称。",
+          status: "running",
+          first_seq: job.seq,
+          last_seq: job.seq,
+          segment_no: 2,
+          run_id: job.runId!,
+          phase: "investigate",
+          source_range: { start_ms: 310_000, end_ms: 330_000 },
+        }),
+      )
       this.publish(job, "view.snapshot")
       return
     }
@@ -454,12 +609,27 @@ class MockWorld {
         finished_at: now(),
         frame_ids: ["frm_closed", "frm_open"],
         frames: [frameClosed, frameOpen],
-        outcome: { message: "看到添加步骤、保存流程、运行。观察已记录。", evidence_status: "supported" },
+        outcome: {
+          message: "看到添加步骤、保存流程、运行。观察已记录。",
+          evidence_status: "supported",
+        },
       }
       this.publish(job, "activity.upsert")
       job.seq += 1
       job.phase = "compose"
-      job.steps.push(step({ id: `${job.id}-write`, title: "正在组织图文文章", purpose: "把已确认的步骤写成可阅读的段落。", status: "running", first_seq: job.seq, last_seq: job.seq, segment_no: 2, run_id: job.runId!, phase: "compose" }))
+      job.steps.push(
+        step({
+          id: `${job.id}-write`,
+          title: "正在组织图文文章",
+          purpose: "把已确认的步骤写成可阅读的段落。",
+          status: "running",
+          first_seq: job.seq,
+          last_seq: job.seq,
+          segment_no: 2,
+          run_id: job.runId!,
+          phase: "compose",
+        }),
+      )
       this.publish(job, "view.snapshot")
       return
     }
@@ -476,7 +646,13 @@ class MockWorld {
 
   private completeCurrent(job: Job, message: string) {
     const index = job.steps.length - 1
-    job.steps[index] = { ...job.steps[index], status: "completed", finished_at: now(), last_seq: job.seq, outcome: { message, evidence_status: "supported" } }
+    job.steps[index] = {
+      ...job.steps[index],
+      status: "completed",
+      finished_at: now(),
+      last_seq: job.seq,
+      outcome: { message, evidence_status: "supported" },
+    }
   }
 
   private cancelJob(job: Job) {
@@ -488,9 +664,19 @@ class MockWorld {
       job.revision += 1
       job.runId = null
       job.seq = 0
-      job.steps = job.steps.map((item) => item.status === "running" || item.status === "queued"
-        ? { ...item, status: "canceled", finished_at: now(), outcome: { message: "取消时尚未完成", evidence_status: "not_assessed" } }
-        : item)
+      job.steps = job.steps.map((item) =>
+        item.status === "running" || item.status === "queued"
+          ? {
+              ...item,
+              status: "canceled",
+              finished_at: now(),
+              outcome: {
+                message: "取消时尚未完成",
+                evidence_status: "not_assessed",
+              },
+            }
+          : item,
+      )
       job.updatedAt = now()
       this.publish(job, "view.snapshot")
     }
@@ -499,7 +685,11 @@ class MockWorld {
 
   private retryJob(job: Job, key: string) {
     if (job.status === "completed" || (job.status !== "failed" && job.status !== "canceled")) {
-      throw new ApiError({ status: 409, code: "RETRY_NOT_ALLOWED", detail: "这次生成不能从这里重试。" })
+      throw new ApiError({
+        status: 409,
+        code: "RETRY_NOT_ALLOWED",
+        detail: "这次生成不能从这里重试。",
+      })
     }
     const created = this.createRequest(job.inputUrl, key)
     const next = this.mustJob(created.body.request.id)
@@ -508,17 +698,36 @@ class MockWorld {
   }
 
   private article(job: Job): ArticleResponse {
-    if (job.status !== "completed" || !job.articleId) throw new ApiError({ status: 409, code: "ARTICLE_NOT_READY", detail: "文章还没有发布。" })
+    if (job.status !== "completed" || !job.articleId)
+      throw new ApiError({
+        status: 409,
+        code: "ARTICLE_NOT_READY",
+        detail: "文章还没有发布。",
+      })
     return {
       schema_version: 1,
-      article: { ...article, source: job.source ?? article.source, published_at: job.updatedAt },
+      article: {
+        ...article,
+        source: job.source ?? article.source,
+        published_at: job.updatedAt,
+      },
+      generation_model: developmentModel,
       frames,
-      media: { status: "ready", can_inspect_now: true, can_restore_for_question: true },
+      media: {
+        status: "ready",
+        can_inspect_now: true,
+        can_restore_for_question: true,
+      },
     }
   }
 
   private conversation(job: Job) {
-    if (job.status !== "completed") throw new ApiError({ status: 409, code: "ARTICLE_NOT_READY", detail: "文章还没有发布。" })
+    if (job.status !== "completed")
+      throw new ApiError({
+        status: 409,
+        code: "ARTICLE_NOT_READY",
+        detail: "文章还没有发布。",
+      })
     let conversation = [...this.conversations.values()].find((item) => item.request_id === job.id)
     if (!conversation) {
       conversation = {
@@ -535,22 +744,60 @@ class MockWorld {
     return { schema_version: 1, conversation }
   }
 
-  private createTurn(conversationId: string, key: string, input: { question: string; expected_last_turn_id: string | null; context: QuestionContext }) {
+  private createTurn(
+    conversationId: string,
+    key: string,
+    input: {
+      question: string
+      expected_last_turn_id: string | null
+      context: QuestionContext
+    },
+  ) {
     const conversation = this.conversations.get(conversationId)
-    if (!conversation) throw new ApiError({ status: 404, code: "RESOURCE_NOT_FOUND", detail: "资源不存在。" })
+    if (!conversation)
+      throw new ApiError({
+        status: 404,
+        code: "RESOURCE_NOT_FOUND",
+        detail: "资源不存在。",
+      })
     const body = JSON.stringify(input)
     const seen = this.turnKeys.get(`${conversationId}:${key}`)
     if (seen) {
-      if (seen.body !== body) throw new ApiError({ status: 409, code: "IDEMPOTENCY_CONFLICT", detail: "同一次提交的内容不一致。" })
+      if (seen.body !== body)
+        throw new ApiError({
+          status: 409,
+          code: "IDEMPOTENCY_CONFLICT",
+          detail: "同一次提交的内容不一致。",
+        })
       return this.accepted(this.turnView(this.mustTurn(seen.id)), true)
     }
     const question = input.question?.trim() ?? ""
-    if (!question) throw new ApiError({ status: 400, code: "INVALID_ARGUMENT", detail: "先写下一个问题。" })
-    if ([...question].length > 4000) throw new ApiError({ status: 422, code: "INPUT_LIMIT_EXCEEDED", detail: "这个问题太长了。" })
+    if (!question)
+      throw new ApiError({
+        status: 400,
+        code: "INVALID_ARGUMENT",
+        detail: "先写下一个问题。",
+      })
+    if ([...question].length > 4000)
+      throw new ApiError({
+        status: 422,
+        code: "INPUT_LIMIT_EXCEEDED",
+        detail: "这个问题太长了。",
+      })
     if (input.expected_last_turn_id !== conversation.last_turn_id) {
-      throw new ApiError({ status: 409, code: "TURN_HISTORY_CHANGED", detail: "对话已经有了更新的一轮。" })
+      throw new ApiError({
+        status: 409,
+        code: "TURN_HISTORY_CHANGED",
+        detail: "对话已经有了更新的一轮。",
+      })
     }
-    if (conversation.active_turn_id) throw new ApiError({ status: 409, code: "TURN_IN_PROGRESS", detail: "上一轮回答仍在进行。", meta: { active_turn_id: conversation.active_turn_id } })
+    if (conversation.active_turn_id)
+      throw new ApiError({
+        status: 409,
+        code: "TURN_IN_PROGRESS",
+        detail: "上一轮回答仍在进行。",
+        meta: { active_turn_id: conversation.active_turn_id },
+      })
     this.assertContext(input.context)
     const turnNo = [...this.turns.values()].filter((item) => item.conversationId === conversationId).length + 1
     const id = `turn_${++this.seq}`
@@ -588,13 +835,23 @@ class MockWorld {
   private assertContext(context: QuestionContext | undefined) {
     const frameId = context?.frame_id
     if (frameId && !frames.some((item) => item.id === frameId)) {
-      throw new ApiError({ status: 422, code: "INVALID_CONTEXT", detail: "这张画面不属于当前视频。" })
+      throw new ApiError({
+        status: 422,
+        code: "INVALID_CONTEXT",
+        detail: "这张画面不属于当前视频。",
+      })
     }
     const passage = context?.passage
     if (!passage) return
-    const block = article.sections.flatMap((section) => section.blocks.map((item) => ({ section, item }))).find((item) => item.item.id === passage.block_id && item.section.id === passage.section_id)
+    const block = article.sections
+      .flatMap((section) => section.blocks.map((item) => ({ section, item })))
+      .find((item) => item.item.id === passage.block_id && item.section.id === passage.section_id)
     if (!block || !quoteMatchesBlock(block.item, passage.quote)) {
-      throw new ApiError({ status: 422, code: "INVALID_CONTEXT", detail: "选中的文字不在这一段里。" })
+      throw new ApiError({
+        status: 422,
+        code: "INVALID_CONTEXT",
+        detail: "选中的文字不在这一段里。",
+      })
     }
   }
 
@@ -612,28 +869,47 @@ class MockWorld {
       talk.wait = null
       talk.phase = "answer"
       talk.seq = 2
-      talk.steps.push(step({ id: `${talk.id}-read`, title: talk.context.passage ? "正在阅读选中的段落" : "正在阅读相关段落", purpose: "对照文章和这条视频。", status: "running", first_seq: 2, last_seq: 2, segment_no: 0, run_id: talk.runId, phase: "answer" }))
+      talk.steps.push(
+        step({
+          id: `${talk.id}-read`,
+          title: talk.context.passage ? "正在阅读选中的段落" : "正在阅读相关段落",
+          purpose: "对照文章和这条视频。",
+          status: "running",
+          first_seq: 2,
+          last_seq: 2,
+          segment_no: 0,
+          run_id: talk.runId,
+          phase: "answer",
+        }),
+      )
       this.publish(talk, "view.snapshot")
       return
     }
     if (talk.stage === 2) {
-      talk.steps[0] = { ...talk.steps[0], status: "completed", finished_at: now(), outcome: { message: "已对照文章原文。", evidence_status: "supported" } }
-      talk.seq = 3
-      talk.steps.push(step({
-        id: `${talk.id}-look`,
-        title: `正在查看 ${picked.caption}`,
-        purpose: "核对画面里能确认的内容。",
+      talk.steps[0] = {
+        ...talk.steps[0],
         status: "completed",
-        first_seq: 3,
-        last_seq: 3,
-        segment_no: 0,
-        run_id: talk.runId,
-        phase: "answer",
-        frame_ids: [picked.id],
-        frames: [picked],
         finished_at: now(),
-        outcome: { message: picked.caption, evidence_status: "supported" },
-      }))
+        outcome: { message: "已对照文章原文。", evidence_status: "supported" },
+      }
+      talk.seq = 3
+      talk.steps.push(
+        step({
+          id: `${talk.id}-look`,
+          title: `正在查看 ${picked.caption}`,
+          purpose: "核对画面里能确认的内容。",
+          status: "completed",
+          first_seq: 3,
+          last_seq: 3,
+          segment_no: 0,
+          run_id: talk.runId,
+          phase: "answer",
+          frame_ids: [picked.id],
+          frames: [picked],
+          finished_at: now(),
+          outcome: { message: picked.caption, evidence_status: "supported" },
+        }),
+      )
       this.publish(talk, "activity.upsert")
       return
     }
@@ -652,20 +928,43 @@ class MockWorld {
     return {
       kind: "grounded",
       summary: "已核对这张画面",
-      blocks: [{
-        id: `${talk.id}-block`,
-        type: "paragraph",
-        origin: "video",
-        content: [
-          { type: "text", text: picked.id === frameClosed.id ? "这一帧还停在编辑状态，菜单没有展开，不能据此确认流程已经运行。" : "这一帧能看到展开后的菜单，里面有添加步骤、保存流程和运行。它说明的是可添加的步骤，还不是运行结果。", marks: [] },
-          { type: "citation", citation_id: "ans_cite" },
-        ],
-      }],
+      blocks: [
+        {
+          id: `${talk.id}-block`,
+          type: "paragraph",
+          origin: "video",
+          content: [
+            {
+              type: "text",
+              text:
+                picked.id === frameClosed.id
+                  ? "这一帧还停在编辑状态，菜单没有展开，不能据此确认流程已经运行。"
+                  : "这一帧能看到展开后的菜单，里面有添加步骤、保存流程和运行。它说明的是可添加的步骤，还不是运行结果。",
+              marks: [],
+            },
+            { type: "citation", citation_id: "ans_cite" },
+          ],
+        },
+      ],
       citations: {
-        ans_cite: { id: "ans_cite", kind: "video_frame", label: picked.caption, snapshot_id: "snap_mock", frame_id: picked.id, time_ms: picked.time_ms },
+        ans_cite: {
+          id: "ans_cite",
+          kind: "video_frame",
+          label: picked.caption,
+          snapshot_id: "snap_mock",
+          frame_id: picked.id,
+          time_ms: picked.time_ms,
+        },
       },
       frames: [picked],
-      limitations: [{ code: "not_observed", message: "该帧未覆盖运行完成后的结果页。", section_ids: ["cautions"], citation_ids: ["ans_cite"] }],
+      limitations: [
+        {
+          code: "not_observed",
+          message: "该帧未覆盖运行完成后的结果页。",
+          section_ids: ["cautions"],
+          citation_ids: ["ans_cite"],
+        },
+      ],
     }
   }
 
@@ -686,7 +985,7 @@ class MockWorld {
     talk.status = "canceled"
     talk.runStatus = "canceled"
     talk.revision += 1
-    talk.steps = talk.steps.map((item) => item.status === "running" ? { ...item, status: "canceled", finished_at: now() } : item)
+    talk.steps = talk.steps.map((item) => (item.status === "running" ? { ...item, status: "canceled", finished_at: now() } : item))
     const conversation = this.conversations.get(talk.conversationId)
     if (conversation?.active_turn_id === talk.id) conversation.active_turn_id = null
     talk.updatedAt = now()
@@ -694,8 +993,17 @@ class MockWorld {
   }
 
   private retryTurn(conversationId: string, talk: Talk, key: string, expected: string | null) {
-    if (talk.status !== "failed" && talk.status !== "canceled") throw new ApiError({ status: 409, code: "RETRY_NOT_ALLOWED", detail: "这一轮不能重试。" })
-    const created = this.createTurn(conversationId, key, { question: talk.question, expected_last_turn_id: expected, context: talk.context })
+    if (talk.status !== "failed" && talk.status !== "canceled")
+      throw new ApiError({
+        status: 409,
+        code: "RETRY_NOT_ALLOWED",
+        detail: "这一轮不能重试。",
+      })
+    const created = this.createTurn(conversationId, key, {
+      question: talk.question,
+      expected_last_turn_id: expected,
+      context: talk.context,
+    })
     const next = this.mustTurn(created.body.turn.id)
     next.retryOf = talk.id
     return { ...created, body: this.turnView(next) }
@@ -730,6 +1038,7 @@ class MockWorld {
         id: job.id,
         revision: job.revision,
         input_url: job.inputUrl,
+        generation_model: developmentModel,
         status: job.status,
         reuse: job.reuse,
         retry_of_id: job.retryOf,
@@ -738,7 +1047,16 @@ class MockWorld {
         updated_at: job.updatedAt,
       },
       source: job.source,
-      execution: job.runId ? { id: job.runId, kind: job.runKind, status: job.runStatus as "running", phase: job.phase as "overview" | null, retry_at: null, wait_reason: job.wait as "dispatch" | null } : null,
+      execution: job.runId
+        ? {
+            id: job.runId,
+            kind: job.runKind,
+            status: job.runStatus as "running",
+            phase: job.phase as "overview" | null,
+            retry_at: null,
+            wait_reason: job.wait as "dispatch" | null,
+          }
+        : null,
       activity: {
         current_step_id: !terminal(job.status) && current ? current.id : null,
         recent_steps: recent,
@@ -748,8 +1066,15 @@ class MockWorld {
         history_expires_at: null,
       },
       failure: job.failure,
-      actions: { can_cancel: !terminal(job.status), can_retry: job.status === "canceled" || job.status === "failed", can_read_article: job.articleId != null },
-      stream: { ...this.position(job), url: `/api/v1/requests/${job.id}/events` },
+      actions: {
+        can_cancel: !terminal(job.status),
+        can_retry: job.status === "canceled" || job.status === "failed",
+        can_read_article: job.articleId != null,
+      },
+      stream: {
+        ...this.position(job),
+        url: `/api/v1/requests/${job.id}/events`,
+      },
     }
   }
 
@@ -775,7 +1100,14 @@ class MockWorld {
         created_at: talk.createdAt,
         updated_at: talk.updatedAt,
       },
-      execution: { id: talk.runId, kind: "answer.generate", status: talk.runStatus as NonNullable<TurnView["execution"]>["status"], phase: (talk.phase as NonNullable<TurnView["execution"]>["phase"]) ?? null, retry_at: null, wait_reason: (talk.wait as NonNullable<TurnView["execution"]>["wait_reason"]) ?? null },
+      execution: {
+        id: talk.runId,
+        kind: "answer.generate",
+        status: talk.runStatus as NonNullable<TurnView["execution"]>["status"],
+        phase: (talk.phase as NonNullable<TurnView["execution"]>["phase"]) ?? null,
+        retry_at: null,
+        wait_reason: (talk.wait as NonNullable<TurnView["execution"]>["wait_reason"]) ?? null,
+      },
       activity: {
         current_step_id: !terminal(talk.status) && current ? current.id : null,
         recent_steps: talk.steps,
@@ -790,12 +1122,20 @@ class MockWorld {
         can_retry: latest && (talk.status === "canceled" || talk.status === "failed"),
         can_submit_next: latest && terminal(talk.status),
       },
-      stream: { ...this.position(talk), url: `/api/v1/conversations/${talk.conversationId}/turns/${talk.id}/events` },
+      stream: {
+        ...this.position(talk),
+        url: `/api/v1/conversations/${talk.conversationId}/turns/${talk.id}/events`,
+      },
     }
   }
 
   private position(target: Job | Talk) {
-    return { cursor: `mock:${target.id}:${target.revision}:${target.runId ?? "-"}:${target.seq}`, revision: target.revision, run_id: target.runId, seq: target.seq }
+    return {
+      cursor: `mock:${target.id}:${target.revision}:${target.runId ?? "-"}:${target.seq}`,
+      revision: target.revision,
+      run_id: target.runId,
+      seq: target.seq,
+    }
   }
 
   private statusOf(target: Job | Talk) {
@@ -819,7 +1159,15 @@ class MockWorld {
       if (!current) {
         type = "view.snapshot"
       } else {
-        socket.emit(type, { schema_version: 1, scope, position, payload: { step: current, current_step_id: current.status === "running" ? current.id : null } })
+        socket.emit(type, {
+          schema_version: 1,
+          scope,
+          position,
+          payload: {
+            step: current,
+            current_step_id: current.status === "running" ? current.id : null,
+          },
+        })
         return
       }
     }
@@ -841,17 +1189,33 @@ class MockWorld {
 
   private mustJob(id: string) {
     const job = this.requests.get(id)
-    if (!job) throw new ApiError({ status: 404, code: "RESOURCE_NOT_FOUND", detail: "资源不存在。" })
+    if (!job)
+      throw new ApiError({
+        status: 404,
+        code: "RESOURCE_NOT_FOUND",
+        detail: "资源不存在。",
+      })
     return job
   }
 
   private mustTurn(id: string) {
     const turn = this.turns.get(id)
-    if (!turn) throw new ApiError({ status: 404, code: "RESOURCE_NOT_FOUND", detail: "资源不存在。" })
+    if (!turn)
+      throw new ApiError({
+        status: 404,
+        code: "RESOURCE_NOT_FOUND",
+        detail: "资源不存在。",
+      })
     return turn
   }
 
   private accepted<T>(body: T, replayed: boolean) {
-    return { status: replayed ? 200 : 201, replayed, expiresAt: "2026-10-16T00:00:00Z", location: null, body }
+    return {
+      status: replayed ? 200 : 201,
+      replayed,
+      expiresAt: "2026-10-16T00:00:00Z",
+      location: null,
+      body,
+    }
   }
 }

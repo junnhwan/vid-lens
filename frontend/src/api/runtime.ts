@@ -1,6 +1,7 @@
 import { HttpApi } from "./http"
 import type { LiveSocket } from "./live"
 import type {
+  GenerationInput,
   Accepted,
   ActivityPage,
   ArticleResponse,
@@ -14,7 +15,7 @@ import type {
 
 export interface VisitorApi {
   session(): Promise<SessionResponse>
-  createRequest(videoUrl: string, key: string): Promise<Accepted<RequestView>>
+  createRequest(videoUrl: string, key: string, options?: GenerationInput): Promise<Accepted<RequestView>>
   getRequest(id: string): Promise<RequestView>
   cancelRequest(id: string): Promise<RequestView>
   retryRequest(id: string, key: string): Promise<Accepted<RequestView>>
@@ -35,6 +36,7 @@ export interface Runtime {
 }
 
 export function wantsMock(): boolean {
+  if (!import.meta.env.DEV) return false
   if (typeof location === "undefined") return false
   return new URLSearchParams(location.search).get("mock") === "1" || import.meta.env.VITE_API === "mock"
 }
@@ -48,7 +50,7 @@ export function createHttpRuntime(): Runtime {
 }
 
 export async function createRuntime(): Promise<Runtime> {
-  if (wantsMock()) {
+  if (import.meta.env.DEV && wantsMock()) {
     const mock = await import("./mock")
     return mock.createMockRuntime()
   }

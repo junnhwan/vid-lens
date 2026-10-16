@@ -102,6 +102,13 @@ export class ResourceStream {
       let message = "匿名会话已失效。"
       try {
         const envelope = JSON.parse(String(event.data)) as StreamEnvelope
+        if (envelope.payload?.code === "CLIENT_UPDATE_REQUIRED") {
+          this.stopped = true
+          this.socket?.close()
+          this.options.onAuth("此问答包含新版引用，请刷新页面。")
+          this.options.onStatus("closed")
+          return
+        }
         if (type === "stream.auth_required") message = String(envelope.payload?.message || message)
       } catch {
         message = "连接需要重新同步。"
@@ -134,7 +141,10 @@ export class ResourceStream {
       return
     }
     if (type === "activity.upsert") {
-      const payload = envelope.payload as { step?: ActivityStep; current_step_id?: string | null }
+      const payload = envelope.payload as {
+        step?: ActivityStep
+        current_step_id?: string | null
+      }
       const position = envelope.position
       if (!payload?.step || !position) {
         void this.recover(true)
@@ -208,9 +218,12 @@ export class ResourceStream {
     } catch (error) {
       this.recovering = false
       if (this.stopped) return
-      if (error instanceof ApiError && (error.status === 401 || error.status === 404 || error.status === 410)) {
+      if (
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 404 || error.status === 410 || error.code === "CLIENT_UPDATE_REQUIRED")
+      ) {
         this.stopped = true
-        if (error.status === 401) this.options.onAuth(error.detail)
+        if (error.status === 401 || error.code === "CLIENT_UPDATE_REQUIRED") this.options.onAuth(error.detail)
         this.options.onStatus("closed")
         return
       }
@@ -221,7 +234,10 @@ export class ResourceStream {
 
 function isTerminalView(view: unknown): boolean {
   if (!view || typeof view !== "object") return false
-  const body = view as { request?: { status?: string }; turn?: { status?: string } }
+  const body = view as {
+    request?: { status?: string }
+    turn?: { status?: string }
+  }
   const status = body.request?.status || body.turn?.status
   return status === "completed" || status === "failed" || status === "canceled"
 }

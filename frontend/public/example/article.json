@@ -1,0 +1,959 @@
+{
+  "schema_version": 1,
+  "article": {
+    "schema_version": 1,
+    "id": "example-article",
+    "snapshot_id": "example-snapshot",
+    "source": {
+      "source_id": "example-source",
+      "snapshot_id": "example-snapshot",
+      "platform": "bilibili",
+      "canonical_url": "https://www.bilibili.com/video/BV14Upq6yEq7?p=1",
+      "title": "Matt Pocock 推荐：用动画讲解从 grill 到 retro 的全程工作流 p01 【中英字幕】Matt Pocock 推荐：用动画讲解从 grill 到 retro 的全程工作流",
+      "duration_ms": 544800,
+      "part": {
+        "key": "1",
+        "label": "第 1 P"
+      },
+      "text_provenance": {
+        "origin": "asr",
+        "coverage": "complete",
+        "language": null
+      }
+    },
+    "title": "Matt Pocock 的 AI 开发工作流：从“Grill”到“Retro”的全程解析",
+    "published_at": "2026-10-15T13:43:19.306473178Z",
+    "sections": [
+      {
+        "id": "sec_intro",
+        "title": "引言：沉默的猜测与咖啡时间",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "想象一下，你只需输入一句“让用户暂停订阅”，AI Agent 就能在你冲咖啡的短短几分钟内完成功能开发、通过测试并交付代码。这听起来很美好，但随之而来的是“沉默的猜测”：Agent 自行决定了账单何时停止、已打包的商品如何处理，甚至提醒邮件的措辞。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_0",
+                "type": "citation"
+              }
+            ],
+            "id": "block_intro_1",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "视频开篇展示了 Agent 在 9 分钟内完成“暂停订阅”功能的场景，标题为“THE SILENT GUESS”（沉默的猜测）。",
+            "citation_ids": [
+              "cit_frame_1"
+            ],
+            "frame_ids": [
+              "example-frame-01"
+            ],
+            "id": "block_intro_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_grill",
+        "title": "Grill：驱散决策迷雾",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "Matt Pocock 提出的解决方案是“Grill”技能——一种无情的访谈机制。它将功能视为一棵决策树，在“迷雾”中找出所有尚未确定的子决策（如计费方式、已打包商品处理、暂停时长），并向开发者逐一提问。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_1",
+                "type": "citation"
+              }
+            ],
+            "id": "block_grill_concept",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“The Fog”可视化：灰色云雾代表未决定的决策，白色椭圆代表已确定的“墨水”决策。随着问答进行，迷雾逐渐消散。",
+            "citation_ids": [
+              "cit_frame_2"
+            ],
+            "frame_ids": [
+              "example-frame-02"
+            ],
+            "id": "block_grill_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          },
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "这种提问可能非常密集。在一次课程录制中，Agent 向 Matt 提出了 46 个问题，以至于他开玩笑说：“哥们，冷静点，你把新手都吓跑了。”每个问题都附带推荐答案，开发者只需确认或修正，从而高效地填满决策树的空白。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_2",
+                "type": "citation"
+              }
+            ],
+            "id": "block_grill_questions",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "Matt Pocock 的推文截图，显示 Agent 在一次课程中提出了 46 个问题，引发幽默回应。",
+            "citation_ids": [
+              "cit_frame_3"
+            ],
+            "frame_ids": [
+              "example-frame-03"
+            ],
+            "id": "block_grill_figure_2",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_glossary",
+        "title": "术语表与 /wait-what：统一语言",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "为了避免 Agent 使用模糊或错误的术语，工作流中引入了项目术语表（Glossary）。例如，明确区分“Pause”（无配送、无扣费）和“Skip”（错过配送、计费继续）。当 Agent 使用晦涩语言时，开发者可以使用“/wait-what”技能，强制其用通俗语言和标准术语重新解释。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_3",
+                "type": "citation"
+              }
+            ],
+            "id": "block_glossary",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“SAY IT ONCE”：展示 Glossary.md 文件定义及 /wait-what 技能的作用，确保沟通一致性。",
+            "citation_ids": [
+              "cit_frame_4"
+            ],
+            "frame_ids": [
+              "example-frame-04"
+            ],
+            "id": "block_glossary_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_spec_tickets",
+        "title": "Spec 与 Tickets：智能区内的清洁头脑",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "决策确定后，Agent 生成包含详细用户故事（User Stories）的 Spec，并作为 Issue 标记为“Ready for Agent”。为了保持 Agent 在“智能区”（Smart Zone，约 150k token 以内）的高效推理，大任务被拆分为多个小 Ticket。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_4",
+                "type": "citation"
+              }
+            ],
+            "id": "block_spec",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“THE DESTINATION”：Spec 转化为带有用户故事的 Issue，并明确“Seam”（切入点）以便测试。",
+            "citation_ids": [
+              "cit_frame_5"
+            ],
+            "frame_ids": [
+              "example-frame-05"
+            ],
+            "id": "block_spec_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          },
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "采用“Clean Heads”策略：每完成一个 Ticket 就清空聊天上下文，确保下一个任务从零开始，避免上下文污染和推理能力下降。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_5",
+                "type": "citation"
+              }
+            ],
+            "id": "block_tickets",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“CLEAN HEADS”：展示 150k Token 的 Smart Zone 限制及 Ticket 拆分逻辑。",
+            "citation_ids": [
+              "cit_frame_6"
+            ],
+            "frame_ids": [
+              "example-frame-06"
+            ],
+            "id": "block_tickets_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_review_pr",
+        "title": "双桌审查与 Merge Danger",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "代码审查采用“Two Desks”模式：一个 Agent 对照 Spec 检查功能完整性，另一个 Agent 对照编码标准检查代码质量。这种分离确保了审查的专注性。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_6",
+                "type": "citation"
+              }
+            ],
+            "id": "block_review",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“TWO DESKS”：两个 Agent 分别负责 Spec 对照和 Standards 对照的代码审查。",
+            "citation_ids": [
+              "cit_frame_7"
+            ],
+            "frame_ids": [
+              "example-frame-07"
+            ],
+            "id": "block_review_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          },
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "PR 描述由 Agent 自动生成，包含“Merge Danger”评估，指出更改是“双向门”（可逆）还是“单向门”，以及“Blast Radius”（波及范围），帮助人类快速识别风险。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_7",
+                "type": "citation"
+              }
+            ],
+            "id": "block_pr",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“MERGE DANGER”：PR 描述中包含 Door 类型和 Blast Radius 评估，此处波及范围为 Billing 模块。",
+            "citation_ids": [
+              "cit_frame_8"
+            ],
+            "frame_ids": [
+              "example-frame-08"
+            ],
+            "id": "block_pr_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_retro",
+        "title": "Retro：持续改进的工程规范",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "任务完成后，使用“/retro”技能回顾会话，Agent 会建议更新文档、添加 Lint 规则或预提交钩子，将本次遇到的痛点转化为长期规范。Matt 强调不应自动应用这些修复，以免 Agent 陷入误报循环，人类需介入筛选。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_8",
+                "type": "citation"
+              }
+            ],
+            "id": "block_retro",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“/RETRO”：Agent 回顾会话并提出改进建议，如添加 Lint 规则或更新 AGENTS.md。",
+            "citation_ids": [
+              "cit_frame_9"
+            ],
+            "frame_ids": [
+              "example-frame-09"
+            ],
+            "id": "block_retro_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      },
+      {
+        "id": "sec_philosophy",
+        "title": "哲学：将军与战术家",
+        "blocks": [
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "尽管该工作流（Grill -> Spec -> Tickets -> Build）看似瀑布流，但 Matt 引用 Uncle Bob 的观点为其辩护，认为在 AI 时代这种结构化方法能有效控制复杂性。整个技能集合仅占用 660 tokens，其中大部分按需调用，并不增加日常认知负荷。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_9",
+                "type": "citation"
+              }
+            ],
+            "id": "block_waterfall",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“WATERFALL?”：阶梯图展示工作流阶段，并引用 Uncle Bob 直播内容回应质疑。",
+            "citation_ids": [
+              "cit_frame_10"
+            ],
+            "frame_ids": [
+              "example-frame-10"
+            ],
+            "id": "block_waterfall_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          },
+          {
+            "caption": "“TOO DEFENSIVE?”：展示技能集合构成，总占用仅 660 tokens。",
+            "citation_ids": [
+              "cit_frame_11"
+            ],
+            "frame_ids": [
+              "example-frame-11"
+            ],
+            "id": "block_skills_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          },
+          {
+            "content": [
+              {
+                "marks": [],
+                "text": "核心理念是：人类是“将军”（The General），负责战略决策；Agent 是“战术家”（Tactical），负责执行。通过明确的决策和结构化的工作流，人类驾驭 AI 的强大执行力，同时保留对业务逻辑的最终控制权。",
+                "type": "text"
+              },
+              {
+                "citation_id": "cit_transcript_10",
+                "type": "citation"
+              }
+            ],
+            "id": "block_general",
+            "origin": "video",
+            "type": "paragraph"
+          },
+          {
+            "caption": "“THE GENERAL”：人类制定战略决策（如账单、商品处理），Agent 负责战术执行。",
+            "citation_ids": [
+              "cit_frame_12"
+            ],
+            "frame_ids": [
+              "example-frame-12"
+            ],
+            "id": "block_general_figure",
+            "layout": "single",
+            "origin": "video",
+            "type": "figure"
+          }
+        ]
+      }
+    ],
+    "mind_map": {
+      "root_id": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "parent_id": null,
+          "label": "Matt Pocock AI 工作流",
+          "section_id": "sec_intro"
+        },
+        {
+          "id": "node_grill",
+          "parent_id": "root",
+          "label": "Grill: 驱散迷雾",
+          "section_id": "sec_grill"
+        },
+        {
+          "id": "node_glossary",
+          "parent_id": "root",
+          "label": "术语表与沟通",
+          "section_id": "sec_glossary"
+        },
+        {
+          "id": "node_spec",
+          "parent_id": "root",
+          "label": "Spec 与 Tickets",
+          "section_id": "sec_spec_tickets"
+        },
+        {
+          "id": "node_review",
+          "parent_id": "root",
+          "label": "审查与 PR",
+          "section_id": "sec_review_pr"
+        },
+        {
+          "id": "node_retro",
+          "parent_id": "root",
+          "label": "Retro: 持续改进",
+          "section_id": "sec_retro"
+        },
+        {
+          "id": "node_philosophy",
+          "parent_id": "root",
+          "label": "将军与战术家",
+          "section_id": "sec_philosophy"
+        }
+      ]
+    },
+    "citations": {
+      "cit_frame_1": {
+        "frame_id": "example-frame-01",
+        "id": "cit_frame_1",
+        "kind": "video_frame",
+        "label": "开篇场景：沉默的猜测",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 22700
+      },
+      "cit_frame_10": {
+        "frame_id": "example-frame-10",
+        "id": "cit_frame_10",
+        "kind": "video_frame",
+        "label": "WATERFALL?",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 431300
+      },
+      "cit_frame_11": {
+        "frame_id": "example-frame-11",
+        "id": "cit_frame_11",
+        "kind": "video_frame",
+        "label": "TOO DEFENSIVE?",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 476700
+      },
+      "cit_frame_12": {
+        "frame_id": "example-frame-12",
+        "id": "cit_frame_12",
+        "kind": "video_frame",
+        "label": "THE GENERAL",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 522100
+      },
+      "cit_frame_2": {
+        "frame_id": "example-frame-02",
+        "id": "cit_frame_2",
+        "kind": "video_frame",
+        "label": "The Fog 可视化",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 68100
+      },
+      "cit_frame_3": {
+        "frame_id": "example-frame-03",
+        "id": "cit_frame_3",
+        "kind": "video_frame",
+        "label": "Matt Pocock 推文",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 113500
+      },
+      "cit_frame_4": {
+        "frame_id": "example-frame-04",
+        "id": "cit_frame_4",
+        "kind": "video_frame",
+        "label": "SAY IT ONCE",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 158900
+      },
+      "cit_frame_5": {
+        "frame_id": "example-frame-05",
+        "id": "cit_frame_5",
+        "kind": "video_frame",
+        "label": "THE DESTINATION",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 204300
+      },
+      "cit_frame_6": {
+        "frame_id": "example-frame-06",
+        "id": "cit_frame_6",
+        "kind": "video_frame",
+        "label": "CLEAN HEADS",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 249700
+      },
+      "cit_frame_7": {
+        "frame_id": "example-frame-07",
+        "id": "cit_frame_7",
+        "kind": "video_frame",
+        "label": "TWO DESKS",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 295100
+      },
+      "cit_frame_8": {
+        "frame_id": "example-frame-08",
+        "id": "cit_frame_8",
+        "kind": "video_frame",
+        "label": "MERGE DANGER",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 340500
+      },
+      "cit_frame_9": {
+        "frame_id": "example-frame-09",
+        "id": "cit_frame_9",
+        "kind": "video_frame",
+        "label": "/RETRO",
+        "snapshot_id": "example-snapshot",
+        "time_ms": 385900
+      },
+      "cit_transcript_0": {
+        "id": "cit_transcript_0",
+        "kind": "video_text",
+        "label": "引言：沉默的猜测",
+        "quote": null,
+        "range": {
+          "start_ms": 0,
+          "end_ms": 60000
+        },
+        "segment_ids": [
+          "example-snapshot_0"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_1": {
+        "id": "cit_transcript_1",
+        "kind": "video_text",
+        "label": "Grill 技能介绍",
+        "quote": null,
+        "range": {
+          "start_ms": 60000,
+          "end_ms": 120000
+        },
+        "segment_ids": [
+          "example-snapshot_1"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_10": {
+        "id": "cit_transcript_10",
+        "kind": "video_text",
+        "label": "将军与战术家",
+        "quote": null,
+        "range": {
+          "start_ms": 480000,
+          "end_ms": 540000
+        },
+        "segment_ids": [
+          "example-snapshot_8"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_2": {
+        "id": "cit_transcript_2",
+        "kind": "video_text",
+        "label": "46 个问题",
+        "quote": null,
+        "range": {
+          "start_ms": 120000,
+          "end_ms": 180000
+        },
+        "segment_ids": [
+          "example-snapshot_2"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_3": {
+        "id": "cit_transcript_3",
+        "kind": "video_text",
+        "label": "术语表与 /wait-what",
+        "quote": null,
+        "range": {
+          "start_ms": 120000,
+          "end_ms": 180000
+        },
+        "segment_ids": [
+          "example-snapshot_2"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_4": {
+        "id": "cit_transcript_4",
+        "kind": "video_text",
+        "label": "Spec 与 Seam",
+        "quote": null,
+        "range": {
+          "start_ms": 180000,
+          "end_ms": 240000
+        },
+        "segment_ids": [
+          "example-snapshot_3"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_5": {
+        "id": "cit_transcript_5",
+        "kind": "video_text",
+        "label": "Clean Heads 与 Smart Zone",
+        "quote": null,
+        "range": {
+          "start_ms": 240000,
+          "end_ms": 300000
+        },
+        "segment_ids": [
+          "example-snapshot_4"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_6": {
+        "id": "cit_transcript_6",
+        "kind": "video_text",
+        "label": "Two Desks 审查",
+        "quote": null,
+        "range": {
+          "start_ms": 240000,
+          "end_ms": 300000
+        },
+        "segment_ids": [
+          "example-snapshot_4"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_7": {
+        "id": "cit_transcript_7",
+        "kind": "video_text",
+        "label": "Merge Danger",
+        "quote": null,
+        "range": {
+          "start_ms": 300000,
+          "end_ms": 360000
+        },
+        "segment_ids": [
+          "example-snapshot_5"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_8": {
+        "id": "cit_transcript_8",
+        "kind": "video_text",
+        "label": "/retro 技能",
+        "quote": null,
+        "range": {
+          "start_ms": 300000,
+          "end_ms": 360000
+        },
+        "segment_ids": [
+          "example-snapshot_5"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      },
+      "cit_transcript_9": {
+        "id": "cit_transcript_9",
+        "kind": "video_text",
+        "label": "Waterfall 质疑与 Skills 占用",
+        "quote": null,
+        "range": {
+          "start_ms": 420000,
+          "end_ms": 480000
+        },
+        "segment_ids": [
+          "example-snapshot_7"
+        ],
+        "snapshot_id": "example-snapshot",
+        "text_origin": "asr"
+      }
+    },
+    "limitations": [],
+    "quality": "standard"
+  },
+  "frames": [
+    {
+      "id": "example-frame-01",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 22700,
+      "requested_time_ms": 22700,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-01.jpg",
+        "thumbnail": "/example/frame-01.jpg"
+      }
+    },
+    {
+      "id": "example-frame-02",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 68100,
+      "requested_time_ms": 68100,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-02.jpg",
+        "thumbnail": "/example/frame-02.jpg"
+      }
+    },
+    {
+      "id": "example-frame-03",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 113500,
+      "requested_time_ms": 113500,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-03.jpg",
+        "thumbnail": "/example/frame-03.jpg"
+      }
+    },
+    {
+      "id": "example-frame-04",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 158900,
+      "requested_time_ms": 158900,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-04.jpg",
+        "thumbnail": "/example/frame-04.jpg"
+      }
+    },
+    {
+      "id": "example-frame-05",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 204300,
+      "requested_time_ms": 204300,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-05.jpg",
+        "thumbnail": "/example/frame-05.jpg"
+      }
+    },
+    {
+      "id": "example-frame-06",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 249700,
+      "requested_time_ms": 249700,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-06.jpg",
+        "thumbnail": "/example/frame-06.jpg"
+      }
+    },
+    {
+      "id": "example-frame-07",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 295100,
+      "requested_time_ms": 295100,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-07.jpg",
+        "thumbnail": "/example/frame-07.jpg"
+      }
+    },
+    {
+      "id": "example-frame-08",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 340500,
+      "requested_time_ms": 340500,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-08.jpg",
+        "thumbnail": "/example/frame-08.jpg"
+      }
+    },
+    {
+      "id": "example-frame-09",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 385900,
+      "requested_time_ms": 385900,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-09.jpg",
+        "thumbnail": "/example/frame-09.jpg"
+      }
+    },
+    {
+      "id": "example-frame-10",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 431300,
+      "requested_time_ms": 431300,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-10.jpg",
+        "thumbnail": "/example/frame-10.jpg"
+      }
+    },
+    {
+      "id": "example-frame-11",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 476700,
+      "requested_time_ms": 476700,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-11.jpg",
+        "thumbnail": "/example/frame-11.jpg"
+      }
+    },
+    {
+      "id": "example-frame-12",
+      "snapshot_id": "example-snapshot",
+      "time_ms": 522100,
+      "requested_time_ms": 522100,
+      "width": 1280,
+      "height": 867,
+      "mime_type": "image/jpeg",
+      "caption": "视频画面",
+      "crop": null,
+      "replaces_frame_id": null,
+      "availability": "ready",
+      "unavailable_reason": null,
+      "expires_at": null,
+      "urls": {
+        "full": "/example/frame-12.jpg",
+        "thumbnail": "/example/frame-12.jpg"
+      }
+    }
+  ],
+  "media": {
+    "status": "ready",
+    "can_inspect_now": false,
+    "can_restore_for_question": false
+  },
+  "generation_model": {
+    "id": "example-historical",
+    "revision_id": "example-historical",
+    "display_name": "历史模型（名称未归档）",
+    "brand_id": "generic",
+    "selection_locked": true,
+    "legacy": true
+  },
+  "quality_note": "本例保留原发布正文。首张图的画面标注为 9 min，烧录字幕为 10 minutes later；两者有差异，请结合原片判断。示例不开放私人问答。"
+}

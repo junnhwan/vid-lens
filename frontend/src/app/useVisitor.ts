@@ -1,13 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { clearWrites, canReplay, forgetWrite, memoryStore, newIdempotencyKey, pendingWrite, rememberWrite, type KeyValue } from "../api/writes"
+import {
+  clearWrites,
+  canReplay,
+  forgetWrite,
+  memoryStore,
+  newIdempotencyKey,
+  pendingWrite,
+  rememberWrite,
+  type KeyValue,
+} from "../api/writes"
 import { ApiError, NetworkError, isApiError, replayable, sessionLost } from "../api/error"
 import { ResourceStream, type Reaction } from "../api/live"
 import { createRuntime, wantsMock, type Runtime } from "../api/runtime"
 import { asSteps, mergeSteps } from "../contract/activity"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, formatClock } from "../contract/text"
-import type { ActivityStep, ArticleResponse, Citation, Conversation, Frame, RequestView, SessionResponse, StreamPosition, TurnView } from "../contract/types"
+import type {
+  ActivityStep,
+  ArticleResponse,
+  Citation,
+  Conversation,
+  Frame,
+  RequestView,
+  SessionResponse,
+  StreamPosition,
+  TurnView,
+} from "../contract/types"
 import { prefersReduced } from "../ui/motion"
+import { HttpApi } from "../api/http"
+import type { GenerationInput, ModelCatalog } from "../contract/types"
 
 export type Phase = "input" | "run" | "holding" | "reading"
 
@@ -58,6 +79,10 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [session, setSession] = useState<SessionResponse | null>(null)
   const [phase, setPhase] = useState<Phase>("input")
   const [link, setLink] = useState("")
+  const [purpose, setPurpose] = useState("")
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null)
+  const [selectedModel, setSelectedModel] = useState("")
+  const [catalogError, setCatalogError] = useState("")
   const [linkError, setLinkError] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [request, setRequest] = useState<RequestView | null>(null)
@@ -72,14 +97,28 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [turnSteps, setTurnSteps] = useState<Record<string, ActivityStep[]>>({})
   const [qaOpen, setQaOpen] = useState(false)
   const [draft, setDraft] = useState("")
-  const [frameChip, setFrameChip] = useState<{ id: string; label: string } | null>(null)
-  const [passageChip, setPassageChip] = useState<{ sectionId: string; blockId: string; quote: string } | null>(null)
+  const [externalAllowed, setExternalAllowed] = useState(false)
+  const [referenceLinks, setReferenceLinks] = useState("")
+  const [frameChip, setFrameChip] = useState<{
+    id: string
+    label: string
+  } | null>(null)
+  const [passageChip, setPassageChip] = useState<{
+    sectionId: string
+    blockId: string
+    quote: string
+  } | null>(null)
   const [qaError, setQaError] = useState("")
   const [qaBusy, setQaBusy] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({})
   const [focusToken, setFocusToken] = useState(0)
   const [frameMap, setFrameMap] = useState<Map<string, Frame>>(() => new Map())
-  const [lightbox, setLightbox] = useState<{ open: boolean; frames: Frame[]; index: number; origin: HTMLElement | null }>({ open: false, frames: [], index: 0, origin: null })
+  const [lightbox, setLightbox] = useState<{
+    open: boolean
+    frames: Frame[]
+    index: number
+    origin: HTMLElement | null
+  }>({ open: false, frames: [], index: 0, origin: null })
   const [live, setLive] = useState("")
 
   const runtimeRef = useRef<Runtime | null>(null)
@@ -129,7 +168,13 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       const next = new Map(prev)
       for (const frame of list) {
         const old = next.get(frame.id)
-        if (!old || old.availability !== frame.availability || old.urls.full !== frame.urls.full || old.urls.thumbnail !== frame.urls.thumbnail || old.caption !== frame.caption) {
+        if (
+          !old ||
+          old.availability !== frame.availability ||
+          old.urls.full !== frame.urls.full ||
+          old.urls.thumbnail !== frame.urls.thumbnail ||
+          old.caption !== frame.caption
+        ) {
           next.set(frame.id, frame)
           changed = true
         }
@@ -224,7 +269,15 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       stepsRef.current = merged
       return merged
     })
-    setRequest((prev) => prev ? { ...prev, activity: { ...prev.activity, current_step_id: currentId }, stream: { ...prev.stream, ...position } } : prev)
+    setRequest((prev) =>
+      prev
+        ? {
+            ...prev,
+            activity: { ...prev.activity, current_step_id: currentId },
+            stream: { ...prev.stream, ...position },
+          }
+        : prev,
+    )
     absorb(normalized.frames)
     return "stay"
   }
@@ -232,7 +285,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   function installTurn(view: TurnView, replace: boolean) {
     setTurns((prev) => {
       const index = prev.findIndex((item) => item.turn.id === view.turn.id)
-      const next = index < 0 ? [...prev, view] : prev.map((item, itemIndex) => itemIndex === index ? view : item)
+      const next = index < 0 ? [...prev, view] : prev.map((item, itemIndex) => (itemIndex === index ? view : item))
       next.sort((a, b) => a.turn.turn_no - b.turn.turn_no)
       turnsRef.current = next
       return next
@@ -284,8 +337,21 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     if (decision === "resync") return "resync"
     const normalized = normalizeStep(step)
     turnClock.current = next
-    setTurnSteps((prev) => ({ ...prev, [id]: mergeSteps(prev[id] ?? [], [normalized], false) }))
-    setTurns((prev) => prev.map((item) => item.turn.id === id ? { ...item, activity: { ...item.activity, current_step_id: currentId }, stream: { ...item.stream, ...position } } : item))
+    setTurnSteps((prev) => ({
+      ...prev,
+      [id]: mergeSteps(prev[id] ?? [], [normalized], false),
+    }))
+    setTurns((prev) =>
+      prev.map((item) =>
+        item.turn.id === id
+          ? {
+              ...item,
+              activity: { ...item.activity, current_step_id: currentId },
+              stream: { ...item.stream, ...position },
+            }
+          : item,
+      ),
+    )
     absorb(normalized.frames)
     return "stay"
   }
@@ -301,8 +367,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       resourcePath: `/api/v1/requests/${encodeURIComponent(id)}/events`,
       scope: { type: "request", id },
       getSnapshot: () => runtimeRef.current!.api.getRequest(id),
-      onSnapshot: (payload, source) => gen === epoch.current ? onRequestSnapshot(payload, source) : "close",
-      onUpsert: (step, currentId, position) => gen === epoch.current ? onRequestUpsert(step, currentId, position) : "close",
+      onSnapshot: (payload, source) => (gen === epoch.current ? onRequestSnapshot(payload, source) : "close"),
+      onUpsert: (step, currentId, position) => (gen === epoch.current ? onRequestUpsert(step, currentId, position) : "close"),
       onAuth: (message) => markLost(message),
       onStatus: (status) => setReconnecting(status === "reconnecting"),
     })
@@ -321,11 +387,18 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     turnClock.current = clockFrom(view.stream)
     const stream = new ResourceStream({
       events: (url) => runtimeRef.current!.events(url),
-      resourcePath: `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(id)}/events`,
+      resourcePath: (() => {
+        const u = new URL(
+          view.stream.url || `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(id)}/events`,
+          location.origin,
+        )
+        u.searchParams.set("contract", "2")
+        return u.pathname + u.search
+      })(),
       scope: { type: "turn", id },
       getSnapshot: () => runtimeRef.current!.api.getTurn(conversationId, id),
-      onSnapshot: (payload, source) => gen === epoch.current ? onTurnSnapshot(payload, source) : "close",
-      onUpsert: (step, currentId, position) => gen === epoch.current ? onTurnUpsert(step, currentId, position) : "close",
+      onSnapshot: (payload, source) => (gen === epoch.current ? onTurnSnapshot(payload, source) : "close"),
+      onUpsert: (step, currentId, position) => (gen === epoch.current ? onTurnUpsert(step, currentId, position) : "close"),
       onAuth: (message) => markLost(message),
       onStatus: (status) => {
         if (status === "reconnecting") setLive("正在重新连接回答")
@@ -372,6 +445,19 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   }
 
   async function submitUrl(videoUrl: string) {
+    if (codePointLength(purpose.trim()) > 500) {
+      setLinkError("关注点最多 500 字，请精简后再提交。")
+      return
+    }
+    const chosen = catalog?.models.find((m) => m.id === selectedModel)
+    if (!mockMode && !chosen) {
+      setLinkError("请先读取并选择可用模型。")
+      return
+    }
+    const options: GenerationInput = {
+      ...(purpose.trim() ? { purpose: purpose.replace(/\r\n?/g, "\n").trim() } : {}),
+      ...(chosen && !mockMode ? { model_id: chosen.id, model_revision_id: chosen.revision_id } : {}),
+    }
     const trimmed = videoUrl.trim()
     if (!trimmed) {
       setLinkError("先贴上链接。")
@@ -390,14 +476,21 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setLink(trimmed)
     setLinkError("")
     setSubmitting(true)
-    const body = JSON.stringify({ video_url: trimmed })
+    const body = JSON.stringify({ video_url: trimmed, ...options })
     const slot = "request:create"
     const pending = pendingWrite(store(), slot)
     const windowMs = (sessionRef.current?.capabilities.idempotency_window_seconds ?? 86400) * 1000
     const key = pending && pending.body === body && canReplay(pending, Date.now()) ? pending.key : newIdempotencyKey()
-    rememberWrite(store(), { slot, key, path: "/api/v1/requests", body, expiresAt: Date.now() + windowMs, startedAt: Date.now() })
+    rememberWrite(store(), {
+      slot,
+      key,
+      path: "/api/v1/requests",
+      body,
+      expiresAt: Date.now() + windowMs,
+      startedAt: Date.now(),
+    })
     try {
-      const accepted = await rt.api.createRequest(trimmed, key)
+      const accepted = await rt.api.createRequest(trimmed, key, options)
       forgetWrite(store(), slot)
       navigateRef.current(`/r/${encodeURIComponent(accepted.body.request.id)}`)
     } catch (error) {
@@ -411,8 +504,21 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     const pending = pendingWrite(store(), "request:create")
     if (!pending || !canReplay(pending, Date.now())) return
     let videoUrl = ""
+    let options: GenerationInput = {}
     try {
-      videoUrl = String((JSON.parse(pending.body) as { video_url?: string }).video_url || "")
+      const saved = JSON.parse(pending.body) as GenerationInput & {
+        video_url?: string
+      }
+      videoUrl = String(saved.video_url || "")
+      options = {
+        ...(saved.purpose !== undefined ? { purpose: saved.purpose } : {}),
+        ...(saved.model_id
+          ? {
+              model_id: saved.model_id,
+              model_revision_id: saved.model_revision_id,
+            }
+          : {}),
+      }
     } catch {
       forgetWrite(store(), "request:create")
       return
@@ -421,7 +527,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setLink(videoUrl)
     setSubmitting(true)
     try {
-      const accepted = await runtimeRef.current.api.createRequest(videoUrl, pending.key)
+      const accepted = await runtimeRef.current.api.createRequest(videoUrl, pending.key, options)
       forgetWrite(store(), "request:create")
       navigateRef.current(`/r/${encodeURIComponent(accepted.body.request.id)}`)
     } catch (error) {
@@ -434,7 +540,12 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   async function ensureConversation(force: boolean) {
     const current = requestRef.current
     const rt = runtimeRef.current
-    if (!current || !rt) throw new ApiError({ status: 409, code: "ARTICLE_NOT_READY", detail: "文章还没有发布。" })
+    if (!current || !rt)
+      throw new ApiError({
+        status: 409,
+        code: "ARTICLE_NOT_READY",
+        detail: "文章还没有发布。",
+      })
     if (!force && conversationRef.current?.request_id === current.request.id) return conversationRef.current
     const response = await rt.api.conversation(current.request.id)
     rememberConversation(response.conversation)
@@ -443,34 +554,55 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     turnsRef.current = page.items
     setTurnSteps((prev) => {
       const next = { ...prev }
-      for (const turn of page.items) next[turn.turn.id] = mergeSteps(force ? [] : (next[turn.turn.id] ?? []), asSteps(turn.activity.recent_steps).map(normalizeStep), force || !next[turn.turn.id])
+      for (const turn of page.items)
+        next[turn.turn.id] = mergeSteps(
+          force ? [] : (next[turn.turn.id] ?? []),
+          asSteps(turn.activity.recent_steps).map(normalizeStep),
+          force || !next[turn.turn.id],
+        )
       return next
     })
     for (const turn of page.items) absorb([...(turn.turn.answer?.frames ?? [])])
     return response.conversation
   }
 
+  async function reloadCatalog() {
+    try {
+      const c = await new HttpApi().models()
+      setCatalog(c)
+      setSelectedModel((prev) => prev || c.default_model_id || c.models[0]?.id || "")
+      setCatalogError(c.models.length ? "" : "站长暂时没有启用可用模型。")
+    } catch (e) {
+      setCatalogError(errorText(e))
+    }
+  }
+  useEffect(() => {
+    void reloadCatalog()
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    void createRuntime().then(async (rt) => {
-      if (cancelled) return
-      runtimeRef.current = rt
-      setMockMode(wantsMock())
-      try {
-        const next = await rt.api.session()
+    void createRuntime()
+      .then(async (rt) => {
         if (cancelled) return
-        sessionRef.current = next
-        setSession(next)
-        if (next.schema_version !== 1) setNotice("当前页面与服务的协议版本不一致。")
-        setBooted(true)
-      } catch (error) {
-        if (cancelled) return
-        if (sessionLost(error)) markLost(error instanceof ApiError ? error.detail : "匿名会话已失效，请重新开始。")
-        else setBootError(errorText(error))
-      }
-    }).catch((error: unknown) => {
-      if (!cancelled) setBootError(errorText(error))
-    })
+        runtimeRef.current = rt
+        setMockMode(wantsMock())
+        try {
+          const next = await rt.api.session()
+          if (cancelled) return
+          sessionRef.current = next
+          setSession(next)
+          if (next.schema_version !== 1) setNotice("当前页面与服务的协议版本不一致。")
+          setBooted(true)
+        } catch (error) {
+          if (cancelled) return
+          if (sessionLost(error)) markLost(error instanceof ApiError ? error.detail : "匿名会话已失效，请重新开始。")
+          else setBootError(errorText(error))
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setBootError(errorText(error))
+      })
     return () => {
       cancelled = true
     }
@@ -508,6 +640,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setQaError("")
     setQaBusy(false)
     setDraft("")
+    setExternalAllowed(false)
+    setReferenceLinks("")
     setFrameChip(null)
     setPassageChip(null)
     setExpanded({})
@@ -559,27 +693,48 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     if (request.request.status === "failed") setLive(request.failure?.message || "这次没能完成")
   }, [phase, request])
 
-  const resolvedSteps = useMemo(() => steps.map((step) => {
-    const frames = (step.frames ?? []).map((frame) => frameMap.get(frame.id) ?? frame)
-    if ((step.frames ?? []).every((frame, index) => frame === frames[index])) return step
-    return { ...step, frames }
-  }), [steps, frameMap])
+  const resolvedSteps = useMemo(
+    () =>
+      steps.map((step) => {
+        const frames = (step.frames ?? []).map((frame) => frameMap.get(frame.id) ?? frame)
+        if ((step.frames ?? []).every((frame, index) => frame === frames[index])) return step
+        return { ...step, frames }
+      }),
+    [steps, frameMap],
+  )
 
-  const resolvedTurns = useMemo(() => Object.fromEntries(Object.entries(turnSteps).map(([id, list]) => [id, list.map((step) => {
-    const frames = (step.frames ?? []).map((frame) => frameMap.get(frame.id) ?? frame)
-    return (step.frames ?? []).every((frame, index) => frame === frames[index]) ? step : { ...step, frames }
-  })])), [turnSteps, frameMap])
+  const resolvedTurns = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(turnSteps).map(([id, list]) => [
+          id,
+          list.map((step) => {
+            const frames = (step.frames ?? []).map((frame) => frameMap.get(frame.id) ?? frame)
+            return (step.frames ?? []).every((frame, index) => frame === frames[index]) ? step : { ...step, frames }
+          }),
+        ]),
+      ),
+    [turnSteps, frameMap],
+  )
 
   const suggesting = article?.article.title ? `《${article.article.title}》主要在讲什么？` : "这条视频主要在讲什么？"
 
   return {
     booted,
+    csrfToken: session?.csrf_token || "",
     bootError,
     lost,
     notice,
     mockMode,
     phase,
     link,
+    purpose,
+    setPurpose,
+    catalog,
+    selectedModel,
+    setSelectedModel,
+    catalogError,
+    reloadCatalog,
     setLink,
     linkError,
     submitting,
@@ -593,6 +748,12 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     stepsFor: (turn: TurnView) => resolvedTurns[turn.turn.id] ?? asSteps(turn.activity.recent_steps).map(normalizeStep),
     qaOpen,
     draft,
+    externalAllowed,
+    setExternalAllowed,
+    referenceLinks,
+    setReferenceLinks,
+    externalAvailable: session?.capabilities.external_sources?.enabled ?? false,
+    searchAvailable: session?.capabilities.external_sources?.search_enabled ?? false,
     setDraft,
     frameChip,
     passageChip,
@@ -602,7 +763,10 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     expanded,
     focusToken,
     frames: frameMap,
-    lightbox: { ...lightbox, frames: lightbox.frames.map((frame) => frameMap.get(frame.id) ?? frame) },
+    lightbox: {
+      ...lightbox,
+      frames: lightbox.frames.map((frame) => frameMap.get(frame.id) ?? frame),
+    },
     live,
     announce: setLive,
     selectionMax: session?.capabilities.selection_chars_max ?? null,
@@ -617,77 +781,80 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       setLinkError("请贴上你自己的视频链接。")
       document.getElementById("link")?.focus()
     },
-    stop: () => void (async () => {
-      const rt = runtimeRef.current
-      const current = requestRef.current
-      if (!rt || !current) return
-      try {
-        const view = await rt.api.cancelRequest(current.request.id)
-        const reaction = onRequestSnapshot(view, "http")
-        if (reaction === "close") {
-          requestStream.current?.stop()
-          requestStreamId.current = ""
+    stop: () =>
+      void (async () => {
+        const rt = runtimeRef.current
+        const current = requestRef.current
+        if (!rt || !current) return
+        try {
+          const view = await rt.api.cancelRequest(current.request.id)
+          const reaction = onRequestSnapshot(view, "http")
+          if (reaction === "close") {
+            requestStream.current?.stop()
+            requestStreamId.current = ""
+          }
+        } catch (error) {
+          await report(error, setPageError)
         }
-      } catch (error) {
-        await report(error, setPageError)
-      }
-    })(),
-    retry: () => void (async () => {
-      const rt = runtimeRef.current
-      const current = requestRef.current
-      if (!rt || !current) return
-      try {
-        const accepted = await rt.api.retryRequest(current.request.id, newIdempotencyKey())
-        navigateRef.current(`/r/${encodeURIComponent(accepted.body.request.id)}`)
-      } catch (error) {
-        await report(error, setPageError)
-      }
-    })(),
+      })(),
+    retry: () =>
+      void (async () => {
+        const rt = runtimeRef.current
+        const current = requestRef.current
+        if (!rt || !current) return
+        try {
+          const accepted = await rt.api.retryRequest(current.request.id, newIdempotencyKey())
+          navigateRef.current(`/r/${encodeURIComponent(accepted.body.request.id)}`)
+        } catch (error) {
+          await report(error, setPageError)
+        }
+      })(),
     beginReading: () => {
       setPhase("reading")
       setQaOpen(false)
     },
-    toggleHistory: () => void (async () => {
-      const next = !historyRef.current
-      historyRef.current = next
-      engagedRef.current = next || lightboxRef.current
-      setHistoryOpen(next)
-      const current = requestRef.current
-      const rt = runtimeRef.current
-      if (!next || !current?.activity.has_more || !rt) return
-      try {
-        let before: string | null = null
-        let more = true
-        for (let guard = 0; more && guard < 20; guard += 1) {
-          const page = await rt.api.activity(current.activity.history_url, before)
-          if (page.history_status === "expired") {
-            const fresh = await rt.api.getRequest(current.request.id)
-            onRequestSnapshot(fresh, "http")
+    toggleHistory: () =>
+      void (async () => {
+        const next = !historyRef.current
+        historyRef.current = next
+        engagedRef.current = next || lightboxRef.current
+        setHistoryOpen(next)
+        const current = requestRef.current
+        const rt = runtimeRef.current
+        if (!next || !current?.activity.has_more || !rt) return
+        try {
+          let before: string | null = null
+          let more = true
+          for (let guard = 0; more && guard < 20; guard += 1) {
+            const page = await rt.api.activity(current.activity.history_url, before)
+            if (page.history_status === "expired") {
+              const fresh = await rt.api.getRequest(current.request.id)
+              onRequestSnapshot(fresh, "http")
+              return
+            }
+            const incoming = page.items.map(normalizeStep)
+            setSteps((prev) => {
+              const merged = mergeSteps(prev, incoming, false)
+              stepsRef.current = merged
+              return merged
+            })
+            absorb(incoming.flatMap((step) => step.frames))
+            more = page.has_more && !!page.next_before && page.next_before !== before
+            before = page.next_before
+          }
+        } catch (error) {
+          if (isApiError(error) && error.status === 410) {
+            try {
+              const fresh = await rt.api.getRequest(current.request.id)
+              onRequestSnapshot(fresh, "http")
+            } catch (again) {
+              await report(again, setPageError)
+            }
             return
           }
-          const incoming = page.items.map(normalizeStep)
-          setSteps((prev) => {
-            const merged = mergeSteps(prev, incoming, false)
-            stepsRef.current = merged
-            return merged
-          })
-          absorb(incoming.flatMap((step) => step.frames))
-          more = page.has_more && !!page.next_before && page.next_before !== before
-          before = page.next_before
+          await report(error, setPageError)
         }
-      } catch (error) {
-        if (isApiError(error) && error.status === 410) {
-          try {
-            const fresh = await rt.api.getRequest(current.request.id)
-            onRequestSnapshot(fresh, "http")
-          } catch (again) {
-            await report(again, setPageError)
-          }
-          return
-        }
-        await report(error, setPageError)
-      }
-    })(),
+      })(),
     retryArticle: () => {
       const id = requestRef.current?.request.id
       if (id) void loadArticle(id, true)
@@ -703,52 +870,69 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       setLightbox((prev) => ({ ...prev, open: false }))
     },
     setLightboxIndex: (index: number) => setLightbox((prev) => ({ ...prev, index })),
-    refreshFrame: (frame: Frame) => void (async () => {
-      const rt = runtimeRef.current
-      const id = requestRef.current?.request.id
-      if (!rt || !id) return
-      try {
-        absorb([await rt.api.frame(id, frame.id)])
-      } catch (error) {
-        if (sessionLost(error)) markLost(error instanceof ApiError ? error.detail : "匿名会话已失效，请重新开始。")
-      }
-    })(),
-    cite: (citation: Citation) => void (async () => {
-      if (citation.kind === "video_frame" && citation.frame_id) {
-        let frame = frameMap.get(citation.frame_id) ?? null
+    refreshFrame: (frame: Frame) =>
+      void (async () => {
         const rt = runtimeRef.current
         const id = requestRef.current?.request.id
-        if (!frame && rt && id) {
-          try {
-            frame = await rt.api.frame(id, citation.frame_id)
-            absorb([frame])
-          } catch (error) {
-            setLive(errorText(error))
-            return
-          }
-        }
-        if (frame) {
-          const origin = document.activeElement instanceof HTMLElement ? document.activeElement : document.body
-          lightboxRef.current = true
-          engagedRef.current = true
-          setLightbox({ open: true, frames: [frame], index: 0, origin })
-        }
-        return
-      }
-      if (citation.block_id) {
+        if (!rt || !id) return
         try {
-          const node = document.querySelector(`[data-block-id="${CSS.escape(citation.block_id)}"]`)
-          node?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "center" })
-        } catch {
-          setLive(citation.label)
+          absorb([await rt.api.frame(id, frame.id)])
+        } catch (error) {
+          if (sessionLost(error)) markLost(error instanceof ApiError ? error.detail : "匿名会话已失效，请重新开始。")
         }
-        return
-      }
-      setLive(citation.quote || citation.label)
-    })(),
+      })(),
+    cite: (citation: Citation) =>
+      void (async () => {
+        if (citation.kind === "external_reference" && citation.reference_id) {
+          const node = document.getElementById(`reference-${citation.reference_id}`)
+          if (node instanceof HTMLDetailsElement) {
+            node.open = true
+            node.scrollIntoView({ block: "nearest", behavior: "auto" })
+            node.querySelector("summary")?.focus()
+          }
+          return
+        }
+        if (citation.kind === "video_frame" && citation.frame_id) {
+          let frame = frameMap.get(citation.frame_id) ?? null
+          const rt = runtimeRef.current
+          const id = requestRef.current?.request.id
+          if (!frame && rt && id) {
+            try {
+              frame = await rt.api.frame(id, citation.frame_id)
+              absorb([frame])
+            } catch (error) {
+              setLive(errorText(error))
+              return
+            }
+          }
+          if (frame) {
+            const origin = document.activeElement instanceof HTMLElement ? document.activeElement : document.body
+            lightboxRef.current = true
+            engagedRef.current = true
+            setLightbox({ open: true, frames: [frame], index: 0, origin })
+          }
+          return
+        }
+        if (citation.block_id) {
+          try {
+            const node = document.querySelector(`[data-block-id="${CSS.escape(citation.block_id)}"]`)
+            node?.scrollIntoView({
+              behavior: prefersReduced() ? "auto" : "smooth",
+              block: "center",
+            })
+          } catch {
+            setLive(citation.label)
+          }
+          return
+        }
+        setLive(citation.quote || citation.label)
+      })(),
     askFrame: (frame: Frame) => {
       if (phaseRef.current !== "reading" && phaseRef.current !== "holding") return
-      setFrameChip({ id: frame.id, label: `${formatClock(frame.time_ms)} · ${frame.caption || "画面"}` })
+      setFrameChip({
+        id: frame.id,
+        label: `${formatClock(frame.time_ms)} · ${frame.caption || "画面"}`,
+      })
       setDraft(`这张 ${formatClock(frame.time_ms)} 的画面在说明什么？`)
       if (phaseRef.current === "holding") setPhase("reading")
       setQaOpen(true)
@@ -765,7 +949,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       if (qaOpen) {
         const panel = document.getElementById("qa")
         const toggle = document.getElementById("toggle-qa")
-        if (panel && toggle && panel.contains(document.activeElement)) toggle.focus()
+        if (panel && toggle && panel.contains(document.activeElement)) toggle.focus({ preventScroll: true })
         setQaOpen(false)
         return
       }
@@ -776,97 +960,124 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     closeQa: () => {
       const panel = document.getElementById("qa")
       const toggle = document.getElementById("toggle-qa")
-      if (panel && toggle && panel.contains(document.activeElement)) toggle.focus()
+      if (panel && toggle && panel.contains(document.activeElement)) toggle.focus({ preventScroll: true })
       setQaOpen(false)
     },
-    send: () => void (async () => {
-      const text = draft.trim()
-      if (!text) {
-        setQaError("先写下一个问题。")
-        return
-      }
-      const max = sessionRef.current?.capabilities.question_chars_max
-      if (max != null && codePointLength(text) > max) {
-        setQaError("这个问题太长了。")
-        return
-      }
-      if (turnsRef.current.some((turn) => !isTerminalStatus(turn.turn.status))) {
-        setQaError("上一轮回答仍在进行。")
-        return
-      }
-      const rt = runtimeRef.current
-      if (!rt) return
-      setQaBusy(true)
-      setQaError("")
-      const sentFrame = frameChip
-      const sentPassage = passageChip
-      try {
-        const current = await ensureConversation(true)
-        const payload = {
-          question: text,
-          expected_last_turn_id: current.last_turn_id,
-          context: {
-            frame_id: sentFrame?.id ?? null,
-            passage: sentPassage ? { section_id: sentPassage.sectionId, block_id: sentPassage.blockId, quote: sentPassage.quote } : null,
-          },
-        }
-        const body = JSON.stringify(payload)
-        const slot = `turn:${current.id}`
-        const pending = pendingWrite(store(), slot)
-        const windowMs = (sessionRef.current?.capabilities.idempotency_window_seconds ?? 86400) * 1000
-        const key = pending && pending.body === body && canReplay(pending, Date.now()) ? pending.key : newIdempotencyKey()
-        rememberWrite(store(), { slot, key, path: `/api/v1/conversations/${current.id}/turns`, body, expiresAt: Date.now() + windowMs, startedAt: Date.now() })
-        const accepted = await rt.api.createTurn(current.id, key, payload)
-        forgetWrite(store(), slot)
-        setDraft((value) => value.trim() === text ? "" : value)
-        setFrameChip((value) => value?.id === sentFrame?.id ? null : value)
-        setPassageChip((value) => value?.blockId === sentPassage?.blockId && value?.quote === sentPassage?.quote ? null : value)
-        turnClock.current = clockFrom(accepted.body.stream)
-        installTurn(accepted.body, true)
-      } catch (error) {
-        if (isApiError(error) && (error.code === "TURN_IN_PROGRESS" || error.code === "TURN_HISTORY_CHANGED")) {
-          forgetWrite(store(), `turn:${conversationRef.current?.id || "unknown"}`)
-          setQaError(error.detail)
-          try {
-            await ensureConversation(true)
-          } catch (again) {
-            await report(again, setQaError)
-          }
+    send: () =>
+      void (async () => {
+        const text = draft.trim()
+        if (!text) {
+          setQaError("先写下一个问题。")
           return
         }
-        await report(error, setQaError, conversationRef.current ? `turn:${conversationRef.current.id}` : undefined)
-      } finally {
-        setQaBusy(false)
-      }
-    })(),
-    stopTurn: () => void (async () => {
-      const rt = runtimeRef.current
-      const current = conversationRef.current
-      const active = turnsRef.current.find((turn) => turn.actions.can_cancel)
-      if (!rt || !current || !active) return
-      try {
-        const view = await rt.api.cancelTurn(current.id, active.turn.id)
-        const reaction = onTurnSnapshot(view, "http")
-        if (reaction === "close") {
-          turnStream.current?.stop()
-          turnStreamId.current = ""
+        const max = sessionRef.current?.capabilities.question_chars_max
+        if (max != null && codePointLength(text) > max) {
+          setQaError("这个问题太长了。")
+          return
         }
-      } catch (error) {
-        await report(error, setQaError)
-      }
-    })(),
-    retryTurn: (turn: TurnView) => void (async () => {
-      const rt = runtimeRef.current
-      const current = conversationRef.current
-      if (!rt || !current) return
-      try {
-        const accepted = await rt.api.retryTurn(current.id, turn.turn.id, newIdempotencyKey(), current.last_turn_id)
-        turnClock.current = clockFrom(accepted.body.stream)
-        installTurn(accepted.body, true)
-      } catch (error) {
-        await report(error, setQaError)
-      }
-    })(),
+        if (turnsRef.current.some((turn) => !isTerminalStatus(turn.turn.status))) {
+          setQaError("上一轮回答仍在进行。")
+          return
+        }
+        const rt = runtimeRef.current
+        if (!rt) return
+        setQaBusy(true)
+        setQaError("")
+        const sentFrame = frameChip
+        const sentPassage = passageChip
+        try {
+          const current = await ensureConversation(true)
+          const payload = {
+            question: text,
+            ...(externalAllowed
+              ? {
+                  allow_external_sources: true,
+                  reference_urls: referenceLinks
+                    .split(/\n/)
+                    .map((v) => v.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+            expected_last_turn_id: current.last_turn_id,
+            context: {
+              frame_id: sentFrame?.id ?? null,
+              passage: sentPassage
+                ? {
+                    section_id: sentPassage.sectionId,
+                    block_id: sentPassage.blockId,
+                    quote: sentPassage.quote,
+                  }
+                : null,
+            },
+          }
+          const body = JSON.stringify(payload)
+          const slot = `turn:${current.id}`
+          const pending = pendingWrite(store(), slot)
+          const windowMs = (sessionRef.current?.capabilities.idempotency_window_seconds ?? 86400) * 1000
+          const key = pending && pending.body === body && canReplay(pending, Date.now()) ? pending.key : newIdempotencyKey()
+          rememberWrite(store(), {
+            slot,
+            key,
+            path: `/api/v1/conversations/${current.id}/turns`,
+            body,
+            expiresAt: Date.now() + windowMs,
+            startedAt: Date.now(),
+          })
+          const accepted = await rt.api.createTurn(current.id, key, payload)
+          forgetWrite(store(), slot)
+          setDraft((value) => (value.trim() === text ? "" : value))
+          setExternalAllowed(false)
+          setReferenceLinks("")
+          setFrameChip((value) => (value?.id === sentFrame?.id ? null : value))
+          setPassageChip((value) => (value?.blockId === sentPassage?.blockId && value?.quote === sentPassage?.quote ? null : value))
+          turnClock.current = clockFrom(accepted.body.stream)
+          installTurn(accepted.body, true)
+        } catch (error) {
+          if (isApiError(error) && (error.code === "TURN_IN_PROGRESS" || error.code === "TURN_HISTORY_CHANGED")) {
+            forgetWrite(store(), `turn:${conversationRef.current?.id || "unknown"}`)
+            setQaError(error.detail)
+            try {
+              await ensureConversation(true)
+            } catch (again) {
+              await report(again, setQaError)
+            }
+            return
+          }
+          await report(error, setQaError, conversationRef.current ? `turn:${conversationRef.current.id}` : undefined)
+        } finally {
+          setQaBusy(false)
+        }
+      })(),
+    stopTurn: () =>
+      void (async () => {
+        const rt = runtimeRef.current
+        const current = conversationRef.current
+        const active = turnsRef.current.find((turn) => turn.actions.can_cancel)
+        if (!rt || !current || !active) return
+        try {
+          const view = await rt.api.cancelTurn(current.id, active.turn.id)
+          const reaction = onTurnSnapshot(view, "http")
+          if (reaction === "close") {
+            turnStream.current?.stop()
+            turnStreamId.current = ""
+          }
+        } catch (error) {
+          await report(error, setQaError)
+        }
+      })(),
+    retryTurn: (turn: TurnView) =>
+      void (async () => {
+        const rt = runtimeRef.current
+        const current = conversationRef.current
+        if (!rt || !current) return
+        try {
+          const accepted = await rt.api.retryTurn(current.id, turn.turn.id, newIdempotencyKey(), current.last_turn_id)
+          turnClock.current = clockFrom(accepted.body.stream)
+          installTurn(accepted.body, true)
+        } catch (error) {
+          await report(error, setQaError)
+        }
+      })(),
     suggest: () => {
       const title = articleRef.current?.article.title
       setDraft(title ? `《${title}》主要在讲什么？` : "这条视频主要在讲什么？")

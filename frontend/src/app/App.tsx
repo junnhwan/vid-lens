@@ -7,6 +7,7 @@ import { EntryView } from "../ui/EntryView"
 import { Lightbox } from "../ui/Lightbox"
 import { ReadView } from "../ui/ReadView"
 import { RunView } from "../ui/RunView"
+import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 
 function requestIdFrom(pathname: string): string | undefined {
   const match = pathname.match(/^\/r\/([^/]+)\/?$/)
@@ -46,7 +47,12 @@ export function App() {
   const readRef = useRef<HTMLElement>(null)
   const shown = useRef<HTMLElement | null>(null)
   const [homeTick, setHomeTick] = useState(0)
-  const [pop, setPop] = useState<{ left: number; top: number; label: string; pick: () => void } | null>(null)
+  const [pop, setPop] = useState<{
+    left: number
+    top: number
+    label: string
+    pick: () => void
+  } | null>(null)
   const attachRef = useRef(visitor.attachPassage)
   const announceRef = useRef(visitor.announce)
   attachRef.current = visitor.attachPassage
@@ -68,10 +74,20 @@ export function App() {
     if (next && shown.current !== next) {
       showView(next)
       shown.current = next
+      if (previous) {
+        const heading = next.querySelector<HTMLElement>("h1")
+        if (heading) {
+          heading.tabIndex = -1
+          heading.focus({ preventScroll: true })
+        }
+        window.scrollTo({ top: 0, behavior: "instant" })
+      }
     }
     if (previous === run && next === read && start && next) {
       const dest = next.querySelector<HTMLElement>("[data-carry-to]")
-      if (dest) carryStill(start, dest)
+      const fromID = origin?.querySelector("img")?.getAttribute("data-frame-id")
+      const toID = dest?.querySelector("img")?.getAttribute("data-frame-id")
+      if (dest && fromID && fromID === toID) carryStill(start, dest)
     }
     document.body.dataset.phase = visitor.phase === "run" ? "generating" : visitor.phase
   }, [visitor.phase])
@@ -125,13 +141,14 @@ export function App() {
           setPop(null)
           return
         }
-        const label = !result.ok && result.reason === "cross"
-          ? "请只选择一段"
-          : !result.ok && result.reason === "long"
-            ? "这段太长了"
-            : !result.ok
-              ? "这段对不上正文"
-              : "问这段"
+        const label =
+          !result.ok && result.reason === "cross"
+            ? "请只选择一段"
+            : !result.ok && result.reason === "long"
+              ? "这段太长了"
+              : !result.ok
+                ? "这段对不上正文"
+                : "问这段"
         setPop({
           left,
           top,
@@ -139,11 +156,12 @@ export function App() {
           pick: () => {
             setPop(null)
             if (!result.ok) {
-              const note = result.reason === "cross"
-                ? "请只选择一个段落。"
-                : result.reason === "long"
-                  ? "这段超过了可选长度。"
-                  : "这段文字对不上文章里的那一段。"
+              const note =
+                result.reason === "cross"
+                  ? "请只选择一个段落。"
+                  : result.reason === "long"
+                    ? "这段超过了可选长度。"
+                    : "这段文字对不上文章里的那一段。"
               announceRef.current(note)
               return
             }
@@ -170,38 +188,53 @@ export function App() {
 
   return (
     <>
-      <a className="skip" href="#main">跳到内容</a>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <span className="wordmark">VidLens</span>
-          <button type="button" className="btn primary" id="new-video" onClick={newVideo}>新视频</button>
-        </div>
-      </header>
+      <a className="skip" href="#main">
+        跳到内容
+      </a>
+      <SiteHeader onNew={newVideo} />
+      {visitor.mockMode ? (
+        <p className="development-note" role="note">
+          开发预览：模拟流程，不代表真实生成。
+        </p>
+      ) : null}
       <main id="main">
-        {visitor.notice ? <p className="history-note" role="status">{visitor.notice}</p> : null}
+        {visitor.notice ? (
+          <p className="history-note" role="status">
+            {visitor.notice}
+          </p>
+        ) : null}
         {blocked ? (
           <section className="view-input">
             <div className="entry">
               <div className="entry-copy">
                 <h1>{visitor.lost ? "需要重新开始" : "暂时连不上"}</h1>
                 <p className="purpose">{visitor.lost || visitor.bootError}</p>
-                <button type="button" className="btn primary" onClick={() => window.location.reload()}>重新开始</button>
+                <button type="button" className="btn primary" onClick={() => window.location.reload()}>
+                  重新开始
+                </button>
               </div>
             </div>
           </section>
         ) : (
           <>
             <EntryView
+              csrf={visitor.csrfToken}
               viewRef={inputRef}
               link={visitor.link}
               error={visitor.linkError}
               busy={visitor.submitting}
               ready={visitor.booted}
-              mock={visitor.mockMode}
               active={visitor.phase === "input"}
               onLink={visitor.setLink}
               onSubmit={visitor.submit}
               onSample={visitor.sample}
+              purpose={visitor.purpose}
+              onPurpose={visitor.setPurpose}
+              catalog={visitor.catalog}
+              selected={visitor.selectedModel}
+              onSelect={visitor.setSelectedModel}
+              catalogError={visitor.catalogError}
+              onReloadCatalog={() => void visitor.reloadCatalog()}
             />
             <RunView
               viewRef={runRef}
@@ -221,10 +254,18 @@ export function App() {
               onBroken={visitor.refreshFrame}
             />
             <ReadView
+              csrf={visitor.csrfToken}
+              preview={visitor.mockMode}
               viewRef={readRef}
               view={visitor.request}
               article={visitor.article}
               articleError={visitor.articleError}
+              externalAllowed={visitor.externalAllowed}
+              externalAvailable={visitor.externalAvailable}
+              searchAvailable={visitor.searchAvailable}
+              referenceLinks={visitor.referenceLinks}
+              onExternal={visitor.setExternalAllowed}
+              onReferenceLinks={visitor.setReferenceLinks}
               steps={visitor.steps}
               frames={visitor.frames}
               qaOpen={visitor.qaOpen}
@@ -258,7 +299,10 @@ export function App() {
           </>
         )}
       </main>
-      <div id="live" className="sr-only" aria-live="polite">{visitor.live}</div>
+      {visitor.phase === "input" ? <SiteFooter /> : null}
+      <div id="live" className="sr-only" aria-live="polite">
+        {visitor.live}
+      </div>
       <Lightbox
         frames={visitor.lightbox.frames}
         index={visitor.lightbox.index}

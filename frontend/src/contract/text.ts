@@ -50,9 +50,7 @@ export interface PassageChoice {
   quote: string
 }
 
-export type PassageResult =
-  | { ok: true; passage: PassageChoice }
-  | { ok: false; reason: "empty" | "cross" | "long" | "mismatch" }
+export type PassageResult = { ok: true; passage: PassageChoice } | { ok: false; reason: "empty" | "cross" | "long" | "mismatch" }
 
 export function choosePassage(
   hits: { sectionId: string; blockId: string; block: Block }[],
@@ -68,7 +66,10 @@ export function choosePassage(
   if ([...quote].length < 2) return { ok: false, reason: "empty" }
   if (maxCodePoints != null && codePointLength(quote) > maxCodePoints) return { ok: false, reason: "long" }
   if (!quoteMatchesBlock(hit.block, quote)) return { ok: false, reason: "mismatch" }
-  return { ok: true, passage: { sectionId: hit.sectionId, blockId: hit.blockId, quote } }
+  return {
+    ok: true,
+    passage: { sectionId: hit.sectionId, blockId: hit.blockId, quote },
+  }
 }
 
 export function formatClock(ms: number): string {
@@ -93,6 +94,7 @@ export function formatDuration(ms: number | null | undefined): string {
 }
 
 export function citationClock(citation: Citation): string {
+  if (citation.kind === "external_reference") return "网页 ↗"
   if (citation.kind === "video_frame" && citation.time_ms != null) return formatClock(citation.time_ms)
   if (citation.kind === "video_text" && citation.range) return formatClock(citation.range.start_ms)
   return citation.label

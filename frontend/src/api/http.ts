@@ -1,4 +1,6 @@
 import type {
+  GenerationInput,
+  ModelCatalog,
   Accepted,
   ActivityPage,
   ArticleResponse,
@@ -41,7 +43,7 @@ export class HttpApi {
     if (options.csrf) this.csrfToken = options.csrf()
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, key?: string): Promise<{ status: number; headers: Headers; body: T }> {
+  async request<T>(method: string, path: string, body?: unknown, key?: string): Promise<{ status: number; headers: Headers; body: T }> {
     let response: Response
     try {
       response = await this.fetchImpl(path, {
@@ -49,6 +51,7 @@ export class HttpApi {
         credentials: "include",
         headers: {
           accept: "application/json",
+          "X-VidLens-Contract": "2",
           ...(body !== undefined ? { "content-type": "application/json" } : {}),
           ...(method !== "GET" && path !== "/api/v1/session" ? { "x-csrf-token": this.csrfToken } : {}),
           ...(key ? { "idempotency-key": key } : {}),
@@ -64,11 +67,19 @@ export class HttpApi {
       try {
         parsed = JSON.parse(text)
       } catch {
-        throw new ApiError({ status: response.status, code: "SERVICE_UNAVAILABLE", detail: "响应无法读取。" })
+        throw new ApiError({
+          status: response.status,
+          code: "SERVICE_UNAVAILABLE",
+          detail: "响应无法读取。",
+        })
       }
     }
     if (!response.ok) throw new ApiError(problemFrom(response.status, parsed))
-    return { status: response.status, headers: response.headers, body: parsed as T }
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: parsed as T,
+    }
   }
 
   private accepted<T>(result: { status: number; headers: Headers; body: T }): Accepted<T> {
@@ -87,8 +98,22 @@ export class HttpApi {
     return result.body
   }
 
-  createRequest(videoUrl: string, key: string) {
-    return this.request<RequestView>("POST", "/api/v1/requests", { video_url: videoUrl }, key).then((result) => this.accepted(result))
+  createRequest(videoUrl: string, key: string, options?: GenerationInput) {
+    return this.request<RequestView>("POST", "/api/v1/requests", { video_url: videoUrl, ...options }, key).then((result) =>
+      this.accepted(result),
+    )
+  }
+
+  models() {
+    return this.request<ModelCatalog>("GET", "/api/v1/models").then((r) => r.body)
+  }
+  stats() {
+    return this.request<{ completed_readings: number; likes: number }>("GET", "/api/v1/site/stats").then((r) => r.body)
+  }
+  like(set = false) {
+    return this.request<{ liked: boolean; count: number }>(set ? "PUT" : "GET", "/api/v1/site/like", set ? {} : undefined).then(
+      (r) => r.body,
+    )
   }
 
   getRequest(id: string) {
@@ -100,7 +125,9 @@ export class HttpApi {
   }
 
   retryRequest(id: string, key: string) {
-    return this.request<RequestView>("POST", `/api/v1/requests/${encodeURIComponent(id)}/retry`, {}, key).then((result) => this.accepted(result))
+    return this.request<RequestView>("POST", `/api/v1/requests/${encodeURIComponent(id)}/retry`, {}, key).then((result) =>
+      this.accepted(result),
+    )
   }
 
   article(id: string) {
@@ -122,16 +149,22 @@ export class HttpApi {
   }
 
   conversation(requestId: string) {
-    return this.request<ConversationResponse>("POST", `/api/v1/requests/${encodeURIComponent(requestId)}/conversation`, {}).then((result) => result.body)
+    return this.request<ConversationResponse>("POST", `/api/v1/requests/${encodeURIComponent(requestId)}/conversation`, {}).then(
+      (result) => result.body,
+    )
   }
 
   turns(conversationId: string, beforeTurnNo?: number | null) {
     const query = beforeTurnNo ? `?before_turn_no=${beforeTurnNo}` : ""
-    return this.request<TurnPage>("GET", `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns${query}`).then((result) => result.body)
+    return this.request<TurnPage>("GET", `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns${query}`).then(
+      (result) => result.body,
+    )
   }
 
   createTurn(conversationId: string, key: string, body: unknown) {
-    return this.request<TurnView>("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`, body, key).then((result) => this.accepted(result))
+    return this.request<TurnView>("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`, body, key).then((result) =>
+      this.accepted(result),
+    )
   }
 
   getTurn(conversationId: string, turnId: string) {
