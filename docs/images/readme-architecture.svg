@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">VidLens — from video to illustrated reading</title>
+  <desc id="desc">A desktop browser submits a video link. Go prepares anonymous media and subtitles or ASR. An Eino Agent investigates actual text and frames. Validated articles and private answers are saved before the browser reads them. One Go process hosts the API and separate worker pools, backed by PostgreSQL, Redis with Asynq, and persistent application files.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#698478"/></marker>
+    <style>
+      text{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fill:#233d33}
+      .eyebrow{font-size:14px;letter-spacing:2.6px;fill:#63776c;font-weight:600}
+      .heading{font-size:25px;font-weight:650;letter-spacing:-.5px}
+      .body{font-size:17px;fill:#586b60}
+      .small{font-size:15px;fill:#64776c}
+      .line{stroke:#8aa396;stroke-width:2;fill:none;marker-end:url(#arrow)}
+      .card{fill:#fffdf7;stroke:#d9ded1;stroke-width:1.5}
+    </style>
+  </defs>
+  <rect width="1440" height="900" rx="24" fill="#f4f1e8"/>
+  <text x="56" y="56" class="eyebrow">VIDLENS / HOW IT WORKS</text>
+  <text x="56" y="110" font-size="40" font-weight="650" letter-spacing="-1.4">A video becomes something you can read.</text>
+  <text x="56" y="147" class="body">Actual text. Actual frames. Saved evidence behind the answer.</text>
+  <rect x="56" y="192" width="304" height="290" rx="16" class="card"/>
+  <rect x="392" y="192" width="304" height="290" rx="16" class="card"/>
+  <rect x="728" y="192" width="304" height="290" rx="16" fill="#e6eee2" stroke="#9bad9f" stroke-width="1.5"/>
+  <rect x="1064" y="192" width="320" height="290" rx="16" class="card"/>
+  <g>
+    <circle cx="92" cy="230" r="16" fill="#e4eadd"/><text x="92" y="235" text-anchor="middle" font-size="13" font-weight="700">01</text>
+    <text x="116" y="235" class="eyebrow">START</text>
+    <text x="80" y="285" class="heading">Bring a video link</text>
+    <text x="80" y="325" class="body">Bilibili / YouTube</text>
+    <text x="80" y="354" class="body">Choose a model and focus</text>
+    <text x="80" y="383" class="body">Anonymous visitor session</text>
+    <path d="M80 411H336" stroke="#d9ded1"/>
+    <text x="80" y="444" class="small">Desktop Web · React + Vite</text>
+  </g>
+  <g>
+    <circle cx="428" cy="230" r="16" fill="#e4eadd"/><text x="428" y="235" text-anchor="middle" font-size="13" font-weight="700">02</text>
+    <text x="452" y="235" class="eyebrow">PREPARE</text>
+    <text x="416" y="285" class="heading">Freeze the source</text>
+    <text x="416" y="325" class="body">Anonymous media acquisition</text>
+    <text x="416" y="354" class="body">Subtitles first · ASR fallback</text>
+    <text x="416" y="383" class="body">Verified source + overview frames</text>
+    <path d="M416 411H672" stroke="#d9ded1"/>
+    <text x="416" y="444" class="small">FFmpeg / ffprobe · yt-dlp · ASR API</text>
+  </g>
+  <g>
+    <circle cx="764" cy="230" r="16" fill="#275e4d"/><text x="764" y="235" text-anchor="middle" font-size="13" font-weight="700" style="fill:#fffdf7">03</text>
+    <text x="788" y="235" class="eyebrow">INVESTIGATE</text>
+    <text x="752" y="285" class="heading">Look for evidence</text>
+    <text x="752" y="325" class="body">Read original text and time windows</text>
+    <text x="752" y="354" class="body">Inspect real frames and crops</text>
+    <text x="752" y="383" class="body">Record observations and gaps</text>
+    <path d="M752 411H1008" stroke="#bbcbbd"/>
+    <text x="752" y="444" class="small">Eino Agent ↔ vision + tool model API</text>
+  </g>
+  <g>
+    <circle cx="1100" cy="230" r="16" fill="#e4eadd"/><text x="1100" y="235" text-anchor="middle" font-size="13" font-weight="700">04</text>
+    <text x="1124" y="235" class="eyebrow">READ &amp; ASK</text>
+    <text x="1088" y="285" class="heading">Validate, then publish</text>
+    <text x="1088" y="325" class="body">Illustrated article + content map</text>
+    <text x="1088" y="354" class="body">Private text and frame questions</text>
+    <text x="1088" y="383" class="body">Citations · Markdown / image ZIP</text>
+    <path d="M1088 411H1360" stroke="#d9ded1"/>
+    <text x="1088" y="444" class="small">Saved results · public steps over SSE</text>
+  </g>
+  <path d="M362 337H386" class="line"/>
+  <path d="M698 337H722" class="line"/>
+  <path d="M1034 337H1058" class="line"/>
+  <rect x="56" y="521" width="1328" height="99" rx="16" fill="#234e40"/>
+  <text x="80" y="559" font-size="22" font-weight="600" style="fill:#f8f5ec">One Go process · HTTP API + Eino workers</text>
+  <text x="80" y="591" font-size="17" style="fill:#d3e1d4">Separate generation, Q&amp;A and maintenance pools · durable checkpoints · bounded resource admission</text>
+  <path d="M262 622V658" class="line" marker-start="url(#arrow)"/>
+  <path d="M720 622V658" class="line" marker-start="url(#arrow)"/>
+  <path d="M1178 622V658" class="line" marker-start="url(#arrow)"/>
+  <rect x="56" y="666" width="412" height="150" rx="16" class="card"/>
+  <rect x="514" y="666" width="412" height="150" rx="16" class="card"/>
+  <rect x="972" y="666" width="412" height="150" rx="16" class="card"/>
+  <text x="80" y="706" class="heading">PostgreSQL</text>
+  <text x="80" y="740" class="body">State · snapshots · evidence · results</text>
+  <text x="80" y="771" class="small">Outbox · ownership · publication · model config</text>
+  <text x="538" y="706" class="heading">Redis / Asynq</text>
+  <text x="538" y="740" class="body">Delivery · admission · small index caches</text>
+  <text x="538" y="771" class="small">Application state remains in PostgreSQL</text>
+  <text x="996" y="706" class="heading">Persistent files</text>
+  <text x="996" y="740" class="body">Temporary media · owned article images</text>
+  <text x="996" y="771" class="small">Image pins and cleanup follow database state</text>
+  <text x="56" y="865" class="small">Current retrieval: time + keywords + whole-video coverage. Vector retrieval is not enabled.</text>
+  <text x="1384" y="865" text-anchor="end" class="eyebrow">READ THE VIDEO.</text>
+</svg>
