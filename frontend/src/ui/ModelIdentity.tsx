@@ -2,7 +2,7 @@ import type { GenerationModel } from "../contract/types"
 import { ModelIcon } from "./brandMarks"
 
 export { ModelIcon }
-export function ModelIdentity({ model, purpose }: { model?: GenerationModel; purpose?: string }) {
+export function ModelIdentity({ model, purpose, showHistoryNote = true }: { model?: GenerationModel; purpose?: string; showHistoryNote?: boolean }) {
   if (!model) return null
   return (
     <div className="generation-identity">
@@ -17,7 +17,7 @@ export function ModelIdentity({ model, purpose }: { model?: GenerationModel; pur
           {purpose}
         </p>
       ) : null}
-      {model.legacy ? <small>历史记录按归档信息显示；早期问答的模型可能不同。</small> : null}
+      {model.legacy && showHistoryNote ? <small>历史记录按归档信息显示；早期问答的模型可能不同。</small> : null}
     </div>
   )
 }

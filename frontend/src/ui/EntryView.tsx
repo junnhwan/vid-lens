@@ -193,7 +193,7 @@ export function EntryView({
           </form>
           <div className="entry-foot">
             <a className="sample-link" href="/example">
-              先看一篇真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
+              查看真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
             </a>
             <p className="entry-note">单条或单个分 P，较长视频要几分钟。</p>
           </div>
