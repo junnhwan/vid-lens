@@ -2008,6 +2008,7 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
   margin-bottom: 18px;
 }
 .manage-form input:not([type="checkbox"]),
+.network-settings input:not([type="checkbox"]),
 .manage-form select,
 .model-toolbar input {
   display: block;
@@ -2590,7 +2591,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .manage-layout .manage-tabs {
   position: relative;
   display: inline-grid;
-  grid-template-columns: repeat(3, max-content);
+  grid-template-columns: repeat(4, max-content);
   gap: 0;
   margin: 0;
   padding: 4px;
@@ -2604,7 +2605,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   top: 4px;
   bottom: 4px;
   left: 4px;
-  width: calc((100% - 8px) / 3);
+  width: calc((100% - 8px) / 4);
   border-radius: 999px;
   background: var(--ink);
   pointer-events: none;
@@ -2829,6 +2830,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   color: var(--ink-soft);
 }
 .manage-layout .manage-form input:not([type="checkbox"]),
+.manage-layout .network-settings input:not([type="checkbox"]),
 .manage-layout .ledger-search input,
 .manage-layout .owner-login input {
   height: 42px;
@@ -2841,6 +2843,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
     background-color 160ms var(--ease-out);
 }
 .manage-layout .manage-form input:not([type="checkbox"]):focus,
+.manage-layout .network-settings input:not([type="checkbox"]):focus,
 .manage-layout .ledger-search input:focus,
 .manage-layout .owner-login input:focus {
   outline: none;
@@ -3746,3 +3749,11 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
     transition: none;
   }
 }
+
+.manage-layout .manage-tabs[data-tab="3"] .tab-indicator { transform: translateX(300%); }
+.network-settings { max-width: 880px; margin: 0 auto; padding: 32px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
+.network-settings header { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.network-settings h2 { margin: 8px 0; }
+.network-settings fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 20px; }
+.network-settings .network-limits { display: grid; gap: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.network-settings .fine, .network-settings .doc-note { margin: 0; }

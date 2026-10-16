@@ -32,7 +32,7 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 		return v
 	}
 	visitor := do("POST", "/api/v1/session", "{}", "", nil).Cookies()[0]
-	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics"} {
+	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics", "/api/v1/admin/network-settings"} {
 		if v := do("GET", path, "", "", visitor); v.StatusCode != 401 {
 			t.Fatalf("visitor accessed %s: %d", path, v.StatusCode)
 		}
@@ -54,6 +54,9 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 	}
 	if v := do("PUT", "/api/v1/admin/model-settings", `{}`, "", owner); v.StatusCode != 403 {
 		t.Fatal("owner write bypassed CSRF")
+	}
+	if v := do("PUT", "/api/v1/admin/network-settings", `{}`, "", owner); v.StatusCode != 403 {
+		t.Fatal("network settings bypassed CSRF")
 	}
 	if v := do("GET", "/api/v1/admin/models", "", "", owner); v.StatusCode != 200 {
 		t.Fatal("owner session inaccessible")

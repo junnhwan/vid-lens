@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"time"
+	"vidlens/internal/config"
 	"vidlens/internal/domain"
 )
 
@@ -113,6 +114,22 @@ func (s *Store) ReserveSearch(ctx context.Context, c domain.Claim, key string, l
 		if turns >= 2 {
 			return domain.Err(429, "SEARCH_QUOTA_EXHAUSTED", "本轮搜索额度已用完。")
 		}
+		settings, e := networkSettings(ctx, tx, config.Config{SearchMonthlyLimit: limit})
+		if e != nil {
+			return e
+		}
+		if settings.Revision > 0 && (!settings.ReferenceReadEnabled || !settings.SearchEnabled || !settings.KeyConfigured) {
+			return domain.Err(403, "SEARCH_DISABLED", "搜索已关闭，继续基于视频证据回答。")
+		}
+		var today int
+		if e := tx.QueryRow(ctx, `SELECT count(*) FROM external_search_credits
+ WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')`).Scan(&today); e != nil {
+			return e
+		}
+		if today >= settings.DailyLimit {
+			return domain.Err(429, "SEARCH_DAILY_QUOTA_EXHAUSTED", "全站今日搜索额度已用完，北京时间零点重置；仍可根据视频证据回答。")
+		}
+		limit = settings.MonthlyLimit
 		var month string
 		if e := tx.QueryRow(ctx, "SELECT to_char(now() AT TIME ZONE 'UTC','YYYY-MM')").Scan(&month); e != nil {
 			return e
@@ -131,7 +148,7 @@ func (s *Store) ReserveSearch(ctx context.Context, c domain.Claim, key string, l
 		if _, e := tx.Exec(ctx, "INSERT INTO external_search_credits(run_id,operation_key,month) VALUES($1,$2,$3)", c.Run.ID, key, month); e != nil {
 			return e
 		}
-		_, e := tx.Exec(ctx, "UPDATE run_operations SET submissions=submissions+1,updated_at=now() WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key)
+		_, e = tx.Exec(ctx, "UPDATE run_operations SET submissions=submissions+1,updated_at=now() WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key)
 		return e
 	})
 }

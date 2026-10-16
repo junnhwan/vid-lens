@@ -73,6 +73,8 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/models/{model}/probes", a.probes)
 	m.HandleFunc("GET /api/v1/admin/models/{model}/probes", a.probes)
 	m.HandleFunc("GET /api/v1/admin/diagnostics", a.diagnostics)
+	m.HandleFunc("GET /api/v1/admin/network-settings", a.networkSettings)
+	m.HandleFunc("PUT /api/v1/admin/network-settings", a.networkSettings)
 	m.HandleFunc("GET /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("PUT /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("POST /api/v1/admin/config/test", a.adminTest)
@@ -188,8 +190,13 @@ func (a *Server) session(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
+	network, e := a.Store.NetworkSettings(r.Context(), a.Config)
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
 	models, _ := catalog["models"].([]domain.GenerationModel)
-	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": len(models) > 0, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds, "purpose_input": true, "max_purpose_chars": domain.PurposeCharsMax, "model_selection": true, "article_export": map[string]any{"formats": []string{"markdown", "markdown_zip"}}, "external_sources": map[string]bool{"enabled": a.Config.ReferenceReadEnabled, "search_enabled": a.Config.ReferenceReadEnabled && a.Config.SearchEnabled && a.Config.TavilyAPIKey != ""}}})
+	a.json(w, code, map[string]any{"schema_version": 1, "session": v, "csrf_token": a.csrf(token), "capabilities": map[string]any{"supported_platforms": p.Platforms, "accepting_requests": len(models) > 0, "question_chars_max": p.QuestionCharsMax, "selection_chars_max": p.SelectionCharsMax, "idempotency_window_seconds": p.IdempotencySeconds, "purpose_input": true, "max_purpose_chars": domain.PurposeCharsMax, "model_selection": true, "article_export": map[string]any{"formats": []string{"markdown", "markdown_zip"}}, "external_sources": map[string]bool{"enabled": network.ReferenceReadEnabled, "search_enabled": network.ReferenceReadEnabled && network.SearchEnabled && network.KeyConfigured}}})
 }
 func (a *Server) body(w http.ResponseWriter, r *http.Request, out any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -422,7 +429,12 @@ func (a *Server) createTurn(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(409, "CLIENT_UPDATE_REQUIRED", "网络补充需要新版页面。"))
 		return
 	}
-	if in.AllowExternalSources && !a.Config.ReferenceReadEnabled {
+	network, e := a.Store.NetworkSettings(r.Context(), a.Config)
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	if in.AllowExternalSources && !network.ReferenceReadEnabled {
 		a.problem(w, r, domain.Err(503, "EXTERNAL_SOURCES_DISABLED", "站长尚未启用网络补充；可继续围绕视频提问。"))
 		return
 	}

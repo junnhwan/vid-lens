@@ -162,7 +162,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		out = append(out, t)
 		return nil
 	}
-	refs, e := s.referenceTools()
+	refs, e := s.referenceTools(context.Background())
 	if e != nil {
 		return nil, e
 	}

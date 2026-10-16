@@ -41,7 +41,9 @@ Exports allow one pending task per session, five globally, one executing worker,
 
 ## Optional web references
 
-Known public HTML reading and Tavily search are independent runtime switches, both off by default:
+Owners can configure public HTML reading, Tavily search and the API key in `/manage` → 联网搜索. Saves take effect immediately on that instance; local and hosted sites keep independent settings. Keys are encrypted in PostgreSQL and never returned to the browser. An empty key field keeps the saved key; the explicit clear action removes it. Revision checks reject stale saves.
+
+Until the first owner save, these YAML/environment switches supply the configuration (both off by default):
 
 ```yaml
 reference_read_enabled: "true"
@@ -50,7 +52,7 @@ tavily_api_key: ""
 search_monthly_limit: "1000"
 ```
 
-Each Q&A turn must explicitly send `allow_external_sources: true`; optional `reference_urls` supplies at most three known URLs. Read tools can only use registered reference IDs. Search is basic only, without automatic parameter selection or paid fallback, with two queries per turn and a conservative monthly reservation capped at 1000 credits. Use a dedicated free-plan key with paid overage disabled at the provider. Unknown results consume the reserved credit; quota/plan limits stop further search. [Tavily parameters](https://docs.tavily.com/documentation/api-reference/endpoint/search) and [credits](https://docs.tavily.com/documentation/api-credits) describe the upstream contract.
+Each Q&A turn must explicitly send `allow_external_sources: true`; optional `reference_urls` supplies at most three known URLs. Read tools can only use registered reference IDs. Search is basic only, without automatic parameter selection or paid fallback, with two queries per turn, a site-wide default of 20 actual search requests per day, and a conservative monthly reservation capped at 1000 credits. Owners can set either cap to 0 to stop search. The daily cap resets at midnight Asia/Shanghai; monthly accounting uses UTC months. Reservations are atomic across visitors and processes, survive restarts and key changes, and include unknown upstream outcomes. Search stops when a cap is reached; video-only Q&A and permitted known-page reading remain available. Local and hosted instances each enforce their own cap; sharing a key does not combine their counters. Use a dedicated free-plan key with paid overage disabled at the provider. Unknown results consume the reserved credit; quota/plan limits stop further search. [Tavily parameters](https://docs.tavily.com/documentation/api-reference/endpoint/search) and [credits](https://docs.tavily.com/documentation/api-credits) describe the upstream contract.
 
 Public-page fetching is direct and credential-free, with public DNS bound to the actual dial, redirect checks, 20-second deadlines, 2 MiB compressed/expanded caps and 12,000-character readable snapshots. Search snippets are never citeable evidence. Final answers validate the exact reference ID, final URL, title, read time, content hash and continuous actual quote. Snapshots remain private to their turn/session and expire after 24 hours. Untrusted page text cannot grant tool permissions or alter model routing.
 

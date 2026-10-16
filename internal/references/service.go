@@ -152,7 +152,11 @@ func Fetch(ctx context.Context, client *http.Client, raw string) (string, string
 	return title, text, resp.Request.URL.String(), truncated, e
 }
 func (s *Service) Read(ctx context.Context, c domain.Claim, id, key string) (map[string]any, error) {
-	if !s.Config.ReferenceReadEnabled {
+	cfg, e := s.Store.NetworkConfig(ctx, s.Config)
+	if e != nil {
+		return nil, e
+	}
+	if !cfg.ReferenceReadEnabled {
 		return nil, domain.Err(403, "EXTERNAL_SOURCES_DISABLED", "网络补充当前未启用。")
 	}
 	r, op, e := s.Store.StartReferenceRead(ctx, c, id, key)
@@ -196,7 +200,11 @@ func (s *Service) Read(ctx context.Context, c domain.Claim, id, key string) (map
 	return v, nil
 }
 func (s *Service) Search(ctx context.Context, c domain.Claim, t domain.Turn, query, key string) (map[string]any, error) {
-	if !s.Config.ReferenceReadEnabled || !s.Config.SearchEnabled || s.Config.TavilyAPIKey == "" {
+	cfg, e := s.Store.NetworkConfig(ctx, s.Config)
+	if e != nil {
+		return nil, e
+	}
+	if !cfg.ReferenceReadEnabled || !cfg.SearchEnabled || cfg.TavilyAPIKey == "" {
 		return nil, domain.Err(403, "SEARCH_DISABLED", "免费搜索尚未配置或已关闭，可读取已知公开网页。")
 	}
 	query = strings.TrimSpace(query)
@@ -217,7 +225,7 @@ func (s *Service) Search(ctx context.Context, c domain.Claim, t domain.Turn, que
 		return nil, e
 	}
 	defer release()
-	if e = s.Store.ReserveSearch(actx, c, key, s.Config.SearchMonthlyLimit); e != nil {
+	if e = s.Store.ReserveSearch(actx, c, key, cfg.SearchMonthlyLimit); e != nil {
 		return nil, e
 	}
 	body := domain.JSON(map[string]any{"query": query, "search_depth": "basic", "auto_parameters": false, "include_answer": false, "include_raw_content": false, "include_images": false, "include_usage": true, "max_results": 5})
@@ -227,7 +235,7 @@ func (s *Service) Search(ctx context.Context, c domain.Claim, t domain.Turn, que
 	}
 	req, _ := http.NewRequestWithContext(actx, "POST", endpoint, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.Config.TavilyAPIKey)
+	req.Header.Set("Authorization", "Bearer "+cfg.TavilyAPIKey)
 	client := s.client()
 	defer client.CloseIdleConnections()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
