@@ -4,6 +4,8 @@ import { ApiError } from "../api/error"
 import { canReplay, newIdempotencyKey, pendingWrite, rememberWrite, forgetWrite, memoryStore } from "../api/writes"
 import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 import { ModelIcon } from "../ui/ModelIdentity"
+import { ChoiceMenu, type ChoiceOption } from "../ui/ChoiceMenu"
+import { useRise } from "../ui/countUp"
 
 interface Provider {
   id: string
@@ -98,6 +100,82 @@ const labels: Record<string, string> = {
   failed: "检查失败",
   unknown: "结果未知",
 }
+const sections = [
+  ["models", "模型目录"],
+  ["providers", "供应商"],
+  ["diagnostics", "缓存与用量"],
+] as const
+const proxyOptions: ChoiceOption[] = [
+  { id: "server", label: "使用服务器代理配置", hint: "沿用这台机器已有的出站代理" },
+  { id: "direct", label: "直接连接公开端点", hint: "不经过服务器代理" },
+]
+const cacheOptions: ChoiceOption[] = [
+  { id: "provider_default", label: "供应商默认", hint: "沿用端点自己的缓存行为" },
+  { id: "disabled_hints", label: "不发送显式提示", hint: "请求里不附带缓存提示" },
+  { id: "qwen_explicit", label: "Qwen 显式", hint: "须经探测验证后才启用提示" },
+]
+const brandOptions: ChoiceOption[] = [
+  ["generic", "通用", "中性标记；显示名仍可识别已知品牌"],
+  ["openai", "OpenAI"],
+  ["claude", "Claude"],
+  ["gemini", "Gemini"],
+  ["qwen", "Qwen"],
+  ["deepseek", "DeepSeek"],
+  ["kimi", "Kimi"],
+  ["glm", "GLM"],
+  ["mimo", "MiMo"],
+  ["doubao", "豆包"],
+  ["hunyuan", "混元"],
+].map(([id, label, hint]) => ({ id, label, brand: id, hint }))
+function DeskSelect({
+  label,
+  value,
+  options,
+  placeholder,
+  disabled,
+  unavailable,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: ChoiceOption[]
+  placeholder: string
+  disabled?: boolean
+  unavailable?: string
+  onChange: (id: string) => void
+}) {
+  return (
+    <div className="desk-field">
+      <span>{label}</span>
+      <ChoiceMenu
+        label={label}
+        value={value}
+        options={options}
+        placeholder={placeholder}
+        disabled={disabled}
+        unavailable={unavailable}
+        onChange={onChange}
+      />
+    </div>
+  )
+}
+function InkSwitch({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="ink-check">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span />
+      {label}
+    </label>
+  )
+}
+function LensGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M10.2 10.2 13.2 13.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
 function message(e: unknown) {
   return e instanceof ApiError ? e.detail : e instanceof Error ? e.message : "操作未完成，请重新读取状态。"
 }
@@ -131,7 +209,8 @@ function modelDraft(m: Model): ModelDraft {
 export function Manage() {
   const api = useRef(new HttpApi())
   const [auth, setAuth] = useState<boolean | null>(null),
-    [password, setPassword] = useState("")
+    [password, setPassword] = useState(""),
+    [reveal, setReveal] = useState(false)
   const [section, setSection] = useState("models"),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
@@ -242,7 +321,7 @@ export function Manage() {
   }
   function editProvider(p?: Provider) {
     if (dirty) {
-      setError("当前表单有未保存内容，请先保存或撤销。 ")
+      setError("当前表单有未保存内容，请先保存或撤销。")
       return
     }
     setPd(p ? providerDraft(p) : emptyProvider)
@@ -251,7 +330,7 @@ export function Manage() {
   }
   function editModel(m?: Model) {
     if (dirty) {
-      setError("当前表单有未保存内容，请先保存或撤销。 ")
+      setError("当前表单有未保存内容，请先保存或撤销。")
       return
     }
     setMd(m ? modelDraft(m) : { ...emptyModel, provider_id: providers[0]?.id || "" })
@@ -341,20 +420,32 @@ export function Manage() {
     })
   }
   const selected = models.find((m) => m.id === md.id)
+  const enabledCount = models.filter((m) => m.enabled && m.provider_enabled).length
+  const risenEnabled = useRise(auth ? enabledCount : undefined, auth === true)
+  const filtered = models.filter((m) =>
+    [m.display_name, m.upstream_id, providers.find((p) => p.id === m.provider_id)?.name].join(" ").toLowerCase().includes(filter.toLowerCase()),
+  )
+  const sectionIndex = Math.max(
+    0,
+    sections.findIndex(([id]) => id === section),
+  )
   return (
     <>
       <SiteHeader />
       <main className={`manage-layout ${auth ? "" : "manage-login-layout"}`}>
         <header className="manage-heading">
           <div>
-            <p className="eyebrow">VIDLENS / OWNER DESK</p>
+            <p className="eyebrow">
+              <span />
+              VIDLENS / OWNER DESK
+            </p>
             <h1>{auth ? "模型与供应商" : "站长登录"}</h1>
             <p>{auth ? "只让确认可用的模型，出现在访客面前。" : "管理供应商、模型与运行诊断。"}</p>
           </div>
           {auth ? (
             <button
               type="button"
-              className="btn quiet"
+              className="btn quiet desk-pill"
               disabled={!!busy}
               onClick={() =>
                 void action("logout", async () => {
@@ -363,12 +454,15 @@ export function Manage() {
                 })
               }
             >
-              退出登录 ↗
+              退出登录 <span className="nudge">↗</span>
             </button>
           ) : null}
         </header>
         {auth === null ? (
-          <p role="status">正在读取管理会话…</p>
+          <p className="desk-wait" role="status">
+            <i />
+            正在读取管理会话…
+          </p>
         ) : !auth ? (
           <form
             className="owner-login"
@@ -377,58 +471,76 @@ export function Manage() {
               void login()
             }}
           >
+            <p className="eyebrow">
+              <span />
+              PASSWORD
+            </p>
             <label htmlFor="owner-password">站长密码</label>
-            <input
-              id="owner-password"
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="owner-secret">
+              <input
+                id="owner-password"
+                type={reveal ? "text" : "password"}
+                value={password}
+                autoComplete="current-password"
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button type="button" className="text-action" aria-pressed={reveal} onClick={() => setReveal((open) => !open)}>
+                {reveal ? "隐藏" : "显示"}
+              </button>
+            </div>
             <button className="btn primary" disabled={!!busy}>
-              {busy === "login" ? "正在校验" : "进入管理后台 →"}
+              {busy === "login" ? (
+                "正在校验"
+              ) : (
+                <>
+                  进入管理后台 <span className="nudge-forward">→</span>
+                </>
+              )}
             </button>
             <p>初始密码或重置需在服务器运行交互式命令。本站没有默认密码、公开注册或邮件找回。</p>
             <code>vidlens -config … -set-owner-password</code>
           </form>
         ) : (
           <>
-            <nav className="manage-tabs" aria-label="管理分区">
-              {[
-                ["models", "模型目录"],
-                ["providers", "供应商"],
-                ["diagnostics", "缓存与用量"],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-current={section === id ? "page" : undefined}
-                  onClick={() => {
-                    if (dirty) {
-                      setError("请先保存或撤销当前表单。")
-                      return
-                    }
-                    setSection(id)
-                    if (id === "diagnostics")
-                      void action("diagnostics", async () => {
-                        const r = await api.current.request<Record<string, unknown>>("GET", "/api/v1/admin/diagnostics")
-                        setDiagnostics(r.body)
-                      })
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-              <span>{models.filter((m) => m.enabled && m.provider_enabled).length} 个启用模型</span>
-            </nav>
+            <div className="desk-nav">
+              <nav className="manage-tabs" data-tab={sectionIndex} aria-label="管理分区">
+                <i className="tab-indicator" aria-hidden="true" />
+                {sections.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-current={section === id ? "page" : undefined}
+                    onClick={() => {
+                      if (dirty) {
+                        setError("请先保存或撤销当前表单。")
+                        return
+                      }
+                      setSection(id)
+                      if (id === "diagnostics")
+                        void action("diagnostics", async () => {
+                          const r = await api.current.request<Record<string, unknown>>("GET", "/api/v1/admin/diagnostics")
+                          setDiagnostics(r.body)
+                        })
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              <p className="desk-census">
+                <strong>{risenEnabled ?? 0}</strong>
+                <span>个启用模型</span>
+              </p>
+            </div>
+            <div className="desk-stage" key={section}>
             {section === "providers" ? (
               <div className="manage-columns">
-                <section>
+                <section className="provider-rail">
                   <div className="manage-list-head">
                     <h2>供应商</h2>
-                    <button type="button" className="text-action" onClick={() => editProvider()}>
-                      + 新增
+                    <button type="button" className="btn quiet desk-pill" onClick={() => editProvider()}>
+                      新增
                     </button>
                   </div>
                   {providers.length ? (
@@ -440,13 +552,14 @@ export function Manage() {
                         aria-current={pd.id === p.id ? "true" : undefined}
                         onClick={() => editProvider(p)}
                       >
+                        <span className={`status-dot ${p.enabled ? "on" : ""}`} />
                         <span>
-                          {p.name}
+                          <strong>{p.name}</strong>
                           <small>
                             {p.enabled ? "已启用" : "已停用"} · {p.key_configured ? "密钥已配置" : "未配置密钥"}
                           </small>
                         </span>
-                        <span>↗</span>
+                        <span className="nudge">↗</span>
                       </button>
                     ))
                   ) : (
@@ -454,15 +567,18 @@ export function Manage() {
                   )}
                 </section>
                 <section className="manage-form">
-                  <h2>{pd.id ? "编辑供应商" : "添加供应商"}</h2>
+                  <h2>
+                    {pd.id ? "编辑供应商" : "添加供应商"}
+                    {dirty ? <span className="desk-dirty">未保存</span> : null}
+                  </h2>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
                       void saveProvider()
                     }}
                   >
-                    <label>
-                      名称
+                    <label className="desk-field">
+                      <span>名称</span>
                       <input
                         value={pd.name}
                         onChange={(e) => {
@@ -472,11 +588,12 @@ export function Manage() {
                         required
                       />
                     </label>
-                    <label>
-                      OpenAI 兼容 base URL
+                    <label className="desk-field">
+                      <span>OpenAI 兼容 base URL</span>
                       <input
                         value={pd.base_url}
                         placeholder="https://api.example.com/v1"
+                        spellCheck={false}
                         onChange={(e) => {
                           setPd({ ...pd, base_url: e.target.value })
                           setDirty(true)
@@ -484,42 +601,39 @@ export function Manage() {
                         required
                       />
                     </label>
-                    <label>
-                      {pd.id ? "更新密钥（留空保持原值）" : "API Key"}
+                    <label className="desk-field">
+                      <span>{pd.id ? "更新密钥（留空保持原值）" : "API Key"}</span>
                       <input
                         type="password"
                         autoComplete="new-password"
                         value={pd.api_key}
+                        spellCheck={false}
                         onChange={(e) => {
                           setPd({ ...pd, api_key: e.target.value })
                           setDirty(true)
                         }}
                       />
                     </label>
-                    <label>
-                      出站策略
-                      <select
-                        value={pd.proxy_policy}
-                        onChange={(e) => {
-                          setPd({ ...pd, proxy_policy: e.target.value })
-                          setDirty(true)
-                        }}
-                      >
-                        <option value="server">使用服务器代理配置</option>
-                        <option value="direct">直接连接公开端点</option>
-                      </select>
-                    </label>
-                    <label className="check-field">
-                      <input
-                        type="checkbox"
+                    <DeskSelect
+                      label="出站策略"
+                      value={pd.proxy_policy}
+                      options={proxyOptions}
+                      placeholder="选择出站策略"
+                      onChange={(id) => {
+                        setPd({ ...pd, proxy_policy: id })
+                        setDirty(true)
+                      }}
+                    />
+                    <div className="desk-switches">
+                      <InkSwitch
                         checked={pd.enabled}
-                        onChange={(e) => {
-                          setPd({ ...pd, enabled: e.target.checked })
+                        label="启用供应商"
+                        onChange={(checked) => {
+                          setPd({ ...pd, enabled: checked })
                           setDirty(true)
                         }}
                       />
-                      启用供应商
-                    </label>
+                    </div>
                     <p className="fine">Key 保存后只显示配置状态。轮换密钥创建新修订；撤销旧 Key 可能让旧视频暂时不能继续问答。</p>
                     <div className="form-actions">
                       <button className="btn primary" disabled={!!busy}>
@@ -527,7 +641,7 @@ export function Manage() {
                       </button>
                       <button
                         type="button"
-                        className="btn quiet"
+                        className="btn quiet desk-pill"
                         onClick={() => {
                           setDirty(false)
                           setPd(
@@ -538,107 +652,121 @@ export function Manage() {
                         撤销修改
                       </button>
                       {pd.id ? (
-                        <button type="button" className="btn quiet" disabled={!!busy || dirty} onClick={() => void discover()}>
+                        <button type="button" className="btn quiet desk-pill" disabled={!!busy || dirty} onClick={() => void discover()}>
                           {busy === "discover" ? "正在发现" : "拉取模型列表"}
                         </button>
                       ) : null}
                     </div>
                   </form>
-                  {discovery.length ? (
-                    <div className="discovered">
-                      <h3>
-                        发现的候选 <span>{discovery.length}</span>
-                      </h3>
-                      <p className="fine">发现只表示名字存在，不代表看图或工具能力。</p>
-                      {discovery.map((id) => (
-                        <label className="check-field" key={id}>
-                          <input
-                            type="checkbox"
-                            checked={picked.includes(id)}
-                            onChange={(e) => setPicked((prev) => (e.target.checked ? [...prev, id] : prev.filter((v) => v !== id)))}
-                          />
-                          <code>{id}</code>
-                        </label>
-                      ))}
-                      <button type="button" className="btn primary" disabled={!!busy || !picked.length} onClick={() => void importModels()}>
-                        导入 {picked.length} 个候选为停用模型
-                      </button>
+                  <div className="fold" data-open={discovery.length ? "true" : "false"}>
+                    <div className="fold-clip">
+                      {discovery.length ? (
+                        <div className="discovered">
+                          <div className="discovered-head">
+                            <h3>
+                              发现的候选 <span>{discovery.length}</span>
+                            </h3>
+                            <button
+                              type="button"
+                              className="text-action"
+                              onClick={() => setPicked(picked.length === discovery.length ? [] : [...discovery])}
+                            >
+                              {picked.length === discovery.length ? "取消全选" : "全选"}
+                            </button>
+                          </div>
+                          <p className="fine">发现只表示名字存在，不代表看图或工具能力。</p>
+                          {discovery.map((id) => (
+                            <label className="ink-check" key={id}>
+                              <input
+                                type="checkbox"
+                                checked={picked.includes(id)}
+                                onChange={(e) => setPicked((prev) => (e.target.checked ? [...prev, id] : prev.filter((v) => v !== id)))}
+                              />
+                              <span />
+                              <code>{id}</code>
+                            </label>
+                          ))}
+                          <button type="button" className="btn primary" disabled={!!busy || !picked.length} onClick={() => void importModels()}>
+                            导入 {picked.length} 个候选为停用模型
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
+                  </div>
                 </section>
               </div>
             ) : section === "models" ? (
               <>
                 <div className="model-toolbar">
-                  <label className="sr-only" htmlFor="model-filter">
-                    筛选模型
+                  <label className="ledger-search">
+                    <span className="sr-only">筛选模型</span>
+                    <LensGlyph />
+                    <input
+                      id="model-filter"
+                      placeholder="筛选名称、供应商或上游 ID"
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                    />
                   </label>
-                  <input
-                    id="model-filter"
-                    placeholder="筛选名称、供应商或上游 ID"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value)}
-                  />
-                  <button type="button" className="btn quiet" onClick={() => editModel()}>
-                    + 添加模型
+                  <button type="button" className="btn primary" onClick={() => editModel()}>
+                    添加模型
                   </button>
                 </div>
-                {!models.length ? (
-                  <div className="empty-state">
-                    <p>还没有目录模型。先添加供应商，再手动添加或发现模型。现有单模型入口仍按原配置工作。</p>
-                    <button
-                      type="button"
-                      className="btn quiet"
-                      disabled={!!busy}
-                      onClick={() =>
-                        void action("import-current", async () => {
-                          await api.current.request("POST", "/api/v1/admin/models/import-current", {})
-                          await load()
-                          setNotice("现有模型已导入为停用候选；先检查再启用，未改变现有入口。")
-                        })
-                      }
-                    >
-                      导入现有配置为候选
-                    </button>
+                <div className="model-ledger">
+                  <div className="ledger-head">
+                    <span>目录</span>
+                    <span>{models.length ? `${filtered.length} / ${models.length}` : "空"}</span>
                   </div>
-                ) : (
-                  <table className="models-table">
-                    <thead>
-                      <tr>
-                        <th>模型 / 上游 ID</th>
-                        <th>供应商</th>
-                        <th>最近能力</th>
-                        <th>状态</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {models
-                        .filter((m) =>
-                          [m.display_name, m.upstream_id, providers.find((p) => p.id === m.provider_id)?.name]
-                            .join(" ")
-                            .toLowerCase()
-                            .includes(filter.toLowerCase()),
-                        )
-                        .map((m) => (
-                          <tr key={m.id}>
-                            <td>
-                              <button type="button" className="model-name" onClick={() => editModel(m)}>
-                                <ModelIcon brand={m.brand_id} name={m.display_name} />
-                                <span>
-                                  {m.display_name}
-                                  <code>{m.upstream_id}</code>
-                                </span>
-                              </button>
-                            </td>
-                            <td>{providers.find((p) => p.id === m.provider_id)?.name || "—"}</td>
-                            <td>{m.verified ? "图片与工具检查通过" : "尚未通过当前修订检查"}</td>
-                            <td>
-                              <span className={`status-dot ${m.enabled ? "on" : ""}`} />
-                              {m.enabled ? "启用" : "停用"}
-                              {m.is_default ? <small className="default-mark">默认</small> : null}
-                            </td>
-                            <td>
+                  {!models.length ? (
+                    <div className="empty-state">
+                      <p>还没有目录模型。先添加供应商，再手动添加或发现模型。现有单模型入口仍按原配置工作。</p>
+                      <button
+                        type="button"
+                        className="btn quiet desk-pill"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void action("import-current", async () => {
+                            await api.current.request("POST", "/api/v1/admin/models/import-current", {})
+                            await load()
+                            setNotice("现有模型已导入为停用候选；先检查再启用，未改变现有入口。")
+                          })
+                        }
+                      >
+                        导入现有配置为候选
+                      </button>
+                    </div>
+                  ) : filtered.length ? (
+                    <ul className="ledger-list">
+                      {filtered.map((m) => (
+                        <li key={m.id} data-current={md.id === m.id ? "true" : "false"}>
+                          <button
+                            type="button"
+                            className="ledger-open"
+                            aria-current={md.id === m.id ? "true" : undefined}
+                            onClick={() => editModel(m)}
+                          >
+                            <span className="ledger-mark">
+                              <ModelIcon brand={m.brand_id} name={m.display_name} />
+                            </span>
+                            <span className="ledger-copy">
+                              <strong>{m.display_name}</strong>
+                              <small>
+                                {m.upstream_id} · {providers.find((p) => p.id === m.provider_id)?.name || "未关联供应商"}
+                              </small>
+                              <em className={m.verified ? "on" : undefined}>
+                                {m.verified ? "图片与工具检查通过" : "尚未通过当前修订检查"}
+                              </em>
+                            </span>
+                          </button>
+                          <div className="ledger-ops">
+                            <div className="ledger-flags">
+                              <span className={`desk-seal ${m.enabled ? "on" : ""}`}>
+                                <i className={`status-dot ${m.enabled ? "on" : ""}`} />
+                                {m.enabled ? "启用" : "停用"}
+                              </span>
+                              {m.is_default ? <span className="desk-seal mark">默认</span> : null}
+                            </div>
+                            <div className="ledger-actions">
                               <button type="button" className="text-action" disabled={!!busy} onClick={() => void toggleModel(m)}>
                                 {m.enabled ? "停用" : "启用"}
                               </button>
@@ -662,48 +790,57 @@ export function Manage() {
                               <button type="button" className="text-action" disabled={!!busy} onClick={() => void probe(m, "capabilities")}>
                                 检查
                               </button>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                )}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="empty-state">没有符合「{filter}」的模型。</p>
+                  )}
+                </div>
                 {!models.some((m) => m.enabled && m.provider_enabled) && models.length ? (
                   <p className="doc-note">当前目录没有启用模型。若已切换到目录选模，新解读将不可提交；旧文章仍可阅读与导出。</p>
                 ) : null}
                 <section className="manage-form model-detail">
                   <div>
-                    <h2>{md.id ? "模型详情" : "添加模型"}</h2>
+                    <h2>
+                      {md.id ? <ModelIcon brand={md.brand_id} name={md.display_name} decorative /> : null}
+                      {md.id ? "模型详情" : "添加模型"}
+                      {dirty ? <span className="desk-dirty">未保存</span> : null}
+                    </h2>
                     <p className="fine">新修订先保存为停用。一次小样本通过不代表长期健康或长视频质量保证。</p>
                   </div>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
+                      if (!md.provider_id) {
+                        setError("请先选择供应商。")
+                        setNotice("")
+                        return
+                      }
                       void saveModel()
                     }}
                   >
                     <div className="form-grid">
-                      <label>
-                        供应商
-                        <select
-                          value={md.provider_id}
-                          disabled={!!md.id}
-                          onChange={(e) => {
-                            setMd({ ...md, provider_id: e.target.value })
-                            setDirty(true)
-                          }}
-                          required
-                        >
-                          <option value="">选择供应商</option>
-                          {providers.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        显示名
+                      <DeskSelect
+                        label="供应商"
+                        value={md.provider_id}
+                        placeholder={providers.length ? "选择供应商" : "还没有供应商"}
+                        disabled={!!md.id}
+                        unavailable={md.provider_id && !providers.some((p) => p.id === md.provider_id) ? "原供应商已不在目录中" : undefined}
+                        options={providers.map((p) => ({
+                          id: p.id,
+                          label: p.name,
+                          hint: `${p.enabled ? "已启用" : "已停用"} · ${p.key_configured ? "密钥已配置" : "未配置密钥"}`,
+                        }))}
+                        onChange={(id) => {
+                          setMd({ ...md, provider_id: id })
+                          setDirty(true)
+                        }}
+                      />
+                      <label className="desk-field">
+                        <span>显示名</span>
                         <input
                           value={md.display_name}
                           onChange={(e) => {
@@ -713,10 +850,11 @@ export function Manage() {
                           required
                         />
                       </label>
-                      <label>
-                        上游 model ID
+                      <label className="desk-field">
+                        <span>上游 model ID</span>
                         <input
                           value={md.upstream_id}
+                          spellCheck={false}
                           onChange={(e) => {
                             setMd({ ...md, upstream_id: e.target.value })
                             setDirty(true)
@@ -724,36 +862,18 @@ export function Manage() {
                           required
                         />
                       </label>
-                      <label>
-                        品牌标识
-                        <select
-                          value={md.brand_id}
-                          onChange={(e) => {
-                            setMd({ ...md, brand_id: e.target.value })
-                            setDirty(true)
-                          }}
-                        >
-                          {[
-                            ["generic", "通用"],
-                            ["openai", "OpenAI"],
-                            ["claude", "Claude"],
-                            ["gemini", "Gemini"],
-                            ["qwen", "Qwen"],
-                            ["deepseek", "DeepSeek"],
-                            ["kimi", "Kimi"],
-                            ["glm", "GLM"],
-                            ["mimo", "MiMo"],
-                            ["doubao", "豆包"],
-                            ["hunyuan", "混元"],
-                          ].map(([b, label]) => (
-                            <option key={b} value={b}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        输出 tokens 上限
+                      <DeskSelect
+                        label="品牌标识"
+                        value={md.brand_id}
+                        options={brandOptions}
+                        placeholder="选择品牌"
+                        onChange={(id) => {
+                          setMd({ ...md, brand_id: id })
+                          setDirty(true)
+                        }}
+                      />
+                      <label className="desk-field">
+                        <span>输出 tokens 上限</span>
                         <input
                           type="number"
                           min={1024}
@@ -768,8 +888,8 @@ export function Manage() {
                           }}
                         />
                       </label>
-                      <label>
-                        输入字符保护上限
+                      <label className="desk-field">
+                        <span>输入字符保护上限</span>
                         <input
                           type="number"
                           min={10000}
@@ -784,37 +904,19 @@ export function Manage() {
                           }}
                         />
                       </label>
-                      <label>
-                        缓存策略
-                        <select
-                          value={md.cache_policy}
-                          onChange={(e) => {
-                            setMd({ ...md, cache_policy: e.target.value })
-                            setDirty(true)
-                          }}
-                        >
-                          <option value="provider_default">供应商默认</option>
-                          <option value="disabled_hints">不发送显式提示</option>
-                          <option value="qwen_explicit">Qwen 显式（须经探测验证）</option>
-                        </select>
-                      </label>
-                      <label className="check-field">
-                        <input
-                          type="checkbox"
-                          checked={md.disable_thinking}
-                          onChange={(e) => {
-                            setMd({
-                              ...md,
-                              disable_thinking: e.target.checked,
-                            })
-                            setDirty(true)
-                          }}
-                        />
-                        发送关闭思考的兼容参数
-                      </label>
+                      <DeskSelect
+                        label="缓存策略"
+                        value={md.cache_policy}
+                        options={cacheOptions}
+                        placeholder="选择缓存策略"
+                        onChange={(id) => {
+                          setMd({ ...md, cache_policy: id })
+                          setDirty(true)
+                        }}
+                      />
                     </div>
-                    <label>
-                      给访客的一句说明
+                    <label className="desk-field">
+                      <span>给访客的一句说明</span>
                       <input
                         maxLength={240}
                         value={md.description}
@@ -824,24 +926,31 @@ export function Manage() {
                         }}
                       />
                     </label>
-                    <label className="check-field">
-                      <input
-                        type="checkbox"
-                        checked={md.enabled}
-                        onChange={(e) => {
-                          setMd({ ...md, enabled: e.target.checked })
+                    <div className="desk-switches">
+                      <InkSwitch
+                        checked={md.disable_thinking}
+                        label="发送关闭思考的兼容参数"
+                        onChange={(checked) => {
+                          setMd({ ...md, disable_thinking: checked })
                           setDirty(true)
                         }}
                       />
-                      启用此修订（能力检查通过后）
-                    </label>
+                      <InkSwitch
+                        checked={md.enabled}
+                        label="启用此修订（能力检查通过后）"
+                        onChange={(checked) => {
+                          setMd({ ...md, enabled: checked })
+                          setDirty(true)
+                        }}
+                      />
+                    </div>
                     <div className="form-actions">
                       <button className="btn primary" disabled={!!busy}>
                         {busy === "model" ? "正在保存" : "保存模型"}
                       </button>
                       <button
                         type="button"
-                        className="btn quiet"
+                        className="btn quiet desk-pill"
                         onClick={() => {
                           setDirty(false)
                           setMd(selected ? modelDraft(selected) : emptyModel)
@@ -853,7 +962,7 @@ export function Manage() {
                         <>
                           <button
                             type="button"
-                            className="btn quiet"
+                            className="btn quiet desk-pill"
                             disabled={!!busy || dirty}
                             onClick={() => void probe(selected, "capabilities")}
                           >
@@ -861,7 +970,7 @@ export function Manage() {
                           </button>
                           <button
                             type="button"
-                            className="btn quiet"
+                            className="btn quiet desk-pill"
                             disabled={!!busy || dirty}
                             onClick={() => void probe(selected, "cache")}
                           >
@@ -880,21 +989,27 @@ export function Manage() {
                   <section className="probe-history">
                     <h2>最近检查</h2>
                     {probes.length ? (
-                      probes.map((p) => (
-                        <div key={p.id}>
-                          <span>{p.mode === "cache" ? "缓存样本" : "图片与工具"}</span>
-                          <strong>{labels[p.status] || p.status}</strong>
-                          <span>{p.submissions} 次物理提交</span>
-                          <time>{new Date(p.created_at).toLocaleString("zh-Hans")}</time>
-                          {p.failure_code ? <code>{p.failure_code}</code> : null}
-                          {p.mode === "cache" && p.status === "succeeded" ? (
-                            <small>
-                              {p.result?.usage_reported ? "缓存字段已报告" : "缓存字段未报告"} ·{" "}
-                              {p.result?.cache_hit_observed ? "观察到命中" : "未取得命中证据"} · 账单折扣未知
-                            </small>
-                          ) : null}
-                        </div>
-                      ))
+                      <ol className="probe-rail">
+                        {probes.map((p) => (
+                          <li key={p.id} data-status={p.status}>
+                            <i aria-hidden="true" />
+                            <div>
+                              <strong>{labels[p.status] || p.status}</strong>
+                              <span>
+                                {p.mode === "cache" ? "缓存样本" : "图片与工具"} · {p.submissions} 次物理提交
+                              </span>
+                              {p.failure_code ? <code>{p.failure_code}</code> : null}
+                              {p.mode === "cache" && p.status === "succeeded" ? (
+                                <small>
+                                  {p.result?.usage_reported ? "缓存字段已报告" : "缓存字段未报告"} ·{" "}
+                                  {p.result?.cache_hit_observed ? "观察到命中" : "未取得命中证据"} · 账单折扣未知
+                                </small>
+                              ) : null}
+                            </div>
+                            <time dateTime={p.created_at}>{new Date(p.created_at).toLocaleString("zh-Hans")}</time>
+                          </li>
+                        ))}
+                      </ol>
                     ) : (
                       <p className="fine">尚无检查记录。</p>
                     )}
@@ -910,9 +1025,11 @@ export function Manage() {
                     setDiagnostics(r.body)
                   })
                 }
-                busy={!!busy}
+                busy={busy === "diagnostics"}
+                spinning={busy === "diagnostics"}
               />
             )}
+            </div>
           </>
         )}
         {error ? (
@@ -939,7 +1056,26 @@ function metric(m?: Metric) {
   if (m.status !== "reported") return m.status === "null" ? "空值" : "字段异常"
   return (m.value ?? 0).toLocaleString("zh-Hans")
 }
-function Diagnostics({ data, onReload, busy }: { data: Record<string, unknown> | null; onReload: () => void; busy: boolean }) {
+function RisingFigure({ value, label }: { value?: number; label: string }) {
+  const shown = useRise(value, value !== undefined)
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{shown === undefined ? "—" : shown.toLocaleString("zh-Hans")}</strong>
+    </div>
+  )
+}
+function Diagnostics({
+  data,
+  onReload,
+  busy,
+  spinning,
+}: {
+  data: Record<string, unknown> | null
+  onReload: () => void
+  busy: boolean
+  spinning: boolean
+}) {
   const summary = data?.summary as Record<string, number> | undefined
   const recent = (data?.recent || []) as {
     created_at: string
@@ -956,6 +1092,14 @@ function Diagnostics({ data, onReload, busy }: { data: Record<string, unknown> |
       cache_policy: string
     }
   }[]
+  const figures = [
+    ["physical_submissions", "物理提交"],
+    ["reported", "缓存字段已报告"],
+    ["unknown", "未报告或异常"],
+    ["hits", "观察到命中"],
+    ["reported_zero", "明确报告为零"],
+    ["incomplete", "未完整结束"],
+  ] as const
   return (
     <section className="diagnostics">
       <header>
@@ -963,64 +1107,72 @@ function Diagnostics({ data, onReload, busy }: { data: Record<string, unknown> |
           <h2>缓存与实际用量</h2>
           <p className="fine">未知样本不进入命中比例的分母；字段报告、实际命中与账单折扣分别展示。</p>
         </div>
-        <button type="button" className="btn quiet" disabled={busy} onClick={onReload}>
-          重新读取 ↻
+        <button type="button" className="btn quiet desk-pill" disabled={busy} onClick={onReload}>
+          <span className={spinning ? "desk-spin" : "desk-reload"} aria-hidden="true">
+            ↻
+          </span>
+          重新读取
         </button>
       </header>
-      <div className="diagnostic-metrics">
-        {[
-          ["physical_submissions", "物理提交"],
-          ["reported", "缓存字段已报告"],
-          ["unknown", "未报告或异常"],
-          ["hits", "观察到命中"],
-          ["reported_zero", "明确报告为零"],
-          ["incomplete", "未完整结束"],
-        ].map(([id, label]) => (
-          <div key={id}>
-            <span>{label}</span>
-            <strong>{summary?.[id] ?? "—"}</strong>
+      {!data ? (
+        <p className={busy ? "desk-wait" : "empty-state"} role="status">
+          {busy ? <i /> : null}
+          {busy ? "正在读取用量…" : "还没有读到用量。"}
+        </p>
+      ) : (
+        <>
+          <div className="diagnostic-metrics">
+            {figures.map(([id, label]) => (
+              <RisingFigure key={id} label={label} value={summary?.[id]} />
+            ))}
           </div>
-        ))}
-      </div>
-      <p className="doc-note">
-        账单折扣：未知。历史仅规范化记录：
-        {String(data?.legacy_normalized_only ?? "—")} 条，不能按其中的 0 推断真实未命中。
-      </p>
-      <table className="models-table">
-        <thead>
-          <tr>
-            <th>模型 / 时间</th>
-            <th>输入 / 输出</th>
-            <th>缓存读取 / 创建</th>
-            <th>首响应 / 总耗时</th>
-            <th>实际提示 / 结束</th>
-          </tr>
-        </thead>
-        <tbody>
-          {recent.map((r, i) => (
-            <tr key={i}>
-              <td>
-                {r.display_name}
-                <small>{new Date(r.created_at).toLocaleString("zh-Hans")}</small>
-              </td>
-              <td>
-                {metric(r.reporting.input)} / {metric(r.reporting.output)}
-              </td>
-              <td>
-                {metric(r.reporting.cache_read)} / {metric(r.reporting.cache_write)}
-              </td>
-              <td>
-                {r.reporting.first_response_ms === null ? "未知" : `${r.reporting.first_response_ms}ms`} / {r.reporting.total_ms}ms
-              </td>
-              <td>
-                {r.reporting.hints_sent ? "已发送显式提示" : "未发显式提示"}
-                <small>{r.reporting.stream_status === "complete" ? "完整" : "未完整"}</small>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!recent.length ? <p className="empty-state">还没有本版本的物理提交用量。已有历史记录保持原事实。</p> : null}
+          <p className="doc-note">
+            账单折扣：未知。历史仅规范化记录：
+            {String(data.legacy_normalized_only ?? "—")} 条，不能按其中的 0 推断真实未命中。
+          </p>
+          {recent.length ? (
+            <ul className="usage-list">
+              {recent.map((r, i) => (
+                <li key={i}>
+                  <header>
+                    <strong>{r.display_name}</strong>
+                    <time dateTime={r.created_at}>{new Date(r.created_at).toLocaleString("zh-Hans")}</time>
+                  </header>
+                  <dl>
+                    <div>
+                      <dt>输入 / 输出</dt>
+                      <dd>
+                        {metric(r.reporting.input)} / {metric(r.reporting.output)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>缓存读取 / 创建</dt>
+                      <dd>
+                        {metric(r.reporting.cache_read)} / {metric(r.reporting.cache_write)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>首响应 / 总耗时</dt>
+                      <dd>
+                        {r.reporting.first_response_ms === null ? "未知" : `${r.reporting.first_response_ms}ms`} / {r.reporting.total_ms}ms
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>实际提示 / 结束</dt>
+                      <dd>
+                        {r.reporting.hints_sent ? "已发送显式提示" : "未发显式提示"}
+                        <small>{r.reporting.stream_status === "complete" ? "完整" : "未完整"}</small>
+                      </dd>
+                    </div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty-state">还没有本版本的物理提交用量。已有历史记录保持原事实。</p>
+          )}
+        </>
+      )}
     </section>
   )
 }
