@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -281,11 +282,34 @@ func fmtBool(b bool) string {
 	}
 	return "false"
 }
+func diagnosticsPage(r *http.Request) (int, int, error) {
+	limit, offset := 20, 0
+	if q := r.URL.Query().Get("limit"); q != "" {
+		n, e := strconv.Atoi(q)
+		if e != nil || n < 1 || n > 100 {
+			return 0, 0, domain.Err(422, "INVALID_ARGUMENT", "每页条数需在 1 到 100 之间。")
+		}
+		limit = n
+	}
+	if q := r.URL.Query().Get("offset"); q != "" {
+		n, e := strconv.Atoi(q)
+		if e != nil || n < 0 || n > 1_000_000 {
+			return 0, 0, domain.Err(422, "INVALID_ARGUMENT", "分页起点无效。")
+		}
+		offset = n
+	}
+	return limit, offset, nil
+}
 func (a *Server) diagnostics(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return
 	}
-	v, e := a.Store.ModelReporting(r.Context())
+	limit, offset, e := diagnosticsPage(r)
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	v, e := a.Store.ModelReporting(r.Context(), limit, offset)
 	if e != nil {
 		a.problem(w, r, e)
 		return

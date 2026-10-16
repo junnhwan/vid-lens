@@ -68,6 +68,22 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 		t.Fatal("owner logout destroyed visitor session")
 	}
 }
+func TestDiagnosticsPage(t *testing.T) {
+	ok, _ := http.NewRequest(http.MethodGet, "/api/v1/admin/diagnostics?limit=20&offset=40", nil)
+	limit, offset, e := diagnosticsPage(ok)
+	if e != nil || limit != 20 || offset != 40 {
+		t.Fatalf("page = %d %d %v", limit, offset, e)
+	}
+	bare, _ := http.NewRequest(http.MethodGet, "/api/v1/admin/diagnostics", nil)
+	limit, offset, e = diagnosticsPage(bare)
+	if e != nil || limit != 20 || offset != 0 {
+		t.Fatalf("default page = %d %d %v", limit, offset, e)
+	}
+	bad, _ := http.NewRequest(http.MethodGet, "/api/v1/admin/diagnostics?limit=0", nil)
+	if _, _, e = diagnosticsPage(bad); e == nil {
+		t.Fatal("accepted an empty page")
+	}
+}
 func TestLegacyClientRejectsExternalCitationAndStreamCarriesContract(t *testing.T) {
 	_, a := apiTest(t)
 	old, _ := http.NewRequest("GET", "https://vidlens.test/api/v1/test", nil)
