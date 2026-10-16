@@ -1347,6 +1347,9 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
+.supplement p { color: var(--amber-ink); }
+.send { color: var(--canvas); }
+.send:hover { background: var(--teal); filter: brightness(.95); }
 
 .development-note ~ main .qa-slot {
   top: 118px;
