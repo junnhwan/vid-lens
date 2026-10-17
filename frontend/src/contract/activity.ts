@@ -38,6 +38,12 @@ export function mergeSteps(existing: ActivityStep[], incoming: ActivityStep[], r
   return sortSteps([...map.values()])
 }
 
+// A new SSE binding/revision replaces its cursor, not the owned history already
+// read for this resource. Keep that history through preparation/writing stages.
+export function mergeActivitySnapshot(existing: ActivityStep[], incoming: ActivityStep[], options: { replace: boolean; sameResource: boolean; expired: boolean }): ActivityStep[] {
+  return mergeSteps(existing, incoming, options.replace && (!options.sameResource || options.expired))
+}
+
 export function asSteps(value: unknown): ActivityStep[] {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is ActivityStep => !!item && typeof item === "object" && typeof (item as ActivityStep).id === "string")

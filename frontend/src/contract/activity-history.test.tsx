@@ -2,11 +2,21 @@ import { describe, expect, it, vi } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ActivityList } from "../ui/ActivityList"
 import { activityGroups, lineageHistoryUrls, loadActivityHistory } from "./activity-history"
-import { advanceActivity } from "./activity"
+import { advanceActivity, mergeActivitySnapshot } from "./activity"
 import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("retains loaded ancestor actions across source-to-article binding changes", () => {
+    const prior = {...step("earlier-failed", "tool_execution", 0), run_id: "old", status: "failed", started_at: "2026-10-17T00:00:00Z"}
+    const source = {...step("source", "tool_execution", 0), run_id: "source", started_at: "2026-10-17T00:01:00Z"}
+    const response = {...step("new-call", "model_response", 1), started_at: "2026-10-17T00:02:00Z"}
+    const next = mergeActivitySnapshot([prior, source], [source, response], {replace:true, sameResource:true, expired:false})
+    expect(next.map((item) => item.id)).toEqual(["earlier-failed", "source", "new-call"])
+    expect(next[0].status).toBe("failed")
+    expect(mergeActivitySnapshot(next, [response], {replace:true, sameResource:false, expired:false})).toEqual([response])
+    expect(mergeActivitySnapshot(next, [response], {replace:true, sameResource:true, expired:true})).toEqual([response])
+  })
   it("includes earlier source failures even when no article attempt existed", async () => {
     const owner = (id: string, prior: string | null) => ({ request: { id, retry_of_id: prior }, activity: { history_url: `/requests/${id}/activity` } })
     const read = vi.fn(async () => owner("source-failed", null))

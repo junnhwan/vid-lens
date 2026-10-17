@@ -13,7 +13,7 @@ import {
 import { ApiError, NetworkError, isApiError, replayable, sessionLost } from "../api/error"
 import { ResourceStream, type Reaction } from "../api/live"
 import { createRuntime, wantsMock, type Runtime } from "../api/runtime"
-import { advanceActivity, asSteps, mergeSteps } from "../contract/activity"
+import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../contract/activity"
 import { lineageHistoryUrls, loadActivityHistory } from "../contract/activity-history"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, formatClock } from "../contract/text"
@@ -229,10 +229,11 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
 
   function installRequest(view: RequestView, replace: boolean) {
     const normalized = asSteps(view.activity.recent_steps).map(normalizeStep)
+    const sameResource = requestRef.current?.request.id === view.request.id
     requestRef.current = view
     setRequest(view)
     setSteps((prev) => {
-      const merged = mergeSteps(prev, normalized, replace)
+      const merged = mergeActivitySnapshot(prev, normalized, {replace, sameResource, expired: view.activity.history_status === "expired"})
       stepsRef.current = merged
       return merged
     })
@@ -303,7 +304,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     })
     setTurnSteps((prev) => ({
       ...prev,
-      [view.turn.id]: mergeSteps(prev[view.turn.id] ?? [], asSteps(view.activity.recent_steps).map(normalizeStep), replace),
+      [view.turn.id]: mergeActivitySnapshot(prev[view.turn.id] ?? [], asSteps(view.activity.recent_steps).map(normalizeStep), {replace, sameResource: !!prev[view.turn.id], expired: view.activity.history_status === "expired"}),
     }))
     absorb([...(view.turn.answer?.frames ?? []), ...asSteps(view.activity.recent_steps).flatMap((step) => step.frames ?? [])])
     const terminal = isTerminalStatus(view.turn.status)
