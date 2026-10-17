@@ -63,21 +63,42 @@ func resolveAnswerReferences(in compactAnswerInput, catalog map[string]domain.Ci
 }
 
 func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) error {
-	submit := func(ctx context.Context, in answerInput) (*schema.ToolResult, error) {
-		a := domain.Answer{Kind: in.Kind, Summary: in.Summary, Blocks: in.Blocks, Citations: in.Citations, Frames: []domain.Frame{}, Limitations: in.Limitations}
+	persist := func(ctx context.Context, in answerInput, parts []domain.AnswerPart) (*schema.ToolResult, error) {
+		a := domain.Answer{Kind: in.Kind, Summary: in.Summary, Blocks: in.Blocks, Parts: parts, Citations: in.Citations, Frames: []domain.Frame{}, Limitations: in.Limitations}
 		if a.Limitations == nil {
 			a.Limitations = []domain.Limitation{}
 		}
 		if e := s.validateAnswer(ctx, &a); e != nil {
 			return nil, &candidateError{err: e}
 		}
-		if _, e := s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "answer_candidate", in, false); e != nil {
+		if e := validateAnswerParts(&a); e != nil {
+			return nil, &candidateError{err: e}
+		}
+		var args any = in
+		if s.cp.HarnessRevision >= 10 {
+			args = map[string]any{"answer": in, "parts": parts}
+		}
+		if _, e := s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "answer_candidate", args, false); e != nil {
 			return nil, e
 		}
 		if e := s.engine.Store.FinishOperation(ctx, s.claim, "candidate", a, "", nil); e != nil {
 			return nil, e
 		}
 		return textResult(map[string]any{"accepted_for_publication": true}), nil
+	}
+	submit := func(ctx context.Context, in answerInput) (*schema.ToolResult, error) { return persist(ctx, in, nil) }
+	if s.cp.HarnessRevision >= 10 {
+		return add(utils.InferEnhancedTool("submit_answer", "Submit the answer directly, with a short direct summary and non-repeating evidence-backed explanation. Optional parts name the actual aspects of this question, not a fixed template. Use existing tN/fN references; no separate prose answer before this tool.", func(ctx context.Context, in composedAnswerInput) (*schema.ToolResult, error) {
+			catalog, err := s.citationCatalog(ctx)
+			if err != nil {
+				return nil, err
+			}
+			resolved, err := resolveAnswerReferences(compactAnswerInput{Kind: in.Kind, Summary: in.Summary, Blocks: in.Blocks, Citations: in.Citations, Limitations: in.Limitations}, catalog)
+			if err != nil {
+				return nil, &candidateError{err: err}
+			}
+			return persist(ctx, resolved, in.Parts)
+		}))
 	}
 	if !s.compactAnswerProtocol() {
 		return add(utils.InferEnhancedTool("submit_answer", "Submit a finalized answer for this private turn. It cannot edit the article. All references will be validated.", submit))

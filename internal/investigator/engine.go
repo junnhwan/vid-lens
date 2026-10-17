@@ -205,13 +205,17 @@ func (s *session) initial(ctx context.Context) error {
 					s.cp.HarnessRevision = 7
 					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions
 				}
+				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v7" {
+					s.cp.HarnessRevision = 9
+					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions + conceptMapInstructions
+				}
 			}
 		} else {
 			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
 			// A new private turn freezes its own protocol before its first call.
 			// Existing Ready checkpoints never pass through this initialization.
-			s.cp.HarnessRevision = 8
-			instruction += compactAnswerInstructions + observationBudgetInstructions + structuredAnswerInstructions
+			s.cp.HarnessRevision = 10
+			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions
 		}
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}

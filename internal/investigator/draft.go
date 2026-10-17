@@ -58,12 +58,17 @@ type articleDraft struct {
 	Sections     map[string]domain.Section  `json:"sections"`
 	Citations    map[string]domain.Citation `json:"citations"`
 	Limitations  []domain.Limitation        `json:"limitations"`
+	MindMap      *domain.MindMap            `json:"mind_map,omitempty"`
 	BatchReceipt *batchReceipt              `json:"batch_receipt,omitempty"`
 }
 
 func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) error {
-	begin := func(ctx context.Context, in beginArticleInput) (*schema.ToolResult, error) {
-		if result, err := s.replayedDraft(ctx, in); result != nil || err != nil {
+	beginWithMap := func(ctx context.Context, in beginArticleInput, mindMap *domain.MindMap) (*schema.ToolResult, error) {
+		var args any = in
+		if s.cp.HarnessRevision >= 9 {
+			args = conceptPlanInput{Title: in.Title, Sections: in.Sections, MindMap: mindMap, Limitations: in.Limitations}
+		}
+		if result, err := s.replayedDraft(ctx, args); result != nil || err != nil {
 			return result, err
 		}
 		old, err := s.engine.Store.ArticleDraft(ctx, s.claim.Run.ID)
@@ -83,7 +88,12 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		for _, p := range in.Sections {
 			ids[p.ID] = true
 		}
-		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations}
+		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations, MindMap: mindMap}
+		if s.cp.HarnessRevision >= 9 {
+			if err := validateConceptMap(mindMap, ids); err != nil {
+				return s.draftFeedback(ctx, err.Error())
+			}
+		}
 		catalog, err := s.citationCatalog(ctx)
 		if err != nil {
 			return nil, err
@@ -101,7 +111,14 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if err = validateLimitations(draft.Limitations, ids, draft.Citations); err != nil {
 			return s.draftFeedback(ctx, err.Error())
 		}
-		return s.writeDraft(ctx, in, 0, draft, "正在保存文章结构")
+		title := "正在保存文章结构"
+		if s.cp.HarnessRevision >= 9 {
+			title += "与概念关系"
+		}
+		return s.writeDraft(ctx, args, 0, draft, title)
+	}
+	begin := func(ctx context.Context, in beginArticleInput) (*schema.ToolResult, error) {
+		return beginWithMap(ctx, in, nil)
 	}
 	beginDescription := "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
 	options := []utils.Option{}
@@ -109,7 +126,13 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		beginDescription = "Finish investigation and persist a full-video article outline. For each chapter choose only 1-24 representative citation IDs that support its key points; do not list every citation in the time range. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
 		options = append(options, utils.WithSchemaModifier(contentPlanSchema))
 	}
-	if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
+	if s.cp.HarnessRevision >= 9 {
+		if err := add(utils.InferEnhancedTool("begin_article", "Persist the full-video outline AND a concept relationship tree in one operation. Save body chapters afterward in a few complete batches; the server publishes automatically when complete.", func(ctx context.Context, in conceptPlanInput) (*schema.ToolResult, error) {
+			return beginWithMap(ctx, beginArticleInput{Title: in.Title, Sections: in.Sections, Limitations: in.Limitations}, in.MindMap)
+		}, options...)); err != nil {
+			return err
+		}
+	} else if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
 		if err := add(utils.InferEnhancedTool("begin_article", beginDescription, begin, options...)); err != nil {
 			return err
 		}
@@ -396,6 +419,9 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 		next = "All planned chapters are saved. Call submit_article_draft NOW with this version. Do not rewrite chapters or limitations before receiving a validation issue."
 	}
 	out := map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "saved_section_count": len(complete), "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
+	if draft.MindMap != nil {
+		out["mind_map"] = draft.MindMap
+	}
 	if draft.BatchReceipt != nil {
 		if len(pending) == 0 {
 			out["next_action"] = "All chapters saved. The server will validate the complete article and publish automatically; no further model call is needed."
@@ -574,6 +600,10 @@ func (s *session) assembleArticle(draft articleDraft) (domain.Article, error) {
 	}
 	if len(a.Limitations) > 0 {
 		a.Quality = "with_limitations"
+	}
+	if draft.MindMap != nil {
+		a.MindMap = draft.MindMap
+		return a, nil
 	}
 	nodes := []domain.MapNode{{ID: "root", Label: a.Title}}
 	for _, sec := range a.Sections {

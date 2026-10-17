@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ActivityStep, Citation, Frame, TurnView } from "../contract/types"
-import { answerKicker, describeTurn } from "../app/labels"
+import { describeTurn } from "../app/labels"
 import { clipText, formatClock } from "../contract/text"
-import { BlockView } from "./Blocks"
+import { AnswerBody } from "./AnswerBody"
 import { ActivityList } from "./ActivityList"
 import { ReferenceCard } from "./ReferenceCard"
 import { prefersReduced } from "./motion"
@@ -190,6 +190,8 @@ export function QaPanel({
           const frame = turn.turn.context.frame_id ? frames.get(turn.turn.context.frame_id) : undefined
           return (
             <article className="turn" data-turn-id={turn.turn.id} key={turn.turn.id}>
+              <div className="question-message" aria-label="你的提问">
+              <div className="message-byline question-byline"><span className="user-monogram" aria-hidden="true">你</span><span>你的提问</span></div>
               <h3 className="turn-q">{turn.turn.question}</h3>
               <div className="turn-chips">
                 {frame ? (
@@ -205,6 +207,9 @@ export function QaPanel({
                   </span>
                 ) : null}
               </div>
+              </div>
+              <div className="assistant-message" aria-label="VidLens 的回答">
+              <div className="message-byline assistant-byline"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="10" r="6"/><path d="m15.5 14.5 5 5M4 21h10"/></svg><strong>VidLens</strong><span>视频问答</span></div>
               <div className="turn-activity">
                 <button
                   type="button"
@@ -224,33 +229,14 @@ export function QaPanel({
                 </div>
               </div>
               {turn.turn.status === "completed" && answer ? (
-                <div className="turn-answer">
-                  {answer.summary ? <p className="answer-lead">{answer.summary.replace(/\\"/g, '"')}</p> : null}
-                  {answerKicker(answer.kind) ? <p className="answer-kicker">{answerKicker(answer.kind)}</p> : null}
-                  {(answer.blocks ?? []).map((block) => (
-                    <BlockView
-                      key={block.id}
-                      block={block}
-                      sectionId={block.id}
-                      citations={answer.citations ?? {}}
-                      frames={frames}
-                      onOpenFrame={onOpenFrame}
-                      onAskFrame={() => undefined}
-                      onCite={onCite}
-                      onBroken={onBroken}
-                    />
-                  ))}
-                  {(answer.limitations ?? []).map((item) => (
-                    <p className="history-note" key={item.message}>
-                      {item.message}
-                    </p>
-                  ))}
+                <>
+                  <AnswerBody answer={answer} frames={frames} onOpenFrame={onOpenFrame} onAskFrame={() => undefined} onCite={onCite} onBroken={onBroken} />
                   {Object.values(answer.citations || {})
                     .filter((c) => c.kind === "external_reference")
                     .map((c) => (
                       <ReferenceCard key={c.id} citation={c} requestId={turn.turn.request_id} />
                     ))}
-                </div>
+                </>
               ) : null}
               {turn.turn.status === "canceled" ? (
                 <div className="turn-answer">
@@ -268,6 +254,7 @@ export function QaPanel({
                   重新回答
                 </button>
               ) : null}
+              </div>
             </article>
           )
         })}

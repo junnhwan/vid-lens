@@ -357,6 +357,7 @@ export interface Answer {
   kind: string
   summary: string
   blocks: Block[]
+  parts?: { title: string; block_ids: string[] }[]
   citations: Record<string, Citation>
   frames: Frame[]
   limitations: Limitation[]

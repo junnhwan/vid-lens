@@ -142,6 +142,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 	switch t.name {
 	case "begin_article":
 		target = &beginArticleInput{}
+		if t.session != nil && t.session.cp.HarnessRevision >= 9 {
+			target = &conceptPlanInput{}
+		}
 	case "save_article_sections":
 		target = &saveSectionsInput{}
 	case "update_article_limitations":
@@ -157,6 +160,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &answerInput{}
 		if t.session != nil && t.session.compactAnswerProtocol() {
 			target = &compactAnswerInput{}
+			if t.session.cp.HarnessRevision >= 10 {
+				target = &composedAnswerInput{}
+			}
 		}
 	case "record_observation":
 		target = &observation{}

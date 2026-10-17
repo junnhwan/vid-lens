@@ -43,6 +43,8 @@ On CLOSED/network errors, GET the resource and reconstruct a new EventSource wit
 
 ## Article, frames and Q&A
 
+- The article's `mind_map` is a real tree: render parent/child relationships and non-navigable group nodes, not a flattened section list. Leaf `section_id` links navigate to published chapters. Use article sections for an independent side outline and current-reading highlight; published older maps keep their original structure.
+- Q&A distinguishes the user's question from the assistant's answer. Optional `answer.parts` are `{title, block_ids}` groups with titles chosen for the actual question, not a fixed answer template. Render each canonical block once, retain blocks outside groups, and keep existing answers without parts readable. The process disclosure is separate from the answer; send records stay inside logical-call details.
 - Render blocks and inline types structurally. Never interpret model text as HTML. `background_explanation` is visibly distinguished from video content. Unknown types need an explicit compatibility state.
 - Use section/block IDs for anchors and passage selection. v1 accepts one frame and one single-block quote, with Unicode whitespace normalization. Cross-block selections require a user-facing adjustment.
 - Use Frame `time_ms` for display/citations and preserve figure sequence order. `requested_time_ms` is acquisition intent. Expired/unavailable frames have null URLs. Image GETs never download video or call models.

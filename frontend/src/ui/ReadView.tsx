@@ -9,6 +9,7 @@ import { QaPanel } from "./QaPanel"
 import { ExportControl } from "./ExportControl"
 import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
+import { ArticleOutline } from "./ArticleOutline"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -186,6 +187,7 @@ export function ReadView(props: {
             图文
           </button>
         ) : null}
+        {article && !stage ? <ArticleOutline key={article.id} sections={article.sections} current={current} onJump={jump} /> : null}
         <div
           className="article-col"
           ref={colRef}
@@ -252,7 +254,7 @@ export function ReadView(props: {
                 ) : null}
               </div>
             </div>
-            {article?.mind_map ? <MindMap map={article.mind_map} current={current} onJump={jump} /> : null}
+            {article?.mind_map ? <MindMap key={article.id} map={article.mind_map} current={current} onJump={jump} /> : null}
             <div className="prose" id="prose" data-arrive={arrive ? "true" : undefined}>
               {props.article && !props.article.media.can_inspect_now ? (
                 <p className="history-note">

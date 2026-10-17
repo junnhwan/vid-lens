@@ -115,6 +115,10 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 						lastEvidence = "t2"
 					}
 					args = beginArticleInput{Title: "蓝色视频说明", Sections: []sectionPlan{{ID: "one", Title: "前半段", StartMS: 0, EndMS: duration / 2, KeyPoints: []string{"前半段呈现蓝色"}, EvidenceIDs: []string{"t1"}}, {ID: "two", Title: "后半段", StartMS: duration / 2, EndMS: duration, KeyPoints: []string{"后半段继续为蓝色，不能推断画外物体"}, EvidenceIDs: []string{lastEvidence}}}}
+					if strings.HasPrefix(fault, "efficient") {
+						plan := args.(beginArticleInput)
+						args = conceptPlanInput{Title: plan.Title, Sections: plan.Sections, Limitations: plan.Limitations, MindMap: &domain.MindMap{RootID: "root", Nodes: []domain.MapNode{{ID: "root", Label: "观察与推断的边界"}, {ID: "color", ParentID: domain.Ptr("root"), Label: "可见颜色"}, {ID: "first", ParentID: domain.Ptr("color"), Label: "前半段维持蓝色", SectionID: domain.Ptr("one")}, {ID: "last", ParentID: domain.Ptr("color"), Label: "后半段没有额外对象", SectionID: domain.Ptr("two")}}}}
+					}
 					if fault == "plan_repair" || fault == "plan_repair_recovery" {
 						plan := args.(beginArticleInput)
 						for len(plan.Sections[0].EvidenceIDs) < 25 {

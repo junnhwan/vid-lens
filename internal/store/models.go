@@ -592,7 +592,9 @@ func (s *Store) ModelCatalog(ctx context.Context) (map[string]any, error) {
 func resolveSpec(ctx context.Context, tx pgx.Tx, session string, in domain.RequestInput) (domain.GenerationSpec, error) {
 	var spec domain.GenerationSpec
 	spec.Version = 2
-	spec.SourcePipelineRevision = "subtitle-adoption-v2"
+	// New source work records the parallel-window checkpoints and complete
+	// extractor metadata contract; old specifications keep their own work key.
+	spec.SourcePipelineRevision = "subtitle-adoption-parallel-v3"
 	spec.DetailLevel = "standard"
 	if in.DetailLevel != nil {
 		spec.DetailLevel = *in.DetailLevel

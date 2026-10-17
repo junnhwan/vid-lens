@@ -49,7 +49,7 @@ type DetailPolicy struct {
 }
 
 func InterpretationPolicy(level string) (DetailPolicy, bool) {
-	p := DetailPolicy{Revision: "interpretation-2026-10-17-v6", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 8192, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048}
+	p := DetailPolicy{Revision: "interpretation-2026-10-17-v7", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 8192, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048}
 	switch level {
 	case "concise":
 		p.OptionalInspections = 2

@@ -343,10 +343,15 @@ type QuestionInput struct {
 	Context              QuestionContext `json:"context"`
 	ExpectedLastTurnID   *string         `json:"expected_last_turn_id"`
 }
+type AnswerPart struct {
+	Title    string   `json:"title"`
+	BlockIDs []string `json:"block_ids"`
+}
 type Answer struct {
 	Kind        string              `json:"kind"`
 	Summary     string              `json:"summary"`
 	Blocks      []Block             `json:"blocks"`
+	Parts       []AnswerPart        `json:"parts,omitempty"`
 	Citations   map[string]Citation `json:"citations"`
 	Frames      []Frame             `json:"frames"`
 	Limitations []Limitation        `json:"limitations"`

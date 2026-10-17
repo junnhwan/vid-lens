@@ -298,6 +298,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
+		} else if s.turn != nil && s.cp.HarnessRevision >= 10 {
+			// Require an executable action, while retaining evidence tools when
+			// the question needs investigation. No plain-text-then-submit round.
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced))
 		}
 		result, err := receiveModelResponse(sub, base, NormalizeToolImages(in), limits, options...)
 		release()
