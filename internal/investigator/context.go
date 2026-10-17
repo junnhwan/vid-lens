@@ -180,7 +180,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	var draftContext *schema.Message
 	freshMessages := []*schema.Message{}
 	for _, x := range state.Messages {
-		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" {
+		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" && x.Name != "vidlens_answer_references" {
 			freshMessages = append(freshMessages, x)
 		}
 	}
@@ -225,6 +225,13 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	}
 	if draftContext != nil {
 		filtered = append(filtered, draftContext)
+	}
+	if s.compactAnswerProtocol() {
+		catalog, err := s.citationCatalog(ctx)
+		if err != nil {
+			return ctx, nil, err
+		}
+		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_answer_references", Content: string(domain.JSON(map[string]any{"citation_catalog": catalogHints(catalog), "rule": "Use tN/fN directly in answer blocks; omit video citation objects. Cite representative evidence for this question, not every subtitle."}))})
 	}
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})

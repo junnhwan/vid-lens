@@ -155,6 +155,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &articleInput{}
 	case "submit_answer":
 		target = &answerInput{}
+		if t.session != nil && t.session.compactAnswerProtocol() {
+			target = &compactAnswerInput{}
+		}
 	case "record_observation":
 		target = &observation{}
 		if t.session != nil && t.session.cp.HarnessRevision >= 5 {
@@ -566,22 +569,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return nil, e
 		}
 	} else {
-		if e := add(utils.InferEnhancedTool("submit_answer", "Submit a finalized answer for this private turn. It cannot edit the article. All references will be validated.", func(ctx context.Context, in answerInput) (*schema.ToolResult, error) {
-			a := domain.Answer{Kind: in.Kind, Summary: in.Summary, Blocks: in.Blocks, Citations: in.Citations, Frames: []domain.Frame{}, Limitations: in.Limitations}
-			if a.Limitations == nil {
-				a.Limitations = []domain.Limitation{}
-			}
-			if e := s.validateAnswer(ctx, &a); e != nil {
-				return nil, &candidateError{err: e}
-			}
-			if _, e := s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "answer_candidate", in, false); e != nil {
-				return nil, e
-			}
-			if e := s.engine.Store.FinishOperation(ctx, s.claim, "candidate", a, "", nil); e != nil {
-				return nil, e
-			}
-			return textResult(map[string]any{"accepted_for_publication": true}), nil
-		})); e != nil {
+		if e := s.answerTool(add); e != nil {
 			return nil, e
 		}
 	}
