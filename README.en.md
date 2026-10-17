@@ -1,8 +1,22 @@
-![VidLens — Your video, made readable. Read. Revisit. Ask.](docs/images/readme-banner-light.svg)
+<div align="center">
+
+# VidLens
+
+**Turn videos into readable, revisitable, question-ready articles.**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme-banner-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/readme-banner-light.svg" />
+  <img alt="VidLens — Your video, made readable. Read. Revisit. Ask." src="./docs/images/readme-banner-light.svg" width="1440" />
+</picture>
 
 [简体中文](README.md) · **English**
 
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev) [![React 18 · Vite 5](https://img.shields.io/badge/React-18%20%2B%20Vite%205-61DAFB?logo=react&logoColor=black)](https://vite.dev) [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org) [![Redis 7 · Asynq](https://img.shields.io/badge/Redis-7%20%2B%20Asynq-DC382D?logo=redis&logoColor=white)](https://github.com/hibiken/asynq) [![FFmpeg](https://img.shields.io/badge/FFmpeg-media%20processing-007808?logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
+
 [Live demo](https://vidlens.wanjune.qzz.io/) · [Real examples](https://vidlens.wanjune.qzz.io/example) · [Linux.do community](https://linux.do/) · [Local setup](docs/backend/startup.md)
+
+</div>
 
 VidLens turns a Bilibili or YouTube video into a desktop reading experience: an illustrated article with chapters, real video frames, timestamped sources, and a content map. Choose an interpretation depth and focus, revisit the sources, and ask follow-up questions as you read.
 

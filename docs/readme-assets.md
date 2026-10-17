@@ -22,12 +22,12 @@ Earlier `.jpg` captures and the superseded PNGs `readme-process-source.png`, `re
 
 ## Banner
 
-The current README uses `readme-banner-light.svg` through a plain Markdown image reference for compatibility with previewers that display raw HTML picture markup. The optional `readme-banner-dark.svg` variant remains available. Both are self-contained 1440 × 300 SVGs, with a flat background, generous whitespace, the project's existing favicon and vector wordmark on the left, and two lines of copy on the right:
+The Chinese and English READMEs select between `readme-banner-light.svg` and `readme-banner-dark.svg` with a `<picture>` element, so the background follows the reader's color scheme. Both are self-contained 1440 × 300 SVGs, with a flat background, generous whitespace, the project's existing favicon and vector wordmark on the left, and two lines of copy on the right:
 
 > Your video, made readable.<br>
 > **Read. Revisit. Ask.**
 
-The language links and demo/local-setup links follow the banner, without repeating the project name and tagline.
+The centered README header also includes the project title, a localized short tagline, current technology badges, language links, and demo/local-setup links.
 
 The logo is derived from [`frontend/public/favicon.svg`](../frontend/public/favicon.svg), and the wordmark paths from `Wordmark` in [`SiteHeader.tsx`](../frontend/src/ui/SiteHeader.tsx). The SVGs have no scripts or external resources. Only the two-line copy uses a system monospace font stack; the logo and wordmark are paths.
 

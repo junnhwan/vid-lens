@@ -1,8 +1,22 @@
-![VidLens — 让视频变得可读：阅读、回看、追问](docs/images/readme-banner-light.svg)
+<div align="center">
+
+# VidLens · 映知
+
+**让视频变得可读：阅读 · 回看 · 追问**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/readme-banner-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="./docs/images/readme-banner-light.svg" />
+  <img alt="VidLens — Your video, made readable. Read. Revisit. Ask." src="./docs/images/readme-banner-light.svg" width="1440" />
+</picture>
 
 **简体中文** · [English](README.en.md)
 
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev) [![React 18 · Vite 5](https://img.shields.io/badge/React-18%20%2B%20Vite%205-61DAFB?logo=react&logoColor=black)](https://vite.dev) [![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org) [![Redis 7 · Asynq](https://img.shields.io/badge/Redis-7%20%2B%20Asynq-DC382D?logo=redis&logoColor=white)](https://github.com/hibiken/asynq) [![FFmpeg](https://img.shields.io/badge/FFmpeg-media%20processing-007808?logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
+
 [在线体验](https://vidlens.wanjune.qzz.io/) · [真实示例](https://vidlens.wanjune.qzz.io/example) · [Linux.do 交流](https://linux.do/) · [本地开发](docs/backend/startup.md)
+
+</div>
 
 VidLens 面向桌面浏览器，把 B 站或 YouTube 视频整理成带章节、真实画面、时间出处和内容导图的图文文章。你可以选择解读深度与关注点，阅读时回看来源，也可以继续提问。
 
