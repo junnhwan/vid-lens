@@ -33,7 +33,7 @@ func TestWrapUpAccountsForSlowResponsesAndReservedCalls(t *testing.T) {
 
 func TestPhaseSchemasKeepEvidenceAndBoundDraftTools(t *testing.T) {
 	in := []*schema.ToolInfo{}
-	for _, name := range []string{"record_observation", "inspect_video_window", "begin_article", "repair_article_plan", "save_article_sections", "submit_article_draft", "submit_article"} {
+	for _, name := range []string{"record_observation", "inspect_video_window", "begin_article", "repair_article_plan", "read_candidate_fields", "save_article_sections", "submit_article_draft", "submit_article"} {
 		in = append(in, &schema.ToolInfo{Name: name})
 	}
 	s := &session{cp: checkpoint{HarnessRevision: 4}}
@@ -47,6 +47,11 @@ func TestPhaseSchemasKeepEvidenceAndBoundDraftTools(t *testing.T) {
 	initial := names()
 	if !initial["record_observation"] || !initial["inspect_video_window"] || !initial["begin_article"] || initial["submit_article"] || initial["save_article_sections"] {
 		t.Fatal(initial)
+	}
+	s.cp.DraftIssue = map[string]any{"code": "candidate_schema"}
+	s.cp.LastCandidate = map[string]any{"candidate_id": "rejected"}
+	if ready := names(); !ready["read_candidate_fields"] || !ready["repair_article_plan"] {
+		t.Fatal("repair instructions reference an unavailable field reader", ready)
 	}
 	s.cp.Composing = true
 	composition := names()

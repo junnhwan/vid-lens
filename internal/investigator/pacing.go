@@ -114,6 +114,8 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 			keep = !s.cp.Composing
 		case "repair_article_plan":
 			keep = !s.cp.Composing && s.cp.DraftIssue != nil
+		case "read_candidate_fields":
+			keep = s.cp.LastCandidate != nil
 		case "save_article_sections", "read_article_sections", "patch_article_draft", "update_article_limitations", "submit_article_draft":
 			keep = s.cp.Composing
 		}
