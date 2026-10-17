@@ -44,13 +44,6 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 	if err != nil {
 		return err
 	}
-	outputLimit := 512
-	if reasoningGPT(profile.ModelName) {
-		// The shared completion budget includes reasoning. A 512-token probe
-		// can be rejected before tools run even when the configured model works.
-		outputLimit = 4096
-	}
-	profile.MaxOutputTokens = min(profile.MaxOutputTokens, outputLimit)
 	reports := []usageReport{}
 	observer := newUsageObserver("source-context-v2", profile.CachePolicy, nil)
 	submission := 0
