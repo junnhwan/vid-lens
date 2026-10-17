@@ -1,5 +1,5 @@
 import type { ActivityStep, ExecutionView, RequestView, TurnView } from "../contract/types"
-import { formatRange } from "../contract/text"
+import { clipText, formatRange } from "../contract/text"
 import { isTerminalStatus } from "../contract/stream"
 import { displayStepTitle } from "./progress"
 
@@ -18,6 +18,13 @@ function when(iso: string | null | undefined): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ""
   return date.toLocaleString("zh-CN", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
+export function starterPrompts(title: string | undefined, sectionTitle: string | undefined): string[] {
+  const main = title ? `《${title}》主要在讲什么？` : "这条视频主要在讲什么？"
+  const focus = sectionTitle ? clipText(sectionTitle, 18) : ""
+  const second = focus ? `「${focus}」里最关键的一点是什么？` : "最值得记住的结论是什么？"
+  return [main, second, "哪些说法可以直接回到画面核对？"]
 }
 
 export function describeRequest(view: RequestView | null, current: ActivityStep | null, holding: boolean, reconnecting: boolean) {

@@ -340,7 +340,18 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .phase-spine li[data-state="current"] .phase-dot { animation: phase-now 180ms var(--ease-out); }
+  .phase-spine li[data-state="current"]::before {
+    top: 4px;
+    height: 2px;
+    background: repeating-linear-gradient(90deg, var(--teal) 0 6px, transparent 6px 11px);
+    background-size: 22px 2px;
+    animation: phase-dash 1.6s linear infinite;
+  }
   .step[data-status="done"] .mark { animation: mark-in 180ms var(--ease-out); }
+}
+
+@keyframes phase-dash {
+  to { background-position: 22px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -357,7 +368,7 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 280px);
   object-fit: contain;
   background: #141716;
 }

@@ -22,7 +22,10 @@ export function ExecutionPlan({ activity, completed }: { activity: ActivitySumma
           const label = status === "done" ? "已完成" : status === "active" ? "进行中" : status === "deferred" ? "留作限制说明" : "待执行"
           return <li key={item.id} data-state={status}>
             <span className="plan-mark" aria-hidden="true">{status === "done" ? "✓" : status === "active" ? "○" : "·"}</span>
-            <span>{item.title}{item.detail ? <small>{item.detail}</small> : null}</span>
+            <span className="plan-copy">
+              {item.title}
+              {item.detail ? <small>{item.detail}</small> : null}
+            </span>
             <span className="plan-status">{label}</span>
           </li>
         })}
@@ -31,7 +34,7 @@ export function ExecutionPlan({ activity, completed }: { activity: ActivitySumma
         <summary>章节进度 · {plan.sections.filter((item) => item.status === "done").length} / {plan.sections.length} 已保存</summary>
         <ol className="plan-items">{plan.sections.map((item) => <li key={item.id} data-state={item.status}>
           <span className="plan-mark" aria-hidden="true">{item.status === "done" ? "✓" : item.status === "active" ? "○" : "·"}</span>
-          <span>{item.title}</span><span className="plan-status">{item.status === "done" ? "已保存" : item.status === "active" ? "接下来写作" : "待写作"}</span>
+          <span className="plan-copy">{item.title}</span><span className="plan-status">{item.status === "done" ? "已保存" : item.status === "active" ? "接下来写作" : "待写作"}</span>
         </li>)}</ol>
       </details> : null}
       {plan?.note && !completed ? <p className="plan-note" role="status">{plan.note}</p> : null}

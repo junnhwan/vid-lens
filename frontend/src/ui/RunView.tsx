@@ -153,6 +153,7 @@ export function RunView({
         </div>
       </div>
       <div className="activity" aria-busy={copy.busy}>
+        <div className="run-pin">
         <p className="kicker">
           <span className="pulse" hidden={!copy.busy} aria-hidden="true" />
           <span>{copy.kicker}</span>
@@ -197,6 +198,7 @@ export function RunView({
             </button>
           </p>
         ) : null}
+        </div>
       </div>
       <ExecutionPlan activity={view?.activity} completed={view?.request.status === "completed"} />
       {shown.length ? (

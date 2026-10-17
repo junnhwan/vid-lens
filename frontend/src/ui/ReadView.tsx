@@ -23,7 +23,7 @@ export function ReadView(props: {
   draft: string
   frameChip: { id: string; label: string } | null
   passageChip: { sectionId: string; blockId: string; quote: string } | null
-  suggesting: string
+  prompts: string[]
   qaBusy: boolean
   qaError: string
   expanded: Record<string, boolean | undefined>
@@ -46,7 +46,7 @@ export function ReadView(props: {
   onRetryTurn: (turn: TurnView) => void
   onCloseQa: () => void
   onToggleTurn: (id: string, open: boolean) => void
-  onSuggest: () => void
+  onSuggest: (prompt: string) => void
   onRemoveFrame: () => void
   onRemovePassage: () => void
   externalAllowed: boolean
@@ -62,6 +62,8 @@ export function ReadView(props: {
   const [arrive, setArrive] = useState(false)
   const [stage, setStage] = useState(false)
   const [paperOpen, setPaperOpen] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [pastTitle, setPastTitle] = useState(false)
   const seenArticle = useRef<string | null>(null)
   const colRef = useRef<HTMLDivElement>(null)
   const closePaperRef = useRef<HTMLButtonElement>(null)
@@ -143,6 +145,28 @@ export function ReadView(props: {
     .join(" · ")
 
   useEffect(() => {
+    if (!props.active || !article) return
+    const onScroll = () => {
+      const sheet = colRef.current?.querySelector(".sheet")
+      const title = document.getElementById("article-top")
+      if (sheet instanceof HTMLElement) {
+        const start = sheet.getBoundingClientRect().top + window.scrollY
+        const total = Math.max(sheet.offsetHeight - window.innerHeight, 1)
+        const scrolled = window.scrollY - start + 72
+        setProgress(Math.min(100, Math.max(0, (scrolled / total) * 100)))
+      }
+      setPastTitle(!!title && title.getBoundingClientRect().bottom < 72)
+    }
+    onScroll()
+    window.addEventListener("scroll", onScroll, { passive: true })
+    window.addEventListener("resize", onScroll)
+    return () => {
+      window.removeEventListener("scroll", onScroll)
+      window.removeEventListener("resize", onScroll)
+    }
+  }, [props.active, article?.id])
+
+  useEffect(() => {
     if (!props.active || !article || prefersReduced()) return
     if (seenArticle.current === article.id) return
     seenArticle.current = article.id
@@ -181,6 +205,16 @@ export function ReadView(props: {
 
   return (
     <section className="view-read" ref={props.viewRef}>
+      {props.active && article ? (
+        <>
+          <div className="read-progress" aria-hidden="true">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+          <p className="read-chapter" data-on={pastTitle && current !== "article-top" ? "true" : "false"}>
+            {article.sections.find((section) => section.id === current)?.title || ""}
+          </p>
+        </>
+      ) : null}
       <div className="workspace" data-qa={layout} data-paper={paperOpen ? "open" : "closed"}>
         {stage && !paperOpen ? (
           <button type="button" className="paper-tab" onClick={() => setPaperOpen(true)}>
@@ -321,7 +355,7 @@ export function ReadView(props: {
             draft={props.draft}
             frameChip={props.frameChip}
             passageChip={props.passageChip}
-            suggesting={props.suggesting}
+            prompts={props.prompts}
             busy={props.qaBusy}
             error={props.qaError}
             expanded={props.expanded}

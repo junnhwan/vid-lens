@@ -279,7 +279,7 @@ export function App() {
               draft={visitor.draft}
               frameChip={visitor.frameChip}
               passageChip={visitor.passageChip}
-              suggesting={visitor.suggesting}
+              prompts={visitor.prompts}
               qaBusy={visitor.qaBusy}
               qaError={visitor.qaError}
               expanded={visitor.expanded}

@@ -29,6 +29,7 @@ import type {
   TurnView,
 } from "../contract/types"
 import { prefersReduced } from "../ui/motion"
+import { starterPrompts } from "./labels"
 import { HttpApi } from "../api/http"
 import type { DetailLevel, GenerationInput, ModelCatalog } from "../contract/types"
 
@@ -715,7 +716,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     [turnSteps, frameMap],
   )
 
-  const suggesting = article?.article.title ? `《${article.article.title}》主要在讲什么？` : "这条视频主要在讲什么？"
+  const prompts = starterPrompts(article?.article.title, article?.article.sections[0]?.title)
+  const suggesting = prompts[0]
 
   async function loadHistory(turnId?: string) {
     const rt = runtimeRef.current
@@ -786,6 +788,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     frameChip,
     passageChip,
     suggesting,
+    prompts,
     qaBusy,
     qaError,
     expanded,
@@ -914,6 +917,12 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
               behavior: prefersReduced() ? "auto" : "smooth",
               block: "center",
             })
+            if (node instanceof HTMLElement && !prefersReduced()) {
+              node.classList.remove("is-cited")
+              void node.offsetWidth
+              node.classList.add("is-cited")
+              window.setTimeout(() => node.classList.remove("is-cited"), 700)
+            }
           } catch {
             setLive(citation.label)
           }
@@ -1072,9 +1081,10 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
           await report(error, setQaError)
         }
       })(),
-    suggest: () => {
+    suggest: (prompt?: string) => {
       const title = articleRef.current?.article.title
-      setDraft(title ? `《${title}》主要在讲什么？` : "这条视频主要在讲什么？")
+      const section = articleRef.current?.article.sections[0]?.title
+      setDraft(prompt?.trim() || starterPrompts(title, section)[0])
       setFocusToken((value) => value + 1)
     },
     removeFrame: () => setFrameChip(null),

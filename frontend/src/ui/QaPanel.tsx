@@ -16,7 +16,7 @@ export function QaPanel({
   draft,
   frameChip,
   passageChip,
-  suggesting,
+  prompts,
   busy,
   error,
   expanded,
@@ -53,7 +53,7 @@ export function QaPanel({
   draft: string
   frameChip: { id: string; label: string } | null
   passageChip: { quote: string } | null
-  suggesting: string
+  prompts: string[]
   busy: boolean
   error: string
   expanded: Record<string, boolean | undefined>
@@ -64,7 +64,7 @@ export function QaPanel({
   onRetry: (turn: TurnView) => void
   onClose: () => void
   onToggle: (id: string, open: boolean) => void
-  onSuggest: () => void
+  onSuggest: (prompt: string) => void
   onRemoveFrame: () => void
   onRemovePassage: () => void
   onOpenFrame: (frames: Frame[], index: number, origin: HTMLElement) => void
@@ -114,14 +114,7 @@ export function QaPanel({
         const node = Array.from(sectionRef.current?.querySelectorAll<HTMLElement>(".turn") || [])
           .find((el) => el.dataset.turnId === turn.turn.id)
           ?.querySelector<HTMLElement>(".turn-answer")
-        const animation = node?.animate(
-          [
-            { opacity: 0, transform: "translateY(8px)" },
-            { opacity: 1, transform: "none" },
-          ],
-          { duration: 200, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
-        )
-        if (animation) animation.onfinish = () => animation.cancel()
+        node?.setAttribute("data-arrive", "true")
       }
       previousStatus.current.set(turn.turn.id, turn.turn.status)
     }
@@ -176,9 +169,13 @@ export function QaPanel({
         {!turns.length ? (
           <div className="qa-empty">
             <p>可以问文章里的内容，也可以从某张图问起。</p>
-            <button type="button" className="suggest" onClick={onSuggest}>
-              {suggesting}
-            </button>
+            <div className="qa-prompts">
+              {prompts.map((prompt) => (
+                <button type="button" key={prompt} onClick={() => onSuggest(prompt)}>
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
         {turns.map((turn) => {
@@ -238,6 +235,9 @@ export function QaPanel({
                     ))}
                 </>
               ) : null}
+              {!answer && !["completed", "failed", "canceled"].includes(turn.turn.status) && !steps.length ? (
+                <p className="quiet-note">{described.title || "正在组织回答"}</p>
+              ) : null}
               {turn.turn.status === "canceled" ? (
                 <div className="turn-answer">
                   <p className="turn-stopped">没有继续生成回答。</p>
@@ -245,7 +245,7 @@ export function QaPanel({
               ) : null}
               {turn.turn.status === "failed" ? (
                 <div className="turn-answer">
-                  <p className="turn-stopped">{turn.failure?.message || "没能完成回答。"}</p>
+                  <p className="form-error">{turn.failure?.message || "没能完成回答。"}</p>
                   {turn.failure?.diagnostic_id ? <small className="meta">错误编号：{turn.failure.diagnostic_id}</small> : null}
                 </div>
               ) : null}
@@ -258,20 +258,20 @@ export function QaPanel({
             </article>
           )
         })}
+        {newAnswer ? (
+          <button
+            type="button"
+            className="new-answer"
+            onClick={() => {
+              if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+              nearBottom.current = true
+              setNewAnswer(false)
+            }}
+          >
+            新回答 ↓
+          </button>
+        ) : null}
       </div>
-      {newAnswer ? (
-        <button
-          type="button"
-          className="new-answer"
-          onClick={() => {
-            if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-            nearBottom.current = true
-            setNewAnswer(false)
-          }}
-        >
-          有新回答，回到底部 ↓
-        </button>
-      ) : null}
       <form
         className="composer"
         onSubmit={(event) => {
@@ -298,7 +298,7 @@ export function QaPanel({
           ) : null}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-        {modelUnavailable ? <p className="doc-note">本次解读的原模型暂不可用。文章和下载仍可使用，问题草稿已保留。</p> : null}
+        {modelUnavailable ? <p className="composer-reason">原模型暂不可用，问题草稿已保留。文章和下载仍可使用。</p> : null}
         <div className="external-option">
           <label className="ink-check">
             <input
@@ -349,6 +349,7 @@ export function QaPanel({
             type="submit"
             className="send"
             aria-label="发送"
+            title={modelUnavailable ? "原模型暂不可用" : "发送"}
             disabled={busy || !draft.trim() || !!active || modelUnavailable}
             hidden={!!active}
           >

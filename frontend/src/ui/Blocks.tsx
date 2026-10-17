@@ -3,6 +3,80 @@ import type { Block, Citation, Frame, Inline } from "../contract/types"
 import { citationClock, formatClock } from "../contract/text"
 import { FrameThumb } from "./FrameThumb"
 
+function citationStart(citation: Citation): number | null {
+  if (citation.kind === "external_reference") return null
+  if (citation.time_ms != null) return citation.time_ms
+  if (citation.range) return citation.range.start_ms
+  return null
+}
+
+export function citationClusterLabel(cites: Citation[]): string {
+  if (!cites.length) return ""
+  if (cites.length === 1) return citationClock(cites[0])
+  const starts = cites.map(citationStart).filter((value): value is number => value != null)
+  if (starts.length === cites.length && starts.length > 1) {
+    const min = Math.min(...starts)
+    const max = Math.max(...starts)
+    if (formatClock(min) === formatClock(max)) return formatClock(min)
+    return `${formatClock(min)}–${formatClock(max)}`
+  }
+  return `${citationClock(cites[0])} +${cites.length - 1}`
+}
+
+function previewFrame(cites: Citation[], frames: Map<string, Frame> | undefined): Frame | undefined {
+  for (const citation of cites) {
+    const frame = citation.frame_id ? frames?.get(citation.frame_id) : undefined
+    if (frame) return frame
+  }
+  return undefined
+}
+
+function CiteCluster({
+  cites,
+  frames,
+  onCite,
+}: {
+  cites: Citation[]
+  frames?: Map<string, Frame>
+  onCite: (citation: Citation) => void
+}) {
+  if (!cites.length) return null
+  const frame = previewFrame(cites, frames)
+  if (cites.length === 1) {
+    return (
+      <span className="cite-cluster">
+        <button type="button" className="time" data-citation="true" onClick={() => onCite(cites[0])}>
+          {citationClock(cites[0])}
+        </button>
+        {frame ? (
+          <span className="cite-preview" aria-hidden="true">
+            <FrameThumb frame={frame} variant="thumbnail" />
+          </span>
+        ) : null}
+      </span>
+    )
+  }
+  return (
+    <span className="cite-cluster">
+      <span className="cite-range" aria-hidden="true">
+        {citationClusterLabel(cites)}
+      </span>
+      <span className="cite-list">
+        {frame ? (
+          <span className="cite-preview" aria-hidden="true">
+            <FrameThumb frame={frame} variant="thumbnail" />
+          </span>
+        ) : null}
+        {cites.map((citation) => (
+          <button type="button" className="time" data-citation="true" key={citation.id} onClick={() => onCite(citation)}>
+            {citationClock(citation)}
+          </button>
+        ))}
+      </span>
+    </span>
+  )
+}
+
 function marks(text: string, kinds: string[] | undefined): ReactNode {
   let node: ReactNode = kinds?.includes("code") ? text : text.replace(/\\"/g, '"')
   if (kinds?.includes("code")) node = <code>{node}</code>
@@ -15,35 +89,40 @@ export function Inlines({
   items,
   citations,
   onCite,
+  frames,
 }: {
   items: Inline[] | undefined
   citations: Record<string, Citation>
   onCite: (citation: Citation) => void
+  frames?: Map<string, Frame>
 }) {
+  const body: ReactNode[] = []
+  const cites: Citation[] = []
+  for (const [index, item] of (items ?? []).entries()) {
+    if (item.type === "text") {
+      body.push(<span key={index}>{marks(item.text ?? "", item.marks)}</span>)
+      continue
+    }
+    if (item.type === "link") {
+      const url = item.url ?? ""
+      if (!/^https?:\/\//i.test(url)) body.push(<span key={index}>{item.text}</span>)
+      else
+        body.push(
+          <a key={index} href={url} target="_blank" rel="noopener noreferrer">
+            {item.text}
+          </a>,
+        )
+      continue
+    }
+    if (item.type === "citation") {
+      const citation = item.citation_id ? citations[item.citation_id] : undefined
+      if (citation) cites.push(citation)
+    }
+  }
   return (
     <>
-      {(items ?? []).map((item, index) => {
-        if (item.type === "text") return <span key={index}>{marks(item.text ?? "", item.marks)}</span>
-        if (item.type === "link") {
-          const url = item.url ?? ""
-          if (!/^https?:\/\//i.test(url)) return <span key={index}>{item.text}</span>
-          return (
-            <a key={index} href={url} target="_blank" rel="noopener noreferrer">
-              {item.text}
-            </a>
-          )
-        }
-        if (item.type === "citation") {
-          const citation = item.citation_id ? citations[item.citation_id] : undefined
-          if (!citation) return null
-          return (
-            <button type="button" className="time" data-citation="true" key={index} onClick={() => onCite(citation)}>
-              {citationClock(citation)}
-            </button>
-          )
-        }
-        return null
-      })}
+      {body}
+      <CiteCluster cites={cites} frames={frames} onCite={onCite} />
     </>
   )
 }
@@ -93,7 +172,7 @@ export function BlockView({
     return wrap(
       block.origin,
       <p {...attrs}>
-        <Inlines items={block.content} citations={citations} onCite={onCite} />
+        <Inlines items={block.content} citations={citations} onCite={onCite} frames={frames} />
       </p>,
     )
   }
@@ -102,7 +181,7 @@ export function BlockView({
       block.origin,
       <blockquote {...attrs}>
         <p>
-          <Inlines items={block.content} citations={citations} onCite={onCite} />
+          <Inlines items={block.content} citations={citations} onCite={onCite} frames={frames} />
         </p>
       </blockquote>,
     )
@@ -114,7 +193,7 @@ export function BlockView({
       <Tag {...attrs}>
         {(block.items ?? []).map((item) => (
           <li key={item.id}>
-            <Inlines items={item.content} citations={citations} onCite={onCite} />
+            <Inlines items={item.content} citations={citations} onCite={onCite} frames={frames} />
           </li>
         ))}
       </Tag>,
@@ -167,6 +246,9 @@ export function BlockView({
               <span className="sr-only">放大 {formatClock(frame.time_ms)} 的画面</span>
               <span className="shot-host" data-carry-to={carry && index === 0 ? "true" : undefined}>
                 <FrameThumb frame={frame} onBroken={onBroken} />
+              </span>
+              <span className="shot-badge" aria-hidden="true">
+                {formatClock(frame.time_ms)}
               </span>
             </button>
           ))}

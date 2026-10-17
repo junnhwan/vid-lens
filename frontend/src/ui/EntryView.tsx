@@ -127,7 +127,7 @@ export function EntryView({
                 aria-invalid={error ? true : undefined}
                 onChange={(e) => onLink(e.target.value)}
               />
-              <button type="submit" className="btn primary" disabled={busy || !ready || !model}>
+              <button type="submit" className="btn primary" disabled={busy || !ready || !model} aria-describedby="wait-expect">
                 {busy ? "正在提交" : "开始解读"}
                 <span aria-hidden="true" className="nudge">
                   {" "}
@@ -135,6 +135,9 @@ export function EntryView({
                 </span>
               </button>
             </div>
+            <p className="entry-expect" id="wait-expect">
+              较长视频要几分钟。
+            </p>
             <div className="form-options">
               <ChoiceMenu
                 label="本次使用的模型"
@@ -176,23 +179,20 @@ export function EntryView({
                 </span>
                 <small>可选</small>
               </button>
-            </div>
-            <p className="model-help">
-              <span className="model-help-rule">三档都覆盖全片主要内容，详细档通常需要更多处理。</span>
-              模型来自其他非官方渠道，可能临时不可用。
-              <span className="model-note">
+              <span className="model-note model-note-end">
                 <button type="button" className="model-note-mark" aria-describedby="model-source-note">
                   <span aria-hidden="true">?</span>
-                  <span className="sr-only">关于这些模型</span>
+                  <span className="sr-only">关于模型和档位</span>
                 </button>
                 <span className="model-note-card" id="model-source-note" role="tooltip">
-                  名称对应模型系列。
+                  三档都覆盖全片主要内容，详细档通常需要更多处理。
                   <br />
-                  线路可能中断，回答质量也会起伏。
+                  模型来自其他非官方渠道，可能临时不可用。名称对应模型系列，线路可能中断，回答质量也会起伏。
+                  <br />
+                  提交后，此视频的解读与问答固定使用同一模型。
                 </span>
               </span>
-              <span className="model-help-rule">提交后，此视频的解读与问答固定使用同一模型。</span>
-            </p>
+            </div>
             <div className="fold" data-open={expanded ? "true" : "false"}>
               <div className="fold-clip">
                 <div className="purpose-field" id="purpose-field">
@@ -237,7 +237,7 @@ export function EntryView({
             <a className="sample-link" href="/example">
               查看真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
             </a>
-            <p className="entry-note">单条或单个分 P，较长视频要几分钟。</p>
+            <p className="entry-note">单条或单个分 P。</p>
           </div>
           <div className="proof">
             <p className="census">
@@ -289,7 +289,7 @@ export function EntryView({
               <span>循着画面，找到理解的焦点。</span>
               <span>01 — ∞</span>
             </div>
-            <DiskMeter capacity={capacity} state={capacityState} active={active} />
+            <DiskMeter capacity={capacity} state={capacityState} />
           </div>
         </aside>
       </div>

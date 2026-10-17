@@ -29,6 +29,7 @@ export function Lightbox({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
+  const stripRef = useRef<HTMLDivElement>(null)
   const originRef = useRef(origin)
   const closingRef = useRef(false)
   originRef.current = origin
@@ -75,6 +76,15 @@ export function Lightbox({
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   }, [open, index, frames.length, onIndex])
+
+  useEffect(() => {
+    if (!open) return
+    const strip = stripRef.current
+    const current = strip?.querySelector<HTMLElement>("[aria-current='true']")
+    if (!strip || !current) return
+    const left = current.offsetLeft - strip.clientWidth / 2 + current.clientWidth / 2
+    strip.scrollTo({ left: Math.max(0, left), behavior: prefersReduced() ? "auto" : "smooth" })
+  }, [open, index])
 
   function close() {
     if (closingRef.current) return
@@ -166,6 +176,22 @@ export function Lightbox({
               </button>
             </div>
           </div>
+          {frames.length > 1 ? (
+            <div className="lb-strip" ref={stripRef}>
+              {frames.map((item, itemIndex) => (
+                <button
+                  type="button"
+                  className="lb-thumb"
+                  key={item.id}
+                  aria-label={item.caption || formatClock(item.time_ms)}
+                  aria-current={itemIndex === index ? "true" : undefined}
+                  onClick={() => onIndex(itemIndex)}
+                >
+                  <FrameThumb frame={item} variant="thumbnail" onBroken={onBroken} />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </dialog>
