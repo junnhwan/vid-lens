@@ -113,7 +113,7 @@ func (s *Service) Run(ctx context.Context, v store.Export) error {
 				imagePaths[id] = fmt.Sprintf("images/frame-%03d%s", i+1, ext)
 			}
 		}
-		md, e := Markdown(a, model, purpose, imagePaths)
+		md, e := markdownVersion(a, model, purpose, imagePaths, v.RendererVersion)
 		if e != nil {
 			return e
 		}
@@ -189,7 +189,7 @@ func (s *Service) Run(ctx context.Context, v store.Export) error {
 			if e = write("sources.json", sources); e != nil {
 				return e
 			}
-			manifest, e := json.MarshalIndent(map[string]any{"format_version": 1, "renderer_version": RendererVersion, "article_content_sha256": hash(domain.JSON(a)), "files": entries}, "", "  ")
+			manifest, e := json.MarshalIndent(map[string]any{"format_version": 1, "renderer_version": v.RendererVersion, "article_content_sha256": hash(domain.JSON(a)), "files": entries}, "", "  ")
 			if e != nil {
 				return e
 			}

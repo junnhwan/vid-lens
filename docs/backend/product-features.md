@@ -26,6 +26,8 @@ Markdown contains the full published structure, captions and source links, with 
 
 Export copies have a 24-hour ready lifetime and a 64 MiB file/128-entry cap. Downloads and export creation are bounded by concurrency, time and storage budgets. Expiry affects the copy, not the article or formal images; a new export can be created later. Creating an export does not call models or regenerate the article.
 
+Renderer version 2 preserves concept-map parent relationships as nested Markdown lists with chapter anchors. New exports and latest-export discovery are keyed to the current renderer version, so a previous flat payload is not reused as a new hierarchical export. Specific older export downloads and idempotency replays remain available, and previously accepted version 1 work retains its renderer contract. Articles are unchanged.
+
 ## Optional web references
 
 Web supplementation is off by default and may be unavailable on a given instance. Each Q&A turn must explicitly send `allow_external_sources: true`; optional `reference_urls` supplies at most three known URLs. Read tools can only use registered reference IDs. If search is unavailable or its allowance is exhausted, video-only Q&A and permitted known-page reading remain available.

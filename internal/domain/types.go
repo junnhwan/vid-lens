@@ -312,6 +312,11 @@ type MindMap struct {
 	RootID string    `json:"root_id"`
 	Nodes  []MapNode `json:"nodes"`
 }
+
+// ExportRendererVersion identifies reusable offline payloads, independently of
+// the immutable article and the schema version of its content.
+const ExportRendererVersion = 2
+
 type Article struct {
 	DetailLevel          string              `json:"detail_level,omitempty"`
 	DetailPolicyRevision string              `json:"detail_policy_revision,omitempty"`

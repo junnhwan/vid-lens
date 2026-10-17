@@ -10,7 +10,7 @@ import (
 	"vidlens/internal/domain"
 )
 
-const RendererVersion = 1
+const RendererVersion = domain.ExportRendererVersion
 
 func escape(s string) string {
 	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;", "#", "\\#", "!", "\\!", "|", "\\|", "~", "\\~").Replace(s)
@@ -191,6 +191,13 @@ func escapedCells(in []string) []string {
 }
 func clock(ms int64) string { return fmt.Sprintf("%02d:%02d", ms/60000, ms/1000%60) }
 func Markdown(a domain.Article, model domain.GenerationModel, purpose string, images map[string]string) ([]byte, error) {
+	return markdownVersion(a, model, purpose, images, RendererVersion)
+}
+
+func markdownVersion(a domain.Article, model domain.GenerationModel, purpose string, images map[string]string, version int) ([]byte, error) {
+	if version != 1 && version != RendererVersion {
+		return nil, errors.New("unsupported export renderer version")
+	}
 	r := renderer{a: a, images: images, citations: map[string]int{}}
 	keys := make([]string, 0, len(a.Citations))
 	for id := range a.Citations {
@@ -234,8 +241,12 @@ func Markdown(a domain.Article, model domain.GenerationModel, purpose string, im
 	}
 	if a.MindMap != nil {
 		out.WriteString("## 文章导图\n\n")
-		for _, node := range a.MindMap.Nodes {
-			out.WriteString("- " + escape(node.Label) + "\n")
+		if version == 1 {
+			for _, node := range a.MindMap.Nodes {
+				out.WriteString("- " + escape(node.Label) + "\n")
+			}
+		} else if err := writeConceptMap(&out, *a.MindMap, a.Sections); err != nil {
+			return nil, err
 		}
 		out.WriteString("\n")
 	}
@@ -274,4 +285,62 @@ func Markdown(a domain.Article, model domain.GenerationModel, purpose string, im
 		out.WriteString("\n")
 	}
 	return []byte(out.String()), nil
+}
+
+func writeConceptMap(out *strings.Builder, tree domain.MindMap, sections []domain.Section) error {
+	if len(tree.Nodes) == 0 || len(tree.Nodes) > 256 {
+		return errors.New("invalid concept map size")
+	}
+	nodes := map[string]domain.MapNode{}
+	children := map[string][]domain.MapNode{}
+	for _, node := range tree.Nodes {
+		if node.ID == "" {
+			return errors.New("concept map node id is missing")
+		}
+		if _, exists := nodes[node.ID]; exists {
+			return errors.New("duplicate concept map node")
+		}
+		nodes[node.ID] = node
+		if node.ParentID != nil {
+			children[*node.ParentID] = append(children[*node.ParentID], node)
+		}
+	}
+	root, exists := nodes[tree.RootID]
+	if !exists || root.ParentID != nil {
+		return errors.New("invalid concept map root")
+	}
+	targets := map[string]int{}
+	for index, section := range sections {
+		targets[section.ID] = index + 1
+	}
+	seen := map[string]bool{}
+	var visit func(domain.MapNode, int) error
+	visit = func(node domain.MapNode, depth int) error {
+		if seen[node.ID] {
+			return errors.New("concept map cycle")
+		}
+		seen[node.ID] = true
+		label := escape(strings.Join(strings.Fields(node.Label), " "))
+		if node.SectionID != nil {
+			index, ok := targets[*node.SectionID]
+			if !ok {
+				return errors.New("concept map chapter target is missing")
+			}
+			label = fmt.Sprintf("[%s](#section-%d)", label, index)
+		}
+		out.WriteString(strings.Repeat("  ", depth) + "- " + label + "\n")
+		for _, child := range children[node.ID] {
+			if err := visit(child, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(root, 0); err != nil {
+		return err
+	}
+	if len(seen) != len(nodes) {
+		return errors.New("disconnected concept map")
+	}
+	return nil
 }

@@ -63,7 +63,7 @@ func (s *Store) CreateExport(ctx context.Context, session, request, format, key 
 			return domain.Err(400, "INVALID_ARGUMENT", "不支持这种导出格式。")
 		}
 		var id string
-		e = tx.QueryRow(ctx, `SELECT id FROM article_exports WHERE session_id=$1 AND request_id=$2 AND article_id=$3 AND format=$4 AND renderer_version=1 AND (status IN ('queued','running','retry_wait') AND deadline_at>now() OR status='ready' AND expires_at>now()) ORDER BY created_at DESC LIMIT 1`, session, request, *r.ArticleID, format).Scan(&id)
+		e = tx.QueryRow(ctx, `SELECT id FROM article_exports WHERE session_id=$1 AND request_id=$2 AND article_id=$3 AND format=$4 AND renderer_version=$5 AND (status IN ('queued','running','retry_wait') AND deadline_at>now() OR status='ready' AND expires_at>now()) ORDER BY created_at DESC LIMIT 1`, session, request, *r.ArticleID, format, domain.ExportRendererVersion).Scan(&id)
 		if e == nil {
 			reused = true
 			a, e = remember(ctx, tx, scope, key, h, id, 86400)
@@ -125,7 +125,7 @@ func (s *Store) CreateExport(ctx context.Context, session, request, format, key 
 			}
 		}
 		id = domain.ID()
-		if _, e = tx.Exec(ctx, "INSERT INTO article_exports(id,session_id,request_id,article_id,format) VALUES($1,$2,$3,$4,$5)", id, session, request, *r.ArticleID, format); e != nil {
+		if _, e = tx.Exec(ctx, "INSERT INTO article_exports(id,session_id,request_id,article_id,format,renderer_version) VALUES($1,$2,$3,$4,$5,$6)", id, session, request, *r.ArticleID, format, domain.ExportRendererVersion); e != nil {
 			return e
 		}
 		if format == "markdown_zip" {
@@ -176,7 +176,7 @@ func (s *Store) LatestExport(ctx context.Context, session, request, format strin
 	}
 	_ = r
 	var id string
-	e = s.Pool.QueryRow(ctx, "SELECT id FROM article_exports WHERE session_id=$1 AND request_id=$2 AND ($3='' OR format=$3) ORDER BY created_at DESC LIMIT 1", session, request, format).Scan(&id)
+	e = s.Pool.QueryRow(ctx, "SELECT id FROM article_exports WHERE session_id=$1 AND request_id=$2 AND ($3='' OR format=$3) AND renderer_version=$4 ORDER BY created_at DESC LIMIT 1", session, request, format, domain.ExportRendererVersion).Scan(&id)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, nil
 	}
