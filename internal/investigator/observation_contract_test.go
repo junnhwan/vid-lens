@@ -19,7 +19,7 @@ func TestObservationContractAcceptsActivityMetadataAndRejectsUnknownFields(t *te
 	if !strings.Contains(string(domain.JSON(sc)), `"activity_title"`) {
 		t.Error("instruction metadata missing from actual tool schema")
 	}
-	if !strings.Contains(string(domain.JSON(sc)), `"maxItems":16`) || !strings.Contains(string(domain.JSON(sc)), `"maxLength":240`) {
+	if !strings.Contains(string(domain.JSON(sc)), `"maxItems":16`) || !strings.Contains(string(domain.JSON(sc)), `"maxLength":1024`) {
 		t.Fatal("observation bounds missing from transmitted schema")
 	}
 	args := `{"inspection_id":"overview","frame_ids":["frame"],"visible_facts":["合成蓝色画面"],"status":"bad","activity_title":"记录画面事实"}`
@@ -44,11 +44,18 @@ func TestObservationContractKeepsHistoricalSchemasAndBoundsLongRecords(t *testin
 	if strings.Contains(string(domain.JSON(sc)), `"activity_title"`) {
 		t.Fatal("historical observation schema changed")
 	}
-	if validObservationSize(observation{VisibleFacts: []string{strings.Repeat("字", 241)}}) {
+	if validObservationSize(observation{VisibleFacts: []string{strings.Repeat("字", 1025)}}) {
 		t.Fatal("long screenshot transcription accepted")
 	}
 	if !validObservationSize(observation{VisibleFacts: []string{"必要的合成画面事实"}}) {
 		t.Fatal("concise facts rejected")
+	}
+	oversized := observation{}
+	for i := 0; i < 16; i++ {
+		oversized.VisibleFacts = append(oversized.VisibleFacts, strings.Repeat("字", 1000))
+	}
+	if validObservationSize(oversized) {
+		t.Fatal("aggregate observation payload exceeds its durable capsule budget")
 	}
 }
 
@@ -57,5 +64,11 @@ func TestMalformedToolResponseIsNotPresentedAsReadyAction(t *testing.T) {
 	title, outcome := responseActivity(result)
 	if !strings.Contains(title, "纠正") || !strings.Contains(outcome, "尚未执行") {
 		t.Fatal(title, outcome)
+	}
+}
+
+func TestOrdinaryObservationDoesNotNeedAnotherModelCallForFourExtraCharacters(t *testing.T) {
+	if !validObservationSize(observation{VisibleFacts: []string{strings.Repeat("字", 244), strings.Repeat("字", 270)}}) {
+		t.Fatal("bounded ordinary facts unnecessarily require a new model response")
 	}
 }

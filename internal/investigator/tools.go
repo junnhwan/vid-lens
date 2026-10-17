@@ -528,7 +528,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 	if s.cp.HarnessRevision >= 5 {
 		if e := add(utils.InferEnhancedTool("record_observation", observationDescription, func(ctx context.Context, in pacedObservation) (*schema.ToolResult, error) {
 			if !validObservationSize(in.ObservationFields) {
-				return toolError("观察记录过长：每个事实/细节/冲突/未确认字段最多16项，每项最多240字符。请简洁记录必要事实；原始图片与全文来源仍保留，不要抄录整屏终端。")
+				return toolError("观察记录过长：每个事实/细节/冲突/未确认字段最多16项，每项最多1024字符，整个记录最多32KiB。请简洁记录必要事实；原始图片与全文来源仍保留，不要抄录整屏终端。")
 			}
 			return recordObservation(ctx, in.ObservationFields)
 		}, utils.WithSchemaModifier(observationSchema))); e != nil {

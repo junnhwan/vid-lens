@@ -594,7 +594,7 @@ func (s *session) finalizationError() error {
 	return domain.Err(422, "MODEL_RESULT_NOT_SUBMITTED", "模型结束时未正式提交结果；已取得的来源和草稿保留，可以重新尝试。")
 }
 func (s *session) resumeDraft(ctx context.Context) error {
-	msgs := []*schema.Message{schema.SystemMessage(instructions + draftInstructions), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "transcript": s.transcript}))), schema.UserMessage("这是用户明确重新尝试的草稿恢复。使用已保存的真实观察和章节继续，不必重新调查已经支持的事实。未验证内容仍须正式校验提交。")}
+	msgs := []*schema.Message{schema.SystemMessage(instructions + draftInstructions), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}))), schema.UserMessage("这是用户明确重新尝试的草稿恢复。使用已保存的真实观察和章节继续，不必重新调查已经支持的事实。未验证内容仍须正式校验提交。")}
 	// Include purpose again; it is frozen to the original request/model.
 	spec, err := s.engine.Store.GenerationForRun(ctx, s.claim.Run.ID)
 	if err != nil {
@@ -603,12 +603,18 @@ func (s *session) resumeDraft(ctx context.Context) error {
 	msgs[2].Content += "\n关注点：" + spec.Purpose
 	if s.cp.HarnessRevision > 0 && spec.DetailPolicy != nil {
 		if spec.DetailPolicy.ContentPlan {
-			s.cp.HarnessRevision = 3
+			s.cp.HarnessRevision = max(3, s.cp.HarnessRevision)
 		}
 		msgs[0].Content += harnessInstructions + "\n" + spec.DetailPolicy.Instruction
 		if spec.DetailPolicy.ContentPlan {
 			msgs[0].Content += contentPlanInstructions
 			msgs[0].Content += planRepairInstructions
+			if s.cp.HarnessRevision >= 4 {
+				msgs[0].Content += pacedHarnessInstructions
+			}
+			if s.cp.HarnessRevision >= 5 {
+				msgs[0].Content += observationBudgetInstructions
+			}
 		}
 		msgs[2].Content += "\n解读详细程度：" + spec.DetailLevel
 	}
