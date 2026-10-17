@@ -1,4 +1,5 @@
 import type { ActivityStep, Answer, ArticleResponse, GenerationModel } from "../contract/types"
+import { formatDuration, platformLabel } from "../contract/text"
 
 export interface ExampleQuestion {
   id: string
@@ -23,9 +24,36 @@ export const exampleChoices = [
   { id: "skills", title: "Skills v1.3，三个新技能", description: "从自动实现，到 PR 证据，再到会话复盘。", meta: "YouTube · 14:34", tag: "技能更新", cover: "/example/skills/frame-05.jpg" },
 ] as const
 
+export interface CatalogItem {
+  id: string
+  title: string
+  description: string
+  platform: string
+  duration_ms: number | null
+  cover: string
+}
+
+const exampleIdPattern = /^(?:workflow|skills|[a-f0-9]{32})$/
+
+export function exampleArchive(id: string): string {
+  return id === "workflow" || id === "skills" ? `/example/${id}.json` : `/api/v1/examples/${id}`
+}
+
+export function catalogChoice(item: CatalogItem) {
+  return {
+    id: item.id,
+    title: item.title,
+    description: item.description,
+    meta: [platformLabel(item.platform), formatDuration(item.duration_ms)].filter(Boolean).join(" · "),
+    tag: "已发布",
+    cover: item.cover,
+  }
+}
+
 export function exampleRoute(search: string): { id: string; mode: ExampleMode; question: string | null } {
   const query = new URLSearchParams(search)
-  const id = exampleChoices.find((item) => item.id === query.get("video"))?.id ?? "workflow"
+  const requested = query.get("video") || ""
+  const id = exampleIdPattern.test(requested) ? requested : "workflow"
   const view = query.get("view")
   return { id, mode: view === "process" || view === "qa" ? view : "article", question: query.get("question") }
 }

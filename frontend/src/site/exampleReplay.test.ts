@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ActivityStep, Block, Citation } from "../contract/types"
-import { exampleChoices, exampleRoute, replaySteps, replayTimeline, type ExampleData } from "./exampleReplay"
+import { catalogChoice, exampleArchive, exampleChoices, exampleRoute, replaySteps, replayTimeline, type ExampleData } from "./exampleReplay"
 
 const archives = import.meta.glob("../../public/example/*.json", { eager: true, import: "default" }) as Record<string, ExampleData>
 const images = import.meta.glob("../../public/example/**/*.jpg")
@@ -10,6 +10,10 @@ describe("saved example playback", () => {
   it("resolves direct links and falls back to a known static example", () => {
     expect(exampleRoute("?video=skills&view=qa&question=frame")).toEqual({ id: "skills", mode: "qa", question: "frame" })
     expect(exampleRoute("?video=../../api&view=other")).toEqual({ id: "workflow", mode: "article", question: null })
+    expect(exampleRoute("?video=9280423ce43c85da9cc539a7576749a7&view=process")).toEqual({ id: "9280423ce43c85da9cc539a7576749a7", mode: "process", question: null })
+    expect(exampleArchive("workflow")).toBe("/example/workflow.json")
+    expect(exampleArchive("9280423ce43c85da9cc539a7576749a7")).toBe("/api/v1/examples/9280423ce43c85da9cc539a7576749a7")
+    expect(catalogChoice({ id: "9280423ce43c85da9cc539a7576749a7", title: "已发布", description: "第一节", platform: "youtube", duration_ms: null, cover: "" }).meta).toBe("YouTube")
   })
   it("does not reveal final evidence or final ASR progress during a replayed step", () => {
     const steps = examples[1].generation_steps

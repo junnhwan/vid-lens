@@ -13,8 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +52,9 @@ func (a *Server) Handler() http.Handler {
 	})
 	m.HandleFunc("POST /api/v1/session", a.session)
 	m.HandleFunc("GET /api/v1/site/stats", a.stats)
+	m.HandleFunc("GET /api/v1/examples", a.publicExamples)
+	m.HandleFunc("GET /api/v1/examples/{article}/frames/{frame}/content", a.publicExampleFrame)
+	m.HandleFunc("GET /api/v1/examples/{article}", a.publicExample)
 	m.HandleFunc("GET /api/v1/site/capacity", a.capacity)
 	m.HandleFunc("GET /api/v1/site/like", a.like)
 	m.HandleFunc("PUT /api/v1/site/like", a.like)
@@ -81,6 +82,8 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/admin/storage", a.storageSettings)
 	m.HandleFunc("GET /api/v1/admin/videos", a.managedVideos)
 	m.HandleFunc("DELETE /api/v1/admin/videos/{source}/media", a.deleteVideo)
+	m.HandleFunc("GET /api/v1/admin/examples", a.adminExamples)
+	m.HandleFunc("PUT /api/v1/admin/examples", a.saveExamples)
 	m.HandleFunc("GET /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("PUT /api/v1/admin/config", a.adminConfig)
 	m.HandleFunc("POST /api/v1/admin/config/test", a.adminTest)
@@ -407,27 +410,7 @@ func (a *Server) frameContent(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "图片暂不可读。"))
 		return
 	}
-	path := filepath.Join(a.Config.DataDir, filepath.Clean(asset.StorageKey))
-	if !strings.HasPrefix(path, a.Config.DataDir+string(os.PathSeparator)) {
-		a.problem(w, r, errors.New("invalid storage key"))
-		return
-	}
-	file, e := os.Open(path)
-	if e != nil {
-		if errors.Is(e, os.ErrNotExist) {
-			_ = a.Store.MarkMissingFrame(r.Context(), asset.ID)
-		}
-		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "图片暂不可读。"))
-		return
-	}
-	defer file.Close()
-	stat, e := file.Stat()
-	if e != nil {
-		a.problem(w, r, e)
-		return
-	}
-	w.Header().Set("Content-Type", asset.MIME)
-	http.ServeContent(w, r, asset.ID, stat.ModTime(), file)
+	a.serveStoredAsset(w, r, asset)
 }
 func (a *Server) conversation(w http.ResponseWriter, r *http.Request) {
 	ses, ok := a.auth(w, r)

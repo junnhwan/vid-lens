@@ -32,7 +32,7 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 		return v
 	}
 	visitor := do("POST", "/api/v1/session", "{}", "", nil).Cookies()[0]
-	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics", "/api/v1/admin/network-settings", "/api/v1/admin/storage", "/api/v1/admin/videos", "/api/v1/admin/runs/unknown/diagnostics"} {
+	for _, path := range []string{"/api/v1/admin/config", "/api/v1/admin/models", "/api/v1/admin/providers", "/api/v1/admin/status", "/api/v1/admin/diagnostics", "/api/v1/admin/network-settings", "/api/v1/admin/storage", "/api/v1/admin/videos", "/api/v1/admin/examples", "/api/v1/admin/runs/unknown/diagnostics"} {
 		if v := do("GET", path, "", "", visitor); v.StatusCode != 401 {
 			t.Fatalf("visitor accessed %s: %d", path, v.StatusCode)
 		}
@@ -63,6 +63,9 @@ func TestOwnerCookieIsIndependentAndAllAdminWritesRequireCSRF(t *testing.T) {
 	}
 	if v := do("DELETE", "/api/v1/admin/videos/unknown/media", `{"asset_ids":["unknown"]}`, "", owner); v.StatusCode != 403 {
 		t.Fatal("video deletion bypassed CSRF")
+	}
+	if v := do("PUT", "/api/v1/admin/examples", `{"article_ids":[]}`, "", owner); v.StatusCode != 403 {
+		t.Fatal("example selection bypassed CSRF")
 	}
 	if v := do("GET", "/api/v1/admin/models", "", "", owner); v.StatusCode != 200 {
 		t.Fatal("owner session inaccessible")

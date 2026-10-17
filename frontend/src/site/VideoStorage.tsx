@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
 import { diskRatio, formatDiskBytes } from "../contract/capacity"
+import { ExampleShowcase } from "./ExampleShowcase"
 
 interface Overview {
   settings: { revision: number; video_quota_bytes: number; image_quota_bytes: number }
@@ -100,6 +101,7 @@ export function VideoStorage({ api, onDirty, onAuthLost }: { api: HttpApi; onDir
   return <section className="video-storage" aria-busy={Boolean(busy)}>
     <header className="storage-heading"><div><p className="eyebrow">VIDEO ARCHIVE</p><h2>视频与存储</h2><p className="fine">全站访客处理过的视频。原视频由你决定何时清理。</p></div>
       <div className="storage-refresh"><span className="fine">{loadedAt ? `${loadedAt} 更新` : "正在读取"}</span><button className="btn quiet desk-pill" disabled={Boolean(busy) || Boolean(confirm)} onClick={reload}>{busy === "load" ? "正在读取…" : dirty ? "撤销并刷新" : "刷新列表"}</button></div></header>
+    <ExampleShowcase api={api} onAuthLost={onAuthLost} />
     {error ? <p className="management-message error" role="alert">{error}</p> : null}
     {notice ? <p className="management-message" role="status">{notice}</p> : null}
     {overview ? <>
