@@ -42,7 +42,7 @@ func (s *Store) Asset(ctx context.Context, id string) (domain.Asset, error) {
 	return one[domain.Asset](ctx, s.Pool, "SELECT to_jsonb(a) FROM media_assets a WHERE id=$1", id)
 }
 func (s *Store) Video(ctx context.Context, snapshot string) (domain.Asset, error) {
-	return one[domain.Asset](ctx, s.Pool, "SELECT to_jsonb(a) FROM media_assets a WHERE snapshot_id=$1 AND kind='video' AND state='ready' AND (expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=a.id AND (expires_at IS NULL OR expires_at>now()))) ORDER BY created_at DESC LIMIT 1", snapshot)
+	return one[domain.Asset](ctx, s.Pool, "SELECT to_jsonb(a) FROM media_assets a WHERE snapshot_id=$1 AND kind='video' AND state='ready' AND (expires_at IS NULL OR expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=a.id AND (expires_at IS NULL OR expires_at>now()))) ORDER BY created_at DESC LIMIT 1", snapshot)
 }
 func (s *Store) AddAsset(ctx context.Context, c domain.Claim, a domain.Asset) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error {
@@ -54,6 +54,9 @@ func (s *Store) AddAsset(ctx context.Context, c domain.Claim, a domain.Asset) er
 		}
 		if c.Run.SnapshotID != nil && !sameID(a.SnapshotID, c.Run.SnapshotID) {
 			return errors.New("asset snapshot mismatch")
+		}
+		if a.Kind == "video" || a.Kind == "audio" {
+			a.ExpiresAt = nil
 		}
 		if _, e := tx.Exec(ctx, "INSERT INTO media_assets(id,snapshot_id,source_id,run_id,kind,storage_key,sha256,mime,bytes,time_ms,requested_time_ms,width,height,caption,crop,replaces_frame_id,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)", a.ID, a.SnapshotID, a.SourceID, a.RunID, a.Kind, a.StorageKey, a.SHA256, a.MIME, a.Bytes, a.TimeMS, a.RequestedTimeMS, a.Width, a.Height, a.Caption, nullableCrop(a.Crop), a.ReplacesFrameID, a.ExpiresAt); e != nil {
 			return e
@@ -88,11 +91,7 @@ func (s *Store) Pin(ctx context.Context, c domain.Claim, asset string) error {
 	})
 }
 func (s *Store) TouchVideo(ctx context.Context, c domain.Claim, id string) error {
-	if e := s.Pin(ctx, c, id); e != nil {
-		return e
-	}
-	_, e := s.Pool.Exec(ctx, "UPDATE media_assets SET expires_at=LEAST(now()+interval '24 hours',created_at+interval '72 hours') WHERE id=$1 AND state='ready'", id)
-	return e
+	return s.Pin(ctx, c, id)
 }
 func (s *Store) FinishSource(ctx context.Context, c domain.Claim, snap domain.Snapshot, segments []domain.Segment, videoID string) (string, error) {
 	id := snap.ID

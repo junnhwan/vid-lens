@@ -7,14 +7,14 @@ import (
 	"vidlens/internal/domain"
 )
 
-func (s *Store) CleanupAssets(ctx context.Context, pressure bool) ([]domain.Asset, error) {
+func (s *Store) CleanupAssets(ctx context.Context, _ bool) ([]domain.Asset, error) {
 	var out []domain.Asset
 	e := s.Tx(ctx, func(tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, "DELETE FROM asset_refs WHERE expires_at<now()"); e != nil {
 			return e
 		}
 		var e error
-		out, e = many[domain.Asset](ctx, tx, "UPDATE media_assets SET state='deleting' WHERE id IN (SELECT a.id FROM media_assets a WHERE (state='deleting' OR state='ready' AND (expires_at<now() OR $1 AND kind IN ('video','audio'))) AND (delete_not_before IS NULL OR delete_not_before<now()) AND NOT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=a.id AND (expires_at IS NULL OR expires_at>now())) ORDER BY expires_at NULLS LAST LIMIT 100 FOR UPDATE) RETURNING to_jsonb(media_assets)", pressure)
+		out, e = many[domain.Asset](ctx, tx, "UPDATE media_assets SET state='deleting' WHERE id IN (SELECT a.id FROM media_assets a WHERE (state='deleting' OR state='ready' AND kind='frame' AND expires_at<now()) AND (delete_not_before IS NULL OR delete_not_before<now()) AND NOT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=a.id AND (expires_at IS NULL OR expires_at>now())) ORDER BY expires_at NULLS LAST LIMIT 100 FOR UPDATE) RETURNING to_jsonb(media_assets)")
 		return e
 	})
 	return out, e

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -16,12 +15,7 @@ func (s *Service) Cleanup(ctx context.Context) error {
 		return e
 	}
 	defer release()
-	var st syscall.Statfs_t
-	if e = syscall.Statfs(s.Config.DataDir, &st); e != nil {
-		return e
-	}
-	pressure := int64(st.Blocks-st.Bavail)*100/int64(st.Blocks) >= 80
-	assets, e := s.Store.CleanupAssets(ctx, pressure)
+	assets, e := s.Store.CleanupAssets(ctx, false)
 	if e != nil {
 		return e
 	}

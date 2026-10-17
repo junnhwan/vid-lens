@@ -15,11 +15,16 @@ func (a *Server) capacity(w http.ResponseWriter, r *http.Request) {
 	}
 	available := int64(disk.Bavail) * int64(disk.Bsize)
 	total := int64(disk.Blocks) * int64(disk.Bsize)
-	v, e := a.Store.DiskCapacity(r.Context(), available, total, a.Config.DiskStopPercent, a.Config.Profile.WorkspaceBytes)
+	_, p, e := a.Store.CurrentConfig(r.Context())
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=15")
+	v, e := a.Store.DiskCapacity(r.Context(), available, total, a.Config.DiskStopPercent, p.WorkspaceBytes)
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	a.json(w, 200, v)
 }

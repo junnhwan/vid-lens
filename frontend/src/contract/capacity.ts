@@ -1,24 +1,25 @@
 export interface SiteCapacity {
+  scope: "video_workspace"
   total_bytes: number
   available_bytes: number
   used_bytes: number
-  reserve_bytes: number
+  reserved_bytes: number
+  workspace_bytes: number
   ceiling_bytes: number
-  stop_percent: number
   accepting: boolean
   level: "open" | "tight" | "closed"
-  blocked_by?: "disk" | "media" | ""
 }
 
 export function formatDiskBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "—"
   const gib = bytes / (1024 * 1024 * 1024)
-  if (gib >= 100) return `${Math.round(gib)} GB`
-  if (gib >= 1) return `${trim(gib.toFixed(1))} GB`
+  if (gib >= 100) return `${Math.round(gib)} GiB`
+  if (gib >= 1) return `${trim(gib.toFixed(1))} GiB`
   const mib = bytes / (1024 * 1024)
-  if (mib >= 10) return `${Math.round(mib)} MB`
-  if (mib >= 1) return `${trim(mib.toFixed(1))} MB`
-  return `${Math.max(0, Math.round(bytes / 1024))} KB`
+  if (mib >= 10) return `${Math.round(mib)} MiB`
+  if (mib >= 1) return `${trim(mib.toFixed(1))} MiB`
+  if (bytes === 0) return "0 MiB"
+  return `${Math.max(1, Math.round(bytes / 1024))} KiB`
 }
 
 export function formatDiskPercent(used: number, total: number): string {
@@ -39,14 +40,13 @@ export function diskStatus(capacity: SiteCapacity): string {
 }
 
 export function diskNote(capacity: SiteCapacity): string {
-  if (capacity.level === "closed" && capacity.blocked_by === "media") return "临时文件已经占满，新的下载会先停下。"
-  if (capacity.level === "closed") return "余量不够留出工作区，新的下载会先停下。"
-  if (capacity.level === "tight") return "再放一条长视频，可能会碰到停线。"
-  return "下载前会留出工作区。过了刻度，新视频会先停下。"
+  if (capacity.level === "closed") return "暂时无法准备新素材，等待站长清理或增加可用空间。"
+  if (capacity.level === "tight") return "视频专用空间余量不多，下载前会先检查容量。"
+  return "视频与处理素材的专用配额，下载前预留工作空间。"
 }
 
 export function diskLabel(capacity: SiteCapacity): string {
-  return `服务器磁盘，已用 ${formatDiskPercent(capacity.used_bytes, capacity.total_bytes)}%，可用 ${formatDiskBytes(capacity.available_bytes)}，${diskStatus(capacity)}。${diskNote(capacity)}`
+  return `视频工作区，已用 ${formatDiskPercent(capacity.used_bytes, capacity.total_bytes)}%，剩余配额 ${formatDiskBytes(capacity.available_bytes)}，任务预留 ${formatDiskBytes(capacity.reserved_bytes)}，${diskStatus(capacity)}。${diskNote(capacity)}`
 }
 
 function trim(value: string): string {

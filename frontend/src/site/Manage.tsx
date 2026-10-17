@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { NetworkSettings } from "./NetworkSettings"
+import { VideoStorage } from "./VideoStorage"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
 import { canReplay, newIdempotencyKey, pendingWrite, rememberWrite, forgetWrite, memoryStore } from "../api/writes"
@@ -114,6 +115,7 @@ const sections = [
   ["providers", "供应商"],
   ["diagnostics", "缓存与用量"],
   ["network", "联网搜索"],
+  ["videos", "视频与存储"],
 ] as const
 const usagePageSize = 20
 const proxyOptions: ChoiceOption[] = [
@@ -637,7 +639,7 @@ export function Manage() {
               VIDLENS / OWNER DESK
             </p>
             <h1>{auth ? "站长管理" : "站长登录"}</h1>
-            <p>{auth ? "配置模型、供应商和网络补充，查看实际用量。" : "管理供应商、模型、联网搜索与运行诊断。"}</p>
+            <p>{auth ? "管理视频与存储，配置模型与联网，查看实际用量。" : "管理视频、供应商、模型、联网搜索与运行诊断。"}</p>
           </div>
           {auth ? (
             <button
@@ -733,7 +735,9 @@ export function Manage() {
               </p>
             ) : null}
             <div className="desk-stage" key={section}>
-            {section === "network" ? (
+            {section === "videos" ? (
+              <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+            ) : section === "network" ? (
               <NetworkSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "providers" ? (
               <div className="manage-columns">

@@ -85,6 +85,9 @@ func (s *Service) own(ctx context.Context, c domain.Claim, path, kind, mime stri
 	}
 	now := time.Now().UTC()
 	a := domain.Asset{ID: id, SnapshotID: snapshot, SourceID: c.Run.SourceID, RunID: c.Run.ID, Kind: kind, StorageKey: key, SHA256: hex.EncodeToString(h.Sum(nil)), MIME: mime, Bytes: n, State: "ready", CreatedAt: now, ExpiresAt: domain.Ptr(now.Add(expiry))}
+	if kind == "video" || kind == "audio" {
+		a.ExpiresAt = nil
+	}
 	return a, nil
 }
 func (s *Service) ReadImage(ctx context.Context, c domain.Claim, id string) (domain.Asset, []byte, error) {

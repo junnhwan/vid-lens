@@ -6,8 +6,9 @@ import (
 	"vidlens/internal/domain"
 )
 
-// IncomingFrameBytes is reserved with the download workspace before a video is fetched.
 const IncomingFrameBytes int64 = 20 << 20
+const DefaultVideoQuota int64 = 10 << 30
+const DefaultImageQuota int64 = 5 << 30
 
 type storageLoad struct {
 	usedTemp, usedImages   int64
@@ -16,36 +17,47 @@ type storageLoad struct {
 	ownTemp, ownImages     int64
 	temp, images           int64
 	available, total       int64
+	videoQuota, imageQuota int64
 	stop                   int
 }
 
-// DiskCapacity is the public snapshot of the volume that holds runtime data.
-// CeilingBytes is the used-byte mark at which another download would be refused.
+// DiskCapacity exposes only VidLens's logical allocation. Host disk sizes,
+// other applications' usage and system safety margins never leave the server.
 type DiskCapacity struct {
+	Scope          string `json:"scope"`
 	TotalBytes     int64  `json:"total_bytes"`
 	AvailableBytes int64  `json:"available_bytes"`
 	UsedBytes      int64  `json:"used_bytes"`
-	ReserveBytes   int64  `json:"reserve_bytes"`
+	ReservedBytes  int64  `json:"reserved_bytes"`
+	WorkspaceBytes int64  `json:"workspace_bytes"`
 	CeilingBytes   int64  `json:"ceiling_bytes"`
-	StopPercent    int    `json:"stop_percent"`
 	Accepting      bool   `json:"accepting"`
 	Level          string `json:"level"`
-	BlockedBy      string `json:"blocked_by,omitempty"`
+}
+
+func storageLedger(ctx context.Context, q Querier, own string) (storageLoad, error) {
+	var l storageLoad
+	e := q.QueryRow(ctx, `
+	 SELECT
+	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE kind IN ('video','audio') AND state IN ('ready','deleting','unavailable')),0),
+	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE kind='frame' AND state IN ('ready','deleting','unavailable')),0),
+	 COALESCE((SELECT sum(GREATEST(0,r.temp_bytes-COALESCE(a.temp,0))) FROM storage_reservations r LEFT JOIN (SELECT run_id,sum(bytes) FILTER(WHERE kind IN ('video','audio')) AS temp FROM media_assets WHERE state IN ('ready','deleting','unavailable') GROUP BY run_id) a ON a.run_id=r.run_id WHERE r.run_id<>$1 AND r.expires_at>now()),0),
+	 COALESCE((SELECT sum(GREATEST(0,r.image_bytes-COALESCE(a.images,0))) FROM storage_reservations r LEFT JOIN (SELECT run_id,sum(bytes) FILTER(WHERE kind='frame') AS images FROM media_assets WHERE state IN ('ready','deleting','unavailable') GROUP BY run_id) a ON a.run_id=r.run_id WHERE r.run_id<>$1 AND r.expires_at>now()),0),
+	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE run_id=$1 AND kind IN ('video','audio') AND state IN ('ready','deleting','unavailable')),0),
+	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE run_id=$1 AND kind='frame' AND state IN ('ready','deleting','unavailable')),0),
+	 COALESCE((SELECT sum(bytes) FROM article_exports WHERE NOT file_deleted AND storage_key IS NOT NULL),0),
+	 COALESCE((SELECT sum(GREATEST(0,67108864-COALESCE(bytes,0))) FROM article_exports WHERE NOT file_deleted AND status IN ('queued','running','retry_wait')),0),
+	 video_quota_bytes,image_quota_bytes FROM storage_settings WHERE singleton`, own).Scan(
+		&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.ownTemp, &l.ownImages, &l.exports, &l.exportPending, &l.videoQuota, &l.imageQuota)
+	return l, e
 }
 
 func (s *Store) DiskCapacity(ctx context.Context, available, total int64, stop int, workspace int64) (DiskCapacity, error) {
 	if total <= 0 {
-		return DiskCapacity{}, domain.Err(503, "SERVICE_UNAVAILABLE", "磁盘状态暂时读不到。")
+		return DiskCapacity{}, domain.Err(503, "SERVICE_UNAVAILABLE", "视频存储状态暂时读不到。")
 	}
-	var l storageLoad
-	if e := s.Pool.QueryRow(ctx, `
-		SELECT
-			COALESCE((SELECT sum(bytes) FILTER (WHERE kind IN ('video','audio')) FROM media_assets WHERE state IN ('ready','deleting')),0),
-			COALESCE((SELECT sum(bytes) FILTER (WHERE kind='frame') FROM media_assets WHERE state IN ('ready','deleting')),0),
-			COALESCE((SELECT sum(GREATEST(0,r.temp_bytes-COALESCE(a.temp,0))) FROM storage_reservations r LEFT JOIN (SELECT run_id,sum(bytes) FILTER (WHERE kind IN ('video','audio')) AS temp,sum(bytes) FILTER (WHERE kind='frame') AS images FROM media_assets WHERE state IN ('ready','deleting') GROUP BY run_id) a ON a.run_id=r.run_id WHERE r.expires_at>now()),0),
-			COALESCE((SELECT sum(GREATEST(0,r.image_bytes-COALESCE(a.images,0))) FROM storage_reservations r LEFT JOIN (SELECT run_id,sum(bytes) FILTER (WHERE kind IN ('video','audio')) AS temp,sum(bytes) FILTER (WHERE kind='frame') AS images FROM media_assets WHERE state IN ('ready','deleting') GROUP BY run_id) a ON a.run_id=r.run_id WHERE r.expires_at>now()),0),
-			COALESCE((SELECT sum(bytes) FILTER (WHERE storage_key IS NOT NULL) FROM article_exports WHERE NOT file_deleted),0),
-			COALESCE((SELECT sum(67108864) FILTER (WHERE status IN ('queued','running','retry_wait')) FROM article_exports WHERE NOT file_deleted),0)`).Scan(&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.exports, &l.exportPending); e != nil {
+	l, e := storageLedger(ctx, s.Pool, "")
+	if e != nil {
 		return DiskCapacity{}, e
 	}
 	l.available, l.total, l.stop = available, total, stop
@@ -54,25 +66,33 @@ func (s *Store) DiskCapacity(ctx context.Context, available, total int64, stop i
 }
 
 func admitStorage(l storageLoad) error {
-	if storageBlocked(l) {
-		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "磁盘可用容量不足，暂不能准备新素材。")
+	disk, media := storageLimits(l)
+	if disk || media {
+		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "视频工作区余量不足，请等待站长清理素材或增加配额。")
 	}
 	return nil
 }
 
-func storageBlocked(l storageLoad) bool {
-	disk, media := storageLimits(l)
-	return disk || media
-}
-
 func storageLimits(l storageLoad) (disk, media bool) {
 	extra := storageExtra(l)
-	reserve := diskFloor(l.total, l.stop)
 	incomingTemp := max(int64(0), l.temp-l.ownTemp)
 	incomingImages := max(int64(0), l.images-l.ownImages)
-	media = l.usedTemp+l.exports+l.exportPending+l.resTemp+incomingTemp > 10<<30 || l.usedImages+l.resImages+incomingImages > 5<<30
-	disk = l.available-extra < reserve || (l.total-l.available+extra)*100 > l.total*int64(l.stop)
+	media = l.usedTemp+l.exports+l.exportPending+l.resTemp+incomingTemp > videoLimit(l) || l.usedImages+l.resImages+incomingImages > imageLimit(l)
+	disk = l.total <= 0 || l.available-extra < diskFloor(l.total, l.stop) || (l.total-l.available+extra)*100 > l.total*int64(l.stop)
 	return disk, media
+}
+
+func videoLimit(l storageLoad) int64 {
+	if l.videoQuota > 0 {
+		return l.videoQuota
+	}
+	return DefaultVideoQuota
+}
+func imageLimit(l storageLoad) int64 {
+	if l.imageQuota > 0 {
+		return l.imageQuota
+	}
+	return DefaultImageQuota
 }
 
 func storageExtra(l storageLoad) int64 {
@@ -88,49 +108,18 @@ func diskFloor(total int64, stop int) int64 {
 }
 
 func buildCapacity(l storageLoad) DiskCapacity {
-	extra := storageExtra(l)
-	reserve := diskFloor(l.total, l.stop)
-	ceiling := min(l.total-extra-reserve, l.total*int64(l.stop)/100-extra)
-	if ceiling < 0 {
-		ceiling = 0
-	}
-	if l.total > 0 && ceiling > l.total {
-		ceiling = l.total
-	}
-	used := l.total - l.available
-	if used < 0 {
-		used = 0
-	}
+	quota := videoLimit(l)
+	used, reserved := l.usedTemp+l.exports, l.resTemp+l.exportPending
+	available := max(int64(0), quota-used-reserved)
 	disk, media := storageLimits(l)
-	accepting := !disk && !media && l.total > 0
+	accepting := !disk && !media
 	level := "open"
-	incoming := max(int64(0), l.temp-l.ownTemp) + max(int64(0), l.images-l.ownImages)
 	if !accepting {
 		level = "closed"
-	} else if ceiling-used < incoming {
+	} else if available-l.temp < l.temp {
 		level = "tight"
 	}
-	blocked := ""
-	if !accepting {
-		if disk {
-			blocked = "disk"
-		} else if media {
-			blocked = "media"
-		}
-	}
-	available := l.available
-	if available < 0 {
-		available = 0
-	}
-	return DiskCapacity{
-		TotalBytes:     l.total,
-		AvailableBytes: available,
-		UsedBytes:      used,
-		ReserveBytes:   reserve,
-		CeilingBytes:   ceiling,
-		StopPercent:    l.stop,
-		Accepting:      accepting,
-		Level:          level,
-		BlockedBy:      blocked,
-	}
+	return DiskCapacity{Scope: "video_workspace", TotalBytes: quota, UsedBytes: used,
+		ReservedBytes: reserved, AvailableBytes: available, WorkspaceBytes: l.temp,
+		CeilingBytes: max(int64(0), quota-reserved-l.temp), Accepting: accepting, Level: level}
 }

@@ -157,7 +157,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		var runID, status string
 		e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.prepare' AND work_key=$1 AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')", work).Scan(&runID, &status)
 		if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
-			e = tx.QueryRow(ctx, `SELECT r.id,r.status FROM job_runs r WHERE r.kind='source.prepare' AND r.work_key=$1 AND r.status='succeeded' AND EXISTS(SELECT 1 FROM media_assets a WHERE a.snapshot_id=r.result_id AND a.kind='video' AND a.state='ready' AND (a.expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs ar WHERE ar.asset_id=a.id AND (ar.expires_at IS NULL OR ar.expires_at>now())))) ORDER BY r.updated_at DESC LIMIT 1`, work).Scan(&runID, &status)
+			e = tx.QueryRow(ctx, `SELECT r.id,r.status FROM job_runs r WHERE r.kind='source.prepare' AND r.work_key=$1 AND r.status='succeeded' AND EXISTS(SELECT 1 FROM media_assets a WHERE a.snapshot_id=r.result_id AND a.kind='video' AND a.state='ready' AND (a.expires_at IS NULL OR a.expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs ar WHERE ar.asset_id=a.id AND (ar.expires_at IS NULL OR ar.expires_at>now())))) ORDER BY r.updated_at DESC LIMIT 1`, work).Scan(&runID, &status)
 		}
 		reuse := "pending"
 		deadline := time.Now().Add(time.Duration(p.GenerationSeconds) * time.Second)

@@ -41,7 +41,7 @@ A valid visual question can depend on one shared `source.restore`. It releases t
 
 Separate generation, interactive and maintenance pools preserve a Q&A slot. Download, FFmpeg and ordinary/interactive AI lanes use Redis owner leases with PostgreSQL leases as the final fence. Cache entries are small, collision-checked, expiring indices in a fixed slot set; bytes/media/conversations are not cached in Redis. Capacity is reserved in PostgreSQL before expensive work and checked against real disk availability.
 
-Cleanup marks an unpinned expired asset `deleting` under the same transaction order used for new pins. Physical deletion occurs outside the transaction and can resume from `deleting`. Run/checkpoint pins outlive an attempt; published image pins have article lifetime. Answer/history/diagnostic retention is separate. Orphan cleanup only visits the backend's own `work`/`assets` roots and preserves active runs.
+Cleanup marks an unpinned expired frame `deleting` under the same transaction order used for new pins. Original video/audio assets are retained until an explicit owner cleanup; disk pressure never automatically removes them. Physical deletion occurs outside the transaction and can resume from `deleting`. Run/checkpoint pins outlive an attempt; published image pins have article lifetime. Answer/history/diagnostic retention is separate. Orphan cleanup only visits the backend's own `work`/`assets` roots and preserves active runs.
 
 The Go runtime applies a soft heap limit; FFmpeg threads and child RSS are bounded/observed. The Compose file supplies process-group memory limits for a containerized deployment. Resource defaults do not constitute a server capacity or quality benchmark.
 

@@ -34,48 +34,37 @@ func TestAdmitStorageKeepsStopPercentBoundary(t *testing.T) {
 	}
 }
 
-func TestBuildCapacityUsesEarlierFloorWhenStopIsLooser(t *testing.T) {
-	total := int64(40) << 30
-	workspace := int64(3) << 30
-	extra := workspace + IncomingFrameBytes
-	l := storageLoad{available: total, total: total, stop: 95, temp: workspace, images: IncomingFrameBytes}
+func TestPublicCapacityOnlyDescribesServiceQuota(t *testing.T) {
+	l := storageLoad{available: 100 << 30, total: 200 << 30, stop: 85, temp: 3 << 30, images: IncomingFrameBytes, usedTemp: 1 << 30, exports: 64 << 20, resTemp: 2 << 30, videoQuota: 12 << 30}
 	view := buildCapacity(l)
-	want := total - extra - (5 << 30)
-	if view.CeilingBytes != want {
-		t.Fatalf("ceiling = %d, want %d", view.CeilingBytes, want)
+	if view.TotalBytes != 12<<30 || view.UsedBytes != (1<<30)+(64<<20) || view.ReservedBytes != 2<<30 || view.AvailableBytes != (9<<30)-(64<<20) || view.Scope != "video_workspace" {
+		t.Fatalf("wrong quota: %+v", view)
 	}
-	if !view.Accepting || view.Level != "open" || view.BlockedBy != "" {
-		t.Fatalf("empty volume should accept, got %+v", view)
+	l.total, l.available = 1000<<30, 900<<30
+	if other := buildCapacity(l); other != view {
+		t.Fatalf("host sizes escaped: %+v %+v", view, other)
 	}
 }
-
 func TestBuildCapacityClosesOnMediaLedgerBeforeDisk(t *testing.T) {
-	total := int64(200) << 30
-	workspace := int64(3) << 30
-	l := storageLoad{
-		usedTemp:  (10 << 30) - workspace + 1,
-		available: total,
-		total:     total,
-		stop:      85,
-		temp:      workspace,
-		images:    IncomingFrameBytes,
-	}
+	l := storageLoad{usedTemp: (10 << 30) - (3 << 30) + 1, available: 200 << 30, total: 200 << 30, stop: 85, temp: 3 << 30, images: IncomingFrameBytes}
 	view := buildCapacity(l)
-	if view.Accepting || view.Level != "closed" || view.BlockedBy != "media" {
-		t.Fatalf("full temporary ledger should close without blaming the volume, got %+v", view)
+	if view.Accepting || view.Level != "closed" {
+		t.Fatalf("full ledger accepted: %+v", view)
+	}
+	l.videoQuota = 20 << 30
+	if other := buildCapacity(l); !other.Accepting {
+		t.Fatalf("updated quota not applied: %+v", other)
 	}
 }
-
-func TestBuildCapacityTightensNearTheNextDownload(t *testing.T) {
-	total := int64(40) << 30
-	workspace := int64(3) << 30
-	extra := workspace + IncomingFrameBytes
-	reserve := diskFloor(total, 85)
-	ceiling := total - extra - reserve
-	used := ceiling - workspace/2
-	l := storageLoad{available: total - used, total: total, stop: 85, temp: workspace, images: IncomingFrameBytes}
+func TestBuildCapacityPreservesHostGuardWithoutExposingHostBytes(t *testing.T) {
+	l := storageLoad{available: 4 << 30, total: 40 << 30, stop: 85, temp: 3 << 30, images: IncomingFrameBytes}
 	view := buildCapacity(l)
-	if !view.Accepting || view.Level != "tight" {
-		t.Fatalf("less than one workspace before the line should be tight, got %+v", view)
+	if view.Accepting || view.TotalBytes != DefaultVideoQuota || view.AvailableBytes != DefaultVideoQuota || view.Level != "closed" {
+		t.Fatalf("unsafe or leaked capacity: %+v", view)
+	}
+	l.available = 30 << 30
+	l.usedTemp = 5 << 30
+	if v := buildCapacity(l); !v.Accepting || v.Level != "tight" {
+		t.Fatalf("near quota: %+v", v)
 	}
 }

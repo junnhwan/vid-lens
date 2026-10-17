@@ -86,23 +86,16 @@ func (s *Store) CreateExport(ctx context.Context, session, request, format, key 
 		if reserved+ExportMaxBytes > ExportStorageBytes {
 			return domain.Err(429, "ADMISSION_LIMITED", "导出副本空间暂时已满。")
 		}
-		var media, pending int64
-		if e = tx.QueryRow(ctx, "SELECT COALESCE(sum(bytes),0) FROM media_assets WHERE state IN ('ready','deleting') AND kind IN ('video','audio')").Scan(&media); e != nil {
+		load, e := storageLedger(ctx, tx, "")
+		if e != nil {
 			return e
 		}
-		if e = tx.QueryRow(ctx, "SELECT COALESCE(sum(GREATEST(0,r.temp_bytes-COALESCE(a.bytes,0))+r.image_bytes),0) FROM storage_reservations r LEFT JOIN (SELECT run_id,sum(bytes) AS bytes FROM media_assets WHERE state IN ('ready','deleting') AND kind IN ('video','audio') GROUP BY run_id) a ON a.run_id=r.run_id WHERE r.expires_at>now()").Scan(&pending); e != nil {
-			return e
-		}
-		if media+pending+reserved+ExportMaxBytes > 10<<30 {
+		if load.usedTemp+load.exports+load.resTemp+load.exportPending+ExportMaxBytes > videoLimit(load) {
 			return domain.Err(429, "ADMISSION_LIMITED", "临时素材与导出空间暂时已满。")
 		}
 		if len(disk) > 0 {
 			d := disk[0]
-			var exportPending int64
-			if e = tx.QueryRow(ctx, "SELECT count(*)*67108864 FROM article_exports WHERE status IN ('queued','running','retry_wait')").Scan(&exportPending); e != nil {
-				return e
-			}
-			extra := pending + exportPending + ExportMaxBytes
+			extra := load.resTemp + load.resImages + load.exportPending + ExportMaxBytes
 			reserve := max(int64(5<<30), d.Total*15/100)
 			if d.StopPercent > 85 {
 				reserve = 5 << 30
