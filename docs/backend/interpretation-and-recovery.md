@@ -27,7 +27,9 @@ Rejected candidates stay outside the publishable `candidate` operation. `patch_a
 
 ## Model budgets
 
-The model's configured maximum output is a ceiling, not an output target. Current policies cap investigation, chapter composition, repair, and final submission separately (8,192 / 32,768 / 16,384 / 4,096 tokens, further limited by the frozen model profile). Q&A uses the composition allowance rather than the concise article's optional investigation allowance.
+The model's configured maximum output is a ceiling, not an output target. New article policies (`interpretation-2026-10-17-v5`) cap investigation, chapter composition, repair, and final submission separately (8,192 / 16,384 / 8,192 / 2,048 tokens, further limited by the frozen model profile). Q&A uses the composition allowance rather than the concise article's optional investigation allowance. Existing runs and explicit retries retain their frozen policy.
+
+Optional article investigation enters wrap-up after 4 / 6 / 10 logical calls or 120 / 240 / 480 seconds of cumulative model-response time for concise / standard / detailed, or when at most eight calls remain. These are prompts to prioritize writing and limitations, not whole-task deadlines or permission to bypass outstanding critical evidence and final validation. Phase-specific tool schemas reduce irrelevant actions; a rejected draft retains the exact read and repair tools needed to address its validation errors.
 
 Model profiles define `input_chars_limit` and `context_tokens` independently of output. Zero context tokens means unknown capacity. For imported combined-character profiles, an unset input limit preserves their previous effective allowance, `max_input_chars - 4 * max_output_tokens`; the selected phase's output no longer repeatedly consumes that envelope. Legacy checkpoints keep their previous path.
 

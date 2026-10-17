@@ -22,6 +22,12 @@ VidLens is a video reading tool for the desktop Web. Paste a Bilibili or YouTube
 
 Follow the steps in a tutorial, unpack an idea from a talk, or return to a frame to examine a detail. Keep reading beyond the summary.
 
+## Which videos work best
+
+Technical explanations, science explainers, courses, tutorials, and clearly narrated knowledge-sharing videos are the best fit. A coherent topic, subtitles or transcription carrying the main information, and visuals that explain concepts, steps, or examples make it easier to produce a source-linked article.
+
+Music, scenery, and montage videos with little narration usually provide less information to organize. Sparse frame sampling also cannot fully convey continuous motion, timing, or a story's viewing experience. These are selection suggestions, not genre restrictions. Missing subtitles, inaccurate transcription, and unreadable visual details can still limit results.
+
 ## Try a real example
 
 Explore the [saved examples](https://vidlens.wanjune.qzz.io/example) before setting up an environment:
@@ -41,14 +47,14 @@ The articles, images, and answers are saved outputs from real runs. Processing a
 - **An Agent that sees the frames.** The model receives usable text and overview frames spanning the video, then retrieves source text, examines time windows and crops, and records observations before producing a result. Visual investigation sends actual image pixels to the model.
 - **Ask in words or start from a frame.** Continue asking about the current video, with text and visual evidence in the answer. Inspect images, return to the original timestamps, and see what could not be confirmed.
 - **Take the article with you.** Export Markdown or a ZIP containing original article images, source records, and a verification manifest. Exports omit private Q&A and full transcripts.
-- **Follow the processing steps.** SSE delivers public activity and final results. Execution state, tool outputs, and checkpoints are persisted so the browser can reload saved status and results.
+- **Follow the processing steps.** See the current plan, saved chapters, numbered model calls, and actual submission counts. Each new call keeps its own record; its current action can update while it runs. Tools and observations have separate records. Persisted checkpoints allow compatible explicit retries to continue from saved chapters.
 - **Optional web references.** Questions can use public webpages as supplementary sources when you opt in for that turn. Answers distinguish video evidence from web citations.
 
 Model and platform availability depend on the provider and deployment environment. Web references are off by default; availability depends on the current service.
 
 ## Screenshots
 
-Captured from the desktop Web interface on October 16, 2026. Article and Q&A screens use the saved real examples above. These screenshots predate the interpretation-depth selector. The application UI is currently in Chinese; the header uses the project's existing logo and wordmark.
+Captured from the desktop Web interface on October 16, 2026. Article and Q&A screens use the saved real examples above. These screenshots predate the interpretation-depth selector, execution plan, and home-page video-selection guidance. The application UI is currently in Chinese; the header uses the project's existing logo and wordmark.
 
 ### One link, with your focus
 

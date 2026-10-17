@@ -304,11 +304,24 @@ html:active-view-transition select {
 }
 .entry-deck {
   max-width: 28em;
-  margin: 0 0 32px;
+  margin: 0 0 18px;
   padding: 2px 0 2px 14px;
   border-left: 2px solid var(--teal);
   color: var(--ink);
   font: 500 16px/1.75 var(--serif);
+}
+.entry-fit {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 24px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.entry-fit strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
 }
 .field-label {
   display: block;

@@ -99,6 +99,10 @@ export function EntryView({
             读成一篇<span>图文。</span>
           </h1>
           <p className="entry-deck">循着原视频的文字与画面整理重点，留下可回看的出处，也留一点继续追问的空间。</p>
+          <p className="entry-fit" id="video-fit">
+            <strong>更适合技术讲解、科普、课程与教程。</strong>
+            <span>音乐、风景、纯剪辑等缺少讲述的视频，可整理的信息较少。</span>
+          </p>
           <form
             className="generation-form"
             onSubmit={(e) => {
@@ -118,6 +122,7 @@ export function EntryView({
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="粘贴 B 站或 YouTube 视频链接"
+                aria-describedby="video-fit"
                 value={link}
                 aria-invalid={error ? true : undefined}
                 onChange={(e) => onLink(e.target.value)}
