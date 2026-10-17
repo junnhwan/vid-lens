@@ -1,5 +1,18 @@
-import type { ActivityPage, ActivityStep } from "./types"
+import type { ActivityPage, ActivityStep, ActivitySummary, RequestBody } from "./types"
 import { mergeSteps } from "./activity"
+
+type HistoryOwner = { request: Pick<RequestBody, "id" | "retry_of_id">; activity: Pick<ActivitySummary, "history_url"> }
+export async function lineageHistoryUrls(view: HistoryOwner, read: (id: string) => Promise<HistoryOwner>): Promise<string[]> {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  let current = view
+  for (let depth = 0; ; depth += 1) {
+    if (depth >= 40 || seen.has(current.request.id)) throw new Error("较早过程的关联记录不完整，请单独打开较早的请求查看。")
+    seen.add(current.request.id); urls.push(current.activity.history_url)
+    if (!current.request.retry_of_id) return urls
+    current = await read(current.request.retry_of_id)
+  }
+}
 
 export async function loadActivityHistory(urls: string[], read: (url: string, before: string | null) => Promise<ActivityPage>): Promise<ActivityStep[]> {
   let result: ActivityStep[] = []

@@ -2,7 +2,9 @@ package media
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,6 +23,27 @@ func fakeExtractor(t *testing.T, body string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+}
+
+func TestExtractorLargeMetadataIsCompleteAndOverflowIsExplicit(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "metadata.json")
+	payload := []byte(`{"id":"fixture","title":"Many caption languages","extra":"` + strings.Repeat("x", 12<<20) + `"}`)
+	if err := os.WriteFile(file, payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fakeExtractor(t, fmt.Sprintf("exec /bin/cat %q\n", file))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if raw, err := command(ctx, "yt-dlp", nil, "", 0, 0); err == nil || len(raw) > 0 {
+		t.Fatal("ordinary stdout silently truncated metadata", len(raw), err)
+	}
+	raw, err := commandOutputLimit(ctx, "yt-dlp", nil, "", 0, 0, 32<<20)
+	if err != nil || len(raw) != len(payload) || !json.Valid(raw) {
+		t.Fatal("complete metadata not retained", len(raw), err)
+	}
+	if raw, err = commandOutputLimit(ctx, "yt-dlp", nil, "", 0, 0, 1<<20); err == nil || len(raw) > 0 {
+		t.Fatal("overflow used partial metadata", len(raw), err)
+	}
 }
 
 func TestExtractorArgumentsNeverUseOwnerPlatformCookies(t *testing.T) {

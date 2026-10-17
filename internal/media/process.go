@@ -17,19 +17,26 @@ import (
 )
 
 type boundedBuffer struct {
-	mu  sync.Mutex
-	b   bytes.Buffer
-	max int
+	mu    sync.Mutex
+	b     bytes.Buffer
+	max   int
+	total int64
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	n := len(p)
+	b.total += int64(n)
 	if b.b.Len() < b.max {
 		_, _ = b.b.Write(p[:min(n, b.max-b.b.Len())])
 	}
 	return n, nil
+}
+func (b *boundedBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.total > int64(b.max)
 }
 func (b *boundedBuffer) Bytes() []byte {
 	b.mu.Lock()
@@ -58,6 +65,14 @@ func mediaCommandFailure(name string, stderr []byte, fallback string) error {
 }
 
 func commandLogged(ctx context.Context, name string, args []string, dir string, quota int64, stall time.Duration, log *boundedBuffer) ([]byte, error) {
+	return commandOutputLogged(ctx, name, args, dir, quota, stall, log, 4<<20)
+}
+
+func commandOutputLimit(ctx context.Context, name string, args []string, dir string, quota int64, stall time.Duration, limit int) ([]byte, error) {
+	return commandOutputLogged(ctx, name, args, dir, quota, stall, nil, limit)
+}
+
+func commandOutputLogged(ctx context.Context, name string, args []string, dir string, quota int64, stall time.Duration, log *boundedBuffer, limit int) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -69,7 +84,7 @@ func commandLogged(ctx context.Context, name string, args []string, dir string, 
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 5 * time.Second
-	out := &boundedBuffer{max: 4 << 20}
+	out := &boundedBuffer{max: limit}
 	stderr := log
 	if stderr == nil {
 		stderr = &boundedBuffer{max: 4096}
@@ -97,6 +112,9 @@ func commandLogged(ctx context.Context, name string, args []string, dir string, 
 			}
 			if e != nil {
 				return nil, mediaCommandFailure(name, stderr.Bytes(), "媒体工具未能处理这个来源。")
+			}
+			if out.Truncated() {
+				return nil, domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频来源信息超过安全读取上限，未使用截断内容继续处理。")
 			}
 			return out.Bytes(), nil
 		case <-tick.C:

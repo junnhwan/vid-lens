@@ -203,14 +203,19 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		}
 		subctx, cancel := context.WithTimeout(mctx, 30*time.Second)
 		a := append(s.ytdlpArgs(ident.URL), "--dump-single-json", "--skip-download", ident.URL)
-		raw, e := command(subctx, "yt-dlp", a, "", 0, 0)
+		// Many automatic-caption languages carry signed URLs for several
+		// formats. Real metadata can exceed 10MiB; ordinary tool stdout stays 4MiB.
+		raw, e := commandOutputLimit(subctx, "yt-dlp", a, "", 0, 0, 32<<20)
 		cancel()
 		release()
 		if e != nil {
 			return e
 		}
 		if json.Unmarshal(raw, &meta) != nil {
-			return errors.New("invalid extractor response")
+			if e = s.Store.SourceDiagnostic(ctx, c, "metadata-decode", map[string]any{"valid_json": false, "bytes": len(raw), "output_limit": 32 << 20}); e != nil {
+				return e
+			}
+			return domain.Err(422, "SOURCE_UNAVAILABLE", "视频来源信息格式无效，未使用不完整来源继续处理。")
 		}
 		if meta.Type == "playlist" {
 			if len(meta.Entries) != 1 {

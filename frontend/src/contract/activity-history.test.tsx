@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ActivityList } from "../ui/ActivityList"
-import { activityGroups, loadActivityHistory } from "./activity-history"
+import { activityGroups, lineageHistoryUrls, loadActivityHistory } from "./activity-history"
 import { advanceActivity } from "./activity"
 import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("includes earlier source failures even when no article attempt existed", async () => {
+    const owner = (id: string, prior: string | null) => ({ request: { id, retry_of_id: prior }, activity: { history_url: `/requests/${id}/activity` } })
+    const read = vi.fn(async () => owner("source-failed", null))
+    expect(await lineageHistoryUrls(owner("current", "source-failed"), read)).toEqual(["/requests/current/activity", "/requests/source-failed/activity"])
+    expect(read).toHaveBeenCalledWith("source-failed")
+    await expect(lineageHistoryUrls(owner("loop", "loop"), async () => owner("loop", "loop"))).rejects.toThrow("关联记录不完整")
+  })
   it("groups retries below one logical call and retains its meaningful title", () => {
     const steps = [step("parent", "model_response", 1), step("send1", "model_submission", 1), step("send2", "model_submission", 1)]
     expect(activityGroups(steps)).toHaveLength(1)

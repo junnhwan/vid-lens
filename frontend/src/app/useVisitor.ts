@@ -14,7 +14,7 @@ import { ApiError, NetworkError, isApiError, replayable, sessionLost } from "../
 import { ResourceStream, type Reaction } from "../api/live"
 import { createRuntime, wantsMock, type Runtime } from "../api/runtime"
 import { advanceActivity, asSteps, mergeSteps } from "../contract/activity"
-import { loadActivityHistory } from "../contract/activity-history"
+import { lineageHistoryUrls, loadActivityHistory } from "../contract/activity-history"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, formatClock } from "../contract/text"
 import type {
@@ -725,6 +725,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setHistoryState((prev) => ({ ...prev, [id]: "正在加载完整过程…" }))
     try {
       const urls = [view.activity.history_url, ...(view.activity.attempts ?? []).filter((attempt) => !attempt.current).map((attempt) => attempt.history_url)]
+      if ("request" in view) urls.push(...await lineageHistoryUrls(view, (id) => rt.api.getRequest(id)))
       const incoming = (await loadActivityHistory(urls, (url, before) => rt.api.activity(url, before))).map(normalizeStep)
       // Navigation and history loading may race. Never mix another video's steps.
       if (turnId) {

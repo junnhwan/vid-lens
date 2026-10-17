@@ -51,4 +51,6 @@ Selection, download, parse outcome, cue coverage, fallback reason, and adopted t
 
 For YouTube without usable subtitles, bounded video and audio downloads can overlap in separate leased lanes. The combined download limit and full video verification still apply; prefetched audio is canceled when unnecessary. Source preparation, subtitles, video download, audio download, media verification and transcription have separately retained activity steps and elapsed times. Redis coordinates short-lived admission; PostgreSQL remains the authority for checkpoints, accepted drafts, observations and publication. Adding Redis copies of those records would not remove provider response latency.
 
+Extractor metadata has a separate 32 MiB stdout allowance because many caption languages can produce more than 10 MiB of signed format/track URLs. Ordinary media-tool stdout remains bounded at 4 MiB. Any overflow fails explicitly; a truncated buffer is never parsed or published as a complete source. Metadata decode diagnostics retain size/limit and validity, without exposing signed URLs or raw extractor output.
+
 Title and duration can appear before download and source publication. Failures include a safe diagnostic ID; HTTP responses include a generated `X-Request-ID`, also used in problem responses and linked to request/turn creation.
