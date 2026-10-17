@@ -23,16 +23,12 @@ npm test
 npm run build
 ```
 
-## 配置与管理
+## 运行环境
 
-请从仓库 README 和 config-examples 开始设置运行环境。配置、凭据、Cookie、数据库和媒体目录都应留在 Git 外。站长密码通过服务器交互式命令设置或重置，不使用默认密码。
+请从仓库 README、config.example.yaml 和 config-examples 中的示例开始设置运行环境。运行配置、凭据、Cookie、数据库和媒体目录应留在 Git 外。
 
-```sh
-vidlens -config /path/to/private.yaml -set-owner-password
-```
-
-模型发现仅拉取名字；启用前需要当前修订通过真实图片、工具调用和结构化提交检查。探测会产生真实模型调用，缓存字段、命中证据和账单折扣应分别核对。
+浏览器页面与 API 需要使用同一来源，代理应保留 Cookie、CSRF 和 SSE 头，并关闭 SSE 缓冲。模型服务需要支持图片输入与流式工具调用；ASR 使用独立的同步音频转写接口。实际可用性取决于所接服务与平台访问条件。
 
 ## 更多实现说明
 
-完整源码、部署说明和后端设计在 [GitHub 项目](https://github.com/junnhwan/vid-lens)。此站点只提供使用与实现文档，不发布私人交接或服务器凭据。
+完整源码、部署说明和后端设计在 [GitHub 项目](https://github.com/junnhwan/vid-lens)。阅读指南介绍使用方式，仓库文档补充请求协议、证据校验与执行恢复设计。

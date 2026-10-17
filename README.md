@@ -42,9 +42,9 @@ VidLens 是一个面向桌面 Web 的视频阅读工具。粘贴 B 站或 YouTub
 - **文字提问，也能选图追问**：围绕当前视频继续提问，回答可包含文字出处与画面证据；标出无法确认的部分，支持放大图片、回到原视频对应时刻。
 - **读完可以带走**：导出 Markdown，或包含原始配图、来源清单和校验清单的 ZIP。导出不包含私有问答与完整转写。
 - **看得见的处理过程**：通过 SSE 展示处理阶段与公开步骤；执行状态、工具结果和检查点持久化，刷新页面后可重新读取状态与已保存结果。
-- **站长管理与可选联网**：独立后台管理供应商、模型与能力检查，同一型号可在符合条件的供应商间故障切换。可配置公开网页读取、Tavily 搜索及额度，访客每轮主动允许后才会使用外部资料，并区分视频与网页出处。
+- **可选网络补充**：问答可以结合公开网页补充资料，每轮由你主动允许，并明确区分视频与网页出处。
 
-模型和平台可用性取决于部署环境与供应商。可选联网需要站长另行配置，默认关闭。
+模型和平台可用性取决于部署环境与供应商。网络补充默认关闭，是否可用以当前服务为准。
 
 ## 界面预览
 
@@ -125,7 +125,7 @@ chmod 600 .local/backend.yaml
 
 编辑 `.local/backend.yaml`：填写模型和 ASR 地址、型号与 API Key；为 `admin_token` 和 `secret_key` 分别生成独立随机值（至少 32 个字符，例如分别运行 `openssl rand -hex 32`）。原生运行时，把 `data_dir` 改为仓库外已创建、当前用户可写的绝对路径。
 
-YAML 中的产品配置与凭据只初始化新数据库一次，之后通过站长后台修改。请保管好原 `secret_key`，数据库中的加密凭据依赖它。
+YAML 中的产品配置与凭据只初始化新数据库一次；修改文件并重启不会覆盖数据库中已有的设置。请保管好原 `secret_key`，数据库中的加密凭据依赖它。
 
 ### 2. 启动后端
 
@@ -153,7 +153,7 @@ npm ci
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-打开 <http://127.0.0.1:5173>。Vite 默认代理至后端 `127.0.0.1:8086`。更改端口、设置站长密码、配置模型目录及生产代理，见[启动与配置](docs/backend/startup.md)、[产品能力与后台](docs/backend/product-features.md)和[前端集成](docs/backend/frontend-integration.md)。
+打开 <http://127.0.0.1:5173>。Vite 默认代理至后端 `127.0.0.1:8086`。端口、来源获取与环境说明见[启动与配置](docs/backend/startup.md)；浏览器请求、SSE 与代理约定见[前端集成](docs/backend/frontend-integration.md)。
 
 ## 使用边界
 
@@ -183,8 +183,8 @@ npm run build
 
 | 入口 | 内容 |
 | --- | --- |
-| [启动与站长配置](docs/backend/startup.md) | 环境、配置初始化、平台获取、密码与权限 |
-| [模型管理与导出](docs/backend/product-features.md) | 模型版本、供应商切换、Markdown / ZIP、可选联网 |
+| [启动与配置](docs/backend/startup.md) | 环境、首次初始化、平台获取与数据保留 |
+| [模型选择与文章导出](docs/backend/product-features.md) | 固定型号、关注点、Markdown / ZIP、可选网络补充 |
 | [执行与恢复](docs/backend/execution.md) | 证据工具、发布校验、检查点、资源与文件生命周期 |
 | [前端集成](docs/backend/frontend-integration.md) | API、SSE、匿名会话与交互约定 |
 | [使用文档](docs/site/index.md) | 阅读、问答、引用、导出与隐私说明 |

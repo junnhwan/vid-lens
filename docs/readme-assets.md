@@ -1,6 +1,6 @@
 # README visual assets
 
-The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). Screenshots were captured on October 16, 2026 from the desktop application, using the saved public examples bundled with the frontend. These captures predate the concise/standard/detailed selector. No new video processing, ASR, model probe, or generation was started for these captures.
+The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). Screenshots were captured on October 16, 2026 from the desktop application, using the saved public examples bundled with the frontend. These captures predate the concise/standard/detailed selector. No new video processing, transcription, or generation was started for these captures.
 
 ## Screenshots
 
@@ -14,7 +14,7 @@ The Chinese [README](../README.md) and [English README](../README.en.md) share t
 
 Screenshots preserve the rendered application. UI and saved content are in Chinese. The model labels, counters, disk capacity, and elapsed times are observations from that capture or saved run; they are not default model recommendations, performance benchmarks, or current service guarantees. Replay timing compresses waits. The workflow example has no saved intermediate Q&A steps; the UI retains that disclosure. The Skills example has saved intermediate steps. Do not synthesize missing steps or relabel a replay as a live run.
 
-Only explicitly prepared public examples appear in the screenshots. Ordinary visitor articles and Q&A remain private to their anonymous session. When refreshing images, check that no credentials, owner configuration, browser sessions, private requests, or personal data appear in the capture.
+Only explicitly prepared public examples appear in the screenshots. Ordinary visitor articles and Q&A remain private to their anonymous session. When refreshing images, check that no credentials, private service settings, browser sessions, private requests, or personal data appear in the capture.
 
 ## Video attribution
 
@@ -36,7 +36,7 @@ A `<picture>` element selects the matching GitHub light or dark theme; the light
 
 The logo is derived from [`frontend/public/favicon.svg`](../frontend/public/favicon.svg), and the wordmark paths from `Wordmark` in [`SiteHeader.tsx`](../frontend/src/ui/SiteHeader.tsx). The SVGs have no scripts or external resources. Only the two-line copy uses a system monospace font stack; the logo and wordmark are paths.
 
-The earlier generated illustration was replaced following the owner's preference for a minimal project header. It is no longer referenced by either README. This header is brand identity, not a product screenshot.
+The header is brand identity, not a product screenshot.
 
 ## Architecture
 
@@ -50,4 +50,4 @@ Check these source areas when changing the architecture:
 - [`internal/media`](../internal/media/) — source acquisition and owned frames.
 - [`internal/investigator`](../internal/investigator/) — Eino model and evidence tools.
 - [`internal/jobs`](../internal/jobs/) and [`internal/store`](../internal/store/) — delivery, state, checkpoints, ownership, and publication.
-- [Execution and recovery](backend/execution.md) and [model management and outputs](backend/product-features.md) — implementation contracts.
+- [Execution and recovery](backend/execution.md) and [model selection and article exports](backend/product-features.md) — implementation contracts.

@@ -29,7 +29,7 @@ Rejected candidates stay outside the publishable `candidate` operation. `patch_a
 
 The model's configured maximum output is a ceiling, not an output target. Current policies cap investigation, chapter composition, repair, and final submission separately (8,192 / 32,768 / 16,384 / 4,096 tokens, further limited by the frozen model profile). Q&A uses the composition allowance rather than the concise article's optional investigation allowance.
 
-The management API and model form accept `input_chars_limit` and `context_tokens` independently of output. Zero context tokens means unknown capacity. For imported combined-character profiles, an unset input limit preserves their previous effective allowance, `max_input_chars - 4 * max_output_tokens`; the selected phase's output no longer repeatedly consumes that envelope. Legacy checkpoints keep their previous path.
+Model profiles define `input_chars_limit` and `context_tokens` independently of output. Zero context tokens means unknown capacity. For imported combined-character profiles, an unset input limit preserves their previous effective allowance, `max_input_chars - 4 * max_output_tokens`; the selected phase's output no longer repeatedly consumes that envelope. Legacy checkpoints keep their previous path.
 
 Text and image token reserves are explicitly heuristic and model dependent. Images still have the existing 12-frame/16 MiB working-set limits. A configured shared context limit checks text estimate + image reserve + selected output + safety reserve. This is not a provider tokenizer or billing measurement. Unreported provider input/output/cache usage remains unknown.
 
@@ -42,11 +42,3 @@ Supported subtitle formats are selected before language preference can send an u
 Selection, download, parse outcome, cue coverage, fallback reason, and adopted text origin are durable source diagnostics. Coverage uses the existing cue-duration union thresholds: 50% usable and 85% complete. It does not infer speech or silence. ASR timing remains coarse where only audio-window timestamps are known. A rejected subtitle's language is not reported as an ASR language detection. ASR remains sequential until measurements and supplier limits justify a concurrency change.
 
 Title and duration can appear before download and source publication. Failures include a safe diagnostic ID; HTTP responses include a generated `X-Request-ID`, also used in problem responses and linked to request/turn creation.
-
-The owner-only `GET /api/v1/admin/runs/{run}/diagnostics` and local command below return a read-only summary of request/turn, run, attempts, operations, submissions, candidate identities, drafts, safe source decisions, usage and finish reasons:
-
-```sh
-vidlens --config /path/to/private.yaml --diagnose-run RUN_ID
-```
-
-The command does not migrate, bootstrap, start workers, or call providers. The summary excludes credentials, raw candidates, prompts, tool arguments, question text, and signed URLs. Historical unknown timestamps remain unknown. Array limits are explicit; operation/submission timestamps and active time must not be mistaken for a universal end-to-end performance claim.

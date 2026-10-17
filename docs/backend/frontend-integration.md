@@ -1,13 +1,13 @@
 # Frontend integration
 
-The visitor API is implemented under `/api/v1`; its routes and typed views are defined in `internal/httpapi` and `internal/domain`, with frontend types in `frontend/src/contract`. Optional user purposes and portable exports are not implemented. The active React application is in `frontend/`; `docs/prototype` is a separate static visual reference.
+The visitor API is implemented under `/api/v1`; its routes and typed views are defined in `internal/httpapi` and `internal/domain`, with frontend types in `frontend/src/contract`. Optional focus, interpretation detail, model selection and portable exports follow the [product contracts](product-features.md). The active React application is in `frontend/`; `docs/prototype` is a separate static visual reference.
 
 Serve the frontend and API through the same browser origin. The Vite development server proxies `/api` to `http://127.0.0.1:8086` by default and rewrites the upstream Origin to that backend origin; configure the development backend's `public_origin` accordingly. `VITE_BACKEND_ORIGIN` changes that target. A production proxy must preserve the external Origin and the backend's `public_origin` must match the public HTTPS origin. Preserve Cookie, CSRF and SSE headers and disable proxy buffering for SSE. No cross-origin CORS workflow is provided.
 
 ## Request flow
 
 1. `POST /session` with `{}` and same-origin credentials. Retain `csrf_token`; the cookie is HttpOnly. This does not require a preexisting CSRF token.
-2. `POST /requests` with `{video_url}` plus `X-CSRF-Token` and a newly generated `Idempotency-Key`. Persist `request.id` in the page URL. HTTP 201 means accepted, not completed.
+2. `POST /requests` with `{video_url}` and optional model, purpose and detail fields, plus `X-CSRF-Token` and a newly generated `Idempotency-Key`. Persist `request.id` in the page URL. HTTP 201 means accepted, not completed.
 3. Install the entire returned RequestView; subscribe to its stable `stream.url?after=<cursor>`. Prepare/generation run changes are server-owned.
 4. Once `request.status=completed`, close SSE and GET `/requests/{id}/article`. Render typed blocks, citations and returned Frame URLs. The article is immutable. A held-open image/history view is local frontend state.
 5. Ensure `/requests/{id}/conversation` when opening Q&A. Read turn history and use the accepted tail ID for `expected_last_turn_id`. Each new question/retry gets its own action key.

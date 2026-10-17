@@ -42,9 +42,9 @@ The articles, images, and answers are saved outputs from real runs. Processing a
 - **Ask in words or start from a frame.** Continue asking about the current video, with text and visual evidence in the answer. Inspect images, return to the original timestamps, and see what could not be confirmed.
 - **Take the article with you.** Export Markdown or a ZIP containing original article images, source records, and a verification manifest. Exports omit private Q&A and full transcripts.
 - **Follow the processing steps.** SSE delivers public activity and final results. Execution state, tool outputs, and checkpoints are persisted so the browser can reload saved status and results.
-- **Owner controls and optional web references.** Manage providers, models, and capability checks in a separate owner interface. Eligible suppliers of the same model can serve as fallbacks. Owners can configure public-page reading, Tavily search, and quotas; visitors must opt in per turn, and video and web citations remain distinguishable.
+- **Optional web references.** Questions can use public webpages as supplementary sources when you opt in for that turn. Answers distinguish video evidence from web citations.
 
-Model and platform availability depend on the provider and deployment environment. Optional web access requires owner configuration and is disabled by default.
+Model and platform availability depend on the provider and deployment environment. Web references are off by default; availability depends on the current service.
 
 ## Screenshots
 
@@ -125,7 +125,7 @@ chmod 600 .local/backend.yaml
 
 Edit `.local/backend.yaml`: set model and ASR endpoints, model names, and API keys. Generate independent random values of at least 32 characters for `admin_token` and `secret_key`, for example by running `openssl rand -hex 32` separately for each. For native execution, set `data_dir` to an existing, writable absolute directory outside the repository.
 
-YAML product settings and credentials initialize a new database only once. Use the owner interface for later changes. Keep the original `secret_key`: encrypted credentials in PostgreSQL depend on it.
+YAML product settings and credentials initialize a new database only once; editing the file and restarting does not overwrite existing database settings. Keep the original `secret_key`: encrypted credentials in PostgreSQL depend on it.
 
 ### 2. Start the backend
 
@@ -153,7 +153,7 @@ npm ci
 npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open <http://127.0.0.1:5173>. Vite proxies to backend port `127.0.0.1:8086` by default. See [startup and configuration](docs/backend/startup.md), [owner controls and features](docs/backend/product-features.md), and [frontend integration](docs/backend/frontend-integration.md) for port changes, owner password setup, the model catalog, and production proxy configuration.
+Open <http://127.0.0.1:5173>. Vite proxies to backend port `127.0.0.1:8086` by default. See [startup and configuration](docs/backend/startup.md) for ports, source acquisition, and environment settings, and [frontend integration](docs/backend/frontend-integration.md) for browser requests, SSE, and proxy configuration.
 
 ## Scope and limitations
 
@@ -183,8 +183,8 @@ Production requires same-origin static hosting and API proxying, unbuffered SSE,
 
 | Guide | Contents |
 | --- | --- |
-| [Startup and owner configuration](docs/backend/startup.md) | Environment, initialization, platform acquisition, passwords, and access |
-| [Model management and exports](docs/backend/product-features.md) | Model revisions, supplier failover, Markdown / ZIP, and optional web references |
+| [Startup and configuration](docs/backend/startup.md) | Environment, first-run initialization, platform acquisition, and data retention |
+| [Model selection and article exports](docs/backend/product-features.md) | Fixed model identity, focus, Markdown / ZIP, and optional web references |
 | [Execution and recovery](docs/backend/execution.md) | Evidence tools, publication checks, checkpoints, resources, and file lifetimes |
 | [Frontend integration](docs/backend/frontend-integration.md) | API, SSE, anonymous sessions, and interaction contracts |
 | [User documentation](docs/site/index.md) | Reading, questions, citations, exports, and privacy; currently in Chinese |
