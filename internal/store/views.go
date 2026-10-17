@@ -334,6 +334,16 @@ func stepsAt(ctx context.Context, q Querier, segs []domain.ExecutionSegment, req
 		}
 		for i := range list {
 			list[i].SegmentNo = seg.SegmentNo
+			// A prior attempt's unfinished step must not become "running" again
+			// merely because a later retry is now complete. Keep persisted events
+			// intact and project the owning run's terminal state.
+			if (list[i].Status == "running" || list[i].Status == "queued") && domain.Terminal(status) {
+				list[i].Status = "canceled"
+				if status == "failed" {
+					list[i].Status = "failed"
+				}
+				list[i].Outcome = &domain.Outcome{Message: "这次尝试结束时，此动作尚未确认完成。", EvidenceStatus: "not_assessed"}
+			}
 			fs, e := frames(ctx, q, request, list[i].FrameIDs)
 			if e != nil {
 				return nil, "", nil, e

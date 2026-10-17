@@ -77,6 +77,10 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	if err := s.Question(ctx, c, "q", map[string]any{"id": "q", "critical": true, "status": "supported"}); err != nil {
 		t.Fatal(err)
 	}
+	unfinished := domain.Step{ID: "unfinished", Title: "尚未完成的动作", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+	if _, err := s.Step(ctx, c, unfinished); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Fail(ctx, c, domain.Failure{Code: "MODEL_RESULT_INVALID", Message: "invalid batch", CanRetry: true}, false, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +136,22 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	}
 	if _, _, err = s.RequestView(ctx, session(t, s), next.ID); err == nil {
 		t.Fatal("retry history leaked to another visitor")
+	}
+	page, err := s.ActivityPage(ctx, owner, "request", req.ID, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, step := range page["items"].([]domain.Step) {
+		if step.ID == unfinished.ID {
+			found = true
+			if step.Status != "failed" {
+				t.Fatal("failed ancestor rendered active", step)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("earlier action not retained")
 	}
 }
 
