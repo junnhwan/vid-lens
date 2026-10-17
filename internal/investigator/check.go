@@ -2,9 +2,10 @@ package investigator
 
 import (
 	"context"
-	_ "embed"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,10 +20,30 @@ import (
 )
 
 // The capability probe uses the realistic model-admin screenshot supplied by
-// the product owner instead of a synthetic two-color pattern.
-//
-//go:embed testdata/model_capability.png
+// the product owner instead of a synthetic two-color pattern. The image stays
+// outside Git and is loaded from the private release asset directory.
 var capabilityProbeImage []byte
+var capabilityProbeImageErr error
+
+func init() {
+	capabilityProbeImage, capabilityProbeImageErr = loadCapabilityProbeImage()
+}
+
+func loadCapabilityProbeImage() ([]byte, error) {
+	candidates := []string{
+		filepath.Join("internal", "investigator", "testdata", "model_capability.png"),
+		filepath.Join("testdata", "model_capability.png"),
+	}
+	if executable, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "share", "model_capability.png")))
+	}
+	for _, path := range candidates {
+		if image, err := os.ReadFile(path); err == nil && len(image) > 0 {
+			return image, nil
+		}
+	}
+	return nil, errors.New("owner-supplied capability probe screenshot is unavailable")
+}
 
 type capabilityProbeObservation struct {
 	ModelName               string `json:"model_name"`
@@ -55,6 +76,9 @@ var expectedCapabilityProbeObservation = capabilityProbeObservation{
 }
 
 func (e *Engine) CheckModel(ctx context.Context, p config.Profile) (any, error) {
+	if capabilityProbeImageErr != nil {
+		return nil, capabilityProbeImageErr
+	}
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	model, err := e.baseModel(ctx, p)
