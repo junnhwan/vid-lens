@@ -24,6 +24,7 @@ func TestBilibiliPreparationUsesOnlyAnonymousAPIAndSeparatesOldCache(t *testing.
 			s, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
 			var asrCalls atomic.Int32
+			var primaryCalls, backupCalls atomic.Int32
 			asr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				asrCalls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
@@ -59,7 +60,7 @@ func TestBilibiliPreparationUsesOnlyAnonymousAPIAndSeparatesOldCache(t *testing.
 				case "/x/web-interface/view":
 					return `{"code":0,"data":{"title":"Anonymous fixture","pages":[{"page":1,"cid":1,"duration":2}]}}`
 				case "/x/player/playurl":
-					return `{"code":0,"data":{"timelength":2000,"dash":{"video":[{"id":16,"width":160,"height":90,"baseUrl":"https://cdn.example.test/video"}]}}}`
+					return `{"code":0,"data":{"timelength":2000,"dash":{"video":[{"id":16,"width":160,"height":90,"baseUrl":"https://cdn.example.test/primary","backupUrl":["https://cdn.example.test/video"]}]}}}`
 				case "/x/player/v2":
 					if subtitles {
 						return `{"code":0,"data":{"subtitle":{"subtitles":[{"lan":"zh-CN","subtitle_url":"https://cdn.example.test/subtitle"}]}}}`
@@ -68,7 +69,11 @@ func TestBilibiliPreparationUsesOnlyAnonymousAPIAndSeparatesOldCache(t *testing.
 				case "/subtitle":
 					return `{"body":[{"from":0,"to":2,"content":"A complete public transcript."}]}`
 				case "/video":
+					backupCalls.Add(1)
 					return string(payload)
+				case "/primary":
+					primaryCalls.Add(1)
+					return ""
 				default:
 					t.Fatalf("unexpected source request %s", r.URL.Path)
 					return ""
@@ -98,6 +103,9 @@ func TestBilibiliPreparationUsesOnlyAnonymousAPIAndSeparatesOldCache(t *testing.
 			ms.bilibiliHTTP = client
 			if err := ms.Prepare(ctx, *claim, profile); err != nil {
 				t.Fatal(err)
+			}
+			if primaryCalls.Load() != 1 || backupCalls.Load() != 1 {
+				t.Fatalf("preparation did not recover from the primary CDN: primary=%d backup=%d", primaryCalls.Load(), backupCalls.Load())
 			}
 			req, err = s.Request(ctx, owner.ID, accepted.ID)
 			if err != nil || req.Status != "generating" || req.SnapshotID == nil {

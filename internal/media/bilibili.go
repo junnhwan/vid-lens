@@ -3,9 +3,12 @@ package media
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,12 +61,7 @@ func bilibiliFailure(ctx context.Context, restricted bool) error {
 }
 
 func (b *bilibiliClient) get(ctx context.Context, raw string) (*http.Response, error) {
-	if strings.HasPrefix(raw, "//") {
-		raw = "https:" + raw
-	}
-	if strings.HasPrefix(raw, "http://") {
-		raw = "https://" + strings.TrimPrefix(raw, "http://")
-	}
+	raw = bilibiliHTTPSURL(raw)
 	if _, err := outbound.Validate(raw, nil, true); err != nil {
 		return nil, bilibiliFailure(ctx, false)
 	}
@@ -83,6 +81,16 @@ func (b *bilibiliClient) get(ctx context.Context, raw string) (*http.Response, e
 		return nil, bilibiliFailure(ctx, resp.StatusCode == 403 || resp.StatusCode == 412 || resp.StatusCode == 429)
 	}
 	return resp, nil
+}
+
+func bilibiliHTTPSURL(raw string) string {
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+	if strings.HasPrefix(raw, "http://") {
+		raw = "https://" + strings.TrimPrefix(raw, "http://")
+	}
+	return raw
 }
 
 func (b *bilibiliClient) read(ctx context.Context, raw string, limit int64) ([]byte, error) {
@@ -294,22 +302,94 @@ func (b *bilibiliClient) download(ctx context.Context, track bilibiliTrack, dst 
 	if limit <= 0 {
 		return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "音视频累计大小超过上限。")
 	}
-	if track.BaseURL == "" {
+	urls := bilibiliDownloadURLs(track)
+	if len(urls) == 0 {
 		return bilibiliFailure(ctx, false)
 	}
-	// Each track is one bounded stream. Existing workspace and byte admission
-	// remain authoritative, including when the highest public track is 4K.
-	resp, err := b.get(ctx, track.BaseURL)
+	// Reserve the output exclusively; attempts live in a private directory so
+	// a partial stream can never be appended to, published or left behind.
+	output, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return err
+		return bilibiliFailure(ctx, false)
 	}
-	defer resp.Body.Close()
-	if resp.ContentLength > limit {
-		return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "音视频累计大小超过上限。")
+	output.Close()
+	complete := false
+	defer func() {
+		if !complete {
+			os.Remove(dst)
+		}
+	}()
+	attemptDir, err := os.MkdirTemp(filepath.Dir(dst), ".bilibili-download-")
+	if err != nil {
+		return bilibiliFailure(ctx, false)
 	}
+	defer os.RemoveAll(attemptDir)
+	remaining := limit
+	var last error
+	for i, raw := range urls {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		attempt := filepath.Join(attemptDir, strconv.Itoa(i))
+		n, err := b.downloadAttempt(ctx, raw, attempt, remaining)
+		remaining -= n
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil {
+			if err = os.Rename(attempt, dst); err != nil {
+				return bilibiliFailure(ctx, false)
+			}
+			complete = true
+			return nil
+		}
+		var problem *domain.Problem
+		if errors.As(err, &problem) && problem.Code == "INPUT_LIMIT_EXCEEDED" {
+			return err
+		}
+		var fileError *os.PathError
+		if errors.As(err, &fileError) {
+			return bilibiliFailure(ctx, false)
+		}
+		if remaining <= 0 {
+			return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "音视频累计大小超过上限。")
+		}
+		if err := os.Remove(attempt); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return bilibiliFailure(ctx, false)
+		}
+		last = err
+	}
+	return last
+}
+
+func bilibiliDownloadURLs(track bilibiliTrack) []string {
+	var urls []string
+	add := func(raw string) bool {
+		raw = bilibiliHTTPSURL(raw)
+		if _, err := outbound.Validate(raw, nil, true); err != nil || slices.Contains(urls, raw) {
+			return false
+		}
+		urls = append(urls, raw)
+		return true
+	}
+	add(track.BaseURL)
+	backups := 0
+	for _, raw := range track.BackupURL {
+		if add(raw) {
+			backups++
+			if backups == 2 {
+				break
+			}
+		}
+	}
+	return urls
+}
+
+func (b *bilibiliClient) downloadAttempt(ctx context.Context, raw, dst string, limit int64) (int64, error) {
+	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	reader := &progressReader{r: resp.Body}
+	reader := &progressReader{}
 	reader.last.Store(time.Now().UnixNano())
 	var stalled atomic.Bool
 	done := make(chan struct{})
@@ -322,27 +402,44 @@ func (b *bilibiliClient) download(ctx context.Context, track bilibiliTrack, dst 
 			case <-done:
 				return
 			case <-ctx.Done():
-				resp.Body.Close()
 				return
 			case <-ticker.C:
 				if time.Since(time.Unix(0, reader.last.Load())) > 60*time.Second {
 					stalled.Store(true)
 					cancel()
-					resp.Body.Close()
 					return
 				}
 			}
 		}
 	}()
-	_, _, err = copyBounded(ctx, dst, reader, limit)
+	// The no-progress timer also covers response headers and TLS handshakes,
+	// leaving time for another CDN within the original caller deadline.
+	resp, err := b.get(ctx, raw)
+	if err != nil {
+		if stalled.Load() && parent.Err() == nil {
+			return 0, &domain.WorkError{Code: "SOURCE_UNAVAILABLE", Message: "B 站下载长时间没有字节进展。", Transient: true}
+		}
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.ContentLength > limit {
+		return 0, domain.Err(422, "INPUT_LIMIT_EXCEEDED", "音视频累计大小超过上限。")
+	}
+	reader.r = resp.Body
+	_, n, err := copyBounded(ctx, dst, reader, limit)
 	if err != nil {
 		if stalled.Load() {
-			return &domain.WorkError{Code: "SOURCE_UNAVAILABLE", Message: "B 站下载长时间没有字节进展。", Transient: true}
+			return n, &domain.WorkError{Code: "SOURCE_UNAVAILABLE", Message: "B 站下载长时间没有字节进展。", Transient: true}
 		}
-		if _, ok := err.(*domain.Problem); ok {
-			return err
+		var problem *domain.Problem
+		var fileError *os.PathError
+		if errors.As(err, &problem) || errors.As(err, &fileError) {
+			return n, err
 		}
-		return bilibiliFailure(ctx, false)
+		return n, bilibiliFailure(parent, false)
 	}
-	return nil
+	if n == 0 || (resp.ContentLength > 0 && n != resp.ContentLength) {
+		return n, bilibiliFailure(parent, false)
+	}
+	return n, nil
 }
