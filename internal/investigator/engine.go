@@ -186,6 +186,10 @@ func (s *session) initial(ctx context.Context) error {
 				s.cp.HarnessRevision = 3
 				instruction += contentPlanInstructions
 				instruction += planRepairInstructions
+				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v4" {
+					s.cp.HarnessRevision = 4
+					instruction += pacedHarnessInstructions
+				}
 			}
 		} else {
 			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"

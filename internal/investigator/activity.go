@@ -33,14 +33,14 @@ func (s *session) modelActivity() (string, string) {
 // business outcome. Actual chapter saving/validation has its own durable step.
 func responseActivity(result *schema.Message) (string, string) {
 	if len(result.ToolCalls) == 0 {
-		return "已收到模型响应", "响应已接收，仍需通过正式提交与内容校验。"
+		return "模型响应已接收", "响应已接收，仍需通过正式提交与内容校验。"
 	}
 	names := []string{}
 	for _, c := range result.ToolCalls {
 		names = append(names, c.Function.Name)
 	}
 	if len(names) > 1 {
-		return "已收到下一组处理动作", "接下来执行所需的来源获取或记录；内容尚待校验。"
+		return "模型处理动作已接收", "接下来执行所需的来源获取或记录；内容尚待校验。"
 	}
 	switch names[0] {
 	case "record_observation":
@@ -50,7 +50,7 @@ func responseActivity(result *schema.Message) (string, string) {
 			ActivityTitle string `json:"activity_title"`
 		}
 		if json.Unmarshal([]byte(result.ToolCalls[0].Function.Arguments), &in) == nil && strings.TrimSpace(in.ActivityTitle) != "" {
-			return publicTitle(in.ActivityTitle, "已确定需要核对的来源"), "已收到来源核对请求，接下来执行。"
+			return "模型来源核对请求已接收", "下一步执行：" + publicTitle(in.ActivityTitle, "核对所需来源") + "。"
 		}
 		return "已确定需要核对的来源", "接下来获取所需原文或真实画面。"
 	case "begin_article", "repair_article_plan":

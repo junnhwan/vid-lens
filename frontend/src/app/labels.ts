@@ -45,7 +45,8 @@ export function describeRequest(view: RequestView | null, current: ActivityStep 
     return { kicker, title: "已停止理解", purpose: "停在已经取得的内容，文章还没有生成。", range: "", busy: false }
   }
   if (current) {
-    return { kicker, title: displayStepTitle(current.title), purpose: current.purpose || "", range: formatRange(current.source_range), busy: true }
+    const model = current.kind === "model_response"
+    return { kicker, title: displayStepTitle(model ? current.purpose || current.title : current.title), purpose: model ? `第 ${current.model_call || ""} 次模型调用` : current.purpose || "", range: formatRange(current.source_range), busy: true }
   }
   return { kicker, title: fallbackTitle(execution), purpose: fallbackPurpose(execution), range: "", busy: !isTerminalStatus(status) }
 }

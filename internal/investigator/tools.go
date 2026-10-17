@@ -243,7 +243,7 @@ func publicTitle(input, fallback string) string {
 }
 func (s *session) step(ctx context.Context, title, phase string, r *domain.Range, work func() (any, []string, error)) (*schema.ToolResult, error) {
 	id := "step_" + s.claim.Run.ID + "_" + store.Hash(callID(ctx))[:16]
-	st := domain.Step{ID: id, Title: title, Phase: phase, Status: "running", SourceRange: r, FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+	st := domain.Step{ID: id, Kind: "tool_execution", ModelCall: s.cp.Calls, Title: title, Phase: phase, Status: "running", SourceRange: r, FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
 	st, e := s.engine.Store.Step(ctx, s.claim, st)
 	if e != nil {
 		return nil, e
@@ -274,6 +274,9 @@ func (s *session) step(ctx context.Context, title, phase string, r *domain.Range
 	st.Outcome = &domain.Outcome{Message: "已取得所需来源，等待内容判断。", EvidenceStatus: "not_assessed"}
 	if phase == "compose" {
 		st.Outcome = &domain.Outcome{Message: "草稿已保存，全部章节核对通过后才会发布。", EvidenceStatus: "not_applicable"}
+	}
+	if title == "保存视频画面观察" {
+		st.Outcome = &domain.Outcome{Message: "已保存可见事实与未确认问题，后续可从此继续。", EvidenceStatus: "not_assessed"}
 	}
 	if _, e = s.engine.Store.Step(ctx, s.claim, st); e != nil {
 		return nil, e
@@ -381,12 +384,23 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		}
 		key := callID(ctx)
 		critical := s.turn == nil
+		if s.cp.HarnessRevision >= 4 {
+			critical = false
+		}
 		if in.Critical != nil {
 			critical = *in.Critical
 		}
 		if s.cp.HarnessRevision > 0 && !critical && s.turn == nil && s.spec.DetailPolicy != nil {
 			p := s.spec.DetailPolicy
-			if s.cp.Progress.OptionalInspections >= p.OptionalInspections || s.profile.MaxIterations-s.cp.Calls <= p.FinalCallsReserved {
+			closing := false
+			if s.cp.HarnessRevision >= 4 {
+				stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
+				if err != nil {
+					return nil, err
+				}
+				closing = s.wrapUp(stats)
+			}
+			if closing || s.cp.Progress.OptionalInspections >= p.OptionalInspections || s.profile.MaxIterations-s.cp.Calls <= p.FinalCallsReserved {
 				return toolError("可选调查额度已用完；保留必要证据，将非关键未知写入limitations，开始成文并正式提交。")
 			}
 		}
@@ -492,15 +506,17 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		if len(in.VisibleFacts) == 0 && len(in.Unresolved) == 0 {
 			return toolError("必须记录可见事实或明确缺口。")
 		}
-		if e := s.engine.Store.RecordObservation(ctx, s.claim, callID(ctx), in.InspectionID, in); e != nil {
-			return nil, e
-		}
-		if in.QuestionID != "" {
-			if e := s.engine.Store.Question(ctx, s.claim, in.QuestionID, map[string]any{"id": in.QuestionID, "question": in.Question, "critical": in.Critical, "status": in.Status, "unresolved": in.Unresolved, "frame_ids": in.FrameIDs}); e != nil {
-				return nil, e
+		return s.step(ctx, "保存视频画面观察", s.phase(), nil, func() (any, []string, error) {
+			if e := s.engine.Store.RecordObservation(ctx, s.claim, callID(ctx), in.InspectionID, in); e != nil {
+				return nil, nil, e
 			}
-		}
-		return textResult(map[string]any{"saved": true, "inspection_id": in.InspectionID, "status": in.Status}), nil
+			if in.QuestionID != "" {
+				if e := s.engine.Store.Question(ctx, s.claim, in.QuestionID, map[string]any{"id": in.QuestionID, "question": in.Question, "critical": in.Critical, "status": in.Status, "unresolved": in.Unresolved, "frame_ids": in.FrameIDs}); e != nil {
+					return nil, nil, e
+				}
+			}
+			return map[string]any{"saved": true, "inspection_id": in.InspectionID, "status": in.Status}, nil, nil
+		})
 	})); e != nil {
 		return nil, e
 	}

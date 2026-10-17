@@ -43,6 +43,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	var args any = stripPixels(in)
 	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools
+	activeTools = s.phaseTools(activeTools)
 	if s.forceDraftSubmit {
 		subset := []*schema.ToolInfo{}
 		for _, t := range activeTools {
@@ -167,7 +168,19 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		routes = append(routes, routes[0])
 	}
 	title, phase := s.modelActivity()
-	step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", Title: "正在等待模型可用名额", Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+	step := domain.Step{ID: "model_" + s.claim.Run.ID + "_" + strconv.Itoa(s.cp.Calls), Kind: "model_response", ModelCall: s.cp.Calls + 1, Title: modelCallTitle(s.cp.Calls + 1), Purpose: domain.Ptr("正在等待模型可用名额"), Phase: phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+	open, err := s.engine.Store.OpenModelSubmissions(ctx, s.claim.Run.ID, step.ModelCall)
+	if err != nil {
+		return nil, err
+	}
+	for _, previous := range open {
+		previous.Status = "failed"
+		previous.FinishedAt = domain.Ptr(time.Now().UTC())
+		previous.Outcome = &domain.Outcome{Message: "上次执行未保存完整响应，结果未知；原发送记录保留。", EvidenceStatus: "not_assessed"}
+		if _, err = s.engine.Store.Step(ctx, s.claim, previous); err != nil {
+			return nil, err
+		}
+	}
 	step, err = s.engine.Store.Step(ctx, s.claim, step)
 	if err != nil {
 		return nil, err
@@ -224,7 +237,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if err != nil {
 			return nil, err
 		}
-		step.Title = title
+		step.Purpose = domain.Ptr(title)
 		if _, err = s.engine.Store.Step(ctx, s.claim, step); err != nil {
 			release()
 			return nil, err
@@ -234,6 +247,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			limits.Total = 300 * time.Second
 		}
 		submission := 0
+		var transport *domain.Step
 		observer := newUsageObserver(s.cp.LayoutVersion, p.CachePolicy, func(report usageReport) {
 			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
@@ -250,6 +264,12 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				err = s.engine.Store.RecordSubmission(actx, s.claim, key, submission, map[string]any{"budget": budget})
 				submitErr = err
 			}
+			if err == nil {
+				x := domain.Step{ID: step.ID + "_send_" + strconv.Itoa(submission), Kind: "model_submission", ModelCall: step.ModelCall, Submission: submission, Title: "模型调用 " + strconv.Itoa(step.ModelCall) + " · 发送 " + strconv.Itoa(submission), Phase: step.Phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+				x, err = s.engine.Store.Step(actx, s.claim, x)
+				transport = &x
+				submitErr = err
+			}
 			return err
 		})
 		reportedActivity := ""
@@ -259,7 +279,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				return nil
 			}
 			reportedActivity = title
-			step.Title = title
+			step.Purpose = domain.Ptr(title)
+			switch name {
+			case "begin_article", "repair_article_plan", "save_article_sections":
+				step.Phase = "compose"
+			case "submit_article", "submit_article_draft":
+				step.Phase = "validate"
+			}
 			_, err := s.engine.Store.Step(ctx, s.claim, step)
 			return err
 		})
@@ -272,6 +298,19 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		result, err := receiveModelResponse(sub, base, NormalizeToolImages(in), limits, options...)
 		release()
+		if transport != nil && ctx.Err() == nil {
+			transport.Status = "completed"
+			message := "已收到完整模型响应，动作执行与内容校验另行记录。"
+			if err != nil {
+				transport.Status = "failed"
+				message = modelFailureMessage(err)
+			}
+			transport.FinishedAt = domain.Ptr(time.Now().UTC())
+			transport.Outcome = &domain.Outcome{Message: message, EvidenceStatus: "not_assessed"}
+			if _, saveErr := s.engine.Store.Step(ctx, s.claim, *transport); saveErr != nil {
+				return nil, saveErr
+			}
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -285,12 +324,12 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 					last = submitErr
 					continue
 				}
-				return nil, submitErr
+				return nil, s.failModelStep(ctx, step, submitErr)
 			}
 			var work *domain.WorkError
 			if errors.As(err, &work) {
 				if work.Code != "PROVIDER_UNAVAILABLE" && work.Code != "PROVIDER_RATE_LIMITED" {
-					return nil, work
+					return nil, s.failModelStep(ctx, step, work)
 				}
 				last = work
 			} else {
@@ -318,13 +357,36 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		step.Status = "completed"
 		step.FinishedAt = domain.Ptr(time.Now().UTC())
-		step.Title, title = responseActivity(result)
-		step.Outcome = &domain.Outcome{Message: title, EvidenceStatus: "not_assessed"}
+		responseTitle, outcome := responseActivity(result)
+		step.Purpose = domain.Ptr(responseTitle)
+		step.Outcome = &domain.Outcome{Message: outcome, EvidenceStatus: "not_assessed"}
 		if _, err = s.engine.Store.Step(ctx, s.claim, step); err != nil {
 			return nil, err
 		}
 		slog.Info("model response completed", "run_id", s.claim.Run.ID, "attempt_id", s.claim.AttemptID, "operation_key", key, "submission", submission, "tool_calls", len(result.ToolCalls))
 		return result, nil
 	}
-	return nil, last
+	return nil, s.failModelStep(ctx, step, last)
+}
+
+func modelFailureMessage(err error) string {
+	var work *domain.WorkError
+	if errors.As(err, &work) {
+		return work.Message
+	}
+	var problem *domain.Problem
+	if errors.As(err, &problem) {
+		return problem.Detail
+	}
+	return "未取得完整模型响应；未将未完成内容作为结果。"
+}
+
+func (s *session) failModelStep(ctx context.Context, step domain.Step, cause error) error {
+	step.Status = "failed"
+	step.FinishedAt = domain.Ptr(time.Now().UTC())
+	step.Outcome = &domain.Outcome{Message: modelFailureMessage(cause), EvidenceStatus: "not_assessed"}
+	if _, err := s.engine.Store.Step(ctx, s.claim, step); err != nil {
+		return err
+	}
+	return cause
 }

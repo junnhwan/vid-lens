@@ -163,6 +163,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	cp["finalization_failed"] = false
 	delete(cp, "finalization_failure")
 	cp["draft_resume"] = true
+	delete(cp, "plan_hash")
 	if _, err = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=$2 WHERE id=$1", run, domain.JSON(cp)); err != nil {
 		return err
 	}

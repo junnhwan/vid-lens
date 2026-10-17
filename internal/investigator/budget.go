@@ -56,6 +56,9 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			b.Phase = "compose"
 			b.OutputTokens = min(s.profile.MaxOutputTokens, p.CompositionOutputTokens)
 		}
+		if s.cp.HarnessRevision >= 4 && s.turn == nil && !s.cp.Composing {
+			b.OutputTokens = min(b.OutputTokens, 8192)
+		}
 		if s.turn != nil {
 			b.Phase = "answer"
 			b.OutputTokens = min(s.profile.MaxOutputTokens, p.CompositionOutputTokens)

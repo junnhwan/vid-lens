@@ -122,12 +122,15 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 						}
 						plan.Sections[1].EvidenceIDs = []string{"t999"}
 						args = plan
-						if !strings.Contains(string(input.Tools), `"maxItems":24`) || !strings.Contains(string(input.Tools), "repair_article_plan") {
-							t.Error("provider did not receive bounded plan/repair contract")
+						if !strings.Contains(string(input.Tools), `"maxItems":24`) {
+							t.Error("provider did not receive bounded plan contract")
 						}
 					}
 				case 2:
 					if planTurn {
+						if !strings.Contains(string(input.Tools), "repair_article_plan") {
+							t.Error("rejected plan did not expose the repair tool")
+						}
 						if !strings.Contains(string(input.Messages), "evidence_count_exceeded") || !strings.Contains(string(input.Messages), "unknown_evidence") {
 							t.Error("provider lost structured issues before local plan repair")
 						}
@@ -292,6 +295,14 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='inspect' AND operation_key NOT LIKE 'overview:%'`, claim.Run.ID).Scan(&executed); e != nil || executed != 0 {
 					t.Fatalf("multiple inspect response partially executed: %d %v", executed, e)
 				}
+			}
+			var rawPlan []byte
+			if e := db.Pool.QueryRow(ctx, `SELECT step->'plan' FROM run_events WHERE run_id=$1 AND step->>'kind'='execution_plan' ORDER BY seq DESC LIMIT 1`, claim.Run.ID).Scan(&rawPlan); e != nil {
+				t.Fatal("execution plan did not survive the full pipeline", e)
+			}
+			var plan domain.ExecutionPlan
+			if e := json.Unmarshal(rawPlan, &plan); e != nil || len(plan.Items) < 6 || len(plan.Sections) != 2 || plan.Sections[0].Status != "done" || plan.Items[3].Status != "done" || plan.Items[3].Detail != "已保存 2 / 2 章" {
+				t.Fatalf("plan not based on accepted chapters: %+v %v", plan, e)
 			}
 			if fault == "plan_repair" || fault == "plan_repair_recovery" {
 				var repairs int

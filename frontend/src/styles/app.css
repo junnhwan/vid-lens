@@ -1841,6 +1841,21 @@ figcaption {
   .qa-log { max-height: 360px; }
 }
 
+.execution-plan { margin: 32px 0; padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.plan-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; color: var(--ink); }
+.plan-counts { font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.plan-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; margin: 20px 0 0; padding: 0; list-style: none; }
+.plan-items li { display: flex; align-items: baseline; gap: 9px; min-width: 0; font-size: 14px; color: var(--ink-soft); }
+.plan-items li[data-state="active"] { color: var(--ink); }
+.plan-items li[data-state="done"] .plan-mark { color: var(--teal); }
+.plan-items small { display: block; font-size: 12px; color: var(--ink-soft); margin-top: 3px; }
+.plan-mark { flex: 0 0 14px; }
+.plan-status { margin-left: auto; flex-shrink: 0; font-size: 12px; color: var(--ink-soft); }
+.plan-note { margin: 18px 0 0; font-size: 14px; color: var(--teal); }
+.plan-chapters { margin-top: 18px; color: var(--ink-soft); font-size: 13px; }
+.plan-chapters summary { cursor: pointer; }
+.step[data-kind="model_submission"] { font-size: 0.88em; margin-left: 22px; }
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 

@@ -7,6 +7,7 @@ import { EASE, animateTitle, prefersReduced } from "./motion"
 import { ActivityList } from "./ActivityList"
 import { FrameThumb } from "./FrameThumb"
 import { ModelIdentity } from "./ModelIdentity"
+import { ExecutionPlan } from "./ExecutionPlan"
 
 export function RunView({
   view,
@@ -176,7 +177,7 @@ export function RunView({
           ) : null}
           {view?.actions.can_retry ? (
             <button type="button" className="btn primary" onClick={onRetry}>
-              重新理解
+              {view.activity.model_calls ? "从已保存进度继续" : "重新理解"}
             </button>
           ) : null}
         </div>
@@ -195,6 +196,7 @@ export function RunView({
           </p>
         ) : null}
       </div>
+      <ExecutionPlan activity={view?.activity} completed={view?.request.status === "completed"} />
       {shown.length ? (
         <div className="frame-panel">
           <Coverage duration={source?.duration_ms} ranges={steps.flatMap((step) => (step.source_range ? [step.source_range] : []))} />

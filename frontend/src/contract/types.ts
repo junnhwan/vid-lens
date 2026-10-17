@@ -131,6 +131,10 @@ export interface Outcome {
 }
 
 export interface ActivityStep {
+  kind?: string
+  model_call?: number
+  submission?: number
+  plan?: ExecutionPlan | null
   id: string
   run_id: string
   segment_no: number
@@ -149,7 +153,17 @@ export interface ActivityStep {
   finished_at: string | null
 }
 
+export interface ExecutionPlan {
+  items: { id: string; title: string; status: string; detail?: string }[]
+  sections?: { id: string; title: string; status: string }[]
+  wrap_up: boolean
+  note?: string
+}
+
 export interface ActivitySummary {
+  model_calls?: number
+  model_submissions?: number | null
+  plan?: ExecutionPlan | null
   current_step_id: string | null
   recent_steps: ActivityStep[]
   has_more: boolean

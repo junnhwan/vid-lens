@@ -262,7 +262,7 @@ func (s *Store) Step(ctx context.Context, c domain.Claim, step domain.Step) (dom
 		}
 		step.Frames = []domain.Frame{}
 		if step.FirstSeq == 0 {
-			_ = tx.QueryRow(ctx, "SELECT (step->>'first_seq')::bigint FROM run_events WHERE run_id=$1 AND step_id=$2 ORDER BY seq DESC LIMIT 1", c.Run.ID, step.ID).Scan(&step.FirstSeq)
+			_ = tx.QueryRow(ctx, "SELECT (step->>'first_seq')::bigint,(step->>'started_at')::timestamptz FROM run_events WHERE run_id=$1 AND step_id=$2 ORDER BY seq DESC LIMIT 1", c.Run.ID, step.ID).Scan(&step.FirstSeq, &step.StartedAt)
 		}
 		if step.Phase != "" {
 			var old *string

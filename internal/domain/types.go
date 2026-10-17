@@ -206,23 +206,39 @@ type Outcome struct {
 	EvidenceStatus string `json:"evidence_status"`
 }
 type Step struct {
-	Kind          string     `json:"kind,omitempty"`
-	ID            string     `json:"id"`
-	RunID         string     `json:"run_id"`
-	SegmentNo     int        `json:"segment_no"`
-	FirstSeq      int64      `json:"first_seq"`
-	LastSeq       int64      `json:"last_seq"`
-	Phase         string     `json:"phase"`
-	Title         string     `json:"title"`
-	Purpose       *string    `json:"purpose"`
-	Status        string     `json:"status"`
-	SourceRange   *Range     `json:"source_range"`
-	FrameIDs      []string   `json:"frame_ids"`
-	Frames        []Frame    `json:"frames"`
-	Outcome       *Outcome   `json:"outcome"`
-	RetryOfStepID *string    `json:"retry_of_step_id"`
-	StartedAt     *time.Time `json:"started_at"`
-	FinishedAt    *time.Time `json:"finished_at"`
+	Kind          string         `json:"kind,omitempty"`
+	ModelCall     int            `json:"model_call,omitempty"`
+	Submission    int            `json:"submission,omitempty"`
+	Plan          *ExecutionPlan `json:"plan,omitempty"`
+	ID            string         `json:"id"`
+	RunID         string         `json:"run_id"`
+	SegmentNo     int            `json:"segment_no"`
+	FirstSeq      int64          `json:"first_seq"`
+	LastSeq       int64          `json:"last_seq"`
+	Phase         string         `json:"phase"`
+	Title         string         `json:"title"`
+	Purpose       *string        `json:"purpose"`
+	Status        string         `json:"status"`
+	SourceRange   *Range         `json:"source_range"`
+	FrameIDs      []string       `json:"frame_ids"`
+	Frames        []Frame        `json:"frames"`
+	Outcome       *Outcome       `json:"outcome"`
+	RetryOfStepID *string        `json:"retry_of_step_id"`
+	StartedAt     *time.Time     `json:"started_at"`
+	FinishedAt    *time.Time     `json:"finished_at"`
+}
+
+type PlanItem struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+type ExecutionPlan struct {
+	Items    []PlanItem `json:"items"`
+	Sections []PlanItem `json:"sections,omitempty"`
+	WrapUp   bool       `json:"wrap_up"`
+	Note     string     `json:"note,omitempty"`
 }
 type Inline struct {
 	Type       string   `json:"type"`

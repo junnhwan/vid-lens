@@ -357,7 +357,7 @@ func activitySummary(steps []domain.Step, history string, expiry *time.Time, bas
 	var current *string
 	if active {
 		for i := len(steps) - 1; i >= 0; i-- {
-			if steps[i].Status == "running" {
+			if steps[i].Status == "running" && steps[i].Kind != "model_submission" {
 				current = &steps[i].ID
 				break
 			}
@@ -376,7 +376,24 @@ func activitySummary(steps []domain.Step, history string, expiry *time.Time, bas
 			}
 		}
 	}
-	return map[string]any{"current_step_id": current, "recent_steps": recent, "has_more": len(recent) < n, "history_url": base + "/activity", "history_status": history, "history_expires_at": expiry}
+	modelCalls, submissions := 0, 0
+	var plan *domain.ExecutionPlan
+	for _, step := range steps {
+		if step.Kind == "model_response" {
+			modelCalls++
+		}
+		if step.Kind == "model_submission" {
+			submissions++
+		}
+		if step.Plan != nil {
+			plan = step.Plan
+		}
+	}
+	var sends any
+	if submissions > 0 {
+		sends = submissions
+	}
+	return map[string]any{"current_step_id": current, "recent_steps": recent, "has_more": len(recent) < n, "history_url": base + "/activity", "history_status": history, "history_expires_at": expiry, "model_calls": modelCalls, "model_submissions": sends, "plan": plan}
 }
 func (s *Store) requestView(ctx context.Context, q Querier, session, id string) (map[string]any, Position, error) {
 	var pos Position

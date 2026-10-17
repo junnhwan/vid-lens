@@ -479,6 +479,9 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 				limit = max(limit, len(routes))
 			}
 			if op.Submissions >= limit {
+				if kind == "model" {
+					return modelSubmissionLimit(op.Submissions)
+				}
 				return domain.Err(422, "PROVIDER_UNAVAILABLE", "同一远端操作已达到提交上限。")
 			}
 			if _, e = tx.Exec(ctx, "UPDATE run_operations SET submissions=submissions+1,updated_at=now() WHERE run_id=$1 AND operation_key=$2", c.Run.ID, key); e != nil {

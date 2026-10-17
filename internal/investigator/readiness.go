@@ -85,7 +85,41 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	if s.forceDraftSubmit {
 		action = "Call submit_article_draft with the latest version now."
 	}
-	return map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}, nil
+	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
+	if s.cp.HarnessRevision >= 4 && s.turn == nil {
+		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
+		if err != nil {
+			return nil, err
+		}
+		wrap := s.wrapUp(stats)
+		out["model_execution"] = stats
+		out["wrap_up"] = wrap
+		if wrap && canCompose && s.cp.DraftIssue == nil && !s.forceDraftSubmit {
+			out["next_action"] = "Investigation has used several model calls or substantial waiting time. Stop optional investigation now; begin/finish the full-video article, preserve noncritical unknowns as limitations. Never bypass critical evidence or final validation."
+		}
+		gaps := []domain.PlanItem{}
+		for _, raw := range questions {
+			var q struct {
+				ID       string
+				Question string
+				Critical bool
+				Status   string
+			}
+			if json.Unmarshal(raw, &q) != nil || q.Status == "supported" {
+				continue
+			}
+			status := "active"
+			if !q.Critical && wrap {
+				status = "deferred"
+			}
+			gaps = append(gaps, domain.PlanItem{ID: "question:" + q.ID, Title: publicTitle(q.Question, "核对尚未确认的问题"), Status: status})
+			if len(gaps) == 8 {
+				break
+			}
+		}
+		out["open_questions"] = gaps
+	}
+	return out, nil
 }
 
 func (s *session) progressFingerprint(ctx context.Context) (string, error) {

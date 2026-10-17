@@ -86,6 +86,12 @@ export function stepSpent(step: Pick<ActivityStep, "started_at" | "finished_at">
 
 export interface ElapsedAnchor { elapsedMs: number; monotonicMs: number }
 
+export function activityTitle(step: ActivityStep): string {
+  if (step.kind !== "model_response") return displayStepTitle(step.title)
+  const ordinal = step.model_call ?? (Number(step.id.match(/_(\d+)$/)?.[1] ?? -1) + 1)
+  return ordinal > 0 ? `第 ${ordinal} 次模型调用` : "模型调用"
+}
+
 // Browser wall clocks can differ from the server or jump during a run.
 export function anchoredElapsed(anchor: ElapsedAnchor, monotonicNow: number): number {
   return Math.max(0, anchor.elapsedMs + Math.max(0, monotonicNow - anchor.monotonicMs))

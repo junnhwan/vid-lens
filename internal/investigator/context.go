@@ -17,6 +17,7 @@ import (
 
 type checkpoint struct {
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
+	PlanHash             string              `json:"plan_hash,omitempty"`
 	Progress             progressState       `json:"progress,omitempty"`
 	InspectBatchRejected map[string]bool     `json:"inspect_batch_rejected,omitempty"`
 	LastCandidate        map[string]any      `json:"last_candidate,omitempty"`
@@ -232,6 +233,11 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			return ctx, nil, err
 		}
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_readiness", Content: string(domain.JSON(ready))})
+		if s.cp.HarnessRevision >= 4 && s.turn == nil {
+			if err = s.saveExecutionPlan(ctx, ready); err != nil {
+				return ctx, nil, err
+			}
+		}
 	}
 	filtered, e = s.projectReferences(ctx, filtered)
 	if e != nil {
