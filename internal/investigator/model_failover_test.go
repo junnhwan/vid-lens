@@ -51,7 +51,7 @@ func verifiedFixtureRoute(t *testing.T, s *store.Store, name, endpoint, upstream
 }
 
 func TestMeteredModelFailoverKeepsDurableActualSupplier(t *testing.T) {
-	for _, fault := range []string{"http_401", "http_403", "http_429", "http_503", "broken_stream", "caller_cancels", "output_limit", "all_fail", "resume_unknown", "backup_output_limit", "backup_context_limit"} {
+	for _, fault := range []string{"http_401", "http_403", "http_429", "http_503", "broken_stream", "empty_response", "caller_cancels", "output_limit", "all_fail", "resume_unknown", "backup_output_limit", "backup_context_limit"} {
 		t.Run(fault, func(t *testing.T) {
 			s, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
@@ -64,6 +64,9 @@ func TestMeteredModelFailoverKeepsDurableActualSupplier(t *testing.T) {
 					t.Error("wrong primary credential")
 				}
 				switch fault {
+				case "empty_response":
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":52}}\n\ndata: [DONE]\n\n")
 				case "caller_cancels":
 					cancel()
 					w.WriteHeader(503)
@@ -190,6 +193,13 @@ func TestMeteredModelFailoverKeepsDurableActualSupplier(t *testing.T) {
 			var actual string
 			if err = s.Pool.QueryRow(ctx, "SELECT reporting->>'provider_id' FROM model_submissions WHERE run_id=$1 AND operation_key='model:0' AND submission=2", claim.Run.ID).Scan(&actual); err != nil || actual != b.ProviderID {
 				t.Fatalf("actual supplier audit lost: %s %v", actual, err)
+			}
+			if fault == "empty_response" {
+				var empty bool
+				var stream string
+				if err = s.Pool.QueryRow(ctx, "SELECT (reporting->>'response_empty')::boolean, reporting->>'stream_status' FROM model_submissions WHERE run_id=$1 AND operation_key='model:0' AND submission=1", claim.Run.ID).Scan(&empty, &stream); err != nil || !empty || stream != "complete" || sess.cp.Repairs != 0 {
+					t.Fatal("empty response lost its completed stream report or consumed content repair", empty, stream, err)
+				}
 			}
 		})
 	}

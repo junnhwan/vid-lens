@@ -169,6 +169,8 @@ func completeModelResponse(ctx context.Context, base model.ToolCallingChatModel,
 
 type modelResponseLimits struct{ Total, First, Idle time.Duration }
 
+var errEmptyModelResponse = &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型响应已结束，但没有正文或工具动作；空响应未作为有效结果。", Transient: true}
+
 // Consume provider streaming internally. Public events still contain only durable
 // activities and finalized results; a long completion must not wait for its entire
 // body before satisfying the response-header deadline.
@@ -266,6 +268,12 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 	}
 	if result.ResponseMeta.FinishReason == "length" {
 		return nil, &domain.WorkError{Code: "MODEL_OUTPUT_TRUNCATED", Message: "模型输出达到长度上限，未产生完整结果。"}
+	}
+	// A stop marker and billed reasoning tokens do not make an empty response
+	// a usable agent turn. Keep it in bounded transport recovery, so it cannot
+	// terminate an unfinished draft or consume its content-correction budget.
+	if len(result.ToolCalls) == 0 && strings.TrimSpace(result.Content) == "" {
+		return nil, errEmptyModelResponse
 	}
 	return result, nil
 }

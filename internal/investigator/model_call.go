@@ -298,6 +298,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		result, err := receiveModelResponse(sub, base, NormalizeToolImages(in), limits, options...)
 		release()
+		if errors.Is(err, errEmptyModelResponse) {
+			// Preserve the provider's complete stream/usage report while recording
+			// that it supplied no executable action or visible answer.
+			if saveErr := s.engine.Store.RecordSubmission(ctx, s.claim, key, submission, map[string]any{"response_empty": true}); saveErr != nil {
+				return nil, saveErr
+			}
+		}
 		if transport != nil && ctx.Err() == nil {
 			transport.Status = "completed"
 			message := "已收到模型响应，接下来校验工具参数与内容。"

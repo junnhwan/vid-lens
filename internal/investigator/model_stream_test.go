@@ -17,6 +17,29 @@ import (
 	"vidlens/internal/domain"
 )
 
+func TestEmptyProviderResponseIsNotAccepted(t *testing.T) {
+	for _, delta := range []string{`{}`, `{"content":"  "}`, `{"reasoning_content":"internal only"}`} {
+		t.Run(delta, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":%s,\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":205}}\n\ndata: [DONE]\n\n", delta)
+			}))
+			defer server.Close()
+			p := config.DefaultProfile()
+			p.ModelBaseURL = server.URL
+			base, err := newModelWithClient(context.Background(), p, "fixture", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := completeModelResponse(context.Background(), base, []*schema.Message{schema.UserMessage("Continue saved chapters")})
+			var work *domain.WorkError
+			if result != nil || !errors.As(err, &work) || work.Code != "PROVIDER_UNAVAILABLE" || !work.Transient {
+				t.Fatalf("empty response was treated as a usable agent turn: result=%v err=%v", result, err)
+			}
+		})
+	}
+}
+
 func TestReasoningGPTStreamsWithCompatibleParameters(t *testing.T) {
 	for _, name := range []string{"gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "openai/gpt-5.5", "deepseek/deepseek-v4.1-flash"} {
 		t.Run(name, func(t *testing.T) {
