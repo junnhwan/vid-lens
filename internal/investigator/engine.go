@@ -214,8 +214,8 @@ func (s *session) initial(ctx context.Context) error {
 			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
 			// A new private turn freezes its own protocol before its first call.
 			// Existing Ready checkpoints never pass through this initialization.
-			s.cp.HarnessRevision = 10
-			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions
+			s.cp.HarnessRevision = 11
+			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
 		}
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
