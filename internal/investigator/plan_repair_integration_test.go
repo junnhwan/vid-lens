@@ -114,7 +114,7 @@ func TestRetainedPlanRepairsThroughCheckedToolsAndReplays(t *testing.T) {
 	}
 	patch := candidatePatchInput{CandidateID: "invalid-plan", ExpectedHash: store.Hash(string(domain.JSON(bad))), Patches: []fieldPatch{
 		{Op: "replace", Path: "/sections/0/evidence_ids", Value: domain.JSON([]string{"t1", "t24"})},
-		{Op: "replace", Path: "/sections/1/evidence_ids", Value: domain.JSON([]string{"t25"})},
+		{Op: "replace", Path: "/sections/1/evidence_ids/0", Value: domain.JSON("t25")},
 	}}
 	body, err := planCall(s, "fixed-plan", "repair_article_plan", patch)
 	if err != nil || body["version"] != float64(1) {

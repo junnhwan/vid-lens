@@ -10,6 +10,26 @@ import (
 	"vidlens/internal/domain"
 )
 
+func TestPlanRepairAcceptsReportedEvidenceItemPath(t *testing.T) {
+	input := beginArticleInput{Title: "完整计划", Sections: []sectionPlan{{
+		ID: "one", Title: "原章", StartMS: 0, EndMS: 1000,
+		KeyPoints: []string{"保留事实"}, EvidenceIDs: []string{"t1", "t2"},
+	}}}
+	raw, err := replaceFields(domain.JSON(input), []fieldPatch{{Op: "replace", Path: "/sections/0/evidence_ids/0", Value: domain.JSON("t3")}}, planRepairAllowed)
+	var repaired beginArticleInput
+	if err != nil || json.Unmarshal(raw, &repaired) != nil {
+		t.Fatalf("validator-reported evidence item path rejected: %v", err)
+	}
+	if !slices.Equal(repaired.Sections[0].EvidenceIDs, []string{"t3", "t2"}) || !slices.Equal(repaired.Sections[0].KeyPoints, input.Sections[0].KeyPoints) {
+		t.Fatal("single reference repair changed other references or supported points")
+	}
+	for _, path := range []string{"/sections/0/evidence_ids/2", "/sections/0/evidence_ids/-", "/sections/0/evidence_ids/0/id", "/sections/0/id", "/sections"} {
+		if _, err = replaceFields(domain.JSON(input), []fieldPatch{{Op: "replace", Path: path, Value: domain.JSON("t3")}}, planRepairAllowed); err == nil {
+			t.Fatalf("structural or nonexistent reference path accepted: %s", path)
+		}
+	}
+}
+
 func TestContentPlanSchemaRequiresBoundedPointsAndEvidence(t *testing.T) {
 	policy, _ := domain.InterpretationPolicy("standard")
 	s := &session{spec: domain.GenerationSpec{DetailPolicy: &policy}, cp: checkpoint{HarnessRevision: 3, LayoutVersion: draftLayout}}

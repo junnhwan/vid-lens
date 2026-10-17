@@ -168,11 +168,11 @@ func planRepairAllowed(path []string) bool {
 	if len(path) == 3 {
 		return path[2] == "evidence_ids" || path[2] == "start_ms" || path[2] == "end_ms" || path[2] == "title"
 	}
-	return len(path) == 4 && path[2] == "key_points"
+	return len(path) == 4 && (path[2] == "key_points" || path[2] == "evidence_ids")
 }
 
 func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) error) error {
-	return add(utils.InferEnhancedTool("repair_article_plan", "Repair a retained rejected begin_article plan before any draft exists. Require candidate_id and exact expected_hash. Use 1-16 replace patches for /sections/<index>/evidence_ids, start_ms, end_ms, title or an existing key_points/<index>, /title or /limitations. Preserve the complete chapter plan and supported points. Cannot alter source/model identity or publish. All source and full-video checks run again before saving version 1.", func(ctx context.Context, in candidatePatchInput) (*schema.ToolResult, error) {
+	return add(utils.InferEnhancedTool("repair_article_plan", "Repair a retained rejected begin_article plan before any draft exists. Require candidate_id and exact expected_hash. Use 1-16 replace patches for /sections/<index>/evidence_ids, an existing evidence_ids/<index>, start_ms, end_ms, title or an existing key_points/<index>, /title or /limitations. Preserve the complete chapter plan and supported points. Cannot alter source/model identity or publish. All source and full-video checks run again before saving version 1.", func(ctx context.Context, in candidatePatchInput) (*schema.ToolResult, error) {
 		op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "candidate-attempt:"+in.CandidateID+":invalid")
 		if errors.Is(err, pgx.ErrNoRows) {
 			return toolError("候选不存在或不属于本次执行。")
