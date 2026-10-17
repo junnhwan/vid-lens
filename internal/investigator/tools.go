@@ -157,6 +157,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &answerInput{}
 	case "record_observation":
 		target = &observation{}
+		if t.session != nil && t.session.cp.HarnessRevision >= 5 {
+			target = &pacedObservation{}
+		}
 	case "inspect_video_window":
 		target = &inspectInput{}
 	case "find_evidence":
@@ -201,6 +204,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 				}
 			}
 			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "文章/回答提交的JSON结构无效："+string(domain.JSON(issue)))}
+		}
+		if t.session != nil && t.session.cp.HarnessRevision >= 5 && args != nil && !json.Valid([]byte(args.Text)) {
+			return toolError("参数JSON不完整或语法无效，本次没有保存事实或执行取证。请只输出一个完整、简短的工具对象，预留闭合引号/数组/对象；不要重抄整屏终端或文件列表。" + err.Error())
 		}
 		return toolError("工具参数不符合字段类型，请按 schema 修正：" + err.Error() + "。观察的 conflicts、unresolved、inferences 等字段必须是字符串数组，status 只能是 supported 或 unresolved。")
 	}
@@ -478,7 +484,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 	})); e != nil {
 		return nil, e
 	}
-	if e := add(utils.InferEnhancedTool("record_observation", "Durably record what the main agent saw in images. Preserve literal numbers/units/conditions, distinguish inferences, conflicts and unresolved gaps. One inspection per record.", func(ctx context.Context, in observation) (*schema.ToolResult, error) {
+	recordObservation := func(ctx context.Context, in observation) (*schema.ToolResult, error) {
 		known, ok := s.cp.Inspections[in.InspectionID]
 		if !ok {
 			ids := make([]string, 0, len(s.cp.Inspections))
@@ -517,8 +523,21 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			}
 			return map[string]any{"saved": true, "inspection_id": in.InspectionID, "status": in.Status}, nil, nil
 		})
-	})); e != nil {
-		return nil, e
+	}
+	const observationDescription = "Durably record concise visible facts, necessary literal numbers/conditions and unresolved gaps. One inspection per record; do not transcribe entire screenshots or terminal listings."
+	if s.cp.HarnessRevision >= 5 {
+		if e := add(utils.InferEnhancedTool("record_observation", observationDescription, func(ctx context.Context, in pacedObservation) (*schema.ToolResult, error) {
+			if !validObservationSize(in.ObservationFields) {
+				return toolError("观察记录过长：每个事实/细节/冲突/未确认字段最多16项，每项最多240字符。请简洁记录必要事实；原始图片与全文来源仍保留，不要抄录整屏终端。")
+			}
+			return recordObservation(ctx, in.ObservationFields)
+		}, utils.WithSchemaModifier(observationSchema))); e != nil {
+			return nil, e
+		}
+	} else {
+		if e := add(utils.InferEnhancedTool("record_observation", "Durably record what the main agent saw in images. Preserve literal numbers/units/conditions, distinguish inferences, conflicts and unresolved gaps. One inspection per record.", recordObservation)); e != nil {
+			return nil, e
+		}
 	}
 	if s.turn == nil && s.cp.LayoutVersion == draftLayout {
 		if e := s.draftTools(add); e != nil {

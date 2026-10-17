@@ -32,6 +32,9 @@ func (s *session) modelActivity() (string, string) {
 // This describes an observed response, never provider reasoning or an assumed
 // business outcome. Actual chapter saving/validation has its own durable step.
 func responseActivity(result *schema.Message) (string, string) {
+	if !validModelToolArguments(result) {
+		return "模型工具参数需要纠正", "响应已结束，但工具参数JSON不完整或无效；本次尚未执行动作，接下来简化并纠正参数。"
+	}
 	if len(result.ToolCalls) == 0 {
 		return "模型响应已接收", "响应已接收，仍需通过正式提交与内容校验。"
 	}
@@ -67,6 +70,18 @@ func responseActivity(result *schema.Message) (string, string) {
 		return "已收到回答候选", "接下来校验回答与引用，保存后才能正式展示。"
 	}
 	return "已收到来源处理请求", "接下来执行所需动作并校验结果。"
+}
+
+func validModelToolArguments(result *schema.Message) bool {
+	if result == nil {
+		return false
+	}
+	for _, call := range result.ToolCalls {
+		if !json.Valid([]byte(call.Function.Arguments)) {
+			return false
+		}
+	}
+	return true
 }
 
 func streamActivity(name string) string {

@@ -300,7 +300,10 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		release()
 		if transport != nil && ctx.Err() == nil {
 			transport.Status = "completed"
-			message := "已收到完整模型响应，动作执行与内容校验另行记录。"
+			message := "已收到模型响应，接下来校验工具参数与内容。"
+			if err == nil && !validModelToolArguments(result) {
+				message = "响应已结束，但工具参数JSON不完整或无效；尚未执行动作。"
+			}
 			if err != nil {
 				transport.Status = "failed"
 				message = modelFailureMessage(err)
@@ -340,6 +343,15 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		result.ReasoningContent = ""
 		result.Extra = cleanExtra(result.Extra)
+		if s.cp.HarnessRevision >= 5 {
+			var exhausted *bool
+			if result.ResponseMeta != nil && result.ResponseMeta.Usage != nil && result.ResponseMeta.Usage.CompletionTokens > 0 {
+				exhausted = domain.Ptr(result.ResponseMeta.Usage.CompletionTokens >= outputTokens)
+			}
+			if err = s.engine.Store.RecordSubmission(ctx, s.claim, key, submission, map[string]any{"tool_arguments_valid": validModelToolArguments(result), "output_limit_reached": exhausted}); err != nil {
+				return nil, err
+			}
+		}
 		if s.cp.HarnessRevision > 0 {
 			// Some compatible suppliers reuse IDs across separate responses.
 			// Eino caches tool results by ID, so scope them to this logical call
