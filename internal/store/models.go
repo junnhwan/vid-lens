@@ -34,6 +34,8 @@ type ProviderInput struct {
 type CatalogModel struct {
 	InputCharsLimit    int    `json:"input_chars_limit"`
 	ContextTokens      int    `json:"context_tokens"`
+	RoutePriority      int    `json:"route_priority"`
+	RouteFamily        string `json:"route_family"`
 	ID                 string `json:"id"`
 	RevisionID         string `json:"revision_id"`
 	Revision           int64  `json:"revision"`
@@ -57,6 +59,7 @@ type CatalogModel struct {
 type ModelInput struct {
 	InputCharsLimit  *int   `json:"input_chars_limit,omitempty"`
 	ContextTokens    *int   `json:"context_tokens,omitempty"`
+	RoutePriority    *int   `json:"route_priority,omitempty"`
 	ProviderID       string `json:"provider_id"`
 	DisplayName      string `json:"display_name"`
 	BrandID          string `json:"brand_id"`
@@ -70,8 +73,13 @@ type ModelInput struct {
 	CachePolicy      string `json:"cache_policy"`
 }
 
+type ModelRouteOrderEntry struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
 const providerSelect = `SELECT jsonb_build_object('id',p.id,'revision_id',r.id,'revision',p.revision,'name',r.name,'base_url',r.base_url,'proxy_policy',r.proxy_policy,'key_configured',r.key_ref<>'','enabled',p.enabled) FROM model_providers p JOIN provider_revisions r ON r.id=p.current_revision_id`
-const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','input_chars_limit',COALESCE((c.profile->>'input_chars_limit')::int,0),'context_tokens',COALESCE((c.profile->>'context_tokens')::int,0),'disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
+const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'route_priority',m.route_priority,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','input_chars_limit',COALESCE((c.profile->>'input_chars_limit')::int,0),'context_tokens',COALESCE((c.profile->>'context_tokens')::int,0),'disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
 
 // Older databases may already have enabled models without a catalog default.
 // Once enabled, the catalog stays active even if all its models are stopped.
@@ -81,7 +89,14 @@ func (s *Store) Providers(ctx context.Context) ([]Provider, error) {
 	return many[Provider](ctx, s.Pool, providerSelect+" ORDER BY r.name,p.id")
 }
 func (s *Store) Models(ctx context.Context) ([]CatalogModel, error) {
-	return many[CatalogModel](ctx, s.Pool, modelSelect+" ORDER BY r.display_name,m.id")
+	items, err := many[CatalogModel](ctx, s.Pool, modelSelect+" ORDER BY r.display_name,m.id")
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].RouteFamily = domain.ModelFamily(items[i].BrandID, items[i].UpstreamID)
+	}
+	return items, nil
 }
 func (s *Store) Provider(ctx context.Context, id string) (Provider, error) {
 	v, e := one[Provider](ctx, s.Pool, providerSelect+" WHERE p.id=$1", id)
@@ -89,7 +104,141 @@ func (s *Store) Provider(ctx context.Context, id string) (Provider, error) {
 }
 func (s *Store) Model(ctx context.Context, id string) (CatalogModel, error) {
 	v, e := one[CatalogModel](ctx, s.Pool, modelSelect+" WHERE m.id=$1", id)
+	if e == nil {
+		v.RouteFamily = domain.ModelFamily(v.BrandID, v.UpstreamID)
+	}
 	return v, NotFound(e)
+}
+
+// ReorderModelRoutes validates and updates every current catalog route for one
+// exact model family as a single change. The table lock prevents a route from
+// being added or revised between membership validation and priority updates.
+func (s *Store) ReorderModelRoutes(ctx context.Context, in []ModelRouteOrderEntry) ([]CatalogModel, error) {
+	if len(in) < 2 || len(in) > 100 {
+		return nil, domain.Err(422, "INVALID_ARGUMENT", "同型号线路至少要有两条，且一次最多调整100条。")
+	}
+
+	requested := make(map[string]ModelRouteOrderEntry, len(in))
+	for _, item := range in {
+		if item.ID == "" || item.ExpectedRevision < 1 {
+			return nil, domain.Err(422, "INVALID_ARGUMENT", "线路顺序请求缺少有效的模型和修订号。")
+		}
+		if _, exists := requested[item.ID]; exists {
+			return nil, domain.Err(422, "INVALID_ARGUMENT", "线路顺序中不能重复包含同一个模型。")
+		}
+		requested[item.ID] = item
+	}
+
+	family := ""
+	err := s.Tx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "LOCK TABLE catalog_models IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT m.id,m.revision,r.brand_id,c.profile->>'model_name'
+FROM catalog_models m
+JOIN model_revisions r ON r.id=m.current_revision_id
+JOIN runtime_config_revisions c ON c.id=r.config_id`)
+		if err != nil {
+			return err
+		}
+		type member struct {
+			id       string
+			revision int64
+			family   string
+		}
+		members := make(map[string]member, len(in))
+		familyMembers := make(map[string]member)
+		for rows.Next() {
+			var item member
+			var brand, upstream string
+			if err = rows.Scan(&item.id, &item.revision, &brand, &upstream); err != nil {
+				rows.Close()
+				return err
+			}
+			item.family = domain.ModelFamily(brand, upstream)
+			if _, ok := requested[item.id]; ok {
+				members[item.id] = item
+			}
+		}
+		if err = rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+
+		for _, item := range in {
+			member, ok := members[item.ID]
+			if !ok {
+				return domain.Err(409, "REVISION_CONFLICT", "同型号线路已变化，请重新读取后再保存。")
+			}
+			if family == "" {
+				family = member.family
+			} else if member.family != family {
+				return domain.Err(422, "INVALID_ARGUMENT", "只能调整完全相同型号的供应商线路。")
+			}
+			if item.ExpectedRevision != member.revision {
+				return domain.Err(409, "REVISION_CONFLICT", "模型配置已更新，请重新读取后再保存线路顺序。")
+			}
+		}
+
+		rows, err = tx.Query(ctx, `SELECT m.id,m.revision,r.brand_id,c.profile->>'model_name'
+FROM catalog_models m
+JOIN model_revisions r ON r.id=m.current_revision_id
+JOIN runtime_config_revisions c ON c.id=r.config_id`)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for rows.Next() {
+			var id, brand, upstream string
+			var revision int64
+			if err = rows.Scan(&id, &revision, &brand, &upstream); err != nil {
+				rows.Close()
+				return err
+			}
+			if domain.ModelFamily(brand, upstream) == family {
+				count++
+				familyMembers[id] = member{id: id, revision: revision, family: family}
+			}
+		}
+		if err = rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if count != len(in) {
+			return domain.Err(409, "REVISION_CONFLICT", "同型号线路已变化，请重新读取后再保存。")
+		}
+		for _, item := range in {
+			if _, ok := familyMembers[item.ID]; !ok {
+				return domain.Err(409, "REVISION_CONFLICT", "同型号线路已变化，请重新读取后再保存。")
+			}
+		}
+
+		for index, item := range in {
+			if _, err = tx.Exec(ctx, `UPDATE catalog_models
+SET route_priority=$2,revision=revision+1
+WHERE id=$1 AND route_priority<>$2`, item.ID, index+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := s.Models(ctx)
+	if err != nil {
+		return nil, err
+	}
+	group := make([]CatalogModel, 0, len(in))
+	for _, item := range items {
+		if item.RouteFamily == family {
+			group = append(group, item)
+		}
+	}
+	return group, nil
 }
 func providerRevision(ctx context.Context, q Querier, id string) (Provider, error) {
 	return one[Provider](ctx, q, `SELECT jsonb_build_object('id',p.id,'revision_id',r.id,'revision',p.revision,'name',r.name,'base_url',r.base_url,'proxy_policy',r.proxy_policy,'enabled',p.enabled,'key_ref',r.key_ref) FROM model_providers p JOIN provider_revisions r ON r.id=p.current_revision_id WHERE p.id=$1`, id)
@@ -225,6 +374,9 @@ func modelIdentity(ctx context.Context, q Querier, cid string) (domain.Generatio
 func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (CatalogModel, error) {
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.UpstreamID = strings.TrimSpace(in.UpstreamID)
+	if in.RoutePriority != nil && (*in.RoutePriority < 0 || *in.RoutePriority > 1000) {
+		return CatalogModel{}, domain.Err(422, "INVALID_ARGUMENT", "线路尝试顺序须为 0–1000。")
+	}
 	if in.DisplayName == "" || utf8.RuneCountInString(in.DisplayName) > 80 || in.UpstreamID == "" || len(in.UpstreamID) > 256 || utf8.RuneCountInString(in.Description) > 240 {
 		return CatalogModel{}, domain.Err(422, "INVALID_ARGUMENT", "请填写有效的模型名称、上游 ID 和简短说明。")
 	}
@@ -264,12 +416,19 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 		if in.ContextTokens == nil {
 			in.ContextTokens = domain.Ptr(old.ContextTokens)
 		}
+		routePriority := old.RoutePriority
+		if create {
+			routePriority = 0
+		}
+		if in.RoutePriority != nil {
+			routePriority = *in.RoutePriority
+		}
 		same := !create && old.ProviderRevisionID == provider.RevisionID && old.DisplayName == in.DisplayName && old.BrandID == in.BrandID && old.Description == in.Description && old.UpstreamID == in.UpstreamID && old.MaxOutputTokens == in.MaxOutputTokens && old.MaxInputChars == in.MaxInputChars && old.DisableThinking == in.DisableThinking && old.CachePolicy == in.CachePolicy && old.InputCharsLimit == *in.InputCharsLimit && old.ContextTokens == *in.ContextTokens
 		if same {
-			if in.Enabled && (!old.Verified || !provider.Enabled) {
+			if in.Enabled && !old.Enabled && (!old.Verified || !provider.Enabled) {
 				return domain.Err(409, "MODEL_NOT_VERIFIED", "启用前请先通过当前修订的图片与工具检查，并启用供应商。")
 			}
-			if _, e = tx.Exec(ctx, "UPDATE catalog_models SET enabled=$2,revision=revision+1 WHERE id=$1", id, in.Enabled); e != nil {
+			if _, e = tx.Exec(ctx, "UPDATE catalog_models SET enabled=$2,route_priority=$3,revision=revision+1 WHERE id=$1", id, in.Enabled, routePriority); e != nil {
 				return e
 			}
 		} else {
@@ -303,11 +462,11 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 			}
 			rev, cid := domain.ID(), domain.ID()
 			if create {
-				if _, e = tx.Exec(ctx, "INSERT INTO catalog_models(id,provider_id,current_revision_id) VALUES($1,$2,$3)", id, in.ProviderID, rev); e != nil {
+				if _, e = tx.Exec(ctx, "INSERT INTO catalog_models(id,provider_id,current_revision_id,route_priority) VALUES($1,$2,$3,$4)", id, in.ProviderID, rev, routePriority); e != nil {
 					return e
 				}
 			} else {
-				if _, e = tx.Exec(ctx, "UPDATE catalog_models SET current_revision_id=$2,revision=revision+1,enabled=false WHERE id=$1", id, rev); e != nil {
+				if _, e = tx.Exec(ctx, "UPDATE catalog_models SET current_revision_id=$2,revision=revision+1,enabled=false,route_priority=$3 WHERE id=$1", id, rev, routePriority); e != nil {
 					return e
 				}
 			}

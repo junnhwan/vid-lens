@@ -40,6 +40,8 @@ interface Model {
   context_tokens: number
   disable_thinking: boolean
   cache_policy: string
+  route_priority: number
+  route_family: string
 }
 interface Probe {
   id: string
@@ -288,6 +290,8 @@ export function Manage() {
     [now, setNow] = useState(() => Date.now()),
     [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null),
     [usageOffset, setUsageOffset] = useState(0)
+  const [routeOrderDraft, setRouteOrderDraft] = useState<{ family: string; ids: string[] } | null>(null)
+  const [draggingRoute, setDraggingRoute] = useState("")
   const storage = useRef(
     (() => {
       try {
@@ -432,6 +436,8 @@ export function Manage() {
     if (m && m.id === md.id && !composing) return
     setError("")
     setAdvanced(false)
+    setRouteOrderDraft(null)
+    setDraggingRoute("")
     if (!m) {
       setComposing(true)
       setMd({ ...emptyModel, provider_id: providers[0]?.id || "" })
@@ -616,9 +622,28 @@ export function Manage() {
   function providerName(id: string) {
     return providers.find((p) => p.id === id)?.name || "未关联供应商"
   }
-  function modelMeta(model: { display_name: string; upstream_id: string; provider_id: string }) {
+  const selectedRouteGroup = selected ? models.filter((model) => model.route_family === selected.route_family) : []
+  const baseRouteGroup = selectedRouteGroup.slice().sort((a, b) => {
+    const priorityA = a.route_priority || Number.MAX_SAFE_INTEGER
+    const priorityB = b.route_priority || Number.MAX_SAFE_INTEGER
+    return priorityA - priorityB || providerName(a.provider_id).localeCompare(providerName(b.provider_id), "zh-CN") || a.id.localeCompare(b.id)
+  })
+  const baseRouteIDs = baseRouteGroup.map((model) => model.id)
+  const currentRouteDraft = routeOrderDraft
+  const routeOrderIDs =
+    currentRouteDraft && currentRouteDraft.family === selected?.route_family
+      ? [
+          ...currentRouteDraft.ids.filter((id) => baseRouteIDs.includes(id)),
+          ...baseRouteIDs.filter((id) => !currentRouteDraft.ids.includes(id)),
+        ]
+      : baseRouteIDs
+  const routeOrderChanged = routeOrderIDs.some((id, index) => id !== baseRouteIDs[index])
+  const routeModelsByID = new Map(selectedRouteGroup.map((model) => [model.id, model]))
+  const orderedRouteModels = routeOrderIDs.map((id) => routeModelsByID.get(id)).filter((model): model is Model => Boolean(model))
+  function modelMeta(model: Pick<Model, "display_name" | "upstream_id" | "provider_id" | "route_priority">) {
     const name = providerName(model.provider_id)
-    return model.upstream_id === model.display_name ? name : `${model.upstream_id} · ${name}`
+    const identity = model.upstream_id === model.display_name ? name : `${model.upstream_id} · ${name}`
+    return `${identity} · ${model.route_priority > 0 ? `顺序 ${model.route_priority}` : "自动顺序"}`
   }
   function patchModel(partial: Partial<ModelDraft>) {
     setMd((draft) => ({ ...draft, ...partial }))
@@ -626,7 +651,43 @@ export function Manage() {
   }
   function revertModel() {
     setDirty(false)
+    setRouteOrderDraft(null)
     setMd(selected ? modelDraft(selected) : { ...emptyModel, provider_id: providers[0]?.id || "" })
+  }
+  function moveRoute(id: string, toIndex: number) {
+    if (!selected || dirty || busy) return
+    const fromIndex = routeOrderIDs.indexOf(id)
+    if (fromIndex < 0 || fromIndex === toIndex || toIndex < 0 || toIndex >= routeOrderIDs.length) return
+    const ids = routeOrderIDs.slice()
+    ids.splice(fromIndex, 1)
+    ids.splice(toIndex, 0, id)
+    setRouteOrderDraft({ family: selected.route_family, ids })
+  }
+  async function saveRouteOrder() {
+    if (!selected || !routeOrderChanged || orderedRouteModels.length < 2 || dirty) return
+    await action("route-order", async () => {
+      try {
+        const result = await api.current.request<{ items: Model[] }>("POST", "/api/v1/admin/model-routes/order", {
+          items: orderedRouteModels.map((model) => ({ id: model.id, expected_revision: model.revision })),
+        })
+        const refreshed = new Map(result.body.items.map((model) => [model.id, model]))
+        setModels((current) => current.map((model) => refreshed.get(model.id) || model))
+        const freshSelected = refreshed.get(selected.id)
+        if (freshSelected) setMd(modelDraft(freshSelected))
+        setRouteOrderDraft(null)
+        setDraggingRoute("")
+        setNotice("同型号线路顺序已保存。提交次数较少的线路会先尝试；次数相同时按这里的顺序选择。")
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          const refreshed = await load()
+          const freshSelected = refreshed.find((model) => model.id === selected.id)
+          if (freshSelected) setMd(modelDraft(freshSelected))
+          setRouteOrderDraft(null)
+          setDraggingRoute("")
+        }
+        throw error
+      }
+    })
   }
   return (
     <>
@@ -1145,7 +1206,7 @@ export function Manage() {
                           >
                             <span>
                               <strong>调整参数</strong>
-                              <small>额度、缓存、品牌与说明</small>
+                              <small>线路顺序、额度、缓存与说明</small>
                             </span>
                             <i aria-hidden="true" />
                           </button>
@@ -1218,6 +1279,93 @@ export function Manage() {
                                   onChange={(id) => patchModel({ cache_policy: id })}
                                 />
                               </div>
+                              {!composing && selected && orderedRouteModels.length > 1 ? (
+                                <section className="route-order-panel" aria-labelledby="route-order-title">
+                                  <header className="route-order-head">
+                                    <div>
+                                      <span className="route-order-kicker">同型号备用线路</span>
+                                      <h3 id="route-order-title">设置供应商尝试顺序</h3>
+                                    </div>
+                                    <span className="route-order-count">{orderedRouteModels.length} 条线路</span>
+                                  </header>
+                                  <p className="route-order-help">
+                                    拖动线路调整顺序。恢复时会先尝试提交次数较少的供应商；次数相同时按这里的顺序选择。只有已启用且检查通过的线路会参与请求。
+                                  </p>
+                                  <ol className="route-order-list">
+                                    {orderedRouteModels.map((model, index) => {
+                                      const provider = providerName(model.provider_id)
+                                      const status = !model.provider_enabled
+                                        ? { text: "供应商已停用", tone: "dim" }
+                                        : !model.verified
+                                          ? { text: "待检查", tone: "wait" }
+                                          : !model.enabled
+                                            ? { text: "模型已停用", tone: "dim" }
+                                            : { text: "参与路由", tone: "ready" }
+                                      return (
+                                        <li
+                                          key={model.id}
+                                          data-dragging={draggingRoute === model.id ? "true" : "false"}
+                                          onDragOver={(event) => event.preventDefault()}
+                                          onDrop={(event) => {
+                                            event.preventDefault()
+                                            const id = event.dataTransfer.getData("text/plain") || draggingRoute
+                                            if (id) moveRoute(id, index)
+                                            setDraggingRoute("")
+                                          }}
+                                        >
+                                          <button
+                                            type="button"
+                                            className="route-order-handle"
+                                            draggable={!busy && !dirty}
+                                            disabled={!!busy || dirty}
+                                            aria-label={`拖动${provider}线路，当前第${index + 1}位`}
+                                            onDragStart={(event) => {
+                                              setDraggingRoute(model.id)
+                                              event.dataTransfer.effectAllowed = "move"
+                                              event.dataTransfer.setData("text/plain", model.id)
+                                            }}
+                                            onDragEnd={() => setDraggingRoute("")}
+                                          >
+                                            <span className="route-order-grip" aria-hidden="true">⠿</span>
+                                          </button>
+                                          <span className="route-order-position">{index + 1}</span>
+                                          <span className="route-order-copy">
+                                            <strong>{provider}</strong>
+                                            <small>{model.upstream_id}</small>
+                                          </span>
+                                          <span className="route-order-actions">
+                                            <span className="route-order-status" data-tone={status.tone}>{status.text}</span>
+                                            <button
+                                              type="button"
+                                              className="route-nudge"
+                                              aria-label={`将${provider}线路上移`}
+                                              disabled={!!busy || dirty || index === 0}
+                                              onClick={() => moveRoute(model.id, index - 1)}
+                                            >
+                                              ↑
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="route-nudge"
+                                              aria-label={`将${provider}线路下移`}
+                                              disabled={!!busy || dirty || index === orderedRouteModels.length - 1}
+                                              onClick={() => moveRoute(model.id, index + 1)}
+                                            >
+                                              ↓
+                                            </button>
+                                          </span>
+                                        </li>
+                                      )
+                                    })}
+                                  </ol>
+                                  <footer className="route-order-foot">
+                                    <span>{routeOrderChanged ? "顺序已调整，保存后生效。" : "可拖动排序，也可用上下箭头微调。"}</span>
+                                    <button type="button" className="btn primary" disabled={!!busy || dirty || !routeOrderChanged} onClick={() => void saveRouteOrder()}>
+                                      {busy === "route-order" ? "正在保存" : "保存顺序"}
+                                    </button>
+                                  </footer>
+                                </section>
+                              ) : null}
                               <label className="desk-field">
                                 <span>给访客的一句说明</span>
                                 <input maxLength={240} value={md.description} onChange={(e) => patchModel({ description: e.target.value })} />

@@ -3595,6 +3595,181 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   grid-template-columns: 1fr 1fr;
   column-gap: 28px;
 }
+.route-order-panel {
+  margin: 8px 0 24px;
+  padding: 20px 22px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--teal) 5%, transparent), transparent 48%),
+    var(--canvas);
+}
+.route-order-head,
+.route-order-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.route-order-kicker {
+  color: var(--teal-ink);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.route-order-head h3 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font: 500 20px/1.25 var(--serif);
+  letter-spacing: -0.02em;
+}
+.route-order-count {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.route-order-help {
+  max-width: 690px;
+  margin: 10px 0 16px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.route-order-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.route-order-list li {
+  display: grid;
+  grid-template-columns: 30px 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 58px;
+  padding: 6px 8px 6px 4px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  transition: border-color 160ms var(--ease-out), background-color 160ms var(--ease-out), transform 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+.route-order-list li[data-dragging="true"] {
+  transform: scale(0.99);
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  opacity: 0.62;
+}
+.route-order-handle,
+.route-nudge {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--ink-soft);
+}
+.route-order-handle {
+  width: 30px;
+  height: 38px;
+  border-radius: 9px;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.route-order-handle:active {
+  cursor: grabbing;
+}
+.route-order-handle:focus-visible,
+.route-nudge:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+.route-order-grip {
+  font-size: 21px;
+  line-height: 1;
+}
+.route-order-position {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.route-order-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.route-order-copy strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.route-order-copy small {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.route-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.route-order-status {
+  margin-right: 5px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.route-order-status[data-tone="ready"] {
+  color: var(--teal-ink);
+}
+.route-order-status[data-tone="wait"] {
+  color: var(--amber-ink);
+}
+.route-order-status[data-tone="dim"] {
+  color: var(--ink-faint);
+}
+.route-nudge {
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  background: transparent;
+  font: 500 14px/1 var(--sans);
+  cursor: pointer;
+}
+.route-nudge:hover:not(:disabled) {
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+.route-nudge:disabled,
+.route-order-handle:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+.route-order-foot {
+  margin-top: 15px;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.route-order-foot .btn {
+  flex: 0 0 auto;
+}
 .tune-extra {
   display: grid;
   justify-items: start;

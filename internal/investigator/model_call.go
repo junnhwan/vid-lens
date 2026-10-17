@@ -132,12 +132,22 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	if err != nil {
 		return nil, err
 	}
-	// A recovered operation tries an unused supplier first. Later Agent calls
-	// continue on the last successful route instead of repeatedly hitting a failure.
+	// Recovery prefers routes with fewer submissions. Configured priority orders
+	// routes with equal attempt counts; the last successful route breaks ties.
 	sort.SliceStable(routes, func(i, j int) bool {
 		a, b := routes[i].ConfigID, routes[j].ConfigID
 		if attempts[a] != attempts[b] {
 			return attempts[a] < attempts[b]
+		}
+		priorityA, priorityB := routes[i].RoutePriority, routes[j].RoutePriority
+		if priorityA == 0 {
+			priorityA = 1001
+		}
+		if priorityB == 0 {
+			priorityB = 1001
+		}
+		if priorityA != priorityB {
+			return priorityA < priorityB
 		}
 		return a == preferred && b != preferred
 	})

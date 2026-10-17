@@ -152,6 +152,25 @@ func (a *Server) catalogModels(w http.ResponseWriter, r *http.Request) {
 	}
 	a.json(w, 200, v)
 }
+
+func (a *Server) modelRouteOrder(w http.ResponseWriter, r *http.Request) {
+	if !a.admin(w, r) {
+		return
+	}
+	var in struct {
+		Items []store.ModelRouteOrderEntry `json:"items"`
+	}
+	if !a.body(w, r, &in) {
+		return
+	}
+	items, err := a.Store.ReorderModelRoutes(r.Context(), in.Items)
+	if err != nil {
+		a.problem(w, r, err)
+		return
+	}
+	a.json(w, 200, map[string]any{"items": items})
+}
+
 func (a *Server) modelSettings(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return

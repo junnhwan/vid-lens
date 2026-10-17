@@ -11,6 +11,7 @@ import (
 // ModelRoute is private execution metadata. The public catalog only exposes a
 // representative model; each physical submission retains its actual route.
 type ModelRoute struct {
+	RoutePriority      int            `json:"route_priority"`
 	ConfigID           string         `json:"config_id"`
 	ModelID            string         `json:"model_id"`
 	RevisionID         string         `json:"model_revision_id"`
@@ -61,7 +62,7 @@ func publicModels(models []CatalogModel, preferred *string) ([]domain.Generation
 // enabled, verified suppliers of that exact model. Retired revisions/keys are
 // excluded, including when a provider rotates its credential during a run.
 func modelRoutes(ctx context.Context, q Querier, cid string) ([]ModelRoute, error) {
-	origin, err := one[ModelRoute](ctx, q, `SELECT jsonb_build_object('config_id',c.id,'profile',c.profile,'model_id',r.model_id,'model_revision_id',r.id,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'brand_id',r.brand_id,'eligible',COALESCE(m.enabled AND p.enabled AND m.current_revision_id=r.id AND p.current_revision_id=r.provider_revision_id AND EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),false)) FROM runtime_config_revisions c LEFT JOIN model_revisions r ON r.config_id=c.id LEFT JOIN catalog_models m ON m.id=r.model_id LEFT JOIN model_providers p ON p.id=m.provider_id WHERE c.id=$1`, cid)
+	origin, err := one[ModelRoute](ctx, q, `SELECT jsonb_build_object('route_priority',COALESCE(m.route_priority,0),'config_id',c.id,'profile',c.profile,'model_id',r.model_id,'model_revision_id',r.id,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'brand_id',r.brand_id,'eligible',COALESCE(m.enabled AND p.enabled AND m.current_revision_id=r.id AND p.current_revision_id=r.provider_revision_id AND EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),false)) FROM runtime_config_revisions c LEFT JOIN model_revisions r ON r.config_id=c.id LEFT JOIN catalog_models m ON m.id=r.model_id LEFT JOIN model_providers p ON p.id=m.provider_id WHERE c.id=$1`, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +74,7 @@ func modelRoutes(ctx context.Context, q Querier, cid string) ([]ModelRoute, erro
 		}
 		return []ModelRoute{origin}, nil
 	}
-	routes, err := many[ModelRoute](ctx, q, `SELECT jsonb_build_object('config_id',r.config_id,'profile',c.profile,'model_id',m.id,'model_revision_id',r.id,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'brand_id',r.brand_id,'eligible',true) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN runtime_config_revisions c ON c.id=r.config_id JOIN model_providers p ON p.id=m.provider_id WHERE m.enabled AND p.enabled AND p.current_revision_id=r.provider_revision_id AND EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded') ORDER BY m.id`)
+	routes, err := many[ModelRoute](ctx, q, `SELECT jsonb_build_object('route_priority',m.route_priority,'config_id',r.config_id,'profile',c.profile,'model_id',m.id,'model_revision_id',r.id,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'brand_id',r.brand_id,'eligible',true) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN runtime_config_revisions c ON c.id=r.config_id JOIN model_providers p ON p.id=m.provider_id WHERE m.enabled AND p.enabled AND p.current_revision_id=r.provider_revision_id AND EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded') ORDER BY m.id`)
 	if err != nil {
 		return nil, err
 	}

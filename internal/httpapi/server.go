@@ -69,6 +69,7 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/models", a.catalogModels)
 	m.HandleFunc("POST /api/v1/admin/models/import-current", a.importCurrent)
 	m.HandleFunc("PUT /api/v1/admin/models/{model}", a.catalogModels)
+	m.HandleFunc("POST /api/v1/admin/model-routes/order", a.modelRouteOrder)
 	m.HandleFunc("PUT /api/v1/admin/model-settings", a.modelSettings)
 	m.HandleFunc("POST /api/v1/admin/models/{model}/probes", a.probes)
 	m.HandleFunc("GET /api/v1/admin/models/{model}/probes", a.probes)
