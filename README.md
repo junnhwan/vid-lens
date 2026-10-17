@@ -1,213 +1,83 @@
-<div align="center">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme-banner-dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/readme-banner-light.svg" />
-  <img alt="VidLens — Your video, made readable. Read. Revisit. Ask." src="docs/images/readme-banner-light.svg" width="1440" />
-</picture>
+![VidLens — 让视频变得可读：阅读、回看、追问](docs/images/readme-banner-light.svg)
 
 **简体中文** · [English](README.en.md)
 
-[在线体验](https://vidlens.wanjune.qzz.io/) · [真实示例](https://vidlens.wanjune.qzz.io/example) · [快速开始](#快速开始) · [工程文档](#工程文档)
+[在线体验](https://vidlens.wanjune.qzz.io/) · [真实示例](https://vidlens.wanjune.qzz.io/example) · [Linux.do 交流](https://linux.do/) · [本地开发](docs/backend/startup.md)
 
-![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
-![React](https://img.shields.io/badge/React-18-149ECA?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+VidLens 面向桌面浏览器，把 B 站或 YouTube 视频整理成带章节、真实画面、时间出处和内容导图的图文文章。你可以选择解读深度与关注点，阅读时回看来源，也可以继续提问。
 
-</div>
-
-VidLens 是一个面向桌面 Web 的视频阅读工具。粘贴 B 站或 YouTube 的单条视频链接，选择模型与解读深度、写下关注点，它会结合字幕或语音转写与真实视频画面，生成带配图、时间引用和内容导图的文章。读完后，可以继续问这个视频，也可以选中一张画面追问。
-
-从教程里梳理操作步骤、从分享里提炼思路，或回到某一帧看清一个细节——让理解不必止于一段摘要。
-
-## 适合什么视频
-
-更适合技术讲解、科普、课程学习、操作教程，以及有清晰讲述的知识分享。内容有可梳理的主线，字幕或转写能承载主要信息，画面用于解释概念、步骤或例子时，更容易形成有出处的图文。
-
-音乐、风景、纯剪辑等缺少讲述的视频，可整理的信息通常较少；依赖连续动作、节奏或剧情体验的内容，也很难通过稀疏取帧完整呈现。这里是选片建议，不按题材禁止提交；字幕缺失、转写不准、画面细节不可辨认仍会影响结果。
-
-## 先看一次真实演示
-
-不想先配环境，可以直接打开[真实示例](https://vidlens.wanjune.qzz.io/example)：
+## 先看真实示例
 
 | 示例 | 可以体验 |
 | --- | --- |
-| [从 Grill 到 Retro · B 站 / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | 图文、内容导图、处理回放、文字与选图问答 |
-| [Skills v1.3，三个新技能 · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | 图文、取证过程、带时间引用的追问，以及从真实 PR 画面继续提问 |
+| [从 Grill 到 Retro · B 站 / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | 图文文章、内容导图、处理回放和问答 |
+| [Skills v1.3，三个新技能 · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | 取证过程、时间引用和画面追问 |
 
-示例的文章、配图和答案来自已保存的真实生成结果。处理与问答过程是压缩等待时间后的回放，浏览不会发起新的模型调用。示例是专门整理的公开内容，普通访客的文章和问答仍受匿名会话权限保护。
+这些是已保存的真实结果；浏览示例不会发起新的模型调用。
+
+## 实际处理与阅读界面
+
+以下处理、文章和问答截图来自一条 10:08 的 YouTube 实测视频。流程进度和用时只代表截图捕获时的界面状态，不构成时长承诺。
+
+### 提交视频
+
+![VidLens 首页：粘贴视频链接并选择模型与解读深度。](docs/images/readme-demo-home.png)
+
+### 查看处理阶段与计划
+
+![VidLens 处理页面：查看当前阶段、执行计划和全片概览画面。](docs/images/readme-process-plan.png)
+
+### 准备文字来源与画面证据
+
+![VidLens 来源准备记录：检查平台字幕、获取视频并生成覆盖全片的概览帧。](docs/images/readme-process-source-detail.png)
+
+### 分批撰写文章
+
+![VidLens 处理进度：12 章计划中已保存 6 章，Agent 正在继续撰写。](docs/images/readme-process-writing-progress.png)
+
+### 阅读带时间出处的文章
+
+![VidLens 图文文章：正文包含时间引用，并配有真实视频画面。](docs/images/readme-article-detail.png)
+
+### 浏览章节内容导图
+
+![VidLens 已生成的图文文章页面：显示章节内容导图和导出、回看处理、视频追问入口。](docs/images/readme-article-map.png)
+
+### 选中内容继续追问
+
+![VidLens 视频问答：选中文章内容后，在侧栏查看带时间出处的回答和对应视频画面。](docs/images/readme-frame-qa.png)
 
 ## 核心能力
 
-- **从链接开始阅读**：支持 B 站单条视频与单个分 P、YouTube 单条视频。优先采用可用平台字幕，不可用时回落语音转写；获取视频不需要提供个人平台 Cookie。
-- **选择解读深度与关注点**：提交前选择精简、标准或详细档位（默认标准），选择可用模型、填写可选关注点。三档都以全片主要内容为范围，调整解释深度；文章与后续问答固定同一模型版本，保留当次配置。
-- **图文与内容导图**：正文按章节组织，配上实际视频帧、图注与时间引用；内容导图帮助浏览主线并跳转章节。
-- **真正看画面的 Agent**：模型接收覆盖整段视频的文字和稀疏概览帧，再按需检索原文、检查时间窗与局部画面，记录观察后整理结果。视觉调查会传入真实图片。
-- **文字提问，也能选图追问**：围绕当前视频继续提问，回答可包含文字出处与画面证据；标出无法确认的部分，支持放大图片、回到原视频对应时刻。
-- **读完可以带走**：导出 Markdown，或包含原始配图、来源清单和校验清单的 ZIP。导出不包含私有问答与完整转写。
-- **看得见的处理过程**：显示当前计划、已保存章节、每次模型调用与实际发送次数。新调用保留为新记录，同一次调用内更新当前动作；工具与观察另有记录。执行状态与检查点持久化，兼容的失败重试可接续已保存章节。
-- **可选网络补充**：问答可以结合公开网页补充资料，每轮由你主动允许，并明确区分视频与网页出处。
+- **从视频开始**：支持 B 站单条视频、单个分 P 和 YouTube 单条视频；优先使用字幕，缺失时进行语音转写，不需要个人平台 Cookie。
+- **带出处阅读**：文章按章节组织，包含真实画面、时间引用和内容导图；可导出 Markdown 或图文 ZIP。
+- **围绕证据提问**：Agent 根据视频文字和画面查找依据；可追问文章、段落或选中画面，并标出来源和未确认之处。
+- **查看实际进度**：页面展示来源准备、取证、写作和校验过程，已保存的步骤可以回看。服务启用时，也可对单轮问答选择补充公开网页资料。
 
-模型和平台可用性取决于部署环境与供应商。网络补充默认关闭，是否可用以当前服务为准。
+## 架构概览
 
-## 界面预览
+这张图概括了从视频链接到图文阅读的流程，以及当前应用服务、Agent、队列和持久化存储之间的关系。
 
-以下截图于 2026-10-16 从桌面 Web 界面实拍；图文与问答使用上述保存的真实示例，界面语言为中文。截图早于三档解读选择、执行计划与首页选片提示的新增；顶部横幅沿用项目现有标识与字标。
+![VidLens 架构图：视频来源准备、Agent 证据调查、文章发布与当前服务组件。](docs/images/readme-architecture.svg)
 
-### 贴一个链接，带上你的关注点
+## 适合什么视频
 
-在首页选择模型、添加关注点，再开始解读。支持浅色、深色及跟随系统主题。
+技术讲解、科普、课程和操作教程等讲述清晰的视频更适合整理成图文。音乐、风景或纯剪辑视频可供整理的信息较少；静态画面也无法完整表达连续动作、节奏或剧情。结果会受字幕、转写、画面清晰度和模型服务影响。详见[选片建议](docs/site/start.md)。
 
-![VidLens 首页：视频链接、模型选择与关注点入口](docs/images/readme-home.jpg)
+## 本地开发
 
-### 文字有出处，画面能细看
+需要 Go 1.26+、Node.js 22+、PostgreSQL 17、Redis 7 和 FFmpeg；Windows 上运行后端需使用 Linux/Docker 环境。完整步骤见[启动与配置](docs/backend/startup.md)。
 
-正文配图来自原视频，图注和引用保留时间点；点击画面可以放大，点击时间可以回到视频。
+## 文档
 
-![真实文章：Grill 章节、原视频画面与时间引用](docs/images/readme-evidence.jpg)
+[使用指南](docs/site/index.md) · [隐私与保留](docs/site/privacy.md) · [Agent 执行与恢复](docs/backend/execution.md)
 
-### 从一张画面，再多问一句
+## 社区与反馈
 
-选中视频里的 PR 截图，追问 Evidence、Door 和 Blast Radius。回答结合实际画面，区分直接观察与解释。
+VidLens 的发布与讨论在 [Linux.do](https://linux.do/)；欢迎分享体验、提问和交流建议。技术问题与可复现的缺陷也可以提交到 [GitHub Issues](https://github.com/junnhwan/vid-lens/issues)。
 
-![真实选图问答：选中的 PR 画面、问题与带引用的回答](docs/images/readme-qa.jpg)
-
-<details>
-<summary>展开查看：内容导图与处理回放</summary>
-
-**内容导图与章节导航**：先看主线，再跳到想读的章节。
-
-![文章的内容导图与章节导航](docs/images/readme-article.jpg)
-
-**处理回放**：查看已经保存的真实步骤和取证画面；这里展示的是回放结果。
-
-![真实处理回放：公开执行步骤与视频取证画面](docs/images/readme-process.jpg)
-
-</details>
-
-## 从视频到图文，背后发生了什么
-
-![VidLens 系统架构：来源准备、证据调查、图文与问答；Go、PostgreSQL、Redis 与持久化文件](docs/images/readme-architecture.svg)
-
-1. **准备来源**：解析链接，匿名获取视频与可用字幕；必要时转写音频，冻结来源快照与真实时长。
-2. **围绕证据调查**：Go / Eino Agent 接收完整可用文字和全视频概览帧，调用原文检索、时间窗阅读、取帧与观察记录工具。
-3. **校验后发布**：服务端校验文章结构、引用归属、原文片段、帧时间和图片文件，再保存正式文章。已发布文章保持不可变，后续问答单独保存。
-4. **继续阅读与追问**：浏览器读取已保存结果，通过 SSE 接收公开执行步骤；问答限定当前视频和当前匿名会话。
-
-PostgreSQL 保存业务状态、来源、证据与结果；Redis / Asynq 负责投递、资源协调与小型索引缓存；视频缓存和正式配图由应用持久化目录保存。API 与分队列 Worker 运行在一个 Go 进程中。
-
-当前检索使用时间范围、关键词与全视频覆盖，向量检索尚未启用。校验保证的是结构与证据引用约束，模型解释本身仍可能有误。详见[执行与恢复](docs/backend/execution.md)。
-
-## 快速开始
-
-### 环境要求
-
-| 组件 | 要求 |
-| --- | --- |
-| Go | 1.26+；仅容器运行后端时无需在宿主安装 |
-| Node.js | 22+，用于前端开发，也可供原生 yt-dlp 执行 YouTube JavaScript |
-| 数据服务 | PostgreSQL 17、Redis 7；仓库提供 Docker Compose |
-| 媒体工具 | FFmpeg / ffprobe、`yt-dlp[default]==2026.8.19`；YouTube 还需要 Deno 2.3+ 或 Node 22+ |
-| 模型服务 | Chat Completions 兼容接口，支持图片与流式工具调用 |
-| ASR 服务 | 同步 OpenAI 兼容 multipart 音频转写接口 |
-
-Windows 请使用 Linux / Docker 运行后端，当前资源管理代码使用 Unix 系统调用。后端镜像已包含媒体工具、匹配的 yt-dlp / EJS 及 Deno。
-
-### 1. 启动依赖，填写配置
-
-以下命令面向新环境；已有配置时保留原文件，端口已占用时先调整 Compose 与配置。
-
-```sh
-git clone https://github.com/junnhwan/vid-lens.git
-cd vid-lens
-
-docker compose -p vidlens-dev -f compose.backend.yaml up -d postgres redis
-mkdir -p .local
-cp config.example.yaml .local/backend.yaml
-chmod 600 .local/backend.yaml
-```
-
-编辑 `.local/backend.yaml`：填写模型和 ASR 地址、型号与 API Key；为 `admin_token` 和 `secret_key` 分别生成独立随机值（至少 32 个字符，例如分别运行 `openssl rand -hex 32`）。原生运行时，把 `data_dir` 改为仓库外已创建、当前用户可写的绝对路径。
-
-YAML 中的产品配置与凭据只初始化新数据库一次；修改文件并重启不会覆盖数据库中已有的设置。请保管好原 `secret_key`，数据库中的加密凭据依赖它。
-
-### 2. 启动后端
-
-原生运行（已安装环境要求中的媒体工具）：
-
-```sh
-go run ./cmd/vidlens --config .local/backend.yaml
-```
-
-或使用容器，二选一：
-
-```sh
-docker compose -p vidlens-dev -f compose.backend.yaml --profile app up -d --build
-```
-
-Compose 的默认数据库密码仅供本地开发；其他环境请设置独立凭据，并使用独立数据卷。
-
-### 3. 启动前端
-
-另开终端：
-
-```sh
-cd frontend
-npm ci
-npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
-```
-
-打开 <http://127.0.0.1:5173>。Vite 默认代理至后端 `127.0.0.1:8086`。端口、来源获取与环境说明见[启动与配置](docs/backend/startup.md)；浏览器请求、SSE 与代理约定见[前端集成](docs/backend/frontend-integration.md)。
-
-## 使用边界
-
-- 面向当前单条视频的解读与问答；不提供本地文件上传、多视频知识库或任意长度视频的处理承诺。长视频受输入、调用、时长与磁盘预算约束，超出范围会明确失败。
-- 匿名获取仍可能被上游平台拒绝或要求验证。私有、付费、会员专属与年龄受限内容不保证可用，B 站画质取决于公开接口实际返回的轨道与资源限制。
-- 访客使用匿名会话，普通文章与问答不提供公开分享。会话默认自创建起保留 30 天，丢失 Cookie 或会话到期后没有账号找回入口；重要内容建议导出。
-- 平台字幕不可用时使用 ASR。若供应商只返回文本，引用按真实音频窗口标注，不伪造逐句时间。已发布正文不会随追问被改写。
-- SSE 展示公开步骤与最终结果，不逐 token 展示模型回答；自动化检查不代表每个模型、视频和部署环境均已验证。
-
-## 开发与验证
-
-```sh
-go test ./cmd/... ./internal/...
-go vet ./cmd/... ./internal/...
-go build -o .local/bin/vidlens ./cmd/vidlens
-
-cd frontend
-npm test
-npm run build
-```
-
-前端构建包含 TypeScript 检查。后端集成测试另需设置 `VIDLENS_TEST_DATABASE_URL` 和 `VIDLENS_TEST_REDIS_URL`，指向隔离测试库与 Redis 逻辑 DB；PostgreSQL 测试创建并清理随机 schema。媒体测试依赖 FFmpeg / ffprobe，真实模型与 ASR 验证会产生供应商调用。
-
-生产需要同源静态服务与 API 代理、无缓冲 SSE、私有配置和持久化数据，参考 [nginx 示例](config-examples/nginx.conf.example)。当前仓库没有 GitHub Actions 部署工作流，推送源码不会自动部署。
-
-## 工程文档
-
-| 入口 | 内容 |
-| --- | --- |
-| [启动与配置](docs/backend/startup.md) | 环境、首次初始化、平台获取与数据保留 |
-| [模型选择与文章导出](docs/backend/product-features.md) | 固定型号、关注点、Markdown / ZIP、可选网络补充 |
-| [执行与恢复](docs/backend/execution.md) | 证据工具、发布校验、检查点、资源与文件生命周期 |
-| [前端集成](docs/backend/frontend-integration.md) | API、SSE、匿名会话与交互约定 |
-| [使用文档](docs/site/index.md) | 阅读、问答、引用、导出与隐私说明 |
-| [README 视觉素材](docs/readme-assets.md) | 截图来源、示例归属与视觉素材维护 |
-
-源码入口：`cmd/vidlens/` 为后端命令，`internal/` 为 Go 业务模块，`frontend/` 为 React / TypeScript / Vite 应用。`docs/prototype/` 仅保留静态设计参考。
-
-## 交流与反馈
-
-欢迎通过 [GitHub Issues](https://github.com/junnhwan/vid-lens/issues) 反馈问题与建议，也可以在 [linux.do](https://linux.do/) 交流使用体验。请附上复现步骤与可公开的错误信息，避免提交 API Key、Cookie 或私有问答。
+网站面向桌面浏览器，访客无需注册；文章和问答由当前匿名会话持有。详情见[隐私与保留](docs/site/privacy.md)。
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=junnhwan%2Fvid-lens&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left" />
-    <img alt="VidLens Star History" src="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left" />
-  </picture>
-</a>
+[![VidLens Star History](https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left)](https://www.star-history.com/?repos=junnhwan%2Fvid-lens&type=date&legend=top-left)

@@ -1,38 +1,33 @@
 # README visual assets
 
-The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). Screenshots were captured on October 16, 2026 from the desktop application, using the saved public examples bundled with the frontend. These captures predate the concise/standard/detailed selector. No new video processing, transcription, or generation was started for these captures.
+The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). The seven PNG screenshots below were supplied by the user from real desktop tests and copied without edits. Progress counters and elapsed times reflect the page state in each capture; they are not a service guarantee. No extra video processing or model calls were started to create the images.
 
 ## Screenshots
 
 | File | Application view | Contents |
 | --- | --- | --- |
-| `readme-home.jpg` | `/` | Actual home page, model selector, optional focus entry, and the serving host's disk indicator |
-| `readme-article.jpg` | `/example?video=workflow` | Published article, content map, and section navigation |
-| `readme-evidence.jpg` | `/example?video=workflow` | Grill section, original video frame, caption, and timestamps |
-| `readme-qa.jpg` | `/example?video=skills&view=qa&question=frame` | Saved frame question, selected PR image, and start of the answer |
-| `readme-process.jpg` | `/example?video=skills&view=process` | Completed processing replay with original public steps and evidence frames |
+| `readme-demo-home.png` | `001.png` | Home page, link submission, and model/depth selectors |
+| `readme-process-plan.png` | `013.png` | Current stage, execution plan, and overview frames |
+| `readme-process-source-detail.png` | `014.png` | Subtitle check, video acquisition, and overview-frame records |
+| `readme-process-writing-progress.png` | `015.png` | Article drafting with 6 of 12 planned chapters saved |
+| `readme-article-detail.png` | `017.png` | Article text, timestamp citations, and an original video frame |
+| `readme-article-map.png` | `019.png` | Generated article page with its chapter content map |
+| `readme-frame-qa.png` | `021.png` | Selected passage, related video frame, and sourced Q&A |
 
-Screenshots preserve the rendered application. UI and saved content are in Chinese. The model labels, counters, disk capacity, and elapsed times are observations from that capture or saved run; they are not default model recommendations, performance benchmarks, or current service guarantees. Replay timing compresses waits. The workflow example has no saved intermediate Q&A steps; the UI retains that disclosure. The Skills example has saved intermediate steps. Do not synthesize missing steps or relabel a replay as a live run.
+The six processing, article, and Q&A captures use a 10:08 YouTube video titled *RAG Explained For Beginners*. UI language, model label, counters, and elapsed time are observations from the supplied captures, not default recommendations, benchmarks, or service guarantees. These static screenshots do not make the test article an interactive public example; ordinary visitor articles and Q&A remain private to their anonymous session.
 
 Only explicitly prepared public examples appear in the screenshots. Ordinary visitor articles and Q&A remain private to their anonymous session. When refreshing images, check that no credentials, private service settings, browser sessions, private requests, or personal data appear in the capture.
 
-## Video attribution
-
-The screenshots contain frames from videos featuring Matt Pocock and their generated commentary. Video frames remain attributable to their original creators and are used here to demonstrate the application's handling of evidence; they are not project-owned illustrations.
-
-- Workflow example: [Bilibili source](https://www.bilibili.com/video/BV14Upq6yEq7?p=1), as recorded in [`workflow.json`](../frontend/public/example/workflow.json).
-- Skills v1.3 example: [YouTube source](https://www.youtube.com/watch?v=BsJGo1wFTvQ), as recorded in [`skills.json`](../frontend/public/example/skills.json).
-
-Keep the original source links, timestamps, and visible attribution when updating these demonstrations.
+Earlier `.jpg` captures and the superseded PNGs `readme-process-source.png`, `readme-process-writing.png`, `readme-process-review.png`, and `readme-demo-article.png` remain in `docs/images/` but are not used by the current README. If they are reused, retain their original source links and attribution.
 
 ## Banner
 
-The header uses two self-contained SVG files: `readme-banner-light.svg` and `readme-banner-dark.svg`. Both are 1440 × 300, with a flat background, generous whitespace, the project's existing favicon and vector wordmark on the left, and two lines of copy on the right:
+The current README uses `readme-banner-light.svg` through a plain Markdown image reference for compatibility with previewers that display raw HTML picture markup. The optional `readme-banner-dark.svg` variant remains available. Both are self-contained 1440 × 300 SVGs, with a flat background, generous whitespace, the project's existing favicon and vector wordmark on the left, and two lines of copy on the right:
 
 > Your video, made readable.<br>
 > **Read. Revisit. Ask.**
 
-A `<picture>` element selects the matching GitHub light or dark theme; the light version is the fallback. The language links and badges follow directly below it, without repeating the project name and tagline.
+The language links and demo/local-setup links follow the banner, without repeating the project name and tagline.
 
 The logo is derived from [`frontend/public/favicon.svg`](../frontend/public/favicon.svg), and the wordmark paths from `Wordmark` in [`SiteHeader.tsx`](../frontend/src/ui/SiteHeader.tsx). The SVGs have no scripts or external resources. Only the two-line copy uses a system monospace font stack; the logo and wordmark are paths.
 

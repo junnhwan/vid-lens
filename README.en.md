@@ -1,213 +1,83 @@
-<div align="center">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme-banner-dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/readme-banner-light.svg" />
-  <img alt="VidLens — Your video, made readable. Read. Revisit. Ask." src="docs/images/readme-banner-light.svg" width="1440" />
-</picture>
+![VidLens — Your video, made readable. Read. Revisit. Ask.](docs/images/readme-banner-light.svg)
 
 [简体中文](README.md) · **English**
 
-[Live demo](https://vidlens.wanjune.qzz.io/) · [Real examples](https://vidlens.wanjune.qzz.io/example) · [Quick start](#quick-start) · [Documentation](#documentation)
+[Live demo](https://vidlens.wanjune.qzz.io/) · [Real examples](https://vidlens.wanjune.qzz.io/example) · [Linux.do community](https://linux.do/) · [Local setup](docs/backend/startup.md)
 
-![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
-![React](https://img.shields.io/badge/React-18-149ECA?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
-
-</div>
-
-VidLens is a video reading tool for the desktop Web. Paste a Bilibili or YouTube video link, choose a model and interpretation depth, and optionally describe your focus. It combines subtitles or speech transcription with actual video frames to produce an illustrated article with timestamped citations and a navigable content map. Then ask follow-up questions about the same video, or select a frame and ask about what you see.
-
-Follow the steps in a tutorial, unpack an idea from a talk, or return to a frame to examine a detail. Keep reading beyond the summary.
-
-## Which videos work best
-
-Technical explanations, science explainers, courses, tutorials, and clearly narrated knowledge-sharing videos are the best fit. A coherent topic, subtitles or transcription carrying the main information, and visuals that explain concepts, steps, or examples make it easier to produce a source-linked article.
-
-Music, scenery, and montage videos with little narration usually provide less information to organize. Sparse frame sampling also cannot fully convey continuous motion, timing, or a story's viewing experience. These are selection suggestions, not genre restrictions. Missing subtitles, inaccurate transcription, and unreadable visual details can still limit results.
+VidLens turns a Bilibili or YouTube video into a desktop reading experience: an illustrated article with chapters, real video frames, timestamped sources, and a content map. Choose an interpretation depth and focus, revisit the sources, and ask follow-up questions as you read.
 
 ## Try a real example
 
-Explore the [saved examples](https://vidlens.wanjune.qzz.io/example) before setting up an environment:
-
 | Example | What you can explore |
 | --- | --- |
-| [From Grill to Retro · Bilibili / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | Illustrated article, content map, processing replay, text and frame questions |
-| [Skills v1.3: Three New Skills · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | Article, evidence-gathering steps, timestamped answers, and questions about an actual PR shown in the video |
+| [From Grill to Retro · Bilibili / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | Illustrated article, content map, processing replay, and Q&A |
+| [Skills v1.3: Three New Skills · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | Evidence gathering, timestamped citations, and questions about a frame |
 
-The articles, images, and answers are saved outputs from real runs. Processing and Q&A replays compress waiting time; browsing them makes no new model calls. These examples were specifically prepared for public display. Ordinary visitor articles and questions remain protected by their anonymous session.
+These are saved real results. Browsing them makes no new model calls.
 
-## Features
+## Processing and reading
 
-- **Start with a link.** Supports individual Bilibili videos and parts, and individual YouTube videos. Uses available platform subtitles first, with speech transcription as a fallback. No personal platform Cookie is required to acquire videos.
-- **Choose depth, focus, and model.** Select concise, standard, or detailed interpretation (standard by default), choose an available model, and optionally describe what matters to you. Every level targets the video's main topics, with a different depth of explanation. The article and its follow-up questions retain the same model version and frozen configuration.
-- **Illustrated articles and content maps.** Read structured sections with original video frames, captions, and timestamped citations. Use the content map to follow the main ideas and jump between sections.
-- **An Agent that sees the frames.** The model receives usable text and overview frames spanning the video, then retrieves source text, examines time windows and crops, and records observations before producing a result. Visual investigation sends actual image pixels to the model.
-- **Ask in words or start from a frame.** Continue asking about the current video, with text and visual evidence in the answer. Inspect images, return to the original timestamps, and see what could not be confirmed.
-- **Take the article with you.** Export Markdown or a ZIP containing original article images, source records, and a verification manifest. Exports omit private Q&A and full transcripts.
-- **Follow the processing steps.** See the current plan, saved chapters, numbered model calls, and actual submission counts. Each new call keeps its own record; its current action can update while it runs. Tools and observations have separate records. Persisted checkpoints allow compatible explicit retries to continue from saved chapters.
-- **Optional web references.** Questions can use public webpages as supplementary sources when you opt in for that turn. Answers distinguish video evidence from web citations.
+The processing, article, and Q&A screenshots below come from a real test of a 10:08 YouTube video. Progress and elapsed times show the page state at capture; they are not a processing-time guarantee.
 
-Model and platform availability depend on the provider and deployment environment. Web references are off by default; availability depends on the current service.
+### Submit a video
 
-## Screenshots
+![VidLens home page: paste a video link and choose a model and interpretation depth.](docs/images/readme-demo-home.png)
 
-Captured from the desktop Web interface on October 16, 2026. Article and Q&A screens use the saved real examples above. These screenshots predate the interpretation-depth selector, execution plan, and home-page video-selection guidance. The application UI is currently in Chinese; the header uses the project's existing logo and wordmark.
+### Follow the current stage and plan
 
-### One link, with your focus
+![VidLens processing page: the current stage, execution plan, and overview frames from across the video.](docs/images/readme-process-plan.png)
 
-Choose a model, add an optional focus, and start reading. Light, dark, and system themes are available.
+### Prepare source text and visual evidence
 
-![VidLens home: video link, model selection, and optional focus](docs/images/readme-home.jpg)
+![VidLens source preparation log: subtitle checks, video acquisition, and overview frames spanning the video.](docs/images/readme-process-source-detail.png)
 
-### Read the text. Inspect the evidence.
+### Draft the article in batches
 
-Article figures come from the original video, with captions and timestamps. Enlarge a frame or follow a citation back to the video.
+![VidLens processing progress: 6 of 12 planned chapters are saved while the Agent continues writing.](docs/images/readme-process-writing-progress.png)
 
-![A real article with an original video frame and timestamped citations](docs/images/readme-evidence.jpg)
+### Read the article with timestamped sources
 
-### Ask one more question about a frame
+![VidLens illustrated article: body text with timestamped citations and a real video frame.](docs/images/readme-article-detail.png)
 
-Select a PR shown in the video and ask about its Evidence, Door, and Blast Radius. The saved answer distinguishes visible details from interpretation.
+### Browse the content map
 
-![A real frame question with the selected PR image and a cited answer](docs/images/readme-qa.jpg)
+![Generated VidLens article page with a chapter content map and links to export, revisit processing, and ask about the video.](docs/images/readme-article-map.png)
 
-<details>
-<summary>More: content map and processing replay</summary>
+### Ask about a passage or frame
 
-**Content map and section navigation:** follow the main ideas, then jump to a section.
+![VidLens video Q&A: select article content and view an answer with timestamped sources alongside the related video frame.](docs/images/readme-frame-qa.png)
 
-![Article content map and section navigation](docs/images/readme-article.jpg)
+## Core features
 
-**Processing replay:** inspect saved activity and evidence frames. This screen displays a replay of a completed run.
+- **Start with a video**: Supports a Bilibili video or individual part, and a single YouTube video. Uses available subtitles first, with speech transcription when they are missing. Personal platform cookies are not required.
+- **Read with sources**: Articles include chapters, real video frames, timestamped citations, and a content map. Export as Markdown or an illustrated ZIP.
+- **Ask about evidence**: The Agent searches the video's text and frames for support. Ask about the article, a passage, or a selected frame; answers identify sources and unresolved points.
+- **Follow the work**: See source preparation, investigation, writing, and review progress, then revisit saved steps. When enabled, public webpages can supplement an individual question.
 
-![Saved processing replay with public steps and evidence frames](docs/images/readme-process.jpg)
+## Architecture
 
-</details>
+This diagram shows how a video link becomes an illustrated article and how the current service, Agent, queue, and persistent storage fit together.
 
-## From video to reading
+![VidLens architecture: video preparation, Agent evidence investigation, article publication, and current service components.](docs/images/readme-architecture.svg)
 
-![VidLens architecture: source preparation, evidence investigation, reading and Q&A; Go, PostgreSQL, Redis, and persistent files](docs/images/readme-architecture.svg)
+## Videos that work well
 
-1. **Prepare the source.** Resolve the link, acquire media and available subtitles anonymously, transcribe when necessary, and freeze the source snapshot and actual duration.
-2. **Investigate the evidence.** A Go / Eino Agent receives complete usable text and overview frames covering the video, then uses source search, time-window reading, frame inspection, and observation tools.
-3. **Validate and publish.** The server checks structure, citation ownership, original text spans, frame times, and image files before saving the article. Published articles remain immutable; subsequent answers are stored separately.
-4. **Keep reading and asking.** The browser loads saved results and receives public activity through SSE. Q&A concerns the current video and belongs to the current anonymous session.
+Technical explainers, science videos, courses, and tutorials with clear narration are a good fit. Music, scenery, and montages may provide less information to organize; still frames also cannot fully convey continuous action, rhythm, or story. Results depend on subtitles, transcription, frame clarity, and model availability. See the [video selection guide](docs/site/start.md).
 
-PostgreSQL owns application state, source snapshots, evidence, and results. Redis / Asynq handles delivery, resource coordination, and small index caches. The application's persistent data directory holds cached media and owned article images. The API and separate worker pools run in one Go process.
+## Local development
 
-Retrieval currently uses time ranges, keywords, and whole-video coverage. Vector retrieval is not enabled. Validation enforces structural and citation constraints; it does not guarantee that a model's interpretation is correct. See [execution and recovery](docs/backend/execution.md).
-
-## Quick start
-
-### Requirements
-
-| Component | Requirement |
-| --- | --- |
-| Go | 1.26+; not required on the host when running the backend in Docker |
-| Node.js | 22+ for frontend development; also usable for native yt-dlp YouTube JavaScript execution |
-| Data services | PostgreSQL 17 and Redis 7; Docker Compose is provided |
-| Media tools | FFmpeg / ffprobe and `yt-dlp[default]==2026.8.19`; YouTube also needs Deno 2.3+ or Node 22+ |
-| Model service | Chat Completions-compatible API with image input and streaming tool calls |
-| ASR service | Synchronous OpenAI-compatible multipart audio transcription endpoint |
-
-Use Linux / Docker for the backend on Windows: resource management currently uses Unix system calls. The backend image includes media tools, matching yt-dlp / EJS packages, and Deno.
-
-### 1. Start dependencies and configure
-
-These commands assume a new environment. Preserve an existing configuration; adjust Compose and configuration if the ports are already occupied.
-
-```sh
-git clone https://github.com/junnhwan/vid-lens.git
-cd vid-lens
-
-docker compose -p vidlens-dev -f compose.backend.yaml up -d postgres redis
-mkdir -p .local
-cp config.example.yaml .local/backend.yaml
-chmod 600 .local/backend.yaml
-```
-
-Edit `.local/backend.yaml`: set model and ASR endpoints, model names, and API keys. Generate independent random values of at least 32 characters for `admin_token` and `secret_key`, for example by running `openssl rand -hex 32` separately for each. For native execution, set `data_dir` to an existing, writable absolute directory outside the repository.
-
-YAML product settings and credentials initialize a new database only once; editing the file and restarting does not overwrite existing database settings. Keep the original `secret_key`: encrypted credentials in PostgreSQL depend on it.
-
-### 2. Start the backend
-
-Run natively after installing the required media tools:
-
-```sh
-go run ./cmd/vidlens --config .local/backend.yaml
-```
-
-Or run the backend in Docker instead:
-
-```sh
-docker compose -p vidlens-dev -f compose.backend.yaml --profile app up -d --build
-```
-
-The default Compose database password is for local development. Use independent credentials and isolated volumes for other environments.
-
-### 3. Start the frontend
-
-In another terminal:
-
-```sh
-cd frontend
-npm ci
-npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
-```
-
-Open <http://127.0.0.1:5173>. Vite proxies to backend port `127.0.0.1:8086` by default. See [startup and configuration](docs/backend/startup.md) for ports, source acquisition, and environment settings, and [frontend integration](docs/backend/frontend-integration.md) for browser requests, SSE, and proxy configuration.
-
-## Scope and limitations
-
-- Interpretation and Q&A target one current video. Local file uploads, multi-video knowledge bases, and arbitrary-length video processing are not offered. Input, call, time, and disk budgets can stop processing explicitly.
-- Anonymous acquisition may still be refused or require platform verification. Private, paid, members-only, and age-restricted sources are not guaranteed. Bilibili quality depends on the public tracks actually returned and resource limits.
-- Visitors use anonymous sessions. Ordinary articles and Q&A have no public sharing feature. Sessions last 30 days from creation by default; lost Cookies or expired sessions have no account-based recovery. Export content you want to keep.
-- ASR is a fallback when subtitles are unavailable. For text-only ASR responses, citations use actual audio windows without inventing sentence timestamps. Follow-up answers do not rewrite the published article.
-- SSE exposes public steps and final results, without streaming answer tokens to visitors. Automated checks do not establish compatibility or quality for every provider, video, or environment.
-
-## Development and verification
-
-```sh
-go test ./cmd/... ./internal/...
-go vet ./cmd/... ./internal/...
-go build -o .local/bin/vidlens ./cmd/vidlens
-
-cd frontend
-npm test
-npm run build
-```
-
-The frontend build includes TypeScript checking. Backend integration tests additionally need `VIDLENS_TEST_DATABASE_URL` and `VIDLENS_TEST_REDIS_URL`, pointing at an isolated test database and Redis logical DB. PostgreSQL tests create and remove random schemas. Media tests need FFmpeg / ffprobe. Real model and ASR verification makes provider calls.
-
-Production requires same-origin static hosting and API proxying, unbuffered SSE, private configuration, and persistent data. See the [nginx example](config-examples/nginx.conf.example). This repository has no GitHub Actions deployment workflow; pushing source does not deploy it.
+Requires Go 1.26+, Node.js 22+, PostgreSQL 17, Redis 7, and FFmpeg. The backend needs a Linux/Docker environment on Windows. See [startup and configuration](docs/backend/startup.md) for details.
 
 ## Documentation
 
-| Guide | Contents |
-| --- | --- |
-| [Startup and configuration](docs/backend/startup.md) | Environment, first-run initialization, platform acquisition, and data retention |
-| [Model selection and article exports](docs/backend/product-features.md) | Fixed model identity, focus, Markdown / ZIP, and optional web references |
-| [Execution and recovery](docs/backend/execution.md) | Evidence tools, publication checks, checkpoints, resources, and file lifetimes |
-| [Frontend integration](docs/backend/frontend-integration.md) | API, SSE, anonymous sessions, and interaction contracts |
-| [User documentation](docs/site/index.md) | Reading, questions, citations, exports, and privacy; currently in Chinese |
-| [README visual assets](docs/readme-assets.md) | Screenshot provenance, example attribution, and visual maintenance |
+[User guide](docs/site/index.md) · [Privacy and retention](docs/site/privacy.md) · [Agent execution and recovery](docs/backend/execution.md)
 
-Source layout: `cmd/vidlens/` is the backend entrypoint, `internal/` contains Go application modules, and `frontend/` is the React / TypeScript / Vite application. `docs/prototype/` is a static design reference.
+## Community and feedback
 
-## Feedback and discussion
+VidLens announcements and discussions are on [Linux.do](https://linux.do/). Share your experience, ask questions, and discuss ideas there. Technical questions and reproducible bugs can also go to [GitHub Issues](https://github.com/junnhwan/vid-lens/issues).
 
-Report problems and suggestions through [GitHub Issues](https://github.com/junnhwan/vid-lens/issues), or discuss your experience on [linux.do](https://linux.do/). Include reproduction steps and shareable error details; omit API keys, Cookies, and private Q&A.
+The site is designed for desktop browsers and does not require registration. Articles and Q&A belong to the current anonymous session. See [privacy and retention](docs/site/privacy.md).
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=junnhwan%2Fvid-lens&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left" />
-    <img alt="VidLens Star History" src="https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left" />
-  </picture>
-</a>
+[![VidLens Star History](https://api.star-history.com/chart?repos=junnhwan/vid-lens&type=date&legend=top-left)](https://www.star-history.com/?repos=junnhwan%2Fvid-lens&type=date&legend=top-left)
