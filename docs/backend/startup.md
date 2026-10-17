@@ -49,6 +49,6 @@ The script tests session/CSRF, idempotent creation, persisted status, final SSE,
 
 ## Access and retention
 
-Anonymous sessions last 30 days from creation, without visit-based extension. HTTPS sets Secure cookies; local HTTP does not. Cookie loss/expiry has no account-based recovery in v1, and a fresh session cannot claim old resources. Published articles are retained but readable only through an authorized request; public sharing is not implemented.
+Anonymous sessions last 30 days from creation, without visit-based extension. HTTPS sets Secure cookies; local HTTP does not. The processing-history endpoint lists only the authenticated session's requests; no registration or login is required. Cookie loss/expiry has no account-based recovery in v1, and a fresh session cannot claim old resources. Published articles are retained but readable only through an authorized request; public sharing is not implemented.
 
 Original videos/audio do not expire automatically and are not removed automatically under disk pressure. Service video/image quotas are persisted in PostgreSQL; insufficient capacity pauses new downloads. Unselected frames, export copies, formal images, private answers and execution history have separate lifetimes. Physical cleanup follows database pins; deleting Redis keys does not delete files. Back up PostgreSQL, `secret_key` and owned article images together. Restoring unrelated application data requires a separate compatibility assessment.

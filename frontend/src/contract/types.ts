@@ -239,6 +239,25 @@ export interface RequestView {
   stream: StreamPosition
 }
 
+export interface RequestHistoryItem {
+  id: string
+  title: string
+  platform: string
+  canonical_url: string
+  status: RequestStatus | string
+  phase: Phase | string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RequestHistoryPage {
+  schema_version: number
+  items: RequestHistoryItem[]
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
 export interface TurnActions {
   can_cancel: boolean
   can_retry: boolean

@@ -86,6 +86,7 @@ func (a *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/admin/config/test", a.adminTest)
 	m.HandleFunc("GET /api/v1/admin/status", a.adminStatus)
 	m.HandleFunc("POST /api/v1/requests", a.createRequest)
+	m.HandleFunc("GET /api/v1/requests", a.requestHistory)
 	m.HandleFunc("GET /api/v1/requests/{request}", a.getRequest)
 	m.HandleFunc("POST /api/v1/requests/{request}/cancel", a.cancelRequest)
 	m.HandleFunc("POST /api/v1/requests/{request}/retry", a.retryRequest)
@@ -279,6 +280,35 @@ func (a *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.accepted(w, r, x, v, "/api/v1/requests/"+x.ID)
+}
+func (a *Server) requestHistory(w http.ResponseWriter, r *http.Request) {
+	ses, ok := a.auth(w, r)
+	if !ok {
+		return
+	}
+	limit, offset := 20, 0
+	if value := r.URL.Query().Get("limit"); value != "" {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 50 {
+			a.problem(w, r, domain.Err(400, "INVALID_ARGUMENT", "limit 必须在 1 到 50 之间。"))
+			return
+		}
+		limit = n
+	}
+	if value := r.URL.Query().Get("offset"); value != "" {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 || n > 1_000_000 {
+			a.problem(w, r, domain.Err(400, "INVALID_ARGUMENT", "offset 无效。"))
+			return
+		}
+		offset = n
+	}
+	page, err := a.Store.RequestHistory(r.Context(), ses.ID, limit, offset)
+	if err != nil {
+		a.problem(w, r, err)
+		return
+	}
+	a.json(w, 200, page)
 }
 func (a *Server) getRequest(w http.ResponseWriter, r *http.Request) {
 	ses, ok := a.auth(w, r)

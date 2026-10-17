@@ -104,8 +104,30 @@ func TestSessionCSRFAndPrivateResources(t *testing.T) {
 		t.Fatal("network replay failed")
 	}
 	other := do("POST", "/api/v1/session", "{}", "", nil).Cookies()[0]
+	ownerHistory := do("GET", "/api/v1/requests", "", "", cookie)
+	var ownerPage struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if ownerHistory.StatusCode != 200 || json.NewDecoder(ownerHistory.Body).Decode(&ownerPage) != nil || len(ownerPage.Items) != 1 {
+		t.Fatal("history did not return the current session's request")
+	}
+	if ownerPage.Items[0].ID != strings.TrimPrefix(location, "/api/v1/requests/") {
+		t.Fatal("history returned another request")
+	}
+	otherHistory := do("GET", "/api/v1/requests", "", "", other)
+	var otherPage struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if otherHistory.StatusCode != 200 || json.NewDecoder(otherHistory.Body).Decode(&otherPage) != nil || len(otherPage.Items) != 0 {
+		t.Fatal("history exposed requests from another session")
+	}
 	if r := do("GET", location, "", "", other); r.StatusCode != 404 {
 		t.Fatal("cross-session request read")
+	}
+	if bad := do("GET", "/api/v1/requests?limit=51", "", "", cookie); bad.StatusCode != 400 {
+		t.Fatal("invalid history page size accepted")
 	}
 	canceled := do("POST", location+"/cancel", "{}", csrf, cookie)
 	if canceled.StatusCode != 200 {

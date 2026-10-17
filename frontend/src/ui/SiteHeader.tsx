@@ -130,7 +130,7 @@ function Wordmark() {
     </svg>
   )
 }
-export function SiteHeader({ onNew }: { onNew?: () => void }) {
+export function SiteHeader({ onNew, onHistory }: { onNew?: () => void; onHistory?: () => void }) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -140,6 +140,18 @@ export function SiteHeader({ onNew }: { onNew?: () => void }) {
         </a>
         <nav className="site-nav" aria-label="主导航">
           <a href="/docs">使用文档</a>
+          {onHistory ? (
+            <a
+              href="/history"
+              aria-current={location.pathname === "/history" ? "page" : undefined}
+              onClick={(event) => {
+                event.preventDefault()
+                onHistory()
+              }}
+            >
+              处理记录
+            </a>
+          ) : null}
           <ThemeControl />
           {onNew ? (
             <button type="button" className="btn nav-cta" id="new-video" onClick={onNew}>

@@ -9,6 +9,7 @@ import type {
   Frame,
   Problem,
   RequestView,
+  RequestHistoryPage,
   SessionResponse,
   TurnPage,
   TurnView,
@@ -122,6 +123,11 @@ export class HttpApi {
 
   getRequest(id: string) {
     return this.request<RequestView>("GET", `/api/v1/requests/${encodeURIComponent(id)}`).then((result) => result.body)
+  }
+
+  requestHistory(offset = 0, limit = 20) {
+    const query = new URLSearchParams({ offset: String(offset), limit: String(limit) })
+    return this.request<RequestHistoryPage>("GET", `/api/v1/requests?${query}`).then((result) => result.body)
   }
 
   cancelRequest(id: string) {

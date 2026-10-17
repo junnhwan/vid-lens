@@ -7,6 +7,7 @@ import { EntryView } from "../ui/EntryView"
 import { Lightbox } from "../ui/Lightbox"
 import { ReadView } from "../ui/ReadView"
 import { RunView } from "../ui/RunView"
+import { HistoryView } from "../ui/HistoryView"
 import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 
 function requestIdFrom(pathname: string): string | undefined {
@@ -40,11 +41,13 @@ function usePath() {
 
 export function App() {
   const { path, navigate } = usePath()
+  const showingHistory = path === "/history" || path === "/history/"
   const requestId = requestIdFrom(path)
   const visitor = useVisitor(requestId, navigate)
   const inputRef = useRef<HTMLElement>(null)
   const runRef = useRef<HTMLElement>(null)
   const readRef = useRef<HTMLElement>(null)
+  const historyRef = useRef<HTMLElement>(null)
   const shown = useRef<HTMLElement | null>(null)
   const [homeTick, setHomeTick] = useState(0)
   const [pop, setPop] = useState<{
@@ -62,11 +65,12 @@ export function App() {
     const input = inputRef.current
     const run = runRef.current
     const read = readRef.current
-    const next = visitor.phase === "input" ? input : visitor.phase === "reading" ? read : run
+    const history = historyRef.current
+    const next = showingHistory ? history : visitor.phase === "input" ? input : visitor.phase === "reading" ? read : run
     const previous = shown.current
     const origin = previous?.querySelector<HTMLElement>("[data-carry-from]")
     const start = origin?.getBoundingClientRect()
-    for (const el of [input, run, read]) {
+    for (const el of [input, run, read, history]) {
       if (!el || el === next) continue
       if (shown.current === el) hideView(el)
       else el.hidden = true
@@ -90,12 +94,13 @@ export function App() {
       if (dest && fromID && fromID === toID) carryStill(start, dest)
     }
     document.body.dataset.phase = visitor.phase === "run" ? "generating" : visitor.phase
-  }, [visitor.phase])
+  }, [visitor.phase, path])
 
   useEffect(() => {
-    if (visitor.phase === "input") document.title = "VidLens"
-    if (visitor.phase === "reading") document.title = `${visitor.article?.article.title || "文章"} · VidLens`
-  }, [visitor.phase, visitor.article?.article.title])
+    if (showingHistory) document.title = "处理记录 · VidLens"
+    else if (visitor.phase === "input") document.title = "VidLens"
+    else if (visitor.phase === "reading") document.title = `${visitor.article?.article.title || "文章"} · VidLens`
+  }, [visitor.phase, visitor.article?.article.title, showingHistory])
 
   useEffect(() => {
     if (!homeTick || visitor.phase !== "input") return
@@ -191,7 +196,7 @@ export function App() {
       <a className="skip" href="#main">
         跳到内容
       </a>
-      <SiteHeader onNew={newVideo} />
+      <SiteHeader onNew={newVideo} onHistory={() => navigate("/history")} />
       {visitor.mockMode ? (
         <p className="development-note" role="note">
           开发预览：模拟流程，不代表真实生成。
@@ -301,10 +306,16 @@ export function App() {
               onRemoveFrame={visitor.removeFrame}
               onRemovePassage={visitor.removePassage}
             />
+            <HistoryView
+              active={showingHistory && visitor.booted}
+              viewRef={historyRef}
+              onOpen={(id) => navigate(`/r/${encodeURIComponent(id)}`)}
+              onNew={newVideo}
+            />
           </>
         )}
       </main>
-      {visitor.phase === "input" ? <SiteFooter /> : null}
+      {visitor.phase === "input" || showingHistory ? <SiteFooter /> : null}
       <div id="live" className="sr-only" aria-live="polite">
         {visitor.live}
       </div>
