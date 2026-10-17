@@ -201,6 +201,17 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 		state.Messages = projectDraftHistory(state.Messages)
 		data := map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}
+		if s.cp.HarnessRevision >= 7 {
+			output := s.profile.MaxOutputTokens
+			if s.spec.DetailPolicy != nil {
+				output = min(output, s.spec.DetailPolicy.CompositionOutputTokens)
+			}
+			perChapter := 1200
+			if s.spec.DetailLevel == "detailed" {
+				perChapter = 2200
+			}
+			data["batch_guidance"] = map[string]any{"output_tokens": output, "recommended_chapters": min(12, max(1, (output-1000)/perChapter)), "max_chapters": 12, "max_bytes": 128 << 10, "rule": "Prefer fewer complete batches; estimate actual content size. Preserve required details, leave room for closing JSON. Save valid chapters independently. Server validates and publishes automatically when complete."}
+		}
 		data["source_duration_ms"] = s.snapshot.DurationMS
 		data["citation_time_rule"] = "Citation catalog ranges are intersections of original source windows with actual media. Raw platform cue end times can extend beyond the media. Preserve source text; the full-video plan ends at source_duration_ms, not the last cue end."
 		if s.cp.HarnessRevision > 0 {

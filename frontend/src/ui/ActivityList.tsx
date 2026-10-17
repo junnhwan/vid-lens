@@ -5,6 +5,7 @@ import { stepPresentation } from "../app/labels"
 import { activityTitle, parseTranscription, stepSpent } from "../app/progress"
 import { prefersReduced } from "./motion"
 import { FrameThumb } from "./FrameThumb"
+import { activityGroups } from "../contract/activity-history"
 
 function statusText(status: string) {
   if (status === "done") return "已完成"
@@ -32,7 +33,7 @@ export function ActivityList({
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   const jumpRef = useRef<HTMLButtonElement>(null)
-  const actions = steps.filter((step) => step.kind !== "execution_plan")
+  const actions = activityGroups(steps)
   const visible = open ? actions : actions.slice(-3)
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export function ActivityList({
     if (!list || !open) return
     const near = list.scrollHeight - list.scrollTop - list.clientHeight < 28
     if (near) list.scrollTop = list.scrollHeight
-  }, [open, steps.length, visible.at(-1)?.last_seq])
+  }, [open, steps.length, visible.at(-1)?.step.last_seq])
 
   function syncJump() {
     const list = listRef.current
@@ -54,7 +55,7 @@ export function ActivityList({
   return (
     <>
       <div id={detailed ? undefined : "run-steps"} className={detailed ? "steps gen-steps" : "steps"} role="list" ref={listRef} onScroll={syncJump} data-open={open ? "true" : undefined}>
-        {visible.map((step) => {
+        {visible.map(({ step, sends }) => {
           const view = stepPresentation(step, resourceStatus)
           const frames = step.frames ?? []
           const transcribed = parseTranscription(step.title)
@@ -66,11 +67,12 @@ export function ActivityList({
               <div>
                 <div className="step-label">
                   {activityTitle(step)}
+                  {model ? <span className="step-spent">第 {step.model_call ?? "?"} 次模型调用{sends.length ? ` · 发送 ${sends.length} 次` : ""}</span> : null}
                   {spent ? <span className="step-spent">用时 {spent}</span> : null}
                   <span className="sr-only">{statusText(view.status)}</span>
                 </div>
                 {transcribed ? <div className="step-range">{transcribed.done} / {transcribed.total}</div> : null}
-                {model && view.status === "active" && step.purpose ? <div className="step-outcome">{step.purpose}</div> : null}
+                {model && sends.length ? <details className="model-sends"><summary>发送详情</summary>{sends.map((send) => <p key={send.id}>{send.title} · {stepPresentation(send, resourceStatus).status === "active" ? "等待响应" : stepPresentation(send, resourceStatus).outcome || "已结束"}{stepSpent(send) ? ` · ${stepSpent(send)}` : ""}</p>)}</details> : null}
                 {(detailed || model) && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
                 {detailed && step.source_range ? <div className="step-range">{formatRange(step.source_range)}</div> : null}
                 {detailed && frames.length ? (

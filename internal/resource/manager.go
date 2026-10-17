@@ -55,35 +55,42 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 		}
 	}
 	owner := domain.ID()
-	redisKey := "vidlens:resource:" + name
+	baseName, slots := name, 1
+	if name == "asr" {
+		slots = 2
+	}
+	redisKey := ""
+acquire:
 	for {
-		fast, e := m.Redis.SetNX(ctx, redisKey, owner, 60*time.Second).Result()
-		if e != nil {
-			return nil, nil, domain.Err(503, "SERVICE_UNAVAILABLE", "资源调度暂不可用。")
-		}
-		if !fast {
-			select {
-			case <-ctx.Done():
-				return nil, nil, ctx.Err()
-			case <-time.After(250 * time.Millisecond):
+		for slot := 0; slot < slots; slot++ {
+			name = baseName
+			if slots > 1 {
+				name = fmt.Sprintf("%s:%d", baseName, slot)
 			}
-			continue
-		}
-		ok, e := m.Store.AcquireResource(ctx, c, name, owner, 1)
-		if e != nil {
+			redisKey = "vidlens:resource:" + name
+			fast, e := m.Redis.SetNX(ctx, redisKey, owner, 60*time.Second).Result()
+			if e != nil {
+				return nil, nil, domain.Err(503, "SERVICE_UNAVAILABLE", "资源调度暂不可用。")
+			}
+			if !fast {
+				continue
+			}
+			ok, e := m.Store.AcquireResource(ctx, c, name, owner, 1)
+			if e == nil && ok {
+				break acquire
+			}
 			_, _ = m.Redis.Eval(ctx, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{redisKey}, owner).Result()
-			return nil, nil, e
+			if e != nil {
+				return nil, nil, e
+			}
 		}
-		if ok {
-			break
-		}
-		_, _ = m.Redis.Eval(ctx, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{redisKey}, owner).Result()
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
+
 	child, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -119,7 +126,7 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 func (m *Manager) waitMemory(ctx context.Context, name string) error {
 	lane := "ai"
 	threshold := int64(256 * 1024)
-	if name == "ffmpeg" || name == "download" {
+	if name == "ffmpeg" || strings.HasPrefix(name, "download") {
 		lane = "media"
 		threshold = 512 * 1024
 	}

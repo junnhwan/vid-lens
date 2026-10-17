@@ -132,6 +132,13 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 			break
 		}
 		if ev.Err != nil {
+			if errors.Is(ev.Err, errDraftReady) {
+				op, loadErr := e.Store.Operation(ctx, c.Run.ID, "candidate")
+				if loadErr != nil {
+					return loadErr
+				}
+				return s.publish(ctx, op.Result)
+			}
 			return s.tryRepair(ctx, ev.Err)
 		}
 	}
@@ -194,13 +201,17 @@ func (s *session) initial(ctx context.Context) error {
 					s.cp.HarnessRevision = 5
 					instruction += pacedHarnessInstructions + observationBudgetInstructions
 				}
+				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v6" {
+					s.cp.HarnessRevision = 7
+					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions
+				}
 			}
 		} else {
 			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
-			if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v5" {
-				s.cp.HarnessRevision = 6
-				instruction += compactAnswerInstructions + observationBudgetInstructions
-			}
+			// A new private turn freezes its own protocol before its first call.
+			// Existing Ready checkpoints never pass through this initialization.
+			s.cp.HarnessRevision = 8
+			instruction += compactAnswerInstructions + observationBudgetInstructions + structuredAnswerInstructions
 		}
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}

@@ -32,10 +32,32 @@ func canonicalArguments(raw string) any {
 
 func (s *session) repairUsage(ctx context.Context) (int, error) {
 	var count int
-	if err := s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind IN ('field_repair','draft_correction')", s.claim.Run.ID).Scan(&count); err != nil {
+	kinds := []string{"field_repair", "draft_correction"}
+	if s.cp.HarnessRevision >= 7 {
+		kinds = []string{"field_repair"}
+	}
+	if err := s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind=ANY($2)", s.claim.Run.ID, kinds).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count + s.cp.Repairs, nil
+}
+
+func (s *session) correctionScope(ctx context.Context) (string, error) {
+	version, _, err := s.loadDraft(ctx)
+	return fmt.Sprintf("draft:%d", version), err
+}
+
+func (s *session) correctionUsage(ctx context.Context) (int, error) {
+	if s.cp.HarnessRevision < 7 {
+		return s.repairUsage(ctx)
+	}
+	scope, err := s.correctionScope(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind=$2", s.claim.Run.ID, "draft_correction:"+scope).Scan(&count)
+	return count, err
 }
 
 func draftMutation(name string) bool {
@@ -50,8 +72,18 @@ func (s *session) reserveDraftCorrection(ctx context.Context, name, raw string) 
 	}
 	key := "draft-correction:" + callID(ctx)
 	args := map[string]any{"tool": name, "arguments": canonicalArguments(raw)}
+	kind := "draft_correction"
+	if s.cp.HarnessRevision >= 7 {
+		scope, err := s.correctionScope(ctx)
+		if err != nil {
+			return false, err
+		}
+		kind += ":" + scope
+	}
 	if op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key); err == nil {
-		if op.Kind != "draft_correction" || op.ArgsHash != store.Hash(args) {
+		// A replay may occur after this correction advanced the draft version.
+		validKind := op.Kind == kind || s.cp.HarnessRevision >= 7 && strings.HasPrefix(op.Kind, "draft_correction:draft:")
+		if !validKind || op.ArgsHash != store.Hash(args) {
 			return false, errors.New("draft correction replay conflict")
 		}
 		return true, nil
@@ -61,14 +93,14 @@ func (s *session) reserveDraftCorrection(ctx context.Context, name, raw string) 
 	if s.cp.DraftIssue == nil && name != "repair_article_plan" {
 		return false, nil
 	}
-	used, err := s.repairUsage(ctx)
+	used, err := s.correctionUsage(ctx)
 	if err != nil {
 		return false, err
 	}
 	if used >= s.repairLimit() {
 		return false, s.endDraftCorrection(ctx)
 	}
-	_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, "draft_correction", args, false)
+	_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, kind, args, false)
 	return err == nil, err
 }
 
@@ -87,7 +119,7 @@ func (s *session) structuredDraftFeedback(ctx context.Context, message string) (
 	}
 	issue := feedbackIssue(message)
 	s.cp.DraftIssue = issue
-	used, err := s.repairUsage(ctx)
+	used, err := s.correctionUsage(ctx)
 	if err != nil {
 		return nil, err
 	}

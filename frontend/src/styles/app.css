@@ -1086,6 +1086,7 @@ main { position: relative; }
   display: inline-block;
   width: 6px;
   height: 6px;
+  flex: 0 0 6px;
   margin-right: 7px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
@@ -1550,15 +1551,31 @@ figcaption {
   color: var(--ink);
   font-weight: 600;
   font-size: 14px;
+  text-align: left;
+  max-width: 100%;
+  line-height: 1.6;
 }
 
 .turn-answer { margin-top: 8px; }
 
 .turn-answer p {
-  margin: 0;
+  margin: 0 0 1em;
   font-size: 14.5px;
   line-height: 1.7;
 }
+
+.turn-answer > :last-child { margin-bottom: 0; }
+.turn-answer ul, .turn-answer ol { margin: .8em 0 1.2em; padding-left: 1.5em; }
+.turn-answer li { margin: .5em 0; line-height: 1.8; }
+.turn-answer table { width: 100%; margin: 1em 0; border-collapse: collapse; font-size: .94em; }
+.turn-answer th, .turn-answer td { padding: .65em .8em; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.turn-answer pre { padding: 1em; overflow-x: auto; line-height: 1.6; }
+.model-sends { margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
+.model-sends p { margin: 5px 0; font-family: var(--sans); font-size: 12px; line-height: 1.6; }
+.model-sends summary { cursor: pointer; }
+.attempt-ledger { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+.attempt-ledger p { margin: 5px 0; font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+.attempt-ledger [data-current] { color: var(--teal-ink); }
 
 .turn-stopped { color: var(--ink-soft); }
 

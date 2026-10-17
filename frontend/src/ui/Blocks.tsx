@@ -4,7 +4,7 @@ import { citationClock, formatClock } from "../contract/text"
 import { FrameThumb } from "./FrameThumb"
 
 function marks(text: string, kinds: string[] | undefined): ReactNode {
-  let node: ReactNode = text
+  let node: ReactNode = kinds?.includes("code") ? text : text.replace(/\\"/g, '"')
   if (kinds?.includes("code")) node = <code>{node}</code>
   if (kinds?.includes("emphasis")) node = <em>{node}</em>
   if (kinds?.includes("bold")) node = <strong>{node}</strong>

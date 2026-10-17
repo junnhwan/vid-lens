@@ -88,6 +88,8 @@ export interface ElapsedAnchor { elapsedMs: number; monotonicMs: number }
 
 export function activityTitle(step: ActivityStep): string {
   if (step.kind !== "model_response") return displayStepTitle(step.title)
+  if (step.purpose) return displayStepTitle(step.purpose)
+  if (step.title && !/^第\s*\d+\s*次模型调用|^模型调用/.test(step.title)) return displayStepTitle(step.title)
   const ordinal = step.model_call ?? (Number(step.id.match(/_(\d+)$/)?.[1] ?? -1) + 1)
   return ordinal > 0 ? `第 ${ordinal} 次模型调用` : "模型调用"
 }

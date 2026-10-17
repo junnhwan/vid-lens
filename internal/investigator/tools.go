@@ -185,9 +185,24 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 	if args == nil {
 		err = errors.New("工具参数为空")
 	} else if target != nil {
-		err = json.Unmarshal([]byte(args.Text), target)
+		checked := args.Text
+		if t.session != nil && t.session.cp.HarnessRevision >= 7 {
+			var metadata map[string]json.RawMessage
+			if json.Unmarshal([]byte(checked), &metadata) == nil && metadata != nil {
+				if title, ok := metadata["activity_title"]; ok {
+					var text string
+					if json.Unmarshal(title, &text) != nil {
+						return toolError("activity_title必须是简短字符串。")
+					}
+					// Metadata is never a source fact or part of an immutable draft.
+					delete(metadata, "activity_title")
+					checked = string(domain.JSON(metadata))
+				}
+			}
+		}
+		err = json.Unmarshal([]byte(checked), target)
 		if err == nil && t.session != nil && t.session.cp.HarnessRevision > 0 {
-			d := json.NewDecoder(bytes.NewBufferString(args.Text))
+			d := json.NewDecoder(bytes.NewBufferString(checked))
 			d.DisallowUnknownFields()
 			err = d.Decode(target)
 		}

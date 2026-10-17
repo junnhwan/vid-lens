@@ -23,7 +23,7 @@ import (
 // Real PG/Redis, FFmpeg and Eino. The provider emits the incident's exact
 // structural defect in a bounded chapter; previously saved chapters survive.
 func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
-	for _, fault := range []string{"malformed_batch", "worker_recovery", "final_validation", "long_detailed", "provider_reused_call_id", "duplicate_candidate", "multi_inspect_batch", "plan_repair", "plan_repair_recovery"} {
+	for _, fault := range []string{"efficient", "efficient_final_validation", "efficient_worker_recovery", "malformed_batch", "worker_recovery", "final_validation", "long_detailed", "provider_reused_call_id", "duplicate_candidate", "multi_inspect_batch", "plan_repair", "plan_repair_recovery"} {
 		t.Run(fault, func(t *testing.T) {
 			db, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
@@ -54,7 +54,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					w.WriteHeader(400)
 					return
 				}
-				if ((phase.Load() == 3 && fault == "worker_recovery") || (phase.Load() == 2 && fault == "plan_repair_recovery")) && failed.Add(1) <= 2 {
+				if ((phase.Load() == 3 && (fault == "worker_recovery" || fault == "efficient_worker_recovery")) || (phase.Load() == 2 && fault == "plan_repair_recovery")) && failed.Add(1) <= 2 {
 					w.WriteHeader(500)
 					return
 				}
@@ -85,7 +85,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					n = 1
 				}
 				complete := n == 4 && fault != "malformed_batch" || n == 5 && fault == "malformed_batch" || n == 6
-				if complete && (!strings.Contains(string(input.Tools), "submit_article_draft") || strings.Contains(string(input.Tools), "update_article_limitations") || len(input.Choice) == 0) {
+				if complete && !strings.HasPrefix(fault, "efficient") && (!strings.Contains(string(input.Tools), "submit_article_draft") || strings.Contains(string(input.Tools), "update_article_limitations") || len(input.Choice) == 0) {
 					t.Errorf("complete draft did not restrict tools and force final submission at phase %d", n)
 				}
 
@@ -105,7 +105,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					}
 					name = "record_observation"
 					args = observation{InspectionID: "overview", FrameIDs: frames, VisibleFacts: []string{"画面持续为蓝色。"}, Status: "supported"}
-					if fault == "final_validation" {
+					if fault == "final_validation" || fault == "efficient_final_validation" {
 						args = observation{InspectionID: "overview", FrameIDs: frames, VisibleFacts: []string{"蓝色"}, Status: "supported", Unresolved: []string{"画面以外未知"}}
 					}
 				case 1:
@@ -151,6 +151,16 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					name = "save_article_sections"
 					args = saveSectionsInput{Version: 2, Sections: []domain.Section{prose("two", "视频后半段继续展示同样的蓝色画面。视频没有提供更丰富的对象和事件，不能据此推断其他未出现的视觉内容。")}}
 				case 4:
+					if strings.HasPrefix(fault, "efficient") && fault != "efficient_final_validation" {
+						t.Error("unnecessary final-version model call")
+						w.WriteHeader(500)
+						return
+					}
+					if fault == "efficient_final_validation" {
+						name = "update_article_limitations"
+						args = map[string]any{"version": 3, "limitations": []domain.Limitation{{Code: "not_observed", Message: "画面以外内容未知。", SectionIDs: []string{}, CitationIDs: []string{}}}}
+						break
+					}
 					if fault == "malformed_batch" {
 						if !strings.Contains(string(input.Messages), "json_syntax") || !strings.Contains(string(input.Messages), "one") {
 							t.Error("batch repair lost error or accepted chapter identity")
@@ -162,7 +172,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 						args = submitDraftInput{Version: 3}
 					}
 				case 5:
-					if fault == "final_validation" {
+					if fault == "final_validation" || fault == "efficient_final_validation" {
 						name = "update_article_limitations"
 						args = map[string]any{"version": 3, "limitations": []domain.Limitation{{Code: "not_observed", Message: "画面以外内容未知。", SectionIDs: []string{}, CitationIDs: []string{}}}}
 					} else {
@@ -233,6 +243,13 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				t.Fatal(err)
 			}
 			req, _ := db.Request(ctx, owner.ID, accepted.ID)
+			if !strings.HasPrefix(fault, "efficient") {
+				// These regressions exercise the previously frozen v5 protocol.
+				_, err = db.Pool.Exec(ctx, `UPDATE generation_requests SET generation_spec=jsonb_set(jsonb_set(generation_spec,'{detail_policy,revision}','"interpretation-2026-10-17-v5"'),'{detail_policy_revision}','"interpretation-2026-10-17-v5"') WHERE id=$1`, accepted.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			claim, err := db.Claim(ctx, *req.ActiveRunID, 1, "source")
 			if err != nil {
 				t.Fatal(err)
@@ -262,7 +279,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				}
 				return
 			}
-			if fault == "worker_recovery" || fault == "plan_repair_recovery" {
+			if (fault == "worker_recovery" || fault == "efficient_worker_recovery") || fault == "plan_repair_recovery" {
 				if err == nil {
 					t.Fatal("provider outage did not interrupt writer")
 				}

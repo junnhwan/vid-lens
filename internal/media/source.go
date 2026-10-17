@@ -55,6 +55,17 @@ func (s *Service) ytdlpArgs(source string) []string {
 	return a
 }
 func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile) error {
+	ctx, cancelPrepare := context.WithCancel(ctx)
+	var audioDone chan struct{}
+	var prefetchedAudio string
+	var audioErr error
+	var stopAudio context.CancelFunc
+	defer func() {
+		cancelPrepare()
+		if audioDone != nil {
+			<-audioDone
+		}
+	}()
 	ident, e := s.Store.SourceIdentity(ctx, c.Run.SourceID)
 	if e != nil {
 		return e
@@ -78,6 +89,18 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	step, e = s.Store.Step(ctx, c, step)
 	if e != nil {
 		return e
+	}
+	advance := func(title string) error {
+		step.Status = "completed"
+		step.FinishedAt = domain.Ptr(time.Now().UTC())
+		step.Outcome = &domain.Outcome{Message: "这一步来源准备已完成。", EvidenceStatus: "not_assessed"}
+		if _, err := s.Store.Step(ctx, c, step); err != nil {
+			return err
+		}
+		step = domain.Step{ID: domain.ID(), Phase: "prepare_source", Title: title, Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+		var err error
+		step, err = s.Store.Step(ctx, c, step)
+		return err
 	}
 	if ident.Platform == "local" {
 		src, e := s.localFile(ident.CanonicalID)
@@ -205,6 +228,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			return e
 		}
 		s.Resources.Cache(ctx, "metadata:"+ident.URL, map[string]any{"title": meta.Title, "duration": meta.Duration})
+		if e = advance("正在检查可用的平台字幕"); e != nil {
+			return e
+		}
 		if !restore {
 			infoFile := filepath.Join(work, "subtitle-info.json")
 			if e = os.WriteFile(infoFile, raw, 0600); e != nil {
@@ -215,6 +241,45 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			if e != nil {
 				return e
 			}
+		}
+		if usable, _ := TranscriptCoverage(segs, int64(meta.Duration*1000)); !restore && !usable && ident.Platform == "youtube" {
+			prefetchedAudio = filepath.Join(work, "source-audio.input")
+			audioDone = make(chan struct{})
+			audioCtx, cancelAudio := context.WithCancel(ctx)
+			stopAudio = cancelAudio
+			go func() {
+				defer close(audioDone)
+				audioStep := domain.Step{ID: "audio_" + c.Run.ID, Phase: "prepare_source", Title: "正在获取转写所需音轨", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+				if audioStep, audioErr = s.Store.Step(ctx, c, audioStep); audioErr != nil {
+					return
+				}
+				defer func() {
+					audioStep.FinishedAt = domain.Ptr(time.Now().UTC())
+					audioStep.Status = "completed"
+					if audioErr != nil {
+						audioStep.Status = "failed"
+					}
+					if audioCtx.Err() != nil {
+						audioStep.Status = "canceled"
+					}
+					_, saveErr := s.Store.Step(ctx, c, audioStep)
+					if audioErr == nil {
+						audioErr = saveErr
+					}
+				}()
+				dctx, release, err := s.Resources.Acquire(audioCtx, c, "download:audio")
+				if err != nil {
+					audioErr = err
+					return
+				}
+				defer release()
+				sub, cc := context.WithTimeout(dctx, 20*time.Minute)
+				defer cc()
+				audioErr = s.downloadStream(sub, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", prefetchedAudio, min(p.MaxDownloadBytes, 64<<20))
+			}()
+		}
+		if e = advance("正在获取用于观察的完整视频"); e != nil {
+			return e
 		}
 		dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
 		if e != nil {
@@ -229,6 +294,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if e != nil {
 			return e
 		}
+	}
+	if e = advance("正在校验视频时长与素材"); e != nil {
+		return e
 	}
 	probe, e := s.Probe(ctx, c, video)
 	if e != nil {
@@ -245,6 +313,10 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		meta.Title = ident.CanonicalID
 	}
 	usable, cov := TranscriptCoverage(segs, duration)
+	if stopAudio != nil && (usable || probe.HasAudio) {
+		stopAudio()
+		<-audioDone
+	}
 	decision.Usable = usable
 	decision.Coverage = cov
 	decision.Segments = len(segs)
@@ -300,26 +372,52 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		language = nil // Rejected subtitle language is not an ASR detection result.
 		audioInput := video
 		if ident.Platform != "local" && !probe.HasAudio {
-			dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
-			if e != nil {
-				return e
-			}
-			subctx, cancel := context.WithTimeout(dctx, 20*time.Minute)
-			audioInput = filepath.Join(work, "source-audio.input")
-			st, _ := os.Stat(video)
-			left := p.MaxDownloadBytes - st.Size()
-			if bili != nil {
-				e = biliReader.download(subctx, bili.Audio, audioInput, left)
+			if audioDone != nil {
+				select {
+				case <-audioDone:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if audioErr != nil {
+					return audioErr
+				}
+				st, err := os.Stat(video)
+				if err != nil {
+					return err
+				}
+				audioStat, err := os.Stat(prefetchedAudio)
+				if err != nil {
+					return err
+				}
+				if st.Size()+audioStat.Size() > p.MaxDownloadBytes {
+					return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频与音频合计超过下载限制。")
+				}
+				audioInput = prefetchedAudio
 			} else {
-				e = s.downloadStream(subctx, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", audioInput, left)
-			}
-			cancel()
-			rel()
-			if e != nil {
-				return e
+				dctx, rel, e := s.Resources.Acquire(ctx, c, "download")
+				if e != nil {
+					return e
+				}
+				subctx, cancel := context.WithTimeout(dctx, 20*time.Minute)
+				audioInput = filepath.Join(work, "source-audio.input")
+				st, _ := os.Stat(video)
+				left := p.MaxDownloadBytes - st.Size()
+				if bili != nil {
+					e = biliReader.download(subctx, bili.Audio, audioInput, left)
+				} else {
+					e = s.downloadStream(subctx, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", audioInput, left)
+				}
+				cancel()
+				rel()
+				if e != nil {
+					return e
+				}
 			}
 		}
-		step.Title = "正在转写缺少可用字幕的视频"
+		if e = advance("正在转写缺少可用字幕的视频"); e != nil {
+			return e
+		}
+		step.Title = "正在转写缺少可用字幕的视频（最多并行2个音频窗口）"
 		if step, e = s.Store.Step(ctx, c, step); e != nil {
 			return e
 		}
@@ -345,6 +443,10 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		coverage = "unknown"
 		origin = "unavailable"
 	} // Silent/visual clips can still be investigated; publication must declare absent text.
+	if stopAudio != nil {
+		stopAudio()
+		<-audioDone
+	}
 	decision.AdoptedOrigin = origin
 	if e = s.Store.SourceDiagnostic(ctx, c, "text-adopted", decision); e != nil {
 		return e

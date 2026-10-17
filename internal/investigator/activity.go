@@ -45,6 +45,12 @@ func responseActivity(result *schema.Message) (string, string) {
 	if len(names) > 1 {
 		return "模型处理动作已接收", "接下来执行所需的来源获取或记录；内容尚待校验。"
 	}
+	var metadata struct {
+		ActivityTitle string `json:"activity_title"`
+	}
+	if json.Unmarshal([]byte(result.ToolCalls[0].Function.Arguments), &metadata) == nil && strings.TrimSpace(metadata.ActivityTitle) != "" {
+		return "准备：" + publicTitle(metadata.ActivityTitle, "执行下一步处理"), "已收到动作请求，接下来执行并校验；内容尚未确认。"
+	}
 	switch names[0] {
 	case "record_observation":
 		return "已收到视频画面观察", "接下来保存事实与尚未确认的问题。"

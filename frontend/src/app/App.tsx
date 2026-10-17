@@ -248,6 +248,7 @@ export function App() {
               historyOpen={visitor.historyOpen}
               articleError={visitor.articleError}
               onToggleHistory={visitor.toggleHistory}
+              historyMessage={visitor.request ? visitor.historyState[visitor.request.request.id] : undefined}
               onStop={visitor.stop}
               onRetry={visitor.retry}
               onRead={visitor.beginReading}
@@ -256,6 +257,8 @@ export function App() {
               onBroken={visitor.refreshFrame}
             />
             <ReadView
+              onLoadHistory={visitor.loadHistory}
+              historyState={visitor.historyState}
               csrf={visitor.csrfToken}
               preview={visitor.mockMode}
               viewRef={readRef}

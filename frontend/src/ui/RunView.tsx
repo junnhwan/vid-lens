@@ -15,6 +15,7 @@ export function RunView({
   holding,
   reconnecting,
   historyOpen,
+  historyMessage,
   articleError,
   active,
   viewRef,
@@ -31,6 +32,7 @@ export function RunView({
   holding: boolean
   reconnecting: boolean
   historyOpen: boolean
+  historyMessage?: string
   articleError: string
   active: boolean
   viewRef?: Ref<HTMLElement>
@@ -251,6 +253,7 @@ export function RunView({
           </button>
         </div>
         {view?.activity.history_status === "expired" ? <p className="history-note">更早的过程已经过期。</p> : null}
+        {historyOpen && historyMessage ? <p className="history-note" role="status">{historyMessage}</p> : null}
         {view?.activity.history_status === "partial" ? <p className="history-note">一部分过程记录已经清理。</p> : null}
       </div>
       <p className="leave-note">

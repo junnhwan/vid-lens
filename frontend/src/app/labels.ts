@@ -75,8 +75,8 @@ export function describeTurn(view: TurnView, current: ActivityStep | null) {
   if (status === "cancel_requested") return { title: "正在停止", summary: "正在停止", open: true }
   if (status === "failed") return { title: view.failure?.message || "没能完成回答", summary: "没能完成", open: false }
   if (status === "canceled") return { title: "已停止", summary: "已停止", open: false }
-  if (status === "completed") return { title: view.turn.answer?.summary || "回答已完成", summary: view.turn.answer?.summary || "回答已完成", open: false }
-  if (current) return { title: current.title, summary: "", open: true }
+  if (status === "completed") return { title: "", summary: `查看回答过程 · ${view.activity.model_calls ?? 0} 次模型调用`, open: false }
+  if (current) return { title: current.purpose || current.title, summary: "", open: true }
   return { title: fallbackTitle(view.execution), summary: "", open: true }
 }
 

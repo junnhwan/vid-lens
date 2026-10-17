@@ -3,13 +3,19 @@ import type { ActivitySummary } from "../contract/types"
 export function ExecutionPlan({ activity, completed }: { activity: ActivitySummary | undefined; completed: boolean }) {
   const plan = activity?.plan
   const calls = activity?.model_calls ?? 0
-  if (!plan && calls === 0) return null
+  if (!plan && calls === 0 && !activity?.attempts?.length) return null
   return (
     <div className="execution-plan">
       <div className="plan-heading">
         <span>{plan ? "执行计划" : "已记录的执行过程"}</span>
         <span className="plan-counts">模型调用 {calls} 次{activity?.model_submissions != null ? ` · 实际发送 ${activity.model_submissions} 次` : ""}</span>
       </div>
+      {activity?.attempts?.length ? <div className="attempt-ledger" aria-label="历次尝试">
+        {activity.attempts.map((attempt, index) => <p key={attempt.run_id} data-current={attempt.current || undefined}>
+          第 {index + 1} 次尝试{attempt.current ? "（当前）" : ""} · {attempt.saved_sections} / {attempt.planned_sections} 章已保存{attempt.inherited_sections ? `（继承 ${attempt.inherited_sections} 章）` : ""} · 调用 {attempt.model_calls} 次{attempt.current ? "" : ` · ${["completed", "succeeded"].includes(attempt.status) ? "已完成" : attempt.status === "failed" ? "未完成" : attempt.status === "canceled" ? "已停止" : "处理中"}`}
+        </p>)}
+        {activity.attempts.length > 1 ? <p>累计模型调用 {activity.total_model_calls} 次 · 实际发送 {activity.total_model_submissions} 次</p> : null}
+      </div> : null}
       {plan ? <ol className="plan-items" aria-label="当前执行计划">
         {plan.items.map((item) => {
           const status = completed && !item.id.startsWith("question:") ? "done" : item.status

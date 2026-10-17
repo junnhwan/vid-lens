@@ -8,6 +8,7 @@ import { MindMap } from "./MindMap"
 import { QaPanel } from "./QaPanel"
 import { ExportControl } from "./ExportControl"
 import { ModelIdentity } from "./ModelIdentity"
+import { ExecutionPlan } from "./ExecutionPlan"
 
 export function ReadView(props: {
   view: RequestView | null
@@ -31,6 +32,8 @@ export function ReadView(props: {
   csrf: string
   viewRef?: Ref<HTMLElement>
   onToggleQa: () => void
+  onLoadHistory: () => void
+  historyState?: Record<string, string>
   onRetryArticle: () => void
   onOpenFrame: (frames: Frame[], index: number, origin: HTMLElement) => void
   onAskFrame: (frame: Frame) => void
@@ -216,7 +219,7 @@ export function ReadView(props: {
                 ) : (
                   <ExportControl requestId={props.view?.request.id} csrf={props.csrf} />
                 )}
-                <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => setGenOpen((value) => !value)}>
+                <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => { if (!genOpen) props.onLoadHistory(); setGenOpen((value) => !value) }}>
                   {genOpen ? "收起生成过程" : "查看生成过程"}
                 </button>
                 <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={props.qaOpen} onClick={props.onToggleQa}>
@@ -231,6 +234,8 @@ export function ReadView(props: {
             </header>
             <div className="disclose" data-open={genOpen ? "true" : "false"}>
               <div className="disclose-inner">
+                <ExecutionPlan activity={props.view?.activity} completed={props.view?.request.status === "completed"} />
+                {props.view && props.historyState?.[props.view.request.id] ? <p className="history-note" role="status">{props.historyState[props.view.request.id]}</p> : null}
                 <ActivityList
                   steps={props.steps}
                   resourceStatus={props.view?.request.status || "completed"}
@@ -325,6 +330,7 @@ export function ReadView(props: {
             onRetry={props.onRetryTurn}
             onClose={props.onCloseQa}
             onToggle={props.onToggleTurn}
+            historyState={props.historyState}
             onSuggest={props.onSuggest}
             onRemoveFrame={props.onRemoveFrame}
             onRemovePassage={props.onRemovePassage}

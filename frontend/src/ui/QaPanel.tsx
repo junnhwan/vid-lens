@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { ActivityStep, Citation, Frame, TurnView } from "../contract/types"
-import { answerKicker, describeTurn, stepPresentation } from "../app/labels"
+import { answerKicker, describeTurn } from "../app/labels"
 import { clipText, formatClock } from "../contract/text"
 import { BlockView } from "./Blocks"
-import { FrameThumb } from "./FrameThumb"
+import { ActivityList } from "./ActivityList"
 import { ReferenceCard } from "./ReferenceCard"
 import { prefersReduced } from "./motion"
 
 export function QaPanel({
   open,
+  historyState,
   turns,
   stepsFor,
   frames,
@@ -45,6 +46,7 @@ export function QaPanel({
   onOpenArticle,
 }: {
   open: boolean
+  historyState?: Record<string, string>
   turns: TurnView[]
   stepsFor: (turn: TurnView) => ActivityStep[]
   frames: Map<string, Frame>
@@ -215,54 +217,15 @@ export function QaPanel({
                 </button>
                 <div className="disclose" data-open={isOpen ? "true" : "false"}>
                   <div className="disclose-inner">
-                    <p className="turn-title">{described.title}</p>
-                    <div className="turn-steps">
-                      {steps.map((step) => {
-                        const view = stepPresentation(step, turn.turn.status)
-                        return (
-                          <div className="step" role="listitem" key={step.id} data-status={view.status}>
-                            <span className="mark" aria-hidden="true" />
-                            <div>
-                              <div className="step-label">
-                                {step.title}
-                                <span className="sr-only">
-                                  {view.status === "done" ? "已完成" : view.status === "active" ? "进行中" : "已停止"}
-                                </span>
-                              </div>
-                              {view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
-                              {step.frames?.length ? (
-                                <div className="mini-row">
-                                  {step.frames.map((item, index) => (
-                                    <button
-                                      type="button"
-                                      className="mini-shot"
-                                      key={item.id}
-                                      onClick={(event) =>
-                                        onOpenFrame(
-                                          step.frames,
-                                          index,
-                                          event.currentTarget.querySelector(".shot-host") || event.currentTarget,
-                                        )
-                                      }
-                                    >
-                                      <span className="shot-host">
-                                        <FrameThumb frame={item} variant="thumbnail" onBroken={onBroken} />
-                                      </span>
-                                      <span className="mini-time">{formatClock(item.time_ms)}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
+                    {described.title && !steps.length ? <p className="turn-title">{described.title}</p> : null}
+                    <ActivityList steps={steps} resourceStatus={turn.turn.status} detailed open onOpenFrame={onOpenFrame} onBroken={onBroken} />
+                    {historyState?.[turn.turn.id] ? <p className="history-note" role="status">{historyState[turn.turn.id]}</p> : null}
                   </div>
                 </div>
               </div>
               {turn.turn.status === "completed" && answer ? (
                 <div className="turn-answer">
+                  {answer.summary ? <p className="answer-lead">{answer.summary.replace(/\\"/g, '"')}</p> : null}
                   {answerKicker(answer.kind) ? <p className="answer-kicker">{answerKicker(answer.kind)}</p> : null}
                   {(answer.blocks ?? []).map((block) => (
                     <BlockView

@@ -529,10 +529,14 @@ func (s *session) repair(ctx context.Context, cause error) error {
 			break
 		}
 	}
-	if last < 0 {
+	if last < 0 && !(s.cp.HarnessRevision >= 7 && s.turn == nil && s.cp.DraftRepairVersion > 0) {
 		return errors.New("missing candidate call")
 	}
-	for _, call := range s.cp.Messages[last].ToolCalls {
+	var candidateCalls []schema.ToolCall
+	if last >= 0 {
+		candidateCalls = s.cp.Messages[last].ToolCalls
+	}
+	for _, call := range candidateCalls {
 		done := false
 		for _, msg := range s.cp.Messages[last+1:] {
 			if msg.Role == schema.Tool && msg.ToolCallID == call.ID {
@@ -545,6 +549,11 @@ func (s *session) repair(ctx context.Context, cause error) error {
 		}
 		s.cp.Messages = append(s.cp.Messages, &schema.Message{Role: schema.Tool, ToolName: call.Function.Name, ToolCallID: call.ID, Content: fmt.Sprintf("候选校验失败（已使用%d/%d次纠正）：%v。候选身份与结构问题：%s。仅修正相关字段/引用后重新提交。", s.cp.Repairs, s.repairLimit(), cause, domain.JSON(s.cp.LastCandidate))})
 	}
-	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次收尾纠正：%v。必须调用正式提交工具，不得用自由文本收尾。分批草稿已保存的章节保持，使用当前version仅修正相关章节后再提交；原证据、调用数与时限继续适用。", cause)))
+	advice := "必须调用正式提交工具，不得用自由文本收尾。分批草稿已保存的章节保持，使用当前version仅修正相关章节后再提交；原证据、调用数与时限继续适用。"
+	if s.cp.HarnessRevision >= 7 && s.turn == nil {
+		advice = "服务器自动核对指出上述问题。使用当前草稿version，仅修正相关章节/引用或限制说明，其他已接受内容保持；保存后服务器再次自动核对，无需模型只提交version。原证据、调用数、纠错次数与时限继续适用。"
+		s.cp.DraftIssue = candidateIssue(cause)
+	}
+	s.cp.Messages = append(s.cp.Messages, schema.UserMessage(fmt.Sprintf("本次收尾纠正：%v。%s", cause, advice)))
 	return s.persist(ctx, s.cp.Messages)
 }

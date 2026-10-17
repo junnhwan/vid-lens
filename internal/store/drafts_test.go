@@ -122,6 +122,17 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	if err != nil || old.Status != "failed" {
 		t.Fatal("old failure was rewritten")
 	}
+	view, pos, err := s.RequestView(ctx, owner, next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := view["activity"].(map[string]any)["attempts"].([]map[string]any)
+	if len(attempts) != 2 || attempts[0]["saved_sections"] != 1 || attempts[0]["current"] != false || attempts[1]["inherited_sections"] != 1 || attempts[1]["current"] != true || pos.RunID == nil || *pos.RunID != claim.Run.ID {
+		t.Fatalf("retry ledger or current stream identity wrong: %+v", attempts)
+	}
+	if _, _, err = s.RequestView(ctx, session(t, s), next.ID); err == nil {
+		t.Fatal("retry history leaked to another visitor")
+	}
 }
 
 func draftJSONEqual(a, b json.RawMessage) bool {

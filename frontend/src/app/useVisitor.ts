@@ -13,7 +13,8 @@ import {
 import { ApiError, NetworkError, isApiError, replayable, sessionLost } from "../api/error"
 import { ResourceStream, type Reaction } from "../api/live"
 import { createRuntime, wantsMock, type Runtime } from "../api/runtime"
-import { asSteps, mergeSteps } from "../contract/activity"
+import { advanceActivity, asSteps, mergeSteps } from "../contract/activity"
+import { loadActivityHistory } from "../contract/activity-history"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
 import { codePointLength, formatClock } from "../contract/text"
 import type {
@@ -101,6 +102,9 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
   const [conversation, setConversation] = useState<Conversation | null>(null)
   const [turns, setTurns] = useState<TurnView[]>([])
   const [turnSteps, setTurnSteps] = useState<Record<string, ActivityStep[]>>({})
+  const turnStepsRef = useRef<Record<string, ActivityStep[]>>({})
+  turnStepsRef.current = turnSteps
+  const [historyState, setHistoryState] = useState<Record<string, string>>({})
   const [qaOpen, setQaOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const [externalAllowed, setExternalAllowed] = useState(false)
@@ -270,6 +274,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     if (!known) return "resync"
     const normalized = normalizeStep(step)
     requestClock.current = next
+    const firstSeen = !stepsRef.current.some((item) => item.id === normalized.id)
     setSteps((prev) => {
       const merged = mergeSteps(prev, [normalized], false)
       stepsRef.current = merged
@@ -279,7 +284,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       prev
         ? {
             ...prev,
-            activity: { ...prev.activity, current_step_id: currentId },
+            activity: advanceActivity(prev.activity, normalized, currentId, firstSeen),
             stream: { ...prev.stream, ...position },
           }
         : prev,
@@ -343,21 +348,14 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     if (decision === "resync") return "resync"
     const normalized = normalizeStep(step)
     turnClock.current = next
-    setTurnSteps((prev) => ({
-      ...prev,
-      [id]: mergeSteps(prev[id] ?? [], [normalized], false),
-    }))
-    setTurns((prev) =>
-      prev.map((item) =>
-        item.turn.id === id
-          ? {
-              ...item,
-              activity: { ...item.activity, current_step_id: currentId },
-              stream: { ...item.stream, ...position },
-            }
-          : item,
-      ),
-    )
+    const firstSeen = !(turnStepsRef.current[id] ?? []).some((item) => item.id === normalized.id)
+    setTurnSteps((prev) => {
+      const updated = { ...prev, [id]: mergeSteps(prev[id] ?? [], [normalized], false) }
+      turnStepsRef.current = updated
+      return updated
+    })
+    setTurns((turns) => turns.map((item) => item.turn.id === id ? { ...item, activity: advanceActivity(item.activity, normalized, currentId, firstSeen), stream: { ...item.stream, ...position } } : item))
+
     absorb(normalized.frames)
     return "stay"
   }
@@ -718,6 +716,31 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
 
   const suggesting = article?.article.title ? `《${article.article.title}》主要在讲什么？` : "这条视频主要在讲什么？"
 
+  async function loadHistory(turnId?: string) {
+    const rt = runtimeRef.current
+    const view = turnId ? turnsRef.current.find((item) => item.turn.id === turnId) : requestRef.current
+    if (!rt || !view) return
+    const id = turnId ?? requestRef.current!.request.id
+    if (historyState[id] === "正在加载完整过程…") return
+    setHistoryState((prev) => ({ ...prev, [id]: "正在加载完整过程…" }))
+    try {
+      const urls = [view.activity.history_url, ...(view.activity.attempts ?? []).filter((attempt) => !attempt.current).map((attempt) => attempt.history_url)]
+      const incoming = (await loadActivityHistory(urls, (url, before) => rt.api.activity(url, before))).map(normalizeStep)
+      // Navigation and history loading may race. Never mix another video's steps.
+      if (turnId) {
+        if (!turnsRef.current.some((item) => item.turn.id === turnId)) return
+        setTurnSteps((prev) => ({ ...prev, [turnId]: mergeSteps(prev[turnId] ?? [], incoming, false) }))
+      } else {
+        if (requestRef.current?.request.id !== id) return
+        setSteps((prev) => { const merged = mergeSteps(prev, incoming, false); stepsRef.current = merged; return merged })
+      }
+      absorb(incoming.flatMap((step) => step.frames))
+      setHistoryState((prev) => ({ ...prev, [id]: "" }))
+    } catch (error) {
+      setHistoryState((prev) => ({ ...prev, [id]: error instanceof Error ? error.message : "完整过程加载失败，请收起后重新展开。" }))
+    }
+  }
+
   return {
     booted,
     csrfToken: session?.csrf_token || "",
@@ -745,6 +768,8 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     articleError: articleError || pageError,
     reconnecting,
     historyOpen,
+    historyState,
+    loadHistory: () => void loadHistory(),
     turns,
     stepsFor: (turn: TurnView) => resolvedTurns[turn.turn.id] ?? asSteps(turn.activity.recent_steps).map(normalizeStep),
     qaOpen,
@@ -820,41 +845,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
         historyRef.current = next
         engagedRef.current = next || lightboxRef.current
         setHistoryOpen(next)
-        const current = requestRef.current
-        const rt = runtimeRef.current
-        if (!next || !current?.activity.has_more || !rt) return
-        try {
-          let before: string | null = null
-          let more = true
-          for (let guard = 0; more && guard < 20; guard += 1) {
-            const page = await rt.api.activity(current.activity.history_url, before)
-            if (page.history_status === "expired") {
-              const fresh = await rt.api.getRequest(current.request.id)
-              onRequestSnapshot(fresh, "http")
-              return
-            }
-            const incoming = page.items.map(normalizeStep)
-            setSteps((prev) => {
-              const merged = mergeSteps(prev, incoming, false)
-              stepsRef.current = merged
-              return merged
-            })
-            absorb(incoming.flatMap((step) => step.frames))
-            more = page.has_more && !!page.next_before && page.next_before !== before
-            before = page.next_before
-          }
-        } catch (error) {
-          if (isApiError(error) && error.status === 410) {
-            try {
-              const fresh = await rt.api.getRequest(current.request.id)
-              onRequestSnapshot(fresh, "http")
-            } catch (again) {
-              await report(again, setPageError)
-            }
-            return
-          }
-          await report(error, setPageError)
-        }
+        if (next) await loadHistory()
       })(),
     retryArticle: () => {
       const id = requestRef.current?.request.id
@@ -1086,6 +1077,6 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     },
     removeFrame: () => setFrameChip(null),
     removePassage: () => setPassageChip(null),
-    toggleTurn: (id: string, open: boolean) => setExpanded((prev) => ({ ...prev, [id]: open })),
+    toggleTurn: (id: string, open: boolean) => { setExpanded((prev) => ({ ...prev, [id]: open })); if (open) void loadHistory(id) },
   }
 }

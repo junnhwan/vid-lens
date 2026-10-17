@@ -53,11 +53,12 @@ type submitDraftInput struct {
 	Version int `json:"version"`
 }
 type articleDraft struct {
-	Title       string                     `json:"title"`
-	Plan        []sectionPlan              `json:"plan"`
-	Sections    map[string]domain.Section  `json:"sections"`
-	Citations   map[string]domain.Citation `json:"citations"`
-	Limitations []domain.Limitation        `json:"limitations"`
+	Title        string                     `json:"title"`
+	Plan         []sectionPlan              `json:"plan"`
+	Sections     map[string]domain.Section  `json:"sections"`
+	Citations    map[string]domain.Citation `json:"citations"`
+	Limitations  []domain.Limitation        `json:"limitations"`
+	BatchReceipt *batchReceipt              `json:"batch_receipt,omitempty"`
 }
 
 func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) error {
@@ -137,6 +138,9 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if version == 0 || version != in.Version {
 			return s.draftFeedback(ctx, "version不匹配，请读取反馈中的当前草稿版本。")
 		}
+		if s.cp.HarnessRevision >= 7 {
+			return s.saveFlexibleBatch(ctx, in, version, draft)
+		}
 		if len(in.Sections) < 1 || len(in.Sections) > 3 || len(domain.JSON(in.Sections)) > 64<<10 {
 			return s.draftFeedback(ctx, "每批保存1–3章，序列化内容最多64KiB；请缩小当前批次，已有章节保持。")
 		}
@@ -215,51 +219,55 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		return err
 	}
 	return add(utils.InferEnhancedTool("submit_article_draft", "Submit the latest saved draft version for full validation and immutable publication. Do not repeat article body. All planned chapters must have been saved.", func(ctx context.Context, in submitDraftInput) (*schema.ToolResult, error) {
-		version, draft, err := s.loadDraft(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if version == 0 || version != in.Version {
-			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "草稿版本不匹配，请使用当前保存版本提交。")}
-		}
-		catalog, err := s.citationCatalog(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err = resolveDraftCitations(&draft, catalog); err != nil {
-			return nil, &candidateError{err: err}
-		}
-		article, err := s.assembleArticle(draft)
-		if err != nil {
-			return nil, &candidateError{err: err}
-		}
-		step := domain.Step{ID: "validate_" + s.claim.Run.ID + "_" + strconv.Itoa(version), Title: "正在核对文章内容与引用", Phase: "validate", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
-		step, err = s.engine.Store.Step(ctx, s.claim, step)
-		if err != nil {
-			return nil, err
-		}
-		err = s.validateArticle(ctx, article)
-		step.FinishedAt = domain.Ptr(time.Now().UTC())
-		step.Status = "completed"
-		step.Outcome = &domain.Outcome{Message: "全部章节、来源引用与正式配图已通过校验。", EvidenceStatus: "not_applicable"}
-		if err != nil {
-			step.Status = "failed"
-			step.Outcome = &domain.Outcome{Message: "文章还需要修正，已保存章节保留。", EvidenceStatus: "not_assessed"}
-		}
-		if _, saveErr := s.engine.Store.Step(ctx, s.claim, step); saveErr != nil {
-			return nil, saveErr
-		}
-		if err != nil {
-			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", err.Error())}
-		}
-		if _, err = s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "article_candidate", in, false); err != nil {
-			return nil, err
-		}
-		if err = s.engine.Store.FinishOperation(ctx, s.claim, "candidate", article, "", nil); err != nil {
-			return nil, err
-		}
-		return textResult(map[string]any{"accepted_for_publication": true, "version": version}), nil
+		return s.submitSavedDraft(ctx, in)
 	}))
+}
+
+func (s *session) submitSavedDraft(ctx context.Context, in submitDraftInput) (*schema.ToolResult, error) {
+	version, draft, err := s.loadDraft(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if version == 0 || version != in.Version {
+		return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "草稿版本不匹配，请使用当前保存版本提交。")}
+	}
+	catalog, err := s.citationCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err = resolveDraftCitations(&draft, catalog); err != nil {
+		return nil, &candidateError{err: err}
+	}
+	article, err := s.assembleArticle(draft)
+	if err != nil {
+		return nil, &candidateError{err: err}
+	}
+	step := domain.Step{ID: "validate_" + s.claim.Run.ID + "_" + strconv.Itoa(version), Title: "正在核对文章内容与引用", Phase: "validate", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+	step, err = s.engine.Store.Step(ctx, s.claim, step)
+	if err != nil {
+		return nil, err
+	}
+	err = s.validateArticle(ctx, article)
+	step.FinishedAt = domain.Ptr(time.Now().UTC())
+	step.Status = "completed"
+	step.Outcome = &domain.Outcome{Message: "全部章节、来源引用与正式配图已通过校验。", EvidenceStatus: "not_applicable"}
+	if err != nil {
+		step.Status = "failed"
+		step.Outcome = &domain.Outcome{Message: "文章还需要修正，已保存章节保留。", EvidenceStatus: "not_assessed"}
+	}
+	if _, saveErr := s.engine.Store.Step(ctx, s.claim, step); saveErr != nil {
+		return nil, saveErr
+	}
+	if err != nil {
+		return nil, &candidateError{err: err}
+	}
+	if _, err = s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "article_candidate", in, false); err != nil {
+		return nil, err
+	}
+	if err = s.engine.Store.FinishOperation(ctx, s.claim, "candidate", article, "", nil); err != nil {
+		return nil, err
+	}
+	return textResult(map[string]any{"accepted_for_publication": true, "version": version}), nil
 }
 
 func validateSectionPlan(plan []sectionPlan, duration int64, allowOverlap bool) error {
@@ -302,8 +310,37 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 	if err != nil {
 		return nil, err
 	}
-	if op.Kind != "article_draft" || op.ArgsHash != store.Hash(args) {
+	if op.Kind != "article_draft" {
 		return nil, errors.New("draft replay conflict")
+	}
+	if op.ArgsHash != store.Hash(args) {
+		// Older writers hashed their incoming slices after assigning canonical
+		// block/frame IDs. Accept that exact legacy hash without changing data.
+		legacy, ok := args.(saveSectionsInput)
+		if !ok || s.cp.HarnessRevision >= 7 {
+			return nil, errors.New("draft replay conflict")
+		}
+		var normalized saveSectionsInput
+		if json.Unmarshal(domain.JSON(legacy), &normalized) != nil {
+			return nil, errors.New("draft replay conflict")
+		}
+		for i := range normalized.Sections {
+			for j := range normalized.Sections[i].Blocks {
+				b := &normalized.Sections[i].Blocks[j]
+				b.ID = normalized.Sections[i].ID + "_b" + strconv.Itoa(j+1)
+				for k, id := range b.FrameIDs {
+					if strings.HasPrefix(id, "f") {
+						n, e := strconv.Atoi(strings.TrimPrefix(id, "f"))
+						if e == nil && n > 0 && n <= len(s.cp.CitationFrames) {
+							b.FrameIDs[k] = s.cp.CitationFrames[n-1]
+						}
+					}
+				}
+			}
+		}
+		if op.ArgsHash != store.Hash(normalized) {
+			return nil, errors.New("draft replay conflict")
+		}
 	}
 	var saved store.Draft
 	if err = json.Unmarshal(op.Result, &saved); err != nil {
@@ -358,7 +395,19 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 	if len(pending) == 0 && len(draft.Plan) > 0 {
 		next = "All planned chapters are saved. Call submit_article_draft NOW with this version. Do not rewrite chapters or limitations before receiving a validation issue."
 	}
-	return map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "saved_section_count": len(complete), "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
+	out := map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "saved_section_count": len(complete), "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
+	if draft.BatchReceipt != nil {
+		if len(pending) == 0 {
+			out["next_action"] = "All chapters saved. The server will validate the complete article and publish automatically; no further model call is needed."
+		}
+		out["accepted_sections"] = draft.BatchReceipt.Accepted
+		out["rejected_sections"] = draft.BatchReceipt.Rejected
+		if len(draft.BatchReceipt.Rejected) > 0 {
+			out["error"] = map[string]any{"code": "chapter_validation", "affected_sections": draft.BatchReceipt.Rejected, "repairable": true}
+			out["next_action"] = "Keep accepted_sections unchanged. Correct only rejected_sections and write other pending_sections with this latest version."
+		}
+	}
+	return out
 }
 func (s *session) draftFeedback(ctx context.Context, message string) (*schema.ToolResult, error) {
 	if s.cp.HarnessRevision >= 3 {
@@ -421,6 +470,13 @@ func (s *session) citationCatalog(ctx context.Context) (map[string]domain.Citati
 }
 func assembleDraftBatch(draft articleDraft, sections []domain.Section, catalog map[string]domain.Citation) (articleDraft, error) {
 	// Copy: a rejected batch must not mutate accepted chapters in memory.
+	// Also copy incoming nested blocks: canonical IDs must not mutate the exact
+	// tool arguments hashed for idempotent replay.
+	var copiedSections []domain.Section
+	if err := json.Unmarshal(domain.JSON(sections), &copiedSections); err != nil {
+		return draft, err
+	}
+	sections = copiedSections
 	var next articleDraft
 	if err := json.Unmarshal(domain.JSON(draft), &next); err != nil {
 		return next, err
@@ -614,6 +670,9 @@ func (s *session) resumeDraft(ctx context.Context) error {
 			}
 			if s.cp.HarnessRevision >= 5 {
 				msgs[0].Content += observationBudgetInstructions
+			}
+			if s.cp.HarnessRevision >= 7 {
+				msgs[0].Content += efficientDraftInstructions
 			}
 		}
 		msgs[2].Content += "\n解读详细程度：" + spec.DetailLevel

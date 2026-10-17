@@ -161,6 +161,9 @@ export interface ExecutionPlan {
 }
 
 export interface ActivitySummary {
+  attempts?: { run_id: string; request_id: string; current: boolean; status: string; saved_sections: number; planned_sections: number; inherited_sections: number; model_calls: number; model_submissions: number; history_url: string }[]
+  total_model_calls?: number
+  total_model_submissions?: number
   model_calls?: number
   model_submissions?: number | null
   plan?: ExecutionPlan | null

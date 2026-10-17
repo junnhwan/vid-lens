@@ -40,6 +40,9 @@ func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatMod
 
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
+	if err := s.autoFinalize(ctx); err != nil {
+		return nil, err
+	}
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	var args any = stripPixels(in)
 	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools

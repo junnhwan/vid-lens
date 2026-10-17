@@ -424,6 +424,19 @@ func (s *Store) requestView(ctx context.Context, q Querier, session, id string) 
 	}
 	canRetry := r.Status == "canceled" || r.Status == "failed" && domain.RetryableFailure(r.Failure)
 	view := map[string]any{"server_now": time.Now().UTC(), "schema_version": 1, "request": map[string]any{"id": r.ID, "revision": r.Revision, "input_url": r.InputURL, "status": r.Status, "reuse": r.Reuse, "retry_of_id": r.RetryOfID, "article_id": r.ArticleID, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}, "source": src, "execution": execution(run), "activity": activitySummary(steps, h, ex, base, !domain.Terminal(r.Status)), "failure": r.Failure, "actions": map[string]bool{"can_cancel": !domain.Terminal(r.Status), "can_retry": canRetry, "can_read_article": r.ArticleID != nil}, "stream": s.stream(pos, base)}
+	attempts, e := requestAttempts(ctx, q, r)
+	if e != nil {
+		return nil, pos, e
+	}
+	activity := view["activity"].(map[string]any)
+	activity["attempts"] = attempts
+	totalCalls, totalSends := 0, 0
+	for _, attempt := range attempts {
+		totalCalls += attempt["model_calls"].(int)
+		totalSends += attempt["model_submissions"].(int)
+	}
+	activity["total_model_calls"] = totalCalls
+	activity["total_model_submissions"] = totalSends
 	if r.GenerationSpec != nil {
 		v := view["request"].(map[string]any)
 		v["purpose"] = r.GenerationSpec.Purpose
