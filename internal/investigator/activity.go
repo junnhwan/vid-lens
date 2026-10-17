@@ -14,6 +14,9 @@ func (s *session) modelActivity() (string, string) {
 	if s.cp.Composing && s.compositionReady {
 		return "正在撰写与核对文章章节", "compose"
 	}
+	if s.cp.DraftIssue != nil || s.compositionReady {
+		return "正在组织与校对文章结构", "compose"
+	}
 	for i := len(s.cp.Messages) - 1; i >= 0; i-- {
 		m := s.cp.Messages[i]
 		if m.Role == schema.Tool && m.ToolName == "inspect_video_window" {
@@ -50,7 +53,7 @@ func responseActivity(result *schema.Message) (string, string) {
 			return publicTitle(in.ActivityTitle, "已确定需要核对的来源"), "已收到来源核对请求，接下来执行。"
 		}
 		return "已确定需要核对的来源", "接下来获取所需原文或真实画面。"
-	case "begin_article":
+	case "begin_article", "repair_article_plan":
 		return "已收到文章结构", "接下来校验覆盖范围并保存章节计划。"
 	case "save_article_sections":
 		return "已收到章节草稿", "接下来校验并保存本批章节；其他已保存章节保留。"
@@ -68,7 +71,7 @@ func responseActivity(result *schema.Message) (string, string) {
 
 func streamActivity(name string) string {
 	switch name {
-	case "begin_article":
+	case "begin_article", "repair_article_plan":
 		return "正在组织文章结构"
 	case "save_article_sections":
 		return "正在生成文章章节草稿"

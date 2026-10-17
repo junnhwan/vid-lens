@@ -32,6 +32,7 @@ type checkpoint struct {
 	Repairs              int                 `json:"repairs"`
 	DraftRepairVersion   int                 `json:"draft_repair_version,omitempty"`
 	DraftCorrection      bool                `json:"draft_correction,omitempty"`
+	DraftIssue           map[string]any      `json:"draft_issue,omitempty"`
 	Composing            bool                `json:"composing,omitempty"`
 	CitationFrames       []string            `json:"citation_frames,omitempty"`
 	DraftResume          bool                `json:"draft_resume,omitempty"`

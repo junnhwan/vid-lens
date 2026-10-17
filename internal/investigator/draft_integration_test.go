@@ -23,7 +23,7 @@ import (
 // Real PG/Redis, FFmpeg and Eino. The provider emits the incident's exact
 // structural defect in a bounded chapter; previously saved chapters survive.
 func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
-	for _, fault := range []string{"malformed_batch", "worker_recovery", "final_validation", "long_detailed", "provider_reused_call_id", "duplicate_candidate", "multi_inspect_batch"} {
+	for _, fault := range []string{"malformed_batch", "worker_recovery", "final_validation", "long_detailed", "provider_reused_call_id", "duplicate_candidate", "multi_inspect_batch", "plan_repair", "plan_repair_recovery"} {
 		t.Run(fault, func(t *testing.T) {
 			db, resources, cfg := testsupport.Services(t)
 			ctx := context.Background()
@@ -54,11 +54,18 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					w.WriteHeader(400)
 					return
 				}
-				if phase.Load() == 3 && fault == "worker_recovery" && failed.Add(1) <= 2 {
+				if ((phase.Load() == 3 && fault == "worker_recovery") || (phase.Load() == 2 && fault == "plan_repair_recovery")) && failed.Add(1) <= 2 {
 					w.WriteHeader(500)
 					return
 				}
 				n := phase.Add(1) - 1
+				planTurn := false
+				if fault == "plan_repair" || fault == "plan_repair_recovery" {
+					planTurn = n == 2
+					if n > 2 {
+						n--
+					}
+				}
 				if fault == "multi_inspect_batch" {
 					if n == 1 {
 						calls := []any{}
@@ -108,7 +115,30 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 						lastEvidence = "t2"
 					}
 					args = beginArticleInput{Title: "蓝色视频说明", Sections: []sectionPlan{{ID: "one", Title: "前半段", StartMS: 0, EndMS: duration / 2, KeyPoints: []string{"前半段呈现蓝色"}, EvidenceIDs: []string{"t1"}}, {ID: "two", Title: "后半段", StartMS: duration / 2, EndMS: duration, KeyPoints: []string{"后半段继续为蓝色，不能推断画外物体"}, EvidenceIDs: []string{lastEvidence}}}}
+					if fault == "plan_repair" || fault == "plan_repair_recovery" {
+						plan := args.(beginArticleInput)
+						for len(plan.Sections[0].EvidenceIDs) < 25 {
+							plan.Sections[0].EvidenceIDs = append(plan.Sections[0].EvidenceIDs, "t1")
+						}
+						plan.Sections[1].EvidenceIDs = []string{"t999"}
+						args = plan
+						if !strings.Contains(string(input.Tools), `"maxItems":24`) || !strings.Contains(string(input.Tools), "repair_article_plan") {
+							t.Error("provider did not receive bounded plan/repair contract")
+						}
+					}
 				case 2:
+					if planTurn {
+						if !strings.Contains(string(input.Messages), "evidence_count_exceeded") || !strings.Contains(string(input.Messages), "unknown_evidence") {
+							t.Error("provider lost structured issues before local plan repair")
+						}
+						candidate := retainedPlanCandidate(input.Messages)
+						name = "repair_article_plan"
+						args = candidatePatchInput{CandidateID: candidate["candidate_id"], ExpectedHash: candidate["expected_hash"], Patches: []fieldPatch{
+							{Op: "replace", Path: "/sections/0/evidence_ids", Value: domain.JSON([]string{"t1"})},
+							{Op: "replace", Path: "/sections/1/evidence_ids", Value: domain.JSON([]string{"t1"})},
+						}}
+						break
+					}
 					firstWrites.Add(1)
 					name = "save_article_sections"
 					sec := prose("one", "视频前半段呈现持续的蓝色背景，真实取帧支持这一颜色描述，没有证据说明画面之外的其他事件或物体。")
@@ -219,8 +249,9 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 			engine := &Engine{Store: db, Media: ms, Resources: resources, Config: cfg}
 			err = engine.Run(ctx, *claim, cfg.Profile)
 			if fault == "duplicate_candidate" {
-				if err == nil || !strings.Contains(err.Error(), "MODEL_RESULT_INVALID") || phase.Load() != 5 {
-					t.Fatalf("duplicate candidate bypassed stall guard: calls=%d err=%v", phase.Load(), err)
+				policy, _ := domain.InterpretationPolicy(level)
+				if err == nil || !strings.Contains(err.Error(), "MODEL_RESULT_INVALID") || phase.Load() != int32(3+policy.RepairLimit) {
+					t.Fatalf("duplicate candidate bypassed shared correction budget: calls=%d err=%v", phase.Load(), err)
 				}
 				draft, e := db.ArticleDraft(ctx, claim.Run.ID)
 				if e != nil || draft.Version != 1 {
@@ -228,12 +259,16 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				}
 				return
 			}
-			if fault == "worker_recovery" {
+			if fault == "worker_recovery" || fault == "plan_repair_recovery" {
 				if err == nil {
 					t.Fatal("provider outage did not interrupt writer")
 				}
 				saved, e := db.ArticleDraft(ctx, claim.Run.ID)
-				if e != nil || saved.Version != 2 {
+				wantedVersion := 2
+				if fault == "plan_repair_recovery" {
+					wantedVersion = 0
+				}
+				if e != nil || saved.Version != wantedVersion {
 					t.Fatalf("chapter was not persisted before outage: %+v %v", saved, e)
 				}
 				if _, e = db.Pool.Exec(ctx, "UPDATE job_runs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", claim.Run.ID); e != nil {
@@ -256,6 +291,12 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				var executed int
 				if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='inspect' AND operation_key NOT LIKE 'overview:%'`, claim.Run.ID).Scan(&executed); e != nil || executed != 0 {
 					t.Fatalf("multiple inspect response partially executed: %d %v", executed, e)
+				}
+			}
+			if fault == "plan_repair" || fault == "plan_repair_recovery" {
+				var repairs int
+				if e := db.Pool.QueryRow(ctx, `SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='draft_correction'`, claim.Run.ID).Scan(&repairs); e != nil || repairs != 1 {
+					t.Fatalf("plan repair ledger/recovery changed logical budget: %d %v", repairs, e)
 				}
 			}
 			req, err = db.Request(ctx, owner.ID, accepted.ID)

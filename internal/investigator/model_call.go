@@ -66,6 +66,16 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			e = json.Unmarshal(saved.Result, &frozen)
 		} else if e == nil || errors.Is(e, pgx.ErrNoRows) {
 			budget, e = s.budget(ctx, in, bound.(*meteredModel).toolsChars)
+			if e != nil {
+				var problem *domain.Problem
+				if errors.As(e, &problem) && problem.Meta["budget_reason"] != nil {
+					if saveErr := s.engine.Store.BudgetDiagnostic(ctx, s.claim, key, map[string]any{
+						"budget": budget, "reason": problem.Meta["budget_reason"], "model_revision_id": s.spec.Model.RevisionID,
+					}); saveErr != nil {
+						return nil, saveErr
+					}
+				}
+			}
 			if e == nil {
 				args = map[string]any{"messages": stripPixels(in), "budget": budget, "tools_hash": digest(domain.JSON(activeTools)), "policy_revision": s.spec.DetailPolicyRevision}
 				frozen, e = s.freezeModelInput(ctx, key, in, args, budget, activeTools)

@@ -60,7 +60,7 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			b.Phase = "answer"
 			b.OutputTokens = min(s.profile.MaxOutputTokens, p.CompositionOutputTokens)
 		}
-		if s.cp.DraftCorrection || s.cp.Repairs > 0 {
+		if s.cp.DraftCorrection || s.cp.DraftIssue != nil || s.cp.Repairs > 0 {
 			b.Phase = "repair"
 			b.OutputTokens = min(s.profile.MaxOutputTokens, p.RepairOutputTokens)
 		}
@@ -77,7 +77,7 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			}
 			id, _ := part.Extra["frame_id"].(string)
 			if id == "" {
-				return b, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "图片缺少可追溯身份。")
+				return b, budgetProblem("image_identity_missing", "图片缺少可追溯身份，当前请求无法继续。")
 			}
 			if seen[id] {
 				continue
@@ -98,8 +98,19 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 	return b, b.check(s.profile)
 }
 func (b callBudget) check(p config.Profile) error {
-	if b.OutputTokens < 1 || b.InputChars > separateInputLimit(p) || p.ContextTokens > 0 && b.EstimatedTextTokens+b.EstimatedImageTokens+b.OutputTokens+b.SafetyTokens > p.ContextTokens {
-		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整来源、工具、图片估算与本阶段输出预留超过模型预算；已保留来源与章节，不会截断后半片。")
+	if b.OutputTokens < 1 {
+		return budgetProblem("output_reservation_invalid", "当前模型修订没有可用的输出预算，请新建解读以使用当前模型配置。")
+	}
+	if b.InputChars > separateInputLimit(p) {
+		return budgetProblem("input_chars_exceeded", "完整来源超过当前模型修订的输入额度；请新建解读以使用当前模型配置。不会截断视频来源继续生成。")
+	}
+	if p.ContextTokens > 0 && b.EstimatedTextTokens+b.EstimatedImageTokens+b.OutputTokens+b.SafetyTokens > p.ContextTokens {
+		return budgetProblem("context_tokens_exceeded", "完整来源、图片与本阶段输出预留超过当前模型修订的上下文额度；请新建解读以使用当前模型配置。")
 	}
 	return nil
+}
+
+func budgetProblem(reason, message string) error {
+	return &domain.Problem{Status: 422, Code: "RESOURCE_LIMIT_EXCEEDED", Detail: message,
+		Meta: map[string]any{"budget_reason": reason, "can_retry": false, "retry_action": "new_request"}}
 }

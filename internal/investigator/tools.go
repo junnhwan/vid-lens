@@ -68,11 +68,29 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		}
 		defer func() {
 			if isCandidateTool(t.name) && args != nil {
-				if message := toolRejection(result, runErr); message != "" && message != "operation_failed" {
-					issue := map[string]any{"code": "candidate_schema", "detail": message, "repairable": true}
-					var structured map[string]any
-					if json.Unmarshal([]byte(message), &structured) == nil && structured["code"] != nil {
-						issue = structured
+				if issue := rejectedCandidateIssue(result, runErr); issue != nil {
+					if s.cp.HarnessRevision >= 3 {
+						canonical := store.Hash(canonicalArguments(args.Text))
+						if s.cp.Repeated == nil {
+							s.cp.Repeated = map[string]int{}
+						}
+						marker := "candidate-call:" + callID(ctx)
+						if s.cp.Repeated[marker] == 0 {
+							s.cp.Repeated[marker] = 1
+							s.cp.Repeated["candidate-content:"+canonical]++
+						}
+						issue["canonical_arguments_hash"] = canonical
+						issue["unchanged_candidate"] = s.cp.Repeated["candidate-content:"+canonical] > 1
+						if draftMutation(t.name) {
+							s.cp.DraftIssue = issue
+							if result != nil && len(result.Parts) > 0 {
+								var value map[string]any
+								if json.Unmarshal([]byte(result.Parts[0].Text), &value) == nil {
+									value["error"] = issue
+									result.Parts[0].Text = string(domain.JSON(value))
+								}
+							}
+						}
 					}
 					if err := s.engine.Store.RecordCandidate(ctx, s.claim, callID(ctx), t.name, args.Text, "invalid", issue); err != nil {
 						result, runErr = nil, err
@@ -105,6 +123,21 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return toolError("本轮多个inspect已整组拒绝，没有创建图片或问题。每轮只提交一个inspect；先观察已交付图片。")
 		}
 	}
+	if s := t.session; s != nil && s.engine != nil {
+		reserved, err := s.reserveDraftCorrection(ctx, t.name, rawToolArguments(args))
+		if err != nil {
+			return nil, err
+		}
+		if reserved {
+			parent, _ := s.cp.LastCandidate["candidate_id"].(string)
+			defer func() {
+				data := map[string]any{"tool": t.name, "candidate_id": callID(ctx), "parent_candidate_id": parent, "rejected": rejectedCandidateIssue(result, runErr) != nil}
+				if err := s.engine.Store.FinishOperation(ctx, s.claim, "draft-correction:"+callID(ctx), data, "", nil); err != nil {
+					result, runErr = nil, err
+				}
+			}()
+		}
+	}
 	var target any
 	switch t.name {
 	case "begin_article":
@@ -133,6 +166,8 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 	case "patch_article_draft":
 		target = &draftPatchInput{}
 	case "repair_candidate":
+		target = &candidatePatchInput{}
+	case "repair_article_plan":
 		target = &candidatePatchInput{}
 	}
 	var err error

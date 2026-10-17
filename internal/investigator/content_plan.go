@@ -1,7 +1,6 @@
 package investigator
 
 import (
-	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -18,36 +17,7 @@ func pointKey(text string) string {
 }
 
 func validatePlanFacts(plan []sectionPlan, catalog map[string]domain.Citation) error {
-	if len(domain.JSON(plan)) > 64<<10 {
-		return domain.Err(422, "MODEL_RESULT_INVALID", "主题计划超过64KiB，请只保留主要信息。")
-	}
-	seen := map[string]bool{}
-	for i, p := range plan {
-		fail := func(msg string) error {
-			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: msg, Meta: map[string]any{"path": fmt.Sprintf("/sections/%d", i), "expected": "1-12 distinct key_points and 1-24 existing evidence_ids supporting this source range"}}
-		}
-		if len(p.KeyPoints) < 1 || len(p.KeyPoints) > 12 || len(p.EvidenceIDs) < 1 || len(p.EvidenceIDs) > 24 {
-			return fail("每个主题须登记要保留的事实/条件及来源短引用，不能只给重复标题。")
-		}
-		for _, point := range p.KeyPoints {
-			key := pointKey(point)
-			if key == "" || utf8.RuneCountInString(point) > 300 || seen[key] {
-				return fail("key_points需简洁、非空，且不同章节不能重复同一要点。")
-			}
-			seen[key] = true
-		}
-		for _, id := range p.EvidenceIDs {
-			c, ok := catalog[id]
-			if !ok {
-				return fail("计划来源必须来自当前citation_catalog。")
-			}
-			intersects := c.Range != nil && c.Range.StartMS < p.EndMS && c.Range.EndMS > p.StartMS || c.TimeMS != nil && *c.TimeMS >= p.StartMS && *c.TimeMS <= p.EndMS
-			if !intersects {
-				return fail("计划引用的实际来源范围不支持这一章节时间范围。")
-			}
-		}
-	}
-	return nil
+	return validateContentPlan(plan, catalog)
 }
 
 // Excerpts come directly from accepted canonical blocks. They are private
@@ -93,4 +63,4 @@ func validateDistinctProse(sections []domain.Section) error {
 }
 
 const contentPlanInstructions = `
-begin_article.sections每个主题必须有key_points（1–12条要保留的事实/条件/步骤）与evidence_ids（1–24个当前tN/fN）。先登记全片主要信息，再按详细程度分配解释；不同主题不要重复同一要点。章节来源范围可重叠，但联合覆盖全片且不能有缺口。草稿状态提供已保存正文的canonical_text_excerpt，写后续章节前对照避免重讲同一概念；摘录明确标记截短，必要时read_article_sections回读完整章节。精简只用关键要点组织短段，标准补原因与代表例子，详细补来源支持的非重复条件/参数/例子与有帮助的解释。不要把重复正文当详细。`
+begin_article.sections每个主题必须有key_points（1–12条要保留的事实/条件/步骤）与evidence_ids（1–24个当前tN/fN）。evidence_ids只选最能支持要点的代表性来源，不要罗列该章节时间范围内的全部编号；若校验反馈列出章节和实际数量，逐章按反馈精简。先登记全片主要信息，再按详细程度分配解释；不同主题不要重复同一要点。章节来源范围可重叠，但联合覆盖全片且不能有缺口。草稿状态提供已保存正文的canonical_text_excerpt，写后续章节前对照避免重讲同一概念；摘录明确标记截短，必要时read_article_sections回读完整章节。精简只用关键要点组织短段，标准补原因与代表例子，详细补来源支持的非重复条件/参数/例子与有帮助的解释。不要把重复正文当详细。`

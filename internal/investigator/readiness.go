@@ -21,7 +21,7 @@ type progressState struct {
 }
 
 func (s *session) repairLimit() int {
-	if s.cp.FinalizationFailure != nil && s.cp.FinalizationFailure.Code == "MODEL_RESULT_NOT_SUBMITTED" {
+	if s.cp.HarnessRevision < 3 && s.cp.FinalizationFailure != nil && s.cp.FinalizationFailure.Code == "MODEL_RESULT_NOT_SUBMITTED" {
 		return 1
 	}
 	if s.cp.HarnessRevision > 0 && s.spec.DetailPolicy != nil {
@@ -78,6 +78,9 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		action = "Record visible facts for pending frames first; do not reload or request new pixels."
 	} else if canCompose {
 		action = "Main evidence is ready. Begin/save the full-video article now; inspect only a concrete remaining gap."
+	}
+	if s.cp.DraftIssue != nil && s.cp.LastCandidate["tool"] == "begin_article" {
+		action = "Repair the retained plan with repair_article_plan using rejected_candidate.candidate_id and expected_hash. Fix all listed fields before writing chapter bodies."
 	}
 	if s.forceDraftSubmit {
 		action = "Call submit_article_draft with the latest version now."
@@ -194,10 +197,14 @@ func toolRejection(result *schema.ToolResult, err error) string {
 	if result != nil {
 		for _, part := range result.Parts {
 			var v struct {
-				Error string `json:"error"`
+				Error json.RawMessage `json:"error"`
 			}
-			if json.Unmarshal([]byte(part.Text), &v) == nil && v.Error != "" {
-				return string([]rune(v.Error)[:min(512, len([]rune(v.Error)))])
+			if json.Unmarshal([]byte(part.Text), &v) == nil && len(v.Error) > 0 && string(v.Error) != "null" {
+				var message string
+				if json.Unmarshal(v.Error, &message) != nil {
+					message = string(v.Error)
+				}
+				return string([]rune(message)[:min(512, len([]rune(message)))])
 			}
 		}
 	}

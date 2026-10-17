@@ -72,14 +72,11 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if old.Version != 0 {
 			return s.draftFeedback(ctx, "文章结构已经保存，请使用当前version继续保存章节，不要重建。")
 		}
-		if strings.TrimSpace(in.Title) == "" || len(in.Sections) == 0 || len(in.Sections) > 40 {
+		if strings.TrimSpace(in.Title) == "" || len(in.Sections) == 0 || len(in.Sections) > maxPlanSections {
 			return s.draftFeedback(ctx, "需要标题与1–40个覆盖全片的章节。")
 		}
 		if !s.compositionReady {
 			return s.draftFeedback(ctx, "请先保存所有新图片的观察并解决关键取证问题，再开始成文。")
-		}
-		if err = validateSectionPlan(in.Sections, s.snapshot.DurationMS, s.cp.HarnessRevision > 0); err != nil {
-			return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
 		}
 		ids := map[string]bool{}
 		for _, p := range in.Sections {
@@ -90,10 +87,12 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if err != nil {
 			return nil, err
 		}
+		planErr := validateSectionPlan(in.Sections, s.snapshot.DurationMS, s.cp.HarnessRevision > 0)
 		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
-			if err = validatePlanFacts(in.Sections, catalog); err != nil {
-				return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
-			}
+			planErr = errors.Join(planErr, validatePlanFacts(in.Sections, catalog))
+		}
+		if planErr != nil {
+			return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(planErr))))
 		}
 		if err = resolveDraftCitations(&draft, catalog); err != nil {
 			return s.draftFeedback(ctx, err.Error())
@@ -103,9 +102,14 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		}
 		return s.writeDraft(ctx, in, 0, draft, "正在保存文章结构")
 	}
-	const beginDescription = "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
+	beginDescription := "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
+	options := []utils.Option{}
+	if s.cp.HarnessRevision >= 3 {
+		beginDescription = "Finish investigation and persist a full-video article outline. For each chapter choose only 1-24 representative citation IDs that support its key points; do not list every citation in the time range. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
+		options = append(options, utils.WithSchemaModifier(contentPlanSchema))
+	}
 	if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
-		if err := add(utils.InferEnhancedTool("begin_article", beginDescription, begin)); err != nil {
+		if err := add(utils.InferEnhancedTool("begin_article", beginDescription, begin, options...)); err != nil {
 			return err
 		}
 	} else {
@@ -261,7 +265,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 func validateSectionPlan(plan []sectionPlan, duration int64, allowOverlap bool) error {
 	ids := map[string]bool{}
 	end, lastStart := int64(0), int64(0)
-	if len(plan) < 1 || len(plan) > 40 {
+	if len(plan) < 1 || len(plan) > maxPlanSections {
 		return domain.Err(422, "MODEL_RESULT_INVALID", "需要1–40个覆盖全片的主题章节。")
 	}
 	for i, p := range plan {
@@ -332,6 +336,8 @@ func (s *session) writeDraft(ctx context.Context, args any, version int, draft a
 		}
 		s.cp.Composing = true
 		s.cp.DraftCorrection = false
+		s.cp.DraftIssue = nil
+		s.cp.LastCandidate = nil
 		return draftSummary(saved.Version, draft), nil, nil
 	})
 }
@@ -346,12 +352,18 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 		}
 	}
 	next := "Use save_article_sections with latest version for pending chapters; keep accepted chapters unchanged."
+	if version == 0 {
+		next = "No article plan or chapter body is saved. Correct begin_article and save a full-video plan before writing chapters."
+	}
 	if len(pending) == 0 && len(draft.Plan) > 0 {
 		next = "All planned chapters are saved. Call submit_article_draft NOW with this version. Do not rewrite chapters or limitations before receiving a validation issue."
 	}
-	return map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
+	return map[string]any{"version": version, "title": draft.Title, "plan": draft.Plan, "saved_sections": complete, "saved_section_count": len(complete), "pending_sections": pending, "limitations": draft.Limitations, "next_action": next}
 }
 func (s *session) draftFeedback(ctx context.Context, message string) (*schema.ToolResult, error) {
+	if s.cp.HarnessRevision >= 3 {
+		return s.structuredDraftFeedback(ctx, message)
+	}
 	version, draft, err := s.loadDraft(ctx)
 	if err != nil {
 		return nil, err
@@ -509,7 +521,7 @@ func (s *session) assembleArticle(draft articleDraft) (domain.Article, error) {
 }
 
 const draftInstructions = `
-本次文章使用分批草稿协议，禁止输出整篇巨大JSON。调查充分后先 begin_article 保存标题、覆盖全片的连续章节计划和限制说明（章节 start_ms/end_ms 从0到实际duration_ms）。然后每轮一个 save_article_sections 调用，保存1–3章，复制最新version，section.id来自计划；最后 submit_article_draft 只提交最新version。不要在同轮并发修改同一个version。
+本次文章使用分批草稿协议，禁止输出整篇巨大JSON。调查充分后先 begin_article 保存标题、覆盖全片的连续章节计划和限制说明（章节 start_ms/end_ms 从0到实际duration_ms）。每章的evidence_ids只选1–24个最能支持要点的代表性来源，不要罗列该时间范围内的全部引用；收到包含实际章节号和数量的校验反馈时，逐一按反馈精简。然后每轮一个 save_article_sections 调用，保存1–3章，复制最新version，section.id来自计划；最后 submit_article_draft 只提交最新version。不要在同轮并发修改同一个version。
 正文、配图使用citation_catalog中的tN/fN短引用。text/citation inline与其他block格式不变；figure.frame_ids也可填fN。服务器负责展开snapshot/range/segment/frame元数据、分配块ID和组装导图，不要重复写citations字典。引用多个连续字幕时可在正文添加多个tN引用。没有目录中的引用不能编造。
 已有章节不因下一次格式错误丢失。错误时只重写相关批次，不要重建文章、不重复全部正文。需要更新限制说明用update_article_limitations。已保存章节、待写章节、当前版本与引用目录在每轮状态中提供。主要内容足够支持后及时成文，不为无关细节继续看图。`
 
@@ -520,10 +532,13 @@ func candidateIssue(err error) map[string]any {
 	issue := map[string]any{"code": "candidate_schema", "detail": err.Error(), "repairable": true}
 	var p *domain.Problem
 	if errors.As(err, &p) {
+		if original, ok := p.Meta["issue"].(map[string]any); ok && original != nil {
+			return original
+		}
 		if p.Code == "EVIDENCE_INSUFFICIENT" {
 			issue["code"] = "evidence_missing"
 		}
-		for _, key := range []string{"path", "block_id", "citation_id", "expected", "actual"} {
+		for _, key := range []string{"code", "path", "block_id", "citation_id", "expected", "actual", "issues", "issue_count", "issues_truncated", "affected_sections"} {
 			if v, ok := p.Meta[key]; ok {
 				issue[key] = v
 			}
@@ -531,13 +546,21 @@ func candidateIssue(err error) map[string]any {
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		issues := []map[string]any{}
+		total := 0
 		for _, child := range joined.Unwrap() {
-			if len(issues) >= 16 {
-				break
+			next := candidateIssue(child)
+			if children, ok := next["issues"].([]map[string]any); ok {
+				count, _ := next["issue_count"].(int)
+				total += max(count, len(children))
+				issues = append(issues, children...)
+			} else {
+				total++
+				issues = append(issues, next)
 			}
-			issues = append(issues, candidateIssue(child))
 		}
-		issue["issues"] = issues
+		issue["issues"] = issues[:min(len(issues), maxPlanIssues)]
+		issue["issue_count"] = total
+		issue["issues_truncated"] = total > min(len(issues), maxPlanIssues)
 	}
 	var syntax *json.SyntaxError
 	if errors.As(err, &syntax) {
@@ -556,6 +579,9 @@ func candidateIssue(err error) map[string]any {
 }
 func (s *session) finalizationError() error {
 	if s.cp.FinalizationFailure != nil {
+		if s.cp.FinalizationFailure.Meta["draft_version"] != nil {
+			return s.cp.FinalizationFailure
+		}
 		return domain.Err(422, s.cp.FinalizationFailure.Code, "本次提交仍未通过校验，已取得的来源和草稿保留。"+s.cp.FinalizationFailure.Detail)
 	}
 	return domain.Err(422, "MODEL_RESULT_NOT_SUBMITTED", "模型结束时未正式提交结果；已取得的来源和草稿保留，可以重新尝试。")
@@ -569,9 +595,13 @@ func (s *session) resumeDraft(ctx context.Context) error {
 	}
 	msgs[2].Content += "\n关注点：" + spec.Purpose
 	if s.cp.HarnessRevision > 0 && spec.DetailPolicy != nil {
+		if spec.DetailPolicy.ContentPlan {
+			s.cp.HarnessRevision = 3
+		}
 		msgs[0].Content += harnessInstructions + "\n" + spec.DetailPolicy.Instruction
 		if spec.DetailPolicy.ContentPlan {
 			msgs[0].Content += contentPlanInstructions
+			msgs[0].Content += planRepairInstructions
 		}
 		msgs[2].Content += "\n解读详细程度：" + spec.DetailLevel
 	}

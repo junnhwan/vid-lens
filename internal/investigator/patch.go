@@ -116,14 +116,14 @@ func (s *session) reserveFieldRepair(ctx context.Context, args any) error {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	var count int
-	if err := s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='field_repair'", s.claim.Run.ID).Scan(&count); err != nil {
+	count, err := s.repairUsage(ctx)
+	if err != nil {
 		return err
 	}
-	if s.spec.DetailPolicy == nil || count >= s.spec.DetailPolicy.RepairLimit {
+	if s.spec.DetailPolicy == nil || count >= s.repairLimit() {
 		return domain.Err(422, "MODEL_RESULT_INVALID", "字段修复额度已用完，草稿与原候选保留。")
 	}
-	_, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "field_repair", args, false)
+	_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, "field_repair", args, false)
 	return err
 }
 
@@ -135,6 +135,11 @@ func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) 
 		return err
 	}
 	if s.turn == nil && s.cp.LayoutVersion == draftLayout {
+		if s.cp.HarnessRevision >= 3 {
+			if err := s.planRepairTool(add); err != nil {
+				return err
+			}
+		}
 		return add(utils.InferEnhancedTool("patch_article_draft", "Replace existing fields in saved draft chapters with version CAS. Paths: /title, /limitations or /sections/<id>/blocks/.... Cannot alter plan, source, config or canonical citation metadata. Full publication validation still required.", func(ctx context.Context, in draftPatchInput) (*schema.ToolResult, error) {
 			if r, e := s.replayedDraft(ctx, in); r != nil || e != nil {
 				return r, e

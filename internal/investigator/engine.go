@@ -142,7 +142,14 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 		}
 	}
 	if err != nil || op.Status != "completed" {
-		if s.cp.Repairs >= s.repairLimit() {
+		used, usageErr := s.repairUsage(ctx)
+		if usageErr != nil {
+			return usageErr
+		}
+		if used >= s.repairLimit() {
+			if s.cp.DraftIssue != nil && s.cp.HarnessRevision >= 3 {
+				return s.endDraftCorrection(ctx)
+			}
 			s.cp.FinalizationFailed = true
 			if err = s.persist(ctx, s.cp.Messages); err != nil {
 				return err
@@ -176,8 +183,9 @@ func (s *session) initial(ctx context.Context) error {
 		if s.turn == nil {
 			instruction += "\n" + s.spec.DetailPolicy.Instruction
 			if s.spec.DetailPolicy.ContentPlan {
-				s.cp.HarnessRevision = 2
+				s.cp.HarnessRevision = 3
 				instruction += contentPlanInstructions
+				instruction += planRepairInstructions
 			}
 		} else {
 			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"

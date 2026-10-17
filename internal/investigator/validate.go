@@ -492,7 +492,14 @@ func (s *session) repair(ctx context.Context, cause error) error {
 	} else {
 		s.cp.FinalizationFailure = &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "候选内容未通过校验。"}
 	}
-	if s.cp.Repairs >= s.repairLimit() {
+	used, usageErr := s.repairUsage(ctx)
+	if usageErr != nil {
+		return usageErr
+	}
+	if used >= s.repairLimit() {
+		if s.cp.DraftIssue != nil && s.cp.HarnessRevision >= 3 {
+			return s.endDraftCorrection(ctx)
+		}
 		s.cp.FinalizationFailed = true
 		if err := s.persist(ctx, s.cp.Messages); err != nil {
 			return err

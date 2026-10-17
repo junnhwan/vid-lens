@@ -79,8 +79,9 @@ func (s *Store) RecordCandidate(ctx context.Context, c domain.Claim, key, name, 
 	return s.FinishOperation(ctx, c, operation, args, "", nil)
 }
 
-// An explicit retry may reuse validated draft chapters and their evidence only
-// under the same immutable source/config/protocol. The failed run stays intact.
+// An explicit retry may reuse real observations before a plan exists, or saved
+// draft chapters, under the same immutable source/config/protocol. It never
+// carries model submissions or changes the failed run.
 func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run string, snapshot string) error {
 	if old.SnapshotID == nil || *old.SnapshotID != snapshot {
 		return nil
@@ -96,28 +97,57 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	if err != nil {
 		return err
 	}
-	if previous.Kind != "article.generate" || !domain.Terminal(previous.Status) || previous.ConfigID != old.ConfigID {
+	if previous.Kind != "article.generate" || !domain.Terminal(previous.Status) || previous.ConfigID != old.ConfigID || previous.SnapshotID == nil || *previous.SnapshotID != snapshot {
 		return nil
 	}
 	var cp map[string]any
-	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp["layout_version"] != "source-context-v3" || (cp["protocol"] != domain.ArticleDraftProtocol && cp["protocol"] != "eino-0.9.21/openai-0.1.13/vidlens-1") {
+	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp["ready"] != true || cp["layout_version"] != "source-context-v3" || (cp["protocol"] != domain.ArticleDraftProtocol && cp["protocol"] != "eino-0.9.21/openai-0.1.13/vidlens-1") {
 		return nil
 	}
 	draft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, previous.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	var observations int
+	if err = tx.QueryRow(ctx, "SELECT count(*) FROM observations WHERE run_id=$1 AND snapshot_id=$2", previous.ID, snapshot).Scan(&observations); err != nil {
+		return err
+	}
+	if draft.Version == 0 && observations == 0 {
+		return nil
 	}
 	// No automatic download/re-materialization during retry admission. If an
 	// inspected frame is gone, start fresh rather than fabricate an observation.
-	var missing bool
-	// terminate releases run refs, so inspect every original observation frame too.
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jsonb_each($1::jsonb->'inspections') e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id) LEFT JOIN media_assets a ON a.id=f.frame_id WHERE a.id IS NULL OR a.state<>'ready' OR a.snapshot_id<>$2)`, previous.Checkpoint, snapshot).Scan(&missing); err != nil {
+	// Termination releases run refs. Lock every delivered and observed frame
+	// before checking readiness and pinning, so cleanup cannot win in between.
+	var frames []string
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(array_agg(DISTINCT frame_id),'{}'::text[]) FROM (
+		SELECT f.frame_id FROM jsonb_each(COALESCE($1::jsonb->'inspections','{}'::jsonb)) e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id)
+		UNION SELECT jsonb_array_elements_text(COALESCE(data->'frame_ids','[]'::jsonb)) FROM observations WHERE run_id=$2
+	) wanted`, previous.Checkpoint, previous.ID).Scan(&frames); err != nil {
 		return err
 	}
-	if missing {
+	rows, err := tx.Query(ctx, "SELECT id, state='ready' AND kind='frame' AND snapshot_id=$2 FROM media_assets WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE", frames, snapshot)
+	if err != nil {
+		return err
+	}
+	ready := true
+	count := 0
+	for rows.Next() {
+		var id string
+		var valid bool
+		if err = rows.Scan(&id, &valid); err != nil {
+			rows.Close()
+			return err
+		}
+		count++
+		ready = ready && valid
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if !ready || count != len(frames) {
 		return nil
 	}
 	cp["messages"] = []any{}
@@ -126,6 +156,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	cp["repairs"] = 0
 	delete(cp, "progress")
 	delete(cp, "last_candidate")
+	delete(cp, "draft_issue")
 	delete(cp, "inspect_batch_rejected")
 	cp["draft_correction"] = false
 	cp["draft_repair_version"] = 0
@@ -135,9 +166,11 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	if _, err = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=$2 WHERE id=$1", run, domain.JSON(cp)); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,kind,args_hash,status,result) VALUES($1,'article-draft:retry','article_draft',$2,'completed',$3)`, run, Hash(map[string]any{"from_run": previous.ID}), domain.JSON(Draft{Version: 1, Data: draft.Data}))
-	if err != nil {
-		return err
+	if draft.Version > 0 {
+		_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,kind,args_hash,status,result) VALUES($1,'article-draft:retry','article_draft',$2,'completed',$3)`, run, Hash(map[string]any{"from_run": previous.ID}), domain.JSON(Draft{Version: 1, Data: draft.Data}))
+		if err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO observations(id,run_id,snapshot_id,operation_key,inspection_id,data,created_at) SELECT md5($2||id),$2,snapshot_id,operation_key,inspection_id,data,created_at FROM observations WHERE run_id=$1`, previous.ID, run)
 	if err != nil {
@@ -147,6 +180,6 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO asset_refs(asset_id,owner_type,owner_id,expires_at) SELECT DISTINCT a.id,'run',$2,(SELECT deadline_at+interval '5 minutes' FROM job_runs WHERE id=$2) FROM jsonb_each($1::jsonb->'inspections') e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id) JOIN media_assets a ON a.id=f.frame_id WHERE a.kind='frame' ON CONFLICT DO NOTHING`, previous.Checkpoint, run)
+	_, err = tx.Exec(ctx, `INSERT INTO asset_refs(asset_id,owner_type,owner_id,expires_at) SELECT id,'run',$2,(SELECT deadline_at+interval '5 minutes' FROM job_runs WHERE id=$2) FROM media_assets WHERE id=ANY($1::text[]) ON CONFLICT DO NOTHING`, frames, run)
 	return err
 }

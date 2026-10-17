@@ -43,7 +43,21 @@ func (s *Store) runDiagnostics(ctx context.Context, q Querier, id string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "source_diagnostics": facts, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "source_diagnostics": 40}}, nil
+	budgets, err := many[json.RawMessage](ctx, q, `SELECT jsonb_build_object('budget',result->'budget','reason',result->>'reason','model_revision_id',result->>'model_revision_id') FROM run_operations WHERE run_id=$1 AND kind='budget_diagnostic' ORDER BY started_at,operation_key LIMIT 40`, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "source_diagnostics": facts, "budget_diagnostics": budgets, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "source_diagnostics": 40, "budget_diagnostics": 40}}, nil
+}
+
+// Only the caller's numeric budget and rejection category belong here. Never
+// freeze rejected prompts or credentials just to explain a preflight failure.
+func (s *Store) BudgetDiagnostic(ctx context.Context, c domain.Claim, key string, data any) error {
+	key = "budget-diagnostic:" + key
+	if _, err := s.BeginOperation(ctx, c, key, "budget_diagnostic", data, false); err != nil {
+		return err
+	}
+	return s.FinishOperation(ctx, c, key, data, "", nil)
 }
 
 func (s *Store) SourceDiagnostic(ctx context.Context, c domain.Claim, key string, data any) error {
