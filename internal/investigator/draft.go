@@ -151,7 +151,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		for _, section := range in.Sections {
 			sec := next.Sections[section.ID]
 			if err = s.validateBlocks(ctx, sec.Blocks, next.Citations, true); err != nil {
-				return s.draftFeedback(ctx, err.Error())
+				return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
 			}
 		}
 		return s.writeDraft(ctx, in, version, next, "正在保存文章章节")
@@ -384,7 +384,14 @@ func (s *session) citationCatalog(ctx context.Context) (map[string]domain.Citati
 	catalog := map[string]domain.Citation{}
 	for i, t := range s.transcript {
 		id := "t" + strconv.Itoa(i+1)
-		catalog[id] = domain.Citation{ID: id, Kind: "video_text", Label: "视频原文", SnapshotID: s.snapshot.ID, Range: &domain.Range{StartMS: t.StartMS, EndMS: t.EndMS}, SegmentIDs: []string{t.ID}, TextOrigin: t.Origin}
+		// Platform cue display windows may run slightly beyond the actual media.
+		// Cite only their real intersection; retain the complete original segment,
+		// text, ID, ordinal and raw times in the immutable source snapshot.
+		start, end := max(int64(0), t.StartMS), min(s.snapshot.DurationMS, t.EndMS)
+		if start >= end {
+			continue
+		}
+		catalog[id] = domain.Citation{ID: id, Kind: "video_text", Label: "视频原文", SnapshotID: s.snapshot.ID, Range: &domain.Range{StartMS: start, EndMS: end}, SegmentIDs: []string{t.ID}, TextOrigin: t.Origin}
 	}
 	observations, err := s.observations(ctx)
 	if err != nil {

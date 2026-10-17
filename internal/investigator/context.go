@@ -201,6 +201,8 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 		state.Messages = projectDraftHistory(state.Messages)
 		data := map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}
+		data["source_duration_ms"] = s.snapshot.DurationMS
+		data["citation_time_rule"] = "Citation catalog ranges are intersections of original source windows with actual media. Raw platform cue end times can extend beyond the media. Preserve source text; the full-video plan ends at source_duration_ms, not the last cue end."
 		if s.cp.HarnessRevision > 0 {
 			data["saved_section_previews"] = draftPreviews(draft)
 		}

@@ -205,7 +205,14 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 			problems = append(problems, invalid("引用身份无效："+id))
 		}
 		if err := s.validateCitation(ctx, c, article); err != nil {
-			problems = append(problems, &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: err.Error(), Meta: map[string]any{"path": "/citations/" + strings.ReplaceAll(strings.ReplaceAll(id, "~", "~0"), "/", "~1"), "citation_id": id, "expected": "owned source identity and exact range"}})
+			meta := map[string]any{"path": "/citations/" + strings.ReplaceAll(strings.ReplaceAll(id, "~", "~0"), "/", "~1"), "citation_id": id, "expected": "owned source identity and exact range"}
+			var p *domain.Problem
+			if errors.As(err, &p) {
+				for key, value := range p.Meta {
+					meta[key] = value
+				}
+			}
+			problems = append(problems, &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: err.Error(), Meta: meta})
 		}
 	}
 	return errors.Join(problems...)
@@ -334,7 +341,7 @@ func (s *session) validateCitation(ctx context.Context, c domain.Citation, artic
 		}
 	case "video_text":
 		if c.SnapshotID != s.snapshot.ID || c.Range == nil || len(c.SegmentIDs) == 0 || c.Range.StartMS < 0 || c.Range.StartMS >= c.Range.EndMS || c.Range.EndMS > s.snapshot.DurationMS {
-			return invalid("字幕引用范围无效")
+			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: fmt.Sprintf("字幕引用 %s 范围无效；范围须在实际视频 0..%dms 内并使用当前快照的真实片段。", c.ID, s.snapshot.DurationMS), Meta: map[string]any{"code": "citation_range_invalid", "citation_id": c.ID, "actual": c.Range, "expected": map[string]any{"min_start_ms": 0, "max_end_ms": s.snapshot.DurationMS, "snapshot_id": s.snapshot.ID}}}
 		}
 		selected := []domain.Segment{}
 		for _, id := range c.SegmentIDs {

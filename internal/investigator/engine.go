@@ -200,7 +200,7 @@ func (s *session) initial(ctx context.Context) error {
 		}
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
-	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "text_time_precision": "platform timestamps, or actual coarse ASR audio windows; no invented sentence timing", "transcript": s.transcript}
+	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}
 	if spec, e := s.engine.Store.GenerationForRun(ctx, s.claim.Run.ID); e == nil {
 		fixed["purpose"] = spec.Purpose
