@@ -1,70 +1,14 @@
 import { useEffect, useState } from "react"
-
-const REPO = "junnhwan/vid-lens"
-const CACHE = "vidlens-repo-card"
-
-type RepoInfo = {
-  description: string
-  stars: number
-  forks: number
-}
-
-function readCache(): RepoInfo | null {
-  try {
-    const raw = sessionStorage.getItem(CACHE)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as RepoInfo
-    if (typeof parsed.stars !== "number" || typeof parsed.forks !== "number") return null
-    return { description: parsed.description || "", stars: parsed.stars, forks: parsed.forks }
-  } catch {
-    return null
-  }
-}
-
-let pending: Promise<RepoInfo | null> | null = null
-
-function loadRepo() {
-  const cached = readCache()
-  if (cached) return Promise.resolve(cached)
-  if (!pending) {
-    pending = fetch(`https://api.github.com/repos/${REPO}`, {
-      headers: { Accept: "application/vnd.github+json" },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status))
-        return response.json() as Promise<{ description?: string; stargazers_count?: number; forks_count?: number }>
-      })
-      .then((body) => {
-        const info: RepoInfo = {
-          description: body.description?.trim() || "",
-          stars: body.stargazers_count ?? 0,
-          forks: body.forks_count ?? 0,
-        }
-        try {
-          sessionStorage.setItem(CACHE, JSON.stringify(info))
-        } catch {
-          /* private mode */
-        }
-        return info
-      })
-      .catch(() => null)
-  }
-  return pending
-}
+import { readRepoCache, subscribeRepo } from "../api/github"
 
 function useRepo() {
-  const [info, setInfo] = useState<RepoInfo | null>(null)
+  const [info, setInfo] = useState(readRepoCache)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
-    let live = true
-    void loadRepo().then((next) => {
-      if (!live) return
+    return subscribeRepo((next) => {
       if (next) setInfo(next)
-      else setFailed(true)
+      setFailed(!next)
     })
-    return () => {
-      live = false
-    }
   }, [])
   return { info, failed }
 }
@@ -88,7 +32,7 @@ export function StarLink() {
         </span>
         <span className="star-copy">
           <strong>给仓库加星</strong>
-          <small>{count ? `${count} 颗星` : failed ? "打开 GitHub" : "读取星标"}</small>
+          <small>{count ? `${count} 颗星${failed ? " · 待更新" : ""}` : failed ? "打开 GitHub" : "读取星标"}</small>
         </span>
       </a>
       <span className="repo-card" aria-hidden="true">
