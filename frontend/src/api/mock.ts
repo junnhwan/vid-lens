@@ -195,6 +195,24 @@ const article: Article = {
         label: "注意事项",
         section_id: "cautions",
       },
+      {
+        id: "map_save",
+        parent_id: "map_steps",
+        label: "保存流程",
+        section_id: "steps",
+      },
+      {
+        id: "map_check",
+        parent_id: "map_steps",
+        label: "对照画面核对",
+        section_id: "steps",
+      },
+      {
+        id: "map_unseen",
+        parent_id: "map_check",
+        label: "结果页尚未出现",
+        section_id: "cautions",
+      },
     ],
   },
   citations: {

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react"
 import type { RequestHistoryItem } from "../contract/types"
 import { HttpApi } from "../api/http"
 import { ShareControl } from "./ShareControl"
+import { displayDate, displayUrl, isRunning, statusName } from "./historyText"
+import { rememberTitleCarry } from "./motion"
 
 const phaseNames: Record<string, string> = {
   prepare_source: "准备来源",
@@ -10,40 +12,6 @@ const phaseNames: Record<string, string> = {
   compose: "组织文章",
   validate: "核对文章",
   publish: "发布文章",
-}
-
-function statusName(status: string): string {
-  if (status === "waiting_source") return "准备来源"
-  if (status === "generating") return "处理中"
-  if (status === "completed") return "已完成"
-  if (status === "failed") return "未完成"
-  if (status === "canceled") return "已停止"
-  return "状态未知"
-}
-
-function isRunning(status: string): boolean {
-  return status === "waiting_source" || status === "generating"
-}
-
-function displayUrl(value: string): string {
-  try {
-    const url = new URL(value)
-    return `${url.hostname}${url.pathname}${url.search}`
-  } catch {
-    return value
-  }
-}
-
-function displayDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "时间未知"
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date)
 }
 
 function mergeLatest(latest: RequestHistoryItem[], current: RequestHistoryItem[]): RequestHistoryItem[] {
@@ -69,8 +37,10 @@ export function HistoryView({
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState("")
+  const [stagger, setStagger] = useState(false)
   const itemsRef = useRef(items)
   const refreshing = useRef(false)
+  const firstList = useRef(true)
   const api = useRef(new HttpApi())
   const refreshRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined)
   itemsRef.current = items
@@ -84,6 +54,10 @@ export function HistoryView({
       setItems((current) => mergeLatest(page.items, current))
       setHasMore(page.has_more)
       setError("")
+      if (firstList.current && page.items.length) {
+        firstList.current = false
+        setStagger(true)
+      }
     } catch {
       setError("暂时无法读取处理记录，请稍后重试。")
     } finally {
@@ -91,6 +65,12 @@ export function HistoryView({
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!stagger) return
+    const timer = window.setTimeout(() => setStagger(false), 900)
+    return () => window.clearTimeout(timer)
+  }, [stagger])
 
   useEffect(() => {
     if (active) void refreshRef.current()
@@ -143,20 +123,22 @@ export function HistoryView({
       {error ? <p className="history-error" role="alert">{error}</p> : null}
       {loading && items.length === 0 ? (
         <p className="history-state" role="status">正在读取处理记录…</p>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && !error ? (
         <div className="history-empty">
           <p>这里还没有处理记录。</p>
           <button type="button" className="btn primary" onClick={onNew}>开始解读视频</button>
         </div>
       ) : (
-        <ol className="history-list" aria-label="视频处理记录">
-          {items.map((item) => (
-            <li key={item.id}>
+        <ol className="history-list" data-stagger={stagger ? "true" : undefined} aria-label="视频处理记录">
+          {items.map((item, index) => (
+            <li key={item.id} style={{ "--row": Math.min(index, 12) } as CSSProperties}>
               <a
                 className="history-row"
                 href={`/r/${encodeURIComponent(item.id)}`}
                 onClick={(event) => {
                   event.preventDefault()
+                  const title = event.currentTarget.querySelector("strong")
+                  if (title instanceof HTMLElement) rememberTitleCarry(title)
                   onOpen(item.id)
                 }}
               >

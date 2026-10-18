@@ -1,6 +1,6 @@
 # Model selection, questions and article exports
 
-The desktop React application provides `/`, `/example` and `/docs/*`. Documentation is built from `docs/site/*.md`. The example page shows only published articles selected for public display, including their images and completed questions. With none selected, the page has no article. Opening an example creates no generation task. `GET /api/v1/examples` lists those selected articles, and `GET /api/v1/examples/{article}` returns one only while it remains selected. Theme choices are light, dark and system, persisted locally.
+The desktop React application provides `/`, `/example` and `/docs/*`. Documentation is built from `docs/site/*.md`. The example page shows only published articles selected for public display, including their images. It does not play the generation or saved questions. With none selected, the page has no article. Opening an example creates no generation task. `GET /api/v1/examples` lists those selected articles, and `GET /api/v1/examples/{article}` returns one only while it remains selected. Theme choices are light, dark and system, persisted locally.
 
 ## Model identity and interpretation
 

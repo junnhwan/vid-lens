@@ -6,6 +6,7 @@ import { DiskMeter } from "./DiskMeter"
 import { LikeButton } from "./LikeButton"
 import { ChoiceMenu } from "./ChoiceMenu"
 import { Lens } from "./Lens"
+import { RecentReadings } from "./RecentReadings"
 import { RepoPeek } from "./RepoPeek"
 import { useRise } from "./countUp"
 
@@ -28,6 +29,8 @@ export function EntryView({
   catalogError,
   onReloadCatalog,
   active,
+  onOpenRecord,
+  onHistory,
 }: {
   link: string
   error: string
@@ -48,6 +51,8 @@ export function EntryView({
   onSelect: (v: string) => void
   catalogError: string
   onReloadCatalog: () => void
+  onOpenRecord: (id: string) => void
+  onHistory: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [stats, setStats] = useState<{
@@ -233,6 +238,7 @@ export function EntryView({
               </p>
             ) : null}
           </form>
+          <RecentReadings active={active} onOpen={onOpenRecord} onHistory={onHistory} />
           <div className="entry-foot">
             <a className="sample-link" href="/example">
               查看真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>

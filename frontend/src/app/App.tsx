@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { choosePassage } from "../contract/text"
 import { useVisitor } from "./useVisitor"
-import { carryStill, hideView, showView } from "../ui/motion"
+import { carryStill, hideView, showView, settleTitleCarry } from "../ui/motion"
 import { hitsInSelection } from "../ui/selection"
 import { EntryView } from "../ui/EntryView"
 import { Lightbox } from "../ui/Lightbox"
@@ -93,8 +93,10 @@ export function App() {
       const toID = dest?.querySelector("img")?.getAttribute("data-frame-id")
       if (dest && fromID && fromID === toID) carryStill(start, dest)
     }
+    const heading = next?.querySelector<HTMLElement>("#article-top")
+    if (heading) settleTitleCarry(heading)
     document.body.dataset.phase = visitor.phase === "run" ? "generating" : visitor.phase
-  }, [visitor.phase, path])
+  }, [visitor.phase, path, visitor.article?.article.title])
 
   useEffect(() => {
     if (showingHistory) document.title = "处理记录 · VidLens"
@@ -242,6 +244,8 @@ export function App() {
               onSelect={visitor.setSelectedModel}
               catalogError={visitor.catalogError}
               onReloadCatalog={() => void visitor.reloadCatalog()}
+              onOpenRecord={(id) => navigate(`/r/${encodeURIComponent(id)}`)}
+              onHistory={() => navigate("/history")}
             />
             <RunView
               csrf={visitor.mockMode ? undefined : visitor.csrfToken}
