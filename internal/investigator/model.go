@@ -43,6 +43,9 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return nil, &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型连接暂不可用。", Transient: true}
 	}
+	if observer != nil {
+		observer.report.HTTPStatus = domain.Ptr(r.StatusCode)
+	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		if observer != nil {
 			observer.finish(false)

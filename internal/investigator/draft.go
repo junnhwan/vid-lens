@@ -90,7 +90,14 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		}
 		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations, MindMap: mindMap}
 		if s.cp.HarnessRevision >= 9 {
-			if err := validateConceptMap(mindMap, ids); err != nil {
+			mapError := validateConceptMap(mindMap, ids)
+			if s.authoring() && mapError != nil {
+				mapError = authoringConceptMapIssue(mindMap, ids, mapError)
+			}
+			if err := mapError; err != nil {
+				if s.authoring() {
+					return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
+				}
 				return s.draftFeedback(ctx, err.Error())
 			}
 		}

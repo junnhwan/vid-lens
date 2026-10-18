@@ -218,6 +218,10 @@ func (w *Worker) handle(ctx context.Context, t *asynq.Task) error {
 		return asynq.SkipRetry
 	}
 	c, e := w.Store.Claim(ctx, p.RunID, p.Generation, w.owner)
+	var waiting *store.RetryWait
+	if errors.As(e, &waiting) {
+		return &retryError{delay: waiting.After}
+	}
 	if e != nil {
 		return e
 	}

@@ -35,7 +35,7 @@ func (s *Store) runDiagnostics(ctx context.Context, q Querier, id string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	subs, err := many[map[string]any](ctx, q, `SELECT jsonb_build_object('operation_key',operation_key,'attempt_id',attempt_id,'submission',submission,'created_at',created_at,'finish_reason',reporting->'finish_reason','stream_status',reporting->'stream_status','tool_arguments_valid',reporting->'tool_arguments_valid','output_limit_reached',reporting->'output_limit_reached','input',reporting->'input','output',reporting->'output','reasoning',reporting->'reasoning','requested_output_tokens',reporting->'requested_output_tokens','thinking_request',reporting->'thinking_request','cache_read',reporting->'cache_read','budget',reporting->'budget','response_finished_at',reporting->'response_finished_at','total_ms',reporting->'total_ms') FROM model_submissions WHERE run_id=$1 ORDER BY created_at,submission LIMIT 300`, id)
+	subs, err := many[map[string]any](ctx, q, `SELECT jsonb_build_object('operation_key',operation_key,'attempt_id',attempt_id,'submission',submission,'created_at',created_at,'finish_reason',reporting->'finish_reason','stream_status',reporting->'stream_status','http_status',reporting->'http_status','failure_message',reporting->'failure_message','first_meaningful_delta_ms',reporting->'first_meaningful_delta_ms','tool_arguments_valid',reporting->'tool_arguments_valid','output_limit_reached',reporting->'output_limit_reached','input',reporting->'input','output',reporting->'output','reasoning',reporting->'reasoning','requested_output_tokens',reporting->'requested_output_tokens','thinking_request',reporting->'thinking_request','cache_read',reporting->'cache_read','budget',reporting->'budget','response_finished_at',reporting->'response_finished_at','total_ms',reporting->'total_ms') FROM model_submissions WHERE run_id=$1 ORDER BY created_at,submission LIMIT 300`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,11 @@ func (s *Store) runDiagnostics(ctx context.Context, q Querier, id string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "source_diagnostics": facts, "budget_diagnostics": budgets, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "source_diagnostics": 40, "budget_diagnostics": 40}}, nil
+	recoveries, err := many[modelRecovery](ctx, q, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='model_recovery' ORDER BY started_at,operation_key LIMIT 10`, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "source_diagnostics": facts, "budget_diagnostics": budgets, "automatic_recoveries": recoveries, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "source_diagnostics": 40, "budget_diagnostics": 40, "automatic_recoveries": 10}}, nil
 }
 
 // Only the caller's numeric budget and rejection category belong here. Never

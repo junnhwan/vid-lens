@@ -27,6 +27,9 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 		if !r.DeadlineAt.After(now) {
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "TASK_DEADLINE_EXCEEDED", Message: "处理已达到总时限。", CanRetry: true})
 		}
+		if r.Kind == "article.generate" && r.Status == "retry_wait" && r.RetryNotBefore != nil && r.RetryNotBefore.After(now) {
+			return &RetryWait{After: r.RetryNotBefore.Sub(now)}
+		}
 		if r.LeaseExpiresAt != nil && r.LeaseExpiresAt.After(now) && r.Status == "running" {
 			return nil
 		}
@@ -69,7 +72,7 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 		aid := domain.ID()
 		r.ExecutionEpoch++
 		r.AttemptNo++
-		_, e = tx.Exec(ctx, "UPDATE job_runs SET status='running',execution_epoch=$2,attempt_no=$3,lease_owner=$4,lease_expires_at=now()+interval '60 seconds',retry_at=NULL,retry_not_before=NULL,updated_at=now() WHERE id=$1", id, r.ExecutionEpoch, r.AttemptNo, owner)
+		_, e = tx.Exec(ctx, "UPDATE job_runs SET status='running',execution_epoch=$2,attempt_no=$3,lease_owner=$4,lease_expires_at=now()+interval '60 seconds',retry_at=NULL,retry_not_before=NULL,failure=NULL,updated_at=now() WHERE id=$1", id, r.ExecutionEpoch, r.AttemptNo, owner)
 		if e != nil {
 			return e
 		}
@@ -211,10 +214,13 @@ func (s *Store) Fail(ctx context.Context, c domain.Claim, f domain.Failure, tran
 		if e = sourceRetryNotice(ctx, tx, r, f.Message); e != nil {
 			return e
 		}
+		if e = modelRetryNotice(ctx, tx, r, f, delay); e != nil {
+			return e
+		}
 		if _, e = tx.Exec(ctx, "UPDATE job_attempts SET ended_at=now(),outcome='retry_wait' WHERE id=$1", c.AttemptID); e != nil {
 			return e
 		}
-		_, e = tx.Exec(ctx, "UPDATE job_runs SET status='retry_wait',failure_count=failure_count+1,retry_not_before=now()+$2*interval '1 millisecond',retry_at=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1", r.ID, delay.Milliseconds())
+		_, e = tx.Exec(ctx, "UPDATE job_runs SET status='retry_wait',failure_count=failure_count+1,retry_not_before=now()+$2*interval '1 millisecond',retry_at=NULL,failure=$3,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1", r.ID, delay.Milliseconds(), domain.JSON(f))
 		if e != nil {
 			return e
 		}

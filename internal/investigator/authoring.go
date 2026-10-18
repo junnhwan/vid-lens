@@ -13,6 +13,7 @@ import (
 )
 
 const authoringPolicy = "interpretation-2026-10-18-v9"
+const recoveryPolicy = "interpretation-2026-10-18-v10"
 
 func (s *session) authoring() bool { return s != nil && s.turn == nil && s.cp.HarnessRevision >= 12 }
 
@@ -475,6 +476,9 @@ func projectAuthoringHistory(messages []*schema.Message) []*schema.Message {
 	for i := 0; i < len(messages); i++ {
 		m := messages[i]
 		if m.Name == "vidlens_last_feedback" {
+			if json.Unmarshal([]byte(m.Content), &last) != nil {
+				out = append(out, m)
+			}
 			continue
 		}
 		if m.Role != schema.Assistant || len(m.ToolCalls) != 1 {
@@ -482,7 +486,10 @@ func projectAuthoringHistory(messages []*schema.Message) []*schema.Message {
 			continue
 		}
 		name := m.ToolCalls[0].Function.Name
-		if !strings.Contains("|begin_article|save_article_sections|repair_article_plan|repair_article_sections|patch_article_draft|update_article_limitations|read_candidate_fields|record_observation|", "|"+name+"|") || i+1 >= len(messages) || messages[i+1].Role != schema.Tool || messages[i+1].ToolCallID != m.ToolCalls[0].ID {
+		// Candidate fields have no equivalent in the draft/evidence capsules.
+		// Keep these bounded tool exchanges until a candidate mutation supersedes
+		// them; otherwise the model must read the same fields every round.
+		if !strings.Contains("|begin_article|save_article_sections|repair_article_plan|repair_article_sections|patch_article_draft|update_article_limitations|record_observation|", "|"+name+"|") || i+1 >= len(messages) || messages[i+1].Role != schema.Tool || messages[i+1].ToolCallID != m.ToolCalls[0].ID {
 			out = append(out, m)
 			continue
 		}
@@ -496,7 +503,10 @@ func projectAuthoringHistory(messages []*schema.Message) []*schema.Message {
 			out = append(out, m)
 			continue
 		}
-		last = nil
+		if name != "record_observation" {
+			last = nil
+			out = dropCandidateFieldReads(out)
+		}
 		if e := value["error"]; len(e) > 0 && string(e) != "null" {
 			last = map[string]json.RawMessage{}
 			for _, k := range []string{"error", "next_action", "correct_arguments_and_try_again"} {
@@ -509,6 +519,19 @@ func projectAuthoringHistory(messages []*schema.Message) []*schema.Message {
 	}
 	if len(last) > 0 {
 		out = append(out, &schema.Message{Role: schema.User, Name: "vidlens_last_feedback", Content: string(domain.JSON(last))})
+	}
+	return out
+}
+
+func dropCandidateFieldReads(messages []*schema.Message) []*schema.Message {
+	out := make([]*schema.Message, 0, len(messages))
+	for i := 0; i < len(messages); i++ {
+		m := messages[i]
+		if m.Role == schema.Assistant && len(m.ToolCalls) == 1 && m.ToolCalls[0].Function.Name == "read_candidate_fields" && i+1 < len(messages) && messages[i+1].Role == schema.Tool && messages[i+1].ToolCallID == m.ToolCalls[0].ID {
+			i++
+			continue
+		}
+		out = append(out, m)
 	}
 	return out
 }

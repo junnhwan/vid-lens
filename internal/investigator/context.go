@@ -180,7 +180,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	var draftContext *schema.Message
 	freshMessages := []*schema.Message{}
 	for _, x := range state.Messages {
-		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" && x.Name != "vidlens_answer_references" && x.Name != "vidlens_last_feedback" {
+		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" && x.Name != "vidlens_answer_references" && (x.Name != "vidlens_last_feedback" || s.authoring()) {
 			freshMessages = append(freshMessages, x)
 		}
 	}

@@ -51,10 +51,11 @@ type DetailPolicy struct {
 	CompositionOutputTokens   int    `json:"composition_output_tokens"`
 	RepairOutputTokens        int    `json:"repair_output_tokens"`
 	FinalOutputTokens         int    `json:"final_output_tokens"`
+	ProviderRecoveryLimit     int    `json:"provider_recovery_limit,omitempty"`
 }
 
 func InterpretationPolicy(level string) (DetailPolicy, bool) {
-	p := DetailPolicy{Revision: "interpretation-2026-10-18-v9", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 16384, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048}
+	p := DetailPolicy{Revision: "interpretation-2026-10-18-v10", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 16384, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048, ProviderRecoveryLimit: 2}
 	switch level {
 	case "concise":
 		p.OptionalInspections = 2

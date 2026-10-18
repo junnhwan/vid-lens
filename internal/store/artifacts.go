@@ -454,6 +454,7 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 				}
 			}
 			limit := 3
+			recoveryGranted := false
 			reporting := map[string]any{"schema": "unobserved", "stream_status": "incomplete"}
 			if kind == "model" {
 				routes, err := modelRoutes(ctx, tx, c.Run.ConfigID)
@@ -477,9 +478,18 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 					return domain.Err(503, "MODEL_UNAVAILABLE", "这条模型线路已不可用。")
 				}
 				limit = max(limit, len(routes))
+				baseLimit := limit
+				limit, err = recoveredModelLimit(ctx, tx, c.Run.ID, key, limit)
+				if err != nil {
+					return err
+				}
+				recoveryGranted = limit > baseLimit
 			}
 			if op.Submissions >= limit {
 				if kind == "model" {
+					if recoveryGranted {
+						return &domain.Problem{Status: 422, Code: "PROVIDER_UNAVAILABLE", Detail: "本轮模型调用的自动恢复额度已用完；来源、观察和已保存章节保留，可手动继续。", Meta: map[string]any{"can_retry": true, "retry_action": "resume_checkpoint", "submissions": op.Submissions}}
+					}
 					return modelSubmissionLimit(op.Submissions)
 				}
 				return domain.Err(422, "PROVIDER_UNAVAILABLE", "同一远端操作已达到提交上限。")

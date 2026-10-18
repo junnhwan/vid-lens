@@ -95,6 +95,8 @@ export interface ExecutionView {
   phase: Phase | null
   retry_at: string | null
   wait_reason: WaitReason | null
+  retry_reason?: string
+  retry_attempt?: number
 }
 
 export interface FrameUrls {

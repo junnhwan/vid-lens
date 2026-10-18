@@ -53,6 +53,10 @@ export function describeRequest(view: RequestView | null, current: ActivityStep 
   }
 
   if (execution?.status === "retry_wait") {
+    if (execution.kind === "article.generate") {
+      const attempt = execution.retry_attempt ? `第 ${execution.retry_attempt} 次自动恢复。` : ""
+      return { kicker: "正在自动恢复", title: "正在等待继续生成", purpose: [attempt, execution.retry_reason, fallbackPurpose(execution), "来源与已保存进度会保留，无需手动重试。"].filter(Boolean).join(" "), range: "", busy: true }
+    }
     return { kicker, title: fallbackTitle(execution), purpose: fallbackPurpose(execution), range: "", busy: true }
   }
   if (current) {

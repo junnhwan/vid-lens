@@ -25,6 +25,19 @@ describe("terminal activity", () => {
 })
 
 describe("source retries", () => {
+
+  it("explains automatic article recovery and keeps failed requests terminal", () => {
+    const view = { request: { status: "generating" }, execution: { kind: "article.generate", status: "retry_wait", retry_attempt: 2, retry_reason: "模型响应未完整结束", retry_at: "2026-10-18T08:00:00Z" } } as RequestView
+    const description = describeRequest(view, null, false, false)
+    expect(description.kicker).toBe("正在自动恢复")
+    expect(description.purpose).toContain("第 2 次自动恢复")
+    expect(description.purpose).toContain("模型响应未完整结束")
+    expect(description.purpose).toContain("无需手动重试")
+    const failed = describeRequest({ ...view, request: { ...view.request, status: "failed" }, failure: { code: "PROVIDER_UNAVAILABLE", message: "自动恢复额度已用完", can_retry: true, retry_at: null } }, null, false, false)
+    expect(failed.busy).toBe(false)
+    expect(failed.title).toBe("自动恢复额度已用完")
+    expect(failed.purpose).not.toContain("无需手动重试")
+  })
   it("shows the retry wait instead of an old running download", () => {
     const view = { request: { status: "waiting_source" }, execution: { status: "retry_wait", retry_at: null } } as RequestView
     const current = { status: "running", title: "正在获取用于观察的完整视频" } as ActivityStep

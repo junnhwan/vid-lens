@@ -105,7 +105,14 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 		return in
 	}
 	out := []*schema.ToolInfo{}
+	repair := s.requiredRepairTool()
 	for _, t := range in {
+		if repair != "" {
+			if t.Name == repair {
+				out = append(out, t)
+			}
+			continue
+		}
 		keep := false
 		switch t.Name {
 		case "record_observation", "inspect_video_window", "find_evidence", "read_source":
@@ -133,6 +140,25 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 	}
 	return out
 }
+
+// Repeated candidate reads are preparation, not evidence or accepted writing.
+// Direct the model to the pending correction before it exhausts the durable
+// stall guard; do not reset call, correction or no-progress budgets.
+func (s *session) requiredRepairTool() string {
+	if s.cp.HarnessRevision < 13 || s.turn != nil || s.cp.DraftIssue == nil || s.cp.Progress.Stalled < 3 {
+		return ""
+	}
+	switch s.cp.LastCandidate["tool"] {
+	case "begin_article":
+		return "repair_article_plan"
+	case "save_article_sections":
+		return "repair_article_sections"
+	}
+	return ""
+}
+
+const repairProgressInstructions = `
+错误修复：计划被拒时用repair_article_plan，正文被拒时用repair_article_sections，复制readiness.rejected_candidate的candidate_id与expected_hash。read_candidate_fields返回的fields会保留到候选更新；已读过的字段直接用于replace修正，不要重复读取。导图修复可以替换/mind_map或具体已有节点字段：只有一个根且parent_id=null，分组section_id可null，叶节点section_id必须是当前真实章节ID。连续准备却没有保存修正时，下一轮只允许执行修复；原纠错次数、总调用数与无进展上限不会重置。`
 
 func modelCallTitle(call int) string { return "第 " + strconv.Itoa(call) + " 次模型调用" }
 

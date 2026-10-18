@@ -117,7 +117,15 @@ func execution(r *domain.Run) any {
 	if r.Status == "waiting_dependency" {
 		wait = domain.Ptr("media_restore")
 	}
-	return map[string]any{"id": r.ID, "kind": kind, "status": r.Status, "phase": r.Phase, "retry_at": r.RetryAt, "wait_reason": wait}
+	retryAt := r.RetryAt
+	if retryAt == nil && r.Status == "retry_wait" {
+		retryAt = r.RetryNotBefore
+	}
+	retryReason := ""
+	if r.Status == "retry_wait" && r.Failure != nil {
+		retryReason = r.Failure.Message
+	}
+	return map[string]any{"id": r.ID, "kind": kind, "status": r.Status, "phase": r.Phase, "retry_at": retryAt, "wait_reason": wait, "retry_reason": retryReason, "retry_attempt": r.FailureCount}
 }
 func article(ctx context.Context, q Querier, id string) (domain.Article, error) {
 	return one[domain.Article](ctx, q, "SELECT content FROM articles WHERE id=$1", id)

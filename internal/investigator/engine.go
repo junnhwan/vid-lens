@@ -218,9 +218,13 @@ func (s *session) initial(ctx context.Context) error {
 			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
 		}
 	}
-	if newLayout && s.turn == nil && s.spec.DetailPolicy != nil && s.spec.DetailPolicy.Revision == authoringPolicy {
+	if newLayout && s.turn == nil && s.spec.DetailPolicy != nil && (s.spec.DetailPolicy.Revision == authoringPolicy || s.spec.DetailPolicy.Revision == recoveryPolicy) {
 		s.cp.HarnessRevision = 12
 		instruction = authoringInstructions(s.spec.DetailPolicy.Instruction)
+		if s.spec.DetailPolicy.Revision == recoveryPolicy {
+			s.cp.HarnessRevision = 13
+			instruction += repairProgressInstructions
+		}
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}

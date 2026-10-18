@@ -71,6 +71,9 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 	}
 	out := *info
 	out.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&next)
+	if t.name == "repair_article_plan" && t.session.cp.HarnessRevision >= 9 {
+		out.Desc += " Concept-tree repairs may also replace /mind_map or its existing root_id/nodes fields. Use one root with parent_id=null; group section_id=null, leaf section_id must be a real planned chapter ID. Read only fields not already present in context, then submit patches."
+	}
 	if t.session.turn != nil && t.session.cp.HarnessRevision >= 11 && t.name == "inspect_video_window" {
 		out.Desc += " For this Q&A turn, inspect only a concrete pixel-dependent gap needed to answer the user's actual question. Use the supplied full transcript/article directly for conceptual explanations; do not fetch decorative figures or resolve unrelated article limitations."
 	}

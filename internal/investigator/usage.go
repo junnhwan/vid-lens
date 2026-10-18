@@ -33,6 +33,7 @@ type usageReport struct {
 	RequestedOutput   *int64      `json:"requested_output_tokens,omitempty"`
 	ThinkingRequest   string      `json:"thinking_request"`
 	StreamStatus      string      `json:"stream_status"`
+	HTTPStatus        *int        `json:"http_status,omitempty"`
 	RequestID         string      `json:"request_id,omitempty"`
 	ResponseID        string      `json:"response_id,omitempty"`
 	ObservationStatus string      `json:"observation_status"`

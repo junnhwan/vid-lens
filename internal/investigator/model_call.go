@@ -302,6 +302,8 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
+		} else if s.cp.HarnessRevision >= 13 && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, activeTools[0].Name))
 		} else if s.turn != nil && s.cp.HarnessRevision >= 10 {
 			// Require an executable action, while retaining evidence tools when
 			// the question needs investigation. No plain-text-then-submit round.
@@ -325,6 +327,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			if err != nil {
 				transport.Status = "failed"
 				message = modelFailureMessage(err)
+				if saveErr := s.engine.Store.RecordSubmission(ctx, s.claim, key, submission, map[string]any{"failure_message": message}); saveErr != nil {
+					return nil, saveErr
+				}
 			}
 			transport.FinishedAt = domain.Ptr(time.Now().UTC())
 			transport.Outcome = &domain.Outcome{Message: message, EvidenceStatus: "not_assessed"}
@@ -344,6 +349,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				if errors.As(submitErr, &problem) && problem.Code == "MODEL_UNAVAILABLE" {
 					last = submitErr
 					continue
+				}
+				if errors.As(submitErr, &problem) && problem.Code == "PROVIDER_UNAVAILABLE" && s.cp.HarnessRevision >= 13 {
+					if delay, reserved, saveErr := s.engine.Store.ScheduleModelRecovery(ctx, s.claim, key); saveErr != nil {
+						return nil, saveErr
+					} else if reserved {
+						submitErr = &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "本轮模型响应连续失败，已安排等待后从原进度自动恢复。", Transient: true, RetryAfter: delay}
+					}
 				}
 				return nil, s.failModelStep(ctx, step, submitErr)
 			}

@@ -4,7 +4,7 @@ import { LectureShelf } from "./LectureShelf"
 import { lectures, sameVideo } from "./lectures"
 
 describe("lecture shelf", () => {
-  it("lists two short lectures and marks the one already in the field", () => {
+  it("lists the available lectures and marks the one already in the field", () => {
     const html = renderToStaticMarkup(<LectureShelf link="https://youtu.be/eMlx5fFNoYc" onPick={() => undefined} />)
     for (const item of lectures) expect(html).toContain(item.title)
     expect(lectures).toHaveLength(2)
@@ -12,7 +12,7 @@ describe("lecture shelf", () => {
     expect(html).not.toContain("LSTM 的三个门")
     expect(html).toContain("从这些讲课视频试起")
     expect(html).toContain("已填入")
-    expect(html.match(/试这篇/g)).toHaveLength(2)
+    expect(html.match(/试这篇/g)).toHaveLength(lectures.length - 1)
   })
 
   it("treats watch and short YouTube links as the same video", () => {
