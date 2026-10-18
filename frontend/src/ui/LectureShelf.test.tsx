@@ -4,17 +4,20 @@ import { LectureShelf } from "./LectureShelf"
 import { lectures, sameVideo } from "./lectures"
 
 describe("lecture shelf", () => {
-  it("lists four short lectures and marks the one already in the field", () => {
-    const html = renderToStaticMarkup(<LectureShelf link="https://youtu.be/YCzL96nL7j0" onPick={() => undefined} />)
+  it("lists two short lectures and marks the one already in the field", () => {
+    const html = renderToStaticMarkup(<LectureShelf link="https://youtu.be/eMlx5fFNoYc" onPick={() => undefined} />)
     for (const item of lectures) expect(html).toContain(item.title)
+    expect(lectures).toHaveLength(2)
+    expect(html).not.toContain("Kubernetes 架构怎么串起来")
+    expect(html).not.toContain("LSTM 的三个门")
     expect(html).toContain("从这些讲课视频试起")
     expect(html).toContain("已填入")
-    expect(html.match(/试这篇/g)).toHaveLength(3)
+    expect(html.match(/试这篇/g)).toHaveLength(2)
   })
 
   it("treats watch and short YouTube links as the same video", () => {
-    expect(sameVideo("https://www.youtube.com/watch?v=8C_SCDbUJTg&t=12s", "https://youtu.be/8C_SCDbUJTg")).toBe(true)
-    expect(sameVideo("https://www.youtube.com/watch?v=eMlx5fFNoYc", "https://youtu.be/YCzL96nL7j0")).toBe(false)
+    expect(sameVideo("https://www.youtube.com/watch?v=eMlx5fFNoYc&t=12s", "https://youtu.be/eMlx5fFNoYc")).toBe(true)
+    expect(sameVideo("https://www.youtube.com/watch?v=uxwjXLjJOoM", "https://youtu.be/eMlx5fFNoYc")).toBe(false)
     expect(sameVideo("", lectures[0].url)).toBe(false)
   })
 })
