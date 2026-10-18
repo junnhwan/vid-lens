@@ -17,3 +17,6 @@ __pycache__/
 AGENTS.md
 CONTEXT.md
 docs-private/
+
+# Owner-supplied model-admin screenshot is a private capability-probe asset.
+/internal/investigator/testdata/model_capability.png

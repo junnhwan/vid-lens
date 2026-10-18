@@ -22,7 +22,7 @@ The source video is 3Blue1Brown's [But what is a neural network? | Deep learning
 
 The user supplied these screenshots for public README display. Static screenshots do not make the test article an interactive public example; ordinary visitor articles and Q&A remain private to their anonymous session. Future captures should likewise be selected for publication and checked for credentials, private service settings, session tokens, and personal data.
 
-Earlier `.jpg` captures and the superseded PNGs `readme-process-source.png`, `readme-process-writing.png`, `readme-process-review.png`, and `readme-demo-article.png` remain in `docs/images/` but are not used by the current README. If they are reused, retain their original source links and attribution.
+Earlier `.jpg` captures remain in `docs/images/` but are not used by the current README. If they are reused, retain their original source links and attribution.
 
 ## Banner
 
