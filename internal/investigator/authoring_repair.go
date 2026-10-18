@@ -144,8 +144,11 @@ func (s *session) authoringRepairTool(add func(tool.EnhancedInvokableTool, error
 		if err != nil {
 			return finish(toolError(err.Error()))
 		}
+		if err := authoringShapeIssues(string(raw)); err != nil {
+			return finish(toolError(string(domain.JSON(candidateIssue(err)))))
+		}
 		var next saveSectionsInput
-		if json.Unmarshal(raw, &next) != nil {
+		if json.Unmarshal([]byte(normalizeAuthoringBody(string(raw))), &next) != nil {
 			return finish(toolError("修复后正文类型不正确。"))
 		}
 		// The mixed original batch may also contain accepted chapters. Their

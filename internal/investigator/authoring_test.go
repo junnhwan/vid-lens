@@ -169,12 +169,12 @@ func TestAuthoringRetainedBodyFieldRepairSurvivesReplay(t *testing.T) {
 	if body, err := planCall(s, "outline", "begin_article", plan); err != nil || body["version"] != float64(1) {
 		t.Fatal(body, err)
 	}
-	bad := `{"version":1,"sections":[{"id":"one","blocks":[{"type":"paragraph","origin":"video","content":[{"type":"text","text":"起始条件有来源提供的事实，需要在后续过程中保留。"},{"type":"citation","citation_id":"t1"}]}]},{"id":"two","blocks":[{"type":"list","origin":"video","ordered":true,"content":[]}]}]}`
+	bad := `{"version":1,"sections":[{"id":"one","blocks":[{"type":"paragraph","origin":"video","text":"起始条件有来源提供的事实，需要在后续过程中保留。","citation_ids":["t1"]}]},{"id":"two","blocks":[{"type":"list","origin":"video","ordered":true,"content":[]}]}]}`
 	if body, err := planCall(s, "bad-body", "save_article_sections", bad); err != nil || body["error"] == nil {
 		t.Fatal(body, err)
 	}
 	candidate := s.cp.LastCandidate
-	block := map[string]any{"type": "list", "origin": "video", "ordered": true, "items": []any{map[string]any{"content": []any{map[string]string{"type": "text", "text": "结束状态同样有独立的来源事实，不能省略。"}, map[string]string{"type": "citation", "citation_id": "t25"}}}}}
+	block := map[string]any{"type": "list", "origin": "video", "ordered": true, "items": []any{map[string]any{"text": "结束状态同样有独立的来源事实，不能省略。", "citation_ids": []string{"t25"}}}}
 	input := authoringRepairInput{CandidateID: candidate["candidate_id"].(string), ExpectedHash: candidate["expected_hash"].(string), Version: 1, Patches: []authoringFieldPatch{{Op: "replace", Path: "/sections/1/blocks/0", Value: domain.JSON(block)}}}
 	for i := 0; i < 2; i++ {
 		body, err := planCall(s, "field-fix", "repair_article_sections", input)
@@ -183,7 +183,7 @@ func TestAuthoringRetainedBodyFieldRepairSurvivesReplay(t *testing.T) {
 		}
 	}
 	version, draft, err := s.loadDraft(context.Background())
-	if err != nil || version != 2 || !strings.Contains(domain.BlockText(draft.Sections["one"].Blocks[0]), "起始条件有来源") {
+	if err != nil || version != 2 || !strings.Contains(domain.BlockText(draft.Sections["one"].Blocks[0]), "起始条件有来源") || !strings.Contains(domain.BlockText(draft.Sections["two"].Blocks[0]), "结束状态同样有独立") {
 		t.Fatal(version, err)
 	}
 	for _, path := range []string{"/version", "/sections/0/id", "/sections/0/blocks/0/snapshot_id"} {
