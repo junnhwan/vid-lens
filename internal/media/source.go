@@ -32,6 +32,9 @@ type subformat struct {
 	Ext string `json:"ext"`
 }
 
+const youtubeVideoFormat = "bestvideo[height<=1080][protocol=https][ext=mp4]/bestvideo[height<=1080][protocol=https]/bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]/best[height<=1080]"
+const youtubeAudioFormat = "bestaudio[protocol=https][ext=m4a]/bestaudio[protocol=https]/bestaudio[ext=m4a]/bestaudio/best"
+
 func youtubeSource(source string) bool {
 	u, err := url.Parse(source)
 	if err != nil {
@@ -47,7 +50,7 @@ func (s *Service) ytdlpArgs(source string) []string {
 	if youtubeSource(source) {
 		// Public YouTube work must never borrow the owner's account, even when
 		// the shared platform file also contains YouTube login cookies.
-		a = append(a, "--js-runtimes", "node")
+		a = append(a, "--js-runtimes", "node", "--abort-on-unavailable-fragments")
 	}
 	if s.Config.ProxyURL != "" {
 		a = append(a, "--proxy", s.Config.ProxyURL)
@@ -60,10 +63,14 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	var prefetchedAudio string
 	var audioErr error
 	var stopAudio context.CancelFunc
+	var sourceInfo string
 	defer func() {
 		cancelPrepare()
 		if audioDone != nil {
 			<-audioDone
+		}
+		if sourceInfo != "" {
+			_ = os.Remove(sourceInfo)
 		}
 	}()
 	ident, e := s.Store.SourceIdentity(ctx, c.Run.SourceID)
@@ -239,13 +246,14 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		if e = advance("正在检查可用的平台字幕"); e != nil {
 			return e
 		}
+		// Subtitles, video and audio must use the same extraction and signed
+		// format selection. Do not repeat page/challenge work for each stream.
+		sourceInfo = filepath.Join(work, "source-info.json")
+		if e = os.WriteFile(sourceInfo, raw, 0600); e != nil {
+			return e
+		}
 		if !restore {
-			infoFile := filepath.Join(work, "subtitle-info.json")
-			if e = os.WriteFile(infoFile, raw, 0600); e != nil {
-				return e
-			}
-			segs, language, decision, e = s.extractorSubtitles(ctx, c, meta, infoFile, work)
-			_ = os.Remove(infoFile)
+			segs, language, decision, e = s.extractorSubtitles(ctx, c, meta, sourceInfo, work)
 			if e != nil {
 				return e
 			}
@@ -283,7 +291,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 				defer release()
 				sub, cc := context.WithTimeout(dctx, 20*time.Minute)
 				defer cc()
-				audioErr = s.downloadStream(sub, ident.URL, "bestaudio[ext=m4a]/bestaudio/best", prefetchedAudio, min(p.MaxDownloadBytes, 64<<20))
+				audioErr = s.downloadStreamFromInfo(sub, ident.URL, youtubeAudioFormat, prefetchedAudio, min(p.MaxDownloadBytes, 64<<20), sourceInfo)
 			}()
 		}
 		if e = advance("正在获取用于观察的完整视频"); e != nil {
@@ -295,8 +303,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 		}
 		subctx, cancel = context.WithTimeout(dctx, 20*time.Minute)
 		video = filepath.Join(work, "video.input")
-		format := "bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]/best[height<=1080]"
-		e = s.downloadStream(subctx, ident.URL, format, video, p.MaxDownloadBytes)
+		e = s.downloadStreamFromInfo(subctx, ident.URL, youtubeVideoFormat, video, p.MaxDownloadBytes, sourceInfo)
 		cancel()
 		rel()
 		if e != nil {
@@ -313,6 +320,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	duration := probe.DurationMS
 	if bili != nil && (float64(duration)+2000 < meta.Duration*1000 || probe.Width != bili.Video.Width || probe.Height != bili.Video.Height) {
 		return domain.Err(422, "SOURCE_UNAVAILABLE", "B 站下载结果与完整视频或选定清晰度不一致。")
+	}
+	if ident.Platform == "youtube" && meta.Duration > 0 && float64(duration)+2000 < meta.Duration*1000 {
+		return domain.Err(422, "SOURCE_UNAVAILABLE", "下载结果未覆盖完整视频，未使用缺失片段继续处理。")
 	}
 	if duration <= 0 || duration > p.MaxVideoMS {
 		return domain.Err(422, "INPUT_LIMIT_EXCEEDED", "视频时长无效或超过限制。")

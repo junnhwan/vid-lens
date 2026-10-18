@@ -146,10 +146,18 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	if err != nil {
 		return nil, err
 	}
+	cooldowns, err := s.engine.Store.ModelRouteCooldowns(ctx, s.claim.Run.ID)
+	if err != nil {
+		return nil, err
+	}
 	// Recovery prefers routes with fewer submissions. Configured priority orders
-	// routes with equal attempt counts; the last successful route breaks ties.
+	// healthy routes with equal attempt counts; a recent transport failure in
+	// this run temporarily yields to another eligible route of the exact model.
 	sort.SliceStable(routes, func(i, j int) bool {
 		a, b := routes[i].ConfigID, routes[j].ConfigID
+		if cooldowns[a] != cooldowns[b] {
+			return !cooldowns[a]
+		}
 		if attempts[a] != attempts[b] {
 			return attempts[a] < attempts[b]
 		}
@@ -327,7 +335,15 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			if err != nil {
 				transport.Status = "failed"
 				message = modelFailureMessage(err)
-				if saveErr := s.engine.Store.RecordSubmission(ctx, s.claim, key, submission, map[string]any{"failure_message": message}); saveErr != nil {
+				report := map[string]any{"failure_message": message}
+				var work *domain.WorkError
+				if errors.As(err, &work) {
+					report["failure_code"] = work.Code
+					if work.Transient && (work.Code == "PROVIDER_UNAVAILABLE" || work.Code == "PROVIDER_RATE_LIMITED") {
+						report["route_cooldown_until"] = time.Now().UTC().Add(min(5*time.Minute, max(2*time.Minute, work.RetryAfter)))
+					}
+				}
+				if saveErr := s.engine.Store.RecordSubmission(ctx, s.claim, key, submission, report); saveErr != nil {
 					return nil, saveErr
 				}
 			}

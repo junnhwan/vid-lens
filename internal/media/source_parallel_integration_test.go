@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"vidlens/internal/domain"
@@ -19,6 +21,8 @@ func TestSourceDownloadsVideoAndAudioTogetherThenPublishesVerifiedTranscript(t *
 	db, res, cfg := testsupport.Services(t)
 	ctx := context.Background()
 	fixture := t.TempDir()
+	trace := filepath.Join(fixture, "extractor-arguments.log")
+	t.Setenv("EXTRACTOR_TRACE", trace)
 	video, audio := filepath.Join(fixture, "video.mp4"), filepath.Join(fixture, "audio.wav")
 	for _, args := range [][]string{
 		{"-f", "lavfi", "-i", "color=blue:size=160x90:rate=1", "-t", "2", "-c:v", "libx264", "-threads", "1", video},
@@ -29,6 +33,7 @@ func TestSourceDownloadsVideoAndAudioTogetherThenPublishesVerifiedTranscript(t *
 		}
 	}
 	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> "$EXTRACTOR_TRACE"
 case "$*" in
  *--dump-single-json*) printf '{"id":"abcdefghijk","title":"Parallel source fixture","duration":2,"subtitles":{},"automatic_captions":{}}';;
  *bestaudio*) sleep 0.6; cat %q;;
@@ -86,6 +91,75 @@ esac
 	err = db.Pool.QueryRow(ctx, `WITH latest AS(SELECT DISTINCT ON(step_id) step FROM run_events WHERE run_id=$1 AND step_id IS NOT NULL ORDER BY step_id,seq DESC) SELECT EXISTS(SELECT 1 FROM latest v,latest a WHERE v.step->>'title'='正在获取用于观察的完整视频' AND a.step->>'title'='正在获取转写所需音轨' AND v.step->>'status'='completed' AND a.step->>'status'='completed' AND (v.step->>'started_at')::timestamptz<(a.step->>'finished_at')::timestamptz AND (a.step->>'started_at')::timestamptz<(v.step->>'finished_at')::timestamptz)`, claim.Run.ID).Scan(&overlap)
 	if err != nil || !overlap {
 		t.Fatal("source downloads were serialized or not observed", err)
+	}
+	arguments, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extractions := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(arguments)), "\n") {
+		if strings.Contains(line, "--dump-single-json") {
+			extractions++
+			continue
+		}
+		if !strings.Contains(line, "--load-info-json") || strings.Contains(line, "https://") {
+			t.Fatal("video/audio re-extracted the page instead of using the same metadata", line)
+		}
+	}
+	if extractions != 1 {
+		t.Fatal("source extraction was repeated", extractions)
+	}
+}
+
+func TestSourceRejectsTruncatedExtractorVideo(t *testing.T) {
+	db, res, cfg := testsupport.Services(t)
+	ctx := context.Background()
+	fixture := t.TempDir()
+	video := filepath.Join(fixture, "short.mp4")
+	if out, err := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=160x90:rate=1", "-f", "lavfi", "-i", "sine=sample_rate=16000", "-t", "2", "-c:v", "libx264", "-threads", "1", "-c:a", "aac", video).CombinedOutput(); err != nil {
+		t.Fatalf("fixture: %v %s", err, out)
+	}
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *--dump-single-json*) printf '{\"id\":\"abcdefghijk\",\"title\":\"Twenty second source\",\"duration\":20}';; *) cat %q;; esac\n", video)
+	if err := os.WriteFile(filepath.Join(fixture, "yt-dlp"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fixture+string(os.PathListSeparator)+os.Getenv("PATH"))
+	asrCalls := 0
+	asr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asrCalls++
+		fmt.Fprint(w, `{"text":"Only the first two seconds."}`)
+	}))
+	defer asr.Close()
+	p := cfg.Profile
+	p.ASRBaseURL, p.ASRModel = asr.URL, "truncation-fixture"
+	if _, err := db.SaveConfig(ctx, p, "", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	_, p, err := db.CurrentConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := db.NewSession(ctx, domain.ID(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := db.CreateRequest(ctx, owner.ID, domain.ID(), "https://youtube.com/watch?v=abcdefghijk", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := db.Request(ctx, owner.ID, a.ID)
+	c, err := db.Claim(ctx, *req.ActiveRunID, 1, "truncation-fixture")
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	s, err := New(db, res, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Prepare(ctx, *c, p)
+	var problem *domain.Problem
+	if !errors.As(err, &problem) || problem.Code != "SOURCE_UNAVAILABLE" || asrCalls != 0 {
+		t.Fatalf("truncated full-video source reached ASR/publication: error=%v asr_calls=%d", err, asrCalls)
 	}
 }
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sort"
+	"time"
 
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
@@ -121,6 +122,29 @@ func (s *Store) ModelRouteAttempts(ctx context.Context, run, key, original strin
 			return nil, err
 		}
 		out[cid] = n
+	}
+	return out, rows.Err()
+}
+
+// Route health is scoped to the current run and derived from its durable send
+// ledger. This uses the existing run_id primary-key prefix, creates no global
+// circuit state, and never changes a frozen model, input or submission budget.
+func (s *Store) ModelRouteCooldowns(ctx context.Context, run string) (map[string]bool, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT ON (COALESCE(m.reporting->>'route_config_id',j.config_id)) COALESCE(m.reporting->>'route_config_id',j.config_id),COALESCE(m.reporting->>'route_cooldown_until','') FROM model_submissions m JOIN job_runs j ON j.id=m.run_id WHERE m.run_id=$1 ORDER BY COALESCE(m.reporting->>'route_config_id',j.config_id),m.created_at DESC,m.submission DESC`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	now := time.Now()
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return nil, err
+		}
+		if until, err := time.Parse(time.RFC3339Nano, raw); err == nil && until.After(now) {
+			out[id] = true
+		}
 	}
 	return out, rows.Err()
 }
