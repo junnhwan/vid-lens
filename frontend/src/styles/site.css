@@ -2849,6 +2849,9 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
   top: 118px;
   height: calc(100dvh - 132px);
 }
+.development-note ~ main .workspace[data-qa="stage"] {
+  height: calc(100dvh - 98px);
+}
 
 .article-tools .disclosure {
   height: auto;
@@ -2940,9 +2943,12 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
 .paper-tab:hover { transform: translateX(3px); }
 .paper-tab:active { transform: translateX(1px) scale(0.98); }
 .workspace[data-qa="stage"] {
-  display: block;
+  display: flex;
+  flex-direction: column;
   width: min(48rem, calc(100% - 96px));
-  margin: 12px auto 28px;
+  height: calc(100dvh - 64px);
+  margin: 0 auto;
+  min-height: 0;
 }
 .workspace[data-qa="stage"] .article-col {
   position: fixed;
@@ -2984,24 +2990,38 @@ body[data-page-hidden="true"] .entry-stage.is-live * {
 }
 .workspace[data-qa="stage"] .qa-slot {
   position: static;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   width: auto;
   height: auto;
-  overflow: visible;
+  min-height: 0;
+  overflow: hidden;
 }
 .workspace[data-qa="stage"] .qa,
 .workspace[data-qa="open"] .qa {
   pointer-events: auto;
 }
 .workspace[data-qa="stage"] .qa {
+  flex: 1 1 auto;
   width: auto;
-  height: calc(100dvh - 104px);
-  min-height: 520px;
+  height: auto;
+  min-height: 0;
   margin-left: 0;
   border-left: 0;
-  padding: 6px 4px 12px;
+  padding: 8px 4px 12px;
   opacity: 1;
   transform: none;
   background: transparent;
+  overflow: hidden;
+}
+.workspace[data-qa="stage"] .qa-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink) 28%, transparent) transparent;
 }
 .workspace[data-qa="stage"] .qa-head {
   align-items: flex-end;
