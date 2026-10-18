@@ -24,37 +24,65 @@ VidLens turns a Bilibili or YouTube video into a desktop reading experience: an 
 
 [Open the real examples](https://vidlens.wanjune.qzz.io/example). The page shows published articles selected for public display. Browsing them makes no new model calls.
 
-## Processing and reading
+## Reading and asking questions
 
-The processing, article, and Q&A screenshots below come from a real test of a 10:08 YouTube video. Progress and elapsed times show the page state at capture; they are not a processing-time guarantee.
+These screenshots come from an actual interpretation of 3Blue1Brown's [But what is a neural network? | Deep learning chapter 1](https://www.youtube.com/watch?v=aircAruvnKk) (18:39), showing the desktop Web flow from a video link to an illustrated article and questions about its frames.
 
-### Submit a video
+### Submit a video and choose how to read it
 
-![VidLens home page: paste a video link and choose a model and interpretation depth.](docs/images/readme-demo-home.png)
+![VidLens home page: paste a video link, choose a model and interpretation depth, add a focus, or open a recent article.](docs/images/readme-demo-home.png)
 
-### Follow the current stage and plan
+### See the whole video in a content map
 
-![VidLens processing page: the current stage, execution plan, and overview frames from across the video.](docs/images/readme-process-plan.png)
+![VidLens article opening: chapter navigation and the full content map, with controls to share, export, revisit processing, or ask about the video.](docs/images/readme-article-map.png)
 
-### Prepare source text and visual evidence
+### Read the article alongside real video frames
 
-![VidLens source preparation log: subtitle checks, video acquisition, and overview frames spanning the video.](docs/images/readme-process-source-detail.png)
+![VidLens article body: chapter navigation, timestamped explanations, and an original neural-network frame with a follow-up question link.](docs/images/readme-article-detail.png)
 
-### Draft the article in batches
+### Ask as you read, with sources in the answer
 
-![VidLens processing progress: 6 of 12 planned chapters are saved while the Agent continues writing.](docs/images/readme-process-writing-progress.png)
+![VidLens side-by-side Q&A: keep reading on the left while the answer explains weight colors and horizontal edge detection with timestamped sources and a video frame.](docs/images/readme-frame-qa.png)
 
-### Read the article with timestamped sources
+<details>
+<summary>Show passage questions, frame investigation, and focused Q&A (2 screenshots)</summary>
 
-![VidLens illustrated article: body text with timestamped citations and a real video frame.](docs/images/readme-article-detail.png)
+#### Select a passage and follow the investigation
 
-### Browse the content map
+![VidLens passage and frame Q&A: the selected passage remains visible while the sidebar shows video frames being inspected and their timestamps.](docs/images/readme-qa-investigation.png)
 
-![Generated VidLens article page with a chapter content map and links to export, revisit processing, and ask about the video.](docs/images/readme-article-map.png)
+#### Switch to the focused Q&A view
 
-### Ask about a passage or frame
+![VidLens focused Q&A: a wider question area with an expanded answer history showing additional video frames gathered for the question.](docs/images/readme-qa-focus.png)
 
-![VidLens video Q&A: select article content and view an answer with timestamped sources alongside the related video frame.](docs/images/readme-frame-qa.png)
+</details>
+
+<details>
+<summary>Show processing from source preparation to publication (5 screenshots)</summary>
+
+Progress, call counts, and elapsed times reflect the page state at capture; they are not a processing-time guarantee.
+
+#### Follow the current stage and execution plan
+
+![VidLens processing page: reading the video's text and frames, with the current stage and execution plan visible.](docs/images/readme-process-plan.png)
+
+#### Prepare subtitles and overview frames
+
+![VidLens source preparation: subtitles, the full video, and media checks are complete, with 12 overview frames spanning the video.](docs/images/readme-process-source-detail.png)
+
+#### Organize and check the article structure
+
+![VidLens writing progress: the text has been read and frames checked; the Agent is organizing an outline covering the full video.](docs/images/readme-process-writing-progress.png)
+
+#### Check frames, save observations, and write the article
+
+![VidLens execution history: inspect two neural-network frames, save visual observations and the outline, then save the article and validate its citations.](docs/images/readme-process-evidence.png)
+
+#### Open the finished article
+
+![VidLens article ready: all 10 chapters are saved, with preparation, reading, frame inspection, writing, review, and publication complete.](docs/images/readme-process-complete.png)
+
+</details>
 
 ## Core features
 

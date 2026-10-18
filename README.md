@@ -24,37 +24,65 @@ VidLens 面向桌面浏览器，把 B 站或 YouTube 视频整理成带章节、
 
 [打开真实示例](https://vidlens.wanjune.qzz.io/example)。页面展示已经发布、并被选中公开的图文。浏览示例不会发起新的模型调用。
 
-## 实际处理与阅读界面
+## 实际阅读与追问界面
 
-以下处理、文章和问答截图来自一条 10:08 的 YouTube 实测视频。流程进度和用时只代表截图捕获时的界面状态，不构成时长承诺。
+以下截图来自对 3Blue1Brown 的 [But what is a neural network? | Deep learning chapter 1](https://www.youtube.com/watch?v=aircAruvnKk)（18:39）的实际解读，展示从提交链接到图文阅读、画面追问的桌面 Web 流程。
 
-### 提交视频
+### 提交视频，选择解读方式
 
-![VidLens 首页：粘贴视频链接并选择模型与解读深度。](docs/images/readme-demo-home.png)
+![VidLens 首页：粘贴视频链接、选择模型与解读深度，也可添加关注点或打开最近的解读。](docs/images/readme-demo-home.png)
 
-### 查看处理阶段与计划
+### 用导图把握全片结构
 
-![VidLens 处理页面：查看当前阶段、执行计划和全片概览画面。](docs/images/readme-process-plan.png)
+![VidLens 文章首页：左侧章节目录与完整内容导图，顶部可分享、导出图文、回看生成过程或追问视频。](docs/images/readme-article-map.png)
 
-### 准备文字来源与画面证据
+### 阅读正文，回看真实画面
 
-![VidLens 来源准备记录：检查平台字幕、获取视频并生成覆盖全片的概览帧。](docs/images/readme-process-source-detail.png)
+![VidLens 图文正文：章节目录、带时间出处的讲解与原视频中的神经网络画面，图下可继续追问。](docs/images/readme-article-detail.png)
 
-### 分批撰写文章
+### 边读边问，查看带出处的回答
 
-![VidLens 处理进度：12 章计划中已保存 6 章，Agent 正在继续撰写。](docs/images/readme-process-writing-progress.png)
+![VidLens 并排问答：左侧继续阅读文章，右侧结合视频画面解释权重颜色与横向边缘检测，并附上时间引用和配图。](docs/images/readme-frame-qa.png)
 
-### 阅读带时间出处的文章
+<details>
+<summary>展开：选段追问、画面取证与专注问答（2 张）</summary>
 
-![VidLens 图文文章：正文包含时间引用，并配有真实视频画面。](docs/images/readme-article-detail.png)
+#### 选中段落，查看取证过程
 
-### 浏览章节内容导图
+![VidLens 选段与画面追问：文章保留选中段落，问答侧栏展示正在查看的原视频画面与对应时间。](docs/images/readme-qa-investigation.png)
 
-![VidLens 已生成的图文文章页面：显示章节内容导图和导出、回看处理、视频追问入口。](docs/images/readme-article-map.png)
+#### 切换到「问答为主」
 
-### 选中内容继续追问
+![VidLens 问答为主模式：放大问答区域，展开回答过程可查看为问题补充获取的多张视频画面。](docs/images/readme-qa-focus.png)
 
-![VidLens 视频问答：选中文章内容后，在侧栏查看带时间出处的回答和对应视频画面。](docs/images/readme-frame-qa.png)
+</details>
+
+<details>
+<summary>展开：从来源准备到文章发布的处理过程（5 张）</summary>
+
+进度、调用次数与用时均为截图捕获时的状态，不构成处理时长承诺。
+
+#### 查看当前阶段与执行计划
+
+![VidLens 处理页面：正在理解全片文字与画面，阶段条与执行计划显示当前工作。](docs/images/readme-process-plan.png)
+
+#### 准备字幕与全片概览画面
+
+![VidLens 来源准备记录：平台字幕、完整视频与素材校验已完成，并展示覆盖全片的 12 张概览帧。](docs/images/readme-process-source-detail.png)
+
+#### 组织与核对文章结构
+
+![VidLens 写作进度：已通读文字、核对画面，正在确定覆盖全片的文章提纲。](docs/images/readme-process-writing-progress.png)
+
+#### 核对画面，保存观察与正文
+
+![VidLens 执行记录：核对两帧神经网络画面、保存视频观察与文章结构，随后保存正文并校验引用。](docs/images/readme-process-evidence.png)
+
+#### 完成后开始阅读
+
+![VidLens 文章已就绪：10 章全部保存，准备、通览、看画面、写文章、核对与发布均已完成。](docs/images/readme-process-complete.png)
+
+</details>
 
 ## 核心能力
 

@@ -1,22 +1,26 @@
 # README visual assets
 
-The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). The seven PNG screenshots below were supplied by the user from real desktop tests and copied without edits. Progress counters and elapsed times reflect the page state in each capture; they are not a service guarantee. No extra video processing or model calls were started to create the images.
+The Chinese [README](../README.md) and [English README](../README.en.md) share the assets in [`docs/images/`](images/). The eleven PNG screenshots below were supplied by the user on 2026-10-18 from a real desktop test and copied without edits at their original 3072 × 1600 resolution. The README shows the home page, content map, article, and Q&A answer first; expandable sections contain the additional Q&A views and processing history.
 
 ## Screenshots
 
-| File | Application view | Contents |
+| File | Supplied capture | Contents |
 | --- | --- | --- |
-| `readme-demo-home.png` | `001.png` | Home page, link submission, and model/depth selectors |
-| `readme-process-plan.png` | `013.png` | Current stage, execution plan, and overview frames |
-| `readme-process-source-detail.png` | `014.png` | Subtitle check, video acquisition, and overview-frame records |
-| `readme-process-writing-progress.png` | `015.png` | Article drafting with 6 of 12 planned chapters saved |
-| `readme-article-detail.png` | `017.png` | Article text, timestamp citations, and an original video frame |
-| `readme-article-map.png` | `019.png` | Generated article page with its chapter content map |
-| `readme-frame-qa.png` | `021.png` | Selected passage, related video frame, and sourced Q&A |
+| `readme-demo-home.png` | `011.png` | Updated home page, link submission, model/depth selectors, and recent articles |
+| `readme-article-map.png` | `006.png` | Article opening, chapter navigation, full content map, and export controls |
+| `readme-article-detail.png` | `007.png` | Article text, timestamp citations, and an original neural-network frame |
+| `readme-frame-qa.png` | `009.png` | Side-by-side reading and an answer with timestamped sources and a video frame |
+| `readme-qa-investigation.png` | `008.png` | Passage selection and frame investigation in the Q&A sidebar |
+| `readme-qa-focus.png` | `010.png` | Focused Q&A with expanded frame-gathering history |
+| `readme-process-plan.png` | `001.png` | Current stage and execution plan while reading the video |
+| `readme-process-source-detail.png` | `002.png` | Subtitle checks, video acquisition, and 12 overview frames |
+| `readme-process-writing-progress.png` | `003.png` | Organizing the article outline after reading text and checking frames |
+| `readme-process-evidence.png` | `004.png` | Detailed frame checks, saved observations, article writing, and citation validation |
+| `readme-process-complete.png` | `005.png` | Completed processing with all 10 chapters saved and the article ready to open |
 
-The six processing, article, and Q&A captures use a 10:08 YouTube video titled *RAG Explained For Beginners*. UI language, model label, counters, and elapsed time are observations from the supplied captures, not default recommendations, benchmarks, or service guarantees. These static screenshots do not make the test article an interactive public example; ordinary visitor articles and Q&A remain private to their anonymous session.
+The source video is 3Blue1Brown's [But what is a neural network? | Deep learning chapter 1](https://www.youtube.com/watch?v=aircAruvnKk), shown as 18:39 in the application. The original video imagery belongs to its creator. UI language, model label, counters, and elapsed time are observations from the supplied captures, not default recommendations, benchmarks, or service guarantees.
 
-Only explicitly prepared public examples appear in the screenshots. Ordinary visitor articles and Q&A remain private to their anonymous session. When refreshing images, check that no credentials, private service settings, browser sessions, private requests, or personal data appear in the capture.
+The user supplied these screenshots for public README display. Static screenshots do not make the test article an interactive public example; ordinary visitor articles and Q&A remain private to their anonymous session. Future captures should likewise be selected for publication and checked for credentials, private service settings, session tokens, and personal data.
 
 Earlier `.jpg` captures and the superseded PNGs `readme-process-source.png`, `readme-process-writing.png`, `readme-process-review.png`, and `readme-demo-article.png` remain in `docs/images/` but are not used by the current README. If they are reused, retain their original source links and attribution.
 
