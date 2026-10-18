@@ -20,7 +20,7 @@ function publishedDate(value: string) {
   return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
 }
 
-export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost: () => void }) {
+export function ExampleShowcase({ api, onDirty, onAuthLost }: { api: HttpApi; onDirty: (dirty: boolean) => void; onAuthLost: () => void }) {
   const [articles, setArticles] = useState<PublishedArticle[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [saved, setSaved] = useState<string[]>([])
@@ -30,6 +30,13 @@ export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost:
   const dirty = selected.join("\n") !== saved.join("\n")
   const authLost = useRef(onAuthLost)
   authLost.current = onAuthLost
+  const reportDirty = useRef(onDirty)
+  reportDirty.current = onDirty
+
+  useEffect(() => {
+    reportDirty.current(dirty)
+    return () => reportDirty.current(false)
+  }, [dirty])
 
   useEffect(() => {
     let stop = false
@@ -97,9 +104,19 @@ export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost:
     ...articles.filter((item) => !selected.includes(item.article_id)).sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at)),
   ]
 
+  function revert() {
+    setNotice("")
+    setSelected(saved)
+  }
+
   return <section className="example-showcase" aria-labelledby="example-showcase-title">
-    <h3 id="example-showcase-title">公开示例</h3>
-    <p>勾选后，这篇图文和已经保存的追问会出现在公开示例页。没有勾选时，示例页不展示文章。最多 {maxExamples} 篇，可调整已选图文的顺序。</p>
+    <header className="storage-heading">
+      <div>
+        <p className="eyebrow">PUBLIC EXAMPLES</p>
+        <h2 id="example-showcase-title">公开示例</h2>
+        <p className="fine">勾选后，这篇图文会出现在公开示例页。没有勾选时，示例页不展示文章。最多 {maxExamples} 篇，可调整已选图文的顺序。</p>
+      </div>
+    </header>
     {error ? <p className="management-message error" role="alert">{error}</p> : null}
     {notice ? <p className="management-message" role="status">{notice}</p> : null}
     {busy === "load" && articles.length === 0 ? <p className="fine">正在读取已发布图文…</p> : null}
@@ -122,6 +139,7 @@ export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost:
     </ul> : null}
     {articles.length ? <div className="example-showcase-actions">
       <button type="button" className="btn primary" disabled={!dirty || Boolean(busy)} onClick={() => void save()}>{busy === "save" ? "正在保存…" : "保存示例"}</button>
+      <button type="button" className="btn quiet desk-pill" disabled={!dirty || Boolean(busy)} onClick={revert}>撤销</button>
       <span className="fine">已选 {selected.length} / {maxExamples}</span>
     </div> : null}
   </section>

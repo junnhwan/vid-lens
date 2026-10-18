@@ -29,7 +29,15 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   const [drawn, setDrawn] = useState<Set<string>>(() => new Set())
   const [ghosts, setGhosts] = useState<Ghost[]>([])
   const [frame, setFrame] = useState(0)
+  const [enlarged, setEnlarged] = useState(false)
+  const [scale, setScale] = useState(1)
   const canvasRef = useRef<HTMLDivElement>(null)
+  const inlineHostRef = useRef<HTMLDivElement>(null)
+  const zoomHostRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const pendingJump = useRef<string | null>(null)
+  const jumpRef = useRef(onJump)
+  jumpRef.current = onJump
   const treeRef = useRef<HTMLDivElement>(null)
   const refs = useRef(new Map<string, HTMLButtonElement>())
   const known = useRef(new Set<string>())
@@ -67,12 +75,42 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   }, [indexed, current])
 
   useClientLayout(() => {
-    const stage = treeRef.current
-    if (!stage) return
+    const host = enlarged ? zoomHostRef.current : inlineHostRef.current
+    if (!host) return
     const observer = new ResizeObserver(() => setFrame((value) => value + 1))
-    observer.observe(stage)
+    observer.observe(host)
     return () => observer.disconnect()
-  }, [])
+  }, [enlarged])
+
+  useClientLayout(() => {
+    const host = enlarged ? zoomHostRef.current : inlineHostRef.current
+    if (!host || layout.width < 1 || layout.height < 1) return
+    const pad = 16
+    const availW = host.clientWidth - pad
+    const availH = enlarged ? host.clientHeight - pad : 420
+    if (availW < 1 || availH < 1) return
+    const next = Math.min(enlarged ? 1.35 : 1, availW / layout.width, availH / layout.height)
+    if (!Number.isFinite(next) || next <= 0) return
+    setScale((value) => (Math.abs(value - next) < 0.01 ? value : next))
+  }, [enlarged, frame, layout.width, layout.height])
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!enlarged || !dialog) return
+    if (!dialog.open) dialog.showModal()
+    setFrame((value) => value + 1)
+  }, [enlarged])
+
+  useEffect(() => {
+    if (enlarged || !pendingJump.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const id = pendingJump.current
+      if (!id) return
+      pendingJump.current = null
+      jumpRef.current(id)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [enlarged, scale])
 
   useClientLayout(() => {
     const canvas = canvasRef.current
@@ -138,20 +176,6 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
     button.focus()
   }, [focused, visibleKey])
 
-  useEffect(() => {
-    if (!indexed) return
-    const canvas = canvasRef.current
-    const id = nodeForSection(indexed, current)
-    const node = id ? refs.current.get(id) : null
-    if (!canvas || !node) return
-    const top = node.offsetTop - canvas.clientHeight / 2 + node.clientHeight / 2
-    const left = node.offsetLeft - 28
-    const nextTop = Math.max(0, top)
-    const nextLeft = Math.max(0, left)
-    if (Math.abs(canvas.scrollTop - nextTop) < 8 && Math.abs(canvas.scrollLeft - nextLeft) < 8) return
-    canvas.scrollTo({ top: nextTop, left: nextLeft, behavior: prefersReduced() ? "auto" : "smooth" })
-  }, [current, visibleKey, indexed])
-
   function toggle(id: string) {
     const node = indexed?.nodes.get(id)
     if (!node) return
@@ -178,32 +202,30 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   }
 
   if (!indexed) return null
+  const fittedHeight = Math.ceil(layout.height * scale + 16)
+  const fittedWidth = Math.ceil(layout.width * scale + 16)
+  function openZoom(event: { target: EventTarget | null }) {
+    if (enlarged) return
+    const target = event.target
+    if (!(target instanceof Element) || target.closest("button")) return
+    setEnlarged(true)
+  }
   const anchors: { x: number; y: number; hot: boolean }[] = []
   for (const wire of layout.wires) {
     const found = anchors.find((item) => Math.abs(item.x - wire.x1) < 0.5 && Math.abs(item.y - wire.y1) < 0.5)
     if (!found) anchors.push({ x: wire.x1, y: wire.y1, hot: hot.has(wire.id) })
     else if (hot.has(wire.id)) found.hot = true
   }
-  return (
-    <section className="map concept-map" aria-labelledby="map-label">
-      <div className="map-head">
-        <div>
-          <h2 id="map-label">思维导图</h2>
-          <p>从主题到关系，点选概念回到原文</p>
-        </div>
-        <button type="button" id="map-toggle" aria-expanded={!sketch} aria-controls="map-panel" onClick={() => setSketch((value) => !value)}>
-          {sketch ? "展开" : "收起"}
-        </button>
-      </div>
-      <div id="map-panel" className="concept-canvas" ref={canvasRef}>
+  const stage = (
         <div
           className="concept-stage"
           role="tree"
           aria-label="概念关系"
           ref={treeRef}
-          style={{ width: layout.width, height: layout.height }}
+          style={{ width: layout.width, height: layout.height, transform: `scale(${scale})` }}
           onKeyDown={onKey}
           onMouseLeave={() => setHoverId(null)}
+          onClick={openZoom}
         >
           <svg className="concept-wires" viewBox={`0 0 ${layout.width} ${layout.height}`} width={layout.width} height={layout.height} aria-hidden="true">
             {layout.wires.map((wire) => (
@@ -254,8 +276,12 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
                 onFocus={() => setFocusId(node.id)}
                 onClick={() => {
                   setFocusId(node.id)
-                  if (node.sectionId) onJump(node.sectionId)
-                  else if (!open && node.childIds.length) toggle(node.id)
+                  if (node.sectionId) {
+                    if (enlarged) {
+                      pendingJump.current = node.sectionId
+                      setEnlarged(false)
+                    } else onJump(node.sectionId)
+                  } else if (!open && node.childIds.length) toggle(node.id)
                 }}
               >
                 {node.depth === 0 ? (
@@ -300,7 +326,52 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
             </span>
           ))}
         </div>
+  )
+  return (
+    <section className="map concept-map" aria-labelledby="map-label">
+      <div className="map-head">
+        <div>
+          <h2 id="map-label">思维导图</h2>
+          <p>整张图都在这里。点空白处或「放大」看大图，点概念回到原文</p>
+        </div>
+        <div className="concept-actions">
+          <button type="button" onClick={() => setEnlarged(true)}>放大</button>
+          <button type="button" id="map-toggle" aria-expanded={!sketch} aria-controls="map-panel" onClick={() => setSketch((value) => !value)}>
+            {sketch ? "展开" : "收起"}
+          </button>
+        </div>
       </div>
+      <div className="concept-slot" ref={inlineHostRef}>
+        {enlarged ? <p className="concept-zoom-hold">导图已在浮层中打开。</p> : (
+          <div id="map-panel" className="concept-fit" data-zoomable="true" ref={canvasRef} style={{ height: fittedHeight }} onClick={openZoom}>
+            {stage}
+          </div>
+        )}
+      </div>
+      {enlarged ? (
+        <dialog
+          ref={dialogRef}
+          className="concept-zoom"
+          aria-labelledby="map-zoom-title"
+          onCancel={(event) => {
+            event.preventDefault()
+            setEnlarged(false)
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setEnlarged(false)
+          }}
+        >
+          <div className="concept-zoom-head">
+            <h2 id="map-zoom-title">思维导图</h2>
+            <button type="button" onClick={() => setEnlarged(false)}>关闭</button>
+          </div>
+          <div className="concept-zoom-body" ref={zoomHostRef}>
+            <div id="map-panel" className="concept-fit" ref={canvasRef} style={{ width: fittedWidth, height: fittedHeight }}>
+              {stage}
+            </div>
+          </div>
+        </dialog>
+      ) : null}
     </section>
   )
 }

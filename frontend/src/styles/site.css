@@ -2903,7 +2903,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .manage-layout .manage-tabs {
   position: relative;
   display: inline-grid;
-  grid-template-columns: repeat(5, max-content);
+  grid-template-columns: repeat(6, max-content);
   gap: 0;
   margin: 0;
   padding: 4px;
@@ -2917,7 +2917,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   top: 4px;
   bottom: 4px;
   left: 4px;
-  width: calc((100% - 8px) / 5);
+  width: calc((100% - 8px) / 6);
   border-radius: 999px;
   background: var(--ink);
   pointer-events: none;
@@ -2935,7 +2935,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .manage-layout .manage-tabs button {
   position: relative;
   z-index: 1;
-  min-width: 8.6em;
+  min-width: 7.8em;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -4239,6 +4239,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 
 .manage-layout .manage-tabs[data-tab="3"] .tab-indicator { transform: translateX(300%); }
 .manage-layout .manage-tabs[data-tab="4"] .tab-indicator { transform: translateX(400%); }
+.manage-layout .manage-tabs[data-tab="5"] .tab-indicator { transform: translateX(500%); }
 .storage-heading, .storage-refresh, .storage-search, .storage-pagination { display: flex; align-items: center; gap: 18px; }
 .storage-heading { justify-content: space-between; margin-bottom: 28px; }
 .storage-heading h2 { margin: 8px 0; font: 500 28px/1.4 var(--serif); }
@@ -4265,9 +4266,8 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .video-storage .desk-field input { box-sizing: border-box; width: 100%; min-height: 42px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; outline: none; }
 .video-storage .desk-field input:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 13%, transparent); }
 .video-storage .desk-field input:disabled { opacity: 0.5; }
-.example-showcase { margin: 6px 0 28px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.example-showcase h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
-.example-showcase > p { max-width: 760px; margin: 0 0 8px; color: var(--ink-soft); font-size: 13px; line-height: 1.7; }
+.example-showcase { margin: 0; }
+.example-showcase .storage-heading { margin-bottom: 8px; }
 .example-showcase-list { list-style: none; margin: 14px 0; padding: 0; }
 .example-showcase-item { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .example-showcase-item label { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }

@@ -25,6 +25,8 @@ describe("concept mind map", () => {
     expect(html).not.toContain("快照降低重建成本")
     expect(html).toContain('aria-label="展开虚拟机隔离内核"')
     expect(html).toContain('aria-label="概念关系"')
+    expect(html).toContain("放大")
+    expect(html).not.toContain("concept-canvas")
     expect(html).toContain("<path")
     expect(html).not.toContain("concept-chips")
   })

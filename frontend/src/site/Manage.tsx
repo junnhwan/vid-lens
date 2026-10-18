@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { NetworkSettings } from "./NetworkSettings"
+import { ExampleShowcase } from "./ExampleShowcase"
 import { VideoStorage } from "./VideoStorage"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
@@ -118,6 +119,7 @@ const sections = [
   ["diagnostics", "缓存与用量"],
   ["network", "联网搜索"],
   ["videos", "视频与存储"],
+  ["examples", "公开示例"],
 ] as const
 const usagePageSize = 20
 const proxyOptions: ChoiceOption[] = [
@@ -700,7 +702,7 @@ export function Manage() {
               VIDLENS / OWNER DESK
             </p>
             <h1>{auth ? "站长管理" : "站长登录"}</h1>
-            <p>{auth ? "管理视频与存储，配置模型与联网，查看实际用量。" : "管理视频、供应商、模型、联网搜索与运行诊断。"}</p>
+            <p>{auth ? "管理模型与联网，挑选公开示例，查看视频存储和实际用量。" : "管理视频、公开示例、供应商、模型、联网搜索与运行诊断。"}</p>
           </div>
           {auth ? (
             <button
@@ -798,6 +800,8 @@ export function Manage() {
             <div className="desk-stage" key={section}>
             {section === "videos" ? (
               <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+            ) : section === "examples" ? (
+              <ExampleShowcase api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "network" ? (
               <NetworkSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "providers" ? (

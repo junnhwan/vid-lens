@@ -3,7 +3,6 @@ import type { RequestHistoryItem } from "../contract/types"
 import { HttpApi } from "../api/http"
 import { sessionLost } from "../api/error"
 import { displayDate, isRunning, statusName } from "./historyText"
-import { rememberTitleCarry } from "./motion"
 
 const cookieNote = "清除 Cookie 或换浏览器后无法找回。"
 
@@ -119,8 +118,6 @@ export function RecentReadings({
               href={`/r/${encodeURIComponent(item.id)}`}
               onClick={(event) => {
                 event.preventDefault()
-                const title = event.currentTarget.querySelector("strong")
-                if (title instanceof HTMLElement) rememberTitleCarry(title)
                 onOpen(item.id)
               }}
             >
