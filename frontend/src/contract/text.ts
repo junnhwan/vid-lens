@@ -95,9 +95,36 @@ export function formatDuration(ms: number | null | undefined): string {
 
 export function citationClock(citation: Citation): string {
   if (citation.kind === "external_reference") return "网页 ↗"
-  if (citation.kind === "video_frame" && citation.time_ms != null) return formatClock(citation.time_ms)
-  if (citation.kind === "video_text" && citation.range) return formatClock(citation.range.start_ms)
+  const start = citationStart(citation)
+  if (start != null) return formatClock(start)
+  if (citation.kind === "video_text") return "视频原文"
   return citation.label
+}
+
+export function citationStart(citation: Citation): number | null {
+  if (citation.kind === "video_frame") return citation.time_ms ?? null
+  // ASR ranges can be whole audio windows. Legacy or unknown origins have no
+  // timing guarantee either, so only platform subtitle cues expose text times.
+  if (citation.kind === "video_text" && (citation.text_origin === "platform_subtitles" || citation.text_origin === "platform_subtitle")) {
+    return citation.range?.start_ms ?? null
+  }
+  return null
+}
+
+export function citationURL(citation: Citation, sourceURL: string): string | null {
+  if (!["video_text", "video_frame", "external_reference"].includes(citation.kind)) return null
+  try {
+    const url = new URL(citation.kind === "external_reference" ? citation.url || "" : sourceURL)
+    if (!/^https?:$/.test(url.protocol)) return null
+    if (citation.kind !== "external_reference") {
+      const start = citationStart(citation)
+      if (start == null) url.searchParams.delete("t")
+      else url.searchParams.set("t", String(Math.floor(start / 1000)))
+    }
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 export function clipText(value: string, max: number): string {

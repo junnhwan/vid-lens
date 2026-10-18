@@ -315,7 +315,7 @@ type MindMap struct {
 
 // ExportRendererVersion identifies reusable offline payloads, independently of
 // the immutable article and the schema version of its content.
-const ExportRendererVersion = 2
+const ExportRendererVersion = 3
 
 type Article struct {
 	DetailLevel          string              `json:"detail_level,omitempty"`

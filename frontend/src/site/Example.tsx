@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import type { Citation, Frame } from "../contract/types"
-import { formatDuration, platformLabel } from "../contract/text"
+import { citationURL, formatDuration, platformLabel } from "../contract/text"
 import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 import { ArticleOutline } from "../ui/ArticleOutline"
 import { BlockView } from "../ui/Blocks"
@@ -98,10 +98,8 @@ export function Example() {
   }
   function cite(citation: Citation) {
     if (!current) return
-    const url = new URL(citation.kind === "external_reference" && citation.url ? citation.url : current.article.source.canonical_url)
-    if (!/^https?:$/.test(url.protocol)) return
-    if (citation.kind !== "external_reference") url.searchParams.set("t", String(Math.floor((citation.time_ms ?? citation.range?.start_ms ?? 0) / 1000)))
-    window.open(url.toString(), "_blank", "noopener,noreferrer")
+    const url = citationURL(citation, current.article.source.canonical_url)
+    if (url) window.open(url, "_blank", "noopener,noreferrer")
   }
   const openFrame: OpenFrame = (items, index, origin) => setLightbox({ frames: items, index, origin })
   return <>

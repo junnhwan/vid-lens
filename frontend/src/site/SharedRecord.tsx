@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { loadSharedRecord } from "../api/shares"
 import { ApiError } from "../api/error"
 import type { Citation, Frame, SharedRecordResponse } from "../contract/types"
-import { formatDuration, platformLabel } from "../contract/text"
+import { citationURL, formatDuration, platformLabel } from "../contract/text"
 import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
 import { ActivityList } from "../ui/ActivityList"
 import { BlockView } from "../ui/Blocks"
@@ -92,7 +92,12 @@ export function SharedContent({ data }: { data: SharedRecordResponse }) {
   function onBroken(frame: Frame) { setBroken((current) => new Set([...current, frame.id])) }
   function cite(citation: Citation) {
     const frame = citation.frame_id ? frames.get(citation.frame_id) : undefined
-    if (frame) setLightbox({ frames: [frame], index: 0, origin: null })
+    if (frame) {
+      setLightbox({ frames: [frame], index: 0, origin: null })
+      return
+    }
+    const url = citationURL(citation, source?.canonical_url || "")
+    if (url) window.open(url, "_blank", "noopener,noreferrer")
   }
   function jump(id: string) { document.getElementById(id)?.scrollIntoView({ behavior: "auto", block: "start" }) }
   const status = data.view.request.status

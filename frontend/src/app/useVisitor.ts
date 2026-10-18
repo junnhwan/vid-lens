@@ -16,7 +16,7 @@ import { createRuntime, wantsMock, type Runtime } from "../api/runtime"
 import { advanceActivity, asSteps, mergeActivitySnapshot, mergeSteps } from "../contract/activity"
 import { lineageHistoryUrls, loadActivityHistory } from "../contract/activity-history"
 import { clockFrom, decideSnapshot, decideUpsert, isTerminalStatus, type Clock } from "../contract/stream"
-import { codePointLength, formatClock } from "../contract/text"
+import { citationURL, codePointLength, formatClock } from "../contract/text"
 import type {
   ActivityStep,
   ArticleResponse,
@@ -908,6 +908,11 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
             engagedRef.current = true
             setLightbox({ open: true, frames: [frame], index: 0, origin })
           }
+          return
+        }
+        if (citation.kind === "video_text") {
+          const url = citationURL(citation, articleRef.current?.article.source.canonical_url || requestRef.current?.source?.canonical_url || "")
+          if (url) window.open(url, "_blank", "noopener,noreferrer")
           return
         }
         if (citation.block_id) {

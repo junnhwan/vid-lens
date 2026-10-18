@@ -1,14 +1,7 @@
 import type { ReactNode } from "react"
 import type { Block, Citation, Frame, Inline } from "../contract/types"
-import { citationClock, formatClock } from "../contract/text"
+import { citationClock, citationStart, formatClock } from "../contract/text"
 import { FrameThumb } from "./FrameThumb"
-
-function citationStart(citation: Citation): number | null {
-  if (citation.kind === "external_reference") return null
-  if (citation.time_ms != null) return citation.time_ms
-  if (citation.range) return citation.range.start_ms
-  return null
-}
 
 export function citationClusterLabel(cites: Citation[]): string {
   if (!cites.length) return ""

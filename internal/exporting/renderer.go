@@ -195,7 +195,7 @@ func Markdown(a domain.Article, model domain.GenerationModel, purpose string, im
 }
 
 func markdownVersion(a domain.Article, model domain.GenerationModel, purpose string, images map[string]string, version int) ([]byte, error) {
-	if version != 1 && version != RendererVersion {
+	if version < 1 || version > RendererVersion {
 		return nil, errors.New("unsupported export renderer version")
 	}
 	r := renderer{a: a, images: images, citations: map[string]int{}}
@@ -264,6 +264,7 @@ func markdownVersion(a domain.Article, model domain.GenerationModel, purpose str
 	out.WriteString("## 来源\n\n")
 	for _, id := range keys {
 		c := a.Citations[id]
+		untimedText := version >= 3 && c.Kind == "video_text" && c.TextOrigin != "platform_subtitles" && c.TextOrigin != "platform_subtitle"
 		ms := int64(0)
 		if c.TimeMS != nil {
 			ms = *c.TimeMS
@@ -271,12 +272,20 @@ func markdownVersion(a domain.Article, model domain.GenerationModel, purpose str
 		if c.Range != nil {
 			ms = c.Range.StartMS
 		}
-		u, e := safeURL(sourceURL(a.Source.CanonicalURL, ms))
+		link := sourceURL(a.Source.CanonicalURL, ms)
+		if untimedText {
+			link = a.Source.CanonicalURL
+		}
+		u, e := safeURL(link)
 		if e != nil {
 			return nil, e
 		}
-		fmt.Fprintf(&out, "[^source-%d]: [%s · %s](<%s>)", r.citations[id], escape(c.Label), clock(ms), u)
-		if c.Range != nil {
+		if untimedText {
+			fmt.Fprintf(&out, "[^source-%d]: [视频原文](<%s>)", r.citations[id], u)
+		} else {
+			fmt.Fprintf(&out, "[^source-%d]: [%s · %s](<%s>)", r.citations[id], escape(c.Label), clock(ms), u)
+		}
+		if !untimedText && c.Range != nil {
 			fmt.Fprintf(&out, "（至 %s）", clock(c.Range.EndMS))
 		}
 		if c.Quote != nil {
