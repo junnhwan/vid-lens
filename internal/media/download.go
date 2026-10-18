@@ -13,14 +13,45 @@ import (
 )
 
 type progressReader struct {
-	r    io.Reader
-	last atomic.Int64
+	r           io.Reader
+	last        atomic.Int64
+	bytes       int64
+	progress    func(int64) error
+	reportedAt  time.Time
+	progressErr error
+}
+
+type downloadProgressKey struct{}
+type downloadProgress func(context.Context, string, int64) error
+
+func (s *Service) sourceDownloadContext(ctx context.Context, c domain.Claim) context.Context {
+	return context.WithValue(ctx, downloadProgressKey{}, downloadProgress(func(ctx context.Context, transfer string, bytes int64) error {
+		return s.Store.SourceDownloadProgress(ctx, c, transfer, bytes)
+	}))
+}
+
+func newProgressReader(ctx context.Context, r io.Reader, transfer string) *progressReader {
+	p := &progressReader{r: r}
+	p.last.Store(time.Now().UnixNano())
+	if report, ok := ctx.Value(downloadProgressKey{}).(downloadProgress); ok {
+		p.progress = func(bytes int64) error { return report(ctx, transfer, bytes) }
+	}
+	return p
 }
 
 func (p *progressReader) Read(b []byte) (int, error) {
 	n, e := p.r.Read(b)
 	if n > 0 {
-		p.last.Store(time.Now().UnixNano())
+		now := time.Now()
+		p.last.Store(now.UnixNano())
+		p.bytes += int64(n)
+		if p.progress != nil && (p.reportedAt.IsZero() || now.Sub(p.reportedAt) >= 30*time.Second) {
+			p.reportedAt = now
+			if err := p.progress(p.bytes); err != nil {
+				p.progressErr = err
+				return n, err
+			}
+		}
 	}
 	return n, e
 }
@@ -68,8 +99,7 @@ func (s *Service) downloadStreamFromInfo(ctx context.Context, source, format, ds
 	if e = cmd.Start(); e != nil {
 		return errors.New("yt-dlp executable unavailable")
 	}
-	pr := &progressReader{r: pipe}
-	pr.last.Store(time.Now().UnixNano())
+	pr := newProgressReader(ctx, pipe, dst)
 	type copied struct {
 		bytes int64
 		err   error

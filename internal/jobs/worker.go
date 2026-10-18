@@ -89,14 +89,7 @@ func (w *Worker) Start(ctx context.Context) error {
 			return e
 		}
 		if p == nil {
-			var pending bool
-			if e = w.Store.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM model_probes WHERE id=$1 AND status IN ('queued','running') AND deadline_at>now())", body.ID).Scan(&pending); e != nil {
-				return e
-			}
-			if !pending {
-				return nil
-			}
-			return errBusy
+			return pendingDelivery(ctx, w.Store, "model.probe", body.ID)
 		}
 		return w.Agent.RunProbe(ctx, *p)
 	})
@@ -112,14 +105,7 @@ func (w *Worker) Start(ctx context.Context) error {
 			return e
 		}
 		if v == nil {
-			var pending bool
-			if e = w.Store.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM article_exports WHERE id=$1 AND status IN ('queued','running','retry_wait') AND deadline_at>now())", body.ID).Scan(&pending); e != nil {
-				return e
-			}
-			if !pending {
-				return nil
-			}
-			return errBusy
+			return pendingDelivery(ctx, w.Store, "article.export", body.ID)
 		}
 		return (&exporting.Service{Store: w.Store, Config: w.Config}).Run(ctx, *v)
 	})

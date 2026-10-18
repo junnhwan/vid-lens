@@ -45,7 +45,7 @@ func (s *Store) Video(ctx context.Context, snapshot string) (domain.Asset, error
 	return one[domain.Asset](ctx, s.Pool, "SELECT to_jsonb(a) FROM media_assets a WHERE snapshot_id=$1 AND kind='video' AND state='ready' AND (expires_at IS NULL OR expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=a.id AND (expires_at IS NULL OR expires_at>now()))) ORDER BY created_at DESC LIMIT 1", snapshot)
 }
 func (s *Store) AddAsset(ctx context.Context, c domain.Claim, a domain.Asset) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -72,7 +72,7 @@ func nullableCrop(v *domain.Crop) any {
 	return domain.JSON(v)
 }
 func (s *Store) Pin(ctx context.Context, c domain.Claim, asset string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -95,7 +95,7 @@ func (s *Store) TouchVideo(ctx context.Context, c domain.Claim, id string) error
 }
 func (s *Store) FinishSource(ctx context.Context, c domain.Claim, snap domain.Snapshot, segments []domain.Segment, videoID string) (string, error) {
 	id := snap.ID
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -256,7 +256,7 @@ func (s *Store) PublishedArticle(ctx context.Context, id string) (domain.Article
 	return article(ctx, s.Pool, id)
 }
 func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -316,7 +316,7 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 	})
 }
 func (s *Store) CompleteAnswer(ctx context.Context, c domain.Claim, a domain.Answer) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -346,7 +346,7 @@ func (s *Store) CompleteAnswer(ctx context.Context, c domain.Claim, a domain.Ans
 	})
 }
 func (s *Store) WaitForRestore(ctx context.Context, c domain.Claim) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -356,13 +356,6 @@ func (s *Store) WaitForRestore(ctx context.Context, c domain.Claim) error {
 		}
 		if r.Kind != "qa.answer" || r.SnapshotID == nil || r.RestoreUsed {
 			return domain.Err(422, "MEDIA_UNAVAILABLE", "所需视频画面无法恢复。")
-		}
-		var ordinary int
-		if e = tx.QueryRow(ctx, "SELECT count(*) FROM job_runs WHERE kind<>'qa.answer' AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')").Scan(&ordinary); e != nil {
-			return e
-		}
-		if ordinary >= 3 {
-			return domain.Err(422, "MEDIA_UNAVAILABLE", "当前没有视频恢复容量。")
 		}
 		p, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", r.ConfigID)
 		if e != nil {
@@ -374,6 +367,10 @@ func (s *Store) WaitForRestore(ctx context.Context, c domain.Claim) error {
 		if errors.Is(e, pgx.ErrNoRows) {
 			dep, e = newRun(ctx, tx, "source.restore", *r.SnapshotID, r.SourceID, r.ConfigID, r.SnapshotID, deadline)
 			if e != nil {
+				var p *domain.Problem
+				if errors.As(e, &p) && p.Code == "ADMISSION_LIMITED" {
+					return domain.Err(422, "MEDIA_UNAVAILABLE", "当前没有视频恢复容量。")
+				}
 				return e
 			}
 		} else if e != nil {
@@ -421,7 +418,7 @@ func (s *Store) BeginModelSubmission(ctx context.Context, c domain.Claim, key st
 
 func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind string, args any, submit bool, routeConfigID string) (Operation, error) {
 	var op Operation
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -509,7 +506,7 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 	return op, e
 }
 func (s *Store) FinishOperation(ctx context.Context, c domain.Claim, key string, result any, provider string, usage any) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -534,7 +531,7 @@ func (s *Store) Observations(ctx context.Context, run string) ([]json.RawMessage
 	return many[json.RawMessage](ctx, s.Pool, "SELECT data FROM observations WHERE run_id=$1 ORDER BY created_at,id", run)
 }
 func (s *Store) RecordObservation(ctx context.Context, c domain.Claim, key, inspection string, data any) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -603,7 +600,7 @@ func (s *Store) PublicFrames(ctx context.Context, request string, ids []string) 
 // A missing owned file changes availability, never the immutable article or its
 // frame identity. This observation cannot resurrect deleting/deleted assets.
 func (s *Store) MarkMissingFrame(ctx context.Context, id string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE media_assets SET state='unavailable' WHERE id=$1 AND kind='frame' AND state='ready'", id)
 		return err
 	})
@@ -614,7 +611,7 @@ func (s *Store) HasProtection(ctx context.Context, id string) (bool, error) {
 	return ok, e
 }
 func (s *Store) MarkReplacement(ctx context.Context, c domain.Claim, fresh, old string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}

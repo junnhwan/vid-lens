@@ -65,7 +65,7 @@ type articleDraft struct {
 func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) error {
 	beginWithMap := func(ctx context.Context, in beginArticleInput, mindMap *domain.MindMap) (*schema.ToolResult, error) {
 		var args any = in
-		if s.cp.HarnessRevision >= 9 {
+		if s.policy().ConceptMaps {
 			args = conceptPlanInput{Title: in.Title, Sections: in.Sections, MindMap: mindMap, Limitations: in.Limitations}
 		}
 		if result, err := s.replayedDraft(ctx, args); result != nil || err != nil {
@@ -89,7 +89,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			ids[p.ID] = true
 		}
 		draft := articleDraft{Title: in.Title, Plan: in.Sections, Sections: map[string]domain.Section{}, Citations: map[string]domain.Citation{}, Limitations: in.Limitations, MindMap: mindMap}
-		if s.cp.HarnessRevision >= 9 {
+		if s.policy().ConceptMaps {
 			mapError := validateConceptMap(mindMap, ids)
 			if s.authoring() && mapError != nil {
 				mapError = authoringConceptMapIssue(mindMap, ids, mapError)
@@ -108,7 +108,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if s.authoring() {
 			draft.Plan = deriveAuthoringRanges(in.Sections, catalog, s.snapshot.DurationMS)
 		}
-		planErr := validateSectionPlan(draft.Plan, s.snapshot.DurationMS, s.cp.HarnessRevision > 0)
+		planErr := validateSectionPlan(draft.Plan, s.snapshot.DurationMS, s.policy().Enabled)
 		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
 			planErr = errors.Join(planErr, validatePlanFacts(draft.Plan, catalog))
 		}
@@ -127,7 +127,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			return s.draftFeedback(ctx, err.Error())
 		}
 		title := "正在保存文章结构"
-		if s.cp.HarnessRevision >= 9 {
+		if s.policy().ConceptMaps {
 			title += "与概念关系"
 		}
 		return s.writeDraft(ctx, args, 0, draft, title)
@@ -137,11 +137,11 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 	}
 	beginDescription := "Finish investigation and persist a full-video article outline. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
 	options := []utils.Option{}
-	if s.cp.HarnessRevision >= 3 {
+	if s.policy().ContentPlan {
 		beginDescription = "Finish investigation and persist a full-video article outline. For each chapter choose only 1-24 representative citation IDs that support its key points; do not list every citation in the time range. No giant article JSON. Save body chapters in bounded batches with save_article_sections, then submit_article_draft with its version."
 		options = append(options, utils.WithSchemaModifier(contentPlanSchema))
 	}
-	if s.cp.HarnessRevision >= 9 {
+	if s.policy().ConceptMaps {
 		if err := add(utils.InferEnhancedTool("begin_article", "Persist the full-video outline AND a concept relationship tree in one operation. Save body chapters afterward in a few complete batches; the server publishes automatically when complete.", func(ctx context.Context, in conceptPlanInput) (*schema.ToolResult, error) {
 			return beginWithMap(ctx, beginArticleInput{Title: in.Title, Sections: in.Sections, Limitations: in.Limitations}, in.MindMap)
 		}, options...)); err != nil {
@@ -176,7 +176,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if version == 0 || version != in.Version {
 			return s.draftFeedback(ctx, "version不匹配，请读取反馈中的当前草稿版本。")
 		}
-		if s.cp.HarnessRevision >= 7 {
+		if s.policy().SectionRepairs {
 			return s.saveFlexibleBatch(ctx, in, version, draft)
 		}
 		if len(in.Sections) < 1 || len(in.Sections) > 3 || len(domain.JSON(in.Sections)) > 64<<10 {
@@ -355,7 +355,7 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 		// Older writers hashed their incoming slices after assigning canonical
 		// block/frame IDs. Accept that exact legacy hash without changing data.
 		legacy, ok := args.(saveSectionsInput)
-		if !ok || s.cp.HarnessRevision >= 7 {
+		if !ok || s.policy().SectionRepairs {
 			return nil, errors.New("draft replay conflict")
 		}
 		var normalized saveSectionsInput
@@ -451,7 +451,7 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 	return out
 }
 func (s *session) draftFeedback(ctx context.Context, message string) (*schema.ToolResult, error) {
-	if s.cp.HarnessRevision >= 3 {
+	if s.policy().ContentPlan {
 		return s.structuredDraftFeedback(ctx, message)
 	}
 	version, draft, err := s.loadDraft(ctx)
@@ -702,7 +702,7 @@ func (s *session) resumeDraft(ctx context.Context) error {
 		return err
 	}
 	msgs[2].Content += "\n关注点：" + spec.Purpose
-	if s.cp.HarnessRevision > 0 && spec.DetailPolicy != nil {
+	if s.policy().Enabled && spec.DetailPolicy != nil {
 		if spec.DetailPolicy.ContentPlan {
 			s.cp.HarnessRevision = max(3, s.cp.HarnessRevision)
 		}
@@ -710,13 +710,13 @@ func (s *session) resumeDraft(ctx context.Context) error {
 		if spec.DetailPolicy.ContentPlan {
 			msgs[0].Content += contentPlanInstructions
 			msgs[0].Content += planRepairInstructions
-			if s.cp.HarnessRevision >= 4 {
+			if s.policy().Paced {
 				msgs[0].Content += pacedHarnessInstructions
 			}
-			if s.cp.HarnessRevision >= 5 {
+			if s.policy().ObservationBudget {
 				msgs[0].Content += observationBudgetInstructions
 			}
-			if s.cp.HarnessRevision >= 7 {
+			if s.policy().SectionRepairs {
 				msgs[0].Content += efficientDraftInstructions
 			}
 		}

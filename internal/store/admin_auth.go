@@ -44,7 +44,7 @@ func (s *Store) SetOwnerPassword(ctx context.Context, password string) error {
 		return fmt.Errorf("owner password must contain %d-512 bytes", OwnerPasswordMinBytes)
 	}
 	h := hashPassword(password)
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, "INSERT INTO owner_auth(singleton,password_hash) VALUES(true,$1) ON CONFLICT(singleton) DO UPDATE SET password_hash=$1,auth_version=owner_auth.auth_version+1", h); e != nil {
 			return e
 		}
@@ -55,7 +55,7 @@ func (s *Store) SetOwnerPassword(ctx context.Context, password string) error {
 func (s *Store) BeginOwnerLogin(ctx context.Context, source string) (string, int64, error) {
 	var hash string
 	var version int64
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, "DELETE FROM admin_login_limits WHERE window_start<now()-interval '1 day'"); e != nil {
 			return e
 		}
@@ -86,7 +86,7 @@ func (s *Store) OwnerLoginAllowed(ctx context.Context, source string) error {
 }
 func (s *Store) VerifyOwnerPassword(password, hash string) bool { return checkPassword(password, hash) }
 func (s *Store) NewAdminSession(ctx context.Context, source, token string, version int64) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var current int64
 		if e := tx.QueryRow(ctx, "SELECT auth_version FROM owner_auth").Scan(&current); e != nil {
 			return e

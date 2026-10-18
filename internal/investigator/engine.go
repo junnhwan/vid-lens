@@ -43,6 +43,7 @@ type session struct {
 	compositionReady bool
 	forceDraftSubmit bool
 	spec             domain.GenerationSpec
+	resolvedPolicy   *executionPolicy
 	modelMessages    []*schema.Message
 }
 
@@ -154,7 +155,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 			return usageErr
 		}
 		if used >= s.repairLimit() {
-			if s.cp.DraftIssue != nil && s.cp.HarnessRevision >= 3 {
+			if s.cp.DraftIssue != nil && s.policy().ContentPlan {
 				return s.endDraftCorrection(ctx)
 			}
 			s.cp.FinalizationFailed = true
@@ -180,58 +181,14 @@ func (s *session) initial(ctx context.Context) error {
 			s.cp.LayoutVersion = draftLayout
 		}
 	}
-	instruction := instructions
-	if s.cp.LayoutVersion == draftLayout {
-		instruction += draftInstructions
-	}
-	if newLayout && s.spec.Version >= 2 && s.spec.DetailPolicy != nil {
-		s.cp.HarnessRevision = 1
-		instruction += harnessInstructions
-		if s.turn == nil {
-			instruction += "\n" + s.spec.DetailPolicy.Instruction
-			if s.spec.DetailPolicy.ContentPlan {
-				s.cp.HarnessRevision = 3
-				instruction += contentPlanInstructions
-				instruction += planRepairInstructions
-				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v4" {
-					s.cp.HarnessRevision = 4
-					instruction += pacedHarnessInstructions
-				}
-				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v5" {
-					s.cp.HarnessRevision = 5
-					instruction += pacedHarnessInstructions + observationBudgetInstructions
-				}
-				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v6" {
-					s.cp.HarnessRevision = 7
-					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions
-				}
-				if s.spec.DetailPolicy.Revision == "interpretation-2026-10-17-v7" {
-					s.cp.HarnessRevision = 9
-					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions + conceptMapInstructions
-				}
-			}
-		} else {
-			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
-			// A new private turn freezes its own protocol before its first call.
-			// Existing Ready checkpoints never pass through this initialization.
-			s.cp.HarnessRevision = 11
-			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
-		}
-	}
-	if newLayout && s.turn == nil && s.spec.DetailPolicy != nil && (s.spec.DetailPolicy.Revision == authoringPolicy || s.spec.DetailPolicy.Revision == recoveryPolicy) {
-		s.cp.HarnessRevision = 12
-		instruction = authoringInstructions(s.spec.DetailPolicy.Instruction)
-		if s.spec.DetailPolicy.Revision == recoveryPolicy {
-			s.cp.HarnessRevision = 13
-			instruction += repairProgressInstructions
-		}
-	}
+	revision, instruction := initialProtocol(s.spec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)
+	s.cp.HarnessRevision = revision
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}
 	if spec, e := s.engine.Store.GenerationForRun(ctx, s.claim.Run.ID); e == nil {
 		fixed["purpose"] = spec.Purpose
-		if s.cp.HarnessRevision > 0 {
+		if s.policy().Enabled {
 			fixed["detail_level"] = spec.DetailLevel
 			fixed["detail_policy_revision"] = spec.DetailPolicyRevision
 			fixed["detail_rule"] = "All levels cover the whole video. Chapters follow topics and information gain, never a fixed minute/word/image quota. Optional investigation is bounded; necessary evidence and honest limitations are shared."

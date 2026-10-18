@@ -61,7 +61,7 @@ type argumentCheckedTool struct {
 }
 
 func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (result *schema.ToolResult, runErr error) {
-	if s := t.session; s != nil && s.cp.HarnessRevision > 0 && s.engine != nil {
+	if s := t.session; s != nil && s.policy().Enabled && s.engine != nil {
 		before, err := s.progressFingerprint(ctx)
 		if err != nil {
 			return nil, err
@@ -69,7 +69,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		defer func() {
 			if isCandidateTool(t.name) && args != nil {
 				if issue := rejectedCandidateIssue(result, runErr); issue != nil {
-					if s.cp.HarnessRevision >= 3 {
+					if s.policy().ContentPlan {
 						canonical := store.Hash(canonicalArguments(args.Text))
 						if s.cp.Repeated == nil {
 							s.cp.Repeated = map[string]int{}
@@ -142,7 +142,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 	switch t.name {
 	case "begin_article":
 		target = &beginArticleInput{}
-		if t.session != nil && t.session.cp.HarnessRevision >= 9 {
+		if t.session != nil && t.session.policy().ConceptMaps {
 			target = &conceptPlanInput{}
 		}
 	case "save_article_sections":
@@ -160,13 +160,13 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &answerInput{}
 		if t.session != nil && t.session.compactAnswerProtocol() {
 			target = &compactAnswerInput{}
-			if t.session.cp.HarnessRevision >= 10 {
+			if t.session.policy().ComposedAnswers {
 				target = &composedAnswerInput{}
 			}
 		}
 	case "record_observation":
 		target = &observation{}
-		if t.session != nil && t.session.cp.HarnessRevision >= 5 {
+		if t.session != nil && t.session.policy().ObservationBudget {
 			target = &pacedObservation{}
 		}
 	case "inspect_video_window":
@@ -207,7 +207,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 				}
 			}
 		}
-		if t.session != nil && t.session.cp.HarnessRevision >= 7 {
+		if t.session != nil && t.session.policy().SectionRepairs {
 			var metadata map[string]json.RawMessage
 			if json.Unmarshal([]byte(checked), &metadata) == nil && metadata != nil {
 				if title, ok := metadata["activity_title"]; ok {
@@ -224,7 +224,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		if err == nil {
 			err = json.Unmarshal([]byte(checked), target)
 		}
-		if err == nil && t.session != nil && t.session.cp.HarnessRevision > 0 {
+		if err == nil && t.session != nil && t.session.policy().Enabled {
 			d := json.NewDecoder(bytes.NewBufferString(checked))
 			d.DisallowUnknownFields()
 			err = d.Decode(target)
@@ -234,7 +234,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		if isCandidateTool(t.name) {
 			issue := candidateIssue(err)
 			if t.session != nil && t.session.engine != nil {
-				if t.session.cp.HarnessRevision > 0 {
+				if t.session.policy().Enabled {
 					t.session.cp.LastCandidate = map[string]any{"candidate_id": callID(ctx), "expected_hash": store.Hash(rawToolArguments(args)), "tool": t.name, "issue": issue}
 				}
 				if e := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, rawToolArguments(args), "invalid", issue); e != nil {
@@ -246,7 +246,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			}
 			return nil, &candidateError{err: domain.Err(422, "MODEL_RESULT_INVALID", "文章/回答提交的JSON结构无效："+string(domain.JSON(issue)))}
 		}
-		if t.session != nil && t.session.cp.HarnessRevision >= 5 && args != nil && !json.Valid([]byte(args.Text)) {
+		if t.session != nil && t.session.policy().ObservationBudget && args != nil && !json.Valid([]byte(args.Text)) {
 			return toolError("参数JSON不完整或语法无效，本次没有保存事实或执行取证。请只输出一个完整、简短的工具对象，预留闭合引号/数组/对象；不要重抄整屏终端或文件列表。" + err.Error())
 		}
 		return toolError("工具参数不符合字段类型，请按 schema 修正：" + err.Error() + "。观察的 conflicts、unresolved、inferences 等字段必须是字符串数组，status 只能是 supported 或 unresolved。")
@@ -280,7 +280,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			if saveErr := t.session.engine.Store.RecordCandidate(ctx, t.session.claim, callID(ctx), t.name, args.Text, "invalid", candidateIssue(candidate.err)); saveErr != nil {
 				return nil, saveErr
 			}
-			if t.session.cp.HarnessRevision > 0 {
+			if t.session.policy().Enabled {
 				t.session.cp.LastCandidate = map[string]any{"candidate_id": callID(ctx), "expected_hash": store.Hash(args.Text), "tool": t.name, "issue": candidateIssue(candidate.err)}
 			}
 		}
@@ -444,16 +444,16 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		}
 		key := callID(ctx)
 		critical := s.turn == nil
-		if s.cp.HarnessRevision >= 4 {
+		if s.policy().Paced {
 			critical = false
 		}
 		if in.Critical != nil {
 			critical = *in.Critical
 		}
-		if s.cp.HarnessRevision > 0 && !critical && s.turn == nil && s.spec.DetailPolicy != nil {
+		if s.policy().Enabled && !critical && s.turn == nil && s.spec.DetailPolicy != nil {
 			p := s.spec.DetailPolicy
 			closing := false
-			if s.cp.HarnessRevision >= 4 {
+			if s.policy().Paced {
 				stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
 				if err != nil {
 					return nil, err
@@ -510,7 +510,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return st, nil
 		}
 		s.cp.Inspections[key] = result.FrameIDs
-		if s.cp.HarnessRevision > 0 && !critical && s.turn == nil {
+		if s.policy().Enabled && !critical && s.turn == nil {
 			s.cp.Progress.OptionalInspections++
 		}
 		for _, id := range result.FrameIDs {
@@ -579,7 +579,7 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		})
 	}
 	const observationDescription = "Durably record concise visible facts, necessary literal numbers/conditions and unresolved gaps. One inspection per record; do not transcribe entire screenshots or terminal listings."
-	if s.cp.HarnessRevision >= 5 {
+	if s.policy().ObservationBudget {
 		if e := add(utils.InferEnhancedTool("record_observation", observationDescription, func(ctx context.Context, in pacedObservation) (*schema.ToolResult, error) {
 			if !validObservationSize(in.ObservationFields) {
 				return toolError("观察记录过长：每个事实/细节/冲突/未确认字段最多16项，每项最多1024字符，整个记录最多32KiB。请简洁记录必要事实；原始图片与全文来源仍保留，不要抄录整屏终端。")

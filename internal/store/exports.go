@@ -45,7 +45,7 @@ type DiskSpace struct {
 func (s *Store) CreateExport(ctx context.Context, session, request, format, key string, disk ...DiskSpace) (Accepted, bool, error) {
 	var a Accepted
 	reused := false
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRequest(ctx, tx, request)
 		if e != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -187,7 +187,7 @@ func (s *Store) LatestExport(ctx context.Context, session, request, format strin
 	return &v, e
 }
 func (s *Store) PendingExports(ctx context.Context) ([]Export, error) {
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, `UPDATE article_exports SET status='failed',revision=revision+1,failure='{"code":"TASK_DEADLINE_EXCEEDED","message":"导出准备已达到期限。","can_retry":true,"retry_at":null}' WHERE status IN ('queued','running','retry_wait') AND (deadline_at<now() OR active_ms>=120000 OR attempts>=2 AND lease_until<now())`); e != nil {
 			return e
 		}
@@ -203,7 +203,7 @@ func (s *Store) PendingExports(ctx context.Context) ([]Export, error) {
 }
 func (s *Store) ClaimExport(ctx context.Context, id string) (*Export, error) {
 	var v *Export
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var running bool
 		if e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM article_exports WHERE status='running' AND lease_until>now())").Scan(&running); e != nil {
 			return e
@@ -234,7 +234,7 @@ func exportFence(ctx context.Context, q Querier, v Export) error {
 	return nil
 }
 func (s *Store) FinishExport(ctx context.Context, v Export, key, sha string, bytes int64, failure *domain.Failure, retry bool, elapsed time.Duration) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := exportFence(ctx, tx, v); e != nil {
 			return e
 		}
@@ -257,7 +257,7 @@ func (s *Store) FinishExport(ctx context.Context, v Export, key, sha string, byt
 }
 func (s *Store) ExportDownload(ctx context.Context, v Export) (string, error) {
 	id := domain.ID()
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, "DELETE FROM export_download_leases WHERE expires_at<now()"); e != nil {
 			return e
 		}

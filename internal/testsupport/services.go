@@ -3,7 +3,6 @@ package testsupport
 import (
 	"context"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -11,25 +10,27 @@ import (
 	"vidlens/internal/domain"
 	"vidlens/internal/resource"
 	"vidlens/internal/store"
+	"vidlens/internal/testenv"
 )
 
 func Services(t *testing.T) (*store.Store, *resource.Manager, config.Config) {
 	t.Helper()
-	dsn := os.Getenv("VIDLENS_TEST_DATABASE_URL")
-	redis := os.Getenv("VIDLENS_TEST_REDIS_URL")
-	if dsn == "" || redis == "" {
-		t.Skip("set isolated VIDLENS_TEST_DATABASE_URL and VIDLENS_TEST_REDIS_URL")
-	}
+	dsn := testenv.Require(t, "VIDLENS_TEST_DATABASE_URL")
+	redis := testenv.Require(t, "VIDLENS_TEST_REDIS_URL")
 	ctx := context.Background()
 	secret := strings.Repeat("test-secret-", 5)
 	base, e := store.Open(ctx, dsn, secret)
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(base.Pool.Close)
 	schema := "test_" + domain.ID()
 	if _, e = base.Pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() {
+		_, _ = base.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	})
 	u, _ := url.Parse(dsn)
 	q := u.Query()
 	q.Set("search_path", schema)
@@ -38,6 +39,7 @@ func Services(t *testing.T) (*store.Store, *resource.Manager, config.Config) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(s.Pool.Close)
 	if e = s.Migrate(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -52,14 +54,9 @@ func Services(t *testing.T) (*store.Store, *resource.Manager, config.Config) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() { r.Redis.Close() })
 	if e = r.Redis.Ping(ctx).Err(); e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() {
-		r.Redis.Close()
-		s.Pool.Close()
-		_, _ = base.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		base.Pool.Close()
-	})
 	return s, r, cfg
 }

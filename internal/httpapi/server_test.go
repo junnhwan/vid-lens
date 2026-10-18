@@ -18,23 +18,26 @@ import (
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
 	"vidlens/internal/store"
+	"vidlens/internal/testenv"
 )
 
 func apiTest(t *testing.T) (*httptest.Server, *Server) {
 	t.Helper()
-	dsn := os.Getenv("VIDLENS_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set VIDLENS_TEST_DATABASE_URL")
-	}
+	dsn := testenv.Require(t, "VIDLENS_TEST_DATABASE_URL")
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	base, e := store.Open(ctx, dsn, strings.Repeat("secret", 8))
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(base.Pool.Close)
 	schema := "test_" + domain.ID()
 	if _, e = base.Pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() {
+		_, _ = base.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	})
 	u, _ := url.Parse(dsn)
 	q := u.Query()
 	q.Set("search_path", schema)
@@ -43,6 +46,7 @@ func apiTest(t *testing.T) (*httptest.Server, *Server) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(s.Pool.Close)
 	if e = s.Migrate(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -57,9 +61,6 @@ func apiTest(t *testing.T) (*httptest.Server, *Server) {
 	t.Cleanup(func() {
 		cancel()
 		server.Close()
-		s.Pool.Close()
-		_, _ = base.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		base.Pool.Close()
 	})
 	return server, a
 }

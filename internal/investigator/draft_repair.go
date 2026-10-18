@@ -31,12 +31,12 @@ func canonicalArguments(raw string) any {
 }
 
 func (s *session) repairUsage(ctx context.Context) (int, error) {
-	var count int
 	kinds := []string{"field_repair", "draft_correction"}
-	if s.cp.HarnessRevision >= 7 {
+	if s.policy().SectionRepairs {
 		kinds = []string{"field_repair"}
 	}
-	if err := s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind=ANY($2)", s.claim.Run.ID, kinds).Scan(&count); err != nil {
+	count, err := s.engine.Store.OperationCount(ctx, s.claim.Run.ID, kinds...)
+	if err != nil {
 		return 0, err
 	}
 	return count + s.cp.Repairs, nil
@@ -48,15 +48,14 @@ func (s *session) correctionScope(ctx context.Context) (string, error) {
 }
 
 func (s *session) correctionUsage(ctx context.Context) (int, error) {
-	if s.cp.HarnessRevision < 7 {
+	if !s.policy().SectionRepairs {
 		return s.repairUsage(ctx)
 	}
 	scope, err := s.correctionScope(ctx)
 	if err != nil {
 		return 0, err
 	}
-	var count int
-	err = s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind=$2", s.claim.Run.ID, "draft_correction:"+scope).Scan(&count)
+	count, err := s.engine.Store.OperationCount(ctx, s.claim.Run.ID, "draft_correction:"+scope)
 	return count, err
 }
 
@@ -67,13 +66,13 @@ func draftMutation(name string) bool {
 // Reserve one logical correction before parsing or writing. It survives crashes
 // and JSON key reordering; a worker takeover never grants a fresh repair budget.
 func (s *session) reserveDraftCorrection(ctx context.Context, name, raw string) (bool, error) {
-	if s.cp.HarnessRevision < 3 || !draftMutation(name) || ctx.Value(draftRepairContextKey{}) != nil {
+	if !s.policy().ContentPlan || !draftMutation(name) || ctx.Value(draftRepairContextKey{}) != nil {
 		return false, nil
 	}
 	key := "draft-correction:" + callID(ctx)
 	args := map[string]any{"tool": name, "arguments": canonicalArguments(raw)}
 	kind := "draft_correction"
-	if s.cp.HarnessRevision >= 7 {
+	if s.policy().SectionRepairs {
 		scope, err := s.correctionScope(ctx)
 		if err != nil {
 			return false, err
@@ -82,7 +81,7 @@ func (s *session) reserveDraftCorrection(ctx context.Context, name, raw string) 
 	}
 	if op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key); err == nil {
 		// A replay may occur after this correction advanced the draft version.
-		validKind := op.Kind == kind || s.cp.HarnessRevision >= 7 && strings.HasPrefix(op.Kind, "draft_correction:draft:")
+		validKind := op.Kind == kind || s.policy().SectionRepairs && strings.HasPrefix(op.Kind, "draft_correction:draft:")
 		if !validKind || op.ArgsHash != store.Hash(args) {
 			return false, errors.New("draft correction replay conflict")
 		}
@@ -230,7 +229,7 @@ func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) err
 			parentJSON = normalizeAuthoringContainers("begin_article", normalizeAuthoringJSON(parentJSON))
 		}
 		raw, err := replaceFields([]byte(parentJSON), in.Patches, func(path []string) bool {
-			return planRepairAllowed(path) || s.cp.HarnessRevision >= 9 && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids")
+			return planRepairAllowed(path) || s.policy().ConceptMaps && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids")
 		})
 		if err != nil {
 			return toolError(err.Error())

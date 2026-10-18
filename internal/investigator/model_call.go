@@ -63,7 +63,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	inputChars := utf8.RuneCount(domain.JSON(args)) + bound.(*meteredModel).toolsChars
 	var budget callBudget
 	outputTokens := s.profile.MaxOutputTokens
-	if s.cp.HarnessRevision > 0 {
+	if s.policy().Enabled {
 		var frozen frozenModelInput
 		saved, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, "input:"+key)
 		if e == nil && saved.Status == "completed" {
@@ -216,7 +216,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		// Failover may not silently reduce the accepted output budget or truncate
 		// context to fit a supplier with lower configured limits.
 		fits := inputChars+s.profile.MaxOutputTokens*4 <= p.MaxInputChars
-		if s.cp.HarnessRevision > 0 {
+		if s.policy().Enabled {
 			fits = budget.check(p) == nil
 		}
 		if p.MaxOutputTokens < outputTokens || !fits {
@@ -275,7 +275,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
 			reserved, err := s.engine.Store.BeginModelSubmission(actx, s.claim, key, args, route.ConfigID)
 			submission, submitErr = reserved.Submissions, err
-			if err == nil && s.cp.HarnessRevision > 0 {
+			if err == nil && s.policy().Enabled {
 				err = s.engine.Store.RecordSubmission(actx, s.claim, key, submission, map[string]any{"budget": budget})
 				submitErr = err
 			}
@@ -305,14 +305,14 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return err
 		})
 		options := append(cacheOptions(p), opts...)
-		if s.cp.HarnessRevision > 0 {
+		if s.policy().Enabled {
 			options = append(options, model.WithTools(activeTools))
 		}
 		if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
-		} else if s.cp.HarnessRevision >= 13 && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {
+		} else if s.policy().Recovery && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, activeTools[0].Name))
-		} else if s.turn != nil && s.cp.HarnessRevision >= 10 {
+		} else if s.turn != nil && s.policy().ComposedAnswers {
 			// Require an executable action, while retaining evidence tools when
 			// the question needs investigation. No plain-text-then-submit round.
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced))
@@ -366,7 +366,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 					last = submitErr
 					continue
 				}
-				if errors.As(submitErr, &problem) && problem.Code == "PROVIDER_UNAVAILABLE" && s.cp.HarnessRevision >= 13 {
+				if errors.As(submitErr, &problem) && problem.Code == "PROVIDER_UNAVAILABLE" && s.policy().Recovery {
 					if delay, reserved, saveErr := s.engine.Store.ScheduleModelRecovery(ctx, s.claim, key); saveErr != nil {
 						return nil, saveErr
 					} else if reserved {
@@ -389,7 +389,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		result.ReasoningContent = ""
 		result.Extra = cleanExtra(result.Extra)
-		if s.cp.HarnessRevision >= 5 {
+		if s.policy().ObservationBudget {
 			var exhausted *bool
 			if result.ResponseMeta != nil && result.ResponseMeta.Usage != nil && result.ResponseMeta.Usage.CompletionTokens > 0 {
 				exhausted = domain.Ptr(result.ResponseMeta.Usage.CompletionTokens >= outputTokens)
@@ -398,7 +398,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				return nil, err
 			}
 		}
-		if s.cp.HarnessRevision > 0 {
+		if s.policy().Enabled {
 			// Some compatible suppliers reuse IDs across separate responses.
 			// Eino caches tool results by ID, so scope them to this logical call
 			// before persistence/dispatch. A worker replay keeps the saved IDs.

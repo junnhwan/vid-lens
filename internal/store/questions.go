@@ -12,7 +12,7 @@ func (s *Store) Question(ctx context.Context, c domain.Claim, id string, data an
 	if id == "" {
 		return errors.New("question id missing")
 	}
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}

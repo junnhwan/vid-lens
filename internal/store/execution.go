@@ -12,7 +12,7 @@ import (
 
 func (s *Store) Claim(ctx context.Context, id string, generation int64, owner string) (*domain.Claim, error) {
 	var c *domain.Claim
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRun(ctx, tx, id)
 		if e != nil {
 			return e
@@ -100,7 +100,7 @@ func charge(ctx context.Context, tx pgx.Tx, id string) error {
 	return e
 }
 func (s *Store) Heartbeat(ctx context.Context, c domain.Claim) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -115,7 +115,7 @@ func (s *Store) Heartbeat(ctx context.Context, c domain.Claim) error {
 	})
 }
 func (s *Store) Check(ctx context.Context, c domain.Claim) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error { return fence(ctx, tx, c) })
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error { return fence(ctx, tx, c) })
 }
 func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *domain.Failure) error {
 	if f != nil && f.DiagnosticID == "" {
@@ -179,7 +179,7 @@ func nullableJSON(v any) any {
 }
 func (s *Store) Fail(ctx context.Context, c domain.Claim, f domain.Failure, transient bool, delay time.Duration) (bool, error) {
 	retry := false
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRun(ctx, tx, c.Run.ID)
 		if e != nil {
 			return e
@@ -236,7 +236,7 @@ func (s *Store) Checkpoint(ctx context.Context, c domain.Claim, data any) error 
 	if len(b) > 2<<20 {
 		return errors.New("checkpoint exceeds limit")
 	}
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -245,7 +245,7 @@ func (s *Store) Checkpoint(ctx context.Context, c domain.Claim, data any) error 
 	})
 }
 func (s *Store) Suspend(ctx context.Context, c domain.Claim) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRun(ctx, tx, c.Run.ID)
 		if e != nil {
 			return e
@@ -285,7 +285,7 @@ func (s *Store) Suspend(ctx context.Context, c domain.Claim) error {
 	})
 }
 func (s *Store) Step(ctx context.Context, c domain.Claim, step domain.Step) (domain.Step, error) {
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -330,7 +330,7 @@ type Outbox struct {
 
 func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
 	var out []Outbox
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var e error
 		out, e = many[Outbox](ctx, tx, "UPDATE task_outbox SET claimed_until=now()+interval '30 seconds' WHERE id IN (SELECT id FROM task_outbox WHERE delivered_at IS NULL AND not_before<=now() AND (claimed_until IS NULL OR claimed_until<now()) ORDER BY id LIMIT 10) RETURNING to_jsonb(task_outbox)")
 		return e
@@ -338,7 +338,7 @@ func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
 	return out, e
 }
 func (s *Store) OutboxResult(ctx context.Context, o Outbox, delivered bool) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if delivered {
 			_, e := tx.Exec(ctx, "UPDATE task_outbox SET delivered_at=now(),claimed_until=NULL WHERE id=$1", o.ID)
 			return e
@@ -353,7 +353,7 @@ func (s *Store) Recoverable(ctx context.Context) ([]domain.Run, error) {
 	return many[domain.Run](ctx, s.Pool, "SELECT to_jsonb(r) FROM job_runs r WHERE status NOT IN ('succeeded','failed','canceled') ORDER BY created_at LIMIT 100")
 }
 func (s *Store) Repair(ctx context.Context, id string, generation int64, broker string, retryAt *time.Time) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRun(ctx, tx, id)
 		if e != nil {
 			return e

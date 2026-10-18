@@ -90,7 +90,7 @@ type showcaseTurn struct {
 
 func (s *Store) AdminExamples(ctx context.Context) ([]AdminExample, error) {
 	var items []AdminExample
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := many[AdminExample](ctx, tx, `
 			SELECT jsonb_build_object(
 				'article_id', a.id,
@@ -131,7 +131,7 @@ func (s *Store) ReplaceExampleShowcases(ctx context.Context, ids []string) error
 		}
 		seen[id] = struct{}{}
 	}
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var n int
 		if e := tx.QueryRow(ctx, "SELECT count(*) FROM articles WHERE id = ANY($1::text[])", ids).Scan(&n); e != nil {
 			return e
@@ -153,7 +153,7 @@ func (s *Store) ReplaceExampleShowcases(ctx context.Context, ids []string) error
 
 func (s *Store) PublicExamples(ctx context.Context) ([]ExampleCard, error) {
 	var cards []ExampleCard
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := many[struct {
 			ID           string         `json:"id"`
 			Title        string         `json:"title"`
@@ -210,7 +210,7 @@ func (s *Store) PublicExample(ctx context.Context, id string) (PublicExample, er
 	if !exampleArticleID.MatchString(id) {
 		return out, domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
 	}
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		row, turns, err := loadShowcase(ctx, tx, id)
 		if err != nil {
 			return err
@@ -279,7 +279,7 @@ func (s *Store) PublicExampleFrame(ctx context.Context, articleID, frameID strin
 	if !exampleArticleID.MatchString(articleID) || !exampleArticleID.MatchString(frameID) {
 		return asset, domain.Err(404, "RESOURCE_NOT_FOUND", "这张图片没有公开。")
 	}
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		row, turns, err := loadShowcase(ctx, tx, articleID)
 		if err != nil {
 			return err

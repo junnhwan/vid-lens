@@ -57,7 +57,7 @@ func (s *Store) ParseCursor(raw, session, typ, id string) (Position, error) {
 	}
 	return p, nil
 }
-func (s *Store) read(ctx context.Context, f func(pgx.Tx) error) error {
+func (s *Store) read(ctx context.Context, f func(context.Context, pgx.Tx) error) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tx, e := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -65,7 +65,7 @@ func (s *Store) read(ctx context.Context, f func(pgx.Tx) error) error {
 		return e
 	}
 	defer tx.Rollback(context.Background())
-	if e = f(tx); e != nil {
+	if e = f(ctx, tx); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)
@@ -132,7 +132,7 @@ func article(ctx context.Context, q Querier, id string) (domain.Article, error) 
 }
 func (s *Store) Article(ctx context.Context, session, requestID string) (map[string]any, error) {
 	var out map[string]any
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRequest(ctx, tx, requestID)
 		if e != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -295,7 +295,7 @@ func visibleFrame(ctx context.Context, q Querier, session, request, frame string
 func (s *Store) Frame(ctx context.Context, session, request, id string) (domain.Frame, domain.Asset, error) {
 	var f domain.Frame
 	var a domain.Asset
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := visibleFrame(ctx, tx, session, request, id); e != nil {
 			return e
 		}
@@ -470,7 +470,11 @@ func (s *Store) stream(p Position, base string) map[string]any {
 func (s *Store) RequestView(ctx context.Context, session, id string) (map[string]any, Position, error) {
 	var v map[string]any
 	var p Position
-	e := s.read(ctx, func(tx pgx.Tx) error { var e error; v, p, e = s.requestView(ctx, tx, session, id); return e })
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var e error
+		v, p, e = s.requestView(ctx, tx, session, id)
+		return e
+	})
 	return v, p, e
 }
 func (s *Store) turnView(ctx context.Context, q Querier, session, conversation, id string) (map[string]any, Position, error) {
@@ -520,14 +524,18 @@ func (s *Store) turnView(ctx context.Context, q Querier, session, conversation, 
 func (s *Store) TurnView(ctx context.Context, session, conversation, id string) (map[string]any, Position, error) {
 	var v map[string]any
 	var p Position
-	e := s.read(ctx, func(tx pgx.Tx) error { var e error; v, p, e = s.turnView(ctx, tx, session, conversation, id); return e })
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var e error
+		v, p, e = s.turnView(ctx, tx, session, conversation, id)
+		return e
+	})
 	return v, p, e
 }
 func (s *Store) TurnPage(ctx context.Context, session, conversation string, before int64, limit int) (map[string]any, error) {
 	items := []map[string]any{}
 	var next *int64
 	has := false
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var valid bool
 		if e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM qa_conversations WHERE id=$1 AND session_id=$2)", conversation, session).Scan(&valid); e != nil {
 			return e
@@ -560,7 +568,7 @@ func (s *Store) TurnPage(ctx context.Context, session, conversation string, befo
 }
 func (s *Store) ActivityPage(ctx context.Context, session, typ, id, conversation, before string, limit int) (map[string]any, error) {
 	var out map[string]any
-	e := s.read(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var segs []domain.ExecutionSegment
 		var pos Position
 		var req string

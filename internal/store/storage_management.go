@@ -31,8 +31,9 @@ type StorageOverview struct {
 
 func (s *Store) StorageOverview(ctx context.Context) (StorageOverview, error) {
 	var v StorageOverview
-	// A single control transaction keeps settings, counts and reservations aligned.
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	// One read-only snapshot keeps settings, counts and reservations aligned
+	// without holding the lock used by admission, claims and heartbeats.
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := tx.QueryRow(ctx, "SELECT revision,video_quota_bytes,image_quota_bytes FROM storage_settings WHERE singleton").Scan(&v.Settings.Revision, &v.Settings.VideoQuotaBytes, &v.Settings.ImageQuotaBytes); e != nil {
 			return e
 		}
@@ -49,7 +50,7 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 	if in.VideoQuotaBytes < max(int64(1<<30), workspace) || in.VideoQuotaBytes > 10<<40 || in.ImageQuotaBytes < 1<<30 || in.ImageQuotaBytes > 10<<40 {
 		return domain.Err(422, "INVALID_ARGUMENT", "视频配额不能小于单次工作区，配图配额至少 1 GiB；两项均不能超过 10 TiB。")
 	}
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		l, e := storageLedger(ctx, tx, "")
 		if e != nil {
 			return e
@@ -91,7 +92,7 @@ type ManagedVideo struct {
 func (s *Store) ManagedVideos(ctx context.Context, search string, limit, offset int) ([]ManagedVideo, int64, error) {
 	var total int64
 	var out []ManagedVideo
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := `WITH videos AS (
 		 SELECT v.id,v.platform,v.canonical_url AS url,
 		 COALESCE(NULLIF(s.source->>'title',''),NULLIF(o.result->>'title',''),v.canonical_id) AS title,
@@ -132,7 +133,7 @@ func (s *Store) MarkVideoDeleting(ctx context.Context, source string, expected [
 	if len(expected) == 0 || len(expected) > 1000 {
 		return nil, domain.Err(422, "INVALID_ARGUMENT", "请先重新读取要清理的素材。")
 	}
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var exists, active, stale, protected bool
 		if e := tx.QueryRow(ctx, `SELECT
 		 EXISTS(SELECT 1 FROM video_sources WHERE id=$1),

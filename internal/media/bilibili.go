@@ -333,6 +333,9 @@ func (b *bilibiliClient) download(ctx context.Context, track bilibiliTrack, dst 
 		attempt := filepath.Join(attemptDir, strconv.Itoa(i))
 		n, err := b.downloadAttempt(ctx, raw, attempt, remaining)
 		remaining -= n
+		if errors.Is(err, domain.ErrFenced) {
+			return err
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -389,8 +392,7 @@ func (b *bilibiliClient) downloadAttempt(ctx context.Context, raw, dst string, l
 	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	reader := &progressReader{}
-	reader.last.Store(time.Now().UnixNano())
+	reader := newProgressReader(ctx, nil, dst)
 	var stalled atomic.Bool
 	done := make(chan struct{})
 	defer close(done)
@@ -428,6 +430,9 @@ func (b *bilibiliClient) downloadAttempt(ctx context.Context, raw, dst string, l
 	reader.r = resp.Body
 	_, n, err := copyBounded(ctx, dst, reader, limit)
 	if err != nil {
+		if reader.progressErr != nil {
+			return n, reader.progressErr
+		}
 		if stalled.Load() {
 			return n, &domain.WorkError{Code: "SOURCE_UNAVAILABLE", Message: "B 站下载长时间没有字节进展。", Transient: true}
 		}

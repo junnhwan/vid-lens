@@ -48,7 +48,7 @@ func (s *Store) CreateRequest(ctx context.Context, session, key, input, retryID 
 }
 func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string, in domain.RequestInput, retryID string, local bool) (Accepted, error) {
 	var a Accepted
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		input := strings.TrimSpace(in.VideoURL)
 		in.Purpose = domain.NormalizePurpose(in.Purpose)
 		scope := "request:" + session
@@ -162,13 +162,6 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 		reuse := "pending"
 		deadline := time.Now().Add(time.Duration(p.GenerationSeconds) * time.Second)
 		if errors.Is(e, pgx.ErrNoRows) {
-			var count int
-			if e = tx.QueryRow(ctx, "SELECT count(*) FROM job_runs WHERE kind<>'qa.answer' AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')").Scan(&count); e != nil {
-				return e
-			}
-			if count >= 3 {
-				return domain.Err(429, "ADMISSION_LIMITED", "当前视频处理容量已满，请稍后再试。")
-			}
 			runID, e = newRun(ctx, tx, "source.prepare", work, source, cid, nil, deadline)
 			if e != nil {
 				return e
@@ -177,6 +170,10 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			return e
 		} else if status == "cancel_requested" {
 			return domain.Err(429, "ADMISSION_LIMITED", "同一来源正在停止，请稍后再试。")
+		} else if status != "succeeded" {
+			if e = admitSourceSubscriber(ctx, tx, runID, spec); e != nil {
+				return e
+			}
 		}
 		id := domain.ID()
 		var retry *string
@@ -208,7 +205,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 	return a, e
 }
 func (s *Store) CancelRequest(ctx context.Context, session, id string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRequest(ctx, tx, id)
 		if e != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -250,7 +247,7 @@ func cancelUnused(ctx context.Context, tx pgx.Tx, id string) error {
 func (s *Store) EnsureConversation(ctx context.Context, session, request string) (domain.Conversation, bool, error) {
 	var v domain.Conversation
 	created := false
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, e := loadRequest(ctx, tx, request)
 		if e != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -278,7 +275,7 @@ func (s *Store) Conversation(ctx context.Context, session, id string) (domain.Co
 func sameID(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func (s *Store) CreateTurn(ctx context.Context, session, conversation, key string, in domain.QuestionInput, retry string) (Accepted, error) {
 	var a Accepted
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		c, e := one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE id=$1 AND session_id=$2", conversation, session)
 		if e != nil {
 			return NotFound(e)
@@ -430,7 +427,7 @@ func (s *Store) Turn(ctx context.Context, session, conversation, id string) (dom
 	return v, nil
 }
 func (s *Store) CancelTurn(ctx context.Context, session, conversation, id string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		c, e := one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE id=$1 AND session_id=$2", conversation, session)
 		if e != nil {
 			return NotFound(e)

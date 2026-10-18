@@ -32,7 +32,7 @@ func (s *Store) SaveArticleDraft(ctx context.Context, c domain.Claim, key string
 	if len(raw) > 512<<10 {
 		return out, domain.Err(422, "MODEL_RESULT_INVALID", "文章草稿超过保存上限，请减少单个章节的内容。")
 	}
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := fence(ctx, tx, c); err != nil {
 			return err
 		}

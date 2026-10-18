@@ -2,10 +2,89 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"vidlens/internal/domain"
 )
+
+func TestSourceDownloadProgressKeepsActiveTransfersButNotReplayedBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		bytes   int64
+		healthy bool
+	}{{"new_bytes", 1024, true}, {"replayed_bytes", 512, false}, {"zero_bytes", 0, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			owner := session(t, s)
+			a, err := s.CreateRequest(ctx, owner, domain.ID(), "local://download-progress.mp4", "", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := s.Request(ctx, owner, a.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := s.Claim(ctx, *r.ActiveRunID, 1, "downloader")
+			if err != nil || c == nil {
+				t.Fatal(err)
+			}
+			if err := s.SourceDownloadProgress(ctx, *c, "video", 512); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Pool.Exec(ctx, "UPDATE job_runs SET updated_at=now()-interval '6 minutes' WHERE id=$1", c.Run.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Heartbeat(ctx, *c); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SourceDownloadProgress(ctx, *c, "video", tc.bytes); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Repair(ctx, c.Run.ID, 1, "active", nil); err != nil {
+				t.Fatal(err)
+			}
+			run, err := s.Run(ctx, c.Run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (run.Status == "running") != tc.healthy {
+				t.Fatalf("actual bytes not distinguished from heartbeats/replays: status=%s failure=%+v", run.Status, run.Failure)
+			}
+		})
+	}
+}
+
+func TestSourceDownloadProgressRejectsOldExecution(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	a, err := s.CreateRequest(ctx, session(t, s), domain.ID(), "local://old-downloader.mp4", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := s.Pool.QueryRow(ctx, "SELECT active_run_id FROM generation_requests WHERE id=$1", a.ID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.Claim(ctx, id, 1, "old")
+	if err != nil || old == nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, "UPDATE job_runs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Claim(ctx, id, 1, "new")
+	if err != nil || next == nil {
+		t.Fatal(err)
+	}
+	if err := s.SourceDownloadProgress(ctx, *old, "video", 1024); !errors.Is(err, domain.ErrFenced) {
+		t.Fatal("old downloader refreshed the replacement execution", err)
+	}
+	if err := s.SourceDownloadProgress(ctx, *next, "video", 1024); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRepairKeepsRunWithCompletedASRProgress(t *testing.T) {
 	s := testStore(t)

@@ -37,7 +37,7 @@ func (r Reference) Evidence() map[string]any {
 }
 func (s *Store) RegisterReference(ctx context.Context, c domain.Claim, t domain.Turn, url, title string) (Reference, error) {
 	var r Reference
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -78,7 +78,7 @@ func (s *Store) StartReferenceRead(ctx context.Context, c domain.Claim, id, key 
 	return r, op, e
 }
 func (s *Store) SaveReference(ctx context.Context, c domain.Claim, id, key, title, url, body, sha string, truncated bool) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -87,7 +87,7 @@ func (s *Store) SaveReference(ctx context.Context, c domain.Claim, id, key, titl
 	})
 }
 func (s *Store) FailedReference(ctx context.Context, c domain.Claim, id string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -96,7 +96,7 @@ func (s *Store) FailedReference(ctx context.Context, c domain.Claim, id string) 
 	})
 }
 func (s *Store) ReserveSearch(ctx context.Context, c domain.Claim, key string, limit int) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}

@@ -128,7 +128,7 @@ func (s *session) reserveFieldRepair(ctx context.Context, args any) error {
 }
 
 func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) error {
-	if s.cp.HarnessRevision == 0 {
+	if s.policy().Legacy {
 		return nil
 	}
 	if err := s.candidateReadTool(add); err != nil {
@@ -140,7 +140,7 @@ func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) 
 				return err
 			}
 		}
-		if s.cp.HarnessRevision >= 3 {
+		if s.policy().ContentPlan {
 			if err := s.planRepairTool(add); err != nil {
 				return err
 			}

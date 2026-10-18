@@ -131,7 +131,7 @@ func (s *Store) ReorderModelRoutes(ctx context.Context, in []ModelRouteOrderEntr
 	}
 
 	family := ""
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "LOCK TABLE catalog_models IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 			return err
 		}
@@ -281,7 +281,7 @@ func (s *Store) SaveProvider(ctx context.Context, id string, in ProviderInput) (
 	if id == "" {
 		id = "prv_" + domain.ID()
 	}
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var catalogEnabled bool
 		if e := tx.QueryRow(ctx, "SELECT "+catalogEnabledSQL+" FROM model_settings s").Scan(&catalogEnabled); e != nil {
 			return e
@@ -395,7 +395,7 @@ func (s *Store) SaveModel(ctx context.Context, id string, in ModelInput) (Catalo
 	if id == "" {
 		id = "mdl_" + domain.ID()
 	}
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		old, e := one[CatalogModel](ctx, tx, modelSelect+" WHERE m.id=$1", id)
 		create := errors.Is(e, pgx.ErrNoRows)
 		if e != nil && !create {
@@ -506,7 +506,7 @@ func selectable(ctx context.Context, q Querier, id, expected string) (domain.Gen
 	return m, cid, e
 }
 func (s *Store) SetModelRecommended(ctx context.Context, id string, recommended bool, expected int64) (CatalogModel, error) {
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var rev int64
 		e := tx.QueryRow(ctx, "SELECT revision FROM catalog_models WHERE id=$1", id).Scan(&rev)
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -531,7 +531,7 @@ func (s *Store) SetModelRecommended(ctx context.Context, id string, recommended 
 }
 
 func (s *Store) SetDefaultModel(ctx context.Context, id string, expected int64) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var rev int64
 		if e := tx.QueryRow(ctx, "SELECT revision FROM model_settings").Scan(&rev); e != nil {
 			return e

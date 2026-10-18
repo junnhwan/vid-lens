@@ -101,7 +101,7 @@ func (s *session) saveExecutionPlan(ctx context.Context, ready map[string]any) e
 // Remove schemas irrelevant to the current phase before freezing the call.
 // Frozen inputs bypass this projection on replay and retain their exact schema.
 func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
-	if s.cp.HarnessRevision < 4 || s.turn != nil || s.forceDraftSubmit {
+	if !s.policy().Paced || s.turn != nil || s.forceDraftSubmit {
 		return in
 	}
 	out := []*schema.ToolInfo{}
@@ -145,7 +145,7 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 // Direct the model to the pending correction before it exhausts the durable
 // stall guard; do not reset call, correction or no-progress budgets.
 func (s *session) requiredRepairTool() string {
-	if s.cp.HarnessRevision < 13 || s.turn != nil || s.cp.DraftIssue == nil || s.cp.Progress.Stalled < 3 {
+	if !s.policy().Recovery || s.turn != nil || s.cp.DraftIssue == nil || s.cp.Progress.Stalled < 3 {
 		return ""
 	}
 	switch s.cp.LastCandidate["tool"] {

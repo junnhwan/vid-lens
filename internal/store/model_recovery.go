@@ -27,7 +27,7 @@ func (e *RetryWait) Error() string { return "execution retry is not due" }
 // creates a new request, changes a frozen model input, or resets the ledger.
 // Each logical call can receive one extra send, at most twice in a new run.
 func (s *Store) ScheduleModelRecovery(ctx context.Context, c domain.Claim, key string) (delay time.Duration, reserved bool, err error) {
-	err = s.Tx(ctx, func(tx pgx.Tx) error {
+	err = s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}

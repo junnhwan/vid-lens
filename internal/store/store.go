@@ -23,9 +23,10 @@ import (
 var migrations embed.FS
 
 type Store struct {
-	Pool    *pgxpool.Pool
-	aead    cipher.AEAD
-	signing []byte
+	Pool             *pgxpool.Pool
+	VideoConcurrency int
+	aead             cipher.AEAD
+	signing          []byte
 }
 
 func Open(ctx context.Context, dsn, secret string) (*Store, error) {
@@ -54,7 +55,7 @@ func Open(ctx context.Context, dsn, secret string) (*Store, error) {
 }
 
 // Transactions are short control operations. A database-wide lock fixes join/cancel/publish ordering.
-func (s *Store) Tx(ctx context.Context, f func(pgx.Tx) error) error {
+func (s *Store) Tx(ctx context.Context, f func(context.Context, pgx.Tx) error) error {
 	c, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	tx, e := s.Pool.Begin(c)
@@ -65,7 +66,7 @@ func (s *Store) Tx(ctx context.Context, f func(pgx.Tx) error) error {
 	if _, e = tx.Exec(c, "SELECT pg_advisory_xact_lock(867914031)"); e != nil {
 		return e
 	}
-	if e = f(tx); e != nil {
+	if e = f(c, tx); e != nil {
 		return e
 	}
 	return tx.Commit(c)
@@ -84,21 +85,20 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return e
 	}
 
-	for version, name := range []string{"migrations/001_init.sql", "migrations/002_evidence_order.sql", "migrations/003_strip_provider_thoughts.sql", "migrations/004_model_reporting.sql", "migrations/005_model_catalog.sql", "migrations/006_site_metrics.sql", "migrations/007_article_exports.sql", "migrations/008_external_references.sql", "migrations/009_provider_policies.sql", "migrations/010_reference_snapshots.sql", "migrations/011_network_settings.sql", "migrations/012_diagnostics.sql", "migrations/013_storage_management.sql", "migrations/014_model_route_priorities.sql", "migrations/015_request_history_index.sql", "migrations/016_example_showcases.sql", "migrations/017_request_shares.sql", "migrations/019_model_recommendation.sql", "migrations/020_site_announcement.sql"} {
-		n := version + 1
+	for _, migration := range migrationRegistry {
 		var exists bool
-		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", n).Scan(&exists); e != nil {
+		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", migration.version).Scan(&exists); e != nil {
 			return e
 		}
 		if !exists {
-			b, err := migrations.ReadFile(name)
+			b, err := migrations.ReadFile(migration.file)
 			if err != nil {
 				return err
 			}
 			if _, e = tx.Exec(ctx, string(b)); e != nil {
 				return e
 			}
-			if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES($1)", n); e != nil {
+			if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES($1)", migration.version); e != nil {
 				return e
 			}
 		}
@@ -144,7 +144,7 @@ func many[T any](ctx context.Context, q Querier, sql string, args ...any) ([]T, 
 }
 func Hash(v any) string { b := sha256.Sum256(domain.JSON(v)); return hex.EncodeToString(b[:]) }
 func (s *Store) Bootstrap(ctx context.Context, p config.Profile, modelKey, asrKey string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var exists bool
 		if e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM runtime_settings)").Scan(&exists); e != nil {
 			return e
@@ -214,7 +214,7 @@ func (s *Store) SaveConfig(ctx context.Context, p config.Profile, modelKey, asrK
 		return "", e
 	}
 	id := domain.ID()
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		current, e := one[config.Profile](ctx, tx, "SELECT c.profile FROM runtime_settings s JOIN runtime_config_revisions c ON c.id=s.config_id")
 		if e != nil {
 			return e
@@ -280,6 +280,11 @@ func event(ctx context.Context, tx pgx.Tx, run string, step *domain.Step) error 
 	return e
 }
 func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, snapshot *string, deadline time.Time) (string, error) {
+	if kind != "qa.answer" {
+		if e := admitVideoTask(ctx, tx); e != nil {
+			return "", e
+		}
+	}
 	id := domain.ID()
 	_, e := tx.Exec(ctx, "INSERT INTO job_runs(id,kind,work_key,source_id,snapshot_id,config_id,status,deadline_at) VALUES($1,$2,$3,$4,$5,$6,'queued',$7)", id, kind, key, source, snapshot, configID, deadline)
 	if e != nil {

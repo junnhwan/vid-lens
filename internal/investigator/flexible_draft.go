@@ -93,7 +93,7 @@ func authoringSectionIssue(issue map[string]any, sectionIndex int) map[string]an
 }
 
 func (s *session) autoFinalize(ctx context.Context) error {
-	if s.turn != nil || s.cp.HarnessRevision < 7 {
+	if s.turn != nil || !s.policy().SectionRepairs {
 		return nil
 	}
 	version, draft, err := s.loadDraft(ctx)

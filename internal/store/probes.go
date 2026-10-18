@@ -25,7 +25,7 @@ type Probe struct {
 
 func (s *Store) CreateProbe(ctx context.Context, model, revision, mode, key string) (Accepted, error) {
 	var a Accepted
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var found bool
 		var e error
 		scope := "probe:" + model
@@ -76,7 +76,7 @@ func (s *Store) PendingProbes(ctx context.Context) ([]Probe, error) {
 }
 func (s *Store) ClaimProbe(ctx context.Context, id string) (*Probe, error) {
 	var p *Probe
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var running bool
 		if e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM model_probes WHERE status='running')").Scan(&running); e != nil {
 			return e
@@ -113,7 +113,7 @@ func (s *Store) ProbeProfileID(ctx context.Context, p Probe) (string, error) {
 }
 func (s *Store) BeginProbeSubmission(ctx context.Context, p Probe) (int, error) {
 	var n int
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := probeFence(ctx, tx, p); e != nil {
 			return e
 		}
@@ -137,7 +137,7 @@ func (s *Store) RecordProbeSubmission(ctx context.Context, p Probe, n int, repor
 	return e
 }
 func (s *Store) FinishProbe(ctx context.Context, p Probe, result any, code string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := probeFence(ctx, tx, p); e != nil {
 			return e
 		}
@@ -154,7 +154,7 @@ func (s *Store) FinishProbe(ctx context.Context, p Probe, result any, code strin
 }
 
 func (s *Store) TouchProbe(ctx context.Context, p Probe) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := probeFence(ctx, tx, p); e != nil {
 			return e
 		}
@@ -164,7 +164,7 @@ func (s *Store) TouchProbe(ctx context.Context, p Probe) error {
 }
 func (s *Store) AcquireProbeResource(ctx context.Context, p Probe, resource, owner string) (bool, error) {
 	var ok bool
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := probeFence(ctx, tx, p); e != nil {
 			return e
 		}
@@ -178,7 +178,7 @@ func (s *Store) AcquireProbeResource(ctx context.Context, p Probe, resource, own
 	return ok, e
 }
 func (s *Store) RenewProbeResource(ctx context.Context, p Probe, resource, owner string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := probeFence(ctx, tx, p); e != nil {
 			return e
 		}

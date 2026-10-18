@@ -109,10 +109,10 @@ func (m *middleware) WrapEnhancedInvokableToolCall(ctx context.Context, next adk
 }
 func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	s := m.s
-	if s.cp.HarnessRevision > 0 && s.cp.Progress.Total >= 4*s.profile.MaxIterations {
+	if s.policy().Enabled && s.cp.Progress.Total >= 4*s.profile.MaxIterations {
 		return ctx, nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "工具调用达到本次任务的累计上限；来源和草稿保留。")
 	}
-	if s.cp.HarnessRevision > 0 && s.spec.DetailPolicy != nil && s.cp.Progress.Stalled >= s.spec.DetailPolicy.NoProgressLimit {
+	if s.policy().Enabled && s.spec.DetailPolicy != nil && s.cp.Progress.Stalled >= s.spec.DetailPolicy.NoProgressLimit {
 		return ctx, nil, domain.Err(422, "AGENT_NO_PROGRESS", "连续工具调用未增加可用证据或有效草稿；来源和已保存章节保留，可以重新尝试。")
 	}
 	if s.cp.Calls >= s.profile.MaxIterations {
@@ -215,7 +215,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			}
 		}
 		data := map[string]any{"draft": s.draftState(saved, draft), "citation_catalog": hints}
-		if s.cp.HarnessRevision >= 7 {
+		if s.policy().SectionRepairs {
 			output := s.profile.MaxOutputTokens
 			if s.spec.DetailPolicy != nil {
 				output = min(output, s.spec.DetailPolicy.CompositionOutputTokens)
@@ -231,7 +231,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 		data["source_duration_ms"] = s.snapshot.DurationMS
 		data["citation_time_rule"] = "Citation catalog ranges are intersections of original source windows with actual media. Raw platform cue end times can extend beyond the media. Preserve source text; the full-video plan ends at source_duration_ms, not the last cue end."
-		if s.cp.HarnessRevision > 0 {
+		if s.policy().Enabled {
 			data["saved_section_previews"] = draftPreviews(draft)
 		}
 		draftContext = &schema.Message{Role: schema.User, Name: "vidlens_draft_state", Content: string(domain.JSON(data))}
@@ -248,7 +248,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		filtered = projectToolHistory(filtered, s.cp.LayoutVersion == draftLayout)
 		filtered = s.projectSourceReads(filtered)
 	}
-	if s.cp.HarnessRevision > 0 {
+	if s.policy().Enabled {
 		filtered = projectRejectedCandidates(filtered)
 	}
 	if draftContext != nil {
@@ -264,13 +264,13 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})
 	}
-	if s.cp.HarnessRevision > 0 {
+	if s.policy().Enabled {
 		ready, err := s.readiness(ctx)
 		if err != nil {
 			return ctx, nil, err
 		}
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_readiness", Content: string(domain.JSON(ready))})
-		if s.cp.HarnessRevision >= 4 && s.turn == nil {
+		if s.policy().Paced && s.turn == nil {
 			if err = s.saveExecutionPlan(ctx, ready); err != nil {
 				return ctx, nil, err
 			}
@@ -303,7 +303,7 @@ func (m *middleware) AfterModelRewriteState(ctx context.Context, state *adk.Chat
 		m.s.modelMessages = nil
 	}
 	m.s.cp.Calls++
-	if m.s.cp.HarnessRevision > 0 {
+	if m.s.policy().Enabled {
 		m.s.cp.InspectBatchRejected = map[string]bool{}
 		// Reject a multi-inspection response as a whole before any frame/question
 		// side effect. Eino still emits a paired result for every original call.

@@ -21,10 +21,10 @@ type progressState struct {
 }
 
 func (s *session) repairLimit() int {
-	if s.cp.HarnessRevision < 3 && s.cp.FinalizationFailure != nil && s.cp.FinalizationFailure.Code == "MODEL_RESULT_NOT_SUBMITTED" {
+	if !s.policy().ContentPlan && s.cp.FinalizationFailure != nil && s.cp.FinalizationFailure.Code == "MODEL_RESULT_NOT_SUBMITTED" {
 		return 1
 	}
-	if s.cp.HarnessRevision > 0 && s.spec.DetailPolicy != nil {
+	if s.policy().Enabled && s.spec.DetailPolicy != nil {
 		return s.spec.DetailPolicy.RepairLimit
 	}
 	return 1
@@ -89,7 +89,7 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		action = "Use the candidate fields already returned in context and call " + repair + " now. Do not read the same fields again. Preserve supported content and fix the listed paths."
 	}
 	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
-	if s.cp.HarnessRevision >= 4 && s.turn == nil {
+	if s.policy().Paced && s.turn == nil {
 		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
 		if err != nil {
 			return nil, err
@@ -264,7 +264,7 @@ func (s *session) unknownTool(ctx context.Context, name, args string) (string, e
 		return "", err
 	}
 	result, _ := toolError("未知工具。请只使用当前提供的工具名称；本次调用没有执行任何工作。")
-	if s.cp.HarnessRevision > 0 {
+	if s.policy().Enabled {
 		if err = s.toolFeedback(ctx, name, args, before, result, nil); err != nil {
 			return "", err
 		}

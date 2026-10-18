@@ -9,7 +9,7 @@ import (
 
 func (s *Store) CleanupAssets(ctx context.Context, _ bool) ([]domain.Asset, error) {
 	var out []domain.Asset
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, e := tx.Exec(ctx, "DELETE FROM asset_refs WHERE expires_at<now()"); e != nil {
 			return e
 		}
@@ -28,7 +28,7 @@ func (s *Store) Deleted(ctx context.Context, id string, success bool) error {
 	return e
 }
 func (s *Store) CleanupMetadata(ctx context.Context) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Private page bodies must not survive in either snapshots or tool
 		// replay payloads after the reference's 24-hour retention window.
 		if _, e := tx.Exec(ctx, "UPDATE run_operations o SET result='{}' WHERE kind IN ('web.read','web.search') AND (EXISTS(SELECT 1 FROM external_references r WHERE r.run_id=o.run_id AND r.expires_at<now()) OR EXISTS(SELECT 1 FROM qa_turns t WHERE t.run_id=o.run_id AND t.expires_at<now())) AND result<>'{}'::jsonb"); e != nil {

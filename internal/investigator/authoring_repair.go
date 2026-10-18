@@ -22,10 +22,47 @@ type authoringFieldPatch struct {
 	Value json.RawMessage `json:"value"`
 }
 type authoringRepairInput struct {
-	CandidateID  string                `json:"candidate_id"`
-	ExpectedHash string                `json:"expected_hash"`
-	Version      int                   `json:"version"`
-	Patches      []authoringFieldPatch `json:"patches" jsonschema:"description=1-16 add/replace operations on rejected /sections/index/blocks/index fields. Add missing caption or replace a defective block, not a complete chapter. Cannot alter section identity, version, model or source metadata."`
+	CandidateID     string                `json:"candidate_id"`
+	ExpectedHash    string                `json:"expected_hash"`
+	Version         int                   `json:"version"`
+	Patches         []authoringFieldPatch `json:"patches,omitempty" jsonschema:"description=1-16 add/replace operations on rejected /sections/index/blocks/index fields. Use for structurally complete JSON. Mutually exclusive with replacement_json."`
+	ReplacementJSON *string               `json:"replacement_json,omitempty" jsonschema:"description=Only when the retained candidate has invalid JSON or missing/empty sections or blocks. Supply one complete save_article_sections object, at most 64KiB, for pending chapters. Accepted chapters stay unchanged. Otherwise use patches."`
+}
+
+func patchableAuthoringBody(raw string) bool {
+	raw = normalizeAuthoringContainers("save_article_sections", normalizeAuthoringJSON(raw))
+	var body struct {
+		Sections []struct {
+			ID     string                       `json:"id"`
+			Blocks []map[string]json.RawMessage `json:"blocks"`
+		} `json:"sections"`
+	}
+	if json.Unmarshal([]byte(raw), &body) != nil || len(body.Sections) == 0 {
+		return false
+	}
+	for _, section := range body.Sections {
+		if section.ID == "" || len(section.Blocks) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func repairAuthoringBody(raw string, in authoringRepairInput) ([]byte, error) {
+	if in.ReplacementJSON == nil {
+		return patchAuthoringBody(raw, in.Patches)
+	}
+	if len(in.Patches) != 0 || len(*in.ReplacementJSON) > 64<<10 || !json.Valid([]byte(*in.ReplacementJSON)) {
+		return nil, errors.New("replacement_json须为一个完整JSON对象、最多64KiB，且不能同时提供patches")
+	}
+	if patchableAuthoringBody(raw) {
+		return nil, errors.New("原候选结构完整，请用patches仅修复错误字段")
+	}
+	var body map[string]json.RawMessage
+	if json.Unmarshal([]byte(*in.ReplacementJSON), &body) != nil || body == nil {
+		return nil, errors.New("replacement_json必须为正文批次对象")
+	}
+	return []byte(*in.ReplacementJSON), nil
 }
 
 func patchAuthoringBody(raw string, patches []authoringFieldPatch) ([]byte, error) {
@@ -86,7 +123,7 @@ func patchAuthoringBody(raw string, patches []authoringFieldPatch) ([]byte, erro
 }
 
 func (s *session) authoringRepairTool(add func(tool.EnhancedInvokableTool, error) error) error {
-	return add(utils.InferEnhancedTool("repair_article_sections", "Repair retained rejected body fields without regenerating chapters. Bind candidate_id, exact expected_hash and current version. Add missing captions or replace defective blocks with 1-16 patches. Accepted chapters remain unchanged. Every repaired body runs the ordinary source, pixel and publication validators.", func(ctx context.Context, in authoringRepairInput) (*schema.ToolResult, error) {
+	return add(utils.InferEnhancedTool("repair_article_sections", "Repair retained rejected body fields. Bind candidate_id, exact expected_hash and current version. Use 1-16 patches for complete JSON. For invalid JSON or missing/empty sections or blocks only, use replacement_json with a complete pending body batch up to 64KiB, without patches. Accepted chapters remain unchanged. Every repaired body runs the ordinary source, pixel and publication validators.", func(ctx context.Context, in authoringRepairInput) (*schema.ToolResult, error) {
 		if err := s.reserveFieldRepair(ctx, in); err != nil {
 			return nil, err
 		}
@@ -141,7 +178,7 @@ func (s *session) authoringRepairTool(add func(tool.EnhancedInvokableTool, error
 		if in.Version != version || version == 0 {
 			return finish(toolError("请复制当前草稿version。"))
 		}
-		raw, err := patchAuthoringBody(saved.Arguments, in.Patches)
+		raw, err := repairAuthoringBody(saved.Arguments, in)
 		if err != nil {
 			return finish(toolError(err.Error()))
 		}
@@ -149,7 +186,9 @@ func (s *session) authoringRepairTool(add func(tool.EnhancedInvokableTool, error
 			return finish(toolError(string(domain.JSON(candidateIssue(err)))))
 		}
 		var next saveSectionsInput
-		if json.Unmarshal([]byte(normalizeAuthoringBody(string(raw))), &next) != nil {
+		decoder := json.NewDecoder(strings.NewReader(normalizeAuthoringBody(string(raw))))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&next) != nil {
 			return finish(toolError("修复后正文类型不正确。"))
 		}
 		// The mixed original batch may also contain accepted chapters. Their

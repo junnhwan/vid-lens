@@ -687,27 +687,10 @@ func (a *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return
 	}
-	rows, e := a.Store.Pool.Query(r.Context(), "SELECT status,count(*) FROM job_runs GROUP BY status")
+	v, e := a.Store.RuntimeStatus(r.Context())
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	defer rows.Close()
-	counts := map[string]int64{}
-	for rows.Next() {
-		var k string
-		var n int64
-		if e = rows.Scan(&k, &n); e != nil {
-			a.problem(w, r, e)
-			return
-		}
-		counts[k] = n
-	}
-	var temp, images int64
-	e = a.Store.Pool.QueryRow(r.Context(), "SELECT COALESCE(sum(bytes) FILTER(WHERE kind IN ('video','audio')),0),COALESCE(sum(bytes) FILTER(WHERE kind='frame'),0) FROM media_assets WHERE state IN ('ready','deleting')").Scan(&temp, &images)
-	if e != nil {
-		a.problem(w, r, e)
-		return
-	}
-	a.json(w, 200, map[string]any{"schema_version": 1, "runs": counts, "storage": map[string]any{"media_bytes": temp, "frame_bytes": images}})
+	a.json(w, 200, v)
 }

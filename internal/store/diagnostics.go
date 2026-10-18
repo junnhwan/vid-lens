@@ -11,7 +11,7 @@ import (
 // RunDiagnostics is an allow-list projection. It never returns prompts, tool
 // arguments, raw candidates, question text, credential refs or signed URLs.
 func (s *Store) RunDiagnostics(ctx context.Context, id string) (out map[string]any, err error) {
-	err = s.read(ctx, func(tx pgx.Tx) error { out, err = s.runDiagnostics(ctx, tx, id); return err })
+	err = s.read(ctx, func(ctx context.Context, tx pgx.Tx) error { out, err = s.runDiagnostics(ctx, tx, id); return err })
 	return out, err
 }
 func (s *Store) runDiagnostics(ctx context.Context, q Querier, id string) (map[string]any, error) {
@@ -73,7 +73,7 @@ func (s *Store) SourceDiagnostic(ctx context.Context, c domain.Claim, key string
 }
 
 func (s *Store) NotifySourceMetadata(ctx context.Context, c domain.Claim) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := fence(ctx, tx, c); err != nil {
 			return err
 		}

@@ -4,30 +4,47 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
+	"vidlens/internal/testenv"
 )
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("VIDLENS_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set VIDLENS_TEST_DATABASE_URL to an isolated PostgreSQL database")
+	s := testDatabase(t)
+	ctx := context.Background()
+	if e := s.Migrate(ctx); e != nil {
+		t.Fatal(e)
 	}
+	p := config.DefaultProfile()
+	p.ModelBaseURL = "https://example.test/v1"
+	p.ModelName = "test"
+	if e := s.Bootstrap(ctx, p, "secret", "asr"); e != nil {
+		t.Fatal(e)
+	}
+	return s
+}
+
+func testDatabase(t *testing.T) *Store {
+	t.Helper()
+	dsn := testenv.Require(t, "VIDLENS_TEST_DATABASE_URL")
 	ctx := context.Background()
 	base, e := Open(ctx, dsn, "test-secret-long-enough-to-encrypt-credentials")
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(base.Pool.Close)
 	schema := "test_" + domain.ID()
 	if _, e = base.Pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() {
+		_, _ = base.Pool.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	})
 	u, _ := url.Parse(dsn)
 	q := u.Query()
 	q.Set("search_path", schema)
@@ -36,20 +53,7 @@ func testStore(t *testing.T) *Store {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = s.Migrate(ctx); e != nil {
-		t.Fatal(e)
-	}
-	p := config.DefaultProfile()
-	p.ModelBaseURL = "https://example.test/v1"
-	p.ModelName = "test"
-	if e = s.Bootstrap(ctx, p, "secret", "asr"); e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() {
-		s.Pool.Close()
-		_, _ = base.Pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-		base.Pool.Close()
-	})
+	t.Cleanup(s.Pool.Close)
 	return s
 }
 func session(t *testing.T, s *Store) string {
@@ -210,7 +214,7 @@ func TestClaimFencingAndConcurrentAdmission(t *testing.T) {
 	wg.Wait()
 	var n int
 	_ = s.Pool.QueryRow(ctx, "SELECT count(*) FROM job_runs WHERE status NOT IN ('failed','succeeded','canceled')").Scan(&n)
-	if n != 3 {
+	if n != 9 {
 		t.Fatalf("admission count=%d", n)
 	}
 }

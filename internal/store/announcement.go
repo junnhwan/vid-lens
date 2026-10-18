@@ -48,7 +48,7 @@ func (s *Store) SaveAnnouncement(ctx context.Context, in AnnouncementInput) (Ann
 		return Announcement{}, domain.Err(422, "INVALID_ARGUMENT", "启用公告前，请填写标题和正文。")
 	}
 	var v Announcement
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		old, e := announcement(ctx, tx)
 		if e != nil {
 			return e

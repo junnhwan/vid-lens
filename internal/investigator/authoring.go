@@ -15,7 +15,7 @@ import (
 const authoringPolicy = "interpretation-2026-10-18-v9"
 const recoveryPolicy = "interpretation-2026-10-18-v10"
 
-func (s *session) authoring() bool { return s != nil && s.turn == nil && s.cp.HarnessRevision >= 12 }
+func (s *session) authoring() bool { return s != nil && s.turn == nil && s.policy().SectionAuthoring }
 
 func authoringLimitationIssues(limits []domain.Limitation, sections map[string]bool, catalog map[string]domain.Citation) error {
 	issues := []map[string]any{}

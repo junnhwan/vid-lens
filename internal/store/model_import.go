@@ -12,7 +12,7 @@ import (
 // No secret is returned, no probe is fabricated, and the live default stays put.
 func (s *Store) ImportCurrentModel(ctx context.Context) (CatalogModel, error) {
 	id := ""
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var cid string
 		if e := tx.QueryRow(ctx, "SELECT config_id FROM runtime_settings").Scan(&cid); e != nil {
 			return e

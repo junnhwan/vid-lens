@@ -72,7 +72,7 @@ func (s *Store) requestShare(ctx context.Context, q Querier, request string) (Re
 
 func (s *Store) RequestShare(ctx context.Context, session, request string) (RequestShare, error) {
 	var out RequestShare
-	err := s.read(ctx, func(tx pgx.Tx) error {
+	err := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, err := loadRequest(ctx, tx, request)
 		if err != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -85,7 +85,7 @@ func (s *Store) RequestShare(ctx context.Context, session, request string) (Requ
 
 func (s *Store) SetRequestShare(ctx context.Context, session, request string, enabled bool) (RequestShare, error) {
 	var out RequestShare
-	err := s.Tx(ctx, func(tx pgx.Tx) error {
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, err := loadRequest(ctx, tx, request)
 		if err != nil || r.SessionID != session {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "资源不存在。")
@@ -188,7 +188,7 @@ func (s *Store) SharedRecord(ctx context.Context, token string) (SharedRecord, e
 	if _, err := s.shareID(token); err != nil {
 		return out, err
 	}
-	err := s.read(ctx, func(tx pgx.Tx) error {
+	err := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, err := s.sharedRequest(ctx, tx, token)
 		if err != nil {
 			return err
@@ -262,7 +262,7 @@ func (s *Store) SharedFrame(ctx context.Context, token, id string) (domain.Asset
 	if _, err := s.shareID(token); err != nil {
 		return asset, err
 	}
-	err := s.read(ctx, func(tx pgx.Tx) error {
+	err := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		r, err := s.sharedRequest(ctx, tx, token)
 		if err != nil {
 			return err

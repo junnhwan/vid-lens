@@ -21,7 +21,7 @@ func (s *Store) SiteStats(ctx context.Context) (map[string]any, error) {
 }
 func (s *Store) SiteLike(ctx context.Context, session string, set bool) (map[string]any, error) {
 	var v map[string]any
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if set {
 			tag, e := tx.Exec(ctx, "INSERT INTO site_likes(session_id) VALUES($1) ON CONFLICT DO NOTHING", session)
 			if e != nil {

@@ -22,7 +22,7 @@ type compactAnswerInput struct {
 	Limitations []domain.Limitation        `json:"limitations"`
 }
 
-func (s *session) compactAnswerProtocol() bool { return s.turn != nil && s.cp.HarnessRevision >= 6 }
+func (s *session) compactAnswerProtocol() bool { return s.turn != nil && s.policy().CompactAnswers }
 
 func resolveAnswerReferences(in compactAnswerInput, catalog map[string]domain.Citation) (answerInput, error) {
 	out := answerInput{Kind: in.Kind, Summary: in.Summary, Citations: map[string]domain.Citation{}, Limitations: in.Limitations}
@@ -75,7 +75,7 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 			return nil, &candidateError{err: e}
 		}
 		var args any = in
-		if s.cp.HarnessRevision >= 10 {
+		if s.policy().ComposedAnswers {
 			args = map[string]any{"answer": in, "parts": parts}
 		}
 		if _, e := s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "answer_candidate", args, false); e != nil {
@@ -87,7 +87,7 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		return textResult(map[string]any{"accepted_for_publication": true}), nil
 	}
 	submit := func(ctx context.Context, in answerInput) (*schema.ToolResult, error) { return persist(ctx, in, nil) }
-	if s.cp.HarnessRevision >= 10 {
+	if s.policy().ComposedAnswers {
 		return add(utils.InferEnhancedTool("submit_answer", "Submit the answer directly, with a short direct summary and non-repeating evidence-backed explanation. Optional parts name the actual aspects of this question, not a fixed template. Use existing tN/fN references; no separate prose answer before this tool.", func(ctx context.Context, in composedAnswerInput) (*schema.ToolResult, error) {
 			catalog, err := s.citationCatalog(ctx)
 			if err != nil {

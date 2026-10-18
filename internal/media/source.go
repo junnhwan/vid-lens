@@ -58,6 +58,7 @@ func (s *Service) ytdlpArgs(source string) []string {
 	return a
 }
 func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile) error {
+	ctx = s.sourceDownloadContext(ctx, c)
 	ctx, cancelPrepare := context.WithCancel(ctx)
 	var audioDone chan struct{}
 	var prefetchedAudio string

@@ -9,7 +9,7 @@ import (
 
 func (s *Store) AcquireResource(ctx context.Context, c domain.Claim, resource, owner string, slots int) (bool, error) {
 	ok := false
-	e := s.Tx(ctx, func(tx pgx.Tx) error {
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -31,7 +31,7 @@ func (s *Store) AcquireResource(ctx context.Context, c domain.Claim, resource, o
 	return ok, e
 }
 func (s *Store) RenewResource(ctx context.Context, c domain.Claim, resource, owner string) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
@@ -50,7 +50,7 @@ func (s *Store) ReleaseResource(ctx context.Context, resource, owner string) err
 	return e
 }
 func (s *Store) ReserveStorage(ctx context.Context, c domain.Claim, temp, images, available, total int64, stop int) error {
-	return s.Tx(ctx, func(tx pgx.Tx) error {
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
