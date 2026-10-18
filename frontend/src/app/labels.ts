@@ -40,16 +40,20 @@ export function describeRequest(view: RequestView | null, current: ActivityStep 
   if (reconnecting) kicker = "正在重新连接"
   else if (status === "failed") kicker = "未能完成"
   else if (status === "canceled") kicker = "已停止"
-  else if (status === "waiting_source") kicker = "正在准备来源"
   else if (execution?.status === "retry_wait") kicker = "将自动重试"
   else if (execution?.status === "queued") kicker = "正在排队"
   else if (execution?.status === "waiting_dependency") kicker = "正在恢复画面"
+  else if (status === "waiting_source") kicker = "正在准备来源"
 
   if (status === "failed") {
     return { kicker, title: view.failure?.message || "这次没能完成", purpose: "", range: "", busy: false }
   }
   if (status === "canceled") {
     return { kicker, title: "已停止理解", purpose: "停在已经取得的内容，文章还没有生成。", range: "", busy: false }
+  }
+
+  if (execution?.status === "retry_wait") {
+    return { kicker, title: fallbackTitle(execution), purpose: fallbackPurpose(execution), range: "", busy: true }
   }
   if (current) {
     const model = current.kind === "model_response"

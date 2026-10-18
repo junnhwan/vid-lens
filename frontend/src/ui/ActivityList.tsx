@@ -73,7 +73,7 @@ export function ActivityList({
                 </div>
                 {transcribed ? <div className="step-range">{transcribed.done} / {transcribed.total}</div> : null}
                 {model && sends.length ? <details className="model-sends"><summary>发送详情</summary>{sends.map((send) => <p key={send.id}>{send.title} · {stepPresentation(send, resourceStatus).status === "active" ? "等待响应" : stepPresentation(send, resourceStatus).outcome || "已结束"}{stepSpent(send) ? ` · ${stepSpent(send)}` : ""}</p>)}</details> : null}
-                {(detailed || model) && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
+                {(detailed || model || step.kind === "retry") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
                 {detailed && step.source_range ? <div className="step-range">{formatRange(step.source_range)}</div> : null}
                 {detailed && frames.length ? (
                   <div className="mini-row">

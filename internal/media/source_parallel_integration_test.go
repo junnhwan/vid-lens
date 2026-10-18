@@ -88,3 +88,54 @@ esac
 		t.Fatal("source downloads were serialized or not observed", err)
 	}
 }
+
+func TestSourceRetryKeepsSeparateAudioAttemptsAndClosesOldDownloads(t *testing.T) {
+	db, res, cfg := testsupport.Services(t)
+	ctx := context.Background()
+	fixture := t.TempDir()
+	script := `#!/bin/sh
+case "$*" in
+ *--dump-single-json*) printf '{"id":"abcdefghijk","title":"Retry source fixture","duration":2,"subtitles":{},"automatic_captions":{}}';;
+ *bestaudio*) printf 'complete audio';;
+ *) /bin/sleep 0.1; printf 'unavailable' >&2; exit 1;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(fixture, "yt-dlp"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fixture+string(os.PathListSeparator)+os.Getenv("PATH"))
+	owner, err := db.NewSession(ctx, domain.ID(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := db.CreateRequest(ctx, owner.ID, domain.ID(), "https://youtube.com/watch?v=abcdefghijk", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := db.Request(ctx, owner.ID, accepted.ID)
+	ms, err := New(db, res, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		claim, err := db.Claim(ctx, *req.ActiveRunID, 1, "retry-source")
+		if err != nil || claim == nil {
+			t.Fatal("claim", err)
+		}
+		if err = ms.Prepare(ctx, *claim, cfg.Profile); err == nil {
+			t.Fatal("fixture video unexpectedly downloaded")
+		}
+		if _, err = db.Fail(ctx, *claim, domain.Failure{Code: "SOURCE_UNAVAILABLE", Message: "下载暂时中断。", CanRetry: true}, attempt == 1, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var audioSteps, openSteps, retryTitles int
+	err = db.Pool.QueryRow(ctx, `WITH latest AS (
+		SELECT DISTINCT ON(step_id) step FROM run_events WHERE run_id=$1 AND step_id IS NOT NULL ORDER BY step_id,seq DESC
+	) SELECT count(*) FILTER(WHERE step->>'title'='正在获取转写所需音轨'),
+		count(*) FILTER(WHERE step->>'status' IN ('running','queued')),
+		count(*) FILTER(WHERE step->>'title' LIKE '正在重新准备%第 2 次尝试%') FROM latest`, *req.ActiveRunID).Scan(&audioSteps, &openSteps, &retryTitles)
+	if err != nil || audioSteps != 2 || openSteps != 0 || retryTitles != 1 {
+		t.Fatalf("source retries overwrote history or kept old downloads live: audio=%d active=%d retry=%d err=%v", audioSteps, openSteps, retryTitles, err)
+	}
+}

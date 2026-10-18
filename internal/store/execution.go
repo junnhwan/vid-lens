@@ -42,6 +42,13 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "QUEUE_WAIT_TIMEOUT", Message: "等待处理已超时。", CanRetry: true})
 		}
 		if r.Status == "running" {
+			reason := "上一次来源准备已中断，正在重新获取来源。"
+			if e = closeSourceSteps(ctx, tx, r, "canceled", reason); e != nil {
+				return e
+			}
+			if e = sourceRetryNotice(ctx, tx, r, reason); e != nil {
+				return e
+			}
 			if e = charge(ctx, tx, r.ID); e != nil {
 				return e
 			}
@@ -113,6 +120,13 @@ func terminate(ctx context.Context, tx pgx.Tx, r domain.Run, status string, f *d
 	}
 	if domain.Terminal(r.Status) {
 		return nil
+	}
+	reason := "来源准备已停止，此步骤尚未完成。"
+	if f != nil {
+		reason = f.Message
+	}
+	if e := closeSourceSteps(ctx, tx, r, status, reason); e != nil {
+		return e
 	}
 	if e := charge(ctx, tx, r.ID); e != nil {
 		return e
@@ -191,6 +205,12 @@ func (s *Store) Fail(ctx context.Context, c domain.Claim, f domain.Failure, tran
 		if !retry {
 			return terminate(ctx, tx, r, "failed", &f)
 		}
+		if e = closeSourceSteps(ctx, tx, r, "failed", f.Message); e != nil {
+			return e
+		}
+		if e = sourceRetryNotice(ctx, tx, r, f.Message); e != nil {
+			return e
+		}
 		if _, e = tx.Exec(ctx, "UPDATE job_attempts SET ended_at=now(),outcome='retry_wait' WHERE id=$1", c.AttemptID); e != nil {
 			return e
 		}
@@ -237,6 +257,13 @@ func (s *Store) Suspend(ctx context.Context, c domain.Claim) error {
 			return e
 		}
 		if e = charge(ctx, tx, r.ID); e != nil {
+			return e
+		}
+		reason := "来源准备已中断，稍后会重新获取来源。"
+		if e = closeSourceSteps(ctx, tx, r, "canceled", reason); e != nil {
+			return e
+		}
+		if e = sourceRetryNotice(ctx, tx, r, reason); e != nil {
 			return e
 		}
 		if _, e = tx.Exec(ctx, "UPDATE job_runs SET status='retry_wait',retry_not_before=now()+interval '5 seconds',lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1", r.ID); e != nil {

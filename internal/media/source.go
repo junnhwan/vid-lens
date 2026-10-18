@@ -86,6 +86,9 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 	decision := subtitleDecision{Revision: "subtitle-adoption-v2", Candidates: []subtitleChoice{}, Attempts: []subtitleAttempt{}, FallbackReason: "not_listed"}
 	restore := c.Run.Kind == "source.restore"
 	step := domain.Step{ID: domain.ID(), Phase: "prepare_source", Title: "正在准备视频和文字来源", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+	if c.Run.AttemptNo > 1 {
+		step.Title = fmt.Sprintf("正在重新准备视频和文字来源（第 %d 次尝试）", c.Run.AttemptNo)
+	}
 	step, e = s.Store.Step(ctx, c, step)
 	if e != nil {
 		return e
@@ -254,7 +257,7 @@ func (s *Service) Prepare(ctx context.Context, c domain.Claim, p config.Profile)
 			stopAudio = cancelAudio
 			go func() {
 				defer close(audioDone)
-				audioStep := domain.Step{ID: "audio_" + c.Run.ID, Phase: "prepare_source", Title: "正在获取转写所需音轨", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
+				audioStep := domain.Step{ID: "audio_" + c.AttemptID, Phase: "prepare_source", Title: "正在获取转写所需音轨", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
 				if audioStep, audioErr = s.Store.Step(ctx, c, audioStep); audioErr != nil {
 					return
 				}

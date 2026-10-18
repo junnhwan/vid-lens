@@ -7,6 +7,12 @@ import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("shows the reason for a source retry in the compact process list", () => {
+    const retry = { ...step("source-retry", "retry", 0), phase: "prepare_source", title: "来源准备中断，将自动重试", outcome: { message: "下载长时间没有字节进展。", evidence_status: "not_assessed" } }
+    const html = renderToStaticMarkup(<ActivityList steps={[retry]} open={false} detailed={false} resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain("下载长时间没有字节进展。")
+    expect(html).toContain("来源准备中断，将自动重试")
+  })
   it("retains loaded ancestor actions across source-to-article binding changes", () => {
     const prior = {...step("earlier-failed", "tool_execution", 0), run_id: "old", status: "failed", started_at: "2026-10-17T00:00:00Z"}
     const source = {...step("source", "tool_execution", 0), run_id: "source", started_at: "2026-10-17T00:01:00Z"}
