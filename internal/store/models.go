@@ -50,6 +50,7 @@ type CatalogModel struct {
 	ProviderEnabled    bool   `json:"provider_enabled"`
 	Verified           bool   `json:"verified"`
 	IsDefault          bool   `json:"is_default"`
+	Recommended        bool   `json:"recommended"`
 	MaxOutputTokens    int    `json:"max_output_tokens"`
 	MaxInputChars      int    `json:"max_input_chars"`
 	DisableThinking    bool   `json:"disable_thinking"`
@@ -79,7 +80,7 @@ type ModelRouteOrderEntry struct {
 }
 
 const providerSelect = `SELECT jsonb_build_object('id',p.id,'revision_id',r.id,'revision',p.revision,'name',r.name,'base_url',r.base_url,'proxy_policy',r.proxy_policy,'key_configured',r.key_ref<>'','enabled',p.enabled) FROM model_providers p JOIN provider_revisions r ON r.id=p.current_revision_id`
-const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'route_priority',m.route_priority,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','input_chars_limit',COALESCE((c.profile->>'input_chars_limit')::int,0),'context_tokens',COALESCE((c.profile->>'context_tokens')::int,0),'disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
+const modelSelect = `SELECT jsonb_build_object('id',m.id,'revision_id',r.id,'revision',m.revision,'route_priority',m.route_priority,'provider_id',m.provider_id,'provider_revision_id',r.provider_revision_id,'display_name',r.display_name,'brand_id',r.brand_id,'description',r.description,'upstream_id',c.profile->>'model_name','enabled',m.enabled,'provider_enabled',p.enabled,'verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='capabilities' AND b.status='succeeded'),'is_default',COALESCE(m.id=s.default_model_id,false),'recommended',m.recommended,'max_output_tokens',c.profile->'max_output_tokens','max_input_chars',c.profile->'max_input_chars','input_chars_limit',COALESCE((c.profile->>'input_chars_limit')::int,0),'context_tokens',COALESCE((c.profile->>'context_tokens')::int,0),'disable_thinking',COALESCE((c.profile->>'model_disable_thinking')::boolean,false),'cache_policy',COALESCE(c.profile->>'cache_policy','provider_default'),'cache_hints_verified',EXISTS(SELECT 1 FROM model_probes b WHERE b.revision_id=r.id AND b.mode='cache' AND b.status='succeeded' AND b.result->>'hints_verified'='true')) FROM catalog_models m JOIN model_revisions r ON r.id=m.current_revision_id JOIN model_providers p ON p.id=m.provider_id JOIN runtime_config_revisions c ON c.id=r.config_id CROSS JOIN model_settings s`
 
 // Older databases may already have enabled models without a catalog default.
 // Once enabled, the catalog stays active even if all its models are stopped.
@@ -504,6 +505,31 @@ func selectable(ctx context.Context, q Querier, id, expected string) (domain.Gen
 	m, e := modelIdentity(ctx, q, cid)
 	return m, cid, e
 }
+func (s *Store) SetModelRecommended(ctx context.Context, id string, recommended bool, expected int64) (CatalogModel, error) {
+	err := s.Tx(ctx, func(tx pgx.Tx) error {
+		var rev int64
+		e := tx.QueryRow(ctx, "SELECT revision FROM catalog_models WHERE id=$1", id).Scan(&rev)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return domain.Err(404, "RESOURCE_NOT_FOUND", "模型不存在。")
+		}
+		if e != nil {
+			return e
+		}
+		if rev != expected {
+			return domain.Err(409, "REVISION_CONFLICT", "模型已更新，请重新读取后保存。")
+		}
+		if _, e = tx.Exec(ctx, "UPDATE catalog_models SET recommended=$2,revision=revision+1 WHERE id=$1", id, recommended); e != nil {
+			return e
+		}
+		_, e = tx.Exec(ctx, "UPDATE model_settings SET revision=revision+1")
+		return e
+	})
+	if err != nil {
+		return CatalogModel{}, err
+	}
+	return s.Model(ctx, id)
+}
+
 func (s *Store) SetDefaultModel(ctx context.Context, id string, expected int64) error {
 	return s.Tx(ctx, func(tx pgx.Tx) error {
 		var rev int64

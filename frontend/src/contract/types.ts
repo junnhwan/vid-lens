@@ -213,6 +213,7 @@ export interface GenerationModel {
   description?: string
   selection_locked?: boolean
   legacy?: boolean
+  recommended?: boolean
 }
 export interface ModelCatalog {
   revision: number

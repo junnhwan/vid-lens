@@ -100,7 +100,7 @@ This diagram shows how a video link becomes an illustrated article and how the c
 
 ## Videos that work well
 
-Technical explainers, science videos, courses, and tutorials with clear narration are a good fit. Music, scenery, and montages may provide less information to organize; still frames also cannot fully convey continuous action, rhythm, or story. Results depend on subtitles, transcription, frame clarity, and model availability. See the [video selection guide](docs/site/start.md).
+Technical explainers, science videos, courses, and tutorials with clear narration are a good fit. Music, scenery, and montages may provide less information to organize; still frames also cannot fully convey continuous action, rhythm, or story. Unrelated videos, and very large videos submitted to abuse the service, are removed. Results depend on subtitles, transcription, frame clarity, and model availability. See the [video selection guide](docs/site/start.md).
 
 ## Local development
 

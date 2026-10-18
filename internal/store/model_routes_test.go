@@ -221,3 +221,48 @@ func TestModelSubmissionValidatesActualRouteAndKeepsAuditOnRecovery(t *testing.T
 		t.Fatalf("stale worker submitted: %v", err)
 	}
 }
+
+func TestRecommendationPublishesWithTheVisibleModel(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	primary := routeModel(t, s, "primary-reco", "deepseek-v4.1-flash", "generic")
+	backup := routeModel(t, s, "backup-reco", "deepseek/deepseek-v4.1-flash", "deepseek")
+	other := routeModel(t, s, "other-reco", "glm-5.3-flash", "glm")
+	if _, err := s.SetModelRecommended(ctx, backup.ID, true, backup.Revision-1); err == nil {
+		t.Fatal("stale recommendation revision was accepted")
+	}
+	saved, err := s.SetModelRecommended(ctx, backup.ID, true, backup.Revision)
+	if err != nil || !saved.Recommended || saved.Revision != backup.Revision+1 {
+		t.Fatalf("recommendation not stored: %+v %v", saved, err)
+	}
+	catalog, err := s.ModelCatalog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deepseek, glm bool
+	for _, model := range catalog["models"].([]domain.GenerationModel) {
+		if model.ID == primary.ID || model.ID == backup.ID {
+			deepseek = model.Recommended
+		}
+		if model.ID == other.ID {
+			glm = model.Recommended
+		}
+	}
+	if !deepseek || glm {
+		t.Fatalf("public recommendation = deepseek %v, glm %v, catalog %+v", deepseek, glm, catalog["models"])
+	}
+	stopped := modelInput(saved)
+	stopped.Enabled = false
+	if _, err = s.SaveModel(ctx, backup.ID, stopped); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = s.ModelCatalog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range catalog["models"].([]domain.GenerationModel) {
+		if (model.ID == primary.ID || model.ID == backup.ID) && model.Recommended {
+			t.Fatalf("stopped route still published a recommendation: %+v", model)
+		}
+	}
+}

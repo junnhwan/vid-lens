@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { NetworkSettings } from "./NetworkSettings"
+import { ExecutionSettings } from "./ExecutionSettings"
 import { ExampleShowcase } from "./ExampleShowcase"
+import { AnnouncementSettings } from "./AnnouncementSettings"
 import { VideoStorage } from "./VideoStorage"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
@@ -35,6 +37,7 @@ interface Model {
   provider_enabled: boolean
   verified: boolean
   is_default: boolean
+  recommended: boolean
   max_output_tokens: number
   max_input_chars: number
   input_chars_limit: number
@@ -117,9 +120,11 @@ const sections = [
   ["models", "模型"],
   ["providers", "供应商"],
   ["diagnostics", "缓存与用量"],
+  ["execution", "任务与队列"],
   ["network", "联网搜索"],
   ["videos", "视频与存储"],
   ["examples", "公开示例"],
+  ["announcement", "公告"],
 ] as const
 const usagePageSize = 20
 const proxyOptions: ChoiceOption[] = [
@@ -176,10 +181,10 @@ function DeskSelect({
     </div>
   )
 }
-function InkSwitch({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+function InkSwitch({ checked, label, disabled, onChange }: { checked: boolean; label: string; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return (
     <label className="ink-check">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span />
       {label}
     </label>
@@ -552,6 +557,16 @@ export function Manage() {
       setNotice("默认模型已更新，只影响新请求的预选。")
     })
   }
+  async function setRecommended(m: Model, recommended: boolean) {
+    await action(m.id, async () => {
+      await api.current.request("PUT", `/api/v1/admin/models/${m.id}/recommendation`, {
+        recommended,
+        expected_revision: m.revision,
+      })
+      await load()
+      setNotice(recommended ? "首页会标出这个模型。" : "已取消首页推荐。")
+    })
+  }
   async function importCurrent() {
     await action("import-current", async () => {
       await api.current.request("POST", "/api/v1/admin/models/import-current", {})
@@ -766,8 +781,8 @@ export function Manage() {
         ) : (
           <>
             <div className="desk-nav">
-              <nav className="manage-tabs" data-tab={tab} aria-label="管理分区">
-                <i className="tab-indicator" aria-hidden="true" />
+              <nav className="manage-tabs" data-tab={tab} aria-label="管理分区" style={{ gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))` }}>
+                <i className="tab-indicator" aria-hidden="true" style={{ width: `calc((100% - 8px) / ${sections.length})`, transform: `translateX(${Number(tab) * 100}%)` }} />
                 {sections.map(([id, label]) => (
                   <button
                     key={id}
@@ -798,7 +813,11 @@ export function Manage() {
               </p>
             ) : null}
             <div className="desk-stage" key={section}>
-            {section === "videos" ? (
+            {section === "announcement" ? (
+              <AnnouncementSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+            ) : section === "execution" ? (
+              <ExecutionSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+            ) : section === "videos" ? (
               <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "examples" ? (
               <ExampleShowcase api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
@@ -1069,7 +1088,10 @@ export function Manage() {
                                       <ModelIcon brand={m.brand_id} name={m.display_name} />
                                     </span>
                                     <span className="ledger-copy">
-                                      <strong>{m.display_name}</strong>
+                                      <strong>
+                                        {m.display_name}
+                                        {m.recommended ? <i className="ledger-recommend">推荐</i> : null}
+                                      </strong>
                                       <small>{modelMeta(m)}</small>
                                       <em data-tone={line.tone}>{line.text}</em>
                                     </span>
@@ -1114,6 +1136,7 @@ export function Manage() {
                         ) : null}
                       </header>
                       {!composing && selected ? (
+                        <>
                         <div className="sheet-actions">
                           <button
                             type="button"
@@ -1149,6 +1172,16 @@ export function Manage() {
                             {selected.is_default ? "已是默认" : "设为默认"}
                           </button>
                         </div>
+                        <div className="recommend-switch">
+                          <InkSwitch
+                            checked={selected.recommended}
+                            disabled={!!busy}
+                            label="首页推荐"
+                            onChange={(checked) => void setRecommended(selected, checked)}
+                          />
+                          <small>勾选后，首页的模型菜单会标出推荐。</small>
+                        </div>
+                        </>
                       ) : null}
                       {!composing && selected && actionNote(selected, dirty, Boolean(modelActivity(selectedProbes))) ? (
                         <p className="sheet-reason" id="model-action-note">

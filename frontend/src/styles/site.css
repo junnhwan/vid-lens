@@ -323,6 +323,15 @@ html:active-view-transition select {
   font-size: 13px;
   font-weight: 500;
 }
+.entry-caution {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--amber-ink);
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, var(--amber-bg) 78%, transparent);
+  color: var(--amber-ink);
+  font: 500 12.5px/1.65 var(--serif);
+}
 .field-label {
   display: block;
   font-size: 12px;
@@ -380,9 +389,14 @@ html:active-view-transition select {
 .form-options {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   padding: 13px 0 8px;
   gap: 16px;
+  row-gap: 10px;
+}
+.generation-form .form-options > .choice {
+  flex-shrink: 0;
 }
 .choice {
   position: relative;
@@ -392,7 +406,7 @@ html:active-view-transition select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: 280px;
+  max-width: 320px;
   height: 36px;
   padding: 0 12px 0 6px;
   border: 1px solid var(--line-strong);
@@ -420,9 +434,41 @@ html:active-view-transition select {
   cursor: default;
 }
 .choice-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.choice-recommend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 18px;
+  margin: 0;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--amber-bg) 88%, var(--surface));
+  color: var(--amber-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber-ink) 26%, transparent);
+  font: 500 10px/1 var(--serif);
+  font-style: normal;
+}
+.choice-recommend::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  flex: none;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+.choice-recommend > span {
+  display: inline-block;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+}
+.choice[data-recommend="true"] .choice-trigger {
+  padding-right: 8px;
 }
 .choice-caret {
   width: 7px;
@@ -442,8 +488,8 @@ html:active-view-transition select {
   z-index: 30;
   top: calc(100% + 8px);
   left: 0;
-  min-width: max(100%, 248px);
-  max-width: 340px;
+  min-width: max(100%, 280px);
+  max-width: 360px;
   max-height: min(292px, 42vh);
   margin: 0;
   padding: 6px;
@@ -496,7 +542,9 @@ html:active-view-transition select {
   color: var(--ink);
   text-align: left;
   cursor: pointer;
-  transition: background-color 140ms var(--ease-out);
+  transition:
+    background-color 140ms var(--ease-out),
+    box-shadow 140ms var(--ease-out);
 }
 .choice-menu button[data-active="true"] {
   background: color-mix(in srgb, var(--teal-soft) 80%, transparent);
@@ -504,13 +552,46 @@ html:active-view-transition select {
 .choice-menu button[aria-selected="true"] {
   background: var(--teal-soft);
 }
-.choice-menu button span {
+.choice-menu li:has(button[data-recommend="true"]) {
+  margin-bottom: 4px;
+}
+.choice-menu button[data-recommend="true"] {
+  padding: 10px 10px 10px 8px;
+  background:
+    linear-gradient(
+      105deg,
+      color-mix(in srgb, var(--amber-bg) 90%, var(--surface)) 0%,
+      color-mix(in srgb, var(--amber-bg) 36%, var(--surface)) 62%,
+      var(--surface) 100%
+    );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber-ink) 16%, transparent);
+}
+.choice-menu button[data-recommend="true"][data-active="true"],
+.choice-menu button[data-recommend="true"][aria-selected="true"] {
+  background:
+    linear-gradient(
+      105deg,
+      color-mix(in srgb, var(--teal-soft) 78%, var(--amber-bg)),
+      var(--teal-soft)
+    );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--teal) 24%, transparent);
+}
+.choice-menu button > span {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .choice-menu strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
   font-weight: 500;
   font-size: 13px;
+  line-height: 1.35;
+}
+.choice-name {
+  min-width: 0;
 }
 .choice-menu small {
   display: block;
@@ -518,6 +599,16 @@ html:active-view-transition select {
   color: var(--ink-soft);
   font-size: 11px;
   line-height: 1.45;
+}
+.choice-recommend-note {
+  color: var(--amber-ink);
+  font-family: var(--serif);
+  letter-spacing: 0.04em;
+}
+.choice-recommend-note + span::before {
+  content: "·";
+  margin: 0 0.4em;
+  color: var(--ink-soft);
 }
 .choice-menu button i {
   width: 6px;
@@ -4028,6 +4119,29 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 }
 .sheet-actions .desk-pill {
   font-variant-numeric: tabular-nums;
+}
+.recommend-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 14px;
+}
+.recommend-switch small {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.ledger-recommend {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--amber-bg);
+  color: var(--amber-ink);
+  font: 500 10px/16px var(--serif);
+  font-style: normal;
+  letter-spacing: 0.08em;
+  vertical-align: 1px;
 }
 .sheet-reason {
   display: flex;

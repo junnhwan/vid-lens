@@ -5,6 +5,7 @@ import { HttpApi } from "../api/http"
 import { DiskMeter } from "./DiskMeter"
 import { LikeButton } from "./LikeButton"
 import { ChoiceMenu } from "./ChoiceMenu"
+import { homeModelOption } from "./homeModel"
 import { Lens } from "./Lens"
 import { LectureShelf } from "./LectureShelf"
 import type { Lecture } from "./lectures"
@@ -118,8 +119,9 @@ export function EntryView({
           </h1>
           <p className="entry-deck">循着原视频的文字与画面整理重点，留下可回看的出处，也留一点继续追问的空间。</p>
           <p className="entry-fit" id="video-fit">
-            <strong>更适合技术讲解、科普、课程与教程。</strong>
+            <strong>主要面向技术讲解、科普、课程与教程。</strong>
             <span>音乐、风景、纯剪辑等缺少讲述的视频，可整理的信息较少。</span>
+            <span className="entry-caution">无关内容，或恶意提交的超大视频，会被直接清理。</span>
           </p>
           <form
             className="generation-form"
@@ -163,12 +165,7 @@ export function EntryView({
                 disabled={busy || !catalog?.models.length}
                 placeholder={catalog ? "暂无可用模型" : "正在读取模型"}
                 unavailable={selected && !model ? "原模型已不可用，请重新选择" : undefined}
-                options={(catalog?.models ?? []).map((item) => ({
-                  id: item.id,
-                  label: item.display_name,
-                  hint: item.description,
-                  brand: item.brand_id,
-                }))}
+                options={(catalog?.models ?? []).map(homeModelOption)}
                 onChange={onSelect}
               />
               <ChoiceMenu

@@ -16,6 +16,7 @@ type GenerationModel struct {
 	Description     string `json:"description,omitempty"`
 	SelectionLocked bool   `json:"selection_locked"`
 	Legacy          bool   `json:"legacy,omitempty"`
+	Recommended     bool   `json:"recommended,omitempty"`
 }
 type GenerationSpec struct {
 	Version                int             `json:"version"`

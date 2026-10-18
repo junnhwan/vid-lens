@@ -6,12 +6,18 @@ function ChoiceMark({ brand, name }: { brand?: string; name?: string }) {
   return <ModelIcon brand={brand} name={name} decorative />
 }
 
+export type ChoiceBadge = {
+  label: string
+  note?: string
+}
+
 export type ChoiceOption = {
   id: string
   label: string
   hint?: string
   brand?: string
   disabled?: boolean
+  mark?: ChoiceBadge
 }
 
 export function ChoiceMenu({
@@ -43,6 +49,8 @@ export function ChoiceMenu({
   const listId = useId()
   const current = options.find((option) => option.id === value)
   const enabled = options.filter((option) => !option.disabled)
+  const currentMark = unavailable ? undefined : current?.mark
+  const spoken = [label, unavailable || current?.label || placeholder, currentMark?.label, currentMark?.note].filter(Boolean).join("，")
 
   useEffect(() => {
     if (!open) return
@@ -134,20 +142,25 @@ export function ChoiceMenu({
   }
 
   return (
-    <div className="choice" data-align={align} ref={root}>
+    <div className="choice" data-align={align} data-recommend={currentMark ? "true" : undefined} ref={root}>
       <button
         type="button"
         className="choice-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-label={`${label}，${unavailable || current?.label || placeholder}`}
+        aria-label={spoken}
         disabled={disabled}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onTriggerKey}
       >
         <ChoiceMark brand={current?.brand} name={current?.label} />
         <span className="choice-label">{unavailable || current?.label || placeholder}</span>
+        {currentMark ? (
+          <em className="choice-recommend">
+            <span>{currentMark.label}</span>
+          </em>
+        ) : null}
         <span className="choice-caret" aria-hidden="true" />
       </button>
       {mounted ? (
@@ -171,6 +184,7 @@ export function ChoiceMenu({
                   role="option"
                   aria-selected={option.id === value}
                   data-active={active ? "true" : "false"}
+                  data-recommend={option.mark ? "true" : undefined}
                   disabled={option.disabled}
                   onMouseEnter={() => {
                     if (index >= 0) setCursor(index)
@@ -179,8 +193,20 @@ export function ChoiceMenu({
                 >
                   <ChoiceMark brand={option.brand} name={option.label} />
                   <span>
-                    <strong>{option.label}</strong>
-                    {option.hint ? <small>{option.hint}</small> : null}
+                    <strong>
+                      <span className="choice-name">{option.label}</span>
+                      {option.mark ? (
+                        <em className="choice-recommend">
+                          <span>{option.mark.label}</span>
+                        </em>
+                      ) : null}
+                    </strong>
+                    {option.mark?.note || option.hint ? (
+                      <small>
+                        {option.mark?.note ? <span className="choice-recommend-note">{option.mark.note}</span> : null}
+                        {option.hint ? <span>{option.hint}</span> : null}
+                      </small>
+                    ) : null}
                   </span>
                   {option.id === value ? <i aria-hidden="true" /> : null}
                 </button>

@@ -24,6 +24,7 @@ type ModelRoute struct {
 
 func publicModels(models []CatalogModel, preferred *string) ([]domain.GenerationModel, *string) {
 	groups := map[string]CatalogModel{}
+	recommended := map[string]bool{}
 	preferredFamily := ""
 	for _, m := range models {
 		if preferred != nil && m.ID == *preferred {
@@ -36,6 +37,9 @@ func publicModels(models []CatalogModel, preferred *string) ([]domain.Generation
 			continue
 		}
 		key := domain.ModelFamily(m.BrandID, m.UpstreamID)
+		if m.Recommended {
+			recommended[key] = true
+		}
 		prior, exists := groups[key]
 		if !exists || preferred != nil && m.ID == *preferred || (preferred == nil || prior.ID != *preferred) && m.ID < prior.ID {
 			groups[key] = m
@@ -44,7 +48,7 @@ func publicModels(models []CatalogModel, preferred *string) ([]domain.Generation
 	out := make([]domain.GenerationModel, 0, len(groups))
 	var def *string
 	for family, m := range groups {
-		out = append(out, domain.GenerationModel{ID: m.ID, RevisionID: m.RevisionID, DisplayName: m.DisplayName, BrandID: m.BrandID, Description: m.Description})
+		out = append(out, domain.GenerationModel{ID: m.ID, RevisionID: m.RevisionID, DisplayName: m.DisplayName, BrandID: m.BrandID, Description: m.Description, Recommended: recommended[family]})
 		if family == preferredFamily {
 			def = domain.Ptr(m.ID)
 		}

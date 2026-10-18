@@ -153,6 +153,25 @@ func (a *Server) catalogModels(w http.ResponseWriter, r *http.Request) {
 	a.json(w, 200, v)
 }
 
+func (a *Server) modelRecommendation(w http.ResponseWriter, r *http.Request) {
+	if !a.admin(w, r) {
+		return
+	}
+	var in struct {
+		Recommended      bool  `json:"recommended"`
+		ExpectedRevision int64 `json:"expected_revision"`
+	}
+	if !a.body(w, r, &in) {
+		return
+	}
+	v, e := a.Store.SetModelRecommended(r.Context(), r.PathValue("model"), in.Recommended, in.ExpectedRevision)
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	a.json(w, 200, v)
+}
+
 func (a *Server) modelRouteOrder(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return
