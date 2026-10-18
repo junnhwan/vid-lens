@@ -1,22 +1,33 @@
 import { describe, expect, it } from "vitest"
-import type { ActivityStep, Block, Citation } from "../contract/types"
-import { catalogChoice, exampleArchive, exampleChoices, exampleRoute, replaySteps, replayTimeline, type ExampleData } from "./exampleReplay"
+import type { ActivityStep } from "../contract/types"
+import { catalogChoice, exampleArchive, exampleRoute, replaySteps, replayTimeline } from "./exampleReplay"
 
-const archives = import.meta.glob("../../public/example/*.json", { eager: true, import: "default" }) as Record<string, ExampleData>
-const images = import.meta.glob("../../public/example/**/*.jpg")
-const examples = exampleChoices.map((choice) => archives[`../../public/example/${choice.id}.json`])
+function step(patch: Partial<ActivityStep> & Pick<ActivityStep, "id" | "title" | "status">): ActivityStep {
+  return {
+    run_id: "run", segment_no: 1, first_seq: 1, last_seq: 1, phase: "investigate",
+    purpose: null, source_range: null, frame_ids: [], frames: [], outcome: null,
+    retry_of_step_id: null, started_at: "2026-10-18T00:00:00.000Z", finished_at: "2026-10-18T00:00:20.000Z",
+    ...patch,
+  }
+}
+
+const transcript = step({
+  id: "transcribe", title: "正在转写音频（12/22）", status: "completed",
+    outcome: { message: "转写完成", evidence_status: "ready" },
+  frame_ids: ["frame"], frames: [{ id: "frame", snapshot_id: "snap", time_ms: 1000, requested_time_ms: 1000, width: 1, height: 1, mime_type: "image/jpeg", caption: "", crop: null, replaces_frame_id: null, availability: "ready", unavailable_reason: null, expires_at: null, urls: { full: "/api/v1/examples/x/frames/frame/content", thumbnail: "/api/v1/examples/x/frames/frame/content" } }],
+})
+const failed = step({ id: "look", title: "查看画面", status: "failed", started_at: "2026-10-18T00:00:20.000Z", finished_at: "2026-10-18T00:00:40.000Z" })
 
 describe("saved example playback", () => {
-  it("resolves direct links and falls back to a known static example", () => {
-    expect(exampleRoute("?video=skills&view=qa&question=frame")).toEqual({ id: "skills", mode: "qa", question: "frame" })
-    expect(exampleRoute("?video=../../api&view=other")).toEqual({ id: "workflow", mode: "article", question: null })
+  it("opens a selected article and ignores a removed static id", () => {
     expect(exampleRoute("?video=9280423ce43c85da9cc539a7576749a7&view=process")).toEqual({ id: "9280423ce43c85da9cc539a7576749a7", mode: "process", question: null })
-    expect(exampleArchive("workflow")).toBe("/example/workflow.json")
+    expect(exampleRoute("?video=skills&view=qa&question=frame")).toEqual({ id: null, mode: "qa", question: "frame" })
+    expect(exampleRoute("?video=../../api&view=other")).toEqual({ id: null, mode: "article", question: null })
     expect(exampleArchive("9280423ce43c85da9cc539a7576749a7")).toBe("/api/v1/examples/9280423ce43c85da9cc539a7576749a7")
     expect(catalogChoice({ id: "9280423ce43c85da9cc539a7576749a7", title: "已发布", description: "第一节", platform: "youtube", duration_ms: null, cover: "" }).meta).toBe("YouTube")
   })
   it("does not reveal final evidence or final ASR progress during a replayed step", () => {
-    const steps = examples[1].generation_steps
+    const steps = [transcript, failed]
     const original = JSON.stringify(steps)
     const current = replaySteps(steps, 1)[0]
     expect(current.status).toBe("running")
@@ -28,7 +39,7 @@ describe("saved example playback", () => {
     expect(JSON.stringify(steps)).toBe(original)
   })
   it("seeks backward without carrying an answer or evidence from the future", () => {
-    const steps = examples[1].questions[1].steps
+    const steps = [transcript, failed]
     const timeline = replayTimeline(steps)
     expect(replaySteps(steps, timeline.duration)).toEqual(steps)
     expect(replaySteps(steps, 0)).toEqual([])
@@ -37,50 +48,9 @@ describe("saved example playback", () => {
     expect(replayTimeline([]).duration).toBeGreaterThan(0)
   })
   it("preserves a failed investigation step inside a successful article record", () => {
-    const steps = examples[1].generation_steps
-    expect(steps.some((step) => step.status === "failed")).toBe(true)
+    const steps = [transcript, failed]
+    expect(steps.some((item) => item.status === "failed")).toBe(true)
     expect(replaySteps(steps, replayTimeline(steps).duration)).toEqual(steps)
     for (const entry of replayTimeline(steps).entries) expect(entry.end - entry.start).toBeGreaterThanOrEqual(1100)
-  })
-})
-
-describe("public example archives", () => {
-  for (const data of examples) it(`${data.id} has self-contained answers, citations, and durable static images`, () => {
-    const frameIds = new Set(data.frames.map((frame) => frame.id))
-    expect(frameIds.size).toBe(data.frames.length)
-    function checkBlocks(blocks: Block[], citations: Record<string, Citation>) {
-      for (const block of blocks) {
-        for (const id of block.frame_ids || []) expect(frameIds.has(id), id).toBe(true)
-        for (const inline of [...(block.content || []), ...(block.items || []).flatMap((item) => item.content)]) {
-          if (inline.type === "citation") expect(citations[inline.citation_id || ""]).toBeDefined()
-        }
-      }
-      for (const citation of Object.values(citations)) if (citation.frame_id) expect(frameIds.has(citation.frame_id), citation.frame_id).toBe(true)
-    }
-    function checkSteps(steps: ActivityStep[]) {
-      for (const step of steps) {
-        expect(["completed", "failed", "canceled"]).toContain(step.status)
-        expect(step.frames.map((frame) => frame.id)).toEqual(step.frame_ids)
-        for (const id of step.frame_ids) expect(frameIds.has(id)).toBe(true)
-      }
-    }
-    checkBlocks(data.article.sections.flatMap((section) => section.blocks), data.article.citations)
-    checkSteps(data.generation_steps)
-    expect(data.questions).toHaveLength(2)
-    for (const question of data.questions) {
-      expect(question.answer.blocks.length).toBeGreaterThan(0)
-      expect(question.duration_ms).toBeGreaterThan(0)
-      if (question.context_frame_id) expect(frameIds.has(question.context_frame_id)).toBe(true)
-      checkBlocks(question.answer.blocks, question.answer.citations)
-      checkSteps(question.steps)
-    }
-    for (const frame of data.frames) {
-      expect(frame.expires_at).toBeNull()
-      for (const url of Object.values(frame.urls)) {
-        expect(url).toMatch(/^\/example\/[a-z0-9/.-]+\.jpg$/)
-        expect(images[`../../public${url}`], url || "").toBeDefined()
-      }
-    }
-    expect(JSON.stringify(data)).not.toMatch(/\/api\/|csrf|token_hash|conversation_id|request_id|provider_request|api_key|"[a-f0-9]{32}"/i)
   })
 })

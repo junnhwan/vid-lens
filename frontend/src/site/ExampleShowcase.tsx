@@ -82,7 +82,7 @@ export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost:
       setArticles(items)
       setSelected(order)
       setSaved(order)
-      setNotice(order.length ? "公开示例已更新。" : "已清空选择。示例页现在只保留两篇内置回放。")
+      setNotice(order.length ? "公开示例已更新。" : "已清空选择。示例页现在没有公开文章。")
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) authLost.current()
       else setError(reason instanceof ApiError ? reason.detail : "公开示例暂时没能保存。")
@@ -99,7 +99,7 @@ export function ExampleShowcase({ api, onAuthLost }: { api: HttpApi; onAuthLost:
 
   return <section className="example-showcase" aria-labelledby="example-showcase-title">
     <h3 id="example-showcase-title">公开示例</h3>
-    <p>勾选后，这篇图文和已经保存的追问会出现在公开示例页。没有勾选时，示例页只显示两篇内置回放。最多 {maxExamples} 篇，可调整已选图文的顺序。</p>
+    <p>勾选后，这篇图文和已经保存的追问会出现在公开示例页。没有勾选时，示例页不展示文章。最多 {maxExamples} 篇，可调整已选图文的顺序。</p>
     {error ? <p className="management-message error" role="alert">{error}</p> : null}
     {notice ? <p className="management-message" role="status">{notice}</p> : null}
     {busy === "load" && articles.length === 0 ? <p className="fine">正在读取已发布图文…</p> : null}

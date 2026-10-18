@@ -19,10 +19,6 @@ export interface ExampleData extends ArticleResponse {
   questions: ExampleQuestion[]
 }
 export type ExampleMode = "article" | "process" | "qa"
-export const exampleChoices = [
-  { id: "workflow", title: "从 Grill 到 Retro", description: "一套 AI 开发工作流，如何把想法变成代码。", meta: "Bilibili · 09:04", tag: "完整工作流", cover: "/example/frame-02.jpg" },
-  { id: "skills", title: "Skills v1.3，三个新技能", description: "从自动实现，到 PR 证据，再到会话复盘。", meta: "YouTube · 14:34", tag: "技能更新", cover: "/example/skills/frame-05.jpg" },
-] as const
 
 export interface CatalogItem {
   id: string
@@ -33,10 +29,10 @@ export interface CatalogItem {
   cover: string
 }
 
-const exampleIdPattern = /^(?:workflow|skills|[a-f0-9]{32})$/
+const exampleIdPattern = /^[a-f0-9]{32}$/
 
 export function exampleArchive(id: string): string {
-  return id === "workflow" || id === "skills" ? `/example/${id}.json` : `/api/v1/examples/${id}`
+  return `/api/v1/examples/${id}`
 }
 
 export function catalogChoice(item: CatalogItem) {
@@ -50,10 +46,10 @@ export function catalogChoice(item: CatalogItem) {
   }
 }
 
-export function exampleRoute(search: string): { id: string; mode: ExampleMode; question: string | null } {
+export function exampleRoute(search: string): { id: string | null; mode: ExampleMode; question: string | null } {
   const query = new URLSearchParams(search)
   const requested = query.get("video") || ""
-  const id = exampleIdPattern.test(requested) ? requested : "workflow"
+  const id = exampleIdPattern.test(requested) ? requested : null
   const view = query.get("view")
   return { id, mode: view === "process" || view === "qa" ? view : "article", question: query.get("question") }
 }

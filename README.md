@@ -22,12 +22,7 @@ VidLens 面向桌面浏览器，把 B 站或 YouTube 视频整理成带章节、
 
 ## 先看真实示例
 
-| 示例 | 可以体验 |
-| --- | --- |
-| [从 Grill 到 Retro · B 站 / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | 图文文章、内容导图、处理回放和问答 |
-| [Skills v1.3，三个新技能 · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | 取证过程、时间引用和画面追问 |
-
-这些是已保存的真实结果；浏览示例不会发起新的模型调用。
+[打开真实示例](https://vidlens.wanjune.qzz.io/example)。页面展示已经发布、并被选中公开的图文。浏览示例不会发起新的模型调用。
 
 ## 实际处理与阅读界面
 

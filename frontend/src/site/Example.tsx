@@ -8,7 +8,7 @@ import { Lightbox } from "../ui/Lightbox"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
 import { prefersReduced } from "../ui/motion"
-import { catalogChoice, exampleArchive, exampleChoices, exampleRoute, replaySteps, replayTimeline, type CatalogItem, type ExampleData, type ExampleMode, type ExampleQuestion } from "./exampleReplay"
+import { catalogChoice, exampleArchive, exampleRoute, replaySteps, replayTimeline, type CatalogItem, type ExampleData, type ExampleMode, type ExampleQuestion } from "./exampleReplay"
 import "../styles/example.css"
 
 type OpenFrame = (frames: Frame[], index: number, origin: HTMLElement) => void
@@ -69,23 +69,38 @@ export function Example() {
   const [retry, setRetry] = useState(0)
   const [lightbox, setLightbox] = useState<{ frames: Frame[]; index: number; origin: HTMLElement | null }>({ frames: [], index: 0, origin: null })
   const [published, setPublished] = useState<ReturnType<typeof catalogChoice>[]>([])
+  const [catalogState, setCatalogState] = useState<"loading" | "ready" | "error">("loading")
+  const [catalogRetry, setCatalogRetry] = useState(0)
   useEffect(() => {
     const abort = new AbortController()
+    setCatalogState("loading")
     void fetch("/api/v1/examples", { signal: abort.signal })
-      .then((response) => response.ok ? response.json() as Promise<{ items?: CatalogItem[] }> : { items: [] })
+      .then((response) => { if (!response.ok) throw new Error(); return response.json() as Promise<{ items?: CatalogItem[] }> })
       .then((body) => {
+        if (abort.signal.aborted) return
         const items = Array.isArray(body.items) ? body.items : []
         setPublished(items.filter((item) => item && /^[a-f0-9]{32}$/.test(item.id) && item.title).map(catalogChoice))
+        setCatalogState("ready")
       })
-      .catch(() => undefined)
+      .catch(() => { if (!abort.signal.aborted) setCatalogState("error") })
     return () => abort.abort()
-  }, [])
+  }, [catalogRetry])
   useEffect(() => {
     const onPop = () => { setRoute(exampleRoute(location.search)); setLightbox({ frames: [], index: 0, origin: null }) }
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
   }, [])
   useEffect(() => {
+    if (route.id || catalogState !== "ready" || published.length === 0) return
+    const query = new URLSearchParams(location.search)
+    query.delete("video")
+    query.set("video", published[0].id)
+    const search = query.toString()
+    history.replaceState(null, "", `/example?${search}`)
+    setRoute(exampleRoute(`?${search}`))
+  }, [catalogState, published, route.id])
+  useEffect(() => {
+    if (!route.id) { setData(null); setError(""); return }
     const abort = new AbortController()
     setError("")
     void fetch(exampleArchive(route.id), { signal: abort.signal })
@@ -118,33 +133,35 @@ export function Example() {
     window.open(url.toString(), "_blank", "noopener,noreferrer")
   }
   const openFrame: OpenFrame = (items, index, origin) => setLightbox({ frames: items, index, origin })
+  const articleId = route.id
   return <>
     <SiteHeader />
     <main className="examples-page">
       <header className="examples-intro"><div><p className="eyebrow">THE READING ROOM <span aria-hidden="true">/</span> 真实示例</p>
         <h1>从一条视频，<span>读到一个答案。</span></h1><p>看图文如何生成，也看看带着问题，能从画面里再读出什么。</p>
-      </div><span className="examples-archive-note"><span aria-hidden="true">◌</span> 真实生成 · 已保存回放</span></header>
-      <div className="example-choices" role="group" aria-label="选择真实示例">{[...exampleChoices, ...published].map((choice, index) =>
+      </div><span className="examples-archive-note"><span aria-hidden="true">◌</span> 真实生成 · 公开图文</span></header>
+      {catalogState === "error" && !route.id ? <div className="example-loading" role="alert"><p>公开示例暂时没能读出来。</p><button type="button" className="btn" onClick={() => setCatalogRetry((value) => value + 1)}>重新读取</button></div>
+        : published.length ? <div className="example-choices" role="group" aria-label="选择真实示例">{published.map((choice, index) =>
         <button key={choice.id} type="button" className="example-choice" aria-pressed={choice.id === route.id} onClick={() => { if (choice.id !== route.id) navigate(choice.id, route.mode) }}>
           <span className="example-cover">{choice.cover ? <img src={choice.cover} alt="" /> : null}<span>{choice.meta}</span></span>
-          <span className="example-choice-copy"><span className="example-choice-kicker">0{index + 1}<span>{choice.tag}</span></span><strong>{choice.title}</strong><span className="example-choice-description">{choice.description}</span><span className="example-choice-state">{choice.id === route.id ? "正在浏览" : "浏览这一篇"} <span aria-hidden="true">{choice.id === route.id ? "●" : "↗"}</span></span></span>
-        </button>)}
-      </div>
-      <section id="example-stage" className="example-stage" aria-label="示例体验">
+          <span className="example-choice-copy"><span className="example-choice-kicker">{String(index + 1).padStart(2, "0")}<span>{choice.tag}</span></span><strong>{choice.title}</strong><span className="example-choice-description">{choice.description}</span><span className="example-choice-state">{choice.id === route.id ? "正在浏览" : "浏览这一篇"} <span aria-hidden="true">{choice.id === route.id ? "●" : "↗"}</span></span></span>
+        </button>)}</div>
+        : <p className="example-loading" role="status">{catalogState === "ready" ? "还没有公开示例。选定已发布的图文之后，会出现在这里。" : "正在读取公开示例…"}</p>}
+      {articleId ? <section id="example-stage" className="example-stage" aria-label="示例体验">
         <nav className="example-modes" aria-label="示例内容"><div>{([["article", "阅读图文"], ["process", "处理回放"], ["qa", "体验问答"]] as const).map(([mode, label], index) =>
-          <button type="button" key={mode} aria-current={route.mode === mode ? "page" : undefined} onClick={() => navigate(route.id, mode)}><span aria-hidden="true">0{index + 1}</span>{label}</button>)}
+          <button type="button" key={mode} aria-current={route.mode === mode ? "page" : undefined} onClick={() => navigate(articleId, mode)}><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{label}</button>)}
         </div><p>浏览与回放不会发起新的生成任务</p></nav>
         {error ? <div className="example-loading" role="alert"><p>{error}</p><button type="button" className="btn" onClick={() => setRetry((value) => value + 1)}>重新读取</button></div>
           : !current ? <p className="example-loading" role="status">正在打开这份真实记录…</p>
           : <div key={current.id}>
-            {route.mode === "article" ? <ExampleArticle data={current} frames={frames} onOpenFrame={openFrame} onCite={cite} onNavigate={(mode, question) => navigate(route.id, mode, question ?? null, true)} /> : null}
-            {route.mode === "process" ? <GenerationReplay data={current} onOpenFrame={openFrame} onRead={() => navigate(route.id, "article", null, true)} /> : null}
+            {route.mode === "article" ? <ExampleArticle data={current} frames={frames} onOpenFrame={openFrame} onCite={cite} onNavigate={(mode, question) => navigate(articleId, mode, question ?? null, true)} /> : null}
+            {route.mode === "process" ? <GenerationReplay data={current} onOpenFrame={openFrame} onRead={() => navigate(articleId, "article", null, true)} /> : null}
             {route.mode === "qa" ? <div className="example-qa-layout"><aside className="example-question-list"><p className="eyebrow">从一个问题开始</p><h2>读完之后，<br />再多问一句。</h2><p>{current.questions.length ? "选一个真实问过的问题，直接读答案，或回看它如何找到依据。" : "这篇还没有保存过追问。图文和画面仍然可以读。"}</p>
-              {current.questions.map((question) => <button type="button" key={question.id} aria-pressed={selectedQuestion?.id === question.id} onClick={() => navigate(route.id, "qa", question.id)}><span>{question.label}</span><strong>{question.question}</strong><span className="example-question-arrow" aria-hidden="true">↗</span></button>)}
+              {current.questions.map((question) => <button type="button" key={question.id} aria-pressed={selectedQuestion?.id === question.id} onClick={() => navigate(articleId, "qa", question.id)}><span>{question.label}</span><strong>{question.question}</strong><span className="example-question-arrow" aria-hidden="true">↗</span></button>)}
               <a href="/" className="example-own-question">带着自己的视频来提问 <span aria-hidden="true">↗</span></a>
             </aside>{selectedQuestion ? <SavedQuestion key={selectedQuestion.id} data={current} question={selectedQuestion} frames={frames} onOpenFrame={openFrame} onCite={cite} /> : <article className="sheet example-saved-question"><p className="example-quality-note">这篇图文还没有保存过追问。</p></article>}</div> : null}
           </div>}
-      </section>
+      </section> : null}
       <footer className="examples-next"><div><p className="eyebrow">YOUR NEXT READ</p><h2>下一条，换成你的视频。</h2><p>贴入链接，带上你的关注点。</p></div><a href="/" className="btn primary">开始自己的解读 <span aria-hidden="true">↗</span></a></footer>
     </main><SiteFooter />
     <Lightbox canAsk={false} readOnly open={lightbox.frames.length > 0} frames={lightbox.frames} index={lightbox.index} origin={lightbox.origin} onClose={() => setLightbox({ frames: [], index: 0, origin: null })} onIndex={(index) => setLightbox((value) => ({ ...value, index }))} onAsk={() => {}} onBroken={() => {}} />

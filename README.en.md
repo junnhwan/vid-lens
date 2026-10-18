@@ -22,12 +22,7 @@ VidLens turns a Bilibili or YouTube video into a desktop reading experience: an 
 
 ## Try a real example
 
-| Example | What you can explore |
-| --- | --- |
-| [From Grill to Retro · Bilibili / 09:04](https://vidlens.wanjune.qzz.io/example?video=workflow) | Illustrated article, content map, processing replay, and Q&A |
-| [Skills v1.3: Three New Skills · YouTube / 14:34](https://vidlens.wanjune.qzz.io/example?video=skills) | Evidence gathering, timestamped citations, and questions about a frame |
-
-These are saved real results. Browsing them makes no new model calls.
+[Open the real examples](https://vidlens.wanjune.qzz.io/example). The page shows published articles selected for public display. Browsing them makes no new model calls.
 
 ## Processing and reading
 
