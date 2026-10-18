@@ -305,6 +305,24 @@ func TestAuthoringSingletonObservationKeepsLiteralTextAndLegacyContract(t *testi
 	}
 }
 
+func TestAuthoringEncodedContainersPreserveContentAndRepairPaths(t *testing.T) {
+	encoded := string(domain.JSON(map[string]any{"version": 1, "sections": `[{"id":"one","blocks":[{"type":"paragraph","origin":"video","text":"原文 [1,2] 不解析。","citation_ids":["t1"]},{"type":"figure","origin":"video","frame_ids":["f1"]}]}]`}))
+	normalized := normalizeAuthoringContainers("save_article_sections", encoded)
+	if normalized == encoded || !strings.Contains(normalized, "原文 [1,2] 不解析") {
+		t.Fatal(normalized)
+	}
+	patched, err := patchAuthoringBody(encoded, []authoringFieldPatch{{Op: "add", Path: "/sections/0/blocks/1/caption", Value: domain.JSON("真实图注")}})
+	if err != nil || !strings.Contains(string(patched), "真实图注") || !strings.Contains(string(patched), "原文 [1,2] 不解析") {
+		t.Fatal(string(patched), err)
+	}
+	if got := normalizeAuthoringContainers("begin_article", `{"sections":"[not complete","title":"[1,2]"}`); got != `{"sections":"[not complete","title":"[1,2]"}` {
+		t.Fatal("invalid container repaired", got)
+	}
+	if got := normalizeAuthoringContainers("repair_article_sections", encoded); got != encoded {
+		t.Fatal("arbitrary patch interpreted")
+	}
+}
+
 func TestAuthoringRawErrorsAreAggregated(t *testing.T) {
 	// The production failure hid four missing captions behind one list error.
 	var raw any

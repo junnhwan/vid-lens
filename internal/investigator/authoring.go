@@ -221,6 +221,44 @@ func normalizeAuthoringObservation(raw string) string {
 	return string(domain.JSON(fields))
 }
 
+// Some compatible providers encode a container as a JSON string. Decode only
+// named container fields in this contract, once, with the exact required root
+// kind. Prose, identities and arbitrary repair values are never interpreted.
+func normalizeAuthoringContainers(name, raw string) string {
+	kinds := map[string]byte{}
+	switch name {
+	case "begin_article":
+		kinds = map[string]byte{"sections": '[', "mind_map": '{', "limitations": '['}
+	case "save_article_sections":
+		kinds["sections"] = '['
+	case "update_article_limitations":
+		kinds["limitations"] = '['
+	default:
+		return raw
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &fields) != nil || fields == nil {
+		return raw
+	}
+	changed := false
+	for key, kind := range kinds {
+		var encoded string
+		value := bytes.TrimSpace(fields[key])
+		if len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &encoded) != nil {
+			continue
+		}
+		decoded := bytes.TrimSpace([]byte(encoded))
+		if len(decoded) > 0 && decoded[0] == kind && json.Valid(decoded) {
+			fields[key] = decoded
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	return string(domain.JSON(fields))
+}
+
 func authoringShapeIssues(raw string) error {
 	var input struct {
 		Sections []struct {

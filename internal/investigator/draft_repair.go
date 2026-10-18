@@ -225,7 +225,11 @@ func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) err
 		if in.ReplacementJSON != nil {
 			return toolError("计划纠正仅允许替换已有字段，不能整篇替换或删除章节与要点。")
 		}
-		raw, err := replaceFields([]byte(parent.Arguments), in.Patches, func(path []string) bool {
+		parentJSON := parent.Arguments
+		if s.authoring() {
+			parentJSON = normalizeAuthoringContainers("begin_article", normalizeAuthoringJSON(parentJSON))
+		}
+		raw, err := replaceFields([]byte(parentJSON), in.Patches, func(path []string) bool {
 			return planRepairAllowed(path) || s.cp.HarnessRevision >= 9 && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids")
 		})
 		if err != nil {

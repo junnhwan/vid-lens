@@ -196,6 +196,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		checked := args.Text
 		if t.session.authoring() {
 			checked = normalizeAuthoringJSON(checked)
+			checked = normalizeAuthoringContainers(t.name, checked)
 			if t.name == "record_observation" {
 				checked = normalizeAuthoringObservation(checked)
 			}
@@ -263,6 +264,7 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 	if t.session.authoring() && args != nil {
 		copy := *args
 		copy.Text = normalizeAuthoringJSON(args.Text)
+		copy.Text = normalizeAuthoringContainers(t.name, copy.Text)
 		if t.name == "record_observation" {
 			copy.Text = normalizeAuthoringObservation(copy.Text)
 		}

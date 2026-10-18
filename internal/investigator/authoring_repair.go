@@ -30,7 +30,8 @@ type authoringRepairInput struct {
 
 func patchAuthoringBody(raw string, patches []authoringFieldPatch) ([]byte, error) {
 	var root any
-	if len(patches) < 1 || len(patches) > 16 || len(domain.JSON(patches)) > 64<<10 || json.Unmarshal([]byte(normalizeAuthoringJSON(raw)), &root) != nil {
+	raw = normalizeAuthoringContainers("save_article_sections", normalizeAuthoringJSON(raw))
+	if len(patches) < 1 || len(patches) > 16 || len(domain.JSON(patches)) > 64<<10 || json.Unmarshal([]byte(raw), &root) != nil {
 		return nil, errors.New("需要合法候选与1–16个字段修复，总计最多64KiB")
 	}
 	for _, p := range patches {
