@@ -67,6 +67,7 @@ The processing, article, and Q&A screenshots below come from a real test of a 10
 - **Read with sources**: Articles include chapters, real video frames, timestamped citations, and a content map. Export as Markdown or an illustrated ZIP.
 - **Ask about evidence**: The Agent searches the video's text and frames for support. Ask about the article, a passage, or a selected frame; answers identify sources and unresolved points.
 - **Follow the work**: See source preparation, investigation, writing, and review progress, then revisit saved steps. When enabled, public webpages can supplement an individual question.
+- **Share a single record**: Create a revocable read-only link to its article and processing history. Private Q&A stays private.
 
 ## Architecture
 
@@ -90,7 +91,7 @@ Requires Go 1.26+, Node.js 22+, PostgreSQL 17, Redis 7, and FFmpeg. The backend 
 
 VidLens announcements and discussions are on [Linux.do](https://linux.do/). Share your experience, ask questions, and discuss ideas there. Technical questions and reproducible bugs can also go to [GitHub Issues](https://github.com/junnhwan/vid-lens/issues).
 
-The site is designed for desktop browsers and does not require registration. Articles and Q&A belong to the current anonymous session. See [privacy and retention](docs/site/privacy.md).
+The site is designed for desktop browsers and does not require registration. Articles and Q&A belong to the current anonymous session. Explicitly sharing a single record grants read-only access to its article and processing history; private Q&A is excluded. See [privacy and retention](docs/site/privacy.md).
 
 ## Star History
 

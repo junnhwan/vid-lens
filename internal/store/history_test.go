@@ -22,7 +22,9 @@ func TestRequestHistoryIsSessionScopedAndPaginated(t *testing.T) {
 		}
 		owned[created.ID] = true
 	}
-	foreign, err := s.CreateRequest(ctx, other, "foreign-history", "https://www.youtube.com/watch?v=defghijklmn", "", false)
+	// Coalesce the source without adding a fourth active job. Ownership must
+	// remain isolated even when both visitors submitted the very same video.
+	foreign, err := s.CreateRequest(ctx, other, "foreign-history", "https://www.youtube.com/watch?v=abcdefghijk", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

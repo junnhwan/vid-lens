@@ -10,6 +10,7 @@ import type {
   Problem,
   RequestView,
   RequestHistoryPage,
+  RequestShare,
   SessionResponse,
   TurnPage,
   TurnView,
@@ -128,6 +129,12 @@ export class HttpApi {
   requestHistory(offset = 0, limit = 20) {
     const query = new URLSearchParams({ offset: String(offset), limit: String(limit) })
     return this.request<RequestHistoryPage>("GET", `/api/v1/requests?${query}`).then((result) => result.body)
+  }
+
+  requestShare(id: string, enabled?: boolean) {
+    const method = enabled === undefined ? "GET" : enabled ? "PUT" : "DELETE"
+    return this.request<RequestShare>(method, `/api/v1/requests/${encodeURIComponent(id)}/share`, method === "PUT" ? {} : undefined)
+      .then((result) => result.body)
   }
 
   cancelRequest(id: string) {

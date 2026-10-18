@@ -12,6 +12,10 @@ Requests, explicit retries, conversations and subsequent turns retain the chosen
 
 Request/article views include a safe `generation_model`, purpose and detail metadata alongside immutable article content. Historical records have `legacy: true` when early Q&A provenance cannot be guaranteed.
 
+## Single-record sharing
+
+The owner can read, enable or revoke `/api/v1/requests/{request}/share` with `GET`, `PUT` or `DELETE`; writes require the anonymous session and CSRF. Enabling is idempotent while the link remains active. Revocation deletes the capability; enabling again creates a fresh URL. `/s/{token}` and `GET /api/v1/shares/{token}` provide read-only article and complete retained generation history, including owned retries. Running shares refresh every 12 seconds. Private questions, answers, Q&A-only frames, session identifiers and private stream cursors are excluded. Every shared image request checks the live capability and an exact article/process frame allowlist, with `no-store` caching. Sharing retains the existing process and image retention limits and does not add the record to the public example list.
+
 ## Public site information
 
 Public `GET /api/v1/site/stats` counts distinct `(anonymous session, article)` completed-reading receipts, not visits or model calls. `PUT /api/v1/site/like` is session-authenticated, CSRF-protected and idempotent; receipts survive session expiry.

@@ -10,10 +10,14 @@ import (
 	"vidlens/internal/domain"
 )
 
-func prepared(t *testing.T, s *Store, owner string) (domain.Request, domain.Claim) {
+func prepared(t *testing.T, s *Store, owner string, urls ...string) (domain.Request, domain.Claim) {
 	t.Helper()
 	ctx := context.Background()
-	a, e := s.CreateRequest(ctx, owner, domain.ID(), "https://youtube.com/watch?v=abcdefghijk", "", false)
+	videoURL := "https://youtube.com/watch?v=abcdefghijk"
+	if len(urls) > 0 {
+		videoURL = urls[0]
+	}
+	a, e := s.CreateRequest(ctx, owner, domain.ID(), videoURL, "", false)
 	if e != nil {
 		t.Fatal(e)
 	}

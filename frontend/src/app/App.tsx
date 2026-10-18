@@ -244,6 +244,7 @@ export function App() {
               onReloadCatalog={() => void visitor.reloadCatalog()}
             />
             <RunView
+              csrf={visitor.mockMode ? undefined : visitor.csrfToken}
               viewRef={runRef}
               active={visitor.phase === "run" || visitor.phase === "holding"}
               view={visitor.request}
@@ -307,6 +308,7 @@ export function App() {
               onRemovePassage={visitor.removePassage}
             />
             <HistoryView
+              csrf={visitor.csrfToken}
               active={showingHistory && visitor.booted}
               viewRef={historyRef}
               onOpen={(id) => navigate(`/r/${encodeURIComponent(id)}`)}

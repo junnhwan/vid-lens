@@ -258,6 +258,20 @@ export interface RequestHistoryPage {
   has_more: boolean
 }
 
+export interface RequestShare {
+  schema_version: number
+  enabled: boolean
+  url: string | null
+  created_at: string | null
+}
+
+export interface SharedRecordResponse {
+  schema_version: number
+  view: Omit<RequestView, "stream">
+  article: ArticleResponse | null
+  steps: ActivityStep[]
+}
+
 export interface TurnActions {
   can_cancel: boolean
   can_retry: boolean

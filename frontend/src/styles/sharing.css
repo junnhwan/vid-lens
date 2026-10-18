@@ -1,0 +1,40 @@
+.share-control { display: inline-flex; flex: none; }
+.share-dialog {
+  width: min(480px, calc(100vw - 64px));
+  padding: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 16px 64px #10241c24;
+}
+.share-dialog::backdrop { background: #13231e55; }
+.share-dialog-head, .share-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.share-dialog-head h2 { margin: 0; font-size: 24px; }
+.share-dialog .text-button { border: 0; padding: 0; background: transparent; color: var(--ink-soft); font-size: 12px; }
+.share-dialog .text-button:hover { color: var(--teal-ink); text-decoration: underline; }
+.share-dialog .text-button:disabled { cursor: wait; opacity: 0.6; }
+.share-dialog .share-actions a { text-decoration: none; }
+.share-dialog p { line-height: 1.8; }
+.share-description { margin: 20px 0; color: var(--ink-soft); font-size: 14px; }
+.share-link-label { display: grid; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+.share-link-label input { width: 100%; box-sizing: border-box; min-width: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); font: inherit; }
+.share-actions { justify-content: flex-start; margin-top: 18px; }
+.share-revoke { margin-top: 22px; color: var(--ink-soft); }
+.share-footnote { margin: 24px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; }
+.share-notice { font-size: 13px; color: var(--teal-ink); }
+.history-list > li { display: flex; align-items: center; gap: 16px; }
+.history-list .history-row { flex: 1; min-width: 0; }
+.shared-page { max-width: 1080px; margin: 0 auto; padding: 38px 32px 80px; }
+.share-banner { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 26px; color: var(--ink-soft); font-size: 12px; }
+.shared-status { color: var(--teal-ink); margin-left: 12px; }
+.shared-sheet { max-width: 900px; margin: 0 auto; }
+.shared-sheet .article-head h1 { font-size: clamp(30px, 3.3vw, 44px); }
+.shared-sheet a.text-button { color: var(--teal-ink); font-size: 12px; text-decoration: none; }
+.shared-process { padding-bottom: 20px; margin-bottom: 26px; border-bottom: 1px solid var(--line); }
+.shared-process summary { cursor: pointer; font-size: 13px; color: var(--ink-soft); padding: 8px 0; }
+.shared-process[open] summary { margin-bottom: 16px; }
+.shared-pending > p { margin-bottom: 28px; color: var(--ink-soft); }
+.shared-state { padding: 56px 0; }
+.shared-state h1 { font-size: 30px; }
+.shared-state p { color: var(--ink-soft); }

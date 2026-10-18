@@ -8,9 +8,11 @@ import { ActivityList } from "./ActivityList"
 import { FrameThumb } from "./FrameThumb"
 import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
+import { ShareControl } from "./ShareControl"
 
 export function RunView({
   view,
+  csrf,
   steps,
   holding,
   reconnecting,
@@ -28,6 +30,7 @@ export function RunView({
   onBroken,
 }: {
   view: RequestView | null
+  csrf?: string
   steps: ActivityStep[]
   holding: boolean
   reconnecting: boolean
@@ -170,6 +173,7 @@ export function RunView({
         {quiet ? <p className="quiet-note">{quiet}</p> : null}
         <PhaseSpine marks={marks} />
         <div className="run-actions">
+          {csrf ? <ShareControl requestId={view?.request.id} csrf={csrf} /> : null}
           <p className="range" hidden={!copy.range}>
             {copy.range}
           </p>

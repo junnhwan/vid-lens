@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import type { RequestHistoryItem } from "../contract/types"
 import { HttpApi } from "../api/http"
+import { ShareControl } from "./ShareControl"
 
 const phaseNames: Record<string, string> = {
   prepare_source: "准备来源",
@@ -55,11 +56,13 @@ export function HistoryView({
   viewRef,
   onOpen,
   onNew,
+  csrf,
 }: {
   active: boolean
   viewRef: RefObject<HTMLElement>
   onOpen: (id: string) => void
   onNew: () => void
+  csrf: string
 }) {
   const [items, setItems] = useState<RequestHistoryItem[]>([])
   const [hasMore, setHasMore] = useState(false)
@@ -172,6 +175,7 @@ export function HistoryView({
                 </span>
                 <span className="history-row-arrow" aria-hidden="true">→</span>
               </a>
+              <ShareControl requestId={item.id} csrf={csrf} />
             </li>
           ))}
         </ol>

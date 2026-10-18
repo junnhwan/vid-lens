@@ -7,6 +7,7 @@ import { BlockView } from "./Blocks"
 import { MindMap } from "./MindMap"
 import { QaPanel } from "./QaPanel"
 import { ExportControl } from "./ExportControl"
+import { ShareControl } from "./ShareControl"
 import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
 import { ArticleOutline } from "./ArticleOutline"
@@ -250,6 +251,7 @@ export function ReadView(props: {
               </h1>
               <div className="article-tools">
                 <p className="meta">{meta}</p>
+                {!props.preview ? <ShareControl requestId={props.view?.request.id} csrf={props.csrf} /> : null}
                 {props.preview ? (
                   <small className="meta">开发预览不生成导出</small>
                 ) : (

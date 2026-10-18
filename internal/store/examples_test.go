@@ -137,7 +137,9 @@ func publishExample(t *testing.T, s *Store, title, section string) publishedExam
 	t.Helper()
 	ctx := context.Background()
 	owner := session(t, s)
-	r, c := prepared(t, s, owner)
+	// Each published example needs its own source: the product correctly reuses
+	// an existing article for another request with the same generation spec.
+	r, c := prepared(t, s, owner, "https://youtube.com/watch?v="+domain.ID()[:11])
 	frameID := domain.ID()
 	storageKey := "frames/" + frameID + ".jpg"
 	frame := domain.Asset{
