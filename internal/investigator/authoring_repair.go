@@ -191,7 +191,7 @@ func (s *session) authoringFacts(ctx context.Context, sections []domain.Section)
 		available += "\n" + strings.Join(o.VisibleFacts, "\n") + "\n" + strings.Join(o.LiteralDetails, "\n")
 	}
 	for _, sec := range sections {
-		for _, b := range sec.Blocks {
+		for blockIndex, b := range sec.Blocks {
 			if b.Origin != "video" {
 				continue
 			}
@@ -200,7 +200,7 @@ func (s *session) authoringFacts(ctx context.Context, sections []domain.Section)
 				n := strconv.Itoa(year)
 				if strings.Contains(text, n+" 年") || strings.Contains(text, n+"年") {
 					if !strings.Contains(available, n) {
-						return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "视频正文补入了来源未明确支持的年份；保留原文相对日期或补充真实取证。", Meta: map[string]any{"path": fmt.Sprintf("/sections/%s/blocks/%s", sec.ID, b.ID), "code": "unsupported_year", "actual": n, "repairable": true}}
+						return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "视频正文补入了来源未明确支持的年份；保留原文相对日期或补充真实取证。", Meta: map[string]any{"path": fmt.Sprintf("/blocks/%d", blockIndex), "code": "unsupported_year", "actual": n, "repairable": true}}
 					}
 				}
 			}

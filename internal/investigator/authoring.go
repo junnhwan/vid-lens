@@ -361,6 +361,9 @@ func normalizeAuthoringBody(raw string) string {
 			if b["type"] == "figure" {
 				if b["layout"] == nil {
 					b["layout"] = "single"
+					if frames, ok := b["frame_ids"].([]any); ok && len(frames) > 1 {
+						b["layout"] = "sequence"
+					}
 				}
 				if b["citation_ids"] == nil {
 					b["citation_ids"] = b["frame_ids"]

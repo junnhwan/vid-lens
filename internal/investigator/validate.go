@@ -188,7 +188,14 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 		if err := s.validateBlock(ctx, b, citations); err != nil {
 			var p *domain.Problem
 			if errors.As(err, &p) {
-				problems = append(problems, &domain.Problem{Status: p.Status, Code: p.Code, Detail: fmt.Sprintf("block %s: %s", b.ID, p.Detail), Meta: map[string]any{"path": fmt.Sprintf("/blocks/%d", i), "block_id": b.ID}})
+				meta := map[string]any{}
+				for key, value := range p.Meta {
+					meta[key] = value
+				}
+				field, _ := meta["path"].(string)
+				meta["path"] = fmt.Sprintf("/blocks/%d", i) + field
+				meta["block_id"] = b.ID
+				problems = append(problems, &domain.Problem{Status: p.Status, Code: p.Code, Detail: fmt.Sprintf("block %s: %s", b.ID, p.Detail), Meta: meta})
 			} else {
 				problems = append(problems, err)
 			}
@@ -284,8 +291,14 @@ func (s *session) validateBlock(ctx context.Context, b domain.Block, citations m
 			ids = append(ids, r.CitationIDs...)
 		}
 	case "figure":
-		if b.Origin != "video" || b.Caption == "" || b.Layout != "single" && b.Layout != "sequence" || b.Layout == "single" && len(b.FrameIDs) != 1 || b.Layout == "sequence" && len(b.FrameIDs) < 2 {
-			return invalid("配图结构无效")
+		if b.Origin != "video" {
+			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "配图必须使用视频来源。", Meta: map[string]any{"path": "/origin", "code": "figure_origin", "actual": b.Origin, "expected": "video"}}
+		}
+		if b.Caption == "" {
+			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "配图需要非空图注。", Meta: map[string]any{"path": "/caption", "code": "missing_caption", "expected": "nonempty caption supported by the actual frame"}}
+		}
+		if b.Layout != "single" && b.Layout != "sequence" || b.Layout == "single" && len(b.FrameIDs) != 1 || b.Layout == "sequence" && len(b.FrameIDs) < 2 {
+			return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "配图布局与帧数不匹配。", Meta: map[string]any{"path": "/layout", "code": "figure_layout", "actual": map[string]any{"layout": b.Layout, "frame_count": len(b.FrameIDs)}, "expected": "single for exactly one frame; sequence for two or more frames in source-time order"}}
 		}
 		framesSeen := map[string]bool{}
 		last := int64(-1)

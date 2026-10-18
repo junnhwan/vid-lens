@@ -3,6 +3,7 @@ package investigator
 import (
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"vidlens/internal/domain"
 )
@@ -23,6 +24,8 @@ func authoringConceptMapIssue(m *domain.MindMap, sections map[string]bool, cause
 		add("/mind_map", "missing_concept_map", nil, "one rooted concept tree with leaves linked to planned sections")
 	} else {
 		ids := map[string]bool{}
+		byID := map[string]domain.MapNode{}
+		parents := map[string]bool{}
 		roots := []string{}
 		for i, n := range m.Nodes {
 			path := fmt.Sprintf("/mind_map/nodes/%d", i)
@@ -30,11 +33,14 @@ func authoringConceptMapIssue(m *domain.MindMap, sections map[string]bool, cause
 				add(path+"/id", "invalid_node_id", n.ID, "a nonempty unique node ID")
 			}
 			ids[n.ID] = true
+			byID[n.ID] = n
 			if n.Label == "" {
 				add(path+"/label", "empty_label", n.Label, "a supported concept label")
 			}
 			if n.ParentID == nil {
 				roots = append(roots, n.ID)
+			} else {
+				parents[*n.ParentID] = true
 			}
 			if n.SectionID != nil && !sections[*n.SectionID] {
 				add(path+"/section_id", "unknown_section", *n.SectionID, map[string]any{"planned_section_ids": sectionIDs, "group_nodes_may_use_null": true})
@@ -44,9 +50,39 @@ func authoringConceptMapIssue(m *domain.MindMap, sections map[string]bool, cause
 			add("/mind_map", "invalid_root", map[string]any{"root_id": m.RootID, "parentless_node_ids": roots}, "exactly one node has parent_id=null and its ID equals root_id; all other nodes have a real parent_id")
 		}
 		for i, n := range m.Nodes {
+			path := fmt.Sprintf("/mind_map/nodes/%d", i)
 			if n.ParentID != nil && !ids[*n.ParentID] {
-				add(fmt.Sprintf("/mind_map/nodes/%d/parent_id", i), "unknown_parent", *n.ParentID, "an existing node ID")
+				add(path+"/parent_id", "unknown_parent", *n.ParentID, "an existing node ID; the root uses null, not an empty string")
 			}
+			if utf8.RuneCountInString(n.Label) > 100 {
+				add(path+"/label", "label_too_long", utf8.RuneCountInString(n.Label), map[string]int{"max_characters": 100})
+			}
+			if !parents[n.ID] && n.ID != m.RootID && n.SectionID == nil {
+				add(path+"/section_id", "missing_leaf_section", nil, map[string]any{"planned_section_ids": sectionIDs})
+			}
+			// The invalid tree may contain a cycle or missing parents. Never
+			// assume the publication validator accepted it while building feedback.
+			visited := map[string]bool{}
+			at, depth := n, 0
+			for at.ParentID != nil {
+				if visited[at.ID] {
+					add(path+"/parent_id", "parent_cycle", *n.ParentID, "a parent chain that reaches root_id without revisiting a node")
+					break
+				}
+				visited[at.ID] = true
+				next, found := byID[*at.ParentID]
+				if !found {
+					break
+				}
+				depth++
+				at = next
+			}
+			if depth > 4 && at.ParentID == nil {
+				add(path+"/parent_id", "depth_exceeded", depth, "at most 4 parent edges to root_id; reparent or merge this overly deep branch")
+			}
+		}
+		if len(m.Nodes) > 80 {
+			add("/mind_map/nodes", "node_count_exceeded", len(m.Nodes), map[string]int{"max": 80})
 		}
 	}
 	if len(issues) == 0 {

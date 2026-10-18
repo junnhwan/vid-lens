@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/domain"
 )
@@ -35,7 +37,7 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 	for _, section := range in.Sections {
 		counts[section.ID]++
 	}
-	for _, section := range in.Sections {
+	for sectionIndex, section := range in.Sections {
 		next, issue := assembleDraftBatch(draft, []domain.Section{section}, catalog)
 		if counts[section.ID] > 1 {
 			issue = fmt.Errorf("重复章节%s；一次只提交一个修订", section.ID)
@@ -47,7 +49,11 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 			issue = s.authoringFacts(ctx, []domain.Section{next.Sections[section.ID]})
 		}
 		if issue != nil {
-			receipt.Rejected = append(receipt.Rejected, map[string]any{"section_id": section.ID, "issue": candidateIssue(issue)})
+			feedback := candidateIssue(issue)
+			if s.authoring() {
+				feedback = authoringSectionIssue(feedback, sectionIndex)
+			}
+			receipt.Rejected = append(receipt.Rejected, map[string]any{"section_id": section.ID, "issue": feedback})
 			continue
 		}
 		draft = next
@@ -64,6 +70,26 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		s.cp.DraftIssue = map[string]any{"code": "chapter_validation", "affected_sections": receipt.Rejected, "repairable": true}
 	}
 	return result, err
+}
+
+// Validation works on one canonical chapter, but repair tools address the
+// original submitted batch. Keep every nested path in that candidate's space.
+func authoringSectionIssue(issue map[string]any, sectionIndex int) map[string]any {
+	out := map[string]any{}
+	for key, value := range issue {
+		out[key] = value
+	}
+	if path, ok := out["path"].(string); ok && strings.HasPrefix(path, "/blocks/") {
+		out["path"] = fmt.Sprintf("/sections/%d", sectionIndex) + path
+	}
+	if children, ok := out["issues"].([]map[string]any); ok {
+		projected := make([]map[string]any, len(children))
+		for i, child := range children {
+			projected[i] = authoringSectionIssue(child, sectionIndex)
+		}
+		out["issues"] = projected
+	}
+	return out
 }
 
 func (s *session) autoFinalize(ctx context.Context) error {
