@@ -426,7 +426,7 @@ func validateLimitations(ls []domain.Limitation, sections map[string]bool, c map
 		if l.Message == "" {
 			return invalid("限制说明为空")
 		}
-		if !slices.Contains([]string{"visual_unclear", "source_conflict", "not_observed", "partial_text", "media_unavailable", "resource_limit"}, l.Code) {
+		if !slices.Contains(domain.LimitationCodes(), l.Code) {
 			return invalid("限制类型无效")
 		}
 		for _, id := range l.SectionIDs {

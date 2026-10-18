@@ -22,6 +22,30 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 		return nil, err
 	}
 	projectBodySchema(root)
+	if t.session.authoring() {
+		authoringBodySchema(root)
+		if t.name == "inspect_video_window" {
+			props := root["properties"].(map[string]any)
+			window := props["window"].(map[string]any)
+			window["description"] = "New pixels: 0 < end_ms-start_ms <= 60000, within source_duration_ms. count 1-6. Use one concrete question. For longer gaps inspect a smaller relevant window, then record observations before another inspection."
+			fields := window["properties"].(map[string]any)
+			fields["count"].(map[string]any)["minimum"] = 1
+			fields["count"].(map[string]any)["maximum"] = 6
+			fields["mode"].(map[string]any)["enum"] = []string{"overview", "detail", "sequence"}
+		}
+		if t.name == "begin_article" {
+			if p, ok := root["properties"].(map[string]any); ok {
+				sections := p["sections"].(map[string]any)["items"].(map[string]any)
+				fields := sections["properties"].(map[string]any)
+				delete(fields, "start_ms")
+				delete(fields, "end_ms")
+				sections["required"] = []string{"id", "title", "key_points", "evidence_ids"}
+			}
+		}
+		if t.name == "save_article_sections" {
+			root["properties"].(map[string]any)["sections"].(map[string]any)["items"].(map[string]any)["required"] = []string{"id", "blocks"}
+		}
+	}
 	if props, ok := root["properties"].(map[string]any); ok {
 		props["activity_title"] = map[string]any{"type": "string", "maxLength": 60, "description": "Optional short public action title. Never include private reasoning, credentials or unverified conclusions."}
 		if t.name == "repair_article_plan" {
@@ -31,6 +55,10 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 			props["sections"].(map[string]any)["maxItems"] = 12
 			props["sections"].(map[string]any)["minItems"] = 1
 			props["sections"].(map[string]any)["description"] = "Write 1-12 pending chapters in ONE call, sized to the output budget; at most 128KiB. Valid chapters are saved even when another chapter fails. Follow accepted/rejected IDs and latest version."
+			if t.session.authoring() {
+				props["sections"].(map[string]any)["maxItems"] = maxPlanSections
+				props["sections"].(map[string]any)["description"] = "Write ALL pending chapters in ONE complete call when they fit output_tokens and 128KiB. Up to 40 chapters; split only for actual output size. Preserve required facts and explanation. Accepted chapters remain durable."
+			}
 		}
 	}
 	raw, err := json.Marshal(root)
@@ -48,6 +76,9 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 	}
 	if t.name == "save_article_sections" {
 		out.Desc = "Save 1-12 planned chapters in one bounded call (128KiB maximum). Choose a batch that fits the output budget. Valid chapters are retained independently. When all chapters are saved the server validates and publishes automatically; no model-only final submit is needed."
+		if t.session.authoring() {
+			out.Desc = "Write all pending chapters in one complete call when the output budget allows (1-40 chapters, 128KiB). Preserve necessary detail and figures. Valid chapters are saved independently. Server validates and publishes the complete article automatically."
+		}
 	}
 	return &out, nil
 }

@@ -218,6 +218,10 @@ func (s *session) initial(ctx context.Context) error {
 			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
 		}
 	}
+	if newLayout && s.turn == nil && s.spec.DetailPolicy != nil && s.spec.DetailPolicy.Revision == authoringPolicy {
+		s.cp.HarnessRevision = 12
+		instruction = authoringInstructions(s.spec.DetailPolicy.Instruction)
+	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}

@@ -98,12 +98,20 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 		if err != nil {
 			return nil, err
 		}
-		planErr := validateSectionPlan(in.Sections, s.snapshot.DurationMS, s.cp.HarnessRevision > 0)
+		if s.authoring() {
+			draft.Plan = deriveAuthoringRanges(in.Sections, catalog, s.snapshot.DurationMS)
+		}
+		planErr := validateSectionPlan(draft.Plan, s.snapshot.DurationMS, s.cp.HarnessRevision > 0)
 		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
-			planErr = errors.Join(planErr, validatePlanFacts(in.Sections, catalog))
+			planErr = errors.Join(planErr, validatePlanFacts(draft.Plan, catalog))
 		}
 		if planErr != nil {
 			return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(planErr))))
+		}
+		if s.authoring() {
+			if err = authoringLimitationIssues(draft.Limitations, ids, catalog); err != nil {
+				return s.draftFeedback(ctx, string(domain.JSON(candidateIssue(err))))
+			}
 		}
 		if err = resolveDraftCitations(&draft, catalog); err != nil {
 			return s.draftFeedback(ctx, err.Error())
@@ -373,7 +381,7 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 	if err = json.Unmarshal(saved.Data, &draft); err != nil {
 		return nil, err
 	}
-	return textResult(draftSummary(saved.Version, draft)), nil
+	return textResult(s.draftState(saved.Version, draft)), nil
 }
 func (s *session) writeDraft(ctx context.Context, args any, version int, draft articleDraft, title string) (*schema.ToolResult, error) {
 	return s.step(ctx, title, "compose", nil, func() (any, []string, error) {
@@ -398,7 +406,7 @@ func (s *session) writeDraft(ctx context.Context, args any, version int, draft a
 		s.cp.DraftCorrection = false
 		s.cp.DraftIssue = nil
 		s.cp.LastCandidate = nil
-		return draftSummary(saved.Version, draft), nil, nil
+		return s.draftState(saved.Version, draft), nil, nil
 	})
 }
 func draftSummary(version int, draft articleDraft) map[string]any {
@@ -706,6 +714,9 @@ func (s *session) resumeDraft(ctx context.Context) error {
 			}
 		}
 		msgs[2].Content += "\n解读详细程度：" + spec.DetailLevel
+	}
+	if s.authoring() && spec.DetailPolicy != nil {
+		msgs[0].Content = authoringInstructions(spec.DetailPolicy.Instruction)
 	}
 	if ids := s.unobserved(ctx); len(ids) > 0 {
 		parts, err := s.imageInput(ctx, ids, "resumed-unobserved")

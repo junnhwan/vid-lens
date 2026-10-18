@@ -225,7 +225,11 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 				return nil, err
 			}
 		}
-		base, err := s.engine.baseModel(ctx, p)
+		baseCtx := ctx
+		if s.authoring() {
+			baseCtx = context.WithValue(ctx, nativeStrictKey{}, true)
+		}
+		base, err := s.engine.baseModel(baseCtx, p)
 		if err == nil && activeTools != nil {
 			base, err = base.WithTools(activeTools)
 		}

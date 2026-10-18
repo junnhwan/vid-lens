@@ -135,6 +135,11 @@ func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) 
 		return err
 	}
 	if s.turn == nil && s.cp.LayoutVersion == draftLayout {
+		if s.authoring() {
+			if err := s.authoringRepairTool(add); err != nil {
+				return err
+			}
+		}
 		if s.cp.HarnessRevision >= 3 {
 			if err := s.planRepairTool(add); err != nil {
 				return err

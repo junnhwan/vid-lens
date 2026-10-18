@@ -180,7 +180,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	var draftContext *schema.Message
 	freshMessages := []*schema.Message{}
 	for _, x := range state.Messages {
-		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" && x.Name != "vidlens_answer_references" {
+		if x.Name != "vidlens_draft_state" && x.Name != "vidlens_evidence_capsule" && x.Name != "vidlens_readiness" && x.Name != "vidlens_answer_references" && x.Name != "vidlens_last_feedback" {
 			freshMessages = append(freshMessages, x)
 		}
 	}
@@ -199,8 +199,22 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		if err != nil {
 			return ctx, nil, err
 		}
-		state.Messages = projectDraftHistory(state.Messages)
-		data := map[string]any{"draft": draftSummary(saved, draft), "citation_catalog": catalogHints(catalog)}
+		if s.authoring() {
+			state.Messages = projectAuthoringHistory(state.Messages)
+		} else {
+			state.Messages = projectDraftHistory(state.Messages)
+		}
+		hints := catalogHints(catalog)
+		if s.authoring() {
+			for id, c := range catalog {
+				if c.Kind == "video_text" {
+					hint := hints[id].(map[string]any)
+					hint["text_origin"] = c.TextOrigin
+					hint["sentence_timing_known"] = c.TextOrigin == "platform_subtitles" || c.TextOrigin == "platform_subtitle"
+				}
+			}
+		}
+		data := map[string]any{"draft": s.draftState(saved, draft), "citation_catalog": hints}
 		if s.cp.HarnessRevision >= 7 {
 			output := s.profile.MaxOutputTokens
 			if s.spec.DetailPolicy != nil {
@@ -211,6 +225,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 				perChapter = 2200
 			}
 			data["batch_guidance"] = map[string]any{"output_tokens": output, "recommended_chapters": min(12, max(1, (output-1000)/perChapter)), "max_chapters": 12, "max_bytes": 128 << 10, "rule": "Prefer fewer complete batches; estimate actual content size. Preserve required details, leave room for closing JSON. Save valid chapters independently. Server validates and publishes automatically when complete."}
+			if s.authoring() {
+				data["batch_guidance"] = map[string]any{"base_output_tokens": output, "max_chapters": maxPlanSections, "max_bytes": 128 << 10, "rule": "Write ALL pending chapters in ONE complete call when the actual output size fits. No fixed chapter quota. Dense sources may receive more output reservation within provider/context limits. Split only when necessary; preserve required detail, figures and closing JSON. Server validates and publishes automatically."}
+			}
 		}
 		data["source_duration_ms"] = s.snapshot.DurationMS
 		data["citation_time_rule"] = "Citation catalog ranges are intersections of original source windows with actual media. Raw platform cue end times can extend beyond the media. Preserve source text; the full-video plan ends at source_duration_ms, not the last cue end."

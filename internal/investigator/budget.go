@@ -101,6 +101,25 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			b.ImageCount++
 		}
 	}
+	if s.authoring() && b.Phase == "compose" {
+		// A dense/long source may need more than the normal 32K writer budget.
+		// Estimate from original text, never from accumulated repair history.
+		factor := 2
+		if s.spec.DetailLevel == "detailed" {
+			factor = 3
+		}
+		if s.spec.DetailLevel == "concise" {
+			factor = 1
+		}
+		target := estimateTextTokens(domain.JSON(s.transcript))*factor + 4000
+		capacity := min(s.profile.MaxOutputTokens, 65536)
+		if b.ContextTokens > 0 {
+			capacity = min(capacity, b.ContextTokens-b.EstimatedTextTokens-b.EstimatedImageTokens-b.SafetyTokens)
+		}
+		if target > b.OutputTokens && capacity > b.OutputTokens {
+			b.OutputTokens = min(target, capacity)
+		}
+	}
 	return b, b.check(s.profile)
 }
 func (b callBudget) check(p config.Profile) error {

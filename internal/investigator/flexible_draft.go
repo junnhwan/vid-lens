@@ -16,7 +16,14 @@ type batchReceipt struct {
 }
 
 func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, version int, draft articleDraft) (*schema.ToolResult, error) {
-	if len(in.Sections) < 1 || len(in.Sections) > 12 || len(domain.JSON(in.Sections)) > 128<<10 {
+	maximum := 12
+	if s.authoring() {
+		maximum = maxPlanSections
+	}
+	if len(in.Sections) < 1 || len(in.Sections) > maximum || len(domain.JSON(in.Sections)) > 128<<10 {
+		if s.authoring() {
+			return s.draftFeedback(ctx, "每批1–40章、最多128KiB；按输出预算完整成文，必要时才拆批。")
+		}
 		return s.draftFeedback(ctx, "每批保存1–12章、最多128KiB；按当前输出预算选择完整批次，已有章节保持。")
 	}
 	catalog, err := s.citationCatalog(ctx)
@@ -35,6 +42,9 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		}
 		if issue == nil {
 			issue = s.validateBlocks(ctx, next.Sections[section.ID].Blocks, next.Citations, true)
+		}
+		if issue == nil && s.authoring() {
+			issue = s.authoringFacts(ctx, []domain.Section{next.Sections[section.ID]})
 		}
 		if issue != nil {
 			receipt.Rejected = append(receipt.Rejected, map[string]any{"section_id": section.ID, "issue": candidateIssue(issue)})

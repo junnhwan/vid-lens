@@ -4,6 +4,10 @@ import "strings"
 
 const PurposeCharsMax = 500
 
+func LimitationCodes() []string {
+	return []string{"visual_unclear", "source_conflict", "not_observed", "partial_text", "media_unavailable", "resource_limit"}
+}
+
 type GenerationModel struct {
 	ID              string `json:"id"`
 	RevisionID      string `json:"revision_id"`
@@ -49,7 +53,7 @@ type DetailPolicy struct {
 }
 
 func InterpretationPolicy(level string) (DetailPolicy, bool) {
-	p := DetailPolicy{Revision: "interpretation-2026-10-17-v7", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 8192, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048}
+	p := DetailPolicy{Revision: "interpretation-2026-10-18-v9", ContentPlan: true, NoProgressLimit: 6, RepairLimit: 3, FinalCallsReserved: 4, InvestigationOutputTokens: 16384, CompositionOutputTokens: 32768, RepairOutputTokens: 16384, FinalOutputTokens: 2048}
 	switch level {
 	case "concise":
 		p.OptionalInspections = 2

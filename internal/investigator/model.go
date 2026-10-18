@@ -88,14 +88,22 @@ func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed 
 	if err != nil {
 		return nil, domain.Err(503, "MODEL_UNAVAILABLE", "模型端点或代理不符合服务器出站策略。")
 	}
+	strict, _ := ctx.Value(nativeStrictKey{}).(bool)
 	client.Transport = safeTransport{client.Transport}
+	if strict && nativeStrictEndpoint(p.ModelBaseURL) {
+		client.Transport = strictTransport{client.Transport}
+	}
 	return newModelWithClient(ctx, p, key, client)
 }
 
 func newModelWithClient(ctx context.Context, p config.Profile, key string, client *http.Client) (model.ToolCallingChatModel, error) {
 	extra := map[string]any{}
 	if p.ModelDisableThinking {
-		extra["enable_thinking"] = false
+		if strings.Contains(strings.ToLower(p.ModelName), "deepseek") {
+			extra["thinking"] = map[string]string{"type": "disabled"}
+		} else {
+			extra["enable_thinking"] = false
+		}
 	}
 	cfg := &openai.ChatModelConfig{ExtraFields: extra, BaseURL: strings.TrimRight(p.ModelBaseURL, "/"), Model: p.ModelName, APIKey: key, HTTPClient: client, MaxTokens: domain.Ptr(p.MaxOutputTokens), Temperature: domain.Ptr(float32(0.2))}
 	if reasoningGPT(p.ModelName) {

@@ -29,6 +29,9 @@ type usageReport struct {
 	Total             tokenMetric `json:"total"`
 	CacheRead         tokenMetric `json:"cache_read"`
 	CacheWrite        tokenMetric `json:"cache_write"`
+	Reasoning         tokenMetric `json:"reasoning"`
+	RequestedOutput   *int64      `json:"requested_output_tokens,omitempty"`
+	ThinkingRequest   string      `json:"thinking_request"`
 	StreamStatus      string      `json:"stream_status"`
 	RequestID         string      `json:"request_id,omitempty"`
 	ResponseID        string      `json:"response_id,omitempty"`
@@ -63,7 +66,7 @@ func newUsageObserver(layout, policy string, flush func(usageReport)) *usageObse
 		policy = "provider_default"
 	}
 	u := tokenMetric{Status: "unknown"}
-	return &usageObserver{start: time.Now(), report: usageReport{StartedAt: time.Now().UTC(), Schema: "openai_compatible", Input: u, Output: u, Total: u, CacheRead: u, CacheWrite: u, StreamStatus: "incomplete", Layout: layout, CachePolicy: policy, CostReporting: "unknown", ObservationStatus: "observed"}, flush: flush}
+	return &usageObserver{start: time.Now(), report: usageReport{StartedAt: time.Now().UTC(), Schema: "openai_compatible", Input: u, Output: u, Total: u, CacheRead: u, CacheWrite: u, Reasoning: u, ThinkingRequest: "provider_default", StreamStatus: "incomplete", Layout: layout, CachePolicy: policy, CostReporting: "unknown", ObservationStatus: "observed"}, flush: flush}
 }
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func (o *usageObserver) wire(req *http.Request) {
@@ -80,13 +83,32 @@ func (o *usageObserver) wire(req *http.Request) {
 		return
 	}
 	var body struct {
-		Messages []json.RawMessage `json:"messages"`
-		Tools    json.RawMessage   `json:"tools"`
+		Messages            []json.RawMessage `json:"messages"`
+		Tools               json.RawMessage   `json:"tools"`
+		MaxTokens           *int64            `json:"max_tokens"`
+		MaxCompletionTokens *int64            `json:"max_completion_tokens"`
+		Thinking            struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+		EnableThinking *bool `json:"enable_thinking"`
 	}
 	if json.Unmarshal(b, &body) != nil {
 		return
 	}
 	o.report.ToolsHash = digest(body.Tools)
+	o.report.RequestedOutput = body.MaxTokens
+	if body.MaxCompletionTokens != nil {
+		o.report.RequestedOutput = body.MaxCompletionTokens
+	}
+	if body.Thinking.Type == "enabled" || body.Thinking.Type == "disabled" {
+		o.report.ThinkingRequest = body.Thinking.Type
+	} else if body.EnableThinking != nil {
+		if *body.EnableThinking {
+			o.report.ThinkingRequest = "enabled"
+		} else {
+			o.report.ThinkingRequest = "disabled"
+		}
+	}
 	// Layout v2 has exactly three frozen messages. Legacy checkpoints are
 	// explicitly identified and do not claim a stable source prefix.
 	if (o.report.Layout == "source-context-v2" || o.report.Layout == draftLayout) && len(body.Messages) >= 3 {
@@ -196,6 +218,7 @@ func (o *usageObserver) parse(b []byte) {
 	// Usage frames are cumulative snapshots. Replace, never sum repeated frames.
 	o.report.Input = metric(frame.Usage, "prompt_tokens", "input_tokens")
 	o.report.Output = metric(frame.Usage, "completion_tokens", "output_tokens")
+	o.report.Reasoning = metric(frame.Usage, "completion_tokens_details.reasoning_tokens", "output_tokens_details.reasoning_tokens", "reasoning_tokens")
 	o.report.Total = metric(frame.Usage, "total_tokens")
 	o.report.CacheRead = metric(frame.Usage, "prompt_tokens_details.cached_tokens", "input_tokens_details.cached_tokens", "cache_read_input_tokens")
 	o.report.CacheWrite = metric(frame.Usage, "cache_creation_input_tokens", "prompt_tokens_details.cache_creation_input_tokens", "prompt_tokens_details.cache_creation_tokens", "cache_creation_tokens")

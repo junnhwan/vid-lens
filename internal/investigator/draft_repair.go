@@ -126,7 +126,7 @@ func (s *session) structuredDraftFeedback(ctx context.Context, message string) (
 	if used >= s.repairLimit() {
 		return nil, s.endDraftCorrection(ctx)
 	}
-	v := draftSummary(version, draft)
+	v := s.draftState(version, draft)
 	v["error"] = issue
 	v["correct_arguments_and_try_again"] = true
 	v["repair_attempts_used"] = used
@@ -226,7 +226,7 @@ func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) err
 			return toolError("计划纠正仅允许替换已有字段，不能整篇替换或删除章节与要点。")
 		}
 		raw, err := replaceFields([]byte(parent.Arguments), in.Patches, func(path []string) bool {
-			return planRepairAllowed(path) || s.cp.HarnessRevision >= 9 && len(path) > 0 && path[0] == "mind_map"
+			return planRepairAllowed(path) || s.cp.HarnessRevision >= 9 && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids")
 		})
 		if err != nil {
 			return toolError(err.Error())

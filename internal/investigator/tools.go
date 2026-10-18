@@ -181,6 +181,8 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &candidatePatchInput{}
 	case "repair_article_plan":
 		target = &candidatePatchInput{}
+	case "repair_article_sections":
+		target = &authoringRepairInput{}
 	}
 	var err error
 	if args != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
@@ -192,6 +194,15 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		err = errors.New("工具参数为空")
 	} else if target != nil {
 		checked := args.Text
+		if t.session.authoring() {
+			checked = normalizeAuthoringJSON(checked)
+			if t.name == "save_article_sections" {
+				err = authoringShapeIssues(checked)
+				if err == nil {
+					checked = normalizeAuthoringBody(checked)
+				}
+			}
+		}
 		if t.session != nil && t.session.cp.HarnessRevision >= 7 {
 			var metadata map[string]json.RawMessage
 			if json.Unmarshal([]byte(checked), &metadata) == nil && metadata != nil {
@@ -206,7 +217,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 				}
 			}
 		}
-		err = json.Unmarshal([]byte(checked), target)
+		if err == nil {
+			err = json.Unmarshal([]byte(checked), target)
+		}
 		if err == nil && t.session != nil && t.session.cp.HarnessRevision > 0 {
 			d := json.NewDecoder(bytes.NewBufferString(checked))
 			d.DisallowUnknownFields()
@@ -243,7 +256,16 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return toolError("window 与 frame_ids 只能选择一种：新画面使用 window 对象，重新加载已有图片使用 frame_ids。")
 		}
 	}
-	result, err = t.EnhancedInvokableTool.InvokableRun(ctx, args, opts...)
+	delegated := args
+	if t.session.authoring() && args != nil {
+		copy := *args
+		copy.Text = normalizeAuthoringJSON(args.Text)
+		if t.name == "save_article_sections" {
+			copy.Text = normalizeAuthoringBody(copy.Text)
+		}
+		delegated = &copy
+	}
+	result, err = t.EnhancedInvokableTool.InvokableRun(ctx, delegated, opts...)
 	if err != nil && isCandidateTool(t.name) && t.session != nil && t.session.engine != nil {
 		var candidate *candidateError
 		if errors.As(err, &candidate) {
