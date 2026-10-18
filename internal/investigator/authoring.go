@@ -194,6 +194,33 @@ func normalizeAuthoringJSON(raw string) string {
 	return raw
 }
 
+// A singleton prose field has an unambiguous array representation. Do not
+// split, rewrite, truncate, or coerce IDs/statuses or other JSON value types.
+func normalizeAuthoringObservation(raw string) string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &fields) != nil || fields == nil {
+		return raw
+	}
+	changed := false
+	for _, key := range []string{"visible_facts", "literal_details", "inferences", "conflicts", "unresolved"} {
+		var text string
+		value := bytes.TrimSpace(fields[key])
+		if len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &text) != nil {
+			continue
+		}
+		items := []string{}
+		if text != "" {
+			items = append(items, text)
+		}
+		fields[key] = domain.JSON(items)
+		changed = true
+	}
+	if !changed {
+		return raw
+	}
+	return string(domain.JSON(fields))
+}
+
 func authoringShapeIssues(raw string) error {
 	var input struct {
 		Sections []struct {

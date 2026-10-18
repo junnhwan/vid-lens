@@ -276,6 +276,35 @@ func TestAuthoringShallowBodyPreservesWordsMarksAndReferences(t *testing.T) {
 	}
 }
 
+func TestAuthoringSingletonObservationKeepsLiteralTextAndLegacyContract(t *testing.T) {
+	calls := 0
+	base, _ := utils.InferEnhancedTool("record_observation", "test", func(_ context.Context, in pacedObservation) (*schema.ToolResult, error) {
+		calls++
+		if len(in.VisibleFacts) != 1 || in.VisibleFacts[0] != "屏幕原文 59%，没有拆分或改写。" || len(in.Conflicts) != 0 || in.Status != "supported" || in.FrameIDs[0] != "real-frame" {
+			t.Fatal(in)
+		}
+		return textResult(map[string]bool{"saved": true}), nil
+	})
+	raw := `{"question":"图中文字","question_id":"q","inspection_id":"overview","status":"supported","critical":true,"retain_for_comparison":false,"frame_ids":["real-frame"],"visible_facts":"屏幕原文 59%，没有拆分或改写。","literal_details":[],"inferences":[],"conflicts":"","unresolved":[]}`
+	checked := &argumentCheckedTool{EnhancedInvokableTool: base, name: "record_observation", session: &session{cp: checkpoint{HarnessRevision: 12}}}
+	if _, err := checked.InvokableRun(context.Background(), &schema.ToolArgument{Text: raw}); err != nil || calls != 1 {
+		t.Fatal(err)
+	}
+	checked.session.cp.HarnessRevision = 11
+	_, _ = checked.InvokableRun(context.Background(), &schema.ToolArgument{Text: raw})
+	if calls != 1 {
+		t.Fatal("legacy frozen contract changed")
+	}
+	var v map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(normalizeAuthoringObservation(strings.Replace(raw, `"frame_ids":["real-frame"]`, `"frame_ids":"real-frame"`, 1))), &v)
+	if string(v["frame_ids"]) != `"real-frame"` {
+		t.Fatal("source identity coerced")
+	}
+	if got := normalizeAuthoringObservation(`{"visible_facts":null,"inferences":42}`); got != `{"visible_facts":null,"inferences":42}` {
+		t.Fatal("non-string field coerced", got)
+	}
+}
+
 func TestAuthoringRawErrorsAreAggregated(t *testing.T) {
 	// The production failure hid four missing captions behind one list error.
 	var raw any
