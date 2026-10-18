@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 
 const REPO = "junnhwan/vid-lens"
 const CACHE = "vidlens-repo-card"
@@ -52,7 +52,7 @@ function loadRepo() {
   return pending
 }
 
-export function RepoPeek({ children }: { children: ReactNode }) {
+function useRepo() {
   const [info, setInfo] = useState<RepoInfo | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -66,9 +66,31 @@ export function RepoPeek({ children }: { children: ReactNode }) {
       live = false
     }
   }, [])
+  return { info, failed }
+}
+
+export function StarLink() {
+  const { info, failed } = useRepo()
+  const count = info ? info.stars.toLocaleString("zh-Hans") : ""
   return (
     <span className="repo-peek">
-      {children}
+      <a
+        className="star-link"
+        href="https://github.com/junnhwan/vid-lens"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={count ? `在 GitHub 为 VidLens 加星，目前 ${count} 颗` : "在 GitHub 为 VidLens 加星"}
+      >
+        <span className="star-seal" aria-hidden="true">
+          <svg viewBox="0 0 16 16">
+            <path d="M8 1.2l1.72 3.72 4.06.46-3.04 2.78.84 4.02L8 10.22l-3.58 2.06.84-4.02L2.22 5.38l4.06-.46L8 1.2z" />
+          </svg>
+        </span>
+        <span className="star-copy">
+          <strong>给仓库加星</strong>
+          <small>{count ? `${count} 颗星` : failed ? "打开 GitHub" : "读取星标"}</small>
+        </span>
+      </a>
       <span className="repo-card" aria-hidden="true">
         <span className="repo-kicker">GitHub</span>
         <strong>junnhwan/vid-lens</strong>

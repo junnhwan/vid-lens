@@ -6,9 +6,12 @@ import { DiskMeter } from "./DiskMeter"
 import { LikeButton } from "./LikeButton"
 import { ChoiceMenu } from "./ChoiceMenu"
 import { Lens } from "./Lens"
+import { LectureShelf } from "./LectureShelf"
+import type { Lecture } from "./lectures"
 import { RecentReadings } from "./RecentReadings"
-import { RepoPeek } from "./RepoPeek"
+import { StarLink } from "./RepoPeek"
 import { useRise } from "./countUp"
+import { prefersReduced } from "./motion"
 
 export function EntryView({
   link,
@@ -91,6 +94,16 @@ export function EntryView({
   }, [])
   const model = catalog?.models.find((m) => m.id === selected)
   const readings = useRise(stats?.completed_readings, active)
+  function fillLecture(item: Lecture) {
+    onLink(item.url)
+    onPurpose(item.purpose)
+    setExpanded(true)
+    window.requestAnimationFrame(() => {
+      const form = document.getElementById("link")?.closest("form")
+      document.getElementById("link")?.focus({ preventScroll: true })
+      form?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "center" })
+    })
+  }
   return (
     <section className="view-input" ref={viewRef}>
       <div className="entry editorial-entry">
@@ -239,35 +252,6 @@ export function EntryView({
             ) : null}
           </form>
           <RecentReadings active={active} onOpen={onOpenRecord} onHistory={onHistory} />
-          <div className="entry-foot">
-            <a className="sample-link" href="/example">
-              查看真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
-            </a>
-            <p className="entry-note">单条或单个分 P。</p>
-          </div>
-          <div className="proof">
-            <p className="census">
-              {readings !== undefined ? (
-                <>
-                  <strong>{readings.toLocaleString("zh-Hans")}</strong>
-                  <span>次解读</span>
-                </>
-              ) : (
-                <span>从一条视频开始</span>
-              )}
-            </p>
-            <div className="thanks">
-              <LikeButton count={stats?.likes} ready={ready} csrf={csrf} active={active} />
-              <RepoPeek>
-                <a className="star-link" href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M8 1.35l1.62 3.28 3.62.53-2.62 2.55.62 3.6L8 9.62 4.76 11.3l.62-3.6L2.76 5.16l3.62-.53L8 1.35z" />
-                  </svg>
-                  GitHub Star
-                </a>
-              </RepoPeek>
-            </div>
-          </div>
         </div>
         <aside
           className={`entry-stage entry-art abstract-stage ${active ? "is-live" : ""}`}
@@ -295,10 +279,33 @@ export function EntryView({
               <span>循着画面，找到理解的焦点。</span>
               <span>01 — ∞</span>
             </div>
+            <div className="stage-rail">
+              <div className="stage-rail-head">
+                <p className="census">
+                  {readings !== undefined ? (
+                    <>
+                      <strong>{readings.toLocaleString("zh-Hans")}</strong>
+                      <span>次解读</span>
+                    </>
+                  ) : (
+                    <span>从一条视频开始</span>
+                  )}
+                </p>
+                <a className="sample-link" href="/example">
+                  查看真实示例 <span className="nudge nudge-forward" aria-hidden="true">→</span>
+                </a>
+              </div>
+              <div className="thanks">
+                <LikeButton count={stats?.likes} ready={ready} csrf={csrf} active={active} />
+                <StarLink />
+              </div>
+              <p className="entry-note">单条或单个分 P。</p>
+            </div>
             <DiskMeter capacity={capacity} state={capacityState} />
           </div>
         </aside>
       </div>
+      <LectureShelf link={link} onPick={fillLecture} />
     </section>
   )
 }
