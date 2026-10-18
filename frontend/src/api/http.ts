@@ -46,7 +46,7 @@ export class HttpApi {
     if (options.csrf) this.csrfToken = options.csrf()
   }
 
-  async request<T>(method: string, path: string, body?: unknown, key?: string): Promise<{ status: number; headers: Headers; body: T }> {
+  async request<T>(method: string, path: string, body?: unknown, key?: string, signal?: AbortSignal): Promise<{ status: number; headers: Headers; body: T }> {
     let response: Response
     try {
       response = await this.fetchImpl(path, {
@@ -60,6 +60,7 @@ export class HttpApi {
           ...(key ? { "idempotency-key": key } : {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        ...(signal ? { signal } : {}),
       })
     } catch {
       throw new NetworkError()

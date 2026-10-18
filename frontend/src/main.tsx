@@ -5,6 +5,7 @@ import "./styles/product.css"
 import "./styles/site.css"
 import "./styles/reading.css"
 import "./styles/sharing.css"
+import "./styles/announcement.css"
 
 // Apply this before React renders shared content or requests its images.
 if (location.pathname.startsWith("/s/")) {

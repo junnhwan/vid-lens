@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import { NetworkSettings } from "./NetworkSettings"
-import { ExecutionSettings } from "./ExecutionSettings"
 import { ExampleShowcase } from "./ExampleShowcase"
 import { AnnouncementSettings } from "./AnnouncementSettings"
 import { VideoStorage } from "./VideoStorage"
@@ -120,7 +119,6 @@ const sections = [
   ["models", "模型"],
   ["providers", "供应商"],
   ["diagnostics", "缓存与用量"],
-  ["execution", "任务与队列"],
   ["network", "联网搜索"],
   ["videos", "视频与存储"],
   ["examples", "公开示例"],
@@ -815,8 +813,6 @@ export function Manage() {
             <div className="desk-stage" key={section}>
             {section === "announcement" ? (
               <AnnouncementSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
-            ) : section === "execution" ? (
-              <ExecutionSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "videos" ? (
               <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
             ) : section === "examples" ? (

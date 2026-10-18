@@ -3,11 +3,12 @@ import { Docs } from "./Docs"
 import { Example } from "./Example"
 import { Manage } from "./Manage"
 import { SharedRecord } from "./SharedRecord"
+import { VisitorAnnouncement } from "../ui/Announcement"
 export function SiteApp() {
   const path = location.pathname
-  if (path === "/s" || path.startsWith("/s/")) return <SharedRecord />
-  if (path === "/docs" || path.startsWith("/docs/")) return <Docs />
-  if (path === "/example" || path === "/example/") return <Example />
   if (path === "/manage" || path.startsWith("/manage/")) return <Manage />
-  return <App />
+  const page = path === "/s" || path.startsWith("/s/") ? <SharedRecord />
+    : path === "/docs" || path.startsWith("/docs/") ? <Docs />
+    : path === "/example" || path === "/example/" ? <Example /> : <App />
+  return <>{page}<VisitorAnnouncement /></>
 }

@@ -1,0 +1,48 @@
+.announcement-dialog {
+  width: min(580px, calc(100vw - 96px));
+  max-height: calc(100dvh - 96px);
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 90px #10241c30;
+}
+.announcement-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.announcement-dialog::backdrop { background: #13231e70; }
+.announcement-head { display: flex; align-items: start; justify-content: space-between; gap: 24px; padding: 32px 32px 22px; }
+.announcement-head .eyebrow { margin: 0 0 14px; color: var(--teal-ink); font-size: 10px; letter-spacing: 0.12em; }
+.announcement-head h2 { margin: 0; font: 500 29px/1.45 var(--serif); overflow-wrap: anywhere; outline: none; }
+.announcement-close { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin: -8px -8px 0 0; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--ink-soft); font: 24px/1 sans-serif; cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 160ms ease; }
+.announcement-close:active { transform: scale(0.95); }
+.announcement-close:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+.announcement-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 32px 28px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); font-size: 15px; line-height: 1.9; }
+.announcement-body:focus-visible { outline: 2px solid var(--teal); outline-offset: -4px; }
+.announcement-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); padding: 20px 32px; }
+.announcement-footer p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.7; }
+.announcement-footer .btn { flex: none; }
+.announcement-settings { max-width: 880px; margin: 0 auto; }
+.announcement-settings .storage-heading { align-items: start; margin-bottom: 32px; }
+.announcement-settings .storage-heading .fine { max-width: 570px; line-height: 1.8; }
+.announcement-state { flex: none; margin-top: 34px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-soft); font-size: 11px; }
+.announcement-state[data-enabled="true"] { background: var(--teal-soft); border-color: transparent; color: var(--teal-ink); }
+.announcement-settings fieldset { display: grid; gap: 24px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.announcement-toggle { display: grid; gap: 10px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.announcement-settings .fine { margin: 0; }
+.announcement-settings .desk-field { margin: 0; }
+.announcement-settings input:not([type="checkbox"]) { width: 100%; min-height: 44px; box-sizing: border-box; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: 14px/1.6 var(--sans); transition: border-color 160ms ease, box-shadow 160ms ease; }
+.announcement-settings input:not([type="checkbox"]):focus-visible { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 13%, transparent); }
+.announcement-settings .desk-field > span { display: flex; justify-content: space-between; gap: 20px; }
+.announcement-settings .desk-field small { color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.announcement-settings textarea { display: block; width: 100%; min-height: 200px; box-sizing: border-box; resize: vertical; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: 14px/1.8 var(--sans); transition: border-color 160ms ease, box-shadow 160ms ease; }
+.announcement-settings textarea:focus-visible { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 13%, transparent); }
+.announcement-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 0; }
+.announcement-loading { display: grid; justify-items: start; gap: 20px; }
+@media (hover: hover) and (pointer: fine) {
+  .announcement-close:hover { color: var(--ink); background: var(--teal-soft); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .announcement-close { transition: color 160ms ease, background-color 160ms ease; }
+  .announcement-close:active { transform: none; }
+}
