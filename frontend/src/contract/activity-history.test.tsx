@@ -7,6 +7,55 @@ import type { ActivityPage, ActivityStep } from "./types"
 
 const step = (id: string, kind: string, call: number): ActivityStep => ({ id, kind, model_call: call, run_id: "run", first_seq: 1, last_seq: 1, segment_no: 1, phase: "compose", title: "整理本批章节", purpose: "撰写沙箱与快照两章", status: "completed", frames: [], frame_ids: [], started_at: null, finished_at: null, outcome: null, source_range: null, retry_of_step_id: null })
 describe("complete execution history", () => {
+  it("collects one model call's consecutive observation saves into one expandable row", () => {
+    const observations = Array.from({ length: 4 }, (_, index) => ({
+      ...step(`observation-${index}`, "tool_execution", 1), phase: "investigate", title: "保存视频画面观察",
+      first_seq: 14 + index * 2, last_seq: 15 + index * 2,
+      started_at: `2026-10-18T03:23:19.${289 + index * 10}Z`, finished_at: `2026-10-18T03:23:19.${293 + index * 10}Z`,
+      outcome: { message: "已保存可见事实与未确认问题，后续可从此继续。", evidence_status: "not_assessed" },
+    }))
+    const steps = [step("call1", "model_response", 1), ...observations, { ...step("call2", "model_response", 2), status: "running" }]
+    expect(activityGroups(steps)).toHaveLength(3)
+    const html = renderToStaticMarkup(<ActivityList steps={steps} open detailed resourceStatus="generating" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html.match(/role="listitem"/g)).toHaveLength(3)
+    expect(html).toContain("已保存 4 组画面观察")
+    expect(html).toContain("查看 4 组记录")
+    expect(html).toContain("第 4 组")
+    expect(html.match(/保存视频画面观察/g)).toBeNull()
+    expect(observations[0].title).toBe("保存视频画面观察")
+    expect(activityGroups(steps)[1].observations).toEqual(observations)
+    const compact = renderToStaticMarkup(<ActivityList steps={steps} open={false} detailed={false} freshId="observation-3" resourceStatus="generating" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(compact).toContain("已保存 4 组画面观察")
+    expect(compact).toContain('data-new="true"')
+  })
+  it("keeps different calls, runs, phases and intervening actions separate", () => {
+    const observation = { ...step("one", "tool_execution", 1), phase: "investigate", title: "保存视频画面观察" }
+    const next = { ...observation, id: "two" }
+    for (const other of [{ ...next, model_call: 2 }, { ...next, run_id: "retry" }, { ...next, phase: "compose" }]) {
+      expect(activityGroups([observation, other])).toHaveLength(2)
+    }
+    expect(activityGroups([observation, { ...next, title: "查看新的画面" }, { ...next, id: "three" }])).toHaveLength(3)
+    expect(activityGroups([{ ...observation, model_call: undefined }, { ...next, model_call: undefined }])).toHaveLength(2)
+  })
+  it("updates a grouped observation without increasing its count and preserves failures", () => {
+    const saved = { ...step("saved", "tool_execution", 1), phase: "investigate", title: "保存视频画面观察", first_seq: 14, last_seq: 15, started_at: "2026-10-18T03:23:19.289Z", finished_at: "2026-10-18T03:23:19.293Z" }
+    const running = { ...saved, id: "pending", first_seq: 16, last_seq: 16, status: "running", started_at: "2026-10-18T03:23:19.302Z", finished_at: null }
+    const before = activityGroups([saved, running])[0]
+    expect(before.step.status).toBe("running")
+    expect(before.step.finished_at).toBeNull()
+    expect(before.step.title).toContain("1/2 组已保存")
+    const failure = { ...running, status: "failed", last_seq: 17, finished_at: "2026-10-18T03:23:19.306Z", outcome: { message: "保存失败，请稍后重试。", evidence_status: "not_assessed" } }
+    const after = activityGroups(mergeActivitySnapshot([saved, running], [failure], { replace: true, sameResource: true, expired: false }))[0]
+    expect(after.observations).toHaveLength(2)
+    expect(after.step.id).toBe(before.step.id)
+    expect(after.step.status).toBe("failed")
+    expect(after.step.last_seq).toBe(17)
+    expect(after.step.finished_at).toBe(failure.finished_at)
+    const html = renderToStaticMarkup(<ActivityList steps={after.observations} open detailed resourceStatus="generating" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain('data-status="stopped"')
+    expect(html).toContain("保存失败，请稍后重试。")
+    expect(html).toContain("1/2 组已保存")
+  })
   it("shows the reason for a source retry in the compact process list", () => {
     const retry = { ...step("source-retry", "retry", 0), phase: "prepare_source", title: "来源准备中断，将自动重试", outcome: { message: "下载长时间没有字节进展。", evidence_status: "not_assessed" } }
     const html = renderToStaticMarkup(<ActivityList steps={[retry]} open={false} detailed={false} resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)

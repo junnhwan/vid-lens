@@ -33,15 +33,41 @@ export async function loadActivityHistory(urls: string[], read: (url: string, be
   return result
 }
 
+interface ActivityGroup { step: ActivityStep; sends: ActivityStep[]; observations: ActivityStep[] }
+
+function observationSummary(items: ActivityStep[]): ActivityStep {
+  const completed = items.filter((item) => item.status === "completed").length
+  const active = items.find((item) => item.status === "running" || item.status === "queued")
+  const stopped = items.find((item) => item.status === "failed") ?? items.find((item) => item.status === "canceled")
+  const status = active?.status ?? stopped?.status ?? "completed"
+  const done = completed === items.length
+  const finished = items.every((item) => item.finished_at) ? items.reduce((latest, item) => Date.parse(item.finished_at!) > Date.parse(latest!) ? item.finished_at : latest, items[0].finished_at) : null
+  return {
+    ...items[0], kind: "observation_group", status,
+    title: done ? `已保存 ${items.length} 组画面观察` : `${active ? "正在保存画面观察" : "画面观察保存未完成"}（${completed}/${items.length} 组已保存）`,
+    last_seq: Math.max(...items.map((item) => item.last_seq)),
+    finished_at: active ? null : finished, source_range: null, frames: [], frame_ids: [],
+    outcome: done ? { message: "已保存可见事实与未确认问题，后续可从此继续。", evidence_status: "not_assessed" } : stopped?.outcome ?? null,
+  }
+}
+
 export function activityGroups(steps: ActivityStep[]) {
-  const groups: { step: ActivityStep; sends: ActivityStep[] }[] = []
-  const calls = new Map<string, { step: ActivityStep; sends: ActivityStep[] }>()
+  const groups: ActivityGroup[] = []
+  const calls = new Map<string, ActivityGroup>()
   for (const step of steps) {
     if (step.kind === "execution_plan") continue
-    if (step.kind !== "model_response" && step.kind !== "model_submission") { groups.push({ step, sends: [] }); continue }
+    if (step.kind === "tool_execution" && step.title === "保存视频画面观察") {
+      const previous = groups.at(-1)
+      if (previous?.observations.length && step.model_call && previous.step.run_id === step.run_id && previous.step.model_call === step.model_call && previous.step.phase === step.phase) {
+        previous.observations.push(step)
+        previous.step = observationSummary(previous.observations)
+      } else groups.push({ step, sends: [], observations: [step] })
+      continue
+    }
+    if (step.kind !== "model_response" && step.kind !== "model_submission") { groups.push({ step, sends: [], observations: [] }); continue }
     const key = `${step.run_id}:${step.model_call ?? step.id}`
     let group = calls.get(key)
-    if (!group) { group = { step, sends: [] }; calls.set(key, group); groups.push(group) }
+    if (!group) { group = { step, sends: [], observations: [] }; calls.set(key, group); groups.push(group) }
     if (step.kind === "model_response") group.step = step
     else group.sends.push(step)
   }

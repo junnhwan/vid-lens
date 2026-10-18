@@ -1697,6 +1697,10 @@ figcaption {
 .model-sends { margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
 .model-sends p { margin: 5px 0; font-family: var(--sans); font-size: 12px; line-height: 1.6; }
 .model-sends summary { cursor: pointer; }
+.observation-details { margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
+.observation-details summary { cursor: pointer; }
+.observation-details ol { margin: 6px 0 0; padding-left: 20px; list-style: none; }
+.observation-details li { margin: 4px 0; }
 .attempt-ledger { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
 .attempt-ledger p { margin: 5px 0; font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
 .attempt-ledger [data-current] { color: var(--teal-ink); }

@@ -55,14 +55,14 @@ export function ActivityList({
   return (
     <>
       <div id={detailed ? undefined : "run-steps"} className={detailed ? "steps gen-steps" : "steps"} role="list" ref={listRef} onScroll={syncJump} data-open={open ? "true" : undefined}>
-        {visible.map(({ step, sends }) => {
+        {visible.map(({ step, sends, observations }) => {
           const view = stepPresentation(step, resourceStatus)
           const frames = step.frames ?? []
           const transcribed = parseTranscription(step.title)
           const spent = view.status !== "active" ? stepSpent(step) : null
           const model = step.kind === "model_response" || step.kind === "model_submission"
           return (
-            <div className="step" role="listitem" key={step.id} data-kind={step.kind} data-status={view.status} data-new={step.id === freshId ? "true" : undefined}>
+            <div className="step" role="listitem" key={step.id} data-kind={step.kind} data-status={view.status} data-new={step.id === freshId || observations.some((item) => item.id === freshId) ? "true" : undefined}>
               <span className="mark" aria-hidden="true" />
               <div>
                 <div className="step-label">
@@ -74,6 +74,24 @@ export function ActivityList({
                 {transcribed ? <div className="step-range">{transcribed.done} / {transcribed.total}</div> : null}
                 {model && sends.length ? <details className="model-sends"><summary>发送详情</summary>{sends.map((send) => <p key={send.id}>{send.title} · {stepPresentation(send, resourceStatus).status === "active" ? "等待响应" : stepPresentation(send, resourceStatus).outcome || "已结束"}{stepSpent(send) ? ` · ${stepSpent(send)}` : ""}</p>)}</details> : null}
                 {(detailed || model || step.kind === "retry") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
+                {observations.length > 1 ? (
+                  <details className="observation-details">
+                    <summary>查看 {observations.length} 组记录</summary>
+                    <ol>
+                      {observations.map((item, index) => {
+                        const detail = stepPresentation(item, resourceStatus)
+                        const duration = detail.status !== "active" ? stepSpent(item) : null
+                        return (
+                          <li key={item.id}>
+                            第 {index + 1} 组 · {statusText(detail.status)}{duration ? ` · 用时 ${duration}` : ""}
+                            {detail.status === "stopped" && detail.outcome ? <div>{detail.outcome}</div> : null}
+                            {item.source_range ? <div>{formatRange(item.source_range)}</div> : null}
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  </details>
+                ) : null}
                 {detailed && step.source_range ? <div className="step-range">{formatRange(step.source_range)}</div> : null}
                 {detailed && frames.length ? (
                   <div className="mini-row">
