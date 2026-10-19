@@ -111,6 +111,8 @@ func TestRealFrameTimesCropReloadAndCleanup(t *testing.T) {
 
 func TestYouTubeMetadataPreparationNeverLoadsOwnerCookies(t *testing.T) {
 	s, r, cfg := testsupport.Services(t)
+	// This fixture only reaches metadata; reserve a bounded test workspace.
+	cfg.Profile.MaxDownloadBytes, cfg.Profile.WorkspaceBytes = 64<<20, 128<<20
 	argsFile := filepath.Join(t.TempDir(), "arguments")
 	t.Setenv("EXTRACTOR_ARGUMENTS", argsFile)
 	fakeExtractor(t, "printf '%s\\n' \"$@\" > \"$EXTRACTOR_ARGUMENTS\"\nprintf '%s\\n' \"ERROR: [youtube] anonfixture: Sign in to confirm you are not a bot\" >&2\nexit 1\n")

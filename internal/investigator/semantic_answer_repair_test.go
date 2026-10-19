@@ -35,12 +35,13 @@ func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 					Question      string                   `json:"question"`
 					CandidateHash string                   `json:"candidate_hash"`
 					Candidate     struct{ Summary string } `json:"candidate"`
+					Fields        map[string]string        `json:"review_fields"`
 				}
 				if json.Unmarshal(message.Content, &text) != nil || json.Unmarshal([]byte(text), &payload) != nil {
 					continue
 				}
 				questionSeen = questionSeen || payload.Question == sourceQuestion && sourceQuestion != ""
-				if payload.CandidateHash != "" && payload.Candidate.Summary == "视频证明了完全一致。" {
+				if payload.CandidateHash != "" && (payload.Candidate.Summary == "视频证明了完全一致。" || payload.Fields["/summary"] == "视频证明了完全一致。") {
 					if !questionSeen {
 						t.Error("independent answer review lost the actual user's question")
 					}
@@ -101,7 +102,7 @@ func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 		t.Fatal("reviewed answer did not complete through normal publication", turn, writers.Load(), err)
 	}
 	var submissions int
-	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM model_submissions WHERE run_id=$1", claim.Run.ID).Scan(&submissions); err != nil || submissions != 4 {
+	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM model_submissions WHERE run_id=$1", claim.Run.ID).Scan(&submissions); err != nil || submissions != 5 {
 		t.Fatal("writer correction and both independent verdicts lost their separate accounting", submissions, err)
 	}
 }

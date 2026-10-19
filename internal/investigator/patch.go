@@ -116,6 +116,21 @@ func (s *session) reserveFieldRepair(ctx context.Context, args any) error {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
+	if s.policy().ReviewRecovery && s.turn == nil && s.pendingEvidenceReview() != nil {
+		// repair() already charged this logical review correction. Its actual
+		// patch must not charge the global quota again. Malformed/repeated
+		// attempts remain bounded within this durable review identity.
+		kind := "review_correction:" + store.Hash(s.pendingEvidenceReview())
+		count, err := s.engine.Store.OperationCount(ctx, s.claim.Run.ID, kind)
+		if err != nil {
+			return err
+		}
+		if count >= s.repairLimit() {
+			return domain.Err(422, "MODEL_RESULT_INVALID", "本轮复核的字段修订额度已用完，草稿与复核意见保留。")
+		}
+		_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, kind, args, false)
+		return err
+	}
 	count, err := s.repairUsage(ctx)
 	if err != nil {
 		return err
@@ -160,7 +175,7 @@ func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) 
 				return nil, err
 			}
 			raw, err := replaceFields(domain.JSON(draft), in.Patches, func(p []string) bool {
-				return len(p) == 1 && (p[0] == "title" || p[0] == "limitations") || len(p) >= 3 && p[0] == "sections" && p[2] == "blocks"
+				return len(p) == 1 && (p[0] == "title" || p[0] == "limitations") || len(p) >= 3 && p[0] == "sections" && p[2] == "blocks" || s.policy().ReviewRecovery && len(p) == 3 && p[0] == "limitations" && p[2] == "message"
 			})
 			if err != nil {
 				return s.draftFeedback(ctx, err.Error())

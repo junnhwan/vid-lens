@@ -784,5 +784,89 @@
     "revision": 16,
     "question": false,
     "sha256": "940d7a5db78000b5cdd1e840fcfa727711ed0ed283caa149042c7f01c8faca23"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": false,
+    "revision": 17,
+    "sha256": "5c861ddf5f34d2aacc22e25d80fb6ae438c038e501cf7dc9385987a7effee182"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": true,
+    "revision": 17,
+    "sha256": "7b2ac945bb31fd81a73185d3158ad535d5880ef2398685a5e85ff6ed0389c5d4"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": false,
+    "revision": 17,
+    "sha256": "ba0ce8df637c18b555db6288dfedddb758cdfdb18e55d6db542df60f0a1c1870"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": true,
+    "revision": 17,
+    "sha256": "7b2ac945bb31fd81a73185d3158ad535d5880ef2398685a5e85ff6ed0389c5d4"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": false,
+    "revision": 17,
+    "sha256": "4b9bf544800a471449456185ddaa04cf4fd8bf2cf6a5fd3be377d9c7065c3dac"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v14",
+    "question": true,
+    "revision": 17,
+    "sha256": "7b2ac945bb31fd81a73185d3158ad535d5880ef2398685a5e85ff6ed0389c5d4"
+  },
+  {
+    "kind": "tools",
+    "question": false,
+    "revision": 17,
+    "sha256": "efc6ed7523bf21456be30059b7e74d5763aa52fd6e46b5eff250ecbb2f6e1cf3"
+  },
+  {
+    "kind": "tools",
+    "question": true,
+    "revision": 17,
+    "sha256": "b35568948819020179bc0fd5473f1db2f44bc4c14bbb26845ac13847fb9b4af9"
+  },
+  {
+    "kind": "review_text_prompt_v6",
+    "question": false,
+    "revision": 17,
+    "sha256": "18ce251d0e337a8e62ef5848acdbdaedf5ca58b4ad1de735b0976e33d5806c43"
+  },
+  {
+    "kind": "review_visual_prompt_v6",
+    "question": false,
+    "revision": 17,
+    "sha256": "1cf51d391f347425c7e8b01e09ddef2de1787fa2bb252d5f8cc65e29f1801620"
+  },
+  {
+    "kind": "review_adjudication_prompt_v6",
+    "revision": 17,
+    "question": false,
+    "sha256": "1d951fbfe233122ab1b1bbfaf40231f205f816b32213c7a4881ba18c6e92bce3"
+  },
+  {
+    "kind": "review_adjudicator_prompt_v6",
+    "revision": 17,
+    "question": false,
+    "sha256": "b3b11154b681446b6665a7a6aae331dffe877d5bf1e18269f35fb637ba48276c"
   }
 ]

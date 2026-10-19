@@ -141,6 +141,27 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			return toolError("本轮多个inspect已整组拒绝，没有创建图片或问题。每轮只提交一个inspect；先观察已交付图片。")
 		}
 	}
+	if s := t.session; s != nil && s.engine != nil && s.policy().ReviewRecovery && s.turn == nil && (t.name == "begin_article" || t.name == "repair_article_plan") {
+		version, draft, err := s.loadDraft(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if version > 0 {
+			// A stale model action cannot replace an outline that already passed
+			// its durable CAS, even when the obsolete arguments have a bad schema.
+			s.cp.Composing = true
+			if s.cp.LastCandidate["tool"] == "begin_article" {
+				pending := s.pendingEvidenceReview()
+				s.cp.LastCandidate, s.cp.DraftIssue = nil, pending
+			}
+			s.cp.DraftWriteRequired = len(draft.Sections) < len(draft.Plan)
+			state := s.draftState(version, draft)
+			delete(state, "error")
+			state["action_already_completed"] = true
+			state["next_action"] = "The outline is already saved; do not begin or repair it again. " + fmt.Sprint(state["next_action"])
+			return textResult(state), nil
+		}
+	}
 	if s := t.session; s != nil && s.engine != nil {
 		reserved, err := s.reserveDraftCorrection(ctx, t.name, rawToolArguments(args))
 		if err != nil {
@@ -212,6 +233,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		err = errors.New("工具参数为空")
 	} else if target != nil {
 		checked := args.Text
+		if t.session != nil && t.session.policy().ReviewRecovery {
+			checked = normalizeRecoveryRepairContainers(t.name, checked)
+		}
 		if t.session.authoring() {
 			checked = normalizeAuthoringJSON(checked)
 			checked = normalizeAuthoringContainers(t.name, checked)
@@ -282,6 +306,11 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		if t.name == "save_article_sections" {
 			copy.Text = normalizeAuthoringBody(copy.Text)
 		}
+		delegated = &copy
+	}
+	if args != nil && t.session != nil && t.session.policy().ReviewRecovery {
+		copy := *delegated
+		copy.Text = normalizeRecoveryRepairContainers(t.name, copy.Text)
 		delegated = &copy
 	}
 	result, err = t.EnhancedInvokableTool.InvokableRun(ctx, delegated, opts...)

@@ -110,4 +110,8 @@ func TestMalformedResultAllowsExplicitRetryWithoutAutomaticResubmission(t *testi
 			t.Fatalf("wrong retry semantics for %s: %+v auto=%v", code, failure, automatic)
 		}
 	}
+	failure, automatic, _ := classify(domain.Err(502, "REVIEW_RESULT_INVALID", "reviewer returned no executable correction"))
+	if !failure.CanRetry || automatic {
+		t.Fatal("invalid review must preserve explicit retry without replaying the author automatically", failure, automatic)
+	}
 }

@@ -165,6 +165,8 @@ func TestSourceRejectsTruncatedExtractorVideo(t *testing.T) {
 
 func TestSourceRetryKeepsSeparateAudioAttemptsAndClosesOldDownloads(t *testing.T) {
 	db, res, cfg := testsupport.Services(t)
+	// The fake extractor emits tiny strings rather than a multi-GB source.
+	cfg.Profile.MaxDownloadBytes, cfg.Profile.WorkspaceBytes = 64<<20, 128<<20
 	ctx := context.Background()
 	fixture := t.TempDir()
 	script := `#!/bin/sh

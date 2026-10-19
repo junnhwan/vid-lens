@@ -23,6 +23,7 @@ type executionPolicy struct {
 	Recovery             bool
 	EvidenceGrounding    bool
 	ContentReview        bool
+	ReviewRecovery       bool
 }
 
 func policyAt(revision int) executionPolicy {
@@ -40,6 +41,7 @@ func policyAt(revision int) executionPolicy {
 		Recovery:             revision >= 13,
 		EvidenceGrounding:    revision >= 14,
 		ContentReview:        revision >= 15,
+		ReviewRecovery:       revision >= 17,
 	}
 }
 
@@ -54,7 +56,7 @@ func (s *session) policy() executionPolicy {
 // Resolve only a new protocol. A checkpoint that already has a layout retains
 // its recorded revision and existing initialization behavior, including v0.
 func initialProtocol(spec domain.GenerationSpec, question bool, layout string, newLayout bool, revision int) (int, string) {
-	review := spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == reviewPolicy || spec.DetailPolicy.Revision == reviewBudgetPolicy)
+	review := spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == reviewPolicy || spec.DetailPolicy.Revision == reviewBudgetPolicy || spec.DetailPolicy.Revision == reviewRecoveryPolicy)
 	instruction := instructions
 	if layout == draftLayout {
 		instruction += draftInstructions
@@ -101,6 +103,10 @@ func initialProtocol(spec domain.GenerationSpec, question bool, layout string, n
 				if spec.DetailPolicy.Revision == reviewBudgetPolicy {
 					revision = 16
 				}
+				if spec.DetailPolicy.Revision == reviewRecoveryPolicy {
+					revision = 17
+					instruction += reviewRecoveryInstructions
+				}
 			}
 		}
 	}
@@ -120,6 +126,10 @@ func initialProtocol(spec domain.GenerationSpec, question bool, layout string, n
 			instruction += reviewAuthorInstructions
 			if spec.DetailPolicy.Revision == reviewBudgetPolicy {
 				revision = 16
+			}
+			if spec.DetailPolicy.Revision == reviewRecoveryPolicy {
+				revision = 17
+				instruction += reviewRecoveryInstructions
 			}
 		}
 	}

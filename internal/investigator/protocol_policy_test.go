@@ -54,7 +54,19 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 	}
 	for _, c := range cases {
 		var actual string
-		if c.Kind == "review_text_prompt_v5" {
+		if c.Kind == "review_adjudicator_prompt_v6" {
+			hash := sha256.Sum256([]byte(evidenceAdjudicatorInstructionsV6))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_adjudication_prompt_v6" {
+			hash := sha256.Sum256([]byte(reviewAdjudicationInstruction))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_text_prompt_v6" {
+			hash := sha256.Sum256([]byte(evidenceReviewerTextInstructionsV6))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_visual_prompt_v6" {
+			hash := sha256.Sum256([]byte(evidenceReviewerVisualInstructionsV6))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_text_prompt_v5" {
 			hash := sha256.Sum256([]byte(evidenceReviewerTextInstructionsV5))
 			actual = hex.EncodeToString(hash[:])
 		} else if c.Kind == "review_visual_prompt_v5" {
@@ -108,7 +120,7 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 }
 func TestExistingCheckpointProtocolIsNotUpgraded(t *testing.T) {
 	p, _ := domain.InterpretationPolicy("detailed")
-	for revision := 0; revision <= 16; revision++ {
+	for revision := 0; revision <= 17; revision++ {
 		spec := domain.GenerationSpec{Version: 2, DetailPolicy: &p}
 		actual, _ := initialProtocol(spec, false, draftLayout, false, revision)
 		if actual != revision {

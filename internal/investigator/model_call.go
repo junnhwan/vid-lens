@@ -316,6 +316,8 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
 		} else if s.policy().Recovery && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, activeTools[0].Name))
+		} else if s.policy().ReviewRecovery && len(activeTools) == 1 && activeTools[0].Name == "save_article_sections" {
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, "save_article_sections"))
 		} else if s.turn != nil && s.policy().ComposedAnswers {
 			// Require an executable action, while retaining evidence tools when
 			// the question needs investigation. No plain-text-then-submit round.

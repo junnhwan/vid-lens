@@ -66,7 +66,7 @@ func TestGroundingProtocolDoesNotUpgradeAnExistingCheckpoint(t *testing.T) {
 	p, _ := domain.InterpretationPolicy("standard")
 	for _, question := range []bool{false, true} {
 		revision, _ := initialProtocol(domain.GenerationSpec{Version: 2, DetailPolicy: &p}, question, draftLayout, true, 0)
-		if revision != 16 || !policyAt(revision).EvidenceGrounding || !policyAt(revision).ContentReview {
+		if revision != 17 || !policyAt(revision).EvidenceGrounding || !policyAt(revision).ContentReview || !policyAt(revision).ReviewRecovery {
 			t.Fatal("new evidence protocol was not selected", revision, question)
 		}
 		for _, historical := range []int{0, 3, 11, 12, 13, 14} {

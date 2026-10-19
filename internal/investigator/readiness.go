@@ -94,12 +94,18 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		action += " Delete unnecessary decorative or uncertain visual details instead of replacing them with new unverified assertions. Keep the source's actual conditions and useful figures; do not add prose merely to maintain length."
 		action += " If an issue names save_field=title, include the corrected section title in save_article_sections; patch only fields that provide a draft_path."
 		action += " A heading in the same reviewer-named chapter may also be corrected consistently with its listed body issue."
+		if s.policy().ReviewRecovery && s.turn == nil {
+			action = "Correct the exact existing draft_path fields in evidence_review_issues with patch_article_draft and the latest version, in one bounded patch. Make an actual text/caption change; unchanged chapters do not advance version. Read only affected_section_ids if their current fields are missing. Use save_article_sections only for reviewed titles or necessary chapter changes. Keep all other chapters. A fresh independent review must pass before publication."
+		}
 		if s.turn != nil {
 			action = "Use evidence_review_issues to correct the listed fields of this answer, preserving supported content and real source references. expected_type/current_value describe the actual field; a text string is not an inline array. Call submit_answer with the corrected complete answer; do not use article tools or draft-field patches. A fresh review must pass before publication."
 		}
 		if len(pending) > 0 {
 			action = "Record visible facts for pending_frame_ids first. " + action
 		}
+	}
+	if s.policy().ReviewRecovery && s.cp.DraftIssue["code"] == "unplanned_sections" && reviewIssue == nil {
+		action = "Discard ignored_unplanned_sections. Use save_article_sections only with pending section IDs from the frozen plan and latest version. Never repair or add a chapter identity."
 	}
 	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
 	if reviewIssue != nil {
@@ -159,7 +165,16 @@ func (s *session) progressFingerprint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return store.Hash(map[string]any{"facts": facts, "draft": d.Data, "frames": s.cp.CitationFrames}), nil
+	var draft any = d.Data
+	if s.policy().ReviewRecovery && len(d.Data) > 0 {
+		var content articleDraft
+		if err = json.Unmarshal(d.Data, &content); err != nil {
+			return "", err
+		}
+		content.BatchReceipt = nil
+		draft = content
+	}
+	return store.Hash(map[string]any{"facts": facts, "draft": draft, "frames": s.cp.CitationFrames}), nil
 }
 
 func (s *session) toolFeedback(ctx context.Context, name, args, before string, result *schema.ToolResult, callErr error) error {
@@ -228,6 +243,27 @@ func (s *session) toolFeedback(ctx context.Context, name, args, before string, r
 						progress = progress || s.cp.Progress.Seen[key] == 0
 						s.cp.Progress.Seen[key]++
 					}
+				}
+			}
+		}
+	}
+	if !rejected && result != nil && name == "read_article_sections" && s.policy().ReviewRecovery && s.pendingEvidenceReview() != nil {
+		var pending struct {
+			SectionIDs []string `json:"affected_section_ids"`
+		}
+		_ = json.Unmarshal(domain.JSON(s.pendingEvidenceReview()), &pending)
+		for _, part := range result.Parts {
+			var value struct {
+				Sections []domain.Section `json:"sections"`
+			}
+			if json.Unmarshal([]byte(part.Text), &value) != nil {
+				continue
+			}
+			for _, section := range value.Sections {
+				if slices.Contains(pending.SectionIDs, section.ID) {
+					key := "read:review-chapter:" + store.Hash(section)
+					progress = progress || s.cp.Progress.Seen[key] == 0
+					s.cp.Progress.Seen[key]++
 				}
 			}
 		}

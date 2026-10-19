@@ -157,6 +157,8 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	delete(cp, "progress")
 	delete(cp, "last_candidate")
 	delete(cp, "draft_issue")
+	delete(cp, "evidence_review_issue")
+	delete(cp, "draft_write_required")
 	delete(cp, "inspect_batch_rejected")
 	cp["draft_correction"] = false
 	cp["draft_repair_version"] = 0

@@ -215,6 +215,13 @@ func bindPrepared(ctx context.Context, tx pgx.Tx, prepare, snapshot string) erro
 				if err = reuseArticleDraft(ctx, tx, old, rid, snapshot); err != nil {
 					return err
 				}
+				if r.GenerationSpec != nil && r.GenerationSpec.Version >= 2 && r.GenerationSpec.DetailPolicy != nil {
+					// Freeze only this explicit new run; keep its ancestor and
+					// immutable content/model specification unchanged.
+					if _, err = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=jsonb_set(checkpoint,'{retry_harness_revision}',to_jsonb($2::integer),true) WHERE id=$1", rid, domain.CurrentReviewHarnessRevision); err != nil {
+						return err
+					}
+				}
 			}
 			active = &rid
 			var seq int64

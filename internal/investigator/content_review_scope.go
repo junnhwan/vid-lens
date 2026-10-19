@@ -106,7 +106,7 @@ func referencesReviewFrame(value any, allowed map[string]bool) bool {
 }
 
 func (b evidenceReviewBatch) containsPath(path string) bool {
-	if b.Mode == "source_text" {
+	if b.Mode == "source_text" && b.Fields == nil {
 		return true
 	}
 	for prefix := range b.Fields {

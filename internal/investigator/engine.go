@@ -89,7 +89,7 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 		return domain.Err(422, "INTERNAL_FAILURE", "检查点协议版本不兼容。")
 	}
 	if s.cp.SchemaVersion == 0 {
-		s.cp = checkpoint{SchemaVersion: 1, Protocol: protocol, Inspections: map[string][]string{}, Repeated: map[string]int{}}
+		s.cp = checkpoint{SchemaVersion: 1, Protocol: protocol, RetryHarnessRevision: s.cp.RetryHarnessRevision, Inspections: map[string][]string{}, Repeated: map[string]int{}}
 	}
 	if s.cp.Inspections == nil {
 		s.cp.Inspections = map[string][]string{}
@@ -183,12 +183,17 @@ func (s *session) initial(ctx context.Context) error {
 		}
 	}
 	protocolSpec := s.spec
+	if newLayout && s.turn == nil && s.cp.RetryHarnessRevision == domain.CurrentReviewHarnessRevision {
+		if refreshed, ok := compatibleRetryReviewSpec(protocolSpec); ok {
+			protocolSpec = refreshed
+		}
+	}
 	if newLayout && s.turn != nil && s.spec.Version >= 2 && s.spec.DetailPolicy != nil {
 		// A new private question freezes today's answer protocol independently of
 		// the immutable article's older generation policy. Do not mutate that spec
 		// or upgrade a checkpoint that has already started.
 		p := *s.spec.DetailPolicy
-		p.Revision = reviewBudgetPolicy
+		p.Revision = reviewRecoveryPolicy
 		protocolSpec.DetailPolicy = &p
 	}
 	revision, instruction := initialProtocol(protocolSpec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)
@@ -196,6 +201,9 @@ func (s *session) initial(ctx context.Context) error {
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}
+	if s.policy().ReviewRecovery {
+		fixed["diagram_grounding_rule"] = diagramGroundingRule
+	}
 	if spec, e := s.engine.Store.GenerationForRun(ctx, s.claim.Run.ID); e == nil {
 		fixed["purpose"] = spec.Purpose
 		if s.policy().Enabled {

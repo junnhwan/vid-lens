@@ -143,7 +143,11 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 	for _, a := range frames {
 		identities = append(identities, map[string]any{"id": a.ID, "sha256": a.SHA256, "time_ms": a.TimeMS})
 	}
-	hash := store.Hash(map[string]any{"review_protocol": evidenceReviewProtocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities})
+	protocol := evidenceReviewProtocol
+	if s.policy().ReviewRecovery {
+		protocol = evidenceReviewRecoveryProtocol
+	}
+	hash := store.Hash(map[string]any{"review_protocol": protocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities})
 	hints := map[string]any{}
 	for id, c := range catalog {
 		if c.Kind == "video_text" {
@@ -158,8 +162,24 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		}
 	}
 	issues := []map[string]any{}
-	for index, batch := range evidenceReviewBatches(candidate, catalog, frames) {
+	batches := evidenceReviewBatches(candidate, catalog, frames)
+	if s.policy().ReviewRecovery {
+		batches = recoveryReviewBatches(candidate, catalog, frames)
+	}
+	for index, batch := range batches {
 		key := "evidence-review:" + hash + ":" + strconv.Itoa(index)
+		approvalKeys := map[string]string(nil)
+		if s.policy().ReviewRecovery {
+			approvalKeys = s.reviewApprovalKeys(candidate, catalog, batch)
+			pending, err := s.unreviewedFields(ctx, candidate, batch, approvalKeys)
+			if err != nil {
+				return err
+			}
+			if len(pending) == 0 {
+				continue
+			}
+			batch.Fields = pending
+		}
 		var result evidenceReview
 		op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
 		if e == nil && op.Status == "completed" {
@@ -170,11 +190,16 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		if e != nil {
 			return e
 		}
+		if s.policy().ReviewRecovery {
+			if e = s.rememberReviewApprovals(ctx, key, approvalKeys, result); e != nil {
+				return e
+			}
+		}
 		for _, issue := range result.Issues {
 			entry := map[string]any{"code": "evidence_not_supported", "path": issue.Path, "reason": issue.Reason, "citation_ids": issue.CitationIDs}
 			issues = append(issues, entry)
 		}
-		if batch.Mode == "source_text" && len(issues) > 0 {
+		if !s.policy().ReviewRecovery && batch.Mode == "source_text" && len(issues) > 0 {
 			break // Fix source conditions before spending calls on image details.
 		}
 	}
@@ -186,7 +211,13 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		return nil
 	}
 	s.cp.LastCandidate = nil
-	meta := evidenceReviewCorrection(candidate, hash, issues[:min(16, len(issues))])
+	if !s.policy().ReviewRecovery {
+		issues = issues[:min(16, len(issues))]
+	}
+	meta := evidenceReviewCorrection(candidate, hash, issues)
+	if s.policy().ReviewRecovery {
+		meta["correction_rule"] = reviewUncertaintyCorrectionRule
+	}
 	s.cp.EvidenceReviewIssue = meta
 	if err := s.persist(ctx, s.cp.Messages); err != nil {
 		return err
@@ -294,7 +325,11 @@ func (s *session) reviewAllowsSectionTitle(id string) bool {
 }
 
 func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candidate any, hints map[string]any, catalog map[string]domain.Citation, batch evidenceReviewBatch) (evidenceReview, error) {
-	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash, "review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode}, false); err != nil {
+	protocol := evidenceReviewProtocol
+	if s.policy().ReviewRecovery {
+		protocol = evidenceReviewRecoveryProtocol
+	}
+	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash, "review_protocol": protocol, "review_mode": batch.Mode}, false); err != nil {
 		return evidenceReview{}, err
 	}
 	ids := []string{}
@@ -302,7 +337,7 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 		ids = append(ids, a.ID)
 	}
 	instruction := evidenceReviewerTextInstructionsV5
-	payload := map[string]any{"review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode, "candidate_hash": hash, "citation_catalog": hints, "batch_frame_ids": ids}
+	payload := map[string]any{"review_protocol": protocol, "review_mode": batch.Mode, "candidate_hash": hash, "citation_catalog": hints, "batch_frame_ids": ids}
 	if batch.Mode == "source_text" {
 		payload["candidate"] = candidate
 	} else {
@@ -317,6 +352,23 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 		}
 		payload["citation_catalog"] = scopeHints
 		payload["frame_context"] = frameContexts(scopeCatalog, s.transcript)
+	}
+	fields := map[string]any(nil)
+	if s.policy().ReviewRecovery {
+		fields = reviewFields(candidate, batch)
+		payload["review_fields"] = fields
+		payload["field_ids"] = reviewFieldIDs(fields)
+		payload["candidate_context"] = reviewCandidateContext(candidate)
+		// The flattened fields retain canonical pointers without repeating the
+		// whole nested article alongside the same prose a second time.
+		delete(payload, "candidate")
+		if batch.Mode == "source_text" {
+			delete(payload, "candidate_fields")
+		}
+		instruction = evidenceReviewerTextInstructionsV6
+		if batch.Mode == "visual" {
+			instruction = evidenceReviewerVisualInstructionsV6
+		}
 	}
 	source := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}
 	if s.turn != nil {
@@ -352,7 +404,21 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 	if err != nil {
 		return evidenceReview{}, err
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	originalInfo := info
+	if s.policy().ReviewRecovery {
+		info, err = reviewFieldTool(info, fields)
+		if err != nil {
+			return evidenceReview{}, err
+		}
+	}
+	baseInput := append([]*schema.Message{}, input...)
+	formatRetried, adjudicating := false, false
+	var adjudicationPaths map[string]bool
+	maxAttempts := 2
+	if s.policy().ReviewRecovery {
+		maxAttempts = 3 // One bounded schema repair and one distinct source recheck.
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		slot, err := s.reserveReviewCall(ctx, key+":"+strconv.Itoa(attempt))
 		if err != nil {
 			return evidenceReview{}, err
@@ -366,7 +432,24 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 		if err != nil {
 			return evidenceReview{}, err
 		}
-		result, err := parseEvidenceReview(response, hash, domain.JSON(candidate), catalog)
+		var result evidenceReview
+		if s.policy().ReviewRecovery {
+			result, err = parseRecoveryEvidenceReview(response, hash, domain.JSON(candidate), catalog, fields)
+		} else {
+			result, err = parseEvidenceReview(response, hash, domain.JSON(candidate), catalog)
+		}
+		if err == nil && s.policy().ReviewRecovery {
+			for _, issue := range result.Issues {
+				if _, ok := fields[issue.Path]; !ok {
+					err = fmt.Errorf("path %s is not an exact review_fields key", issue.Path)
+					break
+				}
+				if adjudicating && !adjudicationPaths[issue.Path] {
+					err = errors.New("adjudication may only retain or withdraw provisional findings; it cannot invent another correction")
+					break
+				}
+			}
+		}
 		if err == nil {
 			for _, issue := range result.Issues {
 				if batch.Mode == "source_text" {
@@ -396,14 +479,54 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 			if len(message) > 240 {
 				message = message[:240]
 			}
-			input = append(input, schema.UserMessage(string(domain.JSON(map[string]any{"review_format_error": message, "candidate_hash": hash, "expected_fields": []string{"candidate_hash", "verdict", "issues"}, "expected_issue_fields": []string{"path", "reason", "citation_ids"}, "instruction": "Correct only the verdict schema and paths; return one report_evidence_review call, without extra fields."}))))
+			if s.policy().ReviewRecovery {
+				if saveErr := s.recordReviewFormatFailure(ctx, key, batch.Mode, attempt, slot, message); saveErr != nil {
+					return evidenceReview{}, saveErr
+				}
+				if formatRetried {
+					break
+				}
+				formatRetried = true
+			}
+			correction := map[string]any{"review_format_error": message, "candidate_hash": hash, "expected_fields": []string{"candidate_hash", "verdict", "issues"}, "expected_issue_fields": []string{"path", "reason", "citation_ids"}, "instruction": "Correct only the verdict schema and paths; return one report_evidence_review call, without extra fields."}
+			if s.policy().ReviewRecovery {
+				correction["expected_fields"], correction["expected_issue_fields"] = []string{"issues"}, []string{"field", "reason", "citation_ids"}
+				correction["instruction"] = "Return issues only. Use an exact F-number from field_ids. Keep each final reason under 300 characters; omit correct and withdrawn items. No hash or verdict."
+			}
+			input = append(input, schema.UserMessage(string(domain.JSON(correction))))
 			continue // At most one fresh format retry, within the original call cap.
 		}
-		verdict := map[string]any{"candidate_hash": result.CandidateHash, "verdict": result.Verdict, "issues": result.Issues, "review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode, "batch_frame_ids": ids}
+		if s.policy().ReviewRecovery && !adjudicating && len(result.Issues) > 0 {
+			// A critic's tentative findings are untrusted. A fresh source-bound
+			// decision removes retracted/nonissues before they can spend author
+			// corrections. This reservation also survives worker replay.
+			adjudicating = true
+			adjudicationPaths = map[string]bool{}
+			for _, issue := range result.Issues {
+				adjudicationPaths[issue.Path] = true
+			}
+			info, err = reviewFieldTool(originalInfo, fields, adjudicationPaths)
+			if err != nil {
+				return evidenceReview{}, err
+			}
+			input = append([]*schema.Message{}, baseInput...)
+			input[0] = schema.SystemMessage(evidenceAdjudicatorInstructionsV6)
+			input = append(input, schema.UserMessage(string(domain.JSON(map[string]any{"provisional_review": result, "previous_review": s.pendingEvidenceReview(), "instruction": reviewAdjudicationInstruction}))))
+			continue
+		}
+		verdict := map[string]any{"candidate_hash": result.CandidateHash, "verdict": result.Verdict, "issues": result.Issues, "review_protocol": protocol, "review_mode": batch.Mode, "batch_frame_ids": ids}
+		if s.policy().ReviewRecovery {
+			verdict["adjudicated"], verdict["review_attempts"] = adjudicating, attempt+1
+		}
 		if err = s.engine.Store.FinishOperation(ctx, s.claim, key, verdict, "", nil); err != nil {
 			return evidenceReview{}, err
 		}
 		return result, nil
+	}
+	if s.policy().ReviewRecovery {
+		// A broken reviewer response provides no valid author correction. Never
+		// spend the writer's repair quota trying to repair the reviewer's schema.
+		return evidenceReview{}, domain.Err(502, "REVIEW_RESULT_INVALID", "独立复核连续未返回可执行的结论；来源与草稿已保留，可以重新尝试。")
 	}
 	return evidenceReview{}, &candidateError{err: invalid("独立复核未返回合格的结构化结论，候选已保留，不能据此发布。")}
 }
@@ -462,10 +585,10 @@ func parseEvidenceReview(response *schema.Message, hash string, candidate []byte
 	}
 	for _, issue := range out.Issues {
 		if len(issue.Path) > 240 || utf8.RuneCountInString(issue.Reason) < 3 || utf8.RuneCountInString(issue.Reason) > 600 || len(issue.CitationIDs) < 1 || len(issue.CitationIDs) > 6 {
-			return out, errors.New("review issue is not bounded or source-linked")
+			return out, fmt.Errorf("review issue bounds invalid: path_bytes=%d reason_characters=%d (3-600 required) citation_count=%d (1-6 required); report only a short final actionable error", len(issue.Path), utf8.RuneCountInString(issue.Reason), len(issue.CitationIDs))
 		}
 		if _, err = jsonField(candidate, issue.Path); err != nil {
-			return out, fmt.Errorf("review points outside candidate: %w", err)
+			return out, fmt.Errorf("review points outside candidate at %s: %w", issue.Path, err)
 		}
 		for _, id := range issue.CitationIDs {
 			if _, ok := catalog[id]; !ok {

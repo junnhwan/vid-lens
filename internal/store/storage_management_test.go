@@ -296,7 +296,7 @@ func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testi
 		t.Fatal(e)
 	}
 	// Recreate the schema-12 storage state and apply the real embedded upgrade.
-	for _, q := range []string{"DELETE FROM schema_migrations WHERE version=13", "DELETE FROM schema_migrations WHERE version=23", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
+	for _, q := range []string{"DELETE FROM schema_migrations WHERE version IN (13,23,24)", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
 		if _, e = s.Pool.Exec(ctx, q); e != nil {
 			t.Fatal(e)
 		}

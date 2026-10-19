@@ -112,7 +112,7 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	if err = json.Unmarshal(run.Checkpoint, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if restored["draft_resume"] != true || restored["calls"] != float64(0) {
+	if restored["draft_resume"] != true || restored["calls"] != float64(0) || restored["retry_harness_revision"] != float64(domain.CurrentReviewHarnessRevision) {
 		t.Fatalf("explicit retry identity not reset: %s", run.Checkpoint)
 	}
 	claim, err := s.Claim(ctx, *next.ActiveRunID, 1, "resumed")

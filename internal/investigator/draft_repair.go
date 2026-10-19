@@ -203,7 +203,11 @@ func planRepairAllowed(path []string) bool {
 }
 
 func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) error) error {
-	return add(utils.InferEnhancedTool("repair_article_plan", "Repair a retained rejected begin_article plan before any draft exists. Require candidate_id and exact expected_hash. Use 1-16 replace patches for /sections/<index>/evidence_ids, an existing evidence_ids/<index>, start_ms, end_ms, title or an existing key_points/<index>, /title or /limitations. Preserve the complete chapter plan and supported points. Cannot alter source/model identity or publish. All source and full-video checks run again before saving version 1.", func(ctx context.Context, in candidatePatchInput) (*schema.ToolResult, error) {
+	description := "Repair a retained rejected begin_article plan before any draft exists. Require candidate_id and exact expected_hash. Use 1-16 replace patches for /sections/<index>/evidence_ids, an existing evidence_ids/<index>, start_ms, end_ms, title or an existing key_points/<index>, /title or /limitations. Preserve the complete chapter plan and supported points. Cannot alter source/model identity or publish. All source and full-video checks run again before saving version 1."
+	if s.policy().ReviewRecovery {
+		description += " If current feedback flags point_count_exceeded, replace that exact /sections/<index>/key_points array by merging its supported facts into 1-12 points. No other whole key_points array is editable."
+	}
+	return add(utils.InferEnhancedTool("repair_article_plan", description, func(ctx context.Context, in candidatePatchInput) (*schema.ToolResult, error) {
 		op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "candidate-attempt:"+in.CandidateID+":invalid")
 		if errors.Is(err, pgx.ErrNoRows) {
 			return toolError("候选不存在或不属于本次执行。")
@@ -229,7 +233,7 @@ func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) err
 			parentJSON = normalizeAuthoringContainers("begin_article", normalizeAuthoringJSON(parentJSON))
 		}
 		raw, err := replaceFields([]byte(parentJSON), in.Patches, func(path []string) bool {
-			return planRepairAllowed(path) || s.policy().ConceptMaps && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && (path[0] == "sections" && path[2] == "id" || path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids"))
+			return planRepairAllowed(path) || s.planCountRepairAllowed(path) || s.policy().ConceptMaps && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && (path[0] == "sections" && path[2] == "id" || path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids"))
 		})
 		if err != nil {
 			return toolError(err.Error())

@@ -17,6 +17,7 @@ import (
 
 type checkpoint struct {
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
+	RetryHarnessRevision int                 `json:"retry_harness_revision,omitempty"`
 	PlanHash             string              `json:"plan_hash,omitempty"`
 	Progress             progressState       `json:"progress,omitempty"`
 	InspectBatchRejected map[string]bool     `json:"inspect_batch_rejected,omitempty"`
@@ -33,6 +34,7 @@ type checkpoint struct {
 	Repairs              int                 `json:"repairs"`
 	DraftRepairVersion   int                 `json:"draft_repair_version,omitempty"`
 	DraftCorrection      bool                `json:"draft_correction,omitempty"`
+	DraftWriteRequired   bool                `json:"draft_write_required,omitempty"`
 	DraftIssue           map[string]any      `json:"draft_issue,omitempty"`
 	EvidenceReviewIssue  map[string]any      `json:"evidence_review_issue,omitempty"`
 	Composing            bool                `json:"composing,omitempty"`

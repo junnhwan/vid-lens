@@ -400,6 +400,15 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 	return textResult(s.draftState(saved.Version, draft)), nil
 }
 func (s *session) writeDraft(ctx context.Context, args any, version int, draft articleDraft, title string) (*schema.ToolResult, error) {
+	if version > 0 && s.policy().ReviewRecovery {
+		currentVersion, current, err := s.loadDraft(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if currentVersion == version && draftContentHash(current) == draftContentHash(draft) {
+			return s.draftFeedback(ctx, string(domain.JSON(map[string]any{"code": "draft_unchanged", "detail": "正文、图注、引用和标题没有实际变化，草稿版本保持。按evidence_review_issues中现有draft_path调用patch_article_draft修正字段，不能再次提交相同章节。", "repairable": true})))
+		}
+	}
 	return s.step(ctx, title, "compose", nil, func() (any, []string, error) {
 		if version > 0 {
 			currentVersion, current, err := s.loadDraft(ctx)
@@ -420,6 +429,7 @@ func (s *session) writeDraft(ctx context.Context, args any, version int, draft a
 		}
 		s.cp.Composing = true
 		s.cp.DraftCorrection = false
+		s.cp.DraftWriteRequired = false
 		s.cp.DraftIssue = nil
 		s.cp.LastCandidate = nil
 		return s.draftState(saved.Version, draft), nil, nil
@@ -452,6 +462,9 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 		}
 		out["accepted_sections"] = draft.BatchReceipt.Accepted
 		out["rejected_sections"] = draft.BatchReceipt.Rejected
+		if len(draft.BatchReceipt.Ignored) > 0 {
+			out["ignored_unplanned_sections"] = draft.BatchReceipt.Ignored
+		}
 		if len(draft.BatchReceipt.Rejected) > 0 {
 			out["error"] = map[string]any{"code": "chapter_validation", "affected_sections": draft.BatchReceipt.Rejected, "repairable": true}
 			out["next_action"] = "Keep accepted_sections unchanged. Correct only rejected_sections and write other pending_sections with this latest version."
@@ -733,6 +746,24 @@ func (s *session) resumeDraft(ctx context.Context) error {
 	}
 	if s.authoring() && spec.DetailPolicy != nil {
 		msgs[0].Content = authoringInstructions(spec.DetailPolicy.Instruction)
+	}
+	if s.cp.HarnessRevision >= 13 && s.cp.HarnessRevision <= domain.CurrentReviewHarnessRevision {
+		revision := s.cp.HarnessRevision
+		if s.cp.RetryHarnessRevision == domain.CurrentReviewHarnessRevision && revision >= 15 && s.cp.Calls == 0 && s.cp.Repairs == 0 {
+			if _, compatible := compatibleRetryReviewSpec(spec); compatible {
+				revision = domain.CurrentReviewHarnessRevision
+			}
+		}
+		if restored, ok := recordedResumeProtocolSpec(spec, revision); ok {
+			actual, instruction := initialProtocol(restored, false, draftLayout, true, 0)
+			if actual != revision {
+				return errors.New("restored draft execution protocol is incompatible")
+			}
+			s.cp.HarnessRevision, msgs[0].Content = revision, instruction
+			if s.policy().ReviewRecovery {
+				msgs[2].Content += "\n" + diagramGroundingRule
+			}
+		}
 	}
 	if ids := s.unobserved(ctx); len(ids) > 0 {
 		parts, err := s.imageInput(ctx, ids, "resumed-unobserved")

@@ -15,6 +15,7 @@ var errDraftReady = errors.New("validated draft ready for publication")
 type batchReceipt struct {
 	Accepted []string         `json:"accepted_sections"`
 	Rejected []map[string]any `json:"rejected_sections"`
+	Ignored  []string         `json:"ignored_unplanned_sections,omitempty"`
 }
 
 func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, version int, draft articleDraft) (*schema.ToolResult, error) {
@@ -33,11 +34,21 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		return nil, err
 	}
 	receipt := &batchReceipt{Accepted: []string{}, Rejected: []map[string]any{}}
+	planned := map[string]bool{}
+	for _, section := range draft.Plan {
+		planned[section.ID] = true
+	}
 	counts := map[string]int{}
 	for _, section := range in.Sections {
 		counts[section.ID]++
 	}
 	for sectionIndex, section := range in.Sections {
+		if s.policy().ReviewRecovery && !planned[section.ID] {
+			// Only the frozen plan can define publishable chapters. A spurious
+			// extra chapter must not poison its complete, independently valid body.
+			receipt.Ignored = append(receipt.Ignored, section.ID)
+			continue
+		}
 		if s.policy().ContentReview {
 			section, err = resolveOwnedFrameAliases(section, catalog)
 			if err != nil {
@@ -81,6 +92,9 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		receipt.Accepted = append(receipt.Accepted, section.ID)
 	}
 	if len(receipt.Accepted) == 0 {
+		if s.policy().ReviewRecovery && len(receipt.Rejected) == 0 && len(receipt.Ignored) > 0 {
+			return s.draftFeedback(ctx, string(domain.JSON(map[string]any{"code": "unplanned_sections", "detail": "丢弃计划外章节，仅用当前计划中的章节ID保存正文；不要修补或新增计划身份。", "ignored_unplanned_sections": receipt.Ignored, "repairable": true})))
+		}
 		return s.draftFeedback(ctx, string(domain.JSON(map[string]any{"code": "chapter_validation", "affected_sections": receipt.Rejected, "repairable": true})))
 	}
 	// Receipt and accepted subset commit in the SAME fenced, idempotent operation.

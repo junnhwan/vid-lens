@@ -126,6 +126,13 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 			return answerTools
 		}
 	}
+	if s.requiresNextDraftWrite() {
+		for _, info := range in {
+			if info.Name == "save_article_sections" {
+				return []*schema.ToolInfo{info}
+			}
+		}
+	}
 	if !s.policy().Paced || s.turn != nil || s.forceDraftSubmit {
 		return in
 	}
