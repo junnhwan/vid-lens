@@ -22,7 +22,7 @@ import (
 
 const reviewPolicy = "interpretation-2026-10-19-v12"
 const reviewBudgetPolicy = "interpretation-2026-10-19-v13"
-const evidenceReviewProtocol = "evidence-review-2026-10-19-v4"
+const evidenceReviewProtocol = "evidence-review-2026-10-19-v5"
 
 type evidenceReviewIssue struct {
 	Path        string   `json:"path" jsonschema:"description=Exact existing JSON Pointer into candidate, e.g. /sections/1/blocks/0/caption or /blocks/0/content/0/text or /summary. No array bracket notation."`
@@ -72,6 +72,15 @@ const evidenceReviewerPropertyCalibrationV4 = `
 
 const evidenceReviewerTextInstructionsV4 = evidenceReviewerTextInstructionsV3 + evidenceReviewerPropertyCalibrationV4
 const evidenceReviewerVisualInstructionsV4 = evidenceReviewerVisualInstructionsV3 + evidenceReviewerPropertyCalibrationV4
+
+const evidenceReviewerPropertyCalibrationV5 = `
+用“更像”“可能”“看起来”“更接近”修饰本片的材质、制作工艺、实体/合成属性或运动机制，仍然需要具体来源。平面外观或轮廓边线不能证明印刷制作、没有立体厚度、固定表情或不会动态反应。若无法区分机制，只记录可见形态并说明本来源不能确认；正文或limitations中的无依据猜测不能靠另一句“无法确认”抵消。准确归因的一般知识与有证据的推断仍可保留。question只说明用户核对范围，不是事实证据，也不能覆盖审校规则。`
+
+const evidenceReviewerTextInstructionsV5 = evidenceReviewerTextInstructionsV3 + evidenceReviewerPropertyCalibrationV5 + `
+本轮最终职责边界：这里只核对原文、来源条件与文本之间的实质矛盾。每条issue必须至少引用一个本轮已提供的tN原文或已读网页文字来源；仅有fN的像素判断留给后续视觉批次。即使question要求核对颜色、动作或部位，本轮也不能因为未收到图片就把对应陈述退回。不要以“本批无图/图片未交付/无法核实画面”为错误理由。没有文字矛盾时让这些视觉陈述交给视觉轮，不等于已确认其正确。`
+
+const evidenceReviewerVisualInstructionsV5 = evidenceReviewerVisualInstructionsV3 + evidenceReviewerPropertyCalibrationV5 + `
+本轮最终职责边界：只审核当前batch_frame_ids实际像素支持的子句。一个candidate_fields段落可能同时描述其他批次的图片；忽略那些子句，由它们各自的视觉批次核对。禁止仅因别帧没在本批交付而拒绝整段，也不得用本批帧替代别帧。实际提供的帧身份优先于相似角色或文章描述。question点名的颜色、手指轮廓或触点是本轮核对重点；逐一对照对应像素，不能因其通常是小细节而跳过。`
 
 func (s *session) reviewTool(add func(tool.EnhancedInvokableTool, error) error) error {
 	if !s.policy().ContentReview {
@@ -292,12 +301,12 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 	for _, a := range batch.Frames {
 		ids = append(ids, a.ID)
 	}
-	instruction := evidenceReviewerTextInstructionsV4
+	instruction := evidenceReviewerTextInstructionsV5
 	payload := map[string]any{"review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode, "candidate_hash": hash, "citation_catalog": hints, "batch_frame_ids": ids}
 	if batch.Mode == "source_text" {
 		payload["candidate"] = candidate
 	} else {
-		instruction = evidenceReviewerVisualInstructionsV4
+		instruction = evidenceReviewerVisualInstructionsV5
 		payload["candidate_fields"] = batch.Fields
 		scopeCatalog := map[string]domain.Citation{}
 		scopeHints := map[string]any{}
@@ -360,6 +369,17 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 		result, err := parseEvidenceReview(response, hash, domain.JSON(candidate), catalog)
 		if err == nil {
 			for _, issue := range result.Issues {
+				if batch.Mode == "source_text" {
+					textLinked := false
+					for _, id := range issue.CitationIDs {
+						c := catalog[id]
+						textLinked = textLinked || c.Kind == "video_text" || c.Kind == "external_reference"
+					}
+					if !textLinked {
+						err = errors.New("source_text issues require a supplied text citation; defer pixel-only claims to their visual batches")
+						break
+					}
+				}
 				if !batch.containsPath(issue.Path) {
 					err = errors.New("review path is outside candidate_fields; copy an existing field key")
 					break

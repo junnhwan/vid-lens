@@ -54,7 +54,13 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 	}
 	for _, c := range cases {
 		var actual string
-		if c.Kind == "review_text_prompt_v4" {
+		if c.Kind == "review_text_prompt_v5" {
+			hash := sha256.Sum256([]byte(evidenceReviewerTextInstructionsV5))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_visual_prompt_v5" {
+			hash := sha256.Sum256([]byte(evidenceReviewerVisualInstructionsV5))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "review_text_prompt_v4" {
 			hash := sha256.Sum256([]byte(evidenceReviewerTextInstructionsV4))
 			actual = hex.EncodeToString(hash[:])
 		} else if c.Kind == "review_visual_prompt_v4" {

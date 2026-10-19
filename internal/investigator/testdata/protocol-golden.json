@@ -772,5 +772,17 @@
     "revision": 16,
     "question": false,
     "sha256": "e5d12244b9ba0a8ba5d78a40b4d801c91ede6224fa3d839c35179ef711fe56c9"
+  },
+  {
+    "kind": "review_text_prompt_v5",
+    "revision": 16,
+    "question": false,
+    "sha256": "85ea92e52a0600ee36cbe714b3d605dea7af8be0785e4cd59074a4dd3c3b5d47"
+  },
+  {
+    "kind": "review_visual_prompt_v5",
+    "revision": 16,
+    "question": false,
+    "sha256": "940d7a5db78000b5cdd1e840fcfa727711ed0ed283caa149042c7f01c8faca23"
   }
 ]
