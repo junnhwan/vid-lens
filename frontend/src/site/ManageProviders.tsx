@@ -7,7 +7,7 @@ export interface ManageProvidersProps {
   dirty: boolean
   saveProvider: () => Promise<void>
   setPd: import("react").Dispatch<import("react").SetStateAction<ProviderDraft>>
-  setDirty: import("react").Dispatch<import("react").SetStateAction<boolean>>
+  setDirty: (dirty: boolean) => void
   busy: string
   discover: () => Promise<void>
   discovery: string[]
