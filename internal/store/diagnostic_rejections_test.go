@@ -52,7 +52,7 @@ func TestRunDiagnosticsExplainsRepairDeadEndsWithoutCandidateContent(t *testing.
 
 func TestToolRejectionDiagnosticsUnwrapsEncodedAndNestedValidationIssues(t *testing.T) {
 	for _, raw := range []string{
-		`{"code":"plan_invalid","issues":[{"code":"evidence_count_exceeded","path":"/sections/2/evidence_ids","actual":"private-candidate-text"}]}`,
+		`{"code":"plan_invalid","affected_sections":[1,4,5,8],"issues":[{"code":"evidence_count_exceeded","path":"/sections/2/evidence_ids","actual":"private-candidate-text"}]}`,
 		`{"code":"chapter_validation","affected_sections":[{"section_id":"s3","issue":{"code":"candidate_schema","issues":[{"code":"evidence_count_exceeded","path":"/sections/2/evidence_ids","detail":"private-candidate-text"}]}}]}`,
 	} {
 		// String-valued tool errors are JSON strings in the execution ledger.

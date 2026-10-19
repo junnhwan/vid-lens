@@ -24,9 +24,7 @@ type rejectionIssueEnvelope struct {
 	Code             string                   `json:"code"`
 	Path             string                   `json:"path"`
 	Issues           []rejectionIssueEnvelope `json:"issues"`
-	AffectedSections []struct {
-		Issue *rejectionIssueEnvelope `json:"issue"`
-	} `json:"affected_sections"`
+	AffectedSections []json.RawMessage        `json:"affected_sections"`
 }
 
 // Rejection text can contain the complete private candidate. Project only
@@ -68,10 +66,17 @@ func diagnosticRejectionIssues(reason string) []diagnosticIssue {
 					project(child, depth+1)
 				}
 			} else if depth < 4 && len(next.AffectedSections) > 0 {
-				for _, section := range next.AffectedSections[:min(len(next.AffectedSections), 40)] {
-					if section.Issue != nil {
+				before := len(out)
+				for _, raw := range next.AffectedSections[:min(len(next.AffectedSections), 40)] {
+					var section struct {
+						Issue *rejectionIssueEnvelope `json:"issue"`
+					}
+					if json.Unmarshal(raw, &section) == nil && section.Issue != nil {
 						project(*section.Issue, depth+1)
 					}
+				}
+				if len(out) == before {
+					add(next.Code, next.Path)
 				}
 			} else {
 				add(next.Code, next.Path)
