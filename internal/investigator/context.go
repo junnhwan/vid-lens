@@ -212,6 +212,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			}
 		}
 		data := map[string]any{"draft": s.draftState(saved, draft), "citation_catalog": hints}
+		if s.policy().EvidenceGrounding {
+			data["frame_context"] = frameContexts(catalog, s.transcript)
+		}
 		if s.authoring() {
 			data["citation_catalog_rule"] = authoringCatalogRule
 		}
@@ -259,7 +262,12 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		if err != nil {
 			return ctx, nil, err
 		}
-		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_answer_references", Content: string(domain.JSON(map[string]any{"citation_catalog": catalogHints(catalog), "rule": "Use tN/fN directly in answer blocks; omit video citation objects. Cite representative evidence for this question, not every subtitle."}))})
+		refs := map[string]any{"citation_catalog": catalogHints(catalog), "rule": "Use tN/fN directly in answer blocks; omit video citation objects. Cite representative evidence for this question, not every subtitle."}
+		if s.policy().EvidenceGrounding {
+			refs["frame_context"] = frameContexts(catalog, s.transcript)
+			refs["question_frame_ids"] = s.cp.Inspections["question-context"]
+		}
+		filtered = append(filtered, &schema.Message{Role: schema.User, Name: "vidlens_answer_references", Content: string(domain.JSON(refs))})
 	}
 	if len(observations) > 0 {
 		filtered = append(filtered, &schema.Message{Role: schema.User, Name: capsuleName, Content: capsule})

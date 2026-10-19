@@ -38,6 +38,9 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		counts[section.ID]++
 	}
 	for sectionIndex, section := range in.Sections {
+		if s.policy().EvidenceGrounding {
+			section = linkFigureFrames(section, catalog)
+		}
 		next, issue := assembleDraftBatch(draft, []domain.Section{section}, catalog)
 		if counts[section.ID] > 1 {
 			issue = fmt.Errorf("重复章节%s；一次只提交一个修订", section.ID)

@@ -143,6 +143,9 @@ func (s *session) validateAnswer(ctx context.Context, a *domain.Answer) error {
 	if e := s.validateBlocks(ctx, a.Blocks, a.Citations, false); e != nil {
 		return e
 	}
+	if e := s.validateQuestionFrameReference(*a); e != nil {
+		return e
+	}
 	sections := map[string]bool{}
 	for _, sec := range s.article.Sections {
 		sections[sec.ID] = true

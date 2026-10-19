@@ -550,5 +550,65 @@
     "question": true,
     "revision": 11,
     "sha256": "34a9333932393c83601f6d290e335a14124414838e0871dc1d8a6b5dc1f4dc12"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": false,
+    "revision": 14,
+    "sha256": "8dcc87f355f756ebd536d20f445cb6c82a51268e9e682e03db93f1c23ed0cd56"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": true,
+    "revision": 14,
+    "sha256": "dae23126cae5638ed291828c5dd237df8a155c2d0e7c06ca43c8006951e93eae"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": false,
+    "revision": 14,
+    "sha256": "978fb8acb8837487284ebc8585b88ec7351c1eaaf91037c60bd7bbc7634d425f"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": true,
+    "revision": 14,
+    "sha256": "dae23126cae5638ed291828c5dd237df8a155c2d0e7c06ca43c8006951e93eae"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": false,
+    "revision": 14,
+    "sha256": "1c34e294488cee10b120c1ded79e247f7b77f16e809f67e1b45d92b00df86c39"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v11",
+    "question": true,
+    "revision": 14,
+    "sha256": "dae23126cae5638ed291828c5dd237df8a155c2d0e7c06ca43c8006951e93eae"
+  },
+  {
+    "kind": "tools",
+    "question": false,
+    "revision": 14,
+    "sha256": "0034742ab9ff2b2692f2d904a59060853bba91cad3552703f919508dc28211b4"
+  },
+  {
+    "kind": "tools",
+    "question": true,
+    "revision": 14,
+    "sha256": "b673ba0359d901b1f2ae1453f4c23915cb2134d4e965bb7e126676568fcf8751"
   }
 ]

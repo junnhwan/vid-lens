@@ -21,6 +21,7 @@ type executionPolicy struct {
 	EvidenceFirstAnswers bool
 	SectionAuthoring     bool
 	Recovery             bool
+	EvidenceGrounding    bool
 }
 
 func policyAt(revision int) executionPolicy {
@@ -36,6 +37,7 @@ func policyAt(revision int) executionPolicy {
 		EvidenceFirstAnswers: revision >= 11,
 		SectionAuthoring:     revision >= 12,
 		Recovery:             revision >= 13,
+		EvidenceGrounding:    revision >= 14,
 	}
 }
 
@@ -86,14 +88,22 @@ func initialProtocol(spec domain.GenerationSpec, question bool, layout string, n
 			// Existing Ready checkpoints never pass through this initialization.
 			revision = 11
 			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
+			if spec.DetailPolicy.Revision == evidencePolicy {
+				revision = 14
+				instruction += evidenceGroundingInstructions
+			}
 		}
 	}
-	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy) {
+	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy) {
 		revision = 12
 		instruction = authoringInstructions(spec.DetailPolicy.Instruction)
-		if spec.DetailPolicy.Revision == recoveryPolicy {
+		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy {
 			revision = 13
 			instruction += repairProgressInstructions
+		}
+		if spec.DetailPolicy.Revision == evidencePolicy {
+			revision = 14
+			instruction += evidenceGroundingInstructions
 		}
 	}
 	return revision, instruction

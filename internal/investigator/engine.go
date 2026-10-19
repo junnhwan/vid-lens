@@ -181,7 +181,16 @@ func (s *session) initial(ctx context.Context) error {
 			s.cp.LayoutVersion = draftLayout
 		}
 	}
-	revision, instruction := initialProtocol(s.spec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)
+	protocolSpec := s.spec
+	if newLayout && s.turn != nil && s.spec.Version >= 2 && s.spec.DetailPolicy != nil {
+		// A new private question freezes today's answer protocol independently of
+		// the immutable article's older generation policy. Do not mutate that spec
+		// or upgrade a checkpoint that has already started.
+		p := *s.spec.DetailPolicy
+		p.Revision = evidencePolicy
+		protocolSpec.DetailPolicy = &p
+	}
+	revision, instruction := initialProtocol(protocolSpec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)
 	s.cp.HarnessRevision = revision
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
@@ -285,6 +294,15 @@ func (s *session) initial(ctx context.Context) error {
 		s.cp.Protocol = domain.ArticleDraftProtocol
 	}
 	s.cp.CitationFrames = append([]string{}, s.cp.OverviewIDs...)
+	if s.turn != nil {
+		// Question pixels are not article overview frames. Keep the identities
+		// actually returned by Reload (which may rematerialize missing media).
+		for _, id := range s.cp.Inspections["question-context"] {
+			if !slices.Contains(s.cp.CitationFrames, id) {
+				s.cp.CitationFrames = append(s.cp.CitationFrames, id)
+			}
+		}
+	}
 	s.cp.Ready = true
 	return s.persist(ctx, msgs)
 }
@@ -296,6 +314,9 @@ func (s *session) imageInput(ctx context.Context, ids []string, inspection strin
 			return nil, e
 		}
 		meta := fmt.Sprintf("snapshot_id=%s inspection_id=%s frame_id=%s actual_time_ms=%d requested_time_ms=%d", s.snapshot.ID, inspection, a.ID, *a.TimeMS, *a.RequestedTimeMS)
+		if s.policy().EvidenceGrounding {
+			meta += "\nframe_text_context=" + string(domain.JSON(frameTextContext(*a.TimeMS, s.transcript)))
+		}
 		parts = append(parts, schema.MessageInputPart{Type: schema.ChatMessagePartTypeText, Text: meta}, schema.MessageInputPart{Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: domain.Ptr(base64.StdEncoding.EncodeToString(b)), MIMEType: a.MIME}}, Extra: map[string]any{"frame_id": a.ID, "inspection_id": inspection}})
 	}
 	return parts, nil
