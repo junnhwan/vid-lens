@@ -64,3 +64,5 @@ Title and duration can appear before download and source publication. Failures i
 Owner run diagnostics include bounded `tool_rejections`: tool/call identity, consecutive no-progress count, and validation categories with field paths. Missing retained fields are identified as `repair_field_missing`. This projection excludes raw rejection prose, expected/actual candidate values, prompts and signed URLs. Unknown rejection text is represented by a generic category. The original private execution ledger remains available for authorized deeper investigation.
 
 String-encoded tool errors and nested chapter validation issues use the same safe projection. Only known error envelopes are traversed, to a bounded depth and at most 64 issue entries per rejection; raw chapter or candidate contents are not returned.
+
+When short execution feedback clips a long validation report, diagnostics uses the complete retained issue bound to the same run and tool call. Candidate arguments and private expected/actual values remain outside the diagnostic response.

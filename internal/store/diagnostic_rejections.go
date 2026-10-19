@@ -91,10 +91,15 @@ func diagnosticRejectionIssues(reason string) []diagnosticIssue {
 }
 
 func toolRejectionDiagnostics(ctx context.Context, q Querier, run string) ([]diagnosticRejection, error) {
-	rows, err := q.Query(ctx, `SELECT operation_key,COALESCE(result->>'call_id',''),COALESCE(result->>'tool',''),
- COALESCE(result->'progress'->>'stalled','0')::integer,COALESCE(result->>'rejection_reason','')
- FROM run_operations WHERE run_id=$1 AND kind='tool_feedback' AND result->>'rejected'='true'
- ORDER BY started_at,operation_key LIMIT 400`, run)
+	rows, err := q.Query(ctx, `SELECT f.operation_key,COALESCE(f.result->>'call_id',''),COALESCE(f.result->>'tool',''),
+ COALESCE(f.result->'progress'->>'stalled','0')::integer,
+ CASE WHEN jsonb_typeof(c.result->'issue')='object' THEN (c.result->'issue')::text
+ ELSE COALESCE(f.result->>'rejection_reason','') END
+ FROM run_operations f
+ LEFT JOIN run_operations c ON c.run_id=f.run_id
+ AND c.operation_key='candidate-attempt:'||(f.result->>'call_id')||':invalid' AND c.kind='candidate_attempt'
+ WHERE f.run_id=$1 AND f.kind='tool_feedback' AND f.result->>'rejected'='true'
+ ORDER BY f.started_at,f.operation_key LIMIT 400`, run)
 	if err != nil {
 		return nil, err
 	}

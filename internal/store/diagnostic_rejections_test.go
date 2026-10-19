@@ -66,3 +66,46 @@ func TestToolRejectionDiagnosticsUnwrapsEncodedAndNestedValidationIssues(t *test
 		}
 	}
 }
+
+func TestRunDiagnosticsUsesRetainedIssuesAfterFeedbackTruncation(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	accepted, err := s.CreateRequest(ctx, session(t, s), domain.ID(), "local://retained-diagnostic.mp4", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run string
+	if err = s.Pool.QueryRow(ctx, "SELECT active_run_id FROM generation_requests WHERE id=$1", accepted.ID).Scan(&run); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := s.Claim(ctx, run, 1, "diagnostic")
+	if err != nil || claim == nil {
+		t.Fatal(err)
+	}
+	issue := map[string]any{"code": "plan_invalid", "detail": strings.Repeat("private-candidate-text", 80), "affected_sections": []int{1, 2},
+		"issues": []map[string]any{{"code": "evidence_count_exceeded", "path": "/sections/1/evidence_ids", "actual": "private-provider-key"},
+			{"code": "figure_sequence", "path": "/sections/2/blocks/0/frame_ids", "expected": "private-candidate-text"}}}
+	if err = s.RecordCandidate(ctx, *claim, "retained", "begin_article", `{"private-arguments":"do not expose"}`, "invalid", issue); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.BeginOperation(ctx, *claim, "feedback", "tool_feedback", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	reason := []rune(string(domain.JSON(issue)))
+	if err = s.FinishOperation(ctx, *claim, "feedback", map[string]any{"tool": "begin_article", "call_id": "retained", "rejected": true, "rejection_reason": string(reason[:512])}, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := s.RunDiagnostics(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(domain.JSON(diagnostic))
+	for _, want := range []string{"evidence_count_exceeded", "/sections/1/evidence_ids", "figure_sequence", "/sections/2/blocks/0/frame_ids"} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("truncated feedback concealed retained issue %q", want)
+		}
+	}
+	if strings.Contains(raw, "private-") {
+		t.Fatal("retained candidate lookup exposed values outside the safe issue projection")
+	}
+}
