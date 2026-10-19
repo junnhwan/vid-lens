@@ -29,6 +29,10 @@ export function Manage() {
   const [pd, setPd] = useState<ProviderDraft>(emptyProvider),
     [md, setMd] = useState<ModelDraft>(emptyModel),
     [dirty, setDirty] = useState(false)
+  function markDirty(next: boolean) {
+    setDirty(next)
+    if (!next) setError((current) => (current.includes("请先保存或撤销") ? "" : current))
+  }
   const [discovery, setDiscovery] = useState<string[]>([]),
     [picked, setPicked] = useState<string[]>([]),
     [filter, setFilter] = useState(""),
@@ -221,7 +225,7 @@ export function Manage() {
         body,
       )
       setPd(providerDraft(r.body))
-      setDirty(false)
+      markDirty(false)
       setNotice("供应商已保存。更换密钥或端点不会改写旧请求的修订。")
       await load()
     })
@@ -236,7 +240,7 @@ export function Manage() {
         enabled: unchanged ? Boolean(current?.enabled) : false,
       })
       setMd(modelDraft(r.body))
-      setDirty(false)
+      markDirty(false)
       setComposing(false)
       setAdvanced(false)
       setNotice(
@@ -381,7 +385,7 @@ export function Manage() {
     setDirty(true)
   }
   function revertModel() {
-    setDirty(false)
+    markDirty(false)
     setRouteOrderDraft(null)
     setMd(selected ? modelDraft(selected) : { ...emptyModel, provider_id: providers[0]?.id || "" })
   }
@@ -528,19 +532,19 @@ export function Manage() {
             ) : null}
             <div className="desk-stage" key={section}>
               {section === "announcement" ? (
-                <AnnouncementSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+                <AnnouncementSettings api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "execution" ? (
-                <ExecutionSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+                <ExecutionSettings api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "videos" ? (
-                <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} query={route.query} offset={route.offset} onRoute={(next) => {
+                <VideoStorage api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} query={route.query} offset={route.offset} onRoute={(next) => {
                   const path = managePath("videos", next)
                   visit(path)
                 }} />
               ) : section === "examples" ? (
-                <ExampleShowcase api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+                <ExampleShowcase api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "network" ? (
-                <NetworkSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
-              ) : section === "providers" ? <ManageProviders {...{ openSection, editProvider, providers, pd, dirty, saveProvider, setPd, setDirty, busy, discover, discovery, setPicked, picked, importModels }} /> : section === "models" ? <ManageModels {...{ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }} /> : (
+                <NetworkSettings api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
+              ) : section === "providers" ? <ManageProviders {...{ openSection, editProvider, providers, pd, dirty, saveProvider, setPd, setDirty: markDirty, busy, discover, discovery, setPicked, picked, importModels }} /> : section === "models" ? <ManageModels {...{ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }} /> : (
                 <Diagnostics
                   data={diagnostics}
                   offset={route.offset}
