@@ -21,6 +21,7 @@ import (
 )
 
 const reviewPolicy = "interpretation-2026-10-19-v12"
+const reviewBudgetPolicy = "interpretation-2026-10-19-v13"
 const evidenceReviewProtocol = "evidence-review-2026-10-19-v1"
 
 type evidenceReviewIssue struct {

@@ -55,7 +55,7 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 	for _, c := range cases {
 		var actual string
 		if c.Kind == "review_prompt" {
-			if c.Revision != 15 {
+			if c.Revision != 15 && c.Revision != 16 {
 				t.Fatal("unknown independent review prompt revision")
 			}
 			hash := sha256.Sum256([]byte(evidenceReviewerInstructions))
@@ -87,7 +87,7 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 }
 func TestExistingCheckpointProtocolIsNotUpgraded(t *testing.T) {
 	p, _ := domain.InterpretationPolicy("detailed")
-	for revision := 0; revision <= 13; revision++ {
+	for revision := 0; revision <= 16; revision++ {
 		spec := domain.GenerationSpec{Version: 2, DetailPolicy: &p}
 		actual, _ := initialProtocol(spec, false, draftLayout, false, revision)
 		if actual != revision {

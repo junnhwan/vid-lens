@@ -676,5 +676,71 @@
     "revision": 15,
     "question": false,
     "sha256": "f924d329a35778897ebc54b4fb7205279db68c0980dd428afdcc63b0de55162b"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": false,
+    "revision": 16,
+    "sha256": "47826ff1eaa8f476b6d3f71579d5e902a93275bbe68da21bbf7d62103394c722"
+  },
+  {
+    "kind": "prompt",
+    "level": "concise",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": true,
+    "revision": 16,
+    "sha256": "4ac6c128ee04254a36641bdf4daff94e00a2a5f3fc1d5561d47762eed85709f5"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": false,
+    "revision": 16,
+    "sha256": "2c085886c8db4af88adedd6e6ee435cce4b6ff406bf17693e6527b1f0b021c96"
+  },
+  {
+    "kind": "prompt",
+    "level": "standard",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": true,
+    "revision": 16,
+    "sha256": "4ac6c128ee04254a36641bdf4daff94e00a2a5f3fc1d5561d47762eed85709f5"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": false,
+    "revision": 16,
+    "sha256": "f54a1d59d872da04d8aa6317bcdef27c5990b9f3969fbc93d85fcdacee4249d2"
+  },
+  {
+    "kind": "prompt",
+    "level": "detailed",
+    "policy": "interpretation-2026-10-19-v13",
+    "question": true,
+    "revision": 16,
+    "sha256": "4ac6c128ee04254a36641bdf4daff94e00a2a5f3fc1d5561d47762eed85709f5"
+  },
+  {
+    "kind": "tools",
+    "question": false,
+    "revision": 16,
+    "sha256": "67af63560651781c54ae68d345957d7914bcb460976b10e8a49819dff7244890"
+  },
+  {
+    "kind": "tools",
+    "question": true,
+    "revision": 16,
+    "sha256": "b35568948819020179bc0fd5473f1db2f44bc4c14bbb26845ac13847fb9b4af9"
+  },
+  {
+    "kind": "review_prompt",
+    "revision": 16,
+    "question": false,
+    "sha256": "f924d329a35778897ebc54b4fb7205279db68c0980dd428afdcc63b0de55162b"
   }
 ]

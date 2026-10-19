@@ -54,6 +54,7 @@ func (s *session) policy() executionPolicy {
 // Resolve only a new protocol. A checkpoint that already has a layout retains
 // its recorded revision and existing initialization behavior, including v0.
 func initialProtocol(spec domain.GenerationSpec, question bool, layout string, newLayout bool, revision int) (int, string) {
+	review := spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == reviewPolicy || spec.DetailPolicy.Revision == reviewBudgetPolicy)
 	instruction := instructions
 	if layout == draftLayout {
 		instruction += draftInstructions
@@ -90,30 +91,36 @@ func initialProtocol(spec domain.GenerationSpec, question bool, layout string, n
 			// Existing Ready checkpoints never pass through this initialization.
 			revision = 11
 			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
-			if spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
+			if spec.DetailPolicy.Revision == evidencePolicy || review {
 				revision = 14
 				instruction += evidenceGroundingInstructions
 			}
-			if spec.DetailPolicy.Revision == reviewPolicy {
+			if review {
 				revision = 15
 				instruction += reviewAuthorInstructions
+				if spec.DetailPolicy.Revision == reviewBudgetPolicy {
+					revision = 16
+				}
 			}
 		}
 	}
-	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy) {
+	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || review) {
 		revision = 12
 		instruction = authoringInstructions(spec.DetailPolicy.Instruction)
-		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
+		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || review {
 			revision = 13
 			instruction += repairProgressInstructions
 		}
-		if spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
+		if spec.DetailPolicy.Revision == evidencePolicy || review {
 			revision = 14
 			instruction += evidenceGroundingInstructions
 		}
-		if spec.DetailPolicy.Revision == reviewPolicy {
+		if review {
 			revision = 15
 			instruction += reviewAuthorInstructions
+			if spec.DetailPolicy.Revision == reviewBudgetPolicy {
+				revision = 16
+			}
 		}
 	}
 	return revision, instruction

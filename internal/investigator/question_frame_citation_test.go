@@ -52,7 +52,7 @@ func TestQuestionContextPixelsRemainCitableAfterInitialization(t *testing.T) {
 	if !slices.Contains(s.cp.Inspections["question-context"], id) {
 		t.Fatal("question did not receive the real source pixels")
 	}
-	if s.cp.HarnessRevision != 15 || s.spec.DetailPolicy.Revision != recoveryPolicy {
+	if s.cp.HarnessRevision != 16 || s.spec.DetailPolicy.Revision != recoveryPolicy {
 		t.Fatal("new question inherited old article protocol or rewrote the immutable article policy")
 	}
 	// Keep the citation regression at its frozen v14 boundary. Independent

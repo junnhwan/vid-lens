@@ -69,7 +69,7 @@ func respondSupportedEvidenceReview(t *testing.T, w http.ResponseWriter, value a
 func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	s := planSession(t)
 	ctx := context.Background()
-	s.cp.HarnessRevision = 15
+	s.cp.HarnessRevision = 16
 	ms, err := media.New(s.engine.Store, s.engine.Resources, s.engine.Config)
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +96,9 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var input struct {
-			Messages []struct{ Content json.RawMessage } `json:"messages"`
-			Tools    []json.RawMessage                   `json:"tools"`
+			Messages  []struct{ Content json.RawMessage } `json:"messages"`
+			Tools     []json.RawMessage                   `json:"tools"`
+			MaxTokens int                                 `json:"max_tokens"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			t.Error(err)
@@ -107,6 +108,9 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 		body := string(domain.JSON(input))
 		if len(input.Tools) != 1 || !strings.Contains(body, "image_url") || strings.Contains(body, "WRITER_OBSERVATION_NOT_PRIMARY") {
 			t.Error("review reused writer beliefs or lost source pixels instead of a fresh evidence context")
+		}
+		if input.MaxTokens != min(s.profile.MaxOutputTokens, 32768) {
+			t.Error("actual independent review request lost its reasoning reservation")
 		}
 		expected := ""
 		for _, m := range input.Messages {

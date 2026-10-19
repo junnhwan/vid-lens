@@ -122,7 +122,13 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 	}
 	if s.reviewing {
 		b.Phase = "evidence_review"
-		b.OutputTokens = min(b.OutputTokens, 4096)
+		if s.cp.HarnessRevision >= 16 {
+			// A short verdict can still require substantial provider reasoning.
+			// Do not inherit the writer's final-submit/repair reservation.
+			b.OutputTokens = min(s.profile.MaxOutputTokens, 32768)
+		} else {
+			b.OutputTokens = min(b.OutputTokens, 4096)
+		}
 	}
 	return b, b.check(s.profile)
 }

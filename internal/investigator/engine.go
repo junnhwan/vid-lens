@@ -188,7 +188,7 @@ func (s *session) initial(ctx context.Context) error {
 		// the immutable article's older generation policy. Do not mutate that spec
 		// or upgrade a checkpoint that has already started.
 		p := *s.spec.DetailPolicy
-		p.Revision = reviewPolicy
+		p.Revision = reviewBudgetPolicy
 		protocolSpec.DetailPolicy = &p
 	}
 	revision, instruction := initialProtocol(protocolSpec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)
