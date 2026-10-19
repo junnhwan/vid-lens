@@ -2,10 +2,13 @@ const manageSectionIDs = ["models", "providers", "diagnostics", "execution", "ne
 
 export type ManageSection = (typeof manageSectionIDs)[number]
 
+export type VideoCleanup = "" | "ready" | "held" | "gone"
+
 export interface ManageRoute {
   section: ManageSection
   offset: number
   query: string
+  cleanup: VideoCleanup
 }
 
 function sectionID(value: string | undefined): ManageSection {
@@ -29,13 +32,16 @@ export function readManageRoute(pathname: string, search: string): ManageRoute {
   const raw = Number(params.get("offset"))
   const offset = (section === "videos" || section === "diagnostics") && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
   const query = section === "videos" ? (params.get("q") || "").trim().slice(0, 200) : ""
-  return { section, offset, query }
+  const cleanupValue = params.get("cleanup")
+  const cleanup: VideoCleanup = section === "videos" && (cleanupValue === "ready" || cleanupValue === "held" || cleanupValue === "gone") ? cleanupValue : ""
+  return { section, offset, query, cleanup }
 }
 
-export function managePath(section: string, extra?: { offset?: number; query?: string }) {
+export function managePath(section: string, extra?: { offset?: number; query?: string; cleanup?: string }) {
   const id = sectionID(section)
   const params = new URLSearchParams()
   if (id === "videos" && extra?.query) params.set("q", extra.query)
+  if (id === "videos" && (extra?.cleanup === "ready" || extra?.cleanup === "held" || extra?.cleanup === "gone")) params.set("cleanup", extra.cleanup)
   if ((id === "videos" || id === "diagnostics") && extra?.offset && extra.offset > 0) params.set("offset", String(Math.floor(extra.offset)))
   const query = params.toString()
   const path = id === "models" ? "/manage" : `/manage/${id}`

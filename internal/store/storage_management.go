@@ -96,12 +96,26 @@ type ManagedVideo struct {
 	Protected      bool      `json:"protected"`
 	Deleting       bool      `json:"deleting"`
 	DeleteFailures int64     `json:"delete_failures"`
+	Cleanup        string    `json:"cleanup"`
+}
+
+type VideoCleanupCounts struct {
+	Ready int64 `json:"ready"`
+	Held  int64 `json:"held"`
+	Gone  int64 `json:"gone"`
 }
 
 // Never return session identifiers, private questions, prompts or storage paths.
-func (s *Store) ManagedVideos(ctx context.Context, search string, limit, offset int) ([]ManagedVideo, int64, error) {
+// cleanup is "", "ready" (originals can be removed), "held" (in use), or "gone" (nothing left to remove).
+func (s *Store) ManagedVideos(ctx context.Context, search, cleanup string, limit, offset int) ([]ManagedVideo, int64, VideoCleanupCounts, error) {
 	var total int64
+	var counts VideoCleanupCounts
 	var out []ManagedVideo
+	switch cleanup {
+	case "", "ready", "held", "gone":
+	default:
+		return nil, 0, counts, domain.Err(422, "INVALID_ARGUMENT", "清理筛选只能是可清理、使用中或已清理。")
+	}
 	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := `WITH videos AS (
 		 SELECT v.id,v.platform,v.canonical_url AS url,
@@ -125,15 +139,17 @@ func (s *Store) ManagedVideos(ctx context.Context, search string, limit, offset 
 		 bool_or(state='deleting' AND kind IN ('video','audio')) AS deleting,
 		 sum(delete_failures) FILTER(WHERE kind IN ('video','audio')) AS delete_failures
 		 FROM media_assets WHERE source_id=v.id AND state<>'deleted') m ON true
-		), filtered AS (SELECT * FROM videos WHERE $1='' OR strpos(lower(title||' '||url||' '||platform),lower($1))>0) `
-		if e := tx.QueryRow(ctx, q+"SELECT count(*) FROM filtered", search).Scan(&total); e != nil {
+		), classified AS (
+		 SELECT *, CASE WHEN active OR protected THEN 'held' WHEN COALESCE(jsonb_array_length(asset_ids),0)=0 THEN 'gone' ELSE 'ready' END AS cleanup FROM videos
+		), filtered AS (SELECT * FROM classified WHERE $1='' OR strpos(lower(title||' '||url||' '||platform),lower($1))>0) `
+		if e := tx.QueryRow(ctx, q+`SELECT count(*) FILTER (WHERE $2='' OR cleanup=$2), count(*) FILTER (WHERE cleanup='ready'), count(*) FILTER (WHERE cleanup='held'), count(*) FILTER (WHERE cleanup='gone') FROM filtered`, search, cleanup).Scan(&total, &counts.Ready, &counts.Held, &counts.Gone); e != nil {
 			return e
 		}
 		var e error
-		out, e = many[ManagedVideo](ctx, tx, q+"SELECT to_jsonb(x) FROM (SELECT * FROM filtered ORDER BY last_requested_at DESC,id DESC LIMIT $2 OFFSET $3) x", search, limit, offset)
+		out, e = many[ManagedVideo](ctx, tx, q+"SELECT to_jsonb(x) FROM (SELECT * FROM filtered WHERE $4='' OR cleanup=$4 ORDER BY last_requested_at DESC,id DESC LIMIT $2 OFFSET $3) x", search, limit, offset, cleanup)
 		return e
 	})
-	return out, total, e
+	return out, total, counts, e
 }
 
 // Select the exact originals reviewed by the owner. A stale retry cannot delete

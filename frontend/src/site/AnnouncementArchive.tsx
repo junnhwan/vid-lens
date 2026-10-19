@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import type { AnnouncementResponse, PublicNotice } from "../contract/announcement"
 import { SiteFooter, SiteHeader } from "../ui/SiteHeader"
-import { DeskStatus } from "../ui/DeskStatus"
 
 function stamp(value: string | undefined) {
   if (!value) return ""
@@ -44,12 +43,15 @@ export function AnnouncementArchive() {
 }
 
 function AnnouncementItem({ item, current }: { item: PublicNotice; current: boolean }) {
-  return <li>
-    <div className="announcement-archive-meta">
-      <time dateTime={item.published_at}>{stamp(item.published_at)}</time>
-      {current ? <DeskStatus tone="ready">当前</DeskStatus> : <DeskStatus tone="dim">已发布</DeskStatus>}
-    </div>
-    <h2>{item.title}</h2>
-    <p>{item.body}</p>
+  return <li data-current={current ? "true" : undefined}>
+    <div className="announcement-archive-rail" aria-hidden="true"><i /></div>
+    <article>
+      <div className="announcement-archive-meta">
+        <time dateTime={item.published_at}>{stamp(item.published_at)}</time>
+        {current ? <span className="announcement-now">当前</span> : null}
+      </div>
+      <h2>{item.title}</h2>
+      <p>{item.body}</p>
+    </article>
   </li>
 }

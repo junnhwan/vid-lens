@@ -112,10 +112,11 @@ export function Diagnostics({
   const [reading, setReading] = useState(false)
   return (
     <section className="diagnostics">
-      <header>
+      <header className="storage-heading">
         <div>
+          <p className="eyebrow">MODEL USAGE</p>
           <h2>缓存与实际用量</h2>
-          <p className="fine">每次模型提交的实际用量。</p>
+          <p className="fine">每次模型提交的实际用量。完整结束、未完成和没报回来的数字分开看。</p>
         </div>
         <button type="button" className="btn quiet desk-pill" disabled={busy} onClick={() => onPage(offset)}>
           <span className={spinning ? "desk-spin" : "desk-reload"} aria-hidden="true">↻</span>

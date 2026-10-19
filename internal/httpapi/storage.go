@@ -51,12 +51,13 @@ func (a *Server) managedVideos(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, domain.Err(422, "INVALID_ARGUMENT", "搜索内容最多 200 字。"))
 		return
 	}
-	v, total, e := a.Store.ManagedVideos(r.Context(), search, limit, offset)
+	cleanup := strings.TrimSpace(r.URL.Query().Get("cleanup"))
+	v, total, counts, e := a.Store.ManagedVideos(r.Context(), search, cleanup, limit, offset)
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	a.json(w, 200, map[string]any{"items": v, "total": total, "limit": limit, "offset": offset})
+	a.json(w, 200, map[string]any{"items": v, "total": total, "limit": limit, "offset": offset, "counts": counts})
 }
 
 func (a *Server) deleteVideo(w http.ResponseWriter, r *http.Request) {

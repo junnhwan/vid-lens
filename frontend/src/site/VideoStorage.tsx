@@ -3,6 +3,7 @@ import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
 import { diskRatio, formatDiskBytes } from "../contract/capacity"
 import { DeskStatus } from "../ui/DeskStatus"
+import type { VideoCleanup } from "./manageRoute"
 interface Overview {
   settings: { revision: number; video_quota_bytes: number; image_quota_bytes: number; disk_stop_percent: number }
   original_bytes: number
@@ -29,8 +30,10 @@ interface Video {
   protected: boolean
   deleting: boolean
   delete_failures: number
+  cleanup?: VideoCleanup
 }
-interface VideoPage { items: Video[]; total: number; offset: number; limit: number }
+interface CleanupCounts { ready: number; held: number; gone: number }
+interface VideoPage { items: Video[]; total: number; offset: number; limit: number; counts?: CleanupCounts }
 const gib = 1024 ** 3
 const pageSize = 20
 const statusLabels: Record<string, string> = { waiting_source: "准备素材", generating: "正在成文", completed: "已完成", failed: "处理失败", canceled: "已取消" }
@@ -48,9 +51,27 @@ function mediaMark(video: Video): { tone: "ready" | "wait" | "live" | "dim"; lab
   if (!video.asset_ids.length) return { tone: "dim", label: "已清理", title: "原视频已清理，或当时没有下载。" }
   return { tone: "ready", label: "可清理" }
 }
+function cleanupOf(video: Video): Exclude<VideoCleanup, ""> {
+  if (video.cleanup === "ready" || video.cleanup === "held" || video.cleanup === "gone") return video.cleanup
+  if (video.active || video.protected) return "held"
+  return video.asset_ids.length ? "ready" : "gone"
+}
+function cleanupAction(video: Video) {
+  const state = cleanupOf(video)
+  if (state === "held") return { state, button: "", label: "暂不能清理", reason: "正在使用，处理结束后才能清理" }
+  if (state === "gone") return { state, button: "", label: "无可清理", reason: "原视频已清理，或当时没有下载" }
+  if (video.deleting) return { state, button: "重试清理", label: "", reason: video.delete_failures ? "上次清理没有完成" : "清理还没有结束" }
+  return { state, button: "清理原视频", label: "", reason: "可以清理原视频和音频，文章与配图会留下" }
+}
+const cleanupFilters: { id: VideoCleanup; label: string }[] = [
+  { id: "", label: "全部" },
+  { id: "ready", label: "可清理" },
+  { id: "held", label: "使用中" },
+  { id: "gone", label: "已清理" },
+]
 function remaining(quota: number, used: number, reserved: number) { return Math.max(0, quota - used - reserved) }
 
-export function VideoStorage({ api, onDirty, onAuthLost, query, offset, onRoute }: { api: HttpApi; onDirty: (dirty: boolean) => void; onAuthLost: () => void; query: string; offset: number; onRoute: (next: { query: string; offset: number }) => void }) {
+export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup, onRoute }: { api: HttpApi; onDirty: (dirty: boolean) => void; onAuthLost: () => void; query: string; offset: number; cleanup: VideoCleanup; onRoute: (next: { query: string; offset: number; cleanup: VideoCleanup }) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null)
   const [page, setPage] = useState<VideoPage | null>(null)
   const [videoQuota, setVideoQuota] = useState("")
@@ -83,13 +104,13 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, onRoute 
     setBusy("load"); setError(""); setConfirm(null)
     void Promise.all([
       api.request<Overview>("GET", "/api/v1/admin/storage"),
-      api.request<VideoPage>("GET", `/api/v1/admin/videos?limit=${pageSize}&offset=${offset}&q=${encodeURIComponent(query)}`),
+      api.request<VideoPage>("GET", `/api/v1/admin/videos?limit=${pageSize}&offset=${offset}&q=${encodeURIComponent(query)}${cleanup ? `&cleanup=${cleanup}` : ""}`),
     ]).then(([a, b]) => {
       if (stop) return
       accept(a.body); setPage(b.body); setLoadedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }))
     }).catch((e) => { if (!stop) failed(e) }).finally(() => { if (!stop) setBusy("") })
     return () => { stop = true }
-  }, [api, query, offset, refresh])
+  }, [api, query, offset, cleanup, refresh])
   async function save() {
     if (!overview || busy) return
     setBusy("save"); setError(""); setNotice("")
@@ -131,22 +152,28 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, onRoute 
         </fieldset><p className="fine">达到停止线会暂停新下载和导出。可设为 80–95%，默认 90%；无论阈值如何设置，都会保留至少 5 GiB 主机空闲空间。VidLens 配额只限制本站用量，不会预占磁盘；修改设置不会自动删除视频。</p></form>
       </details>
     </> : <p className="fine">{busy ? "正在读取视频存储…" : "存储状态未能读取，请刷新重试。"}</p>}
-    <form className="storage-search" onSubmit={(e) => { e.preventDefault(); setConfirm(null); const next = search.trim(); onRoute({ query: next, offset: 0 }); if (next === query && offset === 0) reload() }}>
-      <label className="desk-field"><span>查找视频</span><input type="search" placeholder="搜索标题、链接或平台" maxLength={200} value={search} disabled={Boolean(busy) || dirty || Boolean(confirm)} onChange={(e) => setSearch(e.target.value)} /></label><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm)}>搜索</button><span className="fine">{page ? `共 ${page.total} 条视频` : ""}</span>
+    <form className="storage-search" onSubmit={(e) => { e.preventDefault(); setConfirm(null); const next = search.trim(); onRoute({ query: next, offset: 0, cleanup }); if (next === query && offset === 0) reload() }}>
+      <label className="desk-field"><span>查找视频</span><input type="search" placeholder="搜索标题、链接或平台" maxLength={200} value={search} disabled={Boolean(busy) || dirty || Boolean(confirm)} onChange={(e) => setSearch(e.target.value)} /></label><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm)}>搜索</button><span className="fine">{page ? `${cleanup === "ready" ? "可清理" : cleanup === "held" ? "使用中" : cleanup === "gone" ? "已清理" : "全部"} ${page.total} 条` : ""}</span>
     </form>
+    <div className="storage-filters" role="group" aria-label="按能否清理筛选">
+      {cleanupFilters.map((item) => {
+        const count = page?.counts ? (item.id ? page.counts[item.id] : page.counts.ready + page.counts.held + page.counts.gone) : undefined
+        return <button key={item.id || "all"} type="button" data-cleanup={item.id || "all"} aria-pressed={cleanup === item.id} disabled={Boolean(busy) || dirty || Boolean(confirm)} onClick={() => { setConfirm(null); if (cleanup !== item.id) onRoute({ query, offset: 0, cleanup: item.id }) }}>{item.label}{count === undefined ? "" : ` ${count.toLocaleString("zh-Hans")}`}</button>
+      })}
+    </div>
     {page ? <>
-      <div className="storage-table-wrap"><table className="storage-table"><thead><tr><th scope="col">视频来源</th><th scope="col">处理情况</th><th scope="col">原素材 / 配图</th><th scope="col">最近提交</th><th scope="col">管理</th></tr></thead><tbody>
-        {page.items.map((v) => { const media = mediaMark(v); return <Fragment key={v.id}><tr className={v.latest_status === "failed" || (v.deleting && v.delete_failures > 0) ? "storage-row-wait" : undefined}>
+      <div className="storage-table-wrap"><table className="storage-table"><thead><tr><th scope="col">视频来源</th><th scope="col">处理情况</th><th scope="col">原素材 / 配图</th><th scope="col">最近提交</th><th scope="col">清理</th></tr></thead><tbody>
+        {page.items.map((v) => { const media = mediaMark(v); const action = cleanupAction(v); return <Fragment key={v.id}><tr data-cleanup={action.state} className={v.latest_status === "failed" || (v.deleting && v.delete_failures > 0) ? "storage-row-wait" : undefined}>
           <td><a href={v.url} target="_blank" rel="noopener noreferrer">{v.title} ↗</a><p>{v.platform === "bilibili" ? "哔哩哔哩" : v.platform === "youtube" ? "YouTube" : v.platform}{v.duration_ms ? ` · ${Math.ceil(v.duration_ms / 60000)} 分钟` : ""}</p></td>
           <td><span className="storage-marks"><DeskStatus tone={videoTone(v.latest_status)}>{statusLabels[v.latest_status] || v.latest_status}</DeskStatus>{v.active ? <DeskStatus tone="live">进行中</DeskStatus> : null}</span><p>{v.request_count} 次提交 · {v.article_count} 篇文章</p></td>
           <td><strong>{formatDiskBytes(v.original_bytes)}</strong><p><DeskStatus tone={media.tone} title={media.title}>{media.label}</DeskStatus> 配图 {formatDiskBytes(v.image_bytes)}</p></td>
           <td><time dateTime={v.last_requested_at}>{date(v.last_requested_at)}</time></td>
-          <td><button className="text-action storage-delete" disabled={Boolean(busy) || dirty || v.active || v.protected || !v.asset_ids.length || Boolean(confirm)} title={v.active || v.protected ? "正在使用，处理结束后可清理" : "清理原视频与音频，保留文章与配图"} onClick={() => { setConfirm(v); setError(""); setNotice("") }}>{v.active || v.protected ? "使用中" : v.deleting ? "重试清理" : "清理原视频"}</button></td>
+          <td>{action.button ? <button className={`storage-clean${v.deleting ? " is-retry" : ""}`} disabled={Boolean(busy) || dirty || Boolean(confirm)} title={dirty ? "请先保存或撤销存储设置" : action.reason} onClick={() => { setConfirm(v); setError(""); setNotice("") }}>{action.button}</button> : <span className="storage-blocked"><DeskStatus tone={action.state === "held" ? "wait" : "dim"}>{action.label}</DeskStatus><small>{action.reason}</small></span>}</td>
         </tr>{confirm?.id === v.id ? <tr className="storage-confirm"><td colSpan={5}><div role="group" aria-label={`确认清理 ${v.title}`}><div><strong>清理「{v.title}」的原素材？</strong><p>将删除原视频与音频 {formatDiskBytes(v.original_bytes)}。文章、配图和处理记录保留；后续需要原画面时可能重新下载。</p></div><button ref={cancelRef} className="btn quiet desk-pill" disabled={Boolean(busy)} onClick={() => setConfirm(null)}>取消</button><button className="btn storage-danger" disabled={Boolean(busy)} onClick={() => void remove()}>{busy === "delete" ? "正在清理…" : "确认清理"}</button></div></td></tr> : null}</Fragment> })}
-        {!page.items.length ? <tr><td colSpan={5} className="storage-empty">{query ? "没有找到匹配的视频。" : "还没有视频处理记录。"}</td></tr> : null}
+        {!page.items.length ? <tr><td colSpan={5} className="storage-empty">{query && cleanup ? "没有符合当前搜索和筛选的视频。" : query ? "没有找到匹配的视频。" : cleanup === "ready" ? "现在没有可以清理的原视频。" : cleanup === "held" ? "现在没有使用中的视频。" : cleanup === "gone" ? "还没有已清理的视频。" : offset > 0 ? "这一页没有视频。" : "还没有视频处理记录。"}</td></tr> : null}
       </tbody></table></div>
-      <div className="storage-pagination"><span className="fine">{page.total ? `${offset + 1}–${Math.min(offset + page.items.length, page.total)} / ${page.total}` : "0 条记录"}</span><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset === 0} onClick={() => onRoute({ query, offset: Math.max(0, offset - pageSize) })}>上一页</button><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset + pageSize >= page.total} onClick={() => onRoute({ query, offset: offset + pageSize })}>下一页</button></div>
+      <div className="storage-pagination"><span className="fine">{page.total ? `${offset + 1}–${Math.min(offset + page.items.length, page.total)} / ${page.total}` : "0 条记录"}</span><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset === 0} onClick={() => onRoute({ query, cleanup, offset: Math.max(0, offset - pageSize) })}>上一页</button><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset + pageSize >= page.total} onClick={() => onRoute({ query, cleanup, offset: offset + pageSize })}>下一页</button></div>
     </> : null}
-    <p className="fine storage-footnote">相同视频的提交合并展示，失败与取消记录也会保留。仅清理你确认的原素材；正在使用的文件受到保护，文章配图不会随之删除。</p>
+    <p className="fine storage-footnote">相同视频的提交合并展示，失败与取消记录也会保留。只有还能清理的视频会显示清理按钮；使用中的要等处理结束，已清理的不再占用原视频。清理前会再确认一次，文章和配图不会被删掉。</p>
   </section>
 }

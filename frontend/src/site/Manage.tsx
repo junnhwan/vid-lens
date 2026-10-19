@@ -89,7 +89,7 @@ export function Manage() {
     const sync = () => {
       const here = pageLocation()
       const next = readManageRoute(here.pathname, here.search)
-      if (dirty && (next.section !== route.section || next.offset !== route.offset || next.query !== route.query)) {
+      if (dirty && (next.section !== route.section || next.offset !== route.offset || next.query !== route.query || next.cleanup !== route.cleanup)) {
         globalThis.history?.pushState(null, "", managePath(route.section, route))
         setError("请先保存或撤销当前表单。")
         return
@@ -536,7 +536,7 @@ export function Manage() {
               ) : section === "execution" ? (
                 <ExecutionSettings api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "videos" ? (
-                <VideoStorage api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} query={route.query} offset={route.offset} onRoute={(next) => {
+                <VideoStorage api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} query={route.query} offset={route.offset} cleanup={route.cleanup} onRoute={(next) => {
                   const path = managePath("videos", next)
                   visit(path)
                 }} />

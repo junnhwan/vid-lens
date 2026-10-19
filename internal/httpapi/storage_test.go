@@ -51,8 +51,12 @@ func TestCapacityPrivacyAndStorageAdministration(t *testing.T) {
 	}
 	r := do("GET", "/api/v1/admin/videos?limit=20&offset=0", "", true)
 	b, _ := io.ReadAll(r.Body)
-	if r.StatusCode != 200 || !strings.Contains(string(b), `"items":[]`) {
+	if r.StatusCode != 200 || !strings.Contains(string(b), `"items":[]`) || !strings.Contains(string(b), `"counts":{"ready":0,"held":0,"gone":0}`) {
 		t.Fatalf("video list: %d %s", r.StatusCode, b)
+	}
+	r = do("GET", "/api/v1/admin/videos?cleanup=nope", "", true)
+	if r.StatusCode != 422 {
+		t.Fatalf("unknown cleanup accepted: %d", r.StatusCode)
 	}
 	r = do("PUT", "/api/v1/admin/storage", `{"expected_revision":1,"video_quota_bytes":12884901888,"image_quota_bytes":5368709120}`, true)
 	if r.StatusCode != 200 {

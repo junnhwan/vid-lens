@@ -80,7 +80,7 @@ func TestStorageReadsDoNotAcquireControlLock(t *testing.T) {
 	if _, err := s.StorageOverview(ctx); err != nil {
 		t.Errorf("overview waited for control lock: %v", err)
 	}
-	if _, _, err := s.ManagedVideos(ctx, "", 10, 0); err != nil {
+	if _, _, _, err := s.ManagedVideos(ctx, "", "", 10, 0); err != nil {
 		t.Errorf("video list waited for control lock: %v", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestSlowStorageReadsDoNotBlockRunControl(t *testing.T) {
 			}
 			match := "SELECT revision,video_quota_bytes"
 			if operation == "videos" {
-				match = "SELECT count(*) FROM filtered"
+				match = "count(*) FILTER (WHERE $2='' OR cleanup=$2)"
 			}
 			reader, gate, release := gatedStorageReader(t, s, match)
 			done := make(chan error, 1)
@@ -116,7 +116,7 @@ func TestSlowStorageReadsDoNotBlockRunControl(t *testing.T) {
 					_, err := reader.StorageOverview(ctx)
 					done <- err
 				} else {
-					_, _, err := reader.ManagedVideos(ctx, "", 10, 0)
+					_, _, _, err := reader.ManagedVideos(ctx, "", "", 10, 0)
 					done <- err
 				}
 			}()
@@ -148,14 +148,17 @@ func TestManagedVideosCountAndPageShareSnapshot(t *testing.T) {
 	if _, err := s.CreateRequest(ctx, owner, domain.ID(), "https://youtube.com/watch?v=snapshot001", "", false); err != nil {
 		t.Fatal(err)
 	}
-	reader, gate, release := gatedStorageReader(t, s, "SELECT count(*) FROM filtered")
+	reader, gate, release := gatedStorageReader(t, s, "count(*) FILTER (WHERE $2='' OR cleanup=$2)")
 	type result struct {
 		items []ManagedVideo
 		total int64
 		err   error
 	}
 	done := make(chan result, 1)
-	go func() { items, total, err := reader.ManagedVideos(ctx, "", 10, 0); done <- result{items, total, err} }()
+	go func() {
+		items, total, _, err := reader.ManagedVideos(ctx, "", "", 10, 0)
+		done <- result{items, total, err}
+	}()
 	waitForStorageRead(t, gate)
 	control, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -167,7 +170,7 @@ func TestManagedVideosCountAndPageShareSnapshot(t *testing.T) {
 	if got.err != nil || got.total != 1 || len(got.items) != 1 {
 		t.Fatalf("count/page snapshot diverged: total=%d items=%d err=%v", got.total, len(got.items), got.err)
 	}
-	items, total, err := s.ManagedVideos(ctx, "", 10, 0)
+	items, total, _, err := s.ManagedVideos(ctx, "", "", 10, 0)
 	if err != nil || total != 2 || len(items) != 2 {
 		t.Fatalf("subsequent read missed committed request: total=%d items=%d err=%v", total, len(items), err)
 	}

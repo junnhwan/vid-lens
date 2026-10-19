@@ -118,7 +118,7 @@ export function AnnouncementSettings({ api, onDirty, onAuthLost }: { api: HttpAp
             </button></li>)}
           </ol> : <p className="fine">还没有公告。写一条后，访客进入网站时会看到。</p>}
         </div>
-        <form onSubmit={(event) => { event.preventDefault(); void send(current && current.status !== "draft" ? "correct" : "publish") }}>
+        <form className="announcement-compose" onSubmit={(event) => { event.preventDefault(); void send(current && current.status !== "draft" ? "correct" : "publish") }}>
           <fieldset disabled={Boolean(busy)}>
             {current ? <DeskStatus tone={tones[current.status]}>{labels[current.status]}</DeskStatus> : <DeskStatus tone="dim">新公告</DeskStatus>}
             <label className="desk-field"><span>公告标题</span><input value={title} maxLength={120} placeholder="例如：欢迎使用 VidLens" onChange={(event) => { setTitle(event.target.value); setNotice("") }} /></label>

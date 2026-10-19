@@ -37,11 +37,11 @@ func TestManualOriginalRetentionAndGlobalVideoList(t *testing.T) {
 	if _, e = s.CreateRequest(ctx, other, "other", "https://www.bilibili.com/video/BV1xx411c7mD", "", false); e != nil {
 		t.Fatal(e)
 	}
-	items, total, e := s.ManagedVideos(ctx, "", 1, 0)
+	items, total, _, e := s.ManagedVideos(ctx, "", "", 1, 0)
 	if e != nil || total != 2 || len(items) != 1 {
 		t.Fatalf("global pagination: %+v %d %v", items, total, e)
 	}
-	items, total, e = s.ManagedVideos(ctx, "TEST VIDEO", 20, 0)
+	items, total, _, e = s.ManagedVideos(ctx, "TEST VIDEO", "", 20, 0)
 	if e != nil || total != 1 || len(items) != 1 || items[0].ArticleCount != 1 || items[0].Active || items[0].OriginalBytes != 42 {
 		t.Fatalf("video/search aggregates: %+v %d %v", items, total, e)
 	}
@@ -237,6 +237,46 @@ func TestConcurrentDownloadsCannotOverbookTheServiceQuota(t *testing.T) {
 	}
 }
 
+func TestManagedVideosSeparateWhatCanBeCleaned(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	owner := session(t, s)
+	r, c := prepared(t, s, owner)
+	if _, total, counts, e := s.ManagedVideos(ctx, "", "ready", 20, 0); e != nil || total != 0 || counts.Held != 1 || counts.Ready != 0 {
+		t.Fatalf("running original looked cleanable: total=%d counts=%+v %v", total, counts, e)
+	}
+	if _, total, _, e := s.ManagedVideos(ctx, "", "held", 20, 0); e != nil || total != 1 {
+		t.Fatalf("held filter: %d %v", total, e)
+	}
+	if e := s.Publish(ctx, c, domain.Article{SnapshotID: *r.SnapshotID, Title: "kept"}); e != nil {
+		t.Fatal(e)
+	}
+	items, total, counts, e := s.ManagedVideos(ctx, "", "ready", 20, 0)
+	if e != nil || total != 1 || len(items) != 1 || items[0].Cleanup != "ready" || counts.Ready != 1 || counts.Held != 0 || len(items[0].AssetIDs) == 0 {
+		t.Fatalf("finished original not cleanable: %+v total=%d counts=%+v %v", items, total, counts, e)
+	}
+	sourceID, assetID := items[0].ID, items[0].AssetIDs[0]
+	if _, e = s.MarkVideoDeleting(ctx, sourceID, []string{assetID}); e != nil {
+		t.Fatal(e)
+	}
+	if e = s.Deleted(ctx, assetID, true); e != nil {
+		t.Fatal(e)
+	}
+	items, total, counts, e = s.ManagedVideos(ctx, "", "gone", 20, 0)
+	if e != nil || total != 1 || len(items) != 1 || items[0].Cleanup != "gone" || len(items[0].AssetIDs) != 0 || counts.Gone != 1 || counts.Ready != 0 {
+		t.Fatalf("removed original still offered: %+v total=%d counts=%+v %v", items, total, counts, e)
+	}
+	if _, e = s.CreateRequest(ctx, owner, domain.ID(), "https://youtube.com/watch?v=heldvideo01", "", false); e != nil {
+		t.Fatal(e)
+	}
+	if _, total, counts, e = s.ManagedVideos(ctx, "", "", 20, 0); e != nil || total != 2 || counts.Held != 1 || counts.Gone != 1 || counts.Ready != 0 {
+		t.Fatalf("mixed cleanup counts: total=%d counts=%+v %v", total, counts, e)
+	}
+	if _, _, _, e = s.ManagedVideos(ctx, "", "later", 20, 0); e == nil {
+		t.Fatal("unknown cleanup accepted")
+	}
+}
+
 func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -256,7 +296,7 @@ func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testi
 		t.Fatal(e)
 	}
 	// Recreate the schema-12 storage state and apply the real embedded upgrade.
-	for _, q := range []string{"DELETE FROM schema_migrations WHERE version=13", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
+	for _, q := range []string{"DELETE FROM schema_migrations WHERE version=13", "DELETE FROM schema_migrations WHERE version=23", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
 		if _, e = s.Pool.Exec(ctx, q); e != nil {
 			t.Fatal(e)
 		}

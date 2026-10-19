@@ -142,6 +142,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if version < 23 {
+				if _, err := s.Pool.Exec(ctx, "ALTER TABLE storage_settings DROP COLUMN IF EXISTS disk_stop_percent"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := s.Pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version>$1", version); err != nil {
 				t.Fatal(err)
 			}

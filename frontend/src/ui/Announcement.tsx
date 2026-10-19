@@ -51,7 +51,7 @@ export function AnnouncementDialog({ announcement, preview = false, earlier = fa
     <footer className="announcement-footer">
       <p>{preview ? "预览不会发布，也不会影响访客的已读状态。" : "同一版公告，读过便不再打扰。"}</p>
       <div className="announcement-footer-actions">
-        {earlier && !preview ? <a className="btn quiet" href="/announcements">更早的公告</a> : null}
+        {earlier && !preview ? <a className="announcement-earlier" href="/announcements">更早的公告</a> : null}
         <button type="button" className="btn primary" onClick={onDismiss}>{preview ? "返回编辑" : "知道了，继续"}<span aria-hidden="true"> →</span></button>
       </div>
     </footer>
