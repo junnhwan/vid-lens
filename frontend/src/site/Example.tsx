@@ -143,6 +143,31 @@ export function Example() {
   </>
 }
 
+function ExampleOutline({ sections, current, onJump }: { sections: { id: string; title: string }[]; current: string; onJump: (id: string) => void }) {
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const nav = navRef.current
+    const item = nav?.querySelector<HTMLElement>("[aria-current='location']")
+    if (!nav || !item) return
+    const top = item.offsetTop - nav.clientHeight / 2 + item.clientHeight / 2
+    nav.scrollTo({ top: Math.max(0, top), behavior: prefersReduced() ? "auto" : "smooth" })
+  }, [current])
+  if (!sections.length) return null
+  return <aside className="example-outline" aria-label="目录">
+    <p className="example-outline-label">目录</p>
+    <nav ref={navRef} aria-label="章节">
+      <ol>
+        {sections.map((item, index) => <li key={item.id}>
+          <button type="button" aria-current={item.id === current ? "location" : undefined} onClick={() => onJump(item.id)}>
+            <span className="example-outline-index">{String(index + 1).padStart(2, "0")}</span>
+            <span className="example-outline-title">{item.title}</span>
+          </button>
+        </li>)}
+      </ol>
+    </nav>
+  </aside>
+}
+
 function processActivity(steps: ActivityStep[]) {
   const plan = [...steps].reverse().find((step) => step.plan)?.plan ?? null
   const calls = steps.filter((step) => step.kind === "model_response").length
@@ -164,11 +189,9 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
   const sections = data.article.sections
   const sectionKey = sections.map((item) => item.id).join("\n")
   const [section, setSection] = useState("")
-  const [thread, setThread] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const [pop, setPop] = useState<{ left: number; top: number; label: string; pick: () => void } | null>(null)
   const lock = useRef<string | null>(null)
-  const contentsRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const nodes = sectionKey.split("\n").filter(Boolean).map((id) => document.getElementById(id)).filter((node): node is HTMLElement => !!node)
     const observer = new IntersectionObserver((entries) => {
@@ -177,15 +200,6 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
       if (visible) setSection(visible.target.id)
     }, { rootMargin: "-18% 0px -55% 0px", threshold: [0.15, 0.4, 0.7] })
     for (const node of nodes) observer.observe(node)
-    return () => observer.disconnect()
-  }, [sectionKey])
-  useEffect(() => {
-    const node = contentsRef.current
-    if (!node) return
-    const observer = new IntersectionObserver(([entry]) => {
-      setThread(!entry.isIntersecting && entry.boundingClientRect.top < 0)
-    })
-    observer.observe(node)
     return () => observer.disconnect()
   }, [sectionKey])
   function jump(id: string) {
@@ -236,23 +250,13 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
   const date = new Date(data.article.published_at).toLocaleDateString("zh-Hans")
   const source = choice?.meta || [platformLabel(data.article.source.platform), formatDuration(data.article.source.duration_ms)].filter(Boolean).join(" · ")
   const caption = [source, date].filter(Boolean).join(" · ")
-  const currentTitle = sections.find((item) => item.id === section)?.title || ""
   const steps = data.generation_steps || []
   const processNote = data.process_status === "partial" ? "更早的步骤已经不在记录里。" : !steps.length ? "这份示例发布时，生成过程已经不在记录里。" : ""
   const canAsk = data.qa_available !== false
   return <div className="workspace example-workspace example-paper" data-qa={questions.open ? "open" : "closed"}>
+    <ExampleOutline sections={sections} current={section} onJump={jump} />
     <div className="article-col">
     <article className="sheet example-sheet">
-      <div className="example-thread" data-open={thread ? "true" : undefined}>
-        <div className="example-thread-bar" aria-hidden={thread ? undefined : true}>
-          <ol>
-            {sections.map((item, index) => <li key={item.id}>
-              <button type="button" tabIndex={thread ? undefined : -1} aria-current={item.id === section ? "true" : undefined} aria-label={item.title} onClick={() => jump(item.id)}>{String(index + 1).padStart(2, "0")}</button>
-            </li>)}
-          </ol>
-          <p>{currentTitle}</p>
-        </div>
-      </div>
       <header className="article-head">
         <h1 id="article-top">{data.article.title}</h1>
         <div className="article-tools">
@@ -271,17 +275,6 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
         </div>
       </div>
       {!data.media.can_inspect_now ? <p className="history-note">{data.media.can_restore_for_question ? "现在不能直接查看新的画面。提问时可以再准备这条视频。" : "现在不能查看新的画面。已有文章仍然可以读。"}</p> : null}
-      {sections.length ? <nav className="example-contents" aria-label="目录" ref={contentsRef}>
-        <p className="eyebrow"><span aria-hidden="true" />目录</p>
-        <ol data-columns={sections.length > 4 ? "2" : "1"}>
-          {sections.map((item, index) => <li key={item.id}>
-            <button type="button" aria-current={item.id === section ? "location" : undefined} onClick={() => jump(item.id)}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <strong>{item.title}</strong>
-            </button>
-          </li>)}
-        </ol>
-      </nav> : null}
       {data.article.mind_map ? <MindMap map={data.article.mind_map} current={section} onJump={jump} /> : null}
       <div className="prose" id="prose">{sections.map((item) => <section key={item.id}><h2 id={item.id}>{item.title}</h2>{item.blocks.map((block) =>
         <BlockView key={block.id} block={block} sectionId={item.id} frames={frames} citations={data.article.citations} onCite={onCite} onOpenFrame={onOpenFrame} onAskFrame={questions.askFrame} onBroken={() => {}} readOnly={!canAsk} />
