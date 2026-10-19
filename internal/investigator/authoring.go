@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
@@ -442,6 +443,55 @@ func deriveAuthoringRanges(input []sectionPlan, catalog map[string]domain.Citati
 		}
 	}
 	return plan
+}
+
+// Authoring chapters are ordered by topic, while their source ranges are
+// derived by the server. Validate the temporal union on a separate ordering;
+// neither reorder the author's chapters nor ask it to patch absent timestamps.
+func validateAuthoringPlan(plan []sectionPlan, duration int64) error {
+	issues := &planIssues{}
+	if len(plan) < 1 || len(plan) > maxPlanSections {
+		return domain.Err(422, "MODEL_RESULT_INVALID", "需要1–40个覆盖全片的主题章节。")
+	}
+	ids := map[string]bool{}
+	order := make([]int, 0, len(plan))
+	for i, p := range plan {
+		base := fmt.Sprintf("/sections/%d", i)
+		if p.ID == "" || len(p.ID) > 80 || ids[p.ID] {
+			issues.add(i, "invalid_section_id", base+"/id", "章节ID需非空且唯一，修改时同时更新导图中的章节引用。", "unique nonempty chapter ID, at most 80 bytes", p.ID)
+		}
+		ids[p.ID] = true
+		if strings.TrimSpace(p.Title) == "" {
+			issues.add(i, "missing_title", base+"/title", "章节标题不能为空。", "nonempty chapter title", p.Title)
+		}
+		if p.StartMS < 0 || p.EndMS <= p.StartMS || p.EndMS > duration {
+			issues.add(i, "invalid_evidence_range", base+"/evidence_ids", "无法从本章引用推导有效来源范围，请纠正引用；章节时间由服务器计算。", "existing tN/fN aliases with valid times in this video", p.EvidenceIDs)
+			continue
+		}
+		order = append(order, i)
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		if plan[a].StartMS < plan[b].StartMS {
+			return -1
+		}
+		if plan[a].StartMS > plan[b].StartMS {
+			return 1
+		}
+		return 0
+	})
+	end := int64(0)
+	for _, i := range order {
+		p := plan[i]
+		if p.StartMS > end {
+			issues.add(i, "source_coverage_gap", fmt.Sprintf("/sections/%d/evidence_ids", i), "章节来源联合覆盖存在缺口，请补充该部分的真实引用；不填写毫秒字段。", "source evidence covering the missing part of this video", p.EvidenceIDs)
+		}
+		end = max(end, p.EndMS)
+	}
+	if len(order) > 0 && end != duration {
+		i := order[len(order)-1]
+		issues.add(i, "source_coverage_gap", fmt.Sprintf("/sections/%d/evidence_ids", i), "章节来源尚未覆盖视频结尾，请补充结尾的真实引用。", "source evidence covering the end of this video", plan[i].EvidenceIDs)
+	}
+	return issues.err()
 }
 
 func (s *session) draftState(version int, draft articleDraft) map[string]any {

@@ -229,7 +229,7 @@ func (s *session) planRepairTool(add func(tool.EnhancedInvokableTool, error) err
 			parentJSON = normalizeAuthoringContainers("begin_article", normalizeAuthoringJSON(parentJSON))
 		}
 		raw, err := replaceFields([]byte(parentJSON), in.Patches, func(path []string) bool {
-			return planRepairAllowed(path) || s.policy().ConceptMaps && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids")
+			return planRepairAllowed(path) || s.policy().ConceptMaps && len(path) > 0 && path[0] == "mind_map" || s.authoring() && len(path) == 3 && (path[0] == "sections" && path[2] == "id" || path[0] == "limitations" && (path[2] == "code" || path[2] == "message" || path[2] == "section_ids" || path[2] == "citation_ids"))
 		})
 		if err != nil {
 			return toolError(err.Error())

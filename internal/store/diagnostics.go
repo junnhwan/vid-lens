@@ -51,7 +51,11 @@ func (s *Store) runDiagnostics(ctx context.Context, q Querier, id string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "source_diagnostics": facts, "budget_diagnostics": budgets, "automatic_recoveries": recoveries, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "source_diagnostics": 40, "budget_diagnostics": 40, "automatic_recoveries": 10}}, nil
+	rejections, err := toolRejectionDiagnostics(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"schema_version": 1, "run": run, "requests": requests, "turns": turns, "attempts": attempts, "operations": ops, "submissions": subs, "tool_rejections": rejections, "source_diagnostics": facts, "budget_diagnostics": budgets, "automatic_recoveries": recoveries, "usage_note": "Token estimates are heuristic. Provider usage and cache billing remain unknown when unreported.", "limits": map[string]int{"requests": 100, "turns": 100, "attempts": 100, "operations": 400, "submissions": 300, "tool_rejections": 400, "source_diagnostics": 40, "budget_diagnostics": 40, "automatic_recoveries": 10}}, nil
 }
 
 // Only the caller's numeric budget and rejection category belong here. Never

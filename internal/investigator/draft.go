@@ -109,6 +109,9 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 			draft.Plan = deriveAuthoringRanges(in.Sections, catalog, s.snapshot.DurationMS)
 		}
 		planErr := validateSectionPlan(draft.Plan, s.snapshot.DurationMS, s.policy().Enabled)
+		if s.authoring() {
+			planErr = validateAuthoringPlan(draft.Plan, s.snapshot.DurationMS)
+		}
 		if s.spec.DetailPolicy != nil && s.spec.DetailPolicy.ContentPlan {
 			planErr = errors.Join(planErr, validatePlanFacts(draft.Plan, catalog))
 		}

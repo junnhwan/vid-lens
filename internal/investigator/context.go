@@ -206,15 +206,15 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 		hints := catalogHints(catalog)
 		if s.authoring() {
-			for id, c := range catalog {
-				if c.Kind == "video_text" {
-					hint := hints[id].(map[string]any)
-					hint["text_origin"] = c.TextOrigin
-					hint["sentence_timing_known"] = c.TextOrigin == "platform_subtitles" || c.TextOrigin == "platform_subtitle"
-				}
+			hints, err = authoringCatalogHints(catalog, s.transcript)
+			if err != nil {
+				return ctx, nil, err
 			}
 		}
 		data := map[string]any{"draft": s.draftState(saved, draft), "citation_catalog": hints}
+		if s.authoring() {
+			data["citation_catalog_rule"] = authoringCatalogRule
+		}
 		if s.policy().SectionRepairs {
 			output := s.profile.MaxOutputTokens
 			if s.spec.DetailPolicy != nil {
