@@ -218,7 +218,7 @@ func (m *Manager) Reserve(ctx context.Context, c domain.Claim, temp, images int6
 	if e := syscall.Statfs(m.Config.DataDir, &st); e != nil {
 		return e
 	}
-	return m.Store.ReserveStorage(ctx, c, temp, images, int64(st.Bavail)*int64(st.Bsize), int64(st.Blocks)*int64(st.Bsize), m.Config.DiskStopPercent)
+	return m.Store.ReserveStorage(ctx, c, temp, images, int64(st.Bavail)*int64(st.Bsize), int64(st.Blocks)*int64(st.Bsize))
 }
 
 type cacheValue struct {

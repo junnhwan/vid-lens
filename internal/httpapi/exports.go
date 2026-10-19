@@ -38,7 +38,7 @@ func (a *Server) exports(w http.ResponseWriter, r *http.Request) {
 			a.problem(w, r, e)
 			return
 		}
-		x, reused, e := a.Store.CreateExport(r.Context(), s.ID, request, in.Format, key, store.DiskSpace{Available: int64(disk.Bavail) * int64(disk.Bsize), Total: int64(disk.Blocks) * int64(disk.Bsize), StopPercent: a.Config.DiskStopPercent})
+		x, reused, e := a.Store.CreateExport(r.Context(), s.ID, request, in.Format, key, store.DiskSpace{Available: int64(disk.Bavail) * int64(disk.Bsize), Total: int64(disk.Blocks) * int64(disk.Bsize)})
 		if e != nil {
 			a.problem(w, r, e)
 			return

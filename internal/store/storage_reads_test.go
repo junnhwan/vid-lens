@@ -191,7 +191,7 @@ func TestStorageOverviewSettingsAndLedgerShareSnapshot(t *testing.T) {
 	waitForStorageRead(t, gate)
 	control, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	if err := s.ReserveStorage(control, claim, 2<<30, IncomingFrameBytes, 100<<30, 200<<30, 85); err != nil {
+	if err := s.ReserveStorage(control, claim, 2<<30, IncomingFrameBytes, 100<<30, 200<<30); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveStorageSettings(control, StorageInput{ExpectedRevision: before.Settings.Revision, VideoQuotaBytes: 6 << 30, ImageQuotaBytes: 2 << 30}, 3<<30); err != nil {

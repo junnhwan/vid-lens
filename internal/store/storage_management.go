@@ -13,11 +13,13 @@ type StorageSettings struct {
 	Revision        int64 `json:"revision"`
 	VideoQuotaBytes int64 `json:"video_quota_bytes"`
 	ImageQuotaBytes int64 `json:"image_quota_bytes"`
+	DiskStopPercent int   `json:"disk_stop_percent"`
 }
 type StorageInput struct {
 	ExpectedRevision int64 `json:"expected_revision"`
 	VideoQuotaBytes  int64 `json:"video_quota_bytes"`
 	ImageQuotaBytes  int64 `json:"image_quota_bytes"`
+	DiskStopPercent  int   `json:"disk_stop_percent"`
 }
 type StorageOverview struct {
 	Settings           StorageSettings `json:"settings"`
@@ -34,7 +36,7 @@ func (s *Store) StorageOverview(ctx context.Context) (StorageOverview, error) {
 	// One read-only snapshot keeps settings, counts and reservations aligned
 	// without holding the lock used by admission, claims and heartbeats.
 	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if e := tx.QueryRow(ctx, "SELECT revision,video_quota_bytes,image_quota_bytes FROM storage_settings WHERE singleton").Scan(&v.Settings.Revision, &v.Settings.VideoQuotaBytes, &v.Settings.ImageQuotaBytes); e != nil {
+		if e := tx.QueryRow(ctx, "SELECT revision,video_quota_bytes,image_quota_bytes,disk_stop_percent FROM storage_settings WHERE singleton").Scan(&v.Settings.Revision, &v.Settings.VideoQuotaBytes, &v.Settings.ImageQuotaBytes, &v.Settings.DiskStopPercent); e != nil {
 			return e
 		}
 		l, e := storageLedger(ctx, tx, "")
@@ -55,10 +57,18 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if e != nil {
 			return e
 		}
+		// Older admin clients omit this field. Preserve the current policy for
+		// their quota-only saves while new clients can edit it explicitly.
+		if in.DiskStopPercent == 0 {
+			in.DiskStopPercent = l.stop
+		}
+		if in.DiskStopPercent < 80 || in.DiskStopPercent > 95 {
+			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 95% 之间。")
+		}
 		if in.VideoQuotaBytes < l.usedTemp+l.exports+l.resTemp+l.exportPending || in.ImageQuotaBytes < l.usedImages+l.resImages {
 			return domain.Err(409, "STORAGE_IN_USE", "配额不能小于已占用与任务预留的空间，请先清理素材。")
 		}
-		tag, e := tx.Exec(ctx, "UPDATE storage_settings SET video_quota_bytes=$1,image_quota_bytes=$2,revision=revision+1 WHERE singleton AND revision=$3", in.VideoQuotaBytes, in.ImageQuotaBytes, in.ExpectedRevision)
+		tag, e := tx.Exec(ctx, "UPDATE storage_settings SET video_quota_bytes=$1,image_quota_bytes=$2,disk_stop_percent=$3,revision=revision+1 WHERE singleton AND revision=$4", in.VideoQuotaBytes, in.ImageQuotaBytes, in.DiskStopPercent, in.ExpectedRevision)
 		if e != nil {
 			return e
 		}

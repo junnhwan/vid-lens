@@ -4581,7 +4581,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .storage-settings { margin: 14px 0 28px; padding: 15px 21px; border: 1px solid var(--line); border-radius: 12px; }
 .storage-settings summary { cursor: pointer; font-size: 12px; }
 .storage-settings summary span { margin-left: 14px; color: var(--ink-soft); }
-.storage-settings fieldset { border: 0; padding: 22px 0 14px; margin: 0; display: flex; align-items: end; gap: 20px; }
+.storage-settings fieldset { border: 0; padding: 22px 0 14px; margin: 0; display: flex; flex-wrap: wrap; align-items: end; gap: 20px; }
 .storage-settings .desk-field { margin: 0; width: 220px; }
 .storage-settings .fine { margin: 0; }
 .storage-search { margin: 25px 0 18px; align-items: end; }

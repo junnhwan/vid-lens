@@ -60,7 +60,11 @@ func (s *Service) Run(ctx context.Context, v store.Export) error {
 			return e
 		}
 		available, total := int64(disk.Bavail)*int64(disk.Bsize), int64(disk.Blocks)*int64(disk.Bsize)
-		if available-store.ExportMaxBytes < 5<<30 || total > 0 && (total-available+store.ExportMaxBytes)*100 > total*int64(s.Config.DiskStopPercent) {
+		allowed, e := s.Store.DiskSpaceAllowed(ctx, available, total, store.ExportMaxBytes)
+		if e != nil {
+			return e
+		}
+		if !allowed {
 			return domain.Err(422, "EXPORT_LIMIT_EXCEEDED", "当前磁盘空间不足以准备导出。")
 		}
 		r, e := s.Store.Request(ctx, v.SessionID, v.RequestID)

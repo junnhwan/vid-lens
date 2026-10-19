@@ -53,7 +53,7 @@ func (s *Store) ReleaseResource(ctx context.Context, resource, owner string) err
 	_, e := s.Pool.Exec(ctx, "DELETE FROM resource_leases WHERE resource=$1 AND owner=$2", resource, owner)
 	return e
 }
-func (s *Store) ReserveStorage(ctx context.Context, c domain.Claim, temp, images, available, total int64, stop int) error {
+func (s *Store) ReserveStorage(ctx context.Context, c domain.Claim, temp, images, available, total int64) error {
 	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if e := fence(ctx, tx, c); e != nil {
 			return e
@@ -62,7 +62,7 @@ func (s *Store) ReserveStorage(ctx context.Context, c domain.Claim, temp, images
 		if e != nil {
 			return e
 		}
-		l.temp, l.images, l.available, l.total, l.stop = temp, images, available, total, stop
+		l.temp, l.images, l.available, l.total = temp, images, available, total
 		if e := admitStorage(l); e != nil {
 			return e
 		}

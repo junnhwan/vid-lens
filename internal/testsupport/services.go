@@ -49,7 +49,7 @@ func Services(t *testing.T) (*store.Store, *resource.Manager, config.Config) {
 	if e = s.Bootstrap(ctx, p, "test", ""); e != nil {
 		t.Fatal(e)
 	}
-	cfg := config.Config{DatabaseURL: u.String(), RedisURL: redis, SecretKey: secret, DataDir: t.TempDir(), DevMediaDir: t.TempDir(), DiskStopPercent: 99, Profile: p}
+	cfg := config.Config{DatabaseURL: u.String(), RedisURL: redis, SecretKey: secret, DataDir: t.TempDir(), DevMediaDir: t.TempDir(), Profile: p}
 	r, e := resource.New(s, cfg)
 	if e != nil {
 		t.Fatal(e)

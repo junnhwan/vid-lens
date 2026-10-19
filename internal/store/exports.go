@@ -39,7 +39,6 @@ type Export struct {
 
 type DiskSpace struct {
 	Available, Total int64
-	StopPercent      int
 }
 
 func (s *Store) CreateExport(ctx context.Context, session, request, format, key string, disk ...DiskSpace) (Accepted, bool, error) {
@@ -96,11 +95,7 @@ func (s *Store) CreateExport(ctx context.Context, session, request, format, key 
 		if len(disk) > 0 {
 			d := disk[0]
 			extra := load.resTemp + load.resImages + load.exportPending + ExportMaxBytes
-			reserve := max(int64(5<<30), d.Total*15/100)
-			if d.StopPercent > 85 {
-				reserve = 5 << 30
-			}
-			if d.Available-extra < reserve || d.Total <= 0 || (d.Total-d.Available+extra)*100 > d.Total*int64(d.StopPercent) {
+			if diskSpaceBlocked(d.Available, d.Total, extra, load.stop) {
 				return domain.Err(429, "ADMISSION_LIMITED", "磁盘余量不足，暂时无法准备导出。")
 			}
 		}

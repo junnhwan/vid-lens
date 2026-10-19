@@ -47,12 +47,12 @@ func storageLedger(ctx context.Context, q Querier, own string) (storageLoad, err
 	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE run_id=$1 AND kind='frame' AND state IN ('ready','deleting','unavailable')),0),
 	 COALESCE((SELECT sum(bytes) FROM article_exports WHERE NOT file_deleted AND storage_key IS NOT NULL),0),
 	 COALESCE((SELECT sum(GREATEST(0,67108864-COALESCE(bytes,0))) FROM article_exports WHERE NOT file_deleted AND status IN ('queued','running','retry_wait')),0),
-	 video_quota_bytes,image_quota_bytes FROM storage_settings WHERE singleton`, own).Scan(
-		&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.ownTemp, &l.ownImages, &l.exports, &l.exportPending, &l.videoQuota, &l.imageQuota)
+	 video_quota_bytes,image_quota_bytes,disk_stop_percent FROM storage_settings WHERE singleton`, own).Scan(
+		&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.ownTemp, &l.ownImages, &l.exports, &l.exportPending, &l.videoQuota, &l.imageQuota, &l.stop)
 	return l, e
 }
 
-func (s *Store) DiskCapacity(ctx context.Context, available, total int64, stop int, workspace int64) (DiskCapacity, error) {
+func (s *Store) DiskCapacity(ctx context.Context, available, total int64, workspace int64) (DiskCapacity, error) {
 	if total <= 0 {
 		return DiskCapacity{}, domain.Err(503, "SERVICE_UNAVAILABLE", "视频存储状态暂时读不到。")
 	}
@@ -60,15 +60,18 @@ func (s *Store) DiskCapacity(ctx context.Context, available, total int64, stop i
 	if e != nil {
 		return DiskCapacity{}, e
 	}
-	l.available, l.total, l.stop = available, total, stop
+	l.available, l.total = available, total
 	l.temp, l.images = workspace, IncomingFrameBytes
 	return buildCapacity(l), nil
 }
 
 func admitStorage(l storageLoad) error {
 	disk, media := storageLimits(l)
-	if disk || media {
-		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "视频工作区余量不足，请等待站长清理素材或增加配额。")
+	if disk {
+		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "服务器磁盘保护线已触发，请清理主机磁盘空间或在管理台调整磁盘停止线。")
+	}
+	if media {
+		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "视频工作区配额不足，请清理素材或在管理台调整视频/配图配额。")
 	}
 	return nil
 }
@@ -78,8 +81,22 @@ func storageLimits(l storageLoad) (disk, media bool) {
 	incomingTemp := max(int64(0), l.temp-l.ownTemp)
 	incomingImages := max(int64(0), l.images-l.ownImages)
 	media = l.usedTemp+l.exports+l.exportPending+l.resTemp+incomingTemp > videoLimit(l) || l.usedImages+l.resImages+incomingImages > imageLimit(l)
-	disk = l.total <= 0 || l.available-extra < diskFloor(l.total, l.stop) || (l.total-l.available+extra)*100 > l.total*int64(l.stop)
+	disk = diskSpaceBlocked(l.available, l.total, extra, l.stop)
 	return disk, media
+}
+
+func diskSpaceBlocked(available, total, extra int64, stop int) bool {
+	return total <= 0 || available-extra < diskFloor(total, stop) || (total-available+extra)*100 > total*int64(stop)
+}
+
+// DiskSpaceAllowed checks current host usage against the persisted owner policy.
+// Export workers recheck at execution time because host usage can change after queue admission.
+func (s *Store) DiskSpaceAllowed(ctx context.Context, available, total, extra int64) (bool, error) {
+	var stop int
+	if err := s.Pool.QueryRow(ctx, "SELECT disk_stop_percent FROM storage_settings WHERE singleton").Scan(&stop); err != nil {
+		return false, err
+	}
+	return !diskSpaceBlocked(available, total, extra, stop), nil
 }
 
 func videoLimit(l storageLoad) int64 {

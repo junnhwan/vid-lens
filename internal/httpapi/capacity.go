@@ -20,7 +20,7 @@ func (a *Server) capacity(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
-	v, e := a.Store.DiskCapacity(r.Context(), available, total, a.Config.DiskStopPercent, p.WorkspaceBytes)
+	v, e := a.Store.DiskCapacity(r.Context(), available, total, p.WorkspaceBytes)
 	if e != nil {
 		a.problem(w, r, e)
 		return

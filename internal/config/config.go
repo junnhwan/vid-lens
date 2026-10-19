@@ -94,8 +94,6 @@ func (p Profile) Validate() error {
 type Config struct {
 	DatabaseURL, RedisURL, DataDir, Listen, Origin, AdminToken, SecretKey, DevMediaDir, CookieFile, ProxyURL string
 	SecureCookie                                                                                             bool
-	DiskStopPercent                                                                                          int
-	DiskReserveBytes                                                                                         int64
 	SessionTTL                                                                                               time.Duration
 	Profile                                                                                                  Profile
 	ModelKey, ASRKey                                                                                         string
@@ -143,7 +141,7 @@ func LoadFile(path string) (Config, error) {
 	p.ModelDisableThinking = get("VIDLENS_MODEL_DISABLE_THINKING") == "true"
 	p.ASRBaseURL = get("VIDLENS_ASR_BASE_URL")
 	p.ASRModel = get("VIDLENS_ASR_MODEL")
-	c := Config{DatabaseURL: get("VIDLENS_DATABASE_URL"), RedisURL: env("VIDLENS_REDIS_URL", "redis://127.0.0.1:6379/0"), DataDir: get("VIDLENS_DATA_DIR"), Listen: env("VIDLENS_LISTEN", "127.0.0.1:8080"), Origin: env("VIDLENS_PUBLIC_ORIGIN", "http://127.0.0.1:8080"), AdminToken: get("VIDLENS_ADMIN_TOKEN"), SecretKey: get("VIDLENS_SECRET_KEY"), DevMediaDir: get("VIDLENS_DEV_MEDIA_DIR"), CookieFile: get("VIDLENS_PLATFORM_COOKIE_FILE"), ProxyURL: get("VIDLENS_PROXY_URL"), Profile: p, ModelKey: get("VIDLENS_MODEL_API_KEY"), ASRKey: get("VIDLENS_ASR_API_KEY"), DiskStopPercent: 85, DiskReserveBytes: 5 << 30, SessionTTL: 30 * 24 * time.Hour}
+	c := Config{DatabaseURL: get("VIDLENS_DATABASE_URL"), RedisURL: env("VIDLENS_REDIS_URL", "redis://127.0.0.1:6379/0"), DataDir: get("VIDLENS_DATA_DIR"), Listen: env("VIDLENS_LISTEN", "127.0.0.1:8080"), Origin: env("VIDLENS_PUBLIC_ORIGIN", "http://127.0.0.1:8080"), AdminToken: get("VIDLENS_ADMIN_TOKEN"), SecretKey: get("VIDLENS_SECRET_KEY"), DevMediaDir: get("VIDLENS_DEV_MEDIA_DIR"), CookieFile: get("VIDLENS_PLATFORM_COOKIE_FILE"), ProxyURL: get("VIDLENS_PROXY_URL"), Profile: p, ModelKey: get("VIDLENS_MODEL_API_KEY"), ASRKey: get("VIDLENS_ASR_API_KEY"), SessionTTL: 30 * 24 * time.Hour}
 	c.SecureCookie = strings.HasPrefix(c.Origin, "https://")
 	if v := get("VIDLENS_VIDEO_CONCURRENCY"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -165,13 +163,6 @@ func LoadFile(path string) (Config, error) {
 			return c, errors.New("search monthly limit must be 0-1000")
 		}
 		c.SearchMonthlyLimit = n
-	}
-	if s := get("VIDLENS_DISK_STOP_PERCENT"); s != "" {
-		v, e := strconv.Atoi(s)
-		if e != nil || v < 50 || v > 99 {
-			return c, errors.New("invalid disk stop percent")
-		}
-		c.DiskStopPercent = v
 	}
 	if c.DatabaseURL == "" || c.DataDir == "" || len(c.AdminToken) < 32 || len(c.SecretKey) < 32 || strings.HasPrefix(c.AdminToken, "REPLACE_") || strings.HasPrefix(c.SecretKey, "REPLACE_") {
 		return c, errors.New("database URL, external data directory, admin token and secret key (each at least 32 characters) are required")
