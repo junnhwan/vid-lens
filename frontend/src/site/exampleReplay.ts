@@ -1,8 +1,10 @@
-import type { ArticleResponse } from "../contract/types"
+import type { ActivityStep, ArticleResponse } from "../contract/types"
 import { formatDuration, platformLabel } from "../contract/text"
 
 export interface ExampleData extends ArticleResponse {
   id: string
+  process_status?: "ready" | "partial" | "unavailable" | string
+  generation_steps?: ActivityStep[]
 }
 
 export interface CatalogItem {

@@ -2,19 +2,23 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"vidlens/internal/domain"
 )
 
 const maxExampleShowcases = 24
+const ExampleQuestionLimit = 8
 
 const exampleTitleSQL = `COALESCE(NULLIF(a.content->>'title', ''), NULLIF(a.content#>>'{source,title}', ''), '未命名视频')`
 const exampleDurationSQL = `CASE WHEN COALESCE(a.content#>>'{source,duration_ms}', '') ~ '^[0-9]+$' THEN (a.content#>>'{source,duration_ms}')::bigint ELSE NULL END`
@@ -62,8 +66,14 @@ type PublicExample struct {
 	GenerationModel *domain.GenerationModel `json:"generation_model,omitempty"`
 	Purpose         string                  `json:"purpose,omitempty"`
 	QAAvailable     bool                    `json:"qa_available"`
-	GenerationSteps []struct{}              `json:"generation_steps"`
+	ProcessStatus   string                  `json:"process_status"`
+	GenerationSteps []domain.Step           `json:"generation_steps"`
 	Questions       []PublicExampleQuestion `json:"questions"`
+}
+
+type exampleProcess struct {
+	Status string        `json:"status"`
+	Steps  []domain.Step `json:"steps"`
 }
 
 type publicExampleMedia struct {
@@ -77,15 +87,6 @@ type showcaseArticle struct {
 	Model      *domain.GenerationModel `json:"generation_model"`
 	SnapshotID string                  `json:"snapshot_id"`
 	Purpose    string                  `json:"purpose"`
-}
-
-type showcaseTurn struct {
-	ID        string                 `json:"id"`
-	Question  string                 `json:"question"`
-	Context   domain.QuestionContext `json:"context"`
-	Answer    *domain.Answer         `json:"answer"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 func (s *Store) AdminExamples(ctx context.Context) ([]AdminExample, error) {
@@ -139,11 +140,35 @@ func (s *Store) ReplaceExampleShowcases(ctx context.Context, ids []string) error
 		if n != len(ids) {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "有一篇图文已经不存在，请刷新后再保存。")
 		}
-		if _, e := tx.Exec(ctx, "DELETE FROM example_showcases"); e != nil {
+		kept := map[string][]byte{}
+		rows, e := tx.Query(ctx, "SELECT article_id, process FROM example_showcases WHERE process_frozen")
+		if e != nil {
+			return e
+		}
+		for rows.Next() {
+			var id string
+			var process []byte
+			if e = rows.Scan(&id, &process); e != nil {
+				rows.Close()
+				return e
+			}
+			kept[id] = process
+		}
+		rows.Close()
+		if e = rows.Err(); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, "DELETE FROM example_showcases"); e != nil {
 			return e
 		}
 		for i, id := range ids {
-			if _, e := tx.Exec(ctx, "INSERT INTO example_showcases(article_id, position) VALUES($1, $2)", id, i+1); e != nil {
+			process := kept[id]
+			if process == nil {
+				if process, e = captureExampleProcess(ctx, tx, id); e != nil {
+					return e
+				}
+			}
+			if _, e = tx.Exec(ctx, "INSERT INTO example_showcases(article_id, position, process, process_frozen) VALUES($1, $2, $3, true)", id, i+1, process); e != nil {
 				return e
 			}
 		}
@@ -211,11 +236,11 @@ func (s *Store) PublicExample(ctx context.Context, id string) (PublicExample, er
 		return out, domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
 	}
 	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		row, turns, err := loadShowcase(ctx, tx, id)
+		row, process, err := loadShowcase(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		frames, byID, err := showcaseFrames(ctx, tx, row, turns, id)
+		frames, _, err := showcaseFrames(ctx, tx, row, id)
 		if err != nil {
 			return err
 		}
@@ -229,32 +254,30 @@ func (s *Store) PublicExample(ctx context.Context, id string) (PublicExample, er
 		if article.Limitations == nil {
 			article.Limitations = []domain.Limitation{}
 		}
-		questions := make([]PublicExampleQuestion, 0, len(turns))
-		for _, turn := range turns {
-			if strings.TrimSpace(turn.Question) == "" || turn.Answer == nil {
-				continue
-			}
-			answer := projectAnswer(*turn.Answer, byID)
-			var contextFrame *string
-			label := "文字追问"
-			if turn.Context.FrameID != nil {
-				if frame, ok := byID[*turn.Context.FrameID]; ok {
-					contextFrame = domain.Ptr(frame.ID)
-					label = "看图追问"
-				}
-			}
-			duration := turn.UpdatedAt.Sub(turn.CreatedAt).Milliseconds()
-			if duration < 0 {
-				duration = 0
-			}
-			questions = append(questions, PublicExampleQuestion{
-				ID: turn.ID, Label: label, Question: turn.Question, ContextFrameID: contextFrame,
-				Answer: answer, Steps: []struct{}{}, RecordedAt: turn.CreatedAt, DurationMS: duration,
-			})
+		var ready, restoring bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM media_assets WHERE snapshot_id=$1 AND kind='video' AND state='ready' AND (expires_at IS NULL OR expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=media_assets.id AND (expires_at IS NULL OR expires_at>now()))))", row.SnapshotID).Scan(&ready); err != nil {
+			return err
 		}
-		status := "unavailable"
-		if len(frames) > 0 {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM job_runs WHERE snapshot_id=$1 AND kind='source.restore' AND status IN ('queued','running','retry_wait'))", row.SnapshotID).Scan(&restoring); err != nil {
+			return err
+		}
+		status := "expired"
+		if ready {
 			status = "ready"
+		} else if restoring {
+			status = "restoring"
+		}
+		var configID string
+		if err = tx.QueryRow(ctx, "SELECT config_id FROM articles WHERE id=$1", id).Scan(&configID); err != nil {
+			return err
+		}
+		qaReady := true
+		if err = checkAvailable(ctx, tx, configID); err != nil {
+			var problem *domain.Problem
+			if !errors.As(err, &problem) {
+				return err
+			}
+			qaReady = false
 		}
 		model := row.Model
 		if model != nil {
@@ -263,11 +286,17 @@ func (s *Store) PublicExample(ctx context.Context, id string) (PublicExample, er
 			copy.Description = ""
 			model = &copy
 		}
+		if process.Steps == nil {
+			process.Steps = []domain.Step{}
+		}
+		if process.Status == "" {
+			process.Status = "unavailable"
+		}
 		out = PublicExample{
 			ID: id, SchemaVersion: 1, DetailLevel: article.DetailLevel, Article: article, Frames: frames,
-			Media:           publicExampleMedia{Status: status, CanInspectNow: len(frames) > 0},
-			GenerationModel: model, Purpose: strings.TrimSpace(row.Purpose), QAAvailable: false,
-			GenerationSteps: []struct{}{}, Questions: questions,
+			Media:           publicExampleMedia{Status: status, CanInspectNow: ready, CanRestoreForQuestion: true},
+			GenerationModel: model, Purpose: strings.TrimSpace(row.Purpose), QAAvailable: qaReady,
+			ProcessStatus: process.Status, GenerationSteps: process.Steps, Questions: []PublicExampleQuestion{},
 		}
 		return nil
 	})
@@ -280,11 +309,11 @@ func (s *Store) PublicExampleFrame(ctx context.Context, articleID, frameID strin
 		return asset, domain.Err(404, "RESOURCE_NOT_FOUND", "这张图片没有公开。")
 	}
 	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		row, turns, err := loadShowcase(ctx, tx, articleID)
+		row, process, err := loadShowcase(ctx, tx, articleID)
 		if err != nil {
 			return err
 		}
-		if !frameAllowed(row, turns, frameID) {
+		if !frameAllowed(row, process, frameID) {
 			return domain.Err(404, "RESOURCE_NOT_FOUND", "这张图片没有公开。")
 		}
 		found, err := one[domain.Asset](ctx, tx, "SELECT to_jsonb(m) FROM media_assets m WHERE m.id=$1 AND m.snapshot_id=$2 AND m.kind='frame' AND m.state='ready'", frameID, row.SnapshotID)
@@ -297,7 +326,8 @@ func (s *Store) PublicExampleFrame(ctx context.Context, articleID, frameID strin
 	return asset, e
 }
 
-func loadShowcase(ctx context.Context, q Querier, id string) (showcaseArticle, []showcaseTurn, error) {
+func loadShowcase(ctx context.Context, q Querier, id string) (showcaseArticle, exampleProcess, error) {
+	var process exampleProcess
 	row, e := one[showcaseArticle](ctx, q, `
 		SELECT jsonb_build_object(
 			'content', a.content,
@@ -306,7 +336,7 @@ func loadShowcase(ctx context.Context, q Querier, id string) (showcaseArticle, [
 			'purpose', COALESCE((
 				SELECT g.generation_spec->>'purpose'
 				FROM generation_requests g
-				WHERE g.article_id = a.id AND g.generation_spec IS NOT NULL
+				WHERE g.article_id = a.id AND g.generation_spec IS NOT NULL AND g.reuse <> 'example_question'
 				ORDER BY g.created_at DESC
 				LIMIT 1
 			), '')
@@ -315,29 +345,25 @@ func loadShowcase(ctx context.Context, q Querier, id string) (showcaseArticle, [
 		JOIN example_showcases s ON s.article_id = a.id
 		WHERE a.id = $1`, id)
 	if errors.Is(e, pgx.ErrNoRows) {
-		return row, nil, domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
+		return row, process, domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
 	}
 	if e != nil {
-		return row, nil, e
+		return row, process, e
 	}
-	turns, e := many[showcaseTurn](ctx, q, `
-		SELECT jsonb_build_object(
-			'id', t.id,
-			'question', t.question,
-			'context', t.context,
-			'answer', t.answer,
-			'created_at', t.created_at,
-			'updated_at', t.updated_at
-		)
-		FROM qa_turns t
-		WHERE t.article_id = $1 AND t.status = 'completed' AND t.answer IS NOT NULL
-		ORDER BY t.created_at
-		LIMIT 8`, id)
-	return row, turns, e
+	var raw []byte
+	if e = q.QueryRow(ctx, "SELECT process FROM example_showcases WHERE article_id=$1", id).Scan(&raw); e != nil {
+		return row, process, e
+	}
+	if len(raw) > 0 {
+		if e = json.Unmarshal(raw, &process); e != nil {
+			return row, process, e
+		}
+	}
+	return row, process, nil
 }
 
-func showcaseFrames(ctx context.Context, q Querier, row showcaseArticle, turns []showcaseTurn, articleID string) ([]domain.Frame, map[string]domain.Frame, error) {
-	ids := referencedFrameIDs(row.Content, turns)
+func showcaseFrames(ctx context.Context, q Querier, row showcaseArticle, articleID string) ([]domain.Frame, map[string]domain.Frame, error) {
+	ids := ContentFrameIDs(row.Content.Sections, row.Content.Citations)
 	assets, e := readyFrames(ctx, q, row.SnapshotID, ids)
 	if e != nil {
 		return nil, nil, e
@@ -352,32 +378,22 @@ func showcaseFrames(ctx context.Context, q Querier, row showcaseArticle, turns [
 	return frames, byID, nil
 }
 
-func referencedFrameIDs(article domain.Article, turns []showcaseTurn) []string {
-	ids := ContentFrameIDs(article.Sections, article.Citations)
-	for _, turn := range turns {
-		if turn.Context.FrameID != nil {
-			ids = appendFrameID(ids, *turn.Context.FrameID)
-		}
-		if turn.Answer == nil {
-			continue
-		}
-		for _, frame := range turn.Answer.Frames {
-			ids = appendFrameID(ids, frame.ID)
-		}
-		for _, block := range turn.Answer.Blocks {
-			for _, id := range block.FrameIDs {
-				ids = appendFrameID(ids, id)
-			}
-		}
-		ids = append(ids, ContentFrameIDs(nil, turn.Answer.Citations)...)
-	}
-	return ids
-}
-
-func frameAllowed(row showcaseArticle, turns []showcaseTurn, frameID string) bool {
-	for _, id := range referencedFrameIDs(row.Content, turns) {
+func frameAllowed(row showcaseArticle, process exampleProcess, frameID string) bool {
+	for _, id := range ContentFrameIDs(row.Content.Sections, row.Content.Citations) {
 		if id == frameID {
 			return true
+		}
+	}
+	for _, step := range process.Steps {
+		for _, id := range step.FrameIDs {
+			if id == frameID {
+				return true
+			}
+		}
+		for _, frame := range step.Frames {
+			if frame.ID == frameID {
+				return true
+			}
 		}
 	}
 	return false
@@ -444,35 +460,173 @@ func scrubArticle(article domain.Article) domain.Article {
 	return article
 }
 
-func projectAnswer(answer domain.Answer, frames map[string]domain.Frame) domain.Answer {
-	kept := make([]domain.Frame, 0, len(answer.Frames))
-	for _, frame := range answer.Frames {
-		if pub, ok := frames[frame.ID]; ok {
-			kept = append(kept, pub)
-		}
-	}
-	answer.Frames = kept
-	if answer.Blocks == nil {
-		answer.Blocks = []domain.Block{}
-	}
-	if answer.Citations == nil {
-		answer.Citations = map[string]domain.Citation{}
-	}
-	for id, citation := range answer.Citations {
-		citation.SnapshotID = ""
-		citation.ContentSHA256 = ""
-		answer.Citations[id] = citation
-	}
-	if answer.Limitations == nil {
-		answer.Limitations = []domain.Limitation{}
-	}
-	return answer
-}
-
 func clipRunes(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if utf8.RuneCountInString(value) <= limit {
 		return value
 	}
 	return string([]rune(value)[:limit])
+}
+
+func unavailableExampleProcess() []byte {
+	raw, err := json.Marshal(exampleProcess{Status: "unavailable", Steps: []domain.Step{}})
+	if err != nil {
+		return []byte(`{"status":"unavailable","steps":[]}`)
+	}
+	return raw
+}
+
+func captureExampleProcess(ctx context.Context, tx pgx.Tx, articleID string) ([]byte, error) {
+	req, err := one[domain.Request](ctx, tx, `
+		SELECT to_jsonb(r) FROM generation_requests r
+		JOIN articles a ON a.id=$1
+		WHERE r.article_id=a.id AND r.reuse<>'example_question'
+		  AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.segments) e WHERE e->>'run_id'=a.generation_run_id)
+		ORDER BY r.created_at
+		LIMIT 1`, articleID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unavailableExampleProcess(), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	segments, err := sharedSegments(ctx, tx, req)
+	if err != nil {
+		return nil, err
+	}
+	steps, history, _, err := stepsAt(ctx, tx, segments, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	status := "unavailable"
+	if len(steps) > 0 && history == "available" {
+		status = "ready"
+	} else if len(steps) > 0 {
+		status = "partial"
+	}
+	return json.Marshal(exampleProcess{Status: status, Steps: projectExampleSteps(steps, articleID)})
+}
+
+func projectExampleSteps(steps []domain.Step, articleID string) []domain.Step {
+	out := make([]domain.Step, len(steps))
+	for i, step := range steps {
+		step.RunID = "attempt-" + strconv.Itoa(step.SegmentNo)
+		frames := make([]domain.Frame, len(step.Frames))
+		for j, frame := range step.Frames {
+			frames[j] = projectExampleFrame(frame, articleID)
+		}
+		step.Frames = frames
+		if step.FrameIDs == nil {
+			step.FrameIDs = []string{}
+		}
+		out[i] = step
+	}
+	return out
+}
+
+func projectExampleFrame(frame domain.Frame, articleID string) domain.Frame {
+	frame.SnapshotID = ""
+	frame.ReplacesFrameID = nil
+	frame.ExpiresAt = nil
+	frame.URLs = map[string]*string{"full": nil, "thumbnail": nil}
+	if frame.Availability == "ready" {
+		path := exampleFrameURL(articleID, frame.ID)
+		frame.URLs["full"] = &path
+		frame.URLs["thumbnail"] = &path
+	}
+	return frame
+}
+
+func (s *Store) FreezeExampleProcess(ctx context.Context, articleID string) error {
+	if !exampleArticleID.MatchString(articleID) {
+		return nil
+	}
+	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var frozen bool
+		err := tx.QueryRow(ctx, "SELECT process_frozen FROM example_showcases WHERE article_id=$1", articleID).Scan(&frozen)
+		if errors.Is(err, pgx.ErrNoRows) || frozen {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		process, err := captureExampleProcess(ctx, tx, articleID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "UPDATE example_showcases SET process=$2, process_frozen=true WHERE article_id=$1 AND NOT process_frozen", articleID, process)
+		return err
+	})
+}
+
+func (s *Store) OpenExampleConversation(ctx context.Context, session, articleID string) (domain.Conversation, bool, error) {
+	var out domain.Conversation
+	var created bool
+	if !exampleArticleID.MatchString(session) || !exampleArticleID.MatchString(articleID) {
+		return out, false, domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
+	}
+	err := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var sourceID, snapshotID, configID, inputURL string
+		var spec []byte
+		err := tx.QueryRow(ctx, `
+			SELECT a.snapshot_id, a.config_id, ss.source_id,
+			       COALESCE(NULLIF(a.content#>>'{source,canonical_url}', ''), 'https://vidlens.invalid/' || a.id),
+			       spec.generation_spec
+			FROM example_showcases es
+			JOIN articles a ON a.id = es.article_id
+			JOIN source_snapshots ss ON ss.id = a.snapshot_id
+			LEFT JOIN LATERAL (
+				SELECT generation_spec FROM generation_requests g
+				WHERE g.article_id = a.id AND g.reuse <> 'example_question' AND g.generation_spec IS NOT NULL
+				ORDER BY g.created_at
+				LIMIT 1
+			) spec ON true
+			WHERE es.article_id = $1`, articleID).Scan(&snapshotID, &configID, &sourceID, &inputURL, &spec)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
+		}
+		if err != nil {
+			return err
+		}
+		requestID, err := exampleQuestionRequest(ctx, tx, session, articleID, inputURL, sourceID, snapshotID, configID, spec)
+		if err != nil {
+			return err
+		}
+		found, err := one[domain.Conversation](ctx, tx, "SELECT to_jsonb(c) FROM qa_conversations c WHERE session_id=$1 AND request_id=$2", session, requestID)
+		if err == nil {
+			out = found
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		created = true
+		out, err = one[domain.Conversation](ctx, tx, "INSERT INTO qa_conversations(id,session_id,request_id,article_id,snapshot_id) VALUES($1,$2,$3,$4,$5) RETURNING to_jsonb(qa_conversations)", domain.ID(), session, requestID, articleID, snapshotID)
+		return err
+	})
+	return out, created, err
+}
+
+func exampleQuestionRequest(ctx context.Context, tx pgx.Tx, session, articleID, inputURL, sourceID, snapshotID, configID string, spec []byte) (string, error) {
+	var requestID string
+	err := tx.QueryRow(ctx, "SELECT id FROM generation_requests WHERE session_id=$1 AND article_id=$2 AND reuse='example_question'", session, articleID).Scan(&requestID)
+	if err == nil {
+		return requestID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	requestID = domain.ID()
+	_, err = tx.Exec(ctx, `INSERT INTO generation_requests(id,session_id,input_url,source_id,snapshot_id,article_id,config_id,status,reuse,segments,deadline_at,generation_spec)
+		VALUES($1,$2,$3,$4,$5,$6,$7,'completed','example_question','[]'::jsonb,now()+interval '24 hours',$8)`,
+		requestID, session, inputURL, sourceID, snapshotID, articleID, configID, spec)
+	if err == nil {
+		return requestID, nil
+	}
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" {
+		err = tx.QueryRow(ctx, "SELECT id FROM generation_requests WHERE session_id=$1 AND article_id=$2 AND reuse='example_question'", session, articleID).Scan(&requestID)
+		return requestID, err
+	}
+	return "", err
 }

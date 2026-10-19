@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { Citation, Frame } from "../contract/types"
-import { citationURL, formatDuration, platformLabel } from "../contract/text"
+import type { ActivityStep, Citation, Frame } from "../contract/types"
+import { choosePassage, citationURL, formatDuration, platformLabel } from "../contract/text"
 import { SiteHeader, SiteFooter } from "../ui/SiteHeader"
+import { ActivityList } from "../ui/ActivityList"
 import { BlockView } from "../ui/Blocks"
+import { ExecutionPlan } from "../ui/ExecutionPlan"
 import { Lightbox } from "../ui/Lightbox"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
+import { QaPanel } from "../ui/QaPanel"
+import { hitsInSelection } from "../ui/selection"
 import { prefersReduced } from "../ui/motion"
 import { catalogChoice, exampleArchive, exampleRoute, exampleShelf, type CatalogItem, type ExampleData } from "./exampleReplay"
+import { useExampleQuestions } from "./useExampleQuestions"
 import "../styles/example.css"
 
 type OpenFrame = (frames: Frame[], index: number, origin: HTMLElement) => void
@@ -87,7 +92,13 @@ export function Example() {
   }, [route.id, published])
   const current = data?.id === route.id ? data : null
   const choice = published.find((item) => item.id === route.id)
-  const frames = useMemo(() => new Map((current?.frames || []).map((frame) => [frame.id, frame])), [current])
+  const questions = useExampleQuestions(current?.id ?? null, current?.article.title, current?.article.sections[0]?.title)
+  const frames = useMemo(() => {
+    const map = new Map((current?.frames || []).map((frame) => [frame.id, frame]))
+    for (const frame of questions.frames) map.set(frame.id, frame)
+    for (const step of current?.generation_steps || []) for (const frame of step.frames || []) map.set(frame.id, frame)
+    return map
+  }, [current, questions.frames])
   function navigate(id: string) {
     if (id === route.id) return
     history.pushState(null, "", `/example?video=${id}`)
@@ -103,7 +114,7 @@ export function Example() {
   const openFrame: OpenFrame = (items, index, origin) => setLightbox({ frames: items, index, origin })
   return <>
     <SiteHeader />
-    <main className="examples-page">
+    <main className="examples-page" data-qa={questions.open ? "open" : "closed"}>
       <header className="examples-intro">
         <p className="eyebrow"><span aria-hidden="true" />真实示例</p>
         {shelf.rest.length ? <button type="button" className="example-more" aria-expanded={moreOpen} onClick={() => setMoreOpen((value) => !value)}>{moreOpen ? "收起" : "更多"}</button> : null}
@@ -123,21 +134,39 @@ export function Example() {
       {route.id ? <section id="example-stage" className="example-stage" aria-label="示例图文">
         {error ? <div className="example-status" role="alert"><p>{error}</p><button type="button" className="btn" onClick={() => setRetry((value) => value + 1)}>重新读取</button></div>
           : !current ? <p className="example-status" role="status">正在打开这份图文…</p>
-          : <ExampleArticle key={current.id} data={current} choice={choice} frames={frames} onOpenFrame={openFrame} onCite={cite} />}
+          : <ExampleArticle key={current.id} data={current} choice={choice} frames={frames} questions={questions} onOpenFrame={openFrame} onCite={cite} />}
       </section> : null}
       <footer className="examples-next"><div><p className="eyebrow">YOUR NEXT READ</p><h2>下一条，换成你的视频。</h2><p>贴入链接，带上你的关注点。</p></div><a href="/" className="btn primary">开始自己的解读 <span aria-hidden="true">↗</span></a></footer>
     </main>
     <SiteFooter />
-    <Lightbox canAsk={false} readOnly open={lightbox.frames.length > 0} frames={lightbox.frames} index={lightbox.index} origin={lightbox.origin} onClose={() => setLightbox({ frames: [], index: 0, origin: null })} onIndex={(index) => setLightbox((value) => ({ ...value, index }))} onAsk={() => {}} onBroken={() => {}} />
+    <Lightbox canAsk={current?.qa_available === true} open={lightbox.frames.length > 0} frames={lightbox.frames} index={lightbox.index} origin={lightbox.origin} onClose={() => setLightbox({ frames: [], index: 0, origin: null })} onIndex={(index) => setLightbox((value) => ({ ...value, index }))} onAsk={(frame) => { setLightbox({ frames: [], index: 0, origin: null }); questions.askFrame(frame) }} onBroken={() => {}} />
   </>
 }
 
-function ExampleArticle({ data, choice, frames, onOpenFrame, onCite }: { data: ExampleData; choice?: Choice; frames: Map<string, Frame>; onOpenFrame: OpenFrame; onCite: (citation: Citation) => void }) {
+function processActivity(steps: ActivityStep[]) {
+  const plan = [...steps].reverse().find((step) => step.plan)?.plan ?? null
+  const calls = steps.filter((step) => step.kind === "model_response").length
+  const sends = steps.filter((step) => step.kind === "model_submission").length
+  return {
+    current_step_id: null,
+    recent_steps: steps,
+    has_more: false,
+    history_url: "",
+    history_status: "available" as const,
+    history_expires_at: null,
+    model_calls: calls,
+    model_submissions: sends || null,
+    plan,
+  }
+}
+
+export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, onCite }: { data: ExampleData; choice?: Choice; frames: Map<string, Frame>; questions: ReturnType<typeof useExampleQuestions>; onOpenFrame: OpenFrame; onCite: (citation: Citation) => void }) {
   const sections = data.article.sections
   const sectionKey = sections.map((item) => item.id).join("\n")
   const [section, setSection] = useState("")
   const [thread, setThread] = useState(false)
-  const [coverBroken, setCoverBroken] = useState(false)
+  const [genOpen, setGenOpen] = useState(false)
+  const [pop, setPop] = useState<{ left: number; top: number; label: string; pick: () => void } | null>(null)
   const lock = useRef<string | null>(null)
   const contentsRef = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -165,12 +194,54 @@ function ExampleArticle({ data, choice, frames, onOpenFrame, onCite }: { data: E
     document.getElementById(id)?.scrollIntoView({ behavior: prefersReduced() ? "auto" : "smooth", block: "start" })
     window.setTimeout(() => { if (lock.current === id) lock.current = null }, prefersReduced() ? 0 : 900)
   }
+  useEffect(() => {
+    function hide() { setPop(null) }
+    function sync(event: Event) {
+      const target = event.target
+      if (target instanceof Element && target.closest(".passage-pop")) return
+      window.setTimeout(() => {
+        const prose = document.getElementById("prose")
+        if (!prose || data.qa_available === false) { setPop(null); return }
+        const found = hitsInSelection(prose)
+        if (!found.rect || !found.hits.length) { setPop(null); return }
+        const enriched = found.hits.flatMap((hit) => {
+          const item = sections.find((section) => section.id === hit.sectionId)
+          const block = item?.blocks.find((entry) => entry.id === hit.blockId)
+          return block ? [{ sectionId: hit.sectionId, blockId: hit.blockId, block }] : []
+        })
+        const result = choosePassage(enriched, found.hits.map((hit) => hit.quote).join(" "), questions.selectionMax)
+        const rect = found.rect
+        const left = Math.max(12, Math.min(rect.left + rect.width / 2 - 36, window.innerWidth - 84))
+        let top = rect.top - 38
+        if (top < 64) top = rect.bottom + 8
+        if (!result.ok && result.reason === "empty") { setPop(null); return }
+        const label = !result.ok && result.reason === "cross" ? "请只选择一段" : !result.ok && result.reason === "long" ? "这段太长了" : !result.ok ? "这段对不上正文" : "问这段"
+        setPop({
+          left, top, label, pick: () => {
+            setPop(null)
+            if (!result.ok) return
+            document.getSelection()?.removeAllRanges()
+            questions.askPassage(result.passage)
+          },
+        })
+      }, 0)
+    }
+    document.addEventListener("mouseup", sync)
+    document.addEventListener("scroll", hide, true)
+    return () => {
+      document.removeEventListener("mouseup", sync)
+      document.removeEventListener("scroll", hide, true)
+    }
+  }, [data.qa_available, questions, sections])
   const date = new Date(data.article.published_at).toLocaleDateString("zh-Hans")
   const source = choice?.meta || [platformLabel(data.article.source.platform), formatDuration(data.article.source.duration_ms)].filter(Boolean).join(" · ")
   const caption = [source, date].filter(Boolean).join(" · ")
-  const cover = choice?.cover && !coverBroken ? choice.cover : ""
   const currentTitle = sections.find((item) => item.id === section)?.title || ""
-  return <div className="example-reading example-paper">
+  const steps = data.generation_steps || []
+  const processNote = data.process_status === "partial" ? "更早的步骤已经不在记录里。" : !steps.length ? "这份示例发布时，生成过程已经不在记录里。" : ""
+  const canAsk = data.qa_available !== false
+  return <div className="workspace example-workspace example-paper" data-qa={questions.open ? "open" : "closed"}>
+    <div className="article-col">
     <article className="sheet example-sheet">
       <div className="example-thread" data-open={thread ? "true" : undefined}>
         <div className="example-thread-bar" aria-hidden={thread ? undefined : true}>
@@ -184,11 +255,22 @@ function ExampleArticle({ data, choice, frames, onOpenFrame, onCite }: { data: E
       </div>
       <header className="article-head">
         <h1 id="article-top">{data.article.title}</h1>
-        {cover ? <figure className="example-lead"><img src={cover} alt="" onError={() => setCoverBroken(true)} />
-          <figcaption><span>{caption}</span><a href={data.article.source.canonical_url} target="_blank" rel="noopener noreferrer">打开原视频 <span aria-hidden="true">↗</span></a></figcaption>
-        </figure> : <div className="example-article-meta"><p className="meta">{caption}</p><a href={data.article.source.canonical_url} target="_blank" rel="noopener noreferrer">打开原视频 <span aria-hidden="true">↗</span></a></div>}
-        <ModelIdentity model={data.generation_model} showHistoryNote={false} />
+        <div className="article-tools">
+          <p className="meta">{caption}</p>
+          <a className="text-button" href={data.article.source.canonical_url} target="_blank" rel="noopener noreferrer">打开原视频 <span aria-hidden="true">↗</span></a>
+          <button type="button" className="disclosure" aria-expanded={genOpen} onClick={() => setGenOpen((value) => !value)}>{genOpen ? "收起生成过程" : "查看生成过程"}</button>
+          <button type="button" id="toggle-qa" className="btn toggle" aria-pressed={questions.open} onClick={questions.toggle}>问这条视频</button>
+        </div>
+        <ModelIdentity model={data.generation_model} purpose={data.purpose} detailLevel={data.detail_level} showHistoryNote={false} />
       </header>
+      <div className="disclose" data-open={genOpen ? "true" : "false"}>
+        <div className="disclose-inner">
+          <ExecutionPlan activity={processActivity(steps)} completed />
+          <ActivityList steps={steps} resourceStatus="completed" detailed open onOpenFrame={onOpenFrame} onBroken={() => {}} />
+          {processNote ? <p className="history-note">{processNote}</p> : null}
+        </div>
+      </div>
+      {!data.media.can_inspect_now ? <p className="history-note">{data.media.can_restore_for_question ? "现在不能直接查看新的画面。提问时可以再准备这条视频。" : "现在不能查看新的画面。已有文章仍然可以读。"}</p> : null}
       {sections.length ? <nav className="example-contents" aria-label="目录" ref={contentsRef}>
         <p className="eyebrow"><span aria-hidden="true" />目录</p>
         <ol data-columns={sections.length > 4 ? "2" : "1"}>
@@ -201,9 +283,47 @@ function ExampleArticle({ data, choice, frames, onOpenFrame, onCite }: { data: E
         </ol>
       </nav> : null}
       {data.article.mind_map ? <MindMap map={data.article.mind_map} current={section} onJump={jump} /> : null}
-      <div className="prose">{sections.map((item) => <section key={item.id}><h2 id={item.id}>{item.title}</h2>{item.blocks.map((block) =>
-        <BlockView key={block.id} block={block} sectionId={item.id} frames={frames} citations={data.article.citations} onCite={onCite} onOpenFrame={onOpenFrame} onAskFrame={() => {}} onBroken={() => {}} readOnly />
+      <div className="prose" id="prose">{sections.map((item) => <section key={item.id}><h2 id={item.id}>{item.title}</h2>{item.blocks.map((block) =>
+        <BlockView key={block.id} block={block} sectionId={item.id} frames={frames} citations={data.article.citations} onCite={onCite} onOpenFrame={onOpenFrame} onAskFrame={questions.askFrame} onBroken={() => {}} readOnly={!canAsk} />
       )}</section>)}{data.article.limitations.length ? <aside className="limits"><h2>还没确认的部分</h2>{data.article.limitations.map((item, index) => <p key={index}>{item.message}</p>)}</aside> : null}</div>
     </article>
+    </div>
+    <div className="qa-slot">
+      <QaPanel
+        open={questions.open}
+        turns={questions.turns}
+        stepsFor={questions.stepsFor}
+        frames={frames}
+        draft={questions.draft}
+        frameChip={questions.frameChip}
+        passageChip={questions.passageChip}
+        prompts={questions.prompts}
+        busy={questions.busy}
+        error={questions.error}
+        expanded={questions.expanded}
+        focusToken={questions.focusToken}
+        onDraft={questions.setDraft}
+        onSend={questions.send}
+        onStop={questions.stop}
+        onRetry={questions.retry}
+        onClose={questions.close}
+        onToggle={questions.toggleTurn}
+        onSuggest={questions.suggest}
+        onRemoveFrame={questions.removeFrame}
+        onRemovePassage={questions.removePassage}
+        onOpenFrame={onOpenFrame}
+        onCite={onCite}
+        onBroken={() => {}}
+        externalAllowed={questions.externalAllowed}
+        externalAvailable={questions.externalAvailable}
+        searchAvailable={questions.searchAvailable}
+        referenceLinks={questions.referenceLinks}
+        onExternal={questions.setExternal}
+        onReferenceLinks={questions.setReferenceLinks}
+        modelUnavailable={data.qa_available === false}
+        unavailableNote="原模型暂不可用，问题草稿已保留。这篇图文仍可阅读。"
+      />
+    </div>
+    <button type="button" className="passage-pop" hidden={!pop} style={pop ? { left: pop.left, top: pop.top } : undefined} onMouseDown={(event) => { event.preventDefault(); pop?.pick() }}>{pop?.label || "问这段"}</button>
   </div>
 }

@@ -1,4 +1,8 @@
 .examples-page { width: min(1120px, calc(100% - 96px)); margin: 72px auto 0; }
+.examples-page[data-qa="open"] { width: min(calc(40rem + 526px), calc(100% - 64px)); }
+.examples-page .workspace.example-workspace { width: min(40rem, 100%); margin: 8px 0 0; }
+.examples-page .workspace.example-workspace[data-qa="open"] { width: 100%; }
+.examples-page .article-col { padding-bottom: 72px; }
 .examples-page .sheet { width: min(40rem, 100%); margin: 0; }
 .examples-intro { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
 .examples-intro .eyebrow { margin: 0; letter-spacing: .16em; }

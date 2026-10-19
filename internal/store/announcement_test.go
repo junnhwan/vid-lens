@@ -86,7 +86,7 @@ func TestAnnouncementMigrationAppendsAfterPublishedRecommendation(t *testing.T) 
 	ctx := context.Background()
 	// Reproduce the published schema: recommendation was already migration 18.
 	// Pending work must append after it rather than shift its recorded version.
-	if _, e := s.Pool.Exec(ctx, "DROP TABLE site_announcement; DROP TABLE IF EXISTS execution_settings; DELETE FROM schema_migrations WHERE version>18"); e != nil {
+	if _, e := s.Pool.Exec(ctx, "DROP TABLE site_announcement; DROP TABLE IF EXISTS execution_settings; ALTER TABLE example_showcases DROP COLUMN IF EXISTS process, DROP COLUMN IF EXISTS process_frozen; DROP INDEX IF EXISTS example_question_once; DELETE FROM schema_migrations WHERE version>18"); e != nil {
 		t.Fatal(e)
 	}
 	if e := s.Migrate(ctx); e != nil {

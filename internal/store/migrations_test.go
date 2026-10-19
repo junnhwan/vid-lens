@@ -17,6 +17,7 @@ func TestPublishedMigrationIdentities(t *testing.T) {
 		13: "013_storage_management.sql", 14: "014_model_route_priorities.sql", 15: "015_request_history_index.sql",
 		16: "016_example_showcases.sql", 17: "017_request_shares.sql", 18: "019_model_recommendation.sql",
 		19: "020_site_announcement.sql", 20: "018_execution_settings.sql",
+		21: "021_example_process.sql",
 	}
 	seen := map[string]bool{}
 	previous := 0
@@ -71,8 +72,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 20 {
-		t.Fatalf("expected 20 registered migrations, got %v", versions)
+	if len(versions) != 21 {
+		t.Fatalf("expected 21 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -82,7 +83,7 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 }
 
 func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
-	for _, version := range []int{18, 19, 20} {
+	for _, version := range []int{18, 19, 20, 21} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			s := testStore(t)
 			ctx := context.Background()
@@ -102,6 +103,14 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			shape := schemaShape(t, s)
+			if version < 21 {
+				if _, err := s.Pool.Exec(ctx, "ALTER TABLE example_showcases DROP COLUMN IF EXISTS process, DROP COLUMN IF EXISTS process_frozen"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Pool.Exec(ctx, "DROP INDEX IF EXISTS example_question_once"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if version < 20 {
 				if _, err := s.Pool.Exec(ctx, "DROP TABLE execution_settings"); err != nil {
 					t.Fatal(err)

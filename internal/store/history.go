@@ -40,7 +40,7 @@ func (s *Store) RequestHistory(ctx context.Context, session string, limit, offse
 		LEFT JOIN source_snapshots ss ON ss.id=r.snapshot_id
 		LEFT JOIN articles a ON a.id=r.article_id
 		LEFT JOIN job_runs jr ON jr.id=r.active_run_id
-		WHERE r.session_id=$1
+		WHERE r.session_id=$1 AND r.reuse<>'example_question'
 		ORDER BY r.created_at DESC, r.id DESC
 		LIMIT $2 OFFSET $3`, session, limit+1, offset)
 	if err != nil {

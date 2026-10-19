@@ -40,6 +40,7 @@ export function QaPanel({
   onExternal,
   onReferenceLinks,
   modelUnavailable,
+  unavailableNote = "原模型暂不可用，问题草稿已保留。文章和下载仍可使用。",
   staged = false,
   onStage,
   onPair,
@@ -77,6 +78,7 @@ export function QaPanel({
   onExternal: (v: boolean) => void
   onReferenceLinks: (v: string) => void
   modelUnavailable: boolean
+  unavailableNote?: string
   staged?: boolean
   onStage?: () => void
   onPair?: () => void
@@ -298,7 +300,7 @@ export function QaPanel({
           ) : null}
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-        {modelUnavailable ? <p className="composer-reason">原模型暂不可用，问题草稿已保留。文章和下载仍可使用。</p> : null}
+        {modelUnavailable ? <p className="composer-reason">{unavailableNote}</p> : null}
         <div className="external-option">
           <label className="ink-check">
             <input

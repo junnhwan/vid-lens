@@ -332,9 +332,27 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 				return domain.Err(422, "INVALID_ARGUMENT", "请提供有效的公开网页链接。")
 			}
 		}
-		var configID string
-		if e = tx.QueryRow(ctx, "SELECT config_id FROM generation_requests WHERE id=$1", c.RequestID).Scan(&configID); e != nil {
+		var configID, reuse string
+		if e = tx.QueryRow(ctx, "SELECT config_id, reuse FROM generation_requests WHERE id=$1", c.RequestID).Scan(&configID, &reuse); e != nil {
 			return e
+		}
+		if reuse == "example_question" {
+			var shown bool
+			if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM example_showcases WHERE article_id=$1)", c.ArticleID).Scan(&shown); e != nil {
+				return e
+			}
+			if !shown {
+				return domain.Err(404, "RESOURCE_NOT_FOUND", "这篇示例没有公开。")
+			}
+			if retry == "" {
+				var asked int
+				if e = tx.QueryRow(ctx, "SELECT count(*) FROM qa_turns WHERE conversation_id=$1 AND retry_of_id IS NULL", c.ID).Scan(&asked); e != nil {
+					return e
+				}
+				if asked >= ExampleQuestionLimit {
+					return domain.Err(429, "EXAMPLE_QUESTION_LIMIT", "这篇示例的提问次数已用完。")
+				}
+			}
 		}
 		if e = checkAvailable(ctx, tx, configID); e != nil {
 			return e
