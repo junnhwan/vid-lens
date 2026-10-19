@@ -14,11 +14,12 @@ import { NetworkSettings } from "./NetworkSettings"
 import { openProbe } from "./probeStatus"
 import { useOwnerSession } from "./useOwnerSession"
 import { useProbeMonitor } from "./useProbeMonitor"
+import { managePath, pageLocation, readManagePath, readManageRoute } from "./manageRoute"
 import { VideoStorage } from "./VideoStorage"
 
 export function Manage() {
   const { api, auth, setAuth, password, setPassword, reveal, setReveal, login } = useOwnerSession(action)
-  const [section, setSection] = useState("models"),
+  const [route, setRoute] = useState(() => readManageRoute(pageLocation().pathname, pageLocation().search)),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("")
@@ -35,9 +36,10 @@ export function Manage() {
     [advanced, setAdvanced] = useState(false),
     [ready, setReady] = useState(false)
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null)
-  const [usageOffset, setUsageOffset] = useState(0)
+  const section = route.section
   const { probeByModel, acceptProbes, now } = useProbeMonitor({ api, auth, busy, selectedId: composing ? undefined : md.id, refresh: load, setError, onAuthLost: () => setAuth(false) })
   const [routeOrderDraft, setRouteOrderDraft] = useState<{ family: string; ids: string[] } | null>(null)
+  const usageToken = useRef(0)
   const storage = useRef(
     (() => {
       try {
@@ -70,6 +72,36 @@ export function Manage() {
   useEffect(() => {
     if (auth) void load().catch((e) => setError(message(e)))
   }, [auth])
+  function visit(path: string, replace = false) {
+    const here = pageLocation()
+    if (`${here.pathname}${here.search}` !== path) {
+      const history = globalThis.history
+      if (replace) history?.replaceState(null, "", path)
+      else history?.pushState(null, "", path)
+    }
+    setRoute(readManagePath(path))
+  }
+  useEffect(() => {
+    const sync = () => {
+      const here = pageLocation()
+      const next = readManageRoute(here.pathname, here.search)
+      if (dirty && (next.section !== route.section || next.offset !== route.offset || next.query !== route.query)) {
+        globalThis.history?.pushState(null, "", managePath(route.section, route))
+        setError("请先保存或撤销当前表单。")
+        return
+      }
+      setRoute(next)
+    }
+    addEventListener("popstate", sync)
+    return () => removeEventListener("popstate", sync)
+  }, [dirty, route])
+  useEffect(() => {
+    const here = pageLocation()
+    if (!here.pathname.startsWith("/manage")) return
+    const current = readManageRoute(here.pathname, here.search)
+    const canonical = managePath(current.section, current)
+    if (`${here.pathname}${here.search}` !== canonical) globalThis.history?.replaceState(null, "", canonical)
+  }, [])
   useEffect(() => {
     if (!auth || composing || md.id || !models.length) return
     const preferred = models.find((m) => m.is_default) || models.find((m) => m.enabled && m.verified && m.provider_enabled) || models[0]
@@ -137,8 +169,7 @@ export function Manage() {
       return false
     }
     setError("")
-    setSection(id)
-    if (id === "diagnostics") loadDiagnostics(0)
+    visit(managePath(id))
     return true
   }
   function openProviders(target?: Provider) {
@@ -150,16 +181,37 @@ export function Manage() {
     if (!openSection("providers")) return
     editProvider()
   }
-  function loadDiagnostics(offset = 0) {
-    void action("diagnostics", async () => {
-      const r = await api.current.request<Record<string, unknown>>(
-        "GET",
-        `/api/v1/admin/diagnostics?limit=${usagePageSize}&offset=${offset}`,
-      )
-      setUsageOffset(offset)
-      setDiagnostics(r.body)
-    })
+  function loadDiagnostics(offset = route.offset) {
+    const token = ++usageToken.current
+    setBusy((current) => (current && current !== "diagnostics" ? current : "diagnostics"))
+    setError("")
+    setNotice("")
+    void api.current
+      .request<Record<string, unknown>>("GET", `/api/v1/admin/diagnostics?limit=${usagePageSize}&offset=${offset}`)
+      .then((r) => {
+        if (usageToken.current === token) setDiagnostics(r.body)
+      })
+      .catch((e) => {
+        if (usageToken.current !== token) return
+        if (e instanceof ApiError && e.status === 401) setAuth(false)
+        setError(message(e))
+      })
+      .finally(() => {
+        if (usageToken.current === token) setBusy((current) => (current === "diagnostics" ? "" : current))
+      })
   }
+  function showUsage(offset: number) {
+    const path = managePath("diagnostics", { offset })
+    const here = pageLocation()
+    if (`${here.pathname}${here.search}` !== path) {
+      visit(path)
+      return
+    }
+    loadDiagnostics(offset)
+  }
+  useEffect(() => {
+    if (auth && section === "diagnostics") loadDiagnostics(route.offset)
+  }, [auth, section, route.offset])
   async function saveProvider() {
     await action("provider", async () => {
       const { id, ...body } = pd
@@ -480,7 +532,10 @@ export function Manage() {
               ) : section === "execution" ? (
                 <ExecutionSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "videos" ? (
-                <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+                <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} query={route.query} offset={route.offset} onRoute={(next) => {
+                  const path = managePath("videos", next)
+                  visit(path)
+                }} />
               ) : section === "examples" ? (
                 <ExampleShowcase api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "network" ? (
@@ -488,8 +543,8 @@ export function Manage() {
               ) : section === "providers" ? <ManageProviders {...{ openSection, editProvider, providers, pd, dirty, saveProvider, setPd, setDirty, busy, discover, discovery, setPicked, picked, importModels }} /> : section === "models" ? <ManageModels {...{ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }} /> : (
                 <Diagnostics
                   data={diagnostics}
-                  offset={usageOffset}
-                  onPage={loadDiagnostics}
+                  offset={route.offset}
+                  onPage={showUsage}
                   busy={busy === "diagnostics"}
                   spinning={busy === "diagnostics"}
                 />

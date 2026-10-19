@@ -7,36 +7,32 @@ import (
 )
 
 func (a *Server) publicAnnouncement(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.Announcement(r.Context())
+	feed, e := a.Store.PublicAnnouncements(r.Context())
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	var published any
-	if v.Enabled {
-		published = map[string]string{"version": v.Version, "title": v.Title, "body": v.Body}
-	}
-	a.json(w, http.StatusOK, map[string]any{"announcement": published})
+	a.json(w, http.StatusOK, feed)
 }
 
 func (a *Server) announcementSettings(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return
 	}
-	var v store.Announcement
+	var list store.AnnouncementList
 	var e error
 	if r.Method == http.MethodPut {
-		var in store.AnnouncementInput
+		var in store.AnnouncementCommand
 		if !a.body(w, r, &in) {
 			return
 		}
-		v, e = a.Store.SaveAnnouncement(r.Context(), in)
+		list, e = a.Store.ApplyAnnouncement(r.Context(), in)
 	} else {
-		v, e = a.Store.Announcement(r.Context())
+		list, e = a.Store.Announcements(r.Context())
 	}
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
-	a.json(w, http.StatusOK, v)
+	a.json(w, http.StatusOK, list)
 }

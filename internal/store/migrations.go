@@ -31,4 +31,5 @@ var migrationRegistry = []migration{
 	{19, "migrations/020_site_announcement.sql"},
 	{20, "migrations/018_execution_settings.sql"},
 	{21, "migrations/021_example_process.sql"},
+	{22, "migrations/022_announcement_history.sql"},
 }

@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { HttpApi } from "../api/http"
-import type { AnnouncementResponse, PublishedAnnouncement } from "../contract/announcement"
+import type { AnnouncementResponse, PublicNotice } from "../contract/announcement"
 import { announcementMemory } from "./announcementMemory"
 
 const memory = announcementMemory(() => localStorage)
 
-export function AnnouncementDialog({ announcement, preview = false, onDismiss }: {
-  announcement: PublishedAnnouncement
+export function AnnouncementDialog({ announcement, preview = false, earlier = false, onDismiss }: {
+  announcement: PublicNotice
   preview?: boolean
+  earlier?: boolean
   onDismiss: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -49,13 +50,17 @@ export function AnnouncementDialog({ announcement, preview = false, onDismiss }:
     <div id={bodyId} className="announcement-body" tabIndex={0}>{announcement.body}</div>
     <footer className="announcement-footer">
       <p>{preview ? "预览不会发布，也不会影响访客的已读状态。" : "同一版公告，读过便不再打扰。"}</p>
-      <button type="button" className="btn primary" onClick={onDismiss}>{preview ? "返回编辑" : "知道了，继续"}<span aria-hidden="true"> →</span></button>
+      <div className="announcement-footer-actions">
+        {earlier && !preview ? <a className="btn quiet" href="/announcements">更早的公告</a> : null}
+        <button type="button" className="btn primary" onClick={onDismiss}>{preview ? "返回编辑" : "知道了，继续"}<span aria-hidden="true"> →</span></button>
+      </div>
     </footer>
   </dialog>
 }
 
 export function VisitorAnnouncement() {
-  const [announcement, setAnnouncement] = useState<PublishedAnnouncement | null>(null)
+  const [announcement, setAnnouncement] = useState<PublicNotice | null>(null)
+  const [earlier, setEarlier] = useState(false)
   useEffect(() => {
     const abort = new AbortController()
     const timeout = window.setTimeout(() => abort.abort(), 8000)
@@ -63,6 +68,7 @@ export function VisitorAnnouncement() {
     void api.request<AnnouncementResponse>("GET", "/api/v1/site/announcement", undefined, undefined, abort.signal)
       .then(({ body }) => {
         if (abort.signal.aborted) return
+        setEarlier((body?.timeline?.length || 0) > 1)
         const value = body?.announcement
         if (value?.version && value.title && value.body && !memory.hasRead(value.version)) setAnnouncement(value)
       })
@@ -72,5 +78,5 @@ export function VisitorAnnouncement() {
   }, [])
 
   if (!announcement) return null
-  return <AnnouncementDialog announcement={announcement} onDismiss={() => { memory.markRead(announcement.version); setAnnouncement(null) }} />
+  return <AnnouncementDialog earlier={earlier} announcement={announcement} onDismiss={() => { memory.markRead(announcement.version); setAnnouncement(null) }} />
 }

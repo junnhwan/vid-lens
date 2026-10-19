@@ -156,7 +156,7 @@ func TestSourcePreparationHasItsOwnBoundAndWaitingDoesNotReserveDisk(t *testing.
 func TestExecutionMigrationAppendsAfterPublishedSettings(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	announcement, e := s.SaveAnnouncement(ctx, AnnouncementInput{Title: "preserved draft", Body: "keep this content"})
+	announcement, e := s.ApplyAnnouncement(ctx, AnnouncementCommand{Action: "publish", Title: "preserved notice", Body: "keep this content"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -171,7 +171,7 @@ func TestExecutionMigrationAppendsAfterPublishedSettings(t *testing.T) {
 	if e = s.Migrate(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if got, e := s.Announcement(ctx); e != nil || got != announcement {
+	if got, e := s.Announcements(ctx); e != nil || got.Revision != announcement.Revision || len(got.Items) != 1 || got.Items[0].ID != announcement.Items[0].ID || got.Items[0].Title != "preserved notice" || got.Items[0].Body != "keep this content" || got.Items[0].Version != announcement.Items[0].Version {
 		t.Fatalf("existing announcement changed: %+v %v", got, e)
 	}
 	if _, e = s.SaveExecutionSettings(ctx, ExecutionInput{MaxVideoRunning: 10}); e != nil {

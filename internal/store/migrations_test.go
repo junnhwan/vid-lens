@@ -18,6 +18,7 @@ func TestPublishedMigrationIdentities(t *testing.T) {
 		16: "016_example_showcases.sql", 17: "017_request_shares.sql", 18: "019_model_recommendation.sql",
 		19: "020_site_announcement.sql", 20: "018_execution_settings.sql",
 		21: "021_example_process.sql",
+		22: "022_announcement_history.sql",
 	}
 	seen := map[string]bool{}
 	previous := 0
@@ -72,8 +73,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 21 {
-		t.Fatalf("expected 21 registered migrations, got %v", versions)
+	if len(versions) != 22 {
+		t.Fatalf("expected 22 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -116,8 +117,27 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if version < 22 {
+				if _, err := s.Pool.Exec(ctx, "DROP TABLE IF EXISTS site_announcement_entries; DROP TABLE IF EXISTS site_announcement_state"); err != nil {
+					t.Fatal(err)
+				}
+				if version >= 19 {
+					if _, err := s.Pool.Exec(ctx, `CREATE TABLE site_announcement (
+						singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+						revision bigint NOT NULL CHECK (revision > 0),
+						enabled boolean NOT NULL DEFAULT false,
+						title text NOT NULL DEFAULT '' CHECK (char_length(title) <= 120),
+						body text NOT NULL DEFAULT '' CHECK (char_length(body) <= 8000),
+						version text NOT NULL DEFAULT '',
+						updated_at timestamptz NOT NULL DEFAULT now(),
+						CHECK (NOT enabled OR (btrim(title) <> '' AND btrim(body) <> '' AND version <> ''))
+					)`); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			if version < 19 {
-				if _, err := s.Pool.Exec(ctx, "DROP TABLE site_announcement"); err != nil {
+				if _, err := s.Pool.Exec(ctx, "DROP TABLE IF EXISTS site_announcement"); err != nil {
 					t.Fatal(err)
 				}
 			}

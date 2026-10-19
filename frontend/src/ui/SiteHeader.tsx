@@ -171,6 +171,7 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <span>循着文字与画面，读懂视频。</span>
+      <a href="/announcements">公告</a>
       <a href="/docs/privacy">隐私与保留</a>
       <a href="https://github.com/junnhwan/vid-lens" target="_blank" rel="noopener noreferrer">
         开源项目 <span className="nudge" aria-hidden="true">↗</span>
