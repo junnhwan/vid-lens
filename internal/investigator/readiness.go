@@ -91,6 +91,8 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	reviewIssue := s.pendingEvidenceReview()
 	if reviewIssue != nil {
 		action = "Use evidence_review_issues.affected_section_ids (actual IDs, not array offsets) to read_article_sections, then save_article_sections with the latest version and only those corrected chapters. Preserve other chapters. If patching, copy the exact draft_path: blocks use numeric array offsets, never block IDs. Do not rebuild the plan. The unresolved review persists until a revised candidate passes fresh source review."
+		action += " Delete unnecessary decorative or uncertain visual details instead of replacing them with new unverified assertions. Keep the source's actual conditions and useful figures; do not add prose merely to maintain length."
+		action += " If an issue names save_field=title, include the corrected section title in save_article_sections; patch only fields that provide a draft_path."
 		if s.turn != nil {
 			action = "Use evidence_review_issues to correct the listed fields of this answer, preserving supported content and real source references. Call submit_answer with the corrected answer; do not use article tools. A fresh review must pass before publication."
 		}

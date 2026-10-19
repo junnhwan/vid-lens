@@ -93,6 +93,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
+	var malformedText atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var input struct {
@@ -106,19 +107,21 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 			return
 		}
 		body := string(domain.JSON(input))
-		if len(input.Tools) != 1 || !strings.Contains(body, "image_url") || strings.Contains(body, "WRITER_OBSERVATION_NOT_PRIMARY") {
+		if len(input.Tools) != 1 || strings.Contains(body, "WRITER_OBSERVATION_NOT_PRIMARY") {
 			t.Error("review reused writer beliefs or lost source pixels instead of a fresh evidence context")
 		}
 		if input.MaxTokens != min(s.profile.MaxOutputTokens, 32768) {
 			t.Error("actual independent review request lost its reasoning reservation")
 		}
 		expected := ""
+		mode := ""
 		for _, m := range input.Messages {
 			var content string
 			var payload map[string]json.RawMessage
 			if json.Unmarshal(m.Content, &content) == nil && json.Unmarshal([]byte(content), &payload) == nil {
 				_ = json.Unmarshal(payload["candidate_hash"], &expected)
 				if expected != "" {
+					_ = json.Unmarshal(payload["review_mode"], &mode)
 					break
 				}
 			}
@@ -127,7 +130,24 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 			t.Error("review was not bound to its exact candidate")
 		}
 		args := map[string]any{"candidate_hash": expected, "verdict": "supported", "issues": []any{}}
-		if strings.Contains(body, "金属认证") {
+		switch mode {
+		case "source_text":
+			if strings.Contains(body, "image_url") || !strings.Contains(body, `\"candidate\"`) {
+				t.Error("text conditions were mixed with visual review")
+			}
+			if !malformedText.Swap(true) {
+				args["extra_field"] = "deliberately invalid reviewer output"
+			} else if calls.Load() == 2 && !strings.Contains(body, "review_format_error") {
+				t.Error("review format retry did not receive the actual schema error")
+			}
+		case "visual":
+			if !strings.Contains(body, "image_url") || !strings.Contains(body, "source_citation_ids=f1") || !strings.Contains(body, "candidate_fields") || strings.Contains(body, "开始事实已经保存") {
+				t.Error("visual review lost pixels or included unrelated chapters")
+			}
+		default:
+			t.Error("source text and matching visual fields were not reviewed separately")
+		}
+		if mode == "visual" && strings.Contains(body, "金属认证") {
 			args["verdict"] = "needs_correction"
 			args["issues"] = []any{map[string]any{"path": "/sections/1/blocks/0/caption", "reason": "黑色像素不能证明材质或认证。", "citation_ids": []string{"f1"}}}
 		}
@@ -155,7 +175,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 		t.Fatal(result, err)
 	}
 	err = s.autoFinalize(ctx)
-	if calls.Load() != 1 || err == nil {
+	if calls.Load() != 3 || err == nil {
 		t.Fatalf("structurally valid but unsupported claim crossed publication without review: calls=%d err=%v", calls.Load(), err)
 	}
 	if _, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, "candidate"); !errors.Is(e, pgx.ErrNoRows) {
@@ -174,7 +194,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	if len(issues) != 1 || issues[0]["section_id"] != "finish" || issues[0]["draft_path"] != "/sections/finish/blocks/0/caption" {
 		t.Fatal("review array offsets were not bound to the saved chapter identity", reviewProblem.Meta)
 	}
-	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 1 {
+	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 3 {
 		t.Fatal("the same rejected content was re-sent instead of replaying the review", calls.Load(), err)
 	}
 	// Simulate a crash after model:N completed but before its review verdict
@@ -187,7 +207,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	if _, err = s.engine.Store.Pool.Exec(ctx, "DELETE FROM run_operations WHERE run_id=$1 AND kind='content_review'", s.claim.Run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 1 || s.cp.Calls != 1 {
+	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 3 || s.cp.Calls != 3 {
 		t.Fatal("review takeover duplicated a provider call or lost its reserved model slot", calls.Load(), s.cp.Calls, err)
 	}
 	replayed, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "input:model:0")
@@ -222,7 +242,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	if result, err := planCall(s, "review-revision", "save_article_sections", revised); err != nil || result["version"] != float64(3) {
 		t.Fatal(result, err)
 	}
-	if err = s.autoFinalize(ctx); !errors.Is(err, errDraftReady) || calls.Load() != 2 {
+	if err = s.autoFinalize(ctx); !errors.Is(err, errDraftReady) || calls.Load() != 5 {
 		t.Fatal("corrected content did not pass a fresh source review", calls.Load(), err)
 	}
 	if strings.Contains(string(domain.JSON(s.cp)), `"evidence_review_issue"`) {
@@ -233,7 +253,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	if err != nil || json.Unmarshal(op.Result, &article) != nil || domain.BlockText(article.Sections[0].Blocks[0]) != "开始事实已经保存，不应因另一个章节被纠正而改写。" {
 		t.Fatal("review correction changed unaffected saved prose", err)
 	}
-	if err = s.autoFinalize(ctx); !errors.Is(err, errDraftReady) || calls.Load() != 2 {
+	if err = s.autoFinalize(ctx); !errors.Is(err, errDraftReady) || calls.Load() != 5 {
 		t.Fatal("approved candidate review was not replayable", calls.Load(), err)
 	}
 }

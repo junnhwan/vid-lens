@@ -748,5 +748,17 @@
     "revision": 16,
     "question": false,
     "sha256": "ea00f6d710d53ea05c791963251bc11bc67b654ef422decb5c626678ac71c5c3"
+  },
+  {
+    "kind": "review_text_prompt_v3",
+    "revision": 16,
+    "question": false,
+    "sha256": "21b68b0b575ed988eafaf2689ea405c1c847b96c0a534f4e1cc9081a9b8284b6"
+  },
+  {
+    "kind": "review_visual_prompt_v3",
+    "revision": 16,
+    "question": false,
+    "sha256": "46a5387229383fd77e71ae3b867c79a2d96ec4124f65c2dd7f6f9cadd5b24a5c"
   }
 ]

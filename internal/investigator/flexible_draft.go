@@ -47,7 +47,19 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		if s.policy().EvidenceGrounding {
 			section = linkFigureFrames(section, catalog)
 		}
-		next, issue := assembleDraftBatch(draft, []domain.Section{section}, catalog)
+		proposed := draft
+		if s.policy().ContentReview && strings.TrimSpace(section.Title) != "" && s.reviewRequestsSectionTitle(section.ID) {
+			// A reviewed display title may be corrected without rebuilding IDs,
+			// evidence or coverage. Clone before validation: rejected writes must
+			// never mutate the retained authoritative plan.
+			proposed.Plan = append([]sectionPlan{}, draft.Plan...)
+			for index := range proposed.Plan {
+				if proposed.Plan[index].ID == section.ID {
+					proposed.Plan[index].Title = section.Title
+				}
+			}
+		}
+		next, issue := assembleDraftBatch(proposed, []domain.Section{section}, catalog)
 		if counts[section.ID] > 1 {
 			issue = fmt.Errorf("重复章节%s；一次只提交一个修订", section.ID)
 		}

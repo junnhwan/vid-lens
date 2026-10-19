@@ -22,7 +22,7 @@ import (
 
 const reviewPolicy = "interpretation-2026-10-19-v12"
 const reviewBudgetPolicy = "interpretation-2026-10-19-v13"
-const evidenceReviewProtocol = "evidence-review-2026-10-19-v2"
+const evidenceReviewProtocol = "evidence-review-2026-10-19-v3"
 
 type evidenceReviewIssue struct {
 	Path        string   `json:"path" jsonschema:"description=Exact existing JSON Pointer into candidate, e.g. /sections/1/blocks/0/caption or /blocks/0/content/0/text or /summary. No array bracket notation."`
@@ -54,6 +54,15 @@ const evidenceReviewerInstructionsV2 = evidenceReviewerInstructions + `
 - 图注不必复述所有可见代码。只描述了读取CSV与日期过滤，不能因还存在其他步骤就判错。相反，把返回注解、编辑器尚未接受的建议、重构前后的阶段写错，确属实质问题。
 - 不清楚的像素不能支持你断言相反事实；不要猜出画面没有的代码或对象。其他批图片未展示时，不凭记忆审它的视觉细节。只报告你有明确原始依据的问题；不要为凑问题逐帧挑刺。
 结论保持简短，不逐条复述全部正确内容。`
+
+const evidenceReviewerTextInstructionsV3 = evidenceReviewerInstructionsV2 + `
+本轮只做原文事实复核，不交付图片。逐条对齐完整transcript中的事实、数字、条件、时长与作者观点，尤其区分“主动做出某行为”与“没有某种反应”，不能把不同步骤的前提合并成相同门槛。候选内部的前后矛盾也必须纠正。核对引用实际能支持的主张，不因引用编号有效就放行。
+不要凭想象审图中姿态、左右、颜色或代码像素；这些由单独视觉批次审核。本轮无图不等于视频没有图，不得仅以没有图片而拒绝。只输出严格schema字段：candidate_hash、verdict、issues，每项仅path、reason、citation_ids。`
+
+const evidenceReviewerVisualInstructionsV3 = evidenceReviewerInstructionsV2 + `
+本轮只核对candidate_fields列出的图文对应关系，每批最多三张真实图片。candidate_fields的键是完整候选的原始JSON Pointer，复制该键，必要时追加/caption或/content/0/text；不要从零重新编号章节。只可指出这些已有字段中的问题，只引用本批实际图片及原始文字。
+每张图片前的frame_id和actual_time_ms与图片紧邻绑定，先核对其身份再读对应字段；不要把相似角色的另一张图当作当前图。摘要可能也涉及其他批次，未在本批看到不等于没有发生。只报告影响动作/条件、代码/数字、阶段或结论的明确图文错误，不挑颜色深浅、轻微表情、手部高低和无关装饰细节。不要推断材质/制作方式或静止属性。
+只输出严格schema字段：candidate_hash、verdict、issues，每项仅path、reason、citation_ids。正确的内容不能列入issues。`
 
 func (s *session) reviewTool(add func(tool.EnhancedInvokableTool, error) error) error {
 	if !s.policy().ContentReview {
@@ -96,7 +105,22 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		}
 		frames = append(frames, a)
 	}
-	slices.SortFunc(frames, func(a, b domain.Asset) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(frames, func(a, b domain.Asset) int {
+		at, bt := int64(-1), int64(-1)
+		if a.TimeMS != nil {
+			at = *a.TimeMS
+		}
+		if b.TimeMS != nil {
+			bt = *b.TimeMS
+		}
+		if at < bt {
+			return -1
+		}
+		if at > bt {
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 	identities := []any{}
 	for _, a := range frames {
 		identities = append(identities, map[string]any{"id": a.ID, "sha256": a.SHA256, "time_ms": a.TimeMS})
@@ -116,15 +140,14 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		}
 	}
 	issues := []map[string]any{}
-	for batch := 0; batch < max(1, (len(frames)+11)/12); batch++ {
-		group := frames[min(batch*12, len(frames)):min((batch+1)*12, len(frames))]
-		key := "evidence-review:" + hash + ":" + strconv.Itoa(batch)
+	for index, batch := range evidenceReviewBatches(candidate, catalog, frames) {
+		key := "evidence-review:" + hash + ":" + strconv.Itoa(index)
 		var result evidenceReview
 		op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
 		if e == nil && op.Status == "completed" {
 			e = json.Unmarshal(op.Result, &result)
 		} else if e == nil || errors.Is(e, pgx.ErrNoRows) {
-			result, e = s.runEvidenceReview(ctx, key, hash, candidate, hints, catalog, group)
+			result, e = s.runEvidenceReview(ctx, key, hash, candidate, hints, catalog, batch)
 		}
 		if e != nil {
 			return e
@@ -132,6 +155,9 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		for _, issue := range result.Issues {
 			entry := map[string]any{"code": "evidence_not_supported", "path": issue.Path, "reason": issue.Reason, "citation_ids": issue.CitationIDs}
 			issues = append(issues, entry)
+		}
+		if batch.Mode == "source_text" && len(issues) > 0 {
+			break // Fix source conditions before spending calls on image details.
 		}
 	}
 	if len(issues) == 0 {
@@ -174,7 +200,11 @@ func evidenceReviewCorrection(candidate any, hash string, issues []map[string]an
 				sectionIDs = append(sectionIDs, section.ID)
 			}
 			parts[2] = strings.ReplaceAll(strings.ReplaceAll(section.ID, "~", "~0"), "/", "~1")
-			issue["draft_path"] = strings.Join(parts, "/")
+			if len(parts) == 4 && parts[3] == "title" {
+				issue["repair_tool"], issue["save_field"] = "save_article_sections", "title"
+			} else {
+				issue["draft_path"] = strings.Join(parts, "/")
+			}
 			if len(parts) >= 5 && parts[3] == "blocks" {
 				block, err := strconv.Atoi(parts[4])
 				if err == nil && block >= 0 && block < len(section.Blocks) {
@@ -203,23 +233,67 @@ func (s *session) pendingEvidenceReview() map[string]any {
 	return nil
 }
 
-func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candidate any, hints map[string]any, catalog map[string]domain.Citation, frames []domain.Asset) (evidenceReview, error) {
-	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash, "review_protocol": evidenceReviewProtocol}, false); err != nil {
+func (s *session) reviewRequestsSectionTitle(id string) bool {
+	var pending struct {
+		Issues []struct {
+			Path      string `json:"path"`
+			SectionID string `json:"section_id"`
+		} `json:"issues"`
+	}
+	if json.Unmarshal(domain.JSON(s.pendingEvidenceReview()), &pending) != nil {
+		return false
+	}
+	for _, issue := range pending.Issues {
+		parts := strings.Split(issue.Path, "/")
+		if issue.SectionID == id && len(parts) == 4 && parts[1] == "sections" && parts[3] == "title" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candidate any, hints map[string]any, catalog map[string]domain.Citation, batch evidenceReviewBatch) (evidenceReview, error) {
+	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash, "review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode}, false); err != nil {
 		return evidenceReview{}, err
 	}
 	ids := []string{}
-	for _, a := range frames {
+	for _, a := range batch.Frames {
 		ids = append(ids, a.ID)
 	}
-	input := []*schema.Message{schema.SystemMessage(evidenceReviewerInstructionsV2), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}))),
-		schema.UserMessage(string(domain.JSON(map[string]any{"review_protocol": evidenceReviewProtocol, "candidate_hash": hash, "candidate": candidate, "citation_catalog": hints, "batch_frame_ids": ids, "frame_context": frameContexts(catalog, s.transcript)})))}
+	instruction := evidenceReviewerTextInstructionsV3
+	payload := map[string]any{"review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode, "candidate_hash": hash, "citation_catalog": hints, "batch_frame_ids": ids}
+	if batch.Mode == "source_text" {
+		payload["candidate"] = candidate
+	} else {
+		instruction = evidenceReviewerVisualInstructionsV3
+		payload["candidate_fields"] = batch.Fields
+		scopeCatalog := map[string]domain.Citation{}
+		scopeHints := map[string]any{}
+		for id, c := range catalog {
+			if c.Kind != "video_frame" || slices.Contains(ids, c.FrameID) {
+				scopeCatalog[id], scopeHints[id] = c, hints[id]
+			}
+		}
+		payload["citation_catalog"] = scopeHints
+		payload["frame_context"] = frameContexts(scopeCatalog, s.transcript)
+	}
+	input := []*schema.Message{schema.SystemMessage(instruction), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "evidence-review")
 	if err != nil {
 		return evidenceReview{}, err
 	}
-	for _, p := range parts {
+	for index, p := range parts {
 		if id, ok := p.Extra["frame_id"].(string); ok && !slices.Contains(ids, id) {
 			return evidenceReview{}, &candidateError{err: missingEvidence("复核画面已经重物化，需要重新观察并更新原帧引用。")}
+		} else if ok && index > 0 && parts[index-1].Type == schema.ChatMessagePartTypeText {
+			aliases := []string{}
+			for alias, citation := range catalog {
+				if citation.Kind == "video_frame" && citation.FrameID == id {
+					aliases = append(aliases, alias)
+				}
+			}
+			slices.Sort(aliases)
+			parts[index-1].Text += "\nsource_citation_ids=" + strings.Join(aliases, ",")
 		}
 	}
 	if len(parts) > 0 {
@@ -248,10 +322,29 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 			return evidenceReview{}, err
 		}
 		result, err := parseEvidenceReview(response, hash, domain.JSON(candidate), catalog)
+		if err == nil {
+			for _, issue := range result.Issues {
+				if !batch.containsPath(issue.Path) {
+					err = errors.New("review path is outside candidate_fields; copy an existing field key")
+					break
+				}
+				for _, id := range issue.CitationIDs {
+					if c := catalog[id]; batch.Mode == "visual" && c.Kind == "video_frame" && !slices.Contains(ids, c.FrameID) {
+						err = errors.New("visual review may cite only the actually delivered frame IDs")
+					}
+				}
+			}
+		}
 		if err != nil {
+			message := err.Error()
+			if len(message) > 240 {
+				message = message[:240]
+			}
+			input = append(input, schema.UserMessage(string(domain.JSON(map[string]any{"review_format_error": message, "candidate_hash": hash, "expected_fields": []string{"candidate_hash", "verdict", "issues"}, "expected_issue_fields": []string{"path", "reason", "citation_ids"}, "instruction": "Correct only the verdict schema and paths; return one report_evidence_review call, without extra fields."}))))
 			continue // At most one fresh format retry, within the original call cap.
 		}
-		if err = s.engine.Store.FinishOperation(ctx, s.claim, key, result, "", nil); err != nil {
+		verdict := map[string]any{"candidate_hash": result.CandidateHash, "verdict": result.Verdict, "issues": result.Issues, "review_protocol": evidenceReviewProtocol, "review_mode": batch.Mode, "batch_frame_ids": ids}
+		if err = s.engine.Store.FinishOperation(ctx, s.claim, key, verdict, "", nil); err != nil {
 			return evidenceReview{}, err
 		}
 		return result, nil
