@@ -180,14 +180,37 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 // use a map keyed by section ID. Bind both explicitly so /sections/3 cannot be
 // mistaken for chapter "ch3", and retain the verdict through unrelated errors.
 func evidenceReviewCorrection(candidate any, hash string, issues []map[string]any) map[string]any {
+	rawCandidate := domain.JSON(candidate)
 	var document struct {
 		Sections []domain.Section `json:"sections"`
 		Blocks   []domain.Block   `json:"blocks"`
 	}
-	_ = json.Unmarshal(domain.JSON(candidate), &document)
+	_ = json.Unmarshal(rawCandidate, &document)
 	sectionIDs := []string{}
 	for _, issue := range issues {
 		path, _ := issue["path"].(string)
+		if raw, err := jsonField(rawCandidate, path); err == nil {
+			var value any
+			if json.Unmarshal(raw, &value) == nil {
+				kind := "null"
+				switch value.(type) {
+				case string:
+					kind = "string"
+				case []any:
+					kind = "array"
+				case map[string]any:
+					kind = "object"
+				case bool:
+					kind = "boolean"
+				case float64:
+					kind = "number"
+				}
+				issue["expected_type"] = kind
+				if len(raw) <= 512 {
+					issue["current_value"] = value
+				}
+			}
+		}
 		parts := strings.Split(path, "/")
 		if len(parts) >= 3 && parts[1] == "sections" {
 			index, err := strconv.Atoi(parts[2])
@@ -233,7 +256,7 @@ func (s *session) pendingEvidenceReview() map[string]any {
 	return nil
 }
 
-func (s *session) reviewRequestsSectionTitle(id string) bool {
+func (s *session) reviewAllowsSectionTitle(id string) bool {
 	var pending struct {
 		Issues []struct {
 			Path      string `json:"path"`
@@ -245,7 +268,7 @@ func (s *session) reviewRequestsSectionTitle(id string) bool {
 	}
 	for _, issue := range pending.Issues {
 		parts := strings.Split(issue.Path, "/")
-		if issue.SectionID == id && len(parts) == 4 && parts[1] == "sections" && parts[3] == "title" {
+		if issue.SectionID == id && len(parts) >= 3 && parts[1] == "sections" {
 			return true
 		}
 	}

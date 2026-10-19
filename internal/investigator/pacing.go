@@ -112,6 +112,19 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 		if s.reviewing {
 			return in
 		}
+		if s.turn != nil && s.pendingEvidenceReview() != nil {
+			// A source verdict concerns the unpublished answer, not a saved
+			// article draft. Keep evidence/read actions, but require a corrected
+			// full submit instead of fragile nested draft-field patches.
+			answerTools := []*schema.ToolInfo{}
+			for _, t := range in {
+				switch t.Name {
+				case "submit_answer", "record_observation", "inspect_video_window", "find_evidence", "read_source", "read_candidate_fields":
+					answerTools = append(answerTools, t)
+				}
+			}
+			return answerTools
+		}
 	}
 	if !s.policy().Paced || s.turn != nil || s.forceDraftSubmit {
 		return in

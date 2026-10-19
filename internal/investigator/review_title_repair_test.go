@@ -26,7 +26,9 @@ func TestReviewedChapterTitleCanBeCorrectedWithoutChangingPlanIdentity(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.cp.EvidenceReviewIssue = map[string]any{"code": "semantic_evidence", "issues": []any{map[string]any{"path": "/sections/1/title", "section_id": "finish"}}}
+	// A reviewer may identify the wrong body claim and mention its heading in
+	// the same correction, without duplicating the issue at /title.
+	s.cp.EvidenceReviewIssue = map[string]any{"code": "semantic_evidence", "issues": []any{map[string]any{"path": "/sections/1/blocks/0/content/0/text", "section_id": "finish"}}}
 	revised := `{"version":2,"sections":[{"id":"finish","title":"有来源的结束条件","blocks":[{"type":"paragraph","origin":"video","text":"结束事实。","citation_ids":["t25"]}]}]}`
 	result, err := planCall(s, "correct-reviewed-title", "save_article_sections", revised)
 	if err != nil || result["version"] != float64(3) {

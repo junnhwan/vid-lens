@@ -48,7 +48,7 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 			section = linkFigureFrames(section, catalog)
 		}
 		proposed := draft
-		if s.policy().ContentReview && strings.TrimSpace(section.Title) != "" && s.reviewRequestsSectionTitle(section.ID) {
+		if s.policy().ContentReview && strings.TrimSpace(section.Title) != "" && s.reviewAllowsSectionTitle(section.ID) {
 			// A reviewed display title may be corrected without rebuilding IDs,
 			// evidence or coverage. Clone before validation: rejected writes must
 			// never mutate the retained authoritative plan.

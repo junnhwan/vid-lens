@@ -191,7 +191,7 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 		t.Fatal("source review did not retain a structured problem")
 	}
 	issues, _ := reviewProblem.Meta["issues"].([]map[string]any)
-	if len(issues) != 1 || issues[0]["section_id"] != "finish" || issues[0]["draft_path"] != "/sections/finish/blocks/0/caption" {
+	if len(issues) != 1 || issues[0]["section_id"] != "finish" || issues[0]["draft_path"] != "/sections/finish/blocks/0/caption" || issues[0]["expected_type"] != "string" {
 		t.Fatal("review array offsets were not bound to the saved chapter identity", reviewProblem.Meta)
 	}
 	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 3 {
