@@ -124,6 +124,75 @@ func diskFloor(total int64, stop int) int64 {
 	return reserve
 }
 
+func buildStorageAdmission(l storageLoad) StorageAdmission {
+	incomingTemp := max(int64(0), l.temp-l.ownTemp)
+	incomingImages := max(int64(0), l.images-l.ownImages)
+	sourceReserve := incomingTemp + incomingImages
+	systemReserve := max(diskFloor(l.total, l.stop), stopPercentReserve(l.total, l.stop))
+	extra := storageExtra(l)
+	otherReservations := max(int64(0), extra-sourceReserve)
+	hostRequired := otherReservations + sourceReserve + systemReserve
+
+	videoUsed := l.usedTemp + l.exports + l.exportPending + l.resTemp
+	imageUsed := l.usedImages + l.resImages
+	videoAvailable := max(int64(0), videoLimit(l)-videoUsed)
+	imageAvailable := max(int64(0), imageLimit(l)-imageUsed)
+
+	videoSlots, imageSlots, hostSlots := int64(0), int64(0), int64(0)
+	if incomingTemp > 0 {
+		videoSlots = videoAvailable / incomingTemp
+	}
+	if incomingImages > 0 {
+		imageSlots = imageAvailable / incomingImages
+	}
+	if l.total > 0 && sourceReserve > 0 {
+		hostRoom := l.available - otherReservations - systemReserve
+		if hostRoom > 0 {
+			hostSlots = hostRoom / sourceReserve
+		}
+	}
+	additionalSlots := min(videoSlots, imageSlots, hostSlots)
+
+	blockedBy := make([]string, 0, 3)
+	if diskSpaceBlocked(l.available, l.total, extra, l.stop) {
+		blockedBy = append(blockedBy, "host_disk")
+	}
+	if videoUsed+incomingTemp > videoLimit(l) {
+		blockedBy = append(blockedBy, "video_quota")
+	}
+	if imageUsed+incomingImages > imageLimit(l) {
+		blockedBy = append(blockedBy, "image_quota")
+	}
+
+	return StorageAdmission{
+		CanStartSource:           additionalSlots > 0 && len(blockedBy) == 0,
+		AdditionalSourceSlots:    additionalSlots,
+		BlockedBy:                blockedBy,
+		HostAvailableBytes:       l.available,
+		HostTotalBytes:           l.total,
+		HostRequiredBytes:        hostRequired,
+		HostShortfallBytes:       max(int64(0), hostRequired-l.available),
+		SystemReserveBytes:       systemReserve,
+		SourceReserveBytes:       sourceReserve,
+		DiskStopPercent:          l.stop,
+		VideoQuotaAvailableBytes: videoAvailable,
+		ImageQuotaAvailableBytes: imageAvailable,
+	}
+}
+
+func stopPercentReserve(total int64, stop int) int64 {
+	if total <= 0 || stop >= 100 {
+		return 0
+	}
+	percent := int64(100 - stop)
+	whole := total / 100 * percent
+	remainder := total % 100 * percent
+	if remainder > 0 {
+		whole++
+	}
+	return whole
+}
+
 func buildCapacity(l storageLoad) DiskCapacity {
 	quota := videoLimit(l)
 	used, reserved := l.usedTemp+l.exports, l.resTemp+l.exportPending

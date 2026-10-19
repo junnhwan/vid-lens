@@ -12,6 +12,20 @@ interface Overview {
   reserved_video_bytes: number
   reserved_image_bytes: number
   retention: "manual"
+  admission?: {
+    can_start_source: boolean
+    additional_source_slots: number
+    blocked_by: string[]
+    host_available_bytes: number
+    host_total_bytes: number
+    host_required_bytes: number
+    host_shortfall_bytes: number
+    system_reserve_bytes: number
+    source_reserve_bytes: number
+    disk_stop_percent: number
+    video_quota_available_bytes: number
+    image_quota_available_bytes: number
+  }
 }
 interface Video {
   id: string
@@ -37,6 +51,7 @@ interface VideoPage { items: Video[]; total: number; offset: number; limit: numb
 const gib = 1024 ** 3
 const pageSize = 20
 const statusLabels: Record<string, string> = { waiting_source: "准备素材", generating: "正在成文", completed: "已完成", failed: "处理失败", canceled: "已取消" }
+const admissionReasons: Record<string, string> = { host_disk: "主机磁盘保护线", video_quota: "视频工作区配额", image_quota: "配图空间配额" }
 function date(value: string) { return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) }
 function videoTone(status: string): "ready" | "wait" | "live" | "dim" {
   if (status === "generating" || status === "waiting_source") return "live"
@@ -126,22 +141,48 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
     try {
       const r = await api.request<{ deleted_bytes: number; pending_files: number }>("DELETE", `/api/v1/admin/videos/${encodeURIComponent(confirm.id)}/media`, { asset_ids: confirm.asset_ids })
       setConfirm(null)
-      setNotice(r.body.pending_files ? `已清理 ${formatDiskBytes(r.body.deleted_bytes)}，另有 ${r.body.pending_files} 个文件等待重试，仍计入占用。` : `已清理原视频与音频 ${formatDiskBytes(r.body.deleted_bytes)}，文章和配图继续保留。`)
+      setNotice(r.body.pending_files ? `已从 VidLens 工作区移除 ${formatDiskBytes(r.body.deleted_bytes)}，另有 ${r.body.pending_files} 个文件等待重试，仍计入占用。` : `已从 VidLens 工作区移除原视频与音频 ${formatDiskBytes(r.body.deleted_bytes)}，文章和配图继续保留；主机实际可用空间以页面上方准入状态为准。`)
       setRefresh((v) => v + 1)
     } catch (e) { failed(e) }
     finally { setBusy("") }
   }
   function reload() { setNotice(""); setRefresh((v) => v + 1) }
   const videoUsed = overview ? overview.original_bytes + overview.export_bytes : 0
+  const admission = overview?.admission
+  const hostFreeRatio = admission && admission.host_total_bytes > 0 ? Math.max(0, Math.min(1, admission.host_available_bytes / admission.host_total_bytes)) : 0
+  const admissionLineRatio = admission && admission.host_total_bytes > 0 ? Math.max(0, Math.min(1, admission.host_required_bytes / admission.host_total_bytes)) : 0
   return <section className="video-storage" aria-busy={Boolean(busy)}>
     <header className="storage-heading"><div><p className="eyebrow">VIDEO ARCHIVE</p><h2>视频与存储</h2><p className="fine">全站访客处理过的视频。原视频由你决定何时清理。</p></div>
       <div className="storage-refresh"><span className="fine">{loadedAt ? `${loadedAt} 更新` : "正在读取"}</span><button className="btn quiet desk-pill" disabled={Boolean(busy) || Boolean(confirm)} onClick={reload}>{busy === "load" ? "正在读取…" : dirty ? "撤销并刷新" : "刷新列表"}</button></div></header>
     {error ? <p className="management-message error" role="alert">{error}</p> : null}
     {notice ? <p className="management-message" role="status">{notice}</p> : null}
     {overview ? <>
+      {admission ? <section className={`storage-admission ${admission.can_start_source ? "is-open" : "is-closed"}`} aria-label="新视频存储准入状态" aria-live="polite">
+        <div className="storage-admission-lead">
+          <span className="eyebrow">DOWNLOAD ADMISSION</span>
+          <h3>{admission.can_start_source ? "现在可以开始新视频" : "现在不能开始新视频"}</h3>
+          <p>按存储条件可放行 <strong>{admission.additional_source_slots.toLocaleString("zh-Hans")}</strong> 个新来源</p>
+        </div>
+        <dl className="storage-admission-metrics">
+          <div><dt>主机实际可用</dt><dd>{formatDiskBytes(admission.host_available_bytes)}</dd></div>
+          <div><dt>下一条准入所需</dt><dd>{formatDiskBytes(admission.host_required_bytes)}</dd></div>
+          <div><dt>{admission.host_shortfall_bytes > 0 ? "主机还需释放" : "主机准入余量"}</dt><dd>{admission.host_shortfall_bytes > 0 ? formatDiskBytes(admission.host_shortfall_bytes) : formatDiskBytes(Math.max(0, admission.host_available_bytes - admission.host_required_bytes))}</dd></div>
+        </dl>
+        <figure className="storage-admission-visual">
+          <div className="storage-admission-meter" aria-hidden="true">
+            <i className="storage-admission-meter-free" style={{ width: `${hostFreeRatio * 100}%` }} />
+            <b className="storage-admission-meter-required" style={{ left: `${admissionLineRatio * 100}%` }} />
+          </div>
+          <figcaption><span>主机磁盘空闲 {formatDiskBytes(admission.host_available_bytes)} / {formatDiskBytes(admission.host_total_bytes)}</span><span>下一条准入线 {formatDiskBytes(admission.host_required_bytes)}</span></figcaption>
+        </figure>
+        <div className="storage-admission-note">
+          {admission.blocked_by.length ? <p><strong>当前拦截：</strong>{admission.blocked_by.map((reason) => admissionReasons[reason] || reason).join("、")}</p> : <p><strong>当前存储条件满足。</strong>处理队列和模型状态仍会单独检查。</p>}
+          <p>已自动计入 {formatDiskBytes(admission.source_reserve_bytes)} 的新来源预留、{formatDiskBytes(admission.system_reserve_bytes)} 的主机安全空间、{admission.disk_stop_percent}% 停止线及现有任务预留。无需根据下方配额自行估算。</p>
+        </div>
+      </section> : null}
       <div className="storage-summary">
-        <div><span>视频工作区</span><strong>{formatDiskBytes(videoUsed)} <small>/ {formatDiskBytes(overview.settings.video_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(videoUsed, overview.settings.video_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_video_bytes, overview.settings.video_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(videoUsed)}</li><li><b />预留 {formatDiskBytes(overview.reserved_video_bytes)}</li><li><span />剩余 {formatDiskBytes(remaining(overview.settings.video_quota_bytes, videoUsed, overview.reserved_video_bytes))}</li></ul><p>原视频与音频 {formatDiskBytes(overview.original_bytes)} · 导出 {formatDiskBytes(overview.export_bytes)}</p></div>
-        <div><span>配图空间</span><strong>{formatDiskBytes(overview.image_bytes)} <small>/ {formatDiskBytes(overview.settings.image_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(overview.image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(overview.image_bytes)}</li><li><b />预留 {formatDiskBytes(overview.reserved_image_bytes)}</li><li><span />剩余 {formatDiskBytes(remaining(overview.settings.image_quota_bytes, overview.image_bytes, overview.reserved_image_bytes))}</li></ul><p>正式文章配图持续保留</p></div>
+        <div><span>视频工作区配额</span><strong>{formatDiskBytes(videoUsed)} <small>/ {formatDiskBytes(overview.settings.video_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(videoUsed, overview.settings.video_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_video_bytes, overview.settings.video_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(videoUsed)}</li><li><b />预留 {formatDiskBytes(overview.reserved_video_bytes)}</li><li><span />配额余量 {formatDiskBytes(remaining(overview.settings.video_quota_bytes, videoUsed, overview.reserved_video_bytes))}</li></ul><p>原视频与音频 {formatDiskBytes(overview.original_bytes)} · 导出 {formatDiskBytes(overview.export_bytes)}。这是本站逻辑配额，不是主机磁盘空闲。</p></div>
+        <div><span>配图空间配额</span><strong>{formatDiskBytes(overview.image_bytes)} <small>/ {formatDiskBytes(overview.settings.image_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(overview.image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(overview.image_bytes)}</li><li><b />预留 {formatDiskBytes(overview.reserved_image_bytes)}</li><li><span />配额余量 {formatDiskBytes(remaining(overview.settings.image_quota_bytes, overview.image_bytes, overview.reserved_image_bytes))}</li></ul><p>正式文章配图持续保留</p></div>
       </div>
       <details className="storage-settings"><summary>调整存储限制 <span>视频 {formatDiskBytes(overview.settings.video_quota_bytes)} · 配图 {formatDiskBytes(overview.settings.image_quota_bytes)} · 磁盘停止线 {overview.settings.disk_stop_percent}%</span></summary>
         <form onSubmit={(e) => { e.preventDefault(); void save() }}><fieldset disabled={Boolean(busy) || Boolean(confirm)}>

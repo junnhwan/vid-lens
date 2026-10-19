@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"vidlens/internal/domain"
@@ -14,26 +15,38 @@ func (a *Server) storageSettings(w http.ResponseWriter, r *http.Request) {
 	if !a.admin(w, r) {
 		return
 	}
+	_, profile, e := a.Store.CurrentConfig(r.Context())
+	if e != nil {
+		a.problem(w, r, e)
+		return
+	}
+	var disk syscall.Statfs_t
+	if e = syscall.Statfs(a.Config.DataDir, &disk); e != nil {
+		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "主机磁盘状态暂时读不到。"))
+		return
+	}
+	if disk.Blocks == 0 || disk.Bsize <= 0 {
+		a.problem(w, r, domain.Err(503, "SERVICE_UNAVAILABLE", "主机磁盘状态暂时读不到。"))
+		return
+	}
 	if r.Method == "PUT" {
 		var in store.StorageInput
 		if !a.body(w, r, &in) {
 			return
 		}
-		_, p, e := a.Store.CurrentConfig(r.Context())
-		if e != nil {
-			a.problem(w, r, e)
-			return
-		}
-		if e = a.Store.SaveStorageSettings(r.Context(), in, p.WorkspaceBytes); e != nil {
+		if e = a.Store.SaveStorageSettings(r.Context(), in, profile.WorkspaceBytes); e != nil {
 			a.problem(w, r, e)
 			return
 		}
 	}
-	v, e := a.Store.StorageOverview(r.Context())
+	available := int64(disk.Bavail) * int64(disk.Bsize)
+	total := int64(disk.Blocks) * int64(disk.Bsize)
+	v, e := a.Store.StorageOverviewWithAdmission(r.Context(), available, total, profile.WorkspaceBytes)
 	if e != nil {
 		a.problem(w, r, e)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	a.json(w, 200, v)
 }
 

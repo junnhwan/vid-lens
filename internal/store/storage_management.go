@@ -21,17 +21,48 @@ type StorageInput struct {
 	ImageQuotaBytes  int64 `json:"image_quota_bytes"`
 	DiskStopPercent  int   `json:"disk_stop_percent"`
 }
+type StorageAdmission struct {
+	CanStartSource           bool     `json:"can_start_source"`
+	AdditionalSourceSlots    int64    `json:"additional_source_slots"`
+	BlockedBy                []string `json:"blocked_by"`
+	HostAvailableBytes       int64    `json:"host_available_bytes"`
+	HostTotalBytes           int64    `json:"host_total_bytes"`
+	HostRequiredBytes        int64    `json:"host_required_bytes"`
+	HostShortfallBytes       int64    `json:"host_shortfall_bytes"`
+	SystemReserveBytes       int64    `json:"system_reserve_bytes"`
+	SourceReserveBytes       int64    `json:"source_reserve_bytes"`
+	DiskStopPercent          int      `json:"disk_stop_percent"`
+	VideoQuotaAvailableBytes int64    `json:"video_quota_available_bytes"`
+	ImageQuotaAvailableBytes int64    `json:"image_quota_available_bytes"`
+}
 type StorageOverview struct {
-	Settings           StorageSettings `json:"settings"`
-	OriginalBytes      int64           `json:"original_bytes"`
-	ImageBytes         int64           `json:"image_bytes"`
-	ExportBytes        int64           `json:"export_bytes"`
-	ReservedVideoBytes int64           `json:"reserved_video_bytes"`
-	ReservedImageBytes int64           `json:"reserved_image_bytes"`
-	Retention          string          `json:"retention"`
+	Settings           StorageSettings   `json:"settings"`
+	OriginalBytes      int64             `json:"original_bytes"`
+	ImageBytes         int64             `json:"image_bytes"`
+	ExportBytes        int64             `json:"export_bytes"`
+	ReservedVideoBytes int64             `json:"reserved_video_bytes"`
+	ReservedImageBytes int64             `json:"reserved_image_bytes"`
+	Retention          string            `json:"retention"`
+	Admission          *StorageAdmission `json:"admission,omitempty"`
 }
 
 func (s *Store) StorageOverview(ctx context.Context) (StorageOverview, error) {
+	return s.storageOverview(ctx, nil)
+}
+
+// StorageOverviewWithAdmission adds host filesystem state for the owner-only
+// management view. Public capacity remains limited to the logical workspace.
+func (s *Store) StorageOverviewWithAdmission(ctx context.Context, available, total, workspace int64) (StorageOverview, error) {
+	return s.storageOverview(ctx, &storageAdmissionInput{available: available, total: total, workspace: workspace})
+}
+
+type storageAdmissionInput struct {
+	available int64
+	total     int64
+	workspace int64
+}
+
+func (s *Store) storageOverview(ctx context.Context, admissionInput *storageAdmissionInput) (StorageOverview, error) {
 	var v StorageOverview
 	// One read-only snapshot keeps settings, counts and reservations aligned
 	// without holding the lock used by admission, claims and heartbeats.
@@ -40,10 +71,19 @@ func (s *Store) StorageOverview(ctx context.Context) (StorageOverview, error) {
 			return e
 		}
 		l, e := storageLedger(ctx, tx, "")
+		if e != nil {
+			return e
+		}
 		v.OriginalBytes, v.ImageBytes, v.ExportBytes = l.usedTemp, l.usedImages, l.exports
 		v.ReservedVideoBytes, v.ReservedImageBytes = l.resTemp+l.exportPending, l.resImages
 		v.Retention = "manual"
-		return e
+		if admissionInput != nil {
+			l.available, l.total = admissionInput.available, admissionInput.total
+			l.temp, l.images = admissionInput.workspace, IncomingFrameBytes
+			admission := buildStorageAdmission(l)
+			v.Admission = &admission
+		}
+		return nil
 	})
 	return v, e
 }

@@ -40,9 +40,9 @@ export function diskStatus(capacity: SiteCapacity): string {
 }
 
 export function diskNote(capacity: SiteCapacity): string {
-  if (capacity.level === "closed") return "暂时无法准备新素材，等待站长清理或增加可用空间。"
-  if (capacity.level === "tight") return "视频专用空间余量不多，下载前会先检查容量。"
-  return "视频与处理素材的专用配额，下载前预留工作空间。"
+  if (capacity.level === "closed") return "这里显示的是本站配额余量；下载还会检查主机磁盘空间和安全预留。"
+  if (capacity.level === "tight") return "这里显示的是本站视频工作区配额；下载前还会检查主机磁盘空间。"
+  return "本站视频工作区配额；下载前会预留工作空间并检查主机磁盘。"
 }
 
 export function diskLabel(capacity: SiteCapacity): string {

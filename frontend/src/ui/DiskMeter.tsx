@@ -11,7 +11,7 @@ export function DiskMeter({
   if (!capacity || capacity.level === "open") return null
   return (
     <p className="disk-quiet" data-level={capacity.level}>
-      {diskStatus(capacity)} · 剩余 {formatDiskBytes(capacity.available_bytes)}
+      {diskStatus(capacity)} · 本站配额余量 {formatDiskBytes(capacity.available_bytes)}
     </p>
   )
 }
