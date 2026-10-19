@@ -166,6 +166,14 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 		t.Fatal("review rejection was not repairable", err)
 	}
 	firstErr := rejected.err
+	var reviewProblem *domain.Problem
+	if !errors.As(firstErr, &reviewProblem) {
+		t.Fatal("source review did not retain a structured problem")
+	}
+	issues, _ := reviewProblem.Meta["issues"].([]map[string]any)
+	if len(issues) != 1 || issues[0]["section_id"] != "finish" || issues[0]["draft_path"] != "/sections/finish/blocks/0/caption" {
+		t.Fatal("review array offsets were not bound to the saved chapter identity", reviewProblem.Meta)
+	}
 	if err = s.autoFinalize(ctx); err == nil || calls.Load() != 1 {
 		t.Fatal("the same rejected content was re-sent instead of replaying the review", calls.Load(), err)
 	}
@@ -192,12 +200,33 @@ func TestPublicationWaitsForIndependentEvidenceReview(t *testing.T) {
 	if s.cp.DraftIssue["code"] != "semantic_evidence" {
 		t.Fatal("writer did not receive the exact review correction", s.cp.DraftIssue)
 	}
+	// A tool/schema failure must not erase the still-unfixed source verdict.
+	// Round-trip the actual checkpoint shape as a worker takeover does.
+	s.cp.DraftIssue = map[string]any{"code": "candidate_schema", "detail": "unrelated failed patch"}
+	var restored checkpoint
+	if err = json.Unmarshal(domain.JSON(s.cp), &restored); err != nil {
+		t.Fatal(err)
+	}
+	s.cp = restored
+	ready, err := s.readiness(ctx)
+	if err != nil || !strings.Contains(string(domain.JSON(ready["evidence_review_issues"])), "finish") || !strings.Contains(fmt.Sprint(ready["next_action"]), "save_article_sections") {
+		t.Fatal("a later tool failure hid the unresolved semantic correction", ready, err)
+	}
+	s.turn = &domain.Turn{}
+	ready, err = s.readiness(ctx)
+	if err != nil || !strings.Contains(fmt.Sprint(ready["next_action"]), "submit_answer") || strings.Contains(fmt.Sprint(ready["next_action"]), "read_article_sections") {
+		t.Fatal("answer review correction was directed to unavailable article tools", ready, err)
+	}
+	s.turn = nil
 	revised := fmt.Sprintf(`{"version":2,"sections":[{"id":"finish","blocks":[{"type":"figure","origin":"video","frame_ids":["f1"],"citation_ids":[%q],"caption":"实际交付的黑色合成测试画面。"}]}]}`, id)
 	if result, err := planCall(s, "review-revision", "save_article_sections", revised); err != nil || result["version"] != float64(3) {
 		t.Fatal(result, err)
 	}
 	if err = s.autoFinalize(ctx); !errors.Is(err, errDraftReady) || calls.Load() != 2 {
 		t.Fatal("corrected content did not pass a fresh source review", calls.Load(), err)
+	}
+	if strings.Contains(string(domain.JSON(s.cp)), `"evidence_review_issue"`) {
+		t.Fatal("a passed fresh review left an obsolete correction pending")
 	}
 	op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "candidate")
 	var article domain.Article

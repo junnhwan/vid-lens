@@ -34,6 +34,7 @@ type checkpoint struct {
 	DraftRepairVersion   int                 `json:"draft_repair_version,omitempty"`
 	DraftCorrection      bool                `json:"draft_correction,omitempty"`
 	DraftIssue           map[string]any      `json:"draft_issue,omitempty"`
+	EvidenceReviewIssue  map[string]any      `json:"evidence_review_issue,omitempty"`
 	Composing            bool                `json:"composing,omitempty"`
 	CitationFrames       []string            `json:"citation_frames,omitempty"`
 	DraftResume          bool                `json:"draft_resume,omitempty"`
@@ -215,8 +216,8 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		if s.policy().EvidenceGrounding {
 			data["frame_context"] = frameContexts(catalog, s.transcript)
 		}
-		if s.cp.DraftIssue["code"] == "semantic_evidence" {
-			data["evidence_review_issues"] = s.cp.DraftIssue
+		if issue := s.pendingEvidenceReview(); issue != nil {
+			data["evidence_review_issues"] = issue
 		}
 		if s.authoring() {
 			data["citation_catalog_rule"] = authoringCatalogRule

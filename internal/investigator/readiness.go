@@ -88,10 +88,20 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	if repair := s.requiredRepairTool(); repair != "" {
 		action = "Use the candidate fields already returned in context and call " + repair + " now. Do not read the same fields again. Preserve supported content and fix the listed paths."
 	}
-	if s.cp.DraftIssue["code"] == "semantic_evidence" {
-		action = "Read the affected saved chapters with read_article_sections, then use the latest version to correct only the listed facts/captions/limitations. Other chapters remain unchanged. Do not rebuild the plan. Every revised candidate receives a fresh independent source review."
+	reviewIssue := s.pendingEvidenceReview()
+	if reviewIssue != nil {
+		action = "Use evidence_review_issues.affected_section_ids (actual IDs, not array offsets) to read_article_sections, then save_article_sections with the latest version and only those corrected chapters. Preserve other chapters. If patching, copy the exact draft_path: blocks use numeric array offsets, never block IDs. Do not rebuild the plan. The unresolved review persists until a revised candidate passes fresh source review."
+		if s.turn != nil {
+			action = "Use evidence_review_issues to correct the listed fields of this answer, preserving supported content and real source references. Call submit_answer with the corrected answer; do not use article tools. A fresh review must pass before publication."
+		}
+		if len(pending) > 0 {
+			action = "Record visible facts for pending_frame_ids first. " + action
+		}
 	}
 	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
+	if reviewIssue != nil {
+		out["evidence_review_issues"] = reviewIssue
+	}
 	if s.policy().Paced && s.turn == nil {
 		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
 		if err != nil {
@@ -100,7 +110,7 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		wrap := s.wrapUp(stats)
 		out["model_execution"] = stats
 		out["wrap_up"] = wrap
-		if wrap && canCompose && s.cp.DraftIssue == nil && !s.forceDraftSubmit {
+		if wrap && canCompose && s.cp.DraftIssue == nil && reviewIssue == nil && !s.forceDraftSubmit {
 			out["next_action"] = "Investigation has used several model calls or substantial waiting time. Stop optional investigation now; begin/finish the full-video article, preserve noncritical unknowns as limitations. Never bypass critical evidence or final validation."
 		}
 		gaps := []domain.PlanItem{}

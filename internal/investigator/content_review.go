@@ -22,7 +22,7 @@ import (
 
 const reviewPolicy = "interpretation-2026-10-19-v12"
 const reviewBudgetPolicy = "interpretation-2026-10-19-v13"
-const evidenceReviewProtocol = "evidence-review-2026-10-19-v1"
+const evidenceReviewProtocol = "evidence-review-2026-10-19-v2"
 
 type evidenceReviewIssue struct {
 	Path        string   `json:"path" jsonschema:"description=Exact existing JSON Pointer into candidate, e.g. /sections/1/blocks/0/caption or /blocks/0/content/0/text or /summary. No array bracket notation."`
@@ -44,6 +44,16 @@ const evidenceReviewerInstructions = `你是独立的视频证据复核器。只
 逐一核对图像实际时刻和附近原文。较早版本的输出图不是较晚修改后的验证；单阶段截图不能证明前后完全一致。作者口述的结果可归因给作者，不能冒称自己已从截图验证。区分编辑器待接受建议和实际代码。引用旁白不支持只有像素才能看到的动作、代码与外观；将条件/三秒等时长保持在原句所属步骤。转写错误不是说话者的真实发音。
 只审核当前batch实际交付的图片所涉及的视觉陈述；其他图片会另批审，不因本批未展示而判它错误。文字陈述可对照完整原文。画面未见不能等价于整段视频未发生。保留有来源的作者观点、合理的意译和明确标注的一般解释，不要求证明无关细节。
 只调用report_evidence_review，复制candidate_hash。无实质问题时verdict=supported，issues=[]；有问题时needs_correction，最多8项，每项path是candidate内精确已有JSON Pointer字段，reason简述错误与原始证据，citation_ids使用目录里最相关的真实编号。不要给分数、不要改写全文，不要对同一问题重复列举多处。`
+
+// Retain the v1 prompt above for historical protocol regression checks. New
+// reviewer inputs freeze this independently versioned calibration as v2.
+const evidenceReviewerInstructionsV2 = evidenceReviewerInstructions + `
+拒绝前再核对以下门槛，避免把正确的文章改坏：
+- 只有明确的实质矛盾、无依据的确定事实、错来源或错阶段才需纠正。合理概括可以只说部分代码/字段；未写默认工厂、未列完类型定义、未逐字抄参数名、未重复上下文已说明的版本，均不因此构成错误。除非候选明确声称完整列举且遗漏会改变结论，不得以“不完整/未提及/容易误读”单独拒绝。
+- reason先给出候选确切断言的短摘录，再说明哪份原文或本批实际像素明确矛盾或不足。逐项检查数字、计数与函数输入/返回位置，不能在理由里列出同样数量的项目却声称数量不符；不能说候选缺少它已经写出的内容。
+- 图注不必复述所有可见代码。只描述了读取CSV与日期过滤，不能因还存在其他步骤就判错。相反，把返回注解、编辑器尚未接受的建议、重构前后的阶段写错，确属实质问题。
+- 不清楚的像素不能支持你断言相反事实；不要猜出画面没有的代码或对象。其他批图片未展示时，不凭记忆审它的视觉细节。只报告你有明确原始依据的问题；不要为凑问题逐帧挑刺。
+结论保持简短，不逐条复述全部正确内容。`
 
 func (s *session) reviewTool(add func(tool.EnhancedInvokableTool, error) error) error {
 	if !s.policy().ContentReview {
@@ -125,22 +135,84 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		}
 	}
 	if len(issues) == 0 {
+		if s.cp.EvidenceReviewIssue != nil {
+			s.cp.EvidenceReviewIssue = nil
+			return s.persist(ctx, s.cp.Messages)
+		}
 		return nil
 	}
 	s.cp.LastCandidate = nil
-	return &candidateError{err: &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "独立证据复核指出关键断言未获支持。仅修正列出的事实、图注或限定后重新提交。", Meta: map[string]any{"code": "semantic_evidence", "issues": issues[:min(16, len(issues))], "repairable": true}}}
+	meta := evidenceReviewCorrection(candidate, hash, issues[:min(16, len(issues))])
+	s.cp.EvidenceReviewIssue = meta
+	if err := s.persist(ctx, s.cp.Messages); err != nil {
+		return err
+	}
+	return &candidateError{err: &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "独立证据复核指出关键断言未获支持。按明确的章节ID与已有字段修正后重新提交。", Meta: meta}}
+}
+
+// Review pointers address the canonical candidate's section array. Saved drafts
+// use a map keyed by section ID. Bind both explicitly so /sections/3 cannot be
+// mistaken for chapter "ch3", and retain the verdict through unrelated errors.
+func evidenceReviewCorrection(candidate any, hash string, issues []map[string]any) map[string]any {
+	var document struct {
+		Sections []domain.Section `json:"sections"`
+		Blocks   []domain.Block   `json:"blocks"`
+	}
+	_ = json.Unmarshal(domain.JSON(candidate), &document)
+	sectionIDs := []string{}
+	for _, issue := range issues {
+		path, _ := issue["path"].(string)
+		parts := strings.Split(path, "/")
+		if len(parts) >= 3 && parts[1] == "sections" {
+			index, err := strconv.Atoi(parts[2])
+			if err != nil || index < 0 || index >= len(document.Sections) {
+				continue
+			}
+			section := document.Sections[index]
+			issue["section_id"] = section.ID
+			if !slices.Contains(sectionIDs, section.ID) {
+				sectionIDs = append(sectionIDs, section.ID)
+			}
+			parts[2] = strings.ReplaceAll(strings.ReplaceAll(section.ID, "~", "~0"), "/", "~1")
+			issue["draft_path"] = strings.Join(parts, "/")
+			if len(parts) >= 5 && parts[3] == "blocks" {
+				block, err := strconv.Atoi(parts[4])
+				if err == nil && block >= 0 && block < len(section.Blocks) {
+					issue["block_id"] = section.Blocks[block].ID
+				}
+			}
+		} else if path == "/title" || strings.HasPrefix(path, "/limitations") {
+			issue["draft_path"] = path
+		} else if len(parts) >= 3 && parts[1] == "blocks" {
+			block, err := strconv.Atoi(parts[2])
+			if err == nil && block >= 0 && block < len(document.Blocks) {
+				issue["block_id"] = document.Blocks[block].ID
+			}
+		}
+	}
+	return map[string]any{"code": "semantic_evidence", "candidate_hash": hash, "issues": issues, "affected_section_ids": sectionIDs, "repairable": true}
+}
+
+func (s *session) pendingEvidenceReview() map[string]any {
+	if s.cp.EvidenceReviewIssue != nil {
+		return s.cp.EvidenceReviewIssue
+	}
+	if s.cp.DraftIssue["code"] == "semantic_evidence" {
+		return s.cp.DraftIssue // A checkpoint from before identity binding.
+	}
+	return nil
 }
 
 func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candidate any, hints map[string]any, catalog map[string]domain.Citation, frames []domain.Asset) (evidenceReview, error) {
-	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash}, false); err != nil {
+	if _, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "content_review", map[string]any{"candidate_hash": hash, "review_protocol": evidenceReviewProtocol}, false); err != nil {
 		return evidenceReview{}, err
 	}
 	ids := []string{}
 	for _, a := range frames {
 		ids = append(ids, a.ID)
 	}
-	input := []*schema.Message{schema.SystemMessage(evidenceReviewerInstructions), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}))),
-		schema.UserMessage(string(domain.JSON(map[string]any{"candidate_hash": hash, "candidate": candidate, "citation_catalog": hints, "batch_frame_ids": ids, "frame_context": frameContexts(catalog, s.transcript)})))}
+	input := []*schema.Message{schema.SystemMessage(evidenceReviewerInstructionsV2), schema.UserMessage(string(domain.JSON(map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "transcript": s.transcript}))),
+		schema.UserMessage(string(domain.JSON(map[string]any{"review_protocol": evidenceReviewProtocol, "candidate_hash": hash, "candidate": candidate, "citation_catalog": hints, "batch_frame_ids": ids, "frame_context": frameContexts(catalog, s.transcript)})))}
 	parts, err := s.imageInput(ctx, ids, "evidence-review")
 	if err != nil {
 		return evidenceReview{}, err
