@@ -620,6 +620,9 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			if e := s.validateArticle(ctx, a); e != nil {
 				return nil, &candidateError{err: e}
 			}
+			if e := s.reviewArticle(ctx, a); e != nil {
+				return nil, e
+			}
 			if _, e := s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "article_candidate", in, false); e != nil {
 				return nil, e
 			}
@@ -634,6 +637,9 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 		if e := s.answerTool(add); e != nil {
 			return nil, e
 		}
+	}
+	if e := s.reviewTool(add); e != nil {
+		return nil, e
 	}
 	if e := s.patchTools(add); e != nil {
 		return nil, e

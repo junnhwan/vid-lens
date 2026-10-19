@@ -22,6 +22,7 @@ type executionPolicy struct {
 	SectionAuthoring     bool
 	Recovery             bool
 	EvidenceGrounding    bool
+	ContentReview        bool
 }
 
 func policyAt(revision int) executionPolicy {
@@ -38,6 +39,7 @@ func policyAt(revision int) executionPolicy {
 		SectionAuthoring:     revision >= 12,
 		Recovery:             revision >= 13,
 		EvidenceGrounding:    revision >= 14,
+		ContentReview:        revision >= 15,
 	}
 }
 
@@ -88,22 +90,30 @@ func initialProtocol(spec domain.GenerationSpec, question bool, layout string, n
 			// Existing Ready checkpoints never pass through this initialization.
 			revision = 11
 			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
-			if spec.DetailPolicy.Revision == evidencePolicy {
+			if spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
 				revision = 14
 				instruction += evidenceGroundingInstructions
 			}
+			if spec.DetailPolicy.Revision == reviewPolicy {
+				revision = 15
+				instruction += reviewAuthorInstructions
+			}
 		}
 	}
-	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy) {
+	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy) {
 		revision = 12
 		instruction = authoringInstructions(spec.DetailPolicy.Instruction)
-		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy {
+		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
 			revision = 13
 			instruction += repairProgressInstructions
 		}
-		if spec.DetailPolicy.Revision == evidencePolicy {
+		if spec.DetailPolicy.Revision == evidencePolicy || spec.DetailPolicy.Revision == reviewPolicy {
 			revision = 14
 			instruction += evidenceGroundingInstructions
+		}
+		if spec.DetailPolicy.Revision == reviewPolicy {
+			revision = 15
+			instruction += reviewAuthorInstructions
 		}
 	}
 	return revision, instruction

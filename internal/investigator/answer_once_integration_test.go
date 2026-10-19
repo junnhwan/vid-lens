@@ -17,13 +17,16 @@ func TestQuestionRequiresExecutableActionOnFirstSubmission(t *testing.T) {
 	db, res, cfg := testsupport.Services(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
 		var body map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 			w.WriteHeader(400)
 			return
 		}
+		if respondSupportedEvidenceReview(t, w, body) {
+			return
+		}
+		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		if string(body["tool_choice"]) != `"required"` {
 			fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"This plain answer cannot be published.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -47,5 +50,12 @@ func TestQuestionRequiresExecutableActionOnFirstSubmission(t *testing.T) {
 	result, err := db.TurnForRun(context.Background(), claim.Run.ID)
 	if err != nil || result.Answer == nil || len(result.Answer.Parts) != 1 || calls.Load() != 1 {
 		t.Fatalf("question %s needed avoidable follow-up: calls=%d error=%v", turn.ID, calls.Load(), err)
+	}
+	var reviews, submissions int
+	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='content_review' AND status='completed'", claim.Run.ID).Scan(&reviews); err != nil || reviews != 1 {
+		t.Fatal("new private answer bypassed independent review", reviews, err)
+	}
+	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM model_submissions WHERE run_id=$1", claim.Run.ID).Scan(&submissions); err != nil || submissions != 2 {
+		t.Fatal("writer and reviewer submissions were not accounted separately", submissions, err)
 	}
 }

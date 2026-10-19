@@ -74,6 +74,9 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		if e := validateAnswerParts(&a); e != nil {
 			return nil, &candidateError{err: e}
 		}
+		if e := s.reviewAnswer(ctx, a); e != nil {
+			return nil, e
+		}
 		var args any = in
 		if s.policy().ComposedAnswers {
 			args = map[string]any{"answer": in, "parts": parts}

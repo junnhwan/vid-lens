@@ -215,6 +215,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		if s.policy().EvidenceGrounding {
 			data["frame_context"] = frameContexts(catalog, s.transcript)
 		}
+		if s.cp.DraftIssue["code"] == "semantic_evidence" {
+			data["evidence_review_issues"] = s.cp.DraftIssue
+		}
 		if s.authoring() {
 			data["citation_catalog_rule"] = authoringCatalogRule
 		}

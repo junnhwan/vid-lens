@@ -45,6 +45,7 @@ type session struct {
 	spec             domain.GenerationSpec
 	resolvedPolicy   *executionPolicy
 	modelMessages    []*schema.Message
+	reviewing        bool
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
@@ -187,7 +188,7 @@ func (s *session) initial(ctx context.Context) error {
 		// the immutable article's older generation policy. Do not mutate that spec
 		// or upgrade a checkpoint that has already started.
 		p := *s.spec.DetailPolicy
-		p.Revision = evidencePolicy
+		p.Revision = reviewPolicy
 		protocolSpec.DetailPolicy = &p
 	}
 	revision, instruction := initialProtocol(protocolSpec, s.turn != nil, s.cp.LayoutVersion, newLayout, s.cp.HarnessRevision)

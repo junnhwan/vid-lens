@@ -120,6 +120,10 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			b.OutputTokens = min(target, capacity)
 		}
 	}
+	if s.reviewing {
+		b.Phase = "evidence_review"
+		b.OutputTokens = min(b.OutputTokens, 4096)
+	}
 	return b, b.check(s.profile)
 }
 func (b callBudget) check(p config.Profile) error {

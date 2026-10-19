@@ -1,11 +1,56 @@
 package investigator
 
 import (
+	"encoding/json"
 	"slices"
 	"strconv"
 
 	"vidlens/internal/domain"
 )
+
+// A real frame ID and its short alias identify the same owned, observed
+// source. Translate only exact catalog matches, never a guessed ID or prose.
+func resolveOwnedFrameAliases(section domain.Section, catalog map[string]domain.Citation) (domain.Section, error) {
+	var next domain.Section
+	if err := json.Unmarshal(domain.JSON(section), &next); err != nil {
+		return next, err
+	}
+	aliases := map[string]string{}
+	for alias, c := range catalog {
+		if c.Kind == "video_frame" && (aliases[c.FrameID] == "" || alias < aliases[c.FrameID]) {
+			aliases[c.FrameID] = alias
+		}
+	}
+	resolve := func(id string) string {
+		if _, exists := catalog[id]; !exists && aliases[id] != "" {
+			return aliases[id]
+		}
+		return id
+	}
+	inline := func(items []domain.Inline) {
+		for i := range items {
+			if items[i].Type == "citation" {
+				items[i].CitationID = resolve(items[i].CitationID)
+			}
+		}
+	}
+	for i := range next.Blocks {
+		b := &next.Blocks[i]
+		for j, id := range b.CitationIDs {
+			b.CitationIDs[j] = resolve(id)
+		}
+		inline(b.Content)
+		for j := range b.Items {
+			inline(b.Items[j].Content)
+		}
+		for j := range b.Rows {
+			for k, id := range b.Rows[j].CitationIDs {
+				b.Rows[j].CitationIDs[k] = resolve(id)
+			}
+		}
+	}
+	return next, nil
+}
 
 const evidencePolicy = "interpretation-2026-10-19-v11"
 

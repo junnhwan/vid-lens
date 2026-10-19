@@ -88,6 +88,9 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	if repair := s.requiredRepairTool(); repair != "" {
 		action = "Use the candidate fields already returned in context and call " + repair + " now. Do not read the same fields again. Preserve supported content and fix the listed paths."
 	}
+	if s.cp.DraftIssue["code"] == "semantic_evidence" {
+		action = "Read the affected saved chapters with read_article_sections, then use the latest version to correct only the listed facts/captions/limitations. Other chapters remain unchanged. Do not rebuild the plan. Every revised candidate receives a fresh independent source review."
+	}
 	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
 	if s.policy().Paced && s.turn == nil {
 		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)

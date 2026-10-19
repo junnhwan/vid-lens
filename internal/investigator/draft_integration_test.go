@@ -54,6 +54,9 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 					w.WriteHeader(400)
 					return
 				}
+				if respondSupportedEvidenceReview(t, w, input) {
+					return
+				}
 				if ((phase.Load() == 3 && (fault == "worker_recovery" || fault == "efficient_worker_recovery")) || (phase.Load() == 2 && fault == "plan_repair_recovery")) && failed.Add(1) <= 2 {
 					w.WriteHeader(500)
 					return

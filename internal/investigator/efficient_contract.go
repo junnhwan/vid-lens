@@ -40,6 +40,10 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 				delete(fields, "start_ms")
 				delete(fields, "end_ms")
 				sections["required"] = []string{"id", "title", "key_points", "evidence_ids"}
+				if t.session.policy().ContentReview {
+					evidence := fields["evidence_ids"].(map[string]any)
+					evidence["minItems"], evidence["maxItems"] = 1, 24
+				}
 			}
 		}
 		if t.name == "save_article_sections" {

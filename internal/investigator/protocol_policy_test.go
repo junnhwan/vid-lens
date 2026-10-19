@@ -54,7 +54,13 @@ func TestFrozenProtocolInputsAndToolSchemas(t *testing.T) {
 	}
 	for _, c := range cases {
 		var actual string
-		if c.Kind == "tools" {
+		if c.Kind == "review_prompt" {
+			if c.Revision != 15 {
+				t.Fatal("unknown independent review prompt revision")
+			}
+			hash := sha256.Sum256([]byte(evidenceReviewerInstructions))
+			actual = hex.EncodeToString(hash[:])
+		} else if c.Kind == "tools" {
 			actual = toolProtocolHash(t, c.Revision, c.Question)
 		} else {
 			p, _ := domain.InterpretationPolicy(c.Level)

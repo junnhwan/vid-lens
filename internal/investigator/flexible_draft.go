@@ -38,6 +38,12 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		counts[section.ID]++
 	}
 	for sectionIndex, section := range in.Sections {
+		if s.policy().ContentReview {
+			section, err = resolveOwnedFrameAliases(section, catalog)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if s.policy().EvidenceGrounding {
 			section = linkFigureFrames(section, catalog)
 		}

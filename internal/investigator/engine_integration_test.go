@@ -39,8 +39,9 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 			meta := regexp.MustCompile(`snapshot_id=([a-f0-9]+) inspection_id=\S+ frame_id=([a-f0-9]+) actual_time_ms=([0-9]+)`)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input struct {
-					Model    string `json:"model"`
-					Stream   bool   `json:"stream"`
+					Model    string          `json:"model"`
+					Stream   bool            `json:"stream"`
+					Tools    json.RawMessage `json:"tools"`
 					Messages []struct {
 						Content json.RawMessage `json:"content"`
 					} `json:"messages"`
@@ -53,6 +54,9 @@ func TestEinoCandidateRepairPublishesOnceWithRealEvidence(t *testing.T) {
 				if !input.Stream {
 					t.Error("model invocation did not stream")
 					w.WriteHeader(400)
+					return
+				}
+				if respondSupportedEvidenceReview(t, w, input) {
 					return
 				}
 				if qaMode.Load() {

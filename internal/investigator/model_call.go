@@ -40,8 +40,10 @@ func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatMod
 
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
-	if err := s.autoFinalize(ctx); err != nil {
-		return nil, err
+	if !s.reviewing {
+		if err := s.autoFinalize(ctx); err != nil {
+			return nil, err
+		}
 	}
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	var args any = stripPixels(in)
@@ -308,7 +310,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.policy().Enabled {
 			options = append(options, model.WithTools(activeTools))
 		}
-		if s.forceDraftSubmit {
+		if s.reviewing {
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, "report_evidence_review"))
+		} else if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
 		} else if s.policy().Recovery && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, activeTools[0].Name))

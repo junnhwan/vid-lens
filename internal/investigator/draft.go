@@ -292,6 +292,9 @@ func (s *session) submitSavedDraft(ctx context.Context, in submitDraftInput) (*s
 	step.FinishedAt = domain.Ptr(time.Now().UTC())
 	step.Status = "completed"
 	step.Outcome = &domain.Outcome{Message: "全部章节、来源引用与正式配图已通过校验。", EvidenceStatus: "not_applicable"}
+	if s.policy().ContentReview {
+		step.Outcome = &domain.Outcome{Message: "结构、引用身份与图片来源已通过校验，接下来独立复核事实和图文关系。", EvidenceStatus: "not_assessed"}
+	}
 	if err != nil {
 		step.Status = "failed"
 		step.Outcome = &domain.Outcome{Message: "文章还需要修正，已保存章节保留。", EvidenceStatus: "not_assessed"}
@@ -301,6 +304,9 @@ func (s *session) submitSavedDraft(ctx context.Context, in submitDraftInput) (*s
 	}
 	if err != nil {
 		return nil, &candidateError{err: err}
+	}
+	if err = s.reviewArticle(ctx, article); err != nil {
+		return nil, err
 	}
 	if _, err = s.engine.Store.BeginOperation(ctx, s.claim, "candidate", "article_candidate", in, false); err != nil {
 		return nil, err
@@ -555,7 +561,7 @@ func assembleDraftBatch(draft articleDraft, sections []domain.Section, catalog m
 			for _, id := range ids {
 				c, ok := catalog[id]
 				if !ok {
-					return draft, fmt.Errorf("章节%s引用%s不存在；只能使用citation_catalog提供的tN/fN", section.ID, id)
+					return draft, &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: fmt.Sprintf("章节%s引用%s不存在；只能使用citation_catalog提供的tN/fN", section.ID, id), Meta: map[string]any{"code": "unknown_evidence", "path": fmt.Sprintf("/blocks/%d", i), "citation_id": id, "repairable": true}}
 				}
 				next.Citations[id] = c
 			}

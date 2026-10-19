@@ -101,6 +101,18 @@ func (s *session) saveExecutionPlan(ctx context.Context, ready map[string]any) e
 // Remove schemas irrelevant to the current phase before freezing the call.
 // Frozen inputs bypass this projection on replay and retain their exact schema.
 func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
+	if s.policy().ContentReview {
+		filtered := []*schema.ToolInfo{}
+		for _, t := range in {
+			if (t.Name == "report_evidence_review") == s.reviewing {
+				filtered = append(filtered, t)
+			}
+		}
+		in = filtered
+		if s.reviewing {
+			return in
+		}
+	}
 	if !s.policy().Paced || s.turn != nil || s.forceDraftSubmit {
 		return in
 	}
