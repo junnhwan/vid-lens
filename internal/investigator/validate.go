@@ -312,7 +312,7 @@ func (s *session) validateBlock(ctx context.Context, b domain.Block, citations m
 				return invalid("配图不是可访问的实际帧")
 			}
 			if *a.TimeMS < last {
-				return invalid("连续帧顺序错误")
+				return &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "连续帧须按真实来源时间排列；只修正frame_ids顺序，保留图注和正文。", Meta: map[string]any{"path": "/frame_ids", "code": "figure_sequence", "actual": map[string]int64{"previous_time_ms": last, "current_time_ms": *a.TimeMS}, "expected": "frame aliases in nondecreasing citation_catalog time_ms order"}}
 			}
 			last = *a.TimeMS
 			_, _, e = s.engine.Media.ReadImage(ctx, s.claim, id)

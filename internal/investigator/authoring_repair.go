@@ -185,8 +185,12 @@ func (s *session) authoringRepairTool(add func(tool.EnhancedInvokableTool, error
 		if err := authoringShapeIssues(string(raw)); err != nil {
 			return finish(toolError(string(domain.JSON(candidateIssue(err)))))
 		}
+		checked, err := withoutToolActivityTitle(normalizeAuthoringBody(string(raw)))
+		if err != nil {
+			return finish(toolError(err.Error()))
+		}
 		var next saveSectionsInput
-		decoder := json.NewDecoder(strings.NewReader(normalizeAuthoringBody(string(raw))))
+		decoder := json.NewDecoder(strings.NewReader(checked))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&next) != nil {
 			return finish(toolError("修复后正文类型不正确。"))

@@ -21,6 +21,8 @@ The article outline records source ranges, distinct key points, and supporting `
 
 Authoring keeps the complete original transcript in context. Its citation catalog maps each `tN` alias to the exact zero-based `transcript_index`, instead of repeating segment IDs, origins and timestamps already present in that transcript. A cue clipped to actual media also carries its `canonical_range`; frame aliases retain actual frame IDs and times. The server continues reconstructing and validating canonical citations. Existing frozen model inputs retain their saved messages and schemas; Q&A and historical outline catalog formats are unchanged.
 
+Optional `activity_title` is action metadata. Retained candidates keep its original bytes for identity and replay, while ordinary writes and field repairs both remove it before strict body decoding. Accepted chapters remain immutable during repair. Out-of-order figure sequences identify the editable `frame_ids` field, so correcting frame order does not require replacing the caption or surrounding prose.
+
 Tool feedback and the next-call readiness capsule report pending observations, critical questions, comparison capacity, optional inspection allowance, and remaining calls. Multiple inspection calls in one response are rejected together before creating frames or questions, with a protocol response for each call. Successful extraction still requires observation of actual pixels.
 
 Argument errors, prerequisites, unknown tools, repeated requests, and rejected candidates contribute to durable no-progress tracking. A changed activity title, network heartbeat, or duplicate observation does not count as new evidence. Suppliers' tool-call IDs are scoped to a logical model call before dispatch so repeated provider IDs cannot replay unrelated earlier tool results.
@@ -60,3 +62,5 @@ Extractor metadata has a separate 32 MiB stdout allowance because many caption l
 Title and duration can appear before download and source publication. Failures include a safe diagnostic ID; HTTP responses include a generated `X-Request-ID`, also used in problem responses and linked to request/turn creation.
 
 Owner run diagnostics include bounded `tool_rejections`: tool/call identity, consecutive no-progress count, and validation categories with field paths. Missing retained fields are identified as `repair_field_missing`. This projection excludes raw rejection prose, expected/actual candidate values, prompts and signed URLs. Unknown rejection text is represented by a generic category. The original private execution ledger remains available for authorized deeper investigation.
+
+String-encoded tool errors and nested chapter validation issues use the same safe projection. Only known error envelopes are traversed, to a bounded depth and at most 64 issue entries per rejection; raw chapter or candidate contents are not returned.

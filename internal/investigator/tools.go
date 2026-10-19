@@ -60,6 +60,24 @@ type argumentCheckedTool struct {
 	session *session
 }
 
+// Retained candidates keep their original bytes and hash, including optional
+// action metadata. Every body decoder must use the same metadata boundary.
+func withoutToolActivityTitle(raw string) (string, error) {
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &metadata) != nil || metadata == nil {
+		return raw, nil
+	}
+	if title, ok := metadata["activity_title"]; ok {
+		var text string
+		if json.Unmarshal(title, &text) != nil {
+			return raw, errors.New("activity_title必须是简短字符串。")
+		}
+		delete(metadata, "activity_title")
+		return string(domain.JSON(metadata)), nil
+	}
+	return raw, nil
+}
+
 func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (result *schema.ToolResult, runErr error) {
 	if s := t.session; s != nil && s.policy().Enabled && s.engine != nil {
 		before, err := s.progressFingerprint(ctx)
@@ -208,17 +226,10 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 			}
 		}
 		if t.session != nil && t.session.policy().SectionRepairs {
-			var metadata map[string]json.RawMessage
-			if json.Unmarshal([]byte(checked), &metadata) == nil && metadata != nil {
-				if title, ok := metadata["activity_title"]; ok {
-					var text string
-					if json.Unmarshal(title, &text) != nil {
-						return toolError("activity_title必须是简短字符串。")
-					}
-					// Metadata is never a source fact or part of an immutable draft.
-					delete(metadata, "activity_title")
-					checked = string(domain.JSON(metadata))
-				}
+			var metadataErr error
+			checked, metadataErr = withoutToolActivityTitle(checked)
+			if metadataErr != nil {
+				return toolError(metadataErr.Error())
 			}
 		}
 		if err == nil {

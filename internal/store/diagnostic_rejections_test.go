@@ -49,3 +49,20 @@ func TestRunDiagnosticsExplainsRepairDeadEndsWithoutCandidateContent(t *testing.
 		t.Fatal("read-only diagnostics leaked private candidate, prompt, credential or URL")
 	}
 }
+
+func TestToolRejectionDiagnosticsUnwrapsEncodedAndNestedValidationIssues(t *testing.T) {
+	for _, raw := range []string{
+		`{"code":"plan_invalid","issues":[{"code":"evidence_count_exceeded","path":"/sections/2/evidence_ids","actual":"private-candidate-text"}]}`,
+		`{"code":"chapter_validation","affected_sections":[{"section_id":"s3","issue":{"code":"candidate_schema","issues":[{"code":"evidence_count_exceeded","path":"/sections/2/evidence_ids","detail":"private-candidate-text"}]}}]}`,
+	} {
+		// String-valued tool errors are JSON strings in the execution ledger.
+		reason := string(domain.JSON(raw))
+		issues := diagnosticRejectionIssues(reason)
+		if len(issues) != 1 || issues[0].Code != "evidence_count_exceeded" || issues[0].Path != "/sections/2/evidence_ids" {
+			t.Fatalf("real tool error envelope concealed the actionable leaf: %s", domain.JSON(issues))
+		}
+		if strings.Contains(string(domain.JSON(issues)), "private-") {
+			t.Fatal("unwrapping a tool error exposed private source values")
+		}
+	}
+}
