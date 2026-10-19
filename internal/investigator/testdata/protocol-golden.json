@@ -760,5 +760,17 @@
     "revision": 16,
     "question": false,
     "sha256": "46a5387229383fd77e71ae3b867c79a2d96ec4124f65c2dd7f6f9cadd5b24a5c"
+  },
+  {
+    "kind": "review_text_prompt_v4",
+    "revision": 16,
+    "question": false,
+    "sha256": "1a39e3d7ffc9a3066db7a228a7771775baf647105f688da49d2541323c2dc732"
+  },
+  {
+    "kind": "review_visual_prompt_v4",
+    "revision": 16,
+    "question": false,
+    "sha256": "e5d12244b9ba0a8ba5d78a40b4d801c91ede6224fa3d839c35179ef711fe56c9"
   }
 ]

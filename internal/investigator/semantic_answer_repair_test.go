@@ -16,6 +16,7 @@ import (
 func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 	db, res, cfg := testsupport.Services(t)
 	var writers atomic.Int32
+	var sourceQuestion string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -27,19 +28,31 @@ func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 		if len(tools) == 1 && tools[0].Function.Name == "report_evidence_review" {
 			var messages []struct{ Content json.RawMessage }
 			_ = json.Unmarshal(body["messages"], &messages)
+			questionSeen := false
 			for _, message := range messages {
 				var text string
 				var payload struct {
+					Question      string                   `json:"question"`
 					CandidateHash string                   `json:"candidate_hash"`
 					Candidate     struct{ Summary string } `json:"candidate"`
 				}
-				if json.Unmarshal(message.Content, &text) == nil && json.Unmarshal([]byte(text), &payload) == nil && payload.CandidateHash != "" && payload.Candidate.Summary == "视频证明了完全一致。" {
+				if json.Unmarshal(message.Content, &text) != nil || json.Unmarshal([]byte(text), &payload) != nil {
+					continue
+				}
+				questionSeen = questionSeen || payload.Question == sourceQuestion && sourceQuestion != ""
+				if payload.CandidateHash != "" && payload.Candidate.Summary == "视频证明了完全一致。" {
+					if !questionSeen {
+						t.Error("independent answer review lost the actual user's question")
+					}
 					args := evidenceReview{CandidateHash: payload.CandidateHash, Verdict: "needs_correction", Issues: []evidenceReviewIssue{{Path: "/summary", Reason: "原文不能支持完全一致这一结论。", CitationIDs: []string{"t1"}}}}
 					chunk := map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "source-verdict", "type": "function", "function": map[string]any{"name": "report_evidence_review", "arguments": string(domain.JSON(args))}}}}, "finish_reason": "tool_calls"}}}
 					w.Header().Set("Content-Type", "text/event-stream")
 					fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", domain.JSON(chunk))
 					return
 				}
+			}
+			if !questionSeen {
+				t.Error("corrected answer review lost the actual user's question")
 			}
 			if respondSupportedEvidenceReview(t, w, body) {
 				return
@@ -73,6 +86,11 @@ func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, claim := testsupport.Question(t, db)
+	question, err := db.TurnForRun(context.Background(), claim.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceQuestion = question.Question
 	_, cfg.Profile, _ = db.CurrentConfig(context.Background())
 	engine := Engine{Store: db, Resources: res, Config: cfg}
 	if err := engine.Run(context.Background(), claim, cfg.Profile); err != nil {
