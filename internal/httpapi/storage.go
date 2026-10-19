@@ -38,6 +38,11 @@ func (a *Server) storageSettings(w http.ResponseWriter, r *http.Request) {
 			a.problem(w, r, e)
 			return
 		}
+		_, profile, e = a.Store.CurrentConfig(r.Context())
+		if e != nil {
+			a.problem(w, r, e)
+			return
+		}
 	}
 	available := int64(disk.Bavail) * int64(disk.Bsize)
 	total := int64(disk.Blocks) * int64(disk.Bsize)

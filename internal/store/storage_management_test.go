@@ -313,7 +313,7 @@ func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testi
 		t.Fatalf("migration changed article: %v", e)
 	}
 	v, e := s.StorageOverview(ctx)
-	if e != nil || v.Settings.VideoQuotaBytes != DefaultVideoQuota || v.Settings.DiskStopPercent != 90 || v.OriginalBytes != 42 {
+	if e != nil || v.Settings.VideoQuotaBytes != DefaultVideoQuota || v.Settings.DiskStopPercent != 98 || v.OriginalBytes != 42 {
 		t.Fatalf("migrated quota: %+v %v", v, e)
 	}
 }

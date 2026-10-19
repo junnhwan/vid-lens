@@ -95,7 +95,7 @@ func (s *Store) CreateExport(ctx context.Context, session, request, format, key 
 		if len(disk) > 0 {
 			d := disk[0]
 			extra := load.resTemp + load.resImages + load.exportPending + ExportMaxBytes
-			if diskSpaceBlocked(d.Available, d.Total, extra, load.stop) {
+			if diskSpaceBlocked(d.Available, d.Total, extra, load.stop, load.minHostFree) {
 				return domain.Err(429, "ADMISSION_LIMITED", "磁盘余量不足，暂时无法准备导出。")
 			}
 		}

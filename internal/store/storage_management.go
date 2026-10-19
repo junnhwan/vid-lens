@@ -10,16 +10,20 @@ import (
 )
 
 type StorageSettings struct {
-	Revision        int64 `json:"revision"`
-	VideoQuotaBytes int64 `json:"video_quota_bytes"`
-	ImageQuotaBytes int64 `json:"image_quota_bytes"`
-	DiskStopPercent int   `json:"disk_stop_percent"`
+	Revision                 int64 `json:"revision"`
+	VideoQuotaBytes          int64 `json:"video_quota_bytes"`
+	ImageQuotaBytes          int64 `json:"image_quota_bytes"`
+	DiskStopPercent          int   `json:"disk_stop_percent"`
+	HostMinFreeBytes         int64 `json:"host_min_free_bytes"`
+	SourceDownloadLimitBytes int64 `json:"source_download_limit_bytes"`
 }
 type StorageInput struct {
-	ExpectedRevision int64 `json:"expected_revision"`
-	VideoQuotaBytes  int64 `json:"video_quota_bytes"`
-	ImageQuotaBytes  int64 `json:"image_quota_bytes"`
-	DiskStopPercent  int   `json:"disk_stop_percent"`
+	ExpectedRevision         int64 `json:"expected_revision"`
+	VideoQuotaBytes          int64 `json:"video_quota_bytes"`
+	ImageQuotaBytes          int64 `json:"image_quota_bytes"`
+	DiskStopPercent          int   `json:"disk_stop_percent"`
+	HostMinFreeBytes         int64 `json:"host_min_free_bytes"`
+	SourceDownloadLimitBytes int64 `json:"source_download_limit_bytes"`
 }
 type StorageAdmission struct {
 	CanStartSource           bool     `json:"can_start_source"`
@@ -67,7 +71,7 @@ func (s *Store) storageOverview(ctx context.Context, admissionInput *storageAdmi
 	// One read-only snapshot keeps settings, counts and reservations aligned
 	// without holding the lock used by admission, claims and heartbeats.
 	e := s.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if e := tx.QueryRow(ctx, "SELECT revision,video_quota_bytes,image_quota_bytes,disk_stop_percent FROM storage_settings WHERE singleton").Scan(&v.Settings.Revision, &v.Settings.VideoQuotaBytes, &v.Settings.ImageQuotaBytes, &v.Settings.DiskStopPercent); e != nil {
+		if e := tx.QueryRow(ctx, "SELECT revision,video_quota_bytes,image_quota_bytes,disk_stop_percent,host_min_free_bytes,source_download_limit_bytes FROM storage_settings WHERE singleton").Scan(&v.Settings.Revision, &v.Settings.VideoQuotaBytes, &v.Settings.ImageQuotaBytes, &v.Settings.DiskStopPercent, &v.Settings.HostMinFreeBytes, &v.Settings.SourceDownloadLimitBytes); e != nil {
 			return e
 		}
 		l, e := storageLedger(ctx, tx, "")
@@ -89,9 +93,6 @@ func (s *Store) storageOverview(ctx context.Context, admissionInput *storageAdmi
 }
 
 func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, workspace int64) error {
-	if in.VideoQuotaBytes < max(int64(1<<30), workspace) || in.VideoQuotaBytes > 10<<40 || in.ImageQuotaBytes < 1<<30 || in.ImageQuotaBytes > 10<<40 {
-		return domain.Err(422, "INVALID_ARGUMENT", "视频配额不能小于单次工作区，配图配额至少 1 GiB；两项均不能超过 10 TiB。")
-	}
 	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		l, e := storageLedger(ctx, tx, "")
 		if e != nil {
@@ -102,13 +103,29 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if in.DiskStopPercent == 0 {
 			in.DiskStopPercent = l.stop
 		}
-		if in.DiskStopPercent < 80 || in.DiskStopPercent > 95 {
-			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 95% 之间。")
+		if in.HostMinFreeBytes == 0 {
+			in.HostMinFreeBytes = l.minHostFree
+		}
+		if in.SourceDownloadLimitBytes == 0 {
+			in.SourceDownloadLimitBytes = l.sourceDownloadLimit
+		}
+		if in.DiskStopPercent < 80 || in.DiskStopPercent > 98 {
+			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 98% 之间。")
+		}
+		if in.SourceDownloadLimitBytes < 64<<20 || in.SourceDownloadLimitBytes > 2<<30 {
+			return domain.Err(422, "INVALID_ARGUMENT", "单条来源下载上限须在 64 MiB 到 2 GiB 之间。")
+		}
+		if in.HostMinFreeBytes < 512<<20 || in.HostMinFreeBytes > 20<<30 {
+			return domain.Err(422, "INVALID_ARGUMENT", "主机最低空闲空间须在 512 MiB 到 20 GiB 之间。")
+		}
+		effectiveWorkspace := max(workspace, in.SourceDownloadLimitBytes+(64<<20))
+		if in.VideoQuotaBytes < max(int64(1<<30), effectiveWorkspace) || in.VideoQuotaBytes > 10<<40 || in.ImageQuotaBytes < 1<<30 || in.ImageQuotaBytes > 10<<40 {
+			return domain.Err(422, "INVALID_ARGUMENT", "视频配额不能小于单次工作区，配图配额至少 1 GiB；两项均不能超过 10 TiB。")
 		}
 		if in.VideoQuotaBytes < l.usedTemp+l.exports+l.resTemp+l.exportPending || in.ImageQuotaBytes < l.usedImages+l.resImages {
 			return domain.Err(409, "STORAGE_IN_USE", "配额不能小于已占用与任务预留的空间，请先清理素材。")
 		}
-		tag, e := tx.Exec(ctx, "UPDATE storage_settings SET video_quota_bytes=$1,image_quota_bytes=$2,disk_stop_percent=$3,revision=revision+1 WHERE singleton AND revision=$4", in.VideoQuotaBytes, in.ImageQuotaBytes, in.DiskStopPercent, in.ExpectedRevision)
+		tag, e := tx.Exec(ctx, "UPDATE storage_settings SET video_quota_bytes=$1,image_quota_bytes=$2,disk_stop_percent=$3,host_min_free_bytes=$4,source_download_limit_bytes=$5,revision=revision+1 WHERE singleton AND revision=$6", in.VideoQuotaBytes, in.ImageQuotaBytes, in.DiskStopPercent, in.HostMinFreeBytes, in.SourceDownloadLimitBytes, in.ExpectedRevision)
 		if e != nil {
 			return e
 		}

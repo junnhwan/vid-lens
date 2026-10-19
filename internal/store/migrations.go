@@ -33,4 +33,5 @@ var migrationRegistry = []migration{
 	{21, "migrations/021_example_process.sql"},
 	{22, "migrations/022_announcement_history.sql"},
 	{23, "migrations/023_storage_disk_stop_percent.sql"},
+	{24, "migrations/024_configurable_storage_admission.sql"},
 }

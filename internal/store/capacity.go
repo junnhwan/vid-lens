@@ -18,6 +18,8 @@ type storageLoad struct {
 	temp, images           int64
 	available, total       int64
 	videoQuota, imageQuota int64
+	minHostFree            int64
+	sourceDownloadLimit    int64
 	stop                   int
 }
 
@@ -47,8 +49,8 @@ func storageLedger(ctx context.Context, q Querier, own string) (storageLoad, err
 	 COALESCE((SELECT sum(bytes) FROM media_assets WHERE run_id=$1 AND kind='frame' AND state IN ('ready','deleting','unavailable')),0),
 	 COALESCE((SELECT sum(bytes) FROM article_exports WHERE NOT file_deleted AND storage_key IS NOT NULL),0),
 	 COALESCE((SELECT sum(GREATEST(0,67108864-COALESCE(bytes,0))) FROM article_exports WHERE NOT file_deleted AND status IN ('queued','running','retry_wait')),0),
-	 video_quota_bytes,image_quota_bytes,disk_stop_percent FROM storage_settings WHERE singleton`, own).Scan(
-		&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.ownTemp, &l.ownImages, &l.exports, &l.exportPending, &l.videoQuota, &l.imageQuota, &l.stop)
+	 video_quota_bytes,image_quota_bytes,disk_stop_percent,host_min_free_bytes,source_download_limit_bytes FROM storage_settings WHERE singleton`, own).Scan(
+		&l.usedTemp, &l.usedImages, &l.resTemp, &l.resImages, &l.ownTemp, &l.ownImages, &l.exports, &l.exportPending, &l.videoQuota, &l.imageQuota, &l.stop, &l.minHostFree, &l.sourceDownloadLimit)
 	return l, e
 }
 
@@ -81,22 +83,23 @@ func storageLimits(l storageLoad) (disk, media bool) {
 	incomingTemp := max(int64(0), l.temp-l.ownTemp)
 	incomingImages := max(int64(0), l.images-l.ownImages)
 	media = l.usedTemp+l.exports+l.exportPending+l.resTemp+incomingTemp > videoLimit(l) || l.usedImages+l.resImages+incomingImages > imageLimit(l)
-	disk = diskSpaceBlocked(l.available, l.total, extra, l.stop)
+	disk = diskSpaceBlocked(l.available, l.total, extra, l.stop, l.minHostFree)
 	return disk, media
 }
 
-func diskSpaceBlocked(available, total, extra int64, stop int) bool {
-	return total <= 0 || available-extra < diskFloor(total, stop) || (total-available+extra)*100 > total*int64(stop)
+func diskSpaceBlocked(available, total, extra int64, stop int, minHostFree int64) bool {
+	return total <= 0 || available-extra < minHostFree || (total-available+extra)*100 > total*int64(stop)
 }
 
 // DiskSpaceAllowed checks current host usage against the persisted owner policy.
 // Export workers recheck at execution time because host usage can change after queue admission.
 func (s *Store) DiskSpaceAllowed(ctx context.Context, available, total, extra int64) (bool, error) {
 	var stop int
-	if err := s.Pool.QueryRow(ctx, "SELECT disk_stop_percent FROM storage_settings WHERE singleton").Scan(&stop); err != nil {
+	var minHostFree int64
+	if err := s.Pool.QueryRow(ctx, "SELECT disk_stop_percent,host_min_free_bytes FROM storage_settings WHERE singleton").Scan(&stop, &minHostFree); err != nil {
 		return false, err
 	}
-	return !diskSpaceBlocked(available, total, extra, stop), nil
+	return !diskSpaceBlocked(available, total, extra, stop, minHostFree), nil
 }
 
 func videoLimit(l storageLoad) int64 {
@@ -116,19 +119,11 @@ func storageExtra(l storageLoad) int64 {
 	return max(int64(0), l.temp-l.ownTemp) + max(int64(0), l.images-l.ownImages) + l.resTemp + l.resImages + l.exportPending
 }
 
-func diskFloor(total int64, stop int) int64 {
-	reserve := max(int64(5<<30), total*15/100)
-	if stop > 85 {
-		reserve = 5 << 30
-	}
-	return reserve
-}
-
 func buildStorageAdmission(l storageLoad) StorageAdmission {
 	incomingTemp := max(int64(0), l.temp-l.ownTemp)
 	incomingImages := max(int64(0), l.images-l.ownImages)
 	sourceReserve := incomingTemp + incomingImages
-	systemReserve := max(diskFloor(l.total, l.stop), stopPercentReserve(l.total, l.stop))
+	systemReserve := max(l.minHostFree, stopPercentReserve(l.total, l.stop))
 	extra := storageExtra(l)
 	otherReservations := max(int64(0), extra-sourceReserve)
 	hostRequired := otherReservations + sourceReserve + systemReserve
@@ -154,7 +149,7 @@ func buildStorageAdmission(l storageLoad) StorageAdmission {
 	additionalSlots := min(videoSlots, imageSlots, hostSlots)
 
 	blockedBy := make([]string, 0, 3)
-	if diskSpaceBlocked(l.available, l.total, extra, l.stop) {
+	if diskSpaceBlocked(l.available, l.total, extra, l.stop, l.minHostFree) {
 		blockedBy = append(blockedBy, "host_disk")
 	}
 	if videoUsed+incomingTemp > videoLimit(l) {

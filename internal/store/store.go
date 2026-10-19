@@ -176,7 +176,19 @@ func (s *Store) CurrentConfig(ctx context.Context) (string, config.Profile, erro
 		return "", config.Profile{}, e
 	}
 	p, e := s.Profile(ctx, id)
-	return id, p, e
+	if e != nil {
+		return "", config.Profile{}, e
+	}
+	var sourceLimit int64
+	if e = s.Pool.QueryRow(ctx, "SELECT source_download_limit_bytes FROM storage_settings WHERE singleton").Scan(&sourceLimit); e != nil {
+		return "", config.Profile{}, e
+	}
+	p.MaxDownloadBytes = min(p.MaxDownloadBytes, sourceLimit)
+	p.WorkspaceBytes = min(p.WorkspaceBytes, sourceLimit+(64<<20))
+	if p.WorkspaceBytes < p.MaxDownloadBytes {
+		p.WorkspaceBytes = p.MaxDownloadBytes
+	}
+	return id, p, nil
 }
 func (s *Store) putCredential(ctx context.Context, tx pgx.Tx, name, value string) error {
 	if value == "" {

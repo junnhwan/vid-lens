@@ -20,6 +20,7 @@ func TestPublishedMigrationIdentities(t *testing.T) {
 		21: "021_example_process.sql",
 		22: "022_announcement_history.sql",
 		23: "023_storage_disk_stop_percent.sql",
+		24: "024_configurable_storage_admission.sql",
 	}
 	seen := map[string]bool{}
 	previous := 0
@@ -139,6 +140,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 			}
 			if version < 19 {
 				if _, err := s.Pool.Exec(ctx, "DROP TABLE IF EXISTS site_announcement"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if version < 24 {
+				if _, err := s.Pool.Exec(ctx, "ALTER TABLE storage_settings DROP COLUMN IF EXISTS host_min_free_bytes, DROP COLUMN IF EXISTS source_download_limit_bytes"); err != nil {
 					t.Fatal(err)
 				}
 			}
