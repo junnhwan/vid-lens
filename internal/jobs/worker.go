@@ -51,22 +51,31 @@ func New(s *store.Store, m *media.Service, a *investigator.Engine, c config.Conf
 	w := &Worker{Store: s, Media: m, Agent: a, Config: c, client: asynq.NewClient(opt), inspector: asynq.NewInspector(opt), owner: domain.ID()}
 	for _, queue := range []string{"generation", "interactive", "maintenance"} {
 		queues := map[string]int{queue: 1}
+		concurrency := 1
+		if queue == "generation" {
+			// Idle broker workers are cheap. PostgreSQL admits each execution
+			// against the live setting, including across multiple processes.
+			concurrency = config.MaxVideoConcurrency
+		}
 		if queue == "maintenance" {
 			queues["cleanup"] = 2
 		}
-		srv := asynq.NewServer(opt, asynq.Config{Concurrency: 1, Queues: queues, StrictPriority: queue == "maintenance", ShutdownTimeout: 30 * time.Second, RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
+		srv := asynq.NewServer(opt, asynq.Config{Concurrency: concurrency, Queues: queues, StrictPriority: queue == "maintenance", ShutdownTimeout: 30 * time.Second, DelayedTaskCheckInterval: time.Second, RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
 			var re *retryError
 			if errors.As(e, &re) {
 				return re.delay
 			}
 			if errors.Is(e, errBusy) {
-				return 10 * time.Second
+				return 2 * time.Second
 			}
 			if t.Type() == "asset.cleanup" {
 				return []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute}[min(n, 2)]
 			}
 			return 15 * time.Second
 		}, IsFailure: func(e error) bool { return !errors.Is(e, errBusy) }, ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, t *asynq.Task, e error) {
+			if errors.Is(e, errBusy) {
+				return
+			}
 			slog.Warn("queue delivery did not finish", "task_type", t.Type(), "class", "retry_or_recovery")
 		})})
 		w.servers = append(w.servers, srv)
@@ -189,7 +198,10 @@ func (w *Worker) dispatch(ctx context.Context) {
 		}
 		body := domain.JSON(payload{1, r.ID, r.DispatchGeneration})
 		task := asynq.NewTask("vidlens.run", body)
-		_, e = w.client.EnqueueContext(ctx, task, asynq.TaskID(taskID(r.ID, r.DispatchGeneration)), asynq.Queue(o.Queue), asynq.MaxRetry(p.MaxRetries(r.Kind)), asynq.Timeout(p.ActiveBudget(r.Kind)+15*time.Second), asynq.Deadline(r.DeadlineAt), asynq.Retention(24*time.Hour))
+		// Business retries are bounded by Claim/Fail. Keep delivery retries above
+		// that budget: Asynq checks exhaustion before calling IsFailure, so a
+		// capacity wait on the last business attempt must still be retryable.
+		_, e = w.client.EnqueueContext(ctx, task, asynq.TaskID(taskID(r.ID, r.DispatchGeneration)), asynq.Queue(o.Queue), asynq.MaxRetry(25), asynq.Timeout(p.ActiveBudget(r.Kind)+15*time.Second), asynq.Deadline(r.DeadlineAt), asynq.Retention(24*time.Hour))
 		delivered := e == nil
 		if errors.Is(e, asynq.ErrTaskIDConflict) {
 			existing, err := w.inspector.GetTaskInfo(o.Queue, taskID(r.ID, r.DispatchGeneration))
@@ -207,6 +219,9 @@ func (w *Worker) handle(ctx context.Context, t *asynq.Task) error {
 	var waiting *store.RetryWait
 	if errors.As(e, &waiting) {
 		return &retryError{delay: waiting.After}
+	}
+	if errors.Is(e, store.ErrExecutionBusy) {
+		return errBusy
 	}
 	if e != nil {
 		return e

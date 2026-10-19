@@ -1,4 +1,5 @@
 import type { SiteCapacity } from "../contract/capacity"
+import { readSiteQueue, type SiteQueue } from "../contract/queue"
 import type {
   GenerationInput,
   ModelCatalog,
@@ -117,6 +118,9 @@ export class HttpApi {
   capacity() {
     return this.request<SiteCapacity>("GET", "/api/v1/site/capacity").then((r) => r.body)
   }
+  queue(signal?: AbortSignal) {
+    return this.request<SiteQueue>("GET", "/api/v1/site/queue", undefined, undefined, signal).then((r) => readSiteQueue(r.body))
+  }
   like(set = false) {
     return this.request<{ liked: boolean; count: number }>(set ? "PUT" : "GET", "/api/v1/site/like", set ? {} : undefined).then(
       (r) => r.body,
@@ -170,6 +174,14 @@ export class HttpApi {
     return this.request<ConversationResponse>("POST", `/api/v1/requests/${encodeURIComponent(requestId)}/conversation`, {}).then(
       (result) => result.body,
     )
+  }
+
+  exampleConversation(articleId: string) {
+    return this.request<ConversationResponse & { question_limit?: number }>(
+      "POST",
+      `/api/v1/examples/${encodeURIComponent(articleId)}/conversation`,
+      {},
+    ).then((result) => result.body)
   }
 
   turns(conversationId: string, beforeTurnNo?: number | null) {

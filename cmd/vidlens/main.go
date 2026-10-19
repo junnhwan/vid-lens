@@ -118,6 +118,7 @@ func run(path string, migrate bool) error {
 		return e
 	}
 	defer s.Pool.Close()
+	s.VideoConcurrency = cfg.VideoSlots()
 	if e = s.Migrate(ctx); e != nil {
 		return e
 	}

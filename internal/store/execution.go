@@ -23,7 +23,10 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 		if r.Status == "cancel_requested" {
 			return terminate(ctx, tx, r, "canceled", nil)
 		}
-		now := s.DBTime(ctx)
+		var now time.Time
+		if e = tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); e != nil {
+			return e
+		}
 		if !r.DeadlineAt.After(now) {
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "TASK_DEADLINE_EXCEEDED", Message: "处理已达到总时限。", CanRetry: true})
 		}
@@ -43,6 +46,10 @@ func (s *Store) Claim(ctx context.Context, id string, generation int64, owner st
 		}
 		if r.Status == "queued" && now.Sub(r.QueuedAt) > time.Duration(queueLimit)*time.Second {
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "QUEUE_WAIT_TIMEOUT", Message: "等待处理已超时。", CanRetry: true})
+		}
+		// A capacity wait never starts an attempt or spends active/retry budget.
+		if e = s.admitExecution(ctx, tx, r); e != nil {
+			return e
 		}
 		if r.Status == "running" {
 			reason := "上一次来源准备已中断，正在重新获取来源。"
@@ -361,7 +368,10 @@ func (s *Store) Repair(ctx context.Context, id string, generation int64, broker 
 		if r.DispatchGeneration != generation || domain.Terminal(r.Status) {
 			return nil
 		}
-		now := s.DBTime(ctx)
+		var now time.Time
+		if e = tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); e != nil {
+			return e
+		}
 		if r.Status == "cancel_requested" {
 			return terminate(ctx, tx, r, "canceled", nil)
 		}

@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"fmt"
 	"time"
 	"vidlens/internal/domain"
 	"vidlens/internal/store"
@@ -16,8 +17,8 @@ func (m *Manager) AcquireProbe(ctx context.Context, p store.Probe) (context.Cont
 	if e := m.waitMemory(ctx, "ai"); e != nil {
 		return nil, nil, e
 	}
-	const name = "ai:generation"
-	const key = "vidlens:resource:" + name
+	name := "ai:generation"
+	key := "vidlens:resource:" + name
 	owner := domain.ID()
 	unlock := func() {
 		c, cc := context.WithTimeout(context.Background(), 2*time.Second)
@@ -25,21 +26,30 @@ func (m *Manager) AcquireProbe(ctx context.Context, p store.Probe) (context.Cont
 		_ = m.Store.ReleaseResource(c, name, owner)
 		_, _ = m.Redis.Eval(c, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{key}, owner).Result()
 	}
+acquire:
 	for {
-		fast, e := m.Redis.SetNX(ctx, key, owner, 60*time.Second).Result()
+		v, e := m.Store.ExecutionSettings(ctx)
 		if e != nil {
 			return nil, nil, e
 		}
-		if fast {
-			ok, e := m.Store.AcquireProbeResource(ctx, p, name, owner)
+		for slot := 0; slot < v.MaxVideoRunning; slot++ {
+			name = fmt.Sprintf("ai:generation:%d", slot)
+			key = "vidlens:resource:" + name
+			fast, e := m.Redis.SetNX(ctx, key, owner, 60*time.Second).Result()
 			if e != nil {
-				unlock()
 				return nil, nil, e
 			}
-			if ok {
-				break
+			if fast {
+				ok, e := m.Store.AcquireProbeResource(ctx, p, name, owner)
+				if e != nil {
+					unlock()
+					return nil, nil, e
+				}
+				if ok {
+					break acquire
+				}
+				unlock()
 			}
-			unlock()
 		}
 		select {
 		case <-ctx.Done():

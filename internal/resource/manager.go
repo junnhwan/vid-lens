@@ -62,9 +62,16 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 	redisKey := ""
 acquire:
 	for {
+		if baseName == "ai:generation" {
+			v, e := m.Store.ExecutionSettings(ctx)
+			if e != nil {
+				return nil, nil, e
+			}
+			slots = v.MaxVideoRunning
+		}
 		for slot := 0; slot < slots; slot++ {
 			name = baseName
-			if slots > 1 {
+			if slots > 1 || baseName == "ai:generation" {
 				name = fmt.Sprintf("%s:%d", baseName, slot)
 			}
 			redisKey = "vidlens:resource:" + name

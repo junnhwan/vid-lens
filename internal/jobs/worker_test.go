@@ -40,7 +40,7 @@ func TestRealBrokerOutboxReplayAndLostDeliveryRepair(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if first.MaxRetry != 2 || first.Deadline.IsZero() || first.Timeout != 45*time.Minute+15*time.Second {
+	if first.MaxRetry != 25 || first.Deadline.IsZero() || first.Timeout != 45*time.Minute+15*time.Second {
 		t.Fatal("queue used implicit retry or timeout defaults")
 	}
 	_, e = s.Pool.Exec(ctx, "UPDATE task_outbox SET delivered_at=NULL,claimed_until=NULL,not_before=now() WHERE run_id=$1", run.ID)

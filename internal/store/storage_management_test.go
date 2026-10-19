@@ -154,6 +154,7 @@ func TestStorageQuotaIsAuthoritativeAcrossAdmissionAndReservations(t *testing.T)
 
 func TestConcurrentDownloadsCannotOverbookTheServiceQuota(t *testing.T) {
 	s := testStore(t)
+	s.VideoConcurrency = 2
 	ctx := context.Background()
 	if e := s.SaveStorageSettings(ctx, StorageInput{ExpectedRevision: 1, VideoQuotaBytes: 6 << 30, ImageQuotaBytes: 5 << 30}, 3<<30); e != nil {
 		t.Fatal(e)

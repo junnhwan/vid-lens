@@ -5,6 +5,7 @@ import { useRise } from "../ui/countUp"
 import { SiteFooter, SiteHeader } from "../ui/SiteHeader"
 import { AnnouncementSettings } from "./AnnouncementSettings"
 import { ExampleShowcase } from "./ExampleShowcase"
+import { ExecutionSettings } from "./ExecutionSettings"
 import { checkedFirst, emptyModel, emptyProvider, message, Model, ModelDraft, modelDraft, Probe, Provider, ProviderDraft, providerDraft, sameRevision, sections, usagePageSize } from "./manageCatalog"
 import { Diagnostics } from "./ManageDiagnostics"
 import { ManageModels } from "./ManageModels"
@@ -476,6 +477,8 @@ export function Manage() {
             <div className="desk-stage" key={section}>
               {section === "announcement" ? (
                 <AnnouncementSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
+              ) : section === "execution" ? (
+                <ExecutionSettings api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "videos" ? (
                 <VideoStorage api={api.current} onDirty={setDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "examples" ? (

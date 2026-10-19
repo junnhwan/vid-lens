@@ -13,6 +13,10 @@ func (s *Store) AcquireResource(ctx context.Context, c domain.Claim, resource, o
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
+		available, e := s.generationResourceAvailable(ctx, tx, resource)
+		if e != nil || !available {
+			return e
+		}
 		if _, e := tx.Exec(ctx, "DELETE FROM resource_leases WHERE resource=$1 AND expires_at<now()", resource); e != nil {
 			return e
 		}

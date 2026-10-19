@@ -10,6 +10,7 @@ import { Lens } from "./Lens"
 import { LectureShelf } from "./LectureShelf"
 import type { Lecture } from "./lectures"
 import { RecentReadings } from "./RecentReadings"
+import { ServiceQueue } from "./ServiceQueue"
 import { StarLink } from "./RepoPeek"
 import { useRise } from "./countUp"
 import { prefersReduced } from "./motion"
@@ -248,6 +249,7 @@ export function EntryView({
               </p>
             ) : null}
           </form>
+          <ServiceQueue active={active} />
           <RecentReadings active={active} onOpen={onOpenRecord} onHistory={onHistory} />
         </div>
         <aside

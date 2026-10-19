@@ -116,6 +116,7 @@ export const sections = [
   ["models", "模型"],
   ["providers", "供应商"],
   ["diagnostics", "缓存与用量"],
+  ["execution", "任务与队列"],
   ["network", "联网搜索"],
   ["videos", "视频与存储"],
   ["examples", "公开示例"],
