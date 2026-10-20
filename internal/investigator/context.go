@@ -206,7 +206,10 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 	}
 	state.Messages = freshMessages
-	if s.cp.LayoutVersion == draftLayout {
+	if s.sourceSurveyPending() {
+		s.forceDraftSubmit = false
+	}
+	if s.cp.LayoutVersion == draftLayout && !s.sourceSurveyPending() {
 		saved, draft, err := s.loadDraft(ctx)
 		if err != nil {
 			return ctx, nil, err

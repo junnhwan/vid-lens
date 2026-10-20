@@ -40,7 +40,7 @@ type sourceChunk struct {
 
 type sourceNote struct {
 	ChunkID     string   `json:"chunk_id"`
-	Summary     string   `json:"summary" jsonschema:"description=100-1600 characters in Chinese, preserving the current chunk's main points, concrete numbers, conditions and transitions. Derived navigation only; no visual guesses."`
+	Summary     string   `json:"summary" jsonschema:"description=30-1600 characters in Chinese, preserving the current chunk's main points, concrete numbers, conditions and transitions. Derived navigation only; no visual guesses."`
 	EvidenceIDs []string `json:"evidence_ids" jsonschema:"description=1-12 original tN aliases actually present in current_chunk, supporting its key points. Never cite another chunk or a frame."`
 }
 
@@ -141,24 +141,19 @@ func (s *session) sourceNotesTool(add func(tool.EnhancedInvokableTool, error) er
 	}
 	return add(utils.InferEnhancedTool("record_source_notes", "Save a derived navigation card for the delivered current_chunk. Process every chunk in chronological order before planning a complete article. This does not establish visual facts or replace source evidence.", func(ctx context.Context, in sourceNote) (*schema.ToolResult, error) {
 		for _, note := range s.cp.SourceNotes {
-			if store.Hash(note) == store.Hash(in) {
-				return textResult(map[string]any{"saved": true, "chunk_id": in.ChunkID}), nil
+			if note.ChunkID == in.ChunkID {
+				return textResult(map[string]any{"saved": true, "already_saved": true, "immutable": true, "ignored_update": store.Hash(note) != store.Hash(in), "chunk_id": note.ChunkID, "next_action": "Saved cards are read-only. Process only the delivered current_chunk; a repeated card does not advance source coverage."}), nil
 			}
 		}
 		if !s.sourceSurveyPending() {
-			for _, note := range s.cp.SourceNotes {
-				if store.Hash(note) == store.Hash(in) {
-					return textResult(map[string]any{"saved": true, "chunk_id": in.ChunkID}), nil
-				}
-			}
 			return toolError("全片材料卡已完成，无需再写。")
 		}
 		chunk := s.sourceChunks()[len(s.cp.SourceNotes)]
-		if in.ChunkID != s.cp.SourceChunkDelivered {
-			return toolError("本段原文尚未交付；先处理当前current_chunk，等待下一次调用交付新段。")
+		if in.ChunkID != s.cp.SourceChunkDelivered || in.ChunkID != chunk.ID {
+			return s.sourceNoteFeedback(in, chunk, "本段原文尚未交付；只处理当前current_chunk，等待下一次模型调用交付新段。"), nil
 		}
 		if err := validateSourceNote(in, chunk); err != nil {
-			return toolError(err.Error())
+			return s.sourceNoteFeedback(in, chunk, err.Error()), nil
 		}
 		s.cp.SourceNotes = append(s.cp.SourceNotes, in)
 		if err := s.persist(ctx, s.cp.Messages); err != nil {
@@ -168,11 +163,24 @@ func (s *session) sourceNotesTool(add func(tool.EnhancedInvokableTool, error) er
 	}))
 }
 
+func (s *session) sourceNoteFeedback(in sourceNote, chunk sourceChunk, reason string) *schema.ToolResult {
+	aliases := []string{}
+	for _, passage := range chunk.Passages {
+		if !slices.Contains(aliases, passage.Alias) {
+			aliases = append(aliases, passage.Alias)
+		}
+	}
+	return textResult(map[string]any{"error": reason, "current_chunk_id": chunk.ID, "supplied_chunk_id": in.ChunkID, "summary_characters": utf8.RuneCountInString(in.Summary), "evidence_count": len(in.EvidenceIDs), "summary_min_characters": 30, "summary_max_characters": 1600, "evidence_min_items": 1, "evidence_max_items": 12, "allowed_evidence_ids": aliases, "next_action": "Correct this current card in one call. Select up to 12 representative original aliases; do not rewrite saved cards or submit undelivered chunks."})
+}
+
 func validateSourceNote(note sourceNote, chunk sourceChunk) error {
 	if note.ChunkID != chunk.ID || utf8.RuneCountInString(strings.TrimSpace(note.Summary)) < 30 || utf8.RuneCountInString(note.Summary) > 1600 || len(note.EvidenceIDs) < 1 || len(note.EvidenceIDs) > 12 {
 		return fmt.Errorf("请为当前chunk_id保存30–1600字材料卡及1–12个该段原文引用。")
 	}
-	for _, id := range note.EvidenceIDs {
+	for i, id := range note.EvidenceIDs {
+		if slices.Contains(note.EvidenceIDs[:i], id) {
+			return fmt.Errorf("材料卡引用%s重复；只选择不重复的代表性原文引用。", id)
+		}
 		if !slices.ContainsFunc(chunk.Passages, func(p sourcePassage) bool { return p.Alias == id }) {
 			return fmt.Errorf("材料卡引用%s不属于当前交付的原文。", id)
 		}

@@ -393,8 +393,18 @@ func (s *Store) Repair(ctx context.Context, id string, generation int64, broker 
 		if (r.Status == "queued" || r.Status == "retry_wait") && now.Sub(waitFrom) > time.Duration(waitLimit)*time.Second {
 			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "QUEUE_WAIT_TIMEOUT", Message: "等待处理已超时。", CanRetry: true})
 		}
-		if r.Status == "running" && now.Sub(r.UpdatedAt) > 5*time.Minute {
-			return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "INTERNAL_FAILURE", Message: "处理长时间没有业务进展。", CanRetry: true})
+		if r.Status == "running" {
+			waited, err := resourceWaitDuration(ctx, tx, r, now)
+			if err != nil {
+				var problem *domain.Problem
+				if errors.As(err, &problem) && problem.Code == "QUEUE_WAIT_TIMEOUT" {
+					return terminate(ctx, tx, r, "failed", &domain.Failure{Code: problem.Code, Message: problem.Detail, CanRetry: true})
+				}
+				return err
+			}
+			if now.Sub(r.UpdatedAt)-waited > 5*time.Minute {
+				return terminate(ctx, tx, r, "failed", &domain.Failure{Code: "INTERNAL_FAILURE", Message: "处理长时间没有业务进展。", CanRetry: true})
+			}
 		}
 		var oldest *time.Time
 		if e = tx.QueryRow(ctx, "SELECT min(created_at) FROM task_outbox WHERE run_id=$1 AND dispatch_generation=$2 AND delivered_at IS NULL", id, generation).Scan(&oldest); e != nil {

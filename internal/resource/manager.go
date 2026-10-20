@@ -55,6 +55,15 @@ func (m *Manager) Acquire(ctx context.Context, c domain.Claim, name string) (con
 		}
 	}
 	owner := domain.ID()
+	waitRecorded := false
+	var lastWaitCheck time.Time
+	defer func() {
+		if waitRecorded {
+			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = m.Store.EndResourceWait(cleanup, c, owner)
+		}
+	}()
 	baseName, slots := name, 1
 	if name == "asr" {
 		slots = 2
@@ -91,6 +100,14 @@ acquire:
 				return nil, nil, e
 			}
 		}
+		if lastWaitCheck.IsZero() || time.Since(lastWaitCheck) >= time.Second {
+			logged, e := m.Store.RecordResourceWait(ctx, c, owner, baseName, slots)
+			if e != nil {
+				return nil, nil, e
+			}
+			waitRecorded = waitRecorded || logged
+			lastWaitCheck = time.Now()
+		}
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
@@ -98,6 +115,16 @@ acquire:
 		}
 	}
 
+	if waitRecorded {
+		if e := m.Store.EndResourceWait(ctx, c, owner); e != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = m.Store.ReleaseResource(cleanup, name, owner)
+			_, _ = m.Redis.Eval(cleanup, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{redisKey}, owner).Result()
+			return nil, nil, e
+		}
+		waitRecorded = false
+	}
 	child, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {

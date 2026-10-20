@@ -49,6 +49,21 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	var args any = stripPixels(in)
 	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools
 	activeTools = s.phaseTools(activeTools)
+	if s.boundedSourceContext() && !s.reviewing {
+		activeTools = append([]*schema.ToolInfo{}, activeTools...)
+		for i, info := range activeTools {
+			if info.Name == "record_source_notes" {
+				// The agent binds tools once, while the delivered chunk advances
+				// between calls. Refresh before freezing this logical input;
+				// recovery below still restores its exact persisted schema.
+				current, err := s.tools[info.Name].Info(ctx)
+				if err != nil {
+					return nil, err
+				}
+				activeTools[i] = current
+			}
+		}
+	}
 	if s.forceDraftSubmit {
 		subset := []*schema.ToolInfo{}
 		for _, t := range activeTools {

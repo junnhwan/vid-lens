@@ -310,13 +310,26 @@ func (s *session) toolFeedback(ctx context.Context, name, args, before string, r
 			}
 		}
 	}
+	countStall := true
+	if s.boundedSourceContext() && name == "record_source_notes" {
+		// One model response may contain several tool calls, but it has not
+		// received any of their feedback yet. Charge at most one correction
+		// turn, and never charge it after that response saved a new card.
+		turnKey := fmt.Sprintf("source-note-turn:%d", s.cp.Calls)
+		countStall = s.cp.Progress.Seen[turnKey] == 0
+		if progress {
+			s.cp.Progress.Seen[turnKey] = 2
+		} else if countStall {
+			s.cp.Progress.Seen[turnKey] = 1
+		}
+	}
 	if progress {
 		s.cp.Progress.Stalled = 0
 		if s.usesBoundedReview() {
 			s.cp.Progress.Recovery = nil
 			s.cp.Progress.Epoch++
 		}
-	} else {
+	} else if countStall {
 		s.cp.Progress.Stalled++
 		if s.usesBoundedReview() {
 			loop := store.Hash(map[string]any{"action": signature, "state": after, "reason": reason, "epoch": s.cp.Progress.Epoch})

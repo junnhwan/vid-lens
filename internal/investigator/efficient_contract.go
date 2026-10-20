@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/cloudwego/eino/schema"
 	"github.com/eino-contrib/jsonschema"
+	"slices"
 )
 
 // Project the new contract without changing schemas frozen in existing runs.
@@ -51,6 +52,23 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 		}
 	}
 	if props, ok := root["properties"].(map[string]any); ok {
+		if t.name == "record_source_notes" && t.session.boundedSourceContext() {
+			props["summary"].(map[string]any)["minLength"] = 30
+			props["summary"].(map[string]any)["maxLength"] = 1600
+			evidence := props["evidence_ids"].(map[string]any)
+			evidence["minItems"], evidence["maxItems"], evidence["uniqueItems"] = 1, 12, true
+			if t.session.sourceSurveyPending() {
+				chunk := t.session.sourceChunks()[len(t.session.cp.SourceNotes)]
+				props["chunk_id"].(map[string]any)["enum"] = []string{chunk.ID}
+				aliases := []string{}
+				for _, passage := range chunk.Passages {
+					if !slices.Contains(aliases, passage.Alias) {
+						aliases = append(aliases, passage.Alias)
+					}
+				}
+				evidence["items"].(map[string]any)["enum"] = aliases
+			}
+		}
 		props["activity_title"] = map[string]any{"type": "string", "maxLength": 60, "description": "Optional short public action title. Never include private reasoning, credentials or unverified conclusions."}
 		if t.name == "repair_article_plan" {
 			delete(props, "replacement_json")
