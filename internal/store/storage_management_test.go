@@ -112,7 +112,7 @@ func TestDeleteProtectsPinsAndDoesNotDeleteNewerDownloads(t *testing.T) {
 	}
 }
 
-func TestStorageQuotaIsAuthoritativeAcrossAdmissionAndReservations(t *testing.T) {
+func TestLogicalQuotasDoNotBlockHostDiskReservations(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	r, c := prepared(t, s, session(t, s))
@@ -128,24 +128,29 @@ func TestStorageQuotaIsAuthoritativeAcrossAdmissionAndReservations(t *testing.T)
 		t.Fatalf("reservation: %+v %v", v, e)
 	}
 	in := StorageInput{ExpectedRevision: first.Settings.Revision, VideoQuotaBytes: 1 << 30, ImageQuotaBytes: 1 << 30, DiskStopPercent: 92}
-	if e = s.SaveStorageSettings(ctx, in, 1<<30); e == nil {
-		t.Fatal("shrank below committed reservations")
+	if e = s.SaveStorageSettings(ctx, in, 1<<30); e != nil {
+		t.Fatalf("logical quotas still depend on current reservations: %v", e)
+	}
+	updated, e := s.StorageOverview(ctx)
+	if e != nil {
+		t.Fatal(e)
 	}
 	in.VideoQuotaBytes = 6 << 30
 	in.ImageQuotaBytes = 2 << 30
+	in.ExpectedRevision = updated.Settings.Revision
 	if e = s.SaveStorageSettings(ctx, in, 3<<30); e != nil {
 		t.Fatal(e)
 	}
-	updated, e := s.StorageOverview(ctx)
+	updated, e = s.StorageOverview(ctx)
 	if e != nil || updated.Settings.DiskStopPercent != 92 {
 		t.Fatalf("disk stop setting not persisted: %+v %v", updated.Settings, e)
 	}
-	if e = s.SaveStorageSettings(ctx, in, 3<<30); e == nil {
+	if e = s.SaveStorageSettings(ctx, StorageInput{ExpectedRevision: first.Settings.Revision, VideoQuotaBytes: 6 << 30, ImageQuotaBytes: 2 << 30}, 3<<30); e == nil {
 		t.Fatal("stale quota write accepted")
 	}
-	// The next run cannot use more than the newly selected service quota.
-	if e = s.ReserveStorage(ctx, c, 7<<30, IncomingFrameBytes, 100<<30, 200<<30); e == nil {
-		t.Fatal("worker ignored persisted quota")
+	// Logical quotas do not cap a reservation while the host has enough real space.
+	if e = s.ReserveStorage(ctx, c, 7<<30, IncomingFrameBytes, 100<<30, 200<<30); e != nil {
+		t.Fatalf("host disk had room for a reservation above the logical quota: %v", e)
 	}
 	if e = s.Publish(ctx, c, domain.Article{SnapshotID: *r.SnapshotID}); e != nil {
 		t.Fatal(e)
@@ -156,18 +161,16 @@ func TestStorageQuotaIsAuthoritativeAcrossAdmissionAndReservations(t *testing.T)
 	}
 }
 
-func TestDiskStopSettingControlsAdmissionAndPublicCapacity(t *testing.T) {
+func TestFixedHostReserveControlsAdmissionAndPublicCapacity(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	settings, err := s.StorageOverview(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 86% used plus a 3 GiB reservation is below the default 90% stop line,
-	// while the same request would cross the previous 85% default.
 	capacity, err := s.DiskCapacity(ctx, 14<<30, 100<<30, 3<<30)
 	if err != nil || !capacity.Accepting {
-		t.Fatalf("default 90%% policy refused sufficient disk space: %+v %v", capacity, err)
+		t.Fatalf("fixed 3 GiB reserve refused sufficient disk space: %+v %v", capacity, err)
 	}
 	if err := s.SaveStorageSettings(ctx, StorageInput{
 		ExpectedRevision: settings.Settings.Revision,
@@ -178,16 +181,20 @@ func TestDiskStopSettingControlsAdmissionAndPublicCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	capacity, err = s.DiskCapacity(ctx, 14<<30, 100<<30, 3<<30)
-	if err != nil || capacity.Accepting {
-		t.Fatalf("updated 85%% policy did not close admission: %+v %v", capacity, err)
+	if err != nil || !capacity.Accepting {
+		t.Fatalf("legacy percent setting changed fixed-reserve admission: %+v %v", capacity, err)
 	}
-	allowed, err := s.DiskSpaceAllowed(ctx, 14<<30, 100<<30, 3<<30)
+	allowed, err := s.DiskSpaceAllowed(ctx, 6<<30, 100<<30, 3<<30)
+	if err != nil || !allowed {
+		t.Fatalf("exactly 3 GiB remaining should pass: allowed=%v err=%v", allowed, err)
+	}
+	allowed, err = s.DiskSpaceAllowed(ctx, (6<<30)-1, 100<<30, 3<<30)
 	if err != nil || allowed {
-		t.Fatalf("export disk check ignored the saved policy: allowed=%v err=%v", allowed, err)
+		t.Fatalf("less than 3 GiB remaining should stop: allowed=%v err=%v", allowed, err)
 	}
 }
 
-func TestConcurrentDownloadsCannotOverbookTheServiceQuota(t *testing.T) {
+func TestConcurrentDownloadsCannotOverbookRealHostDisk(t *testing.T) {
 	s := testStore(t)
 	s.VideoConcurrency = 2
 	ctx := context.Background()
@@ -217,7 +224,7 @@ func TestConcurrentDownloadsCannotOverbookTheServiceQuota(t *testing.T) {
 		wg.Add(1)
 		go func(c domain.Claim) {
 			defer wg.Done()
-			results <- s.ReserveStorage(ctx, c, 4<<30, IncomingFrameBytes, 100<<30, 200<<30)
+			results <- s.ReserveStorage(ctx, c, 4<<30, IncomingFrameBytes, 11<<30, 200<<30)
 		}(c)
 	}
 	wg.Wait()
@@ -231,9 +238,9 @@ func TestConcurrentDownloadsCannotOverbookTheServiceQuota(t *testing.T) {
 	if passed != 1 {
 		t.Fatalf("admitted %d downloads into one available slot", passed)
 	}
-	v, e := s.DiskCapacity(ctx, 100<<30, 200<<30, 3<<30)
+	v, e := s.DiskCapacity(ctx, 11<<30, 200<<30, 3<<30)
 	if e != nil || v.ReservedBytes != 4<<30 || v.Accepting {
-		t.Fatalf("overbooked capacity: %+v %v", v, e)
+		t.Fatalf("host disk reservation was not reflected in capacity: %+v %v", v, e)
 	}
 }
 
@@ -296,7 +303,7 @@ func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testi
 		t.Fatal(e)
 	}
 	// Recreate the schema-12 storage state and apply the real embedded upgrade.
-	for _, q := range []string{"DELETE FROM schema_migrations WHERE version IN (13,23,24,25)", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
+	for _, q := range []string{"DELETE FROM schema_migrations WHERE version IN (13,23,24,25,26)", "DROP TABLE storage_settings", "DROP INDEX sources_requests", "DROP INDEX sources_assets"} {
 		if _, e = s.Pool.Exec(ctx, q); e != nil {
 			t.Fatal(e)
 		}
@@ -313,7 +320,7 @@ func TestStorageMigrationPreservesPublishedContentAndRetainsOldOriginal(t *testi
 		t.Fatalf("migration changed article: %v", e)
 	}
 	v, e := s.StorageOverview(ctx)
-	if e != nil || v.Settings.VideoQuotaBytes != DefaultVideoQuota || v.Settings.DiskStopPercent != 98 || v.OriginalBytes != 42 {
+	if e != nil || v.Settings.VideoQuotaBytes != DefaultVideoQuota || v.Settings.DiskStopPercent != 99 || v.Settings.HostMinFreeBytes != DefaultHostReserveBytes || v.OriginalBytes != 42 {
 		t.Fatalf("migrated quota: %+v %v", v, e)
 	}
 }

@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useRef, useState } from "react"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
-import { diskRatio, formatDiskBytes } from "../contract/capacity"
+import { formatDiskBytes } from "../contract/capacity"
 import { DeskStatus } from "../ui/DeskStatus"
 import type { VideoCleanup } from "./manageRoute"
 interface Overview {
-	settings: { revision: number; video_quota_bytes: number; image_quota_bytes: number; disk_stop_percent: number; host_min_free_bytes: number; source_download_limit_bytes: number }
+	settings: { revision: number; video_quota_bytes: number; image_quota_bytes: number; host_min_free_bytes: number; source_download_limit_bytes: number }
   original_bytes: number
   image_bytes: number
   export_bytes: number
@@ -22,9 +22,6 @@ interface Overview {
     host_shortfall_bytes: number
     system_reserve_bytes: number
     source_reserve_bytes: number
-    disk_stop_percent: number
-    video_quota_available_bytes: number
-    image_quota_available_bytes: number
   }
 }
 interface Video {
@@ -52,7 +49,6 @@ const gib = 1024 ** 3
 const mib = 1024 ** 2
 const pageSize = 20
 const statusLabels: Record<string, string> = { waiting_source: "准备素材", generating: "正在成文", completed: "已完成", failed: "处理失败", canceled: "已取消" }
-const admissionReasons: Record<string, string> = { host_disk: "主机磁盘保护线", video_quota: "视频工作区配额", image_quota: "配图空间配额" }
 function date(value: string) { return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) }
 function videoTone(status: string): "ready" | "wait" | "live" | "dim" {
   if (status === "generating" || status === "waiting_source") return "live"
@@ -85,7 +81,6 @@ const cleanupFilters: { id: VideoCleanup; label: string }[] = [
   { id: "held", label: "使用中" },
   { id: "gone", label: "已清理" },
 ]
-function remaining(quota: number, used: number, reserved: number) { return Math.max(0, quota - used - reserved) }
 function formatAdmissionBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) return "—"
   if (bytes >= 4 * gib) return formatDiskBytes(bytes)
@@ -95,9 +90,6 @@ function formatAdmissionBytes(bytes: number) {
 export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup, onRoute }: { api: HttpApi; onDirty: (dirty: boolean) => void; onAuthLost: () => void; query: string; offset: number; cleanup: VideoCleanup; onRoute: (next: { query: string; offset: number; cleanup: VideoCleanup }) => void }) {
   const [overview, setOverview] = useState<Overview | null>(null)
   const [page, setPage] = useState<VideoPage | null>(null)
-  const [videoQuota, setVideoQuota] = useState("")
-  const [imageQuota, setImageQuota] = useState("")
-  const [diskStopPercent, setDiskStopPercent] = useState("")
   const [hostMinFreeGiB, setHostMinFreeGiB] = useState("")
   const [sourceDownloadLimitMiB, setSourceDownloadLimitMiB] = useState("")
   const [search, setSearch] = useState(query)
@@ -108,7 +100,7 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
   const [confirm, setConfirm] = useState<Video | null>(null)
   const [loadedAt, setLoadedAt] = useState("")
   const cancelRef = useRef<HTMLButtonElement>(null)
-  const dirty = Boolean(overview && (Number(videoQuota) * gib !== overview.settings.video_quota_bytes || Number(imageQuota) * gib !== overview.settings.image_quota_bytes || Number(diskStopPercent) !== overview.settings.disk_stop_percent || Number(hostMinFreeGiB) * gib !== overview.settings.host_min_free_bytes || Number(sourceDownloadLimitMiB) * mib !== overview.settings.source_download_limit_bytes))
+  const dirty = Boolean(overview && (Number(hostMinFreeGiB) * gib !== overview.settings.host_min_free_bytes || Number(sourceDownloadLimitMiB) * mib !== overview.settings.source_download_limit_bytes))
   useEffect(() => { setSearch(query) }, [query])
   useEffect(() => { onDirty(dirty || Boolean(confirm) || busy === "save" || busy === "delete") }, [dirty, confirm, busy, onDirty])
   useEffect(() => { if (confirm) cancelRef.current?.focus() }, [confirm])
@@ -118,9 +110,6 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
   }
   function accept(v: Overview) {
     setOverview(v)
-    setVideoQuota(String(v.settings.video_quota_bytes / gib))
-    setImageQuota(String(v.settings.image_quota_bytes / gib))
-    setDiskStopPercent(String(v.settings.disk_stop_percent))
     setHostMinFreeGiB(String(v.settings.host_min_free_bytes / gib))
     setSourceDownloadLimitMiB(String(v.settings.source_download_limit_bytes / mib))
   }
@@ -140,8 +129,8 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
     if (!overview || busy) return
     setBusy("save"); setError(""); setNotice("")
     try {
-      const r = await api.request<Overview>("PUT", "/api/v1/admin/storage", { expected_revision: overview.settings.revision, video_quota_bytes: Math.round(Number(videoQuota) * gib), image_quota_bytes: Math.round(Number(imageQuota) * gib), disk_stop_percent: Number(diskStopPercent), host_min_free_bytes: Math.round(Number(hostMinFreeGiB) * gib), source_download_limit_bytes: Math.round(Number(sourceDownloadLimitMiB) * mib) })
-      accept(r.body); setNotice("存储设置已保存；新任务会按单条下载上限和主机保留空间重新准入。")
+      const r = await api.request<Overview>("PUT", "/api/v1/admin/storage", { expected_revision: overview.settings.revision, video_quota_bytes: overview.settings.video_quota_bytes, image_quota_bytes: overview.settings.image_quota_bytes, host_min_free_bytes: Math.round(Number(hostMinFreeGiB) * gib), source_download_limit_bytes: Math.round(Number(sourceDownloadLimitMiB) * mib) })
+      accept(r.body); setNotice("存储设置已保存；新视频按服务器实时空闲空间和保护空间准入。")
     } catch (e) { failed(e) }
     finally { setBusy("") }
   }
@@ -157,13 +146,11 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
     finally { setBusy("") }
   }
   function reload() { setNotice(""); setRefresh((v) => v + 1) }
-  const videoUsed = overview ? overview.original_bytes + overview.export_bytes : 0
   const admission = overview?.admission
-  const admissionScaleMax = admission ? Math.max(admission.host_available_bytes, admission.host_required_bytes) * 1.12 : 0
+  const admissionScaleMax = admission?.host_total_bytes || 0
   const hostFreeRatio = admission && admissionScaleMax > 0 ? Math.max(0, Math.min(1, admission.host_available_bytes / admissionScaleMax)) : 0
   const admissionLineRatio = admission && admissionScaleMax > 0 ? Math.max(0, Math.min(1, admission.host_required_bytes / admissionScaleMax)) : 0
   const hostDiskBlocked = Boolean(admission?.blocked_by.includes("host_disk"))
-  const otherAdmissionBlocks = admission?.blocked_by.filter((reason) => reason !== "host_disk") || []
   const otherTaskReserve = admission ? Math.max(0, admission.host_required_bytes - admission.system_reserve_bytes - admission.source_reserve_bytes) : 0
   return <section className="video-storage" aria-busy={Boolean(busy)}>
     <header className="storage-heading"><div><p className="eyebrow">VIDEO ARCHIVE</p><h2>视频与存储</h2><p className="fine">全站访客处理过的视频。原视频由你决定何时清理。</p></div>
@@ -174,42 +161,37 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
       {admission ? <section className={`storage-admission ${admission.can_start_source ? "is-open" : "is-closed"}`} aria-label="新视频存储准入状态" aria-live="polite">
         <div className="storage-admission-lead">
           <span className="eyebrow">服务器实际磁盘空间</span>
-          <h3>{admission.can_start_source ? "主机空间够开始新视频" : hostDiskBlocked ? `还差 ${formatAdmissionBytes(admission.host_shortfall_bytes)}` : "本站存储配额不足"}</h3>
-          {hostDiskBlocked ? <p>当前主机空闲 {formatAdmissionBytes(admission.host_available_bytes)}，下一条至少需要 {formatAdmissionBytes(admission.host_required_bytes)}。请释放至少 {formatAdmissionBytes(admission.host_shortfall_bytes)} 的主机磁盘空间，再点“刷新列表”。</p> : admission.can_start_source ? <p>当前主机空闲 {formatAdmissionBytes(admission.host_available_bytes)}，下一条至少需要 {formatAdmissionBytes(admission.host_required_bytes)}；按存储条件可放行 {admission.additional_source_slots.toLocaleString("zh-Hans")} 个新来源。</p> : <p>{otherAdmissionBlocks.map((reason) => admissionReasons[reason] || reason).join("、") || "当前存储条件不满足"}。请查看下方本站配额余量。</p>}
-          <p className="storage-admission-quota-note">本站视频配额还剩 {formatDiskBytes(admission.video_quota_available_bytes)}；这是 VidLens 配额，不是服务器磁盘空闲。</p>
+          <h3>{admission.can_start_source ? "可以开始新视频" : hostDiskBlocked ? `还差 ${formatAdmissionBytes(admission.host_shortfall_bytes)} 空间` : "暂时不能开始新视频"}</h3>
+          {hostDiskBlocked ? <p>服务器现在空闲 {formatAdmissionBytes(admission.host_available_bytes)}，下一条需要 {formatAdmissionBytes(admission.host_required_bytes)}。释放显示的差额后，刷新列表即可重新判断。</p> : <p>服务器现在空闲 {formatAdmissionBytes(admission.host_available_bytes)}；新视频会保留至少 {formatAdmissionBytes(admission.system_reserve_bytes)} 给服务器。</p>}
         </div>
         <dl className="storage-admission-metrics">
-          <div><dt>主机现在空闲</dt><dd>{formatAdmissionBytes(admission.host_available_bytes)}</dd></div>
+          <div><dt>服务器空闲 / 总空间</dt><dd>{formatAdmissionBytes(admission.host_available_bytes)} / {formatAdmissionBytes(admission.host_total_bytes)}</dd></div>
           <div><dt>开始下一条至少需要</dt><dd>{formatAdmissionBytes(admission.host_required_bytes)}</dd></div>
+          <div><dt>服务器保护空间</dt><dd>{formatAdmissionBytes(admission.system_reserve_bytes)}</dd></div>
         </dl>
         <figure className="storage-admission-visual">
           <div className="storage-admission-meter" aria-hidden="true">
             <i className="storage-admission-meter-free" style={{ width: `${hostFreeRatio * 100}%` }} />
             <b className="storage-admission-meter-required" style={{ left: `${admissionLineRatio * 100}%` }} />
           </div>
-          <figcaption><span>现在空闲 {formatAdmissionBytes(admission.host_available_bytes)}</span><span>准入线 {formatAdmissionBytes(admission.host_required_bytes)}</span><span>刻度按下一条所需空间放大显示</span></figcaption>
+          <figcaption><span>主机已用 {formatAdmissionBytes(Math.max(0, admission.host_total_bytes - admission.host_available_bytes))}</span><span>空闲 {formatAdmissionBytes(admission.host_available_bytes)}</span><span>下一条准入线 {formatAdmissionBytes(admission.host_required_bytes)}</span></figcaption>
         </figure>
         <div className="storage-admission-note">
-          <p>准入线合计 {formatAdmissionBytes(admission.host_required_bytes)} = 下一条任务预留 {formatAdmissionBytes(admission.source_reserve_bytes)} + 主机保护空间 {formatAdmissionBytes(admission.system_reserve_bytes)} + 现有任务预留 {formatAdmissionBytes(otherTaskReserve)}。单条音视频上限为 {formatDiskBytes(overview.settings.source_download_limit_bytes)}。</p>
-          <p>主机保护空间取后台最低空闲 {formatAdmissionBytes(overview.settings.host_min_free_bytes)} 和磁盘停止线 {admission.disk_stop_percent}%（至少留出整盘 {100 - admission.disk_stop_percent}%）中较大值；当前按 {formatAdmissionBytes(admission.system_reserve_bytes)} 计入。</p>
-          <p>下一条任务按单条音视频上限再加临时工作区和配图预留；这是准入预算，不代表小于上限的视频实际会占这么多空间。</p>
-          <p>如果在 VidLens 清理视频后，“主机现在空闲”没有增加，原文件可能仍被服务器备份或其他文件保留；以这里显示的主机空闲量为准。</p>
-          {otherAdmissionBlocks.length ? <p><strong>其他拦截：</strong>{otherAdmissionBlocks.map((reason) => admissionReasons[reason] || reason).join("、")}</p> : !admission.blocked_by.length ? <p><strong>主机存储条件满足。</strong>处理队列和模型状态仍会单独检查。</p> : null}
+          <p>看上面的两个数字即可：服务器空闲量高于“下一条准入线”就能开始。准入线已经自动算入保护空间和任务预留，不用手动计算。</p>
+          <p>单条音视频上限为 {formatDiskBytes(overview.settings.source_download_limit_bytes)}；实际下载并入磁盘占用后，系统会相应调整任务预留。</p>
+          {otherTaskReserve > 0 ? <p>当前任务及导出已预留 {formatAdmissionBytes(otherTaskReserve)}。</p> : null}
         </div>
       </section> : null}
-      <div className="storage-summary">
-        <div><span>视频工作区配额</span><strong>{formatDiskBytes(videoUsed)} <small>/ {formatDiskBytes(overview.settings.video_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(videoUsed, overview.settings.video_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_video_bytes, overview.settings.video_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(videoUsed)}</li><li><b />预留 {formatDiskBytes(overview.reserved_video_bytes)}</li><li><span />配额余量 {formatDiskBytes(remaining(overview.settings.video_quota_bytes, videoUsed, overview.reserved_video_bytes))}</li></ul><p>原视频与音频 {formatDiskBytes(overview.original_bytes)} · 导出 {formatDiskBytes(overview.export_bytes)}。这是本站逻辑配额，不是主机磁盘空闲。</p></div>
-        <div><span>配图空间配额</span><strong>{formatDiskBytes(overview.image_bytes)} <small>/ {formatDiskBytes(overview.settings.image_quota_bytes)}</small></strong><div className="storage-bar" aria-hidden="true"><i style={{ width: `${diskRatio(overview.image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /><b style={{ width: `${diskRatio(overview.reserved_image_bytes, overview.settings.image_quota_bytes) * 100}%` }} /></div><ul className="storage-legend"><li><i />已用 {formatDiskBytes(overview.image_bytes)}</li><li><b />预留 {formatDiskBytes(overview.reserved_image_bytes)}</li><li><span />配额余量 {formatDiskBytes(remaining(overview.settings.image_quota_bytes, overview.image_bytes, overview.reserved_image_bytes))}</li></ul><p>正式文章配图持续保留</p></div>
+      <div className="storage-summary storage-usage">
+        <div><span>VidLens 视频与音频占用</span><strong>{formatDiskBytes(overview.original_bytes)}</strong><p>导出文件 {formatDiskBytes(overview.export_bytes)} · 运行任务预留 {formatDiskBytes(overview.reserved_video_bytes)}</p></div>
+        <div><span>VidLens 配图占用</span><strong>{formatDiskBytes(overview.image_bytes)}</strong><p>运行任务预留 {formatDiskBytes(overview.reserved_image_bytes)} · 正式文章配图持续保留</p></div>
       </div>
-      <details className="storage-settings"><summary>调整存储限制 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)} · 主机保留 {formatDiskBytes(overview.settings.host_min_free_bytes)} · 停止线 {overview.settings.disk_stop_percent}%</span></summary>
+      <details className="storage-settings"><summary>存储设置 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)} · 主机至少保留 {formatDiskBytes(overview.settings.host_min_free_bytes)}</span></summary>
         <form onSubmit={(e) => { e.preventDefault(); void save() }}><fieldset disabled={Boolean(busy) || Boolean(confirm)}>
-          <label className="desk-field"><span>视频工作区配额 · GiB</span><input type="number" min={1} max={10240} step="any" required value={videoQuota} onChange={(e) => setVideoQuota(e.target.value)} /></label>
-          <label className="desk-field"><span>配图配额 · GiB</span><input type="number" min={1} max={10240} step="any" required value={imageQuota} onChange={(e) => setImageQuota(e.target.value)} /></label>
           <label className="desk-field"><span>单条来源音视频上限 · MiB</span><input type="number" min={64} max={2048} step={16} required value={sourceDownloadLimitMiB} onChange={(e) => setSourceDownloadLimitMiB(e.target.value)} /></label>
-          <label className="desk-field"><span>主机最低空闲 · GiB</span><input type="number" min={0.5} max={20} step={0.25} required value={hostMinFreeGiB} onChange={(e) => setHostMinFreeGiB(e.target.value)} /></label>
-          <label className="desk-field"><span>主机磁盘停止线 · %</span><input type="number" min={80} max={99} step={1} required value={diskStopPercent} onChange={(e) => setDiskStopPercent(e.target.value)} /></label>
+          <label className="desk-field"><span>服务器最低保留 · GiB</span><input type="number" min={3} max={20} step={0.25} required value={hostMinFreeGiB} onChange={(e) => setHostMinFreeGiB(e.target.value)} /></label>
           <button className="btn primary" disabled={!dirty}>{busy === "save" ? "正在保存…" : "保存存储设置"}</button>
-        </fieldset><p className="fine">单条上限会限制实际下载的音视频总量；来源工作区另留 64 MiB 临时空间，配图另计。达到停止线或最低空闲线都会暂停新下载和导出。可设停止线 80–99%、主机保留 0.5–20 GiB；修改后只影响新任务，不会删除视频。</p></form>
+        </fieldset><p className="fine">准入按服务器实时空闲空间计算，并至少保留 3 GiB。最低保留量可以在 3–20 GiB 范围内调整；单条上限限制单个来源的音视频大小。修改只影响新任务，不会删除已有视频。</p></form>
       </details>
     </> : <p className="fine">{busy ? "正在读取视频存储…" : "存储状态未能读取，请刷新重试。"}</p>}
     <form className="storage-search" onSubmit={(e) => { e.preventDefault(); setConfirm(null); const next = search.trim(); onRoute({ query: next, offset: 0, cleanup }); if (next === query && offset === 0) reload() }}>

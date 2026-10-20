@@ -7,6 +7,7 @@ import (
 )
 
 const IncomingFrameBytes int64 = 20 << 20
+const DefaultHostReserveBytes int64 = 3 << 30
 const DefaultVideoQuota int64 = 10 << 30
 const DefaultImageQuota int64 = 5 << 30
 
@@ -23,8 +24,8 @@ type storageLoad struct {
 	stop                   int
 }
 
-// DiskCapacity exposes only VidLens's logical allocation. Host disk sizes,
-// other applications' usage and system safety margins never leave the server.
+// DiskCapacity reports VidLens's logical usage. Accepting reflects the host
+// disk check, while host size and safety-margin values never leave the server.
 type DiskCapacity struct {
 	Scope          string `json:"scope"`
 	TotalBytes     int64  `json:"total_bytes"`
@@ -68,38 +69,29 @@ func (s *Store) DiskCapacity(ctx context.Context, available, total int64, worksp
 }
 
 func admitStorage(l storageLoad) error {
-	disk, media := storageLimits(l)
-	if disk {
-		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "服务器磁盘保护线已触发，请清理主机磁盘空间或在管理台调整磁盘停止线。")
-	}
-	if media {
-		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "视频工作区配额不足，请清理素材或在管理台调整视频/配图配额。")
+	if diskSpaceBlocked(l.available, l.total, storageExtra(l), l.minHostFree) {
+		return domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "服务器可用空间不足；请清理磁盘，至少为服务器保留 3 GiB 空间。")
 	}
 	return nil
 }
 
-func storageLimits(l storageLoad) (disk, media bool) {
-	extra := storageExtra(l)
-	incomingTemp := max(int64(0), l.temp-l.ownTemp)
-	incomingImages := max(int64(0), l.images-l.ownImages)
-	media = l.usedTemp+l.exports+l.exportPending+l.resTemp+incomingTemp > videoLimit(l) || l.usedImages+l.resImages+incomingImages > imageLimit(l)
-	disk = diskSpaceBlocked(l.available, l.total, extra, l.stop, l.minHostFree)
-	return disk, media
+func storageBlocked(l storageLoad) bool {
+	return diskSpaceBlocked(l.available, l.total, storageExtra(l), l.minHostFree)
 }
 
-func diskSpaceBlocked(available, total, extra int64, stop int, minHostFree int64) bool {
-	return total <= 0 || available-extra < minHostFree || (total-available+extra)*100 > total*int64(stop)
+func diskSpaceBlocked(available, total, extra, minHostFree int64) bool {
+	reserve := max(DefaultHostReserveBytes, minHostFree)
+	return total <= 0 || available-extra < reserve
 }
 
-// DiskSpaceAllowed checks current host usage against the persisted owner policy.
+// DiskSpaceAllowed applies the owner-configured reserve, with a 3 GiB floor.
 // Export workers recheck at execution time because host usage can change after queue admission.
 func (s *Store) DiskSpaceAllowed(ctx context.Context, available, total, extra int64) (bool, error) {
-	var stop int
 	var minHostFree int64
-	if err := s.Pool.QueryRow(ctx, "SELECT disk_stop_percent,host_min_free_bytes FROM storage_settings WHERE singleton").Scan(&stop, &minHostFree); err != nil {
+	if err := s.Pool.QueryRow(ctx, "SELECT host_min_free_bytes FROM storage_settings WHERE singleton").Scan(&minHostFree); err != nil {
 		return false, err
 	}
-	return !diskSpaceBlocked(available, total, extra, stop, minHostFree), nil
+	return !diskSpaceBlocked(available, total, extra, minHostFree), nil
 }
 
 func videoLimit(l storageLoad) int64 {
@@ -123,7 +115,7 @@ func buildStorageAdmission(l storageLoad) StorageAdmission {
 	incomingTemp := max(int64(0), l.temp-l.ownTemp)
 	incomingImages := max(int64(0), l.images-l.ownImages)
 	sourceReserve := incomingTemp + incomingImages
-	systemReserve := max(l.minHostFree, stopPercentReserve(l.total, l.stop))
+	systemReserve := max(DefaultHostReserveBytes, l.minHostFree)
 	extra := storageExtra(l)
 	otherReservations := max(int64(0), extra-sourceReserve)
 	hostRequired := otherReservations + sourceReserve + systemReserve
@@ -133,30 +125,18 @@ func buildStorageAdmission(l storageLoad) StorageAdmission {
 	videoAvailable := max(int64(0), videoLimit(l)-videoUsed)
 	imageAvailable := max(int64(0), imageLimit(l)-imageUsed)
 
-	videoSlots, imageSlots, hostSlots := int64(0), int64(0), int64(0)
-	if incomingTemp > 0 {
-		videoSlots = videoAvailable / incomingTemp
-	}
-	if incomingImages > 0 {
-		imageSlots = imageAvailable / incomingImages
-	}
+	hostSlots := int64(0)
 	if l.total > 0 && sourceReserve > 0 {
 		hostRoom := l.available - otherReservations - systemReserve
 		if hostRoom > 0 {
 			hostSlots = hostRoom / sourceReserve
 		}
 	}
-	additionalSlots := min(videoSlots, imageSlots, hostSlots)
+	additionalSlots := hostSlots
 
-	blockedBy := make([]string, 0, 3)
-	if diskSpaceBlocked(l.available, l.total, extra, l.stop, l.minHostFree) {
+	blockedBy := make([]string, 0, 1)
+	if diskSpaceBlocked(l.available, l.total, extra, l.minHostFree) {
 		blockedBy = append(blockedBy, "host_disk")
-	}
-	if videoUsed+incomingTemp > videoLimit(l) {
-		blockedBy = append(blockedBy, "video_quota")
-	}
-	if imageUsed+incomingImages > imageLimit(l) {
-		blockedBy = append(blockedBy, "image_quota")
 	}
 
 	return StorageAdmission{
@@ -175,30 +155,14 @@ func buildStorageAdmission(l storageLoad) StorageAdmission {
 	}
 }
 
-func stopPercentReserve(total int64, stop int) int64 {
-	if total <= 0 || stop >= 100 {
-		return 0
-	}
-	percent := int64(100 - stop)
-	whole := total / 100 * percent
-	remainder := total % 100 * percent
-	if remainder > 0 {
-		whole++
-	}
-	return whole
-}
-
 func buildCapacity(l storageLoad) DiskCapacity {
 	quota := videoLimit(l)
 	used, reserved := l.usedTemp+l.exports, l.resTemp+l.exportPending
 	available := max(int64(0), quota-used-reserved)
-	disk, media := storageLimits(l)
-	accepting := !disk && !media
+	accepting := !storageBlocked(l)
 	level := "open"
 	if !accepting {
 		level = "closed"
-	} else if available-l.temp < l.temp {
-		level = "tight"
 	}
 	return DiskCapacity{Scope: "video_workspace", TotalBytes: quota, UsedBytes: used,
 		ReservedBytes: reserved, AvailableBytes: available, WorkspaceBytes: l.temp,

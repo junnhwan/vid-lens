@@ -4,7 +4,7 @@ import type { HttpApi } from "../api/http"
 import { VideoStorage } from "./VideoStorage"
 
 const overview = {
-  settings: { revision: 1, video_quota_bytes: 8 * 1024 ** 3, image_quota_bytes: 2 * 1024 ** 3, disk_stop_percent: 98, host_min_free_bytes: 1024 ** 3, source_download_limit_bytes: 192 * 1024 ** 2 },
+  settings: { revision: 1, video_quota_bytes: 8 * 1024 ** 3, image_quota_bytes: 2 * 1024 ** 3, disk_stop_percent: 99, host_min_free_bytes: 3 * 1024 ** 3, source_download_limit_bytes: 192 * 1024 ** 2 },
   original_bytes: 42, image_bytes: 8, export_bytes: 0, reserved_video_bytes: 0, reserved_image_bytes: 0, retention: "manual" as const,
 }
 

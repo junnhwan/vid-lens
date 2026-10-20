@@ -98,8 +98,8 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if e != nil {
 			return e
 		}
-		// Older admin clients omit this field. Preserve the current policy for
-		// their quota-only saves while new clients can edit it explicitly.
+		// Keep the legacy percentage field stable for older admin clients; disk
+		// admission no longer uses it.
 		if in.DiskStopPercent == 0 {
 			in.DiskStopPercent = l.stop
 		}
@@ -109,28 +109,22 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if in.SourceDownloadLimitBytes == 0 {
 			in.SourceDownloadLimitBytes = l.sourceDownloadLimit
 		}
-		if in.DiskStopPercent < 80 || in.DiskStopPercent > 99 {
-			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 99% 之间。")
-		}
 		if in.SourceDownloadLimitBytes < 64<<20 || in.SourceDownloadLimitBytes > 2<<30 {
 			return domain.Err(422, "INVALID_ARGUMENT", "单条来源下载上限须在 64 MiB 到 2 GiB 之间。")
 		}
-		if in.HostMinFreeBytes < 512<<20 || in.HostMinFreeBytes > 20<<30 {
-			return domain.Err(422, "INVALID_ARGUMENT", "主机最低空闲空间须在 512 MiB 到 20 GiB 之间。")
+		if in.HostMinFreeBytes < DefaultHostReserveBytes || in.HostMinFreeBytes > 20<<30 {
+			return domain.Err(422, "INVALID_ARGUMENT", "主机最低空闲空间不能少于 3 GiB，且不能超过 20 GiB。")
 		}
 		effectiveWorkspace := max(workspace, in.SourceDownloadLimitBytes+(64<<20))
 		if in.VideoQuotaBytes < max(int64(1<<30), effectiveWorkspace) || in.VideoQuotaBytes > 10<<40 || in.ImageQuotaBytes < 1<<30 || in.ImageQuotaBytes > 10<<40 {
 			return domain.Err(422, "INVALID_ARGUMENT", "视频配额不能小于单次工作区，配图配额至少 1 GiB；两项均不能超过 10 TiB。")
-		}
-		if in.VideoQuotaBytes < l.usedTemp+l.exports+l.resTemp+l.exportPending || in.ImageQuotaBytes < l.usedImages+l.resImages {
-			return domain.Err(409, "STORAGE_IN_USE", "配额不能小于已占用与任务预留的空间，请先清理素材。")
 		}
 		tag, e := tx.Exec(ctx, "UPDATE storage_settings SET video_quota_bytes=$1,image_quota_bytes=$2,disk_stop_percent=$3,host_min_free_bytes=$4,source_download_limit_bytes=$5,revision=revision+1 WHERE singleton AND revision=$6", in.VideoQuotaBytes, in.ImageQuotaBytes, in.DiskStopPercent, in.HostMinFreeBytes, in.SourceDownloadLimitBytes, in.ExpectedRevision)
 		if e != nil {
 			return e
 		}
 		if tag.RowsAffected() != 1 {
-			return domain.Err(409, "REVISION_CONFLICT", "配额已被更新，请重新读取后保存。")
+			return domain.Err(409, "REVISION_CONFLICT", "存储设置已被更新，请重新读取后保存。")
 		}
 		return nil
 	})

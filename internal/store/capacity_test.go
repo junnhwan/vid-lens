@@ -7,7 +7,7 @@ func TestAdmitStorageKeepsReserveBoundary(t *testing.T) {
 	workspace := int64(3) << 30
 	images := IncomingFrameBytes
 	extra := workspace + images
-	reserve := int64(6) << 30
+	reserve := DefaultHostReserveBytes
 	l := storageLoad{available: reserve + extra, total: total, stop: 85, temp: workspace, images: images}
 	if admitStorage(l) != nil {
 		t.Fatal("available exactly at the reserve should still admit")
@@ -18,19 +18,18 @@ func TestAdmitStorageKeepsReserveBoundary(t *testing.T) {
 	}
 }
 
-func TestAdmitStorageKeepsStopPercentBoundary(t *testing.T) {
+func TestAdmissionIgnoresLegacyPercentStopLine(t *testing.T) {
 	total := int64(40) << 30
 	workspace := int64(3) << 30
 	images := IncomingFrameBytes
 	extra := workspace + images
-	used := total*85/100 - extra
-	l := storageLoad{available: total - used, total: total, stop: 85, temp: workspace, images: images}
+	l := storageLoad{available: DefaultHostReserveBytes + extra, total: total, stop: 80, temp: workspace, images: images}
 	if admitStorage(l) != nil {
-		t.Fatal("used exactly at the stop percent should still admit")
+		t.Fatal("available space at the fixed reserve boundary should admit")
 	}
 	l.available--
 	if admitStorage(l) == nil {
-		t.Fatal("one byte past the stop percent should refuse")
+		t.Fatal("one byte below the fixed reserve should refuse")
 	}
 }
 
@@ -45,15 +44,15 @@ func TestPublicCapacityOnlyDescribesServiceQuota(t *testing.T) {
 		t.Fatalf("host sizes escaped: %+v %+v", view, other)
 	}
 }
-func TestBuildCapacityClosesOnMediaLedgerBeforeDisk(t *testing.T) {
+func TestBuildCapacityDoesNotTreatLogicalQuotaAsAdmission(t *testing.T) {
 	l := storageLoad{usedTemp: (10 << 30) - (3 << 30) + 1, available: 200 << 30, total: 200 << 30, stop: 85, temp: 3 << 30, images: IncomingFrameBytes}
 	view := buildCapacity(l)
-	if view.Accepting || view.Level != "closed" {
-		t.Fatalf("full ledger accepted: %+v", view)
+	if !view.Accepting || view.Level != "open" {
+		t.Fatalf("logical quota blocked real disk capacity: %+v", view)
 	}
 	l.videoQuota = 20 << 30
 	if other := buildCapacity(l); !other.Accepting {
-		t.Fatalf("updated quota not applied: %+v", other)
+		t.Fatalf("capacity rejected sufficient host disk space: %+v", other)
 	}
 }
 func TestBuildCapacityPreservesHostGuardWithoutExposingHostBytes(t *testing.T) {
@@ -64,7 +63,7 @@ func TestBuildCapacityPreservesHostGuardWithoutExposingHostBytes(t *testing.T) {
 	}
 	l.available = 30 << 30
 	l.usedTemp = 5 << 30
-	if v := buildCapacity(l); !v.Accepting || v.Level != "tight" {
-		t.Fatalf("near quota: %+v", v)
+	if v := buildCapacity(l); !v.Accepting || v.Level != "open" {
+		t.Fatalf("logical quota changed host admission: %+v", v)
 	}
 }

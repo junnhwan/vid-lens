@@ -40,13 +40,13 @@ export function diskStatus(capacity: SiteCapacity): string {
 }
 
 export function diskNote(capacity: SiteCapacity): string {
-  if (capacity.level === "closed") return "这里显示的是本站配额余量；下载还会检查主机磁盘空间和安全预留。"
-  if (capacity.level === "tight") return "这里显示的是本站视频工作区配额；下载前还会检查主机磁盘空间。"
-  return "本站视频工作区配额；下载前会预留工作空间并检查主机磁盘。"
+  if (capacity.level === "closed") return "服务器会保留至少 3 GiB 空间；清理后可重试。"
+  if (capacity.level === "tight") return "服务器空间余量不多，下载前会重新检查可用空间。"
+  return "下载按服务器实时可用空间准入，并为服务器保留至少 3 GiB。"
 }
 
 export function diskLabel(capacity: SiteCapacity): string {
-  return `视频工作区，已用 ${formatDiskPercent(capacity.used_bytes, capacity.total_bytes)}%，剩余配额 ${formatDiskBytes(capacity.available_bytes)}，任务预留 ${formatDiskBytes(capacity.reserved_bytes)}，${diskStatus(capacity)}。${diskNote(capacity)}`
+  return `视频处理${diskStatus(capacity)}。${diskNote(capacity)}`
 }
 
 function trim(value: string): string {
