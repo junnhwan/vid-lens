@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"vidlens/internal/config"
 	"vidlens/internal/domain"
 )
 
@@ -24,6 +25,7 @@ type StorageInput struct {
 	DiskStopPercent          int   `json:"disk_stop_percent"`
 	HostMinFreeBytes         int64 `json:"host_min_free_bytes"`
 	SourceDownloadLimitBytes int64 `json:"source_download_limit_bytes"`
+	MaxVideoMS               int64 `json:"max_video_ms"`
 }
 type StorageAdmission struct {
 	CanStartSource           bool     `json:"can_start_source"`
@@ -41,6 +43,7 @@ type StorageAdmission struct {
 }
 type StorageOverview struct {
 	Settings           StorageSettings   `json:"settings"`
+	MaxVideoMS         int64             `json:"max_video_ms"`
 	OriginalBytes      int64             `json:"original_bytes"`
 	ImageBytes         int64             `json:"image_bytes"`
 	ExportBytes        int64             `json:"export_bytes"`
@@ -94,6 +97,14 @@ func (s *Store) storageOverview(ctx context.Context, admissionInput *storageAdmi
 
 func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, workspace int64) error {
 	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var currentID string
+		if e := tx.QueryRow(ctx, "SELECT config_id FROM runtime_settings WHERE singleton FOR UPDATE").Scan(&currentID); e != nil {
+			return e
+		}
+		current, e := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", currentID)
+		if e != nil {
+			return e
+		}
 		l, e := storageLedger(ctx, tx, "")
 		if e != nil {
 			return e
@@ -109,8 +120,14 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if in.SourceDownloadLimitBytes == 0 {
 			in.SourceDownloadLimitBytes = l.sourceDownloadLimit
 		}
+		if in.MaxVideoMS == 0 {
+			in.MaxVideoMS = current.MaxVideoMS
+		}
 		if in.SourceDownloadLimitBytes < 64<<20 || in.SourceDownloadLimitBytes > 2<<30 {
 			return domain.Err(422, "INVALID_ARGUMENT", "单条来源下载上限须在 64 MiB 到 2 GiB 之间。")
+		}
+		if in.MaxVideoMS < 60_000 || in.MaxVideoMS > 24*60*60*1000 {
+			return domain.Err(422, "INVALID_ARGUMENT", "单条视频时长上限须在 1 分钟到 24 小时之间。")
 		}
 		if in.HostMinFreeBytes < DefaultHostReserveBytes || in.HostMinFreeBytes > 20<<30 {
 			return domain.Err(422, "INVALID_ARGUMENT", "主机最低空闲空间不能少于 3 GiB，且不能超过 20 GiB。")
@@ -125,6 +142,20 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		}
 		if tag.RowsAffected() != 1 {
 			return domain.Err(409, "REVISION_CONFLICT", "存储设置已被更新，请重新读取后保存。")
+		}
+		if in.MaxVideoMS != current.MaxVideoMS {
+			current.MaxVideoMS = in.MaxVideoMS
+			newID := domain.ID()
+			if _, e := tx.Exec(ctx, "INSERT INTO runtime_config_revisions(id,profile) VALUES($1,$2)", newID, domain.JSON(current)); e != nil {
+				return e
+			}
+			tag, e := tx.Exec(ctx, "UPDATE runtime_settings SET config_id=$1 WHERE config_id=$2", newID, currentID)
+			if e != nil {
+				return e
+			}
+			if tag.RowsAffected() != 1 {
+				return domain.Err(409, "REVISION_CONFLICT", "运行配置已被更新，请刷新后重试。")
+			}
 		}
 		return nil
 	})

@@ -49,7 +49,7 @@ type Profile struct {
 }
 
 func DefaultProfile() Profile {
-	return Profile{ModelKeyRef: "model", ASRKeyRef: "asr", MaxVideoMS: 90 * 60 * 1000, MaxDownloadBytes: 2 << 30, WorkspaceBytes: 3 << 30, GenerationSeconds: 7200, PrepareActiveSeconds: 2700, ArticleActiveSeconds: 2700, RestoreActiveSeconds: 1200, AnswerActiveSeconds: 300, AnswerSeconds: 600, RestoreAnswerSeconds: 1800, QueueSeconds: 1200, AnswerQueueSeconds: 120, IdempotencySeconds: 86400, QuestionCharsMax: 4000, SelectionCharsMax: 1000, PromptVersion: "vidlens-evidence-v1", MaxIterations: 48, OverviewBins: 12, MaxOutputTokens: 10000, MaxInputChars: 180000, Platforms: []string{"bilibili", "youtube"}}
+	return Profile{ModelKeyRef: "model", ASRKeyRef: "asr", MaxVideoMS: 120 * 60 * 1000, MaxDownloadBytes: 2 << 30, WorkspaceBytes: 3 << 30, GenerationSeconds: 7200, PrepareActiveSeconds: 2700, ArticleActiveSeconds: 2700, RestoreActiveSeconds: 1200, AnswerActiveSeconds: 300, AnswerSeconds: 600, RestoreAnswerSeconds: 1800, QueueSeconds: 1200, AnswerQueueSeconds: 120, IdempotencySeconds: 86400, QuestionCharsMax: 4000, SelectionCharsMax: 1000, PromptVersion: "vidlens-evidence-v1", MaxIterations: 48, OverviewBins: 12, MaxOutputTokens: 10000, MaxInputChars: 180000, Platforms: []string{"bilibili", "youtube"}}
 }
 func (p Profile) ActiveBudget(kind string) time.Duration {
 	s := p.ArticleActiveSeconds

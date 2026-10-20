@@ -23,6 +23,7 @@ func TestPublishedMigrationIdentities(t *testing.T) {
 		24: "024_configurable_storage_admission.sql",
 		25: "025_storage_stop_line_99_percent.sql",
 		26: "026_simple_disk_admission.sql",
+		27: "027_raise_video_input_limits.sql",
 	}
 	seen := map[string]bool{}
 	previous := 0
@@ -77,8 +78,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 26 {
-		t.Fatalf("expected 26 registered migrations, got %v", versions)
+	if len(versions) != 27 {
+		t.Fatalf("expected 27 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {
@@ -174,8 +175,10 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			afterID, afterProfile, err := s.CurrentConfig(ctx)
-			if err != nil || configID != afterID || string(domain.JSON(profile)) != string(domain.JSON(afterProfile)) || article != afterArticle || applied != afterApplied {
-				t.Fatalf("migration rewrote existing data or history: %v", err)
+			expectedProfile := profile
+			expectedProfile.MaxVideoMS = 120 * 60 * 1000
+			if err != nil || configID == afterID || string(domain.JSON(expectedProfile)) != string(domain.JSON(afterProfile)) || article != afterArticle || applied != afterApplied {
+				t.Fatalf("migration did not preserve the old snapshot while advancing current intake limits: %v", err)
 			}
 		})
 	}

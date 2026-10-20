@@ -51,6 +51,7 @@ func (a *Server) storageSettings(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, e)
 		return
 	}
+	v.MaxVideoMS = profile.MaxVideoMS
 	w.Header().Set("Cache-Control", "no-store")
 	a.json(w, 200, v)
 }
