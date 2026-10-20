@@ -63,7 +63,8 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	if err := s.AddAsset(ctx, c, frame); err != nil {
 		t.Fatal(err)
 	}
-	cp := map[string]any{"schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "ready": true, "inspections": map[string][]string{"unobserved": {frame.ID}}, "calls": 8, "repairs": 1}
+	cp := map[string]any{"schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "ready": true, "inspections": map[string][]string{"unobserved": {frame.ID}}, "calls": 8, "repairs": 1,
+		"evidence_review_issue": map[string]any{"candidate_hash": "ancestor-candidate", "code": "semantic_evidence"}}
 	if err := s.Checkpoint(ctx, c, cp); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +116,9 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	if restored["draft_resume"] != true || restored["calls"] != float64(0) {
 		t.Fatalf("explicit retry identity not reset: %s", run.Checkpoint)
 	}
+	if restored["evidence_review_issue"] != nil {
+		t.Fatal("a new run inherited its ancestor's candidate-bound review", restored["evidence_review_issue"])
+	}
 	claim, err := s.Claim(ctx, *next.ActiveRunID, 1, "resumed")
 	if err != nil || claim == nil {
 		t.Fatal(err)
@@ -125,6 +129,10 @@ func TestExplicitRetryKeepsDraftAndEvidenceUnderNewRun(t *testing.T) {
 	old, err := s.Run(ctx, c.Run.ID)
 	if err != nil || old.Status != "failed" {
 		t.Fatal("old failure was rewritten")
+	}
+	var ancestor map[string]any
+	if err = json.Unmarshal(old.Checkpoint, &ancestor); err != nil || ancestor["evidence_review_issue"] == nil {
+		t.Fatal("clearing a new run's review erased its ancestor's failure evidence", err)
 	}
 	view, pos, err := s.RequestView(ctx, owner, next.ID)
 	if err != nil {

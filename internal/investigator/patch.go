@@ -109,11 +109,26 @@ func replaceFields(raw []byte, patches []fieldPatch, allowed func([]string) bool
 func (s *session) reserveFieldRepair(ctx context.Context, args any) error {
 	key := "field-repair:" + callID(ctx)
 	if old, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key); err == nil {
-		if old.ArgsHash != store.Hash(args) {
+		if old.ArgsHash != store.Hash(args) || old.Kind != "field_repair" && !strings.HasPrefix(old.Kind, "review_field_repair:") {
 			return errors.New("repair replay conflict")
 		}
 		return nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if scope := s.chargedReviewCorrection(); scope != "" {
+		// repair() already charged the author for this exact server-bound review.
+		// Keep individual patch attempts durable and bounded without charging the
+		// same logical correction again as an unrelated field repair.
+		kind := "review_field_repair:" + scope
+		count, err := s.engine.Store.OperationCount(ctx, s.claim.Run.ID, kind)
+		if err != nil {
+			return err
+		}
+		if count >= s.repairLimit() {
+			return domain.Err(422, "MODEL_RESULT_INVALID", "本轮复核的字段修订尝试已用完，草稿与复核意见保留。")
+		}
+		_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, kind, args, false)
 		return err
 	}
 	count, err := s.repairUsage(ctx)
@@ -125,6 +140,17 @@ func (s *session) reserveFieldRepair(ctx context.Context, args any) error {
 	}
 	_, err = s.engine.Store.BeginOperation(ctx, s.claim, key, "field_repair", args, false)
 	return err
+}
+
+func (s *session) chargedReviewCorrection() string {
+	if s.turn != nil || !s.policy().ContentReview || s.cp.Repairs == 0 || s.cp.FinalizationFailure == nil {
+		return ""
+	}
+	hash, _ := s.pendingEvidenceReview()["candidate_hash"].(string)
+	if hash == "" || s.cp.FinalizationFailure.Code != "MODEL_RESULT_INVALID" || s.cp.FinalizationFailure.Meta["candidate_hash"] != hash {
+		return ""
+	}
+	return hash
 }
 
 func (s *session) patchTools(add func(tool.EnhancedInvokableTool, error) error) error {
