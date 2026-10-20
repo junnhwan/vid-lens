@@ -4,17 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"vidlens/internal/store"
 	"vidlens/internal/testsupport"
 )
 
 func TestCapabilityProbePreservesConfiguredOutputBudget(t *testing.T) {
+	for _, budget := range []int{16384, 393216} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) { testCapabilityProbeBudget(t, budget) })
+	}
+}
+
+func testCapabilityProbeBudget(t *testing.T, budget int) {
 	s, resources, cfg := testsupport.Services(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,10 +31,13 @@ func TestCapabilityProbePreservesConfiguredOutputBudget(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		// The capability probe must preserve the saved model output budget.
-		if string(body["max_tokens"]) != "16384" || len(body["max_completion_tokens"]) != 0 {
+		// The small check bounds its own request without changing the model.
+		if string(body["max_tokens"]) != fmt.Sprint(min(budget, 32768)) || len(body["max_completion_tokens"]) != 0 {
 			http.Error(w, "configured output budget was changed", http.StatusBadRequest)
 			return
+		}
+		if string(body["stream"]) != "true" || strings.Contains(string(body["tool_choice"]), "function") {
+			t.Error("non-GPT supplier inherited the GPT-specific transport/tool workaround")
 		}
 		n := calls.Add(1)
 		name, args := "inspect_model_screenshot", "{}"
@@ -45,7 +56,7 @@ func TestCapabilityProbePreservesConfiguredOutputBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := s.SaveModel(ctx, "", store.ModelInput{ProviderID: provider.ID, DisplayName: "GLM fixture", UpstreamID: "glm-5.3-flash", MaxOutputTokens: 16384, MaxInputChars: 652000})
+	m, err := s.SaveModel(ctx, "", store.ModelInput{ProviderID: provider.ID, DisplayName: "GLM fixture", UpstreamID: "glm-5.3-flash", MaxOutputTokens: budget, MaxInputChars: 2000000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +77,90 @@ func TestCapabilityProbePreservesConfiguredOutputBudget(t *testing.T) {
 		t.Fatalf("capability probe failed: checks=%+v err=%v provider_calls=%d", checks, err, calls.Load())
 	}
 	current, err := s.Model(ctx, m.ID)
-	if err != nil || current.MaxOutputTokens != 16384 {
+	if err != nil || current.MaxOutputTokens != budget {
 		t.Fatal("probe replaced the saved production output budget")
+	}
+}
+
+func TestProbeSupplierRejectionIsStoredWithoutRepeatingCalls(t *testing.T) {
+	for _, tc := range []struct {
+		status     int
+		body, code string
+	}{
+		{429, `{"error":{"code":"account_cooldown","message":"all accounts are cooling down"}}`, "PROVIDER_ACCOUNT_COOLDOWN"},
+		{503, `{"error":{"code":"model_not_found","message":"No available channel"}}`, "PROVIDER_MODEL_UNAVAILABLE"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			s, rm, cfg := testsupport.Services(t)
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			provider, err := s.SaveProvider(context.Background(), "", store.ProviderInput{Name: "failure fixture", BaseURL: server.URL, APIKey: "fixture", Enabled: true, ProxyPolicy: "direct"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, err := s.SaveModel(context.Background(), "", store.ModelInput{ProviderID: provider.ID, DisplayName: "GPT fixture", UpstreamID: "gpt-5.5"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, err := s.CreateProbe(context.Background(), m.ID, m.RevisionID, "capabilities", tc.code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := s.ClaimProbe(context.Background(), a.ID)
+			if err != nil || p == nil {
+				t.Fatal(err)
+			}
+			e := &Engine{Store: s, Resources: rm, Config: cfg}
+			if err = e.RunProbe(context.Background(), *p); err != nil {
+				t.Fatal(err)
+			}
+			checks, err := s.Probes(context.Background(), m.ID)
+			if err != nil || checks[0].FailureCode == nil || *checks[0].FailureCode != tc.code || checks[0].Status != "failed" || calls.Load() != 1 {
+				t.Fatalf("wrong failure evidence: %+v calls=%d err=%v", checks, calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestProbeInterruptedTransportRemainsUnknown(t *testing.T) {
+	s, rm, cfg := testsupport.Services(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer server.Close()
+	provider, err := s.SaveProvider(context.Background(), "", store.ProviderInput{Name: "timeout fixture", BaseURL: server.URL, APIKey: "fixture", Enabled: true, ProxyPolicy: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.SaveModel(context.Background(), "", store.ModelInput{ProviderID: provider.ID, DisplayName: "timeout", UpstreamID: "gpt-5.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateProbe(context.Background(), m.ID, m.RevisionID, "capabilities", "timeout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ClaimProbe(context.Background(), a.ID)
+	if err != nil || p == nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err = (&Engine{Store: s, Resources: rm, Config: cfg}).RunProbe(ctx, *p); err != nil {
+		t.Fatal(err)
+	}
+	checks, err := s.Probes(context.Background(), m.ID)
+	if err != nil || checks[0].Status != "unknown" || checks[0].Submissions != 1 || checks[0].FailureCode == nil || *checks[0].FailureCode != "PROBE_EXECUTION_TIMEOUT" {
+		t.Fatalf("timeout lost its uncertain outcome: %+v %v", checks, err)
 	}
 }

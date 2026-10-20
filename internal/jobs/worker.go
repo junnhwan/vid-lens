@@ -49,13 +49,16 @@ func New(s *store.Store, m *media.Service, a *investigator.Engine, c config.Conf
 		return nil, e
 	}
 	w := &Worker{Store: s, Media: m, Agent: a, Config: c, client: asynq.NewClient(opt), inspector: asynq.NewInspector(opt), owner: domain.ID()}
-	for _, queue := range []string{"generation", "interactive", "maintenance"} {
+	for _, queue := range []string{"generation", "interactive", "maintenance", "probes"} {
 		queues := map[string]int{queue: 1}
 		concurrency := 1
 		if queue == "generation" {
 			// Idle broker workers are cheap. PostgreSQL admits each execution
 			// against the live setting, including across multiple processes.
 			concurrency = config.MaxVideoConcurrency
+		}
+		if queue == "probes" {
+			concurrency = store.MaxConcurrentProbes
 		}
 		if queue == "maintenance" {
 			queues["cleanup"] = 2
@@ -176,7 +179,7 @@ func (w *Worker) dispatch(ctx context.Context) {
 	}
 	if probes, e := w.Store.PendingProbes(ctx); e == nil {
 		for _, p := range probes {
-			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("model.probe", domain.JSON(map[string]string{"id": p.ID})), asynq.TaskID("probe:"+p.ID), asynq.Queue("maintenance"), asynq.MaxRetry(18), asynq.Timeout(180*time.Second), asynq.Deadline(p.DeadlineAt), asynq.Retention(24*time.Hour))
+			_, _ = w.client.EnqueueContext(ctx, asynq.NewTask("model.probe", domain.JSON(map[string]string{"id": p.ID})), asynq.TaskID("probe:"+p.ID), asynq.Queue("probes"), asynq.MaxRetry(3), asynq.Timeout(store.ProbeRunTimeout+10*time.Second), asynq.Deadline(p.DeadlineAt.Add(store.ProbeRunTimeout+10*time.Second)), asynq.Retention(24*time.Hour))
 		}
 	}
 	out, e := w.Store.Outbox(ctx)

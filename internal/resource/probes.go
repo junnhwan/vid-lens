@@ -8,16 +8,16 @@ import (
 	"vidlens/internal/store"
 )
 
-// Operational probes share the actual generation AI slot. A probe is never a
-// fake video job and retains its own epoch and physical-submission budget.
+// Probes have bounded, independent slots so different models can be checked
+// concurrently without waiting for a video generation or another model.
 func (m *Manager) AcquireProbe(ctx context.Context, p store.Probe) (context.Context, func(), error) {
 	if e := m.Redis.Ping(ctx).Err(); e != nil {
 		return nil, nil, e
 	}
-	if e := m.waitMemory(ctx, "ai"); e != nil {
+	if e := memoryCheck("ai"); e != nil {
 		return nil, nil, e
 	}
-	name := "ai:generation"
+	name := "ai:probe"
 	key := "vidlens:resource:" + name
 	owner := domain.ID()
 	unlock := func() {
@@ -26,36 +26,29 @@ func (m *Manager) AcquireProbe(ctx context.Context, p store.Probe) (context.Cont
 		_ = m.Store.ReleaseResource(c, name, owner)
 		_, _ = m.Redis.Eval(c, `if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`, []string{key}, owner).Result()
 	}
-acquire:
-	for {
-		v, e := m.Store.ExecutionSettings(ctx)
+	acquired := false
+	for slot := 0; slot < store.MaxConcurrentProbes; slot++ {
+		name = fmt.Sprintf("ai:probe:%d", slot)
+		key = "vidlens:resource:" + name
+		fast, e := m.Redis.SetNX(ctx, key, owner, 60*time.Second).Result()
 		if e != nil {
 			return nil, nil, e
 		}
-		for slot := 0; slot < v.MaxVideoRunning; slot++ {
-			name = fmt.Sprintf("ai:generation:%d", slot)
-			key = "vidlens:resource:" + name
-			fast, e := m.Redis.SetNX(ctx, key, owner, 60*time.Second).Result()
+		if fast {
+			ok, e := m.Store.AcquireProbeResource(ctx, p, name, owner)
 			if e != nil {
+				unlock()
 				return nil, nil, e
 			}
-			if fast {
-				ok, e := m.Store.AcquireProbeResource(ctx, p, name, owner)
-				if e != nil {
-					unlock()
-					return nil, nil, e
-				}
-				if ok {
-					break acquire
-				}
-				unlock()
+			if ok {
+				acquired = true
+				break
 			}
+			unlock()
 		}
-		select {
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
-		}
+	}
+	if !acquired {
+		return nil, nil, domain.Err(429, "PROBE_RESOURCE_BUSY", "检测名额暂不可用，请稍后重新发起检查。")
 	}
 	child, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})

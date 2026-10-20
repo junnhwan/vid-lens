@@ -104,7 +104,7 @@ func TestRunAnytimeModelsSerializeCapabilityToolRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bridge := &imageBridge{base: base, skipInitialToolChoice: name == "gpt-5.6-sol"}
+			bridge := &imageBridge{base: base, modelName: name}
 			bound, err := bridge.WithTools([]*schema.ToolInfo{info, submitInfo})
 			if err != nil {
 				t.Fatalf("bind capability tools: %v", err)

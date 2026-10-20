@@ -43,9 +43,14 @@ export interface Probe {
   mode: string
   submissions: number
   created_at: string
+  started_at?: string
   updated_at?: string
   failure_code?: string
   result?: {
+    diagnostic?: { http_status?: number; provider_error_code?: string; provider_error_param?: string }
+    scope?: string
+    probe_output_tokens?: number
+    configured_output_tokens?: number
     cache_hit_observed?: boolean
     usage_reported?: boolean
     cost_reporting?: string
@@ -105,7 +110,7 @@ export const emptyModel: ModelDraft = {
 }
 
 export const labels: Record<string, string> = {
-  queued: "排队中",
+  queued: "准备检查",
   running: "正在检查",
   succeeded: "检查通过",
   failed: "检查失败",

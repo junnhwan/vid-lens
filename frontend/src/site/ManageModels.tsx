@@ -1,7 +1,7 @@
 import { ModelIcon } from "../ui/ModelIdentity"
-import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, labels, LensGlyph, Model, ModelDraft, nextStep, Probe, Provider } from "./manageCatalog"
+import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, LensGlyph, Model, ModelDraft, nextStep, Probe, Provider } from "./manageCatalog"
 import { ManageRouteOrder } from "./ManageRouteOrder"
-import { isOpenProbe, liveStatusText, modelActivity, probeTiming } from "./probeStatus"
+import { isOpenProbe, liveStatusText, modelActivity, probeTiming, probeFailureText, probeStatusText } from "./probeStatus"
 export interface ManageModelsProps {
   ready: boolean
   error: string
@@ -198,7 +198,7 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                   <button
                     type="button"
                     className={nextStep(selected) === "probe" && selected.provider_enabled && !dirty && !busy && !checking ? "btn primary" : "btn quiet desk-pill"}
-                    disabled={!!busy || dirty || checking || !selected.provider_enabled}
+                    disabled={!!busy || dirty || checking || cacheChecking || !selected.provider_enabled}
                     onClick={() => void probe(selected, "capabilities")}
                   >
                     {checking && capabilityProbe ? (
@@ -229,6 +229,7 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                     {selected.is_default ? "已是默认" : "设为默认"}
                   </button>
                 </div>
+                <p className="fine">不同模型可同时检查，最多 3 个；同一模型一次只运行一项检查。此项验证图片读取与工具调用，完整视频质量和最大容量需单独验证。</p>
                 <div className="recommend-switch">
                   <InkSwitch
                     checked={selected.recommended}
@@ -392,7 +393,7 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                         <button
                           type="button"
                           className="btn quiet desk-pill"
-                          disabled={!!busy || dirty || cacheChecking || !selected.provider_enabled}
+                          disabled={!!busy || dirty || checking || cacheChecking || !selected.provider_enabled}
                           onClick={() => void probe(selected, "cache")}
                         >
                           {cacheChecking && cacheProbe ? (
@@ -400,14 +401,14 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                               <span className="desk-spin" aria-hidden="true">
                                 ↻
                               </span>
-                              {cacheProbe.status === "queued" ? "排队中" : "正在检查缓存"} · {probeTiming(cacheProbe, now)}
+                              {cacheProbe.status === "queued" ? "准备检查" : "正在检查缓存"} · {probeTiming(cacheProbe, now)}
                             </>
                           ) : (
-                            "串行检查缓存"
+                            "检查缓存"
                           )}
                         </button>
                         <p className="fine">
-                          缓存检查单独串行，不批量探测。显式提示要等端点报告实际创建或命中。一次小样本通过，不代表长视频质量。
+                          缓存检查会发送两次顺序请求。同一模型检查中时不会重复发起。显式提示要等端点报告实际创建或命中。
                         </p>
                       </div>
                     ) : (
@@ -446,13 +447,15 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                           <i aria-hidden="true" />
                           <div>
                             <strong>
-                              {labels[p.status] || p.status}
+                              {probeStatusText(p)}
                               {isOpenProbe(p) && timing ? ` · ${timing}` : ""}
                             </strong>
                             <span>
                               {p.mode === "cache" ? "缓存样本" : "图片与工具"} · {p.submissions} 次物理提交
                             </span>
                             {!isOpenProbe(p) && timing ? <small>用时 {timing}</small> : null}
+                            {probeFailureText(p) ? <small>{probeFailureText(p)}</small> : null}
+                            {p.result?.diagnostic?.http_status ? <small>上游 HTTP {p.result.diagnostic.http_status}{p.result.diagnostic.provider_error_code ? ` · ${p.result.diagnostic.provider_error_code}` : ""}</small> : null}
                             {p.failure_code ? <code>{p.failure_code}</code> : null}
                             {p.mode === "cache" && p.status === "succeeded" ? (
                               <small>

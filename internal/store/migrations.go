@@ -37,4 +37,5 @@ var migrationRegistry = []migration{
 	{25, "migrations/025_storage_stop_line_99_percent.sql"},
 	{26, "migrations/026_simple_disk_admission.sql"},
 	{27, "migrations/027_raise_video_input_limits.sql"},
+	{28, "migrations/028_probe_execution_clock.sql"},
 }

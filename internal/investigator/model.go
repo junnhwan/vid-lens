@@ -41,6 +41,9 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if observer != nil {
 			observer.finish(false)
 		}
+		if req.Context().Err() != nil {
+			return nil, req.Context().Err()
+		}
 		return nil, &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型连接暂不可用。", Transient: true}
 	}
 	if observer != nil {

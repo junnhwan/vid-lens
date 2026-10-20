@@ -6,13 +6,16 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"strings"
 	"time"
+	"vidlens/internal/domain"
 	"vidlens/internal/store"
 )
 
-func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
+func (e *Engine) RunProbe(ctx context.Context, p store.Probe) (err error) {
 	ctx, cancel := context.WithDeadline(ctx, p.DeadlineAt)
 	defer cancel()
-	// Keep the probe claim alive while it waits for the shared AI lane, too.
+	var result any
+	reports := []usageReport{}
+	// Keep the owned execution alive independently of provider response speed.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -31,6 +34,27 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 		}
 	}()
 	defer func() { cancel(); <-done }()
+	// Settle every claimed probe, including setup/resource failures and expiry.
+	// Retrying queue delivery must never repeat an uncertain provider call.
+	defer func() {
+		code := probeFailureCode(p.Mode, err, ctx.Err(), reports)
+		if code != "" {
+			diagnostic := map[string]any{}
+			if len(reports) > 0 {
+				last := reports[len(reports)-1]
+				diagnostic["http_status"] = last.HTTPStatus
+				diagnostic["provider_error_code"] = last.ProviderErrorCode
+				diagnostic["provider_error_param"] = last.ProviderErrorParam
+			}
+			result = map[string]any{"diagnostic": diagnostic}
+		}
+		c, cc := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cc()
+		err = e.Store.FinishProbe(c, p, result, code)
+		if errors.Is(err, domain.ErrFenced) {
+			err = nil
+		}
+	}()
 	actx, release, err := e.Resources.AcquireProbe(ctx, p)
 	if err != nil {
 		return err
@@ -44,7 +68,6 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 	if err != nil {
 		return err
 	}
-	reports := []usageReport{}
 	observer := newUsageObserver("source-context-v2", profile.CachePolicy, nil)
 	submission := 0
 	observer.flush = func(report usageReport) {
@@ -65,7 +88,6 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 	// A context-scoped observer is reset by each physical RoundTrip, including
 	// capability-agent tool rounds. Each report remains linked to its submission.
 	callctx = context.WithValue(callctx, probeObserverKey{}, func() *usageObserver { return observer })
-	var result any
 	if p.Mode == "capabilities" {
 		result, err = e.CheckModel(callctx, profile)
 	} else {
@@ -91,23 +113,60 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 			result = map[string]any{"usage_reported": reported, "cache_hit_observed": hit, "cache_creation_observed": created, "cost_reporting": "unknown", "hints_verified": profile.CachePolicy == "qwen_explicit" && (hit || created), "samples": reports}
 		}
 	}
-	code := ""
-	if err != nil {
-		code = "CAPABILITY_CHECK_FAILED"
-		var capabilityErr *capabilityCheckFailure
-		if errors.As(err, &capabilityErr) {
-			code = capabilityErr.code
-		}
-		if p.Mode == "cache" {
-			code = "CACHE_CHECK_FAILED"
-		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			code = "PROVIDER_OUTCOME_UNKNOWN"
-		}
-	}
-	c, cc := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cc()
-	return e.Store.FinishProbe(c, p, result, code)
+	return err
 }
 
 type probeObserverKey struct{}
+
+func probeFailureCode(mode string, err, contextErr error, reports []usageReport) string {
+	if err == nil && contextErr == nil {
+		return ""
+	}
+	if len(reports) > 0 {
+		last := reports[len(reports)-1]
+		if last.HTTPStatus != nil {
+			switch status := *last.HTTPStatus; {
+			case status == 429:
+				if last.ProviderErrorCode == "account_cooldown" {
+					return "PROVIDER_ACCOUNT_COOLDOWN"
+				}
+				return "PROVIDER_RATE_LIMITED"
+			case status == 401 || status == 403:
+				return "PROVIDER_AUTH_FAILED"
+			case status == 404 || last.ProviderErrorCode == "model_not_found" || last.ProviderErrorCode == "no_available_channel":
+				return "PROVIDER_MODEL_UNAVAILABLE"
+			case status >= 500:
+				return "PROVIDER_UNAVAILABLE"
+			case status >= 400:
+				return "PROVIDER_REQUEST_REJECTED"
+			}
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(contextErr, context.DeadlineExceeded) {
+		return "PROBE_EXECUTION_TIMEOUT"
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(contextErr, context.Canceled) {
+		return "PROBE_INTERRUPTED"
+	}
+	if len(reports) > 0 {
+		last := reports[len(reports)-1]
+		if last.HTTPStatus == nil || last.StreamStatus != "complete" {
+			return "PROVIDER_CONNECTION_FAILED"
+		}
+	}
+	var capabilityErr *capabilityCheckFailure
+	if errors.As(err, &capabilityErr) {
+		return capabilityErr.code
+	}
+	var problem *domain.Problem
+	if errors.As(err, &problem) {
+		if problem.Code == "RESOURCE_LIMIT_EXCEEDED" || problem.Code == "PROBE_RESOURCE_BUSY" {
+			return "PROBE_RESOURCE_BUSY"
+		}
+		return problem.Code
+	}
+	if mode == "cache" {
+		return "CACHE_CHECK_FAILED"
+	}
+	return "CAPABILITY_CHECK_FAILED"
+}

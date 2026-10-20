@@ -78,8 +78,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 27 {
-		t.Fatalf("expected 27 registered migrations, got %v", versions)
+	if len(versions) != 28 {
+		t.Fatalf("expected 28 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {

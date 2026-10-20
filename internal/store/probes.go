@@ -8,19 +8,26 @@ import (
 	"vidlens/internal/domain"
 )
 
+const (
+	MaxConcurrentProbes = 3
+	ProbeQueueTimeout   = time.Minute
+	ProbeRunTimeout     = 5 * time.Minute
+)
+
 type Probe struct {
-	ID          string    `json:"id"`
-	ModelID     string    `json:"model_id"`
-	RevisionID  string    `json:"revision_id"`
-	Mode        string    `json:"mode"`
-	Status      string    `json:"status"`
-	Epoch       int64     `json:"epoch"`
-	Submissions int       `json:"submissions"`
-	Result      any       `json:"result"`
-	FailureCode *string   `json:"failure_code"`
-	CreatedAt   time.Time `json:"created_at"`
-	DeadlineAt  time.Time `json:"deadline_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string     `json:"id"`
+	ModelID     string     `json:"model_id"`
+	RevisionID  string     `json:"revision_id"`
+	Mode        string     `json:"mode"`
+	Status      string     `json:"status"`
+	Epoch       int64      `json:"epoch"`
+	Submissions int        `json:"submissions"`
+	Result      any        `json:"result"`
+	FailureCode *string    `json:"failure_code"`
+	CreatedAt   time.Time  `json:"created_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	DeadlineAt  time.Time  `json:"deadline_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 func (s *Store) CreateProbe(ctx context.Context, model, revision, mode, key string) (Accepted, error) {
@@ -31,6 +38,9 @@ func (s *Store) CreateProbe(ctx context.Context, model, revision, mode, key stri
 		scope := "probe:" + model
 		h := Hash(map[string]string{"revision_id": revision, "mode": mode})
 		if a, found, e = replay(ctx, tx, scope, key, h); e != nil || found {
+			return e
+		}
+		if e = expireProbes(ctx, tx); e != nil {
 			return e
 		}
 		var current string
@@ -47,15 +57,22 @@ func (s *Store) CreateProbe(ctx context.Context, model, revision, mode, key stri
 		if mode != "capabilities" && mode != "cache" {
 			return domain.Err(422, "INVALID_ARGUMENT", "未知探测模式。")
 		}
+		var duplicate bool
+		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM model_probes WHERE model_id=$1 AND status IN ('queued','running'))", model).Scan(&duplicate); e != nil {
+			return e
+		}
+		if duplicate {
+			return domain.Err(409, "PROBE_ALREADY_RUNNING", "这个模型正在检查，请等待当前结果，避免重复调用。")
+		}
 		var n int
 		if e = tx.QueryRow(ctx, "SELECT count(*) FROM model_probes WHERE status IN ('queued','running')").Scan(&n); e != nil {
 			return e
 		}
-		if n >= 3 {
-			return domain.Err(429, "ADMISSION_LIMITED", "探测队列已满。")
+		if n >= MaxConcurrentProbes {
+			return domain.Err(429, "ADMISSION_LIMITED", "同时最多检查 3 个模型，请等一个检查结束后再试。")
 		}
 		id := domain.ID()
-		if _, e = tx.Exec(ctx, "INSERT INTO model_probes(id,model_id,revision_id,mode) VALUES($1,$2,$3,$4)", id, model, revision, mode); e != nil {
+		if _, e = tx.Exec(ctx, "INSERT INTO model_probes(id,model_id,revision_id,mode,deadline_at) VALUES($1,$2,$3,$4,now()+$5*interval '1 second')", id, model, revision, mode, int(ProbeQueueTimeout.Seconds())); e != nil {
 			return e
 		}
 		a, e = remember(ctx, tx, scope, key, h, id, 86400)
@@ -68,23 +85,26 @@ func (s *Store) Probes(ctx context.Context, model string) ([]Probe, error) {
 }
 func (s *Store) PendingProbes(ctx context.Context) ([]Probe, error) {
 	// Never replay an unknown physical model outcome after a process crash.
-	_, e := s.Pool.Exec(ctx, `UPDATE model_probes SET status=CASE WHEN submissions>0 THEN 'unknown' ELSE 'failed' END,failure_code=CASE WHEN submissions>0 THEN 'PROVIDER_OUTCOME_UNKNOWN' ELSE 'TASK_DEADLINE_EXCEEDED' END,updated_at=now() WHERE status IN ('queued','running') AND (deadline_at<now() OR status='running' AND updated_at<now()-interval '60 seconds')`)
+	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error { return expireProbes(ctx, tx) })
 	if e != nil {
 		return nil, e
 	}
 	return many[Probe](ctx, s.Pool, "SELECT to_jsonb(p) FROM model_probes p WHERE status='queued' ORDER BY created_at LIMIT 3")
 }
+
+func expireProbes(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `UPDATE model_probes SET status=CASE WHEN submissions>0 THEN 'unknown' ELSE 'failed' END,
+	 failure_code=CASE WHEN deadline_at<=now() AND status='queued' THEN 'PROBE_QUEUE_TIMEOUT'
+	 WHEN deadline_at<=now() THEN 'PROBE_EXECUTION_TIMEOUT'
+	 WHEN submissions>0 THEN 'PROVIDER_OUTCOME_UNKNOWN' ELSE 'PROBE_INTERRUPTED' END,updated_at=now()
+	 WHERE status IN ('queued','running') AND (deadline_at<=now() OR status='running' AND updated_at<now()-interval '60 seconds')`)
+	return err
+}
+
 func (s *Store) ClaimProbe(ctx context.Context, id string) (*Probe, error) {
 	var p *Probe
 	e := s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var running bool
-		if e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM model_probes WHERE status='running')").Scan(&running); e != nil {
-			return e
-		}
-		if running {
-			return nil
-		}
-		v, e := one[Probe](ctx, tx, "UPDATE model_probes SET status='running',epoch=epoch+1,updated_at=now() WHERE id=$1 AND status='queued' AND deadline_at>now() RETURNING to_jsonb(model_probes)", id)
+		v, e := one[Probe](ctx, tx, "UPDATE model_probes SET status='running',epoch=epoch+1,started_at=now(),deadline_at=now()+$2*interval '1 second',updated_at=now() WHERE id=$1 AND status='queued' AND deadline_at>now() RETURNING to_jsonb(model_probes)", id, int(ProbeRunTimeout.Seconds()))
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil
 		}
@@ -138,14 +158,24 @@ func (s *Store) RecordProbeSubmission(ctx context.Context, p Probe, n int, repor
 }
 func (s *Store) FinishProbe(ctx context.Context, p Probe, result any, code string) error {
 	return s.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if e := probeFence(ctx, tx, p); e != nil {
+		var submissions int
+		var deadline time.Time
+		if e := tx.QueryRow(ctx, "SELECT submissions,deadline_at FROM model_probes WHERE id=$1 AND epoch=$2 AND status='running' FOR UPDATE", p.ID, p.Epoch).Scan(&submissions, &deadline); e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return domain.ErrFenced
+			}
 			return e
+		}
+		// A terminal failure must be recorded even after the execution deadline.
+		// Ownership/epoch still fence late writers, and late success never passes.
+		if code == "" && !deadline.After(time.Now()) {
+			code = "PROBE_EXECUTION_TIMEOUT"
 		}
 		status := "succeeded"
 		if code != "" {
 			status = "failed"
 		}
-		if code == "PROVIDER_OUTCOME_UNKNOWN" {
+		if code == "PROVIDER_OUTCOME_UNKNOWN" || submissions > 0 && (code == "PROBE_EXECUTION_TIMEOUT" || code == "PROVIDER_CONNECTION_FAILED" || code == "PROBE_INTERRUPTED") {
 			status = "unknown"
 		}
 		_, e := tx.Exec(ctx, "UPDATE model_probes SET status=$3,result=$4,failure_code=NULLIF($5,''),updated_at=now() WHERE id=$1 AND epoch=$2", p.ID, p.Epoch, status, nullableJSON(result), code)
