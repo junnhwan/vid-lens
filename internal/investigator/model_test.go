@@ -4,12 +4,159 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
+	"vidlens/internal/config"
 	"vidlens/internal/domain"
 )
+
+func TestRunAnytimeModelsCanBindCapabilityTools(t *testing.T) {
+	for _, name := range []string{"gpt-6-astra", "gpt-5.5", "gpt-5.6-sol"} {
+		t.Run(name, func(t *testing.T) {
+			profile := config.DefaultProfile()
+			profile.ModelBaseURL = "https://runanytime.hxi.me/v1"
+			profile.ModelName = name
+			profile.ModelProxyPolicy = "direct"
+
+			base, err := NewModel(context.Background(), profile, "test-key", "", "runanytime.hxi.me")
+			if err != nil {
+				t.Fatalf("construct OpenAI-compatible model: %v", err)
+			}
+			inspect, err := utils.InferEnhancedTool("inspect_model_screenshot", "Return the actual pixels of the model-admin screenshot for visual inspection.", func(context.Context, struct{}) (*schema.ToolResult, error) {
+				return &schema.ToolResult{}, nil
+			})
+			if err != nil {
+				t.Fatalf("build image tool schema: %v", err)
+			}
+			submit, err := utils.InferEnhancedTool("submit_probe", "Submit screenshot observations.", func(context.Context, capabilityProbeObservation) (*schema.ToolResult, error) {
+				return &schema.ToolResult{}, nil
+			})
+			if err != nil {
+				t.Fatalf("build submission tool schema: %v", err)
+			}
+			inspectInfo, err := inspect.Info(context.Background())
+			if err != nil {
+				t.Fatalf("read image tool schema: %v", err)
+			}
+			submitInfo, err := submit.Info(context.Background())
+			if err != nil {
+				t.Fatalf("read submission tool schema: %v", err)
+			}
+			if _, err = base.WithTools([]*schema.ToolInfo{inspectInfo, submitInfo}); err != nil {
+				t.Fatalf("bind capability tools to model: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunAnytimeModelsSerializeCapabilityToolRequests(t *testing.T) {
+	for _, name := range []string{"gpt-6-astra", "gpt-5.5", "gpt-5.6-sol"} {
+		t.Run(name, func(t *testing.T) {
+			requests := make(chan map[string]json.RawMessage, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				requests <- body
+				w.Header().Set("Content-Type", "application/json")
+				toolName := "inspect_model_screenshot"
+				if strings.Contains(string(body["tool_choice"]), "submit_probe") {
+					toolName = "submit_probe"
+				}
+				response, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "call-1", "type": "function", "function": map[string]string{"name": toolName, "arguments": "{}"}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+				_, _ = fmt.Fprint(w, string(response))
+			}))
+			defer server.Close()
+
+			profile := config.DefaultProfile()
+			profile.ModelBaseURL = server.URL
+			profile.ModelName = name
+			profile.ModelProxyPolicy = "direct"
+			base, err := NewModel(context.Background(), profile, "test-key", "", server.Listener.Addr().String())
+			if err != nil {
+				t.Fatalf("construct model: %v", err)
+			}
+			inspect, err := utils.InferEnhancedTool("inspect_model_screenshot", "Return the actual screenshot pixels.", func(context.Context, struct{}) (*schema.ToolResult, error) {
+				return &schema.ToolResult{}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := inspect.Info(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			submit, err := utils.InferEnhancedTool("submit_probe", "Submit screenshot observations.", func(context.Context, capabilityProbeObservation) (*schema.ToolResult, error) {
+				return &schema.ToolResult{}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			submitInfo, err := submit.Info(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			bridge := &imageBridge{base: base, skipInitialToolChoice: name == "gpt-5.6-sol"}
+			bound, err := bridge.WithTools([]*schema.ToolInfo{info, submitInfo})
+			if err != nil {
+				t.Fatalf("bind capability tools: %v", err)
+			}
+			bridge = bound.(*imageBridge)
+			stream, err := bridge.Stream(context.Background(), []*schema.Message{schema.UserMessage("Inspect the image and return the actual screenshot pixels.")})
+			if err != nil {
+				t.Fatalf("create capability request: %v", err)
+			}
+			response, err := stream.Recv()
+			if err != nil || response == nil || len(response.ToolCalls) != 1 {
+				t.Fatalf("read tool-call response: response=%v err=%v", response, err)
+			}
+			stream.Close()
+			body := <-requests
+			var modelName string
+			if err := json.Unmarshal(body["model"], &modelName); err != nil || modelName != name {
+				t.Fatalf("unexpected model field: %s err=%v", body["model"], err)
+			}
+			if string(body["stream"]) == "true" || !strings.Contains(string(body["tools"]), "inspect_model_screenshot") || !strings.Contains(string(body["tools"]), "submit_probe") {
+				t.Fatalf("capability request must include both tools: %s", body)
+			}
+			if name == "gpt-5.6-sol" {
+				var choice string
+				if err := json.Unmarshal(body["tool_choice"], &choice); err != nil || choice != "auto" {
+					t.Fatalf("GPT-5.6-Sol first capability turn should use automatic tool choice: %s", body["tool_choice"])
+				}
+			}
+			if name != "gpt-5.6-sol" && !strings.Contains(string(body["tool_choice"]), "inspect_model_screenshot") {
+				t.Fatalf("first capability turn did not force screenshot inspection: %s", body["tool_choice"])
+			}
+			if string(body["max_completion_tokens"]) != "10000" || len(body["max_tokens"]) != 0 || len(body["temperature"]) != 0 {
+				t.Fatalf("reasoning GPT request used incompatible sampling/budget fields: %s", body)
+			}
+
+			second, err := bridge.Stream(context.Background(), []*schema.Message{
+				schema.UserMessage("Inspect the image and return the actual screenshot pixels."),
+				{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "inspect-call", Type: "function", Function: schema.FunctionCall{Name: "inspect_model_screenshot", Arguments: "{}"}}}},
+				{Role: schema.Tool, ToolCallID: "inspect-call", Content: "Screenshot pixels returned."},
+			})
+			if err != nil {
+				t.Fatalf("create structured submission request: %v", err)
+			}
+			_, _ = second.Recv()
+			second.Close()
+			secondBody := <-requests
+			if !strings.Contains(string(secondBody["tool_choice"]), "submit_probe") || !strings.Contains(string(secondBody["tools"]), "submit_probe") || !strings.Contains(string(secondBody["tools"]), "inspect_model_screenshot") {
+				t.Fatalf("second capability turn did not force structured submission: %s", secondBody)
+			}
+		})
+	}
+}
 
 func TestToolImageBridgePreservesCompletedCallGroup(t *testing.T) {
 	msgs := []*schema.Message{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "a"}, {ID: "b"}}}, {Role: schema.Tool, ToolCallID: "a", UserInputMultiContent: []schema.MessageInputPart{{Type: schema.ChatMessagePartTypeText, Text: "frame a"}, {Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: domain.Ptr("actual-pixel-data"), MIMEType: "image/jpeg"}}, Extra: map[string]any{"frame_id": "frame-a"}}}}, {Role: schema.Tool, ToolCallID: "b", Content: "other result"}}
@@ -27,6 +174,30 @@ func TestToolImageBridgePreservesCompletedCallGroup(t *testing.T) {
 	saved, _ := json.Marshal(stripPixels(msgs))
 	if strings.Contains(string(saved), "actual-pixel-data") || !strings.Contains(string(saved), "frame-a") {
 		t.Fatal("checkpoint did not retain only the reloadable frame reference")
+	}
+}
+
+func TestCapabilityToolChoiceAdvancesToSubmissionAfterScreenshot(t *testing.T) {
+	if got := nextCapabilityTool([]*schema.Message{schema.UserMessage("check")}); got != "inspect_model_screenshot" {
+		t.Fatalf("first model turn must inspect the screenshot, got %q", got)
+	}
+	if got := nextCapabilityTool([]*schema.Message{
+		schema.UserMessage("check"),
+		{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Function: schema.FunctionCall{Name: "inspect_model_screenshot"}}}},
+		{Role: schema.Tool, ToolCallID: "inspect-call"},
+	}); got != "submit_probe" {
+		t.Fatalf("after screenshot inspection the model must submit structured observations, got %q", got)
+	}
+}
+
+func TestProviderDiagnosticCapturesOnlyRedactedErrorFields(t *testing.T) {
+	observer := newUsageObserver("test", "", nil)
+	observer.providerFailure([]byte(`{"error":{"type":"invalid_request_error","code":"unsupported_parameter","param":"tools[0].strict","message":"bad key sk-abcdefghijk and Bearer private-token"}}`))
+	if observer.report.ProviderErrorType != "invalid_request_error" || observer.report.ProviderErrorCode != "unsupported_parameter" || observer.report.ProviderErrorParam != "tools[0].strict" {
+		t.Fatalf("provider error fields were not captured: %+v", observer.report)
+	}
+	if strings.Contains(observer.report.ProviderErrorMessage, "sk-") || strings.Contains(observer.report.ProviderErrorMessage, "private-token") {
+		t.Fatalf("provider error message leaked credentials: %q", observer.report.ProviderErrorMessage)
 	}
 }
 func TestProtocolRejectsOrphansAndMissingResults(t *testing.T) {

@@ -94,6 +94,10 @@ func (e *Engine) RunProbe(ctx context.Context, p store.Probe) error {
 	code := ""
 	if err != nil {
 		code = "CAPABILITY_CHECK_FAILED"
+		var capabilityErr *capabilityCheckFailure
+		if errors.As(err, &capabilityErr) {
+			code = capabilityErr.code
+		}
 		if p.Mode == "cache" {
 			code = "CACHE_CHECK_FAILED"
 		}

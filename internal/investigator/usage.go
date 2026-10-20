@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -21,33 +22,37 @@ type tokenMetric struct {
 	Path   string `json:"source_path,omitempty"`
 }
 type usageReport struct {
-	StartedAt         time.Time   `json:"response_started_at"`
-	FinishedAt        *time.Time  `json:"response_finished_at"`
-	Schema            string      `json:"schema"`
-	Input             tokenMetric `json:"input"`
-	Output            tokenMetric `json:"output"`
-	Total             tokenMetric `json:"total"`
-	CacheRead         tokenMetric `json:"cache_read"`
-	CacheWrite        tokenMetric `json:"cache_write"`
-	Reasoning         tokenMetric `json:"reasoning"`
-	RequestedOutput   *int64      `json:"requested_output_tokens,omitempty"`
-	ThinkingRequest   string      `json:"thinking_request"`
-	StreamStatus      string      `json:"stream_status"`
-	HTTPStatus        *int        `json:"http_status,omitempty"`
-	RequestID         string      `json:"request_id,omitempty"`
-	ResponseID        string      `json:"response_id,omitempty"`
-	ObservationStatus string      `json:"observation_status"`
-	FinishReason      string      `json:"finish_reason,omitempty"`
-	FirstMeaningfulMS *int64      `json:"first_meaningful_delta_ms"`
-	FirstByteMS       *int64      `json:"first_byte_ms"`
-	FirstResponseMS   *int64      `json:"first_response_ms"`
-	TotalMS           int64       `json:"total_ms"`
-	Layout            string      `json:"layout_version"`
-	ToolsHash         string      `json:"tools_hash,omitempty"`
-	StablePrefixHash  string      `json:"stable_prefix_hash,omitempty"`
-	CachePolicy       string      `json:"cache_policy"`
-	HintsSent         bool        `json:"hints_sent"`
-	CostReporting     string      `json:"cost_reporting"`
+	StartedAt            time.Time   `json:"response_started_at"`
+	FinishedAt           *time.Time  `json:"response_finished_at"`
+	Schema               string      `json:"schema"`
+	Input                tokenMetric `json:"input"`
+	Output               tokenMetric `json:"output"`
+	Total                tokenMetric `json:"total"`
+	CacheRead            tokenMetric `json:"cache_read"`
+	CacheWrite           tokenMetric `json:"cache_write"`
+	Reasoning            tokenMetric `json:"reasoning"`
+	RequestedOutput      *int64      `json:"requested_output_tokens,omitempty"`
+	ThinkingRequest      string      `json:"thinking_request"`
+	StreamStatus         string      `json:"stream_status"`
+	HTTPStatus           *int        `json:"http_status,omitempty"`
+	RequestID            string      `json:"request_id,omitempty"`
+	ResponseID           string      `json:"response_id,omitempty"`
+	ObservationStatus    string      `json:"observation_status"`
+	FinishReason         string      `json:"finish_reason,omitempty"`
+	FirstMeaningfulMS    *int64      `json:"first_meaningful_delta_ms"`
+	FirstByteMS          *int64      `json:"first_byte_ms"`
+	FirstResponseMS      *int64      `json:"first_response_ms"`
+	TotalMS              int64       `json:"total_ms"`
+	Layout               string      `json:"layout_version"`
+	ToolsHash            string      `json:"tools_hash,omitempty"`
+	StablePrefixHash     string      `json:"stable_prefix_hash,omitempty"`
+	CachePolicy          string      `json:"cache_policy"`
+	HintsSent            bool        `json:"hints_sent"`
+	CostReporting        string      `json:"cost_reporting"`
+	ProviderErrorType    string      `json:"provider_error_type,omitempty"`
+	ProviderErrorCode    string      `json:"provider_error_code,omitempty"`
+	ProviderErrorParam   string      `json:"provider_error_param,omitempty"`
+	ProviderErrorMessage string      `json:"provider_error_message,omitempty"`
 }
 type usageObserver struct {
 	mu             sync.Mutex
@@ -306,6 +311,44 @@ func (o *usageObserver) finish(eof bool) {
 	if o.flush != nil {
 		o.flush(report)
 	}
+}
+
+func (o *usageObserver) providerFailure(body []byte) {
+	var envelope struct {
+		Error struct {
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Param   string `json:"param"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.report.ProviderErrorType = safeProviderDiagnostic(envelope.Error.Type, 80)
+	o.report.ProviderErrorCode = safeProviderDiagnostic(envelope.Error.Code, 80)
+	o.report.ProviderErrorParam = safeProviderDiagnostic(envelope.Error.Param, 120)
+	o.report.ProviderErrorMessage = safeProviderDiagnostic(envelope.Error.Message, 320)
+}
+
+var providerDiagnosticRedactions = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)bearer\s+[^\s,;"']+`),
+	regexp.MustCompile(`(?i)sk-[a-z0-9_-]{8,}`),
+	regexp.MustCompile(`[A-Za-z0-9+/]{96,}={0,2}`),
+	regexp.MustCompile(`(?i)https?://[^\s/@:]+:[^\s/@]+@`),
+}
+
+func safeProviderDiagnostic(value string, limit int) string {
+	value = strings.Join(strings.Fields(strings.ToValidUTF8(value, "")), " ")
+	for _, pattern := range providerDiagnosticRedactions {
+		value = pattern.ReplaceAllString(value, "[redacted]")
+	}
+	if runes := []rune(value); len(runes) > limit {
+		value = string(runes[:limit])
+	}
+	return value
 }
 
 type observedBody struct {

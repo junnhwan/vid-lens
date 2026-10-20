@@ -47,11 +47,14 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		observer.report.HTTPStatus = domain.Ptr(r.StatusCode)
 	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		if observer != nil {
+			if _, isProbe := req.Context().Value(probeObserverKey{}).(func() *usageObserver); isProbe {
+				observer.providerFailure(body)
+			}
 			observer.finish(false)
 		}
 		slog.Warn("model service HTTP failure", "http_status", r.StatusCode)
-		_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 4096))
 		r.Body.Close()
 		retry := r.StatusCode == 429 || r.StatusCode == 408 || r.StatusCode >= 500
 		code := "PROVIDER_UNAVAILABLE"
