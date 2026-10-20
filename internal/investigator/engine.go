@@ -36,6 +36,7 @@ type session struct {
 	cp               checkpoint
 	snapshot         domain.Snapshot
 	transcript       []domain.Segment
+	chunks           []sourceChunk
 	article          *domain.Article
 	turn             *domain.Turn
 	tools            map[string]tool.EnhancedInvokableTool
@@ -222,8 +223,12 @@ func (s *session) initial(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			s.cp.Inspections[key] = result.FrameIDs
 			step.FrameIDs = append(step.FrameIDs, result.FrameIDs...)
+			if s.boundedSourceContext() {
+				s.cp.PendingOverview = append(s.cp.PendingOverview, result.FrameIDs...)
+				continue
+			}
+			s.cp.Inspections[key] = result.FrameIDs
 			s.cp.OverviewIDs = append(s.cp.OverviewIDs, result.FrameIDs...)
 			parts, err := s.imageInput(ctx, result.FrameIDs, "overview")
 			if err != nil {
@@ -231,7 +236,13 @@ func (s *session) initial(ctx context.Context) error {
 			}
 			msgs = append(msgs, &schema.Message{Role: schema.User, Content: "概览 inspection_id=overview", UserInputMultiContent: parts})
 		}
-		s.cp.Inspections["overview"] = append([]string{}, step.FrameIDs...)
+		if s.boundedSourceContext() {
+			if err = s.deliverOverviewBatch(ctx, &msgs); err != nil {
+				return err
+			}
+		} else {
+			s.cp.Inspections["overview"] = append([]string{}, step.FrameIDs...)
+		}
 		step.Status = "completed"
 		step.FinishedAt = domain.Ptr(time.Now().UTC())
 		step.Outcome = &domain.Outcome{Message: "已取得全片分布的概览帧，等待观察。", EvidenceStatus: "not_assessed"}

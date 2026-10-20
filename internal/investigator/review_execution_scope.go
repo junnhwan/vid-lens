@@ -31,7 +31,7 @@ func (s *session) reviewExecutionContext(ctx context.Context) (map[string]any, e
 	for _, segment := range s.transcript {
 		origins[segment.Origin]++
 	}
-	return map[string]any{
+	scope := map[string]any{
 		"snapshot_id":                  s.snapshot.ID,
 		"source_duration_ms":           s.snapshot.DurationMS,
 		"visual_access":                "sampled_frames",
@@ -42,5 +42,10 @@ func (s *session) reviewExecutionContext(ctx context.Context) (map[string]any, e
 		"transcript_segment_count":     len(s.transcript),
 		"transcript_origins":           origins,
 		"scope_rule":                   "Frame identities describe delivered sampling instants, not visible content or continuous visual coverage. The complete original transcript and this task's actual pixels are supplied separately.",
-	}, nil
+	}
+	if s.boundedSourceContext() && s.chunkedSource() {
+		scope["text_access"] = "indexed original passages, with the complete chronological source navigation ledger"
+		scope["scope_rule"] = "Frame identities describe sampled delivery instants, not visible content or continuous coverage. All cited original text and its chronological neighbors accompany the complete navigation ledger; derived notes do not prove claims."
+	}
+	return scope, nil
 }

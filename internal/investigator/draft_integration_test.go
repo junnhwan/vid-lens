@@ -274,6 +274,14 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 				t.Fatal(err)
 			}
 			engine := &Engine{Store: db, Media: ms, Resources: resources, Config: cfg}
+			// This provider fixture exercises the historical authoring/repair
+			// exchange, including all overview pixels in its first request. Freeze
+			// that adapter explicitly; V4 batching has its own delivery regression.
+			legacy := checkpoint{SchemaVersion: 1, ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV1, RunID: claim.Run.ID}}
+			if err := db.Checkpoint(ctx, *claim, legacy); err != nil {
+				t.Fatal(err)
+			}
+			claim.Run.Checkpoint = domain.JSON(legacy)
 			err = engine.Run(ctx, *claim, cfg.Profile)
 			if fault == "duplicate_candidate" {
 				policy, _ := domain.InterpretationPolicy(level)

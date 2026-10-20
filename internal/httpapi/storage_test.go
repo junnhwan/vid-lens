@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -58,7 +59,12 @@ func TestCapacityPrivacyAndStorageAdministration(t *testing.T) {
 	if r.StatusCode != 422 {
 		t.Fatalf("unknown cleanup accepted: %d", r.StatusCode)
 	}
-	r = do("PUT", "/api/v1/admin/storage", `{"expected_revision":1,"video_quota_bytes":12884901888,"image_quota_bytes":5368709120}`, true)
+	r = do("GET", "/api/v1/admin/storage", "", true)
+	var baseline store.StorageOverview
+	if err := json.NewDecoder(r.Body).Decode(&baseline); err != nil || r.StatusCode != 200 {
+		t.Fatal("read current storage revision", err, r.StatusCode)
+	}
+	r = do("PUT", "/api/v1/admin/storage", fmt.Sprintf(`{"expected_revision":%d,"video_quota_bytes":12884901888,"image_quota_bytes":5368709120}`, baseline.Settings.Revision), true)
 	if r.StatusCode != 200 {
 		b, _ := io.ReadAll(r.Body)
 		t.Fatalf("quota save: %d %s", r.StatusCode, b)

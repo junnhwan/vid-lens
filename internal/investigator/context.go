@@ -16,7 +16,11 @@ import (
 )
 
 type checkpoint struct {
-	ExecutionContract *domain.ExecutionContract `json:"execution_contract,omitempty"`
+	SourceNotes          []sourceNote              `json:"source_notes,omitempty"`
+	SourceIndexProtocol  string                    `json:"source_index_protocol,omitempty"`
+	SourceChunkDelivered string                    `json:"source_chunk_delivered,omitempty"`
+	PendingOverview      []string                  `json:"pending_overview,omitempty"`
+	ExecutionContract    *domain.ExecutionContract `json:"execution_contract,omitempty"`
 
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
 	PlanHash             string              `json:"plan_hash,omitempty"`
@@ -112,6 +116,16 @@ func (m *middleware) WrapEnhancedInvokableToolCall(ctx context.Context, next adk
 }
 func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	s := m.s
+	if s.boundedSourceContext() {
+		for _, msg := range state.Messages {
+			if msg.Name == sourceContextName {
+				msg.Content = string(domain.JSON(s.sourceContext()))
+			}
+		}
+		if err := s.deliverOverviewBatch(ctx, &state.Messages); err != nil {
+			return ctx, nil, err
+		}
+	}
 	if s.policy().Enabled && s.cp.Progress.Total >= 4*s.profile.MaxIterations {
 		return ctx, nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "工具调用达到本次任务的累计上限；来源和草稿保留。")
 	}
@@ -167,7 +181,7 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	}
 	// A call may use the long-writing allowance only after the current visual
 	// observations and critical questions are accounted for. Reconstruct this on resume.
-	s.compositionReady = s.turn == nil && len(observations) > 0
+	s.compositionReady = s.turn == nil && len(observations) > 0 && len(s.cp.PendingOverview) == 0 && !s.sourceSurveyPending()
 	for _, ids := range s.cp.Inspections {
 		for _, id := range ids {
 			if !seen[id] {
@@ -202,6 +216,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			s.cp.DraftCorrection = false
 		}
 		s.forceDraftSubmit = saved > 0 && len(draft.Sections) == len(draft.Plan) && len(draft.Plan) > 0 && !s.cp.DraftCorrection
+		if s.boundedSourceContext() && !s.compositionReady {
+			s.forceDraftSubmit = false
+		}
 		catalog, err := s.citationCatalog(ctx)
 		if err != nil {
 			return ctx, nil, err
@@ -218,6 +235,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 				return ctx, nil, err
 			}
 		}
+		if s.boundedSourceContext() {
+			hints = compactSourceCatalog(catalog, state.Messages, draft)
+		}
 		data := map[string]any{"draft": s.draftState(saved, draft), "citation_catalog": hints}
 		if s.policy().EvidenceGrounding {
 			data["frame_context"] = frameContexts(catalog, s.transcript)
@@ -227,6 +247,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		}
 		if s.authoring() {
 			data["citation_catalog_rule"] = authoringCatalogRule
+		}
+		if s.boundedSourceContext() {
+			data["citation_catalog_rule"] = "Only currently relevant aliases are listed. read_source/find_evidence return original tN aliases and source IDs. Reload archived text for detailed claims; source notes are derived navigation."
 		}
 		if s.policy().SectionRepairs {
 			output := s.profile.MaxOutputTokens
@@ -240,6 +263,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			data["batch_guidance"] = map[string]any{"output_tokens": output, "recommended_chapters": min(12, max(1, (output-1000)/perChapter)), "max_chapters": 12, "max_bytes": 128 << 10, "rule": "Prefer fewer complete batches; estimate actual content size. Preserve required details, leave room for closing JSON. Save valid chapters independently. Server validates and publishes automatically when complete."}
 			if s.authoring() {
 				data["batch_guidance"] = map[string]any{"base_output_tokens": output, "max_chapters": maxPlanSections, "max_bytes": 128 << 10, "rule": "Write ALL pending chapters in ONE complete call when the actual output size fits. No fixed chapter quota. Dense sources may receive more output reservation within provider/context limits. Split only when necessary; preserve required detail, figures and closing JSON. Server validates and publishes automatically."}
+			}
+			if s.boundedSourceContext() {
+				data["batch_guidance"] = map[string]any{"output_tokens": output, "recommended_chapters": min(6, max(1, (output-2048)/perChapter)), "max_chapters": 12, "max_bytes": 128 << 10, "rule": "Save complete bounded batches of pending chapters within this per-call output budget. A longer source does not expand one response to the entire transcript size. Preserve details, figures and closing JSON; the server assembles all saved chapters and reviews the complete article."}
 			}
 		}
 		data["source_duration_ms"] = s.snapshot.DurationMS
@@ -273,6 +299,9 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 			return ctx, nil, err
 		}
 		refs := map[string]any{"citation_catalog": catalogHints(catalog), "rule": "Use tN/fN directly in answer blocks; omit video citation objects. Cite representative evidence for this question, not every subtitle."}
+		if s.boundedSourceContext() {
+			refs["citation_catalog"] = compactSourceCatalog(catalog, filtered, nil)
+		}
 		if s.policy().EvidenceGrounding {
 			refs["frame_context"] = frameContexts(catalog, s.transcript)
 			refs["question_frame_ids"] = s.cp.Inspections["question-context"]
@@ -506,7 +535,7 @@ func projectToolHistory(messages []*schema.Message, dropLast ...bool) []*schema.
 		drop := true
 		ids := map[string]bool{}
 		for _, c := range m.ToolCalls {
-			if c.Function.Name != "record_observation" {
+			if c.Function.Name != "record_observation" && c.Function.Name != "record_source_notes" {
 				drop = false
 			}
 			ids[c.ID] = true
@@ -537,6 +566,9 @@ func projectToolHistory(messages []*schema.Message, dropLast ...bool) []*schema.
 	return out
 }
 func (s *session) projectSourceReads(messages []*schema.Message) []*schema.Message {
+	if s.boundedSourceContext() {
+		return projectIndexedSourceReads(messages)
+	}
 	known := map[string]bool{}
 	for _, seg := range s.transcript {
 		known[seg.ID] = true

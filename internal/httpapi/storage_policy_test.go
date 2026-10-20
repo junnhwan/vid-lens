@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,7 +13,11 @@ import (
 
 func TestAdminStorageUpdatesDiskStopPercent(t *testing.T) {
 	server, api := apiTest(t)
-	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/admin/storage", strings.NewReader(`{"expected_revision":1,"video_quota_bytes":10737418240,"image_quota_bytes":5368709120,"disk_stop_percent":92}`))
+	baseline, err := api.Store.StorageOverview(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/admin/storage", strings.NewReader(fmt.Sprintf(`{"expected_revision":%d,"video_quota_bytes":10737418240,"image_quota_bytes":5368709120,"disk_stop_percent":92}`, baseline.Settings.Revision)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +31,7 @@ func TestAdminStorageUpdatesDiskStopPercent(t *testing.T) {
 	if err = json.NewDecoder(res.Body).Decode(&overview); err != nil {
 		t.Fatal(err)
 	}
-	if res.StatusCode != http.StatusOK || overview.Settings.DiskStopPercent != 92 || overview.Settings.Revision != 2 {
+	if res.StatusCode != http.StatusOK || overview.Settings.DiskStopPercent != 92 || overview.Settings.Revision != baseline.Settings.Revision+1 {
 		t.Fatalf("storage policy update: status=%d settings=%+v", res.StatusCode, overview.Settings)
 	}
 }

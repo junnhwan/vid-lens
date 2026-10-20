@@ -47,7 +47,11 @@ func (s *session) saveExecutionPlan(ctx context.Context, ready map[string]any) e
 	if err != nil {
 		return err
 	}
-	if len(observed) > 0 {
+	overviewComplete := len(observed) > 0
+	if s.boundedSourceContext() && (s.sourceSurveyPending() || len(s.cp.PendingOverview) > 0 || len(s.unobserved(ctx)) > 0) {
+		overviewComplete = false
+	}
+	if overviewComplete {
 		plan.Items[0].Status = "done"
 		plan.Items[1].Status = "active"
 	}
@@ -101,6 +105,15 @@ func (s *session) saveExecutionPlan(ctx context.Context, ready map[string]any) e
 // Remove schemas irrelevant to the current phase before freezing the call.
 // Frozen inputs bypass this projection on replay and retain their exact schema.
 func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
+	if !s.reviewing && s.sourceSurveyPending() {
+		out := []*schema.ToolInfo{}
+		for _, t := range in {
+			if t.Name == "record_source_notes" {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
 	if s.policy().ContentReview {
 		filtered := []*schema.ToolInfo{}
 		for _, t := range in {
@@ -132,6 +145,9 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 	out := []*schema.ToolInfo{}
 	repair := s.requiredRepairTool()
 	for _, t := range in {
+		if s.boundedSourceContext() && len(s.cp.PendingOverview) > 0 && t.Name != "record_observation" && t.Name != "read_source" && t.Name != "find_evidence" {
+			continue
+		}
 		if repair != "" {
 			if t.Name == repair {
 				out = append(out, t)

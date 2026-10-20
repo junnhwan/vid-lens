@@ -131,6 +131,9 @@ func authoringSectionIssue(issue map[string]any, sectionIndex int) map[string]an
 }
 
 func (s *session) autoFinalize(ctx context.Context) error {
+	if s.boundedSourceContext() && (s.sourceSurveyPending() || len(s.cp.PendingOverview) > 0 || len(s.unobserved(ctx)) > 0) {
+		return nil
+	}
 	if s.turn != nil || !s.policy().SectionRepairs {
 		return nil
 	}

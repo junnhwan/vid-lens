@@ -193,6 +193,11 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &findInput{}
 	case "read_source":
 		target = &readInput{}
+		if t.session != nil && t.session.boundedSourceContext() {
+			target = &indexedReadInput{}
+		}
+	case "record_source_notes":
+		target = &sourceNote{}
 	case "read_article_sections":
 		if t.session != nil && t.session.usesBoundedReview() {
 			target = &articleSectionReadInput{}
@@ -393,65 +398,74 @@ func (s *session) makeTools() ([]tool.BaseTool, error) {
 			return nil, e
 		}
 	}
-	if e := add(utils.InferEnhancedTool("find_evidence", "Find candidate transcript positions by words and/or time range in this video. Candidates are not confirmed evidence.", func(ctx context.Context, in findInput) (*schema.ToolResult, error) {
-		return s.step(ctx, publicTitle(in.ActivityTitle, "正在定位视频原文"), s.phase(), nil, func() (any, []string, error) {
-			terms := strings.Fields(strings.ToLower(in.Query))
-			found := []domain.Segment{}
-			for _, t := range s.transcript {
-				if in.StartMS != nil && t.EndMS <= *in.StartMS || in.EndMS != nil && t.StartMS >= *in.EndMS {
-					continue
-				}
-				matched := len(terms) == 0
-				for _, term := range terms {
-					if strings.Contains(strings.ToLower(t.Text), term) {
-						matched = true
-						break
-					}
-				}
-				if matched {
-					found = append(found, t)
-					if len(found) == 12 {
-						break
-					}
-				}
-			}
-			return map[string]any{"snapshot_id": s.snapshot.ID, "candidates": found, "note": "candidate positions only; use read_source and inspect real pixels when needed"}, nil, nil
-		})
-	})); e != nil {
+	if e := s.sourceNotesTool(add); e != nil {
 		return nil, e
 	}
-	if e := add(utils.InferEnhancedTool("read_source", "Read exact contiguous transcript segments plus neighboring context; supply segment_ids or a time range.", func(ctx context.Context, in readInput) (*schema.ToolResult, error) {
-		return s.step(ctx, publicTitle(in.ActivityTitle, "正在回读视频原文"), s.phase(), nil, func() (any, []string, error) {
-			indices := map[int]bool{}
-			for i, t := range s.transcript {
-				match := slices.Contains(in.SegmentIDs, t.ID)
-				if len(in.SegmentIDs) == 0 && in.StartMS != nil && in.EndMS != nil {
-					match = t.StartMS < *in.EndMS && t.EndMS > *in.StartMS
-				}
-				if match {
-					for j := max(0, i-1); j <= min(len(s.transcript)-1, i+1); j++ {
-						indices[j] = true
+	if s.boundedSourceContext() {
+		if e := s.indexedSourceTools(add); e != nil {
+			return nil, e
+		}
+	} else {
+		if e := add(utils.InferEnhancedTool("find_evidence", "Find candidate transcript positions by words and/or time range in this video. Candidates are not confirmed evidence.", func(ctx context.Context, in findInput) (*schema.ToolResult, error) {
+			return s.step(ctx, publicTitle(in.ActivityTitle, "正在定位视频原文"), s.phase(), nil, func() (any, []string, error) {
+				terms := strings.Fields(strings.ToLower(in.Query))
+				found := []domain.Segment{}
+				for _, t := range s.transcript {
+					if in.StartMS != nil && t.EndMS <= *in.StartMS || in.EndMS != nil && t.StartMS >= *in.EndMS {
+						continue
+					}
+					matched := len(terms) == 0
+					for _, term := range terms {
+						if strings.Contains(strings.ToLower(t.Text), term) {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						found = append(found, t)
+						if len(found) == 12 {
+							break
+						}
 					}
 				}
-			}
-			found := []domain.Segment{}
-			n := 0
-			more := false
-			for i, t := range s.transcript {
-				if !indices[i] {
-					continue
+				return map[string]any{"snapshot_id": s.snapshot.ID, "candidates": found, "note": "candidate positions only; use read_source and inspect real pixels when needed"}, nil, nil
+			})
+		})); e != nil {
+			return nil, e
+		}
+		if e := add(utils.InferEnhancedTool("read_source", "Read exact contiguous transcript segments plus neighboring context; supply segment_ids or a time range.", func(ctx context.Context, in readInput) (*schema.ToolResult, error) {
+			return s.step(ctx, publicTitle(in.ActivityTitle, "正在回读视频原文"), s.phase(), nil, func() (any, []string, error) {
+				indices := map[int]bool{}
+				for i, t := range s.transcript {
+					match := slices.Contains(in.SegmentIDs, t.ID)
+					if len(in.SegmentIDs) == 0 && in.StartMS != nil && in.EndMS != nil {
+						match = t.StartMS < *in.EndMS && t.EndMS > *in.StartMS
+					}
+					if match {
+						for j := max(0, i-1); j <= min(len(s.transcript)-1, i+1); j++ {
+							indices[j] = true
+						}
+					}
 				}
-				if n+len(t.Text) > 24000 {
-					more = true
-					break
+				found := []domain.Segment{}
+				n := 0
+				more := false
+				for i, t := range s.transcript {
+					if !indices[i] {
+						continue
+					}
+					if n+len(t.Text) > 24000 {
+						more = true
+						break
+					}
+					found = append(found, t)
+					n += len(t.Text)
 				}
-				found = append(found, t)
-				n += len(t.Text)
-			}
-			return map[string]any{"snapshot_id": s.snapshot.ID, "segments": found, "has_more": more, "note": "exact source text; coarse ASR ranges are audio windows"}, nil, nil
-		})
-	})); e != nil {
-		return nil, e
+				return map[string]any{"snapshot_id": s.snapshot.ID, "segments": found, "has_more": more, "note": "exact source text; coarse ASR ranges are audio windows"}, nil, nil
+			})
+		})); e != nil {
+			return nil, e
+		}
 	}
 	if e := add(utils.InferEnhancedTool("inspect_video_window", "Return actual pixels. Use window with start_ms/end_ms/count/mode (overview, detail, sequence). Omit crop unless cropping a real delivered parent_frame_id. Or supply frame_ids without window to reload. Record new images before requesting more. No paths/URLs.", func(ctx context.Context, in inspectInput) (*schema.ToolResult, error) {
 		if len(s.unobserved(ctx)) > 0 {

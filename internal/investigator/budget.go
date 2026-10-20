@@ -106,7 +106,7 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			b.ImageCount++
 		}
 	}
-	if s.authoring() && b.Phase == "compose" {
+	if s.authoring() && b.Phase == "compose" && !s.boundedSourceContext() {
 		// A dense/long source may need more than the normal 32K writer budget.
 		// Estimate from original text, never from accumulated repair history.
 		factor := 2
@@ -136,6 +136,10 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 		} else {
 			b.OutputTokens = min(b.OutputTokens, 4096)
 		}
+	}
+	if !s.reviewing && s.sourceSurveyPending() {
+		b.Phase = "source_survey"
+		b.OutputTokens = min(s.profile.MaxOutputTokens, 8192)
 	}
 	return b, b.check(s.profile)
 }

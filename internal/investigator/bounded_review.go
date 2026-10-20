@@ -196,14 +196,29 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	// Context is deliberately complete and unchanged across smaller tasks. A
 	// local verdict may depend on a premise in another chapter or source segment.
 	payload := map[string]any{"request_id": id, "review_protocol": s.boundedReviewProtocol(), "review_mode": task.Mode, "units": task.Units, "candidate_context": candidate, "citation_catalog": hints, "batch_frame_ids": ids}
+	if s.boundedSourceContext() && s.chunkedSource() {
+		var err error
+		source, err = s.indexedReviewSource(task, catalog)
+		if err != nil {
+			return nil, err
+		}
+		payload["citation_catalog"] = compactSourceCatalog(catalog, nil, candidate)
+	}
 	instructions := reviewUnitInstructions
+	if s.boundedSourceContext() && s.chunkedSource() {
+		instructions += "\n本轮source.transcript是本单元全部引用原文及时间邻居，source_index/derived_notes只是全片导航。不能仅凭材料卡或作者描述确认具体断言；必要材料未交付则not_assessed，不能把未知判为支持。"
+	}
 	if s.usesModalityReview() {
 		scope, err := s.reviewExecutionContext(ctx)
 		if err != nil {
 			return nil, err
 		}
 		source["execution_context"] = scope
-		instructions += "\n" + modalityReviewInstructions
+		modalityInstructions := modalityReviewInstructions
+		if s.boundedSourceContext() && s.chunkedSource() {
+			modalityInstructions = strings.Replace(modalityInstructions, "visual收到完整原始文字及本单元全部引用图片", "visual收到本单元全部引用原文及时间邻居、全片材料索引和本单元全部引用图片", 1)
+		}
+		instructions += "\n" + modalityInstructions
 	}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")

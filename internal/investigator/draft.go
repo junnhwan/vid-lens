@@ -698,12 +698,26 @@ func (s *session) resumeDraft(ctx context.Context) error {
 		return err
 	}
 	if ids := s.unobserved(ctx); len(ids) > 0 {
-		parts, err := s.imageInput(ctx, ids, "resumed-unobserved")
-		if err != nil {
-			return err
+		if s.boundedSourceContext() {
+			for key, frames := range s.cp.Inspections {
+				s.cp.Inspections[key] = slices.DeleteFunc(append([]string{}, frames...), func(id string) bool { return slices.Contains(ids, id) })
+			}
+			for _, id := range ids {
+				if !slices.Contains(s.cp.PendingOverview, id) {
+					s.cp.PendingOverview = append(s.cp.PendingOverview, id)
+				}
+			}
+			if err := s.deliverOverviewBatch(ctx, &msgs); err != nil {
+				return err
+			}
+		} else {
+			parts, err := s.imageInput(ctx, ids, "resumed-unobserved")
+			if err != nil {
+				return err
+			}
+			s.cp.Inspections["resumed-unobserved"] = ids
+			msgs = append(msgs, &schema.Message{Role: schema.User, UserInputMultiContent: parts})
 		}
-		s.cp.Inspections["resumed-unobserved"] = ids
-		msgs = append(msgs, &schema.Message{Role: schema.User, UserInputMultiContent: parts})
 	}
 	s.cp.DraftResume = false
 	return s.persist(ctx, msgs)

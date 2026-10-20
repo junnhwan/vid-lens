@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"vidlens/internal/domain"
 )
@@ -76,5 +77,43 @@ func TestNewExecutionAndExplicitRetryHaveSeparateFrozenContracts(t *testing.T) {
 	ancestor, err := s.Run(ctx, claim.Run.ID)
 	if err != nil || Hash(ancestor.Checkpoint) != Hash(before.Checkpoint) {
 		t.Fatal("retry rewrote the ancestor contract", err)
+	}
+}
+
+func TestExplicitRetryKeepsSourceOnlyCoverageAndPinsUndeliveredOverview(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	owner := session(t, s)
+	req, claim := prepared(t, s, owner)
+	frame := domain.Asset{ID: domain.ID(), SnapshotID: req.SnapshotID, SourceID: claim.Run.SourceID, RunID: claim.Run.ID, Kind: "frame", StorageKey: domain.ID() + ".jpg", SHA256: "pending-fixture", MIME: "image/jpeg", Bytes: 42, TimeMS: domain.Ptr(int64(200)), ExpiresAt: domain.Ptr(time.Now().Add(time.Hour))}
+	if err := s.AddAsset(ctx, claim, frame); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := map[string]any{"ready": true, "schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "execution_contract": domain.ExecutionContract{Version: domain.ExecutionContractV4, RunID: claim.Run.ID}, "source_index_protocol": "source-index-2026-10-20-v1", "source_notes": []any{map[string]any{"chunk_id": "frozen-chunk", "summary": "derived navigation only", "evidence_ids": []string{"t1"}}}, "pending_overview": []string{frame.ID}, "inspections": map[string]any{}}
+	if err := s.Checkpoint(ctx, claim, checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Fail(ctx, claim, domain.Failure{Code: "PROVIDER_UNAVAILABLE", Message: "fixture", CanRetry: true}, false, 0); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := s.CreateRequest(ctx, owner, domain.ID(), "", req.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Request(ctx, owner, retry.ID)
+	if err != nil || next.ActiveRunID == nil {
+		t.Fatal(err)
+	}
+	run, err := s.Run(ctx, *next.ActiveRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copied map[string]any
+	if err = json.Unmarshal(run.Checkpoint, &copied); err != nil || copied["draft_resume"] != true || Hash(copied["source_notes"]) != Hash(checkpoint["source_notes"]) || Hash(copied["pending_overview"]) != Hash(checkpoint["pending_overview"]) {
+		t.Fatal("source-only progress lost on explicit retry", err, string(run.Checkpoint))
+	}
+	var pinned bool
+	if err = s.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM asset_refs WHERE asset_id=$1 AND owner_type='run' AND owner_id=$2 AND expires_at>now())", frame.ID, run.ID).Scan(&pinned); err != nil || !pinned {
+		t.Fatal("undelivered overview was not pinned for the new claim", err)
 	}
 }

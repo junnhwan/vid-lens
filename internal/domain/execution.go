@@ -13,7 +13,13 @@ const ExecutionContractV2 = "vidlens-execution-2026-10-20-v2"
 // the actual investigation scope. V1/V2 runs retain their frozen review rules.
 const ExecutionContractV3 = "vidlens-execution-2026-10-20-v3"
 
-const CurrentExecutionContract = ExecutionContractV3
+// V4 bounds source delivery and separates chronological source coverage from
+// targeted evidence retrieval. Older contracts retain their frozen inputs.
+const ExecutionContractV4 = "vidlens-execution-2026-10-20-v4"
+
+const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
+
+const CurrentExecutionContract = ExecutionContractV4
 
 type ExecutionContract struct {
 	Version string `json:"version"`

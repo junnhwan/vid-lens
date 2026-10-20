@@ -19,7 +19,7 @@ func (s *session) validateExecution() error {
 		return domain.Err(422, "INTERNAL_FAILURE", "检查点协议版本不兼容。")
 	}
 	if contract := s.cp.ExecutionContract; contract != nil {
-		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3) || contract.RunID != s.claim.Run.ID {
+		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4) || contract.RunID != s.claim.Run.ID {
 			return domain.Err(422, "INTERNAL_FAILURE", "执行契约版本或所属任务不兼容。")
 		}
 		layout, wireProtocol := draftLayout, domain.ArticleDraftProtocol
@@ -36,6 +36,20 @@ func (s *session) validateExecution() error {
 			for _, msg := range s.cp.Messages {
 				if msg == nil {
 					return domain.Err(422, "INTERNAL_FAILURE", "执行检查点包含无效的模型上下文。")
+				}
+			}
+		}
+		if s.boundedSourceContext() {
+			if len(s.cp.SourceNotes) > 0 && s.cp.SourceIndexProtocol != sourceIndexProtocol {
+				return domain.Err(422, "INTERNAL_FAILURE", "材料索引协议不兼容。")
+			}
+			chunks := s.sourceChunks()
+			if len(s.cp.SourceNotes) > len(chunks) {
+				return domain.Err(422, "INTERNAL_FAILURE", "材料卡超出当前冻结来源。")
+			}
+			for i, note := range s.cp.SourceNotes {
+				if validateSourceNote(note, chunks[i]) != nil {
+					return domain.Err(422, "INTERNAL_FAILURE", "材料卡与当前冻结来源不一致。")
 				}
 			}
 		}
@@ -70,6 +84,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		s.cp.Protocol = domain.ArticleDraftProtocol
 	}
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
+	if s.boundedSourceContext() {
+		instruction += "\n" + sourceContextInstructions
+	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}
 	fixed := map[string]any{"goal": "Create an independently readable illustrated article in Chinese, covering the full video's main content. First record observations for the overview frames, then investigate content-specific gaps."}
@@ -104,10 +121,17 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		dynamic["prior_conversation_not_video_evidence"] = prior
 	}
 	raw := domain.JSON(text)
+	if s.boundedSourceContext() {
+		raw = domain.JSON(s.sourceContext())
+	}
 	if utf8.RuneCount(raw) > s.profile.MaxInputChars {
 		return nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "完整文字超过当前模型输入限制，不能截断后冒充全片概览。")
 	}
-	msgs = append(msgs, schema.UserMessage(string(raw)))
+	sourceMessage := schema.UserMessage(string(raw))
+	if s.boundedSourceContext() {
+		sourceMessage.Name = sourceContextName
+	}
+	msgs = append(msgs, sourceMessage)
 	msgs = append(msgs, schema.UserMessage(string(domain.JSON(fixed))))
 	if s.turn != nil {
 		msgs = append(msgs, schema.UserMessage(string(domain.JSON(dynamic))))

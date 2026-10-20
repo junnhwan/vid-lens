@@ -37,6 +37,9 @@ func (s *session) requireAnswerPublicationReview(ctx context.Context, a domain.A
 // tools or model context are initialized. This gate only reads completed review
 // operations, retaining the candidate and never spending another provider call.
 func (s *session) requirePublicationReview(ctx context.Context, candidate any, citations map[string]domain.Citation) error {
+	if s.boundedSourceContext() && (s.sourceSurveyPending() || len(s.cp.PendingOverview) > 0 || len(s.unobserved(ctx)) > 0) {
+		return publicationReviewIncomplete()
+	}
 	if !s.usesBoundedReview() || !s.policy().ContentReview {
 		return nil // Historical checkpoints retain their frozen contract.
 	}

@@ -89,7 +89,7 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		optional = max(0, p.OptionalInspections-s.cp.Progress.OptionalInspections)
 		reserved = p.FinalCallsReserved
 	}
-	canCompose := s.turn == nil && len(pending) == 0 && len(blockers) == 0 && len(s.cp.OverviewIDs) > 0
+	canCompose := s.turn == nil && len(pending) == 0 && len(blockers) == 0 && len(s.cp.OverviewIDs) > 0 && len(s.cp.PendingOverview) == 0 && !s.sourceSurveyPending()
 	action := "Resolve listed critical questions; optional gaps may be documented as limitations."
 	if len(pending) > 0 {
 		action = "Record visible facts for pending frames first; do not reload or request new pixels."
@@ -122,6 +122,14 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 		}
 	}
 	out := map[string]any{"pending_frame_ids": pending, "critical_question_ids": blockers, "comparison_frame_headroom": room, "window_max_ms": 60000, "inspect_calls_per_response": 1, "can_compose": canCompose, "optional_inspections_remaining": optional, "model_calls_remaining": max(0, s.profile.MaxIterations-s.cp.Calls), "final_calls_reserved": reserved, "consecutive_no_progress": s.cp.Progress.Stalled, "rejected_candidate": s.cp.LastCandidate, "next_action": action}
+	if s.boundedSourceContext() {
+		out["overview_frames_waiting_delivery"] = len(s.cp.PendingOverview)
+		if s.sourceSurveyPending() {
+			out["next_action"] = "Read the entire delivered current_chunk, then record_source_notes. Continue every chunk before planning."
+		} else if len(s.cp.PendingOverview) > 0 {
+			out["next_action"] = "Record the delivered overview frames. The next batch arrives automatically. Release finished comparisons with retain_for_comparison=false if headroom is zero."
+		}
+	}
 	if reviewIssue != nil {
 		out["evidence_review_issues"] = reviewIssue
 	}
@@ -199,7 +207,11 @@ func (s *session) progressFingerprint(ctx context.Context) (string, error) {
 		draft.BatchReceipt = nil
 		content = draft
 	}
-	return store.Hash(map[string]any{"facts": facts, "draft": content, "frames": s.cp.CitationFrames}), nil
+	state := map[string]any{"facts": facts, "draft": content, "frames": s.cp.CitationFrames}
+	if s.boundedSourceContext() {
+		state["source_notes"] = s.cp.SourceNotes
+	}
+	return store.Hash(state), nil
 }
 
 func (s *session) toolFeedback(ctx context.Context, name, args, before string, result *schema.ToolResult, callErr error) error {

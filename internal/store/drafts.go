@@ -129,7 +129,10 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM observations WHERE run_id=$1 AND snapshot_id=$2", previous.ID, snapshot).Scan(&observations); err != nil {
 		return err
 	}
-	if draft.Version == 0 && observations == 0 {
+	notes, _ := cp["source_notes"].([]any)
+	contract, _ := cp["execution_contract"].(map[string]any)
+	reusableNotes := len(notes) > 0 && contract["version"] == domain.ExecutionContractV4 && cp["source_index_protocol"] == domain.SourceIndexProtocolV1
+	if draft.Version == 0 && observations == 0 && !reusableNotes {
 		return nil
 	}
 	// No automatic download/re-materialization during retry admission. If an
@@ -139,6 +142,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	var frames []string
 	if err = tx.QueryRow(ctx, `SELECT COALESCE(array_agg(DISTINCT frame_id),'{}'::text[]) FROM (
 		SELECT f.frame_id FROM jsonb_each(COALESCE($1::jsonb->'inspections','{}'::jsonb)) e CROSS JOIN LATERAL jsonb_array_elements_text(e.value) f(frame_id)
+		UNION SELECT jsonb_array_elements_text(COALESCE(NULLIF($1::jsonb->'pending_overview','null'::jsonb),'[]'::jsonb))
 		UNION SELECT jsonb_array_elements_text(COALESCE(data->'frame_ids','[]'::jsonb)) FROM observations WHERE run_id=$2
 	) wanted`, previous.Checkpoint, previous.ID).Scan(&frames); err != nil {
 		return err

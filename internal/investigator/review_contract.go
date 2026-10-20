@@ -28,14 +28,17 @@ review_mode=source_text时只判断文字来源是否支持断言，像素专属
 只调用report_review_units，复制request_id和unit_id。结论简短，不改写候选，不复述私密推理。`
 
 func (s *session) usesBoundedReview() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV2 || s.cp.ExecutionContract.Version == domain.ExecutionContractV3)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV2 || s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.cp.ExecutionContract.Version == domain.ExecutionContractV4)
 }
 
 func (s *session) usesModalityReview() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV3
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.cp.ExecutionContract.Version == domain.ExecutionContractV4)
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.boundedSourceContext() {
+		return "evidence-review-2026-10-20-v8"
+	}
 	if s.usesModalityReview() {
 		return modalityReviewProtocol
 	}
@@ -43,6 +46,9 @@ func (s *session) boundedReviewProtocol() string {
 }
 
 func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
+	if s.boundedSourceContext() {
+		return planReviewTasksWithImageTarget(units, s.profile.MaxOutputTokens, true, 3)
+	}
 	if s.usesModalityReview() {
 		return planReviewTasksByModality(units, s.profile.MaxOutputTokens, true)
 	}
@@ -206,6 +212,10 @@ func planReviewTasks(units []reviewUnit, outputCapacity int) ([]reviewTask, erro
 }
 
 func planReviewTasksByModality(units []reviewUnit, outputCapacity int, modalities bool) ([]reviewTask, error) {
+	return planReviewTasksWithImageTarget(units, outputCapacity, modalities, 12)
+}
+
+func planReviewTasksWithImageTarget(units []reviewUnit, outputCapacity int, modalities bool, imageTarget int) ([]reviewTask, error) {
 	target := max(1024, min(8192, outputCapacity/4))
 	tasks := []reviewTask{}
 	for _, mode := range []string{"source_text", "visual"} {
@@ -223,7 +233,7 @@ func planReviewTasksByModality(units []reviewUnit, outputCapacity int, modalitie
 			}
 			cost := estimateTextTokens(domain.JSON(unit))
 			next := reviewTask{Mode: mode, Units: append(append([]reviewUnit{}, batch.Units...), unit)}
-			if len(batch.Units) > 0 && (len(batch.Units) >= 8 || work+cost > target || len(reviewTaskFrames(next)) > 12) {
+			if len(batch.Units) > 0 && (len(batch.Units) >= 8 || work+cost > target || len(reviewTaskFrames(next)) > imageTarget) {
 				tasks = append(tasks, batch)
 				batch = reviewTask{Mode: mode}
 				work = 0

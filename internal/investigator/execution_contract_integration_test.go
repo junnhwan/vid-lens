@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -329,7 +330,14 @@ func TestExplicitDraftRetryResolvesItsOwnCompatibleExecution(t *testing.T) {
 			if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.CurrentExecutionContract || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != tc.expected || cp.Protocol != domain.ArticleDraftProtocol || cp.DraftResume || cp.Calls != 0 || cp.Repairs != 0 {
 				t.Fatalf("explicit retry did not resolve and persist its own execution: %s", run.Checkpoint)
 			}
-			hash := sha256.Sum256([]byte(cp.Messages[0].Content))
+			text := cp.Messages[0].Content
+			if cp.ExecutionContract.Version == domain.ExecutionContractV4 {
+				if !strings.HasSuffix(text, "\n"+sourceContextInstructions) {
+					t.Fatal("new execution omitted bounded source contract")
+				}
+				text = strings.TrimSuffix(text, "\n"+sourceContextInstructions)
+			}
+			hash := sha256.Sum256([]byte(text))
 			if hex.EncodeToString(hash[:]) != frozenPromptHash(t, tc.expected, false) {
 				t.Fatal("new retry did not use the complete compatible prompt")
 			}
@@ -402,7 +410,11 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	}
 	select {
 	case messages := <-requests:
-		hash := sha256.Sum256([]byte(wireText(t, messages[0])))
+		text := wireText(t, messages[0])
+		if !strings.HasSuffix(text, "\n"+sourceContextInstructions) {
+			t.Fatal("new question omitted bounded source contract")
+		}
+		hash := sha256.Sum256([]byte(strings.TrimSuffix(text, "\n"+sourceContextInstructions)))
 		if hex.EncodeToString(hash[:]) != frozenPromptHash(t, 16, true) {
 			t.Fatal("new question inherited its article's old authoring protocol")
 		}
