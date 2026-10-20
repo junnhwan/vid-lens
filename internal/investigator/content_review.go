@@ -405,7 +405,7 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 		}
 		return result, nil
 	}
-	return evidenceReview{}, &candidateError{err: invalid("独立复核未返回合格的结构化结论，候选已保留，不能据此发布。")}
+	return evidenceReview{}, domain.Err(502, "REVIEW_RESULT_INVALID", "独立复核未返回合格的结构化结论；来源和草稿已保留，可以重新尝试。")
 }
 
 // Reserve a logical model slot durably before its submission. A crash between

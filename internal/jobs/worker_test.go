@@ -104,6 +104,10 @@ func TestWorkerCommitsAcceptedFailureAndAcknowledgesQueue(t *testing.T) {
 }
 
 func TestMalformedResultAllowsExplicitRetryWithoutAutomaticResubmission(t *testing.T) {
+	failure, automatic, _ := classify(domain.Err(502, "REVIEW_RESULT_INVALID", "reviewer returned an invalid report"))
+	if !failure.CanRetry || automatic {
+		t.Fatal("review format failure must allow explicit retry without automatic resubmission", failure, automatic)
+	}
 	for _, code := range []string{"MODEL_RESULT_INVALID", "MODEL_RESULT_NOT_SUBMITTED", "MODEL_OUTPUT_TRUNCATED"} {
 		failure, automatic, _ := classify(domain.Err(422, code, "invalid structured result"))
 		if !failure.CanRetry || automatic {
