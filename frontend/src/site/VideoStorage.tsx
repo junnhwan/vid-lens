@@ -6,7 +6,7 @@ import { DeskStatus } from "../ui/DeskStatus"
 import type { VideoCleanup } from "./manageRoute"
 interface Overview {
 	settings: { revision: number; video_quota_bytes: number; image_quota_bytes: number; host_min_free_bytes: number; source_download_limit_bytes: number }
-	max_video_ms: number
+	max_video_ms?: number
   original_bytes: number
   image_bytes: number
   export_bytes: number
@@ -103,7 +103,7 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
   const [confirm, setConfirm] = useState<Video | null>(null)
   const [loadedAt, setLoadedAt] = useState("")
   const cancelRef = useRef<HTMLButtonElement>(null)
-  const dirty = Boolean(overview && (Number(hostMinFreeGiB) * gib !== overview.settings.host_min_free_bytes || Number(sourceDownloadLimitMiB) * mib !== overview.settings.source_download_limit_bytes || Math.round(Number(maxVideoMinutes) * minute) !== overview.max_video_ms))
+  const dirty = Boolean(overview && (Number(hostMinFreeGiB) * gib !== overview.settings.host_min_free_bytes || Number(sourceDownloadLimitMiB) * mib !== overview.settings.source_download_limit_bytes || (overview.max_video_ms != null && Math.round(Number(maxVideoMinutes) * minute) !== overview.max_video_ms)))
   useEffect(() => { setSearch(query) }, [query])
   useEffect(() => { onDirty(dirty || Boolean(confirm) || busy === "save" || busy === "delete") }, [dirty, confirm, busy, onDirty])
   useEffect(() => { if (confirm) cancelRef.current?.focus() }, [confirm])
@@ -115,7 +115,7 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
     setOverview(v)
     setHostMinFreeGiB(String(v.settings.host_min_free_bytes / gib))
     setSourceDownloadLimitMiB(String(v.settings.source_download_limit_bytes / mib))
-    setMaxVideoMinutes(String(v.max_video_ms / minute))
+    setMaxVideoMinutes(v.max_video_ms == null ? "" : String(v.max_video_ms / minute))
   }
   useEffect(() => {
     let stop = false
@@ -133,8 +133,9 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
     if (!overview || busy) return
     setBusy("save"); setError(""); setNotice("")
     try {
-      const r = await api.request<Overview>("PUT", "/api/v1/admin/storage", { expected_revision: overview.settings.revision, video_quota_bytes: overview.settings.video_quota_bytes, image_quota_bytes: overview.settings.image_quota_bytes, host_min_free_bytes: Math.round(Number(hostMinFreeGiB) * gib), source_download_limit_bytes: Math.round(Number(sourceDownloadLimitMiB) * mib), max_video_ms: Math.round(Number(maxVideoMinutes) * minute) })
-      accept(r.body); setNotice("视频限制已保存；新提交采用新时长上限，既有任务保留原配置。")
+      const duration = overview.max_video_ms == null ? {} : { max_video_ms: Math.round(Number(maxVideoMinutes) * minute) }
+      const r = await api.request<Overview>("PUT", "/api/v1/admin/storage", { expected_revision: overview.settings.revision, video_quota_bytes: overview.settings.video_quota_bytes, image_quota_bytes: overview.settings.image_quota_bytes, host_min_free_bytes: Math.round(Number(hostMinFreeGiB) * gib), source_download_limit_bytes: Math.round(Number(sourceDownloadLimitMiB) * mib), ...duration })
+      accept(r.body); setNotice(overview.max_video_ms == null ? "存储设置已保存；新视频按服务器实时空闲空间和保护空间准入。" : "视频限制已保存；新提交采用新时长上限，既有任务保留原配置。")
     } catch (e) { failed(e) }
     finally { setBusy("") }
   }
@@ -190,10 +191,10 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
         <div><span>VidLens 视频与音频占用</span><strong>{formatDiskBytes(overview.original_bytes)}</strong><p>导出文件 {formatDiskBytes(overview.export_bytes)} · 运行任务预留 {formatDiskBytes(overview.reserved_video_bytes)}</p></div>
         <div><span>VidLens 配图占用</span><strong>{formatDiskBytes(overview.image_bytes)}</strong><p>运行任务预留 {formatDiskBytes(overview.reserved_image_bytes)} · 正式文章配图持续保留</p></div>
       </div>
-      <details className="storage-settings"><summary>视频限制与存储 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)} · 最长 {Math.round(overview.max_video_ms / minute)} 分钟 · 主机至少保留 {formatDiskBytes(overview.settings.host_min_free_bytes)}</span></summary>
+      <details className="storage-settings"><summary>视频限制与存储 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)}{overview.max_video_ms == null ? "" : ` · 最长 ${Math.round(overview.max_video_ms / minute)} 分钟`} · 主机至少保留 {formatDiskBytes(overview.settings.host_min_free_bytes)}</span></summary>
         <form onSubmit={(e) => { e.preventDefault(); void save() }}><fieldset disabled={Boolean(busy) || Boolean(confirm)}>
           <label className="desk-field"><span>单条来源音视频上限 · MiB</span><input type="number" min={64} max={2048} step={1} required value={sourceDownloadLimitMiB} onChange={(e) => setSourceDownloadLimitMiB(e.target.value)} /></label>
-          <label className="desk-field"><span>单条视频时长上限 · 分钟</span><input type="number" min={1} max={1440} step={1} required value={maxVideoMinutes} onChange={(e) => setMaxVideoMinutes(e.target.value)} /></label>
+          {overview.max_video_ms == null ? null : <label className="desk-field"><span>单条视频时长上限 · 分钟</span><input type="number" min={1} max={1440} step={1} required value={maxVideoMinutes} onChange={(e) => setMaxVideoMinutes(e.target.value)} /></label>}
           <label className="desk-field"><span>服务器最低保留 · GiB</span><input type="number" min={3} max={20} step={0.25} required value={hostMinFreeGiB} onChange={(e) => setHostMinFreeGiB(e.target.value)} /></label>
           <button className="btn primary" disabled={!dirty}>{busy === "save" ? "正在保存…" : "保存存储设置"}</button>
         </fieldset><p className="fine">准入按服务器实时空闲空间计算，并至少保留 3 GiB；主机最低保留量可设为 3–20 GiB。单条音视频上限可设为 64–2048 MiB，时长上限可设为 1–1440 分钟；时长调整只作用于新提交，单条大小按当前设置校验。</p></form>

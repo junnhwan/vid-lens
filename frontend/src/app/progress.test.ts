@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { displayStepTitle, parseTranscription, phaseMarks, quietNote, stepSpent, waitClock, anchoredElapsed, serverElapsed } from "./progress"
+import { displayStepTitle, parseTranscription, phaseMarks, quietNote, restingTitle, stepSpent, waitClock, anchoredElapsed, serverElapsed } from "./progress"
 
 describe("transcription progress", () => {
   it("reads the clock embedded in the activity title", () => {
@@ -8,6 +8,10 @@ describe("transcription progress", () => {
     expect(parseTranscription("正在复用已完整校验视频的转写")).toBeNull()
     expect(displayStepTitle("正在转写音频（1:00 / 35:42）")).toBe("正在转写音频")
     expect(displayStepTitle("正在查看菜单")).toBe("正在查看菜单")
+    expect(restingTitle("正在转写音频（12:03 / 19:43）", "done")).toBe("已转写音频")
+    expect(restingTitle("正在准备视频和文字来源", "done")).toBe("已准备视频和文字来源")
+    expect(restingTitle("正在校验视频时长与素材", "stopped")).toBe("校验视频时长与素材")
+    expect(restingTitle("查看实验画面", "done")).toBe("查看实验画面")
   })
 })
 

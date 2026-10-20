@@ -1,8 +1,6 @@
 import type { ActivityStep } from "../contract/types"
 import { formatClock } from "../contract/text"
 
-export const QUIET_AFTER_MS = 20_000
-
 export const PHASES = [
   { id: "prepare_source", label: "准备" },
   { id: "overview", label: "通览" },
@@ -35,6 +33,14 @@ export function parseTranscription(title: string): { done: string; total: string
 
 export function displayStepTitle(title: string): string {
   return parseTranscription(title) ? "正在转写音频" : title
+}
+
+export function restingTitle(title: string, status: "done" | "stopped"): string {
+  const transcription = parseTranscription(title) != null || title.startsWith("正在转写音频")
+  if (!transcription && !title.startsWith("正在")) return title
+  const plain = transcription ? "转写音频" : title.slice(2)
+  if (status === "done") return `已${plain}`
+  return plain
 }
 
 export function phaseMarks(phase: string | null | undefined, mode: "running" | "done" | "stopped"): PhaseMark[] {

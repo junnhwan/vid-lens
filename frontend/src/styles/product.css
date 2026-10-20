@@ -132,11 +132,22 @@
 }
 
 .transcribe-fill {
+  position: relative;
   width: 100%;
   height: 100%;
+  overflow: hidden;
   background: var(--teal);
   transform-origin: left center;
   transition: transform 280ms var(--ease-out);
+}
+
+.transcribe-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 36%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, white 78%, var(--teal)), transparent);
+  animation: transcribe-gleam 2.4s ease-in-out infinite;
 }
 
 .transcribe-meta {
@@ -270,23 +281,6 @@
 
 .step .mark { position: relative; }
 
-.step[data-status="active"] {
-  position: relative;
-  background: transparent;
-}
-
-.step[data-status="active"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 8px;
-  background: var(--teal-soft);
-  pointer-events: none;
-  animation: row-breathe 2.8s var(--ease-in-out) infinite;
-}
-
-.step[data-status="active"] > * { position: relative; }
-
 .step[data-status="active"] .mark::before {
   content: "";
   position: absolute;
@@ -313,11 +307,6 @@
   to { opacity: 1; transform: none; }
 }
 
-@keyframes row-breathe {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
-
 @keyframes step-breathe {
   0%, 100% { opacity: 0.2; transform: scale(0.92); }
   50% { opacity: 0.75; transform: scale(1); }
@@ -340,7 +329,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .phase-spine li[data-state="current"] .phase-dot { animation: phase-now 180ms var(--ease-out); }
-  .phase-spine li[data-state="current"]::before {
+  .phase-spine li[data-state="current"] + li::before {
     top: 4px;
     height: 2px;
     background: repeating-linear-gradient(90deg, var(--teal) 0 6px, transparent 6px 11px);
@@ -348,20 +337,66 @@
     animation: phase-dash 1.6s linear infinite;
   }
   .step[data-status="done"] .mark { animation: mark-in 180ms var(--ease-out); }
+  .activity[data-motion="watch"] .activity-title {
+    background-image: linear-gradient(90deg, transparent, var(--teal), transparent);
+    background-repeat: no-repeat;
+    background-size: 28% 2px;
+    background-position: 0 100%;
+    animation: title-scan 3.8s ease-in-out infinite;
+  }
+  .activity[data-motion="model"] .activity-title {
+    background-image: repeating-linear-gradient(90deg, var(--teal) 0 5px, transparent 5px 9px);
+    background-repeat: no-repeat;
+    background-size: 100% 2px;
+    background-position: 0 100%;
+    animation: model-dash 2.8s linear infinite;
+  }
+  .activity[data-motion="write"] .activity-title::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 0.86em;
+    margin-left: 4px;
+    background: var(--teal);
+    vertical-align: -0.08em;
+    animation: caret-blink 1.15s steps(1) infinite;
+  }
 }
 
 @keyframes phase-dash {
   to { background-position: 22px 0; }
 }
 
+@keyframes transcribe-gleam {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(380%); }
+}
+
+@keyframes title-scan {
+  from { background-position: 0 100%; }
+  to { background-position: 100% 100%; }
+}
+
+@keyframes model-dash {
+  to { background-position: 18px 100%; }
+}
+
+@keyframes caret-blink {
+  50% { opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .step[data-status="active"]::before,
   .step[data-status="active"] .mark::before,
   .quiet-note,
   .coverage-mark,
-  .prose[data-arrive="true"] > section { animation: none; }
+  .prose[data-arrive="true"] > section,
+  .transcribe-fill::after,
+  .activity[data-motion="watch"] .activity-title,
+  .activity[data-motion="model"] .activity-title,
+  .activity[data-motion="write"] .activity-title::after { animation: none; }
   .transcribe-fill { transition: none; }
-  .step[data-status="active"]::before { opacity: 1; }
+  .transcribe-fill::after { content: none; }
+  .activity[data-motion="write"] .activity-title::after { content: none; }
 }
 
 .lb-stage img {

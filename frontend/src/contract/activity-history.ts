@@ -51,6 +51,122 @@ function observationSummary(items: ActivityStep[]): ActivityStep {
   }
 }
 
+const stagePatterns: [RegExp, string][] = [
+  [/转写|复用已完整校验/, "transcribe"],
+  [/校验视频时长/, "probe"],
+  [/获取用于观察|完整视频/, "download"],
+  [/字幕/, "subtitles"],
+  [/准备视频和文字来源/, "prepare"],
+]
+
+function stageKey(title: string): string {
+  return stagePatterns.find(([pattern]) => pattern.test(title))?.[1] ?? title
+}
+
+function sourceWork(step: ActivityStep): boolean {
+  return step.phase === "prepare_source" && step.kind !== "retry" && step.kind !== "model_response" && step.kind !== "model_submission" && step.kind !== "execution_plan" && step.kind !== "observation_group"
+}
+
+function sourceRetry(step: ActivityStep): boolean {
+  return step.kind === "retry" && (step.phase === "prepare_source" || /来源准备中断|准备中断/.test(step.title))
+}
+
+function newAttempt(title: string): boolean {
+  return /第\s*\d+\s*次尝试/.test(title)
+}
+
+interface PrepAttempt { items: ActivityStep[]; retry: ActivityStep | null }
+
+function interruptNotice(attempt: PrepAttempt): ActivityStep {
+  const stopped = [...attempt.items].reverse().find((step) => step.status === "failed" || step.status === "canceled")
+  const reason = attempt.retry?.outcome?.message || stopped?.outcome?.message || "这次准备没有完成。"
+  const attemptNo = attempt.retry?.title.match(/第\s*(\d+)\s*次/)?.[1] || attempt.items.map((step) => step.title.match(/第\s*(\d+)\s*次尝试/)?.[1]).find(Boolean)
+  const seed = attempt.items[0]
+  return {
+    ...seed,
+    id: attempt.retry?.id ?? `prep-interrupt-${seed.run_id}-${seed.id}`,
+    kind: "retry",
+    phase: "prepare_source",
+    title: attemptNo ? `第 ${attemptNo} 次准备中断` : "上一次准备中断",
+    status: "canceled",
+    purpose: null,
+    source_range: null,
+    frames: [],
+    frame_ids: [],
+    outcome: { message: reason, evidence_status: attempt.retry?.outcome?.evidence_status || stopped?.outcome?.evidence_status || "not_assessed" },
+  }
+}
+
+// Earlier source-preparation rounds repeat the same stages. Keep one row per
+// stage in the open round, and fold an interrupted round into its reason.
+export function collapseSourceRetries(steps: ActivityStep[]): ActivityStep[] {
+  const attempts: PrepAttempt[] = []
+  let attempt: PrepAttempt | null = null
+  for (const step of steps) {
+    if (sourceRetry(step)) {
+      const bucket = attempt ?? { items: [], retry: null }
+      if (!attempt) attempts.push(bucket)
+      bucket.retry = step
+      attempt = null
+      continue
+    }
+    if (!sourceWork(step)) continue
+    if (!attempt) {
+      attempt = { items: [step], retry: null }
+      attempts.push(attempt)
+      continue
+    }
+    const opened = attempt.items[0]
+    const split = opened.run_id !== step.run_id || (newAttempt(step.title) && !newAttempt(opened.title))
+    if (split) {
+      attempt = { items: [step], retry: null }
+      attempts.push(attempt)
+      continue
+    }
+    attempt.items.push(step)
+  }
+  if (!attempts.length) return steps
+  const skip = new Set<string>()
+  const replace = new Map<string, ActivityStep>()
+  attempts.forEach((bucket, index) => {
+    const last = index === attempts.length - 1
+    const interrupted = bucket.items.some((step) => step.status === "failed" || step.status === "canceled")
+    if (bucket.items.length && (bucket.retry || (!last && interrupted))) {
+      for (const step of bucket.items) skip.add(step.id)
+      if (bucket.retry) skip.add(bucket.retry.id)
+      replace.set(bucket.items[0].id, interruptNotice(bucket))
+      return
+    }
+    const latest = new Map<string, ActivityStep>()
+    for (const step of bucket.items) latest.set(stageKey(step.title), step)
+    const emitted = new Set<string>()
+    for (const step of bucket.items) {
+      const key = stageKey(step.title)
+      if (emitted.has(key)) {
+        skip.add(step.id)
+        continue
+      }
+      emitted.add(key)
+      const chosen = latest.get(key)!
+      if (chosen.id !== step.id) {
+        replace.set(step.id, chosen)
+        skip.add(chosen.id)
+      }
+    }
+  })
+  const result: ActivityStep[] = []
+  for (const step of steps) {
+    const swapped = replace.get(step.id)
+    if (swapped) {
+      result.push(swapped)
+      continue
+    }
+    if (skip.has(step.id)) continue
+    result.push(step)
+  }
+  return result
+}
+
 export function activityGroups(steps: ActivityStep[]) {
   const groups: ActivityGroup[] = []
   const calls = new Map<string, ActivityGroup>()

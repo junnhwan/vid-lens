@@ -46,4 +46,12 @@ describe("source retries", () => {
     expect(description.title).toBe("将自动重试")
     expect(description.purpose).toContain("会自动再试一次")
   })
+  it("names transcription instead of source preparation", () => {
+    const view = { request: { status: "waiting_source" }, execution: { status: "running" } } as RequestView
+    const current = { status: "running", title: "正在转写音频（12:03 / 19:43）", kind: "tool_execution" } as ActivityStep
+    const description = describeRequest(view, current, false, false)
+    expect(description.kicker).toBe("正在转写")
+    expect(description.title).toBe("正在转写音频")
+    expect(description.purpose).toBe("")
+  })
 })

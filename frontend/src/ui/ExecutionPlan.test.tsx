@@ -23,7 +23,7 @@ describe("durable execution presentation", () => {
     const html = renderToStaticMarkup(<ActivityList steps={steps} resourceStatus="running" detailed open onOpenFrame={() => {}} onBroken={() => {}} />)
     expect(steps).toHaveLength(3)
     for (const n of [1, 2, 3]) expect(html).toContain(`第 ${n} 次模型调用`)
-    expect(html).toContain("正在组织文章结构")
+    expect(html).toContain("已组织文章结构")
     expect(html).toContain("下一步执行：查看实验画面。")
   })
 })

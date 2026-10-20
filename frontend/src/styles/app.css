@@ -676,7 +676,6 @@ main { position: relative; }
   color: var(--ink-soft);
   font-size: 15px;
   line-height: 1.55;
-  min-height: 1.55em;
 }
 
 .run-actions {
@@ -997,8 +996,6 @@ main { position: relative; }
   border-radius: 8px;
   line-height: 1.55;
 }
-
-.step[data-status="active"] { background: var(--teal-soft); }
 
 .mark {
   width: 16px;

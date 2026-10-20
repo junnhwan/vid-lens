@@ -1,7 +1,7 @@
 import type { ActivityStep, ExecutionView, RequestView, TurnView } from "../contract/types"
 import { clipText, formatRange } from "../contract/text"
 import { isTerminalStatus } from "../contract/stream"
-import { displayStepTitle } from "./progress"
+import { displayStepTitle, parseTranscription } from "./progress"
 
 const phaseTitle: Record<string, string> = {
   prepare_source: "正在准备视频",
@@ -61,7 +61,8 @@ export function describeRequest(view: RequestView | null, current: ActivityStep 
   }
   if (current) {
     const model = current.kind === "model_response"
-    return { kicker, title: displayStepTitle(model ? current.purpose || current.title : current.title), purpose: model ? `第 ${current.model_call || ""} 次模型调用` : current.purpose || "", range: formatRange(current.source_range), busy: true }
+    const transcribing = parseTranscription(current.title) != null || current.title.startsWith("正在转写")
+    return { kicker: kicker === "正在准备来源" && transcribing ? "正在转写" : kicker, title: displayStepTitle(model ? current.purpose || current.title : current.title), purpose: model ? `第 ${current.model_call || ""} 次模型调用` : current.purpose || "", range: formatRange(current.source_range), busy: true }
   }
   return { kicker, title: fallbackTitle(execution), purpose: fallbackPurpose(execution), range: "", busy: !isTerminalStatus(status) }
 }

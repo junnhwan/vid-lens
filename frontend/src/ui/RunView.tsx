@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type Ref } from "react"
 import type { ActivityStep, Frame, Range, RequestView } from "../contract/types"
 import { formatClock, formatDuration, platformLabel, provenanceNote } from "../contract/text"
 import { describeRequest } from "../app/labels"
-import { PHASES, QUIET_AFTER_MS, parseTranscription, phaseMarks, quietNote, waitClock, anchoredElapsed, serverElapsed, type PhaseMark } from "../app/progress"
-import { EASE, animateTitle, prefersReduced } from "./motion"
+import { PHASES, parseTranscription, phaseMarks, quietNote, waitClock, anchoredElapsed, serverElapsed, type PhaseMark } from "../app/progress"
+import { animateTitle } from "./motion"
 import { ActivityList } from "./ActivityList"
 import { FrameThumb } from "./FrameThumb"
 import { ModelIdentity } from "./ModelIdentity"
@@ -49,11 +49,9 @@ export function RunView({
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null)
   const listBox = useRef<HTMLDivElement>(null)
-  const frameBox = useRef<HTMLDivElement>(null)
   const acknowledged = useRef(0)
   const [freshId, setFreshId] = useState<string | null>(null)
   const [framesOpen, setFramesOpen] = useState(false)
-  const [quietOn, setQuietOn] = useState(false)
   const seen = useRef(new Set<string>())
   const current = steps.find((step) => step.id === view?.activity.current_step_id) ?? null
   const copy = describeRequest(view, current, holding, reconnecting)
@@ -72,8 +70,8 @@ export function RunView({
   const phaseId = view?.execution?.phase || current?.phase || (stopped ? steps.at(-1)?.phase : null) || null
   const marks = phaseMarks(phaseId, holding || view?.request.status === "completed" ? "done" : stopped ? "stopped" : "running")
   const clock = useWaitClock(view?.request.created_at, view?.request.updated_at, active && copy.busy, view?.server_now)
-  const quiet = quietOn ? quietNote(phaseId, view?.execution?.status) : ""
-  const signature = `${current?.id ?? ""}|${current?.title ?? ""}|${view?.execution?.status ?? ""}|${view?.execution?.phase ?? ""}`
+  const quiet = copy.busy ? quietNote(phaseId, view?.execution?.status) : ""
+  const motion = waitMotion(copy.busy, phaseId, current, Boolean(transcribed))
   const meta = [platformLabel(source?.platform), formatDuration(source?.duration_ms), source?.part?.label].filter(Boolean).join(" · ")
   const note = source
     ? view?.request.reuse === "published_article"
@@ -103,34 +101,13 @@ export function RunView({
     return () => window.clearTimeout(timer)
   }, [steps])
 
-  useEffect(() => {
-    setQuietOn(false)
-    if (!active || !copy.busy) return
-    const timer = window.setTimeout(() => setQuietOn(true), QUIET_AFTER_MS)
-    return () => window.clearTimeout(timer)
-  }, [active, copy.busy, signature])
-
   function toggleHistory() {
     onToggleHistory()
   }
 
   function toggleFrames() {
-    const el = frameBox.current
-    const opening = !framesOpen
-    if (opening) acknowledged.current = shown.length
-    setFramesOpen(opening)
-    if (!el || prefersReduced()) return
-    for (const a of el.getAnimations()) a.cancel()
-    if (opening) {
-      const anim = el.animate(
-        [
-          { opacity: 0, transform: "translateY(8px)" },
-          { opacity: 1, transform: "none" },
-        ],
-        { duration: 200, easing: EASE },
-      )
-      anim.onfinish = () => anim.cancel()
-    }
+    if (!framesOpen) acknowledged.current = shown.length
+    setFramesOpen((open) => !open)
   }
 
   function openAt(frame: Frame, origin: HTMLElement) {
@@ -141,13 +118,13 @@ export function RunView({
   return (
     <section className="view-run" ref={viewRef}>
       <div className="source">
-        <div className="source-still" aria-hidden="true">
-          {poster ? (
+        {poster ? (
+          <div className="source-still" aria-hidden="true">
             <span className="shot-host">
               <FrameThumb frame={poster} variant="thumbnail" onBroken={onBroken} />
             </span>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         <div>
           <p className="source-title">{source?.title || (stopped ? "视频处理未完成" : "正在确认视频")}</p>
           <p className="source-meta">{meta || view?.request.input_url || ""}</p>
@@ -155,7 +132,7 @@ export function RunView({
           <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} detailLevel={view?.request.detail_level} />
         </div>
       </div>
-      <div className="activity" aria-busy={copy.busy}>
+      <div className="activity" aria-busy={copy.busy} data-motion={motion || undefined}>
         <div className="run-pin">
         <p className="kicker">
           <span className="pulse" hidden={!copy.busy} aria-hidden="true" />
@@ -167,10 +144,10 @@ export function RunView({
           ) : null}
         </p>
         <h1 className="activity-title" ref={titleRef} />
-        <p className="purpose">{copy.purpose}</p>
+        {copy.purpose ? <p className="purpose">{copy.purpose}</p> : null}
         {view?.failure?.diagnostic_id ? <p className="meta">错误编号：{view.failure.diagnostic_id}</p> : null}
-        {transcribed ? <TranscriptionMeter done={transcribed.done} total={transcribed.total} ratio={transcribed.ratio} /> : null}
         {quiet ? <p className="quiet-note">{quiet}</p> : null}
+        {transcribed ? <TranscriptionMeter done={transcribed.done} total={transcribed.total} ratio={transcribed.ratio} /> : null}
         <PhaseSpine marks={marks} />
         <div className="run-actions">
           {csrf ? <ShareControl requestId={view?.request.id} csrf={csrf} /> : null}
@@ -208,18 +185,21 @@ export function RunView({
       {shown.length ? (
         <div className="frame-panel">
           <Coverage duration={source?.duration_ms} ranges={steps.flatMap((step) => (step.source_range ? [step.source_range] : []))} />
-          <div ref={frameBox}>
-            <div className="frames frame-drawer" data-open={framesOpen ? "true" : "false"}>
-              {framesOpen && latest ? (
-                <FrameButton
-                  frame={latest}
-                  hero
-                  carry
-                  fresh={isFresh(latest, steps, freshId)}
-                  onOpen={(origin) => openAt(latest, origin)}
-                  onBroken={onBroken}
-                />
-              ) : null}
+          <div className="frames frame-drawer" data-open={framesOpen ? "true" : "false"}>
+              <div className="disclose" data-open={framesOpen ? "true" : "false"}>
+                <div className="disclose-inner">
+                  {latest ? (
+                    <FrameButton
+                      frame={latest}
+                      hero
+                      carry
+                      fresh={isFresh(latest, steps, freshId)}
+                      onOpen={(origin) => openAt(latest, origin)}
+                      onBroken={onBroken}
+                    />
+                  ) : null}
+                </div>
+              </div>
               {strip.length ? (
                 <div className="filmstrip">
                   {strip.map((frame) => (
@@ -234,7 +214,6 @@ export function RunView({
                   ))}
                 </div>
               ) : null}
-            </div>
           </div>
           <button type="button" className="disclosure frame-toggle" aria-expanded={framesOpen} onClick={toggleFrames}>
             {framesOpen ? "收起画面" : unseen ? `展开 ${shown.length} 张画面，有新的` : `展开 ${shown.length} 张画面`}
@@ -249,6 +228,7 @@ export function RunView({
             detailed={historyOpen}
             open={historyOpen}
             freshId={freshId}
+            headline={copy.title}
             onOpenFrame={onOpenFrame}
             onBroken={onBroken}
           />
@@ -263,10 +243,20 @@ export function RunView({
         {view?.activity.history_status === "partial" ? <p className="history-note">一部分过程记录已经清理。</p> : null}
       </div>
       <p className="leave-note">
-        {stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "离开或刷新不会停止后台工作。已看到的步骤会在刷新后恢复。"}
+        {stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "可以离开这个页面，处理会在后台继续。"}
       </p>
     </section>
   )
+}
+
+function waitMotion(busy: boolean, phase: string | null, current: ActivityStep | null, transcribed: boolean): string {
+  if (!busy) return ""
+  if (transcribed) return "transcribe"
+  if (current?.kind === "model_response" || current?.kind === "model_submission") return "model"
+  if (phase === "investigate") return "watch"
+  if (phase === "compose") return "write"
+  if (phase === "prepare_source") return "prepare"
+  return ""
 }
 
 function useWaitClock(createdAt: string | undefined, updatedAt: string | undefined, live: boolean, serverNow: string | undefined): string | null {
@@ -336,14 +326,13 @@ function TranscriptionMeter({ done, total, ratio }: { done: string; total: strin
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={percent}
-      aria-valuetext={`已转写 ${done}，共 ${total}`}
+      aria-valuetext={`视频 ${done} / ${total}`}
     >
       <div className="transcribe-track">
         <div className="transcribe-fill" style={{ transform: `scaleX(${ratio})` }} />
       </div>
       <p className="transcribe-meta">
-        <span>{done}</span>
-        <span>{total}</span>
+        <span>视频 {done} / {total}</span>
       </p>
     </div>
   )

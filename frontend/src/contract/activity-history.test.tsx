@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ActivityList } from "../ui/ActivityList"
-import { activityGroups, lineageHistoryUrls, loadActivityHistory } from "./activity-history"
+import { activityGroups, collapseSourceRetries, lineageHistoryUrls, loadActivityHistory } from "./activity-history"
 import { advanceActivity, mergeActivitySnapshot } from "./activity"
 import type { ActivityPage, ActivityStep } from "./types"
 
@@ -55,6 +55,36 @@ describe("complete execution history", () => {
     expect(html).toContain('data-status="stopped"')
     expect(html).toContain("保存失败，请稍后重试。")
     expect(html).toContain("1/2 组已保存")
+  })
+  it("folds an interrupted preparation into one row and keeps the new round", () => {
+    const prep = (id: string, title: string, status: string, run: string) => ({ ...step(id, "tool_execution", 0), phase: "prepare_source", title, status, run_id: run })
+    const steps = [
+      prep("prep-1", "正在准备视频和文字来源", "completed", "run-1"),
+      prep("probe-1", "正在校验视频时长与素材", "completed", "run-1"),
+      prep("audio-1", "正在转写音频（4:00 / 19:43）", "failed", "run-1"),
+      { ...step("retry-1", "retry", 0), phase: "prepare_source", run_id: "run-1", title: "第 1 次来源准备中断，将自动重试", outcome: { message: "下载长时间没有字节进展。", evidence_status: "not_assessed" } },
+      prep("prep-2", "正在重新准备视频和文字来源（第 2 次尝试）", "completed", "run-1"),
+      prep("probe-2", "正在校验视频时长与素材", "completed", "run-1"),
+      prep("early-audio", "正在转写缺少可用字幕的视频", "completed", "run-1"),
+      prep("audio-2", "正在转写音频（12:03 / 19:43）", "running", "run-1"),
+    ]
+    const collapsed = collapseSourceRetries(steps)
+    expect(collapsed.map((item) => item.title)).toEqual([
+      "第 1 次准备中断",
+      "正在重新准备视频和文字来源（第 2 次尝试）",
+      "正在校验视频时长与素材",
+      "正在转写音频（12:03 / 19:43）",
+    ])
+    expect(collapsed[0].outcome?.message).toBe("下载长时间没有字节进展。")
+    const html = renderToStaticMarkup(<ActivityList steps={steps} open={false} detailed={false} headline="正在转写音频" resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(html).toContain("第 1 次准备中断")
+    expect(html).toContain("下载长时间没有字节进展。")
+    expect(html).toContain("已重新准备视频和文字来源（第 2 次尝试）")
+    expect(html).toContain("已校验视频时长与素材")
+    expect(html).toContain("视频 12:03 / 19:43")
+    expect(html).not.toContain("正在转写音频")
+    expect(html).not.toContain("正在准备视频和文字来源")
+    expect(html.match(/校验视频时长/g)).toHaveLength(1)
   })
   it("shows the reason for a source retry in the compact process list", () => {
     const retry = { ...step("source-retry", "retry", 0), phase: "prepare_source", title: "来源准备中断，将自动重试", outcome: { message: "下载长时间没有字节进展。", evidence_status: "not_assessed" } }
