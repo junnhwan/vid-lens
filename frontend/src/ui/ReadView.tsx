@@ -310,7 +310,8 @@ export function ReadView(props: {
               {article?.sections.map((section, index) => (
                 <section key={section.id} style={arrive ? { animationDelay: `${Math.min(index, 5) * 48}ms` } : undefined}>
                   <h2 id={section.id} tabIndex={-1}>
-                    {section.title}
+                    <span className="chapter-no" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="chapter-title">{section.title}</span>
                   </h2>
                   {section.blocks.map((block) => (
                     <BlockView

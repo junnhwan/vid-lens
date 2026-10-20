@@ -19,6 +19,17 @@ const useClientLayout = typeof window === "undefined" ? useEffect : useLayoutEff
 
 type Ghost = MindBox & { id: string; label: string; depth: number; wire: string | null }
 
+function siblingLag(nodes: { id: string; depth: number }[]): Map<string, number> {
+  const counts = new Map<number, number>()
+  const lags = new Map<string, number>()
+  for (const node of nodes) {
+    const lag = counts.get(node.depth) ?? 0
+    lags.set(node.id, Math.min(lag, 6))
+    counts.set(node.depth, lag + 1)
+  }
+  return lags
+}
+
 export function MindMap({ map, current, onJump }: { map: MapModel; current: string; onJump: (id: string) => void }) {
   const indexed = useMemo(() => indexMind(map), [map])
   const [sketch, setSketch] = useState(false)
@@ -27,6 +38,7 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   const [focusId, setFocusId] = useState<string | null>(null)
   const [measured, setMeasured] = useState<Map<string, { w: number; h: number }>>(() => new Map())
   const [drawn, setDrawn] = useState<Set<string>>(() => new Set())
+  const [settled, setSettled] = useState<Set<string>>(() => new Set())
   const [ghosts, setGhosts] = useState<Ghost[]>([])
   const [frame, setFrame] = useState(0)
   const [enlarged, setEnlarged] = useState(false)
@@ -40,8 +52,9 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   jumpRef.current = onJump
   const treeRef = useRef<HTMLDivElement>(null)
   const refs = useRef(new Map<string, HTMLButtonElement>())
-  const known = useRef(new Set<string>())
   const snapshot = useRef(new Map<string, Ghost>())
+  const growTries = useRef(0)
+  const growKey = useRef("")
   const measuredRef = useRef(measured)
   const expandedRef = useRef(expanded)
   measuredRef.current = measured
@@ -49,6 +62,12 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
 
   const visible = indexed ? visibleMind(indexed, sketch, expanded) : []
   const visibleKey = visible.map((node) => node.id).join("\n")
+  const lags = siblingLag(visible)
+  function motionOf(id: string): "in" | "wait" | undefined {
+    if (drawn.has(id)) return "in"
+    if (settled.has(id)) return undefined
+    return "wait"
+  }
   const sizes = new Map<string, { w: number; h: number }>()
   for (const node of visible) sizes.set(node.id, measured.get(node.id) ?? estimateNodeBox(node.label, node.depth))
   const layout = indexed ? layoutMind(visible, indexed.rootId, sizes) : { boxes: new Map(), wires: [], width: 0, height: 0 }
@@ -152,19 +171,65 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
   }, [visibleKey, layout.width, layout.height])
 
   useClientLayout(() => {
+    if (growKey.current !== visibleKey) {
+      growKey.current = visibleKey
+      growTries.current = 0
+    }
+    const ids = visible.map((node) => node.id)
+    const visibleSet = new Set(ids)
+    const drop = [...settled, ...drawn].filter((id) => !visibleSet.has(id))
+    if (drop.length) {
+      const gone = new Set(drop)
+      setSettled((existing) => new Set([...existing].filter((id) => !gone.has(id))))
+      setDrawn((existing) => new Set([...existing].filter((id) => !gone.has(id))))
+    }
     const canvas = canvasRef.current
-    if (!canvas || canvas.offsetWidth < 1) return
-    if (prefersReduced()) {
-      known.current = new Set(visible.map((node) => node.id))
+    if (!canvas || canvas.offsetWidth < 1) {
+      const shown = !!canvas && canvas.getClientRects().length > 0
+      if (shown && growTries.current < 12) {
+        growTries.current += 1
+        const retry = window.requestAnimationFrame(() => setFrame((value) => value + 1))
+        return () => window.cancelAnimationFrame(retry)
+      }
+      if (shown) {
+        const missing = ids.filter((id) => !settled.has(id) && !drop.includes(id))
+        if (missing.length) setSettled((existing) => new Set([...existing, ...missing]))
+      }
       return
     }
-    const arrived = visible.map((node) => node.id).filter((id) => !known.current.has(id))
-    known.current = new Set(visible.map((node) => node.id))
-    if (!arrived.length) return
-    setDrawn(new Set(arrived))
-    const timer = window.setTimeout(() => setDrawn(new Set()), 1100)
+    growTries.current = 0
+    const fresh = ids.filter((id) => !settled.has(id) && !drawn.has(id) && !drop.includes(id))
+    if (prefersReduced()) {
+      if (!fresh.length) return
+      setSettled((existing) => {
+        const next = new Set([...existing].filter((id) => !drop.includes(id)))
+        for (const id of fresh) next.add(id)
+        return next
+      })
+      return
+    }
+    if (fresh.length) {
+      setDrawn((existing) => {
+        const next = new Set([...existing].filter((id) => !drop.includes(id)))
+        for (const id of fresh) next.add(id)
+        return next
+      })
+    }
+    const animating = ids.filter((id) => fresh.includes(id) || drawn.has(id))
+    if (!animating.length) return
+    const lags = siblingLag(visible)
+    let finish = 0
+    for (const node of visible) {
+      if (!animating.includes(node.id)) continue
+      finish = Math.max(finish, node.depth * 130 + (lags.get(node.id) ?? 0) * 42 + 900)
+    }
+    const timer = window.setTimeout(() => {
+      const done = new Set(animating)
+      setDrawn((existing) => new Set([...existing].filter((id) => !done.has(id))))
+      setSettled((existing) => new Set([...existing, ...animating]))
+    }, finish)
     return () => window.clearTimeout(timer)
-  }, [visibleKey, frame])
+  }, [visibleKey, frame, drawn, settled])
 
   useEffect(() => {
     const tree = treeRef.current
@@ -210,10 +275,12 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
     if (!(target instanceof Element) || target.closest("button")) return
     setEnlarged(true)
   }
-  const anchors: { x: number; y: number; hot: boolean }[] = []
+  const anchors: { x: number; y: number; hot: boolean; parentId: string; depth: number }[] = []
   for (const wire of layout.wires) {
+    const parentId = indexed.nodes.get(wire.id)?.parentId
+    if (!parentId) continue
     const found = anchors.find((item) => Math.abs(item.x - wire.x1) < 0.5 && Math.abs(item.y - wire.y1) < 0.5)
-    if (!found) anchors.push({ x: wire.x1, y: wire.y1, hot: hot.has(wire.id) })
+    if (!found) anchors.push({ x: wire.x1, y: wire.y1, hot: hot.has(wire.id), parentId, depth: indexed.nodes.get(parentId)?.depth ?? 0 })
     else if (hot.has(wire.id)) found.hot = true
   }
   const stage = (
@@ -229,19 +296,21 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
         >
           <svg className="concept-wires" viewBox={`0 0 ${layout.width} ${layout.height}`} width={layout.width} height={layout.height} aria-hidden="true">
             {layout.wires.map((wire) => (
-              <g key={wire.id}>
-                <path
-                  d={wire.d}
-                  pathLength={1}
-                  data-hot={hot.has(wire.id) ? "true" : undefined}
-                  data-draw={drawn.has(wire.id) ? "in" : undefined}
-                  style={{ "--depth": wire.depth } as CSSProperties}
-                />
+              <g key={wire.id} data-draw={motionOf(wire.id)} style={{ "--depth": wire.depth, "--lag": lags.get(wire.id) ?? 0 } as CSSProperties}>
+                <path d={wire.d} pathLength={1} data-hot={hot.has(wire.id) ? "true" : undefined} />
                 <circle cx={wire.x2} cy={wire.y2} r={3.1} data-hot={hot.has(wire.id) ? "true" : undefined} />
               </g>
             ))}
             {anchors.map((anchor) => (
-              <circle key={`${anchor.x}-${anchor.y}`} cx={anchor.x} cy={anchor.y} r={2.6} data-hot={anchor.hot ? "true" : undefined} />
+              <circle
+                key={`${anchor.x}-${anchor.y}`}
+                cx={anchor.x}
+                cy={anchor.y}
+                r={2.6}
+                data-hot={anchor.hot ? "true" : undefined}
+                data-draw={motionOf(anchor.parentId)}
+                style={{ "--depth": anchor.depth, "--lag": lags.get(anchor.parentId) ?? 0 } as CSSProperties}
+              />
             ))}
             {ghosts.map((ghost) =>
               ghost.wire ? (
@@ -263,11 +332,11 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
                 data-toggle={canToggle(node, sketch, expanded) ? "true" : undefined}
                 data-target={node.sectionId ?? undefined}
                 data-hot={hot.has(node.id) ? "true" : undefined}
-                data-draw={drawn.has(node.id) ? "in" : undefined}
+                data-draw={motionOf(node.id)}
                 aria-expanded={node.childIds.length ? open : undefined}
                 aria-current={node.sectionId && node.sectionId === current ? "location" : undefined}
                 tabIndex={focused === node.id ? 0 : -1}
-                style={{ left: box.x, top: box.y, "--depth": node.depth } as CSSProperties}
+                style={{ left: box.x, top: box.y, "--depth": node.depth, "--lag": lags.get(node.id) ?? 0 } as CSSProperties}
                 ref={(el) => {
                   if (el) refs.current.set(node.id, el)
                   else refs.current.delete(node.id)
@@ -306,9 +375,10 @@ export function MindMap({ map, current, onJump }: { map: MapModel; current: stri
                 type="button"
                 className="concept-joint"
                 data-open={open ? "true" : "false"}
+                data-draw={motionOf(node.id)}
                 aria-label={`${open ? "收起" : "展开"}${node.label}`}
                 tabIndex={-1}
-                style={{ left: box.x + box.w - 7, top: box.y + box.h / 2 - 7 }}
+                style={{ left: box.x + box.w - 7, top: box.y + box.h / 2 - 7, "--depth": node.depth, "--lag": lags.get(node.id) ?? 0 } as CSSProperties}
                 onClick={() => toggle(node.id)}
               />
             )

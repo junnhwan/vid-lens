@@ -31,6 +31,10 @@ describe("answer composition and navigation",()=>{
   it("provides independent chapter anchors and the current reading location",()=>{
     const html=renderToStaticMarkup(<ArticleOutline current="b" sections={[{id:"a",title:"原理",blocks:[]},{id:"b",title:"实践",blocks:[]}]} onJump={()=>undefined} />)
     expect(html).toContain('aria-label="文章目录"')
+    expect(html).toContain("文章目录")
+    expect(html).toContain("<b>02</b>")
+    expect(html).toContain("/02")
+    expect(html).toContain("outline-list")
     expect(html).toContain('href="#a"')
     expect(html).toContain('href="#b" aria-current="location"')
   })

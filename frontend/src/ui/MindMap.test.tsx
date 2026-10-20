@@ -28,6 +28,7 @@ describe("concept mind map", () => {
     expect(html).toContain("放大")
     expect(html).not.toContain("concept-canvas")
     expect(html).toContain("<path")
+    expect(html).toContain('data-draw="wait"')
     expect(html).not.toContain("concept-chips")
   })
 })
