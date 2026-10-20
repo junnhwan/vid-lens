@@ -1,4 +1,4 @@
-import { useEffect, useState, type MutableRefObject } from "react"
+import { useEffect, useRef, useState, type MutableRefObject } from "react"
 import { ApiError } from "../api/error"
 import { HttpApi } from "../api/http"
 import { message, type Probe } from "./manageCatalog"
@@ -15,6 +15,8 @@ interface ProbeMonitorOptions {
 }
 export function useProbeMonitor({ api, auth, busy, selectedId, refresh, setError, onAuthLost }: ProbeMonitorOptions) {
   const [probeByModel, setProbeByModel] = useState<Record<string, Probe[]>>({})
+  const currentProbes = useRef(probeByModel)
+  currentProbes.current = probeByModel
   const [now, setNow] = useState(() => Date.now())
   const watched = [
     ...new Set(
@@ -53,6 +55,9 @@ export function useProbeMonitor({ api, auth, busy, selectedId, refresh, setError
         }),
       )
       if (stop) return
+      const finished = pages.some(page => !page.failed && currentProbes.current[page.id]?.some(previous =>
+        isOpenProbe(previous) && page.items.some(item => item.id === previous.id && !isOpenProbe(item)),
+      ))
       setProbeByModel((prev) => {
         const next = { ...prev }
         for (const page of pages) if (!page.failed) next[page.id] = page.items
@@ -64,7 +69,7 @@ export function useProbeMonitor({ api, auth, busy, selectedId, refresh, setError
         setError(message(failure))
       }
       if (still) timer = setTimeout(poll, 2000)
-      else if (!failure) void refresh().catch(() => { })
+      if (!failure && (!still || finished)) void refresh().catch(() => { })
     }
     void poll()
     return () => {

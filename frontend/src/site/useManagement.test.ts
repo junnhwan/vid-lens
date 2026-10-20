@@ -103,6 +103,30 @@ it("ignores a probe result completed after its monitor unmounts", async () => {
   expect(vi.getTimerCount()).toBe(0)
 })
 
+it("refreshes a finished model while another model is still checking", async () => {
+  vi.useFakeTimers()
+  const refresh = vi.fn().mockResolvedValue(undefined)
+  const api = { current: new HttpApi() }
+  let firstStatus = "running"
+  const row = (id: string, status: string) => ({ id, status, mode: "capabilities", submissions: 1, created_at: new Date().toISOString() })
+  mock.request.mockImplementation(async (_method: string, path: string) => ({ body: { items: [path.includes("model-a") ? row("probe-a", firstStatus) : row("probe-b", "running")] } }))
+  let monitor!: ReturnType<typeof useProbeMonitor>
+  function Monitor() {
+    monitor = useProbeMonitor({ api, auth: true, busy: "", selectedId: "model-a", refresh, setError: vi.fn(), onAuthLost: vi.fn() })
+    return null
+  }
+  await act(async () => { renderer = create(createElement(Monitor)) })
+  await act(async () => monitor.acceptProbes("model-b", [row("probe-b", "running")]))
+  refresh.mockClear()
+  firstStatus = "succeeded"
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+  expect(monitor.probeByModel["model-a"][0].status).toBe("succeeded")
+  expect(monitor.probeByModel["model-b"][0].status).toBe("running")
+  expect(refresh).toHaveBeenCalledOnce()
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+  expect(refresh).toHaveBeenCalledOnce()
+})
+
 it("starts provider edits with an empty write-only credential", () => {
   const provider = { id: "provider", revision: 2, revision_id: "rev", name: "Provider", base_url: "https://example.test", enabled: true, key_configured: true, proxy_policy: "server", api_key: "must-not-copy" }
   expect(providerDraft(provider)).toMatchObject({ expected_revision: 2, api_key: "" })
