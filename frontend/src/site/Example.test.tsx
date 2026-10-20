@@ -57,7 +57,7 @@ describe("public example reading", () => {
     expect(html).toContain("问这张图")
     expect(html).not.toContain("站长私人追问不应公开")
     expect(html).toContain('aria-label="目录"')
-    expect(html).toContain("example-outline")
+    expect(html).toContain("arc-nav")
     expect(html).not.toContain("example-contents")
     expect(html).not.toContain("example-lead")
     expect(html).not.toContain("/api/v1/requests/")

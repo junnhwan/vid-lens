@@ -1,48 +1,47 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import type { Article } from "../contract/types"
-import { prefersReduced } from "./motion"
+import { useState } from "react"
+import type { CSSProperties } from "react"
 
-const useClientLayout = typeof window === "undefined" ? useEffect : useLayoutEffect
+export function arcMarks(count: number, active: number) {
+  const n = Math.max(count, 0)
+  const gap = n > 16 ? 20 : 26
+  const height = Math.max(132, (Math.max(n, 1) - 1) * gap + 28)
+  const engaged = active >= 0 && active < n
+  const marks = Array.from({ length: n }, (_, index) => {
+    const along = n <= 1 ? 0.5 : index / (n - 1)
+    const arc = Math.sin(along * Math.PI) * 9
+    const dist = engaged ? index - active : 3
+    const fall = Math.exp(-(dist * dist) / 2.2)
+    return {
+      x: 4 + arc + fall * 13,
+      y: 14 + index * gap,
+      width: 10 + fall * 20,
+    }
+  })
+  const focus = engaged ? active : 0
+  return { height, marks, engaged, captionY: marks[focus]?.y ?? 14 }
+}
 
-export function ArticleOutline({ sections, current, onJump }: { sections: Article["sections"]; current: string; onJump: (id: string) => void }) {
+export function ArticleOutline({
+  sections,
+  current,
+  onJump,
+  label = "文章目录",
+}: {
+  sections: { id: string; title: string }[]
+  current: string
+  onJump: (id: string) => void
+  label?: string
+}) {
   const [open, setOpen] = useState(true)
-  const navRef = useRef<HTMLElement>(null)
-  const [mark, setMark] = useState<{ top: number; height: number; progress: number } | null>(null)
   const place = sections.findIndex((section) => section.id === current)
-  const sectionKey = sections.map((section) => `${section.id}:${section.title}`).join("\n")
-  useClientLayout(() => {
-    const nav = navRef.current
-    if (!nav || !open) return
-    const measure = () => {
-      const list = nav.querySelector<HTMLElement>(".outline-list")
-      const link = nav.querySelector<HTMLElement>("ol a[aria-current='location']")
-      if (!list || !link) {
-        setMark((value) => (value === null ? value : null))
-        return
-      }
-      const top = Math.round(link.getBoundingClientRect().top - list.getBoundingClientRect().top)
-      const height = Math.round(link.getBoundingClientRect().height)
-      const next = { top: top + 6, height: Math.max(18, height - 12), progress: Math.max(18, top + height / 2 - 8) }
-      setMark((value) => (value && value.top === next.top && value.height === next.height && value.progress === next.progress ? value : next))
-    }
-    measure()
-    const link = nav.querySelector<HTMLElement>("a[aria-current='location']")
-    if (link) {
-      const delta = link.getBoundingClientRect().top - nav.getBoundingClientRect().top - nav.clientHeight / 2 + link.clientHeight / 2
-      if (Math.abs(delta) > 12) nav.scrollTo({ top: Math.max(0, nav.scrollTop + delta), behavior: prefersReduced() ? "auto" : "smooth" })
-    }
-    const observer = new ResizeObserver(measure)
-    observer.observe(nav)
-    const list = nav.querySelector(".outline-list")
-    if (list) observer.observe(list)
-    return () => observer.disconnect()
-  }, [current, open, sectionKey])
+  const arc = arcMarks(sections.length, place)
   if (!sections.length) return null
+  const caption = arc.engaged ? sections[place].title : "从标题读起"
   return (
-    <aside className="article-outline" aria-label="文章目录">
+    <aside className="article-outline" aria-label={label} style={{ "--arc-h": `${arc.height}px`, "--caption-y": `${arc.captionY}px` } as CSSProperties}>
       <div className="outline-heading">
         <p className="outline-kicker">
-          <span>文章目录</span>
+          <span>{label}</span>
           <span className="outline-count" aria-hidden="true">
             {place >= 0 ? (
               <>
@@ -59,7 +58,7 @@ export function ArticleOutline({ sections, current, onJump }: { sections: Articl
         </button>
       </div>
       {open ? (
-        <nav id="article-outline-items" aria-label="章节导航" ref={navRef}>
+        <nav id="article-outline-items" aria-label="章节导航">
           <a
             className="outline-top"
             href="#article-top"
@@ -72,29 +71,30 @@ export function ArticleOutline({ sections, current, onJump }: { sections: Articl
             <span className="outline-return" aria-hidden="true">↑</span>
             <span className="outline-top-label">回到开头</span>
           </a>
-          <div className="outline-list">
-            <span className="outline-progress" style={{ height: mark?.progress ?? 0 }} aria-hidden="true" />
-            {mark ? <span className="outline-mark" style={{ top: mark.top, height: mark.height }} aria-hidden="true" /> : null}
+          <div className="arc-nav">
             <ol>
-              {sections.map((section, index) => (
-                <li key={section.id}>
-                  <a
-                    href={`#${section.id}`}
-                    aria-current={current === section.id ? "location" : undefined}
-                    title={section.title}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      onJump(section.id)
-                    }}
-                  >
-                    <span className="outline-index" aria-hidden="true">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="outline-title">{section.title}</span>
-                  </a>
-                </li>
-              ))}
+              {sections.map((section, index) => {
+                const mark = arc.marks[index]
+                return (
+                  <li key={section.id}>
+                    <a
+                      className="arc-link"
+                      href={`#${section.id}`}
+                      aria-current={current === section.id ? "location" : undefined}
+                      aria-label={`${String(index + 1).padStart(2, "0")} ${section.title}`}
+                      style={{ "--x": `${mark.x}px`, "--y": `${mark.y}px`, "--w": `${mark.width}px` } as CSSProperties}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        onJump(section.id)
+                      }}
+                    >
+                      <span className="arc-mark" />
+                    </a>
+                  </li>
+                )
+              })}
             </ol>
+            <p className="arc-caption" aria-hidden="true">{caption}</p>
           </div>
         </nav>
       ) : null}

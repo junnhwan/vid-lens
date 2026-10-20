@@ -6,6 +6,7 @@ import { ActivityList } from "../ui/ActivityList"
 import { BlockView } from "../ui/Blocks"
 import { ExecutionPlan } from "../ui/ExecutionPlan"
 import { Lightbox } from "../ui/Lightbox"
+import { ArticleOutline } from "../ui/ArticleOutline"
 import { MindMap } from "../ui/MindMap"
 import { ModelIdentity } from "../ui/ModelIdentity"
 import { QaPanel } from "../ui/QaPanel"
@@ -143,31 +144,6 @@ export function Example() {
   </>
 }
 
-function ExampleOutline({ sections, current, onJump }: { sections: { id: string; title: string }[]; current: string; onJump: (id: string) => void }) {
-  const navRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    const nav = navRef.current
-    const item = nav?.querySelector<HTMLElement>("[aria-current='location']")
-    if (!nav || !item) return
-    const top = item.offsetTop - nav.clientHeight / 2 + item.clientHeight / 2
-    nav.scrollTo({ top: Math.max(0, top), behavior: prefersReduced() ? "auto" : "smooth" })
-  }, [current])
-  if (!sections.length) return null
-  return <aside className="example-outline" aria-label="目录">
-    <p className="example-outline-label">目录</p>
-    <nav ref={navRef} aria-label="章节">
-      <ol>
-        {sections.map((item, index) => <li key={item.id}>
-          <button type="button" aria-current={item.id === current ? "location" : undefined} onClick={() => onJump(item.id)}>
-            <span className="example-outline-index">{String(index + 1).padStart(2, "0")}</span>
-            <span className="example-outline-title">{item.title}</span>
-          </button>
-        </li>)}
-      </ol>
-    </nav>
-  </aside>
-}
-
 function processActivity(steps: ActivityStep[]) {
   const plan = [...steps].reverse().find((step) => step.plan)?.plan ?? null
   const calls = steps.filter((step) => step.kind === "model_response").length
@@ -254,7 +230,7 @@ export function ExampleArticle({ data, choice, frames, questions, onOpenFrame, o
   const processNote = data.process_status === "partial" ? "更早的步骤已经不在记录里。" : !steps.length ? "这份示例发布时，生成过程已经不在记录里。" : ""
   const canAsk = data.qa_available !== false
   return <div className="workspace example-workspace example-paper" data-qa={questions.open ? "open" : "closed"}>
-    <ExampleOutline sections={sections} current={section} onJump={jump} />
+    <ArticleOutline label="目录" sections={sections} current={section} onJump={jump} />
     <div className="article-col">
     <article className="sheet example-sheet">
       <header className="article-head">
