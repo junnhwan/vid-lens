@@ -3,22 +3,40 @@ import type { CSSProperties } from "react"
 
 export function arcMarks(count: number, active: number) {
   const n = Math.max(count, 0)
-  const gap = n > 16 ? 20 : 26
-  const height = Math.max(132, (Math.max(n, 1) - 1) * gap + 28)
+  const gap = n > 16 ? 22 : 28
+  const height = Math.max(148, (Math.max(n, 1) - 1) * gap + 36)
   const engaged = active >= 0 && active < n
   const marks = Array.from({ length: n }, (_, index) => {
     const along = n <= 1 ? 0.5 : index / (n - 1)
-    const arc = Math.sin(along * Math.PI) * 9
+    const arc = Math.sin(along * Math.PI) * 14
     const dist = engaged ? index - active : 3
-    const fall = Math.exp(-(dist * dist) / 2.2)
+    const fall = Math.exp(-(dist * dist) / 1.8)
+    const spine = 8 + arc
     return {
-      x: 4 + arc + fall * 13,
-      y: 14 + index * gap,
-      width: 10 + fall * 20,
+      spine,
+      x: spine + fall * 16,
+      y: 18 + index * gap,
+      width: 9 + fall * 22,
     }
   })
   const focus = engaged ? active : 0
-  return { height, marks, engaged, captionY: marks[focus]?.y ?? 14 }
+  return { height, marks, engaged, captionY: marks[focus]?.y ?? 18, spine: smoothSpine(marks) }
+}
+
+function smoothSpine(marks: { spine: number; y: number }[]) {
+  if (!marks.length) return ""
+  if (marks.length === 1) return `M ${marks[0].spine} ${marks[0].y - 10} L ${marks[0].spine} ${marks[0].y + 10}`
+  let path = `M ${marks[0].spine.toFixed(1)} ${marks[0].y.toFixed(1)}`
+  for (let index = 1; index < marks.length; index += 1) {
+    const prev = marks[index - 1]
+    const next = marks[index]
+    const midX = (prev.spine + next.spine) / 2
+    const midY = (prev.y + next.y) / 2
+    path += ` Q ${prev.spine.toFixed(1)} ${prev.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`
+  }
+  const last = marks[marks.length - 1]
+  path += ` T ${last.spine.toFixed(1)} ${last.y.toFixed(1)}`
+  return path
 }
 
 export function ArticleOutline({
@@ -33,12 +51,16 @@ export function ArticleOutline({
   label?: string
 }) {
   const [open, setOpen] = useState(true)
+  const [hover, setHover] = useState<number | null>(null)
   const place = sections.findIndex((section) => section.id === current)
   const arc = arcMarks(sections.length, place)
   if (!sections.length) return null
-  const caption = arc.engaged ? sections[place].title : "从标题读起"
+  const shown = hover ?? (arc.engaged ? place : null)
+  const caption = shown === null ? "从标题读起" : sections[shown].title
+  const captionY = shown === null ? arc.marks[0].y : arc.marks[shown].y
+  const captionIndex = shown === null ? "" : String(shown + 1).padStart(2, "0")
   return (
-    <aside className="article-outline" aria-label={label} style={{ "--arc-h": `${arc.height}px`, "--caption-y": `${arc.captionY}px` } as CSSProperties}>
+    <aside className="article-outline" aria-label={label}>
       <div className="outline-heading">
         <p className="outline-kicker">
           <span>{label}</span>
@@ -58,7 +80,7 @@ export function ArticleOutline({
         </button>
       </div>
       {open ? (
-        <nav id="article-outline-items" aria-label="章节导航">
+        <nav id="article-outline-items" aria-label="章节导航" onMouseLeave={() => setHover(null)}>
           <a
             className="outline-top"
             href="#article-top"
@@ -71,7 +93,10 @@ export function ArticleOutline({
             <span className="outline-return" aria-hidden="true">↑</span>
             <span className="outline-top-label">回到开头</span>
           </a>
-          <div className="arc-nav">
+          <div className="arc-nav" style={{ "--arc-h": `${arc.height}px` } as CSSProperties}>
+            <svg className="arc-spine" viewBox={`0 0 64 ${arc.height}`} aria-hidden="true">
+              <path d={arc.spine} />
+            </svg>
             <ol>
               {sections.map((section, index) => {
                 const mark = arc.marks[index]
@@ -82,7 +107,14 @@ export function ArticleOutline({
                       href={`#${section.id}`}
                       aria-current={current === section.id ? "location" : undefined}
                       aria-label={`${String(index + 1).padStart(2, "0")} ${section.title}`}
-                      style={{ "--x": `${mark.x}px`, "--y": `${mark.y}px`, "--w": `${mark.width}px` } as CSSProperties}
+                      style={{
+                        "--x": `${mark.x + (hover === index && index !== place ? 8 : 0)}px`,
+                        "--y": `${mark.y}px`,
+                        "--w": `${mark.width + (hover === index && index !== place ? 12 : 0)}px`,
+                      } as CSSProperties}
+                      onMouseEnter={() => setHover(index)}
+                      onFocus={() => setHover(index)}
+                      onBlur={() => setHover((value) => (value === index ? null : value))}
                       onClick={(event) => {
                         event.preventDefault()
                         onJump(section.id)
@@ -94,7 +126,10 @@ export function ArticleOutline({
                 )
               })}
             </ol>
-            <p className="arc-caption" aria-hidden="true">{caption}</p>
+            <p key={`${shown ?? "top"}:${caption}`} className="arc-caption" style={{ top: captionY }} aria-hidden="true">
+              {captionIndex ? <span className="arc-caption-index">{captionIndex}</span> : null}
+              <span className="arc-caption-title">{caption}</span>
+            </p>
           </div>
         </nav>
       ) : null}

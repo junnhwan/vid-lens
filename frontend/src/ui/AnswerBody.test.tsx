@@ -35,6 +35,7 @@ describe("answer composition and navigation",()=>{
     expect(html).toContain("<b>02</b>")
     expect(html).toContain("/02")
     expect(html).toContain("arc-nav")
+    expect(html).toContain("实践")
     expect(html).toContain('href="#a"')
     expect(html).toContain('href="#b" aria-current="location"')
   })
