@@ -242,7 +242,9 @@ func TestConcurrentDownloadsCannotOverbookRealHostDisk(t *testing.T) {
 	if passed != 1 {
 		t.Fatalf("admitted %d downloads into one available slot", passed)
 	}
-	v, e := s.DiskCapacity(ctx, 11<<30, 200<<30, 3<<30)
+	// Ask for the same 4 GiB workspace as the concurrent admissions above.
+	// A smaller 3 GiB source can legitimately fit in the remaining host space.
+	v, e := s.DiskCapacity(ctx, 11<<30, 200<<30, 4<<30)
 	if e != nil || v.ReservedBytes != 4<<30 || v.Accepting {
 		t.Fatalf("host disk reservation was not reflected in capacity: %+v %v", v, e)
 	}
