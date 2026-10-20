@@ -93,7 +93,13 @@ func (e *Engine) baseModel(ctx context.Context, p config.Profile) (model.ToolCal
 	return NewModel(ctx, p, key, e.Config.ProxyURL, allow...)
 }
 func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed ...string) (model.ToolCallingChatModel, error) {
-	client, err := outbound.CredentialClient(ctx, p.ModelBaseURL, proxy, p.ModelProxyPolicy, allowed, 300*time.Second)
+	var options []outbound.CredentialOptions
+	if capability, _ := ctx.Value(capabilityCheckKey{}).(bool); capability && reasoningGPT(p.ModelName) {
+		// Non-streaming reasoning checks return headers only after generation.
+		// Their wait must use the probe deadline rather than the streaming default.
+		options = append(options, outbound.CredentialOptions{ResponseHeaderTimeout: 5 * time.Minute})
+	}
+	client, err := outbound.CredentialClient(ctx, p.ModelBaseURL, proxy, p.ModelProxyPolicy, allowed, 300*time.Second, options...)
 	if err != nil {
 		return nil, domain.Err(503, "MODEL_UNAVAILABLE", "模型端点或代理不符合服务器出站策略。")
 	}

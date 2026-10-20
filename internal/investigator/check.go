@@ -31,6 +31,8 @@ type capabilityCheckFailure struct {
 	err  error
 }
 
+type capabilityCheckKey struct{}
+
 func (e *capabilityCheckFailure) Error() string { return e.err.Error() }
 func (e *capabilityCheckFailure) Unwrap() error { return e.err }
 
@@ -99,6 +101,7 @@ func (e *Engine) CheckModel(ctx context.Context, p config.Profile) (any, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, store.ProbeRunTimeout)
 	defer cancel()
+	ctx = context.WithValue(ctx, capabilityCheckKey{}, true)
 	// This small image/tool check does not benchmark the maximum output budget.
 	// Bound only the request copy, never the saved model configuration.
 	configuredOutput := p.MaxOutputTokens

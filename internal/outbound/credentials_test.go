@@ -54,6 +54,42 @@ func TestPublicPageRedirectCannotReachPrivateHost(t *testing.T) {
 	}
 }
 
+func TestLongResponseHeaderWaitRemainsBoundedByRequestContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(50 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	client, err := CredentialClient(context.Background(), server.URL, "", "direct", []string{u.Host}, time.Second, CredentialOptions{ResponseHeaderTimeout: 5 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	for _, limit := range []time.Duration{10 * time.Millisecond, time.Second} {
+		ctx, cancel := context.WithTimeout(context.Background(), limit)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+		response, err := client.Do(request)
+		cancel()
+		if limit < 50*time.Millisecond {
+			if err == nil || ctx.Err() != context.DeadlineExceeded {
+				t.Fatalf("long header wait ignored the request deadline: %v", err)
+			}
+		} else {
+			if err != nil {
+				t.Fatalf("response within the request budget failed: %v", err)
+			}
+			response.Body.Close()
+		}
+	}
+	if transport := client.Transport.(*http.Transport); transport.ResponseHeaderTimeout != client.Timeout {
+		t.Fatal("header override was not bounded by total client timeout")
+	}
+}
+
 type emptyReader struct{}
 
 func (*emptyReader) Read([]byte) (int, error) { return 0, io.EOF }

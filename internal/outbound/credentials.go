@@ -11,10 +11,14 @@ import (
 	"time"
 )
 
+type CredentialOptions struct {
+	ResponseHeaderTimeout time.Duration
+}
+
 // CredentialClient shares one verified destination policy between model
 // discovery and generation. A server-configured proxy cannot resolve the target
 // to an unchecked internal address; its CONNECT destination is a pinned IP.
-func CredentialClient(ctx context.Context, endpoint, proxy, policy string, allowed []string, timeout time.Duration) (*http.Client, error) {
+func CredentialClient(ctx context.Context, endpoint, proxy, policy string, allowed []string, timeout time.Duration, options ...CredentialOptions) (*http.Client, error) {
 	if policy == "direct" {
 		proxy = ""
 	}
@@ -24,6 +28,9 @@ func CredentialClient(ctx context.Context, endpoint, proxy, policy string, allow
 	}
 	tr := Transport(allowed)
 	tr.ResponseHeaderTimeout = min(timeout, 90*time.Second)
+	if len(options) > 0 && options[0].ResponseHeaderTimeout > 0 {
+		tr.ResponseHeaderTimeout = min(timeout, options[0].ResponseHeaderTimeout)
+	}
 	var transport http.RoundTripper = tr
 	if proxy != "" {
 		u, err := url.Parse(proxy)
