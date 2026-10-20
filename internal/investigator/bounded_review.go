@@ -30,7 +30,7 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 	if err != nil {
 		return nil, err
 	}
-	tasks, err := planReviewTasks(units, s.profile.MaxOutputTokens)
+	tasks, err := s.planReviewTasks(units)
 	if err != nil {
 		return nil, domain.Err(422, "REVIEW_INPUT_TOO_LARGE", "单个完整审核单元超出可交付的证据容量；草稿已保留，未拆散比较所需的证据。")
 	}
@@ -66,7 +66,7 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 	}
 	key := "review-units:" + store.Hash(map[string]any{"candidate_hash": hash, "mode": task.Mode, "unit_ids": ids})
 	id := "r_" + strings.TrimPrefix(key, "review-units:")[:24]
-	op, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "review_batch", map[string]any{"request_id": id, "unit_ids": ids, "mode": task.Mode, "protocol": boundedReviewProtocol}, false)
+	op, err := s.engine.Store.BeginOperation(ctx, s.claim, key, "review_batch", map[string]any{"request_id": id, "unit_ids": ids, "mode": task.Mode, "protocol": s.boundedReviewProtocol()}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -195,8 +195,17 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	}
 	// Context is deliberately complete and unchanged across smaller tasks. A
 	// local verdict may depend on a premise in another chapter or source segment.
-	payload := map[string]any{"request_id": id, "review_protocol": boundedReviewProtocol, "review_mode": task.Mode, "units": task.Units, "candidate_context": candidate, "citation_catalog": hints, "batch_frame_ids": ids}
-	input := []*schema.Message{schema.SystemMessage(reviewUnitInstructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
+	payload := map[string]any{"request_id": id, "review_protocol": s.boundedReviewProtocol(), "review_mode": task.Mode, "units": task.Units, "candidate_context": candidate, "citation_catalog": hints, "batch_frame_ids": ids}
+	instructions := reviewUnitInstructions
+	if s.usesModalityReview() {
+		scope, err := s.reviewExecutionContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		source["execution_context"] = scope
+		instructions += "\n" + modalityReviewInstructions
+	}
+	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")
 	if err != nil {
 		return nil, err

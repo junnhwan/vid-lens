@@ -55,9 +55,17 @@ func (s *session) contentReviewIdentity(ctx context.Context, candidate any, cita
 	}
 	reviewProtocol := evidenceReviewProtocol
 	if s.usesBoundedReview() {
-		reviewProtocol = boundedReviewProtocol
+		reviewProtocol = s.boundedReviewProtocol()
 	}
-	hash := store.Hash(map[string]any{"review_protocol": reviewProtocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities})
+	identity := map[string]any{"review_protocol": reviewProtocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities}
+	if s.usesModalityReview() {
+		scope, err := s.reviewExecutionContext(ctx)
+		if err != nil {
+			return "", nil, nil, nil, err
+		}
+		identity["execution_context"] = scope
+	}
+	hash := store.Hash(identity)
 	hints := map[string]any{}
 	for id, c := range catalog {
 		if c.Kind == "video_text" {

@@ -16,6 +16,7 @@ import (
 )
 
 const boundedReviewProtocol = "evidence-review-2026-10-20-v6"
+const modalityReviewProtocol = "evidence-review-2026-10-20-v7"
 const reviewUnitsTool = "report_review_units"
 
 // Stable responsibilities only. Work selection, identities, coverage, budgets
@@ -27,7 +28,25 @@ review_mode=source_text时只判断文字来源是否支持断言，像素专属
 只调用report_review_units，复制request_id和unit_id。结论简短，不改写候选，不复述私密推理。`
 
 func (s *session) usesBoundedReview() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV2
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV2 || s.cp.ExecutionContract.Version == domain.ExecutionContractV3)
+}
+
+func (s *session) usesModalityReview() bool {
+	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV3
+}
+
+func (s *session) boundedReviewProtocol() string {
+	if s.usesModalityReview() {
+		return modalityReviewProtocol
+	}
+	return boundedReviewProtocol
+}
+
+func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
+	if s.usesModalityReview() {
+		return planReviewTasksByModality(units, s.profile.MaxOutputTokens, true)
+	}
+	return planReviewTasks(units, s.profile.MaxOutputTokens)
 }
 
 type reviewUnit struct {
@@ -36,6 +55,9 @@ type reviewUnit struct {
 	Value    any      `json:"value"`
 	Context  string   `json:"section_title,omitempty"`
 	FrameIDs []string `json:"frame_ids"`
+	// Server-resolved from the same evidence container as FrameIDs. Never add
+	// this internal classifier to the frozen V2 model wire representation.
+	HasTextEvidence bool `json:"-"`
 }
 
 type reviewTask struct {
@@ -105,11 +127,19 @@ func candidateReviewUnits(candidate any, catalog map[string]domain.Citation) ([]
 		sort.Strings(ids)
 		return slices.Compact(ids)
 	}
+	textFor := func(value any) bool {
+		for alias, c := range catalog {
+			if (c.Kind == "video_text" || c.Kind == "external_reference") && referencesReviewFrame(value, map[string]bool{alias: true}) {
+				return true
+			}
+		}
+		return false
+	}
 	add := func(path string, value any, heading string, evidence any) {
 		if value == nil || value == "" {
 			return
 		}
-		units = append(units, reviewUnit{ID: "u" + strconv.Itoa(len(units)+1), Path: path, Value: value, Context: heading, FrameIDs: framesFor(evidence)})
+		units = append(units, reviewUnit{ID: "u" + strconv.Itoa(len(units)+1), Path: path, Value: value, Context: heading, FrameIDs: framesFor(evidence), HasTextEvidence: textFor(evidence)})
 	}
 	keys := []string{}
 	for key := range doc {
@@ -172,12 +202,19 @@ func reviewTaskFrames(task reviewTask) []string {
 }
 
 func planReviewTasks(units []reviewUnit, outputCapacity int) ([]reviewTask, error) {
+	return planReviewTasksByModality(units, outputCapacity, false)
+}
+
+func planReviewTasksByModality(units []reviewUnit, outputCapacity int, modalities bool) ([]reviewTask, error) {
 	target := max(1024, min(8192, outputCapacity/4))
 	tasks := []reviewTask{}
 	for _, mode := range []string{"source_text", "visual"} {
 		batch := reviewTask{Mode: mode}
 		work := 0
 		for _, unit := range units {
+			if modalities && mode == "source_text" && len(unit.FrameIDs) > 0 && !unit.HasTextEvidence {
+				continue // Visual receives the complete transcript and every cited pixel.
+			}
 			if mode == "visual" && len(unit.FrameIDs) == 0 {
 				continue
 			}

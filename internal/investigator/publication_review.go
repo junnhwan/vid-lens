@@ -48,7 +48,7 @@ func (s *session) requirePublicationReview(ctx context.Context, candidate any, c
 	if err != nil {
 		return publicationReviewIncomplete()
 	}
-	tasks, err := planReviewTasks(units, s.profile.MaxOutputTokens)
+	tasks, err := s.planReviewTasks(units)
 	if err != nil {
 		return publicationReviewIncomplete()
 	}
@@ -67,7 +67,7 @@ func (s *session) requireReviewedTask(ctx context.Context, hash string, task rev
 	}
 	key := "review-units:" + store.Hash(map[string]any{"candidate_hash": hash, "mode": task.Mode, "unit_ids": ids})
 	id := "r_" + strings.TrimPrefix(key, "review-units:")[:24]
-	argsHash := store.Hash(map[string]any{"request_id": id, "unit_ids": ids, "mode": task.Mode, "protocol": boundedReviewProtocol})
+	argsHash := store.Hash(map[string]any{"request_id": id, "unit_ids": ids, "mode": task.Mode, "protocol": s.boundedReviewProtocol()})
 	op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return publicationReviewIncomplete()
