@@ -190,13 +190,13 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
         <div><span>VidLens 视频与音频占用</span><strong>{formatDiskBytes(overview.original_bytes)}</strong><p>导出文件 {formatDiskBytes(overview.export_bytes)} · 运行任务预留 {formatDiskBytes(overview.reserved_video_bytes)}</p></div>
         <div><span>VidLens 配图占用</span><strong>{formatDiskBytes(overview.image_bytes)}</strong><p>运行任务预留 {formatDiskBytes(overview.reserved_image_bytes)} · 正式文章配图持续保留</p></div>
       </div>
-      <details className="storage-settings"><summary>视频限制与存储 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)} · 最长 {Math.round(overview.max_video_ms / minute)} 分钟</span></summary>
+      <details className="storage-settings"><summary>视频限制与存储 <span>单条上限 {formatDiskBytes(overview.settings.source_download_limit_bytes)} · 最长 {Math.round(overview.max_video_ms / minute)} 分钟 · 主机至少保留 {formatDiskBytes(overview.settings.host_min_free_bytes)}</span></summary>
         <form onSubmit={(e) => { e.preventDefault(); void save() }}><fieldset disabled={Boolean(busy) || Boolean(confirm)}>
           <label className="desk-field"><span>单条来源音视频上限 · MiB</span><input type="number" min={64} max={2048} step={1} required value={sourceDownloadLimitMiB} onChange={(e) => setSourceDownloadLimitMiB(e.target.value)} /></label>
           <label className="desk-field"><span>单条视频时长上限 · 分钟</span><input type="number" min={1} max={1440} step={1} required value={maxVideoMinutes} onChange={(e) => setMaxVideoMinutes(e.target.value)} /></label>
           <label className="desk-field"><span>服务器最低保留 · GiB</span><input type="number" min={3} max={20} step={0.25} required value={hostMinFreeGiB} onChange={(e) => setHostMinFreeGiB(e.target.value)} /></label>
           <button className="btn primary" disabled={!dirty}>{busy === "save" ? "正在保存…" : "保存存储设置"}</button>
-        </fieldset><p className="fine">准入按服务器实时空闲空间计算，并至少保留 3 GiB。单条音视频上限可设为 64–2048 MiB，时长上限可设为 1–1440 分钟；时长调整只作用于新提交，单条大小按当前设置校验。</p></form>
+        </fieldset><p className="fine">准入按服务器实时空闲空间计算，并至少保留 3 GiB；主机最低保留量可设为 3–20 GiB。单条音视频上限可设为 64–2048 MiB，时长上限可设为 1–1440 分钟；时长调整只作用于新提交，单条大小按当前设置校验。</p></form>
       </details>
     </> : <p className="fine">{busy ? "正在读取视频存储…" : "存储状态未能读取，请刷新重试。"}</p>}
     <form className="storage-search" onSubmit={(e) => { e.preventDefault(); setConfirm(null); const next = search.trim(); onRoute({ query: next, offset: 0, cleanup }); if (next === query && offset === 0) reload() }}>
