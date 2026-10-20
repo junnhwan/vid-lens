@@ -15,6 +15,7 @@ var errDraftReady = errors.New("validated draft ready for publication")
 type batchReceipt struct {
 	Accepted []string         `json:"accepted_sections"`
 	Rejected []map[string]any `json:"rejected_sections"`
+	Ignored  []string         `json:"ignored_unplanned_sections,omitempty"`
 }
 
 func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, version int, draft articleDraft) (*schema.ToolResult, error) {
@@ -33,11 +34,19 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		return nil, err
 	}
 	receipt := &batchReceipt{Accepted: []string{}, Rejected: []map[string]any{}}
+	planned := make(map[string]bool, len(draft.Plan))
+	for _, section := range draft.Plan {
+		planned[section.ID] = true
+	}
 	counts := map[string]int{}
 	for _, section := range in.Sections {
 		counts[section.ID]++
 	}
 	for sectionIndex, section := range in.Sections {
+		if !planned[section.ID] {
+			receipt.Ignored = append(receipt.Ignored, section.ID)
+			continue
+		}
 		if s.policy().ContentReview {
 			section, err = resolveOwnedFrameAliases(section, catalog)
 			if err != nil {
@@ -81,6 +90,14 @@ func (s *session) saveFlexibleBatch(ctx context.Context, in saveSectionsInput, v
 		receipt.Accepted = append(receipt.Accepted, section.ID)
 	}
 	if len(receipt.Accepted) == 0 {
+		if len(receipt.Rejected) == 0 && len(receipt.Ignored) > 0 {
+			state := s.draftState(version, draft)
+			state["outcome"] = "noop"
+			state["accepted_sections"] = []string{}
+			state["ignored_unplanned_sections"] = receipt.Ignored
+			state["next_action"] = "No planned chapter was submitted. Use the existing plan IDs and latest version; pending chapters and corrections remain unchanged."
+			return textResult(state), nil
+		}
 		return s.draftFeedback(ctx, string(domain.JSON(map[string]any{"code": "chapter_validation", "affected_sections": receipt.Rejected, "repairable": true})))
 	}
 	// Receipt and accepted subset commit in the SAME fenced, idempotent operation.

@@ -455,6 +455,9 @@ func draftSummary(version int, draft articleDraft) map[string]any {
 		}
 		out["accepted_sections"] = draft.BatchReceipt.Accepted
 		out["rejected_sections"] = draft.BatchReceipt.Rejected
+		if len(draft.BatchReceipt.Ignored) > 0 {
+			out["ignored_unplanned_sections"] = draft.BatchReceipt.Ignored
+		}
 		if len(draft.BatchReceipt.Rejected) > 0 {
 			out["error"] = map[string]any{"code": "chapter_validation", "affected_sections": draft.BatchReceipt.Rejected, "repairable": true}
 			out["next_action"] = "Keep accepted_sections unchanged. Correct only rejected_sections and write other pending_sections with this latest version."
