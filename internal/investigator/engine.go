@@ -335,6 +335,9 @@ func (s *session) publish(ctx context.Context, raw json.RawMessage) error {
 		if e := s.validateArticle(ctx, a); e != nil {
 			return e
 		}
+		if e := s.requirePublicationReview(ctx, map[string]any{"title": a.Title, "sections": a.Sections, "limitations": a.Limitations}, a.Citations); e != nil {
+			return e
+		}
 		step := domain.Step{ID: domain.ID(), Title: "正在发布图文文章", Phase: "publish", Status: "running", StartedAt: domain.Ptr(time.Now().UTC()), FrameIDs: []string{}}
 		step, e := s.engine.Store.Step(ctx, s.claim, step)
 		if e != nil {
@@ -353,6 +356,9 @@ func (s *session) publish(ctx context.Context, raw json.RawMessage) error {
 		return e
 	}
 	if e := s.validateAnswer(ctx, &a); e != nil {
+		return e
+	}
+	if e := s.requireAnswerPublicationReview(ctx, a); e != nil {
 		return e
 	}
 	return s.engine.Store.CompleteAnswer(ctx, s.claim, a)

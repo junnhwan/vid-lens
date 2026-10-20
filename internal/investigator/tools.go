@@ -193,6 +193,10 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		target = &findInput{}
 	case "read_source":
 		target = &readInput{}
+	case "read_article_sections":
+		if t.session != nil && t.session.usesBoundedReview() {
+			target = &articleSectionReadInput{}
+		}
 	case "patch_article_draft":
 		target = &draftPatchInput{}
 	case "repair_candidate":
@@ -242,6 +246,9 @@ func (t *argumentCheckedTool) InvokableRun(ctx context.Context, args *schema.Too
 		}
 	}
 	if err != nil {
+		if t.name == "read_article_sections" && t.session != nil && t.session.usesBoundedReview() {
+			return t.session.articleSectionReadFeedback(ctx, err.Error())
+		}
 		if isCandidateTool(t.name) {
 			issue := candidateIssue(err)
 			if t.session != nil && t.session.engine != nil {

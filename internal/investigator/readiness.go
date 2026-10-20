@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -18,6 +20,21 @@ type progressState struct {
 	Stalled             int            `json:"stalled"`
 	OptionalInspections int            `json:"optional_inspections"`
 	Seen                map[string]int `json:"seen"`
+	Recovery            *loopRecovery  `json:"loop_recovery,omitempty"`
+	Epoch               int            `json:"progress_epoch,omitempty"`
+}
+
+type loopRecovery struct {
+	Signature string `json:"signature"`
+	Tool      string `json:"tool"`
+	Reason    string `json:"reason"`
+	Attempts  int    `json:"attempts"`
+	NudgeCall int    `json:"nudge_call"`
+}
+
+func (s *session) loopCorrectionPending() bool {
+	r := s.cp.Progress.Recovery
+	return s.usesBoundedReview() && r != nil && s.cp.Calls <= r.NudgeCall
 }
 
 func (s *session) repairLimit() int {
@@ -91,6 +108,9 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	reviewIssue := s.pendingEvidenceReview()
 	if reviewIssue != nil {
 		action = "Use evidence_review_issues.affected_section_ids (actual IDs, not array offsets) to read_article_sections, then save_article_sections with the latest version and only those corrected chapters. Preserve other chapters. If patching, copy the exact draft_path: blocks use numeric array offsets, never block IDs. Do not rebuild the plan. The unresolved review persists until a revised candidate passes fresh source review."
+		if s.usesBoundedReview() {
+			action += " read_article_sections returns at most three chapters per page; keep the same section_ids and copy next_offset until it is absent, then repair the affected chapters using the latest version. Unknown IDs are errors: copy valid_section_ids instead of inventing section numbers."
+		}
 		action += " Delete unnecessary decorative or uncertain visual details instead of replacing them with new unverified assertions. Keep the source's actual conditions and useful figures; do not add prose merely to maintain length."
 		action += " If an issue names save_field=title, include the corrected section title in save_article_sections; patch only fields that provide a draft_path."
 		action += " A heading in the same reviewer-named chapter may also be corrected consistently with its listed body issue."
@@ -137,6 +157,17 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 			}
 		}
 		out["open_questions"] = gaps
+	}
+	if s.usesBoundedReview() && s.cp.Progress.Recovery != nil {
+		r := s.cp.Progress.Recovery
+		names := make([]string, 0, len(s.tools))
+		for name := range s.tools {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		next := fmt.Sprintf("Repeated %s did not advance the current saved state: %s. Use the returned current values, valid IDs and latest draft version. Available tools: %s. %s", r.Tool, r.Reason, strings.Join(names, ", "), out["next_action"])
+		out["loop_recovery"] = map[string]any{"tool": r.Tool, "reason": r.Reason, "attempts": r.Attempts, "next_action": next}
+		out["next_action"] = next
 	}
 	return out, nil
 }
@@ -218,6 +249,13 @@ func (s *session) toolFeedback(ctx context.Context, name, args, before string, r
 		}
 	}
 	progress := !rejected && before != after
+	if s.usesBoundedReview() {
+		// A->B->A is not new work. Ignore write/version receipts and retain the
+		// meaningful state history across calls and worker takeovers.
+		progress = progress && s.cp.Progress.Seen["state:"+after] == 0
+		s.cp.Progress.Seen["state:"+before]++
+		s.cp.Progress.Seen["state:"+after]++
+	}
 	if !rejected && result != nil && (name == "read_source" || name == "find_evidence" || name == "read_reference") {
 		// Count new usable content, not a new spelling of a query that returns
 		// the same candidates. Empty reads never reset the stall guard.
@@ -241,10 +279,62 @@ func (s *session) toolFeedback(ctx context.Context, name, args, before string, r
 			}
 		}
 	}
+	if s.usesBoundedReview() && !rejected && result != nil && name == "read_article_sections" {
+		// A legitimate repair can need more than six pages. Count each newly
+		// delivered chapter once, never offsets, versions or a changed grouping.
+		for _, part := range result.Parts {
+			var body struct {
+				Sections []json.RawMessage `json:"sections"`
+			}
+			if part.Type == schema.ToolPartTypeText && json.Unmarshal([]byte(part.Text), &body) == nil {
+				for _, raw := range body.Sections {
+					var section domain.Section
+					if json.Unmarshal(raw, &section) == nil && section.ID != "" && len(section.Blocks) > 0 {
+						key := "read:read_article_sections:" + store.Hash(section)
+						progress = progress || s.cp.Progress.Seen[key] == 0
+						s.cp.Progress.Seen[key]++
+					}
+				}
+			}
+		}
+	}
 	if progress {
 		s.cp.Progress.Stalled = 0
+		if s.usesBoundedReview() {
+			s.cp.Progress.Recovery = nil
+			s.cp.Progress.Epoch++
+		}
 	} else {
 		s.cp.Progress.Stalled++
+		if s.usesBoundedReview() {
+			loop := store.Hash(map[string]any{"action": signature, "state": after, "reason": reason, "epoch": s.cp.Progress.Epoch})
+			key := "loop:" + loop
+			s.cp.Progress.Seen[key]++
+			if s.cp.Progress.Seen[key] >= 2 {
+				// A->B->A failures must retain A's original correction turn.
+				// Zero means no nudge, so persist the call number plus one.
+				nudgeKey := "nudge:" + loop
+				if s.cp.Progress.Seen[nudgeKey] == 0 {
+					s.cp.Progress.Seen[nudgeKey] = s.cp.Calls + 1
+				}
+				// The ordinary stall limit gets at most one correction turn per
+				// progress epoch, even when later failures have brand-new signatures.
+				epochNudge := fmt.Sprintf("nudge-epoch:%d", s.cp.Progress.Epoch)
+				if s.cp.Progress.Seen[epochNudge] == 0 {
+					s.cp.Progress.Seen[epochNudge] = s.cp.Calls + 1
+				}
+				nudgeCall := min(s.cp.Progress.Seen[nudgeKey], s.cp.Progress.Seen[epochNudge]) - 1
+				if reason == "" {
+					reason = "The action returned no new evidence, chapter content or saved state."
+				}
+				// Once a correction has failed, a different ineffective action
+				// cannot hide it. Only actual information/content progress clears it.
+				previous := s.cp.Progress.Recovery
+				if previous == nil || previous.Attempts < 3 || s.cp.Calls <= previous.NudgeCall {
+					s.cp.Progress.Recovery = &loopRecovery{Signature: loop, Tool: name, Reason: reason, Attempts: s.cp.Progress.Seen[key], NudgeCall: nudgeCall}
+				}
+			}
+		}
 	}
 	if _, err = s.engine.Store.BeginOperation(ctx, s.claim, key, "tool_feedback", map[string]string{"tool": name, "arguments_hash": store.Hash(args)}, false); err != nil {
 		return err

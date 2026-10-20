@@ -44,7 +44,7 @@ type reviewTask struct {
 }
 
 type reviewUnitIssue struct {
-	Claim       string   `json:"claim" jsonschema:"description=An exact short quote from this unit, not from another unit or the reviewer reasoning."`
+	Claim       string   `json:"claim" jsonschema:"description=An exact short quote from this unit's readable content, never an internal ID, type, citation alias or other structural metadata."`
 	Reason      string   `json:"reason" jsonschema:"description=One short material difference between the claim and the supplied original evidence."`
 	CitationIDs []string `json:"citation_ids" jsonschema:"description=Existing supplied citation aliases for the original evidence, never invented IDs."`
 }
@@ -252,8 +252,8 @@ func validateReviewUnits(out reviewUnitReport, id string, task reviewTask, catal
 			return errors.New("unknown review verdict")
 		}
 		for _, issue := range result.Issues {
-			if utf8.RuneCountInString(issue.Claim) < 1 || utf8.RuneCountInString(issue.Claim) > 300 || !reviewContainsQuote(unit.Value, issue.Claim) || utf8.RuneCountInString(issue.Reason) < 3 || utf8.RuneCountInString(issue.Reason) > 600 || len(issue.CitationIDs) < 1 || len(issue.CitationIDs) > 6 {
-				return errors.New("review finding must quote its own unit and link original evidence")
+			if utf8.RuneCountInString(issue.Claim) > 300 || unit.Path == "/kind" || !reviewContainsQuote(unit.Value, issue.Claim) || utf8.RuneCountInString(strings.TrimSpace(issue.Reason)) < 3 || utf8.RuneCountInString(issue.Reason) > 600 || len(issue.CitationIDs) < 1 || len(issue.CitationIDs) > 6 {
+				return errors.New("review finding must quote readable content in its own unit, not identifiers or structural metadata, and link original evidence")
 			}
 			linked := false
 			for _, alias := range issue.CitationIDs {
@@ -279,6 +279,9 @@ func validateReviewUnits(out reviewUnitReport, id string, task reviewTask, catal
 }
 
 func reviewContainsQuote(value any, quote string) bool {
+	if strings.TrimSpace(quote) == "" {
+		return false
+	}
 	switch v := value.(type) {
 	case string:
 		return strings.Contains(v, quote)
@@ -289,7 +292,17 @@ func reviewContainsQuote(value any, quote string) bool {
 			}
 		}
 	case map[string]any:
-		for _, x := range v {
+		for key, x := range v {
+			// A source verdict may correct prose, captions, code/formula text,
+			// table cells or labels. Runtime identities and rendering metadata
+			// cannot be unsupported source claims merely because they are strings.
+			if key == "id" || strings.HasSuffix(key, "_id") || strings.HasSuffix(key, "_ids") {
+				continue
+			}
+			switch key {
+			case "kind", "type", "origin", "code", "language", "layout", "marks", "url":
+				continue
+			}
 			if reviewContainsQuote(x, quote) {
 				return true
 			}

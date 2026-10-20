@@ -239,24 +239,7 @@ func (s *session) draftTools(add func(tool.EnhancedInvokableTool, error) error) 
 	})); err != nil {
 		return err
 	}
-	if err := add(utils.InferEnhancedTool("read_article_sections", "Read 1-3 saved chapters for a local correction, without regenerating other chapters.", func(ctx context.Context, in struct {
-		SectionIDs []string `json:"section_ids"`
-	}) (*schema.ToolResult, error) {
-		version, draft, err := s.loadDraft(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(in.SectionIDs) == 0 || len(in.SectionIDs) > 3 {
-			return s.draftFeedback(ctx, "一次读取1–3个已保存章节。")
-		}
-		sections := []domain.Section{}
-		for _, id := range in.SectionIDs {
-			if sec, ok := draft.Sections[id]; ok {
-				sections = append(sections, sec)
-			}
-		}
-		return textResult(map[string]any{"version": version, "sections": sections}), nil
-	})); err != nil {
+	if err := s.articleSectionReadTool(add); err != nil {
 		return err
 	}
 	return add(utils.InferEnhancedTool("submit_article_draft", "Submit the latest saved draft version for full validation and immutable publication. Do not repeat article body. All planned chapters must have been saved.", func(ctx context.Context, in submitDraftInput) (*schema.ToolResult, error) {

@@ -2,9 +2,11 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"vidlens/internal/domain"
 	"vidlens/internal/investigator"
 	"vidlens/internal/media"
@@ -113,5 +115,81 @@ func TestMalformedResultAllowsExplicitRetryWithoutAutomaticResubmission(t *testi
 		if !failure.CanRetry || automatic {
 			t.Fatalf("wrong retry semantics for %s: %+v auto=%v", code, failure, automatic)
 		}
+	}
+}
+
+func TestReviewRecoveryRequiresExplicitRetry(t *testing.T) {
+	for _, code := range []string{"REVIEW_COVERAGE_INCOMPLETE", "REVIEW_BUDGET_EXHAUSTED", "REVIEW_INPUT_TOO_LARGE"} {
+		t.Run(code, func(t *testing.T) {
+			for _, status := range []int{422, 502} {
+				failure, automatic, after := classify(domain.Err(status, code, "review draft is retained"))
+				if !failure.CanRetry || automatic || after != 0 {
+					t.Fatalf("review failure must retain explicit retry without automatic resubmission: %+v auto=%t after=%s", failure, automatic, after)
+				}
+			}
+			failure, automatic, _ := classify(&domain.Problem{Status: 422, Code: code, Detail: "explicitly denied", Meta: map[string]any{"can_retry": false}})
+			if failure.CanRetry || automatic {
+				t.Fatal("failure override must remain authoritative", failure, automatic)
+			}
+		})
+	}
+	for _, code := range []string{"REVIEW_UNKNOWN_FAILURE", "REVIEW_CONTRACT_UNSUPPORTED"} {
+		failure, automatic, _ := classify(domain.Err(422, code, "unknown review state"))
+		if failure.CanRetry || automatic {
+			t.Fatal("unknown review codes must not be made retryable by prefix", failure, automatic)
+		}
+	}
+}
+
+func TestReviewRetryabilityDoesNotResumeFailedOrCanceledRun(t *testing.T) {
+	for _, mode := range []string{"failed", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			db, _, _ := testsupport.Services(t)
+			ctx := context.Background()
+			turn, claim := testsupport.Question(t, db)
+			checkpoint := map[string]any{"schema_version": 1, "review_draft": "retained"}
+			if err := db.Checkpoint(ctx, claim, checkpoint); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "canceled" {
+				var owner string
+				if err := db.Pool.QueryRow(ctx, "SELECT session_id FROM qa_conversations WHERE id=$1", turn.ConversationID).Scan(&owner); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.CancelTurn(ctx, owner, turn.ConversationID, turn.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			failure, automatic, _ := classify(domain.Err(422, "REVIEW_COVERAGE_INCOMPLETE", "review draft retained"))
+			if !failure.CanRetry || automatic {
+				t.Fatal("explicit retry classification lost", failure, automatic)
+			}
+			retry, err := db.Fail(ctx, claim, failure, automatic, 0)
+			if err != nil || retry {
+				t.Fatal("review failure scheduled automatic recovery", retry, err)
+			}
+			// A duplicate queue delivery must stop at the terminal claim check.
+			// The absent Agent would fail immediately if work resumed here.
+			worker := &Worker{Store: db, ctx: ctx, owner: "terminal-replay"}
+			task := asynq.NewTask("vidlens.run", domain.JSON(payload{SchemaVersion: 1, RunID: claim.Run.ID, Generation: claim.Run.DispatchGeneration}))
+			if err := worker.handle(ctx, task); err != nil {
+				t.Fatal("terminal delivery was not acknowledged", err)
+			}
+			after, err := db.Run(ctx, claim.Run.ID)
+			if err != nil || after.Status != mode || after.DispatchGeneration != claim.Run.DispatchGeneration {
+				t.Fatal("review retryability revived a terminal run", after.Status, err)
+			}
+			if mode == "canceled" && after.Failure != nil {
+				t.Fatal("review failure replaced the cancellation", after.Failure)
+			}
+			var saved map[string]any
+			if err := json.Unmarshal(after.Checkpoint, &saved); err != nil || saved["review_draft"] != "retained" {
+				t.Fatal("terminal review lost the saved draft checkpoint", err)
+			}
+			var submissions int
+			if err := db.Pool.QueryRow(ctx, "SELECT count(*) FROM model_submissions WHERE run_id=$1", claim.Run.ID).Scan(&submissions); err != nil || submissions != 0 {
+				t.Fatal("terminal replay submitted a model request", submissions, err)
+			}
+		})
 	}
 }

@@ -115,7 +115,11 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 	if s.policy().Enabled && s.cp.Progress.Total >= 4*s.profile.MaxIterations {
 		return ctx, nil, domain.Err(422, "RESOURCE_LIMIT_EXCEEDED", "工具调用达到本次任务的累计上限；来源和草稿保留。")
 	}
-	if s.policy().Enabled && s.spec.DetailPolicy != nil && s.cp.Progress.Stalled >= s.spec.DetailPolicy.NoProgressLimit {
+	if s.usesBoundedReview() && s.cp.Progress.Recovery != nil && s.cp.Progress.Recovery.Attempts >= 3 && !s.loopCorrectionPending() {
+		r := s.cp.Progress.Recovery
+		return ctx, nil, domain.Err(422, "AGENT_NO_PROGRESS", fmt.Sprintf("重复执行 %s 在纠偏后仍未推进：%s。来源、已保存草稿和具体错误已保留。", r.Tool, r.Reason))
+	}
+	if s.policy().Enabled && s.spec.DetailPolicy != nil && s.cp.Progress.Stalled >= s.spec.DetailPolicy.NoProgressLimit && !s.loopCorrectionPending() {
 		return ctx, nil, domain.Err(422, "AGENT_NO_PROGRESS", "连续工具调用未增加可用证据或有效草稿；来源和已保存章节保留，可以重新尝试。")
 	}
 	if s.cp.Calls >= s.profile.MaxIterations {
