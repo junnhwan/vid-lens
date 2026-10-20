@@ -5,6 +5,14 @@ import (
 	"vidlens/internal/domain"
 )
 
+// A known, fully received truncation may change the next review task, but must
+// never cause the original frozen logical input to be sent again on takeover.
+func (s *Store) ModelOutputTruncated(ctx context.Context, run, key string) (bool, error) {
+	var truncated bool
+	err := s.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT reporting->>'finish_reason'='length' AND reporting->>'stream_status'='complete' FROM model_submissions WHERE run_id=$1 AND operation_key=$2 ORDER BY submission DESC LIMIT 1),false)`, run, key).Scan(&truncated)
+	return truncated, err
+}
+
 // Observations are attached to an already authorized physical submission. They
 // cannot publish results or renew a run, including after cancellation/fencing.
 func (s *Store) RecordSubmission(ctx context.Context, c domain.Claim, key string, n int, report any) error {

@@ -86,6 +86,11 @@ func (s *session) reviewTool(add func(tool.EnhancedInvokableTool, error) error) 
 	if !s.policy().ContentReview {
 		return nil
 	}
+	if s.usesBoundedReview() {
+		return add(utils.InferEnhancedTool(reviewUnitsTool, "Report an explicit evidence verdict for every supplied unit ID. Only the independent server review may use this tool; it cannot edit or publish content.", func(context.Context, reviewUnitReport) (*schema.ToolResult, error) {
+			return toolError("此动作仅供服务器独立证据复核使用，不能由作者自我批准。")
+		}))
+	}
 	return add(utils.InferEnhancedTool("report_evidence_review", "Return the source-grounding verdict for this exact candidate. This tool belongs only to the independent server review context; it cannot write or publish content.", func(context.Context, evidenceReview) (*schema.ToolResult, error) {
 		return toolError("此动作仅供服务器独立证据复核使用，不能由作者自我批准。")
 	}))
@@ -143,7 +148,11 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 	for _, a := range frames {
 		identities = append(identities, map[string]any{"id": a.ID, "sha256": a.SHA256, "time_ms": a.TimeMS})
 	}
-	hash := store.Hash(map[string]any{"review_protocol": evidenceReviewProtocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities})
+	reviewProtocol := evidenceReviewProtocol
+	if s.usesBoundedReview() {
+		reviewProtocol = boundedReviewProtocol
+	}
+	hash := store.Hash(map[string]any{"review_protocol": reviewProtocol, "candidate": candidate, "citations": citations, "snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "frames": identities})
 	hints := map[string]any{}
 	for id, c := range catalog {
 		if c.Kind == "video_text" {
@@ -158,24 +167,31 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		}
 	}
 	issues := []map[string]any{}
-	for index, batch := range evidenceReviewBatches(candidate, catalog, frames) {
-		key := "evidence-review:" + hash + ":" + strconv.Itoa(index)
-		var result evidenceReview
-		op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
-		if e == nil && op.Status == "completed" {
-			e = json.Unmarshal(op.Result, &result)
-		} else if e == nil || errors.Is(e, pgx.ErrNoRows) {
-			result, e = s.runEvidenceReview(ctx, key, hash, candidate, hints, catalog, batch)
+	if s.usesBoundedReview() {
+		issues, err = s.reviewUnits(ctx, hash, candidate, hints, catalog)
+		if err != nil {
+			return err
 		}
-		if e != nil {
-			return e
-		}
-		for _, issue := range result.Issues {
-			entry := map[string]any{"code": "evidence_not_supported", "path": issue.Path, "reason": issue.Reason, "citation_ids": issue.CitationIDs}
-			issues = append(issues, entry)
-		}
-		if batch.Mode == "source_text" && len(issues) > 0 {
-			break // Fix source conditions before spending calls on image details.
+	} else {
+		for index, batch := range evidenceReviewBatches(candidate, catalog, frames) {
+			key := "evidence-review:" + hash + ":" + strconv.Itoa(index)
+			var result evidenceReview
+			op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
+			if e == nil && op.Status == "completed" {
+				e = json.Unmarshal(op.Result, &result)
+			} else if e == nil || errors.Is(e, pgx.ErrNoRows) {
+				result, e = s.runEvidenceReview(ctx, key, hash, candidate, hints, catalog, batch)
+			}
+			if e != nil {
+				return e
+			}
+			for _, issue := range result.Issues {
+				entry := map[string]any{"code": "evidence_not_supported", "path": issue.Path, "reason": issue.Reason, "citation_ids": issue.CitationIDs}
+				issues = append(issues, entry)
+			}
+			if batch.Mode == "source_text" && len(issues) > 0 {
+				break // Fix source conditions before spending calls on image details.
+			}
 		}
 	}
 	if len(issues) == 0 {

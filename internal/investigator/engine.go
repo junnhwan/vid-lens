@@ -45,6 +45,7 @@ type session struct {
 	resolvedPolicy   *executionPolicy
 	modelMessages    []*schema.Message
 	reviewing        bool
+	reviewStep       *reviewStep
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {

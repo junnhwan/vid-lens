@@ -136,6 +136,17 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		return &saved, nil
 	}
+	if s.reviewStep != nil {
+		// A complete length-limited submission is a known outcome. On takeover,
+		// replay it into the review planner instead of paying for the same input.
+		truncated, err := s.engine.Store.ModelOutputTruncated(ctx, s.claim.Run.ID, key)
+		if err != nil {
+			return nil, err
+		}
+		if truncated {
+			return nil, &domain.WorkError{Code: "MODEL_OUTPUT_TRUNCATED", Message: "模型输出达到长度上限，未产生完整结果。"}
+		}
+	}
 	routes, err := s.engine.Store.ModelRoutes(ctx, s.claim.Run.ConfigID)
 	if err != nil {
 		return nil, err
@@ -263,6 +274,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.compositionReady {
 			limits.Total = 300 * time.Second
 		}
+		if s.reviewStep != nil {
+			limits.Total = 300 * time.Second
+		}
 		submission := 0
 		var transport *domain.Step
 		observer := newUsageObserver(s.cp.LayoutVersion, p.CachePolicy, func(report usageReport) {
@@ -311,7 +325,11 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			options = append(options, model.WithTools(activeTools))
 		}
 		if s.reviewing {
-			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, "report_evidence_review"))
+			name := "report_evidence_review"
+			if s.reviewStep != nil {
+				name = reviewUnitsTool
+			}
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, name))
 		} else if s.forceDraftSubmit {
 			options = append(options, model.WithTools(activeTools), model.WithToolChoice(schema.ToolChoiceForced, "submit_article_draft"))
 		} else if s.policy().Recovery && len(activeTools) == 1 && (activeTools[0].Name == "repair_article_plan" || activeTools[0].Name == "repair_article_sections") {

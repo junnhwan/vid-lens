@@ -104,7 +104,7 @@ func (s *session) phaseTools(in []*schema.ToolInfo) []*schema.ToolInfo {
 	if s.policy().ContentReview {
 		filtered := []*schema.ToolInfo{}
 		for _, t := range in {
-			if (t.Name == "report_evidence_review") == s.reviewing {
+			if (t.Name == "report_evidence_review" || t.Name == reviewUnitsTool) == s.reviewing {
 				filtered = append(filtered, t)
 			}
 		}

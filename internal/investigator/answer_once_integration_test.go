@@ -52,7 +52,7 @@ func TestQuestionRequiresExecutableActionOnFirstSubmission(t *testing.T) {
 		t.Fatalf("question %s needed avoidable follow-up: calls=%d error=%v", turn.ID, calls.Load(), err)
 	}
 	var reviews, submissions int
-	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='content_review' AND status='completed'", claim.Run.ID).Scan(&reviews); err != nil || reviews != 1 {
+	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='review_batch' AND status='completed' AND result->>'state'='complete'", claim.Run.ID).Scan(&reviews); err != nil || reviews != 1 {
 		t.Fatal("new private answer bypassed independent review", reviews, err)
 	}
 	if err = db.Pool.QueryRow(context.Background(), "SELECT count(*) FROM model_submissions WHERE run_id=$1", claim.Run.ID).Scan(&submissions); err != nil || submissions != 2 {

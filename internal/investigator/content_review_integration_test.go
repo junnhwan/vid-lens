@@ -41,6 +41,15 @@ func respondSupportedEvidenceReview(t *testing.T, w http.ResponseWriter, value a
 		t.Error(err)
 		return false
 	}
+	if len(request.Tools) == 1 && request.Tools[0].Function.Name == reviewUnitsTool {
+		var in reviewWireRequest
+		if err := json.Unmarshal(domain.JSON(value), &in); err != nil {
+			t.Error(err)
+			return false
+		}
+		reviewWireReply(t, w, in, false)
+		return true
+	}
 	if len(request.Tools) != 1 || request.Tools[0].Function.Name != "report_evidence_review" {
 		return false
 	}

@@ -25,6 +25,39 @@ func TestSemanticAnswerCorrectionRetainsAUsableSubmissionPath(t *testing.T) {
 		}
 		var tools []struct{ Function struct{ Name string } }
 		_ = json.Unmarshal(body["tools"], &tools)
+		if len(tools) == 1 && tools[0].Function.Name == reviewUnitsTool {
+			var in reviewWireRequest
+			_ = json.Unmarshal(domain.JSON(body), &in)
+			payload := reviewWirePayload(t, in)
+			var id string
+			var candidate struct{ Summary string }
+			var units []reviewUnit
+			_ = json.Unmarshal(payload["request_id"], &id)
+			_ = json.Unmarshal(payload["candidate_context"], &candidate)
+			_ = json.Unmarshal(payload["units"], &units)
+			questionSeen := false
+			for _, message := range in.Messages {
+				var text string
+				var source struct{ Question string }
+				if json.Unmarshal(message.Content, &text) == nil && json.Unmarshal([]byte(text), &source) == nil {
+					questionSeen = questionSeen || source.Question == sourceQuestion && sourceQuestion != ""
+				}
+			}
+			if !questionSeen {
+				t.Error("independent unit review lost the actual user's question")
+			}
+			report := reviewUnitReport{RequestID: id, Results: []reviewUnitResult{}}
+			for _, unit := range units {
+				result := reviewUnitResult{UnitID: unit.ID, Verdict: "supported", Issues: []reviewUnitIssue{}}
+				if candidate.Summary == "视频证明了完全一致。" && unit.Value == candidate.Summary {
+					result.Verdict = "contradicted"
+					result.Issues = []reviewUnitIssue{{Claim: candidate.Summary, Reason: "原文不能支持完全一致这一结论。", CitationIDs: []string{"t1"}}}
+				}
+				report.Results = append(report.Results, result)
+			}
+			writeReviewWireArgs(w, reviewUnitsTool, report)
+			return
+		}
 		if len(tools) == 1 && tools[0].Function.Name == "report_evidence_review" {
 			var messages []struct{ Content json.RawMessage }
 			_ = json.Unmarshal(body["messages"], &messages)

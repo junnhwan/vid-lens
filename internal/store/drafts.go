@@ -185,7 +185,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	// Only artifacts cross the explicit retry boundary. The new run freezes
 	// its own adapter, then selects a compatible prompt/tool revision from
 	// the unchanged generation spec before its first model request.
-	cp["execution_contract"] = domain.ExecutionContract{Version: domain.ExecutionContractV1, RunID: run}
+	cp["execution_contract"] = domain.ExecutionContract{Version: domain.CurrentExecutionContract, RunID: run}
 	delete(cp, "harness_revision")
 	delete(cp, "layout_version")
 	delete(cp, "protocol")

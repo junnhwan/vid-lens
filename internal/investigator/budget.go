@@ -11,18 +11,23 @@ import (
 )
 
 type callBudget struct {
-	Revision              string `json:"revision"`
-	Phase                 string `json:"phase"`
-	InputChars            int    `json:"input_chars"`
-	InputCharsLimit       int    `json:"input_chars_limit"`
-	EstimatedTextTokens   int    `json:"estimated_text_tokens"`
-	EstimatedImageTokens  int    `json:"estimated_image_tokens"`
-	ImageCount            int    `json:"image_count"`
-	OutputTokens          int    `json:"output_tokens"`
-	SafetyTokens          int    `json:"safety_tokens"`
-	ContextTokens         int    `json:"context_tokens,omitempty"`
-	ContextCapacityStatus string `json:"context_capacity_status"`
-	Estimator             string `json:"estimator"`
+	Revision               string `json:"revision"`
+	Phase                  string `json:"phase"`
+	InputChars             int    `json:"input_chars"`
+	InputCharsLimit        int    `json:"input_chars_limit"`
+	EstimatedTextTokens    int    `json:"estimated_text_tokens"`
+	EstimatedImageTokens   int    `json:"estimated_image_tokens"`
+	ImageCount             int    `json:"image_count"`
+	OutputTokens           int    `json:"output_tokens"`
+	SafetyTokens           int    `json:"safety_tokens"`
+	ContextTokens          int    `json:"context_tokens,omitempty"`
+	ContextCapacityStatus  string `json:"context_capacity_status"`
+	Estimator              string `json:"estimator"`
+	ConfiguredOutputTokens int    `json:"configured_output_tokens,omitempty"`
+	AvailableOutputTokens  int    `json:"available_output_tokens,omitempty"`
+	AllocationReason       string `json:"allocation_reason,omitempty"`
+	ReviewRequestID        string `json:"review_request_id,omitempty"`
+	ReviewUnits            int    `json:"review_units,omitempty"`
 }
 
 func separateInputLimit(p config.Profile) int {
@@ -122,7 +127,9 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 	}
 	if s.reviewing {
 		b.Phase = "evidence_review"
-		if s.cp.HarnessRevision >= 16 {
+		if s.reviewStep != nil {
+			b = s.reviewStep.allocate(b, s.profile.MaxOutputTokens)
+		} else if s.cp.HarnessRevision >= 16 {
 			// A short verdict can still require substantial provider reasoning.
 			// Do not inherit the writer's final-submit/repair reservation.
 			b.OutputTokens = min(s.profile.MaxOutputTokens, 32768)

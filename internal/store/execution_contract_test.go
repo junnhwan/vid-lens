@@ -23,7 +23,7 @@ func TestNewExecutionAndExplicitRetryHaveSeparateFrozenContracts(t *testing.T) {
 	}
 	first := decode(claim.Run.Checkpoint)
 	contract, ok := first["execution_contract"].(map[string]any)
-	if !ok || contract["version"] != "vidlens-execution-2026-10-20-v1" || contract["run_id"] != claim.Run.ID {
+	if !ok || contract["version"] != domain.CurrentExecutionContract || contract["run_id"] != claim.Run.ID {
 		t.Fatalf("new article execution did not freeze its own contract: %s", claim.Run.Checkpoint)
 	}
 	first["ready"], first["layout_version"], first["protocol"], first["harness_revision"] = true, "source-context-v3", domain.ArticleDraftProtocol, 14
@@ -60,7 +60,7 @@ func TestNewExecutionAndExplicitRetryHaveSeparateFrozenContracts(t *testing.T) {
 	}
 	cp := decode(run.Checkpoint)
 	nextContract, ok := cp["execution_contract"].(map[string]any)
-	if !ok || nextContract["version"] != "vidlens-execution-2026-10-20-v1" || nextContract["run_id"] != run.ID || run.ID == claim.Run.ID {
+	if !ok || nextContract["version"] != domain.CurrentExecutionContract || nextContract["run_id"] != run.ID || run.ID == claim.Run.ID {
 		t.Fatalf("explicit retry inherited another run's execution contract: %s", run.Checkpoint)
 	}
 	if cp["draft_resume"] != true || cp["calls"] != float64(0) || cp["repairs"] != float64(0) || cp["layout_version"] != nil || cp["harness_revision"] != nil || cp["protocol"] != nil {

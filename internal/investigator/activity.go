@@ -77,7 +77,7 @@ func responseActivity(result *schema.Message) (string, string) {
 		return "已收到文章校验请求", "文章尚未发布，接下来校验完整内容与引用。"
 	case "submit_answer":
 		return "已收到回答候选", "接下来校验回答与引用，保存后才能正式展示。"
-	case "report_evidence_review":
+	case "report_evidence_review", reviewUnitsTool:
 		return "已收到独立证据复核意见", "接下来核对候选身份与复核意见，存在问题时先修正内容。"
 	}
 	return "已收到来源处理请求", "接下来执行所需动作并校验结果。"
