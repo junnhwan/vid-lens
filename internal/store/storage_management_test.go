@@ -198,7 +198,11 @@ func TestConcurrentDownloadsCannotOverbookRealHostDisk(t *testing.T) {
 	s := testStore(t)
 	s.VideoConcurrency = 2
 	ctx := context.Background()
-	if e := s.SaveStorageSettings(ctx, StorageInput{ExpectedRevision: 1, VideoQuotaBytes: 6 << 30, ImageQuotaBytes: 5 << 30}, 3<<30); e != nil {
+	settings, err := s.StorageOverview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := s.SaveStorageSettings(ctx, StorageInput{ExpectedRevision: settings.Settings.Revision, VideoQuotaBytes: 6 << 30, ImageQuotaBytes: 5 << 30}, 3<<30); e != nil {
 		t.Fatal(e)
 	}
 	claims := make([]domain.Claim, 2)

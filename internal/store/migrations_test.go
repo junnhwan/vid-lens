@@ -156,6 +156,11 @@ func TestMigrationUpgradesPreservePublishedDataAndConfiguration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if version < 28 {
+				if _, err := s.Pool.Exec(ctx, "ALTER TABLE model_probes DROP COLUMN IF EXISTS started_at"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := s.Pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version>$1", version); err != nil {
 				t.Fatal(err)
 			}

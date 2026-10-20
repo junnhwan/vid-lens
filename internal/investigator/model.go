@@ -2,6 +2,7 @@ package investigator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -52,9 +53,15 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		if observer != nil {
-			if _, isProbe := req.Context().Value(probeObserverKey{}).(func() *usageObserver); isProbe {
-				observer.providerFailure(body)
+			// Record bounded, redacted diagnostics for business calls as well as
+			// capability checks. Never persist a credential echoed by a gateway.
+			redacted := string(body)
+			for _, value := range []string{req.Header.Get("Authorization"), strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")} {
+				if len(value) > 6 {
+					redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+				}
 			}
+			observer.providerFailure([]byte(redacted))
 			observer.finish(false)
 		}
 		slog.Warn("model service HTTP failure", "http_status", r.StatusCode)
@@ -63,6 +70,9 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		code := "PROVIDER_UNAVAILABLE"
 		if r.StatusCode == 429 {
 			code = "PROVIDER_RATE_LIMITED"
+		}
+		if (r.StatusCode == 400 || r.StatusCode == 413 || r.StatusCode == 422) && providerContextExceeded(body) {
+			return nil, &domain.WorkError{Code: "MODEL_CONTEXT_EXCEEDED", Message: "模型线路拒绝了本次上下文容量；来源和草稿已保留，未原样自动重试。"}
 		}
 		var delay time.Duration
 		if v, e := strconv.Atoi(r.Header.Get("Retry-After")); e == nil {
@@ -78,6 +88,27 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		r.Body = &observedBody{ReadCloser: r.Body, o: observer}
 	}
 	return r, nil
+}
+
+func providerContextExceeded(body []byte) bool {
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return false
+	}
+	e := envelope.Error
+	text := strings.ToLower(e.Code + " " + e.Type + " " + e.Message)
+	for _, marker := range []string{"context_length_exceeded", "context_window_exceeded", "maximum context length", "longer than the model's context window", "prompt is too long", "too many input tokens"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 func (e *Engine) baseModel(ctx context.Context, p config.Profile) (model.ToolCallingChatModel, error) {
 	key, err := e.Store.Credential(ctx, p.ModelKeyRef)
