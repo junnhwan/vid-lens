@@ -357,7 +357,7 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 	if err != nil {
 		return nil, err
 	}
-	if op.Kind != "article_draft" {
+	if op.Kind != "article_draft" && op.Kind != "article_draft_noop" {
 		return nil, errors.New("draft replay conflict")
 	}
 	if op.ArgsHash != store.Hash(args) {
@@ -397,19 +397,20 @@ func (s *session) replayedDraft(ctx context.Context, args any) (*schema.ToolResu
 	if err = json.Unmarshal(saved.Data, &draft); err != nil {
 		return nil, err
 	}
-	return textResult(s.draftState(saved.Version, draft)), nil
+	return textResult(s.draftWriteState(saved, draft)), nil
 }
+
+func (s *session) draftWriteState(saved store.Draft, draft articleDraft) map[string]any {
+	state := s.draftState(saved.Version, draft)
+	if saved.Noop {
+		state["outcome"] = "noop"
+		state["next_action"] = "The saved content is unchanged; no new version was created. Resolve the existing issues or continue with pending chapters."
+	}
+	return state
+}
+
 func (s *session) writeDraft(ctx context.Context, args any, version int, draft articleDraft, title string) (*schema.ToolResult, error) {
 	return s.step(ctx, title, "compose", nil, func() (any, []string, error) {
-		if version > 0 {
-			currentVersion, current, err := s.loadDraft(ctx)
-			if err != nil {
-				return nil, nil, err
-			}
-			if currentVersion == version && store.Hash(current) == store.Hash(draft) {
-				return nil, nil, domain.Err(422, "MODEL_RESULT_INVALID", "本次修订没有改变草稿；请按校验问题修正后提交，不能重复相同修订。")
-			}
-		}
 		saved, err := s.engine.Store.SaveArticleDraft(ctx, s.claim, callID(ctx), args, version, draft)
 		if err != nil {
 			return nil, nil, err
@@ -418,11 +419,13 @@ func (s *session) writeDraft(ctx context.Context, args any, version int, draft a
 		if err = json.Unmarshal(saved.Data, &draft); err != nil {
 			return nil, nil, err
 		}
-		s.cp.Composing = true
-		s.cp.DraftCorrection = false
-		s.cp.DraftIssue = nil
-		s.cp.LastCandidate = nil
-		return s.draftState(saved.Version, draft), nil, nil
+		if !saved.Noop {
+			s.cp.Composing = true
+			s.cp.DraftCorrection = false
+			s.cp.DraftIssue = nil
+			s.cp.LastCandidate = nil
+		}
+		return s.draftWriteState(saved, draft), nil, nil
 	})
 }
 func draftSummary(version int, draft articleDraft) map[string]any {

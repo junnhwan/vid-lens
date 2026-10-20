@@ -345,6 +345,10 @@ func (s *session) step(ctx context.Context, title, phase string, r *domain.Range
 	st.Outcome = &domain.Outcome{Message: "已取得所需来源，等待内容判断。", EvidenceStatus: "not_assessed"}
 	if phase == "compose" {
 		st.Outcome = &domain.Outcome{Message: "草稿已保存，全部章节核对通过后才会发布。", EvidenceStatus: "not_applicable"}
+		if result, ok := v.(map[string]any); ok && result["outcome"] == "noop" {
+			st.Title = "草稿内容未变化"
+			st.Outcome.Message = "草稿内容未变化，未创建新版本，待修订问题仍然保留。"
+		}
 	}
 	if title == "保存视频画面观察" {
 		st.Outcome = &domain.Outcome{Message: "已保存可见事实与未确认问题，后续可从此继续。", EvidenceStatus: "not_assessed"}

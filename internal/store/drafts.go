@@ -14,6 +14,7 @@ import (
 type Draft struct {
 	Version int             `json:"version"`
 	Data    json.RawMessage `json:"data"`
+	Noop    bool            `json:"noop,omitempty"`
 }
 
 func (s *Store) ArticleDraft(ctx context.Context, run string) (Draft, error) {
@@ -38,7 +39,7 @@ func (s *Store) SaveArticleDraft(ctx context.Context, c domain.Claim, key string
 		}
 		op, err := one[Operation](ctx, tx, "SELECT to_jsonb(o) FROM run_operations o WHERE run_id=$1 AND operation_key=$2", c.Run.ID, "article-draft:"+key)
 		if err == nil {
-			if op.ArgsHash != Hash(args) || op.Kind != "article_draft" {
+			if op.ArgsHash != Hash(args) || op.Kind != "article_draft" && op.Kind != "article_draft_noop" {
 				return errors.New("draft replay conflict")
 			}
 			return json.Unmarshal(op.Result, &out)
@@ -46,18 +47,34 @@ func (s *Store) SaveArticleDraft(ctx context.Context, c domain.Claim, key string
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		var current int
-		if err = tx.QueryRow(ctx, `SELECT COALESCE(max((result->>'version')::int),0) FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed'`, c.Run.ID).Scan(&current); err != nil {
+		currentDraft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, c.Run.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		current := currentDraft.Version
 		if current != expected {
 			return domain.Err(409, "DRAFT_VERSION_CONFLICT", "草稿版本已更新，请先读取当前版本再修改。")
 		}
-		if current >= 48 {
+		unchanged := false
+		if current > 0 {
+			// A batch acknowledgement is not reader-visible draft content. Compare
+			// JSON values in the same fenced transaction as version CAS and replay.
+			err = tx.QueryRow(ctx, `SELECT
+				(CASE WHEN jsonb_typeof($1::jsonb)='object' THEN $1::jsonb-'batch_receipt' ELSE $1::jsonb END) =
+				(CASE WHEN jsonb_typeof($2::jsonb)='object' THEN $2::jsonb-'batch_receipt' ELSE $2::jsonb END)`, currentDraft.Data, raw).Scan(&unchanged)
+			if err != nil {
+				return err
+			}
+		}
+		if current >= 48 && !unchanged {
 			return domain.Err(422, "MODEL_RESULT_INVALID", "文章草稿修订已达到上限；已保存章节仍然保留。")
 		}
 		out = Draft{Version: current + 1, Data: raw}
-		_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,attempt_id,kind,args_hash,status,result) VALUES($1,$2,$3,'article_draft',$4,'completed',$5)`, c.Run.ID, "article-draft:"+key, c.AttemptID, Hash(args), domain.JSON(out))
+		kind := "article_draft"
+		if unchanged {
+			out.Version, out.Noop, kind = current, true, "article_draft_noop"
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,attempt_id,kind,args_hash,status,result) VALUES($1,$2,$3,$4,$5,'completed',$6)`, c.Run.ID, "article-draft:"+key, c.AttemptID, kind, Hash(args), domain.JSON(out))
 		if err != nil {
 			return err
 		}

@@ -356,7 +356,7 @@ func TestBoundedDraftRepairsBatchAndResumesWithoutRewriting(t *testing.T) {
 	}
 }
 
-func TestIdenticalDraftWriteStopsWithoutCreatingAnotherRevision(t *testing.T) {
+func TestIdenticalDraftWriteReturnsNoopWithoutCreatingAnotherRevision(t *testing.T) {
 	db, _, cfg := testsupport.Services(t)
 	ctx := context.Background()
 	owner, err := db.NewSession(ctx, domain.ID(), time.Hour)
@@ -390,8 +390,13 @@ func TestIdenticalDraftWriteStopsWithoutCreatingAnotherRevision(t *testing.T) {
 	if _, err = s.writeDraft(context.WithValue(ctx, callIDKey{}, "first"), map[string]int{"version": 0}, 0, draft, "save"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.writeDraft(context.WithValue(ctx, callIDKey{}, "same"), map[string]int{"version": 1}, 1, draft, "save"); err == nil {
-		t.Fatal("identical revision allowed unproductive loop")
+	result, err := s.writeDraft(context.WithValue(ctx, callIDKey{}, "same"), map[string]int{"version": 1}, 1, draft, "save")
+	if err != nil {
+		t.Fatal("identical content should return its unchanged saved version", err)
+	}
+	var outcome map[string]any
+	if err = json.Unmarshal([]byte(result.Parts[0].Text), &outcome); err != nil || outcome["outcome"] != "noop" || outcome["version"] != float64(1) {
+		t.Fatal("unchanged content was presented as another successful revision", outcome, err)
 	}
 	saved, err := db.ArticleDraft(ctx, c.Run.ID)
 	if err != nil || saved.Version != 1 {

@@ -159,7 +159,16 @@ func (s *session) progressFingerprint(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return store.Hash(map[string]any{"facts": facts, "draft": d.Data, "frames": s.cp.CitationFrames}), nil
+	var content any = d.Data
+	if len(d.Data) > 0 {
+		var draft articleDraft
+		if err = json.Unmarshal(d.Data, &draft); err != nil {
+			return "", err
+		}
+		draft.BatchReceipt = nil
+		content = draft
+	}
+	return store.Hash(map[string]any{"facts": facts, "draft": content, "frames": s.cp.CitationFrames}), nil
 }
 
 func (s *session) toolFeedback(ctx context.Context, name, args, before string, result *schema.ToolResult, callErr error) error {
