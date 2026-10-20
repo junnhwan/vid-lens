@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { HttpApi } from "../api/http"
 import { ApiError } from "../api/error"
 import { formatDiskBytes } from "../contract/capacity"
@@ -204,16 +204,30 @@ export function VideoStorage({ api, onDirty, onAuthLost, query, offset, cleanup,
       })}
     </div>
     {page ? <>
-      <div className="storage-table-wrap"><table className="storage-table"><thead><tr><th scope="col">视频来源</th><th scope="col">处理情况</th><th scope="col">原素材 / 配图</th><th scope="col">最近提交</th><th scope="col">清理</th></tr></thead><tbody>
-        {page.items.map((v) => { const media = mediaMark(v); const action = cleanupAction(v); return <Fragment key={v.id}><tr data-cleanup={action.state} className={v.latest_status === "failed" || (v.deleting && v.delete_failures > 0) ? "storage-row-wait" : undefined}>
-          <td><a href={v.url} target="_blank" rel="noopener noreferrer">{v.title} ↗</a><p>{v.platform === "bilibili" ? "哔哩哔哩" : v.platform === "youtube" ? "YouTube" : v.platform}{v.duration_ms ? ` · ${Math.ceil(v.duration_ms / 60000)} 分钟` : ""}</p></td>
-          <td><span className="storage-marks"><DeskStatus tone={videoTone(v.latest_status)}>{statusLabels[v.latest_status] || v.latest_status}</DeskStatus>{v.active ? <DeskStatus tone="live">进行中</DeskStatus> : null}</span><p>{v.request_count} 次提交 · {v.article_count} 篇文章</p></td>
-          <td><strong>{formatDiskBytes(v.original_bytes)}</strong><p><DeskStatus tone={media.tone} title={media.title}>{media.label}</DeskStatus> 配图 {formatDiskBytes(v.image_bytes)}</p></td>
-          <td><time dateTime={v.last_requested_at}>{date(v.last_requested_at)}</time></td>
-          <td>{action.button ? <button className={`storage-clean${v.deleting ? " is-retry" : ""}`} disabled={Boolean(busy) || dirty || Boolean(confirm)} title={dirty ? "请先保存或撤销存储设置" : action.reason} onClick={() => { setConfirm(v); setError(""); setNotice("") }}>{action.button}</button> : <span className="storage-blocked"><DeskStatus tone={action.state === "held" ? "wait" : "dim"}>{action.label}</DeskStatus><small>{action.reason}</small></span>}</td>
-        </tr>{confirm?.id === v.id ? <tr className="storage-confirm"><td colSpan={5}><div role="group" aria-label={`确认清理 ${v.title}`}><div><strong>清理「{v.title}」的原素材？</strong><p>将删除原视频与音频 {formatDiskBytes(v.original_bytes)}。文章、配图和处理记录保留；后续需要原画面时可能重新下载。</p></div><button ref={cancelRef} className="btn quiet desk-pill" disabled={Boolean(busy)} onClick={() => setConfirm(null)}>取消</button><button className="btn storage-danger" disabled={Boolean(busy)} onClick={() => void remove()}>{busy === "delete" ? "正在清理…" : "确认清理"}</button></div></td></tr> : null}</Fragment> })}
-        {!page.items.length ? <tr><td colSpan={5} className="storage-empty">{query && cleanup ? "没有符合当前搜索和筛选的视频。" : query ? "没有找到匹配的视频。" : cleanup === "ready" ? "现在没有可以清理的原视频。" : cleanup === "held" ? "现在没有使用中的视频。" : cleanup === "gone" ? "还没有已清理的视频。" : offset > 0 ? "这一页没有视频。" : "还没有视频处理记录。"}</td></tr> : null}
-      </tbody></table></div>
+      {page.items.length ? <ul className="storage-list">
+        {page.items.map((v) => {
+          const media = mediaMark(v)
+          const action = cleanupAction(v)
+          const attention = v.deleting && v.delete_failures > 0
+          const platform = v.platform === "bilibili" ? "哔哩哔哩" : v.platform === "youtube" ? "YouTube" : v.platform
+          return <li key={v.id} data-cleanup={action.state} className={[attention ? "is-wait" : "", confirm?.id === v.id ? "is-confirming" : ""].filter(Boolean).join(" ") || undefined}>
+            <article className="storage-card">
+              <div className="storage-card-main">
+                <a href={v.url} target="_blank" rel="noopener noreferrer">{v.title} ↗</a>
+                <p className="storage-card-meta"><span>{platform}{v.duration_ms ? ` · ${Math.ceil(v.duration_ms / 60000)} 分钟` : ""}</span><time dateTime={v.last_requested_at}>{date(v.last_requested_at)}</time></p>
+              </div>
+              <div className="storage-card-tags">
+                <span className="storage-marks"><DeskStatus tone={videoTone(v.latest_status)}>{statusLabels[v.latest_status] || v.latest_status}</DeskStatus>{v.active ? <DeskStatus tone="live">进行中</DeskStatus> : null}<DeskStatus tone={media.tone} title={media.title}>{media.label}</DeskStatus></span>
+                <span className="storage-card-counts">{v.request_count} 次提交 · {v.article_count} 篇文章</span>
+                {action.button ? null : <span className="storage-card-note">{action.reason}</span>}
+              </div>
+              <p className="storage-card-size"><strong>{formatDiskBytes(v.original_bytes)}</strong><span>配图 {formatDiskBytes(v.image_bytes)}</span></p>
+              <div className="storage-card-action">{action.button ? <button className={`storage-clean${v.deleting ? " is-retry" : ""}`} disabled={Boolean(busy) || dirty || Boolean(confirm)} title={dirty ? "请先保存或撤销存储设置" : action.reason} onClick={() => { setConfirm(v); setError(""); setNotice("") }}>{action.button}</button> : <DeskStatus tone={action.state === "held" ? "wait" : "dim"}>{action.label}</DeskStatus>}</div>
+            </article>
+            {confirm?.id === v.id ? <div className="storage-confirm" role="group" aria-label={`确认清理 ${v.title}`}><div><strong>清理「{v.title}」的原素材？</strong><p>将删除原视频与音频 {formatDiskBytes(v.original_bytes)}。文章、配图和处理记录保留；后续需要原画面时可能重新下载。</p></div><button ref={cancelRef} className="btn quiet desk-pill" disabled={Boolean(busy)} onClick={() => setConfirm(null)}>取消</button><button className="btn storage-danger" disabled={Boolean(busy)} onClick={() => void remove()}>{busy === "delete" ? "正在清理…" : "确认清理"}</button></div> : null}
+          </li>
+        })}
+      </ul> : <p className="storage-empty">{query && cleanup ? "没有符合当前搜索和筛选的视频。" : query ? "没有找到匹配的视频。" : cleanup === "ready" ? "现在没有可以清理的原视频。" : cleanup === "held" ? "现在没有使用中的视频。" : cleanup === "gone" ? "还没有已清理的视频。" : offset > 0 ? "这一页没有视频。" : "还没有视频处理记录。"}</p>}
       <div className="storage-pagination"><span className="fine">{page.total ? `${offset + 1}–${Math.min(offset + page.items.length, page.total)} / ${page.total}` : "0 条记录"}</span><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset === 0} onClick={() => onRoute({ query, cleanup, offset: Math.max(0, offset - pageSize) })}>上一页</button><button className="btn quiet desk-pill" disabled={Boolean(busy) || dirty || Boolean(confirm) || offset + pageSize >= page.total} onClick={() => onRoute({ query, cleanup, offset: offset + pageSize })}>下一页</button></div>
     </> : null}
     <p className="fine storage-footnote">相同视频的提交合并展示，失败与取消记录也会保留。只有还能清理的视频会显示清理按钮；使用中的要等处理结束，已清理的不再占用原视频。清理前会再确认一次，文章和配图不会被删掉。</p>

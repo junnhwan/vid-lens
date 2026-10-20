@@ -121,20 +121,29 @@ export function ExampleShowcase({ api, onDirty, onAuthLost }: { api: HttpApi; on
       <div>
         <p className="eyebrow">PUBLIC EXAMPLES</p>
         <h2 id="example-showcase-title">公开示例</h2>
-        <p className="fine">左边是访客示例页上的顺序，第 1 篇会默认打开。右边是可以加入的已发布图文。最多 {maxExamples} 篇，保存后访客才看得到。</p>
+        <p className="fine">上面是访客看到的顺序，第 1 篇会默认打开。下面挑选已发布图文加入，最多 {maxExamples} 篇，保存后才会公开。</p>
       </div>
     </header>
     {error ? <p className="management-message error" role="alert">{error}</p> : null}
     {notice ? <p className="management-message" role="status">{notice}</p> : null}
     {busy === "load" && articles.length === 0 ? <p className="fine">正在读取已发布图文…</p> : null}
     {busy !== "load" && articles.length === 0 && !error ? <p className="fine">还没有已发布的图文。</p> : null}
-    {articles.length ? <div className="example-boards">
-      <section className="example-board" aria-labelledby="example-order-title">
-        <h3 id="example-order-title">示例页顺序</h3>
-        {ordered.length ? <ol className="example-order">
+    {articles.length ? <div className="example-stages">
+      <section className="example-stage" aria-labelledby="example-order-title">
+        <header className="example-stage-head">
+          <div>
+            <h3 id="example-order-title">示例页顺序</h3>
+            <p>第 1 篇是访客打开示例页时先看到的文章。</p>
+          </div>
+          <span className="example-count">{selected.length} / {maxExamples}</span>
+        </header>
+        {ordered.length ? <ol className={ordered.length === 1 ? "example-order is-single" : ordered.length === 2 ? "example-order is-pair" : "example-order"}>
           {ordered.map((item, index) => <li key={item.article_id}>
-            <span className="example-index">{index + 1}</span>
-            <span><strong>{item.title}</strong><small>{meta(item)}{index === 0 ? " · 访客默认打开" : ""}</small></span>
+            <span className="example-kicker">
+              <span className="example-index" aria-hidden="true">{index + 1}</span>
+              {index === 0 ? <span className="example-lead-mark">访客默认打开</span> : null}
+            </span>
+            <span className="example-copy"><strong>{item.title}</strong><small>{meta(item)}</small></span>
             <span className="example-showcase-order">
               <button type="button" className="btn quiet desk-pill" disabled={Boolean(busy) || index === 0} onClick={() => move(item.article_id, -1)}>上移</button>
               <button type="button" className="btn quiet desk-pill" disabled={Boolean(busy) || index === ordered.length - 1} onClick={() => move(item.article_id, 1)}>下移</button>
@@ -142,23 +151,29 @@ export function ExampleShowcase({ api, onDirty, onAuthLost }: { api: HttpApi; on
               <a className="btn quiet desk-pill" href={`/example?video=${item.article_id}`} target="_blank" rel="noopener noreferrer">查看示例</a>
             </span>
           </li>)}
-        </ol> : <p className="example-empty">示例页现在没有文章。</p>}
+        </ol> : <p className="example-empty">示例页现在没有文章。从下面选一篇加入。</p>}
       </section>
-      <section className="example-board" aria-labelledby="example-available-title">
-        <h3 id="example-available-title">可加入的图文</h3>
-        <label className="desk-field"><span>查找已发布图文</span><input type="search" value={finder} maxLength={200} placeholder="搜索标题、平台或链接" onChange={(event) => setFinder(event.target.value)} /></label>
+      <div className={`example-showcase-actions${dirty ? " is-dirty" : ""}`}>
+        <button type="button" className="btn primary" disabled={!dirty || Boolean(busy)} onClick={() => void save()}>{busy === "save" ? "正在保存…" : "保存示例"}</button>
+        <button type="button" className="btn quiet desk-pill" disabled={!dirty || Boolean(busy)} onClick={() => { setNotice(""); setSelected(saved) }}>撤销</button>
+        <span className="fine">{dirty ? "访客仍看到上一版。" : "已与示例页一致。"} 已选 {selected.length} / {maxExamples}</span>
+      </div>
+      <section className="example-stage" aria-labelledby="example-available-title">
+        <header className="example-stage-head">
+          <div>
+            <h3 id="example-available-title">可加入的图文</h3>
+            <p>{needle ? "按标题、平台或链接筛选。" : "这些已发布图文还没出现在示例页上。"}</p>
+          </div>
+          <span className="example-count">{available.length} 篇</span>
+        </header>
+        <label className="desk-field example-finder"><span>查找已发布图文</span><input type="search" value={finder} maxLength={200} placeholder="搜索标题、平台或链接" onChange={(event) => setFinder(event.target.value)} /></label>
         {available.length ? <ul className="example-available">
           {available.map((item) => <li key={item.article_id}>
-            <span><strong>{item.title}</strong><small>{meta(item)}</small></span>
-            <button type="button" className="btn quiet desk-pill" disabled={Boolean(busy) || selected.length >= maxExamples} onClick={() => add(item.article_id)}>{selected.length >= maxExamples ? "已满" : "加入"}</button>
+            <strong>{item.title}</strong>
+            <span className="example-card-foot"><small>{meta(item)}</small><button type="button" className="btn quiet desk-pill" disabled={Boolean(busy) || selected.length >= maxExamples} onClick={() => add(item.article_id)}>{selected.length >= maxExamples ? "已满" : "加入"}</button></span>
           </li>)}
-        </ul> : <p className="fine">{needle ? "没有找到可加入的图文。" : "已发布的图文都已在示例页上。"}</p>}
+        </ul> : <p className="example-empty">{needle ? "没有找到可加入的图文。" : "已发布的图文都已在示例页上。"}</p>}
       </section>
-    </div> : null}
-    {articles.length ? <div className={`example-showcase-actions${dirty ? " is-dirty" : ""}`}>
-      <button type="button" className="btn primary" disabled={!dirty || Boolean(busy)} onClick={() => void save()}>{busy === "save" ? "正在保存…" : "保存示例"}</button>
-      <button type="button" className="btn quiet desk-pill" disabled={!dirty || Boolean(busy)} onClick={() => { setNotice(""); setSelected(saved) }}>撤销</button>
-      <span className="fine">{dirty ? "访客仍看到上一版。" : "已与示例页一致。"} 已选 {selected.length} / {maxExamples}</span>
     </div> : null}
   </section>
 }
