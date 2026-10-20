@@ -4,8 +4,8 @@ import "vidlens/internal/domain"
 
 // executionPolicy interprets the protocol identity already frozen in the
 // checkpoint. Runtime decisions never resolve against today's default policy.
-// The value is cached per session and rebuilt only when initialization or the
-// historical draft-resume transition explicitly sets that checkpoint identity.
+// The value is cached per session. Bootstrap selects a compatible revision
+// once; a continuation retains the checkpoint identity and its counters.
 type executionPolicy struct {
 	Revision             int
 	Enabled              bool
@@ -54,74 +54,124 @@ func (s *session) policy() executionPolicy {
 // Resolve only a new protocol. A checkpoint that already has a layout retains
 // its recorded revision and existing initialization behavior, including v0.
 func initialProtocol(spec domain.GenerationSpec, question bool, layout string, newLayout bool, revision int) (int, string) {
-	review := spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == reviewPolicy || spec.DetailPolicy.Revision == reviewBudgetPolicy)
-	instruction := instructions
-	if layout == draftLayout {
-		instruction += draftInstructions
+	if !newLayout {
+		instruction := instructions
+		if layout == draftLayout {
+			instruction += draftInstructions
+		}
+		return revision, instruction
 	}
-	if newLayout && spec.Version >= 2 && spec.DetailPolicy != nil {
+	p := spec.DetailPolicy
+	review := p != nil && (p.Revision == reviewPolicy || p.Revision == reviewBudgetPolicy)
+	if spec.Version >= 2 && p != nil {
 		revision = 1
-		instruction += harnessInstructions
 		if !question {
-			instruction += "\n" + spec.DetailPolicy.Instruction
-			if spec.DetailPolicy.ContentPlan {
+			if p.ContentPlan {
 				revision = 3
-				instruction += contentPlanInstructions
-				instruction += planRepairInstructions
-				if spec.DetailPolicy.Revision == "interpretation-2026-10-17-v4" {
+				if p.Revision == "interpretation-2026-10-17-v4" {
 					revision = 4
-					instruction += pacedHarnessInstructions
 				}
-				if spec.DetailPolicy.Revision == "interpretation-2026-10-17-v5" {
+				if p.Revision == "interpretation-2026-10-17-v5" {
 					revision = 5
-					instruction += pacedHarnessInstructions + observationBudgetInstructions
 				}
-				if spec.DetailPolicy.Revision == "interpretation-2026-10-17-v6" {
+				if p.Revision == "interpretation-2026-10-17-v6" {
 					revision = 7
-					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions
 				}
-				if spec.DetailPolicy.Revision == "interpretation-2026-10-17-v7" {
+				if p.Revision == "interpretation-2026-10-17-v7" {
 					revision = 9
-					instruction += pacedHarnessInstructions + observationBudgetInstructions + efficientDraftInstructions + conceptMapInstructions
 				}
 			}
 		} else {
-			instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
-			// A new private turn freezes its own protocol before its first call.
-			// Existing Ready checkpoints never pass through this initialization.
 			revision = 11
-			instruction += compactAnswerInstructions + observationBudgetInstructions + composedAnswerInstructions + evidenceFirstAnswerInstructions
-			if spec.DetailPolicy.Revision == evidencePolicy || review {
+			if p.Revision == evidencePolicy || review {
 				revision = 14
-				instruction += evidenceGroundingInstructions
 			}
 			if review {
 				revision = 15
-				instruction += reviewAuthorInstructions
-				if spec.DetailPolicy.Revision == reviewBudgetPolicy {
+				if p.Revision == reviewBudgetPolicy {
 					revision = 16
 				}
 			}
 		}
 	}
-	if newLayout && !question && spec.DetailPolicy != nil && (spec.DetailPolicy.Revision == authoringPolicy || spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || review) {
+	if !question && p != nil && (p.Revision == authoringPolicy || p.Revision == recoveryPolicy || p.Revision == evidencePolicy || review) {
 		revision = 12
-		instruction = authoringInstructions(spec.DetailPolicy.Instruction)
-		if spec.DetailPolicy.Revision == recoveryPolicy || spec.DetailPolicy.Revision == evidencePolicy || review {
+		if p.Revision == recoveryPolicy || p.Revision == evidencePolicy || review {
 			revision = 13
-			instruction += repairProgressInstructions
 		}
-		if spec.DetailPolicy.Revision == evidencePolicy || review {
+		if p.Revision == evidencePolicy || review {
 			revision = 14
-			instruction += evidenceGroundingInstructions
 		}
 		if review {
 			revision = 15
-			instruction += reviewAuthorInstructions
-			if spec.DetailPolicy.Revision == reviewBudgetPolicy {
+			if p.Revision == reviewBudgetPolicy {
 				revision = 16
 			}
 		}
 	}
-	return revision, instruction
+	return revision, protocolInstructions(spec, question, layout, revision)
+}
+
+// Both fresh input and inherited draft input use the recorded execution
+// revision. The immutable detail policy supplies user intent and budgets;
+// its revision is never rewritten to select a prompt.
+func protocolInstructions(spec domain.GenerationSpec, question bool, layout string, revision int) string {
+	detail := ""
+	if spec.DetailPolicy != nil {
+		detail = spec.DetailPolicy.Instruction
+	}
+	var instruction string
+	if !question && revision >= 12 {
+		instruction = authoringInstructions(detail)
+		if revision >= 13 {
+			instruction += repairProgressInstructions
+		}
+	} else {
+		instruction = instructions
+		if layout == draftLayout {
+			instruction += draftInstructions
+		}
+		if revision > 0 {
+			instruction += harnessInstructions
+			if question {
+				instruction += "\n本轮问答以当前问题要求的深度为先，不要求重写全片。文章详细程度只是表达偏好，不能限制后续追问的证据或解释深度。"
+				if revision >= 6 {
+					instruction += compactAnswerInstructions
+				}
+				if revision >= 5 {
+					instruction += observationBudgetInstructions
+				}
+				if revision >= 10 {
+					instruction += composedAnswerInstructions
+				}
+				if revision >= 11 {
+					instruction += evidenceFirstAnswerInstructions
+				}
+			} else {
+				instruction += "\n" + detail
+				if revision >= 3 {
+					instruction += contentPlanInstructions + planRepairInstructions
+				}
+				if revision >= 4 {
+					instruction += pacedHarnessInstructions
+				}
+				if revision >= 5 {
+					instruction += observationBudgetInstructions
+				}
+				if revision >= 7 {
+					instruction += efficientDraftInstructions
+				}
+				if revision >= 9 {
+					instruction += conceptMapInstructions
+				}
+			}
+		}
+	}
+	if revision >= 14 {
+		instruction += evidenceGroundingInstructions
+	}
+	if revision >= 15 {
+		instruction += reviewAuthorInstructions
+	}
+	return instruction
 }

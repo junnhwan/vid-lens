@@ -182,6 +182,13 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	delete(cp, "finalization_failure")
 	cp["draft_resume"] = true
 	delete(cp, "plan_hash")
+	// Only artifacts cross the explicit retry boundary. The new run freezes
+	// its own adapter, then selects a compatible prompt/tool revision from
+	// the unchanged generation spec before its first model request.
+	cp["execution_contract"] = domain.ExecutionContract{Version: domain.ExecutionContractV1, RunID: run}
+	delete(cp, "harness_revision")
+	delete(cp, "layout_version")
+	delete(cp, "protocol")
 	if _, err = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=$2 WHERE id=$1", run, domain.JSON(cp)); err != nil {
 		return err
 	}

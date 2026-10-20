@@ -16,6 +16,8 @@ import (
 )
 
 type checkpoint struct {
+	ExecutionContract *domain.ExecutionContract `json:"execution_contract,omitempty"`
+
 	HarnessRevision      int                 `json:"harness_revision,omitempty"`
 	PlanHash             string              `json:"plan_hash,omitempty"`
 	Progress             progressState       `json:"progress,omitempty"`
