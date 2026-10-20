@@ -21,6 +21,7 @@ func TestPublishedMigrationIdentities(t *testing.T) {
 		22: "022_announcement_history.sql",
 		23: "023_storage_disk_stop_percent.sql",
 		24: "024_configurable_storage_admission.sql",
+		25: "025_storage_stop_line_99_percent.sql",
 	}
 	seen := map[string]bool{}
 	previous := 0
@@ -75,8 +76,8 @@ func TestFreshMigrationsAreCompleteAndRepeatable(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, "SELECT array_agg(version ORDER BY version) FROM schema_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 23 {
-		t.Fatalf("expected 23 registered migrations, got %v", versions)
+	if len(versions) != 25 {
+		t.Fatalf("expected 25 registered migrations, got %v", versions)
 	}
 	for i, version := range versions {
 		if version != i+1 {

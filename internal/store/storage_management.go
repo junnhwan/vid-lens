@@ -109,8 +109,8 @@ func (s *Store) SaveStorageSettings(ctx context.Context, in StorageInput, worksp
 		if in.SourceDownloadLimitBytes == 0 {
 			in.SourceDownloadLimitBytes = l.sourceDownloadLimit
 		}
-		if in.DiskStopPercent < 80 || in.DiskStopPercent > 98 {
-			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 98% 之间。")
+		if in.DiskStopPercent < 80 || in.DiskStopPercent > 99 {
+			return domain.Err(422, "INVALID_ARGUMENT", "磁盘停止线须在 80% 到 99% 之间。")
 		}
 		if in.SourceDownloadLimitBytes < 64<<20 || in.SourceDownloadLimitBytes > 2<<30 {
 			return domain.Err(422, "INVALID_ARGUMENT", "单条来源下载上限须在 64 MiB 到 2 GiB 之间。")
