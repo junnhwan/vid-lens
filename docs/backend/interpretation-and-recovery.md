@@ -59,6 +59,8 @@ Model profiles define `input_chars_limit` and `context_tokens` independently of 
 
 Text and image token reserves are explicitly heuristic and model dependent. Images still have the existing 12-frame/16 MiB working-set limits. A configured shared context limit checks text estimate + image reserve + selected output + safety reserve. This is not a provider tokenizer or billing measurement. Unreported provider input/output/cache usage remains unknown.
 
+New bounded-source executions use a separate output reservation for source navigation cards and keep article output bounded per chapter batch. A longer transcript does not reserve a response proportional to the entire original source. Saved chapters are assembled by the server. Large-source review receives the unit's complete cited originals and chronological neighbors, the full navigation ledger, actual required pixels and host-owned scope facts. Derived notes cannot prove a claim; a required evidence set that cannot fit fails explicitly instead of being silently trimmed and approved. Historical frozen execution contracts retain their previous input and output rules.
+
 Before any physical model submission, the logical input, budget, tool schemas, and durable image references are saved. Worker takeover reuses that input. PostgreSQL JSON object key order cannot change its canonical argument hash. Incompatible old frozen tools fail explicitly instead of silently changing an already accepted operation.
 
 ## Subtitle adoption and diagnostics
