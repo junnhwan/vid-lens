@@ -27,7 +27,7 @@ export function ArticleOutline({
   onJump,
   label = "文章目录",
 }: {
-  sections: { id: string; title: string }[]
+  sections: { id: string; title: string; [key: string]: unknown }[]
   current: string
   onJump: (id: string) => void
   label?: string
