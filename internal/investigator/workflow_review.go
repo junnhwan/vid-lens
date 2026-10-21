@@ -158,7 +158,7 @@ func (s *session) workflowReviewKey(ctx context.Context, a domain.Article, unit 
 	}
 	contract := domain.ExecutionContractV10
 	if s.scopedWorkflow() {
-		contract = domain.ExecutionContractV11
+		contract = s.cp.ExecutionContract.Version
 	}
 	return "workflow-review:" + store.Hash(map[string]any{"contract": contract, "unit": unit, "context": context, "outline": outline, "limitations": limits, "source": source, "bindings": bindings, "frames": frames, "model_revision": s.spec.Model.RevisionID, "config_id": s.claim.Run.ConfigID, "scope": scope}), nil
 }

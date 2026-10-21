@@ -8,9 +8,38 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/domain"
 	"vidlens/internal/store"
 )
+
+// Keep the schema in the model-visible instruction as well as the native tool
+// envelope. Some compatible transports render tools as text; both paths must
+// describe the same arrays and ID ownership before spending the recovery call.
+func workflowInitialContract(info *schema.ToolInfo, payload any) (string, error) {
+	parameters, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		return "", err
+	}
+	contract := map[string]any{"tool": info.Name, "json_schema": parameters}
+	if info.Name == "write_video_chapters" || info.Name == "revise_video_chapters" {
+		var task struct {
+			Chapters []sectionPlan `json:"assigned_chapters"`
+		}
+		if err := json.Unmarshal(domain.JSON(payload), &task); err != nil {
+			return "", err
+		}
+		example := workflowBody{Sections: []workflowSection{}, Limitations: []domain.Limitation{}}
+		for _, chapter := range task.Chapters {
+			example.Sections = append(example.Sections, workflowSection{ID: chapter.ID, Blocks: []workflowBlock{{
+				Type: "paragraph", Origin: "video", Text: "结构占位：用本章实际证据写完整断言，不照抄此示例。", CitationIDs: []string{"实际交付且支持断言的tN或fN"},
+			}}})
+		}
+		contract["shape_example_only"] = example
+		contract["author_rules"] = "示例仅说明结构，不是事实或额外章节。按assigned_chapters的顺序返回全部章节。id只位于sections[i]，blocks[i]没有id；块ID由程序生成。sections、blocks、items、rows、citation_ids、frame_ids和limitations都是JSON数组，不能用字符串包装JSON。局限只在顶层limitations，通过section_ids关联章节。可用块类型及字段以json_schema为准。"
+	}
+	return "遵循以下唯一输出契约。结构示例不是来源证据；不要照抄占位内容。\nOUTPUT_CONTRACT_JSON\n" + string(domain.JSON(contract)), nil
+}
 
 // Diagnostics add a JSON pointer and wire types without changing what the
 // strict decoder accepts. In particular, strings never become arrays/objects.

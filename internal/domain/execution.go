@@ -46,12 +46,16 @@ const ExecutionContractV10 = "vidlens-workflow-2026-10-21-v1"
 // writing and revision. Admitted V10 runs retain their original wire contract.
 const ExecutionContractV11 = "vidlens-workflow-2026-10-21-v2"
 
+// V12 exposes the exact stage schema and an author shape before the first
+// submission. Existing V10/V11 runs retain their admitted prompts and schema.
+const ExecutionContractV12 = "vidlens-workflow-2026-10-21-v3"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV11
+const CurrentExecutionContract = ExecutionContractV12
 
 func StagedWorkflowContract(version string) bool {
-	return version == ExecutionContractV10 || version == ExecutionContractV11
+	return version == ExecutionContractV10 || version == ExecutionContractV11 || version == ExecutionContractV12
 }
 
 type ExecutionContract struct {

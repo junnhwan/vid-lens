@@ -445,7 +445,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		run, e := newRun(ctx, tx, "qa.answer", id, source.SourceID, configID, &c.SnapshotID, time.Now().Add(time.Duration(p.AnswerSeconds)*time.Second))
 		var workflowArticle bool
 		if e == nil {
-			e = tx.QueryRow(ctx, "SELECT COALESCE(j.checkpoint->'execution_contract'->>'version'=ANY($2::text[]) AND j.checkpoint->'workflow' IS NOT NULL,false) FROM articles a JOIN job_runs j ON j.id=a.generation_run_id WHERE a.id=$1", c.ArticleID, []string{domain.ExecutionContractV10, domain.ExecutionContractV11}).Scan(&workflowArticle)
+			e = tx.QueryRow(ctx, "SELECT COALESCE(j.checkpoint->'execution_contract'->>'version'=ANY($2::text[]) AND j.checkpoint->'workflow' IS NOT NULL,false) FROM articles a JOIN job_runs j ON j.id=a.generation_run_id WHERE a.id=$1", c.ArticleID, []string{domain.ExecutionContractV10, domain.ExecutionContractV11, domain.ExecutionContractV12}).Scan(&workflowArticle)
 		}
 		if e == nil && (in.AllowExternalSources || !workflowArticle) {
 			// Existing articles and external research retain the established

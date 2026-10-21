@@ -9,7 +9,7 @@ import (
 )
 
 func TestWorkflowRetryUpgradesArtifactsWithoutCopyingCallsOrApproval(t *testing.T) {
-	for _, version := range []string{domain.ExecutionContractV10, domain.ExecutionContractV11} {
+	for _, version := range []string{domain.ExecutionContractV10, domain.ExecutionContractV11, domain.ExecutionContractV12} {
 		t.Run(version, func(t *testing.T) {
 			s := testStore(t)
 			ctx := context.Background()

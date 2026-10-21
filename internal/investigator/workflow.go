@@ -33,7 +33,7 @@ func (s *session) stagedWorkflow() bool {
 }
 
 func (s *session) scopedWorkflow() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV11
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV11 || s.cp.ExecutionContract.Version == domain.ExecutionContractV12)
 }
 
 func (s *session) workflowInstruction(current, legacy string) string {
@@ -203,7 +203,15 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 	if err != nil {
 		return out, err
 	}
-	input := []*schema.Message{schema.SystemMessage(s.workflowInstruction(workflowInstructions, workflowV1Instructions) + "\n" + instruction), schema.UserMessage(string(domain.JSON(payload)))}
+	system := s.workflowInstruction(workflowInstructions, workflowV1Instructions) + "\n" + instruction
+	if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV12 {
+		contract, e := workflowInitialContract(info, payload)
+		if e != nil {
+			return out, e
+		}
+		system += "\n" + contract
+	}
+	input := []*schema.Message{schema.SystemMessage(system), schema.UserMessage(string(domain.JSON(payload)))}
 	if len(frameIDs) > 0 {
 		parts, err := s.imageInput(ctx, frameIDs, "workflow:"+key)
 		if err != nil {
@@ -230,6 +238,11 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 		}
 		slot, err := s.reserveWorkflowCall(ctx, fmt.Sprintf("%s:%d", key, attempt), chargedPhase)
 		if err != nil {
+			var problem *domain.Problem
+			if attempt > 0 && last != "" && s.scopedWorkflow() && errors.As(err, &problem) && problem.Code == "WORKFLOW_BUDGET_EXHAUSTED" {
+				return out, &domain.Problem{Status: 422, Code: "WORKFLOW_RESULT_INVALID", Detail: "阶段输出不合格，已无可用格式恢复预算；原始回包和已保存成果保留。" + last,
+					Meta: map[string]any{"recovery_exhausted": true, "budget_code": problem.Code, "stage": name}}
+			}
 			return out, err
 		}
 		calls := s.cp.Calls
