@@ -1,5 +1,6 @@
+import { ChoiceMenu } from "../ui/ChoiceMenu"
 import { ModelIcon } from "../ui/ModelIdentity"
-import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, LensGlyph, Model, ModelDraft, nextStep, Probe, Provider } from "./manageCatalog"
+import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, LensGlyph, Model, ModelDraft, modelState, nextStep, Probe, Provider } from "./manageCatalog"
 import { ManageRouteOrder } from "./ManageRouteOrder"
 import { isOpenProbe, liveStatusText, modelActivity, probeTiming, probeFailureText, probeStatusText } from "./probeStatus"
 export interface ManageModelsProps {
@@ -16,6 +17,8 @@ export interface ManageModelsProps {
   filter: string
   filtered: Model[]
   setFilter: import("react").Dispatch<import("react").SetStateAction<string>>
+  providerFilter: string
+  setProviderFilter: import("react").Dispatch<import("react").SetStateAction<string>>
   probeByModel: Record<string, Probe[]>
   now: number
   md: ModelDraft
@@ -45,7 +48,16 @@ export interface ManageModelsProps {
   cacheProbe: Probe | undefined
   revertModel: () => void
 }
-export function ManageModels({ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }: ManageModelsProps) {
+export function ManageModels({ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, providerFilter, setProviderFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }: ManageModelsProps) {
+  const filtering = Boolean(filter.trim() || providerFilter)
+  const providerOptions = [
+    { id: "", label: "全部供应商", hint: `${models.length} 个模型` },
+    ...providers.map((p) => ({
+      id: p.id,
+      label: p.name,
+      hint: `${models.filter((m) => m.provider_id === p.id).length} 个模型 · ${p.enabled ? "供应商已启用" : "供应商已停用"}`,
+    })),
+  ]
   return ((
     !ready ? (
       error ? null : (
@@ -116,28 +128,40 @@ export function ManageModels({ ready, error, models, composing, providers, openP
           <section className="model-ledger">
             <div className="ledger-head">
               <span>目录</span>
-              <span>{filter ? `${filtered.length} / ${models.length}` : models.length}</span>
+              <span>{filtering ? `${filtered.length} / ${models.length}` : models.length}</span>
             </div>
-            <label className="ledger-search">
-              <span className="sr-only">筛选模型</span>
-              <LensGlyph />
-              <input
-                id="model-filter"
-                placeholder="筛选名称、供应商或上游 ID"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-            </label>
+            <div className="ledger-filters">
+              <label className="ledger-search">
+                <span className="sr-only">筛选模型</span>
+                <LensGlyph />
+                <input
+                  id="model-filter"
+                  placeholder="筛选名称或上游 ID"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </label>
+              <div className="ledger-provider">
+                <ChoiceMenu
+                  label="按供应商筛选"
+                  value={providerFilter}
+                  options={providerOptions}
+                  placeholder="全部供应商"
+                  onChange={setProviderFilter}
+                />
+              </div>
+            </div>
             <div className="ledger-scroll">
               {filtered.length ? (
                 <ul className="ledger-list">
                   {filtered.map((m) => {
-                    const line = catalogLine(m, modelActivity(probeByModel[m.id]), now)
+                    const state = modelState(m, modelActivity(probeByModel[m.id]), now)
                     return (
                       <li key={m.id} data-current={!composing && md.id === m.id ? "true" : "false"}>
                         <button
                           type="button"
                           className="ledger-open"
+                          data-tone={state.tone}
                           aria-current={!composing && md.id === m.id ? "true" : undefined}
                           onClick={() => editModel(m)}
                         >
@@ -145,12 +169,18 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                             <ModelIcon brand={m.brand_id} name={m.display_name} />
                           </span>
                           <span className="ledger-copy">
-                            <strong>
-                              {m.display_name}
+                            <span className="ledger-title">
+                              <strong>{m.display_name}</strong>
+                              {m.is_default ? <i className="ledger-default">默认</i> : null}
                               {m.recommended ? <i className="ledger-recommend">推荐</i> : null}
-                            </strong>
-                            <small>{modelMeta(m)}</small>
-                            <em data-tone={line.tone}>{line.text}</em>
+                            </span>
+                            <span className="ledger-trail">
+                              <small>{modelMeta(m)}</small>
+                              <span className="state-chip" data-tone={state.tone}>
+                                <i aria-hidden="true" />
+                                {state.text}
+                              </span>
+                            </span>
                           </span>
                         </button>
                       </li>
@@ -158,7 +188,19 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                   })}
                 </ul>
               ) : (
-                <p className="empty-state">没有符合「{filter}」的模型。</p>
+                <div className="empty-state">
+                  <p>没有符合当前筛选的模型。</p>
+                  <button
+                    type="button"
+                    className="text-action"
+                    onClick={() => {
+                      setFilter("")
+                      setProviderFilter("")
+                    }}
+                  >
+                    清除筛选
+                  </button>
+                </div>
               )}
             </div>
             <div className="ledger-foot">
@@ -185,6 +227,28 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                   {dirty ? <span className="desk-dirty">未保存</span> : null}
                 </h2>
                 <p>{composing ? "先保存为停用。检查通过后才能启用。" : selected ? modelMeta(selected) : ""}</p>
+                {!composing && selected ? (
+                  <div className="sheet-states" aria-label="模型状态">
+                    <span className="state-chip" data-tone={selected.provider_enabled ? "ready" : "dim"}>
+                      <i aria-hidden="true" />
+                      {selected.provider_enabled ? "供应商可用" : "供应商停用"}
+                    </span>
+                    <span className="state-chip" data-tone={selected.verified ? "ready" : "wait"}>
+                      <i aria-hidden="true" />
+                      {selected.verified ? "检查通过" : "尚未检查"}
+                    </span>
+                    <span className="state-chip" data-tone={selected.enabled ? "ready" : "held"}>
+                      <i aria-hidden="true" />
+                      {selected.enabled ? "已启用" : "未启用"}
+                    </span>
+                    {selected.is_default ? (
+                      <span className="state-chip" data-tone="ready">
+                        <i aria-hidden="true" />
+                        默认模型
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               {!composing && selected ? (
                 <span className={`desk-seal ${catalogLine(selected, modelActivity(selectedProbes), now).tone}`}>

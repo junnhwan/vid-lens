@@ -3437,6 +3437,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 .manage-layout .owner-login input {
   height: 42px;
   max-width: none;
+  border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: var(--canvas);
   transition:
@@ -3534,10 +3535,13 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   margin: 0;
 }
 .model-ledger {
-  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface);
+}
+.model-ledger:has(.choice-menu) {
+  position: relative;
+  z-index: 8;
 }
 .ledger-head {
   display: flex;
@@ -3599,31 +3603,49 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   height: 20px;
 }
 .ledger-copy {
+  flex: 1;
   min-width: 0;
 }
-.ledger-copy small {
+.ledger-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ledger-title strong {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.ledger-copy strong,
-.ledger-copy small,
-.ledger-copy em {
-  display: block;
-}
-.ledger-copy strong {
   font-size: 14px;
   font-weight: 600;
 }
-.ledger-copy small,
-.ledger-copy em {
-  margin-top: 4px;
+.ledger-trail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 5px;
+}
+.ledger-trail small {
+  min-width: 0;
+  overflow: hidden;
   color: var(--ink-soft);
   font-size: 11px;
-  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ledger-copy em.on {
-  color: var(--teal-ink);
+.ledger-default {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--canvas);
+  font: 500 10px/16px var(--sans);
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-indent: 0.08em;
 }
 .ledger-ops {
   display: flex;
@@ -3695,6 +3717,101 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
 }
 .desk-seal .status-dot {
   margin: 0;
+}
+.desk-seal::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+}
+.desk-seal.held {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--teal) 38%, var(--line));
+  background: color-mix(in srgb, var(--teal-soft) 45%, var(--canvas));
+  color: var(--teal-ink);
+}
+.desk-seal.dim {
+  border-style: dashed;
+  color: var(--ink-soft);
+  background: var(--canvas);
+  opacity: 0.85;
+}
+.state-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 9px 2px 7px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--canvas);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 18px;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state-chip i {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+.state-chip[data-tone="ready"] {
+  border-color: color-mix(in srgb, var(--teal) 26%, transparent);
+  background: color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  color: var(--teal-ink);
+}
+.state-chip[data-tone="held"] {
+  border: 1px dashed color-mix(in srgb, var(--teal) 42%, var(--line));
+  background: transparent;
+  color: var(--teal-ink);
+}
+.state-chip[data-tone="wait"] {
+  border-color: color-mix(in srgb, var(--amber-ink) 22%, transparent);
+  background: var(--amber-bg);
+  color: var(--amber-ink);
+}
+.state-chip[data-tone="dim"] {
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+}
+.state-chip[data-tone="live"] {
+  border-color: color-mix(in srgb, var(--teal) 30%, transparent);
+  background: color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  color: var(--teal-ink);
+  font-variant-numeric: tabular-nums;
+}
+.state-chip[data-tone="live"] i {
+  animation: desk-pulse 1.4s ease-out infinite;
+}
+.ledger-open[data-tone="ready"] .ledger-mark {
+  border-color: color-mix(in srgb, var(--teal) 40%, var(--line));
+  background: color-mix(in srgb, var(--teal-soft) 52%, var(--canvas));
+}
+.ledger-open[data-tone="held"] .ledger-mark {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--teal) 36%, var(--line));
+}
+.ledger-open[data-tone="wait"] .ledger-mark {
+  border-color: color-mix(in srgb, var(--amber-ink) 28%, var(--line));
+  background: color-mix(in srgb, var(--amber-bg) 55%, var(--canvas));
+}
+.ledger-open[data-tone="dim"] .ledger-mark {
+  border-style: dashed;
+  opacity: 0.55;
+}
+.ledger-open[data-tone="live"] .ledger-mark {
+  border-color: color-mix(in srgb, var(--teal) 46%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent);
 }
 .model-detail {
   margin-top: 22px;
@@ -4039,12 +4156,35 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   flex-direction: column;
   max-height: calc(100vh - 112px);
 }
+.ledger-filters {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 10px;
+}
 .model-stage .ledger-search {
   width: auto;
-  margin: 12px 14px 4px;
+  margin: 0;
 }
 .model-stage .ledger-search input {
   background: var(--canvas);
+}
+.ledger-provider {
+  min-width: 0;
+}
+.ledger-provider .choice,
+.ledger-provider .choice-trigger {
+  width: 100%;
+  max-width: none;
+}
+.ledger-provider .choice-trigger {
+  height: 38px;
+  border-radius: 11px;
+  background: var(--canvas);
+  font-size: 12px;
+}
+.ledger-provider .choice-label {
+  flex: 1;
+  text-align: left;
 }
 .ledger-scroll {
   flex: 0 1 auto;
@@ -4135,6 +4275,17 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   color: var(--ink-soft);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+.sheet-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.sheet-states .state-chip {
+  padding: 3px 10px 3px 8px;
+  font-size: 11px;
+  line-height: 17px;
 }
 .desk-seal.ready {
   border-color: color-mix(in srgb, var(--teal) 42%, var(--line));
@@ -4569,6 +4720,7 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   .probe-rail li[data-status="running"] i,
   .probe-rail li[data-status="queued"] i,
   .ledger-copy em[data-tone="live"]::before,
+  .state-chip[data-tone="live"] i,
   .desk-seal.live::before,
   .model-sheet,
   .tune-body {

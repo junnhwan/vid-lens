@@ -36,6 +36,7 @@ export function Manage() {
   const [discovery, setDiscovery] = useState<DiscoveredModel[]>([]),
     [picked, setPicked] = useState<string[]>([]),
     [filter, setFilter] = useState(""),
+    [providerFilter, setProviderFilter] = useState(""),
     [composing, setComposing] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [ready, setReady] = useState(false)
@@ -111,6 +112,13 @@ export function Manage() {
     const preferred = models.find((m) => m.is_default) || models.find((m) => m.enabled && m.verified && m.provider_enabled) || models[0]
     setMd(modelDraft(preferred))
   }, [auth, composing, md.id, models])
+  useEffect(() => {
+    if (!auth || composing || dirty || !providerFilter) return
+    const visible = models.filter((m) => m.provider_id === providerFilter)
+    if (!visible.length || visible.some((m) => m.id === md.id)) return
+    const preferred = visible.find((m) => m.is_default) || visible.find((m) => m.enabled && m.verified) || visible[0]
+    setMd(modelDraft(preferred))
+  }, [auth, composing, dirty, providerFilter, models, md.id])
   async function action(name: string, fn: () => Promise<void>) {
     if (busy) return
     setBusy(name)
@@ -146,7 +154,7 @@ export function Manage() {
 
     if (!m) {
       setComposing(true)
-      setMd({ ...emptyModel, provider_id: providers[0]?.id || "" })
+      setMd({ ...emptyModel, provider_id: providerFilter || providers[0]?.id || "" })
       return
     }
     setComposing(false)
@@ -343,9 +351,12 @@ export function Manage() {
   const selected = models.find((m) => m.id === md.id)
   const enabledCount = models.filter((m) => m.enabled && m.provider_enabled).length
   const risenEnabled = useRise(auth ? enabledCount : undefined, auth === true)
+  const query = filter.trim().toLowerCase()
   const filtered = checkedFirst(
-    models.filter((m) =>
-      [m.display_name, m.upstream_id, providers.find((p) => p.id === m.provider_id)?.name].join(" ").toLowerCase().includes(filter.toLowerCase()),
+    models.filter(
+      (m) =>
+        (!providerFilter || m.provider_id === providerFilter) &&
+        [m.display_name, m.upstream_id, providers.find((p) => p.id === m.provider_id)?.name].join(" ").toLowerCase().includes(query),
     ),
   )
   const tab = String(Math.max(0, sections.findIndex(([id]) => id === section)))
@@ -544,7 +555,7 @@ export function Manage() {
                 <ExampleShowcase api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
               ) : section === "network" ? (
                 <NetworkSettings api={api.current} onDirty={markDirty} onAuthLost={() => setAuth(false)} />
-              ) : section === "providers" ? <ManageProviders {...{ openSection, editProvider, providers, pd, dirty, saveProvider, setPd, setDirty: markDirty, busy, discover, discovery, setPicked, picked, importModels }} /> : section === "models" ? <ManageModels {...{ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }} /> : (
+              ) : section === "providers" ? <ManageProviders {...{ openSection, editProvider, providers, pd, dirty, saveProvider, setPd, setDirty: markDirty, busy, discover, discovery, setPicked, picked, importModels }} /> : section === "models" ? <ManageModels {...{ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, providerFilter, setProviderFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }} /> : (
                 <Diagnostics
                   data={diagnostics}
                   offset={route.offset}

@@ -151,13 +151,24 @@ export const brandOptions: ChoiceOption[] = [
   ["openai", "OpenAI"],
   ["claude", "Claude"],
   ["gemini", "Gemini"],
+  ["grok", "Grok"],
+  ["meta", "Llama", "Meta 开源模型"],
+  ["mistral", "Mistral"],
+  ["gemma", "Gemma", "Google 开源系列"],
+  ["cohere", "Cohere"],
   ["qwen", "Qwen"],
   ["deepseek", "DeepSeek"],
   ["kimi", "Kimi"],
   ["glm", "GLM"],
+  ["minimax", "MiniMax"],
   ["mimo", "MiMo"],
   ["doubao", "豆包"],
   ["hunyuan", "混元"],
+  ["wenxin", "文心", "百度文心 / ERNIE"],
+  ["spark", "星火", "讯飞星火"],
+  ["stepfun", "阶跃", "阶跃星辰 Step"],
+  ["yi", "零一", "零一万物 Yi"],
+  ["baichuan", "百川", "百川智能"],
 ].map(([id, label, hint]) => ({ id, label, brand: id, hint }))
 
 export function DeskSelect({
@@ -232,14 +243,21 @@ export function sameRevision(draft: ModelDraft, model: Model) {
   )
 }
 
-export function catalogLine(model: Model, active: Probe | undefined, now: number): { text: string; tone: "ready" | "held" | "wait" | "dim" | "live" } {
+export type ModelTone = "ready" | "held" | "wait" | "dim" | "live"
+
+export function modelState(model: Model, active: Probe | undefined, now: number): { text: string; tone: ModelTone } {
   if (active) return { text: liveStatusText(active, now), tone: "live" }
   if (!model.provider_enabled) return { text: "供应商已停用", tone: "dim" }
-  if (model.enabled && model.verified && model.is_default) return { text: "可选用 · 默认", tone: "ready" }
   if (model.enabled && model.verified) return { text: "可选用", tone: "ready" }
-  if (model.verified) return { text: "已检查，未启用", tone: "held" }
-  if (model.enabled) return { text: "已启用，待复核", tone: "wait" }
+  if (model.verified) return { text: "已检查 · 未启用", tone: "held" }
+  if (model.enabled) return { text: "已启用 · 待复核", tone: "wait" }
   return { text: "待检查", tone: "wait" }
+}
+
+export function catalogLine(model: Model, active: Probe | undefined, now: number): { text: string; tone: ModelTone } {
+  const state = modelState(model, active, now)
+  if (!active && model.provider_enabled && model.enabled && model.verified && model.is_default) return { ...state, text: "可选用 · 默认" }
+  return state
 }
 
 export function checkedFirst(items: Model[]) {
