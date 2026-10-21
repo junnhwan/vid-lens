@@ -1,3 +1,18 @@
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-latin-400-italic.woff2") format("woff2");
+}
+
 :root {
   --canvas: #f4f1e9;
   --surface: #fcfaf5;
@@ -292,14 +307,18 @@ html:active-view-transition select {
   border-radius: 50%;
 }
 .editorial-entry h1 {
-  font-family: var(--serif);
-  font-weight: 500;
-  font-size: clamp(46px, 4vw, 62px);
-  line-height: 1.34;
-  letter-spacing: -0.035em;
+  font-family: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, var(--serif);
+  font-weight: 400;
+  font-size: clamp(54px, 5.1vw, 76px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
   margin: 0 0 20px;
 }
-.editorial-entry h1 > span {
+.editorial-entry h1 em {
+  font-style: italic;
+}
+.editorial-entry h1 > span,
+.editorial-entry h1 em span {
   color: var(--teal);
 }
 .entry-deck {

@@ -114,9 +114,11 @@ export function EntryView({
             <span /> A CLOSER LOOK AT VIDEO
           </p>
           <h1>
-            把视频，
+            A video,
             <br />
-            读成一篇<span>图文。</span>
+            <em>
+              read <span>closely.</span>
+            </em>
           </h1>
           <p className="entry-deck">循着原视频的文字与画面整理重点，留下可回看的出处，也留一点继续追问的空间。</p>
           <p className="entry-fit" id="video-fit">
