@@ -81,23 +81,35 @@ export function hideView(el: HTMLElement) {
   }
 }
 
-export function animateTitle(el: HTMLElement, title: string) {
+export function slideTitle(el: HTMLElement, title: string) {
   if (el.dataset.value === title) return
+  const previous = el.dataset.value
   el.dataset.value = title
-  for (const anim of el.getAnimations()) anim.cancel()
-  el.textContent = title
-  if (!prefersReduced()) {
-    const outgoing = el.animate(
-      [
-        { opacity: 0.5, transform: "translateY(4px)" },
-        { opacity: 1, transform: "none" },
-      ],
-      { duration: 200, easing: EASE },
-    )
-    outgoing.onfinish = () => outgoing.cancel()
-    return
-  }
-  el.textContent = title
+  const incoming = document.createElement("span")
+  incoming.className = "title-now"
+  incoming.textContent = title
+  el.replaceChildren(incoming)
+  if (!previous || prefersReduced()) return
+  const ghost = document.createElement("span")
+  ghost.className = "title-ghost"
+  ghost.setAttribute("aria-hidden", "true")
+  ghost.textContent = previous
+  el.append(ghost)
+  const leave = ghost.animate(
+    [
+      { opacity: 1, transform: "none", filter: "blur(0)" },
+      { opacity: 0, transform: "translateY(-0.55em)", filter: "blur(2px)" },
+    ],
+    { duration: 220, easing: EASE, fill: "forwards" },
+  )
+  leave.onfinish = () => ghost.remove()
+  incoming.animate(
+    [
+      { opacity: 0, transform: "translateY(0.6em)" },
+      { opacity: 1, transform: "none" },
+    ],
+    { duration: 320, delay: 60, easing: EASE, fill: "backwards" },
+  )
 }
 
 const EASE_MOVE = "cubic-bezier(0.77, 0, 0.175, 1)"
