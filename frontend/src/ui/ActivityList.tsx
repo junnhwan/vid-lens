@@ -103,8 +103,8 @@ export function ActivityList({
             </details>
           ) : null}
           {detailed && step.source_range ? <div className="step-range">{formatRange(step.source_range)}</div> : null}
-          {detailed && frames.length ? (
-            <div className="mini-row">
+          {frames.length ? (
+            <div className="mini-row" aria-label="画面证据">
               {frames.map((frame, index) => (
                 <button
                   type="button"

@@ -1,4 +1,4 @@
-import type { ActivityStep } from "../contract/types"
+import type { ActivityStep, Range } from "../contract/types"
 import { formatClock } from "../contract/text"
 
 export const PHASES = [
@@ -41,6 +41,20 @@ export function restingTitle(title: string, status: "done" | "stopped"): string 
   const plain = transcription ? "转写音频" : title.slice(2)
   if (status === "done") return `已${plain}`
   return plain
+}
+
+export function mergeRanges(ranges: Range[]): Range[] {
+  const sorted = ranges
+    .filter((range) => range.end_ms > range.start_ms)
+    .map((range) => ({ ...range }))
+    .sort((a, b) => a.start_ms - b.start_ms)
+  const merged: Range[] = []
+  for (const range of sorted) {
+    const last = merged.at(-1)
+    if (last && range.start_ms <= last.end_ms) last.end_ms = Math.max(last.end_ms, range.end_ms)
+    else merged.push(range)
+  }
+  return merged
 }
 
 export function phaseMarks(phase: string | null | undefined, mode: "running" | "done" | "stopped"): PhaseMark[] {

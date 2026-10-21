@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { displayStepTitle, parseTranscription, phaseMarks, quietNote, restingTitle, stepSpent, waitClock, anchoredElapsed, serverElapsed } from "./progress"
+import { displayStepTitle, mergeRanges, parseTranscription, phaseMarks, quietNote, restingTitle, stepSpent, waitClock, anchoredElapsed, serverElapsed } from "./progress"
 
 describe("transcription progress", () => {
   it("reads the clock embedded in the activity title", () => {
@@ -40,4 +40,17 @@ it("keeps running time on a server anchor and a monotonic clock", () => {
   expect(anchoredElapsed({ elapsedMs: elapsed, monotonicMs: 10_000 }, 12_000)).toBe(122_000)
   expect(anchoredElapsed({ elapsedMs: elapsed, monotonicMs: 10_000 }, 9_000)).toBe(120_000)
   expect(serverElapsed("invalid", "invalid")).toBeNull()
+})
+
+it("merges overlapping observed ranges without inventing gaps", () => {
+  expect(mergeRanges([
+    { start_ms: 30_000, end_ms: 40_000 },
+    { start_ms: 10_000, end_ms: 20_000 },
+    { start_ms: 18_000, end_ms: 25_000 },
+    { start_ms: 40_000, end_ms: 50_000 },
+    { start_ms: 70_000, end_ms: 70_000 },
+  ])).toEqual([
+    { start_ms: 10_000, end_ms: 25_000 },
+    { start_ms: 30_000, end_ms: 50_000 },
+  ])
 })
