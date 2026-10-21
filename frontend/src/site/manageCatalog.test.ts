@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { catalogLine, modelState, type Model } from "./manageCatalog"
+import { catalogLine, modelState, modelStateCounts, modelStateGroup, type Model } from "./manageCatalog"
 
 const base: Model = {
   id: "m",
@@ -46,4 +46,17 @@ it("shows an open probe before the stored state", () => {
     text: "正在检查 · 12 秒",
     tone: "live",
   })
+})
+
+it("groups models into enabled, pending-check and off buckets", () => {
+  const ready = { ...base, enabled: true, verified: true }
+  const pending = { ...base, id: "pending" }
+  const checkedOff = { ...base, id: "checked", verified: true }
+  const providerOff = { ...base, id: "off", enabled: true, verified: true, provider_enabled: false }
+  expect(modelStateGroup(ready)).toBe("enabled")
+  expect(modelStateGroup({ ...base, enabled: true, is_default: true })).toBe("enabled")
+  expect(modelStateGroup(pending)).toBe("pending")
+  expect(modelStateGroup(checkedOff)).toBe("off")
+  expect(modelStateGroup(providerOff)).toBe("off")
+  expect(modelStateCounts([ready, pending, checkedOff, providerOff])).toEqual({ "": 4, enabled: 1, pending: 1, off: 2 })
 })

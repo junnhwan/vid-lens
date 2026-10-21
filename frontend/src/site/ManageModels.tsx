@@ -1,6 +1,6 @@
 import { ChoiceMenu } from "../ui/ChoiceMenu"
 import { ModelIcon } from "../ui/ModelIdentity"
-import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, LensGlyph, Model, ModelDraft, modelState, nextStep, Probe, Provider } from "./manageCatalog"
+import { actionNote, brandOptions, cacheOptions, catalogLine, DeskSelect, InkSwitch, LensGlyph, Model, ModelDraft, modelState, ModelStateCounts, ModelStateFilter, ModelStateGroup, nextStep, Probe, Provider } from "./manageCatalog"
 import { ManageRouteOrder } from "./ManageRouteOrder"
 import { isOpenProbe, liveStatusText, modelActivity, probeTiming, probeFailureText, probeStatusText } from "./probeStatus"
 export interface ManageModelsProps {
@@ -19,6 +19,9 @@ export interface ManageModelsProps {
   setFilter: import("react").Dispatch<import("react").SetStateAction<string>>
   providerFilter: string
   setProviderFilter: import("react").Dispatch<import("react").SetStateAction<string>>
+  stateFilter: ModelStateFilter
+  setStateFilter: import("react").Dispatch<import("react").SetStateAction<ModelStateFilter>>
+  stateCounts: ModelStateCounts
   probeByModel: Record<string, Probe[]>
   now: number
   md: ModelDraft
@@ -48,8 +51,14 @@ export interface ManageModelsProps {
   cacheProbe: Probe | undefined
   revertModel: () => void
 }
-export function ManageModels({ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, providerFilter, setProviderFilter, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }: ManageModelsProps) {
-  const filtering = Boolean(filter.trim() || providerFilter)
+export function ManageModels({ ready, error, models, composing, providers, openProviders, beginAddProvider, busy, importCurrent, editModel, filter, filtered, setFilter, providerFilter, setProviderFilter, stateFilter, setStateFilter, stateCounts, probeByModel, now, md, modelMeta, selected, cancelCompose, dirty, selectedProbes, checking, probe, capabilityProbe, toggleModel, makeDefault, setRecommended, setError, setNotice, saveModel, patchModel, advanced, setAdvanced, orderedRouteModels, providerName, moveRoute, routeOrderChanged, saveRouteOrder, cacheChecking, cacheProbe, revertModel }: ManageModelsProps) {
+  const filtering = Boolean(filter.trim() || providerFilter || stateFilter)
+  const stateOptions: { id: ModelStateFilter; label: string; tone?: ModelStateGroup; hint: string }[] = [
+    { id: "", label: "全部", hint: "当前供应商与搜索范围内的全部模型" },
+    { id: "enabled", label: "已启用", tone: "enabled", hint: "开关已打开，且供应商可用" },
+    { id: "pending", label: "待检查", tone: "pending", hint: "尚未启用，也还没有通过检查" },
+    { id: "off", label: "未启用", tone: "off", hint: "未启用、已检查未启用或供应商停用" },
+  ]
   const providerOptions = [
     { id: "", label: "全部供应商", hint: `${models.length} 个模型` },
     ...providers.map((p) => ({
@@ -150,6 +159,23 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                   onChange={setProviderFilter}
                 />
               </div>
+              <div className="ledger-states" role="group" aria-label="按状态筛选">
+                {stateOptions.map((option) => (
+                  <button
+                    key={option.id || "all"}
+                    type="button"
+                    className="ledger-state"
+                    data-tone={option.tone}
+                    aria-pressed={stateFilter === option.id}
+                    title={option.hint}
+                    onClick={() => setStateFilter(option.id)}
+                  >
+                    {option.tone ? <i aria-hidden="true" /> : null}
+                    {option.label}
+                    <b>{stateCounts[option.id]}</b>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="ledger-scroll">
               {filtered.length ? (
@@ -196,6 +222,7 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                     onClick={() => {
                       setFilter("")
                       setProviderFilter("")
+                      setStateFilter("")
                     }}
                   >
                     清除筛选

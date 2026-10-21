@@ -4186,6 +4186,73 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   flex: 1;
   text-align: left;
 }
+.ledger-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.ledger-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    background-color 160ms var(--ease-out);
+}
+.ledger-state i {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ink-soft);
+}
+.ledger-state[data-tone="enabled"] i {
+  background: var(--teal);
+}
+.ledger-state[data-tone="pending"] i {
+  background: var(--amber-ink);
+}
+.ledger-state[data-tone="off"] i {
+  background: var(--line-strong);
+}
+.ledger-state b {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.82;
+}
+.ledger-state:hover {
+  border-color: var(--line-strong);
+  background: var(--canvas);
+  color: var(--ink);
+}
+.ledger-state[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--ink) 34%, var(--line));
+  background: color-mix(in srgb, var(--ink) 7%, var(--canvas));
+  color: var(--ink);
+}
+.ledger-state[aria-pressed="true"] b {
+  color: var(--ink);
+  opacity: 1;
+}
+.ledger-state:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--teal) 55%, transparent);
+  outline-offset: 1px;
+}
 .ledger-scroll {
   flex: 0 1 auto;
   min-height: 0;

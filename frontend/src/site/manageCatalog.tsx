@@ -254,6 +254,22 @@ export function modelState(model: Model, active: Probe | undefined, now: number)
   return { text: "待检查", tone: "wait" }
 }
 
+export type ModelStateGroup = "enabled" | "pending" | "off"
+export type ModelStateFilter = "" | ModelStateGroup
+export type ModelStateCounts = Record<ModelStateFilter, number>
+
+export function modelStateGroup(model: Model): ModelStateGroup {
+  if (!model.provider_enabled) return "off"
+  if (model.enabled) return "enabled"
+  return model.verified ? "off" : "pending"
+}
+
+export function modelStateCounts(models: Model[]): ModelStateCounts {
+  const counts: ModelStateCounts = { "": models.length, enabled: 0, pending: 0, off: 0 }
+  for (const model of models) counts[modelStateGroup(model)]++
+  return counts
+}
+
 export function catalogLine(model: Model, active: Probe | undefined, now: number): { text: string; tone: ModelTone } {
   const state = modelState(model, active, now)
   if (!active && model.provider_enabled && model.enabled && model.verified && model.is_default) return { ...state, text: "可选用 · 默认" }
