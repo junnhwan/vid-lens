@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.repairsReviewCoverage() {
+		return "evidence-review-2026-10-21-v10"
+	}
 	if s.usesJointReview() {
 		return "evidence-review-2026-10-21-v9"
 	}
@@ -62,7 +65,11 @@ func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
 }
 
 func (s *session) usesJointReview() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV6
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7)
+}
+
+func (s *session) repairsReviewCoverage() bool {
+	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV7
 }
 
 type reviewUnit struct {

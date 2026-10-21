@@ -46,13 +46,16 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 		}
 		for _, result := range results {
 			if result.Verdict == "not_assessed" {
-				return nil, domain.Err(502, "REVIEW_COVERAGE_INCOMPLETE", "独立复核未完成所有必需单元；草稿和已完成审核记录已保留。")
+				if !s.repairsReviewCoverage() {
+					return nil, domain.Err(502, "REVIEW_COVERAGE_INCOMPLETE", "独立复核未完成所有必需单元；草稿和已完成审核记录已保留。")
+				}
+				issues = append(issues, map[string]any{"code": "review_not_assessed", "path": byID[result.UnitID].Path, "reason": "本单元尚未完成复核。这不是已证伪；先回读相应原文或实际图片，定位并补正引用及必要证据后重新提交。不能把未审当通过，也不能仅为绕过审核删掉必要主题。", "review_unit_id": result.UnitID, "verdict": result.Verdict})
 			}
 			for _, issue := range result.Issues {
 				issues = append(issues, map[string]any{"code": "evidence_not_supported", "path": byID[result.UnitID].Path, "reason": issue.Reason, "claim": issue.Claim, "citation_ids": issue.CitationIDs, "review_unit_id": result.UnitID, "verdict": result.Verdict})
 			}
 		}
-		if task.Mode == "source_text" && len(issues) > 0 {
+		if (task.Mode == "source_text" || s.repairsReviewCoverage()) && len(issues) > 0 {
 			break
 		}
 	}

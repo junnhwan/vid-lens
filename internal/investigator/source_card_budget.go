@@ -19,14 +19,18 @@ type sourceCardBounds struct {
 }
 
 func (s *session) adaptiveSourceCards() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7)
 }
 
 func (s *session) sourceInstructions() string {
+	instructions := sourceContextInstructions
 	if s.adaptiveSourceCards() {
-		return sourceContextInstructions + "\n" + adaptiveSourceCardInstructions
+		instructions += "\n" + adaptiveSourceCardInstructions
 	}
-	return sourceContextInstructions
+	if s.repairsReviewCoverage() {
+		instructions += "\n" + reviewCoverageRepairInstructions
+	}
+	return instructions
 }
 
 func sourceNoteMaximum(chunk sourceChunk) int {

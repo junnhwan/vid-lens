@@ -114,3 +114,47 @@ func TestJointReviewBindsTextPixelsAndPublicationCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestCurrentReviewKeepsFindingsAndRoutesUnassessedUnitToEvidenceRepair(t *testing.T) {
+	s := boundedReviewSession(t, func(w http.ResponseWriter, r *http.Request) {
+		var in reviewWireRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Error(err)
+		}
+		payload := reviewWirePayload(t, in)
+		var id string
+		var units []reviewUnit
+		_ = json.Unmarshal(payload["request_id"], &id)
+		_ = json.Unmarshal(payload["units"], &units)
+		report := reviewUnitReport{RequestID: id, Results: []reviewUnitResult{}}
+		for i, unit := range units {
+			result := reviewUnitResult{UnitID: unit.ID, Verdict: "not_assessed", Issues: []reviewUnitIssue{}}
+			if i == 0 {
+				result.Verdict = "contradicted"
+				result.Issues = []reviewUnitIssue{{Claim: "来源事实0", Reason: "该引用与当前断言不对应。", CitationIDs: []string{"t1"}}}
+			}
+			report.Results = append(report.Results, result)
+		}
+		writeReviewWireArgs(w, reviewUnitsTool, report)
+	})
+	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	ctx := context.Background()
+	catalog, err := s.citationCatalog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := map[string]any{"summary": "来源事实0", "title": "待补读的另一项原文事实"}
+	err = s.reviewContent(ctx, candidate, catalog)
+	var correction *candidateError
+	meta := s.pendingEvidenceReview()
+	if !errors.As(err, &correction) || meta == nil {
+		t.Fatalf("one unassessed unit discarded actionable findings and blocked evidence acquisition: %v", err)
+	}
+	issues, _ := meta["issues"].([]map[string]any)
+	if len(issues) != 2 || issues[0]["code"] != "evidence_not_supported" || issues[1]["code"] != "review_not_assessed" || issues[1]["path"] != "/title" || s.cp.Repairs != 0 {
+		t.Fatal("coverage gap became approval, a fabricated contradiction, or lost the real finding", meta)
+	}
+	if err = s.requirePublicationReview(ctx, candidate, catalog); err == nil {
+		t.Fatal("an unassessed unit was allowed through publication")
+	}
+}

@@ -25,9 +25,13 @@ const ExecutionContractV5 = "vidlens-execution-2026-10-21-v5"
 // Older runs retain their separate modality obligations and frozen inputs.
 const ExecutionContractV6 = "vidlens-execution-2026-10-21-v6"
 
+// V7 routes incomplete semantic coverage back to bounded evidence acquisition,
+// retaining actionable findings instead of losing a whole mixed-verdict batch.
+const ExecutionContractV7 = "vidlens-execution-2026-10-21-v7"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV6
+const CurrentExecutionContract = ExecutionContractV7
 
 type ExecutionContract struct {
 	Version string `json:"version"`
