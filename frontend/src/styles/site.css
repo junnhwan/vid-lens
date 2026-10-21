@@ -3719,9 +3719,30 @@ html:has(.workspace[data-qa="stage"][data-paper="open"]) {
   border-color: var(--teal);
   background: var(--teal-soft);
 }
+.manage-layout .discovered .ink-check > span {
+  flex-shrink: 0;
+}
+.discovered-identity {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 14px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.discovered-identity > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .manage-layout .discovered .ink-check code {
   min-width: 0;
   overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 400;
 }
 .probe-history {
   margin-top: 28px;

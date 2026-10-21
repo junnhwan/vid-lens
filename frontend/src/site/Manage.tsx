@@ -6,7 +6,7 @@ import { SiteFooter, SiteHeader } from "../ui/SiteHeader"
 import { AnnouncementSettings } from "./AnnouncementSettings"
 import { ExampleShowcase } from "./ExampleShowcase"
 import { ExecutionSettings } from "./ExecutionSettings"
-import { checkedFirst, emptyModel, emptyProvider, message, Model, ModelDraft, modelDraft, Probe, Provider, ProviderDraft, providerDraft, sameRevision, sections, usagePageSize } from "./manageCatalog"
+import { checkedFirst, DiscoveredModel, emptyModel, emptyProvider, message, Model, ModelDraft, modelDraft, Probe, Provider, ProviderDraft, providerDraft, sameRevision, sections, usagePageSize } from "./manageCatalog"
 import { Diagnostics } from "./ManageDiagnostics"
 import { ManageModels } from "./ManageModels"
 import { ManageProviders } from "./ManageProviders"
@@ -33,7 +33,7 @@ export function Manage() {
     setDirty(next)
     if (!next) setError((current) => (current.includes("请先保存或撤销") ? "" : current))
   }
-  const [discovery, setDiscovery] = useState<string[]>([]),
+  const [discovery, setDiscovery] = useState<DiscoveredModel[]>([]),
     [picked, setPicked] = useState<string[]>([]),
     [filter, setFilter] = useState(""),
     [composing, setComposing] = useState(false),
@@ -319,8 +319,8 @@ export function Manage() {
   async function discover() {
     if (!pd.id) return
     await action("discover", async () => {
-      const r = await api.current.request<{ items: { id: string }[] }>("POST", `/api/v1/admin/providers/${pd.id}/discover`, {})
-      setDiscovery(r.body.items.map((x) => x.id))
+      const r = await api.current.request<{ items: DiscoveredModel[] }>("POST", `/api/v1/admin/providers/${pd.id}/discover`, {})
+      setDiscovery(r.body.items.map((model) => ({ id: model.id, display_name: model.display_name?.trim() || model.id })))
       setPicked([])
       setNotice("仅发现模型名字；未探测、未启用，也未更改默认模型。")
     })
@@ -332,7 +332,7 @@ export function Manage() {
         await api.current.request("POST", "/api/v1/admin/models", {
           ...emptyModel,
           provider_id: pd.id,
-          display_name: id,
+          display_name: discovery.find((model) => model.id === id)?.display_name || id,
           upstream_id: id,
         })
       setPicked([])

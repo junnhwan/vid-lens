@@ -262,7 +262,9 @@ func (a *Server) discoverModels(w http.ResponseWriter, r *http.Request) {
 	}
 	var result struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			Name        string `json:"name"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(b, &result) != nil {
@@ -272,7 +274,14 @@ func (a *Server) discoverModels(w http.ResponseWriter, r *http.Request) {
 	items := []map[string]string{}
 	for _, m := range result.Data {
 		if m.ID != "" && len(m.ID) <= 256 {
-			items = append(items, map[string]string{"id": m.ID})
+			name := strings.TrimSpace(m.DisplayName)
+			if name == "" {
+				name = strings.TrimSpace(m.Name)
+			}
+			if name == "" {
+				name = m.ID
+			}
+			items = append(items, map[string]string{"id": m.ID, "display_name": name})
 		}
 		if len(items) == 1000 {
 			break

@@ -12,6 +12,11 @@ export interface Provider {
   proxy_policy: string
 }
 
+export interface DiscoveredModel {
+  id: string
+  display_name?: string
+}
+
 export interface Model {
   id: string
   revision: number

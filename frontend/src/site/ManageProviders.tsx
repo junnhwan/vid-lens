@@ -1,4 +1,4 @@
-import { DeskSelect, emptyProvider, InkSwitch, Provider, ProviderDraft, providerDraft, proxyOptions } from "./manageCatalog"
+import { DeskSelect, DiscoveredModel, emptyProvider, InkSwitch, Provider, ProviderDraft, providerDraft, proxyOptions } from "./manageCatalog"
 export interface ManageProvidersProps {
   openSection: (id: string) => boolean
   editProvider: (p?: Provider) => void
@@ -10,7 +10,7 @@ export interface ManageProvidersProps {
   setDirty: (dirty: boolean) => void
   busy: string
   discover: () => Promise<void>
-  discovery: string[]
+  discovery: DiscoveredModel[]
   setPicked: import("react").Dispatch<import("react").SetStateAction<string[]>>
   picked: string[]
   importModels: () => Promise<void>
@@ -156,13 +156,13 @@ export function ManageProviders({ openSection, editProvider, providers, pd, dirt
                   <button
                     type="button"
                     className="text-action"
-                    onClick={() => setPicked(picked.length === discovery.length ? [] : [...discovery])}
+                    onClick={() => setPicked(picked.length === discovery.length ? [] : discovery.map((model) => model.id))}
                   >
                     {picked.length === discovery.length ? "取消全选" : "全选"}
                   </button>
                 </div>
                 <p className="fine">发现只表示名字存在，不代表看图或工具能力。</p>
-                {discovery.map((id) => (
+                {discovery.map(({ id, display_name }) => (
                   <label className="ink-check" key={id}>
                     <input
                       type="checkbox"
@@ -170,7 +170,10 @@ export function ManageProviders({ openSection, editProvider, providers, pd, dirt
                       onChange={(e) => setPicked((prev) => (e.target.checked ? [...prev, id] : prev.filter((v) => v !== id)))}
                     />
                     <span />
-                    <code>{id}</code>
+                    <strong className="discovered-identity">
+                      <span>{display_name || id}</span>
+                      {display_name && display_name !== id ? <code>{id}</code> : null}
+                    </strong>
                   </label>
                 ))}
                 <button type="button" className="btn primary" disabled={!!busy || !picked.length} onClick={() => void importModels()}>
