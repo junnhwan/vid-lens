@@ -41,6 +41,61 @@ func workflowInitialContract(info *schema.ToolInfo, payload any) (string, error)
 	return "遵循以下唯一输出契约。结构示例不是来源证据；不要照抄占位内容。\nOUTPUT_CONTRACT_JSON\n" + string(domain.JSON(contract)), nil
 }
 
+// This optional annotation contains no evidence or uncertainty. Only null at
+// the section boundary is inert; a non-null value, another key or another
+// location is left for the unchanged strict decoder to reject. Real top-level
+// limitations and every section/block value retain their JSON values.
+func workflowNullSectionPlaceholders(raw string) (string, []string) {
+	var root map[string]json.RawMessage
+	var original []json.RawMessage
+	var sections []map[string]json.RawMessage
+	if !workflowUniqueObjectFields([]byte(raw)) || json.Unmarshal([]byte(raw), &root) != nil || json.Unmarshal(root["sections"], &original) != nil || json.Unmarshal(root["sections"], &sections) != nil {
+		return raw, nil
+	}
+	for _, section := range original {
+		if !workflowUniqueObjectFields(section) {
+			return raw, nil
+		}
+	}
+	paths := []string{}
+	for i, section := range sections {
+		if value, ok := section["limitations_placeholder"]; ok && strings.TrimSpace(string(value)) == "null" {
+			delete(section, "limitations_placeholder")
+			paths = append(paths, fmt.Sprintf("/sections/%d/limitations_placeholder", i))
+		}
+	}
+	if len(paths) == 0 {
+		return raw, nil
+	}
+	root["sections"] = domain.JSON(sections)
+	return string(domain.JSON(root)), paths
+}
+
+// Map decoding keeps the last duplicate key. Projection must not conceal an
+// earlier non-null annotation or conflicting section under a later null value.
+func workflowUniqueObjectFields(raw []byte) bool {
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return false
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		token, err := d.Token()
+		name, ok := token.(string)
+		if err != nil || !ok || seen[name] {
+			return false
+		}
+		seen[name] = true
+		var value json.RawMessage
+		if d.Decode(&value) != nil {
+			return false
+		}
+	}
+	token, err = d.Token()
+	return err == nil && token == json.Delim('}')
+}
+
 // Diagnostics add a JSON pointer and wire types without changing what the
 // strict decoder accepts. In particular, strings never become arrays/objects.
 func workflowDecode(raw string, out any) error {

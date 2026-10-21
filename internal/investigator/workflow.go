@@ -90,20 +90,37 @@ func workflowDecodeStrict(raw string, out any) error {
 }
 
 func workflowArguments(response *schema.Message, name string) (string, error) {
+	raw, _, err := workflowStageArguments(response, name, false)
+	return raw, err
+}
+
+func workflowStageArguments(response *schema.Message, name string, closingEcho bool) (string, bool, error) {
 	if response == nil {
-		return "", errors.New("阶段结果缺失。")
+		return "", false, errors.New("阶段结果缺失。")
 	}
 	raw := strings.TrimSpace(response.Content)
 	if len(response.ToolCalls) > 0 {
 		if len(response.ToolCalls) != 1 || response.ToolCalls[0].Function.Name != name || raw != "" {
-			return "", errors.New("只能返回指定工具的一次调用或一个JSON对象，不能混用。")
+			return "", false, errors.New("只能返回指定工具的一次调用或一个JSON对象，不能混用。")
 		}
 		raw = strings.TrimSpace(response.ToolCalls[0].Function.Arguments)
 	}
-	if !strings.HasPrefix(raw, "{") || !json.Valid([]byte(raw)) {
-		return "", errors.New("阶段结果须为一个完整JSON对象，不含解释文字、Markdown或残缺数据。")
+	normalized := false
+	if closingEcho && strings.HasPrefix(raw, "{") && !json.Valid([]byte(raw)) {
+		// The first value must already be a complete, unmodified JSON object.
+		// Only one unmatched closing brace outside it can be discarded. Never
+		// complete a truncated object, repair a field, or merge multiple values.
+		d := json.NewDecoder(strings.NewReader(raw))
+		var object json.RawMessage
+		if d.Decode(&object) == nil && strings.TrimSpace(raw[d.InputOffset():]) == "}" {
+			raw, normalized = string(object), true
+		}
 	}
-	return withoutToolActivityTitle(raw)
+	if !strings.HasPrefix(raw, "{") || !json.Valid([]byte(raw)) {
+		return "", false, errors.New("阶段结果须为一个完整JSON对象，不含解释文字、Markdown或残缺数据。")
+	}
+	raw, err := withoutToolActivityTitle(raw)
+	return raw, normalized, err
 }
 
 type workflowCallReservation struct {
@@ -275,7 +292,24 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 			continue
 		}
 		var value T
-		raw, e := workflowArguments(response, name)
+		closingEcho := s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV12
+		raw, normalized, e := workflowStageArguments(response, name, closingEcho)
+		rules, paths := []string{}, []string{}
+		if normalized {
+			rules = append(rules, "one_redundant_closing_brace")
+		}
+		if e == nil && closingEcho && (name == "write_video_chapters" || name == "revise_video_chapters") {
+			raw, paths = workflowNullSectionPlaceholders(raw)
+			if len(paths) > 0 {
+				rules = append(rules, "null_section_limitations_placeholder")
+			}
+		}
+		if len(rules) > 0 {
+			audit := map[string]any{"rules": rules, "paths": paths, "model_result_hash": store.Hash(response), "arguments_hash": store.Hash(json.RawMessage(raw)), "semantic_approval": false}
+			if err := s.workflowSave(ctx, fmt.Sprintf("workflow-envelope:%s:%d", key, attempt), audit); err != nil {
+				return out, err
+			}
+		}
 		rejected = raw
 		if e == nil {
 			if s.scopedWorkflow() && name == "plan_video_article" {
