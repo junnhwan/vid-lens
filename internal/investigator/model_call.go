@@ -202,7 +202,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		return a == preferred && b != preferred
 	})
 	single := len(routes) == 1
-	if single {
+	if single && !s.stagedWorkflow() {
 		// Preserve the small existing retry for a single transiently failing route.
 		routes = append(routes, routes[0])
 	}

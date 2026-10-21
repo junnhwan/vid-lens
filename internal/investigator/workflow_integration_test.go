@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -263,5 +264,21 @@ func TestWorkflowRevisionReusesOnlyUnaffectedChapterEvidence(t *testing.T) {
 	s.snapshot.TextHash = "changed source"
 	if s.requireWorkflowReview(context.Background(), workflowArticleCandidate(a), nil) == nil {
 		t.Fatal("changed original source retained approval")
+	}
+}
+
+func TestWorkflowProviderFailureRequiresExplicitRetryWithoutResending(t *testing.T) {
+	var sends atomic.Int32
+	s := boundedReviewSession(t, func(w http.ResponseWriter, r *http.Request) {
+		sends.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	workflowFixtureState(s)
+	_, err := workflowStage[struct {
+		Value string `json:"value"`
+	}](context.Background(), s, "one-provider-failure", "plan", "record_test_value", "Record one value.", map[string]any{"snapshot_id": s.snapshot.ID}, nil, nil)
+	var problem *domain.Problem
+	if !errors.As(err, &problem) || problem.Code != "PROVIDER_UNAVAILABLE" || problem.Status != 502 || problem.Meta["can_retry"] != true || sends.Load() != 1 {
+		t.Fatal("large logical input was automatically resent or failure identity was lost", sends.Load(), err)
 	}
 }

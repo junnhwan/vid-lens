@@ -135,6 +135,8 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 	t, err := utils.InferEnhancedTool(name, instruction, func(context.Context, T) (*schema.ToolResult, error) { return nil, nil })
 	if name == workflowReviewToolName {
 		t, err = workflowReviewTool(instruction)
+	} else if name == "plan_video_article" {
+		t, err = workflowPlanTool(instruction)
 	}
 	if err != nil {
 		return out, err
@@ -174,7 +176,7 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 		calls := s.cp.Calls
 		s.cp.Calls = slot
 		output := 32768
-		if phase == "plan" || phase == "evidence" || phase == "answer" {
+		if phase == "evidence" || phase == "answer" {
 			output = 16384
 		}
 		s.workflowStep = &workflowStep{Phase: phase, Tool: name, OutputTokens: output}
@@ -187,6 +189,13 @@ func workflowStage[T any](ctx context.Context, s *session, key, phase, name, ins
 		s.cp.Calls = calls
 		if err != nil {
 			var work *domain.WorkError
+			if errors.As(err, &work) && (work.Code == "PROVIDER_UNAVAILABLE" || work.Code == "PROVIDER_RATE_LIMITED") {
+				return out, &domain.Problem{Status: 502, Code: work.Code, Detail: work.Message + "本次发送的记录已保留，未自动重发同一大输入；可显式重新尝试。", Meta: map[string]any{"can_retry": true, "retry_action": "resume_checkpoint"}}
+			}
+			var problem *domain.Problem
+			if errors.As(err, &problem) && problem.Status == 503 {
+				return out, &domain.Problem{Status: 502, Code: problem.Code, Detail: problem.Detail, Meta: map[string]any{"can_retry": true, "retry_action": "resume_checkpoint"}}
+			}
 			if !errors.As(err, &work) || work.Code != "MODEL_OUTPUT_TRUNCATED" {
 				return out, err
 			}

@@ -72,7 +72,27 @@ func (s *session) workflowEvidence(ctx context.Context, start, end int64, frameI
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "duration_ms": s.snapshot.DurationMS, "source": s.snapshot.Source, "original_passages": workflowPassages(s.transcript, start, end), "delivered_pixels": frames, "detail_level": s.spec.DetailLevel, "purpose": s.spec.Purpose}, nil
+	out := map[string]any{"snapshot_id": s.snapshot.ID, "text_hash": s.snapshot.TextHash, "video_hash": s.snapshot.VideoHash, "duration_ms": s.snapshot.DurationMS, "source": s.snapshot.Source, "original_passages": workflowPassages(s.transcript, start, end), "delivered_pixels": frames, "detail_level": s.spec.DetailLevel, "purpose": s.spec.Purpose}
+	if s.spec.DetailPolicy != nil {
+		out["detail_instruction"] = s.spec.DetailPolicy.Instruction
+	}
+	return out, nil
+}
+
+// The model selects an evidence question and source range. The server owns
+// FFmpeg's window ceiling and a fixed three-frame sampling cost, including
+// comparisons whose source ranges span more than one minute.
+func workflowInspectionWindows(question workflowInvestigation) []media.Window {
+	span := question.EndMS - question.StartMS
+	if span <= 60000 {
+		return []media.Window{{StartMS: question.StartMS, EndMS: question.EndMS, Count: 3, Mode: "detail"}}
+	}
+	intersections := []media.Window{}
+	for i := 0; i < 3; i++ {
+		t := question.StartMS + span*int64(2*i+1)/6
+		intersections = append(intersections, media.Window{StartMS: t, EndMS: min(question.EndMS, t+1), Count: 1, Mode: "detail"})
+	}
+	return intersections
 }
 
 type workflowFrameNote struct {

@@ -96,3 +96,43 @@ func TestWorkflowIndependentCoverageNeverInfersMissingOrDuplicateVerdicts(t *tes
 		}
 	}
 }
+
+func TestWorkflowPlanAcceptsAValidWideInvestigationForServerSampling(t *testing.T) {
+	// The first real MiniMax Theo plan was rejected solely because this
+	// 93.44-second question range was longer than one FFmpeg window.
+	plan := workflowPlan{Title: "完整主题结构", Chapters: []workflowChapter{{Title: "主题", StartMS: 0, KeyPoints: []string{"具体机制"}}}, FrameNotes: []workflowFrameNote{}, Investigations: []workflowInvestigation{{Question: "核对文章中的实际数字与旁白是否一致", StartMS: 693920, EndMS: 787360}}}
+	if err := validateWorkflowPlan(&plan, 3772902, nil); err != nil {
+		t.Fatal("model was asked to coordinate an internal sampling ceiling", err)
+	}
+	windows := workflowInspectionWindows(plan.Investigations[0])
+	if len(windows) != 3 {
+		t.Fatal("wide evidence question lost bounded sampling", windows)
+	}
+	last := int64(-1)
+	count := 0
+	for _, window := range windows {
+		if window.EndMS-window.StartMS > 60000 || window.StartMS <= last || window.StartMS < plan.Investigations[0].StartMS || window.EndMS > plan.Investigations[0].EndMS {
+			t.Fatal("sampling violated original range, chronology or media ceiling", windows)
+		}
+		last = window.StartMS
+		count += window.Count
+	}
+	if count != 3 {
+		t.Fatal("wide range expanded the evidence cost", count)
+	}
+}
+
+func TestWorkflowOutlineContractDoesNotRequestAnotherArticle(t *testing.T) {
+	tool, err := workflowPlanTool(workflowPlanInstructions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil || strings.Contains(string(domain.JSON(sc)), "key_points") {
+		t.Fatal("outline requested duplicated body facts instead of structural metadata", err)
+	}
+}
