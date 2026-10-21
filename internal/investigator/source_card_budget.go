@@ -19,7 +19,7 @@ type sourceCardBounds struct {
 }
 
 func (s *session) adaptiveSourceCards() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
 }
 
 func (s *session) sourceInstructions() string {

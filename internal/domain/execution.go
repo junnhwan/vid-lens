@@ -29,9 +29,13 @@ const ExecutionContractV6 = "vidlens-execution-2026-10-21-v6"
 // retaining actionable findings instead of losing a whole mixed-verdict batch.
 const ExecutionContractV7 = "vidlens-execution-2026-10-21-v7"
 
+// V8 gathers a complete text-review sweep before author correction, separates
+// bound citations from contextual originals, and grows a truncated batch once.
+const ExecutionContractV8 = "vidlens-execution-2026-10-21-v8"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV7
+const CurrentExecutionContract = ExecutionContractV8
 
 type ExecutionContract struct {
 	Version string `json:"version"`

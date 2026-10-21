@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.sweepsTextReview() {
+		return "evidence-review-2026-10-21-v11"
+	}
 	if s.repairsReviewCoverage() {
 		return "evidence-review-2026-10-21-v10"
 	}
@@ -65,11 +68,15 @@ func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
 }
 
 func (s *session) usesJointReview() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
 }
 
 func (s *session) repairsReviewCoverage() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV7
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
+}
+
+func (s *session) sweepsTextReview() bool {
+	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV8
 }
 
 type reviewUnit struct {
@@ -80,7 +87,8 @@ type reviewUnit struct {
 	FrameIDs []string `json:"frame_ids"`
 	// Server-resolved from the same evidence container as FrameIDs. Never add
 	// this internal classifier to the frozen V2 model wire representation.
-	HasTextEvidence bool `json:"-"`
+	HasTextEvidence bool     `json:"-"`
+	CitationAliases []string `json:"-"`
 }
 
 type reviewTask struct {
@@ -162,7 +170,13 @@ func candidateReviewUnits(candidate any, catalog map[string]domain.Citation) ([]
 		if value == nil || value == "" {
 			return
 		}
-		units = append(units, reviewUnit{ID: "u" + strconv.Itoa(len(units)+1), Path: path, Value: value, Context: heading, FrameIDs: framesFor(evidence), HasTextEvidence: textFor(evidence)})
+		aliases := []string{}
+		for _, alias := range sourceAliases(evidence) {
+			if _, ok := catalog[alias]; ok {
+				aliases = append(aliases, alias)
+			}
+		}
+		units = append(units, reviewUnit{ID: "u" + strconv.Itoa(len(units)+1), Path: path, Value: value, Context: heading, FrameIDs: framesFor(evidence), HasTextEvidence: textFor(evidence), CitationAliases: aliases})
 	}
 	keys := []string{}
 	for key := range doc {

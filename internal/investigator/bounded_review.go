@@ -39,7 +39,14 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 		byID[unit.ID] = unit
 	}
 	issues := []map[string]any{}
+	visualStarted := false
 	for _, task := range tasks {
+		if s.sweepsTextReview() && task.Mode != "source_text" && !visualStarted {
+			if len(issues) > 0 {
+				break // Return the complete text sweep before spending visual calls.
+			}
+			visualStarted = true
+		}
 		results, err := s.executeReviewTask(ctx, hash, candidate, hints, catalog, task)
 		if err != nil {
 			return nil, err
@@ -55,7 +62,7 @@ func (s *session) reviewUnits(ctx context.Context, hash string, candidate any, h
 				issues = append(issues, map[string]any{"code": "evidence_not_supported", "path": byID[result.UnitID].Path, "reason": issue.Reason, "claim": issue.Claim, "citation_ids": issue.CitationIDs, "review_unit_id": result.UnitID, "verdict": result.Verdict})
 			}
 		}
-		if (task.Mode == "source_text" || s.repairsReviewCoverage()) && len(issues) > 0 {
+		if !s.sweepsTextReview() && (task.Mode == "source_text" || s.repairsReviewCoverage()) && len(issues) > 0 {
 			break
 		}
 	}
@@ -108,6 +115,7 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 	}
 	step := reviewStep{RequestID: id, Units: len(task.Units), WorkTokens: estimateTextTokens(domain.JSON(task.Units))}
 	formatErrors := 0
+	batchGrown := false
 	for attempt := 0; ; attempt++ {
 		slot, err := s.reserveReviewCall(ctx, key+":"+strconv.Itoa(attempt))
 		if err != nil {
@@ -124,6 +132,16 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 				return nil, err
 			}
 			if len(task.Units) > 1 {
+				if s.sweepsTextReview() && !batchGrown {
+					next, previous, e := s.reviewOutputGrowth(ctx, slot)
+					if e != nil {
+						return nil, e
+					}
+					if next > previous {
+						step.OutputTokens, batchGrown = next, true
+						continue
+					}
+				}
 				out := reviewBatchOutcome{State: "split", Mode: task.Mode, RequestID: id, UnitIDs: ids}
 				if err = s.engine.Store.FinishOperation(ctx, s.claim, key, out, "", nil); err != nil {
 					return nil, err
@@ -210,6 +228,10 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 	instructions := reviewUnitInstructions
 	if s.usesJointReview() {
 		instructions = jointReviewInstructions
+	}
+	if s.sweepsTextReview() {
+		payload["evidence_bindings"] = reviewEvidenceBindings(task, catalog, source)
+		instructions += "\n" + reviewCitationBindingInstructions
 	}
 	if s.boundedSourceContext() && s.chunkedSource() {
 		instructions += "\n本轮source.transcript是本单元全部引用原文及时间邻居，source_index/derived_notes只是全片导航。不能仅凭材料卡或作者描述确认具体断言；必要材料未交付则not_assessed，不能把未知判为支持。"
