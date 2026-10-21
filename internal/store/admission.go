@@ -20,7 +20,7 @@ func admitVideoTask(ctx context.Context, tx pgx.Tx) error {
 	 + COALESCE((SELECT sum(GREATEST(0,articles-1)) FROM (
 	   SELECT count(DISTINCT COALESCE(r.generation_spec,jsonb_build_object('config_id',r.config_id))) AS articles
 	   FROM generation_requests r JOIN job_runs j ON j.id=r.active_run_id
-	   WHERE r.status='waiting_source' AND j.kind='source.prepare'
+	   WHERE r.status='waiting_source' AND j.kind IN ('source.prepare','source.restore')
 	     AND j.status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')
 	   GROUP BY j.id
 	 ) pending),0)`).Scan(&count)

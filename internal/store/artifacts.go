@@ -138,9 +138,6 @@ func (s *Store) FinishSource(ctx context.Context, c domain.Claim, snap domain.Sn
 		if _, e := tx.Exec(ctx, "UPDATE job_runs SET snapshot_id=$2 WHERE id=$1", c.Run.ID, id); e != nil {
 			return e
 		}
-		if c.Run.Kind == "source.restore" {
-			return nil
-		}
 		return bindPrepared(ctx, tx, c.Run.ID, id)
 	})
 	return id, e

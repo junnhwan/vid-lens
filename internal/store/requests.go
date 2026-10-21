@@ -87,6 +87,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			return e
 		}
 		var frozen *domain.GenerationSpec
+		var retrySnapshot string
 		if retryID != "" {
 			old, e := loadRequest(ctx, tx, retryID)
 			if e != nil || old.SessionID != session {
@@ -99,6 +100,9 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 				return domain.Err(409, "RETRY_NOT_ALLOWED", "请先修正来源或配置。")
 			}
 			input = old.InputURL
+			if old.SnapshotID != nil {
+				retrySnapshot = *old.SnapshotID
+			}
 			frozen = old.GenerationSpec
 			if frozen == nil {
 				m, e := modelIdentity(ctx, tx, old.ConfigID)
@@ -153,11 +157,42 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			// owner's account or to the previous extractor's capped quality.
 			pipeline += ":bilibili-public-api-anonymous-max-v1"
 		}
-		work := source + ":prepare-v2:" + Hash(map[string]any{"asr_endpoint": p.ASRBaseURL, "asr_model": p.ASRModel, "asr_key_ref": p.ASRKeyRef, "max_video_ms": p.MaxVideoMS, "max_download_bytes": p.MaxDownloadBytes, "pipeline": pipeline})
+		work := sourcePreparationKey(source, p, pipeline)
 		var runID, status string
-		e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.prepare' AND work_key=$1 AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')", work).Scan(&runID, &status)
-		if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
-			e = tx.QueryRow(ctx, `SELECT r.id,r.status FROM job_runs r WHERE r.kind='source.prepare' AND r.work_key=$1 AND r.status='succeeded' AND EXISTS(SELECT 1 FROM media_assets a WHERE a.snapshot_id=r.result_id AND a.kind='video' AND a.state='ready' AND (a.expires_at IS NULL OR a.expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs ar WHERE ar.asset_id=a.id AND (ar.expires_at IS NULL OR ar.expires_at>now())))) ORDER BY r.updated_at DESC LIMIT 1`, work).Scan(&runID, &status)
+		var retainedSnapshot *string
+		var retained *retainedSource
+		if retrySnapshot != "" && identity.Platform != "local" {
+			retained, e = findRetainedSource(ctx, tx, source, pipeline, retrySnapshot, p)
+			if e != nil {
+				return e
+			}
+		}
+		if retained == nil {
+			e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.prepare' AND work_key=$1 AND status IN ('queued','running','retry_wait','waiting_dependency','cancel_requested')", work).Scan(&runID, &status)
+			if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
+				e = tx.QueryRow(ctx, `SELECT r.id,r.status FROM job_runs r WHERE r.kind='source.prepare' AND r.work_key=$1 AND r.status='succeeded' AND ($2='' OR r.result_id=$2) AND EXISTS(SELECT 1 FROM media_assets a WHERE a.snapshot_id=r.result_id AND a.kind='video' AND a.state='ready' AND (a.expires_at IS NULL OR a.expires_at>now() OR EXISTS(SELECT 1 FROM asset_refs ar WHERE ar.asset_id=a.id AND (ar.expires_at IS NULL OR ar.expires_at>now())))) ORDER BY r.updated_at DESC LIMIT 1`, work, retrySnapshot).Scan(&runID, &status)
+			}
+			if errors.Is(e, pgx.ErrNoRows) && identity.Platform != "local" {
+				retained, e = findRetainedSource(ctx, tx, source, pipeline, retrySnapshot, p)
+				if e != nil {
+					return e
+				}
+				if retained == nil {
+					e = pgx.ErrNoRows
+				}
+			}
+		}
+		if retained != nil {
+			if retained.VideoReady {
+				runID, status = retained.RunID, "succeeded"
+			} else {
+				retainedSnapshot = &retained.SnapshotID
+				e = tx.QueryRow(ctx, "SELECT id,status FROM job_runs WHERE kind='source.restore' AND work_key=$1 AND status IN ('queued','running','retry_wait','cancel_requested')", retained.SnapshotID).Scan(&runID, &status)
+				if errors.Is(e, pgx.ErrNoRows) {
+					runID, e = newRun(ctx, tx, "source.restore", retained.SnapshotID, source, cid, retainedSnapshot, time.Now().Add(time.Duration(p.GenerationSeconds)*time.Second))
+					status = "queued"
+				}
+			}
 		}
 		reuse := "pending"
 		deadline := time.Now().Add(time.Duration(p.GenerationSeconds) * time.Second)
@@ -181,7 +216,7 @@ func (s *Store) CreateRequestWithInput(ctx context.Context, session, key string,
 			retry = &retryID
 		}
 		segs := []domain.ExecutionSegment{{RunID: runID, SegmentNo: 0}}
-		_, e = tx.Exec(ctx, "INSERT INTO generation_requests(id,session_id,input_url,source_id,active_run_id,config_id,status,reuse,retry_of_id,segments,deadline_at,generation_spec) VALUES($1,$2,$3,$4,$5,$6,'waiting_source',$7,$8,$9,$10,$11)", id, session, input, source, runID, cid, reuse, retry, domain.JSON(segs), deadline, domain.JSON(spec))
+		_, e = tx.Exec(ctx, "INSERT INTO generation_requests(id,session_id,input_url,source_id,active_run_id,config_id,status,reuse,retry_of_id,segments,deadline_at,generation_spec,snapshot_id) VALUES($1,$2,$3,$4,$5,$6,'waiting_source',$7,$8,$9,$10,$11,$12)", id, session, input, source, runID, cid, reuse, retry, domain.JSON(segs), deadline, domain.JSON(spec), retainedSnapshot)
 		if e != nil {
 			return e
 		}
