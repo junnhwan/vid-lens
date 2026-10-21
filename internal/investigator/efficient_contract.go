@@ -11,7 +11,7 @@ import (
 // Project the new contract without changing schemas frozen in existing runs.
 func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	info, err := t.EnhancedInvokableTool.Info(ctx)
-	if err != nil || t.session == nil || !t.session.policy().SectionRepairs || info.ParamsOneOf == nil {
+	if err != nil || t.session == nil || info.ParamsOneOf == nil || (!t.session.policy().SectionRepairs && !(t.name == "record_source_notes" && t.session.adaptiveSourceCards())) {
 		return info, err
 	}
 	sc, err := info.ParamsOneOf.ToJSONSchema()
@@ -59,6 +59,10 @@ func (t *argumentCheckedTool) Info(ctx context.Context) (*schema.ToolInfo, error
 			evidence["minItems"], evidence["maxItems"], evidence["uniqueItems"] = 1, 12, true
 			if t.session.sourceSurveyPending() {
 				chunk := t.session.sourceChunks()[len(t.session.cp.SourceNotes)]
+				if t.session.adaptiveSourceCards() {
+					props["summary"].(map[string]any)["maxLength"] = t.session.sourceCardLimits(chunk).Maximum
+					props["summary"].(map[string]any)["description"] = sourceCardDescription
+				}
 				props["chunk_id"].(map[string]any)["enum"] = []string{chunk.ID}
 				aliases := []string{}
 				for _, passage := range chunk.Passages {

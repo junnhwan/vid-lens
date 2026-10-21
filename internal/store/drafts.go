@@ -131,7 +131,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	}
 	notes, _ := cp["source_notes"].([]any)
 	contract, _ := cp["execution_contract"].(map[string]any)
-	reusableNotes := len(notes) > 0 && contract["version"] == domain.ExecutionContractV4 && cp["source_index_protocol"] == domain.SourceIndexProtocolV1
+	reusableNotes := len(notes) > 0 && (contract["version"] == domain.ExecutionContractV4 || contract["version"] == domain.ExecutionContractV5) && cp["source_index_protocol"] == domain.SourceIndexProtocolV1
 	if draft.Version == 0 && observations == 0 && !reusableNotes {
 		return nil
 	}

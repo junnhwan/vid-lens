@@ -19,7 +19,7 @@ func (s *session) validateExecution() error {
 		return domain.Err(422, "INTERNAL_FAILURE", "检查点协议版本不兼容。")
 	}
 	if contract := s.cp.ExecutionContract; contract != nil {
-		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4) || contract.RunID != s.claim.Run.ID {
+		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4 && contract.Version != domain.ExecutionContractV5) || contract.RunID != s.claim.Run.ID {
 			return domain.Err(422, "INTERNAL_FAILURE", "执行契约版本或所属任务不兼容。")
 		}
 		layout, wireProtocol := draftLayout, domain.ArticleDraftProtocol
@@ -85,7 +85,7 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 	}
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
 	if s.boundedSourceContext() {
-		instruction += "\n" + sourceContextInstructions
+		instruction += "\n" + s.sourceInstructions()
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
 	text := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "text_time_precision": "Original platform timestamps, or actual coarse ASR audio windows; no invented sentence timing. Platform cue windows may extend beyond media; canonical citation ranges intersect actual media, without changing source text.", "transcript": s.transcript}

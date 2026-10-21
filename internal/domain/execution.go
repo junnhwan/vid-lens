@@ -17,9 +17,13 @@ const ExecutionContractV3 = "vidlens-execution-2026-10-20-v3"
 // targeted evidence retrieval. Older contracts retain their frozen inputs.
 const ExecutionContractV4 = "vidlens-execution-2026-10-20-v4"
 
+// V5 sizes source navigation cards within both source-density and whole-ledger
+// budgets. Chunk identities stay compatible with V4; admitted V4 runs stay frozen.
+const ExecutionContractV5 = "vidlens-execution-2026-10-21-v5"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV4
+const CurrentExecutionContract = ExecutionContractV5
 
 type ExecutionContract struct {
 	Version string `json:"version"`

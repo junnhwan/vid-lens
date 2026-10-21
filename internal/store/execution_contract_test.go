@@ -81,6 +81,12 @@ func TestNewExecutionAndExplicitRetryHaveSeparateFrozenContracts(t *testing.T) {
 }
 
 func TestExplicitRetryKeepsSourceOnlyCoverageAndPinsUndeliveredOverview(t *testing.T) {
+	for _, version := range []string{domain.ExecutionContractV4, domain.ExecutionContractV5} {
+		t.Run(version, func(t *testing.T) { testSourceOnlyCoverageRetry(t, version) })
+	}
+}
+
+func testSourceOnlyCoverageRetry(t *testing.T, version string) {
 	s := testStore(t)
 	ctx := context.Background()
 	owner := session(t, s)
@@ -89,7 +95,7 @@ func TestExplicitRetryKeepsSourceOnlyCoverageAndPinsUndeliveredOverview(t *testi
 	if err := s.AddAsset(ctx, claim, frame); err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := map[string]any{"ready": true, "schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "execution_contract": domain.ExecutionContract{Version: domain.ExecutionContractV4, RunID: claim.Run.ID}, "source_index_protocol": "source-index-2026-10-20-v1", "source_notes": []any{map[string]any{"chunk_id": "frozen-chunk", "summary": "derived navigation only", "evidence_ids": []string{"t1"}}}, "pending_overview": []string{frame.ID}, "inspections": map[string]any{}}
+	checkpoint := map[string]any{"ready": true, "schema_version": 1, "layout_version": "source-context-v3", "protocol": domain.ArticleDraftProtocol, "execution_contract": domain.ExecutionContract{Version: version, RunID: claim.Run.ID}, "source_index_protocol": "source-index-2026-10-20-v1", "source_notes": []any{map[string]any{"chunk_id": "frozen-chunk", "summary": "derived navigation only", "evidence_ids": []string{"t1"}}}, "pending_overview": []string{frame.ID}, "inspections": map[string]any{}}
 	if err := s.Checkpoint(ctx, claim, checkpoint); err != nil {
 		t.Fatal(err)
 	}

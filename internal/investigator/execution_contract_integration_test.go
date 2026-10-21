@@ -331,11 +331,15 @@ func TestExplicitDraftRetryResolvesItsOwnCompatibleExecution(t *testing.T) {
 				t.Fatalf("explicit retry did not resolve and persist its own execution: %s", run.Checkpoint)
 			}
 			text := cp.Messages[0].Content
-			if cp.ExecutionContract.Version == domain.ExecutionContractV4 {
-				if !strings.HasSuffix(text, "\n"+sourceContextInstructions) {
+			if cp.ExecutionContract.Version == domain.ExecutionContractV4 || cp.ExecutionContract.Version == domain.ExecutionContractV5 {
+				instruction := sourceContextInstructions
+				if cp.ExecutionContract.Version == domain.ExecutionContractV5 {
+					instruction += "\n" + adaptiveSourceCardInstructions
+				}
+				if !strings.HasSuffix(text, "\n"+instruction) {
 					t.Fatal("new execution omitted bounded source contract")
 				}
-				text = strings.TrimSuffix(text, "\n"+sourceContextInstructions)
+				text = strings.TrimSuffix(text, "\n"+instruction)
 			}
 			hash := sha256.Sum256([]byte(text))
 			if hex.EncodeToString(hash[:]) != frozenPromptHash(t, tc.expected, false) {
@@ -411,10 +415,11 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	select {
 	case messages := <-requests:
 		text := wireText(t, messages[0])
-		if !strings.HasSuffix(text, "\n"+sourceContextInstructions) {
+		sourceInstruction := sourceContextInstructions + "\n" + adaptiveSourceCardInstructions
+		if !strings.HasSuffix(text, "\n"+sourceInstruction) {
 			t.Fatal("new question omitted bounded source contract")
 		}
-		hash := sha256.Sum256([]byte(strings.TrimSuffix(text, "\n"+sourceContextInstructions)))
+		hash := sha256.Sum256([]byte(strings.TrimSuffix(text, "\n"+sourceInstruction)))
 		if hex.EncodeToString(hash[:]) != frozenPromptHash(t, 16, true) {
 			t.Fatal("new question inherited its article's old authoring protocol")
 		}

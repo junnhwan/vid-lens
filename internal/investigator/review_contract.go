@@ -28,11 +28,11 @@ review_mode=source_text时只判断文字来源是否支持断言，像素专属
 只调用report_review_units，复制request_id和unit_id。结论简短，不改写候选，不复述私密推理。`
 
 func (s *session) usesBoundedReview() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV2 || s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.cp.ExecutionContract.Version == domain.ExecutionContractV4)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV2 || s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.boundedSourceContext())
 }
 
 func (s *session) usesModalityReview() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.cp.ExecutionContract.Version == domain.ExecutionContractV4)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV3 || s.boundedSourceContext())
 }
 
 func (s *session) boundedReviewProtocol() string {

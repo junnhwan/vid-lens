@@ -32,10 +32,11 @@ type sourcePassage struct {
 }
 
 type sourceChunk struct {
-	ID       string          `json:"id"`
-	StartMS  int64           `json:"start_ms"`
-	EndMS    int64           `json:"end_ms"`
-	Passages []sourcePassage `json:"-"`
+	ID                string          `json:"id"`
+	StartMS           int64           `json:"start_ms"`
+	EndMS             int64           `json:"end_ms"`
+	Passages          []sourcePassage `json:"-"`
+	NoteMaxCharacters int             `json:"-"`
 }
 
 type sourceNote struct {
@@ -51,7 +52,7 @@ type indexedReadInput struct {
 }
 
 func (s *session) boundedSourceContext() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV4
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV4 || s.cp.ExecutionContract.Version == domain.ExecutionContractV5)
 }
 
 func (s *session) chunkedSource() bool {
@@ -61,6 +62,17 @@ func (s *session) chunkedSource() bool {
 func (s *session) sourceChunks() []sourceChunk {
 	if s.chunks == nil {
 		s.chunks = buildSourceChunks(s.transcript, max(3000, min(24000, separateInputLimit(s.profile)/4)))
+		if s.adaptiveSourceCards() {
+			for i := range s.chunks {
+				characters := 0
+				for _, passage := range s.chunks[i].Passages {
+					characters += utf8.RuneCountInString(passage.Text)
+				}
+				// Keep every valid V4 card reusable. Dense originals may need a
+				// larger navigation card, still bounded by the complete ledger.
+				s.chunks[i].NoteMaxCharacters = max(1600, min(4000, characters/6))
+			}
+		}
 	}
 	return s.chunks
 }
@@ -127,6 +139,9 @@ func (s *session) sourceContext() map[string]any {
 		current := chunks[len(s.cp.SourceNotes)]
 		s.cp.SourceChunkDelivered = current.ID
 		out["current_chunk"] = map[string]any{"id": current.ID, "start_ms": current.StartMS, "end_ms": current.EndMS, "passages": current.Passages}
+		if s.adaptiveSourceCards() {
+			out["source_card_constraints"] = s.sourceCardLimits(current)
+		}
 	} else if s.turn != nil {
 		// Questions start with relevance-ranked original passages and can widen
 		// the search. They never pay for a fresh whole-video summary survey.
@@ -155,6 +170,9 @@ func (s *session) sourceNotesTool(add func(tool.EnhancedInvokableTool, error) er
 		if err := validateSourceNote(in, chunk); err != nil {
 			return s.sourceNoteFeedback(in, chunk, err.Error()), nil
 		}
+		if s.adaptiveSourceCards() && (utf8.RuneCountInString(in.Summary) > s.sourceCardLimits(chunk).Maximum || !s.sourceCardFitsNavigation(in)) {
+			return s.sourceNoteFeedback(in, chunk, "当前材料卡超过全片导航剩余预算；保留原文，只压缩这张派生导航卡。"), nil
+		}
 		s.cp.SourceNotes = append(s.cp.SourceNotes, in)
 		if err := s.persist(ctx, s.cp.Messages); err != nil {
 			return nil, err
@@ -170,12 +188,23 @@ func (s *session) sourceNoteFeedback(in sourceNote, chunk sourceChunk, reason st
 			aliases = append(aliases, passage.Alias)
 		}
 	}
-	return textResult(map[string]any{"error": reason, "current_chunk_id": chunk.ID, "supplied_chunk_id": in.ChunkID, "summary_characters": utf8.RuneCountInString(in.Summary), "evidence_count": len(in.EvidenceIDs), "summary_min_characters": 30, "summary_max_characters": 1600, "evidence_min_items": 1, "evidence_max_items": 12, "allowed_evidence_ids": aliases, "next_action": "Correct this current card in one call. Select up to 12 representative original aliases; do not rewrite saved cards or submit undelivered chunks."})
+	feedback := map[string]any{"error": reason, "current_chunk_id": chunk.ID, "supplied_chunk_id": in.ChunkID, "summary_characters": utf8.RuneCountInString(in.Summary), "evidence_count": len(in.EvidenceIDs), "summary_min_characters": 30, "summary_max_characters": 1600, "evidence_min_items": 1, "evidence_max_items": 12, "allowed_evidence_ids": aliases, "next_action": "Correct this current card in one call. Select up to 12 representative original aliases; do not rewrite saved cards or submit undelivered chunks."}
+	if s.adaptiveSourceCards() {
+		limits := s.sourceCardLimits(chunk)
+		feedback["summary_max_characters"] = limits.Maximum
+		feedback["summary_target_characters"] = limits.Target
+		feedback["summary_excess_characters"] = max(0, utf8.RuneCountInString(in.Summary)-limits.Maximum)
+		feedback["navigation_budget"] = limits
+		feedback["navigation_candidate_characters"] = utf8.RuneCount(domain.JSON(append(append([]sourceNote{}, s.cp.SourceNotes...), in)))
+		feedback["next_action"] = fmt.Sprintf("只改当前卡：将摘要重写至约%d字、最多%d字，保留主题、关键数字/条件和转折，合并重复解释；原文完整保留，细节可用read_source回读。只选1–12个不重复的本段代表性引用，不重写旧卡，不提交未交付段。", limits.Target, limits.Maximum)
+	}
+	return textResult(feedback)
 }
 
 func validateSourceNote(note sourceNote, chunk sourceChunk) error {
-	if note.ChunkID != chunk.ID || utf8.RuneCountInString(strings.TrimSpace(note.Summary)) < 30 || utf8.RuneCountInString(note.Summary) > 1600 || len(note.EvidenceIDs) < 1 || len(note.EvidenceIDs) > 12 {
-		return fmt.Errorf("请为当前chunk_id保存30–1600字材料卡及1–12个该段原文引用。")
+	limit := sourceNoteMaximum(chunk)
+	if note.ChunkID != chunk.ID || utf8.RuneCountInString(strings.TrimSpace(note.Summary)) < 30 || utf8.RuneCountInString(note.Summary) > limit || len(note.EvidenceIDs) < 1 || len(note.EvidenceIDs) > 12 {
+		return fmt.Errorf("请为当前chunk_id保存30–%d字材料卡及1–12个该段原文引用。", limit)
 	}
 	for i, id := range note.EvidenceIDs {
 		if slices.Contains(note.EvidenceIDs[:i], id) {

@@ -140,6 +140,9 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 	if !s.reviewing && s.sourceSurveyPending() {
 		b.Phase = "source_survey"
 		b.OutputTokens = min(s.profile.MaxOutputTokens, 8192)
+		if err := s.checkSourceCardCapacity(); err != nil {
+			return b, err
+		}
 	}
 	return b, b.check(s.profile)
 }
