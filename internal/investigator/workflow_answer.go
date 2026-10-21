@@ -47,7 +47,7 @@ func (s *session) runWorkflowAnswer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	written, err := workflowStage[workflowAnswerDraft](ctx, s, "answer", "answer", "answer_video_question", "依据本次问题、原始全片文字及实际交付图片作答。summary简短，blocks给具体解释与就近引用，格式与图文章节相同。图像问题必须从实际像素观察，frame_notes覆盖本轮全部delivered_pixels；无图则[]。published_article与prior_conversation只作导航，不能替代来源。视频未提供依据则明确insufficient_evidence；与当前视频无关则out_of_scope，不编造答案。", payload, ids, func(a *workflowAnswerDraft) error {
+	written, err := workflowStage[workflowAnswerDraft](ctx, s, "answer", "answer", "answer_video_question", "依据本次问题、原始全片文字及实际交付图片作答。summary简短，blocks给具体解释与就近引用，格式与图文章节相同。图像问题必须从实际像素观察。published_article与prior_conversation只作导航，不能替代来源。视频未提供依据则明确insufficient_evidence；与当前视频无关则out_of_scope，不编造答案。"+workflowFrameNoteInstructions, payload, ids, func(a *workflowAnswerDraft) error {
 		if a.Summary == "" || len(a.Blocks) == 0 || a.Kind != "grounded" && a.Kind != "insufficient_evidence" && a.Kind != "out_of_scope" {
 			return errors.New("回答kind、summary或blocks无效")
 		}

@@ -22,6 +22,19 @@ type meteredModel struct {
 	toolsChars int
 }
 
+func (s *session) responseLimits() modelResponseLimits {
+	limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
+	if s.compositionReady || s.reviewStep != nil || s.workflowStep != nil {
+		limits.Total = 300 * time.Second
+	}
+	if s.workflowStep != nil {
+		// A relay may announce a tool and then buffer its complete arguments.
+		// Streaming cadence is not a second deadline for these bounded stages.
+		limits.First, limits.Idle = limits.Total, limits.Total
+	}
+	return limits
+}
+
 func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	chars := 0
 	for _, info := range t {
@@ -285,13 +298,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			release()
 			return nil, err
 		}
-		limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
-		if s.compositionReady {
-			limits.Total = 300 * time.Second
-		}
-		if s.reviewStep != nil || s.workflowStep != nil {
-			limits.Total = 300 * time.Second
-		}
+		limits := s.responseLimits()
 		submission := 0
 		var transport *domain.Step
 		observer := newUsageObserver(s.cp.LayoutVersion, p.CachePolicy, func(report usageReport) {

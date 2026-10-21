@@ -68,7 +68,8 @@ func validateWorkflowPlan(p *workflowPlan, duration int64, frames []workflowFram
 }
 
 const workflowPlanInstructions = `通读已交付的全片原文和全部真实概览图片，返回中文标题、按来源顺序的主题章节，以及每张图片的简短可见事实。chapters按实际内容划分，不套固定章节/字数配额；每章仅返回title与start_ms，不提前写正文、摘要或key_points。start_ms为主题大致起点，第一章为0，严格递增且小于duration_ms。程序负责分配s1、s2等章节编号和连续覆盖区间。完整原文会在写作时直接交付，具体方法、例子、数字、条件与反例留给正文，不在提纲重复。
-frame_notes必须覆盖全部delivered_pixels的fN，每张记录1–4条短的实际可见事实，模糊内容写uncertain。只有影响主要结论且概览不足时才给investigations，最多2项，明确问题和有界时间范围；无需额外取证则[]。limitations使用允许的code；section_ids暂用[]，citation_ids只能用已交付tN/fN。此轮只做计划和观察，不写正文。`
+只有影响主要结论且概览不足时才给investigations，最多2项，明确问题和有界时间范围；无需额外取证则[]。limitations使用允许的code；section_ids暂用[]，citation_ids只能用已交付tN/fN。此轮只做计划和观察，不写正文。
+` + workflowFrameNoteInstructions
 
 const workflowWriteInstructions = `一次完成assigned_chapters中全部指定章节，返回sections:[{id,blocks}]，只使用给定章节ID。保持其他章节不变。按detail_instruction确定详细程度，用可独立理解的中文解释，保留该主题的具体机制、例子、步骤、数字、前提、反例和不确定性，不逐句翻译或重复铺垫。段落每段围绕一个可核对的断言；列表每项、表格每行各有就近citation_ids，不能只给整块一组引用。
 正文块使用type=paragraph/quote/list/code/table/figure及origin=video或background_explanation。段落用text和citation_ids；列表用items:[{text,citation_ids}]；table使用columns和rows:[{cells,citation_ids}]；代码用text、language、citation_ids。figure使用frame_ids:["fN"]、caption，必须来自本轮真实交付像素；图注说明可见内容和作用，不用旁白补画面。保留有信息价值的实际配图，不要求每章配图。不要写content/内联对象、块ID、引用字典、版本号或全文重复稿。`
@@ -123,7 +124,7 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 		}
 		notes, err := workflowStage[struct {
 			FrameNotes []workflowFrameNote `json:"frame_notes"`
-		}](ctx, s, key, "evidence", "record_video_evidence", "仅依据实际像素回答本次取证问题。每张delivered_pixels记录frame_notes；这些是离散采样，不能证明未采样的连续过程。不能确认的内容写uncertain，不把旁白当画面。", payload, frameIDs, func(n *struct {
+		}](ctx, s, key, "evidence", "record_video_evidence", "仅依据实际像素回答本次取证问题。这些是离散采样，不能证明未采样的连续过程。不把旁白当画面。"+workflowFrameNoteInstructions, payload, frameIDs, func(n *struct {
 			FrameNotes []workflowFrameNote `json:"frame_notes"`
 		}) error {
 			return validateWorkflowFrameNotes(n.FrameNotes, frames)

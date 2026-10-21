@@ -136,3 +136,24 @@ func TestWorkflowOutlineContractDoesNotRequestAnotherArticle(t *testing.T) {
 		t.Fatal("outline requested duplicated body facts instead of structural metadata", err)
 	}
 }
+
+func TestWorkflowFrameNoteSharesDeliveredAliasAndKeepsStrictLegacyDecode(t *testing.T) {
+	for _, key := range []string{"alias", "frame_alias"} {
+		var note workflowFrameNote
+		if err := workflowDecode(`{"`+key+`":"f1","visible_facts":["实际可见内容"],"uncertain":[]}`, &note); err != nil || note.FrameAlias != "f1" {
+			t.Fatal("safe evidence identity required a new model call", key, err)
+		}
+	}
+	for _, raw := range []string{
+		`{"alias":"f1","frame_alias":"f2","visible_facts":["内容"],"uncertain":[]}`,
+		`{"alias":"f1","invented":"f2","visible_facts":["内容"],"uncertain":[]}`,
+	} {
+		if workflowDecode(raw, new(workflowFrameNote)) == nil {
+			t.Fatal("conflicting or unknown evidence field accepted", raw)
+		}
+	}
+	encoded := string(domain.JSON(workflowFrameNote{FrameAlias: "f1"}))
+	if !strings.Contains(encoded, `"alias":"f1"`) || strings.Contains(encoded, "frame_alias") {
+		t.Fatal("new output still disagrees with delivered pixel identity", encoded)
+	}
+}

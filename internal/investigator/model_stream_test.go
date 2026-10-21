@@ -199,6 +199,39 @@ func TestModelStreamDeadlinesAndTruncation(t *testing.T) {
 	}
 }
 
+func TestWorkflowBufferedToolArgumentsUseTheWholeBoundedResponseWindow(t *testing.T) {
+	var sends atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sends.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"one-call","type":"function","function":{"name":"write_video_chapters","arguments":""}}]}}]}`+"\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(140 * time.Millisecond):
+		}
+		fmt.Fprint(w, `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"sections\":[]}"}}]},"finish_reason":"tool_calls"}]}`+"\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	p := config.DefaultProfile()
+	p.ModelBaseURL = server.URL
+	base, err := newModelWithClient(context.Background(), p, "fixture", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{workflowStep: &workflowStep{Phase: "write"}}
+	limits := s.responseLimits()
+	if limits.Total != 300*time.Second || limits.First != limits.Total || limits.Idle != limits.Total {
+		t.Fatal("staged result was preempted by a shorter streaming cadence assumption", limits)
+	}
+	limits.Total, limits.First, limits.Idle = limits.Total/1000, limits.First/1000, limits.Idle/1000
+	result, err := receiveModelResponse(context.Background(), base, []*schema.Message{schema.UserMessage("write once")}, limits)
+	if err != nil || len(result.ToolCalls) != 1 || result.ToolCalls[0].Function.Arguments != `{"sections":[]}` || sends.Load() != 1 {
+		t.Fatal("buffered valid completion lost or resent", result, err, sends.Load())
+	}
+}
+
 func TestModelStreamConcatenatesToolArgumentsAndDiscardsThinking(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

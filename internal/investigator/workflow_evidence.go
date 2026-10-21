@@ -96,10 +96,36 @@ func workflowInspectionWindows(question workflowInvestigation) []media.Window {
 }
 
 type workflowFrameNote struct {
-	FrameAlias   string   `json:"frame_alias"`
-	VisibleFacts []string `json:"visible_facts"`
+	FrameAlias   string   `json:"alias"`
+	VisibleFacts []string `json:"visible_facts" jsonschema:"minItems=1,maxItems=8" jsonschema_description:"Each fact is nonempty and at most 500 characters; concise visible facts, not full-page transcription."`
 	Uncertain    []string `json:"uncertain"`
 }
+
+// Current tools use the delivered-pixel field name. Previously saved plans and
+// frozen calls used frame_alias; accept that exact spelling without relaxing
+// unknown-field or evidence-identity checks.
+func (note *workflowFrameNote) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Alias        string   `json:"alias"`
+		LegacyAlias  string   `json:"frame_alias"`
+		VisibleFacts []string `json:"visible_facts"`
+		Uncertain    []string `json:"uncertain"`
+	}
+	if err := workflowDecode(string(data), &wire); err != nil {
+		return err
+	}
+	if wire.Alias != "" && wire.LegacyAlias != "" {
+		return fmt.Errorf("图片观察不能同时指定alias与frame_alias")
+	}
+	alias := wire.Alias
+	if alias == "" {
+		alias = wire.LegacyAlias
+	}
+	*note = workflowFrameNote{FrameAlias: alias, VisibleFacts: wire.VisibleFacts, Uncertain: wire.Uncertain}
+	return nil
+}
+
+const workflowFrameNoteInstructions = `frame_notes每项使用alias（与delivered_pixels相同）、visible_facts、uncertain。覆盖本轮全部真实图片；每张1–8条可见事实，每条1–500字，简述事实和作用，不整页抄录。模糊内容放uncertain；无图则frame_notes为[]。`
 
 func validateWorkflowFrameNotes(notes []workflowFrameNote, frames []workflowFrame) error {
 	seen := map[string]bool{}
