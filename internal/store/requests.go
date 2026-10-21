@@ -443,6 +443,15 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 			return e
 		}
 		run, e := newRun(ctx, tx, "qa.answer", id, source.SourceID, configID, &c.SnapshotID, time.Now().Add(time.Duration(p.AnswerSeconds)*time.Second))
+		var workflowArticle bool
+		if e == nil {
+			e = tx.QueryRow(ctx, "SELECT COALESCE(j.checkpoint->'execution_contract'->>'version'=$2 AND j.checkpoint->'workflow' IS NOT NULL,false) FROM articles a JOIN job_runs j ON j.id=a.generation_run_id WHERE a.id=$1", c.ArticleID, domain.ExecutionContractV10).Scan(&workflowArticle)
+		}
+		if e == nil && (in.AllowExternalSources || !workflowArticle) {
+			// Existing articles and external research retain the established
+			// interactive evidence tools and their frozen authoring compatibility.
+			_, e = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=jsonb_set(checkpoint,'{execution_contract}',$2::jsonb) WHERE id=$1", run, domain.JSON(domain.ExecutionContract{Version: domain.ExecutionContractV9, RunID: run}))
+		}
 		if e != nil {
 			return e
 		}

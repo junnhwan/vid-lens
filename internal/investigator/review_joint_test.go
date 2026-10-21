@@ -11,7 +11,7 @@ import (
 
 func TestJointReviewIncludesOriginalSpeechAtCitedFrameTime(t *testing.T) {
 	s := indexedFixture()
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	task := reviewTask{Mode: "multimodal", Units: []reviewUnit{{ID: "u1", FrameIDs: []string{"late-frame"}, Value: map[string]any{"caption": "后半段演示", "citation_ids": []string{"f1"}}}}}
 	catalog := map[string]domain.Citation{"f1": {Kind: "video_frame", FrameID: "late-frame", TimeMS: domain.Ptr(int64(65*45000 + 1))}}
 	source, err := s.indexedReviewSource(task, catalog)
@@ -38,7 +38,7 @@ func TestCurrentReviewDeliversMixedLimitationOnceWithAllEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := session{profile: config.DefaultProfile(), cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.CurrentExecutionContract}}}
+	s := session{profile: config.DefaultProfile(), cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9}}}
 	tasks, err := s.planReviewTasks(units)
 	if err != nil || len(tasks) != 1 || tasks[0].Mode != "multimodal" || !slices.Equal(reviewTaskFrames(tasks[0]), []string{"gui-frame"}) || !tasks[0].Units[0].HasTextEvidence {
 		t.Fatalf("mixed limitation was split into incomplete evidence obligations: %+v, %v", tasks, err)

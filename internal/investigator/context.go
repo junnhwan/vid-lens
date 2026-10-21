@@ -16,6 +16,7 @@ import (
 )
 
 type checkpoint struct {
+	Workflow             *workflowState            `json:"workflow,omitempty"`
 	SourceNotes          []sourceNote              `json:"source_notes,omitempty"`
 	SourceIndexProtocol  string                    `json:"source_index_protocol,omitempty"`
 	SourceChunkDelivered string                    `json:"source_chunk_delivered,omitempty"`
@@ -418,6 +419,9 @@ func (s *session) hydrate(ctx context.Context, msgs []*schema.Message) ([]*schem
 				return nil, e
 			}
 			if a.ID != id {
+				if s.stagedWorkflow() {
+					return nil, domain.Err(422, "WORKFLOW_EVIDENCE_CHANGED", "冻结调用中的图片身份已经改变；原输入保留，未重新发送或沿用审核。")
+				}
 				extra := map[string]any{}
 				for k, v := range p.Extra {
 					extra[k] = v

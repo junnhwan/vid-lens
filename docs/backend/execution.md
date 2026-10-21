@@ -1,6 +1,6 @@
 # Execution and recovery
 
-`internal/store` owns short PostgreSQL control transactions; `internal/jobs` bridges them to Asynq. `internal/media` prepares versioned sources and owned image files. `internal/investigator` runs a single Eino ChatModelAgent with sequential Enhanced Tools. Runtime defaults and their validation live in `internal/config`; they are defaults, not benchmarks.
+`internal/store` owns short PostgreSQL control transactions; `internal/jobs` bridges them to Asynq. `internal/media` prepares versioned sources and owned image files. `internal/investigator` uses Eino model/tool contracts with durable server-directed stages for new articles; frozen earlier executions retain their ChatModelAgent and sequential Enhanced Tools. Runtime defaults and their validation live in `internal/config`; they are defaults, not benchmarks.
 
 ## Durable boundaries
 
@@ -13,7 +13,21 @@
 
 The current store serializes short control mutations with one PostgreSQL advisory transaction lock. This intentionally keeps join/cancel/publish/pin ordering simple for the bounded single-host workload. It is not a claim of high write throughput. Read projections use repeatable-read snapshots. Public events retain step versions, so cancellation reads the version at its frozen watermark.
 
-## Eino evidence loop
+## Server-directed generation
+
+New articles use `vidlens-workflow-2026-10-21-v1`. The server supplies original text and real overview pixels, requests one full-video topic plan, assigns bounded chapter batches, validates the assembled article, gathers independent evidence verdicts, and permits at most one targeted author revision. Final affected-section review and a separate whole-article check precede publication. Source acquisition, frozen intent, leases, checkpoints and the immutable publication transaction retain their existing boundaries.
+
+Adjacent short subtitle cues can share a transport container, while every cue's original text and stable `tN` alias remain present. Original segment IDs, coarse ASR timestamps and source hashes remain unchanged in PostgreSQL. Writing batches receive original evidence directly. Each paragraph, list item and table row retains its own citations; figure captions receive actual pixels. An optional bounded investigation can request additional source windows for a concrete question.
+
+Complete review responses are decoded per unit. Invalid, duplicated, missing and unassessed results never approve a unit; independent legal results remain durable. The reviewer identifies server-assigned units and need not echo long quotations. A single shared format allowance bounds recovery. Per-unit approval binds the original source and pixel identities, model revision, question scope, complete section context, global title and section order. Revising one chapter invalidates that chapter's dependent results; a separate final check binds the complete article and checks coverage, late topics and cross-section conflicts.
+
+Article work is bounded to 20 logical calls and 20 actual submissions; video-only questions on these articles have a three-call ceiling. Phase reservations include truncation and recovery, and unused capacity is not a target. Context and output reservations must fit the frozen model configuration. A complete source that cannot fit fails explicitly rather than being truncated. These are execution limits, not a quality or arbitrary-duration guarantee.
+
+Stage outputs, chapter revisions and legal verdicts survive worker takeover without resetting counters. An owning-session retry may inherit a compatible source, author plan, draft and real observations, but it creates new call accounting and does not inherit another run's approval. New pixel identities cannot replace the images in a frozen call. Video-only answers use complete original evidence and independent review; existing articles and questions that permit external research retain the established interactive evidence adapter.
+
+## Earlier Eino evidence loop
+
+The following describes the frozen adapters retained for earlier executions and compatible legacy draft retries.
 
 Short sources retain their complete usable text in context. New executions handle large transcripts through a chronological index and bounded original-text chunks. Before composing a full article, the Agent must save a derived navigation card for every delivered chunk; an undelivered chunk cannot be marked processed. Cards retain original citation aliases and support planning, while detailed claims and quotations remain grounded in original text. Questions start with relevance-ranked original candidates and can widen the search. Retrieval currently ranks lexical terms, including Chinese word pairs; semantic embeddings are not implemented.
 
@@ -63,7 +77,7 @@ The Go runtime applies a soft heap limit; FFmpeg threads and child RSS are bound
 
 Vector retrieval is not enabled. Current-video evidence gathering uses exact temporal/keyword text access alongside full-source coverage. PostgreSQL remains the source of truth; any future vector projection must use pgvector and must not replace the whole-video overview.
 
-## Bounded article drafts and clocks
+## Earlier bounded article drafts and clocks
 
 New article runs use `source-context-v3`: `begin_article` persists a full-video outline, `save_article_sections` writes or replaces 1–3 planned chapters, and `submit_article_draft` submits the current revision. Only validated drafts enter the existing publishable `candidate` operation. Stable `tN`/`fN` citation aliases resolve to owned transcript/frame metadata on the server; final validation still checks the assembled article and actual image observations.
 
@@ -85,4 +99,4 @@ The execution plan is projected from accepted observations, open questions, the 
 
 A provider response with no content and no tool call is an empty transport result even if it reports a stop marker or billed reasoning tokens. It receives only the existing bounded submission retry for that logical operation, using the same frozen input and model; it does not spend a content-repair attempt. Exhausted or unknown submissions remain recorded and can still stop a run. PostgreSQL owns checkpoints and accepted results; Redis remains queue, admission, lease, and rebuildable-cache infrastructure.
 
-New Q&A runs use harness revision 6: the model can submit compact `tN` / `fN` aliases, and the server resolves them to owned transcript/frame metadata before the same final citation validation. External-reference and article-passage citations retain their complete validated form. Legacy frozen schemas remain supported; this changes neither the public answer shape nor published article content.
+Earlier Q&A runs can submit compact `tN` / `fN` aliases, and the server resolves them to owned transcript/frame metadata before the same final citation validation. External-reference and article-passage citations retain their complete validated form. Frozen schemas remain supported; this changes neither the public answer shape nor published article content.

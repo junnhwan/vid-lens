@@ -47,6 +47,7 @@ type session struct {
 	modelMessages    []*schema.Message
 	reviewing        bool
 	reviewStep       *reviewStep
+	workflowStep     *workflowStep
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
@@ -107,6 +108,9 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	}
 	if s.cp.Progress.Seen == nil {
 		s.cp.Progress.Seen = map[string]int{}
+	}
+	if s.stagedWorkflow() {
+		return s.runWorkflow(ctx)
 	}
 	if s.cp.DraftResume {
 		if err = s.resumeDraft(ctx); err != nil {

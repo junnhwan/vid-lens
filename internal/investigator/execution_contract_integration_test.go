@@ -327,7 +327,7 @@ func TestExplicitDraftRetryResolvesItsOwnCompatibleExecution(t *testing.T) {
 			if err = json.Unmarshal(run.Checkpoint, &cp); err != nil {
 				t.Fatal(err)
 			}
-			if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.CurrentExecutionContract || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != tc.expected || cp.Protocol != domain.ArticleDraftProtocol || cp.DraftResume || cp.Calls != 0 || cp.Repairs != 0 {
+			if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != tc.expected || cp.Protocol != domain.ArticleDraftProtocol || cp.DraftResume || cp.Calls != 0 || cp.Repairs != 0 {
 				t.Fatalf("explicit retry did not resolve and persist its own execution: %s", run.Checkpoint)
 			}
 			text := cp.Messages[0].Content
@@ -441,7 +441,7 @@ func TestNewQuestionFreezesExecutionIndependentlyOfArticlePolicy(t *testing.T) {
 	if err = json.Unmarshal(run.Checkpoint, &cp); err != nil {
 		t.Fatal(err)
 	}
-	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.CurrentExecutionContract || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
+	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ExecutionContractV9 || cp.ExecutionContract.RunID != run.ID || cp.HarnessRevision != 16 || cp.Protocol != protocol {
 		t.Fatal("question did not persist its own execution contract")
 	}
 }

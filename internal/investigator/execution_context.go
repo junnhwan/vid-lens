@@ -19,7 +19,7 @@ func (s *session) validateExecution() error {
 		return domain.Err(422, "INTERNAL_FAILURE", "检查点协议版本不兼容。")
 	}
 	if contract := s.cp.ExecutionContract; contract != nil {
-		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4 && contract.Version != domain.ExecutionContractV5 && contract.Version != domain.ExecutionContractV6 && contract.Version != domain.ExecutionContractV7 && contract.Version != domain.ExecutionContractV8 && contract.Version != domain.ExecutionContractV9) || contract.RunID != s.claim.Run.ID {
+		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4 && contract.Version != domain.ExecutionContractV5 && contract.Version != domain.ExecutionContractV6 && contract.Version != domain.ExecutionContractV7 && contract.Version != domain.ExecutionContractV8 && contract.Version != domain.ExecutionContractV9 && contract.Version != domain.ExecutionContractV10) || contract.RunID != s.claim.Run.ID {
 			return domain.Err(422, "INTERNAL_FAILURE", "执行契约版本或所属任务不兼容。")
 		}
 		layout, wireProtocol := draftLayout, domain.ArticleDraftProtocol

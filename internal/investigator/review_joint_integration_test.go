@@ -137,7 +137,7 @@ func TestCurrentReviewKeepsFindingsAndRoutesUnassessedUnitToEvidenceRepair(t *te
 		}
 		writeReviewWireArgs(w, reviewUnitsTool, report)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	ctx := context.Background()
 	catalog, err := s.citationCatalog(ctx)
 	if err != nil {

@@ -13,6 +13,9 @@ import (
 )
 
 func (s *session) requireAnswerPublicationReview(ctx context.Context, a domain.Answer) error {
+	if s.stagedWorkflow() {
+		return s.requireWorkflowReview(ctx, workflowArticleCandidate(workflowAnswerArticle(a)), a.Citations)
+	}
 	candidate := map[string]any{"kind": a.Kind, "summary": a.Summary, "blocks": a.Blocks, "parts": a.Parts, "limitations": a.Limitations}
 	err := s.requirePublicationReview(ctx, candidate, a.Citations)
 	var problem *domain.Problem
@@ -37,6 +40,9 @@ func (s *session) requireAnswerPublicationReview(ctx context.Context, a domain.A
 // tools or model context are initialized. This gate only reads completed review
 // operations, retaining the candidate and never spending another provider call.
 func (s *session) requirePublicationReview(ctx context.Context, candidate any, citations map[string]domain.Citation) error {
+	if s.stagedWorkflow() {
+		return s.requireWorkflowReview(ctx, candidate, citations)
+	}
 	if s.boundedSourceContext() && (s.sourceSurveyPending() || len(s.cp.PendingOverview) > 0 || len(s.unobserved(ctx)) > 0) {
 		return publicationReviewIncomplete()
 	}

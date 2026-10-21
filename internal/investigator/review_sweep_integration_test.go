@@ -34,7 +34,7 @@ func TestCurrentReviewCollectsAllTextBatchesBeforeOneWriterRepair(t *testing.T) 
 		}
 		writeReviewWireArgs(w, reviewUnitsTool, report)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	ctx := context.Background()
 	catalog, err := s.citationCatalog(ctx)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestCurrentReviewGrowsBatchOnceBeforeSplittingAndReplays(t *testing.T) {
 		}
 		reviewWireReply(t, w, in, false)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	ctx := context.Background()
 	catalog, err := s.citationCatalog(ctx)
 	if err != nil {
@@ -84,7 +84,7 @@ func TestCurrentReviewGrowsBatchOnceBeforeSplittingAndReplays(t *testing.T) {
 
 func TestCurrentReviewSeparatesBoundCitationsFromContextNeighbors(t *testing.T) {
 	s := boundedReviewSession(t, func(http.ResponseWriter, *http.Request) { t.Error("input projection must not send a model request") })
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	ctx := context.Background()
 	catalog, err := s.citationCatalog(ctx)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestCurrentReviewCollectsVisualBatchesWithoutConsumingOneRepairEach(t *test
 		}
 		writeReviewWireArgs(w, reviewUnitsTool, report)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	blocks := []any{}
 	for i := 0; i < 9; i++ {
 		blocks = append(blocks, map[string]any{"text": fmt.Sprint("合成画面", i), "citation_ids": []string{"f1"}})
@@ -164,7 +164,7 @@ func TestCurrentReviewGrowthFallsBackAtConfiguredCapacity(t *testing.T) {
 		}
 		reviewWireReply(t, w, in, false)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	s.profile.MaxOutputTokens = 8192
 	catalog, err := s.citationCatalog(context.Background())
 	if err != nil {

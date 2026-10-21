@@ -40,7 +40,7 @@ func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatMod
 
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
-	if !s.reviewing {
+	if !s.reviewing && !s.stagedWorkflow() {
 		if err := s.autoFinalize(ctx); err != nil {
 			return nil, err
 		}
@@ -151,7 +151,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		return &saved, nil
 	}
-	if s.reviewStep != nil {
+	if s.reviewStep != nil || s.workflowStep != nil {
 		// A complete length-limited submission is a known outcome. On takeover,
 		// replay it into the review planner instead of paying for the same input.
 		truncated, err := s.engine.Store.ModelOutputTruncated(ctx, s.claim.Run.ID, key)
@@ -289,7 +289,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.compositionReady {
 			limits.Total = 300 * time.Second
 		}
-		if s.reviewStep != nil {
+		if s.reviewStep != nil || s.workflowStep != nil {
 			limits.Total = 300 * time.Second
 		}
 		submission := 0
@@ -304,6 +304,20 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		var submitErr error
 		sub := context.WithValue(actx, usageKey{}, observer)
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
+			if s.stagedWorkflow() {
+				stats, err := s.engine.Store.ModelExecution(actx, s.claim.Run.ID)
+				if err != nil {
+					return err
+				}
+				ceiling := min(20, s.profile.MaxIterations)
+				if s.turn != nil {
+					ceiling = min(3, ceiling)
+				}
+				if stats.Submissions >= ceiling {
+					submitErr = domain.Err(422, "WORKFLOW_BUDGET_EXHAUSTED", "实际模型发送已达本轮上限，未知发送也已计入；已保存成果保留。")
+					return submitErr
+				}
+			}
 			reserved, err := s.engine.Store.BeginModelSubmission(actx, s.claim, key, args, route.ConfigID)
 			submission, submitErr = reserved.Submissions, err
 			if err == nil && s.policy().Enabled {
@@ -339,7 +353,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.policy().Enabled {
 			options = append(options, model.WithTools(activeTools))
 		}
-		if s.reviewing {
+		if s.workflowStep != nil {
+			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, s.workflowStep.Tool))
+		} else if s.reviewing {
 			name := "report_evidence_review"
 			if s.reviewStep != nil {
 				name = reviewUnitsTool

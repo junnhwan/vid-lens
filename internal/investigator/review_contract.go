@@ -314,6 +314,9 @@ func parseReviewUnits(response *schema.Message, id string, task reviewTask, cata
 	if err = d.Decode(&out); err != nil {
 		return out, err
 	}
+	if task.Mode == "evidence" {
+		return admitIndependentReview(out, id, task, catalog)
+	}
 	return out, validateReviewUnits(out, id, task, catalog)
 }
 

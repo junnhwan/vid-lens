@@ -144,6 +144,11 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 			return b, err
 		}
 	}
+	if s.workflowStep != nil {
+		b.Phase = s.workflowStep.Phase
+		b.OutputTokens = min(s.profile.MaxOutputTokens, s.workflowStep.OutputTokens)
+		b.AllocationReason = "bounded_server_workflow"
+	}
 	return b, b.check(s.profile)
 }
 func (b callBudget) check(p config.Profile) error {

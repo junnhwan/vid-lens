@@ -8,6 +8,18 @@ import (
 )
 
 func (s *session) modelActivity() (string, string) {
+	if s.workflowStep != nil {
+		switch s.workflowStep.Phase {
+		case "plan":
+			return "正在通读全片并组织文章结构", "compose"
+		case "write", "revision":
+			return "正在撰写与核对文章章节", "compose"
+		case "review", "recheck":
+			return "正在核对原文、引用和真实配图", "validate"
+		case "answer":
+			return "正在依据视频原文与画面回答", "answer"
+		}
+	}
 	if s.reviewing {
 		return "正在独立复核事实、引用和实际配图", "validate"
 	}

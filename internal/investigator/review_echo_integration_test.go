@@ -38,7 +38,7 @@ func TestCurrentReviewKeepsAllFindingsWithinBoundedFieldGroups(t *testing.T) {
 		}
 		writeReviewWireArgs(w, reviewUnitsTool, report)
 	})
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	catalog, err := s.citationCatalog(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestCurrentReviewFieldGroupingKeepsBoundsAndLegacyCeiling(t *testing.T) {
 			issues = append(issues, map[string]any{"path": fmt.Sprintf("/blocks/%d/text", field), "finding": finding})
 		}
 	}
-	s := &session{cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.CurrentExecutionContract}}}
+	s := &session{cp: checkpoint{ExecutionContract: &domain.ExecutionContract{Version: domain.ExecutionContractV9}}}
 	selected := s.reviewCorrectionIssues(issues)
 	paths := map[string]int{}
 	for _, issue := range selected {
@@ -144,7 +144,7 @@ func TestCurrentReviewNormalizesOnlyEmptyAnnotationsAndExactContextEcho(t *testi
 				}
 				writeReviewWireArgs(w, reviewUnitsTool, report)
 			})
-			s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+			s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 			ctx := context.Background()
 			catalog, err := s.citationCatalog(ctx)
 			if err != nil {

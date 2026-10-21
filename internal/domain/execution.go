@@ -38,9 +38,13 @@ const ExecutionContractV8 = "vidlens-execution-2026-10-21-v8"
 // and bounds author feedback by affected fields rather than raw findings.
 const ExecutionContractV9 = "vidlens-execution-2026-10-21-v9"
 
+// V10 assigns article stages, evidence delivery and bounded recovery to the
+// server. Existing runs keep their admitted adapter and exact frozen inputs.
+const ExecutionContractV10 = "vidlens-workflow-2026-10-21-v1"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV9
+const CurrentExecutionContract = ExecutionContractV10
 
 type ExecutionContract struct {
 	Version string `json:"version"`

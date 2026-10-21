@@ -18,7 +18,7 @@ import (
 // using a reserved video as a fixture. A valid prefix must remain reusable.
 func denseSourceCardFixture() *session {
 	s := indexedFixture()
-	s.cp.ExecutionContract.Version = domain.CurrentExecutionContract
+	s.cp.ExecutionContract.Version = domain.ExecutionContractV9
 	s.transcript = nil
 	for i := 0; i < 68; i++ {
 		s.transcript = append(s.transcript, domain.Segment{
