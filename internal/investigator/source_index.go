@@ -52,7 +52,7 @@ type indexedReadInput struct {
 }
 
 func (s *session) boundedSourceContext() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV4 || s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV4 || s.cp.ExecutionContract.Version == domain.ExecutionContractV5 || s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8 || s.cp.ExecutionContract.Version == domain.ExecutionContractV9)
 }
 
 func (s *session) chunkedSource() bool {

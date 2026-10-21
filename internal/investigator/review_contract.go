@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.normalizesReviewEcho() {
+		return "evidence-review-2026-10-21-v12"
+	}
 	if s.sweepsTextReview() {
 		return "evidence-review-2026-10-21-v11"
 	}
@@ -68,15 +71,19 @@ func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
 }
 
 func (s *session) usesJointReview() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV6 || s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8 || s.cp.ExecutionContract.Version == domain.ExecutionContractV9)
 }
 
 func (s *session) repairsReviewCoverage() bool {
-	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8)
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV7 || s.cp.ExecutionContract.Version == domain.ExecutionContractV8 || s.cp.ExecutionContract.Version == domain.ExecutionContractV9)
 }
 
 func (s *session) sweepsTextReview() bool {
-	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV8
+	return s.cp.ExecutionContract != nil && (s.cp.ExecutionContract.Version == domain.ExecutionContractV8 || s.cp.ExecutionContract.Version == domain.ExecutionContractV9)
+}
+
+func (s *session) normalizesReviewEcho() bool {
+	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV9
 }
 
 type reviewUnit struct {

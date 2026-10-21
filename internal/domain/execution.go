@@ -33,9 +33,14 @@ const ExecutionContractV7 = "vidlens-execution-2026-10-21-v7"
 // bound citations from contextual originals, and grows a truncated batch once.
 const ExecutionContractV8 = "vidlens-execution-2026-10-21-v8"
 
+// V9 projects semantically empty annotations and exact input-context echoes out
+// of review responses before the unchanged strict identity/coverage checks,
+// and bounds author feedback by affected fields rather than raw findings.
+const ExecutionContractV9 = "vidlens-execution-2026-10-21-v9"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV8
+const CurrentExecutionContract = ExecutionContractV9
 
 type ExecutionContract struct {
 	Version string `json:"version"`

@@ -147,12 +147,35 @@ func (s *session) reviewContent(ctx context.Context, candidate any, citations ma
 		return nil
 	}
 	s.cp.LastCandidate = nil
-	meta := evidenceReviewCorrection(candidate, hash, issues[:min(16, len(issues))])
+	meta := evidenceReviewCorrection(candidate, hash, s.reviewCorrectionIssues(issues))
 	s.cp.EvidenceReviewIssue = meta
 	if err := s.persist(ctx, s.cp.Messages); err != nil {
 		return err
 	}
 	return &candidateError{err: &domain.Problem{Status: 422, Code: "MODEL_RESULT_INVALID", Detail: "独立证据复核指出关键断言未获支持。按明确的章节ID与已有字段修正后重新提交。", Meta: meta}}
+}
+
+// Bound repair work by affected fields. Several material findings in one field
+// should not displace findings from other fields in the completed review sweep.
+// Keep the old raw issue-count ceiling for already frozen executions.
+func (s *session) reviewCorrectionIssues(issues []map[string]any) []map[string]any {
+	if s.cp.ExecutionContract == nil || s.cp.ExecutionContract.Version != domain.ExecutionContractV9 {
+		return issues[:min(16, len(issues))]
+	}
+	counts := map[string]int{}
+	selected := make([]map[string]any, 0, min(64, len(issues)))
+	for i, issue := range issues {
+		path, _ := issue["path"].(string)
+		if path == "" {
+			path = "missing-path:" + strconv.Itoa(i)
+		}
+		if counts[path] == 0 && len(counts) >= 16 || counts[path] >= 4 {
+			continue
+		}
+		counts[path]++
+		selected = append(selected, issue)
+	}
+	return selected
 }
 
 // Review pointers address the canonical candidate's section array. Saved drafts

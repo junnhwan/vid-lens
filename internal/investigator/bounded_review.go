@@ -16,11 +16,12 @@ import (
 )
 
 type reviewBatchOutcome struct {
-	State     string            `json:"state"`
-	Mode      string            `json:"mode"`
-	RequestID string            `json:"request_id"`
-	UnitIDs   []string          `json:"unit_ids"`
-	Report    *reviewUnitReport `json:"report,omitempty"`
+	State                string            `json:"state"`
+	Mode                 string            `json:"mode"`
+	RequestID            string            `json:"request_id"`
+	UnitIDs              []string          `json:"unit_ids"`
+	Report               *reviewUnitReport `json:"report,omitempty"`
+	IgnoredContextFields []string          `json:"ignored_context_fields,omitempty"`
 }
 
 // Own planning, explicit coverage and resumable execution behind one entry.
@@ -167,6 +168,10 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 			step.OutputTokens = next
 			continue
 		}
+		ignored := []string{}
+		if s.normalizesReviewEcho() {
+			response, ignored = projectReviewContextEcho(response, task, input)
+		}
 		report, err := parseReviewUnits(response, id, task, catalog)
 		if err != nil {
 			formatErrors++
@@ -180,7 +185,7 @@ func (s *session) executeReviewTask(ctx context.Context, hash string, candidate 
 			input = append(input, schema.UserMessage(string(domain.JSON(map[string]any{"review_format_error": message, "request_id": id, "required_unit_ids": ids, "instruction": "Return exactly one result for each required unit ID using the supplied tool schema."}))))
 			continue
 		}
-		out := reviewBatchOutcome{State: "complete", Mode: task.Mode, RequestID: id, UnitIDs: ids, Report: &report}
+		out := reviewBatchOutcome{State: "complete", Mode: task.Mode, RequestID: id, UnitIDs: ids, Report: &report, IgnoredContextFields: ignored}
 		if err = s.engine.Store.FinishOperation(ctx, s.claim, key, out, "", nil); err != nil {
 			return nil, err
 		}
