@@ -1694,13 +1694,194 @@ figcaption {
 .turn-answer table { width: 100%; margin: 1em 0; border-collapse: collapse; font-size: .94em; }
 .turn-answer th, .turn-answer td { padding: .65em .8em; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .turn-answer pre { padding: 1em; overflow-x: auto; line-height: 1.6; }
-.model-sends { margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
-.model-sends p { margin: 5px 0; font-family: var(--sans); font-size: 12px; line-height: 1.6; }
-.model-sends summary { cursor: pointer; }
-.observation-details { margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
-.observation-details summary { cursor: pointer; }
-.observation-details ol { margin: 6px 0 0; padding-left: 20px; list-style: none; }
-.observation-details li { margin: 4px 0; }
+.model-sends,
+.observation-details { margin-top: 6px; color: var(--ink-soft); font-size: 11.5px; }
+
+.model-sends summary,
+.observation-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.7;
+  list-style: none;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.model-sends summary::-webkit-details-marker,
+.observation-details summary::-webkit-details-marker { display: none; }
+
+.model-sends summary:hover,
+.observation-details summary:hover {
+  border-color: color-mix(in srgb, var(--teal) 36%, var(--line));
+  color: var(--ink);
+}
+
+.model-sends[open] summary,
+.observation-details[open] summary {
+  border-color: color-mix(in srgb, var(--teal) 32%, var(--line));
+  background: color-mix(in srgb, var(--teal-soft) 62%, var(--surface));
+  color: var(--teal-ink);
+}
+
+.journal-disclosure-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--teal) 48%, var(--line-strong));
+  transition: background-color 180ms ease;
+}
+
+.model-sends[open] .journal-disclosure-dot,
+.observation-details[open] .journal-disclosure-dot { background: var(--teal); }
+
+.journal-disclosure-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  color: var(--teal-ink);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-disclosure-caret {
+  width: 5px;
+  height: 5px;
+  margin: 0 1px;
+  border-right: 1.4px solid currentColor;
+  border-bottom: 1.4px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+  transition: transform 200ms var(--ease-out);
+}
+
+.model-sends[open] .journal-disclosure-caret,
+.observation-details[open] .journal-disclosure-caret { transform: translateY(1px) rotate(-135deg); }
+
+.send-list,
+.observation-list {
+  margin: 7px 0 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--canvas) 52%, var(--surface));
+  list-style: none;
+  overflow: hidden;
+}
+
+.send-list li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  padding: 9px 10px;
+}
+
+.send-list li + li,
+.observation-list li + li { border-top: 1px solid var(--line); }
+
+.send-index {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 400 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.send-list li[data-status="done"] .send-index {
+  border-color: color-mix(in srgb, var(--teal) 38%, var(--line));
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+
+.send-list li[data-status="active"] .send-index {
+  border-color: var(--teal);
+  color: var(--teal-ink);
+  animation: disclosure-pulse 1.8s var(--ease-in-out) infinite;
+}
+
+.send-list li[data-status="stopped"] .send-index {
+  border-color: var(--amber-ink);
+  background: var(--amber-bg);
+  color: var(--amber-ink);
+}
+
+.send-copy { display: grid; gap: 2px; min-width: 0; }
+
+.send-title { color: var(--ink); font-size: 11.5px; font-weight: 600; line-height: 1.5; }
+
+.send-outcome { color: var(--ink-soft); font-size: 11.5px; line-height: 1.6; }
+
+.send-time {
+  padding-top: 3px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.send-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 3px;
+  color: var(--teal-ink);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.send-live i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: disclosure-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+.observation-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 8px 10px;
+}
+
+.observation-index { color: var(--ink); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.observation-state { justify-self: end; color: var(--ink-soft); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.observation-list li[data-status="stopped"] .observation-state { color: var(--amber-ink); }
+
+.observation-note,
+.observation-range { grid-column: 1 / -1; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
+
+.observation-range { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .route-chapters[open] .chapter-fold,
+  .model-sends[open] .send-list,
+  .observation-details[open] .observation-list { animation: disclosure-arrive 240ms var(--ease-out) both; }
+}
+
+@keyframes disclosure-arrive {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes disclosure-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
 
 .turn-stopped { color: var(--ink-soft); }
 

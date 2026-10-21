@@ -53,6 +53,9 @@ export function ExecutionPlan({
       ? PHASES.map((item, index) => ({ id: item.id, title: item.label, status: marks[index] }))
       : []
   const saved = plan?.sections?.filter((item) => item.status === "done").length ?? 0
+  const total = plan?.sections?.length ?? 0
+  const percent = total ? Math.round((saved / total) * 100) : 0
+  const writing = plan?.sections?.find((item) => item.status === "active")?.title
   const live = !completed && phaseMode === "running"
 
   return (
@@ -114,27 +117,34 @@ export function ExecutionPlan({
       {plan?.sections?.length ? (
         <details className="route-chapters">
           <summary>
-            <span>章节进度</span>
-            <span className="chapter-count">
-              {saved} / {plan.sections.length} 已保存
+            <span className="chapter-progress">
+              <svg viewBox="0 0 36 36" aria-hidden="true">
+                <circle className="chapter-progress-track" cx="18" cy="18" r="15" pathLength="100" />
+                <circle className="chapter-progress-value" cx="18" cy="18" r="15" pathLength="100" style={{ strokeDasharray: `${percent} 100` }} />
+              </svg>
+              <span className="chapter-progress-count">{saved}<i>/{total}</i><span className="sr-only"> 章已保存</span></span>
             </span>
-            <span className="chapter-ticks" aria-hidden="true">
-              {plan.sections.map((item) => (
-                <i key={item.id} data-state={item.status} />
-              ))}
+            <span className="chapter-summary">
+              <span className="chapter-summary-title">章节进度</span>
+              <span className="chapter-summary-note">
+                {saved === total ? `全部 ${total} 章已保存` : writing ? `正在写「${writing}」` : `已保存 ${saved} 章 · 还剩 ${total - saved} 章`}
+              </span>
             </span>
+            <span className="chapter-caret" aria-hidden="true" />
           </summary>
-          <ol className="chapter-list">
-            {plan.sections.map((item) => (
-              <li key={item.id} data-state={item.status}>
-                <span className="chapter-mark" aria-hidden="true" />
-                <span className="chapter-title">{item.title}</span>
-                <span className="chapter-state">
-                  {item.status === "done" ? "已保存" : item.status === "active" ? "接下来写作" : "待写作"}
-                </span>
-              </li>
-            ))}
-          </ol>
+          <div className="chapter-fold">
+            <ol className="chapter-list">
+              {plan.sections.map((item, index) => (
+                <li key={item.id} data-state={item.status}>
+                  <span className="chapter-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="chapter-title">{item.title}</span>
+                  <span className="chapter-state">
+                    {item.status === "done" ? "已保存" : item.status === "active" ? "接下来写作" : "待写作"}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </details>
       ) : null}
       {plan?.note && !completed ? (

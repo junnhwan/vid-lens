@@ -14,6 +14,11 @@ function statusText(status: string) {
   return ""
 }
 
+function sendName(title: string, index: number) {
+  const match = title.match(/发送\s*(\d+)/)
+  return match ? `发送 ${match[1]}` : title || `第 ${index + 1} 次发送`
+}
+
 export function ActivityList({
   steps,
   resourceStatus,
@@ -82,20 +87,54 @@ export function ActivityList({
             </div>
           )}
           {transcribed && view.status === "active" ? <div className="step-range">视频 {transcribed.done} / {transcribed.total}</div> : null}
-          {model && sends.length ? <details className="model-sends"><summary>发送详情</summary>{sends.map((send) => <p key={send.id}>{send.title} · {stepPresentation(send, resourceStatus).status === "active" ? "等待响应" : stepPresentation(send, resourceStatus).outcome || "已结束"}{stepSpent(send) ? ` · ${stepSpent(send)}` : ""}</p>)}</details> : null}
+          {model && sends.length ? (
+            <details className="model-sends">
+              <summary>
+                <span className="journal-disclosure-dot" aria-hidden="true" />
+                <span>发送详情</span>
+                <span className="journal-disclosure-count">{sends.length} 次</span>
+                <span className="journal-disclosure-caret" aria-hidden="true" />
+              </summary>
+              <ol className="send-list">
+                {sends.map((send, index) => {
+                  const detail = stepPresentation(send, resourceStatus)
+                  const duration = detail.status !== "active" ? stepSpent(send) : null
+                  return (
+                    <li key={send.id} data-status={detail.status}>
+                      <span className="send-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                      <span className="send-copy">
+                        <span className="send-title">{sendName(send.title, index)}</span>
+                        <span className="send-outcome">{detail.status === "active" ? "等待响应" : detail.outcome || "已结束"}</span>
+                      </span>
+                      {detail.status === "active" ? (
+                        <span className="send-live"><i aria-hidden="true" />进行中</span>
+                      ) : duration ? (
+                        <span className="send-time">{duration}</span>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ol>
+            </details>
+          ) : null}
           {(detailed || model || step.kind === "retry" || view.status === "stopped") && view.outcome && view.status !== "active" ? <div className="step-outcome">{view.outcome}</div> : null}
           {observations.length > 1 ? (
             <details className="observation-details">
-              <summary>查看 {observations.length} 组记录</summary>
-              <ol>
+              <summary>
+                <span className="journal-disclosure-dot" aria-hidden="true" />
+                <span>查看 {observations.length} 组记录</span>
+                <span className="journal-disclosure-caret" aria-hidden="true" />
+              </summary>
+              <ol className="observation-list">
                 {observations.map((item, index) => {
                   const detail = stepPresentation(item, resourceStatus)
                   const duration = detail.status !== "active" ? stepSpent(item) : null
                   return (
-                    <li key={item.id}>
-                      第 {index + 1} 组 · {statusText(detail.status)}{duration ? ` · 用时 ${duration}` : ""}
-                      {detail.status === "stopped" && detail.outcome ? <div>{detail.outcome}</div> : null}
-                      {item.source_range ? <div>{formatRange(item.source_range)}</div> : null}
+                    <li key={item.id} data-status={detail.status}>
+                      <span className="observation-index">第 {index + 1} 组</span>
+                      <span className="observation-state">{statusText(detail.status)}{duration ? ` · ${duration}` : ""}</span>
+                      {detail.status === "stopped" && detail.outcome ? <span className="observation-note">{detail.outcome}</span> : null}
+                      {item.source_range ? <span className="observation-range">{formatRange(item.source_range)}</span> : null}
                     </li>
                   )
                 })}

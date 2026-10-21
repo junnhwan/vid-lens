@@ -947,96 +947,203 @@
 }
 
 .route-chapters {
-  margin-top: 14px;
-  padding-top: 13px;
-  border-top: 1px dashed var(--line);
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--teal-soft) 30%, transparent), transparent 58%),
+    var(--surface);
   color: var(--ink-soft);
   font-size: 12px;
+  overflow: hidden;
+  transition: border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.route-chapters:hover { border-color: color-mix(in srgb, var(--teal) 24%, var(--line)); }
+
+.route-chapters[open] {
+  border-color: color-mix(in srgb, var(--teal) 30%, var(--line));
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
 .route-chapters summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 13px;
+  padding: 11px 13px;
   list-style: none;
   cursor: pointer;
 }
 
 .route-chapters summary::-webkit-details-marker { display: none; }
 
-.route-chapters summary::after {
+.route-chapters summary:focus-visible { outline-offset: -3px; border-radius: 14px; }
+
+.chapter-progress {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+}
+
+.chapter-progress svg {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.chapter-progress circle { fill: none; stroke-width: 2.4; }
+
+.chapter-progress-track { stroke: color-mix(in srgb, var(--line-strong) 78%, transparent); }
+
+.chapter-progress-value {
+  stroke: var(--teal);
+  stroke-linecap: round;
+  transition: stroke-dasharray 600ms var(--ease-out);
+}
+
+.chapter-progress-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  color: var(--ink);
+  font: 500 12px/1 var(--serif);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.chapter-progress-count i {
+  color: var(--ink-soft);
+  font: 400 8.5px/1 var(--sans);
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.chapter-summary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chapter-summary-title {
+  color: var(--ink);
+  font: 500 13px/1.3 var(--serif);
+  letter-spacing: 0.01em;
+}
+
+.chapter-summary-note {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-caret {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-soft);
+  transition: transform 240ms var(--ease-out), border-color 200ms ease, background-color 200ms ease;
+}
+
+.chapter-caret::before {
   content: "";
-  flex: none;
   width: 6px;
   height: 6px;
-  margin-left: 2px;
-  border-right: 1.5px solid var(--ink-soft);
-  border-bottom: 1.5px solid var(--ink-soft);
-  transform: rotate(45deg);
-  transition: transform 160ms var(--ease-out);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
 }
 
-.route-chapters[open] summary::after { transform: rotate(-135deg); }
+.route-chapters:hover .chapter-caret { border-color: color-mix(in srgb, var(--teal) 30%, var(--line)); }
 
-.chapter-count {
+.route-chapters[open] .chapter-caret {
+  border-color: color-mix(in srgb, var(--teal) 32%, var(--line));
+  background: var(--teal-soft);
   color: var(--teal-ink);
-  font-variant-numeric: tabular-nums;
+  transform: rotate(180deg);
 }
 
-.chapter-ticks {
-  display: flex;
-  gap: 3px;
-  margin-left: auto;
-}
-
-.chapter-ticks i {
-  width: 13px;
-  height: 4px;
-  border-radius: 99px;
-  background: var(--line-strong);
-  transition: background-color 260ms ease, box-shadow 260ms ease;
-}
-
-.chapter-ticks i[data-state="done"] { background: var(--teal); }
-.chapter-ticks i[data-state="active"] {
-  background: color-mix(in srgb, var(--teal) 45%, var(--line));
-  animation: tick-glow 1.8s var(--ease-in-out) infinite;
-}
+.chapter-fold { padding: 0 13px 12px; }
 
 .chapter-list {
   display: grid;
-  gap: 5px;
-  margin: 12px 0 0;
-  padding: 0;
+  gap: 2px;
+  margin: 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--line);
   list-style: none;
 }
 
 .chapter-list li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 7px;
+  border-radius: 9px;
+  transition: background-color 160ms ease;
 }
 
-.chapter-mark {
-  flex: 0 0 6px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
+.chapter-list li:hover { background: color-mix(in srgb, var(--teal-soft) 48%, transparent); }
+
+.chapter-index {
+  color: var(--ink-soft);
+  font: 400 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
-.chapter-list li[data-state="done"] .chapter-mark { border-color: var(--teal); background: var(--teal); }
-.chapter-list li[data-state="active"] .chapter-mark { border-color: var(--teal); }
+.chapter-title {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
-.chapter-title { min-width: 0; flex: 1; font-size: 12.5px; }
+.chapter-list li[data-state="pending"] .chapter-title { color: var(--ink-soft); }
 
 .chapter-state {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.6;
   white-space: nowrap;
 }
 
-.chapter-list li[data-state="active"] .chapter-state { color: var(--teal-ink); }
+.chapter-list li[data-state="done"] .chapter-state {
+  background: var(--teal-soft);
+  color: var(--teal-ink);
+}
+
+.chapter-list li[data-state="active"] .chapter-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--teal) 30%, transparent);
+  background: color-mix(in srgb, var(--teal-soft) 55%, transparent);
+  color: var(--teal-ink);
+}
+
+.chapter-list li[data-state="active"] .chapter-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: disclosure-pulse 1.8s var(--ease-in-out) infinite;
+}
 
 .journal-head {
   display: flex;
