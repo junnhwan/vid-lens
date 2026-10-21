@@ -25,7 +25,7 @@ export function ActivityList({
   detailed,
   open,
   freshId,
-  headline,
+  settledId,
   onOpenFrame,
   onBroken,
 }: {
@@ -34,7 +34,7 @@ export function ActivityList({
   detailed: boolean
   open: boolean
   freshId?: string | null
-  headline?: string
+  settledId?: string | null
   onOpenFrame: (frames: Frame[], index: number, origin: HTMLElement) => void
   onBroken: (frame: Frame) => void
 }) {
@@ -69,30 +69,24 @@ export function ActivityList({
     const callUsage = step.kind === "model_response" ? step.usage : null
     const named = activityTitle(step)
     const title = step.kind === "retry" || view.status === "active" ? named : restingTitle(named, view.status)
-    const repeated = Boolean(headline) && view.status === "active" && title === headline
-    const videoLine = transcribed && view.status === "active"
-    const outcomeLine = (detailed || model || step.kind === "retry" || view.status === "stopped") && view.outcome && view.status !== "active"
-    if (repeated && !model && !spent && !videoLine && !outcomeLine && observations.length <= 1 && !(detailed && (step.source_range || frames.length))) return null
+    const live = view.status === "active"
     return (
-      <div className="step" role="listitem" key={step.id} data-kind={step.kind} data-status={view.status} data-new={step.id === freshId || observations.some((item) => item.id === freshId) ? "true" : undefined}>
+      <div className="step" role="listitem" key={step.id} data-kind={step.kind} data-status={view.status} data-new={step.id === freshId || observations.some((item) => item.id === freshId) ? "true" : undefined} data-settled={step.id === settledId && view.status === "done" ? "true" : undefined}>
         <span className="mark" aria-hidden="true" />
         <div>
-          {repeated && !model && !spent ? (
+          <div className="step-label">
+            <span className="step-title">{title}</span>
+            {model ? <span className="step-spent">第 {step.model_call ?? "?"} 次模型调用{sends.length ? ` · 发送 ${sends.length} 次` : ""}</span> : null}
+            {spent ? <span className="step-spent">用时 {spent}</span> : null}
+            {live ? <span className="step-live" aria-hidden="true"><i />进行中</span> : null}
+            {callUsage ? (
+              <span className="step-usage" title={tokenUsageLabel(callUsage)}>
+                <span className="sr-only">{tokenUsageLabel(callUsage)}</span>
+                <span aria-hidden="true"><span className="usage-label">用量</span>入 <b>{formatTokens(callUsage.input)}</b> · 出 <b>{formatTokens(callUsage.output)}</b></span>
+              </span>
+            ) : null}
             <span className="sr-only">{statusText(view.status)}</span>
-          ) : (
-            <div className="step-label">
-              {repeated ? null : title}
-              {model ? <span className="step-spent">第 {step.model_call ?? "?"} 次模型调用{sends.length ? ` · 发送 ${sends.length} 次` : ""}</span> : null}
-              {spent ? <span className="step-spent">用时 {spent}</span> : null}
-              {callUsage ? (
-                <span className="step-usage" title={tokenUsageLabel(callUsage)}>
-                  <span className="sr-only">{tokenUsageLabel(callUsage)}</span>
-                  <span aria-hidden="true"><span className="usage-label">用量</span>入 <b>{formatTokens(callUsage.input)}</b> · 出 <b>{formatTokens(callUsage.output)}</b></span>
-                </span>
-              ) : null}
-              <span className="sr-only">{statusText(view.status)}</span>
-            </div>
-          )}
+          </div>
           {transcribed && view.status === "active" ? <div className="step-range">视频 {transcribed.done} / {transcribed.total}</div> : null}
           {model && sends.length ? (
             <details className="model-sends">

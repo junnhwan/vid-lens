@@ -52,6 +52,8 @@ export function RunView({
   const stillRef = useRef<HTMLSpanElement>(null)
   const [freshId, setFreshId] = useState<string | null>(null)
   const [freshFrameId, setFreshFrameId] = useState<string | null>(null)
+  const [settledId, setSettledId] = useState<string | null>(null)
+  const statuses = useRef(new Map<string, string>())
   const seen = useRef(new Set<string>())
   const seenFrames = useRef(new Set<string>())
   const primedSteps = useRef(false)
@@ -113,6 +115,19 @@ export function RunView({
   }, [steps])
 
   useEffect(() => {
+    let changed: string | null = null
+    for (const step of steps) {
+      const before = statuses.current.get(step.id)
+      if ((before === "running" || before === "queued") && step.status === "completed") changed = step.id
+      statuses.current.set(step.id, step.status)
+    }
+    if (!changed) return
+    setSettledId(changed)
+    const timer = window.setTimeout(() => setSettledId(null), 1100)
+    return () => window.clearTimeout(timer)
+  }, [steps])
+
+  useEffect(() => {
     if (!primedFrames.current) {
       primedFrames.current = true
       for (const frame of shown) seenFrames.current.add(frame.id)
@@ -140,161 +155,167 @@ export function RunView({
         </div>
         <ModelIdentity model={view?.request.generation_model} purpose={view?.request.purpose} detailLevel={view?.request.detail_level} />
       </header>
-      <div className="screening-now" aria-busy={copy.busy} data-motion={motion || undefined}>
-        <div
-          className="viewfinder"
-          data-empty={latest ? undefined : "true"}
-          data-tone={stopped ? "stopped" : undefined}
-          data-live={copy.busy ? "true" : undefined}
-        >
-          <div className="viewfinder-scene">
-            {latest ? (
-              <span className="viewfinder-still" ref={stillRef} data-new={freshFrame ? "true" : undefined}>
-                <FrameThumb frame={latest} variant="full" onBroken={onBroken} />
-              </span>
-            ) : (
-              <span className="viewfinder-signal" aria-hidden="true">
-                <i className="signal-scan" />
-              </span>
-            )}
-            <span className="viewfinder-brackets" aria-hidden="true" />
-            {copy.busy ? <span className="vf-sweep" aria-hidden="true" /> : null}
-            {copy.busy && phaseId ? <span className="vf-phase-sweep" key={phaseId} aria-hidden="true" /> : null}
-            <div className="viewfinder-top">
-              <p className="kicker vf-kicker">
-                <span className="pulse" hidden={!copy.busy} aria-hidden="true" />
-                <span>{copy.kicker}</span>
-              </p>
-              {clock ? (
-                <span className="elapsed vf-clock">
-                  {copy.busy ? "已进行" : "用时"} {clock}
-                </span>
-              ) : null}
-            </div>
-            <div className="viewfinder-caption">
-              <h1 className="activity-title vf-title" ref={titleRef} />
-              {copy.purpose ? <p className="vf-purpose">{copy.purpose}</p> : null}
-              <div className="vf-meta">
-                {copy.range ? <span className="vf-range">{copy.range}</span> : null}
+      <div className="run-stage">
+        <div className="run-main">
+          <div className="screening-now" aria-busy={copy.busy} data-motion={motion || undefined}>
+            <div
+              className="viewfinder"
+              data-empty={latest ? undefined : "true"}
+              data-tone={stopped ? "stopped" : undefined}
+              data-live={copy.busy ? "true" : undefined}
+            >
+              <div className="viewfinder-scene">
                 {latest ? (
-                  <span>
-                    {formatClock(latest.time_ms)}
-                    {latest.caption ? ` · ${latest.caption}` : ""} · 第 {latestIndex + 1} / {shown.length} 帧
+                  <span className="viewfinder-still" ref={stillRef} data-new={freshFrame ? "true" : undefined}>
+                    <FrameThumb frame={latest} variant="full" onBroken={onBroken} />
                   </span>
+                ) : (
+                  <span className="viewfinder-signal" aria-hidden="true">
+                    <i className="signal-scan" />
+                  </span>
+                )}
+                <span className="viewfinder-brackets" aria-hidden="true" />
+                {copy.busy ? <span className="vf-sweep" aria-hidden="true" /> : null}
+                {copy.busy && phaseId ? <span className="vf-phase-sweep" key={phaseId} aria-hidden="true" /> : null}
+                <div className="viewfinder-top">
+                  <p className="kicker vf-kicker">
+                    <span className="pulse" hidden={!copy.busy} aria-hidden="true" />
+                    <span>{copy.kicker}</span>
+                  </p>
+                  {clock ? (
+                    <span className="elapsed vf-clock">
+                      {copy.busy ? "已进行" : "用时"} {clock}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="viewfinder-caption">
+                  <h1 className="activity-title vf-title" ref={titleRef} />
+                  {copy.purpose ? <p className="vf-purpose">{copy.purpose}</p> : null}
+                  <div className="vf-meta">
+                    {copy.range ? <span className="vf-range">{copy.range}</span> : null}
+                    {latest ? (
+                      <span>
+                        {formatClock(latest.time_ms)}
+                        {latest.caption ? ` · ${latest.caption}` : ""} · 第 {latestIndex + 1} / {shown.length} 帧
+                      </span>
+                    ) : null}
+                    {view?.failure?.diagnostic_id ? <span>错误编号：{view.failure.diagnostic_id}</span> : null}
+                    {latest ? (
+                      <button
+                        type="button"
+                        className="vf-expand"
+                        onClick={() => {
+                          if (stillRef.current) openAt(latest, stillRef.current)
+                        }}
+                      >
+                        查看大图
+                      </button>
+                    ) : null}
+                  </div>
+                  {transcribed ? <TranscriptionMeter done={transcribed.done} total={transcribed.total} ratio={transcribed.ratio} /> : null}
+                </div>
+              </div>
+            </div>
+            {quiet ? <p className="quiet-note">{quiet}</p> : null}
+            {copy.busy ? (
+              <WaitTips
+                key={`${phaseId ?? "connecting"}:${view?.execution?.status ?? "running"}`}
+                phase={phaseId}
+                status={view?.execution?.status}
+              />
+            ) : null}
+            {hasActions ? (
+              <div className="run-actions">
+                {csrf && view?.request.id ? <ShareControl requestId={view.request.id} csrf={csrf} /> : null}
+                <span className="run-spacer" aria-hidden="true" />
+                {view?.actions.can_cancel ? (
+                  <button type="button" className="btn stop" onClick={onStop}>
+                    停止
+                  </button>
                 ) : null}
-                {view?.failure?.diagnostic_id ? <span>错误编号：{view.failure.diagnostic_id}</span> : null}
-                {latest ? (
-                  <button
-                    type="button"
-                    className="vf-expand"
-                    onClick={() => {
-                      if (stillRef.current) openAt(latest, stillRef.current)
-                    }}
-                  >
-                    查看大图
+                {view?.actions.can_retry ? (
+                  <button type="button" className="btn primary" onClick={onRetry}>
+                    {view.activity.model_calls ? "从已保存进度继续" : "重新理解"}
                   </button>
                 ) : null}
               </div>
-              {transcribed ? <TranscriptionMeter done={transcribed.done} total={transcribed.total} ratio={transcribed.ratio} /> : null}
-            </div>
+            ) : null}
+            {holding ? (
+              <div className="ready-banner">
+                <p>文章已就绪</p>
+                <button type="button" className="btn primary" onClick={onRead}>
+                  开始阅读
+                </button>
+              </div>
+            ) : null}
+            {articleError ? (
+              <p className="form-error">
+                {articleError}{" "}
+                <button type="button" className="btn quiet" onClick={onRetryArticle}>
+                  重新读取
+                </button>
+              </p>
+            ) : null}
           </div>
-        </div>
-        {quiet ? <p className="quiet-note">{quiet}</p> : null}
-        {copy.busy ? (
-          <WaitTips
-            key={`${phaseId ?? "connecting"}:${view?.execution?.status ?? "running"}`}
-            phase={phaseId}
-            status={view?.execution?.status}
+          <FilmRuler
+            duration={source?.duration_ms}
+            ranges={ranges}
+            frames={shown}
+            activeRange={activeRange}
+            progress={transcribed?.ratio ?? null}
+            stopped={stopped}
+            live={copy.busy}
+            latestId={latest?.id ?? null}
+            onOpenFrame={openAt}
           />
-        ) : null}
-        {hasActions ? (
-          <div className="run-actions">
-            {csrf && view?.request.id ? <ShareControl requestId={view.request.id} csrf={csrf} /> : null}
-            <span className="run-spacer" aria-hidden="true" />
-            {view?.actions.can_cancel ? (
-              <button type="button" className="btn stop" onClick={onStop}>
-                停止
-              </button>
-            ) : null}
-            {view?.actions.can_retry ? (
-              <button type="button" className="btn primary" onClick={onRetry}>
-                {view.activity.model_calls ? "从已保存进度继续" : "重新理解"}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {holding ? (
-          <div className="ready-banner">
-            <p>文章已就绪</p>
-            <button type="button" className="btn primary" onClick={onRead}>
-              开始阅读
-            </button>
-          </div>
-        ) : null}
-        {articleError ? (
-          <p className="form-error">
-            {articleError}{" "}
-            <button type="button" className="btn quiet" onClick={onRetryArticle}>
-              重新读取
-            </button>
-          </p>
-        ) : null}
-      </div>
-      <FilmRuler
-        duration={source?.duration_ms}
-        ranges={ranges}
-        frames={shown}
-        activeRange={activeRange}
-        progress={transcribed?.ratio ?? null}
-        stopped={stopped}
-        live={copy.busy}
-        latestId={latest?.id ?? null}
-        onOpenFrame={openAt}
-      />
-      <ExecutionPlan
-        activity={view?.activity}
-        completed={view?.request.status === "completed"}
-        phase={phaseId}
-        phaseMode={phaseMode}
-      />
-      <div className="history">
-        <div className="journal-head">
-          <div>
-            <p className="journal-kicker">
-              现场记录
-              {copy.busy ? (
-                <span className="agent-dots" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              ) : null}
-            </p>
-            <p className="journal-caption">{journalCaption}</p>
-          </div>
-          <button type="button" className="disclosure" aria-expanded={historyOpen} onClick={onToggleHistory}>
-            {historyOpen ? "收起过程" : "查看全部过程"}
-          </button>
+          <p className="leave-note">{stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "可以离开这个页面，处理会在后台继续。"}</p>
         </div>
-        <ActivityList
-          steps={steps}
-          resourceStatus={view?.request.status || ""}
-          detailed={historyOpen}
-          open={historyOpen}
-          freshId={freshId}
-          headline={copy.title}
-          onOpenFrame={onOpenFrame}
-          onBroken={onBroken}
-        />
-        {view?.activity.history_status === "expired" ? <p className="history-note">更早的过程已经过期。</p> : null}
-        {historyOpen && historyMessage ? (
-          <p className="history-note" role="status">
-            {historyMessage}
-          </p>
-        ) : null}
-        {view?.activity.history_status === "partial" ? <p className="history-note">一部分过程记录已经清理。</p> : null}
+        <aside className="run-side" aria-label="执行过程">
+          <ExecutionPlan
+            activity={view?.activity}
+            completed={view?.request.status === "completed"}
+            phase={phaseId}
+            phaseMode={phaseMode}
+          />
+          <div className="history">
+            <div className="journal-head">
+              <div>
+                <p className="journal-kicker">
+                  现场记录
+                  {copy.busy ? (
+                    <span className="agent-dots" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  ) : null}
+                </p>
+                <p className="journal-caption">{journalCaption}</p>
+              </div>
+              <button type="button" className="disclosure" aria-expanded={historyOpen} onClick={onToggleHistory}>
+                {historyOpen ? "收起过程" : "查看全部过程"}
+              </button>
+            </div>
+            <ActivityList
+              steps={steps}
+              resourceStatus={view?.request.status || ""}
+              detailed={historyOpen}
+              open={historyOpen}
+              freshId={freshId}
+              settledId={settledId}
+              onOpenFrame={onOpenFrame}
+              onBroken={onBroken}
+            />
+            {view?.activity.history_status === "expired" ? <p className="history-note">更早的过程已经过期。</p> : null}
+            {historyOpen && historyMessage ? (
+              <p className="history-note" role="status">
+                {historyMessage}
+              </p>
+            ) : null}
+            {view?.activity.history_status === "partial" ? <p className="history-note">一部分过程记录已经清理。</p> : null}
+          </div>
+        </aside>
       </div>
-      <p className="leave-note">{stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "可以离开这个页面，处理会在后台继续。"}</p>
     </section>
   )
 }

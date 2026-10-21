@@ -609,7 +609,7 @@ main { position: relative; }
 }
 
 .view-run {
-  width: min(820px, calc(100% - 64px));
+  width: min(1120px, calc(100% - 64px));
   margin: 28px auto 88px;
 }
 
@@ -1038,17 +1038,17 @@ main { position: relative; }
   background: var(--ink-soft);
 }
 
-.step-label { font-size: 14px; }
-
-.step[data-kind="model_response"] .step-label {
+.step-label {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   column-gap: 8px;
-  font-weight: 500;
+  font-size: 14px;
 }
 
-.step[data-kind="model_response"] .step-label > .step-spent { margin-left: 0; }
+.step-label > .step-spent { margin-left: 0; }
+
+.step[data-kind="model_response"] .step-label { font-weight: 500; }
 
 .step-outcome, .step-range {
   margin-top: 2px;

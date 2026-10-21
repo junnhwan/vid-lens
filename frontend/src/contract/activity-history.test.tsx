@@ -76,15 +76,25 @@ describe("complete execution history", () => {
       "正在转写音频（12:03 / 19:43）",
     ])
     expect(collapsed[0].outcome?.message).toBe("下载长时间没有字节进展。")
-    const html = renderToStaticMarkup(<ActivityList steps={steps} open={false} detailed={false} headline="正在转写音频" resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
+    const html = renderToStaticMarkup(<ActivityList steps={steps} open={false} detailed={false} resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
     expect(html).toContain("第 1 次准备中断")
     expect(html).toContain("下载长时间没有字节进展。")
     expect(html).toContain("已重新准备视频和文字来源（第 2 次尝试）")
     expect(html).toContain("已校验视频时长与素材")
     expect(html).toContain("视频 12:03 / 19:43")
-    expect(html).not.toContain("正在转写音频")
+    expect(html.match(/正在转写音频/g)).toHaveLength(1)
     expect(html).not.toContain("正在准备视频和文字来源")
     expect(html.match(/校验视频时长/g)).toHaveLength(1)
+  })
+  it("keeps the running step in the journal while it runs, then settles it in place", () => {
+    const base = { ...step("video", "tool_execution", 0), phase: "prepare_source", title: "正在获取用于观察的完整视频", outcome: null }
+    const running = renderToStaticMarkup(<ActivityList steps={[{ ...base, status: "running", started_at: "2026-10-21T08:00:00Z" }]} open={false} detailed={false} resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(running).toContain("正在获取用于观察的完整视频")
+    expect(running).toContain("进行中")
+    const done = renderToStaticMarkup(<ActivityList steps={[{ ...base, status: "completed", started_at: "2026-10-21T08:00:00Z", finished_at: "2026-10-21T08:02:49Z" }]} open={false} detailed={false} resourceStatus="waiting_source" onOpenFrame={() => {}} onBroken={() => {}} />)
+    expect(done).toContain("已获取用于观察的完整视频")
+    expect(done).toContain("用时 02:49")
+    expect(done).not.toContain("进行中")
   })
   it("shows the reason for a source retry in the compact process list", () => {
     const retry = { ...step("source-retry", "retry", 0), phase: "prepare_source", title: "来源准备中断，将自动重试", outcome: { message: "下载长时间没有字节进展。", evidence_status: "not_assessed" } }
