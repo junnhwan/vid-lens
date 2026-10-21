@@ -132,11 +132,17 @@ export interface Outcome {
   evidence_status: EvidenceStatus | string
 }
 
+export interface TokenUsage {
+  input: number
+  output: number
+}
+
 export interface ActivityStep {
   kind?: string
   model_call?: number
   submission?: number
   plan?: ExecutionPlan | null
+  usage?: TokenUsage | null
   id: string
   run_id: string
   segment_no: number

@@ -1040,7 +1040,15 @@ main { position: relative; }
 
 .step-label { font-size: 14px; }
 
-.step[data-kind="model_response"] .step-label { font-weight: 500; }
+.step[data-kind="model_response"] .step-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  font-weight: 500;
+}
+
+.step[data-kind="model_response"] .step-label > .step-spent { margin-left: 0; }
 
 .step-outcome, .step-range {
   margin-top: 2px;
@@ -1848,6 +1856,28 @@ figcaption {
   background: var(--teal);
   animation: disclosure-pulse 1.4s var(--ease-in-out) infinite;
 }
+
+.send-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  padding-top: 2px;
+}
+
+.send-meta .send-time,
+.send-meta .send-live { padding-top: 0; }
+
+.send-usage {
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.send-usage b { color: var(--ink); font-weight: 500; }
 
 .observation-list li {
   display: grid;

@@ -105,7 +105,7 @@ export function Diagnostics({
   const pages = Math.max(1, Math.ceil(total / usagePageSize))
   const page = Math.min(pages, Math.floor(offset / usagePageSize) + 1)
   const groups = [
-    { title: "调用", note: "未完整结束的次数单独列出。", items: [["physical_submissions", "物理提交", false], ["incomplete", "未完整结束", true]] as const },
+    { title: "发送", note: "未完整结束的次数单独列出。", items: [["physical_submissions", "实际发送", false], ["incomplete", "未完整结束", true]] as const },
     { title: "用量报告", note: "只看缓存读字段有没有报回来。", items: [["reported", "已报告", false], ["unknown", "未报告或异常", true]] as const },
     { title: "缓存", note: "未知样本不计入命中比例。", items: [["hits", "观察到命中", false], ["reported_zero", "明确报告为零", false]] as const },
   ]
@@ -116,7 +116,7 @@ export function Diagnostics({
         <div>
           <p className="eyebrow">MODEL USAGE</p>
           <h2>缓存与实际用量</h2>
-          <p className="fine">每次模型提交的实际用量。完整结束、未完成和没报回来的数字分开看。</p>
+          <p className="fine">每次模型发送的实际用量。完整结束、未完成和没报回来的数字分开看。</p>
         </div>
         <button type="button" className="btn quiet desk-pill" disabled={busy} onClick={() => onPage(offset)}>
           <span className={spinning ? "desk-spin" : "desk-reload"} aria-hidden="true">↻</span>
@@ -143,16 +143,16 @@ export function Diagnostics({
           </div>
           <details className="diagnostic-reading" open={reading} onToggle={(event) => setReading(event.currentTarget.open)}>
             <summary>如何阅读</summary>
-            <p>账单折扣仍然未知。历史仅规范化记录 {String(data.legacy_normalized_only ?? "—")} 条，不能按其中的 0 推断真实未命中。时间为提交开始；响应用时不含工具执行和文章校验，供应商后台可能按完成时刻记账。未知、空值和异常不是数字 0。</p>
+            <p>账单折扣仍然未知。历史仅规范化记录 {String(data.legacy_normalized_only ?? "—")} 条，不能按其中的 0 推断真实未命中。时间为发送开始；响应用时不含工具执行和文章校验，供应商后台可能按完成时刻记账。未知、空值和异常不是数字 0。</p>
           </details>
           <div className="usage-sheet">
             {rows.length ? (
               <table className="usage-table">
-                <caption className="sr-only">模型调用记录</caption>
+                <caption className="sr-only">模型发送记录</caption>
                 <thead>
                   <tr>
                     <th>状态</th>
-                    <th>提交开始（北京时间）</th>
+                    <th>发送开始（北京时间）</th>
                     <th>模型</th>
                     <th className="num">响应用时 / 首个内容</th>
                     <th className="num">输入</th>
@@ -197,7 +197,7 @@ export function Diagnostics({
                 </tbody>
               </table>
             ) : (
-              <p className="empty-state">{offset > 0 ? "这一页没有记录。" : "还没有本版本的物理提交用量。已有历史记录保持原事实。"}</p>
+              <p className="empty-state">{offset > 0 ? "这一页没有记录。" : "还没有本版本的发送用量。已有历史记录保持原事实。"}</p>
             )}
             {total > 0 ? (
               <div className="usage-pager">

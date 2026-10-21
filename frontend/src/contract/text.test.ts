@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Block } from "./types"
-import { blockPlainText, choosePassage, formatClock, normalizeQuote, quoteMatchesBlock } from "./text"
+import { blockPlainText, choosePassage, formatClock, formatTokens, normalizeQuote, quoteMatchesBlock, tokenUsageLabel } from "./text"
 
 const paragraph: Block = {
   id: "blk",
@@ -41,5 +41,15 @@ describe("passage text", () => {
     expect(formatClock(312000)).toBe("05:12")
     expect(formatClock(2_142_000)).toBe("35:42")
     expect(formatClock(3_935_000)).toBe("1:05:35")
+  })
+
+  it("keeps token counts compact without inventing precision", () => {
+    expect(formatTokens(0)).toBe("0")
+    expect(formatTokens(999)).toBe("999")
+    expect(formatTokens(1000)).toBe("1k")
+    expect(formatTokens(21649)).toBe("21.6k")
+    expect(formatTokens(236500)).toBe("236.5k")
+    expect(formatTokens(1_000_000)).toBe("1m")
+    expect(tokenUsageLabel({ input: 21649, output: 3102 })).toBe("输入 21,649 tokens，输出 3,102 tokens")
   })
 })

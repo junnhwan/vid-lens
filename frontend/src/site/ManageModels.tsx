@@ -542,7 +542,7 @@ export function ManageModels({ ready, error, models, composing, providers, openP
                               {isOpenProbe(p) && timing ? ` · ${timing}` : ""}
                             </strong>
                             <span>
-                              {p.mode === "cache" ? "缓存样本" : "图片与工具"} · {p.submissions} 次物理提交
+                              {p.mode === "cache" ? "缓存样本" : "图片与工具"} · {p.submissions} 次实际发送
                             </span>
                             {!isOpenProbe(p) && timing ? <small>用时 {timing}</small> : null}
                             {probeFailureText(p) ? <small>{probeFailureText(p)}</small> : null}

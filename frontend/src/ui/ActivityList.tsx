@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { ActivityStep, Frame } from "../contract/types"
-import { formatClock, formatRange } from "../contract/text"
+import { formatClock, formatRange, formatTokens, tokenUsageLabel } from "../contract/text"
 import { stepPresentation } from "../app/labels"
 import { activityTitle, parseTranscription, restingTitle, stepSpent } from "../app/progress"
 import { prefersReduced } from "./motion"
@@ -66,6 +66,7 @@ export function ActivityList({
     const transcribed = parseTranscription(step.title)
     const spent = view.status !== "active" ? stepSpent(step) : null
     const model = step.kind === "model_response" || step.kind === "model_submission"
+    const callUsage = step.kind === "model_response" ? step.usage : null
     const named = activityTitle(step)
     const title = step.kind === "retry" || view.status === "active" ? named : restingTitle(named, view.status)
     const repeated = Boolean(headline) && view.status === "active" && title === headline
@@ -83,6 +84,12 @@ export function ActivityList({
               {repeated ? null : title}
               {model ? <span className="step-spent">第 {step.model_call ?? "?"} 次模型调用{sends.length ? ` · 发送 ${sends.length} 次` : ""}</span> : null}
               {spent ? <span className="step-spent">用时 {spent}</span> : null}
+              {callUsage ? (
+                <span className="step-usage" title={tokenUsageLabel(callUsage)}>
+                  <span className="sr-only">{tokenUsageLabel(callUsage)}</span>
+                  <span aria-hidden="true"><span className="usage-label">用量</span>入 <b>{formatTokens(callUsage.input)}</b> · 出 <b>{formatTokens(callUsage.output)}</b></span>
+                </span>
+              ) : null}
               <span className="sr-only">{statusText(view.status)}</span>
             </div>
           )}
@@ -99,6 +106,8 @@ export function ActivityList({
                 {sends.map((send, index) => {
                   const detail = stepPresentation(send, resourceStatus)
                   const duration = detail.status !== "active" ? stepSpent(send) : null
+                  const usage = send.usage
+                  const meta = Boolean(usage || duration || detail.status === "active")
                   return (
                     <li key={send.id} data-status={detail.status}>
                       <span className="send-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
@@ -106,10 +115,20 @@ export function ActivityList({
                         <span className="send-title">{sendName(send.title, index)}</span>
                         <span className="send-outcome">{detail.status === "active" ? "等待响应" : detail.outcome || "已结束"}</span>
                       </span>
-                      {detail.status === "active" ? (
-                        <span className="send-live"><i aria-hidden="true" />进行中</span>
-                      ) : duration ? (
-                        <span className="send-time">{duration}</span>
+                      {meta ? (
+                        <span className="send-meta">
+                          {usage ? (
+                            <span className="send-usage" title={tokenUsageLabel(usage)}>
+                              <span className="sr-only">{tokenUsageLabel(usage)}</span>
+                              <span aria-hidden="true">入 <b>{formatTokens(usage.input)}</b> · 出 <b>{formatTokens(usage.output)}</b></span>
+                            </span>
+                          ) : null}
+                          {detail.status === "active" ? (
+                            <span className="send-live"><i aria-hidden="true" />进行中</span>
+                          ) : duration ? (
+                            <span className="send-time">{duration}</span>
+                          ) : null}
+                        </span>
                       ) : null}
                     </li>
                   )

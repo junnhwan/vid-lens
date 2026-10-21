@@ -1201,6 +1201,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+.step-usage {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.step-usage .usage-label {
+  margin-right: 7px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+}
+
+.step-usage b { color: var(--ink); font-weight: 500; }
+
 .prose[data-arrive="true"] > section {
   animation: section-arrive 280ms var(--ease-out) both;
 }

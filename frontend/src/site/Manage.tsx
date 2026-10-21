@@ -425,7 +425,7 @@ export function Manage() {
         if (freshSelected) setMd(modelDraft(freshSelected))
         setRouteOrderDraft(null)
 
-        setNotice("同型号线路顺序已保存。提交次数较少的线路会先尝试；次数相同时按这里的顺序选择。")
+        setNotice("同型号线路顺序已保存。发送次数较少的线路会先尝试；次数相同时按这里的顺序选择。")
       } catch (error) {
         if (error instanceof ApiError && error.status === 409) {
           const refreshed = await load()

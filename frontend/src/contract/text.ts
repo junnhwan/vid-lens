@@ -93,6 +93,18 @@ export function formatDuration(ms: number | null | undefined): string {
   return formatClock(ms)
 }
 
+export function formatTokens(value: number): string {
+  const n = Math.max(0, Math.round(value))
+  if (n < 1000) return String(n)
+  const divisor = n < 1_000_000 ? 1_000 : 1_000_000
+  const unit = n < 1_000_000 ? "k" : "m"
+  return `${(n / divisor).toFixed(1).replace(/\.0$/, "")}${unit}`
+}
+
+export function tokenUsageLabel(usage: { input: number; output: number }): string {
+  return `输入 ${usage.input.toLocaleString("en-US")} tokens，输出 ${usage.output.toLocaleString("en-US")} tokens`
+}
+
 export function citationClock(citation: Citation): string {
   if (citation.kind === "external_reference") return "网页 ↗"
   const start = citationStart(citation)

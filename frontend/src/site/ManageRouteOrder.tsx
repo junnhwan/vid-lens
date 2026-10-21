@@ -20,7 +20,7 @@ export function ManageRouteOrder({ orderedRouteModels, providerName, moveRoute, 
       <span className="route-order-count">{orderedRouteModels.length} 条线路</span>
     </header>
     <p className="route-order-help">
-      拖动线路调整顺序。恢复时会先尝试提交次数较少的供应商；次数相同时按这里的顺序选择。只有已启用且检查通过的线路会参与请求。
+      拖动线路调整顺序。恢复时会先尝试发送次数较少的供应商；次数相同时按这里的顺序选择。只有已启用且检查通过的线路会参与请求。
     </p>
     <ol className="route-order-list">
       {orderedRouteModels.map((model, index) => {

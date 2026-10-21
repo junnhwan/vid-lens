@@ -205,11 +205,16 @@ type Outcome struct {
 	Message        string `json:"message"`
 	EvidenceStatus string `json:"evidence_status"`
 }
+type Usage struct {
+	Input  int64 `json:"input"`
+	Output int64 `json:"output"`
+}
 type Step struct {
 	Kind          string         `json:"kind,omitempty"`
 	ModelCall     int            `json:"model_call,omitempty"`
 	Submission    int            `json:"submission,omitempty"`
 	Plan          *ExecutionPlan `json:"plan,omitempty"`
+	Usage         *Usage         `json:"usage,omitempty"`
 	ID            string         `json:"id"`
 	RunID         string         `json:"run_id"`
 	SegmentNo     int            `json:"segment_no"`

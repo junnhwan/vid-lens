@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -339,6 +340,9 @@ func stepsAt(ctx context.Context, q Querier, segs []domain.ExecutionSegment, req
 		}
 		if len(list) > 0 {
 			retained++
+			if e := attachUsage(ctx, q, seg.RunID, list); e != nil {
+				return nil, "", nil, e
+			}
 		}
 		for i := range list {
 			list[i].SegmentNo = seg.SegmentNo
@@ -371,6 +375,69 @@ func stepsAt(ctx context.Context, q Querier, segs []domain.ExecutionSegment, req
 	}
 	return all, history, expiry, nil
 }
+
+type modelUsageRow struct {
+	OperationKey string `json:"operation_key"`
+	Submission   int    `json:"submission"`
+	Input        *int64 `json:"input"`
+	Output       *int64 `json:"output"`
+}
+
+func attachUsage(ctx context.Context, q Querier, run string, steps []domain.Step) error {
+	rows, e := many[modelUsageRow](ctx, q, `SELECT jsonb_build_object('operation_key',operation_key,'submission',submission,'input',CASE WHEN reporting->'input'->>'status'='reported' THEN (reporting->'input'->>'value')::bigint END,'output',CASE WHEN reporting->'output'->>'status'='reported' THEN (reporting->'output'->>'value')::bigint END) FROM model_submissions WHERE run_id=$1 AND operation_key LIKE 'model:%' ORDER BY operation_key,submission`, run)
+	if e != nil {
+		return e
+	}
+	attachModelUsage(steps, rows)
+	return nil
+}
+
+// A call total is shown only when every physical send reported both sides;
+// partial sums would understate what the run actually consumed.
+func attachModelUsage(steps []domain.Step, rows []modelUsageRow) {
+	type keySub struct {
+		key        string
+		submission int
+	}
+	perSend := map[keySub]domain.Usage{}
+	totals := map[string]domain.Usage{}
+	complete := map[string]bool{}
+	for _, row := range rows {
+		if _, seen := complete[row.OperationKey]; !seen {
+			complete[row.OperationKey] = true
+		}
+		if row.Input == nil || row.Output == nil {
+			complete[row.OperationKey] = false
+			continue
+		}
+		usage := domain.Usage{Input: *row.Input, Output: *row.Output}
+		perSend[keySub{row.OperationKey, row.Submission}] = usage
+		total := totals[row.OperationKey]
+		total.Input += usage.Input
+		total.Output += usage.Output
+		totals[row.OperationKey] = total
+	}
+	for i := range steps {
+		step := &steps[i]
+		if step.ModelCall < 1 || step.Status == "running" || step.Status == "queued" {
+			continue
+		}
+		key := "model:" + strconv.Itoa(step.ModelCall-1)
+		switch step.Kind {
+		case "model_submission":
+			if usage, ok := perSend[keySub{key, step.Submission}]; ok {
+				step.Usage = &usage
+			}
+		case "model_response":
+			if complete[key] {
+				if usage, ok := totals[key]; ok {
+					step.Usage = &usage
+				}
+			}
+		}
+	}
+}
+
 func activitySummary(steps []domain.Step, history string, expiry *time.Time, base string, active bool) map[string]any {
 	var current *string
 	if active {
