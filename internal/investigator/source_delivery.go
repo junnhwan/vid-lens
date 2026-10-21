@@ -69,6 +69,21 @@ func (s *session) indexedReviewSource(task reviewTask, catalog map[string]domain
 			}
 		}
 	}
+	if s.usesJointReview() {
+		// A frame caption can contradict nearby speech even without an explicit
+		// text alias. Deliver that original speech, not just global note samples.
+		frames := reviewTaskFrames(task)
+		for _, citation := range catalog {
+			if citation.Kind != "video_frame" || citation.TimeMS == nil || !slices.Contains(frames, citation.FrameID) {
+				continue
+			}
+			for _, segment := range s.transcript {
+				if segment.StartMS <= *citation.TimeMS && (*citation.TimeMS < segment.EndMS || *citation.TimeMS == s.snapshot.DurationMS && segment.EndMS == s.snapshot.DurationMS) {
+					selected[segment.ID] = true
+				}
+			}
+		}
+	}
 	// Global headings and uncited scope claims still receive representative
 	// originals from every completed card, not only the author's article prose.
 	if len(selected) == 0 {

@@ -205,6 +205,9 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 		payload["citation_catalog"] = compactSourceCatalog(catalog, nil, candidate)
 	}
 	instructions := reviewUnitInstructions
+	if s.usesJointReview() {
+		instructions = jointReviewInstructions
+	}
 	if s.boundedSourceContext() && s.chunkedSource() {
 		instructions += "\n本轮source.transcript是本单元全部引用原文及时间邻居，source_index/derived_notes只是全片导航。不能仅凭材料卡或作者描述确认具体断言；必要材料未交付则not_assessed，不能把未知判为支持。"
 	}
@@ -218,7 +221,9 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 		if s.boundedSourceContext() && s.chunkedSource() {
 			modalityInstructions = strings.Replace(modalityInstructions, "visual收到完整原始文字及本单元全部引用图片", "visual收到本单元全部引用原文及时间邻居、全片材料索引和本单元全部引用图片", 1)
 		}
-		instructions += "\n" + modalityInstructions
+		if !s.usesJointReview() {
+			instructions += "\n" + modalityInstructions
+		}
 	}
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")

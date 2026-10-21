@@ -81,7 +81,7 @@ func TestNewExecutionAndExplicitRetryHaveSeparateFrozenContracts(t *testing.T) {
 }
 
 func TestExplicitRetryKeepsSourceOnlyCoverageAndPinsUndeliveredOverview(t *testing.T) {
-	for _, version := range []string{domain.ExecutionContractV4, domain.ExecutionContractV5} {
+	for _, version := range []string{domain.ExecutionContractV4, domain.ExecutionContractV5, domain.ExecutionContractV6} {
 		t.Run(version, func(t *testing.T) { testSourceOnlyCoverageRetry(t, version) })
 	}
 }

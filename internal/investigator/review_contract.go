@@ -36,6 +36,9 @@ func (s *session) usesModalityReview() bool {
 }
 
 func (s *session) boundedReviewProtocol() string {
+	if s.usesJointReview() {
+		return "evidence-review-2026-10-21-v9"
+	}
 	if s.boundedSourceContext() {
 		return "evidence-review-2026-10-20-v8"
 	}
@@ -46,6 +49,9 @@ func (s *session) boundedReviewProtocol() string {
 }
 
 func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
+	if s.usesJointReview() {
+		return planReviewTasksWithPolicy(units, s.profile.MaxOutputTokens, true, 3, true)
+	}
 	if s.boundedSourceContext() {
 		return planReviewTasksWithImageTarget(units, s.profile.MaxOutputTokens, true, 3)
 	}
@@ -53,6 +59,10 @@ func (s *session) planReviewTasks(units []reviewUnit) ([]reviewTask, error) {
 		return planReviewTasksByModality(units, s.profile.MaxOutputTokens, true)
 	}
 	return planReviewTasks(units, s.profile.MaxOutputTokens)
+}
+
+func (s *session) usesJointReview() bool {
+	return s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ExecutionContractV6
 }
 
 type reviewUnit struct {
@@ -198,7 +208,7 @@ func candidateReviewUnits(candidate any, catalog map[string]domain.Citation) ([]
 
 func reviewTaskFrames(task reviewTask) []string {
 	ids := []string{}
-	if task.Mode == "visual" {
+	if task.Mode == "visual" || task.Mode == "multimodal" {
 		for _, unit := range task.Units {
 			ids = append(ids, unit.FrameIDs...)
 		}
@@ -216,12 +226,23 @@ func planReviewTasksByModality(units []reviewUnit, outputCapacity int, modalitie
 }
 
 func planReviewTasksWithImageTarget(units []reviewUnit, outputCapacity int, modalities bool, imageTarget int) ([]reviewTask, error) {
+	return planReviewTasksWithPolicy(units, outputCapacity, modalities, imageTarget, false)
+}
+
+func planReviewTasksWithPolicy(units []reviewUnit, outputCapacity int, modalities bool, imageTarget int, joint bool) ([]reviewTask, error) {
 	target := max(1024, min(8192, outputCapacity/4))
 	tasks := []reviewTask{}
-	for _, mode := range []string{"source_text", "visual"} {
+	modes := []string{"source_text", "visual"}
+	if joint {
+		modes[1] = "multimodal"
+	}
+	for _, mode := range modes {
 		batch := reviewTask{Mode: mode}
 		work := 0
 		for _, unit := range units {
+			if joint && (mode == "multimodal") != (len(unit.FrameIDs) > 0) {
+				continue // One complete obligation, with both original text and pixels.
+			}
 			if modalities && mode == "source_text" && len(unit.FrameIDs) > 0 && !unit.HasTextEvidence {
 				continue // Visual receives the complete transcript and every cited pixel.
 			}
@@ -315,6 +336,9 @@ func validateReviewUnits(out reviewUnitReport, id string, task reviewTask, catal
 						return errors.New("review cites pixels not delivered in this task")
 					}
 					linked = linked || c.Kind == "video_frame" && slices.Contains(unit.FrameIDs, c.FrameID)
+					if task.Mode == "multimodal" {
+						linked = linked || c.Kind == "video_text" || c.Kind == "external_reference"
+					}
 				}
 			}
 			if !linked {

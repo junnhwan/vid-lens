@@ -21,9 +21,13 @@ const ExecutionContractV4 = "vidlens-execution-2026-10-20-v4"
 // budgets. Chunk identities stay compatible with V4; admitted V4 runs stay frozen.
 const ExecutionContractV5 = "vidlens-execution-2026-10-21-v5"
 
+// V6 reviews an indivisible text/pixel claim once with all of its evidence.
+// Older runs retain their separate modality obligations and frozen inputs.
+const ExecutionContractV6 = "vidlens-execution-2026-10-21-v6"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV5
+const CurrentExecutionContract = ExecutionContractV6
 
 type ExecutionContract struct {
 	Version string `json:"version"`

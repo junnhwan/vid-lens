@@ -331,9 +331,9 @@ func TestExplicitDraftRetryResolvesItsOwnCompatibleExecution(t *testing.T) {
 				t.Fatalf("explicit retry did not resolve and persist its own execution: %s", run.Checkpoint)
 			}
 			text := cp.Messages[0].Content
-			if cp.ExecutionContract.Version == domain.ExecutionContractV4 || cp.ExecutionContract.Version == domain.ExecutionContractV5 {
+			if cp.ExecutionContract.Version == domain.ExecutionContractV4 || cp.ExecutionContract.Version == domain.ExecutionContractV5 || cp.ExecutionContract.Version == domain.ExecutionContractV6 {
 				instruction := sourceContextInstructions
-				if cp.ExecutionContract.Version == domain.ExecutionContractV5 {
+				if cp.ExecutionContract.Version == domain.ExecutionContractV5 || cp.ExecutionContract.Version == domain.ExecutionContractV6 {
 					instruction += "\n" + adaptiveSourceCardInstructions
 				}
 				if !strings.HasSuffix(text, "\n"+instruction) {
