@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/domain"
 )
 
@@ -155,5 +156,36 @@ func TestWorkflowFrameNoteSharesDeliveredAliasAndKeepsStrictLegacyDecode(t *test
 	encoded := string(domain.JSON(workflowFrameNote{FrameAlias: "f1"}))
 	if !strings.Contains(encoded, `"alias":"f1"`) || strings.Contains(encoded, "frame_alias") {
 		t.Fatal("new output still disagrees with delivered pixel identity", encoded)
+	}
+}
+
+func TestWorkflowStageAcceptsOneCompleteTypedJSONInEitherEnvelope(t *testing.T) {
+	const name, body = "record_value", `{"value":"已核对"}`
+	toolResponse := func(n string, args string) *schema.Message {
+		return &schema.Message{ToolCalls: []schema.ToolCall{{Function: schema.FunctionCall{Name: n, Arguments: args}}}}
+	}
+	for _, response := range []*schema.Message{{Content: body}, toolResponse(name, body)} {
+		raw, err := workflowArguments(response, name)
+		var value struct {
+			Value string `json:"value"`
+		}
+		if err != nil || workflowDecode(raw, &value) != nil || value.Value != "已核对" {
+			t.Fatal("complete typed stage required another paid envelope repair", err, raw)
+		}
+	}
+	mixed := toolResponse(name, body)
+	mixed.Content = body
+	multiple := toolResponse(name, body)
+	multiple.ToolCalls = append(multiple.ToolCalls, multiple.ToolCalls[0])
+	for _, response := range []*schema.Message{nil, mixed, multiple, toolResponse("other", body), {Content: "说明：" + body}, {Content: body + body}, {Content: `{"value":`}, {Content: `{"value":"ok","invented":true}`}, {Content: "null"}} {
+		raw, err := workflowArguments(response, name)
+		if err == nil {
+			err = workflowDecode(raw, new(struct {
+				Value string `json:"value"`
+			}))
+		}
+		if err == nil {
+			t.Fatal("ambiguous, partial or undeclared output became a stage result", response)
+		}
 	}
 }

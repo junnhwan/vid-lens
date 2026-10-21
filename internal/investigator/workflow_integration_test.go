@@ -282,3 +282,22 @@ func TestWorkflowProviderFailureRequiresExplicitRetryWithoutResending(t *testing
 		t.Fatal("large logical input was automatically resent or failure identity was lost", sends.Load(), err)
 	}
 }
+
+func TestWorkflowPlainJSONStagePersistsWithoutEnvelopeRepair(t *testing.T) {
+	var sends atomic.Int32
+	s := boundedReviewSession(t, func(w http.ResponseWriter, r *http.Request) {
+		sends.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"{\"value\":\"complete result\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`+"\n\ndata: [DONE]\n\n")
+	})
+	workflowFixtureState(s)
+	type output struct {
+		Value string `json:"value"`
+	}
+	for i := 0; i < 2; i++ {
+		value, err := workflowStage[output](context.Background(), s, "one-json-result", "plan", "record_value", "Return one value.", map[string]any{"snapshot_id": s.snapshot.ID}, nil, nil)
+		if err != nil || value.Value != "complete result" || sends.Load() != 1 || s.cp.Calls != 1 || s.cp.Workflow.Calls["format"] != 0 {
+			t.Fatal("transport envelope caused a paid retry or lost its durable result", value, err, sends.Load())
+		}
+	}
+}
