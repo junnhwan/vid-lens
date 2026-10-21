@@ -102,7 +102,7 @@ func TestWorkflowPlanAcceptsAValidWideInvestigationForServerSampling(t *testing.
 	// The first real MiniMax Theo plan was rejected solely because this
 	// 93.44-second question range was longer than one FFmpeg window.
 	plan := workflowPlan{Title: "完整主题结构", Chapters: []workflowChapter{{Title: "主题", StartMS: 0, KeyPoints: []string{"具体机制"}}}, FrameNotes: []workflowFrameNote{}, Investigations: []workflowInvestigation{{Question: "核对文章中的实际数字与旁白是否一致", StartMS: 693920, EndMS: 787360}}}
-	if err := validateWorkflowPlan(&plan, 3772902, nil); err != nil {
+	if err := validateWorkflowPlan(&plan, 3772902, nil, nil); err != nil {
 		t.Fatal("model was asked to coordinate an internal sampling ceiling", err)
 	}
 	windows := workflowInspectionWindows(plan.Investigations[0])

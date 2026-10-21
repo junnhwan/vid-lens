@@ -23,7 +23,7 @@ import (
 )
 
 func workflowFixtureState(s *session) {
-	s.cp.ExecutionContract = &domain.ExecutionContract{Version: domain.ExecutionContractV10, RunID: s.claim.Run.ID}
+	s.cp.ExecutionContract = &domain.ExecutionContract{Version: domain.CurrentExecutionContract, RunID: s.claim.Run.ID}
 	s.cp.Workflow = &workflowState{Calls: map[string]int{}}
 	s.cp.Messages = []*schema.Message{schema.SystemMessage(workflowInstructions)}
 	s.cp.CitationFrames = []string{}
@@ -103,7 +103,7 @@ func TestWorkflowEnginePublishesThroughCompleteBoundedStages(t *testing.T) {
 			if !strings.Contains(string(domain.JSON(wire)), "data:image/jpeg;") {
 				t.Error("planning did not receive actual pixels")
 			}
-			writeReviewWireArgs(w, name, workflowPlan{Title: "两个来源事实的说明", Chapters: []workflowChapter{{Title: "最初的事实", StartMS: 0, KeyPoints: []string{"来源事实0"}}, {Title: "最后的事实", StartMS: 1000, KeyPoints: []string{"来源事实24"}}}, FrameNotes: []workflowFrameNote{{FrameAlias: "f1", VisibleFacts: []string{"画面是一块黑色方形区域。"}, Uncertain: []string{}}}, Investigations: []workflowInvestigation{}, Limitations: []domain.Limitation{}})
+			writeReviewWireArgs(w, name, workflowPlan{Title: "两个来源事实的说明", Chapters: []workflowChapter{{Title: "最初的事实", StartMS: 0}, {Title: "最后的事实", StartMS: 1000}}, FrameNotes: []workflowFrameNote{{FrameAlias: "f1", VisibleFacts: []string{"画面是一块黑色方形区域。"}, Uncertain: []string{}}}, Investigations: []workflowInvestigation{}, Limitations: []domain.Limitation{{Code: "not_observed", Message: "单帧不能证明连续变化。", CitationIDs: []string{"f1"}, SectionIDs: []string{}}}})
 		case "write_video_chapters":
 			var chapters []sectionPlan
 			_ = json.Unmarshal(payload["assigned_chapters"], &chapters)
@@ -116,6 +116,9 @@ func TestWorkflowEnginePublishesThroughCompleteBoundedStages(t *testing.T) {
 					blocks[0].Text, blocks[0].CitationIDs = "最后的来源事实24说明结尾独立的内容，与前面的开头事实分别保留，不能省略这段后半部分。", []string{"t25"}
 				}
 				body.Sections = append(body.Sections, workflowSection{ID: chapter.ID, Blocks: blocks})
+				if chapter.ID == "s1" {
+					body.Limitations = append(body.Limitations, domain.Limitation{Code: "visual_unclear", Message: "首章单帧没有可辨认文字。", SectionIDs: []string{"s1"}, CitationIDs: []string{"f1"}})
+				}
 			}
 			writeReviewWireArgs(w, name, body)
 		case workflowReviewToolName:
@@ -177,6 +180,10 @@ func TestWorkflowEnginePublishesThroughCompleteBoundedStages(t *testing.T) {
 	var count int
 	if err = s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM articles WHERE generation_run_id=$1", s.claim.Run.ID).Scan(&count); err != nil || count != 1 || sends.Load() > 20 {
 		t.Fatal("complete workflow did not publish within budget", count, sends.Load(), err)
+	}
+	var publishedLimits []domain.Limitation
+	if err = s.engine.Store.Pool.QueryRow(ctx, "SELECT content->'limitations' FROM articles WHERE generation_run_id=$1", s.claim.Run.ID).Scan(&publishedLimits); err != nil || len(publishedLimits) != 2 {
+		t.Fatal("planning/writing uncertainty did not survive publication", publishedLimits, err)
 	}
 	stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
 	if err != nil || stats.Submissions != int(sends.Load()) {

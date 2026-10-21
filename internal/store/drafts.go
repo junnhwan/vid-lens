@@ -122,7 +122,8 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 		return nil
 	}
 	previousContract, _ := cp["execution_contract"].(map[string]any)
-	workflow := previousContract["version"] == domain.ExecutionContractV10
+	previousVersion, _ := previousContract["version"].(string)
+	workflow := domain.StagedWorkflowContract(previousVersion)
 	draft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, previous.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
@@ -193,7 +194,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	// the unchanged generation spec before its first model request.
 	adapter := domain.ExecutionContractV9
 	if workflow {
-		adapter = domain.ExecutionContractV10
+		adapter = domain.CurrentExecutionContract
 		cp["workflow"] = map[string]any{"phase": "prepare", "calls": map[string]int{}}
 	}
 	cp["execution_contract"] = domain.ExecutionContract{Version: adapter, RunID: run}
@@ -213,7 +214,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 		// Only source observations and the compatible author plan cross this
 		// explicit retry. No model input, call reservation or review verdict is
 		// copied; the new execution must review the inherited draft itself.
-		_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,kind,args_hash,status,result) SELECT $2,operation_key,kind,args_hash,status,result FROM run_operations WHERE run_id=$1 AND kind='workflow_stage' AND status='completed' AND (operation_key='workflow:plan' OR operation_key LIKE 'workflow:investigate:%')`, previous.ID, run)
+		_, err = tx.Exec(ctx, `INSERT INTO run_operations(run_id,operation_key,kind,args_hash,status,result) SELECT $2,replace(operation_key,'workflow:','workflow-inherited:'),'workflow_artifact',args_hash,status,result FROM run_operations WHERE run_id=$1 AND kind='workflow_stage' AND status='completed' AND (operation_key='workflow:plan' OR operation_key LIKE 'workflow:investigate:%')`, previous.ID, run)
 		if err != nil {
 			return err
 		}

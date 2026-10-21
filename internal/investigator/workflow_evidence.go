@@ -2,15 +2,56 @@ package investigator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"vidlens/internal/domain"
 	"vidlens/internal/media"
 )
+
+// Explicit retries reuse an observation's original frame identities. Running
+// FFmpeg first would create new aliases and invalidate the inherited report.
+func (s *session) inheritedWorkflowFrames(ctx context.Context, key string) ([]string, bool, error) {
+	if !s.scopedWorkflow() {
+		return nil, false, nil
+	}
+	op, err := s.engine.Store.Operation(ctx, s.claim.Run.ID, "workflow-inherited:"+key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var saved struct {
+		FrameNotes []workflowFrameNote `json:"frame_notes"`
+	}
+	if op.Kind != "workflow_artifact" || op.Status != "completed" || workflowDecode(string(op.Result), &saved) != nil || len(saved.FrameNotes) == 0 {
+		return nil, false, domain.Err(422, "WORKFLOW_RESULT_INVALID", "继承的取证观察不完整；旧成果保留，未重新取帧替换证据。")
+	}
+	all, err := s.workflowFrames(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	ids, selected := []string{}, []workflowFrame{}
+	for _, frame := range all {
+		for _, note := range saved.FrameNotes {
+			if frame.Alias == note.FrameAlias {
+				ids = append(ids, frame.ID)
+				selected = append(selected, frame)
+				break
+			}
+		}
+	}
+	if err = validateWorkflowFrameNotes(saved.FrameNotes, selected); err != nil {
+		return nil, false, domain.Err(422, "WORKFLOW_EVIDENCE_CHANGED", "继承观察的原图身份不再可用；未用新像素代替。"+err.Error())
+	}
+	return ids, true, nil
+}
 
 type workflowPassage struct {
 	StartMS int64  `json:"start_ms"`
@@ -77,6 +118,24 @@ func (s *session) workflowEvidence(ctx context.Context, start, end int64, frameI
 		out["detail_instruction"] = s.spec.DetailPolicy.Instruction
 	}
 	return out, nil
+}
+
+// A response may both observe and cite its delivered pixels. These input
+// identities are available for validating that response before observations
+// become durable; publication still uses the observed-only citation catalog.
+func (s *session) workflowInputCatalog(ctx context.Context, frameIDs []string) (map[string]domain.Citation, error) {
+	catalog, err := s.citationCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	frames, err := s.workflowFrames(ctx, frameIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, frame := range frames {
+		catalog[frame.Alias] = domain.Citation{ID: frame.Alias, Kind: "video_frame", Label: "视频画面", SnapshotID: s.snapshot.ID, FrameID: frame.ID, TimeMS: domain.Ptr(frame.TimeMS)}
+	}
+	return workflowDeliveredCatalog(catalog, frameIDs), nil
 }
 
 // The model selects an evidence question and source range. The server owns
@@ -217,8 +276,13 @@ type workflowSection struct {
 	Blocks []workflowBlock `json:"blocks"`
 }
 
-type workflowBody struct {
+type workflowBodyV1 struct {
 	Sections []workflowSection `json:"sections"`
+}
+
+type workflowBody struct {
+	Sections    []workflowSection   `json:"sections"`
+	Limitations []domain.Limitation `json:"limitations"`
 }
 
 func workflowCanonicalSection(in workflowSection, planned sectionPlan, catalog map[string]domain.Citation) (domain.Section, error) {

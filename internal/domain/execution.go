@@ -42,9 +42,17 @@ const ExecutionContractV9 = "vidlens-execution-2026-10-21-v9"
 // server. Existing runs keep their admitted adapter and exact frozen inputs.
 const ExecutionContractV10 = "vidlens-workflow-2026-10-21-v1"
 
+// V11 separates stage roles and persists chapter-scoped uncertainty through
+// writing and revision. Admitted V10 runs retain their original wire contract.
+const ExecutionContractV11 = "vidlens-workflow-2026-10-21-v2"
+
 const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
-const CurrentExecutionContract = ExecutionContractV10
+const CurrentExecutionContract = ExecutionContractV11
+
+func StagedWorkflowContract(version string) bool {
+	return version == ExecutionContractV10 || version == ExecutionContractV11
+}
 
 type ExecutionContract struct {
 	Version string `json:"version"`

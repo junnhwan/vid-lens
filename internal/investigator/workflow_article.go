@@ -50,7 +50,18 @@ func workflowPlanTool(instruction string) (tool.EnhancedInvokableTool, error) {
 	return utils.InferEnhancedTool("plan_video_article", instruction, func(context.Context, workflowPlanWire) (*schema.ToolResult, error) { return nil, nil })
 }
 
-func validateWorkflowPlan(p *workflowPlan, duration int64, frames []workflowFrame) error {
+func validateWorkflowPlan(p *workflowPlan, duration int64, frames []workflowFrame, catalog map[string]domain.Citation) error {
+	if err := validateWorkflowPlanStructure(p, duration, frames); err != nil {
+		return err
+	}
+	limits, err := workflowLimitations(p.Limitations, map[string]bool{}, catalog, true)
+	if err == nil {
+		p.Limitations = limits
+	}
+	return err
+}
+
+func validateWorkflowPlanStructure(p *workflowPlan, duration int64, frames []workflowFrame) error {
 	if strings.TrimSpace(p.Title) == "" || len(p.Chapters) == 0 || len(p.Chapters) > 40 || len(p.Investigations) > 2 {
 		return errors.New("标题/主题章节缺失或计划超限")
 	}
@@ -67,12 +78,18 @@ func validateWorkflowPlan(p *workflowPlan, duration int64, frames []workflowFram
 	return validateWorkflowFrameNotes(p.FrameNotes, frames)
 }
 
-const workflowPlanInstructions = `通读已交付的全片原文和全部真实概览图片，返回中文标题、按来源顺序的主题章节，以及每张图片的简短可见事实。chapters按实际内容划分，不套固定章节/字数配额；每章仅返回title与start_ms，不提前写正文、摘要或key_points。start_ms为主题大致起点，第一章为0，严格递增且小于duration_ms。程序负责分配s1、s2等章节编号和连续覆盖区间。完整原文会在写作时直接交付，具体方法、例子、数字、条件与反例留给正文，不在提纲重复。
+const workflowPlanV1Instructions = `通读已交付的全片原文和全部真实概览图片，返回中文标题、按来源顺序的主题章节，以及每张图片的简短可见事实。chapters按实际内容划分，不套固定章节/字数配额；每章仅返回title与start_ms，不提前写正文、摘要或key_points。start_ms为主题大致起点，第一章为0，严格递增且小于duration_ms。程序负责分配s1、s2等章节编号和连续覆盖区间。完整原文会在写作时直接交付，具体方法、例子、数字、条件与反例留给正文，不在提纲重复。
 只有影响主要结论且概览不足时才给investigations，最多2项，明确问题和有界时间范围；无需额外取证则[]。limitations使用允许的code；section_ids暂用[]，citation_ids只能用已交付tN/fN。此轮只做计划和观察，不写正文。
 ` + workflowFrameNoteInstructions
 
-const workflowWriteInstructions = `一次完成assigned_chapters中全部指定章节，返回sections:[{id,blocks}]，只使用给定章节ID。保持其他章节不变。按detail_instruction确定详细程度，用可独立理解的中文解释，保留该主题的具体机制、例子、步骤、数字、前提、反例和不确定性，不逐句翻译或重复铺垫。段落每段围绕一个可核对的断言；列表每项、表格每行各有就近citation_ids，不能只给整块一组引用。
+const workflowPlanInstructions = "你是本次视频的主题规划者，只输出title、chapters、frame_notes、investigations、limitations。\n" + workflowPlanV1Instructions + "\n" + workflowLimitationInstructions
+
+const workflowWriteV1Instructions = `一次完成assigned_chapters中全部指定章节，返回sections:[{id,blocks}]，只使用给定章节ID。保持其他章节不变。按detail_instruction确定详细程度，用可独立理解的中文解释，保留该主题的具体机制、例子、步骤、数字、前提、反例和不确定性，不逐句翻译或重复铺垫。段落每段围绕一个可核对的断言；列表每项、表格每行各有就近citation_ids，不能只给整块一组引用。
 正文块使用type=paragraph/quote/list/code/table/figure及origin=video或background_explanation。段落用text和citation_ids；列表用items:[{text,citation_ids}]；table使用columns和rows:[{cells,citation_ids}]；代码用text、language、citation_ids。figure使用frame_ids:["fN"]、caption，必须来自本轮真实交付像素；图注说明可见内容和作用，不用旁白补画面。保留有信息价值的实际配图，不要求每章配图。不要写content/内联对象、块ID、引用字典、版本号或全文重复稿。`
+
+const workflowWriteInstructions = "你是本批图文章节的作者。只返回顶层sections与limitations，不返回审核报告。\n" + workflowWriteV1Instructions + "\n" + workflowLimitationInstructions + "每项局限的section_ids须非空且仅绑定本批assigned_chapters；不要在章节对象内嵌limitations。已知局限在saved_limitations中，新发现的仍须保存，不能只藏在说明文字里。"
+
+const workflowRevisionInstructions = "你是本次受影响章节的修订者。只返回顶层sections与limitations，不返回审核报告；不要在章节对象内嵌limitations。\n" + workflowWriteV1Instructions + "\n" + workflowLimitationInstructions
 
 func (s *session) runWorkflowArticle(ctx context.Context) error {
 	if err := s.prepareWorkflowFrames(ctx); err != nil {
@@ -86,8 +103,16 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	plan, err := workflowStage[workflowPlan](ctx, s, "plan", "plan", "plan_video_article", workflowPlanInstructions, evidence, s.cp.OverviewIDs, func(p *workflowPlan) error {
-		return validateWorkflowPlan(p, s.snapshot.DurationMS, frames)
+	catalog, err := s.workflowInputCatalog(ctx, s.cp.OverviewIDs)
+	if err != nil {
+		return err
+	}
+	planInstruction := s.workflowInstruction(workflowPlanInstructions, workflowPlanV1Instructions)
+	plan, err := workflowStage[workflowPlan](ctx, s, "plan", "plan", "plan_video_article", planInstruction, evidence, s.cp.OverviewIDs, func(p *workflowPlan) error {
+		if !s.scopedWorkflow() {
+			return validateWorkflowPlanStructure(p, s.snapshot.DurationMS, frames)
+		}
+		return validateWorkflowPlan(p, s.snapshot.DurationMS, frames, workflowDeliveredCatalog(catalog, s.cp.OverviewIDs))
 	})
 	if err != nil {
 		return err
@@ -97,13 +122,19 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 	}
 	for i, investigation := range plan.Investigations {
 		key := fmt.Sprint("investigate:", i)
-		frameIDs := []string{}
-		for j, window := range workflowInspectionWindows(investigation) {
-			result, err := s.engine.Media.Inspect(ctx, s.claim, fmt.Sprintf("workflow:%s:%d", key, j), investigation.Question, window, nil)
-			if err != nil {
-				return err
+		frameIDs, inherited, err := s.inheritedWorkflowFrames(ctx, key)
+		if err != nil {
+			return err
+		}
+		if !inherited {
+			frameIDs = []string{}
+			for j, window := range workflowInspectionWindows(investigation) {
+				result, err := s.engine.Media.Inspect(ctx, s.claim, fmt.Sprintf("workflow:%s:%d", key, j), investigation.Question, window, nil)
+				if err != nil {
+					return err
+				}
+				frameIDs = append(frameIDs, result.FrameIDs...)
 			}
-			frameIDs = append(frameIDs, result.FrameIDs...)
 		}
 		for _, id := range frameIDs {
 			if !slices.Contains(s.cp.CitationFrames, id) {
@@ -122,9 +153,13 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		evidenceInstruction := "仅依据实际像素回答本次取证问题。这些是离散采样，不能证明未采样的连续过程。不把旁白当画面。" + workflowFrameNoteInstructions
+		if s.scopedWorkflow() {
+			evidenceInstruction = "你是本次图片观察者，只返回顶层frame_notes；不返回文章或limitations，缺证写入各图片的uncertain。\n" + evidenceInstruction
+		}
 		notes, err := workflowStage[struct {
 			FrameNotes []workflowFrameNote `json:"frame_notes"`
-		}](ctx, s, key, "evidence", "record_video_evidence", "仅依据实际像素回答本次取证问题。这些是离散采样，不能证明未采样的连续过程。不把旁白当画面。"+workflowFrameNoteInstructions, payload, frameIDs, func(n *struct {
+		}](ctx, s, key, "evidence", "record_video_evidence", evidenceInstruction, payload, frameIDs, func(n *struct {
 			FrameNotes []workflowFrameNote `json:"frame_notes"`
 		}) error {
 			return validateWorkflowFrameNotes(n.FrameNotes, frames)
@@ -136,7 +171,7 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 			return err
 		}
 	}
-	catalog, err := s.citationCatalog(ctx)
+	catalog, err = s.citationCatalog(ctx)
 	if err != nil {
 		return err
 	}
@@ -187,25 +222,26 @@ func (s *session) runWorkflowArticle(ctx context.Context) error {
 			return err
 		}
 		payload["outline"], payload["assigned_chapters"] = draft.Plan, chapters
+		if s.scopedWorkflow() {
+			payload["saved_limitations"] = draft.Limitations
+		}
 		payload["observations"], err = s.observations(ctx)
 		if err != nil {
 			return err
 		}
 		allowed := workflowDeliveredCatalog(catalog, frameIDs)
 		key := fmt.Sprint("write:", offset)
-		body, err := workflowStage[workflowBody](ctx, s, key, "write", "write_video_chapters", workflowWriteInstructions, payload, frameIDs, func(b *workflowBody) error {
-			_, e := workflowCanonicalBody(*b, chapters, allowed)
+		writeInstruction := s.workflowInstruction(workflowWriteInstructions, workflowWriteV1Instructions)
+		body, err := workflowStage[workflowBody](ctx, s, key, "write", "write_video_chapters", writeInstruction, payload, frameIDs, func(b *workflowBody) error {
+			_, e := s.applyWorkflowBody(draft, *b, chapters, allowed, false, false)
 			return e
 		})
 		if err != nil {
 			return err
 		}
-		sections, err := workflowCanonicalBody(body, chapters, allowed)
+		draft, err = s.applyWorkflowBody(draft, body, chapters, allowed, false, false)
 		if err != nil {
 			return err
-		}
-		for _, section := range sections {
-			draft.Sections[section.ID] = section
 		}
 		workflowDraftCitations(&draft, catalog)
 		if err = s.workflowDraft(ctx, key, draft); err != nil {
@@ -387,20 +423,24 @@ func (s *session) reviseWorkflowArticle(ctx context.Context, draft articleDraft,
 		return draft, err
 	}
 	payload["outline"], payload["assigned_chapters"], payload["issues"], payload["saved_sections"] = draft.Plan, affected, issues, draft.Sections
+	if s.scopedWorkflow() {
+		payload["saved_limitations"], payload["replace_global_limitations"] = draft.Limitations, all
+	}
 	allowed := workflowDeliveredCatalog(catalog, frames)
-	body, err := workflowStage[workflowBody](ctx, s, "revision", "revision", "revise_video_chapters", workflowWriteInstructions+"\n这是本轮唯一一次语义修订。先回读issues对应原文和实际像素，修正全部受影响字段，保留仍有依据的细节。不确定内容明确限定；不能删去整个主题来回避问题。", payload, frames, func(b *workflowBody) error {
-		_, e := workflowCanonicalBody(*b, affected, allowed)
+	instruction := s.workflowInstruction(workflowRevisionInstructions, workflowWriteV1Instructions) + "\n这是本轮唯一一次语义修订。先回读issues对应原文和实际像素，修正全部受影响字段，保留仍有依据的细节。不确定内容明确限定；不能删去整个主题来回避问题。"
+	if s.scopedWorkflow() {
+		instruction += "本次limitations替换受影响章节的局限，返回这些章节仍然存在和新发现的全部局限；不影响其他章节。replace_global_limitations=false时每项section_ids非空且只用本批章节；为true时还须返回仍然存在的全局局限，允许其section_ids=[]。"
+	}
+	body, err := workflowStage[workflowBody](ctx, s, "revision", "revision", "revise_video_chapters", instruction, payload, frames, func(b *workflowBody) error {
+		_, e := s.applyWorkflowBody(draft, *b, affected, allowed, true, all)
 		return e
 	})
 	if err != nil {
 		return draft, err
 	}
-	sections, err := workflowCanonicalBody(body, affected, allowed)
+	draft, err = s.applyWorkflowBody(draft, body, affected, allowed, true, all)
 	if err != nil {
 		return draft, err
-	}
-	for _, section := range sections {
-		draft.Sections[section.ID] = section
 	}
 	workflowDraftCitations(&draft, catalog)
 	err = s.workflowDraft(ctx, "revision", draft)

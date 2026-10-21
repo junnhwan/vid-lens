@@ -47,11 +47,37 @@ func (s *session) runWorkflowAnswer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	written, err := workflowStage[workflowAnswerDraft](ctx, s, "answer", "answer", "answer_video_question", "依据本次问题、原始全片文字及实际交付图片作答。summary简短，blocks给具体解释与就近引用，格式与图文章节相同。图像问题必须从实际像素观察。published_article与prior_conversation只作导航，不能替代来源。视频未提供依据则明确insufficient_evidence；与当前视频无关则out_of_scope，不编造答案。"+workflowFrameNoteInstructions, payload, ids, func(a *workflowAnswerDraft) error {
+	catalog, err := s.workflowInputCatalog(ctx, ids)
+	if err != nil {
+		return err
+	}
+	allowed := workflowDeliveredCatalog(catalog, ids)
+	sectionIDs := map[string]bool{}
+	for _, section := range s.article.Sections {
+		sectionIDs[section.ID] = true
+	}
+	instruction := "依据本次问题、原始全片文字及实际交付图片作答。summary简短，blocks给具体解释与就近引用，格式与图文章节相同。图像问题必须从实际像素观察。published_article与prior_conversation只作导航，不能替代来源。视频未提供依据则明确insufficient_evidence；与当前视频无关则out_of_scope，不编造答案。" + workflowFrameNoteInstructions
+	if s.scopedWorkflow() {
+		instruction = "你是当前视频问题的回答者，只返回kind、summary、blocks、frame_notes、limitations；不返回全片文章或审核报告。\n" + instruction + "\n" + workflowLimitationInstructions + "本次section_ids可用已发布文章的真实章节ID，问题整体局限可用[]。"
+	}
+	written, err := workflowStage[workflowAnswerDraft](ctx, s, "answer", "answer", "answer_video_question", instruction, payload, ids, func(a *workflowAnswerDraft) error {
 		if a.Summary == "" || len(a.Blocks) == 0 || a.Kind != "grounded" && a.Kind != "insufficient_evidence" && a.Kind != "out_of_scope" {
 			return errors.New("回答kind、summary或blocks无效")
 		}
-		return validateWorkflowFrameNotes(a.FrameNotes, frames)
+		if e := validateWorkflowFrameNotes(a.FrameNotes, frames); e != nil {
+			return e
+		}
+		if s.scopedWorkflow() {
+			if _, e := workflowCanonicalSection(workflowSection{ID: "answer", Blocks: a.Blocks}, sectionPlan{ID: "answer", Title: "回答"}, allowed); e != nil {
+				return e
+			}
+			limits, e := workflowLimitations(a.Limitations, sectionIDs, allowed, true)
+			if e != nil {
+				return e
+			}
+			a.Limitations = limits
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -59,7 +85,7 @@ func (s *session) runWorkflowAnswer(ctx context.Context) error {
 	if err = s.saveWorkflowFrameNotes(ctx, "answer", written.FrameNotes); err != nil {
 		return err
 	}
-	catalog, err := s.citationCatalog(ctx)
+	catalog, err = s.citationCatalog(ctx)
 	if err != nil {
 		return err
 	}

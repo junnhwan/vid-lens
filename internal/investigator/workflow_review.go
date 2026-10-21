@@ -131,9 +131,13 @@ func workflowArticleUnits(a domain.Article, catalog map[string]domain.Citation) 
 
 func (s *session) workflowReviewKey(ctx context.Context, a domain.Article, unit reviewUnit, outline any, catalog map[string]domain.Citation) (string, error) {
 	context := any(workflowArticleCandidate(a))
+	limits := a.Limitations
 	for i, section := range a.Sections {
 		if strings.HasPrefix(unit.Path+"/", fmt.Sprintf("/sections/%d/", i)) {
 			context = section
+			if s.scopedWorkflow() {
+				limits = workflowSectionLimitations(a.Limitations, section.ID)
+			}
 			break
 		}
 	}
@@ -152,7 +156,27 @@ func (s *session) workflowReviewKey(ctx context.Context, a domain.Article, unit 
 	if s.turn != nil {
 		scope["question"], scope["question_context"] = s.turn.Question, s.turn.Context
 	}
-	return "workflow-review:" + store.Hash(map[string]any{"contract": domain.ExecutionContractV10, "unit": unit, "context": context, "outline": outline, "limitations": a.Limitations, "source": source, "bindings": bindings, "frames": frames, "model_revision": s.spec.Model.RevisionID, "config_id": s.claim.Run.ConfigID, "scope": scope}), nil
+	contract := domain.ExecutionContractV10
+	if s.scopedWorkflow() {
+		contract = domain.ExecutionContractV11
+	}
+	return "workflow-review:" + store.Hash(map[string]any{"contract": contract, "unit": unit, "context": context, "outline": outline, "limitations": limits, "source": source, "bindings": bindings, "frames": frames, "model_revision": s.spec.Model.RevisionID, "config_id": s.claim.Run.ConfigID, "scope": scope}), nil
+}
+
+func workflowSectionLimitations(limits []domain.Limitation, section string) []domain.Limitation {
+	out := []domain.Limitation{}
+	for _, limit := range limits {
+		limit.CitationIDs = workflowUniqueIDs(limit.CitationIDs)
+		if len(limit.SectionIDs) == 0 {
+			limit.SectionIDs = []string{}
+			out = append(out, limit)
+		} else if slices.Contains(limit.SectionIDs, section) {
+			limit.SectionIDs = []string{section}
+			out = append(out, limit)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Limitation) int { return strings.Compare(store.Hash(a), store.Hash(b)) })
+	return out
 }
 
 func (s *session) workflowSavedVerdict(ctx context.Context, key string, unit reviewUnit) (*reviewUnitResult, error) {
@@ -214,6 +238,15 @@ func (s *session) workflowReviewBatch(ctx context.Context, a domain.Article, out
 		}
 		id := "wr_" + store.Hash(map[string]any{"units": pending, "keys": keys})[:24]
 		payload["request_id"], payload["units"], payload["section_context"], payload["outline"] = id, pending, contexts, outline
+		if s.scopedWorkflow() {
+			// Each local judgment receives its own scoped uncertainty in context;
+			// global work receives the complete candidate through its unit value.
+			scoped := map[string][]domain.Limitation{}
+			for _, section := range contexts {
+				scoped[section.ID] = workflowSectionLimitations(a.Limitations, section.ID)
+			}
+			payload["section_limitations"] = scoped
+		}
 		if s.turn != nil {
 			payload["question"], payload["question_context"] = s.turn.Question, s.turn.Context
 		}
