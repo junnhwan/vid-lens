@@ -208,7 +208,7 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 			return nil, nil, nil, e
 		}
 		if mode == "review" {
-			if e = s.splitLoopReview(*p.Scope); e != nil {
+			if e = s.splitLoopReview(ctx, *p.Scope); e != nil {
 				return nil, nil, nil, e
 			}
 			return s.prepareLoopCall(ctx)
@@ -287,6 +287,14 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 				a.Sections = append(a.Sections, sec)
 			}
 		}
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && !p.Scope.Global {
+			a.Limitations = nil
+			for _, limitation := range d.Article.Limitations {
+				if len(limitation.SectionIDs) == 0 || slices.ContainsFunc(limitation.SectionIDs, func(id string) bool { return slices.Contains(p.Scope.SectionIDs, id) }) {
+					a.Limitations = append(a.Limitations, limitation)
+				}
+			}
+		}
 		if p.Scope.Global && len(p.Scope.SourceIDs) == 0 {
 			payload["global_relations_only"] = true
 			headings := []any{}
@@ -295,6 +303,12 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			}
 			payload["candidate_structure"] = headings
 			a.Sections = nil
+			if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+				// These assertions were assigned to the source scopes above. The
+				// final pass checks relations using their completed maps, not facts
+				// whose originals/pixels are intentionally absent from this pass.
+				a.Limitations = nil
+			}
 			records := []domain.ArticleReviewRecord{}
 			for _, key := range l.ReviewKeys {
 				op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, key)
@@ -449,6 +463,11 @@ func (s *session) loopReviewBindings(a domain.Article) (map[string]any, error) {
 			}
 		}
 	}
+	for _, limitation := range a.Limitations {
+		for _, id := range limitation.CitationIDs {
+			used[id] = true
+		}
+	}
 	bindings := map[string]any{}
 	for id := range used {
 		citation, ok := a.Citations[id]
@@ -564,12 +583,19 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 		scope.SourceIDs = append(scope.SourceIDs, t.ID)
 	}
 	scope.ID = store.Hash(scope)[:24]
-	// Try one integrated review first. Splitting occurs only after measured
-	// input capacity says this complete task cannot fit.
+	// Try an integrated review until measured capacity/response failures teach
+	// a smaller work size. Later revisions reuse that size, never old approvals.
 	l := s.cp.ArticleLoop
 	l.Scopes = []domain.ArticleReviewScope{scope}
 	for i := 0; i < len(l.Scopes); i++ {
 		task := l.Scopes[i]
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && l.ReviewSourceLimit > 0 && len(task.SourceIDs) > l.ReviewSourceLimit {
+			if err := s.splitLoopReviewAt(ctx, i); err != nil {
+				return nil, err
+			}
+			i--
+			continue
+		}
 		p := articleLoopCall{Mode: "review", Scope: &task, Frames: task.FrameIDs, OutputTokens: l.OutputTokens}
 		for j, t := range s.transcript {
 			if slices.Contains(task.SourceIDs, t.ID) {
@@ -595,7 +621,7 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 			if !errors.As(e, &problem) || problem.Code != "RESOURCE_LIMIT_EXCEEDED" {
 				return nil, e
 			}
-			if e = s.splitLoopReviewAt(i); e != nil {
+			if e = s.splitLoopReviewAt(ctx, i); e != nil {
 				return nil, e
 			}
 			i--
@@ -606,14 +632,14 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 	}
 	return append([]domain.ArticleReviewScope{}, l.Scopes...), nil
 }
-func (s *session) splitLoopReview(scope domain.ArticleReviewScope) error {
+func (s *session) splitLoopReview(ctx context.Context, scope domain.ArticleReviewScope) error {
 	i := slices.IndexFunc(s.cp.ArticleLoop.Scopes, func(v domain.ArticleReviewScope) bool { return v.ID == scope.ID })
 	if i < 0 {
 		return loopStop("INTERNAL_FAILURE", "核验范围不在待完成账中")
 	}
-	return s.splitLoopReviewAt(i)
+	return s.splitLoopReviewAt(ctx, i)
 }
-func (s *session) splitLoopReviewAt(index int) error {
+func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	l := s.cp.ArticleLoop
 	scope := l.Scopes[index]
 	left, right := scope, scope
@@ -622,6 +648,21 @@ func (s *session) splitLoopReviewAt(index int) error {
 		mid := len(scope.SourceIDs) / 2
 		left.SourceIDs = append([]string{}, scope.SourceIDs[:mid]...)
 		right.SourceIDs = append([]string{}, scope.SourceIDs[mid:]...)
+		if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			_, draft, err := s.loadLoopDraft(ctx)
+			if err != nil {
+				return err
+			}
+			left = loopScopeChapters(left, draft.Article)
+			right = loopScopeChapters(right, draft.Article)
+			for _, ids := range [][3][]string{{scope.SectionIDs, left.SectionIDs, right.SectionIDs}, {scope.FrameIDs, left.FrameIDs, right.FrameIDs}} {
+				for _, id := range ids[0] {
+					if !slices.Contains(ids[1], id) && !slices.Contains(ids[2], id) {
+						return loopStop("ARTICLE_EVIDENCE_CHANGED", "拆分核验丢失了候选章节或画面义务")
+					}
+				}
+			}
+		}
 	case len(scope.SectionIDs) > 1:
 		mid := len(scope.SectionIDs) / 2
 		left.SectionIDs = append([]string{}, scope.SectionIDs[:mid]...)

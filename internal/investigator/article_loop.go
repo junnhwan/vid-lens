@@ -56,6 +56,7 @@ type articleLoopState struct {
 	OutputTokens        int                                    `json:"output_tokens"`
 	SourceChars         int                                    `json:"source_chars"`
 	ReviewReserve       int                                    `json:"review_reserve"`
+	ReviewSourceLimit   int                                    `json:"review_source_limit,omitempty"`
 	OutputSections      int                                    `json:"output_sections"`
 	InspectionKeys      []string                               `json:"inspection_keys,omitempty"`
 }
@@ -85,6 +86,9 @@ func (s *session) validateArticleLoopState() error {
 	}
 	if l.Pending != nil && (l.Pending.Slot != s.cp.Calls-1 || l.Pending.Slot < 0 || (l.Pending.Mode != "author" && l.Pending.Mode != "review")) {
 		return domain.Err(422, "INTERNAL_FAILURE", "文章循环待完成调用身份损坏。")
+	}
+	if l.ReviewSourceLimit < 0 {
+		return domain.Err(422, "INTERNAL_FAILURE", "文章核验工作范围损坏。")
 	}
 	return nil
 }
@@ -266,7 +270,13 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 		l.OutputSections = max(1, l.OutputSections/2)
 		// A truncated review is split as a scope, never routed to the author.
 		if p.Mode == "review" {
-			if err := s.splitLoopReview(*p.Scope); err != nil {
+			if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && len(p.Scope.SourceIDs) > 1 {
+				limit := (len(p.Scope.SourceIDs) + 1) / 2
+				if l.ReviewSourceLimit == 0 || limit < l.ReviewSourceLimit {
+					l.ReviewSourceLimit = limit
+				}
+			}
+			if err := s.splitLoopReview(ctx, *p.Scope); err != nil {
 				return err
 			}
 		}
@@ -277,7 +287,7 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 	if code == "RESOURCE_LIMIT_EXCEEDED" || code == "MODEL_CONTEXT_EXCEEDED" {
 		if p.Mode == "review" {
 			l.NoProgress++
-			return s.splitLoopReview(*p.Scope)
+			return s.splitLoopReview(ctx, *p.Scope)
 		}
 		if n := len(p.Sources); n > 0 {
 			originals := s.loopOriginals(p.Sources)

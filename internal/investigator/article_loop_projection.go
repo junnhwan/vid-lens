@@ -9,6 +9,61 @@ import (
 	"vidlens/internal/domain"
 )
 
+// Keep complete chapters linked to this source range. Unsourced/background or
+// pixel-only chapters remain in both halves, so partitioning cannot hide them.
+func loopScopeChapters(scope domain.ArticleReviewScope, a domain.Article) domain.ArticleReviewScope {
+	allowed := scope.SectionIDs
+	scope.SectionIDs = nil
+	knownFrames, selectedFrames := map[string]bool{}, map[string]bool{}
+	for _, section := range a.Sections {
+		if !slices.Contains(allowed, section.ID) {
+			continue
+		}
+		originals := []string{}
+		frames := []string{}
+		collect := func(refs []string) {
+			for _, ref := range refs {
+				citation := a.Citations[ref]
+				for _, id := range citation.SegmentIDs {
+					originals = appendUnique(originals, id)
+				}
+				if citation.FrameID != "" {
+					frames = appendUnique(frames, citation.FrameID)
+				}
+			}
+		}
+		for _, block := range section.Blocks {
+			collect(blockCitationIDs(block))
+			for _, id := range block.FrameIDs {
+				frames = appendUnique(frames, id)
+			}
+		}
+		for _, limitation := range a.Limitations {
+			if slices.Contains(limitation.SectionIDs, section.ID) {
+				collect(limitation.CitationIDs)
+			}
+		}
+		for _, id := range frames {
+			knownFrames[id] = true
+		}
+		if len(originals) == 0 || slices.ContainsFunc(originals, func(id string) bool { return slices.Contains(scope.SourceIDs, id) }) {
+			scope.SectionIDs = append(scope.SectionIDs, section.ID)
+			for _, id := range frames {
+				selectedFrames[id] = true
+			}
+		}
+	}
+	frames := []string{}
+	for _, id := range scope.FrameIDs {
+		// An unassigned pixel obligation must not disappear during partitioning.
+		if !knownFrames[id] || selectedFrames[id] {
+			frames = append(frames, id)
+		}
+	}
+	scope.FrameIDs = frames
+	return scope
+}
+
 // A retried draft retains old fN citation keys but may copy only some frames.
 // Present immutable frame IDs throughout review instead of two conflicting fN
 // namespaces. This is a detached view; the frozen article/hash never changes.
