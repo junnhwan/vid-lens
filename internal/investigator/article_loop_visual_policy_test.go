@@ -3,6 +3,7 @@ package investigator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -17,10 +18,23 @@ import (
 // A useful transcript must survive publication without decorative overview
 // images. Exercise freeze, independent review, Publish and the immutable read.
 func TestArticleLoopTextOnlyPublication(t *testing.T) {
+	testArticleLoopTextOnlyPublication(t, false)
+}
+
+func TestArticleLoopToolCommentaryDoesNotReplaceValidation(t *testing.T) {
+	testArticleLoopTextOnlyPublication(t, true)
+}
+
+func testArticleLoopTextOnlyPublication(t *testing.T, commentary bool) {
+	t.Helper()
 	var calls atomic.Int32
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		p := loopPayload(t, r)
 		n := calls.Add(1)
+		if commentary {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: %s\n\n", domain.JSON(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": "旁白声称已完成；不能以此跳过实际写入和独立核验。"}}}}))
+		}
 		if p["scope"] != nil {
 			report := loopGoodReport(t, p)
 			if len(report.VisualObservations) != 0 {

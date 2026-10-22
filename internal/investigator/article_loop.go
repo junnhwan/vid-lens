@@ -301,7 +301,17 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 
 func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg *schema.Message) (bool, error) {
 	l := s.cp.ArticleLoop
-	name, raw, err := loopArguments(msg)
+	action := msg
+	if msg != nil && s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		// Commentary has no authority to save or approve anything. A complete
+		// tool action still goes through all argument and business validation;
+		// don't spend another model call merely to remove accompanying prose.
+		// Keep the original response intact in the operation ledger.
+		copy := *msg
+		copy.Content = ""
+		action = &copy
+	}
+	name, raw, err := loopArguments(action)
 	if err != nil {
 		l.Feedback = domain.JSON(map[string]any{"failure": "envelope", "detail": err.Error(), "action": "Return one complete named tool call; no partial content was saved."})
 		if msg != nil && len(msg.ToolCalls) == 1 {
