@@ -138,7 +138,7 @@ export function Lightbox({
             <FrameThumb frame={frame} onBroken={onBroken} />
           </div>
           <div className="lb-meta">
-            <p id="lb-caption">{frame.caption || formatClock(frame.time_ms)}</p>
+            <p id="lb-caption"><time className="lb-timestamp">{formatClock(frame.time_ms)}</time>{frame.caption ? <span>{frame.caption}</span> : null}</p>
             <p id="lb-count" className="lb-count">
               {index + 1} / {frames.length}
             </p>

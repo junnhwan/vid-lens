@@ -7,6 +7,34 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// Read only a complete top-level public label from a bounded stream prefix.
+// Never inspect reasoning text or mistake nested article titles for metadata.
+func streamedActivityTitle(prefix string) string {
+	d := json.NewDecoder(strings.NewReader(prefix))
+	start, err := d.Token()
+	if err != nil || start != json.Delim('{') {
+		return ""
+	}
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return ""
+		}
+		var value json.RawMessage
+		if d.Decode(&value) != nil {
+			return ""
+		}
+		if key == "activity_title" {
+			var title string
+			if json.Unmarshal(value, &title) != nil {
+				return ""
+			}
+			return publicTitle(title, "")
+		}
+	}
+	return ""
+}
+
 func (s *session) modelActivity() (string, string) {
 	if s.articleCall != nil {
 		if s.articleCall.Mode == "review" {

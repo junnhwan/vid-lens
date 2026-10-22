@@ -462,8 +462,18 @@ func activitySummary(steps []domain.Step, history string, expiry *time.Time, bas
 		}
 	}
 	modelCalls, submissions := 0, 0
+	visibleFrames := []domain.Frame{}
+	framePositions := map[string]int{}
 	var plan *domain.ExecutionPlan
 	for _, step := range steps {
+		for _, frame := range step.Frames {
+			if index, exists := framePositions[frame.ID]; exists {
+				visibleFrames[index] = frame
+			} else {
+				framePositions[frame.ID] = len(visibleFrames)
+				visibleFrames = append(visibleFrames, frame)
+			}
+		}
 		if step.Kind == "model_response" {
 			modelCalls++
 		}
@@ -478,7 +488,7 @@ func activitySummary(steps []domain.Step, history string, expiry *time.Time, bas
 	if submissions > 0 {
 		sends = submissions
 	}
-	return map[string]any{"current_step_id": current, "recent_steps": recent, "has_more": len(recent) < n, "history_url": base + "/activity", "history_status": history, "history_expires_at": expiry, "model_calls": modelCalls, "model_submissions": sends, "plan": plan}
+	return map[string]any{"current_step_id": current, "recent_steps": recent, "frames": visibleFrames, "has_more": len(recent) < n, "history_url": base + "/activity", "history_status": history, "history_expires_at": expiry, "model_calls": modelCalls, "model_submissions": sends, "plan": plan}
 }
 func (s *Store) requestView(ctx context.Context, q Querier, session, id string) (map[string]any, Position, error) {
 	var pos Position

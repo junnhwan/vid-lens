@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react"
-import type { ActivityStep, Frame, Range, RequestView } from "../contract/types"
-import { formatClock, formatDuration, formatRange, platformLabel, provenanceNote } from "../contract/text"
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react"
+import type { ActivityStep, Frame, RequestView } from "../contract/types"
+import { formatClock, formatDuration, platformLabel, provenanceNote } from "../contract/text"
 import { describeRequest } from "../app/labels"
 import { mergeRanges, parseTranscription, quietNote, waitClock, anchoredElapsed, serverElapsed } from "../app/progress"
 import { EASE, flyStage, prefersReduced, slideTitle } from "./motion"
 import { ActivityList } from "./ActivityList"
+import { FrameTimeline } from "./FrameTimeline"
 import { FrameThumb } from "./FrameThumb"
 import { ModelIdentity } from "./ModelIdentity"
 import { ExecutionPlan } from "./ExecutionPlan"
@@ -69,13 +70,16 @@ export function RunView({
   const copy = describeRequest(view, current, holding, reconnecting)
   const stopped = view?.request.status === "failed" || view?.request.status === "canceled"
   const source = view?.source
-  const shown: Frame[] = []
+  const shown: Frame[] = [...(view?.activity.frames ?? [])]
   for (const step of steps) {
     for (const frame of step.frames ?? []) {
-      if (!shown.some((item) => item.id === frame.id)) shown.push(frame)
+      const prior = shown.findIndex((item) => item.id === frame.id)
+      if (prior >= 0) shown[prior] = frame
+      else shown.push(frame)
     }
   }
-  const latest = shown.at(-1) ?? null
+  const lastViewedId = [...steps].reverse().find((step) => step.frames?.length)?.frames.at(-1)?.id
+  const latest = shown.find((frame) => frame.id === lastViewedId) ?? shown.at(-1) ?? null
   const latestIndex = latest ? shown.findIndex((item) => item.id === latest.id) : -1
   const freshFrame = latest ? latest.id === freshFrameId : false
   const transcribed = current && copy.title === "正在转写音频" ? parseTranscription(current.title) : null
@@ -374,7 +378,7 @@ export function RunView({
               </button>
             </p>
           ) : null}
-          <FilmRuler
+          <FrameTimeline
             duration={source?.duration_ms}
             ranges={ranges}
             frames={shown}
@@ -384,6 +388,7 @@ export function RunView({
             live={copy.busy}
             latestId={latest?.id ?? null}
             onOpenFrame={openAt}
+            onBroken={onBroken}
           />
           <p className="leave-note">{stopped ? "这次处理已停止。已完成的过程记录仍可查看。" : "可以离开这个页面，处理会在后台继续。"}</p>
         </aside>
@@ -506,106 +511,6 @@ function Scene({
         {live ? <span className="vf-sweep" aria-hidden="true" /> : null}
         {live && phaseId ? <span className="vf-phase-sweep" key={phaseId} aria-hidden="true" /> : null}
         {children}
-      </div>
-    </div>
-  )
-}
-
-function FilmRuler({
-  duration,
-  ranges,
-  frames,
-  activeRange,
-  progress,
-  stopped,
-  live,
-  latestId,
-  onOpenFrame,
-}: {
-  duration: number | null | undefined
-  ranges: Range[]
-  frames: Frame[]
-  activeRange: Range | null
-  progress: number | null
-  stopped: boolean
-  live: boolean
-  latestId: string | null
-  onOpenFrame: (frame: Frame, origin: HTMLElement) => void
-}) {
-  const total = duration && duration > 0 ? duration : Math.max(0, ...ranges.map((range) => range.end_ms), ...frames.map((frame) => frame.time_ms))
-  if (!total) return null
-  const percent = (ms: number) => Math.max(0, Math.min(100, (ms / total) * 100))
-  const covered = ranges.reduce((sum, range) => sum + Math.max(0, range.end_ms - range.start_ms), 0)
-  const note =
-    progress != null
-      ? `正在转写 ${Math.round(progress * 100)}%`
-      : activeRange
-        ? `${stopped ? "停在" : "正在看"} ${formatRange(activeRange)}`
-        : covered
-          ? `已看 ${formatClock(covered)} / ${formatClock(total)}`
-          : frames.length
-            ? `全片 ${formatClock(total)} · ${frames.length} 帧已标记`
-            : `全片 ${formatClock(total)}`
-  return (
-    <div
-      className="film-ruler"
-      data-stopped={stopped ? "true" : undefined}
-      data-live={live ? "true" : undefined}
-      role="group"
-      aria-label={`视频时间轴，${note}`}
-    >
-      <div className="ruler-head">
-        <span className="ruler-kicker">视频时间轴</span>
-        <span className="ruler-note">{note}</span>
-      </div>
-      <div className="ruler-track">
-        <span className="ruler-perf" aria-hidden="true" />
-        {ranges.map((range, index) => (
-          <span
-            className="ruler-range"
-            key={`${range.start_ms}-${range.end_ms}-${index}`}
-            style={{
-              left: `${percent(range.start_ms)}%`,
-              width: `${Math.max(0.4, percent(range.end_ms) - percent(range.start_ms))}%`,
-            }}
-          />
-        ))}
-        {progress != null ? <span className="ruler-progress" style={{ width: `${Math.round(progress * 100)}%` }} /> : null}
-        {activeRange ? (
-          <span
-            className="ruler-now"
-            style={{
-              left: `${percent(activeRange.start_ms)}%`,
-              width: `${Math.max(0.6, percent(activeRange.end_ms) - percent(activeRange.start_ms))}%`,
-            }}
-          >
-            <i className="ruler-beam" aria-hidden="true" />
-          </span>
-        ) : null}
-        {frames.map((frame, index) => (
-          <button
-            type="button"
-            className="ruler-pin"
-            key={frame.id}
-            data-latest={frame.id === latestId ? "true" : undefined}
-            style={
-              {
-                left: `${Math.max(1, Math.min(99, percent(frame.time_ms)))}%`,
-                "--pin-delay": `${Math.min(index * 45, 360)}ms`,
-              } as CSSProperties
-            }
-            title={`${formatClock(frame.time_ms)} ${frame.caption}`}
-            aria-label={`打开 ${formatClock(frame.time_ms)} 的画面`}
-            onClick={(event) => onOpenFrame(frame, event.currentTarget)}
-          >
-            <span aria-hidden="true" />
-          </button>
-        ))}
-      </div>
-      <div className="ruler-scale" aria-hidden="true">
-        <span>00:00</span>
-        <span>{formatClock(total / 2)}</span>
-        <span>{formatClock(total)}</span>
       </div>
     </div>
   )

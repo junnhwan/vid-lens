@@ -173,7 +173,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
       stepsRef.current = merged
       return merged
     })
-    absorb(normalized.flatMap((step) => step.frames))
+    absorb([...(view.activity.frames ?? []), ...normalized.flatMap((step) => step.frames)])
     if (view.request.status === "completed" && view.actions.can_read_article) void loadArticle(view.request.id, false)
     if (view.request.status !== "completed") return
     setPhase((current) => {
@@ -484,7 +484,7 @@ export function useVisitor(requestId: string | undefined, navigate: (path: strin
     setLink,
     linkError,
     submitting,
-    request,
+    request: request ? { ...request, activity: { ...request.activity, frames: request.activity.frames?.map((frame) => frameMap.get(frame.id) ?? frame) } } : request,
     steps: resolvedSteps,
     article,
     articleError: articleError || pageError,

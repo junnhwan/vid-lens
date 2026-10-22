@@ -379,6 +379,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		frames = append(frames, map[string]any{"alias": fmt.Sprint("f", index+1), "id": id, "time_ms": a.TimeMS, "sha256": a.SHA256})
 	}
 	payload["delivered_pixels"] = frames
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		system += "\n每次工具调用先输出activity_title：用简短中文概括本次具体行动，点明主题、章节或画面，避免重复通用标题。只描述可公开的行动意图，不输出内部推理，不预先宣称保存成功或核验通过。"
+	}
 	input := []*schema.Message{schema.SystemMessage(system), schema.UserMessage(string(domain.JSON(payload)))}
 	var candidatePayload map[string]any
 	if p.Mode == "review" && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
@@ -739,6 +742,22 @@ func loopWriteFeedback(result any, raw []byte) json.RawMessage {
 	feedback, ok := result.(map[string]any)
 	if !ok {
 		return domain.JSON(result)
+	}
+	if cause, rejected := feedback["error"]; rejected {
+		// An atomic rejection has no persisted receipt. Keep both its precise
+		// cause and original bounded action, so the next author can fix it.
+		detail := fmt.Sprint(cause)
+		if identity, ok := feedback["identity"]; ok {
+			detail += ": " + fmt.Sprint(identity)
+		}
+		repair := loopAuthorFailureFeedback("write_rejected", errors.New(detail), loopSaveTool, raw)
+		var out map[string]any
+		_ = json.Unmarshal(repair, &out)
+		for k, v := range feedback {
+			out[k] = v
+		}
+		out["action"] = "This action was not saved. Correct the reported error at the authoritative draft version. For creation supply key only; for replacement supply section_id only and omit key. Each section identity occurs once per action. Keep all already accepted content."
+		return domain.JSON(out)
 	}
 	receipt, ok := feedback["receipt"].(*loopReceipt)
 	if !ok || receipt == nil || len(receipt.Rejected) == 0 {

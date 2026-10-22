@@ -281,7 +281,8 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info.Name == loopSaveTool {
+		v2 := s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2
+		if info.Name == loopSaveTool || v2 {
 			// The semantic input type owns the shape; the canonical domain owns
 			// the accepted limitation vocabulary. Publish that same vocabulary
 			// in the actual wire schema, rather than rejecting hidden enum values.
@@ -293,9 +294,21 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			if err = json.Unmarshal(domain.JSON(sc), &root); err != nil {
 				return nil, err
 			}
-			loopLimitationSchema(root)
-			if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-				loopSemanticSchema(root)
+			if info.Name == loopSaveTool {
+				loopLimitationSchema(root)
+				if v2 {
+					loopSemanticSchema(root)
+				}
+			}
+			if v2 {
+				props, _ := root["properties"].(map[string]any)
+				if props == nil {
+					props = map[string]any{}
+					root["properties"] = props
+				}
+				props["activity_title"] = map[string]any{"type": "string", "maxLength": 60, "description": "面向用户的本次具体动作小标题，放在第一个字段；点明正在处理的主题、章节或画面，不宣称保存成功或核验通过。"}
+				required, _ := root["required"].([]any)
+				root["required"] = append(required, "activity_title")
 			}
 			var projected jsonschema.Schema
 			if err = json.Unmarshal(domain.JSON(root), &projected); err != nil {
@@ -316,6 +329,15 @@ func loopSemanticSchema(node map[string]any) {
 	props, _ := node["properties"].(map[string]any)
 	if props != nil {
 		node["additionalProperties"] = false
+	}
+	if props["key"] != nil && props["section_id"] != nil && props["content"] != nil {
+		node["oneOf"] = []any{
+			map[string]any{"required": []string{"key"}, "not": map[string]any{"required": []string{"section_id"}}},
+			map[string]any{"required": []string{"section_id"}, "not": map[string]any{"required": []string{"key"}}},
+		}
+		for _, name := range []string{"key", "section_id"} {
+			props[name].(map[string]any)["minLength"] = 1
+		}
 	}
 	if props["background"] != nil && props["figure"] != nil && props["quote"] != nil {
 		constructors := []string{}

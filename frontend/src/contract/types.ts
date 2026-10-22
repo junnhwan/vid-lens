@@ -170,6 +170,7 @@ export interface ExecutionPlan {
 }
 
 export interface ActivitySummary {
+  frames?: Frame[]
   attempts?: { open_ended?: boolean; run_id: string; request_id: string; current: boolean; status: string; saved_sections: number; planned_sections: number; inherited_sections: number; model_calls: number; model_submissions: number; history_url: string }[]
   total_model_calls?: number
   total_model_submissions?: number

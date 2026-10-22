@@ -360,6 +360,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			}
 			if err == nil {
 				x := domain.Step{ID: step.ID + "_send_" + strconv.Itoa(submission), Kind: "model_submission", ModelCall: step.ModelCall, Submission: submission, Title: "模型调用 " + strconv.Itoa(step.ModelCall) + " · 发送 " + strconv.Itoa(submission), Phase: step.Phase, Status: "running", FrameIDs: []string{}, StartedAt: domain.Ptr(time.Now().UTC())}
+				if s.articleCall != nil {
+					x.FrameIDs = append(x.FrameIDs, s.articleCall.Frames...)
+				}
 				x, err = s.engine.Store.Step(actx, s.claim, x)
 				transport = &x
 				submitErr = err
@@ -367,8 +370,11 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return err
 		})
 		reportedActivity := ""
-		sub = context.WithValue(sub, modelActivityKey{}, func(name string) error {
+		sub = context.WithValue(sub, modelActivityKey{}, func(name, intent string) error {
 			title := streamActivity(name)
+			if intent != "" {
+				title = "准备：" + intent
+			}
 			if title == "" || reportedActivity == title {
 				return nil
 			}

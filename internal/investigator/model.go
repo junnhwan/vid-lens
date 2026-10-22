@@ -355,6 +355,7 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 	chunks := []*schema.Message{}
 	complete := false
 	bytes := 0
+	activityName, activityPrefix, activityIntent := "", "", ""
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -367,9 +368,20 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 			continue
 		}
 
-		if activity, ok := call.Value(modelActivityKey{}).(func(string) error); ok {
+		if activity, ok := call.Value(modelActivityKey{}).(func(string, string) error); ok {
 			for _, tc := range chunk.ToolCalls {
-				if err := activity(tc.Function.Name); err != nil {
+				if tc.Index != nil && *tc.Index != 0 {
+					continue
+				}
+				if tc.Function.Name != "" {
+					activityName = tc.Function.Name
+				}
+				if activityIntent == "" && len(activityPrefix) < 4096 {
+					remaining := 4096 - len(activityPrefix)
+					activityPrefix += tc.Function.Arguments[:min(len(tc.Function.Arguments), remaining)]
+					activityIntent = streamedActivityTitle(activityPrefix)
+				}
+				if err := activity(activityName, activityIntent); err != nil {
 					return nil, err
 				}
 			}

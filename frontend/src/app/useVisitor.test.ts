@@ -190,6 +190,18 @@ describe("visitor request ownership", () => {
     await act(async () => pending.resolve(frame))
     expect(view.frames.size).toBe(0)
   })
+  it("restores older screenshots from the summary and applies refreshed availability", async () => {
+    const frame = {id:"earlier",availability:"ready",urls:{full:"/full",thumbnail:"/thumb"}} as Frame
+    api.getRequest.mockResolvedValueOnce({...request("A"), activity:{...activity(),frames:[frame]}})
+    await open("A")
+    expect(view.frames.get("earlier")).toEqual(frame)
+    const expired = {...frame,availability:"expired",urls:{full:null,thumbnail:null}}
+    api.frame.mockResolvedValueOnce(expired)
+    await act(async () => { await view.refreshFrame(frame) })
+    expect(view.request?.activity.frames?.[0]).toEqual(expired)
+    await open("B")
+    expect(view.frames.size).toBe(0)
+  })
   it("closes each request and answer subscription on panel close and unmount", async () => {
     api.conversation.mockImplementation(async (id: string) => ({conversation: {...conversation(id), active_turn_id: `turn-${id}`}}))
     api.turns.mockResolvedValue({items:[turn("A", "running")]})

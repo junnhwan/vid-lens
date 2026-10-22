@@ -316,6 +316,15 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		}
 		return false, nil
 	}
+	// Display metadata must not become a business argument. The original
+	// response remains intact in the model operation ledger.
+	if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		var args map[string]json.RawMessage
+		if json.Unmarshal(raw, &args) == nil && args["activity_title"] != nil {
+			delete(args, "activity_title")
+			raw = domain.JSON(args)
+		}
+	}
 	if p.Mode == "review" {
 		if name != loopReviewTool {
 			return false, nil
@@ -341,6 +350,19 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			return false, e
 		}
 		l.Feedback = loopWriteFeedback(result, raw)
+		write, _ := result.(map[string]any)
+		receipt, _ := write["receipt"].(*loopReceipt)
+		message := "本次章节未保存，已将具体错误反馈给模型；原有章节保留。"
+		if receipt != nil {
+			message = fmt.Sprintf("本次接纳 %d 章，退回 %d 章；文章仍需通过独立核验。", len(receipt.Accepted), len(receipt.Rejected))
+		}
+		if write["noop"] == true && receipt != nil && len(receipt.Rejected) == 0 {
+			message = "章节内容未变化，未创建新版本，待修订问题仍然保留。"
+		}
+		now := time.Now().UTC()
+		if _, e := s.engine.Store.Step(ctx, s.claim, domain.Step{ID: fmt.Sprintf("loop_write_%s_%d", s.claim.Run.ID, p.Slot), Kind: "tool_execution", ModelCall: p.Slot + 1, Title: "章节保存结果", Phase: "compose", Status: "completed", StartedAt: &now, FinishedAt: &now, Outcome: &domain.Outcome{Message: message, EvidenceStatus: "not_assessed"}}); e != nil {
+			return false, e
+		}
 		if progress {
 			l.CandidateHash = ""
 			l.Scopes = nil
@@ -349,11 +371,10 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		}
 
 		if in.Finish {
-			_, draft, e := s.loadLoopDraft(ctx)
-			if e != nil {
-				return false, e
-			}
-			if draft.BatchReceipt != nil && len(draft.BatchReceipt.Rejected) == 0 {
+			// Only this action's receipt can request review. Early write failures
+			// do not persist a new draft; the old draft's successful receipt says
+			// nothing about whether this revision was accepted.
+			if write["error"] == nil && receipt != nil && len(receipt.Rejected) == 0 {
 				latest, e := s.engine.Store.ArticleDraft(ctx, s.claim.Run.ID)
 				if e != nil {
 					return false, e
