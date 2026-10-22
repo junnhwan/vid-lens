@@ -57,6 +57,7 @@ type articleLoopState struct {
 	SourceChars         int                                    `json:"source_chars"`
 	ReviewReserve       int                                    `json:"review_reserve"`
 	OutputSections      int                                    `json:"output_sections"`
+	InspectionKeys      []string                               `json:"inspection_keys,omitempty"`
 }
 type articleLoopCall struct {
 	Slot         int                        `json:"slot"`
@@ -498,6 +499,10 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 				window.Count = 1
 			}
 			inspectionKey := "article-loop:inspect:" + store.Hash(window)
+			if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && !slices.Contains(l.InspectionKeys, inspectionKey) && len(l.InspectionKeys) >= loopExtraWindowLimit {
+				l.Feedback = domain.JSON(map[string]any{"error": "visual_search_limit", "action": "Stop searching for illustrations. Save the complete article using supported text; omit decorative or uninformative figures. Reload existing frame_ids only for a necessary visual claim. Missing optional illustrations is not a failure; do not invent essential visual evidence."})
+				return false, nil
+			}
 			var result media.Inspection
 			old, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, inspectionKey)
 			if e == nil && old.Status == "completed" {
@@ -510,6 +515,7 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 				return false, e
 			}
 			ids = result.FrameIDs
+			l.InspectionKeys = appendUnique(l.InspectionKeys, inspectionKey)
 			for _, id := range ids {
 				l.Frames = appendUnique(l.Frames, id)
 			}

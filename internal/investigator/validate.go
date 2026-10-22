@@ -110,8 +110,12 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 			prose += len(domain.BlockText(b))
 		}
 	}
-	if figures == 0 || prose < 40 {
-		add(invalid("缺少可阅读正文或真实配图"))
+	optionalFigures := s.articleLoop() && s.cp.ExecutionContract.Version == domain.ArticleLoopV2
+	if prose < 40 {
+		add(invalid("缺少可阅读正文"))
+	}
+	if figures == 0 && !optionalFigures {
+		add(invalid("缺少真实配图"))
 	}
 	add(validateLimitations(a.Limitations, sectionIDs, a.Citations))
 	prov := a.Source.TextProvenance

@@ -96,7 +96,7 @@ func ArticlePolicyIdentity(spec GenerationSpec) string {
 func ArticlePolicyIdentityForContract(spec GenerationSpec, contract string) string {
 	policy := ArticleLoopPolicy
 	if contract == ArticleLoopV2 {
-		policy += ":independent-pixels-v2"
+		policy += ":independent-pixels-v2:article-first-v1"
 	}
 	return ContentHash(struct {
 		Policy string

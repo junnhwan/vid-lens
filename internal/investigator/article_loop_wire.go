@@ -282,6 +282,15 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 			return nil, err
 		}
 		v2 := s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2
+		if v2 && info.Name == "stop_article" {
+			info.Desc = "关键内容确实缺少证据、无法忠实成文时停止并保留成果。缺少可用解释配图不构成停止原因，允许少图或无图完成文章。"
+		}
+		if v2 && info.Name == "view_frames" {
+			info.Desc += " 概览之后最多两个新窗口；只为具体来源线索或必要视觉问题取帧，不盲目找配图。无有用画面时继续正文，允许无图完成。"
+		}
+		if v2 && info.Name == loopSaveTool {
+			info.Desc += " 可在一次原子修订中修改正文、删除和排序；组合行动任一部分无效则整次不保存。order必须包含操作后所有保留章节ID，不能遗漏未修改章节；同一章不能同时替换和删除。"
+		}
 		if info.Name == loopSaveTool || v2 {
 			// The semantic input type owns the shape; the canonical domain owns
 			// the accepted limitation vocabulary. Publish that same vocabulary
@@ -305,6 +314,11 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 				if props == nil {
 					props = map[string]any{}
 					root["properties"] = props
+				}
+				if info.Name == loopSaveTool {
+					if order, ok := props["order"].(map[string]any); ok {
+						order["description"] = "All retained stable section IDs exactly once after this action, including unchanged chapters. May combine with replacements/deletions atomically. For new chapters use a separate later reorder after receiving stable IDs."
+					}
 				}
 				props["activity_title"] = map[string]any{"type": "string", "maxLength": 60, "description": "面向用户的本次具体动作小标题，放在第一个字段；点明正在处理的主题、章节或画面，不宣称保存成功或核验通过。"}
 				required, _ := root["required"].([]any)
@@ -699,42 +713,14 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		}
 		seen[identity] = true
 	}
-	if len(in.DeleteIDs) > 0 || len(in.Order) > 0 {
-		if len(in.Sections) > 0 {
-			return map[string]any{"error": "structural edits must be one atomic action separate from section writes"}, false, nil
+	structural := len(in.DeleteIDs) > 0 || len(in.Order) > 0
+	if structural && len(in.Sections) > 0 && s.cp.ExecutionContract.Version != domain.ArticleLoopV2 {
+		return map[string]any{"error": "structural edits must be one atomic action separate from section writes"}, false, nil
+	}
+	for _, sec := range in.Sections {
+		if sec.SectionID != "" && slices.Contains(in.DeleteIDs, sec.SectionID) {
+			return map[string]any{"error": "cannot delete and replace the same section", "id": sec.SectionID}, false, nil
 		}
-		available := map[string]domain.Section{}
-		for _, sec := range d.Article.Sections {
-			available[sec.ID] = sec
-		}
-		for _, id := range in.DeleteIDs {
-			if _, ok := available[id]; !ok {
-				return map[string]any{"error": "unknown delete identity", "id": id}, false, nil
-			}
-			delete(available, id)
-		}
-		order := in.Order
-		if len(order) == 0 {
-			for _, sec := range d.Article.Sections {
-				if _, ok := available[sec.ID]; ok {
-					order = append(order, sec.ID)
-				}
-			}
-		}
-		if len(order) != len(available) {
-			return map[string]any{"error": "order must contain every retained identity"}, false, nil
-		}
-		next := []domain.Section{}
-		for _, id := range order {
-			sec, ok := available[id]
-			if !ok {
-				return map[string]any{"error": "duplicate/unknown reorder identity"}, false, nil
-			}
-			next = append(next, sec)
-			delete(available, id)
-		}
-		d.Article.Sections = next
-		receipt.Accepted = append(receipt.Accepted, order...)
 	}
 	for i, insec := range in.Sections {
 		id := insec.SectionID
@@ -806,6 +792,43 @@ func (s *session) saveLoopSections(ctx context.Context, key string, in loopSaveI
 		} else {
 			d.Article.Title = *in.Title
 		}
+	}
+	if len(in.DeleteIDs) > 0 || len(in.Order) > 0 {
+		if len(receipt.Rejected) > 0 {
+			return map[string]any{"error": "atomic revision rejected; no changes saved", "rejected": receipt.Rejected}, false, nil
+		}
+		available := map[string]domain.Section{}
+		for _, sec := range d.Article.Sections {
+			available[sec.ID] = sec
+		}
+		for _, id := range in.DeleteIDs {
+			if _, ok := available[id]; !ok {
+				return map[string]any{"error": "unknown delete identity", "id": id}, false, nil
+			}
+			delete(available, id)
+		}
+		order := in.Order
+		if len(order) == 0 {
+			for _, sec := range d.Article.Sections {
+				if _, ok := available[sec.ID]; ok {
+					order = append(order, sec.ID)
+				}
+			}
+		}
+		if len(order) != len(available) {
+			return map[string]any{"error": "order must contain every retained identity"}, false, nil
+		}
+		next := []domain.Section{}
+		for _, id := range order {
+			sec, ok := available[id]
+			if !ok {
+				return map[string]any{"error": "duplicate/unknown reorder identity"}, false, nil
+			}
+			next = append(next, sec)
+			delete(available, id)
+		}
+		d.Article.Sections = next
+		receipt.Accepted = slices.Clone(order)
 	}
 	if len(d.Article.Sections) > 40 {
 		return map[string]any{"error": "resource_limit", "limit": "40 total sections"}, false, nil

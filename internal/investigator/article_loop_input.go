@@ -32,9 +32,15 @@ const loopGroundedSeverityInstruction = `严重性由同一AC标准决定：AC02
 
 const loopReadingInstructions = `candidate 是程序从固定canonical文章逐块展开的完整语义正文，不是摘要；只移除了渲染节点和重复引用元数据，citation_bindings把引用身份绑定到上方原文tN或实际帧。先按sections/blocks的读者顺序读完各章，检查每章的开头、收尾及章间衔接：是否有未完成的句段、悬空的判断/引导语、缺少必要解释或跨章重复。严重断句/不可独立理解须给AC06 blocking并定位实际块；不要因为来源引用存在而忽略正文缺失。所有文字、列表项、代码、表格单元、图注、引用位置与局限均保留；渲染结构与来源身份由程序检查。`
 
-const loopRevisionInstructions = `save_sections是完整章节的创建或替换，不是JSON patch。同一行动内，每个section_id只出现一次；同一章有多个问题时合并为一个完整替换。每个JSON对象的sources只出现一次。recommended_max_sections是格式恢复的输出建议；完整合法的写入仍受40章与128KiB的实际限制。`
+const loopRevisionInstructions = `save_sections是完整章节的创建或替换，不是JSON patch。同一行动内，每个section_id只出现一次；同一章有多个问题时合并为一个完整替换。修改章节必须保留其全部正文与就近sources。可在一次原子行动中修改正文、删除和排序，任一部分无效则整次不保存；order必须包含操作后所有保留章节（包括未改章节），同一章不能同时替换和删除。新建章节收到稳定ID后再排序。每个JSON对象的sources只出现一次。recommended_max_sections是格式恢复的输出建议；完整合法的写入仍受40章与128KiB的实际限制。`
 
 const loopFaithfulReviewInstructions = `来源忠实按完整上下文的含义判断，不要求逐字复刻ASR错误；上下文能明确恢复的省略单位或同义改写不构成捏造，仍有歧义则保留具体不确定性。清楚归因于讲者的口述不因缺少片内独立实测而自动成为错误，本版不做外部事实核查。主要主题与有实质信息的细节需要覆盖，寒暄或无信息收尾不构成遗漏主题。图注可准确翻译可读屏显文字；等义翻译、样式差异和一般排版偏好归AC06 advisory，不能要求正文复刻图中全部布局或改成英文。只报告最终成立的实质缺陷，修正建议也不得补入来源没有的事实。`
+
+const loopExtraWindowLimit = 2
+
+const loopArticleFirstInstructions = `正文优先，配图按信息价值选择，没有最低配图数量。优先使用能补充邻近正文的清晰板书、课件、图表、代码或实际操作画面；有人物不等于无价值，但只有人物、访谈分屏或装饰性场景不能当作解释配图。不要为了标识讲者、章节气氛或凑数量放人像。
+先判断已交付概览。原文能支撑完整文章而没有合适图时，直接以少图或无图完成；不需要为了无图额外调用模型、补免责声明或停止任务。只有来源指出具体屏幕材料或必要视觉问题时才定点view_frames，不做盲目均匀抽帧反复找图；概览之后最多两个新窗口，每次最多六帧。仍无可读材料就停止找图，继续正文与核验。确实依赖画面才能证明的关键内容仍需证据，不能用旁白编造画面或删掉必含事实。
+复核同样接受无图文章，不得仅因缺少配图提出blocking或要求补图。无关人像或装饰图应直接删除，保留有原文依据的正文与引用，无需强制替换；只有实际使用的视觉断言需要像素核验。`
 
 type loopOriginal struct {
 	Alias   string         `json:"alias"`
@@ -243,6 +249,7 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		current["recommended_max_sections"], current["max_sections"] = l.OutputSections, 40
 	}
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && p.Mode == "author" {
+		payload["visual_budget"] = map[string]any{"new_windows_remaining": max(0, loopExtraWindowLimit-len(l.InspectionKeys)), "minimum_figures": 0, "instruction": "Prefer complete supported prose. No useful illustration is a valid outcome; do not spend calls searching for decorative images."}
 		payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls-max(1, l.ReviewReserve)), "review_calls_reserved": max(1, l.ReviewReserve), "instruction": "Use finish=true with your final complete save_sections action so the independent review fits the remaining budget; a separate finish_article consumes another author call. Do not request finish while required content is missing."}
 	}
 	if s.spec.DetailPolicy != nil {
@@ -250,6 +257,8 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	system := loopAuthorInstructions
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		system = strings.Replace(system, "中文完整图文", "中文完整文章", 1)
+		system = strings.Replace(system, "、纯音乐/风景/剪辑或没有可用解释配图时", "或来源没有可用讲解内容时", 1)
 		system += "\n" + loopRevisionInstructions
 	}
 	if p.Mode == "review" {
@@ -380,6 +389,7 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	payload["delivered_pixels"] = frames
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		system += "\n" + loopArticleFirstInstructions
 		system += "\n每次工具调用先输出activity_title：用简短中文概括本次具体行动，点明主题、章节或画面，避免重复通用标题。只描述可公开的行动意图，不输出内部推理，不预先宣称保存成功或核验通过。"
 	}
 	input := []*schema.Message{schema.SystemMessage(system), schema.UserMessage(string(domain.JSON(payload)))}
