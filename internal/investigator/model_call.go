@@ -24,10 +24,10 @@ type meteredModel struct {
 
 func (s *session) responseLimits() modelResponseLimits {
 	limits := modelResponseLimits{Total: 180 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}
-	if s.compositionReady || s.reviewStep != nil || s.workflowStep != nil {
+	if s.compositionReady || s.reviewStep != nil || s.workflowStep != nil || s.articleCall != nil || s.articleLoop() {
 		limits.Total = 300 * time.Second
 	}
-	if s.workflowStep != nil {
+	if s.workflowStep != nil || s.articleCall != nil || s.articleLoop() {
 		// A relay may announce a tool and then buffer its complete arguments.
 		// Streaming cadence is not a second deadline for these bounded stages.
 		limits.First, limits.Idle = limits.Total, limits.Total
@@ -53,7 +53,7 @@ func (m *meteredModel) WithTools(t []*schema.ToolInfo) (model.ToolCallingChatMod
 
 func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s := m.session
-	if !s.reviewing && !s.stagedWorkflow() {
+	if !s.reviewing && !s.stagedWorkflow() && !s.articleLoop() {
 		if err := s.autoFinalize(ctx); err != nil {
 			return nil, err
 		}
@@ -61,7 +61,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 	key := "model:" + strconv.Itoa(s.cp.Calls)
 	var args any = stripPixels(in)
 	activeTools := model.GetCommonOptions(&model.Options{Tools: m.tools}, opts...).Tools
-	activeTools = s.phaseTools(activeTools)
+	if !s.articleLoop() {
+		activeTools = s.phaseTools(activeTools)
+	}
 	if s.boundedSourceContext() && !s.reviewing {
 		activeTools = append([]*schema.ToolInfo{}, activeTools...)
 		for i, info := range activeTools {
@@ -164,7 +166,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 		return &saved, nil
 	}
-	if s.reviewStep != nil || s.workflowStep != nil {
+	if s.reviewStep != nil || s.workflowStep != nil || s.articleCall != nil {
 		// A complete length-limited submission is a known outcome. On takeover,
 		// replay it into the review planner instead of paying for the same input.
 		truncated, err := s.engine.Store.ModelOutputTruncated(ctx, s.claim.Run.ID, key)
@@ -175,6 +177,16 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			return nil, &domain.WorkError{Code: "MODEL_OUTPUT_TRUNCATED", Message: "模型输出达到长度上限，未产生完整结果。"}
 		}
 	}
+	if s.articleLoop() {
+		rejected, err := s.engine.Store.ModelContextExceeded(ctx, s.claim.Run.ID, key)
+		if err != nil {
+			return nil, err
+		}
+		if rejected {
+			return nil, &domain.WorkError{Code: "MODEL_CONTEXT_EXCEEDED", Message: "冻结输入已被模型拒绝，需缩小工作范围。"}
+		}
+	}
+
 	routes, err := s.engine.Store.ModelRoutes(ctx, s.claim.Run.ConfigID)
 	if err != nil {
 		return nil, err
@@ -215,7 +227,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		return a == preferred && b != preferred
 	})
 	single := len(routes) == 1
-	if single && !s.stagedWorkflow() {
+	if single && !s.stagedWorkflow() && !s.articleLoop() {
 		// Preserve the small existing retry for a single transiently failing route.
 		routes = append(routes, routes[0])
 	}
@@ -275,6 +287,9 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			}
 		}
 		baseCtx := ctx
+		if s.articleCall != nil {
+			baseCtx = context.WithValue(baseCtx, serialArticleToolsKey{}, true)
+		}
 		if s.authoring() {
 			baseCtx = context.WithValue(ctx, nativeStrictKey{}, true)
 		}
@@ -311,7 +326,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		var submitErr error
 		sub := context.WithValue(actx, usageKey{}, observer)
 		sub = context.WithValue(sub, remoteSubmitKey{}, func() error {
-			if s.stagedWorkflow() {
+			if s.stagedWorkflow() || s.articleLoop() {
 				stats, err := s.engine.Store.ModelExecution(actx, s.claim.Run.ID)
 				if err != nil {
 					return err
@@ -321,7 +336,11 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 					ceiling = min(3, ceiling)
 				}
 				if stats.Submissions >= ceiling {
-					submitErr = domain.Err(422, "WORKFLOW_BUDGET_EXHAUSTED", "实际模型发送已达本轮上限，未知发送也已计入；已保存成果保留。")
+					code := "WORKFLOW_BUDGET_EXHAUSTED"
+					if s.articleLoop() {
+						code = "ARTICLE_BUDGET_EXHAUSTED"
+					}
+					submitErr = domain.Err(422, code, "实际模型发送已达本轮上限，未知发送也已计入；已保存成果保留。")
 					return submitErr
 				}
 			}
@@ -360,7 +379,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		if s.policy().Enabled {
 			options = append(options, model.WithTools(activeTools))
 		}
-		if s.workflowStep != nil {
+		if s.articleCall != nil {
+			if s.articleCall.Mode == "review" {
+				options = append(options, model.WithToolChoice(schema.ToolChoiceForced, loopReviewTool))
+			} else {
+				options = append(options, model.WithToolChoice(schema.ToolChoiceForced))
+			}
+		} else if s.workflowStep != nil {
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced, s.workflowStep.Tool))
 		} else if s.reviewing {
 			name := "report_evidence_review"

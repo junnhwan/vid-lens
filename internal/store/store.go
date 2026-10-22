@@ -300,7 +300,17 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 	id := domain.ID()
 	cp := map[string]any{"schema_version": 1}
 	if kind == "article.generate" || kind == "qa.answer" {
-		cp["execution_contract"] = domain.ExecutionContract{Version: domain.CurrentExecutionContract, RunID: id}
+		version := domain.CurrentExecutionContract
+		if kind == "article.generate" {
+			p, err := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", configID)
+			if err != nil {
+				return "", err
+			}
+			if p.ArticleHarness == domain.ArticleLoopV1 {
+				version = domain.ArticleLoopV1
+			}
+		}
+		cp["execution_contract"] = domain.ExecutionContract{Version: version, RunID: id}
 	}
 	_, e := tx.Exec(ctx, "INSERT INTO job_runs(id,kind,work_key,source_id,snapshot_id,config_id,status,deadline_at,checkpoint) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,$8)", id, kind, key, source, snapshot, configID, deadline, domain.JSON(cp))
 	if e != nil {
@@ -317,8 +327,10 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 	return id, e
 }
 func fence(ctx context.Context, tx pgx.Tx, c domain.Claim) error {
+	// Hold the claim row until commit: cancellation/takeover cannot pass a
+	// successful fence check and then race a late asset/draft/receipt write.
 	var ok bool
-	e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM job_runs WHERE id=$1 AND status='running' AND execution_epoch=$2 AND lease_owner=$3 AND lease_expires_at>clock_timestamp() AND deadline_at>clock_timestamp())", c.Run.ID, c.Epoch, c.Owner).Scan(&ok)
+	e := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM job_runs WHERE id=$1 AND status='running' AND execution_epoch=$2 AND lease_owner=$3 AND lease_expires_at>clock_timestamp() AND deadline_at>clock_timestamp() FOR UPDATE)", c.Run.ID, c.Epoch, c.Owner).Scan(&ok)
 	if e != nil {
 		return e
 	}

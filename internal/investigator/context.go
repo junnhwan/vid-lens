@@ -16,6 +16,8 @@ import (
 )
 
 type checkpoint struct {
+	ArticleLoopParent    json.RawMessage           `json:"article_loop_parent,omitempty"`
+	ArticleLoop          *articleLoopState         `json:"article_loop,omitempty"`
 	Workflow             *workflowState            `json:"workflow,omitempty"`
 	SourceNotes          []sourceNote              `json:"source_notes,omitempty"`
 	SourceIndexProtocol  string                    `json:"source_index_protocol,omitempty"`
@@ -419,7 +421,7 @@ func (s *session) hydrate(ctx context.Context, msgs []*schema.Message) ([]*schem
 				return nil, e
 			}
 			if a.ID != id {
-				if s.stagedWorkflow() {
+				if s.stagedWorkflow() || s.articleLoop() {
 					return nil, domain.Err(422, "WORKFLOW_EVIDENCE_CHANGED", "冻结调用中的图片身份已经改变；原输入保留，未重新发送或沿用审核。")
 				}
 				extra := map[string]any{}

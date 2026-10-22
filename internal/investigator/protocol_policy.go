@@ -44,6 +44,11 @@ func policyAt(revision int) executionPolicy {
 }
 
 func (s *session) policy() executionPolicy {
+	if s.articleLoop() {
+		// These are shared transport/identity capabilities, not legacy planning,
+		// pacing, authoring, recovery or per-unit review policy.
+		return executionPolicy{Enabled: true, ObservationBudget: true, EvidenceGrounding: true}
+	}
 	if s.resolvedPolicy == nil || s.resolvedPolicy.Revision != s.cp.HarnessRevision {
 		p := policyAt(s.cp.HarnessRevision)
 		s.resolvedPolicy = &p

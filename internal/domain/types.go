@@ -240,10 +240,11 @@ type PlanItem struct {
 	Detail string `json:"detail,omitempty"`
 }
 type ExecutionPlan struct {
-	Items    []PlanItem `json:"items"`
-	Sections []PlanItem `json:"sections,omitempty"`
-	WrapUp   bool       `json:"wrap_up"`
-	Note     string     `json:"note,omitempty"`
+	OpenEnded bool       `json:"open_ended,omitempty"`
+	Items     []PlanItem `json:"items"`
+	Sections  []PlanItem `json:"sections,omitempty"`
+	WrapUp    bool       `json:"wrap_up"`
+	Note      string     `json:"note,omitempty"`
 }
 type Inline struct {
 	Type       string   `json:"type"`

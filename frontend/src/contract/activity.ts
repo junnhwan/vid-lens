@@ -22,7 +22,7 @@ export function advanceActivity(activity: ActivitySummary, step: ActivityStep, c
     const modelCalls = step.kind === "model_response" ? Math.max(attempt.model_calls, step.model_call ?? 0) : attempt.model_calls
     const modelSends = attempt.model_submissions + (step.kind === "model_submission" && firstSeen ? 1 : 0)
     callDelta = modelCalls - attempt.model_calls; sendDelta = modelSends - attempt.model_submissions
-    return { ...attempt, model_calls: modelCalls, model_submissions: modelSends, ...(step.plan?.sections ? { saved_sections: step.plan.sections.filter((item) => item.status === "done").length, planned_sections: step.plan.sections.length } : {}) }
+    return { ...attempt, model_calls: modelCalls, model_submissions: modelSends, ...(step.plan?.sections ? { saved_sections: step.plan.sections.filter((item) => item.status === "done").length, planned_sections: step.plan.open_ended ? 0 : step.plan.sections.length, open_ended: step.plan.open_ended } : {}) }
   })
   return { ...activity, current_step_id: currentId, model_calls: calls, model_submissions: sends, plan: step.plan ?? activity.plan, attempts, total_model_calls: (activity.total_model_calls ?? 0) + callDelta, total_model_submissions: (activity.total_model_submissions ?? 0) + sendDelta }
 }

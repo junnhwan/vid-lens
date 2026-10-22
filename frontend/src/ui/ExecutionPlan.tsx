@@ -69,7 +69,7 @@ export function ExecutionPlan({
                 ? "这次阅读的完整路线。"
                 : "Agent 正在按这条路线读片。"
               : phase
-                ? "执行计划生成前，先按六个阶段推进。"
+                ? "正在执行当前行动，后续会随实际结果更新。"
                 : "这次执行留下的调用记录。"}
             {live ? (
               <span className="agent-dots" aria-hidden="true">
@@ -88,8 +88,7 @@ export function ExecutionPlan({
         <div className="route-attempts" aria-label="历次尝试">
           {attempts.map((attempt, index) => (
             <span key={attempt.run_id} data-current={attempt.current || undefined}>
-              第 {index + 1} 次尝试{attempt.current ? "（当前）" : ""} · {attemptLabel(attempt.status)} · {attempt.saved_sections} /{" "}
-              {attempt.planned_sections} 章{attempt.inherited_sections ? `（继承 ${attempt.inherited_sections} 章）` : ""} · 调用{" "}
+              第 {index + 1} 次尝试{attempt.current ? "（当前）" : ""} · {attemptLabel(attempt.status)} · {attempt.open_ended ? `已保存 ${attempt.saved_sections} 章` : `${attempt.saved_sections} / ${attempt.planned_sections} 章`}{attempt.inherited_sections ? `（继承 ${attempt.inherited_sections} 章）` : ""} · 调用{" "}
               {attempt.model_calls} 次
             </span>
           ))}
@@ -118,16 +117,18 @@ export function ExecutionPlan({
         <details className="route-chapters">
           <summary>
             <span className="chapter-progress">
-              <svg viewBox="0 0 36 36" aria-hidden="true">
+              {!plan.open_ended ? <svg viewBox="0 0 36 36" aria-hidden="true">
                 <circle className="chapter-progress-track" cx="18" cy="18" r="15" pathLength="100" />
                 <circle className="chapter-progress-value" cx="18" cy="18" r="15" pathLength="100" style={{ strokeDasharray: `${percent} 100` }} />
-              </svg>
-              <span className="chapter-progress-count">{saved}<i>/{total}</i><span className="sr-only"> 章已保存</span></span>
+              </svg> : null}
+              <span className="chapter-progress-count">{saved}{!plan.open_ended ? <i>/{total}</i> : null}<span className="sr-only"> 章已保存</span></span>
             </span>
             <span className="chapter-summary">
-              <span className="chapter-summary-title">章节进度</span>
+              <span className="chapter-summary-title">{plan.open_ended ? "已保存章节" : "章节进度"}</span>
               <span className="chapter-summary-note">
-                {saved === total ? `全部 ${total} 章已保存` : writing ? `正在写「${writing}」` : `已保存 ${saved} 章 · 还剩 ${total - saved} 章`}
+                {plan.open_ended
+                  ? completed ? `已保存 ${saved} 章，核验已完成` : `已保存 ${saved} 章，完成后还需核验`
+                  : saved === total ? `全部 ${total} 章已保存` : writing ? `正在写「${writing}」` : `已保存 ${saved} 章 · 还剩 ${total - saved} 章`}
               </span>
             </span>
             <span className="chapter-caret" aria-hidden="true" />

@@ -260,6 +260,9 @@ func (s *Store) Publish(ctx context.Context, c domain.Claim, a domain.Article) e
 		if c.Run.SnapshotID == nil || a.SnapshotID != *c.Run.SnapshotID {
 			return errors.New("publication snapshot mismatch")
 		}
+		if err := verifyArticleLoopPublication(ctx, tx, c, a); err != nil {
+			return err
+		}
 		ids := ContentFrameIDs(a.Sections, a.Citations)
 		var bytes int64
 		for _, id := range ids {
@@ -419,6 +422,29 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 		if e := fence(ctx, tx, c); e != nil {
 			return e
 		}
+		if submit && kind == "model" {
+			var contract string
+			if err := tx.QueryRow(ctx, "SELECT COALESCE(checkpoint->'execution_contract'->>'version','') FROM job_runs WHERE id=$1 FOR UPDATE", c.Run.ID).Scan(&contract); err != nil {
+				return err
+			}
+			if err := fence(ctx, tx, c); err != nil {
+				return err
+			}
+			if contract == domain.ArticleLoopV1 {
+				p, err := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", c.Run.ConfigID)
+				if err != nil {
+					return err
+				}
+				var sends int
+				if err = tx.QueryRow(ctx, "SELECT count(*) FROM model_submissions WHERE run_id=$1", c.Run.ID).Scan(&sends); err != nil {
+					return err
+				}
+				if sends >= min(20, p.MaxIterations) {
+					return domain.Err(422, "ARTICLE_BUDGET_EXHAUSTED", "实际模型发送已达冻结上限；未知发送亦计入。")
+				}
+			}
+		}
+
 		h := Hash(args)
 		_, e := tx.Exec(ctx, "INSERT INTO run_operations(run_id,operation_key,attempt_id,kind,args_hash,status) VALUES($1,$2,$3,$4,$5,'started') ON CONFLICT DO NOTHING", c.Run.ID, key, c.AttemptID, kind, h)
 		if e != nil {

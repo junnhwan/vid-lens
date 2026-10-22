@@ -50,6 +50,9 @@ func requestAttempts(ctx context.Context, q Querier, current domain.Request) ([]
 			var draft struct {
 				Sections map[string]json.RawMessage `json:"sections"`
 				Plan     []json.RawMessage          `json:"plan"`
+				Article  struct {
+					Sections []json.RawMessage `json:"sections"`
+				} `json:"article"`
 			}
 			_ = json.Unmarshal(raw, &draft)
 			var inheritedRaw []byte
@@ -58,6 +61,9 @@ func requestAttempts(ctx context.Context, q Querier, current domain.Request) ([]
 			}
 			var inherited struct {
 				Sections map[string]json.RawMessage `json:"sections"`
+				Article  struct {
+					Sections []json.RawMessage `json:"sections"`
+				} `json:"article"`
 			}
 			_ = json.Unmarshal(inheritedRaw, &inherited)
 			var calls, sends int
@@ -70,7 +76,13 @@ func requestAttempts(ctx context.Context, q Querier, current domain.Request) ([]
 					isCurrent = true
 				}
 			}
-			out = append(out, map[string]any{"run_id": run.ID, "request_id": req.ID, "current": isCurrent, "status": run.Status, "saved_sections": len(draft.Sections), "planned_sections": len(draft.Plan), "inherited_sections": len(inherited.Sections), "model_calls": calls, "model_submissions": sends, "history_url": "/api/v1/requests/" + req.ID + "/activity"})
+			saved, inheritedCount := len(draft.Sections), len(inherited.Sections)
+			openEnded := draft.Article.Sections != nil
+			if openEnded {
+				saved = len(draft.Article.Sections)
+				inheritedCount = len(inherited.Article.Sections)
+			}
+			out = append(out, map[string]any{"open_ended": openEnded, "run_id": run.ID, "request_id": req.ID, "current": isCurrent, "status": run.Status, "saved_sections": saved, "planned_sections": len(draft.Plan), "inherited_sections": inheritedCount, "model_calls": calls, "model_submissions": sends, "history_url": "/api/v1/requests/" + req.ID + "/activity"})
 		}
 	}
 	return out, nil

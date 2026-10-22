@@ -37,56 +37,58 @@ func (s *session) validateArticle(ctx context.Context, a domain.Article) error {
 	if strings.TrimSpace(a.Title) == "" || len(a.Sections) == 0 {
 		add(invalid("缺少文章标题或章节"))
 	}
-	if ids := s.unobserved(ctx); len(ids) > 0 {
-		add(missingEvidence("还有图片观察未记录：" + strings.Join(ids, ",")))
-	}
-	obs, e := s.observations(ctx)
-	if e != nil {
-		return e
-	}
-	latest := map[string]observation{}
-	observed := map[string]bool{}
-	for _, o := range obs {
-		latest[o.QuestionID] = o
-		for _, id := range o.FrameIDs {
-			observed[id] = true
+	if !s.articleLoop() {
+		if ids := s.unobserved(ctx); len(ids) > 0 {
+			add(missingEvidence("还有图片观察未记录：" + strings.Join(ids, ",")))
 		}
-	}
-	for _, id := range s.cp.OverviewIDs {
-		if !observed[id] {
-			add(missingEvidence("全片概览尚有未记录的画面：" + id))
+		obs, e := s.observations(ctx)
+		if e != nil {
+			return e
 		}
-	}
-	questionIDs := make([]string, 0, len(latest))
-	for id := range latest {
-		questionIDs = append(questionIDs, id)
-	}
-	slices.Sort(questionIDs)
-	for _, id := range questionIDs {
-		o := latest[id]
-		if o.Critical && o.Status != "supported" {
-			add(missingEvidence("关键取证问题尚未解决：" + id))
+		latest := map[string]observation{}
+		observed := map[string]bool{}
+		for _, o := range obs {
+			latest[o.QuestionID] = o
+			for _, id := range o.FrameIDs {
+				observed[id] = true
+			}
 		}
-		if (o.Status == "unresolved" || len(o.Unresolved) > 0 || len(o.Conflicts) > 0) && len(a.Limitations) == 0 {
-			add(invalid("未确认问题或冲突必须进入结果限制说明：" + id))
+		for _, id := range s.cp.OverviewIDs {
+			if !observed[id] {
+				add(missingEvidence("全片概览尚有未记录的画面：" + id))
+			}
 		}
-	}
-	questions, e := s.engine.Store.Questions(ctx, s.claim.Run.ID)
-	if e != nil {
-		return e
-	}
-	for _, raw := range questions {
-		var q struct {
-			ID       string
-			Critical bool
-			Status   string
+		questionIDs := make([]string, 0, len(latest))
+		for id := range latest {
+			questionIDs = append(questionIDs, id)
 		}
-		if json.Unmarshal(raw, &q) != nil {
-			add(invalid("问题状态无效"))
-			continue
+		slices.Sort(questionIDs)
+		for _, id := range questionIDs {
+			o := latest[id]
+			if o.Critical && o.Status != "supported" {
+				add(missingEvidence("关键取证问题尚未解决：" + id))
+			}
+			if (o.Status == "unresolved" || len(o.Unresolved) > 0 || len(o.Conflicts) > 0) && len(a.Limitations) == 0 {
+				add(invalid("未确认问题或冲突必须进入结果限制说明：" + id))
+			}
 		}
-		if q.Critical && q.Status != "supported" {
-			add(missingEvidence("关键取证问题尚未得到支持：" + q.ID))
+		questions, e := s.engine.Store.Questions(ctx, s.claim.Run.ID)
+		if e != nil {
+			return e
+		}
+		for _, raw := range questions {
+			var q struct {
+				ID       string
+				Critical bool
+				Status   string
+			}
+			if json.Unmarshal(raw, &q) != nil {
+				add(invalid("问题状态无效"))
+				continue
+			}
+			if q.Critical && q.Status != "supported" {
+				add(missingEvidence("关键取证问题尚未得到支持：" + q.ID))
+			}
 		}
 	}
 	sectionIDs := map[string]bool{}
@@ -404,7 +406,11 @@ func (s *session) validateCitation(ctx context.Context, c domain.Citation, artic
 		if e != nil || a.TimeMS == nil || c.TimeMS == nil || c.SnapshotID != s.snapshot.ID || *a.TimeMS != *c.TimeMS {
 			return invalid("画面来源或真实时间不匹配")
 		}
-		if article {
+		if article && s.articleLoop() {
+			if !slices.Contains(s.cp.ArticleLoop.SeenFrames, c.FrameID) {
+				return invalid("引用的像素未实际交付给作者")
+			}
+		} else if article {
 			obs, e := s.observations(ctx)
 			if e != nil {
 				return e

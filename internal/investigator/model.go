@@ -22,6 +22,7 @@ import (
 
 type remoteSubmitKey struct{}
 type modelActivityKey struct{}
+type serialArticleToolsKey struct{}
 type safeTransport struct{ base http.RoundTripper }
 
 func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -144,6 +145,12 @@ func NewModel(ctx context.Context, p config.Profile, key, proxy string, allowed 
 
 func newModelWithClient(ctx context.Context, p config.Profile, key string, client *http.Client) (model.ToolCallingChatModel, error) {
 	extra := map[string]any{}
+	if serial, _ := ctx.Value(serialArticleToolsKey{}).(bool); serial {
+		// The article Interface accepts one action per durable turn. Declare the
+		// same constraint to the provider instead of inviting parallel tool calls
+		// that cannot be applied atomically as a single authoring action.
+		extra["parallel_tool_calls"] = false
+	}
 	if p.ModelDisableThinking {
 		if strings.Contains(strings.ToLower(p.ModelName), "deepseek") {
 			extra["thinking"] = map[string]string{"type": "disabled"}

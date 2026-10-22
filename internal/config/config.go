@@ -13,6 +13,7 @@ import (
 
 // Profile is frozen for each accepted run. Host admission can impose lower current limits.
 type Profile struct {
+	ArticleHarness       string   `json:"article_harness,omitempty" yaml:"article_harness,omitempty"`
 	ModelProxyPolicy     string   `json:"model_proxy_policy,omitempty"`
 	CachePolicy          string   `json:"cache_policy,omitempty"`
 	CacheHintsVerified   bool     `json:"cache_hints_verified,omitempty"`
@@ -70,6 +71,9 @@ func (p Profile) MaxRetries(kind string) int {
 	return 2
 }
 func (p Profile) Validate() error {
+	if p.ArticleHarness != "" && p.ArticleHarness != "vidlens-article-loop-2026-10-22-v1" {
+		return errors.New("unsupported article harness")
+	}
 	if p.InputCharsLimit < 0 || p.InputCharsLimit > 8000000 || p.ContextTokens < 0 || p.ContextTokens > 4000000 {
 		return errors.New("invalid separate input/context limits")
 	}

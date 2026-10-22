@@ -162,6 +162,7 @@ export interface ActivityStep {
 }
 
 export interface ExecutionPlan {
+  open_ended?: boolean
   items: { id: string; title: string; status: string; detail?: string }[]
   sections?: { id: string; title: string; status: string }[]
   wrap_up: boolean
@@ -169,7 +170,7 @@ export interface ExecutionPlan {
 }
 
 export interface ActivitySummary {
-  attempts?: { run_id: string; request_id: string; current: boolean; status: string; saved_sections: number; planned_sections: number; inherited_sections: number; model_calls: number; model_submissions: number; history_url: string }[]
+  attempts?: { open_ended?: boolean; run_id: string; request_id: string; current: boolean; status: string; saved_sections: number; planned_sections: number; inherited_sections: number; model_calls: number; model_submissions: number; history_url: string }[]
   total_model_calls?: number
   total_model_submissions?: number
   model_calls?: number

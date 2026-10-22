@@ -13,6 +13,14 @@ func (s *Store) ModelOutputTruncated(ctx context.Context, run, key string) (bool
 	return truncated, err
 }
 
+// A known context rejection is durable too: takeover must narrow the next
+// logical input rather than paying to repeat a rejected one.
+func (s *Store) ModelContextExceeded(ctx context.Context, run, key string) (bool, error) {
+	var rejected bool
+	err := s.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT reporting->>'failure_code'='MODEL_CONTEXT_EXCEEDED' FROM model_submissions WHERE run_id=$1 AND operation_key=$2 ORDER BY submission DESC LIMIT 1),false)`, run, key).Scan(&rejected)
+	return rejected, err
+}
+
 // Observations are attached to an already authorized physical submission. They
 // cannot publish results or renew a run, including after cancellation/fencing.
 func (s *Store) RecordSubmission(ctx context.Context, c domain.Claim, key string, n int, report any) error {

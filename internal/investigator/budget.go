@@ -149,6 +149,14 @@ func (s *session) budget(ctx context.Context, in []*schema.Message, toolsChars i
 		b.OutputTokens = min(s.profile.MaxOutputTokens, s.workflowStep.OutputTokens)
 		b.AllocationReason = "bounded_server_workflow"
 	}
+	if s.articleCall != nil {
+		b.Phase = "compose"
+		if s.articleCall.Mode == "review" {
+			b.Phase = "validate"
+		}
+		b.OutputTokens = s.articleCall.OutputTokens
+		b.AllocationReason = "article_loop_shared_budget"
+	}
 	return b, b.check(s.profile)
 }
 func (b callBudget) check(p config.Profile) error {

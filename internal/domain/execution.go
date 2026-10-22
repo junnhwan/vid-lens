@@ -54,8 +54,21 @@ const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
 const CurrentExecutionContract = ExecutionContractV12
 
+// ArticleLoopV1 is an independent article adapter. Admission is opt-in until
+// the paired quality evaluation and release decision; QA keeps its own adapter.
+const ArticleLoopV1 = "vidlens-article-loop-2026-10-22-v1"
+
 func StagedWorkflowContract(version string) bool {
 	return version == ExecutionContractV10 || version == ExecutionContractV11 || version == ExecutionContractV12
+}
+
+// QuestionContract explicitly decouples the article writer from the existing
+// interactive QA adapter, including image and external-reference questions.
+func QuestionContract(articleVersion string, workflow, external bool) string {
+	if external || articleVersion == ArticleLoopV1 || !workflow {
+		return ExecutionContractV9
+	}
+	return ExecutionContractV12
 }
 
 type ExecutionContract struct {

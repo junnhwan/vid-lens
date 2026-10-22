@@ -12,6 +12,12 @@ import (
 )
 
 func (s *session) validateExecution() error {
+	if s.articleLoop() {
+		if s.claim.Run.Kind != "article.generate" || s.cp.ExecutionContract.RunID != s.claim.Run.ID || s.cp.SchemaVersion != 1 || s.cp.Workflow != nil || s.cp.DraftResume {
+			return domain.Err(422, "INTERNAL_FAILURE", "文章循环检查点身份不兼容，不能导入旧阶段状态。")
+		}
+		return s.validateArticleLoopState()
+	}
 	if s.cp.SchemaVersion < 0 || s.cp.SchemaVersion > 1 || s.cp.HarnessRevision < 0 || s.cp.HarnessRevision > 16 {
 		return domain.Err(422, "INTERNAL_FAILURE", "执行检查点版本不兼容。")
 	}

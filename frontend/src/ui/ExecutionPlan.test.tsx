@@ -27,3 +27,17 @@ describe("durable execution presentation", () => {
     expect(html).toContain("下一步执行：查看实验画面。")
   })
 })
+
+it("shows saved chapters without inventing a total and returns review to pending during revision", () => {
+  const activity: ActivitySummary = { current_step_id: null, recent_steps: [], has_more: false, history_url: "", history_status: "available", history_expires_at: null,
+    plan: { open_ended: true, wrap_up: false, items: [{ id: "write", title: "按证据修订文章", status: "active" }, { id: "validate", title: "独立核验当前候选", status: "pending" }], sections: [{ id: "s1", title: "已保存主题", status: "done" }] } }
+  const html = renderToStaticMarkup(<ExecutionPlan activity={activity} completed={false} phase="compose" />)
+  expect(html).toContain("已保存章节")
+  expect(html).toContain("已保存 1 章，完成后还需核验")
+  expect(html).not.toContain("全部 1 章已保存")
+  const published = renderToStaticMarkup(<ExecutionPlan activity={activity} completed phase="publish" />)
+  expect(published).toContain("已保存 1 章，核验已完成")
+  expect(published).not.toContain("完成后还需核验")
+  expect(html).not.toContain("stroke-dasharray")
+  expect(html).toMatch(/data-state="pending"[^]*独立核验当前候选/)
+})

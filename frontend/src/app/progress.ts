@@ -80,7 +80,7 @@ export function quietNote(phase: string | null | undefined, status: string | nul
     case "investigate":
       return "正在核对具体片段，新的画面会收在下面。"
     case "compose":
-      return "画面已经看过，正在写成可以独立阅读的文章。"
+      return "正在结合已读取的原文与画面保存文章，必要时继续补证和修订。"
     case "validate":
       return "文章已经写出，正在核对引用和画面是否对得上。"
     case "publish":

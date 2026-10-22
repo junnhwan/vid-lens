@@ -56,6 +56,17 @@ func (s *Store) SaveArticleDraft(ctx context.Context, c domain.Claim, key string
 			return domain.Err(409, "DRAFT_VERSION_CONFLICT", "草稿版本已更新，请先读取当前版本再修改。")
 		}
 		unchanged := false
+		if current == 0 {
+			var empty struct {
+				Article *struct {
+					Title    string           `json:"title"`
+					Sections []domain.Section `json:"sections"`
+				} `json:"article"`
+			}
+			if json.Unmarshal(raw, &empty) == nil && empty.Article != nil && empty.Article.Title == "" && len(empty.Article.Sections) == 0 {
+				unchanged = true
+			}
+		}
 		if current > 0 {
 			// A batch acknowledgement is not reader-visible draft content. Compare
 			// JSON values in the same fenced transaction as version CAS and replay.
@@ -116,6 +127,9 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	}
 	if previous.Kind != "article.generate" || !domain.Terminal(previous.Status) || previous.ConfigID != old.ConfigID || previous.SnapshotID == nil || *previous.SnapshotID != snapshot {
 		return nil
+	}
+	if handled, err := reuseArticleLoopDraft(ctx, tx, previous, run, snapshot); handled || err != nil {
+		return err
 	}
 	var cp map[string]any
 	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp["ready"] != true || cp["layout_version"] != "source-context-v3" || (cp["protocol"] != domain.ArticleDraftProtocol && cp["protocol"] != "eino-0.9.21/openai-0.1.13/vidlens-1") {
@@ -194,7 +208,7 @@ func reuseArticleDraft(ctx context.Context, tx pgx.Tx, old domain.Request, run s
 	// the unchanged generation spec before its first model request.
 	adapter := domain.ExecutionContractV9
 	if workflow {
-		adapter = domain.CurrentExecutionContract
+		adapter = domain.ExecutionContractV12
 		cp["workflow"] = map[string]any{"phase": "prepare", "calls": map[string]int{}}
 	}
 	cp["execution_contract"] = domain.ExecutionContract{Version: adapter, RunID: run}

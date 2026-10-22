@@ -30,24 +30,26 @@ type Engine struct {
 	Config    config.Config
 }
 type session struct {
-	engine           *Engine
-	claim            domain.Claim
-	profile          config.Profile
-	cp               checkpoint
-	snapshot         domain.Snapshot
-	transcript       []domain.Segment
-	chunks           []sourceChunk
-	article          *domain.Article
-	turn             *domain.Turn
-	tools            map[string]tool.EnhancedInvokableTool
-	compositionReady bool
-	forceDraftSubmit bool
-	spec             domain.GenerationSpec
-	resolvedPolicy   *executionPolicy
-	modelMessages    []*schema.Message
-	reviewing        bool
-	reviewStep       *reviewStep
-	workflowStep     *workflowStep
+	engine            *Engine
+	claim             domain.Claim
+	profile           config.Profile
+	cp                checkpoint
+	snapshot          domain.Snapshot
+	transcript        []domain.Segment
+	chunks            []sourceChunk
+	article           *domain.Article
+	turn              *domain.Turn
+	tools             map[string]tool.EnhancedInvokableTool
+	compositionReady  bool
+	forceDraftSubmit  bool
+	spec              domain.GenerationSpec
+	resolvedPolicy    *executionPolicy
+	modelMessages     []*schema.Message
+	reviewing         bool
+	reviewStep        *reviewStep
+	workflowStep      *workflowStep
+	articleCall       *articleLoopCall
+	articleCallBudget callBudget
 }
 
 func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) error {
@@ -89,6 +91,9 @@ func (e *Engine) Run(ctx context.Context, c domain.Claim, p config.Profile) erro
 	s.spec, err = e.Store.GenerationForRun(ctx, c.Run.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	if s.articleLoop() {
+		return s.runArticleLoop(ctx)
 	}
 	if op, err := e.Store.Operation(ctx, c.Run.ID, "candidate"); err == nil && op.Status == "completed" {
 		return s.publish(ctx, op.Result)
@@ -273,6 +278,9 @@ func (s *session) imageInput(ctx context.Context, ids []string, inspection strin
 		a, b, e := s.engine.Media.Reload(ctx, s.claim, id, inspection)
 		if e != nil {
 			return nil, e
+		}
+		if s.articleLoop() && a.ID != id {
+			return nil, loopStop("ARTICLE_EVIDENCE_CHANGED", "图片恢复产生了新身份，不能作为旧图片继续写作或核验")
 		}
 		meta := fmt.Sprintf("snapshot_id=%s inspection_id=%s frame_id=%s actual_time_ms=%d requested_time_ms=%d", s.snapshot.ID, inspection, a.ID, *a.TimeMS, *a.RequestedTimeMS)
 		if s.policy().EvidenceGrounding {
