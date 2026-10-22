@@ -182,7 +182,8 @@ func TestArticleLoopRevisionWorkspaceFollowsActualIssueLocations(t *testing.T) {
 }
 
 func TestArticleLoopCandidateLocationsNeverSubstituteForOriginalEvidence(t *testing.T) {
-	a := domain.Article{Sections: []domain.Section{{ID: "s_current", Blocks: []domain.Block{{ID: "s_current_b1"}}}}}
+	quote := "实际原文引文"
+	a := domain.Article{Sections: []domain.Section{{ID: "s_current", Blocks: []domain.Block{{ID: "s_current_b1", CitationIDs: []string{"q_saved"}}}}}, Citations: map[string]domain.Citation{"q_saved": {ID: "q_saved", Kind: "video_text", Quote: &quote, SegmentIDs: []string{"original"}}}}
 	scope := domain.ArticleReviewScope{SectionIDs: []string{"s_current"}, SourceIDs: []string{"original"}}
 	report := domain.ArticleReviewReport{Complete: true, Topics: []domain.ArticleTopic{{Topic: "主题", SourceIDs: []string{"t1"}, SectionIDs: []string{"s_current"}}}, Issues: []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC06", Location: "重复段落", EvidenceIDs: []string{"s_current", "s_current_b1", "t1"}, Problem: "候选内容重复", Correction: "合并重复内容"}}}
 	report = loopReviewLocations(report, a)
@@ -192,7 +193,15 @@ func TestArticleLoopCandidateLocationsNeverSubstituteForOriginalEvidence(t *test
 	if string(domain.JSON(report.Issues[0].EvidenceIDs)) != `["t1"]` || !strings.Contains(report.Issues[0].Location, "s_current_b1") {
 		t.Fatal("candidate positions were lost or treated as original evidence")
 	}
-	for _, ids := range [][]string{{"s_current"}, {"s_invented", "t1"}} {
+	report.Issues[0].EvidenceIDs = []string{"t1", "q_saved"}
+	report = loopReviewLocations(report, a)
+	if err := validateLoopReport(report, scope, a, []domain.Segment{{ID: "original"}}, nil); err != nil {
+		t.Fatal("known quote location obscured delivered original evidence", err)
+	}
+	if string(domain.JSON(report.Issues[0].EvidenceIDs)) != `["t1"]` || !strings.Contains(report.Issues[0].Location, "q_saved") {
+		t.Fatal("quote identity was lost or substituted for original evidence")
+	}
+	for _, ids := range [][]string{{"s_current"}, {"s_invented", "t1"}, {"q_saved"}, {"q_invented", "t1"}, {"q_saved", "t2"}} {
 		report.Issues[0].EvidenceIDs = ids
 		projected := loopReviewLocations(report, a)
 		if validateLoopReport(projected, scope, a, []domain.Segment{{ID: "original"}}, nil) == nil {

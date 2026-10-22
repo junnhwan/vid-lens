@@ -39,7 +39,7 @@ const loopFaithfulReviewInstructions = `来源忠实按完整上下文的含义�
 const loopExtraWindowLimit = 2
 
 const loopArticleFirstInstructions = `正文优先，配图按信息价值选择，没有最低配图数量。优先使用能补充邻近正文的清晰板书、课件、图表、代码或实际操作画面；有人物不等于无价值，但只有人物、访谈分屏或装饰性场景不能当作解释配图。不要为了标识讲者、章节气氛或凑数量放人像。
-先判断已交付概览。原文能支撑完整文章而没有合适图时，直接以少图或无图完成；不需要为了无图额外调用模型、补免责声明或停止任务。只有来源指出具体屏幕材料或必要视觉问题时才定点view_frames，不做盲目均匀抽帧反复找图；概览之后最多两个新窗口，每次最多六帧。仍无可读材料就停止找图，继续正文与核验。确实依赖画面才能证明的关键内容仍需证据，不能用旁白编造画面或删掉必含事实。
+先判断已交付概览。原文能支撑完整文章而没有合适图时，直接以少图或无图完成；不需要为了无图额外调用模型、补免责声明或停止任务。旧稿若因少量概览写下“全片没有板书/图表/演示”之类无法证明的全片否定，删除该断言即可，不必继续取帧证明其不存在。只有来源指出具体屏幕材料或必要视觉问题时才定点view_frames，不做盲目均匀抽帧反复找图；概览之后最多两个新窗口，每次最多六帧。仍无可读材料就停止找图，继续正文与核验。确实依赖画面才能证明的关键内容仍需证据，不能用旁白编造画面或删掉必含事实。
 复核同样接受无图文章，不得仅因缺少配图提出blocking或要求补图。无关人像或装饰图应直接删除，保留有原文依据的正文与引用，无需强制替换；只有实际使用的视觉断言需要像素核验。`
 
 type loopOriginal struct {
@@ -272,6 +272,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			scope := *p.Scope
 			scope.SourceIDs = append([]string{}, p.Sources...)
 			payload["scope"] = scope
+			if !scope.Global {
+				payload["scope_instruction"] = "This is one part of a complete review. Assess all required topics supported by the originals actually delivered in scope.source_ids. The full candidate provides matching and cross-reference context, not additional originals. topics[].source_ids and issues[].evidence_ids may cite only delivered originals/pixels. Do not add a topic listing the other, undelivered ranges or mark those ranges unassessed: they remain assigned to separate pending scopes. Disclose genuinely unassessed obligations within THIS scope. The program requires every pending scope and the final global check before publication."
+			}
 		}
 		payload["execution_feedback"] = l.Feedback
 		a := d.Article
@@ -686,7 +689,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 			hasBlockingOmission = hasBlockingOmission || issue.AC == "AC02"
 		}
 	}
-	for _, topic := range report.Topics {
+	for topicIndex, topic := range report.Topics {
 		if strings.TrimSpace(topic.Topic) == "" {
 			return errors.New("empty topic")
 		}
@@ -695,7 +698,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 		}
 		for _, id := range topic.SourceIDs {
 			if !sources[id] {
-				return errors.New("topic source outside actual review range")
+				return fmt.Errorf("topics[%d].source_ids contains %q outside the delivered scope.source_ids; map only topics supported by this scope's actual originals. Other ranges are pending in separate scopes, not a topic to append to this report", topicIndex, id)
 			}
 		}
 		if len(topic.SectionIDs) == 0 && !hasBlockingOmission {
@@ -719,6 +722,15 @@ func loopReviewLocations(report domain.ArticleReviewReport, a domain.Article) do
 		locations[section.ID] = true
 		for _, block := range section.Blocks {
 			locations[block.ID] = true
+			// A quote's citation key identifies the candidate passage, not an
+			// additional original. Preserve it as a location when the reviewer
+			// supplies it alongside actual source evidence. Never infer evidence
+			// from its bindings: candidate-only findings must still be rejected.
+			for _, id := range blockCitationIDs(block) {
+				if citation, ok := a.Citations[id]; ok && citation.Quote != nil {
+					locations[id] = true
+				}
+			}
 			for _, item := range block.Items {
 				locations[item.ID] = true
 			}

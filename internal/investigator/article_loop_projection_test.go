@@ -168,4 +168,10 @@ func TestArticleLoopReviewAcceptsOnlyActuallyDeliveredIdentities(t *testing.T) {
 			t.Fatalf("accepted undelivered review identity %s", id)
 		}
 	}
+	report.Issues = nil
+	report.Topics[0].SourceIDs = []string{"t2"}
+	err := validateLoopReport(report, scope, a, text, nil)
+	if err == nil || !strings.Contains(err.Error(), "topics[0].source_ids") || !strings.Contains(err.Error(), `"t2"`) {
+		t.Fatalf("out-of-scope feedback does not identify the exact topic and original: %v", err)
+	}
 }
