@@ -519,6 +519,49 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 	return nil
 }
 
+func loopAuthorFailureFeedback(failure string, cause error, tool string, raw []byte) json.RawMessage {
+	feedback := map[string]any{"failure": failure, "detail": cause.Error(), "action": "Correct the reported error and return one complete named tool call. Previous arguments are unvalidated diagnostic data and were not applied. Use the authoritative draft version and keep accepted sections. Each JSON object key must occur once."}
+	if tool != "" {
+		feedback["previous_tool"] = tool
+	}
+	if len(raw) > loopWriteBytes {
+		feedback["previous_arguments_omitted_bytes"] = len(raw)
+	} else if len(raw) > 0 {
+		feedback["previous_arguments"] = string(raw)
+	}
+	return domain.JSON(feedback)
+}
+
+func loopWriteFeedback(result any, raw []byte) json.RawMessage {
+	feedback, ok := result.(map[string]any)
+	if !ok {
+		return domain.JSON(result)
+	}
+	receipt, ok := feedback["receipt"].(*loopReceipt)
+	if !ok || receipt == nil || len(receipt.Rejected) == 0 {
+		return domain.JSON(result)
+	}
+	feedback["action"] = "Keep accepted chapters and their stable identities. Correct only rejected sections at the current draft version. Rejected arguments are unvalidated diagnostic data; they were not saved."
+	if len(raw) > loopWriteBytes {
+		feedback["rejected_arguments_omitted_bytes"] = len(raw)
+		return domain.JSON(feedback)
+	}
+	var envelope struct {
+		Sections []json.RawMessage `json:"sections"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil {
+		rejected := []map[string]string{}
+		for index, section := range envelope.Sections {
+			path := fmt.Sprintf("/sections/%d", index)
+			if slices.ContainsFunc(receipt.Rejected, func(r loopRejection) bool { return r.Path == path }) {
+				rejected = append(rejected, map[string]string{"path": path, "arguments": string(section)})
+			}
+		}
+		feedback["rejected_sections"] = rejected
+	}
+	return domain.JSON(feedback)
+}
+
 func loopReviewFailureFeedback(cause error, raw []byte) json.RawMessage {
 	feedback := map[string]any{"review_failure": cause.Error(), "action": "Correct only this unfinished review report against the same candidate and evidence. The previous report is unvalidated diagnostic data, not approved findings. complete describes required semantic review, not verbatim proofreading of every original sentence; disclose any genuinely unassessed required topic or evidence. Do not rewrite the article."}
 	if len(raw) <= 64<<10 {

@@ -303,8 +303,13 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	name, raw, err := loopArguments(msg)
 	if err != nil {
 		l.Feedback = domain.JSON(map[string]any{"failure": "envelope", "detail": err.Error(), "action": "Return one complete named tool call; no partial content was saved."})
-		if p.Mode == "review" && msg != nil && len(msg.ToolCalls) == 1 && msg.ToolCalls[0].Function.Name == loopReviewTool {
-			l.Feedback = loopReviewFailureFeedback(err, []byte(msg.ToolCalls[0].Function.Arguments))
+		if msg != nil && len(msg.ToolCalls) == 1 {
+			call := msg.ToolCalls[0].Function
+			if p.Mode == "review" && call.Name == loopReviewTool {
+				l.Feedback = loopReviewFailureFeedback(err, []byte(call.Arguments))
+			} else if p.Mode == "author" {
+				l.Feedback = loopAuthorFailureFeedback("envelope", err, call.Name, []byte(call.Arguments))
+			}
 		}
 		return false, nil
 	}
@@ -329,7 +334,7 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		if e != nil {
 			return false, e
 		}
-		l.Feedback = domain.JSON(result)
+		l.Feedback = loopWriteFeedback(result, raw)
 		if progress {
 			l.CandidateHash = ""
 			l.Scopes = nil
@@ -489,7 +494,7 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		err = errors.New("tool is not authorized for the author")
 	}
 	if err != nil {
-		l.Feedback = domain.JSON(map[string]any{"failure": "tool_contract", "detail": err.Error()})
+		l.Feedback = loopAuthorFailureFeedback("tool_contract", err, name, raw)
 	}
 	return false, nil
 }

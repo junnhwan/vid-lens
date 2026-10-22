@@ -148,6 +148,7 @@ type articleLoopDraft struct {
 // null-placeholder, string-array or partial-JSON normalization is performed.
 func loopUniqueJSON(raw []byte) error {
 	d := json.NewDecoder(strings.NewReader(string(raw)))
+	path := []string{"$"}
 	var visit func() error
 	visit = func() error {
 		tok, err := d.Token()
@@ -167,23 +168,30 @@ func loopUniqueJSON(raw []byte) error {
 					return e
 				}
 				k, ok := t.(string)
-				if !ok || keys[k] {
-					return fmt.Errorf("duplicate or invalid JSON key %v", t)
+				if !ok {
+					return fmt.Errorf("invalid JSON key at %s", strings.Join(path, ""))
+				}
+				path = append(path, "."+k)
+				if keys[k] {
+					return fmt.Errorf("duplicate JSON key at %s", strings.Join(path, ""))
 				}
 				keys[k] = true
 				if e = visit(); e != nil {
 					return e
 				}
+				path = path[:len(path)-1]
 			}
 			t, e := d.Token()
 			if e != nil || t != json.Delim('}') {
 				return errors.New("incomplete object")
 			}
 		case '[':
-			for d.More() {
+			for index := 0; d.More(); index++ {
+				path = append(path, fmt.Sprint("[", index, "]"))
 				if e := visit(); e != nil {
 					return e
 				}
+				path = path[:len(path)-1]
 			}
 			t, e := d.Token()
 			if e != nil || t != json.Delim(']') {
