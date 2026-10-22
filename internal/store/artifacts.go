@@ -430,7 +430,7 @@ func (s *Store) beginOperation(ctx context.Context, c domain.Claim, key, kind st
 			if err := fence(ctx, tx, c); err != nil {
 				return err
 			}
-			if contract == domain.ArticleLoopV1 {
+			if domain.ArticleLoopContract(contract) {
 				p, err := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", c.Run.ConfigID)
 				if err != nil {
 					return err

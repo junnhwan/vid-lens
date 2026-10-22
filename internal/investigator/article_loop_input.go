@@ -23,6 +23,15 @@ const loopReviewInstructions = `你是VidLens独立核验者，只读当前冻�
 按同一标准检查：AC02全部主要主题（含后半段）与详细度必要步骤/条件覆盖；AC03来源忠实，特别是数字/主体/可能与必然/因果和冲突；AC04引用虽然存在仍须支持邻近断言，逐字引述匹配连续原文；AC05真实清晰配图、图文关系、图注和视觉断言由本次实际像素支持，旁白不是画面；AC06独立可读、无占位/断句/大量重复；AC07局限具体有作用域，重要缺证不能靠免责声明通过。第一版忠实于视频，不声称外部事实核查。
 complete=true只在指定scope的所有义务确实核验完时返回，无法完成须列unassessed。issues=[]不代表自动完成。blocking必须给出AC02–AC07、候选位置或缺失主题、实际原文/图片evidence_ids、具体冲突和期望修正；一般文风喜好为advisory。主题映射列出本次原文所有主要主题、来源tN与实质章节位置；遗漏主题用AC02 blocking。global_relations_only时，已完成范围的主题映射是导航，检查标题、组织与跨章关系/遗漏；不能把导航摘要当作事实证据。`
 
+const loopGroundedReviewInstructions = `本次使用独立证据核验修订v2，仍在同一次综合核验中完成AC02–07，不增加逐段supported门禁。
+先独立读取原文与实际像素，再对照候选；候选中的具体断言不是已知事实。对每个delivered_pixels，在visual_observations写出从像素直接可读的事实与不能确定的内容，使用真实frame_id。不能照抄作者图注、把旁白/文章文字当画面观察，或从一张静态图推断未展示的页面、先后过程、结果与数值。
+visual_claims是程序从候选逐处提取的图注及使用画面证据的正文，位置和frame_ids都已绑定。以独立观察逐一对照这些断言：画面无法证明的具体断言属于AC05 blocking，问题须指向对应候选位置和真实帧；不能因为主题正确、正文流畅、事实可能成立就放行。局部看不清时明确不确定性，检查候选是否也在受影响处保留，不能编造可见事实。配图须有清晰、与邻近正文相关的解释性内容；黑屏、过渡、无内容演示窗口或只有讲台人物不承担正文解释，仅标题相关不够，应删除或换成实际可读材料，不能为数量凑图。无关配图同样阻断。
+对文字同样从来源出发检查：主题映射须包括结束段的主要内容，再核对候选的数字/单位/主语/条件/可能性/因果和就近引用。原文支持范围比候选窄时指出具体差异；不要把必要的保守表述当错误。仅语言或排版偏好为advisory。若发现blocking也要提交已完成的本范围核验；只有确实未完成的义务才列unassessed。`
+
+const loopGroundedSeverityInstruction = `严重性由同一AC标准决定：AC02–05或AC07中已识别的内容缺陷均为blocking，不能因为看似次要而降为advisory；无依据的人物/名称/时间状态/画面过程断言同样要修正。advisory仅用于AC06的一般文风、措辞或排版偏好。只返回最终成立的具体问题；判断没有错误就删除该条，不输出已撤回的质疑、自我辩论或推理历史。程序会退回等级与AC不一致的报告，保持同一候选，不擅自把你的标签升级成正文缺陷。`
+
+const loopReadingInstructions = `candidate 是程序从固定canonical文章逐块展开的完整语义正文，不是摘要；只移除了渲染节点和重复引用元数据，citation_bindings把引用身份绑定到上方原文tN或实际帧。先按sections/blocks的读者顺序读完各章，检查每章的开头、收尾及章间衔接：是否有未完成的句段、悬空的判断/引导语、缺少必要解释或跨章重复。严重断句/不可独立理解须给AC06 blocking并定位实际块；不要因为来源引用存在而忽略正文缺失。所有文字、列表项、代码、表格单元、图注、引用位置与局限均保留；渲染结构与来源身份由程序检查。`
+
 type loopOriginal struct {
 	Alias   string         `json:"alias"`
 	Segment domain.Segment `json:"original"`
@@ -129,6 +138,9 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 			return nil, nil, nil, loopStop("ARTICLE_BUDGET_EXHAUSTED", "剩余调用需要保留给当前规模候选的完整独立核验")
 		}
 
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && len(l.Issues) > 0 && len(l.NextSections) == 0 && len(l.NextSources) == 0 {
+			l.NextSections, l.NextSources, l.NextFrames = s.loopRevisionWorkspace(draft.Article, l.Issues)
+		}
 		p.Sections = append([]string{}, l.NextSections...)
 		selected := l.NextSources
 		if len(selected) == 0 {
@@ -215,14 +227,29 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		return nil, err
 	}
 	payload := map[string]any{"snapshot_id": s.snapshot.ID, "source": s.snapshot.Source, "duration_ms": s.snapshot.DurationMS, "detail_level": s.spec.DetailLevel, "purpose": s.spec.Purpose, "effective_limits": l.Budget, "calls_reserved": s.cp.Calls, "max_sections_this_action": l.OutputSections, "draft_version": saved.Version, "originals": s.loopOriginals(p.Sources)}
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		payload["originals"] = readingOriginals(s.transcript, append([]string{}, p.Sources...))
+		payload["original_identity_rule"] = "Every tN alias binds the unchanged original text, timing and origin in this snapshot. Internal original IDs and ordinal metadata remain program-owned; use the delivered aliases for evidence references."
+	}
 	payload["current_call"] = map[string]any{"output_tokens": p.OutputTokens, "response_timeout_ms": s.responseLimits().Total.Milliseconds(), "max_write_bytes": loopWriteBytes, "max_sections": l.OutputSections, "parallel_tool_calls": false}
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && p.Mode == "author" {
+		payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls-max(1, l.ReviewReserve)), "review_calls_reserved": max(1, l.ReviewReserve), "instruction": "Use finish=true with your final complete save_sections action so the independent review fits the remaining budget; a separate finish_article consumes another author call. Do not request finish while required content is missing."}
+	}
 	if s.spec.DetailPolicy != nil {
 		payload["detail_instruction"] = s.spec.DetailPolicy.Instruction
 	}
 	system := loopAuthorInstructions
 	if p.Mode == "review" {
 		system = loopReviewInstructions
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			system += "\n" + loopGroundedReviewInstructions + "\n" + loopGroundedSeverityInstruction
+		}
 		payload["scope"] = p.Scope
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			scope := *p.Scope
+			scope.SourceIDs = append([]string{}, p.Sources...)
+			payload["scope"] = scope
+		}
 		payload["execution_feedback"] = l.Feedback
 		a := d.Article
 		if domain.ArticleHash(a) != l.CandidateHash {
@@ -257,6 +284,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			payload["completed_scope_maps"] = records
 		}
 		payload["candidate"] = a
+		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			payload["visual_claims"] = loopVisualClaims(a, p.Scope.FrameIDs)
+		}
 	} else {
 		payload["feedback"] = l.Feedback
 		payload["blocking_issues"] = l.Issues
@@ -269,9 +299,11 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 			for _, sec := range d.Article.Sections {
 				headings = append(headings, map[string]string{"section_id": sec.ID, "title": sec.Title})
 				selected := slices.Contains(p.Sections, sec.ID)
-				for _, b := range sec.Blocks {
-					for _, ref := range blockCitationIDs(b) {
-						selected = selected || slices.Contains(p.Sources, ref)
+				if len(p.Sections) == 0 || s.cp.ExecutionContract.Version != domain.ArticleLoopV2 {
+					for _, b := range sec.Blocks {
+						for _, ref := range blockCitationIDs(b) {
+							selected = selected || slices.Contains(p.Sources, ref)
+						}
 					}
 				}
 				if selected {
@@ -335,6 +367,15 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	}
 	payload["delivered_pixels"] = frames
 	input := []*schema.Message{schema.SystemMessage(system), schema.UserMessage(string(domain.JSON(payload)))}
+	var candidatePayload map[string]any
+	if p.Mode == "review" && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		// Evidence and real pixels precede the full semantic reading view.
+		// The canonical candidate and its exact bindings stay authoritative in PG.
+		candidatePayload = map[string]any{"candidate": payload["candidate"], "visual_claims": payload["visual_claims"]}
+		delete(payload, "candidate")
+		delete(payload, "visual_claims")
+		input = []*schema.Message{schema.SystemMessage(system + "\n" + loopReadingInstructions), schema.UserMessage(string(domain.JSON(payload)))}
+	}
 	if len(p.Frames) > 0 {
 		parts, e := s.imageInput(ctx, p.Frames, fmt.Sprint("article-loop:", p.Slot))
 		if e != nil {
@@ -347,7 +388,125 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		}
 		input = append(input, &schema.Message{Role: schema.User, UserInputMultiContent: parts})
 	}
+	if candidatePayload != nil {
+		a := candidatePayload["candidate"].(domain.Article)
+		bindings, err := s.loopReviewBindings(a)
+		if err != nil {
+			return nil, err
+		}
+		candidatePayload["candidate"] = domain.ReadingArticle(a)
+		candidatePayload["citation_bindings"] = bindings
+		input = append(input, schema.UserMessage(string(domain.JSON(candidatePayload))))
+	}
 	return input, nil
+}
+
+func (s *session) loopReviewBindings(a domain.Article) (map[string]any, error) {
+	aliases := map[string]string{}
+	for index, original := range s.transcript {
+		aliases[original.ID] = fmt.Sprint("t", index+1)
+	}
+	used := map[string]bool{}
+	for _, section := range a.Sections {
+		for _, block := range section.Blocks {
+			for _, id := range blockCitationIDs(block) {
+				used[id] = true
+			}
+		}
+	}
+	bindings := map[string]any{}
+	for id := range used {
+		citation, ok := a.Citations[id]
+		if !ok {
+			return nil, invalid("candidate citation identity missing")
+		}
+		binding := map[string]any{"kind": citation.Kind}
+		if citation.FrameID != "" {
+			binding["frame_id"] = citation.FrameID
+		}
+		if len(citation.SegmentIDs) > 0 {
+			sources := []string{}
+			for _, segment := range citation.SegmentIDs {
+				alias, ok := aliases[segment]
+				if !ok {
+					return nil, invalid("candidate original identity missing")
+				}
+				sources = append(sources, alias)
+			}
+			binding["originals"] = sources
+		}
+		if citation.Quote != nil {
+			binding["verbatim_quote"] = *citation.Quote
+		}
+		bindings[id] = binding
+	}
+	return bindings, nil
+}
+
+func loopVisualClaims(a domain.Article, delivered []string) []any {
+	claims := []any{}
+	for _, section := range a.Sections {
+		for _, block := range section.Blocks {
+			frames := append([]string{}, block.FrameIDs...)
+			for _, id := range blockCitationIDs(block) {
+				if frame := a.Citations[id].FrameID; frame != "" {
+					frames = appendUnique(frames, frame)
+				}
+			}
+			frames = slices.DeleteFunc(frames, func(id string) bool { return !slices.Contains(delivered, id) })
+			if len(frames) > 0 {
+				claims = append(claims, map[string]any{"location": section.ID + "/" + block.ID, "frame_ids": frames, "candidate_block": block})
+			}
+		}
+	}
+	return claims
+}
+
+func (s *session) loopRevisionWorkspace(a domain.Article, issues []domain.ArticleReviewIssue) (sections, sources, frames []string) {
+	source := func(id string) {
+		for i, original := range s.transcript {
+			alias := fmt.Sprint("t", i+1)
+			if id == alias || id == original.ID {
+				sources = appendUnique(sources, alias)
+			}
+		}
+		for i, frame := range s.cp.ArticleLoop.Frames {
+			if id == frame || id == fmt.Sprint("f", i+1) {
+				frames = appendUnique(frames, frame)
+			}
+		}
+	}
+	for _, issue := range issues {
+		for _, id := range issue.EvidenceIDs {
+			source(id)
+		}
+	}
+	for _, section := range a.Sections {
+		selected := false
+		for _, issue := range issues {
+			selected = selected || strings.Contains(issue.Location+" "+issue.Problem+" "+issue.Correction, section.ID)
+		}
+		if !selected {
+			continue
+		}
+		sections = append(sections, section.ID)
+		for _, block := range section.Blocks {
+			for _, id := range block.FrameIDs {
+				source(id)
+			}
+			for _, id := range blockCitationIDs(block) {
+				source(id)
+				citation := a.Citations[id]
+				for _, segment := range citation.SegmentIDs {
+					source(segment)
+				}
+				if citation.FrameID != "" {
+					source(citation.FrameID)
+				}
+			}
+		}
+	}
+	return
 }
 func (s *session) loopSourceIndex() []any {
 	// Range navigation only. No lossy replacement of original text. For dense
@@ -475,7 +634,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 		}
 	}
 	hasBlockingOmission := false
-	for _, issue := range report.Issues {
+	for issueIndex, issue := range report.Issues {
 		if issue.Severity != "blocking" && issue.Severity != "advisory" {
 			return errors.New("invalid severity")
 		}
@@ -489,7 +648,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 			for _, id := range issue.EvidenceIDs {
 				frame, ok := frameAliases[id]
 				if !sources[id] && !slices.Contains(scope.FrameIDs, id) && (!ok || !slices.Contains(scope.FrameIDs, frame)) {
-					return errors.New("blocking evidence was not delivered in this review")
+					return fmt.Errorf("issues[%d].evidence_ids contains %q, which is not an original or pixel delivered in this review; use actual scope tN/fN aliases or exact original/frame IDs, and put candidate positions in location", issueIndex, id)
 				}
 			}
 			hasBlockingOmission = hasBlockingOmission || issue.AC == "AC02"
@@ -517,6 +676,37 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 		}
 	}
 	return nil
+}
+
+// A known candidate identity denotes a location, never original evidence.
+// Move only exact identities from this frozen candidate. Unknown references
+// remain rejected, and a blocking issue still needs actual delivered evidence.
+func loopReviewLocations(report domain.ArticleReviewReport, a domain.Article) domain.ArticleReviewReport {
+	locations := map[string]bool{}
+	for _, section := range a.Sections {
+		locations[section.ID] = true
+		for _, block := range section.Blocks {
+			locations[block.ID] = true
+			for _, item := range block.Items {
+				locations[item.ID] = true
+			}
+		}
+	}
+	for index := range report.Issues {
+		issue := &report.Issues[index]
+		evidence := []string{}
+		for _, id := range issue.EvidenceIDs {
+			if locations[id] {
+				if !strings.Contains(issue.Location, id) {
+					issue.Location += "; " + id
+				}
+			} else {
+				evidence = append(evidence, id)
+			}
+		}
+		issue.EvidenceIDs = evidence
+	}
+	return report
 }
 
 func loopAuthorFailureFeedback(failure string, cause error, tool string, raw []byte) json.RawMessage {
@@ -577,7 +767,16 @@ func loopReviewFailureFeedback(cause error, raw []byte) json.RawMessage {
 func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleReviewScope, raw []byte) (bool, error) {
 	l := s.cp.ArticleLoop
 	var report domain.ArticleReviewReport
-	err := loopDecode(raw, &report)
+	var observations []domain.ArticleVisualObservation
+	var err error
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		var grounded domain.ArticleGroundedReviewReport
+		err = loopDecode(raw, &grounded)
+		report = grounded.ArticleReviewReport
+		observations = grounded.VisualObservations
+	} else {
+		err = loopDecode(raw, &report)
+	}
 	_, d, e := s.loadLoopDraft(ctx)
 	if e != nil {
 		return false, e
@@ -586,8 +785,15 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	for i, id := range l.Frames {
 		aliases[fmt.Sprint("f", i+1)] = id
 	}
+	if err == nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		report = loopReviewLocations(report, d.Article)
+		err = domain.ValidateArticleReviewSeverity(report.Issues)
+	}
 	if err == nil {
 		err = validateLoopReport(report, scope, d.Article, s.transcript, aliases)
+	}
+	if err == nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		err = domain.ValidateArticleVisualObservations(observations, scope)
 	}
 	if err != nil {
 		l.Feedback = loopReviewFailureFeedback(err, raw)
@@ -600,7 +806,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if fingerprint != l.EvidenceFingerprint {
 		return false, loopStop("ARTICLE_EVIDENCE_CHANGED", "核验中的证据已变化")
 	}
-	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report}
+	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations}
 	key := "article-loop:review:" + store.Hash(map[string]any{"candidate": l.CandidateHash, "evidence": fingerprint, "scope": scope.ID})
 	if e = s.loopSave(ctx, key, "article_loop_review", record); e != nil {
 		return false, e

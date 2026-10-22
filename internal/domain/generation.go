@@ -8,6 +8,14 @@ func LimitationCodes() []string {
 	return []string{"visual_unclear", "source_conflict", "not_observed", "partial_text", "media_unavailable", "resource_limit"}
 }
 
+func ContentOrigins(external bool) []string {
+	out := []string{"video", "background_explanation"}
+	if external {
+		out = append(out, "external_reference")
+	}
+	return out
+}
+
 type GenerationModel struct {
 	ID              string `json:"id"`
 	RevisionID      string `json:"revision_id"`

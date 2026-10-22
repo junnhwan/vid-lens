@@ -40,6 +40,41 @@ func TestEmptyProviderResponseIsNotAccepted(t *testing.T) {
 	}
 }
 
+func TestArticleResponseDeadlineNarrowsOnlyStartedWork(t *testing.T) {
+	for _, narrow := range []bool{false, true} {
+		for _, active := range []bool{false, true} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.(http.Flusher).Flush()
+				if active {
+					fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"working\"}}]}\n\n")
+					w.(http.Flusher).Flush()
+				}
+				<-r.Context().Done()
+			}))
+			p := config.DefaultProfile()
+			p.ModelBaseURL = server.URL
+			base, err := newModelWithClient(context.Background(), p, "fixture", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := receiveModelResponse(context.Background(), base, []*schema.Message{schema.UserMessage("test")}, modelResponseLimits{Total: 120 * time.Millisecond, First: time.Second, Idle: time.Second, NarrowOnDeadline: narrow})
+			var work *domain.WorkError
+			if result != nil || !errors.As(err, &work) {
+				t.Fatal("unfinished response became a result", err)
+			}
+			if narrow && active {
+				if work.Code != "MODEL_RESPONSE_BUDGET_EXHAUSTED" || work.Transient {
+					t.Fatal("started oversized work was routed to blind transport retry", work)
+				}
+			} else if work.Code != "PROVIDER_UNAVAILABLE" || !work.Transient {
+				t.Fatal("inactive provider or historical contract changed classification", work)
+			}
+			server.Close()
+		}
+	}
+}
+
 func TestReasoningGPTStreamsWithCompatibleParameters(t *testing.T) {
 	for _, name := range []string{"gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "openai/gpt-5.5", "deepseek/deepseek-v4.1-flash"} {
 		t.Run(name, func(t *testing.T) {

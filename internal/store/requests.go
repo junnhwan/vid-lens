@@ -451,7 +451,7 @@ func (s *Store) CreateTurn(ctx context.Context, session, conversation, key strin
 		if e == nil {
 			// Existing articles and external research retain the established
 			// interactive evidence tools and their frozen authoring compatibility.
-			_, e = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=jsonb_set(checkpoint,'{execution_contract}',$2::jsonb) WHERE id=$1", run, domain.JSON(domain.ExecutionContract{Version: domain.QuestionContract(articleContract, workflowArticle, in.AllowExternalSources), RunID: run}))
+			_, e = tx.Exec(ctx, "UPDATE job_runs SET checkpoint=jsonb_set(checkpoint,'{execution_contract}',$2::jsonb) WHERE id=$1", run, domain.JSON(domain.ExecutionContract{Version: domain.QuestionContract(articleContract, workflowArticle, in.AllowExternalSources), RunID: run, InputRevision: domain.QuestionInputRevision(articleContract)}))
 		}
 		if e != nil {
 			return e

@@ -308,6 +308,10 @@ func (m *middleware) BeforeModelRewriteState(ctx context.Context, state *adk.Cha
 		if s.boundedSourceContext() {
 			refs["citation_catalog"] = compactSourceCatalog(catalog, filtered, nil)
 		}
+		if s.questionReading() {
+			refs["citation_catalog"] = questionCitationHints(catalog, compactSourceCatalog(catalog, filtered, nil))
+			refs["rule"] = "Catalog values are compact identity-kind tags, not source text or proof that pixels were seen. Use existing tN/fN keys in answer blocks; the server reconstructs exact original/frame metadata. Read the original passages needed for the current question and record actual pixel observations. Never repeat video citation objects."
+		}
 		if s.policy().EvidenceGrounding {
 			refs["frame_context"] = frameContexts(catalog, s.transcript)
 			refs["question_frame_ids"] = s.cp.Inspections["question-context"]
@@ -575,6 +579,9 @@ func projectToolHistory(messages []*schema.Message, dropLast ...bool) []*schema.
 	return out
 }
 func (s *session) projectSourceReads(messages []*schema.Message) []*schema.Message {
+	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+		return s.projectQuestionSourceReads(messages)
+	}
 	if s.boundedSourceContext() {
 		return projectIndexedSourceReads(messages)
 	}

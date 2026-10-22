@@ -3,10 +3,14 @@ package investigator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
+	"github.com/eino-contrib/jsonschema"
 	"vidlens/internal/domain"
 )
 
@@ -26,7 +30,37 @@ func (s *session) compactAnswerProtocol() bool { return s.turn != nil && s.polic
 
 func resolveAnswerReferences(in compactAnswerInput, catalog map[string]domain.Citation) (answerInput, error) {
 	out := answerInput{Kind: in.Kind, Summary: in.Summary, Citations: map[string]domain.Citation{}, Limitations: in.Limitations}
-	if err := json.Unmarshal(domain.JSON(in.Blocks), &out.Blocks); err != nil {
+	// The tool schema accepts paragraph/quote citation_ids, while the canonical
+	// renderer stores their references inline. Materialize the explicitly supplied
+	// IDs before canonical serialization, which otherwise silently drops them.
+	blocks := append([]domain.Block(nil), in.Blocks...)
+	for i := range blocks {
+		b := &blocks[i]
+		if b.Type != "paragraph" && b.Type != "quote" {
+			continue
+		}
+		b.Content = append([]domain.Inline(nil), b.Content...)
+		if b.Text != "" {
+			if strings.TrimSpace(domain.BlockText(*b)) != "" {
+				return out, invalid(fmt.Sprintf("/blocks/%d: paragraph/quote 只能提供 text 或 content 一份正文，不能同时提供两份", i))
+			}
+			b.Content = append([]domain.Inline{{Type: "text", Text: b.Text}}, b.Content...)
+			b.Text = ""
+		}
+		seen := map[string]bool{}
+		for _, part := range b.Content {
+			if part.Type == "citation" {
+				seen[part.CitationID] = true
+			}
+		}
+		for _, id := range b.CitationIDs {
+			if !seen[id] {
+				b.Content = append(b.Content, domain.Inline{Type: "citation", CitationID: id})
+				seen[id] = true
+			}
+		}
+	}
+	if err := json.Unmarshal(domain.JSON(blocks), &out.Blocks); err != nil {
 		return out, err
 	}
 	for id, c := range in.Citations {
@@ -62,6 +96,19 @@ func resolveAnswerReferences(in compactAnswerInput, catalog map[string]domain.Ci
 	return out, nil
 }
 
+func questionCitationHints(catalog map[string]domain.Citation, visible map[string]any) map[string]any {
+	out := map[string]any{}
+	for alias := range visible {
+		citation := catalog[alias]
+		if citation.Kind == "video_text" {
+			out[alias] = "video_text"
+		} else {
+			out[alias] = map[string]any{"kind": citation.Kind, "frame_id": citation.FrameID, "time_ms": citation.TimeMS}
+		}
+	}
+	return out
+}
+
 func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) error {
 	persist := func(ctx context.Context, in answerInput, parts []domain.AnswerPart) (*schema.ToolResult, error) {
 		a := domain.Answer{Kind: in.Kind, Summary: in.Summary, Blocks: in.Blocks, Parts: parts, Citations: in.Citations, Frames: []domain.Frame{}, Limitations: in.Limitations}
@@ -90,6 +137,37 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 		return textResult(map[string]any{"accepted_for_publication": true}), nil
 	}
 	submit := func(ctx context.Context, in answerInput) (*schema.ToolResult, error) { return persist(ctx, in, nil) }
+	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+		return add(utils.InferEnhancedTool("submit_answer", "Submit the focused answer in the same semantic reading format as article context: paragraph/quote/code use text and citation_ids; list items use text and citation_ids; table rows use cells and citation_ids; figures use frame_ids/caption/citation_ids. The server builds rendering nodes and figure layout. Never emit inline content arrays. Existing source and independent semantic validation still apply.", func(ctx context.Context, in readingAnswerInput) (*schema.ToolResult, error) {
+			blocks, err := answerReadingBlocks(in.Blocks)
+			if err != nil {
+				return nil, &candidateError{err: err}
+			}
+			catalog, err := s.citationCatalog(ctx)
+			if err != nil {
+				return nil, err
+			}
+			resolved, err := resolveAnswerReferences(compactAnswerInput{Kind: in.Kind, Summary: in.Summary, Blocks: blocks, Citations: in.Citations, Limitations: in.Limitations}, catalog)
+			if err != nil {
+				return nil, &candidateError{err: err}
+			}
+			return persist(ctx, resolved, in.Parts)
+		}, utils.WithSchemaModifier(func(name string, _ reflect.Type, _ reflect.StructTag, sc *jsonschema.Schema) {
+			if name == "origin" {
+				for _, value := range domain.ContentOrigins(s.turn.AllowExternalSources) {
+					sc.Enum = append(sc.Enum, value)
+				}
+			}
+			if name == "type" {
+				sc.Enum = []any{"paragraph", "quote", "list", "code", "table", "figure"}
+			}
+			if name == "code" {
+				for _, value := range domain.LimitationCodes() {
+					sc.Enum = append(sc.Enum, value)
+				}
+			}
+		})))
+	}
 	if s.policy().ComposedAnswers {
 		return add(utils.InferEnhancedTool("submit_answer", "Submit the answer directly, with a short direct summary and non-repeating evidence-backed explanation. Optional parts name the actual aspects of this question, not a fixed template. Use existing tN/fN references; no separate prose answer before this tool.", func(ctx context.Context, in composedAnswerInput) (*schema.ToolResult, error) {
 			catalog, err := s.citationCatalog(ctx)
@@ -101,7 +179,21 @@ func (s *session) answerTool(add func(tool.EnhancedInvokableTool, error) error) 
 				return nil, &candidateError{err: err}
 			}
 			return persist(ctx, resolved, in.Parts)
-		}))
+		}, utils.WithSchemaModifier(func(name string, typ reflect.Type, _ reflect.StructTag, sc *jsonschema.Schema) {
+			if s.cp.ExecutionContract == nil || s.cp.ExecutionContract.InputRevision != domain.QuestionReadingV1 {
+				return
+			}
+			if typ == reflect.TypeOf(domain.Block{}) {
+				sc.Description = "One answer block. paragraph/quote: provide nonempty text OR inline content, plus citation_ids (or inline citations). code: text/language/citation_ids. list: ordered/items with inline content. table: columns/rows with row citation_ids. figure: frame_ids/layout/caption/citation_ids. Never supply two text bodies."
+			}
+			if name == "origin" && sc.Type == "string" {
+				sc.Enum = []any{}
+				for _, value := range domain.ContentOrigins(s.turn.AllowExternalSources) {
+					sc.Enum = append(sc.Enum, value)
+				}
+				sc.Description = "Content provenance: video for video or article-passage claims, background_explanation for clearly separated background, external_reference only when authorized. article_passage belongs in citation.kind, never origin."
+			}
+		})))
 	}
 	if !s.compactAnswerProtocol() {
 		return add(utils.InferEnhancedTool("submit_answer", "Submit a finalized answer for this private turn. It cannot edit the article. All references will be validated.", submit))

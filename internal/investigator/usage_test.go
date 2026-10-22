@@ -2,6 +2,7 @@ package investigator
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,52 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/config"
+	"vidlens/internal/domain"
 )
+
+func TestSDKPixelTransportReceiptsBindExactBytesWithoutStoringPixels(t *testing.T) {
+	for _, last := range []bool{false, true} {
+		t.Run(fmt.Sprint("image_last_", last), func(t *testing.T) {
+			pixels := []byte("synthetic-image-wire-bytes")
+			encoded := base64.StdEncoding.EncodeToString(pixels)
+			var received []pixelInputReceipt
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				o := newUsageObserver("test", "provider_default", nil)
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				request, _ := http.NewRequest("POST", "http://fixture/", strings.NewReader(string(body)))
+				o.wire(request)
+				received = o.report.PixelInputs
+				if strings.Contains(string(domain.JSON(o.report)), encoded) {
+					t.Error("receipt retained pixels")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			}))
+			defer server.Close()
+			p := config.DefaultProfile()
+			p.ModelBaseURL = server.URL
+			base, err := newModelWithClient(context.Background(), p, "fixture", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			image := &schema.Message{Role: schema.User, UserInputMultiContent: []schema.MessageInputPart{{Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: &encoded, MIMEType: "image/jpeg"}}}}}
+			text := schema.UserMessage("candidate after or before the actual image")
+			messages := []*schema.Message{schema.SystemMessage("inspect"), image, text}
+			if last {
+				messages[1], messages[2] = text, image
+			}
+			if _, err = completeModelResponse(context.Background(), base, NormalizeToolImages(messages)); err != nil {
+				t.Fatal(err)
+			}
+			if len(received) != 1 || received[0].SHA256 != digest(pixels) || received[0].Bytes != len(pixels) {
+				t.Fatal("actual SDK request lost exact image bytes", received)
+			}
+		})
+	}
+}
 
 func TestUsageObserverChunkBoundariesAndPresence(t *testing.T) {
 	for _, tc := range []struct {

@@ -50,3 +50,45 @@ func TestCompactAnswerResolvesAllReferenceLocationsWithoutMutatingInput(t *testi
 		t.Fatalf("reference projection changed input or dropped evidence: %+v %v", out, err)
 	}
 }
+
+func TestCompactAnswerKeepsExplicitParagraphAndQuoteReferences(t *testing.T) {
+	catalog := map[string]domain.Citation{"t1": {ID: "t1", Kind: "video_text", SnapshotID: "owned"}}
+	for _, kind := range []string{"paragraph", "quote"} {
+		t.Run(kind, func(t *testing.T) {
+			in := compactAnswerInput{Blocks: []domain.Block{{Type: kind, Origin: "video", CitationIDs: []string{"t1", "t1"}, Content: []domain.Inline{{Type: "text", Text: "An explicit reference."}}}}}
+			out, err := resolveAnswerReferences(in, catalog)
+			if err != nil || len(out.Blocks[0].Content) != 2 || out.Blocks[0].Content[1].CitationID != "t1" || out.Citations["t1"].SnapshotID != "owned" {
+				t.Fatalf("explicit references lost in canonical conversion: %+v %v", out, err)
+			}
+			if len(in.Blocks[0].Content) != 1 || len(in.Blocks[0].CitationIDs) != 2 {
+				t.Fatal("caller input mutated")
+			}
+			in.Blocks[0].Content = append(in.Blocks[0].Content, domain.Inline{Type: "citation", CitationID: "t1"})
+			out, err = resolveAnswerReferences(in, catalog)
+			if err != nil || len(out.Blocks[0].Content) != 2 {
+				t.Fatal("existing inline reference duplicated", err)
+			}
+		})
+	}
+}
+
+func TestCompactAnswerKeepsPlainParagraphWireText(t *testing.T) {
+	in := compactAnswerInput{Blocks: []domain.Block{{ID: "p", Type: "paragraph", Origin: "video", Text: "The model emits tokens.", CitationIDs: []string{"t1"}}}}
+	out, err := resolveAnswerReferences(in, map[string]domain.Citation{"t1": {ID: "t1", Kind: "video_text"}})
+	if err != nil || domain.BlockText(out.Blocks[0]) != in.Blocks[0].Text {
+		t.Fatal("paragraph wire text was silently discarded", err)
+	}
+	in.Blocks[0].Content = []domain.Inline{{Type: "text", Text: "Another body."}}
+	if _, err := resolveAnswerReferences(in, nil); err == nil {
+		t.Fatal("conflicting text/content body was guessed")
+	}
+}
+
+func TestAnswerBlockRequiresReadableTextBeyondReferences(t *testing.T) {
+	s := &session{}
+	for _, content := range [][]domain.Inline{{{Type: "citation", CitationID: "t1"}}, {{Type: "text", Text: "  "}, {Type: "citation", CitationID: "t1"}}} {
+		if err := s.validateBlock(context.Background(), domain.Block{Type: "paragraph", Origin: "video", Content: content}, map[string]domain.Citation{"t1": {}}); err == nil {
+			t.Fatal("citation-only paragraph passed the mechanical reader gate")
+		}
+	}
+}

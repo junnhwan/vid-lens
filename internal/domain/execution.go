@@ -58,6 +58,14 @@ const CurrentExecutionContract = ExecutionContractV12
 // the paired quality evaluation and release decision; QA keeps its own adapter.
 const ArticleLoopV1 = "vidlens-article-loop-2026-10-22-v1"
 
+// V2 requires independently grounded pixel observations in the integrated
+// review. V1 runs retain their admitted report schema and policy identity.
+const ArticleLoopV2 = "vidlens-article-loop-2026-10-22-v2"
+
+func ArticleLoopContract(version string) bool {
+	return version == ArticleLoopV1 || version == ArticleLoopV2
+}
+
 func StagedWorkflowContract(version string) bool {
 	return version == ExecutionContractV10 || version == ExecutionContractV11 || version == ExecutionContractV12
 }
@@ -65,13 +73,28 @@ func StagedWorkflowContract(version string) bool {
 // QuestionContract explicitly decouples the article writer from the existing
 // interactive QA adapter, including image and external-reference questions.
 func QuestionContract(articleVersion string, workflow, external bool) string {
-	if external || articleVersion == ArticleLoopV1 || !workflow {
+	if external || ArticleLoopContract(articleVersion) || !workflow {
 		return ExecutionContractV9
 	}
 	return ExecutionContractV12
 }
 
 type ExecutionContract struct {
-	Version string `json:"version"`
-	RunID   string `json:"run_id"`
+	Version       string `json:"version"`
+	RunID         string `json:"run_id"`
+	InputRevision string `json:"input_revision,omitempty"`
+}
+
+const QuestionReadingV1 = "qa-article-reading-2026-10-22-v1"
+const QuestionReadingV2 = "qa-article-reading-2026-10-22-v2"
+
+func QuestionReadingContract(version string) bool {
+	return version == QuestionReadingV1 || version == QuestionReadingV2
+}
+
+func QuestionInputRevision(articleVersion string) string {
+	if articleVersion == ArticleLoopV2 {
+		return QuestionReadingV2
+	}
+	return ""
 }

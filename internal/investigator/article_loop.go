@@ -69,7 +69,7 @@ type articleLoopCall struct {
 }
 
 func (s *session) articleLoop() bool {
-	return s != nil && s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV1
+	return s != nil && s.cp.ExecutionContract != nil && domain.ArticleLoopContract(s.cp.ExecutionContract.Version)
 }
 func (s *session) validateArticleLoopState() error {
 	l := s.cp.ArticleLoop
@@ -115,7 +115,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 			limit = min(limit, s.spec.DetailPolicy.NoProgressLimit)
 		}
 		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
-		s.cp.Protocol = domain.ArticleLoopV1
+		s.cp.Protocol = s.cp.ExecutionContract.Version
 		s.cp.LayoutVersion = "article-workspace-v1"
 		s.cp.Ready = true
 		if err := s.persist(ctx, nil); err != nil {
@@ -261,7 +261,7 @@ func (s *session) recoverLoopFailure(ctx context.Context, p articleLoopCall, cau
 	if errors.As(cause, &problem) {
 		code = problem.Code
 	}
-	if code == "MODEL_OUTPUT_TRUNCATED" {
+	if code == "MODEL_OUTPUT_TRUNCATED" || code == "MODEL_RESPONSE_BUDGET_EXHAUSTED" {
 		l.OutputSections = max(1, l.OutputSections/2)
 		// A truncated review is split as a scope, never routed to the author.
 		if p.Mode == "review" {
@@ -310,6 +310,9 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 			} else if p.Mode == "author" {
 				l.Feedback = loopAuthorFailureFeedback("envelope", err, call.Name, []byte(call.Arguments))
 			}
+		}
+		if p.Mode == "author" {
+			s.narrowLoopAuthorFailure()
 		}
 		return false, nil
 	}
@@ -499,6 +502,17 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	return false, nil
 }
 
+func (s *session) narrowLoopAuthorFailure() {
+	if s.cp.ExecutionContract == nil || s.cp.ExecutionContract.Version != domain.ArticleLoopV2 {
+		return
+	}
+	l := s.cp.ArticleLoop
+	l.Failures["author_envelope"]++
+	l.OutputSections = max(1, l.OutputSections/2)
+	// Syntax/output failure does not establish an input-capacity limit. Keep
+	// the source workspace available; only real context rejection narrows it.
+}
+
 func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (bool, error) {
 	l := s.cp.ArticleLoop
 	saved, d, err := s.loadLoopDraft(ctx)
@@ -539,7 +553,7 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 	}
 	l.CandidateHash = hash
 	l.EvidenceFingerprint = fingerprint
-	l.PolicyRevision = domain.ArticlePolicyIdentity(s.spec)
+	l.PolicyRevision = domain.ArticlePolicyIdentityForContract(s.spec, s.cp.ExecutionContract.Version)
 	l.DraftVersion = saved.Version
 	l.ReviewKeys = nil
 	l.Issues = nil

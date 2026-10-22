@@ -230,13 +230,14 @@ func (s *session) validateBlocks(ctx context.Context, blocks []domain.Block, cit
 	return errors.Join(problems...)
 }
 func (s *session) validateBlock(ctx context.Context, b domain.Block, citations map[string]domain.Citation) error {
-	if b.Origin != "video" && b.Origin != "background_explanation" && !(b.Origin == "external_reference" && s.turn != nil && s.turn.AllowExternalSources) {
-		return invalid("正文来源标识无效")
+	origins := domain.ContentOrigins(s.turn != nil && s.turn.AllowExternalSources)
+	if !slices.Contains(origins, b.Origin) {
+		return invalid(fmt.Sprintf("origin=%q 无效；只允许 %s；article_passage 是引用类型，不是 origin", b.Origin, strings.Join(origins, ", ")))
 	}
 	ids := append([]string{}, b.CitationIDs...)
 	checkInline := func(content []domain.Inline) error {
-		if len(content) == 0 {
-			return invalid("空行内内容")
+		if strings.TrimSpace(domain.BlockText(domain.Block{Type: "paragraph", Content: content})) == "" {
+			return invalid("空正文：段落、引述或列表项必须包含可读文字，不能只有引用节点")
 		}
 		for _, x := range content {
 			switch x.Type {

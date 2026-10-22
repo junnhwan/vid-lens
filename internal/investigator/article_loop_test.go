@@ -31,23 +31,30 @@ func loopPayload(t *testing.T, r *http.Request) map[string]json.RawMessage {
 	if req.Parallel == nil || *req.Parallel {
 		t.Error("article provider request must disable parallel actions")
 	}
+	payload := map[string]json.RawMessage{}
 	for _, msg := range req.Messages {
 		var raw string
 		var p map[string]json.RawMessage
-		if json.Unmarshal(msg.Content, &raw) == nil && json.Unmarshal([]byte(raw), &p) == nil && p["snapshot_id"] != nil {
-			var limits struct {
-				Output     int   `json:"output_tokens"`
-				Timeout    int64 `json:"response_timeout_ms"`
-				WriteBytes int   `json:"max_write_bytes"`
+		if json.Unmarshal(msg.Content, &raw) == nil && json.Unmarshal([]byte(raw), &p) == nil {
+			for key, value := range p {
+				payload[key] = value
 			}
-			if err := json.Unmarshal(p["current_call"], &limits); err != nil || limits.Output != req.MaxTokens || limits.Timeout != 300000 || limits.WriteBytes != loopWriteBytes {
-				t.Error("visible call limits differ from actual provider/write limits", limits, req.MaxTokens, err)
-			}
-			if p["scope"] == nil && p["frame_index_navigation_only"] == nil {
-				t.Error("author cannot reload prior pixels without a frame navigation ledger")
-			}
-			return p
 		}
+	}
+	p := payload
+	if p["snapshot_id"] != nil {
+		var limits struct {
+			Output     int   `json:"output_tokens"`
+			Timeout    int64 `json:"response_timeout_ms"`
+			WriteBytes int   `json:"max_write_bytes"`
+		}
+		if err := json.Unmarshal(p["current_call"], &limits); err != nil || limits.Output != req.MaxTokens || limits.Timeout != 300000 || limits.WriteBytes != loopWriteBytes {
+			t.Error("visible call limits differ from actual provider/write limits", limits, req.MaxTokens, err)
+		}
+		if p["scope"] == nil && p["frame_index_navigation_only"] == nil {
+			t.Error("author cannot reload prior pixels without a frame navigation ledger")
+		}
+		return p
 	}
 	t.Error("loop payload missing")
 	return nil
@@ -57,7 +64,7 @@ func loopGoodWrite() loopSaveInput {
 	text := "这段合成来源介绍多个来源事实，并在后半段提供最后一项事实。正文把这些事实组织为可以独立阅读的说明，测试只验证交付契约与恢复，不声称真实模型已经理解这些事实。"
 	return loopSaveInput{ExpectedVersion: 0, Title: &title, Finish: true, Sections: []loopSection{{Key: "main", Title: "完整来源与结尾", Content: []loopContent{{Text: &text, Sources: []string{"t1", "t25"}}, {Figure: &loopFigure{Frames: []string{"f1"}, Caption: "用于测试发布链的合成黑色画面。", VisibleFacts: []string{"黑色画面"}, Uncertainty: []string{"合成图片没有实际教学内容"}}}}, Limitations: []loopSectionLimitation{{Code: "partial_text", Message: "这是合成字幕与图片的离线夹具，不代表真实视频内容。", Sources: []string{"t1"}}}}}}
 }
-func loopGoodReport(t *testing.T, p map[string]json.RawMessage) domain.ArticleReviewReport {
+func loopGoodReport(t *testing.T, p map[string]json.RawMessage) domain.ArticleGroundedReviewReport {
 	t.Helper()
 	var candidate domain.Article
 	var scope domain.ArticleReviewScope
@@ -75,7 +82,11 @@ func loopGoodReport(t *testing.T, p map[string]json.RawMessage) domain.ArticleRe
 	for _, o := range originals {
 		refs = append(refs, o.Alias)
 	}
-	return domain.ArticleReviewReport{Complete: true, Unassessed: []string{}, Topics: []domain.ArticleTopic{{Topic: "合成来源事实与后半段结尾", SourceIDs: refs, SectionIDs: scope.SectionIDs}}, Issues: []domain.ArticleReviewIssue{}}
+	observations := []domain.ArticleVisualObservation{}
+	for _, id := range scope.FrameIDs {
+		observations = append(observations, domain.ArticleVisualObservation{FrameID: id, VisibleFacts: []string{"合成黑色画面"}, Uncertainty: []string{"合成画面不能证明其他事实"}})
+	}
+	return domain.ArticleGroundedReviewReport{VisualObservations: observations, ArticleReviewReport: domain.ArticleReviewReport{Complete: true, Unassessed: []string{}, Topics: []domain.ArticleTopic{{Topic: "合成来源事实与后半段结尾", SourceIDs: refs, SectionIDs: scope.SectionIDs}}, Issues: []domain.ArticleReviewIssue{}}}
 }
 func loopFixture(t *testing.T, handler http.HandlerFunc) *session {
 	t.Helper()
@@ -93,9 +104,9 @@ func loopFixture(t *testing.T, handler http.HandlerFunc) *session {
 		t.Fatal(err)
 	}
 	s.compositionReady = false
-	s.cp = checkpoint{SchemaVersion: 1, ExecutionContract: &domain.ExecutionContract{Version: domain.ArticleLoopV1, RunID: s.claim.Run.ID}}
+	s.cp = checkpoint{SchemaVersion: 1, ExecutionContract: &domain.ExecutionContract{Version: domain.ArticleLoopV2, RunID: s.claim.Run.ID}}
 	s.profile.MaxOutputTokens = 32768
-	s.profile.ArticleHarness = domain.ArticleLoopV1
+	s.profile.ArticleHarness = domain.ArticleLoopV2
 	if _, err := s.engine.Store.Pool.Exec(context.Background(), "UPDATE runtime_config_revisions SET profile=$2 WHERE id=$1", s.claim.Run.ConfigID, domain.JSON(s.profile)); err != nil {
 		t.Fatal(err)
 	}
@@ -513,13 +524,11 @@ func TestArticleLoopT08ChangedTitleInvalidatesApprovalInBothEntrances(t *testing
 			writeReviewWireArgs(w, loopSaveTool, loopGoodWrite())
 			return
 		}
-		if err := json.Unmarshal(p["candidate"], &original); err != nil {
-			t.Error(err)
-		}
 		saved, d, err := s.loadLoopDraft(context.Background())
 		if err != nil {
 			t.Error(err)
 		}
+		original = d.Article
 		d.Article.Title = "核验之后修改的标题"
 		if _, err = s.engine.Store.SaveArticleDraft(context.Background(), s.claim, "concurrent-title", nil, saved.Version, d); err != nil {
 			t.Error(err)
@@ -629,7 +638,7 @@ func TestArticleLoopT13ExplicitRetryImportsArtifactsAndLineageOnly(t *testing.T)
 	if err = json.Unmarshal(run.Checkpoint, &cp); err != nil {
 		t.Fatal(err)
 	}
-	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ArticleLoopV1 || cp.ExecutionContract.RunID != run.ID || cp.ArticleLoop != nil || cp.Calls != 0 || len(cp.ArticleLoopParent) == 0 {
+	if cp.ExecutionContract == nil || cp.ExecutionContract.Version != domain.ArticleLoopV2 || cp.ExecutionContract.RunID != run.ID || cp.ArticleLoop != nil || cp.Calls != 0 || len(cp.ArticleLoopParent) == 0 {
 		t.Fatalf("retry imported execution or lost parent lineage: %s", run.Checkpoint)
 	}
 	draft, err := s.engine.Store.ArticleDraft(context.Background(), run.ID)

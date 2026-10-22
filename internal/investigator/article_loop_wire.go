@@ -244,7 +244,14 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		return nil
 	}
 	if review {
-		if err := add(utils.InferEnhancedTool(loopReviewTool, "独立综合核验。逐项执行AC02–07，完整性、未核验范围、主题到章节映射和具体blocking/advisory问题。没有问题不等于完成；不要返回身份哈希。", func(context.Context, domain.ArticleReviewReport) (*schema.ToolResult, error) { return nil, nil })); err != nil {
+		var reviewTool tool.EnhancedInvokableTool
+		var err error
+		if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			reviewTool, err = utils.InferEnhancedTool(loopReviewTool, "独立综合核验AC02–07：先记录每个实际像素的独立可见事实与不确定性，再对照visual_claims、原文和全片主题，提交完成状态及具体blocking/advisory问题。无依据的具体图注或视觉断言为AC05 blocking。不要返回身份哈希或逐段supported。", func(context.Context, domain.ArticleGroundedReviewReport) (*schema.ToolResult, error) { return nil, nil })
+		} else {
+			reviewTool, err = utils.InferEnhancedTool(loopReviewTool, "独立综合核验。逐项执行AC02–07，完整性、未核验范围、主题到章节映射和具体blocking/advisory问题。没有问题不等于完成；不要返回身份哈希。", func(context.Context, domain.ArticleReviewReport) (*schema.ToolResult, error) { return nil, nil })
+		}
+		if err := add(reviewTool, err); err != nil {
 			return nil, err
 		}
 	} else {
@@ -287,6 +294,9 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 				return nil, err
 			}
 			loopLimitationSchema(root)
+			if s.cp.ExecutionContract != nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+				loopSemanticSchema(root)
+			}
 			var projected jsonschema.Schema
 			if err = json.Unmarshal(domain.JSON(root), &projected); err != nil {
 				return nil, err
@@ -297,6 +307,57 @@ func (s *session) loopTools(review bool) ([]*schema.ToolInfo, error) {
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+// Express the same sum type the canonical constructor checks. Merely listing
+// optional fields invited complete but conflicting text/background objects and
+// source arrays in places that never accepted them.
+func loopSemanticSchema(node map[string]any) {
+	props, _ := node["properties"].(map[string]any)
+	if props != nil {
+		node["additionalProperties"] = false
+	}
+	if props["background"] != nil && props["figure"] != nil && props["quote"] != nil {
+		constructors := []string{}
+		for name := range props {
+			if name != "sources" {
+				constructors = append(constructors, name)
+			}
+		}
+		slices.Sort(constructors) // Stable wire identity across recovery.
+		variants := []any{}
+		for _, name := range constructors {
+			required := []string{name}
+			forbidden := []any{}
+			for _, other := range constructors {
+				if other != name {
+					forbidden = append(forbidden, map[string]any{"required": []string{other}})
+				}
+			}
+			if name == "text" || name == "quote" || name == "code" {
+				required = append(required, "sources")
+			} else {
+				forbidden = append(forbidden, map[string]any{"required": []string{"sources"}})
+			}
+			variants = append(variants, map[string]any{"required": required, "not": map[string]any{"anyOf": forbidden}})
+		}
+		node["oneOf"] = variants
+	}
+	if sources, ok := props["sources"].(map[string]any); ok {
+		sources["minItems"] = 1
+	}
+	for _, value := range node {
+		switch value := value.(type) {
+		case map[string]any:
+			loopSemanticSchema(value)
+		case []any:
+			for _, item := range value {
+				if child, ok := item.(map[string]any); ok {
+					loopSemanticSchema(child)
+				}
+			}
+		}
+	}
 }
 
 func loopLimitationSchema(node map[string]any) {
@@ -422,7 +483,7 @@ func loopCanonicalSection(in loopSection, id string, catalog map[string]domain.C
 			}
 			if b.Origin == "video" {
 				if e := refs(c.Sources); e != nil {
-					return fail(e.Error())
+					return fail(fmt.Sprintf("/content/%d/sources: %s", i, e))
 				}
 			} else if len(c.Sources) > 0 {
 				return fail("background explanation must be separate from video claims")
@@ -482,13 +543,13 @@ func loopCanonicalSection(in loopSection, id string, catalog map[string]domain.C
 					return fail("empty list item")
 				}
 				if e := refs(item.Sources); e != nil {
-					return fail(e.Error())
+					return fail(fmt.Sprintf("/content/%d/list/items/%d/sources: %s", i, j, e))
 				}
 				b.Items = append(b.Items, domain.ListItem{ID: fmt.Sprintf("%s_i%d", b.ID, j+1), Content: inline(item.Text, item.Sources)})
 			}
 		case c.Code != nil:
 			if e := refs(c.Sources); e != nil {
-				return fail(e.Error())
+				return fail(fmt.Sprintf("/content/%d/sources: %s", i, e))
 			}
 			if strings.TrimSpace(c.Code.Text) == "" {
 				return fail("empty code")
@@ -503,12 +564,12 @@ func loopCanonicalSection(in loopSection, id string, catalog map[string]domain.C
 			if len(b.Columns) == 0 || len(c.Table.Rows) == 0 || len(c.Sources) > 0 {
 				return fail("table rows need their own sources")
 			}
-			for _, row := range c.Table.Rows {
+			for j, row := range c.Table.Rows {
 				if len(row.Cells) != len(b.Columns) {
 					return fail("table columns mismatch")
 				}
 				if e := refs(row.Sources); e != nil {
-					return fail(e.Error())
+					return fail(fmt.Sprintf("/content/%d/table/rows/%d/sources: %s", i, j, e))
 				}
 				b.Rows = append(b.Rows, domain.TableRow{Cells: row.Cells, CitationIDs: row.Sources})
 			}
@@ -525,7 +586,7 @@ func loopCanonicalSection(in loopSection, id string, catalog map[string]domain.C
 				return fail("figure needs actual frames, caption and visible facts")
 			}
 			if e := refs(f.Frames); e != nil {
-				return fail(e.Error())
+				return fail(fmt.Sprintf("/content/%d/figure/frames: %s", i, e))
 			}
 			last := int64(-1)
 			seen := map[string]bool{}

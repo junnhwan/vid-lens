@@ -3,7 +3,9 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -25,11 +27,38 @@ type ArticleReviewIssue struct {
 	Problem     string   `json:"problem"`
 	Correction  string   `json:"correction"`
 }
+
+// Reject an inconsistent report instead of silently regrading a model finding.
+// The reviewer must decide whether a concrete defect remains. Its abandoned
+// criticism must not become a blocking instruction to rewrite a correct draft.
+func ValidateArticleReviewSeverity(issues []ArticleReviewIssue) error {
+	for _, issue := range issues {
+		if issue.Severity == "advisory" && issue.AC != "AC06" {
+			return fmt.Errorf("inconsistent review: %s content defects cannot be waived as advisory. Report a concrete remaining defect as blocking; if your final conclusion is that there is no defect, omit this issue. General wording/layout preferences belong to AC06 advisory. Return final findings only, without withdrawn criticism or reasoning history", issue.AC)
+		}
+	}
+	return nil
+}
+
 type ArticleReviewReport struct {
 	Complete   bool                 `json:"complete" jsonschema:"description=True only when all required semantic review obligations are assessed; requires unassessed to be an empty array"`
 	Unassessed []string             `json:"unassessed" jsonschema:"description=Only required review obligations that remain unassessed. Must be empty when complete is true. Material already classified as irrelevant is assessed, not an unassessed obligation; optional observations belong in advisory issues"`
 	Topics     []ArticleTopic       `json:"topics" jsonschema:"description=Major source topics and substantive candidate locations; include the end of the video"`
 	Issues     []ArticleReviewIssue `json:"issues"`
+}
+
+// Observations are the reviewer's direct account of delivered pixels, never
+// copied from the author's observations or a caption. They are evidence, not
+// per-paragraph supported labels or a second publication review.
+type ArticleVisualObservation struct {
+	FrameID      string   `json:"frame_id" jsonschema:"description=One exact frame ID from delivered_pixels; do not use a transcript ID"`
+	VisibleFacts []string `json:"visible_facts" jsonschema:"description=Concrete legible facts directly visible in this image, recorded independently before judging candidate claims; no narrative or temporal inference"`
+	Uncertainty  []string `json:"uncertainty" jsonschema:"description=What the image cannot establish or read; empty array only when no relevant uncertainty"`
+}
+
+type ArticleGroundedReviewReport struct {
+	VisualObservations []ArticleVisualObservation `json:"visual_observations" jsonschema:"description=Independent visible facts and limits for every delivered frame in this review scope; assess caption and visual claims against these observations and report unsupported claims as AC05 blocking"`
+	ArticleReviewReport
 }
 type ArticleTopic struct {
 	Topic      string   `json:"topic"`
@@ -37,11 +66,12 @@ type ArticleTopic struct {
 	SectionIDs []string `json:"section_ids"`
 }
 type ArticleReviewRecord struct {
-	CandidateHash       string              `json:"candidate_hash"`
-	EvidenceFingerprint string              `json:"evidence_fingerprint"`
-	PolicyRevision      string              `json:"policy_revision"`
-	Scope               ArticleReviewScope  `json:"scope"`
-	Report              ArticleReviewReport `json:"report"`
+	CandidateHash       string                     `json:"candidate_hash"`
+	EvidenceFingerprint string                     `json:"evidence_fingerprint"`
+	PolicyRevision      string                     `json:"policy_revision"`
+	Scope               ArticleReviewScope         `json:"scope"`
+	Report              ArticleReviewReport        `json:"report"`
+	VisualObservations  []ArticleVisualObservation `json:"visual_observations,omitempty"`
 }
 type ArticleApproval struct {
 	CandidateHash       string   `json:"candidate_hash"`
@@ -60,10 +90,45 @@ func ArticleHash(a Article) string {
 
 func ContentHash(value any) string { h := sha256.Sum256(JSON(value)); return hex.EncodeToString(h[:]) }
 func ArticlePolicyIdentity(spec GenerationSpec) string {
+	return ArticlePolicyIdentityForContract(spec, ArticleLoopV1)
+}
+
+func ArticlePolicyIdentityForContract(spec GenerationSpec, contract string) string {
+	policy := ArticleLoopPolicy
+	if contract == ArticleLoopV2 {
+		policy += ":independent-pixels-v2"
+	}
 	return ContentHash(struct {
 		Policy string
 		Spec   GenerationSpec
-	}{ArticleLoopPolicy, spec})
+	}{policy, spec})
+}
+
+// ValidateArticleVisualObservations checks coverage and evidence identities.
+// Whether visible facts support a claim remains a semantic review obligation.
+func ValidateArticleVisualObservations(observations []ArticleVisualObservation, scope ArticleReviewScope) error {
+	seen := map[string]bool{}
+	for _, observation := range observations {
+		id := observation.FrameID
+		if !slices.Contains(scope.FrameIDs, id) || seen[id] {
+			return fmt.Errorf("visual observation frame %q is duplicate or outside delivered scope", id)
+		}
+		if len(observation.VisibleFacts) == 0 {
+			return fmt.Errorf("visual observation %s needs independent visible facts", id)
+		}
+		for _, fact := range append(append([]string{}, observation.VisibleFacts...), observation.Uncertainty...) {
+			if strings.TrimSpace(fact) == "" {
+				return fmt.Errorf("visual observation %s contains an empty fact or uncertainty", id)
+			}
+		}
+		seen[id] = true
+	}
+	for _, id := range scope.FrameIDs {
+		if !seen[id] {
+			return fmt.Errorf("review incomplete: delivered frame %s has no independent pixel observation; inspect pixels and compare all corresponding candidate visual claims", id)
+		}
+	}
+	return nil
 }
 func ArticleEvidenceIdentity(snap Snapshot, text []Segment, assets []Asset) string {
 	type frame struct {

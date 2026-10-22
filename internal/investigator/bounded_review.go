@@ -255,6 +255,7 @@ func (s *session) reviewUnitInput(ctx context.Context, id string, candidate any,
 			instructions += "\n" + modalityInstructions
 		}
 	}
+	s.questionReviewReading(source, payload, catalog)
 	input := []*schema.Message{schema.SystemMessage(instructions), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "review-units")
 	if err != nil {

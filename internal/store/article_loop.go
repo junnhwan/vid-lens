@@ -29,7 +29,7 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	if err := fence(ctx, tx, c); err != nil {
 		return err
 	}
-	if cp.Contract.Version != domain.ArticleLoopV1 {
+	if !domain.ArticleLoopContract(cp.Contract.Version) {
 		return nil
 	}
 	if cp.Contract.RunID != c.Run.ID || cp.Loop == nil || cp.Loop.CandidateHash != domain.ArticleHash(a) {
@@ -80,7 +80,7 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 	if err != nil {
 		return err
 	}
-	policy := domain.ArticlePolicyIdentity(spec)
+	policy := domain.ArticlePolicyIdentityForContract(spec, cp.Contract.Version)
 	if approval.EvidenceFingerprint != evidence || approval.PolicyRevision != policy {
 		return articleLoopGateError()
 	}
@@ -94,6 +94,12 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 		seen[key] = true
 		record, e := one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, key)
 		if e != nil || record.CandidateHash != h || record.EvidenceFingerprint != evidence || record.PolicyRevision != policy || !record.Report.Complete || len(record.Report.Unassessed) != 0 || len(record.Report.Topics) == 0 {
+			return articleLoopGateError()
+		}
+		if cp.Contract.Version == domain.ArticleLoopV2 && domain.ValidateArticleVisualObservations(record.VisualObservations, record.Scope) != nil {
+			return articleLoopGateError()
+		}
+		if cp.Contract.Version == domain.ArticleLoopV2 && domain.ValidateArticleReviewSeverity(record.Report.Issues) != nil {
 			return articleLoopGateError()
 		}
 		for _, issue := range record.Report.Issues {
@@ -139,7 +145,7 @@ func reuseArticleLoopDraft(ctx context.Context, tx pgx.Tx, previous domain.Run, 
 	var cp struct {
 		Contract domain.ExecutionContract `json:"execution_contract"`
 	}
-	if json.Unmarshal(previous.Checkpoint, &cp) != nil || cp.Contract.Version != domain.ArticleLoopV1 {
+	if json.Unmarshal(previous.Checkpoint, &cp) != nil || !domain.ArticleLoopContract(cp.Contract.Version) {
 		return false, nil
 	}
 	draft, err := one[Draft](ctx, tx, `SELECT result FROM run_operations WHERE run_id=$1 AND kind='article_draft' AND status='completed' ORDER BY (result->>'version')::int DESC LIMIT 1`, previous.ID)
@@ -169,7 +175,9 @@ func reuseArticleLoopDraft(ctx context.Context, tx pgx.Tx, previous domain.Run, 
 		}
 	}
 	// The raw canonical draft is safe to import only into the same contract.
-	_, err = tx.Exec(ctx, `UPDATE job_runs SET checkpoint=jsonb_build_object('schema_version',1,'execution_contract',$2::jsonb,'article_loop_parent',jsonb_build_object('run_id',$3::text,'draft_version',$4::int)) WHERE id=$1`, run, domain.JSON(domain.ExecutionContract{Version: domain.ArticleLoopV1, RunID: run}), previous.ID, draft.Version)
+	// Keep the newly admitted run's contract. A retry may import compatible
+	// content, but it never imports an older review schema or approval.
+	_, err = tx.Exec(ctx, `UPDATE job_runs SET checkpoint=jsonb_set(checkpoint,'{article_loop_parent}',jsonb_build_object('run_id',$2::text,'draft_version',$3::int)) WHERE id=$1`, run, previous.ID, draft.Version)
 	if err != nil {
 		return true, err
 	}

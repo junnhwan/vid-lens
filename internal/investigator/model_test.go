@@ -9,12 +9,41 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 	"vidlens/internal/config"
 	"vidlens/internal/domain"
 )
+
+func TestModelRateLimitPreservesStructuredRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, header string
+		want               time.Duration
+	}{
+		{"native", `{"retry_policy":{"retry":true,"retry_after":13}}`, "", 13 * time.Second},
+		{"nested_message", `{"error":{"message":"{\"retry_policy\":{\"retry\":true,\"retry_after\":13}}"}}`, "", 13 * time.Second},
+		{"header_floor", `{"retry_policy":{"retry_after":13}}`, "23", 23 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.header != "" {
+					w.Header().Set("Retry-After", tc.header)
+				}
+				w.WriteHeader(429)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			req, _ := http.NewRequest(http.MethodPost, server.URL, nil)
+			_, err := (safeTransport{base: http.DefaultTransport}).RoundTrip(req)
+			var work *domain.WorkError
+			if !errors.As(err, &work) || work.Code != "PROVIDER_RATE_LIMITED" || work.RetryAfter != tc.want {
+				t.Fatalf("rate-limit backoff lost: %+v %v", work, err)
+			}
+		})
+	}
+}
 
 func TestRunAnytimeModelsCanBindCapabilityTools(t *testing.T) {
 	for _, name := range []string{"gpt-6-astra", "gpt-5.5", "gpt-5.6-sol"} {

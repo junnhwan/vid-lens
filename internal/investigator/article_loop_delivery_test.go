@@ -65,7 +65,7 @@ func TestArticleLoopT14ReadingSSEExportsAndQAMatrix(t *testing.T) {
 			return
 		}
 		qaCalls.Add(1)
-		writeReviewWireArgs(w, "submit_answer", map[string]any{"kind": "insufficient_evidence", "summary": "合成测试来源没有提供这个细节。", "blocks": []domain.Block{{ID: "reason", Type: "paragraph", Origin: "background_explanation", Content: []domain.Inline{{Type: "text", Text: "合成材料不足以支持更具体的判断，保留证据边界。"}}}}, "parts": []domain.AnswerPart{{Title: "证据边界", BlockIDs: []string{"reason"}}}, "limitations": []domain.Limitation{}})
+		writeReviewWireArgs(w, "submit_answer", map[string]any{"kind": "insufficient_evidence", "summary": "合成测试来源没有提供这个细节。", "blocks": []domain.ArticleReadingBlock{{ID: "reason", Type: "paragraph", Origin: "background_explanation", Text: "合成材料不足以支持更具体的判断，保留证据边界。"}}, "parts": []domain.AnswerPart{{Title: "证据边界", BlockIDs: []string{"reason"}}}, "limitations": []domain.Limitation{}})
 	})
 	ctx := context.Background()
 	if err := s.engine.Run(ctx, s.claim, s.profile); err != nil {
@@ -155,6 +155,9 @@ func TestArticleLoopT14ReadingSSEExportsAndQAMatrix(t *testing.T) {
 		}
 		if frozen.ExecutionContract == nil || frozen.ExecutionContract.Version != domain.ExecutionContractV9 || frozen.ArticleLoop != nil {
 			t.Fatalf("QA contract changed due to article: %s", claim.Run.Checkpoint)
+		}
+		if frozen.ExecutionContract.InputRevision != domain.QuestionReadingV2 {
+			t.Fatal("new article QA did not freeze its compact reading input")
 		}
 		if err = s.engine.Run(ctx, *claim, s.profile); err != nil {
 			t.Fatalf("%s QA failed: %v", variant, err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -132,6 +133,32 @@ func (s *session) readiness(ctx context.Context) (map[string]any, error) {
 	}
 	if reviewIssue != nil {
 		out["evidence_review_issues"] = reviewIssue
+	}
+	if s.questionReading() {
+		delete(out, "can_compose")
+		out["can_submit_answer"] = len(pending) == 0 && len(blockers) == 0
+		out["required_scope"] = "current_question"
+		out["submission_is_not_approval"] = true
+		remaining := max(time.Duration(0), s.profile.ActiveBudget("qa.answer")-time.Duration(s.claim.Run.ActiveMS)*time.Millisecond)
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining = min(remaining, max(time.Duration(0), time.Until(deadline)))
+		}
+		if !s.claim.Run.DeadlineAt.IsZero() {
+			remaining = min(remaining, max(time.Duration(0), time.Until(s.claim.Run.DeadlineAt)))
+		}
+		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)
+		if err != nil {
+			return nil, err
+		}
+		reserve := max(time.Minute, 2*time.Duration(stats.ResponseMS/int64(max(1, stats.Submissions)))*time.Millisecond)
+		out["remaining_active_ms"] = remaining.Milliseconds()
+		out["submission_and_review_time_reserve_ms"] = reserve.Milliseconds()
+		if len(pending) == 0 && len(blockers) == 0 && reviewIssue == nil && s.requiredRepairTool() == "" {
+			out["next_action"] = "Read only the original evidence needed for the current question, then submit a concise complete answer with representative citations. There is no full-video or article-composition prerequisite. If the required fact remains unavailable, submit an honest insufficient_evidence answer rather than researching unrelated ranges. Submission still requires source and semantic validation."
+			if remaining <= reserve {
+				out["next_action"] = "The remaining frozen active time is reserved for submission and independent validation. Stop optional reading and submit the focused answer now using delivered evidence; preserve any essential unknown as insufficient_evidence rather than inventing facts. Submission never bypasses source/semantic review."
+			}
+		}
 	}
 	if s.policy().Paced && s.turn == nil {
 		stats, err := s.engine.Store.ModelExecution(ctx, s.claim.Run.ID)

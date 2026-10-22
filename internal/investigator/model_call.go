@@ -32,6 +32,7 @@ func (s *session) responseLimits() modelResponseLimits {
 		// Streaming cadence is not a second deadline for these bounded stages.
 		limits.First, limits.Idle = limits.Total, limits.Total
 	}
+	limits.NarrowOnDeadline = s.articleLoop() && s.cp.ExecutionContract.Version == domain.ArticleLoopV2
 	return limits
 }
 
@@ -178,6 +179,13 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 		}
 	}
 	if s.articleLoop() {
+		limited, err := s.engine.Store.ModelResponseBudgetExhausted(ctx, s.claim.Run.ID, key)
+		if err != nil {
+			return nil, err
+		}
+		if limited {
+			return nil, &domain.WorkError{Code: "MODEL_RESPONSE_BUDGET_EXHAUSTED", Message: "冻结调用已达到响应时间上限；原发送结果未知，需缩小下一工作范围。"}
+		}
 		rejected, err := s.engine.Store.ModelContextExceeded(ctx, s.claim.Run.ID, key)
 		if err != nil {
 			return nil, err
@@ -402,7 +410,7 @@ func (m *meteredModel) Generate(ctx context.Context, in []*schema.Message, opts 
 			// the question needs investigation. No plain-text-then-submit round.
 			options = append(options, model.WithToolChoice(schema.ToolChoiceForced))
 		}
-		result, err := receiveModelResponse(sub, base, NormalizeToolImages(in), limits, options...)
+		result, err := receiveModelResponse(sub, base, s.modelImageInput(in), limits, options...)
 		release()
 		if errors.Is(err, errEmptyModelResponse) {
 			// Preserve the provider's complete stream/usage report while recording

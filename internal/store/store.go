@@ -306,8 +306,8 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 			if err != nil {
 				return "", err
 			}
-			if p.ArticleHarness == domain.ArticleLoopV1 {
-				version = domain.ArticleLoopV1
+			if domain.ArticleLoopContract(p.ArticleHarness) {
+				version = p.ArticleHarness
 			}
 		}
 		cp["execution_contract"] = domain.ExecutionContract{Version: version, RunID: id}

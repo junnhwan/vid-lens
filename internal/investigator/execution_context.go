@@ -25,6 +25,9 @@ func (s *session) validateExecution() error {
 		return domain.Err(422, "INTERNAL_FAILURE", "检查点协议版本不兼容。")
 	}
 	if contract := s.cp.ExecutionContract; contract != nil {
+		if contract.InputRevision != "" && (!domain.QuestionReadingContract(contract.InputRevision) || s.turn == nil || contract.Version != domain.ExecutionContractV9) {
+			return domain.Err(422, "INTERNAL_FAILURE", "问答输入投影修订与冻结契约不兼容。")
+		}
 		if (contract.Version != domain.ExecutionContractV1 && contract.Version != domain.ExecutionContractV2 && contract.Version != domain.ExecutionContractV3 && contract.Version != domain.ExecutionContractV4 && contract.Version != domain.ExecutionContractV5 && contract.Version != domain.ExecutionContractV6 && contract.Version != domain.ExecutionContractV7 && contract.Version != domain.ExecutionContractV8 && contract.Version != domain.ExecutionContractV9 && !domain.StagedWorkflowContract(contract.Version)) || contract.RunID != s.claim.Run.ID {
 			return domain.Err(422, "INTERNAL_FAILURE", "执行契约版本或所属任务不兼容。")
 		}
@@ -90,7 +93,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 		s.cp.Protocol = domain.ArticleDraftProtocol
 	}
 	instruction := protocolInstructions(s.spec, s.turn != nil, s.cp.LayoutVersion, s.cp.HarnessRevision)
-	if s.boundedSourceContext() {
+	if s.questionReading() && s.cp.ExecutionContract.InputRevision == domain.QuestionReadingV2 {
+		instruction = questionReadingInstructions
+	} else if s.boundedSourceContext() {
 		instruction += "\n" + s.sourceInstructions()
 	}
 	msgs := []*schema.Message{schema.SystemMessage(instruction)}
@@ -108,6 +113,9 @@ func (s *session) executionMessages(ctx context.Context, resumed bool) ([]*schem
 	dynamic := map[string]any{}
 	if s.turn != nil {
 		fixed["article"] = s.article
+		if s.questionReading() {
+			fixed = map[string]any{"article": domain.ReadingArticle(*s.article), "article_context_role": "Full article reading projection, with unchanged chapter/block identities and all prose, lists, code, tables, captions and limitations. This is article context, not original video evidence. Read original source passages or actual pixels to support video claims. Canonical article-passage quotes are checked against the immutable article.", "question_scope_rule": "Only answer the current question at its requested depth. There is no whole-video survey, article outline, chapter-writing or article-completion obligation. Read the necessary original passages or actual pixels, then submit the focused answer; do not keep reading unrelated ranges. Preserve genuine evidence gaps explicitly."}
+		}
 		fixed["goal"] = "Answer the current question about this video using verified evidence and formal submission."
 		dynamic["question"] = s.turn.Question
 		dynamic["context"] = s.turn.Context

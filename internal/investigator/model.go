@@ -81,6 +81,9 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		} else if t, e := http.ParseTime(r.Header.Get("Retry-After")); e == nil {
 			delay = time.Until(t)
 		}
+		if retry {
+			delay = max(delay, providerRetryAfter(body, 0))
+		}
 		return nil, &domain.WorkError{Code: code, Message: "模型服务未能完成请求。", Transient: retry, RetryAfter: max(time.Duration(0), delay)}
 	}
 	if observer != nil {
@@ -89,6 +92,35 @@ func (t safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		r.Body = &observedBody{ReadCloser: r.Body, o: observer}
 	}
 	return r, nil
+}
+
+// Compatible relays sometimes preserve a structured retry policy inside the
+// error JSON (including a JSON-encoded message) instead of an HTTP header.
+// Read bounded numeric guidance only; body text is never an instruction.
+func providerRetryAfter(body []byte, depth int) time.Duration {
+	if depth > 4 {
+		return 0
+	}
+	var encoded string
+	if json.Unmarshal(body, &encoded) == nil {
+		return providerRetryAfter([]byte(encoded), depth+1)
+	}
+	var value map[string]json.RawMessage
+	if json.Unmarshal(body, &value) != nil {
+		return 0
+	}
+	var policy struct {
+		RetryAfter float64 `json:"retry_after"`
+	}
+	if json.Unmarshal(value["retry_policy"], &policy) == nil && policy.RetryAfter > 0 && policy.RetryAfter <= 86400 {
+		return time.Duration(policy.RetryAfter * float64(time.Second))
+	}
+	for _, key := range []string{"error", "message"} {
+		if delay := providerRetryAfter(value[key], depth+1); delay > 0 {
+			return delay
+		}
+	}
+	return 0
 }
 
 func providerContextExceeded(body []byte) bool {
@@ -224,11 +256,59 @@ func NormalizeToolImages(input []*schema.Message) []*schema.Message {
 	return out
 }
 
+func (s *session) modelImageInput(input []*schema.Message) []*schema.Message {
+	out := NormalizeToolImages(input)
+	c := s.cp.ExecutionContract
+	if c == nil || (c.Version != domain.ArticleLoopV2 && c.InputRevision != domain.QuestionReadingV2) {
+		return out
+	}
+	move := false
+	for i, m := range out {
+		for _, part := range m.UserInputMultiContent {
+			move = move || (part.Type == schema.ChatMessagePartTypeImageURL && m.Role == schema.User && i != len(out)-1)
+		}
+	}
+	if !move {
+		return out
+	}
+	// Some compatible relays forward pixels only from the final user message.
+	// Preserve the frozen text and complete tool exchanges; relocate the exact
+	// hydrated pixels, never a caption or a replacement image, at this boundary.
+	var pixels []schema.MessageInputPart
+	result := make([]*schema.Message, 0, len(out)+1)
+	for _, m := range out {
+		copy := *m
+		copy.UserInputMultiContent = nil
+		for _, part := range m.UserInputMultiContent {
+			if part.Type == schema.ChatMessagePartTypeImageURL && m.Role == schema.User {
+				if id, ok := part.Extra["frame_id"].(string); ok {
+					pixels = append(pixels, schema.MessageInputPart{Type: schema.ChatMessagePartTypeText, Text: "frame_id=" + id})
+				}
+				pixels = append(pixels, part)
+			} else {
+				copy.UserInputMultiContent = append(copy.UserInputMultiContent, part)
+			}
+		}
+		if copy.Role == schema.User && copy.Content == "" && len(copy.UserInputMultiContent) == 0 {
+			continue
+		}
+		result = append(result, &copy)
+	}
+	if len(pixels) == 0 {
+		return out
+	}
+	result = append(result, &schema.Message{Role: schema.User, UserInputMultiContent: pixels})
+	return result
+}
+
 func completeModelResponse(ctx context.Context, base model.ToolCallingChatModel, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	return receiveModelResponse(ctx, base, in, modelResponseLimits{Total: 300 * time.Second, First: 90 * time.Second, Idle: 60 * time.Second}, opts...)
 }
 
-type modelResponseLimits struct{ Total, First, Idle time.Duration }
+type modelResponseLimits struct {
+	Total, First, Idle time.Duration
+	NarrowOnDeadline   bool
+}
 
 var errEmptyModelResponse = &domain.WorkError{Code: "PROVIDER_UNAVAILABLE", Message: "模型响应已结束，但没有正文或工具动作；空响应未作为有效结果。", Transient: true}
 
@@ -246,6 +326,7 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 	first := time.AfterFunc(limits.First, func() { cancel(timeout("模型未在期限内返回有效响应。")) })
 	defer first.Stop()
 	var idle *time.Timer
+	hadActivity := false
 	defer func() {
 		if idle != nil {
 			idle.Stop()
@@ -257,6 +338,9 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 				return ctx.Err()
 			}
 			if errors.Is(cause, context.DeadlineExceeded) {
+				if limits.NarrowOnDeadline && hadActivity {
+					return &domain.WorkError{Code: "MODEL_RESPONSE_BUDGET_EXHAUSTED", Message: "响应已开始但未在本次冻结时间内完整结束；发送结果仍为未知，下一调用须缩小工作范围。"}
+				}
 				return timeout("模型单次调用超过期限。")
 			}
 			return cause
@@ -295,6 +379,7 @@ func receiveModelResponse(ctx context.Context, base model.ToolCallingChatModel, 
 			meaningful = true
 		}
 		if meaningful {
+			hadActivity = true
 			first.Stop()
 			if idle == nil {
 				idle = time.AfterFunc(limits.Idle, func() { cancel(timeout("模型响应流长时间没有新内容。")) })

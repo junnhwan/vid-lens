@@ -306,6 +306,7 @@ func (s *session) runEvidenceReview(ctx context.Context, key, hash string, candi
 	if s.turn != nil {
 		source["question"] = s.turn.Question
 	}
+	s.questionReviewReading(source, payload, catalog)
 	input := []*schema.Message{schema.SystemMessage(instruction), schema.UserMessage(string(domain.JSON(source))), schema.UserMessage(string(domain.JSON(payload)))}
 	parts, err := s.imageInput(ctx, ids, "evidence-review")
 	if err != nil {

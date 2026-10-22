@@ -5,6 +5,7 @@ package investigator
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -22,37 +23,44 @@ type tokenMetric struct {
 	Path   string `json:"source_path,omitempty"`
 }
 type usageReport struct {
-	StartedAt            time.Time   `json:"response_started_at"`
-	FinishedAt           *time.Time  `json:"response_finished_at"`
-	Schema               string      `json:"schema"`
-	Input                tokenMetric `json:"input"`
-	Output               tokenMetric `json:"output"`
-	Total                tokenMetric `json:"total"`
-	CacheRead            tokenMetric `json:"cache_read"`
-	CacheWrite           tokenMetric `json:"cache_write"`
-	Reasoning            tokenMetric `json:"reasoning"`
-	RequestedOutput      *int64      `json:"requested_output_tokens,omitempty"`
-	ThinkingRequest      string      `json:"thinking_request"`
-	StreamStatus         string      `json:"stream_status"`
-	HTTPStatus           *int        `json:"http_status,omitempty"`
-	RequestID            string      `json:"request_id,omitempty"`
-	ResponseID           string      `json:"response_id,omitempty"`
-	ObservationStatus    string      `json:"observation_status"`
-	FinishReason         string      `json:"finish_reason,omitempty"`
-	FirstMeaningfulMS    *int64      `json:"first_meaningful_delta_ms"`
-	FirstByteMS          *int64      `json:"first_byte_ms"`
-	FirstResponseMS      *int64      `json:"first_response_ms"`
-	TotalMS              int64       `json:"total_ms"`
-	Layout               string      `json:"layout_version"`
-	ToolsHash            string      `json:"tools_hash,omitempty"`
-	StablePrefixHash     string      `json:"stable_prefix_hash,omitempty"`
-	CachePolicy          string      `json:"cache_policy"`
-	HintsSent            bool        `json:"hints_sent"`
-	CostReporting        string      `json:"cost_reporting"`
-	ProviderErrorType    string      `json:"provider_error_type,omitempty"`
-	ProviderErrorCode    string      `json:"provider_error_code,omitempty"`
-	ProviderErrorParam   string      `json:"provider_error_param,omitempty"`
-	ProviderErrorMessage string      `json:"provider_error_message,omitempty"`
+	PixelInputs          []pixelInputReceipt `json:"pixel_inputs,omitempty"`
+	StartedAt            time.Time           `json:"response_started_at"`
+	FinishedAt           *time.Time          `json:"response_finished_at"`
+	Schema               string              `json:"schema"`
+	Input                tokenMetric         `json:"input"`
+	Output               tokenMetric         `json:"output"`
+	Total                tokenMetric         `json:"total"`
+	CacheRead            tokenMetric         `json:"cache_read"`
+	CacheWrite           tokenMetric         `json:"cache_write"`
+	Reasoning            tokenMetric         `json:"reasoning"`
+	RequestedOutput      *int64              `json:"requested_output_tokens,omitempty"`
+	ThinkingRequest      string              `json:"thinking_request"`
+	StreamStatus         string              `json:"stream_status"`
+	HTTPStatus           *int                `json:"http_status,omitempty"`
+	RequestID            string              `json:"request_id,omitempty"`
+	ResponseID           string              `json:"response_id,omitempty"`
+	ObservationStatus    string              `json:"observation_status"`
+	FinishReason         string              `json:"finish_reason,omitempty"`
+	FirstMeaningfulMS    *int64              `json:"first_meaningful_delta_ms"`
+	FirstByteMS          *int64              `json:"first_byte_ms"`
+	FirstResponseMS      *int64              `json:"first_response_ms"`
+	TotalMS              int64               `json:"total_ms"`
+	Layout               string              `json:"layout_version"`
+	ToolsHash            string              `json:"tools_hash,omitempty"`
+	StablePrefixHash     string              `json:"stable_prefix_hash,omitempty"`
+	CachePolicy          string              `json:"cache_policy"`
+	HintsSent            bool                `json:"hints_sent"`
+	CostReporting        string              `json:"cost_reporting"`
+	ProviderErrorType    string              `json:"provider_error_type,omitempty"`
+	ProviderErrorCode    string              `json:"provider_error_code,omitempty"`
+	ProviderErrorParam   string              `json:"provider_error_param,omitempty"`
+	ProviderErrorMessage string              `json:"provider_error_message,omitempty"`
+}
+
+type pixelInputReceipt struct {
+	MessageIndex int    `json:"message_index"`
+	SHA256       string `json:"sha256"`
+	Bytes        int    `json:"bytes"`
 }
 type usageObserver struct {
 	mu             sync.Mutex
@@ -121,14 +129,25 @@ func (o *usageObserver) wire(req *http.Request) {
 		prefix, _ := json.Marshal(body.Messages[:3])
 		o.report.StablePrefixHash = digest(prefix)
 	}
-	for _, m := range body.Messages {
+	for index, m := range body.Messages {
 		var msg struct {
 			Content []struct {
+				Type     string `json:"type"`
+				ImageURL struct {
+					URL string `json:"url"`
+				} `json:"image_url"`
 				Cache json.RawMessage `json:"cache_control"`
 			} `json:"content"`
 		}
 		if json.Unmarshal(m, &msg) == nil {
 			for _, p := range msg.Content {
+				if p.Type == "image_url" && strings.HasPrefix(p.ImageURL.URL, "data:image/") {
+					if _, data, ok := strings.Cut(p.ImageURL.URL, ";base64,"); ok {
+						if pixels, err := base64.StdEncoding.DecodeString(data); err == nil && len(pixels) > 0 {
+							o.report.PixelInputs = append(o.report.PixelInputs, pixelInputReceipt{MessageIndex: index, SHA256: digest(pixels), Bytes: len(pixels)})
+						}
+					}
+				}
 				if len(p.Cache) > 0 {
 					o.report.HintsSent = true
 				}
