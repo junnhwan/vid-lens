@@ -265,6 +265,7 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		system = loopReviewInstructions
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 			system += "\n" + loopGroundedReviewInstructions + "\n" + loopGroundedSeverityInstruction + "\n" + loopFaithfulReviewInstructions
+			system += "\n每条issues必须显式填写severity字段，值只能是blocking或advisory；不能只写ac而省略severity。视觉问题的evidence_ids优先使用delivered_pixels里的完整id（与visual_observations.frame_id一致）；候选配图引用已绑定相同的不可变图片ID，不按文章出现顺序重新编号。"
 		}
 		payload["scope"] = p.Scope
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
@@ -307,6 +308,11 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		}
 		payload["candidate"] = a
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+			a, err = loopReviewPixelIdentities(a)
+			if err != nil {
+				return nil, err
+			}
+			payload["candidate"] = a
 			payload["visual_claims"] = loopVisualClaims(a, p.Scope.FrameIDs)
 		}
 	} else {
@@ -662,7 +668,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 	hasBlockingOmission := false
 	for issueIndex, issue := range report.Issues {
 		if issue.Severity != "blocking" && issue.Severity != "advisory" {
-			return errors.New("invalid severity")
+			return fmt.Errorf("issues[%d].severity is %q; explicitly supply severity=blocking for a concrete AC02-05/AC07 defect, or advisory only for an AC06 wording/layout preference. Return every issue with this required field; do not omit it", issueIndex, issue.Severity)
 		}
 		if !slices.Contains([]string{"AC02", "AC03", "AC04", "AC05", "AC06", "AC07"}, issue.AC) || strings.TrimSpace(issue.Location) == "" || strings.TrimSpace(issue.Problem) == "" || strings.TrimSpace(issue.Correction) == "" {
 			return errors.New("issue needs AC, location, concrete problem and correction")

@@ -1,7 +1,9 @@
 package investigator
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -45,6 +47,66 @@ func TestArticleLoopAuthorDraftRoundTripPreservesSemanticContentAndEvidence(t *t
 	got, gotCits, gotNotes, gotLimits, err := loopCanonicalSection(decoded.Sections[0], "stable", catalog, transcript)
 	if err != nil || domain.ContentHash(got) != domain.ContentHash(sec) || domain.ContentHash(gotCits) != domain.ContentHash(cits) || domain.ContentHash(gotNotes) != domain.ContentHash(notes) || domain.ContentHash(gotLimits) != domain.ContentHash(limits) {
 		t.Fatalf("semantic projection changed persisted meaning/evidence: %v\n%s", err, domain.JSON(got))
+	}
+}
+
+func TestArticleLoopRetryReviewSeparatesCitationAndPixelAliases(t *testing.T) {
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) { t.Error("no provider expected") })
+	ctx := context.Background()
+	frames, err := s.engine.Store.RunFrames(ctx, s.claim.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cp.ArticleLoop = &articleLoopState{Frames: []string{frames[0].ID}, SeenFrames: []string{frames[0].ID}, ReadSources: s.loopAllSourceAliases()}
+	if _, _, err = s.saveLoopSections(ctx, "seed", loopGoodWrite()); err != nil {
+		t.Fatal(err)
+	}
+	saved, d, err := s.loadLoopDraft(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Retry copies only used pixels, while canonical citations retain old names.
+	cit := d.Article.Citations["f1"]
+	delete(d.Article.Citations, "f1")
+	cit.ID = "f4"
+	d.Article.Citations["f4"] = cit
+	d.Article.Sections[0].Blocks[1].CitationIDs = []string{"f4"}
+	if _, err = s.engine.Store.SaveArticleDraft(ctx, s.claim, "old-frame-alias", nil, saved.Version, d); err != nil {
+		t.Fatal(err)
+	}
+	s.cp.ArticleLoop.CandidateHash = domain.ArticleHash(d.Article)
+	scope := domain.ArticleReviewScope{Global: true, FrameIDs: []string{frames[0].ID}, SectionIDs: []string{d.Article.Sections[0].ID}}
+	for _, original := range s.transcript {
+		scope.SourceIDs = append(scope.SourceIDs, original.ID)
+	}
+	input, err := s.loopInput(ctx, articleLoopCall{Mode: "review", Scope: &scope, Frames: scope.FrameIDs, Sources: s.loopAllSourceAliases()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var review map[string]json.RawMessage
+	for _, msg := range input {
+		var p map[string]json.RawMessage
+		if json.Unmarshal([]byte(msg.Content), &p) == nil && p["candidate"] != nil {
+			review = p
+		}
+	}
+	if strings.Contains(string(review["candidate"]), `"f4"`) || strings.Contains(string(review["visual_claims"]), `"f4"`) {
+		t.Fatal("old f4 citation is still presented as a current pixel alias")
+	}
+	if !strings.Contains(string(review["candidate"]), frames[0].ID) || !strings.Contains(string(review["citation_bindings"]), frames[0].ID) {
+		t.Fatal("citation binding lost")
+	}
+	_, after, err := s.loadLoopDraft(ctx)
+	if err != nil || domain.ArticleHash(after.Article) != domain.ArticleHash(d.Article) {
+		t.Fatal("review projection mutated authoritative candidate")
+	}
+}
+
+func TestArticleLoopMissingSeverityHasActionablePath(t *testing.T) {
+	report := domain.ArticleReviewReport{Complete: true, Topics: []domain.ArticleTopic{{Topic: "topic"}}, Issues: []domain.ArticleReviewIssue{{AC: "AC05"}}}
+	err := validateLoopReport(report, domain.ArticleReviewScope{}, domain.Article{}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "issues[0].severity") || !strings.Contains(err.Error(), "blocking") {
+		t.Fatalf("opaque repair feedback: %v", err)
 	}
 }
 

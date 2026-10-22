@@ -1,12 +1,63 @@
 package investigator
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
 	"vidlens/internal/domain"
 )
+
+// A retried draft retains old fN citation keys but may copy only some frames.
+// Present immutable frame IDs throughout review instead of two conflicting fN
+// namespaces. This is a detached view; the frozen article/hash never changes.
+func loopReviewPixelIdentities(a domain.Article) (domain.Article, error) {
+	var out domain.Article
+	if err := json.Unmarshal(domain.JSON(a), &out); err != nil {
+		return out, err
+	}
+	refs := map[string]string{}
+	for id, cit := range a.Citations {
+		if cit.Kind == "video_frame" && cit.FrameID != "" {
+			refs[id] = cit.FrameID
+			delete(out.Citations, id)
+			cit.ID = cit.FrameID
+			out.Citations[cit.ID] = cit
+		}
+	}
+	ids := func(values []string) {
+		for i, id := range values {
+			if frame, ok := refs[id]; ok {
+				values[i] = frame
+			}
+		}
+	}
+	inline := func(values []domain.Inline) {
+		for i, v := range values {
+			if frame, ok := refs[v.CitationID]; ok {
+				values[i].CitationID = frame
+			}
+		}
+	}
+	for i := range out.Sections {
+		for j := range out.Sections[i].Blocks {
+			b := &out.Sections[i].Blocks[j]
+			ids(b.CitationIDs)
+			inline(b.Content)
+			for k := range b.Items {
+				inline(b.Items[k].Content)
+			}
+			for k := range b.Rows {
+				ids(b.Rows[k].CitationIDs)
+			}
+		}
+	}
+	for i := range out.Limitations {
+		ids(out.Limitations[i].CitationIDs)
+	}
+	return out, nil
+}
 
 // Project persisted canonical content back into the author's own write language.
 // The renderer AST belongs only to the program and the independent reviewer;
