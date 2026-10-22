@@ -747,7 +747,7 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 		}
 		for _, id := range topic.SectionIDs {
 			if !slices.ContainsFunc(a.Sections, func(sec domain.Section) bool { return sec.ID == id }) {
-				return errors.New("topic points to unknown section")
+				return fmt.Errorf("topics[%d].section_ids contains unknown chapter %q; use exact candidate.sections IDs, not invented or abbreviated identities", topicIndex, id)
 			}
 		}
 	}
@@ -759,10 +759,13 @@ func validateLoopReport(report domain.ArticleReviewReport, scope domain.ArticleR
 // remain rejected, and a blocking issue still needs actual delivered evidence.
 func loopReviewLocations(report domain.ArticleReviewReport, a domain.Article) domain.ArticleReviewReport {
 	locations := map[string]bool{}
+	chapters := map[string]string{}
 	for _, section := range a.Sections {
 		locations[section.ID] = true
+		chapters[section.ID] = section.ID
 		for _, block := range section.Blocks {
 			locations[block.ID] = true
+			chapters[block.ID] = section.ID
 			// A quote's citation key identifies the candidate passage, not an
 			// additional original. Preserve it as a location when the reviewer
 			// supplies it alongside actual source evidence. Never infer evidence
@@ -774,8 +777,21 @@ func loopReviewLocations(report domain.ArticleReviewReport, a domain.Article) do
 			}
 			for _, item := range block.Items {
 				locations[item.ID] = true
+				chapters[item.ID] = section.ID
 			}
 		}
+	}
+	// A real paragraph/item is a more precise candidate position. Resolve its
+	// owning chapter without guessing prefixes or changing original evidence.
+	for index := range report.Topics {
+		ids := []string{}
+		for _, id := range report.Topics[index].SectionIDs {
+			if chapter, ok := chapters[id]; ok {
+				id = chapter
+			}
+			ids = appendUnique(ids, id)
+		}
+		report.Topics[index].SectionIDs = ids
 	}
 	for index := range report.Issues {
 		issue := &report.Issues[index]

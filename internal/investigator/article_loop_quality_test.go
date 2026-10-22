@@ -201,12 +201,27 @@ func TestArticleLoopCandidateLocationsNeverSubstituteForOriginalEvidence(t *test
 	if string(domain.JSON(report.Issues[0].EvidenceIDs)) != `["t1"]` || !strings.Contains(report.Issues[0].Location, "q_saved") {
 		t.Fatal("quote identity was lost or substituted for original evidence")
 	}
+	report.Topics[0].SectionIDs = []string{"s_current_b1", "s_current"}
+	report = loopReviewLocations(report, a)
+	if err := validateLoopReport(report, scope, a, []domain.Segment{{ID: "original"}}, nil); err != nil {
+		t.Fatal("exact paragraph location was not resolved to its owning chapter", err)
+	}
+	if string(domain.JSON(report.Topics[0].SectionIDs)) != `["s_current"]` {
+		t.Fatal("topic chapter normalization duplicated or invented coverage")
+	}
 	for _, ids := range [][]string{{"s_current"}, {"s_invented", "t1"}, {"q_saved"}, {"q_invented", "t1"}, {"q_saved", "t2"}} {
 		report.Issues[0].EvidenceIDs = ids
 		projected := loopReviewLocations(report, a)
 		if validateLoopReport(projected, scope, a, []domain.Segment{{ID: "original"}}, nil) == nil {
 			t.Fatal("candidate-only or invented evidence bypassed original evidence requirement")
 		}
+	}
+	report.Issues[0].EvidenceIDs = []string{"t1"}
+	report.Topics[0].SectionIDs = []string{"s_current_b_invented"}
+	report = loopReviewLocations(report, a)
+	err := validateLoopReport(report, scope, a, []domain.Segment{{ID: "original"}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "topics[0].section_ids") || !strings.Contains(err.Error(), "s_current_b_invented") {
+		t.Fatalf("invented paragraph accepted or missing actionable topic path: %v", err)
 	}
 }
 
