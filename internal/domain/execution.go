@@ -54,13 +54,17 @@ const SourceIndexProtocolV1 = "source-index-2026-10-20-v1"
 
 const CurrentExecutionContract = ExecutionContractV12
 
-// ArticleLoopV1 is an independent article adapter. Admission is opt-in until
-// the paired quality evaluation and release decision; QA keeps its own adapter.
+// ArticleLoopV1 is the first independent article adapter. Historical runs keep
+// this identity; QA keeps its own adapter.
 const ArticleLoopV1 = "vidlens-article-loop-2026-10-22-v1"
 
 // V2 requires independently grounded pixel observations in the integrated
 // review. V1 runs retain their admitted report schema and policy identity.
 const ArticleLoopV2 = "vidlens-article-loop-2026-10-22-v2"
+
+// Only newly admitted articles use this default. Restoring an existing run
+// never replaces its frozen contract; legacy draft retries retain their adapter.
+const CurrentArticleContract = ArticleLoopV2
 
 func ArticleLoopContract(version string) bool {
 	return version == ArticleLoopV1 || version == ArticleLoopV2

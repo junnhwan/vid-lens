@@ -8,22 +8,30 @@ import (
 	"vidlens/internal/domain"
 )
 
-func TestArticleLoopAdmissionIsOptInAndQAIsIndependent(t *testing.T) {
+func TestArticleLoopAdmissionDefaultsToV2AndKeepsExplicitHistoricalContracts(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	owner := session(t, s)
+	_, p, err := s.CurrentConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ArticleHarness = ""
+	if _, err = s.SaveConfig(ctx, p, "", ""); err != nil {
+		t.Fatal(err)
+	}
 	req, claim := prepared(t, s, owner)
 	var original struct {
 		Contract domain.ExecutionContract `json:"execution_contract"`
 	}
 	_ = json.Unmarshal(claim.Run.Checkpoint, &original)
-	if original.Contract.Version != domain.ExecutionContractV12 {
-		t.Fatal("unvalidated article adapter became default")
+	if original.Contract.Version != domain.ArticleLoopV2 {
+		t.Fatal("new article did not select the current independent loop")
 	}
 	if _, err := s.Fail(ctx, claim, domain.Failure{Code: "MODEL_RESULT_INVALID", CanRetry: true}, false, 0); err != nil {
 		t.Fatal(err)
 	}
-	_, p, err := s.CurrentConfig(ctx)
+	_, p, err = s.CurrentConfig(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

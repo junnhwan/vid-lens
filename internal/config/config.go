@@ -71,7 +71,7 @@ func (p Profile) MaxRetries(kind string) int {
 	return 2
 }
 func (p Profile) Validate() error {
-	if p.ArticleHarness != "" && p.ArticleHarness != "vidlens-article-loop-2026-10-22-v1" && p.ArticleHarness != "vidlens-article-loop-2026-10-22-v2" {
+	if p.ArticleHarness != "" && p.ArticleHarness != "vidlens-article-loop-2026-10-22-v1" && p.ArticleHarness != "vidlens-article-loop-2026-10-22-v2" && p.ArticleHarness != "vidlens-workflow-2026-10-21-v3" {
 		return errors.New("unsupported article harness")
 	}
 	if p.InputCharsLimit < 0 || p.InputCharsLimit > 8000000 || p.ContextTokens < 0 || p.ContextTokens > 4000000 {

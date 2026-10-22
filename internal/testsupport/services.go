@@ -44,6 +44,9 @@ func Services(t *testing.T) (*store.Store, *resource.Manager, config.Config) {
 		t.Fatal(e)
 	}
 	p := config.DefaultProfile()
+	// Historical adapter fixtures explicitly select their contract; current
+	// article-loop fixtures override it before admission.
+	p.ArticleHarness = domain.ExecutionContractV12
 	p.ModelBaseURL = "http://example.test/v1"
 	p.ModelName = "test"
 	if e = s.Bootstrap(ctx, p, "test", ""); e != nil {

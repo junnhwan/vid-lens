@@ -329,10 +329,13 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		if err = loopDecode(raw, &in); err != nil {
 			break
 		}
-		if len(in.Sections) > l.OutputSections {
+		if s.cp.ExecutionContract.Version != domain.ArticleLoopV2 && len(in.Sections) > l.OutputSections {
 			l.Feedback = domain.JSON(map[string]any{"failure": "output_scope", "max_sections": l.OutputSections})
 			return false, nil
 		}
+		// V2's smaller output target guides recovery from malformed/truncated
+		// responses. A complete valid write is still governed by the frozen
+		// 40-section/128-KiB limits, not rejected for exceeding that suggestion.
 		result, progress, e := s.saveLoopSections(ctx, key, in)
 		if e != nil {
 			return false, e

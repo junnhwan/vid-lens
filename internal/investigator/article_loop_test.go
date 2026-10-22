@@ -404,6 +404,9 @@ func TestArticleLoopT03TruncationNarrowsAuthorAndReview(t *testing.T) {
 					if author.Load() > 1 {
 						var max int
 						_ = json.Unmarshal(p["max_sections_this_action"], &max)
+						if p["recommended_sections_this_action"] != nil {
+							_ = json.Unmarshal(p["recommended_sections_this_action"], &max)
+						}
 						if max >= 40 {
 							t.Error("truncated author repeated original output scope")
 						}

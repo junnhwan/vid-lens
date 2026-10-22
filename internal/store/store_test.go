@@ -21,6 +21,9 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(e)
 	}
 	p := config.DefaultProfile()
+	// Shared fixtures exercise historical publication/retry adapters. The
+	// current admission contract is tested separately with an empty override.
+	p.ArticleHarness = domain.ExecutionContractV12
 	p.ModelBaseURL = "https://example.test/v1"
 	p.ModelName = "test"
 	if e := s.Bootstrap(ctx, p, "secret", "asr"); e != nil {

@@ -302,11 +302,12 @@ func newRun(ctx context.Context, tx pgx.Tx, kind, key, source, configID string, 
 	if kind == "article.generate" || kind == "qa.answer" {
 		version := domain.CurrentExecutionContract
 		if kind == "article.generate" {
+			version = domain.CurrentArticleContract
 			p, err := one[config.Profile](ctx, tx, "SELECT profile FROM runtime_config_revisions WHERE id=$1", configID)
 			if err != nil {
 				return "", err
 			}
-			if domain.ArticleLoopContract(p.ArticleHarness) {
+			if domain.ArticleLoopContract(p.ArticleHarness) || p.ArticleHarness == domain.ExecutionContractV12 {
 				version = p.ArticleHarness
 			}
 		}

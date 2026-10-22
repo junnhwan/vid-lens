@@ -32,6 +32,10 @@ const loopGroundedSeverityInstruction = `严重性由同一AC标准决定：AC02
 
 const loopReadingInstructions = `candidate 是程序从固定canonical文章逐块展开的完整语义正文，不是摘要；只移除了渲染节点和重复引用元数据，citation_bindings把引用身份绑定到上方原文tN或实际帧。先按sections/blocks的读者顺序读完各章，检查每章的开头、收尾及章间衔接：是否有未完成的句段、悬空的判断/引导语、缺少必要解释或跨章重复。严重断句/不可独立理解须给AC06 blocking并定位实际块；不要因为来源引用存在而忽略正文缺失。所有文字、列表项、代码、表格单元、图注、引用位置与局限均保留；渲染结构与来源身份由程序检查。`
 
+const loopRevisionInstructions = `save_sections是完整章节的创建或替换，不是JSON patch。同一行动内，每个section_id只出现一次；同一章有多个问题时合并为一个完整替换。每个JSON对象的sources只出现一次。recommended_max_sections是格式恢复的输出建议；完整合法的写入仍受40章与128KiB的实际限制。`
+
+const loopFaithfulReviewInstructions = `来源忠实按完整上下文的含义判断，不要求逐字复刻ASR错误；上下文能明确恢复的省略单位或同义改写不构成捏造，仍有歧义则保留具体不确定性。清楚归因于讲者的口述不因缺少片内独立实测而自动成为错误，本版不做外部事实核查。主要主题与有实质信息的细节需要覆盖，寒暄或无信息收尾不构成遗漏主题。图注可准确翻译可读屏显文字；等义翻译、样式差异和一般排版偏好归AC06 advisory，不能要求正文复刻图中全部布局或改成英文。只报告最终成立的实质缺陷，修正建议也不得补入来源没有的事实。`
+
 type loopOriginal struct {
 	Alias   string         `json:"alias"`
 	Segment domain.Segment `json:"original"`
@@ -232,6 +236,12 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		payload["original_identity_rule"] = "Every tN alias binds the unchanged original text, timing and origin in this snapshot. Internal original IDs and ordinal metadata remain program-owned; use the delivered aliases for evidence references."
 	}
 	payload["current_call"] = map[string]any{"output_tokens": p.OutputTokens, "response_timeout_ms": s.responseLimits().Total.Milliseconds(), "max_write_bytes": loopWriteBytes, "max_sections": l.OutputSections, "parallel_tool_calls": false}
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		delete(payload, "max_sections_this_action")
+		payload["recommended_sections_this_action"] = l.OutputSections
+		current := payload["current_call"].(map[string]any)
+		current["recommended_max_sections"], current["max_sections"] = l.OutputSections, 40
+	}
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && p.Mode == "author" {
 		payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls-max(1, l.ReviewReserve)), "review_calls_reserved": max(1, l.ReviewReserve), "instruction": "Use finish=true with your final complete save_sections action so the independent review fits the remaining budget; a separate finish_article consumes another author call. Do not request finish while required content is missing."}
 	}
@@ -239,10 +249,13 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		payload["detail_instruction"] = s.spec.DetailPolicy.Instruction
 	}
 	system := loopAuthorInstructions
+	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
+		system += "\n" + loopRevisionInstructions
+	}
 	if p.Mode == "review" {
 		system = loopReviewInstructions
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-			system += "\n" + loopGroundedReviewInstructions + "\n" + loopGroundedSeverityInstruction
+			system += "\n" + loopGroundedReviewInstructions + "\n" + loopGroundedSeverityInstruction + "\n" + loopFaithfulReviewInstructions
 		}
 		payload["scope"] = p.Scope
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {

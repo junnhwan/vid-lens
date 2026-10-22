@@ -51,6 +51,8 @@ func apiTest(t *testing.T) (*httptest.Server, *Server) {
 		t.Fatal(e)
 	}
 	p := config.DefaultProfile()
+	// These endpoint fixtures seed historical canonical articles directly.
+	p.ArticleHarness = domain.ExecutionContractV12
 	p.ModelBaseURL = "https://example.test/v1"
 	p.ModelName = "test"
 	if e = s.Bootstrap(ctx, p, "private-model-key", ""); e != nil {

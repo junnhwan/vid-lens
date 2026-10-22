@@ -335,3 +335,39 @@ func TestArticleLoopResponseDeadlineKeepsCandidateAndAllReviewObligations(t *tes
 		t.Fatal("deadline recovery lost candidate, budget, source coverage or global review")
 	}
 }
+
+func TestArticleLoopKeepsCompleteValidWriteAboveRecoverySuggestion(t *testing.T) {
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		p := loopPayload(t, r)
+		if p["scope"] == nil {
+			writeReviewWireArgs(w, loopSaveTool, loopGoodWrite())
+			return
+		}
+		w.WriteHeader(503)
+	})
+	ctx := context.Background()
+	if err := s.engine.Run(ctx, s.claim, s.profile); err == nil {
+		t.Fatal("expected paused review")
+	}
+	s = reloadLoopSession(t, s)
+	before, err := s.engine.Store.ArticleDraft(ctx, s.claim.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cp.ArticleLoop.OutputSections = 1
+	text := "实际来源中的事实。"
+	write := loopSaveInput{ExpectedVersion: before.Version, Sections: []loopSection{
+		{Key: "additional-a", Title: "第一处补充", Content: []loopContent{{Text: &text, Sources: []string{"t1"}}}},
+		{Key: "additional-b", Title: "第二处补充", Content: []loopContent{{Text: &text, Sources: []string{"t25"}}}},
+	}}
+	message := &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Function: schema.FunctionCall{Name: loopSaveTool, Arguments: string(domain.JSON(write))}}}}
+	progress, err := s.applyLoopResponse(ctx, articleLoopCall{Mode: "author", Slot: 200}, message)
+	if err != nil || !progress {
+		t.Fatalf("complete valid chapters lost to a recovery suggestion: %v %s", err, s.cp.ArticleLoop.Feedback)
+	}
+	after, err := s.engine.Store.ArticleDraft(ctx, s.claim.Run.ID)
+	if err != nil || after.Version != before.Version+1 {
+		t.Fatal("write not persisted", err)
+	}
+	assertNoLoopPublication(t, s)
+}
