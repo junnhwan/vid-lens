@@ -22,12 +22,17 @@ type loopLimitReplacement struct {
 	SectionID   string                  `json:"section_id"`
 	Limitations []loopSectionLimitation `json:"limitations" jsonschema:"description=Complete scoped limitations for this chapter; an empty array removes obsolete limitations"`
 }
+type loopObservationReplacement struct {
+	SectionID    string                 `json:"section_id"`
+	Observations []loopPixelObservation `json:"observations" jsonschema:"description=Upsert observations for actually delivered frame aliases used by this chapter, including text citations; preserve observations for unmentioned frames"`
+}
 type loopPatchInput struct {
-	ExpectedVersion    int                    `json:"expected_version"`
-	Finish             bool                   `json:"finish,omitempty"`
-	Replacements       []loopBlockReplacement `json:"replacements,omitempty"`
-	RemoveBlockIDs     []string               `json:"remove_block_ids,omitempty"`
-	SectionLimitations []loopLimitReplacement `json:"section_limitations,omitempty"`
+	ExpectedVersion     int                          `json:"expected_version"`
+	Finish              bool                         `json:"finish,omitempty"`
+	Replacements        []loopBlockReplacement       `json:"replacements,omitempty"`
+	RemoveBlockIDs      []string                     `json:"remove_block_ids,omitempty"`
+	SectionLimitations  []loopLimitReplacement       `json:"section_limitations,omitempty"`
+	SectionObservations []loopObservationReplacement `json:"section_observations,omitempty"`
 }
 
 // 将块级语义意图确定性展开为原有章节事务，不让模型重发未修改正文。
@@ -55,7 +60,7 @@ func (s *session) patchLoopBlocks(ctx context.Context, key string, in loopPatchI
 		return nil, false, domain.Err(409, "DRAFT_VERSION_CONFLICT", "局部修订版本已变化。")
 	}
 	reject := func(message string) (any, bool, error) { return map[string]any{"error": message}, false, nil }
-	if len(domain.JSON(in)) > loopWriteBytes || len(in.Replacements)+len(in.RemoveBlockIDs)+len(in.SectionLimitations) == 0 {
+	if len(domain.JSON(in)) > loopWriteBytes || len(in.Replacements)+len(in.RemoveBlockIDs)+len(in.SectionLimitations)+len(in.SectionObservations) == 0 {
 		return reject("revise_blocks requires a nonempty bounded edit")
 	}
 	semantic, err := s.loopAuthorDraft(d.Article, d.Notes, saved.Version)
@@ -103,6 +108,28 @@ func (s *session) patchLoopBlocks(ctx context.Context, key string, in loopPatchI
 		seenLimits[limits.SectionID] = true
 		touched[index] = true
 		semantic.Sections[index].Limitations = limits.Limitations
+	}
+	seenObservations := map[string]bool{}
+	for _, update := range in.SectionObservations {
+		index := slices.IndexFunc(semantic.Sections, func(section loopSection) bool { return section.SectionID == update.SectionID })
+		if index < 0 || seenObservations[update.SectionID] || len(update.Observations) == 0 {
+			return reject("unknown/duplicate or empty observation section_id: " + update.SectionID)
+		}
+		seenObservations[update.SectionID] = true
+		frames := map[string]bool{}
+		for _, observation := range update.Observations {
+			if frames[observation.Frame] {
+				return reject("duplicate frame observation: " + observation.Frame)
+			}
+			frames[observation.Frame] = true
+			previous := slices.IndexFunc(semantic.Sections[index].Observations, func(o loopPixelObservation) bool { return o.Frame == observation.Frame })
+			if previous < 0 {
+				semantic.Sections[index].Observations = append(semantic.Sections[index].Observations, observation)
+			} else {
+				semantic.Sections[index].Observations[previous] = observation
+			}
+		}
+		touched[index] = true
 	}
 	expanded := loopSaveInput{ExpectedVersion: in.ExpectedVersion, Finish: in.Finish, Sections: []loopSection{}}
 	for i, section := range semantic.Sections {

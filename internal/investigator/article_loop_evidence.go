@@ -124,7 +124,8 @@ func (s *session) challengeLoopReview(ctx context.Context, in loopChallengeInput
 }
 
 const loopEvidenceAuthorInstructions = `
-复核意见是待核实主张，不是人工确认。先直接对照原文检查意见与建议是否成立：主体归属需读前后对话，专名可查全片，AC04引用缺口应补真正支持的引用，不为姓名找装饰图片，也不改掉有依据的事实。确有错误用最小修订一次处理；如果当前全部剩余阻断不成立，用challenge_review给出review_findings的issue_id、具体理由和原文逐字反证。程序只验证引文真实存在，独立核验者再次判断意见，作者不能自批。相同稿件只允许一次异议，争议仍无法解决则停止，不能循环改措辞。`
+复核意见是待核实主张，不是人工确认。先直接对照原文检查意见与建议是否成立：主体归属需读前后对话，专名可查全片，AC04引用缺口应补真正支持的引用，不为姓名找装饰图片，也不改掉有依据的事实。确有错误用最小修订一次处理；如果当前全部剩余阻断不成立，用challenge_review给出review_findings的issue_id、具体理由和原文逐字反证。程序只验证引文真实存在，独立核验者再次判断意见，作者不能自批。相同稿件只允许一次异议，争议仍无法解决则停止，不能循环改措辞。
+candidate_validation是最近一次候选准入失败的独立记录，不因读状态/原文/像素而消失；先处理它再finish，不把已保存的新稿当作旧稿异议。正文引用fN也必须提供像素观察，用revise_blocks.section_observations补充当前章实际可见事实，或删除无依据的画面断言/引用；不需要为此重写整章。只读取证与状态回读计入总调用预算，不计修订尝试；save/revise/finish/challenge计修订尝试，保存本身不重置额度。`
 const loopEvidenceReviewInstructions = `
 unresolved_findings列出上轮仍未关闭的问题，resolutions必须逐条填写issue_id、outcome与explanation：fixed代表当前稿件实际修复，withdrawn代表原意见经原文反证不成立（给evidence_quotes），remaining必须继续列入blocking。不能靠漏写旧问题宣布完成。
 每条blocking提交前，直接核对其依据和建议：用evidence_quotes给出短原文逐字片段（source_id与evidence_ids一致），problem说明候选哪项主张与之冲突或哪条绑定缺失。引文必须原样存在，引用存在只证明出处，不证明你的推断正确；检查前后承接与相反解释。区分来源明确反证、就近引用缺失、来源自身含糊；没有证据不要猜说话人，不靠外部知识改写来源。review_challenges是作者提出的未采信异议；直接读原文核实，异议成立则撤回该条，不成立保留具体反证。仅在全部义务已完成且无剩余实质缺陷时返回空issues，不能为了完成撤回真实问题。`
@@ -157,4 +158,23 @@ func (s *session) latestLoopReview(ctx context.Context, scope domain.ArticleRevi
 		return "", record, loopStop("INTERNAL_FAILURE", "待解决复核记录身份不一致")
 	}
 	return key, record, nil
+}
+
+func (s *session) loopCandidateValidation(d articleLoopDraft, version int, cause error) json.RawMessage {
+	missing := []any{}
+	for _, id := range store.ContentFrameIDs(d.Article.Sections, d.Article.Citations) {
+		note := d.Notes[id]
+		seen := slices.Contains(s.cp.ArticleLoop.SeenFrames, id)
+		if len(note.VisibleFacts) > 0 && seen {
+			continue
+		}
+		alias := id
+		for i, frame := range s.cp.ArticleLoop.Frames {
+			if frame == id {
+				alias = fmt.Sprint("f", i+1)
+			}
+		}
+		missing = append(missing, map[string]any{"frame": alias, "pixels_delivered": seen, "observation_missing": len(note.VisibleFacts) == 0})
+	}
+	return domain.JSON(map[string]any{"draft_version": version, "failure": "candidate_validation", "detail": cause.Error(), "missing_pixel_observations": missing, "action": "The draft was saved but this candidate was not admitted for independent review. Correct the concrete condition, then request finish at the current version. For text citing delivered frames, upsert section_observations with visible facts, or remove unsupported visual claims/citations. Read-only actions and challenges do not close this condition; a changed draft must be validated again."})
 }

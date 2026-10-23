@@ -463,6 +463,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		payload["blocking_issues"] = l.Issues
 		if s.loopEvidenceReview() {
 			payload["review_findings"] = loopChallengeFindings(l.Issues)
+			if len(l.CandidateValidation) > 0 {
+				payload["candidate_validation"] = l.CandidateValidation
+			}
 			system += loopEvidenceAuthorInstructions
 		}
 		if s.loopConvergence() {

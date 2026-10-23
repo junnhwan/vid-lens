@@ -50,6 +50,7 @@ type articleLoopState struct {
 	ReviewKeys           []string                               `json:"review_keys,omitempty"`
 	Issues               []domain.ArticleReviewIssue            `json:"issues,omitempty"`
 	Feedback             json.RawMessage                        `json:"feedback,omitempty"`
+	CandidateValidation  json.RawMessage                        `json:"candidate_validation,omitempty"`
 	NoProgress           int                                    `json:"no_progress"`
 	BlockedCandidates    map[string][]domain.ArticleReviewIssue `json:"blocked_candidates,omitempty"`
 	Failures             map[string]int                         `json:"failures"`
@@ -184,7 +185,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 				return err
 			}
 			l.Pending = pending
-			if s.loopConvergence() && pending.Mode == "author" && len(l.Issues) > 0 {
+			if s.loopConvergence() && !s.loopEvidenceReview() && pending.Mode == "author" && len(l.Issues) > 0 {
 				l.RepairActions++
 			}
 			s.cp.Calls++
@@ -389,6 +390,11 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 		return s.applyLoopReview(ctx, *p.Scope, raw, p.Delta)
 	}
 	key := fmt.Sprint("loop:", p.Slot)
+	if s.loopEvidenceReview() && len(l.Issues) > 0 && (name == loopSaveTool || name == loopPatchTool || name == loopFinishTool || name == loopChallengeTool) {
+		// Read-only state/evidence work still consumes the frozen total call/send
+		// budget, but is not a failed attempt to repair or approve the candidate.
+		l.RepairActions++
+	}
 	switch name {
 	case loopSaveTool, loopPatchTool:
 		var in loopSaveInput
@@ -650,8 +656,12 @@ func (s *session) freezeLoopCandidate(ctx context.Context, in loopFinishInput) (
 	}
 	if err = s.validateLoopArticle(ctx, d.Article, d); err != nil {
 		l.Feedback = domain.JSON(map[string]any{"failure": "candidate_validation", "detail": err.Error()})
+		if s.loopEvidenceReview() {
+			l.CandidateValidation = s.loopCandidateValidation(d, saved.Version, err)
+		}
 		return false, nil
 	}
+	l.CandidateValidation = nil
 	fingerprint, err := s.loopEvidenceFingerprint(ctx, d.Article)
 	if err != nil {
 		return false, err
