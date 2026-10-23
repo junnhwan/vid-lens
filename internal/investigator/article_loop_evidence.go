@@ -77,8 +77,6 @@ func (s *session) retainedLoopScopes(a domain.Article) []domain.ArticleReviewSco
 			}
 		}
 		sc = s.loopScopeContext(a, sc)
-		sc.ID = ""
-		sc.ID = store.Hash(sc)[:24]
 		out = append(out, sc)
 	}
 	return out
@@ -155,7 +153,7 @@ func (s *session) latestLoopReview(ctx context.Context, scope domain.ArticleRevi
 	if err != nil {
 		return "", record, err
 	}
-	if json.Unmarshal(op.Result, &record) != nil || op.Kind != "article_loop_review" || op.Status != "completed" || record.PolicyRevision != s.cp.ArticleLoop.PolicyRevision || domain.ContentHash(record.Scope) != domain.ContentHash(scope) {
+	if json.Unmarshal(op.Result, &record) != nil || op.Kind != "article_loop_review" || op.Status != "completed" || record.PolicyRevision != s.cp.ArticleLoop.PolicyRevision || !domain.ArticleReviewSameWorkUnit(record.Scope, scope) {
 		return "", record, loopStop("INTERNAL_FAILURE", "待解决复核记录身份不一致")
 	}
 	return key, record, nil

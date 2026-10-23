@@ -28,6 +28,7 @@ type ArticleReviewScope struct {
 	ContextSourceIDs []string `json:"context_source_ids,omitempty"`
 	FrameIDs         []string `json:"frame_ids"`
 	Global           bool     `json:"global"`
+	BoundedContext   bool     `json:"bounded_context,omitempty"`
 }
 type ArticleEvidenceQuote struct {
 	SourceID string `json:"source_id" jsonschema:"description=Delivered tN alias or exact original ID"`

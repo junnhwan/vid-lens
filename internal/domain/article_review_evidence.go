@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// A work unit survives changes to delivered context or pixels. Those changes
+// invalidate material reuse, but must not erase its outstanding findings.
+func ArticleReviewSameWorkUnit(a, b ArticleReviewScope) bool {
+	return a.ID != "" && a.ID == b.ID && a.Global == b.Global && slices.Equal(a.SectionIDs, b.SectionIDs) && slices.Equal(a.SourceIDs, b.SourceIDs)
+}
+
 // This proves provenance, not semantic entailment. The independent reviewer
 // still decides whether these real passages establish the alleged defect.
 func ValidateArticleEvidenceQuotes(quotes []ArticleEvidenceQuote, scope ArticleReviewScope, text []Segment) error {

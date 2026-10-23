@@ -3,6 +3,7 @@ package investigator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -79,12 +80,15 @@ func TestArticleLoopEvidenceChallengeRequiresIndependentWithdrawal(t *testing.T)
 
 func TestArticleLoopSplitRepairRetainsCompletedWork(t *testing.T) {
 	for _, resume := range []bool{false, true} {
-		t.Run(fmt.Sprint(resume), func(t *testing.T) { testSplitRepair(t, resume) })
+		t.Run(fmt.Sprint(resume), func(t *testing.T) { testSplitRepair(t, resume, false) })
 	}
 }
-func testSplitRepair(t *testing.T, resume bool) {
+func TestArticleLoopContextChangeRetainsOutstandingFindings(t *testing.T) {
+	testSplitRepair(t, false, true)
+}
+func testSplitRepair(t *testing.T, resume, contextChange bool) {
 	var interrupted atomic.Bool
-	var calls, reviews, deltas, relations atomic.Int32
+	var calls, reviews, deltas, relations, reconciled atomic.Int32
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		p := loopPayload(t, r)
 		calls.Add(1)
@@ -94,6 +98,18 @@ func testSplitRepair(t *testing.T, resume bool) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}],\"usage\":{\"completion_tokens\":32768}}\n\ndata: [DONE]\n\n")
 				return
+			}
+			if n == 2 {
+				var originals []loopOriginal
+				_ = json.Unmarshal(p["originals"], &originals)
+				if len(originals) >= 25 {
+					t.Error("capacity split still sends the entire source to each child")
+				}
+			}
+			var outstanding []json.RawMessage
+			_ = json.Unmarshal(p["unresolved_findings"], &outstanding)
+			if len(outstanding) > 0 {
+				reconciled.Add(1)
 			}
 			report := loopGoodReport(t, p)
 			var a domain.ArticleReading
@@ -128,7 +144,11 @@ func testSplitRepair(t *testing.T, resume bool) {
 		var a loopSaveInput
 		_ = json.Unmarshal(p["current_article"], &a)
 		text := "已根据来源修正的后半段事实，并保留全部必要条件。"
-		writeReviewWireArgs(w, loopPatchTool, loopPatchInput{ExpectedVersion: version, Finish: true, Replacements: []loopBlockReplacement{{BlockID: locations[a.Sections[0].SectionID][0], Content: loopContent{Text: &text, Sources: []string{"t25"}}}}})
+		sources := []string{"t25"}
+		if contextChange {
+			sources = append(sources, "t1")
+		}
+		writeReviewWireArgs(w, loopPatchTool, loopPatchInput{ExpectedVersion: version, Finish: true, Replacements: []loopBlockReplacement{{BlockID: locations[a.Sections[0].SectionID][0], Content: loopContent{Text: &text, Sources: sources}}}})
 	})
 	if resume {
 		if err := s.engine.Run(context.Background(), s.claim, s.profile); err == nil {
@@ -143,7 +163,14 @@ func testSplitRepair(t *testing.T, resume bool) {
 	if resume {
 		expected++
 	}
-	if calls.Load() != expected || deltas.Load() != 1 || relations.Load() != 1 {
+	expectedDeltas := int32(1)
+	if contextChange {
+		expectedDeltas = 0
+	}
+	if reconciled.Load() == 0 {
+		t.Fatal("outstanding findings disappeared with context change")
+	}
+	if calls.Load() != expected || deltas.Load() != expectedDeltas || relations.Load() != 1 {
 		t.Fatalf("completed scope reopened: calls=%d reviews=%d deltas=%d global=%d", calls.Load(), reviews.Load(), deltas.Load(), relations.Load())
 	}
 }
@@ -157,4 +184,58 @@ func TestArticleLoopGroundedNewFindingIsNotDiscarded(t *testing.T) {
 	if requireNewFindingEvidence(domain.ArticleReviewReport{Issues: []domain.ArticleReviewIssue{issue}}, d) == nil {
 		t.Fatal("unsupported reopening accepted")
 	}
+}
+
+func TestArticleLoopBoundedContextKeepsDistantChallengeAndStableIdentity(t *testing.T) {
+	s := &session{transcript: []domain.Segment{{ID: "one"}, {ID: "two"}, {ID: "three"}, {ID: "four"}}, cp: checkpoint{ArticleLoop: &articleLoopState{ReviewRevision: domain.ArticleConvergenceReviewV4}}}
+	a := domain.Article{Sections: []domain.Section{{ID: "chapter"}}}
+	scope := domain.ArticleReviewScope{ID: "stable", SectionIDs: []string{"chapter"}, SourceIDs: []string{"one"}, BoundedContext: true}
+	first := s.loopScopeContext(a, scope)
+	if len(first.ContextSourceIDs) != 1 || first.ContextSourceIDs[0] != "two" {
+		t.Fatal(first)
+	}
+	s.cp.ArticleLoop.ReviewPlan = []domain.ArticleReviewScope{scope, {ID: "other", SourceIDs: []string{"two", "three", "four"}}}
+	s.cp.ArticleLoop.ChallengeCandidate = "candidate"
+	s.cp.ArticleLoop.Challenges = []loopReviewChallenge{{EvidenceQuotes: []domain.ArticleEvidenceQuote{{SourceID: "t4", Quote: "source evidence"}}}}
+	next := s.retainedLoopScopes(a)
+	if len(next) != 2 || next[0].ID != "stable" || !domain.ArticleReviewSameWorkUnit(first, next[0]) || len(next[0].ContextSourceIDs) != 3 || next[0].ContextSourceIDs[2] != "four" {
+		t.Fatal("challenge lost or work identity changed", next)
+	}
+}
+
+func TestArticleLoopCannotSplitAwayOutstandingFindings(t *testing.T) {
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		p := loopPayload(t, r)
+		if p["scope"] != nil {
+			report := loopGoodReport(t, p)
+			var a domain.ArticleReading
+			_ = json.Unmarshal(p["candidate"], &a)
+			report.Issues = []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC03", Location: a.Sections[0].Blocks[0].ID, EvidenceIDs: []string{"t1"}, Problem: "待核实的来源冲突", Correction: "核实并修正"}}
+			writeReviewWireArgs(w, loopReviewTool, report)
+			return
+		}
+		var v int
+		_ = json.Unmarshal(p["draft_version"], &v)
+		if v > 0 {
+			w.WriteHeader(503)
+			return
+		}
+		in := loopGoodWrite()
+		in.Sections[0].Content = in.Sections[0].Content[:1]
+		writeReviewWireArgs(w, loopSaveTool, in)
+	})
+	ctx := context.Background()
+	if s.engine.Run(ctx, s.claim, s.profile) == nil {
+		t.Fatal("expected interruption before repair")
+	}
+	s = reloadLoopSession(t, s)
+	l := s.cp.ArticleLoop
+	l.Scopes = append([]domain.ArticleReviewScope{}, l.ReviewPlan...)
+	calls := s.cp.Calls
+	err := s.splitLoopReviewAt(ctx, 0)
+	var problem *domain.Problem
+	if !errors.As(err, &problem) || problem.Code != "ARTICLE_CAPACITY_EXCEEDED" || len(l.Scopes) != len(l.ReviewPlan) || s.cp.Calls != calls {
+		t.Fatal("split silently erased unresolved review", err)
+	}
+	assertNoLoopPublication(t, s)
 }

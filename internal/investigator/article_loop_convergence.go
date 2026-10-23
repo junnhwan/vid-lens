@@ -3,6 +3,7 @@ package investigator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"unicode/utf8"
 
@@ -42,6 +43,21 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 	scope = loopScopeEvidence(scope, a)
 	selected := append(slices.Clone(scope.SourceIDs), scope.ContextSourceIDs...)
 	contextIDs := slices.Clone(scope.ContextSourceIDs)
+	if s.loopEvidenceReview() && s.cp.ArticleLoop.ChallengeCandidate != "" {
+		// A disputed distant passage must actually reach the independent reviewer.
+		for _, challenge := range s.cp.ArticleLoop.Challenges {
+			for _, quote := range challenge.EvidenceQuotes {
+				for i, original := range s.transcript {
+					if quote.SourceID == original.ID || quote.SourceID == fmt.Sprint("t", i+1) {
+						if !slices.Contains(scope.SourceIDs, original.ID) {
+							contextIDs = appendUnique(contextIDs, original.ID)
+							selected = appendUnique(selected, original.ID)
+						}
+					}
+				}
+			}
+		}
+	}
 	for i, original := range s.transcript {
 		if !slices.Contains(selected, original.ID) {
 			continue
@@ -53,7 +69,7 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 		}
 	}
 	scope.ContextSourceIDs = nil
-	if s.loopEvidenceReview() && !s.cp.ArticleLoop.LimitedReviewContext {
+	if s.loopEvidenceReview() && !scope.BoundedContext && !s.cp.ArticleLoop.LimitedReviewContext {
 		// Full originals are context, not extra coverage work. Capacity still checked before sending.
 		for _, original := range s.transcript {
 			if !slices.Contains(scope.SourceIDs, original.ID) {
@@ -61,6 +77,7 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 			}
 		}
 	}
+
 	for _, original := range s.transcript {
 		if slices.Contains(contextIDs, original.ID) {
 			scope.ContextSourceIDs = append(scope.ContextSourceIDs, original.ID)

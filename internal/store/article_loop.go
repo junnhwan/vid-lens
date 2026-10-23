@@ -110,7 +110,7 @@ func verifyArticleLoopPublication(ctx context.Context, tx pgx.Tx, c domain.Claim
 			var prior domain.ArticleReviewRecord
 			if record.ReconcilesReviewKey != "" {
 				prior, e = one[domain.ArticleReviewRecord](ctx, tx, "SELECT result FROM run_operations WHERE run_id=$1 AND operation_key=$2 AND kind='article_loop_review' AND status='completed'", c.Run.ID, record.ReconcilesReviewKey)
-				if e != nil || prior.PolicyRevision != policy || domain.ContentHash(prior) != record.ReconcilesReviewHash || domain.ContentHash(prior.Scope) != domain.ContentHash(record.Scope) {
+				if e != nil || prior.PolicyRevision != policy || domain.ContentHash(prior) != record.ReconcilesReviewHash || !domain.ArticleReviewSameWorkUnit(prior.Scope, record.Scope) {
 					return articleLoopGateError()
 				}
 			}

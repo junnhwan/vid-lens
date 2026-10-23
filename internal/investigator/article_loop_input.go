@@ -811,6 +811,15 @@ func (s *session) splitLoopReview(ctx context.Context, scope domain.ArticleRevie
 func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	l := s.cp.ArticleLoop
 	scope := l.Scopes[index]
+	if s.loopEvidenceReview() {
+		_, prior, err := s.latestLoopReview(ctx, scope)
+		if err != nil {
+			return err
+		}
+		if loopBlocking(prior.Report.Issues) {
+			return loopStop("ARTICLE_CAPACITY_EXCEEDED", "有未闭合问题的核验任务无法在响应上限内完成；保留原问题，不通过再次拆分丢弃复核责任")
+		}
+	}
 	if s.loopEvidenceReview() && scope.Global && len(scope.SourceIDs) == 0 {
 		return loopStop("ARTICLE_CAPACITY_EXCEEDED", "当前全文关系核对无法拆成互不相见的局部批准")
 	}
@@ -854,6 +863,11 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 	}
 	left.Global = false
 	right.Global = false
+	if s.loopEvidenceReview() {
+		// Response exhaustion is evidence that full-source context is too costly.
+		// Keep coverage, cited passages and neighbors; only optional context shrinks.
+		left.BoundedContext, right.BoundedContext = true, true
+	}
 	if s.loopConvergence() {
 		_, draft, err := s.loadLoopDraft(ctx)
 		if err != nil {
@@ -873,18 +887,7 @@ func (s *session) splitLoopReviewAt(ctx context.Context, index int) error {
 		}
 		before := s.loopScopeWork(draft.Article, scope)
 		if s.loopScopeWork(draft.Article, left) >= before || s.loopScopeWork(draft.Article, right) >= before {
-			if s.loopEvidenceReview() && !l.LimitedReviewContext {
-				l.LimitedReviewContext = true
-				left = s.loopScopeContext(draft.Article, left)
-				right = s.loopScopeContext(draft.Article, right)
-				left.ID = ""
-				left.ID = store.Hash(left)[:24]
-				right.ID = ""
-				right.ID = store.Hash(right)[:24]
-			}
-			if s.loopScopeWork(draft.Article, left) >= before || s.loopScopeWork(draft.Article, right) >= before {
-				return loopStop("ARTICLE_CAPACITY_EXCEEDED", "完整章节及其必需证据已无法有效缩小，不再重试相同核验工作量")
-			}
+			return loopStop("ARTICLE_CAPACITY_EXCEEDED", "完整章节及其必需证据已无法有效缩小，不再重试相同核验工作量")
 		}
 	}
 	next := append([]domain.ArticleReviewScope{}, l.Scopes[:index]...)
