@@ -64,6 +64,7 @@ type articleLoopState struct {
 	RepairRounds        int                                    `json:"repair_rounds,omitempty"`
 	RepairActions       int                                    `json:"repair_actions,omitempty"`
 	ReviewWorkLimit     int                                    `json:"review_work_limit,omitempty"`
+	ReviewBaseKey       string                                 `json:"review_base_key,omitempty"`
 }
 type articleLoopCall struct {
 	Slot         int                        `json:"slot"`
@@ -73,6 +74,7 @@ type articleLoopCall struct {
 	Frames       []string                   `json:"frames"`
 	Scope        *domain.ArticleReviewScope `json:"scope,omitempty"`
 	OutputTokens int                        `json:"output_tokens"`
+	Delta        *domain.ArticleReviewDelta `json:"delta,omitempty"`
 }
 
 func (s *session) articleLoop() bool {
@@ -129,7 +131,7 @@ func (s *session) runArticleLoop(ctx context.Context) error {
 		}
 		s.cp.ArticleLoop = &articleLoopState{Version: 1, Budget: articleLoopBudget{InputCharsLimit: separateInputLimit(s.profile), ContextTokens: s.profile.ContextTokens, MaxOutputTokens: s.profile.MaxOutputTokens, TokenCeiling: int64(min(20, s.profile.MaxIterations)) * int64(s.profile.ContextTokens), CostStatus: "unknown", Calls: min(20, s.profile.MaxIterations), Sends: min(20, s.profile.MaxIterations), NoProgress: limit, Sections: 40, DraftBytes: 512 << 10, Revisions: 48, MediaBytes: 20 << 20, ActiveSeconds: s.profile.ArticleActiveSeconds, Deadline: s.claim.Run.DeadlineAt}, Failures: map[string]int{}, OutputTokens: min(s.profile.MaxOutputTokens, 32768), SourceChars: max(1000, separateInputLimit(s.profile)/2), OutputSections: 40}
 		if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
-			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV2
+			s.cp.ArticleLoop.ReviewRevision = domain.ArticleConvergenceReviewV3
 			s.cp.ArticleLoop.ReviewCache = map[string]string{}
 		}
 		s.cp.Protocol = s.cp.ExecutionContract.Version
@@ -344,6 +346,9 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	}
 	name, raw, err := loopArguments(action)
 	if err != nil {
+		if p.Mode == "review" && s.loopConvergence() && p.Scope != nil {
+			l.Failures[s.loopReviewProtocolKey(p.Scope.ID)]++
+		}
 		l.Feedback = domain.JSON(map[string]any{"failure": "envelope", "detail": err.Error(), "action": "Return one complete named tool call; no partial content was saved."})
 		if msg != nil && len(msg.ToolCalls) == 1 {
 			call := msg.ToolCalls[0].Function
@@ -369,9 +374,13 @@ func (s *session) applyLoopResponse(ctx context.Context, p articleLoopCall, msg 
 	}
 	if p.Mode == "review" {
 		if name != loopReviewTool {
+			if s.loopConvergence() && p.Scope != nil {
+				l.Failures[s.loopReviewProtocolKey(p.Scope.ID)]++
+			}
+			l.Feedback = domain.JSON(map[string]any{"review_failure": "wrong review tool", "action": "Return exactly one report_article_review call; the article cannot be edited during review."})
 			return false, nil
 		}
-		return s.applyLoopReview(ctx, *p.Scope, raw)
+		return s.applyLoopReview(ctx, *p.Scope, raw, p.Delta)
 	}
 	key := fmt.Sprint("loop:", p.Slot)
 	switch name {

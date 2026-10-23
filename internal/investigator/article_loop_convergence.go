@@ -20,7 +20,11 @@ func (s *session) loopConvergence() bool {
 }
 
 func (s *session) loopCompactReview() bool {
-	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV2
+	return s.cp.ArticleLoop != nil && (s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV2 || s.loopDeltaReview())
+}
+
+func (s *session) loopDeltaReview() bool {
+	return s.cp.ArticleLoop != nil && s.cp.ArticleLoop.ReviewRevision == domain.ArticleConvergenceReviewV3
 }
 
 func loopBlocking(issues []domain.ArticleReviewIssue) bool {
@@ -56,7 +60,7 @@ func (s *session) loopScopeContext(a domain.Article, scope domain.ArticleReviewS
 
 // 新修订优先综合核验，容量不足时拆分；修稿后按完整章节复用未变材料。
 func (s *session) convergentLoopScopes(a domain.Article) []domain.ArticleReviewScope {
-	return s.buildLoopScopes(a, s.loopCompactReview() && s.cp.ArticleLoop.RepairRounds > 0)
+	return s.buildLoopScopes(a, s.loopCompactReview() && !s.loopDeltaReview() && s.cp.ArticleLoop.RepairRounds > 0)
 }
 
 func (s *session) buildLoopScopes(a domain.Article, units bool) []domain.ArticleReviewScope {
@@ -393,7 +397,7 @@ func (s *session) reuseLoopReviews(ctx context.Context, a domain.Article) error 
 }
 
 func (s *session) cacheLoopReviewSubsets(ctx context.Context, a domain.Article, record domain.ArticleReviewRecord, key string) error {
-	if !s.loopCompactReview() || record.Scope.Global && len(record.Scope.SourceIDs) == 0 {
+	if !s.loopCompactReview() || s.loopDeltaReview() || record.Scope.Global && len(record.Scope.SourceIDs) == 0 {
 		return nil
 	}
 	l := s.cp.ArticleLoop

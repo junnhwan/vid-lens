@@ -138,6 +138,10 @@ func (s *session) prepareLoopCall(ctx context.Context) (*articleLoopCall, []*sch
 			}
 		}
 		p.Scope = &scope
+		p.Delta, e = s.loopReviewDelta(ctx, draft.Article, scope)
+		if e != nil {
+			return nil, nil, nil, e
+		}
 		for i, t := range s.transcript {
 			if slices.Contains(scope.SourceIDs, t.ID) || slices.Contains(scope.ContextSourceIDs, t.ID) {
 				p.Sources = append(p.Sources, fmt.Sprint("t", i+1))
@@ -288,6 +292,9 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 	if s.cp.ExecutionContract.Version == domain.ArticleLoopV2 && p.Mode == "author" {
 		payload["visual_budget"] = map[string]any{"new_windows_remaining": max(0, loopExtraWindowLimit-len(l.InspectionKeys)), "minimum_figures": 0, "instruction": "Prefer complete supported prose. No useful illustration is a valid outcome; do not spend calls searching for decorative images."}
 		payload["completion_budget"] = map[string]any{"remaining_logical_author_calls": max(0, l.Budget.Calls-s.cp.Calls-max(1, l.ReviewReserve)), "review_calls_reserved": max(1, l.ReviewReserve), "instruction": "Use finish=true with your final complete save_sections action so the independent review fits the remaining budget; a separate finish_article consumes another author call. Do not request finish while required content is missing."}
+		if s.loopDeltaReview() && saved.Version > 0 {
+			payload["completion_budget"].(map[string]any)["instruction"] = "The current_article is already saved at draft_version. If it is complete, call finish_article directly with expected_version; do not resend chapters just to submit them. For necessary edits prefer revise_blocks with finish=true, preserve unrelated content and stable identities. Do not request finish while required content is missing."
+		}
 	}
 	if s.spec.DetailPolicy != nil {
 		payload["detail_instruction"] = s.spec.DetailPolicy.Instruction
@@ -309,6 +316,36 @@ func (s *session) loopInput(ctx context.Context, p articleLoopCall) ([]*schema.M
 		}
 		if s.loopCompactReview() {
 			system = loopCompactReviewInstructions
+		}
+		if p.Delta != nil {
+			op, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, p.Delta.ReviewKey)
+			if e != nil {
+				return nil, e
+			}
+			var prior domain.ArticleReviewRecord
+			if json.Unmarshal(op.Result, &prior) != nil || domain.ContentHash(prior) != p.Delta.BaseReviewHash {
+				return nil, loopStop("INTERNAL_FAILURE", "冻结差异的原核验已变化")
+			}
+			payload["revision_delta"] = p.Delta
+			payload["prior_complete_review"] = map[string]any{"candidate_hash": prior.CandidateHash, "topics": prior.Report.Topics, "issues": prior.Report.Issues}
+			old, e := s.engine.Store.Operation(ctx, s.claim.Run.ID, "article-loop:candidate:"+prior.CandidateHash)
+			if e != nil {
+				return nil, e
+			}
+			var before domain.Article
+			if json.Unmarshal(old.Result, &before) != nil || domain.ArticleHash(before) != prior.CandidateHash {
+				return nil, loopStop("INTERNAL_FAILURE", "差异原稿身份不一致")
+			}
+			baselines := []domain.ArticleReadingBlock{}
+			for _, section := range domain.ReadingArticle(before).Sections {
+				for _, block := range section.Blocks {
+					if slices.Contains(p.Delta.AffectedBlockIDs, block.ID) || slices.Contains(p.Delta.RemovedBlockIDs, block.ID) {
+						baselines = append(baselines, block)
+					}
+				}
+			}
+			payload["prior_block_baselines"] = baselines
+			system += loopDeltaReviewInstructions
 		}
 		payload["scope"] = p.Scope
 		if s.loopConvergence() && !s.loopCompactReview() {
@@ -704,6 +741,11 @@ func (s *session) planLoopReview(ctx context.Context, a domain.Article) ([]domai
 			continue
 		}
 		p := articleLoopCall{Mode: "review", Scope: &task, Frames: task.FrameIDs, OutputTokens: l.OutputTokens}
+		delta, e := s.loopReviewDelta(ctx, a, task)
+		if e != nil {
+			return nil, e
+		}
+		p.Delta = delta
 		for j, t := range s.transcript {
 			if slices.Contains(task.SourceIDs, t.ID) || slices.Contains(task.ContextSourceIDs, t.ID) {
 				p.Sources = append(p.Sources, fmt.Sprint("t", j+1))
@@ -1030,7 +1072,7 @@ func loopReviewFailureFeedback(cause error, raw []byte) json.RawMessage {
 	return domain.JSON(feedback)
 }
 
-func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleReviewScope, raw []byte) (bool, error) {
+func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleReviewScope, raw []byte, deltas ...*domain.ArticleReviewDelta) (bool, error) {
 	l := s.cp.ArticleLoop
 	var report domain.ArticleReviewReport
 	var observations []domain.ArticleVisualObservation
@@ -1061,6 +1103,13 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if err == nil {
 		err = validateLoopReport(report, scope, d.Article, s.transcript, aliases)
 	}
+	var delta *domain.ArticleReviewDelta
+	if len(deltas) > 0 {
+		delta = deltas[0]
+	}
+	if err == nil {
+		err = validateLoopDeltaReport(report, delta)
+	}
 	if err == nil && s.cp.ExecutionContract.Version == domain.ArticleLoopV2 {
 		err = domain.ValidateArticleVisualObservations(observations, scope)
 	}
@@ -1078,7 +1127,7 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	if fingerprint != l.EvidenceFingerprint {
 		return false, loopStop("ARTICLE_EVIDENCE_CHANGED", "核验中的证据已变化")
 	}
-	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations}
+	record := domain.ArticleReviewRecord{CandidateHash: l.CandidateHash, EvidenceFingerprint: fingerprint, PolicyRevision: l.PolicyRevision, Scope: scope, Report: report, VisualObservations: observations, Delta: delta}
 	if s.loopConvergence() {
 		record.MaterialHash, e = s.loopMaterialHash(ctx, d.Article, scope)
 		if e != nil {
@@ -1088,6 +1137,9 @@ func (s *session) applyLoopReview(ctx context.Context, scope domain.ArticleRevie
 	key := "article-loop:review:" + store.Hash(map[string]any{"candidate": l.CandidateHash, "evidence": fingerprint, "scope": scope.ID})
 	if e = s.loopSave(ctx, key, "article_loop_review", record); e != nil {
 		return false, e
+	}
+	if s.loopDeltaReview() && l.ReviewBaseKey == "" && delta == nil && domain.ArticleReviewCoversWhole(scope, d.Article, s.transcript, store.ContentFrameIDs(d.Article.Sections, d.Article.Citations)) {
+		l.ReviewBaseKey = key
 	}
 	l.ReviewKeys = appendUnique(l.ReviewKeys, key)
 	l.Feedback = nil

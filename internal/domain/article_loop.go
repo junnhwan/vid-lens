@@ -12,9 +12,10 @@ import (
 const ArticleLoopPolicy = "article-ac01-10-lc01-12-v1"
 const ArticleConvergenceReviewV1 = "scoped-convergence-2026-10-23-v1"
 const ArticleConvergenceReviewV2 = "integrated-convergence-2026-10-23-v2"
+const ArticleConvergenceReviewV3 = "delta-convergence-2026-10-23-v3"
 
 func ArticleConvergenceReview(revision string) bool {
-	return revision == ArticleConvergenceReviewV1 || revision == ArticleConvergenceReviewV2
+	return revision == ArticleConvergenceReviewV1 || revision == ArticleConvergenceReviewV2 || revision == ArticleConvergenceReviewV3
 }
 
 // These identities are owned by the program, never accepted from author tools.
@@ -82,6 +83,7 @@ type ArticleReviewRecord struct {
 	MaterialHash        string                     `json:"material_hash,omitempty"`
 	ReusedFrom          string                     `json:"reused_from,omitempty"`
 	ReuseKind           string                     `json:"reuse_kind,omitempty"`
+	Delta               *ArticleReviewDelta        `json:"delta,omitempty"`
 }
 type ArticleApproval struct {
 	CandidateHash       string   `json:"candidate_hash"`

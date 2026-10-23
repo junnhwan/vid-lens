@@ -69,6 +69,25 @@ func TestArticleLoopInvalidReviewStopsAfterOneCorrection(t *testing.T) {
 	assertNoLoopPublication(t, s)
 }
 
+func TestArticleLoopWrongReviewToolCannotAvoidProtocolStop(t *testing.T) {
+	var calls atomic.Int32
+	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		p := loopPayload(t, r)
+		calls.Add(1)
+		if p["scope"] == nil {
+			writeReviewWireArgs(w, loopSaveTool, loopGoodWrite())
+			return
+		}
+		writeReviewWireArgs(w, "not_a_review_tool", loopGoodReport(t, p))
+	})
+	err := s.engine.Run(context.Background(), s.claim, s.profile)
+	var problem *domain.Problem
+	if !errors.As(err, &problem) || problem.Code != "ARTICLE_REVIEW_PROTOCOL_FAILED" || calls.Load() != 3 {
+		t.Fatalf("错误工具绕过无效报告停止边界：calls=%d err=%v", calls.Load(), err)
+	}
+	assertNoLoopPublication(t, s)
+}
+
 func TestArticleLoopBlockRevisionIsAtomicAndReplayable(t *testing.T) {
 	s := loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if loopPayload(t, r)["scope"] != nil {
@@ -128,25 +147,31 @@ func testLoopReviewReuse(t *testing.T, corrupt bool) {
 	var calls atomic.Int32
 	var secondReviews atomic.Int32
 	var firstReviews atomic.Int32
-	var globals atomic.Int32
 	var s *session
 	s = loopFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		p := loopPayload(t, r)
 		calls.Add(1)
 		if p["scope"] != nil {
 			report := loopGoodReport(t, p)
-			if string(p["global_relations_only"]) == "true" {
+			if p["revision_delta"] != nil {
+				secondReviews.Add(1)
+				var delta domain.ArticleReviewDelta
+				_ = json.Unmarshal(p["revision_delta"], &delta)
 				if corrupt {
-					_, err := s.engine.Store.Pool.Exec(context.Background(), `UPDATE run_operations SET result=jsonb_set(result,'{report,topics,0,topic}',to_jsonb($2::text)) WHERE run_id=$1 AND kind='article_loop_review' AND result->>'reused_from' IS NOT NULL`, s.claim.Run.ID, "未由原核验产生的伪造主题")
+					_, err := s.engine.Store.Pool.Exec(context.Background(), `UPDATE run_operations SET result=jsonb_set(result,'{report,topics,0,topic}',to_jsonb($3::text)) WHERE run_id=$1 AND operation_key=$2`, s.claim.Run.ID, delta.ReviewKey, "未由原核验产生的伪造主题")
 					if err != nil {
 						t.Error(err)
 					}
 				}
-				globals.Add(1)
 				var reading domain.ArticleReading
 				_ = json.Unmarshal(p["candidate"], &reading)
 				if len(reading.Sections) != 2 {
 					t.Error("全文关系核对没有实际完整正文")
+				}
+				var originals []loopOriginal
+				_ = json.Unmarshal(p["originals"], &originals)
+				if len(originals) != 25 || len(delta.AffectedBlockIDs) != 1 || delta.AffectedBlockIDs[0] != reading.Sections[1].Blocks[0].ID {
+					t.Errorf("差异复核丢失完整来源或重审未改事实：%+v originals=%d", delta, len(originals))
 				}
 			} else {
 				var scope domain.ArticleReviewScope
@@ -160,10 +185,7 @@ func testLoopReviewReuse(t *testing.T, corrupt bool) {
 					}
 					report.Issues = []domain.ArticleReviewIssue{{Severity: "blocking", AC: "AC03", Location: reading.Sections[1].Blocks[0].ID, EvidenceIDs: []string{"t13"}, Problem: "第二章的合成事实错误", Correction: "只修正第二章正文"}}
 				} else {
-					secondReviews.Add(1)
-					if len(reading.Sections) != 1 || reading.Sections[0].Title != "第二部分" {
-						t.Error("未改章节没有从已完成综合核验中复用")
-					}
+					t.Error("容量允许时仍拆成会重复审问旧事实的局部复核")
 				}
 			}
 			writeReviewWireArgs(w, loopReviewTool, report)
@@ -221,11 +243,11 @@ func testLoopReviewReuse(t *testing.T, corrupt bool) {
 		t.Fatal(err)
 	}
 	s = reloadLoopSession(t, s)
-	if calls.Load() != 5 || firstReviews.Load() != 1 || secondReviews.Load() != 1 || globals.Load() != 1 {
-		t.Fatalf("局部修改重复全文事实核验：calls=%d first=%d second=%d global=%d", calls.Load(), firstReviews.Load(), secondReviews.Load(), globals.Load())
+	if calls.Load() != 4 || firstReviews.Load() != 1 || secondReviews.Load() != 1 {
+		t.Fatalf("局部修改重复全文事实核验：calls=%d first=%d second=%d", calls.Load(), firstReviews.Load(), secondReviews.Load())
 	}
 	var reused int
-	if err = s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='article_loop_review' AND result->>'reused_from' IS NOT NULL", s.claim.Run.ID).Scan(&reused); err != nil || reused != 1 {
+	if err = s.engine.Store.Pool.QueryRow(ctx, "SELECT count(*) FROM run_operations WHERE run_id=$1 AND kind='article_loop_review' AND result->'delta' IS NOT NULL", s.claim.Run.ID).Scan(&reused); err != nil || reused != 1 {
 		t.Fatalf("缺少绑定新稿的复用证明：%d %v", reused, err)
 	}
 	// 成功发布已经经过真实 Store 事务；不能只依据 fake reviewer 的完成标签。
